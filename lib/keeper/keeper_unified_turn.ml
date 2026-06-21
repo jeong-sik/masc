@@ -52,6 +52,16 @@ let run_keeper_cycle
      pre-dispatch checks (see turn_livelock guard below), leaving silent
      skip paths without a turn correlator. *)
   let keeper_turn_id = meta.runtime.usage.total_turns + 1 in
+  (* RFC-0233 §7.2 (mint once, thread down): mint the turn's join key from this
+     single pre-turn snapshot — the same (trace_id, total_turns + 1) pair the
+     manifest and Turn_record stamp — and thread it into the success handler so
+     a keeper-authored board post carries [origin.turn_ref]. Never re-derive at
+     a downstream seam from a post-lifecycle meta (trace_id rotates on handoff). *)
+  let turn_ref =
+    Ids.Turn_ref.make
+      ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      ~absolute_turn:keeper_turn_id
+  in
   let runtime_manifest_context : Keeper_runtime_manifest.turn_context =
     { manifest_keeper_name = meta.name
     ; manifest_agent_name = Some meta.agent_name
@@ -199,7 +209,11 @@ let run_keeper_cycle
                 (Keeper_agent_error.terminal_reason_code_of_sdk_error err)
             in
             let error_message = Agent_sdk.Error.to_string err in
-            Log.Keeper.error "%s: pre_dispatch failed: %s" meta.name error_message;
+            Log.Keeper.error
+              ~keeper_name:meta.name
+              "%s: pre_dispatch failed: %s"
+              meta.name
+              error_message;
             record_pre_dispatch_terminal_observation
               ~config
               ~meta
@@ -405,6 +419,7 @@ let run_keeper_cycle
                          ~labels:[ "keeper", entry.meta.name; "phase", Keeper_oas_execution_error_phase.(to_label Turn_start) ]
                          ();
                        Log.Keeper.warn
+                         ~keeper_name:entry.meta.name
                          "%s: turn-start write_meta_with_merge failed: %s"
                          entry.meta.name
                          err
@@ -432,6 +447,7 @@ let run_keeper_cycle
                     | Eio.Cancel.Cancelled _ -> ()
                     | e ->
                       Log.Keeper.warn
+                        ~keeper_name:meta.name
                         "%s: unsubscribe_event_bus in turn cleanup raised: %s"
                         meta.name
                         (Printexc.to_string e);
@@ -447,6 +463,7 @@ let run_keeper_cycle
                    | Eio.Cancel.Cancelled _ -> ()
                    | e ->
                      Log.Keeper.warn
+                       ~keeper_name:meta.name
                        "%s: mark_turn_finished in turn cleanup raised: %s"
                        meta.name
                        (Printexc.to_string e);
@@ -682,17 +699,30 @@ let run_keeper_cycle
                     then Log.Keeper.warn
                     else Log.Keeper.error
                   in
+                  let failure_context_ratio =
+                    if final_execution.max_context <= 0
+                    then 0.0
+                    else
+                      float_of_int prompt_timeout_estimate_tokens
+                      /. float_of_int final_execution.max_context
+                  in
                   log_keeper_cycle_failed
+                    ~keeper_name:meta.name
                     "%s: keeper cycle FAILED runtime=%s max_context=%d context_budget=%d \
-                     primary_budget=%d requested_override=%s latency=%dms%s error=%s"
+                     primary_budget=%d requested_override=%s estimated_input_tokens=%d \
+                     context_ratio=%.4f latency=%dms%s error=%s"
                     meta.name
-                    (final_execution.runtime_id)
+                    final_execution.runtime_id
                     final_execution.max_context
                     final_execution.max_context_resolution.effective_budget
                     final_execution.max_context_resolution.primary_budget
-                    (match final_execution.max_context_resolution.requested_override with
+                    (match
+                       final_execution.max_context_resolution.requested_override
+                     with
                      | Some requested -> string_of_int requested
                      | None -> "none")
+                    prompt_timeout_estimate_tokens
+                    failure_context_ratio
                     latency_ms
                     (if is_ambiguous_partial
                      then " (ambiguous partial commit)"
@@ -773,6 +803,7 @@ let run_keeper_cycle
                           ~labels:[ "keeper", meta.name; "reason", "ambiguous_partial" ]
                           ();
                         Log.Keeper.warn
+                          ~keeper_name:meta.name
                           "%s: ambiguous partial commit \
                            (committed_mutating_tools=[%s], turn_events=%d, \
                            payload_kinds=[%s], reason=%s); paused keeper and opened \
@@ -794,7 +825,10 @@ let run_keeper_cycle
                                sync_err
                                (short_preview e_str))
                         in
-                        Log.Keeper.error "%s" (Agent_sdk.Error.to_string combined_err);
+                        Log.Keeper.error
+                          ~keeper_name:meta.name
+                          "%s"
+                          (Agent_sdk.Error.to_string combined_err);
                         Otel_metric_store.inc_counter
                           Keeper_metrics.(to_string RuntimeSyncFailures)
                           ~labels:
@@ -863,10 +897,12 @@ dominant source of the observed CAS race exhaustion after
                      if is_version_conflict_error msg
                      then
                        Log.Keeper.warn
+                         ~keeper_name:updated_meta.name
                          "write_meta lost CAS race after retries (turn failure path): %s"
                          msg
                      else
                        Log.Keeper.error
+                         ~keeper_name:updated_meta.name
                          "write_meta failed after unified turn failure: %s"
                          msg);
                   Otel_metric_store.inc_counter
@@ -891,6 +927,7 @@ dominant source of the observed CAS race exhaustion after
                     let committed_tools = ambiguous_commit_tools in
                     let turn_event_summary = turn_event_bus in
                     Log.Keeper.info
+                      ~keeper_name:meta.name
                       "%s: reconcile-required failure latched as %s after \
                        committed_mutating_tools [%s] (turn_events=%d, payload_kinds=[%s])"
                       meta.name
@@ -947,6 +984,7 @@ dominant source of the observed CAS race exhaustion after
                       ~last_provider_timeout_budget:turn_state.last_provider_timeout_budget
                       ~current_turn_blocker_info:turn_state.current_turn_blocker_info
                       ~keeper_turn_id
+                      ~turn_ref
                       result
                   in
                   (* Cycle 45: KeeperTaskAcquisition.tla TurnComplete post-action. *)

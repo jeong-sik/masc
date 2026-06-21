@@ -16,7 +16,7 @@
   sse_jsonrpc_filter
   keeper_tool_call_log_context
   board_metric_hooks_adapter
-  workspace_metric_hooks
+  workspace_metric_hooks review_artifact_store
   keeper_types_profile_persona
   keeper_types_profile_persona_defaults
   keeper_types_profile_oas_env
@@ -190,7 +190,7 @@
   meta_cognition_interpret
   meta_cognition_digest
   keeper_memory_os_gc
-  keeper_memory_os_io
+  keeper_memory_os_io keeper_user_model
   keeper_memory_os_recall)
  (libraries
   mcp_protocol

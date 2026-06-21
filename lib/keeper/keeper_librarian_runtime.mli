@@ -24,24 +24,43 @@ val cadence_turns : unit -> int
 val cadence_step : cadence:int -> counter:int -> int * bool
 (** Pure cadence decision. [(updated_counter, due)] for a keeper whose counter
     (turns since last successful extraction) is [counter] under [cadence].
-    [counter < 0] is treated as a fresh (keeper, trace) and is due immediately.
+    [counter < 0] is treated as fresh and is due immediately.
     cadence<=1 is always due with the counter pinned at 0. When due, the updated
     counter is set to [cadence] and stays there until [cadence_record_success]
     resets it. Exposed for testing the cadence logic without the per-keeper
     counter table. *)
 
+val cadence_step_keyed
+  :  cadence:int
+  -> current_trace:string
+  -> prior:(string * int) option
+  -> (string * int) * bool
+(** Pure keyed cadence decision. Given a keeper's [prior] stored
+    [(trace, counter)] and the [current_trace], returns the [(trace, counter)]
+    value to store and whether extraction is due now. A [prior] from a different
+    (rotated) trace, or [None], is treated as fresh — due immediately, not
+    inheriting the old trace's schedule. Exposed for testing the rollover
+    decision without the global table. *)
+
 val cadence_due : keeper_id:string -> trace_id:string -> bool
-(** Advance the persistent cadence counter for ([keeper_id], [trace_id]) by one
-    turn and report whether extraction is due now. This is what
-    [run_best_effort] gates on. The counter is scoped to the active trace so a
-    handoff rollover starts a fresh cadence cycle. First call for an unseen pair
-    is due immediately. *)
+(** Advance the persistent cadence counter for [keeper_id] by one turn and
+    report whether extraction is due now. This is what [run_best_effort] gates
+    on. The counter is keyed by [keeper_id] and stores the active [trace_id]
+    alongside it, so a handoff rollover (a new [trace_id]) resets the cadence
+    cycle in place — bounding the table to one row per keeper. First call for an
+    unseen keeper, or the first call after a rollover, is due immediately. *)
 
 val cadence_record_success : keeper_id:string -> trace_id:string -> unit
-(** Record a successful extraction for ([keeper_id], [trace_id]) so the cadence
+(** Record a successful extraction for [keeper_id] on [trace_id] so the cadence
     counter resets and the next cycle can begin. Must only be called after a
     due turn actually produced an episode; skipped or failed attempts must not
     call this. *)
+
+val cadence_counter_entries : unit -> int
+(** Number of live per-keeper cadence rows. Bounded by the number of keepers
+    that have run (one row each), independent of trace rotations — so it is the
+    leak-regression signal for the keeper-keyed cadence table and a memory-health
+    metric for the dashboard. Read-only. *)
 
 val max_messages : unit -> int
 (** Base per-turn cap on checkpoint messages sent to the librarian prompt. The
@@ -82,16 +101,21 @@ type attempt_outcome =
   | Unparseable of string
   | Transport_failed of string
 
+type parse_retry_error =
+  | Retry_exhausted_unparseable of string
+  | Retry_transport_failed of string
+
 val run_with_parse_retries
   :  max_retries:int
   -> attempt:(Agent_sdk.Types.message list -> attempt_outcome)
   -> Agent_sdk.Types.message list
-  -> (Keeper_memory_os_types.episode, string) result
-(** Drive [attempt] over a growing message list. Returns immediately on [Parsed]
-    (Ok) and [Transport_failed] (Error); on [Unparseable], appends
-    {!parse_retry_nudge} and retries up to [max_retries] times before returning
-    the last error. Pure given a pure [attempt] — the provider side effect lives
-    in the [attempt] supplied by {!extract_with_provider}. *)
+  -> (Keeper_memory_os_types.episode, parse_retry_error) result
+(** Drive [attempt] over a growing message list. Returns immediately on [Parsed].
+    [Transport_failed] returns [Retry_transport_failed] without retry. On
+    [Unparseable], appends {!parse_retry_nudge} and retries up to [max_retries]
+    times before returning [Retry_exhausted_unparseable]. Pure given a pure
+    [attempt] — the provider side effect lives in the [attempt] supplied by
+    {!extract_with_provider}. *)
 
 val global_slot_capacity : unit -> int
 (** Fleet-wide librarian provider gate capacity from

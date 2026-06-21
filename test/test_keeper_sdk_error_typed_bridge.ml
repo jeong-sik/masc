@@ -15,9 +15,11 @@
       Serialization / Io / Orchestration / Internal) *)
 
 module AE = Masc.Keeper_agent_error
+module BH = Masc.Keeper_binding_health
 module Code = Masc.Keeper_turn_terminal_code
 module EC = Masc.Keeper_error_classify
 module KTD = Masc.Keeper_turn_driver
+module RC = Runtime_candidate
 module SdkE = Agent_sdk.Error
 module Retry = Agent_sdk.Retry
 module Http = Llm_provider.Http_client
@@ -286,6 +288,12 @@ max-context = 1024
 tools-support = true
 thinking-support = true
 
+[models.no_tool]
+api-name = "no-tool"
+max-context = 1024
+tools-support = false
+thinking-support = true
+
 [models.b]
 api-name = "b"
 max-context = 1024
@@ -299,6 +307,8 @@ tools-support = true
 thinking-support = true
 
 [same.a]
+
+[same.no_tool]
 
 [same.b]
 
@@ -317,6 +327,33 @@ let soft_rate_limit_err =
   SdkE.Api
     (Retry.RateLimited
        { retry_after = Some 30.0; message = "rate limited, retry later" })
+;;
+
+let server_error_500 =
+  SdkE.Api
+    (Retry.ServerError { status = 500; message = "Internal Server Error" })
+;;
+
+let provider_unavailable =
+  SdkE.Provider
+    (Llm_provider.Error.ProviderUnavailable
+       { provider = "server-error-test"; detail = "HTTP 503 retry-after exhausted" })
+;;
+
+let read_only_no_progress_err ~scope =
+  KTD.sdk_error_of_masc_internal_error
+    (KTD.Accept_rejected
+       { scope
+       ; model = None
+       ; reason_kind = Some KTD.Accept_no_usable_progress
+       ; response_shape = Some KTD.Accept_response_thinking_only
+       ; last_tool_effect = Some KTD.Tool_effect_read_only
+       ; any_mutating_tool = Some false
+       ; tool_effects_seen = [ KTD.Tool_effect_read_only ]
+       ; reason =
+           "response rejected by accept (runtime=same.b): shape=thinking_only; \
+            stop_reason=end_turn; last_tool=WebFetch; last_tool_effect=read_only"
+       })
 ;;
 
 let test_soft_rate_limit_skips_same_credential_pool () =
@@ -358,6 +395,146 @@ let test_soft_rate_limit_preserves_independent_pool_failover () =
       (EC.degraded_retry_reason_to_string fallback_reason)
       next_runtime
   | None -> Alcotest.fail "expected independent credential pool failover"
+;;
+
+let test_server_error_classifies_as_runtime_recoverable () =
+  Alcotest.(check bool)
+    "500 is not same-runtime transient retry"
+    false
+    (EC.is_transient_network_error server_error_500);
+  match EC.recoverable_runtime_failure_reason server_error_500 with
+  | Some EC.Server_error -> ()
+  | Some reason ->
+    Alcotest.failf
+      "expected server_error, got %s"
+      (EC.degraded_retry_reason_to_string reason)
+  | None -> Alcotest.fail "expected server_error recoverable reason"
+;;
+
+let test_server_error_records_immediate_provider_cooldown () =
+  let candidate =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"server-error-test"
+      ~base_url:"https://server-error.example/v1"
+      ()
+    |> RC.of_provider_config ~max_concurrent:None
+  in
+  let keeper_name = "server-error-cooldown-test" in
+  let provider_key =
+    match RC.health_keys candidate with
+    | [ key ] -> keeper_name ^ "@" ^ key
+    | keys ->
+      Alcotest.failf
+        "expected one health key, got [%s]"
+        (String.concat "; " keys)
+  in
+  KTD.For_testing.record_candidate_health_error ~keeper_name candidate server_error_500;
+  let info =
+    match BH.provider_info BH.global ~provider_key with
+    | Some info -> info
+    | None -> Alcotest.failf "expected provider info for %s" provider_key
+  in
+  Alcotest.(check bool) "server error opens cooldown" true info.in_cooldown;
+  Alcotest.(check int) "server error increments once" 1 info.consecutive_failures;
+  Alcotest.(check int)
+    "server error outcome counted"
+    1
+    (BH.recent_outcome_count
+       BH.global
+       ~provider_key
+       ~outcome:BH.Outcome_server_error
+       ~window_s:BH.window_sec)
+;;
+
+let test_provider_unavailable_records_server_error_cooldown () =
+  let candidate =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"provider-unavailable-test"
+      ~base_url:"https://provider-unavailable.example/v1"
+      ()
+    |> RC.of_provider_config ~max_concurrent:None
+  in
+  let keeper_name = "provider-unavailable-cooldown-test" in
+  let provider_key =
+    match RC.health_keys candidate with
+    | [ key ] -> keeper_name ^ "@" ^ key
+    | keys ->
+      Alcotest.failf
+        "expected one health key, got [%s]"
+        (String.concat "; " keys)
+  in
+  (match EC.recoverable_runtime_failure_reason provider_unavailable with
+   | Some EC.Server_error -> ()
+   | Some reason ->
+     Alcotest.failf
+       "expected server_error, got %s"
+       (EC.degraded_retry_reason_to_string reason)
+   | None -> Alcotest.fail "expected server_error recoverable reason");
+  KTD.For_testing.record_candidate_health_error ~keeper_name candidate provider_unavailable;
+  let info =
+    match BH.provider_info BH.global ~provider_key with
+    | Some info -> info
+    | None -> Alcotest.failf "expected provider info for %s" provider_key
+  in
+  Alcotest.(check bool) "provider unavailable opens cooldown" true info.in_cooldown;
+  Alcotest.(check int)
+    "provider unavailable outcome counted"
+    1
+    (BH.recent_outcome_count
+       BH.global
+       ~provider_key
+       ~outcome:BH.Outcome_server_error
+       ~window_s:BH.window_sec)
+;;
+
+let test_read_only_no_progress_rotates_to_default_runtime () =
+  init_rate_limit_pool_runtime ();
+  let err = read_only_no_progress_err ~scope:"same.b" in
+  (match EC.recoverable_runtime_failure_reason err with
+   | Some EC.Read_only_no_progress -> ()
+   | Some reason ->
+     Alcotest.failf
+       "expected read_only_no_progress, got %s"
+       (EC.degraded_retry_reason_to_string reason)
+   | None -> Alcotest.fail "expected read_only_no_progress recoverable reason");
+  match
+    EC.degraded_rotation_after_recoverable_error
+      ~base_runtime:"same.b"
+      ~effective_runtime:"same.b"
+      ~attempted_runtimes:[ "same.b" ]
+      err
+  with
+  | Some { EC.next_runtime = "same.a"; fallback_reason = EC.Read_only_no_progress } ->
+    ()
+  | Some { next_runtime; fallback_reason } ->
+    Alcotest.failf
+      "expected read_only_no_progress -> same.a, got %s -> %s"
+      (EC.degraded_retry_reason_to_string fallback_reason)
+      next_runtime
+  | None -> Alcotest.fail "expected read-only no-progress rotation"
+;;
+
+let test_read_only_no_progress_default_runtime_uses_tool_capable_candidate () =
+  init_rate_limit_pool_runtime ();
+  let err = read_only_no_progress_err ~scope:"same.a" in
+  match
+    EC.degraded_rotation_after_recoverable_error
+      ~base_runtime:"same.a"
+      ~effective_runtime:"same.a"
+      ~attempted_runtimes:[ "same.a" ]
+      err
+  with
+  | Some { EC.next_runtime = "same.b"; fallback_reason = EC.Read_only_no_progress } ->
+    ()
+  | Some { next_runtime; fallback_reason } ->
+    Alcotest.failf
+      "expected read_only_no_progress -> same.b, got %s -> %s"
+      (EC.degraded_retry_reason_to_string fallback_reason)
+      next_runtime
+  | None ->
+    Alcotest.fail "expected read-only no-progress to rotate to a tool-capable runtime"
 ;;
 
 let () =
@@ -404,6 +581,26 @@ let () =
             "soft rate limits preserve independent credential-pool failover"
             `Quick
             test_soft_rate_limit_preserves_independent_pool_failover
+        ; Alcotest.test_case
+            "500 classifies as recoverable server_error"
+            `Quick
+            test_server_error_classifies_as_runtime_recoverable
+        ; Alcotest.test_case
+            "500 records immediate provider cooldown"
+            `Quick
+            test_server_error_records_immediate_provider_cooldown
+        ; Alcotest.test_case
+            "provider unavailable records server_error cooldown"
+            `Quick
+            test_provider_unavailable_records_server_error_cooldown
+        ; Alcotest.test_case
+            "read-only no-progress accept rejection rotates to default runtime"
+            `Quick
+            test_read_only_no_progress_rotates_to_default_runtime
+        ; Alcotest.test_case
+            "default runtime read-only no-progress uses tool-capable candidate"
+            `Quick
+            test_read_only_no_progress_default_runtime_uses_tool_capable_candidate
         ] )
     ]
 ;;

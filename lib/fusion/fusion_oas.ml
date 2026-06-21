@@ -34,6 +34,16 @@ let provider_error_detail ~runtime_id detail =
     then detail
     else Printf.sprintf "%s: %s" runtime_id detail
 
+let panel_failure_code = function
+  | Fusion_types.Timeout -> "timeout"
+  | Fusion_types.Provider_error _ -> "provider_error"
+  | Fusion_types.Empty_response -> "empty_response"
+
+let panel_failure_detail ~runtime_id = function
+  | Fusion_types.Timeout -> "timeout"
+  | Fusion_types.Provider_error detail -> provider_error_detail ~runtime_id detail
+  | Fusion_types.Empty_response -> "empty response"
+
 let timeout_budget_opt timeout_s =
   if Float.is_finite timeout_s && timeout_s > 0.0 then Some timeout_s else None
 

@@ -47,10 +47,10 @@ afterEach(() => {
 describe('KeeperWorkspaceRoster', () => {
   it('renders status groups with keeper rows', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
-    const groups = Array.from(host.querySelectorAll('.kw-roster-group')).map(g => g.textContent)
-    expect(groups).toContain('실행 중')
-    expect(groups).toContain('대기 · 일시정지')
-    expect(groups).toContain('중지 · 종료됨')
+    const labels = Array.from(host.querySelectorAll('.kw-roster-group-label')).map(g => g.textContent)
+    expect(labels).toContain('실행 중')
+    expect(labels).toContain('대기 · 일시정지')
+    expect(labels).toContain('중지 · 종료됨')
     expect(host.querySelectorAll('.kw-kp-row').length).toBe(3)
   })
 
@@ -134,6 +134,53 @@ describe('KeeperWorkspaceRoster', () => {
     expect(navigate).toHaveBeenCalledWith('monitoring', { section: 'agents', keeper: 'rama' })
     expect(onOpenConfig).toHaveBeenCalledWith('rama')
     expect(host.querySelector('[data-testid="kw-roster-menu"]')).toBeNull()
+  })
+
+  it('opens the command menu on right-click (contextmenu) without selecting the row', () => {
+    const onSelect = vi.fn()
+    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" onSelect=${onSelect} />`, host)
+    const rows = Array.from(host.querySelectorAll('.kw-kp-row')) as HTMLElement[]
+    const sangsuRow = rows.find(r => r.textContent?.includes('sangsu')) as HTMLElement
+
+    // fireEvent returns false when the (cancelable) event had preventDefault
+    // called — i.e. the native browser context menu is suppressed.
+    const notPrevented = fireEvent.contextMenu(sangsuRow, { clientX: 120, clientY: 80 })
+    expect(notPrevented).toBe(false)
+
+    expect(host.querySelector('[data-testid="kw-roster-menu"]')).not.toBeNull()
+    expect(host.querySelector('[data-testid="kw-roster-menu"]')?.textContent).toContain('sangsu')
+    expect(host.querySelector('[data-testid="kw-roster-menu-open-chat"]')).not.toBeNull()
+    expect(navigate).not.toHaveBeenCalled()
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it('opens the command menu on right-click of a mini-roster sigil', () => {
+    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" mini=${true} />`, host)
+    const minis = Array.from(host.querySelectorAll('.kw-kp-mini')) as HTMLElement[]
+    const ramaMini = minis.find(b => (b.getAttribute('aria-label') ?? '').includes('rama')) as HTMLElement
+
+    fireEvent.contextMenu(ramaMini, { clientX: 60, clientY: 200 })
+
+    expect(host.querySelector('[data-testid="kw-roster-menu"]')).not.toBeNull()
+    expect(host.querySelector('[data-testid="kw-roster-menu"]')?.textContent).toContain('rama')
+  })
+
+  it('renders a status-toned dot in each group header (rg-dot)', () => {
+    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
+    const groupDotTone = (label: string): string | undefined => {
+      const header = Array.from(host.querySelectorAll('.kw-roster-group')).find(
+        g => g.querySelector('.kw-roster-group-label')?.textContent === label,
+      )
+      return header?.querySelector('.kw-dot')?.className
+    }
+    // running → ok (green), paused → warn (amber), offline → idle (no tone class)
+    expect(groupDotTone('실행 중')).toContain('ok')
+    expect(groupDotTone('대기 · 일시정지')).toContain('warn')
+    const offlineDot = groupDotTone('중지 · 종료됨')
+    expect(offlineDot).toBeDefined()
+    expect(offlineDot).not.toContain('ok')
+    expect(offlineDot).not.toContain('warn')
+    expect(offlineDot).not.toContain('bad')
   })
 
   it('filters by search query', () => {
@@ -232,6 +279,9 @@ describe('KeeperWorkspaceRoster', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="keeper-0" />`, host)
     expect(host.querySelector('.virtual-list-spacer')).not.toBeNull()
     expect(host.querySelector('.kw-roster-list')).not.toBeNull()
+    // The windowed path renders the group header through the same renderHeader(),
+    // so the status dot must appear here too (all 60 keepers are running → ok).
+    expect(host.querySelector('.kw-roster-group .kw-dot.ok')).not.toBeNull()
   })
 
   it('renders the sort select defaulting to status order', () => {
@@ -272,5 +322,56 @@ describe('KeeperWorkspaceRoster', () => {
     )
     // blocked-3 (score 3) > flagged (flag → score 1) > calm (score 0)
     expect(order).toEqual(['blocked-3', 'flagged', 'calm'])
+  })
+
+  it('shows the keeper basepath (sandbox_target) as the row sub-line, shortened with a full-path title', () => {
+    keepers.value = [mk({ name: 'miso', status: 'running', sandbox_target: '/workspace/keepers/keeper-miso' })]
+    render(html`<${KeeperWorkspaceRoster} activeName="miso" />`, host)
+    const handle = host.querySelector('.kw-kp-handle') as HTMLElement
+    expect(handle?.textContent).toBe('…/keepers/keeper-miso')
+    expect(handle?.getAttribute('title')).toBe('/workspace/keepers/keeper-miso')
+  })
+
+  it('falls back to the scope proxy when a keeper has no sandbox_target', () => {
+    keepers.value = [mk({ name: 'nobase', status: 'running', model: 'anthropic/claude-x' })]
+    render(html`<${KeeperWorkspaceRoster} activeName="nobase" />`, host)
+    const handle = host.querySelector('.kw-kp-handle') as HTMLElement
+    expect(handle?.textContent).toBe('anthropic/claude-x')
+  })
+
+  it('matches a search query against the basepath', () => {
+    keepers.value = [
+      mk({ name: 'alpha', status: 'running', sandbox_target: '/srv/worktrees/alpha-tree' }),
+      mk({ name: 'beta', status: 'running', sandbox_target: '/srv/worktrees/beta-tree' }),
+    ]
+    render(html`<${KeeperWorkspaceRoster} activeName="alpha" />`, host)
+    fireEvent.input(host.querySelector('.kw-roster-search') as HTMLInputElement, { target: { value: 'beta-tree' } })
+    const rows = host.querySelectorAll('.kw-kp-row')
+    expect(rows.length).toBe(1)
+    expect(rows[0]?.textContent).toContain('beta')
+  })
+
+  it('renders a per-group keeper count in the status group header', () => {
+    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
+    const counts = Array.from(host.querySelectorAll('.kw-roster-group-n')).map(n => n.textContent)
+    // FIXTURE: 1 running, 1 paused, 1 stopped
+    expect(counts).toEqual(['1', '1', '1'])
+  })
+
+  it('closes the row command menu on Escape only (not on any keypress) and on scroll', () => {
+    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
+    const open = () => fireEvent.click(host.querySelector('[data-testid="kw-roster-menu-sangsu"]') as HTMLButtonElement)
+
+    open()
+    expect(host.querySelector('[data-testid="kw-roster-menu"]')).not.toBeNull()
+    fireEvent.keyDown(document, { key: 'a' })
+    expect(host.querySelector('[data-testid="kw-roster-menu"]')).not.toBeNull() // a non-Esc key must NOT close it
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(host.querySelector('[data-testid="kw-roster-menu"]')).toBeNull()
+
+    open()
+    expect(host.querySelector('[data-testid="kw-roster-menu"]')).not.toBeNull()
+    fireEvent.scroll(document)
+    expect(host.querySelector('[data-testid="kw-roster-menu"]')).toBeNull()
   })
 })

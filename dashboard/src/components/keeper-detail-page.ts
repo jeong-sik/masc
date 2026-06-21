@@ -40,6 +40,13 @@ import { KeeperDetailBody } from './keeper-detail-body'
 import { KeeperWorkspaceRoster } from './keeper-workspace/keeper-workspace-roster'
 import { KeeperWorkspaceChat } from './keeper-workspace/keeper-workspace-chat'
 import { KeeperWorkspaceRail } from './keeper-workspace/keeper-workspace-rail'
+import {
+  beginPaneResize,
+  clampPaneWidth,
+  effectiveRosterWidthForViewport,
+  rosterWidth,
+  railWidth,
+} from './keeper-workspace/keeper-workspace-pane-resize'
 import { ringFocusClasses } from './common/ring'
 
 const CLOSE_BUTTON_FOCUS_CLASS = ringFocusClasses({
@@ -121,23 +128,29 @@ function KeeperDetailResolver({
   return html`<${KeeperDetailContent} keeper=${keeper} routeSurface=${routeSurface} />`
 }
 
-function useIsKeeperWorkspaceMobile(): boolean {
+// Breakpoints mirror keeper-workspace.css responsive bands: at <=1180px the
+// context-rail column is dropped, at <=860px the layout collapses to a single
+// mobile pane.
+const KW_MOBILE_QUERY = '(max-width: 860px)'
+const KW_NARROW_QUERY = '(max-width: 1180px)'
+
+function useMatchMedia(query: string): boolean {
   const getInitial = () =>
     typeof window !== 'undefined' &&
     typeof window.matchMedia === 'function' &&
-    window.matchMedia('(max-width: 860px)').matches
-  const [isMobile, setIsMobile] = useState(getInitial)
+    window.matchMedia(query).matches
+  const [matches, setMatches] = useState(getInitial)
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
-    const media = window.matchMedia('(max-width: 860px)')
-    const update = () => setIsMobile(media.matches)
+    const media = window.matchMedia(query)
+    const update = () => setMatches(media.matches)
     update()
     media.addEventListener('change', update)
     return () => media.removeEventListener('change', update)
-  }, [])
+  }, [query])
 
-  return isMobile
+  return matches
 }
 
 const KeeperDetailContent = memo(function KeeperDetailContent({
@@ -163,7 +176,10 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
   const [configOverlayKeeper, setConfigOverlayKeeper] = useState<string | null>(null)
   const [rosterOpen, setRosterOpen] = useState(true)
   const [railOpen, setRailOpen] = useState(true)
-  const isMobile = useIsKeeperWorkspaceMobile()
+  const isMobile = useMatchMedia(KW_MOBILE_QUERY)
+  // <=1180px drops the rail column entirely (keeper-workspace.css), so the right
+  // resizer must not render there even when railOpen is still toggled on.
+  const isNarrow = useMatchMedia(KW_NARROW_QUERY)
   const routeKeeperParam = route.value.tab === 'keepers'
     ? route.value.params.keeper?.trim()
     : route.value.tab === 'monitoring' && route.value.params.section === 'agents'
@@ -375,15 +391,49 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
     setConfigOverlayKeeper(name)
   }
 
+  // Drag-resizable roster/rail columns in the desktop 3-pane chat view. Only set
+  // the width vars when the pane is open (mini/closed states keep their CSS-driven
+  // widths), and only outside detail/mobile layouts where the grid differs.
+  const paneResizable = !detailOpen && !isMobile
+  const gridStyle = paneResizable
+    ? {
+        ...(rosterOpen ? { '--kw-roster-w': `${effectiveRosterWidthForViewport(rosterWidth.value, isNarrow)}px` } : {}),
+        ...(railOpen ? { '--kw-rail-w': `${clampPaneWidth('rail', railWidth.value)}px` } : {}),
+      }
+    : undefined
+
   return html`
     <div
       class="kw-grid v2-monitoring-surface"
+      style=${gridStyle}
       data-detail=${detailOpen ? 'open' : 'closed'}
       data-roster=${rosterOpen ? 'open' : 'mini'}
       data-rail=${railOpen ? 'open' : 'closed'}
       data-mobile-pane=${keeperMobilePane.value}
       data-route-focused-keeper=${keeper.name}
     >
+      ${paneResizable && rosterOpen
+        ? html`<div
+            class="kw-pane-resizer left"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="로스터 폭 조절"
+            title="드래그하여 로스터 폭 조절"
+            onPointerDown=${(e: PointerEvent) =>
+              beginPaneResize('roster', e, (e.currentTarget as HTMLElement).closest('.kw-grid') as HTMLElement)}
+          ></div>`
+        : null}
+      ${paneResizable && railOpen && !isNarrow
+        ? html`<div
+            class="kw-pane-resizer right"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="컨텍스트 레일 폭 조절"
+            title="드래그하여 컨텍스트 레일 폭 조절"
+            onPointerDown=${(e: PointerEvent) =>
+              beginPaneResize('rail', e, (e.currentTarget as HTMLElement).closest('.kw-grid') as HTMLElement)}
+          ></div>`
+        : null}
       <${KeeperWorkspaceRoster}
         activeName=${keeper.name}
         routeSurface=${routeSurface}

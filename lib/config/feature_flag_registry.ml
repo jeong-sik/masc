@@ -138,7 +138,7 @@ let all_flags : flag list = [
   (* ── Dashboard & Governance ───────────────────────────────── *)
   { env_name = "MASC_DISABLE_HITL";
     description = "Disable Human-in-the-loop (HITL) approval gates globally";
-    default = true; category = "dashboard";
+    default = false; category = "dashboard";
     lifecycle = Active; since = "2.250.0" };
 
   { env_name = "MASC_DASHBOARD_FIXTURES_ENABLED";

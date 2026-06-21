@@ -14,5 +14,7 @@ type definition =
   }
 
 val definitions : definition list
+val operator_decision_definitions : definition list
+val all_definitions : definition list
 val schemas : Masc_domain.tool_schema list
 val find_definition : string -> definition option

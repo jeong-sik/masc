@@ -10,6 +10,7 @@ from src.formatters import (
     fallback_text,
     format_context_block,
     response_blocks,
+    structured_response_blocks,
     strip_state_blocks,
 )
 
@@ -115,3 +116,123 @@ class TestResponseBlocks:
         assert "[truncated: Slack block limit]" in blocks[-2]["text"]["text"]
         for block in blocks[:-1]:
             assert len(block["text"]["text"]) <= SLACK_BLOCK_TEXT_LIMIT
+
+    def test_uses_structured_blocks_when_present(self) -> None:
+        structured = {
+            "blocks": [
+                {"t": "p", "html": "hello &lt;world&gt;"},
+                {
+                    "t": "code",
+                    "cap": "python",
+                    "html": "print(&quot;fallback&quot;)",
+                    "source": 'print("&lt;<ok>")',
+                },
+                {"t": "image", "src": "https://example.com/chart.png", "cap": "Chart"},
+                {
+                    "t": "link",
+                    "url": "https://example.com/post?a=1&b=2",
+                    "title": "Post <one>",
+                    "meta": "example.com",
+                },
+                {"t": "fusion", "board_post_id": "p-123", "run_id": "fus-9"},
+            ]
+        }
+        blocks = response_blocks(
+            "fallback",
+            keeper_name="sangsu",
+            structured=structured,
+        )
+
+        assert len(blocks) == 6
+        assert blocks[0]["text"]["text"] == "hello &lt;world&gt;"
+        assert "*Code:* `python`" in blocks[1]["text"]["text"]
+        assert 'print("&amp;lt;&lt;ok&gt;")' in blocks[1]["text"]["text"]
+        assert blocks[2]["type"] == "image"
+        assert blocks[2]["image_url"] == "https://example.com/chart.png"
+        assert "Post &lt;one&gt;" in blocks[3]["text"]["text"]
+        assert "a=1&amp;b=2" in blocks[3]["text"]["text"]
+        assert "board_post_id: p-123" in blocks[4]["text"]["text"]
+        assert blocks[5]["type"] == "context"
+
+    def test_malformed_structured_blocks_fall_back_to_text(self) -> None:
+        blocks = response_blocks("<fallback>", structured={"blocks": [{"t": "image"}]})
+        assert len(blocks) == 1
+        assert blocks[0]["text"]["text"] == "&lt;fallback&gt;"
+
+
+class TestStructuredResponseBlocks:
+    def test_projects_known_dashboard_block_shapes(self) -> None:
+        blocks = structured_response_blocks(
+            {
+                "blocks": [
+                    {"t": "p", "html": "hello &amp; goodbye"},
+                    {"t": "code", "html": "a &lt; b"},
+                    {"t": "image", "src": "https://example.com/a.png"},
+                    {
+                        "t": "link",
+                        "url": "https://example.com",
+                        "title": "Example",
+                    },
+                    {"t": "fusion", "board_post_id": "p-abc"},
+                ]
+            }
+        )
+
+        assert [block["type"] for block in blocks] == [
+            "section",
+            "section",
+            "image",
+            "section",
+            "section",
+        ]
+        assert blocks[0]["text"]["text"] == "hello &amp; goodbye"
+        assert "a &lt; b" in blocks[1]["text"]["text"]
+        assert blocks[2]["alt_text"] == "image"
+        assert "*<https://example.com|Example>*" in blocks[3]["text"]["text"]
+        assert "p-abc" in blocks[4]["text"]["text"]
+
+    def test_projects_extended_dashboard_block_shapes(self) -> None:
+        blocks = structured_response_blocks(
+            {
+                "blocks": [
+                    {"t": "h4", "html": "Plan"},
+                    {"t": "ul", "items": ["one", "two"]},
+                    {"t": "callout", "severity": "warn", "html": "careful"},
+                    {
+                        "t": "table",
+                        "head": ["name", {"v": "count", "num": True}],
+                        "rows": [["alpha", "2"]],
+                    },
+                    {"t": "mermaid", "source": "graph TD\nA-->B"},
+                    {"t": "svg", "svg": "<svg><path /></svg>"},
+                    {
+                        "t": "voice",
+                        "src": "https://example.com/a.mp3",
+                        "transcript": "spoken memo",
+                        "via": "tts",
+                    },
+                    {
+                        "t": "attach",
+                        "name": "clip.mp4",
+                        "src": "https://example.com/clip.mp4",
+                        "kind": "video",
+                    },
+                    {
+                        "t": "video",
+                        "src": "https://example.com/demo.mp4",
+                        "cap": "Demo",
+                    },
+                ]
+            }
+        )
+
+        assert len(blocks) == 9
+        assert blocks[0]["text"]["text"] == "*Plan*"
+        assert "- one\n- two" in blocks[1]["text"]["text"]
+        assert "*Callout (warn):* careful" in blocks[2]["text"]["text"]
+        assert "name | count\nalpha | 2" in blocks[3]["text"]["text"]
+        assert "*Code:* `mermaid`" in blocks[4]["text"]["text"]
+        assert "*Code:* `svg`" in blocks[5]["text"]["text"]
+        assert "*Audio (tts):*" in blocks[6]["text"]["text"]
+        assert "Attachment (video)" in blocks[7]["text"]["text"]
+        assert "*Video:* Demo" in blocks[8]["text"]["text"]

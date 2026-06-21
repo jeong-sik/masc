@@ -29,6 +29,7 @@ Additional rules:
 3. Each claim must include an approximate source_turn from the conversation slice. Use source_tool_call_id only when a tool call id is explicitly visible.
 4. If you are unsure a claim is durable, prefer "ephemeral" over a durable category and state the uncertainty in the claim text. Do not emit a confidence number — the store no longer reads one; spend the words on a precise claim instead.
 5. open_items and constraints are episode-level summary arrays, separate from a claim's category. A claim already categorized as constraint does not need to be repeated in the constraints array.
+6. claim_id (optional): a short lowercase kebab-case slug identifying the CONCLUSION, not the wording — derive it deterministically from the subject and the asserted state (e.g. "pr-21249-verification-complete", "pr-123-open", "pr-123-merged"). Re-stating the same conclusion later MUST reuse the same slug; a changed conclusion (e.g. open -> merged) MUST use a new slug. Omit it if you cannot form a stable slug.
 
 Output schema:
 {
@@ -38,7 +39,8 @@ Output schema:
       "claim": "A single factual sentence.",
       "category": "code_change|fact|preference|blocker|goal|constraint|validated_approach|lesson|ephemeral",
       "source_turn": 12,
-      "source_tool_call_id": "call_abc"
+      "source_tool_call_id": "call_abc",
+      "claim_id": "pr-123-open"
     }
   ],
   "open_items": ["Tasks or questions left unresolved."],

@@ -207,7 +207,7 @@ describe('thread history merge & persistence', () => {
     expect(thread[0]?.id).toBe('assistant-history')
     expect(thread[0]?.delivery).toBe('history')
     expect(thread[0]?.traceSteps).toEqual([
-      { kind: 'think', text: 'checking context' },
+      { kind: 'think', text: 'checking context', ts: expect.any(String) },
     ])
   })
 

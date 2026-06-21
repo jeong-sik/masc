@@ -97,8 +97,13 @@ let test_find_opt_first_registered () =
   | [] -> assert false  (* covered by test_registry_nonempty *)
   | first :: _ ->
       (match R.find_opt first.R.env_name with
-       | Some f -> assert (f.R.env_name = first.R.env_name)
-       | None -> assert false)
+	       | Some f -> assert (f.R.env_name = first.R.env_name)
+	       | None -> assert false)
+
+let test_hitl_disable_flag_defaults_false () =
+  match R.find_opt "MASC_DISABLE_HITL" with
+  | Some flag -> assert (flag.R.default = false)
+  | None -> assert false
 
 (* ─── (4) flag_to_json shape ──────────────────────────────────── *)
 
@@ -206,6 +211,7 @@ let () =
   test_every_category_in_documented_set ();
   test_find_opt_unknown ();
   test_find_opt_first_registered ();
+  test_hitl_disable_flag_defaults_false ();
   test_flag_to_json_eight_fields ();
   test_flag_to_json_canonical_default_is_bool ();
   test_to_json_total_matches_all_flags ();

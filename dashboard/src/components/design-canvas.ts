@@ -12,6 +12,7 @@ import { InlineSpinner } from './common/inline-spinner'
 import { LoadingBar } from './common/loading-bar'
 import { ActionButton } from './common/button'
 import { StatusChip } from './common/status-chip'
+import { Pill } from './common/pill'
 import { StatusBadge } from './common/status-badge'
 import { CountBadge } from './common/badge'
 import { PanelCard } from './common/panel-card'
@@ -162,6 +163,20 @@ function PrimitivesGallery() {
           <${StatusChip} tone="info">working<//>
           <${CountBadge} tone="accent">12<//>
           <${CountBadge} tone="warn">3<//>
+        </div>
+      <//>
+
+      <${Artboard} title="Pill (converged)">
+        <div class="dc-row-wrap">
+          <${Pill} tone="ok" dot=${true}>running<//>
+          <${Pill} tone="warn">failing<//>
+          <${Pill} tone="bad">crashed<//>
+          <${Pill} tone="info">working<//>
+          <${Pill} tone="volt">accent<//>
+          <${Pill} tone="neutral">idle<//>
+          <${Pill} tone="ok" soft=${true}>soft<//>
+          <${Pill} tone="info" mono=${true}>FSM<//>
+          <${Pill} tone="neutral" uppercase=${false}>path.kind<//>
         </div>
       <//>
 

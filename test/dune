@@ -29,6 +29,7 @@
 
 (tests
  (names
+  test_keeper_memory_os_io_fd
   test_rfc0259_reconcile
   test_keeper_memory_lane
   test_keeper_reactive_wake_backlog_gate
@@ -87,6 +88,7 @@
   test_keeper_turn_disposition
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os
+  test_keeper_user_model
   test_keeper_memory_os_consolidation
   test_keeper_memory_os_consolidation_runtime
   eval_memory_os_value
@@ -112,6 +114,7 @@
   test_dashboard_tool_host_events
   test_dashboard_nav_event
   test_server_dashboard_http_memory_subsystems
+  test_server_dashboard_http_keeper_memory_health
   test_dashboard_execute_output
   test_tool_assignment_telemetry
   test_dashboard_link_preview
@@ -127,7 +130,6 @@
   test_sse_stream
   test_health
   test_masc_oas_bridge_timeout_guard
-  test_fusion_oas_error_detail
   test_keeper_llm_bridge
   test_keeper_hooks_oas_log_shape
   test_keeper_idle_metric
@@ -207,6 +209,8 @@
   test_keeper_unified_metacognition
   test_keeper_surface_post
   test_keeper_person_notes
+  test_keeper_person_note_set_handler
+  test_keeper_chat_store_append_result
   test_fact_retention_reachability
   test_keeper_surface_read
   test_keeper_surface_presence_prompt
@@ -327,6 +331,7 @@
   test_relation_materializer
   test_keeper_behavior_trace)
  (modules
+  test_keeper_memory_os_io_fd
   test_rfc0259_reconcile
   test_keeper_memory_lane
   test_env_keeper_scrub
@@ -386,6 +391,7 @@
   test_keeper_turn_disposition
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os
+  test_keeper_user_model
   test_keeper_memory_os_consolidation
   test_keeper_memory_os_consolidation_runtime
   eval_memory_os_value
@@ -411,6 +417,7 @@
   test_dashboard_tool_host_events
   test_dashboard_nav_event
   test_server_dashboard_http_memory_subsystems
+  test_server_dashboard_http_keeper_memory_health
   test_dashboard_execute_output
   test_tool_assignment_telemetry
   test_dashboard_link_preview
@@ -426,7 +433,6 @@
   test_sse_stream
   test_health
   test_masc_oas_bridge_timeout_guard
-  test_fusion_oas_error_detail
   test_keeper_llm_bridge
   test_keeper_hooks_oas_log_shape
   test_keeper_idle_metric
@@ -506,6 +512,8 @@
   test_keeper_unified_metacognition
   test_keeper_surface_post
   test_keeper_person_notes
+  test_keeper_person_note_set_handler
+  test_keeper_chat_store_append_result
   test_fact_retention_reachability
   test_keeper_surface_read
   test_keeper_surface_presence_prompt
@@ -639,6 +647,14 @@
  (modules test_runtime_config_validity)
  (libraries masc_test_deps))
 
+; Dashboard /runtime-defaults JSON builder — resolved defaults + model routing
+; projection, plus the no-fabrication (null/empty) contract.
+
+(test
+ (name test_runtime_defaults_json)
+ (modules test_runtime_defaults_json)
+ (libraries masc_test_deps))
+
 ; RFC-0266: fusion async-completion wake — closed-sum classification +
 ; actionable pending_board_event delivery.
 
@@ -646,6 +662,13 @@
  (name test_fusion_wake)
  (modules test_fusion_wake)
  (libraries masc_test_deps))
+
+; Fusion OAS failure-detail tests need Fusion_types constructors from
+; masc.fusion_core, which is intentionally not re-exported via masc.
+(test
+ (name test_fusion_oas_error_detail)
+ (modules test_fusion_oas_error_detail)
+ (libraries masc_test_deps masc.fusion_core))
 
 ; RFC-0266 Phase 3: masc_fusion_status tool — JSON projection of the run
 ; registry + keeper-LLM visibility (Pass B Default gate). Needs masc.fusion_core

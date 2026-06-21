@@ -169,13 +169,13 @@ let visible_response_body_of_result (result : Keeper_agent_run.run_result) =
   let _, response_body = Protocol.parse_header_block result.response_text in
   Keeper_text_processing.strip_internal_reply_markup response_body |> String.trim
 
-let apply_to_result ~(meta : keeper_meta)
+let apply_to_result ?(turn_ref : Ids.Turn_ref.t option) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(previous_state : Types.social_state option)
     (result : Keeper_agent_run.run_result) =
   let has_text_reply = visible_response_body_of_result result <> "" in
   let base_result, base_state, base_reason =
-    Bdi.apply_to_result ~meta ~observation ~previous_state result
+    Bdi.apply_to_result ?turn_ref ~meta ~observation ~previous_state result
   in
   let state =
     if should_overlay_ledger base_reason then

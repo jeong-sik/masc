@@ -142,7 +142,32 @@ type fact =
   ; valid_until : float option
   ; last_verified_at : float option
   ; schema_version : string
+  ; claim_id : string option
+    (** RFC-0259 §3.7 (P6): a producer (librarian) -emitted stable slug for the
+        claim's CONCLUSION (not its wording). A reworded re-extraction of the same
+        conclusion reuses the id and UPSERTs; a changed conclusion gets a new id
+        and stays a distinct row. Omitted from JSON when [None]; legacy / id-less
+        rows fall back to [normalize_claim] in [claim_identity]. *)
   }
+
+(** Whether a fact's hard-expiry horizon still admits it at [now]. Facts with no
+    [valid_until] are durable and current. *)
+val fact_is_current : now:float -> fact -> bool
+
+(** RFC-0259 §3.6 (P5): partition facts into [(live, expired)] at [now] on the
+    [valid_until] boundary ([fact_is_current]). The cap path drops the expired
+    partition so on-disk retention honours the same [valid_until] the GC sweep
+    does. Durable facts ([valid_until = None]) are always in [live]. *)
+val partition_expired : now:float -> fact list -> fact list * fact list
+
+(** The time a fact was last known good: [last_verified_at] if set, else
+    [first_seen]. The SSOT staleness anchor shared by the reconciler, recall,
+    and dashboard user-model ordering so those paths cannot drift on the anchor
+    rule. *)
+val reference_time : fact -> float
+
+(** Whether the fact belongs to the operator/user-model projection. *)
+val fact_is_user_model : fact -> bool
 
 (** A librarian extraction result: a summary plus structured claims. *)
 type episode =
@@ -165,6 +190,24 @@ type episode =
     the same conclusion share a key. Used by both the recall-time dedup and the
     write-time upsert so the two key identically. *)
 val normalize_claim : string -> string
+
+(** Canonicalize a producer-emitted [claim_id] at the typed boundary. Formatting
+    differences from the LLM such as whitespace, case, underscores, or stray
+    punctuation normalize to the same lowercase kebab slug; blank/empty ids
+    degrade to [None]. *)
+val normalize_claim_id : string -> string option
+
+(** RFC-0259 §3.7 (P6): the producer-identity dedup SSOT. When the librarian emits
+    a [claim_id] (a stable slug for the claim's CONCLUSION, not its wording) that id
+    is the key, so reworded re-extractions of the same conclusion UPSERT one row and
+    inherit its [first_seen] anchor instead of minting a fresh row that resets the
+    volatile TTL, while a changed conclusion carries a new id and stays distinct. A
+    claim with no [claim_id] (legacy / id-less) falls back to [normalize_claim] of
+    its text (pre-P6 append behavior — the degrade never over-merges). The id is the
+    librarian's judgment surfaced as a typed key, not a fuzzy / embedding / substring
+    classifier we author. The write upsert, recall dedup, GC dedup, and Tier-2
+    consolidation MUST all key on this one function. *)
+val claim_identity : fact -> string
 
 (** {1 JSON codecs} *)
 

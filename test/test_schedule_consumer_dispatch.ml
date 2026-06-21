@@ -181,6 +181,36 @@ let test_board_post_consumer_rejects_read_only_risk () =
   check int "no post" 0 (List.length (Board_dispatch.list_posts ~limit:10 ()))
 ;;
 
+let test_dashboard_schedule_resolve_uses_authenticated_operator () =
+  with_workspace
+  @@ fun config ->
+  let request = create_pending_board_schedule config in
+  let args =
+    `Assoc
+      [ "schedule_id", `String request.schedule_id
+      ; "decision", `String "approve"
+      ; "approved_by_id", `String "attacker"
+      ]
+    in
+    match
+      Server_dashboard_http.dashboard_schedule_resolve_http_json
+        ~config ~operator_name:"dashboard-admin" ~args
+    with
+  | Error message -> fail message
+  | Ok json ->
+    let open Yojson.Safe.Util in
+    let approved_by_id = json |> member "approved_by" |> member "id" |> to_string in
+    check string "response approver is token-bound actor" "dashboard-admin"
+      approved_by_id;
+    check bool "body spoofed approver ignored" true
+      (not (String.equal approved_by_id "attacker"));
+    (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+     | None -> fail "schedule missing"
+     | Some stored ->
+       check string "schedule moved to scheduled" "scheduled"
+         (Schedule_domain.schedule_status_to_string stored.status))
+;;
+
 let () =
   run "Schedule_consumer_dispatch"
     [ ( "board_post"
@@ -188,6 +218,8 @@ let () =
             test_board_post_consumer_creates_post_and_succeeds_schedule
         ; test_case "rejects read-only risk" `Quick
             test_board_post_consumer_rejects_read_only_risk
+        ; test_case "dashboard resolve uses authenticated operator" `Quick
+            test_dashboard_schedule_resolve_uses_authenticated_operator
         ] )
     ]
 ;;

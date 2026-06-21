@@ -262,6 +262,12 @@ val set_grpc_runtime_listening : bool -> unit
 (** WebSocket variant of {!set_grpc_runtime_listening}. *)
 val set_ws_runtime_listening : bool -> unit
 
+(** [set_ws_same_origin_runtime_ready ready] flips the same-origin [/ws]
+    upgrade readiness Atomic.  This is separate from the HTTP listener being
+    open: early bootstrap can accept HTTP requests before the WebSocket MCP
+    dispatcher is installed. *)
+val set_ws_same_origin_runtime_ready : bool -> unit
+
 (** [set_grpc_listen_status s] writes [s] into
     {!grpc_listen_status}.  Caller is responsible for using a
     pinned status literal — drift to free-form strings would
@@ -285,6 +291,10 @@ val ws_enabled : unit -> bool
     [ws_enabled () && Atomic.get ws_runtime_listening] —
     AND of env-config and runtime state. *)
 val ws_listening : unit -> bool
+
+(** [ws_same_origin_ready ()] is [ws_enabled ()] AND the runtime readiness bit
+    set after the inbound WebSocket dispatcher is installed. *)
+val ws_same_origin_ready : unit -> bool
 
 (** {1 Agent health gauges (test-visible)} *)
 

@@ -17,6 +17,7 @@ type accept_rejection_kind =
 type accept_rejection =
   { kind : accept_rejection_kind
   ; reason : string
+  ; response_shape : Agent_sdk.Response_shape.content_shape option
   }
 
 val accept_rejection_kind_to_string : accept_rejection_kind -> string

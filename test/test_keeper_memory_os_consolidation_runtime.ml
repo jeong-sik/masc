@@ -18,6 +18,7 @@ let fact claim =
   ; valid_until = None
   ; last_verified_at = Some now
   ; schema_version = Types.schema_version
+  ; claim_id = None
   }
 ;;
 

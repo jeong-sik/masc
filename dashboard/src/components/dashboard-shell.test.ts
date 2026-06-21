@@ -2,9 +2,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
-import { DashboardHealthStrip, DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute, shouldRenderSurfaceLead, SideRail, summarizeAttentionPreview } from './dashboard-shell'
+import { ConnectionStatus, DashboardHealthStrip, DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute, SideRail, summarizeAttentionPreview } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
+import { dashboardWsConnected, dashboardWsLastError, dashboardWsReady, dashboardWsSseFallbackActive } from '../dashboard-ws-state'
 import { dashboardLoading } from '../store'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
 
@@ -46,6 +47,80 @@ describe('DashboardMain solo mode', () => {
   })
 })
 
+describe('DashboardMain primary heading', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    dashboardLoading.value = false
+    connected.value = true
+    namespaceTruthInitializing.value = false
+    document.title = 'MASC Dashboard'
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it('renders a bespoke-header surface with one h1 and no generic lead h1', async () => {
+    route.value = { tab: 'overview', params: {}, postId: null }
+
+    render(h(DashboardMain, {}), container)
+
+    await waitFor(() => {
+      expect([...container.querySelectorAll('h1')].map(node => node.textContent?.trim()))
+        .toEqual(['운영 개요'])
+    }, { timeout: 5000 })
+    expect(container.querySelector('.v2-surface-header h1')).toBeNull()
+  })
+})
+
+describe('ConnectionStatus', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    connected.value = false
+    dashboardWsConnected.value = false
+    dashboardWsReady.value = false
+    dashboardWsSseFallbackActive.value = false
+    dashboardWsLastError.value = null
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    connected.value = false
+    dashboardWsConnected.value = false
+    dashboardWsReady.value = false
+    dashboardWsSseFallbackActive.value = false
+    dashboardWsLastError.value = null
+  })
+
+  it('uses WS readiness instead of the legacy SSE connected signal in WS-only mode', () => {
+    dashboardWsConnected.value = true
+    dashboardWsReady.value = true
+
+    render(h(ConnectionStatus, {}), container)
+
+    expect(container.textContent).toContain('Connected')
+    expect(container.textContent).not.toContain('Reconnecting')
+  })
+
+  it('shows handshaking instead of reconnecting while the WS hello is pending', () => {
+    dashboardWsConnected.value = true
+    dashboardWsReady.value = false
+
+    render(h(ConnectionStatus, {}), container)
+
+    expect(container.textContent).toContain('Connecting WS')
+    expect(container.textContent).not.toContain('Reconnecting')
+  })
+})
+
 describe('isKeeperDetailDashboardRoute', () => {
   it('detects monitor keeper detail drilldowns', () => {
     expect(isKeeperDetailDashboardRoute({
@@ -69,24 +144,6 @@ describe('isKeeperDetailDashboardRoute', () => {
       params: { section: 'agents' },
       postId: null,
     })).toBe(false)
-  })
-})
-
-describe('shouldRenderSurfaceLead', () => {
-  it('lets the Connectors prototype surface own its primary header', () => {
-    expect(shouldRenderSurfaceLead({
-      tab: 'connectors',
-      params: { section: 'connector-status' },
-      postId: null,
-    })).toBe(false)
-  })
-
-  it('keeps the generic lead for ordinary sectioned surfaces', () => {
-    expect(shouldRenderSurfaceLead({
-      tab: 'workspace',
-      params: { section: 'work' },
-      postId: null,
-    })).toBe(true)
   })
 })
 

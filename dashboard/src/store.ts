@@ -1028,12 +1028,16 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
   executionLoaded.value = true
 }
 
+let nextExecutionForce = false
+
 async function doFetchExecution(): Promise<void> {
+  const force = nextExecutionForce
+  nextExecutionForce = false
   executionLoading.value = true
   executionError.value = null
   try {
     const { fetchDashboardExecution } = await import('./api/dashboard')
-    const data = await fetchDashboardExecution()
+    const data = await fetchDashboardExecution({ force })
     hydrateExecutionSnapshot(data)
   } catch (err) {
     console.warn('[Dashboard] execution fetch error:', err)
@@ -1051,6 +1055,7 @@ const executionScheduler = new FetchScheduler(doFetchExecution, {
 
 export async function refreshExecution(opts?: RefreshOptions): Promise<void> {
   if (opts?.force) {
+    nextExecutionForce = true
     executionScheduler.requestNow()
   } else {
     executionScheduler.request()

@@ -7,6 +7,7 @@ import { lazy, Suspense } from 'preact/compat'
 import { route } from '../router'
 import { sectionItemsForTab } from '../config/navigation'
 import { LoadingState } from './common/feedback-state'
+import { SurfaceHeader } from './common/surface-header'
 
 export type StatusSection =
   | 'observatory' | 'journey' | 'agents' | 'runtime'
@@ -115,6 +116,7 @@ export function Status() {
 
   return html`
     <div class="v2-monitoring-surface flex flex-col gap-5">
+      <${SurfaceHeader} />
       <div class="transition-opacity duration-[var(--t-slow)]">
         <${Suspense} fallback=${sectionFallback(sectionLabel(section))}>
           ${renderSection(section)}

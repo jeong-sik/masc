@@ -66,6 +66,13 @@ let is_accept_rejected_sdk_error err =
   | None ->
     false
 
+let accept_no_progress_read_only_should_try_next err =
+  match Keeper_internal_error.classify_masc_internal_error err with
+  | Some err ->
+    Keeper_internal_error.accept_rejection_has_read_only_no_progress_retry_hint
+      err
+  | None -> false
+
 let http_status_of_http_error = function
   | Some (Llm_provider.Http_client.HttpError { code; _ }) -> Some code
   | _ -> None
@@ -194,9 +201,14 @@ let run
          on_success ~provider_key:(Runtime_candidate.health_key candidate);
          Ok run_result
        | Ok run_result ->
+         let last_tool_context =
+           Keeper_turn_driver_try_provider.accept_rejection_context_of_run_result
+             ~initial_messages:ctx.try_provider_ctx.initial_messages
+             run_result
+         in
          let err =
            Keeper_turn_driver_try_provider.accept_rejected_error
-             ~progress_context:None
+             ~last_tool_context
              ~runtime_id:ctx.error_runtime_id
              ~response:run_result.Runtime_agent.response
          in
@@ -223,7 +235,10 @@ let run
            ~http_status:(http_status_of_http_error http_err);
          match http_err with
          | Some http_err
-           when (not is_last) && Runtime_attempt_fsm.should_try_next http_err ->
+           when (not is_last)
+                && (Runtime_attempt_fsm.should_try_next http_err
+                    || accept_no_progress_read_only_should_try_next original_error)
+           ->
            loop checkpoint_after (Some http_err) rest
          | Some http_err ->
            Error
@@ -232,3 +247,8 @@ let run
            if is_last then Error err else loop checkpoint_after last_err rest)
   in
   loop resume_checkpoint last_err candidates
+
+module For_testing = struct
+  let accept_no_progress_read_only_should_try_next =
+    accept_no_progress_read_only_should_try_next
+end

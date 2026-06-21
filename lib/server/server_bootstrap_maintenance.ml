@@ -39,9 +39,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       Tool_metrics_persist.enqueue r
     | _ -> ());
   Tool_metrics_persist.start_flush_fiber ~sw ~clock ~base_path:(Mcp_server.workspace_config state).base_path;
-  (* RFC-0234 scheduled automation runner.  Tool-facing create/approve/list
-     paths only mutate the durable ledger; this loop is the production caller
-     that observes due rows and emits at-most-once generic wake signals.  It
+  (* RFC-0234 scheduled automation runner.  Public schedule tools and the
+     dashboard-only approval route only mutate the durable ledger; this loop is
+     the production caller that observes due rows and emits at-most-once generic wake signals.  It
      catches per-tick failures so a corrupt schedule row or transient write
      error cannot cancel unrelated keeper/server fibers. *)
   fork_logged_fiber
@@ -129,7 +129,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   (* RFC-0247 §2.3: memory-os forgetting sweep. Off the keeper hot path — every
      [interval]s it runs the deterministic per-keeper GC ([run_gc]: hard-expire
      facts whose [valid_until] has passed, drop fully-decayed facts by retention
-     verdict, dedup by the [normalize_claim] SSOT) and rewrites each keeper's
+     verdict, dedup by the [claim_identity] SSOT) and rewrites each keeper's
      Tier-1 store atomically. This is [run_gc]'s first production caller; without
      it the TTL/lifetime machinery (now produced per-category at librarian write
      time) is unreachable. The shared store is skipped — the consolidator

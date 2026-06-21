@@ -22,6 +22,7 @@ export function createSseTransport(url: string, opts: TransportOptions = {}): Tr
   }
 
   const scheduleReconnect = () => {
+    if (reconnectTimer) return
     if (reconnectAttempts >= retryMaxAttempts && !closeNotified) {
       closeNotified = true
       notify({ type: 'close' })
@@ -30,7 +31,10 @@ export function createSseTransport(url: string, opts: TransportOptions = {}): Tr
     const maxMs = opts.retryMaxMs ?? TRANSPORT_RETRY_MAX_MS
     const backoff = Math.min(retryMs, maxMs)
     const jitter = Math.random() * retryJitterMs
-    reconnectTimer = setTimeout(connect, backoff + jitter)
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null
+      connect()
+    }, backoff + jitter)
     retryMs = Math.min(retryMs * 2, maxMs)
   }
 

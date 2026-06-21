@@ -30,10 +30,12 @@ import {
 } from './components/dashboard-shell'
 import { ThemeSwitch } from './components/theme-switch'
 import { EmergencyStopControl } from './components/emergency-stop-control'
+import { AttentionIndicator } from './components/attention-indicator'
 import { TransportBeacon } from './components/transport-beacon'
 import { DashboardNavRail } from './components/mobile-nav'
 import { SkipLink } from './components/skip-link'
 import { selectedAgentName } from './components/agent-detail-selection'
+import { selectedKeeper } from './components/keeper-detail-state'
 import { selectedTask } from './components/goals/task-detail-selection'
 import { ToastContainer } from './components/common/toast'
 import { ConfirmDialogOverlay } from './components/common/confirm-dialog'
@@ -267,6 +269,16 @@ export function App() {
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
   const currentSection = currentSectionForRoute(route.value)
+  // Keepers surface is sectionless (navigation `keepers: []`), so its breadcrumb
+  // tail is the keeper the chat is showing. Prefer the explicit route param,
+  // then fall back to the `selectedKeeper` signal (mirrors keeper-detail-page's
+  // tier-2 resolution) so the crumb still tracks the keeper when no route param
+  // is present. Reading `selectedKeeper.value` subscribes App to a single
+  // low-frequency signal — NOT the high-frequency keepers list (P0 perf).
+  // Mirrors the v2 design crumb `<surface> / <keeper.id>`.
+  const breadcrumbKeeper = currentTab === 'keepers'
+    ? (route.value.params.keeper?.trim() || selectedKeeper.value?.name || undefined)
+    : undefined
   const isCodeSurface = currentTab === 'code'
   const widgetSoloMode = isWidgetSoloRoute(route.value)
   const keeperDetailMode = isKeeperDetailDashboardRoute(route.value)
@@ -318,16 +330,23 @@ export function App() {
                 <div class="min-w-0 px-2.5 py-1">
                   <div class="v2-header-crumb flex items-center gap-1.5 font-ui text-[var(--fs-10)] uppercase leading-none tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
                     <span>${currentView?.label ?? 'Surface'}</span>
-                    ${currentSection && currentSection.label !== currentView?.label
+                    ${breadcrumbKeeper
+                      ? html`
+                          <span class="text-[var(--color-warn)]">/</span>
+                          <span class="truncate">${breadcrumbKeeper}</span>
+                        `
+                      : currentSection && currentSection.label !== currentView?.label
                       ? html`
                           <span class="text-[var(--color-warn)]">/</span>
                           <span class="truncate">${currentSection.label}</span>
                         `
                       : null}
                   </div>
-                  <h1 class="v2-header-title mt-1 min-w-0 truncate font-display text-xs font-semibold leading-tight tracking-normal text-[var(--color-fg-secondary)]">
-                    ${currentSection?.label ?? currentView?.label ?? 'Multi-Agent Namespace Console'}
-                  </h1>
+                  ${/* No title heading here: each surface owns its primary header
+                       (single source of truth), so the global chrome shows only the
+                       crumb — matching the v2 design top bar, which carries a slim
+                       breadcrumb and no page title. A title here duplicated every
+                       surface-level heading/header. */ ''}
                 </div>
               </div>
             </div>
@@ -335,15 +354,16 @@ export function App() {
           </div>
 
           <div class="v2-header-actions flex shrink-0 flex-wrap items-center justify-end gap-2 max-[1080px]:justify-between">
-            <div class="v2-app-header-status hidden items-center gap-2 max-[900px]:hidden" aria-label="Dashboard summary">
-              <span class="v2-statchip live" title="Live keepers reported by the shell snapshot">
-                <span class="inline-block size-2 rounded-full bg-[var(--color-status-ok)] shadow-[0_0_7px_rgb(var(--ok-glow)/0.75)]"></span>
-                ${shellCounts.value?.keepers ?? 0} running
+            <div class="v2-app-header-status v2-desktop-header-only flex items-center gap-2" aria-label="대시보드 요약">
+              <span class="v2-statchip live" title="실행 중인 keeper 수 (shell 스냅샷 기준)">
+                <span class="inline-block size-2 rounded-full bg-[var(--color-status-ok)] shadow-[0_0_7px_rgb(var(--ok-glow)/0.75)] motion-safe:animate-pulse"></span>
+                ${shellCounts.value?.keepers ?? 0} 실행 중
               </span>
-              <span class="v2-statchip" title="Scheduler health inferred from server status">
-                scheduler <b>${serverStatus.value ? 'healthy' : '—'}</b>
+              <span class="v2-statchip" title="dashboard shell이 최근 서버 status를 수신했는지 여부">
+                서버 <b>${serverStatus.value ? '응답' : '—'}</b>
               </span>
             </div>
+            <${AttentionIndicator} />
             <span class="contents" data-mobile-detail-keep><${EmergencyStopControl} /></span>
             <${CopilotDockTopBarButton} dock=${dock} />
             <${Suspense} fallback=${authStatusFallback()}>

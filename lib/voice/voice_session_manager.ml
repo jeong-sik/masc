@@ -14,6 +14,10 @@ type session_status =
   | Idle
   | Suspended
 
+type conversation_mode =
+  | Turn_based
+  | Realtime_bridge of { endpoint : string }
+
 type session = {
   session_id: string;
   agent_id: string;
@@ -22,6 +26,7 @@ type session = {
   mutable last_activity: float;
   mutable turn_count: int;
   mutable status: session_status;
+  mutable conversation_mode: conversation_mode;
 }
 
 type t = {
@@ -67,7 +72,130 @@ let status_of_string_opt = function
   | "suspended" -> Some Suspended
   | _ -> None
 
+let string_of_conversation_mode = function
+  | Turn_based -> "turn_based"
+  | Realtime_bridge _ -> "realtime_bridge"
+
+let transport_mode_of_conversation_mode = function
+  | Turn_based -> "batch_stt_tts"
+  | Realtime_bridge _ -> "websocket_audio_bridge"
+
+let realtime_supported = function
+  | Turn_based -> false
+  | Realtime_bridge _ -> true
+
+let realtime_bridge_env = "MASC_VOICE_REALTIME_WS_URL"
+
+let has_prefix ~prefix s =
+  let prefix_len = String.length prefix in
+  String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
+
+let valid_realtime_bridge_endpoint endpoint =
+  has_prefix ~prefix:"ws://" endpoint || has_prefix ~prefix:"wss://" endpoint
+
+let realtime_bridge_endpoint ?(getenv = Sys.getenv_opt) () =
+  match getenv realtime_bridge_env with
+  | None -> None
+  | Some raw ->
+    let endpoint = String.trim raw in
+    if endpoint = "" || not (valid_realtime_bridge_endpoint endpoint)
+    then None
+    else Some endpoint
+
+let realtime_bridge_public_json ?endpoint () =
+  `Assoc
+    [ "configured", `Bool (Option.is_some endpoint)
+    ; "required_env", `String realtime_bridge_env
+    ; "endpoint", `Null
+    ]
+
+let session_conversation_mode session = session.conversation_mode
+
+let turn_based_voice_loop_json ~session_active =
+  `Assoc
+    [ "mode", `String "turn_based_batch"
+    ; "transport_mode", `String "batch_stt_tts"
+    ; "realtime_supported", `Bool false
+    ; "session_active", `Bool session_active
+    ; ( "operator_input"
+      , `Assoc
+          [ "capture", `String "dashboard_microphone_or_audio_upload"
+          ; "server_route", `String "POST /api/v1/voice/transcribe"
+          ; "handoff", `String "transcribed_text_enters_normal_keeper_turn"
+          ] )
+    ; ( "keeper_output"
+      , `Assoc
+          [ "tool", `String "keeper_voice_speak"
+          ; "delivery", `String "tts_audio_clip"
+          ; "browser_route", `String "GET /api/v1/voice/audio/<token>"
+          ] )
+    ; ( "keeper_next_actions"
+      , `List
+          [ `String "Use keeper_voice_speak for audible keeper output."
+          ; `String
+              "Treat transcribed operator speech as normal text input; do not wait \
+               for a live duplex audio stream."
+          ; `String
+              "Call keeper_voice_agent to inspect whether a turn-based voice session \
+               is active."
+          ] )
+    ]
+
+let realtime_bridge_voice_loop_json ~session_active ~endpoint =
+  `Assoc
+    [ "mode", `String "realtime_bridge"
+    ; "transport_mode", `String "websocket_audio_bridge"
+    ; "realtime_supported", `Bool true
+    ; "session_active", `Bool session_active
+    ; "protocol", `String "masc.voice.realtime_bridge.v1"
+    ; "realtime_bridge", realtime_bridge_public_json ~endpoint ()
+    ; ( "operator_input"
+      , `Assoc
+          [ "capture", `String "dashboard_microphone_stream"
+          ; "handoff", `String "audio_frames_to_realtime_bridge"
+          ; "fallback_route", `String "POST /api/v1/voice/transcribe"
+          ] )
+    ; ( "keeper_output"
+      , `Assoc
+          [ "delivery", `String "assistant_audio_events_or_tts_audio_clip"
+          ; "fallback_tool", `String "keeper_voice_speak"
+          ; "browser_route", `String "GET /api/v1/voice/audio/<token>"
+          ] )
+    ; ( "keeper_next_actions"
+      , `List
+          [ `String
+              "Use the realtime bridge for live audio frames while the session \
+               is active."
+          ; `String
+              "Fall back to keeper_voice_speak and batch STT/TTS if the bridge \
+               disconnects."
+          ; `String
+              "Call keeper_voice_agent to inspect active realtime bridge state."
+          ] )
+    ]
+
+let voice_loop_json ~session_active = function
+  | Turn_based -> turn_based_voice_loop_json ~session_active
+  | Realtime_bridge { endpoint } ->
+    realtime_bridge_voice_loop_json ~session_active ~endpoint
+
 let session_to_json session =
+  let session_active =
+    match session.status with
+    | Active -> true
+    | Idle | Suspended -> false
+  in
+  let mode = session.conversation_mode in
+  let bridge_endpoint =
+    match mode with
+    | Turn_based -> `Null
+    | Realtime_bridge _ -> `Null
+  in
+  let realtime_bridge =
+    match mode with
+    | Turn_based -> realtime_bridge_public_json ()
+    | Realtime_bridge { endpoint } -> realtime_bridge_public_json ~endpoint ()
+  in
   `Assoc [
     ("session_id", `String session.session_id);
     ("agent_id", `String session.agent_id);
@@ -76,7 +204,21 @@ let session_to_json session =
     ("last_activity", `Float session.last_activity);
     ("turn_count", `Int session.turn_count);
     ("status", `String (string_of_status session.status));
+    ("conversation_mode", `String (string_of_conversation_mode mode));
+    ("transport_mode", `String (transport_mode_of_conversation_mode mode));
+    ("realtime_supported", `Bool (realtime_supported mode));
+    ("realtime_bridge_endpoint", bridge_endpoint);
+    ("realtime_bridge", realtime_bridge);
+    ("voice_loop", voice_loop_json ~session_active mode);
   ]
+
+let conversation_mode_of_json json =
+  match Json_util.get_string json "conversation_mode" with
+  | Some "realtime_bridge" | Some "realtime" ->
+    (match realtime_bridge_endpoint () with
+     | Some endpoint -> Realtime_bridge { endpoint }
+     | _ -> Turn_based)
+  | _ -> Turn_based
 
 let session_of_json json =
   {
@@ -96,6 +238,7 @@ let session_of_json json =
       |> Option.value ~default:""
       |> status_of_string_opt
       |> Option.value ~default:Suspended;
+    conversation_mode = conversation_mode_of_json json;
   }
 
 (** {1 Creation} *)
@@ -153,13 +296,14 @@ let delete_session_file t agent_id =
 
 (** {1 Session Lifecycle} *)
 
-let start_session t ~agent_id ?voice () =
+let start_session t ~agent_id ?voice ?(conversation_mode = Turn_based) () =
   with_lock t (fun () ->
     (* Check if session already exists *)
     match Hashtbl.find_opt t.sessions agent_id with
     | Some existing ->
       existing.status <- Active;
       existing.last_activity <- Time_compat.now ();
+      existing.conversation_mode <- conversation_mode;
       save_session t existing;
       existing
     | None ->
@@ -177,6 +321,7 @@ let start_session t ~agent_id ?voice () =
         last_activity = now;
         turn_count = 0;
         status = Active;
+        conversation_mode;
       } in
       Hashtbl.add t.sessions agent_id session;
       save_session t session;

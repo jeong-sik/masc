@@ -233,7 +233,21 @@ jobs:
             ci_core=true
           fi
 
-          if has_match '^(bin/|lib/|test/|proto/|config/|dune-project$|dune-workspace$|.*\.opam$|scripts/ci-run-tests\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/install\.sh$|scripts/harness/contract/|scripts/harness/transport/|scripts/harness/lib/server_bootstrap\.sh$)'; then
+          # The build trigger must stay a SUPERSET of the dune build graph.
+          # ci-gate treats a skipped required job as PASS (see check() near
+          # line 1206), so any code-bearing PR that does NOT set build=true
+          # merges with a green "CI Gate" while the Build job (dune compile)
+          # never ran. The prefix list below (bin/ lib/ test/ proto/ config/)
+          # missed build-graph dirs examples/ ppx/ ppx_tla/ test_lib/ tools/
+          # and the root dune file, so a PR touching only those compiled
+          # nowhere yet reported success. Match any OCaml/dune source plus C
+          # foreign stubs by suffix so new source dirs are covered without
+          # editing this list, and keep explicit prefixes for Dune-declared
+          # non-source deps (e.g. tools/tlc_test_gen/test/fixtures/*.tla).
+          # Over-triggering on dune-excluded dirs (archive/, dashboard_bonsai/
+          # per the root dune (dirs ...) stanza) is harmless: the Build job
+          # runs but dune build skips those dirs.
+          if has_match '^(bin/|lib/|test/|proto/|config/|tools/tlc_test_gen/|dune-project$|dune-workspace$|.*\.opam$|.*\.ml$|.*\.mli$|.*\.mll$|.*\.mly$|.*\.c$|.*\.h$|(.*/)?dune$|scripts/ci-run-tests\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/install\.sh$|scripts/harness/contract/|scripts/harness/transport/|scripts/harness/lib/server_bootstrap\.sh$)'; then
             build=true
           fi
 

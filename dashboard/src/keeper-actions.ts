@@ -10,7 +10,12 @@ import {
   streamKeeperMessage,
 } from './api/keeper'
 import { fetchKeeperToolCalls } from './api/dashboard'
-import { recordToolCallOutputs } from './tool-call-output-store'
+import {
+  markToolCallOutputsHydrated,
+  markToolCallOutputsHydrating,
+  markToolCallOutputsHydrationFailed,
+  recordToolCallOutputs,
+} from './tool-call-output-store'
 import { asString, isRecord } from './components/common/normalize'
 import { invalidateDashboardCache, refreshDashboard } from './store'
 import { isAbortError } from './lib/async-state'
@@ -187,18 +192,36 @@ export async function hydrateKeeperChatHistory(
 
 // Match the visible chat history window. A keeper that calls many tools can
 // easily have >100 tool rows inside the 200-row transcript; using the same
-// horizon keeps every visible row eligible for output join.
+// horizon keeps every visible recent row eligible for output join.
 const TOOL_OUTPUT_FETCH_LIMIT = KEEPER_HISTORY_TAIL_MESSAGES
+
+function toolOutputCoveredSinceMs(entries: readonly { ts: number }[]): number {
+  const oldestMs = entries.reduce((oldest, entry) => {
+    const ms = entry.ts * 1000
+    return Number.isFinite(ms) ? Math.min(oldest, ms) : oldest
+  }, Number.POSITIVE_INFINITY)
+  // The backend filters a global recent tool-call tail by keeper, so a short
+  // response is not proof that no older matching keeper rows exist. Only the
+  // timestamp span actually returned by this fetch is safe to mark covered.
+  return Number.isFinite(oldestMs) ? oldestMs : Number.POSITIVE_INFINITY
+}
 
 /** Best-effort hydration of tool-call outputs into the shared store so the
  *  chat ToolCallBubble can join results onto transcript rows by tool_use_id.
  *  Failures are swallowed (logged): the transcript must render with or without
  *  tool outputs. */
 async function hydrateKeeperToolOutputs(keeperName: string): Promise<void> {
+  const coveredThroughMs = markToolCallOutputsHydrating(keeperName)
   try {
     const response = await fetchKeeperToolCalls(keeperName, TOOL_OUTPUT_FETCH_LIMIT)
     recordToolCallOutputs(response.entries)
+    markToolCallOutputsHydrated(
+      keeperName,
+      coveredThroughMs,
+      toolOutputCoveredSinceMs(response.entries),
+    )
   } catch (err) {
+    markToolCallOutputsHydrationFailed(keeperName)
     const message = err instanceof Error ? err.message : String(err)
     console.warn(`[keeper] tool-call output hydration failed for ${keeperName}:`, message)
   }

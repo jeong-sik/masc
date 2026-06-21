@@ -125,7 +125,7 @@ export default defineConfig(({ command }) => {
             '/api': proxyTarget,
             '/mcp': { target: proxyTarget },
             '/sse': { target: proxyTarget },
-            '/ws': { target: proxyTarget },
+            '/ws': { target: proxyTarget, ws: true },
             '/yjs': { target: proxyTarget, ws: true },
           },
         }

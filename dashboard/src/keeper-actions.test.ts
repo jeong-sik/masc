@@ -32,7 +32,7 @@ const {
   streamKeeperMessage: vi.fn(),
 }))
 const { fetchKeeperToolCalls } = vi.hoisted(() => ({
-  fetchKeeperToolCalls: vi.fn(async () => ({ entries: [] })),
+  fetchKeeperToolCalls: vi.fn(async (): Promise<{ entries: ToolCallEntry[] }> => ({ entries: [] })),
 }))
 
 vi.mock('./api/mcp', () => ({ callMcpTool }))
@@ -82,12 +82,19 @@ import {
   upsertPendingKeeperChatRequest,
 } from './keeper-chat-pending'
 import { KEEPER_HISTORY_TAIL_MESSAGES } from './config/constants'
+import {
+  resetToolCallOutputs,
+  toolCallOutputsCoveredSinceMs,
+  toolCallOutputsCoveredThroughMs,
+} from './tool-call-output-store'
 import type { KeeperChatStreamEvent } from './api'
+import type { ToolCallEntry } from './api/dashboard'
 import type { KeeperConversationAttachment, KeeperStatusDetail } from './types'
 
 beforeEach(() => {
   fetchKeeperToolCalls.mockReset()
   fetchKeeperToolCalls.mockResolvedValue({ entries: [] })
+  resetToolCallOutputs()
 })
 
 describe('noteKeeperChatAppended', () => {
@@ -183,6 +190,39 @@ describe('hydrateKeeperChatHistory', () => {
     await hydrateKeeperChatHistory('echo')
 
     expect(fetchKeeperToolCalls).toHaveBeenCalledWith('echo', 200)
+  })
+
+  it('bounds tool-output hydration to the returned output tail', async () => {
+    fetchKeeperChatHistory.mockResolvedValue([])
+    fetchKeeperToolCalls.mockResolvedValue({
+      entries: [
+        {
+          ts: 1_780_000_010,
+          keeper: 'echo',
+          tool: 'keeper_context_status',
+          input: {},
+          output: 'ok',
+          success: true,
+          duration_ms: 12,
+          tool_use_id: 'toolu_recent',
+        },
+      ],
+    })
+
+    await hydrateKeeperChatHistory('echo')
+
+    expect(toolCallOutputsCoveredSinceMs('echo')).toBe(1_780_000_010_000)
+    expect(toolCallOutputsCoveredThroughMs('echo')).not.toBeNull()
+  })
+
+  it('does not treat an empty tool-output fetch as unbounded coverage', async () => {
+    fetchKeeperChatHistory.mockResolvedValue([])
+    fetchKeeperToolCalls.mockResolvedValue({ entries: [] })
+
+    await hydrateKeeperChatHistory('echo')
+
+    expect(toolCallOutputsCoveredSinceMs('echo')).toBe(Number.POSITIVE_INFINITY)
+    expect(toolCallOutputsCoveredThroughMs('echo')).not.toBeNull()
   })
 
   it('allows a retry after a failed fetch', async () => {

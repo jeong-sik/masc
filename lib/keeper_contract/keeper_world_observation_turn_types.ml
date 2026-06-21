@@ -6,7 +6,7 @@
     (proactive turns on a timer). [unified_turn_channel] is an alias
     retained for legacy callers.
 
-    [turn_reason] carries the 11 reasons a keeper *runs* a turn
+    [turn_reason] carries the reasons a keeper *runs* a turn
     (mention, board event, scope message, scheduled autonomous, idle
     cooldown elapsed with timers, etc.). Inline-record variants carry
     the timing fields the dashboard surfaces.
@@ -34,6 +34,7 @@ type turn_reason =
   | Board_event_pending
   | Scope_message_pending
   | Scheduled_autonomous_turn
+  | Scheduled_automation_due
   | Idle_cooldown_elapsed of
       { idle_sec : int
       ; cooldown : int
@@ -65,6 +66,7 @@ let turn_reason_to_string = function
   | Board_event_pending -> "board_event_pending"
   | Scope_message_pending -> "scope_message_pending"
   | Scheduled_autonomous_turn -> "scheduled_autonomous_turn"
+  | Scheduled_automation_due -> "scheduled_automation_due"
   | Idle_cooldown_elapsed _ -> "idle_cooldown_elapsed"
   | Cooldown_elapsed -> "cooldown_elapsed"
   | Task_backlog _ -> "task_backlog"

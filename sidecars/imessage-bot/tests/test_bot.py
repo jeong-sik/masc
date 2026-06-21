@@ -77,6 +77,58 @@ class IMessageBotTests(unittest.IsolatedAsyncioTestCase):
         )
 
     @patch("src.bot.send_message", return_value=True)
+    @patch("src.bot.resolve_self_chat_guid", return_value="self-guid")
+    @patch("src.bot.GateClient")
+    @patch("src.bot.get_config")
+    async def test_handle_message_prefers_structured_reply_text(
+        self,
+        get_config_mock,
+        gate_client_cls,
+        resolve_self_chat_guid_mock,
+        send_message_mock,
+    ) -> None:
+        get_config_mock.return_value = self._config()
+        gate_client = gate_client_cls.return_value
+        gate_client.send_message = AsyncMock(
+            return_value=GateResponse(
+                ok=True,
+                keeper_name=DEFAULT_KEEPER,
+                reply="fallback reply",
+                model_used="test-model",
+                duration_ms=42,
+                tokens_used=12,
+                error="",
+                structured={
+                    "blocks": [
+                        {"t": "p", "html": "hello &lt;imessage&gt;"},
+                        {"t": "link", "url": "https://example.com", "title": "Example"},
+                    ]
+                },
+            )
+        )
+
+        bot = IMessageBot()
+        msg = InboundMessage(
+            rowid=17,
+            text="hello",
+            date=datetime.now(tz=timezone.utc),
+            service="iMessage",
+            sender="+15551234567",
+            chat_guid="source-guid",
+            chat_identifier="chat123",
+            display_name="Test",
+        )
+
+        ok = await bot._handle_message(msg)
+
+        self.assertTrue(ok)
+        resolve_self_chat_guid_mock.assert_called_once_with("/tmp/chat.db", "")
+        send_message_mock.assert_called_once_with(
+            text="hello <imessage>\n\nExample\nhttps://example.com",
+            chat_guid="self-guid",
+        )
+
+    @patch("src.bot.send_message", return_value=True)
     @patch("src.bot.resolve_self_chat_guid", return_value="")
     @patch("src.bot.GateClient")
     @patch("src.bot.get_config")

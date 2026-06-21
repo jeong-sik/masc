@@ -337,6 +337,18 @@ let assemble_hooks
                   else ctx
                 in
                 let ctx =
+                  match
+                    Keeper_user_model.render_if_enabled
+                      ~keeper_id:meta.name
+                      ~now:(Time_compat.now ())
+                      ()
+                  with
+                  | None -> ctx
+                  | Some block ->
+                    record_block Prompt_block_id.User_model block;
+                    append_ctx ctx block
+                in
+                let ctx =
                   (* Memory OS recall — bounded advisory block rendered from
                      persisted facts/episodes (read side; the write side is
                      the librarian wired in #20897). Opt-in via

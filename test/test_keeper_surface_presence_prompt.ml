@@ -62,6 +62,7 @@ let base_observation : WO.world_observation =
     provider_capacity_blocked_task_count = 0;
     failed_task_count = 0;
     pending_verification_count = 0;
+    scheduled_automation = WO.empty_scheduled_automation_observation;
     backlog_updated_since_last_scheduled_autonomous = false;
     running_keeper_fiber_count = 0;
     connected_surfaces = [];

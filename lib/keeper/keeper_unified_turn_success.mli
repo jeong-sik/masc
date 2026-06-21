@@ -21,5 +21,6 @@ val handle
        Keeper_turn_runtime_budget.provider_timeout_budget option
   -> current_turn_blocker_info:Keeper_meta_contract.blocker_info option
   -> keeper_turn_id:int
+  -> ?turn_ref:Ids.Turn_ref.t
   -> Keeper_agent_run.run_result
   -> Keeper_meta_contract.keeper_meta

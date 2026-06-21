@@ -25,9 +25,10 @@ const boardOffset = signal(0)
 const namespaceTruth = signal<unknown>(null)
 const namespaceTruthError = signal<unknown>(null)
 
-const refreshDashboard = vi.fn<() => Promise<void>>(async () => {})
-const refreshExecution = vi.fn<() => Promise<void>>(async () => {})
+const refreshDashboard = vi.fn<(opts?: { force?: boolean }) => Promise<void>>(async () => {})
+const refreshExecution = vi.fn<(opts?: { force?: boolean }) => Promise<void>>(async () => {})
 const refreshBoard = vi.fn<() => void>(() => {})
+const refreshFusionRuns = vi.fn<() => void>(() => {})
 const invalidateDashboardCache = vi.fn<() => void>(() => {})
 const hydrateBoardSnapshot = vi.fn<(payload: unknown) => void>(() => {})
 const hydrateShellSnapshot = vi.fn<(payload: unknown, opts?: unknown) => void>(() => {})
@@ -63,6 +64,7 @@ async function loadSseStore() {
     refreshDashboard,
     refreshExecution,
     refreshBoard,
+    refreshFusionRuns,
     serverStatus,
     boardPosts,
     boardSortMode,
@@ -112,6 +114,7 @@ describe('setupSSEReaction reconnect hydration', () => {
     refreshDashboard.mockResolvedValue(undefined)
     refreshExecution.mockClear()
     refreshBoard.mockClear()
+    refreshFusionRuns.mockClear()
     invalidateDashboardCache.mockClear()
     hydrateBoardSnapshot.mockClear()
     hydrateShellSnapshot.mockClear()
@@ -237,7 +240,7 @@ describe('setupSSEReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(refreshExecution).toHaveBeenCalledTimes(1)
-    expect(refreshExecution).toHaveBeenCalledWith()
+    expect(refreshExecution).toHaveBeenCalledWith({ force: true })
 
     cleanup()
   })
@@ -256,7 +259,25 @@ describe('setupSSEReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(refreshExecution).toHaveBeenCalledTimes(1)
+    expect(refreshExecution).toHaveBeenCalledWith({ force: true })
+
     cleanup()
+  })
+
+  it('forces execution refresh on keeper turn complete for live roster status', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'keepers', params: { keeper: 'qa-king' }, postId: null }
+
+    sseStore.routeServerPushEvent({
+      type: 'keeper_turn_complete',
+      name: 'qa-king',
+      turn: 42,
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshExecution).toHaveBeenCalledTimes(1)
+    expect(refreshExecution).toHaveBeenCalledWith({ force: true })
   })
 
   it('normalizes MASC broadcast aliases before route-scoped execution refresh', async () => {
@@ -324,6 +345,36 @@ describe('setupSSEReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(refreshBoard).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes fusion_run_status to the registry refresh while on the fusion surface (RFC-0266 Phase 4)', async () => {
+    // The live transport is the WS router (this function); the fusion_run_status
+    // dispatch case in the legacy sse.ts handleEvent is dead. Without a
+    // SIMPLE_ROUTES entry the running -> completed/failed flip never reached
+    // refreshFusionRuns and the panel only updated on the ~120s periodic poll.
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'fusion', params: {}, postId: null }
+
+    // routeServerPushEvent dispatches on event.type alone; the run payload is
+    // irrelevant to the SIMPLE_ROUTES lookup, so it is omitted here.
+    sseStore.routeServerPushEvent({ type: 'fusion_run_status' })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshFusionRuns).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not refresh fusion runs off the fusion surface (route-scoped budget)', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'overview', params: {}, postId: null }
+
+    // routeServerPushEvent dispatches on event.type alone; the run payload is
+    // irrelevant to the SIMPLE_ROUTES lookup, so it is omitted here.
+    sseStore.routeServerPushEvent({ type: 'fusion_run_status' })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshFusionRuns).not.toHaveBeenCalled()
   })
 
   it('routes keeper_chat_appended pushes to the live chat refresh hook', async () => {

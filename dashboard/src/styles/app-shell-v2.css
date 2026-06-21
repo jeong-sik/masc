@@ -14,7 +14,19 @@
    Defined at :root so v2-shell.css and shell components can share them.
    ═══════════════════════════════════════════════════════════════ */
 
-@layer theme-defaults, theme-overrides;
+/* Declare ONLY app-shell's own layers here — never a Tailwind-owned layer
+   (theme / base / components / utilities). The bundler hoists this statement
+   to the top of the built stylesheet, so it is what fixes each named layer's
+   position. Naming `utilities` here pinned it at index 3, which forced
+   Tailwind's own `theme, base, components, utilities` to emit AFTER it —
+   leaving base/components ABOVE utilities. Preflight (base) then beat every
+   utility class: list-style, h1 font-size, and margins all reset to their
+   element defaults (the #21846 cascade-layer regression).
+   app-shell stays first (lowest priority) so `.v2-app > *` (app-shell layer,
+   below) ranks under Tailwind's `.fixed`/`.absolute` (utilities) and overlays
+   keep position:fixed. theme-defaults/theme-overrides only carry :root token
+   values, so their position relative to Tailwind's layers is immaterial. */
+@layer app-shell, theme-defaults, theme-overrides;
 
 @layer theme-defaults {
   :root {
@@ -165,10 +177,15 @@
     radial-gradient(900px 500px at -5% 110%, rgba(0, 0, 0, 0.02), transparent 60%);
 }
 
-/* Ensure shell children render above the decorative background. */
-.v2-app > * {
-  position: relative;
-  z-index: 1;
+/* Lift in-flow shell children above the decorative .v2-app::before plane
+   (z-index:0). Keep this in a lower cascade layer so Tailwind utilities and
+   unlayered overlay classes can define their own positioning without being
+   forced back into normal flow. */
+@layer app-shell {
+  .v2-app > * {
+    position: relative;
+    z-index: 1;
+  }
 }
 
 /* Density variants (data-density mirrors v2 tweak panel). */
@@ -259,6 +276,19 @@
   color: var(--ss-warning);
   border-color: color-mix(in oklab, var(--ss-warning) 35%, transparent);
   background: color-mix(in oklab, var(--ss-warning) 8%, transparent);
+}
+
+/* bad tone — mirrors .warn with the destructive palette (AttentionIndicator). */
+.v2-app .v2-header-actions .v2-statchip.bad {
+  color: var(--ss-destructive);
+  border-color: color-mix(in oklab, var(--ss-destructive) 35%, transparent);
+  background: color-mix(in oklab, var(--ss-destructive) 8%, transparent);
+}
+
+/* The attention chip is an interactive button rather than a static span. */
+.v2-app .v2-header-actions .v2-statchip.attn {
+  cursor: pointer;
+  font-family: inherit;
 }
 
 /* ═══════════════════════════════════════════════════════════════

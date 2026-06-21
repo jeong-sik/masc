@@ -49,11 +49,12 @@ describe('computeBeaconView', () => {
     expect(view.title).toContain('dashboard/ping')
   })
 
-  it('returns red when wsOnly, socket connected but handshake not ready', () => {
+  it('returns yellow when wsOnly, socket connected but handshake not ready', () => {
     const view = computeBeaconView(beaconInput({
       ready: false,
     }))
-    expect(view.state).toBe('red')
+    expect(view.state).toBe('yellow')
+    expect(view.label).toBe('Client WS · handshaking')
   })
 
   it('returns yellow when wsOnly, ready, but no event has ever arrived', () => {

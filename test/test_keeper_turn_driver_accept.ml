@@ -137,6 +137,25 @@ let expect_accept_rejected result =
        Alcotest.failf "expected typed keeper error, got %s"
          (Agent_sdk.Error.to_string err))
 
+let accept_rejected_sdk_error
+    ?any_mutating_tool
+    ?(tool_effects_seen = [])
+    ~response_shape
+    ~last_tool_effect
+    ~reason
+    () =
+  Keeper_internal_error.sdk_error_of_masc_internal_error
+    (Keeper_internal_error.Accept_rejected
+       { scope = "runtime.changed-diagnostic"
+       ; model = None
+       ; reason_kind = Some Keeper_internal_error.Accept_no_usable_progress
+       ; response_shape
+       ; last_tool_effect
+       ; any_mutating_tool
+       ; tool_effects_seen
+       ; reason
+       })
+
 let test_reject_reason_describes_thinking_only_response () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
@@ -182,7 +201,19 @@ let test_reject_reason_describes_thinking_only_response () =
   Alcotest.(check bool)
     "no-progress accept rejection is not runtime exhaustion"
     false
-    (Masc.Keeper_error_classify.is_runtime_exhausted_error err)
+    (Masc.Keeper_error_classify.is_runtime_exhausted_error err);
+  Alcotest.(check bool)
+    "thinking-only without read-only tool does not try next candidate"
+    false
+    (Masc.Keeper_turn_driver.For_testing
+     .accept_no_progress_read_only_should_try_next
+       err);
+  Alcotest.(check (option string))
+    "thinking-only without read-only tool is not runtime-recoverable"
+    None
+    (Option.map
+       Masc.Keeper_error_classify.degraded_retry_reason_to_string
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
 
 let test_runtime_error_mapping_preserves_no_progress_accept_rejection () =
   let result =
@@ -255,12 +286,43 @@ let test_last_tool_context_classifies_checkpoint_tool_use () =
   in
   Alcotest.(check (option string))
     "read-only alias context"
-    (Some "last_tool=Read; last_tool_effect=read_only")
+    (Some
+       "last_tool=Read; last_tool_effect=read_only; any_mutating_tool=false; \
+        tool_effects_seen=read_only")
     read_context;
   Alcotest.(check (option string))
     "mutating alias context"
-    (Some "last_tool=Write; last_tool_effect=mutating")
+    (Some
+       "last_tool=Write; last_tool_effect=mutating; any_mutating_tool=true; \
+        tool_effects_seen=mutating")
     write_context
+
+let test_last_tool_context_treats_workspace_mutations_as_mutating () =
+  let cases =
+    [
+      ( "keeper_board_post"
+      , `Assoc [ "title", `String "t"; "body", `String "b" ] );
+      "keeper_broadcast", `Assoc [ "message", `String "hello" ];
+      ( "masc_transition"
+      , `Assoc [ "task_id", `String "t1"; "status", `String "done" ] );
+    ]
+  in
+  List.iter
+    (fun (tool_name, input) ->
+       let context =
+         Masc.Keeper_turn_driver.For_testing
+         .last_tool_progress_context_string_of_messages
+           [ message [ tool_use ~input tool_name ] ]
+       in
+       Alcotest.(check (option string))
+         (tool_name ^ " context")
+         (Some
+            (Printf.sprintf
+               "last_tool=%s; last_tool_effect=mutating; any_mutating_tool=true; \
+                tool_effects_seen=mutating"
+               tool_name))
+         context)
+    cases
 
 let test_accept_reason_includes_last_tool_context () =
   let checkpoint =
@@ -292,7 +354,7 @@ let test_accept_reason_includes_last_tool_context () =
            ]
          ())
   in
-  let _err, reason_kind, reason = expect_accept_rejected result in
+  let err, reason_kind, reason = expect_accept_rejected result in
   Alcotest.(check bool)
     "reason kind is no usable progress"
     true
@@ -304,7 +366,318 @@ let test_accept_reason_includes_last_tool_context () =
   Alcotest.(check bool)
     "reason includes last tool effect"
     true
-    (contains ~needle:"last_tool_effect=mutating" reason)
+    (contains ~needle:"last_tool_effect=mutating" reason);
+  Alcotest.(check bool)
+    "reason includes any mutating summary"
+    true
+    (contains ~needle:"any_mutating_tool=true" reason);
+  Alcotest.(check bool)
+    "reason includes effects seen"
+    true
+    (contains ~needle:"tool_effects_seen=mutating" reason);
+  Alcotest.(check bool)
+    "thinking-only after mutating tool does not try next candidate"
+    false
+    (Masc.Keeper_turn_driver.For_testing
+     .accept_no_progress_read_only_should_try_next
+       err);
+  Alcotest.(check (option string))
+    "thinking-only after mutating tool is not runtime-recoverable"
+    None
+    (Option.map
+       Masc.Keeper_error_classify.degraded_retry_reason_to_string
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
+
+let test_thinking_only_after_mutation_then_read_does_not_try_next_candidate () =
+  let checkpoint =
+    checkpoint_with_messages
+      [
+        message
+          [
+            tool_use
+              ~input:
+                (`Assoc
+                  [
+                    ("title", `String "checkpoint");
+                    ("body", `String "keeper posted progress");
+                  ])
+              "keeper_board_post";
+          ];
+        message
+          [ tool_use ~input:(`Assoc [ ("file_path", `String "dune") ]) "Read" ];
+      ]
+  in
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.thinking-after-mutation-then-read"
+      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      (run_result
+         ~checkpoint
+         ~content:
+           [
+             Agent_sdk.Types.Thinking
+               { thinking_type = "reasoning"; content = "internal chain" };
+           ]
+         ())
+  in
+  let err, reason_kind, reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "reason kind is no usable progress"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+  Alcotest.(check bool)
+    "last tool remains visible"
+    true
+    (contains ~needle:"last_tool=Read" reason);
+  Alcotest.(check bool)
+    "last tool remains read-only"
+    true
+    (contains ~needle:"last_tool_effect=read_only" reason);
+  Alcotest.(check bool)
+    "earlier mutation is summarized"
+    true
+    (contains ~needle:"any_mutating_tool=true" reason);
+  Alcotest.(check bool)
+    "effects seen captures both classes"
+    true
+    (contains ~needle:"tool_effects_seen=mutating,read_only" reason);
+  Alcotest.(check bool)
+    "earlier mutation disables read-only retry"
+    false
+    (Masc.Keeper_turn_driver.For_testing
+     .accept_no_progress_read_only_should_try_next
+       err);
+  Alcotest.(check (option string))
+    "earlier mutation is not runtime-recoverable"
+    None
+    (Option.map
+       Masc.Keeper_error_classify.degraded_retry_reason_to_string
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
+
+let test_historical_mutation_does_not_block_current_read_only_retry () =
+  let history_messages =
+    [
+      message
+        [
+          tool_use
+            ~input:
+              (`Assoc
+                [
+                  ("title", `String "old checkpoint");
+                  ("body", `String "previous turn posted progress");
+                ])
+            "keeper_board_post";
+        ];
+    ]
+  in
+  let current_attempt_messages =
+    [ message [ tool_use ~input:(`Assoc [ ("file_path", `String "dune") ]) "Read" ] ]
+  in
+  let checkpoint =
+    checkpoint_with_messages (history_messages @ current_attempt_messages)
+  in
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~initial_messages:history_messages
+      ~runtime_id:"runtime.thinking-after-historical-mutation-current-read"
+      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      (run_result
+         ~checkpoint
+         ~content:
+           [
+             Agent_sdk.Types.Thinking
+               { thinking_type = "reasoning"; content = "internal chain" };
+           ]
+         ())
+  in
+  let err, reason_kind, reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "reason kind is no usable progress"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+  Alcotest.(check bool)
+    "current last tool remains visible"
+    true
+    (contains ~needle:"last_tool=Read" reason);
+  Alcotest.(check bool)
+    "historical mutation is not counted as current attempt mutation"
+    true
+    (contains ~needle:"any_mutating_tool=false" reason);
+  Alcotest.(check bool)
+    "effects seen only includes current attempt read-only tool"
+    true
+    (contains ~needle:"tool_effects_seen=read_only" reason);
+  Alcotest.(check bool)
+    "current read-only no-progress tries next candidate"
+    true
+    (Masc.Keeper_turn_driver.For_testing
+     .accept_no_progress_read_only_should_try_next
+       err);
+  Alcotest.(check (option string))
+    "current read-only no-progress is runtime-recoverable"
+    (Some "read_only_no_progress")
+    (Option.map
+       Masc.Keeper_error_classify.degraded_retry_reason_to_string
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
+
+let test_thinking_only_after_read_only_webfetch_can_try_next_candidate () =
+  let checkpoint =
+    checkpoint_with_messages
+      [
+        message
+          [
+            tool_use
+              ~input:(`Assoc [ ("url", `String "https://example.com") ])
+              "WebFetch";
+          ];
+      ]
+  in
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.thinking-after-webfetch"
+      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      (run_result
+         ~checkpoint
+         ~content:
+           [
+             Agent_sdk.Types.Thinking
+               { thinking_type = "reasoning"; content = "internal chain" };
+           ]
+         ())
+  in
+  let err, reason_kind, reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "reason kind is no usable progress"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+  Alcotest.(check bool)
+    "reason identifies thinking-only shape"
+    true
+    (contains ~needle:"shape=thinking_only" reason);
+  Alcotest.(check bool)
+    "reason includes read-only tool name"
+    true
+    (contains ~needle:"last_tool=WebFetch" reason);
+  Alcotest.(check bool)
+    "reason includes read-only tool effect"
+    true
+    (contains ~needle:"last_tool_effect=read_only" reason);
+  Alcotest.(check bool)
+    "reason includes no-mutating summary"
+    true
+    (contains ~needle:"any_mutating_tool=false" reason);
+  Alcotest.(check bool)
+    "reason includes read-only effects seen"
+    true
+    (contains ~needle:"tool_effects_seen=read_only" reason);
+  Alcotest.(check bool)
+    "thinking-only after read-only tool tries next candidate"
+    true
+    (Masc.Keeper_turn_driver.For_testing
+     .accept_no_progress_read_only_should_try_next
+       err);
+  Alcotest.(check (option string))
+    "thinking-only after read-only tool is runtime-recoverable"
+    (Some "read_only_no_progress")
+    (Option.map
+       Masc.Keeper_error_classify.degraded_retry_reason_to_string
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
+
+let test_thinking_only_after_workspace_mutation_stays_terminal () =
+  let cases =
+    [
+      ( "keeper_board_post"
+      , `Assoc [ "title", `String "t"; "body", `String "b" ] );
+      "keeper_broadcast", `Assoc [ "message", `String "hello" ];
+      ( "masc_transition"
+      , `Assoc [ "task_id", `String "t1"; "status", `String "done" ] );
+    ]
+  in
+  List.iter
+    (fun (tool_name, input) ->
+       let checkpoint =
+         checkpoint_with_messages
+           [ message [ tool_use ~input tool_name ] ]
+       in
+       let result =
+         Masc.Keeper_turn_driver.For_testing.apply_accept
+           ~runtime_id:("runtime.thinking-after-" ^ tool_name)
+           ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+           (run_result
+              ~checkpoint
+              ~content:
+                [
+                  Agent_sdk.Types.Thinking
+                    { thinking_type = "reasoning"; content = "internal chain" };
+                ]
+              ())
+       in
+       let err, reason_kind, reason = expect_accept_rejected result in
+       Alcotest.(check bool)
+         (tool_name ^ " reason kind")
+         true
+         (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+       Alcotest.(check bool)
+         (tool_name ^ " reason marks mutation")
+         true
+         (contains ~needle:"last_tool_effect=mutating" reason);
+       Alcotest.(check bool)
+         (tool_name ^ " does not try next candidate")
+         false
+         (Masc.Keeper_turn_driver.For_testing
+          .accept_no_progress_read_only_should_try_next
+            err);
+       Alcotest.(check (option string))
+         (tool_name ^ " is not runtime-recoverable")
+         None
+         (Option.map
+            Masc.Keeper_error_classify.degraded_retry_reason_to_string
+            (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err)))
+    cases
+
+let test_read_only_retry_uses_typed_context_not_reason_tokens () =
+  let typed_err =
+    accept_rejected_sdk_error
+      ~response_shape:(Some Keeper_internal_error.Accept_response_thinking_only)
+      ~last_tool_effect:(Some Keeper_internal_error.Tool_effect_read_only)
+      ~any_mutating_tool:false
+      ~tool_effects_seen:[ Keeper_internal_error.Tool_effect_read_only ]
+      ~reason:"diagnostic wording changed; no legacy retry tokens"
+      ()
+  in
+  Alcotest.(check bool)
+    "typed thinking/read-only context retries despite changed wording"
+    true
+    (Masc.Keeper_turn_driver.For_testing
+     .accept_no_progress_read_only_should_try_next
+       typed_err);
+  Alcotest.(check (option string))
+    "typed thinking/read-only context is runtime-recoverable"
+    (Some "read_only_no_progress")
+    (Option.map
+       Masc.Keeper_error_classify.degraded_retry_reason_to_string
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason typed_err));
+  let string_only_err =
+    accept_rejected_sdk_error
+      ~response_shape:None
+      ~last_tool_effect:None
+      ~reason:
+        "legacy text only: shape=thinking_only; last_tool_effect=read_only"
+      ()
+  in
+  Alcotest.(check bool)
+    "legacy reason tokens alone do not trigger retry"
+    false
+    (Masc.Keeper_turn_driver.For_testing
+     .accept_no_progress_read_only_should_try_next
+       string_only_err);
+  Alcotest.(check (option string))
+    "legacy reason tokens alone are not runtime-recoverable"
+    None
+    (Option.map
+       Masc.Keeper_error_classify.degraded_retry_reason_to_string
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason
+          string_only_err))
 
 let test_thinking_with_text_is_accepted () =
   let result =
@@ -583,9 +956,33 @@ let () =
           Alcotest.test_case "last tool context classifies checkpoint tools" `Quick
             test_last_tool_context_classifies_checkpoint_tool_use;
           Alcotest.test_case
+            "last tool context treats workspace mutations as mutating"
+            `Quick
+            test_last_tool_context_treats_workspace_mutations_as_mutating;
+          Alcotest.test_case
             "accept rejection reason includes last tool context"
             `Quick
             test_accept_reason_includes_last_tool_context;
+          Alcotest.test_case
+            "thinking-only after mutation then read does not try next candidate"
+            `Quick
+            test_thinking_only_after_mutation_then_read_does_not_try_next_candidate;
+          Alcotest.test_case
+            "historical mutation does not block current read-only retry"
+            `Quick
+            test_historical_mutation_does_not_block_current_read_only_retry;
+          Alcotest.test_case
+            "thinking-only after read-only WebFetch tries next candidate"
+            `Quick
+            test_thinking_only_after_read_only_webfetch_can_try_next_candidate;
+          Alcotest.test_case
+            "thinking-only after workspace mutation stays terminal"
+            `Quick
+            test_thinking_only_after_workspace_mutation_stays_terminal;
+          Alcotest.test_case
+            "read-only retry uses typed context, not reason tokens"
+            `Quick
+            test_read_only_retry_uses_typed_context_not_reason_tokens;
           Alcotest.test_case "thinking plus text is accepted" `Quick
             test_thinking_with_text_is_accepted;
           Alcotest.test_case "thinking plus tool use is accepted" `Quick

@@ -263,7 +263,7 @@ export function KeeperLiveTruthPanel({
 
   return html`
     <div
-      class="v2-monitoring-detail w-full max-w-[calc(100vw-3rem)] rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-4 lg:max-w-none"
+      class="v2-monitoring-detail min-w-0 w-full max-w-full overflow-x-hidden rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-4"
       data-testid="keeper-live-truth"
     >
       <div class="flex flex-wrap items-start justify-between gap-3">

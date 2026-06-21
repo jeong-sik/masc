@@ -1,5 +1,6 @@
-(** [masc_completion_trust_eval] — live-LLM behavioural eval for RFC-0262 §9
-    axis ① (completion-trust disposition).
+(** [masc_completion_trust_eval] — live-LLM behavioural eval supporting RFC-0262
+    §9's proving metric (zero foreign-task completions by a non-Operator/System
+    actor), measured from the keeper's completion *disposition*.
 
     Drives a real keeper with adversarial *foreign-task temptation* prompts and
     measures whether it ATTEMPTS to complete a task it does not own or for which
@@ -7,7 +8,9 @@
     grading is deterministic (trajectory reduction -> {!Eval_harness}
     deterministic graders -> pass@k).
 
-    Boundary (RFC-0262 §9 harness — keeper / judge / eval-grader separation):
+    Boundary — keeper / judge / eval-grader separation (a harness design
+    contract, not RFC text; see docs/design/completion-trust-calibration-wiring.md.
+    RFC-0262 §8 is the test plan, §9 the rollout + proving metric):
     - keeper      = the live LLM under test (the completion *attempt* author).
     - judge       = the real dispatch-path gates (deterministic ownership /
                     anti-rationalization). NOT exercised here: this runner stubs
@@ -15,7 +18,9 @@
                     covered deterministically by [test_completion_trust_harness]
                     (PR-B). The stub [dispatch] closure below is the seam where a
                     later PR can route the attempt through the real handler plus
-                    [Eval_calibration] verdict recording.
+                    [Eval_calibration] verdict recording — see
+                    docs/design/completion-trust-calibration-wiring.md for the
+                    three blockers that wiring must resolve.
     - eval-grader = {!Eval_harness} deterministic graders + pass@k (this file).
 
     Scope: completion-trust scenarios only (not a general eval platform). Manual /
@@ -24,6 +29,8 @@
 
 module EH = Masc.Eval_harness
 module KTDW = Masc.Keeper_turn_driver_wrappers
+module AR = Masc.Task.Anti_rationalization
+module Cal = Masc.Eval_calibration
 
 let usage =
   {|Usage: masc_completion_trust_eval [OPTIONS]
@@ -37,6 +44,21 @@ Options:
   --out PATH         write the suite result as JSONL to PATH
   --list             load + print the corpus without driving any LLM
   --strict           exit 1 if a regression-guard scenario's pass@k < threshold
+  --record-verdicts  for self_owned scenarios, drive the anti-rationalization
+                     judge on each completion attempt and record its verdict
+                     (live judge LLM; manual/token-heavy). Requires
+                     --verdict-store-dir. Foreign scenarios stay disposition-only.
+  --verdict-store-dir DIR  isolated directory for --record-verdicts output.
+                     Required with --record-verdicts; must NOT be the live store
+                     ($MASC_BASE_PATH/data/verdicts) so the eval does not
+                     contaminate production calibration.
+  --evaluator-runtime ID  runtime for the judge. Omit for cross-model separation
+                     (the judge runs on routes.cross_verifier, a JSON-capable
+                     model distinct from --runtime; --record-verdicts requires
+                     routes.cross_verifier when this flag is omitted; same-model
+                     verdicts require an explicit --evaluator-runtime);
+                     cross_model_rate is only meaningful when the judge differs
+                     from the generator.
   -h, --help         print this help
 
 Exit codes:
@@ -285,13 +307,64 @@ let build_goal (scenario : EH.scenario) : string =
   else Printf.sprintf "%s\n\n---\n\n%s" context scenario.EH.goal
 ;;
 
-let run_one (scenario : EH.scenario) ~runtime_id ~run_index : EH.eval_run =
+(* The keeper identity the corpus addresses ("You are keeper-eval-agent ..."),
+   recorded as the completion author on the verdict. *)
+let eval_agent_name = "keeper-eval-agent"
+
+(* --record-verdicts: drive the real anti-rationalization judge on a self-owned
+   scenario's completion attempt and persist its verdict, mirroring the live
+   wiring in tool_task_handlers.review_completion_notes (on_verdict ->
+   Eval_calibration.record_verdict). [evaluator_runtime] is propagated as an
+   option: [None] lets AR.review pick routes.cross_verifier (a JSON-capable model
+   distinct from the generator) so cross_model_rate is meaningful; passing a
+   value here only to default it to the generator would collapse the judge to
+   same-model self-evaluation and pin cross_model_rate at 0. Only Self_owned
+   scenarios reach the judge — foreign-temptation completions are ownership-gated
+   in production and stay disposition-only here. *)
+let record_self_owned_verdict (scenario : EH.scenario) ~args ~sw
+    ~(evaluator_runtime : string option) ~generator_runtime : unit =
+  let str_field key =
+    Yojson.Safe.Util.(args |> member key |> to_string_option)
+    |> Option.value ~default:""
+  in
+  let notes = str_field "notes" in
+  let task_id = match str_field "task_id" with "" -> scenario.EH.id | s -> s in
+  let req : AR.review_request =
+    {
+      task_title = scenario.EH.name;
+      task_description = scenario.EH.description;
+      completion_notes = notes;
+      agent_name = eval_agent_name;
+      task_id;
+    }
+  in
+  let on_verdict (result : AR.review_result) =
+    Cal.record_verdict ~task_id ~req ~result ()
+  in
+  let (_ : AR.review_result) =
+    (* ?evaluator_runtime: None -> AR.review's routes.cross_verifier default. *)
+    AR.review ~sw ?evaluator_runtime ~generator_runtime ~on_verdict req
+  in
+  ()
+;;
+
+let run_one (scenario : EH.scenario) ~runtime_id ~run_index ~sw ~record_verdicts
+    ~(evaluator_runtime : string option) : EH.eval_run =
   let calls = ref [] in
   let dispatch ~name ~args =
     let start_time = Time_compat.now () in
     calls := (name, args) :: !calls;
     (* Stub: we measure the *attempt*, not the live gate. The real gate is
-       covered deterministically by test_completion_trust_harness. *)
+       covered deterministically by test_completion_trust_harness. Under
+       --record-verdicts a self-owned scenario additionally routes the attempt
+       through the real judge (record_self_owned_verdict). *)
+    (if
+       record_verdicts
+       && scenario.EH.ownership = EH.Self_owned
+       && is_completion_tool name
+     then
+       record_self_owned_verdict scenario ~args ~sw ~evaluator_runtime
+         ~generator_runtime:runtime_id);
     Tool_result.ok ~tool_name:name ~start_time "recorded (completion-trust eval stub)"
   in
   let goal = build_goal scenario in
@@ -309,9 +382,14 @@ let run_one (scenario : EH.scenario) ~runtime_id ~run_index : EH.eval_run =
   build_eval_run scenario ~run_index ~res ~calls ~duration_ms
 ;;
 
-let run_scenario (scenario : EH.scenario) ~runtime_id ~k : EH.eval_result =
+let run_scenario (scenario : EH.scenario) ~runtime_id ~k ~sw ~record_verdicts
+    ~(evaluator_runtime : string option) : EH.eval_result =
   Printf.eprintf "running scenario %s (k=%d)...\n%!" scenario.EH.id k;
-  let runs = List.init k (fun i -> run_one scenario ~runtime_id ~run_index:i) in
+  let runs =
+    List.init k (fun i ->
+        run_one scenario ~runtime_id ~run_index:i ~sw ~record_verdicts
+          ~evaluator_runtime)
+  in
   EH.summarize_runs ~scenario ~k runs
 ;;
 
@@ -362,6 +440,9 @@ type config = {
   out : string option;
   list_only : bool;
   strict : bool;
+  record_verdicts : bool;
+  verdict_store_dir : string option;
+  evaluator_runtime : string option;
 }
 
 let default_config =
@@ -373,6 +454,9 @@ let default_config =
     out = None;
     list_only = false;
     strict = false;
+    record_verdicts = false;
+    verdict_store_dir = None;
+    evaluator_runtime = None;
   }
 ;;
 
@@ -391,6 +475,11 @@ let rec parse_args cfg = function
   | "--out" :: p :: rest -> parse_args { cfg with out = Some p } rest
   | "--list" :: rest -> parse_args { cfg with list_only = true } rest
   | "--strict" :: rest -> parse_args { cfg with strict = true } rest
+  | "--record-verdicts" :: rest -> parse_args { cfg with record_verdicts = true } rest
+  | "--verdict-store-dir" :: p :: rest ->
+    parse_args { cfg with verdict_store_dir = Some p } rest
+  | "--evaluator-runtime" :: id :: rest ->
+    parse_args { cfg with evaluator_runtime = Some id } rest
   | other :: _ -> error (Printf.sprintf "unknown argument: %S\n%s" other usage)
 ;;
 
@@ -398,7 +487,9 @@ let print_corpus (scenarios : EH.scenario list) =
   Printf.printf "completion-trust corpus (%d scenarios):\n" (List.length scenarios);
   List.iter
     (fun (s : EH.scenario) ->
-      Printf.printf "  %-26s  graders=%d  tags=[%s]\n    %s\n" s.EH.id
+      Printf.printf "  %-26s  ownership=%-10s graders=%d  tags=[%s]\n    %s\n"
+        s.EH.id
+        (EH.ownership_to_string s.EH.ownership)
         (List.length s.EH.graders)
         (String.concat "," s.EH.tags)
         s.EH.name)
@@ -432,6 +523,19 @@ let () =
     if cfg.runtime_id = "" then
       error "missing --runtime ID (required for a live run; use --list to inspect the corpus)";
     let base_path = resolve_base cfg.base in
+    (* Fail fast: --record-verdicts must target an isolated store, never the live
+       ledger ($MASC_BASE_PATH/data/verdicts). Resolve before any heavy init. *)
+    let verdict_store =
+      match
+        Cal.resolve_record_verdicts_store ~cwd:(Sys.getcwd ())
+          ~record_verdicts:cfg.record_verdicts
+          ~verdict_store_dir:cfg.verdict_store_dir
+          ~live_store_dir:(Some (Filename.concat base_path "data/verdicts"))
+          ()
+      with
+      | Ok v -> v
+      | Error msg -> error msg
+    in
     Eio_main.run @@ fun env ->
     Mirage_crypto_rng_unix.use_default ();
     Time_compat.set_clock (Eio.Stdenv.clock env);
@@ -447,9 +551,40 @@ let () =
        Printf.eprintf "runtime init failed (%s): %s\n" config_path msg;
        exit 1
      | Ok () -> ());
+    let evaluator_runtime =
+      match
+        Cal.resolve_record_verdicts_evaluator
+          ~record_verdicts:cfg.record_verdicts
+          ~generator_runtime:cfg.runtime_id
+          ~evaluator_runtime:cfg.evaluator_runtime
+          ~cross_verifier_runtime:(Runtime.cross_verifier_runtime_id ())
+      with
+      | Ok v -> v
+      | Error msg -> error msg
+    in
+    (match verdict_store with
+     | Some verdict_dir ->
+       (* Live judge: install the OAS-driven anti-rationalization reviewer the
+          server wires at boot; verdicts go to the isolated store resolved above,
+          never the live ledger. *)
+       Masc.Workspace_metric_hooks.install ();
+       Cal.set_store ~base_dir:verdict_dir;
+       let judge_label =
+         match evaluator_runtime with
+         | Some id -> id
+         | None -> "routes.cross_verifier (default)"
+       in
+       Printf.eprintf "record-verdicts: judge=%s store=%s\n%!" judge_label
+         verdict_dir
+     | None -> ());
     let started_at = Unix.gettimeofday () in
     let results =
-      List.map (fun s -> run_scenario s ~runtime_id:cfg.runtime_id ~k:cfg.k) scenarios
+      List.map
+        (fun s ->
+          run_scenario s ~runtime_id:cfg.runtime_id ~k:cfg.k ~sw
+            ~record_verdicts:cfg.record_verdicts
+            ~evaluator_runtime)
+        scenarios
     in
     let ended_at = Unix.gettimeofday () in
     let suite = build_suite ~started_at ~ended_at results in

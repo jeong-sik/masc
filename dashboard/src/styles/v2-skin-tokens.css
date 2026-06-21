@@ -1,8 +1,9 @@
 /* ══════════════════════════════════════════════════════════════
    MASC v2 — High-contrast skin tokens
-   Loaded AFTER colors_and_type.css / global.css.
+   Loaded AFTER colors_and_type.css / global.css. The dark v2 token blocks
+   must yield to opt-in light themes; skin-v2.css carries the same guard.
    ══════════════════════════════════════════════════════════════ */
-[data-skin="v2"] {
+[data-skin="v2"]:not([data-theme="paper"]):not([data-theme="styleseed"]) {
   /* Surfaces — cool neutral charcoal, clean elevation steps */
   --bg-deep:        #08090d;
   --bg-panel:       #0f1015;
@@ -96,11 +97,11 @@
   --fs-t4: 9px;  --fw-t4: 600; --tr-t4: 0.2em;     /* dim · UPPER */
 }
 
-[data-skin="v2"][data-volt="blood"] {
+[data-skin="v2"][data-volt="blood"]:not([data-theme="paper"]):not([data-theme="styleseed"]) {
   --volt: var(--accent-blood); --volt-strong: #ff6a4d; --volt-dim: var(--accent-blood-dim);
   --volt-ink: #ffffff; --volt-glow: rgba(232,71,47,0.26); --volt-wash: rgba(232,71,47,0.10);
 }
-[data-skin="v2"][data-volt="ice"] {
+[data-skin="v2"][data-volt="ice"]:not([data-theme="paper"]):not([data-theme="styleseed"]) {
   --volt: var(--accent-ice); --volt-strong: #7ad8f6; --volt-dim: var(--accent-ice-dim);
   --volt-ink: #04121a; --volt-glow: rgba(70,198,240,0.24); --volt-wash: rgba(70,198,240,0.09);
   /* primary is now cyan → shift the info accent to violet to stay distinct */
@@ -110,4 +111,3 @@
 /* Ensure the skinned root/html/body fill the viewport. */
 [data-skin="v2"],
 [data-skin="v2"] body { height: 100%; }
-

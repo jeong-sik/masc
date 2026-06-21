@@ -11,6 +11,8 @@ import { RichComposer } from '../common/rich-composer'
 import { RichContent } from '../common/rich-content'
 import { TextInput } from '../common/input'
 import { stripStateBlocks } from '../../keeper-message'
+import { TurnInspectorDrawer } from '../keeper-turn-inspector-drawer'
+import { findKeeper } from '../../lib/keeper-utils'
 import { route } from '../../router'
 import { votePost, voteComment } from '../../api/board'
 import { ModerationBadge } from './moderation-badge'
@@ -551,6 +553,18 @@ export function PostDetail({ post }: { post: BoardPost }) {
   const auditLabel = postVisibilityAuditLabel(post)
   const focusedCommentId = cleanCommentRouteParam((route.value.params as Record<string, string | undefined>).comment)
 
+  // RFC-0233 §7: a board post minted from a keeper turn carries origin.turn_ref.
+  // When present, surface a "턴" affordance that opens the originating turn in
+  // the shared turn inspector (which self-fetches the keeper's turn records by
+  // keeperName). Resolve the author keeper the same way navigateToAuthor does.
+  const [turnInspectorOpen, setTurnInspectorOpen] = useState(false)
+  const originTurnRef = post.origin?.turn_ref ?? null
+  const originKeeper =
+    post.author_identity?.kind === 'keeper'
+      ? findKeeper(post.author_identity.id) ?? findKeeper(post.author_identity.raw) ?? findKeeper(post.author)
+      : findKeeper(post.author)
+  const turnKeeperName = originKeeper?.name ?? post.author
+
   return html`
     <div>
       <${ActionButton}
@@ -582,6 +596,16 @@ export function PostDetail({ post }: { post: BoardPost }) {
               aria-label=${postVoteAria}
               title=${postVoteLabel}
             >${postVoteLabel}</span>
+            ${originTurnRef
+              ? html`<${ActionButton}
+                  variant="subtle"
+                  size="sm"
+                  class="text-2xs text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] bg-transparent border-none p-0"
+                  title=${`이 글을 만든 원본 턴 검사 (${originTurnRef})`}
+                  ariaLabel="원본 턴 검사"
+                  onClick=${() => setTurnInspectorOpen(true)}
+                >🔎 턴<//>`
+              : null}
           </div>
 
           <div
@@ -669,6 +693,14 @@ export function PostDetail({ post }: { post: BoardPost }) {
           <${CommentForm} postId=${post.id} />
         <//>
       </div>
+      <${TurnInspectorDrawer}
+        testId="board-post-turn-inspector"
+        keeperName=${turnKeeperName}
+        subtitle=${originTurnRef ? `원본 턴 · ${originTurnRef}` : null}
+        initialTurnRef=${originTurnRef}
+        open=${turnInspectorOpen}
+        onClose=${() => setTurnInspectorOpen(false)}
+      />
     </div>
   `
 }

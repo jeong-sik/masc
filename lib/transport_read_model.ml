@@ -184,15 +184,27 @@ let websocket_discovery_json (ctx : http_context) =
   let enabled = Transport_metrics.ws_enabled () in
   let port = Env_config.Transport.ws_port in
   let standalone_listening = Transport_metrics.ws_listening () in
-  let listening = standalone_listening in
   let standalone_bind_host = Masc_network_defaults.masc_http_default_host in
   let request_host_can_reach_standalone = is_loopback_host ctx.host in
-  let reachable =
-    request_host_can_reach_standalone && (listening || tcp_port_reachable port)
+  let standalone_reachable =
+    request_host_can_reach_standalone
+    && (standalone_listening || tcp_port_reachable port)
   in
   let standalone_ws_url = Printf.sprintf "ws://%s:%d/" standalone_bind_host port in
+  let same_origin_upgrade_enabled = Transport_metrics.ws_same_origin_ready () in
+  let same_origin_ws_url = websocket_url_from_base_url ctx.base_url in
+  let listening = standalone_listening || same_origin_upgrade_enabled in
+  let reachable = standalone_reachable || same_origin_upgrade_enabled in
   let discovered_ws_url =
-    if request_host_can_reach_standalone then `String standalone_ws_url else `Null
+    if same_origin_upgrade_enabled then `String same_origin_ws_url
+    else if request_host_can_reach_standalone then `String standalone_ws_url
+    else `Null
+  in
+  let primary_mode =
+    if same_origin_upgrade_enabled then "same_origin" else "standalone"
+  in
+  let primary_upgrade_path =
+    if same_origin_upgrade_enabled then "/ws" else "/"
   in
   let base_fields =
     [ "enabled", `Bool enabled ]
@@ -200,13 +212,15 @@ let websocket_discovery_json (ctx : http_context) =
     @ [ "listening", `Bool listening
       ; "reachable", `Bool reachable
       ; "listen_status", `String (Atomic.get Transport_metrics.ws_listen_status)
-      ; "mode", `String "standalone"
+      ; "mode", `String primary_mode
       ; "discovery_path", `String "/ws"
-      ; "upgrade_path", `String "/"
+      ; "upgrade_path", `String primary_upgrade_path
       ; "standalone_listening", `Bool standalone_listening
       ; "standalone_bind_host", `String standalone_bind_host
       ; "request_host", `String ctx.host
       ; "request_host_can_reach_standalone", `Bool request_host_can_reach_standalone
+      ; "same_origin_listening", `Bool same_origin_upgrade_enabled
+      ; "same_origin_reachable", `Bool same_origin_upgrade_enabled
       ; "session_count", `Int (get_ws_session_count ())
       ]
   in
@@ -218,12 +232,14 @@ let websocket_discovery_json (ctx : http_context) =
         ; "ws_url", discovered_ws_url
         ; "standalone_ws_port", `Int port
         ; "standalone_ws_url", `String standalone_ws_url
-        ; "same_origin_upgrade_enabled", `Bool false
+        ; "same_origin_upgrade_enabled", `Bool same_origin_upgrade_enabled
         ; "same_origin_upgrade_path", `String "/ws"
-        ; "same_origin_ws_url", `String (websocket_url_from_base_url ctx.base_url)
+        ; "same_origin_ws_url", `String same_origin_ws_url
         ]
       @
-      (if request_host_can_reach_standalone
+      (if discovered_ws_url <> `Null
+       then []
+       else if request_host_can_reach_standalone
        then []
        else [ "unavailable_reason", `String "standalone_ws_loopback_only" ])
     else base_fields

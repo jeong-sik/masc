@@ -29,6 +29,13 @@ import {
 } from './schemas/dashboard-config'
 import { parseLogsResponse, type LogEntry, type LogsResponse } from './schemas/logs'
 import {
+  parseRuntimeDefaultsResponse,
+  type RuntimeDefaultsResponse,
+  type RuntimeEntry,
+  type KeeperAssignment,
+  type ModelRouting,
+} from './schemas/runtime-defaults'
+import {
   parseProviderLogTailResponse,
   parseProviderLogsCatalogResponse,
   type ProviderLogCatalogEntry,
@@ -115,6 +122,8 @@ function decodeDashboardFeedMetadata(raw: Record<string, unknown>): DashboardFee
 
 export type { LogEntry, LogsResponse }
 export { LogsSchemaDriftError } from './schemas/logs'
+export { RuntimeDefaultsSchemaDriftError } from './schemas/runtime-defaults'
+export type { RuntimeDefaultsResponse, RuntimeEntry, KeeperAssignment, ModelRouting }
 export type {
   ProviderLogCatalogEntry,
   ProviderLogsCatalogResponse,
@@ -128,6 +137,7 @@ export async function fetchLogs(opts?: {
   level?: string
   module?: string
   since_seq?: number
+  before_seq?: number
   category?: string
   exclude_category?: string
 }): Promise<LogsResponse> {
@@ -137,6 +147,9 @@ export async function fetchLogs(opts?: {
   if (opts?.module) params.set('module', opts.module)
   if (typeof opts?.since_seq === 'number' && opts.since_seq >= 0) {
     params.set('since_seq', String(opts.since_seq))
+  }
+  if (typeof opts?.before_seq === 'number' && opts.before_seq >= 0) {
+    params.set('before_seq', String(opts.before_seq))
   }
   if (opts?.category) params.set('category', opts.category)
   if (opts?.exclude_category) params.set('exclude_category', opts.exclude_category)
@@ -278,8 +291,13 @@ export async function fetchFusionRuns(
   return parseFusionRunsResponse(raw)
 }
 
-export function fetchDashboardExecution(opts?: AbortableRequestOptions): Promise<DashboardExecutionResponse> {
-  return get('/api/v1/dashboard/execution', { signal: opts?.signal })
+type DashboardExecutionRequestOptions = AbortableRequestOptions & {
+  force?: boolean
+}
+
+export function fetchDashboardExecution(opts?: DashboardExecutionRequestOptions): Promise<DashboardExecutionResponse> {
+  const query = opts?.force ? '?force=1' : ''
+  return get(`/api/v1/dashboard/execution${query}`, { signal: opts?.signal })
 }
 
 export type DashboardExecutionTrustKeeper = Record<string, unknown> & {
@@ -474,6 +492,16 @@ function normalizeKeeperApprovalRule(raw: unknown): KeeperApprovalRule | null {
   }
 }
 
+function normalizeHitlStatus(raw: unknown): DashboardGovernanceResponse['hitl'] | undefined {
+  if (!isRecord(raw)) return undefined
+  return {
+    enabled: asBoolean(raw.enabled) ?? false,
+    disabled_by_env: asBoolean(raw.disabled_by_env) ?? false,
+    env_name: asString(raw.env_name, 'MASC_DISABLE_HITL'),
+    default_enabled: asBoolean(raw.default_enabled) ?? true,
+  }
+}
+
 export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse> {
   return withRetries('fetchDashboardGovernance', async () => {
     const raw = await get<Record<string, unknown>>('/api/v1/dashboard/governance')
@@ -539,6 +567,7 @@ export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse>
       pending_actions: pendingActions,
       approval_queue: approvalQueue,
       approval_rules: approvalRules,
+      hitl: normalizeHitlStatus(raw.hitl),
     }
   })
 }
@@ -561,6 +590,28 @@ export function deleteGovernanceApprovalRule(
   id: string,
 ): Promise<{ ok: boolean; id: string }> {
   return post('/api/v1/dashboard/governance/approvals/rules/delete', { id })
+}
+
+export type DashboardScheduleDecision = 'approve' | 'reject'
+
+export interface DashboardScheduleResolveResponse {
+  ok: boolean
+  schedule_id: string
+  decision: DashboardScheduleDecision
+  approved_by?: unknown
+  schedule?: unknown
+}
+
+export function resolveScheduleApproval(
+  scheduleId: string,
+  decision: DashboardScheduleDecision,
+  reason?: string,
+): Promise<DashboardScheduleResolveResponse> {
+  return post('/api/v1/dashboard/schedule/resolve', {
+    schedule_id: scheduleId,
+    decision,
+    reason,
+  })
 }
 
 export function fetchGovernanceCaseStatus(caseId: string): Promise<GovernanceCaseBundle> {
@@ -1814,12 +1865,28 @@ export interface DashboardScheduledAutomationExecution {
   error?: string | null
 }
 
+export interface DashboardScheduledAutomationKeeperToolStatus {
+  name: string
+  registered_schema?: boolean
+  dispatch_registered?: boolean
+  direct_call_allowed?: boolean
+  visibility?: string
+  surfaces?: string[]
+  surface_count?: number
+  effect_domain?: string | null
+  read_only?: boolean | null
+  requires_actor_binding?: boolean | null
+}
+
 export interface DashboardScheduledAutomationRequest {
   schedule_id: string
   status: string
   effective_status?: string
   execution_readiness?: string
   operator_action?: string | null
+  keeper_next_tool?: string | null
+  keeper_next_tool_status?: DashboardScheduledAutomationKeeperToolStatus | null
+  keeper_next_action?: string | null
   risk_class: string
   approval_required: boolean
   source: string
@@ -1843,10 +1910,20 @@ export interface DashboardScheduledAutomationRequest {
   expires_at_iso?: string | null
   payload_digest?: string
   payload_kind?: string | null
+  payload_support?: 'supported' | 'unsupported' | 'unknown'
+  payload_target?: string | null
+  payload_summary?: string | null
   recurrence_summary?: string | null
   requires_separate_human_grant?: boolean
   approval_policy?: string | null
   last_execution?: DashboardScheduledAutomationExecution | null
+}
+
+export interface DashboardScheduledAutomationPayloadSupport {
+  supported_kinds?: string[]
+  unsupported_request_count?: number
+  unsupported_kinds?: Array<{ kind: string; count: number }>
+  unknown_request_count?: number
 }
 
 export interface DashboardScheduledAutomation {
@@ -1858,6 +1935,7 @@ export interface DashboardScheduledAutomation {
   truncated: boolean
   counts: Record<string, number>
   derived_counts?: Record<string, number>
+  payload_support?: DashboardScheduledAutomationPayloadSupport
   fsm: DashboardScheduledAutomationFsm
   requests: DashboardScheduledAutomationRequest[]
 }
@@ -2453,6 +2531,16 @@ export async function fetchRuntimeTomlConfig(): Promise<RuntimeTomlConfig> {
   return get<unknown>('/api/v1/runtime/config/raw').then(normalizeRuntimeTomlConfig)
 }
 
+// Structured, already-resolved runtime defaults / model routing (runtime.toml
+// SSOT). Public read — no credentials, no raw TOML; the Settings surface
+// consumes this instead of re-parsing TOML on the client.
+export async function fetchRuntimeDefaults(
+  opts?: AbortableRequestOptions,
+): Promise<RuntimeDefaultsResponse> {
+  const raw = await get<unknown>('/api/v1/dashboard/runtime-defaults', { signal: opts?.signal })
+  return parseRuntimeDefaultsResponse(raw)
+}
+
 export async function saveRuntimeTomlConfig(sourceText: string): Promise<RuntimeTomlConfig> {
   await ensureDevToken()
   return post<unknown>('/api/v1/runtime/config/raw', {
@@ -2769,7 +2857,7 @@ export type ToolCallEntry = {
   input: unknown
   output: string | ToolCallOutputBlob
   success: boolean
-  duration_ms: number
+  duration_ms: number | null
   model?: string
   trace_id?: string
   session_id?: string
@@ -2840,7 +2928,7 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     input: raw.input,
     output: decodeToolCallOutput(raw.output),
     success: asBoolean(raw.success, false),
-    duration_ms: asNumber(raw.duration_ms, 0),
+    duration_ms: asNumber(raw.duration_ms) ?? null,
     model: asString(raw.model),
     trace_id: asString(raw.trace_id),
     session_id: asString(raw.session_id),
@@ -2901,6 +2989,11 @@ export type TurnRecordEntry = {
   absolute_turn: number
   blocks: TurnBlock[]
   runtime_profile: string
+  // RFC-0233 §2.3 — grounded from the backend turn record (boundary-redacted
+  // model label + keeper stop reason). Absent (undefined) on error turns and
+  // pre-grounding rows; the inspector renders absence, never a fabricated value.
+  model?: string
+  finish_reason?: string
   temperature?: number
   thinking_budget?: number
   enable_thinking?: boolean
@@ -2961,12 +3054,42 @@ export type MemoryOsTurnRecordSnapshot = {
   }
 }
 
+export type KeeperUserModelItem = {
+  claim: string
+  category: string
+  source: 'keeper' | 'shared' | string
+  observed_by: string[]
+  turn: number
+  first_seen: number
+  first_seen_iso: string | null
+  last_verified_at: number | null
+  last_verified_at_iso: string | null
+}
+
+export type KeeperUserModelSnapshot = {
+  schema: string
+  keeper: string
+  source: string
+  producer: string
+  facts_store: string
+  shared_facts_store: string
+  enabled: boolean
+  now: number | null
+  now_iso: string | null
+  read_errors: { scope: string; error: string }[]
+  source_fact_count: number
+  shared_fact_count: number
+  preferences: KeeperUserModelItem[]
+  constraints: KeeperUserModelItem[]
+}
+
 export type TurnRecordsResponse = TelemetryFreshnessMetadata & {
   keeper: string
   count: number
   // malformed JSONL rows the server refused to decode (never repaired)
   skipped_rows: number
   memory_os: MemoryOsTurnRecordSnapshot | null
+  user_model: KeeperUserModelSnapshot | null
   entries: TurnRecordRow[]
 }
 
@@ -3005,6 +3128,8 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     absolute_turn,
     blocks: decodeTurnBlockList(raw.blocks),
     runtime_profile,
+    model: asString(raw.model),
+    finish_reason: asString(raw.finish_reason),
     temperature: asNumber(raw.temperature),
     thinking_budget: asNumber(raw.thinking_budget),
     enable_thinking: typeof raw.enable_thinking === 'boolean' ? raw.enable_thinking : undefined,
@@ -3119,6 +3244,68 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
   }
 }
 
+function decodeKeeperUserModelItem(raw: unknown): KeeperUserModelItem | null {
+  if (!isRecord(raw)) return null
+  const claim = asString(raw.claim)
+  const category = asString(raw.category)
+  const source = asString(raw.source)
+  const turn = asNumber(raw.turn)
+  const first_seen = asNumber(raw.first_seen)
+  if (!claim || !category || !source || turn == null || first_seen == null) {
+    return null
+  }
+  return {
+    claim,
+    category,
+    source,
+    observed_by: normalizeStringList(raw.observed_by),
+    turn,
+    first_seen,
+    first_seen_iso: asNullableString(raw.first_seen_iso),
+    last_verified_at: asNumber(raw.last_verified_at) ?? null,
+    last_verified_at_iso: asNullableString(raw.last_verified_at_iso),
+  }
+}
+
+function decodeKeeperUserModelSnapshot(raw: unknown): KeeperUserModelSnapshot | null {
+  if (!isRecord(raw)) return null
+  const schema = asString(raw.schema)
+  const keeper = asString(raw.keeper)
+  const source = asString(raw.source)
+  const producer = asString(raw.producer)
+  const facts_store = asString(raw.facts_store)
+  const shared_facts_store = asString(raw.shared_facts_store)
+  if (!schema || !keeper || !source || !producer || !facts_store || !shared_facts_store) {
+    return null
+  }
+  return {
+    schema,
+    keeper,
+    source,
+    producer,
+    facts_store,
+    shared_facts_store,
+    enabled: asBoolean(raw.enabled, true) ?? true,
+    now: asNumber(raw.now) ?? null,
+    now_iso: asNullableString(raw.now_iso),
+    read_errors: asRecordArray(raw.read_errors)
+      .map((item) => {
+        const scope = asString(item.scope)
+        const error = asString(item.error)
+        return scope && error ? { scope, error } : null
+      })
+      .filter((item): item is { scope: string; error: string } => item !== null),
+    source_fact_count: asNumber(raw.source_fact_count, 0) ?? 0,
+    shared_fact_count: asNumber(raw.shared_fact_count, 0) ?? 0,
+    preferences: asRecordArray(raw.preferences)
+      .map(decodeKeeperUserModelItem)
+      .filter((item): item is KeeperUserModelItem => item !== null),
+    constraints: asRecordArray(raw.constraints)
+      .map(decodeKeeperUserModelItem)
+      .filter((item): item is KeeperUserModelItem => item !== null),
+  }
+}
+
 function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
   if (!isRecord(raw)) return null
   const keeper = asString(raw.keeper)
@@ -3129,6 +3316,7 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
     count: asNumber(raw.count, 0),
     skipped_rows: asNumber(raw.skipped_rows, 0),
     memory_os: decodeMemoryOsSnapshot(raw.memory_os),
+    user_model: decodeKeeperUserModelSnapshot(raw.user_model),
     entries: asRecordArray(raw.entries)
       .map(decodeTurnRecordRow)
       .filter((row): row is TurnRecordRow => row !== null),
@@ -3147,6 +3335,80 @@ export function fetchKeeperTurnRecords(
   ).then((raw) => {
     const decoded = decodeTurnRecordsResponse(raw)
     if (!decoded) throw new Error('유효하지 않은 keeper turn record payload')
+    return decoded
+  })
+}
+
+// ── Keeper turn transcript (RFC-0233 §7) ────────────────
+// The operator request + keeper response for one turn, joined server-side
+// on the turn_ref "<trace_id>#<absolute_turn>". Lazily fetched by the turn
+// inspector so the transcript (which can be large) never bloats the
+// turn-records list. Content is the same load-time redacted view the chat
+// history endpoint serves (RFC-0132); `found` is false when no persisted
+// row carries the requested turn_ref, in which case the inspector renders
+// explicit absence rather than a fabricated transcript.
+
+export type TurnTranscriptLine = {
+  role: string
+  content: string
+  ts?: number
+  // Writer-declared row kind; present (e.g. 'transport_failure') only on
+  // non-utterance assistant rows so the inspector can mark a failed reply
+  // distinctly rather than quoting it as the keeper's own words.
+  kind?: string
+}
+
+export type TurnTranscript = {
+  keeper: string
+  turn_ref: string
+  found: boolean
+  source: string
+  user: TurnTranscriptLine[]
+  assistant: TurnTranscriptLine[]
+}
+
+function decodeTurnTranscriptLine(raw: unknown): TurnTranscriptLine | null {
+  if (!isRecord(raw)) return null
+  const role = asString(raw.role)
+  if (!role) return null
+  return {
+    role,
+    content: asString(raw.content) ?? '',
+    ts: asNumber(raw.ts),
+    kind: asString(raw.kind),
+  }
+}
+
+function decodeTurnTranscript(raw: unknown): TurnTranscript | null {
+  if (!isRecord(raw)) return null
+  const keeper = asString(raw.keeper)
+  const turn_ref = asString(raw.turn_ref)
+  if (!keeper || !turn_ref) return null
+  const decodeLines = (value: unknown): TurnTranscriptLine[] =>
+    asRecordArray(value)
+      .map(decodeTurnTranscriptLine)
+      .filter((line): line is TurnTranscriptLine => line !== null)
+  return {
+    keeper,
+    turn_ref,
+    found: asBoolean(raw.found, false) ?? false,
+    source: asString(raw.source) ?? 'keeper_chat_store',
+    user: decodeLines(raw.user),
+    assistant: decodeLines(raw.assistant),
+  }
+}
+
+export function fetchKeeperTurnTranscript(
+  name: string,
+  turnRef: string,
+  opts?: AbortableRequestOptions,
+): Promise<TurnTranscript> {
+  return get<Record<string, unknown>>(
+    `/api/v1/keepers/${encodeURIComponent(name)}/turn-transcript?turn_ref=${encodeURIComponent(turnRef)}`,
+    { signal: opts?.signal },
+  ).then((raw) => {
+    const decoded = decodeTurnTranscript(raw)
+    if (!decoded) throw new Error('유효하지 않은 keeper turn transcript payload')
     return decoded
   })
 }
@@ -3457,6 +3719,56 @@ export interface MemorySubsystemsMemoryEntryError {
   error_class: string
 }
 
+export interface MemorySubsystemsUserModelItem {
+  keeper: string
+  kind: 'preference' | 'constraint' | string
+  claim: string
+  source_ref: string
+  source_trace_id: string
+  source_turn: number
+  first_seen: number
+  last_verified_at: number | null
+  observed_by: string[]
+}
+
+export interface MemorySubsystemsUserModelError {
+  keeper: string
+  error: string
+}
+
+export interface MemorySubsystemsUserModelPrompt {
+  enabled: boolean
+  block_id: string
+  injection: string
+  runtime_hook: string
+  producer?: string
+}
+
+export interface MemorySubsystemsDraftSkillCandidate {
+  id: string
+  agent_name: string
+  source_kind: string
+  source_ref: string
+  promotion_state: string
+  dir: string
+  json_path: string
+  toml_path: string
+  skill_md_path: string
+  created_at: number | null
+}
+
+export interface MemorySubsystemsDelegationRequest {
+  id: string
+  requester: string
+  topic: string
+  goal: string | null
+  promotion_state: string
+  dir: string
+  json_path: string
+  task_seed_md_path: string
+  created_at: number | null
+}
+
 export interface MemorySubsystemsResponse {
   generated_at: string
   hebbian: {
@@ -3481,6 +3793,33 @@ export interface MemorySubsystemsResponse {
      *  the corresponding rows are absent from `items`; the rest of
      *  `items` is still trustworthy. */
     errors?: MemorySubsystemsMemoryEntryError[]
+  }
+  user_model?: {
+    schema: string
+    source: string
+    prompt?: MemorySubsystemsUserModelPrompt
+    total: number
+    filtered: number
+    shown: number
+    limit: number
+    items: MemorySubsystemsUserModelItem[]
+    errors?: MemorySubsystemsUserModelError[]
+  }
+  draft_skill_candidates?: {
+    total: number
+    shown: number
+    limit: number
+    index_path: string
+    items: MemorySubsystemsDraftSkillCandidate[]
+    error?: string | null
+  }
+  delegation_requests?: {
+    total: number
+    shown: number
+    limit: number
+    index_path: string
+    items: MemorySubsystemsDelegationRequest[]
+    error?: string | null
   }
   filters: {
     keepers: string[]
@@ -3512,6 +3851,37 @@ export function fetchMemorySubsystems(
     `/api/v1/dashboard/memory-subsystems${qs ? `?${qs}` : ''}`,
     { signal: opts?.signal },
   )
+}
+
+// --- Keeper Memory Health ---
+
+export interface KeeperMemoryHealthKeeperEntry {
+  keeper_id: string
+  facts: number
+  facts_bytes: number
+  events: number
+  events_bytes: number
+  events_to_facts_ratio: number
+  ttl_expired_on_disk: number
+  near_duplicate: number
+  external_ref: number
+}
+
+export interface KeeperMemoryHealthResponse {
+  generated_at: number
+  cadence_counter_entries: number
+  keepers: KeeperMemoryHealthKeeperEntry[]
+  totals: {
+    facts: number
+    facts_bytes: number
+    events_bytes: number
+    ttl_expired_on_disk: number
+    near_duplicate: number
+  }
+}
+
+export function fetchKeeperMemoryHealth(): Promise<KeeperMemoryHealthResponse> {
+  return get<KeeperMemoryHealthResponse>('/api/v1/dashboard/keeper-memory-health')
 }
 
 // --- Verification requests (Mission detail table) ---

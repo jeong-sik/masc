@@ -454,6 +454,10 @@ let observed_triggers_of_observation
   let _ = meta in
   if observation.pending_verification_count > 0 then
     add "pending_verification";
+  if observation.scheduled_automation.due_ready_count > 0 then
+    add "scheduled_automation_due_ready";
+  if observation.scheduled_automation.blocked_approval_count > 0 then
+    add "scheduled_automation_blocked_approval";
   if observation.active_goals <> [] && observation.idle_seconds > 0 then
     add "idle_timeout_candidate";
   List.rev !triggers
@@ -477,6 +481,10 @@ let observed_affordances_of_observation
   if observation.failed_task_count > 0 then add "task_audit";
   if observation.pending_verification_count > 0 then
     add "task_verify";
+  if observation.scheduled_automation.due_ready_count > 0 then
+    add "schedule_dispatch_monitor";
+  if observation.scheduled_automation.blocked_approval_count > 0 then
+    add "schedule_grant_followup";
   List.rev !affordances
 
 let response_requests_confirmation (text : string) : bool =

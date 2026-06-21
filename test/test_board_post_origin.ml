@@ -131,6 +131,45 @@ let test_malformed_origin_preserves_post () =
   | None -> Alcotest.fail "row dropped on malformed turn_ref (must be preserved)"
 ;;
 
+(* Producer side (RFC-0233 §7): the keeper-authored origin constructor used by
+   keeper_speech (request-help posts) and keeper_alert. Pins that a keeper post
+   carries [origin.turn_ref = Some _] and a typed [source], with
+   [fusion_run_id = None] (fusion has its own constructor at the sink). *)
+let test_keeper_authored_origin_with_turn_ref () =
+  let tr = Ids.Turn_ref.make ~trace_id:"keeper-trace" ~absolute_turn:7 in
+  let origin = Board.keeper_authored_origin ~source:"keeper_speech" ~turn_ref:tr () in
+  Alcotest.(check (option string)) "source set" (Some "keeper_speech") origin.source;
+  Alcotest.(check (option string))
+    "turn_ref threaded" (Some "keeper-trace#7")
+    (Option.map Ids.Turn_ref.to_string origin.turn_ref);
+  Alcotest.(check bool) "fusion_run_id None" true (Option.is_none origin.fusion_run_id);
+  (* End-to-end: the post created with this origin carries turn_ref through the
+     board codec (create -> encode -> decode). *)
+  let store = Board_core.create_store () in
+  let post = create store ~origin ~content:"keeper speech request-help" in
+  let decoded =
+    match decode (Board_core.post_to_yojson post) with
+    | Some p -> p
+    | None -> Alcotest.fail "encode/decode dropped the keeper post"
+  in
+  match decoded.origin with
+  | Some (o : Board.post_origin) ->
+    Alcotest.(check (option string))
+      "post carries turn_ref" (Some "keeper-trace#7")
+      (Option.map Ids.Turn_ref.to_string o.turn_ref);
+    Alcotest.(check (option string)) "post carries source" (Some "keeper_speech") o.source
+  | None -> Alcotest.fail "keeper post origin lost in round trip"
+;;
+
+let test_keeper_authored_origin_without_turn_ref () =
+  (* Scoped-down path (e.g. keeper_alert): origin is present with a typed source
+     but no fabricated turn_ref. *)
+  let origin = Board.keeper_authored_origin ~source:"keeper_alert" () in
+  Alcotest.(check (option string)) "source set" (Some "keeper_alert") origin.source;
+  Alcotest.(check bool) "turn_ref None (not fabricated)" true (Option.is_none origin.turn_ref);
+  Alcotest.(check bool) "fusion_run_id None" true (Option.is_none origin.fusion_run_id)
+;;
+
 let test_index_lookup_hit_and_miss () =
   let store = Board_core.create_store () in
   let tr = Ids.Turn_ref.make ~trace_id:"idx-trace" ~absolute_turn:9 in
@@ -199,6 +238,14 @@ let () =
             "malformed origin -> None, post preserved"
             `Quick
             (with_eio test_malformed_origin_preserves_post)
+        ; Alcotest.test_case
+            "keeper-authored origin carries turn_ref"
+            `Quick
+            (with_eio test_keeper_authored_origin_with_turn_ref)
+        ; Alcotest.test_case
+            "keeper-authored origin without turn_ref (scoped)"
+            `Quick
+            (with_eio test_keeper_authored_origin_without_turn_ref)
         ] )
     ; ( "index"
       , [ Alcotest.test_case

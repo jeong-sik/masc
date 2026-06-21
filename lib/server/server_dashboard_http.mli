@@ -92,6 +92,12 @@ val dashboard_governance_approval_rule_delete_http_json :
   args:Yojson.Safe.t ->
   (Yojson.Safe.t, string) result
 
+val dashboard_schedule_resolve_http_json :
+  config:Workspace_utils.config ->
+  operator_name:string ->
+  args:Yojson.Safe.t ->
+  (Yojson.Safe.t, string) result
+
 (** {1 Verification + planning + goals} *)
 
 val dashboard_verification_resolve_http_json :

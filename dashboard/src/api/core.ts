@@ -37,6 +37,34 @@ export interface StoredTokenMeta {
   scope?: string | null
 }
 
+export interface StoredTokenChange {
+  token: string | null
+  meta: StoredTokenMeta | null
+}
+
+type StoredTokenChangeListener = (change: StoredTokenChange) => void
+
+const storedTokenChangeListeners = new Set<StoredTokenChangeListener>()
+
+function notifyStoredTokenChange(change: StoredTokenChange): void {
+  for (const listener of storedTokenChangeListeners) {
+    try {
+      listener(change)
+    } catch (err) {
+      console.warn('[dashboard-auth] token change listener failed', err)
+    }
+  }
+}
+
+export function subscribeStoredTokenChanges(
+  listener: StoredTokenChangeListener,
+): () => void {
+  storedTokenChangeListeners.add(listener)
+  return () => {
+    storedTokenChangeListeners.delete(listener)
+  }
+}
+
 function normalizeStoredTokenMeta(value: unknown): StoredTokenMeta | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
   const record = value as Record<string, unknown>
@@ -50,6 +78,16 @@ function normalizeStoredTokenMeta(value: unknown): StoredTokenMeta | null {
       ? record.scope.trim()
       : null
   return { source: source as StoredTokenSource, actor, scope }
+}
+
+function storedTokenMetaEquals(
+  left: StoredTokenMeta | null,
+  right: StoredTokenMeta | null,
+): boolean {
+  if (left === null || right === null) return left === right
+  return left.source === right.source
+    && (left.actor ?? null) === (right.actor ?? null)
+    && (left.scope ?? null) === (right.scope ?? null)
 }
 
 function initTokenFromUrl(): void {
@@ -98,6 +136,8 @@ export function setStoredToken(
     clearStoredToken()
     return
   }
+  const previousToken = getStoredToken()
+  const previousMeta = getStoredTokenMeta()
   const nextMeta = normalizeStoredTokenMeta({
     source: meta.source ?? DEFAULT_STORED_TOKEN_SOURCE,
     actor: meta.actor ?? null,
@@ -110,12 +150,26 @@ export function setStoredToken(
     sessionStorage.removeItem(TOKEN_META_STORAGE_KEY)
   }
   setCanonicalDashboardActor(null)
+  if (previousToken !== normalizedToken || !storedTokenMetaEquals(previousMeta, nextMeta)) {
+    notifyStoredTokenChange({
+      token: normalizedToken,
+      meta: nextMeta,
+    })
+  }
 }
 
 export function clearStoredToken(): void {
+  const previousToken = getStoredToken()
+  const previousMeta = getStoredTokenMeta()
   sessionStorage.removeItem(TOKEN_STORAGE_KEY)
   sessionStorage.removeItem(TOKEN_META_STORAGE_KEY)
   setCanonicalDashboardActor(null)
+  if (previousToken !== null || previousMeta !== null) {
+    notifyStoredTokenChange({
+      token: null,
+      meta: null,
+    })
+  }
 }
 
 export function isRemoteAccess(): boolean {

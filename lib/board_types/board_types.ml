@@ -161,6 +161,17 @@ type post_origin = {
   fusion_run_id: string option;
 }
 
+(* RFC-0233 §7: constructor for a keeper-authored post's origin. A keeper post
+   is the output of a specific keeper turn, so [turn_ref] is the turn-level join
+   key and [source] names the producing channel (e.g. "keeper_speech",
+   "keeper_alert"). [fusion_run_id] is always [None] here: fusion's
+   server-root-switch fork has its own constructor at the fusion sink. [turn_ref]
+   stays optional so callers that cannot reach a mint-once-safe turn reference
+   still set [source] (origin present, turn_ref absent) rather than fabricating
+   one. *)
+let keeper_authored_origin ?turn_ref ~source () : post_origin =
+  { turn_ref; source = Some source; fusion_run_id = None }
+
 type post = {
   id: Post_id.t;
   author: Agent_id.t;

@@ -226,6 +226,23 @@ describe('parseSSEMessage', () => {
     warnSpy.mockRestore()
   })
 
+  it('keeps fusion_run_status events so the RFC-0266 Phase 4 live panel refresh is not dropped', () => {
+    // Regression: the live WS router (sse-store.ts routeServerPushEvent ->
+    // SIMPLE_ROUTES['fusion_run_status'] -> refreshFusionRuns) only sees the event
+    // if it first passes this parse boundary. If this drops to null, the
+    // running -> completed/failed live flip silently stops working and the panel
+    // only updates on the periodic poll / tab re-navigation.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const msg = parseSSEMessage({
+      type: 'fusion_run_status',
+      run: { run_id: 'r1', keeper: 'k', preset: 'balanced', started_at: 10, status: 'running' },
+    })
+    expect(msg).not.toBeNull()
+    expect(msg?.type).toBe('fusion_run_status')
+    expect(warnSpy).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
+  })
+
   it('keeps unknown oas-prefixed events instead of dropping them', () => {
     const msg = parseSSEMessage({
       type: 'oas:slot_scheduler_observed',

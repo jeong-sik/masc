@@ -11,7 +11,10 @@ const appShellCss = readFileSync(appShellCssPath, 'utf-8')
 
 describe('paper-theme.css', () => {
   it('uses cascade layers rather than selector specificity to override v2 defaults', () => {
-    expect(appShellCss).toContain('@layer theme-defaults, theme-overrides;')
+    // Must NOT name a Tailwind-owned layer (utilities/base/components/theme);
+    // doing so reorders Tailwind's layers at build time. See #21846 regression
+    // guard in app-shell-v2-overlay-stacking.test.ts.
+    expect(appShellCss).toContain('@layer app-shell, theme-defaults, theme-overrides;')
     expect(paperCss).toContain('[data-theme="paper"] {')
     expect(paperCss).not.toContain('html[data-theme="paper"] {')
   })

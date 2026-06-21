@@ -107,11 +107,21 @@ let consolidate_into_shared ~now ~min_keepers contribs =
           (* The consolidation IS the verification of the shared fact. *)
         ; last_verified_at = Some now
         ; schema_version
+          (* RFC-0259 §3.7: carry the group's [claim_id] onto the promoted shared
+             fact. The group is keyed on [claim_identity] (see [promote_facts]), so
+             every contribution shares one identity and the representative's
+             [claim_id] is the group's. Without this the shared fact would key on
+             [normalize_claim] while the contributing keepers' private rows key on
+             [id:…], so recall's private-precedence dedup (recall.ml) and the user
+             model would fail to match across tiers and inject the same conclusion
+             twice. *)
+        ; claim_id = rep.fact.claim_id
         }
 ;;
 
 (* Pure core: given each keeper's Tier-1 facts, return the Tier-2 shared facts in
-   normalized-claim order. No IO, no clock read — [now] is injected. *)
+   claim-identity order (RFC-0259 §3.7 SSOT key). No IO, no clock read — [now] is
+   injected. *)
 let promote_facts ?(min_keepers = default_min_keepers) ~now ~keeper_facts () =
   let groups : (string, contribution list) Hashtbl.t = Hashtbl.create 256 in
   List.iter
@@ -120,7 +130,7 @@ let promote_facts ?(min_keepers = default_min_keepers) ~now ~keeper_facts () =
          (fun fact ->
             if eligible fact
             then (
-              let key = normalize_claim fact.claim in
+              let key = claim_identity fact in
               let prev = Option.value (Hashtbl.find_opt groups key) ~default:[] in
               Hashtbl.replace groups key ({ keeper_id; fact } :: prev)))
          facts)
@@ -135,6 +145,53 @@ let promote_facts ?(min_keepers = default_min_keepers) ~now ~keeper_facts () =
   considered, promoted
 ;;
 
+let sum ints = List.fold_left ( + ) 0 ints
+
+let source_fact_counts keeper_facts =
+  List.map
+    (fun (keeper_id, facts) ->
+       ( keeper_id
+       , List.length facts
+       , List.length (List.filter eligible facts) ))
+    keeper_facts
+
+let source_fact_counts_json counts =
+  `List
+    (List.map
+       (fun (keeper_id, facts, eligible_facts) ->
+          `Assoc
+            [ "keeper_id", `String keeper_id
+            ; "facts", `Int facts
+            ; "eligible_facts", `Int eligible_facts
+            ])
+       counts)
+
+let log_run_summary ~dry_run ~min_keepers ~source_ids ~keeper_facts ~considered ~promoted =
+  let counts = source_fact_counts keeper_facts in
+  let input_facts = sum (List.map (fun (_, facts, _) -> facts) counts) in
+  let eligible_facts = sum (List.map (fun (_, _, eligible_facts) -> eligible_facts) counts) in
+  let promoted_count = List.length promoted in
+  Log.Keeper.info
+    "memory os consolidator run dry_run=%b min_keepers=%d keepers=%d input_facts=%d eligible_facts=%d claims_considered=%d promoted=%d"
+    dry_run
+    min_keepers
+    (List.length source_ids)
+    input_facts
+    eligible_facts
+    considered
+    promoted_count;
+  if promoted_count = 0
+  then
+    Log.Keeper.warn
+      "memory os consolidator promoted_zero dry_run=%b min_keepers=%d keepers=%d input_facts=%d eligible_facts=%d claims_considered=%d source_counts=%s"
+      dry_run
+      min_keepers
+      (List.length source_ids)
+      input_facts
+      eligible_facts
+      considered
+      (Yojson.Safe.to_string (source_fact_counts_json counts))
+
 (* IO-driven entry: read each source keeper's Tier-1 store, consolidate, and
    (unless [dry_run]) rewrite the shared store atomically. The shared id itself
    is filtered out of the source list so a prior sweep's output is never folded
@@ -142,6 +199,11 @@ let promote_facts ?(min_keepers = default_min_keepers) ~now ~keeper_facts () =
 let run ?(dry_run = false) ?min_keepers ~keeper_ids ~now () =
   let source_ids =
     List.filter (fun id -> not (String.equal id shared_store_id)) keeper_ids
+  in
+  let min_keepers =
+    match min_keepers with
+    | Some value -> value
+    | None -> default_min_keepers
   in
   let run_unlocked () =
     let rec read_sources acc = function
@@ -152,11 +214,23 @@ let run ?(dry_run = false) ?min_keepers ~keeper_ids ~now () =
          | Error message -> Error message)
     in
     match read_sources [] source_ids with
-    | Error message -> invalid_arg ("memory os consolidation input invalid: " ^ message)
+    | Error message ->
+      Log.Keeper.warn
+        "memory os consolidator input_invalid keepers=%d error=%s"
+        (List.length source_ids)
+        message;
+      invalid_arg ("memory os consolidation input invalid: " ^ message)
     | Ok keeper_facts ->
       let considered, promoted =
-        promote_facts ?min_keepers ~now ~keeper_facts ()
+        promote_facts ~min_keepers ~now ~keeper_facts ()
       in
+      log_run_summary
+        ~dry_run
+        ~min_keepers
+        ~source_ids
+        ~keeper_facts
+        ~considered
+        ~promoted;
       if not dry_run then Io.rewrite_facts_atomically ~keeper_id:shared_store_id promoted;
       { keepers_scanned = List.length source_ids
       ; claims_considered = considered

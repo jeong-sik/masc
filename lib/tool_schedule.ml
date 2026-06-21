@@ -126,39 +126,152 @@ let actor_from_args args ~prefix ~default_id ~default_kind =
   else Ok Schedule_domain.{ id; kind; display_name }
 ;;
 
-let approved_by_from_args args =
-  let* id = required_string args "approved_by_id" in
+let has_arg args key = Option.is_some (Json_util.assoc_member_opt key args)
+
+let has_board_convenience_args args =
+  List.exists
+    (has_arg args)
+    [ "board_content"
+    ; "board_title"
+    ; "board_hearth"
+    ; "board_author"
+    ; "board_thread_id"
+    ; "board_ttl_hours"
+    ; "board_meta"
+    ]
+;;
+
+let optional_body_string args ~arg ~field fields =
+  match string_opt args arg with
+  | None -> Ok fields
+  | Some value -> Ok ((field, `String value) :: fields)
+;;
+
+let optional_body_int args ~arg ~field fields =
+  match Json_util.assoc_member_opt arg args with
+  | None -> Ok fields
+  | Some (`Int value) -> Ok ((field, `Int value) :: fields)
+  | Some _ -> Error (arg ^ " must be an integer")
+;;
+
+let optional_nonnegative_body_int args ~arg ~field fields =
+  match Json_util.assoc_member_opt arg args with
+  | None -> Ok fields
+  | Some (`Int value) when value >= 0 -> Ok ((field, `Int value) :: fields)
+  | Some (`Int _) -> Error (arg ^ " must be non-negative")
+  | Some _ -> Error (arg ^ " must be an integer")
+;;
+
+let optional_body_object args ~arg ~field fields =
+  match Json_util.assoc_member_opt arg args with
+  | None -> Ok fields
+  | Some (`Assoc _ as value) -> Ok ((field, value) :: fields)
+  | Some _ -> Error (arg ^ " must be an object")
+;;
+
+let board_post_payload_from_args args =
+  let* content = required_string args "board_content" in
+  let schema_version =
+    (* DET-OK: board_* is a stable convenience projection for the existing
+       masc.board_post v1 consumer. *)
+    optional_int args "payload_schema_version" |> Option.value ~default:1
+  in
+  if schema_version <> 1
+  then Error "board_* convenience fields only support payload_schema_version=1"
+  else
+    let* fields =
+      optional_body_string args ~arg:"board_title" ~field:"title"
+        [ "content", `String content ]
+    in
+    let* fields = optional_body_string args ~arg:"board_author" ~field:"author" fields in
+    let* fields = optional_body_string args ~arg:"board_hearth" ~field:"hearth" fields in
+    let* fields = optional_body_string args ~arg:"board_thread_id" ~field:"thread_id" fields in
+    let* fields =
+      optional_nonnegative_body_int args ~arg:"board_ttl_hours" ~field:"ttl_hours" fields
+    in
+    let* fields = optional_body_object args ~arg:"board_meta" ~field:"meta" fields in
+    Ok
+      (`Assoc
+        [ "kind", `String "masc.board_post"
+        ; "schema_version", `Int schema_version
+        ; "body", `Assoc (List.rev fields)
+        ])
+;;
+
+let generic_payload_from_args args =
+  let* kind = required_string args "payload_kind" in
+  let schema_version =
+    (* DET-OK: absent schema_version means the stable schedule payload v1
+       contract, not provider-derived guessing. *)
+    optional_int args "payload_schema_version" |> Option.value ~default:1
+  in
+  let* body =
+    match Json_util.assoc_member_opt "payload_body" args with
+    | None -> Ok (`Assoc [])
+    | Some (`Assoc _ as body) -> Ok body
+    | Some _ -> Error "payload_body must be an object"
+  in
   Ok
-    Schedule_domain.
-      { id
-      ; kind = Human_operator
-      ; display_name = string_opt args "approved_by_display_name"
-      }
+    (`Assoc
+      [ "kind", `String kind; "schema_version", `Int schema_version; "body", body ])
 ;;
 
 let payload_from_args args =
   match Json_util.assoc_member_opt "payload" args with
-  | Some (`Assoc _ as payload) -> Ok payload
+  | Some (`Assoc _ as payload) ->
+    if has_board_convenience_args args
+    then Error "use either payload or board_* convenience fields, not both"
+    else Ok payload
   | Some _ -> Error "payload must be an object envelope"
   | None ->
-    let* kind = required_string args "payload_kind" in
-    let schema_version =
-      (* DET-OK: absent schema_version means the stable schedule payload v1
-         contract, not provider-derived guessing. *)
-      optional_int args "payload_schema_version" |> Option.value ~default:1
-    in
-    let* body =
-      match Json_util.assoc_member_opt "payload_body" args with
-      | None -> Ok (`Assoc [])
-      | Some (`Assoc _ as body) -> Ok body
-      | Some _ -> Error "payload_body must be an object"
-    in
-    Ok
-      (`Assoc
-        [ "kind", `String kind
-        ; "schema_version", `Int schema_version
-        ; "body", body
-        ])
+    if has_board_convenience_args args
+    then
+      if has_arg args "payload_body"
+      then Error "use either payload_body or board_* convenience fields, not both"
+      else
+        (match string_opt args "payload_kind" with
+         | None | Some "masc.board_post" -> board_post_payload_from_args args
+         | Some kind ->
+           Error
+             ("board_* convenience fields require payload_kind omitted or masc.board_post, got "
+              ^ kind))
+    else generic_payload_from_args args
+;;
+
+let assoc_string_opt key fields =
+  match List.assoc_opt key fields with
+  | Some (`String value) -> trim_nonempty value
+  | _ -> None
+;;
+
+let validate_known_payload_request ~payload ~risk_class =
+  match payload with
+  | `Assoc fields ->
+    (match assoc_string_opt "kind" fields with
+     | Some "masc.board_post" ->
+       let* () =
+         match List.assoc_opt "schema_version" fields with
+         | Some (`Int 1) -> Ok ()
+         | Some (`Int _) -> Error "masc.board_post only supports payload_schema_version=1"
+         | Some _ -> Error "masc.board_post payload.schema_version must be an integer"
+         | None -> Error "masc.board_post payload requires schema_version=1"
+       in
+       if not (Schedule_domain.is_side_effecting risk_class)
+       then Error "masc.board_post requires a side-effecting risk_class such as workspace_write"
+       else (
+         match List.assoc_opt "body" fields with
+         | Some (`Assoc body) ->
+           (match assoc_string_opt "content" body with
+            | Some _ -> Ok ()
+            | None ->
+              Error
+                "masc.board_post payload requires non-empty body.content; use board_content for board schedules")
+         | Some _ -> Error "masc.board_post payload.body must be an object"
+         | None ->
+           Error
+             "masc.board_post payload requires object body with non-empty content; use board_content for board schedules")
+     | _ -> Ok ())
+  | _ -> Ok ()
 ;;
 
 let schedule_request_json ?last_execution (request : Schedule_domain.schedule_request) =
@@ -166,6 +279,9 @@ let schedule_request_json ?last_execution (request : Schedule_domain.schedule_re
     if Schedule_domain.is_terminal request.status then None else Some request.due_at
   in
   let requires_grant = Schedule_domain.requires_separate_human_grant request in
+  let payload_target, payload_summary =
+    Schedule_payload_projection.target_summary request
+  in
   match Schedule_domain.schedule_request_to_yojson request with
   | `Assoc fields ->
     `Assoc
@@ -192,8 +308,20 @@ let schedule_request_json ?last_execution (request : Schedule_domain.schedule_re
            , `String
                (if requires_grant
                 then "separate_human_grant_required"
-                else "no_separate_grant_required") )
+               else "no_separate_grant_required") )
          ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
+         ; ( "payload_kind"
+           , match Schedule_payload_projection.kind request with
+             | None -> `Null
+             | Some kind -> `String kind )
+         ; ( "payload_target"
+           , match payload_target with
+             | None -> `Null
+             | Some target -> `String target )
+         ; ( "payload_summary"
+           , match payload_summary with
+             | None -> `Null
+             | Some summary -> `String summary )
          ; ( "last_execution"
            , match last_execution with
              | None -> `Null
@@ -238,6 +366,7 @@ let handle_create ~tool_name ~start_time ctx args =
   let result =
     let* payload = payload_from_args args in
     let* risk_class = risk_class_of_arg args in
+    let* () = validate_known_payload_request ~payload ~risk_class in
     let* source = source_of_arg args in
     let* recurrence = recurrence_of_arg args in
     let requested_at =
@@ -360,33 +489,6 @@ let handle_cancel ~tool_name ~start_time ctx args =
         ])
 ;;
 
-let handle_approve ~tool_name ~start_time ctx args =
-  let result =
-    let* schedule_id = required_string args "schedule_id" in
-    let* approved_by = approved_by_from_args args in
-    let grant_id = string_opt args "grant_id" in
-    let approved_at = optional_float args "approved_at_unix" in
-    Schedule_service.approve ctx.config ?grant_id ?approved_at ~schedule_id
-      ~approved_by ()
-    |> Result.map_error Schedule_service.service_error_to_string
-  in
-  request_result ~tool_name ~start_time result
-;;
-
-let handle_reject ~tool_name ~start_time ctx args =
-  let result =
-    let* schedule_id = required_string args "schedule_id" in
-    let* approved_by = approved_by_from_args args in
-    let* reason = required_string args "reason" in
-    let grant_id = string_opt args "grant_id" in
-    let approved_at = optional_float args "approved_at_unix" in
-    Schedule_service.reject ctx.config ?grant_id ?approved_at ~schedule_id
-      ~approved_by ~reason ()
-    |> Result.map_error Schedule_service.service_error_to_string
-  in
-  request_result ~tool_name ~start_time result
-;;
-
 let dispatch ctx ~name ~args : Tool_result.result option =
   let start_time = Time_compat.now () in
   let handle f =
@@ -403,8 +505,6 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | Some { action = List_requests; _ } -> handle handle_list
   | Some { action = Get_request; _ } -> handle handle_get
   | Some { action = Cancel_request; _ } -> handle handle_cancel
-  | Some { action = Approve_request; _ } -> handle handle_approve
-  | Some { action = Reject_request; _ } -> handle handle_reject
   | _ -> None
 ;;
 

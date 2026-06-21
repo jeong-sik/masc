@@ -106,6 +106,33 @@ let terminal_reason_from_receipt receipt =
            "completion_contract_unsatisfied")
   | None -> None
 
+let receipt_contract_attention_reason receipt =
+  let completion_contract_result =
+    json_string_opt_member "completion_contract_result" receipt
+    |> Option.map (fun value -> String.lowercase_ascii (String.trim value))
+  in
+  let terminal_reason_code =
+    json_string_opt_member "terminal_reason_code" receipt
+    |> Option.map (fun value -> String.lowercase_ascii (String.trim value))
+  in
+  let turn_budget_exhausted =
+    match terminal_reason_code with
+    | Some code -> String.starts_with ~prefix:"turn_budget_exhausted" code
+    | None -> false
+  in
+  match completion_contract_result with
+  | Some
+      ( ("violated" | "claim_only_after_owned_task" | "needs_execution_progress"
+        | "passive_only")
+        as reason ) ->
+      Some ("completion_contract_result:" ^ reason)
+  | Some
+      ( ("unknown" | "not_dispatched" | "surface_mismatch" | "no_capable_provider")
+        as reason )
+    when turn_budget_exhausted ->
+      Some ("completion_contract_result:" ^ reason)
+  | Some _ | None -> None
+
 (* JSON-deserialization boundary: maps a runtime_blocker_class wire
    string into a typed [Keeper_turn_disposition.t]. The previous
    variant returned a [terminal_reason_code] wire string that the
@@ -311,8 +338,24 @@ let receipt_operator_disposition receipt =
 
 let effective_disposition_fields ~fallback_disposition ~fallback_reason
     latest_receipt =
-  match Option.bind latest_receipt receipt_operator_disposition with
-  | Some (operator_disposition, operator_disposition_reason) ->
+  let contract_attention_reason =
+    Option.bind latest_receipt receipt_contract_attention_reason
+  in
+  match
+    ( contract_attention_reason,
+      Option.bind latest_receipt receipt_operator_disposition )
+  with
+  | Some disposition_reason, Some (operator_disposition, operator_disposition_reason) ->
+      ( "Blocked",
+        disposition_reason,
+        operator_disposition,
+        operator_disposition_reason )
+  | Some disposition_reason, None ->
+      ( "Blocked",
+        disposition_reason,
+        "pause_human",
+        "completion_contract_unsatisfied" )
+  | None, Some (operator_disposition, operator_disposition_reason) ->
       let disposition, disposition_reason =
         display_disposition_of_operator ~operator_disposition
           ~operator_disposition_reason
@@ -321,7 +364,7 @@ let effective_disposition_fields ~fallback_disposition ~fallback_reason
         disposition_reason,
         operator_disposition,
         operator_disposition_reason )
-  | None ->
+  | None, None ->
       let operator_disposition, operator_disposition_reason =
         operator_disposition_of_display ~disposition:fallback_disposition
           ~disposition_reason:fallback_reason

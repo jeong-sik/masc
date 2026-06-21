@@ -208,11 +208,27 @@ val append_turn :
   unit ->
   unit
 
+(** [append_assistant_message_result] is {!append_assistant_message} that
+    returns [Error msg] on a write failure instead of swallowing it (the failure
+    is still counted + warn-logged). For callers whose own contract requires
+    surfacing a chat-append failure — e.g. {!Fusion_sink.emit}. *)
+val append_assistant_message_result :
+  base_dir:string ->
+  keeper_name:string ->
+  content:string ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?audio:audio_clip ->
+  ?blocks:chat_block list ->
+  ?turn_ref:Ids.Turn_ref.t ->
+  unit ->
+  (unit, string) result
+
 (** [append_assistant_message ~base_dir ~keeper_name ~content ?source
     ?conversation_id ()]
     appends one keeper-initiated assistant line with no paired user
     turn (RFC-0223 P4 [keeper_surface_post]). Same failure policy as
-    {!append_turn}. *)
+    {!append_turn} (failure is counted + logged, not raised). *)
 val append_assistant_message :
   base_dir:string ->
   keeper_name:string ->
@@ -273,3 +289,38 @@ val load_page :
     when present. When [base_dir] is supplied, the history endpoint marks
     audio clips as [expired] when the underlying MP3 file is gone. *)
 val to_json_array : ?base_dir:string -> chat_message list -> Yojson.Safe.t
+
+(** {1 Turn transcript (RFC-0233 §7)} *)
+
+(** A keeper turn's transcript, derived by an exact join on the persisted
+    [turn_ref]. [user] holds the operator request line(s) that opened the
+    turn; [assistant] holds the keeper response line(s) (utterance and
+    typed transport-failure markers). Tool rows are excluded — their full
+    I/O is surfaced by the tool-call store keyed on [execution_id]. Both
+    lists are empty when no persisted row carries the requested
+    [turn_ref] (old rows, redacted, or outside the retained window). *)
+type turn_transcript = {
+  user : chat_message list;
+  assistant : chat_message list;
+}
+
+val transcript_of_messages :
+  chat_message list -> turn_ref:Ids.Turn_ref.t -> turn_transcript
+(** [transcript_of_messages msgs ~turn_ref] partitions the rows whose
+    persisted [turn_ref] equals [turn_ref] into operator [user] lines and
+    keeper [assistant] lines, preserving input order. A row with a
+    different or absent [turn_ref] is excluded — exact-key join only, no
+    timestamp-window fuzzing (RFC-0233 §7 "no fuzzy attribution"). Pass
+    {!load}-produced messages so the content is already the redacted view
+    (RFC-0132); this function does not re-redact. *)
+
+val turn_transcript_to_json :
+  keeper:string ->
+  turn_ref:Ids.Turn_ref.t ->
+  turn_transcript ->
+  Yojson.Safe.t
+(** [turn_transcript_to_json ~keeper ~turn_ref t] renders the dashboard
+    turn-transcript payload: [keeper], [turn_ref], [found] (false when
+    both line lists are empty), [source], and the [user]/[assistant]
+    line arrays. Each line carries [role]/[content]/[ts] and, for
+    non-utterance assistant rows, the writer-declared [kind]. *)

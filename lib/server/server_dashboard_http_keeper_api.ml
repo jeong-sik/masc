@@ -123,6 +123,77 @@ let memory_os_dashboard_json ~keeper_id =
     ]
 ;;
 
+let user_model_item_source_json = function
+  | Keeper_user_model.Keeper_private -> "keeper", []
+  | Keeper_user_model.Shared keepers -> "shared", keepers
+;;
+
+let user_model_item_json (item : Keeper_user_model.item) =
+  let source, observed_by = user_model_item_source_json item.source in
+  `Assoc
+    [ "claim", `String item.claim
+    ; "category", `String (Keeper_memory_os_types.category_to_string item.category)
+    ; "source", `String source
+    ; "observed_by", `List (List.map (fun name -> `String name) observed_by)
+    ; "turn", `Int item.turn
+    ; "first_seen", `Float item.first_seen
+    ; "first_seen_iso", `String (Masc_domain.iso8601_of_unix_seconds item.first_seen)
+    ; "last_verified_at", json_float_opt item.last_verified_at
+    ; "last_verified_at_iso", json_time_iso_opt item.last_verified_at
+    ]
+;;
+
+let user_model_dashboard_json ~keeper_id =
+  let now = Time_compat.now () in
+  let facts_store = Keeper_memory_os_io.facts_path ~keeper_id in
+  let shared_facts_store =
+    Keeper_memory_os_io.facts_path ~keeper_id:Keeper_memory_os_types.shared_store_id
+  in
+  try
+    let model = Keeper_user_model.build ~keeper_id ~now () in
+    `Assoc
+      [ "schema", `String "keeper.user_model.dashboard.v1"
+      ; "keeper", `String keeper_id
+      ; "source", `String "memory_os_facts"
+      ; "producer", `String "keeper_user_model"
+      ; "facts_store", `String facts_store
+      ; "shared_facts_store", `String shared_facts_store
+      ; "enabled", `Bool (Keeper_user_model.enabled ())
+      ; "now", `Float now
+      ; "now_iso", `String (Masc_domain.iso8601_of_unix_seconds now)
+      ; "read_errors", `List []
+      ; "source_fact_count", `Int model.source_fact_count
+      ; "shared_fact_count", `Int model.shared_fact_count
+      ; "preferences", `List (List.map user_model_item_json model.preferences)
+      ; "constraints", `List (List.map user_model_item_json model.constraints)
+      ]
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    `Assoc
+      [ "schema", `String "keeper.user_model.dashboard.v1"
+      ; "keeper", `String keeper_id
+      ; "source", `String "memory_os_facts"
+      ; "producer", `String "keeper_user_model"
+      ; "facts_store", `String facts_store
+      ; "shared_facts_store", `String shared_facts_store
+      ; "enabled", `Bool (Keeper_user_model.enabled ())
+      ; "now", `Float now
+      ; "now_iso", `String (Masc_domain.iso8601_of_unix_seconds now)
+      ; ( "read_errors"
+        , `List
+            [ `Assoc
+                [ "scope", `String "user_model"
+                ; "error", `String (Printexc.to_string exn)
+                ]
+            ] )
+      ; "source_fact_count", `Int 0
+      ; "shared_fact_count", `Int 0
+      ; "preferences", `List []
+      ; "constraints", `List []
+      ]
+;;
+
 let handle_keeper_get_subroutes state req request reqd =
   let req_path = Http.Request.path req in
   let prefix = keeper_api_prefix in
@@ -524,9 +595,54 @@ let handle_keeper_get_subroutes state req request reqd =
         ( "stale_reason",
           if stale_reason = "" then `Null else `String stale_reason );
         ("memory_os", memory_os_dashboard_json ~keeper_id:name);
+        ("user_model", user_model_dashboard_json ~keeper_id:name);
         ("entries", `List entries);
       ] in
       Http.Response.json_value ~compress:true ~request:req json reqd
+  else if ends_with "/turn-transcript" then
+    (* RFC-0233 §7: serve one keeper turn's operator request + keeper
+       response by an exact join on the persisted chat row turn_ref
+       ("<trace_id>#<absolute_turn>"). Lazily fetched by the turn
+       inspector so the transcript (which can be large) never bloats the
+       turn-records list. Content is the load-time redacted view the chat
+       history endpoint already serves (RFC-0132); an unmatched turn_ref
+       returns [found:false] rather than a fabricated transcript. *)
+    let name = extract_name "/turn-transcript" in
+    if String.length name = 0 then
+      respond_error reqd "keeper name is required"
+    else if not (Keeper_config.validate_name name) then
+      Http.Response.json_value ~status:`Bad_request
+        (`Assoc
+           [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])
+        reqd
+    else (
+      match Server_utils.query_param req "turn_ref" with
+      | None ->
+        Http.Response.json_value ~status:`Bad_request
+          (`Assoc
+             [("error", `String "turn_ref query parameter is required")])
+          reqd
+      | Some turn_ref_str ->
+        (match Ids.Turn_ref.of_string turn_ref_str with
+         | None ->
+           Http.Response.json_value ~status:`Bad_request
+             (`Assoc
+                [ ( "error",
+                    `String
+                      (Printf.sprintf "invalid turn_ref: %s" turn_ref_str) )
+                ])
+             reqd
+         | Some turn_ref ->
+           let base_dir = (Mcp_server.workspace_config state).base_path in
+           let messages = Keeper_chat_store.load ~base_dir ~keeper_name:name in
+           let transcript =
+             Keeper_chat_store.transcript_of_messages messages ~turn_ref
+           in
+           let json =
+             Keeper_chat_store.turn_transcript_to_json ~keeper:name ~turn_ref
+               transcript
+           in
+           Http.Response.json_value ~compress:true ~request:req json reqd))
   else if ends_with "/trajectory" then
     let name = extract_name "/trajectory" in
     if String.length name = 0 then

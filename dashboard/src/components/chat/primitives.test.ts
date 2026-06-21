@@ -384,6 +384,37 @@ describe('ChatTranscript', () => {
     expect(onClick.mock.calls[0]?.[0].id).toBe('a1')
   })
 
+  it('copies the message text from an assistant message copy button', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.assign(globalThis.navigator, { clipboard: { writeText } })
+    const target = entry({
+      id: 'a1',
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: '복사할 응답 본문',
+    })
+
+    render(
+      html`<${ChatTranscript} entries=${[target]} emptyText="empty" variant="messenger" />`,
+      container,
+    )
+
+    const copy = container.querySelector('[data-testid="chat-message-copy"]') as HTMLButtonElement
+    expect(copy).not.toBeNull()
+    fireEvent.click(copy)
+    expect(writeText).toHaveBeenCalledWith('복사할 응답 본문')
+  })
+
+  it('does not render a copy button on user messages', () => {
+    const target = entry({ id: 'u1', role: 'user', text: '내 질문' })
+    render(
+      html`<${ChatTranscript} entries=${[target]} emptyText="empty" variant="messenger" />`,
+      container,
+    )
+    expect(container.querySelector('[data-testid="chat-message-copy"]')).toBeNull()
+  })
+
   it('renders a thinking placeholder when the model is reasoning', () => {
     render(
       html`<${ChatTranscript}
@@ -1722,6 +1753,63 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
     expect(bundle?.textContent).toContain('곧 답합니다')
   })
 
+  it('renders thinking text as sanitized markdown with newlines preserved', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            traceSteps: [{ kind: 'think', text: '첫째 줄 **강조**\n둘째 줄\n\n<script>alert(1)</script>' }],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const think = container.querySelector('[data-chat-trace-step="think"] .chat-block-tstep-text') as HTMLElement
+    expect(think).not.toBeNull()
+    // Newline-preserving container (raw interpolation folded these to one line).
+    expect(think.className).toContain('whitespace-pre-wrap')
+    expect(think.className).toContain('markdown-body')
+    // Markdown is rendered, not shown as literal `**강조**`.
+    expect(think.querySelector('strong')?.textContent).toBe('강조')
+    // Both source lines survive the round-trip.
+    expect(think.textContent).toContain('첫째 줄')
+    expect(think.textContent).toContain('둘째 줄')
+    // Untrusted model markup is stripped (no executable script element).
+    expect(think.querySelector('script')).toBeNull()
+  })
+
+  it('renders board post ids in assistant prose as board detail links', () => {
+    const postId = 'p-59e2917e15de5367e81b2244a8f5095a'
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a-board-link',
+            text: `올렸다. 보드에 ${postId}.`,
+            role: 'assistant',
+            source: 'direct_assistant',
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const link = container.querySelector(`a[href="#board?post=${postId}"]`) as HTMLAnchorElement | null
+    expect(link).not.toBeNull()
+    expect(link?.textContent).toBe(postId)
+    expect(link?.getAttribute('title')).toBe('보드 게시글 열기')
+  })
+
   it('keeps the flat per-row tool bubbles when grouping is off (default)', () => {
     render(
       html`<${ChatTranscript}
@@ -1770,6 +1858,160 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
     await flushUi()
     const step = container.querySelector('[data-chat-trace-step="tool"]')
     expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+  })
+
+  it('marks an unjoined tool step as missing once the owning turn has settled', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-unjoined-settled', label: 'keeper_board_comment', turnRef: 'trace-s#1' }),
+          entry({
+            id: 'a-settled',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-s#1',
+            streamState: null,
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        toolOutputsCoveredSinceMs=${Date.parse('2026-03-24T00:00:00.000Z')}
+        toolOutputsCoveredThroughMs=${Date.parse('2026-03-24T00:00:01.000Z')}
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    expect(bundle).not.toBeNull()
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
+    // Settled turn + never-joined output is a real gap, not an indefinite pending.
+    expect(step?.querySelector('.chat-block-tstep-status.missing')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
+    // The gap is surfaced in the card header so silent failures are visible.
+    expect(bundle?.textContent).toContain('결과 누락 1')
+  })
+
+  it('keeps a settled unjoined tool step pending until tool outputs hydrate', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-unjoined-before-hydration', label: 'keeper_board_comment', turnRef: 'trace-h#1' }),
+          entry({
+            id: 'a-before-hydration',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-h#1',
+            streamState: null,
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+    expect(bundle?.textContent).not.toContain('결과 누락')
+  })
+
+  it('keeps a settled unjoined tool step pending when only older output hydration completed', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({
+            id: 'tool-unjoined-after-old-hydration',
+            label: 'keeper_board_comment',
+            timestamp: '2026-03-24T00:00:10.000Z',
+            turnRef: 'trace-old#1',
+          }),
+          entry({
+            id: 'a-after-old-hydration',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-old#1',
+            streamState: null,
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        toolOutputsCoveredThroughMs=${Date.parse('2026-03-24T00:00:01.000Z')}
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+    expect(bundle?.textContent).not.toContain('결과 누락')
+  })
+
+  it('keeps a settled unjoined tool step pending when it predates the hydrated tool-output tail', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({
+            id: 'tool-unjoined-before-covered-tail',
+            label: 'keeper_board_comment',
+            timestamp: '2026-03-24T00:00:05.000Z',
+            turnRef: 'trace-tail#1',
+          }),
+          entry({
+            id: 'a-before-covered-tail',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-tail#1',
+            streamState: null,
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        toolOutputsCoveredSinceMs=${Date.parse('2026-03-24T00:00:10.000Z')}
+        toolOutputsCoveredThroughMs=${Date.parse('2026-03-24T00:00:20.000Z')}
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+    expect(bundle?.textContent).not.toContain('결과 누락')
+  })
+
+  it('keeps an unjoined tool step pending while the owning turn is still streaming', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-unjoined-live', label: 'keeper_board_comment', turnRef: 'trace-l#1' }),
+          entry({
+            id: 'a-live',
+            text: '응답 작성 중',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-l#1',
+            streamState: 'streaming',
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
+    // Output may still arrive while the turn streams, so keep it pending.
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+    expect(bundle?.textContent).not.toContain('결과 누락')
   })
 })
 
@@ -1912,6 +2154,59 @@ describe('fusion chat card', () => {
     fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
     await flushUi()
     expect(container.querySelector('[data-fusion-detail]')?.textContent).toContain('불러오지 못했습니다')
+  })
+
+  it('falls back to the persisted conclusion text when the board fetch fails', async () => {
+    vi.mocked(fetchBoardPost).mockRejectedValue(new Error('boom'))
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+    const fallback = container.querySelector('[data-fusion-fallback]')
+    expect(fallback).not.toBeNull()
+    expect(fallback?.textContent).toContain('answer — done')
+  })
+
+  it('falls back to the persisted conclusion text when the board post has no panel/judge', async () => {
+    vi.mocked(fetchBoardPost).mockResolvedValue({
+      meta: { source: 'fusion', panel: [], judge: null },
+    } as unknown as Awaited<ReturnType<typeof fetchBoardPost>>)
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+    const fallback = container.querySelector('[data-fusion-fallback]')
+    expect(fallback).not.toBeNull()
+    expect(fallback?.textContent).toContain('answer — done')
+    expect(container.querySelector('[data-fusion-detail]')?.textContent).not.toContain('비어 있습니다')
+  })
+
+  it('does not show the fallback conclusion when panel/judge load successfully', async () => {
+    vi.mocked(fetchBoardPost).mockResolvedValue({
+      meta: {
+        source: 'fusion',
+        panel: [{ model: 'm1', status: 'answered', answer: 'A' }],
+        judge: { status: 'synthesized', decision: 'd', resolved_answer: 'R' },
+      },
+    } as unknown as Awaited<ReturnType<typeof fetchBoardPost>>)
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+    expect(container.querySelector('[data-fusion-fallback]')).toBeNull()
+  })
+
+  it('shows a retention note in the expanded detail', async () => {
+    vi.mocked(fetchBoardPost).mockResolvedValue({
+      meta: {
+        source: 'fusion',
+        panel: [],
+        judge: { status: 'synthesized', decision: 'd', resolved_answer: 'R' },
+      },
+    } as unknown as Awaited<ReturnType<typeof fetchBoardPost>>)
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+    const retention = container.querySelector('[data-fusion-retention]')
+    expect(retention).not.toBeNull()
+    expect(retention?.textContent).toContain('만료')
   })
 
   it('renders judge.synthesis as markdown (not the raw resolved_answer dump)', async () => {

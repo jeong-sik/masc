@@ -51,6 +51,7 @@ val with_in_turn_liveness_pulse :
 type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
+  consumed_stimuli : Keeper_event_queue.stimulus list;
 }
 
 val heartbeat_event_intake :
@@ -71,6 +72,7 @@ type keepalive_scheduling_decision = {
 val decide_keepalive_scheduling :
   ?runtime_id_of_meta:(keeper_meta -> string) ->
   ?runtime_resilience_of_name:(string -> string option) ->
+  ?keeper_resilience_of_name:(string -> string option) ->
   ?reactive_wake:bool ->
   stop:bool Atomic.t ->
   meta:keeper_meta ->

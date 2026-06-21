@@ -3,6 +3,7 @@
 
 import { html } from 'htm/preact'
 import { FilterChips } from './common/filter-chips'
+import { SurfaceHeader } from './common/surface-header'
 import { Ops } from './ops'
 import { Governance } from './governance'
 import { LabInspector } from './lab-inspector'
@@ -39,6 +40,7 @@ export function OperationsPanel() {
 
   return html`
     <div class="v2-command-surface flex flex-col gap-4">
+      <${SurfaceHeader} />
       <${FilterChips}
         chips=${VIEW_CHIPS}
         value=${view}

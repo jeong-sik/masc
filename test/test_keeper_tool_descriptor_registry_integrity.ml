@@ -662,6 +662,43 @@ let test_readonly_policy_projects_to_input_aware_registry () =
        ~tool_name:"tool_write_file"
        ~input:(`Assoc [ "path", `String "x"; "content", `String "y" ]))
 
+let test_strict_readonly_policy_excludes_workspace_mutations () =
+  let search_input = `Assoc [ "pattern", `String "Keeper_tool_descriptor" ] in
+  Alcotest.(check bool)
+    "Grep public alias is strict read-only"
+    true
+    (Registry.is_strictly_read_only_with_input ~tool_name:"Grep" ~input:search_input);
+  Alcotest.(check bool)
+    "Read public alias is strict read-only"
+    true
+    (Registry.is_strictly_read_only_with_input
+       ~tool_name:"Read"
+       ~input:(`Assoc [ "file_path", `String "lib/keeper/keeper_tool_registry.ml" ]));
+  Alcotest.(check bool)
+    "WebFetch public alias is strict read-only"
+    true
+    (Registry.is_strictly_read_only_with_input
+       ~tool_name:"WebFetch"
+       ~input:(`Assoc [ "url", `String "https://example.com" ]));
+  Alcotest.(check bool)
+    "keeper_board_post remains mutating for no-side-effect retry"
+    false
+    (Registry.is_strictly_read_only_with_input
+       ~tool_name:"keeper_board_post"
+       ~input:(`Assoc [ "title", `String "t"; "body", `String "b" ]));
+  Alcotest.(check bool)
+    "keeper_broadcast remains mutating for no-side-effect retry"
+    false
+    (Registry.is_strictly_read_only_with_input
+       ~tool_name:"keeper_broadcast"
+       ~input:(`Assoc [ "message", `String "hello" ]));
+  Alcotest.(check bool)
+    "masc_transition remains mutating for no-side-effect retry"
+    false
+    (Registry.is_strictly_read_only_with_input
+       ~tool_name:"masc_transition"
+       ~input:(`Assoc [ "task_id", `String "t1"; "status", `String "done" ]))
+
 let test_mcp_context_policy_uses_descriptor_resolution () =
   Alcotest.(check (list string))
     "safe inline tools project from descriptors"
@@ -975,6 +1012,10 @@ let () =
             "descriptor read-only policy projects to input-aware registry"
             `Quick
             test_readonly_policy_projects_to_input_aware_registry
+        ; test_case
+            "strict read-only policy excludes workspace mutations"
+            `Quick
+            test_strict_readonly_policy_excludes_workspace_mutations
         ; test_case
             "MCP context policy uses descriptor resolution"
             `Quick

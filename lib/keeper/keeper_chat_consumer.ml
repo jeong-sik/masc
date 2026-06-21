@@ -19,7 +19,16 @@ let start ~sw ~clock ~base_path ~handle_turn =
          match Keeper_turn_admission.in_flight ~base_path ~keeper_name with
          | Some _ -> ()
          | None -> (
-             let batch = Keeper_chat_queue.dequeue_batch ~keeper_name in
+             let batch =
+               try Keeper_chat_queue.dequeue_batch ~keeper_name with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn ->
+                 Log.Keeper.warn
+                   "keeper_chat_consumer: dequeue_batch failed for keeper=%s: %s"
+                   keeper_name
+                   (Printexc.to_string exn);
+                 []
+             in
              (match batch with
               | _ :: _ :: _ ->
                   Log.Keeper.info

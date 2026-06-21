@@ -30,6 +30,7 @@ import { isKeeperToolActivityEvent, sseEventMatchesKeeper } from './keeper-sse-m
 
 // Delegated to lib/format-time (SSOT)
 const formatTimestamp = formatTimeHms
+const NO_DURATION_LABEL = '—'
 
 function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
   const gap = coverageGapDisplay(data)
@@ -154,7 +155,8 @@ function newestToolCall(entries: readonly ToolCallEntry[]): ToolCallEntry | null
 function slowestToolCall(entries: readonly ToolCallEntry[]): ToolCallEntry | null {
   let slowest: ToolCallEntry | null = null
   for (const entry of entries) {
-    if (slowest === null || entry.duration_ms > slowest.duration_ms) slowest = entry
+    if (entry.duration_ms == null) continue
+    if (slowest === null || slowest.duration_ms == null || entry.duration_ms > slowest.duration_ms) slowest = entry
   }
   return slowest
 }
@@ -275,7 +277,7 @@ export function deriveKeeperToolCallDossier(
       label: 'latest',
       value: latest?.tool ?? 'none',
       detail: latest
-        ? `${formatTimestamp(latest.ts)} · ${toolCallStatusLabel(latest)} · ${formatMsCompact(latest.duration_ms)}`
+        ? `${formatTimestamp(latest.ts)} · ${toolCallStatusLabel(latest)} · ${latest.duration_ms != null ? formatMsCompact(latest.duration_ms) : NO_DURATION_LABEL}`
         : 'no recent tool call',
       tone: latestTone,
       title: latest ? entryScopeLabel(latest) : undefined,
@@ -292,9 +294,9 @@ export function deriveKeeperToolCallDossier(
     {
       key: 'slowest',
       label: 'slowest',
-      value: slowest ? formatMsCompact(slowest.duration_ms) : 'none',
+      value: slowest?.duration_ms != null ? formatMsCompact(slowest.duration_ms) : NO_DURATION_LABEL,
       detail: slowest ? `${slowest.tool} · ${entryScopeLabel(slowest)}` : 'no duration sample',
-      tone: slowest ? durationTone(slowest.duration_ms) : 'neutral',
+      tone: slowest?.duration_ms != null ? durationTone(slowest.duration_ms) : 'neutral',
     },
     {
       key: 'hot-tool',
@@ -331,7 +333,7 @@ export function deriveKeeperToolCallDossier(
       tone: 'bad',
     })
   }
-  if (slowest && slowest.duration_ms >= 2_000) {
+  if (slowest?.duration_ms != null && slowest.duration_ms >= 2_000) {
     issues.push({
       key: 'slow-call',
       label: 'slow call',
@@ -496,8 +498,8 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
         <span class="font-mono ${cat.color} w-4 text-center flex-shrink-0">${cat.icon}</span>
         <span class="font-mono text-[var(--color-fg-secondary)] flex-shrink-0 w-16">${formatTimestamp(entry.ts)}</span>
         <span class="font-mono font-medium text-[var(--color-fg-secondary)] truncate flex-1" title=${entry.tool}>${entry.tool}</span>
-        <span class=${`font-mono flex-shrink-0 w-16 text-right ${durationColor(entry.duration_ms)}`}>
-          ${formatMsCompact(entry.duration_ms)}
+        <span class=${`font-mono flex-shrink-0 w-16 text-right ${entry.duration_ms != null ? durationColor(entry.duration_ms) : 'text-[var(--color-fg-disabled)]'}`}>
+          ${entry.duration_ms != null ? formatMsCompact(entry.duration_ms) : NO_DURATION_LABEL}
         </span>
         <span
           class=${`flex-shrink-0 w-5 text-center ${toolCallSucceeded(entry) ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-err)]'}`}

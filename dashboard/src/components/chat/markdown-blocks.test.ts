@@ -176,6 +176,15 @@ describe('parseMarkdownToBlocks', () => {
     expect((blocks[0] as Extract<ChatBlock, { t: 'p' }>).html).toContain('<a')
   })
 
+  it('links generated board post ids to the board detail route', () => {
+    const postId = 'p-59e2917e15de5367e81b2244a8f5095a'
+    const blocks = parseMarkdownToBlocks(`올렸다. 보드에 ${postId}.`)
+    expect(blocks).toHaveLength(1)
+    const html = (blocks[0] as Extract<ChatBlock, { t: 'p' }>).html
+    expect(html).toContain(`href="#board?post=${postId}"`)
+    expect(html).toContain('title="보드 게시글 열기"')
+  })
+
   // Per-line superset: a soft-wrapped paragraph (single newlines, no blank line)
   // that interleaves prose with a standalone-URL line must still yield the card,
   // matching the line-based parser the render path supersedes.
@@ -192,5 +201,105 @@ describe('parseMarkdownToBlocks', () => {
     expect(blocks).toHaveLength(2)
     expect(blocks[0]).toMatchObject({ t: 'link', url: 'https://a.example.com/x' })
     expect(blocks[1]).toMatchObject({ t: 'link', url: 'https://b.example.com/y' })
+  })
+
+  // Unterminated code fences: an LLM that opens ``` and never closes it makes
+  // marked absorb all following prose into one code token. We demote that to a
+  // text block so the prose is readable instead of trapped in a monospace box.
+  it('keeps a closed fence as a code block (regression guard)', () => {
+    const blocks = parseMarkdownToBlocks('```js\nconst x = 1\n```')
+    expect(blocks).toHaveLength(1)
+    const code = blocks[0] as Extract<ChatBlock, { t: 'code' }>
+    expect(code.t).toBe('code')
+    expect(code.cap).toBe('js')
+    expect(code.html).toContain('const x = 1')
+  })
+
+  it('renders an unterminated fence as text, preserving the absorbed prose', () => {
+    const blocks = parseMarkdownToBlocks(
+      '```json\n{"x":1}\nThis prose should not be trapped.\nMore prose.',
+    )
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]).toMatchObject({ t: 'p' })
+    const p = blocks[0] as Extract<ChatBlock, { t: 'p' }>
+    // The body is not a code block...
+    expect((blocks[0] as ChatBlock).t).not.toBe('code')
+    // ...and the trailing prose survives (not swallowed into a code box).
+    expect(p.html).toContain('This prose should not be trapped.')
+    expect(p.html).toContain('More prose.')
+    // The fenced JSON body is rendered literally (escapeHtml escapes &<> only).
+    expect(p.html).toContain('{"x":1}')
+    // Newlines are preserved as <br> for the multi-line body.
+    expect(p.html).toContain('<br>')
+  })
+
+  it('escapes angle brackets in an unterminated fence body (no raw HTML)', () => {
+    const blocks = parseMarkdownToBlocks('```\n<script>alert(1)</script>\nremaining prose')
+    expect(blocks).toHaveLength(1)
+    const p = blocks[0] as Extract<ChatBlock, { t: 'p' }>
+    expect(p.t).toBe('p')
+    expect(p.html).toContain('&lt;script&gt;')
+    expect(p.html).not.toContain('<script>')
+    expect(p.html).toContain('remaining prose')
+  })
+
+  it('renders an unterminated tilde fence as text', () => {
+    const blocks = parseMarkdownToBlocks('~~~\nsome code\nthen prose runs on')
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]).toMatchObject({ t: 'p' })
+    const p = blocks[0] as Extract<ChatBlock, { t: 'p' }>
+    expect(p.html).toContain('some code')
+    expect(p.html).toContain('then prose runs on')
+  })
+
+  it('does not treat a mismatched closing fence as closed', () => {
+    const blocks = parseMarkdownToBlocks('~~~\nsome code\n```')
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]).toMatchObject({ t: 'p' })
+    const p = blocks[0] as Extract<ChatBlock, { t: 'p' }>
+    expect(p.html).toContain('some code')
+  })
+
+  it('does not treat the opposite mismatched closing fence as closed', () => {
+    const blocks = parseMarkdownToBlocks('```\nsome code\n~~~')
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]).toMatchObject({ t: 'p' })
+    const p = blocks[0] as Extract<ChatBlock, { t: 'p' }>
+    expect(p.html).toContain('some code')
+  })
+
+  it('leaves a 4-space indented code block untouched', () => {
+    const blocks = parseMarkdownToBlocks('    line1\n    line2')
+    expect(blocks).toHaveLength(1)
+    const code = blocks[0] as Extract<ChatBlock, { t: 'code' }>
+    expect(code.t).toBe('code')
+    expect(code.html).toContain('line1')
+    expect(code.html).toContain('line2')
+  })
+
+  it('leaves 4-space indented code whose first literal line looks fenced untouched', () => {
+    const blocks = parseMarkdownToBlocks('    ```\n    literal fence inside indented code')
+    expect(blocks).toHaveLength(1)
+    const code = blocks[0] as Extract<ChatBlock, { t: 'code' }>
+    expect(code.t).toBe('code')
+    expect(code.html).toContain('```')
+    expect(code.html).toContain('literal fence inside indented code')
+  })
+
+  it('does not treat a 4-space indented closing-looking line as a closing fence', () => {
+    const blocks = parseMarkdownToBlocks('```\nsome code\n    ```')
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]).toMatchObject({ t: 'p' })
+    const p = blocks[0] as Extract<ChatBlock, { t: 'p' }>
+    expect(p.html).toContain('some code')
+  })
+
+  it('keeps a closed fence followed by prose as separate code + paragraph blocks', () => {
+    const blocks = parseMarkdownToBlocks('```js\nc\n```\n\nAnd here is prose.')
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0]).toMatchObject({ t: 'code' })
+    expect((blocks[0] as Extract<ChatBlock, { t: 'code' }>).html).toContain('c')
+    expect(blocks[1]).toMatchObject({ t: 'p' })
+    expect((blocks[1] as Extract<ChatBlock, { t: 'p' }>).html).toContain('And here is prose.')
   })
 })

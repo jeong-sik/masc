@@ -250,6 +250,7 @@ type operator_disposition_reason =
   | Reason_provider_runtime_error
   | Reason_internal_error
   | Reason_tool_route_recoverable_failure
+  | Reason_completion_contract_unsatisfied
   | Reason_turn_budget_exhausted
   | Reason_turn_livelock_blocked
   | Reason_cancelled

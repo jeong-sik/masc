@@ -373,6 +373,7 @@ let http_listener_json ?now () =
 
 let grpc_runtime_listening : bool Atomic.t = Atomic.make false
 let ws_runtime_listening : bool Atomic.t = Atomic.make false
+let ws_same_origin_runtime_ready : bool Atomic.t = Atomic.make false
 
 (** Explanatory status for why a transport is or is not listening.
     Valid values: ["not_started"], ["disabled"], ["listening"],
@@ -382,6 +383,9 @@ let grpc_listen_status : string Atomic.t = Atomic.make "not_started"
 let ws_listen_status : string Atomic.t = Atomic.make "not_started"
 let set_grpc_runtime_listening listening = Atomic.set grpc_runtime_listening listening
 let set_ws_runtime_listening listening = Atomic.set ws_runtime_listening listening
+let set_ws_same_origin_runtime_ready ready =
+  Atomic.set ws_same_origin_runtime_ready ready
+
 let set_grpc_listen_status status = Atomic.set grpc_listen_status status
 let set_ws_listen_status status = Atomic.set ws_listen_status status
 let grpc_enabled () = Env_config.Transport.grpc_enabled ()
@@ -454,6 +458,8 @@ let queue_pressure ~sse_queue_max ~relay_queue_depth ~relay_retry_total ~relay_d
 let ws_enabled () = Env_config.Transport.ws_enabled ()
 let ws_port () = Env_config.Transport.ws_port
 let ws_listening () = ws_enabled () && Atomic.get ws_runtime_listening
+let ws_same_origin_ready () =
+  ws_enabled () && Atomic.get ws_same_origin_runtime_ready
 
 let tcp_port_reachable port =
   try

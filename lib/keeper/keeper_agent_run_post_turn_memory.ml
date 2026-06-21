@@ -2,6 +2,8 @@
 
     Extracted from [Keeper_agent_run.run_turn] Step 8 body (RFC-0147 PR-4). *)
 
+let default_post_turn_procedure_candidate_limit = 8
+
 let run
   ~config
   ~meta
@@ -16,6 +18,7 @@ let run
   ~post_turn_t0
   ~runtime_id
   ~inference_telemetry
+  ?deliberation_execution
   ()
   =
   (* RFC-0257: snapshot the per-keeper tool-emission accumulator synchronously
@@ -91,6 +94,82 @@ let run
     ~runtime_id
     ~keeper_id:meta.name
     librarian_input;
+
+  (* Advisory delegation request drafts: keep review artifact persistence on the
+     same bounded post-turn memory lane as draft-skill projection, not on the
+     decision-record append path. *)
+  (try
+     match deliberation_execution with
+     | None -> ()
+     | Some execution -> (
+       match
+         Keeper_delegation_request_store.write_execution_result
+           ~base_path:config.base_path
+           ~requester:meta.name
+           ~goal:meta.goal
+           execution
+       with
+       | Ok [] -> ()
+       | Ok stored ->
+         Log.Keeper.info ~keeper_name:meta.name
+           "delegation_requests wrote=%d dir=%s"
+           (List.length stored)
+           (Keeper_delegation_request_store.requests_dir
+              ~base_path:config.base_path)
+       | Error msg ->
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string DispatchEventFailures)
+           ~labels:[ "keeper", meta.name; "site", "delegation_requests" ]
+           ();
+         Log.Keeper.warn ~keeper_name:meta.name
+           "delegation_requests failed: %s"
+           msg)
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     Otel_metric_store.inc_counter
+       Keeper_metrics.(to_string DispatchEventFailures)
+       ~labels:[ "keeper", meta.name; "site", "delegation_requests" ]
+       ();
+     Log.Keeper.warn ~keeper_name:meta.name
+       "delegation_requests failed: %s"
+       (Printexc.to_string exn));
+
+  (* Memory OS -> draft skill loop: after librarian facts are durable, project
+     validated approaches / lessons into reviewable draft skill artifacts. This
+     stays advisory and never mutates the keeper tool surface. *)
+  (try
+     match
+       Skill_candidate_store.write_post_turn_candidates
+         ~base_path:config.base_path
+         ~keeper_id:meta.name
+         ~fact_tail_limit:Keeper_memory_os_io.fact_store_max
+         ~procedure_limit:default_post_turn_procedure_candidate_limit
+     with
+     | Ok [] -> ()
+     | Ok stored ->
+       Log.Keeper.info ~keeper_name:meta.name
+         "draft_skill_candidates wrote=%d dir=%s"
+         (List.length stored)
+         (Skill_candidate_store.drafts_dir ~base_path:config.base_path)
+     | Error msg ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string DispatchEventFailures)
+         ~labels:[ "keeper", meta.name; "site", "draft_skill_candidates" ]
+         ();
+       Log.Keeper.warn ~keeper_name:meta.name
+         "draft_skill_candidates failed: %s"
+         msg
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     Otel_metric_store.inc_counter
+       Keeper_metrics.(to_string DispatchEventFailures)
+       ~labels:[ "keeper", meta.name; "site", "draft_skill_candidates" ]
+       ();
+     Log.Keeper.warn ~keeper_name:meta.name
+       "draft_skill_candidates failed: %s"
+       (Printexc.to_string exn));
 
   (* Memory bank compaction: dedup + consolidate if over threshold. *)
   (try

@@ -41,6 +41,15 @@ let respond_ok ~request reqd =
   Http.Response.json_value ~compress:true ~request (`Assoc [ ("ok", `Bool true) ]) reqd
 ;;
 
+let respond_ok_with_warning ~request reqd warning =
+  Http.Response.json_value
+    ~compress:true
+    ~request
+    (`Assoc
+      [ ("ok", `Bool true); ("partial_cleanup", `Bool true); ("warning", `String warning) ])
+    reqd
+;;
+
 let respond_error ?(status = `Bad_request) ~request reqd message =
   Http.Response.json_value ~status ~request
     (`Assoc [ ("ok", `Bool false); ("error", `String message) ])
@@ -418,9 +427,12 @@ let add_delete_action_routes router =
              | Some goal_id ->
              let config = (Mcp_server.workspace_config state) in
              match Goal_store.delete_goal config ~goal_id with
-             | Ok () -> respond_ok ~request:req reqd
-             | Error msg ->
-                 respond_error ~status:`Not_found ~request:req reqd msg
+             | Ok Goal_store.Deleted -> respond_ok ~request:req reqd
+             | Ok (Goal_store.Deleted_with_orphaned_links warning) ->
+                 respond_ok_with_warning ~request:req reqd warning
+             | Error err ->
+                 respond_error ~status:`Not_found ~request:req reqd
+                   (Goal_store.delete_goal_error_to_string err)
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "goal_id")
          )

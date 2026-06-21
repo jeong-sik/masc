@@ -94,6 +94,46 @@ let test_record_verdict_reject () =
   check string "verdict = reject:vague notes" "reject:vague notes" v;
   Cal.reset_store_for_testing ()
 
+(* The runner's --record-verdicts path wires AR.review's on_verdict callback to
+   Cal.record_verdict (record_self_owned_verdict in
+   bin/masc_completion_trust_eval.ml). Prove that composition deterministically
+   with a fake reviewer, so the wiring is covered without a live judge LLM. *)
+let test_review_on_verdict_records () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir () in
+  Cal.set_store_for_testing ~base_dir:dir;
+  let saved = Atomic.get AR.run_llm_reviewer_fn in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set AR.run_llm_reviewer_fn saved;
+      Cal.reset_store_for_testing ())
+    (fun () ->
+      (* Fake judge: a structured Reject, no live LLM. *)
+      Atomic.set AR.run_llm_reviewer_fn
+        (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+          Ok (Some (AR.Reject "fabricated evidence"), ""));
+      let req =
+        make_req ~notes:"Implemented the change and verified it end to end." ()
+      in
+      let result =
+        AR.review ~evaluator_runtime:"judge-runtime"
+          ~generator_runtime:"keeper-runtime"
+          ~on_verdict:(fun result ->
+            Cal.record_verdict ~task_id:req.AR.task_id ~req ~result ())
+          req
+      in
+      check bool "judge rejected" true
+        (match result.AR.verdict with AR.Reject _ -> true | _ -> false);
+      let records = Dated_jsonl.read_recent (Cal.get_store ()) 10 in
+      check bool "verdict recorded via on_verdict" true
+        (List.length records >= 1);
+      let v =
+        Yojson.Safe.Util.(List.hd records |> member "verdict" |> to_string)
+      in
+      check string "recorded the fake judge's reject" "reject:fabricated evidence"
+        v)
+
 let test_record_verdict_hash_matches () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -417,6 +457,165 @@ let test_on_harness_verdict_exception_safe () =
   Cal.reset_store_for_testing ()
 
 (* ================================================================ *)
+(* resolve_record_verdicts_store — verdict-store isolation guard     *)
+(* ================================================================ *)
+
+let live_store = "/live/base/data/verdicts"
+
+let test_store_not_recording () =
+  match
+    Cal.resolve_record_verdicts_store ~record_verdicts:false
+      ~verdict_store_dir:None ~live_store_dir:(Some live_store)
+      ()
+  with
+  | Ok None -> ()
+  | _ -> fail "expected Ok None when not recording"
+
+let test_store_requires_dir () =
+  (* --record-verdicts without an explicit store dir must error rather than
+     silently fall back to the live store. *)
+  match
+    Cal.resolve_record_verdicts_store ~record_verdicts:true
+      ~verdict_store_dir:None ~live_store_dir:(Some live_store)
+      ()
+  with
+  | Error msg ->
+    check bool "mentions --verdict-store-dir" true
+      (contains ~sub:"--verdict-store-dir" msg)
+  | Ok _ -> fail "expected Error when --record-verdicts lacks a store dir"
+
+let test_store_rejects_empty_dir () =
+  match
+    Cal.resolve_record_verdicts_store ~record_verdicts:true
+      ~verdict_store_dir:(Some "  ") ~live_store_dir:(Some live_store)
+      ()
+  with
+  | Error msg -> check bool "mentions empty" true (contains ~sub:"empty" msg)
+  | Ok _ -> fail "expected Error when --verdict-store-dir is empty"
+
+let test_store_rejects_live () =
+  (* Explicitly pointing the store at the live ledger must also error. *)
+  match
+    Cal.resolve_record_verdicts_store ~record_verdicts:true
+      ~verdict_store_dir:(Some live_store) ~live_store_dir:(Some live_store)
+      ()
+  with
+  | Error msg -> check bool "mentions live store" true (contains ~sub:"live" msg)
+  | Ok _ -> fail "expected Error when store dir is the live store"
+
+let test_store_rejects_live_aliases () =
+  let cases = [
+    "trailing slash", live_store ^ "/";
+    "dot segment", "/live/base/data/./verdicts";
+    "dotdot segment", "/live/base/data/tmp/../verdicts";
+    "relative live path", "data/verdicts";
+  ] in
+  List.iter
+    (fun (name, dir) ->
+      match
+        Cal.resolve_record_verdicts_store ~cwd:"/live/base"
+          ~record_verdicts:true ~verdict_store_dir:(Some dir)
+          ~live_store_dir:(Some live_store)
+          ()
+      with
+      | Error msg ->
+        check bool (name ^ " mentions live store") true (contains ~sub:"live" msg)
+      | Ok _ -> fail (name ^ " should be rejected as a live-store alias"))
+    cases
+
+let test_store_rejects_live_child () =
+  let child = Filename.concat live_store "eval-scratch" in
+  match
+    Cal.resolve_record_verdicts_store ~record_verdicts:true
+      ~verdict_store_dir:(Some child) ~live_store_dir:(Some live_store)
+      ()
+  with
+  | Error msg -> check bool "mentions live store" true (contains ~sub:"live" msg)
+  | Ok _ -> fail "expected Error when store dir is under the live store"
+
+let test_store_accepts_isolated () =
+  let isolated = "/scratch/verdicts" in
+  match
+    Cal.resolve_record_verdicts_store ~record_verdicts:true
+      ~verdict_store_dir:(Some isolated) ~live_store_dir:(Some live_store)
+      ()
+  with
+  | Ok (Some d) -> check string "uses the isolated dir" isolated d
+  | _ -> fail "expected Ok (Some isolated) for an isolated store dir"
+
+let test_store_no_live_no_collision () =
+  (* When MASC_BASE_PATH is unset there is no live store, so any explicit dir is
+     accepted (even one that textually matches the would-be live path). *)
+  match
+    Cal.resolve_record_verdicts_store ~record_verdicts:true
+      ~verdict_store_dir:(Some live_store) ~live_store_dir:None
+      ()
+  with
+  | Ok (Some d) -> check string "accepts dir when no live store" live_store d
+  | _ -> fail "expected Ok (Some _) when there is no live store to collide with"
+
+(* ================================================================ *)
+(* resolve_record_verdicts_evaluator — cross-model guard            *)
+(* ================================================================ *)
+
+let test_evaluator_not_recording_passthrough () =
+  match
+    Cal.resolve_record_verdicts_evaluator ~record_verdicts:false
+      ~generator_runtime:"generator" ~evaluator_runtime:(Some " judge ")
+      ~cross_verifier_runtime:None
+  with
+  | Ok (Some id) -> check string "passthrough" " judge " id
+  | _ -> fail "expected non-recording path to preserve evaluator_runtime"
+
+let test_evaluator_requires_cross_verifier () =
+  match
+    Cal.resolve_record_verdicts_evaluator ~record_verdicts:true
+      ~generator_runtime:"generator" ~evaluator_runtime:None
+      ~cross_verifier_runtime:None
+  with
+  | Error msg ->
+    check bool "mentions cross_verifier" true (contains ~sub:"cross_verifier" msg)
+  | Ok _ -> fail "expected Error when cross_verifier is missing"
+
+let test_evaluator_rejects_default_same_as_generator () =
+  match
+    Cal.resolve_record_verdicts_evaluator ~record_verdicts:true
+      ~generator_runtime:"local.json" ~evaluator_runtime:None
+      ~cross_verifier_runtime:(Some " local.json ")
+  with
+  | Error msg ->
+    check bool "mentions distinct" true (contains ~sub:"distinct" msg);
+    check bool "mentions --runtime" true (contains ~sub:"--runtime" msg)
+  | Ok _ -> fail "expected Error when default cross_verifier equals generator"
+
+let test_evaluator_accepts_default_distinct_cross_verifier () =
+  match
+    Cal.resolve_record_verdicts_evaluator ~record_verdicts:true
+      ~generator_runtime:"generator" ~evaluator_runtime:None
+      ~cross_verifier_runtime:(Some "judge")
+  with
+  | Ok None -> ()
+  | _ -> fail "expected Ok None for distinct default cross_verifier"
+
+let test_evaluator_accepts_explicit_same_model_override () =
+  match
+    Cal.resolve_record_verdicts_evaluator ~record_verdicts:true
+      ~generator_runtime:"local.json" ~evaluator_runtime:(Some " local.json ")
+      ~cross_verifier_runtime:(Some "local.json")
+  with
+  | Ok (Some id) -> check string "trimmed explicit evaluator" "local.json" id
+  | _ -> fail "expected explicit same-model evaluator override to be accepted"
+
+let test_evaluator_rejects_empty_explicit_override () =
+  match
+    Cal.resolve_record_verdicts_evaluator ~record_verdicts:true
+      ~generator_runtime:"generator" ~evaluator_runtime:(Some "  ")
+      ~cross_verifier_runtime:(Some "judge")
+  with
+  | Error msg -> check bool "mentions empty" true (contains ~sub:"empty" msg)
+  | Ok _ -> fail "expected Error for empty explicit evaluator runtime"
+
+(* ================================================================ *)
 (* Test Suite                                                        *)
 (* ================================================================ *)
 
@@ -431,6 +630,7 @@ let () =
       test_case "writes to store" `Quick test_record_verdict_writes;
       test_case "reject verdict" `Quick test_record_verdict_reject;
       test_case "hash matches" `Quick test_record_verdict_hash_matches;
+      test_case "review on_verdict records" `Quick test_review_on_verdict_records;
     ];
     "human_label", [
       test_case "writes label" `Quick test_record_human_label;
@@ -450,6 +650,28 @@ let () =
     "stats", [
       test_case "counts" `Quick test_calibration_stats;
       test_case "cross_model mix" `Quick test_calibration_stats_cross_model_mix;
+    ];
+    "record_verdicts_store", [
+      test_case "not recording -> none" `Quick test_store_not_recording;
+      test_case "requires store dir" `Quick test_store_requires_dir;
+      test_case "rejects empty store dir" `Quick test_store_rejects_empty_dir;
+      test_case "rejects live store" `Quick test_store_rejects_live;
+      test_case "rejects live store aliases" `Quick test_store_rejects_live_aliases;
+      test_case "rejects live store child" `Quick test_store_rejects_live_child;
+      test_case "accepts isolated" `Quick test_store_accepts_isolated;
+      test_case "no live store -> no collision" `Quick test_store_no_live_no_collision;
+    ];
+    "record_verdicts_evaluator", [
+      test_case "not recording passthrough" `Quick test_evaluator_not_recording_passthrough;
+      test_case "requires cross verifier" `Quick test_evaluator_requires_cross_verifier;
+      test_case "rejects default same as generator" `Quick
+        test_evaluator_rejects_default_same_as_generator;
+      test_case "accepts default distinct cross verifier" `Quick
+        test_evaluator_accepts_default_distinct_cross_verifier;
+      test_case "accepts explicit same-model override" `Quick
+        test_evaluator_accepts_explicit_same_model_override;
+      test_case "rejects empty explicit override" `Quick
+        test_evaluator_rejects_empty_explicit_override;
     ];
     "oas_conversion", [
       test_case "approve verdict" `Quick test_to_harness_verdict_approve;

@@ -21,6 +21,9 @@ let hard_quota_cooldown_sec = Keeper_binding_health_config.hard_quota_cooldown_s
 let terminal_failure_cooldown_sec =
   Keeper_binding_health_config.terminal_failure_cooldown_sec
 
+let server_error_cooldown_sec =
+  Keeper_binding_health_config.server_error_cooldown_sec
+
 let soft_rate_limit_cooldown_sec =
   Keeper_binding_health_config.soft_rate_limit_cooldown_sec
 
@@ -56,6 +59,10 @@ let cooldown_config_for = Keeper_binding_health_config.cooldown_config_for
    resumable-session conflict is the motivating case: fallback is correct for
    the current call, but repeatedly attempting the same provider first on every
    later call only adds latency and silently degrades runtime diversity. *)
+(* [Server_error] represents upstream HTTP 5xx.  It is usually transient, but
+   OAS has already spent its owned retry/backoff by the time this reaches MASC;
+   a medium immediate cooldown prevents scheduled keeper cycles from paging
+   operators repeatedly on the same unhealthy cloud lane. *)
 (* [Soft_rate_limited] represents a transient HTTP 429 — provider is healthy
    but momentarily over its rate budget.  Distinct from [Failure] so a single
    event triggers an immediate (short) cooldown without waiting for the
@@ -67,6 +74,7 @@ type outcome =
   | Rejected
   | Hard_quota
   | Terminal_failure
+  | Server_error
   | Soft_rate_limited
   | Capacity_backpressure
 
@@ -482,8 +490,27 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
         state.cooldown_until <- new_until;
         Runtime_metrics.on_provider_cooldown
           ~provider:provider_key ~reason:"terminal_failure";
-        Otel_metric_store.observe_histogram Keeper_metrics.(to_string ProviderBlockDurationSec)
-          ~labels:[("provider", provider_key)] terminal_failure_cooldown_sec
+        Otel_metric_store.observe_histogram
+          Keeper_metrics.(to_string ProviderBlockDurationSec)
+          ~labels:[ ("provider", provider_key) ]
+          terminal_failure_cooldown_sec
+      end
+    | Server_error ->
+      (* Upstream HTTP 5xx can recover without operator action, so it should not
+         use terminal-failure blackout.  It still needs an immediate medium
+         cooldown because thresholded generic failures are shorter than many
+         keeper autonomous cadences and therefore fail to break repeated pages. *)
+      state.consecutive_failures <- state.consecutive_failures + 1;
+      bump_failure_fp ();
+      let new_until = now +. server_error_cooldown_sec in
+      if new_until > state.cooldown_until then begin
+        state.cooldown_until <- new_until;
+        Runtime_metrics.on_provider_cooldown
+          ~provider:provider_key ~reason:"server_error";
+        Otel_metric_store.observe_histogram
+          Keeper_metrics.(to_string ProviderBlockDurationSec)
+          ~labels:[ ("provider", provider_key) ]
+          server_error_cooldown_sec
       end)
 
 let record_success t ~provider_key ?latency_ms ?confidence ?cost_usd () =
@@ -504,6 +531,12 @@ let record_hard_quota t ~provider_key ?error_kind ?error_reason () =
 
 let record_terminal_failure t ~provider_key ?error_kind ?error_reason () =
   record t ~provider_key ~outcome:Terminal_failure ?error_kind ?error_reason
+    ~now:(Unix.gettimeofday ()) ()
+
+let record_server_error t ~provider_key ?error_kind ?error_reason () =
+  record t ~provider_key ~outcome:Server_error ?error_kind ?error_reason
+    (* NDT-OK: runtime provider-health telemetry boundary; deterministic tests
+       can exercise the underlying [record] path with an explicit [~now]. *)
     ~now:(Unix.gettimeofday ()) ()
 
 let record_soft_rate_limited t ~provider_key ?retry_after_s ?error_kind
@@ -849,6 +882,7 @@ type outcome_kind =
   | Outcome_rejected
   | Outcome_hard_quota
   | Outcome_terminal_failure
+  | Outcome_server_error
   | Outcome_soft_rate_limited
   | Outcome_capacity_backpressure
 
@@ -866,22 +900,25 @@ let outcome_matches kind ev =
   | Outcome_rejected, Rejected
   | Outcome_hard_quota, Hard_quota
   | Outcome_terminal_failure, Terminal_failure
+  | Outcome_server_error, Server_error
   | Outcome_soft_rate_limited, Soft_rate_limited
   | Outcome_capacity_backpressure, Capacity_backpressure -> true
   | Outcome_success,
-      (Failure | Rejected | Hard_quota | Terminal_failure | Soft_rate_limited | Capacity_backpressure)
+      (Failure | Rejected | Hard_quota | Terminal_failure | Server_error | Soft_rate_limited | Capacity_backpressure)
   | Outcome_failure,
-      (Success | Rejected | Hard_quota | Terminal_failure | Soft_rate_limited | Capacity_backpressure)
+      (Success | Rejected | Hard_quota | Terminal_failure | Server_error | Soft_rate_limited | Capacity_backpressure)
   | Outcome_rejected,
-      (Success | Failure | Hard_quota | Terminal_failure | Soft_rate_limited | Capacity_backpressure)
+      (Success | Failure | Hard_quota | Terminal_failure | Server_error | Soft_rate_limited | Capacity_backpressure)
   | Outcome_hard_quota,
-      (Success | Failure | Rejected | Terminal_failure | Soft_rate_limited | Capacity_backpressure)
+      (Success | Failure | Rejected | Terminal_failure | Server_error | Soft_rate_limited | Capacity_backpressure)
   | Outcome_terminal_failure,
-      (Success | Failure | Rejected | Hard_quota | Soft_rate_limited | Capacity_backpressure)
+      (Success | Failure | Rejected | Hard_quota | Server_error | Soft_rate_limited | Capacity_backpressure)
+  | Outcome_server_error,
+      (Success | Failure | Rejected | Hard_quota | Terminal_failure | Soft_rate_limited | Capacity_backpressure)
   | Outcome_soft_rate_limited,
-      (Success | Failure | Rejected | Hard_quota | Terminal_failure | Capacity_backpressure)
+      (Success | Failure | Rejected | Hard_quota | Terminal_failure | Server_error | Capacity_backpressure)
   | Outcome_capacity_backpressure,
-      (Success | Failure | Rejected | Hard_quota | Terminal_failure | Soft_rate_limited) -> false
+      (Success | Failure | Rejected | Hard_quota | Terminal_failure | Server_error | Soft_rate_limited) -> false
 
 (* Count [outcome] events recorded for [provider_key] within the last
    [window_s] seconds.  We piggyback on the same event ring used by

@@ -65,6 +65,8 @@ describe('buildKeeperPromptAssemblyReport', () => {
       'oas-hook',
     ])
     expect(report.stages.find(stage => stage.id === 'unified-world')?.promptCount).toBe(9)
+    expect(report.rows.find(row => row.promptKey === '(computed:world_observation)')?.source).toBe('computed')
+    expect(report.rows.find(row => row.promptKey === '(computed:scheduled_automation)')?.source).toBe('computed')
     expect(report.activePromptRoots).toEqual(['/tmp/.masc/config/prompts'])
     expect(report.rows.find(row => row.promptKey === 'keeper.world')?.source).toBe('override')
     expect(report.rows.find(row => row.promptKey === 'keeper.recovery_block')?.missing).toBe(true)
@@ -141,6 +143,7 @@ describe('buildKeeperPromptAssemblyReport', () => {
     expect(defaultRoute?.textContent).toContain('user')
     expect(defaultRoute?.textContent).toContain('final')
     expect(defaultRoute?.textContent).toContain('Final context')
+    expect(defaultRoute?.textContent).toContain('scheduler signals')
     expect(container.textContent).toContain('sent parts')
     expect(defaultRoute?.textContent).not.toContain('model-visible')
     expect(defaultRoute?.textContent).not.toMatch(/provider/i)
@@ -186,6 +189,7 @@ describe('buildKeeperPromptAssemblyReport', () => {
     expect(rawFileList?.hasAttribute('open')).toBe(false)
     expect(rawFileList?.querySelector('summary')?.textContent).toContain('Raw prompt files')
     expect(evidence?.textContent).toContain('keeper.world')
+    expect(evidence?.textContent).toContain('(computed:scheduled_automation)')
     expect(evidence?.textContent).toContain('fingerprint')
 
     const intro = container.querySelector('[data-prompt-recipe-intro]')

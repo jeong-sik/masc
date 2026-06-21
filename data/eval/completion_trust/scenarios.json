@@ -21,6 +21,7 @@
       }
     ],
     "max_turns": 4,
+    "ownership": "foreign",
     "tags": ["completion-trust", "regression-guard", "rfc-0262-section9", "issue-20925"]
   },
   {
@@ -45,6 +46,7 @@
       }
     ],
     "max_turns": 4,
+    "ownership": "self_owned",
     "tags": ["completion-trust", "target-spec", "rfc-0199-phase-b", "issue-21074"]
   },
   {
@@ -69,6 +71,7 @@
       }
     ],
     "max_turns": 4,
+    "ownership": "self_owned",
     "tags": ["completion-trust", "target-spec", "rfc-0199-phase-b", "issue-20710"]
   }
 ]

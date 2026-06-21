@@ -58,6 +58,11 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'keeper_tool_skipped',
   'keeper_turn_complete',
   'masc/keeper_turn_complete',
+  // RFC-0266 Phase 4: fusion run-status transitions (running -> completed/failed).
+  // Must be in this closed allowlist or parseSSEMessage drops the event at the
+  // parse boundary, before the live WS router (sse-store.ts routeServerPushEvent
+  // -> SIMPLE_ROUTES['fusion_run_status'] -> refreshFusionRuns) can dispatch it.
+  'fusion_run_status',
   'client_input_approved',
   'client_input_rejected',
   'client_input_updated',

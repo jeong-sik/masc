@@ -673,6 +673,12 @@ export interface DashboardGovernanceResponse {
   pending_actions?: PendingConfirmation[]
   approval_queue?: KeeperApprovalQueueItem[]
   approval_rules?: KeeperApprovalRule[]
+  hitl?: {
+    enabled: boolean
+    disabled_by_env: boolean
+    env_name: string
+    default_enabled: boolean
+  }
 }
 
 export interface DashboardPlanningResponse {

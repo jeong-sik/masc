@@ -7,7 +7,9 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'pr
 import { ringFocusClasses } from '../common/ring'
 import { collectAttachments } from './attachments'
 import { parseMarkdownToBlocks } from './markdown-blocks'
+import { linkifyHtmlReferences } from './chat-linkify'
 import { showToast } from '../common/toast'
+import { copyToClipboard } from '../common/copyable-code'
 import { useVoiceInput } from './voice-input'
 import { Mic, Square } from 'lucide-preact'
 
@@ -452,14 +454,6 @@ function ChatArtifactPreview({
 
 // --- Keeper v2 rich block helpers -------------------------------------------------
 
-function linkifyHtml(raw: string): string {
-  if (!raw || raw.indexOf('http') === -1 || raw.indexOf('<a ') !== -1) return raw
-  return raw.replace(
-    /(^|[\s(>])(https?:\/\/[^\s<)]+[^\s<).,!?:;])/g,
-    '$1<a class="inline-link" href="$2" target="_blank" rel="noopener noreferrer">$2</a>',
-  )
-}
-
 function sanitizeHtml(raw: string): string {
   return purifyHtml(raw)
 }
@@ -469,7 +463,18 @@ function sanitizeSvg(raw: string): string {
 }
 
 function renderInlineHtml(raw: string): { __html: string } {
-  return { __html: sanitizeHtml(linkifyHtml(raw)) }
+  return { __html: sanitizeHtml(linkifyHtmlReferences(raw)) }
+}
+
+// Trace-step thinking text: render through the same sanitized markdown path the
+// assistant message body uses (purifyHtml(marked.parse(...))) so newlines and
+// inline formatting survive. Raw `${step.text}` interpolation collapsed both —
+// the model emits multi-line reasoning and the single-span layout folded it into
+// one run-on line. purifyHtml strips untrusted model markup (XSS coverage in
+// primitives.test.ts); `whitespace-pre-wrap` on the container preserves the
+// newlines marked leaves between paragraphs.
+function traceStepMarkdown(raw: string): { __html: string } {
+  return { __html: purifyHtml(marked.parse(raw) as string) }
 }
 
 function highlightJson(obj: unknown): string {
@@ -603,13 +608,12 @@ function codeBlockText(htmlContent: string, source?: string): string {
   return htmlContent
 }
 
-async function copyCodeToClipboard(text: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text)
-    showToast('코드를 복사했습니다', 'success')
-  } catch {
-    showToast('복사하지 못했습니다', 'error')
-  }
+// Reuse the canonical clipboard helper (common/copyable-code) — it carries the
+// execCommand fallback for non-secure contexts — and just layer the toast on its
+// boolean result so the message text matches what was copied.
+async function copyWithToast(text: string, successMessage: string): Promise<void> {
+  const ok = await copyToClipboard(text)
+  showToast(ok ? successMessage : '복사하지 못했습니다', ok ? 'success' : 'error')
 }
 
 function ChatCodeBlock({ cap, html: htmlContent, source }: { cap?: string; html: string; source?: string }) {
@@ -647,7 +651,7 @@ function ChatCodeBlock({ cap, html: htmlContent, source }: { cap?: string; html:
           class="chat-block-code-copy"
           aria-label="코드 복사"
           title="복사"
-          onClick=${() => { void copyCodeToClipboard(plain) }}
+          onClick=${() => { void copyWithToast(plain, '코드를 복사했습니다') }}
         >
           복사
         </button>
@@ -966,8 +970,11 @@ function ChatTraceStep({ step }: { step: ChatTraceStep }) {
         <div class="min-w-0 flex-1">
           <div class="chat-block-tstep-row">
             <span class="chat-block-tstep-kind">Thinking</span>
-            <span class="chat-block-tstep-text">${step.text}</span>
           </div>
+          <div
+            class="chat-block-tstep-text markdown-body whitespace-pre-wrap break-words"
+            dangerouslySetInnerHTML=${traceStepMarkdown(step.text)}
+          />
         </div>
       </div>
     `
@@ -1226,7 +1233,7 @@ function FusionPanelRow({ entry }: { entry: FusionPanelEntry }) {
   `
 }
 
-function ChatFusionCard({ boardPostId, runId }: { boardPostId: string; runId?: string }) {
+function ChatFusionCard({ boardPostId, runId, fallbackText }: { boardPostId: string; runId?: string; fallbackText?: string }) {
   const [expanded, setExpanded] = useState(false)
   const [state, setState] = useState<{
     status: 'idle' | 'loading' | 'loaded' | 'error'
@@ -1290,7 +1297,12 @@ function ChatFusionCard({ boardPostId, runId }: { boardPostId: string; runId?: s
               ? html`<div class="text-xs text-[var(--color-fg-secondary,#9da7b3)]">불러오는 중…</div>`
               : null}
             ${state.status === 'error'
-              ? html`<div class="text-xs text-[var(--color-danger,#e06c75)]">상세를 불러오지 못했습니다: ${state.error}</div>`
+              ? html`
+                <div class="text-xs text-[var(--color-danger,#e06c75)]">상세를 불러오지 못했습니다: ${state.error}</div>
+                ${fallbackText && fallbackText.trim()
+                  ? html`<div class="mt-1" data-fusion-fallback><${FusionMarkdown} text=${fallbackText} /></div>`
+                  : null}
+              `
               : null}
             ${state.status === 'loaded'
               ? html`
@@ -1317,10 +1329,13 @@ function ChatFusionCard({ boardPostId, runId }: { boardPostId: string; runId?: s
                   `
                   : null}
                 ${state.panel.length === 0 && !state.judge
-                  ? html`<div class="text-xs text-[var(--color-fg-secondary,#9da7b3)]">패널/심판 상세가 비어 있습니다.</div>`
+                  ? fallbackText && fallbackText.trim()
+                    ? html`<div class="mt-1" data-fusion-fallback><${FusionMarkdown} text=${fallbackText} /></div>`
+                    : html`<div class="text-xs text-[var(--color-fg-secondary,#9da7b3)]">패널/심판 상세가 비어 있습니다.</div>`
                   : null}
               `
               : null}
+            <div class="text-2xs text-[var(--color-fg-muted,#6b7280)]" data-fusion-retention>심의 상세는 board 보관 기간이 지나면 만료됩니다.</div>
           </div>
         `
         : null}
@@ -1328,7 +1343,7 @@ function ChatFusionCard({ boardPostId, runId }: { boardPostId: string; runId?: s
   `
 }
 
-function ChatBlock({ block }: { block: ChatBlock }) {
+function ChatBlock({ block, fallbackText }: { block: ChatBlock; fallbackText?: string }) {
   switch (block.t) {
     case 'p': return html`<${ChatTextBlock} html=${block.html} />`
     case 'h4': return html`<${ChatHeadingBlock} html=${block.html} />`
@@ -1346,15 +1361,15 @@ function ChatBlock({ block }: { block: ChatBlock }) {
     case 'trace': return html`<${ChatTraceBlock} trace=${block.trace} />`
     case 'link': return html`<${ChatLinkBlock} url=${block.url} title=${block.title} desc=${block.desc} meta=${block.meta} fav=${block.fav} kind=${block.kind} />`
     case 'broadcast': return html`<${ChatBroadcastBlock} scope=${block.scope} via=${block.via} note=${block.note} recipients=${block.recipients} />`
-    case 'fusion': return html`<${ChatFusionCard} boardPostId=${block.board_post_id} runId=${block.run_id} />`
+    case 'fusion': return html`<${ChatFusionCard} boardPostId=${block.board_post_id} runId=${block.run_id} fallbackText=${fallbackText} />`
     default: return null
   }
 }
 
-function ChatBlocks({ blocks }: { blocks: ChatBlock[] }) {
+function ChatBlocks({ blocks, fallbackText }: { blocks: ChatBlock[]; fallbackText?: string }) {
   return html`
     <div class="flex flex-col gap-3" data-chat-blocks>
-      ${blocks.map((b, i) => html`<${ChatBlock} key=${i} block=${b} />`)}
+      ${blocks.map((b, i) => html`<${ChatBlock} key=${i} block=${b} fallbackText=${fallbackText} />`)}
     </div>
   `
 }
@@ -1757,6 +1772,22 @@ function ChatMessageBubble({
               </button>
             `
           : null}
+        ${richTextRole && hasRealText
+          ? html`
+              <button
+                type="button"
+                class=${`border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${CHAT_FOCUS_RING} ${
+                  isMessenger ? 'rounded-[var(--r-1)] px-2.5 py-1' : 'rounded-[var(--r-0)] px-3 py-1'
+                }`}
+                onClick=${() => { void copyWithToast(entry.text, '메시지를 복사했습니다') }}
+                title="메시지 복사"
+                aria-label="메시지 복사"
+                data-testid="chat-message-copy"
+              >
+                복사
+              </button>
+            `
+          : null}
         ${canExpand
           ? html`
               <button
@@ -1794,7 +1825,7 @@ function ChatMessageBubble({
                   >${renderStructuredFailureText(messageText)}</pre>
                 `
               : hasEffectiveBlocks
-              ? html`<${ChatBlocks} blocks=${effectiveBlocks} />`
+              ? html`<${ChatBlocks} blocks=${effectiveBlocks} fallbackText=${entry.text} />`
               : html`
                   <div
                     class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
@@ -2038,29 +2069,52 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   `
 }
 
-const TOOL_STATUS_TITLE: Record<'pending' | 'ok' | 'bad', string> = {
+const TOOL_STATUS_TITLE: Record<'pending' | 'missing' | 'ok' | 'bad', string> = {
   pending: '출력 대기 중',
+  missing: '결과 누락 — 턴이 끝났는데 출력이 도착하지 않음',
   ok: '성공',
   bad: '실패',
 }
 
+// A tool call's output is legitimately "pending" while its turn is still
+// streaming, or before the separate tool-output hydration surface has loaded.
+// Once both have settled, an output that never joined is a gap (e.g. a call
+// whose tool_use_id was empty and never joined), not indefinite "pending".
+function isTurnStreaming(state: KeeperConversationEntry['streamState']): boolean {
+  return state === 'opening' || state === 'thinking' || state === 'streaming' || state === 'finalizing'
+}
+
+function isToolOutputCoveredByHydration(
+  entry: KeeperConversationEntry,
+  coveredSinceMs: number | null | undefined,
+  coveredThroughMs: number | null | undefined,
+): boolean {
+  if (coveredThroughMs == null) return false
+  const timestampMs = entry.timestamp ? Date.parse(entry.timestamp) : NaN
+  return Number.isFinite(timestampMs)
+    && (coveredSinceMs == null || timestampMs >= coveredSinceMs)
+    && timestampMs <= coveredThroughMs
+}
+
 // One step of a grouped tool-trace card: a single tool call rendered from REAL
 // data only. Name + input args come from the chat entry; status, duration and
-// result are joined from the tool-call output store (null until hydration
-// lands, or forever for calls that carried no provider id — surfaced as a muted
-// "pending" dot rather than miscoloured as a failure).
-function ToolTraceStep({ entry, output }: { entry: KeeperConversationEntry; output: ToolCallEntry | null }) {
+// result are joined from the tool-call output store. A null output is "pending"
+// until the owning turn and output hydration have both settled; after that, a
+// still-null output is "missing" (unknown outcome).
+function ToolTraceStep({ entry, output, canMarkMissing = false }: { entry: KeeperConversationEntry; output: ToolCallEntry | null; canMarkMissing?: boolean }) {
   const [open, setOpen] = useState(false)
   const name = entry.label || 'tool'
   const displayArgs = prettyJsonish(entry.text || '')
   const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
-  const status: 'pending' | 'ok' | 'bad' =
+  const status: 'pending' | 'missing' | 'ok' | 'bad' =
     output === null
-      ? 'pending'
+      ? canMarkMissing
+        ? 'missing'
+        : 'pending'
       : output.success === false || output.semantic_success === false
         ? 'bad'
         : 'ok'
-  const durLabel = output && output.duration_ms > 0 ? formatMsCompact(output.duration_ms) : ''
+  const durLabel = output?.duration_ms != null && output.duration_ms > 0 ? formatMsCompact(output.duration_ms) : ''
   const resultView = output ? toolOutputDisplay(output.output) : null
   const hasResult = resultView !== null && resultView.text.trim() !== ''
   // Expandable when there is anything to show: args, a result, or a still-pending
@@ -2100,7 +2154,7 @@ function ToolTraceStep({ entry, output }: { entry: KeeperConversationEntry; outp
                       <pre class="m-0 max-h-64 overflow-y-auto whitespace-pre-wrap break-all text-2xs">${resultView.text}</pre>
                     `
                   : output === null
-                    ? html`<div class="chat-block-tool-label">출력 대기 중…</div>`
+                    ? html`<div class="chat-block-tool-label">${canMarkMissing ? '결과 없음 — 출력이 도착하지 않음' : '출력 대기 중…'}</div>`
                     : null}
               </div>
             `
@@ -2114,18 +2168,71 @@ function ToolTraceStep({ entry, output }: { entry: KeeperConversationEntry; outp
 // card placed above the answer bubble. The step list is visible by default so
 // operators can see thinking progress, tool names, and status without opening
 // each raw args/result body.
+// Interleave think/reason trace steps with tool entries by occurrence time so
+// the card shows the real think -> tool -> think order instead of two separate
+// blocks. This is a render-time merge only: tool entries keep their
+// entry-based output join (lookupToolCallOutput) and trace steps keep their
+// markdown render path. No data-structure change, so #21892 missing/aggregate
+// counts and the ToolTraceStep status taxonomy (pending/missing/ok/bad) are
+// preserved.
+type TraceOrderItem =
+  | { kind: 'trace'; step: ChatTraceStep }
+  | { kind: 'tool'; entry: KeeperConversationEntry; output: ToolCallEntry | null }
+
+function traceOrderTs(item: TraceOrderItem): string {
+  // ISO-8601 strings sort lexicographically == chronologically. A step without
+  // `ts` (backend-normalized, no timestamp surfaced from the wire) sorts first.
+  if (item.kind === 'tool') return item.entry.timestamp ?? ''
+  // Only think/reason carry `ts`; the tool variant of ChatTraceStep does not
+  // (and is never a 'trace' item here, but narrow for type safety).
+  const step = item.step
+  return step.kind === 'tool' ? '' : step.ts ?? ''
+}
+
+export function interleaveTraceAndTools(
+  traceSteps: ChatTraceStep[],
+  toolSteps: { entry: KeeperConversationEntry; output: ToolCallEntry | null }[],
+): TraceOrderItem[] {
+  const traceItems: TraceOrderItem[] = traceSteps.map((step) => ({ kind: 'trace', step }))
+  const toolItems: TraceOrderItem[] = toolSteps.map(({ entry, output }) => ({ kind: 'tool', entry, output }))
+  // trace-then-tool concat is the stable fallback order: Array.prototype.sort
+  // is stable, so equal (or absent) timestamps preserve this input order,
+  // matching the legacy two-section render as a baseline.
+  return [...traceItems, ...toolItems].sort((a, b) => {
+    const ta = traceOrderTs(a)
+    const tb = traceOrderTs(b)
+    if (ta === tb) return 0
+    return ta < tb ? -1 : 1
+  })
+}
+
 function ToolTraceCard({
   tools,
   traceSteps = [],
+  turnComplete = false,
+  toolOutputsCoveredSinceMs = null,
+  toolOutputsCoveredThroughMs = null,
 }: {
   tools: KeeperConversationEntry[]
   traceSteps?: ChatTraceStep[]
+  turnComplete?: boolean
+  toolOutputsCoveredSinceMs?: number | null
+  toolOutputsCoveredThroughMs?: number | null
 }) {
   const [open, setOpen] = useState(true)
   const steps = tools.map((entry) => ({ entry, output: lookupToolCallOutput(entry.id) }))
+  const canMarkMissingForEntry = (entry: KeeperConversationEntry): boolean =>
+    turnComplete && isToolOutputCoveredByHydration(entry, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs)
+  // Merge think/reason steps and tool entries into a single occurrence-ordered
+  // sequence. Aggregates below (failN/missingN/totalMs/stepN) stay entry-based,
+  // so #21892 missing detection and the status taxonomy are unaffected.
+  const ordered = interleaveTraceAndTools(traceSteps, steps)
   const failN = steps.filter(
     (s) => s.output !== null && (s.output.success === false || s.output.semantic_success === false),
   ).length
+  // Surface unjoined outputs as "missing" only once the turn and output
+  // hydration have both settled.
+  const missingN = steps.filter((s) => s.output === null && canMarkMissingForEntry(s.entry)).length
   const totalMs = steps.reduce((sum, s) => sum + (s.output?.duration_ms ?? 0), 0)
   const durLabel = totalMs > 0 ? formatMsCompact(totalMs) : null
   const stepN = traceSteps.length + tools.length
@@ -2145,6 +2252,7 @@ function ToolTraceCard({
         <span class="chat-block-trace-meta">
           ${tools.length > 0 ? html`<span>도구 ${tools.length}</span>` : null}
           ${failN > 0 ? html`<span class="text-[var(--color-status-err)]">실패 ${failN}</span>` : null}
+          ${missingN > 0 ? html`<span class="text-[var(--color-status-warn)]">결과 누락 ${missingN}</span>` : null}
           ${durLabel ? html`<span class="tnum">${durLabel}</span>` : null}
         </span>
       </button>
@@ -2152,8 +2260,15 @@ function ToolTraceCard({
         ? html`
             <div class="chat-block-trace-steps">
               <span class="chat-block-trace-rail"></span>
-              ${traceSteps.map((step, index) => html`<${ChatTraceStep} key=${`trace-${index}`} step=${step} />`)}
-              ${steps.map(({ entry, output }) => html`<${ToolTraceStep} key=${entry.id} entry=${entry} output=${output} />`)}
+              ${ordered.map((item, index) =>
+                item.kind === 'trace'
+                  ? html`<${ChatTraceStep} key=${`trace-${index}`} step=${item.step} />`
+                  : html`<${ToolTraceStep}
+                      key=${`tool-${item.entry.id}`}
+                      entry=${item.entry}
+                      output=${item.output}
+                      canMarkMissing=${canMarkMissingForEntry(item.entry)}
+                    />`)}
             </div>
           `
         : null}
@@ -2167,6 +2282,8 @@ function TurnWorkBundle({
   showMetadata,
   variant,
   showSourceBadge,
+  toolOutputsCoveredSinceMs,
+  toolOutputsCoveredThroughMs,
   action,
 }: {
   tools: KeeperConversationEntry[]
@@ -2174,12 +2291,23 @@ function TurnWorkBundle({
   showMetadata?: boolean
   variant: ChatTranscriptVariant
   showSourceBadge: boolean
+  toolOutputsCoveredSinceMs: number | null
+  toolOutputsCoveredThroughMs: number | null
   action?: ChatTranscriptAction
 }) {
   const traceSteps = assistant.traceSteps ?? []
+  // The bundle owns the assistant entry, but output hydration is a separate
+  // async surface. Only mark gaps after that surface has successfully loaded.
+  const turnComplete = !isTurnStreaming(assistant.streamState)
   return html`
     <div class="chat-turn-bundle" data-chat-turn-bundle>
-      <${ToolTraceCard} tools=${tools} traceSteps=${traceSteps} />
+      <${ToolTraceCard}
+        tools=${tools}
+        traceSteps=${traceSteps}
+        turnComplete=${turnComplete}
+        toolOutputsCoveredSinceMs=${toolOutputsCoveredSinceMs}
+        toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
+      />
       <${ChatMessageBubble}
         entry=${assistant}
         showMetadata=${showMetadata !== false}
@@ -2293,9 +2421,11 @@ function renderChatTranscriptBody(opts: {
   showMetadata?: boolean
   variant: ChatTranscriptVariant
   showSourceBadge: boolean
+  toolOutputsCoveredSinceMs: number | null
+  toolOutputsCoveredThroughMs: number | null
   action?: ChatTranscriptAction
 }): VNode[] {
-  const { entries, showDayDividers, groupToolCalls, showMetadata, variant, showSourceBadge, action } = opts
+  const { entries, showDayDividers, groupToolCalls, showMetadata, variant, showSourceBadge, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs, action } = opts
   const units = buildChatRenderUnits(entries, groupToolCalls)
   const out: VNode[] = []
   // Track the last NON-NULL calendar day rather than only the immediately
@@ -2325,6 +2455,8 @@ function renderChatTranscriptBody(opts: {
         showMetadata=${showMetadata}
         variant=${variant}
         showSourceBadge=${showSourceBadge}
+        toolOutputsCoveredSinceMs=${toolOutputsCoveredSinceMs}
+        toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
         action=${action}
       />`)
     } else if (unit.entry.role === 'tool') {
@@ -2347,8 +2479,8 @@ function traceStepsSignature(entry: KeeperConversationEntry): string {
   const steps = entry.traceSteps
   if (!steps?.length) return ''
   return steps.map((step) => {
-    if (step.kind === 'think') return `think:${step.text.length}`
-    if (step.kind === 'reason') return `reason:${step.text.length}:${step.detail?.length ?? 0}`
+    if (step.kind === 'think') return `think:${step.text.length}:${step.ts ?? ''}`
+    if (step.kind === 'reason') return `reason:${step.text.length}:${step.detail?.length ?? 0}:${step.ts ?? ''}`
     return `tool:${step.name}:${step.status ?? ''}:${step.dur ?? ''}:${step.result?.length ?? 0}`
   }).join(',')
 }
@@ -2362,6 +2494,8 @@ export function ChatTranscript({
   showDayDividers = false,
   groupToolCalls = false,
   showSourceBadge = false,
+  toolOutputsCoveredSinceMs = null,
+  toolOutputsCoveredThroughMs = null,
   action,
 }: {
   entries: KeeperConversationEntry[]
@@ -2376,6 +2510,8 @@ export function ChatTranscript({
   // Default false so non-workspace surfaces keep the flat per-row ToolCallBubble.
   groupToolCalls?: boolean
   showSourceBadge?: boolean
+  toolOutputsCoveredSinceMs?: number | null
+  toolOutputsCoveredThroughMs?: number | null
   action?: ChatTranscriptAction
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null)
@@ -2386,16 +2522,19 @@ export function ChatTranscript({
     [entries],
   )
   const toolOutputSignature = useMemo(
-    () => entries
-      .filter(entry => entry.role === 'tool')
-      .map((entry) => {
-        const output = lookupToolCallOutput(entry.id)
-        return output
-          ? `${entry.id}:${output.success}:${output.semantic_success ?? ''}:${output.duration_ms}:${toolOutputDisplay(output.output)?.text.length ?? 0}`
-          : `${entry.id}:pending`
-      })
-      .join('|'),
-    [entries, toolCallOutputsById.value],
+    () => {
+      const coverageSig = `${toolOutputsCoveredSinceMs ?? ''}:${toolOutputsCoveredThroughMs ?? ''}`
+      return entries
+        .filter(entry => entry.role === 'tool')
+        .map((entry) => {
+          const output = lookupToolCallOutput(entry.id)
+          return output
+            ? `${entry.id}:${output.success}:${output.semantic_success ?? ''}:${output.duration_ms}:${toolOutputDisplay(output.output)?.text.length ?? 0}`
+            : `${entry.id}:pending:${coverageSig}`
+        })
+        .join('|')
+    },
+    [entries, toolCallOutputsById.value, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs],
   )
 
   const scrollToBottom = () => {
@@ -2461,6 +2600,8 @@ export function ChatTranscript({
               showMetadata,
               variant,
               showSourceBadge,
+              toolOutputsCoveredSinceMs,
+              toolOutputsCoveredThroughMs,
               action,
             })}
       </div>

@@ -6,10 +6,10 @@ import type { GroundedVerdict, RouteState, TabId } from '../types'
 import type { DashboardCdalHealth, DashboardFleetSafetyHealth, DashboardKeeperReactionLedgerHealth, DashboardRuntimeResolution, Keeper } from '../types'
 import type { DashboardRuntimeProbePayload } from '../api/dashboard'
 import { fetchDashboardRuntimeProbe } from '../api/dashboard'
-import { hashForRoute, navigate, route } from '../router'
+import { route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
-import { dashboardWsConnected, dashboardWsSseFallbackActive } from '../dashboard-ws-state'
+import { dashboardWsConnected, dashboardWsLastError, dashboardWsReady, dashboardWsSseFallbackActive } from '../dashboard-ws-state'
 import { isKeeperPaused } from '../lib/keeper-predicates'
 import { dashboardLoading, executionError, keepers, serverStatus, shellCounts, shellRuntimeResolution, tasksByStatus } from '../store'
 import { missionSnapshot, missionLoading } from '../mission-signals'
@@ -33,9 +33,7 @@ import {
 } from '../config/navigation'
 import { ObservatoryFilterBar } from './common/observatory-filter-bar'
 import { ChevronRight, ChevronLeft } from 'lucide-preact'
-import { ExternalLink } from 'lucide-preact'
 import { ScrollToTopButton } from './common/scroll-to-top'
-import { CopyIdButton } from './common/copy-id-button'
 import { formatElapsedCompact } from '../lib/format-time'
 import { unacknowledgedCount } from './common/error-notification-state'
 import { ErrorPanel } from './common/error-panel'
@@ -43,12 +41,10 @@ import { Bell } from 'lucide-preact'
 import { ringFocusClasses } from './common/ring'
 import { SurfaceIcon } from './surface-icon'
 import { governanceData } from './governance-signals'
-import { Breadcrumb, type BreadcrumbItem } from './common/breadcrumb'
 import { RouteLink } from './common/route-link'
 import {
   isWidgetSoloRoute,
   WidgetSoloBar,
-  widgetSoloUrlForRoute,
 } from './widget-solo'
 
 const buildIdentityOpen = signal(false)
@@ -124,44 +120,74 @@ function describeReconnecting(args: {
 
 export function ConnectionStatus() {
   const wsOnly = dashboardWsOnlyEnabled()
-  const isConnected = wsOnly
-    ? dashboardWsConnected.value || dashboardWsSseFallbackActive.value
-    : connected.value
-  const snap = missionSnapshot.value
-  const attentionCount = snap?.attention_queue?.length ?? 0
   const reconn = reconnectCount.value
-
-  const statusLabel = isConnected
-    ? reconn > 0 ? 'Reconnected' : 'Connected'
-    : describeReconnecting({
-        disconnectedAt: lastDisconnectedAt.value,
-        now: Date.now(),
-        reconnects: reconn,
-      }).label
-  const titleAttr = isConnected
-    ? reconn > 0 ? `Reconnect attempts ${reconn}` : ''
-    : describeReconnecting({
-        disconnectedAt: lastDisconnectedAt.value,
-        now: Date.now(),
-        reconnects: reconn,
-      }).title
+  const reconnecting = describeReconnecting({
+    disconnectedAt: lastDisconnectedAt.value,
+    now: Date.now(),
+    reconnects: reconn,
+  })
+  const status = (() => {
+    if (wsOnly) {
+      if (dashboardWsReady.value) {
+        return {
+          tone: 'ok' as const,
+          label: reconn > 0 ? 'Reconnected' : 'Connected',
+          title: reconn > 0 ? `Reconnect attempts ${reconn}` : '',
+        }
+      }
+      if (dashboardWsSseFallbackActive.value) {
+        return {
+          tone: 'warn' as const,
+          label: 'SSE fallback',
+          title: dashboardWsLastError.value
+            ? `Client WS degraded: ${dashboardWsLastError.value}`
+            : 'Client WS degraded; SSE fallback is carrying events.',
+        }
+      }
+      if (dashboardWsConnected.value) {
+        return {
+          tone: 'warn' as const,
+          label: 'Connecting WS',
+          title: 'Client WS socket is open; waiting for dashboard/hello.',
+        }
+      }
+    } else if (connected.value) {
+      return {
+        tone: 'ok' as const,
+        label: reconn > 0 ? 'Reconnected' : 'Connected',
+        title: reconn > 0 ? `Reconnect attempts ${reconn}` : '',
+      }
+    }
+    return {
+      tone: 'err' as const,
+      label: reconnecting.label,
+      title: reconnecting.title,
+    }
+  })()
+  const isConnected = status.tone === 'ok'
+  const textClass = status.tone === 'warn'
+    ? 'text-[var(--color-status-warn)]'
+    : isConnected
+      ? 'text-[var(--color-status-ok)]'
+      : 'text-[var(--color-status-err)]'
+  const dotClass = status.tone === 'warn'
+    ? 'bg-[var(--color-status-warn)]'
+    : isConnected
+      ? 'bg-[var(--color-status-ok)] shadow-[0_0_7px_rgb(var(--ok-glow)/0.75)]'
+      : 'bg-[var(--color-status-err)]'
 
   return html`
     <div
-      class="v2-shell-panel flex items-center gap-1.5 whitespace-nowrap text-xs ${isConnected ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-err)]'}"
-      title=${titleAttr || undefined}
+      class="v2-shell-panel flex items-center gap-1.5 whitespace-nowrap text-xs ${textClass}"
+      title=${status.title || undefined}
     >
-      <span class="inline-block size-[8px] rounded-[var(--r-0)] ${isConnected ? 'bg-[var(--color-status-ok)] shadow-[0_0_7px_rgb(var(--ok-glow)/0.75)]' : 'bg-[var(--color-status-err)]'}"></span>
-      <span class="status-text">${statusLabel}</span>
-      ${attentionCount > 0 ? html`
-        <${RouteLink}
-          tab="overview"
-          class="inline-flex items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 tabular-nums attention-badge"
-        >Attention ${attentionCount}<//>
-      ` : null}
+      <span class="inline-block size-[8px] rounded-[var(--r-0)] ${dotClass}"></span>
+      <span class="status-text">${status.label}</span>
     </div>
   `
 }
+// The attention count moved out of ConnectionStatus into the categorized
+// top-bar AttentionIndicator (components/attention-indicator.ts).
 
 type DashboardHealthChipTone = 'ok' | 'warn' | 'bad' | 'muted'
 
@@ -1302,87 +1328,6 @@ function TabContent() {
   }
 }
 
-/** Pure: build the shareable URL for the current section. Uses
-    window.location as the truth source (the router writes to it
-    already) so we never diverge from what the browser address bar
-    shows. Returns empty string when window is unavailable
-    (SSR/happy-dom without location) so the caller can hide the
-    share affordance gracefully. */
-function currentSectionShareUrl(): string {
-  if (typeof window === 'undefined' || window.location === undefined) {
-    return ''
-  }
-  return window.location.href
-}
-
-/** Pure: derive the navigation trail rendered above the section title.
-    Each crumb is either a clickable ancestor (tab) or the terminal
-    leaf (current section label, non-navigable). Returns a flat array:
-    [] when both tab + section are absent (home / unknown),
-    [tab] when only tab is active (no section drilldown),
-    [tab, section] when the operator has drilled into a per-section view.
-
-    Why this exists: SurfaceLead previously rendered only the leaf
-    label (\"Discord\"). The parent tab (\"Connectors\") was implied by
-    the left nav but not surfaced in the content area — a newcomer
-    opening a deep link had to infer the hierarchy. Every modern web
-    app (GitHub / Linear / Notion / Vercel) renders the trail above
-    the page title for exactly this reason. */
-interface BreadcrumbCrumb {
-  label: string
-  navigableTab: TabId | null
-}
-function deriveBreadcrumbTrail(
-  tabLabel: string | null,
-  sectionLabel: string | null,
-  tabId: TabId | null,
-): BreadcrumbCrumb[] {
-  if (tabLabel === null && sectionLabel === null) return []
-  if (sectionLabel === null) {
-    return tabLabel !== null ? [{ label: tabLabel, navigableTab: null }] : []
-  }
-  if (tabLabel === null) {
-    return [{ label: sectionLabel, navigableTab: null }]
-  }
-  // Drilldown view — tab becomes a clickable parent crumb, section is
-  // the non-navigable leaf (you're already there, clicking it would
-  // be a no-op).
-  return [
-    { label: tabLabel, navigableTab: tabId },
-    { label: sectionLabel, navigableTab: null },
-  ]
-}
-
-function navigateCrumb(event: MouseEvent, tab: TabId): void {
-  if (
-    event.defaultPrevented
-    || event.button !== 0
-    || event.metaKey
-    || event.ctrlKey
-    || event.shiftKey
-    || event.altKey
-  ) {
-    return
-  }
-  event.preventDefault()
-  navigate(tab)
-}
-
-function breadcrumbItemsForTrail(trail: BreadcrumbCrumb[]): BreadcrumbItem[] {
-  return trail.map((crumb, index) => {
-    const current = index === trail.length - 1
-    if (crumb.navigableTab !== null && !current) {
-      return {
-        label: crumb.label,
-        href: hashForRoute(crumb.navigableTab),
-        onClick: (event: MouseEvent) => navigateCrumb(event, crumb.navigableTab!),
-      }
-    }
-    return { label: crumb.label, current }
-  })
-}
-
-
 /** Pure: compose the browser tab title from the current surface +
     section. Reference: every polished SPA (GitHub / Linear / Notion /
     Vercel) sets document.title so operators with multiple tabs open
@@ -1419,71 +1364,6 @@ export function isKeeperDetailDashboardRoute(routeState: RouteState): boolean {
     && routeState.params.keeper.trim() !== ''
 }
 
-// Surfaces that render their own primary header and therefore do not need the
-// generic dashboard section lead above them. Keep this in sync with the route
-// registry; currently only the Connectors prototype surface uses its own header.
-const SURFACE_OWN_LEAD_IDS: ReadonlySet<TabId> = new Set(['connectors'])
-
-export function shouldRenderSurfaceLead(routeState: RouteState): boolean {
-  if (isKeeperDetailDashboardRoute(routeState)) return false
-  return !SURFACE_OWN_LEAD_IDS.has(routeState.tab)
-}
-
-function SurfaceLead() {
-  const currentTab = route.value.tab
-  const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
-  const currentSection = currentSectionForRoute(route.value)
-  const soloUrl = widgetSoloUrlForRoute(route.value)
-
-  const description = currentSection?.description ?? currentView?.description ?? null
-  const title = currentSection?.label ?? currentView?.label ?? 'Home'
-  const shareUrl = currentSectionShareUrl()
-  // Only surface a trail when the operator has drilled into a section —
-  // otherwise the crumb would be \"Connectors\" right above a \"Connectors\"
-  // title, pure duplication.
-  const trail = currentSection !== null
-    ? deriveBreadcrumbTrail(currentView?.label ?? null, currentSection.label, currentTab)
-    : []
-
-  return html`
-    <div class="v2-shell-panel mb-3 flex flex-col gap-1.5">
-      ${trail.length > 0
-        ? html`<${Breadcrumb}
-            items=${breadcrumbItemsForTrail(trail)}
-            ariaLabel="Breadcrumb"
-            testId="surface-breadcrumb"
-            dataSurfaceBreadcrumb=${true}
-          />`
-        : null}
-      <div class="flex items-center gap-2">
-        <h2 class="text-lg font-semibold tracking-normal text-[var(--color-fg-secondary)] leading-tight">
-          ${title}
-        </h2>
-        ${shareUrl !== ''
-          ? html`<${CopyIdButton}
-              value=${shareUrl}
-              label=${`Section link (${title})`}
-              ariaLabel="Copy current section URL"
-              size=${14}
-            />`
-          : null}
-        <a
-          href=${soloUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          class=${`v2-shell-action inline-flex size-7 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
-          title="Open this surface in a solo view"
-          aria-label="Open this surface in a solo view"
-          data-testid="dashboard-widget-solo-link"
-        >
-          <${ExternalLink} size=${14} aria-hidden="true" />
-        </a>
-      </div>
-      ${description ? html`<p class="m-0 max-w-[72rem] text-xs leading-[var(--lh-body)] text-[var(--color-fg-muted)]">${description}</p>` : null}
-    </div>
-  `
-}
-
 export function DashboardMain() {
   useSurfaceDocumentTitle()
 
@@ -1495,7 +1375,6 @@ export function DashboardMain() {
   const soloMode = isWidgetSoloRoute(route.value)
   const immersiveSurface = route.value.tab === 'code' || route.value.tab === 'keepers'
   const keeperDetailRoute = isKeeperDetailDashboardRoute(route.value)
-  const renderSurfaceLead = shouldRenderSurfaceLead(route.value)
   const warmingBanner = namespaceTruthInitializing.value ? html`
     <div class=${`v2-shell-panel ${immersiveSurface
       ? 'shrink-0 border-b border-solid border-[var(--warn-20)] bg-[var(--warn-10)] px-4 py-1.5 text-center text-xs text-[var(--color-status-warn)]'
@@ -1540,7 +1419,6 @@ export function DashboardMain() {
 
   return html`
     ${warmingBanner}
-    ${renderSurfaceLead ? html`<${SurfaceLead} />` : null}
     ${keeperDetailRoute ? null : html`<${ObservatoryFilterBar} />`}
     <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
       <div class="animate-in fade-in slide-in-from-bottom-2 duration-[var(--t-slow)] fill-mode-both">

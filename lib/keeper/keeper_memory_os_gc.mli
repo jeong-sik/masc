@@ -30,3 +30,11 @@ val run_gc
   -> now:float
   -> unit
   -> gc_report
+
+val run_gc_for_keepers_dir
+  :  keepers_dir:string
+  -> ?dry_run:bool
+  -> keeper_id:string
+  -> now:float
+  -> unit
+  -> gc_report

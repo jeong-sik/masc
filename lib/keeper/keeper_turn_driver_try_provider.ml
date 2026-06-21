@@ -189,56 +189,121 @@ let body_timeout_for_attempt ?per_provider_timeout_s () =
 
 type last_tool_progress_context =
   { tool_name : string
-  ; tool_effect : string
+  ; tool_effect : Keeper_internal_error.tool_progress_effect
+  ; any_mutating_tool : bool
+  ; tool_effects_seen : Keeper_internal_error.tool_progress_effect list
   }
 
-let last_tool_use_of_messages (messages : Agent_sdk.Types.message list) =
-  let last_tool_in_message (msg : Agent_sdk.Types.message) acc =
+let last_tool_effect_to_string = Keeper_internal_error.tool_progress_effect_to_string
+
+let classify_tool_effect ~tool_name ~input =
+  if Keeper_tool_registry.is_strictly_read_only_with_input ~tool_name ~input
+  then Keeper_internal_error.Tool_effect_read_only
+  else Keeper_internal_error.Tool_effect_mutating
+;;
+
+let dedupe_tool_effects effects =
+  effects
+  |> List.fold_left
+       (fun acc tool_effect ->
+          if List.mem tool_effect acc then acc else tool_effect :: acc)
+       []
+  |> List.rev
+;;
+
+let tool_uses_of_messages (messages : Agent_sdk.Types.message list) =
+  let tool_uses_in_message (msg : Agent_sdk.Types.message) acc =
     if msg.role <> Agent_sdk.Types.Assistant
     then acc
     else
       List.fold_left
         (fun acc -> function
-          | Agent_sdk.Types.ToolUse { name; input; _ } -> Some (name, input)
+          | Agent_sdk.Types.ToolUse { name; input; _ } -> (name, input) :: acc
           | _ -> acc)
         acc
         msg.content
   in
-  List.fold_left (fun acc msg -> last_tool_in_message msg acc) None messages
+  List.fold_left (fun acc msg -> tool_uses_in_message msg acc) [] messages
+  |> List.rev
 ;;
 
 let last_tool_progress_context_of_messages messages =
-  match last_tool_use_of_messages messages with
-  | None -> None
-  | Some (tool_name, input) ->
+  match tool_uses_of_messages messages with
+  | [] -> None
+  | tool_uses ->
+    let tool_effects =
+      List.map
+        (fun (tool_name, input) -> classify_tool_effect ~tool_name ~input)
+        tool_uses
+    in
+    let last_tool_name, last_input =
+      match List.rev tool_uses with
+      | (tool_name, input) :: _ -> tool_name, input
+      | [] -> "unknown", `Assoc []
+    in
+    let tool_name = last_tool_name in
     let tool_name = String.trim tool_name in
     let tool_name = if tool_name = "" then "unknown" else tool_name in
-    let tool_effect =
-      if Keeper_tool_registry.is_read_only_with_input ~tool_name ~input
-      then "read_only"
-      else "mutating"
+    let tool_effect = classify_tool_effect ~tool_name ~input:last_input in
+    let any_mutating_tool =
+      List.exists
+        (function
+          | Keeper_internal_error.Tool_effect_mutating -> true
+          | Keeper_internal_error.Tool_effect_read_only -> false)
+        tool_effects
     in
-    Some { tool_name; tool_effect }
+    Some
+      {
+        tool_name;
+        tool_effect;
+        any_mutating_tool;
+        tool_effects_seen = dedupe_tool_effects tool_effects;
+      }
 ;;
 
-let accept_rejection_context_of_run_result (run_result : Runtime_agent.run_result) =
+let rec drop_matching_prefix ~prefix messages =
+  match prefix, messages with
+  | [], rest -> rest
+  | p :: ps, m :: ms when p = m -> drop_matching_prefix ~prefix:ps ms
+  | _ :: _, _ -> messages
+;;
+
+let accept_rejection_context_of_run_result
+      ?(initial_messages = [])
+      (run_result : Runtime_agent.run_result)
+  =
   match run_result.checkpoint with
   | None -> None
   | Some checkpoint ->
-    last_tool_progress_context_of_messages checkpoint.Agent_sdk.Checkpoint.messages
+    checkpoint.Agent_sdk.Checkpoint.messages
+    |> drop_matching_prefix ~prefix:initial_messages
+    |> last_tool_progress_context_of_messages
 ;;
 
 let format_last_tool_progress_context = function
   | None -> None
-  | Some { tool_name; tool_effect } ->
-    Some (Printf.sprintf "last_tool=%s; last_tool_effect=%s" tool_name tool_effect)
+  | Some { tool_name; tool_effect; any_mutating_tool; tool_effects_seen } ->
+    let effects_seen =
+      tool_effects_seen
+      |> List.map last_tool_effect_to_string
+      |> String.concat ","
+    in
+    Some
+      (Printf.sprintf
+         "last_tool=%s; last_tool_effect=%s; any_mutating_tool=%b; \
+          tool_effects_seen=%s"
+         tool_name
+         (last_tool_effect_to_string tool_effect)
+         any_mutating_tool
+         effects_seen)
 ;;
 
-let accept_rejected_error ~progress_context ~runtime_id
+let accept_rejected_error ~last_tool_context ~runtime_id
     ~(response : Agent_sdk_response.api_response) =
   let rejection =
     Keeper_tool_response.accept_rejection_of_response ~runtime_id response
   in
+  let progress_context = format_last_tool_progress_context last_tool_context in
   let rejection =
     match progress_context with
     | Some context when String.trim context <> "" ->
@@ -261,20 +326,39 @@ let accept_rejected_error ~progress_context ~runtime_id
              (Boundary_redaction.to_string
                 Boundary_redaction.runtime_model_label);
          reason_kind;
+         response_shape =
+           Option.map
+             Keeper_internal_error.accept_response_shape_of_agent_sdk
+             rejection.response_shape;
+         last_tool_effect =
+           Option.map
+             (fun context -> context.tool_effect)
+             last_tool_context;
+         any_mutating_tool =
+           Option.map
+             (fun context -> context.any_mutating_tool)
+             last_tool_context;
+         tool_effects_seen =
+           (match last_tool_context with
+            | Some context -> context.tool_effects_seen
+            | None -> []);
          reason = rejection.reason;
        })
 
-let apply_accept ~runtime_id ~accept (run_result : Runtime_agent.run_result) =
+let apply_accept
+      ?(initial_messages = [])
+      ~runtime_id
+      ~accept
+      (run_result : Runtime_agent.run_result)
+  =
   if accept run_result.response then Ok run_result
   else
-    let progress_context =
-      run_result
-      |> accept_rejection_context_of_run_result
-      |> format_last_tool_progress_context
+    let last_tool_context =
+      accept_rejection_context_of_run_result ~initial_messages run_result
     in
     Error
       (accept_rejected_error
-         ~progress_context
+         ~last_tool_context
          ~runtime_id
          ~response:run_result.response)
 
@@ -459,7 +543,10 @@ let run_try_provider
     let result =
       match result with
       | Ok run_result ->
-        apply_accept ~runtime_id:ctx.error_runtime_id ~accept:ctx.accept
+        apply_accept
+          ~initial_messages:ctx.initial_messages
+          ~runtime_id:ctx.error_runtime_id
+          ~accept:ctx.accept
           run_result
       | Error _ as err -> err
     in

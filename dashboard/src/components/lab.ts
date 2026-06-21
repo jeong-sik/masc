@@ -5,8 +5,10 @@ import { HarnessHealth } from './harness-health'
 import { DesignCanvas } from './design-canvas'
 import { LabPerf } from './lab-perf'
 import { MemoryExplore } from './memory/memory-explore'
+import { KeeperMemoryHealth } from './memory/keeper-memory-health'
+import { SurfaceHeader } from './common/surface-header'
 
-type LabSection = 'tools' | 'harness' | 'design-canvas' | 'performance' | 'memory-explore'
+type LabSection = 'tools' | 'harness' | 'design-canvas' | 'performance' | 'memory-explore' | 'keeper-memory-health'
 
 function currentSection(): LabSection {
   const section = route.value.params.section
@@ -15,6 +17,7 @@ function currentSection(): LabSection {
     || section === 'design-canvas'
     || section === 'performance'
     || section === 'memory-explore'
+    || section === 'keeper-memory-health'
   ) {
     return section
   }
@@ -26,6 +29,7 @@ export function Lab() {
 
   return html`
     <div class="v2-lab-surface ss-surface bg-surface-page flex flex-col gap-6" data-testid="lab-surface">
+      <${SurfaceHeader} />
       ${section === 'tools' ? html`
         <${Tools} />
       ` : null}
@@ -44,6 +48,10 @@ export function Lab() {
 
       ${section === 'memory-explore' ? html`
         <${MemoryExplore} />
+      ` : null}
+
+      ${section === 'keeper-memory-health' ? html`
+        <${KeeperMemoryHealth} />
       ` : null}
     </div>
   `

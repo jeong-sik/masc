@@ -476,20 +476,56 @@ let update_goal config ~goal_id f =
           write_state config next_state;
           Ok updated_goal)
 
+type delete_goal_outcome =
+  | Deleted
+  | Deleted_with_orphaned_links of string
+
+type delete_goal_error =
+  | Unknown_goal of string
+
+let delete_goal_error_to_string = function
+  | Unknown_goal msg -> msg
+
 let delete_goal config ~goal_id =
-  let before = read_state config in
-  if not (List.exists (fun goal -> String.equal goal.id goal_id) before.goals) then
-    Error "Goal not found"
-  else begin
-    ignore
-      (update_state config (fun state ->
-           {
-             version = state.version + 1;
-             goals = List.filter (fun goal -> not (String.equal goal.id goal_id)) state.goals;
-             updated_at = Masc_domain.now_iso ();
-           }));
-    Ok ()
-  end
+  let deleted =
+    Workspace_utils.with_file_lock config (goals_path config) (fun () ->
+      let state = read_state config in
+      if not (List.exists (fun goal -> String.equal goal.id goal_id) state.goals) then
+        Error (Unknown_goal "Goal not found")
+      else (
+        write_state
+          config
+          { version = state.version + 1
+          ; goals = List.filter (fun goal -> not (String.equal goal.id goal_id)) state.goals
+          ; updated_at = Masc_domain.now_iso ()
+          };
+        Ok ()))
+  in
+  match deleted with
+  | Error _ as error -> error
+  | Ok () ->
+    (* This is best-effort cascade cleanup across two file stores, not a
+       cross-file transaction. A structural fix would either co-locate
+       goal-task links with goals or add a higher-level transaction lock that
+       covers every goal/link mutation path. *)
+    (try
+       Workspace_goal_index.prune_links_for_goal config ~goal_id;
+       Ok Deleted
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       let detail = Printexc.to_string exn in
+       Log.Misc.warn
+         "goal_store.delete_goal: goal %s removed but goal_task_links prune failed: %s"
+         goal_id
+         detail;
+       let warning =
+         Printf.sprintf
+           "goal deleted but failed to prune goal_task_links for %s: %s"
+           goal_id
+           detail
+       in
+       Ok (Deleted_with_orphaned_links warning))
 
 let sort_goals goals =
   let horizon_rank = function

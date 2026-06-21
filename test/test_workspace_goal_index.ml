@@ -14,15 +14,7 @@ let with_test_env f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let tmp_dir =
-    Filename.concat
-      (Filename.get_temp_dir_name ())
-      (Printf.sprintf
-         "masc_goal_index_%d_%d"
-         (Unix.getpid ())
-         (int_of_float (Unix.gettimeofday () *. 1000.)))
-  in
-  Unix.mkdir tmp_dir 0o755;
+  let tmp_dir = Filename.temp_dir "masc_goal_index_" "" in
   let config = Workspace.default_config tmp_dir in
   let _ = Workspace.init config ~agent_name:(Some "claude") in
   try
@@ -206,6 +198,26 @@ let test_add_task_persists_goal_link () =
        | Not_found -> false))
 ;;
 
+let test_prune_goal_links_preserves_other_goals () =
+  with_test_env (fun config ->
+    Workspace_goal_index.write_goal_task_links
+      config
+      [ "goal-a", [ "task-001"; "task-002" ]; "goal-b", [ "task-003" ] ];
+    Workspace_goal_index.prune_links_for_goal config ~goal_id:"goal-a";
+    let links = Workspace_goal_index.read_goal_task_links config in
+    check_bool
+      "deleted goal links removed"
+      false
+      (List.exists (fun (goal_id, _) -> String.equal goal_id "goal-a") links);
+    check_bool
+      "other goal links preserved"
+      true
+      (List.exists
+         (fun (goal_id, task_ids) ->
+            String.equal goal_id "goal-b" && List.mem "task-003" task_ids)
+         links))
+;;
+
 (* ── test suite ─────────────────────────────────────────────────────── *)
 
 let () =
@@ -228,6 +240,10 @@ let () =
               "add_task persists explicit goal link"
               `Quick
               test_add_task_persists_goal_link
+          ; test_case
+              "prune removes only deleted goal links"
+              `Quick
+              test_prune_goal_links_preserves_other_goals
           ] )
     ]
 ;;

@@ -8,12 +8,19 @@ open Keeper_memory_os_types
 (** {1 Path helpers} *)
 
 val facts_path : keeper_id:string -> string
+val facts_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
 (** RFC-0244 Tier 2: keeper ids that currently have a [*.facts.jsonl] store, for
     the cross-keeper consolidation sweep. Excludes the reserved shared id; sorted. *)
 val list_fact_store_keeper_ids : unit -> string list
+val list_fact_store_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
+
+(** Base-path-scoped variant of {!list_fact_store_keeper_ids}; avoids ambient
+    config-dir reads in multi-workspace dashboard routes. *)
+val list_fact_store_keeper_ids_for_base_path : base_path:string -> string list
 
 val events_path : keeper_id:string -> string
+val events_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 val episodes_dir : keeper_id:string -> string
 val tool_results_dir : keeper_id:string -> string
 val tool_result_path : keeper_id:string -> tool_call_id:string -> string
@@ -32,6 +39,13 @@ val next_generation_with_floor : floor:int -> keeper_id:string -> trace_id:strin
 
 (** {1 Atomic writes} *)
 
+(** Run [f] against the channel then close it, releasing the descriptor on every
+    exit path — including when [close_out]'s flush raises, which OCaml's
+    [close_out] leaves the fd open on. The body's exception propagates (so
+    callers can skip a rename / report the write failure). Exposed for testing
+    the fd-release guarantee. *)
+val with_out_channel : out_channel -> f:(out_channel -> unit) -> unit
+
 val append_fact : keeper_id:string -> fact -> unit
 val append_event : keeper_id:string -> episode -> unit
 val append_episode : keeper_id:string -> episode -> unit
@@ -44,6 +58,10 @@ val with_episode_bundle_lock :
 
 val append_episode_bundle : keeper_id:string -> episode -> unit
 val rewrite_facts_atomically : keeper_id:string -> fact list -> unit
+val rewrite_facts_atomically_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> fact list -> unit
+val rewrite_facts_atomically_for_base_path :
+  base_path:string -> keeper_id:string -> fact list -> unit
 
 (** {1 Facts snapshot CAS} *)
 
@@ -74,11 +92,15 @@ val load_tool_result : keeper_id:string -> tool_call_id:string -> Yojson.Safe.t 
 (** {1 Bounded tail reads} *)
 
 val read_facts_all : keeper_id:string -> fact list
+val read_facts_all_for_keepers_dir : keepers_dir:string -> keeper_id:string -> fact list
 (** Read every fact in the store, failing if any JSONL row is malformed or does
     not match the fact schema. Use this before destructive rewrites so corrupt
     input cannot be partially dropped and overwritten. *)
 val read_facts_all_strict : keeper_id:string -> (fact list, string) result
+val read_facts_all_strict_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> (fact list, string) result
 val read_facts_tail : keeper_id:string -> n:int -> fact list
+val read_facts_tail_for_base_path : base_path:string -> keeper_id:string -> n:int -> fact list
 val read_events_tail : keeper_id:string -> n:int -> episode list
 val read_episodes_tail : keeper_id:string -> n:int -> episode list
 
@@ -97,15 +119,51 @@ val fact_recall_window : int
     writes at the file head, which a [fact_recall_window]-sized scan would miss. *)
 val fact_store_max : int
 
+(** RFC-0272 (defect D): episode-log retention bounds, same shape and hysteresis
+    band as the facts cap. [event_recall_window] / [episode_file_window] are the
+    low-water trim targets; [event_store_max] / [episode_file_store_max] are the
+    high-water triggers. The low-water (256) exceeds the recall scan window
+    ([Keeper_memory_os_recall.episode_tail_scan] = 32) so a trim cannot starve
+    recall. *)
+val event_recall_window : int
+
+val event_store_max : int
+val episode_file_window : int
+val episode_file_store_max : int
+
+(** Pure hysteresis decision for the episode-log caps: [None] below [trigger]
+    (no-op), [Some keep] above. Exposed for the watermark unit tests. *)
+val trim_target : count:int -> keep:int -> trigger:int -> int option
+
+(** RFC-0272 (defect D): bound [events.jsonl] by line count. When the line count
+    exceeds [trigger], keep the last [keep] raw lines (newest, byte-faithful,
+    malformed-line tolerant) and atomically rewrite; otherwise no-op. Returns the
+    number of lines dropped. *)
+val cap_events : keeper_id:string -> keep:int -> trigger:int -> int
+
+(** RFC-0272 (defect D): bound the [episodes/] directory by file count. When the
+    parseable-file count exceeds [trigger], keep the [keep] most-recent files by
+    recency and best-effort unlink the rest; otherwise no-op. Unparseable files
+    are left untouched. Returns the number unlinked. *)
+val cap_episode_files : keeper_id:string -> keep:int -> trigger:int -> int
+
 (** Read and parse every fact in the store (unbounded; used by retention). *)
 val read_all_facts : keeper_id:string -> fact list
 
 (** When the fact store exceeds [trigger], keep the [keep] highest-[rank]ed
     facts and atomically rewrite the file; otherwise no-op. Returns the number
     of facts dropped. The hysteresis ([trigger] > [keep]) keeps rewrites off the
-    per-turn hot path. *)
+    per-turn hot path. RFC-0259 §3.6 (P5): rows expired at [now] (typed
+    [valid_until] boundary) are dropped before the trigger gate and ranking, so
+    an under-cap store does not retain them; expired rows count toward the
+    returned total. *)
 val cap_facts :
-  keeper_id:string -> keep:int -> trigger:int -> rank:(fact -> float) -> int
+  now:float
+  -> keeper_id:string
+  -> keep:int
+  -> trigger:int
+  -> rank:(fact -> float)
+  -> int
 
 (** Outcome of a [merge_and_cap_facts] write: how many incoming claims were
     folded into an existing fact ([merged]), persisted as new facts
@@ -121,9 +179,13 @@ type fact_merge_stats =
     in via [merge] (so confidence/access/verification evolve) instead of
     appending an immortal duplicate — then apply the [keep]/[trigger]/[rank]
     retention cap, all in a single atomic rewrite. Replaces the blind append +
-    [cap_facts] pair, giving the store write-time dedup. *)
+    [cap_facts] pair, giving the store write-time dedup. RFC-0259 §3.6 (P5): rows
+    expired at [now] are dropped on the same [valid_until] boundary the GC sweep
+    uses, before the trigger gate, so the librarian write path keeps the on-disk
+    store free of expired rows even below the cap; they count toward [dropped]. *)
 val merge_and_cap_facts :
-  keeper_id:string
+  now:float
+  -> keeper_id:string
   -> merge:(existing:fact -> incoming:fact -> fact)
   -> incoming:fact list
   -> keep:int

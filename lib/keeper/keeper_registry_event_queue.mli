@@ -7,17 +7,29 @@
     MASC-owned durable queue snapshot so a keeper restart can replay
     pending stimuli. *)
 
-(** Enqueue a stimulus on the keeper's event queue.
-    Logs a warning when the keeper is not registered. *)
+(** Enqueue a stimulus on the keeper's event queue. When the keeper is not
+    registered yet, persist the stimulus to the durable snapshot so later
+    registration can replay it instead of dropping the wake at the
+    restart/register boundary. *)
 val enqueue : base_path:string -> string -> Keeper_event_queue.stimulus -> unit
 
-(** Read-only snapshot of the keeper's queue. Returns
-    [Keeper_event_queue.empty] when the keeper is unregistered. *)
+(** Read-only snapshot of the keeper's queue. If the keeper is not registered,
+    read the durable snapshot so diagnostics still expose pending replay. *)
 val snapshot : base_path:string -> string -> Keeper_event_queue.t
 
 (** Remove and return the head stimulus, or [None] when the queue is
     empty or the keeper is unregistered. *)
 val dequeue : base_path:string -> string -> Keeper_event_queue.stimulus option
+
+(** Put previously drained stimuli back at the front of the queue. This is a
+    crash-recovery primitive: if the keepalive cycle dies after dequeue/drain
+    but before the turn completes, the stimuli must remain replayable. *)
+val requeue_front : base_path:string -> string -> Keeper_event_queue.stimulus list -> unit
+
+val ack_consumed :
+  base_path:string -> string -> Keeper_event_queue.stimulus list -> unit
+(** Acknowledge consumed stimuli after a keepalive turn completes. Until this
+    runs, a restart reloads the leased stimuli for at-least-once replay. *)
 
 (** Drain stimuli intended for board reactivity. [window_sec] caps the
     age of stimuli returned to the caller. *)

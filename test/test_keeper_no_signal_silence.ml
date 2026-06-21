@@ -118,6 +118,7 @@ let no_signal_obs : WO.world_observation =
   ; provider_capacity_blocked_task_count = 0
   ; failed_task_count = 0
   ; pending_verification_count = 0
+  ; scheduled_automation = WO.empty_scheduled_automation_observation
   ; backlog_updated_since_last_scheduled_autonomous = false
   ; running_keeper_fiber_count = 1
   ; connected_surfaces = []
@@ -131,6 +132,32 @@ let decide_no_signal () =
     ~reactive_wake:false
     ~meta
     no_signal_obs
+;;
+
+let schedule_attention_obs =
+  { no_signal_obs with
+    scheduled_automation =
+      { WO.empty_scheduled_automation_observation with
+        active_count = 1
+      ; due_ready_count = 1
+      }
+  }
+;;
+
+let schedule_ready_meta () =
+  let meta = warm_meta () in
+  let now = Time_compat.now () in
+  { meta with
+    proactive = { meta.proactive with cooldown_sec = 60 }
+  ; runtime =
+      { meta.runtime with
+        proactive_rt =
+          { meta.runtime.proactive_rt with
+            last_ts = now -. 120.0
+          ; consecutive_noop_count = 0
+          }
+      }
+  }
 ;;
 
 (* Core invariant (PR #21685): a warm keeper with no signal and no backlog
@@ -157,6 +184,21 @@ let test_no_signal_keeps_scheduled_channel () =
      | WO.Scheduled_autonomous -> true
      | WO.Reactive -> false)
 
+let test_scheduled_automation_attention_runs_after_task_cooldown () =
+  let meta = schedule_ready_meta () in
+  let d =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:no_provider_cooldown
+      ~reactive_wake:false
+      ~meta
+      schedule_attention_obs
+  in
+  check bool "scheduled automation attention runs" true d.should_run;
+  check bool "reason includes scheduled_automation_due" true
+    (List.mem
+       "scheduled_automation_due"
+       (WO.verdict_reasons_to_strings d.verdict))
+
 let () = init_runtime_default_for_tests ()
 
 let () =
@@ -171,6 +213,10 @@ let () =
             "no-signal silence keeps scheduled channel"
             `Quick
             test_no_signal_keeps_scheduled_channel
+        ; test_case
+            "scheduled automation attention runs after task cooldown"
+            `Quick
+            test_scheduled_automation_attention_runs_after_task_cooldown
         ] )
     ]
 ;;

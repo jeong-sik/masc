@@ -2,7 +2,7 @@ import type { RouteState, SSEEvent } from './types'
 import { parseSSEMessage } from './schemas/sse'
 import { hydrateDashboardSlice, routeServerPushEvent } from './sse-store'
 import { batch } from '@preact/signals'
-import { dashboardBearerToken } from './api/core'
+import { dashboardBearerToken, subscribeStoredTokenChanges } from './api/core'
 import { parseWebSocketSseFrames } from './dashboard-ws-parse'
 import {
   GLOBAL_DASHBOARD_PUSH_SLICES,
@@ -38,13 +38,20 @@ type DashboardRouteState = Pick<RouteState, 'tab' | 'params'>
 interface DashboardWsDiscovery {
   enabled?: boolean
   listening?: boolean
+  reachable?: boolean
+  listen_status?: string | null
   ws_url?: string | null
+  unavailable_reason?: string | null
+  same_origin_upgrade_enabled?: boolean
+  same_origin_upgrade_path?: string | null
+  same_origin_ws_url?: string | null
 }
 
 interface DashboardWsDiscoveryResult {
   wsUrl: string | null
   retry: boolean
   fromCache: boolean
+  reason?: string
 }
 
 const DASHBOARD_WS_DISCOVERY_CACHE_KEY = 'masc.dashboard.ws.discovery.v1'
@@ -89,6 +96,50 @@ function sameOriginWebSocketUrl(wsUrl: string): boolean {
   }
 }
 
+function currentOriginWebSocketUrl(pathOrUrl: string): string | null {
+  if (typeof window === 'undefined' || typeof window.location === 'undefined') return null
+  if (window.location.protocol !== 'https:' && window.location.protocol !== 'http:') return null
+  try {
+    const parsed = new URL(pathOrUrl, window.location.href)
+    parsed.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    parsed.host = window.location.host
+    return parsed.toString()
+  } catch {
+    return null
+  }
+}
+
+function sameOriginUpgradePath(data: DashboardWsDiscovery): string | null {
+  const upgradePath = nonBlankString(data.same_origin_upgrade_path)
+  if (upgradePath) return upgradePath
+  const sameOriginWsUrl = nonBlankString(data.same_origin_ws_url)
+  if (!sameOriginWsUrl) return null
+  try {
+    const baseUrl = typeof window !== 'undefined' && typeof window.location !== 'undefined'
+      ? window.location.href
+      : 'http://localhost/'
+    const parsed = new URL(sameOriginWsUrl, baseUrl)
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`
+  } catch {
+    return null
+  }
+}
+
+function preferredDiscoveredWsUrl(data: DashboardWsDiscovery): string | null {
+  if (data.same_origin_upgrade_enabled === true) {
+    const upgradePath = sameOriginUpgradePath(data)
+    if (upgradePath) {
+      const wsUrl = currentOriginWebSocketUrl(upgradePath)
+      if (wsUrl) return wsUrl
+    }
+  }
+  const wsUrl = nonBlankString(data.ws_url)
+  if (wsUrl) return wsUrl
+  const sameOriginWsUrl = nonBlankString(data.same_origin_ws_url)
+  if (sameOriginWsUrl && sameOriginWebSocketUrl(sameOriginWsUrl)) return sameOriginWsUrl
+  return null
+}
+
 function readCachedWsUrl(): string | null {
   const storage = sessionStorageOrNull()
   if (!storage) return null
@@ -96,12 +147,13 @@ function readCachedWsUrl(): string | null {
     const raw = storage.getItem(DASHBOARD_WS_DISCOVERY_CACHE_KEY)
     if (!raw) return null
     const data = JSON.parse(raw) as { ws_url?: unknown }
-    if (typeof data.ws_url !== 'string' || data.ws_url.length === 0) return null
-    if (!sameOriginWebSocketUrl(data.ws_url)) {
+    const wsUrl = nonBlankString(data.ws_url)
+    if (!wsUrl) return null
+    if (!sameOriginWebSocketUrl(wsUrl)) {
       storage.removeItem(DASHBOARD_WS_DISCOVERY_CACHE_KEY)
       return null
     }
-    return data.ws_url
+    return wsUrl
   } catch {
     // Eviction must not propagate: in restricted storage contexts the
     // initial getItem can throw, and a follow-up removeItem can throw too.
@@ -152,6 +204,37 @@ function maybeInvalidateDiscoveryCache(): void {
     clearCachedWsUrl()
     resetDiscoveryCacheFailures()
   }
+}
+
+function nonBlankString(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function discoveryUnavailableReason(data: DashboardWsDiscovery): string {
+  const serverReason = nonBlankString(data.unavailable_reason)
+  if (serverReason) return serverReason
+  if (data.enabled !== true) return 'disabled'
+  if (data.listening !== true) {
+    const listenStatus = nonBlankString(data.listen_status)
+    return listenStatus ? `not listening (${listenStatus})` : 'not listening'
+  }
+  if (!nonBlankString(data.ws_url)) {
+    const sameOriginWsUrl = nonBlankString(data.same_origin_ws_url)
+    if (sameOriginWsUrl && data.same_origin_upgrade_enabled !== true) {
+      return 'standalone websocket URL unavailable; same-origin upgrade disabled'
+    }
+    if (data.same_origin_upgrade_enabled === true) {
+      return 'same-origin websocket URL unavailable'
+    }
+    return 'websocket URL unavailable'
+  }
+  return 'unavailable'
+}
+
+function dashboardWsUnavailableMessage(reason?: string): string {
+  return reason ? `dashboard websocket unavailable: ${reason}` : 'dashboard websocket unavailable'
 }
 
 // Phase 2 (PR-4.6): rAF accumulator for inbound WS messages.
@@ -372,15 +455,33 @@ async function discoverWsUrl(): Promise<DashboardWsDiscoveryResult> {
   if (cachedUrl) return { wsUrl: cachedUrl, retry: false, fromCache: true }
 
   const response = await fetch('/ws', { credentials: 'same-origin' })
-  if (!response.ok) return { wsUrl: null, retry: true, fromCache: false }
+  if (!response.ok) {
+    return {
+      wsUrl: null,
+      retry: true,
+      fromCache: false,
+      reason: `discovery HTTP ${response.status}`,
+    }
+  }
   const data = await response.json() as DashboardWsDiscovery
   if (data.enabled !== true) {
-    return { wsUrl: null, retry: false, fromCache: false }
+    return {
+      wsUrl: null,
+      retry: false,
+      fromCache: false,
+      reason: discoveryUnavailableReason(data),
+    }
   }
-  if (data.listening !== true || typeof data.ws_url !== 'string') {
-    return { wsUrl: null, retry: true, fromCache: false }
+  const wsUrl = preferredDiscoveredWsUrl(data)
+  if (data.listening !== true || !wsUrl) {
+    return {
+      wsUrl: null,
+      retry: true,
+      fromCache: false,
+      reason: discoveryUnavailableReason(data),
+    }
   }
-  return { wsUrl: data.ws_url, retry: false, fromCache: false }
+  return { wsUrl, retry: false, fromCache: false }
 }
 
 function sendRpc(method: string, params: JsonObject, timeoutMs = DASHBOARD_WS_RPC_TIMEOUT_MS): Promise<unknown> {
@@ -571,6 +672,25 @@ function reconnectAfterCurrentSocketFailure(ws: WebSocket, err: unknown): void {
   scheduleReconnect()
 }
 
+function reconnectAfterAuthTokenChange(): void {
+  if (!desiredRouteState || typeof WebSocket === 'undefined') return
+  shouldReconnect = true
+  connectGeneration += 1
+  clearReconnectTimer()
+  lastSubscribeKey = ''
+  batch(() => {
+    dashboardWsConnected.value = false
+    dashboardWsReady.value = false
+  })
+  const nextRoute = desiredRouteState
+  closeSocket()
+  void connectDashboardWS(nextRoute)
+}
+
+subscribeStoredTokenChanges(() => {
+  reconnectAfterAuthTokenChange()
+})
+
 export async function subscribeDashboardRoute(routeState: DashboardRouteState): Promise<void> {
   const desired = rememberRouteState(routeState)
   if (!dashboardWsReady.value) return
@@ -616,10 +736,12 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
   const wsUrl = discovery.wsUrl
   if (!wsUrl) {
     if (generation === connectGeneration) clearCachedWsUrl()
-    if (generation === connectGeneration && shouldReconnect && discovery.retry) {
+    if (generation === connectGeneration && shouldReconnect) {
       batch(() => {
-        dashboardWsLastError.value = 'dashboard websocket unavailable'
+        dashboardWsLastError.value = dashboardWsUnavailableMessage(discovery.reason)
       })
+    }
+    if (generation === connectGeneration && shouldReconnect && discovery.retry) {
       scheduleReconnect()
     }
     return
@@ -632,11 +754,8 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
   try {
     ws = new WebSocket(wsUrl)
   } catch (err) {
-    // Cache only values that constructed successfully: writing before
-    // [new WebSocket(...)] would persist a malformed/incompatible URL
-    // through the next reconnect, adding an extra failure+backoff cycle
-    // before discovery is retried. Also invalidate the cache after repeated
-    // construction failures so a stale entry does not survive.
+    // A constructor failure proves this URL is unusable for the current
+    // browser. Keep it out of the cache and let reconnect rediscover.
     maybeInvalidateDiscoveryCache()
     batch(() => {
       dashboardWsLastError.value = errorToString(err)
@@ -645,11 +764,6 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     return
   }
   socket = ws
-  // Cache the URL only after the WebSocket constructor accepted it.
-  // Persisting before construction would leave a bad value in the cache
-  // for the next reconnect attempt; persisting after means cache only
-  // ever holds URLs that at minimum parsed without throwing.
-  if (!discovery.fromCache) writeCachedWsUrl(wsUrl)
   ws.onopen = () => {
     if (socket !== ws) return
     dashboardWsConnected.value = true
@@ -662,6 +776,7 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     })
       .then(() => {
         if (socket !== ws) return
+        if (!discovery.fromCache) writeCachedWsUrl(wsUrl)
         resetDiscoveryCacheFailures()
         batch(() => {
           dashboardWsReady.value = true
@@ -686,8 +801,8 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
           reconnectAfterCurrentSocketFailure(ws, err)
           return
         }
-        helloFailed = true
         if (socket !== ws) return
+        helloFailed = true
         batch(() => {
           dashboardWsConnected.value = false
           dashboardWsReady.value = false

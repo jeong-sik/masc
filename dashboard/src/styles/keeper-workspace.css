@@ -50,14 +50,46 @@
     var(--kw-roster-w, 286px)
     minmax(0, 1fr)
     var(--kw-rail-w, 312px);
+  width: 100%;
   height: 100%;
+  min-width: 0;
   min-height: 0;
   position: relative;
   background: var(--color-bg-page);
   color: var(--color-fg-primary);
 }
-.kw-grid[data-roster="mini"] { --kw-roster-w: 64px; }
+.kw-grid[data-roster="mini"] { --kw-roster-w: 72px; }
 .kw-grid[data-rail="closed"] { --kw-rail-w: 0px; }
+
+/* Drag handles for resizing the roster / rail columns (Unit 8). Absolutely
+ * positioned over the column boundary (the grid is position:relative). z-index 4
+ * sits below the collapse toggles (z-index 5) so the small toggle button stays
+ * clickable while the rest of the full-height strip is draggable. */
+.kw-pane-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 11px;
+  z-index: 4;
+  cursor: col-resize;
+  touch-action: none;
+}
+.kw-pane-resizer.left { left: var(--kw-roster-w, 286px); transform: translateX(-50%); }
+.kw-pane-resizer.right { right: var(--kw-rail-w, 312px); transform: translateX(50%); }
+.kw-pane-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+.kw-pane-resizer:hover::after,
+body.kw-resizing .kw-pane-resizer::after { background: var(--color-border-strong); }
+body.kw-resizing { cursor: col-resize; user-select: none; }
 
 /* Detail ("운영 상세") takes over the conversation + rail span as a
  * single scrollable column; roster stays for keeper switching. */
@@ -67,14 +99,29 @@
   .kw-grid { grid-template-columns: var(--kw-roster-w, 248px) minmax(0, 1fr); }
   .kw-grid .kw-rail { display: none; }
   .kw-rail-toggle.right { display: none; }
+  /* Rail column is gone ≤1180px → its resize handle has nothing to drag. */
+  .kw-pane-resizer.right { display: none; }
 }
 /* Below 860px the workspace becomes master-detail: the roster and chat/detail
  * panes share one grid column, and JS flips data-mobile-pane after selection.
  * The attribute is backed by keeperMobilePane so direct routes and roster
  * selection use the same pane switcher. */
 @media (max-width: 860px) {
-  .kw-grid { grid-template-columns: minmax(0, 1fr); overflow: hidden; }
+  .kw-grid {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 100vw;
+    overflow: hidden;
+  }
+  .kw-grid[data-detail="open"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .kw-grid[data-mobile-pane] { grid-template-rows: minmax(0, 1fr); }
+  .kw-chat,
+  .kw-detail,
+  .kw-roster {
+    min-width: 0;
+    max-width: 100%;
+  }
   .kw-grid[data-mobile-pane="roster"] .kw-chat,
   .kw-grid[data-mobile-pane="roster"] .kw-detail {
     display: none;
@@ -89,6 +136,8 @@
     height: 100%;
   }
   .kw-rail-toggle { display: none; }
+  /* Single-column master-detail layout has no resizable column boundaries. */
+  .kw-pane-resizer { display: none; }
   .kw-roster { border-right: 0; border-bottom: 0; }
   .kw-chat-head { flex-wrap: wrap; align-items: flex-start; min-width: 0; padding: 12px 14px; }
   .kw-chat-id { flex: 1 1 132px; }
@@ -161,11 +210,14 @@
 .kw-roster-sort option { background: var(--color-bg-elevated); color: var(--color-fg-primary); }
 
 .kw-roster-list { flex: 1; overflow-y: auto; padding: 9px 8px; }
-.kw-roster-mini-list { display: flex; flex: 1; flex-direction: column; align-items: center; gap: 8px; overflow-y: auto; padding: 12px 8px; }
+.kw-roster-mini-list { display: flex; flex: 1; flex-direction: column; align-items: center; gap: 8px; overflow-y: auto; padding: 12px; }
 .kw-roster-group {
+  display: flex; align-items: center; gap: 6px;
   font-size: var(--fs-11); font-weight: var(--fw-bold); letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-fg-secondary);
   padding: 12px 8px 6px;
 }
+/* Per-group keeper count, right-aligned — mirrors the design roster's rg-n. */
+.kw-roster-group-n { margin-left: auto; letter-spacing: 0; color: var(--color-fg-muted); font-variant-numeric: tabular-nums; }
 .kw-roster-empty { padding: 30px 12px; text-align: center; color: var(--color-fg-secondary); font-size: var(--fs-13); }
 
 .kw-kp-mini {
@@ -437,6 +489,7 @@
   right: 0;
   display: flex;
   width: max-content;
+  max-width: calc(100vw - 28px);
   min-width: 190px;
   flex-direction: column;
   gap: 2px;
@@ -460,6 +513,12 @@
   text-align: left;
   cursor: pointer;
   transition: color .15s, background .15s;
+}
+.kw-chat-command-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .kw-chat-command-item:hover {
   color: var(--color-fg-primary);
@@ -751,11 +810,14 @@
 .kw-list-empty { font-size: var(--fs-13); color: var(--color-fg-secondary); }
 .kw-tasktag {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 8px;
+  grid-template-areas:
+    "task-id task-state"
+    "task-title task-title";
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 8px;
   align-items: start;
   width: 100%;
-  padding: 9px 11px;
+  padding: 10px 11px;
   border-radius: var(--r-1);
   background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-divider);
@@ -767,16 +829,38 @@
 }
 .kw-tasktag:hover { background: var(--color-bg-hover); border-color: var(--color-border-default); }
 .kw-tasktag:focus-visible { outline: 2px solid var(--color-accent-fg-dim); outline-offset: 2px; }
-.kw-tasktag .tid { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--color-accent-fg); white-space: nowrap; }
-.kw-tasktag .ttl {
+.kw-tasktag .tid {
+  grid-area: task-id;
   min-width: 0;
   overflow: hidden;
+  color: var(--color-accent-fg);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kw-tasktag .ttl {
+  grid-area: task-title;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   line-height: 1.35;
 }
-.kw-tasktag .tstate { align-self: start; font-size: var(--fs-11); color: var(--color-fg-secondary); white-space: nowrap; }
+.kw-tasktag .tstate {
+  grid-area: task-state;
+  align-self: start;
+  justify-self: end;
+  max-width: 10rem;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-fg-secondary);
+  font-size: var(--fs-11);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .kw-tasktag .tstate.review { color: var(--color-status-warn); }
 
 /* Recent tool calls: compact rows (status dot + name + duration + age) that
@@ -811,7 +895,17 @@
   font-size: var(--fs-13); font-weight: var(--fw-bold); transition: background .15s, border-color .15s;
 }
 .kw-detail-btn:hover { background: var(--color-bg-hover); border-color: var(--color-border-strong); }
-.kw-detail-btn .sub { font-weight: 400; color: var(--color-fg-secondary); font-size: var(--fs-12); }
+.kw-detail-btn > span:first-child { flex: none; }
+.kw-detail-btn .sub {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-fg-secondary);
+  font-size: var(--fs-12);
+  font-weight: 400;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ════ DETAIL ("운영 상세") — reuse KeeperDetailBody, scrollable column ══ */
 .kw-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--color-bg-page); }
@@ -820,7 +914,81 @@
   padding: 12px 18px; border-bottom: 1px solid var(--color-border-default);
   background: var(--color-bg-panel-alt);
 }
-.kw-detail-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 20px; }
+.kw-detail-head strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kw-detail-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 20px;
+  overscroll-behavior: contain;
+}
+.kw-detail-scroll .v2-monitoring-panel,
+.kw-detail-scroll .v2-monitoring-surface {
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 860px) {
+  [data-keeper-detail-mode="true"] .v2-shell-stage { padding: 6px; }
+  [data-keeper-detail-mode="true"] .v2-body { border-radius: var(--r-2); }
+  [data-keeper-detail-mode="true"] .v2-header-brand { max-width: calc(100vw - 86px); }
+
+  .kw-mobile-rail-drawer {
+    width: min(100vw, 380px);
+  }
+  .kw-rail-scroll {
+    gap: 18px;
+    padding: 16px 14px;
+  }
+  .kw-detail-head {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  .kw-detail-head .kw-act {
+    min-height: 40px;
+  }
+  .kw-detail-head strong {
+    flex: 1 1 11rem;
+  }
+  .kw-detail-scroll {
+    padding: 10px;
+  }
+}
+
+@media (max-width: 520px) {
+  .kw-vitals {
+    grid-template-columns: 1fr;
+  }
+  .kw-ctx-tok {
+    flex-wrap: wrap;
+  }
+  .kw-ctx-tok .lbl {
+    width: 100%;
+    margin-left: 0;
+  }
+  .kw-ctx-meta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .kw-detail-btn {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    min-height: 44px;
+  }
+  .kw-detail-btn .sub {
+    width: 100%;
+    text-align: left;
+  }
+  .kw-detail-scroll {
+    padding: 8px;
+  }
+}
 
 /* ════ ATTENTION (rail, top) ════════════════════════════════════ */
 .kw-att-list { display: flex; flex-direction: column; gap: 7px; }
@@ -846,6 +1014,15 @@
   border-top: 1px solid var(--color-border-divider);
   font-size: var(--fs-11);
   color: var(--color-fg-secondary);
+}
+.kw-cmp-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+.kw-compact-btn {
+  padding: 6px 10px;
+  font-size: var(--fs-11);
 }
 
 /* ════ B3 — message bubbles: asymmetric "speech tail" + emboss ═══════

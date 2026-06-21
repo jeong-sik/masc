@@ -92,6 +92,45 @@ let update_entry_if_registered ~base_path name f =
   loop ()
 ;;
 
+let rec queue_contains_stimulus queue stimulus =
+  match Keeper_event_queue.dequeue queue with
+  | None -> false
+  | Some (head, rest) -> head = stimulus || queue_contains_stimulus rest stimulus
+;;
+
+let enqueue_missing_stimulus queue stimulus =
+  if queue_contains_stimulus queue stimulus
+  then queue
+  else Keeper_event_queue.enqueue queue stimulus
+;;
+
+let merge_event_queues ~durable ~live =
+  let rec loop acc queue =
+    match Keeper_event_queue.dequeue queue with
+    | None -> acc
+    | Some (stimulus, rest) -> loop (enqueue_missing_stimulus acc stimulus) rest
+  in
+  loop durable live
+;;
+
+let refresh_entry_event_queue_from_persistence ~base_path name entry =
+  let durable = Keeper_event_queue_persistence.load ~base_path ~keeper_name:name in
+  let rec loop () =
+    let live = Atomic.get entry.event_queue in
+    let merged = merge_event_queues ~durable ~live in
+    if merged = live
+    then ()
+    else if Atomic.compare_and_set entry.event_queue live merged
+    then
+      Keeper_event_queue_persistence.persist_snapshot
+        ~base_path
+        ~keeper_name:name
+        (fun () -> Atomic.get entry.event_queue)
+    else loop ()
+  in
+  loop ()
+;;
+
 let register_with_state
       ~base_path
       name
@@ -160,6 +199,7 @@ let register_with_state
     "registry: keeper registered name=%s running_count=%d"
     name
     (Atomic.get running_count_atomic);
+  refresh_entry_event_queue_from_persistence ~base_path name entry;
   entry
 ;;
 
@@ -258,6 +298,7 @@ let register_restarting ~base_path name meta
           name
           base_path
           (Keeper_state_machine.phase_to_string phase);
+        refresh_entry_event_queue_from_persistence ~base_path name new_entry;
         Ok new_entry)
       else loop ()
   in

@@ -284,7 +284,11 @@ type t =
 let stop_reason_to_string = function
   | Runtime_agent.Completed -> "completed"
   | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
-    Printf.sprintf "turn_budget_exhausted:%d/%d" turns_used limit
+    Printf.sprintf
+      "%s:%d/%d"
+      Keeper_terminal_reason.terminal_prefix_turn_budget_exhausted
+      turns_used
+      limit
   | Runtime_agent.MutationBoundaryReached { turns_used; tool_name } ->
     (match tool_name with
      | Some tool -> Printf.sprintf "mutation_boundary:%s:%d" tool turns_used

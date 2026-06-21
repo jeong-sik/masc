@@ -184,7 +184,7 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.streamState).toBe('thinking')
     expect(entry?.delivery).toBe('streaming')
     expect(entry?.traceSteps).toEqual([
-      { kind: 'think', text: 'reasoning about the problem...' },
+      { kind: 'think', text: 'reasoning about the problem...', ts: expect.any(String) },
     ])
   })
 
@@ -203,7 +203,7 @@ describe('applyKeeperStreamEvent', () => {
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.traceSteps).toEqual([
-      { kind: 'think', text: 'checking tools' },
+      { kind: 'think', text: 'checking tools', ts: expect.any(String) },
     ])
   })
 })

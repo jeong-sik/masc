@@ -42,8 +42,12 @@ module For_testing = struct
   ;;
 end
 
+let facts_path_for_keepers_dir ~keepers_dir ~keeper_id =
+  Filename.concat keepers_dir (keeper_id ^ ".facts.jsonl")
+;;
+
 let facts_path ~keeper_id =
-  Filename.concat (keepers_dir ()) (keeper_id ^ ".facts.jsonl")
+  facts_path_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
 ;;
 
 (* RFC-0244 Tier 2: the keeper ids that currently have a Tier-1 fact store, for
@@ -52,8 +56,8 @@ let facts_path ~keeper_id =
    keepers with persisted facts. The reserved shared id is excluded so a prior
    sweep's output is never folded back in as a source keeper. Sorted for
    deterministic sweep order. *)
-let list_fact_store_keeper_ids () =
-  let dir = keepers_dir () in
+let list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir =
+  let dir = keepers_dir in
   if not (Sys.file_exists dir && Sys.is_directory dir)
   then []
   else
@@ -66,8 +70,21 @@ let list_fact_store_keeper_ids () =
     |> List.sort String.compare
 ;;
 
+let list_fact_store_keeper_ids () =
+  list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir:(keepers_dir ())
+;;
+
+let list_fact_store_keeper_ids_for_base_path ~base_path =
+  list_fact_store_keeper_ids_for_keepers_dir
+    ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+;;
+
+let events_path_for_keepers_dir ~keepers_dir ~keeper_id =
+  Filename.concat keepers_dir (keeper_id ^ ".events.jsonl")
+;;
+
 let events_path ~keeper_id =
-  Filename.concat (keepers_dir ()) (keeper_id ^ ".events.jsonl")
+  events_path_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
 ;;
 
 let episode_bundle_lock_path ~keeper_id =
@@ -100,40 +117,43 @@ let episode_path ~keeper_id ~trace_id ~generation =
     (Printf.sprintf "%s-g%04d.json" trace_id generation)
 ;;
 
-let remove_noerr path =
-  try
-    if Sys.file_exists path then Sys.remove path
-  with
-  | Sys_error _ | Unix.Unix_error _ -> ()
+(* Raised when a durable atomic write fails. Distinct from [Failure] so the
+   facts-lock wrapper's lock-timeout handler ([with_facts_lock]) does not
+   misclassify a write error (e.g. ENOSPC) as a lock-acquisition timeout. *)
+exception Atomic_write_failed of string
+
+(* Run [f] against [oc] then close it, guaranteeing the descriptor is released
+   on every exit. [close_out] runs inside the body so a flush failure (e.g.
+   ENOSPC on the buffered tail) propagates to the caller; [close_out_noerr] in
+   the [Fun.protect] finally is a no-op after a clean close and reclaims the fd
+   when [close_out]'s flush raised before [close_out_channel] could run (OCaml's
+   [close_out = flush; close_out_channel] never reaches the close on flush
+   failure). [close_out_noerr] never raises, so it cannot mask the body's
+   exception via [Fun.Finally_raised]. *)
+let with_out_channel oc ~f =
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+       f oc;
+       close_out oc)
 ;;
 
+(* Durable atomic write delegated to the Fs_compat durability SSOT:
+   tmp -> fsync(tmp) -> rename -> best-effort fsync(parent dir) — the same
+   primitive board and event-queue persistence use. A local fsync pair here would
+   duplicate (and could drift from) that durability boundary, so route through it.
+   NB: the primitive's boot-time atomic-orphan sweep is depth-1 from base_path and
+   does not currently reach the keepers dir, so a SIGKILL between write and rename
+   still leaves an uncollected [.atomic_*.tmp] here — a pre-existing gap (the old
+   hand-rolled temp was not swept either), tracked separately, not worsened here.
+   The Memory OS write contract raises on failure (unit return), so map [Error] to
+   [Atomic_write_failed]; the temp is already cleaned up by [save_file_atomic], and
+   [Eio.Cancel.Cancelled] is re-raised by it (RFC-0143), never swallowed. *)
 let write_file_atomically path content =
   ensure_dir (Filename.dirname path);
-  let rec open_tmp attempt =
-    (* PID/counter affect only the collision-resistant temp path;
-       NDT-OK: persisted content and final path stay input-derived, and O_EXCL
-       prevents accidental reuse before the checked close + rename. *)
-    let tmp = Printf.sprintf "%s.tmp.%d.%d" path (Unix.getpid ()) attempt in
-    try
-      let fd =
-        Unix.openfile tmp [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o644
-      in
-      tmp, Unix.out_channel_of_descr fd
-    with
-    | Unix.Unix_error (Unix.EEXIST, _, _) -> open_tmp (attempt + 1)
-  in
-  let tmp, oc = open_tmp 0 in
-  let close_attempted = ref false in
-  try
-    output_string oc content;
-    close_attempted := true;
-    close_out oc;
-    Sys.rename tmp path
-  with
-  | exn ->
-    if not !close_attempted then close_out_noerr oc;
-    remove_noerr tmp;
-    raise exn
+  match Fs_compat.save_file_atomic path content with
+  | Ok () -> ()
+  | Error msg -> raise (Atomic_write_failed msg)
 ;;
 
 let generation_counter_path ~keeper_id ~trace_id =
@@ -220,15 +240,7 @@ let unique_episode_path ~keeper_id episode =
 let append_line path line =
   ensure_dir (Filename.dirname path);
   let oc = open_out_gen [ Open_append; Open_creat; Open_text ] 0o644 path in
-  let close_attempted = ref false in
-  try
-    output_string oc (line ^ "\n");
-    close_attempted := true;
-    close_out oc
-  with
-  | exn ->
-    if not !close_attempted then close_out_noerr oc;
-    raise exn
+  with_out_channel oc ~f:(fun oc -> output_string oc (line ^ "\n"))
 ;;
 
 let append_json path json =
@@ -256,8 +268,8 @@ let append_episode_bundle ~keeper_id episode =
     append_event ~keeper_id episode)
 ;;
 
-let rewrite_facts_atomically ~keeper_id facts =
-  let path = facts_path ~keeper_id in
+let rewrite_facts_atomically_for_keepers_dir ~keepers_dir ~keeper_id facts =
+  let path = facts_path_for_keepers_dir ~keepers_dir ~keeper_id in
   let content =
     facts
     |> List.map (fun fact -> fact_to_json fact |> Yojson.Safe.to_string)
@@ -267,12 +279,24 @@ let rewrite_facts_atomically ~keeper_id facts =
   write_file_atomically path content
 ;;
 
+let rewrite_facts_atomically_for_base_path ~base_path ~keeper_id facts =
+  rewrite_facts_atomically_for_keepers_dir
+    ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+    ~keeper_id
+    facts
+;;
+
+let rewrite_facts_atomically ~keeper_id facts =
+  rewrite_facts_atomically_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id facts
+;;
+
 (* ---------- Facts snapshot CAS (optimistic concurrency) ---------- *)
 
 (* Byte-level snapshot identity for the read-outside-lock, rewrite-under-lock
    pattern. [fact_to_json] has a stable key order (see Keeper_memory_os_types — the
-   external_ref key is appended last specifically to keep this fingerprint stable),
-   so a fact's canonical JSON is a sound content key. [same_fact_snapshot snapshot
+   optional external_ref and claim_id keys are appended last and omitted when None,
+   specifically to keep this fingerprint byte-identical for legacy rows), so a
+   fact's canonical JSON is a sound content key. [same_fact_snapshot snapshot
    current] is true iff the two lists are positionally byte-identical: any
    concurrent append (longer), cap/GC (shorter), or re-observation (a row's bytes
    change) makes them differ, so a caller that classified [snapshot] outside the
@@ -414,13 +438,17 @@ let parse_fact_json_line_strict ~path ~line_number line =
     Error (Printf.sprintf "%s:%d: invalid fact JSON: %s" path line_number message)
 ;;
 
-let read_facts_all ~keeper_id =
-  read_lines_all (facts_path ~keeper_id)
+let read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id =
+  read_lines_all (facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
   |> List.filter_map (parse_json_line fact_of_json)
 ;;
 
-let read_facts_all_strict ~keeper_id =
-  let path = facts_path ~keeper_id in
+let read_facts_all ~keeper_id =
+  read_facts_all_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
+;;
+
+let read_facts_all_strict_for_keepers_dir ~keepers_dir ~keeper_id =
+  let path = facts_path_for_keepers_dir ~keepers_dir ~keeper_id in
   let rec loop line_number acc = function
     | [] -> Ok (List.rev acc)
     | line :: rest ->
@@ -429,10 +457,26 @@ let read_facts_all_strict ~keeper_id =
   in
   loop 1 [] (read_lines_all path)
 ;;
-let read_facts_tail ~keeper_id ~n =
-  read_lines_tail (facts_path ~keeper_id) ~n
+
+let read_facts_all_strict ~keeper_id =
+  read_facts_all_strict_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
+;;
+
+let read_facts_tail_for_keepers_dir ~keepers_dir ~keeper_id ~n =
+  read_lines_tail (facts_path_for_keepers_dir ~keepers_dir ~keeper_id) ~n
   |> List.filter_map (parse_json_line fact_of_json)
   |> take_last n
+;;
+
+let read_facts_tail ~keeper_id ~n =
+  read_facts_tail_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id ~n
+;;
+
+let read_facts_tail_for_base_path ~base_path ~keeper_id ~n =
+  read_facts_tail_for_keepers_dir
+    ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+    ~keeper_id
+    ~n
 ;;
 
 (* RFC-0239 Q4: the per-keeper fact recall *retention target* — the size the
@@ -452,6 +496,20 @@ let fact_recall_window = 256
    file head, which a [fact_recall_window]-sized tail scan would exclude in the
    [fact_recall_window]..[fact_store_max] band. *)
 let fact_store_max = fact_recall_window + (fact_recall_window / 2)
+
+(* RFC-0272 (defect D): retention bounds for the append-only episode log
+   ([events.jsonl] line count and [episodes/] file count). Same shape and
+   hysteresis band as the facts cap ([fact_recall_window] / [fact_store_max]): a
+   trim/unlink fires only when the count exceeds the high-water [*_store_max] and
+   trims back to the low-water [*_recall_window], so it stays off the per-turn
+   hot path. The low-water is 256 = 8x the recall scan window
+   ([Keeper_memory_os_recall.episode_tail_scan] = 32), so a trim can never starve
+   recall of its 32 current episodes; [test_cap_events_preserves_recall_window]
+   asserts that coupling so an edit to either constant cannot silently break it. *)
+let event_recall_window = 256
+let event_store_max = event_recall_window + (event_recall_window / 2)
+let episode_file_window = 256
+let episode_file_store_max = episode_file_window + (episode_file_window / 2)
 
 let take_first n xs =
   let rec aux k = function
@@ -477,17 +535,24 @@ let read_facts_for_rewrite ~keeper_id =
    hysteresis ([trigger] > [keep]) keeps this off the per-turn hot path — a
    rewrite happens only once every ([trigger] - [keep]) appended facts. Returns
    the number of facts dropped. *)
-let cap_facts ~keeper_id ~keep ~trigger ~rank =
+let cap_facts ~now ~keeper_id ~keep ~trigger ~rank =
   let path = facts_path ~keeper_id in
   let all = read_facts_for_rewrite ~keeper_id in
-  let total = List.length all in
-  if total <= trigger
+  (* RFC-0259 §3.6 (P5): drop [valid_until]-expired rows before the trigger gate
+     and before ranking, so an under-cap store does not retain expired rows on
+     disk until the off-by-default GC sweep. Durable facts are never expired. *)
+  let live, expired = partition_expired ~now all in
+  let total = List.length live in
+  if expired = [] && total <= trigger
   then 0
   else (
     let kept =
-      all
-      |> List.stable_sort (fun a b -> Float.compare (rank b) (rank a))
-      |> take_first keep
+      if total <= trigger
+      then live
+      else
+        live
+        |> List.stable_sort (fun a b -> Float.compare (rank b) (rank a))
+        |> take_first keep
     in
     let content =
       match kept with
@@ -497,7 +562,7 @@ let cap_facts ~keeper_id ~keep ~trigger ~rank =
         ^ "\n"
     in
     write_file_atomically path content;
-    total - List.length kept)
+    List.length all - List.length kept)
 ;;
 
 type fact_merge_stats =
@@ -522,14 +587,14 @@ let merge_episode_facts ~merge ~existing ~incoming =
     (fun f ->
        let cell = ref f in
        order := cell :: !order;
-       let key = normalize_claim f.claim in
+       let key = claim_identity f in
        if not (Hashtbl.mem tbl key) then Hashtbl.add tbl key cell)
     existing;
   let merged = ref 0 in
   let appended = ref 0 in
   List.iter
     (fun inc ->
-       let key = normalize_claim inc.claim in
+       let key = claim_identity inc in
        match Hashtbl.find_opt tbl key with
        | Some cell ->
          cell := merge ~existing:!cell ~incoming:inc;
@@ -551,27 +616,33 @@ let merge_episode_facts ~merge ~existing ~incoming =
    that carries claims; the librarian runs at most once per turn after an LLM
    call, so a full rewrite of at most [trigger] facts is off the hot path. An
    empty [incoming] with the store already under [trigger] is a no-op. *)
-let merge_and_cap_facts ~keeper_id ~merge ~incoming ~keep ~trigger ~rank =
+let merge_and_cap_facts ~now ~keeper_id ~merge ~incoming ~keep ~trigger ~rank =
   let existing = read_facts_for_rewrite ~keeper_id in
   let merged_list, merged, appended = merge_episode_facts ~merge ~existing ~incoming in
-  let total = List.length merged_list in
+  (* RFC-0259 §3.6 (P5): drop [valid_until]-expired rows on the same boundary the
+     GC sweep uses, before the trigger gate and ranking, so an under-cap store
+     does not retain expired rows on disk. Expired rows are counted in [dropped]
+     alongside rank evictions. Durable facts ([valid_until = None]) are never
+     expired, so durable knowledge is never evicted here. *)
+  let live, expired = partition_expired ~now merged_list in
+  let total = List.length live in
   let no_incoming = match incoming with [] -> true | _ :: _ -> false in
-  if no_incoming && total <= trigger
+  if no_incoming && expired = [] && total <= trigger
   then { merged; appended; dropped = 0 }
   else (
-    let kept, dropped =
+    let kept, rank_dropped =
       if total <= trigger
-      then merged_list, 0
+      then live, 0
       else (
         let kept =
-          merged_list
+          live
           |> List.stable_sort (fun a b -> Float.compare (rank b) (rank a))
           |> take_first keep
         in
         kept, total - List.length kept)
     in
     rewrite_facts_atomically ~keeper_id kept;
-    { merged; appended; dropped })
+    { merged; appended; dropped = rank_dropped + List.length expired })
 ;;
 
 let read_events_tail ~keeper_id ~n =
@@ -623,4 +694,63 @@ let read_episode_files_tail ~keeper_id ~n =
 let read_episodes_tail ~keeper_id ~n =
   let events = read_events_tail ~keeper_id ~n in
   if events = [] then read_episode_files_tail ~keeper_id ~n else events
+;;
+
+(* RFC-0272 (defect D): the hysteresis decision shared by the episode-log caps.
+   [None] = no-op (count within the high-water [trigger]); [Some keep] = trim to
+   the low-water. Pure so the watermark logic is testable without IO. *)
+let trim_target ~count ~keep ~trigger = if count <= trigger then None else Some keep
+
+(* RFC-0272 (defect D): bound the append-only [events.jsonl] by line count. When
+   the line count exceeds [trigger], keep the last [keep] RAW lines (newest, in
+   append order) and atomically rewrite. Raw-line trim — not parse / filter /
+   re-serialize — preserves byte fidelity and the malformed-line tolerance
+   [read_lines_tail] has: a line [episode_of_json] cannot parse is tail-trimmed
+   like any other, never silently dropped mid-file. Returns the number dropped
+   (diagnostic; the rewrite is the mechanism). *)
+let cap_events ~keeper_id ~keep ~trigger =
+  let path = events_path ~keeper_id in
+  let all = read_lines_all path in
+  match trim_target ~count:(List.length all) ~keep ~trigger with
+  | None -> 0
+  | Some keep_n ->
+    let kept = take_last keep_n all in
+    let content =
+      match kept with
+      | [] -> ""
+      | _ -> String.concat "\n" kept ^ "\n"
+    in
+    write_file_atomically path content;
+    List.length all - List.length kept
+;;
+
+(* RFC-0272 (defect D): bound the [episodes/] directory by file count. When the
+   parseable-file count exceeds [trigger], keep the [keep] most-recent files by
+   [compare_episode_recency] (the order recall uses) and unlink the rest. Only
+   parseable files are counted and ordered — an unparseable file has no recency
+   to rank, so it is left untouched rather than blindly deleted. Unlink is
+   best-effort / [Sys_error]-tolerant: a concurrent reader holding a file is
+   fine, and no lock is taken here that could deadlock with the bundle lock the
+   caller already holds. Returns the number unlinked. *)
+let cap_episode_files ~keeper_id ~keep ~trigger =
+  let dir = episodes_dir ~keeper_id in
+  let parsed =
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter (fun name -> Filename.check_suffix name ".json")
+    |> List.map (fun name -> Filename.concat dir name)
+    |> List.filter Sys.file_exists
+    |> List.filter_map (fun p ->
+      match read_episode_file p with
+      | Some ep -> Some (p, ep)
+      | None -> None)
+  in
+  match trim_target ~count:(List.length parsed) ~keep ~trigger with
+  | None -> 0
+  | Some keep_n ->
+    let sorted = List.sort (fun (_, a) (_, b) -> compare_episode_recency a b) parsed in
+    let n_drop = List.length sorted - keep_n in
+    let to_drop = sorted |> List.filteri (fun i _ -> i < n_drop) |> List.map fst in
+    List.iter (fun p -> try Sys.remove p with Sys_error _ -> ()) to_drop;
+    List.length to_drop
 ;;

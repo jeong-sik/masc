@@ -50,32 +50,38 @@ let compact_whitespace text =
   Buffer.contents buf
 
 let truncate ~max_len text =
-  if String.length text <= max_len then text
-  else
-    let rec utf8_boundary idx =
-      if idx <= 0 then 0
-      else if Char.code text.[idx] land 0xc0 = 0x80 then utf8_boundary (idx - 1)
-      else idx
-    in
-    String.sub text 0 (utf8_boundary max_len)
+  let prefix, _ =
+    Keeper_text_processing.truncate_utf8_prefix ~max_bytes:max_len text
+  in
+  prefix
+
+let optional_identity_component ~field = function
+  | None -> field ^ ":none"
+  | Some value -> field ^ ":some:" ^ value
+;;
 
 let digest_id ~requester ?goal ~topic ~reason () =
-  let goal_text =
-    match goal with
-    | Some text -> text
-    | None -> ""
-  in
   let raw =
     String.concat "\n"
       [
         requester;
         topic;
         reason;
-        goal_text;
+        optional_identity_component ~field:"goal" goal;
       ]
   in
   let hex = Digest.to_hex (Digest.string raw) in
   "delegation-" ^ String.sub hex 0 12
+
+let identity_key request =
+  String.concat "\n"
+    [
+      request.id;
+      request.requester;
+      request.topic;
+      request.reason;
+      optional_identity_component ~field:"goal" request.goal;
+    ]
 
 let task_seed ~requester ?goal ~topic ~reason () =
   let title_topic = topic |> compact_whitespace |> truncate ~max_len:80 in

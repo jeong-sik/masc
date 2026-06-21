@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from gate_shared import response_text
 from gate_shared.bindings_store import load_bindings, save_bindings
 from gate_shared.status_store import ConnectorRuntimeStatus, StatusStore
 
@@ -257,7 +258,8 @@ class SlackGateBot:
         thinking_ts: str,
     ) -> None:
         """Process gate response and update the thinking message."""
-        if response.ok and response.reply:
+        rendered_text = strip_state_blocks(response_text(response))
+        if response.ok and rendered_text:
             reply = strip_state_blocks(response.reply)
             blocks = response_blocks(
                 reply,
@@ -265,8 +267,9 @@ class SlackGateBot:
                 model_used=response.model_used,
                 duration_ms=response.duration_ms,
                 tokens_used=response.tokens_used,
+                structured=response.structured,
             )
-            text = fallback_text(reply)
+            text = fallback_text(rendered_text)
             if thinking_ts:
                 try:
                     app.client.chat_update(

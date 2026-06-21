@@ -22,7 +22,7 @@ import type { VNode } from 'preact'
 import type { Keeper, KeeperConversationEntry } from '../../types'
 import { KeeperConversationPanel } from '../keeper-shared'
 import { keeperMobilePane } from '../keeper-detail-state'
-import { KeeperTurnInspector } from '../keeper-turn-inspector'
+import { TurnInspectorDrawer as SharedTurnInspectorDrawer } from '../keeper-turn-inspector-drawer'
 import { ChatArtifactPanel } from '../chat/artifact-panel'
 import { keeperThreads } from '../../keeper-state'
 import { keeperDisplayStatus } from '../../lib/keeper-runtime-display'
@@ -359,44 +359,23 @@ function TurnInspectorDrawer({
   open: boolean
   onClose: () => void
 }) {
-  if (!open) return null
-
+  // Thin chat-specific wrapper over the shared TurnInspectorDrawer: maps the
+  // chat entry to the drawer's anchor props (turnRef + timestamp window) and
+  // header label. The shared component owns the overlay markup so the board
+  // surface (post-detail) reuses the identical drawer. testId is preserved so
+  // existing chat tests keep their `kw-chat-turn-inspector-*` selectors.
   return html`
-    <div
-      class="fixed inset-0 z-50 flex justify-end bg-black/40"
-      role="dialog"
-      aria-modal="true"
-      aria-label="턴 검사"
-      data-testid="kw-chat-turn-inspector-drawer"
-      onClick=${onClose}
-    >
-      <div
-        class="h-full w-full max-w-2xl overflow-y-auto bg-[var(--color-bg-page)] shadow-2xl"
-        onClick=${(e: Event) => e.stopPropagation()}
-      >
-        <div class="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-3 v2-monitoring-toolbar">
-          <div>
-            <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">턴 검사</h3>
-            <p class="text-2xs text-[var(--color-fg-muted)]">
-              ${triggerEntry
-                ? html`메시지 ${triggerEntry.label} · ${triggerEntry.timestamp ?? triggerEntry.id}`
-                : keeperName}
-            </p>
-          </div>
-          <button
-            type="button"
-            class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5 text-2xs text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)]"
-            onClick=${onClose}
-            data-testid="kw-chat-turn-inspector-close"
-          >닫기</button>
-        </div>
-        <${KeeperTurnInspector}
-          keeperName=${keeperName}
-          initialTurnRef=${triggerEntry?.turnRef ?? null}
-          initialTurnTimestamp=${triggerEntry?.timestamp ?? null}
-        />
-      </div>
-    </div>
+    <${SharedTurnInspectorDrawer}
+      testId="kw-chat-turn-inspector"
+      keeperName=${keeperName}
+      subtitle=${triggerEntry
+        ? `메시지 ${triggerEntry.label} · ${triggerEntry.timestamp ?? triggerEntry.id}`
+        : null}
+      initialTurnRef=${triggerEntry?.turnRef ?? null}
+      initialTurnTimestamp=${triggerEntry?.timestamp ?? null}
+      open=${open}
+      onClose=${onClose}
+    />
   `
 }
 

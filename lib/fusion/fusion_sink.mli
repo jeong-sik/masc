@@ -21,8 +21,10 @@
     답변 전체/judge 종합/observed_usage = panel N + judge 1 합산) 증거를 남긴다. [judge_usage]는
     심판이 소비한 토큰(orchestrator가 [Fusion_judge.run]에서 분리해 주입). [base_dir]는 호출자 주입.
 
-    chat store append, broadcast, board post 중 예외가 발생하면 [Error msg]를 반환한다.
-    [Eio.Cancel.Cancelled]는 재전파한다. *)
+    chat store append 또는 board post 생성 실패는 [Error msg]로 반환한다.
+    [chat_appended] SSE broadcast는 {!Keeper_chat_broadcast} 정책을 따른다:
+    non-cancel 예외는 counter+warn으로 흡수하는 best-effort 알림이며, chat/board
+    영속 성공을 실패로 되돌리지 않는다. [Eio.Cancel.Cancelled]는 재전파한다. *)
 val emit
   :  base_dir:string
   -> keeper:string

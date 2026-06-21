@@ -38,6 +38,7 @@
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
+import { pillClasses } from './pill'
 
 export type StatusChipTone =
   | 'ok'
@@ -62,20 +63,13 @@ export interface StatusChipSummary {
   readonly testIdLength: number
 }
 
-const BASE_SHAPE =
-  'inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-[11px]'
-const UPPERCASE_CLASS = 'uppercase tracking-[0.05em]'
-
-const SEMANTIC_TONE: Record<StatusChipTone, string> = {
-  ok: 'border-success/20 bg-success/10 text-success',
-  warn: 'border-warning/20 bg-warning/10 text-warning',
-  bad: 'border-destructive/20 bg-destructive/10 text-destructive',
-  info: 'border-brand/20 bg-brand/10 text-brand',
-  neutral: 'border-border bg-surface-subtle text-text-tertiary',
-  paused: 'border-[var(--paused-20)] bg-[var(--paused-10)] text-[var(--paused)]',
-  select: 'border-[var(--select-20)] bg-[var(--select-10)] text-[var(--select)]',
-  '': 'border-border bg-surface-subtle text-text-tertiary',
-}
+// Tone class strings + base shape now live in `pill.ts` (single source — the
+// convergence). StatusChip keeps only its own public tone-enum membership so
+// its type guard stays honest: the `volt` accent is Pill-only, not a
+// StatusChip tone.
+const STATUS_CHIP_TONES: ReadonlySet<string> = new Set([
+  'ok', 'warn', 'bad', 'info', 'neutral', 'paused', 'select', '',
+])
 
 /** Keeper lifecycle state → StatusChip tone.
  *
@@ -140,7 +134,7 @@ export function keeperStateTone(state: string): StatusChipTone {
     Tailwind class strings (`bg-[var(--color-status-ok)]`) fall through and are
     composed as-is. Exposed so higher-level helpers can branch. */
 export function isSemanticTone(tone: string): tone is StatusChipTone {
-  return tone in SEMANTIC_TONE
+  return STATUS_CHIP_TONES.has(tone)
 }
 
 /** Pure: class string for given tone + optional extra + optional
@@ -156,12 +150,9 @@ export function statusChipClasses(
   extra?: string,
   uppercase: boolean = true,
 ): string {
-  const toneClass = isSemanticTone(tone) ? SEMANTIC_TONE[tone] : tone
-  const parts = [BASE_SHAPE]
-  if (uppercase) parts.push(UPPERCASE_CLASS)
-  if (toneClass !== '') parts.push(toneClass)
-  if (extra !== undefined && extra !== '') parts.push(extra)
-  return parts.join(' ')
+  // Delegates to the converged engine; output is byte-identical to the prior
+  // inline implementation (pill.ts CHIP_TONE === the old SEMANTIC_TONE).
+  return pillClasses(tone, { uppercase, extra })
 }
 
 function hasChildrenContent(children: ComponentChildren | undefined): boolean {

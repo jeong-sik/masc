@@ -34,10 +34,11 @@ class CheckTestCoverageTest(unittest.TestCase):
             "check_test_coverage.run_diff_or_fail",
             return_value="lib/a.ml\ndashboard/app.ts\nconfig/runtime.toml\n",
         ) as run_diff:
-            self.assertEqual(
-                coverage.get_changed_covered_files(),
-                ["lib/a.ml", "dashboard/app.ts", "config/runtime.toml"],
-            )
+            with mock.patch.dict(os.environ, {"GITHUB_BASE_REF": "main"}, clear=False):
+                self.assertEqual(
+                    coverage.get_changed_covered_files(),
+                    ["lib/a.ml", "dashboard/app.ts", "config/runtime.toml"],
+                )
 
         self.assertEqual(
             run_diff.call_args.args[0],

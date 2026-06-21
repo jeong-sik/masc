@@ -1,9 +1,13 @@
 // MASC Dashboard — Settings surface (keeper-v2 port)
-// Local-state-only operator console. No backend wiring.
+// Read surfaces (MCP exposed-tools list, system-log tail, runtime defaults /
+// model routing) are wired to live backend data. Write surfaces (Save changes,
+// VerifyBtn, expose/unexpose persistence) remain local-state stubs.
 
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import { navigate } from '../router'
+import { fetchDashboardTools, fetchLogs, fetchRuntimeDefaults } from '../api/dashboard.js'
+import type { DashboardToolInventoryItem, LogEntry, RuntimeDefaultsResponse } from '../api/dashboard.js'
 import type { ComponentChildren } from 'preact'
 
 type SectionId =
@@ -54,21 +58,21 @@ const SET_GROUPS: [string, SectionId[]][] = [
   ['관측 · 표시', ['logs', 'notify', 'display']],
 ]
 
-const MCP_TOOLS = [
-  'masc_start',
-  'masc_handoff',
-  'masc_compact',
-  'masc_amplitude_query',
-  'masc_trace_window',
-  'masc_board_metrics',
-  'masc_git_blame',
-]
+// Tools exposed over the public MCP server, derived from the live capability
+// registry (`/api/v1/dashboard/tools`). The "public_mcp" surface is the
+// registry's own exposure signal — see lib/tool_misc_introspection.ml
+// (Tool_catalog.is_public_mcp). Unknown/empty inventory yields an empty list
+// (no fabricated tool names).
+const MCP_PUBLIC_SURFACE = 'public_mcp'
+const SETTINGS_LOG_LIMIT = 50
+const SETTINGS_LOG_POLL_MS = 3000
 
-const RUNTIMES = [
-  { name: 'oas·seoul-1', endpoint: 'oas://seoul-1.masc.run', region: 'ap-northeast-2', kind: 'OAS', keepers: 3 },
-  { name: 'oas·tokyo-2', endpoint: 'oas://tokyo-2.masc.run', region: 'ap-northeast-1', kind: 'OAS', keepers: 2 },
-  { name: 'local·docker', endpoint: 'unix:///var/run/masc.sock', region: 'local', kind: 'Docker', keepers: 1 },
-]
+export function mcpExposedToolNames(items: readonly DashboardToolInventoryItem[]): string[] {
+  return items
+    .filter(item => item.surfaces.includes(MCP_PUBLIC_SURFACE))
+    .map(item => item.name)
+    .sort((a, b) => a.localeCompare(b))
+}
 
 const APPROVAL_ACTIONS: [string, string, string][] = [
   ['git push / merge', 'always', '원격 브랜치에 쓰기'],
@@ -78,18 +82,43 @@ const APPROVAL_ACTIONS: [string, string, string][] = [
   ['읽기 전용 도구', 'auto', 'query·trace·blame 등'],
 ]
 
-const SYS_LOG: [string, string, string, string, string][] = [
-  ['16:24:51', 'info', 'masc-improver', 'masc_amplitude_query 완료', 'ok'],
-  ['16:24:48', 'info', 'masc-improver', 'masc_amplitude_query 호출 (D0–D3)', 'run'],
-  ['16:23:10', 'warn', 'nick0cave', '컨텍스트 91% — compact 예약', 'warn'],
-  ['16:22:55', 'info', 'sangsu', 'masc_git_blame 완료', 'ok'],
-  ['16:21:02', 'error', 'drifter', 'masc_trace_window 실패 — context overflow', 'fail'],
-  ['16:20:40', 'info', 'qa-king', 'HandingOff → sangsu 인계 시작', 'run'],
-  ['16:19:33', 'info', 'nick0cave', 'masc_compact 완료 (−64%)', 'ok'],
-  ['16:18:12', 'error', 'drifter', 'masc_start 재시작 실패 (3/3)', 'fail'],
-  ['16:17:50', 'info', 'scholar', 'masc_board_metrics 완료', 'ok'],
-  ['16:16:04', 'warn', 'analyst', 'search/index 색인 실패 1건', 'warn'],
-]
+// System-log row: [time, level, identity, message, status]. Derived from live
+// ring entries (`/api/v1/dashboard/logs`) — the same source the Logs surface
+// polls. Status is derived from the entry level only (error→fail, warn→warn,
+// else→ok); the in-progress "run" state is not knowable from a settled ring
+// entry, so it is never fabricated.
+type SysLogRow = [string, string, string, string, string]
+
+const SETTINGS_LOG_LEVEL_FAIL = 'error'
+const SETTINGS_LOG_LEVEL_WARN = 'warn'
+
+export function logRowStatus(level: string): 'ok' | 'warn' | 'fail' {
+  const normalized = level.toLowerCase()
+  if (normalized === SETTINGS_LOG_LEVEL_FAIL) return 'fail'
+  if (normalized === SETTINGS_LOG_LEVEL_WARN) return 'warn'
+  return 'ok'
+}
+
+function logRowClock(ts: string): string {
+  const match = ts.match(/T(\d{2}:\d{2}:\d{2})/)
+  if (match?.[1]) return match[1]
+  const date = new Date(ts)
+  if (!Number.isNaN(date.getTime())) {
+    return date.toLocaleTimeString('ko-KR', {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+  }
+  return ts
+}
+
+export function logEntryToSysRow(entry: LogEntry): SysLogRow {
+  const level = entry.level.toLowerCase()
+  const identity = entry.keeper_name?.trim() || entry.module?.trim() || '(root)'
+  return [logRowClock(entry.ts), level, identity, entry.message, logRowStatus(entry.level)]
+}
 
 function SetToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return html`
@@ -247,7 +276,39 @@ function LogFilter({
 
 function LogViewer() {
   const [filter, setFilter] = useState<LogFilter>('all')
-  const rows = SYS_LOG.filter(r => {
+  const [allRows, setAllRows] = useState<SysLogRow[]>([])
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+
+  useEffect(() => {
+    let active = true
+    let timer: ReturnType<typeof setInterval> | null = null
+
+    const tick = async () => {
+      try {
+        const resp = await fetchLogs({ limit: SETTINGS_LOG_LIMIT })
+        if (!active) return
+        const rows = [...resp.entries]
+          .sort((a, b) => b.seq - a.seq)
+          .map(logEntryToSysRow)
+        setAllRows(rows)
+        setStatus('ready')
+      } catch {
+        if (!active) return
+        // No fabricated rows on failure — surface the error state instead.
+        setStatus('error')
+      }
+    }
+
+    void tick()
+    timer = setInterval(() => { void tick() }, SETTINGS_LOG_POLL_MS)
+
+    return () => {
+      active = false
+      if (timer) clearInterval(timer)
+    }
+  }, [])
+
+  const rows = allRows.filter(r => {
     if (filter === 'all') return true
     if (filter === 'tool') return /masc_/.test(r[3])
     if (filter === 'success') return r[4] === 'ok'
@@ -256,6 +317,10 @@ function LogViewer() {
   })
 
   const filters: LogFilter[] = ['all', 'tool', 'success', 'failure']
+  const emptyLabel =
+    status === 'loading' ? '로그를 불러오는 중…'
+    : status === 'error' ? '시스템 로그를 불러오지 못했습니다.'
+    : '조건에 맞는 로그가 없습니다.'
 
   return html`
     <div class="log-view" data-testid="log-viewer">
@@ -271,7 +336,9 @@ function LogViewer() {
         <span class="log-live"><span class="tps-dot"></span>tail -f</span>
       </div>
       <div class="log-stream mono" data-testid="log-stream">
-        ${rows.map((r, i) => html`
+        ${rows.length === 0
+          ? html`<div class="log-empty" data-testid="log-empty">${emptyLabel}</div>`
+          : rows.map((r, i) => html`
           <div key=${i} class=${`log-line ${r[1]}`} data-testid="log-row">
             <span class="lt">${r[0]}</span>
             <span class=${`ll ${r[1]}`}>${r[1]}</span>
@@ -294,26 +361,62 @@ export function SettingsSurface() {
   const [tokenShown, setTokenShown] = useState(false)
   const [sessionExpiry, setSessionExpiry] = useState('8시간')
 
-  // mcp
+  // mcp — exposed tools come from the live capability registry (public_mcp surface)
   const [mcpUrl, setMcpUrl] = useState('https://masc.local/mcp')
   const [transport, setTransport] = useState('http')
-  const [tools, setTools] = useState<Record<string, boolean>>(
-    Object.fromEntries(MCP_TOOLS.map(t => [t, true])),
-  )
+  const [mcpTools, setMcpTools] = useState<string[]>([])
+  const [tools, setTools] = useState<Record<string, boolean>>({})
 
-  // runtime defaults
-  const [defRuntime, setDefRuntime] = useState('oas·seoul-1')
-  const [defModel, setDefModel] = useState('claude-sonnet-4')
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      try {
+        const resp = await fetchDashboardTools()
+        if (!active) return
+        const names = mcpExposedToolNames(resp.tool_inventory?.tools ?? [])
+        setMcpTools(names)
+        // Listed tools are, by definition, currently exposed over public MCP.
+        // The per-tool toggle is a local view control; expose/unexpose
+        // persistence is deferred (no backend write endpoint yet).
+        setTools(Object.fromEntries(names.map(n => [n, true])))
+      } catch {
+        if (!active) return
+        // No fabricated tool names on failure.
+        setMcpTools([])
+        setTools({})
+      }
+    })()
+    return () => { active = false }
+  }, [])
+
+  // runtime defaults / model routing — resolved from runtime.toml (SSOT)
+  const [runtimeDefaults, setRuntimeDefaults] = useState<RuntimeDefaultsResponse | null>(null)
+  const [defRuntime, setDefRuntime] = useState('')
+  const [defModel, setDefModel] = useState('')
   const [maxPar, setMaxPar] = useState(6)
   const [compactAt, setCompactAt] = useState(85)
   const [autoCompact, setAutoCompact] = useState(true)
 
-  // routing / policy
-  const [routing, setRouting] = useState<Record<string, string>>({
-    analysis: 'claude-sonnet-4',
-    heavy: 'claude-opus-4',
-    cheap: 'claude-haiku-4',
-  })
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      try {
+        const resp = await fetchRuntimeDefaults()
+        if (!active) return
+        setRuntimeDefaults(resp)
+        // Seed the selectors with the resolved defaults (unknown → left blank,
+        // never a fabricated default).
+        if (resp.default_runtime_id) setDefRuntime(resp.default_runtime_id)
+        if (resp.default_model) setDefModel(resp.default_model)
+      } catch {
+        if (!active) return
+        setRuntimeDefaults(null)
+      }
+    })()
+    return () => { active = false }
+  }, [])
+
+  // policy
   const [approve, setApprove] = useState<Record<string, string>>(
     Object.fromEntries(APPROVAL_ACTIONS.map(a => [a[0], a[1]])),
   )
@@ -389,6 +492,14 @@ export function SettingsSurface() {
   const [clock24, setClock24] = useState(true)
 
   const cur = SET_SECTIONS.find(s => s[0] === sec) ?? SET_SECTIONS[0]!
+
+  // Resolved runtime options (de-duplicated, derived from the live registry).
+  const runtimeEntries = runtimeDefaults?.runtimes ?? []
+  const runtimeIdOptions = runtimeEntries.map(r => r.id)
+  const runtimeModelOptions = [...new Set(runtimeEntries.map(r => r.model))]
+  const keeperAssignments = runtimeDefaults?.model_routing.keeper_assignments ?? []
+  const librarianRuntime = runtimeDefaults?.model_routing.librarian_runtime_id ?? null
+  const crossVerifierRuntime = runtimeDefaults?.model_routing.cross_verifier_runtime_id ?? null
 
   return html`
     <main class="v2-shell-surface settings-surf ss-surface bg-surface-page text-text-primary" data-screen-label="설정" data-testid="settings-surface">
@@ -493,11 +604,13 @@ export function SettingsSurface() {
                 ${transport === 'stdio' && html`<span>spawn: masc-mcp serve --stdio · framing: ndjson · pid 8421</span>`}
                 ${transport === 'sse' && html`<span>GET ${mcpUrl}/sse · keep-alive 15s · event: message</span>`}
               </div>
-              <div class="set-sub-h">Exposed tools (${Object.values(tools).filter(Boolean).length}/${MCP_TOOLS.length})</div>
-              ${MCP_TOOLS.map(t => html`
+              <div class="set-sub-h">Exposed tools (${Object.values(tools).filter(Boolean).length}/${mcpTools.length})</div>
+              ${mcpTools.length === 0
+                ? html`<div class="set-hint" data-testid="mcp-tools-empty">노출된 MCP 도구가 없습니다.</div>`
+                : mcpTools.map(t => html`
                 <${SetRow} key=${t} label=${html`<span class="mono" style=${{ fontSize: '12.5px' }}>${t}</span>`}>
                   <${SetToggle}
-                    on=${tools[t]}
+                    on=${tools[t] ?? false}
                     onChange=${(v: boolean) => setTools(p => ({ ...p, [t]: v }))}
                   />
                 <//>
@@ -505,11 +618,15 @@ export function SettingsSurface() {
             `}
 
             ${sec === 'runtime' && html`
-              <${SetRow} label="Default runtime" hint="Where new keepers start">
-                <${SetSeg} value=${defRuntime} options=${['oas·seoul-1', 'oas·tokyo-2', 'local·docker']} onChange=${setDefRuntime} />
+              <${SetRow} label="Default runtime" hint="Resolved from runtime.toml [runtime].default">
+                ${runtimeIdOptions.length === 0
+                  ? html`<span class="set-hint" data-testid="runtime-default-empty">런타임 설정을 불러오지 못했습니다.</span>`
+                  : html`<${SetSeg} value=${defRuntime} options=${runtimeIdOptions} onChange=${setDefRuntime} />`}
               <//>
-              <${SetRow} label="Default model" hint="Used when no routing rule matches">
-                <${SetSeg} value=${defModel} options=${['claude-haiku-4', 'claude-sonnet-4', 'claude-opus-4']} onChange=${setDefModel} />
+              <${SetRow} label="Default model" hint="API model of the default runtime">
+                ${runtimeModelOptions.length === 0
+                  ? html`<span class="set-hint">—</span>`
+                  : html`<${SetSeg} value=${defModel} options=${runtimeModelOptions} onChange=${setDefModel} />`}
               <//>
               <${SetRow} label="Max concurrent keepers" hint="In this namespace">
                 <${SetStepper} v=${maxPar} set=${setMaxPar} min=${1} max=${12} />
@@ -525,43 +642,50 @@ export function SettingsSurface() {
             `}
 
             ${sec === 'runtimes' && html`
-              <div class="set-hint" style=${{ marginBottom: '12px' }}>Registered runtime targets. Keepers run on one of these.</div>
-              ${RUNTIMES.map(rt => html`
-                <div key=${rt.name} class="set-rt">
-                  <div class="set-rt-top">
-                    <span class="set-rt-name mono">${rt.name}</span>
-                    <span class="set-rt-kind">${rt.kind}</span>
-                    <span class="set-rt-keepers">keeper ${rt.keepers}</span>
-                    <${VerifyBtn} label="Check" />
-                  </div>
-                  <div class="set-rt-row">
-                    <span class="sub-k">endpoint</span>
-                    <input class="set-input mono" defaultValue=${rt.endpoint} />
-                  </div>
-                  <div class="set-rt-row">
-                    <span class="sub-k">region</span>
-                    <span class="mono" style=${{ fontSize: '12px', color: 'var(--text-mid)' }}>${rt.region}</span>
-                  </div>
-                </div>
-              `)}
+              <div class="set-hint" style=${{ marginBottom: '12px' }}>Registered runtime targets resolved from runtime.toml.</div>
+              ${runtimeEntries.length === 0
+                ? html`<div class="set-hint" data-testid="runtime-nodes-empty">등록된 런타임이 없습니다.</div>`
+                : runtimeEntries.map(rt => html`
+                    <div key=${rt.id} class="set-rt" data-testid="runtime-node">
+                      <div class="set-rt-top">
+                        <span class="set-rt-name mono">${rt.id}</span>
+                        <span class="set-rt-kind">${rt.provider}</span>
+                        ${rt.is_default ? html`<span class="set-rt-keepers">default</span>` : null}
+                      </div>
+                      <div class="set-rt-row">
+                        <span class="sub-k">model</span>
+                        <span class="mono" style=${{ fontSize: '12px', color: 'var(--text-mid)' }}>${rt.model}</span>
+                      </div>
+                      <div class="set-rt-row">
+                        <span class="sub-k">max context</span>
+                        <span class="mono" style=${{ fontSize: '12px', color: 'var(--text-mid)' }}>${rt.max_context}</span>
+                      </div>
+                    </div>
+                  `)}
               <button type="button" class="set-add">＋ Add runtime</button>
             `}
 
             ${sec === 'routing' && html`
-              <div class="set-hint" style=${{ marginBottom: '12px' }}>Automatically pick a model per task.kind.</div>
-              ${([
-                ['analysis', '분석 · 리서치'],
-                ['heavy', '복잡한 추론 · 대규모 리팩터'],
-                ['cheap', '단순 작업 · 분류'],
-              ] as const).map(([k, lbl]) => html`
-                <${SetRow} key=${k} label=${lbl} hint=${`task.kind = ${k}`}>
-                  <${SetSeg}
-                    value=${routing[k]}
-                    options=${['claude-haiku-4', 'claude-sonnet-4', 'claude-opus-4']}
-                    onChange=${(v: string) => setRouting(p => ({ ...p, [k]: v }))}
-                  />
-                <//>
-              `)}
+              <div class="set-hint" style=${{ marginBottom: '12px' }}>
+                Resolved model routing from runtime.toml (SSOT). Read-only — edit runtime.toml to change.
+              </div>
+              <${SetRow} label="Default model" hint="Used when no keeper assignment matches">
+                <span class="mono" data-testid="routing-default-model">${runtimeDefaults?.default_model ?? '—'}</span>
+              <//>
+              ${librarianRuntime
+                ? html`<${SetRow} label="Librarian runtime" hint="[runtime].librarian"><span class="mono">${librarianRuntime}</span><//>`
+                : null}
+              ${crossVerifierRuntime
+                ? html`<${SetRow} label="Cross-verifier runtime" hint="[runtime].cross_verifier"><span class="mono">${crossVerifierRuntime}</span><//>`
+                : null}
+              <div class="set-sub-h">Keeper assignments (${keeperAssignments.length})</div>
+              ${keeperAssignments.length === 0
+                ? html`<div class="set-hint" data-testid="routing-assignments-empty">명시적 keeper 할당이 없습니다 — 모두 기본 런타임을 사용합니다.</div>`
+                : keeperAssignments.map(a => html`
+                    <${SetRow} key=${a.keeper} label=${a.keeper} hint="keeper → runtime">
+                      <span class="mono" data-testid="routing-assignment">${a.runtime_id}</span>
+                    <//>
+                  `)}
             `}
 
             ${sec === 'prompts' && html`

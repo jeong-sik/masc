@@ -45,6 +45,7 @@ type SurfaceSectionId =
   | 'design-canvas'
   | 'performance'
   | 'memory-explore'
+  | 'keeper-memory-health'
   // code (Stage 5 IDE plane — shell only in PR-1, 4-pane content in PR-2+)
   | 'ide-shell'
 
@@ -404,6 +405,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       description: 'Memory Lens, Lineage Rail, and Goal Dossier composition.',
       params: { section: 'memory-explore' },
     },
+    {
+      id: 'keeper-memory-health',
+      label: '키퍼 메모리 상태',
+      description: 'Per-keeper fact-store size, GC statistics, and cadence counter.',
+      params: { section: 'keeper-memory-health' },
+    },
   ],
   code: [
     {
@@ -417,7 +424,10 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
 }
 
 function validSectionIds(tab: NonHomeTabId): SurfaceSectionId[] {
-  return DASHBOARD_SECTION_ITEMS[tab].map(item => item.id)
+  // Total: an unknown/unmapped tab has no sections. Guards against a route
+  // whose tab is not a section-bearing surface (e.g. partial routes in tests
+  // or a not-yet-registered surface) instead of crashing on undefined.map.
+  return (DASHBOARD_SECTION_ITEMS[tab] ?? []).map(item => item.id)
 }
 
 export function defaultParamsForTab(tabId: TabId): Record<string, string> {
@@ -426,7 +436,7 @@ export function defaultParamsForTab(tabId: TabId): Record<string, string> {
 
 export function sectionItemsForTab(tabId: TabId): DashboardSectionNavItem[] {
   if (isSectionlessSurface(tabId)) return []
-  return DASHBOARD_SECTION_ITEMS[tabId as NonHomeTabId]
+  return DASHBOARD_SECTION_ITEMS[tabId as NonHomeTabId] ?? []
 }
 
 export function visibleSectionItemsForTab(tabId: TabId): DashboardSectionNavItem[] {

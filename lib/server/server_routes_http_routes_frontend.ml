@@ -57,6 +57,54 @@ let redirect_to_dashboard reqd =
 let websocket_discovery_handler request reqd =
   Http.Response.json_value (websocket_discovery_json request) reqd
 
+let header_contains_token request name token =
+  match Httpun.Headers.get request.Httpun.Request.headers name with
+  | None -> false
+  | Some raw ->
+      raw
+      |> String.split_on_char ','
+      |> List.exists (fun part ->
+           String.equal
+             (String.lowercase_ascii (String.trim part))
+             token)
+
+let header_equals request name expected =
+  match Httpun.Headers.get request.Httpun.Request.headers name with
+  | None -> false
+  | Some raw ->
+      String.equal
+        (String.lowercase_ascii (String.trim raw))
+        expected
+
+let is_websocket_upgrade_request request =
+  request.Httpun.Request.meth = `GET
+  && header_contains_token request "connection" "upgrade"
+  && header_equals request "upgrade" "websocket"
+
+let websocket_upgrade_unavailable_reason () =
+  if not (Transport_metrics.ws_enabled ())
+  then Some "WebSocket transport disabled"
+  else if not (Transport_metrics.ws_same_origin_ready ())
+  then Some "WebSocket transport not ready"
+  else None
+
+let websocket_handler ?sw ?clock request reqd =
+  if is_websocket_upgrade_request request then
+    match websocket_upgrade_unavailable_reason () with
+    | None ->
+      (match
+         Server_mcp_transport_ws.upgrade_connection
+           ?sw
+           ?clock
+           ~on_message:Server_mcp_transport_ws.dispatch_inbound_message
+           reqd
+       with
+       | Ok () -> ()
+       | Error msg -> Http.Response.text ~status:`Bad_request msg reqd)
+    | Some reason -> Http.Response.text ~status:`Service_unavailable reason reqd
+  else
+    websocket_discovery_handler request reqd
+
 let webrtc_signaling_handler signaling_fn request reqd =
   with_permission_auth ~permission:Masc_domain.CanBroadcast
     (fun _state _req reqd ->
@@ -75,7 +123,7 @@ let webrtc_signaling_handler signaling_fn request reqd =
                 reqd))
     request reqd
 
-let add_routes ~port ~host router =
+let add_routes ?sw ?clock ~port ~host router =
   router
   |> Http.Router.get "/health" health_handler
   |> Http.Router.get Server_health_paths.liveness liveness_handler
@@ -88,7 +136,7 @@ let add_routes ~port ~host router =
          with_public_read (fun _state req reqd ->
          Http.Response.json_value (Runtime.agent_card_json req) reqd)
          request reqd)
-  |> Http.Router.get "/ws" websocket_discovery_handler
+  |> Http.Router.get "/ws" (websocket_handler ?sw ?clock)
   (* RFC-0217 S4-2 — Otel_metric_store scrape endpoint removed; metrics now
      export via OTLP push (Otel_metrics observable). *)
   |> Http.Router.get "/ag-ui/events" handle_ag_ui_events

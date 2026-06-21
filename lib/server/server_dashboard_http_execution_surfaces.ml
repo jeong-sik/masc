@@ -328,13 +328,14 @@ let with_cached_dashboard_surface_metadata
   | other -> other
 ;;
 
-let execution_query_json ~actor ~fixture ~full_mode ~light ~default_light_request =
+let execution_query_json ~actor ~fixture ~full_mode ~light ~default_light_request ~force =
   `Assoc
     [ "actor", Json_util.string_opt_to_json actor
     ; "fixture", Json_util.string_opt_to_json fixture
     ; "full", `Bool full_mode
     ; "light", `Bool light
     ; "default_light_request", `Bool default_light_request
+    ; "force", `Bool force
     ]
 ;;
 
@@ -661,7 +662,8 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
                    ~fixture:None
                    ~full_mode:false
                    ~light:true
-                   ~default_light_request:true));
+                   ~default_light_request:true
+                   ~force:false));
       !broadcast_namespace_truth_ref state)
 ;;
 
@@ -711,6 +713,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
     execution_actor_for_request ~base_path:config.base_path request
   in
   let full_mode = bool_query_param request "full" ~default:false in
+  let force = bool_query_param request "force" ~default:false in
   let light = not full_mode in
   let query =
     execution_query_json
@@ -718,8 +721,10 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
       ~fixture
       ~full_mode
       ~light
-      ~default_light_request:(fixture = None && actor = None && not full_mode)
+      ~default_light_request:(fixture = None && actor = None && not full_mode && not force)
+      ~force
   in
+  let default_light_cache_key = "execution:default:light" in
   let compute ?actor ?fixture ~light () =
     let started_at = Unix.gettimeofday () in
     run_dashboard_compute
@@ -748,20 +753,62 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
                 ])
   in
   match fixture, actor, full_mode with
+  | None, None, false when force ->
+    let timeout_sec = Env_config_runtime.Dashboard.execution_timeout_sec in
+    let compute_and_track () =
+      Server_dashboard_http_cache.mark_cached_surface_attempt execution_cache;
+      try
+        let json = compute ~light:true () in
+        Server_dashboard_http_cache.mark_cached_surface_success execution_cache json;
+        Server_dashboard_http_cache.cached_surface_json execution_cache
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Server_dashboard_http_cache.mark_cached_surface_error execution_cache exn;
+        raise exn
+    in
+    (match
+       Eio.Time.with_timeout clock timeout_sec (fun () -> Ok (compute_and_track ()))
+     with
+     | Ok json -> json
+     | Error `Timeout ->
+       let exn = Dashboard_cache.Compute_timeout (default_light_cache_key, false) in
+       Server_dashboard_http_cache.mark_cached_surface_error execution_cache exn;
+       Log.Dashboard.warn
+         "dashboard execution force refresh timed out: %s (%.0fs)"
+         default_light_cache_key
+         timeout_sec;
+       `Assoc
+         [ "error", `String "computation_timeout"
+         ; "message",
+           `String
+             (Printf.sprintf
+                "Dashboard %s timed out after %.0fs"
+                default_light_cache_key
+                timeout_sec)
+         ; "generated_at", `String (Masc_domain.now_iso ())
+         ; "timeout_kind", `String "owner"
+         ; "timeout_sec", `Float timeout_sec
+         ; "key", `String default_light_cache_key
+         ])
+    |> with_execution_metadata
+         ~config
+         ~cache_key:default_light_cache_key
+         ~query
   | None, None, false ->
     (* Default light mode: stay instant after first success, but avoid
          serving the empty initializing payload forever when proactive warm-up
          misses its first build window. *)
     Server_dashboard_http_cache.cached_surface_or_first_success_json
       execution_cache
-      ~cache_key:"execution:default:light"
+      ~cache_key:default_light_cache_key
       ~ttl:deep_surface_cache_ttl_s
       ~clock
       ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
       (compute ~light:true)
     |> with_execution_metadata
          ~config
-         ~cache_key:"execution:default:light"
+         ~cache_key:default_light_cache_key
          ~query
   | _ ->
     (* Parameterized requests (fixture/actor/full): on-demand with SWR cache.

@@ -12,10 +12,7 @@ open Alcotest
 open Masc
 
 let temp_dir () =
-  let path = Filename.temp_file "goal_store_test" "" in
-  Sys.remove path;
-  Unix.mkdir path 0o755;
-  path
+  Filename.temp_dir "goal_store_test" ""
 
 let rm_rf dir =
   let rec rm path =
@@ -60,8 +57,10 @@ let test_delete_goal_bumps_version () =
   let v_before = (Goal_store.read_state config).version in
   check int "initial version" 10 v_before;
   (match Goal_store.delete_goal config ~goal_id:"g-1" with
-   | Ok () -> ()
-   | Error e -> fail ("delete_goal failed: " ^ e));
+   | Ok Goal_store.Deleted -> ()
+   | Ok (Goal_store.Deleted_with_orphaned_links msg) ->
+     fail ("unexpected partial cleanup failure: " ^ msg)
+   | Error e -> fail ("delete_goal failed: " ^ Goal_store.delete_goal_error_to_string e));
   let v_after = (Goal_store.read_state config).version in
   check int "version bumped by 1" (v_before + 1) v_after
 
@@ -87,8 +86,8 @@ let test_delete_nonexistent_does_not_bump () =
     { version = 42; updated_at = iso_now (); goals = [g] };
   let v_before = (Goal_store.read_state config).version in
   (match Goal_store.delete_goal config ~goal_id:"ghost" with
-   | Error _ -> ()
-   | Ok () -> fail "expected error for missing goal");
+   | Error (Goal_store.Unknown_goal _) -> ()
+   | Ok _ -> fail "expected error for missing goal");
   let v_after = (Goal_store.read_state config).version in
   check int "version unchanged on error" v_before v_after
 
@@ -101,6 +100,59 @@ let test_updated_at_also_refreshed () =
   let _ = Goal_store.delete_goal config ~goal_id:"g-1" in
   let after = Goal_store.read_state config in
   check bool "updated_at refreshed" true (after.updated_at <> stale_ts)
+
+let test_delete_goal_prunes_goal_task_links () =
+  with_workspace
+  @@ fun config ->
+  let deleted = make_goal "g-1" "deleted goal" in
+  let preserved = make_goal "g-2" "preserved goal" in
+  Goal_store.write_state
+    config
+    { version = 1; updated_at = iso_now (); goals = [ deleted; preserved ] };
+  Workspace_goal_index.write_goal_task_links
+    config
+    [ "g-1", [ "task-a"; "task-b" ]; "g-2", [ "task-c" ] ];
+  (match Goal_store.delete_goal config ~goal_id:"g-1" with
+   | Ok Goal_store.Deleted -> ()
+   | Ok (Goal_store.Deleted_with_orphaned_links msg) ->
+     fail ("unexpected partial cleanup failure: " ^ msg)
+   | Error msg -> fail (Goal_store.delete_goal_error_to_string msg));
+  let links = Workspace_goal_index.read_goal_task_links config in
+  check bool
+    "deleted goal links removed"
+    false
+    (List.exists (fun (goal_id, _) -> String.equal goal_id "g-1") links);
+  check bool
+    "other goal links preserved"
+    true
+    (List.exists
+       (fun (goal_id, task_ids) ->
+          String.equal goal_id "g-2" && List.mem "task-c" task_ids)
+       links)
+
+let test_delete_goal_wraps_prune_failure_after_goal_delete () =
+  with_workspace
+  @@ fun config ->
+  let deleted = make_goal "g-1" "deleted goal" in
+  Goal_store.write_state config
+    { version = 1; updated_at = iso_now (); goals = [ deleted ] };
+  Workspace_goal_index.write_goal_task_links config [ "g-1", [ "task-a" ] ];
+  let links_path = Workspace_goal_index.goal_task_links_path config in
+  Sys.remove links_path;
+  Unix.mkdir links_path 0o755;
+  (match Goal_store.delete_goal config ~goal_id:"g-1" with
+   | Ok Goal_store.Deleted -> fail "expected prune failure to return partial cleanup"
+   | Ok (Goal_store.Deleted_with_orphaned_links msg) ->
+     check bool
+       "partial cleanup carries detail"
+       true
+       (String.length msg > 0)
+   | Error msg -> fail (Goal_store.delete_goal_error_to_string msg));
+  let goals = (Goal_store.read_state config).goals in
+  check bool
+    "goal deletion already committed"
+    false
+    (List.exists (fun goal -> String.equal goal.Goal_store.id "g-1") goals)
 
 let test_legacy_status_defaults_phase () =
   with_workspace @@ fun config ->
@@ -225,6 +277,10 @@ let () =
             test_delete_nonexistent_does_not_bump;
           test_case "updated_at also refreshed" `Quick
             test_updated_at_also_refreshed;
+          test_case "delete prunes goal_task_links" `Quick
+            test_delete_goal_prunes_goal_task_links;
+          test_case "prune failure reports partial delete" `Quick
+            test_delete_goal_wraps_prune_failure_after_goal_delete;
           test_case "legacy status defaults phase" `Quick
             test_legacy_status_defaults_phase;
           test_case "blocked phase projects legacy status" `Quick

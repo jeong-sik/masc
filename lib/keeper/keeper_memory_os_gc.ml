@@ -27,17 +27,16 @@ let ttl_expired ~now (fact : fact) =
   | Some ts -> now > ts
 ;;
 
-(* Claim identity uses the shared SSOT [normalize_claim] (lowercase +
-   internal-whitespace-collapse + trailing-trim), the same key the write-time
-   upsert ([merge_and_cap_facts]) and recall dedup use, so GC's dedup cannot
-   diverge from them (RFC-0247 §2.3 fold). *)
-let normalized_claim_key fact = normalize_claim fact.claim
+(* Claim identity uses the shared SSOT [claim_identity] (RFC-0259 §3.7: the
+   producer-emitted [claim_id] when present, else [normalize_claim] of the text),
+   the same key the write-time upsert ([merge_and_cap_facts]) and recall dedup
+   use, so GC's dedup cannot diverge from them (RFC-0247 §2.3 fold). *)
+let normalized_claim_key fact = claim_identity fact
 
-let verified_at fact =
-  match fact.last_verified_at with
-  | Some ts -> ts
-  | None -> fact.first_seen
-;;
+(* The dedup winner's recency anchor: the type-level {!reference_time} SSOT, so
+   GC's "which duplicate to keep" reads the same timestamp as recall ordering and
+   retention ranking. *)
+let verified_at = reference_time
 
 (* RFC-0247 (purge): the dedup winner is structural — the most-recently-verified
    row for a claim (else first-seen), tie-broken by file order. The prior GC
@@ -76,7 +75,15 @@ let dedup_by_claim items =
    discard ([decide_retention] on [score_fact <= 0.02]) was removed: a fact's
    value is not a number GC can threshold. Forgetting is the librarian's
    delete-on-contradiction judgment plus this structural TTL, not a low score. *)
-let run_gc ?(dry_run = false) ~keeper_id ~now () =
+let run_gc_with_store
+      ~facts_path
+      ~read_facts_all_strict
+      ~rewrite_facts_atomically
+      ?(dry_run = false)
+      ~keeper_id
+      ~now
+      ()
+  =
   (* Serialize the whole read-modify-rewrite on the same per-keeper facts lock the
      librarian write path (Keeper_librarian_runtime, wrapping merge_and_cap_facts)
      and the consolidation runtime already hold on facts_path. Without it, a
@@ -92,7 +99,7 @@ let run_gc ?(dry_run = false) ~keeper_id ~now () =
      File_lock_eio already offloads the blocking flock so the Eio domain is not
      stalled. Must run inside an Eio context (the maintenance fiber and tests
      both are). *)
-  File_lock_eio.with_lock (Io.facts_path ~keeper_id) (fun () ->
+  File_lock_eio.with_lock facts_path (fun () ->
     (* Read strictly: a malformed JSONL row aborts the sweep rather than being
        silently dropped by the lenient decoder and then erased by the rewrite
        below. Every other destructive rewrite path already refuses to overwrite a
@@ -102,7 +109,7 @@ let run_gc ?(dry_run = false) ~keeper_id ~now () =
        into permanent deletion of the surrounding facts (it read via the lenient
        read_facts_all). Preserve over delete: leave a corrupt store untouched and
        let the raised error surface so an operator can repair it. *)
-    match Io.read_facts_all_strict ~keeper_id with
+    match read_facts_all_strict () with
     | Error message ->
       raise (Fact_store_corrupt ("memory os gc fact store read failed: " ^ message))
     | Ok facts ->
@@ -112,11 +119,35 @@ let run_gc ?(dry_run = false) ~keeper_id ~now () =
       in
       let deduped = dedup_by_claim live in
       let survivors = List.map (fun item -> item.fact) deduped in
-      if not dry_run then Io.rewrite_facts_atomically ~keeper_id survivors;
+      if not dry_run then rewrite_facts_atomically survivors;
       { total_input = List.length facts
       ; ttl_expired = List.length expired
       ; dedup_removed = List.length live - List.length deduped
       ; written = List.length survivors
       ; dry_run
       })
+;;
+
+let run_gc ?dry_run ~keeper_id ~now () =
+  run_gc_with_store
+    ~facts_path:(Io.facts_path ~keeper_id)
+    ~read_facts_all_strict:(fun () -> Io.read_facts_all_strict ~keeper_id)
+    ~rewrite_facts_atomically:(fun facts -> Io.rewrite_facts_atomically ~keeper_id facts)
+    ?dry_run
+    ~keeper_id
+    ~now
+    ()
+;;
+
+let run_gc_for_keepers_dir ~keepers_dir ?dry_run ~keeper_id ~now () =
+  run_gc_with_store
+    ~facts_path:(Io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
+    ~read_facts_all_strict:(fun () ->
+      Io.read_facts_all_strict_for_keepers_dir ~keepers_dir ~keeper_id)
+    ~rewrite_facts_atomically:(fun facts ->
+      Io.rewrite_facts_atomically_for_keepers_dir ~keepers_dir ~keeper_id facts)
+    ?dry_run
+    ~keeper_id
+    ~now
+    ()
 ;;

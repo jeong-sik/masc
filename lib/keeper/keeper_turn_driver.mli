@@ -26,6 +26,10 @@ include
       Keeper_internal_error.runtime_exhaustion_reason
      and type accept_rejection_kind =
       Keeper_internal_error.accept_rejection_kind
+     and type accept_response_shape =
+      Keeper_internal_error.accept_response_shape
+     and type tool_progress_effect =
+      Keeper_internal_error.tool_progress_effect
      and type masc_internal_error = Keeper_internal_error.masc_internal_error
 
 (** {1 Provider error helpers} *)
@@ -153,7 +157,11 @@ module For_testing : sig
 
   val success_selected_model_raw : Runtime_candidate.t -> string option
 
+  val record_candidate_health_error :
+    keeper_name:string -> Runtime_candidate.t -> Agent_sdk.Error.sdk_error -> unit
+
   val apply_accept :
+    ?initial_messages:Agent_sdk.Types.message list ->
     runtime_id:string ->
     accept:(Agent_sdk_response.api_response -> bool) ->
     Runtime_agent.run_result ->
@@ -166,4 +174,7 @@ module For_testing : sig
     original_error:Agent_sdk.Error.sdk_error ->
     Llm_provider.Http_client.http_error ->
     Agent_sdk.Error.sdk_error
+
+  val accept_no_progress_read_only_should_try_next :
+    Agent_sdk.Error.sdk_error -> bool
 end

@@ -182,6 +182,15 @@ function computeTransportItem(input: TransportInput): StatusTrayItem {
             : 'client WS degraded; SSE fallback is live',
         }
       }
+      if (input.wsConnected && !input.wsReady) {
+        return {
+          key: 'transport',
+          tone: 'warn',
+          label: 'Client',
+          value: 'handshake',
+          detail: 'client WS socket is open; waiting for dashboard/hello before route events resume',
+        }
+      }
       return {
         key: 'transport',
         tone: 'err',

@@ -27,6 +27,7 @@ type keepalive_scheduling_decision = {
 let decide_keepalive_scheduling
       ?(runtime_id_of_meta = Keeper_meta_contract.runtime_id_of_meta)
       ?(runtime_resilience_of_name = fun _ -> None)
+      ?(keeper_resilience_of_name = fun _ -> None)
       ?(reactive_wake = false)
       ~stop
       ~meta
@@ -40,10 +41,19 @@ let decide_keepalive_scheduling
   in
   let runtime_id = runtime_id_of_meta meta in
   let runtime_backpressure =
-    Observations.runtime_backpressure_decision
-      ~runtime_resilience:(runtime_resilience_of_name runtime_id)
-      ~should_run_turn:requested_should_run_turn
-      ~runtime_id
+    match keeper_resilience_of_name meta.name with
+    | Some blocker ->
+      Observations.runtime_backpressure_decision
+        ~reason_prefix:"keeper_health"
+        ~runtime_resilience:(Some blocker)
+        ~should_run_turn:requested_should_run_turn
+        ~runtime_id
+    | None ->
+      Observations.runtime_backpressure_decision
+        ~reason_prefix:"runtime_resilience"
+        ~runtime_resilience:(runtime_resilience_of_name runtime_id)
+        ~should_run_turn:requested_should_run_turn
+        ~runtime_id
   in
   let should_run_turn =
     match runtime_backpressure with

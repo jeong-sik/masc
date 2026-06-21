@@ -253,13 +253,37 @@ let respond_ws_upgrade_unavailable ?(message = "websocket transport disabled") r
   let response = Httpun.Response.create ~headers `Service_unavailable in
   safe_reqd_respond reqd response body
 
+let respond_ws_upgrade_bad_request message reqd =
+  let body =
+    Yojson.Safe.to_string (`Assoc [ ("error", `String message) ])
+  in
+  let headers =
+    Httpun.Headers.of_list
+      [ ("content-type", "application/json")
+      ; ("content-length", string_of_int (String.length body))
+      ]
+  in
+  let response = Httpun.Response.create ~headers `Bad_request in
+  safe_reqd_respond reqd response body
+
 let handle_websocket_upgrade reqd =
   if not (Transport_metrics.ws_enabled ())
   then respond_ws_upgrade_unavailable reqd
-  else
+  else if not (Transport_metrics.ws_same_origin_ready ())
+  then
     respond_ws_upgrade_unavailable
-      ~message:"same-origin websocket upgrade is disabled; use /ws discovery ws_url"
+      ~message:"WebSocket transport not ready"
       reqd
+  else
+    match
+      Server_mcp_transport_ws.upgrade_connection
+        ?sw:(Eio_context.get_switch_opt ())
+        ?clock:(Eio_context.get_clock_opt ())
+        ~on_message:Server_mcp_transport_ws.dispatch_inbound_message
+        reqd
+    with
+    | Ok () -> ()
+    | Error msg -> respond_ws_upgrade_bad_request msg reqd
 
 (** Method/path dispatcher for MCP-validated requests. Caller is
     responsible for rate limiting and origin/protocol-version checks

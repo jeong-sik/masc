@@ -10,6 +10,8 @@ vi.mock('./dev-token', () => ({
 
 import {
   fetchDashboardShell,
+  fetchDashboardExecution,
+  fetchLogs,
   fetchDashboardExecutionTrust,
   fetchDashboardGovernance,
   fetchDashboardGoalDetail,
@@ -18,6 +20,8 @@ import {
   fetchDashboardTools,
   fetchKeeperToolCalls,
   fetchKeeperToolStats,
+  fetchKeeperTurnRecords,
+  fetchKeeperTurnTranscript,
   fetchDashboardMemory,
   fetchDashboardMission,
   fetchDashboardMissionBriefing,
@@ -29,6 +33,7 @@ import {
   fetchMemorySubsystems,
   fetchRuntimeProviders,
   fetchRuntimeTomlConfig,
+  fetchRuntimeDefaults,
   fetchRuntimeModelMetrics,
   patchKeeperConfig,
   saveRuntimeTomlConfig,
@@ -37,6 +42,7 @@ import {
   fetchTelemetrySummary,
   fetchTlcResults,
   fetchToolQuality,
+  resolveScheduleApproval,
 } from './dashboard'
 import { fetchDashboardShell as fetchDashboardShellHot } from './dashboard-hot'
 import { keeperRuntimeBlockerLabel } from '../lib/keeper-runtime-display'
@@ -114,6 +120,62 @@ describe('fetchDashboardShell', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/shell?light=true')
+  })
+})
+
+describe('fetchDashboardExecution', () => {
+  it('uses the cached execution endpoint by default', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ agents: [], tasks: [], messages: [], keepers: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchDashboardExecution()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/execution')
+  })
+
+  it('requests a forced execution snapshot when asked', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ agents: [], tasks: [], messages: [], keepers: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchDashboardExecution({ force: true })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/execution?force=1')
+  })
+})
+
+describe('resolveScheduleApproval', () => {
+  it('posts dashboard schedule decisions to the dashboard-only resolve route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, schedule_id: 'sched-1', decision: 'approve' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await resolveScheduleApproval('sched-1', 'approve')
+
+    expect(result).toEqual({ ok: true, schedule_id: 'sched-1', decision: 'approve' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/schedule/resolve')
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({
+      schedule_id: 'sched-1',
+      decision: 'approve',
+    })
   })
 })
 
@@ -395,6 +457,139 @@ describe('keeper tool telemetry fetchers', () => {
     expect(entry?.semantic_success).toBe(false)
     expect(entry?.semantic_outcome).toBe('blocked')
     expect(entry?.goal_ids).toEqual(['g-1', 'g-2'])
+  })
+
+  it('keeps missing or malformed tool-call duration unmeasured', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        count: 2,
+        source: 'tool_call_io',
+        entries: [
+          {
+            ts: 1,
+            keeper: 'keeper-alpha',
+            tool: 'keeper_context_status',
+            input: {},
+            output: 'ok',
+            success: true,
+          },
+          {
+            ts: 2,
+            keeper: 'keeper-alpha',
+            tool: 'keeper_board_post_get',
+            input: {},
+            output: 'ok',
+            success: true,
+            duration_ms: 'not recorded',
+          },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperToolCalls('keeper-alpha')
+
+    expect(result.entries.map(entry => entry.duration_ms)).toEqual([null, null])
+  })
+
+  it('grounds turn-record model / finish_reason, leaving absent fields undefined', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        count: 2,
+        source: 'turn_record',
+        entries: [
+          {
+            record: {
+              keeper: 'keeper-alpha',
+              trace_id: 'trace-grounded',
+              absolute_turn: 7,
+              ts: 10,
+              runtime_profile: 'local',
+              model: 'deepseek-v4-flash',
+              finish_reason: 'completed',
+              blocks: [],
+              execution_ids: [],
+            },
+            diff_vs_prev: null,
+          },
+          {
+            // RFC-0233 §2.3: error turn omits model/finish_reason — must
+            // decode to undefined, never a fabricated "stop"/placeholder.
+            record: {
+              keeper: 'keeper-alpha',
+              trace_id: 'trace-grounded',
+              absolute_turn: 8,
+              ts: 11,
+              runtime_profile: 'local',
+              blocks: [],
+              execution_ids: [],
+            },
+            diff_vs_prev: null,
+          },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperTurnRecords('keeper-alpha')
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/keeper-alpha/turn-records')
+    expect(result.entries[0]?.record.model).toBe('deepseek-v4-flash')
+    expect(result.entries[0]?.record.finish_reason).toBe('completed')
+    expect(result.entries[1]?.record.model).toBeUndefined()
+    expect(result.entries[1]?.record.finish_reason).toBeUndefined()
+  })
+})
+
+describe('fetchKeeperTurnTranscript', () => {
+  it('encodes the turn_ref join key and decodes operator/keeper lines (RFC-0233 §7)', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        turn_ref: 'trace-xyz#3',
+        found: true,
+        source: 'keeper_chat_store',
+        user: [{ role: 'user', content: 'request A', ts: 10 }],
+        assistant: [
+          { role: 'assistant', content: 'reply A', ts: 11 },
+          { role: 'assistant', content: 'failed', ts: 12, kind: 'transport_failure' },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperTurnTranscript('keeper-alpha', 'trace-xyz#3')
+
+    // The '#' must be percent-encoded so it reaches the server as a query value.
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      '/api/v1/keepers/keeper-alpha/turn-transcript?turn_ref=trace-xyz%233',
+    )
+    expect(result.found).toBe(true)
+    expect(result.user[0]?.content).toBe('request A')
+    expect(result.assistant[0]?.content).toBe('reply A')
+    expect(result.assistant[1]?.kind).toBe('transport_failure')
+  })
+
+  it('decodes explicit absence (found=false) without fabricating lines', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        turn_ref: 'trace-xyz#99',
+        found: false,
+        source: 'keeper_chat_store',
+        user: [],
+        assistant: [],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperTurnTranscript('keeper-alpha', 'trace-xyz#99')
+
+    expect(result.found).toBe(false)
+    expect(result.user).toEqual([])
+    expect(result.assistant).toEqual([])
   })
 })
 
@@ -2131,5 +2326,90 @@ describe('fetchCostLatency', () => {
     expect(result.perAgent[0]?.p95_ms).toBeNull()
     expect(result.matrix.providers).toEqual(['runtime'])
     expect(result.matrix.models).toEqual(['runtime_lane_7'])
+  })
+})
+
+describe('fetchLogs', () => {
+  function stubLogsFetch() {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ total: 0, entries: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  function requestedUrl(fetchMock: ReturnType<typeof vi.fn>): string {
+    return String(fetchMock.mock.calls[0]?.[0])
+  }
+
+  it('sets before_seq for backward "load older" paging', async () => {
+    const fetchMock = stubLogsFetch()
+
+    await fetchLogs({ limit: 200, level: 'INFO', before_seq: 4096 })
+
+    const params = new URLSearchParams(requestedUrl(fetchMock).split('?')[1] ?? '')
+    expect(params.get('before_seq')).toBe('4096')
+    expect(params.get('limit')).toBe('200')
+    expect(params.get('level')).toBe('INFO')
+  })
+
+  it('omits before_seq when negative (no cursor)', async () => {
+    const fetchMock = stubLogsFetch()
+
+    await fetchLogs({ before_seq: -1 })
+
+    const params = new URLSearchParams(requestedUrl(fetchMock).split('?')[1] ?? '')
+    expect(params.has('before_seq')).toBe(false)
+  })
+
+  it('combines before_seq and since_seq into a bounded window', async () => {
+    const fetchMock = stubLogsFetch()
+
+    await fetchLogs({ since_seq: 10, before_seq: 20 })
+
+    const params = new URLSearchParams(requestedUrl(fetchMock).split('?')[1] ?? '')
+    expect(params.get('since_seq')).toBe('10')
+    expect(params.get('before_seq')).toBe('20')
+  })
+})
+
+describe('fetchRuntimeDefaults', () => {
+  it('reads the resolved runtime-defaults surface and parses it', async () => {
+    const rawResponse = {
+      generated_at_iso: '2026-06-21T00:00:00Z',
+      dashboard_surface: '/api/v1/dashboard/runtime-defaults',
+      source: 'runtime_config',
+      config_path: '/cfg/runtime.toml',
+      default_runtime_id: 'openai.gpt-4o',
+      default_model: 'gpt-4o',
+      default_max_context: 128000,
+      runtimes: [
+        { id: 'openai.gpt-4o', provider: 'OpenAI', model: 'gpt-4o', max_context: 128000, is_default: true },
+      ],
+      model_routing: {
+        keeper_assignments: [{ keeper: 'analyst', runtime_id: 'openai.gpt-4o' }],
+        librarian_runtime_id: null,
+        cross_verifier_runtime_id: null,
+        media_failover: [],
+      },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchRuntimeDefaults()
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/runtime-defaults')
+    expect(result.default_runtime_id).toBe('openai.gpt-4o')
+    expect(result.default_model).toBe('gpt-4o')
+    expect(result.runtimes[0]?.is_default).toBe(true)
+    expect(result.model_routing.keeper_assignments[0]?.keeper).toBe('analyst')
   })
 })

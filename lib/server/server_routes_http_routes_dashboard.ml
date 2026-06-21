@@ -319,6 +319,18 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value ~compress:true ~request:req json reqd
        in
        with_tool_auth ~tool_name:"masc_runtime_ollama_probe" handle request reqd)
+  |> Http.Router.get "/api/v1/dashboard/runtime-defaults" (fun request reqd ->
+       (* Structured, already-resolved runtime defaults / model routing for the
+          Settings surface. Read-only projection of the runtime.toml SSOT
+          singletons (no credentials, no raw TOML), so a public read mirrors the
+          other dashboard read surfaces. *)
+       with_public_read (fun _state req reqd ->
+         let json =
+           Server_dashboard_runtime_defaults_json.current
+             ~generated_at_iso:(Masc_domain.now_iso ()) ()
+         in
+         Http.Response.json_value ~compress:true ~request:req json reqd)
+         request reqd)
   |> Http.Router.get "/api/v1/runtime/config/raw" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun _state _agent_name req reqd ->
@@ -397,6 +409,13 @@ let add_routes ~sw ~clock router =
                  let seq = Server_utils.int_query_param req "since_seq" ~default:(-1) in
                  if seq < 0 then None else Some seq
            in
+           let before_seq =
+             match Server_utils.query_param req "before_seq" with
+             | None -> None
+             | Some _ ->
+                 let seq = Server_utils.int_query_param req "before_seq" ~default:(-1) in
+                 if seq < 0 then None else Some seq
+           in
            let module_filter = match Server_utils.query_param req "module" with
              | Some v -> v
              | None -> ""
@@ -415,12 +434,12 @@ let add_routes ~sw ~clock router =
            in
            let entries =
              Log.Ring.recent ~limit ~min_level ~module_filter ?since_seq
-               ?category_filter ?exclude_category ()
+               ?before_seq ?category_filter ?exclude_category ()
            in
            let json =
              dashboard_logs_json ~config:(Mcp_server.workspace_config state) ~limit
                ~level_filter ~applied_level ~min_level ~module_filter ~since_seq
-               ~category_filter ~exclude_category entries
+               ~before_seq ~category_filter ~exclude_category entries
            in
            Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -611,6 +630,18 @@ let add_routes ~sw ~clock router =
            (fun state _agent_name req reqd -> handler state req reqd)
            request reqd
        else with_public_read handler request reqd)
+  |> Http.Router.get "/api/v1/dashboard/keeper-memory-health" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_path = (Mcp_server.workspace_config state).base_path in
+         let cache_key = Printf.sprintf "keeper_memory_health:%s" base_path in
+         let json =
+           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               Server_dashboard_http_keeper_memory_health.keeper_memory_health_http_json
+                 ~base_path))
+         in
+         Http.Response.json_value ~compress:true ~request:req json reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/governance" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let base_path = (Mcp_server.workspace_config state).base_path in
@@ -646,6 +677,26 @@ let add_routes ~sw ~clock router =
              respond_json_value_with_cors ~status:`Bad_request request reqd (operator_error_json (Printf.sprintf "invalid json: %s" msg))
          )
        ) request reqd)
+  |> Http.Router.post "/api/v1/dashboard/schedule/resolve" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state operator_name _req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             try
+                 let args = Yojson.Safe.from_string body_str in
+                 let config = Mcp_server.workspace_config state in
+                 match
+                   dashboard_schedule_resolve_http_json ~config ~operator_name ~args
+                 with
+               | Ok json -> respond_json_value_with_cors request reqd json
+               | Error message ->
+                 respond_json_value_with_cors ~status:`Bad_request request reqd
+                   (operator_error_json message)
+             with
+             | Yojson.Json_error msg ->
+               respond_json_value_with_cors ~status:`Bad_request request reqd
+                 (operator_error_json (Printf.sprintf "invalid json: %s" msg)))
+         )
+         request reqd)
   |> Http.Router.post "/api/v1/dashboard/governance/approvals/rules/delete" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_operator_confirm" (fun state _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->

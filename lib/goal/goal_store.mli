@@ -200,10 +200,25 @@ val update_goal :
     (with [updated_at] pre-stamped), normalises the result,
     and writes back.  Errors when the [goal_id] is unknown. *)
 
+type delete_goal_outcome =
+  | Deleted
+  | Deleted_with_orphaned_links of string
+
+type delete_goal_error =
+  | Unknown_goal of string
+
+val delete_goal_error_to_string : delete_goal_error -> string
+
 val delete_goal :
-  Workspace_utils.config -> goal_id:string -> (unit, string) result
-(** Removes the goal whose [.id] matches.  Errors when the
-    id is unknown. *)
+  Workspace_utils.config ->
+  goal_id:string ->
+  (delete_goal_outcome, delete_goal_error) result
+(** Removes the goal whose [.id] matches.
+
+    Returns [Error (Unknown_goal _)] when the id is unknown and no delete was
+    committed. Goal-task link cleanup is best-effort across separate files; a
+    cleanup failure returns [Ok (Deleted_with_orphaned_links _)] after the goal
+    delete has already been committed. *)
 
 (** {1 List + upsert} *)
 

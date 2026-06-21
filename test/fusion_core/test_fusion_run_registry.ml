@@ -53,6 +53,46 @@ let test_mark_completed () =
   | None -> fail "failed run must remain visible as Completed{ok=false}"
 ;;
 
+(* Models the finalize-before-suspend invariant that fusion_tool.ml
+   [append_chat_failure] relies on after #21821. The real failure path does
+   [mark_completed] then a *suspending* chat append (Eio file I/O) that
+   re-raises [Eio.Cancel.Cancelled] on shutdown / sibling [Switch.fail]. The
+   registry does not distinguish which exception interrupts the append — only
+   the *position* of [mark_completed] relative to the raising step decides
+   whether the run is finalized or leaks. [Exit] therefore faithfully stands in
+   for that raise. [~finalize_first] is exactly the fix vs the bug. *)
+let simulate_failure_path ~finalize_first t ~run_id =
+  R.register_running t ~run_id ~keeper:"k" ~preset:"deep" ~started_at:3.0;
+  try
+    if finalize_first then R.mark_completed t ~run_id ~ok:false;
+    raise Exit (* the suspending append re-propagates Cancelled here *)
+  with
+  | Exit -> ()
+;;
+
+let test_finalize_before_suspend_keeps_completed () =
+  (* clean: mark_completed precedes the raising step -> run is Completed{ok=false}
+     even though the notification step never ran. This is the post-#21821 order. *)
+  let t = R.create () in
+  simulate_failure_path ~finalize_first:true t ~run_id:"clean";
+  (match R.get t ~run_id:"clean" with
+   | Some run ->
+     check (option bool) "finalize-before-raise -> Completed{ok=false}" (Some false)
+       (status_completed_ok run.R.status)
+   | None -> fail "run must remain visible");
+  (* buggy: mark_completed would follow the raising step -> it never runs and the
+     run leaks as Running forever (prune never evicts Running). This is the state
+     #21821 prevents; the contrast proves the ordering is load-bearing, not
+     incidental — mirrors the TLA+ clean/buggy bug-model at the unit level. *)
+  let t = R.create () in
+  simulate_failure_path ~finalize_first:false t ~run_id:"buggy";
+  match R.get t ~run_id:"buggy" with
+  | Some run ->
+    check bool "finalize-after-raise leaks Running (the bug)" true
+      (status_running run.R.status)
+  | None -> fail "run must remain visible"
+;;
+
 let test_mark_unknown_is_noop () =
   let t = R.create () in
   R.mark_completed t ~run_id:"ghost" ~ok:true;
@@ -123,6 +163,10 @@ let () =
     [ ( "rfc-0266-phase2"
       , [ test_case "register then query" `Quick test_register_then_query
         ; test_case "mark completed (ok true/false)" `Quick test_mark_completed
+        ; test_case
+            "finalize before suspend keeps Completed (buggy order leaks Running)"
+            `Quick
+            test_finalize_before_suspend_keeps_completed
         ; test_case "mark unknown run_id is a no-op" `Quick test_mark_unknown_is_noop
         ; test_case "list_runs is newest-first" `Quick test_list_newest_first
         ; test_case "prune keeps Running + recent completed" `Quick test_prune_keeps_running_and_recent

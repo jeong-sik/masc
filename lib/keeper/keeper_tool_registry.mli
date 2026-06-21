@@ -44,12 +44,24 @@ val is_keeper_read_only_tool : string -> bool
     read-only/idempotent classification. *)
 val is_effectively_read_only_tool : string -> bool
 
+(** Strict non-mutating read-only check. Unlike
+    [is_effectively_read_only_tool], this excludes idempotent-but-mutating
+    tools. Use it when a caller needs "no committed mutation" rather than
+    "retry-safe enough". *)
+val is_strictly_read_only_tool : string -> bool
+
 (** Negation of [is_effectively_read_only_tool]. *)
 val has_mutating_side_effect : string -> bool
 
 (** Input-aware read-only check for tools that mix read-only and mutating
     subcommands within one tool name. *)
 val is_read_only_with_input :
+  tool_name:string -> input:Yojson.Safe.t -> bool
+
+(** Input-aware strict read-only check. This uses descriptor
+    [readonly_of_input] when present and otherwise falls back to
+    [is_strictly_read_only_tool]. *)
+val is_strictly_read_only_with_input :
   tool_name:string -> input:Yojson.Safe.t -> bool
 
 (** Input-aware main-worktree boundary check: returns [true] when the tool

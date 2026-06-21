@@ -781,6 +781,34 @@ let test_unknown_governance_level_fail_closed_on_critical () =
    | `Require_confirm _ -> ()
    | _ -> Alcotest.fail "unknown governance level should require confirm on critical risk")
 
+let with_env key value f =
+  let old = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match old with
+      | Some previous -> Unix.putenv key previous
+      | None -> Unix.putenv key "")
+    f
+
+let test_hitl_enabled_by_default () =
+  with_env "MASC_DISABLE_HITL" "" (fun () ->
+    Alcotest.(check (option string)) "production threshold"
+      (Some "critical")
+      (Option.map Gp.risk_level_to_string (Gp.confirm_threshold "production"));
+    Alcotest.(check (option string)) "keeper production threshold"
+      (Some "high")
+      (Option.map Gp.risk_level_to_string (Gp.keeper_confirm_threshold "production")))
+
+let test_hitl_can_still_be_disabled_by_env () =
+  with_env "MASC_DISABLE_HITL" "true" (fun () ->
+    Alcotest.(check (option string)) "production threshold disabled"
+      None
+      (Option.map Gp.risk_level_to_string (Gp.confirm_threshold "production"));
+    Alcotest.(check (option string)) "keeper production threshold disabled"
+      None
+      (Option.map Gp.risk_level_to_string (Gp.keeper_confirm_threshold "production")))
+
 (* ── Case-insensitive tool name matching ────────────────────── *)
 
 let test_case_insensitive_matching () =
@@ -1050,6 +1078,10 @@ let () =
         test_paranoid_confirms_high;
       Alcotest.test_case "paranoid confirms critical" `Quick
         test_paranoid_confirms_critical;
+      Alcotest.test_case "HITL enabled by default" `Quick
+        test_hitl_enabled_by_default;
+      Alcotest.test_case "HITL disable env still disables gates" `Quick
+        test_hitl_can_still_be_disabled_by_env;
       Alcotest.test_case "unknown level fail-closed on critical (#7641)" `Quick
         test_unknown_governance_level_fail_closed_on_critical;
     ];

@@ -271,12 +271,12 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
   const kind = asString(raw.kind)
   if (kind === 'think') {
     const text = asString(raw.text)
-    return text !== undefined ? { kind, text } : null
+    return text !== undefined ? withoutUndefined({ kind, text, ts: asString(raw.ts) }) : null
   }
   if (kind === 'reason') {
     const text = asString(raw.text)
     return text !== undefined
-      ? withoutUndefined({ kind: 'reason', text, detail: asString(raw.detail) ?? undefined })
+      ? withoutUndefined({ kind: 'reason', text, detail: asString(raw.detail) ?? undefined, ts: asString(raw.ts) })
       : null
   }
   if (kind === 'tool') {
@@ -843,15 +843,19 @@ export function appendAssistantThinkingDelta(name: string, entryId: string, delt
   updateThreadEntry(name, entryId, entry => {
     const existing = entry.traceSteps ?? []
     const last = existing[existing.length - 1]
+    // Stamp the occurrence time on a NEW think step so the work-trace card can
+    // interleave it with tool entries by occurrence order. When consecutive
+    // deltas merge into the same step, the first stamp is preserved: the step
+    // began at that time, not when the latest fragment arrived.
     const traceSteps: ChatTraceStep[] =
       last?.kind === 'think'
         ? [
             ...existing.slice(0, -1),
-            { kind: 'think', text: `${last.text}${delta}` },
+            { kind: 'think', text: `${last.text}${delta}`, ts: last.ts },
           ]
         : [
             ...existing,
-            { kind: 'think', text: delta.trimStart() },
+            { kind: 'think', text: delta.trimStart(), ts: new Date().toISOString() },
           ]
     return {
       ...entry,

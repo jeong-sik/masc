@@ -132,6 +132,7 @@ describe('lab navigation', () => {
       'design-canvas',
       'performance',
       'memory-explore',
+      'keeper-memory-health',
     ])
 
     expect(labSections.map(item => item.label)).toEqual([
@@ -140,6 +141,7 @@ describe('lab navigation', () => {
       'Design Canvas',
       'Performance',
       'Memory Explore',
+      '키퍼 메모리 상태',
     ])
     expect(labSections.find(item => item.id === 'performance')?.description).toBe(
       'FPS meter, VirtualList, content-visibility, native dialog, and observer probes.',

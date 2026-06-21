@@ -5,15 +5,21 @@
 // per-call store (see keeper-workspace-tool-calls.ts).
 
 import { html } from 'htm/preact'
+import { useState } from 'preact/hooks'
 import type { VNode } from 'preact'
-import { tasks } from '../../store'
+import { shellAuthSummary, tasks } from '../../store'
 import type { Keeper, Task } from '../../types'
 import { navigate } from '../../router'
 import { keeperModelLabel, keeperRuntimeLabel } from './keeper-workspace-shared'
 import { KeeperWorkspaceRecentTools } from './keeper-workspace-tool-calls'
 import { formatDuration } from '../../lib/format-time'
-
-const COMPACT_AT = 85 // auto-compaction threshold (%) — matches runtime default
+import { callMcpTool } from '../../api/mcp'
+import { showToast } from '../common/toast'
+import { requestConfirm } from '../common/confirm-dialog'
+import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
+import { errorToString } from '../../lib/format-string'
+import { refreshAfterRuntimeAction } from '../keeper-detail-helpers'
+import { contextThresholds } from '../../config/context-thresholds'
 
 function contextRatio(keeper: Keeper): number | null {
   const ratio = keeper.context_ratio ?? keeper.context?.context_ratio
@@ -28,7 +34,9 @@ function contextPercent(keeper: Keeper): number | null {
 }
 
 function contextMax(keeper: Keeper): number | null {
-  return keeper.context_max ?? keeper.context?.context_max ?? null
+  const max = keeper.context_max ?? keeper.context?.context_max ?? null
+  if (typeof max !== 'number' || !Number.isFinite(max) || max <= 0) return null
+  return max
 }
 
 function formatK(n: number | null | undefined): string | null {
@@ -66,7 +74,7 @@ function attentionFallback(keeper: Keeper): string | null {
   if (reason && action) return `${reason} · ${action}`
   if (reason) return `주의 원인: ${reason}`
   if (action) return `다음 조치: ${action}`
-  return '주의 플래그 있음 · 원인 미전달'
+  return 'runtime_attention.needs_attention=true · 원인/조치 미수신'
 }
 
 type AttentionItem = { sev: 'bad' | 'warn'; text: string }
@@ -108,9 +116,27 @@ function formatAgo(seconds: number | null | undefined): string | null {
   return `${formatDuration(seconds)} 전`
 }
 
+function compactionGatePct(keeper: Keeper): number {
+  const raw = keeper.compaction_ratio_gate
+  const ratio = typeof raw === 'number' && Number.isFinite(raw) && raw > 0
+    ? raw
+    : contextThresholds.value.compacting
+  return Math.max(1, Math.min(99, Math.round(ratio * 100)))
+}
+
+function compactRequiresForce(keeper: Keeper): boolean {
+  const phase = (keeper.phase ?? keeper.lifecycle_phase ?? '').toLowerCase()
+  if (phase === 'overflowed' || phase === 'paused' || phase === 'compacting') return false
+  if (phase === 'running' || phase === 'failing') return true
+  const status = keeper.status.toLowerCase()
+  return status === 'running' || status === 'active' || status === 'busy' || status === 'failing'
+}
+
 function ContextSection({ keeper }: { keeper: Keeper }): VNode {
+  const [compacting, setCompacting] = useState(false)
   const pct = contextPercent(keeper)
-  const hot = pct !== null && pct >= COMPACT_AT
+  const compactAt = compactionGatePct(keeper)
+  const hot = pct !== null && pct >= compactAt
   const max = contextMax(keeper)
   const baseTokens = keeper.context_tokens ?? keeper.context?.context_tokens ?? null
   const tokens = formatK(baseTokens)
@@ -119,11 +145,60 @@ function ContextSection({ keeper }: { keeper: Keeper }): VNode {
   const hasCheckpoint = keeper.context?.has_checkpoint ?? null
   const contextSource = nonEmpty(keeper.context_source ?? keeper.context?.source)
   const compactionCount = keeper.compaction_count ?? null
+  const compactionProfile = nonEmpty(keeper.compaction_profile)
+  const messageGate = keeper.compaction_message_gate
+  const tokenGate = keeper.compaction_token_gate
   const hasCompactionHistory = typeof compactionCount === 'number' && compactionCount > 0
   const lastCompactionAgo = hasCompactionHistory ? formatAgo(keeper.last_compaction_ago_s) : null
   const lastCompactionSaved = hasCompactionHistory ? formatK(keeper.last_compaction_saved_tokens) : null
   const hasUsageBreakdown = baseTokens !== null || max !== null || msgCount !== null || hasCheckpoint !== null || contextSource != null
   const hasMeterData = pct !== null && (pct > 0 || max !== null)
+  const compactAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
+  const canCompact = compactAccess.allowed && !compacting
+  const compactReason = compactAccess.reason ?? '컴팩션 실행 권한이 필요합니다.'
+  const runCompact = () => {
+    if (!compactAccess.allowed) {
+      showToast(compactReason, 'error', 6000)
+      return
+    }
+    void (async () => {
+      const force = compactRequiresForce(keeper)
+      if (force) {
+        const confirmed = await requestConfirm({
+          title: 'Force keeper compact',
+          message: `${keeper.name} is not in an explicit overflow/paused compaction phase. Run masc_keeper_compact with force=true?`,
+          confirmText: 'Force compact',
+          tone: 'warning',
+        })
+        if (!confirmed) return
+      }
+      setCompacting(true)
+      try {
+        const raw = await callMcpTool('masc_keeper_compact', {
+          name: keeper.name,
+          force,
+        })
+        const parsed = JSON.parse(raw) as {
+          before_tokens?: number
+          after_tokens?: number
+          phase_after?: string
+        }
+        const before = formatK(parsed.before_tokens)
+        const after = formatK(parsed.after_tokens)
+        showToast(
+          before && after
+            ? `${keeper.name} compact 완료: ${before} -> ${after}`
+            : `${keeper.name} compact 완료`,
+          'success',
+        )
+        await refreshAfterRuntimeAction()
+      } catch (err) {
+        showToast(`compact 실패: ${errorToString(err)}`, 'error', 8000)
+      } finally {
+        setCompacting(false)
+      }
+    })()
+  }
   const contextMeta = html`
     <div class="kw-ctx-meta">
       ${msgCount !== null ? html`<span>메시지 ${msgCount}개</span>` : null}
@@ -140,8 +215,8 @@ function ContextSection({ keeper }: { keeper: Keeper }): VNode {
       </div>
       <div class="kw-meter-wrap">
         <div class=${`kw-meter${hot ? ' hot' : ''}`}><span style=${{ width: `${pct ?? 0}%` }}></span></div>
-        <span class="kw-meter-mark" style=${{ left: `${COMPACT_AT}%` }} title=${`자동 compact 임계치 ${COMPACT_AT}%`}>
-          <i class="kw-meter-mark-lbl">compact ${COMPACT_AT}%</i>
+        <span class="kw-meter-mark" style=${{ left: `${compactAt}%` }} title=${`compact ratio_gate ${compactAt}%`}>
+          <i class="kw-meter-mark-lbl">compact ${compactAt}%</i>
         </span>
       </div>
       ${tokens || maxLabel
@@ -158,7 +233,7 @@ function ContextSection({ keeper }: { keeper: Keeper }): VNode {
     usageBody = html`
       <div class="kw-context-empty">
         <strong>윈도우 사용률 미수신</strong>
-        <span>전체 윈도우 총량이 없어 비율과 compact 임계치를 숨깁니다.</span>
+        <span>전체 윈도우 총량이 없어 비율을 숨깁니다. compact ratio_gate는 ${compactAt}%입니다.</span>
       </div>
       ${tokens || maxLabel
         ? html`<div class="kw-ctx-tok">
@@ -192,6 +267,19 @@ function ContextSection({ keeper }: { keeper: Keeper }): VNode {
                 ${lastCompactionSaved ? html`<span>절약 ${lastCompactionSaved} tok</span>` : null}
               `
             : html`<span>컴팩트 기록 없음</span>`}
+          ${compactionProfile ? html`<span>profile ${compactionProfile}</span>` : null}
+          <span>ratio_gate ${compactAt}%</span>
+          ${typeof messageGate === 'number' && messageGate > 0 ? html`<span>message_gate ${messageGate}</span>` : null}
+          ${typeof tokenGate === 'number' && tokenGate > 0 ? html`<span>token_gate ${formatK(tokenGate) ?? tokenGate}</span>` : null}
+        </div>
+        <div class="kw-cmp-actions">
+          <button
+            type="button"
+            class="kw-act kw-compact-btn v2-monitoring-action"
+            disabled=${!canCompact}
+            title=${compactAccess.allowed ? 'masc_keeper_compact force=true 실행' : compactReason}
+            onClick=${runCompact}
+          >${compacting ? 'compact 중...' : '지금 compact'}</button>
         </div>
       </div>
     </div>

@@ -116,6 +116,65 @@ let accept_rejection_kind_of_string = function
   | _ -> None
 ;;
 
+type accept_response_shape =
+  | Accept_response_empty
+  | Accept_response_thinking_only
+  | Accept_response_blank_text_only
+  | Accept_response_tool_result_only
+  | Accept_response_media_only
+  | Accept_response_mixed_without_deliverable_content
+  | Accept_response_has_deliverable_content
+
+let accept_response_shape_to_string = function
+  | Accept_response_empty -> "empty"
+  | Accept_response_thinking_only -> "thinking_only"
+  | Accept_response_blank_text_only -> "blank_text_only"
+  | Accept_response_tool_result_only -> "tool_result_only"
+  | Accept_response_media_only -> "media_only"
+  | Accept_response_mixed_without_deliverable_content ->
+    "mixed_without_deliverable_content"
+  | Accept_response_has_deliverable_content -> "has_deliverable_content"
+;;
+
+let accept_response_shape_of_string = function
+  | "empty" -> Some Accept_response_empty
+  | "thinking_only" -> Some Accept_response_thinking_only
+  | "blank_text_only" -> Some Accept_response_blank_text_only
+  | "tool_result_only" -> Some Accept_response_tool_result_only
+  | "media_only" -> Some Accept_response_media_only
+  | "mixed_without_deliverable_content" ->
+    Some Accept_response_mixed_without_deliverable_content
+  | "has_deliverable_content" -> Some Accept_response_has_deliverable_content
+  | _ -> None
+;;
+
+let accept_response_shape_of_agent_sdk = function
+  | Agent_sdk.Response_shape.Empty -> Accept_response_empty
+  | Agent_sdk.Response_shape.Thinking_only -> Accept_response_thinking_only
+  | Agent_sdk.Response_shape.Blank_text_only -> Accept_response_blank_text_only
+  | Agent_sdk.Response_shape.Tool_result_only -> Accept_response_tool_result_only
+  | Agent_sdk.Response_shape.Media_only -> Accept_response_media_only
+  | Agent_sdk.Response_shape.Mixed_without_deliverable_content ->
+    Accept_response_mixed_without_deliverable_content
+  | Agent_sdk.Response_shape.Has_deliverable_content ->
+    Accept_response_has_deliverable_content
+;;
+
+type tool_progress_effect =
+  | Tool_effect_read_only
+  | Tool_effect_mutating
+
+let tool_progress_effect_to_string = function
+  | Tool_effect_read_only -> "read_only"
+  | Tool_effect_mutating -> "mutating"
+;;
+
+let tool_progress_effect_of_string = function
+  | "read_only" -> Some Tool_effect_read_only
+  | "mutating" -> Some Tool_effect_mutating
+  | _ -> None
+;;
+
 type masc_internal_error =
   | Runtime_exhausted of {
       runtime_id : string;
@@ -136,6 +195,10 @@ type masc_internal_error =
       scope : string;
       model : string option;
       reason_kind : accept_rejection_kind option;
+      response_shape : accept_response_shape option;
+      last_tool_effect : tool_progress_effect option;
+      any_mutating_tool : bool option;
+      tool_effects_seen : tool_progress_effect list;
       reason : string;
     }
   | Admission_queue_timeout of {
@@ -224,6 +287,26 @@ let string_opt_of_assoc key json =
   Json_field.string json key |> Json_field.to_option
 ;;
 
+let bool_opt_of_assoc key = function
+  | `Assoc fields -> (
+    match List.assoc_opt key fields with
+    | Some (`Bool value) -> Some value
+    | _ -> None)
+  | _ -> None
+;;
+
+let tool_progress_effects_to_json effects =
+  `List
+    (List.map
+       (fun tool_effect -> `String (tool_progress_effect_to_string tool_effect))
+       effects)
+;;
+
+let tool_progress_effects_of_assoc key json =
+  string_list_of_assoc key json
+  |> List.filter_map tool_progress_effect_of_string
+;;
+
 let masc_internal_error_to_json = function
   | Runtime_exhausted { runtime_id; reason } ->
     let runtime_id = runtime_id_to_string runtime_id in
@@ -260,7 +343,17 @@ let masc_internal_error_to_json = function
         ("detail", `String detail);
         ("exit_code", Json_util.int_opt_to_json exit_code);
       ]
-  | Accept_rejected { scope; model; reason_kind; reason } ->
+  | Accept_rejected
+      {
+        scope;
+        model;
+        reason_kind;
+        response_shape;
+        last_tool_effect;
+        any_mutating_tool;
+        tool_effects_seen;
+        reason;
+      } ->
     `Assoc
       [
         ("kind", `String "accept_rejected");
@@ -269,6 +362,17 @@ let masc_internal_error_to_json = function
         ( "reason_kind",
           Json_util.string_opt_to_json
             (Option.map accept_rejection_kind_to_string reason_kind) );
+        ( "response_shape",
+          Json_util.string_opt_to_json
+            (Option.map accept_response_shape_to_string response_shape) );
+        ( "last_tool_effect",
+          Json_util.string_opt_to_json
+            (Option.map tool_progress_effect_to_string last_tool_effect) );
+        ( "any_mutating_tool",
+          (match any_mutating_tool with
+           | Some value -> `Bool value
+           | None -> `Null) );
+        ("tool_effects_seen", tool_progress_effects_to_json tool_effects_seen);
         ("reason", `String reason);
       ]
   | Admission_queue_timeout { keeper_name; runtime_id; wait_sec } ->
@@ -449,6 +553,32 @@ let runtime_id_of_masc_internal_error = function
   | Internal_bridge_exception _
   | Internal_contract_rejected _ -> "unknown"
 
+let accept_rejection_has_read_only_no_progress_retry_hint = function
+  | Accept_rejected
+      {
+        reason_kind = Some Accept_no_usable_progress;
+        response_shape = Some Accept_response_thinking_only;
+        last_tool_effect = Some Tool_effect_read_only;
+        any_mutating_tool = Some false;
+        tool_effects_seen;
+        _;
+      } ->
+    tool_effects_seen <> []
+  | Accept_rejected _
+  | Runtime_exhausted _
+  | Capacity_backpressure _
+  | Resumable_cli_session _
+  | Admission_queue_timeout _
+  | Admission_queue_rejected _
+  | Turn_timeout _
+  | Provider_timeout _
+  | Max_tokens_ceiling_violation _
+  | Ambiguous_post_commit _
+  | Internal_unhandled_exception _
+  | Internal_bridge_exception _
+  | Internal_contract_rejected _ ->
+    false
+
 let sdk_error_of_masc_internal_error err =
   Agent_sdk.Error.Internal
     (masc_internal_error_prefix ^ Yojson.Safe.to_string (masc_internal_error_to_json err))
@@ -546,6 +676,17 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                      Option.bind
                        (string_opt_of_assoc "reason_kind" json)
                        accept_rejection_kind_of_string;
+                   response_shape =
+                     Option.bind
+                       (string_opt_of_assoc "response_shape" json)
+                       accept_response_shape_of_string;
+                   last_tool_effect =
+                     Option.bind
+                       (string_opt_of_assoc "last_tool_effect" json)
+                       tool_progress_effect_of_string;
+                   any_mutating_tool = bool_opt_of_assoc "any_mutating_tool" json;
+                   tool_effects_seen =
+                     tool_progress_effects_of_assoc "tool_effects_seen" json;
                    reason;
                  })
           | _ -> None)

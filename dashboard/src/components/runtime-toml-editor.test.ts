@@ -155,7 +155,7 @@ describe('RuntimeTomlEditor', () => {
 
     await waitFor(() => {
       expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource)
-      expect(container.textContent).toContain('저장됨')
+      expect(container.textContent).toContain('적용됨')
     })
     expect(saveButton.disabled).toBe(true)
     expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(nextSource)

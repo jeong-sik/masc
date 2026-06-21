@@ -129,15 +129,20 @@ let cadence_turns () =
   |> max 1
 ;;
 
-(* Per-(keeper, active trace) "turns since last successful extraction"
-   counters. Stdlib.Mutex (not Eio.Mutex): the critical section is a Hashtbl
-   read/write that never yields, and the table is reachable from concurrent
-   keeper fibers. *)
+(* Per-keeper "turns since last successful extraction" counter, paired with the
+   trace it belongs to. Keyed by [keeper_id] (the long-lived owner), NOT by
+   (keeper_id, trace_id): trace_id rotates on every keeper run, so a pair-keyed
+   table mints a fresh row per rotation and never reclaims the previous one,
+   growing without bound over the process lifetime. Keying by keeper_id bounds
+   the table to one row per live keeper; a rotated trace is detected as a stored
+   mismatch and resets the schedule in place. Stdlib.Mutex (not Eio.Mutex): the
+   critical section is a Hashtbl read/write that never yields, and the table is
+   reachable from concurrent keeper fibers. *)
 let cadence_mu = Stdlib.Mutex.create ()
-let cadence_counters : (string * string, int) Hashtbl.t = Hashtbl.create 16
+let cadence_counters : (string, string * int) Hashtbl.t = Hashtbl.create 16
 
-(* A counter value below 0 means the (keeper, trace) has never had a successful
-   extraction: the next turn is due immediately. *)
+(* A counter value below 0 means the keeper has never had a successful
+   extraction on the current trace: the next turn is due immediately. *)
 let fresh_counter = -1
 
 (* Pure cadence decision. Given the keeper's current [counter] (turns since its
@@ -159,22 +164,46 @@ let cadence_step ~cadence ~counter =
     if next >= cadence then cadence, true else next, false)
 ;;
 
+(* Pure keyed cadence decision. Given a keeper's [prior] stored (trace, counter)
+   and the [current_trace], a stored entry from a different (rotated) trace is
+   treated as fresh — due immediately, not inheriting the old trace's schedule —
+   exactly like an unseen keeper ([prior = None]). Returns the value to store and
+   whether extraction is due now. Exposed for testing the rollover decision
+   without the global table. *)
+let cadence_step_keyed ~cadence ~current_trace ~prior =
+  let counter =
+    (* sound-partial: allow — an unseen keeper or a rotated trace is fresh
+       (due immediately via [fresh_counter]); fresh-state init, not a default
+       hiding a parse error. *)
+    match prior with
+    | Some (t, c) when String.equal t current_trace -> c
+    | _ -> fresh_counter
+  in
+  let updated, due = cadence_step ~cadence ~counter in
+  (current_trace, updated), due
+;;
+
 let cadence_due ~keeper_id ~trace_id =
   Stdlib.Mutex.protect cadence_mu (fun () ->
-    let counter =
-      (* sound-partial: allow — an unseen (keeper, trace) is due immediately via
-         [fresh_counter]; fresh-state init, not a default hiding a parse error. *)
-      Option.value ~default:fresh_counter
-        (Hashtbl.find_opt cadence_counters (keeper_id, trace_id))
+    let prior = Hashtbl.find_opt cadence_counters keeper_id in
+    let value, due =
+      cadence_step_keyed ~cadence:(cadence_turns ()) ~current_trace:trace_id ~prior
     in
-    let updated, due = cadence_step ~cadence:(cadence_turns ()) ~counter in
-    Hashtbl.replace cadence_counters (keeper_id, trace_id) updated;
+    Hashtbl.replace cadence_counters keeper_id value;
     due)
 ;;
 
 let cadence_record_success ~keeper_id ~trace_id =
   Stdlib.Mutex.protect cadence_mu (fun () ->
-    Hashtbl.replace cadence_counters (keeper_id, trace_id) 0)
+    Hashtbl.replace cadence_counters keeper_id (trace_id, 0))
+;;
+
+(* Live per-keeper cadence rows. Bounded by the number of keepers that have run
+   (one row each), so it doubles as a leak-regression signal: it must not grow
+   with trace rotations. Read-only; consumed by the cadence test and the
+   dashboard memory-health panel. *)
+let cadence_counter_entries () =
+  Stdlib.Mutex.protect cadence_mu (fun () -> Hashtbl.length cadence_counters)
 ;;
 
 let max_messages () =
@@ -282,13 +311,17 @@ type attempt_outcome =
     (* provider returned output we could not parse into an episode — retryable *)
   | Transport_failed of string (* timeout / HTTP error — not retried here *)
 
+type parse_retry_error =
+  | Retry_exhausted_unparseable of string
+  | Retry_transport_failed of string
+
 let rec run_with_parse_retries ~max_retries ~attempt messages =
   match attempt messages with
   | Parsed episode -> Ok episode
-  | Transport_failed msg -> Error msg
+  | Transport_failed msg -> Error (Retry_transport_failed msg)
   | Unparseable msg ->
     if max_retries <= 0
-    then Error msg
+    then Error (Retry_exhausted_unparseable msg)
     else
       run_with_parse_retries
         ~max_retries:(max_retries - 1)
@@ -354,6 +387,79 @@ let with_timeout ?clock ~timeout_sec f =
      | Eio.Time.Timeout -> None)
 ;;
 
+let now_from_clock ?clock () =
+  match clock with
+  | Some clock -> Eio.Time.now clock
+  | None -> Time_compat.now ()
+;;
+
+let unstructured_note_max_chars = 900
+
+let collapse_for_unstructured_note raw =
+  let buf = Buffer.create (String.length raw) in
+  let previous_space = ref true in
+  String.iter
+    (fun c ->
+       match c with
+       | '\n' | '\r' | '\t' | ' ' ->
+         if not !previous_space then Buffer.add_char buf ' ';
+         previous_space := true
+       | c ->
+         Buffer.add_char buf c;
+         previous_space := false)
+    raw;
+  Buffer.contents buf |> String.trim
+
+let unstructured_episode ~now ~generation (inp : Keeper_librarian.input) ~reason ~raw =
+  let raw_excerpt, _ =
+    Keeper_text_processing.truncate_utf8_prefix
+      ~max_bytes:unstructured_note_max_chars
+      (collapse_for_unstructured_note raw)
+  in
+  let note =
+    if String.equal raw_excerpt ""
+    then Printf.sprintf "unstructured_note: librarian parse fallback (%s): <empty response>" reason
+    else Printf.sprintf "unstructured_note: librarian parse fallback (%s): %s" reason raw_excerpt
+  in
+  let source_turn_range =
+    match List.length inp.messages with
+    | 0 -> None
+    | n -> Some (0, n - 1)
+  in
+  let fact : Keeper_memory_os_types.fact =
+    { claim = note
+    ; category = Keeper_memory_os_types.Ephemeral
+    ; external_ref = None
+    ; source = { trace_id = inp.trace_id; turn = 0; tool_call_id = None }
+    ; observed_by = []
+    ; first_seen = now
+    ; valid_until =
+        Keeper_memory_os_types.fact_valid_until
+          ~now
+          ~external_ref:None
+          Keeper_memory_os_types.Ephemeral
+    ; last_verified_at = Some now
+    ; schema_version = Keeper_memory_os_types.schema_version
+    ; claim_id = None
+    }
+  in
+  { Keeper_memory_os_types.trace_id = inp.trace_id
+  ; generation
+  ; episode_summary = "Unstructured librarian note preserved after parse failure"
+  ; claims = [ fact ]
+  ; open_items = []
+  ; constraints = []
+  ; preserved_tool_refs = []
+  ; source_turn_range
+  ; created_at = now
+  ; valid_until =
+      Keeper_memory_os_types.category_valid_until
+        ~now
+        Keeper_memory_os_types.Ephemeral
+  ; terminal_marker = Some "librarian_unstructured_fallback"
+  ; schema_version = Keeper_memory_os_types.schema_version
+  }
+
 let extract_with_provider
     ?(complete = default_complete)
     ?clock
@@ -368,6 +474,7 @@ let extract_with_provider
   | Error _ as e -> e
   | Ok messages ->
     let provider_cfg = provider_for_librarian provider_cfg in
+    let last_unparseable_raw = ref None in
     let attempt messages =
       match
         with_timeout ?clock ~timeout_sec (fun () ->
@@ -378,16 +485,37 @@ let extract_with_provider
       | Some (Ok response) ->
         let raw = Agent_sdk_response.text_of_response response |> String.trim in
         if String.equal raw ""
-        then Unparseable "librarian provider returned empty response"
+        then (
+          last_unparseable_raw := Some raw;
+          Unparseable "librarian provider returned empty response")
         else (
           match Keeper_librarian.episode_of_output ~generation inp raw with
           | Some episode -> Parsed episode
-          | None -> Unparseable "librarian provider returned invalid episode JSON")
+          | None ->
+            last_unparseable_raw := Some raw;
+            Unparseable "librarian provider returned invalid episode JSON")
     in
-    run_with_parse_retries
-      ~max_retries:librarian_max_parse_retries
-      ~attempt
-      messages
+    (match
+       run_with_parse_retries
+         ~max_retries:librarian_max_parse_retries
+         ~attempt
+         messages
+     with
+     | Ok episode -> Ok episode
+     | Error (Retry_transport_failed msg) -> Error msg
+     | Error (Retry_exhausted_unparseable msg) ->
+       let raw =
+         match !last_unparseable_raw with
+         | Some raw -> raw
+         | None -> ""
+       in
+       let now = now_from_clock ?clock () in
+       Log.Keeper.warn
+         "memory os librarian preserving unstructured fallback trace_id=%s generation=%d reason=%s"
+         inp.trace_id
+         generation
+         msg;
+       Ok (unstructured_episode ~now ~generation inp ~reason:msg ~raw))
 ;;
 
 let extract_and_append_with_provider
@@ -425,6 +553,7 @@ let extract_and_append_with_provider
           let (_ : Keeper_memory_os_io.fact_merge_stats) =
             File_lock_eio.with_lock ?clock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
               Keeper_memory_os_io.merge_and_cap_facts
+                ~now
                 ~keeper_id
                 ~merge:(Keeper_memory_os_policy.reobserve_fact ~now)
                 ~incoming:episode.Keeper_memory_os_types.claims
@@ -443,6 +572,22 @@ let extract_and_append_with_provider
       | Ok () ->
         Keeper_memory_os_io.append_episode ~keeper_id episode;
         Keeper_memory_os_io.append_event ~keeper_id episode;
+        (* RFC-0272 (defect D): bound the append-only episode log under the same
+           bundle lock that serialized the writes above, so a re-extraction cannot
+           grow events.jsonl / episodes/ without limit. Hysteresis-gated: the trim
+           is a no-op until the high-water, so this is off the per-turn hot path. *)
+        ignore
+          (Keeper_memory_os_io.cap_events
+             ~keeper_id
+             ~keep:Keeper_memory_os_io.event_recall_window
+             ~trigger:Keeper_memory_os_io.event_store_max
+            : int);
+        ignore
+          (Keeper_memory_os_io.cap_episode_files
+             ~keeper_id
+             ~keep:Keeper_memory_os_io.episode_file_window
+             ~trigger:Keeper_memory_os_io.episode_file_store_max
+            : int);
         (* RFC-0251: the co-occurrence edge / spreading-activation organ was removed
            (dark-by-default, no recall consumer), so the fact upsert above is the only
            post-merge work. *)

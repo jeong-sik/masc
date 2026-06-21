@@ -102,6 +102,13 @@ let json_bool_field key = function
       | _ -> None)
   | _ -> None
 
+let json_int_field key = function
+  | `Assoc fields -> (
+      match List.assoc_opt key fields with
+      | Some (`Int value) -> Some value
+      | _ -> None)
+  | _ -> None
+
 let json_assoc_field key = function
   | `Assoc fields -> (
       match List.assoc_opt key fields with
@@ -174,6 +181,19 @@ let status_goal_with ?(agent_name = "test-agent") ?name config =
   | None -> Alcotest.fail "status response missing goal"
 
 let status_goal config name = status_goal_with ~name config
+
+let status_json_with ?(agent_name = "test-agent") ?name config =
+  let args =
+    match name with
+    | Some name -> `Assoc [ ("name", `String name); ("fast", `Bool true) ]
+    | None -> `Assoc [ ("fast", `Bool true) ]
+  in
+  let result =
+    Status_detail.handle_keeper_status_config ~config ~agent_name args
+  in
+  if not (Profile.tool_result_success result) then
+    Alcotest.failf "status failed: %s" (Profile.tool_result_body result);
+  Yojson.Safe.from_string (Profile.tool_result_body result)
 
 let resolved_keeper_name config name =
   match
@@ -605,6 +625,44 @@ let test_status_cache_tracks_toml_overlay_changes () =
     "second cache goal after toml edit"
     (status_goal config name)
 
+let test_status_surfaces_chat_queue_runtime () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "chatqueue-status" in
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local" ~goal:"chat queue status";
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  Eio_main.run @@ fun _env ->
+  (* Mirror production: the status handler runs under [Eio_main.run] with the
+     guard enabled (bin/main_eio.ml), so [Keeper_chat_queue.length] is read.
+     Disable on exit so other (non-Eio) cases keep reporting [`Null]. *)
+  Eio_guard.enable ();
+  Masc.Keeper_chat_queue.For_testing.reset ();
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_chat_queue.For_testing.reset ();
+      Eio_guard.disable ())
+    (fun () ->
+      Masc.Keeper_chat_queue.configure_persistence ~base_path:config.base_path;
+      Masc.Keeper_chat_queue.enqueue
+        ~keeper_name:name
+        {
+          Masc.Keeper_chat_queue.content = "queued status probe";
+          user_blocks = [];
+          attachments = [];
+          timestamp = 1.0;
+          source = Masc.Keeper_chat_queue.Dashboard;
+        };
+      let status_json = status_json_with ~name config in
+      let chat_queue = json_assoc_field "chat_queue" status_json in
+      Alcotest.(check (option int))
+        "status exposes pending chat queue depth"
+        (Some 1)
+        (json_int_field "pending_messages" chat_queue);
+      Alcotest.(check (option bool))
+        "status exposes durable chat queue replay flag"
+        (Some true)
+        (json_bool_field "durable_replay_enabled" chat_queue))
+
 let test_keeper_list_row_surfaces_effective_meta_errors () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "badprofile" in
@@ -750,6 +808,8 @@ let () =
             `Quick test_missing_profile_source_fails_loud;
           Alcotest.test_case "status cache tracks TOML overlay edits" `Quick
             test_status_cache_tracks_toml_overlay_changes;
+          Alcotest.test_case "status surfaces chat queue runtime" `Quick
+            test_status_surfaces_chat_queue_runtime;
           Alcotest.test_case "keeper list surfaces effective meta errors"
             `Quick test_keeper_list_row_surfaces_effective_meta_errors;
           Alcotest.test_case

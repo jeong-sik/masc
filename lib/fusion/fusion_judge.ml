@@ -45,7 +45,7 @@ let run ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~question ~panel
   | Error reason ->
     Error
       (Printf.sprintf "judge build failed: %s"
-         (Fusion_types.show_panel_failure reason))
+         (Fusion_oas.panel_failure_detail ~runtime_id:judge_model reason))
   | Ok agent ->
     let prompt = compose_prompt ~question ~panel in
     (match

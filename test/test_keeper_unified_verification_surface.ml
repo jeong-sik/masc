@@ -17,6 +17,7 @@ let base_observation : WO.world_observation =
     provider_capacity_blocked_task_count = 0;
     failed_task_count = 0;
     pending_verification_count = 0;
+    scheduled_automation = WO.empty_scheduled_automation_observation;
     backlog_updated_since_last_scheduled_autonomous = false;
     running_keeper_fiber_count = 0;
     connected_surfaces = [];
@@ -40,6 +41,38 @@ let sample_board_event : WO.pending_board_event =
     provenance = WO.Human_direct;
   }
 
+let scheduled_automation_observation : WO.scheduled_automation_observation =
+  { active_count = 2
+  ; due_ready_count = 1
+  ; blocked_approval_count = 1
+  ; next_due_at = Some 200.0
+  ; items =
+      [ { schedule_id = "sched-ready"
+        ; action = "dispatch_ready"
+        ; status = "due"
+        ; payload_kind = Some "masc.board_post"
+        ; recurrence_summary = "daily 09:00:00 Asia/Seoul"
+        ; risk_class = "read_only"
+        ; due_at = 200.0
+        ; keeper_next_tool = Some "masc_schedule_get"
+        ; keeper_next_action =
+            "Inspect the schedule if needed and monitor dispatch; do not create a duplicate schedule."
+        }
+      ; { schedule_id = "sched-blocked"
+        ; action = "approve_or_reject"
+        ; status = "pending_approval"
+        ; payload_kind = Some "masc.board_post"
+        ; recurrence_summary = "one_shot"
+        ; risk_class = "workspace_write"
+        ; due_at = 180.0
+        ; keeper_next_tool = Some "masc_schedule_get"
+        ; keeper_next_action =
+            "Inspect details, then wait for the dashboard operator approval or rejection action to resolve this schedule."
+        }
+      ]
+  }
+;;
+
 let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
   let json =
     `Assoc
@@ -54,6 +87,39 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
   | Error e -> failwith ("meta_of_json failed: " ^ e)
 
 let minimal_meta : Masc.Keeper_meta_contract.keeper_meta = make_meta "test-keeper"
+
+let runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+;;
+
+let init_runtime_default_for_tests () =
+  let path = Filename.temp_file "keeper_schedule_observation_runtime_" ".toml" in
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc runtime_toml);
+  match Runtime.init_default ~config_path:path with
+  | Ok () -> ()
+  | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
+;;
 
 let test_task_verify_affordance_for_keeper () =
   let meta = { minimal_meta with mention_targets = [ "analyst" ] } in
@@ -216,6 +282,44 @@ let test_pending_verification_trigger_for_verifier_tag () =
   check bool "pending_verification present for verifier-tagged keeper" true
     (List.mem "pending_verification" triggers)
 
+let test_scheduled_automation_triggers_and_affordances () =
+  let obs =
+    { base_observation with scheduled_automation = scheduled_automation_observation }
+  in
+  let triggers = UM.observed_triggers_of_observation obs in
+  check bool "due-ready schedule trigger present" true
+    (List.mem "scheduled_automation_due_ready" triggers);
+  check bool "blocked schedule trigger present" true
+    (List.mem "scheduled_automation_blocked_approval" triggers);
+  let affordances = UM.observed_affordances_of_observation obs in
+  check bool "dispatch monitor affordance present" true
+    (List.mem "schedule_dispatch_monitor" affordances);
+  check bool "grant followup affordance present" true
+    (List.mem "schedule_grant_followup" affordances)
+
+let test_scheduled_automation_prompt_section () =
+  Masc_test_deps.init_keeper_tool_registry ();
+  init_runtime_default_for_tests ();
+  let obs =
+    { base_observation with scheduled_automation = scheduled_automation_observation }
+  in
+  let _, user_msg =
+    Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
+      ~observation:obs ()
+  in
+  check bool "prompt includes schedule section" true
+    (contains_sub "### Scheduled Automation" user_msg);
+  check bool "prompt includes ready schedule id" true
+    (contains_sub "schedule_id=sched-ready" user_msg);
+  check bool "prompt includes blocked action" true
+    (contains_sub "action=approve_or_reject" user_msg);
+  check bool "prompt points to schedule detail tool" true
+    (contains_sub "masc_schedule_get" user_msg);
+  check bool "prompt includes ready next action" true
+    (contains_sub "do not create a duplicate schedule" user_msg);
+  check bool "prompt includes approval next action" true
+    (contains_sub "dashboard operator approval or rejection" user_msg)
+
 let () =
   run "keeper_unified_verification_surface"
     [
@@ -250,5 +354,11 @@ let () =
           test_case
             "trigger: verifier-tagged keeper also sees pending_verification"
             `Quick test_pending_verification_trigger_for_verifier_tag;
+          test_case
+            "trigger: scheduled automation attention is observable"
+            `Quick test_scheduled_automation_triggers_and_affordances;
+          test_case
+            "prompt: scheduled automation section renders attention items"
+            `Quick test_scheduled_automation_prompt_section;
         ] );
     ]

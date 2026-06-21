@@ -54,6 +54,7 @@ let record_recovery_stimulus_turn_started
 type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
+  consumed_stimuli : Keeper_event_queue.stimulus list;
 }
 
 let consume_single_heartbeat_stimulus
@@ -136,7 +137,7 @@ let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
       ~base_path:ctx.config.base_path
       meta_after_triage.name
   in
-  let queued_observations, consumed_stimulus_count =
+  let queued_observations, consumed_stimuli =
     match board_batch with
     | [] ->
       (match
@@ -144,10 +145,11 @@ let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
            ~base_path:ctx.config.base_path
            meta_after_triage.name
        with
-       | None -> [], 0
-       | Some stim -> consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim, 1)
-    | batch -> consume_board_stimulus_batch ~meta_after_triage batch, List.length batch
+       | None -> [], []
+       | Some stim -> consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim, [ stim ])
+    | batch -> consume_board_stimulus_batch ~meta_after_triage batch, batch
   in
+  let consumed_stimulus_count = List.length consumed_stimuli in
   let pending_board_events =
     List.fold_left
       (fun acc (event : Keeper_world_observation.pending_board_event) ->
@@ -168,5 +170,5 @@ let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
       pending_board_events
       (List.rev queued_observations)
   in
-  { pending_board_events; consumed_stimulus_count }
+  { pending_board_events; consumed_stimulus_count; consumed_stimuli }
 ;;

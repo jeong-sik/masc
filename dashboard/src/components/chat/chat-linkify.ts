@@ -3,6 +3,15 @@ const BOARD_POST_ID_RE = /(^|[\s([{"'`>])(p-[a-f0-9]{32})(?=$|[\s)\].,!?:;}"'`<]
 const ANCHOR_RE = /(<a\b[\s\S]*?<\/a>)/gi
 const HTML_TAG_RE = /(<[^>]+>)/g
 
+function escapeHtml(raw: string): string {
+  return raw
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 function boardPostHref(postId: string): string {
   return `#board?post=${encodeURIComponent(postId)}`
 }
@@ -13,11 +22,14 @@ function boardPostLabel(postId: string): string {
 
 function boardPostLink(postId: string): string {
   const label = boardPostLabel(postId)
+  const escapedPostId = escapeHtml(postId)
+  const escapedLabel = escapeHtml(label)
+  const title = `보드 글 ${escapedPostId} 열기`
   return [
     `<a class="inline-link chat-board-post-link" href="${boardPostHref(postId)}"`,
-    ` title="보드 글 ${postId} 열기" aria-label="보드 글 ${postId} 열기" data-board-post-id="${postId}">`,
+    ` title="${title}" aria-label="${title}" data-board-post-id="${escapedPostId}">`,
     '<span class="chat-board-post-link-kind">보드 글</span>',
-    `<span class="chat-board-post-link-id">${label}</span>`,
+    `<span class="chat-board-post-link-id">${escapedLabel}</span>`,
     '</a>',
   ].join('')
 }

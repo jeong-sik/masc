@@ -147,7 +147,6 @@
   border-radius: var(--r-0);
   background: var(--accent-10);
   color: var(--color-accent-fg);
-  font-family: var(--font-mono);
   font-weight: 600;
   line-height: 1.45;
   text-decoration: none;
@@ -173,6 +172,7 @@
 .chat-board-post-link-id {
   min-width: 0;
   overflow: hidden;
+  font-family: var(--font-mono);
   text-overflow: ellipsis;
 }
 

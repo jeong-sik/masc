@@ -10,6 +10,7 @@ vi.mock('./dev-token', () => ({
 
 import {
   fetchDashboardShell,
+  fetchLogs,
   fetchDashboardExecutionTrust,
   fetchDashboardGovernance,
   fetchDashboardGoalDetail,
@@ -18,6 +19,7 @@ import {
   fetchDashboardTools,
   fetchKeeperToolCalls,
   fetchKeeperToolStats,
+  fetchKeeperTurnRecords,
   fetchDashboardMemory,
   fetchDashboardMission,
   fetchDashboardMissionBriefing,
@@ -429,6 +431,55 @@ describe('keeper tool telemetry fetchers', () => {
     const result = await fetchKeeperToolCalls('keeper-alpha')
 
     expect(result.entries.map(entry => entry.duration_ms)).toEqual([null, null])
+  })
+
+  it('grounds turn-record model / finish_reason, leaving absent fields undefined', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        count: 2,
+        source: 'turn_record',
+        entries: [
+          {
+            record: {
+              keeper: 'keeper-alpha',
+              trace_id: 'trace-grounded',
+              absolute_turn: 7,
+              ts: 10,
+              runtime_profile: 'local',
+              model: 'deepseek-v4-flash',
+              finish_reason: 'completed',
+              blocks: [],
+              execution_ids: [],
+            },
+            diff_vs_prev: null,
+          },
+          {
+            // RFC-0233 §2.3: error turn omits model/finish_reason — must
+            // decode to undefined, never a fabricated "stop"/placeholder.
+            record: {
+              keeper: 'keeper-alpha',
+              trace_id: 'trace-grounded',
+              absolute_turn: 8,
+              ts: 11,
+              runtime_profile: 'local',
+              blocks: [],
+              execution_ids: [],
+            },
+            diff_vs_prev: null,
+          },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperTurnRecords('keeper-alpha')
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/keeper-alpha/turn-records')
+    expect(result.entries[0]?.record.model).toBe('deepseek-v4-flash')
+    expect(result.entries[0]?.record.finish_reason).toBe('completed')
+    expect(result.entries[1]?.record.model).toBeUndefined()
+    expect(result.entries[1]?.record.finish_reason).toBeUndefined()
   })
 })
 
@@ -2165,5 +2216,52 @@ describe('fetchCostLatency', () => {
     expect(result.perAgent[0]?.p95_ms).toBeNull()
     expect(result.matrix.providers).toEqual(['runtime'])
     expect(result.matrix.models).toEqual(['runtime_lane_7'])
+  })
+})
+
+describe('fetchLogs', () => {
+  function stubLogsFetch() {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ total: 0, entries: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  function requestedUrl(fetchMock: ReturnType<typeof vi.fn>): string {
+    return String(fetchMock.mock.calls[0]?.[0])
+  }
+
+  it('sets before_seq for backward "load older" paging', async () => {
+    const fetchMock = stubLogsFetch()
+
+    await fetchLogs({ limit: 200, level: 'INFO', before_seq: 4096 })
+
+    const params = new URLSearchParams(requestedUrl(fetchMock).split('?')[1] ?? '')
+    expect(params.get('before_seq')).toBe('4096')
+    expect(params.get('limit')).toBe('200')
+    expect(params.get('level')).toBe('INFO')
+  })
+
+  it('omits before_seq when negative (no cursor)', async () => {
+    const fetchMock = stubLogsFetch()
+
+    await fetchLogs({ before_seq: -1 })
+
+    const params = new URLSearchParams(requestedUrl(fetchMock).split('?')[1] ?? '')
+    expect(params.has('before_seq')).toBe(false)
+  })
+
+  it('combines before_seq and since_seq into a bounded window', async () => {
+    const fetchMock = stubLogsFetch()
+
+    await fetchLogs({ since_seq: 10, before_seq: 20 })
+
+    const params = new URLSearchParams(requestedUrl(fetchMock).split('?')[1] ?? '')
+    expect(params.get('since_seq')).toBe('10')
+    expect(params.get('before_seq')).toBe('20')
   })
 })

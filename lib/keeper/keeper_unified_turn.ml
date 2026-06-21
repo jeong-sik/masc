@@ -52,6 +52,16 @@ let run_keeper_cycle
      pre-dispatch checks (see turn_livelock guard below), leaving silent
      skip paths without a turn correlator. *)
   let keeper_turn_id = meta.runtime.usage.total_turns + 1 in
+  (* RFC-0233 §7.2 (mint once, thread down): mint the turn's join key from this
+     single pre-turn snapshot — the same (trace_id, total_turns + 1) pair the
+     manifest and Turn_record stamp — and thread it into the success handler so
+     a keeper-authored board post carries [origin.turn_ref]. Never re-derive at
+     a downstream seam from a post-lifecycle meta (trace_id rotates on handoff). *)
+  let turn_ref =
+    Ids.Turn_ref.make
+      ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      ~absolute_turn:keeper_turn_id
+  in
   let runtime_manifest_context : Keeper_runtime_manifest.turn_context =
     { manifest_keeper_name = meta.name
     ; manifest_agent_name = Some meta.agent_name
@@ -974,6 +984,7 @@ dominant source of the observed CAS race exhaustion after
                       ~last_provider_timeout_budget:turn_state.last_provider_timeout_budget
                       ~current_turn_blocker_info:turn_state.current_turn_blocker_info
                       ~keeper_turn_id
+                      ~turn_ref
                       result
                   in
                   (* Cycle 45: KeeperTaskAcquisition.tla TurnComplete post-action. *)

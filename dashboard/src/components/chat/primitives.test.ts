@@ -384,6 +384,37 @@ describe('ChatTranscript', () => {
     expect(onClick.mock.calls[0]?.[0].id).toBe('a1')
   })
 
+  it('copies the message text from an assistant message copy button', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.assign(globalThis.navigator, { clipboard: { writeText } })
+    const target = entry({
+      id: 'a1',
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: '복사할 응답 본문',
+    })
+
+    render(
+      html`<${ChatTranscript} entries=${[target]} emptyText="empty" variant="messenger" />`,
+      container,
+    )
+
+    const copy = container.querySelector('[data-testid="chat-message-copy"]') as HTMLButtonElement
+    expect(copy).not.toBeNull()
+    fireEvent.click(copy)
+    expect(writeText).toHaveBeenCalledWith('복사할 응답 본문')
+  })
+
+  it('does not render a copy button on user messages', () => {
+    const target = entry({ id: 'u1', role: 'user', text: '내 질문' })
+    render(
+      html`<${ChatTranscript} entries=${[target]} emptyText="empty" variant="messenger" />`,
+      container,
+    )
+    expect(container.querySelector('[data-testid="chat-message-copy"]')).toBeNull()
+  })
+
   it('renders a thinking placeholder when the model is reasoning', () => {
     render(
       html`<${ChatTranscript}
@@ -1722,6 +1753,39 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
     expect(bundle?.textContent).toContain('곧 답합니다')
   })
 
+  it('renders thinking text as sanitized markdown with newlines preserved', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            traceSteps: [{ kind: 'think', text: '첫째 줄 **강조**\n둘째 줄\n\n<script>alert(1)</script>' }],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const think = container.querySelector('[data-chat-trace-step="think"] .chat-block-tstep-text') as HTMLElement
+    expect(think).not.toBeNull()
+    // Newline-preserving container (raw interpolation folded these to one line).
+    expect(think.className).toContain('whitespace-pre-wrap')
+    expect(think.className).toContain('markdown-body')
+    // Markdown is rendered, not shown as literal `**강조**`.
+    expect(think.querySelector('strong')?.textContent).toBe('강조')
+    // Both source lines survive the round-trip.
+    expect(think.textContent).toContain('첫째 줄')
+    expect(think.textContent).toContain('둘째 줄')
+    // Untrusted model markup is stripped (no executable script element).
+    expect(think.querySelector('script')).toBeNull()
+  })
+
   it('keeps the flat per-row tool bubbles when grouping is off (default)', () => {
     render(
       html`<${ChatTranscript}
@@ -1770,6 +1834,64 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
     await flushUi()
     const step = container.querySelector('[data-chat-trace-step="tool"]')
     expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+  })
+
+  it('marks an unjoined tool step as missing once the owning turn has settled', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-unjoined-settled', label: 'keeper_board_comment', turnRef: 'trace-s#1' }),
+          entry({
+            id: 'a-settled',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-s#1',
+            streamState: null,
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    expect(bundle).not.toBeNull()
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
+    // Settled turn + never-joined output is a real gap, not an indefinite pending.
+    expect(step?.querySelector('.chat-block-tstep-status.missing')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
+    // The gap is surfaced in the card header so silent failures are visible.
+    expect(bundle?.textContent).toContain('결과 누락 1')
+  })
+
+  it('keeps an unjoined tool step pending while the owning turn is still streaming', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-unjoined-live', label: 'keeper_board_comment', turnRef: 'trace-l#1' }),
+          entry({
+            id: 'a-live',
+            text: '응답 작성 중',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-l#1',
+            streamState: 'streaming',
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
+    // Output may still arrive while the turn streams, so keep it pending.
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+    expect(bundle?.textContent).not.toContain('결과 누락')
   })
 })
 

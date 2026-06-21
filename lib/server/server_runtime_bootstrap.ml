@@ -213,8 +213,17 @@ let record_runtime_toml_load_failure msg =
        Otel_metric_store.inc_counter
          metric_keeper_runtime_config_load_failures
          ~labels:[ "reason", reason ]
-         ())
+      ())
     reason
+
+let thompson_shutdown_hook_registered = Atomic.make false
+
+let ensure_thompson_persistence ~base_path =
+  Thompson_sampling.set_base_path base_path;
+  Thompson_sampling.load_stats ();
+  if Atomic.compare_and_set thompson_shutdown_hook_registered false true then
+    Shutdown.register ~name:"thompson_sampling_save" ~priority:24 (fun () ->
+      Thompson_sampling.save_stats ())
 
 let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
     ?env ()
@@ -249,6 +258,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
     Env_config_core.base_path_input_env_key
     (Option.value ~default:"" input_base_path);
   Unix.putenv Env_config_core.base_path_env_key base_path;
+  ensure_thompson_persistence ~base_path;
   bootstrap_base_path_config_root ~base_path;
   (* Apply keeper runtime overrides from the resolved config root's
      runtime.toml. Must run before any module that reads
@@ -552,6 +562,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   let requested_backend_mode_before_enforcement = requested_backend_mode () in
   force_jsonl_fallback_env ();
   let initial_backend_mode = requested_backend_mode () in
+  Transport_metrics.set_ws_same_origin_runtime_ready false;
   server_state := None;
   Server_startup_state.reset ~backend_mode:initial_backend_mode ();
   note_storage_enforcement_fallback
@@ -932,9 +943,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
                  ~config:(Mcp_server.workspace_config state))
         | _ ->
             None);
-      (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)
-      Server_ws_standalone.start ~sw ~env
-        ~on_message:(fun ws_session_id body_str ->
+      let dispatch_ws_inbound_message ws_session_id body_str =
           let jsonrpc_id_opt body =
             match Yojson.Safe.from_string body with
             | `Assoc fields -> (
@@ -1025,7 +1034,14 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
                     with
                     | Eio.Cancel.Cancelled _ as e -> raise e
                     | exn ->
-                      Log.Server.warn "WS dispatch error %s: %s" ws_session_id (Printexc.to_string exn))));
+                      Log.Server.warn "WS dispatch error %s: %s" ws_session_id (Printexc.to_string exn)))
+      in
+      Server_mcp_transport_ws.set_inbound_message_handler
+        dispatch_ws_inbound_message;
+      Transport_metrics.set_ws_same_origin_runtime_ready true;
+      (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)
+      Server_ws_standalone.start ~sw ~env
+        ~on_message:Server_mcp_transport_ws.dispatch_inbound_message;
       (* WebRTC DataChannel transport (enabled by default, opt-out via MASC_WEBRTC_ENABLED=0) *)
       if Server_webrtc_transport.is_enabled () then (
         Log.Server.info "WebRTC DataChannel transport enabled";

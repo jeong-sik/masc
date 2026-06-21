@@ -176,6 +176,8 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           absolute_turn: 42,
           ts: 1_781_587_560,
           runtime_profile: 'local',
+          model: 'deepseek-v4-flash',
+          finish_reason: 'completed',
           input_tokens: 2400,
           output_tokens: 280,
           blocks: [
@@ -470,6 +472,66 @@ describe('KeeperTurnInspector v2 drawer', () => {
     await waitFor(() => {
       expect(container.textContent).toContain('실행 메타데이터')
     })
+  })
+
+  it('grounds model / finish_reason from the record and marks deferred fields n/a', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+    fireEvent.click(container.querySelector('[data-testid="turn-tab-meta"]')!)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('실행 메타데이터')
+    })
+
+    const meta = container.querySelector('.kti-kv')?.textContent ?? ''
+    // grounded from the backend turn record (RFC-0233 §2.3)
+    expect(meta).toContain('deepseek-v4-flash')
+    expect(meta).toContain('completed')
+    // finish_reason is no longer the fabricated hardcoded 'stop'
+    expect(meta).not.toContain('stop')
+    // namespace / fsm.state are not captured in MASC — honest absence, not a guess
+    expect(meta).toContain('namespace')
+    expect(meta).toContain('fsm.state')
+    expect(meta).toContain('n/a')
+  })
+
+  it('renders finish_reason absence as n/a without fabricating a value', async () => {
+    const response = turnRecordsWithMemoryOs()
+    // strip the grounded meta fields → simulate an error turn / pre-grounding row
+    response.entries[1] = {
+      ...response.entries[1]!,
+      record: {
+        ...response.entries[1]!.record,
+        model: undefined,
+        finish_reason: undefined,
+      },
+    }
+    fetchKeeperTurnRecordsMock.mockResolvedValue(response)
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+    fireEvent.click(container.querySelector('[data-testid="turn-tab-meta"]')!)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('실행 메타데이터')
+    })
+
+    const meta = container.querySelector('.kti-kv')?.textContent ?? ''
+    expect(meta).not.toContain('stop')
+    expect(meta).not.toContain('deepseek-v4-flash')
+    expect(meta).toContain('n/a')
   })
 
   it('displays summary stats in the stat strip', async () => {

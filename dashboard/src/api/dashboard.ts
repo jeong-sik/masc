@@ -128,6 +128,7 @@ export async function fetchLogs(opts?: {
   level?: string
   module?: string
   since_seq?: number
+  before_seq?: number
   category?: string
   exclude_category?: string
 }): Promise<LogsResponse> {
@@ -137,6 +138,9 @@ export async function fetchLogs(opts?: {
   if (opts?.module) params.set('module', opts.module)
   if (typeof opts?.since_seq === 'number' && opts.since_seq >= 0) {
     params.set('since_seq', String(opts.since_seq))
+  }
+  if (typeof opts?.before_seq === 'number' && opts.before_seq >= 0) {
+    params.set('before_seq', String(opts.before_seq))
   }
   if (opts?.category) params.set('category', opts.category)
   if (opts?.exclude_category) params.set('exclude_category', opts.exclude_category)
@@ -2905,6 +2909,11 @@ export type TurnRecordEntry = {
   absolute_turn: number
   blocks: TurnBlock[]
   runtime_profile: string
+  // RFC-0233 §2.3 — grounded from the backend turn record (boundary-redacted
+  // model label + keeper stop reason). Absent (undefined) on error turns and
+  // pre-grounding rows; the inspector renders absence, never a fabricated value.
+  model?: string
+  finish_reason?: string
   temperature?: number
   thinking_budget?: number
   enable_thinking?: boolean
@@ -3039,6 +3048,8 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     absolute_turn,
     blocks: decodeTurnBlockList(raw.blocks),
     runtime_profile,
+    model: asString(raw.model),
+    finish_reason: asString(raw.finish_reason),
     temperature: asNumber(raw.temperature),
     thinking_budget: asNumber(raw.thinking_budget),
     enable_thinking: typeof raw.enable_thinking === 'boolean' ? raw.enable_thinking : undefined,

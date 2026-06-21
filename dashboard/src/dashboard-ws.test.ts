@@ -351,6 +351,64 @@ describe('dashboard websocket route subscriptions', () => {
 
     await connectDashboardWS({ tab: 'overview', params: {} })
     expect(mockSockets).toHaveLength(0)
+    expect(dashboardWsLastError.value).toBe('dashboard websocket unavailable: not listening')
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(mockSockets).toHaveLength(1)
+  })
+
+  it('surfaces disabled discovery reasons without scheduling reconnect', async () => {
+    vi.useFakeTimers()
+    mockSockets.length = 0
+    vi.stubGlobal('WebSocket', MockWebSocket)
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        enabled: false,
+        listening: false,
+        unavailable_reason: 'disabled_by_config',
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    expect(mockSockets).toHaveLength(0)
+    expect(dashboardWsLastError.value).toBe(
+      'dashboard websocket unavailable: disabled_by_config',
+    )
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(mockSockets).toHaveLength(0)
+  })
+
+  it('treats blank websocket discovery URLs as unavailable', async () => {
+    vi.useFakeTimers()
+    mockSockets.length = 0
+    vi.stubGlobal('WebSocket', MockWebSocket)
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        enabled: true,
+        listening: true,
+        ws_url: '   ',
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(wsDiscoveryResponse())
+    vi.stubGlobal('fetch', fetchMock)
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    expect(mockSockets).toHaveLength(0)
+    expect(dashboardWsLastError.value).toBe(
+      'dashboard websocket unavailable: websocket URL unavailable',
+    )
 
     await vi.advanceTimersByTimeAsync(60_000)
     await flushPromises()
@@ -368,6 +426,7 @@ describe('dashboard websocket route subscriptions', () => {
         enabled: true,
         listening: true,
         ws_url: null,
+        unavailable_reason: 'standalone_ws_loopback_only',
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -377,6 +436,9 @@ describe('dashboard websocket route subscriptions', () => {
 
     await connectDashboardWS({ tab: 'overview', params: {} })
     expect(mockSockets).toHaveLength(0)
+    expect(dashboardWsLastError.value).toBe(
+      'dashboard websocket unavailable: standalone_ws_loopback_only',
+    )
 
     await vi.advanceTimersByTimeAsync(60_000)
     await flushPromises()
@@ -568,6 +630,100 @@ describe('dashboard websocket route subscriptions', () => {
     expect(dashboardWsConnected.value).toBe(false)
     expect(dashboardWsReady.value).toBe(false)
     expect(mockSockets).toHaveLength(1)
+  })
+
+  it('reconnects with a fresh token after hello auth rejection', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+    setStoredToken('stale-token', { source: 'dev', actor: 'dashboard' })
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    expect(hello.params.token).toBe('stale-token')
+
+    socket.receive({ jsonrpc: '2.0', id: hello.id, error: { message: 'auth rejected' } })
+    await flushPromises()
+    expect(dashboardWsConnected.value).toBe(false)
+    expect(dashboardWsReady.value).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+    expect(mockSockets).toHaveLength(1)
+
+    setStoredToken('fresh-token', { source: 'dev', actor: 'dashboard' })
+    await flushPromises()
+
+    expect(mockSockets).toHaveLength(2)
+    const retry = mockSockets[1]!
+    retry.open()
+    const retryHello = parseRpc(retry, 0)
+    expect(retryHello.method).toBe('dashboard/hello')
+    expect(retryHello.params.token).toBe('fresh-token')
+  })
+
+  it('keeps reconnecting after a token change cancels an in-flight hello', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+    setStoredToken('stale-token', { source: 'manual' })
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const staleSocket = mockSockets[0]!
+    staleSocket.open()
+    const staleHello = parseRpc(staleSocket, 0)
+    expect(staleHello.params.token).toBe('stale-token')
+
+    setStoredToken('fresh-token', { source: 'manual' })
+    await flushPromises()
+
+    expect(staleSocket.readyState).toBe(MockWebSocket.CLOSED)
+    expect(mockSockets).toHaveLength(2)
+
+    const freshSocket = mockSockets[1]!
+    freshSocket.open()
+    const freshHello = parseRpc(freshSocket, 0)
+    expect(freshHello.method).toBe('dashboard/hello')
+    expect(freshHello.params.token).toBe('fresh-token')
+    freshSocket.receive({ jsonrpc: '2.0', id: freshHello.id, result: {} })
+    await flushPromises()
+    const subscribe = parseRpc(freshSocket, 1)
+    freshSocket.receive({
+      jsonrpc: '2.0',
+      id: subscribe.id,
+      result: { snapshot: { seq: 1, slices: {} } },
+    })
+    await flushPromises()
+    expect(dashboardWsReady.value).toBe(true)
+
+    freshSocket.close({ code: 1011, reason: 'server restart', wasClean: false })
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+
+    expect(mockSockets).toHaveLength(3)
+    expect(mockSockets[2]!.readyState).toBe(MockWebSocket.CONNECTING)
+  })
+
+  it('closes an authenticated socket when the stored token is cleared', async () => {
+    installWebSocketMocks()
+    setStoredToken('active-token', { source: 'manual' })
+
+    const socket = await connectReadyDashboard()
+    expect(dashboardWsReady.value).toBe(true)
+
+    clearStoredToken()
+    await flushPromises()
+
+    expect(socket.readyState).toBe(MockWebSocket.CLOSED)
+    expect(dashboardWsConnected.value).toBe(false)
+    expect(dashboardWsReady.value).toBe(false)
+    expect(mockSockets).toHaveLength(2)
+
+    const retry = mockSockets[1]!
+    retry.open()
+    const retryHello = parseRpc(retry, 0)
+    expect(retryHello.method).toBe('dashboard/hello')
+    expect(retryHello.params).not.toHaveProperty('token')
   })
 
   it('subscribes the latest route captured while hello is still in flight', async () => {

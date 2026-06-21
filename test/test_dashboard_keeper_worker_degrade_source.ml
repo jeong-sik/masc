@@ -83,6 +83,15 @@ let test_degraded_row_shape_keeps_dashboard_contract () =
   check_contains "agent field remains present" src "(\"agent\", `Null)";
   check_contains "runtime identity field remains present" src "(\"runtime_id\", runtime_id_json)"
 
+let test_checkpoint_context_max_uses_runtime_budget () =
+  let src = load_source target_file in
+  check_contains
+    "checkpoint fallback resolves runtime context max"
+    src
+    "Keeper_turn_runtime_budget.resolved_max_context_for_turn";
+  check bool "summary fallback does not hardcode zero context max" false
+    (contains ~needle:"let primary_max_context = 0 in" src)
+
 let () =
   run
     "dashboard_keeper_worker_degrade_source"
@@ -95,5 +104,9 @@ let () =
             "degraded row keeps dashboard contract"
             `Quick
             test_degraded_row_shape_keeps_dashboard_contract
+        ; test_case
+            "checkpoint context max uses runtime budget"
+            `Quick
+            test_checkpoint_context_max_uses_runtime_budget
         ] )
     ]

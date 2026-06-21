@@ -3,12 +3,72 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
-import { SettingsSurface } from './settings-surface'
+import {
+  SettingsSurface,
+  mcpExposedToolNames,
+  logEntryToSysRow,
+  logRowStatus,
+} from './settings-surface'
+import type { DashboardToolInventoryItem } from '../api/dashboard'
+import type { LogEntry } from '../api/schemas/logs'
 import { DashboardMain } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
 import { dashboardLoading } from '../store'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
+
+const apiMock = vi.hoisted(() => ({
+  fetchLogs: vi.fn(),
+  fetchDashboardTools: vi.fn(),
+}))
+
+vi.mock('../api/dashboard.js', async () => {
+  const actual = await vi.importActual<typeof import('../api/dashboard')>('../api/dashboard')
+  return {
+    ...actual,
+    fetchLogs: apiMock.fetchLogs,
+    fetchDashboardTools: apiMock.fetchDashboardTools,
+  }
+})
+
+function makeLogEntry(overrides: Partial<LogEntry> = {}): LogEntry {
+  return {
+    seq: 1,
+    ts: '2026-06-21T16:24:51Z',
+    level: 'INFO',
+    source: 'structured',
+    module: 'Keeper',
+    message: 'booted',
+    keeper_name: null,
+    turn_id: null,
+    category: null,
+    details: null,
+    ...overrides,
+  }
+}
+
+function makeToolItem(overrides: Partial<DashboardToolInventoryItem> = {}): DashboardToolInventoryItem {
+  return {
+    name: 'tool',
+    description: '',
+    category: 'uncategorized',
+    enabled_in_current_mode: false,
+    direct_call_allowed: false,
+    doc_refs: [],
+    prompt_hints: [],
+    surfaces: [],
+    visibility: 'public',
+    lifecycle: 'stable',
+    implementationStatus: 'implemented',
+    tier: 'standard',
+    ...overrides,
+  }
+}
+
+function stubEmptyApi() {
+  apiMock.fetchLogs.mockResolvedValue({ total: 0, entries: [] })
+  apiMock.fetchDashboardTools.mockResolvedValue({ tool_inventory: { count: 0, tools: [] } })
+}
 
 const navigate = vi.fn()
 vi.mock('../router', async () => {
@@ -25,6 +85,9 @@ describe('SettingsSurface', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
+    apiMock.fetchLogs.mockReset()
+    apiMock.fetchDashboardTools.mockReset()
+    stubEmptyApi()
   })
 
   afterEach(() => {
@@ -95,22 +158,35 @@ describe('SettingsSurface', () => {
     expect(buttons()[2]!.getAttribute('data-active')).toBe('true')
   })
 
-  it('log filter chips filter rows', async () => {
+  it('log filter chips filter live rows from the ring', async () => {
+    // 6 ring entries mapped to rows: tool(/masc_/)=3, success(ok)=3, failure(fail)=2.
+    apiMock.fetchLogs.mockResolvedValue({
+      total: 6,
+      entries: [
+        makeLogEntry({ seq: 6, level: 'INFO', message: 'masc_start 완료' }),
+        makeLogEntry({ seq: 5, level: 'INFO', message: 'masc_compact 완료' }),
+        makeLogEntry({ seq: 4, level: 'WARN', message: '컨텍스트 91% — compact 예약' }),
+        makeLogEntry({ seq: 3, level: 'ERROR', message: 'masc_trace_window 실패' }),
+        makeLogEntry({ seq: 2, level: 'ERROR', message: 'restart failed (3/3)' }),
+        makeLogEntry({ seq: 1, level: 'INFO', message: 'handoff 시작' }),
+      ],
+    })
+
     render(html`<${SettingsSurface} />`, container)
 
     const logsNav = container.querySelector('[data-testid="settings-nav-logs"]') as HTMLElement
     await fireEvent.click(logsNav)
 
     const allRows = () => container.querySelectorAll('[data-testid="log-row"]')
-    expect(allRows().length).toBe(10)
+    await waitFor(() => expect(allRows().length).toBe(6))
 
     const toolFilter = container.querySelector('[data-filter="tool"]') as HTMLButtonElement
     await fireEvent.click(toolFilter)
-    expect(allRows().length).toBe(7)
+    expect(allRows().length).toBe(3)
 
     const successFilter = container.querySelector('[data-filter="success"]') as HTMLButtonElement
     await fireEvent.click(successFilter)
-    expect(allRows().length).toBe(4)
+    expect(allRows().length).toBe(3)
 
     const failureFilter = container.querySelector('[data-filter="failure"]') as HTMLButtonElement
     await fireEvent.click(failureFilter)
@@ -118,7 +194,33 @@ describe('SettingsSurface', () => {
 
     const allFilter = container.querySelector('[data-filter="all"]') as HTMLButtonElement
     await fireEvent.click(allFilter)
-    expect(allRows().length).toBe(10)
+    expect(allRows().length).toBe(6)
+  })
+
+  it('shows the live MCP exposed-tools list from the capability registry', async () => {
+    apiMock.fetchDashboardTools.mockResolvedValue({
+      tool_inventory: {
+        count: 2,
+        tools: [
+          makeToolItem({ name: 'masc_handoff', surfaces: ['public_mcp'] }),
+          makeToolItem({ name: 'masc_start', surfaces: ['public_mcp'] }),
+          makeToolItem({ name: 'internal_only', surfaces: ['internal'] }),
+        ],
+      },
+    })
+
+    render(html`<${SettingsSurface} />`, container)
+
+    const mcpNav = container.querySelector('[data-testid="settings-nav-mcp"]') as HTMLElement
+    await fireEvent.click(mcpNav)
+
+    await waitFor(() => {
+      const labels = Array.from(container.querySelectorAll('.set-row .mono')).map(n => n.textContent)
+      expect(labels).toContain('masc_handoff')
+      expect(labels).toContain('masc_start')
+      // internal-only tools are not exposed over public MCP.
+      expect(labels).not.toContain('internal_only')
+    })
   })
 })
 
@@ -128,6 +230,9 @@ describe('SettingsSurface shell route', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
+    apiMock.fetchLogs.mockReset()
+    apiMock.fetchDashboardTools.mockReset()
+    stubEmptyApi()
     dashboardLoading.value = false
     connected.value = true
     namespaceTruthInitializing.value = false
@@ -150,5 +255,47 @@ describe('SettingsSurface shell route', () => {
     await waitFor(() => {
       expect(document.title).toBe('MASC · Settings')
     })
+  })
+})
+
+describe('settings read-surface helpers', () => {
+  it('mcpExposedToolNames keeps only public_mcp tools, sorted', () => {
+    const names = mcpExposedToolNames([
+      makeToolItem({ name: 'masc_start', surfaces: ['public_mcp'] }),
+      makeToolItem({ name: 'masc_handoff', surfaces: ['public_mcp', 'keeper'] }),
+      makeToolItem({ name: 'internal_only', surfaces: ['internal'] }),
+      makeToolItem({ name: 'no_surface', surfaces: [] }),
+    ])
+    expect(names).toEqual(['masc_handoff', 'masc_start'])
+  })
+
+  it('mcpExposedToolNames returns [] for empty inventory (no fabrication)', () => {
+    expect(mcpExposedToolNames([])).toEqual([])
+  })
+
+  it('logRowStatus derives status from level only', () => {
+    expect(logRowStatus('ERROR')).toBe('fail')
+    expect(logRowStatus('error')).toBe('fail')
+    expect(logRowStatus('WARN')).toBe('warn')
+    expect(logRowStatus('INFO')).toBe('ok')
+    expect(logRowStatus('DEBUG')).toBe('ok')
+  })
+
+  it('logEntryToSysRow maps a ring entry to [time, level, identity, message, status]', () => {
+    const row = logEntryToSysRow(
+      makeLogEntry({
+        ts: '2026-06-21T16:24:51Z',
+        level: 'ERROR',
+        keeper_name: 'drifter',
+        module: 'Keeper',
+        message: 'masc_trace_window 실패',
+      }),
+    )
+    expect(row).toEqual(['16:24:51', 'error', 'drifter', 'masc_trace_window 실패', 'fail'])
+  })
+
+  it('logEntryToSysRow falls back to module then (root) for identity', () => {
+    expect(logEntryToSysRow(makeLogEntry({ keeper_name: null, module: 'Server' }))[2]).toBe('Server')
+    expect(logEntryToSysRow(makeLogEntry({ keeper_name: null, module: '' }))[2]).toBe('(root)')
   })
 })

@@ -449,11 +449,15 @@ let handle
       ~last_provider_timeout_budget
       ~current_turn_blocker_info
       ~keeper_turn_id
+      ?(turn_ref : Ids.Turn_ref.t option)
       result
   =
   let explicit_accountability_claim = Social.extract_accountability_claim result in
+  (* RFC-0233 §7: the social model may author a keeper board post (request-help);
+     thread the turn's minted join key so that post carries [origin.turn_ref]. *)
   let result, social_state, social_transition_reason =
-    Social.apply_to_result ~meta ~observation ~previous_state:previous_social_state result
+    Social.apply_to_result ?turn_ref ~meta ~observation
+      ~previous_state:previous_social_state result
   in
   let turn_cost = turn_cost result in
   let lifecycle =

@@ -14,6 +14,7 @@ import {
   post,
   runOperatorAction,
   setStoredToken,
+  subscribeStoredTokenChanges,
 } from './core'
 import { OperatorActionSchemaDriftError } from './schemas/operator-action'
 import {
@@ -60,6 +61,32 @@ describe('stored token metadata', () => {
 
     expect(getStoredToken()).toBeNull()
     expect(getStoredTokenMeta()).toBeNull()
+  })
+
+  it('notifies token listeners only when the semantic token state changes', () => {
+    const listener = vi.fn()
+    const unsubscribe = subscribeStoredTokenChanges(listener)
+
+    setStoredToken('manual-token', { source: 'manual', actor: 'dashboard-user' })
+    setStoredToken(' manual-token ', { source: 'manual', actor: 'dashboard-user' })
+    setStoredToken('manual-token', { source: 'manual', actor: 'dashboard-user-2' })
+    clearStoredToken()
+    clearStoredToken()
+    unsubscribe()
+
+    expect(listener).toHaveBeenCalledTimes(3)
+    expect(listener).toHaveBeenNthCalledWith(1, {
+      token: 'manual-token',
+      meta: { source: 'manual', actor: 'dashboard-user', scope: null },
+    })
+    expect(listener).toHaveBeenNthCalledWith(2, {
+      token: 'manual-token',
+      meta: { source: 'manual', actor: 'dashboard-user-2', scope: null },
+    })
+    expect(listener).toHaveBeenNthCalledWith(3, {
+      token: null,
+      meta: null,
+    })
   })
 
   it('normalizes blank raw storage for shared transport auth', () => {

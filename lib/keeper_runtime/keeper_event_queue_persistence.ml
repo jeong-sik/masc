@@ -38,60 +38,96 @@ let snapshot_path ~base_path ~keeper_name =
          "event-queue.json")
   else Error (Printf.sprintf "invalid keeper name for event queue snapshot: %s" keeper_name)
 
+let load_from_path ~keeper_name path =
+  if not (Sys.file_exists path)
+  then Keeper_event_queue.empty
+  else (
+    match Safe_ops.read_json_file_safe path with
+    | Error msg ->
+      Log.Keeper.warn
+        "event_queue_snapshot: failed to read keeper=%s path=%s: %s"
+        keeper_name
+        path
+        msg;
+      Keeper_event_queue.empty
+    | Ok json ->
+      (match Keeper_event_queue.queue_of_yojson json with
+       | Error msg ->
+         Log.Keeper.warn
+           "event_queue_snapshot: failed to parse keeper=%s path=%s: %s"
+           keeper_name
+           path
+           msg;
+         Keeper_event_queue.empty
+       | Ok queue ->
+         if not (Keeper_event_queue.is_empty queue)
+         then
+           Log.Keeper.info
+             "event_queue_snapshot: restored %s for keeper=%s"
+             (Keeper_event_queue.summary queue)
+             keeper_name;
+         queue))
+
 let load ~base_path ~keeper_name =
   match snapshot_path ~base_path ~keeper_name with
   | Error msg ->
     Log.Keeper.warn "event_queue_snapshot: %s" msg;
     Keeper_event_queue.empty
-  | Ok path ->
-    if not (Sys.file_exists path)
-    then Keeper_event_queue.empty
-    else (
-      match Safe_ops.read_json_file_safe path with
-      | Error msg ->
-        Log.Keeper.warn
-          "event_queue_snapshot: failed to read keeper=%s path=%s: %s"
-          keeper_name
-          path
-          msg;
-        Keeper_event_queue.empty
-      | Ok json ->
-        (match Keeper_event_queue.queue_of_yojson json with
-         | Error msg ->
-           Log.Keeper.warn
-             "event_queue_snapshot: failed to parse keeper=%s path=%s: %s"
-             keeper_name
-             path
-             msg;
-           Keeper_event_queue.empty
-         | Ok queue ->
-           if not (Keeper_event_queue.is_empty queue)
-           then
-             Log.Keeper.info
-               "event_queue_snapshot: restored %s for keeper=%s"
-               (Keeper_event_queue.summary queue)
-               keeper_name;
-           queue))
+  | Ok path -> load_from_path ~keeper_name path
+
+let persist_to_path ~keeper_name path queue =
+  match save_json_atomic path (Keeper_event_queue.queue_to_yojson queue) with
+  | Ok () -> ()
+  | Error msg ->
+    Log.Keeper.warn
+      "event_queue_snapshot: failed to persist keeper=%s path=%s: %s"
+      keeper_name
+      path
+      msg
 
 let persist ~base_path ~keeper_name queue =
   match snapshot_path ~base_path ~keeper_name with
   | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
   | Ok path ->
     (try
-       with_write_lock (fun () ->
-         match save_json_atomic path (Keeper_event_queue.queue_to_yojson queue) with
-         | Ok () -> ()
-         | Error msg ->
-           Log.Keeper.warn
-             "event_queue_snapshot: failed to persist keeper=%s path=%s: %s"
-             keeper_name
-             path
-             msg)
+       with_write_lock (fun () -> persist_to_path ~keeper_name path queue)
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
        Log.Keeper.warn
          "event_queue_snapshot: persist raised keeper=%s path=%s: %s"
+         keeper_name
+         path
+         (Printexc.to_string exn))
+
+let persist_snapshot ~base_path ~keeper_name snapshot =
+  match snapshot_path ~base_path ~keeper_name with
+  | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
+  | Ok path ->
+    (try
+       with_write_lock (fun () -> persist_to_path ~keeper_name path (snapshot ()))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Keeper.warn
+         "event_queue_snapshot: persist_snapshot raised keeper=%s path=%s: %s"
+         keeper_name
+         path
+         (Printexc.to_string exn))
+
+let update ~base_path ~keeper_name f =
+  match snapshot_path ~base_path ~keeper_name with
+  | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
+  | Ok path ->
+    (try
+       with_write_lock (fun () ->
+         let cur = load_from_path ~keeper_name path in
+         persist_to_path ~keeper_name path (f cur))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Keeper.warn
+         "event_queue_snapshot: update raised keeper=%s path=%s: %s"
          keeper_name
          path
          (Printexc.to_string exn))

@@ -45,6 +45,8 @@ let sample_record () : Turn_record.t =
       ; sample_block Prompt_block_id.Memory_os_recall "cccc"
       ]
   ; runtime_profile = "ollama_cloud.deepseek-v4-flash"
+  ; model = Some "deepseek-v4-flash"
+  ; finish_reason = Some "completed"
   ; sampling =
       { temperature = Some 0.3; thinking_budget = Some 1500; enable_thinking = Some true }
   ; usage = { input_tokens = Some 18000; output_tokens = Some 412 }
@@ -77,6 +79,8 @@ let test_codec_roundtrip () =
            && String.equal a.digest b.digest)
          record.blocks decoded.blocks);
     check string "runtime_profile" record.runtime_profile decoded.runtime_profile;
+    check (option string) "model" record.model decoded.model;
+    check (option string) "finish_reason" record.finish_reason decoded.finish_reason;
     check (option (float 0.0001)) "temperature" record.sampling.temperature
       decoded.sampling.temperature;
     check (option int) "thinking_budget" record.sampling.thinking_budget
@@ -92,14 +96,29 @@ let test_codec_roundtrip () =
 let test_codec_optional_fields_absent () =
   let record =
     { (sample_record ()) with
-      sampling = { temperature = None; thinking_budget = None; enable_thinking = None }
+      model = None
+    ; finish_reason = None
+    ; sampling = { temperature = None; thinking_budget = None; enable_thinking = None }
     ; usage = { input_tokens = None; output_tokens = None }
     ; turn_ref = None
     }
   in
-  match Turn_record.of_json (Turn_record.to_json record) with
+  let json = Turn_record.to_json record in
+  (* RFC-0233 §2.3: absent meta fields are omitted from the wire, never
+     emitted as a fabricated value (no "stop", no placeholder model). *)
+  (match json with
+   | `Assoc fields ->
+     check bool "finish_reason key omitted when None" false
+       (List.mem_assoc "finish_reason" fields);
+     check bool "model key omitted when None" false
+       (List.mem_assoc "model" fields)
+   | _ -> fail "to_json did not produce an object");
+  match Turn_record.of_json json with
   | Error e -> failf "decode failed: %s" e
   | Ok decoded ->
+    check (option string) "model absent stays None" None decoded.model;
+    check (option string) "finish_reason absent stays None (not \"stop\")" None
+      decoded.finish_reason;
     check (option (float 0.0001)) "temperature absent" None
       decoded.sampling.temperature;
     check (option int) "input_tokens absent" None decoded.usage.input_tokens;

@@ -295,10 +295,19 @@ let post_keeper_alert_board
     | None -> Board.Internal
   in
   let meta_json = Some (`Assoc [ ("source", `String "keeper_alert_board") ]) in
+  (* RFC-0233 §7: stamp the typed origin so an alert board post is no longer
+     origin-less. [turn_ref] is [None] here (scoped down, not fabricated):
+     [post_keeper_alert_board] only receives [~alert_text], and its sole caller
+     [maybe_emit_interesting_alert] runs post-turn where [meta] is no longer a
+     mint-once-safe turn reference (trace_id may have rotated on handoff). Root
+     fix: thread the turn's minted [turn_ref] from the turn loop into the alert
+     path when alert emission is wired back into the keeper turn — same
+     "mint once, thread down" pattern used for keeper_speech. *)
+  let origin = Board.keeper_authored_origin ~source:"keeper_alert" () in
   match
     Board_dispatch.create_post ~author ~content:alert_text
       ~post_kind:Board.System_post ?meta_json
-      ~visibility ~ttl_hours:24 ?hearth:hearth_opt ()
+      ~visibility ~ttl_hours:24 ?hearth:hearth_opt ~origin ()
   with
   | Ok _ -> Alert_sent (Some "board_posted")
   | Error e -> Alert_failed (Some (Board.show_board_error e))

@@ -479,6 +479,16 @@ let validate_content_blocks_against_capabilities
              ~supported
              ~reason:"provider does not support combined non-text modalities")
 
+let validate_content_blocks_for_run_against_capabilities
+    ~(provider_label : string)
+    (caps : Llm_provider.Capabilities.capabilities)
+    ~(initial_messages : Agent_sdk.Types.message list)
+    ~(goal_blocks : Agent_sdk.Types.content_block list) =
+  validate_content_blocks_against_capabilities
+    ~provider_label
+    caps
+    (content_blocks_for_run ~initial_messages ~goal_blocks)
+
 let apply_runtime_model_input_capabilities
     (caps : Llm_provider.Capabilities.capabilities)
     (model_caps : Runtime_schema.model_capabilities) =
@@ -537,11 +547,12 @@ let media_reroute_candidates ~(exclude : string) :
 
 let validate_content_blocks_for_config
     ~(config : config)
-    (blocks : Agent_sdk.Types.content_block list) =
-  validate_content_blocks_against_capabilities
+    (goal_blocks : Agent_sdk.Types.content_block list) =
+  validate_content_blocks_for_run_against_capabilities
     ~provider_label:(provider_label config.provider_cfg)
     (input_capabilities_for_config config)
-    blocks
+    ~initial_messages:config.initial_messages
+    ~goal_blocks
 
 (* RFC-0265: capability-driven proactive runtime reroute. A pure decision from
    the turn's required input modalities and the candidate runtimes' declared
@@ -609,6 +620,8 @@ module For_testing = struct
   let required_modalities_of_messages = required_modalities_of_messages
   let required_modalities_for_run = required_modalities_for_run
   let caps_admit_required_modalities = caps_admit_required_modalities
+  let validate_content_blocks_for_run_against_capabilities =
+    validate_content_blocks_for_run_against_capabilities
   let validate_content_blocks_against_capabilities =
     validate_content_blocks_against_capabilities
   let apply_runtime_model_input_capabilities =
@@ -839,15 +852,10 @@ let run_blocks
     ?goal_detail
     (goal_blocks : Agent_sdk.Types.content_block list)
   : (run_result, Agent_sdk.Error.sdk_error) result =
-  let validation_blocks =
-    content_blocks_for_run
-      ~initial_messages:config.initial_messages
-      ~goal_blocks
-  in
   match
     validate_content_blocks_for_config
       ~config
-      validation_blocks
+      goal_blocks
   with
   | Error _ as err -> err
   | Ok () ->

@@ -38,6 +38,17 @@ type t =
        [option] so pre-§7 rows decode as [None]. *)
   ; blocks : prompt_block list (* assembly order *)
   ; runtime_profile : string
+  ; model : string option
+    (* RFC-0233 §2.2/§2.3 — boundary-redacted runtime model label, the
+       same value the execution receipt surfaces (RFC-0132 redaction
+       SSOT). [option] so error turns and pre-grounding rows decode as
+       [None]; the inspector renders absence rather than a fabricated
+       name. *)
+  ; finish_reason : string option
+    (* RFC-0233 §2.3 — keeper turn stop reason, serialized via the
+       receipt SSOT [Keeper_execution_receipt.stop_reason_to_string].
+       [None] when the turn errored before a stop reason was recorded;
+       an unknown reason is never collapsed to a fake "stop". *)
   ; sampling : sampling
   ; usage : usage
   ; ts : float

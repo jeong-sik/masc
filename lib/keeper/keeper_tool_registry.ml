@@ -139,6 +139,14 @@ let is_effectively_read_only_tool (name : string) : bool =
   || Keeper_tool_descriptor_resolution.capability_has Tool_capability.Idempotent name
 ;;
 
+let is_strictly_read_only_tool (name : string) : bool =
+  (* Unlike [is_effectively_read_only_tool], this intentionally excludes
+     idempotent-but-mutating tools. Use it for retry paths that require no
+     committed mutation rather than merely retry-safe mutation. *)
+  is_keeper_read_only_tool name
+  || Keeper_tool_descriptor_resolution.capability_has Tool_capability.Read_only name
+;;
+
 let has_mutating_side_effect (name : string) : bool =
   not (is_effectively_read_only_tool name)
 ;;
@@ -152,6 +160,16 @@ let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : boo
   match Keeper_tool_descriptor_resolution.readonly_for_tool_call ~tool_name ~input with
   | Some readonly -> readonly
   | None -> is_effectively_read_only_tool tool_name
+;;
+
+let is_strictly_read_only_with_input
+      ~(tool_name : string)
+      ~(input : Yojson.Safe.t)
+  : bool
+  =
+  match Keeper_tool_descriptor_resolution.readonly_for_tool_call ~tool_name ~input with
+  | Some readonly -> readonly
+  | None -> is_strictly_read_only_tool tool_name
 ;;
 
 let descriptor_boundary_exempt tool_name =

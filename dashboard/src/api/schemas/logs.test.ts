@@ -55,6 +55,7 @@ describe('parseLogsResponse', () => {
         min_level: 1,
         module: '',
         since_seq: null,
+        before_seq: 42,
       },
       returned: 2,
       latest_seq: 43,
@@ -69,6 +70,10 @@ describe('parseLogsResponse', () => {
     expect(out.retention?.scope).toBe('dashboard_logs')
     expect(out.retention?.capacity).toBe(50000)
     expect(out.query?.applied_level).toBe('INFO')
+    // before_seq is the backward "load older" cursor echoed in the query meta.
+    expect(out.query?.before_seq).toBe(42)
+    // oldest_seq is the cursor the UI passes back as before_seq to page older.
+    expect(out.oldest_seq).toBe(42)
     expect(out.latest_seq).toBe(43)
   })
 

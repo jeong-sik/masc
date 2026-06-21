@@ -1193,6 +1193,10 @@ export interface Keeper {
     message_count?: number
     has_checkpoint?: boolean
   }
+  compaction_profile?: string | null
+  compaction_ratio_gate?: number | null
+  compaction_message_gate?: number | null
+  compaction_token_gate?: number | null
   traits?: string[]
   interests?: string[]
   primaryValue?: string

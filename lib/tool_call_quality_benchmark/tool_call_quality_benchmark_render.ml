@@ -52,6 +52,23 @@ let json_check_to_yojson (check : json_check) =
       ("present", Option.fold ~none:`Null ~some:(fun value -> `Bool value) check.present);
     ]
 
+let evidence_quality_issue_kind_to_string = function
+  | Missing_route_evidence -> "missing_route_evidence"
+
+let evidence_quality_issue_to_yojson (issue : evidence_quality_issue) =
+  `Assoc
+    [
+      ("kind", `String (evidence_quality_issue_kind_to_string issue.kind));
+      ("case_id", `String issue.case_id);
+      ("provider", `String issue.provider);
+      ("model", `String issue.model);
+      ("keeper_profile", `String issue.keeper_profile);
+      ("run_id", Option.fold ~none:`Null ~some:(fun value -> `String value) issue.run_id);
+      ("tool_call_index", `Int issue.tool_call_index);
+      ("tool_name", `String issue.tool_name);
+      ("selector_labels", `List (List.map (fun value -> `String value) issue.selector_labels));
+    ]
+
 let summary_row_to_yojson (row : summary_row) =
   `Assoc
     [

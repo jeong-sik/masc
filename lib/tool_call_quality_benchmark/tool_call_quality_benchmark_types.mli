@@ -14,7 +14,7 @@ type json_check = {
 }
 
 type arg_check = {
-  tool_name : string;
+  selector : Eval_tool_selector.t;
   path : string;
   equals : Yojson.Safe.t option;
   contains : string option;
@@ -35,6 +35,7 @@ type benchmark_case = {
   keeper_profiles : string list;
   forbidden_tools : string list;
   forbidden_selectors : Eval_tool_selector.t list;
+  required_selectors : Eval_tool_selector.t list;
   max_tool_calls : int;
   success_checks : json_check list;
   arg_checks : arg_check list;
@@ -73,6 +74,21 @@ type evidence_run = {
   cost_usd : float option;
   status : run_status;
   tool_calls : tool_call list;
+}
+
+type evidence_quality_issue_kind =
+  | Missing_route_evidence
+
+type evidence_quality_issue = {
+  kind : evidence_quality_issue_kind;
+  case_id : string;
+  provider : string;
+  model : string;
+  keeper_profile : string;
+  run_id : string option;
+  tool_call_index : int;
+  tool_name : string;
+  selector_labels : string list;
 }
 
 type case_score = {

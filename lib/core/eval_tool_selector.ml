@@ -127,3 +127,7 @@ let matches selector call =
         (Some expected)
         (receipt_label_value key call.route_evidence)
   | Eval_tag expected -> List.exists (String.equal expected) (eval_tags call.route_evidence)
+
+let requires_route_evidence = function
+  | Tool_name _ -> false
+  | Descriptor_id _ | Runtime_handler _ | Receipt_label _ | Eval_tag _ -> true

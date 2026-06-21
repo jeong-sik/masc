@@ -94,9 +94,12 @@ let evaluate_json_check ~(target : Yojson.Safe.t option) (check : json_check) =
   in
   present_ok && equals_ok && contains_ok && min_int_ok
 
+let selector_call_view (call : tool_call) : Eval_tool_selector.call =
+  { tool_name = call.tool_name; route_evidence = call.route_evidence }
+
 let arg_check_passes (run : evidence_run) (check : arg_check) =
   let predicate call =
-    String.equal call.tool_name check.tool_name
+    Eval_tool_selector.matches check.selector (selector_call_view call)
     && evaluate_json_check ~target:(Some call.input)
          { path = check.path
          ; equals = check.equals
@@ -108,16 +111,21 @@ let arg_check_passes (run : evidence_run) (check : arg_check) =
   List.exists predicate run.tool_calls
 
 let tool_sequence (run : evidence_run) =
-  run.tool_calls |> List.map (fun call -> call.tool_name)
-
-let selector_call_view (call : tool_call) : Eval_tool_selector.call =
-  { tool_name = call.tool_name; route_evidence = call.route_evidence }
+  run.tool_calls |> List.map (fun (call : tool_call) -> call.tool_name)
 
 let forbidden_call_used_by_case (benchmark_case : benchmark_case) (call : tool_call) =
   List.exists (String.equal call.tool_name) benchmark_case.forbidden_tools
   || List.exists
        (fun selector -> Eval_tool_selector.matches selector (selector_call_view call))
        benchmark_case.forbidden_selectors
+
+let required_selector_satisfied (run : evidence_run) selector =
+  List.exists
+    (fun call -> Eval_tool_selector.matches selector (selector_call_view call))
+    run.tool_calls
+
+let required_selectors_satisfied (benchmark_case : benchmark_case) (run : evidence_run) =
+  List.for_all (required_selector_satisfied run) benchmark_case.required_selectors
 
 let forbidden_tool_used (benchmark_case : benchmark_case) (run : evidence_run) =
   match benchmark_case.category with
@@ -212,7 +220,10 @@ let score_run ~cases (run : evidence_run) =
         else
           let task_pass = task_pass_score benchmark_case run in
           let tool_selection =
-            if forbidden_tool_used benchmark_case run then 0.0 else 1.0
+            if forbidden_tool_used benchmark_case run
+               || not (required_selectors_satisfied benchmark_case run)
+            then 0.0
+            else 1.0
           in
           let arg_validity = arg_validity_score benchmark_case run in
           let recovery = recovery_score benchmark_case run task_pass in

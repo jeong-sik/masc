@@ -8,6 +8,13 @@
       "category": "tool_use",
       "keeper_profiles": ["bench-analyst", "bench-executor"],
       "forbidden_tools": ["tool_execute"],
+      "forbidden_selectors": [
+        { "type": "descriptor_id", "value": "agent.execute" }
+      ],
+      "required_selectors": [
+        { "type": "eval_tag", "value": "capability_introspection" },
+        { "type": "descriptor_id", "value": "agent.read_file" }
+      ],
       "max_tool_calls": 3,
       "success_checks": [
         { "path": "$.status", "equals": "completed" },
@@ -15,12 +22,12 @@
       ],
       "arg_checks": [
         {
-          "tool_name": "keeper_tool_search",
+          "selector": { "type": "eval_tag", "value": "capability_introspection" },
           "path": "$.query",
           "contains": "prompt_fingerprint"
         },
         {
-          "tool_name": "tool_read_file",
+          "selector": { "type": "descriptor_id", "value": "agent.read_file" },
           "path": "$.path",
           "contains": "keeper_tool_call_log"
         }
@@ -53,6 +60,10 @@
       "category": "recovery_required",
       "keeper_profiles": ["bench-verifier"],
       "forbidden_tools": [],
+      "required_selectors": [
+        { "type": "eval_tag", "value": "capability_introspection" },
+        { "type": "descriptor_id", "value": "agent.read_file" }
+      ],
       "max_tool_calls": 4,
       "success_checks": [
         { "path": "$.status", "equals": "completed" },
@@ -60,12 +71,12 @@
       ],
       "arg_checks": [
         {
-          "tool_name": "keeper_tool_search",
+          "selector": { "type": "eval_tag", "value": "capability_introspection" },
           "path": "$.query",
           "contains": "keeper_agent_run"
         },
         {
-          "tool_name": "tool_read_file",
+          "selector": { "type": "descriptor_id", "value": "agent.read_file" },
           "path": "$.path",
           "contains": "keeper_agent_run.ml"
         }
@@ -82,6 +93,11 @@
       "category": "multi_step",
       "keeper_profiles": ["bench-executor", "bench-verifier"],
       "forbidden_tools": [],
+      "required_selectors": [
+        { "type": "eval_tag", "value": "capability_introspection" },
+        { "type": "descriptor_id", "value": "agent.execute" },
+        { "type": "descriptor_id", "value": "masc.board.post" }
+      ],
       "max_tool_calls": 4,
       "success_checks": [
         { "path": "$.status", "equals": "completed" },
@@ -89,7 +105,7 @@
       ],
       "arg_checks": [
         {
-          "tool_name": "masc_board_post",
+          "selector": { "type": "descriptor_id", "value": "masc.board.post" },
           "path": "$.body",
           "contains": "verified"
         }

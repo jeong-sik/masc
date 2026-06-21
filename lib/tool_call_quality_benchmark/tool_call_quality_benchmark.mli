@@ -11,6 +11,10 @@ include
      and type tool_call = Tool_call_quality_benchmark_types.tool_call
      and type run_status = Tool_call_quality_benchmark_types.run_status
      and type evidence_run = Tool_call_quality_benchmark_types.evidence_run
+     and type evidence_quality_issue_kind =
+      Tool_call_quality_benchmark_types.evidence_quality_issue_kind
+     and type evidence_quality_issue =
+      Tool_call_quality_benchmark_types.evidence_quality_issue
      and type case_score = Tool_call_quality_benchmark_types.case_score
      and type summary_view = Tool_call_quality_benchmark_types.summary_view
      and type summary_row = Tool_call_quality_benchmark_types.summary_row
@@ -26,6 +30,9 @@ val load_runs_from_file : string -> (evidence_run list, string) Result.t
 val score_run :
   cases:benchmark_case list -> evidence_run -> case_score option
 
+val route_evidence_issues :
+  cases:benchmark_case list -> runs:evidence_run list -> evidence_quality_issue list
+
 val summarize :
      cases:benchmark_case list
   -> runs:evidence_run list
@@ -36,6 +43,7 @@ val summarize :
 
 val json_check_to_yojson : json_check -> Yojson.Safe.t
 val case_score_to_yojson : case_score -> Yojson.Safe.t
+val evidence_quality_issue_to_yojson : evidence_quality_issue -> Yojson.Safe.t
 val summary_row_to_yojson : summary_row -> Yojson.Safe.t
 val benchmark_summary_to_yojson : benchmark_summary -> Yojson.Safe.t
 val summary_rows_to_csv : view:summary_view -> benchmark_summary -> string

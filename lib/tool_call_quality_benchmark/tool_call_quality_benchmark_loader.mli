@@ -48,8 +48,10 @@ val load_cases_from_file :
     - [category] defaults to [["tool_use"]] when absent;
       unknown categories return [Error "unknown tool-call-quality
       category: <other>"]
-    - [forbidden_tools] / [forbidden_selectors] / [arg_checks]
-      default to empty lists
+    - [forbidden_tools] / [forbidden_selectors] /
+      [required_selectors] / [arg_checks] default to empty lists.
+      [arg_checks] accepts either legacy [tool_name] or a structured
+      [selector] using the same schema as [required_selectors].
     - [recovery_policy] defaults to [None] (case has no recovery
       requirement)
 

@@ -52,8 +52,8 @@ val score_run :
     | Axis | Definition |
     |---|---|
     | `task_pass` | reported [task_success = true] AND every [success_check] passes against [final_result] |
-    | `tool_selection` | [0.0] if any forbidden tool name or forbidden selector is used; otherwise [1.0]. [Tool_forbidden] cases require zero calls. |
-    | `arg_validity` | [1.0] if no `arg_checks`; otherwise mean of per-check pass rate (each check passes iff at least one matching tool call satisfies it) |
+    | `tool_selection` | [0.0] if any forbidden tool name/selector is used or any required selector is missing; otherwise [1.0]. [Tool_forbidden] cases require zero calls. |
+    | `arg_validity` | [1.0] if no `arg_checks`; otherwise mean of per-check pass rate (each check passes iff at least one selector-matching tool call satisfies it) |
     | `recovery` | [1.0] for cases without [recovery_policy.required = true]; otherwise [1.0] iff [task_pass = 1.0] AND a successful call exists after at least one failure AND the failure count is within [max_failures_before_success] |
     | `efficiency` | [Tool_forbidden]: [1.0] if zero calls else [0.0]. Otherwise: [1.0 - (over_limit / max_tool_calls)], floored at [0.0]; [max_tool_calls <= 0] forces zero-call requirement |
 

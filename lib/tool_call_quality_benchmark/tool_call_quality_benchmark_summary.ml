@@ -105,7 +105,7 @@ let modal_ratio values =
       Some (Stdlib.Float.of_int best /. Stdlib.Float.of_int (List.length values))
 
 let tool_sequence (run : evidence_run) =
-  run.tool_calls |> List.map (fun call -> call.tool_name)
+  run.tool_calls |> List.map (fun (call : tool_call) -> call.tool_name)
 
 let summary_key_of_run view (run : evidence_run) =
   match view with

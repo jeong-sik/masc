@@ -35,3 +35,8 @@ val of_yojson : Yojson.Safe.t -> (t, string) result
 val matches : t -> call -> bool
 (** [matches selector call] returns [true] when the selector matches the
     call's tool name or descriptor route evidence. *)
+
+val requires_route_evidence : t -> bool
+(** [requires_route_evidence selector] is [false] only for legacy
+    [Tool_name] selectors. Descriptor/runtime/receipt/eval-tag selectors
+    cannot be evaluated against name-only evidence. *)

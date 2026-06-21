@@ -61,14 +61,19 @@
     <span><b>상태</b> <span class="tag draft">Draft (설계 검토용)</span></span>
     <span><b>작성</b> 2026-06-21</span>
     <span><b>출처</b> 턴 상세 적대 감사 concern #5</span>
-    <span><b>연관</b> #21748 (thinking-trace mis-attribution), #21889(머지), #21892(머지)</span>
+    <span><b>연관</b> #21913(구현 PR), #21748 (thinking-trace mis-attribution), #21889(머지), #21892(머지)</span>
     <span><b>대상 repo</b> masc / dashboard</span>
   </div>
 </header>
 
 <div class="callout key">
   <h4>요약 (TL;DR)</h4>
-  <p>키퍼 턴 상세에서 모델이 <code>think → tool → think → tool</code> 순으로 작업해도 화면에는 <code>[생각 블록 전체][도구 블록 전체]</code> 두 덩어리로만 보여, <b>어느 생각 다음에 어떤 도구가 실행됐는지</b>를 운영자가 볼 수 없다. 원인은 (1) 라이브 스트림이 모든 tool entry를 assistant entry <i>앞으로</i> hoist하고, (2) <code>ToolTraceCard</code>가 thinking과 tool을 <i>두 섹션으로 분리</i> 렌더하기 때문이다. <b>핵심:</b> 타입(<code>ChatTraceToolStep</code>)과 렌더러(<code>ChatTraceStep</code> 컴포넌트)는 이미 인터리빙을 표현할 수 있는데 <b>스트림 빌더가 think-only만 emit</b>한다. 권장안은 통합 <code>traceSteps</code> 배열에 <code>kind:'tool'</code> 스텝도 순서대로 append하는 <b>옵션 C</b>(구조적 표현) — 재구성이 아니라 표현력 배선이다.</p>
+  <p>키퍼 턴 상세에서 모델이 <code>think → tool → think → tool</code> 순으로 작업해도 화면에는 <code>[생각 블록 전체][도구 블록 전체]</code> 두 덩어리로만 보여, <b>어느 생각 다음에 어떤 도구가 실행됐는지</b>를 운영자가 볼 수 없다. 원인은 (1) 라이브 스트림이 모든 tool entry를 assistant entry <i>앞으로</i> hoist하고, (2) <code>ToolTraceCard</code>가 thinking과 tool을 <i>두 섹션으로 분리</i> 렌더하기 때문이다. <b>핵심:</b> 타입(<code>ChatTraceToolStep</code>)과 렌더러(<code>ChatTraceStep</code> 컴포넌트)는 인터리빙 표현력을 일부 갖고 있지만, 순수 <code>kind:'tool'</code> migration은 tool output join/status taxonomy를 잃는다. 현행 권장안은 #21913의 <b>render-time occurrence merge</b> — think/reason step에 <code>ts</code>를 찍고 기존 tool entry timestamp와 정렬해 #21892 missing/output 집계를 보존하는 방식이다.</p>
+</div>
+
+<div class="callout warn">
+  <h4>2026-06-21 결정 보정</h4>
+  <p>초기 설계는 옵션 C(도구를 <code>traceSteps</code> 안으로 이동)를 권장했지만, #21913 구현 리뷰에서 순수 옵션 C는 거부됐다. 이유는 <code>ChatTraceToolStep</code>에 <code>tool_use_id</code>가 없어 output store join을 끊고, status를 <code>ok|err</code>로 축소하며, #21892의 missing/aggregate 계산을 깨기 때문이다. 이 문서는 #21913의 render-time merge 결정을 SSOT로 따른다.</p>
 </div>
 
 <h2>1. 문제 정의 (concern #5)</h2>
@@ -151,11 +156,11 @@ flowchart TD
   <thead><tr><th>옵션</th><th>메커니즘</th><th>변경 레이어</th><th>침습도</th><th>트레이드오프</th></tr></thead>
   <tbody>
     <tr>
-      <td><b>A. 카드 sort-merge</b></td>
-      <td><code>ToolTraceCard</code>에서 <code>traceSteps</code>+<code>tools</code>를 timestamp로 정렬해 단일 <code>.map</code></td>
+      <td><b class="rec">A. 카드 occurrence merge (#21913)</b></td>
+      <td><code>ToolTraceCard</code>에서 <code>traceSteps</code>+<code>tools</code>를 timestamp로 정렬해 단일 <code>.map</code>. think/reason step에는 <code>ts</code>를 추가한다.</td>
       <td>렌더만 (primitives.ts)</td>
-      <td>낮음</td>
-      <td><span class="no">불충분</span> — 상류 hoist로 tool의 thinking-상대 위치가 이미 소실. thinking 델타엔 세그먼트 timestamp가 없어 정렬 키가 부정확. <b>단독으로는 순서 복원 불가.</b></td>
+      <td>낮음~중간</td>
+      <td><span class="rec">채택</span> — 기존 tool entry를 유지해 output join, missing 집계, status taxonomy를 보존한다. 단, think/reason에 occurrence timestamp를 stamp해야 하며 timestamp 없는 backend-normalized step은 legacy two-section fallback으로 둔다.</td>
     </tr>
     <tr>
       <td><b>B. thinkAnchor 기록</b></td>
@@ -165,11 +170,11 @@ flowchart TD
       <td>기존 entry 구조 유지하며 위치 <i>재구성</i>. anchor 계산 정확도에 의존. tool은 여전히 sibling entry라 두 자료구조를 동기화해야 함.</td>
     </tr>
     <tr>
-      <td><b class="rec">C. 통합 traceSteps (권장)</b></td>
+      <td><b>C. 통합 traceSteps</b></td>
       <td>tool 발생 시 assistant의 <code>traceSteps</code>에 <code>kind:'tool'</code> 스텝을 순서대로 append. <code>TOOL_CALL_END</code>에서 status/dur 후속 패치. 카드는 단일 배열 순회</td>
       <td>stream + state (+ 카드 소폭)</td>
       <td>중간</td>
-      <td><span class="rec">인터리빙을 <i>구조적으로</i> 표현</span> — 타입/렌더러 이미 지원. 재구성 불필요. 단 tool entry를 sibling으로도 두던 기존 소비자(그룹핑/툴 패널)와의 이중화 정리 필요.</td>
+      <td><span class="no">순수 migration은 기각</span> — <code>ChatTraceToolStep</code>에는 output-store join에 필요한 식별자와 현재 status taxonomy가 부족하다. 이를 보완하려면 사실상 <code>ToolCallEntry</code>를 중복하는 구조 변경이 필요하다.</td>
     </tr>
     <tr>
       <td><b>D. timestamp 표면화</b></td>
@@ -181,32 +186,32 @@ flowchart TD
   </tbody>
 </table>
 
-<h2>6. 권장안 + 근거</h2>
+<h2>6. 현행 권장안 + 근거</h2>
 <div class="callout ok">
-  <h4>옵션 C — 통합 <code>traceSteps</code></h4>
+  <h4>옵션 A — #21913 render-time occurrence merge</h4>
   <ol>
-    <li><b>표현력이 이미 존재</b>: <code>ChatTraceToolStep</code> 타입 + 렌더러가 인터리브를 그릴 수 있어, "새 표현"이 아니라 "배선"이다. 재구성(옵션 A/B)보다 결정론적.</li>
-    <li><b>순서가 source-of-truth</b>: 발생 시점에 한 배열에 순서대로 쌓으면 timestamp 정렬·anchor 계산 같은 휴리스틱이 불필요.</li>
-    <li><b>카드 단순화</b>: <code>ToolTraceCard</code>의 2-섹션 분기를 단일 순회로 줄여 렌더 복잡도 감소.</li>
+    <li><b>기존 tool entry를 보존</b>: <code>lookupToolCallOutput(entry.id)</code>, semantic status, missing aggregation이 그대로 유지된다.</li>
+    <li><b>순서 복원에 필요한 최소 데이터만 추가</b>: live think/reason step에 <code>ts</code>를 stamp하고, tool entry의 기존 <code>timestamp</code>와 stable sort한다.</li>
+    <li><b>카드 렌더만 단일 순회로 단순화</b>: <code>ToolTraceCard</code>의 thinking/tools 2-섹션 분기를 occurrence-ordered 단일 리스트로 바꾼다.</li>
   </ol>
-  <p class="small">옵션 D(순번 배지)를 병행해 점진 도입 가능: 먼저 D로 관측성 보강 → C로 구조 전환.</p>
+  <p class="small">옵션 C는 구조적으로 깔끔해 보이지만 현재 타입으로는 output join/status 손실이 크다. 장기적으로 tool step을 SSOT로 삼으려면 <code>ToolCallEntry</code>급 식별자와 상태 모델을 먼저 통합해야 한다.</p>
 </div>
 
-<h2>7. 구현 계획 (스케치, 코드 아님)</h2>
+<h2>7. 구현 계획 (#21913 기준)</h2>
 <table>
   <thead><tr><th>단계</th><th>파일</th><th>변경</th></tr></thead>
   <tbody>
-    <tr><td>1</td><td class="fileref">keeper-state.ts</td><td><code>appendAssistantToolStep(keeper, entryId, {name,...})</code> 추가 — assistant <code>traceSteps</code>에 <code>kind:'tool'</code> append. <code>TOOL_CALL_END</code>용 <code>patchAssistantToolStep</code>(status/dur/result 채우기).</td></tr>
-    <tr><td>2</td><td class="fileref">keeper-stream.ts:76–95</td><td><code>TOOL_CALL_START/ARGS/END</code> 핸들러를 sibling <code>insertThreadEntryBefore</code> 대신(또는 병행) step append로 라우팅. 두 경로 이중화 시 SSOT 결정.</td></tr>
-    <tr><td>3</td><td class="fileref">primitives.ts (ToolTraceCard)</td><td>2-섹션(<code>traceSteps</code> then <code>tools</code>)을 단일 <code>traceSteps</code> 순회로. 헤더의 도구/실패/<code>결과 누락</code> 카운트는 <code>kind:'tool'</code> 스텝에서 집계.</td></tr>
-    <tr><td>4</td><td class="fileref">buildChatRenderUnits</td><td>tool이 step으로 흡수되면 별도 <code>toolGroup</code> 그룹핑 로직 정리 — 기존 flat 경로(<code>groupToolCalls=false</code>) 회귀 방지.</td></tr>
+    <tr><td>1</td><td class="fileref">types/core.ts</td><td><code>ChatTraceThinkStep</code>/<code>ChatTraceReasonStep</code>에 optional <code>ts</code> 추가. <code>ChatTraceToolStep</code>는 output join SSOT가 아니므로 순수 migration 대상으로 쓰지 않는다.</td></tr>
+    <tr><td>2</td><td class="fileref">keeper-state.ts</td><td>live thinking step 생성 시 <code>new Date().toISOString()</code>로 occurrence timestamp를 stamp하고, consecutive delta merge에서는 최초 timestamp를 보존. backend-normalized step의 <code>ts</code>도 통과시킨다.</td></tr>
+    <tr><td>3</td><td class="fileref">primitives.ts (ToolTraceCard)</td><td><code>interleaveTraceAndTools</code>를 추가해 trace step과 tool entry를 occurrence time으로 stable sort한다. output join/missing/status aggregate는 기존 tool entry 기반으로 유지한다.</td></tr>
+    <tr><td>4</td><td class="fileref">primitives-interleave.test.ts</td><td><code>think A → tool X → think B → tool Y</code> 순서와 timestamp 없는 legacy fallback을 순수 함수 수준에서 고정한다.</td></tr>
   </tbody>
 </table>
 
 <h2>8. 테스트 계획</h2>
 <ul>
   <li><b>인터리빙 보존</b>: <code>[think A, tool X, think B, tool Y]</code> 스트림 → 렌더 DOM 순서가 정확히 A·X·B·Y인지 단언.</li>
-  <li><b>status/dur 후속 패치</b>: <code>TOOL_CALL_END</code> 후 해당 tool 스텝의 status(ok/err)·dur 갱신 확인.</li>
+  <li><b>output join 보존</b>: interleave 후에도 tool output/missing/status가 기존 <code>ToolCallEntry</code> 기반으로 유지되는지 확인.</li>
   <li><b>회귀</b>: 기존 think-only 턴, tool-only 턴, flat(<code>groupToolCalls=false</code>) 경로가 그대로 동작.</li>
   <li><b>#21892 연동</b>: settled 턴의 미join tool 스텝이 통합 배열에서도 <code>missing</code>으로 표시되는지.</li>
 </ul>
@@ -215,15 +220,15 @@ flowchart TD
 <div class="callout warn">
   <h4>충돌 · 좌표</h4>
   <ul>
-    <li><b>#21748 동일 영역</b>: "assistant thinking-trace mis-attribution across identical-text turns"가 <code>keeper-state.ts</code>/<code>keeper-stream.ts</code>의 같은 traceStep 경로를 다룬다. <b>본 설계는 #21748에 합류</b>해 단일 SSOT로 진행 권장(중복 PR 회피).</li>
+    <li><b>#21913 구현 SSOT</b>: 현행 구현은 #21913이다. #21748("assistant thinking-trace mis-attribution across identical-text turns")은 같은 <code>keeper-state.ts</code>/<code>keeper-stream.ts</code> traceStep 경로를 다루므로, 후속 변경은 #21913 위에서 rebase/통합해야 한다.</li>
     <li><b>이중 자료구조</b>: tool을 step으로 옮기면, tool을 sibling entry로 읽던 다른 소비자(툴 실행 추적 패널, 그룹핑)와의 동기화/이중화를 정리해야 한다 — 잘못하면 한쪽만 갱신되는 silent drift.</li>
-    <li><b>thinking 세그먼트 timestamp 부재</b>: 옵션 A/D의 정렬·배지 정확도 한계. 옵션 C는 발생순 append라 이 문제를 우회.</li>
+    <li><b>backend-normalized thinking timestamp 부재</b>: timestamp가 없는 기존/history step은 legacy two-section fallback으로 남는다. 완전한 과거 재구성은 별도 backend timestamp surface가 필요하다.</li>
     <li><b>스트림 재정렬 부작용</b>: hoist 제거가 자동 스크롤/스트리밍 표시(<code>streamState</code>)와 상호작용할 수 있어 라이브 회귀 테스트 필요.</li>
   </ul>
 </div>
 
 <hr />
-<p class="small">근거: 턴 상세 적대 감사(9-에이전트 워크플로) + 직접 spot-verify. 모든 file:line은 2026-06-21 기준 origin/main에서 확인. 표현력(타입/렌더러)은 존재, 빌더 미배선이 핵심. 본 문서는 코드 변경이 아닌 설계 검토용 Draft이며, 구현은 #21748 맥락에서 진행 권장.</p>
+<p class="small">근거: 턴 상세 적대 감사(9-에이전트 워크플로) + 직접 spot-verify. 모든 file:line은 2026-06-21 기준 origin/main에서 확인. 본 문서는 코드 변경이 아닌 설계 검토용 Draft이며, 현행 구현 좌표는 #21913이다.</p>
 
 </div>
 </body>

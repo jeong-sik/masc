@@ -80,6 +80,16 @@ function normalizeStoredTokenMeta(value: unknown): StoredTokenMeta | null {
   return { source: source as StoredTokenSource, actor, scope }
 }
 
+function storedTokenMetaEquals(
+  left: StoredTokenMeta | null,
+  right: StoredTokenMeta | null,
+): boolean {
+  if (left === null || right === null) return left === right
+  return left.source === right.source
+    && (left.actor ?? null) === (right.actor ?? null)
+    && (left.scope ?? null) === (right.scope ?? null)
+}
+
 function initTokenFromUrl(): void {
   const params = new URLSearchParams(window.location.search)
   const urlToken = params.get('token')
@@ -126,6 +136,8 @@ export function setStoredToken(
     clearStoredToken()
     return
   }
+  const previousToken = getStoredToken()
+  const previousMeta = getStoredTokenMeta()
   const nextMeta = normalizeStoredTokenMeta({
     source: meta.source ?? DEFAULT_STORED_TOKEN_SOURCE,
     actor: meta.actor ?? null,
@@ -138,20 +150,26 @@ export function setStoredToken(
     sessionStorage.removeItem(TOKEN_META_STORAGE_KEY)
   }
   setCanonicalDashboardActor(null)
-  notifyStoredTokenChange({
-    token: normalizedToken,
-    meta: nextMeta,
-  })
+  if (previousToken !== normalizedToken || !storedTokenMetaEquals(previousMeta, nextMeta)) {
+    notifyStoredTokenChange({
+      token: normalizedToken,
+      meta: nextMeta,
+    })
+  }
 }
 
 export function clearStoredToken(): void {
+  const previousToken = getStoredToken()
+  const previousMeta = getStoredTokenMeta()
   sessionStorage.removeItem(TOKEN_STORAGE_KEY)
   sessionStorage.removeItem(TOKEN_META_STORAGE_KEY)
   setCanonicalDashboardActor(null)
-  notifyStoredTokenChange({
-    token: null,
-    meta: null,
-  })
+  if (previousToken !== null || previousMeta !== null) {
+    notifyStoredTokenChange({
+      token: null,
+      meta: null,
+    })
+  }
 }
 
 export function isRemoteAccess(): boolean {

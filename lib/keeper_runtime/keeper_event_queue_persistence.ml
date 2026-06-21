@@ -65,6 +65,9 @@ let prepend_missing queue stimuli =
   in
   Keeper_event_queue.prepend_list missing queue
 
+let queue_of_list stimuli =
+  List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty stimuli
+
 let remove_stimuli queue stimuli =
   match stimuli with
   | [] -> queue
@@ -73,7 +76,7 @@ let remove_stimuli queue stimuli =
     queue
     |> Keeper_event_queue.to_list
     |> List.filter (fun stimulus -> not (remove stimulus))
-    |> Keeper_event_queue.of_list
+    |> queue_of_list
 
 let load_from_path ~keeper_name path =
   if not (Sys.file_exists path)

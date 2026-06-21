@@ -171,13 +171,14 @@
 /* ── triggers: FAB + top-bar button ── */
 .dock-fab {
   position: fixed; right: 22px; bottom: 22px; z-index: 55;
-  width: 50px; height: 50px; padding: 0; display: flex; align-items: center; justify-content: center; gap: 0;
+  height: 50px; padding: 0 18px 0 14px; display: flex; align-items: center; justify-content: center; gap: 8px;
   border-radius: var(--radius-pill); border: 1px solid var(--volt);
   background: var(--volt); color: var(--volt-ink);
   font-family: var(--font-ui); font-weight: 600; font-size: 12.5px; cursor: pointer;
   box-shadow: 0 8px 24px rgba(0,0,0,0.4), 0 0 18px var(--volt-glow); transition: 0.16s;
 }
 .dock-fab:hover { background: var(--volt-strong); transform: translateY(-1px); }
+.dock-fab-label { line-height: 1; letter-spacing: 0.01em; }
 .dock-fab .spark {
   display: inline-flex;
   align-items: center;
@@ -280,8 +281,11 @@
     right: max(14px, env(safe-area-inset-right, 0px));
     width: 44px;
     height: 44px;
+    padding: 0;
     bottom: calc(68px + env(safe-area-inset-bottom, 0px));
   }
+  /* On mobile the FAB reverts to an icon-only 44px circle (no room for the label). */
+  .v2-app[data-mobile="true"] .dock-fab-label { display: none; }
 
   .v2-app[data-mobile="true"][data-keeper-detail-mode="true"] .dock-fab {
     bottom: calc(14px + env(safe-area-inset-bottom, 0px));

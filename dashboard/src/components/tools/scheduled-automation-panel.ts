@@ -72,6 +72,97 @@ function recurrenceLabel(request: DashboardScheduledAutomationRequest): string {
   return enumLabel(kind)
 }
 
+/**
+ * RFC-0234 §10 "Dashboard and operator UX" — a wake-signal feed surfaces the
+ * upcoming scheduler wakes ("future rows with ... due time, payload summary,
+ * and risk") ordered soonest-first. The scheduler is a turn-start channel
+ * (RFC-0234 §2: proactive turn mechanisms decide whether an agent should wake);
+ * this feed answers "what wakes next" rather than auditing every row like the
+ * full table below.
+ *
+ * Every field is read verbatim from what the backend already emits (#21852):
+ * id = schedule_id, at = next_due_at ?? due_at, kind = payload_kind (else the
+ * recurrence label), risk = risk_class. Nothing is fabricated — a row without a
+ * concrete next wake time is not a signal and is dropped.
+ */
+export interface WakeSignal {
+  id: string
+  at: number
+  atIso: string | null
+  kind: string
+  risk: string
+  readiness: string
+  tone: StatusChipTone
+}
+
+// Readiness / status values that mean the schedule will not wake again — these
+// are history, not upcoming signals, so they are excluded from the feed.
+const TERMINAL_WAKE_READINESS: ReadonlySet<string> = new Set(['terminal', 'expired'])
+const TERMINAL_WAKE_STATUS: ReadonlySet<string> = new Set([
+  'terminal',
+  'expired',
+  'cancelled',
+  'succeeded',
+  'failed',
+  'rejected',
+])
+
+export function selectWakeSignals(
+  automation: DashboardScheduledAutomation | null | undefined,
+): WakeSignal[] {
+  if (!automation) return []
+  const signals: WakeSignal[] = []
+  for (const request of automation.requests ?? []) {
+    const at = request.next_due_at ?? request.due_at ?? null
+    // No concrete wake time → no signal to surface (parse, don't validate).
+    if (at == null) continue
+    const readiness = request.execution_readiness ?? null
+    const status = request.effective_status ?? request.status
+    if (readiness != null && TERMINAL_WAKE_READINESS.has(readiness)) continue
+    if (TERMINAL_WAKE_STATUS.has(status)) continue
+    signals.push({
+      id: request.schedule_id,
+      at,
+      atIso: request.next_due_at_iso ?? request.due_at_iso ?? null,
+      kind: request.payload_kind?.trim() || recurrenceLabel(request),
+      risk: request.risk_class,
+      readiness: readiness ?? status,
+      tone: automationTone(readiness ?? status),
+    })
+  }
+  return signals.sort((a, b) => a.at - b.at)
+}
+
+function WakeSignalFeed({ signals }: { signals: WakeSignal[] }) {
+  if (signals.length === 0) {
+    return html`
+      <div class="sch-signals text-xs text-[var(--color-fg-muted)]" data-testid="sch-signals-empty">
+        예정된 wake signal 없음
+      </div>
+    `
+  }
+  return html`
+    <ul class="sch-signals grid gap-1" data-testid="sch-signals">
+      ${signals.map(
+        signal => html`
+          <li
+            class="sch-signal flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-2 py-1"
+            data-testid="sch-signal"
+          >
+            <span class="sch-signal-at font-mono text-xs text-[var(--color-fg-secondary)]">
+              ${formatDateTimeKo(signal.atIso ?? signal.at)}
+            </span>
+            <${StatusChip} tone=${signal.tone} uppercase=${false}>${enumLabel(signal.readiness)}<//>
+            <span class="sch-signal-kind font-mono text-2xs text-[var(--color-fg-muted)]">${signal.kind}</span>
+            <span class="sch-signal-id font-mono text-3xs text-[var(--color-fg-disabled)]">${signal.id}</span>
+            <span class="sch-signal-risk text-2xs text-[var(--color-fg-muted)]">risk ${enumLabel(signal.risk)}</span>
+          </li>
+        `,
+      )}
+    </ul>
+  `
+}
+
 function lastExecutionLabel(request: DashboardScheduledAutomationRequest): string {
   const execution = request.last_execution
   if (!execution) return '-'
@@ -157,6 +248,7 @@ export function ScheduledAutomationPanel({
   const nonzeroCounts = Object.entries(automation.counts ?? {})
     .filter(([, count]) => count > 0)
   const rows = automation.requests ?? []
+  const wakeSignals = selectWakeSignals(automation)
   const dueEffective = automation.derived_counts?.due_effective ?? 0
   const blockedApproval = automation.derived_counts?.blocked_approval ?? 0
   const dueExecutionReady = automation.derived_counts?.due_execution_ready ?? 0
@@ -199,6 +291,13 @@ export function ScheduledAutomationPanel({
         ${nonzeroCounts.length > 0
           ? nonzeroCounts.map(([name, count]) => html`<${CountChip} name=${name} count=${count} />`)
           : html`<span class="text-xs text-[var(--color-fg-muted)]">active schedule 없음</span>`}
+      </div>
+
+      <div class="grid gap-2">
+        <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">
+          upcoming wake signals
+        </div>
+        <${WakeSignalFeed} signals=${wakeSignals} />
       </div>
 
       ${rows.length > 0

@@ -8,7 +8,7 @@
 
    No fabricated defaults: when the runtime config is uninitialized the
    singletons hold [None]/[[]] and surface as null/empty arrays. The resolving
-   accessors that [failwith] on an unset default (e.g. [get_default_runtime_id])
+   accessors that raise on an unset default (e.g. [get_default_runtime_id])
    are intentionally avoided — the option-returning [get_default_runtime] is the
    only default source used here. *)
 

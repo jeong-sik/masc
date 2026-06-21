@@ -129,7 +129,13 @@ let latest_message_to agent_name messages =
       let content = String.lowercase_ascii message.content in
       let from_self = String.equal (String.lowercase_ascii (String.trim message.from_agent)) lowered in
       let mentioned =
-        String.contains content '@'
+        (* [lowered] can be "" for a degenerate agent record with an empty or
+           whitespace-only name (agent_of_yojson accepts "name":""; the brief
+           loop does not drop empties — cf. the [agent_name <> ""] guard on the
+           event path). Without this length check [String.get lowered 0] would
+           raise Invalid_argument and crash the briefing fiber. *)
+        String.length lowered > 0
+        && String.contains content '@'
         && (String.contains content (String.get lowered 0)
             || String.contains content (String.get lowered (String.length lowered - 1)))
       in

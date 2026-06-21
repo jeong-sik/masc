@@ -67,7 +67,7 @@ let scheduled_automation_observation : WO.scheduled_automation_observation =
         ; due_at = 180.0
         ; keeper_next_tool = Some "masc_schedule_get"
         ; keeper_next_action =
-            "Inspect details, then wait for an explicit human decision before calling masc_schedule_approve or masc_schedule_reject."
+            "Inspect details, then wait for the dashboard operator approval or rejection action to resolve this schedule."
         }
       ]
   }
@@ -318,7 +318,7 @@ let test_scheduled_automation_prompt_section () =
   check bool "prompt includes ready next action" true
     (contains_sub "do not create a duplicate schedule" user_msg);
   check bool "prompt includes approval next action" true
-    (contains_sub "masc_schedule_approve or masc_schedule_reject" user_msg)
+    (contains_sub "dashboard operator approval or rejection" user_msg)
 
 let () =
   run "keeper_unified_verification_surface"

@@ -1,11 +1,25 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type {
   DashboardScheduledAutomation,
   DashboardScheduledAutomationRequest,
-} from '../../api/dashboard'
+} from '../../api'
+
+const mocks = vi.hoisted(() => ({
+  resolveScheduleApproval: vi.fn(),
+  showToast: vi.fn(),
+}))
+
+vi.mock('../../api', () => ({
+  resolveScheduleApproval: mocks.resolveScheduleApproval,
+}))
+
+vi.mock('../common/toast', () => ({
+  showToast: mocks.showToast,
+}))
+
 import { ScheduledAutomationPanel, selectWakeSignals } from './scheduled-automation-panel'
 
 function request(
@@ -24,12 +38,72 @@ function automation(
   requests: DashboardScheduledAutomationRequest[],
 ): DashboardScheduledAutomation {
   return {
+    schema: 'masc.dashboard.scheduled_automation.v1',
+    source: 'schedule_store',
+    generated_at: '2026-06-21T00:00:00Z',
     request_count: requests.length,
     request_limit: 50,
     truncated: false,
     counts: {},
+    derived_counts: {
+      due_effective: 0,
+      blocked_approval: 0,
+      due_execution_ready: 0,
+      expired_effective: 0,
+    },
     fsm: { state: 'idle', active_count: requests.length, terminal_count: 0 },
     requests,
+  }
+}
+
+function approvalAutomationFixture(): DashboardScheduledAutomation {
+  return {
+    schema: 'masc.dashboard.scheduled_automation.v1',
+    source: 'schedule_store',
+    generated_at: '2026-06-21T00:00:00Z',
+    request_count: 1,
+    request_limit: 20,
+    truncated: false,
+    counts: { pending_approval: 1 },
+    derived_counts: {
+      due_effective: 0,
+      blocked_approval: 1,
+      due_execution_ready: 0,
+      expired_effective: 0,
+    },
+    fsm: {
+      state: 'blocked_approval',
+      active_count: 1,
+      terminal_count: 0,
+      next_due_at: '2026-06-21T01:00:00Z',
+    },
+    requests: [
+      {
+        schedule_id: 'sched-1',
+        status: 'pending_approval',
+        effective_status: 'blocked_approval',
+        execution_readiness: 'blocked_approval',
+        operator_action: 'approve_or_reject',
+        keeper_next_tool: 'masc_schedule_get',
+        keeper_next_action:
+          'Inspect details, then wait for the dashboard operator approval or rejection action to resolve this schedule.',
+        risk_class: 'workspace_write',
+        approval_required: true,
+        source: 'operator_request',
+        recurrence: { kind: 'one_shot' },
+        recurrence_kind: 'one_shot',
+        payload_kind: 'masc.board_post',
+        due_at_iso: '2026-06-21T01:00:00Z',
+        approval_policy: 'separate_human_grant_required',
+      },
+    ],
+  }
+}
+
+async function flush(): Promise<void> {
+  for (let i = 0; i < 4; i += 1) {
+    await Promise.resolve()
+    await new Promise(resolve => setTimeout(resolve, 0))
   }
 }
 
@@ -68,7 +142,6 @@ describe('selectWakeSignals', () => {
       risk: 'read_only',
       readiness: 'ready',
     })
-    // risk is the backend value, never a fabricated default
     expect(signals[1]?.risk).toBe('side_effecting')
   })
 
@@ -80,7 +153,7 @@ describe('selectWakeSignals', () => {
     expect(signals[0]?.at).toBe(1500)
   })
 
-  it('drops rows with no concrete wake time (not a signal)', () => {
+  it('drops rows with no concrete wake time', () => {
     const signals = selectWakeSignals(
       automation([request({ schedule_id: 's-nodue', execution_readiness: 'scheduled' })]),
     )
@@ -92,7 +165,12 @@ describe('selectWakeSignals', () => {
       automation([
         request({ schedule_id: 's-term', next_due_at: 100, execution_readiness: 'terminal' }),
         request({ schedule_id: 's-exp', next_due_at: 200, execution_readiness: 'expired' }),
-        request({ schedule_id: 's-cancelled', next_due_at: 300, status: 'cancelled', effective_status: 'cancelled' }),
+        request({
+          schedule_id: 's-cancelled',
+          next_due_at: 300,
+          status: 'cancelled',
+          effective_status: 'cancelled',
+        }),
         request({ schedule_id: 's-live', next_due_at: 400, execution_readiness: 'scheduled' }),
       ]),
     )
@@ -115,7 +193,7 @@ describe('selectWakeSignals', () => {
     expect(signals.map(s => s.id)).toEqual(['s-live'])
   })
 
-  it('keeps due-but-blocked rows — they are still pending wakes', () => {
+  it('keeps due-but-blocked rows because they are still pending wakes', () => {
     const signals = selectWakeSignals(
       automation([
         request({
@@ -162,8 +240,18 @@ describe('ScheduledAutomationPanel wake-signal feed', () => {
     render(
       html`<${ScheduledAutomationPanel}
         automation=${automation([
-          request({ schedule_id: 's-soon', next_due_at: 1000, payload_kind: 'masc.keeper_nudge', execution_readiness: 'ready' }),
-          request({ schedule_id: 's-late', next_due_at: 2000, payload_kind: 'masc.board_post', execution_readiness: 'scheduled' }),
+          request({
+            schedule_id: 's-soon',
+            next_due_at: 1000,
+            payload_kind: 'masc.keeper_nudge',
+            execution_readiness: 'ready',
+          }),
+          request({
+            schedule_id: 's-late',
+            next_due_at: 2000,
+            payload_kind: 'masc.board_post',
+            execution_readiness: 'scheduled',
+          }),
         ])}
       />`,
       container,
@@ -190,5 +278,54 @@ describe('ScheduledAutomationPanel wake-signal feed', () => {
 
     expect(container.querySelector('[data-testid="sch-signals-empty"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="sch-signals"]')).toBeNull()
+  })
+})
+
+describe('ScheduledAutomationPanel approval actions', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    mocks.resolveScheduleApproval.mockReset()
+    mocks.showToast.mockReset()
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it('resolves pending schedule approval through the dashboard-only API', async () => {
+    mocks.resolveScheduleApproval.mockResolvedValue({
+      ok: true,
+      schedule_id: 'sched-1',
+      decision: 'approve',
+    })
+    const onResolved = vi.fn()
+
+    render(
+      html`<${ScheduledAutomationPanel}
+        automation=${approvalAutomationFixture()}
+        onResolved=${onResolved}
+      />`,
+      container,
+    )
+
+    const approve = container.querySelector(
+      '[data-testid="schedule-approve-sched-1"]',
+    ) as HTMLButtonElement | null
+    const reject = container.querySelector(
+      '[data-testid="schedule-reject-sched-1"]',
+    ) as HTMLButtonElement | null
+    expect(approve).not.toBeNull()
+    expect(reject).not.toBeNull()
+
+    approve?.click()
+    await flush()
+
+    expect(mocks.resolveScheduleApproval).toHaveBeenCalledWith('sched-1', 'approve', undefined)
+    expect(onResolved).toHaveBeenCalledTimes(1)
+    expect(mocks.showToast).toHaveBeenCalledWith('sched-1 approved', 'success')
   })
 })

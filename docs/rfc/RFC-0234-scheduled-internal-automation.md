@@ -305,8 +305,12 @@ Initial internal tools:
 | `masc_schedule_list` | list projection rows | read-only |
 | `masc_schedule_get` | inspect one request plus audit events | read-only |
 | `masc_schedule_cancel` | terminal cancellation before start | policy-selected |
-| `masc_schedule_approve` | record execution grant | human-only, cannot be requester/scheduler |
-| `masc_schedule_reject` | reject execution | human-only |
+
+Operator-only dashboard mutation:
+
+| Endpoint | Purpose | Approval |
+| --- | --- | --- |
+| `POST /api/v1/dashboard/schedule/resolve` | record approval or rejection grant | token-bound `CanAdmin` actor, cannot be requester/scheduler |
 
 Internal-only runner entrypoint:
 

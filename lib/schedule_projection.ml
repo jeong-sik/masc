@@ -8,7 +8,7 @@ let inspect_and_monitor_dispatch =
 ;;
 
 let approval_decision_required =
-  "Inspect details, then wait for an explicit human decision before calling masc_schedule_approve or masc_schedule_reject."
+  "Inspect details, then wait for the dashboard operator approval or rejection action to resolve this schedule."
 ;;
 
 let wait_for_runner_tick =

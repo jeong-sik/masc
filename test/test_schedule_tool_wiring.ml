@@ -56,24 +56,46 @@ let schedule_definition action =
   | None -> fail "schedule definition missing"
 ;;
 
+let operator_schedule_definition action =
+  match
+    List.find_opt
+      (fun (definition : Tool_schemas_schedule.definition) ->
+        definition.action = action)
+      Tool_schemas_schedule.operator_decision_definitions
+  with
+  | Some definition -> definition
+  | None -> fail "operator schedule definition missing"
+;;
+
 let schedule_tool_name action =
   let schema : Masc_domain.tool_schema = (schedule_definition action).schema in
   schema.name
 ;;
 
+let operator_schedule_tool_name action =
+  let schema : Masc_domain.tool_schema =
+    (operator_schedule_definition action).schema
+  in
+  schema.name
+;;
+
 let test_schema_and_descriptor_exposed () =
   let create_name = schedule_tool_name Tool_schemas_schedule.Create_request in
+  let approve_name = operator_schedule_tool_name Tool_schemas_schedule.Approve_request in
+  let reject_name = operator_schedule_tool_name Tool_schemas_schedule.Reject_request in
   let approve_schema =
-    (schedule_definition Tool_schemas_schedule.Approve_request).schema
+    (operator_schedule_definition Tool_schemas_schedule.Approve_request).schema
   in
   let reject_schema =
-    (schedule_definition Tool_schemas_schedule.Reject_request).schema
+    (operator_schedule_definition Tool_schemas_schedule.Reject_request).schema
   in
   let schema_names =
     Config.raw_all_tool_schemas
     |> List.map (fun (s : Masc_domain.tool_schema) -> s.name)
   in
   check bool "raw schema has create" true (List.mem create_name schema_names);
+  check bool "raw schema hides approve" false (List.mem approve_name schema_names);
+  check bool "raw schema hides reject" false (List.mem reject_name schema_names);
   check string "approve describes due grants"
     "Record a separate human execution grant for a pending or due scheduled request. Recurring side-effecting requests need a fresh grant for each due occurrence."
     approve_schema.description;
@@ -81,12 +103,14 @@ let test_schema_and_descriptor_exposed () =
     "Reject a pending or due scheduled request with a human decision."
     reject_schema.description;
   check bool "tag registered" true
-    (Tool_dispatch.lookup_tag create_name = Some Tool_dispatch.Mod_schedule);
+      (Tool_dispatch.lookup_tag create_name = Some Tool_dispatch.Mod_schedule);
   let descriptor_names =
     Keeper_tool_descriptor.all_descriptors ()
     |> List.map (fun (d : Keeper_tool_descriptor.t) -> d.internal_name)
   in
-  check bool "descriptor has create" true (List.mem create_name descriptor_names)
+  check bool "descriptor has create" true (List.mem create_name descriptor_names);
+  check bool "descriptor hides approve" false (List.mem approve_name descriptor_names);
+  check bool "descriptor hides reject" false (List.mem reject_name descriptor_names)
 ;;
 
 let schedule_ctx config : Tool_schedule.context =
@@ -109,6 +133,28 @@ let test_dispatch_create_persists_schedule () =
     let request = List.hd state.schedules in
     check string "status" "scheduled"
       (Schedule_domain.schedule_status_to_string request.status)
+;;
+
+let test_dispatch_operator_decisions_are_dashboard_only () =
+  with_config
+  @@ fun config ->
+  let ctx = schedule_ctx config in
+  let approve_name = operator_schedule_tool_name Tool_schemas_schedule.Approve_request in
+  let reject_name = operator_schedule_tool_name Tool_schemas_schedule.Reject_request in
+  (match Tool_schedule.dispatch ctx ~name:approve_name
+           ~args:(`Assoc [ "schedule_id", `String "sched-1"; "approved_by_id", `String "operator" ])
+   with
+   | None -> ()
+   | Some _ -> fail "approve should not dispatch through public schedule tool surface");
+  (match Tool_schedule.dispatch ctx ~name:reject_name
+           ~args:(`Assoc
+                    [ "schedule_id", `String "sched-1"
+                    ; "approved_by_id", `String "operator"
+                    ; "reason", `String "no"
+                    ])
+   with
+   | None -> ()
+   | Some _ -> fail "reject should not dispatch through public schedule tool surface")
 ;;
 
 let test_dispatch_create_persists_recurrence () =
@@ -560,10 +606,10 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
     (blocked_row |> member "operator_action" |> to_string);
   check string "blocked keeper next tool" "masc_schedule_get"
     (blocked_row |> member "keeper_next_tool" |> to_string);
-  check bool "blocked keeper action mentions grant tools" true
+  check bool "blocked keeper action mentions dashboard action" true
     (String_util.contains_substring
        (blocked_row |> member "keeper_next_action" |> to_string)
-       "masc_schedule_approve or masc_schedule_reject");
+       "dashboard operator approval or rejection");
   let expired_row = find_request "sched-expired-effective" in
   check string "expired effective status" "expired"
     (expired_row |> member "effective_status" |> to_string);
@@ -635,9 +681,9 @@ let test_keeper_observation_surfaces_schedule_attention () =
      check string "blocked action" "approve_or_reject" blocked.action;
      check (option string) "blocked next tool" (Some "masc_schedule_get")
        blocked.keeper_next_tool;
-     check bool "blocked next action mentions grant tools" true
+     check bool "blocked next action mentions dashboard action" true
        (String_util.contains_substring blocked.keeper_next_action
-          "masc_schedule_approve or masc_schedule_reject");
+          "dashboard operator approval or rejection");
      check string "ready schedule second" "sched-ready" ready.schedule_id;
      check string "ready action" "dispatch_ready" ready.action;
      check (option string) "ready next tool" (Some "masc_schedule_get")
@@ -655,6 +701,8 @@ let () =
             test_schema_and_descriptor_exposed
         ; test_case "dispatch create persists schedule" `Quick
             test_dispatch_create_persists_schedule
+        ; test_case "operator decisions are dashboard-only" `Quick
+            test_dispatch_operator_decisions_are_dashboard_only
         ; test_case "dispatch create persists recurrence" `Quick
             test_dispatch_create_persists_recurrence
         ; test_case "dispatch create derives due_at for cron recurrence" `Quick

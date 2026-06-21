@@ -478,6 +478,16 @@ function normalizeKeeperApprovalRule(raw: unknown): KeeperApprovalRule | null {
   }
 }
 
+function normalizeHitlStatus(raw: unknown): DashboardGovernanceResponse['hitl'] | undefined {
+  if (!isRecord(raw)) return undefined
+  return {
+    enabled: asBoolean(raw.enabled) ?? false,
+    disabled_by_env: asBoolean(raw.disabled_by_env) ?? false,
+    env_name: asString(raw.env_name, 'MASC_DISABLE_HITL'),
+    default_enabled: asBoolean(raw.default_enabled) ?? true,
+  }
+}
+
 export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse> {
   return withRetries('fetchDashboardGovernance', async () => {
     const raw = await get<Record<string, unknown>>('/api/v1/dashboard/governance')
@@ -543,6 +553,7 @@ export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse>
       pending_actions: pendingActions,
       approval_queue: approvalQueue,
       approval_rules: approvalRules,
+      hitl: normalizeHitlStatus(raw.hitl),
     }
   })
 }
@@ -565,6 +576,28 @@ export function deleteGovernanceApprovalRule(
   id: string,
 ): Promise<{ ok: boolean; id: string }> {
   return post('/api/v1/dashboard/governance/approvals/rules/delete', { id })
+}
+
+export type DashboardScheduleDecision = 'approve' | 'reject'
+
+export interface DashboardScheduleResolveResponse {
+  ok: boolean
+  schedule_id: string
+  decision: DashboardScheduleDecision
+  approved_by?: unknown
+  schedule?: unknown
+}
+
+export function resolveScheduleApproval(
+  scheduleId: string,
+  decision: DashboardScheduleDecision,
+  reason?: string,
+): Promise<DashboardScheduleResolveResponse> {
+  return post('/api/v1/dashboard/schedule/resolve', {
+    schedule_id: scheduleId,
+    decision,
+    reason,
+  })
 }
 
 export function fetchGovernanceCaseStatus(caseId: string): Promise<GovernanceCaseBundle> {

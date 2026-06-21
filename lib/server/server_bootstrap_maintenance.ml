@@ -39,9 +39,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       Tool_metrics_persist.enqueue r
     | _ -> ());
   Tool_metrics_persist.start_flush_fiber ~sw ~clock ~base_path:(Mcp_server.workspace_config state).base_path;
-  (* RFC-0234 scheduled automation runner.  Tool-facing create/approve/list
-     paths only mutate the durable ledger; this loop is the production caller
-     that observes due rows and emits at-most-once generic wake signals.  It
+  (* RFC-0234 scheduled automation runner.  Public schedule tools and the
+     dashboard-only approval route only mutate the durable ledger; this loop is
+     the production caller that observes due rows and emits at-most-once generic wake signals.  It
      catches per-tick failures so a corrupt schedule row or transient write
      error cannot cancel unrelated keeper/server fibers. *)
   fork_logged_fiber

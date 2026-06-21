@@ -61,7 +61,7 @@ export function Tools() {
       <${PromptRegistryPanel} />
 
       <${SectionCard} label="예약 자동화 FSM" class="section v2-lab-panel mb-4">
-        <${ScheduledAutomationPanel} automation=${data?.scheduled_automation ?? null} />
+        <${ScheduledAutomationPanel} automation=${data?.scheduled_automation ?? null} onResolved=${loadTools} />
       <//>
 
       <${SectionCard} label="시스템 도구 목록" class="section v2-lab-panel mb-4">

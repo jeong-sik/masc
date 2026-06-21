@@ -29,7 +29,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_CLUSTER_NAME` | string_literal | n/a | n/a | 230 |  |
 | `MASC_CONFIG_DIR` | string_literal | n/a | n/a | 424 | SSOT for MASC_CONFIG_DIR / MASC_PERSONAS_DIR env-var names (issue 8352). Shared by snapshot catalog and docker worker... |
 | `MASC_DATA_DIR` | string_literal | n/a | n/a | 437 | SSOT for the MASC_DATA_DIR env-var name (issue 8352). Overrides [<base_path>/data] as the root for CDAL verdicts and ... |
-| `MASC_DISABLE_HITL` | typed:bool | Security | operator | 506 | Whether to disable HITL (human-in-the-loop) approval gates. Default: true. @category Security @ops_class operator |
+| `MASC_DISABLE_HITL` | typed:bool | Security | operator | 506 | Whether to disable HITL (human-in-the-loop) approval gates. Default: false. @category Security @ops_class operator |
 | `MASC_GIT_FETCH_TIMEOUT_SEC` | string_literal | n/a | n/a | 467 | [git fetch origin] is network-bound and can stall behind a slow Docker bridge or a large remote. Default 120s gives e... |
 | `MASC_GOVERNANCE_LEVEL` | string_literal | n/a | n/a | 480 | SSOT for logging / observability env-var names (issue 8352). |
 | `MASC_HOST` | string_literal | n/a | n/a | 201 | SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352). Defined here so in-process readers and out-of-process... |

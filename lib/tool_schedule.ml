@@ -126,16 +126,6 @@ let actor_from_args args ~prefix ~default_id ~default_kind =
   else Ok Schedule_domain.{ id; kind; display_name }
 ;;
 
-let approved_by_from_args args =
-  let* id = required_string args "approved_by_id" in
-  Ok
-    Schedule_domain.
-      { id
-      ; kind = Human_operator
-      ; display_name = string_opt args "approved_by_display_name"
-      }
-;;
-
 let has_arg args key = Option.is_some (Json_util.assoc_member_opt key args)
 
 let has_board_convenience_args args =
@@ -499,33 +489,6 @@ let handle_cancel ~tool_name ~start_time ctx args =
         ])
 ;;
 
-let handle_approve ~tool_name ~start_time ctx args =
-  let result =
-    let* schedule_id = required_string args "schedule_id" in
-    let* approved_by = approved_by_from_args args in
-    let grant_id = string_opt args "grant_id" in
-    let approved_at = optional_float args "approved_at_unix" in
-    Schedule_service.approve ctx.config ?grant_id ?approved_at ~schedule_id
-      ~approved_by ()
-    |> Result.map_error Schedule_service.service_error_to_string
-  in
-  request_result ~tool_name ~start_time result
-;;
-
-let handle_reject ~tool_name ~start_time ctx args =
-  let result =
-    let* schedule_id = required_string args "schedule_id" in
-    let* approved_by = approved_by_from_args args in
-    let* reason = required_string args "reason" in
-    let grant_id = string_opt args "grant_id" in
-    let approved_at = optional_float args "approved_at_unix" in
-    Schedule_service.reject ctx.config ?grant_id ?approved_at ~schedule_id
-      ~approved_by ~reason ()
-    |> Result.map_error Schedule_service.service_error_to_string
-  in
-  request_result ~tool_name ~start_time result
-;;
-
 let dispatch ctx ~name ~args : Tool_result.result option =
   let start_time = Time_compat.now () in
   let handle f =
@@ -542,8 +505,6 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | Some { action = List_requests; _ } -> handle handle_list
   | Some { action = Get_request; _ } -> handle handle_get
   | Some { action = Cancel_request; _ } -> handle handle_cancel
-  | Some { action = Approve_request; _ } -> handle handle_approve
-  | Some { action = Reject_request; _ } -> handle handle_reject
   | _ -> None
 ;;
 

@@ -39,6 +39,7 @@ import {
   fetchTelemetrySummary,
   fetchTlcResults,
   fetchToolQuality,
+  resolveScheduleApproval,
 } from './dashboard'
 import { fetchDashboardShell as fetchDashboardShellHot } from './dashboard-hot'
 import { keeperRuntimeBlockerLabel } from '../lib/keeper-runtime-display'
@@ -116,6 +117,30 @@ describe('fetchDashboardShell', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/shell?light=true')
+  })
+})
+
+describe('resolveScheduleApproval', () => {
+  it('posts dashboard schedule decisions to the dashboard-only resolve route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, schedule_id: 'sched-1', decision: 'approve' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await resolveScheduleApproval('sched-1', 'approve')
+
+    expect(result).toEqual({ ok: true, schedule_id: 'sched-1', decision: 'approve' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/schedule/resolve')
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({
+      schedule_id: 'sched-1',
+      decision: 'approve',
+    })
   })
 })
 

@@ -79,6 +79,13 @@ type t =
   | Internal_error of string
   (** Exact wire ["internal_error"] (modulo case). Payload is the original
           string, carried only for [to_wire] round-trip fidelity. *)
+  | Turn_budget_exhausted of string
+  (** Wire [String.starts_with ~prefix:"turn_budget_exhausted"], emitted from
+          [Runtime_agent.TurnBudgetExhausted]. Unlike
+          [Auto_recoverable_budget], this is a completed runtime stop reason,
+          so the receipt classifier must inspect completion-contract evidence
+          before deciding whether it is safe to pass. Payload is the original
+          string. *)
   | Auto_recoverable_budget of string
   (** Wire matches one of the turn/time-budget cut-off prefixes
           ([agent_error_max_turns_exceeded] / [agent_error_execution_timeout]

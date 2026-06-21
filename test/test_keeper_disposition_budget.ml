@@ -37,6 +37,7 @@ let () =
     (fun s -> check ("expected-not-recoverable: " ^ s) (not (pred s)))
     [ "agent_error_token_budget_exceeded:kind=output,used=100,limit=50"
     ; "agent_error_cost_budget_exceeded:spent_usd=1.00,limit_usd=0.50"
+    ; "turn_budget_exhausted:8/8"
     ; "agent_error_guardrail_violation:validator=x"
     ; "agent_error_tripwire_violation:tripwire=y"
     ; "agent_error_idle_detected:consecutive_idle_turns=3"

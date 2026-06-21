@@ -40,6 +40,20 @@ let completed_budget_execution =
     ]
 ;;
 
+let passive_budget_execution =
+  `Assoc
+    [ "latest_receipt_present", `Bool true
+    ; "recorded_at", `String "2999-01-01T00:00:00Z"
+    ; "completion_contract_result", `String "passive_only"
+    ; "operator_disposition", `String "pass"
+    ; "operator_disposition_reason", `String "healthy"
+    ; "terminal_reason_code", `String "turn_budget_exhausted:1070/1070"
+    ; "error", `Null
+    ; "claim_scope", `Assoc [ "status", `String "ok" ]
+    ; "config_drift", `Assoc [ "runtime_override", `Bool false ]
+    ]
+;;
+
 let test_contract_blocker_marks_attention () =
   let execution = execution "surface_mismatch" in
   let attention =
@@ -100,6 +114,22 @@ let test_completed_budget_exhaustion_is_not_blocked () =
   check (option string) "reason" None attention.cra_reason
 ;;
 
+let test_passive_budget_exhaustion_is_blocked () =
+  let attention =
+    Server_dashboard_http_composite.composite_runtime_attention
+      ~snapshot
+      ~execution:passive_budget_execution
+  in
+  check bool "blocked" true attention.cra_blocked;
+  check bool "needs_attention" true attention.cra_needs_attention;
+  check string "state" "blocked" attention.cra_state;
+  check
+    (option string)
+    "reason"
+    (Some "completion_contract_result:passive_only")
+    attention.cra_reason
+;;
+
 let () =
   run
     "server_dashboard_composite_attention"
@@ -113,6 +143,10 @@ let () =
             "pass/healthy turn-budget exhaustion is not blocked"
             `Quick
             test_completed_budget_exhaustion_is_not_blocked
+        ; test_case
+            "passive turn-budget exhaustion is blocked"
+            `Quick
+            test_passive_budget_exhaustion_is_blocked
         ] )
     ]
 ;;

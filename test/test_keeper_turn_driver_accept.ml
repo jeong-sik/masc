@@ -285,6 +285,29 @@ let test_last_tool_context_classifies_checkpoint_tool_use () =
     (Some "last_tool=Write; last_tool_effect=mutating")
     write_context
 
+let test_last_tool_context_treats_workspace_mutations_as_mutating () =
+  let cases =
+    [
+      ( "keeper_board_post"
+      , `Assoc [ "title", `String "t"; "body", `String "b" ] );
+      "keeper_broadcast", `Assoc [ "message", `String "hello" ];
+      ( "masc_transition"
+      , `Assoc [ "task_id", `String "t1"; "status", `String "done" ] );
+    ]
+  in
+  List.iter
+    (fun (tool_name, input) ->
+       let context =
+         Masc.Keeper_turn_driver.For_testing
+         .last_tool_progress_context_string_of_messages
+           [ message [ tool_use ~input tool_name ] ]
+       in
+       Alcotest.(check (option string))
+         (tool_name ^ " context")
+         (Some (Printf.sprintf "last_tool=%s; last_tool_effect=mutating" tool_name))
+         context)
+    cases
+
 let test_accept_reason_includes_last_tool_context () =
   let checkpoint =
     checkpoint_with_messages
@@ -395,6 +418,58 @@ let test_thinking_only_after_read_only_webfetch_can_try_next_candidate () =
     (Option.map
        Masc.Keeper_error_classify.degraded_retry_reason_to_string
        (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
+
+let test_thinking_only_after_workspace_mutation_stays_terminal () =
+  let cases =
+    [
+      ( "keeper_board_post"
+      , `Assoc [ "title", `String "t"; "body", `String "b" ] );
+      "keeper_broadcast", `Assoc [ "message", `String "hello" ];
+      ( "masc_transition"
+      , `Assoc [ "task_id", `String "t1"; "status", `String "done" ] );
+    ]
+  in
+  List.iter
+    (fun (tool_name, input) ->
+       let checkpoint =
+         checkpoint_with_messages
+           [ message [ tool_use ~input tool_name ] ]
+       in
+       let result =
+         Masc.Keeper_turn_driver.For_testing.apply_accept
+           ~runtime_id:("runtime.thinking-after-" ^ tool_name)
+           ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+           (run_result
+              ~checkpoint
+              ~content:
+                [
+                  Agent_sdk.Types.Thinking
+                    { thinking_type = "reasoning"; content = "internal chain" };
+                ]
+              ())
+       in
+       let err, reason_kind, reason = expect_accept_rejected result in
+       Alcotest.(check bool)
+         (tool_name ^ " reason kind")
+         true
+         (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+       Alcotest.(check bool)
+         (tool_name ^ " reason marks mutation")
+         true
+         (contains ~needle:"last_tool_effect=mutating" reason);
+       Alcotest.(check bool)
+         (tool_name ^ " does not try next candidate")
+         false
+         (Masc.Keeper_turn_driver.For_testing
+          .accept_no_progress_read_only_should_try_next
+            err);
+       Alcotest.(check (option string))
+         (tool_name ^ " is not runtime-recoverable")
+         None
+         (Option.map
+            Masc.Keeper_error_classify.degraded_retry_reason_to_string
+            (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err)))
+    cases
 
 let test_read_only_retry_uses_typed_context_not_reason_tokens () =
   let typed_err =
@@ -713,6 +788,10 @@ let () =
           Alcotest.test_case "last tool context classifies checkpoint tools" `Quick
             test_last_tool_context_classifies_checkpoint_tool_use;
           Alcotest.test_case
+            "last tool context treats workspace mutations as mutating"
+            `Quick
+            test_last_tool_context_treats_workspace_mutations_as_mutating;
+          Alcotest.test_case
             "accept rejection reason includes last tool context"
             `Quick
             test_accept_reason_includes_last_tool_context;
@@ -720,6 +799,10 @@ let () =
             "thinking-only after read-only WebFetch tries next candidate"
             `Quick
             test_thinking_only_after_read_only_webfetch_can_try_next_candidate;
+          Alcotest.test_case
+            "thinking-only after workspace mutation stays terminal"
+            `Quick
+            test_thinking_only_after_workspace_mutation_stays_terminal;
           Alcotest.test_case
             "read-only retry uses typed context, not reason tokens"
             `Quick

@@ -142,10 +142,16 @@ let run_named
          text-only; [initial_messages] still participate in reroute below. *)
       []
   in
+  let checkpoint_messages =
+    match oas_checkpoint with
+    | None -> []
+    | Some (checkpoint : Agent_sdk.Checkpoint.t) -> checkpoint.messages
+  in
   let runtime_id, runtime =
     match
       Runtime_agent.decide_modality_reroute_for_runtime
         ~assigned:assigned_runtime
+        ~checkpoint_messages
         ~initial_messages
         current_goal_blocks
     with

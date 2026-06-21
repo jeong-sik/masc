@@ -48,6 +48,7 @@ import { AttachDraftChip, ChatComposer, ChatTranscript, STREAM_STALL_THRESHOLD_S
 import { showToast } from './common/toast'
 import { TextInput } from './common/input'
 import { shellAuthSummary } from '../store'
+import { toolCallOutputsCoveredThroughMs } from '../tool-call-output-store'
 
 
 const KEEPER_CHAT_METADATA_VISIBLE_KEY = 'masc_keeper_chat_metadata_visible'
@@ -659,6 +660,7 @@ export function KeeperConversationPanel({
               showDayDividers=${true}
               groupToolCalls=${true}
               showSourceBadge=${true}
+              toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
               action=${onInspectTurn ? { label: '턴 상세', title: '이 메시지 턴 상세 열기', onClick: onInspectTurn } : undefined}
             />
           </div>
@@ -787,6 +789,7 @@ export function KeeperConversationPanel({
           variant="messenger"
           size="primary"
           groupToolCalls=${true}
+          toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
           action=${onInspectTurn ? { label: '턴 상세', title: '이 메시지 턴 상세 열기', onClick: onInspectTurn } : undefined}
         />
 
@@ -899,6 +902,7 @@ export function KeeperConversationPanel({
             variant="messenger"
             size="default"
             groupToolCalls=${true}
+            toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
             action=${onInspectTurn ? { label: '턴 상세', title: '이 메시지 턴 상세 열기', onClick: onInspectTurn } : undefined}
           />
         </div>

@@ -22,6 +22,76 @@ const TOOL_ENTRY_ID_PREFIX = 'tool-'
 // Replaced (not mutated) on each merge so signal subscribers re-render.
 export const toolCallOutputsById = signal<Map<string, ToolCallEntry>>(new Map())
 
+interface ToolCallOutputHydrationState {
+  inFlight: number
+  coveredThroughMs: number | null
+  failed: boolean
+}
+
+export const toolCallOutputHydrationByKeeper = signal<Record<string, ToolCallOutputHydrationState>>({})
+
+function keeperKey(keeperName: string): string {
+  return keeperName.trim()
+}
+
+function currentHydrationState(keeperName: string): ToolCallOutputHydrationState {
+  return toolCallOutputHydrationByKeeper.value[keeperName] ?? { inFlight: 0, coveredThroughMs: null, failed: false }
+}
+
+function updateHydrationState(
+  keeperName: string,
+  update: (current: ToolCallOutputHydrationState) => ToolCallOutputHydrationState,
+): void {
+  const key = keeperKey(keeperName)
+  if (!key) return
+  const current = currentHydrationState(key)
+  const next = update(current)
+  if (
+    current.inFlight === next.inFlight
+    && current.coveredThroughMs === next.coveredThroughMs
+    && current.failed === next.failed
+  ) return
+  toolCallOutputHydrationByKeeper.value = {
+    ...toolCallOutputHydrationByKeeper.value,
+    [key]: next,
+  }
+}
+
+export function markToolCallOutputsHydrating(keeperName: string): number {
+  const startedAtMs = Date.now()
+  const key = keeperKey(keeperName)
+  if (!key) return startedAtMs
+  updateHydrationState(key, current => ({
+    ...current,
+    inFlight: current.inFlight + 1,
+    failed: false,
+  }))
+  return startedAtMs
+}
+
+export function markToolCallOutputsHydrated(keeperName: string, coveredThroughMs: number): void {
+  updateHydrationState(keeperName, current => ({
+    inFlight: Math.max(0, current.inFlight - 1),
+    coveredThroughMs: Math.max(current.coveredThroughMs ?? 0, coveredThroughMs),
+    failed: false,
+  }))
+}
+
+export function markToolCallOutputsHydrationFailed(keeperName: string): void {
+  const key = keeperKey(keeperName)
+  if (!key) return
+  updateHydrationState(key, current => ({
+    ...current,
+    inFlight: Math.max(0, current.inFlight - 1),
+    failed: true,
+  }))
+}
+
+export function toolCallOutputsCoveredThroughMs(keeperName: string): number | null {
+  const key = keeperKey(keeperName)
+  return key ? (toolCallOutputHydrationByKeeper.value[key]?.coveredThroughMs ?? null) : null
+}
+
 /** Merge tool-call entries into the store, keyed by tool_use_id. Entries
  *  without a tool_use_id are skipped — they have no stable join key to the
  *  chat transcript (and their output was not persisted either, since the log
@@ -52,4 +122,5 @@ export function lookupToolCallOutput(toolEntryId: string): ToolCallEntry | null 
 /** Test/teardown helper: drop all recorded outputs. */
 export function resetToolCallOutputs(): void {
   toolCallOutputsById.value = new Map()
+  toolCallOutputHydrationByKeeper.value = {}
 }

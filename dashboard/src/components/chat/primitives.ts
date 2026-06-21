@@ -2075,27 +2075,36 @@ const TOOL_STATUS_TITLE: Record<'pending' | 'missing' | 'ok' | 'bad', string> = 
   bad: '실패',
 }
 
-// A tool call's output is legitimately "pending" only while its turn is still
-// streaming. Once the owning assistant turn has settled (streamState null), an
-// output that never joined will never arrive — so an indefinite "pending" dot
-// hides a real gap (e.g. a call whose tool_use_id was empty and never joined).
+// A tool call's output is legitimately "pending" while its turn is still
+// streaming, or before the separate tool-output hydration surface has loaded.
+// Once both have settled, an output that never joined is a gap (e.g. a call
+// whose tool_use_id was empty and never joined), not indefinite "pending".
 function isTurnStreaming(state: KeeperConversationEntry['streamState']): boolean {
   return state === 'opening' || state === 'thinking' || state === 'streaming' || state === 'finalizing'
+}
+
+function isToolOutputCoveredByHydration(
+  entry: KeeperConversationEntry,
+  coveredThroughMs: number | null | undefined,
+): boolean {
+  if (coveredThroughMs == null) return false
+  const timestampMs = entry.timestamp ? Date.parse(entry.timestamp) : NaN
+  return Number.isFinite(timestampMs) && timestampMs <= coveredThroughMs
 }
 
 // One step of a grouped tool-trace card: a single tool call rendered from REAL
 // data only. Name + input args come from the chat entry; status, duration and
 // result are joined from the tool-call output store. A null output is "pending"
-// while the turn streams; once the turn has settled (turnSettled) a still-null
-// output is "missing" (unknown outcome) rather than an indefinite "pending".
-function ToolTraceStep({ entry, output, turnSettled = false }: { entry: KeeperConversationEntry; output: ToolCallEntry | null; turnSettled?: boolean }) {
+// until the owning turn and output hydration have both settled; after that, a
+// still-null output is "missing" (unknown outcome).
+function ToolTraceStep({ entry, output, canMarkMissing = false }: { entry: KeeperConversationEntry; output: ToolCallEntry | null; canMarkMissing?: boolean }) {
   const [open, setOpen] = useState(false)
   const name = entry.label || 'tool'
   const displayArgs = prettyJsonish(entry.text || '')
   const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
   const status: 'pending' | 'missing' | 'ok' | 'bad' =
     output === null
-      ? turnSettled
+      ? canMarkMissing
         ? 'missing'
         : 'pending'
       : output.success === false || output.semantic_success === false
@@ -2141,7 +2150,7 @@ function ToolTraceStep({ entry, output, turnSettled = false }: { entry: KeeperCo
                       <pre class="m-0 max-h-64 overflow-y-auto whitespace-pre-wrap break-all text-2xs">${resultView.text}</pre>
                     `
                   : output === null
-                    ? html`<div class="chat-block-tool-label">${turnSettled ? '결과 없음 — 출력이 도착하지 않음' : '출력 대기 중…'}</div>`
+                    ? html`<div class="chat-block-tool-label">${canMarkMissing ? '결과 없음 — 출력이 도착하지 않음' : '출력 대기 중…'}</div>`
                     : null}
               </div>
             `
@@ -2158,20 +2167,24 @@ function ToolTraceStep({ entry, output, turnSettled = false }: { entry: KeeperCo
 function ToolTraceCard({
   tools,
   traceSteps = [],
-  turnSettled = false,
+  turnComplete = false,
+  toolOutputsCoveredThroughMs = null,
 }: {
   tools: KeeperConversationEntry[]
   traceSteps?: ChatTraceStep[]
-  turnSettled?: boolean
+  turnComplete?: boolean
+  toolOutputsCoveredThroughMs?: number | null
 }) {
   const [open, setOpen] = useState(true)
   const steps = tools.map((entry) => ({ entry, output: lookupToolCallOutput(entry.id) }))
+  const canMarkMissingForEntry = (entry: KeeperConversationEntry): boolean =>
+    turnComplete && isToolOutputCoveredByHydration(entry, toolOutputsCoveredThroughMs)
   const failN = steps.filter(
     (s) => s.output !== null && (s.output.success === false || s.output.semantic_success === false),
   ).length
-  // Surface unjoined outputs as "missing" only once the turn has settled — while
-  // it streams they are still legitimately pending, not a gap.
-  const missingN = turnSettled ? steps.filter((s) => s.output === null).length : 0
+  // Surface unjoined outputs as "missing" only once the turn and output
+  // hydration have both settled.
+  const missingN = steps.filter((s) => s.output === null && canMarkMissingForEntry(s.entry)).length
   const totalMs = steps.reduce((sum, s) => sum + (s.output?.duration_ms ?? 0), 0)
   const durLabel = totalMs > 0 ? formatMsCompact(totalMs) : null
   const stepN = traceSteps.length + tools.length
@@ -2200,7 +2213,12 @@ function ToolTraceCard({
             <div class="chat-block-trace-steps">
               <span class="chat-block-trace-rail"></span>
               ${traceSteps.map((step, index) => html`<${ChatTraceStep} key=${`trace-${index}`} step=${step} />`)}
-              ${steps.map(({ entry, output }) => html`<${ToolTraceStep} key=${entry.id} entry=${entry} output=${output} turnSettled=${turnSettled} />`)}
+              ${steps.map(({ entry, output }) => html`<${ToolTraceStep}
+                key=${entry.id}
+                entry=${entry}
+                output=${output}
+                canMarkMissing=${canMarkMissingForEntry(entry)}
+              />`)}
             </div>
           `
         : null}
@@ -2214,6 +2232,7 @@ function TurnWorkBundle({
   showMetadata,
   variant,
   showSourceBadge,
+  toolOutputsCoveredThroughMs,
   action,
 }: {
   tools: KeeperConversationEntry[]
@@ -2221,15 +2240,21 @@ function TurnWorkBundle({
   showMetadata?: boolean
   variant: ChatTranscriptVariant
   showSourceBadge: boolean
+  toolOutputsCoveredThroughMs: number | null
   action?: ChatTranscriptAction
 }) {
   const traceSteps = assistant.traceSteps ?? []
-  // The bundle owns the settled assistant entry, so an unjoined tool output here
-  // is a real gap (not in-flight) once the turn stops streaming.
-  const turnSettled = !isTurnStreaming(assistant.streamState)
+  // The bundle owns the assistant entry, but output hydration is a separate
+  // async surface. Only mark gaps after that surface has successfully loaded.
+  const turnComplete = !isTurnStreaming(assistant.streamState)
   return html`
     <div class="chat-turn-bundle" data-chat-turn-bundle>
-      <${ToolTraceCard} tools=${tools} traceSteps=${traceSteps} turnSettled=${turnSettled} />
+      <${ToolTraceCard}
+        tools=${tools}
+        traceSteps=${traceSteps}
+        turnComplete=${turnComplete}
+        toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
+      />
       <${ChatMessageBubble}
         entry=${assistant}
         showMetadata=${showMetadata !== false}
@@ -2343,9 +2368,10 @@ function renderChatTranscriptBody(opts: {
   showMetadata?: boolean
   variant: ChatTranscriptVariant
   showSourceBadge: boolean
+  toolOutputsCoveredThroughMs: number | null
   action?: ChatTranscriptAction
 }): VNode[] {
-  const { entries, showDayDividers, groupToolCalls, showMetadata, variant, showSourceBadge, action } = opts
+  const { entries, showDayDividers, groupToolCalls, showMetadata, variant, showSourceBadge, toolOutputsCoveredThroughMs, action } = opts
   const units = buildChatRenderUnits(entries, groupToolCalls)
   const out: VNode[] = []
   // Track the last NON-NULL calendar day rather than only the immediately
@@ -2375,6 +2401,7 @@ function renderChatTranscriptBody(opts: {
         showMetadata=${showMetadata}
         variant=${variant}
         showSourceBadge=${showSourceBadge}
+        toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
         action=${action}
       />`)
     } else if (unit.entry.role === 'tool') {
@@ -2412,6 +2439,7 @@ export function ChatTranscript({
   showDayDividers = false,
   groupToolCalls = false,
   showSourceBadge = false,
+  toolOutputsCoveredThroughMs = null,
   action,
 }: {
   entries: KeeperConversationEntry[]
@@ -2426,6 +2454,7 @@ export function ChatTranscript({
   // Default false so non-workspace surfaces keep the flat per-row ToolCallBubble.
   groupToolCalls?: boolean
   showSourceBadge?: boolean
+  toolOutputsCoveredThroughMs?: number | null
   action?: ChatTranscriptAction
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null)
@@ -2511,6 +2540,7 @@ export function ChatTranscript({
               showMetadata,
               variant,
               showSourceBadge,
+              toolOutputsCoveredThroughMs,
               action,
             })}
       </div>

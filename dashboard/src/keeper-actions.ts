@@ -10,7 +10,12 @@ import {
   streamKeeperMessage,
 } from './api/keeper'
 import { fetchKeeperToolCalls } from './api/dashboard'
-import { recordToolCallOutputs } from './tool-call-output-store'
+import {
+  markToolCallOutputsHydrated,
+  markToolCallOutputsHydrating,
+  markToolCallOutputsHydrationFailed,
+  recordToolCallOutputs,
+} from './tool-call-output-store'
 import { asString, isRecord } from './components/common/normalize'
 import { invalidateDashboardCache, refreshDashboard } from './store'
 import { isAbortError } from './lib/async-state'
@@ -195,10 +200,13 @@ const TOOL_OUTPUT_FETCH_LIMIT = KEEPER_HISTORY_TAIL_MESSAGES
  *  Failures are swallowed (logged): the transcript must render with or without
  *  tool outputs. */
 async function hydrateKeeperToolOutputs(keeperName: string): Promise<void> {
+  const coveredThroughMs = markToolCallOutputsHydrating(keeperName)
   try {
     const response = await fetchKeeperToolCalls(keeperName, TOOL_OUTPUT_FETCH_LIMIT)
     recordToolCallOutputs(response.entries)
+    markToolCallOutputsHydrated(keeperName, coveredThroughMs)
   } catch (err) {
+    markToolCallOutputsHydrationFailed(keeperName)
     const message = err instanceof Error ? err.message : String(err)
     console.warn(`[keeper] tool-call output hydration failed for ${keeperName}:`, message)
   }

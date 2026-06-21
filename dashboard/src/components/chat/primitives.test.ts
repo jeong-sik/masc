@@ -1852,6 +1852,7 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
         ]}
         emptyText="empty"
         groupToolCalls=${true}
+        toolOutputsCoveredThroughMs=${Date.parse('2026-03-24T00:00:01.000Z')}
       />`,
       container,
     )
@@ -1864,6 +1865,66 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
     expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
     // The gap is surfaced in the card header so silent failures are visible.
     expect(bundle?.textContent).toContain('결과 누락 1')
+  })
+
+  it('keeps a settled unjoined tool step pending until tool outputs hydrate', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-unjoined-before-hydration', label: 'keeper_board_comment', turnRef: 'trace-h#1' }),
+          entry({
+            id: 'a-before-hydration',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-h#1',
+            streamState: null,
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+    expect(bundle?.textContent).not.toContain('결과 누락')
+  })
+
+  it('keeps a settled unjoined tool step pending when only older output hydration completed', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({
+            id: 'tool-unjoined-after-old-hydration',
+            label: 'keeper_board_comment',
+            timestamp: '2026-03-24T00:00:10.000Z',
+            turnRef: 'trace-old#1',
+          }),
+          entry({
+            id: 'a-after-old-hydration',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-old#1',
+            streamState: null,
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        toolOutputsCoveredThroughMs=${Date.parse('2026-03-24T00:00:01.000Z')}
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+    expect(bundle?.textContent).not.toContain('결과 누락')
   })
 
   it('keeps an unjoined tool step pending while the owning turn is still streaming', () => {

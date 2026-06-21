@@ -52,13 +52,20 @@ const levelFilter = signal('INFO')
 const moduleInput = signal('')
 const appliedModuleFilter = signal('')
 const autoRefresh = signal(true)
-const logLimit = signal(200)
+const DEFAULT_LOG_LIMIT = 200
+const logLimit = signal(DEFAULT_LOG_LIMIT)
 const providerLogProvider = signal('')
 const providerLogLines = signal(200)
 const latestSeq = signal<number | null>(null)
 const categoryFilter = signal('')
 const hideFsmTransitions = signal(false)
 const expandedLogSeq = signal<number | null>(null)
+// "load older" backward paging: [displayCap] is the max rows kept in view. It
+// starts at the per-request limit and only grows as older pages are appended,
+// so the delta poller's merge does not trim history the operator paged into.
+const displayCap = signal(DEFAULT_LOG_LIMIT)
+const olderLoading = signal(false)
+const noMoreOlder = signal(false)
 
 const POLL_INTERVAL_MS = 3000
 const ESTIMATED_LOG_ROW_HEIGHT = 78
@@ -66,6 +73,7 @@ const EMPTY_LOG_ENTRIES: LogEntry[] = []
 
 let moduleDebounceTimer: ReturnType<typeof setTimeout> | null = null
 let latestRequestId = 0
+let logQueryGeneration = 0
 
 function MetaTag({ children }: { children: unknown }) {
   return html`<${StatusChip} tone="neutral" uppercase=${false}>${children}</${StatusChip}>`
@@ -468,6 +476,9 @@ async function loadLogs(mode: LoadMode = 'reset') {
   const requestId = ++latestRequestId
 
   if (mode === 'reset') {
+    logQueryGeneration += 1
+    displayCap.value = logLimit.value
+    noMoreOlder.value = false
     return logResource.load(async () => {
       const resp = await fetchLogs({
         limit: logLimit.value,
@@ -501,7 +512,10 @@ async function loadLogs(mode: LoadMode = 'reset') {
     const s = logResource.state.value
     const currentEntries = s.status === 'loaded' ? s.data.entries : []
     const incoming = sortLogEntries(resp.entries)
-    const nextEntries = mergeLogEntries(currentEntries, incoming, logLimit.value)
+    // Cap at displayCap (>= logLimit once older pages are loaded) so a delta
+    // poll never drops history the operator paged into via "load older".
+    const cap = Math.max(displayCap.value, logLimit.value)
+    const nextEntries = mergeLogEntries(currentEntries, incoming, cap)
 
     latestSeq.value = latestLogSeq(nextEntries)
     logResource.state.value = loaded({
@@ -512,6 +526,61 @@ async function loadLogs(mode: LoadMode = 'reset') {
   } catch {
     if (requestId !== latestRequestId) return
     // Delta failures don't overwrite loaded state — keep existing data visible
+  }
+}
+
+function oldestLogSeq(entries: readonly LogEntry[]): number | null {
+  if (entries.length === 0) return null
+  return entries.reduce((min, entry) => Math.min(min, entry.seq), entries[0]?.seq ?? 0)
+}
+
+// "load older" backward paging: fetch entries strictly older than the smallest
+// seq currently shown and append them, growing displayCap so neither this merge
+// nor the delta poller trims the existing rows.
+export async function loadOlder() {
+  const s = logResource.state.value
+  if (s.status !== 'loaded') return
+  const currentEntries = s.data.entries
+  const oldest = oldestLogSeq(currentEntries)
+  if (oldest === null || oldest <= 0) {
+    noMoreOlder.value = true
+    return
+  }
+  if (olderLoading.value) return
+  const startedGeneration = logQueryGeneration
+  olderLoading.value = true
+  try {
+    const resp = await fetchLogs({
+      limit: logLimit.value,
+      level: levelFilter.value,
+      module: appliedModuleFilter.value || undefined,
+      before_seq: oldest,
+      category: categoryFilter.value || undefined,
+      exclude_category: hideFsmTransitions.value ? 'fsm' : undefined,
+    })
+    if (startedGeneration !== logQueryGeneration) return
+    const incoming = sortLogEntries(resp.entries)
+    if (incoming.length === 0) {
+      noMoreOlder.value = true
+      return
+    }
+    const latestState = logResource.state.value
+    if (latestState.status !== 'loaded') return
+    const latestEntries = latestState.data.entries
+    const cap = latestEntries.length + incoming.length
+    const nextEntries = mergeLogEntries(latestEntries, incoming, cap)
+    displayCap.value = Math.max(displayCap.value, nextEntries.length)
+    // latestSeq stays untouched: older paging only extends the tail, the
+    // newest-cursor for delta polling is unaffected.
+    logResource.state.value = loaded({
+      ...latestState.data,
+      entries: nextEntries,
+      total: resp.total,
+    })
+  } catch {
+    // Keep existing data on failure; the affordance stays available for retry.
+  } finally {
+    olderLoading.value = false
   }
 }
 
@@ -1067,6 +1136,26 @@ export function LogViewer() {
                 className="v2-logs-stream"
               />
             `}
+
+        ${logEntries.length > 0
+          ? html`
+              <div class="v2-logs-load-older flex items-center justify-center px-4 py-3">
+                ${noMoreOlder.value
+                  ? html`<span class="text-2xs text-[var(--color-fg-muted)]">더 오래된 기록이 없습니다.</span>`
+                  : html`
+                      <button
+                        type="button"
+                        class="logs-refresh-btn rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs font-medium text-[var(--color-fg-muted)]"
+                        data-testid="logs-load-older"
+                        onClick=${() => { void loadOlder() }}
+                        disabled=${olderLoading.value}
+                      >
+                        ${olderLoading.value ? '불러오는 중...' : '이전 기록 더 보기'}
+                      </button>
+                    `}
+              </div>
+            `
+          : null}
       </section>
     </div>
   `

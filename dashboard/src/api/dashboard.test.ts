@@ -10,6 +10,7 @@ vi.mock('./dev-token', () => ({
 
 import {
   fetchDashboardShell,
+  fetchLogs,
   fetchDashboardExecutionTrust,
   fetchDashboardGovernance,
   fetchDashboardGoalDetail,
@@ -2215,5 +2216,52 @@ describe('fetchCostLatency', () => {
     expect(result.perAgent[0]?.p95_ms).toBeNull()
     expect(result.matrix.providers).toEqual(['runtime'])
     expect(result.matrix.models).toEqual(['runtime_lane_7'])
+  })
+})
+
+describe('fetchLogs', () => {
+  function stubLogsFetch() {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ total: 0, entries: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  function requestedUrl(fetchMock: ReturnType<typeof vi.fn>): string {
+    return String(fetchMock.mock.calls[0]?.[0])
+  }
+
+  it('sets before_seq for backward "load older" paging', async () => {
+    const fetchMock = stubLogsFetch()
+
+    await fetchLogs({ limit: 200, level: 'INFO', before_seq: 4096 })
+
+    const params = new URLSearchParams(requestedUrl(fetchMock).split('?')[1] ?? '')
+    expect(params.get('before_seq')).toBe('4096')
+    expect(params.get('limit')).toBe('200')
+    expect(params.get('level')).toBe('INFO')
+  })
+
+  it('omits before_seq when negative (no cursor)', async () => {
+    const fetchMock = stubLogsFetch()
+
+    await fetchLogs({ before_seq: -1 })
+
+    const params = new URLSearchParams(requestedUrl(fetchMock).split('?')[1] ?? '')
+    expect(params.has('before_seq')).toBe(false)
+  })
+
+  it('combines before_seq and since_seq into a bounded window', async () => {
+    const fetchMock = stubLogsFetch()
+
+    await fetchLogs({ since_seq: 10, before_seq: 20 })
+
+    const params = new URLSearchParams(requestedUrl(fetchMock).split('?')[1] ?? '')
+    expect(params.get('since_seq')).toBe('10')
+    expect(params.get('before_seq')).toBe('20')
   })
 })

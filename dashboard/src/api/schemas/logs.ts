@@ -75,6 +75,7 @@ export interface LogsQuery {
   min_level?: number
   module?: string
   since_seq?: number | null
+  before_seq?: number | null
   category?: string
   exclude_category?: string
 }

@@ -12,12 +12,22 @@ PR #21938 gave the `Mid_turn_no_progress` kill-class its first producer:
 flags a `Running` keeper whose `current_turn_observation.last_progress_at`
 (`lib/keeper/keeper_registry_types.ml:124`) is older than the configured window.
 
-`last_progress_at` is stamped by `Keeper_registry.record_turn_progress` only on
-three event kinds (`lib/keeper/keeper_hooks_oas.ml`): `sdk_before_turn`,
-`sdk_after_turn`, and `tool_completed:<name>`. It is NOT stamped while a single
-tool call is in flight (between `ToolCalled` and `ToolCompleted`). A legitimate
-long-running tool (a multi-minute build, a slow MCP call) therefore records no
-progress for its whole duration.
+`last_progress_at` is stamped by `Keeper_registry.record_turn_progress` on many
+events. Directly in `keeper_hooks_oas.ml` these include `sdk_before_turn`,
+`sdk_after_turn`, and `tool_completed:<name>` (`:276`, `:283`, `:519`). Most SSE
+events during model streaming also stamp progress via
+`keeper_agent_run_turn_helpers.registry_progress_on_event` (`:108-109`), e.g.
+`sse_message_start`, `sse_content_block_start`, `sse_tool_block_start`,
+`sse_text_delta`, `sse_thinking_delta`, `sse_tool_arg_delta`, `sse_content_delta`,
+`sse_content_block_stop`, and `sse_message_delta`; admission yield/resume
+(`slot_yield`/`slot_resume` at `:288/296`) stamps it as well.
+
+Because streaming tool-call generation stamps progress continuously, the real
+unstamped gap is not the whole "tool-involved turn" but the single tool
+execution window: after the SSE stream ends and the runtime actually executes
+the tool, until `tool_completed:<name>` is recorded. A legitimate long-running
+tool (a multi-minute build, a slow MCP call) can stay in this window longer than
+the progress timeout.
 
 If the operator enables the window (`MASC_KEEPER_MID_TURN_PROGRESS_TIMEOUT_SEC`),
 `assess_in_turn_progress` classifies active tool execution as no-progress. This
@@ -30,9 +40,15 @@ is exactly what RFC-0197 forbids:
 - Point 4: "only introduce cancellation after the execution region is tool-aware
   and can prove no active tool call is in flight."
 
-The producer is opt-in and default-off, so this is not a live defect; it is the
-precondition that makes the P1-5 signal safe to enable (and any future
-cancellation safe per point 4).
+The producer is opt-in and default-off, so this is not a live defect. Making the
+advisory `Mid_turn_no_progress` signal tool-aware is the precondition that makes
+the P1-5 signal safe to enable.
+
+This PR does not make cancellation safe per RFC-0197 point 4. The mirror is a
+lagging copy (§5), so it can prove only that the count was zero at the last
+drain, not at the exact instant a cancellation decision is made. A future
+cancellation gate will need a stronger seam—either a synchronous authoritative
+read of `pending_tool_count` or a "lag ≤ X + pre-cancel recheck" protocol.
 
 ## 2. What already exists (grounding)
 
@@ -42,7 +58,14 @@ cancellation safe per point 4).
   events that validates transitions and drops invalid ones (`:109`), updated
   under an `Atomic` CAS (`:160`). It is leak-safe: the count comes from a
   validated transition function, not a naive increment/decrement pair, so a
-  dropped or out-of-order event cannot wedge the count.
+  dropped or out-of-order event cannot wedge the count. The same holds for tool
+  errors: `ToolCompleted` carries `output = Error _` and the FSM transition
+  decrements the count. The only remaining wedge is a hard crash that emits no
+  terminal event at all; that is covered by the `In_turn_hung` backstop (§6).
+- The registry's `update_entry_if_registered` (`keeper_registry_setup.ml:80-88`)
+  uses an `Atomic.compare_and_set` retry loop, so concurrent
+  `record_turn_progress` and `record_turn_tool_inflight` writes to the same
+  `current_turn_observation` cannot lose updates.
 - The event bus already observes `ToolCalled` (`lib/keeper/keeper_event_bridge.ml:79`,
   `:236`), so RFC-0197 point 2's "observe" half is shipped.
 - RFC-0197 point 4 is already honored at the OAS-idle boundary:
@@ -116,7 +139,7 @@ turn-scoped data. When the turn ends, `mark_turn_finished` clears
 ```
 (* keeper_supervisor.ml assess_in_turn_progress *)
 | Some obs
-  when Bool.(phase = Keeper_state_machine.Running)
+  when phase = Keeper_state_machine.Running
        && obs.active_tool_count = 0          (* NEW: exclude active tool work *)
        && now -. obs.last_progress_at > progress_timeout -> Some (... Mid_turn_no_progress ...)
 | Some _ | None -> None
@@ -132,8 +155,9 @@ emission), matching RFC-0197 point 3. A turn with no tool in flight and a stale
   single authoritative value (the FSM); the registry field is a derived copy
   with no independent lifecycle, so it cannot leak. Cost: the event bus gains
   one optional callback parameter, and the mirror lags the true count by at most
-  one drain interval (negligible against a ≥300 s no-progress window, and the
-  background drain keeps it fresh).
+  one drain interval. That lag is negligible against a ≥300 s no-progress window
+  (the background drain keeps it fresh), but it is why this mirror is only an
+  advisory signal, not a point-in-time proof for RFC-0197 point 4 cancellation.
 - **Query the event bus from the sweep** (rejected): the bus is not globally
   registered (§3). Making it queryable would require a keeper-keyed table with
   its own create/unsubscribe lifecycle and cross-fiber synchronization — more
@@ -198,8 +222,10 @@ after the window.
 ## 9. RFC disposition
 
 This implements RFC-0197 Replacement Direction points 2–3 for the MASC
-no-progress watchdog and extends the RFC-0012 producer. It introduces one
-contract change (`turn_observation.active_tool_count`). Recommendation: land
+no-progress watchdog and extends the RFC-0012 producer. It does not implement
+point 4 (cancellation safety); that remains future work and will require a
+stronger, point-in-time seam than the lagging mirror used here. It introduces
+one contract change (`turn_observation.active_tool_count`). Recommendation: land
 under RFC-0197 as its named implementation (cite RFC-0197 + RFC-0012 in the PR);
 a new RFC is not warranted because no new lifecycle contract is created — the
 field mirrors an existing authoritative value. `lib/keeper/keeper_supervisor.ml`

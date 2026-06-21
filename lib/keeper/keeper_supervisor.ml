@@ -357,9 +357,9 @@ let sweep_and_recover (ctx : _ context) =
             [Keeper_mid_turn_progress.timeout_sec_opt],
             [assess_in_turn_progress] produces [Mid_turn_no_progress] —
             giving that closed variant its first producer. Both windows are
-            independent opt-in knobs and ride the same [Stale_turn_timeout]
-            crash-recovery routing; the no-turn [Idle_turn] takes precedence
-            when both would fire. *)
+            independent; only the mid-turn progress window is opt-in. They ride
+            the same [Stale_turn_timeout] crash-recovery routing; the no-turn
+            [Idle_turn] takes precedence when both would fire. *)
          let stale_run_reason =
            match Env_config_runtime.Keeper_stale_run.threshold_sec_opt () with
            | None -> None

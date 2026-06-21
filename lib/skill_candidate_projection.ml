@@ -28,8 +28,17 @@ let is_slug_char = function
 let slugify raw =
   let raw = raw |> String.trim |> String.lowercase_ascii in
   let buf = Buffer.create (String.length raw) in
+  let last_dash = ref false in
   String.iter
-    (fun ch -> Buffer.add_char buf (if is_slug_char ch then ch else '-'))
+    (fun ch ->
+      if is_slug_char ch
+      then (
+        Buffer.add_char buf ch;
+        last_dash := false)
+      else if not !last_dash
+      then (
+        Buffer.add_char buf '-';
+        last_dash := true))
     raw;
   let s = Buffer.contents buf in
   let len = String.length s in
@@ -207,8 +216,9 @@ let candidates_of_memory_facts ~agent_name facts =
   |> List.sort (fun a b -> Float.compare b.confidence a.confidence)
 ;;
 
-let top_candidates ~agent_name ~limit =
-  Procedural_memory.top_procedures ~agent_name ~limit |> candidates_of_procedures
+let top_candidates ~base_path ~agent_name ~limit =
+  Procedural_memory.top_procedures ~base_path ~agent_name ~limit ()
+  |> candidates_of_procedures
 ;;
 
 let string_list_json xs = `List (List.map (fun s -> `String s) xs)

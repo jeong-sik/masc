@@ -318,6 +318,28 @@ let dashboard_memory_subsystems_http_json
     |> List.map (fun (_, (row : Keeper_memory_policy.keeper_memory_line)) -> row.kind)
     |> List.sort_uniq String.compare
   in
+  let draft_skill_candidates =
+    match Skill_candidate_store.list_drafts ~base_path:config.base_path ~limit with
+    | Ok listing ->
+      `Assoc
+        [ "total", `Int listing.total
+        ; "shown", `Int listing.shown
+        ; "limit", `Int listing.limit
+        ; "index_path", `String listing.index_path
+        ; ( "items"
+          , `List (List.map Skill_candidate_store.draft_summary_to_json listing.items) )
+        ; "error", `Null
+        ]
+    | Error msg ->
+      `Assoc
+        [ "total", `Int 0
+        ; "shown", `Int 0
+        ; "limit", `Int limit
+        ; "index_path", `String (Skill_candidate_store.index_path ~base_path:config.base_path)
+        ; "items", `List []
+        ; "error", `String msg
+        ]
+  in
   `Assoc
     [ "generated_at", `String (Masc_domain.now_iso ())
     ; "hebbian", hebbian
@@ -371,6 +393,7 @@ let dashboard_memory_subsystems_http_json
                      `Assoc [ "keeper", `String keeper; "error", `String error ])
                    user_model_errors) )
           ] )
+    ; "draft_skill_candidates", draft_skill_candidates
     ; ( "filters"
       , `Assoc
           [ "keepers", `List (List.map (fun k -> `String k) known_keepers)

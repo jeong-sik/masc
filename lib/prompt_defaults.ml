@@ -45,11 +45,7 @@ type sync_result = {
   failed : (string * string) list;
 }
 
-let read_file_opt path =
-  if Sys.file_exists path then
-    try Some (In_channel.with_open_text path In_channel.input_all)
-    with Sys_error _ -> None
-  else None
+let read_file_opt = Fs_compat.load_file_opt
 
 let sync_prompt_assets ~read ~files ~prompts_dir () =
   let prefix_len = String.length prompts_asset_prefix in

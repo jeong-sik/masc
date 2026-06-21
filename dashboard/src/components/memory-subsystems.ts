@@ -16,6 +16,7 @@ import {
   type MemorySubsystemsUserModelItem,
   type MemorySubsystemsUserModelError,
   type MemorySubsystemsUserModelPrompt,
+  type MemorySubsystemsDraftSkillCandidate,
 } from '../api/dashboard'
 import { formatTimeAgo } from '../lib/format-time'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
@@ -79,6 +80,9 @@ export const ARCHITECTURE_FLOW = `graph LR
     G1 --> D1
     F1 --> U1[user_model projection]
     U1 --> D1
+    M3 --> S1[skill_candidate_projection]
+    S1 --> S2[(.masc/draft-skills)]
+    S2 --> D1
     D1 --> UI[기억 서브시스템 패널]
 
     %% dark-fantasy palette (mermaid can't use CSS vars): store=bg/mold,
@@ -86,8 +90,8 @@ export const ARCHITECTURE_FLOW = `graph LR
     classDef store fill:#221815,stroke:#5a3028,color:#e8d8b8
     classDef action fill:#16210f,stroke:#5a7a3a,color:#e8d8b8
     classDef ui fill:#2a1d08,stroke:#c4461a,color:#e8d8b8
-    class F1,G1 store
-    class M1,M3,H1,H2,T2,U1 action
+    class F1,G1,S2 store
+    class M1,M3,H1,H2,T2,U1,S1 action
     class UI ui`
 
 const shortAgentLabel = (name: string) => {
@@ -627,6 +631,88 @@ function UserModelPanel({
   `
 }
 
+function DraftSkillCandidateRow({
+  candidate,
+}: {
+  readonly candidate: MemorySubsystemsDraftSkillCandidate
+}) {
+  return html`
+    <div
+      class="v2-monitoring-row grid grid-cols-[10rem_7rem_minmax(0,1fr)_minmax(12rem,20rem)] items-start gap-2 border-b border-[var(--color-border-default)] px-2 py-2 text-xs last:border-b-0 max-lg:grid-cols-[8rem_minmax(0,1fr)]"
+      role="listitem"
+      aria-label=${`${candidate.id} · ${candidate.promotion_state} · ${candidate.source_ref}`}
+    >
+      <span class="min-w-0 truncate font-mono text-[var(--color-fg-muted)]" title=${candidate.id}>
+        ${candidate.id}
+      </span>
+      <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-center font-mono text-[var(--color-status-warn)]">
+        ${candidate.promotion_state}
+      </span>
+      <span class="min-w-0 truncate text-[var(--color-fg-primary)]" title=${candidate.source_ref}>
+        ${candidate.source_kind}: ${candidate.source_ref}
+      </span>
+      <span class="min-w-0 truncate font-mono text-[var(--color-fg-disabled)] max-lg:col-span-2" title=${candidate.skill_md_path}>
+        ${candidate.skill_md_path}
+      </span>
+    </div>
+  `
+}
+
+function DraftSkillCandidatesPanel({
+  total,
+  shown,
+  indexPath,
+  candidates,
+  error,
+}: {
+  readonly total: number
+  readonly shown: number
+  readonly indexPath: string
+  readonly candidates: readonly MemorySubsystemsDraftSkillCandidate[]
+  readonly error?: string | null
+}) {
+  return html`
+    <section
+      data-testid="draft-skill-candidates"
+      aria-label=${`Draft skill candidates · ${shown} shown`}
+      class="flex flex-col gap-2"
+    >
+      <div class="flex flex-wrap items-center gap-2">
+        <h3 class="text-base font-semibold text-[var(--color-fg-muted)]">Draft skill candidates</h3>
+        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">
+          ${indexPath}
+        </span>
+        <span class="ml-auto text-xs text-[var(--color-fg-muted)]">
+          total ${total} · shown ${shown}
+        </span>
+      </div>
+      ${
+        error
+          ? html`<div
+              role="alert"
+              class="rounded-[var(--r-1)] border border-[var(--warn-fg)] bg-[var(--warn-bg)] px-3 py-2 text-2xs text-[var(--color-fg-primary)]"
+            >${error}</div>`
+          : null
+      }
+      ${
+        candidates.length === 0
+          ? html`<div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4 text-center text-sm text-[var(--color-fg-muted)]">
+              draft skill 후보 없음
+            </div>`
+          : html`
+              <div
+                class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)]"
+                role="list"
+                aria-label=${`${shown} draft skill candidates`}
+              >
+                ${candidates.map(candidate => html`<${DraftSkillCandidateRow} candidate=${candidate} />`)}
+              </div>
+            `
+      }
+    </section>
+  `
+}
+
 export function MemoryEntriesPanel({
   entries,
   visibleEntries,
@@ -792,6 +878,8 @@ export function MemorySubsystems({ focus }: MemorySubsystemsProps = {}) {
   const knownMemoryKinds = data?.filters?.memory_kinds ?? Array.from(new Set(entries.map(e => e.kind))).sort()
   const userModel = data?.user_model
   const userModelItems = userModel?.items ?? []
+  const draftSkillCandidateBlock = data?.draft_skill_candidates
+  const draftSkillCandidates = draftSkillCandidateBlock?.items ?? []
   const visibleEntries = useMemo(
     () => filterMemoryEntries(entries, memoryKindFilter.value),
     [entries, memoryKindFilter.value],
@@ -872,6 +960,14 @@ export function MemorySubsystems({ focus }: MemorySubsystemsProps = {}) {
         filtered=${userModel?.filtered ?? userModelItems.length}
         errors=${userModel?.errors ?? []}
         prompt=${userModel?.prompt}
+      />
+
+      <${DraftSkillCandidatesPanel}
+        total=${draftSkillCandidateBlock?.total ?? draftSkillCandidates.length}
+        shown=${draftSkillCandidateBlock?.shown ?? draftSkillCandidates.length}
+        indexPath=${draftSkillCandidateBlock?.index_path ?? '.masc/draft-skills/index.jsonl'}
+        candidates=${draftSkillCandidates}
+        error=${draftSkillCandidateBlock?.error ?? null}
       />
 
       ${

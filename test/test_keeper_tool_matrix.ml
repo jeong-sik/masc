@@ -281,6 +281,46 @@ let test_keeper_inventory_materializes_masc_fusion_schema () =
   check bool "masc_fusion schema is materialized" true
     (List.mem "masc_fusion" Cases.all_keeper_tool_names)
 
+(* Drift-guard: Fusion_tool.handle reads web_tools (Tool_args.get_bool args
+   "web_tools") and fusion_orchestrator ORs it with the preset to inject
+   web_search / web_fetch into the panel and judge. If the keeper-facing schema
+   omits web_tools, the keeper LLM has no surfaced way to enable it (the field is
+   only reachable by guessing the exact name). Assert the *materialized* schema —
+   what the keeper actually receives — declares it as a boolean, so
+   descriptor<->handler drift on this arg fails the build. *)
+let test_masc_fusion_schema_declares_web_tools () =
+  match
+    List.find_opt
+      (fun (schema : Masc_domain.tool_schema) ->
+        String.equal schema.name "masc_fusion")
+      (Cases.all_keeper_tool_schemas ())
+  with
+  | None -> fail "masc_fusion schema must be materialized"
+  | Some schema ->
+      let props =
+        match schema.input_schema with
+        | `Assoc fields -> (
+            match List.assoc_opt "properties" fields with
+            | Some (`Assoc props) -> props
+            | _ -> [])
+        | _ -> []
+      in
+      check bool
+        "masc_fusion schema declares web_tools (descriptor<->handler parity)"
+        true
+        (List.mem_assoc "web_tools" props);
+      let web_tools_type =
+        match List.assoc_opt "web_tools" props with
+        | Some (`Assoc fields) -> List.assoc_opt "type" fields
+        | _ -> None
+      in
+      check (option string)
+        "masc_fusion web_tools schema type matches handler bool parser"
+        (Some "boolean")
+        (match web_tools_type with
+         | Some (`String value) -> Some value
+         | _ -> None)
+
 let test_keeper_oas_bundle_materializes_masc_fusion_tool () =
   let marker = Filename.temp_file "keeper-fusion-schema-" ".tmp" in
   Sys.remove marker;
@@ -344,6 +384,8 @@ let () =
             test_keeper_inventory_has_cases;
           test_case "keeper inventory materializes masc_fusion schema" `Quick
             test_keeper_inventory_materializes_masc_fusion_schema;
+          test_case "masc_fusion schema declares web_tools" `Quick
+            test_masc_fusion_schema_declares_web_tools;
           test_case "keeper OAS bundle materializes masc_fusion tool" `Quick
             test_keeper_oas_bundle_materializes_masc_fusion_tool;
         ] );

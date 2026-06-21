@@ -279,6 +279,13 @@ let rewrite_facts_atomically_for_keepers_dir ~keepers_dir ~keeper_id facts =
   write_file_atomically path content
 ;;
 
+let rewrite_facts_atomically_for_base_path ~base_path ~keeper_id facts =
+  rewrite_facts_atomically_for_keepers_dir
+    ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+    ~keeper_id
+    facts
+;;
+
 let rewrite_facts_atomically ~keeper_id facts =
   rewrite_facts_atomically_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id facts
 ;;

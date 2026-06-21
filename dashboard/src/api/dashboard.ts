@@ -3579,6 +3579,19 @@ export interface MemorySubsystemsUserModelPrompt {
   producer?: string
 }
 
+export interface MemorySubsystemsDraftSkillCandidate {
+  id: string
+  agent_name: string
+  source_kind: string
+  source_ref: string
+  promotion_state: string
+  dir: string
+  json_path: string
+  toml_path: string
+  skill_md_path: string
+  created_at: number | null
+}
+
 export interface MemorySubsystemsResponse {
   generated_at: string
   hebbian: {
@@ -3614,6 +3627,14 @@ export interface MemorySubsystemsResponse {
     limit: number
     items: MemorySubsystemsUserModelItem[]
     errors?: MemorySubsystemsUserModelError[]
+  }
+  draft_skill_candidates?: {
+    total: number
+    shown: number
+    limit: number
+    index_path: string
+    items: MemorySubsystemsDraftSkillCandidate[]
+    error?: string | null
   }
   filters: {
     keepers: string[]

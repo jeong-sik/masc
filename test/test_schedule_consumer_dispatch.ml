@@ -191,11 +191,11 @@ let test_dashboard_schedule_resolve_uses_authenticated_operator () =
       ; "decision", `String "approve"
       ; "approved_by_id", `String "attacker"
       ]
-  in
-  match
-    Server_dashboard_http_schedule_actions.resolve_http_json
-      ~config ~operator_name:"dashboard-admin" ~args
-  with
+    in
+    match
+      Server_dashboard_http.dashboard_schedule_resolve_http_json
+        ~config ~operator_name:"dashboard-admin" ~args
+    with
   | Error message -> fail message
   | Ok json ->
     let open Yojson.Safe.Util in

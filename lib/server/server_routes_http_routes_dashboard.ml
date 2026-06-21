@@ -670,12 +670,11 @@ let add_routes ~sw ~clock router =
          (fun state operator_name _req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
              try
-               let args = Yojson.Safe.from_string body_str in
-               let config = Mcp_server.workspace_config state in
-               match
-                 Server_dashboard_http_schedule_actions.resolve_http_json
-                   ~config ~operator_name ~args
-               with
+                 let args = Yojson.Safe.from_string body_str in
+                 let config = Mcp_server.workspace_config state in
+                 match
+                   dashboard_schedule_resolve_http_json ~config ~operator_name ~args
+                 with
                | Ok json -> respond_json_value_with_cors request reqd json
                | Error message ->
                  respond_json_value_with_cors ~status:`Bad_request request reqd

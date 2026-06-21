@@ -109,9 +109,6 @@ let handle_person_note_set ~config ~(meta : keeper_meta) ~args =
   let speaker_id =
     String.trim (Safe_ops.json_string ~default:"" "speaker_id" args)
   in
-  (* note is NOT trimmed to emptiness-only: a blank note is the
-     deliberate tombstone (RFC-0229 §3.1). *)
-  let note = Safe_ops.json_string ~default:"" "note" args in
   if speaker_id = "" then
     Yojson.Safe.to_string
       (`Assoc
@@ -121,18 +118,37 @@ let handle_person_note_set ~config ~(meta : keeper_meta) ~args =
                keeper_surface_read roster." )
         ])
   else begin
-    Keeper_person_notes.set_note
-      ~base_dir:config.Workspace.base_path
-      ~keeper_name:meta.name
-      ~speaker_id
-      ~note
-      ();
-    Yojson.Safe.to_string
-      (`Assoc
-        [ "ok", `Bool true
-        ; "speaker_id", `String speaker_id
-        ; "cleared", `Bool (String.trim note = "")
-        ])
+    (* Distinguish field-absent (LLM omission) from field-present-empty:
+       [json_string_opt] returns [None] when [note] is absent and [Some s] when
+       it is present (including ""). An explicit "" is the deliberate tombstone
+       that clears the note (RFC-0229 §3.1); an omitted [note] must be rejected,
+       not silently cleared. The prior [json_string ~default:""] collapsed both
+       to "", so a keeper that omitted [note] silently deleted an existing note
+       (OAS anti-pattern #2: Unknown -> Permissive Default). The structural
+       dispatch-level gap (in-process dispatch skips required validation) is
+       tracked in #21875. *)
+    match Safe_ops.json_string_opt "note" args with
+    | None ->
+      Yojson.Safe.to_string
+        (`Assoc
+          [ ( "error"
+            , `String
+                "note is required. Send an empty string to clear (tombstone) \
+                 an existing note." )
+          ])
+    | Some note ->
+      Keeper_person_notes.set_note
+        ~base_dir:config.Workspace.base_path
+        ~keeper_name:meta.name
+        ~speaker_id
+        ~note
+        ();
+      Yojson.Safe.to_string
+        (`Assoc
+          [ "ok", `Bool true
+          ; "speaker_id", `String speaker_id
+          ; "cleared", `Bool (String.trim note = "")
+          ])
   end
 ;;
 

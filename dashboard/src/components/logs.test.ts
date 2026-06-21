@@ -2,7 +2,12 @@ import { h } from 'preact'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LogEntry } from '../api/dashboard'
-import { logDiagnosticCause, summarizeLogWindow } from './logs'
+import {
+  deltaMergeCap,
+  logDiagnosticCause,
+  mergeLogEntries,
+  summarizeLogWindow,
+} from './logs'
 
 function entry(overrides: Partial<LogEntry>): LogEntry {
   return {
@@ -147,6 +152,47 @@ describe('log diagnostics', () => {
     expect(summary.topCauses).toContainEqual({ cause: 'provider_timeout', count: 1 })
     expect(summary.topCauses).toHaveLength(1)
     expect(summary.topModules[0]).toEqual({ module: 'Keeper', count: 2 })
+  })
+})
+
+describe('deltaMergeCap (load-older erosion guard)', () => {
+  it('keeps a fixed newest-N sliding window when not paged', () => {
+    const current = [entry({ seq: 10 }), entry({ seq: 9 })]
+    const incoming = [entry({ seq: 11 })]
+    // un-paged: cap stays at the base limit regardless of how many rows exist,
+    // so old rows roll off and memory stays bounded.
+    expect(deltaMergeCap(current, incoming, false, 200)).toBe(200)
+    expect(deltaMergeCap(current, incoming, false, 2)).toBe(2)
+  })
+
+  it('grows the cap to fit current rows plus genuinely-new rows when paged', () => {
+    const current = [entry({ seq: 10 }), entry({ seq: 9 }), entry({ seq: 8 })]
+    const incoming = [entry({ seq: 11 })] // 1 fresh
+    // paged: cap must cover every currently shown row (3) + the fresh row (1).
+    expect(deltaMergeCap(current, incoming, true, 2)).toBe(4)
+  })
+
+  it('counts only non-overlapping incoming rows as fresh when paged', () => {
+    const current = [entry({ seq: 10 }), entry({ seq: 9 })]
+    // seq 10 overlaps the current window; only seq 11 is genuinely new.
+    const incoming = [entry({ seq: 11 }), entry({ seq: 10 })]
+    expect(deltaMergeCap(current, incoming, true, 2)).toBe(3)
+  })
+
+  it('prevents the delta poll from evicting paged-in older rows over multiple cycles', () => {
+    // Reproduces the erosion: base limit 2, operator paged a third (older) row
+    // in (seq 8). Each delta poll appends one newer row. With the buggy cap
+    // (max(displayCap, limit) == 3) the newest-first slice would drop seq 8.
+    let current = [entry({ seq: 10 }), entry({ seq: 9 }), entry({ seq: 8, message: 'paged older' })]
+    for (const fresh of [11, 12, 13]) {
+      const incoming = [entry({ seq: fresh, message: `delta ${fresh}` })]
+      const cap = deltaMergeCap(current, incoming, true, 2)
+      current = mergeLogEntries(current, incoming, cap)
+      // the paged-in oldest row must survive every cycle
+      expect(current.some(e => e.seq === 8)).toBe(true)
+    }
+    // after 3 delta cycles all rows are retained, none evicted
+    expect(current.map(e => e.seq)).toEqual([13, 12, 11, 10, 9, 8])
   })
 })
 

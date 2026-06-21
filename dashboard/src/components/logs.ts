@@ -61,9 +61,13 @@ const categoryFilter = signal('')
 const hideFsmTransitions = signal(false)
 const expandedLogSeq = signal<number | null>(null)
 // "load older" backward paging: [displayCap] is the max rows kept in view. It
-// starts at the per-request limit and only grows as older pages are appended,
-// so the delta poller's merge does not trim history the operator paged into.
+// starts at the per-request limit and grows as older pages are appended AND as
+// the delta poller adds newer rows on top of a paged-open view, so neither path
+// evicts history the operator paged into. [pagedOlder] records whether the view
+// has been expanded past the base limit; while it is false the delta poller
+// keeps a fixed newest-N sliding window (bounded memory, steady state).
 const displayCap = signal(DEFAULT_LOG_LIMIT)
+const pagedOlder = signal(false)
 const olderLoading = signal(false)
 const noMoreOlder = signal(false)
 
@@ -173,7 +177,7 @@ function latestLogSeq(entries: LogEntry[]): number | null {
   return entries.reduce((max, entry) => Math.max(max, entry.seq), entries[0]?.seq ?? 0)
 }
 
-function mergeLogEntries(
+export function mergeLogEntries(
   current: LogEntry[],
   incoming: LogEntry[],
   maxEntries: number,
@@ -184,6 +188,27 @@ function mergeLogEntries(
   return [...merged.values()]
     .sort((a, b) => b.seq - a.seq)
     .slice(0, Math.max(1, maxEntries))
+}
+
+// Cap for the delta poll's merge with the currently loaded rows.
+// Un-paged steady state: a fixed newest-N sliding window ([baseLimit]) so memory
+// stays bounded and old rows roll off as new ones arrive.
+// Paged-open (operator used "load older"): keep EVERY currently shown row plus
+// the genuinely-new (non-overlapping) incoming rows, so newest-first slicing in
+// [mergeLogEntries] cannot evict the just-paged-in oldest rows on the next poll.
+export function deltaMergeCap(
+  current: readonly LogEntry[],
+  incoming: readonly LogEntry[],
+  pagedOlder: boolean,
+  baseLimit: number,
+): number {
+  if (!pagedOlder) return baseLimit
+  const currentSeqs = new Set(current.map(entry => entry.seq))
+  const freshCount = incoming.reduce(
+    (n, entry) => (currentSeqs.has(entry.seq) ? n : n + 1),
+    0,
+  )
+  return current.length + freshCount
 }
 
 function sourceLabel(source: string): string {
@@ -478,6 +503,7 @@ async function loadLogs(mode: LoadMode = 'reset') {
   if (mode === 'reset') {
     logQueryGeneration += 1
     displayCap.value = logLimit.value
+    pagedOlder.value = false
     noMoreOlder.value = false
     return logResource.load(async () => {
       const resp = await fetchLogs({
@@ -512,10 +538,9 @@ async function loadLogs(mode: LoadMode = 'reset') {
     const s = logResource.state.value
     const currentEntries = s.status === 'loaded' ? s.data.entries : []
     const incoming = sortLogEntries(resp.entries)
-    // Cap at displayCap (>= logLimit once older pages are loaded) so a delta
-    // poll never drops history the operator paged into via "load older".
-    const cap = Math.max(displayCap.value, logLimit.value)
+    const cap = deltaMergeCap(currentEntries, incoming, pagedOlder.value, logLimit.value)
     const nextEntries = mergeLogEntries(currentEntries, incoming, cap)
+    displayCap.value = Math.max(logLimit.value, nextEntries.length)
 
     latestSeq.value = latestLogSeq(nextEntries)
     logResource.state.value = loaded({
@@ -570,6 +595,9 @@ export async function loadOlder() {
     const cap = latestEntries.length + incoming.length
     const nextEntries = mergeLogEntries(latestEntries, incoming, cap)
     displayCap.value = Math.max(displayCap.value, nextEntries.length)
+    // Mark the view as paged-open so the delta poller grows its cap for new
+    // rows instead of slicing the just-loaded older rows back off.
+    pagedOlder.value = true
     // latestSeq stays untouched: older paging only extends the tail, the
     // newest-cursor for delta polling is unaffected.
     logResource.state.value = loaded({

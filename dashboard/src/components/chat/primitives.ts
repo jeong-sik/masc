@@ -1240,7 +1240,7 @@ function FusionPanelRow({ entry }: { entry: FusionPanelEntry }) {
   `
 }
 
-function ChatFusionCard({ boardPostId, runId }: { boardPostId: string; runId?: string }) {
+function ChatFusionCard({ boardPostId, runId, fallbackText }: { boardPostId: string; runId?: string; fallbackText?: string }) {
   const [expanded, setExpanded] = useState(false)
   const [state, setState] = useState<{
     status: 'idle' | 'loading' | 'loaded' | 'error'
@@ -1304,7 +1304,12 @@ function ChatFusionCard({ boardPostId, runId }: { boardPostId: string; runId?: s
               ? html`<div class="text-xs text-[var(--color-fg-secondary,#9da7b3)]">불러오는 중…</div>`
               : null}
             ${state.status === 'error'
-              ? html`<div class="text-xs text-[var(--color-danger,#e06c75)]">상세를 불러오지 못했습니다: ${state.error}</div>`
+              ? html`
+                <div class="text-xs text-[var(--color-danger,#e06c75)]">상세를 불러오지 못했습니다: ${state.error}</div>
+                ${fallbackText && fallbackText.trim()
+                  ? html`<div class="mt-1" data-fusion-fallback><${FusionMarkdown} text=${fallbackText} /></div>`
+                  : null}
+              `
               : null}
             ${state.status === 'loaded'
               ? html`
@@ -1331,10 +1336,13 @@ function ChatFusionCard({ boardPostId, runId }: { boardPostId: string; runId?: s
                   `
                   : null}
                 ${state.panel.length === 0 && !state.judge
-                  ? html`<div class="text-xs text-[var(--color-fg-secondary,#9da7b3)]">패널/심판 상세가 비어 있습니다.</div>`
+                  ? fallbackText && fallbackText.trim()
+                    ? html`<div class="mt-1" data-fusion-fallback><${FusionMarkdown} text=${fallbackText} /></div>`
+                    : html`<div class="text-xs text-[var(--color-fg-secondary,#9da7b3)]">패널/심판 상세가 비어 있습니다.</div>`
                   : null}
               `
               : null}
+            <div class="text-2xs text-[var(--color-fg-muted,#6b7280)]" data-fusion-retention>심의 상세는 board 보관 기간이 지나면 만료됩니다.</div>
           </div>
         `
         : null}
@@ -1342,7 +1350,7 @@ function ChatFusionCard({ boardPostId, runId }: { boardPostId: string; runId?: s
   `
 }
 
-function ChatBlock({ block }: { block: ChatBlock }) {
+function ChatBlock({ block, fallbackText }: { block: ChatBlock; fallbackText?: string }) {
   switch (block.t) {
     case 'p': return html`<${ChatTextBlock} html=${block.html} />`
     case 'h4': return html`<${ChatHeadingBlock} html=${block.html} />`
@@ -1360,15 +1368,15 @@ function ChatBlock({ block }: { block: ChatBlock }) {
     case 'trace': return html`<${ChatTraceBlock} trace=${block.trace} />`
     case 'link': return html`<${ChatLinkBlock} url=${block.url} title=${block.title} desc=${block.desc} meta=${block.meta} fav=${block.fav} kind=${block.kind} />`
     case 'broadcast': return html`<${ChatBroadcastBlock} scope=${block.scope} via=${block.via} note=${block.note} recipients=${block.recipients} />`
-    case 'fusion': return html`<${ChatFusionCard} boardPostId=${block.board_post_id} runId=${block.run_id} />`
+    case 'fusion': return html`<${ChatFusionCard} boardPostId=${block.board_post_id} runId=${block.run_id} fallbackText=${fallbackText} />`
     default: return null
   }
 }
 
-function ChatBlocks({ blocks }: { blocks: ChatBlock[] }) {
+function ChatBlocks({ blocks, fallbackText }: { blocks: ChatBlock[]; fallbackText?: string }) {
   return html`
     <div class="flex flex-col gap-3" data-chat-blocks>
-      ${blocks.map((b, i) => html`<${ChatBlock} key=${i} block=${b} />`)}
+      ${blocks.map((b, i) => html`<${ChatBlock} key=${i} block=${b} fallbackText=${fallbackText} />`)}
     </div>
   `
 }
@@ -1824,7 +1832,7 @@ function ChatMessageBubble({
                   >${renderStructuredFailureText(messageText)}</pre>
                 `
               : hasEffectiveBlocks
-              ? html`<${ChatBlocks} blocks=${effectiveBlocks} />`
+              ? html`<${ChatBlocks} blocks=${effectiveBlocks} fallbackText=${entry.text} />`
               : html`
                   <div
                     class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}

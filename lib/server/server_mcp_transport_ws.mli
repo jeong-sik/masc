@@ -376,7 +376,9 @@ val client_buffer_limit_bytes : unit -> int
 
 val dashboard_ack_stale_threshold_s : unit -> float
 (** Resolved max age for the latest [dashboard/ack] before outbound dashboard
-    sends are considered stale.  [0.0] disables stale-ACK backpressure. *)
+    sends are considered stale.  [0.0] disables stale-ACK backpressure.
+    Cached for [env_cache_ttl_s] seconds; the test resets the cache via
+    {!__test_reset_env_caches}. *)
 
 val dashboard_ack_is_stale :
   now:float ->

@@ -733,10 +733,11 @@ let dashboard_delta_for_sse session sse_event =
 
 (** TTL cache for env-var reads on the fan-out hot path.
 
-    [client_buffer_limit_bytes] and [slice_index_enabled] are both
-    invoked once per session per broadcast, so a 100-session fanout
-    at 1000 broadcasts/sec produced 200k [Sys.getenv_opt] calls per
-    second per var.  The earlier docstring claimed the read was
+    [client_buffer_limit_bytes], [dashboard_ack_stale_threshold_s],
+    and [slice_index_enabled] are invoked once per session per broadcast,
+    so a 100-session fanout at 1000 broadcasts/sec produced hundreds of
+    thousands of [Sys.getenv_opt] calls per second.  The earlier docstring
+    claimed the read was
     "atomic hash lookup", but [Env_config_core.raw_value_opt] runs
     [Sys.getenv_opt] which on glibc is a linear search of the
     process [environ] array — far from free.
@@ -765,9 +766,21 @@ let client_buffer_limit_bytes () =
     value
   end
 
+let dashboard_ack_stale_threshold_cache : (float * float) Atomic.t =
+  Atomic.make (Float.neg_infinity, 30.0)
+
 let dashboard_ack_stale_threshold_s () =
-  Env_config_core.get_float_nonneg ~default:30.0
-    "MASC_WS_ACK_STALE_THRESHOLD_SEC"
+  let now = Time_compat.now () in
+  let last_at, cached = Atomic.get dashboard_ack_stale_threshold_cache in
+  if now -. last_at < env_cache_ttl_s then cached
+  else begin
+    let value =
+      Env_config_core.get_float_nonneg ~default:30.0
+        "MASC_WS_ACK_STALE_THRESHOLD_SEC"
+    in
+    Atomic.set dashboard_ack_stale_threshold_cache (now, value);
+    value
+  end
 
 let dashboard_ack_is_stale
     ~now
@@ -828,6 +841,8 @@ let slice_index_enabled () =
     Production code never calls this. *)
 let __test_reset_env_caches () =
   Atomic.set client_buffer_limit_cache (Float.neg_infinity, 0);
+  Atomic.set dashboard_ack_stale_threshold_cache
+    (Float.neg_infinity, 30.0);
   Atomic.set slice_index_enabled_cache (Float.neg_infinity, true)
 
 let send_dashboard_or_raw_sse session sse_event =

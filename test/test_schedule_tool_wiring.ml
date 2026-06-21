@@ -619,6 +619,21 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
     (due_row |> member "operator_action" |> to_string);
   check string "due keeper next tool" "masc_schedule_get"
     (due_row |> member "keeper_next_tool" |> to_string);
+  let due_tool_status = due_row |> member "keeper_next_tool_status" in
+  check string "due keeper next tool status name" "masc_schedule_get"
+    (due_tool_status |> member "name" |> to_string);
+  check bool "due keeper next tool schema registered" true
+    (due_tool_status |> member "registered_schema" |> to_bool);
+  check bool "due keeper next tool dispatch registered" true
+    (due_tool_status |> member "dispatch_registered" |> to_bool);
+  check bool "due keeper next tool direct callable" true
+    (due_tool_status |> member "direct_call_allowed" |> to_bool);
+  check string "due keeper next tool hidden visibility" "hidden"
+    (due_tool_status |> member "visibility" |> to_string);
+  check int "due keeper next tool has no surface projection" 0
+    (due_tool_status |> member "surface_count" |> to_int);
+  check string "due keeper next tool read-only domain" "read_only"
+    (due_tool_status |> member "effect_domain" |> to_string);
   check bool "due keeper action mentions runner tick" true
     (String_util.contains_substring
        (due_row |> member "keeper_next_action" |> to_string)

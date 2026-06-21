@@ -1851,6 +1851,19 @@ export interface DashboardScheduledAutomationExecution {
   error?: string | null
 }
 
+export interface DashboardScheduledAutomationKeeperToolStatus {
+  name: string
+  registered_schema?: boolean
+  dispatch_registered?: boolean
+  direct_call_allowed?: boolean
+  visibility?: string
+  surfaces?: string[]
+  surface_count?: number
+  effect_domain?: string | null
+  read_only?: boolean | null
+  requires_actor_binding?: boolean | null
+}
+
 export interface DashboardScheduledAutomationRequest {
   schedule_id: string
   status: string
@@ -1858,6 +1871,7 @@ export interface DashboardScheduledAutomationRequest {
   execution_readiness?: string
   operator_action?: string | null
   keeper_next_tool?: string | null
+  keeper_next_tool_status?: DashboardScheduledAutomationKeeperToolStatus | null
   keeper_next_action?: string | null
   risk_class: string
   approval_required: boolean

@@ -143,6 +143,18 @@ describe('Tools', () => {
             execution_readiness: 'blocked_approval',
             operator_action: 'approve_or_reject',
             keeper_next_tool: 'masc_schedule_get',
+            keeper_next_tool_status: {
+              name: 'masc_schedule_get',
+              registered_schema: true,
+              dispatch_registered: true,
+              direct_call_allowed: true,
+              visibility: 'hidden',
+              surfaces: [],
+              surface_count: 0,
+              effect_domain: 'read_only',
+              read_only: true,
+              requires_actor_binding: null,
+            },
             keeper_next_action:
               'Inspect details, then wait for the dashboard operator approval or rejection action to resolve this schedule.',
             risk_class: 'workspace_write',
@@ -175,6 +187,9 @@ describe('Tools', () => {
     expect(container.textContent).toContain('dashboard operator approval or rejection')
     expect(container.textContent).toContain('Approve')
     expect(container.textContent).toContain('Reject')
+    expect(container.textContent).toContain('callable')
+    expect(container.textContent).toContain('hidden')
+    expect(container.textContent).toContain('no surface')
     expect(container.textContent).toContain('sched-1')
     expect(container.textContent).toContain('workspace write')
     expect(container.textContent).toContain('cron 0 9 * * 1-5 Asia/Seoul')

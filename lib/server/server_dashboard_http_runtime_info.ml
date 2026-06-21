@@ -1903,10 +1903,59 @@ let schedule_operator_action readiness =
   | None -> `Null
 ;;
 
-let schedule_keeper_next_tool readiness =
-  match Schedule_projection.keeper_next_tool_for_execution_readiness readiness with
-  | Some tool -> `String tool
+let tool_projection_surfaces_for tool_name =
+  let surfaces = ref [] in
+  let add_surface surface =
+    if not (List.exists (String.equal surface) !surfaces)
+    then surfaces := surface :: !surfaces
+  in
+  if Tool_catalog.is_public_mcp tool_name then add_surface "public_mcp";
+  Capability_registry.all_projection_seeds_from Config.raw_all_tool_schemas
+  |> List.iter (fun (seed : Capability_registry.capability_seed) ->
+    let surface = Capability_registry.surface_to_string seed.projection.surface in
+    if
+      (not (String.equal surface "public_mcp"))
+      && (String.equal seed.projection.tool_name tool_name
+          || String.equal seed.projection.backend_tool_name tool_name)
+    then add_surface surface);
+  List.sort String.compare !surfaces
+;;
+
+let schedule_keeper_next_tool_status_json = function
   | None -> `Null
+  | Some tool_name ->
+    let registered_schema =
+      List.exists
+        (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name tool_name)
+        Config.raw_all_tool_schemas
+    in
+    let dispatch_registered = Option.is_some (Tool_dispatch.lookup_tag tool_name) in
+    let metadata = Tool_catalog.metadata tool_name in
+    let surfaces = tool_projection_surfaces_for tool_name in
+    let effect_domain =
+      match metadata.effect_domain with
+      | None -> `Null
+      | Some domain -> `String (Tool_catalog.effect_domain_to_string domain)
+    in
+    `Assoc
+      [ "name", `String tool_name
+      ; "registered_schema", `Bool registered_schema
+      ; "dispatch_registered", `Bool dispatch_registered
+      ; "direct_call_allowed", `Bool (Tool_catalog.allow_direct_call tool_name)
+      ; "visibility", `String (Tool_catalog.visibility_to_string metadata.visibility)
+      ; ( "surfaces"
+        , `List (List.map (fun surface -> `String surface) surfaces) )
+      ; "surface_count", `Int (List.length surfaces)
+      ; "effect_domain", effect_domain
+      ; ( "read_only"
+        , match metadata.readonly with
+          | None -> `Null
+          | Some read_only -> `Bool read_only )
+      ; ( "requires_actor_binding"
+        , match metadata.requires_actor_binding with
+          | None -> `Null
+          | Some requires_actor_binding -> `Bool requires_actor_binding )
+      ]
 ;;
 
 let schedule_keeper_next_action readiness =
@@ -1977,6 +2026,9 @@ let schedule_request_dashboard_json
     Schedule_payload_projection.target_summary request
   in
   let execution_readiness = schedule_execution_readiness ~now state request in
+  let keeper_next_tool =
+    Schedule_projection.keeper_next_tool_for_execution_readiness execution_readiness
+  in
   `Assoc
     [ "schedule_id", `String request.schedule_id
     ; "status", `String (Schedule_domain.schedule_status_to_string request.status)
@@ -1984,7 +2036,11 @@ let schedule_request_dashboard_json
     ; ( "execution_readiness"
       , `String (Schedule_projection.execution_readiness_to_string execution_readiness) )
     ; "operator_action", schedule_operator_action execution_readiness
-    ; "keeper_next_tool", schedule_keeper_next_tool execution_readiness
+    ; ( "keeper_next_tool"
+      , match keeper_next_tool with
+        | None -> `Null
+        | Some tool -> `String tool )
+    ; "keeper_next_tool_status", schedule_keeper_next_tool_status_json keeper_next_tool
     ; "keeper_next_action", schedule_keeper_next_action execution_readiness
     ; "risk_class", `String (Schedule_domain.risk_class_to_string request.risk_class)
     ; "approval_required", `Bool request.approval_required

@@ -202,14 +202,55 @@ function PayloadCell({ request }: { request: DashboardScheduledAutomationRequest
   `
 }
 
+function keeperToolStatusTone(request: DashboardScheduledAutomationRequest): StatusChipTone {
+  const status = request.keeper_next_tool_status
+  if (!status) return 'neutral'
+  if (status.registered_schema === false || status.dispatch_registered === false) return 'bad'
+  if (status.direct_call_allowed === false) return 'warn'
+  return 'ok'
+}
+
+function keeperToolStatusLabel(request: DashboardScheduledAutomationRequest): string {
+  const status = request.keeper_next_tool_status
+  if (!status) return 'unknown'
+  if (status.registered_schema === false || status.dispatch_registered === false) return 'orphan'
+  if (status.direct_call_allowed === false) return 'blocked'
+  return 'callable'
+}
+
+function keeperToolSurfaceLabel(request: DashboardScheduledAutomationRequest): string {
+  const status = request.keeper_next_tool_status
+  if (!status) return 'surface unknown'
+  const surfaces = status.surfaces ?? []
+  const surfaceCount = status.surface_count ?? surfaces.length
+  if (surfaceCount <= 0) return 'no surface'
+  if (surfaceCount === 1 && surfaces[0]) return surfaces[0].replace(/_/g, ' ')
+  return `${surfaceCount} surfaces`
+}
+
 function KeeperActionCell({ request }: { request: DashboardScheduledAutomationRequest }) {
   const nextTool = request.keeper_next_tool?.trim() || null
   const nextAction = request.keeper_next_action?.trim() || null
+  const status = request.keeper_next_tool_status
+  const visibility = status?.visibility?.trim() || null
   if (!nextTool && !nextAction) return html`<span class="text-xs text-[var(--color-fg-disabled)]">-</span>`
   return html`
     <div class="max-w-[16rem]">
       ${nextTool
         ? html`<div class="truncate font-mono text-3xs text-[var(--color-fg-secondary)]" title=${nextTool}>${nextTool}</div>`
+        : null}
+      ${status
+        ? html`
+            <div class="mt-1 flex flex-wrap items-center gap-1">
+              <${StatusChip} tone=${keeperToolStatusTone(request)} uppercase=${false}>
+                ${keeperToolStatusLabel(request)}
+              <//>
+              ${visibility
+                ? html`<span class="rounded-[var(--r-0)] bg-[var(--color-bg-hover)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-muted)]">${visibility.replace(/_/g, ' ')}</span>`
+                : null}
+              <span class="rounded-[var(--r-0)] bg-[var(--color-bg-hover)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-muted)]">${keeperToolSurfaceLabel(request)}</span>
+            </div>
+          `
         : null}
       ${nextAction
         ? html`<div class="mt-1 truncate text-3xs text-[var(--color-fg-muted)]" title=${nextAction}>${nextAction}</div>`

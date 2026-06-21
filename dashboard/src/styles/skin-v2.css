@@ -33,11 +33,12 @@ html[data-skin="v2"]:not([data-theme="paper"]):not([data-theme="styleseed"]) {
   --border-soft:      #1e1f29;
   --border-highlight: #3b3d4e;
 
-  /* Text — bone, pushed bright for reading */
+  /* Text — bone, pushed bright for reading (raised contrast on mid/dim
+     so 9–11px labels, eyebrows and captions stay legible on dark ground) */
   --text-bright:  #f7f1e6;
   --text-primary: #e3dacb;
-  --text-mid:     #c0b7a6;
-  --text-dim:     #968fa1;
+  --text-mid:     #cabfac;
+  --text-dim:     #a59db0;
 
   /* Accents — vivid */
   --accent-blood:     #e8472f;

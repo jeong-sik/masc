@@ -61,6 +61,8 @@ type try_provider_ctx =
 type last_tool_progress_context =
   { tool_name : string
   ; tool_effect : Keeper_internal_error.tool_progress_effect
+  ; any_mutating_tool : bool
+  ; tool_effects_seen : Keeper_internal_error.tool_progress_effect list
   }
 
 val run_try_provider :

@@ -190,37 +190,75 @@ let body_timeout_for_attempt ?per_provider_timeout_s () =
 type last_tool_progress_context =
   { tool_name : string
   ; tool_effect : Keeper_internal_error.tool_progress_effect
+  ; any_mutating_tool : bool
+  ; tool_effects_seen : Keeper_internal_error.tool_progress_effect list
   }
 
 let last_tool_effect_to_string = Keeper_internal_error.tool_progress_effect_to_string
 
-let last_tool_use_of_messages (messages : Agent_sdk.Types.message list) =
-  let last_tool_in_message (msg : Agent_sdk.Types.message) acc =
+let classify_tool_effect ~tool_name ~input =
+  if Keeper_tool_registry.is_strictly_read_only_with_input ~tool_name ~input
+  then Keeper_internal_error.Tool_effect_read_only
+  else Keeper_internal_error.Tool_effect_mutating
+;;
+
+let dedupe_tool_effects effects =
+  effects
+  |> List.fold_left
+       (fun acc tool_effect ->
+          if List.mem tool_effect acc then acc else tool_effect :: acc)
+       []
+  |> List.rev
+;;
+
+let tool_uses_of_messages (messages : Agent_sdk.Types.message list) =
+  let tool_uses_in_message (msg : Agent_sdk.Types.message) acc =
     if msg.role <> Agent_sdk.Types.Assistant
     then acc
     else
       List.fold_left
         (fun acc -> function
-          | Agent_sdk.Types.ToolUse { name; input; _ } -> Some (name, input)
+          | Agent_sdk.Types.ToolUse { name; input; _ } -> (name, input) :: acc
           | _ -> acc)
         acc
         msg.content
   in
-  List.fold_left (fun acc msg -> last_tool_in_message msg acc) None messages
+  List.fold_left (fun acc msg -> tool_uses_in_message msg acc) [] messages
+  |> List.rev
 ;;
 
 let last_tool_progress_context_of_messages messages =
-  match last_tool_use_of_messages messages with
-  | None -> None
-  | Some (tool_name, input) ->
+  match tool_uses_of_messages messages with
+  | [] -> None
+  | tool_uses ->
+    let tool_effects =
+      List.map
+        (fun (tool_name, input) -> classify_tool_effect ~tool_name ~input)
+        tool_uses
+    in
+    let last_tool_name, last_input =
+      match List.rev tool_uses with
+      | (tool_name, input) :: _ -> tool_name, input
+      | [] -> "unknown", `Assoc []
+    in
+    let tool_name = last_tool_name in
     let tool_name = String.trim tool_name in
     let tool_name = if tool_name = "" then "unknown" else tool_name in
-    let tool_effect =
-      if Keeper_tool_registry.is_strictly_read_only_with_input ~tool_name ~input
-      then Keeper_internal_error.Tool_effect_read_only
-      else Keeper_internal_error.Tool_effect_mutating
+    let tool_effect = classify_tool_effect ~tool_name ~input:last_input in
+    let any_mutating_tool =
+      List.exists
+        (function
+          | Keeper_internal_error.Tool_effect_mutating -> true
+          | Keeper_internal_error.Tool_effect_read_only -> false)
+        tool_effects
     in
-    Some { tool_name; tool_effect }
+    Some
+      {
+        tool_name;
+        tool_effect;
+        any_mutating_tool;
+        tool_effects_seen = dedupe_tool_effects tool_effects;
+      }
 ;;
 
 let accept_rejection_context_of_run_result (run_result : Runtime_agent.run_result) =
@@ -232,12 +270,20 @@ let accept_rejection_context_of_run_result (run_result : Runtime_agent.run_resul
 
 let format_last_tool_progress_context = function
   | None -> None
-  | Some { tool_name; tool_effect } ->
+  | Some { tool_name; tool_effect; any_mutating_tool; tool_effects_seen } ->
+    let effects_seen =
+      tool_effects_seen
+      |> List.map last_tool_effect_to_string
+      |> String.concat ","
+    in
     Some
       (Printf.sprintf
-         "last_tool=%s; last_tool_effect=%s"
+         "last_tool=%s; last_tool_effect=%s; any_mutating_tool=%b; \
+          tool_effects_seen=%s"
          tool_name
-         (last_tool_effect_to_string tool_effect))
+         (last_tool_effect_to_string tool_effect)
+         any_mutating_tool
+         effects_seen)
 ;;
 
 let accept_rejected_error ~last_tool_context ~runtime_id
@@ -276,6 +322,14 @@ let accept_rejected_error ~last_tool_context ~runtime_id
            Option.map
              (fun context -> context.tool_effect)
              last_tool_context;
+         any_mutating_tool =
+           Option.map
+             (fun context -> context.any_mutating_tool)
+             last_tool_context;
+         tool_effects_seen =
+           (match last_tool_context with
+            | Some context -> context.tool_effects_seen
+            | None -> []);
          reason = rejection.reason;
        })
 

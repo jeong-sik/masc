@@ -45,8 +45,8 @@ OAS.
 
 | # | Surface | Current heuristic | Missing example class | Risk |
 |---|---------|-------------------|-----------------------|------|
-| 1 | Thinking-only read-only retry | accept reason substring gate | actual no-progress trace after read-only tool | retry can hide accept failures |
-| 2 | Last-tool effect context | only the final assistant tool call is inspected | multi-tool turn with earlier mutation | read-only label can be unsound |
+| 1 | Thinking-only read-only retry | typed response/effect gate | read-only error/empty payload trace | retry can hide accept failures |
+| 2 | Last-tool effect context | final tool plus turn-wide effect summary | compaction/resume multi-message fixture | read-only label can be unsound |
 | 3 | Tool read-only registry | descriptor/capability fallback | mixed-mode tool contracts | checkpoint boundary can drift |
 | 4 | Provider error string classifiers | quota/capacity/terminal substrings | provider/CLI error corpus | wrong cooldown/escalation |
 | 5 | Keeper warn/recoverable classifier | typed bucket allow/deny list | operator-facing failure samples | noisy or silent incidents |
@@ -64,26 +64,21 @@ Evidence:
 
 Current behavior: typed `Accept_rejected` with
 `Accept_no_usable_progress` is retryable on the next runtime only when the
-free-form reason contains both `shape=thinking_only` and
-`last_tool_effect=read_only`.
+typed response shape is `thinking_only`, the final tool is `read_only`, and the
+turn-wide checkpoint summary reports `any_mutating_tool=false`.
 
 Missing real-world examples:
-- WebFetch/Read/Grep succeeds, then the runtime returns only thinking text.
 - A read-only tool returns an error or empty payload, then the runtime returns
   only thinking text.
-- The last tool is read-only but an earlier tool in the same turn mutated
-  workspace or board state.
 - The rejection happens on the final candidate, where retry is intentionally
   impossible.
 
-Operational risk: the fix is intentionally narrow, but its safety rests on a
-string-decorated reason. Without fixture traces for the false-positive
-boundary, a future reason-format change can silently stop retrying, or a
-misclassified read-only context can retry after a turn that already had side
-effects.
+Operational risk: the fix is intentionally narrow. The earlier string-decorated
+reason gate is now typed, but remaining confidence still depends on broader
+fixture traces for read-only tool failures and final-candidate behavior.
 
 Evidence fixture needed: a raw checkpoint/rejection fixture with multiple tools,
-including at least one read-only-only turn and one earlier-mutation turn.
+including final-candidate and read-only error/empty-payload cases.
 
 ## 2. Last-tool effect context
 
@@ -91,23 +86,22 @@ Evidence:
 - `lib/keeper/keeper_turn_driver_try_provider.ml:195-221`
 - `lib/keeper/keeper_turn_driver_try_provider.ml:224-234`
 
-Current behavior: the checkpoint scan records only the final assistant
-`ToolUse` and formats it as `last_tool=<name>; last_tool_effect=<read_only|mutating>`.
+Current behavior: the checkpoint scan records the final assistant `ToolUse` and
+a turn-wide effect summary:
+`last_tool=<name>; last_tool_effect=<read_only|mutating>; any_mutating_tool=<bool>; tool_effects_seen=<...>`.
 
 Missing real-world examples:
-- A turn calls `Edit` then `Read`, and the model produces no deliverable.
 - A turn calls several read-only tools where only the last one is relevant to
   the rejection.
 - A checkpoint includes tool-use blocks from multiple assistant messages after
   compaction or resume.
 
-Operational risk: "last tool was read-only" is not the same as "this turn was
-read-only". Retry decisions built on the last tool alone can ignore earlier
-side effects.
+Operational risk: the original "last tool was read-only" false-positive is
+covered by `any_mutating_tool`, but compaction/resume checkpoint shape can still
+hide relevant tool-use history if it is not preserved in the checkpoint.
 
-Evidence fixture needed: a checkpoint summary that includes `any_mutating_tool`,
-`last_tool_effect`, and `tool_effects_seen`, plus tests that pin the intended
-precedence.
+Evidence fixture needed: multi-message checkpoint fixtures after compaction or
+resume, plus tests that pin which checkpoint spans are authoritative.
 
 ## 3. Tool read-only registry and checkpoint boundary
 
@@ -310,8 +304,8 @@ outputs and examples that prove substring fallbacks are only fallback behavior.
 
 ## Recommended follow-up test slices
 
-1. Add multi-tool accept-rejection fixtures that distinguish `last_tool_effect`
-   from `any_mutating_tool`.
+1. Add compaction/resume checkpoint fixtures that prove the turn-wide
+   `any_mutating_tool` summary still sees the authoritative tool-use span.
 2. Add provider error corpus tests for hard quota, capacity backpressure,
    terminal runtime failure, and retryable transient errors.
 3. Add multilingual board-signal fixtures for Korean goal text, mention false

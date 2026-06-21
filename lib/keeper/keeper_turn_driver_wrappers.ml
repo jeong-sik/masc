@@ -149,6 +149,8 @@ let run_model_by_label
                                   accept_response_shape_of_agent_sdk
                                   rejection.response_shape;
                               last_tool_effect = None;
+                              any_mutating_tool = None;
+                              tool_effects_seen = [];
                               reason = rejection.reason;
                             }))
                 | Error e -> Error e))

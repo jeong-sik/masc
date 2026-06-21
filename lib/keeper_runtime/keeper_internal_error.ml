@@ -197,6 +197,8 @@ type masc_internal_error =
       reason_kind : accept_rejection_kind option;
       response_shape : accept_response_shape option;
       last_tool_effect : tool_progress_effect option;
+      any_mutating_tool : bool option;
+      tool_effects_seen : tool_progress_effect list;
       reason : string;
     }
   | Admission_queue_timeout of {
@@ -285,6 +287,26 @@ let string_opt_of_assoc key json =
   Json_field.string json key |> Json_field.to_option
 ;;
 
+let bool_opt_of_assoc key = function
+  | `Assoc fields -> (
+    match List.assoc_opt key fields with
+    | Some (`Bool value) -> Some value
+    | _ -> None)
+  | _ -> None
+;;
+
+let tool_progress_effects_to_json effects =
+  `List
+    (List.map
+       (fun tool_effect -> `String (tool_progress_effect_to_string tool_effect))
+       effects)
+;;
+
+let tool_progress_effects_of_assoc key json =
+  string_list_of_assoc key json
+  |> List.filter_map tool_progress_effect_of_string
+;;
+
 let masc_internal_error_to_json = function
   | Runtime_exhausted { runtime_id; reason } ->
     let runtime_id = runtime_id_to_string runtime_id in
@@ -322,7 +344,16 @@ let masc_internal_error_to_json = function
         ("exit_code", Json_util.int_opt_to_json exit_code);
       ]
   | Accept_rejected
-      { scope; model; reason_kind; response_shape; last_tool_effect; reason } ->
+      {
+        scope;
+        model;
+        reason_kind;
+        response_shape;
+        last_tool_effect;
+        any_mutating_tool;
+        tool_effects_seen;
+        reason;
+      } ->
     `Assoc
       [
         ("kind", `String "accept_rejected");
@@ -337,6 +368,11 @@ let masc_internal_error_to_json = function
         ( "last_tool_effect",
           Json_util.string_opt_to_json
             (Option.map tool_progress_effect_to_string last_tool_effect) );
+        ( "any_mutating_tool",
+          (match any_mutating_tool with
+           | Some value -> `Bool value
+           | None -> `Null) );
+        ("tool_effects_seen", tool_progress_effects_to_json tool_effects_seen);
         ("reason", `String reason);
       ]
   | Admission_queue_timeout { keeper_name; runtime_id; wait_sec } ->
@@ -523,9 +559,11 @@ let accept_rejection_has_read_only_no_progress_retry_hint = function
         reason_kind = Some Accept_no_usable_progress;
         response_shape = Some Accept_response_thinking_only;
         last_tool_effect = Some Tool_effect_read_only;
+        any_mutating_tool = Some false;
+        tool_effects_seen;
         _;
       } ->
-    true
+    tool_effects_seen <> []
   | Accept_rejected _
   | Runtime_exhausted _
   | Capacity_backpressure _
@@ -646,6 +684,9 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                      Option.bind
                        (string_opt_of_assoc "last_tool_effect" json)
                        tool_progress_effect_of_string;
+                   any_mutating_tool = bool_opt_of_assoc "any_mutating_tool" json;
+                   tool_effects_seen =
+                     tool_progress_effects_of_assoc "tool_effects_seen" json;
                    reason;
                  })
           | _ -> None)

@@ -87,6 +87,8 @@ type masc_internal_error =
       reason_kind : accept_rejection_kind option;
       response_shape : accept_response_shape option;
       last_tool_effect : tool_progress_effect option;
+      any_mutating_tool : bool option;
+      tool_effects_seen : tool_progress_effect list;
       reason : string;
     }
   | Admission_queue_timeout of {

@@ -208,11 +208,27 @@ val append_turn :
   unit ->
   unit
 
+(** [append_assistant_message_result] is {!append_assistant_message} that
+    returns [Error msg] on a write failure instead of swallowing it (the failure
+    is still counted + warn-logged). For callers whose own contract requires
+    surfacing a chat-append failure — e.g. {!Fusion_sink.emit}. *)
+val append_assistant_message_result :
+  base_dir:string ->
+  keeper_name:string ->
+  content:string ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?audio:audio_clip ->
+  ?blocks:chat_block list ->
+  ?turn_ref:Ids.Turn_ref.t ->
+  unit ->
+  (unit, string) result
+
 (** [append_assistant_message ~base_dir ~keeper_name ~content ?source
     ?conversation_id ()]
     appends one keeper-initiated assistant line with no paired user
     turn (RFC-0223 P4 [keeper_surface_post]). Same failure policy as
-    {!append_turn}. *)
+    {!append_turn} (failure is counted + logged, not raised). *)
 val append_assistant_message :
   base_dir:string ->
   keeper_name:string ->

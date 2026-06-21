@@ -472,6 +472,17 @@ function renderInlineHtml(raw: string): { __html: string } {
   return { __html: sanitizeHtml(linkifyHtml(raw)) }
 }
 
+// Trace-step thinking text: render through the same sanitized markdown path the
+// assistant message body uses (purifyHtml(marked.parse(...))) so newlines and
+// inline formatting survive. Raw `${step.text}` interpolation collapsed both —
+// the model emits multi-line reasoning and the single-span layout folded it into
+// one run-on line. purifyHtml strips untrusted model markup (XSS coverage in
+// primitives.test.ts); `whitespace-pre-wrap` on the container preserves the
+// newlines marked leaves between paragraphs.
+function traceStepMarkdown(raw: string): { __html: string } {
+  return { __html: purifyHtml(marked.parse(raw) as string) }
+}
+
 function highlightJson(obj: unknown): string {
   const s = JSON.stringify(obj, null, 2)
   return sanitizeHtml(
@@ -966,8 +977,11 @@ function ChatTraceStep({ step }: { step: ChatTraceStep }) {
         <div class="min-w-0 flex-1">
           <div class="chat-block-tstep-row">
             <span class="chat-block-tstep-kind">Thinking</span>
-            <span class="chat-block-tstep-text">${step.text}</span>
           </div>
+          <div
+            class="chat-block-tstep-text markdown-body whitespace-pre-wrap break-words"
+            dangerouslySetInnerHTML=${traceStepMarkdown(step.text)}
+          />
         </div>
       </div>
     `

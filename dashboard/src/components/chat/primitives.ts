@@ -2175,6 +2175,44 @@ function ToolTraceStep({ entry, output, canMarkMissing = false }: { entry: Keepe
 // card placed above the answer bubble. The step list is visible by default so
 // operators can see thinking progress, tool names, and status without opening
 // each raw args/result body.
+// Interleave think/reason trace steps with tool entries by occurrence time so
+// the card shows the real think -> tool -> think order instead of two separate
+// blocks. This is a render-time merge only: tool entries keep their
+// entry-based output join (lookupToolCallOutput) and trace steps keep their
+// markdown render path. No data-structure change, so #21892 missing/aggregate
+// counts and the ToolTraceStep status taxonomy (pending/missing/ok/bad) are
+// preserved.
+type TraceOrderItem =
+  | { kind: 'trace'; step: ChatTraceStep }
+  | { kind: 'tool'; entry: KeeperConversationEntry; output: ToolCallEntry | null }
+
+function traceOrderTs(item: TraceOrderItem): string {
+  // ISO-8601 strings sort lexicographically == chronologically. A step without
+  // `ts` (backend-normalized, no timestamp surfaced from the wire) sorts first.
+  if (item.kind === 'tool') return item.entry.timestamp ?? ''
+  // Only think/reason carry `ts`; the tool variant of ChatTraceStep does not
+  // (and is never a 'trace' item here, but narrow for type safety).
+  const step = item.step
+  return step.kind === 'tool' ? '' : step.ts ?? ''
+}
+
+export function interleaveTraceAndTools(
+  traceSteps: ChatTraceStep[],
+  toolSteps: { entry: KeeperConversationEntry; output: ToolCallEntry | null }[],
+): TraceOrderItem[] {
+  const traceItems: TraceOrderItem[] = traceSteps.map((step) => ({ kind: 'trace', step }))
+  const toolItems: TraceOrderItem[] = toolSteps.map(({ entry, output }) => ({ kind: 'tool', entry, output }))
+  // trace-then-tool concat is the stable fallback order: Array.prototype.sort
+  // is stable, so equal (or absent) timestamps preserve this input order,
+  // matching the legacy two-section render as a baseline.
+  return [...traceItems, ...toolItems].sort((a, b) => {
+    const ta = traceOrderTs(a)
+    const tb = traceOrderTs(b)
+    if (ta === tb) return 0
+    return ta < tb ? -1 : 1
+  })
+}
+
 function ToolTraceCard({
   tools,
   traceSteps = [],
@@ -2192,6 +2230,10 @@ function ToolTraceCard({
   const steps = tools.map((entry) => ({ entry, output: lookupToolCallOutput(entry.id) }))
   const canMarkMissingForEntry = (entry: KeeperConversationEntry): boolean =>
     turnComplete && isToolOutputCoveredByHydration(entry, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs)
+  // Merge think/reason steps and tool entries into a single occurrence-ordered
+  // sequence. Aggregates below (failN/missingN/totalMs/stepN) stay entry-based,
+  // so #21892 missing detection and the status taxonomy are unaffected.
+  const ordered = interleaveTraceAndTools(traceSteps, steps)
   const failN = steps.filter(
     (s) => s.output !== null && (s.output.success === false || s.output.semantic_success === false),
   ).length
@@ -2225,13 +2267,15 @@ function ToolTraceCard({
         ? html`
             <div class="chat-block-trace-steps">
               <span class="chat-block-trace-rail"></span>
-              ${traceSteps.map((step, index) => html`<${ChatTraceStep} key=${`trace-${index}`} step=${step} />`)}
-              ${steps.map(({ entry, output }) => html`<${ToolTraceStep}
-                key=${entry.id}
-                entry=${entry}
-                output=${output}
-                canMarkMissing=${canMarkMissingForEntry(entry)}
-              />`)}
+              ${ordered.map((item, index) =>
+                item.kind === 'trace'
+                  ? html`<${ChatTraceStep} key=${`trace-${index}`} step=${item.step} />`
+                  : html`<${ToolTraceStep}
+                      key=${`tool-${item.entry.id}`}
+                      entry=${item.entry}
+                      output=${item.output}
+                      canMarkMissing=${canMarkMissingForEntry(item.entry)}
+                    />`)}
             </div>
           `
         : null}
@@ -2442,8 +2486,8 @@ function traceStepsSignature(entry: KeeperConversationEntry): string {
   const steps = entry.traceSteps
   if (!steps?.length) return ''
   return steps.map((step) => {
-    if (step.kind === 'think') return `think:${step.text.length}`
-    if (step.kind === 'reason') return `reason:${step.text.length}:${step.detail?.length ?? 0}`
+    if (step.kind === 'think') return `think:${step.text.length}:${step.ts ?? ''}`
+    if (step.kind === 'reason') return `reason:${step.text.length}:${step.detail?.length ?? 0}:${step.ts ?? ''}`
     return `tool:${step.name}:${step.status ?? ''}:${step.dur ?? ''}:${step.result?.length ?? 0}`
   }).join(',')
 }

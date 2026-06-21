@@ -8,8 +8,17 @@ let fixture_runs repo_root =
   Filename.concat repo_root
     "test/fixtures/tool_call_quality_benchmark/evidence_runs.json"
 
+(* Under [dune runtest] the cwd is the sandbox dir, not the repo root, so the
+   benchmark fixtures (which live at repo-root [benchmarks/data/...] and are not
+   sandbox deps) are unreachable via [Sys.getcwd ()]. dune exports the real
+   workspace source root as DUNE_SOURCEROOT; resolve fixtures against it and
+   fall back to cwd for direct (non-dune) invocation. Mirrors
+   test_disk_hygiene_script.ml / test_ci_run_tests_script.ml. *)
+let repo_source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with Some root -> root | None -> Sys.getcwd ()
+
 let load_fixture () =
-  let repo_root = Sys.getcwd () in
+  let repo_root = repo_source_root () in
   let cases =
     match Tool_call_quality_benchmark.load_cases_from_file (fixture_cases repo_root) with
     | Ok v -> v

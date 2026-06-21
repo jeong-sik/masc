@@ -1788,6 +1788,7 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
 
   it('renders board post ids in assistant prose as board detail links', () => {
     const postId = 'p-59e2917e15de5367e81b2244a8f5095a'
+    const label = postId.slice(0, 8)
     render(
       html`<${ChatTranscript}
         entries=${[
@@ -1806,8 +1807,12 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
 
     const link = container.querySelector(`a[href="#board?post=${postId}"]`) as HTMLAnchorElement | null
     expect(link).not.toBeNull()
-    expect(link?.textContent).toBe(postId)
-    expect(link?.getAttribute('title')).toBe('보드 게시글 열기')
+    expect(link?.classList.contains('chat-board-post-link')).toBe(true)
+    expect(link?.getAttribute('data-board-post-id')).toBe(postId)
+    expect(link?.getAttribute('aria-label')).toBe(`보드 글 ${postId} 열기`)
+    expect(link?.getAttribute('title')).toBe(`보드 글 ${postId} 열기`)
+    expect(link?.textContent).toContain('보드 글')
+    expect(link?.textContent).toContain(label)
   })
 
   it('keeps the flat per-row tool bubbles when grouping is off (default)', () => {

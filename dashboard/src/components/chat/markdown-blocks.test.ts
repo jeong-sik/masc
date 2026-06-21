@@ -178,11 +178,16 @@ describe('parseMarkdownToBlocks', () => {
 
   it('links generated board post ids to the board detail route', () => {
     const postId = 'p-59e2917e15de5367e81b2244a8f5095a'
+    const label = postId.slice(0, 8)
     const blocks = parseMarkdownToBlocks(`올렸다. 보드에 ${postId}.`)
     expect(blocks).toHaveLength(1)
     const html = (blocks[0] as Extract<ChatBlock, { t: 'p' }>).html
     expect(html).toContain(`href="#board?post=${postId}"`)
-    expect(html).toContain('title="보드 게시글 열기"')
+    expect(html).toContain('class="inline-link chat-board-post-link"')
+    expect(html).toContain(`data-board-post-id="${postId}"`)
+    expect(html).toContain(`title="보드 글 ${postId} 열기"`)
+    expect(html).toContain('보드 글')
+    expect(html).toContain(label)
   })
 
   // Per-line superset: a soft-wrapped paragraph (single newlines, no blank line)

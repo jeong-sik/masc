@@ -648,7 +648,6 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(params).not.toContain('top_p0.95')
     expect(params).not.toContain('max_tokens4,096')
   })
-
   it('displays summary stats in the stat strip', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
 

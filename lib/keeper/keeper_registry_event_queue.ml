@@ -12,9 +12,12 @@ let enqueue ~base_path name stimulus =
   match Keeper_registry.get ~base_path name with
   | None ->
     Log.Keeper.warn
-      "registry: enqueue_event name=%s base_path=%s: keeper not registered"
+      "registry: enqueue_event name=%s base_path=%s: keeper not registered; persisting stimulus for replay"
       name
-      base_path
+      base_path;
+    let cur = Keeper_event_queue_persistence.load ~base_path ~keeper_name:name in
+    let next = Keeper_event_queue.enqueue cur stimulus in
+    Keeper_event_queue_persistence.persist ~base_path ~keeper_name:name next
   | Some entry ->
     let rec loop () =
       let cur = Atomic.get entry.event_queue in
@@ -28,7 +31,7 @@ let enqueue ~base_path name stimulus =
 
 let snapshot ~base_path name =
   match Keeper_registry.get ~base_path name with
-  | None -> Keeper_event_queue.empty
+  | None -> Keeper_event_queue_persistence.load ~base_path ~keeper_name:name
   | Some entry -> Atomic.get entry.event_queue
 ;;
 

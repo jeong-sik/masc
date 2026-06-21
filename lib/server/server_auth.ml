@@ -285,6 +285,12 @@ let sanitize_dashboard_actor_name raw =
    is emitted at most once per [warn_cooldown_sec] per token prefix. *)
 let warn_cooldown_sec = 300.0
 
+(* Ceiling on distinct token-hash prefixes retained for log dedup. The prefix
+   is derived from client bearer tokens (16^8 keyspace), so without a cap the
+   table grows with every rotated/invalid token over process lifetime. The
+   cooldown gates log frequency per prefix, not table size. *)
+let stale_token_warn_log_max_entries = 1024
+
 let stale_token_warn_log : (string, float) Hashtbl.t = Hashtbl.create 16
 let stale_token_warn_mu = Eio.Mutex.create ()
 
@@ -306,6 +312,13 @@ let record_dashboard_actor_fallback
       | None -> true
     in
     if really_should_log then (
+      (* Bound the dedup table before inserting a new prefix. Guard on absence
+         so refreshing an existing prefix after cooldown does not evict an
+         unrelated entry. Reuses the same helper as the dashboard caches. *)
+      (if not (Hashtbl.mem stale_token_warn_log fb.token_hash_prefix) then
+         Server_utils.evict_oldest_if_full
+           ~max_entries:stale_token_warn_log_max_entries ~age_of:Fun.id
+           stale_token_warn_log);
       Hashtbl.replace stale_token_warn_log fb.token_hash_prefix now;
       Log.Auth.warn "%s"
         (Auth_error_kind.dashboard_actor_fallback_log_message fb));
@@ -314,6 +327,12 @@ let record_dashboard_actor_fallback
     Otel_metric_store.metric_silent_dashboard_actor_fallback
     ~labels:(Auth_error_kind.dashboard_actor_fallback_metric_labels fb)
     ()
+
+(* Exposed for testing: current size of the dedup table, used to assert the
+   bound holds under churn. *)
+let stale_token_warn_log_entry_count () =
+  Eio.Mutex.use_ro stale_token_warn_mu @@ fun () ->
+  Hashtbl.length stale_token_warn_log
 
 let dashboard_actor_for_request ~base_path request =
   match auth_token_from_request request with

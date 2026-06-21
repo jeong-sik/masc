@@ -5,6 +5,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
+import { createSseTransport } from '../../transports/sse-transport'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -406,28 +407,21 @@ export function connectKeeperCursorStream(
   baseUrl: string,
   onUpdate: (overlay: KeeperCursorOverlay) => void,
 ): () => void {
-  const eventSource = new EventSource(`${baseUrl}/api/v1/ide/cursors/stream`)
-  
-  eventSource.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data)
-      onUpdate(normalizeKeeperCursorSnapshot(data))
-    } catch (err) {
-      console.error('Keeper cursor stream parse error:', err)
+  const transport = createSseTransport(`${baseUrl}/api/v1/ide/cursors/stream`)
+  const unsubscribe = transport.subscribe((event) => {
+    if (event.type === 'message') {
+      onUpdate(normalizeKeeperCursorSnapshot(event.data))
+      return
     }
-  }
-  
-  eventSource.onerror = (err) => {
-    console.error('Keeper cursor stream error:', err)
-    // Reconnect after delay
-    setTimeout(() => {
-      eventSource.close()
-      connectKeeperCursorStream(baseUrl, onUpdate)
-    }, 3000)
-  }
-  
+    if (event.type === 'error') {
+      console.error('Keeper cursor stream error:', event.error)
+    }
+  })
+  transport.connect()
+
   return () => {
-    eventSource.close()
+    unsubscribe()
+    transport.disconnect()
   }
 }
 

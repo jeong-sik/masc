@@ -7,6 +7,8 @@ import {
 } from './keeper-cursor-overlay'
 
 afterEach(() => {
+  vi.useRealTimers()
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
@@ -75,7 +77,12 @@ describe('getKeeperColor', () => {
   })
 
   it('connects to the dedicated cursor stream endpoint', () => {
-    const instances: Array<{ readonly url: string; close: () => void }> = []
+    const instances: Array<{
+      readonly url: string
+      onmessage: ((event: MessageEvent) => void) | null
+      onerror: ((event: Event) => void) | null
+      close: () => void
+    }> = []
     class MockEventSource {
       onmessage: ((event: MessageEvent) => void) | null = null
       onerror: ((event: Event) => void) | null = null
@@ -95,5 +102,55 @@ describe('getKeeperColor', () => {
     expect(instances[0]?.url).toBe('http://localhost:8935/api/v1/ide/cursors/stream')
     cleanup()
     expect(instances[0]?.close).toHaveBeenCalled()
+  })
+
+  it('cancels cursor stream reconnect timers during cleanup', () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const instances: Array<{
+      readonly url: string
+      onmessage: ((event: MessageEvent) => void) | null
+      onerror: ((event: Event) => void) | null
+      close: () => void
+    }> = []
+    class MockEventSource {
+      onmessage: ((event: MessageEvent) => void) | null = null
+      onerror: ((event: Event) => void) | null = null
+      readonly url: string
+
+      constructor(url: string) {
+        this.url = url
+        instances.push(this)
+      }
+
+      close = vi.fn()
+    }
+    vi.stubGlobal('EventSource', MockEventSource)
+
+    const onUpdate = vi.fn()
+    const cleanup = connectKeeperCursorStream('http://localhost:8935', onUpdate)
+    instances[0]!.onmessage?.({
+      data: JSON.stringify({
+        cursors: [{
+          keeper_id: 'sangsu',
+          file_path: 'lib/a.ml',
+          line: 24,
+          column: 2,
+          focus_mode: 'editing',
+          last_update: Date.now(),
+        }],
+      }),
+    } as MessageEvent)
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      active_file: 'lib/a.ml',
+    }))
+
+    instances[0]!.onerror?.(new Event('error'))
+    cleanup()
+    vi.advanceTimersByTime(1_000)
+
+    expect(instances).toHaveLength(1)
+    expect(instances[0]!.close).toHaveBeenCalled()
   })
 })

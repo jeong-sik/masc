@@ -3729,6 +3729,18 @@ export interface MemorySubsystemsDraftSkillCandidate {
   created_at: number | null
 }
 
+export interface MemorySubsystemsDelegationRequest {
+  id: string
+  requester: string
+  topic: string
+  goal: string | null
+  promotion_state: string
+  dir: string
+  json_path: string
+  task_seed_md_path: string
+  created_at: number | null
+}
+
 export interface MemorySubsystemsResponse {
   generated_at: string
   hebbian: {
@@ -3771,6 +3783,14 @@ export interface MemorySubsystemsResponse {
     limit: number
     index_path: string
     items: MemorySubsystemsDraftSkillCandidate[]
+    error?: string | null
+  }
+  delegation_requests?: {
+    total: number
+    shown: number
+    limit: number
+    index_path: string
+    items: MemorySubsystemsDelegationRequest[]
     error?: string | null
   }
   filters: {

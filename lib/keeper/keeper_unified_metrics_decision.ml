@@ -30,6 +30,42 @@ let append_decision_record
     ?error
     ?terminal_reason
     () : unit =
+  (try
+     match deliberation_execution with
+     | None -> ()
+     | Some execution -> (
+       match
+         Keeper_delegation_request_store.write_execution_result
+           ~base_path:config.base_path
+           ~requester:meta.name
+           ~goal:meta.goal
+           execution
+       with
+       | Ok [] -> ()
+       | Ok stored ->
+         Log.Keeper.info ~keeper_name:meta.name
+           "delegation_requests wrote=%d dir=%s"
+           (List.length stored)
+           (Keeper_delegation_request_store.requests_dir
+              ~base_path:config.base_path)
+       | Error msg ->
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string DispatchEventFailures)
+           ~labels:[ "keeper", meta.name; "site", "delegation_requests" ]
+           ();
+         Log.Keeper.warn ~keeper_name:meta.name
+           "delegation_requests failed: %s"
+           msg)
+   with
+   | Eio.Cancel.Cancelled _ as exn -> raise exn
+   | exn ->
+     Otel_metric_store.inc_counter
+       Keeper_metrics.(to_string DispatchEventFailures)
+       ~labels:[ "keeper", meta.name; "site", "delegation_requests" ]
+       ();
+     Log.Keeper.warn ~keeper_name:meta.name
+       "delegation_requests failed: %s"
+       (Printexc.to_string exn));
   let now_ts = Time_compat.now () in
   let trigger_signals = observed_triggers_of_observation ~meta observation in
   let affordances = observed_affordances_of_observation ~meta observation in

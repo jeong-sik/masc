@@ -2,6 +2,7 @@ open Alcotest
 
 module D = Masc.Keeper_deliberation
 module R = Masc.Keeper_delegation_request
+module RS = Masc.Keeper_delegation_request_store
 module Keeper_types = Keeper_types
 
 let has_prompt_root path =
@@ -23,6 +24,29 @@ let () =
   let prompts_dir = Filename.concat (repo_root ()) "config/prompts" in
   Prompt_registry.set_markdown_dir prompts_dir;
   Masc.Prompt_defaults.init ()
+
+let temp_dir () = Filename.temp_dir "keeper_delegation_request_store_test" ""
+
+let rm_rf dir =
+  let rec rm path =
+    if Sys.file_exists path
+    then
+      if Sys.is_directory path
+      then (
+        Sys.readdir path |> Array.iter (fun entry -> rm (Filename.concat path entry));
+        Unix.rmdir path)
+      else Sys.remove path
+  in
+  try rm dir with
+  | _ -> ()
+;;
+
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+;;
 
 (* ---------- Triage tests ---------- *)
 
@@ -604,8 +628,9 @@ let test_delegation_request_json_uses_stable_array_shape () =
     |> json_list_items "empty delegation requests"
   in
   check int "empty request list" 0 (List.length empty);
+  let delegation_obs = D.{ base_obs with active_goal_count = 1 } in
   let single_result =
-    D.execute_structured_result base_obs
+    D.execute_structured_result delegation_obs
       D.
         {
           action =
@@ -626,7 +651,7 @@ let test_delegation_request_json_uses_stable_array_shape () =
         (json_string_field "schema" request_json)
   | _ -> fail "expected one request JSON");
   let multi_result =
-    D.execute_structured_result base_obs
+    D.execute_structured_result delegation_obs
       D.
         {
           action =
@@ -666,6 +691,88 @@ let test_delegation_request_title_truncates_utf8_boundary () =
   check string "title stops before partial codepoint"
     ("Delegate: " ^ String.make 79 'a')
     request.task_seed.title
+
+let test_delegation_request_store_writes_reviewable_artifacts () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+      let request =
+        R.make ~requester:"planner" ~goal:"connector parity"
+          ~topic:"Review non-dashboard rendering"
+          ~reason:"existing channels lose rich blocks"
+          ()
+      in
+      let stored =
+        match RS.write_request ~base_path:dir request with
+        | Ok stored -> stored
+        | Error msg -> fail msg
+      in
+      check bool "request json exists" true (Sys.file_exists stored.json_path);
+      check bool "task seed exists" true (Sys.file_exists stored.task_seed_md_path);
+      check string "index path" (RS.index_path ~base_path:dir) stored.index_path;
+      let json = Yojson.Safe.from_file stored.json_path in
+      check string "request schema" "masc.keeper_delegation_request.v1"
+        (json_string_field "schema" json);
+      let task_seed_md = read_file stored.task_seed_md_path in
+      check bool "promotion contract visible" true
+        (contains_substring task_seed_md "not a direct child-agent spawn");
+      let listing =
+        match RS.list_requests ~base_path:dir ~limit:10 with
+        | Ok listing -> listing
+        | Error msg -> fail msg
+      in
+      check int "listing total" 1 listing.total;
+      match listing.items with
+      | [ item ] ->
+        check string "listing id" request.id item.id;
+        check string "listing requester" "planner" item.requester
+      | _ -> fail "expected one delegation request summary")
+;;
+
+let test_delegation_request_store_dedups_unchanged_execution () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+      let obs = D.{ base_obs with active_goal_count = 1 } in
+      let execution =
+        D.execute_structured_result obs
+          D.
+            { action =
+                ProposeSpawn
+                  { topic = "Review connector routing"; reason = "needs owner" }
+            ; reasoning = "delegate one task"
+            ; confidence = 0.8
+            }
+      in
+      let first =
+        match
+          RS.write_execution_result ~base_path:dir ~requester:"planner"
+            ~goal:"connector parity"
+            execution
+        with
+        | Ok stored -> stored
+        | Error msg -> fail msg
+      in
+      let second =
+        match
+          RS.write_execution_result ~base_path:dir ~requester:"planner"
+            ~goal:"connector parity"
+            execution
+        with
+        | Ok stored -> stored
+        | Error msg -> fail msg
+      in
+      check int "first write" 1 (List.length first);
+      check int "second unchanged write" 0 (List.length second);
+      let listing =
+        match RS.list_requests ~base_path:dir ~limit:10 with
+        | Ok listing -> listing
+        | Error msg -> fail msg
+      in
+      check int "deduped listing total" 1 listing.total)
+;;
 
 let test_parse_json_with_code_fences_rejected () =
   let raw =
@@ -1277,6 +1384,10 @@ let () =
             test_delegation_request_id_includes_goal;
           test_case "delegation request truncates utf8 at boundary" `Quick
             test_delegation_request_title_truncates_utf8_boundary;
+          test_case "delegation request store writes reviewable artifacts" `Quick
+            test_delegation_request_store_writes_reviewable_artifacts;
+          test_case "delegation request store dedups unchanged execution" `Quick
+            test_delegation_request_store_dedups_unchanged_execution;
         ] );
       ( "parse_deliberation_response",
         [

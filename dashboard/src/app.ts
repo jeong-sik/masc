@@ -330,11 +330,11 @@ export function App() {
       data-motion=${tweaksMotion.value}
       data-bubble=${tweaksBubble.value}
       data-font-scale=${tweaksFontScale.value}
-      data-theme=${tweaksTheme.value}
+      data-theme=${tweaksTheme.value === 'paper' ? 'paper' : null}
       data-volt=${tweaksVolt.value}
       data-surface=${currentTab}
       style=${{
-        '--twk-font-scale': String(tweaksFontScale.value),
+        '--twk-font-scale': String(tweaksFontScale.value / 100),
         '--thread-w': `${tweaksThreadW.value}px`,
       }}
     >

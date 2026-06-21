@@ -78,8 +78,8 @@ export const tweaksCtxOpen = persistentSignal<boolean>({
 })
 
 export const tweaksFontScale = persistentSignal<number>({
-  key: 'dashboard:tweaks:font-scale-v3', // v3: 0.9 ~ 1.4
-  defaultValue: 1.0,
+  key: 'dashboard:tweaks:font-scale-v2', // v2: 80 ~ 140
+  defaultValue: 100,
 })
 
 export const tweaksOpen = signal(false)
@@ -366,7 +366,7 @@ function TweakRadio<T extends string>({ label, value, options, onChange }: Tweak
   const normalizedOpts = options.map((o) => (typeof o === 'object' && o !== null ? o : { value: o, label: o }))
   return html`
     <${TweakRow} label=${label}>
-      <div class="twk-seg" role="radiogroup">
+      <div class="twk-seg" role="radiogroup" data-testid="twk-seg">
         ${normalizedOpts.map((o) => html`
           <button
             type="button"
@@ -374,6 +374,7 @@ function TweakRadio<T extends string>({ label, value, options, onChange }: Tweak
             role="radio"
             class=${`twk-seg-b ${value === o.value ? 'on' : ''}`}
             aria-checked=${value === o.value}
+            data-value=${o.value}
             onClick=${() => onChange(o.value)}
           >
             ${o.label}
@@ -391,21 +392,26 @@ interface TweakSliderProps {
   max: number
   step?: number
   unit?: string
+  displayValue?: string
+  testid?: string
   onChange: (value: number) => void
 }
 
-function TweakSlider({ label, value, min, max, step = 1, unit = '', onChange }: TweakSliderProps) {
+function TweakSlider({ label, value, min, max, step = 1, unit = '', displayValue, testid, onChange }: TweakSliderProps) {
+  const renderedVal = displayValue !== undefined ? displayValue : `${value}${unit}`
   return html`
-    <${TweakRow} label=${label} value=${`${value}${unit}`}>
-      <input
-        type="range"
-        class="twk-slider"
-        min=${min}
-        max=${max}
-        step=${step}
-        value=${value}
-        onInput=${(e: Event) => onChange(Number((e.target as HTMLInputElement).value))}
-      />
+    <${TweakRow} label=${label} value=${renderedVal}>
+      <div data-testid=${testid}>
+        <input
+          type="range"
+          class="twk-slider"
+          min=${min}
+          max=${max}
+          step=${step}
+          value=${value}
+          onInput=${(e: Event) => onChange(Number((e.target as HTMLInputElement).value))}
+        />
+      </div>
     <//>
   `
 }
@@ -604,10 +610,11 @@ export function TweaksPanel() {
         <${TweakSlider}
           label="가독성 · 본문 배율"
           value=${tweaksFontScale.value}
-          min=${0.9}
-          max=${1.4}
-          step=${0.05}
-          unit="x"
+          min=${90}
+          max=${140}
+          step=${5}
+          displayValue=${`${tweaksFontScale.value / 100}x`}
+          testid="twk-slider"
           onChange=${(v: number) => { tweaksFontScale.value = v }}
         />
       </div>

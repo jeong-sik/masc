@@ -18,9 +18,9 @@ let enqueue_if_missing queue stimulus =
   if queue_contains queue stimulus then queue else Keeper_event_queue.enqueue queue stimulus
 ;;
 
-let persist_live_queue entry name =
+let persist_live_queue ~base_path (entry : Keeper_registry.registry_entry) name =
   Keeper_event_queue_persistence.persist
-    ~base_path:entry.base_path
+    ~base_path
     ~keeper_name:name
     (Atomic.get entry.event_queue)
 ;;
@@ -45,7 +45,7 @@ let enqueue ~base_path name stimulus =
          if next = cur
          then ()
          else if Atomic.compare_and_set entry.event_queue cur next
-         then persist_live_queue entry name
+         then persist_live_queue ~base_path entry name
          else loop ()
        in
        loop ())
@@ -54,7 +54,7 @@ let enqueue ~base_path name stimulus =
       let cur = Atomic.get entry.event_queue in
       let next = Keeper_event_queue.enqueue cur stimulus in
       if Atomic.compare_and_set entry.event_queue cur next
-      then persist_live_queue entry name
+      then persist_live_queue ~base_path entry name
       else loop ()
     in
     loop ()
@@ -77,7 +77,7 @@ let dequeue ~base_path name =
       | Some (stim, rest) ->
         if Atomic.compare_and_set entry.event_queue cur rest
         then (
-          persist_live_queue entry name;
+          persist_live_queue ~base_path entry name;
           Some stim)
         else loop ()
     in
@@ -93,7 +93,7 @@ let drain_board ?window_sec ~base_path name =
       let board, rest = Keeper_event_queue.drain_board_window ?window_sec cur in
       if Atomic.compare_and_set entry.event_queue cur rest
       then (
-        persist_live_queue entry name;
+        persist_live_queue ~base_path entry name;
         board)
       else loop ()
     in

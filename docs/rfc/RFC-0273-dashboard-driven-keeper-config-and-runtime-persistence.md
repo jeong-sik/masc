@@ -77,7 +77,14 @@ All write endpoints sit behind **dashboard operator auth**, following the preced
 
 ### 3.4 VerifyBtn
 
-Replace the fake `setTimeout` with a **read-only** verify endpoint that probes the selected runtime's reachability (provider/model resolvable, endpoint live) and returns a typed `{ ok; detail }`. No write, no credential exposure (mask per RFC-0132). This is independent of Tier A/B and can ship first.
+> **Amendment (PR-VerifyBtn, grounded correction).** The original draft said this probes "the selected runtime's reachability". Grounding `settings-surface.ts` corrected that premise: the fake `VerifyBtn` (`:237`, `setTimeout(() => setSt('ok'), 700)`) is reused at **six** call sites that verify five **heterogeneous, non-runtime** resources — MCP endpoint URL (×2), Gate base URL, Store/DB connection string, worktree basepath, and a linked GitHub repo ref. Runtime reachability is a *separate* concern already served by `GET /api/v1/dashboard/runtime-probe` (`dashboard_runtime_provider_probe_json`). §3.4 is therefore re-scoped to the resources `VerifyBtn` actually targets.
+
+Replace the fake `setTimeout` with a **read-only** verify endpoint (`POST /api/v1/dashboard/verify-resource`) that takes a typed `{ kind; value }` and returns `{ ok; detail; http_status; target }`:
+
+- **Implemented now (in-tree probes):** `mcp_endpoint` / `gate_url` → HTTP(S) reachability via `Masc_http_client.get_sync` (2xx/3xx → ok; 4xx/5xx/connection-failure → fail); `worktree_path` → server-side directory existence (`~` expanded to `$HOME`). The echoed `target` is userinfo/query/fragment-stripped (RFC-0132); credentials are never exposed.
+- **Deferred (honest, not faked):** Store/DB (`store_url`) and linked GitHub repo (`ide_repo`) have no in-tree probe yet (they need DB-ping / GitHub-API infra and their own credential boundary). The frontend renders a disabled **"수동 확인"** placeholder for these rather than a fabricated `✓` — an always-success stub is worse than honest absence (the same anti-fabrication bar as the rest of this RFC). A follow-up adds their probes.
+
+**Auth:** unlike the public-read runtime-probe (which only probes the server's own `runtime.toml` URLs), this endpoint fetches a **caller-supplied** URL (SSRF surface) / stats a caller-supplied path (info-disclosure), so it is gated behind operator (`CanAdmin`) auth — read-only, but stricter than a public read. Independent of Tier A/B; ships first.
 
 ## 4. Scope & non-goals
 

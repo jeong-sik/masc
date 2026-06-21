@@ -64,6 +64,18 @@ val light_runtime_resolution_json : Workspace.config -> Yojson.Safe.t
     aligned with [/health] fleet safety without running git probes or other
     heavy runtime-resolution checks on the header hot path. *)
 
+(** {1 URL hygiene (shared with the verify-resource route)} *)
+
+val dashboard_runtime_url_for_json : string -> string
+(** Strip userinfo / query / fragment from a URL before echoing it on a
+    dashboard surface, so credentials embedded in a URL never leak (RFC-0132).
+    Reused by {!Server_dashboard_verify_resource} for the verify-target echo. *)
+
+val dashboard_runtime_http_url_valid : string -> bool
+(** [true] when the URL has an [http]/[https] scheme and a non-empty host.
+    Reused by {!Server_dashboard_verify_resource} to reject non-HTTP schemes
+    (e.g. [file:]) before the server issues an outbound GET. *)
+
 (** {1 Dashboard HTTP routes} *)
 
 val dashboard_runtime_probe_http_json :

@@ -371,6 +371,24 @@
   color: var(--text-dim);
 }
 
+.set-verify.fail {
+  color: var(--status-bad);
+  border-color: color-mix(in oklab, var(--status-bad) 45%, transparent);
+}
+
+/* Honest placeholder for resources with no in-tree probe yet (DB / repo) —
+   never styled as success. */
+.set-verify.deferred {
+  color: var(--text-dim);
+  border-style: dashed;
+  cursor: not-allowed;
+}
+
+.set-verify.deferred:hover {
+  border-color: var(--border-main);
+  color: var(--text-dim);
+}
+
 .set-path {
   display: flex;
   align-items: center;

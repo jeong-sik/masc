@@ -369,6 +369,26 @@ let add_routes ~sw ~clock router =
                        ~status:(runtime_config_path_error_status msg)
                        ~request:req reqd msg)))
          ) request reqd)
+  |> Http.Router.post "/api/v1/dashboard/verify-resource" (fun request reqd ->
+       (* RFC-0273 §3.4 — read-only verification of operator-supplied Settings
+          resources (replaces the dashboard VerifyBtn fake). Gated behind
+          operator (CanAdmin) auth, stricter than the public-read runtime-probe:
+          the server fetches a caller-supplied URL (SSRF surface) / stats a
+          caller-supplied path (info-disclosure), unlike the runtime-probe which
+          only probes the server's own runtime.toml URLs. DB / GitHub-repo
+          verify is deferred (the UI renders an honest "수동 확인" state). *)
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             match Server_dashboard_verify_resource.parse_request body_str with
+             | Error msg ->
+               respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+             | Ok (kind, value) ->
+               let outcome = Server_dashboard_verify_resource.verify ~kind ~value in
+               Http.Response.json_value ~compress:true ~request:req
+                 (Server_dashboard_verify_resource.to_json ~kind outcome)
+                 reqd))
+         request reqd)
   (* Phase 1 Action 2 — live Dashboard_cache state surface.  Renders
      hit_ratio, in-flight compute count, per-entry ttl_remaining, and
      timeout-circuit-open counts so operators can correlate slow endpoints

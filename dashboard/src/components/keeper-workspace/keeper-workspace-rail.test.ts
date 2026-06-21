@@ -1,8 +1,9 @@
-import { cleanup, fireEvent, render } from '@testing-library/preact'
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { tasks } from '../../store'
+import { shellAuthSummary, tasks } from '../../store'
 import { navigate } from '../../router'
+import { callMcpTool } from '../../api/mcp'
 import { KeeperWorkspaceRail } from './keeper-workspace-rail'
 import type { Keeper, Task } from '../../types'
 
@@ -26,6 +27,10 @@ vi.mock('../../router', () => ({
   navigate: vi.fn(),
 }))
 
+vi.mock('../../api/mcp', () => ({
+  callMcpTool: vi.fn().mockResolvedValue('{"before_tokens":1000,"after_tokens":800,"phase_after":"Running"}'),
+}))
+
 function mkKeeper(partial: Partial<Keeper>): Keeper {
   return { name: 'masc-improver', status: 'running', ...partial } as Keeper
 }
@@ -43,6 +48,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   tasks.value = []
+  shellAuthSummary.value = null
   vi.clearAllMocks()
 })
 
@@ -53,6 +59,9 @@ describe('KeeperWorkspaceRail', () => {
     context_ratio: 0.62,
     context_tokens: 124000,
     context_max: 200000,
+    compaction_profile: 'balanced',
+    compaction_ratio_gate: 0.72,
+    compaction_message_gate: 120,
     recent_tool_names: ['masc_amplitude_query', 'masc_board_metrics'],
   })
 
@@ -119,7 +128,10 @@ describe('KeeperWorkspaceRail', () => {
 
   it('renders the auto-compact threshold label', () => {
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
-    expect(container.textContent).toContain('compact 85%')
+    expect(container.textContent).toContain('compact 72%')
+    expect(container.textContent).toContain('ratio_gate 72%')
+    expect(container.textContent).toContain('profile balanced')
+    expect(container.textContent).toContain('message_gate 120')
   })
 
   it('renders context metrics as missing when only a zero default exists', () => {
@@ -127,9 +139,12 @@ describe('KeeperWorkspaceRail', () => {
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
     expect(container.textContent).toContain('컨텍스트 사용량 미수신')
     expect(container.textContent).toContain('컴팩트 기록 없음')
-    expect(container.textContent).not.toContain('0%')
+    expect(container.textContent).not.toContain('윈도우 사용량')
+    expect(container.querySelector('.kw-meter')).toBeNull()
     expect(container.textContent).not.toContain('마지막 컴팩트 0초 전')
-    expect(container.querySelector('.kw-compact-btn')).toBeNull()
+    const button = container.querySelector('.kw-compact-btn') as HTMLButtonElement | null
+    expect(button).not.toBeNull()
+    expect(button?.disabled).toBe(true)
   })
 
   it('shows token-only context without a fake window percentage', () => {
@@ -137,8 +152,22 @@ describe('KeeperWorkspaceRail', () => {
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
     expect(container.textContent).toContain('윈도우 사용률 미수신')
     expect(container.textContent).toContain('37.8k')
-    expect(container.textContent).not.toContain('0%')
-    expect(container.textContent).not.toContain('compact 85%')
+    expect(container.textContent).not.toContain('윈도우 사용량')
+    expect(container.querySelector('.kw-meter')).toBeNull()
+    expect(container.textContent).toContain('compact ratio_gate는 50%입니다')
+  })
+
+  it('runs operator compaction through the existing MCP tool', async () => {
+    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
+    fireEvent.click(getByRole('button', { name: '지금 compact' }))
+
+    await waitFor(() => {
+      expect(callMcpTool).toHaveBeenCalledWith('masc_keeper_compact', {
+        name: 'masc-improver',
+        force: true,
+      })
+    })
   })
 
   it('fires onToggleDetail from the 운영 상세 button', () => {

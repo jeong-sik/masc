@@ -359,8 +359,8 @@ export function App() {
                 <span class="inline-block size-2 rounded-full bg-[var(--color-status-ok)] shadow-[0_0_7px_rgb(var(--ok-glow)/0.75)] motion-safe:animate-pulse"></span>
                 ${shellCounts.value?.keepers ?? 0} 실행 중
               </span>
-              <span class="v2-statchip" title="서버 상태로 추정한 스케줄러 상태">
-                스케줄러 <b>${serverStatus.value ? '정상' : '—'}</b>
+              <span class="v2-statchip" title="dashboard shell이 최근 서버 status를 수신했는지 여부">
+                서버 <b>${serverStatus.value ? '응답' : '—'}</b>
               </span>
             </div>
             <${AttentionIndicator} />

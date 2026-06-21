@@ -730,7 +730,10 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                   ("message_count", `Int (Safe_ops.json_int "message_count" metrics));
                 ]
             | None ->
-                (let primary_max_context = 0 in
+                (let primary_max_context =
+                   Keeper_turn_runtime_budget.resolved_max_context_for_turn
+                     ~meta:m
+                 in
                      let base_dir = Keeper_types_profile.session_base_dir config in
                      let (_session, ctx_opt) =
                        Keeper_execution.load_context_from_checkpoint

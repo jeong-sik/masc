@@ -23,6 +23,7 @@
 let terminal_prefix_max_turns_exceeded = "agent_error_max_turns_exceeded"
 let terminal_prefix_execution_timeout = "agent_error_execution_timeout"
 let terminal_prefix_idle_timeout = "agent_error_idle_timeout"
+let terminal_prefix_turn_budget_exhausted = "turn_budget_exhausted"
 
 (* SSOT for the two retry-recoverable transient wire codes inside the
    [api_error_*] / [Provider_runtime_failure] family. These are the wire
@@ -54,6 +55,7 @@ type t =
   | Completion_contract_violation of string
   | Turn_livelock of string
   | Internal_error of string
+  | Turn_budget_exhausted of string
   | Auto_recoverable_budget of string
   | Pre_dispatch_success of string
   | Other of string
@@ -90,6 +92,8 @@ let of_wire wire =
   then Turn_livelock wire
   else if String.equal lowered "internal_error"
   then Internal_error wire
+  else if String.starts_with ~prefix:terminal_prefix_turn_budget_exhausted lowered
+  then Turn_budget_exhausted wire
   else if is_auto_recoverable_turn_budget_terminal lowered
   then Auto_recoverable_budget wire
   else if String.equal lowered "pre_dispatch_success"
@@ -108,6 +112,7 @@ let to_wire = function
   | Completion_contract_violation wire -> wire
   | Turn_livelock wire -> wire
   | Internal_error wire -> wire
+  | Turn_budget_exhausted wire -> wire
   | Auto_recoverable_budget wire -> wire
   | Pre_dispatch_success wire -> wire
   | Other wire -> wire
@@ -141,6 +146,7 @@ let is_transient_provider_runtime_failure = function
   | Completion_contract_violation _
   | Turn_livelock _
   | Internal_error _
+  | Turn_budget_exhausted _
   | Auto_recoverable_budget _
   | Pre_dispatch_success _
   | Other _ -> false

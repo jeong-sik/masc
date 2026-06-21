@@ -336,11 +336,37 @@ let composite_execution_config_drift execution =
 
 let keeper_activation_readiness_json = Server_dashboard_fleet_readiness.keeper_activation_readiness_json
 
+let composite_execution_completion_unsatisfied_reason execution =
+  match lower_string_opt (json_string "completion_contract_result" execution) with
+  | Some
+      ( ("violated" | "claim_only_after_owned_task" | "needs_execution_progress"
+        | "passive_only")
+        as reason ) -> Some ("completion_contract_result:" ^ reason)
+  | Some _
+  | None -> None
+;;
+
+let composite_execution_budget_unsatisfied_reason execution =
+  match lower_string_opt (json_string "completion_contract_result" execution) with
+  | Some
+      ( ("unknown" | "not_dispatched" | "violated" | "surface_mismatch"
+        | "no_capable_provider" | "claim_only_after_owned_task" | "needs_execution_progress"
+        | "passive_only")
+        as reason ) -> Some ("completion_contract_result:" ^ reason)
+  | Some _
+  | None -> None
+;;
+
+let composite_execution_turn_budget_exhausted execution =
+  string_opt_has_prefix
+    (json_string "terminal_reason_code" execution)
+    ~prefix:"turn_budget_exhausted"
+;;
+
 let composite_execution_budget_exhausted_pass execution =
   string_opt_is_any (json_string "operator_disposition" execution) [ "pass" ]
-  && string_opt_has_prefix
-       (json_string "terminal_reason_code" execution)
-       ~prefix:"turn_budget_exhausted"
+  && composite_execution_turn_budget_exhausted execution
+  && Option.is_none (composite_execution_budget_unsatisfied_reason execution)
   &&
   match lower_string_opt (json_string "operator_disposition_reason" execution) with
   | None -> true
@@ -352,6 +378,7 @@ let composite_execution_budget_exhausted_pass execution =
 let composite_execution_blocked execution =
   composite_execution_claim_no_eligible execution
   || composite_execution_contract_blocked execution
+  || Option.is_some (composite_execution_completion_unsatisfied_reason execution)
   || string_opt_is_any (json_string "operator_disposition" execution) [ "pause_human" ]
   || (match lower_string_opt (json_string "terminal_reason_code" execution) with
       | Some terminal ->
@@ -452,17 +479,26 @@ let composite_runtime_attention ~snapshot ~execution =
     then Some "claim_scope_no_eligible"
     else match composite_execution_contract_blocker_reason execution with
     | Some _ as reason -> reason
-    | None when not blocked -> None
-    | None ->
-      (match json_string "operator_disposition_reason" execution with
-       | Some value -> String_util.trim_to_option value
-       | _ ->
-         (match json_string "terminal_reason_code" execution with
-          | Some value -> String_util.trim_to_option value
-          | _ when needs_attention && composite_execution_config_drift execution ->
-            Some "keeper_runtime_override_drift"
-          | _ when blocked -> Some "runtime_blocked"
-          | _ -> None))
+    | None -> (
+      match composite_execution_completion_unsatisfied_reason execution with
+      | Some _ as reason -> reason
+      | None when not blocked -> None
+      | None ->
+        (match
+           ( composite_execution_turn_budget_exhausted execution,
+             composite_execution_budget_unsatisfied_reason execution )
+         with
+         | true, Some reason -> Some reason
+         | _ ->
+           (match json_string "operator_disposition_reason" execution with
+            | Some value -> String_util.trim_to_option value
+            | _ ->
+              (match json_string "terminal_reason_code" execution with
+               | Some value -> String_util.trim_to_option value
+               | _ when needs_attention && composite_execution_config_drift execution ->
+                 Some "keeper_runtime_override_drift"
+               | _ when blocked -> Some "runtime_blocked"
+               | _ -> None))))
   in
   let reason =
     match execution_reason with

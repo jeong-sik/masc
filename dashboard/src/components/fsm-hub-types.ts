@@ -398,9 +398,8 @@ export function operatorDispositionLabel(value: string | null | undefined): stri
 }
 
 /** Korean labels for `execution.operator_disposition_reason`. Backend
- *  emits 13 closed-sum values via
- *  `Keeper_execution_receipt.operator_disposition_reason_to_string`
- *  (lib/keeper/keeper_execution_receipt.ml:427-441). Paired with
+ *  emits 15 closed-sum values via
+ *  `Keeper_execution_receipt.operator_disposition_reason_to_string`. Paired with
  *  {!operatorDispositionLabel} at every emit site — same atomic
  *  coverage as the attention_reason / next_human_action pair fixed
  *  by #16355. */
@@ -410,9 +409,12 @@ const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   preflight_config_error: '실행 전 설정 오류',
   degraded_retry: '저하 상태 재시도',
   runtime_fallback: '런타임 폴백',
+  transient_runtime_retry: '일시적 런타임 재시도',
   provider_runtime_error: '런타임 호출 오류',
   internal_error: '내부 오류',
   tool_route_recoverable_failure: '도구 라우팅 복구 가능 실패',
+  completion_contract_unsatisfied: '완료 계약 미충족',
+  turn_budget_exhausted: '턴 예산 소진',
   turn_livelock_blocked: '턴 livelock 차단',
   cancelled: '취소됨',
   phase_skipped: 'phase 건너뜀',

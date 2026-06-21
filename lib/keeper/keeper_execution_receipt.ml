@@ -93,6 +93,7 @@ type operator_disposition_reason =
   | Reason_provider_runtime_error
   | Reason_internal_error
   | Reason_tool_route_recoverable_failure
+  | Reason_completion_contract_unsatisfied
   | Reason_turn_budget_exhausted
   | Reason_turn_livelock_blocked
   | Reason_cancelled
@@ -109,6 +110,7 @@ let operator_disposition_reason_to_string = function
   | Reason_provider_runtime_error -> "provider_runtime_error"
   | Reason_internal_error -> "internal_error"
   | Reason_tool_route_recoverable_failure -> "tool_route_recoverable_failure"
+  | Reason_completion_contract_unsatisfied -> "completion_contract_unsatisfied"
   | Reason_turn_budget_exhausted -> "turn_budget_exhausted"
   | Reason_turn_livelock_blocked -> "turn_livelock_blocked"
   | Reason_cancelled -> "cancelled"
@@ -140,6 +142,31 @@ let terminal_prefix_idle_timeout = Keeper_terminal_reason.terminal_prefix_idle_t
 
 let is_auto_recoverable_turn_budget_terminal =
   Keeper_terminal_reason.is_auto_recoverable_turn_budget_terminal
+;;
+
+let completion_contract_satisfied = function
+  | Contract_satisfied_completion | Contract_satisfied_execution -> true
+  | Contract_unknown
+  | Contract_not_dispatched
+  | Contract_violated
+  | Contract_surface_mismatch
+  | Contract_no_capable_provider
+  | Contract_claim_only_after_owned_task
+  | Contract_needs_execution_progress
+  | Contract_passive_only -> false
+;;
+
+let completion_contract_unsatisfied = function
+  | Contract_violated
+  | Contract_claim_only_after_owned_task
+  | Contract_needs_execution_progress
+  | Contract_passive_only -> true
+  | Contract_unknown
+  | Contract_not_dispatched
+  | Contract_surface_mismatch
+  | Contract_no_capable_provider
+  | Contract_satisfied_completion
+  | Contract_satisfied_execution -> false
 ;;
 
 let operator_disposition (receipt : t)
@@ -246,13 +273,15 @@ let operator_disposition (receipt : t)
     Disp_pass, Reason_turn_budget_exhausted
   | Config_or_auth _
   | Provider_runtime_failure _
+  | Turn_budget_exhausted _
   | Pre_dispatch_success _
   | Other _ ->
     (* Generic fall-through. [Config_or_auth] and
        [Provider_runtime_failure] are caught by the guarded branches above
        (their constructors force [preflight_config_failure] /
-       [provider_runtime_failure] true), so only [Pre_dispatch_success] and
-       [Other] reach here in practice; the first two are listed to keep the
+       [provider_runtime_failure] true), so only [Turn_budget_exhausted],
+       [Pre_dispatch_success], and [Other] reach here in practice;
+       [Config_or_auth] and [Provider_runtime_failure] are listed to keep the
        match exhaustive without a wildcard. *)
     let tool_route_failure =
       List.mem
@@ -276,6 +305,24 @@ let operator_disposition (receipt : t)
       || receipt.runtime_outcome = Runtime_passed_to_next_model
     then Disp_pass_next_model, Reason_runtime_fallback
     else if
+      match terminal_reason with
+      | Keeper_terminal_reason.Turn_budget_exhausted _ -> true
+      | Runtime_exhausted _
+      | Config_or_auth _
+      | Provider_runtime_failure _
+      | Completion_contract_violation _
+      | Turn_livelock _
+      | Internal_error _
+      | Auto_recoverable_budget _
+      | Pre_dispatch_success _
+      | Other _ -> false
+    then
+      if completion_contract_satisfied receipt.completion_contract_result
+      then Disp_pass, Reason_turn_budget_exhausted
+      else Disp_alert_exhausted, Reason_turn_budget_exhausted
+    else if completion_contract_unsatisfied receipt.completion_contract_result
+    then Disp_pause_human, Reason_completion_contract_unsatisfied
+    else if
       receipt.outcome = `Ok
       && receipt.runtime_outcome = Runtime_not_dispatched
       && receipt.completion_contract_result = Contract_not_dispatched
@@ -288,6 +335,7 @@ let operator_disposition (receipt : t)
        | Completion_contract_violation _
        | Turn_livelock _
        | Internal_error _
+       | Turn_budget_exhausted _
        | Auto_recoverable_budget _
        | Other _ -> false)
     then Disp_pass, Reason_healthy

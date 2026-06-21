@@ -2181,8 +2181,11 @@ type TraceOrderItem =
 function traceOrderTs(item: TraceOrderItem): string {
   // ISO-8601 strings sort lexicographically == chronologically. A step without
   // `ts` (backend-normalized, no timestamp surfaced from the wire) sorts first.
-  if (item.kind === 'trace') return item.step.ts ?? ''
-  return item.entry.timestamp ?? ''
+  if (item.kind === 'tool') return item.entry.timestamp ?? ''
+  // Only think/reason carry `ts`; the tool variant of ChatTraceStep does not
+  // (and is never a 'trace' item here, but narrow for type safety).
+  const step = item.step
+  return step.kind === 'tool' ? '' : step.ts ?? ''
 }
 
 export function interleaveTraceAndTools(

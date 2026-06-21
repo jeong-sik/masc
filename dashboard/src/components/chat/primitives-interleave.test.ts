@@ -19,7 +19,11 @@ describe('interleaveTraceAndTools', () => {
     output: null,
   })
   const labels = (items: ReturnType<typeof interleaveTraceAndTools>) =>
-    items.map((i) => (i.kind === 'trace' ? `think:${i.step.text}` : `tool:${i.entry.id}`))
+    items.map((i) => {
+      if (i.kind === 'tool') return `tool:${i.entry.id}`
+      // think/reason carry `text`; the tool variant of ChatTraceStep does not.
+      return `think:${'text' in i.step ? i.step.text : i.step.name}`
+    })
 
   it('interleaves think and tool by occurrence time (think -> tool -> think -> tool)', () => {
     const out = interleaveTraceAndTools(

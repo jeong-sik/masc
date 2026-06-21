@@ -28,13 +28,26 @@ export const DEFAULT_RAIL_WIDTH = 312
 
 /** Persisted column widths (px). Reads subscribe the component, but values only
  *  change on drag-end so re-renders stay rare. */
-export const rosterWidth = persistentSignal<number>({ key: 'kw.rosterWidth', defaultValue: DEFAULT_ROSTER_WIDTH })
-export const railWidth = persistentSignal<number>({ key: 'kw.railWidth', defaultValue: DEFAULT_RAIL_WIDTH })
+function persistedPaneWidth(kind: PaneKind, key: string, defaultValue: number) {
+  return persistentSignal<number>({
+    key,
+    defaultValue,
+    deserialize: raw => {
+      const parsed: unknown = JSON.parse(raw)
+      return typeof parsed === 'number' && Number.isFinite(parsed)
+        ? clampPaneWidth(kind, parsed)
+        : defaultValue
+    },
+  })
+}
+
+export const rosterWidth = persistedPaneWidth('roster', 'kw.rosterWidth', DEFAULT_ROSTER_WIDTH)
+export const railWidth = persistedPaneWidth('rail', 'kw.railWidth', DEFAULT_RAIL_WIDTH)
 
 /** Pure: clamp a candidate width to the pane's bounds (rounded to whole px). */
-export function clampPaneWidth(kind: PaneKind, px: number): number {
+export function clampPaneWidth(kind: PaneKind, px: unknown): number {
   const { min, max } = PANE_BOUNDS[kind]
-  if (!Number.isFinite(px)) return min
+  if (typeof px !== 'number' || !Number.isFinite(px)) return min
   return Math.max(min, Math.min(max, Math.round(px)))
 }
 
@@ -46,7 +59,7 @@ export function beginPaneResize(kind: PaneKind, event: PointerEvent, gridEl: HTM
   const { cssVar } = PANE_BOUNDS[kind]
   const sig = kind === 'roster' ? rosterWidth : railWidth
   const startX = event.clientX
-  const startW = sig.value
+  const startW = clampPaneWidth(kind, sig.value)
   const dir = kind === 'roster' ? 1 : -1
   let latest = startW
   document.body.classList.add('kw-resizing')

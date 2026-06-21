@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   beginPaneResize,
   clampPaneWidth,
@@ -13,6 +13,7 @@ afterEach(() => {
   rosterWidth.value = DEFAULT_ROSTER_WIDTH
   railWidth.value = DEFAULT_RAIL_WIDTH
   document.body.classList.remove('kw-resizing')
+  window.localStorage.clear()
 })
 
 describe('clampPaneWidth', () => {
@@ -31,6 +32,38 @@ describe('clampPaneWidth', () => {
   it('falls back to the minimum for non-finite input (defensive floor)', () => {
     expect(clampPaneWidth('roster', Number.NaN)).toBe(200)
     expect(clampPaneWidth('rail', Number.POSITIVE_INFINITY)).toBe(240)
+    expect(clampPaneWidth('roster', 'wide')).toBe(200)
+  })
+})
+
+describe('persisted pane widths', () => {
+  async function importWithStorage(seed: Record<string, unknown>) {
+    vi.resetModules()
+    window.localStorage.clear()
+    for (const [key, value] of Object.entries(seed)) {
+      window.localStorage.setItem(key, JSON.stringify(value))
+    }
+    return import('./keeper-workspace-pane-resize')
+  }
+
+  it('falls back to defaults for invalid stored value types', async () => {
+    const mod = await importWithStorage({
+      'kw.rosterWidth': 'wide',
+      'kw.railWidth': null,
+    })
+
+    expect(mod.rosterWidth.value).toBe(mod.DEFAULT_ROSTER_WIDTH)
+    expect(mod.railWidth.value).toBe(mod.DEFAULT_RAIL_WIDTH)
+  })
+
+  it('clamps persisted numeric widths on load', async () => {
+    const mod = await importWithStorage({
+      'kw.rosterWidth': 9999,
+      'kw.railWidth': 0,
+    })
+
+    expect(mod.rosterWidth.value).toBe(440)
+    expect(mod.railWidth.value).toBe(240)
   })
 })
 

@@ -1130,6 +1130,14 @@
  (modules test_voice_config)
  (libraries alcotest yojson masc.voice_config))
 
+; MCP HTTP session persistence: save/forget/load round-trip through the
+; fd-safe write path (close_out_noerr finally guard).
+
+(test
+ (name test_server_mcp_session_persist)
+ (modules test_server_mcp_session_persist)
+ (libraries alcotest masc_server unix))
+
 ; Focused dashboard nudge feed projection.
 
 (test

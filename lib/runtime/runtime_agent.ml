@@ -852,15 +852,10 @@ let run_blocks
     ?goal_detail
     (goal_blocks : Agent_sdk.Types.content_block list)
   : (run_result, Agent_sdk.Error.sdk_error) result =
-  let validation_blocks =
-    content_blocks_for_run
-      ~initial_messages:config.initial_messages
-      ~goal_blocks
-  in
   match
     validate_content_blocks_for_config
       ~config
-      validation_blocks
+      goal_blocks
   with
   | Error _ as err -> err
   | Ok () ->

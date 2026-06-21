@@ -317,6 +317,50 @@ describe('Work', () => {
       expect(detail?.textContent).toContain('Deploy to staging')
     })
 
+    it('renders all defined gate evaluations including verify_to_review', () => {
+      goals.value = [
+        { id: 'G-1', horizon: 'short', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+      ]
+      tasks.value = [
+        {
+          id: 'J-1',
+          title: 'Gated job',
+          goal_id: 'G-1',
+          status: 'todo',
+          gate: {
+            done: { status: 'ready', checks: [{ evidence: 'done check', outcome: 'satisfied', detail: 'done detail' }] },
+            inspect_to_implement: { status: 'blocked', checks: [{ evidence: 'inspect check', outcome: 'failed', detail: 'inspect detail' }] },
+            verify_to_review: { status: 'inconclusive', checks: [{ evidence: 'verify check', outcome: 'missing', detail: 'verify detail' }] },
+          },
+        },
+      ]
+
+      const { container } = render(html`<${Work} />`)
+
+      fireEvent.click(screen.getByTestId('goal-card').querySelector('.wk-goal-h')!)
+      fireEvent.click(container.querySelector('[data-job-id="J-1"] .wk-task-main')!)
+
+      const detail = screen.getByTestId('job-row').querySelector('.wk-task-detail')
+      expect(detail?.textContent).toContain('done gate')
+      expect(detail?.textContent).toContain('inspect gate')
+      expect(detail?.textContent).toContain('verify gate')
+      expect(detail?.textContent).toContain('verify check')
+    })
+
+    it('maps known goal status IDs to Korean labels', () => {
+      goals.value = [
+        { id: 'G-1', horizon: 'short', title: 'Active goal', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-2', horizon: 'mid', title: 'Completed goal', priority: 3, status: 'completed', phase: 'done', created_at: '2026-01-01', updated_at: '2026-01-01' },
+      ]
+      tasks.value = []
+
+      render(html`<${Work} />`)
+
+      const cards = screen.getAllByTestId('goal-card')
+      expect(cards[0]?.textContent).toContain('진행 중')
+      expect(cards[1]?.textContent).toContain('완료')
+    })
+
     it('does not render a task dossier sidebar for route-selected tasks', () => {
       routeSignal.value = {
         tab: 'workspace',

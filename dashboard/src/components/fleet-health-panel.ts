@@ -300,7 +300,7 @@ function FleetCommandStrip() {
     ? 'bad'
     : fleet?.operator_action_required || fleet?.reaction_capacity_below_target || (pausedCount && pausedCount > 0)
       ? 'warn'
-      : runtime ? 'ok' : 'warn'
+      : runtime?.status === 'ready' ? 'ok' : 'warn'
   const runtimeLabel = runtime?.status === 'ready' ? '런타임 가동' : `런타임 ${runtime?.status ?? 'unknown'}`
   const tick = cdal?.proof_store?.latest_activity_at ?? (fleetSafety ? 'runtime sample' : 'no runtime sample')
 

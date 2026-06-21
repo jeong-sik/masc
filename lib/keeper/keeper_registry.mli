@@ -108,6 +108,13 @@ val mark_turn_started : base_path:string -> string -> unit
 val record_turn_progress :
   base_path:string -> string -> event_kind:string -> unit
 
+(** RFC-0197 (P1-4a): write-through mirror of the turn event bus
+    [pending_tool_count] into the live turn's [active_tool_count]. No-op when no
+    turn is active. Does not touch [last_progress_at]. Read by
+    [Keeper_supervisor.assess_in_turn_progress] to exclude active tool execution
+    from the [Mid_turn_no_progress] window. *)
+val record_turn_tool_inflight : base_path:string -> string -> count:int -> unit
+
 (** Mark the beginning of an SDK turn within an existing keeper turn.
 
     The Agent SDK [run_loop] iterates N SDK turns inside a single MASC

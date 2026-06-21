@@ -523,6 +523,13 @@ and turn_observation = {
   last_progress_kind : string option;
       (** Low-cardinality label for the progress signal that most recently
           refreshed [last_progress_at]. *)
+  active_tool_count : int;
+      (** Write-through mirror of the turn event bus [pending_tool_count]
+          (tools issued but not yet completed). Maintained from the
+          authoritative FSM via [record_turn_tool_inflight]; the supervisor
+          sweep reads it to exclude active tool execution from the
+          [Mid_turn_no_progress] no-progress window (RFC-0197 points 2-3).
+          [0] outside any tool call. *)
   turn_phase : packed_turn_phase;
   decision_stage : packed_decision_stage;
   measurement : turn_measurement option;

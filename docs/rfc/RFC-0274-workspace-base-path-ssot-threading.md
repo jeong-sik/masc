@@ -37,6 +37,7 @@ Retire `Env_config_core.base_path ()` as a **runtime** read. Thread `Workspace.c
 
 - Keep `MASC_BASE_PATH` env as the **boot-time** source only (bootstrap putenv at `server_runtime_bootstrap.ml:260` and the test-gated `workspace_utils_backend_setup.ml:117` populate the initial `Workspace.config`). After boot, env is no longer read for the workspace path.
 - `Env_config_core.base_path_opt ()` and `Env_config_core.base_path_source_opt ()` are retained for bootstrap-only callers (those that run before any `Workspace.config` exists). Runtime callers are migrated off them.
+- Read semantics are explicit: the default is **per-operation read-through** (`Atomic.get state.workspace_config` at the point of use). A long-lived fiber may use a documented **per-fiber/per-pass snapshot** via a captured `~base_path`, but that choice must be explicit and reviewed.
 
 ### Site classification (16 runtime call sites, 14 modules)
 
@@ -84,6 +85,7 @@ Each wave is independently mergeable.
 - Zero runtime call sites of `Env_config_core.base_path ()` or `Env_config_core.base_path_source_opt` outside bootstrap.
 - Zero direct `Sys.getenv_opt "MASC_BASE_PATH"` reads outside bootstrap (`shutdown_hooks`, `tool_library` migrated), and zero use of `Host_config.from_env ().base_path` as a runtime SSOT (migrated to `Workspace.config.base_path` or explicit `~base_path`).
 - Static acceptance check passes: `rg 'MASC_BASE_PATH' lib/` minus bootstrap/test allow-list is empty.
+- Each migrated base_path read site is classified in review as either **per-operation read-through** (obtains `Workspace.config` via `Atomic.get` immediately before use) or an explicit **per-fiber/per-pass snapshot** (captured in a `~base_path` argument and documented as intentional). No site may implicitly capture a stale config.
 - Reproduction test present and passing.
 - No regression in workspace-isolation tests.
 

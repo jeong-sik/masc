@@ -133,6 +133,22 @@ describe('createSseTransport', () => {
     expect(instances).toHaveLength(2)
   })
 
+  it('coalesces duplicate error events into one pending reconnect', () => {
+    const transport = createSseTransport('/mcp', {
+      retryBaseMs: 100,
+      retryJitterMs: 0,
+      retryMaxAttempts: 10,
+    })
+    transport.connect()
+    instances[0]!.simulateOpen()
+
+    instances[0]!.simulateError()
+    instances[0]!.simulateError()
+    vi.advanceTimersByTime(100)
+
+    expect(instances).toHaveLength(2)
+  })
+
   it('keeps reconnecting after retryMaxAttempts and emits close once', () => {
     const events: { type: string }[] = []
     const transport = createSseTransport('/mcp', {

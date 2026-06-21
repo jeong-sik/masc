@@ -318,4 +318,37 @@ describe('FusionSurface', () => {
     expect(refresh?.disabled).toBe(true)
     expect(refresh?.textContent).toContain('Refreshing')
   })
+
+  it('counts only explicit panel failure statuses, not substrings like failover', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-fus-statuses',
+        title: 'Fusion deliberation (run fus-statuses): mixed',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-statuses',
+          question: 'Status edge cases?',
+          panel: [
+            { model: 'm1', status: 'failover', answer: 'Not a failure.' },
+            { model: 'm2', status: 'error', reason: 'provider error' },
+          ],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'One real failure.' },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const detail = container.querySelector('[data-testid="fusion-detail"]')
+    // Only the explicit 'error' status counts as failed; 'failover' is treated as answered.
+    expect(detail?.textContent).toContain('1/2')
+    expect(detail?.textContent).toContain('fail 1')
+    expect(detail?.textContent).not.toContain('0/2')
+    expect(detail?.textContent).not.toContain('fail 2')
+
+    const cards = container.querySelectorAll('.fus-panel-card')
+    expect(cards[0]?.classList.contains('answered')).toBe(true)
+    expect(cards[0]?.classList.contains('failed')).toBe(false)
+    expect(cards[1]?.classList.contains('failed')).toBe(true)
+  })
 })

@@ -17,12 +17,19 @@ import { FusionRunsPanel } from './fusion-runs-panel'
 
 type FusionRunStatus = 'complete' | 'failed' | 'running'
 type FusionTone = 'ok' | 'warn' | 'bad' | 'volt' | 'muted'
+type FusionPanelStatus = 'answered' | 'failed' | 'error' | 'timeout' | 'unknown'
+
+const FAILED_PANEL_STATUSES: readonly string[] = ['failed', 'error']
+
+function isPanelFailure(status: string): status is 'failed' | 'error' {
+  return FAILED_PANEL_STATUSES.includes(status)
+}
 
 const FUSION_BOARD_SOURCE = 'fusion'
 
 interface FusionPanelEntry {
   model: string
-  status: string
+  status: FusionPanelStatus
   answer: string | null
   reason: string | null
   inputTokens: number | null
@@ -156,7 +163,7 @@ function normalizePanelEntry(value: unknown, index: number): FusionPanelEntry | 
   const model = firstString(entry, ['model', 'name', 'provider']) ?? `panel-${index + 1}`
   return {
     model,
-    status: firstString(entry, ['status']) ?? 'unknown',
+    status: (firstString(entry, ['status']) ?? 'unknown') as FusionPanelStatus,
     answer: firstString(entry, ['answer', 'content', 'output']),
     reason: firstString(entry, ['reason', 'error', 'error_text']),
     inputTokens: firstNumber(entry, ['input_tokens', 'inputTokens']) ?? firstNumber(usage ?? {}, ['input_tokens', 'inputTokens']),
@@ -319,7 +326,7 @@ function statusFor(judge: FusionJudge, panel: FusionPanelEntry[]): FusionRunStat
   if (status.includes('fail')) return 'failed'
   if (judge.error) return 'failed'
   if (judge.resolvedAnswer || judge.synthesis || judge.decision || status.includes('synth')) return 'complete'
-  if (panel.length > 0 && panel.every(entry => entry.status.toLowerCase().includes('fail'))) return 'failed'
+  if (panel.length > 0 && panel.every(entry => isPanelFailure(entry.status))) return 'failed'
   return 'running'
 }
 
@@ -428,7 +435,7 @@ function FusionStatusGlyph({ status }: { status: FusionRunStatus }) {
 }
 
 function FusionPipelineStrip({ run }: { run: FusionRunView }) {
-  const panelFailures = run.panel.filter(entry => entry.status.toLowerCase().includes('fail')).length
+  const panelFailures = run.panel.filter(entry => isPanelFailure(entry.status)).length
   const gateClass = run.status === 'failed' && run.panel.length === 0 ? 'deny' : 'gate'
   const panelLabel = run.panel.length > 0 ? `panel ×${run.panel.length}` : 'panel pending'
   const judgeLabel = run.judge.decision ?? run.judge.status ?? (run.status === 'running' ? 'judge pending' : 'judge')
@@ -454,7 +461,7 @@ function FusionPipelineStrip({ run }: { run: FusionRunView }) {
 }
 
 function FusionPanelCard({ entry }: { entry: FusionPanelEntry }) {
-  const failed = entry.status.toLowerCase().includes('fail')
+  const failed = isPanelFailure(entry.status)
   const body = entry.answer ?? entry.reason ?? 'No panel output captured.'
   return html`
     <article class=${`fus-panel-card ${failed ? 'failed' : 'answered'}`}>
@@ -636,7 +643,7 @@ function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) 
 }
 
 function FusionRunDetail({ run }: { run: FusionRunView }) {
-  const answered = run.panel.filter(entry => !entry.status.toLowerCase().includes('fail')).length
+  const answered = run.panel.filter(entry => !isPanelFailure(entry.status)).length
   const failed = run.panel.length - answered
   const synthesis = run.judge.synthesis ?? run.judge.error ?? 'No judge synthesis captured.'
   const resolved = run.judge.resolvedAnswer ?? 'No resolved answer captured.'

@@ -15,6 +15,7 @@ import { TextInput } from './common/input'
 import { Select } from './common/select'
 import { Checkbox } from './common/checkbox'
 import { LogFilter } from './common/log-filter'
+import { kSlot, kSigil } from './keeper-badge'
 import { createAsyncResource, loaded } from '../lib/async-state'
 import { toolCategory } from './tool-call-shared'
 import { StatusChip } from './common/status-chip'
@@ -141,7 +142,7 @@ const LOG_KIND_LABELS: Record<LogDisplayKind, string> = {
   tool: 'TOOL',
   turn: 'TURN',
   lifecycle: 'LIFECYCLE',
-  approval: 'DIRECTIVE',
+  approval: 'APPROVAL',
   broadcast: 'BROADCAST',
   telemetry: 'TELEMETRY',
   task: 'TASK',
@@ -274,14 +275,6 @@ function keeperLabel(entry: LogEntry, details: Record<string, unknown> | null): 
   const moduleName = entry.module?.trim()
   if (moduleName) return moduleName
   return '(root)'
-}
-
-function keeperInitial(label: string): string {
-  const normalized = label.replace(/^\(|\)$/g, '').trim()
-  if (!normalized) return '?'
-  const [first, second] = normalized.split(/[-_\s]+/).filter(Boolean)
-  if (first && second) return `${first[0] ?? ''}${second[0] ?? ''}`.toUpperCase()
-  return normalized.slice(0, Math.min(2, normalized.length)).toUpperCase()
 }
 
 function formatLogClock(ts: string): string {
@@ -694,7 +687,7 @@ function renderLogRow(entry: LogEntry) {
       >
         <span class="v2-logs-time mono">${formatLogClock(entry.ts)}</span>
         <span class="v2-logs-who">
-          <span class="v2-logs-sigil" aria-hidden="true">${keeperInitial(identity)}</span>
+          <span class="v2-logs-sigil" data-keeper-slot=${kSlot(identity)} style=${{ background: `var(--color-keeper-${kSlot(identity)})`, borderColor: `color-mix(in oklab, var(--color-keeper-${kSlot(identity)}) 50%, transparent)` }} aria-hidden="true">${kSigil(identity)}</span>
           <span class="v2-logs-identity" title=${identity}>${identity}</span>
         </span>
         <span class="v2-logs-kind" data-kind=${displayKind}>${LOG_KIND_LABELS[displayKind]}</span>
@@ -1011,8 +1004,8 @@ export function LogViewer() {
           <div class="v2-logs-stats" aria-label="로그 요약">
             <div class="v2-logs-stat"><span class="k">이벤트/분</span><span class="v mono">${eventRatePerMinute(logEntries)}</span></div>
             <div class="v2-logs-stat"><span class="k">오류율</span><span class=${`v mono ${summary.errors > 0 ? 'bad' : ''}`}>${errRate}%</span></div>
-            <div class="v2-logs-stat"><span class="k">Tool 호출</span><span class="v mono">${toolCalls}</span></div>
-            <div class="v2-logs-stat"><span class="k">활성 소스</span><span class="v mono">${logActiveIdentityCount(logEntries)}</span></div>
+            <div class="v2-logs-stat"><span class="k">tool 호출</span><span class="v mono">${toolCalls}</span></div>
+            <div class="v2-logs-stat"><span class="k">활성 keeper</span><span class="v mono">${logActiveIdentityCount(logEntries)}</span></div>
           </div>
         </header>
 

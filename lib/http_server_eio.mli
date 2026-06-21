@@ -14,10 +14,12 @@
     handlers), \[with_streamable_mcp_request_handler],
     \[make_request_handler] (router → request_handler
     converter), and \[error_handler] (httpun connection error
-    handler).  The server accept loop and [Eio_main] entry point
-    live in the [Server_bootstrap_*] facade modules rather than
-    in this file.  External callers reach the server through
-    those facade modules instead of these internals.
+    handler).  The server accept loop lives in the
+    [Server_bootstrap_*] facade modules; the [Eio_main] entry
+    point (with signal handlers) lives in the executable
+    [bin/main_eio.ml] (and sibling [bin/*_eio.ml] binaries).
+    External callers reach the server through the facade modules
+    instead of these internals.
 
     @see <https://github.com/anmonteiro/httpun> httpun
     documentation *)

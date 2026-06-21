@@ -1,115 +1,14 @@
 import { html } from 'htm/preact'
 import { RichContent } from '../common/rich-content'
 import type { BoardPost } from '../../types/core'
-import { normalizeFusionPanelReason } from '../../lib/fusion-meta'
+import {
+  extractFusionEvidence,
+  type FusionJudgeView,
+  type FusionPanelEntry,
+} from '../../lib/fusion-meta'
 
-type FusionPanelEntry = {
-  model: string
-  status: string
-  answer?: string
-  reasonCode?: string
-  reason?: string
-  outputTokens?: number
-}
-
-type FusionJudgeView = {
-  status: string
-  decision?: string
-  // fusion_sink.ml writes render_judge markdown here; keep it ahead of
-  // resolvedAnswer so board detail and chat fusion cards share the same SSOT.
-  synthesis?: string
-  resolvedAnswer?: string
-  error?: string
-}
-
-type FusionUsage = {
-  inputTokens?: number
-  outputTokens?: number
-}
-
-type FusionEvidenceView = {
-  runId?: string
-  question?: string
-  panel: FusionPanelEntry[]
-  judge: FusionJudgeView | null
-  usage: FusionUsage | null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function stringField(record: Record<string, unknown>, key: string): string | undefined {
-  const value = record[key]
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed || undefined
-}
-
-function numberField(record: Record<string, unknown>, key: string): number | undefined {
-  const value = record[key]
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function parsePanel(meta: Record<string, unknown>): FusionPanelEntry[] {
-  const panel = meta.panel
-  if (!Array.isArray(panel)) return []
-  return panel.flatMap((item) => {
-    if (!isRecord(item)) return []
-    const model = stringField(item, 'model') ?? '?'
-    const reason = stringField(item, 'reason_detail') ?? stringField(item, 'reason')
-    return [{
-      model,
-      status: stringField(item, 'status') ?? 'unknown',
-      answer: stringField(item, 'answer'),
-      reasonCode: stringField(item, 'reason_code'),
-      reason: normalizeFusionPanelReason(model, reason),
-      outputTokens: numberField(item, 'output_tokens'),
-    }]
-  })
-}
-
-function parseJudge(meta: Record<string, unknown>): FusionJudgeView | null {
-  const judge = meta.judge
-  if (!isRecord(judge)) return null
-  return {
-    status: stringField(judge, 'status') ?? 'unknown',
-    decision: stringField(judge, 'decision'),
-    synthesis: stringField(judge, 'synthesis'),
-    resolvedAnswer: stringField(judge, 'resolved_answer'),
-    error: stringField(judge, 'error'),
-  }
-}
-
-function parseUsage(meta: Record<string, unknown>): FusionUsage | null {
-  const usage = meta.observed_usage
-  if (!isRecord(usage)) return null
-  const inputTokens = numberField(usage, 'input_tokens')
-  const outputTokens = numberField(usage, 'output_tokens')
-  return inputTokens === undefined && outputTokens === undefined
-    ? null
-    : { inputTokens, outputTokens }
-}
-
-function parseFusionEvidence(meta: BoardPost['meta'] | undefined | null): FusionEvidenceView | null {
-  if (!isRecord(meta)) return null
-  const panel = parsePanel(meta)
-  const judge = parseJudge(meta)
-  const source = stringField(meta, 'source')
-  const runId = stringField(meta, 'run_id')
-  const isFusion = source === 'fusion' || (panel.length > 0 && (judge !== null || Boolean(runId)))
-  if (!isFusion) return null
-  return {
-    runId,
-    question: stringField(meta, 'question'),
-    panel,
-    judge,
-    usage: parseUsage(meta),
-  }
-}
-
-function formatTokens(value: number | undefined): string | null {
-  return value === undefined ? null : `${value.toLocaleString()} tok`
+function formatTokens(value: number | null | undefined): string | null {
+  return value == null ? null : `${value.toLocaleString()} tok`
 }
 
 function statusClass(status: string): string {
@@ -172,10 +71,10 @@ export function FusionBoardEvidence({
   post: Pick<BoardPost, 'meta'>
   class?: string
 }) {
-  const evidence = parseFusionEvidence(post.meta)
+  const evidence = extractFusionEvidence(post.meta)
   if (!evidence) return null
 
-  const answeredCount = evidence.panel.filter(panel => panel.status === 'answered').length
+  const answeredCount = evidence.panel.filter((panel) => panel.status === 'answered').length
   const rootClass = [
     'rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-bg-surface)] p-4',
     className,

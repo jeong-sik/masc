@@ -14,10 +14,17 @@ import { TimeAgo } from '../common/time-ago'
 import { ringFocusClasses } from '../common/ring'
 import { AgentAvatar } from '../overview/agent-avatar'
 import { FusionRunsPanel } from './fusion-runs-panel'
+import { asRecord, asString, asStringArray } from '../common/normalize'
+import {
+  firstString,
+  firstNumber,
+  normalizeFusionPanel,
+  normalizeFusionUsage,
+  type FusionPanelEntry,
+} from '../../lib/fusion-meta'
 
 type FusionRunStatus = 'complete' | 'failed' | 'running'
 type FusionTone = 'ok' | 'warn' | 'bad' | 'volt' | 'muted'
-type FusionPanelStatus = 'answered' | 'failed' | 'error' | 'timeout' | 'unknown'
 
 const FAILED_PANEL_STATUSES: readonly string[] = ['failed', 'error']
 
@@ -26,15 +33,6 @@ function isPanelFailure(status: string): status is 'failed' | 'error' {
 }
 
 const FUSION_BOARD_SOURCE = 'fusion'
-
-interface FusionPanelEntry {
-  model: string
-  status: FusionPanelStatus
-  answer: string | null
-  reason: string | null
-  inputTokens: number | null
-  outputTokens: number | null
-}
 
 interface FusionModelClaim {
   text: string
@@ -99,84 +97,6 @@ interface FusionRunView {
   usage: FusionUsage
   createdAt: string
   updatedAt: string
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  return value as Record<string, unknown>
-}
-
-function asString(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
-function asNumber(value: unknown): number | null {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : null
-  if (typeof value === 'string') {
-    const parsed = Number(value)
-    return Number.isFinite(parsed) ? parsed : null
-  }
-  return null
-}
-
-function asStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value.flatMap(item => {
-    const text = asString(item)
-    return text ? [text] : []
-  })
-}
-
-function firstString(source: Record<string, unknown>, keys: string[]): string | null {
-  for (const key of keys) {
-    const value = asString(source[key])
-    if (value) return value
-  }
-  return null
-}
-
-function firstNumber(source: Record<string, unknown>, keys: string[]): number | null {
-  for (const key of keys) {
-    const value = asNumber(source[key])
-    if (value !== null) return value
-  }
-  return null
-}
-
-function fusionMeta(post: BoardPost): Record<string, unknown> | null {
-  const meta = asRecord(post.meta)
-  if (!meta) return null
-  if (asString(meta.source) === FUSION_BOARD_SOURCE) return meta
-
-  const nested = asRecord(meta.fusion_deliberation)
-  if (nested) return { ...nested, source: FUSION_BOARD_SOURCE }
-
-  return null
-}
-
-function normalizePanelEntry(value: unknown, index: number): FusionPanelEntry | null {
-  const entry = asRecord(value)
-  if (!entry) return null
-  const usage = asRecord(entry.usage)
-  const model = firstString(entry, ['model', 'name', 'provider']) ?? `panel-${index + 1}`
-  return {
-    model,
-    status: (firstString(entry, ['status']) ?? 'unknown') as FusionPanelStatus,
-    answer: firstString(entry, ['answer', 'content', 'output']),
-    reason: firstString(entry, ['reason', 'error', 'error_text']),
-    inputTokens: firstNumber(entry, ['input_tokens', 'inputTokens']) ?? firstNumber(usage ?? {}, ['input_tokens', 'inputTokens']),
-    outputTokens: firstNumber(entry, ['output_tokens', 'outputTokens']) ?? firstNumber(usage ?? {}, ['output_tokens', 'outputTokens']),
-  }
-}
-
-function normalizePanel(value: unknown): FusionPanelEntry[] {
-  if (!Array.isArray(value)) return []
-  return value.flatMap((entry, index) => {
-    const normalized = normalizePanelEntry(entry, index)
-    return normalized ? [normalized] : []
-  })
 }
 
 function normalizeModelClaims(value: unknown): FusionModelClaim[] {
@@ -305,18 +225,10 @@ function normalizeJudge(value: unknown): FusionJudge {
 }
 
 function normalizeUsage(meta: Record<string, unknown>, panel: FusionPanelEntry[]): FusionUsage {
-  const observed = asRecord(meta.observed_usage) ?? {}
-  const summedInput = panel.reduce((sum, entry) => sum + (entry.inputTokens ?? 0), 0)
-  const summedOutput = panel.reduce((sum, entry) => sum + (entry.outputTokens ?? 0), 0)
-  const inputTokens = firstNumber(observed, ['input_tokens', 'inputTokens'])
-    ?? firstNumber(meta, ['input_tokens', 'inputTokens'])
-    ?? (summedInput > 0 ? summedInput : null)
-  const outputTokens = firstNumber(observed, ['output_tokens', 'outputTokens'])
-    ?? firstNumber(meta, ['output_tokens', 'outputTokens'])
-    ?? (summedOutput > 0 ? summedOutput : null)
+  const base = normalizeFusionUsage(meta, panel)
   return {
-    inputTokens,
-    outputTokens,
+    inputTokens: base.inputTokens ?? null,
+    outputTokens: base.outputTokens ?? null,
     costUsd: firstNumber(meta, ['cost_usd', 'costUsd', 'observed_cost_usd']),
   }
 }
@@ -346,11 +258,22 @@ function keeperNameFor(post: BoardPost): string {
     || 'system'
 }
 
+function fusionMeta(post: BoardPost): Record<string, unknown> | null {
+  const meta = asRecord(post.meta)
+  if (!meta) return null
+  if (asString(meta.source) === FUSION_BOARD_SOURCE) return meta
+
+  const nested = asRecord(meta.fusion_deliberation)
+  if (nested) return { ...nested, source: FUSION_BOARD_SOURCE }
+
+  return null
+}
+
 function fusionRunFromPost(post: BoardPost): FusionRunView | null {
   const meta = fusionMeta(post)
   if (!meta) return null
 
-  const panel = normalizePanel(meta.panel)
+  const panel = normalizeFusionPanel(meta.panel)
   const judge = normalizeJudge(meta.judge)
   const usage = normalizeUsage(meta, panel)
   const runId = firstString(meta, ['run_id', 'runId', 'id']) ?? post.id
@@ -388,8 +311,8 @@ function buildFusionRuns(posts: readonly BoardPost[]): FusionRunView[] {
     .sort((a, b) => timeValue(b.updatedAt) - timeValue(a.updatedAt))
 }
 
-function formatTokens(value: number | null): string {
-  if (value === null) return 'n/a'
+function formatTokens(value: number | null | undefined): string {
+  if (value == null) return 'n/a'
   return new Intl.NumberFormat().format(value)
 }
 

@@ -48,19 +48,22 @@ This is entirely MASC-side config-persistence orchestration. OAS owns provider/m
 
 ### 3.1 Tier A — keeper_meta config writes (persona / instructions / tool permissions)
 
-Replace the single stringly `"set_policy"` action with a **typed action sum** so the compiler enforces exhaustiveness and unknown actions are rejected (not coerced to a permissive default):
+> **Amendment (PR-TierA, grounded correction).** The original draft assumed (a) persona/instructions need a *new* write path, (b) the tool-permission panel is a generic `Record<string,boolean>` needing reshape, and (c) `keeper-detail-page.ts:9` should swap to a v2 panel. Grounding `origin/main` corrected all three:
+> - **instructions** already persists via the production panel (`keeper-config-panel.ts` `saveConfig` → `patchKeeperConfig` → `POST /api/v1/keepers/:name/config`); **tool_access/tool_denylist** already persists via `saveToolDenylist` → `setKeeperToolPolicy` → `POST /api/v1/keepers/:name/tools` (action `set_policy`). Adding `Set_persona`/`Set_instructions` to `/tools` would duplicate `/config` (and silently weaken its auth: `/config` is `CanAdmin`, `/tools` is tool-auth).
+> - The production panel **already renders tool permissions masc-tool-keyed** from `KeeperConfig.tools` (`tool_access[]`/`resolved_allowlist[]`/`tool_denylist[]` + counts). The generic `Record<string,boolean>` only exists in `keeper-config-panel-v2.ts`, a dead local-state stub rendered nowhere.
+> - Swapping `keeper-detail-page.ts:9` to the v2 stub would **regress** the production editors (goals, will/needs/desires, sandbox/network, runtime_id, denylist, …) the stub does not implement.
+>
+> Tier A is therefore re-scoped to the **one genuine net-new gap**: the `set_policy` write accepts unknown tool names and persists them silently. There is no static per-tool "risk badge" field (risk is *computed* by `Governance_pipeline_risk.assess_risk`), so that part is dropped too.
 
-```ocaml
-type keeper_config_action =
-  | Set_policy of { tool_access : string list; tool_denylist : string list }
-  | Set_persona of string option
-  | Set_instructions of string
-(* parse from JSON: unknown action -> Error, never a silent default *)
-```
+**Implemented:** `set_policy` (`server_dashboard_http_keeper_api_post.ml`) now rejects **newly-added** `tool_access` names that are not in the keeper tool candidate universe (`Keeper_tool_policy.tool_access_lookup_of_meta`.`candidate_names`) with a `400`, instead of persisting them — previously such names were accepted then silently dropped at runtime (`tool_access_lookup_of_meta` keeps only `candidate_set` members), giving the operator no feedback (AI anti-pattern §2 "unknown → permissive default"). Properties:
 
-- Each action parses a **typed payload**, validates its concrete invariants, and produces an updated `keeper_meta`, persisted via the existing `write_meta_with_merge ~merge:heartbeat_fields_from_disk` CAS path. This generalizes the proven `set_policy` flow rather than adding a parallel one.
-- **Tool-permission panel reshape (gap #304):** the panel's `perm` becomes `masc_*`-tool-keyed rows (tool name + risk badge from the tool descriptor registry + access toggle) instead of generic `Record<string, boolean>`. Only then does `perm` map onto `tool_access`/`tool_denylist`. `tool_access` entries are validated against the known masc tool-name set; **unknown tool names are rejected** (`Error`), never silently accepted (AI anti-pattern §2 "unknown → permissive default").
-- Validation: `persona`/`instructions` length bounds; `tool_access ⊆ known_masc_tools`; `tool_denylist` likewise.
+- **Delta-only**: only names not already on the keeper are validated, so a legacy keeper carrying a stale/renamed name stays editable (no breaking the existing record).
+- **Membership mirrors the runtime exactly** — raw against `candidate_names` (no alias expansion, since the runtime does not alias-expand `tool_access`); `candidate_names` already includes core tools via `effective_core_tools`, so no separate core bypass.
+- **Scope honesty**: `tool_access` (allow_set) is largely telemetry/compat — runtime execution reach is `candidate_set − deny_set`, not the allowlist (`keeper_tool_policy.ml:227-230`). So this is a *write-time honesty* fix (no silent-drop, no junk in `keeper_meta`), not an execution-security gate. `tool_denylist` is left unvalidated: denying an unknown name is a harmless no-op and the denylist is alias-expanded, so a strict check would false-reject.
+
+The validation is a pure helper (`unknown_added_tool_names`) so it is unit-tested without a server harness.
+
+**Out (deferred / not needed):** the typed `keeper_config_action` sum spanning persona/instructions (duplicates `/config`), the v2-panel swap (regresses production), the panel reshape (already masc-tool-keyed in production), and a static risk badge (no SSOT — risk is computed). A persona editor, if ever wanted, is a separate follow-up exposing `keeper_meta.persona` (the field exists but no production UI edits it).
 
 ### 3.2 Tier B — runtime.toml writes (model/runtime assignment + Settings runtime-defaults)
 

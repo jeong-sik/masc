@@ -39,27 +39,27 @@ This audit treats the following as productization blockers:
 
 ## External 기준
 
-- OCaml 5.4 manual: high-level parallel programming libraries are recommended; domains are heavyweight and should not exceed available cores. Source: <https://ocaml.org/manual/5.4/parallelism.html>
+- OCaml 5.4 manual: direct quote — "We recommend that users make use of higher-level parallel programming libraries such as domainslib". [해석] Domains are backed by OS threads and the runtime initializes a fixed pool at startup, so treating them as heavyweight and keeping the domain count at or below available cores is consistent with the manual's guidance. Source: <https://ocaml.org/manual/5.4/parallelism.html>
 - Eio docs: resources are switch-scoped OS resources; the Eio package already exposes structured `Path`, `Process`, Unix, and executor-pool surfaces. Sources: <https://ocaml.org/p/eio/latest/doc/eio/Eio/index.html>, <https://ocaml.org/p/eio/latest/doc/eio/Eio/Resource/index.html>
-- OCaml Discuss Eio cancellation threads: cancellation correctness is a semantic property, not just exception plumbing. Sources: <https://discuss.ocaml.org/t/understanding-cancellation-in-eio/9369>, <https://discuss.ocaml.org/t/i-roughly-translated-real-world-ocamls-async-concurrency-chapter-to-eio/14548>
+- OCaml Discuss Eio cancellation threads: [커뮤니티 논의 요약] cancellation correctness depends on switch/resource nesting semantics and is not reducible to exception plumbing alone. Sources: <https://discuss.ocaml.org/t/understanding-cancellation-in-eio/9369>, <https://discuss.ocaml.org/t/i-roughly-translated-real-world-ocamls-async-concurrency-chapter-to-eio/14548>
 - Jane Street's public OCaml stack shows the bias expected for large OCaml systems: typed standard libraries, clear async/concurrency abstractions, and centralized reusable components over local parsers. Sources: <https://www.janestreet.com/technology/>, <https://opensource.janestreet.com/>
 
 ## Verdict
 
 No runtime `let default_base = "/Users/dancer/me"` style default was found in `bin/` or `lib/`. The serious risk is broader:
 
-1. **P0 conditional**: Shell IR path-jail can still be disabled by env and that disables the only Host-profile positional write-escape guard.
+1. **P0 conditional** if the flag can be toggled at runtime by a keeper or by env injection; otherwise **P1**: Shell IR path-jail can still be disabled by env and that disables the only Host-profile positional write-escape guard.
 2. **P1**: env/config control plane is too wide for a product surface, and its CI guard currently produces false confidence.
 3. **P1**: Eio server/keeper paths still perform blocking stdlib directory scans in maintenance and request paths.
 4. **P1**: path SSOT guards are ratchets, not strict product gates; at least one split `.masc/config` concat is not caught.
-5. **P1**: env parsing is reimplemented in local modules even though central config helpers exist.
+5. **P1**: env parsing is reimplemented outside the config boundary — 5a (`tool_resource_gate.ml`) reads raw `Sys.getenv_opt` and bypasses boot overrides; 5b (`keeper_memory_bank_env.ml`) is a logging wrapper over `Env_config_core.raw_value_opt` that should become a central logged getter rather than a silent local consolidation.
 6. **P2 monitored**: no current evidence of "one keeper failure stops all keepers" in the first pass, but the codebase has enough shared runtime surfaces that this must remain a P0 review gate.
 
 ## Findings
 
 ### 1. Shell IR path-jail kill-switch can remove a product safety boundary
 
-**Severity**: P0 when `MASC_SHELL_IR_PATH_JAIL_ENABLED=false`; P1 until the kill-switch has a sunset and policy boundary.
+**Severity**: P0 when `MASC_SHELL_IR_PATH_JAIL_ENABLED=false` and the env value can be mutated after process start by a keeper or an attacker; P1 if it is operator/bootstrap-time only.
 
 **Evidence**:
 
@@ -67,6 +67,14 @@ No runtime `let default_base = "/Users/dancer/me"` style default was found in `b
 - `lib/config/env_config_runtime.ml:957-968` documents that disabling the flag removes "the only positional write-escape guard on the Host profile".
 - `lib/keeper/keeper_tool_execute_runtime.ml:571-583` logs and counts `path_jail_disabled`, but still proceeds.
 - `lib/exec_policy/exec_policy.ml:631-742` contains the actual path/cwd/redirect validation that gets bypassed.
+
+**Threat model**:
+
+The flag is read via `Feature_flag_registry.get_bool`, which consults the process environment. The risk depends on who can set or mutate that environment:
+- **Operator/bootstrap-time only** (e.g., launchd/systemd unit, container image, deployment manifest): the kill-switch is a policy misconfiguration, not a runtime exploit. Severity should be P1.
+- **Keeper/runtime mutable** (a keeper can `Unix.putenv` or the process inherits a dynamic env from a parent that changes after startup): a single compromised keeper or injected env can disable Host-profile path validation. Severity is P0.
+
+This audit did not find evidence that the value is frozen at startup. PR-D should confirm the freeze or remove the public steady-state kill-switch.
 
 **Impact**:
 
@@ -153,17 +161,18 @@ The repo has correctly moved toward `<base-path>/.masc`, but current gates mostl
 
 **Evidence**:
 
-- `lib/tool_resource_gate.ml:42-68` defines local bool/int/float env parsers over `Sys.getenv_opt`.
-- `lib/keeper/keeper_tool_surface_ops.ml:38-65` defines local TTL parsing over `Sys.getenv_opt`.
-- `lib/keeper/keeper_memory_bank_env.ml:14-67` defines a separate keeper-memory env parser family.
+- **5a — raw `Sys.getenv_opt` in gate code**: `lib/tool_resource_gate.ml:42-68` defines local bool/int/float env parsers over `Sys.getenv_opt`. These are not routed through `Env_config_core` and therefore bypass `Config_boot_overrides.get_opt` (`env_config_core.ml:30`), so boot-time overrides do not apply to these knobs.
+- **5b — keeper-memory logging wrapper**: `lib/keeper/keeper_memory_bank_env.ml:14-67` defines a separate env parser family that ultimately calls `Env_config_core.raw_value_opt` and adds its own logging. It is not a raw `Sys.getenv_opt` reader, but it duplicates parse/telemetry semantics outside the central catalog.
+- **Also seen**: `lib/keeper/keeper_tool_surface_ops.ml:38-65` defines local TTL parsing over `Sys.getenv_opt`.
 
 **Impact**:
 
-This creates inconsistent parse semantics, inconsistent invalid-value telemetry, and hidden product knobs outside the config catalog. It also makes "what env controls the runtime?" unanswerable without grep.
+This creates inconsistent parse semantics, inconsistent invalid-value telemetry, and hidden product knobs outside the config catalog. It also makes "what env controls the runtime?" unanswerable without grep. 5a is worse than a style issue because it silently ignores boot overrides.
 
 **Fix direction**:
 
-- Move these readers into `Env_config_runtime` or a shared typed parser module under `lib/config`.
+- **5a**: migrate `tool_resource_gate.ml` and `keeper_tool_surface_ops.ml` readers to `Env_config_core` typed getters so boot overrides and invalid-value telemetry are uniform.
+- **5b**: add logged variants (`get_int_logged`, `get_bool_logged`, etc.) to `Env_config_core` and make `keeper_memory_bank_env.ml` a thin re-export. Preserve the existing warning telemetry log key/attribute schema so current alerting continues to match.
 - Require all user/operator-facing env vars to appear in `runtime-tunables.md` from generated metadata, not manual side effects.
 - Allow direct `Sys.getenv_opt` only at process bootstrap, secret projection, or test fakes, with comments explaining the boundary.
 
@@ -202,9 +211,9 @@ The descriptor approach is much better than raw shell string heuristics, but it 
 
 **Fix direction**:
 
-- Keep the descriptor module, but add generated/corpus-based tests for every supported command shape.
-- Prefer typed Shell IR path scopes for tool-produced paths over guessing from argv text.
-- Keep `git`/`gh` exceptions explicit and covered by tests because revision/issue tokens are not paths.
+- Introduce typed Shell IR path scopes (e.g., `Path_scope.t` with variants such as `Runtime_root`, `Workspace`, `Tool_output`) so tool-produced paths travel as structured data instead of argv text.
+- Keep the descriptor module as a fallback for external commands, but add generated/corpus-based tests for every supported command shape.
+- Treat `git`/`gh` exceptions as an interim compatibility layer; once typed scopes cover repository/issue references, remove the argv-text exceptions and cover them with tests.
 
 ## Non-findings from this pass
 
@@ -234,25 +243,19 @@ Observed guard results:
 
 ## Recommended PR slices
 
-1. **PR-A: env/feature flag guard hardening**
-   - Fix `check-feature-flag-consistency.sh`.
-   - Reconcile `MASC_CDAL_GATE_ENABLED` docs/defaults.
-   - Add CI failure for unclassified product env knobs.
+| Slice | Owner | Dependencies | Estimated size | Acceptance criteria |
+|-------|-------|--------------|----------------|---------------------|
+| **PR-A: env/feature flag guard hardening** | `@jeong-sik` | None | Small | `check-feature-flag-consistency.sh` reports no false stale flags; `MASC_CDAL_GATE_ENABLED` default text matches registry; CI fails on unclassified product env knobs. |
+| **PR-B: Eio filesystem offload** | `@jeong-sik` | PR-C (path helpers) | Medium | `Fs_compat.list_dir`/`fold_dir` exists; all cited keeper/workspace scans use it; new `Sys.readdir` in runtime paths fails lint. |
+| **PR-C: path SSOT gate hardening** | `@jeong-sik` | None | Small | `check-ssot.sh` R1/R4 baselines lowered to current counts; `audit-path-ssot.sh` catches split `.masc/config` concat; no bare home-root runtime evidence wording remains. |
+| **PR-D: Shell IR path-jail kill-switch sunset** | `@jeong-sik` | PR-A (registry SSOT) | Small | Host-profile Execute refuses to run with path-jail disabled in product builds; emergency disable requires explicit operator approval token and emits fatal startup warning. |
+| **PR-E: fleet-isolation regression harness** | `@jeong-sik` | PR-B (offloaded IO) | Medium | Adversarial test starts ≥3 keepers, kills/cancels one, asserts the others complete work within timeout. |
 
-2. **PR-B: Eio filesystem offload**
-   - Add shared Eio-aware/offloaded directory listing in `Fs_compat`.
-   - Migrate GC/chat queue/async request/workspace backend scans.
-   - Add `Sys.readdir` runtime-path lint.
+### PR-C detailed plan
 
-3. **PR-C: path SSOT gate hardening**
-   - Lower stale baselines.
-   - Catch split `.masc/config` concat.
-   - Replace bare home-root runtime evidence wording.
+The remaining 2 `.masc` concat violations are expected to be in `bin/main_eio.ml:981` and one other ad-hoc construction. The fix is not just to lower the baseline:
 
-4. **PR-D: Shell IR path-jail kill-switch sunset**
-   - Make Host-profile path-jail non-disableable in product mode.
-   - Keep emergency operation explicit, audited, and impossible to enable accidentally.
-
-5. **PR-E: fleet-isolation regression harness**
-   - Inject per-keeper failure/cancellation/flush stalls.
-   - Assert other keepers keep polling, claiming, and completing work.
+1. Replace `Filename.concat (Filename.concat base_path ".masc") "config"` with `Workspace_utils.masc_dir base_path` + `config_dir` resolver.
+2. Add a second regex or AST probe to `audit-path-ssot.sh` that matches `Filename.concat base (".masc" ^ suffix)` and split-concat variants.
+3. Update `RFC-0267` wording to use `<base-path>/.masc` or a fully resolved example path.
+4. Only after (1)-(3) land, lower the R1/R4 baselines from 11 to the new actual count.

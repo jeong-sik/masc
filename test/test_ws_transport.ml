@@ -584,16 +584,31 @@ let test_backpressure_ack_stale_predicate () =
        ~last_delta_seq:7 ~last_ack_seq:6 ~threshold_s:0.0)
 
 let test_backpressure_ack_stale_threshold_reads_env () =
+  Ws.__test_reset_env_caches ();
   with_env_var "MASC_WS_ACK_STALE_THRESHOLD_SEC" "0" (fun () ->
     Alcotest.(check (float 0.001)) "env=0 disables stale-ack gate"
       0.0 (Ws.dashboard_ack_stale_threshold_s ()));
+  Ws.__test_reset_env_caches ();
   with_env_var "MASC_WS_ACK_STALE_THRESHOLD_SEC" "0.25" (fun () ->
     Alcotest.(check (float 0.001)) "env float is read"
       0.25 (Ws.dashboard_ack_stale_threshold_s ()))
 
+let test_backpressure_ack_stale_threshold_cache_resets () =
+  Ws.__test_reset_env_caches ();
+  with_env_var "MASC_WS_ACK_STALE_THRESHOLD_SEC" "7.5" (fun () ->
+    Alcotest.(check (float 0.001)) "initial threshold"
+      7.5 (Ws.dashboard_ack_stale_threshold_s ());
+    Unix.putenv "MASC_WS_ACK_STALE_THRESHOLD_SEC" "12.25";
+    Alcotest.(check (float 0.001)) "cached threshold holds"
+      7.5 (Ws.dashboard_ack_stale_threshold_s ());
+    Ws.__test_reset_env_caches ();
+    Alcotest.(check (float 0.001)) "reset observes env change"
+      12.25 (Ws.dashboard_ack_stale_threshold_s ()))
+
 let test_backpressure_gate_stale_ack_throttles_delivery () =
   let name = MetricStore.metric_ws_throttled_deliveries in
   let before = read_counter name in
+  Ws.__test_reset_env_caches ();
   with_env_var "MASC_WS_ACK_STALE_THRESHOLD_SEC" "0.001" (fun () ->
     let session = Ws.new_session ~id:"stale-ack" ~wsd:(Obj.magic ()) in
     Atomic.set session.dashboard_auth (Ws.Authenticated { agent = None });
@@ -1115,6 +1130,8 @@ let () =
         test_backpressure_ack_stale_predicate;
       Alcotest.test_case "ack stale threshold reads env" `Quick
         test_backpressure_ack_stale_threshold_reads_env;
+      Alcotest.test_case "ack stale threshold cache reset" `Quick
+        test_backpressure_ack_stale_threshold_cache_resets;
       Alcotest.test_case "stale ack throttles delivery before send" `Quick
         test_backpressure_gate_stale_ack_throttles_delivery;
     ]);

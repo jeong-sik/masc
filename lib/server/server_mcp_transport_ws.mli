@@ -60,6 +60,8 @@
     [dashboard_delta_for_sse], [env_cache_ttl_s],
     [client_buffer_limit_cache] /
     [client_buffer_limit_bytes],
+    [dashboard_ack_stale_threshold_cache] /
+    [dashboard_ack_stale_threshold_s],
     [session_is_backpressured],
     [max_inbound_frame_bytes] /
     [max_inbound_message_bytes],
@@ -376,7 +378,9 @@ val client_buffer_limit_bytes : unit -> int
 
 val dashboard_ack_stale_threshold_s : unit -> float
 (** Resolved max age for the latest [dashboard/ack] before outbound dashboard
-    sends are considered stale.  [0.0] disables stale-ACK backpressure. *)
+    sends are considered stale.  [0.0] disables stale-ACK backpressure.
+    Cached for [env_cache_ttl_s] seconds; the test resets the cache via
+    {!__test_reset_env_caches}. *)
 
 val dashboard_ack_is_stale :
   now:float ->
@@ -442,6 +446,7 @@ val __test_slice_index_remove_session : string -> unit
 val __test_reset_env_caches : unit -> unit
 (** Test-only seam: resets the
     {!client_buffer_limit_bytes} and
+    {!dashboard_ack_stale_threshold_s} and
     {!slice_index_enabled} caches so the next call
     re-reads the environment. *)
 

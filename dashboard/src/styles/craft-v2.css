@@ -243,31 +243,32 @@
 }
 
 /* ── Bubble style ─────────────────────────────────────────────── */
-.v2-app[data-bubble="flat"] .bubble {
+/* The design source (keeper-v2/styles/craft.css) scopes these to `.bubble`, but
+   the live chat renders `.chat-bubble` (chat/primitives.ts) — the port kept the
+   design class name, so the data-bubble=flat tweak matched nothing and was inert.
+   Target the live class so the toggle flattens the assistant bubble as designed. */
+.v2-app[data-bubble="flat"] .chat-bubble {
   background: transparent;
   border-color: transparent;
   border-radius: 0;
   padding: 2px 0 0;
 }
 
-.v2-app[data-bubble="flat"] .bubble.user {
+.v2-app[data-bubble="flat"] .chat-bubble.user {
   background: transparent;
   border: 0;
   border-left: 2px solid var(--color-accent-fg-dim, var(--accent-15));
   border-radius: 0;
   padding: 2px 0 2px 16px;
 }
-.v2-app[data-bubble="flat"] .bubble code,
-.v2-app[data-bubble="flat"] .bubble .md-table,
-.v2-app[data-bubble="flat"] .bubble .callout {
+.v2-app[data-bubble="flat"] .chat-bubble code,
+.v2-app[data-bubble="flat"] .chat-bubble .md-table,
+.v2-app[data-bubble="flat"] .chat-bubble .callout {
   /* nested chrome stays — only the outer shell flattens */
 }
-.v2-app[data-bubble="flat"] .msg.from-user .bubble.user {
-  border-left: 0;
-  border-right: 2px solid var(--color-accent-fg-dim, var(--accent-15));
-  padding: 2px 16px 2px 0;
-  text-align: left;
-}
+/* The design's `.msg.from-user .bubble.user` mirror (a right-aligned user spine)
+   is intentionally dropped: the live transcript has no from-user message-row
+   variant — user bubbles render `.chat-bubble.user` directly, covered above. */
 
 /* ── Scrollbar treatment ──────────────────────────────────────── */
 .v2-app .dashboard-main-scroll::-webkit-scrollbar,

@@ -10,7 +10,9 @@ let trim_nonempty value =
 ;;
 
 let string_opt key json =
-  Safe_ops.json_string_opt key json |> Option.bind trim_nonempty
+  match Safe_ops.json_string_opt key json with
+  | None -> None
+  | Some value -> trim_nonempty value
 ;;
 
 let required_string key json =
@@ -62,8 +64,12 @@ let resolve_http_json ~config ~operator_name ~(args : Yojson.Safe.t)
         Schedule_service.approve config ~schedule_id ~approved_by ()
       | Reject ->
         let reason =
-          string_opt "reason" args
-          |> Option.value ~default:(default_rejection_reason ~operator_name)
+          match string_opt "reason" args with
+          | Some reason -> reason
+          | None ->
+            (* DET-OK: the dashboard fallback is derived only from the authenticated
+               operator bound by token auth, not from caller-supplied body identity. *)
+            default_rejection_reason ~operator_name
         in
         Schedule_service.reject config ~schedule_id ~approved_by ~reason ()
     in

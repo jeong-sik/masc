@@ -3292,6 +3292,80 @@ export function fetchKeeperTurnRecords(
   })
 }
 
+// ── Keeper turn transcript (RFC-0233 §7) ────────────────
+// The operator request + keeper response for one turn, joined server-side
+// on the turn_ref "<trace_id>#<absolute_turn>". Lazily fetched by the turn
+// inspector so the transcript (which can be large) never bloats the
+// turn-records list. Content is the same load-time redacted view the chat
+// history endpoint serves (RFC-0132); `found` is false when no persisted
+// row carries the requested turn_ref, in which case the inspector renders
+// explicit absence rather than a fabricated transcript.
+
+export type TurnTranscriptLine = {
+  role: string
+  content: string
+  ts?: number
+  // Writer-declared row kind; present (e.g. 'transport_failure') only on
+  // non-utterance assistant rows so the inspector can mark a failed reply
+  // distinctly rather than quoting it as the keeper's own words.
+  kind?: string
+}
+
+export type TurnTranscript = {
+  keeper: string
+  turn_ref: string
+  found: boolean
+  source: string
+  user: TurnTranscriptLine[]
+  assistant: TurnTranscriptLine[]
+}
+
+function decodeTurnTranscriptLine(raw: unknown): TurnTranscriptLine | null {
+  if (!isRecord(raw)) return null
+  const role = asString(raw.role)
+  if (!role) return null
+  return {
+    role,
+    content: asString(raw.content) ?? '',
+    ts: asNumber(raw.ts),
+    kind: asString(raw.kind),
+  }
+}
+
+function decodeTurnTranscript(raw: unknown): TurnTranscript | null {
+  if (!isRecord(raw)) return null
+  const keeper = asString(raw.keeper)
+  const turn_ref = asString(raw.turn_ref)
+  if (!keeper || !turn_ref) return null
+  const decodeLines = (value: unknown): TurnTranscriptLine[] =>
+    asRecordArray(value)
+      .map(decodeTurnTranscriptLine)
+      .filter((line): line is TurnTranscriptLine => line !== null)
+  return {
+    keeper,
+    turn_ref,
+    found: asBoolean(raw.found, false) ?? false,
+    source: asString(raw.source) ?? 'keeper_chat_store',
+    user: decodeLines(raw.user),
+    assistant: decodeLines(raw.assistant),
+  }
+}
+
+export function fetchKeeperTurnTranscript(
+  name: string,
+  turnRef: string,
+  opts?: AbortableRequestOptions,
+): Promise<TurnTranscript> {
+  return get<Record<string, unknown>>(
+    `/api/v1/keepers/${encodeURIComponent(name)}/turn-transcript?turn_ref=${encodeURIComponent(turnRef)}`,
+    { signal: opts?.signal },
+  ).then((raw) => {
+    const decoded = decodeTurnTranscript(raw)
+    if (!decoded) throw new Error('유효하지 않은 keeper turn transcript payload')
+    return decoded
+  })
+}
+
 // ── Unified telemetry ──────────────────────────────────
 
 export type TelemetrySource =

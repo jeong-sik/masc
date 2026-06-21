@@ -1148,6 +1148,76 @@ let test_turn_ref_malformed_reads_none () =
       | messages ->
           Alcotest.failf "expected 1 message, got %d" (List.length messages))
 
+(* RFC-0233 §7: transcript_of_messages joins persisted rows on the exact
+   turn_ref, partitions operator/keeper lines, and excludes rows of other
+   turns. turn_transcript_to_json reports found=true and surfaces the
+   content. *)
+let test_transcript_of_messages_joins_turn_ref () =
+  let base_dir = temp_base_path "keeper-chat-store-transcript" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-transcript" in
+      let tref_a = Ids.Turn_ref.make ~trace_id:"trace-xyz" ~absolute_turn:3 in
+      let tref_b = Ids.Turn_ref.make ~trace_id:"trace-xyz" ~absolute_turn:4 in
+      K.append_turn ~base_dir ~keeper_name ~user_content:"request A"
+        ~user_attachments:[] ~turn_ref:tref_a ~assistant_content:"reply A" ();
+      K.append_turn ~base_dir ~keeper_name ~user_content:"request B"
+        ~user_attachments:[] ~turn_ref:tref_b ~assistant_content:"reply B" ();
+      let messages = K.load ~base_dir ~keeper_name in
+      let t = K.transcript_of_messages messages ~turn_ref:tref_a in
+      (match t.user with
+       | [ m ] ->
+           Alcotest.(check string) "operator request content" "request A"
+             m.content
+       | other ->
+           Alcotest.failf "expected 1 user line, got %d" (List.length other));
+      (match t.assistant with
+       | [ m ] ->
+           Alcotest.(check string) "keeper reply content" "reply A" m.content
+       | other ->
+           Alcotest.failf "expected 1 assistant line, got %d"
+             (List.length other));
+      (* Turn B's rows must not leak into turn A's transcript. *)
+      List.iter
+        (fun (m : K.chat_message) ->
+          Alcotest.(check bool)
+            "no turn-B content in turn-A transcript" false
+            (contains_substring m.content "B"))
+        (t.user @ t.assistant);
+      let json =
+        K.turn_transcript_to_json ~keeper:keeper_name ~turn_ref:tref_a t
+      in
+      let s = Yojson.Safe.to_string json in
+      Alcotest.(check bool) "found=true when rows present" true
+        (contains_substring s "\"found\":true");
+      Alcotest.(check bool) "turn_ref echoed" true
+        (contains_substring s "trace-xyz#3"))
+
+(* An unmatched turn_ref yields empty lists and found=false — explicit
+   absence, never a fabricated transcript. *)
+let test_transcript_absent_returns_empty () =
+  let base_dir = temp_base_path "keeper-chat-store-transcript-absent" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-transcript-absent" in
+      let tref = Ids.Turn_ref.make ~trace_id:"trace-present" ~absolute_turn:1 in
+      K.append_turn ~base_dir ~keeper_name ~user_content:"hi"
+        ~user_attachments:[] ~turn_ref:tref ~assistant_content:"hello" ();
+      let messages = K.load ~base_dir ~keeper_name in
+      let missing =
+        Ids.Turn_ref.make ~trace_id:"trace-absent" ~absolute_turn:99
+      in
+      let t = K.transcript_of_messages messages ~turn_ref:missing in
+      Alcotest.(check int) "no user lines" 0 (List.length t.user);
+      Alcotest.(check int) "no assistant lines" 0 (List.length t.assistant);
+      let json =
+        K.turn_transcript_to_json ~keeper:keeper_name ~turn_ref:missing t
+      in
+      Alcotest.(check bool) "found=false when no rows match" true
+        (contains_substring (Yojson.Safe.to_string json) "\"found\":false"))
+
 let () =
   Alcotest.run "keeper_chat_store"
     [
@@ -1241,5 +1311,11 @@ let () =
             `Quick test_turn_ref_persisted_on_turn_rows;
           Alcotest.test_case "malformed turn_ref reads as None (RFC-0233 §7)"
             `Quick test_turn_ref_malformed_reads_none;
+          Alcotest.test_case
+            "transcript_of_messages joins turn_ref (RFC-0233 §7)" `Quick
+            test_transcript_of_messages_joins_turn_ref;
+          Alcotest.test_case
+            "transcript absent returns empty + found=false (RFC-0233 §7)"
+            `Quick test_transcript_absent_returns_empty;
         ] );
     ]

@@ -20,6 +20,7 @@ import {
   fetchKeeperToolCalls,
   fetchKeeperToolStats,
   fetchKeeperTurnRecords,
+  fetchKeeperTurnTranscript,
   fetchDashboardMemory,
   fetchDashboardMission,
   fetchDashboardMissionBriefing,
@@ -505,6 +506,56 @@ describe('keeper tool telemetry fetchers', () => {
     expect(result.entries[0]?.record.finish_reason).toBe('completed')
     expect(result.entries[1]?.record.model).toBeUndefined()
     expect(result.entries[1]?.record.finish_reason).toBeUndefined()
+  })
+})
+
+describe('fetchKeeperTurnTranscript', () => {
+  it('encodes the turn_ref join key and decodes operator/keeper lines (RFC-0233 §7)', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        turn_ref: 'trace-xyz#3',
+        found: true,
+        source: 'keeper_chat_store',
+        user: [{ role: 'user', content: 'request A', ts: 10 }],
+        assistant: [
+          { role: 'assistant', content: 'reply A', ts: 11 },
+          { role: 'assistant', content: 'failed', ts: 12, kind: 'transport_failure' },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperTurnTranscript('keeper-alpha', 'trace-xyz#3')
+
+    // The '#' must be percent-encoded so it reaches the server as a query value.
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      '/api/v1/keepers/keeper-alpha/turn-transcript?turn_ref=trace-xyz%233',
+    )
+    expect(result.found).toBe(true)
+    expect(result.user[0]?.content).toBe('request A')
+    expect(result.assistant[0]?.content).toBe('reply A')
+    expect(result.assistant[1]?.kind).toBe('transport_failure')
+  })
+
+  it('decodes explicit absence (found=false) without fabricating lines', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        turn_ref: 'trace-xyz#99',
+        found: false,
+        source: 'keeper_chat_store',
+        user: [],
+        assistant: [],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperTurnTranscript('keeper-alpha', 'trace-xyz#99')
+
+    expect(result.found).toBe(false)
+    expect(result.user).toEqual([])
+    expect(result.assistant).toEqual([])
   })
 })
 

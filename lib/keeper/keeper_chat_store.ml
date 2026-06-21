@@ -989,3 +989,69 @@ let to_json_array ?base_dir (messages : chat_message list) : Yojson.Safe.t =
               @ opt_string_field "turn_ref"
                   (Option.map Ids.Turn_ref.to_string m.turn_ref)))
        messages)
+
+(* RFC-0233 §7: a turn's transcript derived by an exact join on the
+   persisted [turn_ref] ("<trace_id>#<absolute_turn>"). The inspector
+   needs the operator request that opened the turn and the keeper reply
+   it produced; both are stamped with the same turn_ref by
+   {!append_turn} on the dashboard reply path
+   (server_routes_http_keeper_stream.ml). Tool rows are excluded — they
+   carry only the call args, while the full tool I/O (input + output) is
+   surfaced by the tool-call store keyed on [execution_id]. *)
+type turn_transcript = {
+  user : chat_message list;
+  assistant : chat_message list;
+}
+
+let transcript_of_messages (messages : chat_message list) ~turn_ref :
+    turn_transcript =
+  let matches (m : chat_message) =
+    match m.turn_ref with
+    | Some tr -> Ids.Turn_ref.equal tr turn_ref
+    | None -> false
+  in
+  let user, assistant =
+    List.fold_left
+      (fun (user, assistant) (m : chat_message) ->
+        if not (matches m) then (user, assistant)
+        else
+          match m.role with
+          | Role.User -> (m :: user, assistant)
+          | Role.Assistant -> (user, m :: assistant)
+          (* Tool rows join via execution_id in the tool-call store, not
+             via the transcript. *)
+          | Role.Tool -> (user, assistant))
+      ([], []) messages
+  in
+  { user = List.rev user; assistant = List.rev assistant }
+
+let transcript_line_to_json (m : chat_message) : Yojson.Safe.t =
+  `Assoc
+    ([ ("role", `String (Role.to_label m.role));
+       ("content", `String m.content);
+     ]
+    @ (match m.ts with Some t -> [ ("ts", `Float t) ] | None -> [])
+      (* Surface the writer-declared kind so the inspector can tell a
+         transport failure apart from a real keeper utterance, exactly as
+         the chat history endpoint does — a failure marker is never quoted
+         back as the keeper's own words. *)
+    @ (match m.kind with
+       | Row_kind.Utterance -> []
+       | Row_kind.Transport_failure ->
+           [ ("kind", `String (Row_kind.to_label m.kind)) ]))
+
+let turn_transcript_to_json ~keeper ~turn_ref (t : turn_transcript) :
+    Yojson.Safe.t =
+  (* [found] is false when no persisted row carries this turn_ref (old
+     rows, rows outside the retained window, or a turn that produced no
+     chat lines). The caller renders explicit absence, never a fabricated
+     transcript. *)
+  let found = t.user <> [] || t.assistant <> [] in
+  `Assoc
+    [ ("keeper", `String keeper);
+      ("turn_ref", `String (Ids.Turn_ref.to_string turn_ref));
+      ("found", `Bool found);
+      ("source", `String "keeper_chat_store");
+      ("user", `List (List.map transcript_line_to_json t.user));
+      ("assistant", `List (List.map transcript_line_to_json t.assistant));
+    ]

@@ -38,6 +38,10 @@ interface DevTokenBootstrapPayload {
   scope?: unknown
 }
 
+function isRetryableDevTokenStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500
+}
+
 function shouldRefreshDevToken(): boolean {
   const token = getStoredToken()
   const meta = getStoredTokenMeta()
@@ -77,12 +81,16 @@ export async function ensureDevToken(): Promise<void> {
           clearStoredToken()
         }
         ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'no_endpoint'
+        if (isRetryableDevTokenStatus(res.status)) {
+          devTokenBootstrapPromise = null
+        }
         return
       }
       const payload = (await res.json()) as DevTokenBootstrapPayload
       const token = typeof payload.token === 'string' ? payload.token.trim() : ''
       if (!token) {
         ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'no_endpoint'
+        devTokenBootstrapPromise = null
         return
       }
       const actor = typeof payload.actor === 'string' ? payload.actor.trim() : 'dashboard'
@@ -105,6 +113,7 @@ export async function ensureDevToken(): Promise<void> {
       ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'ok'
     } catch {
       ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'network'
+      devTokenBootstrapPromise = null
     }
   })()
   return devTokenBootstrapPromise

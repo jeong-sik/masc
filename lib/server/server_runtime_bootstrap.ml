@@ -552,6 +552,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   let requested_backend_mode_before_enforcement = requested_backend_mode () in
   force_jsonl_fallback_env ();
   let initial_backend_mode = requested_backend_mode () in
+  Transport_metrics.set_ws_same_origin_runtime_ready false;
   server_state := None;
   Server_startup_state.reset ~backend_mode:initial_backend_mode ();
   note_storage_enforcement_fallback
@@ -1027,6 +1028,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       in
       Server_mcp_transport_ws.set_inbound_message_handler
         dispatch_ws_inbound_message;
+      Transport_metrics.set_ws_same_origin_runtime_ready true;
       (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)
       Server_ws_standalone.start ~sw ~env
         ~on_message:Server_mcp_transport_ws.dispatch_inbound_message;

@@ -191,7 +191,7 @@ let websocket_discovery_json (ctx : http_context) =
     && (standalone_listening || tcp_port_reachable port)
   in
   let standalone_ws_url = Printf.sprintf "ws://%s:%d/" standalone_bind_host port in
-  let same_origin_upgrade_enabled = enabled in
+  let same_origin_upgrade_enabled = Transport_metrics.ws_same_origin_ready () in
   let same_origin_ws_url = websocket_url_from_base_url ctx.base_url in
   let listening = standalone_listening || same_origin_upgrade_enabled in
   let reachable = standalone_reachable || same_origin_upgrade_enabled in

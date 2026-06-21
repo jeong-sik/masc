@@ -32,6 +32,10 @@ let make_context ?(include_configured = false) () =
   TRM.make_http_context ~include_configured ~base_url:"http://127.0.0.1:8935"
     ~host:"127.0.0.1" ()
 
+let with_ws_same_origin_ready f =
+  TM.set_ws_same_origin_runtime_ready true;
+  Fun.protect ~finally:(fun () -> TM.set_ws_same_origin_runtime_ready false) f
+
 let test_websocket_discovery_http_shape_extends_tool_shape () =
   let tool_json = TRM.websocket_discovery_json (make_context ()) in
   let http_json =
@@ -123,6 +127,7 @@ let test_transport_status_reports_streamable_http_protocol () =
 
 let test_websocket_discovery_uses_same_origin_url () =
   with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
+    with_ws_same_origin_ready (fun () ->
       TM.set_ws_runtime_listening true;
       Fun.protect
         ~finally:(fun () -> TM.set_ws_runtime_listening false)
@@ -143,10 +148,11 @@ let test_websocket_discovery_uses_same_origin_url () =
           check string "standalone diagnostic is retained" "ws://127.0.0.1:8937/"
             Yojson.Safe.Util.(json |> member "standalone_ws_url" |> to_string);
           check string "same-origin retained for diagnostics" "ws://127.0.0.1:8935/ws"
-            Yojson.Safe.Util.(json |> member "same_origin_ws_url" |> to_string)))
+            Yojson.Safe.Util.(json |> member "same_origin_ws_url" |> to_string))))
 
 let test_websocket_discovery_advertises_same_origin_ws_to_remote_host () =
   with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
+    with_ws_same_origin_ready (fun () ->
       TM.set_ws_runtime_listening true;
       Fun.protect
         ~finally:(fun () -> TM.set_ws_runtime_listening false)
@@ -178,10 +184,11 @@ let test_websocket_discovery_advertises_same_origin_ws_to_remote_host () =
             true
             (match Yojson.Safe.Util.member "unavailable_reason" json with
              | `Null -> true
-             | _ -> false)))
+             | _ -> false))))
 
 let test_websocket_discovery_distinguishes_standalone_from_same_origin () =
   with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
+    with_ws_same_origin_ready (fun () ->
       TM.set_ws_runtime_listening false;
       let json = TRM.websocket_discovery_json (make_context ()) in
       check bool "enabled still advertises configured websocket" true
@@ -191,20 +198,47 @@ let test_websocket_discovery_distinguishes_standalone_from_same_origin () =
       check bool "same-origin upgrade makes primary websocket reachable" true
         Yojson.Safe.Util.(json |> member "reachable" |> to_bool);
       check bool "standalone listener state remains explicit" false
-        Yojson.Safe.Util.(json |> member "standalone_listening" |> to_bool))
+        Yojson.Safe.Util.(json |> member "standalone_listening" |> to_bool)))
+
+let test_websocket_discovery_waits_for_same_origin_dispatcher () =
+  with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
+    TM.set_ws_runtime_listening false;
+    TM.set_ws_same_origin_runtime_ready false;
+    let ctx =
+      TRM.make_http_context
+        ~base_url:"http://192.0.2.10:8935"
+        ~host:"192.0.2.10"
+        ()
+    in
+    let json = TRM.websocket_discovery_json ctx in
+    check bool "websocket remains configured" true
+      Yojson.Safe.Util.(json |> member "enabled" |> to_bool);
+    check bool "same-origin upgrade is not advertised before dispatcher" false
+      Yojson.Safe.Util.(json |> member "same_origin_upgrade_enabled" |> to_bool);
+    check bool "no primary listener is advertised before dispatcher" false
+      Yojson.Safe.Util.(json |> member "listening" |> to_bool);
+    check bool "remote host has no reachable websocket before dispatcher" false
+      Yojson.Safe.Util.(json |> member "reachable" |> to_bool);
+    check bool "primary client ws_url is withheld"
+      true
+      (match Yojson.Safe.Util.member "ws_url" json with
+       | `Null -> true
+       | _ -> false))
 
 let test_websocket_discovery_retains_same_origin_wss_diagnostic () =
-  let ctx =
-    TRM.make_http_context
-      ~base_url:"https://example.com/root/"
-      ~host:"example.com"
-      ()
-  in
-  let json = TRM.websocket_discovery_json ctx in
-  check string "wss preserves base path" "wss://example.com/root/ws"
-    Yojson.Safe.Util.(json |> member "same_origin_ws_url" |> to_string);
-  check string "primary ws_url uses same-origin wss" "wss://example.com/root/ws"
-    Yojson.Safe.Util.(json |> member "ws_url" |> to_string)
+  with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
+    with_ws_same_origin_ready (fun () ->
+      let ctx =
+        TRM.make_http_context
+          ~base_url:"https://example.com/root/"
+          ~host:"example.com"
+          ()
+      in
+      let json = TRM.websocket_discovery_json ctx in
+      check string "wss preserves base path" "wss://example.com/root/ws"
+        Yojson.Safe.Util.(json |> member "same_origin_ws_url" |> to_string);
+      check string "primary ws_url uses same-origin wss" "wss://example.com/root/ws"
+        Yojson.Safe.Util.(json |> member "ws_url" |> to_string)))
 
 let test_advertised_base_url_uses_forwarded_proto_without_internal_port () =
   let headers =
@@ -266,6 +300,8 @@ let () =
              test_websocket_discovery_advertises_same_origin_ws_to_remote_host;
            test_case "websocket standalone state stays explicit" `Quick
              test_websocket_discovery_distinguishes_standalone_from_same_origin;
+           test_case "websocket waits for same-origin dispatcher" `Quick
+             test_websocket_discovery_waits_for_same_origin_dispatcher;
            test_case "websocket HTTPS diagnostic URL" `Quick
              test_websocket_discovery_retains_same_origin_wss_diagnostic;
            test_case "forwarded base URL" `Quick

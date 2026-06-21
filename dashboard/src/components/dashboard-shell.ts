@@ -9,7 +9,7 @@ import { fetchDashboardRuntimeProbe } from '../api/dashboard'
 import { route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
-import { dashboardWsConnected, dashboardWsSseFallbackActive } from '../dashboard-ws-state'
+import { dashboardWsConnected, dashboardWsLastError, dashboardWsReady, dashboardWsSseFallbackActive } from '../dashboard-ws-state'
 import { isKeeperPaused } from '../lib/keeper-predicates'
 import { dashboardLoading, executionError, keepers, serverStatus, shellCounts, shellRuntimeResolution, tasksByStatus } from '../store'
 import { missionSnapshot, missionLoading } from '../mission-signals'
@@ -120,33 +120,69 @@ function describeReconnecting(args: {
 
 export function ConnectionStatus() {
   const wsOnly = dashboardWsOnlyEnabled()
-  const isConnected = wsOnly
-    ? dashboardWsConnected.value || dashboardWsSseFallbackActive.value
-    : connected.value
   const reconn = reconnectCount.value
-
-  const statusLabel = isConnected
-    ? reconn > 0 ? 'Reconnected' : 'Connected'
-    : describeReconnecting({
-        disconnectedAt: lastDisconnectedAt.value,
-        now: Date.now(),
-        reconnects: reconn,
-      }).label
-  const titleAttr = isConnected
-    ? reconn > 0 ? `Reconnect attempts ${reconn}` : ''
-    : describeReconnecting({
-        disconnectedAt: lastDisconnectedAt.value,
-        now: Date.now(),
-        reconnects: reconn,
-      }).title
+  const reconnecting = describeReconnecting({
+    disconnectedAt: lastDisconnectedAt.value,
+    now: Date.now(),
+    reconnects: reconn,
+  })
+  const status = (() => {
+    if (wsOnly) {
+      if (dashboardWsReady.value) {
+        return {
+          tone: 'ok' as const,
+          label: reconn > 0 ? 'Reconnected' : 'Connected',
+          title: reconn > 0 ? `Reconnect attempts ${reconn}` : '',
+        }
+      }
+      if (dashboardWsSseFallbackActive.value) {
+        return {
+          tone: 'warn' as const,
+          label: 'SSE fallback',
+          title: dashboardWsLastError.value
+            ? `Client WS degraded: ${dashboardWsLastError.value}`
+            : 'Client WS degraded; SSE fallback is carrying events.',
+        }
+      }
+      if (dashboardWsConnected.value) {
+        return {
+          tone: 'warn' as const,
+          label: 'Connecting WS',
+          title: 'Client WS socket is open; waiting for dashboard/hello.',
+        }
+      }
+    } else if (connected.value) {
+      return {
+        tone: 'ok' as const,
+        label: reconn > 0 ? 'Reconnected' : 'Connected',
+        title: reconn > 0 ? `Reconnect attempts ${reconn}` : '',
+      }
+    }
+    return {
+      tone: 'err' as const,
+      label: reconnecting.label,
+      title: reconnecting.title,
+    }
+  })()
+  const isConnected = status.tone === 'ok'
+  const textClass = status.tone === 'warn'
+    ? 'text-[var(--color-status-warn)]'
+    : isConnected
+      ? 'text-[var(--color-status-ok)]'
+      : 'text-[var(--color-status-err)]'
+  const dotClass = status.tone === 'warn'
+    ? 'bg-[var(--color-status-warn)]'
+    : isConnected
+      ? 'bg-[var(--color-status-ok)] shadow-[0_0_7px_rgb(var(--ok-glow)/0.75)]'
+      : 'bg-[var(--color-status-err)]'
 
   return html`
     <div
-      class="v2-shell-panel flex items-center gap-1.5 whitespace-nowrap text-xs ${isConnected ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-err)]'}"
-      title=${titleAttr || undefined}
+      class="v2-shell-panel flex items-center gap-1.5 whitespace-nowrap text-xs ${textClass}"
+      title=${status.title || undefined}
     >
-      <span class="inline-block size-[8px] rounded-[var(--r-0)] ${isConnected ? 'bg-[var(--color-status-ok)] shadow-[0_0_7px_rgb(var(--ok-glow)/0.75)]' : 'bg-[var(--color-status-err)]'}"></span>
-      <span class="status-text">${statusLabel}</span>
+      <span class="inline-block size-[8px] rounded-[var(--r-0)] ${dotClass}"></span>
+      <span class="status-text">${status.label}</span>
     </div>
   `
 }

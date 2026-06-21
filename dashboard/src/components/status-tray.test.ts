@@ -87,6 +87,32 @@ describe('summarizeStatusTray', () => {
     expect(summary.items.transport.detail).toContain('dashboard/ping')
   })
 
+  it('marks WS-only transport as handshaking when the socket is open but hello is not ready', () => {
+    const summary = summarizeStatusTray({
+      wsOnly: true,
+      sseConnected: false,
+      wsConnected: true,
+      wsReady: false,
+      wsLastEventAt: 0,
+      wsEventCount60s: 0,
+      wsLastPongAt: 0,
+      wsLastPongLatencyMs: null,
+      wsLastError: null,
+      reconnectCount: 0,
+      lastDisconnectedAt: 0,
+      keepers: [],
+      staleKeeperNames: new Set(),
+      tasks: [],
+      journalEntries: [],
+      unacknowledgedErrors: 0,
+      now: NOW,
+    })
+
+    expect(summary.items.transport.tone).toBe('warn')
+    expect(summary.items.transport.value).toBe('handshake')
+    expect(summary.items.transport.detail).toContain('dashboard/hello')
+  })
+
   it('rolls stale keeper, verification, and error counts into tray items', () => {
     const summary = summarizeStatusTray({
       wsOnly: false,

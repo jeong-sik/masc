@@ -96,6 +96,50 @@ function sameOriginWebSocketUrl(wsUrl: string): boolean {
   }
 }
 
+function currentOriginWebSocketUrl(pathOrUrl: string): string | null {
+  if (typeof window === 'undefined' || typeof window.location === 'undefined') return null
+  if (window.location.protocol !== 'https:' && window.location.protocol !== 'http:') return null
+  try {
+    const parsed = new URL(pathOrUrl, window.location.href)
+    parsed.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    parsed.host = window.location.host
+    return parsed.toString()
+  } catch {
+    return null
+  }
+}
+
+function sameOriginUpgradePath(data: DashboardWsDiscovery): string | null {
+  const upgradePath = nonBlankString(data.same_origin_upgrade_path)
+  if (upgradePath) return upgradePath
+  const sameOriginWsUrl = nonBlankString(data.same_origin_ws_url)
+  if (!sameOriginWsUrl) return null
+  try {
+    const baseUrl = typeof window !== 'undefined' && typeof window.location !== 'undefined'
+      ? window.location.href
+      : 'http://localhost/'
+    const parsed = new URL(sameOriginWsUrl, baseUrl)
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`
+  } catch {
+    return null
+  }
+}
+
+function preferredDiscoveredWsUrl(data: DashboardWsDiscovery): string | null {
+  if (data.same_origin_upgrade_enabled === true) {
+    const upgradePath = sameOriginUpgradePath(data)
+    if (upgradePath) {
+      const wsUrl = currentOriginWebSocketUrl(upgradePath)
+      if (wsUrl) return wsUrl
+    }
+  }
+  const wsUrl = nonBlankString(data.ws_url)
+  if (wsUrl) return wsUrl
+  const sameOriginWsUrl = nonBlankString(data.same_origin_ws_url)
+  if (sameOriginWsUrl && sameOriginWebSocketUrl(sameOriginWsUrl)) return sameOriginWsUrl
+  return null
+}
+
 function readCachedWsUrl(): string | null {
   const storage = sessionStorageOrNull()
   if (!storage) return null
@@ -180,6 +224,9 @@ function discoveryUnavailableReason(data: DashboardWsDiscovery): string {
     const sameOriginWsUrl = nonBlankString(data.same_origin_ws_url)
     if (sameOriginWsUrl && data.same_origin_upgrade_enabled !== true) {
       return 'standalone websocket URL unavailable; same-origin upgrade disabled'
+    }
+    if (data.same_origin_upgrade_enabled === true) {
+      return 'same-origin websocket URL unavailable'
     }
     return 'websocket URL unavailable'
   }
@@ -425,7 +472,7 @@ async function discoverWsUrl(): Promise<DashboardWsDiscoveryResult> {
       reason: discoveryUnavailableReason(data),
     }
   }
-  const wsUrl = nonBlankString(data.ws_url)
+  const wsUrl = preferredDiscoveredWsUrl(data)
   if (data.listening !== true || !wsUrl) {
     return {
       wsUrl: null,
@@ -707,11 +754,8 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
   try {
     ws = new WebSocket(wsUrl)
   } catch (err) {
-    // Cache only values that constructed successfully: writing before
-    // [new WebSocket(...)] would persist a malformed/incompatible URL
-    // through the next reconnect, adding an extra failure+backoff cycle
-    // before discovery is retried. Also invalidate the cache after repeated
-    // construction failures so a stale entry does not survive.
+    // A constructor failure proves this URL is unusable for the current
+    // browser. Keep it out of the cache and let reconnect rediscover.
     maybeInvalidateDiscoveryCache()
     batch(() => {
       dashboardWsLastError.value = errorToString(err)
@@ -720,11 +764,6 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     return
   }
   socket = ws
-  // Cache the URL only after the WebSocket constructor accepted it.
-  // Persisting before construction would leave a bad value in the cache
-  // for the next reconnect attempt; persisting after means cache only
-  // ever holds URLs that at minimum parsed without throwing.
-  if (!discovery.fromCache) writeCachedWsUrl(wsUrl)
   ws.onopen = () => {
     if (socket !== ws) return
     dashboardWsConnected.value = true
@@ -737,6 +776,7 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     })
       .then(() => {
         if (socket !== ws) return
+        if (!discovery.fromCache) writeCachedWsUrl(wsUrl)
         resetDiscoveryCacheFailures()
         batch(() => {
           dashboardWsReady.value = true

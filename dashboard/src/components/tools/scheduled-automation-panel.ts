@@ -95,10 +95,11 @@ export interface WakeSignal {
   tone: StatusChipTone
 }
 
-// Readiness / status values that mean the schedule will not wake again — these
-// are history, not upcoming signals, so they are excluded from the feed.
-const TERMINAL_WAKE_READINESS: ReadonlySet<string> = new Set(['terminal', 'expired'])
-const TERMINAL_WAKE_STATUS: ReadonlySet<string> = new Set([
+// Readiness / status values that are not upcoming wake signals. Terminal rows
+// are history, and running rows have already woken.
+const NON_UPCOMING_WAKE_READINESS: ReadonlySet<string> = new Set(['terminal', 'expired', 'running'])
+const NON_UPCOMING_WAKE_STATUS: ReadonlySet<string> = new Set([
+  'running',
   'terminal',
   'expired',
   'cancelled',
@@ -118,8 +119,8 @@ export function selectWakeSignals(
     if (at == null) continue
     const readiness = request.execution_readiness ?? null
     const status = request.effective_status ?? request.status
-    if (readiness != null && TERMINAL_WAKE_READINESS.has(readiness)) continue
-    if (TERMINAL_WAKE_STATUS.has(status)) continue
+    if (readiness != null && NON_UPCOMING_WAKE_READINESS.has(readiness)) continue
+    if (NON_UPCOMING_WAKE_STATUS.has(status)) continue
     signals.push({
       id: request.schedule_id,
       at,

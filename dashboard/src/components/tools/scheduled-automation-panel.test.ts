@@ -99,6 +99,22 @@ describe('selectWakeSignals', () => {
     expect(signals.map(s => s.id)).toEqual(['s-live'])
   })
 
+  it('excludes running rows because they already woke', () => {
+    const signals = selectWakeSignals(
+      automation([
+        request({
+          schedule_id: 's-running',
+          next_due_at: 100,
+          status: 'running',
+          effective_status: 'running',
+          execution_readiness: 'running',
+        }),
+        request({ schedule_id: 's-live', next_due_at: 200, execution_readiness: 'scheduled' }),
+      ]),
+    )
+    expect(signals.map(s => s.id)).toEqual(['s-live'])
+  })
+
   it('keeps due-but-blocked rows — they are still pending wakes', () => {
     const signals = selectWakeSignals(
       automation([

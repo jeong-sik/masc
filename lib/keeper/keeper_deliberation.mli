@@ -28,6 +28,7 @@ type deliberation_action =
   | BoardComment of { post_id: string; content: string }
   | BoardVote of { post_id: string; direction: string }
   | TaskClaim of { task_id: string; reason: string }
+  | TaskCreate of { title: string; description: string; priority: int option }
   | Broadcast of { message: string }
   | ProposeSpawn of { topic: string; reason: string }
   | MultiStep of deliberation_action list

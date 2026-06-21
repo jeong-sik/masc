@@ -171,6 +171,16 @@ let test_action_to_policy_label_task_claim () =
     (D.deliberation_action_to_policy_label
        (D.TaskClaim { task_id = "t-1"; reason = "needed" }))
 
+let test_action_to_policy_label_task_create () =
+  check string "task_create policy label" "task_create"
+    (D.deliberation_action_to_policy_label
+       (D.TaskCreate
+          {
+            title = "Create scoped task";
+            description = "Seed active goal work";
+            priority = Some 2;
+          }))
+
 let test_action_to_json_roundtrip () =
   let action = D.BoardPost { content = "hello"; hearth = None } in
   let json = D.deliberation_action_to_json action in
@@ -390,6 +400,9 @@ let test_prompt_contains_action_list () =
   check bool "mentions task_claim action" true
     (try ignore (Str.search_forward (Str.regexp_string "task_claim") prompt 0); true
      with Not_found -> false);
+  check bool "mentions task_create action" true
+    (try ignore (Str.search_forward (Str.regexp_string "task_create") prompt 0); true
+     with Not_found -> false);
   check bool "mentions broadcast action" true
     (try ignore (Str.search_forward (Str.regexp_string "broadcast") prompt 0); true
      with Not_found -> false);
@@ -424,6 +437,22 @@ let test_parse_valid_task_claim_json () =
           check string "task_id" "task-99" task_id;
           check string "reason" "Matches my goal" reason
       | _ -> fail "expected TaskClaim action"
+
+let test_parse_valid_task_create_json () =
+  let raw =
+    {|{"action":"task_create","params":{"title":"Add focused regression test","description":"Create a narrow test for active-goal task seeding.","priority":2},"reasoning":"Active goal has no claimable task","confidence":0.72}|}
+  in
+  match D.parse_deliberation_response raw with
+  | Error msg -> fail ("expected Ok, got Error: " ^ msg)
+  | Ok (action, reasoning, confidence) ->
+      (match action with
+       | D.TaskCreate { title; description; priority } ->
+           check string "title" "Add focused regression test" title;
+           check string "description" "Create a narrow test for active-goal task seeding." description;
+           check (option int) "priority" (Some 2) priority
+       | _ -> fail "expected TaskCreate action");
+      check string "reasoning" "Active goal has no claimable task" reasoning;
+      check (float 0.01) "confidence" 0.72 confidence
 
 let test_parse_valid_broadcast_json () =
   let raw =
@@ -472,6 +501,40 @@ let test_legality_verdict_rejects_illegal_task_claim () =
       check bool "mentions unclaimed tasks" true
         (contains_substring msg "unclaimed tasks")
   | D.Legal -> fail "expected illegal task_claim without unclaimed tasks"
+
+let test_legality_verdict_allows_task_create_for_empty_goal_scope () =
+  let obs =
+    D.{ base_obs with active_goal_count = 1; unclaimed_task_count = 0 }
+  in
+  match
+    D.legality_verdict obs
+      (D.TaskCreate
+         {
+           title = "Seed goal task";
+           description = "Create concrete work for the active goal";
+           priority = None;
+         })
+  with
+  | D.Legal -> ()
+  | D.Illegal msg -> fail ("expected legal task_create, got: " ^ msg)
+
+let test_legality_verdict_rejects_task_create_without_goal () =
+  let obs =
+    D.{ base_obs with active_goal_count = 0; unclaimed_task_count = 0 }
+  in
+  match
+    D.legality_verdict obs
+      (D.TaskCreate
+         {
+           title = "Seed goal task";
+           description = "Create concrete work for the active goal";
+           priority = None;
+         })
+  with
+  | D.Illegal msg ->
+      check bool "mentions active goals" true
+        (contains_substring msg "active goals")
+  | D.Legal -> fail "expected illegal task_create without active goals"
 
 let test_legality_verdict_rejects_nested_multistep () =
   let obs =
@@ -1303,6 +1366,8 @@ let () =
             test_action_to_policy_label_board_post;
           test_case "task_claim to policy label" `Quick
             test_action_to_policy_label_task_claim;
+          test_case "task_create to policy label" `Quick
+            test_action_to_policy_label_task_create;
           test_case "action to json roundtrip" `Quick
             test_action_to_json_roundtrip;
           test_case "noop to json preserves reason" `Quick
@@ -1366,6 +1431,10 @@ let () =
         [
           test_case "rejects illegal task_claim" `Quick
             test_legality_verdict_rejects_illegal_task_claim;
+          test_case "allows task_create for empty goal scope" `Quick
+            test_legality_verdict_allows_task_create_for_empty_goal_scope;
+          test_case "rejects task_create without goal" `Quick
+            test_legality_verdict_rejects_task_create_without_goal;
           test_case "rejects nested multi_step" `Quick
             test_legality_verdict_rejects_nested_multistep;
           test_case "keeps legal action" `Quick
@@ -1394,6 +1463,8 @@ let () =
           test_case "parse valid noop" `Quick test_parse_valid_noop_json;
           test_case "parse valid task_claim" `Quick
             test_parse_valid_task_claim_json;
+          test_case "parse valid task_create" `Quick
+            test_parse_valid_task_create_json;
           test_case "parse valid broadcast" `Quick
             test_parse_valid_broadcast_json;
           test_case "parse JSON with code fences rejected" `Quick

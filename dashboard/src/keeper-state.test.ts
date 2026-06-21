@@ -243,7 +243,10 @@ describe('thread history merge & persistence', () => {
     ])
 
     const thread = keeperThreads.value.echo ?? []
-    const traceTextOf = (id: string) => thread.find(e => e.id === id)?.traceSteps?.[0]?.text
+    const traceTextOf = (id: string) => {
+      const step = thread.find(e => e.id === id)?.traceSteps?.[0]
+      return step && 'text' in step ? step.text : undefined
+    }
     // Each history row carries its OWN local trace, not the other's.
     expect(traceTextOf('hist-a')).toBe('first turn reasoning')
     expect(traceTextOf('hist-b')).toBe('second turn reasoning')

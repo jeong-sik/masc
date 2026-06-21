@@ -631,7 +631,11 @@ describe('KeeperTurnInspector v2 drawer', () => {
 
     const stats = container.querySelector('[data-testid="turn-summary-stats"]')?.textContent ?? ''
     expect(stats).toContain('실측')
-    expect(stats).toContain('54ms')
+    // RFC-0233 §9: the gen phase's request_latency_ms (1234ms) joins the tool
+    // duration (54ms) in the measured-total, so the strip reflects the
+    // provider call wall-clock too (1234 + 54 = 1288ms → "1.3s"). This is the
+    // sum of measured phases, not the turn wall-clock — see §9.4.
+    expect(stats).toContain('1.3s')
     expect(stats).toContain('입력')
     expect(stats).toContain('2.4k')
     expect(stats).toContain('출력')

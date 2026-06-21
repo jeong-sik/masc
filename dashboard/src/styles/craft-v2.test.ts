@@ -94,6 +94,17 @@ describe('craft-v2.css density chat console (retargeted to live classes)', () =>
       .toBe('11px')
   })
 
+  it('gives the keeper workspace scroll areas the themed webkit scrollbar', () => {
+    // The design scoped the scrollbar to `.thread`/`.ctx-scroll`/`.roster-list`;
+    // the keeper workspace renders `.kw-thread`/`.kw-rail-scroll`/`.kw-roster-list`,
+    // so those need to be in the selector list to get the 10px themed bar.
+    expect(declarationsForSelector(css, '.v2-app .kw-thread::-webkit-scrollbar').width).toBe('10px')
+    expect(declarationsForSelector(css, '.v2-app .kw-rail-scroll::-webkit-scrollbar').width).toBe('10px')
+    expect(declarationsForSelector(css, '.v2-app .kw-roster-list::-webkit-scrollbar').width).toBe('10px')
+    expect(declarationsForSelector(css, '.v2-app .kw-thread::-webkit-scrollbar-thumb')['background-clip'])
+      .toBe('padding-box')
+  })
+
   it('does not target the design-only .thread / .bubble chat classes (regression guard)', () => {
     // The live keeper workspace renders `.kw-thread` / `.chat-bubble`; the design
     // class names `.thread` / `.bubble` never match, so a density rule on them is dead.

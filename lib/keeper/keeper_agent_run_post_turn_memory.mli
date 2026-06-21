@@ -22,6 +22,7 @@ val run :
   post_turn_t0:float ->
   runtime_id:string ->
   inference_telemetry:Agent_sdk.Types.inference_telemetry option ->
+  ?deliberation_execution:Keeper_deliberation.execution_result ->
   unit ->
   unit
 (** Run the full post-turn memory series.
@@ -31,4 +32,8 @@ val run :
     the [post_turn_ms] metric written to the decision log.
 
     [inference_telemetry] is [result.response.telemetry] from the OAS
-    result; it is optional because some providers do not emit telemetry. *)
+    result; it is optional because some providers do not emit telemetry.
+
+    [deliberation_execution], when available, is persisted as advisory
+    delegation request artifacts on this post-turn memory lane rather than on
+    the decision-record append path. *)

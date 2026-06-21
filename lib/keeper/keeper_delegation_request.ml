@@ -73,6 +73,16 @@ let digest_id ~requester ?goal ~topic ~reason () =
   let hex = Digest.to_hex (Digest.string raw) in
   "delegation-" ^ String.sub hex 0 12
 
+let identity_key request =
+  String.concat "\n"
+    [
+      request.id;
+      request.requester;
+      request.topic;
+      request.reason;
+      optional_identity_component ~field:"goal" request.goal;
+    ]
+
 let task_seed ~requester ?goal ~topic ~reason () =
   let title_topic = topic |> compact_whitespace |> truncate ~max_len:80 in
   let title =

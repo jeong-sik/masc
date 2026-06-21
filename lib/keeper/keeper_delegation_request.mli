@@ -32,6 +32,10 @@ type t = {
 val make :
   requester:string -> ?goal:string -> topic:string -> reason:string -> unit -> t
 
+val identity_key : t -> string
+(** Stable artifact/index identity. Keeps [None] distinct from [Some ""]-style
+    inputs after normalization so stores do not duplicate that encoding. *)
+
 val of_action :
   requester:string ->
   ?goal:string ->

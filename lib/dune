@@ -17,6 +17,7 @@
   keeper_tool_call_log_context
   board_metric_hooks_adapter
   workspace_metric_hooks
+  review_artifact_store
   keeper_types_profile_persona
   keeper_types_profile_persona_defaults
   keeper_types_profile_oas_env

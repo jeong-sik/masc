@@ -36,44 +36,16 @@ let requests_dir ~base_path =
 
 let index_path ~base_path = Filename.concat (requests_dir ~base_path) "index.jsonl"
 
-let component_hash raw =
-  Digestif.SHA256.(digest_string raw |> to_hex) |> fun hex -> String.sub hex 0 16
-;;
-
-let component_prefix raw =
-  let safe =
-    Workspace_utils_backend_setup.sanitize_namespace_segment raw
-    |> String.lowercase_ascii
-  in
-  let safe =
-    match safe with
-    | "default" when String.equal (String.trim raw) "" -> "untitled"
-    | other -> other
-  in
-  if String.length safe > 48 then String.sub safe 0 48 else safe
-;;
-
-let optional_identity_component ~field = function
-  | None -> field ^ ":none"
-  | Some value -> field ^ ":some:" ^ value
-;;
-
 let request_identity_key (request : Keeper_delegation_request.t) =
-  String.concat "\n"
-    [ request.id
-    ; request.requester
-    ; request.topic
-    ; request.reason
-    ; optional_identity_component ~field:"goal" request.goal
-    ]
+  Keeper_delegation_request.identity_key request
 ;;
 
 let summary_identity_key (summary : request_summary) = summary.id
 
 let request_component request =
-  component_prefix request.Keeper_delegation_request.id
-  ^ "-"
-  ^ component_hash (request_identity_key request)
+  Review_artifact_store.component
+    ~display_id:request.Keeper_delegation_request.id
+    ~identity_key:(request_identity_key request)
 ;;
 
 let request_dir ~base_path request =
@@ -86,13 +58,6 @@ let request_json_path ~base_path request =
 
 let request_task_seed_md_path ~base_path request =
   Filename.concat (request_dir ~base_path request) "TASK_SEED.md"
-;;
-
-let write_file path content =
-  Fs_compat.mkdir_p (Filename.dirname path);
-  match Fs_compat.save_file_atomic path content with
-  | Ok () -> Ok ()
-  | Error msg -> Error (Printf.sprintf "%s: %s" path msg)
 ;;
 
 let request_json_content request =
@@ -162,29 +127,30 @@ let index_event_json request ~dir ~json_path ~task_seed_md_path =
     ]
 ;;
 
-let append_index index_path event =
-  try
-    Keeper_types_support.append_jsonl_line index_path event;
-    Ok ()
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (Printf.sprintf "%s: %s" index_path (Printexc.to_string exn))
-;;
-
 let ( let* ) = Result.bind
 
+let stored_request ~base_path request =
+  { request
+  ; dir = request_dir ~base_path request
+  ; json_path = request_json_path ~base_path request
+  ; task_seed_md_path = request_task_seed_md_path ~base_path request
+  ; index_path = index_path ~base_path
+  }
+;;
+
 let write_request ~base_path request =
-  let dir = request_dir ~base_path request in
-  let json_path = request_json_path ~base_path request in
-  let task_seed_md_path = request_task_seed_md_path ~base_path request in
-  let index_path = index_path ~base_path in
-  let* () = write_file json_path (request_json_content request) in
-  let* () = write_file task_seed_md_path (render_task_seed_md request) in
+  let stored = stored_request ~base_path request in
   let* () =
-    append_index index_path
-      (index_event_json request ~dir ~json_path ~task_seed_md_path)
+    Review_artifact_store.write_artifacts
+      ~index_path:stored.index_path
+      ~artifacts:(request_artifacts ~base_path request)
+      ~index_event:
+        (index_event_json request
+           ~dir:stored.dir
+           ~json_path:stored.json_path
+           ~task_seed_md_path:stored.task_seed_md_path)
   in
-  Ok { request; dir; json_path; task_seed_md_path; index_path }
+  Ok stored
 ;;
 
 let write_requests ~base_path requests =
@@ -196,8 +162,6 @@ let write_requests ~base_path requests =
   in
   loop [] requests
 ;;
-
-let read_file_opt = Fs_compat.load_file_opt
 
 let json_string_opt name json =
   match Yojson.Safe.Util.member name json with
@@ -244,34 +208,20 @@ let index_event_matches_request ~base_path request json =
   | _ -> false
 ;;
 
-let index_contains_request ~base_path request =
-  let index_path = index_path ~base_path in
-  if not (Fs_compat.file_exists index_path)
-  then Ok false
-  else
-    try
-      Ok
-        (Fs_compat.load_jsonl index_path
-         |> List.exists (index_event_matches_request ~base_path request))
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Printf.sprintf "%s: %s" index_path (Printexc.to_string exn))
-;;
-
 let write_request_if_changed ~base_path request =
-  let artifacts_unchanged =
-    request_artifacts ~base_path request
-    |> List.for_all (fun (path, expected) ->
-      match read_file_opt path with
-      | Some content -> String.equal content expected
-      | None -> false)
+  let stored = stored_request ~base_path request in
+  let* changed =
+    Review_artifact_store.write_if_changed
+      ~index_path:stored.index_path
+      ~artifacts:(request_artifacts ~base_path request)
+      ~index_event:
+        (index_event_json request
+           ~dir:stored.dir
+           ~json_path:stored.json_path
+           ~task_seed_md_path:stored.task_seed_md_path)
+      ~matches:(index_event_matches_request ~base_path request)
   in
-  let* indexed = index_contains_request ~base_path request in
-  if artifacts_unchanged && indexed
-  then Ok None
-  else (
-    let* stored = write_request ~base_path request in
-    Ok (Some stored))
+  if changed then Ok (Some stored) else Ok None
 ;;
 
 let write_execution_result ~base_path ~requester ?goal execution =
@@ -328,47 +278,17 @@ let request_summary_of_index_event json =
   | _ -> None
 ;;
 
-let take n xs =
-  let rec loop acc remaining = function
-    | _ when remaining <= 0 -> List.rev acc
-    | [] -> List.rev acc
-    | x :: rest -> loop (x :: acc) (remaining - 1) rest
-  in
-  loop [] n xs
-;;
-
-let latest_unique summaries =
-  let seen = Hashtbl.create 16 in
-  List.filter
-    (fun (summary : request_summary) ->
-       let key = summary_identity_key summary in
-       if Hashtbl.mem seen key
-       then false
-       else (
-         Hashtbl.add seen key ();
-         true))
-    summaries
-;;
-
 let list_requests ~base_path ~limit =
   let index_path = index_path ~base_path in
   let limit = max 0 limit in
-  try
-    let items =
-      if Fs_compat.file_exists index_path
-      then
-        Fs_compat.load_jsonl index_path
-        |> List.rev
-        |> List.filter_map request_summary_of_index_event
-        |> latest_unique
-      else []
-    in
-    let total = List.length items in
-    let items = take limit items in
-    Ok { total; shown = List.length items; limit; index_path; items }
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (Printf.sprintf "%s: %s" index_path (Printexc.to_string exn))
+  let* (total, items) =
+    Review_artifact_store.list_index
+      ~index_path
+      ~limit
+      ~of_json:request_summary_of_index_event
+      ~identity_key:summary_identity_key
+  in
+  Ok { total; shown = List.length items; limit; index_path; items }
 ;;
 
 let json_option_float = function

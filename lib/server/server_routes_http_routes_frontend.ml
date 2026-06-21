@@ -92,15 +92,15 @@ let websocket_handler ?sw ?clock request reqd =
   if is_websocket_upgrade_request request then
     match websocket_upgrade_unavailable_reason () with
     | None ->
-      match
-        Server_mcp_transport_ws.upgrade_connection
-          ?sw
-          ?clock
-          ~on_message:Server_mcp_transport_ws.dispatch_inbound_message
-          reqd
-      with
-      | Ok () -> ()
-      | Error msg -> Http.Response.text ~status:`Bad_request msg reqd
+      (match
+         Server_mcp_transport_ws.upgrade_connection
+           ?sw
+           ?clock
+           ~on_message:Server_mcp_transport_ws.dispatch_inbound_message
+           reqd
+       with
+       | Ok () -> ()
+       | Error msg -> Http.Response.text ~status:`Bad_request msg reqd)
     | Some reason -> Http.Response.text ~status:`Service_unavailable reason reqd
   else
     websocket_discovery_handler request reqd

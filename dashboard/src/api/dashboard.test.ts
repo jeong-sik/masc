@@ -32,6 +32,7 @@ import {
   fetchMemorySubsystems,
   fetchRuntimeProviders,
   fetchRuntimeTomlConfig,
+  fetchRuntimeDefaults,
   fetchRuntimeModelMetrics,
   patchKeeperConfig,
   saveRuntimeTomlConfig,
@@ -2339,5 +2340,43 @@ describe('fetchLogs', () => {
     const params = new URLSearchParams(requestedUrl(fetchMock).split('?')[1] ?? '')
     expect(params.get('since_seq')).toBe('10')
     expect(params.get('before_seq')).toBe('20')
+  })
+})
+
+describe('fetchRuntimeDefaults', () => {
+  it('reads the resolved runtime-defaults surface and parses it', async () => {
+    const rawResponse = {
+      generated_at_iso: '2026-06-21T00:00:00Z',
+      dashboard_surface: '/api/v1/dashboard/runtime-defaults',
+      source: 'runtime_config',
+      config_path: '/cfg/runtime.toml',
+      default_runtime_id: 'openai.gpt-4o',
+      default_model: 'gpt-4o',
+      default_max_context: 128000,
+      runtimes: [
+        { id: 'openai.gpt-4o', provider: 'OpenAI', model: 'gpt-4o', max_context: 128000, is_default: true },
+      ],
+      model_routing: {
+        keeper_assignments: [{ keeper: 'analyst', runtime_id: 'openai.gpt-4o' }],
+        librarian_runtime_id: null,
+        cross_verifier_runtime_id: null,
+        media_failover: [],
+      },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchRuntimeDefaults()
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/runtime-defaults')
+    expect(result.default_runtime_id).toBe('openai.gpt-4o')
+    expect(result.default_model).toBe('gpt-4o')
+    expect(result.runtimes[0]?.is_default).toBe(true)
+    expect(result.model_routing.keeper_assignments[0]?.keeper).toBe('analyst')
   })
 })

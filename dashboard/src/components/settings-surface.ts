@@ -1,14 +1,13 @@
 // MASC Dashboard — Settings surface (keeper-v2 port)
-// Read surfaces (MCP exposed-tools list, system-log tail) are wired to live
-// backend data. Write surfaces (Save changes, VerifyBtn, runtime defaults /
-// model routing) remain local-state stubs — see the deferred list in the PR
-// that introduced the read wiring.
+// Read surfaces (MCP exposed-tools list, system-log tail, runtime defaults /
+// model routing) are wired to live backend data. Write surfaces (Save changes,
+// VerifyBtn, expose/unexpose persistence) remain local-state stubs.
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { navigate } from '../router'
-import { fetchLogs, fetchDashboardTools } from '../api/dashboard.js'
-import type { LogEntry, DashboardToolInventoryItem } from '../api/dashboard.js'
+import { fetchDashboardTools, fetchLogs, fetchRuntimeDefaults } from '../api/dashboard.js'
+import type { DashboardToolInventoryItem, LogEntry, RuntimeDefaultsResponse } from '../api/dashboard.js'
 import type { ComponentChildren } from 'preact'
 
 type SectionId =
@@ -396,19 +395,34 @@ export function SettingsSurface() {
     return () => { active = false }
   }, [])
 
-  // runtime defaults
-  const [defRuntime, setDefRuntime] = useState('oas·seoul-1')
-  const [defModel, setDefModel] = useState('claude-sonnet-4')
+  // runtime defaults / model routing — resolved from runtime.toml (SSOT)
+  const [runtimeDefaults, setRuntimeDefaults] = useState<RuntimeDefaultsResponse | null>(null)
+  const [defRuntime, setDefRuntime] = useState('')
+  const [defModel, setDefModel] = useState('')
   const [maxPar, setMaxPar] = useState(6)
   const [compactAt, setCompactAt] = useState(85)
   const [autoCompact, setAutoCompact] = useState(true)
 
-  // routing / policy
-  const [routing, setRouting] = useState<Record<string, string>>({
-    analysis: 'claude-sonnet-4',
-    heavy: 'claude-opus-4',
-    cheap: 'claude-haiku-4',
-  })
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      try {
+        const resp = await fetchRuntimeDefaults()
+        if (!active) return
+        setRuntimeDefaults(resp)
+        // Seed the selectors with the resolved defaults (unknown → left blank,
+        // never a fabricated default).
+        if (resp.default_runtime_id) setDefRuntime(resp.default_runtime_id)
+        if (resp.default_model) setDefModel(resp.default_model)
+      } catch {
+        if (!active) return
+        setRuntimeDefaults(null)
+      }
+    })()
+    return () => { active = false }
+  }, [])
+
+  // policy
   const [approve, setApprove] = useState<Record<string, string>>(
     Object.fromEntries(APPROVAL_ACTIONS.map(a => [a[0], a[1]])),
   )
@@ -484,6 +498,13 @@ export function SettingsSurface() {
   const [clock24, setClock24] = useState(true)
 
   const cur = SET_SECTIONS.find(s => s[0] === sec) ?? SET_SECTIONS[0]!
+
+  // Resolved runtime options (de-duplicated, derived from the live registry).
+  const runtimeIdOptions = (runtimeDefaults?.runtimes ?? []).map(r => r.id)
+  const runtimeModelOptions = [...new Set((runtimeDefaults?.runtimes ?? []).map(r => r.model))]
+  const keeperAssignments = runtimeDefaults?.model_routing.keeper_assignments ?? []
+  const librarianRuntime = runtimeDefaults?.model_routing.librarian_runtime_id ?? null
+  const crossVerifierRuntime = runtimeDefaults?.model_routing.cross_verifier_runtime_id ?? null
 
   return html`
     <main class="v2-shell-surface settings-surf ss-surface bg-surface-page text-text-primary" data-screen-label="설정" data-testid="settings-surface">
@@ -602,11 +623,15 @@ export function SettingsSurface() {
             `}
 
             ${sec === 'runtime' && html`
-              <${SetRow} label="Default runtime" hint="Where new keepers start">
-                <${SetSeg} value=${defRuntime} options=${['oas·seoul-1', 'oas·tokyo-2', 'local·docker']} onChange=${setDefRuntime} />
+              <${SetRow} label="Default runtime" hint="Resolved from runtime.toml [runtime].default">
+                ${runtimeIdOptions.length === 0
+                  ? html`<span class="set-hint" data-testid="runtime-default-empty">런타임 설정을 불러오지 못했습니다.</span>`
+                  : html`<${SetSeg} value=${defRuntime} options=${runtimeIdOptions} onChange=${setDefRuntime} />`}
               <//>
-              <${SetRow} label="Default model" hint="Used when no routing rule matches">
-                <${SetSeg} value=${defModel} options=${['claude-haiku-4', 'claude-sonnet-4', 'claude-opus-4']} onChange=${setDefModel} />
+              <${SetRow} label="Default model" hint="API model of the default runtime">
+                ${runtimeModelOptions.length === 0
+                  ? html`<span class="set-hint">—</span>`
+                  : html`<${SetSeg} value=${defModel} options=${runtimeModelOptions} onChange=${setDefModel} />`}
               <//>
               <${SetRow} label="Max concurrent keepers" hint="In this namespace">
                 <${SetStepper} v=${maxPar} set=${setMaxPar} min=${1} max=${12} />
@@ -645,20 +670,26 @@ export function SettingsSurface() {
             `}
 
             ${sec === 'routing' && html`
-              <div class="set-hint" style=${{ marginBottom: '12px' }}>Automatically pick a model per task.kind.</div>
-              ${([
-                ['analysis', '분석 · 리서치'],
-                ['heavy', '복잡한 추론 · 대규모 리팩터'],
-                ['cheap', '단순 작업 · 분류'],
-              ] as const).map(([k, lbl]) => html`
-                <${SetRow} key=${k} label=${lbl} hint=${`task.kind = ${k}`}>
-                  <${SetSeg}
-                    value=${routing[k]}
-                    options=${['claude-haiku-4', 'claude-sonnet-4', 'claude-opus-4']}
-                    onChange=${(v: string) => setRouting(p => ({ ...p, [k]: v }))}
-                  />
-                <//>
-              `)}
+              <div class="set-hint" style=${{ marginBottom: '12px' }}>
+                Resolved model routing from runtime.toml (SSOT). Read-only — edit runtime.toml to change.
+              </div>
+              <${SetRow} label="Default model" hint="Used when no keeper assignment matches">
+                <span class="mono" data-testid="routing-default-model">${runtimeDefaults?.default_model ?? '—'}</span>
+              <//>
+              ${librarianRuntime
+                ? html`<${SetRow} label="Librarian runtime" hint="[runtime].librarian"><span class="mono">${librarianRuntime}</span><//>`
+                : null}
+              ${crossVerifierRuntime
+                ? html`<${SetRow} label="Cross-verifier runtime" hint="[runtime].cross_verifier"><span class="mono">${crossVerifierRuntime}</span><//>`
+                : null}
+              <div class="set-sub-h">Keeper assignments (${keeperAssignments.length})</div>
+              ${keeperAssignments.length === 0
+                ? html`<div class="set-hint" data-testid="routing-assignments-empty">명시적 keeper 할당이 없습니다 — 모두 기본 런타임을 사용합니다.</div>`
+                : keeperAssignments.map(a => html`
+                    <${SetRow} key=${a.keeper} label=${a.keeper} hint="keeper → runtime">
+                      <span class="mono" data-testid="routing-assignment">${a.runtime_id}</span>
+                    <//>
+                  `)}
             `}
 
             ${sec === 'prompts' && html`

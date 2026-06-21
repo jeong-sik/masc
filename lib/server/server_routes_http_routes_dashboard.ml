@@ -319,6 +319,18 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value ~compress:true ~request:req json reqd
        in
        with_tool_auth ~tool_name:"masc_runtime_ollama_probe" handle request reqd)
+  |> Http.Router.get "/api/v1/dashboard/runtime-defaults" (fun request reqd ->
+       (* Structured, already-resolved runtime defaults / model routing for the
+          Settings surface. Read-only projection of the runtime.toml SSOT
+          singletons (no credentials, no raw TOML), so a public read mirrors the
+          other dashboard read surfaces. *)
+       with_public_read (fun _state req reqd ->
+         let json =
+           Server_dashboard_runtime_defaults_json.current
+             ~generated_at_iso:(Masc_domain.now_iso ()) ()
+         in
+         Http.Response.json_value ~compress:true ~request:req json reqd)
+         request reqd)
   |> Http.Router.get "/api/v1/runtime/config/raw" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun _state _agent_name req reqd ->

@@ -11,7 +11,7 @@ import { linkifyHtmlReferences } from './chat-linkify'
 import { showToast } from '../common/toast'
 import { copyToClipboard } from '../common/copyable-code'
 import { useVoiceInput } from './voice-input'
-import { Mic, Square } from 'lucide-preact'
+import { ExternalLink, Mic, Square } from 'lucide-preact'
 
 const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
 import { formatTimeHms } from '../../lib/format-time'
@@ -26,6 +26,8 @@ import { Sigil } from '../common/sigil-chip'
 import { SuggestionChip } from '../common/suggestion-chip'
 import { StatusDot } from '../common/status-dot'
 import type { JSX } from 'preact'
+import { navigate } from '../../router'
+import { normalizeFusionPanelReason } from '../../lib/fusion-meta'
 
 /** Keeper identity used by SigilBadge. */
 export interface SigilBadgeKeeper {
@@ -1145,6 +1147,13 @@ type FusionJudgeView = {
   // resolvedAnswer for older posts written before synthesis was serialized.
   synthesis?: string
   resolvedAnswer?: string
+  error?: string
+}
+
+function stringOrUndef(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined
+  const trimmed = v.trim()
+  return trimmed || undefined
 }
 
 function numOrUndef(v: unknown): number | undefined {
@@ -1158,11 +1167,13 @@ function asFusionPanel(meta: unknown): FusionPanelEntry[] {
   return panel.flatMap((raw) => {
     if (!raw || typeof raw !== 'object') return []
     const r = raw as Record<string, unknown>
+    const model = stringOrUndef(r.model) ?? '?'
+    const reason = stringOrUndef(r.reason_detail) ?? stringOrUndef(r.reason)
     return [{
-      model: typeof r.model === 'string' ? r.model : '?',
-      status: typeof r.status === 'string' ? r.status : 'unknown',
-      answer: typeof r.answer === 'string' ? r.answer : undefined,
-      reason: typeof r.reason === 'string' ? r.reason : undefined,
+      model,
+      status: stringOrUndef(r.status) ?? 'unknown',
+      answer: stringOrUndef(r.answer),
+      reason: normalizeFusionPanelReason(model, reason),
       outputTokens: numOrUndef(r.output_tokens),
     }]
   })
@@ -1178,6 +1189,7 @@ function asFusionJudge(meta: unknown): FusionJudgeView | null {
     decision: typeof r.decision === 'string' ? r.decision : undefined,
     synthesis: typeof r.synthesis === 'string' ? r.synthesis : undefined,
     resolvedAnswer: typeof r.resolved_answer === 'string' ? r.resolved_answer : undefined,
+    error: typeof r.error === 'string' ? r.error : undefined,
   }
 }
 
@@ -1290,6 +1302,30 @@ function ChatFusionCard({ boardPostId, runId, fallbackText }: { boardPostId: str
             : `패널 합의 상세${runLabel}`}
         </span>
       </button>
+      <div class="flex flex-wrap items-center gap-2 px-3 pb-2">
+        ${runId
+          ? html`
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 rounded-[var(--r-0,4px)] border border-[var(--color-brass-border,#3a3a2a)] bg-[var(--color-bg-surface,#111827)] px-2 py-1 text-2xs font-medium text-[var(--color-fg-secondary,#9da7b3)] hover:text-[var(--color-fg-primary,#f3f4f6)] ${CHAT_FOCUS_RING}"
+              onClick=${() => navigate('fusion', { run_id: runId })}
+              data-testid="fusion-chat-open-run"
+            >
+              <${ExternalLink} size=${12} aria-hidden="true" />
+              <span>Fusion</span>
+            </button>
+          `
+          : null}
+        <button
+          type="button"
+          class="inline-flex items-center gap-1 rounded-[var(--r-0,4px)] border border-[var(--color-brass-border,#3a3a2a)] bg-[var(--color-bg-surface,#111827)] px-2 py-1 text-2xs font-medium text-[var(--color-fg-secondary,#9da7b3)] hover:text-[var(--color-fg-primary,#f3f4f6)] ${CHAT_FOCUS_RING}"
+          onClick=${() => navigate('board', { post: boardPostId })}
+          data-testid="fusion-chat-open-board"
+        >
+          <${ExternalLink} size=${12} aria-hidden="true" />
+          <span>Board</span>
+        </button>
+      </div>
       ${expanded
         ? html`
           <div class="px-3 pb-3 flex flex-col gap-3" data-fusion-detail>
@@ -1316,7 +1352,9 @@ function ChatFusionCard({ boardPostId, runId, fallbackText }: { boardPostId: str
                         ? html`<div class="mt-1"><${FusionMarkdown} text=${state.judge.synthesis} /></div>`
                         : state.judge.resolvedAnswer
                           ? html`<div class="mt-1"><${FusionMarkdown} text=${state.judge.resolvedAnswer} /></div>`
-                          : null}
+                          : state.judge.error
+                            ? html`<div class="mt-1"><${FusionMarkdown} text=${state.judge.error} /></div>`
+                            : null}
                     </div>
                   `
                   : null}

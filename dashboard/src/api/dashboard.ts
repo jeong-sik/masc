@@ -1878,6 +1878,26 @@ export interface DashboardScheduledAutomationKeeperToolStatus {
   requires_actor_binding?: boolean | null
 }
 
+export interface DashboardScheduledAutomationActor {
+  id: string
+  kind: string
+  display_name?: string | null
+}
+
+export interface DashboardScheduledAutomationSignal {
+  signal_id: string
+  kind: string
+  event_type?: string
+  schedule_id: string
+  emitted_at?: number
+  emitted_at_iso?: string | null
+  due_at?: number
+  due_at_iso?: string | null
+  risk_class: string
+  payload_digest?: string
+  payload_kind?: string | null
+}
+
 export interface DashboardScheduledAutomationRequest {
   schedule_id: string
   status: string
@@ -1890,6 +1910,8 @@ export interface DashboardScheduledAutomationRequest {
   risk_class: string
   approval_required: boolean
   source: string
+  requested_by?: DashboardScheduledAutomationActor | null
+  scheduled_by?: DashboardScheduledAutomationActor | null
   recurrence?: {
     kind: string
     interval_sec?: number
@@ -1933,6 +1955,10 @@ export interface DashboardScheduledAutomation {
   request_count: number
   request_limit: number
   truncated: boolean
+  signal_source?: string
+  signal_count?: number
+  signal_limit?: number
+  signals?: DashboardScheduledAutomationSignal[]
   counts: Record<string, number>
   derived_counts?: Record<string, number>
   payload_support?: DashboardScheduledAutomationPayloadSupport

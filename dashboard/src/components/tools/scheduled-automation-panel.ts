@@ -3,21 +3,49 @@ import { useState } from 'preact/hooks'
 import {
   resolveScheduleApproval,
   type DashboardScheduleDecision,
+  type DashboardScheduledAutomationActor,
   type DashboardScheduledAutomation,
+  type DashboardScheduledAutomationExecution,
   type DashboardScheduledAutomationRequest,
+  type DashboardScheduledAutomationSignal,
 } from '../../api'
 import { formatDateTimeKo } from '../../lib/format-time'
 import { ActionButton } from '../common/button'
 import { StatusChip, type StatusChipTone } from '../common/status-chip'
 import { showToast } from '../common/toast'
 
+type ScheduleFilterKey = 'all' | 'pending' | 'due' | 'ready' | 'scheduled' | 'terminal'
+
+const SCHEDULE_FILTERS: ReadonlyArray<{ key: ScheduleFilterKey; label: string }> = [
+  { key: 'all', label: '전체' },
+  { key: 'pending', label: '승인 대기' },
+  { key: 'due', label: '기한 도래' },
+  { key: 'ready', label: '실행 준비' },
+  { key: 'scheduled', label: '예약/실행' },
+  { key: 'terminal', label: '완료' },
+]
+
 function enumLabel(value: string | null | undefined): string {
   if (!value) return '-'
   return value.replace(/_/g, ' ')
 }
 
+function actorLabel(actor: DashboardScheduledAutomationActor | null | undefined): string {
+  if (!actor?.id) return '-'
+  const displayName = actor.display_name?.trim()
+  const kind = actor.kind ? enumLabel(actor.kind) : null
+  if (displayName && displayName !== actor.id) {
+    return kind ? `${displayName} (${actor.id}, ${kind})` : `${displayName} (${actor.id})`
+  }
+  return kind ? `${actor.id} (${kind})` : actor.id
+}
+
+function normalized(value: string | null | undefined): string {
+  return value?.trim().toLowerCase() ?? ''
+}
+
 function automationTone(status: string | null | undefined): StatusChipTone {
-  switch (status) {
+  switch (normalized(status)) {
     case 'running':
     case 'scheduled':
     case 'ready':
@@ -39,6 +67,52 @@ function automationTone(status: string | null | undefined): StatusChipTone {
     case 'cancelled':
     default:
       return 'neutral'
+  }
+}
+
+function effectiveStatus(request: DashboardScheduledAutomationRequest): string {
+  return request.effective_status ?? request.status
+}
+
+function dueTimestamp(request: DashboardScheduledAutomationRequest): number {
+  const dueIso = request.next_due_at_iso ?? request.due_at_iso ?? null
+  const parsed = dueIso ? Date.parse(dueIso) : Number.NaN
+  return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER
+}
+
+function signalTimestamp(signal: DashboardScheduledAutomationSignal): number {
+  const emittedIso = signal.emitted_at_iso ?? signal.due_at_iso ?? null
+  const parsed = emittedIso ? Date.parse(emittedIso) : Number.NaN
+  return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER
+}
+
+function compactTimeLabel(value: string | null | undefined): string {
+  if (!value) return '--:--'
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return clipDetailValue(value, 12)
+  const hh = String(date.getHours()).padStart(2, '0')
+  const mm = String(date.getMinutes()).padStart(2, '0')
+  return `${hh}:${mm}`
+}
+
+function filterMatches(filter: ScheduleFilterKey, request: DashboardScheduledAutomationRequest): boolean {
+  if (filter === 'all') return true
+  const status = normalized(effectiveStatus(request))
+  const readiness = normalized(request.execution_readiness)
+  const operatorAction = normalized(request.operator_action)
+  switch (filter) {
+    case 'pending':
+      return status.includes('approval') || operatorAction.includes('approve')
+    case 'due':
+      return status === 'due' || status === 'due_pending_refresh' || status === 'blocked_approval'
+    case 'ready':
+      return readiness === 'ready' || readiness === 'execution_ready' || readiness.includes('ready')
+    case 'scheduled':
+      return status === 'scheduled' || status === 'running'
+    case 'terminal':
+      return ['succeeded', 'failed', 'rejected', 'expired', 'cancelled'].includes(status)
+    default:
+      return true
   }
 }
 
@@ -175,6 +249,46 @@ function lastExecutionLabel(request: DashboardScheduledAutomationRequest): strin
   const status = enumLabel(execution.status)
   const finishedAt = formatDateTimeKo(execution.finished_at_iso ?? execution.started_at_iso ?? null)
   return finishedAt === '-' ? status : `${status} ${finishedAt}`
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function clipDetailValue(value: string, maxLength = 120): string {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 3)}...`
+}
+
+function countLabel(count: number, singular: string, plural: string): string {
+  return `${count.toLocaleString()} ${count === 1 ? singular : plural}`
+}
+
+function compactDetailValue(value: unknown): string | null {
+  if (value == null) return null
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed ? clipDetailValue(trimmed) : null
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) return `[${countLabel(value.length, 'item', 'items')}]`
+  if (isRecord(value)) return `{${countLabel(Object.keys(value).length, 'field', 'fields')}}`
+  return null
+}
+
+function executionDetailRows(detail: unknown): Array<{ label: string; value: string }> {
+  if (detail == null) return []
+  if (!isRecord(detail)) {
+    const value = compactDetailValue(detail)
+    return value ? [{ label: 'detail', value }] : []
+  }
+
+  return Object.entries(detail)
+    .map(([label, value]) => ({
+      label: clipDetailValue(enumLabel(label), 48),
+      value: compactDetailValue(value),
+    }))
+    .filter((row): row is { label: string; value: string } => Boolean(row.label && row.value))
+    .slice(0, 6)
 }
 
 function PayloadCell({ request }: { request: DashboardScheduledAutomationRequest }) {
@@ -342,36 +456,338 @@ function ApprovalCell({
   `
 }
 
-function ScheduleRow({
+function InfoBlock({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string
+  value: string
+  mono?: boolean
+}) {
+  return html`
+    <div class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">
+      <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">${label}</div>
+      <div class=${`mt-1 truncate text-xs text-[var(--color-fg-secondary)] ${mono ? 'font-mono' : ''}`} title=${value}>${value}</div>
+    </div>
+  `
+}
+
+function ScheduleCard({
   request,
-  onResolved,
+  selected,
+  onSelect,
 }: {
   request: DashboardScheduledAutomationRequest
-  onResolved?: () => Promise<void> | void
+  selected: boolean
+  onSelect: (request: DashboardScheduledAutomationRequest) => void
 }) {
-  const effectiveStatus = request.effective_status ?? request.status
+  const requestStatus = effectiveStatus(request)
   const readiness = request.execution_readiness ?? '-'
   const action = request.operator_action ?? '-'
   const dueIso = request.next_due_at_iso ?? request.due_at_iso ?? null
+  const approval = request.approval_policy ?? (request.approval_required ? 'required' : 'not_required')
   return html`
-    <tr class="v2-lab-row border-t border-[var(--color-border-default)]">
-      <td class="py-2 pr-3 font-mono text-xs text-[var(--color-fg-secondary)]">${request.schedule_id}</td>
-      <td class="py-2 pr-3">
-        <${StatusChip} tone=${automationTone(effectiveStatus)} uppercase=${false}>${enumLabel(effectiveStatus)}<//>
-        ${effectiveStatus !== request.status
-          ? html`<div class="mt-1 text-3xs text-[var(--color-fg-disabled)]">raw ${enumLabel(request.status)}</div>`
+    <article
+      class=${`v2-lab-card rounded-[var(--r-1)] border bg-[var(--color-bg-surface)] p-4 ${selected ? 'border-[var(--color-accent-fg)]' : 'border-[var(--color-border-default)]'}`}
+      data-schedule-id=${request.schedule_id}
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">예약</div>
+          <div class="mt-1 truncate font-mono text-sm font-semibold text-[var(--color-fg-primary)]" title=${request.schedule_id}>
+            ${request.schedule_id}
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <${StatusChip} tone=${automationTone(requestStatus)} uppercase=${false}>${enumLabel(requestStatus)}<//>
+          <button
+            type="button"
+            class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-accent-fg)] hover:text-[var(--color-fg-primary)]"
+            aria-pressed=${selected ? 'true' : 'false'}
+            data-schedule-detail=${request.schedule_id}
+            onClick=${() => { onSelect(request) }}
+          >
+            상세
+          </button>
+        </div>
+      </div>
+
+      <div class="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <${InfoBlock} label="실행 준비" value=${enumLabel(readiness)} />
+        <${InfoBlock} label="운영자 조치" value=${enumLabel(action)} />
+        <${InfoBlock} label="위험도" value=${enumLabel(request.risk_class)} />
+        <${InfoBlock} label="승인 정책" value=${enumLabel(approval)} />
+        <${InfoBlock} label="반복" value=${recurrenceLabel(request)} />
+        <${InfoBlock} label="마지막 실행" value=${lastExecutionLabel(request)} />
+        <${InfoBlock} label="예정 시각" value=${formatDateTimeKo(dueIso)} mono=${true} />
+        <${InfoBlock} label="출처" value=${enumLabel(request.source)} />
+      </div>
+
+      <div class="mt-3 grid gap-3 lg:grid-cols-2">
+        <section class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">
+          <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">키퍼 다음 단계</div>
+          <div class="mt-2"><${KeeperActionCell} request=${request} /></div>
+        </section>
+        <section class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">
+          <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">페이로드</div>
+          <div class="mt-2"><${PayloadCell} request=${request} /></div>
+        </section>
+      </div>
+
+      <div class="mt-3 flex flex-wrap gap-2 text-3xs text-[var(--color-fg-muted)]">
+        ${requestStatus !== request.status
+          ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-0.5">원본 ${enumLabel(request.status)}</span>`
           : null}
-      </td>
-      <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${enumLabel(readiness)}</td>
-      <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${enumLabel(action)}</td>
-      <td class="py-2 pr-3"><${KeeperActionCell} request=${request} /></td>
-      <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${enumLabel(request.risk_class)}</td>
-      <td class="py-2 pr-3"><${PayloadCell} request=${request} /></td>
-      <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${recurrenceLabel(request)}</td>
-      <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${lastExecutionLabel(request)}</td>
-      <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${formatDateTimeKo(dueIso)}</td>
-      <td class="py-2 text-xs text-[var(--color-fg-muted)]"><${ApprovalCell} request=${request} onResolved=${onResolved} /></td>
-    </tr>
+        ${request.requires_separate_human_grant
+          ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-status-warn)] px-2 py-0.5 text-[var(--color-status-warn)]">별도 human grant 필요</span>`
+          : null}
+        ${request.payload_digest
+          ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-0.5 font-mono">${request.payload_digest}</span>`
+          : null}
+      </div>
+    </article>
+  `
+}
+
+function LastExecutionBlock({ execution }: { execution: DashboardScheduledAutomationExecution | null | undefined }) {
+  if (!execution) {
+    return html`<div class="mt-1 text-xs text-[var(--color-fg-muted)]">-</div>`
+  }
+
+  const detailRows = executionDetailRows(execution.detail)
+  return html`
+    <div class="mt-1 grid gap-2 text-xs text-[var(--color-fg-muted)]">
+      <div class="flex flex-wrap items-center gap-2">
+        <${StatusChip} tone=${automationTone(execution.status)} uppercase=${false}>${enumLabel(execution.status)}<//>
+        ${execution.error ? html`<span>${execution.error}</span>` : null}
+      </div>
+      <div class="grid gap-1 text-3xs text-[var(--color-fg-disabled)]">
+        <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-2">
+          <span>실행</span>
+          <span class="truncate font-mono" title=${execution.execution_id}>${execution.execution_id}</span>
+        </div>
+        <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-2">
+          <span>시작</span>
+          <span class="font-mono">${formatDateTimeKo(execution.started_at_iso ?? null)}</span>
+        </div>
+        <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-2">
+          <span>종료</span>
+          <span class="font-mono">${formatDateTimeKo(execution.finished_at_iso ?? null)}</span>
+        </div>
+      </div>
+      ${detailRows.length > 0
+        ? html`
+            <div class="grid gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-2">
+              <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">상세</div>
+              ${detailRows.map(row => html`
+                <div class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2" data-execution-detail-row=${row.label}>
+                  <span class="truncate text-[var(--color-fg-disabled)]" title=${row.label}>${row.label}</span>
+                  <span class="truncate font-mono text-[var(--color-fg-secondary)]" title=${row.value}>${row.value}</span>
+                </div>
+              `)}
+            </div>
+          `
+        : null}
+    </div>
+  `
+}
+
+function ScheduleDetailPanel({
+  request,
+  onResolved,
+}: {
+  request: DashboardScheduledAutomationRequest | null
+  onResolved?: () => Promise<void> | void
+}) {
+  if (!request) {
+    return html`
+      <section class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] px-3 py-6 text-center text-xs text-[var(--color-fg-muted)]">
+        예약을 선택하세요.
+      </section>
+    `
+  }
+
+  const requestStatus = effectiveStatus(request)
+  const dueIso = request.next_due_at_iso ?? request.due_at_iso ?? null
+  const requestedAtIso = request.requested_at_iso ?? null
+  const expiresAtIso = request.expires_at_iso ?? null
+  const execution = request.last_execution
+  return html`
+    <section class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-3" data-schedule-detail-panel=${request.schedule_id}>
+      <div class="flex flex-wrap items-start justify-between gap-2">
+        <div class="min-w-0">
+          <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">선택한 예약</div>
+          <div class="mt-1 truncate font-mono text-sm font-semibold text-[var(--color-fg-primary)]" title=${request.schedule_id}>${request.schedule_id}</div>
+        </div>
+        <${StatusChip} tone=${automationTone(requestStatus)} uppercase=${false}>${enumLabel(requestStatus)}<//>
+      </div>
+
+      <div class="mt-3 grid gap-2 text-xs text-[var(--color-fg-secondary)]">
+        <div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-2">
+          <span class="text-[var(--color-fg-disabled)]">예정</span>
+          <span class="font-mono">${formatDateTimeKo(dueIso)}</span>
+        </div>
+        <div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-2">
+          <span class="text-[var(--color-fg-disabled)]">요청</span>
+          <span class="font-mono">${formatDateTimeKo(requestedAtIso)}</span>
+        </div>
+        <div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-2">
+          <span class="text-[var(--color-fg-disabled)]">만료</span>
+          <span class="font-mono">${formatDateTimeKo(expiresAtIso)}</span>
+        </div>
+        <div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-2">
+          <span class="text-[var(--color-fg-disabled)]">요청자</span>
+          <span>${actorLabel(request.requested_by)}</span>
+        </div>
+        <div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-2">
+          <span class="text-[var(--color-fg-disabled)]">예약자</span>
+          <span>${actorLabel(request.scheduled_by)}</span>
+        </div>
+        <div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-2">
+          <span class="text-[var(--color-fg-disabled)]">실행 준비</span>
+          <span>${enumLabel(request.execution_readiness)}</span>
+        </div>
+        <div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-2">
+          <span class="text-[var(--color-fg-disabled)]">운영자 조치</span>
+          <span>${enumLabel(request.operator_action)}</span>
+        </div>
+        <div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-2">
+          <span class="text-[var(--color-fg-disabled)]">승인</span>
+          <span><${ApprovalCell} request=${request} onResolved=${onResolved} /></span>
+        </div>
+        <div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-2">
+          <span class="text-[var(--color-fg-disabled)]">위험도</span>
+          <span>${enumLabel(request.risk_class)}</span>
+        </div>
+        <div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-2">
+          <span class="text-[var(--color-fg-disabled)]">반복</span>
+          <span>${recurrenceLabel(request)}</span>
+        </div>
+      </div>
+
+      <div class="mt-3 grid gap-3">
+        <div>
+          <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">키퍼 다음 단계</div>
+          <div class="mt-1"><${KeeperActionCell} request=${request} /></div>
+        </div>
+        <div>
+          <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">페이로드</div>
+          <div class="mt-1"><${PayloadCell} request=${request} /></div>
+        </div>
+        <div>
+          <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">최근 실행</div>
+          <${LastExecutionBlock} execution=${execution} />
+        </div>
+      </div>
+    </section>
+  `
+}
+
+function WakeSignalItem({
+  request,
+  onSelect,
+}: {
+  request: DashboardScheduledAutomationRequest
+  onSelect: (request: DashboardScheduledAutomationRequest) => void
+}) {
+  const requestStatus = effectiveStatus(request)
+  const dueIso = request.next_due_at_iso ?? request.due_at_iso ?? null
+  const action = request.operator_action ? enumLabel(request.operator_action) : 'observe'
+  const nextTool = request.keeper_next_tool?.trim() || null
+  return html`
+    <li class="grid grid-cols-[3.25rem_minmax(0,1fr)] items-start gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">
+      <span
+        class="font-mono text-3xs text-[var(--color-fg-muted)]"
+        title=${formatDateTimeKo(dueIso)}
+        data-schedule-signal-at=${request.schedule_id}
+      >
+        ${compactTimeLabel(dueIso)}
+      </span>
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2">
+          <span data-schedule-signal-kind=${requestStatus}>
+            <${StatusChip} tone=${automationTone(requestStatus)} uppercase=${false}>${enumLabel(requestStatus)}<//>
+          </span>
+          <button
+            type="button"
+            class="min-w-0 truncate bg-transparent p-0 text-left font-mono text-xs text-[var(--color-fg-secondary)] hover:text-[var(--color-accent-fg)] hover:underline"
+            title=${request.schedule_id}
+            data-schedule-signal-schedule=${request.schedule_id}
+            onClick=${() => { onSelect(request) }}
+          >
+            ${request.schedule_id}
+          </button>
+        </div>
+        <div class="mt-1 truncate text-3xs text-[var(--color-fg-disabled)]" title=${action}>
+          ${action}
+        </div>
+        ${nextTool
+          ? html`<div class="mt-1 truncate font-mono text-3xs text-[var(--color-fg-disabled)]" title=${nextTool}>${nextTool}</div>`
+          : null}
+      </div>
+    </li>
+  `
+}
+
+function DurableSignalItem({
+  signal,
+  onSelectSchedule,
+}: {
+  signal: DashboardScheduledAutomationSignal
+  onSelectSchedule: (scheduleId: string) => void
+}) {
+  const kind = enumLabel(signal.kind || signal.event_type)
+  const emittedIso = signal.emitted_at_iso ?? null
+  const dueIso = signal.due_at_iso ?? null
+  const payloadKind = signal.payload_kind?.trim() || null
+  const risk = enumLabel(signal.risk_class)
+  const digest = signal.payload_digest?.trim() || null
+  const payloadLine = [payloadKind, digest].filter(Boolean).join(' / ')
+  return html`
+    <li
+      class="grid grid-cols-[3.25rem_minmax(0,1fr)] items-start gap-x-3 gap-y-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2 sm:grid-cols-[3.25rem_minmax(0,1fr)_auto]"
+      data-schedule-signal-id=${signal.signal_id}
+    >
+      <span
+        class="font-mono text-3xs text-[var(--color-fg-muted)]"
+        title=${formatDateTimeKo(emittedIso)}
+        data-schedule-signal-at=${signal.signal_id}
+      >
+        ${compactTimeLabel(emittedIso)}
+      </span>
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2">
+          <span data-schedule-signal-kind=${signal.kind || signal.event_type || ''}>
+            <${StatusChip} tone=${automationTone(signal.kind)} uppercase=${false}>${kind}<//>
+          </span>
+          <button
+            type="button"
+            class="min-w-0 truncate bg-transparent p-0 text-left font-mono text-xs text-[var(--color-fg-secondary)] hover:text-[var(--color-accent-fg)] hover:underline"
+            title=${signal.schedule_id}
+            data-schedule-signal-schedule=${signal.schedule_id}
+            onClick=${() => { onSelectSchedule(signal.schedule_id) }}
+          >
+            ${signal.schedule_id}
+          </button>
+        </div>
+        <div class="mt-1 grid gap-0.5 text-3xs text-[var(--color-fg-disabled)]">
+          <div class="truncate font-mono" title=${signal.signal_id}>${signal.signal_id}</div>
+          <div class="truncate" title=${formatDateTimeKo(dueIso)}>
+            due ${formatDateTimeKo(dueIso)}
+          </div>
+          ${payloadLine
+            ? html`<div class="truncate font-mono" title=${payloadLine}>${payloadLine}</div>`
+            : null}
+        </div>
+      </div>
+      <span
+        class="col-start-2 justify-self-start font-mono text-3xs text-[var(--color-fg-disabled)] sm:col-start-auto sm:justify-self-end"
+        data-schedule-signal-risk=${signal.signal_id}
+      >
+        ${risk}
+      </span>
+    </li>
   `
 }
 
@@ -382,6 +798,9 @@ export function ScheduledAutomationPanel({
   automation?: DashboardScheduledAutomation | null
   onResolved?: () => Promise<void> | void
 }) {
+  const [activeFilter, setActiveFilter] = useState<ScheduleFilterKey>('all')
+  const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null)
+
   if (!automation) {
     return html`
       <div class="text-xs text-[var(--color-fg-muted)]">
@@ -394,6 +813,20 @@ export function ScheduledAutomationPanel({
     .filter(([, count]) => count > 0)
   const rows = automation.requests ?? []
   const wakeSignals = selectWakeSignals(automation)
+  const filteredRows = rows.filter(request => filterMatches(activeFilter, request))
+  const wakeRows = [...rows].sort((a, b) => dueTimestamp(a) - dueTimestamp(b))
+  const durableSignals = [...(automation.signals ?? [])].sort((a, b) => signalTimestamp(a) - signalTimestamp(b))
+  const hasDurableSignals = durableSignals.length > 0
+  const selectedRequest =
+    rows.find(request => request.schedule_id === selectedScheduleId)
+    ?? filteredRows[0]
+    ?? null
+  const filterCounts = new Map(
+    SCHEDULE_FILTERS.map(filter => [
+      filter.key,
+      rows.filter(request => filterMatches(filter.key, request)).length,
+    ]),
+  )
   const dueEffective = automation.derived_counts?.due_effective ?? 0
   const blockedApproval = automation.derived_counts?.blocked_approval ?? 0
   const dueExecutionReady = automation.derived_counts?.due_execution_ready ?? 0
@@ -418,22 +851,22 @@ export function ScheduledAutomationPanel({
           <//>
         </div>
         <span class="text-[var(--color-fg-muted)]">
-          active <span class="font-mono text-[var(--color-fg-secondary)]">${automation.fsm.active_count.toLocaleString()}</span>
+          활성 <span class="font-mono text-[var(--color-fg-secondary)]">${automation.fsm.active_count.toLocaleString()}</span>
         </span>
         <span class="text-[var(--color-fg-muted)]">
-          terminal <span class="font-mono text-[var(--color-fg-secondary)]">${automation.fsm.terminal_count.toLocaleString()}</span>
+          종료 <span class="font-mono text-[var(--color-fg-secondary)]">${automation.fsm.terminal_count.toLocaleString()}</span>
         </span>
         <span class="text-[var(--color-fg-muted)]">
-          due effective <span class="font-mono text-[var(--color-fg-secondary)]">${dueEffective.toLocaleString()}</span>
+          유효 도래 <span class="font-mono text-[var(--color-fg-secondary)]">${dueEffective.toLocaleString()}</span>
         </span>
         <span class="text-[var(--color-fg-muted)]">
-          blocked <span class="font-mono text-[var(--color-fg-secondary)]">${blockedApproval.toLocaleString()}</span>
+          승인 차단 <span class="font-mono text-[var(--color-fg-secondary)]">${blockedApproval.toLocaleString()}</span>
         </span>
         <span class="text-[var(--color-fg-muted)]">
-          ready <span class="font-mono text-[var(--color-fg-secondary)]">${dueExecutionReady.toLocaleString()}</span>
+          실행 준비 <span class="font-mono text-[var(--color-fg-secondary)]">${dueExecutionReady.toLocaleString()}</span>
         </span>
         <span class="text-[var(--color-fg-muted)]">
-          expired <span class="font-mono text-[var(--color-fg-secondary)]">${expiredEffective.toLocaleString()}</span>
+          만료 <span class="font-mono text-[var(--color-fg-secondary)]">${expiredEffective.toLocaleString()}</span>
         </span>
         <span class=${unsupportedPayloads > 0 ? 'text-[var(--color-danger-fg)]' : 'text-[var(--color-fg-muted)]'}>
           unsupported payload <span class="font-mono">${unsupportedPayloads.toLocaleString()}</span>
@@ -446,9 +879,11 @@ export function ScheduledAutomationPanel({
             `
           : null}
         <span class="text-[var(--color-fg-muted)]">
-          next due <span class="font-mono text-[var(--color-fg-secondary)]">${formatDateTimeKo(automation.fsm.next_due_at ?? null)}</span>
+          다음 예정 <span class="font-mono text-[var(--color-fg-secondary)]">${formatDateTimeKo(automation.fsm.next_due_at ?? null)}</span>
         </span>
-        <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${automation.source ?? 'schedule_store'}</span>
+        <span class="text-3xs text-[var(--color-fg-disabled)]">
+          출처 <span class="font-mono">${automation.source ?? 'schedule_store'}</span>
+        </span>
       </div>
 
       ${unsupportedKinds.length > 0
@@ -467,7 +902,28 @@ export function ScheduledAutomationPanel({
       <div class="flex flex-wrap gap-2">
         ${nonzeroCounts.length > 0
           ? nonzeroCounts.map(([name, count]) => html`<${CountChip} name=${name} count=${count} />`)
-          : html`<span class="text-xs text-[var(--color-fg-muted)]">active schedule 없음</span>`}
+          : html`<span class="text-xs text-[var(--color-fg-muted)]">활성 예약 없음</span>`}
+      </div>
+
+      <div class="flex flex-wrap gap-2" aria-label="Schedule filters">
+        ${SCHEDULE_FILTERS.map(filter => {
+          const active = filter.key === activeFilter
+          const count = filterCounts.get(filter.key) ?? 0
+          return html`
+            <button
+              type="button"
+              class=${`inline-flex items-center gap-1 rounded-[var(--r-0)] border px-2.5 py-1 text-2xs transition-colors ${active ? 'border-[var(--color-accent-fg)] bg-[var(--accent-12)] text-[var(--color-accent-fg)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] hover:border-[var(--color-accent-fg)] hover:text-[var(--color-fg-secondary)]'}`}
+              aria-pressed=${active ? 'true' : 'false'}
+              data-schedule-filter=${filter.key}
+              onClick=${() => {
+                setActiveFilter(filter.key)
+              }}
+            >
+              <span>${filter.label}</span>
+              <span class="font-mono">${count.toLocaleString()}</span>
+            </button>
+          `
+        })}
       </div>
 
       <div class="grid gap-2">
@@ -479,27 +935,52 @@ export function ScheduledAutomationPanel({
 
       ${rows.length > 0
         ? html`
-            <div class="overflow-x-auto">
-              <table class="v2-lab-table min-w-full border-collapse text-left">
-                <thead class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">
-                  <tr>
-                    <th class="pb-2 pr-3 font-medium">schedule</th>
-                    <th class="pb-2 pr-3 font-medium">status</th>
-                    <th class="pb-2 pr-3 font-medium">readiness</th>
-                    <th class="pb-2 pr-3 font-medium">action</th>
-                    <th class="pb-2 pr-3 font-medium">keeper</th>
-                    <th class="pb-2 pr-3 font-medium">risk</th>
-                    <th class="pb-2 pr-3 font-medium">payload</th>
-                    <th class="pb-2 pr-3 font-medium">recurrence</th>
-                    <th class="pb-2 pr-3 font-medium">last run</th>
-                    <th class="pb-2 pr-3 font-medium">due</th>
-                    <th class="pb-2 font-medium">approval</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${rows.map(request => html`<${ScheduleRow} request=${request} onResolved=${onResolved} />`)}
-                </tbody>
-              </table>
+            <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+              <div class="grid gap-3">
+                ${filteredRows.length > 0
+                  ? filteredRows.map(request => html`
+                      <${ScheduleCard}
+                        request=${request}
+                        selected=${selectedRequest?.schedule_id === request.schedule_id}
+                        onSelect=${(next: DashboardScheduledAutomationRequest) => {
+                          setSelectedScheduleId(next.schedule_id)
+                        }}
+                      />
+                    `)
+                  : html`<div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] px-4 py-8 text-center text-xs text-[var(--color-fg-muted)]">이 필터에 해당하는 예약이 없습니다.</div>`}
+              </div>
+              <aside class="grid content-start gap-2">
+                <${ScheduleDetailPanel} request=${selectedRequest} onResolved=${onResolved} />
+                <div>
+                  <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">
+                    ${hasDurableSignals ? 'durable wake signal feed' : 'request-derived wake signal feed'}
+                  </div>
+                  <div class="mt-1 text-xs text-[var(--color-fg-muted)]">
+                    ${hasDurableSignals
+                      ? `출처 ${automation.signal_source ?? 'schedule_runner_signals'} · ${durableSignals.length.toLocaleString()} / ${(automation.signal_count ?? durableSignals.length).toLocaleString()} signals 표시`
+                      : 'durable runner signal이 없어 request rows에서 파생했습니다.'}
+                  </div>
+                </div>
+                <ul class="grid gap-2">
+                  ${hasDurableSignals
+                    ? durableSignals.map(signal => html`
+                        <${DurableSignalItem}
+                          signal=${signal}
+                          onSelectSchedule=${(scheduleId: string) => {
+                            setSelectedScheduleId(scheduleId)
+                          }}
+                        />
+                      `)
+                    : wakeRows.map(request => html`
+                        <${WakeSignalItem}
+                          request=${request}
+                          onSelect=${(next: DashboardScheduledAutomationRequest) => {
+                            setSelectedScheduleId(next.schedule_id)
+                          }}
+                        />
+                      `)}
+                </ul>
+              </aside>
             </div>
             ${automation.truncated
               ? html`<div class="text-3xs text-[var(--color-fg-muted)]">표시 ${rows.length.toLocaleString()} / 전체 ${automation.request_count.toLocaleString()}건</div>`

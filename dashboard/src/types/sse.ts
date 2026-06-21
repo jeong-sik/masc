@@ -315,6 +315,7 @@ export type TabId =
   | 'monitoring'
   | 'keepers'
   | 'board'
+  | 'schedule'
   | 'fusion'
   | 'command'
   | 'connectors'
@@ -331,6 +332,7 @@ export const VALID_TABS: TabId[] = [
   'monitoring',
   'keepers',
   'board',
+  'schedule',
   'fusion',
   'command',
   'connectors',

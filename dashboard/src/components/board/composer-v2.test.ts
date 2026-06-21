@@ -139,10 +139,15 @@ describe('ComposerV2', () => {
     render(h(ComposerV2, { workspaceId: 'ops' }))
 
     expect(screen.getByLabelText('Target workspace: ops')).toBeInTheDocument()
+    expect(screen.getByTestId('composer-v2-command-rail')).toHaveTextContent('Broadcast')
+    expect(screen.getByTestId('composer-v2-command-rail')).toHaveTextContent('#ops')
+    expect(screen.getByTestId('composer-v2-command-rail')).toHaveTextContent('no files')
+    expect(screen.getByTestId('composer-v2-command-rail')).toHaveTextContent('blocked · draft empty')
 
     fireEvent.input(screen.getByLabelText('Composer v2 message'), {
       target: { value: 'workspace update' },
     })
+    expect(screen.getByTestId('composer-v2-command-rail')).toHaveTextContent('ready · workspace broadcast')
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
     await waitFor(() => {
@@ -160,6 +165,8 @@ describe('ComposerV2', () => {
     })
 
     expect(screen.getByTestId('composer-v2-tray')).toHaveTextContent('trace.log')
+    expect(screen.getByTestId('composer-v2-tray')).toHaveTextContent('text/plain')
+    expect(screen.getByTestId('composer-v2-command-rail')).toHaveTextContent('1 file')
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
     await waitFor(() => {
@@ -242,7 +249,7 @@ describe('ComposerV2', () => {
     render(h(ComposerV2, { workspaceId: 'ops' }))
     fireEvent.click(screen.getByRole('button', { name: 'DM mode' }))
 
-    expect(screen.getByText('0 chars · 0 files · 2 keeper targets')).toBeInTheDocument()
+    expect(screen.getByText('0 chars · no files · 2 keeper targets')).toBeInTheDocument()
     const select = screen.getByLabelText('Composer v2 keeper target') as HTMLSelectElement
     const options = Array.from(select.options)
       .map(option => option.textContent)

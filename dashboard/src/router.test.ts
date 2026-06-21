@@ -42,11 +42,29 @@ describe('navigate', () => {
     expect(window.location.hash).toBe('#board?post=post-1&comment=comment-1')
   })
 
+  it('navigates to top-level schedule without lab section baggage', () => {
+    navigate('schedule', { section: 'tools', surface: 'lab', view: 'legacy' })
+    expect(route.value.tab).toBe('schedule')
+    expect(route.value.params).toEqual({ view: 'legacy' })
+    expect(window.location.hash).toBe('#schedule?view=legacy')
+  })
+
   it('navigates to top-level fusion without section baggage', () => {
     navigate('fusion', { section: 'workspace', run_id: 'fus-1', surface: 'old' })
     expect(route.value.tab).toBe('fusion')
     expect(route.value.params).toEqual({ run_id: 'fus-1' })
     expect(window.location.hash).toBe('#fusion?run_id=fus-1')
+  })
+
+  it('keeps Settings section hashes routeable without adding sidebar subsections', () => {
+    navigate('settings', { section: 'runtimes', surface: 'old' })
+    expect(route.value.tab).toBe('settings')
+    expect(route.value.params).toEqual({ section: 'runtimes' })
+    expect(window.location.hash).toBe('#settings?section=runtimes')
+
+    navigate('settings', { section: 'account' })
+    expect(route.value.params).toEqual({})
+    expect(window.location.hash).toBe('#settings')
   })
 
   it('keeps workspace board deep links routeable for compatibility', () => {
@@ -120,6 +138,17 @@ describe('navigate', () => {
     navigate('command', { section: 'connectors' })
     expect(route.value.tab).toBe('connectors')
     expect(route.value.params.section).toBe('connector-status')
+  })
+
+  it('canonicalizes connector route filters', () => {
+    navigate('connectors', { section: 'connector-status', connector: 'telegram' })
+    expect(route.value.tab).toBe('connectors')
+    expect(route.value.params).toEqual({ section: 'connector-status', connector: 'telegram' })
+    expect(window.location.hash).toBe('#connectors?section=connector-status&connector=telegram')
+
+    navigate('connectors', { section: 'connector-status', connector: 'bogus' })
+    expect(route.value.params).toEqual({ section: 'connector-status' })
+    expect(window.location.hash).toBe('#connectors?section=connector-status')
   })
 
   it('redirects retired command connectors path links without an operations null hop', () => {

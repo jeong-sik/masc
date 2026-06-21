@@ -3,7 +3,8 @@
 
 import { html } from 'htm/preact'
 import { lazy, Suspense } from 'preact/compat'
-import { useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
+import { ListTree, PanelRightOpen, X } from 'lucide-preact'
 import { route, navigate } from '../router'
 import { goals, tasks, keepers } from '../store'
 import { assignTaskToGoal } from './task-manage/task-manage-state'
@@ -15,6 +16,7 @@ import { VerificationRequestsPanel } from './verification-requests-panel'
 import { ErrorBoundary } from './common/error-boundary'
 import { LoadingState } from './common/feedback-state'
 import { KeeperBadge } from './keeper-badge'
+import { TimeAgo } from './common/time-ago'
 import type { Goal, Task, Keeper } from '../types'
 
 type WorkSection = 'work' | 'board' | 'sub-boards' | 'moderation' | 'planning' | 'repositories' | 'verification'
@@ -118,6 +120,18 @@ function openKeeperWorkspace(name: string): void {
   navigate('monitoring', { section: 'agents', view: 'keepers', keeper: name })
 }
 
+function openWorkTask(taskId: string): void {
+  navigate('workspace', { section: 'work', task: taskId })
+}
+
+function closeWorkTask(): void {
+  navigate('workspace', { section: 'work' })
+}
+
+function openPlanningSurface(): void {
+  navigate('workspace', { section: 'planning' })
+}
+
 // ── Progress aggregation ────────────────────────────────────────────────────
 
 interface GoalProgressCounts {
@@ -125,6 +139,14 @@ interface GoalProgressCounts {
   wip: number
   blocked: number
   total: number
+}
+
+function hasTaskAssignee(task: Task): boolean {
+  return (task.assignee ?? '').trim().length > 0
+}
+
+function isClaimableBacklogTask(task: Task): boolean {
+  return (task.status ?? 'todo') === 'todo' && !hasTaskAssignee(task)
 }
 
 function goalProgressCounts(goal: Goal): GoalProgressCounts {
@@ -157,13 +179,21 @@ function GoalProgressBar({ counts }: { counts: GoalProgressCounts }) {
   `
 }
 
-function JobRow({ task, allowAssign = false }: { task: Task; allowAssign?: boolean }) {
+function JobRow({
+  task,
+  allowAssign = false,
+  selected = false,
+}: {
+  task: Task
+  allowAssign?: boolean
+  selected?: boolean
+}) {
   const state = jobStateForTask(task)
   const keeper = keeperByName(task.assignee)
   const blocker = blockerNoteForTask(task)
 
   return html`
-    <div class=${`wk-job ${state.cls}`} data-testid="job-row" data-job-id=${task.id}>
+    <div class=${`wk-job ${state.cls} ${selected ? 'selected' : ''}`} data-testid="job-row" data-job-id=${task.id}>
       <span class=${`wk-job-dot ${state.cls}`} aria-hidden="true"></span>
       <span class="wk-job-id mono">${task.id}</span>
       <span class="wk-job-title">
@@ -186,6 +216,16 @@ function JobRow({ task, allowAssign = false }: { task: Task; allowAssign?: boole
           </button>
         `
         : html`<span class="wk-job-kp none mono">미배정</span>`}
+      <button
+        type="button"
+        class="wk-job-detail"
+        data-testid="job-detail"
+        aria-label=${`${task.id} 상세 열기`}
+        title="태스크 상세 열기"
+        onClick=${() => openWorkTask(task.id)}
+      >
+        <${PanelRightOpen} size=${14} aria-hidden="true" />
+      </button>
       ${allowAssign
         ? html`
           <select
@@ -210,10 +250,12 @@ function GoalCard({
   goal,
   open,
   onToggle,
+  selectedTaskId,
 }: {
   goal: Goal
   open: boolean
   onToggle: () => void
+  selectedTaskId?: string
 }) {
   const progress = goalProgressCounts(goal)
   const lead = leadKeeperForGoal(goal)
@@ -247,16 +289,187 @@ function GoalCard({
       ${open ? html`
         <div class="wk-jobs">
           ${goal.last_review_note ? html`<div class="wk-note">${goal.last_review_note}</div>` : null}
-          ${goalTasks.map(task => html`<${JobRow} key=${task.id} task=${task} />`)}
+          ${goalTasks.map(task => html`<${JobRow} key=${task.id} task=${task} selected=${selectedTaskId === task.id} />`)}
         </div>
       ` : null}
     </div>
   `
 }
 
+function taskGoal(task: Task): Goal | undefined {
+  if (!task.goal_id) return undefined
+  return goals.value.find(goal => goal.id === task.goal_id)
+}
+
+function TaskMetaRow({ label, value }: { label: string; value?: unknown }) {
+  if (value === null || value === undefined || value === '') return null
+  return html`
+    <div class="wk-task-meta-row">
+      <span>${label}</span>
+      <strong>${value}</strong>
+    </div>
+  `
+}
+
+function TaskStringList({ title, items }: { title: string; items?: string[] }) {
+  if (!items || items.length === 0) return null
+  return html`
+    <div class="wk-task-block">
+      <div class="wk-task-block-title">${title}</div>
+      <div class="wk-task-chips">
+        ${items.map(item => html`<span key=${item} class="wk-task-chip">${item}</span>`)}
+      </div>
+    </div>
+  `
+}
+
+function TaskGateChecks({ task }: { task: Task }) {
+  const gate = task.gate
+  const checks = [
+    ...(gate?.done?.checks ?? []),
+    ...(gate?.inspect_to_implement?.checks ?? []),
+    ...(gate?.verify_to_review?.checks ?? []),
+  ]
+  if (checks.length === 0 && !gate?.unmet_completion_contract?.length) return null
+
+  return html`
+    <div class="wk-task-block">
+      <div class="wk-task-block-title">게이트</div>
+      ${gate?.unmet_completion_contract?.length ? html`
+        <div class="wk-task-warning">
+          미충족 ${gate.unmet_completion_contract.length}: ${gate.unmet_completion_contract.join(', ')}
+        </div>
+      ` : null}
+      ${checks.length ? html`
+        <div class="wk-task-gates">
+          ${checks.slice(0, 6).map(check => html`
+            <div key=${`${check.outcome}-${check.evidence}`} class=${`wk-task-gate ${check.outcome}`}>
+              <span>${check.outcome}</span>
+              <strong>${check.evidence}</strong>
+              ${check.detail ? html`<em>${check.detail}</em>` : null}
+            </div>
+          `)}
+        </div>
+      ` : null}
+    </div>
+  `
+}
+
+function TaskDossier({ task }: { task: Task | null }) {
+  if (!task) {
+    return html`
+      <aside class="wk-task-detail empty ss-card" data-testid="work-task-detail-empty">
+        <div class="wk-task-detail-kicker">태스크 상세</div>
+        <div class="wk-task-empty-title">작업을 선택하세요</div>
+        <p>각 job 행의 상세 아이콘을 누르면 계약, handoff, 실행 링크를 여기서 읽을 수 있습니다.</p>
+      </aside>
+    `
+  }
+
+  const state = jobStateForTask(task)
+  const goal = taskGoal(task)
+  const keeper = keeperByName(task.assignee)
+  const contract = task.contract
+  const handoff = task.handoff_context
+  const execution = task.execution_links
+  const isAwaitingVerification = task.status === 'awaiting_verification'
+
+  return html`
+    <aside class="wk-task-detail ss-card" data-testid="work-task-detail" data-task-id=${task.id}>
+      <div class="wk-task-detail-head">
+        <div>
+          <div class="wk-task-detail-kicker">태스크 상세</div>
+          <h2>${task.title}</h2>
+          <div class="wk-task-detail-sub mono">${task.id}</div>
+        </div>
+        <button
+          type="button"
+          class="wk-task-close"
+          aria-label="태스크 상세 닫기"
+          title="닫기"
+          onClick=${closeWorkTask}
+        >
+          <${X} size=${14} aria-hidden="true" />
+        </button>
+      </div>
+
+      <div class="wk-task-status-line">
+        <span class=${`wk-job-state ${state.cls}`}>${state.label}</span>
+        ${task.priority ? html`<span class="wk-task-priority">P${task.priority}</span>` : null}
+        ${isAwaitingVerification ? html`
+          <button
+            type="button"
+            class="wk-task-verify"
+            onClick=${() => navigate('workspace', { section: 'verification', task: task.id })}
+          >검증 패널</button>
+        ` : null}
+      </div>
+
+      <div class="wk-task-meta">
+        <${TaskMetaRow} label="목표" value=${goal ? `${goal.id} · ${goal.title}` : task.goal_id ?? '미배정'} />
+        <${TaskMetaRow} label="담당" value=${task.assignee ? `${task.assignee}${task.assignee_kind ? ` · ${task.assignee_kind}` : ''}` : '미배정'} />
+        ${task.created_at ? html`
+          <div class="wk-task-meta-row">
+            <span>생성</span>
+            <strong><${TimeAgo} timestamp=${task.created_at} mode="both" /></strong>
+          </div>
+        ` : null}
+        ${task.updated_at ? html`
+          <div class="wk-task-meta-row">
+            <span>갱신</span>
+            <strong><${TimeAgo} timestamp=${task.updated_at} mode="both" /></strong>
+          </div>
+        ` : null}
+      </div>
+
+      ${task.description ? html`
+        <div class="wk-task-block">
+          <div class="wk-task-block-title">설명</div>
+          <p>${task.description}</p>
+        </div>
+      ` : null}
+
+      <${TaskStringList} title="완료 계약" items=${contract?.completion_contract} />
+      <${TaskStringList} title="필수 증거" items=${contract?.required_evidence} />
+      <${TaskStringList} title="검수 증거" items=${contract?.inspect_gate_evidence} />
+      <${TaskStringList} title="검증 증거" items=${contract?.verify_gate_evidence} />
+      <${TaskGateChecks} task=${task} />
+
+      ${handoff?.summary ? html`
+        <div class="wk-task-block handoff">
+          <div class="wk-task-block-title">최근 Handoff</div>
+          <p>${handoff.summary}</p>
+          ${handoff.reason ? html`<div class="wk-task-note">reason: ${handoff.reason}</div>` : null}
+          ${handoff.next_step ? html`<div class="wk-task-note">next: ${handoff.next_step}</div>` : null}
+          ${handoff.failure_mode ? html`<div class="wk-task-note">failure: ${handoff.failure_mode}</div>` : null}
+          <${TaskStringList} title="증거 참조" items=${handoff.evidence_refs} />
+        </div>
+      ` : null}
+
+      ${(execution?.session_id || execution?.operation_id || keeper) ? html`
+        <div class="wk-task-block">
+          <div class="wk-task-block-title">연결</div>
+          ${execution?.session_id ? html`<div class="wk-task-link-row"><span>session</span><strong>${execution.session_id}</strong></div>` : null}
+          ${execution?.operation_id ? html`<div class="wk-task-link-row"><span>operation</span><strong>${execution.operation_id}</strong></div>` : null}
+          ${keeper ? html`
+            <button type="button" class="wk-task-keeper" onClick=${() => openKeeperWorkspace(keeper.name)}>
+              <${KeeperBadge} id=${keeper.name} size="sm" variant="sigil" />
+              <span>${keeper.name} 대화 열기</span>
+            </button>
+          ` : null}
+        </div>
+      ` : null}
+    </aside>
+  `
+}
+
 function WorkSurfaceV2() {
   const goalList = goals.value
   const allTasks = tasks.value
+  const selectedTaskId = route.value.params.task
+  const selectedTask = selectedTaskId
+    ? allTasks.find(task => task.id === selectedTaskId) ?? null
+    : null
 
   const [openSet, setOpenSet] = useState<Set<string>>(() => {
     const initial = new Set<string>()
@@ -264,6 +477,7 @@ function WorkSurfaceV2() {
       const progress = goalProgressCounts(g)
       if (g.priority === 1 || progress.blocked > 0) initial.add(g.id)
     }
+    if (selectedTask?.goal_id) initial.add(selectedTask.goal_id)
     return initial
   })
 
@@ -276,28 +490,48 @@ function WorkSurfaceV2() {
     })
   }
 
+  useEffect(() => {
+    if (!selectedTask?.goal_id) return
+    setOpenSet(prev => {
+      if (prev.has(selectedTask.goal_id!)) return prev
+      const next = new Set(prev)
+      next.add(selectedTask.goal_id!)
+      return next
+    })
+  }, [selectedTask?.goal_id])
+
   // KPI counts span ALL tasks, not only goal-linked ones. goal↔task linkage is
   // optional (tasks frequently carry no goal_id), so a goal-only sum would read
   // 0 jobs even with a full backlog.
   const totals = useMemo(() => {
     let doneJobs = 0
     let blockedJobs = 0
+    let wipJobs = 0
+    let reviewJobs = 0
+    let claimableBacklog = 0
     for (const t of allTasks) {
       const state = jobStateForTask(t).cls
       if (state === 'done') doneJobs++
       else if (state === 'blocked') blockedJobs++
+      else if (state === 'wip') wipJobs++
+      else if (state === 'review') reviewJobs++
+      if (isClaimableBacklogTask(t)) claimableBacklog++
     }
     return {
       goals: goalList.length,
       jobs: allTasks.length,
       done: doneJobs,
       blocked: blockedJobs,
+      wip: wipJobs,
+      review: reviewJobs,
+      backlog: claimableBacklog,
     }
   }, [goalList, allTasks])
 
   // Tasks with no goal_id have no place in the goal→job tree. Surface them in a
   // dedicated section instead of dropping them from the board.
   const unassignedTasks = allTasks.filter(task => !task.goal_id)
+  const unassignedClaimable = unassignedTasks.filter(isClaimableBacklogTask).length
 
   return html`
     <main class="wk-surface ss-surface bg-surface-page text-text-primary">
@@ -310,11 +544,21 @@ function WorkSurfaceV2() {
                 <span title="최상위 조정 범위">namespace <span class="mono">${workspaceNamespace()}</span></span>
                 · <span>목표 ${totals.goals}</span>
                 · <span>job ${totals.jobs}</span>
+                ${totals.backlog > 0 ? html`<span> · <span class="wk-backlog-n">백로그 ${totals.backlog}</span></span>` : null}
                 · <span>완료 ${totals.done}</span>
                 ${totals.blocked > 0 ? html`<span> · <span class="wk-blk-n">막힘 ${totals.blocked}</span></span>` : null}
               </p>
             </div>
-            <button type="button" class="wk-newgoal" title="새 목표 생성 — 다음 단계에서 설계">＋ 새 목표</button>
+            <button
+              type="button"
+              class="wk-newgoal"
+              data-testid="work-planning-link"
+              title="목표 관리자 열기"
+              onClick=${openPlanningSurface}
+            >
+              <${ListTree} size=${14} aria-hidden="true" />
+              <span>목표 관리자</span>
+            </button>
           </header>
 
           <section class="wk-kpis ss-card mx-6" data-testid="work-kpis">
@@ -327,40 +571,63 @@ function WorkSurfaceV2() {
               <div class="wk-kpi-v" data-testid="kpi-jobs">${totals.jobs}</div>
             </div>
             <div class="wk-kpi">
+              <div class="wk-kpi-k">진행 중</div>
+              <div class=${`wk-kpi-v ${totals.wip > 0 ? 'volt' : ''}`} data-testid="kpi-wip">${totals.wip}</div>
+            </div>
+            <div class="wk-kpi">
+              <div class="wk-kpi-k">검증 대기</div>
+              <div class=${`wk-kpi-v ${totals.review > 0 ? 'warn' : ''}`} data-testid="kpi-review">${totals.review}</div>
+            </div>
+            <div class="wk-kpi">
               <div class="wk-kpi-k">완료</div>
               <div class=${`wk-kpi-v ${totals.done > 0 ? 'ok' : ''}`} data-testid="kpi-done">${totals.done}</div>
             </div>
             <div class="wk-kpi">
-              <div class="wk-kpi-k">막힘</div>
-              <div class=${`wk-kpi-v ${totals.blocked > 0 ? 'bad' : ''}`} data-testid="kpi-blocked">${totals.blocked}</div>
+              <div class="wk-kpi-k">백로그</div>
+              <div class=${`wk-kpi-v ${totals.backlog > 0 ? 'warn' : ''}`} data-testid="kpi-backlog">${totals.backlog}</div>
             </div>
           </section>
 
-          <div class="wk-list px-6">
-            ${goalList.map(g => html`
-              <${GoalCard}
-                key=${g.id}
-                goal=${g}
-                open=${openSet.has(g.id)}
-                onToggle=${() => toggleGoal(g.id)}
-              />
-            `)}
+          <div class="wk-workbench px-6">
+            <div class="wk-workbench-list">
+              <div class="wk-list">
+                ${goalList.map(g => html`
+                  <${GoalCard}
+                    key=${g.id}
+                    goal=${g}
+                    open=${openSet.has(g.id)}
+                    onToggle=${() => toggleGoal(g.id)}
+                    selectedTaskId=${selectedTaskId}
+                  />
+                `)}
+              </div>
+
+              ${unassignedTasks.length > 0 ? html`
+                <section class="wk-unassigned ss-card" data-testid="work-unassigned">
+                  <div class="wk-unassigned-h">
+                    <span class="wk-unassigned-dot" aria-hidden="true"></span>
+                    미배정 작업
+                    <span class="wk-unassigned-n mono">(${unassignedTasks.length})</span>
+                    <span class="wk-unassigned-claim mono" data-testid="work-unassigned-claimable">클레임 가능 ${unassignedClaimable}</span>
+                  </div>
+                  <div class="wk-jobs">
+                    ${unassignedTasks.map(task => html`
+                      <${JobRow}
+                        key=${task.id}
+                        task=${task}
+                        allowAssign=${true}
+                        selected=${selectedTaskId === task.id}
+                      />
+                    `)}
+                  </div>
+                </section>
+              ` : null}
+
+              <div class="wk-foot mono">Goal → job → keeper · todo + keeper 미배정은 백로그 · job 의 keeper 를 누르면 해당 keeper 대화로 이동</div>
+            </div>
+
+            <${TaskDossier} task=${selectedTask} />
           </div>
-
-          ${unassignedTasks.length > 0 ? html`
-            <section class="wk-unassigned ss-card mx-6" data-testid="work-unassigned">
-              <div class="wk-unassigned-h">
-                <span class="wk-unassigned-dot" aria-hidden="true"></span>
-                미배정 작업
-                <span class="wk-unassigned-n mono">(${unassignedTasks.length})</span>
-              </div>
-              <div class="wk-jobs">
-                ${unassignedTasks.map(task => html`<${JobRow} key=${task.id} task=${task} allowAssign=${true} />`)}
-              </div>
-            </section>
-          ` : null}
-
-          <div class="wk-foot mono">Goal → job → keeper · goal 없는 작업은 미배정 · job 의 keeper 를 누르면 해당 keeper 대화로 이동</div>
         </div>
       </div>
     </main>

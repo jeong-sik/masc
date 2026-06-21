@@ -2012,6 +2012,34 @@ let execution_record_dashboard_json (execution : Schedule_domain.execution_recor
   | other -> other
 ;;
 
+let schedule_signal_projection_limit = 20
+
+let schedule_signal_payload_kind_json (signal : Schedule_runner.wake_signal) =
+  match signal.payload with
+  | `Assoc fields ->
+    (match List.assoc_opt "kind" fields with
+     | Some (`String kind) -> `String kind
+     | _ -> `Null)
+  | _ -> `Null
+;;
+
+let schedule_signal_dashboard_json (signal : Schedule_runner.wake_signal) =
+  let kind = Schedule_runner.signal_kind_to_string signal.kind in
+  `Assoc
+    [ "signal_id", `String signal.signal_id
+    ; "kind", `String kind
+    ; "event_type", `String kind
+    ; "schedule_id", `String signal.schedule_id
+    ; "emitted_at", `Float signal.emitted_at
+    ; "emitted_at_iso", unix_iso_json signal.emitted_at
+    ; "due_at", `Float signal.due_at
+    ; "due_at_iso", unix_iso_json signal.due_at
+    ; "risk_class", `String (Schedule_domain.risk_class_to_string signal.risk_class)
+    ; "payload_digest", `String signal.payload_digest
+    ; "payload_kind", schedule_signal_payload_kind_json signal
+    ]
+;;
+
 let schedule_request_dashboard_json
   ~now
   ~state
@@ -2154,6 +2182,9 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
       | _ -> String.compare left.schedule_id right.schedule_id)
   in
   let request_rows = take schedule_projection_request_limit sorted in
+  let signal_rows =
+    Schedule_runner.read_recent_signals config schedule_signal_projection_limit
+  in
   `Assoc
     [ "schema", `String "masc.dashboard.scheduled_automation.v1"
     ; "source", `String "schedule_store"
@@ -2161,6 +2192,10 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
     ; "request_count", `Int (List.length schedules)
     ; "request_limit", `Int schedule_projection_request_limit
     ; "truncated", `Bool (List.length schedules > schedule_projection_request_limit)
+    ; "signal_source", `String "schedule_runner_signals"
+    ; "signal_count", `Int (List.length signal_rows)
+    ; "signal_limit", `Int schedule_signal_projection_limit
+    ; "signals", `List (List.map schedule_signal_dashboard_json signal_rows)
     ; "counts", schedule_counts_json schedules
     ; ( "derived_counts"
       , `Assoc

@@ -679,6 +679,8 @@ function renderLogRow(entry: LogEntry) {
     <div
       key=${entry.seq}
       class=${`logs-row v2-logs-row ${isExpanded ? 'is-open' : ''}`}
+      data-testid="logs-row"
+      data-log-seq=${entry.seq}
       data-sev=${severity}
       data-kind=${displayKind}
     >
@@ -996,6 +998,7 @@ export function LogViewer() {
     : '0.0'
   const currentFilterLabel =
     LOG_CATEGORY_FILTERS.find(filter => filter.value === categoryFilter.value)?.label ?? 'Custom'
+  const providerDiagnostics = renderProviderLogPanel()
 
   return html`
     <div class="logs-viewer v2-logs-surface">
@@ -1020,6 +1023,7 @@ export function LogViewer() {
                 key=${filter.value || 'all'}
                 active=${categoryFilter.value === filter.value}
                 class="v2-logs-filter-chip"
+                data-testid=${`logs-filter-${filter.value || 'all'}`}
                 onClick=${() => {
                   categoryFilter.value = filter.value
                 }}
@@ -1135,7 +1139,19 @@ export function LogViewer() {
 
         <div class="v2-logs-support">
           ${renderLogSummary(summary)}
-          ${renderProviderLogPanel()}
+          ${providerDiagnostics
+            ? html`
+              <details class="v2-logs-diagnostics" data-testid="logs-provider-diagnostics">
+                <summary>
+                  <span>Provider diagnostics</span>
+                  <span class="mono">runtime.toml log tail</span>
+                </summary>
+                <div class="v2-logs-diagnostics-body">
+                  ${providerDiagnostics}
+                </div>
+              </details>
+            `
+            : null}
         </div>
 
         <div class="v2-logs-table-header">

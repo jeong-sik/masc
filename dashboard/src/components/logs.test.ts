@@ -385,10 +385,16 @@ describe('LogViewer Code links', () => {
     await waitFor(() => expect(container.querySelector('.v2-logs-surface')).not.toBeNull())
     expect(container.querySelector('.v2-logs-panel')).not.toBeNull()
     expect(container.querySelector('.v2-logs-toolbar')).not.toBeNull()
+    expect(container.querySelector('[data-testid="logs-filter-tool"]')).not.toBeNull()
     expect(container.querySelector('.v2-logs-table-header')).not.toBeNull()
     expect(container.querySelector('.v2-logs-row')).not.toBeNull()
+    expect(container.querySelector('[data-testid="logs-row"]')?.getAttribute('data-log-seq')).toBe('1')
     expect(container.querySelector('.v2-logs-summary')).not.toBeNull()
     expect(container.querySelector('.v2-logs-provider-panel')).not.toBeNull()
+    const diagnostics = container.querySelector('[data-testid="logs-provider-diagnostics"]') as HTMLDetailsElement
+    expect(diagnostics).not.toBeNull()
+    expect(diagnostics.open).toBe(false)
+    expect(diagnostics.querySelector('summary')?.textContent).toContain('Provider diagnostics')
   })
 
   it('does not render Code links for unsafe absolute log file paths', async () => {

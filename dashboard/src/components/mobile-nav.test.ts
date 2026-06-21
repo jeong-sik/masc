@@ -52,7 +52,7 @@ describe('DashboardNavRail', () => {
         currentTab=${props.currentTab ?? 'monitoring'}
         mobile=${props.mobile ?? true}
         drawerOpen=${props.drawerOpen ?? false}
-        keeperDetailMode=${props.keeperDetailMode ?? false}
+        hideMobileTabs=${props.hideMobileTabs ?? false}
         collapsed=${props.collapsed ?? false}
         onToggleCollapsed=${props.onToggleCollapsed ?? onToggleCollapsed}
         onToggleDrawer=${props.onToggleDrawer ?? onToggleDrawer}
@@ -135,7 +135,7 @@ describe('DashboardNavRail', () => {
   })
 
   it('hides mobile tabs while reading keeper chat', () => {
-    renderNav({ mobile: true, drawerOpen: false, keeperDetailMode: true })
+    renderNav({ mobile: true, drawerOpen: false, hideMobileTabs: true })
 
     expect(container.querySelector('nav[aria-label="Primary mobile navigation"]')).toBeNull()
     expect(container.querySelector('[data-testid="dashboard-nav-rail"]')).not.toBeNull()

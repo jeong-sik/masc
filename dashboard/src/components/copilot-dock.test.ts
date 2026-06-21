@@ -7,6 +7,7 @@ import {
   CopilotDockFab,
   CopilotDockTopBarButton,
   getSurfaceContext,
+  starterPromptsForContext,
   useCopilotDock,
   useCopilotDockShortcuts,
 } from './copilot-dock'
@@ -18,6 +19,8 @@ describe('CopilotDock', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
+    window.innerWidth = 1280
+    window.dispatchEvent(new Event('resize'))
     container = document.createElement('div')
     document.body.appendChild(container)
     route.value = { tab: 'overview', params: {}, postId: null }
@@ -84,6 +87,24 @@ describe('CopilotDock', () => {
     expect(dock.state.value.open).toBe(false)
   })
 
+  it('forces a full docked panel on mobile even when float mode was persisted', async () => {
+    window.innerWidth = 390
+    window.dispatchEvent(new Event('resize'))
+    const dock = renderDock()
+    dock.setMode('float')
+    dock.open()
+
+    await waitFor(() => expect(container.querySelector('[data-testid="copilot-dock"]')).not.toBeNull())
+
+    const panel = container.querySelector('[data-testid="copilot-dock"]') as HTMLElement
+    expect(panel.classList.contains('docked')).toBe(true)
+    expect(panel.classList.contains('float')).toBe(false)
+    expect(panel.getAttribute('data-mobile-docked')).toBe('true')
+    expect(container.querySelector('[title="플로팅으로 띄우기"]')).toBeNull()
+    expect(container.querySelector('[title="오른쪽에 도킹"]')).toBeNull()
+    expect(container.querySelector('[title="닫기 (Esc)"]')).not.toBeNull()
+  })
+
   it('closes on Escape shortcut', async () => {
     const dock = renderDock()
     dock.open()
@@ -131,6 +152,100 @@ describe('CopilotDock', () => {
     expect(ctx.route).toBe('/code/ide-shell')
     expect(ctx.label).toBe('IDE')
     expect(ctx.fields.length).toBe(0)
+  })
+
+  it('labels the dedicated schedule surface for co-view context', () => {
+    route.value = { tab: 'schedule', params: {}, postId: null }
+    const ctx = getSurfaceContext()
+    expect(ctx.route).toBe('/schedule')
+    expect(ctx.label).toBe('Schedule')
+    expect(ctx.scene).toBe('예약 자동화와 wake signal을 함께 보는 중')
+  })
+
+  it('uses selected backed keeper context for the Keepers surface', () => {
+    keepers.value = [
+      { name: 'masc-improver', keeper_id: 'masc-improver', koreanName: 'MASC Improver', status: 'running', phase: 'Running', runtime_id: 'fleet', needs_attention: true, total_turns: 12, context_ratio: 0.8 },
+      { name: 'nick0cave', keeper_id: 'nick0cave', koreanName: 'nick0cave', status: 'idle', phase: 'Idle', runtime_id: 'ops', needs_attention: false, total_turns: 8, context_ratio: 0.3 },
+    ] as unknown as typeof keepers.value
+    route.value = { tab: 'keepers', params: {}, postId: null }
+
+    const ctx = getSurfaceContext('masc-improver')
+
+    expect(ctx.label).toBe('Keepers')
+    expect(ctx.route).toBe('/keepers')
+    expect(ctx.scene).toBe('MASC Improver와 1:1 스레드')
+    expect(ctx.fields).toEqual([
+      { k: 'state', v: 'Running' },
+      { k: 'ctx', v: '80%', tone: 'volt' },
+      { k: 'ns', v: 'fleet' },
+    ])
+  })
+
+  it('keeps backed fleet context as the Keepers fallback when no keeper is selected', () => {
+    keepers.value = [
+      { name: 'masc-improver', keeper_id: 'masc-improver', koreanName: 'MASC Improver', status: 'running', phase: 'Running', runtime_id: 'fleet', needs_attention: true, total_turns: 12, context_ratio: 0.8 },
+      { name: 'nick0cave', keeper_id: 'nick0cave', koreanName: 'nick0cave', status: 'idle', phase: 'Idle', runtime_id: 'ops', needs_attention: false, total_turns: 8, context_ratio: 0.3 },
+    ] as unknown as typeof keepers.value
+    route.value = { tab: 'keepers', params: {}, postId: null }
+
+    const ctx = getSurfaceContext()
+
+    expect(ctx.label).toBe('Keepers')
+    expect(ctx.route).toBe('/keepers')
+    expect(ctx.scene).toBe('Keeper workspace를 함께 보는 중')
+    expect(ctx.fields).toEqual([
+      { k: '실행', v: '1/2' },
+      { k: '주의', v: '1', tone: 'bad' },
+      { k: 'ctx', v: '55%', tone: 'volt' },
+      { k: 'trace', v: '20' },
+    ])
+  })
+
+  it('uses route-specific starter prompts with a generic fallback', () => {
+    expect(starterPromptsForContext({ route: '/schedule' })).toEqual([
+      '승인 차단 예약 정리',
+      '다음 due 항목 요약',
+      'wake signal 이상 징후',
+    ])
+    expect(starterPromptsForContext({ route: '/schedule/active?filter=due' })).toEqual([
+      '승인 차단 예약 정리',
+      '다음 due 항목 요약',
+      'wake signal 이상 징후',
+    ])
+    expect(starterPromptsForContext({ route: '/unknown' })).toEqual([
+      '이 화면 요약해줘',
+      '다음 액션 추천',
+      '주의 항목 정리해줘',
+    ])
+  })
+
+  it('renders route-specific starter buttons in the empty dock', async () => {
+    route.value = { tab: 'schedule', params: {}, postId: null }
+    const dock = renderDock()
+    dock.open()
+
+    await waitFor(() => expect(container.querySelector('[data-testid="copilot-dock"]')).not.toBeNull())
+
+    const starters = Array.from(container.querySelectorAll('[data-dock-starter]')).map(el => el.textContent)
+    expect(starters).toEqual([
+      '›승인 차단 예약 정리',
+      '›다음 due 항목 요약',
+      '›wake signal 이상 징후',
+    ])
+  })
+
+  it('renders normalized dock field tone classes', async () => {
+    keepers.value = [
+      { name: 'masc-improver', keeper_id: 'masc-improver', koreanName: 'MASC Improver', status: 'running', phase: 'Running', runtime_id: 'fleet', needs_attention: true, total_turns: 3, context_ratio: 0.9 },
+    ] as unknown as typeof keepers.value
+    route.value = { tab: 'overview', params: {}, postId: null }
+
+    const dock = renderDock()
+    dock.open()
+
+    await waitFor(() => expect(container.querySelector('[data-testid="copilot-dock-coview"]')).not.toBeNull())
+    expect(container.querySelector('.dock-field.bad')?.textContent).toContain('주의1')
+    expect(container.querySelector('.dock-field.warn')?.textContent).toContain('ctx90%')
   })
 
   it('updates surface context when route changes', async () => {

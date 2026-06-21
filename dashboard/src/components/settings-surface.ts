@@ -1,34 +1,24 @@
 // MASC Dashboard — Settings surface (keeper-v2 port)
 // Read surfaces (MCP exposed-tools list, system-log tail, runtime defaults /
-// model routing) are wired to live backend data. Write surfaces (Save changes,
-// VerifyBtn, expose/unexpose persistence) remain local-state stubs.
+// model routing) are wired to live backend data. Most write surfaces remain
+// read-only previews; runtime.toml management is live-backed.
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
-import { navigate } from '../router'
+import {
+  SETTINGS_ROUTE_SECTION_IDS,
+  type SettingsRouteSectionId,
+} from '../config/navigation'
+import { navigate, route } from '../router'
 import { fetchDashboardTools, fetchLogs, fetchRuntimeDefaults } from '../api/dashboard.js'
 import type { DashboardToolInventoryItem, LogEntry, RuntimeDefaultsResponse } from '../api/dashboard.js'
+import { RuntimeTomlEditor } from './runtime-toml-editor'
 import type { ComponentChildren } from 'preact'
 
-type SectionId =
-  | 'account'
-  | 'mcp'
-  | 'runtime'
-  | 'runtimes'
-  | 'routing'
-  | 'prompts'
-  | 'policy'
-  | 'lifecycle'
-  | 'sandbox'
-  | 'ide'
-  | 'gate'
-  | 'paths'
-  | 'logs'
-  | 'notify'
-  | 'display'
+type SectionId = SettingsRouteSectionId
 
-type VerifyState = 'idle' | 'checking' | 'ok'
 type LogFilter = 'all' | 'tool' | 'success' | 'failure'
+const SETTINGS_ROUTE_SECTION_SET = new Set<string>(SETTINGS_ROUTE_SECTION_IDS)
 
 const SET_SECTIONS: [SectionId, string, string][] = [
   ['account', 'Account', '계정'],
@@ -66,6 +56,10 @@ const SET_GROUPS: [string, SectionId[]][] = [
 const MCP_PUBLIC_SURFACE = 'public_mcp'
 const SETTINGS_LOG_LIMIT = 50
 const SETTINGS_LOG_POLL_MS = 3000
+
+export function normalizeSettingsSection(value: string | null | undefined): SectionId {
+  return SETTINGS_ROUTE_SECTION_SET.has(value ?? '') ? (value as SectionId) : 'account'
+}
 
 export function mcpExposedToolNames(items: readonly DashboardToolInventoryItem[]): string[] {
   return items
@@ -127,6 +121,8 @@ function SetToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => vo
       class=${`set-toggle ${on ? 'on' : ''}`}
       role="switch"
       aria-checked=${on}
+      aria-disabled="true"
+      disabled
       data-testid="set-toggle"
       onClick=${() => onChange(!on)}
     >
@@ -152,6 +148,8 @@ function SetSeg({
           key=${o}
           class=${`set-seg-b ${value === o ? 'on' : ''}`}
           data-active=${value === o ? 'true' : 'false'}
+          aria-disabled="true"
+          disabled
           onClick=${() => onChange(o)}
         >
           ${o}
@@ -186,9 +184,9 @@ function SetStepper({
 }) {
   return html`
     <div class="set-stepper" data-testid="set-stepper">
-      <button type="button" onClick=${() => set(Math.max(min, v - 1))}>−</button>
+      <button type="button" aria-disabled="true" disabled onClick=${() => set(Math.max(min, v - 1))}>−</button>
       <span class="mono">${v}</span>
-      <button type="button" onClick=${() => set(Math.min(max, v + 1))}>+</button>
+      <button type="button" aria-disabled="true" disabled onClick=${() => set(Math.min(max, v + 1))}>+</button>
     </div>
   `
 }
@@ -216,6 +214,8 @@ function SetSlider({
         max=${max}
         step=${step ?? 1}
         value=${value}
+        disabled
+        aria-disabled="true"
         onInput=${(e: Event) => onChange(Number((e.target as HTMLInputElement).value))}
       />
       <span class="mono">${value}${suffix ?? ''}</span>
@@ -223,22 +223,14 @@ function SetSlider({
   `
 }
 
-function VerifyBtn({ label }: { label?: string }) {
-  const [st, setSt] = useState<VerifyState>('idle')
+function PreviewBadge({ label = 'API 미연결' }: { label?: string }) {
   return html`
-    <button
-      type="button"
-      class=${`set-verify ${st}`}
-      data-state=${st}
-      data-testid="set-verify"
-      onClick=${(e: Event) => {
-        e.stopPropagation()
-        setSt('checking')
-        window.setTimeout(() => setSt('ok'), 700)
-      }}
+    <span
+      class="set-preview-badge"
+      data-testid="settings-preview-badge"
     >
-      ${st === 'idle' ? (label ?? '확인') : st === 'checking' ? '확인 중…' : '✓ 정상'}
-    </button>
+      ${label}
+    </span>
   `
 }
 
@@ -355,10 +347,20 @@ function LogViewer() {
 }
 
 export function SettingsSurface() {
-  const [sec, setSec] = useState<SectionId>('account')
+  const routeSection = route.value.params.section
+  const [sec, setSec] = useState<SectionId>(() => normalizeSettingsSection(routeSection))
+
+  useEffect(() => {
+    const next = normalizeSettingsSection(routeSection)
+    setSec(current => current === next ? current : next)
+  }, [routeSection])
+
+  function openSection(id: SectionId) {
+    setSec(id)
+    navigate('settings', id === 'account' ? {} : { section: id })
+  }
 
   // account
-  const [tokenShown, setTokenShown] = useState(false)
   const [sessionExpiry, setSessionExpiry] = useState('8시간')
 
   // mcp — exposed tools come from the live capability registry (public_mcp surface)
@@ -523,7 +525,7 @@ export function SettingsSurface() {
                     class=${`set-nav-item ${sec === id ? 'on' : ''}`}
                     data-testid=${`settings-nav-${id}`}
                     data-active=${sec === id ? 'true' : 'false'}
-                    onClick=${() => setSec(id)}
+                    onClick=${() => openSection(id)}
                   >
                     <span class="ko">${s[2]}</span>
                     <span class="en mono">${s[1]}</span>
@@ -532,16 +534,24 @@ export function SettingsSurface() {
               })}
             </div>
           `)}
-          <div class="set-nav-note">Prototype — changes are local-only.</div>
+          <div class="set-nav-note">Prototype controls are read-only previews; runtime.toml is live-backed.</div>
         </nav>
 
         <div class="set-content">
           <header class="set-content-h">
             <h1 data-testid="settings-section-title">${cur[2]}</h1>
-            <button type="button" class="act">Save changes</button>
+            <span
+              class=${`set-section-state ${sec === 'runtimes' ? 'live' : 'preview'}`}
+              data-testid="settings-section-state"
+            >
+              ${sec === 'runtimes' ? 'runtime.toml live-backed' : 'preview only'}
+            </span>
           </header>
 
-          <div class="set-card-b ss-card mx-6 my-6">
+          <div
+            class=${`set-card-b mx-6 my-6 ${sec === 'runtimes' ? 'set-card-b-wide' : 'ss-card'}`}
+            data-preview-locked=${sec === 'runtimes' ? 'false' : 'true'}
+          >
             ${sec === 'account' && html`
               <${SetRow} label="Operator" hint="Currently logged-in operator">
                 <span class="mono" style=${{ color: 'var(--text-bright)' }}>@operator</span>
@@ -554,32 +564,14 @@ export function SettingsSurface() {
                   <input
                     class="set-input mono"
                     readOnly
-                    value=${tokenShown ? 'msc_live_8a4f2c71e0' : '••••••••••••••'}
+                    value="••••••••••••••"
                   />
-                  <button
-                    type="button"
-                    class="set-verify idle"
-                    data-testid="token-toggle"
-                    onClick=${() => setTokenShown(v => !v)}
-                  >
-                    ${tokenShown ? 'Hide' : 'Show'}
-                  </button>
-                  <button type="button" class="set-verify idle">Reissue</button>
+                  <${PreviewBadge} label="redacted" />
                 </div>
               <//>
               <${SetRow} label="Session expiry" hint="Auto-logout timeout">
                 <${SetSeg} value=${sessionExpiry} options=${['1시간', '8시간', '안 함']} onChange=${setSessionExpiry} />
               <//>
-              <button
-                type="button"
-                class="set-add"
-                style=${{
-                  borderColor: 'color-mix(in oklab, var(--status-bad) 40%, transparent)',
-                  color: 'var(--status-bad)',
-                }}
-              >
-                Log out
-              </button>
             `}
 
             ${sec === 'mcp' && html`
@@ -590,10 +582,11 @@ export function SettingsSurface() {
                 <div class="set-path">
                   <input
                     class="set-input mono"
+                    readOnly
                     value=${mcpUrl}
                     onInput=${(e: Event) => setMcpUrl((e.target as HTMLInputElement).value)}
                   />
-                  <${VerifyBtn} />
+                  <${PreviewBadge} />
                 </div>
               <//>
               <${SetRow} label="Transport" hint="transport">
@@ -642,27 +635,19 @@ export function SettingsSurface() {
             `}
 
             ${sec === 'runtimes' && html`
-              <div class="set-hint" style=${{ marginBottom: '12px' }}>Registered runtime targets resolved from runtime.toml.</div>
-              ${runtimeEntries.length === 0
-                ? html`<div class="set-hint" data-testid="runtime-nodes-empty">등록된 런타임이 없습니다.</div>`
-                : runtimeEntries.map(rt => html`
-                    <div key=${rt.id} class="set-rt" data-testid="runtime-node">
-                      <div class="set-rt-top">
-                        <span class="set-rt-name mono">${rt.id}</span>
-                        <span class="set-rt-kind">${rt.provider}</span>
-                        ${rt.is_default ? html`<span class="set-rt-keepers">default</span>` : null}
-                      </div>
-                      <div class="set-rt-row">
-                        <span class="sub-k">model</span>
-                        <span class="mono" style=${{ fontSize: '12px', color: 'var(--text-mid)' }}>${rt.model}</span>
-                      </div>
-                      <div class="set-rt-row">
-                        <span class="sub-k">max context</span>
-                        <span class="mono" style=${{ fontSize: '12px', color: 'var(--text-mid)' }}>${rt.max_context}</span>
-                      </div>
+              <div class="settings-runtime-live" data-testid="settings-runtime-live">
+                <div class="settings-runtime-live-h">
+                  <div>
+                    <div class="set-sub-h">Live runtime.toml</div>
+                    <div class="set-hint">
+                      Runtime targets, providers, model bindings, routing lanes, and keeper assignments are edited through
+                      the same API-backed runtime.toml editor used by the Runtime surface.
                     </div>
-                  `)}
-              <button type="button" class="set-add">＋ Add runtime</button>
+                  </div>
+                  <span class="settings-runtime-live-source mono">/api/v1/runtime/config/raw</span>
+                </div>
+                <${RuntimeTomlEditor} />
+              </div>
             `}
 
             ${sec === 'routing' && html`
@@ -696,6 +681,7 @@ export function SettingsSurface() {
               <div class="set-sub-h">① System (base) — what a keeper is</div>
               <textarea
                 class="set-input mono"
+                readOnly
                 style=${{ width: '100%', minHeight: '150px', resize: 'vertical', lineHeight: '1.6', padding: '10px 12px', whiteSpace: 'pre' }}
                 value=${sysPrompt}
                 onInput=${(e: Event) => setSysPrompt((e.target as HTMLTextAreaElement).value)}
@@ -703,6 +689,7 @@ export function SettingsSurface() {
               <div class="set-sub-h" style=${{ marginTop: '14px' }}>② World prompt — shared world·rules</div>
               <textarea
                 class="set-input mono"
+                readOnly
                 style=${{ width: '100%', minHeight: '150px', resize: 'vertical', lineHeight: '1.6', padding: '10px 12px', whiteSpace: 'pre' }}
                 value=${worldPrompt}
                 onInput=${(e: Event) => setWorldPrompt((e.target as HTMLTextAreaElement).value)}
@@ -763,6 +750,7 @@ export function SettingsSurface() {
                 <${SetRow} label="Allowed domains" hint="Comma-separated">
                   <input
                     class="set-input mono"
+                    readOnly
                     style=${{ width: '260px' }}
                     value=${allowlist}
                     onInput=${(e: Event) => setAllowlist((e.target as HTMLInputElement).value)}
@@ -848,10 +836,11 @@ export function SettingsSurface() {
                 <div class="set-path">
                   <input
                     class="set-input mono"
+                    readOnly
                     value=${ideRepo}
                     onInput=${(e: Event) => setIdeRepo((e.target as HTMLInputElement).value)}
                   />
-                  <${VerifyBtn} label="Check repo" />
+                  <${PreviewBadge} />
                 </div>
               <//>
             `}
@@ -871,10 +860,11 @@ export function SettingsSurface() {
                 <div class="set-path">
                   <input
                     class="set-input mono"
+                    readOnly
                     value=${gateBase}
                     onInput=${(e: Event) => setGateBase((e.target as HTMLInputElement).value)}
                   />
-                  <${VerifyBtn} />
+                  <${PreviewBadge} />
                 </div>
               <//>
               ${['Slack', 'Discord', 'Amplitude', 'GitHub'].map(g => html`
@@ -882,7 +872,6 @@ export function SettingsSurface() {
                   <${SetToggle} on=${gateOn[g]} onChange=${(v: boolean) => setGateOn(p => ({ ...p, [g]: v }))} />
                 <//>
               `)}
-              <button type="button" class="set-add">＋ Add gate</button>
             `}
 
             ${sec === 'paths' && html`
@@ -893,30 +882,33 @@ export function SettingsSurface() {
                 <div class="set-path">
                   <input
                     class="set-input mono"
+                    readOnly
                     value=${mcpUrl}
                     onInput=${(e: Event) => setMcpUrl((e.target as HTMLInputElement).value)}
                   />
-                  <${VerifyBtn} />
+                  <${PreviewBadge} />
                 </div>
               <//>
               <${SetRow} label="Store (DB)" hint="trace·audit persistence">
                 <div class="set-path">
                   <input
                     class="set-input mono"
+                    readOnly
                     value=${storeUrl}
                     onInput=${(e: Event) => setStoreUrl((e.target as HTMLInputElement).value)}
                   />
-                  <${VerifyBtn} />
+                  <${PreviewBadge} />
                 </div>
               <//>
               <${SetRow} label="Default worktree basepath" hint="keeper worktree root — e.g. ~/wt/<keeper>">
                 <div class="set-path">
                   <input
                     class="set-input mono"
+                    readOnly
                     value=${wtBase}
                     onInput=${(e: Event) => setWtBase((e.target as HTMLInputElement).value)}
                   />
-                  <${VerifyBtn} label="Check path" />
+                  <${PreviewBadge} />
                 </div>
               <//>
             `}

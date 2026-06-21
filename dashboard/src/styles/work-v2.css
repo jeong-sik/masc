@@ -71,10 +71,14 @@
   color: var(--status-bad);
 }
 
+.wk-backlog-n {
+  color: var(--status-warn);
+}
+
 /* ── KPI strip ────────────────────────────────────────────────────────────── */
 .wk-kpis {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 1px;
   background: var(--border-soft);
   overflow: hidden;
@@ -112,6 +116,20 @@
   flex-direction: column;
   gap: 12px;
   margin-top: 4px;
+}
+
+.wk-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 390px);
+  gap: 16px;
+  align-items: start;
+}
+
+.wk-workbench-list {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .wk-goal {
@@ -306,6 +324,17 @@
   color: var(--text-dim);
 }
 
+.wk-unassigned-claim {
+  margin-left: auto;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in oklab, var(--status-warn) 42%, var(--border-soft));
+  border-radius: var(--radius-pill);
+  color: var(--status-warn);
+  font-size: 10.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 .wk-job {
   display: flex;
   align-items: center;
@@ -316,6 +345,11 @@
 
 .wk-job:hover {
   background: var(--bg-sunken);
+}
+
+.wk-job.selected {
+  background: color-mix(in oklab, var(--volt) 12%, transparent);
+  outline: 1px solid color-mix(in oklab, var(--volt) 40%, transparent);
 }
 
 .wk-job-dot {
@@ -399,6 +433,27 @@
   cursor: default;
 }
 
+.wk-job-detail {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-sunken);
+  color: var(--text-mid);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.wk-job-detail:hover {
+  border-color: var(--volt-strong);
+  color: var(--text-bright);
+  background: color-mix(in oklab, var(--volt) 10%, var(--bg-sunken));
+}
+
 /* RFC-0267 Phase 2: per-row "assign to goal" control on unassigned tasks. */
 .wk-job-assign {
   flex: none;
@@ -424,6 +479,9 @@
   width: auto;
   margin: 0;
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   align-self: center;
   white-space: nowrap;
 }
@@ -435,8 +493,260 @@
   font-family: var(--font-mono);
 }
 
+/* ── Route-selected task dossier ─────────────────────────────────────────── */
+.wk-task-detail {
+  position: sticky;
+  top: 8px;
+  min-width: 0;
+  padding: 14px;
+  color: var(--text-primary);
+}
+
+.wk-task-detail.empty {
+  color: var(--text-mid);
+}
+
+.wk-task-detail.empty p {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+.wk-task-empty-title {
+  margin-top: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-bright);
+}
+
+.wk-task-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.wk-task-detail-kicker,
+.wk-task-block-title {
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.wk-task-detail h2 {
+  margin: 5px 0 0;
+  font-size: 16px;
+  line-height: 1.25;
+  color: var(--text-bright);
+  overflow-wrap: anywhere;
+}
+
+.wk-task-detail-sub {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+.wk-task-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-sunken);
+  color: var(--text-mid);
+  cursor: pointer;
+}
+
+.wk-task-close:hover {
+  border-color: var(--border-highlight);
+  color: var(--text-bright);
+}
+
+.wk-task-status-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.wk-task-priority,
+.wk-task-verify {
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-sunken);
+  color: var(--text-mid);
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.wk-task-verify {
+  border-color: color-mix(in oklab, var(--status-warn) 38%, var(--border-soft));
+  color: var(--status-warn);
+  cursor: pointer;
+}
+
+.wk-task-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.wk-task-meta-row,
+.wk-task-link-row {
+  display: grid;
+  grid-template-columns: minmax(80px, 0.36fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.wk-task-meta-row span,
+.wk-task-link-row span {
+  color: var(--text-dim);
+}
+
+.wk-task-meta-row strong,
+.wk-task-link-row strong {
+  min-width: 0;
+  color: var(--text-mid);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.wk-task-block {
+  margin-top: 13px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.wk-task-block p {
+  margin: 7px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.wk-task-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.wk-task-chip {
+  max-width: 100%;
+  padding: 3px 7px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-sunken);
+  color: var(--text-mid);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+
+.wk-task-warning {
+  margin-top: 8px;
+  color: var(--status-warn);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.wk-task-gates {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.wk-task-gate {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 8px;
+  padding: 7px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-sunken);
+  font-size: 11px;
+}
+
+.wk-task-gate span {
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+.wk-task-gate strong,
+.wk-task-gate em {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.wk-task-gate em {
+  grid-column: 2;
+  color: var(--text-dim);
+  font-style: normal;
+}
+
+.wk-task-gate.satisfied span { color: var(--status-ok); }
+.wk-task-gate.failed span,
+.wk-task-gate.missing span { color: var(--status-bad); }
+.wk-task-gate.unsupported span { color: var(--status-warn); }
+
+.wk-task-note {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+.wk-task-keeper {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 9px;
+  padding: 5px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-sunken);
+  color: var(--text-mid);
+  cursor: pointer;
+}
+
+.wk-task-keeper:hover {
+  border-color: var(--border-highlight);
+  color: var(--text-bright);
+}
+
 /* ── Responsive ───────────────────────────────────────────────────────────── */
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
+  .wk-workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wk-task-detail {
+    position: static;
+    order: -1;
+  }
+
+  .wk-kpis {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 700px) {
   .wk-kpis {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -452,5 +762,31 @@
   .wk-prog {
     width: 100%;
     max-width: none;
+  }
+
+  .wk-job {
+    flex-wrap: wrap;
+  }
+
+  .wk-job-title {
+    min-width: 100%;
+    order: 2;
+  }
+
+  .wk-job-state,
+  .wk-job-kp,
+  .wk-job-detail,
+  .wk-job-assign {
+    order: 3;
+  }
+
+  .wk-spacer {
+    display: none;
+  }
+
+  .wk-task-meta-row,
+  .wk-task-link-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
   }
 }

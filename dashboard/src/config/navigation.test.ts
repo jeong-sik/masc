@@ -66,6 +66,7 @@ describe('dashboard surface navigation', () => {
       'workspace',
       'keepers',
       'board',
+      'schedule',
       'approvals',
       'fusion',
       'code',
@@ -78,6 +79,7 @@ describe('dashboard surface navigation', () => {
       'Work',
       'Keepers',
       'Board',
+      'Schedule',
       'Approvals',
       'Fusion',
       'IDE',
@@ -88,15 +90,32 @@ describe('dashboard surface navigation', () => {
   })
 
   it('uses one sectionless-surface classifier for section stripping and section lookup', () => {
-    const sectionless = ['overview', 'logs', 'settings', 'keepers', 'board', 'approvals', 'fusion'] as const
+    const sectionless = ['overview', 'logs', 'settings', 'keepers', 'board', 'schedule', 'approvals', 'fusion'] as const
     expect(sectionless.filter(id => isSectionlessSurface(id))).toEqual([...sectionless])
     expect(sectionItemsForTab('settings')).toEqual([])
     expect(normalizeRouteParams('settings', { section: 'legacy', surface: 'old', panel: 'theme' })).toEqual({
       panel: 'theme',
     })
+    expect(normalizeRouteParams('settings', { section: 'runtimes', surface: 'old', panel: 'runtime' })).toEqual({
+      section: 'runtimes',
+      panel: 'runtime',
+    })
+    expect(normalizeRouteParams('settings', { section: 'account', panel: 'theme' })).toEqual({
+      panel: 'theme',
+    })
     expect(normalizeRouteParams('fusion', { section: 'legacy', surface: 'old', run_id: 'fus-1' })).toEqual({
       run_id: 'fus-1',
     })
+  })
+
+  it('exposes Schedule as a dedicated top-level v2 surface without lab section baggage', () => {
+    expect(defaultParamsForTab('schedule')).toEqual({})
+    expect(VISIBLE_DASHBOARD_NAV_ITEMS.map(item => item.id)).toContain('schedule')
+    expect(sectionItemsForTab('schedule')).toEqual([])
+    expect(visibleSectionItemsForTab('schedule')).toEqual([])
+
+    const result = normalizeRouteParams('schedule', { section: 'tools', surface: 'lab', view: 'legacy' })
+    expect(result).toEqual({ view: 'legacy' })
   })
 })
 
@@ -129,23 +148,44 @@ describe('lab navigation', () => {
     expect(labSections.map(item => item.id)).toEqual([
       'tools',
       'harness',
-      'design-canvas',
       'performance',
-      'memory-explore',
+      'memory-subsystems',
       'keeper-memory-health',
     ])
 
     expect(labSections.map(item => item.label)).toEqual([
       'Tools',
       'Safety Harness',
-      'Design Canvas',
       'Performance',
-      'Memory Explore',
+      'Memory OS',
       '키퍼 메모리 상태',
     ])
+    expect(labSections.find(item => item.id === 'memory-subsystems')?.description).toBe(
+      'Live episodes, user model projection, Hebbian synapses, and gated memory entries.',
+    )
     expect(labSections.find(item => item.id === 'performance')?.description).toBe(
       'FPS meter, VirtualList, content-visibility, native dialog, and observer probes.',
     )
+  })
+
+  it('collapses legacy Memory Explore links into the backed Memory OS route', () => {
+    expect(normalizeRouteParams('lab', {
+      section: 'memory-explore',
+      focus: 'episodes',
+      view: 'stale',
+    })).toEqual({
+      section: 'memory-subsystems',
+      focus: 'episodes',
+    })
+  })
+
+  it('collapses legacy Design Canvas links into the backed tools inventory', () => {
+    expect(normalizeRouteParams('lab', {
+      section: 'design-canvas',
+      view: 'fixtures',
+    })).toEqual({
+      section: 'tools',
+    })
   })
 })
 
@@ -185,6 +225,26 @@ describe('connectors navigation (Phase 7, post-2026-04-30 merge)', () => {
     // section ids fall back to the default.
     const result = normalizeRouteParams('connectors', { section: 'connector-slack' })
     expect(result.section).toBe('connector-status')
+  })
+
+  it('keeps only known connector route filters', () => {
+    expect(normalizeRouteParams('connectors', {
+      section: 'connector-status',
+      connector: 'telegram',
+      q: 'gate',
+    })).toEqual({
+      section: 'connector-status',
+      connector: 'telegram',
+      q: 'gate',
+    })
+    expect(normalizeRouteParams('connectors', {
+      section: 'connector-status',
+      connector: 'bogus',
+      q: 'gate',
+    })).toEqual({
+      section: 'connector-status',
+      q: 'gate',
+    })
   })
 })
 

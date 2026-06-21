@@ -8,15 +8,15 @@ import {
   mcpExposedToolNames,
   logEntryToSysRow,
   logRowStatus,
+  normalizeSettingsSection,
 } from './settings-surface'
-import type { DashboardToolInventoryItem } from '../api/dashboard'
-import type { LogEntry } from '../api/schemas/logs'
-import type { RuntimeDefaultsResponse } from '../api/schemas/runtime-defaults'
+import type { DashboardToolInventoryItem, LogEntry, RuntimeDefaultsResponse } from '../api/dashboard'
 import { DashboardMain } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
 import { dashboardLoading } from '../store'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
+import { resetDevTokenBootstrap } from '../api/dev-token'
 
 const apiMock = vi.hoisted(() => ({
   fetchLogs: vi.fn(),
@@ -109,7 +109,10 @@ vi.mock('../router', async () => {
   const actual = await vi.importActual<typeof import('../router')>('../router')
   return {
     ...actual,
-    navigate: (...args: Parameters<typeof navigate>) => navigate(...args),
+    navigate: (...args: Parameters<typeof navigate>) => {
+      navigate(...args)
+      return actual.navigate(args[0], args[1])
+    },
   }
 })
 
@@ -123,12 +126,17 @@ describe('SettingsSurface', () => {
     apiMock.fetchDashboardTools.mockReset()
     apiMock.fetchRuntimeDefaults.mockReset()
     stubEmptyApi()
+    window.location.hash = '#settings'
+    route.value = { tab: 'settings', params: {}, postId: null }
   })
 
   afterEach(() => {
     render(null, container)
     container.remove()
     navigate.mockClear()
+    resetDevTokenBootstrap()
+    sessionStorage.clear()
+    vi.unstubAllGlobals()
   })
 
   it('renders the surface and category navigation', () => {
@@ -159,9 +167,68 @@ describe('SettingsSurface', () => {
 
     expect(title().textContent).toBe('런타임 기본값')
     expect(runtimeNav.getAttribute('data-active')).toBe('true')
+    expect(navigate).toHaveBeenLastCalledWith('settings', { section: 'runtime' })
+
+    const accountNav = container.querySelector('[data-testid="settings-nav-account"]') as HTMLElement
+    await fireEvent.click(accountNav)
+
+    expect(title().textContent).toBe('계정')
+    expect(navigate).toHaveBeenLastCalledWith('settings', {})
   })
 
-  it('toggle control changes state', async () => {
+  it('selects a valid section from the dashboard route', () => {
+    route.value = { tab: 'settings', params: { section: 'logs' }, postId: null }
+
+    render(html`<${SettingsSurface} />`, container)
+
+    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('관측 · 시스템 로그')
+    expect(container.querySelector('[data-testid="settings-nav-logs"]')?.getAttribute('data-active')).toBe('true')
+    expect(container.querySelector('[data-testid="log-viewer"]')).not.toBeNull()
+  })
+
+  it('falls invalid settings sections back to account without a fake subsection', () => {
+    expect(normalizeSettingsSection('not-real')).toBe('account')
+    route.value = { tab: 'settings', params: { section: 'not-real' }, postId: null }
+
+    render(html`<${SettingsSurface} />`, container)
+
+    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('계정')
+    expect(container.querySelector('[data-testid="settings-nav-account"]')?.getAttribute('data-active')).toBe('true')
+  })
+
+  it('syncs when the dashboard route section changes while mounted', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('계정')
+
+    route.value = { tab: 'settings', params: { section: 'logs' }, postId: null }
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('관측 · 시스템 로그')
+    })
+  })
+
+  it('marks unbacked settings sections as previews instead of fake saved actions', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('preview only')
+    expect(container.querySelector('.set-card-b')?.getAttribute('data-preview-locked')).toBe('true')
+    expect(container.textContent).not.toContain('Save changes')
+    expect(container.textContent).not.toContain('Reissue')
+    expect(container.textContent).not.toContain('Log out')
+    expect(container.querySelector('[data-testid="token-toggle"]')).toBeNull()
+    expect(container.querySelector<HTMLInputElement>('.set-path .set-input')?.readOnly).toBe(true)
+
+    const gateNav = container.querySelector('[data-testid="settings-nav-gate"]') as HTMLElement
+    await fireEvent.click(gateNav)
+
+    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('preview only')
+    expect(container.textContent).not.toContain('＋ Add gate')
+    expect(container.querySelector('[data-testid="settings-preview-badge"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="set-verify"]')).toBeNull()
+  })
+
+  it('keeps preview toggle controls read-only instead of mutating local state', async () => {
     render(html`<${SettingsSurface} />`, container)
 
     const runtimeNav = container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement
@@ -169,15 +236,14 @@ describe('SettingsSurface', () => {
 
     const toggle = () => container.querySelector('[data-testid="set-toggle"]') as HTMLButtonElement
     expect(toggle().getAttribute('aria-checked')).toBe('true')
-
-    await fireEvent.click(toggle())
-    expect(toggle().getAttribute('aria-checked')).toBe('false')
+    expect(toggle().disabled).toBe(true)
+    expect(toggle().getAttribute('aria-disabled')).toBe('true')
 
     await fireEvent.click(toggle())
     expect(toggle().getAttribute('aria-checked')).toBe('true')
   })
 
-  it('segmented control changes state', async () => {
+  it('keeps preview segmented controls read-only instead of mutating local state', async () => {
     render(html`<${SettingsSurface} />`, container)
 
     const runtimeNav = container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement
@@ -189,10 +255,12 @@ describe('SettingsSurface', () => {
     const buttons = () => Array.from(seg().querySelectorAll('button'))
     expect(buttons().length).toBeGreaterThanOrEqual(3)
     expect(buttons()[0]!.getAttribute('data-active')).toBe('true')
+    expect(buttons()[0]!.disabled).toBe(true)
+    expect(buttons()[2]!.disabled).toBe(true)
 
     await fireEvent.click(buttons()[2]!)
-    expect(buttons()[0]!.getAttribute('data-active')).toBe('false')
-    expect(buttons()[2]!.getAttribute('data-active')).toBe('true')
+    expect(buttons()[0]!.getAttribute('data-active')).toBe('true')
+    expect(buttons()[2]!.getAttribute('data-active')).toBe('false')
   })
 
   it('Default runtime/model options come from the resolved runtime config', async () => {
@@ -248,24 +316,6 @@ describe('SettingsSurface', () => {
       expect(container.querySelector('[data-testid="routing-assignments-empty"]')).not.toBeNull()
     })
     expect(container.querySelectorAll('[data-testid="routing-assignment"]').length).toBe(0)
-  })
-
-  it('runtime nodes section uses the resolved registry without sample targets', async () => {
-    render(html`<${SettingsSurface} />`, container)
-
-    const runtimesNav = container.querySelector('[data-testid="settings-nav-runtimes"]') as HTMLElement
-    await fireEvent.click(runtimesNav)
-
-    await waitFor(() => {
-      expect(container.querySelectorAll('[data-testid="runtime-node"]').length).toBe(3)
-    })
-    const text = container.textContent ?? ''
-    expect(text).toContain('rt-a')
-    expect(text).toContain('rt-b')
-    expect(text).toContain('rt-c')
-    expect(text).toContain('m1')
-    expect(text).not.toContain('oas://seoul-1.masc.run')
-    expect(text).not.toContain('local·docker')
   })
 
   it('log filter chips filter live rows from the ring', async () => {
@@ -331,6 +381,68 @@ describe('SettingsSurface', () => {
       // internal-only tools are not exposed over public MCP.
       expect(labels).not.toContain('internal_only')
     })
+  })
+
+  it('opens the live runtime.toml editor from runtime management', async () => {
+    const runtimeConfig = {
+      ok: true,
+      path: '/tmp/.masc/config/runtime.toml',
+      file_name: 'runtime.toml',
+      source_text: '[runtime]\ndefault = "runpod_mtp.qwen"\n',
+      reloaded: false,
+    }
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const requestUrl =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.href
+            : typeof (input as { url?: unknown }).url === 'string'
+              ? (input as { url: string }).url
+              : ''
+      const path = requestUrl.startsWith('http')
+        ? new URL(requestUrl).pathname
+        : requestUrl.split('?')[0] ?? requestUrl
+      if (path === '/api/v1/dashboard/dev-token') {
+        return new Response(JSON.stringify({ token: 'dev-token', actor: 'dashboard' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (path === '/api/v1/runtime/config/raw') {
+        return new Response(JSON.stringify(runtimeConfig), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({ message: `unexpected ${path}` }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtimes"]') as HTMLElement)
+
+    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('런타임 관리')
+    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('runtime.toml live-backed')
+    expect(container.querySelector('.set-card-b')?.getAttribute('data-preview-locked')).toBe('false')
+    expect(container.textContent).toContain('/api/v1/runtime/config/raw')
+    expect(container.querySelector('.set-rt')).toBeNull()
+    expect(container.textContent).not.toContain('Add runtime')
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-editor"]')).not.toBeNull()
+      expect(container.textContent).toContain('/tmp/.masc/config/runtime.toml')
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/runtime/config/raw',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer dev-token' }),
+      }),
+    )
   })
 })
 

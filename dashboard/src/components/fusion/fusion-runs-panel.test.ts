@@ -3,7 +3,12 @@ import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parseFusionRunsResponse } from '../../api/dashboard'
 import { fusionRuns, fusionRunsLoading } from '../../store'
-import { FusionRunsPanel, fusionRunStatusText, fusionRunStatusTone } from './fusion-runs-panel'
+import {
+  FusionRunsPanel,
+  fusionRunPipelineSegments,
+  fusionRunStatusText,
+  fusionRunStatusTone,
+} from './fusion-runs-panel'
 
 describe('parseFusionRunsResponse', () => {
   it('maps snake_case rows to FusionRunRecord and falls back count to length', () => {
@@ -57,6 +62,27 @@ describe('fusion run status helpers', () => {
     expect(fusionRunStatusText('completed')).toBe('completed')
     expect(fusionRunStatusText('failed')).toBe('failed')
   })
+
+  it('maps registry status to a conservative backed pipeline', () => {
+    expect(fusionRunPipelineSegments('running').map(segment => [segment.key, segment.state])).toEqual([
+      ['keeper', 'done'],
+      ['registry', 'done'],
+      ['deliberation', 'active'],
+      ['sink', 'pending'],
+    ])
+    expect(fusionRunPipelineSegments('completed').map(segment => segment.state)).toEqual([
+      'done',
+      'done',
+      'done',
+      'done',
+    ])
+    expect(fusionRunPipelineSegments('failed').map(segment => [segment.key, segment.state])).toEqual([
+      ['keeper', 'done'],
+      ['registry', 'done'],
+      ['deliberation', 'failed'],
+      ['sink', 'failed'],
+    ])
+  })
 })
 
 describe('FusionRunsPanel', () => {
@@ -104,6 +130,12 @@ describe('FusionRunsPanel', () => {
     expect(byRun('r-run')?.getAttribute('data-status')).toBe('running')
     expect(byRun('r-done')?.getAttribute('data-status')).toBe('completed')
     expect(byRun('r-fail')?.getAttribute('data-status')).toBe('failed')
+
+    const runningPipeline = byRun('r-run')?.querySelector('[data-testid="fusion-run-pipeline"]')
+    expect(runningPipeline?.querySelector('[data-stage="deliberation"]')?.getAttribute('data-state')).toBe('active')
+    expect(runningPipeline?.querySelector('[data-stage="sink"]')?.getAttribute('data-state')).toBe('pending')
+    expect(byRun('r-done')?.querySelector('[data-stage="sink"]')?.getAttribute('data-state')).toBe('done')
+    expect(byRun('r-fail')?.querySelector('[data-stage="sink"]')?.getAttribute('data-state')).toBe('failed')
 
     // the running indicator counts only in-progress runs
     expect(container.textContent).toContain('1 running')

@@ -14,6 +14,13 @@ import { fusionRuns, fusionRunsLoading } from '../../store'
 import { TimeAgo } from '../common/time-ago'
 
 type StatusTone = 'ok' | 'warn' | 'bad'
+type PipelineState = 'done' | 'active' | 'pending' | 'failed'
+
+interface FusionRunPipelineSegment {
+  key: 'keeper' | 'registry' | 'deliberation' | 'sink'
+  label: string
+  state: PipelineState
+}
 
 // Reuses the existing `.fus-status.tone-*` chip styling. `running` is `warn`
 // (drawing the eye to active work), `completed` `ok`, `failed` `bad`.
@@ -39,6 +46,42 @@ export function fusionRunStatusText(status: FusionRunStatusLabel): string {
   }
 }
 
+export function fusionRunPipelineSegments(status: FusionRunStatusLabel): FusionRunPipelineSegment[] {
+  const deliberationState: PipelineState =
+    status === 'running' ? 'active' : status === 'failed' ? 'failed' : 'done'
+  const sinkState: PipelineState =
+    status === 'running' ? 'pending' : status === 'failed' ? 'failed' : 'done'
+  return [
+    { key: 'keeper', label: 'keeper turn', state: 'done' },
+    { key: 'registry', label: 'registry', state: 'done' },
+    { key: 'deliberation', label: 'panel/judge', state: deliberationState },
+    { key: 'sink', label: 'sink', state: sinkState },
+  ]
+}
+
+function FusionRunPipeline({ status }: { status: FusionRunStatusLabel }) {
+  const segments = fusionRunPipelineSegments(status)
+  return html`
+    <ol
+      class="fus-runs-pipe"
+      data-testid="fusion-run-pipeline"
+      aria-label=${`Fusion registry pipeline: ${fusionRunStatusText(status)}`}
+    >
+      ${segments.map(segment => html`
+        <li
+          key=${segment.key}
+          class="fus-runs-pipe-node"
+          data-stage=${segment.key}
+          data-state=${segment.state}
+        >
+          <span class="fus-runs-pipe-dot" aria-hidden="true"></span>
+          <span class="fus-runs-pipe-label">${segment.label}</span>
+        </li>
+      `)}
+    </ol>
+  `
+}
+
 function FusionRunStatusCard({ run }: { run: FusionRunRecord }) {
   const tone = fusionRunStatusTone(run.status)
   return html`
@@ -48,13 +91,16 @@ function FusionRunStatusCard({ run }: { run: FusionRunRecord }) {
       data-run-id=${run.runId}
       data-status=${run.status}
     >
-      <span class=${`fus-status tone-${tone}`}>${fusionRunStatusText(run.status)}</span>
-      <span class="fus-runs-id">${run.runId}</span>
-      <span class="fus-runs-meta">
-        <span class="fus-runs-keeper">${run.keeper || 'system'}</span>
-        ${run.preset ? html`<span class="fus-runs-preset">${run.preset}</span>` : null}
-        <${TimeAgo} timestamp=${run.startedAt} />
-      </span>
+      <div class="fus-runs-card-main">
+        <span class=${`fus-status tone-${tone}`}>${fusionRunStatusText(run.status)}</span>
+        <span class="fus-runs-id">${run.runId}</span>
+        <span class="fus-runs-meta">
+          <span class="fus-runs-keeper">${run.keeper || 'system'}</span>
+          ${run.preset ? html`<span class="fus-runs-preset">${run.preset}</span>` : null}
+          <${TimeAgo} timestamp=${run.startedAt} />
+        </span>
+      </div>
+      <${FusionRunPipeline} status=${run.status} />
     </li>
   `
 }

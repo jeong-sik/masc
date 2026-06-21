@@ -516,6 +516,58 @@
   padding: 0 26px 14px;
 }
 
+.v2-logs-diagnostics {
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, var(--bg-card) 82%, transparent);
+}
+
+.v2-logs-diagnostics > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 34px;
+  padding: 7px 12px;
+  color: var(--text-mid);
+  cursor: pointer;
+  font-size: 12px;
+  list-style: none;
+}
+
+.v2-logs-diagnostics > summary::-webkit-details-marker {
+  display: none;
+}
+
+.v2-logs-diagnostics > summary::before {
+  content: ">";
+  color: var(--text-dim);
+  font-size: 10px;
+  transition: transform 120ms ease;
+}
+
+.v2-logs-diagnostics[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.v2-logs-diagnostics > summary span:first-child {
+  color: var(--text-bright);
+  font-weight: 600;
+}
+
+.v2-logs-diagnostics > summary .mono {
+  color: var(--text-dim);
+  font-size: 10.5px;
+}
+
+.v2-logs-diagnostics[open] > summary {
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.v2-logs-diagnostics-body {
+  padding: 10px;
+}
+
 .v2-logs-provider-panel {
   background: var(--color-bg-elevated);
   border-color: var(--color-border-default);

@@ -2,10 +2,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
-import { App, shouldSuppressFloatingChrome, shouldUseCompactDashboardChrome } from './app'
+import { App, shouldShowCopilotFab, shouldSuppressFloatingChrome, shouldUseCompactDashboardChrome } from './app'
 import { route } from './router'
 import { serverStatus, shellCounts } from './store'
 import { selectedKeeper } from './components/keeper-detail-state'
+import { keeperMobilePane } from './components/keeper-mobile-pane-state'
 
 describe('App v2 header chrome', () => {
   let container: HTMLDivElement
@@ -19,6 +20,7 @@ describe('App v2 header chrome', () => {
     shellCounts.value = null
     serverStatus.value = null
     selectedKeeper.value = null
+    keeperMobilePane.value = 'chat'
   })
 
   afterEach(() => {
@@ -29,6 +31,7 @@ describe('App v2 header chrome', () => {
     shellCounts.value = null
     serverStatus.value = null
     selectedKeeper.value = null
+    keeperMobilePane.value = 'chat'
   })
 
   function renderApp() {
@@ -179,6 +182,11 @@ describe('App v2 header chrome', () => {
     await waitFor(() => {
       expect(container.querySelector('nav[aria-label="Primary mobile navigation"]')).toBeNull()
     })
+
+    menuButton!.click()
+    await waitFor(() => {
+      expect(container.querySelector('nav[aria-label="Primary mobile navigation"]')).not.toBeNull()
+    })
   })
 
   it('uses the header Copilot control instead of a floating FAB on mobile', () => {
@@ -189,12 +197,25 @@ describe('App v2 header chrome', () => {
     expect(container.querySelector('[data-testid="copilot-dock-fab"]')).toBeNull()
   })
 
-  it('hides mobile nav tabs on keeper detail routes', () => {
-    window.location.hash = '#monitoring/agents?keeper=sangsu'
-    route.value = { tab: 'monitoring', params: { section: 'agents', keeper: 'sangsu' }, postId: null }
+  it('keeps mobile nav available on the keeper roster pane', () => {
+    window.location.hash = '#keepers?keeper=sangsu'
+    route.value = { tab: 'keepers', params: { keeper: 'sangsu' }, postId: null }
+    keeperMobilePane.value = 'roster'
     window.innerWidth = 900
     renderApp()
 
+    expect(container.querySelector('#main-content')?.getAttribute('data-mpane')).toBe('roster')
+    expect(container.querySelector('nav[aria-label="Primary mobile navigation"]')).not.toBeNull()
+  })
+
+  it('hides mobile nav while reading the keeper chat pane', () => {
+    window.location.hash = '#keepers?keeper=sangsu'
+    route.value = { tab: 'keepers', params: { keeper: 'sangsu' }, postId: null }
+    keeperMobilePane.value = 'chat'
+    window.innerWidth = 900
+    renderApp()
+
+    expect(container.querySelector('#main-content')?.getAttribute('data-mpane')).toBe('chat')
     const bottomNav = container.querySelector('nav[aria-label="Primary mobile navigation"]')
     expect(bottomNav).toBeNull()
   })
@@ -253,6 +274,11 @@ describe('App v2 header chrome', () => {
       expect(rail?.classList.contains('hidden')).toBe(false)
       expect(container.querySelector('[data-testid="dashboard-status-tray"]')).toBeNull()
       expect(container.querySelector('[data-testid="dashboard-focus-mode-toggle"]')).toBeNull()
+    })
+
+    menuButton!.click()
+    await waitFor(() => {
+      expect(rail?.classList.contains('hidden')).toBe(true)
     })
   })
 
@@ -356,5 +382,46 @@ describe('shouldUseCompactDashboardChrome', () => {
       widgetSoloMode: false,
       focusMode: true,
     })).toBe(true)
+  })
+})
+
+describe('shouldShowCopilotFab', () => {
+  it('shows the floating Copilot trigger on regular desktop surfaces', () => {
+    expect(shouldShowCopilotFab({
+      dockOpen: false,
+      compactChromeMode: false,
+      isMobile: false,
+      currentTab: 'overview',
+    })).toBe(true)
+  })
+
+  it('hides the floating Copilot trigger when another chat surface owns the action', () => {
+    expect(shouldShowCopilotFab({
+      dockOpen: false,
+      compactChromeMode: false,
+      isMobile: false,
+      currentTab: 'keepers',
+    })).toBe(false)
+  })
+
+  it('hides the floating Copilot trigger for open, mobile, and compact chrome states', () => {
+    expect(shouldShowCopilotFab({
+      dockOpen: true,
+      compactChromeMode: false,
+      isMobile: false,
+      currentTab: 'overview',
+    })).toBe(false)
+    expect(shouldShowCopilotFab({
+      dockOpen: false,
+      compactChromeMode: false,
+      isMobile: true,
+      currentTab: 'overview',
+    })).toBe(false)
+    expect(shouldShowCopilotFab({
+      dockOpen: false,
+      compactChromeMode: true,
+      isMobile: false,
+      currentTab: 'overview',
+    })).toBe(false)
   })
 })

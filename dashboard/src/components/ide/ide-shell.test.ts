@@ -23,7 +23,15 @@ vi.mock('./ide-conversation-rail', () => ({
   IdeConversationRail: () => null,
 }))
 
-import { deriveIdeStatusbarModel, IdeShell } from './ide-shell'
+import {
+  deriveIdeStatusbarModel,
+  IDE_TREE_WIDTH_DEFAULT,
+  IDE_TREE_WIDTH_MAX,
+  IDE_TREE_WIDTH_MIN,
+  IDE_TREE_WIDTH_STORAGE_KEY,
+  IdeShell,
+  normalizeIdeTreeWidth,
+} from './ide-shell'
 import { navigate, route } from '../../router'
 import { clearTraces, pushTrace } from './keeper-trace-store'
 import { activeIdeFile, ideContextFocus } from './ide-state'
@@ -44,6 +52,30 @@ function ideCommandInput(container: HTMLElement): HTMLInputElement {
     throw new Error('missing IDE command bar input')
   }
   return input
+}
+
+function clearLocalStorage(): void {
+  try {
+    window.localStorage.clear()
+  } catch {
+    // localStorage can be disabled in some test runtimes.
+  }
+}
+
+function setLocalStorageItem(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value)
+  } catch {
+    // Tests that assert storage hydrate will fail through the rendered state.
+  }
+}
+
+function getLocalStorageItem(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key)
+  } catch {
+    return null
+  }
 }
 
 function jsonResponse(body: unknown): Response {
@@ -87,6 +119,7 @@ describe('IdeShell', () => {
 
   beforeEach(() => {
     container = document.createElement('div')
+    clearLocalStorage()
     vi.stubGlobal('fetch', vi.fn(dashboardFetchMock))
   })
 
@@ -99,6 +132,7 @@ describe('IdeShell', () => {
     ideContextFocus.value = null
     cursorOverlaySignal.value = { cursors: new Map(), heatmap: new Map(), collisions: [], active_file: null }
     clearTraces()
+    clearLocalStorage()
   })
 
   it('fails fast for unmocked dashboard fetch URLs', () => {
@@ -737,7 +771,7 @@ describe('IdeShell', () => {
     expect(btn.getAttribute('aria-pressed')).toBe('false')
   })
 
-  it('keeps the right diagnostics bounded above the primary conversation rail', () => {
+  it('keeps default right rail context diagnostics bounded above the primary conversation rail', () => {
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source' },
@@ -753,7 +787,65 @@ describe('IdeShell', () => {
     expect(contextStack).not.toBeNull()
     expect(primaryRail).not.toBeNull()
     expect(rail?.classList.contains('ide-v2-rail')).toBe(true)
+    expect(buttonByText(container, 'Context').getAttribute('aria-selected')).toBe('true')
+    expect(container.querySelector('.ide-plane-activity')).toBeNull()
+    expect(container.querySelector('[data-testid="ide-cursor-rail"]')).toBeNull()
+  })
+
+  it('switches the IDE right rail tabs and renders cursor stream focus', () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+    cursorOverlaySignal.value = {
+      cursors: new Map([[
+        'sangsu',
+        {
+          keeper_id: 'sangsu',
+          file_path: 'lib/scheduler/round.ml',
+          line: 94,
+          column: 4,
+          selection_end: { line: 96, column: 0 },
+          focus_mode: 'editing',
+          last_update: Date.now(),
+          tool_name: 'str_replace',
+          turn: 12,
+        },
+      ]]),
+      heatmap: new Map([[94, 1]]),
+      collisions: [{ line: 94, keeper_ids: ['sangsu', 'nick0cave'], risk_level: 'medium' }],
+      active_file: 'lib/scheduler/round.ml',
+    }
+
+    render(h(IdeShell, {}), container)
+
+    fireEvent.click(buttonByText(container, 'Activity'))
+    expect(buttonByText(container, 'Activity').getAttribute('aria-selected')).toBe('true')
     expect(container.querySelector('.ide-plane-activity')).not.toBeNull()
+    expect(container.querySelector('[data-testid="ide-right-context-stack"]')).toBeNull()
+
+    fireEvent.click(buttonByText(container, 'Cursors'))
+    expect(buttonByText(container, 'Cursors').getAttribute('aria-selected')).toBe('true')
+    expect(container.querySelector('.ide-plane-activity')).toBeNull()
+    expect(container.querySelector('[data-testid="ide-right-context-stack"]')).toBeNull()
+    const cursorRail = container.querySelector('[data-testid="ide-cursor-rail"]')
+    expect(cursorRail).not.toBeNull()
+    expect(cursorRail?.textContent).toContain('KEEPER CURSORS')
+    expect(cursorRail?.textContent).toContain('sangsu')
+    expect(cursorRail?.textContent).toContain('editing')
+    expect(cursorRail?.textContent).toContain('str_replace')
+    expect(cursorRail?.textContent).toContain('round.ml:94-96')
+    expect(cursorRail?.textContent).toContain('L94')
+
+    fireEvent.click(buttonByText(container, 'Focus'))
+    expect(ideContextFocus.value).toMatchObject({
+      file_path: 'lib/scheduler/round.ml',
+      line: 94,
+      surface: 'Keeper',
+      label: 'str_replace',
+      keeper_id: 'sangsu',
+    })
   })
 
   it('hydrates collapsed IDE rails from the route', () => {
@@ -787,6 +879,64 @@ describe('IdeShell', () => {
     expect(container.querySelector('.ide-plane-shell')?.getAttribute('data-rails-collapsed')).toBe('true')
     fireEvent.click(buttonByText(container, 'Rails'))
     expect(route.value.params.rails).toBeUndefined()
+  })
+
+  it('normalizes persisted IDE tree widths to the supported range', () => {
+    expect(normalizeIdeTreeWidth(120)).toBe(IDE_TREE_WIDTH_MIN)
+    expect(normalizeIdeTreeWidth(241.6)).toBe(242)
+    expect(normalizeIdeTreeWidth(800)).toBe(IDE_TREE_WIDTH_MAX)
+    expect(normalizeIdeTreeWidth('bad')).toBe(IDE_TREE_WIDTH_DEFAULT)
+  })
+
+  it('hydrates the persisted IDE tree width into the grid and resize handle', () => {
+    setLocalStorageItem(IDE_TREE_WIDTH_STORAGE_KEY, JSON.stringify(315))
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    const shell = container.querySelector<HTMLElement>('.ide-plane-shell')
+    const grid = container.querySelector<HTMLElement>('.ide-v2-body')
+    const handle = container.querySelector<HTMLElement>('[data-testid="ide-tree-resize"]')
+    expect(shell?.getAttribute('data-tree-width')).toBe('315')
+    expect(grid?.getAttribute('style')).toContain('--ide-tree-width: 315px')
+    expect(handle?.getAttribute('aria-valuenow')).toBe('315')
+  })
+
+  it('resizes the IDE file tree with pointer drag and keyboard controls', async () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    const shell = container.querySelector<HTMLElement>('.ide-plane-shell')
+    const handle = container.querySelector<HTMLElement>('[data-testid="ide-tree-resize"]') as HTMLButtonElement
+    expect(shell?.getAttribute('data-tree-width')).toBe(String(IDE_TREE_WIDTH_DEFAULT))
+    expect(handle.getAttribute('aria-valuenow')).toBe(String(IDE_TREE_WIDTH_DEFAULT))
+
+    fireEvent.pointerDown(handle, { button: 0, clientX: 230 })
+    fireEvent.pointerMove(window, { clientX: 285 })
+    await waitFor(() => expect(shell?.getAttribute('data-tree-width')).toBe('285'))
+    expect(handle.getAttribute('aria-valuenow')).toBe('285')
+    expect(getLocalStorageItem(IDE_TREE_WIDTH_STORAGE_KEY)).toBe('285')
+
+    fireEvent.pointerMove(window, { clientX: 620 })
+    await waitFor(() => expect(shell?.getAttribute('data-tree-width')).toBe(String(IDE_TREE_WIDTH_MAX)))
+    fireEvent.pointerUp(window)
+
+    fireEvent.keyDown(handle, { key: 'Home' })
+    await waitFor(() => expect(shell?.getAttribute('data-tree-width')).toBe(String(IDE_TREE_WIDTH_MIN)))
+    expect(getLocalStorageItem(IDE_TREE_WIDTH_STORAGE_KEY)).toBe(String(IDE_TREE_WIDTH_MIN))
+
+    fireEvent.keyDown(handle, { key: 'End' })
+    await waitFor(() => expect(shell?.getAttribute('data-tree-width')).toBe(String(IDE_TREE_WIDTH_MAX)))
+    expect(getLocalStorageItem(IDE_TREE_WIDTH_STORAGE_KEY)).toBe(String(IDE_TREE_WIDTH_MAX))
   })
 
   it('hydrates runtime layer button from the ?layers=runtime URL param', () => {

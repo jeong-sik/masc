@@ -19,6 +19,10 @@
    tool emits an "Unrecognized" entry and CI will surface it. *)
 
 let env_var_re = Str.regexp "\"\\(MASC_[A-Z][A-Z0-9_]*\\)\""
+let env_key_alias_re =
+  Str.regexp "let[ \t]+\\([A-Za-z_][A-Za-z0-9_']*\\)[ \t]*=[ \t]*\"\\(MASC_[A-Z][A-Z0-9_]*\\)\""
+
+let ident_re = Str.regexp "[A-Za-z_][A-Za-z0-9_']*"
 
 let typed_get_re =
   Str.regexp "get_\\(int\\|int_nonneg\\|float\\|float_nonneg\\|float_in_range\\|ratio\\|string\\|bool\\)"
@@ -159,9 +163,39 @@ let classification_of_doc = function
   | None -> (None, None)
   | Some doc -> (search_group category_re doc, search_group ops_class_re doc)
 
+let env_key_aliases arr =
+  let aliases = ref [] in
+  Array.iter
+    (fun line ->
+      try
+        let _ = Str.search_forward env_key_alias_re line 0 in
+        let ident = Str.matched_group 1 line in
+        let env_var = Str.matched_group 2 line in
+        aliases := (ident, env_var) :: !aliases
+      with Not_found | Invalid_argument _ -> ())
+    arr;
+  List.rev !aliases
+
+let alias_refs aliases line =
+  let refs = ref [] in
+  let pos = ref 0 in
+  (try
+     while !pos < String.length line do
+       let _ = Str.search_forward ident_re line !pos in
+       let ident = Str.matched_string line in
+       let next_pos = Str.match_end () in
+       (match List.assoc_opt ident aliases with
+        | Some env_var when not (List.mem env_var !refs) -> refs := env_var :: !refs
+        | Some _ | None -> ());
+       pos := next_pos
+     done
+   with Not_found -> ());
+  List.rev !refs
+
 let scan_file path =
   let lines = read_lines path in
   let arr = Array.of_list lines in
+  let aliases = env_key_aliases arr in
   let acc = ref [] in
   Array.iteri
     (fun i line ->
@@ -201,7 +235,37 @@ let scan_file path =
             :: !acc;
           pos := next_pos
         done
-      with Not_found -> ())
+      with Not_found -> ();
+      let kind =
+        let rec try_classify offset =
+          if offset > 2 || i - offset < 0 then String_lit
+          else
+            match classify_line arr.(i - offset) with
+            | Some k -> k
+            | None -> try_classify (offset + 1)
+        in
+        try_classify 0
+      in
+      match kind with
+      | String_lit -> ()
+      | Feature_flag | Entry_env | Typed_get _ ->
+        let refs = alias_refs aliases line in
+        List.iter
+          (fun env_var ->
+            let doc = doc_above arr i in
+            let category, ops_class = classification_of_doc doc in
+            acc :=
+              {
+                file = path;
+                line = i + 1;
+                env_var;
+                kind;
+                doc;
+                category;
+                ops_class;
+              }
+              :: !acc)
+          refs)
     arr;
   List.rev !acc
 

@@ -216,7 +216,7 @@ let last_tool_progress_context_of_messages messages =
     let tool_name = String.trim tool_name in
     let tool_name = if tool_name = "" then "unknown" else tool_name in
     let tool_effect =
-      if Keeper_tool_registry.is_read_only_with_input ~tool_name ~input
+      if Keeper_tool_registry.is_strictly_read_only_with_input ~tool_name ~input
       then Keeper_internal_error.Tool_effect_read_only
       else Keeper_internal_error.Tool_effect_mutating
     in

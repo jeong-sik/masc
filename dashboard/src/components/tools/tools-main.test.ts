@@ -120,6 +120,14 @@ describe('Tools', () => {
           blocked_approval: 1,
           due_execution_ready: 0,
           expired_effective: 0,
+          unsupported_payload_kind: 1,
+          unknown_payload_kind: 0,
+        },
+        payload_support: {
+          supported_kinds: ['masc.board_post'],
+          unsupported_request_count: 1,
+          unsupported_kinds: [{ kind: 'test.reminder', count: 1 }],
+          unknown_request_count: 0,
         },
         fsm: {
           state: 'blocked_approval',
@@ -143,6 +151,7 @@ describe('Tools', () => {
             recurrence: { kind: 'cron', expression: '0 9 * * 1-5', timezone: 'Asia/Seoul' },
             recurrence_kind: 'cron',
             payload_kind: 'test.reminder',
+            payload_support: 'unsupported',
             due_at_iso: '2026-06-13T01:00:00Z',
             last_execution: {
               execution_id: 'exec-1',
@@ -171,6 +180,8 @@ describe('Tools', () => {
     expect(container.textContent).toContain('cron 0 9 * * 1-5 Asia/Seoul')
     expect(container.textContent).toContain('succeeded')
     expect(container.textContent).toContain('test.reminder')
+    expect(container.textContent).toContain('unsupported payload')
+    expect(container.textContent).toContain('unsupported')
     expect(container.querySelector('.v2-lab-table')).not.toBeNull()
     expect(container.querySelector('.v2-lab-row')).not.toBeNull()
   })

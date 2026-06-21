@@ -181,9 +181,17 @@ function PayloadCell({ request }: { request: DashboardScheduledAutomationRequest
   const kind = request.payload_kind ?? '-'
   const target = request.payload_target?.trim() || null
   const summary = request.payload_summary?.trim() || null
+  const support = request.payload_support
+  const supportTone: StatusChipTone =
+    support === 'supported' ? 'ok' : support === 'unsupported' ? 'bad' : 'neutral'
   return html`
     <div class="max-w-[18rem]">
-      <div class="font-mono text-xs text-[var(--color-fg-secondary)]">${kind}</div>
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="font-mono text-xs text-[var(--color-fg-secondary)]">${kind}</span>
+        ${support
+          ? html`<${StatusChip} tone=${supportTone} uppercase=${false}>${enumLabel(support)}<//>`
+          : null}
+      </div>
       ${target
         ? html`<div class="mt-1 font-mono text-3xs text-[var(--color-fg-muted)]">${target}</div>`
         : null}
@@ -349,6 +357,15 @@ export function ScheduledAutomationPanel({
   const blockedApproval = automation.derived_counts?.blocked_approval ?? 0
   const dueExecutionReady = automation.derived_counts?.due_execution_ready ?? 0
   const expiredEffective = automation.derived_counts?.expired_effective ?? 0
+  const unsupportedPayloads =
+    automation.payload_support?.unsupported_request_count
+      ?? automation.derived_counts?.unsupported_payload_kind
+      ?? 0
+  const unknownPayloads =
+    automation.payload_support?.unknown_request_count
+      ?? automation.derived_counts?.unknown_payload_kind
+      ?? 0
+  const unsupportedKinds = automation.payload_support?.unsupported_kinds ?? []
 
   return html`
     <div class="grid gap-4">
@@ -377,11 +394,34 @@ export function ScheduledAutomationPanel({
         <span class="text-[var(--color-fg-muted)]">
           expired <span class="font-mono text-[var(--color-fg-secondary)]">${expiredEffective.toLocaleString()}</span>
         </span>
+        <span class=${unsupportedPayloads > 0 ? 'text-[var(--color-danger-fg)]' : 'text-[var(--color-fg-muted)]'}>
+          unsupported payload <span class="font-mono">${unsupportedPayloads.toLocaleString()}</span>
+        </span>
+        ${unknownPayloads > 0
+          ? html`
+              <span class="text-[var(--color-warning-fg)]">
+                unknown payload <span class="font-mono">${unknownPayloads.toLocaleString()}</span>
+              </span>
+            `
+          : null}
         <span class="text-[var(--color-fg-muted)]">
           next due <span class="font-mono text-[var(--color-fg-secondary)]">${formatDateTimeKo(automation.fsm.next_due_at ?? null)}</span>
         </span>
         <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${automation.source ?? 'schedule_store'}</span>
       </div>
+
+      ${unsupportedKinds.length > 0
+        ? html`
+            <div class="flex flex-wrap gap-2">
+              ${unsupportedKinds.map(kind => html`
+                <span class="inline-flex items-center gap-1 rounded-[var(--r-0)] bg-[var(--err-soft)] px-2 py-1 text-2xs text-[var(--color-danger-fg)]">
+                  <span class="font-mono">${kind.count.toLocaleString()}</span>
+                  <span class="font-mono">${kind.kind}</span>
+                </span>
+              `)}
+            </div>
+          `
+        : null}
 
       <div class="flex flex-wrap gap-2">
         ${nonzeroCounts.length > 0

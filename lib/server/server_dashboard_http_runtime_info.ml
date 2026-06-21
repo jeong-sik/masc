@@ -1723,6 +1723,60 @@ let schedule_counts_json schedules =
        Schedule_domain.all_schedule_statuses)
 ;;
 
+let schedule_supported_payload_kinds =
+  List.sort_uniq String.compare Server_schedule_consumers.supported_payload_kinds
+;;
+
+let schedule_payload_kind_supported kind =
+  List.exists (String.equal kind) schedule_supported_payload_kinds
+;;
+
+let schedule_payload_support_status (request : Schedule_domain.schedule_request) =
+  match Schedule_payload_projection.kind request with
+  | Some kind when schedule_payload_kind_supported kind -> "supported"
+  | Some _ -> "unsupported"
+  | None -> "unknown"
+;;
+
+let schedule_payload_support_json schedules =
+  let bump kind counts =
+    let rec loop acc = function
+      | [] -> List.rev ((kind, 1) :: acc)
+      | (existing, count) :: rest when String.equal existing kind ->
+        List.rev_append acc ((existing, count + 1) :: rest)
+      | item :: rest -> loop (item :: acc) rest
+    in
+    loop [] counts
+  in
+  let unsupported_request_count, unknown_request_count, unsupported_kinds =
+    List.fold_left
+      (fun (unsupported_count, unknown_count, kind_counts)
+        (request : Schedule_domain.schedule_request) ->
+         match Schedule_payload_projection.kind request with
+         | Some kind when schedule_payload_kind_supported kind ->
+           unsupported_count, unknown_count, kind_counts
+         | Some kind -> unsupported_count + 1, unknown_count, bump kind kind_counts
+         | None -> unsupported_count, unknown_count + 1, kind_counts)
+      (0, 0, []) schedules
+  in
+  let unsupported_kinds =
+    unsupported_kinds
+    |> List.sort (fun (left_kind, left_count) (right_kind, right_count) ->
+      match compare right_count left_count with
+      | 0 -> String.compare left_kind right_kind
+      | order -> order)
+    |> List.map (fun (kind, count) ->
+      `Assoc [ "kind", `String kind; "count", `Int count ])
+  in
+  `Assoc
+    [ ( "supported_kinds"
+      , `List (List.map (fun kind -> `String kind) schedule_supported_payload_kinds) )
+    ; "unsupported_request_count", `Int unsupported_request_count
+    ; "unsupported_kinds", `List unsupported_kinds
+    ; "unknown_request_count", `Int unknown_request_count
+    ]
+;;
+
 let schedule_request_active (request : Schedule_domain.schedule_request) =
   not (Schedule_domain.is_terminal request.status)
 ;;
@@ -1962,6 +2016,7 @@ let schedule_request_dashboard_json
       , match Schedule_payload_projection.kind request with
         | None -> `Null
         | Some kind -> `String kind )
+    ; "payload_support", `String (schedule_payload_support_status request)
     ; ( "payload_target"
       , match payload_target with
         | None -> `Null
@@ -2013,6 +2068,18 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
     |> List.filter (fun request -> not (schedule_effectively_expired ~now request))
     |> List.length
   in
+  let payload_support = schedule_payload_support_json schedules in
+  let unsupported_payload_kind_count, unknown_payload_kind_count =
+    match payload_support with
+    | `Assoc fields ->
+      ( (match List.assoc_opt "unsupported_request_count" fields with
+         | Some (`Int count) -> count
+         | _ -> 0)
+      , (match List.assoc_opt "unknown_request_count" fields with
+         | Some (`Int count) -> count
+         | _ -> 0) )
+    | _ -> 0, 0
+  in
   let sorted =
     schedules
     |> List.sort (fun left right ->
@@ -2045,7 +2112,10 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
           ; "blocked_approval", `Int blocked_approval_count
           ; "due_execution_ready", `Int due_execution_ready_count
           ; "expired_effective", `Int expired_effective_count
+          ; "unsupported_payload_kind", `Int unsupported_payload_kind_count
+          ; "unknown_payload_kind", `Int unknown_payload_kind_count
           ] )
+    ; "payload_support", payload_support
     ; ( "fsm"
       , `Assoc
           [ "state", `String (schedule_fsm_state ~now state schedules)

@@ -370,6 +370,7 @@ export class LspConnection {
   constructor(
     private readonly onDiagnostics: (uri: string | undefined, diags: ReadonlyMap<number, LspDiagnostic[]>) => void,
     private readonly onError: (err: unknown) => void,
+    private readonly onReady: () => void = () => {},
   ) {}
 
   connect(): void {
@@ -510,6 +511,7 @@ export class LspConnection {
         },
       })
       this.initialized = this.sendNotification('initialized', {})
+      if (this.initialized) this.onReady()
     } catch (err) {
       if (!this.disposed) {
         console.error('[LSP] initialize failed:', err)
@@ -773,6 +775,16 @@ const lspViewPlugin = ViewPlugin.fromClass(
           }
         },
         (err) => console.error('[LSP] connection error:', err),
+        () => {
+          const currentFilePath = this.filePath
+          if (currentFilePath !== '') {
+            this.conn.notifyDidOpen(
+              currentFilePath,
+              languageIdFromPath(currentFilePath) ?? DEFAULT_LANGUAGE_ID,
+            )
+          }
+          this.scheduleRefresh()
+        },
       )
       this.conn.connect()
       this.onAnnotationSelect = (e: Event) => {

@@ -189,6 +189,32 @@ describe('LspConnection', () => {
     expect(mockSockets).toHaveLength(1)
   })
 
+  it('notifies readiness after initial connect and reconnect initialize', async () => {
+    vi.useFakeTimers()
+    installWebSocketMock()
+    const onReady = vi.fn()
+    const conn = new LspConnection(() => {}, () => {}, onReady)
+    conn.connect()
+    const firstSocket = mockSockets[0]!
+    firstSocket.open()
+    const firstInitialize = JSON.parse(firstSocket.sent[0]!) as { id: number }
+    firstSocket.message({ id: firstInitialize.id, result: {} })
+    await Promise.resolve()
+
+    expect(onReady).toHaveBeenCalledTimes(1)
+
+    firstSocket.close({ code: 1006, wasClean: false })
+    vi.advanceTimersByTime(5000)
+    const secondSocket = mockSockets[1]!
+    secondSocket.open()
+    const secondInitialize = JSON.parse(secondSocket.sent[0]!) as { id: number }
+    secondSocket.message({ id: secondInitialize.id, result: {} })
+    await Promise.resolve()
+
+    expect(onReady).toHaveBeenCalledTimes(2)
+    conn.dispose()
+  })
+
   it('routes notification send failures through reconnect instead of throwing', async () => {
     vi.useFakeTimers()
     installWebSocketMock()

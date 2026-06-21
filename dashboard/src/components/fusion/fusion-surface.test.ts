@@ -118,7 +118,8 @@ describe('FusionSurface', () => {
     expect(container.querySelector('[data-testid="fusion-pipe"]')).not.toBeNull()
     expect(container.querySelector('.fus-rdot.done')).not.toBeNull()
     expect(container.textContent).toContain('panel ×2')
-    expect(container.textContent).toContain('chat · board')
+    expect(container.textContent).toContain('board evidence')
+    expect(container.textContent).not.toContain('chat · board')
   })
 
   it('calls ringFocusClasses() for focus rings instead of stringifying the function', () => {

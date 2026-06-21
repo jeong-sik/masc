@@ -368,7 +368,7 @@ function WorkSurfaceV2() {
   const unassignedTasks = allTasks.filter(task => !task.goal_id)
   const horizonGroups = HORIZON_META.map(meta => ({
     ...meta,
-    goals: goalList.filter(goal => goal.horizon === meta.key),
+    goals: goalList.filter(goal => horizonMetaForGoal(goal).key === meta.key),
   })).filter(group => group.goals.length > 0)
 
   return html`

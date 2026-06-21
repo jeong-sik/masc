@@ -283,7 +283,7 @@ function FusionPipelineStrip({ run }: { run: FusionRunView }) {
       <span class="fus-pipe-arr" aria-hidden="true">→</span>
       <span class=${`fus-pipe-node judge ${run.status === 'failed' ? 'deny' : ''}`}>${judgeLabel}</span>
       <span class="fus-pipe-arr" aria-hidden="true">→</span>
-      <span class="fus-pipe-node sink">chat · board</span>
+      <span class="fus-pipe-node sink">board evidence</span>
     </section>
   `
 }
@@ -402,7 +402,7 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
       <section class="fus-sink">
         <div>
           <div class="fus-label">Sink</div>
-          <p>chat · board · post ${run.boardPostId}</p>
+          <p>board evidence · post ${run.boardPostId}</p>
         </div>
         <${AgentAvatar} name=${run.keeperName} size="sm" />
       </section>

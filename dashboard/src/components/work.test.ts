@@ -48,6 +48,7 @@ vi.mock('./repository-management', () => ({
 }))
 
 import { goals, keepers, tasks } from '../store'
+import type { Goal } from '../types'
 import { Work } from './work'
 
 describe('Work', () => {
@@ -155,6 +156,20 @@ describe('Work', () => {
 
       expect(screen.getByTestId('job-row')).toBeTruthy()
       expect(screen.getByText('Job one')).toBeTruthy()
+    })
+
+    it('keeps goals with unexpected wire horizons visible in the fallback bucket', () => {
+      goals.value = [
+        { id: 'G-X', horizon: 'quarterly' as unknown as Goal['horizon'], title: 'Unexpected horizon goal', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+      ]
+      tasks.value = []
+
+      render(html`<${Work} />`)
+
+      const horizon = screen.getByTestId('work-horizon')
+      expect(horizon.getAttribute('data-horizon')).toBe('long')
+      expect(screen.getByText('Unexpected horizon goal')).toBeTruthy()
+      expect(horizon.textContent).toContain('Later')
     })
 
     it('renders job rows with state, id, title, and blocker note', () => {

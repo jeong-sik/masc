@@ -13,6 +13,20 @@
 
     설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §8 *)
 
+(** [panel_meta o] — 패널 결과 한 건을 board meta_json의 [panel] 배열 원소로 직렬화.
+    [Answered] → {model; status="answered"; answer; input_tokens; output_tokens},
+    [Failed] → {model; status="failed"; reason_code; reason_detail; reason}.
+    스키마는 프론트(board/fusion-evidence, fusion/fusion-surface)가 소비하는 공개 계약. *)
+val panel_meta : Fusion_types.panel_outcome -> Yojson.Safe.t
+
+(** [judge_meta judge] — 심판 종합을 board meta_json의 [judge] 원소로 직렬화.
+    [Ok] → status/decision/resolved_answer/synthesis(평탄화 markdown, 구형 호환) +
+    구조화 5섹션(consensus/contradictions/partial_coverage/unique_insights/blind_spots) +
+    decision variant에 따른 최상위 [recommend] | [missing]. [Error] → {status="failed"; error}.
+    구조화 필드 키(text/models/topic/addressed_by/...)는 {!Fusion_judge_parse}의
+    LLM-facing JSON 스키마와 대칭이며, 프론트가 markdown 재파싱 없이 5섹션을 렌더한다. *)
+val judge_meta : (Fusion_types.judge_synthesis, string) result -> Yojson.Safe.t
+
 (** judge 결론을 키퍼 메인 chat lane에 남기고 board에 패널/심판 구조화 증거를 post한다.
 
     chat lane: judge가 [Ok]면 "결론 — resolved_answer" 한 줄을 메인 conversation에

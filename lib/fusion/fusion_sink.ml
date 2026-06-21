@@ -71,6 +71,59 @@ let render_judge (j : Fusion_types.judge_synthesis) : string =
   add (Printf.sprintf "**Decision**: %s\n" (render_decision decision));
   Buffer.contents buf
 
+(* RFC-0252 §7/§8 — board meta_json의 judge 원소에서 구조화 종합(5섹션 + recommend/
+   missing)을 보존한다. 프론트(FusionJudgeEvidence, keeper-v2 fusion.jsx)가
+   consensus/contradictions/partial_coverage/unique_insights/blind_spots 섹션을
+   렌더하려면 이 필드들이 JSON에 있어야 한다 — synthesis markdown만 내보내면
+   프론트가 markdown을 재파싱해야 하는 string 분류기 안티패턴이 되므로 근본 fix는
+   구조화 그 자체를 직렬화하는 것이다.
+   ppx [@@deriving yojson]이 [judge_synthesis_to_yojson]을 자동 생성하지만, 그 결과는
+   OCaml 레코드 필드명(gap_topic/supporting_models/insight_text/from_model)을 그대로
+   JSON 키로 쓴다 — keeper-v2 스키마와 [fusion_judge_parse.ml]의 LLM-facing JSON 스키마
+   (topic/addressed_by/text/model)과 불일치. 그래서 parse(of_json)과 대칭되는
+   emit(to_json)을 수동으로 두어 SSOT를 LLM-facing 스키마로 정립한다. *)
+let claim_to_json (c : Fusion_types.claim) : Yojson.Safe.t =
+  `Assoc
+    [ ("text", `String c.Fusion_types.text)
+    ; ( "models"
+      , `List (List.map (fun m -> `String m) c.Fusion_types.supporting_models) )
+    ]
+
+let contradiction_to_json (c : Fusion_types.contradiction) : Yojson.Safe.t =
+  (* positions은 튜플 (model, stance) 리스트를 keeper-v2 스키마의 [[model, stance]]
+     배열로 직렬화 — 프론트 normalizeContradictionPositions의 Array 분기와 대칭. *)
+  `Assoc
+    [ ("topic", `String c.Fusion_types.topic)
+    ; ( "positions"
+      , `List
+          (List.map
+             (fun (m, stance) -> `Assoc [ ("model", `String m); ("stance", `String stance) ])
+             c.Fusion_types.positions) )
+    ]
+
+let coverage_gap_to_json (g : Fusion_types.coverage_gap) : Yojson.Safe.t =
+  (* missing : string option. 미상(None)은 null — 빈 문자열로 압축하지 않는다
+     (fusion_types.ml 주석). 프론트는 falsy missing을 가진 gap을 스킵하므로 렌더
+     누락이 아니라 의도적 생략이다. *)
+  `Assoc
+    [ ("topic", `String g.Fusion_types.gap_topic)
+    ; ( "addressed_by"
+      , `List (List.map (fun m -> `String m) g.Fusion_types.addressed_by) )
+    ; ("missing", match g.Fusion_types.missing with Some m -> `String m | None -> `Null)
+    ]
+
+let insight_to_json (i : Fusion_types.insight) : Yojson.Safe.t =
+  `Assoc
+    [ ("text", `String i.Fusion_types.insight_text)
+    ; ("model", `String i.Fusion_types.from_model)
+    ]
+
+let recommendation_to_json (r : Fusion_types.recommendation) : Yojson.Safe.t =
+  `Assoc
+    [ ("action", `String r.Fusion_types.action)
+    ; ("rationale", `String r.Fusion_types.rationale)
+    ]
+
 (* board post 증거의 보존 기간. 심의 증거는 transient 알림(24h)보다 오래 둬 사후
    리뷰가 가능하도록 1주로 둔다 (Magic Number 회피 — named 상수). *)
 let board_post_ttl_hours = 24 * 7
@@ -106,12 +159,37 @@ let judge_meta (judge : (Fusion_types.judge_synthesis, string) result) : Yojson.
      증거의 judge 서술 필드다 (no-inline-ok-envelope 가드 대상과 별개 개념). *)
   match judge with
   | Ok j ->
-    `Assoc
+    let { Fusion_types.consensus; contradictions; partial_coverage; unique_insights
+        ; blind_spots; resolved_answer; decision } =
+      j
+    in
+    (* base 7필드: status/decision/resolved_answer/synthesis(평탄화 markdown, 호환) +
+       구조화 5섹션. synthesis를 남기는 건 구형 프론트/로그 호환 — 구조화 필드가
+       canonical이므로 신규 프론트는 5섹션을 우선 소비한다. *)
+    let base =
       [ ("status", `String "synthesized")
-      ; ("decision", `String (render_decision j.Fusion_types.decision))
-      ; ("resolved_answer", `String j.Fusion_types.resolved_answer)
+      ; ("decision", `String (render_decision decision))
+      ; ("resolved_answer", `String resolved_answer)
       ; ("synthesis", `String (render_judge j))
+      ; ("consensus", `List (List.map claim_to_json consensus))
+      ; ("contradictions", `List (List.map contradiction_to_json contradictions))
+      ; ("partial_coverage", `List (List.map coverage_gap_to_json partial_coverage))
+      ; ("unique_insights", `List (List.map insight_to_json unique_insights))
+      ; ("blind_spots", `List (List.map (fun b -> `String b) blind_spots))
       ]
+    in
+    (* decision variant에 따라 keeper-v2 스키마의 최상위 recommend/missing를 붙인다.
+       Answer → 추가 없음, Recommend → recommend:{action,rationale},
+       Insufficient → missing:[...]. 프론트 normalizeRecommendation/normalizeJudge 가
+       judge.recommend / judge.missing 을 읽는다. *)
+    let with_decision_fields =
+      match decision with
+      | Fusion_types.Recommend r -> ("recommend", recommendation_to_json r) :: base
+      | Fusion_types.Insufficient { missing_for_decision } ->
+        ("missing", `List (List.map (fun m -> `String m) missing_for_decision)) :: base
+      | Fusion_types.Answer _ -> base
+    in
+    `Assoc with_decision_fields
   | Error e -> `Assoc [ ("status", `String "failed"); ("error", `String e) ]
 
 (* RFC-0266: 심의 완료 시 호출 키퍼를 typed [Fusion_completed] stimulus로 깨운다.

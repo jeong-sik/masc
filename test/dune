@@ -678,6 +678,14 @@
  (modules test_fusion_status_tool)
  (libraries masc_test_deps masc.fusion_core))
 
+; RFC-0252 §8 — judge_meta/panel_meta structured serialization. Needs
+; masc.fusion_core for Fusion_types constructors (Answer/Recommend/Insufficient,
+; judge_synthesis record) + Masc.Fusion_sink for the public meta serializers.
+(test
+ (name test_fusion_sink_meta)
+ (modules test_fusion_sink_meta)
+ (libraries masc_test_deps masc.fusion_core))
+
 ; RFC-0207: per-keeper LLM runtime routing (persona [model] selection + driver fail-fast).
 
 (test

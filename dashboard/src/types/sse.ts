@@ -110,6 +110,7 @@ export type AttributionOrigin = 'det' | 'nondet'
 export type AttributionGate =
   | 'cdal_verdict'
   | 'verification'
+  | 'exec_policy'
   | 'accountability'
   | 'keeper_fsm'
   | 'oas_completion'

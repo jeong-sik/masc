@@ -572,6 +572,22 @@ let extract_and_append_with_provider
       | Ok () ->
         Keeper_memory_os_io.append_episode ~keeper_id episode;
         Keeper_memory_os_io.append_event ~keeper_id episode;
+        (* RFC-0272 (defect D): bound the append-only episode log under the same
+           bundle lock that serialized the writes above, so a re-extraction cannot
+           grow events.jsonl / episodes/ without limit. Hysteresis-gated: the trim
+           is a no-op until the high-water, so this is off the per-turn hot path. *)
+        ignore
+          (Keeper_memory_os_io.cap_events
+             ~keeper_id
+             ~keep:Keeper_memory_os_io.event_recall_window
+             ~trigger:Keeper_memory_os_io.event_store_max
+            : int);
+        ignore
+          (Keeper_memory_os_io.cap_episode_files
+             ~keeper_id
+             ~keep:Keeper_memory_os_io.episode_file_window
+             ~trigger:Keeper_memory_os_io.episode_file_store_max
+            : int);
         (* RFC-0251: the co-occurrence edge / spreading-activation organ was removed
            (dark-by-default, no recall consumer), so the fact upsert above is the only
            post-merge work. *)

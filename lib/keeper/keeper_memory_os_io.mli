@@ -119,6 +119,34 @@ val fact_recall_window : int
     writes at the file head, which a [fact_recall_window]-sized scan would miss. *)
 val fact_store_max : int
 
+(** RFC-0272 (defect D): episode-log retention bounds, same shape and hysteresis
+    band as the facts cap. [event_recall_window] / [episode_file_window] are the
+    low-water trim targets; [event_store_max] / [episode_file_store_max] are the
+    high-water triggers. The low-water (256) exceeds the recall scan window
+    ([Keeper_memory_os_recall.episode_tail_scan] = 32) so a trim cannot starve
+    recall. *)
+val event_recall_window : int
+
+val event_store_max : int
+val episode_file_window : int
+val episode_file_store_max : int
+
+(** Pure hysteresis decision for the episode-log caps: [None] below [trigger]
+    (no-op), [Some keep] above. Exposed for the watermark unit tests. *)
+val trim_target : count:int -> keep:int -> trigger:int -> int option
+
+(** RFC-0272 (defect D): bound [events.jsonl] by line count. When the line count
+    exceeds [trigger], keep the last [keep] raw lines (newest, byte-faithful,
+    malformed-line tolerant) and atomically rewrite; otherwise no-op. Returns the
+    number of lines dropped. *)
+val cap_events : keeper_id:string -> keep:int -> trigger:int -> int
+
+(** RFC-0272 (defect D): bound the [episodes/] directory by file count. When the
+    parseable-file count exceeds [trigger], keep the [keep] most-recent files by
+    recency and best-effort unlink the rest; otherwise no-op. Unparseable files
+    are left untouched. Returns the number unlinked. *)
+val cap_episode_files : keeper_id:string -> keep:int -> trigger:int -> int
+
 (** Read and parse every fact in the store (unbounded; used by retention). *)
 val read_all_facts : keeper_id:string -> fact list
 

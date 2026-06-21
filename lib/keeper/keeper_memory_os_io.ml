@@ -497,6 +497,20 @@ let fact_recall_window = 256
    [fact_recall_window]..[fact_store_max] band. *)
 let fact_store_max = fact_recall_window + (fact_recall_window / 2)
 
+(* RFC-0272 (defect D): retention bounds for the append-only episode log
+   ([events.jsonl] line count and [episodes/] file count). Same shape and
+   hysteresis band as the facts cap ([fact_recall_window] / [fact_store_max]): a
+   trim/unlink fires only when the count exceeds the high-water [*_store_max] and
+   trims back to the low-water [*_recall_window], so it stays off the per-turn
+   hot path. The low-water is 256 = 8x the recall scan window
+   ([Keeper_memory_os_recall.episode_tail_scan] = 32), so a trim can never starve
+   recall of its 32 current episodes; [test_cap_events_preserves_recall_window]
+   asserts that coupling so an edit to either constant cannot silently break it. *)
+let event_recall_window = 256
+let event_store_max = event_recall_window + (event_recall_window / 2)
+let episode_file_window = 256
+let episode_file_store_max = episode_file_window + (episode_file_window / 2)
+
 let take_first n xs =
   let rec aux k = function
     | x :: tl when k > 0 -> x :: aux (k - 1) tl
@@ -680,4 +694,63 @@ let read_episode_files_tail ~keeper_id ~n =
 let read_episodes_tail ~keeper_id ~n =
   let events = read_events_tail ~keeper_id ~n in
   if events = [] then read_episode_files_tail ~keeper_id ~n else events
+;;
+
+(* RFC-0272 (defect D): the hysteresis decision shared by the episode-log caps.
+   [None] = no-op (count within the high-water [trigger]); [Some keep] = trim to
+   the low-water. Pure so the watermark logic is testable without IO. *)
+let trim_target ~count ~keep ~trigger = if count <= trigger then None else Some keep
+
+(* RFC-0272 (defect D): bound the append-only [events.jsonl] by line count. When
+   the line count exceeds [trigger], keep the last [keep] RAW lines (newest, in
+   append order) and atomically rewrite. Raw-line trim — not parse / filter /
+   re-serialize — preserves byte fidelity and the malformed-line tolerance
+   [read_lines_tail] has: a line [episode_of_json] cannot parse is tail-trimmed
+   like any other, never silently dropped mid-file. Returns the number dropped
+   (diagnostic; the rewrite is the mechanism). *)
+let cap_events ~keeper_id ~keep ~trigger =
+  let path = events_path ~keeper_id in
+  let all = read_lines_all path in
+  match trim_target ~count:(List.length all) ~keep ~trigger with
+  | None -> 0
+  | Some keep_n ->
+    let kept = take_last keep_n all in
+    let content =
+      match kept with
+      | [] -> ""
+      | _ -> String.concat "\n" kept ^ "\n"
+    in
+    write_file_atomically path content;
+    List.length all - List.length kept
+;;
+
+(* RFC-0272 (defect D): bound the [episodes/] directory by file count. When the
+   parseable-file count exceeds [trigger], keep the [keep] most-recent files by
+   [compare_episode_recency] (the order recall uses) and unlink the rest. Only
+   parseable files are counted and ordered — an unparseable file has no recency
+   to rank, so it is left untouched rather than blindly deleted. Unlink is
+   best-effort / [Sys_error]-tolerant: a concurrent reader holding a file is
+   fine, and no lock is taken here that could deadlock with the bundle lock the
+   caller already holds. Returns the number unlinked. *)
+let cap_episode_files ~keeper_id ~keep ~trigger =
+  let dir = episodes_dir ~keeper_id in
+  let parsed =
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter (fun name -> Filename.check_suffix name ".json")
+    |> List.map (fun name -> Filename.concat dir name)
+    |> List.filter Sys.file_exists
+    |> List.filter_map (fun p ->
+      match read_episode_file p with
+      | Some ep -> Some (p, ep)
+      | None -> None)
+  in
+  match trim_target ~count:(List.length parsed) ~keep ~trigger with
+  | None -> 0
+  | Some keep_n ->
+    let sorted = List.sort (fun (_, a) (_, b) -> compare_episode_recency a b) parsed in
+    let n_drop = List.length sorted - keep_n in
+    let to_drop = sorted |> List.filteri (fun i _ -> i < n_drop) |> List.map fst in
+    List.iter (fun p -> try Sys.remove p with Sys_error _ -> ()) to_drop;
+    List.length to_drop
 ;;

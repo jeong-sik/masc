@@ -10,6 +10,25 @@ let dedupe_tool_names names =
   Json_util.dedupe_keep_order
     (names |> List.map String.trim |> List.filter (fun name -> name <> ""))
 
+(* RFC-0273 §3.1 — names newly added to a keeper's tool_access (not already
+   present) that are not known candidate tools.
+
+   Returned names are the ones a write should reject instead of persisting
+   silently: the runtime drops unknown tool_access entries at
+   [Keeper_tool_policy.tool_access_lookup_of_meta], so without this check an
+   operator typo is accepted then silently ignored (AI anti-pattern §2). The
+   check is delta-only — names already on the keeper are grandfathered so a
+   legacy keeper carrying a stale/renamed name can still be edited. Membership
+   is raw against [candidate_names] (no alias expansion), matching the runtime
+   keep-rule exactly; [candidate_names] already includes core tools via
+   effective_core_tools, so no separate core bypass is needed. tool_denylist is
+   intentionally not validated here: denying an unknown name is a harmless no-op
+   and the denylist is alias-expanded, so a strict check would false-reject. *)
+let unknown_added_tool_names ~candidate_names ~existing ~requested =
+  requested
+  |> List.filter (fun name -> not (List.mem name existing))
+  |> List.filter (fun name -> not (List.mem name candidate_names))
+
 let json_list_length = function
   | `List l -> List.length l
   | _ -> 0
@@ -83,15 +102,25 @@ let handle_keeper_tools_post state req reqd =
                      | Some `Null -> Error "tool_access required"
                      | None | Some _ -> Error "tool_access must be an array of strings"
                    in
-                   Result.map
-                     (fun tool_access ->
-                       {
-                         meta with
-                         tool_access;
-                         tool_denylist = deny;
-                         updated_at = Keeper_meta_contract.now_iso ();
-                       })
-                     tool_access_result
+                   Result.bind tool_access_result (fun tool_access ->
+                     let lookup = Keeper_tool_policy.tool_access_lookup_of_meta meta in
+                     match
+                       unknown_added_tool_names
+                         ~candidate_names:lookup.Keeper_tool_policy.candidate_names
+                         ~existing:meta.tool_access ~requested:tool_access
+                     with
+                     | [] ->
+                         Ok
+                           {
+                             meta with
+                             tool_access;
+                             tool_denylist = deny;
+                             updated_at = Keeper_meta_contract.now_iso ();
+                           }
+                     | unknown ->
+                         Error
+                           (Printf.sprintf "unknown tool name(s) in tool_access: %s"
+                              (String.concat ", " unknown)))
                | "" -> Error "action required (set_policy)"
                | other -> Error (Printf.sprintf "unknown action: %s" other)
              in

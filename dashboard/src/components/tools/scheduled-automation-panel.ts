@@ -100,7 +100,11 @@ function compactTimeLabel(value: string | null | undefined): string {
   return `${hh}:${mm}`
 }
 
-function filterMatches(filter: ScheduleFilterKey, request: DashboardScheduledAutomationRequest): boolean {
+function assertNever(value: never): never {
+  throw new Error(`Unhandled schedule filter key: ${String(value)}`)
+}
+
+export function filterMatches(filter: ScheduleFilterKey, request: DashboardScheduledAutomationRequest): boolean {
   if (filter === 'all') return true
   const status = normalized(effectiveStatus(request))
   const readiness = normalized(request.execution_readiness)
@@ -117,7 +121,9 @@ function filterMatches(filter: ScheduleFilterKey, request: DashboardScheduledAut
     case 'terminal':
       return ['succeeded', 'failed', 'rejected', 'expired', 'cancelled', 'canceled'].includes(status)
     default:
-      return true
+      // Exhaustiveness: a new ScheduleFilterKey must fail to compile here rather
+      // than silently fall through to "show all" (Unknown->Permissive-Default).
+      return assertNever(filter)
   }
 }
 

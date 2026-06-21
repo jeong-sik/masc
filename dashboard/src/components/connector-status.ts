@@ -1846,7 +1846,10 @@ function ConnectorValueCell({
 }
 
 function ConnectorBindingKeeperLink({ binding }: { binding: DiscordConfiguredBinding }) {
-  const keeperName = binding.keeper_name?.trim()
+  // keeper_name is a required non-null field on DiscordConfiguredBinding (valibot
+  // string()), so no optional chaining; the empty-string guard below stays since
+  // string() still permits ''.
+  const keeperName = binding.keeper_name.trim()
   if (!keeperName) {
     return html`
       <div class="cn-bind-row" data-binding-channel=${binding.channel_id}>

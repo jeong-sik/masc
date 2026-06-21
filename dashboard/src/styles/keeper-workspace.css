@@ -61,6 +61,36 @@
 .kw-grid[data-roster="mini"] { --kw-roster-w: 64px; }
 .kw-grid[data-rail="closed"] { --kw-rail-w: 0px; }
 
+/* Drag handles for resizing the roster / rail columns (Unit 8). Absolutely
+ * positioned over the column boundary (the grid is position:relative). z-index 4
+ * sits below the collapse toggles (z-index 5) so the small toggle button stays
+ * clickable while the rest of the full-height strip is draggable. */
+.kw-pane-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 11px;
+  z-index: 4;
+  cursor: col-resize;
+  touch-action: none;
+}
+.kw-pane-resizer.left { left: var(--kw-roster-w, 286px); transform: translateX(-50%); }
+.kw-pane-resizer.right { right: var(--kw-rail-w, 312px); transform: translateX(50%); }
+.kw-pane-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+.kw-pane-resizer:hover::after,
+body.kw-resizing .kw-pane-resizer::after { background: var(--color-border-strong); }
+body.kw-resizing { cursor: col-resize; user-select: none; }
+
 /* Detail ("운영 상세") takes over the conversation + rail span as a
  * single scrollable column; roster stays for keeper switching. */
 .kw-grid[data-detail="open"] { grid-template-columns: var(--kw-roster-w, 286px) minmax(0, 1fr); }
@@ -69,6 +99,8 @@
   .kw-grid { grid-template-columns: var(--kw-roster-w, 248px) minmax(0, 1fr); }
   .kw-grid .kw-rail { display: none; }
   .kw-rail-toggle.right { display: none; }
+  /* Rail column is gone ≤1180px → its resize handle has nothing to drag. */
+  .kw-pane-resizer.right { display: none; }
 }
 /* Below 860px the workspace becomes master-detail: the roster and chat/detail
  * panes share one grid column, and JS flips data-mobile-pane after selection.
@@ -104,6 +136,8 @@
     height: 100%;
   }
   .kw-rail-toggle { display: none; }
+  /* Single-column master-detail layout has no resizable column boundaries. */
+  .kw-pane-resizer { display: none; }
   .kw-roster { border-right: 0; border-bottom: 0; }
   .kw-chat-head { flex-wrap: wrap; align-items: flex-start; min-width: 0; padding: 12px 14px; }
   .kw-chat-id { flex: 1 1 132px; }

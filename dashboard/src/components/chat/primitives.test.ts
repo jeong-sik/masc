@@ -1753,6 +1753,39 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
     expect(bundle?.textContent).toContain('곧 답합니다')
   })
 
+  it('renders thinking text as sanitized markdown with newlines preserved', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            traceSteps: [{ kind: 'think', text: '첫째 줄 **강조**\n둘째 줄\n\n<script>alert(1)</script>' }],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const think = container.querySelector('[data-chat-trace-step="think"] .chat-block-tstep-text') as HTMLElement
+    expect(think).not.toBeNull()
+    // Newline-preserving container (raw interpolation folded these to one line).
+    expect(think.className).toContain('whitespace-pre-wrap')
+    expect(think.className).toContain('markdown-body')
+    // Markdown is rendered, not shown as literal `**강조**`.
+    expect(think.querySelector('strong')?.textContent).toBe('강조')
+    // Both source lines survive the round-trip.
+    expect(think.textContent).toContain('첫째 줄')
+    expect(think.textContent).toContain('둘째 줄')
+    // Untrusted model markup is stripped (no executable script element).
+    expect(think.querySelector('script')).toBeNull()
+  })
+
   it('keeps the flat per-row tool bubbles when grouping is off (default)', () => {
     render(
       html`<${ChatTranscript}

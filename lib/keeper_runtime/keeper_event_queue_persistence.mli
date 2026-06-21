@@ -13,3 +13,9 @@ val persist :
     Eio mutex; non-Eio setup/test callers use a Stdlib fallback mutex.
     Persistence failures are logged and do not roll back the already-applied
     in-memory registry CAS update. *)
+
+val update :
+  base_path:string -> keeper_name:string -> (Keeper_event_queue.t -> Keeper_event_queue.t) -> unit
+(** Load, transform, and atomically write the queue snapshot while holding the
+    persistence write lock. Use this for pre-registry mutation paths that do not
+    have a live registry CAS cell yet. *)

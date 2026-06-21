@@ -257,19 +257,27 @@ let () =
       let meta = meta_for_keeper keeper_name "trace-event-queue-unregistered-test" in
       Masc.Keeper_registry.clear ();
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
+      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name bootstrap_stim;
       assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
       let pending = Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name in
-      assert (length pending = 1);
+      assert (length pending = 2);
       ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
       let restored = Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name in
-      assert (length restored = 1);
-      let replayed =
+      assert (length restored = 2);
+      let first =
         match Masc.Keeper_registry_event_queue.dequeue ~base_path keeper_name with
         | Some stim -> stim
         | None ->
-          Alcotest.fail "late registry registration should replay pre-registered stimulus"
+          Alcotest.fail "late registry registration should replay first pre-registered stimulus"
       in
-      assert (String.equal replayed.post_id "p1");
+      assert (String.equal first.post_id "p1");
+      let second =
+        match Masc.Keeper_registry_event_queue.dequeue ~base_path keeper_name with
+        | Some stim -> stim
+        | None ->
+          Alcotest.fail "late registry registration should replay second pre-registered stimulus"
+      in
+      assert (String.equal second.post_id "bootstrap");
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
 
   print_endline "test_keeper_event_queue: all passed"

@@ -52,6 +52,7 @@ let record_recovery_stimulus_turn_started =
 type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
+  consumed_stimuli : Keeper_event_queue.stimulus list;
 }
 
 let consume_single_heartbeat_stimulus = Stimulus_intake.consume_single_heartbeat_stimulus
@@ -184,10 +185,12 @@ let run_keepalive_unified_turn
   if not proactive_warmup_elapsed
   then { meta = meta_after_triage; cycle_crashed = false }
   else (
+    let consumed_stimuli = ref [] in
     try
       let event_intake =
         heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events
       in
+      consumed_stimuli := event_intake.consumed_stimuli;
       let pending_board_events = event_intake.pending_board_events in
       let obs =
         Keeper_world_observation.observe
@@ -400,11 +403,20 @@ let run_keepalive_unified_turn
             ())
         else meta_after_triage
       in
+      if !consumed_stimuli <> []
+      then
+        Keeper_registry_event_queue.ack_consumed
+          ~base_path:ctx.config.base_path
+          meta_after_triage.name;
       { meta = meta_after_cycle; cycle_crashed = false }
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | Keeper_registry.Keeper_fiber_crash as e -> raise e
     | exn ->
+      Keeper_registry_event_queue.requeue_front
+        ~base_path:ctx.config.base_path
+        meta_after_triage.name
+        !consumed_stimuli;
       (* T6 audit: keep the fiber alive, but surface the crash as a
          turn failure so the caller does not dispatch
          [Turn_succeeded] for a cycle that never completed. *)

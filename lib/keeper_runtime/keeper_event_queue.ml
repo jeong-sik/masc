@@ -83,6 +83,15 @@ let dequeue (queue : t) : (stimulus * t) option =
      | [] -> None
      | s :: rest -> Some (s, { front = rest; back_rev = []; length = queue.length - 1 }))
 
+let prepend_list stimuli queue =
+  match stimuli with
+  | [] -> queue
+  | _ ->
+    { front = stimuli @ to_list queue
+    ; back_rev = []
+    ; length = queue.length + List.length stimuli
+    }
+
 let dedup_by_post_id ?(window_seconds = 60.0) (queue : t) : t =
   let within_window a b =
     Float.abs (a.arrived_at -. b.arrived_at) <= window_seconds

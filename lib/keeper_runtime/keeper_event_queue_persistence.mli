@@ -25,3 +25,13 @@ val persist_snapshot :
 (** Evaluate [snapshot] while holding the persistence write lock, then atomically
     write it. Use this after live registry CAS mutations so an older writer
     cannot overwrite a newer live queue snapshot after waiting on the file lock. *)
+
+val record_inflight :
+  base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
+(** Mark drained stimuli as in-flight before they are removed from the pending
+    snapshot. [load] merges these rows back in front of pending rows, giving a
+    restart at-least-once replay boundary until {!ack_inflight} clears them. *)
+
+val ack_inflight : base_path:string -> keeper_name:string -> unit
+(** Clear the in-flight lease file after the heartbeat turn has completed or
+    after the stimuli have been requeued into the pending snapshot. *)

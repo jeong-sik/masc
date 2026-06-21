@@ -244,6 +244,7 @@ let () =
         | None -> Alcotest.fail "registry reload should replay pending stimulus"
       in
       assert (String.equal replayed.post_id "p1");
+      Masc.Keeper_registry_event_queue.ack_consumed ~base_path keeper_name;
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
 
   (* --- registry unavailable window: enqueue persists before register --- *)
@@ -278,6 +279,57 @@ let () =
           Alcotest.fail "late registry registration should replay second pre-registered stimulus"
       in
       assert (String.equal second.post_id "bootstrap");
+      Masc.Keeper_registry_event_queue.ack_consumed ~base_path keeper_name;
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
+
+  (* --- crash recovery: consumed stimuli can be put back for replay --- *)
+  let base_path = temp_dir "keeper-event-queue-requeue-front" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.clear ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-requeue-front-test" in
+      let meta = meta_for_keeper keeper_name "trace-event-queue-requeue-front-test" in
+      Masc.Keeper_registry.clear ();
+      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
+      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name bootstrap_stim;
+      let consumed =
+        match Masc.Keeper_registry_event_queue.dequeue ~base_path keeper_name with
+        | Some stim -> stim
+        | None -> Alcotest.fail "dequeue should consume the first queued stimulus"
+      in
+      assert (String.equal consumed.post_id "p1");
+      let restart_replay = Keeper_event_queue_persistence.load ~base_path ~keeper_name in
+      assert (length restart_replay = 2);
+      let replay_head =
+        match dequeue restart_replay with
+        | Some (stim, _) -> stim
+        | None -> Alcotest.fail "restart replay should keep consumed stimulus before ack"
+      in
+      assert (String.equal replay_head.post_id "p1");
+      Masc.Keeper_registry_event_queue.requeue_front
+        ~base_path
+        keeper_name
+        [ consumed ];
+      assert (length (Keeper_event_queue_persistence.load ~base_path ~keeper_name) = 2);
+      Masc.Keeper_registry_event_queue.requeue_front
+        ~base_path
+        keeper_name
+        [ consumed ];
+      assert (length (Keeper_event_queue_persistence.load ~base_path ~keeper_name) = 2);
+      let replayed =
+        match Masc.Keeper_registry_event_queue.dequeue ~base_path keeper_name with
+        | Some stim -> stim
+        | None -> Alcotest.fail "requeued stimulus should replay first"
+      in
+      assert (String.equal replayed.post_id "p1");
+      let second =
+        match Masc.Keeper_registry_event_queue.dequeue ~base_path keeper_name with
+        | Some stim -> stim
+        | None -> Alcotest.fail "original second stimulus should remain queued"
+      in
+      assert (String.equal second.post_id "bootstrap"));
 
   print_endline "test_keeper_event_queue: all passed"

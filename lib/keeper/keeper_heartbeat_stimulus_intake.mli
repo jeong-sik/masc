@@ -35,6 +35,7 @@ val record_recovery_stimulus_turn_started
 type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
+  consumed_stimuli : Keeper_event_queue.stimulus list;
 }
 
 (** [consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim]

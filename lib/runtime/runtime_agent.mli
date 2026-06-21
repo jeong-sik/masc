@@ -282,6 +282,13 @@ module For_testing : sig
   val caps_admit_required_modalities :
     Llm_provider.Capabilities.capabilities -> string list -> bool
 
+  val validate_content_blocks_for_run_against_capabilities :
+    provider_label:string ->
+    Llm_provider.Capabilities.capabilities ->
+    initial_messages:Agent_sdk.Types.message list ->
+    goal_blocks:Agent_sdk.Types.content_block list ->
+    (unit, Agent_sdk.Error.sdk_error) result
+
   val validate_content_blocks_against_capabilities :
     provider_label:string ->
     Llm_provider.Capabilities.capabilities ->

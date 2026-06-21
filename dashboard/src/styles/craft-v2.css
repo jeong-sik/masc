@@ -66,11 +66,31 @@
 }
 
 /* ── Component-level density tweaks from v2 source ────────────── */
-/* Chat-console density tweaks from the v2 source are omitted: the design scopes
-   them under a `.v2-keeper-chat` chat container the live dashboard never renders,
-   so every rule here matched nothing (dead). Re-adding them would require the live
-   chat element class names (e.g. `.chat-bubble`), not the design class names, and
-   pixel verification of the spacing — out of scope for this dead-CSS cleanup. */
+/* Chat console. The v2 source scopes these under `.bubble`/`.thread`/`.composer`
+   inside a `.v2-keeper-chat` container; the live dashboard renders the keeper
+   workspace with `.kw-*` / `.chat-*` class names instead, so the design selectors
+   matched nothing. Retargeted to the live classes and verified against the running
+   dashboard (data-density spacious/compact, computed padding + screenshots):
+   design `.thread` + `.thread-inner` fold into workspace `.chat-transcript`
+   (vertical + horizontal); `.msg` -> `.chat-turn-bundle`; `.chat-head`/
+   `.composer` -> their `.kw-` equivalents. Shared ChatTranscript classes are
+   scoped to `data-keeper-chat-layout="workspace"` so density does not spill into
+   primary/detail transcripts. The transcript's own `chat-transcript-airy` gap
+   already spaces messages, so the design `thread-inner` gap is not re-applied. */
+.v2-app[data-density="spacious"] .kw-chat-head     { padding: 18px 28px 16px; gap: 16px; }
+.v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .chat-transcript  { padding: 34px 40px 14px; }
+.v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .chat-turn-bundle { gap: 15px; }
+.v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .chat-bubble      { padding: 17px 21px; line-height: 1.7; }
+.v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .kw-composer-inner { padding: 16px 30px 22px; }
+.v2-app[data-density="spacious"] .kw-kp-row        { padding: 11px 11px; }
+/* Context rail + roster (design `.ctx-scroll`/`.ctx-card`/`.tps-card`/`.roster-*`
+   -> live `.kw-rail-scroll`/`.kw-sec`/`.kw-roster-*`). `.kw-sec` is scoped under
+   `.kw-rail` (context cards only). Verified on the running dashboard. */
+.v2-app[data-density="spacious"] .kw-rail-scroll   { padding: 20px; gap: 22px; }
+.v2-app[data-density="spacious"] .kw-rail .kw-sec  { padding: 14px 15px; }
+.v2-app[data-density="spacious"] .kw-roster-head   { padding: 15px 14px; }
+.v2-app[data-density="spacious"] .kw-roster-list   { padding: 9px 8px; }
+.v2-app[data-density="spacious"] .kw-roster-filters { padding: 12px 14px; }
 
 /* Board */
 .v2-app[data-density="spacious"] .bd-feed-head     { padding: 15px 24px; }
@@ -86,8 +106,13 @@
 .v2-app[data-density="spacious"] .set-row       { padding: 16px 0; }
 .v2-app[data-density="spacious"] .set-nav-item  { padding: 11px 13px; }
 
-/* Compact overrides (dead `.v2-keeper-chat` chat rules dropped — see note above;
-   the board + settings density rules below stay live). */
+/* Compact overrides — chat console retargeted to live `.kw-*`/`.chat-*` classes
+   (the v2 source `.thread`/`.chat-head`/`.composer` never matched). Verified on
+   the running dashboard. */
+.v2-app[data-density="compact"] .kw-chat-head     { padding: 10px 16px 9px; }
+.v2-app[data-density="compact"] [data-keeper-chat-layout="workspace"] .chat-transcript  { padding: 14px 22px 6px; }
+.v2-app[data-density="compact"] [data-keeper-chat-layout="workspace"] .kw-composer-inner { padding: 9px 18px 12px; }
+.v2-app[data-density="compact"] .kw-rail-scroll { padding: 11px; gap: 12px; }
 .v2-app[data-density="compact"] .bd-list       { padding: 11px 14px; gap: 8px; }
 .v2-app[data-density="compact"] .set-row       { padding: 10px 0; }
 

@@ -5,6 +5,10 @@ import {
   lspDiagnosticSnapshot,
   resolveLspDiagnosticFilePath,
 } from './ide-lsp-client'
+import {
+  TRANSPORT_RETRY_BASE_MS,
+  TRANSPORT_RETRY_MAX_ATTEMPTS,
+} from '../../config/constants'
 
 const mockSockets: MockWebSocket[] = []
 
@@ -59,6 +63,7 @@ function installWebSocketMock(): void {
 
 afterEach(() => {
   vi.useRealTimers()
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
   lspDiagnosticSnapshot.value = new Map()
   mockSockets.length = 0
@@ -187,6 +192,69 @@ describe('LspConnection', () => {
     vi.advanceTimersByTime(5000)
 
     expect(mockSockets).toHaveLength(1)
+  })
+
+  it('uses exponential reconnect delays while the LSP socket stays down', () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    installWebSocketMock()
+    const conn = new LspConnection(() => {}, () => {})
+    conn.connect()
+    const firstSocket = mockSockets[0]!
+
+    firstSocket.close({ code: 1006, wasClean: false })
+    vi.advanceTimersByTime(TRANSPORT_RETRY_BASE_MS - 1)
+    expect(mockSockets).toHaveLength(1)
+    vi.advanceTimersByTime(1)
+    expect(mockSockets).toHaveLength(2)
+
+    mockSockets[1]!.close({ code: 1006, wasClean: false })
+    vi.advanceTimersByTime((TRANSPORT_RETRY_BASE_MS * 2) - 1)
+    expect(mockSockets).toHaveLength(2)
+    vi.advanceTimersByTime(1)
+    expect(mockSockets).toHaveLength(3)
+    conn.dispose()
+  })
+
+  it('stops reconnecting after the retry budget is exhausted', () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    installWebSocketMock()
+    const errors: unknown[] = []
+    const conn = new LspConnection(() => {}, err => errors.push(err))
+    conn.connect()
+
+    for (let attempt = 1; attempt <= TRANSPORT_RETRY_MAX_ATTEMPTS; attempt += 1) {
+      mockSockets[mockSockets.length - 1]!.close({ code: 1006, wasClean: false })
+      vi.advanceTimersByTime(60_000)
+      expect(mockSockets).toHaveLength(attempt + 1)
+    }
+
+    mockSockets[mockSockets.length - 1]!.close({ code: 1006, wasClean: false })
+    vi.advanceTimersByTime(60_000)
+
+    expect(mockSockets).toHaveLength(TRANSPORT_RETRY_MAX_ATTEMPTS + 1)
+    expect(errors.some(err => err instanceof Error && err.message.includes('exhausted'))).toBe(true)
+    conn.dispose()
+  })
+
+  it('does not reconnect after terminal LSP close codes', async () => {
+    vi.useFakeTimers()
+    installWebSocketMock()
+    const errors: unknown[] = []
+    const conn = new LspConnection(() => {}, err => errors.push(err))
+    conn.connect()
+    const socket = mockSockets[0]!
+    socket.open()
+    const hover = conn.requestHover('lib/keeper/current.ml', 0, 0)
+
+    socket.close({ code: 4401, reason: 'unauthorized', wasClean: false })
+    vi.advanceTimersByTime(60_000)
+
+    await expect(hover).resolves.toBeNull()
+    expect(mockSockets).toHaveLength(1)
+    expect(errors.some(err => err instanceof Error && err.message.includes('4401'))).toBe(true)
+    conn.dispose()
   })
 
   it('notifies readiness after initial connect and reconnect initialize', async () => {

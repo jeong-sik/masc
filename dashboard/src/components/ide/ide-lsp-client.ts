@@ -16,7 +16,13 @@ import {
 import { StateField, StateEffect, RangeSetBuilder, type Extension } from '@codemirror/state'
 import { signal } from '@preact/signals'
 import { normalizeIdeContextFilePath } from './ide-state'
-import { DEFAULT_MASC_ORIGIN } from '../../config/constants'
+import {
+  DEFAULT_MASC_ORIGIN,
+  TRANSPORT_RETRY_BASE_MS,
+  TRANSPORT_RETRY_JITTER_MS,
+  TRANSPORT_RETRY_MAX_ATTEMPTS,
+  TRANSPORT_RETRY_MAX_MS,
+} from '../../config/constants'
 import { DEFAULT_LANGUAGE_ID } from './ide-language'
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -65,6 +71,8 @@ export interface LspDiagnosticAnchor {
 }
 
 export const lspDiagnosticSnapshot = signal<ReadonlyMap<string, ReadonlyArray<LspDiagnosticAnchor>>>(new Map())
+
+const LSP_TERMINAL_CLOSE_CODES = new Set([1008, 4401, 4403])
 
 export interface SelectedAnnotation {
   readonly id: string
@@ -366,6 +374,8 @@ export class LspConnection {
   private disposed = false
   private initialized = false
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private reconnectAttempts = 0
+  private reconnectDelayMs = TRANSPORT_RETRY_BASE_MS
 
   constructor(
     private readonly onDiagnostics: (uri: string | undefined, diags: ReadonlyMap<number, LspDiagnostic[]>) => void,
@@ -397,11 +407,16 @@ export class LspConnection {
     }
 
     ws.onclose = (event) => {
-      if (this.ws !== ws) return
-      if (this.ws === ws) this.ws = null
+      if (this.disposed || this.ws !== ws) return
+      this.ws = null
       this.initialized = false
-      this.rejectPending(new Error(lspCloseReason(event)))
-      this.scheduleReconnect()
+      const reason = new Error(lspCloseReason(event))
+      this.rejectPending(reason)
+      if (shouldReconnectLspClose(event)) {
+        this.scheduleReconnect()
+      } else {
+        this.onError(reason)
+      }
     }
 
     ws.onerror = (err) => {
@@ -488,11 +503,20 @@ export class LspConnection {
 
   private scheduleReconnect(): void {
     if (this.disposed) return
-    this.clearReconnectTimer()
+    if (this.reconnectTimer !== null) return
+    if (this.reconnectAttempts >= TRANSPORT_RETRY_MAX_ATTEMPTS) {
+      this.onError(new Error('LSP reconnect attempts exhausted'))
+      return
+    }
+    const delayMs =
+      Math.min(this.reconnectDelayMs, TRANSPORT_RETRY_MAX_MS)
+      + Math.random() * TRANSPORT_RETRY_JITTER_MS
+    this.reconnectAttempts += 1
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
       if (!this.disposed) this.connect()
-    }, 5000)
+    }, delayMs)
+    this.reconnectDelayMs = Math.min(this.reconnectDelayMs * 2, TRANSPORT_RETRY_MAX_MS)
   }
 
   private async initialize(): Promise<void> {
@@ -511,7 +535,10 @@ export class LspConnection {
         },
       })
       this.initialized = this.sendNotification('initialized', {})
-      if (this.initialized) this.onReady()
+      if (this.initialized) {
+        this.resetReconnectBackoff()
+        this.onReady()
+      }
     } catch (err) {
       if (!this.disposed) {
         console.error('[LSP] initialize failed:', err)
@@ -613,6 +640,11 @@ export class LspConnection {
     this.reconnectTimer = null
   }
 
+  private resetReconnectBackoff(): void {
+    this.reconnectAttempts = 0
+    this.reconnectDelayMs = TRANSPORT_RETRY_BASE_MS
+  }
+
   private rejectPending(reason: Error): void {
     for (const [, { reject }] of this.pending) {
       reject(reason)
@@ -631,6 +663,10 @@ function lspCloseReason(event: CloseEvent): string {
   const code = event.code ? ` ${event.code}` : ''
   const reason = event.reason ? `: ${event.reason}` : ''
   return `WebSocket closed${code}${reason}`
+}
+
+function shouldReconnectLspClose(event: CloseEvent): boolean {
+  return !LSP_TERMINAL_CLOSE_CODES.has(event.code)
 }
 
 export function resolveLspDiagnosticFilePath(

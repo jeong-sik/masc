@@ -4,6 +4,8 @@ let write
       ~trace_id
       ~absolute_turn
       ~runtime_profile
+      ~model
+      ~finish_reason
       ~sampling
       ~usage
       ~execution_ids
@@ -18,6 +20,8 @@ let write
     ; turn_ref = Some (Ids.Turn_ref.make ~trace_id ~absolute_turn)
     ; blocks
     ; runtime_profile
+    ; model
+    ; finish_reason
     ; sampling
     ; usage
     ; ts = Time_compat.now ()

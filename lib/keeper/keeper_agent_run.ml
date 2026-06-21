@@ -682,12 +682,25 @@ let run_turn
             }
           | Ok _ | Error _ -> { input_tokens = None; output_tokens = None }
         in
+        (* RFC-0233 §2.3 — views derive, no view-side repair: ground the
+           inspector's [model] and [finish_reason] in the same refs the
+           execution receipt already records this turn. [model] is the
+           RFC-0132 boundary-redacted runtime label; [finish_reason] is
+           the keeper stop reason serialized through the receipt SSOT
+           ([Keeper_execution_receipt.stop_reason_to_string]). Both are
+           [None] on the error path (receipt refs unset), never a
+           fabricated value. *)
         Keeper_turn_record_writer.write
           ~config
           ~keeper_name:meta.name
           ~trace_id
           ~absolute_turn:manifest_keeper_turn_id
           ~runtime_profile:runtime_id_string
+          ~model:!receipt_model_used_ref
+          ~finish_reason:
+            (Option.map
+               Keeper_execution_receipt.stop_reason_to_string
+               !receipt_stop_reason_ref)
           ~sampling:
             { temperature = Some temperature
             ; thinking_budget = tctx.thinking_budget

@@ -483,7 +483,10 @@ function thinkingChipLabel(record: TurnRecordEntry): string {
 
 function buildInjectedCtx(record: TurnRecordEntry, ctxPct: number, tokIn: number): string {
   return `# namespace snapshot
-fsm.state      = —
+namespace      = n/a
+fsm.state      = n/a
+model          = ${record.model ?? 'n/a'}
+finish_reason  = ${record.finish_reason ?? 'n/a'}
 ctx.window     = ${ctxPct.toFixed(1)}%   (${tokIn.toLocaleString()} / 200,000 tok)
 keeper.turn    = T${record.absolute_turn}
 thinking       = ${thinkingStateLabel(record)}
@@ -869,10 +872,10 @@ function MetaTab({ record, t, source }: { record: TurnRecordEntry; t: TurnDetail
       </div>
       <div class="kti-sec-h" style=${{ marginTop: '16px' }}><h4>실행 메타데이터</h4></div>
       <div class="kti-kv">
-        <span class="k">model</span><span class="v">—</span>
+        <span class="k">model</span><span class="v">${record.model ?? 'n/a'}</span>
         <span class="k">runtime</span><span class="v">${record.runtime_profile}</span>
-        <span class="k">namespace</span><span class="v">—</span>
-        <span class="k">fsm.state</span><span class="v">—</span>
+        <span class="k">namespace</span><span class="v">n/a</span>
+        <span class="k">fsm.state</span><span class="v">n/a</span>
         <span class="k">input tokens</span><span class="v">${t.tokIn.toLocaleString()}</span>
         <span class="k">output tokens</span><span class="v">${t.tokOut.toLocaleString()}</span>
         <span class="k">ctx window</span><span class="v">${t.ctxPct.toFixed(1)}% / 200K</span>
@@ -882,7 +885,7 @@ function MetaTab({ record, t, source }: { record: TurnRecordEntry; t: TurnDetail
         <span class="k">tool calls</span><span class="v">${t.tools.length}</span>
         <span class="k">measured phase duration</span><span class="v">${t.measuredDurationMs != null ? formatMsCompact(t.measuredDurationMs) : 'none'}</span>
         <span class="k">est. cost</span><span class="v">$${t.cost.toFixed(3)}</span>
-        <span class="k">finish_reason</span><span class="v">stop</span>
+        <span class="k">finish_reason</span><span class="v">${record.finish_reason ?? 'n/a'}</span>
         <span class="k">source</span><span class="v">${source}</span>
       </div>
     </div>
@@ -957,8 +960,8 @@ function TurnDetailDrawer({
           <span class="kti-chip">
             <span class="sub-k">thinking</span>${thinkingChipLabel(row.record)}
           </span>
-          <span class="kti-chip ok">
-            stop
+          <span class="kti-chip${row.record.finish_reason ? ' ok' : ''}">
+            <span class="sub-k">finish</span>${row.record.finish_reason ?? 'n/a'}
           </span>
           <span class="kti-chip">
             <span class="sub-k">runtime</span>${row.record.runtime_profile}

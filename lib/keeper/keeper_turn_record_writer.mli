@@ -11,6 +11,8 @@ val write :
   trace_id:string ->
   absolute_turn:int ->
   runtime_profile:string ->
+  model:string option ->
+  finish_reason:string option ->
   sampling:Turn_record.sampling ->
   usage:Turn_record.usage ->
   execution_ids:Ids.Execution_id.t list ->

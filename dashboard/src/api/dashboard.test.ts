@@ -18,6 +18,7 @@ import {
   fetchDashboardTools,
   fetchKeeperToolCalls,
   fetchKeeperToolStats,
+  fetchKeeperTurnRecords,
   fetchDashboardMemory,
   fetchDashboardMission,
   fetchDashboardMissionBriefing,
@@ -429,6 +430,55 @@ describe('keeper tool telemetry fetchers', () => {
     const result = await fetchKeeperToolCalls('keeper-alpha')
 
     expect(result.entries.map(entry => entry.duration_ms)).toEqual([null, null])
+  })
+
+  it('grounds turn-record model / finish_reason, leaving absent fields undefined', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        count: 2,
+        source: 'turn_record',
+        entries: [
+          {
+            record: {
+              keeper: 'keeper-alpha',
+              trace_id: 'trace-grounded',
+              absolute_turn: 7,
+              ts: 10,
+              runtime_profile: 'local',
+              model: 'deepseek-v4-flash',
+              finish_reason: 'completed',
+              blocks: [],
+              execution_ids: [],
+            },
+            diff_vs_prev: null,
+          },
+          {
+            // RFC-0233 §2.3: error turn omits model/finish_reason — must
+            // decode to undefined, never a fabricated "stop"/placeholder.
+            record: {
+              keeper: 'keeper-alpha',
+              trace_id: 'trace-grounded',
+              absolute_turn: 8,
+              ts: 11,
+              runtime_profile: 'local',
+              blocks: [],
+              execution_ids: [],
+            },
+            diff_vs_prev: null,
+          },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperTurnRecords('keeper-alpha')
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/keeper-alpha/turn-records')
+    expect(result.entries[0]?.record.model).toBe('deepseek-v4-flash')
+    expect(result.entries[0]?.record.finish_reason).toBe('completed')
+    expect(result.entries[1]?.record.model).toBeUndefined()
+    expect(result.entries[1]?.record.finish_reason).toBeUndefined()
   })
 })
 

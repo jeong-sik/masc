@@ -23,6 +23,8 @@ type t =
   ; turn_ref : Ids.Turn_ref.t option
   ; blocks : prompt_block list
   ; runtime_profile : string
+  ; model : string option
+  ; finish_reason : string option
   ; sampling : sampling
   ; usage : usage
   ; ts : float
@@ -52,6 +54,8 @@ let to_json (r : t) : Yojson.Safe.t =
      ; ("runtime_profile", `String r.runtime_profile)
      ]
     @ opt_field "turn_ref" Ids.Turn_ref.to_yojson r.turn_ref
+    @ opt_field "model" (fun v -> `String v) r.model
+    @ opt_field "finish_reason" (fun v -> `String v) r.finish_reason
     @ opt_field "temperature" (fun v -> `Float v) r.sampling.temperature
     @ opt_field "thinking_budget" (fun v -> `Int v) r.sampling.thinking_budget
     @ opt_field "enable_thinking" (fun v -> `Bool v) r.sampling.enable_thinking
@@ -141,6 +145,8 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
       let* profile_json = require "runtime_profile" fields in
       let* runtime_profile = as_string "runtime_profile" profile_json in
       let* turn_ref = opt_member "turn_ref" fields as_turn_ref in
+      let* model = opt_member "model" fields as_string in
+      let* finish_reason = opt_member "finish_reason" fields as_string in
       let* temperature = opt_member "temperature" fields as_float in
       let* thinking_budget = opt_member "thinking_budget" fields as_int in
       let* enable_thinking = opt_member "enable_thinking" fields as_bool in
@@ -156,6 +162,8 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; turn_ref
         ; blocks
         ; runtime_profile
+        ; model
+        ; finish_reason
         ; sampling = { temperature; thinking_budget; enable_thinking }
         ; usage = { input_tokens; output_tokens }
         ; ts

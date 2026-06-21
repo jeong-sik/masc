@@ -2905,6 +2905,11 @@ export type TurnRecordEntry = {
   absolute_turn: number
   blocks: TurnBlock[]
   runtime_profile: string
+  // RFC-0233 §2.3 — grounded from the backend turn record (boundary-redacted
+  // model label + keeper stop reason). Absent (undefined) on error turns and
+  // pre-grounding rows; the inspector renders absence, never a fabricated value.
+  model?: string
+  finish_reason?: string
   temperature?: number
   thinking_budget?: number
   enable_thinking?: boolean
@@ -3039,6 +3044,8 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     absolute_turn,
     blocks: decodeTurnBlockList(raw.blocks),
     runtime_profile,
+    model: asString(raw.model),
+    finish_reason: asString(raw.finish_reason),
     temperature: asNumber(raw.temperature),
     thinking_budget: asNumber(raw.thinking_budget),
     enable_thinking: typeof raw.enable_thinking === 'boolean' ? raw.enable_thinking : undefined,

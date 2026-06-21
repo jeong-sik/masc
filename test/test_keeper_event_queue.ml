@@ -206,6 +206,21 @@ let () =
       Keeper_event_queue_persistence.persist ~base_path ~keeper_name rest;
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
 
+  let meta_for_keeper keeper_name trace_id =
+    match
+      Masc.Keeper_meta_json_parse.meta_of_json
+        (`Assoc
+          [ "name", `String keeper_name
+          ; "agent_name", `String keeper_name
+          ; "trace_id", `String trace_id
+          ; "last_model_used", `String "llama:auto"
+          ; "tool_access", `List []
+          ])
+    with
+    | Ok meta -> meta
+    | Error msg -> Alcotest.fail ("meta parse failed: " ^ msg)
+  in
+
   (* --- registry integration: CAS-successful enqueue persists and register reloads --- *)
   let base_path = temp_dir "keeper-event-queue-registry" in
   Fun.protect
@@ -214,20 +229,7 @@ let () =
       rm_rf base_path)
     (fun () ->
       let keeper_name = "keeper-event-queue-registry-test" in
-      let meta =
-        match
-          Masc.Keeper_meta_json_parse.meta_of_json
-            (`Assoc
-              [ "name", `String keeper_name
-              ; "agent_name", `String keeper_name
-              ; "trace_id", `String "trace-event-queue-registry-test"
-              ; "last_model_used", `String "llama:auto"
-              ; "tool_access", `List []
-              ])
-        with
-        | Ok meta -> meta
-        | Error msg -> Alcotest.fail ("meta parse failed: " ^ msg)
-      in
+      let meta = meta_for_keeper keeper_name "trace-event-queue-registry-test" in
       Masc.Keeper_registry.clear ();
       ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
@@ -242,6 +244,40 @@ let () =
         | None -> Alcotest.fail "registry reload should replay pending stimulus"
       in
       assert (String.equal replayed.post_id "p1");
+      assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
+
+  (* --- registry unavailable window: enqueue persists before register --- *)
+  let base_path = temp_dir "keeper-event-queue-unregistered" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.clear ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-unregistered-test" in
+      let meta = meta_for_keeper keeper_name "trace-event-queue-unregistered-test" in
+      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
+      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name bootstrap_stim;
+      assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
+      let pending = Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name in
+      assert (length pending = 2);
+      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      let restored = Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name in
+      assert (length restored = 2);
+      let first =
+        match Masc.Keeper_registry_event_queue.dequeue ~base_path keeper_name with
+        | Some stim -> stim
+        | None ->
+          Alcotest.fail "late registry registration should replay first pre-registered stimulus"
+      in
+      assert (String.equal first.post_id "p1");
+      let second =
+        match Masc.Keeper_registry_event_queue.dequeue ~base_path keeper_name with
+        | Some stim -> stim
+        | None ->
+          Alcotest.fail "late registry registration should replay second pre-registered stimulus"
+      in
+      assert (String.equal second.post_id "bootstrap");
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
 
   print_endline "test_keeper_event_queue: all passed"

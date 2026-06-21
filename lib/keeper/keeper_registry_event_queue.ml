@@ -8,19 +8,53 @@
     Atomic state primitive. CAS-successful mutations are mirrored to
     [Keeper_event_queue_persistence] for restart replay. *)
 
+let rec queue_contains queue stimulus =
+  match Keeper_event_queue.dequeue queue with
+  | None -> false
+  | Some (head, rest) -> head = stimulus || queue_contains rest stimulus
+;;
+
+let enqueue_if_missing queue stimulus =
+  if queue_contains queue stimulus then queue else Keeper_event_queue.enqueue queue stimulus
+;;
+
+let persist_live_queue ~base_path (entry : Keeper_registry.registry_entry) name =
+  Keeper_event_queue_persistence.persist_snapshot
+    ~base_path
+    ~keeper_name:name
+    (fun () -> Atomic.get entry.event_queue)
+;;
+
 let enqueue ~base_path name stimulus =
   match Keeper_registry.get ~base_path name with
   | None ->
     Log.Keeper.warn
-      "registry: enqueue_event name=%s base_path=%s: keeper not registered"
+      "registry: enqueue_event name=%s base_path=%s: keeper not registered; persisting stimulus for replay"
       name
-      base_path
+      base_path;
+    Keeper_event_queue_persistence.update
+      ~base_path
+      ~keeper_name:name
+      (fun cur -> Keeper_event_queue.enqueue cur stimulus);
+    (match Keeper_registry.get ~base_path name with
+     | None -> ()
+     | Some entry ->
+       let rec loop () =
+         let cur = Atomic.get entry.event_queue in
+         let next = enqueue_if_missing cur stimulus in
+         if next = cur
+         then ()
+         else if Atomic.compare_and_set entry.event_queue cur next
+         then persist_live_queue ~base_path entry name
+         else loop ()
+       in
+       loop ())
   | Some entry ->
     let rec loop () =
       let cur = Atomic.get entry.event_queue in
       let next = Keeper_event_queue.enqueue cur stimulus in
       if Atomic.compare_and_set entry.event_queue cur next
-      then Keeper_event_queue_persistence.persist ~base_path:entry.base_path ~keeper_name:name next
+      then persist_live_queue ~base_path entry name
       else loop ()
     in
     loop ()
@@ -28,7 +62,7 @@ let enqueue ~base_path name stimulus =
 
 let snapshot ~base_path name =
   match Keeper_registry.get ~base_path name with
-  | None -> Keeper_event_queue.empty
+  | None -> Keeper_event_queue_persistence.load ~base_path ~keeper_name:name
   | Some entry -> Atomic.get entry.event_queue
 ;;
 
@@ -43,10 +77,7 @@ let dequeue ~base_path name =
       | Some (stim, rest) ->
         if Atomic.compare_and_set entry.event_queue cur rest
         then (
-          Keeper_event_queue_persistence.persist
-            ~base_path:entry.base_path
-            ~keeper_name:name
-            rest;
+          persist_live_queue ~base_path entry name;
           Some stim)
         else loop ()
     in
@@ -62,10 +93,7 @@ let drain_board ?window_sec ~base_path name =
       let board, rest = Keeper_event_queue.drain_board_window ?window_sec cur in
       if Atomic.compare_and_set entry.event_queue cur rest
       then (
-        Keeper_event_queue_persistence.persist
-          ~base_path:entry.base_path
-          ~keeper_name:name
-          rest;
+        persist_live_queue ~base_path entry name;
         board)
       else loop ()
     in

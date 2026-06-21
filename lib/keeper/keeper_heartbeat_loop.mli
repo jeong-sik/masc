@@ -51,6 +51,7 @@ val with_in_turn_liveness_pulse :
 type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
+  consumed_stimuli : Keeper_event_queue.stimulus list;
 }
 
 val heartbeat_event_intake :

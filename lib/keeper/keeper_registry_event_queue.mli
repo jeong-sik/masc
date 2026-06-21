@@ -21,6 +21,16 @@ val snapshot : base_path:string -> string -> Keeper_event_queue.t
     empty or the keeper is unregistered. *)
 val dequeue : base_path:string -> string -> Keeper_event_queue.stimulus option
 
+(** Put previously drained stimuli back at the front of the queue. This is a
+    crash-recovery primitive: if the keepalive cycle dies after dequeue/drain
+    but before the turn completes, the stimuli must remain replayable. *)
+val requeue_front : base_path:string -> string -> Keeper_event_queue.stimulus list -> unit
+
+val ack_consumed :
+  base_path:string -> string -> Keeper_event_queue.stimulus list -> unit
+(** Acknowledge consumed stimuli after a keepalive turn completes. Until this
+    runs, a restart reloads the leased stimuli for at-least-once replay. *)
+
 (** Drain stimuli intended for board reactivity. [window_sec] caps the
     age of stimuli returned to the caller. *)
 val drain_board :

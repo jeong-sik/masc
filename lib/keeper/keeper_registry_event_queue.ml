@@ -18,6 +18,13 @@ let enqueue_if_missing queue stimulus =
   if queue_contains queue stimulus then queue else Keeper_event_queue.enqueue queue stimulus
 ;;
 
+let requeue_missing_front queue stimuli =
+  let missing =
+    List.filter (fun stimulus -> not (queue_contains queue stimulus)) stimuli
+  in
+  Keeper_event_queue.prepend_list missing queue
+;;
+
 let persist_live_queue ~base_path (entry : Keeper_registry.registry_entry) name =
   Keeper_event_queue_persistence.persist_snapshot
     ~base_path
@@ -60,6 +67,36 @@ let enqueue ~base_path name stimulus =
     loop ()
 ;;
 
+let requeue_front ~base_path name stimuli =
+  match stimuli with
+  | [] -> ()
+  | _ ->
+    (match Keeper_registry.get ~base_path name with
+     | None ->
+       Keeper_event_queue_persistence.update
+         ~base_path
+         ~keeper_name:name
+         (fun cur -> requeue_missing_front cur stimuli);
+       Keeper_event_queue_persistence.ack_inflight ~base_path ~keeper_name:name stimuli
+     | Some entry ->
+       let rec loop () =
+         let cur = Atomic.get entry.event_queue in
+         let next = requeue_missing_front cur stimuli in
+         if next = cur
+         then Keeper_event_queue_persistence.ack_inflight ~base_path ~keeper_name:name stimuli
+         else if Atomic.compare_and_set entry.event_queue cur next
+         then (
+           persist_live_queue ~base_path entry name;
+           Keeper_event_queue_persistence.ack_inflight ~base_path ~keeper_name:name stimuli)
+         else loop ()
+       in
+       loop ())
+;;
+
+let ack_consumed ~base_path name stimuli =
+  Keeper_event_queue_persistence.ack_inflight ~base_path ~keeper_name:name stimuli
+;;
+
 let snapshot ~base_path name =
   match Keeper_registry.get ~base_path name with
   | None -> Keeper_event_queue_persistence.load ~base_path ~keeper_name:name
@@ -75,6 +112,10 @@ let dequeue ~base_path name =
       match Keeper_event_queue.dequeue cur with
       | None -> None
       | Some (stim, rest) ->
+        Keeper_event_queue_persistence.record_inflight
+          ~base_path
+          ~keeper_name:name
+          [ stim ];
         if Atomic.compare_and_set entry.event_queue cur rest
         then (
           persist_live_queue ~base_path entry name;
@@ -91,6 +132,7 @@ let drain_board ?window_sec ~base_path name =
     let rec loop () =
       let cur = Atomic.get entry.event_queue in
       let board, rest = Keeper_event_queue.drain_board_window ?window_sec cur in
+      Keeper_event_queue_persistence.record_inflight ~base_path ~keeper_name:name board;
       if Atomic.compare_and_set entry.event_queue cur rest
       then (
         persist_live_queue ~base_path entry name;

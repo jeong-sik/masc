@@ -98,10 +98,19 @@ val is_empty : t -> bool
 val enqueue : t -> stimulus -> t
 (** [enqueue q s] appends [s] to the back of [q] in O(1). Always succeeds. *)
 
+val to_list : t -> stimulus list
+(** Return the FIFO contents. *)
+
 val dequeue : t -> (stimulus * t) option
 (** [dequeue q] removes and returns the front of [q], or [None] when
     empty. The Policy Layer must call this at the start of every
     [emit] turn to honour the KeeperEventQueue [TurnDequeue] action. *)
+
+val prepend_list : stimulus list -> t -> t
+(** [prepend_list stimuli q] puts [stimuli] back at the front of [q] while
+    preserving [stimuli]'s order. Used when a keepalive cycle crashes after
+    draining stimuli but before completing the turn, so restart/retry keeps an
+    at-least-once replay boundary. *)
 
 val dedup_by_post_id : ?window_seconds:float -> t -> t
 (** Drops later duplicates of the same [post_id] when their

@@ -10,19 +10,26 @@
 
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { fetchKeeperToolCalls, fetchKeeperTurnRecords } from '../api/dashboard'
+import {
+  fetchKeeperToolCalls,
+  fetchKeeperTurnRecords,
+  fetchKeeperTurnTranscript,
+} from '../api/dashboard'
 import type {
   KeeperUserModelItem,
   KeeperUserModelSnapshot,
   MemoryOsEpisodeSummary,
   MemoryOsTurnRecordSnapshot,
   ToolCallEntry,
+  ToolCallOutputBlob,
   ToolCallsResponse,
   TurnBlock,
   TurnBlockDiff,
   TurnRecordEntry,
   TurnRecordRow,
   TurnRecordsResponse,
+  TurnTranscript,
+  TurnTranscriptLine,
   TelemetryFreshnessMetadata,
 } from '../api/dashboard'
 import { formatTimeHms } from '../lib/format-time'
@@ -440,6 +447,13 @@ type TurnToolDetail = {
   durationMs: number | null
   agentSubturn: number | null
   keeperTurn: number | null
+  // RFC-0233 §1.1: the real tool call I/O, joined from the tool-call log on
+  // execution_id (already boundary-redacted at write in keeper_tool_call_log).
+  // [matched] is false when no tool-call entry carried this execution id —
+  // the inspector renders explicit absence, never a fabricated result.
+  matched: boolean
+  input: unknown
+  output: string | ToolCallOutputBlob | null
 }
 
 type TurnInspectorData = {
@@ -518,6 +532,34 @@ function toolStatusLabel(status: TurnToolDetail['status']): string {
   if (status === 'ok') return 'success'
   if (status === 'bad') return 'error'
   return 'unmatched'
+}
+
+// Tool input args as copyable text. Strings pass through; structured input is
+// pretty-printed JSON.
+function toolInputText(input: unknown): string {
+  if (input == null) return ''
+  if (typeof input === 'string') return input
+  try {
+    return JSON.stringify(input, null, 2)
+  } catch {
+    return String(input)
+  }
+}
+
+// Tool output as copyable text. A string is the result verbatim; a blob ref
+// (output spilled out-of-line by the server) yields its stored preview.
+function toolOutputText(output: string | ToolCallOutputBlob | null): string {
+  if (output == null) return ''
+  if (typeof output === 'string') return output
+  return output._blob.preview
+}
+
+// Provenance line for a blob-backed output so the operator knows the preview is
+// truncated, with the sha to fetch the full payload elsewhere.
+function toolOutputMeta(output: string | ToolCallOutputBlob | null): string | null {
+  if (output == null || typeof output === 'string') return null
+  const { bytes, mime, sha256 } = output._blob
+  return `blob · ${bytes}B · ${mime} · ${sha256.slice(0, 12)}`
 }
 
 function toolCallIndexByExecutionId(entries: readonly ToolCallEntry[]): Map<string, ToolCallEntry> {
@@ -617,6 +659,9 @@ function buildTurnDetail(
       durationMs: entry?.duration_ms ?? null,
       agentSubturn: entry?.turn ?? null,
       keeperTurn: entry?.keeper_turn_id ?? null,
+      matched: entry !== null,
+      input: entry?.input ?? null,
+      output: entry?.output ?? null,
     }
   })
   tools.forEach(tool => {
@@ -697,12 +742,6 @@ function CodeCard({ cap, text, htmlContent, tokens }: { cap: string; text: strin
   `
 }
 
-function jsonHighlight(obj: unknown): string {
-  return JSON.stringify(obj, null, 2)
-    .replace(/("[^"]+"):/g, '<span class="jk">$1</span>:')
-    .replace(/: ("[^"]*")/g, ': <span class="js">$1</span>')
-}
-
 function TimelineTab({ t }: { t: TurnDetail }) {
   const measuredCount = t.phases.filter(p => p.durationMs != null).length
   const unknownCount = t.phases.length - measuredCount
@@ -747,14 +786,105 @@ function TimelineTab({ t }: { t: TurnDetail }) {
   `
 }
 
-function MessagesTab({ keeperName, t }: { keeperName: string; t: TurnDetail }) {
+// Lazy-loaded transcript state for the open turn (RFC-0233 §7). Distinct from
+// `null` (not yet requested) so the renderer can show loading vs absence.
+type TranscriptView =
+  | { kind: 'loading' }
+  | { kind: 'error'; message: string }
+  | { kind: 'loaded'; data: TurnTranscript }
+
+// Map the async-resource state to a transcript view. Error wins over a stale
+// data value; absence of both reads as still-loading (the lazy fetch fires on
+// drawer open).
+function toTranscriptView(state: {
+  loading: boolean
+  error: string | null
+  data: TurnTranscript | null
+}): TranscriptView {
+  if (state.error) return { kind: 'error', message: state.error }
+  if (state.data) return { kind: 'loaded', data: state.data }
+  return { kind: 'loading' }
+}
+
+// One operator request line. Renders the real persisted content; explicit
+// absence when the turn carried no joinable user row.
+function OperatorLine({ line, seq }: { line: TurnTranscriptLine | null; seq: number }) {
+  return html`
+    <div class="kti-msg">
+      <div class="kti-msg-h">
+        <span class="kti-msg-role user">user</span>
+        <span class="who">operator</span>
+        <span class="seq">#${seq}</span>
+      </div>
+      ${line
+        ? html`<div class="kti-msg-b" data-testid="turn-transcript-user">${line.content}</div>`
+        : html`<div class="kti-msg-b kti-msg-absent" data-testid="turn-transcript-user-absent">
+            operator 요청이 이 턴에 기록되지 않았습니다 (turn_ref 미연결 또는 보존 윈도 밖)
+          </div>`}
+    </div>
+  `
+}
+
+// One keeper response line. A transport-failure row is labelled distinctly and
+// never presented as the keeper's own utterance.
+function KeeperLine({
+  keeperName,
+  line,
+  seq,
+}: {
+  keeperName: string
+  line: TurnTranscriptLine | null
+  seq: number
+}) {
+  const isFailure = line?.kind === 'transport_failure'
+  return html`
+    <div class="kti-msg">
+      <div class="kti-msg-h">
+        <span class="kti-msg-role assistant">assistant</span>
+        <span class="who">${keeperName}</span>
+        ${isFailure
+          ? html`<span class="pill bad" data-testid="turn-transcript-assistant-failure">transport failure</span>`
+          : null}
+        <span class="seq">#${seq}</span>
+      </div>
+      ${line
+        ? html`<div class="kti-msg-b" data-testid="turn-transcript-assistant">${line.content}</div>`
+        : html`<div class="kti-msg-b kti-msg-absent" data-testid="turn-transcript-assistant-absent">
+            keeper 응답이 이 턴에 기록되지 않았습니다
+          </div>`}
+    </div>
+  `
+}
+
+function MessagesTab({
+  keeperName,
+  t,
+  transcript,
+}: {
+  keeperName: string
+  t: TurnDetail
+  transcript: TranscriptView
+}) {
   let seq = 0
+  const userLines = transcript.kind === 'loaded' ? transcript.data.user : []
+  const assistantLines = transcript.kind === 'loaded' ? transcript.data.assistant : []
+  // 2 synthetic (system + context) + real user lines + tools + real assistant
+  // lines. Falls back to one placeholder slot each while loading/absent.
+  const userSlots = userLines.length || 1
+  const assistantSlots = assistantLines.length || 1
+  const messageCount = 2 + userSlots + t.tools.length + assistantSlots
   return html`
     <div class="kti-sec">
       <div class="kti-sec-h">
         <h4>모델에 전달된 시퀀스</h4>
-        <span class="n">${3 + t.tools.length + 1} 메시지</span>
+        <span class="n">${messageCount} 메시지</span>
       </div>
+      ${transcript.kind === 'loading'
+        ? html`<div class="text-2xs text-[var(--color-fg-muted)] px-1 pb-1" data-testid="turn-transcript-loading">전사 불러오는 중…</div>`
+        : null}
+      ${transcript.kind === 'error'
+        ? html`<div class="text-2xs text-[var(--color-status-warn)] px-1 pb-1" data-testid="turn-transcript-error">전사 불러오기 실패 · ${transcript.message}</div>`
+        : null}
       <div class="kti-seq-rail">
         <div class="kti-msg">
           <div class="kti-msg-h">
@@ -772,14 +902,9 @@ function MessagesTab({ keeperName, t }: { keeperName: string; t: TurnDetail }) {
           </div>
           <div class="kti-msg-b mono">${t.injectedCtx}</div>
         </div>
-        <div class="kti-msg">
-          <div class="kti-msg-h">
-            <span class="kti-msg-role user">user</span>
-            <span class="who">operator</span>
-            <span class="seq">#${++seq}</span>
-          </div>
-          <div class="kti-msg-b">[직전 operator 요청 — 본 대화의 사용자 메시지]</div>
-        </div>
+        ${userLines.length
+          ? userLines.map(line => html`<${OperatorLine} line=${line} seq=${++seq} />`)
+          : html`<${OperatorLine} line=${null} seq=${++seq} />`}
         ${t.tools.map((tool, i) => html`
           <div key=${i} class="kti-tool">
             <div class="kti-tool-h">
@@ -796,40 +921,30 @@ function MessagesTab({ keeperName, t }: { keeperName: string; t: TurnDetail }) {
                 : html`<span class="seq">duration 없음</span>`}
             </div>
             <div class="kti-tool-b">
-              <${CodeCard}
-                cap="실행 식별자"
-                text=${JSON.stringify({
-                  execution_id: tool.id,
-                  tool_name: tool.toolName,
-                  keeper_turn: tool.keeperTurn,
-                  agent_subturn: tool.agentSubturn,
-                  duration_ms: tool.durationMs,
-                }, null, 2)}
-                htmlContent=${jsonHighlight({
-                  execution_id: tool.id,
-                  tool_name: tool.toolName,
-                  keeper_turn: tool.keeperTurn,
-                  agent_subturn: tool.agentSubturn,
-                  duration_ms: tool.durationMs,
-                })}
-                tokens=${approxTokens(JSON.stringify({ execution_id: tool.id }))}
-              />
-              <${CodeCard}
-                cap="응답 · result"
-                text="[도구 결과는 별도 execution trace 에서 확인]"
-                tokens=${approxTokens('[도구 결과는 별도 execution trace 에서 확인]')}
-              />
+              ${tool.matched
+                ? html`
+                  <${CodeCard}
+                    cap="요청 · input"
+                    text=${toolInputText(tool.input)}
+                    tokens=${approxTokens(toolInputText(tool.input))}
+                  />
+                  <${CodeCard}
+                    cap=${toolOutputMeta(tool.output) ? `응답 · result (${toolOutputMeta(tool.output)})` : '응답 · result'}
+                    text=${toolOutputText(tool.output)}
+                    tokens=${approxTokens(toolOutputText(tool.output))}
+                  />
+                `
+                : html`
+                  <div class="kti-msg-b kti-msg-absent" data-testid="turn-tool-io-absent">
+                    이 execution(${tool.id.slice(0, 24)})의 tool-call I/O를 tool-call 로그에서 찾지 못했습니다 (보존 윈도 밖이거나 미기록)
+                  </div>
+                `}
             </div>
           </div>
         `)}
-        <div class="kti-msg">
-          <div class="kti-msg-h">
-            <span class="kti-msg-role assistant">assistant</span>
-            <span class="who">${keeperName}</span>
-            <span class="seq">#${++seq}</span>
-          </div>
-          <div class="kti-msg-b">[keeper 응답 — 본 턴의 출력 메시지]</div>
-        </div>
+        ${assistantLines.length
+          ? assistantLines.map(line => html`<${KeeperLine} keeperName=${keeperName} line=${line} seq=${++seq} />`)
+          : html`<${KeeperLine} keeperName=${keeperName} line=${null} seq=${++seq} />`}
       </div>
     </div>
   `
@@ -916,6 +1031,22 @@ function TurnDetailDrawer({
 }) {
   const [tab, setTab] = useState('timeline')
   const t = buildTurnDetail(keeperName, row.record, toolEntries)
+
+  // RFC-0233 §7: lazily fetch this turn's transcript by its join key
+  // "<trace_id>#<absolute_turn>". Loaded per-open so the (potentially large)
+  // transcript never bloats the turn-records list.
+  const turnRef = `${row.record.trace_id}#${row.record.absolute_turn}`
+  const transcriptResource = useManagedAsyncResource<TurnTranscript | null>(null)
+  useEffect(() => {
+    void transcriptResource.load((signal) =>
+      fetchKeeperTurnTranscript(keeperName, turnRef, { signal }),
+    )
+    return () => {
+      transcriptResource.cancel()
+    }
+  }, [keeperName, turnRef, transcriptResource])
+
+  const transcript = toTranscriptView(transcriptResource.state.value)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1040,7 +1171,7 @@ function TurnDetailDrawer({
 
         <div class="kti-body">
           ${tab === 'timeline' && html`<${TimelineTab} t=${t} />`}
-          ${tab === 'messages' && html`<${MessagesTab} keeperName=${keeperName} t=${t} />`}
+          ${tab === 'messages' && html`<${MessagesTab} keeperName=${keeperName} t=${t} transcript=${transcript} />`}
           ${tab === 'context' && html`<${ContextTab} t=${t} />`}
           ${tab === 'meta' && html`<${MetaTab} record=${row.record} t=${t} source=${source} />`}
         </div>

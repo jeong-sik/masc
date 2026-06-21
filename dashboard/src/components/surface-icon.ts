@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import {
   Activity,
+  CalendarClock,
   ClipboardList,
   Code2,
   FlaskConical,
@@ -32,6 +33,8 @@ export function SurfaceIcon({ icon, size = 16 }: SurfaceIconProps) {
       return html`<${UsersRound} ...${props} />`
     case 'board':
       return html`<${SquareKanban} ...${props} />`
+    case 'schedule':
+      return html`<${CalendarClock} ...${props} />`
     case 'fusion':
       return html`<${Workflow} ...${props} />`
     case 'approvals':

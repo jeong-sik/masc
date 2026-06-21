@@ -12,7 +12,8 @@
 // intentionally not rendered. Visual layout ports the keeper-v2 .ap-* design.
 
 import { html } from 'htm/preact'
-import { useEffect, useMemo } from 'preact/hooks'
+import { Fragment } from 'preact'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import type { KeeperApprovalQueueItem } from '../../types'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../../config/constants'
 import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
@@ -43,22 +44,99 @@ function apAge(sec: number | null | undefined): string {
   return m ? `${m}분 ${r}초 대기` : `${r}초 대기`
 }
 
+function compactText(value: string | null | undefined): string | null {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : null
+}
+
+function joinUnique(values: Array<string | null | undefined>): string | null {
+  const seen: string[] = []
+  for (const value of values) {
+    const compact = compactText(value)
+    if (compact && !seen.includes(compact)) seen.push(compact)
+  }
+  return seen.length ? seen.join(' · ') : null
+}
+
+function approvalTitle(item: KeeperApprovalQueueItem): string {
+  return compactText(item.action_key) || `${item.tool_name} 실행 승인 요청`
+}
+
+function approvalWorkSummary(item: KeeperApprovalQueueItem): string | null {
+  return joinUnique([
+    item.task_id ? `task ${item.task_id}` : null,
+    item.runtime_contract?.task_id ? `runtime task ${item.runtime_contract.task_id}` : null,
+    item.goal_id ? `goal ${item.goal_id}` : null,
+    ...(item.goal_ids ?? []).map(id => `goal ${id}`),
+    item.runtime_contract?.goal_id ? `runtime goal ${item.runtime_contract.goal_id}` : null,
+    ...(item.runtime_contract?.goal_ids ?? []).map(id => `runtime goal ${id}`),
+  ])
+}
+
+function approvalRuntimeSummary(item: KeeperApprovalQueueItem): string | null {
+  return joinUnique([
+    item.runtime_contract?.sandbox_profile ? `sandbox ${item.runtime_contract.sandbox_profile}` : null,
+    item.sandbox_target ? `target ${item.sandbox_target}` : null,
+    item.runtime_contract?.network_mode ? `network ${item.runtime_contract.network_mode}` : null,
+    item.runtime_contract?.backend ? `backend ${item.runtime_contract.backend}` : null,
+  ])
+}
+
+function approvalRuleSummary(item: KeeperApprovalQueueItem): string | null {
+  return item.rule_match
+    ? joinUnique([
+        item.rule_match.rule_id ? `rule ${item.rule_match.rule_id}` : null,
+        item.rule_match.matched_by ? `matched by ${item.rule_match.matched_by}` : null,
+      ])
+    : null
+}
+
+function approvalDetailRows(item: KeeperApprovalQueueItem): Array<{ label: string; value: string }> {
+  return [
+    { label: '키퍼', value: item.keeper_name },
+    { label: '도구', value: item.tool_name },
+    { label: '위험도', value: item.risk_level.toUpperCase() },
+    { label: '대기', value: apAge(item.waiting_s) },
+    { label: '작업', value: approvalWorkSummary(item) },
+    { label: '런타임', value: approvalRuntimeSummary(item) },
+    { label: '선택 모델', value: compactText(item.selected_model) },
+    { label: '턴', value: typeof item.turn_id === 'number' ? `turn ${item.turn_id}` : null },
+    { label: '요청시각', value: compactText(item.requested_at) },
+    { label: '판단', value: joinUnique([item.disposition, item.disposition_reason]) },
+    { label: '규칙', value: approvalRuleSummary(item) },
+    { label: '입력', value: compactText(item.input_preview) || '입력 미리보기 없음' },
+  ].filter((row): row is { label: string; value: string } => Boolean(row.value))
+}
+
 // Open this keeper's workspace conversation (work.ts idiom).
 function openKeeperWorkspace(name: string): void {
   navigate('monitoring', { section: 'agents', view: 'keepers', keeper: name })
 }
 
-function ApprovalCard({ item }: { item: KeeperApprovalQueueItem }) {
+function ApprovalCard({
+  item,
+  selected,
+  onSelect,
+}: {
+  item: KeeperApprovalQueueItem
+  selected: boolean
+  onSelect: (id: string) => void
+}) {
   const sev = apSev(item.risk_level)
   const actingId = governanceApprovalActing.value
   const busy = actingId === item.id
   const anyBusy = Boolean(actingId)
-  const title = item.action_key?.trim() || `${item.tool_name} 실행 승인 요청`
+  const title = approvalTitle(item)
   const sandbox = item.runtime_contract?.sandbox_profile?.trim() || item.sandbox_target?.trim() || null
   const detailReason = item.disposition_reason?.trim() || null
 
   return html`
-    <article class=${`ap-card sev-${sev}`} data-testid="approval-card" data-approval-id=${item.id}>
+    <article
+      class=${`ap-card sev-${sev}`}
+      data-testid="approval-card"
+      data-approval-id=${item.id}
+      data-selected=${selected ? 'true' : 'false'}
+    >
       <div class="ap-rail"></div>
       <div class="ap-main">
         <div class="ap-h">
@@ -66,6 +144,13 @@ function ApprovalCard({ item }: { item: KeeperApprovalQueueItem }) {
           <span class="ap-tool mono">${item.tool_name}</span>
           <span class="ap-id mono">${item.id}</span>
           <span class=${`ap-age sev-${sev}`}>${apAge(item.waiting_s)}</span>
+          <button
+            type="button"
+            class="ap-detail-toggle"
+            aria-pressed=${selected}
+            onClick=${() => onSelect(item.id)}
+            title="요청 상세 보기"
+          >상세</button>
         </div>
         <h3 class="ap-title">${title}</h3>
         ${detailReason ? html`<p class="ap-detail">${detailReason}</p>` : null}
@@ -129,6 +214,42 @@ function ApprovalCard({ item }: { item: KeeperApprovalQueueItem }) {
   `
 }
 
+function ApprovalDetailPanel({
+  item,
+  variant = 'rail',
+}: {
+  item: KeeperApprovalQueueItem | null
+  variant?: 'rail' | 'inline'
+}) {
+  if (!item) return null
+  const sev = apSev(item.risk_level)
+  const rows = approvalDetailRows(item)
+
+  return html`
+    <aside
+      class=${`ap-detail-panel ap-detail-panel-${variant}`}
+      data-testid=${variant === 'inline' ? 'approval-detail-panel-inline' : 'approval-detail-panel'}
+      data-approval-id=${item.id}
+    >
+      <div class="ap-detail-panel-head">
+        <span class=${`ap-kind sev-${sev}`}>${item.risk_level.toUpperCase()}</span>
+        <div class="ap-detail-panel-title">
+          <strong>${approvalTitle(item)}</strong>
+          <span class="mono">${item.id}</span>
+        </div>
+      </div>
+      <dl class="ap-dossier">
+        ${rows.map(row => html`
+          <div class="ap-dossier-row" key=${row.label}>
+            <dt>${row.label}</dt>
+            <dd>${row.value}</dd>
+          </div>
+        `)}
+      </dl>
+    </aside>
+  `
+}
+
 export function ApprovalsSurface() {
   useEffect(() => {
     void refreshGovernance()
@@ -140,6 +261,8 @@ export function ApprovalsSurface() {
 
   const items = governanceData.value?.approval_queue ?? []
   const error = governanceError.value
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const selectedItem = items.find(item => item.id === selectedId) ?? items[0] ?? null
 
   const stats = useMemo(() => {
     const risky = items.filter(i => isHighOrCriticalKeeperApprovalRisk(i.risk_level)).length
@@ -194,8 +317,22 @@ export function ApprovalsSurface() {
               </div>
             `
           : html`
-              <div class="ap-queue" data-testid="approvals-queue">
-                ${items.map(item => html`<${ApprovalCard} key=${item.id} item=${item} />`)}
+              <div class="ap-workspace" data-testid="approvals-workspace">
+                <div class="ap-queue" data-testid="approvals-queue">
+                  ${items.map(item => html`
+                    <${Fragment} key=${item.id}>
+                      <${ApprovalCard}
+                        item=${item}
+                        selected=${selectedItem?.id === item.id}
+                        onSelect=${setSelectedId}
+                      />
+                      ${selectedItem?.id === item.id
+                        ? html`<${ApprovalDetailPanel} item=${item} variant="inline" />`
+                        : null}
+                    <//>
+                  `)}
+                </div>
+                <${ApprovalDetailPanel} item=${selectedItem} variant="rail" />
               </div>
             `}
       </div>

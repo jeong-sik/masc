@@ -8,6 +8,8 @@ vi.mock('./store', async (importOriginal) => {
     refreshShell: vi.fn(),
     refreshExecution: vi.fn(),
     refreshBoard: vi.fn(),
+    refreshFusionBoard: vi.fn(),
+    refreshFusionRuns: vi.fn(),
     refreshGoals: vi.fn(),
   }
 })
@@ -45,7 +47,7 @@ import { refreshObservatorySurface } from './components/observatory/observatory'
 import { refreshServerConfig } from './components/server-config'
 import { refreshSurfaceReadiness } from './components/surface-readiness-panel'
 import { refreshForRoute, refreshPlanForRoute } from './tab-refresh'
-import { refreshExecution, refreshShell } from './store'
+import { refreshExecution, refreshFusionBoard, refreshFusionRuns, refreshShell } from './store'
 
 describe('refreshPlanForRoute', () => {
   beforeEach(() => {
@@ -71,6 +73,13 @@ describe('refreshPlanForRoute', () => {
       tab: 'board',
       params: {},
     })).toEqual(['board'])
+  })
+
+  it('hydrates Fusion from its own board-sink source and the registry source', () => {
+    expect(refreshPlanForRoute({
+      tab: 'fusion',
+      params: {},
+    })).toEqual(['fusionBoard', 'fusionRuns'])
   })
 
   it('uses the current monitoring sections', () => {
@@ -249,6 +258,18 @@ describe('refreshPlanForRoute', () => {
     })
 
     expect(refreshExecution).toHaveBeenCalledWith()
+  })
+
+  it('refreshes Fusion without inheriting Board route filters', async () => {
+    refreshForRoute({
+      tab: 'fusion',
+      params: {},
+    })
+
+    await waitFor(() => {
+      expect(refreshFusionBoard).toHaveBeenCalledTimes(1)
+      expect(refreshFusionRuns).toHaveBeenCalledTimes(1)
+    })
   })
 })
 

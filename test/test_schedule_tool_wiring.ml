@@ -693,6 +693,55 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
       (row |> member "last_execution" |> member "detail" |> member "kind" |> to_string)
 ;;
 
+let test_dashboard_projection_surfaces_schedule_runner_signals () =
+  with_config
+  @@ fun config ->
+  let request =
+    create_schedule_exn config ~schedule_id:"sched-signal" ~due_at:200.0
+      ~risk_class:Schedule_domain.Read_only ~requested_by:(human "operator")
+      ~scheduled_by:(automated "scheduler-agent")
+      ()
+  in
+  let tick_result =
+    match Schedule_runner.tick config ~now:201.0 with
+    | Ok result -> result
+    | Error err -> fail (Schedule_runner.runner_error_to_string err)
+  in
+  check int "one durable signal emitted" 1 (List.length tick_result.emitted);
+  let emitted = List.hd tick_result.emitted in
+  let json =
+    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+  in
+  let open Yojson.Safe.Util in
+  check string "signal source" "schedule_runner_signals"
+    (json |> member "signal_source" |> to_string);
+  check int "signal count" 1 (json |> member "signal_count" |> to_int);
+  check int "signal limit" 20 (json |> member "signal_limit" |> to_int);
+  let signal =
+    match json |> member "signals" |> to_list with
+    | [ signal ] -> signal
+    | signals -> failf "expected one dashboard signal, got %d" (List.length signals)
+  in
+  check string "signal id" emitted.signal_id
+    (signal |> member "signal_id" |> to_string);
+  check string "signal kind" "schedule.due_candidate"
+    (signal |> member "kind" |> to_string);
+  check string "signal event type" "schedule.due_candidate"
+    (signal |> member "event_type" |> to_string);
+  check string "signal schedule" request.schedule_id
+    (signal |> member "schedule_id" |> to_string);
+  check string "signal emitted iso" "1970-01-01T00:03:21Z"
+    (signal |> member "emitted_at_iso" |> to_string);
+  check string "signal due iso" "1970-01-01T00:03:20Z"
+    (signal |> member "due_at_iso" |> to_string);
+  check string "signal risk" "read_only"
+    (signal |> member "risk_class" |> to_string);
+  check string "signal payload kind" "test.reminder"
+    (signal |> member "payload_kind" |> to_string);
+  check string "signal payload digest" emitted.payload_digest
+    (signal |> member "payload_digest" |> to_string)
+;;
+
 let test_keeper_observation_surfaces_schedule_attention () =
   with_config
   @@ fun config ->
@@ -773,6 +822,8 @@ let () =
             test_dispatch_cancel_persists_status
         ; test_case "dashboard projection surfaces schedule FSM" `Quick
             test_dashboard_projection_surfaces_schedule_fsm
+        ; test_case "dashboard projection surfaces schedule runner signals" `Quick
+            test_dashboard_projection_surfaces_schedule_runner_signals
         ; test_case "keeper observation surfaces schedule attention" `Quick
             test_keeper_observation_surfaces_schedule_attention
         ] )

@@ -1,5 +1,5 @@
 import type { RouteState } from './types'
-import { refreshExecution, refreshBoard, refreshFusionRuns, refreshGoals, refreshShell } from './store'
+import { refreshExecution, refreshBoard, refreshFusionBoard, refreshFusionRuns, refreshGoals, refreshShell } from './store'
 import { requestNamespaceTruth } from './namespace-truth-store'
 import { refreshMissionSnapshot } from './mission-store'
 import { refreshOperatorWorkspaceDigest, refreshOperatorSnapshot } from './operator-store'
@@ -41,6 +41,7 @@ type RefreshTask =
   | 'execution'
   | 'observatory'
   | 'board'
+  | 'fusionBoard'
   | 'goals'
   | 'harness'
   | 'toolQuality'
@@ -70,10 +71,11 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
     case 'board':
       return ['board']
     case 'fusion':
-      // 'board' feeds the board-meta-derived detail browser; 'fusionRuns' feeds
-      // the registry-backed live status panel (running + recent) that the SSE
-      // `fusion_run_status` event also re-fetches.
-      return ['board', 'fusionRuns']
+      // 'fusionBoard' feeds the board-meta-derived detail browser without
+      // inheriting Board-route filters; 'fusionRuns' feeds the registry-backed
+      // live status panel (running + recent) that the SSE `fusion_run_status`
+      // event also re-fetches.
+      return ['fusionBoard', 'fusionRuns']
     case 'monitoring':
       if (routeState.params.section === 'observatory') {
         return ['namespaceTruth', 'observatory']
@@ -148,6 +150,7 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
   execution: () => { void refreshExecution() },
   observatory: () => { void refreshObservatoryPanel() },
   board: () => { void refreshBoard() },
+  fusionBoard: () => { void refreshFusionBoard() },
   goals: () => { void refreshGoals() },
   harness: () => { void refreshHarnessLabSurface() },
   toolQuality: () => { void refreshToolQualityLabSurface() },

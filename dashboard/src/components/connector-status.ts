@@ -3,7 +3,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo } from 'preact/hooks'
 import type { ComponentChildren } from 'preact'
 import { post } from '../api/core'
 import { DEFAULT_MASC_ORIGIN } from '../config/constants'
@@ -44,7 +44,7 @@ import { ConnectorOverviewStrip } from './connector-overview-strip'
 import { ConnectorKeeperMatrix, deriveMatrix } from './connector-keeper-matrix'
 import { ConnectorPathsStrip } from './connector-paths-strip'
 import { createManagedAsyncResource } from '../lib/async-state'
-import { route } from '../router'
+import { navigate, route } from '../router'
 import { Tk } from './tk'
 import { KeeperBadge } from './keeper-badge'
 
@@ -1678,14 +1678,38 @@ function ConnectorsSurfaceHeader({
           aria-label="게이트 새로고침"
           onClick=${onRefresh}
         >게이트 새로고침 ↻</button>
-        <button
-          type="button"
-          class="cn-act primary"
-          aria-label="커넥터 추가"
-          onClick=${() => { showToast('Add connector: keeper-v2 connector catalog coming soon', 'warning') }}
-        >＋ Add connector</button>
       </div>
     </header>
+  `
+}
+
+function ConnectorRouteSwitcher({ activeConnectorId }: { activeConnectorId: KnownConnectorId | null }) {
+  return html`
+    <div class="cn-route-switcher" data-testid="connector-route-switcher" role="group" aria-label="Connector route scope">
+      <button
+        type="button"
+        class=${`cn-route-chip ${activeConnectorId === null ? 'on' : ''}`}
+        data-testid="connector-route-all"
+        data-active=${activeConnectorId === null ? 'true' : 'false'}
+        onClick=${() => { navigate('connectors', { section: 'connector-status' }) }}
+      >
+        <span class="cn-route-ico" aria-hidden="true">∷</span>
+        <span>All</span>
+      </button>
+      ${KNOWN_CONNECTOR_IDS.map(connectorId => html`
+        <button
+          type="button"
+          key=${connectorId}
+          class=${`cn-route-chip ${activeConnectorId === connectorId ? 'on' : ''}`}
+          data-testid=${`connector-route-${connectorId}`}
+          data-active=${activeConnectorId === connectorId ? 'true' : 'false'}
+          onClick=${() => { navigate('connectors', { section: 'connector-status', connector: connectorId }) }}
+        >
+          <span class="cn-route-ico" aria-hidden="true">${channelIcon(connectorId)}</span>
+          <span>${CONNECTOR_DISPLAY_NAMES[connectorId]}</span>
+        </button>
+      `)}
+    </div>
   `
 }
 
@@ -1707,12 +1731,6 @@ function ConnectorsToolbar({
         class="cn-search"
         onInput=${(e: Event) => { onQuery((e.target as HTMLInputElement).value) }}
       />
-      <${ActionButton}
-        variant="primary"
-        size="sm"
-        testId="connector-add-button"
-        onClick=${() => { showToast('Add connector: keeper-v2 connector catalog coming soon', 'warning') }}
-      >＋ Add connector<//>
     </div>
   `
 }
@@ -1827,6 +1845,39 @@ function ConnectorValueCell({
   `
 }
 
+function ConnectorBindingKeeperLink({ binding }: { binding: DiscordConfiguredBinding }) {
+  const keeperName = binding.keeper_name?.trim()
+  if (!keeperName) {
+    return html`
+      <div class="cn-bind-row" data-binding-channel=${binding.channel_id}>
+        <span class="chn">${binding.channel_id}</span>
+        <span class="arr">→</span>
+        <span class="text-[var(--text-bright)]">-</span>
+      </div>
+    `
+  }
+
+  return html`
+    <button
+      type="button"
+      class="cn-bind-row link"
+      data-testid="connector-binding-keeper-link"
+      data-binding-channel=${binding.channel_id}
+      data-binding-keeper=${keeperName}
+      title=${`${keeperName} keeper 대화 열기`}
+      aria-label=${`${binding.channel_id} binding keeper ${keeperName} 열기`}
+      onClick=${() => { navigate('keepers', { keeper: keeperName }) }}
+    >
+      <span class="chn">${binding.channel_id}</span>
+      <span class="arr">→</span>
+      <span class="text-[var(--text-bright)]">
+        <${KeeperBadge} id=${keeperName} variant="full" size="sm" />
+      </span>
+      <span class="cn-bind-go" aria-hidden="true">▸</span>
+    </button>
+  `
+}
+
 function ConnectorGateCard({
   connectorId,
   connector,
@@ -1886,11 +1937,7 @@ function ConnectorGateCard({
         <h5>바인딩 — 채널 → keeper (${bindings.length})</h5>
         ${bindings.length
           ? bindings.map(binding => html`
-              <div class="cn-bind-row">
-                <span class="chn">${binding.channel_id}</span>
-                <span class="arr">→</span>
-                <span class="text-[var(--text-bright)]">${binding.keeper_name}</span>
-              </div>
+              <${ConnectorBindingKeeperLink} key=${binding.channel_id} binding=${binding} />
             `)
           : html`<div class="cn-bind-none">바인딩 없음 — 이 게이트는 알림 전용입니다.</div>`}
         ${connector?.error
@@ -1989,18 +2036,6 @@ function ConnectorsAuditLog({ connectors }: { connectors: GateConnectorInfo[] })
   `
 }
 
-type ConnectorBindingDirection = 'both' | 'inbound' | 'outbound' | 'post-back'
-
-interface ConnectorBindingDraft {
-  id: string
-  channel: string
-  keeper: string
-  direction: ConnectorBindingDirection
-  enabled: boolean
-}
-
-const DEFAULT_REPLY_MODE_OPTIONS = ['mention', 'all', 'manual'] as const
-
 function connectorScopeLabel(connector: GateConnectorInfo | null): string {
   return connector?.channel === 'webhook' ? 'Base URL' : 'Guilds'
 }
@@ -2016,104 +2051,48 @@ function connectorBotValue(connector: GateConnectorInfo | null): string {
   return connector?.bot_user_name || connector?.bot_user_id || ''
 }
 
-function connectorBindingDirectionOptions(connector: GateConnectorInfo | null): ConnectorBindingDirection[] {
-  return connector?.channel === 'webhook' ? ['inbound', 'post-back'] : ['both', 'inbound', 'outbound']
-}
-
-function connectorBindingDrafts(connectorId: KnownConnectorId, connector: GateConnectorInfo | null): ConnectorBindingDraft[] {
-  return (connector?.configured_bindings ?? EMPTY_CONFIGURED_BINDINGS).map((binding, index) => ({
-    id: `${connectorId}:${binding.channel_id}:${index}`,
-    channel: binding.channel_id,
-    keeper: binding.keeper_name,
-    direction: connector?.channel === 'webhook' ? 'inbound' : 'both',
-    enabled: true,
-  }))
-}
-
-function keeperOptionsForBindingEditor(keepers: GateKeeperInfo[], drafts: ConnectorBindingDraft[]): string[] {
-  const names = new Set<string>()
-  for (const keeper of keepers) {
-    if (keeper.name) names.add(keeper.name)
-  }
-  for (const draft of drafts) {
-    if (draft.keeper) names.add(draft.keeper)
-  }
-  return Array.from(names).sort((a, b) => a.localeCompare(b))
-}
-
-function ConnectorBindingEditor({
-  connector,
-  drafts,
-  keeperOptions,
-  onPatch,
-  onDelete,
-  onAdd,
+function ConnectorReadOnlyRow({
+  label,
+  value,
+  hint,
+  testId,
 }: {
-  connector: GateConnectorInfo | null
-  drafts: ConnectorBindingDraft[]
-  keeperOptions: string[]
-  onPatch: (id: string, patch: Partial<ConnectorBindingDraft>) => void
-  onDelete: (id: string) => void
-  onAdd: () => void
+  label: string
+  value: ComponentChildren
+  hint?: ComponentChildren
+  testId?: string
 }) {
-  const dirOptions = connectorBindingDirectionOptions(connector)
+  return html`
+    <div class="cn-set-row" data-testid=${testId ?? null}>
+      <div class="cn-set-row-l">
+        <div class="cn-set-label">${label}</div>
+        ${hint ? html`<div class="cn-set-hint">${hint}</div>` : null}
+      </div>
+      <div class="cn-set-row-c">${value}</div>
+    </div>
+  `
+}
+
+function ConnectorBindingSummary({ connector }: { connector: GateConnectorInfo | null }) {
+  const bindings = connector?.configured_bindings ?? EMPTY_CONFIGURED_BINDINGS
 
   return html`
-    <div class="cn-drawer-section" data-testid="connector-binding-editor">
-      <h4>채널 → keeper 바인딩 (${drafts.length})</h4>
+    <div class="cn-drawer-section" data-testid="connector-binding-summary">
+      <h4>채널 → keeper 바인딩 (${bindings.length})</h4>
       <div class="cn-set-hint">
-        어떤 채널이 어떤 keeper에 연결되는지. 한 keeper가 여러 채널을 받거나, 채널마다 다른 keeper로 라우팅할 수 있습니다.
+        ${connector?.binding_source || 'GET /api/v1/gate/connectors'} 기준의 현재 바인딩입니다.
       </div>
-      ${drafts.length
-        ? drafts.map(draft => html`
-            <div class=${`cn-be ${draft.enabled ? '' : 'off'}`} data-testid="connector-binding-editor-row" data-drawer-binding=${draft.channel}>
-              <div class="cn-be-main">
-                <input
-                  class="cn-be-chn mono"
-                  aria-label="binding channel"
-                  value=${draft.channel}
-                  onInput=${(e: Event) => { onPatch(draft.id, { channel: (e.target as HTMLInputElement).value }) }}
-                />
-                <span class="cn-be-arr">→</span>
-                <span class="cn-be-kp">
-                  ${draft.keeper ? html`<${KeeperBadge} id=${draft.keeper} variant="sigil" size="sm" />` : null}
-                  <select
-                    class="cn-be-sel mono"
-                    aria-label="binding keeper"
-                    value=${draft.keeper}
-                    onInput=${(e: Event) => { onPatch(draft.id, { keeper: (e.target as HTMLSelectElement).value }) }}
-                  >
-                    ${keeperOptions.map(keeper => html`<option value=${keeper}>${keeper}</option>`)}
-                  </select>
-                </span>
-                <button
-                  type="button"
-                  class="cn-be-del"
-                  title="바인딩 삭제"
-                  onClick=${() => { onDelete(draft.id) }}
-                >✕</button>
-              </div>
-              <div class="cn-be-opts">
-                <div class="cn-be-dir" aria-label="binding direction">
-                  ${dirOptions.map(direction => html`
-                    <button
-                      type="button"
-                      class=${`cn-dir-b ${draft.direction === direction ? 'on' : ''}`}
-                      onClick=${() => { onPatch(draft.id, { direction }) }}
-                    >${direction}</button>
-                  `)}
+      ${bindings.length
+        ? html`
+            <div class="space-y-2">
+              ${bindings.map(binding => html`
+                <div data-testid="connector-binding-summary-row" data-drawer-binding=${binding.channel_id}>
+                  <${ConnectorBindingKeeperLink} key=${binding.channel_id} binding=${binding} />
                 </div>
-                <button
-                  type="button"
-                  class=${`set-toggle sm ${draft.enabled ? 'on' : ''}`}
-                  title=${draft.enabled ? '활성' : '일시중지'}
-                  onClick=${() => { onPatch(draft.id, { enabled: !draft.enabled }) }}
-                ><span class="knob"></span></button>
-              </div>
+              `)}
             </div>
-          `)
+          `
         : html`<div class="cn-bind-none">바인딩 없음 — 알림 전용 게이트</div>`}
-      <button type="button" class="cn-set-add" onClick=${onAdd}>＋ 바인딩 추가</button>
     </div>
   `
 }
@@ -2121,12 +2100,10 @@ function ConnectorBindingEditor({
 function ConnectorDetailDrawer({
   connectorId,
   connector,
-  keepers,
   onClose,
 }: {
   connectorId: KnownConnectorId
   connector: GateConnectorInfo | null
-  keepers: GateKeeperInfo[]
   onClose: () => void
 }) {
   useEffect(() => {
@@ -2149,7 +2126,6 @@ function ConnectorDetailDrawer({
       key=${connectorId}
       connectorId=${connectorId}
       connector=${connector}
-      keepers=${keepers}
       onClose=${onClose}
     />
   `
@@ -2158,51 +2134,22 @@ function ConnectorDetailDrawer({
 function ConnectorDetailDrawerBody({
   connectorId,
   connector,
-  keepers,
   onClose,
 }: {
   connectorId: KnownConnectorId
   connector: GateConnectorInfo | null
-  keepers: GateKeeperInfo[]
   onClose: () => void
 }) {
-  const [enabled, setEnabled] = useState(() => connectorStateLabel(connector) === 'connected')
-  const [botDraft, setBotDraft] = useState(() => connectorBotValue(connector))
-  const [replyMode, setReplyMode] = useState(() => connector?.reply_mode || 'manual')
-  const [bindingDrafts, setBindingDrafts] = useState(() => connectorBindingDrafts(connectorId, connector))
-
   const displayName = CONNECTOR_DISPLAY_NAMES[connectorId] ?? connectorId
   const tab = configDrawerTab.value
   const auditRows = connector?.recent_audit ?? []
-  const keeperOptions = useMemo(
-    () => keeperOptionsForBindingEditor(keepers, bindingDrafts),
-    [keepers, bindingDrafts],
-  )
-  const patchBindingDraft = (id: string, patch: Partial<ConnectorBindingDraft>) => {
-    setBindingDrafts(drafts => drafts.map(draft => draft.id === id ? { ...draft, ...patch } : draft))
-  }
-  const deleteBindingDraft = (id: string) => {
-    setBindingDrafts(drafts => drafts.filter(draft => draft.id !== id))
-  }
-  const addBindingDraft = () => {
-    setBindingDrafts(drafts => [
-      ...drafts,
-      {
-        id: `${connectorId}:new:${Date.now()}`,
-        channel: connector?.channel === 'webhook' ? '/hooks/new' : '#new-channel',
-        keeper: keeperOptions[0] ?? '',
-        direction: connector?.channel === 'webhook' ? 'inbound' : 'both',
-        enabled: true,
-      },
-    ])
-  }
 
   return html`
     <div class="cn-drawer-overlay" onClick=${onClose} data-testid="connector-detail-drawer">
       <div class="cn-drawer" onClick=${(e: Event) => { e.stopPropagation() }}>
         <div class="cn-drawer-hd">
           <div>
-            <h3>${channelIcon(connector?.channel ?? connectorId)} ${displayName} 설정</h3>
+            <h3>${channelIcon(connector?.channel ?? connectorId)} ${displayName} 상태 및 설정</h3>
             <span class="id">${connectorId}</span>
           </div>
           <button
@@ -2223,64 +2170,38 @@ function ConnectorDetailDrawerBody({
         </div>
         <div class="cn-drawer-body">
           ${tab === 'connection' && html`
-            <div class="cn-drawer-section">
-              <h4>연결</h4>
-              <div class="cn-set-row">
-                <div class="cn-set-row-l">
-                  <div class="cn-set-label">게이트 활성화</div>
-                  <div class="cn-set-hint">
-                    ${enabled ? '연결됨' : '비활성'} · status ${connectorStateLabel(connector)}
-                    ${connector?.gate_healthy !== null
-                      ? html` · gate ${connector?.gate_healthy ? 'healthy' : 'unhealthy'}`
-                      : null}
-                    ${connector?.updated_at ? html` · heartbeat ${timeAgo(connector.updated_at)}` : null}
-                  </div>
-                </div>
-                <div class="cn-set-row-c">
-                  <button
-                    type="button"
-                    class=${`set-toggle ${enabled ? 'on' : ''}`}
-                    title=${enabled ? '연결됨' : '비활성'}
-                    onClick=${() => { setEnabled(value => !value) }}
-                  ><span class="knob"></span></button>
-                </div>
-              </div>
-              <div class="cn-set-row">
-                <div class="cn-set-row-l">
-                  <div class="cn-set-label">Bot</div>
-                </div>
-                <div class="cn-set-row-c">
-                  <input
-                    class="cn-set-input mono"
-                    aria-label="connector bot"
-                    value=${botDraft}
-                    onInput=${(e: Event) => { setBotDraft((e.target as HTMLInputElement).value) }}
-                  />
-                </div>
-              </div>
-              <div class="cn-set-row">
-                <div class="cn-set-row-l">
-                  <div class="cn-set-label">${connectorScopeLabel(connector)}</div>
-                </div>
-                <div class="cn-set-row-c">
-                  <span class="mono cn-set-static">${connectorScopeValue(connector)}</span>
-                </div>
-              </div>
-              <div class="cn-set-row">
-                <div class="cn-set-row-l">
-                  <div class="cn-set-label">토큰</div>
-                </div>
-                <div class="cn-set-row-c">
-                  <div class="cn-set-path">
-                    <input class="cn-set-input mono short" readonly value="••••••••••" />
-                    <button
-                      type="button"
-                      class="cn-test-btn"
-                      onClick=${() => { showToast(`${displayName} token rotation placeholder`, 'warning') }}
-                    >재발급</button>
-                  </div>
-                </div>
-              </div>
+            <div class="cn-drawer-section" data-testid="connector-live-settings-summary">
+              <h4>연결 상태</h4>
+              <${ConnectorReadOnlyRow}
+                label="게이트 상태"
+                value=${html`<span class=${`cn-status-pill ${connectorStatusPillClass(connectorStateLabel(connector))}`}><span class="dot"></span>${connectorStatusPillLabel(connectorStateLabel(connector))}</span>`}
+                hint=${html`
+                  status ${connectorStateLabel(connector)}
+                  ${connector?.gate_healthy !== null
+                    ? html` · gate ${connector?.gate_healthy ? 'healthy' : 'unhealthy'}`
+                    : null}
+                  ${connector?.updated_at ? html` · heartbeat ${timeAgo(connector.updated_at)}` : null}
+                `}
+                testId="connector-readonly-status-row"
+              />
+              <${ConnectorReadOnlyRow}
+                label="Bot"
+                value=${html`<span class="mono cn-set-static">${connectorBotValue(connector) || '-'}</span>`}
+                testId="connector-readonly-bot-row"
+              />
+              <${ConnectorReadOnlyRow}
+                label=${connectorScopeLabel(connector)}
+                value=${html`<span class="mono cn-set-static">${connectorScopeValue(connector)}</span>`}
+              />
+              <${ConnectorReadOnlyRow}
+                label="Reply mode"
+                value=${html`<span class="mono cn-set-static">${connector?.reply_mode || 'manual'}</span>`}
+                testId="connector-reply-mode-summary"
+              />
+              <${ConnectorReadOnlyRow}
+                label="PID"
+                value=${html`<span class="mono cn-set-static">${connector?.pid || '-'}</span>`}
+              />
               ${connector?.error
                 ? html`
                     <div class="mt-2 rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-10)] px-2 py-1 text-2xs text-[var(--bad-light)]">
@@ -2289,37 +2210,12 @@ function ConnectorDetailDrawerBody({
                   `
                 : null}
             </div>
-            <div class="cn-drawer-section">
-              <h4>기본 응답 모드</h4>
-              <div class="cn-set-hint">바인딩별로 재정의하지 않으면 이 값을 따릅니다.</div>
-              <div class="cn-set-seg" data-testid="connector-reply-mode-editor">
-                ${DEFAULT_REPLY_MODE_OPTIONS.map(option => html`
-                  <button
-                    type="button"
-                    class=${`cn-set-seg-b ${replyMode === option ? 'on' : ''}`}
-                    onClick=${() => { setReplyMode(option) }}
-                  >${option}</button>
-                `)}
-              </div>
-            </div>
-            <${ConnectorBindingEditor}
-              connector=${connector}
-              drafts=${bindingDrafts}
-              keeperOptions=${keeperOptions}
-              onPatch=${patchBindingDraft}
-              onDelete=${deleteBindingDraft}
-              onAdd=${addBindingDraft}
-            />
+            <${ConnectorBindingSummary} connector=${connector} />
           `}
           ${tab === 'config' && html`
             <div class="cn-drawer-section">
               <div class="mb-2 flex items-center justify-between">
                 <h4>Config</h4>
-                <button
-                  type="button"
-                  class="cn-test-btn"
-                  onClick=${() => { showToast(`${displayName} connection test placeholder`, 'warning') }}
-                >Test connection</button>
               </div>
               <${ConnectorConfigForm} connectorId=${connectorId} />
             </div>
@@ -2400,14 +2296,6 @@ export function ConnectorStatusPanel() {
     return html`<${ErrorState} message=${`Gate: ${snapshot.gateError}`} />`
   }
 
-  if (filterId && allConnectors.length > 0 && visibleConnectors.length === 0) {
-    return html`
-      <${SurfaceCard} class="!border-dashed !border-[var(--color-border-default)] !px-3 !py-6 text-center text-xs text-[var(--color-fg-disabled)]">
-        ${filterId} sidecar가 아직 Gate에 등록되지 않았습니다. 시작 후 다시 확인하세요.
-      </${SurfaceCard}>
-    `
-  }
-
   if (!d && visibleConnectors.length === 0) {
     // Cold start: gate has not advertised any connector yet, and no per-bridge
     // filter is active. Surface the 4-card onboarding grid so a new operator
@@ -2434,6 +2322,7 @@ export function ConnectorStatusPanel() {
         activeCount=${activeCount}
         onRefresh=${() => { void refresh() }}
       />
+      <${ConnectorRouteSwitcher} activeConnectorId=${filterId as KnownConnectorId | null} />
 
       ${!filterId
         ? html`
@@ -2526,7 +2415,6 @@ export function ConnectorStatusPanel() {
             <${ConnectorDetailDrawer}
               connectorId=${configDrawerConnectorId.value}
               connector=${findKnownConnector(allConnectors, configDrawerConnectorId.value)}
-              keepers=${snapshot.keepers}
               onClose=${() => { configDrawerConnectorId.value = null }}
             />
           `

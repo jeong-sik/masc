@@ -6,7 +6,7 @@ import type { GroundedVerdict, RouteState, TabId } from '../types'
 import type { DashboardCdalHealth, DashboardFleetSafetyHealth, DashboardKeeperReactionLedgerHealth, DashboardRuntimeResolution, Keeper } from '../types'
 import type { DashboardRuntimeProbePayload } from '../api/dashboard'
 import { fetchDashboardRuntimeProbe } from '../api/dashboard'
-import { route } from '../router'
+import { hashForRoute, navigate, route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
 import { dashboardWsConnected, dashboardWsLastError, dashboardWsReady, dashboardWsSseFallbackActive } from '../dashboard-ws-state'
@@ -33,7 +33,9 @@ import {
 } from '../config/navigation'
 import { ObservatoryFilterBar } from './common/observatory-filter-bar'
 import { ChevronRight, ChevronLeft } from 'lucide-preact'
+import { ExternalLink } from 'lucide-preact'
 import { ScrollToTopButton } from './common/scroll-to-top'
+import { CopyIdButton } from './common/copy-id-button'
 import { formatElapsedCompact } from '../lib/format-time'
 import { unacknowledgedCount } from './common/error-notification-state'
 import { ErrorPanel } from './common/error-panel'
@@ -41,10 +43,12 @@ import { Bell } from 'lucide-preact'
 import { ringFocusClasses } from './common/ring'
 import { SurfaceIcon } from './surface-icon'
 import { governanceData } from './governance-signals'
+import { Breadcrumb, type BreadcrumbItem } from './common/breadcrumb'
 import { RouteLink } from './common/route-link'
 import {
   isWidgetSoloRoute,
   WidgetSoloBar,
+  widgetSoloUrlForRoute,
 } from './widget-solo'
 
 const buildIdentityOpen = signal(false)
@@ -64,6 +68,7 @@ const LazyOverview = lazy(async () => ({ default: (await import('./overview/over
 const LazyStatus = lazy(async () => ({ default: (await import('./status')).Status }))
 const LazyKeeperDetailPage = lazy(async () => ({ default: (await import('./keeper-detail-page')).KeeperDetailPage }))
 const LazyBoardSurface = lazy(async () => ({ default: (await import('./board/board-surface')).BoardSurface }))
+const LazyScheduleSurface = lazy(async () => ({ default: (await import('./schedule/schedule-surface')).ScheduleSurface }))
 const LazyWork = lazy(async () => ({ default: (await import('./work')).Work }))
 const LazyOperations = lazy(async () => ({ default: (await import('./operations-panel')).OperationsPanel }))
 const LazyConnectors = lazy(async () => ({ default: (await import('./connector-status')).ConnectorStatusPanel }))
@@ -1259,6 +1264,12 @@ function TabContent() {
           <${LazyBoardSurface} />
         <//>
       `
+    case 'schedule':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('Schedule')}>
+          <${LazyScheduleSurface} />
+        <//>
+      `
     case 'approvals':
       return html`
         <${Suspense} fallback=${lazyTabFallback('Approvals')}>
@@ -1328,6 +1339,84 @@ function TabContent() {
   }
 }
 
+/** Pure: build the shareable URL for the current section. Uses
+    window.location as the truth source (the router writes to it
+    already) so we never diverge from what the browser address bar
+    shows. Returns empty string when window is unavailable
+    (SSR/happy-dom without location) so the caller can hide the
+    share affordance gracefully. */
+function currentSectionShareUrl(): string {
+  if (typeof window === 'undefined' || window.location === undefined) {
+    return ''
+  }
+  return window.location.href
+}
+
+/** Pure: derive the navigation trail rendered above the section title.
+    Each crumb is either a clickable ancestor (tab) or the terminal
+    leaf (current section label, non-navigable). Returns a flat array:
+    [] when both tab + section are absent (home / unknown),
+    [tab] when only tab is active (no section drilldown),
+    [tab, section] when the operator has drilled into a per-section view.
+
+    Why this exists: SurfaceLead previously rendered only the leaf
+    label ("Discord"). The parent tab ("Connectors") was implied by
+    the left nav but not surfaced in the content area — a newcomer
+    opening a deep link had to infer the hierarchy. Every modern web
+    app (GitHub / Linear / Notion / Vercel) renders the trail above
+    the page title for exactly this reason. */
+interface BreadcrumbCrumb {
+  label: string
+  navigableTab: TabId | null
+}
+
+function deriveBreadcrumbTrail(
+  tabLabel: string | null,
+  sectionLabel: string | null,
+  tabId: TabId | null,
+): BreadcrumbCrumb[] {
+  if (tabLabel === null && sectionLabel === null) return []
+  if (sectionLabel === null) {
+    return tabLabel !== null ? [{ label: tabLabel, navigableTab: null }] : []
+  }
+  if (tabLabel === null) {
+    return [{ label: sectionLabel, navigableTab: null }]
+  }
+  return [
+    { label: tabLabel, navigableTab: tabId },
+    { label: sectionLabel, navigableTab: null },
+  ]
+}
+
+function navigateCrumb(event: MouseEvent, tab: TabId): void {
+  if (
+    event.defaultPrevented
+    || event.button !== 0
+    || event.metaKey
+    || event.ctrlKey
+    || event.shiftKey
+    || event.altKey
+  ) {
+    return
+  }
+  event.preventDefault()
+  navigate(tab)
+}
+
+function breadcrumbItemsForTrail(trail: BreadcrumbCrumb[]): BreadcrumbItem[] {
+  return trail.map((crumb, index) => {
+    const current = index === trail.length - 1
+    if (crumb.navigableTab !== null && !current) {
+      return {
+        label: crumb.label,
+        href: hashForRoute(crumb.navigableTab),
+        onClick: (event: MouseEvent) => navigateCrumb(event, crumb.navigableTab!),
+      }
+    }
+    return { label: crumb.label, current }
+  })
+}
+
 /** Pure: compose the browser tab title from the current surface +
     section. Reference: every polished SPA (GitHub / Linear / Notion /
     Vercel) sets document.title so operators with multiple tabs open
@@ -1364,6 +1453,99 @@ export function isKeeperDetailDashboardRoute(routeState: RouteState): boolean {
     && routeState.params.keeper.trim() !== ''
 }
 
+// Surfaces that render their own primary header (a bespoke per-surface title
+// block) and therefore must NOT get the generic dashboard SurfaceLead above
+// them — otherwise the screen shows a duplicate title: the generic <h1> nav
+// label stacked over the surface's own <h1>. When a surface component renders
+// its own top-of-body header, add its TabId here (keep this in sync with the
+// route registry). Verified against the v2 design audit (2026-06-20): the
+// design gives every surface a single bespoke header plus a slim top-bar crumb,
+// with no generic lead.
+//
+//   overview   → overview/overview.ts  <header class="ov-head">      <h1>운영 개요</h1>
+//   approvals  → approvals-surface.ts  <header class="ov-head">      <h1>승인 · HITL 큐</h1>
+//   schedule   → schedule-surface.ts   <header class="ov-head">      <h1>예약 자동화</h1>
+//   fusion     → fusion-surface.ts     <header class="ov-head fus-head"> <h1>Fusion</h1>
+//   workspace  → work.ts               <header class="wk-head">      <h1>작업 · 목표</h1>
+//   logs       → logs.ts               <header class="v2-logs-head">  <h1>이벤트 로그</h1>
+//   cockpit    → cockpit/cockpit.ts    <header class="cp-head">      <h1>Cockpit</h1>
+//   settings   → settings-surface.ts   <header class="set-content-h"> <h1>…</h1>
+//   connectors → connector-status.ts   (prototype surface, own header)
+//
+// Surfaces WITHOUT their own header (monitoring, command, lab, board) keep the
+// generic SurfaceLead, which supplies their title.
+const SURFACE_OWN_LEAD_IDS: ReadonlySet<TabId> = new Set([
+  'overview',
+  'approvals',
+  'schedule',
+  'fusion',
+  'workspace',
+  'logs',
+  'cockpit',
+  'settings',
+  'connectors',
+])
+
+export function shouldRenderSurfaceLead(routeState: RouteState): boolean {
+  if (isKeeperDetailDashboardRoute(routeState)) return false
+  return !SURFACE_OWN_LEAD_IDS.has(routeState.tab)
+}
+
+function SurfaceLead() {
+  const currentTab = route.value.tab
+  const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
+  const currentSection = currentSectionForRoute(route.value)
+  const soloUrl = widgetSoloUrlForRoute(route.value)
+
+  const description = currentSection?.description ?? currentView?.description ?? null
+  const title = currentSection?.label ?? currentView?.label ?? 'Home'
+  const shareUrl = currentSectionShareUrl()
+  // Only surface a trail when the operator has drilled into a section —
+  // otherwise the crumb would be \"Connectors\" right above a \"Connectors\"
+  // title, pure duplication.
+  const trail = currentSection !== null
+    ? deriveBreadcrumbTrail(currentView?.label ?? null, currentSection.label, currentTab)
+    : []
+
+  return html`
+    <div class="v2-shell-panel mb-3 flex flex-col gap-1.5">
+      ${trail.length > 0
+        ? html`<${Breadcrumb}
+            items=${breadcrumbItemsForTrail(trail)}
+            ariaLabel="Breadcrumb"
+            testId="surface-breadcrumb"
+            dataSurfaceBreadcrumb=${true}
+          />`
+        : null}
+      <div class="flex items-center gap-2">
+        <h1 class="text-lg font-semibold tracking-normal text-[var(--color-fg-secondary)] leading-tight">
+          ${title}
+        </h1>
+        ${shareUrl !== ''
+          ? html`<${CopyIdButton}
+              value=${shareUrl}
+              label=${`Section link (${title})`}
+              ariaLabel="Copy current section URL"
+              size=${14}
+            />`
+          : null}
+        <a
+          href=${soloUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          class=${`v2-shell-action inline-flex size-7 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
+          title="Open this surface in a solo view"
+          aria-label="Open this surface in a solo view"
+          data-testid="dashboard-widget-solo-link"
+        >
+          <${ExternalLink} size=${14} aria-hidden="true" />
+        </a>
+      </div>
+      ${description ? html`<p class="m-0 max-w-[72rem] text-xs leading-[var(--lh-body)] text-[var(--color-fg-muted)]">${description}</p>` : null}
+    </div>
+  `
+}
+
 export function DashboardMain() {
   useSurfaceDocumentTitle()
 
@@ -1375,6 +1557,7 @@ export function DashboardMain() {
   const soloMode = isWidgetSoloRoute(route.value)
   const immersiveSurface = route.value.tab === 'code' || route.value.tab === 'keepers'
   const keeperDetailRoute = isKeeperDetailDashboardRoute(route.value)
+  const renderSurfaceLead = shouldRenderSurfaceLead(route.value)
   const warmingBanner = namespaceTruthInitializing.value ? html`
     <div class=${`v2-shell-panel ${immersiveSurface
       ? 'shrink-0 border-b border-solid border-[var(--warn-20)] bg-[var(--warn-10)] px-4 py-1.5 text-center text-xs text-[var(--color-status-warn)]'
@@ -1419,6 +1602,7 @@ export function DashboardMain() {
 
   return html`
     ${warmingBanner}
+    ${renderSurfaceLead ? html`<${SurfaceLead} />` : null}
     ${keeperDetailRoute ? null : html`<${ObservatoryFilterBar} />`}
     <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
       <div class="animate-in fade-in slide-in-from-bottom-2 duration-[var(--t-slow)] fill-mode-both">

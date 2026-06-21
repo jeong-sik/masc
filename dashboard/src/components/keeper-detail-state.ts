@@ -5,17 +5,10 @@ import { hydrateKeeperStatus, selectKeeper } from '../keeper-runtime'
 import { activeKeeperName } from '../keeper-state'
 import { registerKeeperTurnRefresh } from '../sse-store'
 import { loadKeeperConfig, resetKeeperConfig } from './keeper-config-panel'
+import { keeperMobilePane } from './keeper-mobile-pane-state'
+export { keeperMobilePane, type KeeperMobilePane } from './keeper-mobile-pane-state'
 
 export const selectedKeeper = signal<Keeper | null>(null)
-
-/** Mobile (≤860px) single-pane switch for the keeper workspace grid.
- * Desktop shows roster | conversation | rail side by side; below 860px only
- * one pane fits at a time, so this selects the visible one. Defaults to 'chat'
- * because entering keeper detail means a keeper is focused. Roster row select
- * and `openKeeperDetail` set 'chat'; the chat header back button sets 'roster'.
- * Read by `.kw-grid[data-mobile-pane]` in keeper-workspace.css. */
-export type KeeperMobilePane = 'roster' | 'chat'
-export const keeperMobilePane = signal<KeeperMobilePane>('chat')
 
 registerKeeperTurnRefresh((keeperName: string) => {
   if (keeperName !== activeKeeperName.value) return

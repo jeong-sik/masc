@@ -236,6 +236,7 @@ describe('ConnectorStatusPanel', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
+    window.location.hash = '#connectors?section=connector-status'
   })
 
   afterEach(async () => {
@@ -353,6 +354,71 @@ describe('ConnectorStatusPanel', () => {
     expect(detailPanel!.textContent).toContain('iMessage')
     expect(detailPanel!.textContent).toContain('reply self-chat')
     expect(detailPanel!.textContent).toContain('self-chat self-chat-guid')
+  })
+
+  it('routes connector sub-states through the route switcher', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const discord = sampleConnectorsResponse().connectors[0]
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse({
+      connectors: [
+        discord,
+        {
+          ...discord,
+          connector_id: 'imessage',
+          display_name: 'iMessage',
+          channel: 'imessage',
+          status_path: '/tmp/imessage_status.json',
+          binding_store_path: '/tmp/imessage_bindings.json',
+          audit_path: '/tmp/imessage_binding_audit.jsonl',
+          names_path: '/tmp/imessage_names.json',
+          bot_user_name: 'Messages Bot',
+          reply_mode: 'self-chat',
+          self_chat_guid: 'self-chat-guid',
+          configured_bindings: [{ channel_id: 'imsg-workspace', keeper_name: 'nova' }],
+          recent_audit: [],
+        },
+      ],
+      total: 2,
+      active_count: 2,
+    }))
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
+
+    window.location.hash = '#connectors?section=connector-status&connector=imessage'
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('[data-testid="connector-route-switcher"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="connector-route-imessage"]')?.getAttribute('data-active')).toBe('true')
+    expect(container.querySelector('[data-testid="connector-route-all"]')?.getAttribute('data-active')).toBe('false')
+    expect(container.querySelector('[data-testid="connector-gate-grid"]')).toBeNull()
+    expect(container.textContent).toContain('iMessage')
+    expect(container.textContent).toContain('reply self-chat')
+
+    const allButton = container.querySelector<HTMLButtonElement>('[data-testid="connector-route-all"]')
+    expect(allButton).not.toBeNull()
+    allButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushUi()
+
+    expect(window.location.hash).toBe('#connectors?section=connector-status')
+    expect(container.querySelector('[data-testid="connector-route-all"]')?.getAttribute('data-active')).toBe('true')
+    expect(container.querySelector('[data-testid="connector-gate-grid"]')).not.toBeNull()
+
+    const telegramButton = container.querySelector<HTMLButtonElement>('[data-testid="connector-route-telegram"]')
+    expect(telegramButton).not.toBeNull()
+    telegramButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushUi()
+
+    expect(window.location.hash).toBe('#connectors?section=connector-status&connector=telegram')
+    expect(container.querySelector('[data-testid="connector-route-telegram"]')?.getAttribute('data-active')).toBe('true')
+    expect(container.querySelector('[data-testid="connector-gate-grid"]')).toBeNull()
+    expect(container.textContent).toContain('Telegram')
   })
 
   it('preserves header expansion state per connector when switching selected detail', async () => {
@@ -1144,13 +1210,47 @@ describe('ConnectorStatusPanel v2 surface layout', () => {
     expect(container.querySelector('[data-testid="connector-operations-rollup"]')).not.toBeNull()
     expect(container.querySelector('.cn-toolbar')).not.toBeNull()
     expect(container.querySelector('[data-testid="connector-search-input"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="connector-add-button"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="connector-add-button"]')).toBeNull()
     expect(container.querySelector('[data-testid="connector-gate-strip"]')).not.toBeNull()
     expect(container.textContent).toContain('Gate')
     expect(container.textContent).toContain('외부 게이트 4개')
     expect(container.textContent).toContain('최근 감사 로그')
     expect(container.textContent).toContain('운영 상세')
-    expect(container.textContent).toContain('Add connector')
+    expect(container.textContent).not.toContain('Add connector')
+  })
+
+  it('routes backed channel keeper bindings to the keeper conversation', async () => {
+    const originalHash = window.location.hash
+    try {
+      const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+      const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse())
+      const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
+
+      const { ConnectorStatusPanel } = await loadComponentWithApi({
+        fetchGateStatus,
+        fetchGateConnectors,
+        fetchGateKeepers,
+        lastEvent: signal(null),
+      })
+
+      render(html`<${ConnectorStatusPanel} />`, container)
+      await flushUi()
+
+      const bindingLink = container.querySelector<HTMLButtonElement>(
+        '[data-testid="connector-binding-keeper-link"][data-binding-channel="123456"]',
+      )
+      expect(bindingLink).not.toBeNull()
+      expect(bindingLink?.getAttribute('data-binding-keeper')).toBe('luna')
+      expect(bindingLink?.textContent).toContain('luna')
+
+      bindingLink!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await flushUi()
+
+      expect(window.location.hash).toBe('#keepers?keeper=luna')
+    } finally {
+      window.location.hash = originalHash
+      window.dispatchEvent(new HashChangeEvent('hashchange'))
+    }
   })
 
   it('pins connector status pill mapping across the closed four-state domain', async () => {
@@ -1293,19 +1393,22 @@ describe('ConnectorStatusPanel v2 surface layout', () => {
 
     const drawer = container.querySelector('[data-testid="connector-detail-drawer"]')
     expect(drawer).not.toBeNull()
-    expect(drawer!.textContent).toContain('Discord 설정')
+    expect(drawer!.textContent).toContain('Discord 상태 및 설정')
     expect(drawer!.textContent).toContain('connection')
     expect(drawer!.textContent).toContain('config')
     expect(drawer!.textContent).toContain('events')
-    expect(drawer!.textContent).toContain('연결')
-    expect(drawer!.textContent).toContain('기본 응답 모드')
+    expect(drawer!.textContent).toContain('연결 상태')
+    expect(drawer!.textContent).toContain('Reply mode')
     expect(drawer!.textContent).toContain('채널 → keeper 바인딩')
-    expect(drawer!.querySelector('[data-testid="connector-reply-mode-editor"]')).not.toBeNull()
-    expect(drawer!.querySelector('[data-testid="connector-binding-editor"]')).not.toBeNull()
-    expect(drawer!.querySelectorAll('[data-testid="connector-binding-editor-row"]').length).toBe(1)
-    expect(drawer!.textContent).toContain('both')
-    expect(drawer!.textContent).toContain('inbound')
-    expect(drawer!.textContent).toContain('outbound')
+    expect(drawer!.querySelector('[data-testid="connector-live-settings-summary"]')).not.toBeNull()
+    expect(drawer!.querySelector('[data-testid="connector-reply-mode-summary"]')).not.toBeNull()
+    expect(drawer!.querySelector('[data-testid="connector-binding-summary"]')).not.toBeNull()
+    expect(drawer!.querySelector('[data-testid="connector-reply-mode-editor"]')).toBeNull()
+    expect(drawer!.querySelector('[data-testid="connector-binding-editor"]')).toBeNull()
+    expect(drawer!.querySelectorAll('[data-testid="connector-binding-summary-row"]').length).toBe(1)
+    expect(drawer!.textContent).not.toContain('바인딩 추가')
+    expect(drawer!.textContent).not.toContain('재발급')
+    expect(drawer!.textContent).not.toContain('Test connection')
 
     const configTab = Array.from(drawer!.querySelectorAll('button')).find(b => b.textContent === 'config')
     expect(configTab).not.toBeUndefined()
@@ -1313,9 +1416,10 @@ describe('ConnectorStatusPanel v2 surface layout', () => {
     await flushUi()
 
     expect(drawer!.textContent).toContain('server in-process')
+    expect(drawer!.textContent).not.toContain('Test connection')
   })
 
-  it('preserves connector config drafts across same-connector refreshes', async () => {
+  it('refreshes connector drawer read-only fields from the backend snapshot', async () => {
     const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
     const firstConnector = {
       ...sampleConnectorsResponse().connectors[0],
@@ -1355,18 +1459,14 @@ describe('ConnectorStatusPanel v2 surface layout', () => {
     configButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushUi()
 
-    const botInput = container.querySelector<HTMLInputElement>('input[aria-label="connector bot"]')
-    expect(botInput).not.toBeNull()
-    expect(botInput!.value).toBe('server bot initial')
-    botInput!.value = 'operator unsaved draft'
-    botInput!.dispatchEvent(new Event('input', { bubbles: true }))
-    await flushUi()
+    expect(container.querySelector('input[aria-label="connector bot"]')).toBeNull()
+    expect(container.querySelector('[data-testid="connector-readonly-bot-row"]')?.textContent).toContain('server bot initial')
 
     last.value = { type: 'connector_refresh' }
     await new Promise(resolve => setTimeout(resolve, 2100))
     await flushUi()
 
     expect(fetchGateConnectors).toHaveBeenCalledTimes(2)
-    expect(botInput!.value).toBe('operator unsaved draft')
+    expect(container.querySelector('[data-testid="connector-readonly-bot-row"]')?.textContent).toContain('server bot refreshed')
   })
 })

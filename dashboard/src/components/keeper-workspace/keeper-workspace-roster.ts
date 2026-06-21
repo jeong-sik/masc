@@ -40,6 +40,15 @@ type RosterSort = 'status' | 'name' | 'att'
 type KeeperWorkspaceRouteSurface = 'monitoring' | 'keepers'
 type RosterMenuState = { keeper: Keeper; x: number; y: number } | null
 type IconComponent = typeof Play
+type RosterFleetSummary = {
+  total: number
+  running: number
+  paused: number
+  offline: number
+  attention: number
+  approvalGate: number
+  highContext: number
+}
 
 const LIFECYCLE_COPY: Record<KeeperActionKey, { label: string; title: string; icon: IconComponent; danger?: boolean }> = {
   pause: {
@@ -104,6 +113,32 @@ function attentionCount(keeper: Keeper): number {
 }
 function needsAttention(keeper: Keeper): boolean {
   return keeper.needs_attention === true || attentionCount(keeper) > 0
+}
+
+export function rosterFleetSummary(rows: readonly Keeper[]): RosterFleetSummary {
+  const summary: RosterFleetSummary = {
+    total: rows.length,
+    running: 0,
+    paused: 0,
+    offline: 0,
+    attention: 0,
+    approvalGate: 0,
+    highContext: 0,
+  }
+
+  for (const keeper of rows) {
+    const bucket = keeperBucket(keeper)
+    if (bucket === 'running') summary.running += 1
+    if (bucket === 'paused') summary.paused += 1
+    if (bucket === 'offline') summary.offline += 1
+    if (needsAttention(keeper)) summary.attention += 1
+    if (keeper.current_gate?.kind === 'approval_required') summary.approvalGate += 1
+    if (typeof keeper.context_ratio === 'number' && Number.isFinite(keeper.context_ratio) && keeper.context_ratio >= 0.8) {
+      summary.highContext += 1
+    }
+  }
+
+  return summary
 }
 
 /** Numeric attention weight for the 'att' sort: attention-needing keepers rank
@@ -263,6 +298,34 @@ function lifecycleActions(keeper: Keeper): KeeperActionKey[] {
   return actions
 }
 
+function pct(count: number, total: number): string {
+  if (total <= 0 || count <= 0) return '0%'
+  return `${Math.max(4, Math.round((count / total) * 100))}%`
+}
+
+function KeeperFleetSummaryBand({ summary }: { summary: RosterFleetSummary }): VNode {
+  return html`
+    <section class="kw-roster-summary" data-testid="kw-roster-summary" aria-label="키퍼 플릿 요약">
+      <div class="kw-roster-meter" aria-hidden="true">
+        <span class="run" style=${{ width: pct(summary.running, summary.total) }}></span>
+        <span class="pause" style=${{ width: pct(summary.paused, summary.total) }}></span>
+        <span class="off" style=${{ width: pct(summary.offline, summary.total) }}></span>
+      </div>
+      <div class="kw-roster-summary-grid">
+        <div class="kw-roster-stat"><b>${summary.total}</b><span>전체</span></div>
+        <div class="kw-roster-stat ok"><b>${summary.running}</b><span>실행</span></div>
+        <div class="kw-roster-stat warn"><b>${summary.paused}</b><span>대기</span></div>
+        <div class="kw-roster-stat idle"><b>${summary.offline}</b><span>중지</span></div>
+      </div>
+      <div class="kw-roster-flags">
+        <span class=${summary.attention > 0 ? 'hot' : ''}>주의 ${summary.attention}</span>
+        <span class=${summary.approvalGate > 0 ? 'gate' : ''}>승인 ${summary.approvalGate}</span>
+        <span class=${summary.highContext > 0 ? 'ctx' : ''}>CTX 80%+ ${summary.highContext}</span>
+      </div>
+    </section>
+  `
+}
+
 function KeeperRosterMenu({
   state,
   onClose,
@@ -375,6 +438,7 @@ export function KeeperWorkspaceRoster({
   }, [menu])
 
   const all = keepers.value
+  const summary = rosterFleetSummary(all)
   const counts = {
     all: all.length,
     run: all.filter(k => keeperBucket(k) === 'running').length,
@@ -504,6 +568,7 @@ export function KeeperWorkspaceRoster({
               onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
             />
           </div>
+          <${KeeperFleetSummaryBand} summary=${summary} />
           <div class="kw-roster-filters v2-monitoring-toolbar" role="group" aria-label="상태 필터">
             ${filterChips.map(chip => html`
               <button

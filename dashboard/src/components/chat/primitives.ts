@@ -2179,8 +2179,11 @@ type TraceOrderItem =
   | { kind: 'tool'; entry: KeeperConversationEntry; output: ToolCallEntry | null }
 
 function traceOrderTs(item: TraceOrderItem): string {
-  // ISO-8601 strings sort lexicographically == chronologically. A step without
-  // `ts` (backend-normalized, no timestamp surfaced from the wire) sorts first.
+  // ISO-8601 strings sort lexicographically within one clock domain. This merge
+  // spans two: think/reason `ts` is stamped on the client when the delta
+  // arrives, tool `entry.timestamp` comes from the server (ts_unix). Live
+  // ordering is best-effort chronological and can cross within ~1 RTT; a step
+  // without `ts` (backend-normalized, no timestamp from the wire) sorts first.
   if (item.kind === 'tool') return item.entry.timestamp ?? ''
   // Only think/reason carry `ts`; the tool variant of ChatTraceStep does not
   // (and is never a 'trace' item here, but narrow for type safety).

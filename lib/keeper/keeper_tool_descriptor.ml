@@ -776,6 +776,13 @@ let masc_fusion_schema =
         "string"
         "Panel preset name from runtime.toml [fusion.presets]. Omitted uses \
          the configured default_preset."
+    ; property
+        "web_tools"
+        "boolean"
+        "When true, the panel and judge agents are given web_search / \
+         web_fetch tools to ground their answers. Defaults to false; the \
+         selected preset may also enable web tools on its own (the effective \
+         setting is this flag OR the preset's)."
     ]
 ;;
 
@@ -1187,7 +1194,9 @@ let internal_descriptors : t list =
          insights, and blind spots. Advisory only: this keeper turn continues \
          immediately and the synthesis arrives asynchronously on this keeper's \
          chat lane (also visible in the dashboard). Returns a status with a \
-         run_id. Gated by runtime.toml [fusion] (disabled by default)."
+         run_id. Set web_tools=true to let the panel and judge ground their \
+         answers with web_search / web_fetch. Gated by runtime.toml [fusion] \
+         (disabled by default)."
       ~input_schema:masc_fusion_schema
       (* RFC-0252 §159/§177: 심의 가치는 키퍼(이미 LLM)가 스스로 판단해
          masc_fusion 을 직접 호출하는 것으로 표현된다. 따라서 키퍼가 LLM 도구

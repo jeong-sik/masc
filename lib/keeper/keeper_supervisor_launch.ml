@@ -158,16 +158,16 @@ let launch_supervised_fiber
       Eio_guard.protect
         (fun () ->
            try
-             (* RFC-0125 P4: opt-in keeper-level max-turn watchdog.
-                When [MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC] is set
-                to a positive float, race the keepalive loop against
+             (* RFC-0125 P4: default-on keeper-level max-turn watchdog.
+                [MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC] defaults to
+                1800.0 (30 min); set it to 0 (or a negative value) to
+                disable. When enabled, race the keepalive loop against
                 [Eio.Time.sleep ctx.clock t] via [Eio.Fiber.first].
                 Timer expiry stamps
                 [Stale_turn_timeout (In_turn_hung ...)] BEFORE the
                 timer fiber returns so the existing watchdog_triggered
                 branch (below) treats the cancellation as a crash and
-                [sweep_and_recover] restarts the keeper. Default
-                disabled — opt-in. *)
+                [sweep_and_recover] restarts the keeper. *)
              (match
                 Env_config_runtime.Keeper_max_turn_watchdog.timeout_sec_opt
                   ()

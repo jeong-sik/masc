@@ -1556,6 +1556,8 @@
 
 (include stanzas/test_env_config_keeper_poll_intervals.inc)
 
+(include stanzas/test_env_config_keeper_max_turn_watchdog.inc)
+
 (include stanzas/test_env_config_nonneg.inc)
 
 (include stanzas/test_env_config_sandbox.inc)

@@ -234,7 +234,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_HTTP_AUTH_STRICT` | feature_flag | n/a | n/a | 317 |  |
 | `MASC_JANITOR_INTERVAL_SEC` | typed:float | unclassified | unclassified | 876 | Bootstrap janitor tick interval (seconds). Drives the SSE/session/ rate-limit/webrtc reaper loop in [server_bootstrap... |
 | `MASC_KEEPER_BOOTSTRAP_WINDOW_SEC` | typed:float | unclassified | unclassified | 852 | Keeper world observation bootstrap window (seconds). Default: 300 (5 min). |
-| `MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 417 | {1 Keeper Max-Turn Watchdog (RFC-0109 P4)} Opt-in keeper-level wall-clock watchdog. Default disabled — opt-in via [... |
+| `MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 417 | {1 Keeper Max-Turn Watchdog (RFC-0125 P4)} Default-on keeper-level wall-clock watchdog. Default 1800.0 (30 min). Set to 0 to disable. |
 | `MASC_KEEPER_MID_TURN_PROGRESS_TIMEOUT_SEC` | typed:float | Timeouts | operator | 465 | In-turn progress-silence threshold in seconds; produces [Mid_turn_no_progress] when a running turn records no progres... |
 | `MASC_KEEPER_STALE_RUN_SEC` | typed:float | unclassified | unclassified | 437 | {1 Keeper Stale-Run Window (RFC-0250)} Default-on wall-clock window for the no-turn-produced case, distinct from the ... |
 | `MASC_KEEPER_ZOMBIE_THRESHOLD_SEC` | typed:float | unclassified | unclassified | 10 | Threshold for keeper agents (longer grace period, default 1 hour) |

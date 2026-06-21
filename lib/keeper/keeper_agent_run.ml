@@ -709,7 +709,10 @@ let run_turn
                  previously fabricated 0.95; we now render absence until the
                  runtime pipeline exposes the effective value. See PR
                  description for adversarial gap analysis. *)
-            ; max_tokens = Some max_tokens
+            ; max_tokens =
+                (match pre_dispatch_max_tokens_error with
+                 | None -> Some max_tokens
+                 | Some _ -> None)
             ; thinking_budget = tctx.thinking_budget
             ; enable_thinking = tctx.thinking_enabled
             }

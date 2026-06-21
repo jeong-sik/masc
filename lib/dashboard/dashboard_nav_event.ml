@@ -43,7 +43,9 @@ let valid_sections =
   ; "connectors", [ "connector-status" ]
   ; ( "workspace"
     , [ "board"; "sub-boards"; "moderation"; "planning"; "repositories"; "verification"; "work" ] )
-  ; "lab", [ "tools"; "harness"; "design-canvas"; "memory-explore"; "performance"; "keeper-memory-health" ]
+  ; ( "lab"
+    , [ "tools"; "harness"; "performance"; "memory-subsystems"; "keeper-memory-health" ]
+    )
   ; "code", [ "ide-shell" ]
   ]
 ;;

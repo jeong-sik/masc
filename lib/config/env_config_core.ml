@@ -499,11 +499,11 @@ let governance_level () =
 
 let disable_hitl_env_key = "MASC_DISABLE_HITL"
 
-(** Whether to disable HITL (human-in-the-loop) approval gates. Default: true.
+(** Whether to disable HITL (human-in-the-loop) approval gates. Default: false.
     @category Security
     @ops_class operator *)
 let disable_hitl () =
-  get_bool ~default:true "MASC_DISABLE_HITL"
+  get_bool ~default:false disable_hitl_env_key
 
 (** {1 Build Identity} *)
 

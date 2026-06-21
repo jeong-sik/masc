@@ -1,10 +1,15 @@
 import { html } from 'htm/preact'
-import type {
-  DashboardScheduledAutomation,
-  DashboardScheduledAutomationRequest,
+import { useState } from 'preact/hooks'
+import {
+  resolveScheduleApproval,
+  type DashboardScheduleDecision,
+  type DashboardScheduledAutomation,
+  type DashboardScheduledAutomationRequest,
 } from '../../api'
 import { formatDateTimeKo } from '../../lib/format-time'
+import { ActionButton } from '../common/button'
 import { StatusChip, type StatusChipTone } from '../common/status-chip'
+import { showToast } from '../common/toast'
 
 function enumLabel(value: string | null | undefined): string {
   if (!value) return '-'
@@ -205,12 +210,100 @@ function KeeperActionCell({ request }: { request: DashboardScheduledAutomationRe
   `
 }
 
-function ScheduleRow({ request }: { request: DashboardScheduledAutomationRequest }) {
+function isTerminalStatus(status: string | null | undefined): boolean {
+  switch (status) {
+    case 'succeeded':
+    case 'failed':
+    case 'rejected':
+    case 'cancelled':
+    case 'expired':
+      return true
+    default:
+      return false
+  }
+}
+
+function isApprovalActionable(request: DashboardScheduledAutomationRequest): boolean {
+  if (isTerminalStatus(request.status) || isTerminalStatus(request.effective_status)) return false
+  return request.operator_action === 'approve_or_reject'
+    || request.execution_readiness === 'blocked_approval'
+    || request.execution_readiness === 'awaiting_approval'
+    || request.effective_status === 'blocked_approval'
+    || request.effective_status === 'awaiting_approval'
+}
+
+function ApprovalCell({
+  request,
+  onResolved,
+}: {
+  request: DashboardScheduledAutomationRequest
+  onResolved?: () => Promise<void> | void
+}) {
+  const [pendingDecision, setPendingDecision] = useState<DashboardScheduleDecision | null>(null)
+  const approval = request.approval_policy ?? (request.approval_required ? 'required' : 'not_required')
+  const actionable = isApprovalActionable(request)
+  const busy = pendingDecision !== null
+
+  async function decide(decision: DashboardScheduleDecision) {
+    setPendingDecision(decision)
+    try {
+      await resolveScheduleApproval(
+        request.schedule_id,
+        decision,
+        decision === 'reject' ? 'rejected from dashboard' : undefined,
+      )
+      showToast(
+        `${request.schedule_id} ${decision === 'approve' ? 'approved' : 'rejected'}`,
+        'success',
+      )
+      await onResolved?.()
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'schedule approval failed', 'error')
+    } finally {
+      setPendingDecision(null)
+    }
+  }
+
+  return html`
+    <div class="grid gap-1">
+      <span>${enumLabel(approval)}</span>
+      ${actionable
+        ? html`
+            <div class="flex flex-wrap gap-1">
+              <${ActionButton}
+                variant="ok"
+                size="sm"
+                disabled=${busy}
+                ariaBusy=${pendingDecision === 'approve'}
+                testId=${`schedule-approve-${request.schedule_id}`}
+                onClick=${() => { void decide('approve') }}
+              >Approve<//>
+              <${ActionButton}
+                variant="danger"
+                size="sm"
+                disabled=${busy}
+                ariaBusy=${pendingDecision === 'reject'}
+                testId=${`schedule-reject-${request.schedule_id}`}
+                onClick=${() => { void decide('reject') }}
+              >Reject<//>
+            </div>
+          `
+        : null}
+    </div>
+  `
+}
+
+function ScheduleRow({
+  request,
+  onResolved,
+}: {
+  request: DashboardScheduledAutomationRequest
+  onResolved?: () => Promise<void> | void
+}) {
   const effectiveStatus = request.effective_status ?? request.status
   const readiness = request.execution_readiness ?? '-'
   const action = request.operator_action ?? '-'
   const dueIso = request.next_due_at_iso ?? request.due_at_iso ?? null
-  const approval = request.approval_policy ?? (request.approval_required ? 'required' : 'not_required')
   return html`
     <tr class="v2-lab-row border-t border-[var(--color-border-default)]">
       <td class="py-2 pr-3 font-mono text-xs text-[var(--color-fg-secondary)]">${request.schedule_id}</td>
@@ -228,15 +321,17 @@ function ScheduleRow({ request }: { request: DashboardScheduledAutomationRequest
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${recurrenceLabel(request)}</td>
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${lastExecutionLabel(request)}</td>
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${formatDateTimeKo(dueIso)}</td>
-      <td class="py-2 text-xs text-[var(--color-fg-muted)]">${enumLabel(approval)}</td>
+      <td class="py-2 text-xs text-[var(--color-fg-muted)]"><${ApprovalCell} request=${request} onResolved=${onResolved} /></td>
     </tr>
   `
 }
 
 export function ScheduledAutomationPanel({
   automation,
+  onResolved,
 }: {
   automation?: DashboardScheduledAutomation | null
+  onResolved?: () => Promise<void> | void
 }) {
   if (!automation) {
     return html`
@@ -321,7 +416,7 @@ export function ScheduledAutomationPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  ${rows.map(request => html`<${ScheduleRow} request=${request} />`)}
+                  ${rows.map(request => html`<${ScheduleRow} request=${request} onResolved=${onResolved} />`)}
                 </tbody>
               </table>
             </div>

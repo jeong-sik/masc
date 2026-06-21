@@ -362,12 +362,24 @@ let dashboard_governance_approval_rule_delete_http_json ~base_path ~(args : Yojs
   | Some id ->
     (match Keeper_approval_queue.delete_rule ~base_path ~id () with
      | Ok deleted ->
-       Keeper_approval_queue.audit_rule_event
-         ~base_path
-         ~event_type:"rule_deleted"
-         deleted;
-       Ok (`Assoc [ "ok", `Bool true; "id", `String deleted.id ])
-     | Error message -> Error message)
+         Keeper_approval_queue.audit_rule_event
+           ~base_path
+           ~event_type:"rule_deleted"
+           deleted;
+         Ok (`Assoc [ "ok", `Bool true; "id", `String deleted.id ])
+       | Error message -> Error message)
+;;
+
+let dashboard_schedule_resolve_http_json
+      ~config
+      ~operator_name
+      ~(args : Yojson.Safe.t)
+  : (Yojson.Safe.t, string) result
+  =
+  Server_dashboard_http_schedule_actions.resolve_http_json
+    ~config
+    ~operator_name
+    ~args
 ;;
 
 (* Dashboard-initiated verification verdict. Mirrors the tool_task path for

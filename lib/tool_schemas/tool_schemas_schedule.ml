@@ -250,7 +250,11 @@ let definitions : definition list =
       ~description:
         "Cancel a pending, scheduled, or due scheduled request before execution."
       ~input_schema:cancel_schema ~read_only:false
-  ; definition ~action:Approve_request ~id:"approve" ~name:"masc_schedule_approve"
+  ]
+;;
+
+let operator_decision_definitions : definition list =
+  [ definition ~action:Approve_request ~id:"approve" ~name:"masc_schedule_approve"
       ~description:
         "Record a separate human execution grant for a pending or due scheduled request. Recurring side-effecting requests need a fresh grant for each due occurrence."
       ~input_schema:approve_schema ~read_only:false
@@ -259,6 +263,8 @@ let definitions : definition list =
       ~input_schema:reject_schema ~read_only:false
   ]
 ;;
+
+let all_definitions = definitions @ operator_decision_definitions
 
 let schemas : Masc_domain.tool_schema list =
   List.map (fun definition -> definition.schema) definitions

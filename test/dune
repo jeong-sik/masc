@@ -1138,6 +1138,13 @@
  (modules test_server_mcp_session_persist)
  (libraries alcotest masc_server unix))
 
+; Bounded-cache eviction guard for client-keyed dashboard metrics caches.
+
+(test
+ (name test_server_utils_bounded_cache)
+ (modules test_server_utils_bounded_cache)
+ (libraries alcotest masc))
+
 ; Focused dashboard nudge feed projection.
 
 (test

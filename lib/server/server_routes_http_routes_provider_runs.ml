@@ -12,6 +12,14 @@ type dashboard_json_cache_entry =
   }
 
 let dashboard_metrics_cache_ttl_s = 60.0
+
+(* Per-cache entry ceiling. The [window]/[bucket_min] query params are folded
+   into the cache key unclamped (see [add_routes]), and these endpoints are
+   public reads, so distinct client-supplied values would otherwise grow each
+   table without bound (memory-exhaustion vector). The legitimate dashboard
+   uses a small fixed set of windows, so this ceiling is never reached in
+   normal operation; past it, the least-recently-refreshed entry is evicted. *)
+let dashboard_metrics_cache_max_entries = 128
 let dashboard_metrics_cache_mu = Stdlib.Mutex.create ()
 let dashboard_model_metrics_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 let dashboard_cost_latency_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
@@ -84,6 +92,9 @@ let cached_dashboard_json ~sync_first ~sw ~cache ~key ~placeholder ~compute =
       match Hashtbl.find_opt cache key with
       | Some entry -> entry
       | None ->
+          evict_oldest_if_full
+            ~max_entries:dashboard_metrics_cache_max_entries
+            ~age_of:(fun e -> e.updated_at) cache;
           let entry = new_cache_entry () in
           Hashtbl.add cache key entry;
           entry

@@ -259,12 +259,18 @@ let compact ~base_path ~keeper_name =
       let entries = load_entries path in
       let keep = drop (List.length entries - compact_to) entries in
       let oc = open_out path in
-      List.iter
-        (fun e ->
-           output_string oc (Yojson.Safe.to_string (entry_to_json e));
-           output_char oc '\n')
-        keep;
-      close_out_no_err oc))
+      (* Release the fd on every exit path. A mid-write [Sys_error] (disk full
+         / I/O error) would otherwise skip [close_out_no_err] and leak the fd
+         while leaving a truncated history file. Mirrors the [Eio_guard.protect]
+         used by [count_lines]/[load_entries] above. *)
+      Eio_guard.protect
+        ~finally:(fun () -> close_out_no_err oc)
+        (fun () ->
+           List.iter
+             (fun e ->
+                output_string oc (Yojson.Safe.to_string (entry_to_json e));
+                output_char oc '\n')
+             keep)))
 ;;
 
 (* --- suggest (query) --- *)

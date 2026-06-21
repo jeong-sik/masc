@@ -120,6 +120,14 @@ describe('Tools', () => {
           blocked_approval: 1,
           due_execution_ready: 0,
           expired_effective: 0,
+          unsupported_payload_kind: 1,
+          unknown_payload_kind: 0,
+        },
+        payload_support: {
+          supported_kinds: ['masc.board_post'],
+          unsupported_request_count: 1,
+          unsupported_kinds: [{ kind: 'test.reminder', count: 1 }],
+          unknown_request_count: 0,
         },
         fsm: {
           state: 'blocked_approval',
@@ -135,6 +143,18 @@ describe('Tools', () => {
             execution_readiness: 'blocked_approval',
             operator_action: 'approve_or_reject',
             keeper_next_tool: 'masc_schedule_get',
+            keeper_next_tool_status: {
+              name: 'masc_schedule_get',
+              registered_schema: true,
+              dispatch_registered: true,
+              direct_call_allowed: true,
+              visibility: 'hidden',
+              surfaces: [],
+              surface_count: 0,
+              effect_domain: 'read_only',
+              read_only: true,
+              requires_actor_binding: null,
+            },
             keeper_next_action:
               'Inspect details, then wait for the dashboard operator approval or rejection action to resolve this schedule.',
             risk_class: 'workspace_write',
@@ -143,6 +163,7 @@ describe('Tools', () => {
             recurrence: { kind: 'cron', expression: '0 9 * * 1-5', timezone: 'Asia/Seoul' },
             recurrence_kind: 'cron',
             payload_kind: 'test.reminder',
+            payload_support: 'unsupported',
             due_at_iso: '2026-06-13T01:00:00Z',
             last_execution: {
               execution_id: 'exec-1',
@@ -166,11 +187,16 @@ describe('Tools', () => {
     expect(container.textContent).toContain('dashboard operator approval or rejection')
     expect(container.textContent).toContain('Approve')
     expect(container.textContent).toContain('Reject')
+    expect(container.textContent).toContain('callable')
+    expect(container.textContent).toContain('hidden')
+    expect(container.textContent).toContain('no surface')
     expect(container.textContent).toContain('sched-1')
     expect(container.textContent).toContain('workspace write')
     expect(container.textContent).toContain('cron 0 9 * * 1-5 Asia/Seoul')
     expect(container.textContent).toContain('succeeded')
     expect(container.textContent).toContain('test.reminder')
+    expect(container.textContent).toContain('unsupported payload')
+    expect(container.textContent).toContain('unsupported')
     expect(container.querySelector('.v2-lab-table')).not.toBeNull()
     expect(container.querySelector('.v2-lab-row')).not.toBeNull()
   })

@@ -1,0 +1,851 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Keeper Schedule Dashboard Todo</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f4;
+      --panel: #ffffff;
+      --panel-2: #f0f4f7;
+      --ink: #172026;
+      --muted: #627078;
+      --line: #d7dfdf;
+      --line-strong: #aebbbb;
+      --blue: #196f8f;
+      --blue-soft: #dff0f5;
+      --gold: #9a6a16;
+      --gold-soft: #f6ead0;
+      --red: #a3443f;
+      --red-soft: #f9dedb;
+      --green: #35745b;
+      --green-soft: #dceee5;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--sans);
+      letter-spacing: 0;
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+    }
+
+    a {
+      color: var(--blue);
+      text-decoration-color: rgba(25, 111, 143, 0.35);
+    }
+
+    code {
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #f8faf9;
+      color: #243038;
+      font-family: var(--mono);
+      font-size: 0.92em;
+      padding: 0.08rem 0.28rem;
+    }
+
+    .shell {
+      min-height: 100vh;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-bottom: 1px solid var(--line);
+      background: rgba(246, 247, 244, 0.94);
+      backdrop-filter: blur(10px);
+    }
+
+    .topbar-inner,
+    .page {
+      width: min(1220px, calc(100vw - 40px));
+      margin: 0 auto;
+    }
+
+    .topbar-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 58px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .brand-mark {
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: #172026;
+      color: #f7f5ec;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      padding: 5px 7px;
+      white-space: nowrap;
+    }
+
+    .brand-title {
+      overflow: hidden;
+      color: #263239;
+      font-size: 0.92rem;
+      font-weight: 700;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .meta-line {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 0.74rem;
+      white-space: nowrap;
+    }
+
+    .page {
+      padding: 34px 0 56px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr);
+      gap: 22px;
+      align-items: stretch;
+      margin-bottom: 22px;
+    }
+
+    .hero-main,
+    .snapshot,
+    .section {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 16px 40px rgba(29, 43, 47, 0.06);
+    }
+
+    .hero-main {
+      padding: 26px;
+    }
+
+    .eyebrow {
+      margin: 0 0 12px;
+      color: var(--gold);
+      font-family: var(--mono);
+      font-size: 0.74rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      color: #111a1f;
+      font-size: clamp(2rem, 5vw, 4.4rem);
+      line-height: 0.98;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      max-width: 820px;
+      margin: 18px 0 0;
+      color: #3c4a52;
+      font-size: 1.05rem;
+      line-height: 1.65;
+    }
+
+    .verdict {
+      display: inline-flex;
+      align-items: center;
+      margin-top: 20px;
+      border: 1px solid #e2b1ad;
+      border-radius: 999px;
+      background: var(--red-soft);
+      color: var(--red);
+      font-size: 0.82rem;
+      font-weight: 700;
+      padding: 8px 12px;
+    }
+
+    .snapshot {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      padding: 18px;
+    }
+
+    .snapshot h2,
+    .section h2 {
+      margin: 0;
+      color: #1c282f;
+      font-size: 1rem;
+      letter-spacing: 0;
+    }
+
+    .snapshot-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fbfcfb;
+      padding: 12px;
+    }
+
+    .metric-label {
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+    }
+
+    .metric-value {
+      display: block;
+      margin-top: 5px;
+      color: #18242b;
+      font-family: var(--mono);
+      font-size: 1rem;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 0 0 22px;
+    }
+
+    .status {
+      min-height: 120px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 16px;
+    }
+
+    .status strong {
+      display: block;
+      color: #1d2b32;
+      font-size: 0.92rem;
+    }
+
+    .status span {
+      display: block;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.88rem;
+      line-height: 1.5;
+    }
+
+    .status.done {
+      border-color: #afd1c1;
+      background: var(--green-soft);
+    }
+
+    .status.partial {
+      border-color: #d7c08e;
+      background: var(--gold-soft);
+    }
+
+    .status.missing {
+      border-color: #e1aaa6;
+      background: var(--red-soft);
+    }
+
+    .section {
+      margin-top: 22px;
+      padding: 22px;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .section-subtitle {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.55;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel-2);
+      color: #415058;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      padding: 5px 8px;
+      white-space: nowrap;
+    }
+
+    .evidence-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .evidence-list li {
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fbfcfb;
+      padding: 12px;
+      color: #324149;
+      font-size: 0.9rem;
+      line-height: 1.55;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+    }
+
+    table {
+      width: 100%;
+      min-width: 780px;
+      border-collapse: collapse;
+      background: #ffffff;
+      font-size: 0.88rem;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line);
+      padding: 11px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f1f5f5;
+      color: #4d5e66;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 4px 8px;
+      white-space: nowrap;
+    }
+
+    .pill.done {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .pill.partial {
+      background: var(--gold-soft);
+      color: var(--gold);
+    }
+
+    .pill.missing,
+    .pill.p0 {
+      background: var(--red-soft);
+      color: var(--red);
+    }
+
+    .pill.p1 {
+      background: var(--gold-soft);
+      color: var(--gold);
+    }
+
+    .pill.p2 {
+      background: var(--blue-soft);
+      color: var(--blue);
+    }
+
+    .findings {
+      display: grid;
+      gap: 14px;
+    }
+
+    .finding {
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--blue);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 16px;
+    }
+
+    .finding.p0 {
+      border-left-color: var(--red);
+    }
+
+    .finding.p1 {
+      border-left-color: var(--gold);
+    }
+
+    .finding.p2 {
+      border-left-color: var(--blue);
+    }
+
+    .finding-title {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin: 0;
+      color: #18242b;
+      font-size: 1rem;
+    }
+
+    .finding p {
+      margin: 10px 0 0;
+      color: #3d4a52;
+      line-height: 1.58;
+    }
+
+    .finding ul {
+      margin: 10px 0 0 18px;
+      padding: 0;
+      color: #37464e;
+      line-height: 1.62;
+    }
+
+    .order-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      counter-reset: order;
+    }
+
+    .order-list li {
+      counter-increment: order;
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: 10px;
+      align-items: start;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fbfcfb;
+      padding: 12px;
+      color: #35444b;
+      line-height: 1.45;
+    }
+
+    .order-list li::before {
+      content: counter(order);
+      display: grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      border-radius: 50%;
+      background: #172026;
+      color: #ffffff;
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+
+    .done-list {
+      margin: 0;
+      padding-left: 20px;
+      color: #33434b;
+      line-height: 1.7;
+    }
+
+    .footer {
+      margin-top: 22px;
+      color: var(--muted);
+      font-size: 0.8rem;
+      text-align: center;
+    }
+
+    @media (max-width: 880px) {
+      .topbar-inner,
+      .page {
+        width: min(100vw - 24px, 1220px);
+      }
+
+      .topbar-inner {
+        align-items: start;
+        flex-direction: column;
+        justify-content: center;
+        padding: 10px 0;
+      }
+
+      .meta-line {
+        justify-content: flex-start;
+        white-space: normal;
+      }
+
+      .hero,
+      .status-grid,
+      .evidence-list,
+      .order-list {
+        grid-template-columns: 1fr;
+      }
+
+      .hero-main {
+        padding: 20px;
+      }
+
+      .section {
+        padding: 18px;
+      }
+    }
+
+    @media print {
+      .topbar {
+        position: static;
+      }
+
+      .hero-main,
+      .snapshot,
+      .section,
+      .status,
+      .finding {
+        box-shadow: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">
+          <span class="brand-mark">MASC</span>
+          <span class="brand-title">Keeper Schedule Dashboard Todo</span>
+        </div>
+        <div class="meta-line">
+          <span>2026-06-21 KST</span>
+          <span>/</span>
+          <span>base 2eed0aa224</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="page">
+      <section class="hero">
+        <div class="hero-main">
+          <p class="eyebrow">Adversarial implementation audit</p>
+          <h1>Schedule substrate exists. Keeper scheduling is not done.</h1>
+          <p class="lead">
+            Durable records, recurrence metadata, runner ticks, dispatch signals, schedule tools, keeper observations,
+            and a Tools/Lab panel are implemented. The missing product work is operational: supported job consumers,
+            callable tool surfaces, first-screen dashboard visibility, live runtime parity, and a successful end-to-end
+            smoke proof.
+          </p>
+          <span class="verdict">Verdict: Partial, not production-complete</span>
+        </div>
+
+        <aside class="snapshot">
+          <h2>Live Snapshot</h2>
+          <div class="snapshot-grid">
+            <div class="metric">
+              <span class="metric-label">Runtime release</span>
+              <span class="metric-value">0.19.47</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Runtime source</span>
+              <span class="metric-value">76d88e2bc0</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Repo head</span>
+              <span class="metric-value">2eed0aa224</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Schedule state</span>
+              <span class="metric-value">failed 2 / expired 2 / active 0</span>
+            </div>
+          </div>
+        </aside>
+      </section>
+
+      <section class="status-grid" aria-label="Status summary">
+        <div class="status done">
+          <strong>Implemented</strong>
+          <span>Domain, store, service, runner, signals, schedule tools, board-post consumer, prompt observation, Tools/Lab panel.</span>
+        </div>
+        <div class="status partial">
+          <strong>Partial</strong>
+          <span>Dashboard projection and keeper next-action model exist on main, but live runtime is behind and tool surfaces are inactive.</span>
+        </div>
+        <div class="status missing">
+          <strong>Missing</strong>
+          <span>Broad Keeper job consumers, operational dashboard card, UI actions, parser drift guard, and live happy-path smoke.</span>
+        </div>
+        <div class="status missing">
+          <strong>Current Risk</strong>
+          <span>Live schedules include unsupported payload kinds, so records can exist while the runner cannot actually do the work.</span>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <div>
+            <h2>Evidence</h2>
+            <p class="section-subtitle">Local code paths and live runtime endpoints used for the audit.</p>
+          </div>
+          <span class="tag">checked live + main</span>
+        </div>
+        <ul class="evidence-list">
+          <li><strong>Schedule core:</strong> <code>lib/schedule/schedule_domain.mli</code>, <code>schedule_store.mli</code>, <code>schedule_service.mli</code>, <code>schedule_runner.ml</code></li>
+          <li><strong>Runtime loop:</strong> <code>lib/server/server_bootstrap_maintenance.ml</code>, <code>lib/server/server_runtime_bootstrap.ml</code></li>
+          <li><strong>Consumer:</strong> <code>lib/server/server_schedule_consumers.ml</code> supports only <code>masc.board_post</code></li>
+          <li><strong>Tools:</strong> <code>lib/tool_schemas/tool_schemas_schedule.ml</code>, <code>lib/tool_schedule.ml</code>, <code>lib/keeper/keeper_tool_descriptor.ml</code></li>
+          <li><strong>Keeper prompt:</strong> <code>lib/keeper/keeper_world_observation.ml</code>, <code>lib/keeper/keeper_unified_prompt.ml</code>, <code>lib/schedule_projection.ml</code></li>
+          <li><strong>Dashboard:</strong> <code>server_dashboard_http_runtime_info.ml</code>, <code>dashboard/src/api/dashboard.ts</code>, <code>ScheduledAutomationPanel</code></li>
+          <li><strong>Live endpoint:</strong> <code>GET /health?full=1</code> reports runtime source <code>76d88e2bc0</code> while repo head is <code>2eed0aa224</code></li>
+          <li><strong>Live tools:</strong> schedule tools are registered and directly callable, but have <code>surfaces=[]</code> and <code>enabled_in_current_mode=false</code></li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <div>
+            <h2>Implementation Matrix</h2>
+            <p class="section-subtitle">What exists, what is partial, and what still blocks calling this complete.</p>
+          </div>
+          <span class="tag">feature readiness</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Area</th>
+                <th>Status</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Durable schedule model</td>
+                <td><span class="pill done">Done</span></td>
+                <td>Actor/risk/status/source, recurrence, payload envelope, grants, execution records.</td>
+              </tr>
+              <tr>
+                <td>Durable store</td>
+                <td><span class="pill done">Done</span></td>
+                <td><code>schedules.json</code>, last-good recovery, due refresh, recurring reschedule, candidate lifecycle.</td>
+              </tr>
+              <tr>
+                <td>Schedule service</td>
+                <td><span class="pill done">Done</span></td>
+                <td>Create/list/get/approve/reject/cancel/due-candidate API. It intentionally does not execute work.</td>
+              </tr>
+              <tr>
+                <td>Runtime runner</td>
+                <td><span class="pill done">Done</span></td>
+                <td>Background maintenance fiber ticks <code>Schedule_runner.tick</code> and emits due/blocked signals.</td>
+              </tr>
+              <tr>
+                <td>Concrete job consumers</td>
+                <td><span class="pill partial">Partial</span></td>
+                <td>Only <code>masc.board_post</code> is accepted. Live records include unsupported payload kinds.</td>
+              </tr>
+              <tr>
+                <td>Schedule tools</td>
+                <td><span class="pill partial">Partial</span></td>
+                <td>Schemas and dispatch exist, but active dashboard tool surface exposure is empty.</td>
+              </tr>
+              <tr>
+                <td>Dashboard API projection</td>
+                <td><span class="pill partial">Partial</span></td>
+                <td>Main emits <code>scheduled_automation</code> request rows and keeper next actions. Live server is stale.</td>
+              </tr>
+              <tr>
+                <td>Dashboard UI</td>
+                <td><span class="pill partial">Partial</span></td>
+                <td>Tools/Lab panel renders the table. Main operational dashboard exposure is still missing.</td>
+              </tr>
+              <tr>
+                <td>Operator actions in UI</td>
+                <td><span class="pill missing">Missing</span></td>
+                <td>No approve/reject/cancel/get/create affordances or deep links.</td>
+              </tr>
+              <tr>
+                <td>Live happy-path proof</td>
+                <td><span class="pill missing">Missing</span></td>
+                <td>Current live state only proves terminal/unsupported/expired cases.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <div>
+            <h2>Adversarial Findings</h2>
+            <p class="section-subtitle">Prioritized work items. P0 items are correctness or trust blockers.</p>
+          </div>
+          <span class="tag">todo</span>
+        </div>
+        <div class="findings">
+          <article class="finding p0">
+            <h3 class="finding-title"><span class="pill p0">P0</span> Live dashboard is stale relative to inspected main</h3>
+            <p>Live runtime reports source snapshot <code>76d88e2bc0</code>, while repo head is <code>2eed0aa224</code>. The latest schedule dashboard and keeper next-action work cannot be assumed deployed.</p>
+            <ul>
+              <li>Rebuild/restart from current main.</li>
+              <li>Re-check <code>/api/v1/dashboard/tools</code>.</li>
+              <li>Require matching runtime/source identity or known binary commit before calling the dashboard current.</li>
+            </ul>
+          </article>
+
+          <article class="finding p0">
+            <h3 class="finding-title"><span class="pill p0">P0</span> Prompt suggests schedule tools that are not exposed</h3>
+            <p>Keeper prompt/read-model can recommend <code>masc_schedule_get</code>, <code>masc_schedule_approve</code>, and <code>masc_schedule_reject</code>, but live inventory reports every schedule tool with no active surface.</p>
+            <ul>
+              <li>Decide the intended schedule tool surface: operator-only, keeper-internal, or both.</li>
+              <li>Add all six <code>masc_schedule_*</code> tools to the proper catalog/surface.</li>
+              <li>Add regression coverage for descriptor registration and active exposure.</li>
+            </ul>
+          </article>
+
+          <article class="finding p0">
+            <h3 class="finding-title"><span class="pill p0">P0</span> Existing live schedules use unsupported payload kinds</h3>
+            <p>The only concrete consumer supports <code>masc.board_post</code>. Live records include <code>orphan_auto_release</code>, <code>keeper_surface_post</code>, <code>task_goal_generation</code>, and <code>backlog_depletion_check</code>.</p>
+            <ul>
+              <li>Add a consumer registry that declares supported payload kinds.</li>
+              <li>Implement or retire the currently observed payload kinds.</li>
+              <li>Surface unsupported payload kind counts and remediation in the dashboard.</li>
+            </ul>
+          </article>
+
+          <article class="finding p1">
+            <h3 class="finding-title"><span class="pill p1">P1</span> Dashboard exposure is buried in Tools/Lab</h3>
+            <p>The full panel is useful for investigation, but it is weak as system monitoring. Operators can miss blocked approvals or failed schedules unless they open the tool inventory page.</p>
+            <ul>
+              <li>Add a compact scheduled automation card to the overview/runtime/attention area.</li>
+              <li>Show FSM state, next due, blocked approval count, due-ready count, and unsupported failures.</li>
+              <li>Link to the full Tools/Lab table.</li>
+            </ul>
+          </article>
+
+          <article class="finding p1">
+            <h3 class="finding-title"><span class="pill p1">P1</span> UI is read-only where operators need decisions</h3>
+            <p>The panel renders readiness and approval policy, but does not let the operator inspect, approve, reject, cancel, or recreate from the dashboard.</p>
+            <ul>
+              <li>Add action affordances for get, approve, reject, cancel, and recreate.</li>
+              <li>Gate side-effecting actions behind the existing human grant model.</li>
+              <li>Render the result back into the row status or last-execution area.</li>
+            </ul>
+          </article>
+
+          <article class="finding p1">
+            <h3 class="finding-title"><span class="pill p1">P1</span> Runtime parser coverage is thin</h3>
+            <p>The TypeScript type and component fixture exist, but there is no strong runtime parser or schema drift guard around <code>scheduled_automation</code>.</p>
+            <ul>
+              <li>Add dashboard API normalization for the projection.</li>
+              <li>Totalize optional fields and warn on missing required fields.</li>
+              <li>Fixture active, blocked approval, unsupported failure, and stale projection cases.</li>
+            </ul>
+          </article>
+
+          <article class="finding p1">
+            <h3 class="finding-title"><span class="pill p1">P1</span> No live-safe happy-path smoke exists</h3>
+            <p>Current live state proves terminal and unsupported cases, not due approved supported schedule to successful execution record.</p>
+            <ul>
+              <li>Add a safe no-op payload kind or live-safe board-post smoke fixture.</li>
+              <li>Capture before/after dashboard projection evidence.</li>
+            </ul>
+          </article>
+
+          <article class="finding p2">
+            <h3 class="finding-title"><span class="pill p2">P2</span> Runner liveness is not first-class</h3>
+            <p>The panel derives schedule state, but does not show last runner tick, last dispatch attempt, or stale-runner warnings.</p>
+            <ul>
+              <li>Add last tick time, last tick error, and emitted/dispatch/rescheduled counters.</li>
+              <li>Surface stale-runner state in the overview card and full panel.</li>
+            </ul>
+          </article>
+
+          <article class="finding p2">
+            <h3 class="finding-title"><span class="pill p2">P2</span> Recurrence is under-explained operationally</h3>
+            <p>The model supports recurrence and fixed-offset timezone contracts, but the UI mainly displays summaries.</p>
+            <ul>
+              <li>Add previous-run, next-run, and recurrence explanation fields.</li>
+              <li>Test daily fixed-offset behavior around date boundaries.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <div>
+            <h2>Recommended Next Order</h2>
+            <p class="section-subtitle">Shortest path from partial substrate to trustworthy operator product.</p>
+          </div>
+          <span class="tag">execution order</span>
+        </div>
+        <ol class="order-list">
+          <li>Rebuild/restart runtime and re-check dashboard projection parity.</li>
+          <li>Fix schedule tool surface exposure or remove tool-call instructions from keeper prompts.</li>
+          <li>Add consumer registry plus unsupported payload visibility.</li>
+          <li>Move a compact schedule status card into the main operational dashboard.</li>
+          <li>Add one live-safe happy-path smoke.</li>
+          <li>Add dashboard parser and fixture tests around <code>scheduled_automation</code>.</li>
+        </ol>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <div>
+            <h2>Done Criteria</h2>
+            <p class="section-subtitle">Do not call Keeper scheduling complete until these are true.</p>
+          </div>
+          <span class="tag">release gate</span>
+        </div>
+        <ul class="done-list">
+          <li>Current runtime is built from current main or exposes a known binary commit.</li>
+          <li>The dashboard can show active, due, blocked, failed, and succeeded schedules.</li>
+          <li>The dashboard exposes blocked approvals in an operational surface, not only Tools/Lab.</li>
+          <li>Keeper prompts only mention schedule tools that are actually callable in that context.</li>
+          <li>Unsupported payload kinds cannot quietly become terminal surprises.</li>
+          <li>At least one supported schedule completes end-to-end and leaves an execution record visible in the dashboard.</li>
+        </ul>
+      </section>
+
+      <p class="footer">Generated from the Keeper schedule dashboard audit report. Saved as a standalone local HTML file.</p>
+    </main>
+  </div>
+</body>
+</html>

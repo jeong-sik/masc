@@ -26,6 +26,14 @@ let payload =
     ]
 ;;
 
+let board_post_payload =
+  `Assoc
+    [ "kind", `String "masc.board_post"
+    ; "schema_version", `Int 1
+    ; "body", `Assoc [ "content", `String "scheduled board post" ]
+    ]
+;;
+
 let create_fields =
   [ "due_at_unix", `Float 200.0
   ; "risk_class", `String "read_only"
@@ -461,6 +469,7 @@ let test_dispatch_cancel_persists_status () =
 let create_schedule_exn
   config
   ?expires_at
+  ?(payload = payload)
   ?recurrence
   ~schedule_id
   ~due_at
@@ -515,7 +524,8 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
       : Schedule_domain.schedule_request);
   ignore
     (create_schedule_exn config ~schedule_id:"sched-approval" ~due_at:future_due
-       ~risk_class:Schedule_domain.Workspace_write ~requested_by:(human "operator")
+       ~payload:board_post_payload ~risk_class:Schedule_domain.Workspace_write
+       ~requested_by:(human "operator")
        ~scheduled_by:(automated "scheduler-agent")
        ()
       : Schedule_domain.schedule_request);
@@ -557,6 +567,24 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
     (json |> member "derived_counts" |> member "due_execution_ready" |> to_int);
   check int "expired effective count" 1
     (json |> member "derived_counts" |> member "expired_effective" |> to_int);
+  check int "unsupported payload count" 4
+    (json |> member "derived_counts" |> member "unsupported_payload_kind" |> to_int);
+  check int "unknown payload count" 0
+    (json |> member "derived_counts" |> member "unknown_payload_kind" |> to_int);
+  check int "payload support unsupported count" 4
+    (json |> member "payload_support" |> member "unsupported_request_count" |> to_int);
+  check int "payload support unknown count" 0
+    (json |> member "payload_support" |> member "unknown_request_count" |> to_int);
+  check string "supported payload kind" "masc.board_post"
+    (json |> member "payload_support" |> member "supported_kinds" |> to_list
+     |> List.hd |> to_string);
+  (match json |> member "payload_support" |> member "unsupported_kinds" |> to_list with
+   | unsupported :: _ ->
+     check string "unsupported payload kind" "test.reminder"
+       (unsupported |> member "kind" |> to_string);
+     check int "unsupported payload kind count" 4
+       (unsupported |> member "count" |> to_int)
+   | [] -> fail "expected unsupported payload kind summary");
   let requests = json |> member "requests" |> to_list in
   let find_request schedule_id =
     match
@@ -568,6 +596,8 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
     | None -> fail ("schedule missing from dashboard projection: " ^ schedule_id)
   in
   let due_row = find_request "sched-due" in
+  check string "due payload unsupported" "unsupported"
+    (due_row |> member "payload_support" |> to_string);
   check string "due recurrence kind" "daily"
     (due_row |> member "recurrence_kind" |> to_string);
   check string "due recurrence object kind" "daily"
@@ -589,11 +619,28 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
     (due_row |> member "operator_action" |> to_string);
   check string "due keeper next tool" "masc_schedule_get"
     (due_row |> member "keeper_next_tool" |> to_string);
+  let due_tool_status = due_row |> member "keeper_next_tool_status" in
+  check string "due keeper next tool status name" "masc_schedule_get"
+    (due_tool_status |> member "name" |> to_string);
+  check bool "due keeper next tool schema registered" true
+    (due_tool_status |> member "registered_schema" |> to_bool);
+  check bool "due keeper next tool dispatch registered" true
+    (due_tool_status |> member "dispatch_registered" |> to_bool);
+  check bool "due keeper next tool direct callable" true
+    (due_tool_status |> member "direct_call_allowed" |> to_bool);
+  check string "due keeper next tool hidden visibility" "hidden"
+    (due_tool_status |> member "visibility" |> to_string);
+  check int "due keeper next tool has no surface projection" 0
+    (due_tool_status |> member "surface_count" |> to_int);
+  check string "due keeper next tool read-only domain" "read_only"
+    (due_tool_status |> member "effect_domain" |> to_string);
   check bool "due keeper action mentions runner tick" true
     (String_util.contains_substring
        (due_row |> member "keeper_next_action" |> to_string)
        "runner tick");
   let blocked_row = find_request "sched-blocked" in
+  check string "blocked payload unsupported" "unsupported"
+    (blocked_row |> member "payload_support" |> to_string);
   check bool "blocked separate grant" true
     (blocked_row |> member "requires_separate_human_grant" |> to_bool);
   check string "blocked approval policy" "separate_human_grant_required"
@@ -611,6 +658,8 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
        (blocked_row |> member "keeper_next_action" |> to_string)
        "dashboard operator approval or rejection");
   let expired_row = find_request "sched-expired-effective" in
+  check string "expired payload unsupported" "unsupported"
+    (expired_row |> member "payload_support" |> to_string);
   check string "expired effective status" "expired"
     (expired_row |> member "effective_status" |> to_string);
   check string "expired readiness" "expired"
@@ -628,6 +677,9 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
       (fun row -> String.equal (row |> member "schedule_id" |> to_string) "sched-exec")
       requests
   in
+  let supported_row = find_request "sched-approval" in
+  check string "supported board payload" "supported"
+    (supported_row |> member "payload_support" |> to_string);
   match exec_row with
   | None -> fail "sched-exec missing from dashboard projection"
   | Some row ->

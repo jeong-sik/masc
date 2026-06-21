@@ -1860,6 +1860,19 @@ export interface DashboardScheduledAutomationExecution {
   error?: string | null
 }
 
+export interface DashboardScheduledAutomationKeeperToolStatus {
+  name: string
+  registered_schema?: boolean
+  dispatch_registered?: boolean
+  direct_call_allowed?: boolean
+  visibility?: string
+  surfaces?: string[]
+  surface_count?: number
+  effect_domain?: string | null
+  read_only?: boolean | null
+  requires_actor_binding?: boolean | null
+}
+
 export interface DashboardScheduledAutomationRequest {
   schedule_id: string
   status: string
@@ -1867,6 +1880,7 @@ export interface DashboardScheduledAutomationRequest {
   execution_readiness?: string
   operator_action?: string | null
   keeper_next_tool?: string | null
+  keeper_next_tool_status?: DashboardScheduledAutomationKeeperToolStatus | null
   keeper_next_action?: string | null
   risk_class: string
   approval_required: boolean
@@ -1891,12 +1905,20 @@ export interface DashboardScheduledAutomationRequest {
   expires_at_iso?: string | null
   payload_digest?: string
   payload_kind?: string | null
+  payload_support?: 'supported' | 'unsupported' | 'unknown'
   payload_target?: string | null
   payload_summary?: string | null
   recurrence_summary?: string | null
   requires_separate_human_grant?: boolean
   approval_policy?: string | null
   last_execution?: DashboardScheduledAutomationExecution | null
+}
+
+export interface DashboardScheduledAutomationPayloadSupport {
+  supported_kinds?: string[]
+  unsupported_request_count?: number
+  unsupported_kinds?: Array<{ kind: string; count: number }>
+  unknown_request_count?: number
 }
 
 export interface DashboardScheduledAutomation {
@@ -1908,6 +1930,7 @@ export interface DashboardScheduledAutomation {
   truncated: boolean
   counts: Record<string, number>
   derived_counts?: Record<string, number>
+  payload_support?: DashboardScheduledAutomationPayloadSupport
   fsm: DashboardScheduledAutomationFsm
   requests: DashboardScheduledAutomationRequest[]
 }

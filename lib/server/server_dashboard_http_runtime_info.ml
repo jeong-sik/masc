@@ -1723,6 +1723,60 @@ let schedule_counts_json schedules =
        Schedule_domain.all_schedule_statuses)
 ;;
 
+let schedule_supported_payload_kinds =
+  List.sort_uniq String.compare Server_schedule_consumers.supported_payload_kinds
+;;
+
+let schedule_payload_kind_supported kind =
+  List.exists (String.equal kind) schedule_supported_payload_kinds
+;;
+
+let schedule_payload_support_status (request : Schedule_domain.schedule_request) =
+  match Schedule_payload_projection.kind request with
+  | Some kind when schedule_payload_kind_supported kind -> "supported"
+  | Some _ -> "unsupported"
+  | None -> "unknown"
+;;
+
+let schedule_payload_support_json schedules =
+  let bump kind counts =
+    let rec loop acc = function
+      | [] -> List.rev ((kind, 1) :: acc)
+      | (existing, count) :: rest when String.equal existing kind ->
+        List.rev_append acc ((existing, count + 1) :: rest)
+      | item :: rest -> loop (item :: acc) rest
+    in
+    loop [] counts
+  in
+  let unsupported_request_count, unknown_request_count, unsupported_kinds =
+    List.fold_left
+      (fun (unsupported_count, unknown_count, kind_counts)
+        (request : Schedule_domain.schedule_request) ->
+         match Schedule_payload_projection.kind request with
+         | Some kind when schedule_payload_kind_supported kind ->
+           unsupported_count, unknown_count, kind_counts
+         | Some kind -> unsupported_count + 1, unknown_count, bump kind kind_counts
+         | None -> unsupported_count, unknown_count + 1, kind_counts)
+      (0, 0, []) schedules
+  in
+  let unsupported_kinds =
+    unsupported_kinds
+    |> List.sort (fun (left_kind, left_count) (right_kind, right_count) ->
+      match compare right_count left_count with
+      | 0 -> String.compare left_kind right_kind
+      | order -> order)
+    |> List.map (fun (kind, count) ->
+      `Assoc [ "kind", `String kind; "count", `Int count ])
+  in
+  `Assoc
+    [ ( "supported_kinds"
+      , `List (List.map (fun kind -> `String kind) schedule_supported_payload_kinds) )
+    ; "unsupported_request_count", `Int unsupported_request_count
+    ; "unsupported_kinds", `List unsupported_kinds
+    ; "unknown_request_count", `Int unknown_request_count
+    ]
+;;
+
 let schedule_request_active (request : Schedule_domain.schedule_request) =
   not (Schedule_domain.is_terminal request.status)
 ;;
@@ -1849,10 +1903,59 @@ let schedule_operator_action readiness =
   | None -> `Null
 ;;
 
-let schedule_keeper_next_tool readiness =
-  match Schedule_projection.keeper_next_tool_for_execution_readiness readiness with
-  | Some tool -> `String tool
+let tool_projection_surfaces_for tool_name =
+  let surfaces = ref [] in
+  let add_surface surface =
+    if not (List.exists (String.equal surface) !surfaces)
+    then surfaces := surface :: !surfaces
+  in
+  if Tool_catalog.is_public_mcp tool_name then add_surface "public_mcp";
+  Capability_registry.all_projection_seeds_from Config.raw_all_tool_schemas
+  |> List.iter (fun (seed : Capability_registry.capability_seed) ->
+    let surface = Capability_registry.surface_to_string seed.projection.surface in
+    if
+      (not (String.equal surface "public_mcp"))
+      && (String.equal seed.projection.tool_name tool_name
+          || String.equal seed.projection.backend_tool_name tool_name)
+    then add_surface surface);
+  List.sort String.compare !surfaces
+;;
+
+let schedule_keeper_next_tool_status_json = function
   | None -> `Null
+  | Some tool_name ->
+    let registered_schema =
+      List.exists
+        (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name tool_name)
+        Config.raw_all_tool_schemas
+    in
+    let dispatch_registered = Option.is_some (Tool_dispatch.lookup_tag tool_name) in
+    let metadata = Tool_catalog.metadata tool_name in
+    let surfaces = tool_projection_surfaces_for tool_name in
+    let effect_domain =
+      match metadata.effect_domain with
+      | None -> `Null
+      | Some domain -> `String (Tool_catalog.effect_domain_to_string domain)
+    in
+    `Assoc
+      [ "name", `String tool_name
+      ; "registered_schema", `Bool registered_schema
+      ; "dispatch_registered", `Bool dispatch_registered
+      ; "direct_call_allowed", `Bool (Tool_catalog.allow_direct_call tool_name)
+      ; "visibility", `String (Tool_catalog.visibility_to_string metadata.visibility)
+      ; ( "surfaces"
+        , `List (List.map (fun surface -> `String surface) surfaces) )
+      ; "surface_count", `Int (List.length surfaces)
+      ; "effect_domain", effect_domain
+      ; ( "read_only"
+        , match metadata.readonly with
+          | None -> `Null
+          | Some read_only -> `Bool read_only )
+      ; ( "requires_actor_binding"
+        , match metadata.requires_actor_binding with
+          | None -> `Null
+          | Some requires_actor_binding -> `Bool requires_actor_binding )
+      ]
 ;;
 
 let schedule_keeper_next_action readiness =
@@ -1923,6 +2026,9 @@ let schedule_request_dashboard_json
     Schedule_payload_projection.target_summary request
   in
   let execution_readiness = schedule_execution_readiness ~now state request in
+  let keeper_next_tool =
+    Schedule_projection.keeper_next_tool_for_execution_readiness execution_readiness
+  in
   `Assoc
     [ "schedule_id", `String request.schedule_id
     ; "status", `String (Schedule_domain.schedule_status_to_string request.status)
@@ -1930,7 +2036,11 @@ let schedule_request_dashboard_json
     ; ( "execution_readiness"
       , `String (Schedule_projection.execution_readiness_to_string execution_readiness) )
     ; "operator_action", schedule_operator_action execution_readiness
-    ; "keeper_next_tool", schedule_keeper_next_tool execution_readiness
+    ; ( "keeper_next_tool"
+      , match keeper_next_tool with
+        | None -> `Null
+        | Some tool -> `String tool )
+    ; "keeper_next_tool_status", schedule_keeper_next_tool_status_json keeper_next_tool
     ; "keeper_next_action", schedule_keeper_next_action execution_readiness
     ; "risk_class", `String (Schedule_domain.risk_class_to_string request.risk_class)
     ; "approval_required", `Bool request.approval_required
@@ -1962,6 +2072,7 @@ let schedule_request_dashboard_json
       , match Schedule_payload_projection.kind request with
         | None -> `Null
         | Some kind -> `String kind )
+    ; "payload_support", `String (schedule_payload_support_status request)
     ; ( "payload_target"
       , match payload_target with
         | None -> `Null
@@ -2013,6 +2124,18 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
     |> List.filter (fun request -> not (schedule_effectively_expired ~now request))
     |> List.length
   in
+  let payload_support = schedule_payload_support_json schedules in
+  let unsupported_payload_kind_count, unknown_payload_kind_count =
+    match payload_support with
+    | `Assoc fields ->
+      ( (match List.assoc_opt "unsupported_request_count" fields with
+         | Some (`Int count) -> count
+         | _ -> 0)
+      , (match List.assoc_opt "unknown_request_count" fields with
+         | Some (`Int count) -> count
+         | _ -> 0) )
+    | _ -> 0, 0
+  in
   let sorted =
     schedules
     |> List.sort (fun left right ->
@@ -2045,7 +2168,10 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
           ; "blocked_approval", `Int blocked_approval_count
           ; "due_execution_ready", `Int due_execution_ready_count
           ; "expired_effective", `Int expired_effective_count
+          ; "unsupported_payload_kind", `Int unsupported_payload_kind_count
+          ; "unknown_payload_kind", `Int unknown_payload_kind_count
           ] )
+    ; "payload_support", payload_support
     ; ( "fsm"
       , `Assoc
           [ "state", `String (schedule_fsm_state ~now state schedules)

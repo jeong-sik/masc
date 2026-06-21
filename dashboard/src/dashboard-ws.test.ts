@@ -663,6 +663,47 @@ describe('dashboard websocket route subscriptions', () => {
     expect(retryHello.params.token).toBe('fresh-token')
   })
 
+  it('keeps reconnecting after a token change cancels an in-flight hello', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+    setStoredToken('stale-token', { source: 'manual' })
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const staleSocket = mockSockets[0]!
+    staleSocket.open()
+    const staleHello = parseRpc(staleSocket, 0)
+    expect(staleHello.params.token).toBe('stale-token')
+
+    setStoredToken('fresh-token', { source: 'manual' })
+    await flushPromises()
+
+    expect(staleSocket.readyState).toBe(MockWebSocket.CLOSED)
+    expect(mockSockets).toHaveLength(2)
+
+    const freshSocket = mockSockets[1]!
+    freshSocket.open()
+    const freshHello = parseRpc(freshSocket, 0)
+    expect(freshHello.method).toBe('dashboard/hello')
+    expect(freshHello.params.token).toBe('fresh-token')
+    freshSocket.receive({ jsonrpc: '2.0', id: freshHello.id, result: {} })
+    await flushPromises()
+    const subscribe = parseRpc(freshSocket, 1)
+    freshSocket.receive({
+      jsonrpc: '2.0',
+      id: subscribe.id,
+      result: { snapshot: { seq: 1, slices: {} } },
+    })
+    await flushPromises()
+    expect(dashboardWsReady.value).toBe(true)
+
+    freshSocket.close({ code: 1011, reason: 'server restart', wasClean: false })
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+
+    expect(mockSockets).toHaveLength(3)
+    expect(mockSockets[2]!.readyState).toBe(MockWebSocket.CONNECTING)
+  })
+
   it('closes an authenticated socket when the stored token is cleared', async () => {
     installWebSocketMocks()
     setStoredToken('active-token', { source: 'manual' })

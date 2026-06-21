@@ -761,8 +761,8 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
           reconnectAfterCurrentSocketFailure(ws, err)
           return
         }
-        helloFailed = true
         if (socket !== ws) return
+        helloFailed = true
         batch(() => {
           dashboardWsConnected.value = false
           dashboardWsReady.value = false

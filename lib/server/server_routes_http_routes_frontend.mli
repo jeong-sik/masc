@@ -14,6 +14,11 @@ val add_routes :
   host:string ->
   Http_server_eio.Router.t -> Http_server_eio.Router.t
 
+val websocket_upgrade_unavailable_reason : unit -> string option
+(** [None] when same-origin [/ws] upgrades can be admitted, otherwise the
+    503 response body that should be returned.  Exposed for the route policy
+    regression test; production requests still go through {!add_routes}. *)
+
 val canonical_loopback_location :
   default_port:int -> Httpun.Request.t -> string option
 (** [Some redirect_url] when the request's [Host] header advertises a

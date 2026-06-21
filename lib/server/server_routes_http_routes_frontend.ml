@@ -81,9 +81,17 @@ let is_websocket_upgrade_request request =
   && header_contains_token request "connection" "upgrade"
   && header_equals request "upgrade" "websocket"
 
+let websocket_upgrade_unavailable_reason () =
+  if not (Transport_metrics.ws_enabled ())
+  then Some "WebSocket transport disabled"
+  else if not (Transport_metrics.ws_same_origin_ready ())
+  then Some "WebSocket transport not ready"
+  else None
+
 let websocket_handler ?sw ?clock request reqd =
   if is_websocket_upgrade_request request then
-    if Transport_metrics.ws_enabled () then
+    match websocket_upgrade_unavailable_reason () with
+    | None ->
       match
         Server_mcp_transport_ws.upgrade_connection
           ?sw
@@ -93,9 +101,7 @@ let websocket_handler ?sw ?clock request reqd =
       with
       | Ok () -> ()
       | Error msg -> Http.Response.text ~status:`Bad_request msg reqd
-    else
-      Http.Response.text ~status:`Service_unavailable
-        "WebSocket transport disabled" reqd
+    | Some reason -> Http.Response.text ~status:`Service_unavailable reason reqd
   else
     websocket_discovery_handler request reqd
 

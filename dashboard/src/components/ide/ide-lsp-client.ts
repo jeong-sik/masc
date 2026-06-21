@@ -400,13 +400,7 @@ export class LspConnection {
       if (this.ws === ws) this.ws = null
       this.initialized = false
       this.rejectPending(new Error(lspCloseReason(event)))
-      if (!this.disposed) {
-        this.clearReconnectTimer()
-        this.reconnectTimer = setTimeout(() => {
-          this.reconnectTimer = null
-          if (!this.disposed) this.connect()
-        }, 5000)
-      }
+      this.scheduleReconnect()
     }
 
     ws.onerror = (err) => {
@@ -451,19 +445,53 @@ export class LspConnection {
         return
       }
       const id = this.nextId++
+      const currentSocket = this.ws
       this.pending.set(id, { resolve, reject })
       try {
-        this.ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
+        currentSocket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
       } catch (err) {
         this.pending.delete(id)
-        reject(err)
+        const reason = err instanceof Error ? err : new Error(String(err))
+        this.handleSocketSendFailure(currentSocket, reason)
+        reject(reason)
       }
     })
   }
 
-  private sendNotification(method: string, params: unknown): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
-    this.ws.send(JSON.stringify({ jsonrpc: '2.0', method, params }))
+  private sendNotification(method: string, params: unknown): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false
+    const currentSocket = this.ws
+    try {
+      currentSocket.send(JSON.stringify({ jsonrpc: '2.0', method, params }))
+      return true
+    } catch (err) {
+      const reason = err instanceof Error ? err : new Error(String(err))
+      this.handleSocketSendFailure(currentSocket, reason)
+      return false
+    }
+  }
+
+  private handleSocketSendFailure(ws: WebSocket, reason: Error): void {
+    if (this.disposed || this.ws !== ws) return
+    this.onError(reason)
+    this.ws = null
+    this.initialized = false
+    this.rejectPending(reason)
+    try {
+      ws.close()
+    } catch {
+      // Ignore close failures; the reconnect timer below owns recovery.
+    }
+    this.scheduleReconnect()
+  }
+
+  private scheduleReconnect(): void {
+    if (this.disposed) return
+    this.clearReconnectTimer()
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      if (!this.disposed) this.connect()
+    }, 5000)
   }
 
   private async initialize(): Promise<void> {
@@ -481,8 +509,7 @@ export class LspConnection {
           },
         },
       })
-      this.sendNotification('initialized', {})
-      this.initialized = true
+      this.initialized = this.sendNotification('initialized', {})
     } catch (err) {
       if (!this.disposed) {
         console.error('[LSP] initialize failed:', err)

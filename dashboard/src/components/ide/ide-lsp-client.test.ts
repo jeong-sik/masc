@@ -20,6 +20,7 @@ class MockWebSocket {
   onmessage: ((event: MessageEvent) => void) | null = null
   onerror: ((event: Event) => void) | null = null
   onclose: ((event: CloseEvent) => void) | null = null
+  failSend = false
 
   constructor(readonly url: string) {
     mockSockets.push(this)
@@ -27,6 +28,7 @@ class MockWebSocket {
 
   send(data: string): void {
     if (this.readyState !== MockWebSocket.OPEN) throw new Error('socket not open')
+    if (this.failSend) throw new Error('send failed')
     this.sent.push(data)
   }
 
@@ -185,5 +187,29 @@ describe('LspConnection', () => {
     vi.advanceTimersByTime(5000)
 
     expect(mockSockets).toHaveLength(1)
+  })
+
+  it('routes notification send failures through reconnect instead of throwing', async () => {
+    vi.useFakeTimers()
+    installWebSocketMock()
+    const errors: unknown[] = []
+    const conn = new LspConnection(() => {}, err => errors.push(err))
+    conn.connect()
+    const socket = mockSockets[0]!
+    socket.open()
+    const initialize = JSON.parse(socket.sent[0]!) as { id: number }
+    socket.message({ id: initialize.id, result: {} })
+    await Promise.resolve()
+
+    expect(socket.sent).toHaveLength(2)
+    socket.failSend = true
+
+    expect(() => conn.notifyDidOpen('lib/keeper/current.ml', 'ocaml')).not.toThrow()
+    expect(errors).toHaveLength(1)
+    expect(socket.readyState).toBe(MockWebSocket.CLOSED)
+
+    vi.advanceTimersByTime(5000)
+    expect(mockSockets).toHaveLength(2)
+    conn.dispose()
   })
 })

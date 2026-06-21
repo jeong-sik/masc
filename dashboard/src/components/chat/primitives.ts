@@ -2085,11 +2085,14 @@ function isTurnStreaming(state: KeeperConversationEntry['streamState']): boolean
 
 function isToolOutputCoveredByHydration(
   entry: KeeperConversationEntry,
+  coveredSinceMs: number | null | undefined,
   coveredThroughMs: number | null | undefined,
 ): boolean {
   if (coveredThroughMs == null) return false
   const timestampMs = entry.timestamp ? Date.parse(entry.timestamp) : NaN
-  return Number.isFinite(timestampMs) && timestampMs <= coveredThroughMs
+  return Number.isFinite(timestampMs)
+    && (coveredSinceMs == null || timestampMs >= coveredSinceMs)
+    && timestampMs <= coveredThroughMs
 }
 
 // One step of a grouped tool-trace card: a single tool call rendered from REAL
@@ -2168,17 +2171,19 @@ function ToolTraceCard({
   tools,
   traceSteps = [],
   turnComplete = false,
+  toolOutputsCoveredSinceMs = null,
   toolOutputsCoveredThroughMs = null,
 }: {
   tools: KeeperConversationEntry[]
   traceSteps?: ChatTraceStep[]
   turnComplete?: boolean
+  toolOutputsCoveredSinceMs?: number | null
   toolOutputsCoveredThroughMs?: number | null
 }) {
   const [open, setOpen] = useState(true)
   const steps = tools.map((entry) => ({ entry, output: lookupToolCallOutput(entry.id) }))
   const canMarkMissingForEntry = (entry: KeeperConversationEntry): boolean =>
-    turnComplete && isToolOutputCoveredByHydration(entry, toolOutputsCoveredThroughMs)
+    turnComplete && isToolOutputCoveredByHydration(entry, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs)
   const failN = steps.filter(
     (s) => s.output !== null && (s.output.success === false || s.output.semantic_success === false),
   ).length
@@ -2232,6 +2237,7 @@ function TurnWorkBundle({
   showMetadata,
   variant,
   showSourceBadge,
+  toolOutputsCoveredSinceMs,
   toolOutputsCoveredThroughMs,
   action,
 }: {
@@ -2240,6 +2246,7 @@ function TurnWorkBundle({
   showMetadata?: boolean
   variant: ChatTranscriptVariant
   showSourceBadge: boolean
+  toolOutputsCoveredSinceMs: number | null
   toolOutputsCoveredThroughMs: number | null
   action?: ChatTranscriptAction
 }) {
@@ -2253,6 +2260,7 @@ function TurnWorkBundle({
         tools=${tools}
         traceSteps=${traceSteps}
         turnComplete=${turnComplete}
+        toolOutputsCoveredSinceMs=${toolOutputsCoveredSinceMs}
         toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
       />
       <${ChatMessageBubble}
@@ -2368,10 +2376,11 @@ function renderChatTranscriptBody(opts: {
   showMetadata?: boolean
   variant: ChatTranscriptVariant
   showSourceBadge: boolean
+  toolOutputsCoveredSinceMs: number | null
   toolOutputsCoveredThroughMs: number | null
   action?: ChatTranscriptAction
 }): VNode[] {
-  const { entries, showDayDividers, groupToolCalls, showMetadata, variant, showSourceBadge, toolOutputsCoveredThroughMs, action } = opts
+  const { entries, showDayDividers, groupToolCalls, showMetadata, variant, showSourceBadge, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs, action } = opts
   const units = buildChatRenderUnits(entries, groupToolCalls)
   const out: VNode[] = []
   // Track the last NON-NULL calendar day rather than only the immediately
@@ -2401,6 +2410,7 @@ function renderChatTranscriptBody(opts: {
         showMetadata=${showMetadata}
         variant=${variant}
         showSourceBadge=${showSourceBadge}
+        toolOutputsCoveredSinceMs=${toolOutputsCoveredSinceMs}
         toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
         action=${action}
       />`)
@@ -2439,6 +2449,7 @@ export function ChatTranscript({
   showDayDividers = false,
   groupToolCalls = false,
   showSourceBadge = false,
+  toolOutputsCoveredSinceMs = null,
   toolOutputsCoveredThroughMs = null,
   action,
 }: {
@@ -2454,6 +2465,7 @@ export function ChatTranscript({
   // Default false so non-workspace surfaces keep the flat per-row ToolCallBubble.
   groupToolCalls?: boolean
   showSourceBadge?: boolean
+  toolOutputsCoveredSinceMs?: number | null
   toolOutputsCoveredThroughMs?: number | null
   action?: ChatTranscriptAction
 }) {
@@ -2465,16 +2477,19 @@ export function ChatTranscript({
     [entries],
   )
   const toolOutputSignature = useMemo(
-    () => entries
-      .filter(entry => entry.role === 'tool')
-      .map((entry) => {
-        const output = lookupToolCallOutput(entry.id)
-        return output
-          ? `${entry.id}:${output.success}:${output.semantic_success ?? ''}:${output.duration_ms}:${toolOutputDisplay(output.output)?.text.length ?? 0}`
-          : `${entry.id}:pending`
-      })
-      .join('|'),
-    [entries, toolCallOutputsById.value],
+    () => {
+      const coverageSig = `${toolOutputsCoveredSinceMs ?? ''}:${toolOutputsCoveredThroughMs ?? ''}`
+      return entries
+        .filter(entry => entry.role === 'tool')
+        .map((entry) => {
+          const output = lookupToolCallOutput(entry.id)
+          return output
+            ? `${entry.id}:${output.success}:${output.semantic_success ?? ''}:${output.duration_ms}:${toolOutputDisplay(output.output)?.text.length ?? 0}`
+            : `${entry.id}:pending:${coverageSig}`
+        })
+        .join('|')
+    },
+    [entries, toolCallOutputsById.value, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs],
   )
 
   const scrollToBottom = () => {
@@ -2540,6 +2555,7 @@ export function ChatTranscript({
               showMetadata,
               variant,
               showSourceBadge,
+              toolOutputsCoveredSinceMs,
               toolOutputsCoveredThroughMs,
               action,
             })}

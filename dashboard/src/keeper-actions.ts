@@ -195,6 +195,17 @@ export async function hydrateKeeperChatHistory(
 // horizon keeps every visible row eligible for output join.
 const TOOL_OUTPUT_FETCH_LIMIT = KEEPER_HISTORY_TAIL_MESSAGES
 
+function toolOutputCoveredSinceMs(entries: readonly { ts: number }[], limit: number): number | null {
+  if (entries.length < limit) return null
+  const oldestMs = entries.reduce((oldest, entry) => {
+    const ms = entry.ts * 1000
+    return Number.isFinite(ms) ? Math.min(oldest, ms) : oldest
+  }, Number.POSITIVE_INFINITY)
+  // Saturated response with no parseable timestamp: do not mark any older
+  // unjoined tool row missing, because the fetched tail's lower bound is unknown.
+  return Number.isFinite(oldestMs) ? oldestMs : Number.POSITIVE_INFINITY
+}
+
 /** Best-effort hydration of tool-call outputs into the shared store so the
  *  chat ToolCallBubble can join results onto transcript rows by tool_use_id.
  *  Failures are swallowed (logged): the transcript must render with or without
@@ -204,7 +215,11 @@ async function hydrateKeeperToolOutputs(keeperName: string): Promise<void> {
   try {
     const response = await fetchKeeperToolCalls(keeperName, TOOL_OUTPUT_FETCH_LIMIT)
     recordToolCallOutputs(response.entries)
-    markToolCallOutputsHydrated(keeperName, coveredThroughMs)
+    markToolCallOutputsHydrated(
+      keeperName,
+      coveredThroughMs,
+      toolOutputCoveredSinceMs(response.entries, TOOL_OUTPUT_FETCH_LIMIT),
+    )
   } catch (err) {
     markToolCallOutputsHydrationFailed(keeperName)
     const message = err instanceof Error ? err.message : String(err)

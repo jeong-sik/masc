@@ -24,6 +24,7 @@ export const toolCallOutputsById = signal<Map<string, ToolCallEntry>>(new Map())
 
 interface ToolCallOutputHydrationState {
   inFlight: number
+  coveredSinceMs: number | null
   coveredThroughMs: number | null
   failed: boolean
 }
@@ -35,7 +36,12 @@ function keeperKey(keeperName: string): string {
 }
 
 function currentHydrationState(keeperName: string): ToolCallOutputHydrationState {
-  return toolCallOutputHydrationByKeeper.value[keeperName] ?? { inFlight: 0, coveredThroughMs: null, failed: false }
+  return toolCallOutputHydrationByKeeper.value[keeperName] ?? {
+    inFlight: 0,
+    coveredSinceMs: null,
+    coveredThroughMs: null,
+    failed: false,
+  }
 }
 
 function updateHydrationState(
@@ -48,6 +54,7 @@ function updateHydrationState(
   const next = update(current)
   if (
     current.inFlight === next.inFlight
+    && current.coveredSinceMs === next.coveredSinceMs
     && current.coveredThroughMs === next.coveredThroughMs
     && current.failed === next.failed
   ) return
@@ -69,9 +76,21 @@ export function markToolCallOutputsHydrating(keeperName: string): number {
   return startedAtMs
 }
 
-export function markToolCallOutputsHydrated(keeperName: string, coveredThroughMs: number): void {
+function mergeCoveredSince(current: number | null, next: number | null): number | null {
+  if (current == null || next == null) return null
+  return Math.min(current, next)
+}
+
+export function markToolCallOutputsHydrated(
+  keeperName: string,
+  coveredThroughMs: number,
+  coveredSinceMs: number | null = null,
+): void {
   updateHydrationState(keeperName, current => ({
     inFlight: Math.max(0, current.inFlight - 1),
+    coveredSinceMs: current.coveredThroughMs == null
+      ? coveredSinceMs
+      : mergeCoveredSince(current.coveredSinceMs, coveredSinceMs),
     coveredThroughMs: Math.max(current.coveredThroughMs ?? 0, coveredThroughMs),
     failed: false,
   }))
@@ -90,6 +109,11 @@ export function markToolCallOutputsHydrationFailed(keeperName: string): void {
 export function toolCallOutputsCoveredThroughMs(keeperName: string): number | null {
   const key = keeperKey(keeperName)
   return key ? (toolCallOutputHydrationByKeeper.value[key]?.coveredThroughMs ?? null) : null
+}
+
+export function toolCallOutputsCoveredSinceMs(keeperName: string): number | null {
+  const key = keeperKey(keeperName)
+  return key ? (toolCallOutputHydrationByKeeper.value[key]?.coveredSinceMs ?? null) : null
 }
 
 /** Merge tool-call entries into the store, keyed by tool_use_id. Entries

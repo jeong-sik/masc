@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>설계서 — Keeper 턴 상세: thinking↔tool 인터리빙 보존</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'dark', securityLevel: 'loose' });
+</script>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1d212b; --fg: #d7dce5; --fg-dim: #8b93a3;
+    --acc: #6ea8fe; --ok: #4ec9a3; --warn: #e2b341; --err: #e06c75; --border: #2a2f3a;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, "Apple SD Gothic Neo", "Pretendard", system-ui, sans-serif;
+    line-height: 1.65; font-size: 15px;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 40px 28px 120px; }
+  header.doc { border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 8px; }
+  h1 { font-size: 26px; margin: 0 0 10px; letter-spacing: -0.01em; }
+  h2 { font-size: 20px; margin: 40px 0 12px; padding-top: 12px; border-top: 1px solid var(--border); letter-spacing: -0.01em; }
+  h3 { font-size: 16px; margin: 24px 0 8px; color: var(--acc); }
+  p { margin: 10px 0; }
+  code { font-family: var(--mono); font-size: 0.86em; background: var(--panel2); padding: 1px 6px; border-radius: 4px; color: #c8d3e6; }
+  pre { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.5; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px 18px; color: var(--fg-dim); font-size: 13px; margin-top: 6px; }
+  .meta b { color: var(--fg); font-weight: 600; }
+  .tag { display: inline-block; font-size: 12px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel); color: var(--fg-dim); }
+  .tag.draft { color: var(--warn); border-color: #5a4a1f; }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 13.5px; }
+  th, td { text-align: left; padding: 9px 11px; border: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--panel2); color: var(--fg); font-weight: 600; }
+  td code { white-space: nowrap; }
+  .callout { border: 1px solid var(--border); border-left-width: 3px; border-radius: 8px; padding: 12px 16px; margin: 16px 0; background: var(--panel); }
+  .callout.root { border-left-color: var(--err); }
+  .callout.key { border-left-color: var(--acc); }
+  .callout.ok { border-left-color: var(--ok); }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout h4 { margin: 0 0 6px; font-size: 14px; }
+  .mermaid { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 18px; margin: 16px 0; text-align: center; }
+  ul, ol { margin: 8px 0; padding-left: 22px; }
+  li { margin: 5px 0; }
+  .fileref { font-family: var(--mono); font-size: 0.84em; color: var(--ok); }
+  .rec { color: var(--ok); font-weight: 600; }
+  .no { color: var(--err); }
+  .small { color: var(--fg-dim); font-size: 13px; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <h1>설계서 — Keeper 턴 상세: thinking↔tool 인터리빙 보존</h1>
+  <div class="meta">
+    <span><b>상태</b> <span class="tag draft">Draft (설계 검토용)</span></span>
+    <span><b>작성</b> 2026-06-21</span>
+    <span><b>출처</b> 턴 상세 적대 감사 concern #5</span>
+    <span><b>연관</b> #21748 (thinking-trace mis-attribution), #21889(머지), #21892(머지)</span>
+    <span><b>대상 repo</b> masc / dashboard</span>
+  </div>
+</header>
+
+<div class="callout key">
+  <h4>요약 (TL;DR)</h4>
+  <p>키퍼 턴 상세에서 모델이 <code>think → tool → think → tool</code> 순으로 작업해도 화면에는 <code>[생각 블록 전체][도구 블록 전체]</code> 두 덩어리로만 보여, <b>어느 생각 다음에 어떤 도구가 실행됐는지</b>를 운영자가 볼 수 없다. 원인은 (1) 라이브 스트림이 모든 tool entry를 assistant entry <i>앞으로</i> hoist하고, (2) <code>ToolTraceCard</code>가 thinking과 tool을 <i>두 섹션으로 분리</i> 렌더하기 때문이다. <b>핵심:</b> 타입(<code>ChatTraceToolStep</code>)과 렌더러(<code>ChatTraceStep</code> 컴포넌트)는 이미 인터리빙을 표현할 수 있는데 <b>스트림 빌더가 think-only만 emit</b>한다. 권장안은 통합 <code>traceSteps</code> 배열에 <code>kind:'tool'</code> 스텝도 순서대로 append하는 <b>옵션 C</b>(구조적 표현) — 재구성이 아니라 표현력 배선이다.</p>
+</div>
+
+<h2>1. 문제 정의 (concern #5)</h2>
+<p>사용자 관찰: <i>"Thinking 중간에 Tools가 나오는 배치는 못 보는건가? 이게 어떻게 묶이는건지."</i></p>
+<p>턴 상세 transcript는 한 턴의 작업 과정을 <b>"작업 과정"</b> 카드(<code>ToolTraceCard</code>)로 보여준다. 그러나 모델의 실제 작업 순서(생각과 도구 호출의 교차)가 렌더링에서 소실되어, 운영자는 다음을 판단할 수 없다:</p>
+<ul>
+  <li>특정 도구가 <b>어느 추론 단계 직후</b>에 실행됐는가</li>
+  <li>도구 결과가 그 다음 생각에 반영됐는가(인과 순서)</li>
+  <li>생각만 길게 하고 도구는 마지막에 몰아친 것인지, 생각-도구를 번갈아 한 것인지</li>
+</ul>
+<p>이 정보는 키퍼가 "생각만 맴돌다 멈추는"(thinking-only/no-progress) 패턴을 운영자가 진단할 때 직접적 단서가 된다. concern #3(thinking 루프)과 같은 뿌리의 관측성 문제다.</p>
+
+<h2>2. As-Is — 현재 동작</h2>
+<p>대상 표면은 <code>groupToolCalls=true</code> 경로(<span class="fileref">keeper-shared.ts</span>)이며 <code>buildChatRenderUnits</code> → <code>TurnWorkBundle</code> → <code>ToolTraceCard</code>로 렌더된다.</p>
+
+<h3>2.1 데이터 흐름</h3>
+<div class="mermaid">
+flowchart TD
+  subgraph S["라이브 스트림 · keeper-stream.ts"]
+    direction TB
+    THv["THINKING_DELTA"] -->|"appendAssistantThinkingDelta()"| TS["assistant.traceSteps<br/>kind:'think' 만 누적"]
+    TCv["TOOL_CALL_START (:76)"] -->|"insertThreadEntryBefore(assistantEntryId) (:81)"| TE["tool entry 들<br/>assistant entry <b>앞</b>으로 hoist"]
+  end
+  TS --> CARD
+  TE --> CARD
+  subgraph CARD["ToolTraceCard 렌더 (primitives.ts)"]
+    direction TB
+    A["1) traceSteps.map → 생각 블록 전체"]
+    B["2) tools.map → 도구 블록 전체"]
+    A --> B
+  end
+  CARD --> OUT["화면: [생각][생각]…[도구][도구]<br/><b>교차 순서 소실</b>"]
+</div>
+
+<h3>2.2 근거 (file:line, 직접 검증)</h3>
+<table>
+  <thead><tr><th>지점</th><th>코드</th><th>동작</th></tr></thead>
+  <tbody>
+    <tr><td>tool entry hoist</td><td class="fileref">keeper-stream.ts:76–88</td><td><code>TOOL_CALL_START</code> → <code>insertThreadEntryBefore(keeperName, assistantEntryId, …)</code> — 모든 도구 entry를 단일 assistant entry <b>앞</b>에 삽입. tool entry는 <code>timestamp: new Date().toISOString()</code>(:88) 보유.</td></tr>
+    <tr><td>thinking 누적</td><td class="fileref">keeper-state.ts:841–858</td><td><code>appendAssistantThinkingDelta()</code>가 <code>traceSteps</code>에 <b><code>kind:'think'</code>만</b> append(:850, :854). tool 스텝은 절대 안 들어감.</td></tr>
+    <tr><td>그룹핑</td><td class="fileref">primitives.ts:2259 · 2289</td><td><code>buildChatRenderUnits</code>가 <code>canAppendToolToRun</code> 기준(turnRef/인접)으로 연속 tool entry를 한 <code>toolGroup</code>으로 fold. tool run + 직후 assistant → 단일 <code>turnBundle</code>.</td></tr>
+    <tr><td>2-섹션 렌더</td><td class="fileref">primitives.ts (ToolTraceCard)</td><td><code>traceSteps.map(…)</code> <b>다음</b> <code>tools.map(…)</code> — 생각 전체를 먼저, 도구 전체를 나중에. 헤더 단계 수는 <code>traceSteps.length + tools.length</code>로 함께 세지만 렌더는 비-인터리브 2블록.</td></tr>
+  </tbody>
+</table>
+
+<h3>2.3 정보 손실 지점</h3>
+<div class="callout root">
+  <h4>순서 정보는 <i>존재</i>하지만 두 곳에서 폐기된다</h4>
+  <ul>
+    <li><b>(a) 스트림 hoist</b> — <span class="fileref">keeper-stream.ts:81</span>: tool entry를 assistant 앞으로 삽입하는 순간, 그 도구가 "어느 thinking 세그먼트 다음"이었는지가 사라진다. tool의 <code>timestamp</code>는 남지만 thinking 델타에는 세그먼트별 timestamp가 없다.</li>
+    <li><b>(b) 2-섹션 렌더</b> — <code>ToolTraceCard</code>가 <code>traceSteps</code>(생각)와 <code>tools</code>(도구)를 별도 입력으로 받아 순서대로 합치지 않고 두 섹션으로 그린다.</li>
+  </ul>
+</div>
+
+<h2>3. 핵심 통찰 — 표현력은 이미 있다</h2>
+<div class="callout key">
+  <h4>"새 기능"이 아니라 "미배선"</h4>
+  <p><code>ChatTraceStep</code> 유니온은 이미 tool 변형을 포함한다:</p>
+  <pre>// types/core.ts:825–826
+export type ChatTraceToolStep = { kind: 'tool'; name: string; status?: 'ok'|'err'; dur?: string; args?: unknown; result?: string }
+export type ChatTraceStep = ChatTraceThinkStep | ChatTraceReasonStep | ChatTraceToolStep</pre>
+  <p>그리고 <code>ChatTraceStep</code> 렌더 컴포넌트(primitives.ts)는 <code>kind:'tool'</code> 스텝을 이미 그릴 수 있다. <b>유일한 공백</b>은 entry 레벨 <code>traceSteps</code> 빌더(<code>appendAssistantThinkingDelta</code>)가 <code>kind:'think'</code>만 emit한다는 것. 즉 단일 순서 배열로 인터리빙을 표현할 길이 타입·렌더러엔 열려 있는데 stream 핸들러만 안 쓴다.</p>
+</div>
+
+<h2>4. To-Be — 제안 설계</h2>
+<div class="mermaid">
+flowchart TD
+  subgraph S2["라이브 스트림 (수정)"]
+    direction TB
+    TH2["THINKING_DELTA"] -->|"append kind:'think'"| U["통합 traceSteps<br/>kind:'think' | 'tool' 시간순 인터리브"]
+    TC2["TOOL_CALL_START / _END"] -->|"append kind:'tool' (+status/dur 후속 패치)"| U
+  end
+  U --> C2["ToolTraceCard<br/>traceSteps 단일 순회 렌더"]
+  C2 --> O2["화면: 생각 → 도구 → 생각 → 도구<br/><b>실제 순서 보존</b>"]
+</div>
+<p>도구 호출을 sibling entry로 따로 두지 않고, 발생 시점에 assistant의 <b>같은 <code>traceSteps</code> 배열</b>에 <code>kind:'tool'</code> 스텝으로 append한다. 렌더러는 이미 그 순서대로 그릴 수 있으므로 카드 변경이 최소화된다.</p>
+
+<h2>5. 설계 옵션 비교</h2>
+<table>
+  <thead><tr><th>옵션</th><th>메커니즘</th><th>변경 레이어</th><th>침습도</th><th>트레이드오프</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><b>A. 카드 sort-merge</b></td>
+      <td><code>ToolTraceCard</code>에서 <code>traceSteps</code>+<code>tools</code>를 timestamp로 정렬해 단일 <code>.map</code></td>
+      <td>렌더만 (primitives.ts)</td>
+      <td>낮음</td>
+      <td><span class="no">불충분</span> — 상류 hoist로 tool의 thinking-상대 위치가 이미 소실. thinking 델타엔 세그먼트 timestamp가 없어 정렬 키가 부정확. <b>단독으로는 순서 복원 불가.</b></td>
+    </tr>
+    <tr>
+      <td><b>B. thinkAnchor 기록</b></td>
+      <td><span class="fileref">keeper-stream.ts:81</span>에서 tool 삽입 시 현재 <code>assistantEntry.traceSteps.length</code>(또는 thinking-char offset)를 tool entry에 <code>thinkAnchor</code>로 저장. 카드가 그 anchor 뒤에 도구 배치</td>
+      <td>stream + state + 렌더</td>
+      <td>중간</td>
+      <td>기존 entry 구조 유지하며 위치 <i>재구성</i>. anchor 계산 정확도에 의존. tool은 여전히 sibling entry라 두 자료구조를 동기화해야 함.</td>
+    </tr>
+    <tr>
+      <td><b class="rec">C. 통합 traceSteps (권장)</b></td>
+      <td>tool 발생 시 assistant의 <code>traceSteps</code>에 <code>kind:'tool'</code> 스텝을 순서대로 append. <code>TOOL_CALL_END</code>에서 status/dur 후속 패치. 카드는 단일 배열 순회</td>
+      <td>stream + state (+ 카드 소폭)</td>
+      <td>중간</td>
+      <td><span class="rec">인터리빙을 <i>구조적으로</i> 표현</span> — 타입/렌더러 이미 지원. 재구성 불필요. 단 tool entry를 sibling으로도 두던 기존 소비자(그룹핑/툴 패널)와의 이중화 정리 필요.</td>
+    </tr>
+    <tr>
+      <td><b>D. timestamp 표면화</b></td>
+      <td>각 스텝에 상대 시각/순번 배지 표시 (A~C와 병행 가능)</td>
+      <td>렌더만</td>
+      <td>낮음</td>
+      <td>보조책. 순서를 <i>복원</i>하진 않지만 운영자가 순번을 추론하게 함. thinking 델타 timestamp 부재가 한계.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>6. 권장안 + 근거</h2>
+<div class="callout ok">
+  <h4>옵션 C — 통합 <code>traceSteps</code></h4>
+  <ol>
+    <li><b>표현력이 이미 존재</b>: <code>ChatTraceToolStep</code> 타입 + 렌더러가 인터리브를 그릴 수 있어, "새 표현"이 아니라 "배선"이다. 재구성(옵션 A/B)보다 결정론적.</li>
+    <li><b>순서가 source-of-truth</b>: 발생 시점에 한 배열에 순서대로 쌓으면 timestamp 정렬·anchor 계산 같은 휴리스틱이 불필요.</li>
+    <li><b>카드 단순화</b>: <code>ToolTraceCard</code>의 2-섹션 분기를 단일 순회로 줄여 렌더 복잡도 감소.</li>
+  </ol>
+  <p class="small">옵션 D(순번 배지)를 병행해 점진 도입 가능: 먼저 D로 관측성 보강 → C로 구조 전환.</p>
+</div>
+
+<h2>7. 구현 계획 (스케치, 코드 아님)</h2>
+<table>
+  <thead><tr><th>단계</th><th>파일</th><th>변경</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td class="fileref">keeper-state.ts</td><td><code>appendAssistantToolStep(keeper, entryId, {name,...})</code> 추가 — assistant <code>traceSteps</code>에 <code>kind:'tool'</code> append. <code>TOOL_CALL_END</code>용 <code>patchAssistantToolStep</code>(status/dur/result 채우기).</td></tr>
+    <tr><td>2</td><td class="fileref">keeper-stream.ts:76–95</td><td><code>TOOL_CALL_START/ARGS/END</code> 핸들러를 sibling <code>insertThreadEntryBefore</code> 대신(또는 병행) step append로 라우팅. 두 경로 이중화 시 SSOT 결정.</td></tr>
+    <tr><td>3</td><td class="fileref">primitives.ts (ToolTraceCard)</td><td>2-섹션(<code>traceSteps</code> then <code>tools</code>)을 단일 <code>traceSteps</code> 순회로. 헤더의 도구/실패/<code>결과 누락</code> 카운트는 <code>kind:'tool'</code> 스텝에서 집계.</td></tr>
+    <tr><td>4</td><td class="fileref">buildChatRenderUnits</td><td>tool이 step으로 흡수되면 별도 <code>toolGroup</code> 그룹핑 로직 정리 — 기존 flat 경로(<code>groupToolCalls=false</code>) 회귀 방지.</td></tr>
+  </tbody>
+</table>
+
+<h2>8. 테스트 계획</h2>
+<ul>
+  <li><b>인터리빙 보존</b>: <code>[think A, tool X, think B, tool Y]</code> 스트림 → 렌더 DOM 순서가 정확히 A·X·B·Y인지 단언.</li>
+  <li><b>status/dur 후속 패치</b>: <code>TOOL_CALL_END</code> 후 해당 tool 스텝의 status(ok/err)·dur 갱신 확인.</li>
+  <li><b>회귀</b>: 기존 think-only 턴, tool-only 턴, flat(<code>groupToolCalls=false</code>) 경로가 그대로 동작.</li>
+  <li><b>#21892 연동</b>: settled 턴의 미join tool 스텝이 통합 배열에서도 <code>missing</code>으로 표시되는지.</li>
+</ul>
+
+<h2>9. 리스크 · 미해결 질문</h2>
+<div class="callout warn">
+  <h4>충돌 · 좌표</h4>
+  <ul>
+    <li><b>#21748 동일 영역</b>: "assistant thinking-trace mis-attribution across identical-text turns"가 <code>keeper-state.ts</code>/<code>keeper-stream.ts</code>의 같은 traceStep 경로를 다룬다. <b>본 설계는 #21748에 합류</b>해 단일 SSOT로 진행 권장(중복 PR 회피).</li>
+    <li><b>이중 자료구조</b>: tool을 step으로 옮기면, tool을 sibling entry로 읽던 다른 소비자(툴 실행 추적 패널, 그룹핑)와의 동기화/이중화를 정리해야 한다 — 잘못하면 한쪽만 갱신되는 silent drift.</li>
+    <li><b>thinking 세그먼트 timestamp 부재</b>: 옵션 A/D의 정렬·배지 정확도 한계. 옵션 C는 발생순 append라 이 문제를 우회.</li>
+    <li><b>스트림 재정렬 부작용</b>: hoist 제거가 자동 스크롤/스트리밍 표시(<code>streamState</code>)와 상호작용할 수 있어 라이브 회귀 테스트 필요.</li>
+  </ul>
+</div>
+
+<hr />
+<p class="small">근거: 턴 상세 적대 감사(9-에이전트 워크플로) + 직접 spot-verify. 모든 file:line은 2026-06-21 기준 origin/main에서 확인. 표현력(타입/렌더러)은 존재, 빌더 미배선이 핵심. 본 문서는 코드 변경이 아닌 설계 검토용 Draft이며, 구현은 #21748 맥락에서 진행 권장.</p>
+
+</div>
+</body>
+</html>

@@ -83,14 +83,24 @@ let test_degraded_row_shape_keeps_dashboard_contract () =
   check_contains "agent field remains present" src "(\"agent\", `Null)";
   check_contains "runtime identity field remains present" src "(\"runtime_id\", runtime_id_json)"
 
-let test_checkpoint_context_max_uses_runtime_budget () =
+let test_context_max_fallback_uses_pure_runtime_budget () =
   let src = load_source target_file in
   check_contains
-    "checkpoint fallback resolves runtime context max"
+    "dashboard context max resolves runtime context budget"
     src
-    "Keeper_turn_runtime_budget.resolved_max_context_for_turn";
+    "Keeper_context_runtime.resolve_max_context_resolution_of_meta m";
+  check_contains
+    "metrics zero context max falls back to runtime budget"
+    src
+    "if raw_context_max > 0 then raw_context_max else primary_max_context";
+  check_contains
+    "missing metrics ratio is recomputed from tokens and runtime budget"
+    src
+    "float_of_int context_tokens /. float_of_int context_max";
   check bool "summary fallback does not hardcode zero context max" false
     (contains ~needle:"let primary_max_context = 0 in" src)
+  ; check bool "dashboard read path avoids turn resolver side effects" false
+      (contains ~needle:"Keeper_turn_runtime_budget.resolved_max_context_for_turn" src)
 
 let () =
   run
@@ -105,8 +115,8 @@ let () =
             `Quick
             test_degraded_row_shape_keeps_dashboard_contract
         ; test_case
-            "checkpoint context max uses runtime budget"
+            "context max fallback uses pure runtime budget"
             `Quick
-            test_checkpoint_context_max_uses_runtime_budget
+            test_context_max_fallback_uses_pure_runtime_budget
         ] )
     ]

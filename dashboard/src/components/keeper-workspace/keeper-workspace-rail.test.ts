@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { shellAuthSummary, tasks } from '../../store'
 import { navigate } from '../../router'
 import { callMcpTool } from '../../api/mcp'
+import { requestConfirm } from '../common/confirm-dialog'
 import { KeeperWorkspaceRail } from './keeper-workspace-rail'
 import type { Keeper, Task } from '../../types'
 
@@ -29,6 +30,10 @@ vi.mock('../../router', () => ({
 
 vi.mock('../../api/mcp', () => ({
   callMcpTool: vi.fn().mockResolvedValue('{"before_tokens":1000,"after_tokens":800,"phase_after":"Running"}'),
+}))
+
+vi.mock('../common/confirm-dialog', () => ({
+  requestConfirm: vi.fn().mockResolvedValue(true),
 }))
 
 function mkKeeper(partial: Partial<Keeper>): Keeper {
@@ -157,17 +162,45 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('compact ratio_gate는 50%입니다')
   })
 
-  it('runs operator compaction through the existing MCP tool', async () => {
+  it('runs overflow compaction without force through the existing MCP tool', async () => {
     shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, phase: 'Overflowed' })} onToggleDetail=${() => {}} />`)
     fireEvent.click(getByRole('button', { name: '지금 compact' }))
 
     await waitFor(() => {
       expect(callMcpTool).toHaveBeenCalledWith('masc_keeper_compact', {
         name: 'masc-improver',
+        force: false,
+      })
+    })
+    expect(requestConfirm).not.toHaveBeenCalled()
+  })
+
+  it('confirms before forcing compaction on running keepers', async () => {
+    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, phase: 'Running' })} onToggleDetail=${() => {}} />`)
+    fireEvent.click(getByRole('button', { name: '지금 compact' }))
+
+    await waitFor(() => {
+      expect(requestConfirm).toHaveBeenCalledWith(expect.objectContaining({
+        title: 'Force keeper compact',
+        confirmText: 'Force compact',
+      }))
+      expect(callMcpTool).toHaveBeenCalledWith('masc_keeper_compact', {
+        name: 'masc-improver',
         force: true,
       })
     })
+  })
+
+  it('does not compact running keepers when force confirmation is cancelled', async () => {
+    vi.mocked(requestConfirm).mockResolvedValueOnce(false)
+    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, phase: 'Running' })} onToggleDetail=${() => {}} />`)
+    fireEvent.click(getByRole('button', { name: '지금 compact' }))
+
+    await waitFor(() => expect(requestConfirm).toHaveBeenCalled())
+    expect(callMcpTool).not.toHaveBeenCalled()
   })
 
   it('fires onToggleDetail from the 운영 상세 button', () => {

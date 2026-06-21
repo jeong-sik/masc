@@ -30,30 +30,31 @@ Check timestamp: 2026-06-21 Asia/Seoul.
    - SSE connections are registered with per-connection stop state in `lib/server/server_mcp_transport_http_conn.ml`.
    - The Eio shape matches the official `Switch` resource-lifetime contract: long-lived fibers/resources must be owned by caller-provided switches, and child failures/cancellation need explicit containment.
 
-## P0: remote/proxy WebSocket is not actually solved
+## P0: remote/proxy WebSocket was not actually solved
 
-Current code:
+Prior code:
 
-- `GET /ws` is a discovery JSON route in `lib/server/server_routes_http_routes_frontend.ml`.
-- `lib/transport_read_model.ml` returns a standalone loopback URL only when the request host is loopback.
-- For remote hosts it returns `ws_url = null` with `unavailable_reason = standalone_ws_loopback_only`.
-- The same JSON exposes `same_origin_ws_url`, but `same_origin_upgrade_enabled = false`.
-- `Server_mcp_transport_ws.upgrade_connection` exists, but no route currently wires it into `/ws`.
+- `GET /ws` was only a discovery JSON route in `lib/server/server_routes_http_routes_frontend.ml`.
+- `lib/transport_read_model.ml` returned a standalone loopback URL only when the request host was loopback.
+- For remote hosts it returned `ws_url = null` with `unavailable_reason = standalone_ws_loopback_only`.
+- The same JSON exposed `same_origin_ws_url`, but `same_origin_upgrade_enabled = false`.
+- `Server_mcp_transport_ws.upgrade_connection` existed, but no route wired it into `/ws`.
 
-Impact:
+Impact before this PR:
 
 - RunPod/proxy/remote dashboards cannot connect to `ws://127.0.0.1:<MASC_WS_PORT>/`.
 - The browser correctly refuses or cannot reach the loopback standalone socket.
 - Before this PR, the dashboard collapsed this into `dashboard websocket unavailable`, hiding the real condition.
 
-Required fix:
+Implemented in this PR:
 
 - Wire same-origin HTTP upgrade on `/ws` through the top-level route stack.
 - Reuse the same inbound MCP dispatch path used by `Server_ws_standalone.start`.
-- Flip discovery only after the route is wired and covered by tests: `same_origin_upgrade_enabled = true`, `ws_url = same_origin_ws_url` for remote/proxy-safe requests.
-- Add an e2e smoke with an HTTPS or proxy-like origin that verifies `wss://<dashboard-origin>/ws` reaches `dashboard/hello` and `dashboard/subscribe`.
+- Flip discovery only after the route and inbound dispatcher are ready: `same_origin_upgrade_enabled = true`, `ws_url = same_origin_ws_url` for remote/proxy-safe requests.
 
-This PR only makes the diagnosis visible; it does not claim to provide remote WSS.
+Remaining validation gap:
+
+- Add an e2e smoke with an HTTPS or proxy-like origin that verifies `wss://<dashboard-origin>/ws` reaches `dashboard/hello` and `dashboard/subscribe`.
 
 ## P1: auth/development-token UX still needs typed failure display
 
@@ -137,4 +138,4 @@ Recommended action:
 
 The dashboard auth layer now also publishes same-tab bearer-token changes. The WS layer uses that signal to close/reconnect after token replacement or token clear, so the socket authorization state tracks the stored bearer token instead of remaining stuck after `dashboard/hello` auth rejection or staying privileged after a clear.
 
-The main HTTP `/ws` route now distinguishes discovery JSON from an actual WebSocket upgrade request. Upgrade requests reuse the same inbound JSON-RPC dispatcher as the standalone WebSocket server, and discovery now advertises same-origin `ws://` / `wss://` as the primary `ws_url` while keeping standalone loopback fields as diagnostics. That removes the remote/proxy failure mode where `/ws` only reported `standalone_ws_loopback_only` and the dashboard had no usable browser WebSocket URL.
+The main HTTP `/ws` route now distinguishes discovery JSON from an actual WebSocket upgrade request. Upgrade requests reuse the same inbound JSON-RPC dispatcher as the standalone WebSocket server, and discovery now advertises same-origin `ws://` / `wss://` as the primary `ws_url` while keeping standalone loopback fields as diagnostics. The same-origin URL is advertised only after bootstrap installs the inbound dispatcher, which avoids telling clients to reconnect into a route that can accept an upgrade but cannot yet process MCP messages. That removes the remote/proxy failure mode where `/ws` only reported `standalone_ws_loopback_only` and the dashboard had no usable browser WebSocket URL.

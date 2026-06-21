@@ -100,6 +100,21 @@ let persist ~base_path ~keeper_name queue =
          path
          (Printexc.to_string exn))
 
+let persist_snapshot ~base_path ~keeper_name snapshot =
+  match snapshot_path ~base_path ~keeper_name with
+  | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
+  | Ok path ->
+    (try
+       with_write_lock (fun () -> persist_to_path ~keeper_name path (snapshot ()))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Keeper.warn
+         "event_queue_snapshot: persist_snapshot raised keeper=%s path=%s: %s"
+         keeper_name
+         path
+         (Printexc.to_string exn))
+
 let update ~base_path ~keeper_name f =
   match snapshot_path ~base_path ~keeper_name with
   | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg

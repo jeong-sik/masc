@@ -19,3 +19,9 @@ val update :
 (** Load, transform, and atomically write the queue snapshot while holding the
     persistence write lock. Use this for pre-registry mutation paths that do not
     have a live registry CAS cell yet. *)
+
+val persist_snapshot :
+  base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit
+(** Evaluate [snapshot] while holding the persistence write lock, then atomically
+    write it. Use this after live registry CAS mutations so an older writer
+    cannot overwrite a newer live queue snapshot after waiting on the file lock. *)

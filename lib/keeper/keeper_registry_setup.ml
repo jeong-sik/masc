@@ -121,7 +121,11 @@ let refresh_entry_event_queue_from_persistence ~base_path name entry =
     if merged = live
     then ()
     else if Atomic.compare_and_set entry.event_queue live merged
-    then Keeper_event_queue_persistence.persist ~base_path ~keeper_name:name merged
+    then
+      Keeper_event_queue_persistence.persist_snapshot
+        ~base_path
+        ~keeper_name:name
+        (fun () -> Atomic.get entry.event_queue)
     else loop ()
   in
   loop ()

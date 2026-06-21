@@ -19,10 +19,10 @@ let enqueue_if_missing queue stimulus =
 ;;
 
 let persist_live_queue ~base_path (entry : Keeper_registry.registry_entry) name =
-  Keeper_event_queue_persistence.persist
+  Keeper_event_queue_persistence.persist_snapshot
     ~base_path
     ~keeper_name:name
-    (Atomic.get entry.event_queue)
+    (fun () -> Atomic.get entry.event_queue)
 ;;
 
 let enqueue ~base_path name stimulus =

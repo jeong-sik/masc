@@ -1031,7 +1031,6 @@ function handleEvent(event: SSEEvent): void {
       const p = (event.payload ?? {}) as Record<string, unknown>
       const runtimeId = asString(p.runtime_id) ?? 'unknown'
       const branch = asString(p.branch) ?? 'unknown'
-      // supervisor extracted for future use
       const connected = p.connected === true
       const entries = Array.isArray(p.entries) ? p.entries.length : 0
       addTypedJournalEntry(

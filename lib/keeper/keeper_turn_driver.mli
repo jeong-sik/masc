@@ -161,6 +161,7 @@ module For_testing : sig
     keeper_name:string -> Runtime_candidate.t -> Agent_sdk.Error.sdk_error -> unit
 
   val apply_accept :
+    ?initial_messages:Agent_sdk.Types.message list ->
     runtime_id:string ->
     accept:(Agent_sdk_response.api_response -> bool) ->
     Runtime_agent.run_result ->

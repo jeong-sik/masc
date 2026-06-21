@@ -454,6 +454,72 @@ let test_thinking_only_after_mutation_then_read_does_not_try_next_candidate () =
        Masc.Keeper_error_classify.degraded_retry_reason_to_string
        (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
 
+let test_historical_mutation_does_not_block_current_read_only_retry () =
+  let history_messages =
+    [
+      message
+        [
+          tool_use
+            ~input:
+              (`Assoc
+                [
+                  ("title", `String "old checkpoint");
+                  ("body", `String "previous turn posted progress");
+                ])
+            "keeper_board_post";
+        ];
+    ]
+  in
+  let current_attempt_messages =
+    [ message [ tool_use ~input:(`Assoc [ ("file_path", `String "dune") ]) "Read" ] ]
+  in
+  let checkpoint =
+    checkpoint_with_messages (history_messages @ current_attempt_messages)
+  in
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~initial_messages:history_messages
+      ~runtime_id:"runtime.thinking-after-historical-mutation-current-read"
+      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      (run_result
+         ~checkpoint
+         ~content:
+           [
+             Agent_sdk.Types.Thinking
+               { thinking_type = "reasoning"; content = "internal chain" };
+           ]
+         ())
+  in
+  let err, reason_kind, reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "reason kind is no usable progress"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+  Alcotest.(check bool)
+    "current last tool remains visible"
+    true
+    (contains ~needle:"last_tool=Read" reason);
+  Alcotest.(check bool)
+    "historical mutation is not counted as current attempt mutation"
+    true
+    (contains ~needle:"any_mutating_tool=false" reason);
+  Alcotest.(check bool)
+    "effects seen only includes current attempt read-only tool"
+    true
+    (contains ~needle:"tool_effects_seen=read_only" reason);
+  Alcotest.(check bool)
+    "current read-only no-progress tries next candidate"
+    true
+    (Masc.Keeper_turn_driver.For_testing
+     .accept_no_progress_read_only_should_try_next
+       err);
+  Alcotest.(check (option string))
+    "current read-only no-progress is runtime-recoverable"
+    (Some "read_only_no_progress")
+    (Option.map
+       Masc.Keeper_error_classify.degraded_retry_reason_to_string
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
+
 let test_thinking_only_after_read_only_webfetch_can_try_next_candidate () =
   let checkpoint =
     checkpoint_with_messages
@@ -901,6 +967,10 @@ let () =
             "thinking-only after mutation then read does not try next candidate"
             `Quick
             test_thinking_only_after_mutation_then_read_does_not_try_next_candidate;
+          Alcotest.test_case
+            "historical mutation does not block current read-only retry"
+            `Quick
+            test_historical_mutation_does_not_block_current_read_only_retry;
           Alcotest.test_case
             "thinking-only after read-only WebFetch tries next candidate"
             `Quick

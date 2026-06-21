@@ -203,6 +203,7 @@ let run
        | Ok run_result ->
          let last_tool_context =
            Keeper_turn_driver_try_provider.accept_rejection_context_of_run_result
+             ~initial_messages:ctx.try_provider_ctx.initial_messages
              run_result
          in
          let err =

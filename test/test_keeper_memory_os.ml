@@ -2508,6 +2508,95 @@ let test_merge_and_cap_drops_expired_no_incoming () =
     Alcotest.(check (list string)) "only durable remains" [ "durable" ] remaining)
 ;;
 
+(* RFC-0272 (defect D): the episode-log cap hysteresis is a no-op at/below the
+   trigger and trims to the low-water above it; the band is non-empty and the
+   low-water clears the recall scan window so a trim can never starve recall. *)
+let test_trim_target_hysteresis () =
+  Alcotest.(check (option int))
+    "at trigger: no-op"
+    None
+    (Memory_io.trim_target ~count:5 ~keep:3 ~trigger:5);
+  Alcotest.(check (option int))
+    "above trigger: trim to keep"
+    (Some 3)
+    (Memory_io.trim_target ~count:6 ~keep:3 ~trigger:5);
+  Alcotest.(check bool)
+    "event band non-empty"
+    true
+    (Memory_io.event_recall_window < Memory_io.event_store_max);
+  Alcotest.(check bool)
+    "episode-file band non-empty"
+    true
+    (Memory_io.episode_file_window < Memory_io.episode_file_store_max);
+  (* coupling guard: Keeper_memory_os_recall.episode_tail_scan = 32. If a future
+     edit drops the low-water below the recall window, recall starves — fail here
+     instead. *)
+  Alcotest.(check bool)
+    "low-water clears the recall scan window (32)"
+    true
+    (Memory_io.event_recall_window > 32 && Memory_io.episode_file_window > 32)
+;;
+
+(* RFC-0272 (defect D): cap_events keeps the newest [keep] raw lines once the log
+   passes [trigger], and is a no-op once back under it. *)
+let test_cap_events_drops_oldest_over_trigger () =
+  with_temp_keepers_dir (fun _ ->
+    let keeper_id = "virtual-memory-keeper" in
+    let now = 1_000_000.0 in
+    for i = 1 to 6 do
+      let ep =
+        episode_fixture
+          ~now:(now +. float_of_int i)
+          ~trace_id:"trace-events"
+          ~generation:i
+          ~summary:(Printf.sprintf "ev-%d" i)
+      in
+      Memory_io.append_event ~keeper_id ep
+    done;
+    let dropped = Memory_io.cap_events ~keeper_id ~keep:3 ~trigger:5 in
+    Alcotest.(check int) "over trigger: drops the three oldest" 3 dropped;
+    let summaries =
+      Memory_io.read_events_tail ~keeper_id ~n:10
+      |> List.map (fun e -> e.Types.episode_summary)
+    in
+    Alcotest.(check (list string))
+      "keeps the newest three in append order"
+      [ "ev-4"; "ev-5"; "ev-6" ]
+      summaries;
+    let dropped2 = Memory_io.cap_events ~keeper_id ~keep:3 ~trigger:5 in
+    Alcotest.(check int) "idempotent: no-op below trigger" 0 dropped2)
+;;
+
+(* RFC-0272 (defect D): cap_episode_files keeps the [keep] most-recent files by
+   recency and unlinks the rest, idempotently. *)
+let test_cap_episode_files_keeps_recent () =
+  with_temp_keepers_dir (fun _ ->
+    let keeper_id = "virtual-memory-keeper" in
+    let now = 1_000_000.0 in
+    for i = 1 to 6 do
+      let ep =
+        episode_fixture
+          ~now:(now +. float_of_int i)
+          ~trace_id:"trace-episodes"
+          ~generation:i
+          ~summary:(Printf.sprintf "epi-%d" i)
+      in
+      Memory_io.append_episode ~keeper_id ep
+    done;
+    Alcotest.(check int)
+      "six episode files written"
+      6
+      (json_episode_file_count ~keeper_id);
+    let dropped = Memory_io.cap_episode_files ~keeper_id ~keep:3 ~trigger:5 in
+    Alcotest.(check int) "over trigger: unlinks the three oldest" 3 dropped;
+    Alcotest.(check int)
+      "three episode files remain"
+      3
+      (json_episode_file_count ~keeper_id);
+    let dropped2 = Memory_io.cap_episode_files ~keeper_id ~keep:3 ~trigger:5 in
+    Alcotest.(check int) "idempotent: no-op below trigger" 0 dropped2)
+;;
+
 let test_recall_context_renders_sanitized_memory () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
@@ -3836,6 +3925,18 @@ let () =
             "merge_and_cap drops expired with no incoming (RFC-0259 P5)"
             `Quick
             test_merge_and_cap_drops_expired_no_incoming
+        ; Alcotest.test_case
+            "episode-log cap hysteresis + recall coupling (RFC-0272)"
+            `Quick
+            test_trim_target_hysteresis
+        ; Alcotest.test_case
+            "cap_events drops oldest over trigger (RFC-0272)"
+            `Quick
+            test_cap_events_drops_oldest_over_trigger
+        ; Alcotest.test_case
+            "cap_episode_files keeps recent (RFC-0272)"
+            `Quick
+            test_cap_episode_files_keeps_recent
         ; Alcotest.test_case
             "merge_and_cap upserts re-observed claim (RFC-0243)"
             `Quick

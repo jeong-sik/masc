@@ -189,8 +189,10 @@ let body_timeout_for_attempt ?per_provider_timeout_s () =
 
 type last_tool_progress_context =
   { tool_name : string
-  ; tool_effect : string
+  ; tool_effect : Keeper_internal_error.tool_progress_effect
   }
+
+let last_tool_effect_to_string = Keeper_internal_error.tool_progress_effect_to_string
 
 let last_tool_use_of_messages (messages : Agent_sdk.Types.message list) =
   let last_tool_in_message (msg : Agent_sdk.Types.message) acc =
@@ -215,8 +217,8 @@ let last_tool_progress_context_of_messages messages =
     let tool_name = if tool_name = "" then "unknown" else tool_name in
     let tool_effect =
       if Keeper_tool_registry.is_read_only_with_input ~tool_name ~input
-      then "read_only"
-      else "mutating"
+      then Keeper_internal_error.Tool_effect_read_only
+      else Keeper_internal_error.Tool_effect_mutating
     in
     Some { tool_name; tool_effect }
 ;;
@@ -231,14 +233,19 @@ let accept_rejection_context_of_run_result (run_result : Runtime_agent.run_resul
 let format_last_tool_progress_context = function
   | None -> None
   | Some { tool_name; tool_effect } ->
-    Some (Printf.sprintf "last_tool=%s; last_tool_effect=%s" tool_name tool_effect)
+    Some
+      (Printf.sprintf
+         "last_tool=%s; last_tool_effect=%s"
+         tool_name
+         (last_tool_effect_to_string tool_effect))
 ;;
 
-let accept_rejected_error ~progress_context ~runtime_id
+let accept_rejected_error ~last_tool_context ~runtime_id
     ~(response : Agent_sdk_response.api_response) =
   let rejection =
     Keeper_tool_response.accept_rejection_of_response ~runtime_id response
   in
+  let progress_context = format_last_tool_progress_context last_tool_context in
   let rejection =
     match progress_context with
     | Some context when String.trim context <> "" ->
@@ -261,20 +268,24 @@ let accept_rejected_error ~progress_context ~runtime_id
              (Boundary_redaction.to_string
                 Boundary_redaction.runtime_model_label);
          reason_kind;
+         response_shape =
+           Option.map
+             Keeper_internal_error.accept_response_shape_of_agent_sdk
+             rejection.response_shape;
+         last_tool_effect =
+           Option.map
+             (fun context -> context.tool_effect)
+             last_tool_context;
          reason = rejection.reason;
        })
 
 let apply_accept ~runtime_id ~accept (run_result : Runtime_agent.run_result) =
   if accept run_result.response then Ok run_result
   else
-    let progress_context =
-      run_result
-      |> accept_rejection_context_of_run_result
-      |> format_last_tool_progress_context
-    in
+    let last_tool_context = accept_rejection_context_of_run_result run_result in
     Error
       (accept_rejected_error
-         ~progress_context
+         ~last_tool_context
          ~runtime_id
          ~response:run_result.response)
 

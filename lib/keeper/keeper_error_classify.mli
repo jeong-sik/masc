@@ -106,6 +106,7 @@ type degraded_retry_reason =
   | Rate_limit
   | Server_error
   | Auth_error
+  | Read_only_no_progress
 
 val degraded_retry_reason_to_string : degraded_retry_reason -> string
 
@@ -128,8 +129,10 @@ val fallback_runtime_for_unavailable_profile :
 
 (** Classifies an SDK error into a fallback reason label when the runtime
     failure is recoverable via [fallback_runtime] or [degraded_rotation].
-    Returns [None] for terminal errors (e.g. accept-rejected, ambiguous
-    post-commit) that should not trigger same-turn escalation.
+    Returns [None] for terminal errors (e.g. generic accept-rejected,
+    ambiguous post-commit) that should not trigger same-turn escalation. A
+    narrow built-in progress-contract rejection is recoverable only when the
+    response was thinking-only after a read-only tool.
 
     Status-code-aware rotation: raw API errors that are not wrapped in a MASC
     internal error are also classified when a different runtime may succeed:
@@ -155,7 +158,9 @@ val degraded_retry_after_recoverable_error :
 
 (** Returns the next untried runtime in the same-turn recovery group for a
     whole-runtime failure. Uses the default degraded rotation candidate set
-    (base/default/phase-recovery).
+    (base/default/phase-recovery). Read-only no-progress accept rejections also
+    append configured tool-capable runtimes so a default-runtime
+    thinking-only response can still rotate to another safe tool-capable model.
 
     [fallback_hint], when provided, is prepended to the candidate list so
     that single-provider profiles can declare an immediate escalation
@@ -170,8 +175,9 @@ val degraded_retry_after_recoverable_error :
     filtering is applied. Non-contract transient infrastructure errors
     (provider timeout, server error, capacity backpressure) allow cycling
     through candidates again when all are exhausted, because the same runtime may
-    succeed on a subsequent attempt. Contract violations and quota/rate-limit
-    classes cap rotation.
+    succeed on a subsequent attempt. Contract violations, read-only no-progress
+    accept rejections, and quota/rate-limit classes cap rotation after the
+    candidate set is exhausted.
     @since 0.174.0 *)
 val degraded_rotation_after_recoverable_error :
   ?credential_pool_of_runtime_id:(string -> string option) ->

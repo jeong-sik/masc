@@ -257,4 +257,8 @@ module For_testing = struct
 
   let sdk_error_of_nonretryable_attempt_error =
     Keeper_turn_driver_try_runtime.sdk_error_of_nonretryable_attempt_error
+
+  let accept_no_progress_read_only_should_try_next =
+    Keeper_turn_driver_try_runtime.For_testing
+    .accept_no_progress_read_only_should_try_next
 end

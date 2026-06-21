@@ -129,6 +129,11 @@ val terminal_prefix_max_turns_exceeded : string
 
 val terminal_prefix_execution_timeout : string
 val terminal_prefix_idle_timeout : string
+val terminal_prefix_turn_budget_exhausted : string
+(** Wire prefix emitted for [Runtime_agent.TurnBudgetExhausted]. This is not
+    part of [is_auto_recoverable_turn_budget_terminal]: it is a completed
+    runtime stop reason, so receipt classification must inspect completion
+    contract evidence before deciding pass vs attention. *)
 
 (** {1 Transient provider-runtime wire codes (SSOT)}
 

@@ -166,6 +166,19 @@ let frozen_completion_contract_satisfied = function
   | R.Contract_passive_only -> false
 ;;
 
+let frozen_completion_contract_unsatisfied = function
+  | R.Contract_violated
+  | R.Contract_claim_only_after_owned_task
+  | R.Contract_needs_execution_progress
+  | R.Contract_passive_only -> true
+  | R.Contract_unknown
+  | R.Contract_not_dispatched
+  | R.Contract_surface_mismatch
+  | R.Contract_no_capable_provider
+  | R.Contract_satisfied_completion
+  | R.Contract_satisfied_execution -> false
+;;
+
 let frozen_is_transient_provider_runtime_failure terminal_reason =
   String.equal terminal_reason "api_error_timeout"
   || String.equal terminal_reason "api_error_network"
@@ -263,6 +276,8 @@ let frozen_operator_disposition (receipt : R.t)
       if frozen_completion_contract_satisfied receipt.completion_contract_result
       then R.Disp_pass, R.Reason_turn_budget_exhausted
       else R.Disp_alert_exhausted, R.Reason_turn_budget_exhausted
+    else if frozen_completion_contract_unsatisfied receipt.completion_contract_result
+    then R.Disp_pause_human, R.Reason_completion_contract_unsatisfied
     else if
       receipt.outcome = `Ok
       && receipt.runtime_outcome = R.Runtime_not_dispatched
@@ -503,6 +518,25 @@ let () =
   check
     (Printf.sprintf
        "satisfied turn budget exhaustion want=%s got=%s"
+       (disp_pair_to_string want)
+       (disp_pair_to_string got))
+    (got = want)
+;;
+
+let () =
+  let receipt =
+    { base_receipt with
+      terminal_reason_code = "completed"
+    ; outcome = `Ok
+    ; runtime_outcome = R.Runtime_completed
+    ; completion_contract_result = R.Contract_passive_only
+    }
+  in
+  let got = R.operator_disposition receipt in
+  let want = R.Disp_pause_human, R.Reason_completion_contract_unsatisfied in
+  check
+    (Printf.sprintf
+       "completed passive-only receipt want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))
     (got = want)

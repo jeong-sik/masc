@@ -164,6 +164,55 @@ let test_snapshot_uses_receipt_runtime_model_when_decision_absent () =
          (snapshot |> member "execution" |> member "provider_selected_model" |> to_string))
 ;;
 
+let test_budget_not_dispatched_receipt_marks_attention () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "runtime-trust-budget-not-dispatched" in
+       let meta = make_meta keeper_name in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       Dated_jsonl.append
+         receipt_store
+         (`Assoc
+             [ "ended_at", `String "2026-06-01T00:00:00Z"
+             ; "operator_disposition", `String "pass"
+             ; "operator_disposition_reason", `String "healthy"
+             ; "terminal_reason_code", `String "turn_budget_exhausted:8/8"
+             ; "completion_contract_result", `String "not_dispatched"
+             ]);
+       let snapshot = K.snapshot_json ~config ~meta in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "display disposition"
+         "Blocked"
+         (snapshot |> member "disposition" |> to_string);
+       Alcotest.(check string)
+         "display reason"
+         "completion_contract_result:not_dispatched"
+         (snapshot |> member "disposition_reason" |> to_string);
+       Alcotest.(check bool)
+         "needs attention"
+         true
+         (snapshot |> member "needs_attention" |> to_bool);
+       Alcotest.(check string)
+         "operator disposition remains receipt truth"
+         "pass"
+         (snapshot |> member "operator_disposition" |> to_string);
+       Alcotest.(check string)
+         "operator disposition reason remains receipt truth"
+         "healthy"
+         (snapshot |> member "operator_disposition_reason" |> to_string))
+;;
+
 let test_model_observability_uses_runtime_trust_selected_model () =
   let runtime_trust =
     `Assoc
@@ -257,6 +306,10 @@ let () =
             "status model observability reuses runtime-trust selected model"
             `Quick
             test_model_observability_uses_runtime_trust_selected_model
+        ; Alcotest.test_case
+            "budget not-dispatched receipt marks runtime-trust attention"
+            `Quick
+            test_budget_not_dispatched_receipt_marks_attention
         ; Alcotest.test_case
             "status model observability reuses runtime-trust execution selected model"
             `Quick

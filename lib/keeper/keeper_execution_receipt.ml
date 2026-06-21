@@ -93,6 +93,7 @@ type operator_disposition_reason =
   | Reason_provider_runtime_error
   | Reason_internal_error
   | Reason_tool_route_recoverable_failure
+  | Reason_completion_contract_unsatisfied
   | Reason_turn_budget_exhausted
   | Reason_turn_livelock_blocked
   | Reason_cancelled
@@ -109,6 +110,7 @@ let operator_disposition_reason_to_string = function
   | Reason_provider_runtime_error -> "provider_runtime_error"
   | Reason_internal_error -> "internal_error"
   | Reason_tool_route_recoverable_failure -> "tool_route_recoverable_failure"
+  | Reason_completion_contract_unsatisfied -> "completion_contract_unsatisfied"
   | Reason_turn_budget_exhausted -> "turn_budget_exhausted"
   | Reason_turn_livelock_blocked -> "turn_livelock_blocked"
   | Reason_cancelled -> "cancelled"
@@ -152,6 +154,19 @@ let completion_contract_satisfied = function
   | Contract_claim_only_after_owned_task
   | Contract_needs_execution_progress
   | Contract_passive_only -> false
+;;
+
+let completion_contract_unsatisfied = function
+  | Contract_violated
+  | Contract_claim_only_after_owned_task
+  | Contract_needs_execution_progress
+  | Contract_passive_only -> true
+  | Contract_unknown
+  | Contract_not_dispatched
+  | Contract_surface_mismatch
+  | Contract_no_capable_provider
+  | Contract_satisfied_completion
+  | Contract_satisfied_execution -> false
 ;;
 
 let operator_disposition (receipt : t)
@@ -305,6 +320,8 @@ let operator_disposition (receipt : t)
       if completion_contract_satisfied receipt.completion_contract_result
       then Disp_pass, Reason_turn_budget_exhausted
       else Disp_alert_exhausted, Reason_turn_budget_exhausted
+    else if completion_contract_unsatisfied receipt.completion_contract_result
+    then Disp_pause_human, Reason_completion_contract_unsatisfied
     else if
       receipt.outcome = `Ok
       && receipt.runtime_outcome = Runtime_not_dispatched

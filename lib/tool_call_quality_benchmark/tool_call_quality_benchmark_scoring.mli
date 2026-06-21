@@ -23,6 +23,10 @@ val score_run :
     - [run.keeper_profile] is not in the case's
       [keeper_profiles] (a run on the wrong profile is
       structurally invalid).
+    - the case uses descriptor/runtime/receipt/eval-tag selectors
+      but none of the run's tool calls carry usable [route_evidence]
+      (missing evidence is a data-quality failure, not proof that the
+      model chose the wrong tool).
 
     {2 Composite score formula (pinned)}
 

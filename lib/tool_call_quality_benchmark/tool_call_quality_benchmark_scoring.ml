@@ -127,6 +127,20 @@ let required_selector_satisfied (run : evidence_run) selector =
 let required_selectors_satisfied (benchmark_case : benchmark_case) (run : evidence_run) =
   List.for_all (required_selector_satisfied run) benchmark_case.required_selectors
 
+let semantic_selectors_evaluable (benchmark_case : benchmark_case) (run : evidence_run) =
+  let selectors =
+    benchmark_case.forbidden_selectors
+    @ benchmark_case.required_selectors
+    @ List.map (fun check -> check.selector) benchmark_case.arg_checks
+  in
+  if not (List.exists Eval_tool_selector.requires_route_evidence selectors) then true
+  else
+    List.exists
+      (fun call ->
+         Tool_call_quality_benchmark_evidence_quality.route_evidence_has_semantic_fields
+           call.route_evidence)
+      run.tool_calls
+
 let forbidden_tool_used (benchmark_case : benchmark_case) (run : evidence_run) =
   match benchmark_case.category with
   | Tool_forbidden -> Stdlib.List.length run.tool_calls > 0
@@ -217,6 +231,7 @@ let score_run ~cases (run : evidence_run) =
     | None -> None
     | Some benchmark_case ->
         if not (List.mem run.keeper_profile benchmark_case.keeper_profiles) then None
+        else if not (semantic_selectors_evaluable benchmark_case run) then None
         else
           let task_pass = task_pass_score benchmark_case run in
           let tool_selection =

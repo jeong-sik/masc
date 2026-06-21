@@ -690,6 +690,16 @@ let run_turn
            ([Keeper_execution_receipt.stop_reason_to_string]). Both are
            [None] on the error path (receipt refs unset), never a
            fabricated value. *)
+        (* RFC-0233 §8 — ground ctx-window/cost in real runtime facts so the
+           dashboard stops fabricating 200K / Claude $3·$15. [context_window]
+           is the keeper-resolved effective budget ([max_context]); pricing
+           comes from the runtime binding retained in the Runtime singleton
+           ([Runtime.pricing_of_runtime_id] projects binding.price_input/output
+           — both option, None when the operator left runtime.toml unset, in
+           which case the dashboard renders absence rather than a default). *)
+        let (price_input_per_million, price_output_per_million) =
+          Runtime.pricing_of_runtime_id runtime_id_string
+        in
         Keeper_turn_record_writer.write
           ~config
           ~keeper_name:meta.name
@@ -701,6 +711,9 @@ let run_turn
             (Option.map
                Keeper_execution_receipt.stop_reason_to_string
                !receipt_stop_reason_ref)
+          ~context_window:(Some max_context)
+          ~price_input_per_million
+          ~price_output_per_million
           ~sampling:
             { temperature = Some temperature
             ; top_p = None

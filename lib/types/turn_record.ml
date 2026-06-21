@@ -27,6 +27,9 @@ type t =
   ; runtime_profile : string
   ; model : string option
   ; finish_reason : string option
+  ; context_window : int option
+  ; price_input_per_million : float option
+  ; price_output_per_million : float option
   ; sampling : sampling
   ; usage : usage
   ; ts : float
@@ -58,6 +61,9 @@ let to_json (r : t) : Yojson.Safe.t =
     @ opt_field "turn_ref" Ids.Turn_ref.to_yojson r.turn_ref
     @ opt_field "model" (fun v -> `String v) r.model
     @ opt_field "finish_reason" (fun v -> `String v) r.finish_reason
+    @ opt_field "context_window" (fun v -> `Int v) r.context_window
+    @ opt_field "price_input_per_million" (fun v -> `Float v) r.price_input_per_million
+    @ opt_field "price_output_per_million" (fun v -> `Float v) r.price_output_per_million
     @ opt_field "temperature" (fun v -> `Float v) r.sampling.temperature
     @ opt_field "top_p" (fun v -> `Float v) r.sampling.top_p
     @ opt_field "max_tokens" (fun v -> `Int v) r.sampling.max_tokens
@@ -151,6 +157,9 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
       let* turn_ref = opt_member "turn_ref" fields as_turn_ref in
       let* model = opt_member "model" fields as_string in
       let* finish_reason = opt_member "finish_reason" fields as_string in
+      let* context_window = opt_member "context_window" fields as_int in
+      let* price_input_per_million = opt_member "price_input_per_million" fields as_float in
+      let* price_output_per_million = opt_member "price_output_per_million" fields as_float in
       let* temperature = opt_member "temperature" fields as_float in
       let* top_p = opt_member "top_p" fields as_float in
       let* max_tokens = opt_member "max_tokens" fields as_int in
@@ -170,6 +179,9 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; runtime_profile
         ; model
         ; finish_reason
+        ; context_window
+        ; price_input_per_million
+        ; price_output_per_million
         ; sampling = { temperature; top_p; max_tokens; thinking_budget; enable_thinking }
         ; usage = { input_tokens; output_tokens }
         ; ts

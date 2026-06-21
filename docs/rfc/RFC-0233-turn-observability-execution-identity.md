@@ -392,6 +392,138 @@ foundational-record-field rule).
   the board post's `origin`.
 - API: `/chat/history` and `BoardPost` JSON carry `turn_ref` / `origin` for
   new rows and `null`/absent for legacy rows.
+
+## §8 Amendment (2026-06-21) — runtime model metadata: context window + pricing
+
+### §8.1 Problem — the dashboard fabricated the context window and the price
+
+The turn inspector rendered a token-economy panel whose denominator and
+price rates were hardcoded constants, not facts from the record:
+
+- `keeper-turn-inspector.ts:628` computed `ctxPct = (tokIn / 200_000) * 100`
+  — a hardcoded 200K denominator for every runtime.
+- `keeper-turn-inspector.ts:629` computed `cost = (tokIn*3 + tokOut*15)/1e6`
+  — hardcoded Claude Sonnet $3/$15 per million for every runtime.
+
+The token counts themselves were already real (`usage.input_tokens` /
+`output_tokens`), so the only fabricated values were the window and the
+price. For a non-Claude runtime (e.g. `glm-coding.glm-5-turbo`) the panel
+therefore showed a wrong ctx-fill% against an irrelevant 200K ceiling and a
+cost against Claude rates. The data to fix this already lived in the
+process: `Runtime.t.binding` retains `price_input`/`price_output`/`num_ctx`
+(`lib/runtime/runtime.ml:19`, `lib/runtime/runtime_schema.mli:116-119`) in
+the boot-populated `runtimes_ref` singleton, and the keeper's resolved
+effective budget (`max_context`) is already in scope at the write site. The
+record simply never stored them, forcing the view to fabricate — a
+view-side-repair violation of §2.3.
+
+### §8.2 Design — three option fields, populated from retained runtime facts
+
+```ocaml
+; context_window : int option
+    (* keeper-resolved effective context budget — the ctx% denominator *)
+; price_input_per_million : float option
+    (* USD per 1M input tokens from the runtime binding *)
+; price_output_per_million : float option
+    (* USD per 1M output tokens from the runtime binding *)
+```
+
+- `context_window` is the `max_context` parameter at
+  `lib/keeper/keeper_agent_run.ml:693` — the keeper compaction budget the
+  turn actually operates against. Stored as `Some max_context`.
+- The two prices come from `Runtime.pricing_of_runtime_id`
+  (`lib/runtime/runtime.ml:386`): a sibling of the existing
+  `max_context_of_runtime_id` / `thinking_support_of_runtime_id`
+  projections, projecting `rt.binding.price_input` / `price_output` off the
+  retained singleton via `get_runtime_by_id`. No new holder, no threading,
+  no re-parse.
+- All three are `option`: `None` when the runtime is unknown or the operator
+  left the rates unset in runtime.toml. The view renders "미상" (unknown),
+  never a fabricated value — the same absence contract `model` and
+  `finish_reason` already follow (§2.3).
+- Cost is **not** stored: the view derives it from `price_*_per_million ×
+  real token counts`, per the views-derive principle (§2.3).
+
+### §8.3 Boundary invariant (unchanged from §3)
+
+No OAS change. MASC reads the runtime binding it already materialized at
+boot (`Runtime.t.binding`); OAS's `Provider_runtime_binding` catalog — which
+deliberately omits price ("OAS owns identity/capability, not pricing") — is
+untouched. Price is MASC's operator-config concern, sourced from
+runtime.toml.
+
+### §8.4 Non-goals
+
+- No backfill: legacy rows decode all three as `None`; the view renders
+  "미상" for them.
+- `context_window` is the **keeper compaction budget**, not the provider's
+  per-request `num_ctx` cap. `num_ctx` is an Ollama-only transport detail
+  (`oas/lib/llm_provider/backend_ollama.ml`: honored by Ollama only); the
+  keeper resolver does not consult it, and conflating the two would mis-state
+  the window for any Ollama binding where the operator set `num-ctx` below
+  the model ceiling. For the current fleet (glm/deepseek/claude, none
+  Ollama-bound) `max_context` is the effective window. A future wave that
+  needs the provider-enforced cap should add a separate
+  `provider_context_window` field rather than overload this one.
+- No OAS `request_latency_ms` (phase duration) — that is a separate
+  amendment (Wave 2b); this amendment is context window + pricing only.
+
+### §8.5 Migration
+
+Single PR, dependency-ordered. Each builds fully (`dune build --root .`) so
+the shared-record field addition catches every literal construction site
+(the compiler forces `writer.ml` + `test_turn_record.ml`).
+
+1. **Type + codec** — `lib/types/turn_record.{mli,ml}`: three option fields
+   on `t`; `to_json` via `opt_field`, `of_json` via `opt_member` (mirrors
+   `model`/`finish_reason`/`temperature`).
+2. **Runtime projection** — `lib/runtime/runtime.{ml,mli}`:
+   `pricing_of_runtime_id : string -> float option * float option`, sibling
+   to `max_context_of_runtime_id`.
+3. **Writer + emit** — `lib/keeper/keeper_turn_record_writer.{ml,mli}`:
+   three labeled args + record fields; `lib/keeper/keeper_agent_run.ml:693`
+   binds `price_*` from `Runtime.pricing_of_runtime_id runtime_id_string`
+   and passes `~context_window:(Some max_context)`.
+4. **Dashboard API** — `lib/server/server_dashboard_http_keeper_api.ml:551`
+   needs **no edit**: it serializes via `Turn_record.to_json`, so the new
+   fields auto-flow.
+5. **Frontend** — `dashboard/src/api/dashboard.ts`: `TurnRecordEntry` type +
+   `decodeTurnRecordEntry` (hand-rolled decoder, no schema auto-pickup);
+   `keeper-turn-inspector.ts`: `TurnDetail.ctxPct`/`cost` widen to
+   `number | null`, compute from real `context_window`/prices, render "미상"
+   when absent (replaces the Wave-1 "200K 가정" / "Claude 가격" labels).
+
+### §8.6 Workaround guards (rejected per CLAUDE.md §워크어라운드)
+
+1. Keeping the hardcoded 200K / Claude $3·$15 in the dashboard as "the fix"
+   — the exact fabrication this amendment removes. → real runtime facts.
+2. Storing a precomputed `cost_usd` number — collapses two facts (prices ×
+   tokens) into one derived value at write time, losing the rates and
+   blocking per-field absence rendering. → store price rates + token counts;
+   derive cost in the view (§2.3).
+3. Re-parsing runtime.toml per turn (the `fusion_config_loader` pattern) —
+   diverges from the boot-validated config and parses a ~900-line file on
+   the turn-record hot path. → read the retained `Runtime` singleton.
+4. Threading price up from `runtime_adapter.binding_to_provider_config` —
+   duplicates the SSOT already retained in the `Runtime` singleton (where
+   price is read once as a boolean signal then discarded). →
+   `pricing_of_runtime_id` projection.
+5. Sourcing `context_window` from `binding.num_ctx` — conflates the keeper
+   compaction budget with an Ollama-only transport KV-cache cap and would
+   mis-state the window (see §8.4). → `max_context`.
+
+### §8.7 Verification harness
+
+- Unit (`test/test_turn_record.ml`): round-trip of all three new fields
+  (`Some`); the absent case (`None`) omits the JSON keys and decodes `None`
+  (no fabricated 200K / $3·$15 on the wire).
+- Frontend (`dashboard/src/components/keeper-turn-inspector.test.ts`): a
+  grounded fixture (real `context_window` + prices) renders a `$` cost and a
+  `%` fill, not "미상" — guards the `number | null` widening.
+- Behavioral: a `glm-coding.glm-5-turbo` turn (empty binding — no price set)
+  records `context_window = Some <model max-context>` and `price_* = None`,
+  so the inspector shows the real ctx% and "미상" cost; a turn on a priced
+  runtime shows a real derived cost.
 - FE: turn inspector opens the correct turn by id (not by window) given
   `turn_ref`; a board post navigates to its anchored chat turn and back.
   tsc + vitest, including a board↔chat navigation test.

@@ -384,6 +384,21 @@ let preserve_thinking_of_runtime_id (id : string) : bool option =
   | None -> None
 ;;
 
+(* RFC-0233 §8 — per-million-token pricing declared on the [id] binding's
+   runtime.toml table. Projects straight off the retained [rt.binding]
+   (price_input/price_output are [Runtime_schema.binding] option fields),
+   same shape as [max_context_of_runtime_id]. Returns (None, None) when the
+   runtime is unknown OR the operator left the rates unset — the turn-record
+   writer stores those Nones so the dashboard renders cost absence ("미상")
+   rather than fabricating Claude $3/$15 defaults. Partial config (only one
+   rate set) is preserved field-by-field; the cost view then cannot compute
+   and also renders absence. *)
+let pricing_of_runtime_id (id : string) : float option * float option =
+  match get_runtime_by_id id with
+  | Some rt -> (rt.binding.price_input, rt.binding.price_output)
+  | None -> (None, None)
+;;
+
 (* fail-fast: uninitialized = startup-ordering bug, NOT a recoverable
    condition. 이전 [| None -> "tool_strict"] 하드코딩 fallback 은 90 사이트에
    조작된 id 를 흘리는 Unknown→Permissive 안티패턴이라 제거했다 (RFC-0206 §2.1).

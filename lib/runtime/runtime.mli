@@ -131,6 +131,13 @@ val preserve_thinking_of_runtime_id : string -> bool option
     preserve Qwen3.6 reasoning traces on OpenAI-compatible runtimes that
     support it without spraying explicit false fields at every provider. *)
 
+val pricing_of_runtime_id : string -> float option * float option
+(** [(price_input, price_output)] per-million-token USD rates declared on the
+    runtime [id] binding in runtime.toml, or [(None, None)] when the runtime is
+    not configured or the operator left the rates unset.  Consumed by the
+    turn-record writer (RFC-0233 §8) so the dashboard renders actual cost or
+    absence rather than a fabricated Claude default. *)
+
 val get_default_runtime_id : unit -> string
 (** @raise Failure if {!init_default} has not run. No silent fallback
     (RFC-0206 §2.1): an unresolved default is a startup-ordering bug, not a

@@ -430,8 +430,10 @@ type TurnDetail = {
   traceId: string
   tokIn: number
   tokOut: number
-  ctxPct: number
-  cost: number
+  // RFC-0233 §8 — null when context_window/price are absent on the record
+  // (runtime unknown or operator left runtime.toml unset); render "미상".
+  ctxPct: number | null
+  cost: number | null
   measuredDurationMs: number | null
   visualTotalMs: number
   phases: TurnPhase[]
@@ -495,13 +497,22 @@ function thinkingChipLabel(record: TurnRecordEntry): string {
   return '—'
 }
 
-function buildInjectedCtx(record: TurnRecordEntry, ctxPct: number, tokIn: number): string {
+// RFC-0233 §8 — compact "NNNK" form of the runtime's context window, or
+// "미상" when the record has no context_window (render absence, not 200K).
+function formatCtxWindowK(cw: number | null | undefined): string {
+  return cw != null ? `${Math.round(cw / 1000)}K` : '미상'
+}
+
+function buildInjectedCtx(record: TurnRecordEntry, ctxPct: number | null, tokIn: number): string {
+  const ctxLine = ctxPct != null
+    ? `${ctxPct.toFixed(1)}%   (${tokIn.toLocaleString()} / ${record.context_window?.toLocaleString() ?? '미상'} tok)`
+    : `미상   (${tokIn.toLocaleString()} / 미상 tok, runtime 미구성)`
   return `# namespace snapshot
 namespace      = n/a
 fsm.state      = n/a
 model          = ${record.model ?? 'n/a'}
 finish_reason  = ${record.finish_reason ?? 'n/a'}
-ctx.window     = ${ctxPct.toFixed(1)}%   (${tokIn.toLocaleString()} / 200,000 tok, 가정)
+ctx.window     = ${ctxLine}
 keeper.turn    = T${record.absolute_turn}
 thinking       = ${thinkingStateLabel(record)}
 thinking.budget= ${record.thinking_budget ?? '—'}
@@ -625,8 +636,18 @@ function buildTurnDetail(
   const traceId = `${record.trace_id}_${String(record.absolute_turn).padStart(4, '0')}`
   const tokIn = record.input_tokens ?? Math.max(1, Math.round(record.blocks.reduce((sum, b) => sum + b.bytes, 0) / 4))
   const tokOut = record.output_tokens ?? 120
-  const ctxPct = Math.min(100, (tokIn / 200_000) * 100)
-  const cost = (tokIn * 3 + tokOut * 15) / 1e6
+  // RFC-0233 §8 — ctx-fill% and cost grounded in runtime.toml-declared facts.
+  // context_window is the keeper-resolved effective budget (replaces the
+  // hardcoded 200K); prices are USD/1M from the binding (replace Claude $3/$15).
+  // Either is null when the record lacks the fact — the view renders "미상".
+  const ctxPct =
+    record.context_window != null && record.context_window > 0
+      ? Math.min(100, (tokIn / record.context_window) * 100)
+      : null
+  const cost =
+    record.price_input_per_million != null && record.price_output_per_million != null
+      ? (tokIn * record.price_input_per_million + tokOut * record.price_output_per_million) / 1e6
+      : null
   const toolIndex = toolCallIndexByExecutionId(toolEntries)
 
   const phases: TurnPhase[] = [{
@@ -994,13 +1015,13 @@ function MetaTab({ record, t, source }: { record: TurnRecordEntry; t: TurnDetail
         <span class="k">fsm.state</span><span class="v">n/a</span>
         <span class="k">input tokens</span><span class="v">${t.tokIn.toLocaleString()}</span>
         <span class="k">output tokens</span><span class="v">${t.tokOut.toLocaleString()}</span>
-        <span class="k">ctx window · 200K 가정</span><span class="v">${t.ctxPct.toFixed(1)}% / 200K</span>
+        <span class="k">ctx window${record.context_window != null ? '' : ' · 미상'}</span><span class="v">${t.ctxPct != null ? `${t.ctxPct.toFixed(1)}% / ${record.context_window?.toLocaleString() ?? '미상'}` : '미상'}</span>
         <span class="k">keeper turn</span><span class="v">T${record.absolute_turn}</span>
         <span class="k">agent subturns</span><span class="v">${formatTurnList(uniqueNumbers(t.tools.map(tool => tool.agentSubturn)))}</span>
         <span class="k">thinking</span><span class="v">${thinkingStateLabel(record)}</span>
         <span class="k">tool calls</span><span class="v">${t.tools.length}</span>
         <span class="k">measured phase duration</span><span class="v">${t.measuredDurationMs != null ? formatMsCompact(t.measuredDurationMs) : 'none'}</span>
-        <span class="k">est. cost · Claude 가격</span><span class="v">$${t.cost.toFixed(3)}</span>
+        <span class="k">est. cost${record.price_input_per_million != null ? '' : ' · 가격 미구성'}</span><span class="v">${t.cost != null ? `$${t.cost.toFixed(3)}` : '미상'}</span>
         <span class="k">finish_reason</span><span class="v">${record.finish_reason ?? 'n/a'}</span>
         <span class="k">source</span><span class="v">${source}</span>
       </div>
@@ -1130,14 +1151,14 @@ function TurnDetailDrawer({
           </div>
           <div class="kti-stat">
             <div class="k">추정비용</div>
-            <div class="v ok">$${t.cost.toFixed(2)}</div>
+            <div class="v ok">${t.cost != null ? `$${t.cost.toFixed(2)}` : '미상'}</div>
           </div>
         </div>
 
         <div class="kti-tok" data-testid="turn-token-bar">
           <div class="kti-tok-top">
             <span class="lbl">토큰 경제</span>
-            <span class="ctxpct">컨텍스트 ${t.ctxPct.toFixed(1)}% / 200K</span>
+            <span class="ctxpct">${t.ctxPct != null ? `컨텍스트 ${t.ctxPct.toFixed(1)}% / ${formatCtxWindowK(record.context_window)}` : '컨텍스트 미상'}</span>
           </div>
           <div class="kti-tok-bar">
             <span

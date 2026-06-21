@@ -3021,6 +3021,8 @@ export type TurnRecordEntry = {
   model?: string
   finish_reason?: string
   temperature?: number
+  top_p?: number
+  max_tokens?: number
   thinking_budget?: number
   enable_thinking?: boolean
   input_tokens?: number
@@ -3157,6 +3159,8 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     model: asString(raw.model),
     finish_reason: asString(raw.finish_reason),
     temperature: asNumber(raw.temperature),
+    top_p: asNumber(raw.top_p),
+    max_tokens: asNumber(raw.max_tokens),
     thinking_budget: asNumber(raw.thinking_budget),
     enable_thinking: typeof raw.enable_thinking === 'boolean' ? raw.enable_thinking : undefined,
     input_tokens: asNumber(raw.input_tokens),

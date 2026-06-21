@@ -17,6 +17,18 @@
 let sha1 s =
   Digestif.SHA1.(digest_string s |> to_raw_string)
 
+let inbound_message_handler : (string -> string -> unit) Atomic.t =
+  Atomic.make (fun session_id _body ->
+      Log.Server.warn
+        "WS inbound message received before dispatcher registered: session=%s"
+        session_id)
+
+let set_inbound_message_handler handler =
+  Atomic.set inbound_message_handler handler
+
+let dispatch_inbound_message session_id body =
+  Atomic.get inbound_message_handler session_id body
+
 (** Dashboard authentication state for a WebSocket session.  Set once by
     [dashboard_hello] and then read on the SSE forward hot path and the
     dashboard RPC auth gates.  Held in an [Atomic.t] on the session

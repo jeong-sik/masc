@@ -136,3 +136,5 @@ Recommended action:
 `dashboard/src/dashboard-ws.ts` now carries `/ws` discovery failure reasons into `dashboardWsLastError`. Existing status tray/beacon surfaces can show `dashboard websocket unavailable: standalone_ws_loopback_only` instead of an opaque unavailable state.
 
 The dashboard auth layer now also publishes same-tab bearer-token changes. The WS layer uses that signal to close/reconnect after token replacement or token clear, so the socket authorization state tracks the stored bearer token instead of remaining stuck after `dashboard/hello` auth rejection or staying privileged after a clear.
+
+The main HTTP `/ws` route now distinguishes discovery JSON from an actual WebSocket upgrade request. Upgrade requests reuse the same inbound JSON-RPC dispatcher as the standalone WebSocket server, and discovery now advertises same-origin `ws://` / `wss://` as the primary `ws_url` while keeping standalone loopback fields as diagnostics. That removes the remote/proxy failure mode where `/ws` only reported `standalone_ws_loopback_only` and the dashboard had no usable browser WebSocket URL.

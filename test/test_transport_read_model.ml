@@ -121,27 +121,31 @@ let test_transport_status_reports_streamable_http_protocol () =
   check bool "enabled_protocols includes canonical json-rpc path" true
     (List.mem "json-rpc" enabled_protocols)
 
-let test_websocket_discovery_uses_standalone_url () =
+let test_websocket_discovery_uses_same_origin_url () =
   with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
       TM.set_ws_runtime_listening true;
       Fun.protect
         ~finally:(fun () -> TM.set_ws_runtime_listening false)
         (fun () ->
           let json = TRM.websocket_discovery_json (make_context ()) in
-          check string "mode" "standalone"
+          check string "mode" "same_origin"
             Yojson.Safe.Util.(json |> member "mode" |> to_string);
-          check string "upgrade path" "/"
+          check string "upgrade path" "/ws"
             Yojson.Safe.Util.(json |> member "upgrade_path" |> to_string);
-          check string "ws_url uses standalone listener" "ws://127.0.0.1:8937/"
+          check string "ws_url uses same-origin listener" "ws://127.0.0.1:8935/ws"
             Yojson.Safe.Util.(json |> member "ws_url" |> to_string);
           check string "standalone bind host is explicit" "127.0.0.1"
             Yojson.Safe.Util.(json |> member "standalone_bind_host" |> to_string);
-          check bool "same-origin upgrade is marked disabled" false
+          check bool "same-origin upgrade is marked enabled" true
             Yojson.Safe.Util.(json |> member "same_origin_upgrade_enabled" |> to_bool);
+          check bool "same-origin reachability is explicit" true
+            Yojson.Safe.Util.(json |> member "same_origin_reachable" |> to_bool);
+          check string "standalone diagnostic is retained" "ws://127.0.0.1:8937/"
+            Yojson.Safe.Util.(json |> member "standalone_ws_url" |> to_string);
           check string "same-origin retained for diagnostics" "ws://127.0.0.1:8935/ws"
             Yojson.Safe.Util.(json |> member "same_origin_ws_url" |> to_string)))
 
-let test_websocket_discovery_does_not_advertise_loopback_ws_to_remote_host () =
+let test_websocket_discovery_advertises_same_origin_ws_to_remote_host () =
   with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
       TM.set_ws_runtime_listening true;
       Fun.protect
@@ -155,8 +159,11 @@ let test_websocket_discovery_does_not_advertise_loopback_ws_to_remote_host () =
           in
           let json = TRM.websocket_discovery_json ctx in
           check bool "standalone process is listening" true
-            Yojson.Safe.Util.(json |> member "listening" |> to_bool);
+            Yojson.Safe.Util.(json |> member "standalone_listening" |> to_bool);
           check bool "remote host cannot reach loopback standalone listener" false
+            Yojson.Safe.Util.(
+              json |> member "request_host_can_reach_standalone" |> to_bool);
+          check bool "same-origin listener is reachable from request origin" true
             Yojson.Safe.Util.(json |> member "reachable" |> to_bool);
           check bool "request host reachability is explicit" false
             Yojson.Safe.Util.(
@@ -164,24 +171,24 @@ let test_websocket_discovery_does_not_advertise_loopback_ws_to_remote_host () =
           check string "standalone diagnostic still reports bind URL"
             "ws://127.0.0.1:8937/"
             Yojson.Safe.Util.(json |> member "standalone_ws_url" |> to_string);
-          check bool "primary client ws_url is withheld"
+          check string "primary client ws_url uses same-origin"
+            "ws://192.0.2.10:8935/ws"
+            Yojson.Safe.Util.(json |> member "ws_url" |> to_string);
+          check bool "loopback-only reason is absent when same-origin is primary"
             true
-            (match Yojson.Safe.Util.member "ws_url" json with
+            (match Yojson.Safe.Util.member "unavailable_reason" json with
              | `Null -> true
-             | _ -> false);
-          check string "reason explains mismatch"
-            "standalone_ws_loopback_only"
-            Yojson.Safe.Util.(json |> member "unavailable_reason" |> to_string)))
+             | _ -> false)))
 
-let test_websocket_discovery_does_not_treat_enabled_as_reachable () =
+let test_websocket_discovery_distinguishes_standalone_from_same_origin () =
   with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
       TM.set_ws_runtime_listening false;
       let json = TRM.websocket_discovery_json (make_context ()) in
       check bool "enabled still advertises configured websocket" true
         Yojson.Safe.Util.(json |> member "enabled" |> to_bool);
-      check bool "enabled alone is not listening" false
+      check bool "same-origin upgrade makes primary listener available" true
         Yojson.Safe.Util.(json |> member "listening" |> to_bool);
-      check bool "enabled alone is not reachable" false
+      check bool "same-origin upgrade makes primary websocket reachable" true
         Yojson.Safe.Util.(json |> member "reachable" |> to_bool);
       check bool "standalone listener state remains explicit" false
         Yojson.Safe.Util.(json |> member "standalone_listening" |> to_bool))
@@ -195,7 +202,9 @@ let test_websocket_discovery_retains_same_origin_wss_diagnostic () =
   in
   let json = TRM.websocket_discovery_json ctx in
   check string "wss preserves base path" "wss://example.com/root/ws"
-    Yojson.Safe.Util.(json |> member "same_origin_ws_url" |> to_string)
+    Yojson.Safe.Util.(json |> member "same_origin_ws_url" |> to_string);
+  check string "primary ws_url uses same-origin wss" "wss://example.com/root/ws"
+    Yojson.Safe.Util.(json |> member "ws_url" |> to_string)
 
 let test_advertised_base_url_uses_forwarded_proto_without_internal_port () =
   let headers =
@@ -251,12 +260,12 @@ let () =
              test_transport_status_http_shape_extends_tool_shape;
            test_case "transport status includes json-rpc protocol" `Quick
              test_transport_status_reports_streamable_http_protocol;
-           test_case "websocket standalone URL" `Quick
-             test_websocket_discovery_uses_standalone_url;
-           test_case "websocket remote host does not get loopback URL" `Quick
-             test_websocket_discovery_does_not_advertise_loopback_ws_to_remote_host;
-           test_case "websocket enabled is not reachability" `Quick
-             test_websocket_discovery_does_not_treat_enabled_as_reachable;
+           test_case "websocket same-origin URL" `Quick
+             test_websocket_discovery_uses_same_origin_url;
+           test_case "websocket remote host gets same-origin URL" `Quick
+             test_websocket_discovery_advertises_same_origin_ws_to_remote_host;
+           test_case "websocket standalone state stays explicit" `Quick
+             test_websocket_discovery_distinguishes_standalone_from_same_origin;
            test_case "websocket HTTPS diagnostic URL" `Quick
              test_websocket_discovery_retains_same_origin_wss_diagnostic;
            test_case "forwarded base URL" `Quick

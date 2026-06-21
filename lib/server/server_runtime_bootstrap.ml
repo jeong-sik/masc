@@ -932,9 +932,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
                  ~config:(Mcp_server.workspace_config state))
         | _ ->
             None);
-      (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)
-      Server_ws_standalone.start ~sw ~env
-        ~on_message:(fun ws_session_id body_str ->
+      let dispatch_ws_inbound_message ws_session_id body_str =
           let jsonrpc_id_opt body =
             match Yojson.Safe.from_string body with
             | `Assoc fields -> (
@@ -1025,7 +1023,13 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
                     with
                     | Eio.Cancel.Cancelled _ as e -> raise e
                     | exn ->
-                      Log.Server.warn "WS dispatch error %s: %s" ws_session_id (Printexc.to_string exn))));
+                      Log.Server.warn "WS dispatch error %s: %s" ws_session_id (Printexc.to_string exn)))
+      in
+      Server_mcp_transport_ws.set_inbound_message_handler
+        dispatch_ws_inbound_message;
+      (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)
+      Server_ws_standalone.start ~sw ~env
+        ~on_message:Server_mcp_transport_ws.dispatch_inbound_message;
       (* WebRTC DataChannel transport (enabled by default, opt-out via MASC_WEBRTC_ENABLED=0) *)
       if Server_webrtc_transport.is_enabled () then (
         Log.Server.info "WebRTC DataChannel transport enabled";

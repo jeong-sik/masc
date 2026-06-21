@@ -47,8 +47,13 @@ val turn_made_progress :
     no-progress turn and resets when a turn makes progress. Generalises the
     earlier literal silent speech-act match so a keeper that re-posts its
     "nothing to do" conclusion (a no-progress board post) also accrues the
-    streak. *)
-val record_turn : keeper_name:string -> made_progress:bool -> record_outcome
+    streak.
+
+    [threshold_override] is for high-confidence runtime containment signals
+    where waiting for the product default would burn another autonomous budgeted
+    turn. Non-positive overrides are ignored. *)
+val record_turn :
+  ?threshold_override:int -> keeper_name:string -> made_progress:bool -> record_outcome
 
 (** Current consecutive no-progress count for [keeper_name]. *)
 val current_streak : keeper_name:string -> int

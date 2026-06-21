@@ -69,6 +69,19 @@ let test_threshold_crossing_fires_counter () =
     (before +. 1.0) (detected_count k);
   ()
 
+let test_threshold_override_fires_early () =
+  D.reset_all_for_test ();
+  let k = "test-keeper-fast-latch" in
+  let before = detected_count k in
+  (match record_turn ~threshold_override:1 ~keeper_name:k ~made_progress:false with
+   | D.Loop_detected { streak; threshold } ->
+     Alcotest.(check int) "fast latch streak" 1 streak;
+     Alcotest.(check int) "fast latch threshold" 1 threshold
+   | D.Normal | D.Loop_reset _ -> Alcotest.fail "expected fast loop detection");
+  Alcotest.(check (float 0.0001)) "fast latch increments counter"
+    (before +. 1.0) (detected_count k);
+  Alcotest.(check int) "streak retained" 1 (D.current_streak ~keeper_name:k)
+
 let test_latched_no_repeat_while_streak_grows () =
   D.reset_all_for_test ();
   let k = "test-keeper-latched" in
@@ -190,6 +203,8 @@ let () =
         [
           Alcotest.test_case "fires counter at threshold"
             `Quick (with_eio test_threshold_crossing_fires_counter);
+          Alcotest.test_case "threshold override fires early"
+            `Quick (with_eio test_threshold_override_fires_early);
           Alcotest.test_case "latched: no repeat while streak grows"
             `Quick (with_eio test_latched_no_repeat_while_streak_grows);
           Alcotest.test_case "latch releases on reset, then re-fires"

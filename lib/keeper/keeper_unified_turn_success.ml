@@ -48,7 +48,7 @@ let apply_lifecycle ~config ~base_dir ~meta ~final_execution ~current_turn_block
   lifecycle
 ;;
 
-let apply_loop_detectors ~config ~social_state updated_meta result =
+let apply_loop_detectors ~config ~observation ~social_state updated_meta result =
   (* RFC-0239 §3 R3: feed the loop detector a semantic no-progress verdict
      instead of the literal speech_act. A turn makes progress if it produced
      durable evidence (substantive tool calls or validated output); a turn that
@@ -71,8 +71,28 @@ let apply_loop_detectors ~config ~social_state updated_meta result =
       ~strong_evidence
       ~surface_requires_evidence
   in
+  let threshold_override =
+    let budget_exhausted =
+      match result.Keeper_agent_run.stop_reason with
+      | Runtime_agent.TurnBudgetExhausted _ -> true
+      | Runtime_agent.Completed | Runtime_agent.MutationBoundaryReached _ -> false
+    in
+    let no_work_scope =
+      Option.is_none updated_meta.Keeper_meta_contract.current_task_id
+      && updated_meta.Keeper_meta_contract.active_goal_ids = []
+    in
+    if
+      budget_exhausted
+      && no_work_scope
+      && (not strong_evidence)
+      && surface_requires_evidence
+      && KUM.is_scheduled_autonomous_cycle_of_observation observation
+    then Some 1
+    else None
+  in
   match
     Keeper_no_progress_loop_detector.record_turn
+      ?threshold_override
       ~keeper_name:updated_meta.Keeper_meta_contract.name
       ~made_progress
   with
@@ -480,7 +500,9 @@ let handle
       ~update_proactive_rt:true
       result
   in
-  let updated_meta = apply_loop_detectors ~config ~social_state updated_meta result in
+  let updated_meta =
+    apply_loop_detectors ~config ~observation ~social_state updated_meta result
+  in
   append_metrics_snapshot
     ~config
     ~meta

@@ -354,6 +354,14 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ()
       in
       let ctx0 = Keeper_context_runtime.create ~system_prompt ~max_tokens:primary_max_context in
+      (* next_generation keys the per-(keeper, trace) counter by the trace_id
+         string; episodes live under that same string dir (ensure_dir/of
+         session_id above), so pass the raw [trace_id] string, not the typed
+         [trace_id_t]. Reuse the reservation for metadata and checkpoint
+         creation so they cannot diverge. *)
+      let generation =
+        Keeper_memory_os_io.next_generation ~keeper_id:p.name ~trace_id
+      in
       let meta = {
         id = None;
         name = p.name;
@@ -444,7 +452,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_preview = "";
             consecutive_noop_count = 0;
           };
-          let generation = Keeper_memory_os_io.next_generation ~keeper_id:p.name ~trace_id:trace_id_t in
+          generation;
           trace_id = trace_id_t;
           trace_history = [];
           last_handoff_ts = 0.0;

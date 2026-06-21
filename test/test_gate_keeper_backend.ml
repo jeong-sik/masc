@@ -622,6 +622,47 @@ let test_runtime_multimodal_gate_lists_required_modalities () =
   check (list string) "required modalities" [ "image"; "audio" ]
     (Runtime_agent.For_testing.required_modalities_of_content_blocks blocks)
 
+let test_runtime_multimodal_gate_includes_initial_messages () =
+  let initial_messages =
+    [
+      { Agent_sdk.Types.role = Agent_sdk.Types.User;
+        content =
+          [
+            Agent_sdk.Types.Text "previous image turn";
+            Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" ();
+          ];
+        name = None;
+        tool_call_id = None;
+        metadata = [] };
+    ]
+  in
+  check (list string) "history required modalities" [ "image" ]
+    (Runtime_agent.For_testing.required_modalities_of_messages initial_messages);
+  check (list string) "run required modalities" [ "image" ]
+    (Runtime_agent.For_testing.required_modalities_for_run
+       ~initial_messages
+       ~goal_blocks:[ Agent_sdk.Types.Text "text-only follow-up" ]);
+  let blocks =
+    Runtime_agent.For_testing.content_blocks_for_run
+      ~initial_messages
+      ~goal_blocks:[ Agent_sdk.Types.Text "text-only follow-up" ]
+  in
+  match
+    Runtime_agent.For_testing.validate_content_blocks_against_capabilities
+      ~provider_label:"test:text-only"
+      (multimodal_caps ())
+      blocks
+  with
+  | Ok () -> fail "expected image retained in history to be rejected"
+  | Error
+      (Agent_sdk.Error.Config
+         (Agent_sdk.Error.InvalidConfig { detail; _ })) ->
+      check bool "mentions unsupported history image" true
+        (String_util.string_contains_substring
+           ~needle:"unsupported image input"
+           detail)
+  | Error err -> fail ("unexpected error shape: " ^ Agent_sdk.Error.to_string err)
+
 let test_runtime_multimodal_gate_rejects_unsupported_image () =
   let blocks =
     [ Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" () ]
@@ -986,6 +1027,8 @@ let () =
             test_runtime_run_blocks_appends_multimodal_input_to_oas_agent;
           test_case "runtime multimodal gate lists required modalities" `Quick
             test_runtime_multimodal_gate_lists_required_modalities;
+          test_case "runtime multimodal gate includes initial messages" `Quick
+            test_runtime_multimodal_gate_includes_initial_messages;
           test_case "runtime multimodal gate model caps fail closed" `Quick
             test_runtime_multimodal_gate_model_caps_fail_closed;
           test_case "runtime multimodal gate rejects unsupported image" `Quick

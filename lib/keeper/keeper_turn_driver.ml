@@ -125,35 +125,43 @@ let run_named
              (no silent fallback to default — RFC-0207/RFC-0206 §2.1)"
             runtime_id))
   | Some assigned_runtime ->
-  (* RFC-0265: proactively reroute a turn whose input modality (image/audio/
-     document) the assigned runtime cannot accept to a capable configured runtime
-     ([\[runtime\].media_failover] order, else declaration order). Text turns
-     ([goal_blocks = None]) and modality-satisfied turns are untouched; when no
-     runtime qualifies the assigned runtime stands and the loud capability gate in
-     [Runtime_agent.run_blocks] rejects (the floor). The reroute is visible via a
-     WARN log (non-silent — RFC-0126/0145). *)
-  let runtime_id, runtime =
+  (* RFC-0265: proactively reroute a turn whose active input modality
+     (image/audio/document) the assigned runtime cannot accept to a capable
+     configured runtime ([\[runtime\].media_failover] order, else declaration
+     order). The active input includes both the current goal and prior
+     [initial_messages]; otherwise an image in history can poison the next
+     text-only follow-up and leak as a provider 400. Modality-satisfied turns are
+     untouched; when no runtime qualifies the assigned runtime stands and the
+     loud capability gate in [Runtime_agent.run_blocks] rejects (the floor). The
+     reroute is visible via a WARN log (non-silent — RFC-0126/0145). *)
+  let current_goal_blocks =
     match goal_blocks with
-    | None | Some [] -> runtime_id, assigned_runtime
-    | Some blocks ->
-      (match
-         Runtime_agent.decide_modality_reroute_for_runtime
-           ~assigned:assigned_runtime
-           blocks
-       with
-       | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ ->
-         runtime_id, assigned_runtime
-       | Runtime_agent.Reroute { to_runtime_id; reason } ->
-         (match Runtime.get_runtime_by_id to_runtime_id with
-          | None -> runtime_id, assigned_runtime
-          | Some rerouted ->
-            Log.Keeper.warn
-              "%s: RFC-0265 modality reroute %s -> %s (%s)"
-              keeper_name
-              runtime_id
-              to_runtime_id
-              reason;
-            to_runtime_id, rerouted))
+    | Some blocks -> blocks
+    | None ->
+      (* A missing current block payload means the current keeper goal is
+         text-only; [initial_messages] still participate in reroute below. *)
+      []
+  in
+  let runtime_id, runtime =
+    match
+      Runtime_agent.decide_modality_reroute_for_runtime
+        ~assigned:assigned_runtime
+        ~initial_messages
+        current_goal_blocks
+    with
+    | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ ->
+      runtime_id, assigned_runtime
+    | Runtime_agent.Reroute { to_runtime_id; reason } ->
+      (match Runtime.get_runtime_by_id to_runtime_id with
+       | None -> runtime_id, assigned_runtime
+       | Some rerouted ->
+         Log.Keeper.warn
+           "%s: RFC-0265 modality reroute %s -> %s (%s)"
+           keeper_name
+           runtime_id
+           to_runtime_id
+           reason;
+         to_runtime_id, rerouted)
   in
   let error_runtime_id = runtime_id in
   let candidate =

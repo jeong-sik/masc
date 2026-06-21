@@ -209,6 +209,15 @@ val decide_modality_reroute :
     the loud capability rejection as the floor). Deterministic: no I/O, no provider
     liveness (deferred to RFC-0260). *)
 
+val content_blocks_for_run :
+  initial_messages:Agent_sdk.Types.message list ->
+  goal_blocks:Agent_sdk.Types.content_block list ->
+  Agent_sdk.Types.content_block list
+(** Active content blocks for a single OAS run: prior [initial_messages] plus
+    the current goal blocks. Keeper reroute and the runtime capability floor use
+    this same view so media retained in history cannot bypass pre-dispatch
+    gating on a later text-only follow-up. *)
+
 val input_capabilities_of_runtime :
   Runtime.t -> Llm_provider.Capabilities.capabilities
 (** Effective input capabilities of a materialized runtime: provider caps overlaid
@@ -223,10 +232,12 @@ val media_reroute_candidates :
 
 val decide_modality_reroute_for_runtime :
   assigned:Runtime.t ->
+  ?initial_messages:Agent_sdk.Types.message list ->
   Agent_sdk.Types.content_block list ->
   reroute_decision
 (** Keeper-dispatch convenience: gather candidates from the runtime cache and
-    decide a reroute for [assigned] given the turn's content blocks. Composes
+    decide a reroute for [assigned] given the active run view: prior
+    [initial_messages] plus the current turn's content blocks. Composes
     [input_capabilities_of_runtime] / [media_reroute_candidates] /
     [decide_modality_reroute]. *)
 
@@ -251,6 +262,22 @@ module For_testing : sig
 
   val required_modalities_of_content_blocks :
     Agent_sdk.Types.content_block list -> string list
+
+  val content_blocks_of_messages :
+    Agent_sdk.Types.message list -> Agent_sdk.Types.content_block list
+
+  val content_blocks_for_run :
+    initial_messages:Agent_sdk.Types.message list ->
+    goal_blocks:Agent_sdk.Types.content_block list ->
+    Agent_sdk.Types.content_block list
+
+  val required_modalities_of_messages :
+    Agent_sdk.Types.message list -> string list
+
+  val required_modalities_for_run :
+    initial_messages:Agent_sdk.Types.message list ->
+    goal_blocks:Agent_sdk.Types.content_block list ->
+    string list
 
   val caps_admit_required_modalities :
     Llm_provider.Capabilities.capabilities -> string list -> bool

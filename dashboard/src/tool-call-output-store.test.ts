@@ -2,9 +2,13 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { ToolCallEntry } from './api/dashboard'
 import {
   lookupToolCallOutput,
+  markToolCallOutputsHydrated,
+  markToolCallOutputsHydrating,
   recordToolCallOutputs,
   resetToolCallOutputs,
   toolCallOutputsById,
+  toolCallOutputsCoveredSinceMs,
+  toolCallOutputsCoveredThroughMs,
 } from './tool-call-output-store'
 
 function toolCall(overrides: Partial<ToolCallEntry> = {}): ToolCallEntry {
@@ -78,5 +82,21 @@ describe('tool-call-output-store', () => {
     const stored = lookupToolCallOutput('tool-toolu_blob')?.output
     expect(typeof stored).toBe('object')
     expect(stored).toMatchObject({ _blob: { preview: 'preview…' } })
+  })
+
+  it('tracks bounded hydration coverage for tail-limited output fetches', () => {
+    markToolCallOutputsHydrating('sangsu')
+    markToolCallOutputsHydrated('sangsu', 2_000, 1_000)
+
+    expect(toolCallOutputsCoveredSinceMs('sangsu')).toBe(1_000)
+    expect(toolCallOutputsCoveredThroughMs('sangsu')).toBe(2_000)
+  })
+
+  it('merges unbounded hydration coverage without retaining an old lower bound', () => {
+    markToolCallOutputsHydrated('sangsu', 2_000, 1_000)
+    markToolCallOutputsHydrated('sangsu', 3_000, null)
+
+    expect(toolCallOutputsCoveredSinceMs('sangsu')).toBeNull()
+    expect(toolCallOutputsCoveredThroughMs('sangsu')).toBe(3_000)
   })
 })

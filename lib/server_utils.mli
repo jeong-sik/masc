@@ -33,6 +33,13 @@ val clamp : min_v:int -> max_v:int -> int -> int
 (** [clamp ~min_v ~max_v v] returns [v] bounded to
     [\[min_v, max_v\]]. *)
 
+val evict_oldest_if_full :
+  max_entries:int -> age_of:('a -> float) -> ('k, 'a) Hashtbl.t -> unit
+(** [evict_oldest_if_full ~max_entries ~age_of cache] removes the single entry
+    with the smallest [age_of] value when [cache] already holds [max_entries]
+    or more, otherwise a no-op. Call before inserting a new key to keep a cache
+    keyed partly by client input bounded over process lifetime. *)
+
 val take : int -> 'a list -> 'a list
 (** [take n xs] is [List.take n xs] re-exported so callers using
     [open Server_utils] do not need to also open Stdlib's [List]

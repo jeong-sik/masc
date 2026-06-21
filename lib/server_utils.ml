@@ -20,6 +20,25 @@ let bool_query_param request key ~default =
 
 let clamp ~min_v ~max_v v = max min_v (min max_v v)
 
+(** Bound an in-memory cache keyed partly by client-supplied input. When
+    [cache] holds at least [max_entries] entries, evict the single entry with
+    the smallest [age_of] (the least-recently-refreshed), so a caller that
+    inserts on every miss keeps the table bounded over process lifetime. Call
+    immediately before adding a new key. No-op below the cap. *)
+let evict_oldest_if_full ~max_entries ~age_of cache =
+  if Hashtbl.length cache >= max_entries then
+    match
+      Hashtbl.fold
+        (fun k v acc ->
+          let age = age_of v in
+          match acc with
+          | Some (_, oldest) when oldest <= age -> acc
+          | Some _ | None -> Some (k, age))
+        cache None
+    with
+    | Some (k, _) -> Hashtbl.remove cache k
+    | None -> ()
+
 let take = List.take
 let drop = List.drop
 

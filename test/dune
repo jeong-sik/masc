@@ -1145,6 +1145,13 @@
  (modules test_server_utils_bounded_cache)
  (libraries alcotest masc))
 
+; Warn-log dedup table stays bounded under distinct token-hash-prefix churn.
+
+(test
+ (name test_server_auth_warn_log_bound)
+ (modules test_server_auth_warn_log_bound)
+ (libraries alcotest masc masc_server eio_main))
+
 ; Focused dashboard nudge feed projection.
 
 (test

@@ -521,17 +521,24 @@ let read_facts_for_rewrite ~keeper_id =
    hysteresis ([trigger] > [keep]) keeps this off the per-turn hot path — a
    rewrite happens only once every ([trigger] - [keep]) appended facts. Returns
    the number of facts dropped. *)
-let cap_facts ~keeper_id ~keep ~trigger ~rank =
+let cap_facts ~now ~keeper_id ~keep ~trigger ~rank =
   let path = facts_path ~keeper_id in
   let all = read_facts_for_rewrite ~keeper_id in
-  let total = List.length all in
-  if total <= trigger
+  (* RFC-0259 §3.6 (P5): drop [valid_until]-expired rows before the trigger gate
+     and before ranking, so an under-cap store does not retain expired rows on
+     disk until the off-by-default GC sweep. Durable facts are never expired. *)
+  let live, expired = partition_expired ~now all in
+  let total = List.length live in
+  if expired = [] && total <= trigger
   then 0
   else (
     let kept =
-      all
-      |> List.stable_sort (fun a b -> Float.compare (rank b) (rank a))
-      |> take_first keep
+      if total <= trigger
+      then live
+      else
+        live
+        |> List.stable_sort (fun a b -> Float.compare (rank b) (rank a))
+        |> take_first keep
     in
     let content =
       match kept with
@@ -541,7 +548,7 @@ let cap_facts ~keeper_id ~keep ~trigger ~rank =
         ^ "\n"
     in
     write_file_atomically path content;
-    total - List.length kept)
+    List.length all - List.length kept)
 ;;
 
 type fact_merge_stats =
@@ -595,27 +602,33 @@ let merge_episode_facts ~merge ~existing ~incoming =
    that carries claims; the librarian runs at most once per turn after an LLM
    call, so a full rewrite of at most [trigger] facts is off the hot path. An
    empty [incoming] with the store already under [trigger] is a no-op. *)
-let merge_and_cap_facts ~keeper_id ~merge ~incoming ~keep ~trigger ~rank =
+let merge_and_cap_facts ~now ~keeper_id ~merge ~incoming ~keep ~trigger ~rank =
   let existing = read_facts_for_rewrite ~keeper_id in
   let merged_list, merged, appended = merge_episode_facts ~merge ~existing ~incoming in
-  let total = List.length merged_list in
+  (* RFC-0259 §3.6 (P5): drop [valid_until]-expired rows on the same boundary the
+     GC sweep uses, before the trigger gate and ranking, so an under-cap store
+     does not retain expired rows on disk. Expired rows are counted in [dropped]
+     alongside rank evictions. Durable facts ([valid_until = None]) are never
+     expired, so durable knowledge is never evicted here. *)
+  let live, expired = partition_expired ~now merged_list in
+  let total = List.length live in
   let no_incoming = match incoming with [] -> true | _ :: _ -> false in
-  if no_incoming && total <= trigger
+  if no_incoming && expired = [] && total <= trigger
   then { merged; appended; dropped = 0 }
   else (
-    let kept, dropped =
+    let kept, rank_dropped =
       if total <= trigger
-      then merged_list, 0
+      then live, 0
       else (
         let kept =
-          merged_list
+          live
           |> List.stable_sort (fun a b -> Float.compare (rank b) (rank a))
           |> take_first keep
         in
         kept, total - List.length kept)
     in
     rewrite_facts_atomically ~keeper_id kept;
-    { merged; appended; dropped })
+    { merged; appended; dropped = rank_dropped + List.length expired })
 ;;
 
 let read_events_tail ~keeper_id ~n =

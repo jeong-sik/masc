@@ -277,6 +277,19 @@ let fact_is_current ~now (fact : fact) =
   | Some ts -> ts >= now
 ;;
 
+(* RFC-0259 §3.6 (P5): split a fact list into (live, expired-at-[now]) on the
+   typed [valid_until] boundary. The cap path ([Keeper_memory_os_io.cap_facts] /
+   [merge_and_cap_facts]) calls this so it drops expired rows on the SAME
+   boundary the GC sweep uses ([Keeper_memory_os_gc.ttl_expired]), instead of
+   leaving them on disk until the off-by-default 600s sweep happens to run.
+   Durable facts ([valid_until = None]) are always live, so this never evicts
+   durable knowledge. This is retention-path determinism (cap and GC agree on
+   what [valid_until] means), not a new read-side filter — recall already drops
+   expired rows via [fact_is_current]. *)
+let partition_expired ~now (facts : fact list) =
+  List.partition (fact_is_current ~now) facts
+;;
+
 (* The time a fact was last known good: [last_verified_at] if set, else
    [first_seen] (a never-re-verified fact is as old as its extraction). The SSOT
    anchor for "how stale is this claim": the reconciler, recall, and dashboard

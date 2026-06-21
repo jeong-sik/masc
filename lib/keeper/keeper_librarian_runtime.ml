@@ -553,6 +553,7 @@ let extract_and_append_with_provider
           let (_ : Keeper_memory_os_io.fact_merge_stats) =
             File_lock_eio.with_lock ?clock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
               Keeper_memory_os_io.merge_and_cap_facts
+                ~now
                 ~keeper_id
                 ~merge:(Keeper_memory_os_policy.reobserve_fact ~now)
                 ~incoming:episode.Keeper_memory_os_types.claims

@@ -265,6 +265,7 @@ let scenario_truth_anchor_refresh () =
     (* Replicates keeper_librarian_runtime.ml exactly: upsert via reobserve_fact. *)
     let stats =
       Memory_io.merge_and_cap_facts
+        ~now:later
         ~keeper_id:kid
         ~merge:(Policy.reobserve_fact ~now:later)
         ~incoming

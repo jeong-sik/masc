@@ -53,13 +53,18 @@ let component_prefix raw =
   if String.length safe > 48 then String.sub safe 0 48 else safe
 ;;
 
+let optional_identity_component ~field = function
+  | None -> field ^ ":none"
+  | Some value -> field ^ ":some:" ^ value
+;;
+
 let request_identity_key (request : Keeper_delegation_request.t) =
   String.concat "\n"
     [ request.id
     ; request.requester
     ; request.topic
     ; request.reason
-    ; Option.value ~default:"" request.goal
+    ; optional_identity_component ~field:"goal" request.goal
     ]
 ;;
 

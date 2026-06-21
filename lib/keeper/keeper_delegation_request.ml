@@ -55,19 +55,19 @@ let truncate ~max_len text =
   in
   prefix
 
+let optional_identity_component ~field = function
+  | None -> field ^ ":none"
+  | Some value -> field ^ ":some:" ^ value
+;;
+
 let digest_id ~requester ?goal ~topic ~reason () =
-  let goal_text =
-    match goal with
-    | Some text -> text
-    | None -> ""
-  in
   let raw =
     String.concat "\n"
       [
         requester;
         topic;
         reason;
-        goal_text;
+        optional_identity_component ~field:"goal" goal;
       ]
   in
   let hex = Digest.to_hex (Digest.string raw) in

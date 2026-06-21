@@ -1107,7 +1107,13 @@ export function LogViewer() {
                 class="v2-logs-filter-chip"
                 data-testid=${`logs-filter-${filter.value || 'all'}`}
                 onClick=${() => {
+<<<<<<< HEAD
                   kindFilter.value = filter.value
+||||||| parent of 4040009709 (feat(dashboard): align event-log toolbar with Observatory kind filters)
+                  categoryFilter.value = filter.value
+=======
+                  kindFilter.value = filter.value as LogDisplayKind | ''
+>>>>>>> 4040009709 (feat(dashboard): align event-log toolbar with Observatory kind filters)
                 }}
               >${filter.label}<//>
             `)}
@@ -1205,7 +1211,13 @@ export function LogViewer() {
               />
               자동
             </label>
+<<<<<<< HEAD
             <span class="v2-logs-live mono"><span class="dot" />${autoRefresh.value ? `masc-mcp · 3s polling · ${eventRatePerMinute(logEntries)}δ/min` : 'masc-mcp · WS paused'}</span>
+||||||| parent of 4040009709 (feat(dashboard): align event-log toolbar with Observatory kind filters)
+            <span class="v2-logs-live mono"><span class="dot" />${autoRefresh.value ? 'live poll · 3s' : 'poll paused'}</span>
+=======
+            <span class="v2-logs-live mono"><span class="dot" />${autoRefresh.value ? `WS open · ${eventRatePerMinute(logEntries)}δ/min` : 'WS paused'}</span>
+>>>>>>> 4040009709 (feat(dashboard): align event-log toolbar with Observatory kind filters)
             <button
               type="button"
               class="logs-refresh-btn v2-logs-refresh"

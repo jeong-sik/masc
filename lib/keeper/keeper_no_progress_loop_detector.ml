@@ -56,7 +56,7 @@ let update_streak_gauge keeper_name value =
 let turn_made_progress ~strong_evidence ~surface_requires_evidence =
   strong_evidence || not surface_requires_evidence
 
-let record_turn ?threshold_override ~keeper_name ~made_progress =
+let record_turn ?threshold_override ~keeper_name ~made_progress () =
   with_lock (fun () ->
     let s = get_or_create keeper_name in
     if not made_progress then begin

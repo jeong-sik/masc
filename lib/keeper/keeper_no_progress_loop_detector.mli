@@ -53,7 +53,7 @@ val turn_made_progress :
     where waiting for the product default would burn another autonomous budgeted
     turn. Non-positive overrides are ignored. *)
 val record_turn :
-  ?threshold_override:int -> keeper_name:string -> made_progress:bool -> record_outcome
+  ?threshold_override:int -> keeper_name:string -> made_progress:bool -> unit -> record_outcome
 
 (** Current consecutive no-progress count for [keeper_name]. *)
 val current_streak : keeper_name:string -> int

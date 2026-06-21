@@ -18,7 +18,7 @@ let with_eio f () = Eio_main.run @@ fun _env -> f ()
 let latch keeper =
   let threshold = D.threshold () in
   for _ = 1 to threshold do
-    D.record_turn ~keeper_name:keeper ~made_progress:false |> ignore
+    D.record_turn ~keeper_name:keeper ~made_progress:false () |> ignore
   done
 
 let is_suppressed origin keeper =
@@ -49,7 +49,7 @@ let test_progress_clears_tombstone () =
     true (is_suppressed T.Board_reactive "tombstone-c");
   (* A progress turn resets the detector latch; the gate reads that state, so
      wake is re-allowed without any tombstone-store mutation. *)
-  D.record_turn ~keeper_name:"tombstone-c" ~made_progress:true |> ignore;
+  D.record_turn ~keeper_name:"tombstone-c" ~made_progress:true () |> ignore;
   Alcotest.(check bool) "wake re-allowed after progress turn"
     false (is_suppressed T.Board_reactive "tombstone-c")
 

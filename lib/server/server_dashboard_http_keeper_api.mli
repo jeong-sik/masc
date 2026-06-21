@@ -70,11 +70,6 @@ val handle_keeper_tools_post :
   Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Handle [POST /tools] (tool-grant edits). *)
 
-val handle_keeper_runtime_assignment_post :
-  Mcp_server.server_state ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Handle [POST /runtime-assignment] (structured keeper→runtime assignment). *)
-
 (** {1 POST route classifier}
 
     keeper_post_route_kind ADT + classifier + path helpers live in

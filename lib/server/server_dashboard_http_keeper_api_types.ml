@@ -12,7 +12,6 @@ let keeper_suffix_reset = "/reset"
 let keeper_suffix_clear = "/clear"
 let keeper_suffix_checkpoints = "/checkpoints"
 let keeper_suffix_runtime_trace = "/runtime-trace"
-let keeper_suffix_runtime_assignment = "/runtime-assignment"
 let keeper_suffix_directive = "/directive"
 let keeper_suffix_bdi_snapshot = "/bdi-snapshot"
 
@@ -24,7 +23,6 @@ type keeper_post_route_kind =
   | Keeper_post_reset
   | Keeper_post_clear
   | Keeper_post_checkpoints
-  | Keeper_post_runtime_assignment
   | Keeper_post_directive
   | Keeper_post_unknown
 
@@ -45,7 +43,6 @@ let classify_keeper_post_route req_path =
     else if ends_with keeper_suffix_reset then Keeper_post_reset
     else if ends_with keeper_suffix_clear then Keeper_post_clear
     else if ends_with keeper_suffix_checkpoints then Keeper_post_checkpoints
-    else if ends_with keeper_suffix_runtime_assignment then Keeper_post_runtime_assignment
     else if ends_with keeper_suffix_directive then Keeper_post_directive
     else Keeper_post_unknown
 

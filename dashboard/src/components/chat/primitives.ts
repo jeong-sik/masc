@@ -10,8 +10,9 @@ import { parseMarkdownToBlocks } from './markdown-blocks'
 import { linkifyHtmlReferences } from './chat-linkify'
 import { showToast } from '../common/toast'
 import { copyToClipboard } from '../common/copyable-code'
-import { useVoiceInput } from './voice-input'
 import { ExternalLink, Mic, Square } from 'lucide-preact'
+import { prettyJsonDeep } from '../tool-call-shared'
+import { useVoiceInput } from './voice-input'
 
 const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
 import { formatTimeHms } from '../../lib/format-time'
@@ -1977,11 +1978,12 @@ function ChatMessageBubble({
 function prettyJsonish(text: string): string {
   const trimmed = text.trimStart()
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    try {
-      return JSON.stringify(JSON.parse(text), null, 2)
-    } catch {
-      // not valid JSON — show as-is
-    }
+    // prettyJsonDeep recursively un-nests double-encoded JSON in string values
+    // so legacy "<label>\n{json}" tool rows render structurally instead of
+    // showing literal "\n". Returns null when not valid JSON.
+    const pretty = prettyJsonDeep(text)
+    if (pretty !== null) return pretty
+    // not valid JSON — show as-is
   }
   return text
 }

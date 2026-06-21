@@ -5,6 +5,8 @@ import {
   durationColor,
   formatArgs,
   prettyArgs,
+  extractEmbeddedJson,
+  prettyJsonDeep,
 } from './tool-call-shared'
 
 // ================================================================
@@ -183,5 +185,65 @@ describe('prettyArgs', () => {
 
   it('serializes object with array', () => {
     expect(prettyArgs({ items: [1, 2] })).toBe('{\n  "items": [\n    1,\n    2\n  ]\n}')
+  })
+})
+
+// ================================================================
+// extractEmbeddedJson / prettyJsonDeep (double-encoded tool results)
+// ================================================================
+
+describe('extractEmbeddedJson', () => {
+  it('returns the object for a pure-JSON string', () => {
+    expect(extractEmbeddedJson('{"id":"p-1"}')).toEqual({ id: 'p-1' })
+  })
+
+  it('extracts the JSON after a "<prose>\\n{json}" prefix', () => {
+    expect(extractEmbeddedJson('Post created:\n{"id":"p-1","body":"hi"}')).toEqual({
+      id: 'p-1',
+      body: 'hi',
+    })
+  })
+
+  it('returns null for plain prose without embedded JSON', () => {
+    expect(extractEmbeddedJson('just a note, see {a:1}')).toBeNull()
+  })
+
+  it('returns null when the suffix after newline is not valid JSON', () => {
+    expect(extractEmbeddedJson('header\n{not json')).toBeNull()
+  })
+})
+
+describe('prettyJsonDeep', () => {
+  it('returns null for non-JSON input', () => {
+    expect(prettyJsonDeep('not json at all')).toBeNull()
+  })
+
+  // The core bug: a tool result envelope whose `result` field embeds a
+  // "Post created:\n{json}" string. JSON.stringify(parse(...)) alone re-escapes
+  // the inner newlines to literal "\n"; prettyJsonDeep un-nests it instead.
+  it('un-nests a double-encoded board_post result so no literal \\n remains', () => {
+    const legacy = JSON.stringify({
+      ok: true,
+      result: 'Post created:\n{\n  "id": "p-240532",\n  "body": "hi"\n}',
+    })
+    const out = prettyJsonDeep(legacy)
+    expect(out).not.toBeNull()
+    // No literal backslash-n escape sequences survive in the rendered output.
+    expect(out).not.toContain('\\n')
+    // The inner post fields are now structurally addressable.
+    expect(out).toContain('"id": "p-240532"')
+    expect(out).toContain('"body": "hi"')
+  })
+
+  it('un-nests a field whose value is a pure stringified JSON object', () => {
+    const out = prettyJsonDeep(JSON.stringify({ result: '{"n":1}' }))
+    expect(out).not.toBeNull()
+    expect(out).not.toContain('\\n')
+    expect(out).toContain('"n": 1')
+  })
+
+  it('leaves plain string values untouched (no over-coercion)', () => {
+    const out = prettyJsonDeep(JSON.stringify({ note: 'hello world' }))
+    expect(out).toBe('{\n  "note": "hello world"\n}')
   })
 })

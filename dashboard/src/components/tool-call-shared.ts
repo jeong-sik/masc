@@ -122,6 +122,84 @@ export function prettyArgs(args: Record<string, unknown> | string): string {
   try { return JSON.stringify(args, null, 2) } catch { return String(args) }
 }
 
+// ── Embedded-JSON coercion ───────────────────────────────
+// Some tool results carry JSON double-encoded: a human "<label>\n{json}" string,
+// or a field whose value is itself a stringified JSON object. Re-serializing such
+// a string with JSON.stringify(..., null, 2) escapes the inner newlines back to
+// literal "\n", so the inspector shows backslash-n noise instead of structure.
+// These helpers mirror OCaml [Tool_result.structured_payload_of_message] so that
+// already-persisted (legacy) tool rows render structurally. New tool results are
+// emitted structured at the source (board_tool_adapter), so this is a
+// display-side defence for historical data, not the primary fix.
+
+function parseJsonContainer(raw: string): unknown | null {
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return parsed !== null && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+/** Extract a structured object/array from a pure-JSON or "<prose>\n{json}"
+ *  string. Returns null when no embedded JSON container is present. Mirror of
+ *  OCaml Tool_result.structured_payload_of_message. */
+export function extractEmbeddedJson(message: string): unknown | null {
+  const whole = parseJsonContainer(message.trim())
+  if (whole !== null) return whole
+  let from = 0
+  for (;;) {
+    const nl = message.indexOf('\n', from)
+    if (nl === -1) return null
+    const suffix = message.slice(nl + 1).trim()
+    if (suffix === '') {
+      from = nl + 1
+      continue
+    }
+    if (suffix[0] === '{' || suffix[0] === '[') {
+      const parsed = parseJsonContainer(suffix)
+      if (parsed !== null) return parsed
+    }
+    from = nl + 1
+  }
+}
+
+/** Recursively replace string values that embed JSON with the parsed value.
+ *  Terminates: each extraction turns a string into a container, and containers
+ *  are walked once. */
+function coerceEmbeddedJson(value: unknown): unknown {
+  if (typeof value === 'string') {
+    const extracted = extractEmbeddedJson(value)
+    return extracted === null ? value : coerceEmbeddedJson(extracted)
+  }
+  if (Array.isArray(value)) return value.map(coerceEmbeddedJson)
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = coerceEmbeddedJson(v)
+    }
+    return out
+  }
+  return value
+}
+
+/** Pretty-print a JSON string, recursively un-nesting double-encoded JSON found
+ *  in string values. Returns null when the input is not JSON (caller falls back
+ *  to the raw text). */
+export function prettyJsonDeep(s: string): string | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(s)
+  } catch {
+    return null
+  }
+  try {
+    return JSON.stringify(coerceEmbeddedJson(parsed), null, 2)
+  } catch {
+    return s
+  }
+}
+
 /** Strip `keeper_` and `masc_` prefixes from a tool name for display. */
 export function normalizeToolName(name: string): string {
   return name.replace(/^(keeper_|masc_)/, '')

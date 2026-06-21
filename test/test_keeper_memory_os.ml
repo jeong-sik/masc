@@ -1691,8 +1691,17 @@ let test_gc_waits_for_fact_writer_lock () =
       | Some report -> report
       | None -> Alcotest.fail "expected GC to finish after writer releases lock"
     in
-    Alcotest.(check int) "gc sees writer's committed fact" 2 report.GC.total_input;
-    Alcotest.(check int) "gc drops only the expired fact" 1 report.ttl_expired;
+    (* RFC-0259 §3.6 (P5): the writer's merge_and_cap now drops the expired row
+       on the same valid_until boundary GC uses, so by the time GC runs the
+       expired fact is already reclaimed — GC reads only the fresh fact and finds
+       nothing to expire. The lock-ordering assertion above (GC waits for the
+       writer's lock) is this test's subject; GC-drops-expired on an untouched
+       store is covered by test_gc_dry_run_and_rewrite. *)
+    Alcotest.(check int) "gc sees only the writer's committed fact" 1 report.GC.total_input;
+    Alcotest.(check int)
+      "writer's cap already reclaimed the expired fact"
+      0
+      report.ttl_expired;
     let survivors = Memory_io.read_facts_all ~keeper_id in
     Alcotest.(check int) "fresh fact survives GC" 1 (List.length survivors);
     Alcotest.(check bool)

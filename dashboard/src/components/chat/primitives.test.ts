@@ -2036,6 +2036,59 @@ describe('fusion chat card', () => {
     expect(container.querySelector('[data-fusion-detail]')?.textContent).toContain('불러오지 못했습니다')
   })
 
+  it('falls back to the persisted conclusion text when the board fetch fails', async () => {
+    vi.mocked(fetchBoardPost).mockRejectedValue(new Error('boom'))
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+    const fallback = container.querySelector('[data-fusion-fallback]')
+    expect(fallback).not.toBeNull()
+    expect(fallback?.textContent).toContain('answer — done')
+  })
+
+  it('falls back to the persisted conclusion text when the board post has no panel/judge', async () => {
+    vi.mocked(fetchBoardPost).mockResolvedValue({
+      meta: { source: 'fusion', panel: [], judge: null },
+    } as unknown as Awaited<ReturnType<typeof fetchBoardPost>>)
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+    const fallback = container.querySelector('[data-fusion-fallback]')
+    expect(fallback).not.toBeNull()
+    expect(fallback?.textContent).toContain('answer — done')
+    expect(container.querySelector('[data-fusion-detail]')?.textContent).not.toContain('비어 있습니다')
+  })
+
+  it('does not show the fallback conclusion when panel/judge load successfully', async () => {
+    vi.mocked(fetchBoardPost).mockResolvedValue({
+      meta: {
+        source: 'fusion',
+        panel: [{ model: 'm1', status: 'answered', answer: 'A' }],
+        judge: { status: 'synthesized', decision: 'd', resolved_answer: 'R' },
+      },
+    } as unknown as Awaited<ReturnType<typeof fetchBoardPost>>)
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+    expect(container.querySelector('[data-fusion-fallback]')).toBeNull()
+  })
+
+  it('shows a retention note in the expanded detail', async () => {
+    vi.mocked(fetchBoardPost).mockResolvedValue({
+      meta: {
+        source: 'fusion',
+        panel: [],
+        judge: { status: 'synthesized', decision: 'd', resolved_answer: 'R' },
+      },
+    } as unknown as Awaited<ReturnType<typeof fetchBoardPost>>)
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+    const retention = container.querySelector('[data-fusion-retention]')
+    expect(retention).not.toBeNull()
+    expect(retention?.textContent).toContain('만료')
+  })
+
   it('renders judge.synthesis as markdown (not the raw resolved_answer dump)', async () => {
     vi.mocked(fetchBoardPost).mockResolvedValue({
       meta: {

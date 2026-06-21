@@ -433,6 +433,7 @@ type TurnDetail = {
   // RFC-0233 §8 — null when context_window/price are absent on the record
   // (runtime unknown or operator left runtime.toml unset); render "미상".
   ctxPct: number | null
+  contextWindow: number | null
   cost: number | null
   measuredDurationMs: number | null
   visualTotalMs: number
@@ -719,6 +720,7 @@ function buildTurnDetail(
     tokIn,
     tokOut,
     ctxPct,
+    contextWindow: record.context_window ?? null,
     cost,
     measuredDurationMs,
     visualTotalMs,
@@ -1158,7 +1160,7 @@ function TurnDetailDrawer({
         <div class="kti-tok" data-testid="turn-token-bar">
           <div class="kti-tok-top">
             <span class="lbl">토큰 경제</span>
-            <span class="ctxpct">${t.ctxPct != null ? `컨텍스트 ${t.ctxPct.toFixed(1)}% / ${formatCtxWindowK(record.context_window)}` : '컨텍스트 미상'}</span>
+            <span class="ctxpct">${t.ctxPct != null ? `컨텍스트 ${t.ctxPct.toFixed(1)}% / ${formatCtxWindowK(t.contextWindow)}` : '컨텍스트 미상'}</span>
           </div>
           <div class="kti-tok-bar">
             <span

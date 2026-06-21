@@ -34,7 +34,7 @@ jobs:
     name: Hardcoded model prefix
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run lint
         run: bash scripts/lint/no-roadmap-stale-hardcoding.sh
 
@@ -42,7 +42,7 @@ jobs:
     name: OCaml comment `*)` terminator trap
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install ripgrep
         run: sudo apt-get install -y -qq ripgrep
       - name: Run lint
@@ -52,7 +52,7 @@ jobs:
     name: Timeout env knob ceiling ratchet (RFC-0138)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install ripgrep
         run: sudo apt-get install -y -qq ripgrep
       - name: Run lint
@@ -63,7 +63,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run lint
         run: bash scripts/lint-timeout-env-count.sh --strict
 
@@ -71,7 +71,7 @@ jobs:
     name: No actionable signal bool context
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install ripgrep
         run: sudo apt-get install -y -qq ripgrep
       - name: Run lint
@@ -81,7 +81,7 @@ jobs:
     name: Provider name hardcoding ratchet
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install ripgrep
         run: sudo apt-get install -y -qq ripgrep
       - name: Run lint
@@ -91,7 +91,7 @@ jobs:
     name: Keeper behavior hardcoding ratchet
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install ripgrep
         run: sudo apt-get install -y -qq ripgrep
       - name: Run lint
@@ -101,7 +101,7 @@ jobs:
     name: Eval tool selector runtime boundary
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install ripgrep
         run: sudo apt-get install -y -qq ripgrep
       - name: Run lint
@@ -111,7 +111,7 @@ jobs:
     name: Legacy tool surface name ratchet (RFC-0064)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install ripgrep
         run: sudo apt-get install -y -qq ripgrep
       - name: Run lint
@@ -121,7 +121,7 @@ jobs:
     name: Retired tool husk ratchet
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install ripgrep
         run: sudo apt-get install -y -qq ripgrep
       - name: Run lint
@@ -131,7 +131,7 @@ jobs:
     name: Synthetic tool-call residue ratchet
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install ripgrep
         run: sudo apt-get install -y -qq ripgrep
       - name: Run lint
@@ -141,7 +141,7 @@ jobs:
     name: Tool substrate adapter surface ratchet
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install ripgrep
         run: sudo apt-get install -y -qq ripgrep
       - name: Run lint
@@ -151,7 +151,7 @@ jobs:
     name: Tool -> Keeper dependency-direction ratchet (RFC-0194 §3)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install ripgrep
         run: sudo apt-get install -y -qq ripgrep
       - name: Run lint
@@ -161,7 +161,7 @@ jobs:
     name: MASC domain ownership ratchet
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install ripgrep
         run: sudo apt-get install -y -qq ripgrep
       - name: Run lint
@@ -171,7 +171,7 @@ jobs:
     name: RFC-0148 backsliding guard (no Tool_result.error + Printexc.to_string)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install ripgrep
         run: sudo apt-get install -y -qq ripgrep
       - name: Run lint
@@ -181,7 +181,7 @@ jobs:
     name: Boundary redaction SSOT enforcement (RFC-0132 PR-3)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install ripgrep
         run: sudo apt-get install -y -qq ripgrep
       - name: Run lint
@@ -191,7 +191,7 @@ jobs:
     name: Math.random in components
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run lint
         run: bash scripts/lint/no-fabricated-telemetry.sh
 
@@ -199,7 +199,7 @@ jobs:
     name: No oas_* prefix in masc lib/ (RFC-0047)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run lint
         run: bash scripts/lint/no-oas-prefix-in-lib.sh
 
@@ -207,7 +207,7 @@ jobs:
     name: No inline ok-envelope literals (T27/T28/T29)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run lint
         run: bash scripts/lint/no-inline-ok-envelope.sh
 
@@ -215,7 +215,7 @@ jobs:
     name: No inline error-envelope literals (T30)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run lint
         run: bash scripts/lint/no-inline-error-envelope.sh
 
@@ -223,7 +223,7 @@ jobs:
     name: No inline json_kind_name (use Json_util.kind_name)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run lint
         run: bash scripts/lint/no-inline-json-kind-name.sh
 
@@ -231,7 +231,7 @@ jobs:
     name: No yojson 3.0 dead arms (`Tuple/`Variant in Yojson.Safe.t)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run lint
         run: bash scripts/lint/no-yojson-3-dead-arms.sh
 
@@ -240,7 +240,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Install ripgrep
@@ -256,7 +256,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install ripgrep
         run: sudo apt-get install -y -qq ripgrep
       - name: Run lint
@@ -266,7 +266,7 @@ jobs:
     name: Workflow YAML syntax
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.x"
@@ -279,7 +279,7 @@ jobs:
     name: Board SLO extractor fixture
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install jq
         run: sudo apt-get install -y -qq jq
       - name: Run fixture test
@@ -290,7 +290,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Run guard
@@ -308,7 +308,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run lint
         run: bash scripts/lint/exhaustive-guard.sh
 
@@ -317,7 +317,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Run guard
@@ -330,7 +330,7 @@ jobs:
     name: Spawn-bounded ratchet
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install ripgrep
         run: sudo apt-get install -y -qq ripgrep
       - name: Run lint
@@ -340,7 +340,7 @@ jobs:
     name: audit-path-ssot
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install ripgrep
         run: sudo apt-get update && sudo apt-get install -y -qq ripgrep
       - name: Run path SSOT audit
@@ -356,7 +356,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history so the merge-base and the intervening main
           # commits are reachable; a shallow clone would make the guard

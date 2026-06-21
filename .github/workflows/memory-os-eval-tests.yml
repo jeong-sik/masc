@@ -25,6 +25,6 @@ jobs:
   judge-eval-unit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: judge_eval pure-function unit tests (deterministic, no network)
         run: python3 test/test_memory_os_judge_eval.py

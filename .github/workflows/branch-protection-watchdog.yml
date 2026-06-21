@@ -18,7 +18,7 @@ jobs:
     name: Branch Protection Watchdog
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Require branch protection audit token
         id: audit_token

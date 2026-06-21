@@ -312,6 +312,10 @@ function ThroughputSection({ keeper }: { keeper: Keeper }): VNode {
             <div class="mt-2 flex h-7 items-end gap-0.5" aria-hidden="true">
               ${series.map(v => html`<span class="flex-1 rounded-[1px] bg-[var(--color-status-ok)]" style=${{ height: `${Math.max(6, (v / peak) * 100)}%`, opacity: 0.35 + 0.65 * (v / peak) }}></span>`)}
             </div>
+          </div>
+          <div class="kw-range-chips">
+            <span class="kw-range-chip">저부하</span>
+            <span class="kw-range-chip">고부하</span>
           </div>`
         : null}
     </div>
@@ -337,9 +341,11 @@ function OwnedTasksSection({ keeper }: { keeper: Keeper }): VNode {
                 aria-label=${`태스크 열기: ${t.id} ${t.title}`}
                 onClick=${() => openTask(t)}
               >
-                <span class="tid">${t.id}</span>
+                <div class="kw-tasktag-row">
+                  <span class="tid">${t.id}</span>
+                  ${t.status ? html`<span class=${`tstate ${taskStateClass(t.status)}`}>${t.status}</span>` : null}
+                </div>
                 <span class="ttl">${t.title}</span>
-                ${t.status ? html`<span class=${`tstate ${taskStateClass(t.status)}`}>${t.status}</span>` : null}
               </button>
             `)
           : html`<div class="kw-list-empty v2-monitoring-row">할당된 태스크 없음</div>`}

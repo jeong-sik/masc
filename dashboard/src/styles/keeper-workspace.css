@@ -48,7 +48,7 @@
   grid-template-columns:
     var(--kw-roster-w, 286px)
     minmax(0, 1fr)
-    var(--kw-rail-w, 312px);
+    var(--kw-rail-w, 300px);
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -56,6 +56,9 @@
   position: relative;
   background: var(--color-bg-page);
   color: var(--color-fg-primary);
+  --color-accent-fg: #8a6a28;
+  --color-accent-fg-dim: #5a4618;
+  --color-fg-muted: #6a5848;
 }
 .kw-grid[data-roster="mini"] { --kw-roster-w: 72px; }
 .kw-grid[data-rail="closed"] { --kw-rail-w: 0px; }
@@ -173,6 +176,16 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   background: var(--color-bg-panel-alt);
 }
 .kw-roster-head { padding: 14px; border-bottom: 1px solid var(--color-border-divider); }
+.kw-roster-title {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-display); font-size: 14px; text-transform: uppercase; letter-spacing: 0.12em;
+  margin-bottom: 10px; color: var(--color-fg-primary);
+}
+.kw-roster-title .n {
+  font-family: var(--font-mono); font-size: 10px; font-weight: var(--fw-semi);
+  padding: 2px 7px; border-radius: 999px;
+  background: var(--color-bg-surface); border: 1px solid var(--color-border-default); color: var(--color-fg-muted);
+}
 .kw-roster-search {
   width: 100%;
   font-size: var(--fs-13);
@@ -263,7 +276,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   transition: color .15s, border-color .15s, background .15s;
 }
 .kw-rfilter:hover { color: var(--color-fg-primary); border-color: var(--color-border-strong); }
-.kw-rfilter[aria-pressed="true"] { color: var(--color-bg-page); background: var(--color-accent-fg); border-color: var(--color-accent-fg); font-weight: var(--fw-semi); }
+.kw-rfilter[aria-pressed="true"] { background: #8a6a28; border-color: #8a6a28; color: #0a0706; font-weight: var(--fw-semi); }
 .kw-rfilter .n { opacity: 0.8; }
 /* Roster sort <select> — ported from keeper-v2 v2.css .roster-sort. Pushed to
    the right of the filter chips; pill control with the same resting/hover/focus
@@ -284,7 +297,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-roster-mini-list { display: flex; flex: 1; flex-direction: column; align-items: center; gap: 8px; overflow-y: auto; padding: 12px; }
 .kw-roster-group {
   display: flex; align-items: center; gap: 6px;
-  font-size: var(--fs-11); font-weight: var(--fw-bold); letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-fg-secondary);
+  font-size: 9.5px; font-weight: var(--fw-bold); letter-spacing: 0.18em; text-transform: uppercase; color: var(--color-fg-secondary);
   padding: 12px 8px 6px;
 }
 /* Per-group keeper count, right-aligned — mirrors the design roster's rg-n. */
@@ -463,7 +476,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
  * two-row variant — the runtime/model/throughput sub-row moved to the rail —
  * so the conversation below gets the reclaimed vertical space. */
 .kw-chat-head {
-  flex: none; padding: 12px 28px;
+  flex: none; padding: 9px 20px 9px;
   border-bottom: 1px solid var(--color-border-default);
   /* B1: subtle panel→deep vertical gradient (standalone .chat-head voice)
      instead of a flat fill — gives the header a faint lit-from-top depth. */
@@ -481,6 +494,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
  * actions wrap to their own row instead (see .kw-chat-head flex-wrap). */
 .kw-chat-id { min-width: 9rem; flex: 1; }
 .kw-chat-name-row { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; }
+.kw-chat-slug { font-size: 12px; color: #6a5848; margin-top: 2px; }
 /* Back-to-roster affordance: only meaningful on the single-pane mobile layout
  * (shown at ≤860px in the conversation media block). On desktop the roster is
  * always visible, so the button is hidden. */
@@ -489,7 +503,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
    "instrument panel" voice (Space Grotesk under [data-skin=v2], theme-aware via
    --font-display). Weight eased to semi (was bold) so the wider tracking reads
    engraved rather than heavy; tracking flipped negative→+0.02em. */
-.kw-chat-name { font-family: var(--font-display); font-size: var(--fs-20); font-weight: var(--fw-semi); letter-spacing: 0.02em; color: var(--color-fg-primary); margin: 0; white-space: nowrap; }
+.kw-chat-name { font-family: var(--font-display); font-size: var(--fs-20); font-weight: 400; letter-spacing: 0.02em; color: var(--color-fg-primary); margin: 0; white-space: nowrap; }
 
 .kw-state-pill {
   display: inline-flex; align-items: center; gap: 6px;
@@ -796,18 +810,18 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
  * conversation is visible at once — the prior values left the transcript
  * feeling cramped (few messages on screen) despite filling the column. */
 .kw-thread-inner .chat-transcript {
-  gap: 22px;
-  padding-left: 40px;
-  padding-right: 40px;
+  gap: 26px;
+  padding-left: 28px;
+  padding-right: 28px;
   padding-top: 20px;
 }
 .kw-composer-wrap {
   flex: none;
   border-top: 1px solid var(--color-border-default);
   background: linear-gradient(0deg, var(--color-bg-panel-alt), var(--color-bg-page));
-  padding: 12px 0 14px;
+  padding: 12px 24px 16px;
 }
-.kw-composer-inner { width: 100%; max-width: var(--kw-thread-w, 980px); margin: 0 auto; padding: 0 40px; }
+.kw-composer-inner { width: 100%; max-width: var(--kw-thread-w, 980px); margin: 0 auto; padding: 0 4px; }
 /* Composer floor: the reused ChatComposer applies min-h-30 (120px) to an empty
  * textarea, permanently reserving space the transcript (its flex:1 sibling)
  * would otherwise take. Lower the floor to ~2 rows, scoped to the workspace;
@@ -827,13 +841,21 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   border-left: 1px solid var(--color-border-default);
   background: var(--color-bg-panel-alt);
 }
-.kw-rail-scroll { overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 22px; }
+.kw-rail-scroll { overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 16px; }
 .kw-sec h4 {
-  font-weight: var(--fw-bold); text-transform: uppercase; letter-spacing: 0.12em;
-  font-size: var(--fs-12); color: var(--color-fg-primary); margin: 0 0 9px;
+  font-family: var(--font-display); font-size: 11px; letter-spacing: 0.18em;
+  font-weight: 400; text-transform: uppercase;
+  color: var(--color-fg-primary); margin: 0 0 9px;
   display: flex; align-items: center; gap: 7px;
 }
 .kw-card { background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: var(--r-2); padding: 13px 14px; }
+.kw-range-chips { display: flex; gap: 6px; margin-top: 8px; }
+.kw-range-chip {
+  font-size: var(--fs-11); letter-spacing: 0.04em;
+  padding: 3px 9px; border-radius: 999px;
+  background: var(--color-bg-elevated); border: 1px solid var(--color-border-default);
+  color: var(--color-fg-secondary);
+}
 
 .kw-vitals { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--color-border-divider); border: 1px solid var(--color-border-default); border-radius: var(--r-2); overflow: hidden; }
 .kw-vitals.single { grid-template-columns: 1fr; }
@@ -880,28 +902,26 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-list { display: flex; flex-direction: column; gap: 7px; }
 .kw-list-empty { font-size: var(--fs-13); color: var(--color-fg-secondary); }
 .kw-tasktag {
-  display: grid;
-  grid-template-areas:
-    "task-id task-state"
-    "task-title task-title";
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 5px 8px;
-  align-items: start;
+  display: flex; flex-direction: column;
+  gap: 5px;
+  align-items: stretch;
   width: 100%;
-  padding: 10px 11px;
+  padding: 8px 10px;
   border-radius: var(--r-1);
   background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border-divider);
+  border: 1px solid #2a1a14;
   font-size: var(--fs-13);
   color: var(--color-fg-primary);
   text-align: left;
   cursor: pointer;
   transition: background .15s, border-color .15s;
 }
-.kw-tasktag:hover { background: var(--color-bg-hover); border-color: var(--color-border-default); }
+.kw-tasktag:hover { background: var(--color-bg-hover); border-color: #3a251c; }
 .kw-tasktag:focus-visible { outline: 2px solid var(--color-accent-fg-dim); outline-offset: 2px; }
+.kw-tasktag-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
 .kw-tasktag .tid {
-  grid-area: task-id;
   min-width: 0;
   overflow: hidden;
   color: var(--color-accent-fg);
@@ -911,7 +931,6 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   white-space: nowrap;
 }
 .kw-tasktag .ttl {
-  grid-area: task-title;
   min-width: 0;
   overflow: hidden;
   overflow-wrap: anywhere;
@@ -921,9 +940,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   line-height: 1.35;
 }
 .kw-tasktag .tstate {
-  grid-area: task-state;
   align-self: start;
-  justify-self: end;
   max-width: 10rem;
   min-width: 0;
   overflow: hidden;
@@ -1092,9 +1109,12 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   margin-top: 10px;
 }
 .kw-compact-btn {
+  background: #8a6a28; color: #0a0706; border-radius: 999px;
   padding: 6px 10px;
   font-size: var(--fs-11);
 }
+.kw-compact-btn:hover { background: #a68233; color: #0a0706; }
+.kw-compact-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ════ B3 — message bubbles: asymmetric "speech tail" + emboss ═══════
  * Ported from the standalone v2 .bubble: a sharp corner on the speaker side

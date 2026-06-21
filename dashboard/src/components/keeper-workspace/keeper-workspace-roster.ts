@@ -559,6 +559,7 @@ export function KeeperWorkspaceRoster({
           </div>`
         : html`
           <div class="kw-roster-head v2-monitoring-toolbar">
+            <div class="kw-roster-title"><span>Keepers</span><span class="n">${counts.all}</span></div>
             <input
               class="kw-roster-search"
               type="text"

@@ -316,6 +316,7 @@ function ChatHeader({
             <${StatusDot} tone=${tone} pulse=${live} />${keeperPhaseLabel(keeper)}
           </span>
         </div>
+        <div class="kw-chat-slug">${keeper.sandbox_target ?? keeper.skill_primary ?? keeper.active_model ?? keeper.model ?? ''}</div>
       </div>
       <div class="kw-chat-actions">
         <${WorkspaceCommandButtons}

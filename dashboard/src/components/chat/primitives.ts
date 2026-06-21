@@ -2068,25 +2068,36 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   `
 }
 
-const TOOL_STATUS_TITLE: Record<'pending' | 'ok' | 'bad', string> = {
+const TOOL_STATUS_TITLE: Record<'pending' | 'missing' | 'ok' | 'bad', string> = {
   pending: '출력 대기 중',
+  missing: '결과 누락 — 턴이 끝났는데 출력이 도착하지 않음',
   ok: '성공',
   bad: '실패',
 }
 
+// A tool call's output is legitimately "pending" only while its turn is still
+// streaming. Once the owning assistant turn has settled (streamState null), an
+// output that never joined will never arrive — so an indefinite "pending" dot
+// hides a real gap (e.g. a call whose tool_use_id was empty and never joined).
+function isTurnStreaming(state: KeeperConversationEntry['streamState']): boolean {
+  return state === 'opening' || state === 'thinking' || state === 'streaming' || state === 'finalizing'
+}
+
 // One step of a grouped tool-trace card: a single tool call rendered from REAL
 // data only. Name + input args come from the chat entry; status, duration and
-// result are joined from the tool-call output store (null until hydration
-// lands, or forever for calls that carried no provider id — surfaced as a muted
-// "pending" dot rather than miscoloured as a failure).
-function ToolTraceStep({ entry, output }: { entry: KeeperConversationEntry; output: ToolCallEntry | null }) {
+// result are joined from the tool-call output store. A null output is "pending"
+// while the turn streams; once the turn has settled (turnSettled) a still-null
+// output is "missing" (unknown outcome) rather than an indefinite "pending".
+function ToolTraceStep({ entry, output, turnSettled = false }: { entry: KeeperConversationEntry; output: ToolCallEntry | null; turnSettled?: boolean }) {
   const [open, setOpen] = useState(false)
   const name = entry.label || 'tool'
   const displayArgs = prettyJsonish(entry.text || '')
   const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
-  const status: 'pending' | 'ok' | 'bad' =
+  const status: 'pending' | 'missing' | 'ok' | 'bad' =
     output === null
-      ? 'pending'
+      ? turnSettled
+        ? 'missing'
+        : 'pending'
       : output.success === false || output.semantic_success === false
         ? 'bad'
         : 'ok'
@@ -2130,7 +2141,7 @@ function ToolTraceStep({ entry, output }: { entry: KeeperConversationEntry; outp
                       <pre class="m-0 max-h-64 overflow-y-auto whitespace-pre-wrap break-all text-2xs">${resultView.text}</pre>
                     `
                   : output === null
-                    ? html`<div class="chat-block-tool-label">출력 대기 중…</div>`
+                    ? html`<div class="chat-block-tool-label">${turnSettled ? '결과 없음 — 출력이 도착하지 않음' : '출력 대기 중…'}</div>`
                     : null}
               </div>
             `
@@ -2147,15 +2158,20 @@ function ToolTraceStep({ entry, output }: { entry: KeeperConversationEntry; outp
 function ToolTraceCard({
   tools,
   traceSteps = [],
+  turnSettled = false,
 }: {
   tools: KeeperConversationEntry[]
   traceSteps?: ChatTraceStep[]
+  turnSettled?: boolean
 }) {
   const [open, setOpen] = useState(true)
   const steps = tools.map((entry) => ({ entry, output: lookupToolCallOutput(entry.id) }))
   const failN = steps.filter(
     (s) => s.output !== null && (s.output.success === false || s.output.semantic_success === false),
   ).length
+  // Surface unjoined outputs as "missing" only once the turn has settled — while
+  // it streams they are still legitimately pending, not a gap.
+  const missingN = turnSettled ? steps.filter((s) => s.output === null).length : 0
   const totalMs = steps.reduce((sum, s) => sum + (s.output?.duration_ms ?? 0), 0)
   const durLabel = totalMs > 0 ? formatMsCompact(totalMs) : null
   const stepN = traceSteps.length + tools.length
@@ -2175,6 +2191,7 @@ function ToolTraceCard({
         <span class="chat-block-trace-meta">
           ${tools.length > 0 ? html`<span>도구 ${tools.length}</span>` : null}
           ${failN > 0 ? html`<span class="text-[var(--color-status-err)]">실패 ${failN}</span>` : null}
+          ${missingN > 0 ? html`<span class="text-[var(--color-status-warn)]">결과 누락 ${missingN}</span>` : null}
           ${durLabel ? html`<span class="tnum">${durLabel}</span>` : null}
         </span>
       </button>
@@ -2183,7 +2200,7 @@ function ToolTraceCard({
             <div class="chat-block-trace-steps">
               <span class="chat-block-trace-rail"></span>
               ${traceSteps.map((step, index) => html`<${ChatTraceStep} key=${`trace-${index}`} step=${step} />`)}
-              ${steps.map(({ entry, output }) => html`<${ToolTraceStep} key=${entry.id} entry=${entry} output=${output} />`)}
+              ${steps.map(({ entry, output }) => html`<${ToolTraceStep} key=${entry.id} entry=${entry} output=${output} turnSettled=${turnSettled} />`)}
             </div>
           `
         : null}
@@ -2207,9 +2224,12 @@ function TurnWorkBundle({
   action?: ChatTranscriptAction
 }) {
   const traceSteps = assistant.traceSteps ?? []
+  // The bundle owns the settled assistant entry, so an unjoined tool output here
+  // is a real gap (not in-flight) once the turn stops streaming.
+  const turnSettled = !isTurnStreaming(assistant.streamState)
   return html`
     <div class="chat-turn-bundle" data-chat-turn-bundle>
-      <${ToolTraceCard} tools=${tools} traceSteps=${traceSteps} />
+      <${ToolTraceCard} tools=${tools} traceSteps=${traceSteps} turnSettled=${turnSettled} />
       <${ChatMessageBubble}
         entry=${assistant}
         showMetadata=${showMetadata !== false}

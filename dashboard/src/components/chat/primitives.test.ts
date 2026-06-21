@@ -384,6 +384,37 @@ describe('ChatTranscript', () => {
     expect(onClick.mock.calls[0]?.[0].id).toBe('a1')
   })
 
+  it('copies the message text from an assistant message copy button', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.assign(globalThis.navigator, { clipboard: { writeText } })
+    const target = entry({
+      id: 'a1',
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: '복사할 응답 본문',
+    })
+
+    render(
+      html`<${ChatTranscript} entries=${[target]} emptyText="empty" variant="messenger" />`,
+      container,
+    )
+
+    const copy = container.querySelector('[data-testid="chat-message-copy"]') as HTMLButtonElement
+    expect(copy).not.toBeNull()
+    fireEvent.click(copy)
+    expect(writeText).toHaveBeenCalledWith('복사할 응답 본문')
+  })
+
+  it('does not render a copy button on user messages', () => {
+    const target = entry({ id: 'u1', role: 'user', text: '내 질문' })
+    render(
+      html`<${ChatTranscript} entries=${[target]} emptyText="empty" variant="messenger" />`,
+      container,
+    )
+    expect(container.querySelector('[data-testid="chat-message-copy"]')).toBeNull()
+  })
+
   it('renders a thinking placeholder when the model is reasoning', () => {
     render(
       html`<${ChatTranscript}

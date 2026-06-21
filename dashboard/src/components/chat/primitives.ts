@@ -8,6 +8,7 @@ import { ringFocusClasses } from '../common/ring'
 import { collectAttachments } from './attachments'
 import { parseMarkdownToBlocks } from './markdown-blocks'
 import { showToast } from '../common/toast'
+import { copyToClipboard } from '../common/copyable-code'
 import { useVoiceInput } from './voice-input'
 import { Mic, Square } from 'lucide-preact'
 
@@ -603,13 +604,12 @@ function codeBlockText(htmlContent: string, source?: string): string {
   return htmlContent
 }
 
-async function copyCodeToClipboard(text: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text)
-    showToast('코드를 복사했습니다', 'success')
-  } catch {
-    showToast('복사하지 못했습니다', 'error')
-  }
+// Reuse the canonical clipboard helper (common/copyable-code) — it carries the
+// execCommand fallback for non-secure contexts — and just layer the toast on its
+// boolean result so the message text matches what was copied.
+async function copyWithToast(text: string, successMessage: string): Promise<void> {
+  const ok = await copyToClipboard(text)
+  showToast(ok ? successMessage : '복사하지 못했습니다', ok ? 'success' : 'error')
 }
 
 function ChatCodeBlock({ cap, html: htmlContent, source }: { cap?: string; html: string; source?: string }) {
@@ -647,7 +647,7 @@ function ChatCodeBlock({ cap, html: htmlContent, source }: { cap?: string; html:
           class="chat-block-code-copy"
           aria-label="코드 복사"
           title="복사"
-          onClick=${() => { void copyCodeToClipboard(plain) }}
+          onClick=${() => { void copyWithToast(plain, '코드를 복사했습니다') }}
         >
           복사
         </button>
@@ -1754,6 +1754,22 @@ function ChatMessageBubble({
                 data-testid="chat-message-action"
               >
                 ${action.label}
+              </button>
+            `
+          : null}
+        ${richTextRole && hasRealText
+          ? html`
+              <button
+                type="button"
+                class=${`border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${CHAT_FOCUS_RING} ${
+                  isMessenger ? 'rounded-[var(--r-1)] px-2.5 py-1' : 'rounded-[var(--r-0)] px-3 py-1'
+                }`}
+                onClick=${() => { void copyWithToast(entry.text, '메시지를 복사했습니다') }}
+                title="메시지 복사"
+                aria-label="메시지 복사"
+                data-testid="chat-message-copy"
+              >
+                복사
               </button>
             `
           : null}

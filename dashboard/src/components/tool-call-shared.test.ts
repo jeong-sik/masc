@@ -204,6 +204,14 @@ describe('extractEmbeddedJson', () => {
     })
   })
 
+  it('wraps a bare top-level array as {items: [...]} to match OCaml ensure_object', () => {
+    expect(extractEmbeddedJson('[1,2]')).toEqual({ items: [1, 2] })
+  })
+
+  it('wraps a suffix array as {items: [...]} to match OCaml ensure_object', () => {
+    expect(extractEmbeddedJson('Items:\n[1,2]')).toEqual({ items: [1, 2] })
+  })
+
   it('returns null for plain prose without embedded JSON', () => {
     expect(extractEmbeddedJson('just a note, see {a:1}')).toBeNull()
   })
@@ -235,8 +243,8 @@ describe('prettyJsonDeep', () => {
     expect(out).toContain('"body": "hi"')
   })
 
-  it('un-nests a field whose value is a pure stringified JSON object', () => {
-    const out = prettyJsonDeep(JSON.stringify({ result: '{"n":1}' }))
+  it('un-nests a field whose value is a "<prose>\\n{json}" string', () => {
+    const out = prettyJsonDeep(JSON.stringify({ result: 'header\n{"n":1}' }))
     expect(out).not.toBeNull()
     expect(out).not.toContain('\\n')
     expect(out).toContain('"n": 1')
@@ -245,5 +253,10 @@ describe('prettyJsonDeep', () => {
   it('leaves plain string values untouched (no over-coercion)', () => {
     const out = prettyJsonDeep(JSON.stringify({ note: 'hello world' }))
     expect(out).toBe('{\n  "note": "hello world"\n}')
+  })
+
+  it('preserves legitimate JSON-text string values (no over-coercion)', () => {
+    const out = prettyJsonDeep(JSON.stringify({ note: '{"x":1}' }))
+    expect(out).toBe('{\n  "note": "{\\"x\\":1}"\n}')
   })
 })

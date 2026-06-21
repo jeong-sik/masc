@@ -386,6 +386,7 @@ export class LspConnection {
     }
 
     ws.onmessage = (event) => {
+      if (this.disposed || this.ws !== ws) return
       try {
         const msg = JSON.parse(event.data)
         this.handleMessage(msg)
@@ -395,6 +396,7 @@ export class LspConnection {
     }
 
     ws.onclose = (event) => {
+      if (this.ws !== ws) return
       if (this.ws === ws) this.ws = null
       this.initialized = false
       this.rejectPending(new Error(lspCloseReason(event)))
@@ -408,6 +410,7 @@ export class LspConnection {
     }
 
     ws.onerror = (err) => {
+      if (this.disposed || this.ws !== ws) return
       console.error('[LSP] WebSocket error:', err)
       this.onError(err)
     }

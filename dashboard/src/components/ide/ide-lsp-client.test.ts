@@ -35,6 +35,10 @@ class MockWebSocket {
     this.onopen?.(new Event('open'))
   }
 
+  message(payload: unknown): void {
+    this.onmessage?.({ data: JSON.stringify(payload) } as MessageEvent)
+  }
+
   close(event: Partial<Pick<CloseEvent, 'code' | 'reason' | 'wasClean'>> = {}): void {
     if (this.readyState === MockWebSocket.CLOSED) return
     this.readyState = MockWebSocket.CLOSED
@@ -143,6 +147,29 @@ describe('LspConnection', () => {
     socket.close({ code: 1011, reason: 'server restart', wasClean: false })
 
     await expect(hover).resolves.toBeNull()
+    conn.dispose()
+  })
+
+  it('ignores stale socket events after reconnecting', async () => {
+    installWebSocketMock()
+    const conn = new LspConnection(() => {}, () => {})
+    conn.connect()
+    const oldSocket = mockSockets[0]!
+    oldSocket.open()
+
+    conn.connect()
+    const currentSocket = mockSockets[1]!
+    currentSocket.open()
+
+    const hover = conn.requestHover('lib/keeper/current.ml', 0, 0)
+    expect(currentSocket.sent).toHaveLength(2)
+
+    oldSocket.close({ code: 1006, wasClean: false })
+    oldSocket.message({ id: 3, result: { contents: 'stale' } })
+
+    currentSocket.message({ id: 3, result: { contents: 'current' } })
+
+    await expect(hover).resolves.toEqual({ contents: 'current' })
     conn.dispose()
   })
 

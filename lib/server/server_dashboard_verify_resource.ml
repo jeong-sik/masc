@@ -74,15 +74,17 @@ let verify_http ~value =
       { ok; detail; http_status = Some status; target }
   end
 
-(* Expand a leading "~" to $HOME for the worktree basepath (e.g. "~/wt"). *)
+(* Expand a leading "~" to $HOME for the worktree basepath (e.g. "~/wt").
+   Reading $HOME is the one environment boundary here; the None case (HOME unset)
+   is handled explicitly — the path is left literal, which then fails the
+   existence check honestly rather than being silently substituted. *)
 let expand_home path =
   let path = String.trim path in
-  if path = "~" then Option.value (Sys.getenv_opt "HOME") ~default:path
-  else if String.length path >= 2 && String.equal (String.sub path 0 2) "~/" then
-    match Sys.getenv_opt "HOME" with
-    | Some home -> Filename.concat home (String.sub path 2 (String.length path - 2))
-    | None -> path
-  else path
+  match Sys.getenv_opt "HOME" with
+  | Some home when String.equal path "~" -> home
+  | Some home when String.length path >= 2 && String.equal (String.sub path 0 2) "~/" ->
+    Filename.concat home (String.sub path 2 (String.length path - 2))
+  | Some _ | None -> path
 
 let is_directory path = try Sys.is_directory path with Sys_error _ -> false
 

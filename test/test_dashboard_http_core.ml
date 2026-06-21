@@ -784,6 +784,42 @@ let test_execution_actor_for_request_canonicalizes_token_owner () =
       check (option string) "execution actor canonicalized to token owner"
         (Some "codex") actor
 
+let test_dashboard_execution_force_refresh_bypasses_default_cache () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let state =
+    Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:config.base_path ()
+  in
+  let seed =
+    `Assoc
+      [ "force_marker", `String "cached"
+      ; "generated_at", `String "2026-05-15T00:00:02Z"
+      ]
+  in
+  with_cached_surface_success
+    Server_dashboard_http_execution_surfaces.execution_cache
+    seed
+  @@ fun () ->
+  let json =
+    Server_dashboard_http_execution_surfaces.dashboard_execution_http_json
+      ~state
+      ~sw
+      ~clock:(Eio.Stdenv.clock env)
+      (request "/api/v1/dashboard/execution?force=1")
+  in
+  let open Yojson.Safe.Util in
+  check bool "force query surfaced" true
+    (json |> member "query" |> member "force" |> to_bool);
+  check bool "force is not the default cached light request" false
+    (json |> member "query" |> member "default_light_request" |> to_bool);
+  check bool "seed marker bypassed" true
+    (match json |> member "force_marker" with
+     | `Null -> true
+     | _ -> false);
+  check string "cache key" "execution:default:light"
+    (json |> member "cache" |> member "request_cache_key" |> to_string);
+  check string "cache state" "fresh"
+    (json |> member "cache" |> member "cache_state" |> to_string)
+
 let test_verifier_of_request_canonicalizes_token_owner () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let cfg =
@@ -1204,6 +1240,8 @@ let () =
             test_dashboard_shell_snapshot_selector_injects_auth;
           test_case "execution actor canonicalizes token owner" `Quick
             test_execution_actor_for_request_canonicalizes_token_owner;
+          test_case "execution force refresh bypasses default cache" `Quick
+            test_dashboard_execution_force_refresh_bypasses_default_cache;
           test_case "verification verifier canonicalizes token owner" `Quick
             test_verifier_of_request_canonicalizes_token_owner;
           test_case "message JSON exposes temporal decay fields" `Quick

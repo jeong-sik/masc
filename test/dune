@@ -209,6 +209,7 @@
   test_keeper_unified_metacognition
   test_keeper_surface_post
   test_keeper_person_notes
+  test_keeper_person_note_set_handler
   test_fact_retention_reachability
   test_keeper_surface_read
   test_keeper_surface_presence_prompt
@@ -510,6 +511,7 @@
   test_keeper_unified_metacognition
   test_keeper_surface_post
   test_keeper_person_notes
+  test_keeper_person_note_set_handler
   test_fact_retention_reachability
   test_keeper_surface_read
   test_keeper_surface_presence_prompt

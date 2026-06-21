@@ -186,6 +186,7 @@ let run_keepalive_unified_turn
   then { meta = meta_after_triage; cycle_crashed = false }
   else (
     let consumed_stimuli = ref [] in
+    let consumed_stimuli_turn_completed = ref false in
     try
       let event_intake =
         heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events
@@ -393,22 +394,36 @@ let run_keepalive_unified_turn
           meta_after_triage)
         else if should_run_turn
         then (
-          run_keeper_cycle
-            ~ctx
-            ~meta_after_triage
-            ~stop
-            ~obs
-            ~turn_decision
-            ~shared_context
-            ())
+          let meta_after_cycle =
+            run_keeper_cycle
+              ~ctx
+              ~meta_after_triage
+              ~stop
+              ~obs
+              ~turn_decision
+              ~shared_context
+              ()
+          in
+          consumed_stimuli_turn_completed := true;
+          meta_after_cycle)
         else meta_after_triage
       in
+      (* Event intake dequeues before the admission/pressure gates above.
+         Only ack after [run_keeper_cycle] actually returns; otherwise put the
+         lease back so a non-exception skip does not drop the stimulus. *)
       if !consumed_stimuli <> []
       then
-        Keeper_registry_event_queue.ack_consumed
-          ~base_path:ctx.config.base_path
-          meta_after_triage.name
-          !consumed_stimuli;
+        if !consumed_stimuli_turn_completed
+        then
+          Keeper_registry_event_queue.ack_consumed
+            ~base_path:ctx.config.base_path
+            meta_after_triage.name
+            !consumed_stimuli
+        else
+          Keeper_registry_event_queue.requeue_front
+            ~base_path:ctx.config.base_path
+            meta_after_triage.name
+            !consumed_stimuli;
       { meta = meta_after_cycle; cycle_crashed = false }
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

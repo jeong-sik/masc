@@ -2091,6 +2091,30 @@ export async function fetchDashboardRuntimeProbe(
   return get(`/api/v1/dashboard/runtime-probe${query}`, { signal: opts?.signal })
 }
 
+// RFC-0273 §3.4 — read-only verification of operator-supplied Settings
+// resources (Settings surface VerifyBtn). Only the kinds with a real in-tree
+// probe are modeled; DB / GitHub-repo verify is deferred (the UI renders an
+// honest "수동 확인" state instead of calling this).
+export type VerifyResourceKind = 'mcp_endpoint' | 'gate_url' | 'worktree_path'
+
+export interface VerifyResourceResult {
+  ok: boolean
+  kind: string
+  detail: string
+  target: string
+  http_status: number | null
+}
+
+export async function verifyResource(
+  kind: VerifyResourceKind,
+  value: string,
+): Promise<VerifyResourceResult> {
+  // CanAdmin-gated route (server fetches the value) — seed the dev token first,
+  // mirroring fetchDashboardRuntimeProbe.
+  await ensureDevToken()
+  return post<VerifyResourceResult>('/api/v1/dashboard/verify-resource', { kind, value })
+}
+
 export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promise<DashboardToolsResponse> {
   const raw = await get<DashboardToolsResponse>('/api/v1/dashboard/tools', { signal: opts?.signal })
   const normalizedTools = raw.tool_inventory?.tools?.map(t => ({

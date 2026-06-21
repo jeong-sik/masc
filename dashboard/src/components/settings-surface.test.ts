@@ -22,6 +22,7 @@ const apiMock = vi.hoisted(() => ({
   fetchLogs: vi.fn(),
   fetchDashboardTools: vi.fn(),
   fetchRuntimeDefaults: vi.fn(),
+  verifyResource: vi.fn(),
 }))
 
 vi.mock('../api/dashboard.js', async () => {
@@ -31,6 +32,7 @@ vi.mock('../api/dashboard.js', async () => {
     fetchLogs: apiMock.fetchLogs,
     fetchDashboardTools: apiMock.fetchDashboardTools,
     fetchRuntimeDefaults: apiMock.fetchRuntimeDefaults,
+    verifyResource: apiMock.verifyResource,
   }
 })
 
@@ -122,6 +124,7 @@ describe('SettingsSurface', () => {
     apiMock.fetchLogs.mockReset()
     apiMock.fetchDashboardTools.mockReset()
     apiMock.fetchRuntimeDefaults.mockReset()
+    apiMock.verifyResource.mockReset()
     stubEmptyApi()
   })
 
@@ -250,6 +253,70 @@ describe('SettingsSurface', () => {
     expect(container.querySelectorAll('[data-testid="routing-assignment"]').length).toBe(0)
   })
 
+  // RFC-0273 §3.4 — VerifyBtn performs a real read-only probe (no more fake
+  // setTimeout-to-ok). The defining property: a probe that does not succeed
+  // must NOT render as success.
+  it('VerifyBtn runs a real probe and shows success only on ok:true', async () => {
+    apiMock.verifyResource.mockResolvedValue({
+      ok: true,
+      kind: 'mcp_endpoint',
+      detail: '정상 (HTTP 200)',
+      target: 'https://masc.local/mcp',
+      http_status: 200,
+    })
+    render(html`<${SettingsSurface} />`, container)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-mcp"]') as HTMLElement)
+
+    const verify = () => container.querySelector('[data-testid="set-verify"]') as HTMLButtonElement
+    expect(verify().getAttribute('data-state')).toBe('idle')
+
+    await fireEvent.click(verify())
+    await waitFor(() => expect(verify().getAttribute('data-state')).toBe('ok'))
+    expect(apiMock.verifyResource).toHaveBeenCalledWith('mcp_endpoint', 'https://masc.local/mcp')
+    expect(verify().textContent?.trim()).toBe('✓ 정상')
+  })
+
+  it('VerifyBtn shows failure on ok:false — never a fabricated success', async () => {
+    apiMock.verifyResource.mockResolvedValue({
+      ok: false,
+      kind: 'gate_url',
+      detail: '도달 불가: timeout',
+      target: 'https://gate.masc.local',
+      http_status: null,
+    })
+    render(html`<${SettingsSurface} />`, container)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-gate"]') as HTMLElement)
+
+    const verify = () => container.querySelector('[data-testid="set-verify"]') as HTMLButtonElement
+    await fireEvent.click(verify())
+    await waitFor(() => expect(verify().getAttribute('data-state')).toBe('fail'))
+    expect(verify().textContent?.trim()).toBe('✗ 실패')
+  })
+
+  it('VerifyBtn surfaces a thrown error (e.g. 401) as fail, not a silent ok', async () => {
+    apiMock.verifyResource.mockRejectedValue(new Error('401 unauthorized'))
+    render(html`<${SettingsSurface} />`, container)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-gate"]') as HTMLElement)
+
+    const verify = () => container.querySelector('[data-testid="set-verify"]') as HTMLButtonElement
+    await fireEvent.click(verify())
+    await waitFor(() => expect(verify().getAttribute('data-state')).toBe('fail'))
+  })
+
+  it('deferred resources (linked repo / DB) render an honest "수동 확인", never call verify', async () => {
+    render(html`<${SettingsSurface} />`, container)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-ide"]') as HTMLElement)
+
+    const verify = container.querySelector('[data-testid="set-verify"]') as HTMLButtonElement
+    expect(verify.getAttribute('data-state')).toBe('deferred')
+    expect(verify.disabled).toBe(true)
+    expect(verify.textContent?.trim()).toBe('수동 확인')
+
+    await fireEvent.click(verify)
+    expect(apiMock.verifyResource).not.toHaveBeenCalled()
+    expect(verify.getAttribute('data-state')).toBe('deferred')
+  })
+
   it('runtime nodes section uses the resolved registry without sample targets', async () => {
     render(html`<${SettingsSurface} />`, container)
 
@@ -343,6 +410,7 @@ describe('SettingsSurface shell route', () => {
     apiMock.fetchLogs.mockReset()
     apiMock.fetchDashboardTools.mockReset()
     apiMock.fetchRuntimeDefaults.mockReset()
+    apiMock.verifyResource.mockReset()
     stubEmptyApi()
     dashboardLoading.value = false
     connected.value = true

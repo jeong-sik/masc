@@ -1,13 +1,23 @@
 // MASC Dashboard — Settings surface (keeper-v2 port)
 // Read surfaces (MCP exposed-tools list, system-log tail, runtime defaults /
-// model routing) are wired to live backend data. Write surfaces (Save changes,
-// VerifyBtn, expose/unexpose persistence) remain local-state stubs.
+// model routing) are wired to live backend data. VerifyBtn performs a real
+// read-only probe for MCP/Gate URLs (reachability) and the worktree basepath
+// (existence) via /api/v1/dashboard/verify-resource (RFC-0273 §3.4). DB and
+// linked-repo verification have no in-tree probe yet and render an honest
+// "수동 확인" placeholder (DeferredVerifyBtn) rather than a fabricated "✓".
+// Remaining write surfaces (Save changes, expose/unexpose persistence) are
+// still local-state stubs.
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { navigate } from '../router'
-import { fetchDashboardTools, fetchLogs, fetchRuntimeDefaults } from '../api/dashboard.js'
-import type { DashboardToolInventoryItem, LogEntry, RuntimeDefaultsResponse } from '../api/dashboard.js'
+import { fetchDashboardTools, fetchLogs, fetchRuntimeDefaults, verifyResource } from '../api/dashboard.js'
+import type {
+  DashboardToolInventoryItem,
+  LogEntry,
+  RuntimeDefaultsResponse,
+  VerifyResourceKind,
+} from '../api/dashboard.js'
 import type { ComponentChildren } from 'preact'
 
 type SectionId =
@@ -27,7 +37,7 @@ type SectionId =
   | 'notify'
   | 'display'
 
-type VerifyState = 'idle' | 'checking' | 'ok'
+type VerifyState = 'idle' | 'checking' | 'ok' | 'fail'
 type LogFilter = 'all' | 'tool' | 'success' | 'failure'
 
 const SET_SECTIONS: [SectionId, string, string][] = [
@@ -223,21 +233,63 @@ function SetSlider({
   `
 }
 
-function VerifyBtn({ label }: { label?: string }) {
+function VerifyBtn({ label, kind, value }: { label?: string; kind: VerifyResourceKind; value: string }) {
   const [st, setSt] = useState<VerifyState>('idle')
+  const [detail, setDetail] = useState('')
+  const onClick = (e: Event) => {
+    e.stopPropagation()
+    setSt('checking')
+    setDetail('')
+    void (async () => {
+      try {
+        const res = await verifyResource(kind, value)
+        setSt(res.ok ? 'ok' : 'fail')
+        setDetail(res.detail)
+      } catch (err) {
+        // A failed probe must surface as 'fail' — never silently land on 'ok'
+        // (that was the old setTimeout fake's defect).
+        setSt('fail')
+        setDetail(err instanceof Error ? err.message : '검증 실패')
+      }
+    })()
+  }
+  const text =
+    st === 'idle'
+      ? (label ?? '확인')
+      : st === 'checking'
+        ? '확인 중…'
+        : st === 'ok'
+          ? '✓ 정상'
+          : '✗ 실패'
   return html`
     <button
       type="button"
       class=${`set-verify ${st}`}
       data-state=${st}
       data-testid="set-verify"
-      onClick=${(e: Event) => {
-        e.stopPropagation()
-        setSt('checking')
-        window.setTimeout(() => setSt('ok'), 700)
-      }}
+      title=${detail}
+      onClick=${onClick}
     >
-      ${st === 'idle' ? (label ?? '확인') : st === 'checking' ? '확인 중…' : '✓ 정상'}
+      ${text}
+    </button>
+  `
+}
+
+// Honest placeholder for resources with no in-tree probe yet (Store/DB,
+// linked GitHub repo). Disabled — never fabricates a "✓ 정상" (RFC-0273 §3.4
+// defers these to a follow-up). Stateless, so no hooks: keeps VerifyBtn's hook
+// order unconditional.
+function DeferredVerifyBtn() {
+  return html`
+    <button
+      type="button"
+      class="set-verify deferred"
+      data-state="deferred"
+      data-testid="set-verify"
+      disabled
+      title="자동 검증 미지원 — 수동 확인 필요"
+    >
+      수동 확인
     </button>
   `
 }
@@ -593,7 +645,7 @@ export function SettingsSurface() {
                     value=${mcpUrl}
                     onInput=${(e: Event) => setMcpUrl((e.target as HTMLInputElement).value)}
                   />
-                  <${VerifyBtn} />
+                  <${VerifyBtn} kind="mcp_endpoint" value=${mcpUrl} />
                 </div>
               <//>
               <${SetRow} label="Transport" hint="transport">
@@ -851,7 +903,7 @@ export function SettingsSurface() {
                     value=${ideRepo}
                     onInput=${(e: Event) => setIdeRepo((e.target as HTMLInputElement).value)}
                   />
-                  <${VerifyBtn} label="Check repo" />
+                  <${DeferredVerifyBtn} />
                 </div>
               <//>
             `}
@@ -874,7 +926,7 @@ export function SettingsSurface() {
                     value=${gateBase}
                     onInput=${(e: Event) => setGateBase((e.target as HTMLInputElement).value)}
                   />
-                  <${VerifyBtn} />
+                  <${VerifyBtn} kind="gate_url" value=${gateBase} />
                 </div>
               <//>
               ${['Slack', 'Discord', 'Amplitude', 'GitHub'].map(g => html`
@@ -896,7 +948,7 @@ export function SettingsSurface() {
                     value=${mcpUrl}
                     onInput=${(e: Event) => setMcpUrl((e.target as HTMLInputElement).value)}
                   />
-                  <${VerifyBtn} />
+                  <${VerifyBtn} kind="mcp_endpoint" value=${mcpUrl} />
                 </div>
               <//>
               <${SetRow} label="Store (DB)" hint="trace·audit persistence">
@@ -906,7 +958,7 @@ export function SettingsSurface() {
                     value=${storeUrl}
                     onInput=${(e: Event) => setStoreUrl((e.target as HTMLInputElement).value)}
                   />
-                  <${VerifyBtn} />
+                  <${DeferredVerifyBtn} />
                 </div>
               <//>
               <${SetRow} label="Default worktree basepath" hint="keeper worktree root — e.g. ~/wt/<keeper>">
@@ -916,7 +968,7 @@ export function SettingsSurface() {
                     value=${wtBase}
                     onInput=${(e: Event) => setWtBase((e.target as HTMLInputElement).value)}
                   />
-                  <${VerifyBtn} label="Check path" />
+                  <${VerifyBtn} kind="worktree_path" value=${wtBase} label="Check path" />
                 </div>
               <//>
             `}

@@ -655,6 +655,15 @@
  (modules test_runtime_defaults_json)
  (libraries masc_test_deps))
 
+; RFC-0273 §3.4 — read-only verify-resource probe: typed kind parse, request
+; body parse, HTTP status classification (injected hook, no network), non-http
+; scheme rejection, filesystem existence, JSON envelope.
+
+(test
+ (name test_dashboard_verify_resource)
+ (modules test_dashboard_verify_resource)
+ (libraries masc_test_deps))
+
 ; RFC-0266: fusion async-completion wake — closed-sum classification +
 ; actionable pending_board_event delivery.
 

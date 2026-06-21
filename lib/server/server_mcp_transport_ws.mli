@@ -40,6 +40,7 @@
     Internal helpers stay private at this boundary
     ([sha1], [sessions_mutex], [slice_index] +
     [slice_index_*] family, [__test_*] hooks,
+    [inbound_message_handler],
     [log_ws_delivery_dropped], [send_frame_bytes] /
     [websocket_text_payload] / [send_text] /
     [bytes_cache] / [bytes_of_shared_text] /
@@ -252,6 +253,14 @@ val try_begin_inbound_dispatch : string -> inbound_dispatch_admission
 
 val finish_inbound_dispatch : ws_session -> unit
 (** Release a dispatch slot reserved by {!try_begin_inbound_dispatch}. *)
+
+val set_inbound_message_handler : (string -> string -> unit) -> unit
+(** Installs the MCP JSON-RPC dispatcher invoked for inbound WebSocket
+    text messages.  Bootstrap sets this once it has a live server state. *)
+
+val dispatch_inbound_message : string -> string -> unit
+(** Dispatches an inbound WebSocket message through the currently installed
+    handler.  Used by both standalone WS and same-origin [/ws] upgrade paths. *)
 
 val upgrade_connection :
   ?sw:Eio.Switch.t ->

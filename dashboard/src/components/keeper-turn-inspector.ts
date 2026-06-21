@@ -501,7 +501,7 @@ namespace      = n/a
 fsm.state      = n/a
 model          = ${record.model ?? 'n/a'}
 finish_reason  = ${record.finish_reason ?? 'n/a'}
-ctx.window     = ${ctxPct.toFixed(1)}%   (${tokIn.toLocaleString()} / 200,000 tok)
+ctx.window     = ${ctxPct.toFixed(1)}%   (${tokIn.toLocaleString()} / 200,000 tok, 가정)
 keeper.turn    = T${record.absolute_turn}
 thinking       = ${thinkingStateLabel(record)}
 thinking.budget= ${record.thinking_budget ?? '—'}
@@ -762,7 +762,7 @@ function TimelineTab({ t }: { t: TurnDetail }) {
             </div>
             <div class="kti-wf-track">
               <div
-                class="kti-wf-bar kti-k-${p.kind}"
+                class=${`kti-wf-bar kti-k-${p.kind}${p.durationSource === 'not_recorded' ? ' is-unmeasured' : ''}`}
                 title=${phaseDurationTitle(p)}
                 style=${{
                   left: `${(p.visualOffsetMs / t.visualTotalMs) * 100}%`,
@@ -993,13 +993,13 @@ function MetaTab({ record, t, source }: { record: TurnRecordEntry; t: TurnDetail
         <span class="k">fsm.state</span><span class="v">n/a</span>
         <span class="k">input tokens</span><span class="v">${t.tokIn.toLocaleString()}</span>
         <span class="k">output tokens</span><span class="v">${t.tokOut.toLocaleString()}</span>
-        <span class="k">ctx window</span><span class="v">${t.ctxPct.toFixed(1)}% / 200K</span>
+        <span class="k">ctx window · 200K 가정</span><span class="v">${t.ctxPct.toFixed(1)}% / 200K</span>
         <span class="k">keeper turn</span><span class="v">T${record.absolute_turn}</span>
         <span class="k">agent subturns</span><span class="v">${formatTurnList(uniqueNumbers(t.tools.map(tool => tool.agentSubturn)))}</span>
         <span class="k">thinking</span><span class="v">${thinkingStateLabel(record)}</span>
         <span class="k">tool calls</span><span class="v">${t.tools.length}</span>
         <span class="k">measured phase duration</span><span class="v">${t.measuredDurationMs != null ? formatMsCompact(t.measuredDurationMs) : 'none'}</span>
-        <span class="k">est. cost</span><span class="v">$${t.cost.toFixed(3)}</span>
+        <span class="k">est. cost · Claude 가격</span><span class="v">$${t.cost.toFixed(3)}</span>
         <span class="k">finish_reason</span><span class="v">${record.finish_reason ?? 'n/a'}</span>
         <span class="k">source</span><span class="v">${source}</span>
       </div>

@@ -648,7 +648,8 @@ export function CopilotDockFab({ dock }: { dock: CopilotDockApi }) {
       aria-label="Open Chat Dock"
       title="Chat Dock 열기 (⌘J)"
     >
-      <span class="spark"><${MessageCircle} size=${22} strokeWidth=${2.4} aria-hidden="true" /></span>
+      <span class="spark"><${MessageCircle} size=${20} strokeWidth=${2.4} aria-hidden="true" /></span>
+      <span class="dock-fab-label">Chat</span>
     </button>
   `
 }

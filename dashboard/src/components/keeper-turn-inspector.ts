@@ -492,7 +492,7 @@ function thinkingStateLabel(record: TurnRecordEntry): string {
 function thinkingChipLabel(record: TurnRecordEntry): string {
   if (record.enable_thinking === true) return 'on'
   if (record.enable_thinking === false) return 'off'
-  return 'unknown'
+  return '—'
 }
 
 function buildInjectedCtx(record: TurnRecordEntry, ctxPct: number, tokIn: number): string {
@@ -981,9 +981,10 @@ function MetaTab({ record, t, source }: { record: TurnRecordEntry; t: TurnDetail
       <div class="kti-sec-h"><h4>샘플링 파라미터</h4></div>
       <div class="kti-params">
         <span class="kti-param">temperature<b>${record.temperature ?? '—'}</b></span>
-        <span class="kti-param">top_p<b>0.95</b></span>
-        <span class="kti-param">max_tokens<b>4,096</b></span>
+        <span class="kti-param">top_p<b>${record.top_p ?? '—'}</b></span>
+        <span class="kti-param">max_tokens<b>${record.max_tokens?.toLocaleString() ?? '—'}</b></span>
         <span class="kti-param">thinking_budget<b>${record.thinking_budget ?? '—'}</b></span>
+        <span class="kti-param">enable_thinking<b>${thinkingChipLabel(record)}</b></span>
       </div>
       <div class="kti-sec-h" style=${{ marginTop: '16px' }}><h4>실행 메타데이터</h4></div>
       <div class="kti-kv">
@@ -1194,6 +1195,8 @@ function TurnRow({
       : null
   const sampling = [
     record.temperature != null ? `t=${record.temperature}` : null,
+    record.top_p != null ? `p=${record.top_p}` : null,
+    record.max_tokens != null ? `tok=${record.max_tokens}` : null,
     record.thinking_budget != null ? `think=${record.thinking_budget}` : null,
     record.enable_thinking === false ? 'no-think' : null,
   ].filter(Boolean)

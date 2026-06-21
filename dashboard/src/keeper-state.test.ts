@@ -252,6 +252,64 @@ describe('thread history merge & persistence', () => {
     expect(traceTextOf('hist-b')).toBe('second turn reasoning')
   })
 
+  it('observes trace cross when finalize order inverts append order (#21950, pre-R3)', () => {
+    // Reverse-finalize scenario: local-a is appended FIRST but finalizes
+    // LATER (ts=02); local-b is appended SECOND but finalizes EARLIER (ts=01).
+    // The server sends history chronological (earliest first): [hist-b(01), hist-a(02)].
+    //
+    // consumed Set still guarantees the 1:1 invariant — each local trace source
+    // is claimed at most once, so no row duplicates another row's trace. What
+    // it CANNOT guarantee is the *correct-row* mapping: mergeLocalAssistantTraceSteps
+    // matches by append order (appendThreadEntry push-to-end, keeper-state.ts:769)
+    // while server history is chronological, and finalize stamps `timestamp: new Date().toISOString()`
+    // at COMPLETION time (keeper-actions.ts:447 etc.), not append time. When those
+    // two orders diverge, the trace CROSSES.
+    //
+    // This is a known limitation tracked in #21950, NOT a regression: the
+    // pre-#21932 code duplicated the FIRST trace on BOTH rows (strictly worse).
+    // R3 server-minted id handshake will remove the role+text fallback and make
+    // the pairing deterministic — when it lands, flip the two `toBe` expectations
+    // below to the correct pairing (hist-a <-> 'turn-a reasoning', hist-b <-> 'turn-b').
+    appendThreadEntry('echo', entry({
+      id: 'local-a',
+      role: 'assistant',
+      text: 'done',
+      rawText: 'done',
+      delivery: 'delivered',
+      streamState: null,
+      timestamp: '2026-06-10T00:00:02.000Z', // appended first, finalized LATER
+    }))
+    appendThreadEntry('echo', entry({
+      id: 'local-b',
+      role: 'assistant',
+      text: 'done',
+      rawText: 'done',
+      delivery: 'delivered',
+      streamState: null,
+      timestamp: '2026-06-10T00:00:01.000Z', // appended second, finalized EARLIER
+    }))
+    appendAssistantThinkingDelta('echo', 'local-a', 'turn-a reasoning')
+    appendAssistantThinkingDelta('echo', 'local-b', 'turn-b reasoning')
+
+    mergeServerHistoryEntries('echo', [
+      entry({ id: 'hist-b', role: 'assistant', text: 'done', rawText: 'done', delivery: 'history', timestamp: '2026-06-10T00:00:01.000Z' }),
+      entry({ id: 'hist-a', role: 'assistant', text: 'done', rawText: 'done', delivery: 'history', timestamp: '2026-06-10T00:00:02.000Z' }),
+    ])
+
+    const thread = keeperThreads.value.echo ?? []
+    const traceTextOf = (id: string) => {
+      const step = thread.find(e => e.id === id)?.traceSteps?.[0]
+      return step && 'text' in step ? step.text : undefined
+    }
+    // 1:1 invariant holds even under inverted finalize order: each row carries
+    // a DISTINCT trace (no row duplicates the other).
+    expect(traceTextOf('hist-a')).not.toBe(traceTextOf('hist-b'))
+    // KNOWN CROSS (#21950): under inverted finalize order the pairing inverts.
+    // The correct pairing (hist-a <-> 'turn-a reasoning') is blocked pre-R3.
+    expect(traceTextOf('hist-a')).toBe('turn-b reasoning')
+    expect(traceTextOf('hist-b')).toBe('turn-a reasoning')
+  })
+
   it('keeps local entries the server has not persisted yet', () => {
     appendThreadEntry('echo', entry({ id: 'local-1', text: 'not yet saved' }))
 

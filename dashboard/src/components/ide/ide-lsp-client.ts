@@ -359,12 +359,13 @@ interface PendingRequest {
   reject: (reason: unknown) => void
 }
 
-class LspConnection {
+export class LspConnection {
   private ws: WebSocket | null = null
   private nextId = 1
   private pending = new Map<number, PendingRequest>()
   private disposed = false
   private initialized = false
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(
     private readonly onDiagnostics: (uri: string | undefined, diags: ReadonlyMap<number, LspDiagnostic[]>) => void,
@@ -373,13 +374,14 @@ class LspConnection {
 
   connect(): void {
     if (this.disposed) return
+    this.clearReconnectTimer()
     const origin = typeof window !== 'undefined' ? window.location.origin : DEFAULT_MASC_ORIGIN
     const wsUrl = origin.replace(/^http/, 'ws') + '/api/v1/ide/lsp'
     const ws = new WebSocket(wsUrl)
     this.ws = ws
 
     ws.onopen = () => {
-      if (this.disposed) { ws.close(); return }
+      if (this.disposed || this.ws !== ws) { ws.close(); return }
       this.initialize()
     }
 
@@ -392,10 +394,16 @@ class LspConnection {
       }
     }
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+      if (this.ws === ws) this.ws = null
       this.initialized = false
+      this.rejectPending(new Error(lspCloseReason(event)))
       if (!this.disposed) {
-        setTimeout(() => { if (!this.disposed) this.connect() }, 5000)
+        this.clearReconnectTimer()
+        this.reconnectTimer = setTimeout(() => {
+          this.reconnectTimer = null
+          if (!this.disposed) this.connect()
+        }, 5000)
       }
     }
 
@@ -441,7 +449,12 @@ class LspConnection {
       }
       const id = this.nextId++
       this.pending.set(id, { resolve, reject })
-      this.ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
+      try {
+        this.ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
+      } catch (err) {
+        this.pending.delete(id)
+        reject(err)
+      }
     })
   }
 
@@ -554,14 +567,25 @@ class LspConnection {
 
   dispose(): void {
     this.disposed = true
-    for (const [, { reject }] of this.pending) {
-      reject(new Error('Connection disposed'))
-    }
-    this.pending.clear()
+    this.clearReconnectTimer()
+    this.rejectPending(new Error('Connection disposed'))
     if (this.ws) {
       this.ws.close()
       this.ws = null
     }
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer === null) return
+    clearTimeout(this.reconnectTimer)
+    this.reconnectTimer = null
+  }
+
+  private rejectPending(reason: Error): void {
+    for (const [, { reject }] of this.pending) {
+      reject(reason)
+    }
+    this.pending.clear()
   }
 }
 
@@ -569,6 +593,12 @@ class LspConnection {
 
 function toFileUri(filePath: string): string {
   return `file://${filePath}`
+}
+
+function lspCloseReason(event: CloseEvent): string {
+  const code = event.code ? ` ${event.code}` : ''
+  const reason = event.reason ? `: ${event.reason}` : ''
+  return `WebSocket closed${code}${reason}`
 }
 
 export function resolveLspDiagnosticFilePath(

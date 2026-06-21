@@ -1,9 +1,62 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   clearLspDiagnosticSnapshot,
+  LspConnection,
   lspDiagnosticSnapshot,
   resolveLspDiagnosticFilePath,
 } from './ide-lsp-client'
+
+const mockSockets: MockWebSocket[] = []
+
+class MockWebSocket {
+  static CONNECTING = 0
+  static OPEN = 1
+  static CLOSING = 2
+  static CLOSED = 3
+
+  readyState = MockWebSocket.CONNECTING
+  sent: string[] = []
+  onopen: ((event: Event) => void) | null = null
+  onmessage: ((event: MessageEvent) => void) | null = null
+  onerror: ((event: Event) => void) | null = null
+  onclose: ((event: CloseEvent) => void) | null = null
+
+  constructor(readonly url: string) {
+    mockSockets.push(this)
+  }
+
+  send(data: string): void {
+    if (this.readyState !== MockWebSocket.OPEN) throw new Error('socket not open')
+    this.sent.push(data)
+  }
+
+  open(): void {
+    this.readyState = MockWebSocket.OPEN
+    this.onopen?.(new Event('open'))
+  }
+
+  close(event: Partial<Pick<CloseEvent, 'code' | 'reason' | 'wasClean'>> = {}): void {
+    if (this.readyState === MockWebSocket.CLOSED) return
+    this.readyState = MockWebSocket.CLOSED
+    this.onclose?.({
+      code: event.code ?? 1000,
+      reason: event.reason ?? '',
+      wasClean: event.wasClean ?? true,
+    } as CloseEvent)
+  }
+}
+
+function installWebSocketMock(): void {
+  mockSockets.length = 0
+  vi.stubGlobal('WebSocket', MockWebSocket)
+}
+
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+  lspDiagnosticSnapshot.value = new Map()
+  mockSockets.length = 0
+})
 
 describe('resolveLspDiagnosticFilePath', () => {
   afterEach(() => {
@@ -73,5 +126,37 @@ describe('clearLspDiagnosticSnapshot', () => {
 
     expect(lspDiagnosticSnapshot.value.has('lib/keeper/old.ml')).toBe(false)
     expect(lspDiagnosticSnapshot.value.get('lib/keeper/current.ml')).toHaveLength(1)
+  })
+})
+
+describe('LspConnection', () => {
+  it('settles pending requests when the socket closes', async () => {
+    installWebSocketMock()
+    const conn = new LspConnection(() => {}, () => {})
+    conn.connect()
+    const socket = mockSockets[0]!
+    socket.open()
+
+    const hover = conn.requestHover('lib/keeper/current.ml', 0, 0)
+    expect(socket.sent).toHaveLength(2)
+
+    socket.close({ code: 1011, reason: 'server restart', wasClean: false })
+
+    await expect(hover).resolves.toBeNull()
+    conn.dispose()
+  })
+
+  it('cancels scheduled reconnect when disposed', () => {
+    vi.useFakeTimers()
+    installWebSocketMock()
+    const conn = new LspConnection(() => {}, () => {})
+    conn.connect()
+    const socket = mockSockets[0]!
+
+    socket.close({ code: 1006, wasClean: false })
+    conn.dispose()
+    vi.advanceTimersByTime(5000)
+
+    expect(mockSockets).toHaveLength(1)
   })
 })

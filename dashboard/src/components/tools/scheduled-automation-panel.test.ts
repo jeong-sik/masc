@@ -469,6 +469,41 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.textContent).toContain('sched-run-smoke')
   })
 
+  it('uses explicit ready and terminal status matching', async () => {
+    const automation = sampleAutomation()
+    automation.requests = [
+      ...automation.requests,
+      {
+        ...automation.requests[1]!,
+        schedule_id: 'sched-not-ready',
+        status: 'scheduled',
+        effective_status: 'scheduled',
+        execution_readiness: 'not_ready',
+      },
+      {
+        ...automation.requests[1]!,
+        schedule_id: 'sched-canceled',
+        status: 'canceled',
+        effective_status: 'canceled',
+        execution_readiness: 'blocked_approval',
+      },
+    ]
+    render(html`<${ScheduledAutomationPanel} automation=${automation} />`, container)
+
+    const readyFilter = container.querySelector('[data-schedule-filter="ready"]') as HTMLButtonElement
+    readyFilter.click()
+    await Promise.resolve()
+
+    expect(container.querySelector('[data-schedule-id="sched-run-smoke"]')).not.toBeNull()
+    expect(container.querySelector('[data-schedule-id="sched-not-ready"]')).toBeNull()
+
+    const terminalFilter = container.querySelector('[data-schedule-filter="terminal"]') as HTMLButtonElement
+    terminalFilter.click()
+    await Promise.resolve()
+
+    expect(container.querySelector('[data-schedule-id="sched-canceled"]')).not.toBeNull()
+  })
+
   it('prefers durable schedule runner signals when present', async () => {
     const automation = sampleAutomation()
     automation.signal_source = 'schedule_runner_signals'

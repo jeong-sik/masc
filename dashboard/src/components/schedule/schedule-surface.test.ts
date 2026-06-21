@@ -142,6 +142,37 @@ describe('ScheduleSurface', () => {
     expect(container.querySelectorAll('[data-schedule-mutation]')).toHaveLength(0)
   })
 
+  it('merges sparse backend counts with materialized request statuses', async () => {
+    const automation = sampleAutomation()
+    automation.counts = { pending: 1, scheduled: 3, running: 1 }
+    automation.requests = [
+      {
+        ...automation.requests[0]!,
+        effective_status: undefined,
+        status: 'pending_approval',
+      },
+      {
+        ...automation.requests[0]!,
+        schedule_id: 'sched-awaiting',
+        effective_status: undefined,
+        status: 'awaiting_approval',
+      },
+    ]
+    mocks.toolsData.value = {
+      generated_at: '2026-06-21T00:00:00Z',
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+      scheduled_automation: automation,
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    const pendingKpi = Array.from(container.querySelectorAll('.ov-kpi'))
+      .find(element => element.textContent?.includes('pending'))
+    expect(pendingKpi?.textContent).toContain('2')
+  })
+
   it('surfaces projection load errors without hiding stale schedule data', async () => {
     mocks.toolsError.value = 'dashboard tools unavailable'
     mocks.toolsData.value = {

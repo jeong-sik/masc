@@ -40,8 +40,12 @@ function actorLabel(actor: DashboardScheduledAutomationActor | null | undefined)
   return kind ? `${actor.id} (${kind})` : actor.id
 }
 
-function normalized(value: string | null | undefined): string {
+export function normalizedScheduleStatus(value: string | null | undefined): string {
   return value?.trim().toLowerCase() ?? ''
+}
+
+function normalized(value: string | null | undefined): string {
+  return normalizedScheduleStatus(value)
 }
 
 function automationTone(status: string | null | undefined): StatusChipTone {
@@ -60,6 +64,7 @@ function automationTone(status: string | null | undefined): StatusChipTone {
     case 'failed':
     case 'rejected':
     case 'expired':
+    case 'canceled':
       return 'bad'
     case 'succeeded':
       return 'info'
@@ -106,11 +111,11 @@ function filterMatches(filter: ScheduleFilterKey, request: DashboardScheduledAut
     case 'due':
       return status === 'due' || status === 'due_pending_refresh' || status === 'blocked_approval'
     case 'ready':
-      return readiness === 'ready' || readiness === 'execution_ready' || readiness.includes('ready')
+      return ['ready', 'execution_ready'].includes(readiness)
     case 'scheduled':
       return status === 'scheduled' || status === 'running'
     case 'terminal':
-      return ['succeeded', 'failed', 'rejected', 'expired', 'cancelled'].includes(status)
+      return ['succeeded', 'failed', 'rejected', 'expired', 'cancelled', 'canceled'].includes(status)
     default:
       return true
   }

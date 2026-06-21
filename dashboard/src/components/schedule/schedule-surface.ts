@@ -6,10 +6,10 @@
 import { html } from 'htm/preact'
 import { RefreshCw } from 'lucide-preact'
 import { useEffect } from 'preact/hooks'
-import type { DashboardScheduledAutomation, DashboardScheduledAutomationRequest } from '../../api'
+import type { DashboardScheduledAutomation } from '../../api'
 import { formatDateTimeKo } from '../../lib/format-time'
 import { ErrorState, LoadingState } from '../common/feedback-state'
-import { ScheduledAutomationPanel } from '../tools/scheduled-automation-panel'
+import { ScheduledAutomationPanel, normalizedScheduleStatus } from '../tools/scheduled-automation-panel'
 import {
   loadTools,
   toolsData,
@@ -21,25 +21,17 @@ function countLabel(count: number): string {
   return count.toLocaleString()
 }
 
-function normalizedStatus(request: DashboardScheduledAutomationRequest): string {
-  return (request.effective_status ?? request.status ?? '').trim().toLowerCase()
-}
-
 function countByStatus(
   automation: DashboardScheduledAutomation | null,
   statuses: readonly string[],
 ): number {
   if (!automation) return 0
-  const normalizedStatuses = statuses.map(status => status.toLowerCase())
-  const hasCountKey = normalizedStatuses.some(status =>
-    Object.prototype.hasOwnProperty.call(automation.counts ?? {}, status),
-  )
-  if (hasCountKey) {
-    return normalizedStatuses.reduce((sum, status) => sum + (automation.counts?.[status] ?? 0), 0)
-  }
-  return (automation.requests ?? [])
-    .filter(request => normalizedStatuses.includes(normalizedStatus(request)))
+  const normalizedStatuses = statuses.map(normalizedScheduleStatus)
+  const fromCounts = normalizedStatuses.reduce((sum, status) => sum + (automation.counts?.[status] ?? 0), 0)
+  const fromRequests = (automation.requests ?? [])
+    .filter(request => normalizedStatuses.includes(normalizedScheduleStatus(request.effective_status ?? request.status)))
     .length
+  return Math.max(fromCounts, fromRequests)
 }
 
 export function ScheduleSurface() {

@@ -15,6 +15,7 @@ import { KeeperWorkspaceRecentTools } from './keeper-workspace-tool-calls'
 import { formatDuration } from '../../lib/format-time'
 import { callMcpTool } from '../../api/mcp'
 import { showToast } from '../common/toast'
+import { requestConfirm } from '../common/confirm-dialog'
 import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
 import { errorToString } from '../../lib/format-string'
 import { refreshAfterRuntimeAction } from '../keeper-detail-helpers'
@@ -123,6 +124,14 @@ function compactionGatePct(keeper: Keeper): number {
   return Math.max(1, Math.min(99, Math.round(ratio * 100)))
 }
 
+function compactRequiresForce(keeper: Keeper): boolean {
+  const phase = (keeper.phase ?? keeper.lifecycle_phase ?? '').toLowerCase()
+  if (phase === 'overflowed' || phase === 'paused' || phase === 'compacting') return false
+  if (phase === 'running' || phase === 'failing') return true
+  const status = keeper.status.toLowerCase()
+  return status === 'running' || status === 'active' || status === 'busy' || status === 'failing'
+}
+
 function ContextSection({ keeper }: { keeper: Keeper }): VNode {
   const [compacting, setCompacting] = useState(false)
   const pct = contextPercent(keeper)
@@ -153,11 +162,21 @@ function ContextSection({ keeper }: { keeper: Keeper }): VNode {
       return
     }
     void (async () => {
+      const force = compactRequiresForce(keeper)
+      if (force) {
+        const confirmed = await requestConfirm({
+          title: 'Force keeper compact',
+          message: `${keeper.name} is not in an explicit overflow/paused compaction phase. Run masc_keeper_compact with force=true?`,
+          confirmText: 'Force compact',
+          tone: 'warning',
+        })
+        if (!confirmed) return
+      }
       setCompacting(true)
       try {
         const raw = await callMcpTool('masc_keeper_compact', {
           name: keeper.name,
-          force: true,
+          force,
         })
         const parsed = JSON.parse(raw) as {
           before_tokens?: number

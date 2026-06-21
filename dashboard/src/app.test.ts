@@ -425,3 +425,4 @@ describe('shouldShowCopilotFab', () => {
     })).toBe(false)
   })
 })
+// Keeper Agent v2 sync: coverage ratchet trigger

@@ -48,6 +48,7 @@ import {
   railWidth,
 } from './keeper-workspace/keeper-workspace-pane-resize'
 import { ringFocusClasses } from './common/ring'
+import { tweaksRosterOpen, tweaksCtxOpen } from './tweaks-panel'
 
 const CLOSE_BUTTON_FOCUS_CLASS = ringFocusClasses({
   tone: 'accent-medium',
@@ -174,8 +175,14 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
   // the full tabbed KeeperDetailBody (FSM / 진단 / 정체성 / 설정 / 디버그).
   const [detailOpen, setDetailOpen] = useState(false)
   const [configOverlayKeeper, setConfigOverlayKeeper] = useState<string | null>(null)
-  const [rosterOpen, setRosterOpen] = useState(true)
-  const [railOpen, setRailOpen] = useState(true)
+  const rosterOpen = tweaksRosterOpen.value
+  const setRosterOpen = (v: boolean | ((prev: boolean) => boolean)) => {
+    tweaksRosterOpen.value = typeof v === 'function' ? v(tweaksRosterOpen.value) : v
+  }
+  const railOpen = tweaksCtxOpen.value
+  const setRailOpen = (v: boolean | ((prev: boolean) => boolean)) => {
+    tweaksCtxOpen.value = typeof v === 'function' ? v(tweaksCtxOpen.value) : v
+  }
   const isMobile = useMatchMedia(KW_MOBILE_QUERY)
   // <=1180px drops the rail column entirely (keeper-workspace.css), so the right
   // resizer must not render there even when railOpen is still toggled on.

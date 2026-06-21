@@ -1204,6 +1204,11 @@ let add_routes ~sw ~clock router =
                  Keeper_api.handle_keeper_checkpoints_post state req reqd body_str
                )
              ) request reqd
+       | Keeper_api.Keeper_post_runtime_assignment ->
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
+             (fun state _agent_name req reqd ->
+               Keeper_api.handle_keeper_runtime_assignment_post state req reqd
+             ) request reqd
        | Keeper_api.Keeper_post_directive ->
            with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state agent_name req reqd ->

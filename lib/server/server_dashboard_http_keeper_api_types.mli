@@ -20,6 +20,7 @@ val keeper_suffix_reset : string
 val keeper_suffix_clear : string
 val keeper_suffix_checkpoints : string
 val keeper_suffix_runtime_trace : string
+val keeper_suffix_runtime_assignment : string
 val keeper_suffix_directive : string
 val keeper_suffix_bdi_snapshot : string
 
@@ -31,6 +32,7 @@ type keeper_post_route_kind =
   | Keeper_post_reset
   | Keeper_post_clear
   | Keeper_post_checkpoints
+  | Keeper_post_runtime_assignment
   | Keeper_post_directive
   | Keeper_post_unknown
 (** Sub-route kind for a [POST /api/v1/keepers/<name>/...] path. *)

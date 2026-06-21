@@ -18,7 +18,14 @@ The v2 dashboard ships keeper-config and Settings panels whose **Save is a no-op
 | V2 keeper config tool-permission rows | generic `Record<string, boolean>` toggles, **not** keyed by `masc_*` tool names | `keeper-config-panel-v2.ts:111` (`Object.keys(perm)`) |
 | Keeper detail page | still imports the v1 config panel | `keeper-detail-page.ts:9` |
 
-The only existing keeper-config write path is `POST /api/v1/keepers/:name/tools` with a single stringly action `"set_policy"` that updates `tool_access`/`tool_denylist` and persists via `Keeper_meta_store.write_meta_with_merge` (CAS) (`lib/server/server_dashboard_http_keeper_api_post.ml:74-116`). There is **no** write path for persona, instructions, model/runtime assignment, or Settings runtime-defaults. `#21903` added a **read-only** resolved runtime-defaults endpoint; its write counterpart is absent.
+The only existing keeper-config write path is `POST /api/v1/keepers/:name/tools` with a single stringly action `"set_policy"` that updates `tool_access`/`tool_denylist` and persists via `Keeper_meta_store.write_meta_with_merge` (CAS) (`lib/server/server_dashboard_http_keeper_api_post.ml:74-116`). There is **no** write path for persona, instructions, or model/runtime assignment.
+
+For runtime.toml, the backend already has two reusable write surfaces:
+
+- `POST /api/v1/runtime/config/raw` (`lib/server/server_routes_http_routes_dashboard.ml:347-370`) — validates and saves raw runtime.toml text via `Runtime.save_config_text`, then reloads. This is the write counterpart of the read-only resolved runtime-defaults endpoint added by `#21903`.
+- `Runtime.set_runtime_id_for_keeper` (`lib/runtime/runtime.ml:666-685`) — validates, edits the `[[runtime.assignments]]` table atomically, and reloads.
+
+This RFC defines the dashboard-facing structured endpoints that reuse these existing functions, plus the Tier A keeper_meta write actions and panel reshape.
 
 This RFC defines the backend write paths + the panel reshape needed to make these Saves real, with the correct identity/host_config boundaries and operator-auth gating.
 
@@ -64,11 +71,30 @@ type keeper_config_action =
 
 ### 3.2 Tier B — runtime.toml writes (model/runtime assignment + Settings runtime-defaults)
 
-A new host_config write endpoint editing `runtime.toml`:
+Tier B reuses the existing runtime write surfaces instead of reimplementing them.
 
-- **Keeper→runtime assignment**: the v2 panel's model/runtime dropdowns set the keeper's runtime assignment (the routing *intent*, RFC-0038-runtime-routing-intent-preservation). Persisting must preserve the intent and not silently substitute (RFC-0001 det/nondet boundary).
-- **Settings runtime-defaults editor**: writes the default runtime id + model routing that `#21903` currently serves read-only.
-- Mechanics: parse current `runtime.toml` → apply a typed delta → `save_file_atomic` → `Runtime.reload` (re-populate the resolved singletons `#21903` reads). Concurrency: a write must not corrupt a config being read by in-flight keeper admission; reload is atomic at the singleton swap.
+#### 3.2.1 Keeper→runtime assignment
+
+A new structured dashboard endpoint `POST /api/v1/keepers/:name/runtime-assignment`:
+
+- Request body: `{ "runtime_id": "provider.model" }`.
+- Handler extracts the keeper name, validates `runtime_id`, and calls the existing `Runtime.set_runtime_id_for_keeper ~keeper_name:name ~runtime_id` (`lib/runtime/runtime.ml:666-685`).
+- `Runtime.set_runtime_id_for_keeper` already performs: TOML load → table edit → `Fs_compat.save_file_atomic` → validation → `init_default` reload.
+- Response: `{ "ok": true, "keeper_name": "...", "runtime_id": "..." }` on success; structured error on failure.
+- The v2 panel's model/runtime dropdowns use this endpoint to set the routing *intent* (RFC-0038-runtime-routing-intent-preservation). Unknown `runtime_id` is rejected without writing (fail-closed, RFC-0001).
+
+#### 3.2.2 Settings runtime-defaults editor
+
+The existing `POST /api/v1/runtime/config/raw` endpoint is reused for Settings "Save changes":
+
+- The Settings panel fetches the current resolved defaults via `GET /api/v1/dashboard/runtime-defaults` (#21903) and, when an operator edits them, posts the updated raw `runtime.toml` text to `POST /api/v1/runtime/config/raw`.
+- That endpoint validates via `Runtime.save_config_text` and atomically persists + reloads.
+- If the Settings UI needs a structured default-runtime editor later, it can be added as a thin wrapper over `Runtime.save_config_text` rather than a parallel parser/writer.
+
+#### 3.2.3 Concurrency and gating
+
+- `Runtime.set_runtime_id_for_keeper` and `Runtime.save_config_text` already use `Fs_compat.save_file_atomic` and `init_default` reload. The reload swaps the in-memory `Atomic.t` singletons, so in-flight keeper admission reads either the old or the new config, never a torn write.
+- Concurrent writes to `runtime.toml` from two operators are a risk that remains to be addressed (see §8 open question). A short-term mitigation is to document "last write wins" and require operator coordination; a follow-up may add file-level locking or a version/CAS field.
 - This is the highest-risk surface (global routing). It is gated stricter than Tier A (§3.3) and behind a feature flag for rollout (§7).
 
 ### 3.3 Auth / operator gating
@@ -89,7 +115,8 @@ Replace the fake `setTimeout` with a **read-only** verify endpoint that probes t
 
 - `#21903` resolved runtime-defaults read endpoint (the read counterpart of §3.2).
 - `Keeper_meta_store.write_meta_with_merge`, `Keeper_meta_merge.heartbeat_fields_from_disk` (CAS path, Tier A).
-- `Runtime.reload` / runtime.toml parser + `save_file_atomic` (Tier B).
+- `Runtime.set_runtime_id_for_keeper` and `Runtime.save_config_text` (existing Tier B write surfaces).
+- `Runtime.reload` / runtime.toml parser + `Fs_compat.save_file_atomic` (already used by the functions above).
 - RFC-0038-runtime-routing-intent-preservation (intent preservation on Tier B writes).
 - Operator-auth middleware from `#21898`.
 
@@ -97,7 +124,7 @@ Replace the fake `setTimeout` with a **read-only** verify endpoint that probes t
 
 - **Round-trip tests** per action: read → write (Set_persona/Set_instructions/Set_policy) → read returns the written value; CAS merge preserves heartbeat counters under a concurrent simulated turn write.
 - **Rejection tests**: unknown action → `Error`; `tool_access` with an unknown tool name → `Error` (not accepted); missing operator auth → `401`.
-- **Tier B**: runtime.toml write is atomic (no torn read), `Runtime.reload` re-resolves singletons, routing intent preserved (assigned runtime survives reload); rollback on parse failure.
+- **Tier B**: `POST /api/v1/keepers/:name/runtime-assignment` round-trip: write → `Runtime.runtime_id_for_keeper` returns the assigned id; unknown `runtime_id` returns error without writing; `POST /api/v1/runtime/config/raw` still validates, saves atomically, and reloads. Runtime.toml write is atomic (no torn read), `Runtime.reload` re-resolves singletons, routing intent preserved (assigned runtime survives reload); rollback on parse failure.
 - **TLA+ (optional)**: model runtime.toml write/reload vs in-flight keeper admission as a small concurrency spec (writer swaps singleton; reader never observes a partially-applied config) — bug-model per the TLA+ contract (clean: no torn read; buggy: `TornConfigRead` invariant violated).
 
 ## 7. Rollout & risk
@@ -109,4 +136,5 @@ Replace the fake `setTimeout` with a **read-only** verify endpoint that probes t
 ## 8. Open questions
 
 1. Tier B: should keeper→runtime assignment live in `runtime.toml` (current SSOT) or migrate to a typed host_config store? This RFC assumes runtime.toml (no migration); a follow-up may revisit.
-2. Should persona edits trigger re-derivation of persona-profile defaults (model fallback), or is persona purely descriptive once a runtime is assigned? Per §2.1 `persona ⊥ {model,runtime}`, this RFC treats persona as descriptive; assignment is explicit via Tier B.
+2. Concurrent `runtime.toml` writes: two operators editing assignments or defaults simultaneously can race. Should we add cross-process file locking, a version/CAS field, or serialize through a single writer fiber/process?
+3. Should persona edits trigger re-derivation of persona-profile defaults (model fallback), or is persona purely descriptive once a runtime is assigned? Per §2.1 `persona ⊥ {model,runtime}`, this RFC treats persona as descriptive; assignment is explicit via Tier B.

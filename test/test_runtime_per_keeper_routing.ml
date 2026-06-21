@@ -350,6 +350,23 @@ let test_runtime_id_tool_arg_is_not_removed_keeper_arg () =
     Alcotest.failf "runtime_id dashboard patch arg should be accepted: %s" msg
 ;;
 
+(* ---- dashboard runtime-assignment endpoint plumbing ---- *)
+
+let test_runtime_assignment_route_classification () =
+  let open Server_dashboard_http_keeper_api_types in
+  Alcotest.(check bool)
+    "/api/v1/keepers/:name/runtime-assignment is classified"
+    true
+    (classify_keeper_post_route "/api/v1/keepers/foo/runtime-assignment"
+     = Keeper_post_runtime_assignment);
+  Alcotest.(check string)
+    "keeper name is extracted from runtime-assignment path"
+    "foo"
+    (extract_keeper_name_for_post
+       "/api/v1/keepers/foo/runtime-assignment"
+       keeper_suffix_runtime_assignment)
+;;
+
 let test_undeclared_keeper_falls_to_default () =
   with_config_dir (fun _config_dir ->
     with_runtime_initialized (fun () ->
@@ -626,6 +643,10 @@ let () =
             "runtime_id API arg is not rejected as a removed keeper arg"
             `Quick
             test_runtime_id_tool_arg_is_not_removed_keeper_arg
+        ; Alcotest.test_case
+            "dashboard runtime-assignment route is classified and extracts name"
+            `Quick
+            test_runtime_assignment_route_classification
         ] )
     ; ( "driver lookup"
       , [ Alcotest.test_case

@@ -117,6 +117,46 @@ let handle_keeper_tools_post state req reqd =
            with Yojson.Json_error e ->
              respond_error reqd (Printf.sprintf "invalid json: %s" e)))
 
+(** Handle POST /api/v1/keepers/:name/runtime-assignment.
+    Structured wrapper around [Runtime.set_runtime_id_for_keeper] so the
+    dashboard v2 panel can assign a keeper to a runtime without reimplementing
+    runtime.toml parsing/editing/reload. *)
+let handle_keeper_runtime_assignment_post state req reqd =
+  Http.Request.read_body_async reqd (fun body_str ->
+    let req_path = Http.Request.path req in
+    let name =
+      extract_keeper_name_for_post req_path keeper_suffix_runtime_assignment
+    in
+    if String.length name = 0
+    then respond_error reqd "keeper name required"
+    else
+      let args =
+        try Ok (Yojson.Safe.from_string body_str) with
+        | Yojson.Json_error e -> Error (Printf.sprintf "invalid json: %s" e)
+      in
+      match args with
+      | Error msg -> respond_error reqd msg
+      | Ok args ->
+        let runtime_id = Safe_ops.json_string ~default:"" "runtime_id" args in
+        if String.length runtime_id = 0
+        then respond_error reqd "runtime_id required"
+        else
+          (match
+             Runtime.set_runtime_id_for_keeper ~keeper_name:name ~runtime_id ()
+           with
+           | Error msg -> respond_error ~status:`Bad_request reqd msg
+           | Ok () ->
+             Http.Response.json_value
+               ~compress:true
+               ~request:req
+               (`Assoc
+                  [
+                    ("ok", `Bool true)
+                  ; ("keeper_name", `String name)
+                  ; ("runtime_id", `String runtime_id)
+                  ])
+               reqd))
+
 (* Trajectory preview helpers moved to Server_dashboard_http_keeper_api_types. *)
 
 let stat_json_of_path = Checkpoints.stat_json_of_path

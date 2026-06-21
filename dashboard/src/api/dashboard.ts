@@ -291,8 +291,13 @@ export async function fetchFusionRuns(
   return parseFusionRunsResponse(raw)
 }
 
-export function fetchDashboardExecution(opts?: AbortableRequestOptions): Promise<DashboardExecutionResponse> {
-  return get('/api/v1/dashboard/execution', { signal: opts?.signal })
+type DashboardExecutionRequestOptions = AbortableRequestOptions & {
+  force?: boolean
+}
+
+export function fetchDashboardExecution(opts?: DashboardExecutionRequestOptions): Promise<DashboardExecutionResponse> {
+  const query = opts?.force ? '?force=1' : ''
+  return get(`/api/v1/dashboard/execution${query}`, { signal: opts?.signal })
 }
 
 export type DashboardExecutionTrustKeeper = Record<string, unknown> & {

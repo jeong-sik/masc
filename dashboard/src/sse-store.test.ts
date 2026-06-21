@@ -25,8 +25,8 @@ const boardOffset = signal(0)
 const namespaceTruth = signal<unknown>(null)
 const namespaceTruthError = signal<unknown>(null)
 
-const refreshDashboard = vi.fn<() => Promise<void>>(async () => {})
-const refreshExecution = vi.fn<() => Promise<void>>(async () => {})
+const refreshDashboard = vi.fn<(opts?: { force?: boolean }) => Promise<void>>(async () => {})
+const refreshExecution = vi.fn<(opts?: { force?: boolean }) => Promise<void>>(async () => {})
 const refreshBoard = vi.fn<() => void>(() => {})
 const refreshFusionRuns = vi.fn<() => void>(() => {})
 const invalidateDashboardCache = vi.fn<() => void>(() => {})
@@ -240,7 +240,7 @@ describe('setupSSEReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(refreshExecution).toHaveBeenCalledTimes(1)
-    expect(refreshExecution).toHaveBeenCalledWith()
+    expect(refreshExecution).toHaveBeenCalledWith({ force: true })
 
     cleanup()
   })
@@ -259,7 +259,25 @@ describe('setupSSEReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(refreshExecution).toHaveBeenCalledTimes(1)
+    expect(refreshExecution).toHaveBeenCalledWith({ force: true })
+
     cleanup()
+  })
+
+  it('forces execution refresh on keeper turn complete for live roster status', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'keepers', params: { keeper: 'qa-king' }, postId: null }
+
+    sseStore.routeServerPushEvent({
+      type: 'keeper_turn_complete',
+      name: 'qa-king',
+      turn: 42,
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshExecution).toHaveBeenCalledTimes(1)
+    expect(refreshExecution).toHaveBeenCalledWith({ force: true })
   })
 
   it('normalizes MASC broadcast aliases before route-scoped execution refresh', async () => {

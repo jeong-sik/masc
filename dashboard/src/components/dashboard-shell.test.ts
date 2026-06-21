@@ -2,9 +2,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
-import { DashboardHealthStrip, DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute, SideRail, summarizeAttentionPreview } from './dashboard-shell'
+import { ConnectionStatus, DashboardHealthStrip, DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute, SideRail, summarizeAttentionPreview } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
+import { dashboardWsConnected, dashboardWsLastError, dashboardWsReady, dashboardWsSseFallbackActive } from '../dashboard-ws-state'
 import { dashboardLoading } from '../store'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
 
@@ -73,6 +74,50 @@ describe('DashboardMain primary heading', () => {
         .toEqual(['운영 개요'])
     }, { timeout: 5000 })
     expect(container.querySelector('.v2-surface-header h1')).toBeNull()
+  })
+})
+
+describe('ConnectionStatus', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    connected.value = false
+    dashboardWsConnected.value = false
+    dashboardWsReady.value = false
+    dashboardWsSseFallbackActive.value = false
+    dashboardWsLastError.value = null
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    connected.value = false
+    dashboardWsConnected.value = false
+    dashboardWsReady.value = false
+    dashboardWsSseFallbackActive.value = false
+    dashboardWsLastError.value = null
+  })
+
+  it('uses WS readiness instead of the legacy SSE connected signal in WS-only mode', () => {
+    dashboardWsConnected.value = true
+    dashboardWsReady.value = true
+
+    render(h(ConnectionStatus, {}), container)
+
+    expect(container.textContent).toContain('Connected')
+    expect(container.textContent).not.toContain('Reconnecting')
+  })
+
+  it('shows handshaking instead of reconnecting while the WS hello is pending', () => {
+    dashboardWsConnected.value = true
+    dashboardWsReady.value = false
+
+    render(h(ConnectionStatus, {}), container)
+
+    expect(container.textContent).toContain('Connecting WS')
+    expect(container.textContent).not.toContain('Reconnecting')
   })
 })
 

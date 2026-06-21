@@ -18,7 +18,6 @@ import {
 import { parseWebSocketSseFrames } from './dashboard-ws-parse'
 import { clearStoredToken, setStoredToken } from './api/core'
 import {
-  DASHBOARD_WS_DISCOVERY_CACHE_MAX_FAILURES,
   DASHBOARD_WS_HEARTBEAT_INTERVAL_MS,
   DASHBOARD_WS_HEARTBEAT_RPC_TIMEOUT_MS,
   DASHBOARD_WS_RPC_TIMEOUT_MS,
@@ -107,11 +106,15 @@ function installControlledDiscovery(): Array<(response: Response) => void> {
   return resolvers
 }
 
-function wsDiscoveryResponse(wsUrl = 'ws://localhost:3000/ws'): Response {
+function wsDiscoveryResponse(
+  wsUrl: string | null = 'ws://localhost:3000/ws',
+  overrides: Record<string, unknown> = {},
+): Response {
   return new Response(JSON.stringify({
     enabled: true,
     listening: true,
     ws_url: wsUrl,
+    ...overrides,
   }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
@@ -417,6 +420,49 @@ describe('dashboard websocket route subscriptions', () => {
     expect(mockSockets).toHaveLength(1)
   })
 
+  it('prefers the current page origin when same-origin upgrade is advertised', async () => {
+    mockSockets.length = 0
+    vi.stubGlobal('WebSocket', MockWebSocket)
+    vi.stubGlobal('fetch', vi.fn(async () => wsDiscoveryResponse('ws://127.0.0.1:5173/ws', {
+      same_origin_upgrade_enabled: true,
+      same_origin_upgrade_path: '/ws',
+      same_origin_ws_url: 'ws://127.0.0.1:5173/ws',
+    })))
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+
+    expect(mockSockets).toHaveLength(1)
+    expect(mockSockets[0]!.url).toBe('ws://localhost:3000/ws')
+  })
+
+  it('derives the current-origin upgrade URL from same_origin_ws_url when the path is omitted', async () => {
+    mockSockets.length = 0
+    vi.stubGlobal('WebSocket', MockWebSocket)
+    vi.stubGlobal('fetch', vi.fn(async () => wsDiscoveryResponse('ws://127.0.0.1:5173/ws', {
+      same_origin_upgrade_enabled: true,
+      same_origin_ws_url: 'ws://127.0.0.1:5173/ws?transport=dashboard',
+    })))
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+
+    expect(mockSockets).toHaveLength(1)
+    expect(mockSockets[0]!.url).toBe('ws://localhost:3000/ws?transport=dashboard')
+  })
+
+  it('falls back to the advertised websocket URL when same-origin upgrade is disabled', async () => {
+    mockSockets.length = 0
+    vi.stubGlobal('WebSocket', MockWebSocket)
+    vi.stubGlobal('fetch', vi.fn(async () => wsDiscoveryResponse('ws://127.0.0.1:8937/', {
+      same_origin_upgrade_enabled: false,
+      same_origin_ws_url: 'ws://localhost:3000/ws',
+    })))
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+
+    expect(mockSockets).toHaveLength(1)
+    expect(mockSockets[0]!.url).toBe('ws://127.0.0.1:8937/')
+  })
+
   it('retries discovery when the server withholds ws_url for this host', async () => {
     vi.useFakeTimers()
     mockSockets.length = 0
@@ -531,7 +577,7 @@ describe('dashboard websocket route subscriptions', () => {
     expect(mockSockets[0]!.url).toBe('ws://localhost:3000/ws')
   })
 
-  it('invalidates cached discovery after repeated failures before it is ready', async () => {
+  it('does not cache websocket discovery before hello succeeds', async () => {
     vi.useFakeTimers()
     mockSockets.length = 0
     vi.stubGlobal('WebSocket', MockWebSocket)
@@ -545,23 +591,13 @@ describe('dashboard websocket route subscriptions', () => {
     expect(staleSocket.url).toBe('ws://localhost:3000/ws?stale')
     expect(fetchMock).toHaveBeenCalledTimes(1)
 
-    // The cache is only invalidated after a threshold of consecutive failures,
-    // so the first reconnects still reuse the cached stale URL.
-    for (let i = 0; i < DASHBOARD_WS_DISCOVERY_CACHE_MAX_FAILURES - 1; i += 1) {
-      mockSockets[mockSockets.length - 1]!.close({ code: 1006, reason: 'connect failed', wasClean: false })
-      await vi.advanceTimersByTimeAsync(60_000)
-      await flushPromises()
-      expect(fetchMock).toHaveBeenCalledTimes(1)
-    }
-
-    // The threshold failure clears the cache and falls back to /ws discovery.
-    mockSockets[mockSockets.length - 1]!.close({ code: 1006, reason: 'connect failed', wasClean: false })
+    staleSocket.close({ code: 1006, reason: 'connect failed', wasClean: false })
     await vi.advanceTimersByTimeAsync(60_000)
     await flushPromises()
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(mockSockets).toHaveLength(1 + DASHBOARD_WS_DISCOVERY_CACHE_MAX_FAILURES)
-    expect(mockSockets[DASHBOARD_WS_DISCOVERY_CACHE_MAX_FAILURES]!.url).toBe('ws://localhost:3000/ws?fresh')
+    expect(mockSockets).toHaveLength(2)
+    expect(mockSockets[1]!.url).toBe('ws://localhost:3000/ws?fresh')
   })
 
   it('stops reconnecting after a fatal policy violation close', async () => {
@@ -654,6 +690,7 @@ describe('dashboard websocket route subscriptions', () => {
 
     setStoredToken('fresh-token', { source: 'dev', actor: 'dashboard' })
     await flushPromises()
+    await flushPromises()
 
     expect(mockSockets).toHaveLength(2)
     const retry = mockSockets[1]!
@@ -675,6 +712,7 @@ describe('dashboard websocket route subscriptions', () => {
     expect(staleHello.params.token).toBe('stale-token')
 
     setStoredToken('fresh-token', { source: 'manual' })
+    await flushPromises()
     await flushPromises()
 
     expect(staleSocket.readyState).toBe(MockWebSocket.CLOSED)

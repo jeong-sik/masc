@@ -70,6 +70,13 @@ export function computeBeaconView(args: {
           : 'Client WS is degraded; SSE fallback is carrying events.',
       }
     }
+    if (args.connected && !args.ready) {
+      return {
+        state: 'yellow',
+        label: 'Client WS · handshaking',
+        title: 'Client WS socket is open; waiting for dashboard/hello before route events resume.',
+      }
+    }
     return {
       state: 'red',
       label: 'Client WS · disconnected',

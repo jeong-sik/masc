@@ -66,20 +66,11 @@
 }
 
 /* ── Component-level density tweaks from v2 source ────────────── */
-/* Chat console */
-.v2-app[data-density="spacious"] .v2-keeper-chat .chat-head    { padding: 18px 28px 16px; gap: 16px; }
-.v2-app[data-density="spacious"] .v2-keeper-chat .thread       { padding: 34px 0 14px; }
-.v2-app[data-density="spacious"] .v2-keeper-chat .thread-inner { gap: 30px; padding: 0 40px; }
-.v2-app[data-density="spacious"] .v2-keeper-chat .msg          { gap: 15px; }
-.v2-app[data-density="spacious"] .v2-keeper-chat .bubble       { padding: 17px 21px; line-height: 1.7; }
-.v2-app[data-density="spacious"] .v2-keeper-chat .composer     { padding: 16px 30px 22px; }
-.v2-app[data-density="spacious"] .v2-keeper-chat .ctx-scroll   { padding: 20px; gap: 22px; }
-.v2-app[data-density="spacious"] .v2-keeper-chat .ctx-card,
-.v2-app[data-density="spacious"] .v2-keeper-chat .tps-card      { padding: 14px 15px; }
-.v2-app[data-density="spacious"] .v2-keeper-chat .roster-head  { padding: 15px 14px; }
-.v2-app[data-density="spacious"] .v2-keeper-chat .roster-list  { padding: 9px 8px; }
-.v2-app[data-density="spacious"] .v2-keeper-chat .kp-row       { padding: 11px 11px; }
-.v2-app[data-density="spacious"] .v2-keeper-chat .roster-filters { padding: 12px 14px; }
+/* Chat-console density tweaks from the v2 source are omitted: the design scopes
+   them under a `.v2-keeper-chat` chat container the live dashboard never renders,
+   so every rule here matched nothing (dead). Re-adding them would require the live
+   chat element class names (e.g. `.chat-bubble`), not the design class names, and
+   pixel verification of the spacing — out of scope for this dead-CSS cleanup. */
 
 /* Board */
 .v2-app[data-density="spacious"] .bd-feed-head     { padding: 15px 24px; }
@@ -95,12 +86,8 @@
 .v2-app[data-density="spacious"] .set-row       { padding: 16px 0; }
 .v2-app[data-density="spacious"] .set-nav-item  { padding: 11px 13px; }
 
-/* Compact overrides */
-.v2-app[data-density="compact"] .v2-keeper-chat .thread        { padding: 14px 0 6px; }
-.v2-app[data-density="compact"] .v2-keeper-chat .thread-inner  { gap: 14px; padding: 0 22px; }
-.v2-app[data-density="compact"] .v2-keeper-chat .chat-head     { padding: 10px 16px 9px; }
-.v2-app[data-density="compact"] .v2-keeper-chat .composer      { padding: 9px 18px 12px; }
-.v2-app[data-density="compact"] .v2-keeper-chat .ctx-scroll    { padding: 11px; gap: 12px; }
+/* Compact overrides (dead `.v2-keeper-chat` chat rules dropped — see note above;
+   the board + settings density rules below stay live). */
 .v2-app[data-density="compact"] .bd-list       { padding: 11px 14px; gap: 8px; }
 .v2-app[data-density="compact"] .set-row       { padding: 10px 0; }
 

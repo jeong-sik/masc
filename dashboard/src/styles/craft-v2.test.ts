@@ -33,4 +33,12 @@ describe('craft-v2.css data-bubble=flat toggle', () => {
       /Selector not found/,
     )
   })
+
+  it('has no .v2-keeper-chat phantom-prefix rules (dead chat density removed)', () => {
+    // The design scoped chat density under a `.v2-keeper-chat` container the live
+    // dashboard never renders, so those ported rules were dead. Strip comments so
+    // the tombstone note does not count, then assert no selector reintroduces it.
+    const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, '')
+    expect(withoutComments).not.toContain('v2-keeper-chat')
+  })
 })

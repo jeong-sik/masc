@@ -2478,8 +2478,8 @@ function traceStepsSignature(entry: KeeperConversationEntry): string {
   const steps = entry.traceSteps
   if (!steps?.length) return ''
   return steps.map((step) => {
-    if (step.kind === 'think') return `think:${step.text.length}`
-    if (step.kind === 'reason') return `reason:${step.text.length}:${step.detail?.length ?? 0}`
+    if (step.kind === 'think') return `think:${step.text.length}:${step.ts ?? ''}`
+    if (step.kind === 'reason') return `reason:${step.text.length}:${step.detail?.length ?? 0}:${step.ts ?? ''}`
     return `tool:${step.name}:${step.status ?? ''}:${step.dur ?? ''}:${step.result?.length ?? 0}`
   }).join(',')
 }

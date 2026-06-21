@@ -73,6 +73,7 @@ const EMPTY_LOG_ENTRIES: LogEntry[] = []
 
 let moduleDebounceTimer: ReturnType<typeof setTimeout> | null = null
 let latestRequestId = 0
+let latestResetRequestId = 0
 
 function MetaTag({ children }: { children: unknown }) {
   return html`<${StatusChip} tone="neutral" uppercase=${false}>${children}</${StatusChip}>`
@@ -472,9 +473,9 @@ function providerLogOptionLabel(provider: ProviderLogCatalogEntry): string {
 }
 
 async function loadLogs(mode: LoadMode = 'reset') {
-  const requestId = ++latestRequestId
-
   if (mode === 'reset') {
+    ++latestRequestId
+    ++latestResetRequestId
     // A fresh load collapses the window back to one page and re-arms load-older.
     logWindowLimit.value = logLimit.value
     olderExhausted.value = false
@@ -497,13 +498,14 @@ async function loadLogs(mode: LoadMode = 'reset') {
   }
 
   if (mode === 'older') {
+    const resetRequestId = latestResetRequestId
     const s = logResource.state.value
     if (s.status !== 'loaded') return
-    const currentEntries = s.data.entries
-    if (currentEntries.length === 0 || loadingOlder.value || olderExhausted.value) return
-    const before = currentEntries.reduce(
+    const startingEntries = s.data.entries
+    if (startingEntries.length === 0 || loadingOlder.value || olderExhausted.value) return
+    const before = startingEntries.reduce(
       (min, entry) => Math.min(min, entry.seq),
-      currentEntries[0]?.seq ?? 0,
+      startingEntries[0]?.seq ?? 0,
     )
     if (before <= 0) {
       // seq 0 is the oldest entry the ring can hold — nothing older exists.
@@ -520,24 +522,26 @@ async function loadLogs(mode: LoadMode = 'reset') {
         category: categoryFilter.value || undefined,
         exclude_category: hideFsmTransitions.value ? 'fsm' : undefined,
       })
-      if (requestId !== latestRequestId) return
+      if (resetRequestId !== latestResetRequestId) return
       const incoming = sortLogEntries(resp.entries)
       const fresh = incoming.filter(entry => entry.seq < before)
       if (fresh.length === 0) {
         olderExhausted.value = true
         return
       }
+      const latestState = logResource.state.value
+      if (latestState.status !== 'loaded') return
       // Grow the window so the live delta below preserves these older entries.
       logWindowLimit.value += logLimit.value
-      const nextEntries = mergeLogEntries(currentEntries, fresh, logWindowLimit.value)
+      const nextEntries = mergeLogEntries(latestState.data.entries, fresh, logWindowLimit.value)
       // Older entries never change the newest seq → leave latestSeq untouched.
       logResource.state.value = loaded({
-        ...s.data,
+        ...latestState.data,
         entries: nextEntries,
         total: resp.total,
       })
     } catch {
-      if (requestId !== latestRequestId) return
+      if (resetRequestId !== latestResetRequestId) return
       // A failed older-load keeps the current view; the operator can retry.
     } finally {
       loadingOlder.value = false
@@ -546,6 +550,7 @@ async function loadLogs(mode: LoadMode = 'reset') {
   }
 
   // delta mode — update existing loaded data
+  const requestId = ++latestRequestId
   try {
     const resp = await fetchLogs({
       limit: logLimit.value,

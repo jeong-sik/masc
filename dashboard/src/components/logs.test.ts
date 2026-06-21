@@ -1,5 +1,5 @@
 import { h } from 'preact'
-import { cleanup, render, waitFor } from '@testing-library/preact'
+import { act, cleanup, render, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LogEntry } from '../api/dashboard'
 import { logDiagnosticCause, summarizeLogWindow } from './logs'
@@ -144,6 +144,7 @@ describe('log diagnostics', () => {
 
 describe('LogViewer Code links', () => {
   afterEach(() => {
+    vi.useRealTimers()
     cleanup()
     vi.clearAllMocks()
     vi.resetModules()
@@ -218,6 +219,64 @@ describe('LogViewer Code links', () => {
     await waitFor(() =>
       expect(fetchLogs).toHaveBeenCalledWith(expect.objectContaining({ before_seq: 99 })),
     )
+  })
+
+  it('preserves live delta entries while an older page is in flight', async () => {
+    vi.useFakeTimers()
+    let resolveOlder: (() => void) | null = null
+    const flush = async () => {
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+    }
+    const fetchLogs = vi.fn().mockImplementation((opts?: { before_seq?: number; since_seq?: number }) => {
+      if (typeof opts?.before_seq === 'number') {
+        return new Promise(resolve => {
+          resolveOlder = () => resolve({
+            total: 4,
+            entries: [entry({ seq: 98, message: 'older-98' })],
+          })
+        })
+      }
+      if (typeof opts?.since_seq === 'number') {
+        return Promise.resolve({
+          total: 4,
+          latest_seq: 101,
+          entries: [entry({ seq: 101, message: 'newest-101' })],
+        })
+      }
+      return Promise.resolve({
+        total: 4,
+        latest_seq: 100,
+        entries: [entry({ seq: 100, message: 'newest-100' }), entry({ seq: 99, message: 'newest-99' })],
+      })
+    })
+    const { LogViewer } = await loadLogs(fetchLogs)
+    const { container } = render(h(LogViewer, {}))
+
+    await flush()
+    const loadOlder = container.querySelector('[data-testid="logs-load-older"]') as HTMLButtonElement
+    expect(loadOlder).not.toBeNull()
+    await act(async () => {
+      loadOlder.click()
+      await Promise.resolve()
+    })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+    await flush()
+    expect(container.textContent).toContain('newest-101')
+
+    await act(async () => {
+      resolveOlder?.()
+      await Promise.resolve()
+    })
+    await flush()
+
+    expect(container.textContent).toContain('newest-101')
+    expect(container.textContent).toContain('older-98')
   })
 
   it('marks the load-older affordance exhausted when no older entries come back', async () => {

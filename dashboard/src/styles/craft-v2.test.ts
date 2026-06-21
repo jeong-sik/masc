@@ -42,3 +42,37 @@ describe('craft-v2.css data-bubble=flat toggle', () => {
     expect(withoutComments).not.toContain('v2-keeper-chat')
   })
 })
+
+describe('craft-v2.css density chat console (retargeted to live classes)', () => {
+  it('applies the spacious chat values to the live .kw-*/.chat-* classes', () => {
+    expect(declarationsForSelector(css, '.v2-app[data-density="spacious"] .kw-chat-head').padding)
+      .toBe('18px 28px 16px')
+    expect(declarationsForSelector(css, '.v2-app[data-density="spacious"] .chat-transcript').padding)
+      .toBe('34px 40px 14px')
+    const bubble = declarationsForSelector(css, '.v2-app[data-density="spacious"] .chat-bubble')
+    expect(bubble.padding).toBe('17px 21px')
+    expect(bubble['line-height']).toBe('1.7')
+    expect(declarationsForSelector(css, '.v2-app[data-density="spacious"] .kw-composer-inner').padding)
+      .toBe('16px 30px 22px')
+  })
+
+  it('applies the compact chat values to the live .kw-*/.chat-* classes', () => {
+    expect(declarationsForSelector(css, '.v2-app[data-density="compact"] .kw-chat-head').padding)
+      .toBe('10px 16px 9px')
+    expect(declarationsForSelector(css, '.v2-app[data-density="compact"] .chat-transcript').padding)
+      .toBe('14px 22px 6px')
+    expect(declarationsForSelector(css, '.v2-app[data-density="compact"] .kw-composer-inner').padding)
+      .toBe('9px 18px 12px')
+  })
+
+  it('does not target the design-only .thread / .bubble chat classes (regression guard)', () => {
+    // The live keeper workspace renders `.kw-thread` / `.chat-bubble`; the design
+    // class names `.thread` / `.bubble` never match, so a density rule on them is dead.
+    expect(() => declarationsForSelector(css, '.v2-app[data-density="spacious"] .thread')).toThrow(
+      /Selector not found/,
+    )
+    expect(() => declarationsForSelector(css, '.v2-app[data-density="spacious"] .bubble')).toThrow(
+      /Selector not found/,
+    )
+  })
+})

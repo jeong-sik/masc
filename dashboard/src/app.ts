@@ -70,6 +70,9 @@ import {
   tweaksFontScale,
   tweaksMotion,
   tweaksBubble,
+  tweaksTheme,
+  tweaksVolt,
+  tweaksThreadW,
 } from './components/tweaks-panel'
 
 // Sidebar collapsed state persists across reloads — a user who picks
@@ -310,6 +313,12 @@ export function App() {
     focusMode,
   })
 
+  // sync volt and theme to document root
+  useEffect(() => {
+    document.documentElement.setAttribute('data-volt', tweaksVolt.value)
+    document.documentElement.setAttribute('data-theme', tweaksTheme.value === 'paper' ? 'paper' : '')
+  }, [tweaksVolt.value, tweaksTheme.value])
+
   return html`
     <div
       class="v2-app flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--color-bg-page)] text-[var(--color-fg-primary)]"
@@ -321,8 +330,13 @@ export function App() {
       data-motion=${tweaksMotion.value}
       data-bubble=${tweaksBubble.value}
       data-font-scale=${tweaksFontScale.value}
+      data-theme=${tweaksTheme.value}
+      data-volt=${tweaksVolt.value}
       data-surface=${currentTab}
-      style=${{ '--twk-font-scale': String(tweaksFontScale.value) }}
+      style=${{
+        '--twk-font-scale': String(tweaksFontScale.value),
+        '--thread-w': `${tweaksThreadW.value}px`,
+      }}
     >
       <${SkipLink} />
       <header class="${compactChromeMode ? 'hidden' : 'relative v2-shell-header'} z-10 shrink-0 px-4 py-2">

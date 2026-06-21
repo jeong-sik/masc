@@ -397,11 +397,38 @@ let test_dashboard_briefing_keeper_tool_audit_uses_decision_log () =
       check bool "decision log still reports empty tool list" true
         ((brief |> member "latest_tool_names" |> to_list) = []))
 
+let make_message ~seq ~from_agent ~content : Types.message =
+  { seq;
+    from_agent;
+    msg_type = "broadcast";
+    content;
+    mention = None;
+    timestamp = "";
+    trace_context = None;
+    expires_at = None;
+    relevance = "medium" }
+
+(* Regression: a degenerate agent record with an empty/whitespace name must not
+   crash latest_message_to (String.get on an empty [lowered]). *)
+let test_latest_message_to_empty_name_safe () =
+  let msgs = [ make_message ~seq:1 ~from_agent:"alice" ~content:"hey @bob ping" ] in
+  (match Dashboard_briefing_agents.latest_message_to "" msgs with
+   | None -> ()
+   | Some _ -> Alcotest.fail "empty name must not match a mention");
+  (match Dashboard_briefing_agents.latest_message_to "   " msgs with
+   | None -> ()
+   | Some _ -> Alcotest.fail "whitespace name must not match a mention");
+  match Dashboard_briefing_agents.latest_message_to "bob" msgs with
+  | Some (m : Types.message) -> Alcotest.(check int) "matched seq" 1 m.seq
+  | None -> Alcotest.fail "expected @bob mention to match"
+
 let () =
   Alcotest.run "Dashboard Mission"
     [
       ( "read_model",
         [
+          Alcotest.test_case "latest_message_to tolerates empty agent name"
+            `Quick test_latest_message_to_empty_name_safe;
           Alcotest.test_case "projection groups root-cause lanes" `Quick
             test_dashboard_briefing_projection;
           Alcotest.test_case "http mission keeps full contract" `Quick

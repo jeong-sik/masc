@@ -111,6 +111,13 @@ type archived_agent_meta = {
 
 (** {1 Brief builder} *)
 
+val latest_message_to :
+  string -> Masc_domain.message list -> Masc_domain.message option
+(** [latest_message_to agent_name messages] returns the most recent message
+    that mentions [agent_name] and was not sent by it. Exposed for testing:
+    tolerates an empty/whitespace-only [agent_name] (returns [None] rather than
+    raising). *)
+
 val build_agent_briefs :
   Workspace.config ->
   session_context list ->

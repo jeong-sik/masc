@@ -464,9 +464,15 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
       (sanitize_name keeper_name) (Printexc.to_string exn)
 
 (* RFC-0223 P4: keeper-initiated message on one lane. A single
-   assistant line — there is no user turn to pair it with. *)
-let append_assistant_message ~base_dir ~keeper_name ~(content : string)
-    ?surface ?conversation_id ?audio ?blocks ?turn_ref () =
+   assistant line — there is no user turn to pair it with.
+
+   [append_assistant_message_result] surfaces a write failure as [Error msg] so
+   a caller bound by a no-silent-loss contract (e.g. {!Fusion_sink.emit}) can
+   propagate it. The failure is still counted + warn-logged here so callers that
+   use the unit wrapper below keep the existing swallow-and-count telemetry. *)
+let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
+    ?surface ?conversation_id ?audio ?blocks ?turn_ref () : (unit, string) result
+    =
   try
     ensure_dir_once ~base_dir;
     let redaction = redaction_for ~base_dir ~keeper_name in
@@ -476,7 +482,8 @@ let append_assistant_message ~base_dir ~keeper_name ~(content : string)
     let line =
       encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id ?audio ?blocks ?turn_ref ()
     in
-    Fs_compat.append_file path (line ^ "\n")
+    Fs_compat.append_file path (line ^ "\n");
+    Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -485,7 +492,18 @@ let append_assistant_message ~base_dir ~keeper_name ~(content : string)
       ~labels:[("operation", Keeper_chat_store_operation.(to_label Append))]
       ();
     Log.Keeper.warn "keeper_chat_store: assistant append failed for %s: %s"
-      (sanitize_name keeper_name) (Printexc.to_string exn)
+      (sanitize_name keeper_name) (Printexc.to_string exn);
+    Error (Printexc.to_string exn)
+
+(* Unit wrapper: existing callers keep the prior swallow-and-count behavior (the
+   failure is already counted + logged inside the [_result] variant). New callers
+   that must surface the failure call [append_assistant_message_result] directly. *)
+let append_assistant_message ~base_dir ~keeper_name ~(content : string)
+    ?surface ?conversation_id ?audio ?blocks ?turn_ref () =
+  ignore
+    (append_assistant_message_result ~base_dir ~keeper_name ~content ?surface
+       ?conversation_id ?audio ?blocks ?turn_ref ()
+      : (unit, string) result)
 
 (* RFC-0226: inbound user line recorded at delivery time, before (and
    independent of) any turn. A single user line — the assistant reply,

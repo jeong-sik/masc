@@ -237,6 +237,12 @@ function statusLabel(status: FusionRunStatus): string {
   }
 }
 
+function statusDotClass(status: FusionRunStatus): 'done' | 'deny' | 'run' {
+  if (status === 'complete') return 'done'
+  if (status === 'failed') return 'deny'
+  return 'run'
+}
+
 function compactText(value: string, max = 180): string {
   const normalized = value.replace(/\s+/g, ' ').trim()
   if (normalized.length <= max) return normalized
@@ -249,6 +255,36 @@ function FusionMetric({ label, value, tone = 'muted' }: { label: string; value: 
       <div class="fus-kpi-k">${label}</div>
       <div class="fus-kpi-v">${value}</div>
     </div>
+  `
+}
+
+function FusionStatusGlyph({ status }: { status: FusionRunStatus }) {
+  return html`<span class=${`fus-rdot ${statusDotClass(status)}`} aria-hidden="true"></span>`
+}
+
+function FusionPipelineStrip({ run }: { run: FusionRunView }) {
+  const panelFailures = run.panel.filter(entry => entry.status.toLowerCase().includes('fail')).length
+  const gateClass = run.status === 'failed' && run.panel.length === 0 ? 'deny' : 'gate'
+  const panelLabel = run.panel.length > 0 ? `panel ×${run.panel.length}` : 'panel pending'
+  const judgeLabel = run.judge.decision ?? run.judge.status ?? (run.status === 'running' ? 'judge pending' : 'judge')
+
+  return html`
+    <section class="fus-pipe" data-testid="fusion-pipe" aria-label="Fusion run pipeline">
+      <span class="fus-pipe-node kp">
+        <${FusionStatusGlyph} status=${run.status} />
+        keeper turn
+      </span>
+      <span class="fus-pipe-arr" aria-hidden="true">→</span>
+      <span class=${`fus-pipe-node ${gateClass}`}>gate</span>
+      <span class="fus-pipe-arr" aria-hidden="true">→</span>
+      <span class=${`fus-pipe-node panel ${panelFailures > 0 ? 'warn' : ''}`}>
+        ${panelLabel}${panelFailures > 0 ? ` · fail ${panelFailures}` : ''}
+      </span>
+      <span class="fus-pipe-arr" aria-hidden="true">→</span>
+      <span class=${`fus-pipe-node judge ${run.status === 'failed' ? 'deny' : ''}`}>${judgeLabel}</span>
+      <span class="fus-pipe-arr" aria-hidden="true">→</span>
+      <span class="fus-pipe-node sink">chat · board</span>
+    </section>
   `
 }
 
@@ -279,7 +315,10 @@ function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) 
       onClick=${() => replaceRoute('fusion', { run_id: run.runId })}
     >
       <span class="fus-row-top">
-        <span class="fus-run-id">${run.runId}</span>
+        <span class="fus-run-mark">
+          <${FusionStatusGlyph} status=${run.status} />
+          <span class="fus-run-id">${run.runId}</span>
+        </span>
         <span class=${`fus-status tone-${run.tone}`}>${statusLabel(run.status)}</span>
       </span>
       <span class="fus-row-question">${compactText(run.question, 110)}</span>
@@ -302,6 +341,7 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
       <header class="fus-detail-head">
         <div class="fus-detail-title">
           <div class="fus-detail-meta">
+            <${FusionStatusGlyph} status=${run.status} />
             <span class=${`fus-status tone-${run.tone}`}>${statusLabel(run.status)}</span>
             <span class="fus-run-id">${run.runId}</span>
             <${TimeAgo} timestamp=${run.updatedAt} mode="both" />
@@ -321,6 +361,8 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
           >Open board post</button>
         </div>
       </header>
+
+      <${FusionPipelineStrip} run=${run} />
 
       <section class="fus-question">
         <div class="fus-label">Prompt</div>
@@ -360,7 +402,7 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
       <section class="fus-sink">
         <div>
           <div class="fus-label">Sink</div>
-          <p>Board post ${run.boardPostId}</p>
+          <p>chat · board · post ${run.boardPostId}</p>
         </div>
         <${AgentAvatar} name=${run.keeperName} size="sm" />
       </section>

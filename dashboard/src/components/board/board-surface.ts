@@ -260,7 +260,7 @@ function BoardSummary() {
   const visibleCount = grouped.groups.reduce((sum, g) => sum + g.posts.length, 0)
   const metrics = boardLatencyMetrics.value
   return html`
-    <div class="v2-workspace-panel ss-card mx-6 flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 text-xs text-text-secondary">
+    <div class="bd-summary v2-workspace-panel ss-card mx-6 flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 text-xs text-text-secondary" data-testid="bd-summary">
       <span class="font-semibold text-text-primary tabular-nums text-md">${visibleCount}</span>
       <span>개 표시 중</span>
       ${grouped.groups.map(g => {

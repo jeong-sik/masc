@@ -124,6 +124,9 @@ describe('FleetHealthPanel', () => {
   it('renders the compact Tool Monitor operations board when no view param', () => {
     render(html`<${FleetHealthPanel} />`)
 
+    expect(screen.getByTestId('fleet-command-strip')).toBeTruthy()
+    expect(screen.getByText('Keeper Fleet')).toBeTruthy()
+    expect(screen.getByText('런타임 unknown')).toBeTruthy()
     expect(screen.getByTestId('tool-monitor-default')).toBeTruthy()
     expect(screen.getByText('Keeper tool readiness')).toBeTruthy()
     expect(screen.getAllByText('m:board_post').length).toBeGreaterThan(0)
@@ -235,6 +238,12 @@ describe('FleetHealthPanel', () => {
     render(html`<${FleetHealthPanel} />`)
 
     expect(storeMock.refreshShell).toHaveBeenCalledWith({ force: true })
+    expect(screen.getByTestId('fleet-command-strip')).toBeTruthy()
+    expect(screen.getByText('런타임 가동')).toBeTruthy()
+    expect(screen.getByText('capacity 8/17')).toBeTruthy()
+    expect(screen.getByText('exec 13')).toBeTruthy()
+    expect(screen.getByText('일시정지 3')).toBeTruthy()
+    expect(screen.getByText('CDAL proof_store_incomplete')).toBeTruthy()
     expect(screen.getByTestId('runtime-blocker-board')).toBeTruthy()
     expect(screen.getByText('8/17')).toBeTruthy()
     expect(screen.getByText('analyst')).toBeTruthy()

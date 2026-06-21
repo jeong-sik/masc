@@ -212,6 +212,37 @@
   line-height: 1.35;
 }
 
+.v2-fusion-surface .fus-run-mark {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 7px;
+}
+
+.v2-fusion-surface .fus-rdot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--fus-muted);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fus-muted) 14%, transparent);
+}
+
+.v2-fusion-surface .fus-rdot.done {
+  background: var(--ok-fg);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok-fg) 16%, transparent);
+}
+
+.v2-fusion-surface .fus-rdot.deny {
+  background: var(--bad-light);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad-light) 16%, transparent);
+}
+
+.v2-fusion-surface .fus-rdot.run {
+  background: var(--warn-fg);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn-fg) 16%, transparent);
+}
+
 .v2-fusion-surface .fus-status,
 .v2-fusion-surface .fus-mini-status {
   border: 1px solid var(--fus-line);
@@ -276,6 +307,78 @@
   font-weight: 780;
   line-height: 1.12;
   margin: 8px 0 0;
+}
+
+.v2-fusion-surface .fus-pipe {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  border: 1px solid var(--fus-line);
+  border-radius: var(--r-3);
+  background: var(--fus-panel-strong);
+  padding: 12px;
+}
+
+.v2-fusion-surface .fus-pipe-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  border: 1px solid var(--fus-line);
+  border-radius: var(--r-1);
+  background: var(--color-bg-surface);
+  color: var(--fus-text);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0 9px;
+  text-transform: uppercase;
+}
+
+.v2-fusion-surface .fus-pipe-node.kp {
+  border-color: color-mix(in srgb, var(--volt-strong) 34%, transparent);
+  background: var(--volt-wash);
+  color: var(--volt-strong);
+}
+
+.v2-fusion-surface .fus-pipe-node.gate {
+  border-color: var(--ok-border);
+  background: var(--ok-soft);
+  color: var(--ok-fg);
+}
+
+.v2-fusion-surface .fus-pipe-node.panel {
+  border-color: color-mix(in srgb, var(--volt-strong) 26%, var(--fus-line));
+}
+
+.v2-fusion-surface .fus-pipe-node.judge {
+  border-color: var(--warn-border);
+  background: var(--warn-soft);
+  color: var(--warn-fg);
+}
+
+.v2-fusion-surface .fus-pipe-node.sink {
+  border-color: var(--ok-border);
+  background: color-mix(in srgb, var(--ok-soft) 68%, var(--fus-panel-strong));
+  color: var(--ok-fg);
+}
+
+.v2-fusion-surface .fus-pipe-node.warn {
+  border-color: var(--warn-border);
+  color: var(--warn-fg);
+}
+
+.v2-fusion-surface .fus-pipe-node.deny {
+  border-color: var(--bad-30);
+  background: var(--bad-10);
+  color: var(--bad-light);
+}
+
+.v2-fusion-surface .fus-pipe-arr {
+  color: var(--fus-muted);
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .v2-fusion-surface .fus-actions {

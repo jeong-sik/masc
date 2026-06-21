@@ -122,16 +122,19 @@ describe('Work', () => {
       tasks.value = [
         { id: 'J-1', title: 'Job one', goal_id: 'G-1', status: 'done' },
         { id: 'J-2', title: 'Job two', goal_id: 'G-1', status: 'in_progress' },
-        { id: 'J-3', title: 'Job three', goal_id: 'G-2', status: 'cancelled' },
+        { id: 'J-3', title: 'Job three', goal_id: 'G-2', status: 'awaiting_verification' },
+        { id: 'J-4', title: 'Job four', goal_id: 'G-2', status: 'cancelled' },
       ]
 
       render(html`<${Work} />`)
 
       expect(screen.getByTestId('kpi-goals').textContent).toBe('2')
-      expect(screen.getByTestId('kpi-jobs').textContent).toBe('3')
-      expect(screen.getByTestId('kpi-done').textContent).toBe('1')
-      expect(screen.getByTestId('kpi-blocked').textContent).toBe('1')
-      expect(screen.getByText(/Goal → job → keeper/).textContent).toContain('누르면')
+      expect(screen.getByTestId('kpi-jobs').textContent).toBe('4')
+      expect(screen.getByTestId('kpi-wip').textContent).toBe('1')
+      expect(screen.getByTestId('kpi-verify').textContent).toBe('1')
+      expect(screen.getByTestId('kpi-backlog').textContent).toBe('0')
+      expect(screen.getByText(/Goal → Task → keeper/).textContent).toContain('누르면')
+      expect(screen.getAllByTestId('work-horizon').map(section => section.getAttribute('data-horizon'))).toEqual(['short', 'mid'])
     })
 
     it('renders a collapsed goal card per goal and expands on click', () => {
@@ -171,6 +174,7 @@ describe('Work', () => {
 
       const row = screen.getByTestId('job-row')
       expect(row).toBeTruthy()
+      expect(row.classList.contains('wk-task')).toBe(true)
       expect(screen.getByText('Blocked job')).toBeTruthy()
       expect(screen.getByTestId('job-blocker').textContent).toContain('dependency missing')
     })
@@ -211,11 +215,14 @@ describe('Work', () => {
 
       // KPI counts every task regardless of goal linkage.
       expect(screen.getByTestId('kpi-jobs').textContent).toBe('3')
+      expect(screen.getByTestId('kpi-backlog').textContent).toBe('2')
 
       const unassigned = screen.getByTestId('work-unassigned')
       expect(unassigned).toBeTruthy()
-      expect(unassigned.textContent).toContain('미배정 작업')
+      expect(unassigned).toHaveClass('wk-backlog')
+      expect(unassigned.textContent).toContain('클레임 가능 백로그')
       expect(unassigned.textContent).toContain('(2)')
+      expect(unassigned.querySelector('.wk-task-claim')).toBeTruthy()
       expect(screen.getByText('Orphan job')).toBeTruthy()
       expect(screen.getByText('Another orphan')).toBeTruthy()
     })

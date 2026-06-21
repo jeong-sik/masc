@@ -1,4 +1,4 @@
-/* MASC Dashboard — Work surface v2 (keeper-v2 goal/job layout).
+/* MASC Dashboard — Work surface v2 (keeper-v2 goal/task layout).
  *
  * Ported from keeper-v2/styles/v2.css .wk-* rules. The design's raw
  * palette vars (--bg-deep, --volt, --text-mid …) are bridged through
@@ -71,10 +71,14 @@
   color: var(--status-bad);
 }
 
+.wk-ver-n {
+  color: var(--status-warn);
+}
+
 /* ── KPI strip ────────────────────────────────────────────────────────────── */
 .wk-kpis {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 1px;
   background: var(--border-soft);
   overflow: hidden;
@@ -106,7 +110,47 @@
 .wk-kpi-v.warn { color: var(--status-warn); }
 .wk-kpi-v.volt { color: var(--volt-strong); }
 
-/* ── Goal list ────────────────────────────────────────────────────────────── */
+/* ── Horizon / Goal list ──────────────────────────────────────────────────── */
+.wk-horizons {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 4px;
+}
+
+.wk-horizon {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.wk-hz-head {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  min-height: 22px;
+  padding: 0 2px;
+}
+
+.wk-hz-lbl {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-bright);
+}
+
+.wk-hz-sub {
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.wk-hz-n {
+  font-size: 11px;
+  color: var(--text-mid);
+}
+
 .wk-list {
   display: flex;
   flex-direction: column;
@@ -175,6 +219,29 @@
   color: var(--text-dim);
 }
 
+.wk-gstatus,
+.wk-approval {
+  flex: none;
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-soft);
+}
+
+.wk-gstatus {
+  color: var(--text-mid);
+  background: color-mix(in oklab, var(--bg-sunken) 70%, transparent);
+}
+
+.wk-approval {
+  color: var(--status-warn);
+  border-color: color-mix(in oklab, var(--status-warn) 36%, transparent);
+  background: color-mix(in oklab, var(--status-warn) 10%, transparent);
+}
+
 .wk-goal-id {
   flex: none;
   font-size: 11.5px;
@@ -241,6 +308,7 @@
 }
 
 .wk-seg.done { background: var(--status-ok); }
+.wk-seg.verify { background: var(--status-warn); }
 .wk-seg.wip { background: var(--volt); }
 .wk-seg.blocked { background: var(--status-bad); }
 
@@ -277,13 +345,18 @@
   margin-bottom: 7px;
 }
 
-/* Unassigned jobs: tasks with no goal_id, surfaced below the goal cards. */
+/* Claimable backlog: tasks with no goal_id, surfaced below the goal cards. */
 .wk-unassigned {
   /* Background/border/radius/shadow come from the .ss-card utility. */
   overflow: hidden;
 }
 
-.wk-unassigned-h {
+.wk-backlog {
+  border-color: color-mix(in oklab, var(--status-warn) 18%, var(--border-main));
+}
+
+.wk-unassigned-h,
+.wk-backlog-h {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -306,19 +379,30 @@
   color: var(--text-dim);
 }
 
-.wk-job {
+.wk-job,
+.wk-task {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 5px;
   padding: 7px 8px;
   border-radius: var(--radius-xs);
 }
 
-.wk-job:hover {
+.wk-job:hover,
+.wk-task:hover {
   background: var(--bg-sunken);
 }
 
-.wk-job-dot {
+.wk-task-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+.wk-job-dot,
+.wk-task-dot {
   flex: none;
   width: 7px;
   height: 7px;
@@ -326,12 +410,17 @@
   background: var(--text-dim);
 }
 
-.wk-job-dot.done { background: var(--status-ok); }
-.wk-job-dot.wip { background: var(--volt); }
-.wk-job-dot.review { background: var(--status-warn); }
-.wk-job-dot.blocked { background: var(--status-bad); }
+.wk-job-dot.done,
+.wk-task-dot.done { background: var(--status-ok); }
+.wk-job-dot.wip,
+.wk-task-dot.wip { background: var(--volt); }
+.wk-job-dot.review,
+.wk-task-dot.review { background: var(--status-warn); }
+.wk-job-dot.blocked,
+.wk-task-dot.blocked { background: var(--status-bad); }
 
-.wk-job-id {
+.wk-job-id,
+.wk-task-id {
   flex: none;
   font-size: 11px;
   color: var(--text-dim);
@@ -339,7 +428,8 @@
   font-family: var(--font-mono);
 }
 
-.wk-job-title {
+.wk-job-title,
+.wk-task-title {
   font-size: 13px;
   color: var(--text-primary);
   display: flex;
@@ -348,16 +438,19 @@
   flex-wrap: wrap;
 }
 
-.wk-job.done .wk-job-title {
+.wk-job.done .wk-job-title,
+.wk-task.done .wk-task-title {
   color: var(--text-mid);
 }
 
-.wk-job-block {
+.wk-job-block,
+.wk-task-block {
   font-size: 11px;
   color: var(--status-bad);
 }
 
-.wk-job-state {
+.wk-job-state,
+.wk-task-state {
   flex: none;
   font-family: var(--font-ui);
   font-size: 10px;
@@ -365,12 +458,17 @@
   color: var(--text-dim);
 }
 
-.wk-job-state.done { color: var(--status-ok); }
-.wk-job-state.wip { color: var(--volt-strong); }
-.wk-job-state.review { color: var(--status-warn); }
-.wk-job-state.blocked { color: var(--status-bad); }
+.wk-job-state.done,
+.wk-task-state.done { color: var(--status-ok); }
+.wk-job-state.wip,
+.wk-task-state.wip { color: var(--volt-strong); }
+.wk-job-state.review,
+.wk-task-state.review { color: var(--status-warn); }
+.wk-job-state.blocked,
+.wk-task-state.blocked { color: var(--status-bad); }
 
-.wk-job-kp {
+.wk-job-kp,
+.wk-task-kp {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -389,18 +487,21 @@
   font: inherit;
 }
 
-.wk-job-kp:hover {
+.wk-job-kp:hover,
+.wk-task-kp:hover {
   border-color: var(--border-highlight);
   color: var(--text-bright);
 }
 
-.wk-job-kp.none {
+.wk-job-kp.none,
+.wk-task-kp.none {
   color: var(--text-dim);
   cursor: default;
 }
 
 /* RFC-0267 Phase 2: per-row "assign to goal" control on unassigned tasks. */
-.wk-job-assign {
+.wk-job-assign,
+.wk-task-claim {
   flex: none;
   max-width: 11rem;
   padding: 2px 8px;
@@ -414,9 +515,56 @@
   transition: border-color 0.15s ease, color 0.15s ease;
 }
 
-.wk-job-assign:hover {
+.wk-job-assign:hover,
+.wk-task-claim:hover {
   border-color: var(--volt-strong);
   color: var(--text-bright);
+}
+
+.wk-gate,
+.wk-handoff {
+  width: calc(100% - 24px);
+  margin-left: 24px;
+}
+
+.wk-gate {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wk-gate-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 7px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-soft);
+  color: var(--text-mid);
+  font-size: 10.5px;
+  line-height: 1.3;
+}
+
+.wk-gate-row.satisfied {
+  color: var(--status-ok);
+  border-color: color-mix(in oklab, var(--status-ok) 30%, transparent);
+}
+
+.wk-gate-row.missing {
+  color: var(--status-warn);
+  border-color: color-mix(in oklab, var(--status-warn) 30%, transparent);
+}
+
+.wk-gate-row.failed {
+  color: var(--status-bad);
+  border-color: color-mix(in oklab, var(--status-bad) 30%, transparent);
+}
+
+.wk-handoff {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  line-height: 1.45;
 }
 
 /* ── Footer / new goal button ─────────────────────────────────────────────── */

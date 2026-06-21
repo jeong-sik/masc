@@ -115,6 +115,10 @@ describe('FusionSurface', () => {
     expect(container.textContent).toContain('Ship canary first, then expand.')
     expect(container.textContent).toContain('1,300')
     expect(container.textContent).toContain('360')
+    expect(container.querySelector('[data-testid="fusion-pipe"]')).not.toBeNull()
+    expect(container.querySelector('.fus-rdot.done')).not.toBeNull()
+    expect(container.textContent).toContain('panel ×2')
+    expect(container.textContent).toContain('chat · board')
   })
 
   it('calls ringFocusClasses() for focus rings instead of stringifying the function', () => {

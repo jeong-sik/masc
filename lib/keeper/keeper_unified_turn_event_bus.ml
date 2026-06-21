@@ -33,9 +33,10 @@ type t =
   ; event_bus_sub : Agent_sdk_metrics_bridge.handle option
   ; drain_cancel : drain_cancel_state Atomic.t
   ; state : event_bus_state Atomic.t
+  ; on_pending_count_change : int -> unit
   }
 
-let create ~keeper_name ~turn_id () =
+let create ?(on_pending_count_change = fun _ -> ()) ~keeper_name ~turn_id () =
   let event_bus_sub =
     match Keeper_event_bus.get () with
     | Some bus ->
@@ -56,6 +57,7 @@ let create ~keeper_name ~turn_id () =
         ; tracker = Keeper_unified_turn_types.create_turn_tool_event_tracker ()
         ; pending_tool_count = 0
         }
+  ; on_pending_count_change
   }
 ;;
 
@@ -173,6 +175,11 @@ let drain ?(site = "unspecified") t =
            ~turn_id:t.turn_id
            ~pending_count:new_state.pending_tool_count)
         transitions;
+      (* Mirror the in-flight count to the registry only when it moved, so the
+         supervisor sweep can exclude active tool execution (RFC-0197 P1-4a).
+         The count is the authoritative FSM value, not a re-derived counter. *)
+      if old.pending_tool_count <> new_state.pending_tool_count
+      then t.on_pending_count_change new_state.pending_tool_count;
       new_summary)
     else update ()
   in

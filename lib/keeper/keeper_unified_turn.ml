@@ -369,6 +369,14 @@ let run_keeper_cycle
                in
                let turn_event_bus_state =
                  Keeper_unified_turn_event_bus.create
+                 (* RFC-0197 P1-4a: mirror the in-flight tool count into the
+                    live turn_observation so the supervisor sweep excludes
+                    active tool execution from the no-progress window. *)
+                   ~on_pending_count_change:(fun count ->
+                     Keeper_registry.record_turn_tool_inflight
+                       ~base_path:config.base_path
+                       meta.name
+                       ~count)
                    ~keeper_name:meta.name
                    ~turn_id:keeper_turn_id
                    ()

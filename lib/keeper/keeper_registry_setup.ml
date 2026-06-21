@@ -440,6 +440,7 @@ let mark_turn_started ~base_path name =
       ; started_at = now
       ; last_progress_at = now
       ; last_progress_kind = Some "turn_started"
+      ; active_tool_count = 0
       ; turn_phase = Packed Turn_prompting
       ; decision_stage = Packed Decision_undecided
       ; measurement = None
@@ -459,6 +460,20 @@ let record_turn_progress ~base_path name ~event_kind =
   let now = Time_compat.now () in
   update_entry_if_registered ~base_path name (fun e ->
     update_current_turn e (stamp_turn_progress ~now ~event_kind))
+;;
+
+(* RFC-0197 (P1-4a): write-through mirror of the turn event bus
+   [pending_tool_count] into the live [turn_observation]. The supervisor sweep
+   only reads [current_turn_observation] (the event bus is a per-turn call-stack
+   value, not globally reachable), so the tool-in-flight count is surfaced here
+   for [Keeper_supervisor.assess_in_turn_progress] to exclude active tool work
+   from the no-progress window. Does not touch [last_progress_at]: a tool
+   running silently is "active tool execution", not progress. A [None]
+   [current_turn_observation] (turn already ended) is a no-op, so a late
+   background-drain callback after [mark_turn_finished] cannot leak. *)
+let record_turn_tool_inflight ~base_path name ~count =
+  update_entry_if_registered ~base_path name (fun e ->
+    update_current_turn e (fun obs -> { obs with active_tool_count = count }))
 ;;
 
 (* RFC-0045: SDK-turn boundary reset.  Resets in-turn FSM fields without touching keeper-turn-scoped data ([turn_id], [started_at], [selected_model], [measurement], [measurement_bind_count]).  Bypasse... *)

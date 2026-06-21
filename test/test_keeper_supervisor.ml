@@ -2256,6 +2256,7 @@ let test_assess_in_turn_progress () =
      ; started_at
      ; last_progress_at
      ; last_progress_kind
+     ; active_tool_count = 0
      ; turn_phase = Packed Turn_prompting
      ; decision_stage = Packed Decision_undecided
      ; measurement = None
@@ -2263,6 +2264,14 @@ let test_assess_in_turn_progress () =
      ; selected_model = None
      }
       : Masc.Keeper_registry_types.turn_observation)
+  in
+  (* RFC-0197 P1-4a: a turn_observation with [n] tools in flight, reusing
+     [make_turn_obs] for the shared fields. *)
+  let make_turn_obs_with_tools ~active_tool_count ~started_at ~last_progress_at
+        ~last_progress_kind =
+    { (make_turn_obs ~started_at ~last_progress_at ~last_progress_kind) with
+      Masc.Keeper_registry_types.active_tool_count
+    }
   in
   (* hung mid-turn: Running, turn live, last progress 400s ago, threshold 300s →
      Some (Stale_turn_timeout (Mid_turn_no_progress { since_progress=400 })). *)
@@ -2341,7 +2350,55 @@ let test_assess_in_turn_progress () =
                   ~last_progress_at:1000.0
                   ~last_progress_kind:None))
           ~now:1400.0
-          ~progress_timeout:300.0))
+          ~progress_timeout:300.0));
+  (* RFC-0197 P1-4a: a tool in flight is active tool execution, not no-progress.
+     Same stale 400s>300s window as the hung case above, but active_tool_count=1
+     suppresses the producer → None. *)
+  check bool "tool in flight → None (not no-progress)" true
+    (Option.is_none
+       (Sup.assess_in_turn_progress
+          ~phase:KSM.Running
+          ~in_turn:
+            (Some
+               (make_turn_obs_with_tools
+                  ~active_tool_count:1
+                  ~started_at:1000.0
+                  ~last_progress_at:1000.0
+                  ~last_progress_kind:(Some "tool_completed:foo")))
+          ~now:1400.0
+          ~progress_timeout:300.0));
+  (* The suppression is count-gated, not timing: a long silent tool stays
+     excluded no matter how far past the threshold. *)
+  check bool "tool in flight far past threshold → None" true
+    (Option.is_none
+       (Sup.assess_in_turn_progress
+          ~phase:KSM.Running
+          ~in_turn:
+            (Some
+               (make_turn_obs_with_tools
+                  ~active_tool_count:3
+                  ~started_at:1000.0
+                  ~last_progress_at:1000.0
+                  ~last_progress_kind:None))
+          ~now:10000.0
+          ~progress_timeout:300.0));
+  (* Once the tools complete (count back to 0) a genuinely stalled turn still
+     produces Mid_turn_no_progress, so the gate suppresses only while in flight. *)
+  (match
+     Sup.assess_in_turn_progress
+       ~phase:KSM.Running
+       ~in_turn:
+         (Some
+            (make_turn_obs
+               ~started_at:1000.0
+               ~last_progress_at:1000.0
+               ~last_progress_kind:(Some "tool_completed:foo")))
+       ~now:1400.0
+       ~progress_timeout:300.0
+   with
+   | Some (Reg.Stale_turn_timeout (Reg.Mid_turn_no_progress _)) -> ()
+   | _ ->
+     check bool "count back to 0 still fires no-progress" false true)
 
 let () =
   run "keeper_supervisor" [

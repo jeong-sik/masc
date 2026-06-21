@@ -123,6 +123,7 @@ and turn_observation =
   ; started_at : float
   ; last_progress_at : float
   ; last_progress_kind : string option
+  ; active_tool_count : int
   ; turn_phase : packed_turn_phase
   ; decision_stage : packed_decision_stage
   ; measurement : turn_measurement option

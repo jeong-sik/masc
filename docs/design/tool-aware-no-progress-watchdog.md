@@ -1,6 +1,6 @@
 # Tool-aware no-progress watchdog (P1-4a)
 
-Status: Design (pre-implementation)
+Status: Implemented (this PR; tests cover the consumer gate and the FSM count, the drain→callback glue is integration-covered — see §7)
 Governing RFC: RFC-0197 (runtime-attempt watchdog, per-candidate wrap) — Replacement Direction points 2–4
 Extends: RFC-0012 (Mid-Turn Progress Probe) — the `Mid_turn_no_progress` producer wired in PR #21938 (`3449f60cd`)
 Scope: MASC keeper no-progress watchdog only. OAS execution-idle tool-awareness is a separate slice (P1-4b, see §8).
@@ -197,12 +197,20 @@ Files (≤5, additive):
 
 Tests:
 
-- `assess_in_turn_progress`: tool in flight (`active_tool_count = 1`) + stale
-  `last_progress_at` → `None`; no tool (`= 0`) + stale → `Some Mid_turn_no_progress`
-  (P1-5 regression); count returns to `0` → no-progress resumes.
-- event bus: a `ToolCalled` then `ToolCompleted` drain sequence invokes
-  `on_pending_count_change` with `1` then `0`; a `ToolCompleted` with no prior
-  `ToolCalled` does not drive the count below `0` (FSM drop path).
+- `assess_in_turn_progress` (added, `test_keeper_supervisor.ml`): tool in flight
+  (`active_tool_count = 1`) + stale `last_progress_at` → `None`; in flight far past
+  the threshold (`= 3`, 9000 s stale) → `None` (count-gated, not timing); count
+  back to `0` + stale → `Some Mid_turn_no_progress` (P1-5 behavior preserved).
+- FSM count (existing, `test_keeper_unified_turn_event_bus.ml`):
+  `record_fsm_tool_transitions` already covers `ToolCalled`/`ToolCompleted`
+  balance, pending residue, and the no-prior-`ToolCalled` drop path that keeps
+  the count from going below `0`.
+- The `drain` → `on_pending_count_change` glue and the `record_turn_tool_inflight`
+  registry write are integration-covered: both ends (FSM count, consumer gate)
+  are unit-tested, and the glue is a single `old <> new` conditional plus a
+  write-through. Driving `drain` in isolation needs a live `Keeper_event_bus`
+  subscription, which has no unit harness here; this is recorded rather than
+  fabricated.
 
 Acceptance: with the producer enabled, a turn executing one long tool emits no
 `Mid_turn_no_progress`; a turn stalled with no tool in flight still emits it

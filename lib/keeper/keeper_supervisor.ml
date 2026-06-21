@@ -75,6 +75,13 @@ let assess_in_turn_progress
   match in_turn with
   | Some obs
     when Bool.(phase = Keeper_state_machine.Running)
+         (* RFC-0197 points 2-3: a turn with a tool in flight is active tool
+            execution, not no-progress. [active_tool_count] mirrors the event
+            bus [pending_tool_count] (via [record_turn_tool_inflight]). A long
+            silent tool call therefore does not produce [Mid_turn_no_progress];
+            a hung tool is bounded by the tool substrate budget and the
+            wall-clock [In_turn_hung] watchdog, not this signal. *)
+         && obs.active_tool_count = 0
          && now -. obs.last_progress_at > progress_timeout ->
     Some
       (Keeper_registry.Stale_turn_timeout

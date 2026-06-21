@@ -6,7 +6,17 @@
 
 type t
 
-val create : keeper_name:string -> turn_id:int -> unit -> t
+(** [on_pending_count_change] is invoked with the new [pending_tool_count]
+    whenever a drain changes it (RFC-0197 P1-4a). Used to mirror the in-flight
+    tool count into the registry's live [turn_observation] so the supervisor
+    sweep can exclude active tool execution from the no-progress window.
+    Defaults to a no-op. *)
+val create :
+  ?on_pending_count_change:(int -> unit)
+  -> keeper_name:string
+  -> turn_id:int
+  -> unit
+  -> t
 
 val drain
   :  ?site:string

@@ -11,6 +11,7 @@ import {
 } from './settings-surface'
 import type { DashboardToolInventoryItem } from '../api/dashboard'
 import type { LogEntry } from '../api/schemas/logs'
+import type { RuntimeDefaultsResponse } from '../api/schemas/runtime-defaults'
 import { DashboardMain } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
@@ -20,6 +21,7 @@ import { namespaceTruthInitializing } from '../namespace-truth-store'
 const apiMock = vi.hoisted(() => ({
   fetchLogs: vi.fn(),
   fetchDashboardTools: vi.fn(),
+  fetchRuntimeDefaults: vi.fn(),
 }))
 
 vi.mock('../api/dashboard.js', async () => {
@@ -28,6 +30,7 @@ vi.mock('../api/dashboard.js', async () => {
     ...actual,
     fetchLogs: apiMock.fetchLogs,
     fetchDashboardTools: apiMock.fetchDashboardTools,
+    fetchRuntimeDefaults: apiMock.fetchRuntimeDefaults,
   }
 })
 
@@ -65,9 +68,40 @@ function makeToolItem(overrides: Partial<DashboardToolInventoryItem> = {}): Dash
   }
 }
 
+function makeRuntimeDefaults(
+  overrides: Partial<RuntimeDefaultsResponse> = {},
+): RuntimeDefaultsResponse {
+  return {
+    generated_at_iso: '2026-06-21T00:00:00Z',
+    dashboard_surface: '/api/v1/dashboard/runtime-defaults',
+    source: 'runtime_config',
+    config_path: '/cfg/runtime.toml',
+    default_runtime_id: 'rt-a',
+    default_model: 'm1',
+    default_max_context: 128000,
+    runtimes: [
+      { id: 'rt-a', provider: 'P', model: 'm1', max_context: 128000, is_default: true },
+      { id: 'rt-b', provider: 'P', model: 'm2', max_context: 128000, is_default: false },
+      { id: 'rt-c', provider: 'P', model: 'm3', max_context: 128000, is_default: false },
+    ],
+    model_routing: {
+      keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
+      librarian_runtime_id: null,
+      cross_verifier_runtime_id: null,
+      media_failover: [],
+    },
+    ...overrides,
+  }
+}
+
+function stubRuntimeDefaults(value: RuntimeDefaultsResponse = makeRuntimeDefaults()) {
+  apiMock.fetchRuntimeDefaults.mockResolvedValue(value)
+}
+
 function stubEmptyApi() {
   apiMock.fetchLogs.mockResolvedValue({ total: 0, entries: [] })
   apiMock.fetchDashboardTools.mockResolvedValue({ tool_inventory: { count: 0, tools: [] } })
+  stubRuntimeDefaults()
 }
 
 const navigate = vi.fn()
@@ -87,6 +121,7 @@ describe('SettingsSurface', () => {
     document.body.appendChild(container)
     apiMock.fetchLogs.mockReset()
     apiMock.fetchDashboardTools.mockReset()
+    apiMock.fetchRuntimeDefaults.mockReset()
     stubEmptyApi()
   })
 
@@ -149,6 +184,8 @@ describe('SettingsSurface', () => {
     await fireEvent.click(runtimeNav)
 
     const seg = () => container.querySelector('[data-testid="set-seg"]') as HTMLElement
+    // The Default runtime segmented control renders from resolved runtime config.
+    await waitFor(() => expect(seg()).not.toBeNull())
     const buttons = () => Array.from(seg().querySelectorAll('button'))
     expect(buttons().length).toBeGreaterThanOrEqual(3)
     expect(buttons()[0]!.getAttribute('data-active')).toBe('true')
@@ -156,6 +193,79 @@ describe('SettingsSurface', () => {
     await fireEvent.click(buttons()[2]!)
     expect(buttons()[0]!.getAttribute('data-active')).toBe('false')
     expect(buttons()[2]!.getAttribute('data-active')).toBe('true')
+  })
+
+  it('Default runtime/model options come from the resolved runtime config', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    const runtimeNav = container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement
+    await fireEvent.click(runtimeNav)
+
+    await waitFor(() => {
+      const segLabels = Array.from(
+        container.querySelectorAll('[data-testid="set-seg"] button'),
+      ).map(b => b.textContent?.trim())
+      // runtime ids from the mocked registry, not the old hardcoded oas-* strings
+      expect(segLabels).toContain('rt-a')
+      expect(segLabels).toContain('rt-b')
+      expect(segLabels).toContain('rt-c')
+      expect(segLabels).not.toContain('oas·seoul-1')
+    })
+  })
+
+  it('routing section shows resolved keeper assignments read-only', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    const routingNav = container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement
+    await fireEvent.click(routingNav)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="routing-default-model"]')?.textContent).toBe('m1')
+      const assignments = Array.from(
+        container.querySelectorAll('[data-testid="routing-assignment"]'),
+      ).map(n => n.textContent)
+      expect(assignments).toEqual(['rt-b'])
+    })
+  })
+
+  it('routing section reports no assignments without fabricating rows', async () => {
+    stubRuntimeDefaults(
+      makeRuntimeDefaults({
+        model_routing: {
+          keeper_assignments: [],
+          librarian_runtime_id: null,
+          cross_verifier_runtime_id: null,
+          media_failover: [],
+        },
+      }),
+    )
+    render(html`<${SettingsSurface} />`, container)
+
+    const routingNav = container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement
+    await fireEvent.click(routingNav)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="routing-assignments-empty"]')).not.toBeNull()
+    })
+    expect(container.querySelectorAll('[data-testid="routing-assignment"]').length).toBe(0)
+  })
+
+  it('runtime nodes section uses the resolved registry without sample targets', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    const runtimesNav = container.querySelector('[data-testid="settings-nav-runtimes"]') as HTMLElement
+    await fireEvent.click(runtimesNav)
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('[data-testid="runtime-node"]').length).toBe(3)
+    })
+    const text = container.textContent ?? ''
+    expect(text).toContain('rt-a')
+    expect(text).toContain('rt-b')
+    expect(text).toContain('rt-c')
+    expect(text).toContain('m1')
+    expect(text).not.toContain('oas://seoul-1.masc.run')
+    expect(text).not.toContain('local·docker')
   })
 
   it('log filter chips filter live rows from the ring', async () => {
@@ -232,6 +342,7 @@ describe('SettingsSurface shell route', () => {
     document.body.appendChild(container)
     apiMock.fetchLogs.mockReset()
     apiMock.fetchDashboardTools.mockReset()
+    apiMock.fetchRuntimeDefaults.mockReset()
     stubEmptyApi()
     dashboardLoading.value = false
     connected.value = true

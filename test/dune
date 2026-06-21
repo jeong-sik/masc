@@ -645,6 +645,14 @@
  (modules test_runtime_config_validity)
  (libraries masc_test_deps))
 
+; Dashboard /runtime-defaults JSON builder — resolved defaults + model routing
+; projection, plus the no-fabrication (null/empty) contract.
+
+(test
+ (name test_runtime_defaults_json)
+ (modules test_runtime_defaults_json)
+ (libraries masc_test_deps))
+
 ; RFC-0266: fusion async-completion wake — closed-sum classification +
 ; actionable pending_board_event delivery.
 

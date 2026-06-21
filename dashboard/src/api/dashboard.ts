@@ -29,6 +29,13 @@ import {
 } from './schemas/dashboard-config'
 import { parseLogsResponse, type LogEntry, type LogsResponse } from './schemas/logs'
 import {
+  parseRuntimeDefaultsResponse,
+  type RuntimeDefaultsResponse,
+  type RuntimeEntry,
+  type KeeperAssignment,
+  type ModelRouting,
+} from './schemas/runtime-defaults'
+import {
   parseProviderLogTailResponse,
   parseProviderLogsCatalogResponse,
   type ProviderLogCatalogEntry,
@@ -115,6 +122,8 @@ function decodeDashboardFeedMetadata(raw: Record<string, unknown>): DashboardFee
 
 export type { LogEntry, LogsResponse }
 export { LogsSchemaDriftError } from './schemas/logs'
+export { RuntimeDefaultsSchemaDriftError } from './schemas/runtime-defaults'
+export type { RuntimeDefaultsResponse, RuntimeEntry, KeeperAssignment, ModelRouting }
 export type {
   ProviderLogCatalogEntry,
   ProviderLogsCatalogResponse,
@@ -2492,6 +2501,16 @@ function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
 export async function fetchRuntimeTomlConfig(): Promise<RuntimeTomlConfig> {
   await ensureDevToken()
   return get<unknown>('/api/v1/runtime/config/raw').then(normalizeRuntimeTomlConfig)
+}
+
+// Structured, already-resolved runtime defaults / model routing (runtime.toml
+// SSOT). Public read — no credentials, no raw TOML; the Settings surface
+// consumes this instead of re-parsing TOML on the client.
+export async function fetchRuntimeDefaults(
+  opts?: AbortableRequestOptions,
+): Promise<RuntimeDefaultsResponse> {
+  const raw = await get<unknown>('/api/v1/dashboard/runtime-defaults', { signal: opts?.signal })
+  return parseRuntimeDefaultsResponse(raw)
 }
 
 export async function saveRuntimeTomlConfig(sourceText: string): Promise<RuntimeTomlConfig> {

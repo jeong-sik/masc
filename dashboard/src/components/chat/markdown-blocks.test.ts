@@ -176,6 +176,15 @@ describe('parseMarkdownToBlocks', () => {
     expect((blocks[0] as Extract<ChatBlock, { t: 'p' }>).html).toContain('<a')
   })
 
+  it('links generated board post ids to the board detail route', () => {
+    const postId = 'p-59e2917e15de5367e81b2244a8f5095a'
+    const blocks = parseMarkdownToBlocks(`올렸다. 보드에 ${postId}.`)
+    expect(blocks).toHaveLength(1)
+    const html = (blocks[0] as Extract<ChatBlock, { t: 'p' }>).html
+    expect(html).toContain(`href="#board?post=${postId}"`)
+    expect(html).toContain('title="보드 게시글 열기"')
+  })
+
   // Per-line superset: a soft-wrapped paragraph (single newlines, no blank line)
   // that interleaves prose with a standalone-URL line must still yield the card,
   // matching the line-based parser the render path supersedes.

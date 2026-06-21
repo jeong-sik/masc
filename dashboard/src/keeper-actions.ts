@@ -192,17 +192,17 @@ export async function hydrateKeeperChatHistory(
 
 // Match the visible chat history window. A keeper that calls many tools can
 // easily have >100 tool rows inside the 200-row transcript; using the same
-// horizon keeps every visible row eligible for output join.
+// horizon keeps every visible recent row eligible for output join.
 const TOOL_OUTPUT_FETCH_LIMIT = KEEPER_HISTORY_TAIL_MESSAGES
 
-function toolOutputCoveredSinceMs(entries: readonly { ts: number }[], limit: number): number | null {
-  if (entries.length < limit) return null
+function toolOutputCoveredSinceMs(entries: readonly { ts: number }[]): number {
   const oldestMs = entries.reduce((oldest, entry) => {
     const ms = entry.ts * 1000
     return Number.isFinite(ms) ? Math.min(oldest, ms) : oldest
   }, Number.POSITIVE_INFINITY)
-  // Saturated response with no parseable timestamp: do not mark any older
-  // unjoined tool row missing, because the fetched tail's lower bound is unknown.
+  // The backend filters a global recent tool-call tail by keeper, so a short
+  // response is not proof that no older matching keeper rows exist. Only the
+  // timestamp span actually returned by this fetch is safe to mark covered.
   return Number.isFinite(oldestMs) ? oldestMs : Number.POSITIVE_INFINITY
 }
 
@@ -218,7 +218,7 @@ async function hydrateKeeperToolOutputs(keeperName: string): Promise<void> {
     markToolCallOutputsHydrated(
       keeperName,
       coveredThroughMs,
-      toolOutputCoveredSinceMs(response.entries, TOOL_OUTPUT_FETCH_LIMIT),
+      toolOutputCoveredSinceMs(response.entries),
     )
   } catch (err) {
     markToolCallOutputsHydrationFailed(keeperName)

@@ -1852,6 +1852,7 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
         ]}
         emptyText="empty"
         groupToolCalls=${true}
+        toolOutputsCoveredSinceMs=${Date.parse('2026-03-24T00:00:00.000Z')}
         toolOutputsCoveredThroughMs=${Date.parse('2026-03-24T00:00:01.000Z')}
       />`,
       container,

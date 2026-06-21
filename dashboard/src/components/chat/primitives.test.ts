@@ -1786,6 +1786,30 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
     expect(think.querySelector('script')).toBeNull()
   })
 
+  it('renders board post ids in assistant prose as board detail links', () => {
+    const postId = 'p-59e2917e15de5367e81b2244a8f5095a'
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a-board-link',
+            text: `올렸다. 보드에 ${postId}.`,
+            role: 'assistant',
+            source: 'direct_assistant',
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const link = container.querySelector(`a[href="#board?post=${postId}"]`) as HTMLAnchorElement | null
+    expect(link).not.toBeNull()
+    expect(link?.textContent).toBe(postId)
+    expect(link?.getAttribute('title')).toBe('보드 게시글 열기')
+  })
+
   it('keeps the flat per-row tool bubbles when grouping is off (default)', () => {
     render(
       html`<${ChatTranscript}

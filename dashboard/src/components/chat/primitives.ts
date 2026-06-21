@@ -7,6 +7,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'pr
 import { ringFocusClasses } from '../common/ring'
 import { collectAttachments } from './attachments'
 import { parseMarkdownToBlocks } from './markdown-blocks'
+import { linkifyHtmlReferences } from './chat-linkify'
 import { showToast } from '../common/toast'
 import { copyToClipboard } from '../common/copyable-code'
 import { useVoiceInput } from './voice-input'
@@ -453,14 +454,6 @@ function ChatArtifactPreview({
 
 // --- Keeper v2 rich block helpers -------------------------------------------------
 
-function linkifyHtml(raw: string): string {
-  if (!raw || raw.indexOf('http') === -1 || raw.indexOf('<a ') !== -1) return raw
-  return raw.replace(
-    /(^|[\s(>])(https?:\/\/[^\s<)]+[^\s<).,!?:;])/g,
-    '$1<a class="inline-link" href="$2" target="_blank" rel="noopener noreferrer">$2</a>',
-  )
-}
-
 function sanitizeHtml(raw: string): string {
   return purifyHtml(raw)
 }
@@ -470,7 +463,7 @@ function sanitizeSvg(raw: string): string {
 }
 
 function renderInlineHtml(raw: string): { __html: string } {
-  return { __html: sanitizeHtml(linkifyHtml(raw)) }
+  return { __html: sanitizeHtml(linkifyHtmlReferences(raw)) }
 }
 
 // Trace-step thinking text: render through the same sanitized markdown path the

@@ -1,6 +1,7 @@
 import { marked, type Token, type Tokens } from 'marked'
 import { sanitizeHtml as purifyHtml } from '../../lib/dompurify'
 import type { ChatBlock, ChatCalloutSeverity, ChatTableCellValue } from '../../types'
+import { linkifyHtmlReferences } from './chat-linkify'
 
 function escapeHtml(raw: string): string {
   return raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -37,20 +38,6 @@ function standaloneUrlBlock(text: string): ChatBlock | null {
   return { t: 'link', url: trimmed, title: hostnameTitle(trimmed), meta: hostnameTitle(trimmed) }
 }
 
-/** Linkify plain URLs without touching existing HTML tags. */
-function linkifyHtml(raw: string): string {
-  if (!raw || raw.indexOf('http') === -1) return raw
-  const linkRe = /(^|[\s(>])(https?:\/\/[^\s<)]+[^\s<).,!?:;])/g
-  return raw
-    .split(/(<[^>]+>)/g)
-    .map((part, i) =>
-      i % 2 === 1
-        ? part
-        : part.replace(linkRe, '$1<a class="inline-link" href="$2" target="_blank" rel="noopener noreferrer">$2</a>'),
-    )
-    .join('')
-}
-
 function sanitizeHtml(raw: string): string {
   return purifyHtml(raw)
 }
@@ -59,7 +46,7 @@ function inlineHtml(raw: string): string {
   const trimmed = raw.trim()
   if (!trimmed) return ''
   const parsed = marked.parseInline(trimmed) as string
-  return sanitizeHtml(linkifyHtml(parsed))
+  return sanitizeHtml(linkifyHtmlReferences(parsed))
 }
 
 function cellValue(raw: string): ChatTableCellValue {
@@ -89,11 +76,11 @@ function parseBlockquote(token: Tokens.Blockquote): ChatBlock {
     .replace(/^<blockquote>\s*/i, '')
     .replace(/<\/blockquote>\s*$/i, '')
     .trim()
-  return { t: 'callout', severity, html: sanitizeHtml(linkifyHtml(body)) }
+  return { t: 'callout', severity, html: sanitizeHtml(linkifyHtmlReferences(body)) }
 }
 
 function parseList(token: Tokens.List): ChatBlock {
-  const items = token.items.map((item) => sanitizeHtml(linkifyHtml(marked.parseInline(item.text) as string)))
+  const items = token.items.map((item) => sanitizeHtml(linkifyHtmlReferences(marked.parseInline(item.text) as string)))
   return { t: 'ul', items }
 }
 
@@ -218,7 +205,7 @@ function parseHtml(token: Tokens.HTML): ChatBlock | null {
     return { t: 'svg', svg: trimmed, cap: undefined }
   }
   // Treat other top-level HTML as a paragraph after sanitization.
-  const html = sanitizeHtml(linkifyHtml(trimmed)).trim()
+  const html = sanitizeHtml(linkifyHtmlReferences(trimmed)).trim()
   return html ? { t: 'p', html } : null
 }
 

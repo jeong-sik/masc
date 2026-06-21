@@ -288,8 +288,8 @@ let request_help_post_body ~(meta : keeper_meta)
       "retry condition: external capability or operator guidance becomes available";
     ]
 
-let deliver_request_help_post ~(meta : keeper_meta)
-    ~(state : Types.social_state) =
+let deliver_request_help_post ?(turn_ref : Ids.Turn_ref.t option)
+    ~(meta : keeper_meta) ~(state : Types.social_state) () =
   match state.blocker with
   | None -> Request_help_failed
   | Some blocker when should_dedupe_request_help ~meta ~blocker:(Some blocker)
@@ -313,10 +313,15 @@ let deliver_request_help_post ~(meta : keeper_meta)
               ( "need", Json_util.string_opt_to_json state.need );
             ])
       in
+      (* RFC-0233 §7: a keeper request-help post is the output of this keeper's
+         turn; stamp the typed origin so the dashboard/board can trace it back
+         to the producing turn. [turn_ref] is minted once upstream (keeper turn)
+         and threaded down; [None] only on paths that cannot reach it. *)
+      let origin = Board.keeper_authored_origin ?turn_ref ~source:"keeper_speech" () in
       match
         Board_dispatch.create_post ~author:meta.name ~title ~body ~content:body
           ~post_kind:Board.Automation_post ?meta_json
-          ~visibility:Board.Internal ~ttl_hours:24 ~hearth:"keepers" ()
+          ~visibility:Board.Internal ~ttl_hours:24 ~hearth:"keepers" ~origin ()
       with
       | Ok _ -> Request_help_posted
       | Error _ -> Request_help_failed
@@ -365,13 +370,14 @@ let transition (previous_state : state option) (input : input) =
     in
     (state, output, Types.Protocol_violation_no_tools_no_social_headers)
 
-let apply_output_to_result ~(meta : keeper_meta)
+let apply_output_to_result ?(turn_ref : Ids.Turn_ref.t option)
+    ~(meta : keeper_meta)
     ~(result : Keeper_agent_run.run_result)
     ~(visible_response_body : string) (state : Types.social_state) =
   let tool_names = Keeper_agent_result.tool_names result in
   match state.speech_act, state.delivery_surface with
   | Request_help, Board_post when tool_names = [] ->
-      (match deliver_request_help_post ~meta ~state with
+      (match deliver_request_help_post ?turn_ref ~meta ~state () with
       | Request_help_posted ->
           ({ result with response_text = "" }, state)
       | Request_help_deduped | Request_help_failed ->
@@ -391,7 +397,7 @@ let apply_output_to_result ~(meta : keeper_meta)
          is intentionally left non-empty (#20870 watermark-stall failure mode). *)
       ({ result with response_text = visible_response_body }, state)
 
-let apply_to_result ~(meta : keeper_meta)
+let apply_to_result ?(turn_ref : Ids.Turn_ref.t option) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(previous_state : Types.social_state option)
     (result : Keeper_agent_run.run_result) =
@@ -414,7 +420,8 @@ let apply_to_result ~(meta : keeper_meta)
   let state, output, transition_reason = transition prior_state input in
   let social_state = to_social_state state output in
   let result, social_state =
-    apply_output_to_result ~meta ~result ~visible_response_body social_state
+    apply_output_to_result ?turn_ref ~meta ~result ~visible_response_body
+      social_state
   in
   (result, social_state, transition_reason)
 

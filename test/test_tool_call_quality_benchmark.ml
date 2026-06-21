@@ -462,10 +462,6 @@ let test_loader_parses_legacy_tool_name_arg_check () =
                (List.length cases))
       | Error msg -> fail ("load_cases_from_file failed: " ^ msg))
 
-(* A semantic selector cannot match route_evidence whose field is present but
-   empty, so the gate must treat empty values as missing evidence (anti-pattern:
-   empty -> permissive "has evidence"). Each variant below would have passed the
-   gate when it only checked key presence. *)
 (* When a case uses semantic selectors but none of the run's tool calls carry
    usable route_evidence, scoring cannot distinguish "wrong tool" from
    "missing evidence". Per the evidence-quality contract, such runs are excluded
@@ -482,6 +478,10 @@ let test_unavailable_route_evidence_excludes_run_from_scoring () =
   | Some _ -> fail "score_run should return None when route evidence is unavailable"
   | None -> ()
 
+(* A semantic selector cannot match route_evidence whose field is present but
+   empty, so the gate must treat empty values as missing evidence (anti-pattern:
+   empty -> permissive "has evidence"). Each variant below would have passed the
+   gate when it only checked key presence. *)
 let test_route_evidence_quality_treats_empty_evidence_as_missing () =
   let case =
     selector_case

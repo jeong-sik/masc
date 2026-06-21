@@ -6,18 +6,18 @@
     dependency).  Includes built-in routes for [/health],
     [/ready], plus the streamable MCP endpoint.
 
-    Internal: ~25+ helpers stay private — exception
+    Internal: helpers stay private — exception
     \[Shutdown] (graceful-shutdown signaling), the 5 built-in
     handlers ([health_handler], [ready_handler],
     [mcp_post_handler], [mcp_get_handler]),
     \[default_routes] (the route table assembled from those
     handlers), \[with_streamable_mcp_request_handler],
     \[make_request_handler] (router → request_handler
-    converter), \[error_handler] (httpun connection error
-    handler), \[run] (server accept loop with backoff), and
-    \[start] (Eio_main entry with signal handlers).  External
-    callers reach the server through the [Server_bootstrap_*]
-    facade modules instead of these internals.
+    converter), and \[error_handler] (httpun connection error
+    handler).  The server accept loop and [Eio_main] entry point
+    live in the [Server_bootstrap_*] facade modules rather than
+    in this file.  External callers reach the server through
+    those facade modules instead of these internals.
 
     @see <https://github.com/anmonteiro/httpun> httpun
     documentation *)

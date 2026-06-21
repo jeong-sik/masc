@@ -140,12 +140,35 @@ let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
       true
     else
       (match Tool_dispatch.lookup_tag name with
+       (* Privileged / internal surfaces denied from keeper exposure. *)
        | Some Tool_dispatch.Mod_inline
        | Some Tool_dispatch.Mod_compact
        | Some Tool_dispatch.Mod_operator
        | Some Tool_dispatch.Mod_control ->
            false
-       | Some _ -> true
+       (* Keeper-allowed surfaces enumerated explicitly (no [Some _ ->]
+          wildcard) so that adding a new [Tool_dispatch.module_tag] variant
+          fails to compile here, forcing a deliberate keeper-exposure
+          decision (default deny) rather than being silently injected into
+          every keeper's schema set and made executable. CLAUDE.md "FSM
+          Sparse Match" rule (no catch-all on a security boundary) +
+          RFC-0006 (keeper surface) + RFC-0042 (closed-sum discipline). This
+          arm set is exactly what the former [Some _ -> true] admitted, so
+          runtime behaviour is unchanged. *)
+       | Some Tool_dispatch.Mod_plan
+       | Some Tool_dispatch.Mod_local_runtime
+       | Some Tool_dispatch.Mod_run
+       | Some Tool_dispatch.Mod_agent
+       | Some Tool_dispatch.Mod_task
+       | Some Tool_dispatch.Mod_state
+       | Some Tool_dispatch.Mod_agent_timeline
+       | Some Tool_dispatch.Mod_schedule
+       | Some Tool_dispatch.Mod_misc
+       | Some Tool_dispatch.Mod_library
+       | Some Tool_dispatch.Mod_external
+       | Some Tool_dispatch.Mod_shard
+       | Some Tool_dispatch.Mod_keeper_task ->
+           true
        | None -> false)
   in
   (* masc_board_* tools that have keeper_board_* wrappers with auto-injected

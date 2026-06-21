@@ -59,6 +59,11 @@ const providerLogProvider = signal('')
 const providerLogLines = signal(200)
 const latestSeq = signal<number | null>(null)
 const categoryFilter = signal('')
+// Client-side display-kind filter for the primary toolbar chips
+// (전체/Tool/Turn/Lifecycle/Approval/Broadcast). Complementary to the
+// backend categoryFilter above: kind slices the streamed rows in the view
+// without re-querying, so switching kind is instant.
+const kindFilter = signal<LogDisplayKind | ''>('')
 const hideFsmTransitions = signal(false)
 const expandedLogSeq = signal<number | null>(null)
 // "load older" backward paging: the merge cap is derived per-poll by
@@ -114,13 +119,24 @@ const CATEGORY_LABELS: Record<string, string> = {
   uncategorized: 'Uncategorized',
 }
 
-const LOG_CATEGORY_FILTERS: readonly { value: string; label: string }[] = [
+const LOG_KIND_FILTERS: readonly { value: string; label: string }[] = [
   { value: '', label: '전체' },
   { value: 'tool', label: 'Tool' },
-  { value: 'task', label: 'Task' },
+  { value: 'turn', label: 'Turn' },
   { value: 'lifecycle', label: 'Lifecycle' },
-  { value: 'directive', label: 'Directive' },
-  { value: 'telemetry', label: 'Telemetry' },
+  { value: 'approval', label: 'Approval' },
+  { value: 'broadcast', label: 'Broadcast' },
+]
+// Backend log category, surfaced in the advanced (details) menu so the
+// provider-log category filter is preserved while the primary toolbar uses
+// the client-side display-kind chips above.
+const LOG_CATEGORY_OPTIONS: readonly { value: string; label: string }[] = [
+  { value: '', label: '전체 카테고리' },
+  { value: 'tool', label: 'tool' },
+  { value: 'task', label: 'task' },
+  { value: 'lifecycle', label: 'lifecycle' },
+  { value: 'directive', label: 'directive' },
+  { value: 'telemetry', label: 'telemetry' },
 ]
 
 function categoryLabel(category: string | null | undefined): string | null {
@@ -990,7 +1006,17 @@ export function LogViewer() {
     ? ((summary.errors / logEntries.length) * 100).toFixed(1)
     : '0.0'
   const currentFilterLabel =
-    LOG_CATEGORY_FILTERS.find(filter => filter.value === categoryFilter.value)?.label ?? 'Custom'
+    LOG_KIND_FILTERS.find(filter => filter.value === kindFilter.value)?.label
+    ?? LOG_CATEGORY_OPTIONS.find(option => option.value === categoryFilter.value)?.label
+    ?? '전체'
+  // kindFilter is a preact signal: reading .value subscribes this render,
+  // so a plain derivation recomputes on kind change without a memo dep.
+  const visibleEntries = kindFilter.value === ''
+    ? logEntries
+    : logEntries.filter(entry => logDisplayKind(entry) === kindFilter.value)
+  let emptyMessage = '조건에 맞는 로그가 없습니다.'
+  if (logLoading) emptyMessage = '로그를 불러오는 중...'
+  else if (kindFilter.value !== '') emptyMessage = '해당하는 이벤트 없음'
   const providerDiagnostics = renderProviderLogPanel()
 
   return html`
@@ -1011,14 +1037,14 @@ export function LogViewer() {
 
         <div class="logs-toolbar v2-logs-toolbar">
           <div class="logs-filters v2-logs-filters">
-            ${LOG_CATEGORY_FILTERS.map(filter => html`
+            ${LOG_KIND_FILTERS.map(filter => html`
               <${LogFilter}
                 key=${filter.value || 'all'}
-                active=${categoryFilter.value === filter.value}
+                active=${kindFilter.value === filter.value}
                 class="v2-logs-filter-chip"
                 data-testid=${`logs-filter-${filter.value || 'all'}`}
                 onClick=${() => {
-                  categoryFilter.value = filter.value
+                  kindFilter.value = filter.value as LogDisplayKind | ''
                 }}
               >${filter.label}<//>
             `)}
@@ -1054,6 +1080,15 @@ export function LogViewer() {
                     { value: 'ERROR', label: 'ERROR' },
                   ]}
                   onInput=${(v: string) => { levelFilter.value = v }}
+                />
+
+                <${Select}
+                  class="logs-select px-3 py-2 text-xs"
+                  name="log-category"
+                  ariaLabel="카테고리"
+                  value=${categoryFilter.value}
+                  options=${LOG_CATEGORY_OPTIONS}
+                  onInput=${(v: string) => { categoryFilter.value = v }}
                 />
 
                 <${TextInput}
@@ -1107,7 +1142,7 @@ export function LogViewer() {
               />
               자동
             </label>
-            <span class="v2-logs-live mono"><span class="dot" />${autoRefresh.value ? 'live poll · 3s' : 'poll paused'}</span>
+            <span class="v2-logs-live mono"><span class="dot" />${autoRefresh.value ? `WS open · ${eventRatePerMinute(logEntries)}δ/min` : 'WS paused'}</span>
             <button
               type="button"
               class="logs-refresh-btn v2-logs-refresh"
@@ -1155,15 +1190,15 @@ export function LogViewer() {
           <span></span>
         </div>
 
-        ${logEntries.length === 0
+        ${visibleEntries.length === 0
           ? html`
               <div class="flex flex-1 items-center justify-center px-6 text-sm text-[var(--color-fg-muted)]" role="status">
-                ${logLoading ? '로그를 불러오는 중...' : '조건에 맞는 로그가 없습니다.'}
+                ${emptyMessage}
               </div>
             `
           : html`
               <${VirtualList}
-                items=${logEntries}
+                items=${visibleEntries}
                 estimatedItemHeight=${ESTIMATED_LOG_ROW_HEIGHT}
                 overscan=${6}
                 getKey=${(entry: LogEntry) => String(entry.seq)}

@@ -4,7 +4,9 @@
  (name masc_server)
  (public_name masc.server)
  (wrapped false)
- (private_modules keeper_grpc_heartbeat)
+ (private_modules
+  keeper_grpc_heartbeat
+  server_dashboard_http_schedule_actions)
  (flags :standard -open Masc)
  (libraries
   masc

@@ -348,6 +348,8 @@ let read_only_no_progress_err ~scope =
        ; reason_kind = Some KTD.Accept_no_usable_progress
        ; response_shape = Some KTD.Accept_response_thinking_only
        ; last_tool_effect = Some KTD.Tool_effect_read_only
+       ; any_mutating_tool = Some false
+       ; tool_effects_seen = [ KTD.Tool_effect_read_only ]
        ; reason =
            "response rejected by accept (runtime=same.b): shape=thinking_only; \
             stop_reason=end_turn; last_tool=WebFetch; last_tool_effect=read_only"

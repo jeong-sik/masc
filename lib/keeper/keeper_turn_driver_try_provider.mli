@@ -61,6 +61,8 @@ type try_provider_ctx =
 type last_tool_progress_context =
   { tool_name : string
   ; tool_effect : Keeper_internal_error.tool_progress_effect
+  ; any_mutating_tool : bool
+  ; tool_effects_seen : Keeper_internal_error.tool_progress_effect list
   }
 
 val run_try_provider :
@@ -79,7 +81,9 @@ val accept_rejected_error :
   Agent_sdk.Error.sdk_error
 
 val accept_rejection_context_of_run_result :
-  Runtime_agent.run_result -> last_tool_progress_context option
+  ?initial_messages:Agent_sdk.Types.message list ->
+  Runtime_agent.run_result ->
+  last_tool_progress_context option
 
 module For_testing : sig
   val max_execution_time_for_attempt :
@@ -94,6 +98,7 @@ module For_testing : sig
     Agent_sdk.Hooks.turn_params
 
   val apply_accept :
+    ?initial_messages:Agent_sdk.Types.message list ->
     runtime_id:string ->
     accept:(Agent_sdk_response.api_response -> bool) ->
     Runtime_agent.run_result ->

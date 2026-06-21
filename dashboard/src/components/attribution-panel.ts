@@ -26,17 +26,34 @@ import { isAbortError } from '../lib/async-state'
 const POLL_INTERVAL_MS = 5_000
 const RECENT_LIMIT = 50
 
-// Known gates. Gates not yet wired (accountability, workspace_task, etc.) will
-// show zero counts so the operator sees which sources are live.
+// Gates rendered as cards even before they emit, so the operator sees the full
+// known set with zero counts. Backend-emitted gates outside this list are
+// appended from the live attribution data (see gatesToRender) so none is
+// silently dropped. Backend currently emits accountability, exec_policy,
+// keeper_fsm and verification (lib `Attribution.* ~gate:"..."`); the rest are
+// forward-declared and show zero until their source is wired.
 const KNOWN_GATES = [
   'cdal_verdict',
   'verification',
+  'exec_policy',
   'keeper_fsm',
   'worker_dev_tools',
   'accountability',
   'oas_completion',
   'agent_lifecycle',
 ] as const
+
+// Render order: the known set first (stable, including empty placeholders), then
+// any other gate present in live data, sorted. A backend gate missing from
+// KNOWN_GATES still gets a card instead of being silently uncategorized.
+export function gatesToRender(
+  known: readonly string[],
+  dataGates: Iterable<string>,
+): string[] {
+  const knownSet = new Set<string>(known)
+  const extras = [...dataGates].filter(g => !knownSet.has(g)).sort()
+  return [...known, ...extras]
+}
 
 function outcomeLabel(a: Attribution): string {
   switch (a.outcome.kind) {
@@ -279,6 +296,7 @@ export function AttributionPanel() {
 
   const byGate = new Map<string, GateSummary>()
   for (const g of summary.value?.gates ?? []) byGate.set(g.gate, g)
+  const visibleGates = gatesToRender(KNOWN_GATES, byGate.keys())
 
   // Gate filter runs server-side (see fetchAttributionRecent above), so
   // `recent.value` is already gate-filtered. Text filter composes on top.
@@ -305,7 +323,7 @@ export function AttributionPanel() {
       </div>
 
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-        ${KNOWN_GATES.map(gate => html`
+        ${visibleGates.map(gate => html`
           <${GateCard}
             gate=${gate}
             summary=${byGate.get(gate) ?? null}

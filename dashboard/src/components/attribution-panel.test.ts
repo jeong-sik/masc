@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AttributionEvent, AttributionOutcome } from '../api/attribution'
-import { filterAttributionEvents } from './attribution-panel'
+import { filterAttributionEvents, gatesToRender } from './attribution-panel'
 
 function makeEvent(
   overrides: Partial<{
@@ -109,5 +109,39 @@ describe('filterAttributionEvents', () => {
     // Gate + text where text does not match within the gate subset.
     const noMatch = filterAttributionEvents(gateFiltered, 'signature')
     expect(noMatch).toHaveLength(0)
+  })
+})
+
+describe('gatesToRender', () => {
+  const known = ['cdal_verdict', 'verification', 'keeper_fsm'] as const
+
+  it('keeps the known gates first, in declared order', () => {
+    expect(gatesToRender(known, [])).toEqual(['cdal_verdict', 'verification', 'keeper_fsm'])
+  })
+
+  it('appends a data gate that is not in the known set (no silent drop)', () => {
+    // The bug class: a backend-emitted gate absent from the known allow-list
+    // would never get a card. The union surfaces it instead.
+    expect(gatesToRender(known, ['exec_policy'])).toEqual([
+      'cdal_verdict', 'verification', 'keeper_fsm', 'exec_policy',
+    ])
+  })
+
+  it('does not duplicate a data gate already in the known set', () => {
+    expect(gatesToRender(known, ['verification', 'keeper_fsm'])).toEqual([
+      'cdal_verdict', 'verification', 'keeper_fsm',
+    ])
+  })
+
+  it('sorts the appended extras for stable ordering', () => {
+    expect(gatesToRender(known, ['zeta_gate', 'alpha_gate'])).toEqual([
+      'cdal_verdict', 'verification', 'keeper_fsm', 'alpha_gate', 'zeta_gate',
+    ])
+  })
+
+  it('surfaces exec_policy even when it is missing from the known set', () => {
+    // Regression guard: exec_policy is a live backend attribution gate
+    // (lib/exec_policy/exec_policy.ml). It must never be silently uncategorized.
+    expect(gatesToRender(known, ['exec_policy', 'verification'])).toContain('exec_policy')
   })
 })

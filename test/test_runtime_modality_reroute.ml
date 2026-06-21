@@ -27,6 +27,20 @@ let decide ~assigned ~required ~candidates =
     ~required_modalities:required
     ~candidates
 
+let string_contains haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then true
+  else
+    let rec loop index =
+      index + needle_len <= haystack_len
+      && (String.sub haystack index needle_len = needle || loop (index + 1))
+    in
+    loop 0
+
+let check_contains label ~needle haystack =
+  check bool label true (string_contains haystack needle)
+
 let message_with_blocks blocks =
   { Agent_sdk.Types.role = Agent_sdk.Types.User
   ; content = blocks
@@ -109,6 +123,34 @@ let test_no_capable_runtime_floor () =
        (decide ~assigned:(caps ()) ~required:[ "image" ]
           ~candidates:[ ("text_b", caps ()); ("audio_c", caps ~audio:true ()) ]))
 
+(* Regression: when no configured runtime can accept media, the final floor gate
+   must validate prior history too. Otherwise a text-only follow-up after a
+   vision turn leaks image history to the provider and fails as a provider 400
+   (for example "messages.content.type is invalid, allowed values: ['text']"). *)
+let test_history_media_floor_rejects_before_provider () =
+  let initial_messages =
+    [ message_with_blocks
+        [ Agent_sdk.Types.Text "previous image turn"
+        ; Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+        ]
+    ]
+  in
+  match
+    Runtime_agent.For_testing.validate_content_blocks_for_run_against_capabilities
+      ~provider_label:"glm-coding.glm-5-turbo"
+      (caps ())
+      ~initial_messages
+      ~goal_blocks:[ Agent_sdk.Types.Text "follow up" ]
+  with
+  | Ok () -> fail "expected history image to be rejected before provider dispatch"
+  | Error (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail })) ->
+      check string "field" "multimodal_input" field;
+      check_contains "mentions unsupported image" ~needle:"unsupported image input" detail;
+      check_contains "mentions required modality" ~needle:"required=image" detail;
+      check_contains "mentions text-only support" ~needle:"supported=text" detail
+  | Error err ->
+      failf "expected InvalidConfig, got %s" (Agent_sdk.Error.to_string err)
+
 (* The decision is a pure function: identical inputs yield identical output. *)
 let test_decision_is_deterministic () =
   let candidates = [ ("text_b", caps ()); ("vision_c", caps ~image:true ()) ] in
@@ -144,6 +186,8 @@ let () =
             test_initial_message_media_drives_reroute
         ; test_case "candidate order honored" `Quick test_candidate_order_is_honored
         ; test_case "no capable floor" `Quick test_no_capable_runtime_floor
+        ; test_case "history media floor rejects before provider" `Quick
+            test_history_media_floor_rejects_before_provider
         ; test_case "deterministic" `Quick test_decision_is_deterministic
         ] )
     ; ( "caps_admit_required_modalities"

@@ -1666,6 +1666,7 @@ let test_gc_waits_for_fact_writer_lock () =
         Eio.Promise.await allow_writer;
         let (_ : Memory_io.fact_merge_stats) =
           Memory_io.merge_and_cap_facts
+            ~now
             ~keeper_id
             ~merge:(Policy.reobserve_fact ~now)
             ~incoming:[ fresh ]
@@ -1821,6 +1822,7 @@ let test_recall_scans_whole_bounded_store () =
         in
         let cap_stats =
           Memory_io.merge_and_cap_facts
+            ~now
             ~keeper_id
             ~merge:(Policy.reobserve_fact ~now)
             ~incoming:(head :: cap_fillers)
@@ -2392,7 +2394,7 @@ let test_cap_facts_keeps_top_ranked () =
     (* rank by source turn (a surviving structural field): keep the 3 highest
        (fact-08/09/10), drop 7. *)
     let dropped =
-      Memory_io.cap_facts ~keeper_id ~keep:3 ~trigger:5 ~rank:(fun f ->
+      Memory_io.cap_facts ~now ~keeper_id ~keep:3 ~trigger:5 ~rank:(fun f ->
         float_of_int f.Types.source.turn)
     in
     Alcotest.(check int) "dropped count" 7 dropped;
@@ -2407,10 +2409,103 @@ let test_cap_facts_keeps_top_ranked () =
       remaining;
     (* below trigger now (3 <= 5): no-op, nothing dropped. *)
     let dropped2 =
-      Memory_io.cap_facts ~keeper_id ~keep:3 ~trigger:5 ~rank:(fun f ->
+      Memory_io.cap_facts ~now ~keeper_id ~keep:3 ~trigger:5 ~rank:(fun f ->
         float_of_int f.Types.source.turn)
     in
     Alcotest.(check int) "no-op below trigger" 0 dropped2)
+;;
+
+(* RFC-0259 §3.6 (P5): the cap drops valid_until-expired rows on the same typed
+   boundary the GC sweep uses. Pure split — durable (None) and fresh stay live,
+   expired goes to the second partition, order preserved. *)
+let test_partition_expired_splits_on_valid_until () =
+  let now = 1_000_000.0 in
+  let base = fact_fixture ~now () in
+  let durable = { base with Types.claim = "durable"; Types.valid_until = None } in
+  let expired = { base with Types.claim = "expired"; Types.valid_until = Some (now -. 1.0) } in
+  let fresh = { base with Types.claim = "fresh"; Types.valid_until = Some (now +. days 1) } in
+  let live, gone = Types.partition_expired ~now [ durable; expired; fresh ] in
+  Alcotest.(check (list string))
+    "live keeps durable + fresh in order"
+    [ "durable"; "fresh" ]
+    (List.map (fun f -> f.Types.claim) live);
+  Alcotest.(check (list string))
+    "expired partition holds only the expired row"
+    [ "expired" ]
+    (List.map (fun f -> f.Types.claim) gone)
+;;
+
+(* RFC-0259 §3.6 (P5): cap_facts evicts an expired row even when the store is far
+   below [trigger] (the disk-leak the off-by-default GC sweep would otherwise
+   miss), and never evicts a durable row. Re-running is a no-op once clean. *)
+let test_cap_drops_expired_below_trigger () =
+  with_temp_keepers_dir (fun _ ->
+    let keeper_id = "virtual-memory-keeper" in
+    let now = 1_000_000.0 in
+    let base = fact_fixture ~now () in
+    let durable = { base with Types.claim = "durable-keep"; Types.valid_until = None } in
+    let expired =
+      { base with Types.claim = "expired-drop"; Types.valid_until = Some (now -. 1.0) }
+    in
+    let fresh =
+      { base with Types.claim = "fresh-keep"; Types.valid_until = Some (now +. days 1) }
+    in
+    List.iter (Memory_io.append_fact ~keeper_id) [ durable; expired; fresh ];
+    let dropped =
+      Memory_io.cap_facts
+        ~now
+        ~keeper_id
+        ~keep:Memory_io.fact_recall_window
+        ~trigger:Memory_io.fact_store_max
+        ~rank:(Policy.retention_rank ~now)
+    in
+    Alcotest.(check int) "one expired row dropped below trigger" 1 dropped;
+    let remaining =
+      List.map (fun f -> f.Types.claim) (Memory_io.read_all_facts ~keeper_id)
+    in
+    Alcotest.(check bool) "durable survives" true (List.mem "durable-keep" remaining);
+    Alcotest.(check bool) "fresh survives" true (List.mem "fresh-keep" remaining);
+    Alcotest.(check bool) "expired evicted" false (List.mem "expired-drop" remaining);
+    let dropped2 =
+      Memory_io.cap_facts
+        ~now
+        ~keeper_id
+        ~keep:Memory_io.fact_recall_window
+        ~trigger:Memory_io.fact_store_max
+        ~rank:(Policy.retention_rank ~now)
+    in
+    Alcotest.(check int) "idempotent: no-op once clean" 0 dropped2)
+;;
+
+(* RFC-0259 §3.6 (P5): the production librarian write path (merge_and_cap_facts)
+   evicts expired rows even with no incoming claims and the store below trigger,
+   counting them in [dropped]. This is the load-bearing fix — an idle-ish keeper
+   that stops extracting must not keep expired volatile rows on disk. *)
+let test_merge_and_cap_drops_expired_no_incoming () =
+  with_temp_keepers_dir (fun _ ->
+    let keeper_id = "virtual-memory-keeper" in
+    let now = 1_000_000.0 in
+    let base = fact_fixture ~now () in
+    let durable = { base with Types.claim = "durable"; Types.valid_until = None } in
+    let expired =
+      { base with Types.claim = "expired"; Types.valid_until = Some (now -. 1.0) }
+    in
+    List.iter (Memory_io.append_fact ~keeper_id) [ durable; expired ];
+    let stats =
+      Memory_io.merge_and_cap_facts
+        ~now
+        ~keeper_id
+        ~merge:(Policy.reobserve_fact ~now)
+        ~incoming:[]
+        ~keep:Memory_io.fact_recall_window
+        ~trigger:Memory_io.fact_store_max
+        ~rank:(Policy.retention_rank ~now)
+    in
+    Alcotest.(check int) "expired counted in dropped" 1 stats.Memory_io.dropped;
+    let remaining =
+      List.map (fun f -> f.Types.claim) (Memory_io.read_all_facts ~keeper_id)
+    in
+    Alcotest.(check (list string)) "only durable remains" [ "durable" ] remaining)
 ;;
 
 let test_recall_context_renders_sanitized_memory () =
@@ -2598,6 +2693,7 @@ let test_merge_and_cap_upserts_reobserved_claim () =
     in
     let stats =
       Memory_io.merge_and_cap_facts
+        ~now
         ~keeper_id
         ~merge:(Policy.reobserve_fact ~now)
         ~incoming:[ reobserved ]
@@ -2634,6 +2730,7 @@ let test_merge_and_cap_appends_distinct_and_caps () =
     in
     let stats =
       Memory_io.merge_and_cap_facts
+        ~now
         ~keeper_id
         ~merge:(Policy.reobserve_fact ~now)
         ~incoming:[ mk 1; mk 2; mk 3 ]
@@ -3382,6 +3479,7 @@ let test_merge_and_cap_upserts_same_claim_id () =
     in
     let stats =
       Memory_io.merge_and_cap_facts
+        ~now
         ~keeper_id
         ~merge:(Policy.reobserve_fact ~now)
         ~incoming:[ reworded ]
@@ -3431,6 +3529,7 @@ let test_merge_and_cap_no_over_merge_distinct_conclusions () =
     in
     let stats =
       Memory_io.merge_and_cap_facts
+        ~now
         ~keeper_id
         ~merge:(Policy.reobserve_fact ~now)
         ~incoming:[ merged ]
@@ -3725,6 +3824,18 @@ let () =
             "cap_facts keeps top-ranked (RFC-0239 Q4)"
             `Quick
             test_cap_facts_keeps_top_ranked
+        ; Alcotest.test_case
+            "partition_expired splits on valid_until (RFC-0259 P5)"
+            `Quick
+            test_partition_expired_splits_on_valid_until
+        ; Alcotest.test_case
+            "cap_facts drops expired below trigger (RFC-0259 P5)"
+            `Quick
+            test_cap_drops_expired_below_trigger
+        ; Alcotest.test_case
+            "merge_and_cap drops expired with no incoming (RFC-0259 P5)"
+            `Quick
+            test_merge_and_cap_drops_expired_no_incoming
         ; Alcotest.test_case
             "merge_and_cap upserts re-observed claim (RFC-0243)"
             `Quick

@@ -154,6 +154,12 @@ type fact =
     [valid_until] are durable and current. *)
 val fact_is_current : now:float -> fact -> bool
 
+(** RFC-0259 §3.6 (P5): partition facts into [(live, expired)] at [now] on the
+    [valid_until] boundary ([fact_is_current]). The cap path drops the expired
+    partition so on-disk retention honours the same [valid_until] the GC sweep
+    does. Durable facts ([valid_until = None]) are always in [live]. *)
+val partition_expired : now:float -> fact list -> fact list * fact list
+
 (** The time a fact was last known good: [last_verified_at] if set, else
     [first_seen]. The SSOT staleness anchor shared by the reconciler, recall,
     and dashboard user-model ordering so those paths cannot drift on the anchor

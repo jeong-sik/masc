@@ -125,9 +125,17 @@ val read_all_facts : keeper_id:string -> fact list
 (** When the fact store exceeds [trigger], keep the [keep] highest-[rank]ed
     facts and atomically rewrite the file; otherwise no-op. Returns the number
     of facts dropped. The hysteresis ([trigger] > [keep]) keeps rewrites off the
-    per-turn hot path. *)
+    per-turn hot path. RFC-0259 §3.6 (P5): rows expired at [now] (typed
+    [valid_until] boundary) are dropped before the trigger gate and ranking, so
+    an under-cap store does not retain them; expired rows count toward the
+    returned total. *)
 val cap_facts :
-  keeper_id:string -> keep:int -> trigger:int -> rank:(fact -> float) -> int
+  now:float
+  -> keeper_id:string
+  -> keep:int
+  -> trigger:int
+  -> rank:(fact -> float)
+  -> int
 
 (** Outcome of a [merge_and_cap_facts] write: how many incoming claims were
     folded into an existing fact ([merged]), persisted as new facts
@@ -143,9 +151,13 @@ type fact_merge_stats =
     in via [merge] (so confidence/access/verification evolve) instead of
     appending an immortal duplicate — then apply the [keep]/[trigger]/[rank]
     retention cap, all in a single atomic rewrite. Replaces the blind append +
-    [cap_facts] pair, giving the store write-time dedup. *)
+    [cap_facts] pair, giving the store write-time dedup. RFC-0259 §3.6 (P5): rows
+    expired at [now] are dropped on the same [valid_until] boundary the GC sweep
+    uses, before the trigger gate, so the librarian write path keeps the on-disk
+    store free of expired rows even below the cap; they count toward [dropped]. *)
 val merge_and_cap_facts :
-  keeper_id:string
+  now:float
+  -> keeper_id:string
   -> merge:(existing:fact -> incoming:fact -> fact)
   -> incoming:fact list
   -> keep:int

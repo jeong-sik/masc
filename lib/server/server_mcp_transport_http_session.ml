@@ -169,8 +169,14 @@ let sessions_file_path () =
 let save_sessions_to_file () =
   let path = sessions_file_path () in
   let dir = Filename.dirname path in
-  if not (Stdlib.Sys.file_exists dir) then
-    try Unix.mkdir dir 0o755 with Unix.Unix_error _ -> ();
+  (* [begin]/[end] close the [then] branch so the trailing [;] sequences into
+     the rest of the function. Without them, OCaml absorbs [; let versions =
+     ... in <body>] into the [Unix.Unix_error] handler, so the serialize/write
+     ran only when [mkdir] raised — i.e. never on the happy path (dir already
+     present or mkdir succeeds), silently persisting nothing. *)
+  if not (Stdlib.Sys.file_exists dir) then begin
+    try Unix.mkdir dir 0o755 with Unix.Unix_error _ -> ()
+  end;
   let versions = Atomic.get protocol_version_by_session in
   let profiles = Atomic.get mcp_profile_by_session in
   let timestamps = Atomic.get session_last_active_sse in
@@ -229,9 +235,26 @@ let save_sessions_to_file () =
   let json = `Assoc [ "sessions", `Assoc json_entries ] in
   let tmp_path = path ^ ".tmp" in
   let oc = open_out tmp_path in
-  output_string oc (Yojson.Basic.to_string json);
-  output_char oc '\n';
-  close_out oc;
+  (* Release the fd on every exit path. A mid-write/flush [Sys_error] (disk
+     full, I/O error) previously skipped [close_out] and leaked [oc]; this
+     runs once per reap cycle and the sole caller swallows the error, so the
+     leak accumulated across cycles until fd exhaustion. [flush] stays inside
+     the body so a flush failure still surfaces (caught below, tmp removed,
+     re-raised) rather than renaming a truncated file; [close_out_noerr] in
+     the finally only releases the fd. Mirrors [atomic_write_file] in
+     server_routes_http_routes_sidecar.ml. *)
+  (try
+     Eio_guard.protect
+       ~finally:(fun () -> close_out_noerr oc)
+       (fun () ->
+         output_string oc (Yojson.Basic.to_string json);
+         output_char oc '\n';
+         flush oc)
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     (try Sys.remove tmp_path with Sys_error _ -> ());
+     raise exn);
   Unix.rename tmp_path path
 
 (** Load session state from disk. Restores protocol versions, profiles,

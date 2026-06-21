@@ -662,7 +662,8 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
                    ~fixture:None
                    ~full_mode:false
                    ~light:true
-                   ~default_light_request:true));
+                   ~default_light_request:true
+                   ~force:false));
       !broadcast_namespace_truth_ref state)
 ;;
 

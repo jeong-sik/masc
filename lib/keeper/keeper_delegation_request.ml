@@ -55,23 +55,33 @@ let truncate ~max_len text =
   in
   prefix
 
+let optional_identity_component ~field = function
+  | None -> field ^ ":none"
+  | Some value -> field ^ ":some:" ^ value
+;;
+
 let digest_id ~requester ?goal ~topic ~reason () =
-  let goal_text =
-    match goal with
-    | Some text -> text
-    | None -> ""
-  in
   let raw =
     String.concat "\n"
       [
         requester;
         topic;
         reason;
-        goal_text;
+        optional_identity_component ~field:"goal" goal;
       ]
   in
   let hex = Digest.to_hex (Digest.string raw) in
   "delegation-" ^ String.sub hex 0 12
+
+let identity_key request =
+  String.concat "\n"
+    [
+      request.id;
+      request.requester;
+      request.topic;
+      request.reason;
+      optional_identity_component ~field:"goal" request.goal;
+    ]
 
 let task_seed ~requester ?goal ~topic ~reason () =
   let title_topic = topic |> compact_whitespace |> truncate ~max_len:80 in

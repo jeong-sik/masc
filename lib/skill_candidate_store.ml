@@ -38,23 +38,6 @@ let drafts_dir ~base_path =
 
 let index_path ~base_path = Filename.concat (drafts_dir ~base_path) "index.jsonl"
 
-let component_hash raw =
-  Digestif.SHA256.(digest_string raw |> to_hex) |> fun hex -> String.sub hex 0 16
-;;
-
-let component_prefix raw =
-  let safe =
-    Workspace_utils_backend_setup.sanitize_namespace_segment raw
-    |> String.lowercase_ascii
-  in
-  let safe =
-    match safe with
-    | "default" when String.equal (String.trim raw) "" -> "untitled"
-    | other -> other
-  in
-  if String.length safe > 48 then String.sub safe 0 48 else safe
-;;
-
 let candidate_identity_key (candidate : Skill_candidate_projection.skill_candidate) =
   String.concat "\n"
     [ candidate.source_kind; candidate.agent_name; candidate.source_ref ]
@@ -65,7 +48,9 @@ let summary_identity_key (summary : draft_summary) =
 ;;
 
 let candidate_component (candidate : Skill_candidate_projection.skill_candidate) =
-  component_prefix candidate.id ^ "-" ^ component_hash (candidate_identity_key candidate)
+  Review_artifact_store.component
+    ~display_id:candidate.id
+    ~identity_key:(candidate_identity_key candidate)
 ;;
 
 let draft_dir ~base_path (candidate : Skill_candidate_projection.skill_candidate) =
@@ -112,13 +97,6 @@ let render_candidate_toml (c : Skill_candidate_projection.skill_candidate) =
   |> Otoml.Printer.to_string
 ;;
 
-let write_file path content =
-  Fs_compat.mkdir_p (Filename.dirname path);
-  match Fs_compat.save_file_atomic path content with
-  | Ok () -> Ok ()
-  | Error msg -> Error (Printf.sprintf "%s: %s" path msg)
-;;
-
 let index_event_json (c : Skill_candidate_projection.skill_candidate) ~dir ~json_path
       ~toml_path ~skill_md_path =
   `Assoc
@@ -135,15 +113,6 @@ let index_event_json (c : Skill_candidate_projection.skill_candidate) ~dir ~json
     ; "skill_md_path", `String skill_md_path
     ; "ts", `Float (Time_compat.now ())
     ]
-;;
-
-let append_index index_path event =
-  try
-    Keeper_types_support.append_jsonl_line index_path event;
-    Ok ()
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (Printf.sprintf "%s: %s" index_path (Printexc.to_string exn))
 ;;
 
 let ( let* ) = Result.bind
@@ -166,20 +135,30 @@ let candidate_artifacts ~base_path candidate =
   ]
 ;;
 
+let stored_candidate ~base_path candidate =
+  { candidate
+  ; dir = draft_dir ~base_path candidate
+  ; json_path = candidate_json_path ~base_path candidate
+  ; toml_path = candidate_toml_path ~base_path candidate
+  ; skill_md_path = candidate_skill_md_path ~base_path candidate
+  ; index_path = index_path ~base_path
+  }
+;;
+
 let write_candidate ~base_path (candidate : Skill_candidate_projection.skill_candidate) =
-  let dir = draft_dir ~base_path candidate in
-  let json_path = candidate_json_path ~base_path candidate in
-  let toml_path = candidate_toml_path ~base_path candidate in
-  let skill_md_path = candidate_skill_md_path ~base_path candidate in
-  let index_path = index_path ~base_path in
-  let* () = write_file json_path (candidate_json_content candidate) in
-  let* () = write_file toml_path (render_candidate_toml candidate) in
-  let* () = write_file skill_md_path (Skill_candidate_projection.render_skill_draft candidate) in
+  let stored = stored_candidate ~base_path candidate in
   let* () =
-    append_index index_path
-      (index_event_json candidate ~dir ~json_path ~toml_path ~skill_md_path)
+    Review_artifact_store.write_artifacts
+      ~index_path:stored.index_path
+      ~artifacts:(candidate_artifacts ~base_path candidate)
+      ~index_event:
+        (index_event_json candidate
+           ~dir:stored.dir
+           ~json_path:stored.json_path
+           ~toml_path:stored.toml_path
+           ~skill_md_path:stored.skill_md_path)
   in
-  Ok { candidate; dir; json_path; toml_path; skill_md_path; index_path }
+  Ok stored
 ;;
 
 let write_candidates ~base_path candidates =
@@ -191,8 +170,6 @@ let write_candidates ~base_path candidates =
   in
   loop [] candidates
 ;;
-
-let read_file_opt = Fs_compat.load_file_opt
 
 let index_event_matches_candidate ~base_path
     (candidate : Skill_candidate_projection.skill_candidate) json =
@@ -234,39 +211,26 @@ let index_event_matches_candidate ~base_path
   | _ -> false
 ;;
 
-let index_contains_candidate ~base_path candidate =
-  let index_path = index_path ~base_path in
-  if not (Fs_compat.file_exists index_path)
-  then Ok false
-  else
-    try
-      Ok
-        (Fs_compat.load_jsonl index_path
-         |> List.exists (index_event_matches_candidate ~base_path candidate))
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Printf.sprintf "%s: %s" index_path (Printexc.to_string exn))
-;;
-
 let write_candidate_if_changed ~base_path candidate =
   (* Artifact files and the index are intentionally checked together: a prior
      write can leave complete artifacts but miss the final index append. The
      next post-turn pass should repair that listing row instead of treating the
      draft as fully persisted. This is a safety net until #21871 makes the
      index/artifact persistence atomic or derives one side from the other. *)
-  let artifacts_unchanged =
-    candidate_artifacts ~base_path candidate
-    |> List.for_all (fun (path, expected) ->
-      match read_file_opt path with
-      | Some content -> String.equal content expected
-      | None -> false)
+  let stored = stored_candidate ~base_path candidate in
+  let* changed =
+    Review_artifact_store.write_if_changed
+      ~index_path:stored.index_path
+      ~artifacts:(candidate_artifacts ~base_path candidate)
+      ~index_event:
+        (index_event_json candidate
+           ~dir:stored.dir
+           ~json_path:stored.json_path
+           ~toml_path:stored.toml_path
+           ~skill_md_path:stored.skill_md_path)
+      ~matches:(index_event_matches_candidate ~base_path candidate)
   in
-  let* indexed = index_contains_candidate ~base_path candidate in
-  if artifacts_unchanged && indexed
-  then Ok None
-  else (
-    let* stored = write_candidate ~base_path candidate in
-    Ok (Some stored))
+  if changed then Ok (Some stored) else Ok None
 ;;
 
 let dedup_candidates candidates =
@@ -358,47 +322,17 @@ let draft_summary_of_index_event json =
   | _ -> None
 ;;
 
-let take n xs =
-  let rec loop acc remaining = function
-    | _ when remaining <= 0 -> List.rev acc
-    | [] -> List.rev acc
-    | x :: rest -> loop (x :: acc) (remaining - 1) rest
-  in
-  loop [] n xs
-;;
-
-let latest_unique summaries =
-  let seen = Hashtbl.create 16 in
-  List.filter
-    (fun (summary : draft_summary) ->
-      let key = summary_identity_key summary in
-      if Hashtbl.mem seen key
-      then false
-      else (
-        Hashtbl.add seen key ();
-        true))
-    summaries
-;;
-
 let list_drafts ~base_path ~limit =
   let index_path = index_path ~base_path in
   let limit = max 0 limit in
-  try
-    let items =
-      if Fs_compat.file_exists index_path
-      then
-        Fs_compat.load_jsonl index_path
-        |> List.rev
-        |> List.filter_map draft_summary_of_index_event
-        |> latest_unique
-      else []
-    in
-    let total = List.length items in
-    let items = take limit items in
-    Ok { total; shown = List.length items; limit; index_path; items }
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (Printf.sprintf "%s: %s" index_path (Printexc.to_string exn))
+  let* (total, items) =
+    Review_artifact_store.list_index
+      ~index_path
+      ~limit
+      ~of_json:draft_summary_of_index_event
+      ~identity_key:summary_identity_key
+  in
+  Ok { total; shown = List.length items; limit; index_path; items }
 ;;
 
 let json_option_float = function

@@ -18,6 +18,7 @@ let run
   ~post_turn_t0
   ~runtime_id
   ~inference_telemetry
+  ?deliberation_execution
   ()
   =
   (* RFC-0257: snapshot the per-keeper tool-emission accumulator synchronously
@@ -93,6 +94,46 @@ let run
     ~runtime_id
     ~keeper_id:meta.name
     librarian_input;
+
+  (* Advisory delegation request drafts: keep review artifact persistence on the
+     same bounded post-turn memory lane as draft-skill projection, not on the
+     decision-record append path. *)
+  (try
+     match deliberation_execution with
+     | None -> ()
+     | Some execution -> (
+       match
+         Keeper_delegation_request_store.write_execution_result
+           ~base_path:config.base_path
+           ~requester:meta.name
+           ~goal:meta.goal
+           execution
+       with
+       | Ok [] -> ()
+       | Ok stored ->
+         Log.Keeper.info ~keeper_name:meta.name
+           "delegation_requests wrote=%d dir=%s"
+           (List.length stored)
+           (Keeper_delegation_request_store.requests_dir
+              ~base_path:config.base_path)
+       | Error msg ->
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string DispatchEventFailures)
+           ~labels:[ "keeper", meta.name; "site", "delegation_requests" ]
+           ();
+         Log.Keeper.warn ~keeper_name:meta.name
+           "delegation_requests failed: %s"
+           msg)
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     Otel_metric_store.inc_counter
+       Keeper_metrics.(to_string DispatchEventFailures)
+       ~labels:[ "keeper", meta.name; "site", "delegation_requests" ]
+       ();
+     Log.Keeper.warn ~keeper_name:meta.name
+       "delegation_requests failed: %s"
+       (Printexc.to_string exn));
 
   (* Memory OS -> draft skill loop: after librarian facts are durable, project
      validated approaches / lessons into reviewable draft skill artifacts. This

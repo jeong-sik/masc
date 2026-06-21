@@ -6,6 +6,8 @@ module Memory_io = Masc.Keeper_memory_os_io
 module P = Masc.Procedural_memory
 module Projection = Masc.Skill_candidate_projection
 module Store = Masc.Skill_candidate_store
+module Delegation_request = Masc.Keeper_delegation_request
+module Delegation_store = Masc.Keeper_delegation_request_store
 module Types = Masc.Keeper_memory_os_types
 
 let request target =
@@ -237,6 +239,47 @@ let test_http_json_surfaces_draft_skill_candidates () =
          (Filename.basename Json.(item |> member "skill_md_path" |> to_string)))
 ;;
 
+let test_http_json_surfaces_delegation_requests () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+      let config = Workspace_utils.default_config dir in
+      let delegation =
+        Delegation_request.make ~requester:"planner"
+          ~goal:"ship connector parity"
+          ~topic:"Review non-dashboard rendering"
+          ~reason:"existing channels lose rich blocks"
+          ()
+      in
+      (match Delegation_store.write_request ~base_path:dir delegation with
+       | Ok _ -> ()
+       | Error msg -> fail msg);
+      let json =
+        Memory_subsystems.dashboard_memory_subsystems_http_json
+          ~config
+          ~include_memory_entries:false
+          (request "/dashboard/memory-subsystems?limit=100")
+      in
+      let requests = Json.(json |> member "delegation_requests") in
+      check int "delegation total" 1 Json.(requests |> member "total" |> to_int);
+      check int "delegation shown" 1 Json.(requests |> member "shown" |> to_int);
+      check string "delegation index path"
+        (Delegation_store.index_path ~base_path:dir)
+        Json.(requests |> member "index_path" |> to_string);
+      let item =
+        match Json.(requests |> member "items" |> to_list) with
+        | [ item ] -> item
+        | _ -> fail "expected one delegation request"
+      in
+      check string "delegation id" delegation.id
+        Json.(item |> member "id" |> to_string);
+      check string "delegation requester" "planner"
+        Json.(item |> member "requester" |> to_string);
+      check string "task seed suffix" "TASK_SEED.md"
+        (Filename.basename Json.(item |> member "task_seed_md_path" |> to_string)))
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   Alcotest.run
@@ -268,6 +311,10 @@ let () =
             "surfaces draft skill candidates"
             `Quick
             test_http_json_surfaces_draft_skill_candidates
+        ; test_case
+            "surfaces delegation requests"
+            `Quick
+            test_http_json_surfaces_delegation_requests
         ] )
     ]
 ;;

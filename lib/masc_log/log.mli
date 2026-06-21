@@ -143,11 +143,17 @@ module Ring : sig
     ?min_level:int ->
     ?module_filter:string ->
     ?since_seq:int ->
+    ?before_seq:int ->
     ?order:[< `Newest_first | `Oldest_first > `Newest_first ] ->
     ?category_filter:string ->
     ?exclude_category:string list ->
     unit ->
     entry list
+  (** Read a slice of the in-memory ring, newest-first by default.
+      [since_seq] returns only entries strictly newer than the cursor (forward
+      delta polling); [before_seq] returns only entries strictly older than the
+      cursor (backward "load older" paging). Both are inclusive-exclusive on the
+      cursor and compose into a bounded window when supplied together. *)
 
   val entry_to_json : entry -> Yojson.Safe.t
   val entry_of_json : Yojson.Safe.t -> entry

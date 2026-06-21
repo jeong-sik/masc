@@ -397,6 +397,13 @@ let add_routes ~sw ~clock router =
                  let seq = Server_utils.int_query_param req "since_seq" ~default:(-1) in
                  if seq < 0 then None else Some seq
            in
+           let before_seq =
+             match Server_utils.query_param req "before_seq" with
+             | None -> None
+             | Some _ ->
+                 let seq = Server_utils.int_query_param req "before_seq" ~default:(-1) in
+                 if seq < 0 then None else Some seq
+           in
            let module_filter = match Server_utils.query_param req "module" with
              | Some v -> v
              | None -> ""
@@ -415,12 +422,12 @@ let add_routes ~sw ~clock router =
            in
            let entries =
              Log.Ring.recent ~limit ~min_level ~module_filter ?since_seq
-               ?category_filter ?exclude_category ()
+               ?before_seq ?category_filter ?exclude_category ()
            in
            let json =
              dashboard_logs_json ~config:(Mcp_server.workspace_config state) ~limit
                ~level_filter ~applied_level ~min_level ~module_filter ~since_seq
-               ~category_filter ~exclude_category entries
+               ~before_seq ~category_filter ~exclude_category entries
            in
            Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

@@ -25,6 +25,7 @@ let build
       ~min_level
       ~module_filter
       ~since_seq
+      ~before_seq
       ~category_filter
       ~exclude_category
       (entries : Log.Ring.entry list)
@@ -67,6 +68,7 @@ let build
              ; "min_level", `Int min_level
              ; "module", `String module_filter
              ; "since_seq", Json_util.int_option_to_yojson since_seq
+             ; "before_seq", Json_util.int_option_to_yojson before_seq
              ; "category", Json_util.string_opt_to_json category_filter
              ; ( "exclude_category"
                , match exclude_category with

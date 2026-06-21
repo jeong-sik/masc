@@ -627,6 +627,7 @@ module Ring = struct
 
   let recent ?(limit = 200) ?(min_level = 0) ?(module_filter = "")
       ?since_seq
+      ?before_seq
       ?(order = `Newest_first)
       ?category_filter
       ?exclude_category
@@ -635,14 +636,25 @@ module Ring = struct
     if t = 0 then []
     else begin
       let start = max 0 (t - capacity) in
+      (* [since_seq] raises the lower bound (entries strictly newer than the
+         cursor); [before_seq] lowers the upper bound (entries strictly older
+         than the cursor). For retained slots in [start, t-1] the entry seq
+         equals its scan index [i] (seq is assigned monotonically and the ring
+         only retains the last [capacity] entries), so seq comparisons reduce
+         to index bounds. The two cursors compose into a bounded window. *)
       let start =
         match since_seq with
         | Some seq -> max start (seq + 1)
         | None -> start
       in
+      let upper =
+        match before_seq with
+        | Some seq -> min (t - 1) (seq - 1)
+        | None -> t - 1
+      in
       let entries = ref [] in
       let count = ref 0 in
-      let i = ref (t - 1) in
+      let i = ref upper in
       while !i >= start && !count < limit do
         let e = buf.(!i mod capacity) in
         let level_ok = level_to_int e.level >= min_level in

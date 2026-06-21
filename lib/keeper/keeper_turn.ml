@@ -662,16 +662,23 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
                     | _ -> 24
                   in
                   let window_minutes = window_hours * 60 in
-                  (try
-                     Model_inference_metrics.compute
-                       ~base_path:ctx.config.base_path
-                       ~window_minutes
-                     |> Model_inference_metrics.render_keeper_prompt_feedback
-                   with exn ->
-                     Log.Keeper.warn
-                       "%s: telemetry feedback render failed: %s"
-                       meta.name (Printexc.to_string exn);
-                     "")
+                  (* compute reads JSONL via Eio (Fs_compat.fold_jsonl_lines),
+                     a cancellation point, so a bare catch-all here would
+                     swallow [Eio.Cancel.Cancelled] and let a cancelled turn
+                     keep building its prompt. Route through the RFC-0106 SSOT
+                     combinator, which re-raises Cancelled and recovers others
+                     (matches the trajectory-finalize handlers below). *)
+                  Cancel_safe.protect
+                    ~on_exn:(fun exn ->
+                      Log.Keeper.warn
+                        "%s: telemetry feedback render failed: %s"
+                        meta.name (Printexc.to_string exn);
+                      "")
+                    (fun () ->
+                      Model_inference_metrics.compute
+                        ~base_path:ctx.config.base_path
+                        ~window_minutes
+                      |> Model_inference_metrics.render_keeper_prompt_feedback)
                 | Some false | None -> ""
               in
               let soft_parts = List.filter

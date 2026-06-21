@@ -1145,6 +1145,13 @@
  (modules test_server_utils_bounded_cache)
  (libraries alcotest masc))
 
+; RFC-0106 cancel-safe combinator: re-raises Cancelled, routes others.
+
+(test
+ (name test_cancel_safe)
+ (modules test_cancel_safe)
+ (libraries alcotest masc_cancel_safe eio))
+
 ; Warn-log dedup table stays bounded under distinct token-hash-prefix churn.
 
 (test

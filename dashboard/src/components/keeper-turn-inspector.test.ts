@@ -559,50 +559,56 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(meta).toContain('n/a')
   })
 
-  it('renders sampling params from the record without fabricating top_p/max_tokens', async () => {
-    const response = turnRecordsWithMemoryOs()
-    response.entries[1] = {
-      ...response.entries[1]!,
-      record: {
-        ...response.entries[1]!.record,
-        temperature: 0.7,
-        top_p: 0.9,
-        max_tokens: 8192,
-        thinking_budget: 2048,
-        enable_thinking: true,
-      },
-    }
-    fetchKeeperTurnRecordsMock.mockResolvedValue(response)
+  it.each([
+    { enableThinking: true, expected: 'on' },
+    { enableThinking: false, expected: 'off' },
+  ] as Array<{ enableThinking: boolean; expected: string }>)(
+    'renders sampling params from the record without fabricating top_p/max_tokens ($expected)',
+    async ({ enableThinking, expected }) => {
+      const response = turnRecordsWithMemoryOs()
+      response.entries[1] = {
+        ...response.entries[1]!,
+        record: {
+          ...response.entries[1]!.record,
+          temperature: 0.7,
+          top_p: 0.9,
+          max_tokens: 8192,
+          thinking_budget: 2048,
+          enable_thinking: enableThinking,
+        },
+      }
+      fetchKeeperTurnRecordsMock.mockResolvedValue(response)
 
-    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+      const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
 
-    await waitFor(() => {
-      expect(container.textContent).toContain('T42')
-    })
+      await waitFor(() => {
+        expect(container.textContent).toContain('T42')
+      })
 
-    fireEvent.click(container.querySelector('.kti-turn-summary')!)
-    fireEvent.click(container.querySelector('[data-testid="turn-tab-meta"]')!)
+      fireEvent.click(container.querySelector('.kti-turn-summary')!)
+      fireEvent.click(container.querySelector('[data-testid="turn-tab-meta"]')!)
 
-    await waitFor(() => {
-      expect(container.textContent).toContain('샘플링 파라미터')
-    })
+      await waitFor(() => {
+        expect(container.textContent).toContain('샘플링 파라미터')
+      })
 
-    const params = container.querySelector('.kti-params')?.textContent ?? ''
-    // real, record-backed sampling fields are surfaced
-    expect(params).toContain('temperature')
-    expect(params).toContain('0.7')
-    expect(params).toContain('top_p')
-    expect(params).toContain('0.9')
-    expect(params).toContain('max_tokens')
-    expect(params).toContain('8,192')
-    expect(params).toContain('thinking_budget')
-    expect(params).toContain('2048')
-    expect(params).toContain('enable_thinking')
-    expect(params).toContain('on')
-    // fabricated, non-modeled literals are gone
-    expect(params).not.toContain('0.95')
-    expect(params).not.toContain('4,096')
-  })
+      const params = container.querySelector('.kti-params')?.textContent ?? ''
+      // real, record-backed sampling fields are surfaced
+      expect(params).toContain('temperature')
+      expect(params).toContain('0.7')
+      expect(params).toContain('top_p')
+      expect(params).toContain('0.9')
+      expect(params).toContain('max_tokens')
+      expect(params).toContain('8,192')
+      expect(params).toContain('thinking_budget')
+      expect(params).toContain('2048')
+      expect(params).toContain('enable_thinking')
+      expect(params).toContain(expected)
+      // fabricated, non-modeled literals are gone
+      expect(params).not.toContain('0.95')
+      expect(params).not.toContain('4,096')
+    },
+  )
 
   it('renders sampling param absence as — when the record omits them', async () => {
     const response = turnRecordsWithMemoryOs()

@@ -395,13 +395,16 @@ end
 
 (** {1 Keeper Max-Turn Watchdog (RFC-0109 P4)}
 
-    Opt-in keeper-level wall-clock watchdog. Default disabled — opt-in
-    via [MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC]. Backward-compat
-    until an operator turns it on.
+    Default-on keeper-level wall-clock watchdog. A [Running] keeper whose
+    current turn exceeds the threshold is presumed hung and restarted via
+    the existing [Stale_turn_timeout In_turn_hung] crash-recovery path.
+    Default 1800s (30 min): normal turns complete in seconds to a few
+    minutes, so healthy keepers are unaffected. Set
+    [MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC=0] to disable.
 
-    When enabled, the supervisor races each keeper's keepalive loop
-    against [Eio.Time.sleep clock t] via [Eio.Fiber.first]. Timer
-    expiry cancels the loop fiber and the registry is stamped with
+    The supervisor races each keeper's keepalive loop against
+    [Eio.Time.sleep clock t] via [Eio.Fiber.first]. Timer expiry cancels
+    the loop fiber and the registry is stamped with
     [Stale_turn_timeout "max_turn_watchdog"], which the existing
     [sweep_and_recover] crash-recovery path already understands.
 
@@ -413,7 +416,7 @@ module Keeper_max_turn_watchdog = struct
   let timeout_sec_opt () =
     let v =
       get_float
-        ~default:0.0
+        ~default:1800.0
         "MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC"
     in
     if v > 0.0 then Some v else None
@@ -422,12 +425,12 @@ end
 (** {1 Keeper Stale-Run Window (RFC-0250)}
 
     Default-on wall-clock window for the no-turn-produced case, distinct
-    from the opt-in [Keeper_max_turn_watchdog] above. The max-turn watchdog
-    produces [In_turn_hung] (a turn is taking too long); this window produces
-    [Idle_turn] (no turn has completed at all). It keys on [last_turn_ts]
-    while [current_turn_observation = None] — exactly the [Idle_turn]
-    variant's doc contract — so it does not re-introduce the per-turn
-    wall-clock timeout that was deliberately removed
+    from the default-on [Keeper_max_turn_watchdog] above. The max-turn
+    watchdog produces [In_turn_hung] (a turn is taking too long); this
+    window produces [Idle_turn] (no turn has completed at all). It keys on
+    [last_turn_ts] while [current_turn_observation = None] — exactly the
+    [Idle_turn] variant's doc contract — so it does not re-introduce the
+    per-turn wall-clock timeout that was deliberately removed
     ([keeper_unified_turn_attempt_watchdog]).
 
     Default 1800s: a [Running] keeper that has not completed a turn in 30 min

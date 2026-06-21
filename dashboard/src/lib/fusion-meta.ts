@@ -4,7 +4,6 @@
 // is the single source of truth for that normalization.
 
 import { isRecord } from './type-guards'
-import { asRecord, asString } from '../components/common/normalize'
 
 function decodeOcamlStringLiteral(value: string): string {
   return value
@@ -41,10 +40,20 @@ export function normalizeFusionPanelReason(model: string, reason: string | undef
 // Generic defensive helpers for loose wire metadata
 // ---------------------------------------------------------------------------
 
-// Reuse `asString` / `asRecord` / `asStringArray` from `common/normalize` and
-// `isRecord` from `lib/type-guards`. `asNumber` is kept local because the
-// fusion wire format emits token counts as both numbers and numeric strings,
-// whereas `common/normalize.asNumber` rejects strings by design.
+// Local defensive helpers for loose wire metadata. These are intentionally
+// defined in `lib/` so that `lib/fusion-meta.ts` does not import from
+// `components/`, avoiding a layer cycle (`components/` already depends on
+// `lib/`).
+
+function asString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed !== '' ? trimmed : undefined
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return isRecord(value) ? value : null
+}
 
 export function asNumber(value: unknown): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null

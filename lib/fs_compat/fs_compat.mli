@@ -72,6 +72,9 @@ val append_file : string -> string -> unit
 (** Check if file exists. *)
 val file_exists : string -> bool
 
+(** Check if path is a directory. *)
+val is_directory : string -> bool
+
 (** Return file size or None *)
 val file_size : string -> int option
 

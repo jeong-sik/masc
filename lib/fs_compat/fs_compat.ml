@@ -274,6 +274,23 @@ let file_exists (path : string) : bool =
        | Eio.Io _ -> false)
 ;;
 
+(** Check if path is a directory.
+    Uses [Unix.stat] in both Eio and fallback contexts so the result is
+    consistent with {!file_exists} and other stat-based helpers. *)
+let is_directory (path : string) : bool =
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () ->
+      try (Unix.stat path).Unix.st_kind = Unix.S_DIR with
+      | Unix.Unix_error _ | Sys_error _ -> false)
+    (fun _fs ->
+       try
+         Eio_unix.run_in_systhread (fun () ->
+           (Unix.stat path).Unix.st_kind = Unix.S_DIR)
+       with
+       | Unix.Unix_error _ | Sys_error _ -> false)
+;;
+
 (** Load entire file contents as string, or [None] when the file is
     missing. Option-returning sibling of {!load_file} (which raises on a
     missing path). [Sys_error] from a vanished file (TOCTOU race after the

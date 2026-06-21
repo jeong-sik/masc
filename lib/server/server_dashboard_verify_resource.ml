@@ -74,29 +74,20 @@ let verify_http ~value =
       { ok; detail; http_status = Some status; target }
   end
 
-(* Expand a leading "~" to $HOME for the worktree basepath (e.g. "~/wt").
-   Reading $HOME is the one environment boundary here; the None case (HOME unset)
-   is handled explicitly — the path is left literal, which then fails the
-   existence check honestly rather than being silently substituted. *)
-let expand_home path =
-  let path = String.trim path in
-  match Sys.getenv_opt "HOME" with
-  | Some home when String.equal path "~" -> home
-  | Some home when String.length path >= 2 && String.equal (String.sub path 0 2) "~/" ->
-    Filename.concat home (String.sub path 2 (String.length path - 2))
-  | Some _ | None -> path
-
-let is_directory path = try Sys.is_directory path with Sys_error _ -> false
-
 (* Filesystem existence for a caller-supplied directory path. Info-disclosure
-   surface (reveals what exists on the host), so gated at the route. *)
+   surface (reveals what exists on the host), so gated at the route.
+
+   Path expansion reuses the canonical [Env_config_core.expand_home_prefix]
+   (which consults boot overrides via [raw_value_opt "HOME"]) instead of a
+   local reimplementation, and filesystem access goes through [Fs_compat]
+   rather than raw [Sys]. *)
 let verify_path ~value =
-  let expanded = expand_home value in
+  let expanded = value |> String.trim |> Env_config_core.expand_home_prefix in
   if String.equal expanded "" then
     { ok = false; detail = "빈 경로"; http_status = None; target = value }
-  else if not (Sys.file_exists expanded) then
+  else if not (Fs_compat.file_exists expanded) then
     { ok = false; detail = "경로 없음"; http_status = None; target = value }
-  else if not (is_directory expanded) then
+  else if not (Fs_compat.is_directory expanded) then
     { ok = false; detail = "디렉터리 아님"; http_status = None; target = value }
   else { ok = true; detail = "경로 존재"; http_status = None; target = value }
 

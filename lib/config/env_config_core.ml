@@ -131,9 +131,14 @@ let strip_path_trailing_slashes value =
   if trimmed = "" then "" else loop trimmed
 
 let expand_home_prefix value =
-  if String.length value >= 2 && value.[0] = '~' && value.[1] = '/' then
+  let len = String.length value in
+  if len >= 1 && value.[0] = '~' then
     match raw_value_opt "HOME" |> trim_opt with
-    | Some home -> Filename.concat home (String.sub value 2 (String.length value - 2))
+    | Some home ->
+      if String.equal value "~" then home
+      else if len >= 2 && value.[1] = '/' then
+        Filename.concat home (String.sub value 2 (len - 2))
+      else value
     | None -> value
   else
     value

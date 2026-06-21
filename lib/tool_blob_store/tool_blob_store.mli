@@ -23,7 +23,11 @@ val put : t -> bytes:string -> mime:string -> Tool_output.t
     [preview] is the first ~200 sanitized chars of [bytes] (control bytes
     replaced with [?], whitespace collapsed to spaces).
 
-    Idempotent: re-putting the same bytes is a no-op (file already exists). *)
+    Idempotent: re-putting the same bytes is a no-op (file already exists).
+
+    @raises Sys_error if the blob write fails (disk full, EACCES, ...). Callers
+    that must not lose bytes should catch this and fall back to the inline
+    payload rather than emitting a marker for bytes that were never persisted. *)
 
 val fetch : t -> sha256:string -> string option
 (** Retrieve bytes by sha256. Returns [None] if not in store. *)

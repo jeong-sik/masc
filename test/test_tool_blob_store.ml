@@ -217,6 +217,25 @@ let test_repeated_put_no_dup () =
         "fetched content matches" (Some payload)
         (B.fetch store ~sha256:sha))
 
+(* --- Storage-failure contract --- *)
+
+(* [put] must surface a storage failure (raise) rather than silently returning
+   a [Stored] marker for bytes it never persisted. Here [base_path] is a
+   regular file, so the blob store directory cannot be created and the write
+   cannot land. Using a file (not a chmod) makes the failure structural
+   (ENOTDIR), so the test holds even when run as root. *)
+let test_put_raises_on_unwritable_store () =
+  let file = Filename.temp_file "masc_blob_unwritable" "" in
+  let store = B.create ~base_path:file in
+  let raised =
+    try
+      let _ = B.put store ~bytes:(String.make 5000 'x') ~mime:"text/plain" in
+      false
+    with _ -> true
+  in
+  (try Sys.remove file with _ -> ());
+  Alcotest.(check bool) "put raises on unwritable store" true raised
+
 (* --- Entry point --- *)
 
 let () =
@@ -250,5 +269,10 @@ let () =
         [
           Alcotest.test_case "repeated put no dup" `Quick
             test_repeated_put_no_dup;
+        ] );
+      ( "storage failure",
+        [
+          Alcotest.test_case "put raises on unwritable store" `Quick
+            test_put_raises_on_unwritable_store;
         ] );
     ]

@@ -360,6 +360,63 @@ describe('dashboard websocket route subscriptions', () => {
     expect(mockSockets).toHaveLength(1)
   })
 
+  it('surfaces disabled discovery reasons without scheduling reconnect', async () => {
+    vi.useFakeTimers()
+    mockSockets.length = 0
+    vi.stubGlobal('WebSocket', MockWebSocket)
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        enabled: false,
+        listening: false,
+        unavailable_reason: 'disabled_by_config',
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    expect(mockSockets).toHaveLength(0)
+    expect(dashboardWsLastError.value).toBe(
+      'dashboard websocket unavailable: disabled_by_config',
+    )
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(mockSockets).toHaveLength(0)
+  })
+
+  it('treats blank websocket discovery URLs as unavailable', async () => {
+    vi.useFakeTimers()
+    mockSockets.length = 0
+    vi.stubGlobal('WebSocket', MockWebSocket)
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        enabled: true,
+        listening: true,
+        ws_url: '   ',
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(wsDiscoveryResponse())
+    vi.stubGlobal('fetch', fetchMock)
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    expect(mockSockets).toHaveLength(0)
+    expect(dashboardWsLastError.value).toBe(
+      'dashboard websocket unavailable: websocket URL unavailable',
+    )
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(mockSockets).toHaveLength(1)
+  })
+
   it('retries discovery when the server withholds ws_url for this host', async () => {
     vi.useFakeTimers()
     mockSockets.length = 0

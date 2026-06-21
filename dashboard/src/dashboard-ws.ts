@@ -103,12 +103,13 @@ function readCachedWsUrl(): string | null {
     const raw = storage.getItem(DASHBOARD_WS_DISCOVERY_CACHE_KEY)
     if (!raw) return null
     const data = JSON.parse(raw) as { ws_url?: unknown }
-    if (typeof data.ws_url !== 'string' || data.ws_url.length === 0) return null
-    if (!sameOriginWebSocketUrl(data.ws_url)) {
+    const wsUrl = nonBlankString(data.ws_url)
+    if (!wsUrl) return null
+    if (!sameOriginWebSocketUrl(wsUrl)) {
       storage.removeItem(DASHBOARD_WS_DISCOVERY_CACHE_KEY)
       return null
     }
-    return data.ws_url
+    return wsUrl
   } catch {
     // Eviction must not propagate: in restricted storage contexts the
     // initial getItem can throw, and a follow-up removeItem can throw too.
@@ -175,7 +176,7 @@ function discoveryUnavailableReason(data: DashboardWsDiscovery): string {
     const listenStatus = nonBlankString(data.listen_status)
     return listenStatus ? `not listening (${listenStatus})` : 'not listening'
   }
-  if (typeof data.ws_url !== 'string') {
+  if (!nonBlankString(data.ws_url)) {
     const sameOriginWsUrl = nonBlankString(data.same_origin_ws_url)
     if (sameOriginWsUrl && data.same_origin_upgrade_enabled !== true) {
       return 'standalone websocket URL unavailable; same-origin upgrade disabled'
@@ -424,7 +425,8 @@ async function discoverWsUrl(): Promise<DashboardWsDiscoveryResult> {
       reason: discoveryUnavailableReason(data),
     }
   }
-  if (data.listening !== true || typeof data.ws_url !== 'string') {
+  const wsUrl = nonBlankString(data.ws_url)
+  if (data.listening !== true || !wsUrl) {
     return {
       wsUrl: null,
       retry: true,
@@ -432,7 +434,7 @@ async function discoverWsUrl(): Promise<DashboardWsDiscoveryResult> {
       reason: discoveryUnavailableReason(data),
     }
   }
-  return { wsUrl: data.ws_url, retry: false, fromCache: false }
+  return { wsUrl, retry: false, fromCache: false }
 }
 
 function sendRpc(method: string, params: JsonObject, timeoutMs = DASHBOARD_WS_RPC_TIMEOUT_MS): Promise<unknown> {
@@ -668,10 +670,12 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
   const wsUrl = discovery.wsUrl
   if (!wsUrl) {
     if (generation === connectGeneration) clearCachedWsUrl()
-    if (generation === connectGeneration && shouldReconnect && discovery.retry) {
+    if (generation === connectGeneration && shouldReconnect) {
       batch(() => {
         dashboardWsLastError.value = dashboardWsUnavailableMessage(discovery.reason)
       })
+    }
+    if (generation === connectGeneration && shouldReconnect && discovery.retry) {
       scheduleReconnect()
     }
     return

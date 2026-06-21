@@ -1,5 +1,5 @@
 import { h } from 'preact'
-import { cleanup, render, waitFor } from '@testing-library/preact'
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LogEntry } from '../api/dashboard'
 import { logDiagnosticCause, summarizeLogWindow } from './logs'
@@ -18,6 +18,14 @@ function entry(overrides: Partial<LogEntry>): LogEntry {
     category: null,
     ...overrides,
   }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(innerResolve => {
+    resolve = innerResolve
+  })
+  return { promise, resolve }
 }
 
 async function loadLogs(
@@ -145,10 +153,70 @@ describe('log diagnostics', () => {
 describe('LogViewer Code links', () => {
   afterEach(() => {
     cleanup()
+    vi.useRealTimers()
     vi.clearAllMocks()
     vi.resetModules()
     vi.doUnmock('../api/dashboard.js')
     window.location.hash = ''
+  })
+
+  it('preserves delta rows when an older page resolves after auto-refresh', async () => {
+    vi.useFakeTimers()
+    const olderPage = deferred<{ total: number; entries: LogEntry[] }>()
+    const fetchLogs = vi.fn((opts?: { since_seq?: number; before_seq?: number }) => {
+      if (typeof opts?.before_seq === 'number') {
+        return olderPage.promise
+      }
+      if (typeof opts?.since_seq === 'number') {
+        return Promise.resolve({
+          total: 3,
+          entries: [entry({ seq: 11, module: 'Keeper', message: 'delta fresh' })],
+        })
+      }
+      return Promise.resolve({
+        total: 2,
+        entries: [
+          entry({ seq: 10, module: 'Keeper', message: 'newest visible' }),
+          entry({ seq: 9, module: 'Keeper', message: 'oldest visible' }),
+        ],
+      })
+    })
+    const { LogViewer } = await loadLogs(fetchLogs)
+    const { container } = render(h(LogViewer, {}))
+
+    await waitFor(() => expect(container.textContent).toContain('oldest visible'))
+    const loadOlderButton = container.querySelector(
+      '[data-testid="logs-load-older"]',
+    ) as HTMLButtonElement | null
+    expect(loadOlderButton).not.toBeNull()
+
+    await act(async () => {
+      fireEvent.click(loadOlderButton!)
+    })
+    await waitFor(() =>
+      expect(fetchLogs).toHaveBeenCalledWith(expect.objectContaining({ before_seq: 9 })),
+    )
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+    await waitFor(() => expect(container.textContent).toContain('delta fresh'))
+
+    await act(async () => {
+      olderPage.resolve({
+        total: 3,
+        entries: [entry({ seq: 8, module: 'Keeper', message: 'older page' })],
+      })
+      await olderPage.promise
+    })
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('delta fresh')
+      expect(container.textContent).toContain('newest visible')
+      expect(container.textContent).toContain('oldest visible')
+      expect(container.textContent).toContain('older page')
+    })
+    expect(fetchLogs).toHaveBeenCalledWith(expect.objectContaining({ since_seq: 10 }))
   })
 
   it('links safe structured log file details back to the Code IDE route', async () => {

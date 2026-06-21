@@ -73,6 +73,7 @@ const EMPTY_LOG_ENTRIES: LogEntry[] = []
 
 let moduleDebounceTimer: ReturnType<typeof setTimeout> | null = null
 let latestRequestId = 0
+let logQueryGeneration = 0
 
 function MetaTag({ children }: { children: unknown }) {
   return html`<${StatusChip} tone="neutral" uppercase=${false}>${children}</${StatusChip}>`
@@ -475,6 +476,7 @@ async function loadLogs(mode: LoadMode = 'reset') {
   const requestId = ++latestRequestId
 
   if (mode === 'reset') {
+    logQueryGeneration += 1
     displayCap.value = logLimit.value
     noMoreOlder.value = false
     return logResource.load(async () => {
@@ -545,6 +547,7 @@ export async function loadOlder() {
     return
   }
   if (olderLoading.value) return
+  const startedGeneration = logQueryGeneration
   olderLoading.value = true
   try {
     const resp = await fetchLogs({
@@ -555,18 +558,22 @@ export async function loadOlder() {
       category: categoryFilter.value || undefined,
       exclude_category: hideFsmTransitions.value ? 'fsm' : undefined,
     })
+    if (startedGeneration !== logQueryGeneration) return
     const incoming = sortLogEntries(resp.entries)
     if (incoming.length === 0) {
       noMoreOlder.value = true
       return
     }
-    const cap = currentEntries.length + incoming.length
-    const nextEntries = mergeLogEntries(currentEntries, incoming, cap)
+    const latestState = logResource.state.value
+    if (latestState.status !== 'loaded') return
+    const latestEntries = latestState.data.entries
+    const cap = latestEntries.length + incoming.length
+    const nextEntries = mergeLogEntries(latestEntries, incoming, cap)
     displayCap.value = Math.max(displayCap.value, nextEntries.length)
     // latestSeq stays untouched: older paging only extends the tail, the
     // newest-cursor for delta polling is unaffected.
     logResource.state.value = loaded({
-      ...s.data,
+      ...latestState.data,
       entries: nextEntries,
       total: resp.total,
     })

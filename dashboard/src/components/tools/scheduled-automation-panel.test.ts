@@ -329,3 +329,225 @@ describe('ScheduledAutomationPanel approval actions', () => {
     expect(mocks.showToast).toHaveBeenCalledWith('sched-1 approved', 'success')
   })
 })
+
+function sampleAutomation(): DashboardScheduledAutomation {
+  return {
+    schema: 'masc.dashboard.scheduled_automation.v1',
+    source: 'schedule_store',
+    generated_at: '2026-06-21T00:00:00Z',
+    request_count: 2,
+    request_limit: 20,
+    truncated: false,
+    counts: { pending_approval: 1, due: 1 },
+    derived_counts: {
+      due_effective: 2,
+      blocked_approval: 1,
+      due_execution_ready: 1,
+      expired_effective: 0,
+    },
+    fsm: {
+      state: 'blocked_approval',
+      active_count: 2,
+      terminal_count: 0,
+      next_due_at: '2026-06-21T01:00:00Z',
+    },
+    requests: [
+      {
+        schedule_id: 'sched-keeper-review',
+        status: 'pending_approval',
+        effective_status: 'blocked_approval',
+        execution_readiness: 'blocked_approval',
+        operator_action: 'approve_or_reject',
+        keeper_next_tool: 'masc_schedule_get',
+        keeper_next_action: 'Inspect schedule details and wait for explicit human approval.',
+        risk_class: 'workspace_write',
+        approval_required: true,
+        approval_policy: 'human_required',
+        requires_separate_human_grant: true,
+        source: 'operator_request',
+        requested_by: { id: 'operator', kind: 'human_operator', display_name: 'Operator' },
+        scheduled_by: { id: 'scheduler-agent', kind: 'automated_actor', display_name: 'Scheduler Agent' },
+        recurrence: { kind: 'cron', expression: '0 9 * * 1-5', timezone: 'Asia/Seoul' },
+        recurrence_kind: 'cron',
+        payload_kind: 'keeper.review',
+        payload_target: 'workspace/yousleepwhen/masc',
+        payload_summary: 'Run a keeper review sweep.',
+        payload_digest: 'sha256:abc123',
+        requested_at_iso: '2026-06-21T00:00:00Z',
+        due_at_iso: '2026-06-21T01:00:00Z',
+        expires_at_iso: '2026-06-21T02:00:00Z',
+        last_execution: {
+          execution_id: 'exec-1',
+          schedule_id: 'sched-keeper-review',
+          started_at_iso: '2026-06-21T00:30:00Z',
+          finished_at_iso: '2026-06-21T00:31:00Z',
+          status: 'succeeded',
+          detail: {
+            kind: 'test.done',
+            summary: 'Completed keeper review sweep.',
+            stats: { scanned: 3 },
+            artifacts: ['receipt', 'log'],
+          },
+        },
+      },
+      {
+        schedule_id: 'sched-run-smoke',
+        status: 'due',
+        effective_status: 'due',
+        execution_readiness: 'execution_ready',
+        operator_action: 'run_when_due',
+        keeper_next_tool: 'masc_schedule_run_due',
+        keeper_next_action: 'Run the due smoke check.',
+        risk_class: 'read_only',
+        approval_required: false,
+        source: 'operator_request',
+        requested_by: { id: 'operator', kind: 'human_operator', display_name: null },
+        scheduled_by: { id: 'executor', kind: 'automated_actor', display_name: null },
+        recurrence: { kind: 'one_shot' },
+        recurrence_kind: 'one_shot',
+        payload_kind: 'keeper.smoke',
+        payload_summary: 'Run a read-only smoke check.',
+        due_at_iso: '2026-06-21T00:45:00Z',
+      },
+    ],
+  }
+}
+
+describe('ScheduledAutomationPanel', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it('renders scheduled requests as read-only cards with a wake signal feed', () => {
+    render(html`<${ScheduledAutomationPanel} automation=${sampleAutomation()} />`, container)
+
+    expect(container.querySelector('[data-schedule-id="sched-keeper-review"]')).not.toBeNull()
+    expect(container.textContent).toContain('wake signal feed')
+    expect(container.textContent).toContain('키퍼 다음 단계')
+    expect(container.textContent).toContain('선택한 예약')
+    expect(container.textContent).toContain('approve or reject')
+    expect(container.textContent).toContain('human required')
+    expect(container.textContent).toContain('별도 human grant 필요')
+    expect(container.textContent).toContain('masc_schedule_get')
+    expect(container.textContent).toContain('keeper.review')
+    expect(container.textContent).toContain('sha256:abc123')
+    expect(container.textContent).toContain('Operator (operator, human operator)')
+    expect(container.textContent).toContain('Scheduler Agent (scheduler-agent, automated actor)')
+    expect(container.textContent).toContain('test.done')
+    expect(container.textContent).toContain('Completed keeper review sweep.')
+    expect(container.textContent).toContain('{1 field}')
+    expect(container.textContent).toContain('[2 items]')
+    expect(container.querySelector('[data-execution-detail-row="kind"]')).not.toBeNull()
+    expect(container.textContent).not.toContain('"kind":"test.done"')
+    expect(container.querySelector('[data-schedule-filter="all"]')).not.toBeNull()
+    expect(container.querySelector('[data-schedule-filter="pending"]')).not.toBeNull()
+    expect(container.querySelector('[data-schedule-detail-panel="sched-keeper-review"]')).not.toBeNull()
+    expect(container.textContent).toContain('실행 준비')
+    expect(container.textContent).toContain('운영자 조치')
+    expect(container.textContent).toContain('위험도')
+    expect(container.textContent).toContain('승인 정책')
+    expect(container.textContent).toContain('페이로드')
+  })
+
+  it('filters schedule cards without filtering the wake signal feed', async () => {
+    render(html`<${ScheduledAutomationPanel} automation=${sampleAutomation()} />`, container)
+
+    const pendingFilter = container.querySelector('[data-schedule-filter="pending"]') as HTMLButtonElement
+    pendingFilter.click()
+    await Promise.resolve()
+
+    expect(container.querySelector('[data-schedule-id="sched-keeper-review"]')).not.toBeNull()
+    expect(container.querySelector('[data-schedule-id="sched-run-smoke"]')).toBeNull()
+    expect(container.textContent).toContain('sched-run-smoke')
+  })
+
+  it('uses explicit ready and terminal status matching', async () => {
+    const automation = sampleAutomation()
+    automation.requests = [
+      ...automation.requests,
+      {
+        ...automation.requests[1]!,
+        schedule_id: 'sched-not-ready',
+        status: 'scheduled',
+        effective_status: 'scheduled',
+        execution_readiness: 'not_ready',
+      },
+      {
+        ...automation.requests[1]!,
+        schedule_id: 'sched-canceled',
+        status: 'canceled',
+        effective_status: 'canceled',
+        execution_readiness: 'blocked_approval',
+      },
+    ]
+    render(html`<${ScheduledAutomationPanel} automation=${automation} />`, container)
+
+    const readyFilter = container.querySelector('[data-schedule-filter="ready"]') as HTMLButtonElement
+    readyFilter.click()
+    await Promise.resolve()
+
+    expect(container.querySelector('[data-schedule-id="sched-run-smoke"]')).not.toBeNull()
+    expect(container.querySelector('[data-schedule-id="sched-not-ready"]')).toBeNull()
+
+    const terminalFilter = container.querySelector('[data-schedule-filter="terminal"]') as HTMLButtonElement
+    terminalFilter.click()
+    await Promise.resolve()
+
+    expect(container.querySelector('[data-schedule-id="sched-canceled"]')).not.toBeNull()
+  })
+
+  it('prefers durable schedule runner signals when present', async () => {
+    const automation = sampleAutomation()
+    automation.signal_source = 'schedule_runner_signals'
+    automation.signal_count = 1
+    automation.signal_limit = 20
+    automation.signals = [
+      {
+        signal_id: 'sig-due-1',
+        kind: 'schedule.due_candidate',
+        event_type: 'schedule.due_candidate',
+        schedule_id: 'sched-run-smoke',
+        emitted_at_iso: '2026-06-21T00:46:00Z',
+        due_at_iso: '2026-06-21T00:45:00Z',
+        risk_class: 'read_only',
+        payload_digest: 'sha256:def456',
+        payload_kind: 'keeper.smoke',
+      },
+    ]
+
+    render(html`<${ScheduledAutomationPanel} automation=${automation} />`, container)
+
+    expect(container.textContent).toContain('durable wake signal feed')
+    expect(container.textContent).toContain('출처 schedule_runner_signals')
+    expect(container.textContent).toContain('schedule.due candidate')
+    expect(container.textContent).toContain('keeper.smoke')
+    expect(container.textContent).toContain('sha256:def456')
+    expect(container.querySelector('[data-schedule-signal-id="sig-due-1"]')).not.toBeNull()
+    expect(container.querySelector('[data-schedule-signal-kind="schedule.due_candidate"]')).not.toBeNull()
+    expect(container.querySelector('[data-schedule-signal-risk="sig-due-1"]')?.textContent).toContain('read only')
+    expect(container.querySelector('[data-schedule-signal-at="sig-due-1"]')?.textContent).toMatch(/^\d{2}:\d{2}$/)
+
+    const signalScheduleButton = container.querySelector('[data-schedule-signal-schedule="sched-run-smoke"]') as HTMLButtonElement
+    signalScheduleButton.click()
+    await Promise.resolve()
+
+    expect(container.querySelector('[data-schedule-detail-panel="sched-run-smoke"]')).not.toBeNull()
+  })
+
+  it('does not render prototype action buttons without a backend action callback', () => {
+    render(html`<${ScheduledAutomationPanel} automation=${sampleAutomation()} />`, container)
+
+    expect(container.querySelectorAll('[data-schedule-mutation]')).toHaveLength(0)
+    expect(container.textContent).not.toContain('승인 — grant 발급')
+    expect(container.textContent).not.toContain('거부')
+    expect(container.textContent).not.toContain('취소')
+  })
+})

@@ -2,21 +2,24 @@ import { html } from 'htm/preact'
 import { route } from '../router'
 import { Tools } from './tools/tools-main'
 import { HarnessHealth } from './harness-health'
-import { DesignCanvas } from './design-canvas'
 import { LabPerf } from './lab-perf'
-import { MemoryExplore } from './memory/memory-explore'
 import { KeeperMemoryHealth } from './memory/keeper-memory-health'
 import { SurfaceHeader } from './common/surface-header'
+import { MemorySubsystems } from './memory-subsystems'
 
-type LabSection = 'tools' | 'harness' | 'design-canvas' | 'performance' | 'memory-explore' | 'keeper-memory-health'
+type LabSection =
+  | 'tools'
+  | 'harness'
+  | 'performance'
+  | 'memory-subsystems'
+  | 'keeper-memory-health'
 
 function currentSection(): LabSection {
   const section = route.value.params.section
   if (
     section === 'harness'
-    || section === 'design-canvas'
     || section === 'performance'
-    || section === 'memory-explore'
+    || section === 'memory-subsystems'
     || section === 'keeper-memory-health'
   ) {
     return section
@@ -38,16 +41,12 @@ export function Lab() {
         <${HarnessHealth} />
       ` : null}
 
-      ${section === 'design-canvas' ? html`
-        <${DesignCanvas} />
-      ` : null}
-
       ${section === 'performance' ? html`
         <${LabPerf} />
       ` : null}
 
-      ${section === 'memory-explore' ? html`
-        <${MemoryExplore} />
+      ${section === 'memory-subsystems' ? html`
+        <${MemorySubsystems} focus=${route.value.params.focus} />
       ` : null}
 
       ${section === 'keeper-memory-health' ? html`

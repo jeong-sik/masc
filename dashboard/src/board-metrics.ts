@@ -3,6 +3,7 @@ import { signal } from '@preact/signals'
 export type BoardLatencyOperation =
   | 'list'
   | 'list_more'
+  | 'fusion_list'
   | 'detail'
   | 'reaction_summary'
   | 'reaction_toggle'
@@ -20,6 +21,7 @@ export type BoardLatencyMetrics = Record<BoardLatencyOperation, BoardLatencyMetr
 const OPERATIONS: BoardLatencyOperation[] = [
   'list',
   'list_more',
+  'fusion_list',
   'detail',
   'reaction_summary',
   'reaction_toggle',

@@ -91,6 +91,43 @@ import {
 } from './board-state'
 import type { BoardPost, ContentCategory, ParsedStateBlock } from './board-state'
 
+export const BOARD_DETAIL_WIDTH_STORAGE_KEY = 'dashboard:board-detail-width'
+export const BOARD_DETAIL_WIDTH_DEFAULT = 360
+export const BOARD_DETAIL_WIDTH_MIN = 290
+export const BOARD_DETAIL_WIDTH_MAX = 520
+
+export function normalizeBoardDetailWidth(value: unknown): number {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numeric)) return BOARD_DETAIL_WIDTH_DEFAULT
+  return Math.min(BOARD_DETAIL_WIDTH_MAX, Math.max(BOARD_DETAIL_WIDTH_MIN, Math.round(numeric)))
+}
+
+function readStoredBoardDetailWidth(): number {
+  if (typeof window === 'undefined' || window.localStorage === undefined) {
+    return BOARD_DETAIL_WIDTH_DEFAULT
+  }
+  try {
+    const raw = window.localStorage.getItem(BOARD_DETAIL_WIDTH_STORAGE_KEY)
+    if (!raw) return BOARD_DETAIL_WIDTH_DEFAULT
+    try {
+      return normalizeBoardDetailWidth(JSON.parse(raw))
+    } catch {
+      return normalizeBoardDetailWidth(raw)
+    }
+  } catch {
+    return BOARD_DETAIL_WIDTH_DEFAULT
+  }
+}
+
+function writeStoredBoardDetailWidth(width: number): void {
+  if (typeof window === 'undefined' || window.localStorage === undefined) return
+  try {
+    window.localStorage.setItem(BOARD_DETAIL_WIDTH_STORAGE_KEY, JSON.stringify(width))
+  } catch {
+    // localStorage can be unavailable; keep the in-memory rail width.
+  }
+}
+
 /**
  * Pure filter for board posts.
  *
@@ -495,6 +532,10 @@ const SUB_BOARD_GLYPHS: Record<string, string> = {
   default: '＃',
 }
 
+function countMentionMessages(): number {
+  return messages.value.filter(message => extractMentionTargets(message.content).length > 0).length
+}
+
 function BdRail({ activeSub, onSub, onMentions }: {
   activeSub: string
   onSub: (sub: string) => void
@@ -503,6 +544,7 @@ function BdRail({ activeSub, onSub, onMentions }: {
   const hearths = boardHearths.value
   const allCount = boardPosts.value.length
   const modCount = useMemo(() => boardPosts.value.filter(p => p.moderation_status && p.moderation_status !== 'none' && p.moderation_status !== 'approved').length, [boardPosts.value])
+  const mentionCount = useMemo(() => countMentionMessages(), [messages.value])
 
   return html`
     <nav class="bd-rail" aria-label="서브보드">
@@ -540,7 +582,7 @@ function BdRail({ activeSub, onSub, onMentions }: {
       <button type="button" class="bd-sub" onClick=${onMentions} data-testid="bd-queue-mentions">
         <span class="glyph">＠</span>
         멘션 인박스
-        <span class="n">${boardPosts.value.length}</span>
+        <span class="n">${mentionCount}</span>
       </button>
     </nav>
   `
@@ -577,7 +619,76 @@ function BdFeedHead({ activeFilter, onFilter, count }: {
   `
 }
 
-function BdThreadDetail({ post, onClose }: { post: BoardPost; onClose: () => void }) {
+function BdDetailResizeHandle({
+  width,
+  onWidthChange,
+}: {
+  width: number
+  onWidthChange: (width: number) => void
+}) {
+  const handlePointerDown = (event: PointerEvent) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = width
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      onWidthChange(startWidth + startX - moveEvent.clientX)
+    }
+    const stopTracking = () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', stopTracking)
+      window.removeEventListener('pointercancel', stopTracking)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', stopTracking, { once: true })
+    window.addEventListener('pointercancel', stopTracking, { once: true })
+  }
+
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault()
+      onWidthChange(width + 10)
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault()
+      onWidthChange(width - 10)
+    } else if (event.key === 'Home') {
+      event.preventDefault()
+      onWidthChange(BOARD_DETAIL_WIDTH_MIN)
+    } else if (event.key === 'End') {
+      event.preventDefault()
+      onWidthChange(BOARD_DETAIL_WIDTH_MAX)
+    }
+  }
+
+  return html`
+    <button
+      type="button"
+      class="bd-detail-resize"
+      aria-label="Resize board detail rail"
+      aria-orientation="vertical"
+      aria-valuemin=${BOARD_DETAIL_WIDTH_MIN}
+      aria-valuemax=${BOARD_DETAIL_WIDTH_MAX}
+      aria-valuenow=${width}
+      data-testid="bd-detail-resize"
+      onPointerDown=${handlePointerDown}
+      onKeyDown=${handleKeyDown}
+    />
+  `
+}
+
+function BdThreadDetail({
+  post,
+  detailWidth,
+  onDetailWidthChange,
+  onClose,
+}: {
+  post: BoardPost
+  detailWidth: number
+  onDetailWidthChange: (width: number) => void
+  onClose: () => void
+}) {
   useEffect(() => {
     if (detailPostId.value !== post.id) {
       void loadPostDetail(post.id)
@@ -590,6 +701,7 @@ function BdThreadDetail({ post, onClose }: { post: BoardPost; onClose: () => voi
 
   return html`
     <aside class="bd-detail has-post" data-testid="bd-thread-detail">
+      <${BdDetailResizeHandle} width=${detailWidth} onWidthChange=${onDetailWidthChange} />
       <div class="bd-detail-h">
         <h3>스레드</h3>
         <button type="button" class="bd-detail-x" onClick=${onClose} aria-label="닫기">✕</button>
@@ -617,18 +729,30 @@ function BdThreadDetail({ post, onClose }: { post: BoardPost; onClose: () => voi
 
 function BdDetail({
   post,
+  detailWidth,
   mentionMobileOpen,
+  onDetailWidthChange,
   onClose,
   onCloseMentions,
 }: {
   post: BoardPost | null
+  detailWidth: number
   mentionMobileOpen: boolean
+  onDetailWidthChange: (width: number) => void
   onClose: () => void
   onCloseMentions: () => void
 }) {
-  if (post) return html`<${BdThreadDetail} post=${post} onClose=${onClose} />`
+  if (post) return html`
+    <${BdThreadDetail}
+      post=${post}
+      detailWidth=${detailWidth}
+      onDetailWidthChange=${onDetailWidthChange}
+      onClose=${onClose}
+    />
+  `
   return html`
     <aside class=${`bd-detail is-mentions ${mentionMobileOpen ? 'is-mobile-open' : ''}`} data-testid="bd-mention-detail">
+      <${BdDetailResizeHandle} width=${detailWidth} onWidthChange=${onDetailWidthChange} />
       <div class="bd-detail-h">
         <h3>멘션 인박스</h3>
         <button type="button" class="bd-detail-x bd-detail-mobile-close" onClick=${onCloseMentions} aria-label="멘션 인박스 닫기">✕</button>
@@ -1196,10 +1320,6 @@ function BdMobileQueues({
   `
 }
 
-function countMentionMessages(): number {
-  return messages.value.filter(message => extractMentionTargets(message.content).length > 0).length
-}
-
 function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => void }) {
   const [contentQuery, setContentQuery] = useState('')
   const filteredPosts = useMemo(
@@ -1269,6 +1389,7 @@ function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => v
 // ── Main Board component (public API) ──────────────────────────────
 export function BoardSurface() {
   const [mobileMentionInboxOpen, setMobileMentionInboxOpen] = useState(false)
+  const [detailWidth, setDetailWidth] = useState<number>(readStoredBoardDetailWidth)
   useEffect(() => () => { selectedPostIds.value = new Set() }, [])
   useEffect(() => registerBoardHearthsRefresh(() => {
     void refreshBoardHearths()
@@ -1368,10 +1489,19 @@ export function BoardSurface() {
     setMobileMentionInboxOpen(true)
   }
 
+  function setPersistentDetailWidth(width: number): void {
+    const normalized = normalizeBoardDetailWidth(width)
+    setDetailWidth(normalized)
+    writeStoredBoardDetailWidth(normalized)
+  }
+
   return html`
-    <div class="v2-board-surface ss-surface bg-surface-page text-text-primary">
+    <div
+      class="v2-board-surface ss-surface bg-surface-page text-text-primary"
+      data-detail-width=${String(detailWidth)}
+    >
       <${SurfaceHeader} />
-      <div class="bd-body">
+      <div class="bd-body" style=${`--bd-detail-width: ${detailWidth}px;`}>
         <${BdRail}
           activeSub=${activeSub}
           onSub=${(sub: string) => {
@@ -1384,7 +1514,9 @@ export function BoardSurface() {
         <${BdFeed} posts=${boardPosts.value} onMentions=${openMentionInbox} />
         <${BdDetail}
           post=${selectedPost}
+          detailWidth=${detailWidth}
           mentionMobileOpen=${mobileMentionInboxOpen}
+          onDetailWidthChange=${setPersistentDetailWidth}
           onClose=${() => { selectedBoardPostId.value = null }}
           onCloseMentions=${() => setMobileMentionInboxOpen(false)}
         />

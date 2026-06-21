@@ -3,16 +3,23 @@ import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BoardPost } from '../../types'
 import { route } from '../../router'
-import { boardLoading, boardPosts, fusionRunsLoading, refreshBoard, refreshFusionRuns } from '../../store'
+import {
+  fusionBoardLoading,
+  fusionBoardPosts,
+  fusionRuns,
+  fusionRunsLoading,
+  refreshFusionBoard,
+  refreshFusionRuns,
+} from '../../store'
 import { FusionSurface } from './fusion-surface'
 
-// Mock only the refresh side effects; keep the real signals (boardLoading /
+// Mock only the refresh side effects; keep the real signals (fusionBoardLoading /
 // fusionRunsLoading) via ...actual so the component reads live state. The manual
 // Refresh button must fan out to BOTH refreshers — the run-status panel is a
-// second data source the board refresh cannot reach (RFC-0266 Phase 4).
+// second data source the board-sink refresh cannot reach (RFC-0266 Phase 4).
 vi.mock('../../store', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../store')>()
-  return { ...actual, refreshBoard: vi.fn(), refreshFusionRuns: vi.fn() }
+  return { ...actual, refreshFusionBoard: vi.fn(), refreshFusionRuns: vi.fn() }
 })
 
 function boardPost(overrides: Partial<BoardPost> & { id: string; meta: BoardPost['meta'] }): BoardPost {
@@ -50,25 +57,27 @@ describe('FusionSurface', () => {
     document.body.appendChild(container)
     window.location.hash = '#fusion'
     route.value = { tab: 'fusion', params: {}, postId: null }
-    boardLoading.value = false
-    boardPosts.value = []
+    fusionBoardLoading.value = false
+    fusionBoardPosts.value = []
+    fusionRuns.value = []
     fusionRunsLoading.value = false
-    vi.mocked(refreshBoard).mockClear()
+    vi.mocked(refreshFusionBoard).mockClear()
     vi.mocked(refreshFusionRuns).mockClear()
   })
 
   afterEach(() => {
     render(null, container)
     container.remove()
-    boardLoading.value = false
-    boardPosts.value = []
+    fusionBoardLoading.value = false
+    fusionBoardPosts.value = []
+    fusionRuns.value = []
     fusionRunsLoading.value = false
     route.value = { tab: 'overview', params: {}, postId: null }
     window.location.hash = '#overview'
   })
 
   it('renders live top-level fusion board metadata', () => {
-    boardPosts.value = [
+    fusionBoardPosts.value = [
       boardPost({
         id: 'post-fus-1',
         title: 'Fusion deliberation (run fus-1): answer',
@@ -122,8 +131,74 @@ describe('FusionSurface', () => {
     expect(container.textContent).not.toContain('chat · board')
   })
 
+  it('renders structured judge evidence from board metadata without local prototype state', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-fus-structured',
+        title: 'Fusion deliberation (run fus-structured): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-structured',
+          question: 'Which model result should drive the operator note?',
+          panel: [
+            { model: 'gpt-5', status: 'answered', answer: 'Prefer the canary-backed note.' },
+            { model: 'glm-5', status: 'answered', answer: 'Mention rollback uncertainty.' },
+          ],
+          judge: {
+            status: 'synthesized',
+            decision: 'recommend',
+            synthesis: 'Most models prefer canary with a rollback caveat.',
+            resolved_answer: 'Use canary, but call out rollback coverage.',
+            consensus: [
+              { text: 'Canary rollout is the safer next step.', models: ['gpt-5', 'glm-5'] },
+            ],
+            contradictions: [
+              {
+                topic: 'rollback confidence',
+                positions: [
+                  ['gpt-5', 'rollback path is sufficiently tested'],
+                  ['glm-5', 'rollback proof is still thin'],
+                ],
+              },
+            ],
+            partial_coverage: [
+              {
+                topic: 'mobile operators',
+                addressed_by: ['glm-5'],
+                missing: 'No model checked low-bandwidth mobile review.',
+              },
+            ],
+            unique_insights: [
+              { model: 'glm-5', text: 'Add the rollback caveat to the operator note.' },
+            ],
+            blind_spots: ['No cost impact estimate.'],
+            missing: ['staging rollback transcript'],
+            recommend: {
+              action: 'publish operator note',
+              rationale: 'The panel converged after preserving the caveat.',
+            },
+          },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const evidence = container.querySelector('[data-testid="fusion-judge-evidence"]')
+    expect(evidence).not.toBeNull()
+    expect(evidence?.textContent).toContain('Structured judge evidence')
+    expect(evidence?.textContent).toContain('Canary rollout is the safer next step.')
+    expect(evidence?.textContent).toContain('rollback confidence')
+    expect(evidence?.textContent).toContain('rollback proof is still thin')
+    expect(evidence?.textContent).toContain('No model checked low-bandwidth mobile review.')
+    expect(evidence?.textContent).toContain('Add the rollback caveat to the operator note.')
+    expect(evidence?.textContent).toContain('No cost impact estimate.')
+    expect(evidence?.textContent).toContain('staging rollback transcript')
+    expect(evidence?.textContent).toContain('publish operator note')
+  })
+
   it('calls ringFocusClasses() for focus rings instead of stringifying the function', () => {
-    boardPosts.value = [
+    fusionBoardPosts.value = [
       boardPost({
         id: 'post-fus-1',
         title: 'Fusion deliberation (run fus-1): answer',
@@ -154,7 +229,7 @@ describe('FusionSurface', () => {
   })
 
   it('supports older nested fusion_deliberation metadata and route selection', () => {
-    boardPosts.value = [
+    fusionBoardPosts.value = [
       boardPost({
         id: 'post-fus-1',
         updated_at: '2026-06-19T01:00:00Z',
@@ -196,11 +271,33 @@ describe('FusionSurface', () => {
     expect(window.location.hash).toBe('#fusion?run_id=fus-2')
   })
 
-  it('shows an empty state when no fusion board posts are loaded', () => {
+  it('shows a board-sink empty state when no fusion board posts are loaded', () => {
     render(html`<${FusionSurface} />`, container)
 
     expect(container.querySelector('[data-testid="fusion-empty"]')).not.toBeNull()
-    expect(container.textContent).toContain('No fusion runs found')
+    expect(container.textContent).toContain('No board-sink fusion posts yet')
+    expect(container.textContent).toContain('/api/v1/dashboard/fusion-runs')
+  })
+
+  it('keeps registry-only running rows visible without claiming no fusion runs exist', () => {
+    fusionRuns.value = [
+      {
+        runId: 'fus-running',
+        keeper: 'sangsu',
+        preset: 'balanced',
+        startedAt: 1_780_000_000,
+        status: 'running',
+      },
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    expect(container.querySelector('[data-testid="fusion-run-status-card"]')?.textContent).toContain('fus-running')
+    expect(container.querySelector('[data-testid="fusion-empty"]')?.textContent).toContain('No board-sink fusion posts yet')
+    expect(container.textContent).toContain('board runs')
+    expect(container.textContent).toContain('registry')
+    expect(container.textContent).toContain('1 running')
+    expect(container.textContent).not.toContain('No fusion runs found')
   })
 
   it('manual Refresh fans out to both the board-meta detail and the run-status registry', () => {
@@ -208,9 +305,9 @@ describe('FusionSurface', () => {
     const refresh = container.querySelector<HTMLButtonElement>('.fus-refresh')
     expect(refresh).not.toBeNull()
     refresh?.click()
-    // The run-status panel reads the fusionRuns signal, a source refreshBoard
+    // The run-status panel reads the fusionRuns signal, a source refreshFusionBoard
     // never touches; the button must trigger refreshFusionRuns too.
-    expect(vi.mocked(refreshBoard)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(refreshFusionBoard)).toHaveBeenCalledTimes(1)
     expect(vi.mocked(refreshFusionRuns)).toHaveBeenCalledTimes(1)
   })
 

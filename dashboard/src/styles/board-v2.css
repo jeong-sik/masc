@@ -38,7 +38,7 @@
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr) minmax(290px, 360px);
+  grid-template-columns: 200px minmax(0, 1fr) var(--bd-detail-width, 360px);
   overflow: hidden;
 }
 
@@ -587,11 +587,48 @@
 
 /* ════ DETAIL RAIL (thread + mention inbox) ════ */
 .v2-board-surface .bd-detail {
+  position: relative;
   border-left: 1px solid var(--border-main);
   background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep) 70%);
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+.v2-board-surface .bd-detail-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  z-index: 2;
+  width: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.v2-board-surface .bd-detail-resize::after {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+  transition: background 0.12s, box-shadow 0.12s;
+}
+
+.v2-board-surface .bd-detail-resize:hover::after,
+.v2-board-surface .bd-detail-resize:focus-visible::after {
+  background: var(--volt-dim);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--volt-dim) 30%, transparent);
+}
+
+.v2-board-surface .bd-detail-resize:focus-visible {
+  outline: 1px solid var(--volt-dim);
+  outline-offset: -2px;
 }
 
 .v2-board-surface .bd-detail-h {
@@ -826,6 +863,10 @@
     display: none;
   }
 
+  .v2-board-surface .bd-detail-resize {
+    display: none;
+  }
+
   .v2-board-surface .bd-detail.has-post,
   .v2-board-surface .bd-detail.is-mentions.is-mobile-open {
     position: absolute;
@@ -856,6 +897,7 @@
   .v2-board-surface .bd-detail.has-post,
   .v2-board-surface .bd-detail.is-mentions.is-mobile-open {
     left: 0;
+    bottom: calc(46px + env(safe-area-inset-bottom, 0px));
     width: 100%;
     border-left: 0;
   }

@@ -160,11 +160,15 @@ describe('Tools', () => {
             risk_class: 'workspace_write',
             approval_required: true,
             source: 'operator_request',
+            requested_by: { id: 'operator', kind: 'human_operator', display_name: null },
+            scheduled_by: { id: 'scheduler-agent', kind: 'automated_actor', display_name: null },
             recurrence: { kind: 'cron', expression: '0 9 * * 1-5', timezone: 'Asia/Seoul' },
             recurrence_kind: 'cron',
             payload_kind: 'test.reminder',
             payload_support: 'unsupported',
+            requested_at_iso: '2026-06-13T00:00:00Z',
             due_at_iso: '2026-06-13T01:00:00Z',
+            expires_at_iso: '2026-06-13T02:00:00Z',
             last_execution: {
               execution_id: 'exec-1',
               schedule_id: 'sched-1',
@@ -181,7 +185,7 @@ describe('Tools', () => {
     await flush()
 
     expect(container.textContent).toContain('blocked approval')
-    expect(container.textContent).toContain('raw pending approval')
+    expect(container.textContent).toContain('원본 pending approval')
     expect(container.textContent).toContain('approve or reject')
     expect(container.textContent).toContain('masc_schedule_get')
     expect(container.textContent).toContain('dashboard operator approval or rejection')
@@ -197,8 +201,11 @@ describe('Tools', () => {
     expect(container.textContent).toContain('test.reminder')
     expect(container.textContent).toContain('unsupported payload')
     expect(container.textContent).toContain('unsupported')
-    expect(container.querySelector('.v2-lab-table')).not.toBeNull()
-    expect(container.querySelector('.v2-lab-row')).not.toBeNull()
+    expect(container.textContent).toContain('wake signal feed')
+    expect(container.textContent).toContain('키퍼 다음 단계')
+    expect(container.textContent).toContain('operator (human operator)')
+    expect(container.querySelector('[data-schedule-id="sched-1"]')).not.toBeNull()
+    expect(container.querySelector('.v2-lab-card')).not.toBeNull()
   })
 
   it('renders tool usage coverage gap provenance', async () => {

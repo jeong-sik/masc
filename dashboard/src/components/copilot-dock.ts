@@ -11,6 +11,7 @@ import { isSubmitEnter } from '../lib/keyboard'
 import { streamKeeperMessage } from '../api/keeper'
 import { currentDashboardActor } from '../api/core'
 import type { Keeper } from '../types'
+import { useIsMobile } from '../hooks/use-is-mobile'
 
 interface DockState {
   open: boolean
@@ -24,7 +25,7 @@ interface SurfaceContext {
   label: string
   route: string
   scene: string
-  fields: Array<{ k: string; v: string; tone?: 'err' | 'warn' | 'brass' }>
+  fields: Array<{ k: string; v: string; tone?: 'bad' | 'warn' | 'volt' }>
 }
 
 interface DockMessage {
@@ -41,11 +42,24 @@ interface DockStreaming {
   sug: string[]
 }
 
-const DOCK_STARTERS: string[] = [
+const FALLBACK_DOCK_STARTERS: string[] = [
   '이 화면 요약해줘',
   '다음 액션 추천',
   '주의 항목 정리해줘',
 ]
+
+const DOCK_STARTERS_BY_ROUTE: Record<string, string[]> = {
+  '/overview': ['주의 큐 정리해줘', '컨텍스트가 높은 keeper 찾아줘', '지금 가장 급한 건 뭐야?'],
+  '/keepers': ['이 keeper 지금 뭐 하고 있어?', '소유 태스크 요약', '컨텍스트 압박 풀어줘'],
+  '/board': ['멘션 인박스 정리해줘', '최근 보드 흐름 요약', '다음 답글 추천'],
+  '/schedule': ['승인 차단 예약 정리', '다음 due 항목 요약', 'wake signal 이상 징후'],
+  '/approvals': ['가장 위험한 승인 요청', '승인 전 확인할 맥락', 'keeper별 대기 요약'],
+  '/fusion': ['판단 근거 요약', '패널 의견 차이 정리', '다음 검증 추천'],
+  '/code': ['현재 코드 화면 요약', '회귀 위험 어디야?', '테스트/검증 경로 추천'],
+  '/connectors': ['stale 게이트 확인', '바인딩 현황 요약', '최근 오류 정리'],
+  '/settings': ['런타임 바인딩 요약', '위험한 설정 변경점', 'provider 상태 확인'],
+  '/logs': ['최근 오류만 정리', '경고 패턴 묶어줘', '다음 조사 경로 추천'],
+}
 
 function nowHM(): string {
   const d = new Date()
@@ -92,19 +106,33 @@ function Para({ text }: { text: string }) {
   return text.split('\n\n').map((p, i) => html`<p key=${i} dangerouslySetInnerHTML=${{ __html: mdInline(p) }} />`)
 }
 
-export function getSurfaceContext(): SurfaceContext {
+export function starterPromptsForContext(ctx: Pick<SurfaceContext, 'route'>): string[] {
+  const routePath = ctx.route.split('?')[0] ?? ctx.route
+  const match = Object.keys(DOCK_STARTERS_BY_ROUTE)
+    .sort((a, b) => b.length - a.length)
+    .find(prefix => routePath === prefix || routePath.startsWith(`${prefix}/`))
+  return match ? (DOCK_STARTERS_BY_ROUTE[match] ?? FALLBACK_DOCK_STARTERS) : FALLBACK_DOCK_STARTERS
+}
+
+export function getSurfaceContext(selectedKeeperId?: string | null): SurfaceContext {
   const tab = route.value.tab
   const section = route.value.params.section ?? ''
   const navItem = DASHBOARD_NAV_ITEMS.find(item => item.id === tab)
   const sceneMap: Record<string, string> = {
     overview: '함대 전체 상태를 함께 보는 중',
     monitoring: 'keeper와 1:1 스레드',
+    keepers: 'Keeper workspace를 함께 보는 중',
+    board: 'Board 게시글과 작업 흐름을 함께 보는 중',
+    schedule: '예약 자동화와 wake signal을 함께 보는 중',
+    approvals: '승인 대기와 HITL gate를 함께 보는 중',
+    fusion: 'Fusion 판단/근거 흐름을 함께 보는 중',
     workspace: '네임스페이스 보드를 함께 보는 중',
     code: '코드 모드에서 함께 보는 중',
     connectors: '외부 게이트 상태를 함께 보는 중',
     command: '운영 액션 패널을 함께 보는 중',
     lab: '실험 도구 패널을 함께 보는 중',
     logs: '시스템 로그 스트림을 함께 보는 중',
+    settings: '런타임 설정과 provider binding을 함께 보는 중',
   }
   const base: SurfaceContext = {
     label: navItem?.label ?? tab,
@@ -113,31 +141,73 @@ export function getSurfaceContext(): SurfaceContext {
     fields: [],
   }
 
+  const keeperIdFromRoute = route.value.params.keeper?.trim() || null
+  const selectedKeeperKey = keeperIdFromRoute || selectedKeeperId?.trim() || null
+  const selectedKeeper = selectedKeeperKey
+    ? keepers.value.find(k => k.name === selectedKeeperKey || k.keeper_id === selectedKeeperKey)
+    : null
   const live = keepers.value.filter(k => statusLooksRunning(k.status))
   const run = live.length
   const total = keepers.value.length
   const att = keepers.value.filter(k => k.needs_attention).length
   const traces = keepers.value.reduce((a, k) => a + (typeof k.total_turns === 'number' ? k.total_turns : 0), 0)
+  const avgContextRatio = total > 0
+    ? keepers.value.reduce((a, k) => a + (typeof k.context_ratio === 'number' ? k.context_ratio : 0), 0) / total
+    : 0
+  const fleetFields: SurfaceContext['fields'] = [
+    { k: '실행', v: `${run}/${total}` },
+    { k: '주의', v: String(att), tone: att > 0 ? 'bad' : undefined },
+    { k: 'ctx', v: `${Math.round(avgContextRatio * 100)}%`, tone: avgContextRatio >= 0.85 ? 'warn' : 'volt' },
+  ]
 
   switch (tab) {
     case 'overview':
       base.fields = [
-        { k: '실행', v: `${run}/${total}` },
-        { k: '주의', v: String(att), tone: att > 0 ? 'err' : undefined },
-        { k: 'ctx', v: `${total > 0 ? Math.round((live.reduce((a, k) => a + (typeof k.context_ratio === 'number' ? k.context_ratio : 0), 0) / total) * 100) : 0}%`, tone: 'brass' },
+        ...fleetFields,
         { k: 'trace', v: traces.toLocaleString() },
       ]
       break
-    case 'monitoring': {
-      const keeperName = route.value.params.keeper
-      const sel = keeperName ? keepers.value.find(k => k.name === keeperName || k.keeper_id === keeperName) : null
-      if (sel) {
-        const ctx = typeof sel.context_ratio === 'number' ? sel.context_ratio : 0
-        base.scene = `${sel.koreanName ?? sel.name}와 1:1 스레드`
+    case 'keepers':
+      if (selectedKeeper) {
+        const ctx = typeof selectedKeeper.context_ratio === 'number' ? selectedKeeper.context_ratio : 0
+        base.scene = `${selectedKeeper.koreanName ?? selectedKeeper.name}와 1:1 스레드`
         base.fields = [
-          { k: 'state', v: sel.phase ?? sel.status },
-          { k: 'ctx', v: `${Math.round(ctx * 100)}%`, tone: ctx >= 0.85 ? 'warn' : 'brass' },
-          { k: 'ns', v: sel.runtime_canonical ?? sel.runtime_id ?? '-' },
+          { k: 'state', v: selectedKeeper.phase ?? selectedKeeper.status },
+          { k: 'ctx', v: `${Math.round(ctx * 100)}%`, tone: ctx >= 0.85 ? 'warn' : 'volt' },
+          { k: 'ns', v: selectedKeeper.runtime_canonical ?? selectedKeeper.runtime_id ?? '-' },
+        ]
+      } else {
+        base.fields = [
+          ...fleetFields,
+          { k: 'trace', v: traces.toLocaleString() },
+        ]
+      }
+      break
+    case 'board':
+      base.fields = [
+        { k: 'keepers', v: String(total), tone: total > 0 ? 'volt' : undefined },
+        { k: '주의', v: String(att), tone: att > 0 ? 'bad' : undefined },
+        { k: 'trace', v: traces.toLocaleString() },
+      ]
+      break
+    case 'approvals':
+      base.fields = [
+        { k: '주의', v: String(att), tone: att > 0 ? 'bad' : undefined },
+        { k: '실행', v: `${run}/${total}` },
+      ]
+      break
+    case 'fusion':
+    case 'settings':
+      base.fields = fleetFields
+      break
+    case 'monitoring': {
+      if (selectedKeeper) {
+        const ctx = typeof selectedKeeper.context_ratio === 'number' ? selectedKeeper.context_ratio : 0
+        base.scene = `${selectedKeeper.koreanName ?? selectedKeeper.name}와 1:1 스레드`
+        base.fields = [
+          { k: 'state', v: selectedKeeper.phase ?? selectedKeeper.status },
+          { k: 'ctx', v: `${Math.round(ctx * 100)}%`, tone: ctx >= 0.85 ? 'warn' : 'volt' },
+          { k: 'ns', v: selectedKeeper.runtime_canonical ?? selectedKeeper.runtime_id ?? '-' },
         ]
       }
       break
@@ -339,7 +409,8 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
     phase: 'Running',
     status: 'run',
   }
-  const ctx = useMemo(() => getSurfaceContext(), [route.value, keepers.value])
+  const ctx = useMemo(() => getSurfaceContext(keeper.id), [route.value, keepers.value, keeper.id])
+  const starterPrompts = useMemo(() => starterPromptsForContext(ctx), [ctx.route])
   const msgs = dock.threads.value[keeper.id] ?? []
   const streaming = dock.streaming.value && dock.streaming.value.keeperId === keeper.id ? dock.streaming.value : null
   const [val, setVal] = useState('')
@@ -348,6 +419,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
   const taRef = useRef<HTMLTextAreaElement | null>(null)
   const threadRef = useRef<HTMLDivElement | null>(null)
   const rootRef = useRef<HTMLElement | null>(null)
+  const isMobile = useIsMobile()
 
   useEffect(() => {
     const el = threadRef.current
@@ -397,7 +469,8 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
     window.addEventListener('mouseup', up as EventListener)
   }
 
-  const docked = dock.state.value.mode === 'dock'
+  const docked = isMobile || dock.state.value.mode === 'dock'
+  const mobileDocked = isMobile && docked
   const floatStyle = !docked
     ? {
       left: dock.state.value.x != null ? `${dock.state.value.x}px` : 'auto',
@@ -414,6 +487,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
       style=${floatStyle}
       data-screen-label="Chat 도크"
       data-testid="copilot-dock"
+      data-mobile-docked=${mobileDocked ? 'true' : 'false'}
     >
       <div
         class=${`dock-head ${docked ? '' : 'drag'}`}
@@ -421,18 +495,20 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
       >
         <div class="dock-title"><span class="dock-spark"><${Sparkles} size=${16} aria-hidden="true" /></span>Chat</div>
         <div class="spacer"></div>
-        <button
-          type="button"
-          class="dock-iconbtn"
-          aria-label=${docked ? '플로팅으로 띄우기' : '오른쪽에 도킹'}
-          title=${docked ? '플로팅으로 띄우기' : '오른쪽에 도킹'}
-          onMouseDown=${(e: MouseEvent) => e.stopPropagation()}
-          onClick=${() => dock.setMode(docked ? 'float' : 'dock')}
-        >
-          ${docked
-            ? html`<${PanelRightOpen} size=${15} aria-hidden="true" />`
-            : html`<${PanelRightClose} size=${15} aria-hidden="true" />`}
-        </button>
+        ${mobileDocked ? null : html`
+          <button
+            type="button"
+            class="dock-iconbtn"
+            aria-label=${docked ? '플로팅으로 띄우기' : '오른쪽에 도킹'}
+            title=${docked ? '플로팅으로 띄우기' : '오른쪽에 도킹'}
+            onMouseDown=${(e: MouseEvent) => e.stopPropagation()}
+            onClick=${() => dock.setMode(docked ? 'float' : 'dock')}
+          >
+            ${docked
+              ? html`<${PanelRightOpen} size=${15} aria-hidden="true" />`
+              : html`<${PanelRightClose} size=${15} aria-hidden="true" />`}
+          </button>
+        `}
         <button
           type="button"
           class="dock-iconbtn"
@@ -507,8 +583,8 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
                 <div class="t">${ctx.label}</div>
                 <div class="s">이 화면에 대해 ${keeper.kr}에게 바로 물어보세요. 같은 맥락을 보고 답합니다.</div>
                 <div class="dsug" style=${{ width: '100%' }}>
-                  ${DOCK_STARTERS.map((s, i) => html`
-                    <button key=${i} onClick=${() => doSend(s)}><span class="pre">›</span>${s}</button>
+                  ${starterPrompts.map((s, i) => html`
+                    <button key=${i} data-dock-starter=${i} onClick=${() => doSend(s)}><span class="pre">›</span>${s}</button>
                   `)}
                 </div>
               </div>

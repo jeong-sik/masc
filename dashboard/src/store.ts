@@ -314,6 +314,8 @@ import type { FusionRunRecord } from './api/dashboard'
 // registry endpoint. Distinct from `boardPosts` (the board-derived detail the
 // FusionSurface already renders): the registry is the only source that shows a
 // run while it is still `running`, before any board post exists.
+export const fusionBoardPosts = signal<BoardPost[]>([])
+export const fusionBoardLoading = signal(false)
 export const fusionRuns = signal<FusionRunRecord[]>([])
 export const fusionRunsLoading = signal(false)
 
@@ -1238,7 +1240,27 @@ export async function refreshGoals(): Promise<void> {
   }
 }
 
-// --- Fusion run registry fetcher (RFC-0266 §7 Phase 4) ---
+// --- Fusion board-sink + run registry fetchers (RFC-0266 §7 Phase 4) ---
+
+// Fusion board posts are automation/sink evidence and must not inherit the
+// operator's current Board filters. A Board route set to "hide system" would
+// otherwise make Fusion claim no board-sink posts while live fusion evidence is
+// present in the unfiltered board feed.
+export async function refreshFusionBoard(): Promise<void> {
+  fusionBoardLoading.value = true
+  try {
+    const { fetchDashboardMemory } = await import('./api/dashboard')
+    const data = await timeBoardRequest('fusion_list', () => fetchDashboardMemory('recent', {
+      limit: 500,
+      offset: 0,
+    }))
+    fusionBoardPosts.value = reconcileBoardPosts(fusionBoardPosts.value, data.posts ?? [])
+  } catch (err) {
+    console.warn('[Fusion] board fetch error:', err)
+  } finally {
+    fusionBoardLoading.value = false
+  }
+}
 
 // Re-fetched on route visit (tab-refresh) and on each `fusion_run_status` SSE
 // event. The endpoint is the SSOT for run status; the dashboard never

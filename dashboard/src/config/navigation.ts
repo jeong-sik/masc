@@ -1,11 +1,45 @@
 import type { RouteState, TabId } from '../types'
 
 type SurfaceId = TabId
+export const SETTINGS_ROUTE_SECTION_IDS = [
+  'account',
+  'mcp',
+  'runtime',
+  'runtimes',
+  'routing',
+  'prompts',
+  'policy',
+  'lifecycle',
+  'sandbox',
+  'ide',
+  'gate',
+  'paths',
+  'logs',
+  'notify',
+  'display',
+] as const
+export type SettingsRouteSectionId = typeof SETTINGS_ROUTE_SECTION_IDS[number]
+
+const SETTINGS_ROUTE_SECTION_SET = new Set<string>(SETTINGS_ROUTE_SECTION_IDS)
+
+function isSettingsRouteSection(value: string | undefined): value is SettingsRouteSectionId {
+  return !!value && SETTINGS_ROUTE_SECTION_SET.has(value)
+}
+
+const CONNECTOR_ROUTE_IDS = ['discord', 'imessage', 'slack', 'telegram'] as const
+type ConnectorRouteId = typeof CONNECTOR_ROUTE_IDS[number]
+const CONNECTOR_ROUTE_ID_SET = new Set<string>(CONNECTOR_ROUTE_IDS)
+
+function isConnectorRouteId(value: string | undefined): value is ConnectorRouteId {
+  return !!value && CONNECTOR_ROUTE_ID_SET.has(value)
+}
+
 export type DashboardSurfaceIcon =
   | 'overview'
   | 'monitoring'
   | 'keepers'
   | 'board'
+  | 'schedule'
   | 'fusion'
   | 'command'
   | 'connectors'
@@ -42,9 +76,8 @@ type SurfaceSectionId =
   // lab
   | 'tools'
   | 'harness'
-  | 'design-canvas'
   | 'performance'
-  | 'memory-explore'
+  | 'memory-subsystems'
   | 'keeper-memory-health'
   // code (Stage 5 IDE plane — shell only in PR-1, 4-pane content in PR-2+)
   | 'ide-shell'
@@ -84,6 +117,7 @@ const V2_PRIMARY_SURFACE_IDS: ReadonlyArray<SurfaceId> = [
   'workspace',
   'keepers',
   'board',
+  'schedule',
   'approvals',
   'fusion',
   'code',
@@ -107,6 +141,7 @@ const SECTIONLESS_SURFACE_IDS: ReadonlySet<TabId> = new Set([
   'settings',
   'keepers',
   'board',
+  'schedule',
   'approvals',
   'fusion',
 ])
@@ -158,6 +193,14 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     description: 'Human, agent, automation, and system posts',
     defaultTab: 'board',
     tabs: ['board'],
+  },
+  {
+    id: 'schedule',
+    label: 'Schedule',
+    icon: 'schedule',
+    description: 'Scheduled keeper automation and wake signals',
+    defaultTab: 'schedule',
+    tabs: ['schedule'],
   },
   {
     id: 'approvals',
@@ -311,6 +354,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
   ],
   keepers: [],
   board: [],
+  schedule: [],
   command: [
     {
       id: 'operations',
@@ -388,22 +432,16 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       params: { section: 'harness' },
     },
     {
-      id: 'design-canvas',
-      label: 'Design Canvas',
-      description: 'keeper-v2 design-system preview surface for primitives, molecules, organisms, surfaces, motion, craft, and states.',
-      params: { section: 'design-canvas' },
-    },
-    {
       id: 'performance',
       label: 'Performance',
       description: 'FPS meter, VirtualList, content-visibility, native dialog, and observer probes.',
       params: { section: 'performance' },
     },
     {
-      id: 'memory-explore',
-      label: 'Memory Explore',
-      description: 'Memory Lens, Lineage Rail, and Goal Dossier composition.',
-      params: { section: 'memory-explore' },
+      id: 'memory-subsystems',
+      label: 'Memory OS',
+      description: 'Live episodes, user model projection, Hebbian synapses, and gated memory entries.',
+      params: { section: 'memory-subsystems' },
     },
     {
       id: 'keeper-memory-health',
@@ -496,11 +534,27 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
   'connectors:connector-imessage': { section: 'connector-status', params: { connector: 'imessage' } },
   'connectors:connector-slack': { section: 'connector-status', params: { connector: 'slack' } },
   'connectors:connector-telegram': { section: 'connector-status', params: { connector: 'telegram' } },
+
+  // Keeper v2 parity: the old Lab Memory Explore route used hard-coded sample
+  // graph data. Collapse legacy links into the backed Memory OS projection.
+  'lab:memory-explore': { section: 'memory-subsystems' },
+
+  // Keeper v2 parity: Design Canvas was a static preview over prototype
+  // fixture data. Collapse legacy links into the backed Lab tools inventory.
+  'lab:design-canvas': { section: 'tools' },
 }
 
 export function normalizeRouteParams(tabId: TabId, params: Record<string, string>): Record<string, string> {
   const next = { ...params }
   const legacyObservatoryRanges = new Set(['1h', '6h', '24h', '7d'])
+
+  if (tabId === 'settings') {
+    if (!isSettingsRouteSection(next.section) || next.section === 'account') {
+      delete next.section
+    }
+    delete next.surface
+    return next
+  }
 
   if (isSectionlessSurface(tabId)) {
     delete next.section
@@ -538,6 +592,10 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
 
   if (!(tabId === 'code' && next.section === 'ide-shell')) {
     delete next.surface
+  }
+
+  if (tabId === 'connectors' && !isConnectorRouteId(next.connector)) {
+    delete next.connector
   }
   delete next.operation
   delete next.run_id

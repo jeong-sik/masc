@@ -39,7 +39,7 @@ interface DashboardNavRailProps {
   currentTab: TabId
   mobile: boolean
   drawerOpen: boolean
-  keeperDetailMode: boolean
+  hideMobileTabs: boolean
   collapsed: boolean
   onToggleCollapsed: () => void
   onToggleDrawer: () => void
@@ -50,7 +50,7 @@ export function DashboardNavRail({
   currentTab,
   mobile,
   drawerOpen,
-  keeperDetailMode,
+  hideMobileTabs,
   collapsed,
   onToggleCollapsed,
   onToggleDrawer,
@@ -85,7 +85,7 @@ export function DashboardNavRail({
       >
         <${SideRail} collapsed=${effectiveCollapsed} onToggle=${onToggleCollapsed} primaryOnly=${!mobile} />
       </aside>
-      ${mobile && !drawerOpen && !keeperDetailMode
+      ${mobile && !drawerOpen && !hideMobileTabs
         ? html`<${MobileNavRailTabs} currentTab=${currentTab} onMenuToggle=${onToggleDrawer} />`
         : null}
     <//>

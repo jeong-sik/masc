@@ -911,15 +911,28 @@ function entryTimeMs(entry: KeeperConversationEntry): number {
 function mergeLocalAssistantTraceSteps(
   historyEntry: KeeperConversationEntry,
   localEntries: KeeperConversationEntry[],
+  // Tracks local trace sources already claimed by an earlier history row.
+  // Without it, two identical-text assistant history rows both match the FIRST
+  // local source via the role+text fallback in sameConversationEntry, so the
+  // second turn inherits the first turn's trace (#21748). Each source is
+  // consumed at most once → 1:1 distribution.
+  // Contract: localEntries are in append order, which mirrors the chronological
+  // order of historyEntries, so the Nth identical-text history row maps to the
+  // Nth local source. A server-minted id handshake (R3, not yet landed) would
+  // make this exact without the ordering assumption; until then local
+  // optimistic entries carry no turn_ref, so id-keyed matching is not possible.
+  consumed: Set<string>,
 ): KeeperConversationEntry {
   if (historyEntry.role !== 'assistant') return historyEntry
   const localTraceSource = localEntries.find(
     entry =>
       entry.role === 'assistant'
       && (entry.traceSteps?.length ?? 0) > 0
+      && !consumed.has(entry.id)
       && sameConversationEntry(entry, historyEntry),
   )
   if (!localTraceSource?.traceSteps?.length) return historyEntry
+  consumed.add(localTraceSource.id)
   return {
     ...historyEntry,
     traceSteps: localTraceSource.traceSteps,
@@ -934,7 +947,11 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
   // refresh / probe / recover.
   if (entries.length === 0) return
   const existing = keeperThreads.value[name] ?? []
-  const historyEntries = entries.map(entry => mergeLocalAssistantTraceSteps(entry, existing))
+  // Shared across the map so each local trace source is claimed at most once
+  // (see mergeLocalAssistantTraceSteps): identical-text turns no longer steal
+  // each other's trace (#21748).
+  const consumed = new Set<string>()
+  const historyEntries = entries.map(entry => mergeLocalAssistantTraceSteps(entry, existing, consumed))
   const localEntries = existing.filter(
     entry => {
       const coveredByHistory = historyEntries.some(historyEntry => sameConversationEntry(entry, historyEntry))

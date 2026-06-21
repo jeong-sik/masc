@@ -62,6 +62,7 @@ import {
   useCopilotDock,
   useCopilotDockShortcuts,
 } from './components/copilot-dock'
+import { keeperMobilePane } from './components/keeper-mobile-pane-state'
 import {
   TweaksPanel,
   TweaksPanelToggle,
@@ -139,6 +140,20 @@ export function shouldUseCompactDashboardChrome({
   focusMode: boolean
 }): boolean {
   return widgetSoloMode || focusMode
+}
+
+export function shouldShowCopilotFab({
+  dockOpen,
+  compactChromeMode,
+  isMobile,
+  currentTab,
+}: {
+  dockOpen: boolean
+  compactChromeMode: boolean
+  isMobile: boolean
+  currentTab: TabId
+}): boolean {
+  return !dockOpen && !compactChromeMode && !isMobile && currentTab !== 'keepers'
 }
 
 export function App() {
@@ -282,6 +297,7 @@ export function App() {
   const isCodeSurface = currentTab === 'code'
   const widgetSoloMode = isWidgetSoloRoute(route.value)
   const keeperDetailMode = isKeeperDetailDashboardRoute(route.value)
+  const mobileKeeperPane = isMobile && keeperDetailMode ? keeperMobilePane.value : null
   const focusMode = dashboardFocusMode.value
   const mobileDrawerOpen = isMobile && mobileMenuOpen.value
   const suppressFloatingChrome = shouldSuppressFloatingChrome({
@@ -409,7 +425,7 @@ export function App() {
               currentTab=${currentTab}
               mobile=${isMobile}
               drawerOpen=${mobileMenuOpen.value}
-              keeperDetailMode=${keeperDetailMode}
+              hideMobileTabs=${mobileKeeperPane === 'chat'}
               collapsed=${sidebarCollapsed.value}
               onToggleCollapsed=${() => { sidebarCollapsed.value = !sidebarCollapsed.value }}
               onToggleDrawer=${() => { mobileMenuOpen.value = !mobileMenuOpen.value }}
@@ -418,7 +434,12 @@ export function App() {
           `}
 
         <div class="v2-stage min-h-0 flex-1">
-          <main id="main-content" tabindex=${-1} class=${compactChromeMode ? 'v2-body min-w-0 flex-1 overflow-hidden' : 'v2-body min-w-0 flex-1 overflow-hidden rounded-[var(--ss-radius-card)] border border-[var(--ss-border)] bg-[var(--ss-card)] shadow-[var(--ss-shadow-card)]'}>
+          <main
+            id="main-content"
+            tabindex=${-1}
+            data-mpane=${mobileKeeperPane ?? undefined}
+            class=${compactChromeMode ? 'v2-body min-w-0 flex-1 overflow-hidden' : 'v2-body min-w-0 flex-1 overflow-hidden rounded-[var(--ss-radius-card)] border border-[var(--ss-border)] bg-[var(--ss-card)] shadow-[var(--ss-shadow-card)]'}
+          >
             <div class=${isCodeSurface || widgetSoloMode ? 'h-full overflow-hidden p-0' : keeperDetailMode ? 'h-full p-0' : focusMode ? 'dashboard-main-scroll h-full overflow-y-auto p-3 max-[520px]:p-2 max-[900px]:pb-16' : 'dashboard-main-scroll h-full overflow-y-auto p-4 max-[900px]:pb-16'}>
               <div class="v2-surface" key=${currentTab}>
                 <${DashboardMain} />
@@ -428,7 +449,12 @@ export function App() {
           ${dock.state.value.open ? html`<${CopilotDock} dock=${dock} />` : null}
         </div>
       </div>
-      ${!dock.state.value.open && !compactChromeMode && !isMobile ? html`<${CopilotDockFab} dock=${dock} />` : null}
+      ${shouldShowCopilotFab({
+        dockOpen: dock.state.value.open,
+        compactChromeMode,
+        isMobile,
+        currentTab,
+      }) ? html`<${CopilotDockFab} dock=${dock} />` : null}
 
       ${selectedAgentName.value
         ? html`<${Suspense} fallback=${null}><${LazyAgentDetailOverlay} /><//>`

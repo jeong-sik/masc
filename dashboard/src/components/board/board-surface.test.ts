@@ -1,7 +1,14 @@
 import { h } from 'preact'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/preact'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { BoardSurface } from './board-surface'
+import {
+  BOARD_DETAIL_WIDTH_DEFAULT,
+  BOARD_DETAIL_WIDTH_MAX,
+  BOARD_DETAIL_WIDTH_MIN,
+  BOARD_DETAIL_WIDTH_STORAGE_KEY,
+  BoardSurface,
+  normalizeBoardDetailWidth,
+} from './board-surface'
 import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore, messages, shellAuthSummary } from '../../store'
 import { route } from '../../router'
 import { createPost, sendBroadcast } from '../../api'
@@ -102,6 +109,30 @@ function snapshotWithKeepers(keepers: Array<{
   } as unknown as OperatorSnapshot
 }
 
+function clearLocalStorage(): void {
+  try {
+    window.localStorage.clear()
+  } catch {
+    // localStorage can be disabled in some test runtimes.
+  }
+}
+
+function setLocalStorageItem(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value)
+  } catch {
+    // Rendered state assertions will fail if storage cannot be read.
+  }
+}
+
+function getLocalStorageItem(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
 // ── Content category classifier tests ─────────────────────────────
 describe('contentCategory', () => {
   it('classifies tech exploration titles as article', () => {
@@ -163,10 +194,12 @@ describe('BoardSurface Component', () => {
     await Promise.resolve()
     vi.unstubAllGlobals()
     resetBoardLatencyMetrics()
+    clearLocalStorage()
   })
 
   beforeEach(() => {
     vi.clearAllMocks()
+    clearLocalStorage()
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ posts: [] }), {
         status: 200,
@@ -226,6 +259,53 @@ describe('BoardSurface Component', () => {
   it('shows the mention inbox detail rail by default', () => {
     const { container } = render(h(BoardSurface, null))
     expect(container.querySelector('[data-testid="bd-mention-detail"]')).not.toBeNull()
+  })
+
+  it('normalizes persisted Board detail rail widths to the supported range', () => {
+    expect(normalizeBoardDetailWidth(200)).toBe(BOARD_DETAIL_WIDTH_MIN)
+    expect(normalizeBoardDetailWidth(333.6)).toBe(334)
+    expect(normalizeBoardDetailWidth(800)).toBe(BOARD_DETAIL_WIDTH_MAX)
+    expect(normalizeBoardDetailWidth('bad')).toBe(BOARD_DETAIL_WIDTH_DEFAULT)
+  })
+
+  it('hydrates the persisted Board detail rail width into the grid and resize handle', () => {
+    setLocalStorageItem(BOARD_DETAIL_WIDTH_STORAGE_KEY, JSON.stringify(430))
+
+    const { container } = render(h(BoardSurface, null))
+
+    const surface = container.querySelector<HTMLElement>('.v2-board-surface')
+    const body = container.querySelector<HTMLElement>('.bd-body')
+    const handle = screen.getByTestId('bd-detail-resize')
+    expect(surface?.getAttribute('data-detail-width')).toBe('430')
+    expect(body?.getAttribute('style')).toContain('--bd-detail-width: 430px')
+    expect(handle).toHaveAttribute('aria-valuenow', '430')
+  })
+
+  it('resizes the Board detail rail with pointer drag and keyboard controls', async () => {
+    const { container } = render(h(BoardSurface, null))
+
+    const surface = container.querySelector<HTMLElement>('.v2-board-surface')
+    const handle = screen.getByTestId('bd-detail-resize') as HTMLButtonElement
+    expect(surface?.getAttribute('data-detail-width')).toBe(String(BOARD_DETAIL_WIDTH_DEFAULT))
+    expect(handle).toHaveAttribute('aria-valuenow', String(BOARD_DETAIL_WIDTH_DEFAULT))
+
+    fireEvent.pointerDown(handle, { button: 0, clientX: 1000 })
+    fireEvent.pointerMove(window, { clientX: 920 })
+    expect(surface?.getAttribute('data-detail-width')).toBe('440')
+    expect(handle).toHaveAttribute('aria-valuenow', '440')
+    expect(getLocalStorageItem(BOARD_DETAIL_WIDTH_STORAGE_KEY)).toBe('440')
+
+    fireEvent.pointerMove(window, { clientX: 760 })
+    expect(surface?.getAttribute('data-detail-width')).toBe(String(BOARD_DETAIL_WIDTH_MAX))
+    fireEvent.pointerCancel(window)
+
+    fireEvent.keyDown(handle, { key: 'Home' })
+    expect(surface?.getAttribute('data-detail-width')).toBe(String(BOARD_DETAIL_WIDTH_MIN))
+    expect(getLocalStorageItem(BOARD_DETAIL_WIDTH_STORAGE_KEY)).toBe(String(BOARD_DETAIL_WIDTH_MIN))
+
+    fireEvent.keyDown(handle, { key: 'End' })
+    expect(surface?.getAttribute('data-detail-width')).toBe(String(BOARD_DETAIL_WIDTH_MAX))
+    expect(getLocalStorageItem(BOARD_DETAIL_WIDTH_STORAGE_KEY)).toBe(String(BOARD_DETAIL_WIDTH_MAX))
   })
 
   it('opens and closes the mention inbox detail rail from the mobile queue action', () => {
@@ -486,6 +566,24 @@ describe('BoardSurface Component', () => {
     fireEvent.click(screen.getByTestId('bd-sub-ops'))
 
     expect(boardHearthFilter.value).toBe('ops')
+  })
+
+  it('counts desktop mention queue from messages instead of board posts', () => {
+    boardPosts.value = [
+      makePost({ id: 'post-ops', title: 'Ops note', body: 'ops', author: 'keeper', hearth: 'ops' }),
+      makePost({ id: 'post-review', title: 'Review note', body: 'review', author: 'keeper', hearth: 'review' }),
+    ]
+    messages.value = [
+      { id: 'm-1', from: 'sojin', content: '@dashboard needs review', timestamp: new Date().toISOString() },
+      { id: 'm-2', from: 'sangsu', content: 'plain update', timestamp: new Date().toISOString() },
+    ]
+
+    render(h(BoardSurface, null))
+
+    const queue = screen.getByTestId('bd-queue-mentions')
+    expect(queue).toHaveTextContent('멘션 인박스')
+    expect(within(queue).getByText('1')).toBeInTheDocument()
+    expect(within(queue).queryByText('2')).not.toBeInTheDocument()
   })
 
   it('renders filter chips for state and moderation', () => {

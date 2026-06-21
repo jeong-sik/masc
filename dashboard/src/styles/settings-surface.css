@@ -197,9 +197,87 @@
   white-space: nowrap;
 }
 
+.set-section-state,
+.set-preview-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-main);
+  background: var(--bg-card);
+  color: var(--text-dim);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.set-section-state {
+  padding: 7px 12px;
+}
+
+.set-section-state.live {
+  color: var(--status-ok);
+  border-color: color-mix(in oklab, var(--status-ok) 45%, transparent);
+}
+
+.set-preview-badge {
+  padding: 6px 11px;
+  border-style: dashed;
+}
+
 .settings-surf .set-card-b {
   padding: 8px 28px 40px;
   max-width: 760px;
+}
+
+.settings-surf .set-card-b-wide {
+  max-width: min(1180px, calc(100% - 56px));
+}
+
+.settings-runtime-live {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.settings-runtime-live-h {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 2px;
+}
+
+.settings-runtime-live-h .set-sub-h {
+  margin-top: 0;
+}
+
+.settings-runtime-live-source {
+  flex: none;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--text-dim);
+  font-size: 10.5px;
+  padding: 5px 8px;
+}
+
+@media (max-width: 900px) {
+  .settings-surf .set-card-b-wide {
+    max-width: 100%;
+  }
+  .settings-runtime-live-h {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .settings-runtime-live-source {
+    flex: initial;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
 }
 
 .set-row {
@@ -492,6 +570,19 @@
   transition: 0.16s;
 }
 
+.set-toggle:disabled,
+.set-seg-b:disabled,
+.set-stepper button:disabled,
+.set-slider input[type="range"]:disabled {
+  cursor: not-allowed;
+}
+
+.set-toggle:disabled,
+.set-stepper button:disabled,
+.set-slider input[type="range"]:disabled {
+  opacity: 0.58;
+}
+
 .set-toggle .knob {
   position: absolute;
   top: 2px;
@@ -540,6 +631,16 @@
 .set-seg-b:hover {
   color: var(--text-mid);
   background: var(--bg-card);
+}
+
+.set-seg-b:disabled:hover {
+  color: var(--text-dim);
+  background: transparent;
+}
+
+.set-seg-b.on:disabled:hover {
+  color: var(--volt-ink);
+  background: var(--volt);
 }
 
 .set-seg-b.on {
@@ -608,6 +709,17 @@
 .set-input:focus {
   border-color: var(--volt-dim);
   box-shadow: 0 0 0 2px var(--volt-wash);
+}
+
+.set-input[readonly],
+.set-input:read-only {
+  color: var(--text-mid);
+  cursor: default;
+}
+
+.set-card-b[data-preview-locked="true"] .set-input[readonly]:focus {
+  border-color: var(--border-main);
+  box-shadow: none;
 }
 
 .set-policy-legend {

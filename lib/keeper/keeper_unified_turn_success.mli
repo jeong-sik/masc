@@ -5,6 +5,17 @@
     success path and must be called at most once per turn.
     [Keeper_unified_turn.run_keeper_cycle] is the expected caller. *)
 
+module For_testing : sig
+  val no_work_budget_threshold_override
+    :  stop_reason:Runtime_agent.stop_reason
+    -> has_current_task:bool
+    -> active_goal_ids:string list
+    -> strong_evidence:bool
+    -> surface_requires_evidence:bool
+    -> observation:Keeper_world_observation.world_observation
+    -> int option
+end
+
 val handle
   :  config:Workspace.config
   -> base_dir:string

@@ -4,7 +4,11 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
-const routeSignal = signal({
+const routeSignal = signal<{
+  tab: string
+  params: Record<string, string>
+  postId: null
+}>({
   tab: 'workspace',
   params: { section: 'board' },
   postId: null,
@@ -102,6 +106,19 @@ describe('Work', () => {
     expect(screen.queryByTestId('work-kpis')).toBeNull()
   })
 
+  it('renders the verification panel for the workspace verification section', () => {
+    routeSignal.value = {
+      tab: 'workspace',
+      params: { section: 'verification' },
+      postId: null,
+    }
+
+    render(html`<${Work} />`)
+
+    expect(screen.getByTestId('verification-panel')).toBeTruthy()
+    expect(screen.queryByTestId('work-kpis')).toBeNull()
+  })
+
   it('falls back to the v2 work surface for unknown workspace sections', () => {
     routeSignal.value = {
       tab: 'workspace',
@@ -115,7 +132,15 @@ describe('Work', () => {
   })
 
   describe('v2 work surface', () => {
-    it('renders KPI counts from goals and tasks', () => {
+    beforeEach(() => {
+      routeSignal.value = {
+        tab: 'workspace',
+        params: { section: 'work' },
+        postId: null,
+      }
+    })
+
+    it('renders the reference 5 KPI counts from goals and tasks', () => {
       goals.value = [
         { id: 'G-1', horizon: 'short', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         { id: 'G-2', horizon: 'mid', title: 'Goal Two', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
@@ -124,18 +149,31 @@ describe('Work', () => {
         { id: 'J-1', title: 'Job one', goal_id: 'G-1', status: 'done' },
         { id: 'J-2', title: 'Job two', goal_id: 'G-1', status: 'in_progress' },
         { id: 'J-3', title: 'Job three', goal_id: 'G-2', status: 'awaiting_verification' },
-        { id: 'J-4', title: 'Job four', goal_id: 'G-2', status: 'cancelled' },
+        { id: 'J-4', title: 'Job four', goal_id: 'G-2', status: 'todo' },
+        { id: 'J-5', title: 'Orphan job', status: 'todo' },
       ]
 
       render(html`<${Work} />`)
 
       expect(screen.getByTestId('kpi-goals').textContent).toBe('2')
-      expect(screen.getByTestId('kpi-jobs').textContent).toBe('4')
+      expect(screen.getByTestId('kpi-tasks').textContent).toBe('5')
       expect(screen.getByTestId('kpi-wip').textContent).toBe('1')
       expect(screen.getByTestId('kpi-verify').textContent).toBe('1')
-      expect(screen.getByTestId('kpi-backlog').textContent).toBe('0')
-      expect(screen.getByText(/Goal → Task → keeper/).textContent).toContain('누르면')
+      expect(screen.getByTestId('kpi-backlog').textContent).toBe('2')
+      expect(screen.getByText(/백로그에서 claim/).textContent).toContain('claim')
       expect(screen.getAllByTestId('work-horizon').map(section => section.getAttribute('data-horizon'))).toEqual(['short', 'mid'])
+    })
+
+    it('renders the reference new-goal placeholder button', () => {
+      goals.value = [
+        { id: 'G-1', horizon: 'short', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+      ]
+
+      render(html`<${Work} />`)
+
+      const button = screen.getByTestId('work-new-goal')
+      expect(button.textContent).toContain('새 목표')
+      expect(button).toBeDisabled()
     })
 
     it('renders a collapsed goal card per goal and expands on click', () => {
@@ -143,7 +181,7 @@ describe('Work', () => {
         { id: 'G-1', horizon: 'short', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
-        { id: 'J-1', title: 'Job one', goal_id: 'G-1', status: 'todo' },
+        { id: 'J-1', title: 'Job one', goal_id: 'G-1', status: 'in_progress' },
       ]
 
       render(html`<${Work} />`)
@@ -169,7 +207,7 @@ describe('Work', () => {
       const horizon = screen.getByTestId('work-horizon')
       expect(horizon.getAttribute('data-horizon')).toBe('long')
       expect(screen.getByText('Unexpected horizon goal')).toBeTruthy()
-      expect(horizon.textContent).toContain('Later')
+      expect(horizon.textContent).toContain('장기')
     })
 
     it('renders job rows with state, id, title, and blocker note', () => {
@@ -182,9 +220,9 @@ describe('Work', () => {
 
       const { container } = render(html`<${Work} />`)
 
-      // Cancelled tasks make this goal auto-expand and add the has-block border.
       const card = container.querySelector('[data-goal-id="G-1"]')
       expect(card).toBeTruthy()
+      fireEvent.click(card!.querySelector('.wk-goal-h')!)
       expect(card?.querySelector('.wk-jobs')).toBeTruthy()
 
       const row = screen.getByTestId('job-row')
@@ -192,6 +230,7 @@ describe('Work', () => {
       expect(row.classList.contains('wk-task')).toBe(true)
       expect(screen.getByText('Blocked job')).toBeTruthy()
       expect(screen.getByTestId('job-blocker').textContent).toContain('dependency missing')
+      expect(screen.queryByTestId('job-detail')).toBeNull()
     })
 
     it('navigates to keeper workspace when keeper assignment is clicked', () => {
@@ -216,61 +255,85 @@ describe('Work', () => {
       expect(navigateMock).toHaveBeenCalledWith('monitoring', { section: 'agents', view: 'keepers', keeper: 'sangsu' })
     })
 
-    it('surfaces tasks without a goal_id in a dedicated unassigned section', () => {
+    it('surfaces claimable backlog tasks in a dedicated backlog section', () => {
       goals.value = [
         { id: 'G-1', horizon: 'short', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         { id: 'J-1', title: 'Linked job', goal_id: 'G-1', status: 'todo' },
-        { id: 'U-1', title: 'Orphan job', goal_id: null, status: 'in_progress' },
-        { id: 'U-2', title: 'Another orphan', status: 'todo' },
+        { id: 'U-1', title: 'Orphan job', status: 'todo' },
+        { id: 'U-2', title: 'Another orphan', status: 'in_progress' },
       ]
 
       render(html`<${Work} />`)
 
-      // KPI counts every task regardless of goal linkage.
-      expect(screen.getByTestId('kpi-jobs').textContent).toBe('3')
       expect(screen.getByTestId('kpi-backlog').textContent).toBe('2')
 
-      const unassigned = screen.getByTestId('work-unassigned')
-      expect(unassigned).toBeTruthy()
-      expect(unassigned).toHaveClass('wk-backlog')
-      expect(unassigned.textContent).toContain('클레임 가능 백로그')
-      expect(unassigned.textContent).toContain('(2)')
-      expect(unassigned.querySelector('.wk-task-claim')).toBeTruthy()
+      const backlog = screen.getByTestId('work-backlog')
+      expect(backlog).toBeTruthy()
+      expect(backlog.textContent).toContain('클\uB808\uC784 가능 백로그')
+      expect(backlog.textContent).toContain('2')
+      expect(backlog.querySelectorAll('.wk-task-claim').length).toBe(2)
       expect(screen.getByText('Orphan job')).toBeTruthy()
-      expect(screen.getByText('Another orphan')).toBeTruthy()
+      expect(screen.getByText('Linked job')).toBeTruthy()
     })
 
-    it('omits the unassigned section when every task has a goal', () => {
+    it('expands inline task detail for gate evidence and handoff context', () => {
       goals.value = [
         { id: 'G-1', horizon: 'short', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
-        { id: 'J-1', title: 'Linked job', goal_id: 'G-1', status: 'todo' },
+        {
+          id: 'J-1',
+          title: 'Detail job',
+          goal_id: 'G-1',
+          status: 'todo',
+          assignee: 'dev',
+          gate: {
+            done: {
+              status: 'ready',
+              checks: [{ evidence: 'unit tests pass', outcome: 'satisfied', detail: 'ci green' }],
+            },
+          },
+          handoff_context: {
+            summary: 'Handoff summary text',
+            next_step: 'Deploy to staging',
+          },
+        },
       ]
 
       render(html`<${Work} />`)
 
-      expect(screen.queryByTestId('work-unassigned')).toBeNull()
+      fireEvent.click(screen.getByTestId('goal-card').querySelector('.wk-goal-h')!)
+
+      expect(screen.queryByTestId('work-task-detail')).toBeNull()
+
+      fireEvent.click(screen.getByText('Detail job'))
+
+      const detail = screen.getByTestId('job-row').querySelector('.wk-task-detail')
+      expect(detail).toBeTruthy()
+      expect(detail?.textContent).toContain('unit tests pass')
+      expect(detail?.textContent).toContain('Handoff summary text')
+      expect(detail?.textContent).toContain('Deploy to staging')
     })
 
-    it('auto-expands high-priority goals and goals with blocked jobs', () => {
+    it('does not render a task dossier sidebar for route-selected tasks', () => {
+      routeSignal.value = {
+        tab: 'workspace',
+        params: { section: 'work', task: 'J-1' },
+        postId: null,
+      }
       goals.value = [
-        { id: 'G-1', horizon: 'short', title: 'Normal goal', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
-        { id: 'G-2', horizon: 'mid', title: 'High goal', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
-        { id: 'G-3', horizon: 'long', title: 'Blocked goal', priority: 3, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', horizon: 'short', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
-        { id: 'J-1', title: 'Blocked job', goal_id: 'G-3', status: 'cancelled' },
+        { id: 'J-1', title: 'Selectable job', goal_id: 'G-1', status: 'todo' },
       ]
 
-      const { container } = render(html`<${Work} />`)
+      render(html`<${Work} />`)
 
-      // G-2 (high priority) and G-3 (blocked) should be expanded; G-1 should be collapsed.
-      expect(container.querySelector('[data-goal-id="G-1"]')?.querySelector('.wk-jobs')).toBeNull()
-      expect(container.querySelector('[data-goal-id="G-2"]')?.querySelector('.wk-jobs')).toBeTruthy()
-      expect(container.querySelector('[data-goal-id="G-3"]')?.querySelector('.wk-jobs')).toBeTruthy()
+      expect(screen.queryByTestId('work-task-detail')).toBeNull()
+      expect(screen.queryByTestId('job-detail')).toBeNull()
     })
   })
 })

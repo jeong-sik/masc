@@ -135,6 +135,57 @@
   white-space: nowrap;
 }
 
+.chat-board-post-link {
+  display: inline-flex;
+  max-width: min(100%, 18rem);
+  min-width: 0;
+  align-items: baseline;
+  gap: 0.35rem;
+  vertical-align: baseline;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--accent-30);
+  border-radius: var(--r-0);
+  background: var(--accent-10);
+  color: var(--color-accent-fg);
+  font-weight: 600;
+  line-height: 1.45;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.chat-board-post-link:hover {
+  border-color: var(--color-accent-fg-dim);
+  background: var(--accent-20);
+  color: var(--color-accent-fg);
+  text-decoration: none;
+}
+
+.chat-board-post-link-kind {
+  flex: none;
+  font-family: var(--font-ui);
+  font-size: var(--fs-10);
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--color-fg-primary);
+}
+
+.chat-board-post-link-id {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 560px) {
+  .chat-board-post-link {
+    max-width: 100%;
+  }
+
+  .chat-board-post-link-id {
+    max-width: 13ch;
+  }
+}
+
 /* ════ Keeper v2 multimodal composer ════ */
 
 .composer {

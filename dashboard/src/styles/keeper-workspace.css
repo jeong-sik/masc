@@ -34,11 +34,10 @@
 /* Keeper detail is a focused single-keeper view. On mobile the global header's
  * action chips (Copilot / auth / connection / error) wrap onto two extra rows
  * (~76px) that crowd out the conversation. Hide them and tighten the header
- * padding here. Kept: the brand block + hamburger (the only global-nav escape
- * on mobile in this mode, since the bottom bar is hidden), and the global
- * Emergency Stop (namespace pause) — a safety control with no other on-surface
- * affordance here (marked [data-mobile-detail-keep] in app.ts). The remaining
- * chips stay reachable from the nav drawer / other surfaces. */
+ * padding here. Kept: the brand block + hamburger, and the global Emergency
+ * Stop (namespace pause) — a safety control with no other on-surface affordance
+ * here (marked [data-mobile-detail-keep] in app.ts). The bottom nav is hidden
+ * only while the chat pane is active; the roster pane keeps it. */
 @media (max-width: 768px) {
   [data-keeper-detail-mode="true"] .v2-shell-header { padding-top: 4px; padding-bottom: 4px; }
   [data-keeper-detail-mode="true"] .v2-header-actions > *:not([data-mobile-detail-keep]) { display: none; }
@@ -135,6 +134,10 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
     min-height: 0;
     height: 100%;
   }
+  .v2-body[data-mpane="roster"] .kw-grid {
+    box-sizing: border-box;
+    padding-bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+  }
   .kw-rail-toggle { display: none; }
   /* Single-column master-detail layout has no resizable column boundaries. */
   .kw-pane-resizer { display: none; }
@@ -182,6 +185,74 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 }
 .kw-roster-search:focus { border-color: var(--color-accent-fg-dim); box-shadow: 0 0 0 2px var(--accent-10); }
 .kw-roster-search::placeholder { color: var(--color-fg-muted); }
+
+.kw-roster-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px 11px;
+  border-bottom: 1px solid var(--color-border-divider);
+  background: color-mix(in oklab, var(--color-bg-surface) 38%, transparent);
+}
+.kw-roster-meter {
+  display: flex;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--color-bg-page);
+}
+.kw-roster-meter span { min-width: 0; height: 100%; }
+.kw-roster-meter .run { background: var(--color-status-ok); }
+.kw-roster-meter .pause { background: var(--color-status-warn); }
+.kw-roster-meter .off { background: var(--color-fg-muted); }
+.kw-roster-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+.kw-roster-stat {
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+  background: var(--color-bg-page);
+}
+.kw-roster-stat b {
+  display: block;
+  color: var(--color-fg-primary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-14);
+  line-height: 1.1;
+}
+.kw-roster-stat span {
+  display: block;
+  margin-top: 2px;
+  color: var(--color-fg-muted);
+  font-size: var(--fs-10);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.kw-roster-stat.ok { border-color: rgb(var(--color-status-ok-glow) / 0.36); }
+.kw-roster-stat.warn { border-color: rgb(var(--color-status-warn-glow) / 0.36); }
+.kw-roster-stat.idle { border-color: color-mix(in oklab, var(--color-fg-muted) 32%, var(--color-border-default)); }
+.kw-roster-flags {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.kw-roster-flags span {
+  color: var(--color-fg-muted);
+  border: 1px solid var(--color-border-default);
+  border-radius: 9999px;
+  padding: 2px 7px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  white-space: nowrap;
+}
+.kw-roster-flags .hot { color: var(--color-status-err); border-color: rgb(var(--color-status-err-glow) / 0.4); background: rgb(var(--color-status-err-glow) / 0.10); }
+.kw-roster-flags .gate { color: var(--color-status-warn); border-color: rgb(var(--color-status-warn-glow) / 0.38); background: rgb(var(--color-status-warn-glow) / 0.09); }
+.kw-roster-flags .ctx { color: var(--color-accent-fg); border-color: var(--color-accent-fg-dim); background: var(--accent-10); }
 
 .kw-roster-filters { display: flex; gap: 5px; padding: 10px 14px; flex-wrap: wrap; border-bottom: 1px solid var(--color-border-divider); }
 .kw-rfilter {

@@ -1788,6 +1788,7 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
 
   it('renders board post ids in assistant prose as board detail links', () => {
     const postId = 'p-59e2917e15de5367e81b2244a8f5095a'
+    const label = postId.slice(0, 8)
     render(
       html`<${ChatTranscript}
         entries=${[
@@ -1806,8 +1807,12 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
 
     const link = container.querySelector(`a[href="#board?post=${postId}"]`) as HTMLAnchorElement | null
     expect(link).not.toBeNull()
-    expect(link?.textContent).toBe(postId)
-    expect(link?.getAttribute('title')).toBe('보드 게시글 열기')
+    expect(link?.classList.contains('chat-board-post-link')).toBe(true)
+    expect(link?.getAttribute('data-board-post-id')).toBe(postId)
+    expect(link?.getAttribute('aria-label')).toBe(`보드 글 ${postId} 열기`)
+    expect(link?.getAttribute('title')).toBe(`보드 글 ${postId} 열기`)
+    expect(link?.textContent).toContain('보드 글')
+    expect(link?.textContent).toContain(label)
   })
 
   it('keeps the flat per-row tool bubbles when grouping is off (default)', () => {
@@ -2073,6 +2078,7 @@ describe('fusion chat card', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
+    window.location.hash = '#workspace'
     vi.mocked(fetchBoardPost).mockReset()
   })
 
@@ -2113,6 +2119,25 @@ describe('fusion chat card', () => {
     expect(expandButton?.className).not.toContain('opts')
   })
 
+  it('routes from the collapsed fusion card to the run and source board post', () => {
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+
+    const openRun = container.querySelector('[data-testid="fusion-chat-open-run"]') as HTMLButtonElement | null
+    const openBoard = container.querySelector('[data-testid="fusion-chat-open-board"]') as HTMLButtonElement | null
+    expect(openRun).not.toBeNull()
+    expect(openBoard).not.toBeNull()
+
+    fireEvent.click(openRun as HTMLButtonElement)
+    expect(window.location.hash).toBe('#fusion?run_id=fus-1')
+    expect(container.querySelector('[data-fusion-detail]')).toBeNull()
+    expect(fetchBoardPost).not.toHaveBeenCalled()
+
+    fireEvent.click(openBoard as HTMLButtonElement)
+    expect(window.location.hash).toBe('#board?post=p-1')
+    expect(container.querySelector('[data-fusion-detail]')).toBeNull()
+    expect(fetchBoardPost).not.toHaveBeenCalled()
+  })
+
   it('lazy-fetches the board post and renders panel answers + judge on expand', async () => {
     vi.mocked(fetchBoardPost).mockResolvedValue({
       meta: {
@@ -2146,6 +2171,45 @@ describe('fusion chat card', () => {
     fireEvent.click(panelToggle as HTMLButtonElement)
     await flushUi()
     expect(container.querySelector('[data-fusion-detail]')?.textContent).toContain('PANEL ONE ANSWER')
+  })
+
+  it('normalizes live fusion failure reasons and renders judge errors', async () => {
+    vi.mocked(fetchBoardPost).mockResolvedValue({
+      meta: {
+        source: 'fusion',
+        panel: [
+          {
+            model: 'ollama_cloud.kimi-k2-6',
+            status: 'failed',
+            reason_detail: "Provider 'unknown' timeout phase=http_operation",
+            reason_code: 'provider_error',
+          },
+          {
+            model: 'ollama_cloud.minimax-m3',
+            status: 'failed',
+            reason: "(Fusion_types.Provider_error \"Provider 'unknown' bad gateway\")",
+          },
+          {
+            model: 'ollama_cloud.deepseek-v4-flash',
+            status: 'failed',
+            reason: 'Fusion_types.Timeout',
+          },
+        ],
+        judge: { status: 'failed', decision: 'blocked', error: 'judge failed hard' },
+      },
+    } as unknown as Awaited<ReturnType<typeof fetchBoardPost>>)
+
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] > button') as HTMLButtonElement)
+    await flushUi()
+
+    const detail = container.querySelector('[data-fusion-detail]')
+    expect(detail?.textContent).toContain("Provider 'ollama_cloud.kimi-k2-6' timeout phase=http_operation")
+    expect(detail?.textContent).toContain("Provider 'ollama_cloud.minimax-m3' bad gateway")
+    expect(detail?.textContent).toContain('timeout')
+    expect(detail?.textContent).toContain('judge failed hard')
+    expect(detail?.textContent).not.toContain('Fusion_types.Provider_error')
+    expect(detail?.textContent).not.toContain("Provider 'unknown'")
   })
 
   it('shows an error message when the board post fetch fails', async () => {

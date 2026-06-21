@@ -1,8 +1,8 @@
 /* MASC Dashboard — Work surface v2 (keeper-v2 goal/task layout).
  *
  * Ported from keeper-v2/styles/v2.css .wk-* rules. The design's raw
- * palette vars (--bg-deep, --volt, --text-mid …) are bridged through
- * variables.css aliases so the layout inherits dashboard theme changes.
+ * palette vars are bridged through variables.css aliases so the layout
+ * inherits dashboard theme changes.
  */
 
 /* ── Surface shell ────────────────────────────────────────────────────────── */
@@ -26,7 +26,6 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  /* Background now comes from the .ss-surface / bg-surface-page utility. */
 }
 
 .wk-scroll {
@@ -57,6 +56,16 @@
   margin: 0;
 }
 
+.wk-eyebrow {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 7px;
+}
+
 .wk-sub {
   margin-top: 5px;
   font-size: 12px;
@@ -67,14 +76,6 @@
   color: var(--text-mid);
 }
 
-.wk-blk-n {
-  color: var(--status-bad);
-}
-
-.wk-ver-n {
-  color: var(--status-warn);
-}
-
 /* ── KPI strip ────────────────────────────────────────────────────────────── */
 .wk-kpis {
   display: grid;
@@ -82,7 +83,6 @@
   gap: 1px;
   background: var(--border-soft);
   overflow: hidden;
-  /* Border/radius/shadow are provided by the .ss-card utility. */
 }
 
 .wk-kpi {
@@ -159,7 +159,6 @@
 }
 
 .wk-goal {
-  /* Background/border/radius/shadow are provided by the .ss-card utility. */
   overflow: hidden;
 }
 
@@ -192,31 +191,15 @@
   width: 12px;
 }
 
-.wk-pri {
+.wk-prio {
   flex: none;
-  font-family: var(--font-ui);
-  font-size: 9.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
   padding: 2px 7px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--border-soft);
-  color: var(--text-dim);
-}
-
-.wk-pri.high {
-  color: var(--status-bad);
-  border-color: color-mix(in oklab, var(--status-bad) 40%, transparent);
-  background: color-mix(in oklab, var(--status-bad) 10%, transparent);
-}
-
-.wk-pri.normal {
-  color: var(--volt-strong);
-  border-color: color-mix(in oklab, var(--volt) 32%, transparent);
-}
-
-.wk-pri.low {
-  color: var(--text-dim);
+  color: var(--text-mid);
 }
 
 .wk-gstatus,
@@ -240,13 +223,6 @@
   color: var(--status-warn);
   border-color: color-mix(in oklab, var(--status-warn) 36%, transparent);
   background: color-mix(in oklab, var(--status-warn) 10%, transparent);
-}
-
-.wk-goal-id {
-  flex: none;
-  font-size: 11.5px;
-  color: var(--text-dim);
-  font-family: var(--font-mono);
 }
 
 .wk-goal-title {
@@ -327,7 +303,7 @@
   font-family: var(--font-mono);
 }
 
-/* ── Job list ─────────────────────────────────────────────────────────────── */
+/* ── Job / Task list ──────────────────────────────────────────────────────── */
 .wk-jobs {
   border-top: 1px solid var(--border-soft);
   padding: 10px 15px 13px;
@@ -345,17 +321,33 @@
   margin-bottom: 7px;
 }
 
-/* Claimable backlog: tasks with no goal_id, surfaced below the goal cards. */
-.wk-unassigned {
-  /* Background/border/radius/shadow come from the .ss-card utility. */
+.wk-verifier {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-mid);
+  padding: 2px 0 9px;
+  border-bottom: 1px dashed var(--border-soft);
+  margin-bottom: 7px;
+}
+
+.wk-vchip {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-sunken);
+  color: var(--text-mid);
+}
+
+/* ── Claimable backlog ────────────────────────────────────────────────────── */
+.wk-backlog {
+  border-color: color-mix(in oklab, var(--status-warn) 18%, var(--border-main));
   overflow: hidden;
 }
 
-.wk-backlog {
-  border-color: color-mix(in oklab, var(--status-warn) 18%, var(--border-main));
-}
-
-.wk-unassigned-h,
 .wk-backlog-h {
   display: flex;
   align-items: center;
@@ -366,29 +358,81 @@
   color: var(--text-mid);
 }
 
-.wk-unassigned-dot {
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--text-dim);
+.wk-backlog-glyph {
+  color: var(--status-warn);
 }
 
-.wk-unassigned-n {
-  font-weight: 400;
+.wk-backlog-h .n {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in oklab, var(--status-warn) 12%, transparent);
+  border: 1px solid color-mix(in oklab, var(--status-warn) 35%, transparent);
+  color: var(--status-warn);
+}
+
+.wk-backlog-sub {
+  margin-left: auto;
+  font-size: 10px;
   color: var(--text-dim);
 }
 
-.wk-job,
+.wk-backlog-list {
+  border-top: 1px solid var(--border-soft);
+  padding: 8px 15px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wk-bl-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.wk-bl-row:hover {
+  background: var(--bg-sunken);
+}
+
+.wk-bl-title {
+  font-size: 13px;
+  color: var(--text-primary);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.wk-bl-goal {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-soft);
+  background: var(--bg-sunken);
+  color: var(--text-dim);
+}
+
+.wk-bl-prio {
+  flex: none;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+/* ── Task row ─────────────────────────────────────────────────────────────── */
 .wk-task {
   display: flex;
   flex-direction: column;
   gap: 5px;
   padding: 7px 8px;
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
 }
 
-.wk-job:hover,
 .wk-task:hover {
   background: var(--bg-sunken);
 }
@@ -401,7 +445,6 @@
   min-width: 0;
 }
 
-.wk-job-dot,
 .wk-task-dot {
   flex: none;
   width: 7px;
@@ -410,16 +453,11 @@
   background: var(--text-dim);
 }
 
-.wk-job-dot.done,
 .wk-task-dot.done { background: var(--status-ok); }
-.wk-job-dot.wip,
 .wk-task-dot.wip { background: var(--volt); }
-.wk-job-dot.review,
 .wk-task-dot.review { background: var(--status-warn); }
-.wk-job-dot.blocked,
 .wk-task-dot.blocked { background: var(--status-bad); }
 
-.wk-job-id,
 .wk-task-id {
   flex: none;
   font-size: 11px;
@@ -428,7 +466,6 @@
   font-family: var(--font-mono);
 }
 
-.wk-job-title,
 .wk-task-title {
   font-size: 13px;
   color: var(--text-primary);
@@ -436,20 +473,24 @@
   align-items: baseline;
   gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
-.wk-job.done .wk-job-title,
 .wk-task.done .wk-task-title {
   color: var(--text-mid);
 }
 
-.wk-job-block,
 .wk-task-block {
   font-size: 11px;
   color: var(--status-bad);
 }
 
-.wk-job-state,
+.wk-task-chev {
+  flex: none;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
 .wk-task-state {
   flex: none;
   font-family: var(--font-ui);
@@ -458,16 +499,11 @@
   color: var(--text-dim);
 }
 
-.wk-job-state.done,
 .wk-task-state.done { color: var(--status-ok); }
-.wk-job-state.wip,
 .wk-task-state.wip { color: var(--volt-strong); }
-.wk-job-state.review,
 .wk-task-state.review { color: var(--status-warn); }
-.wk-job-state.blocked,
 .wk-task-state.blocked { color: var(--status-bad); }
 
-.wk-job-kp,
 .wk-task-kp {
   flex: none;
   display: inline-flex;
@@ -487,24 +523,20 @@
   font: inherit;
 }
 
-.wk-job-kp:hover,
 .wk-task-kp:hover {
   border-color: var(--border-highlight);
   color: var(--text-bright);
 }
 
-.wk-job-kp.none,
 .wk-task-kp.none {
   color: var(--text-dim);
   cursor: default;
 }
 
-/* RFC-0267 Phase 2: per-row "assign to goal" control on unassigned tasks. */
-.wk-job-assign,
 .wk-task-claim {
   flex: none;
   max-width: 11rem;
-  padding: 2px 8px;
+  padding: 2px 10px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--border-highlight);
   background: var(--bg-sunken);
@@ -515,35 +547,67 @@
   transition: border-color 0.15s ease, color 0.15s ease;
 }
 
-.wk-job-assign:hover,
 .wk-task-claim:hover {
   border-color: var(--volt-strong);
   color: var(--text-bright);
 }
 
-.wk-gate,
-.wk-handoff {
+/* ── Inline task detail (gate + handoff) ──────────────────────────────────── */
+.wk-task-detail {
   width: calc(100% - 24px);
   margin-left: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 6px;
 }
 
 .wk-gate {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 6px;
+}
+
+.wk-gate-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.wk-gate-open {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in oklab, var(--status-warn) 35%, transparent);
+  background: color-mix(in oklab, var(--status-warn) 10%, transparent);
+  color: var(--status-warn);
+}
+
+.wk-gate-ok {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in oklab, var(--status-ok) 35%, transparent);
+  background: color-mix(in oklab, var(--status-ok) 10%, transparent);
+  color: var(--status-ok);
 }
 
 .wk-gate-row {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   max-width: 100%;
-  padding: 3px 7px;
+  padding: 4px 8px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--border-soft);
   color: var(--text-mid);
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.3;
+  width: fit-content;
 }
 
 .wk-gate-row.satisfied {
@@ -561,10 +625,58 @@
   border-color: color-mix(in oklab, var(--status-bad) 30%, transparent);
 }
 
+.wk-gate-mark {
+  flex: none;
+  font-size: 11px;
+  width: 14px;
+  text-align: center;
+}
+
+.wk-gate-label {
+  flex: none;
+  text-transform: uppercase;
+}
+
+.wk-gate-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .wk-handoff {
-  color: var(--text-dim);
-  font-size: 11.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-soft);
+  color: var(--text-mid);
+  font-size: 12px;
   line-height: 1.45;
+}
+
+.wk-handoff-h {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+
+.wk-handoff-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.wk-handoff-row .k {
+  flex: none;
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  min-width: 36px;
 }
 
 /* ── Footer / new goal button ─────────────────────────────────────────────── */
@@ -572,6 +684,9 @@
   width: auto;
   margin: 0;
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   align-self: center;
   white-space: nowrap;
 }
@@ -584,9 +699,20 @@
 }
 
 /* ── Responsive ───────────────────────────────────────────────────────────── */
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
+  .wk-kpis {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 700px) {
   .wk-kpis {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .wk-head {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .wk-goal-h {
@@ -600,5 +726,24 @@
   .wk-prog {
     width: 100%;
     max-width: none;
+  }
+
+  .wk-task-main {
+    flex-wrap: wrap;
+  }
+
+  .wk-task-title {
+    min-width: 100%;
+    order: 2;
+  }
+
+  .wk-task-state,
+  .wk-task-kp,
+  .wk-task-claim {
+    order: 3;
+  }
+
+  .wk-spacer {
+    display: none;
   }
 }

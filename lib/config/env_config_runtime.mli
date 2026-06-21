@@ -219,6 +219,25 @@ module Keeper_stale_run : sig
       [1800.0] (30 min). *)
 end
 
+(** {1 Keeper mid-turn progress watchdog (RFC-0012)} *)
+
+module Keeper_mid_turn_progress : sig
+  val timeout_sec_opt : unit -> float option
+  (** [timeout_sec_opt ()] returns the in-turn progress-silence threshold
+      when [MASC_KEEPER_MID_TURN_PROGRESS_TIMEOUT_SEC] is positive, or [None]
+      when unset / zero / negative.
+
+      Distinct from [Keeper_max_turn_watchdog] (wall-clock, [In_turn_hung]) and
+      [Keeper_stale_run] (no-turn, [Idle_turn]): keys on
+      [current_turn_observation.last_progress_at] while a turn is running,
+      producing [Mid_turn_no_progress] when no progress event has been recorded
+      for longer than the threshold.
+
+      Opt-in ([None] default): progress is stamped only on tool/sdk-boundary
+      events, so a default-on window could false-fire on a long single-attempt
+      thinking turn. RFC-0012 recommends [300.0] when enabling. *)
+end
+
 (** {1 Slot scheduling} *)
 
 module Slot : sig

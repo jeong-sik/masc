@@ -14,9 +14,12 @@
 
 .ap-sla { font-size: 11px; color: var(--status-warn); border: 1px solid color-mix(in oklab, var(--status-warn) 35%, var(--border-main)); background: color-mix(in oklab, var(--status-warn) 8%, transparent); padding: 4px 10px; border-radius: var(--radius-pill); white-space: nowrap; }
 
+.ap-workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); gap: 14px; align-items: start; margin-bottom: 22px; }
 .ap-queue { display: flex; flex-direction: column; gap: 10px; margin-bottom: 22px; }
+.ap-workspace .ap-queue { margin-bottom: 0; }
 .ap-card { display: flex; background: var(--bg-panel); border: 1px solid var(--border-main); border-radius: var(--radius-md); overflow: hidden; transition: border-color 0.16s; }
 .ap-card:hover { border-color: var(--border-highlight); }
+.ap-card[data-selected="true"] { border-color: var(--volt-dim); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--volt-strong) 28%, transparent); }
 .ap-card .ap-rail { flex: none; width: 3px; background: var(--border-main); }
 .ap-card.sev-bad  .ap-rail { background: var(--status-bad); }
 .ap-card.sev-warn .ap-rail { background: var(--status-warn); }
@@ -35,6 +38,9 @@
 .ap-id { font-size: 10px; color: var(--text-dim); margin-left: auto; letter-spacing: 0.06em; }
 .ap-age { font-size: 10px; font-family: var(--font-mono); color: var(--text-dim); white-space: nowrap; }
 .ap-age.sev-bad { color: var(--status-bad); } .ap-age.sev-warn { color: var(--status-warn); } .ap-age.sev-accent { color: var(--accent-fg); }
+.ap-detail-toggle { flex: none; font-family: var(--font-ui); font-size: 10.5px; padding: 4px 8px; border-radius: var(--radius-xs); border: 1px solid var(--border-soft); color: var(--text-dim); background: var(--bg-sunken); cursor: pointer; }
+.ap-detail-toggle:hover { color: var(--volt-strong); border-color: var(--volt-dim); }
+.ap-detail-toggle[aria-pressed="true"] { color: var(--text-bright); border-color: var(--volt-dim); background: var(--volt-wash); }
 
 .ap-title { font-family: var(--font-display); font-weight: 500; font-size: 15px; color: var(--text-bright); margin: 9px 0 4px; line-height: 1.35; }
 .ap-detail { font-size: 12px; color: var(--text-mid); line-height: 1.55; margin: 0 0 11px; }
@@ -60,6 +66,18 @@
 .ap-act.ghost { margin-left: auto; border-color: transparent; color: var(--text-dim); padding: 7px 4px; }
 .ap-act.ghost:hover:not(:disabled) { color: var(--volt-strong); }
 
+.ap-detail-panel { position: sticky; top: 14px; background: var(--bg-panel); border: 1px solid var(--border-main); border-radius: var(--radius-md); padding: 14px; min-width: 0; }
+.ap-detail-panel-inline { display: none; }
+.ap-detail-panel-rail { display: block; }
+.ap-detail-panel-head { display: flex; gap: 10px; align-items: flex-start; padding-bottom: 12px; border-bottom: 1px solid var(--border-soft); }
+.ap-detail-panel-title { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ap-detail-panel-title strong { color: var(--text-bright); font-family: var(--font-display); font-size: 14px; font-weight: 600; line-height: 1.35; }
+.ap-detail-panel-title span { color: var(--text-dim); font-size: 10px; letter-spacing: 0.06em; }
+.ap-dossier { display: flex; flex-direction: column; gap: 9px; margin: 13px 0 0; }
+.ap-dossier-row { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 10px; align-items: start; }
+.ap-dossier-row dt { color: var(--text-dim); font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+.ap-dossier-row dd { margin: 0; color: var(--text-primary); font-size: 12px; line-height: 1.45; word-break: break-word; }
+
 .ap-clear { text-align: center; padding: 52px 20px; display: flex; flex-direction: column; align-items: center; gap: 7px; color: var(--text-dim); }
 .ap-clear .ico { width: 46px; height: 46px; display: flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 22px; color: var(--status-ok); border: 1px solid color-mix(in oklab, var(--status-ok) 40%, transparent); background: color-mix(in oklab, var(--status-ok) 8%, transparent); }
 .ap-clear h3 { font-family: var(--font-display); font-weight: 500; font-size: 15px; color: var(--text-mid); margin: 4px 0 0; }
@@ -70,3 +88,12 @@
 /* Nav-rail count badge for the approvals surface (open-approval count). */
 .ap-nav-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 5px; border-radius: var(--radius-pill); font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; line-height: 1; color: var(--status-bad); background: color-mix(in oklab, var(--status-bad) 16%, transparent); border: 1px solid color-mix(in oklab, var(--status-bad) 38%, transparent); }
 .ap-nav-dot { position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--status-bad); box-shadow: 0 0 0 2px var(--bg-panel); }
+
+@media (max-width: 980px) {
+  .ap-workspace { grid-template-columns: 1fr; }
+  .ap-detail-panel { position: static; }
+  .ap-detail-panel-rail { display: none; }
+  .ap-detail-panel-inline { display: block; }
+  .ap-h { flex-wrap: wrap; }
+  .ap-id { margin-left: 0; }
+}

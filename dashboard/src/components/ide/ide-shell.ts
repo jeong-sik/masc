@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import { useSubscribedSnapshot, useSubscribedValue } from './use-signal-value'
+import { useSignalValue, useSubscribedSnapshot, useSubscribedValue } from './use-signal-value'
 import {
   activeIdeFile,
   focusIdeContextAnchor,
@@ -32,6 +32,12 @@ import { OverlayKeeperTrace } from './overlay-keeper-trace'
 import { IdePersistencePanel } from './ide-persistence-panel'
 import { IdeMemoryPanel } from './ide-memory-panel'
 import { routeLinksForContext } from './ide-context-lens'
+import {
+  cursorOverlaySignal,
+  getKeeperColor,
+  type KeeperCursor,
+  type KeeperCursorOverlay,
+} from './keeper-cursor-overlay'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
@@ -42,6 +48,7 @@ import { dashboardWsOnlyEnabled } from '../../dashboard-ws-cutover'
 import { dashboardWsConnected, dashboardWsSseFallbackActive } from '../../dashboard-ws-state'
 import type { Repository } from '../../api/repositories'
 import type { WorkspaceSource } from '../../api/workspace-source'
+import { KeeperBadge } from '../keeper-badge'
 import {
   parseActive,
   serializeActive,
@@ -49,6 +56,7 @@ import {
 
 type ViewTab = IdeEditorView
 type IdeFocus = 'review'
+type IdeRightRailTab = 'context' | 'activity' | 'cursors'
 type IdeStatusbarChipTone = 'brass' | 'ghost' | 'info' | 'ok'
 type IdeConnectionTone = 'ok' | 'warn'
 
@@ -71,6 +79,10 @@ const IDE_LAYER_KINDS = new Set(IDE_LAYERS.map(layer => layer.kind))
 const IDE_ACTIVITY_POLL_MS = 10_000
 const REVIEW_FOCUS_LAYER_PARAM = REVIEW_FOCUS_LAYERS.join(',')
 const EMPTY_LAYER_PARAM = 'none'
+export const IDE_TREE_WIDTH_STORAGE_KEY = 'dashboard:ide-tree-width'
+export const IDE_TREE_WIDTH_DEFAULT = 230
+export const IDE_TREE_WIDTH_MIN = 180
+export const IDE_TREE_WIDTH_MAX = 360
 const STATUSBAR_LAYER_PRIORITY: ReadonlyArray<string> = [
   'keeper-trace',
   'approve',
@@ -86,6 +98,43 @@ const STATUSBAR_VIEW_LABELS: Readonly<Record<ViewTab, string>> = {
   unified: 'UNIFIED',
   'split-diff': 'SPLIT DIFF',
   blame: 'BLAME',
+}
+const IDE_RIGHT_RAIL_TABS: ReadonlyArray<{ readonly id: IdeRightRailTab; readonly label: string }> = [
+  { id: 'context', label: 'Context' },
+  { id: 'activity', label: 'Activity' },
+  { id: 'cursors', label: 'Cursors' },
+]
+
+export function normalizeIdeTreeWidth(value: unknown): number {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numeric)) return IDE_TREE_WIDTH_DEFAULT
+  return Math.min(IDE_TREE_WIDTH_MAX, Math.max(IDE_TREE_WIDTH_MIN, Math.round(numeric)))
+}
+
+function readStoredIdeTreeWidth(): number {
+  if (typeof window === 'undefined' || window.localStorage === undefined) {
+    return IDE_TREE_WIDTH_DEFAULT
+  }
+  try {
+    const raw = window.localStorage.getItem(IDE_TREE_WIDTH_STORAGE_KEY)
+    if (!raw) return IDE_TREE_WIDTH_DEFAULT
+    try {
+      return normalizeIdeTreeWidth(JSON.parse(raw))
+    } catch {
+      return normalizeIdeTreeWidth(raw)
+    }
+  } catch {
+    return IDE_TREE_WIDTH_DEFAULT
+  }
+}
+
+function writeStoredIdeTreeWidth(width: number): void {
+  if (typeof window === 'undefined' || window.localStorage === undefined) return
+  try {
+    window.localStorage.setItem(IDE_TREE_WIDTH_STORAGE_KEY, JSON.stringify(width))
+  } catch {
+    // localStorage can be unavailable or quota-limited; keep the in-memory width.
+  }
 }
 
 interface IdeStatusbarInput {
@@ -442,6 +491,133 @@ function paramsWithRails(
   return next
 }
 
+function shortCursorPath(path: string): string {
+  const parts = path.trim().split('/').filter(Boolean)
+  if (parts.length <= 2) return path.trim() || '(no file)'
+  return `${parts.at(-2)}/${parts.at(-1)}`
+}
+
+function cursorAgeLabel(lastUpdate: number): string {
+  if (!Number.isFinite(lastUpdate) || lastUpdate <= 0) return 'unknown age'
+  const seconds = Math.max(0, Math.round((Date.now() - lastUpdate) / 1000))
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  return `${Math.round(minutes / 60)}h ago`
+}
+
+function sortedCursors(overlay: KeeperCursorOverlay): ReadonlyArray<KeeperCursor> {
+  return [...overlay.cursors.values()].sort((left, right) => {
+    if (right.last_update !== left.last_update) return right.last_update - left.last_update
+    return left.keeper_id.localeCompare(right.keeper_id)
+  })
+}
+
+function focusCursor(cursor: KeeperCursor): void {
+  const filePath = cursor.file_path.trim()
+  if (!filePath) return
+  const line = cursor.line >= 1 ? cursor.line : undefined
+  const label = cursor.tool_name ?? cursor.focus_mode
+  const sourceId = `cursor:${cursor.keeper_id}:${filePath}:${line ?? 0}`
+  focusIdeContextAnchor({
+    file_path: filePath,
+    line,
+    surface: 'Keeper',
+    label,
+    source_id: sourceId,
+    keeper_id: cursor.keeper_id,
+    route_links: routeLinksForContext({
+      filePath,
+      line,
+      surface: 'Keeper',
+      label,
+      sourceId,
+      keeperId: cursor.keeper_id,
+      telemetry: true,
+      telemetryQuery: [
+        cursor.keeper_id,
+        cursor.focus_mode ? `mode:${cursor.focus_mode}` : null,
+        cursor.tool_name ? `tool:${cursor.tool_name}` : null,
+      ].filter((part): part is string => Boolean(part)).join(' '),
+    }),
+  })
+}
+
+function IdeCursorRailPanel() {
+  const overlay = useSignalValue(cursorOverlaySignal)
+  const cursors = useMemo(() => sortedCursors(overlay), [overlay])
+  return html`
+    <div
+      class="ide-plane-cursors"
+      data-testid="ide-cursor-rail"
+      role="region"
+      aria-label="Keeper cursor focus"
+    >
+      <div class="ide-rail-head">
+        <span>KEEPER CURSORS</span>
+        <span>${cursors.length} active</span>
+      </div>
+      ${overlay.active_file ? html`
+        <div class="ide-cursor-rail-active-file" title=${overlay.active_file}>
+          active file · ${shortCursorPath(overlay.active_file)}
+        </div>
+      ` : null}
+      ${overlay.collisions.length > 0 ? html`
+        <div class="ide-cursor-collision-list" role="status" aria-label="Cursor collision summary">
+          ${overlay.collisions.slice(0, 4).map(collision => html`
+            <span
+              key=${`${collision.line}:${collision.keeper_ids.join(',')}`}
+              data-risk=${collision.risk_level}
+              title=${collision.keeper_ids.join(', ')}
+            >
+              L${collision.line} · ${collision.risk_level} · ${collision.keeper_ids.length}
+            </span>
+          `)}
+        </div>
+      ` : null}
+      <ol class="ide-cursor-rail-list" aria-label="Active keeper cursors">
+        ${cursors.length === 0
+          ? html`<li class="ide-rail-empty" data-testid="ide-cursor-rail-empty">no active cursors</li>`
+          : cursors.map(cursor => html`<${IdeCursorRailRow} key=${cursor.keeper_id} cursor=${cursor} />`)}
+      </ol>
+    </div>
+  `
+}
+
+function IdeCursorRailRow({ cursor }: { readonly cursor: KeeperCursor }) {
+  const color = getKeeperColor(cursor.keeper_id)
+  const hasFile = cursor.file_path.trim() !== ''
+  const selection = cursor.selection_end && cursor.selection_end.line !== cursor.line
+    ? `-${cursor.selection_end.line}`
+    : ''
+  return html`
+    <li
+      class="ide-cursor-rail-row v2-ide-row"
+      style=${{ '--ide-cursor-color': color.cursor }}
+    >
+      <div class="ide-cursor-rail-row-head">
+        <${KeeperBadge} id=${cursor.keeper_id} variant="sigil" size="sm" />
+        <span class="ide-cursor-rail-keeper">${cursor.keeper_id}</span>
+        <span class="ide-cursor-rail-age">${cursorAgeLabel(cursor.last_update)}</span>
+      </div>
+      <div class="ide-cursor-rail-meta">
+        <span>${cursor.focus_mode}</span>
+        ${cursor.tool_name ? html`<span>${cursor.tool_name}</span>` : null}
+        ${cursor.turn !== undefined ? html`<span>turn ${cursor.turn}</span>` : null}
+      </div>
+      <div class="ide-cursor-rail-path" title=${cursor.file_path}>
+        ${hasFile ? `${shortCursorPath(cursor.file_path)}:${cursor.line}${selection}` : 'no file focus'}
+      </div>
+      <button
+        type="button"
+        class="v2-ide-action ide-cursor-rail-focus"
+        disabled=${!hasFile}
+        onClick=${() => focusCursor(cursor)}
+      >Focus</button>
+    </li>
+  `
+}
+
 export function IdeShell() {
   const workspaceStore = useMemo(() => createIdeDataWorkspaceStore(), [])
 
@@ -569,6 +745,8 @@ export function IdeShell() {
   const findOpen = route.value.params.find === 'open'
   const terminalKeeper = keeperFromRoute()
   const railsCollapsed = route.value.params.rails === 'hidden'
+  const [rightRailTab, setRightRailTab] = useState<IdeRightRailTab>('context')
+  const [treeWidth, setTreeWidth] = useState<number>(readStoredIdeTreeWidth)
   const statusbar = deriveIdeStatusbarModel({
     activeView,
     activeLayers,
@@ -639,6 +817,48 @@ export function IdeShell() {
     navigate('code', nextParams)
   }
 
+  const setPersistentTreeWidth = (nextWidth: number) => {
+    const normalized = normalizeIdeTreeWidth(nextWidth)
+    setTreeWidth(normalized)
+    writeStoredIdeTreeWidth(normalized)
+  }
+
+  const handleTreeResizePointerDown = (event: PointerEvent) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = treeWidth
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      setPersistentTreeWidth(startWidth + moveEvent.clientX - startX)
+    }
+    const stopTracking = () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', stopTracking)
+      window.removeEventListener('pointercancel', stopTracking)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', stopTracking, { once: true })
+    window.addEventListener('pointercancel', stopTracking, { once: true })
+  }
+
+  const handleTreeResizeKeyDown = (event: KeyboardEvent) => {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault()
+      setPersistentTreeWidth(treeWidth - 10)
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault()
+      setPersistentTreeWidth(treeWidth + 10)
+    } else if (event.key === 'Home') {
+      event.preventDefault()
+      setPersistentTreeWidth(IDE_TREE_WIDTH_MIN)
+    } else if (event.key === 'End') {
+      event.preventDefault()
+      setPersistentTreeWidth(IDE_TREE_WIDTH_MAX)
+    }
+  }
+
   return html`
     <section
       class="ide-plane-shell ide-v2-surface v2-ide-surface ss-surface bg-surface-page"
@@ -646,6 +866,7 @@ export function IdeShell() {
       aria-label="Code IDE shell"
       data-terminal-open=${terminalOpen ? 'true' : 'false'}
       data-rails-collapsed=${railsCollapsed ? 'true' : 'false'}
+      data-tree-width=${String(treeWidth)}
     >
       <div class="ide-v2-top">
         <header
@@ -699,6 +920,7 @@ export function IdeShell() {
       <div
         class="ide-plane-grid ide-v2-body ${railsCollapsed ? 'no-rail' : ''}"
         role="presentation"
+        style=${`--ide-tree-width: ${treeWidth}px;`}
       >
         <div class="ide-plane-tree ide-v2-tree v2-ide-panel">
           <${IdeExplorer}
@@ -710,6 +932,18 @@ export function IdeShell() {
             onRepositoryChange=${workspaceStore.setActiveRepositoryId}
             onRepositoryScan=${workspaceStore.scanRepositories}
             subscribeRepositories=${workspaceStore.subscribeRepositories}
+          />
+          <button
+            type="button"
+            class="ide-v2-tree-resize"
+            aria-label="Resize file tree"
+            aria-orientation="vertical"
+            aria-valuemin=${IDE_TREE_WIDTH_MIN}
+            aria-valuemax=${IDE_TREE_WIDTH_MAX}
+            aria-valuenow=${treeWidth}
+            data-testid="ide-tree-resize"
+            onPointerDown=${handleTreeResizePointerDown}
+            onKeyDown=${handleTreeResizeKeyDown}
           />
         </div>
         <div
@@ -736,35 +970,47 @@ export function IdeShell() {
               class="ide-plane-conversation ide-v2-rail v2-ide-panel"
               data-testid="ide-right-rail"
             >
-              <div class="ide-v2-rail-tabs" aria-label="Context lens">
-                <button type="button" class="ide-v2-rail-tab on">Context</button>
-                <button type="button" class="ide-v2-rail-tab">Activity</button>
-                <button type="button" class="ide-v2-rail-tab">Cursors</button>
+              <div class="ide-v2-rail-tabs" role="tablist" aria-label="IDE right rail">
+                ${IDE_RIGHT_RAIL_TABS.map(tab => html`
+                  <button
+                    key=${tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected=${rightRailTab === tab.id ? 'true' : 'false'}
+                    class=${`ide-v2-rail-tab ${rightRailTab === tab.id ? 'on' : ''}`}
+                    onClick=${() => setRightRailTab(tab.id)}
+                  >${tab.label}</button>
+                `)}
               </div>
               <div class="ide-v2-rail-scroll">
-                <div
-                  class="ide-plane-context-stack"
-                  data-testid="ide-right-context-stack"
-                >
-                  <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
-                  <${IdePersistencePanel} keeperName=${terminalKeeper} />
-                  <${IdeMemoryPanel} keeperName=${terminalKeeper} />
-                  <${InspectorKeeperBDI} traceActive=${activeLayers.has('keeper-trace')} />
-                </div>
-                <div
-                  class="ide-plane-primary-rail"
-                  data-testid="ide-primary-conversation-rail"
-                >
-                  <${IdeConversationRail} />
-                </div>
-                <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
-                  <${IdeActivityPanel}
-                    activeFile=${activeFilePath}
-                    annotations=${annotations}
-                    diffRows=${diffRows}
-                    pollMs=${IDE_ACTIVITY_POLL_MS}
-                  />
-                </div>
+                ${rightRailTab === 'context' ? html`
+                  <div
+                    class="ide-plane-context-stack"
+                    data-testid="ide-right-context-stack"
+                  >
+                    <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
+                    <${IdePersistencePanel} keeperName=${terminalKeeper} />
+                    <${IdeMemoryPanel} keeperName=${terminalKeeper} />
+                    <${InspectorKeeperBDI} traceActive=${activeLayers.has('keeper-trace')} />
+                  </div>
+                  <div
+                    class="ide-plane-primary-rail"
+                    data-testid="ide-primary-conversation-rail"
+                  >
+                    <${IdeConversationRail} />
+                  </div>
+                ` : null}
+                ${rightRailTab === 'activity' ? html`
+                  <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
+                    <${IdeActivityPanel}
+                      activeFile=${activeFilePath}
+                      annotations=${annotations}
+                      diffRows=${diffRows}
+                      pollMs=${IDE_ACTIVITY_POLL_MS}
+                    />
+                  </div>
+                ` : null}
+                ${rightRailTab === 'cursors' ? html`<${IdeCursorRailPanel} />` : null}
               </div>
             </div>
           `}
@@ -776,4 +1022,3 @@ export function IdeShell() {
     </section>
   `
 }
-

@@ -100,6 +100,54 @@
   color: var(--volt-ink);
 }
 
+.cn-route-switcher {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  max-width: 100%;
+  margin: -6px 0 16px;
+  padding: 4px;
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+}
+
+.cn-route-chip {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: 0.14s;
+}
+
+.cn-route-chip:hover {
+  color: var(--text-mid);
+  background: var(--bg-card);
+}
+
+.cn-route-chip.on {
+  border-color: var(--volt-dim);
+  background: var(--volt-wash);
+  color: var(--volt-strong);
+}
+
+.cn-route-ico {
+  font-size: 13px;
+  line-height: 1;
+}
+
 /* ── Toolbar (search + add) ─────────────────────────────────────────────── */
 
 .cn-toolbar {
@@ -397,6 +445,29 @@
   border-bottom: 1px dashed var(--border-soft);
 }
 
+.cn-bind-row.link {
+  width: 100%;
+  background: transparent;
+  color: inherit;
+  border-top: 0;
+  border-right: 0;
+  border-left: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cn-bind-row.link:hover {
+  color: var(--volt-strong);
+  background: color-mix(in oklab, var(--volt-strong) 5%, transparent);
+}
+
+.cn-bind-row.link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
 .cn-bind-row:last-child {
   border-bottom: 0;
 }
@@ -413,6 +484,16 @@
 .cn-bind-row .arr {
   color: var(--text-dim);
   flex: none;
+}
+
+.cn-bind-row .cn-bind-go {
+  color: var(--text-dim);
+  flex: none;
+  margin-left: auto;
+}
+
+.cn-bind-row.link:hover .cn-bind-go {
+  color: var(--volt-strong);
 }
 
 .cn-bind-none {

@@ -2,7 +2,14 @@ import { html } from 'htm/preact'
 import { useMemo } from 'preact/hooks'
 import type { BoardPost } from '../../types'
 import { navigate, replaceRoute, route } from '../../router'
-import { boardLoading, boardPosts, fusionRunsLoading, refreshBoard, refreshFusionRuns } from '../../store'
+import {
+  fusionBoardLoading,
+  fusionBoardPosts,
+  fusionRuns,
+  fusionRunsLoading,
+  refreshFusionBoard,
+  refreshFusionRuns,
+} from '../../store'
 import { TimeAgo } from '../common/time-ago'
 import { ringFocusClasses } from '../common/ring'
 import { AgentAvatar } from '../overview/agent-avatar'
@@ -22,12 +29,48 @@ interface FusionPanelEntry {
   outputTokens: number | null
 }
 
+interface FusionModelClaim {
+  text: string
+  models: string[]
+}
+
+interface FusionContradiction {
+  topic: string
+  positions: Array<{
+    model: string
+    stance: string
+  }>
+}
+
+interface FusionCoverageGap {
+  topic: string
+  addressedBy: string[]
+  missing: string
+}
+
+interface FusionUniqueInsight {
+  text: string
+  model: string | null
+}
+
+interface FusionRecommendation {
+  action: string | null
+  rationale: string | null
+}
+
 interface FusionJudge {
   status: string | null
   decision: string | null
   synthesis: string | null
   resolvedAnswer: string | null
   error: string | null
+  consensus: FusionModelClaim[]
+  contradictions: FusionContradiction[]
+  partialCoverage: FusionCoverageGap[]
+  uniqueInsights: FusionUniqueInsight[]
+  blindSpots: string[]
+  missingInputs: string[]
+  recommendation: FusionRecommendation | null
 }
 
 interface FusionUsage {
@@ -69,6 +112,14 @@ function asNumber(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null
   }
   return null
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap(item => {
+    const text = asString(item)
+    return text ? [text] : []
+  })
 }
 
 function firstString(source: Record<string, unknown>, keys: string[]): string | null {
@@ -121,6 +172,113 @@ function normalizePanel(value: unknown): FusionPanelEntry[] {
   })
 }
 
+function normalizeModelClaims(value: unknown): FusionModelClaim[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap(item => {
+    const direct = asString(item)
+    if (direct) return [{ text: direct, models: [] }]
+
+    const claim = asRecord(item)
+    if (!claim) return []
+
+    const text = firstString(claim, ['text', 'claim', 'summary', 'point'])
+    if (!text) return []
+
+    return [{
+      text,
+      models: asStringArray(claim.models),
+    }]
+  })
+}
+
+function normalizeContradictionPositions(value: unknown): FusionContradiction['positions'] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item, index) => {
+    if (Array.isArray(item)) {
+      const stance = asString(item[1])
+      if (!stance) return []
+      return [{
+        model: asString(item[0]) ?? `model-${index + 1}`,
+        stance,
+      }]
+    }
+
+    const position = asRecord(item)
+    if (!position) return []
+
+    const stance = firstString(position, ['stance', 'position', 'text'])
+    if (!stance) return []
+
+    return [{
+      model: firstString(position, ['model', 'name', 'provider']) ?? `model-${index + 1}`,
+      stance,
+    }]
+  })
+}
+
+function normalizeContradictions(value: unknown): FusionContradiction[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item, index) => {
+    const contradiction = asRecord(item)
+    if (!contradiction) return []
+
+    const positions = normalizeContradictionPositions(contradiction.positions)
+    if (positions.length === 0) return []
+
+    return [{
+      topic: firstString(contradiction, ['topic', 'text', 'claim']) ?? `contradiction-${index + 1}`,
+      positions,
+    }]
+  })
+}
+
+function normalizeCoverageGaps(value: unknown): FusionCoverageGap[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item, index) => {
+    const gap = asRecord(item)
+    if (!gap) return []
+
+    const missing = firstString(gap, ['missing', 'gap', 'note'])
+    if (!missing) return []
+
+    return [{
+      topic: firstString(gap, ['topic', 'area', 'claim']) ?? `coverage-${index + 1}`,
+      addressedBy: asStringArray(gap.addressed_by ?? gap.addressedBy),
+      missing,
+    }]
+  })
+}
+
+function normalizeUniqueInsights(value: unknown): FusionUniqueInsight[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap(item => {
+    const direct = asString(item)
+    if (direct) return [{ text: direct, model: null }]
+
+    const insight = asRecord(item)
+    if (!insight) return []
+
+    const text = firstString(insight, ['text', 'insight', 'summary'])
+    if (!text) return []
+
+    return [{
+      text,
+      model: firstString(insight, ['model', 'name', 'provider']),
+    }]
+  })
+}
+
+function normalizeRecommendation(value: unknown): FusionRecommendation | null {
+  const recommendation = asRecord(value)
+  if (!recommendation) return null
+
+  const action = firstString(recommendation, ['action', 'title', 'label'])
+  const rationale = firstString(recommendation, ['rationale', 'reason', 'summary'])
+  if (!action && !rationale) return null
+
+  return { action, rationale }
+}
+
 function normalizeJudge(value: unknown): FusionJudge {
   const judge = asRecord(value) ?? {}
   return {
@@ -129,6 +287,13 @@ function normalizeJudge(value: unknown): FusionJudge {
     synthesis: firstString(judge, ['synthesis', 'rationale', 'summary']),
     resolvedAnswer: firstString(judge, ['resolved_answer', 'resolvedAnswer', 'answer']),
     error: firstString(judge, ['error', 'reason', 'error_text']),
+    consensus: normalizeModelClaims(judge.consensus),
+    contradictions: normalizeContradictions(judge.contradictions),
+    partialCoverage: normalizeCoverageGaps(judge.partial_coverage ?? judge.partialCoverage),
+    uniqueInsights: normalizeUniqueInsights(judge.unique_insights ?? judge.uniqueInsights),
+    blindSpots: asStringArray(judge.blind_spots ?? judge.blindSpots),
+    missingInputs: asStringArray(judge.missing ?? judge.missing_inputs ?? judge.missingInputs),
+    recommendation: normalizeRecommendation(judge.recommend ?? judge.recommendation),
   }
 }
 
@@ -306,6 +471,146 @@ function FusionPanelCard({ entry }: { entry: FusionPanelEntry }) {
   `
 }
 
+function hasStructuredJudgeEvidence(judge: FusionJudge): boolean {
+  return judge.consensus.length > 0
+    || judge.contradictions.length > 0
+    || judge.partialCoverage.length > 0
+    || judge.uniqueInsights.length > 0
+    || judge.blindSpots.length > 0
+    || judge.missingInputs.length > 0
+    || judge.recommendation !== null
+}
+
+function FusionModelChips({ models }: { models: string[] }) {
+  if (models.length === 0) return null
+  return html`
+    <span class="fus-model-chips">
+      ${models.map(model => html`<span class="fus-model-chip" key=${model}>${model}</span>`)}
+    </span>
+  `
+}
+
+function FusionJudgeEvidence({ judge }: { judge: FusionJudge }) {
+  if (!hasStructuredJudgeEvidence(judge)) return null
+
+  return html`
+    <div class="fus-judge-evidence" data-testid="fusion-judge-evidence">
+      <div class="fus-judge-evidence-head">
+        <span>Structured judge evidence</span>
+        <span>
+          ${judge.consensus.length} consensus · ${judge.contradictions.length} contradictions ·
+          ${judge.partialCoverage.length} coverage
+        </span>
+      </div>
+
+      ${judge.consensus.length > 0
+        ? html`
+            <div class="fus-jgroup">
+              <h4>Consensus</h4>
+              <div class="fus-jrows">
+                ${judge.consensus.map((claim, index) => html`
+                  <div class="fus-jrow" key=${`consensus-${index}`}>
+                    <p>${claim.text}</p>
+                    <${FusionModelChips} models=${claim.models} />
+                  </div>
+                `)}
+              </div>
+            </div>
+          `
+        : null}
+
+      ${judge.contradictions.length > 0
+        ? html`
+            <div class="fus-jgroup">
+              <h4>Contradictions</h4>
+              <div class="fus-jrows">
+                ${judge.contradictions.map((contradiction, index) => html`
+                  <div class="fus-jrow" key=${`contradiction-${index}`}>
+                    <strong>${contradiction.topic}</strong>
+                    ${contradiction.positions.map(position => html`
+                      <span class="fus-position" key=${`${contradiction.topic}:${position.model}`}>
+                        <span>${position.model}</span>
+                        <span>${position.stance}</span>
+                      </span>
+                    `)}
+                  </div>
+                `)}
+              </div>
+            </div>
+          `
+        : null}
+
+      ${judge.partialCoverage.length > 0
+        ? html`
+            <div class="fus-jgroup">
+              <h4>Partial Coverage</h4>
+              <div class="fus-jrows">
+                ${judge.partialCoverage.map((gap, index) => html`
+                  <div class="fus-jrow" key=${`coverage-${index}`}>
+                    <strong>${gap.topic}</strong>
+                    <${FusionModelChips} models=${gap.addressedBy} />
+                    <p><span class="fus-muted-key">missing</span>${gap.missing}</p>
+                  </div>
+                `)}
+              </div>
+            </div>
+          `
+        : null}
+
+      ${judge.uniqueInsights.length > 0
+        ? html`
+            <div class="fus-jgroup">
+              <h4>Unique Insights</h4>
+              <div class="fus-jrows">
+                ${judge.uniqueInsights.map((insight, index) => html`
+                  <div class="fus-jrow" key=${`insight-${index}`}>
+                    <p>${insight.text}</p>
+                    ${insight.model ? html`<${FusionModelChips} models=${[insight.model]} />` : null}
+                  </div>
+                `)}
+              </div>
+            </div>
+          `
+        : null}
+
+      ${judge.blindSpots.length > 0 || judge.missingInputs.length > 0
+        ? html`
+            <div class="fus-jgroup fus-jgroup-split">
+              ${judge.blindSpots.length > 0
+                ? html`
+                    <div>
+                      <h4>Blind Spots</h4>
+                      <ul>${judge.blindSpots.map(item => html`<li key=${item}>${item}</li>`)}</ul>
+                    </div>
+                  `
+                : null}
+              ${judge.missingInputs.length > 0
+                ? html`
+                    <div>
+                      <h4>Missing Inputs</h4>
+                      <ul>${judge.missingInputs.map(item => html`<li key=${item}>${item}</li>`)}</ul>
+                    </div>
+                  `
+                : null}
+            </div>
+          `
+        : null}
+
+      ${judge.recommendation
+        ? html`
+            <div class="fus-jgroup">
+              <h4>Recommendation</h4>
+              <div class="fus-jrow">
+                ${judge.recommendation.action ? html`<strong>${judge.recommendation.action}</strong>` : null}
+                ${judge.recommendation.rationale ? html`<p>${judge.recommendation.rationale}</p>` : null}
+              </div>
+            </div>
+          `
+        : null}
+    </div>
+  `
+}
+
 function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) {
   return html`
     <button
@@ -392,6 +697,7 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
           <span>${run.judge.decision ?? run.judge.status ?? 'n/a'}</span>
         </div>
         <pre class="fus-synthesis">${synthesis}</pre>
+        <${FusionJudgeEvidence} judge=${run.judge} />
       </section>
 
       <section class="fus-resolved">
@@ -411,12 +717,13 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
 }
 
 export function FusionSurface() {
-  const posts = boardPosts.value
+  const posts = fusionBoardPosts.value
   const runs = useMemo(() => buildFusionRuns(posts), [posts])
+  const registryRuns = fusionRuns.value
   const selectedRunId = route.value.params.run_id ?? route.value.params.run
   const selected = runs.find(run => run.runId === selectedRunId) ?? runs[0] ?? null
-  const running = runs.filter(run => run.status === 'running').length
-  const failed = runs.filter(run => run.status === 'failed').length
+  const registryRunning = registryRuns.filter(run => run.status === 'running').length
+  const registryFailed = registryRuns.filter(run => run.status === 'failed').length
 
   return html`
     <main class="ov ss-surface bg-surface-page text-text-primary v2-fusion-surface" data-testid="fusion-surface">
@@ -431,26 +738,34 @@ export function FusionSurface() {
           <button
             type="button"
             class=${`fus-refresh ${ringFocusClasses()}`}
-            onClick=${() => { void refreshBoard(); void refreshFusionRuns() }}
-            disabled=${boardLoading.value || fusionRunsLoading.value}
-          >${boardLoading.value || fusionRunsLoading.value ? 'Refreshing...' : 'Refresh'}</button>
+            onClick=${() => { void refreshFusionBoard(); void refreshFusionRuns() }}
+            disabled=${fusionBoardLoading.value || fusionRunsLoading.value}
+          >${fusionBoardLoading.value || fusionRunsLoading.value ? 'Refreshing...' : 'Refresh'}</button>
         </header>
 
         <${FusionRunsPanel} />
 
         <section class="fus-top-kpis" aria-label="Fusion overview">
-          <${FusionMetric} label="runs" value=${runs.length} tone=${runs.length ? 'ok' : 'muted'} />
-          <${FusionMetric} label="running" value=${running} tone=${running ? 'warn' : 'muted'} />
-          <${FusionMetric} label="failed" value=${failed} tone=${failed ? 'bad' : 'muted'} />
-          <${FusionMetric} label="source" value="board meta" tone="volt" />
+          <${FusionMetric} label="board runs" value=${runs.length} tone=${runs.length ? 'ok' : 'muted'} />
+          <${FusionMetric}
+            label="registry"
+            value=${registryRuns.length}
+            tone=${registryRunning ? 'warn' : registryRuns.length ? 'ok' : 'muted'}
+          />
+          <${FusionMetric} label="running" value=${registryRunning} tone=${registryRunning ? 'warn' : 'muted'} />
+          <${FusionMetric} label="failed" value=${registryFailed} tone=${registryFailed ? 'bad' : 'muted'} />
         </section>
 
         ${runs.length === 0
           ? html`
               <section class="fus-empty" data-testid="fusion-empty">
                 <div class="fus-empty-mark">F</div>
-                <h2>No fusion runs found</h2>
-                <p>Load board posts with <code>meta.source = "fusion"</code> to review panel and judge output here.</p>
+                <h2>No board-sink fusion posts yet</h2>
+                <p>
+                  Registry status is shown above from <code>/api/v1/dashboard/fusion-runs</code>;
+                  detailed panel and judge review appears after the fusion sink writes a board post
+                  with <code>meta.source = "fusion"</code>.
+                </p>
               </section>
             `
           : html`

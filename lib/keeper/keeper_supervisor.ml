@@ -47,6 +47,45 @@ let assess_stale_run
       (Keeper_registry.Stale_turn_timeout
          (Keeper_registry_types.Idle_turn { stall_seconds = stall }))
   else None
+;;
+
+(** RFC-0012: pure in-turn progress-silence assessment.
+
+    Returns [Some (Stale_turn_timeout (Mid_turn_no_progress { ... }))] — giving
+    the previously-producerless [Mid_turn_no_progress] variant its first real
+    producer — when the keeper is [Running] with a turn in progress
+    ([in_turn = Some obs]) whose [last_progress_at] is older than
+    [progress_timeout]. Returns [None] otherwise (not running, no turn in
+    progress, or progress recorded within the window).
+
+    Pure: like [assess_stale_run], the caller stamps the reason via
+    [Keeper_registry.set_failure_reason] and invokes
+    [emit_stale_keeper_broadcast]; the next sweep's [watchdog_stop_pending]
+    routes the [Stale_turn_timeout _] to crash recovery. Keys on
+    [last_progress_at] (tool_completed / sdk-turn boundary events recorded by
+    [Keeper_registry.record_turn_progress]), never on raw turn wall-clock, so
+    it is orthogonal to [In_turn_hung] (wall-clock) and [Idle_turn] (no-turn). *)
+let assess_in_turn_progress
+    ~(phase : Keeper_state_machine.phase)
+    ~(in_turn : Keeper_registry_types.turn_observation option)
+    ~(now : float)
+    ~(progress_timeout : float)
+    : Keeper_registry.failure_reason option
+  =
+  match in_turn with
+  | Some obs
+    when Bool.(phase = Keeper_state_machine.Running)
+         && now -. obs.last_progress_at > progress_timeout ->
+    Some
+      (Keeper_registry.Stale_turn_timeout
+         (Keeper_registry_types.Mid_turn_no_progress
+            { active_seconds = now -. obs.started_at
+            ; since_progress_seconds = now -. obs.last_progress_at
+            ; progress_timeout_threshold = progress_timeout
+            ; last_progress_kind = obs.last_progress_kind
+            }))
+  | Some _ | None -> None
+;;
 
 type sweep_acc =
   { to_restart : (Keeper_registry.registry_entry * string) list
@@ -311,37 +350,66 @@ let sweep_and_recover (ctx : _ context) =
             producer); when stale, stamp the reason and invoke the
             dead [emit_stale_keeper_broadcast] (its first call site).
             The next sweep's [watchdog_stop_pending] routes it to
-            crash recovery exactly as [In_turn_hung]. *)
-         (match Env_config_runtime.Keeper_stale_run.threshold_sec_opt () with
+            crash recovery exactly as [In_turn_hung].
+
+            RFC-0012: the in-turn counterpart. When a turn IS running
+            but [last_progress_at] is older than
+            [Keeper_mid_turn_progress.timeout_sec_opt],
+            [assess_in_turn_progress] produces [Mid_turn_no_progress] —
+            giving that closed variant its first producer. Both windows are
+            independent; only the mid-turn progress window is opt-in. They ride
+            the same [Stale_turn_timeout] crash-recovery routing; the no-turn
+            [Idle_turn] takes precedence when both would fire. *)
+         let stale_run_reason =
+           match Env_config_runtime.Keeper_stale_run.threshold_sec_opt () with
+           | None -> None
+           | Some threshold ->
+             assess_stale_run
+               ~phase:entry.phase
+               ~in_turn:entry.current_turn_observation
+               ~last_turn_ts:entry.meta.runtime.usage.last_turn_ts
+               ~now
+               ~threshold
+         in
+         let reason =
+           match stale_run_reason with
+           | Some _ -> stale_run_reason
+           | None ->
+             (match Env_config_runtime.Keeper_mid_turn_progress.timeout_sec_opt () with
+              | None -> None
+              | Some progress_timeout ->
+                assess_in_turn_progress
+                  ~phase:entry.phase
+                  ~in_turn:entry.current_turn_observation
+                  ~now
+                  ~progress_timeout)
+         in
+         (match reason with
           | None -> acc
-          | Some threshold ->
-            (match
-               assess_stale_run
-                 ~phase:entry.phase
-                 ~in_turn:entry.current_turn_observation
-                 ~last_turn_ts:entry.meta.runtime.usage.last_turn_ts
-                 ~now
-                 ~threshold
-             with
-             | None -> acc
-             | Some reason ->
-               let stall = now -. entry.meta.runtime.usage.last_turn_ts in
-               Keeper_registry.set_failure_reason
-                 ~base_path
-                 entry.name
-                 (Some reason);
-               Keeper_execution_receipt.emit_stale_keeper_broadcast
-                 ctx.config
-                 ~keeper_name:entry.name
-                 ~agent_name:entry.meta.agent_name
-                 ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta entry.meta)
-                 ~trace_id:
-                   (Keeper_id.Trace_id.to_string entry.meta.runtime.trace_id)
-                 ~generation:entry.meta.runtime.generation
-                 ~failure_reason:(Some reason)
-                 ~stale_seconds:stall
-                 ~last_turn_ts:entry.meta.runtime.usage.last_turn_ts;
-               acc))
+          | Some reason ->
+            (* [stale_seconds] is a display/telemetry value, not an FSM
+               transition: [Mid_turn_no_progress] reports time since last
+               recorded progress; every other reason (i.e. [Idle_turn])
+               preserves the original no-turn [now -. last_turn_ts]. *)
+            let stale_seconds =
+              match reason with
+              | Keeper_registry.Stale_turn_timeout
+                  (Keeper_registry_types.Mid_turn_no_progress
+                     { since_progress_seconds; _ }) -> since_progress_seconds
+              | _ -> now -. entry.meta.runtime.usage.last_turn_ts
+            in
+            Keeper_registry.set_failure_reason ~base_path entry.name (Some reason);
+            Keeper_execution_receipt.emit_stale_keeper_broadcast
+              ctx.config
+              ~keeper_name:entry.name
+              ~agent_name:entry.meta.agent_name
+              ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta entry.meta)
+              ~trace_id:(Keeper_id.Trace_id.to_string entry.meta.runtime.trace_id)
+              ~generation:entry.meta.runtime.generation
+              ~failure_reason:(Some reason)
+              ~stale_seconds
+              ~last_turn_ts:entry.meta.runtime.usage.last_turn_ts;
+            acc)
        | Some `Stopped -> { acc with to_unregister = entry :: acc.to_unregister }
        | Some (`Crashed msg) -> queue_crashed_entry acc entry msg)
   in

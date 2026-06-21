@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { RichContent } from '../common/rich-content'
 import type { BoardPost } from '../../types/core'
+import { normalizeFusionPanelReason } from '../../lib/fusion-meta'
 
 type FusionPanelEntry = {
   model: string
@@ -50,36 +51,6 @@ function numberField(record: Record<string, unknown>, key: string): number | und
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
-// Legacy-only migration for board posts written before fusion_sink emitted
-// reason_detail/reason_code. Fusion board posts use a one-week TTL, so this
-// raw-constructor parser should be removed after that compatibility window.
-function decodeOcamlStringLiteral(value: string): string {
-  return value
-    .replace(/\\\\/g, '\u0000')
-    .replace(/\\"/g, '"')
-    .replace(/\\n/g, '\n')
-    .replace(/\\t/g, '\t')
-    .replace(/\u0000/g, '\\')
-}
-
-function normalizeProviderAttribution(model: string, reason: string): string {
-  const unknownPrefix = "Provider 'unknown'"
-  if (model === '?' || !reason.startsWith(unknownPrefix)) return reason
-  return `Provider '${model}'${reason.slice(unknownPrefix.length)}`
-}
-
-function normalizePanelReason(model: string, reason: string | undefined): string | undefined {
-  if (!reason) return undefined
-  const trimmed = reason.trim()
-  const providerMatch = trimmed.match(/^\(?\s*Fusion_types\.Provider_error\s+"([\s\S]*)"\s*\)?$/)
-  if (providerMatch) {
-    return normalizeProviderAttribution(model, decodeOcamlStringLiteral(providerMatch[1] ?? '').trim())
-  }
-  if (/^\(?\s*Fusion_types\.Timeout\s*\)?$/.test(trimmed)) return 'timeout'
-  if (/^\(?\s*Fusion_types\.Empty_response\s*\)?$/.test(trimmed)) return 'empty response'
-  return normalizeProviderAttribution(model, trimmed)
-}
-
 function parsePanel(meta: Record<string, unknown>): FusionPanelEntry[] {
   const panel = meta.panel
   if (!Array.isArray(panel)) return []
@@ -92,7 +63,7 @@ function parsePanel(meta: Record<string, unknown>): FusionPanelEntry[] {
       status: stringField(item, 'status') ?? 'unknown',
       answer: stringField(item, 'answer'),
       reasonCode: stringField(item, 'reason_code'),
-      reason: normalizePanelReason(model, reason),
+      reason: normalizeFusionPanelReason(model, reason),
       outputTokens: numberField(item, 'output_tokens'),
     }]
   })

@@ -23,12 +23,26 @@ let test_parse_minimal_surface_only () =
   check (option string) "redirected_from" None event.redirected_from
 ;;
 
+let test_parse_schedule_surface_only () =
+  let event = parse_ok {|{"surface":"schedule"}|} in
+  check string "surface" "schedule" event.surface;
+  check (option string) "section" None event.section;
+  check (option string) "redirected_from" None event.redirected_from
+;;
+
+let test_parse_lab_memory_subsystems () =
+  let event = parse_ok {|{"surface":"lab","section":"memory-subsystems"}|} in
+  check string "surface" "lab" event.surface;
+  check (option string) "section" (Some "memory-subsystems") event.section;
+  check (option string) "redirected_from" None event.redirected_from
+;;
+
 let test_parse_full_event () =
   let event =
-    parse_ok {|{"surface":"monitoring","section":"journey","redirected_from":"none"}|}
+    parse_ok {|{"surface":"monitoring","section":"agents","redirected_from":"none"}|}
   in
   check string "surface" "monitoring" event.surface;
-  check (option string) "section" (Some "journey") event.section;
+  check (option string) "section" (Some "agents") event.section;
   check (option string) "redirected_from" None event.redirected_from
 ;;
 
@@ -169,6 +183,8 @@ let () =
     "dashboard_nav_event"
     [ ( "parse_event_json"
       , [ test_case "minimal surface only" `Quick test_parse_minimal_surface_only
+        ; test_case "schedule surface only" `Quick test_parse_schedule_surface_only
+        ; test_case "lab memory-subsystems section" `Quick test_parse_lab_memory_subsystems
         ; test_case "full event" `Quick test_parse_full_event
         ; test_case "redirected_from accepted" `Quick test_parse_redirected
         ; test_case "rejects unknown surface" `Quick test_reject_unknown_surface

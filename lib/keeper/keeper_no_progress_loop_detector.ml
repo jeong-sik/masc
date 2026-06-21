@@ -56,13 +56,17 @@ let update_streak_gauge keeper_name value =
 let turn_made_progress ~strong_evidence ~surface_requires_evidence =
   strong_evidence || not surface_requires_evidence
 
-let record_turn ~keeper_name ~made_progress =
+let record_turn ?threshold_override ~keeper_name ~made_progress () =
   with_lock (fun () ->
     let s = get_or_create keeper_name in
     if not made_progress then begin
       s.streak <- s.streak + 1;
       update_streak_gauge keeper_name s.streak;
-      let t = threshold () in
+      let t =
+        match threshold_override with
+        | Some n when n > 0 -> n
+        | Some _ | None -> threshold ()
+      in
       if s.streak >= t && not s.detected_latched then begin
         s.detected_latched <- true;
         Otel_metric_store.inc_counter

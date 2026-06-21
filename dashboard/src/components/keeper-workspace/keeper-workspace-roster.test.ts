@@ -15,7 +15,7 @@ import { navigate } from '../../router'
 import { keepers } from '../../store'
 import { keeperMobilePane } from '../keeper-detail-state'
 import { runKeeperAction } from '../keeper-action-panel'
-import { KeeperWorkspaceRoster } from './keeper-workspace-roster'
+import { KeeperWorkspaceRoster, rosterFleetSummary } from './keeper-workspace-roster'
 import type { Keeper } from '../../types'
 
 function mk(partial: Partial<Keeper>): Keeper {
@@ -67,6 +67,88 @@ describe('KeeperWorkspaceRoster', () => {
     expect(chips.some(c => c?.includes('전체') && c?.includes('3'))).toBe(true)
     expect(chips.some(c => c?.includes('실행중') && c?.includes('1'))).toBe(true)
     expect(chips.some(c => c?.includes('주의') && c?.includes('1'))).toBe(true)
+  })
+
+  it('renders a backed fleet summary band before scanning roster rows', () => {
+    keepers.value = [
+      mk({ name: 'running', status: 'running', lifecycle_phase: 'Running', context_ratio: 0.81 }),
+      mk({ name: 'paused', status: 'running', paused: true, lifecycle_phase: 'Paused' }),
+      mk({ name: 'offline', status: 'stopped', lifecycle_phase: 'Stopped' }),
+      mk({
+        name: 'approval',
+        status: 'running',
+        lifecycle_phase: 'Running',
+        blocked_task_count: 2,
+        current_gate: { kind: 'approval_required', tool: 'fs_write', risk: 'critical' },
+      }),
+    ]
+
+    render(html`<${KeeperWorkspaceRoster} activeName="running" />`, host)
+
+    const summary = host.querySelector('[data-testid="kw-roster-summary"]') as HTMLElement
+    expect(summary).not.toBeNull()
+    expect(summary.textContent).toContain('전체')
+    expect(summary.textContent).toContain('실행')
+    expect(summary.textContent).toContain('대기')
+    expect(summary.textContent).toContain('중지')
+    expect(summary.textContent).toContain('주의 1')
+    expect(summary.textContent).toContain('승인 1')
+    expect(summary.textContent).toContain('CTX 80%+ 1')
+    expect(Array.from(summary.querySelectorAll('.kw-roster-stat b')).map(node => node.textContent)).toEqual([
+      '4',
+      '2',
+      '1',
+      '1',
+    ])
+  })
+
+  it('keeps fleet summary totals independent of search and filter state', () => {
+    keepers.value = [
+      mk({ name: 'alpha', status: 'running', lifecycle_phase: 'Running' }),
+      mk({ name: 'beta', status: 'running', lifecycle_phase: 'Running' }),
+      mk({ name: 'gamma', status: 'stopped', lifecycle_phase: 'Stopped', needs_attention: true }),
+    ]
+
+    render(html`<${KeeperWorkspaceRoster} activeName="alpha" />`, host)
+    fireEvent.input(host.querySelector('.kw-roster-search') as HTMLInputElement, {
+      target: { value: 'gamma' },
+    })
+    fireEvent.click(Array.from(host.querySelectorAll('.kw-rfilter')).find(chip => chip.textContent?.includes('주의')) as HTMLButtonElement)
+
+    const summary = host.querySelector('[data-testid="kw-roster-summary"]') as HTMLElement
+    expect(Array.from(summary.querySelectorAll('.kw-roster-stat b')).map(node => node.textContent)).toEqual([
+      '3',
+      '2',
+      '0',
+      '1',
+    ])
+    const rows = host.querySelectorAll('.kw-kp-row')
+    expect(rows.length).toBe(1)
+    expect(rows[0]?.textContent).toContain('gamma')
+  })
+
+  it('computes fleet summary from live keeper fields without local-only fleet actions', () => {
+    const result = rosterFleetSummary([
+      mk({ name: 'run', status: 'running', lifecycle_phase: 'Running', context_ratio: 0.8 }),
+      mk({ name: 'pause', status: 'running', paused: true, lifecycle_phase: 'Paused', needs_attention: true }),
+      mk({ name: 'off', status: 'stopped', lifecycle_phase: 'Stopped' }),
+      mk({
+        name: 'gate',
+        status: 'running',
+        lifecycle_phase: 'Running',
+        current_gate: { kind: 'approval_required', tool: 'shell', risk: 'high' },
+      }),
+    ])
+
+    expect(result).toEqual({
+      total: 4,
+      running: 2,
+      paused: 1,
+      offline: 1,
+      attention: 1,
+      approvalGate: 1,
+      highContext: 1,
+    })
   })
 
   it('navigates to the keeper route and reveals the chat pane on row click', () => {

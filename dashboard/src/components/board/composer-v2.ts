@@ -40,6 +40,7 @@ export interface ComposerAttachmentDraft {
   kind: 'image' | 'file'
   name: string
   size: string
+  mime?: string | null
   dims?: string | null
 }
 
@@ -86,6 +87,18 @@ function modeIcon(mode: ComposerV2Mode) {
 
 function composeBodyText(body: ComposerV2Request['compose']['body']): string {
   return typeof body === 'string' ? body : body.raw
+}
+
+function attachmentTransportMeta(attachment: ComposerAttachmentDraft): string {
+  return [attachment.size, attachment.kind, attachment.dims].filter(Boolean).join(' · ')
+}
+
+function attachmentTrayMeta(attachment: ComposerAttachmentDraft): string {
+  return [attachment.size, attachment.mime, attachment.kind, attachment.dims].filter(Boolean).join(' · ')
+}
+
+function plural(count: number, singular: string, pluralLabel: string): string {
+  return `${count} ${count === 1 ? singular : pluralLabel}`
 }
 
 export function buildComposerV2Request(input: {
@@ -145,7 +158,7 @@ export function serializeComposerBody(input: {
     blocks.push([
       'Attachments:',
       ...input.attachments.map(attachment => {
-        const meta = [attachment.size, attachment.kind, attachment.dims].filter(Boolean).join(' · ')
+        const meta = attachmentTransportMeta(attachment)
         return `- ${attachment.name}${meta ? ` (${meta})` : ''}`
       }),
     ].join('\n'))
@@ -220,11 +233,42 @@ export function ComposerV2({
   } = mention
   const stateKeys = mode === 'state-block' ? stateBlockKeys(draft) : []
   const hasDraftContent = draft.trim() !== '' || attachments.length > 0 || voiceDraft !== null
-  const attachmentLabel = `${attachments.length} file${attachments.length === 1 ? '' : 's'}`
   const sendDisabled = busy
     || !hasDraftContent
     || (mode === 'dm' && (!effectiveKeeperOnline || unresolvedTrailingMention))
     || (mode === 'state-block' && stateKeys.length === 0)
+  const targetLabel = mode === 'dm'
+    ? effectiveKeeper
+      ? `@${effectiveKeeper}`
+      : 'keeper target required'
+    : `#${workspace}`
+  const mediaLabel = [
+    attachments.length > 0 ? plural(attachments.length, 'file', 'files') : 'no files',
+    voiceDraft ? 'voice' : null,
+  ].filter(Boolean).join(' · ')
+  const deliveryState = busy
+    ? 'sending'
+    : sendDisabled
+      ? 'blocked'
+      : 'ready'
+  const deliveryReason = busy
+    ? 'transport busy'
+    : !hasDraftContent
+      ? 'draft empty'
+      : mode === 'dm' && unresolvedTrailingMention
+        ? 'resolve mention'
+        : mode === 'dm' && !effectiveKeeperOnline
+          ? 'keeper unavailable'
+          : mode === 'state-block' && stateKeys.length === 0
+            ? 'state block required'
+            : mode === 'dm'
+              ? 'keeper message'
+              : 'workspace broadcast'
+  const deliveryToneClass = deliveryState === 'ready'
+    ? 'border-[var(--color-status-ok)] text-[var(--color-status-ok)]'
+    : deliveryState === 'sending'
+      ? 'border-[var(--color-accent-fg)] text-[var(--color-accent-fg)]'
+      : 'border-[var(--color-status-warn)] text-[var(--color-status-warn)]'
 
   useEffect(() => {
     if (mode !== 'dm') return
@@ -262,6 +306,7 @@ export function ComposerV2({
         kind: file.type.startsWith('image/') ? 'image' : 'file',
         name: file.name,
         size: formatFileSize(file.size),
+        mime: file.type || null,
       })),
     ].slice(0, 6))
   }
@@ -349,11 +394,33 @@ export function ComposerV2({
           #${workspace}
         </span>
         <span class="ml-auto text-2xs tabular-nums text-[var(--color-fg-muted)]" aria-live="polite">
-          ${draft.length} chars · ${attachmentLabel}${voiceDraft ? ' · voice' : ''} · ${onlineKeepers.length} keeper targets
+          ${draft.length} chars · ${mediaLabel} · ${onlineKeepers.length} keeper targets
         </span>
       </div>
 
       <div class="mt-3 grid gap-2">
+        <div class="grid gap-2 sm:grid-cols-4" data-testid="composer-v2-command-rail" aria-label="Composer command envelope">
+          <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2" data-composer-command-group="mode">
+            <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">mode</div>
+            <div class="mt-1 truncate text-xs font-semibold text-[var(--color-fg-primary)]">${modeLabels[mode] ?? MODE_OPTIONS.find(option => option.value === mode)?.label ?? mode}</div>
+          </div>
+          <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2" data-composer-command-group="target">
+            <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">target</div>
+            <div class="mt-1 break-words font-mono text-xs leading-snug text-[var(--color-fg-secondary)]" title=${targetLabel}>${targetLabel}</div>
+          </div>
+          <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2" data-composer-command-group="media">
+            <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">media</div>
+            <div class="mt-1 truncate text-xs text-[var(--color-fg-secondary)]" title=${mediaLabel}>${mediaLabel}</div>
+          </div>
+          <div class=${`rounded-[var(--r-1)] border bg-[var(--color-bg-surface)] px-2.5 py-2 ${deliveryToneClass}`} data-composer-command-group="delivery">
+            <div class="text-3xs uppercase tracking-[var(--track-caps)] opacity-70">delivery</div>
+            <div class="mt-1 flex min-w-0 items-center gap-2">
+              <span class="h-1.5 w-1.5 shrink-0 rounded-[var(--r-0)] bg-current"></span>
+              <span class="break-words text-xs font-semibold leading-snug" title=${deliveryReason}>${deliveryState} · ${deliveryReason}</span>
+            </div>
+          </div>
+        </div>
+
         ${attachments.length > 0 || voiceDraft
           ? html`
               <div class="composer-tray" data-testid="composer-v2-tray">
@@ -364,7 +431,7 @@ export function ComposerV2({
                     </div>
                     <div class="cdraft-meta">
                       <span class="cdraft-name mono">${attachment.name}</span>
-                      <span class="cdraft-sub mono">${[attachment.size, attachment.kind, attachment.dims].filter(Boolean).join(' · ')}</span>
+                      <span class="cdraft-sub mono">${attachmentTrayMeta(attachment)}</span>
                     </div>
                     <button
                       type="button"

@@ -10,6 +10,8 @@
 
 module D = Masc.Keeper_no_progress_loop_detector
 module Metrics = Masc.Otel_metric_store
+module Success = Masc.Keeper_unified_turn_success.For_testing
+module WO = Masc.Keeper_world_observation
 
 (* Detector now uses Eio.Mutex (was Stdlib.Mutex; the latter raised EDEADLK
    under any fiber contention). Every public entry needs an Eio fiber
@@ -21,10 +23,46 @@ let detected_count keeper =
     "masc_keeper_no_progress_loop_detected_total"
     ~labels:[ ("keeper", keeper) ] ()
 
-let record_turn = D.record_turn
+let record_turn ~keeper_name ~made_progress =
+  D.record_turn ~keeper_name ~made_progress ()
 
 let ignore_outcome = function
   | D.Normal | D.Loop_detected _ | D.Loop_reset _ -> ()
+
+let scheduled_observation : WO.world_observation =
+  { pending_mentions = []
+  ; pending_board_events = []
+  ; pending_scope_messages = []
+  ; idle_seconds = 0
+  ; active_goals = []
+  ; continuity_summary = ""
+  ; context_ratio = lazy 0.0
+  ; unclaimed_task_count = 0
+  ; claimable_task_count = 0
+  ; provider_capacity_blocked_task_count = 0
+  ; failed_task_count = 0
+  ; pending_verification_count = 0
+  ; scheduled_automation = WO.empty_scheduled_automation_observation
+  ; backlog_updated_since_last_scheduled_autonomous = false
+  ; running_keeper_fiber_count = 0
+  ; connected_surfaces = []
+  }
+
+let no_work_budget_override
+      ?(stop_reason = Runtime_agent.TurnBudgetExhausted { turns_used = 1; limit = 1 })
+      ?(has_current_task = false)
+      ?(active_goal_ids = [])
+      ?(strong_evidence = false)
+      ?(surface_requires_evidence = true)
+      observation
+  =
+  Success.no_work_budget_threshold_override
+    ~stop_reason
+    ~has_current_task
+    ~active_goal_ids
+    ~strong_evidence
+    ~surface_requires_evidence
+    ~observation
 
 let test_streak_increments () =
   D.reset_all_for_test ();
@@ -68,6 +106,45 @@ let test_threshold_crossing_fires_counter () =
   Alcotest.(check (float 0.0001)) "fires at threshold"
     (before +. 1.0) (detected_count k);
   ()
+
+let test_threshold_override_fires_early () =
+  D.reset_all_for_test ();
+  let k = "test-keeper-fast-latch" in
+  let before = detected_count k in
+  (match D.record_turn ~threshold_override:1 ~keeper_name:k ~made_progress:false () with
+   | D.Loop_detected { streak; threshold } ->
+     Alcotest.(check int) "fast latch streak" 1 streak;
+     Alcotest.(check int) "fast latch threshold" 1 threshold
+   | D.Normal | D.Loop_reset _ -> Alcotest.fail "expected fast loop detection");
+  Alcotest.(check (float 0.0001)) "fast latch increments counter"
+    (before +. 1.0) (detected_count k);
+  Alcotest.(check int) "streak retained" 1 (D.current_streak ~keeper_name:k)
+
+let test_no_work_budget_override_predicate () =
+  Alcotest.(check (option int)) "scheduled no-work budget exhaustion fast-fails"
+    (Some 1)
+    (no_work_budget_override scheduled_observation);
+  let reactive_observation =
+    { scheduled_observation with pending_mentions = [ ("operator", "wake") ] }
+  in
+  Alcotest.(check (option int)) "reactive observation keeps default threshold"
+    None
+    (no_work_budget_override reactive_observation);
+  Alcotest.(check (option int)) "active task keeps default threshold"
+    None
+    (no_work_budget_override ~has_current_task:true scheduled_observation);
+  Alcotest.(check (option int)) "active goal keeps default threshold"
+    None
+    (no_work_budget_override ~active_goal_ids:[ "goal-1" ] scheduled_observation);
+  Alcotest.(check (option int)) "strong evidence keeps default threshold"
+    None
+    (no_work_budget_override ~strong_evidence:true scheduled_observation);
+  Alcotest.(check (option int)) "visible reply keeps default threshold"
+    None
+    (no_work_budget_override ~surface_requires_evidence:false scheduled_observation);
+  Alcotest.(check (option int)) "completed stop keeps default threshold"
+    None
+    (no_work_budget_override ~stop_reason:Runtime_agent.Completed scheduled_observation)
 
 let test_latched_no_repeat_while_streak_grows () =
   D.reset_all_for_test ();
@@ -190,6 +267,10 @@ let () =
         [
           Alcotest.test_case "fires counter at threshold"
             `Quick (with_eio test_threshold_crossing_fires_counter);
+          Alcotest.test_case "threshold override fires early"
+            `Quick (with_eio test_threshold_override_fires_early);
+          Alcotest.test_case "scheduled autonomous no-work override predicate"
+            `Quick test_no_work_budget_override_predicate;
           Alcotest.test_case "latched: no repeat while streak grows"
             `Quick (with_eio test_latched_no_repeat_while_streak_grows);
           Alcotest.test_case "latch releases on reset, then re-fires"

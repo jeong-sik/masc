@@ -19,6 +19,7 @@ Check timestamp: 2026-06-21 Asia/Seoul.
 1. Auth token bootstrap no longer blindly overwrites manual tokens.
    - `dashboard/src/api/dev-token.ts` preserves non-dev stored tokens and only fetches `/api/v1/dashboard/dev-token` for loopback dashboard contexts.
    - `dashboard/src/api/core.ts` moves URL tokens into session storage and shares the same bearer reader across HTTP and WebSocket hello.
+   - This PR adds same-tab stored-token change notification and makes `dashboard/src/dashboard-ws.ts` close/reconnect the active socket when the token is replaced or cleared. A stale-token `dashboard/hello` rejection can now recover after a fresh dev/manual token arrives, and clearing a token no longer leaves a previously authenticated WS session alive.
 
 2. WebSocket handshake is gated before server push fanout.
    - `dashboard/src/dashboard-ws.ts` sends `dashboard/hello` with the shared bearer token.
@@ -60,6 +61,7 @@ Current code:
 
 - `/api/v1/dashboard/dev-token` returns 404 on strict auth or non-loopback binds.
 - `ensureDevToken()` intentionally swallows fetch failures so strict-auth servers can still reach normal 401 handling.
+- WS now follows same-tab token replacement/clear events, but the user still sees this mostly as badge state changes.
 - The UI has auth status surfaces, but the connection failure reason and token-source state are not shown together.
 
 Recommended UX:
@@ -132,3 +134,5 @@ Recommended action:
 ## Change in this PR
 
 `dashboard/src/dashboard-ws.ts` now carries `/ws` discovery failure reasons into `dashboardWsLastError`. Existing status tray/beacon surfaces can show `dashboard websocket unavailable: standalone_ws_loopback_only` instead of an opaque unavailable state.
+
+The dashboard auth layer now also publishes same-tab bearer-token changes. The WS layer uses that signal to close/reconnect after token replacement or token clear, so the socket authorization state tracks the stored bearer token instead of remaining stuck after `dashboard/hello` auth rejection or staying privileged after a clear.

@@ -407,7 +407,8 @@ let run_keepalive_unified_turn
       then
         Keeper_registry_event_queue.ack_consumed
           ~base_path:ctx.config.base_path
-          meta_after_triage.name;
+          meta_after_triage.name
+          !consumed_stimuli;
       { meta = meta_after_cycle; cycle_crashed = false }
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

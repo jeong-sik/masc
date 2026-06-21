@@ -30,8 +30,11 @@ val record_inflight :
   base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
 (** Mark drained stimuli as in-flight before they are removed from the pending
     snapshot. [load] merges these rows back in front of pending rows, giving a
-    restart at-least-once replay boundary until {!ack_inflight} clears them. *)
+    restart at-least-once replay boundary until {!ack_inflight} acknowledges
+    them. *)
 
-val ack_inflight : base_path:string -> keeper_name:string -> unit
-(** Clear the in-flight lease file after the heartbeat turn has completed or
-    after the stimuli have been requeued into the pending snapshot. *)
+val ack_inflight :
+  base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
+(** Remove acknowledged stimuli from the in-flight lease after the heartbeat
+    turn has completed or after those stimuli have been requeued into the
+    pending snapshot. *)

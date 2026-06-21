@@ -65,6 +65,16 @@ let prepend_missing queue stimuli =
   in
   Keeper_event_queue.prepend_list missing queue
 
+let remove_stimuli queue stimuli =
+  match stimuli with
+  | [] -> queue
+  | _ ->
+    let remove stimulus = List.exists (fun target -> target = stimulus) stimuli in
+    queue
+    |> Keeper_event_queue.to_list
+    |> List.filter (fun stimulus -> not (remove stimulus))
+    |> Keeper_event_queue.of_list
+
 let load_from_path ~keeper_name path =
   if not (Sys.file_exists path)
   then Keeper_event_queue.empty
@@ -182,13 +192,17 @@ let record_inflight ~base_path ~keeper_name stimuli =
          path
          (Printexc.to_string exn)))
 
-let ack_inflight ~base_path ~keeper_name =
+let ack_inflight ~base_path ~keeper_name stimuli =
+  match stimuli with
+  | [] -> ()
+  | _ -> (
   match inflight_path ~base_path ~keeper_name with
   | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
   | Ok path ->
     (try
        with_write_lock (fun () ->
-         persist_to_path ~keeper_name path Keeper_event_queue.empty)
+         let cur = load_from_path ~keeper_name path in
+         persist_to_path ~keeper_name path (remove_stimuli cur stimuli))
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
@@ -196,4 +210,4 @@ let ack_inflight ~base_path ~keeper_name =
          "event_queue_snapshot: ack_inflight raised keeper=%s path=%s: %s"
          keeper_name
          path
-         (Printexc.to_string exn))
+         (Printexc.to_string exn)))

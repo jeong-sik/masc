@@ -26,10 +26,10 @@ val dequeue : base_path:string -> string -> Keeper_event_queue.stimulus option
     but before the turn completes, the stimuli must remain replayable. *)
 val requeue_front : base_path:string -> string -> Keeper_event_queue.stimulus list -> unit
 
-val ack_consumed : base_path:string -> string -> unit
-(** Acknowledge the current in-flight lease after a keepalive turn completes.
-    Until this runs, a restart reloads the leased stimuli for at-least-once
-    replay. *)
+val ack_consumed :
+  base_path:string -> string -> Keeper_event_queue.stimulus list -> unit
+(** Acknowledge consumed stimuli after a keepalive turn completes. Until this
+    runs, a restart reloads the leased stimuli for at-least-once replay. *)
 
 (** Drain stimuli intended for board reactivity. [window_sec] caps the
     age of stimuli returned to the caller. *)

@@ -87,6 +87,7 @@ val derive_failure_state :
   social_state * transition_reason
 
 val apply_to_result :
+  ?turn_ref:Ids.Turn_ref.t ->
   meta:Keeper_meta_contract.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   previous_state:social_state option ->

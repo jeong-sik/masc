@@ -101,6 +101,13 @@ type post_origin = {
   fusion_run_id : string option;
 }
 
+val keeper_authored_origin :
+  ?turn_ref:Ids.Turn_ref.t -> source:string -> unit -> post_origin
+(** RFC-0233 §7: build the [origin] of a keeper-authored board post.
+    [fusion_run_id] is always [None] (fusion has its own origin at the sink);
+    [source] names the producing channel; [turn_ref] is the turn-level join key
+    and is [None] only when no mint-once-safe reference is reachable. *)
+
 type post = {
   id : Post_id.t;
   author : Agent_id.t;

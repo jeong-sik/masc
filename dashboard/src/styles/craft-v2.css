@@ -71,15 +71,17 @@
    workspace with `.kw-*` / `.chat-*` class names instead, so the design selectors
    matched nothing. Retargeted to the live classes and verified against the running
    dashboard (data-density spacious/compact, computed padding + screenshots):
-   design `.thread` + `.thread-inner` fold into `.chat-transcript` (vertical +
-   horizontal); `.msg` -> `.chat-turn-bundle`; `.chat-head`/`.composer` -> their
-   `.kw-` equivalents. The transcript's own `chat-transcript-airy` gap already
-   spaces messages, so the design `thread-inner` gap is not re-applied. */
+   design `.thread` + `.thread-inner` fold into workspace `.chat-transcript`
+   (vertical + horizontal); `.msg` -> `.chat-turn-bundle`; `.chat-head`/
+   `.composer` -> their `.kw-` equivalents. Shared ChatTranscript classes are
+   scoped to `data-keeper-chat-layout="workspace"` so density does not spill into
+   primary/detail transcripts. The transcript's own `chat-transcript-airy` gap
+   already spaces messages, so the design `thread-inner` gap is not re-applied. */
 .v2-app[data-density="spacious"] .kw-chat-head     { padding: 18px 28px 16px; gap: 16px; }
-.v2-app[data-density="spacious"] .chat-transcript  { padding: 34px 40px 14px; }
-.v2-app[data-density="spacious"] .chat-turn-bundle { gap: 15px; }
-.v2-app[data-density="spacious"] .chat-bubble      { padding: 17px 21px; line-height: 1.7; }
-.v2-app[data-density="spacious"] .kw-composer-inner { padding: 16px 30px 22px; }
+.v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .chat-transcript  { padding: 34px 40px 14px; }
+.v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .chat-turn-bundle { gap: 15px; }
+.v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .chat-bubble      { padding: 17px 21px; line-height: 1.7; }
+.v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .kw-composer-inner { padding: 16px 30px 22px; }
 .v2-app[data-density="spacious"] .kw-kp-row        { padding: 11px 11px; }
 /* Context rail + roster (design `.ctx-scroll`/`.ctx-card`/`.tps-card`/`.roster-*`
    -> live `.kw-rail-scroll`/`.kw-sec`/`.kw-roster-*`). `.kw-sec` is scoped under
@@ -108,8 +110,8 @@
    (the v2 source `.thread`/`.chat-head`/`.composer` never matched). Verified on
    the running dashboard. */
 .v2-app[data-density="compact"] .kw-chat-head     { padding: 10px 16px 9px; }
-.v2-app[data-density="compact"] .chat-transcript  { padding: 14px 22px 6px; }
-.v2-app[data-density="compact"] .kw-composer-inner { padding: 9px 18px 12px; }
+.v2-app[data-density="compact"] [data-keeper-chat-layout="workspace"] .chat-transcript  { padding: 14px 22px 6px; }
+.v2-app[data-density="compact"] [data-keeper-chat-layout="workspace"] .kw-composer-inner { padding: 9px 18px 12px; }
 .v2-app[data-density="compact"] .kw-rail-scroll { padding: 11px; gap: 12px; }
 .v2-app[data-density="compact"] .bd-list       { padding: 11px 14px; gap: 8px; }
 .v2-app[data-density="compact"] .set-row       { padding: 10px 0; }

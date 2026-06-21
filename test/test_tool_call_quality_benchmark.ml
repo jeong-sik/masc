@@ -8,8 +8,17 @@ let fixture_runs repo_root =
   Filename.concat repo_root
     "test/fixtures/tool_call_quality_benchmark/evidence_runs.json"
 
+(* Under [dune runtest] the cwd is the sandbox dir, not the repo root, so the
+   benchmark fixtures (which live at repo-root [benchmarks/data/...] and are not
+   sandbox deps) are unreachable via [Sys.getcwd ()]. dune exports the real
+   workspace source root as DUNE_SOURCEROOT; resolve fixtures against it and
+   fall back to cwd for direct (non-dune) invocation. Mirrors
+   test_disk_hygiene_script.ml / test_ci_run_tests_script.ml. *)
+let repo_source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with Some root -> root | None -> Sys.getcwd ()
+
 let load_fixture () =
-  let repo_root = Sys.getcwd () in
+  let repo_root = repo_source_root () in
   let cases =
     match Tool_call_quality_benchmark.load_cases_from_file (fixture_cases repo_root) with
     | Ok v -> v
@@ -39,7 +48,11 @@ let json_check_status_completed : Tool_call_quality_benchmark.json_check =
     present = None;
   }
 
-let selector_case ?(forbidden_tools = []) ?(forbidden_selectors = []) () :
+let selector_case
+    ?(forbidden_tools = [])
+    ?(forbidden_selectors = [])
+    ?(required_selectors = [])
+    () :
     Tool_call_quality_benchmark.benchmark_case =
   {
     id = "selector_case";
@@ -48,21 +61,33 @@ let selector_case ?(forbidden_tools = []) ?(forbidden_selectors = []) () :
     keeper_profiles = [ "bench-selector" ];
     forbidden_tools;
     forbidden_selectors;
+    required_selectors;
     max_tool_calls = 3;
     success_checks = [ json_check_status_completed ];
     arg_checks = [];
     recovery_policy = None;
   }
 
-let selector_tool_call ?route_evidence tool_name :
+let selector_tool_call ?route_evidence ?(input = `Assoc []) tool_name :
     Tool_call_quality_benchmark.tool_call =
   {
     tool_name;
     success = true;
-    input = `Assoc [];
+    input;
     output = None;
     route_evidence;
     duration_ms = None;
+  }
+
+let selector_arg_check ?contains selector path :
+    Tool_call_quality_benchmark.arg_check =
+  {
+    selector;
+    path;
+    equals = None;
+    contains;
+    min_int = None;
+    present = None;
   }
 
 let selector_run tool_calls : Tool_call_quality_benchmark.evidence_run =
@@ -200,7 +225,144 @@ let test_forbidden_selector_matches_eval_tag_evidence () =
       check (float 0.0001) "tool selection failed" 0.0 score.tool_selection
   | None -> fail "score_run unexpectedly returned None"
 
-let test_loader_parses_forbidden_selectors () =
+let test_required_selector_matches_eval_tag_evidence () =
+  let route_evidence =
+    `Assoc
+      [
+        ("descriptor_id", `String "keeper.surface.read");
+        ("eval_tags", `List [ `String "surface_context_read" ]);
+      ]
+  in
+  let case =
+    selector_case
+      ~required_selectors:[ Eval_tool_selector.Eval_tag "surface_context_read" ]
+      ()
+  in
+  let run = selector_run [ selector_tool_call ~route_evidence "renamed_surface_read" ] in
+  match Tool_call_quality_benchmark.score_run ~cases:[ case ] run with
+  | Some score ->
+      check bool "required eval tag permits pass" true score.passed;
+      check (float 0.0001) "tool selection passed" 1.0 score.tool_selection
+  | None -> fail "score_run unexpectedly returned None"
+
+let test_missing_required_selector_degrades_selection () =
+  let case =
+    selector_case
+      ~required_selectors:[ Eval_tool_selector.Descriptor_id "keeper.surface.read" ]
+      ()
+  in
+  let route_evidence = `Assoc [ ("descriptor_id", `String "keeper.tool_search") ] in
+  let run =
+    selector_run [ selector_tool_call ~route_evidence "keeper_tool_search" ]
+  in
+  match Tool_call_quality_benchmark.score_run ~cases:[ case ] run with
+  | Some score ->
+      check bool "missing required selector fails pass" false score.passed;
+      check (float 0.0001) "tool selection failed" 0.0 score.tool_selection
+  | None -> fail "score_run unexpectedly returned None"
+
+let test_arg_check_matches_descriptor_evidence () =
+  let route_evidence =
+    `Assoc [ ("descriptor_id", `String "keeper.surface.read") ]
+  in
+  let case =
+    {
+      (selector_case ())
+      with
+      arg_checks =
+        [
+          selector_arg_check
+            ~contains:"discord"
+            (Eval_tool_selector.Descriptor_id "keeper.surface.read")
+            "$.surface";
+        ];
+    }
+  in
+  let run =
+    selector_run
+      [
+        selector_tool_call
+          ~route_evidence
+          ~input:(`Assoc [ ("surface", `String "discord") ])
+          "renamed_surface_read";
+      ]
+  in
+  match Tool_call_quality_benchmark.score_run ~cases:[ case ] run with
+  | Some score ->
+      check bool "descriptor arg check permits pass" true score.passed;
+      check (float 0.0001) "arg validity passed" 1.0 score.arg_validity
+  | None -> fail "score_run unexpectedly returned None"
+
+let test_missing_arg_selector_degrades_arg_validity () =
+  let case =
+    {
+      (selector_case ())
+      with
+      arg_checks =
+        [
+          selector_arg_check
+            (Eval_tool_selector.Eval_tag "surface_context_read")
+            "$.surface";
+        ];
+    }
+  in
+  let route_evidence =
+    `Assoc [ ("eval_tags", `List [ `String "other_tag" ]) ]
+  in
+  let run =
+    selector_run
+      [
+        selector_tool_call
+          ~route_evidence
+          ~input:(`Assoc [ ("surface", `String "discord") ])
+          "keeper_tool_search";
+      ]
+  in
+  match Tool_call_quality_benchmark.score_run ~cases:[ case ] run with
+  | Some score ->
+      check bool "missing selector fails pass" false score.passed;
+      check (float 0.0001) "arg validity failed" 0.0 score.arg_validity
+  | None -> fail "score_run unexpectedly returned None"
+
+let test_route_evidence_quality_accepts_default_fixture () =
+  let cases, runs = load_fixture () in
+  let issues = Tool_call_quality_benchmark.route_evidence_issues ~cases ~runs in
+  check int "default fixture issue count" 0 (List.length issues)
+
+let test_route_evidence_quality_reports_semantic_case_gaps () =
+  let case =
+    selector_case
+      ~required_selectors:[ Eval_tool_selector.Descriptor_id "keeper.surface.read" ]
+      ()
+  in
+  let missing_evidence_run =
+    selector_run [ selector_tool_call "renamed_surface_read" ]
+  in
+  let issues =
+    Tool_call_quality_benchmark.route_evidence_issues ~cases:[ case ]
+      ~runs:[ missing_evidence_run ]
+  in
+  check int "missing route evidence issue count" 1 (List.length issues);
+  let issue = List.hd issues in
+  check string "issue case id" "selector_case"
+    issue.Tool_call_quality_benchmark.case_id;
+  check string "issue tool name" "renamed_surface_read" issue.tool_name;
+  check bool "issue carries selector label" true
+    (List.mem "descriptor_id:keeper.surface.read" issue.selector_labels);
+  let route_evidence =
+    `Assoc [ ("descriptor_id", `String "keeper.surface.read") ]
+  in
+  let evidenced_run =
+    selector_run
+      [ selector_tool_call ~route_evidence "renamed_surface_read" ]
+  in
+  let clean_issues =
+    Tool_call_quality_benchmark.route_evidence_issues ~cases:[ case ]
+      ~runs:[ evidenced_run ]
+  in
+  check int "evidenced run issue count" 0 (List.length clean_issues)
+
+let test_loader_parses_selector_backed_case_fields () =
   let path = Filename.temp_file "tool-call-quality-selectors" ".json" in
   Fun.protect
     ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
@@ -218,23 +380,131 @@ let test_loader_parses_forbidden_selectors () =
         {"type": "descriptor_id", "value": "masc.agent.card"},
         {"type": "receipt_label", "key": "family", "value": "profile_lookup"}
       ],
+      "required_selectors": [
+        {"type": "eval_tag", "value": "surface_context_read"}
+      ],
       "max_tool_calls": 3,
       "success_checks": [
         {"path": "$.status", "equals": "completed"}
       ],
-      "arg_checks": []
+      "arg_checks": [
+        {
+          "selector": {"type": "descriptor_id", "value": "keeper.surface.read"},
+          "path": "$.surface",
+          "contains": "discord"
+        }
+      ]
     }
   ]
 }|};
       match Tool_call_quality_benchmark.load_cases_from_file path with
       | Ok [ case ] ->
           check int "selector count" 2
-            (List.length case.Tool_call_quality_benchmark.forbidden_selectors)
+            (List.length case.Tool_call_quality_benchmark.forbidden_selectors);
+          check int "required selector count" 1
+            (List.length case.Tool_call_quality_benchmark.required_selectors);
+          check int "arg check count" 1
+            (List.length case.Tool_call_quality_benchmark.arg_checks);
+          let arg_check = List.hd case.Tool_call_quality_benchmark.arg_checks in
+          check string "arg check selector" "descriptor_id:keeper.surface.read"
+            (Eval_tool_selector.label arg_check.Tool_call_quality_benchmark.selector)
       | Ok cases ->
           fail
             (Printf.sprintf "expected one parsed case, got %d"
                (List.length cases))
       | Error msg -> fail ("load_cases_from_file failed: " ^ msg))
+
+(* Regression guard for the legacy [tool_name] arg_check shape: case JSON that
+   predates typed selectors carries a bare ["tool_name"] field instead of a
+   ["selector"] object. parse_arg_check must keep parsing it as
+   [Eval_tool_selector.Tool_name], so removing that fallback fails here. *)
+let test_loader_parses_legacy_tool_name_arg_check () =
+  let path = Filename.temp_file "tool-call-quality-legacy" ".json" in
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+      Fs_compat.save_file path
+        {|{
+  "cases": [
+    {
+      "id": "legacy_arg_check_case",
+      "prompt": "synthetic legacy arg_check case",
+      "category": "tool_use",
+      "keeper_profiles": ["bench-selector"],
+      "forbidden_tools": [],
+      "forbidden_selectors": [],
+      "required_selectors": [],
+      "max_tool_calls": 3,
+      "success_checks": [
+        {"path": "$.status", "equals": "completed"}
+      ],
+      "arg_checks": [
+        {
+          "tool_name": "tool_read_file",
+          "path": "$.path",
+          "contains": "keeper_tool_call_log"
+        }
+      ]
+    }
+  ]
+}|};
+      match Tool_call_quality_benchmark.load_cases_from_file path with
+      | Ok [ case ] ->
+          check int "arg check count" 1
+            (List.length case.Tool_call_quality_benchmark.arg_checks);
+          let arg_check = List.hd case.Tool_call_quality_benchmark.arg_checks in
+          check string "legacy tool_name selector" "tool_name:tool_read_file"
+            (Eval_tool_selector.label
+               arg_check.Tool_call_quality_benchmark.selector)
+      | Ok cases ->
+          fail
+            (Printf.sprintf "expected one parsed case, got %d"
+               (List.length cases))
+      | Error msg -> fail ("load_cases_from_file failed: " ^ msg))
+
+(* When a case uses semantic selectors but none of the run's tool calls carry
+   usable route_evidence, scoring cannot distinguish "wrong tool" from
+   "missing evidence". Per the evidence-quality contract, such runs are excluded
+   from scoring rather than penalized as model failures. *)
+let test_unavailable_route_evidence_excludes_run_from_scoring () =
+  let case =
+    selector_case
+      ~required_selectors:
+        [ Eval_tool_selector.Descriptor_id "keeper.surface.read" ]
+      ()
+  in
+  let run = selector_run [ selector_tool_call "keeper_tool_search" ] in
+  match Tool_call_quality_benchmark.score_run ~cases:[ case ] run with
+  | Some _ -> fail "score_run should return None when route evidence is unavailable"
+  | None -> ()
+
+(* A semantic selector cannot match route_evidence whose field is present but
+   empty, so the gate must treat empty values as missing evidence (anti-pattern:
+   empty -> permissive "has evidence"). Each variant below would have passed the
+   gate when it only checked key presence. *)
+let test_route_evidence_quality_treats_empty_evidence_as_missing () =
+  let case =
+    selector_case
+      ~required_selectors:
+        [ Eval_tool_selector.Descriptor_id "keeper.surface.read" ]
+      ()
+  in
+  let empty_evidence_run route_evidence =
+    selector_run [ selector_tool_call ~route_evidence "renamed_surface_read" ]
+  in
+  List.iter
+    (fun (label, route_evidence) ->
+      let issues =
+        Tool_call_quality_benchmark.route_evidence_issues ~cases:[ case ]
+          ~runs:[ empty_evidence_run route_evidence ]
+      in
+      check int (label ^ " issue count") 1 (List.length issues))
+    [
+      ("empty descriptor_id", `Assoc [ ("descriptor_id", `String "") ]);
+      ("blank runtime_handler", `Assoc [ ("runtime_handler", `String "  ") ]);
+      ("empty eval_tags", `Assoc [ ("eval_tags", `List []) ]);
+      ("empty receipt_labels", `Assoc [ ("receipt_labels", `Assoc []) ]);
+    ]
 
 let () =
   run "tool_call_quality_benchmark"
@@ -248,7 +518,25 @@ let () =
              test_forbidden_selector_matches_descriptor_evidence;
            test_case "forbidden selector matches eval tag evidence" `Quick
              test_forbidden_selector_matches_eval_tag_evidence;
-           test_case "loader parses forbidden selectors" `Quick
-             test_loader_parses_forbidden_selectors;
+           test_case "required selector matches eval tag evidence" `Quick
+             test_required_selector_matches_eval_tag_evidence;
+           test_case "missing required selector degrades selection" `Quick
+             test_missing_required_selector_degrades_selection;
+           test_case "arg check matches descriptor evidence" `Quick
+             test_arg_check_matches_descriptor_evidence;
+           test_case "missing arg selector degrades arg validity" `Quick
+             test_missing_arg_selector_degrades_arg_validity;
+           test_case "route evidence quality accepts default fixture" `Quick
+             test_route_evidence_quality_accepts_default_fixture;
+           test_case "route evidence quality reports semantic gaps" `Quick
+             test_route_evidence_quality_reports_semantic_case_gaps;
+           test_case "loader parses selector-backed case fields" `Quick
+             test_loader_parses_selector_backed_case_fields;
+           test_case "loader parses legacy tool_name arg check" `Quick
+             test_loader_parses_legacy_tool_name_arg_check;
+           test_case "route evidence quality treats empty fields as missing"
+             `Quick test_route_evidence_quality_treats_empty_evidence_as_missing;
+           test_case "unavailable route evidence excludes run from scoring"
+             `Quick test_unavailable_route_evidence_excludes_run_from_scoring;
          ]);
     ]

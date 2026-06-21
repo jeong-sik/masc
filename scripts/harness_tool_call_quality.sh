@@ -3,10 +3,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${TOOL_CALL_QUALITY_OUT_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/tool-call-quality.XXXXXX")}"
-CASES_PATH="${TOOL_CALL_QUALITY_CASES_PATH:-${ROOT_DIR}/benchmark/tool_call_quality_cases.json}"
+CASES_PATH="${TOOL_CALL_QUALITY_CASES_PATH:-${ROOT_DIR}/benchmarks/data/tool_call_quality_cases.json}"
 EVIDENCE_PATH="${TOOL_CALL_QUALITY_EVIDENCE_PATH:-${ROOT_DIR}/test/fixtures/tool_call_quality_benchmark/evidence_runs.json}"
 FORMAT="${TOOL_CALL_QUALITY_FORMAT:-json}"
 VIEW="${TOOL_CALL_QUALITY_VIEW:-provider-model-keeper}"
+REQUIRE_ROUTE_EVIDENCE="${TOOL_CALL_QUALITY_REQUIRE_ROUTE_EVIDENCE:-1}"
 CLI_EXE="${ROOT_DIR}/_build/default/test/tool_call_quality_benchmark_cli.exe"
 
 MODELS="${TOOL_CALL_QUALITY_MODELS:-}"
@@ -35,7 +36,7 @@ Usage:
   scripts/harness_tool_call_quality.sh [--cases PATH] [--evidence PATH] [--format json|csv]
                                        [--view provider-model-keeper|provider-model|keeper]
                                        [--artifact-dir DIR] [--models CSV] [--keepers CSV]
-                                       [--case-ids CSV]
+                                       [--case-ids CSV] [--no-require-route-evidence]
   scripts/harness_tool_call_quality.sh --live --models provider:model[,provider:model]
                                        [--keepers CSV] [--case-ids CSV]
                                        [--repeats N] [--timeout-sec N]
@@ -450,6 +451,7 @@ tool_calls_for_evidence() {
           success: (.success // false),
           input: (.input // {}),
           output: (.output // null),
+          route_evidence: (.route_evidence // null),
           duration_ms: (.duration_ms // null)
         }
     ]
@@ -985,6 +987,9 @@ run_live_harness() {
     if [[ -n "${KEEPERS}" ]]; then
       args+=(--keepers "${KEEPERS}")
     fi
+    if [[ "${REQUIRE_ROUTE_EVIDENCE}" == "1" ]]; then
+      args+=(--require-route-evidence)
+    fi
     "${CLI_EXE}" "${args[@]}"
   )
 
@@ -1010,6 +1015,9 @@ run_evidence_summary() {
     fi
     if [[ -n "${KEEPERS}" ]]; then
       args+=(--keepers "${KEEPERS}")
+    fi
+    if [[ "${REQUIRE_ROUTE_EVIDENCE}" == "1" ]]; then
+      args+=(--require-route-evidence)
     fi
     "${CLI_EXE}" "${args[@]}"
   )
@@ -1049,6 +1057,14 @@ while [[ $# -gt 0 ]]; do
     --keepers)
       KEEPERS="$2"
       shift 2
+      ;;
+    --require-route-evidence)
+      REQUIRE_ROUTE_EVIDENCE=1
+      shift
+      ;;
+    --no-require-route-evidence)
+      REQUIRE_ROUTE_EVIDENCE=0
+      shift
       ;;
     --live)
       LIVE_MODE=1

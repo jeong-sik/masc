@@ -100,10 +100,19 @@ let parse_json_check json =
   }
 
 let parse_arg_check json =
-  let* tool_name = required_string_field json "tool_name" in
+  let* selector =
+    match member_opt "selector" json with
+    | Some value ->
+        (match Eval_tool_selector.of_yojson value with
+         | Ok selector -> Ok selector
+         | Error msg -> errorf "invalid arg_check selector: %s" msg)
+    | None ->
+        let* tool_name = required_string_field json "tool_name" in
+        Ok (Eval_tool_selector.Tool_name tool_name)
+  in
   let* path = required_string_field json "path" in
   Ok {
-    tool_name;
+    selector;
     path;
     equals = member_opt "equals" json;
     contains = Json_util.get_string json "contains";
@@ -147,6 +156,7 @@ let benchmark_case_of_yojson json =
   let* prompt = required_string_field json "prompt" in
   let* forbidden_tools = string_list_field json "forbidden_tools" in
   let* forbidden_selectors = selector_list_field json "forbidden_selectors" in
+  let* required_selectors = selector_list_field json "required_selectors" in
   let* category =
     Json_util.get_string json "category"
     |> Option.value ~default:"tool_use"
@@ -166,6 +176,7 @@ let benchmark_case_of_yojson json =
     keeper_profiles;
     forbidden_tools;
     forbidden_selectors;
+    required_selectors;
     max_tool_calls;
     success_checks;
     arg_checks;

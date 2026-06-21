@@ -37,6 +37,7 @@ let () =
   let artifact_dir = ref "" in
   let emit_canary_path = ref "" in
   let view = ref "provider-model-keeper" in
+  let require_route_evidence = ref false in
   let model_filters : string list ref = ref [] in
   let keeper_filters : string list ref = ref [] in
   let specs =
@@ -47,6 +48,11 @@ let () =
       ("--artifact-dir", Arg.Set_string artifact_dir, "Write summary artifacts to this directory");
       ("--emit-canary", Arg.Set_string emit_canary_path, "Write keeper benchmark canary recommendation JSON to this path");
       ("--view", Arg.Set_string view, "Summary view: provider-model-keeper, provider-model, keeper");
+      ("--require-route-evidence",
+       Arg.Set require_route_evidence,
+       "Fail if selector-backed cases have tool calls without usable \
+        route_evidence (default: off; pass this flag in CI/live benchmarking \
+        to enforce evidence quality)");
       ("--models",
        Arg.String (fun value -> model_filters := parse_csv_arg value),
        "Comma-separated provider:model filters");
@@ -78,6 +84,21 @@ let () =
   let canary_manifest =
     Keeper_benchmark_canary.build_manifest summary
   in
+  let route_evidence_issues =
+    Tool_call_quality_benchmark.route_evidence_issues ~cases ~runs
+  in
+  let evidence_quality_json =
+    `Assoc
+      [
+        ("route_evidence_required", `Bool !require_route_evidence);
+        ("route_evidence_issue_count", `Int (List.length route_evidence_issues));
+        ( "route_evidence_issues",
+          `List
+            (List.map
+               Tool_call_quality_benchmark.evidence_quality_issue_to_yojson
+               route_evidence_issues) );
+      ]
+  in
   let view =
     match String.lowercase_ascii (String.trim !view) with
     | "provider-model-keeper" -> Tool_call_quality_benchmark.By_provider_model_keeper
@@ -93,6 +114,7 @@ let () =
             ("cases_path", `String !cases_path);
             ("evidence_path", `String !evidence_path);
             ("summary", Tool_call_quality_benchmark.benchmark_summary_to_yojson summary);
+            ("evidence_quality", evidence_quality_json);
             ("keeper_benchmark_canary",
              Keeper_benchmark_canary.manifest_to_yojson canary_manifest);
             ("rows", summary_rows_json view summary);
@@ -124,4 +146,9 @@ let () =
    | None -> ());
   print_string output;
   if String.length output = 0 || output.[String.length output - 1] <> '\n' then
-    print_newline ()
+    print_newline ();
+  if !require_route_evidence && not (List.equal (=) route_evidence_issues []) then (
+    prerr_endline
+      (Printf.sprintf "route_evidence completeness failed: %d issue(s)"
+         (List.length route_evidence_issues));
+    exit 2)

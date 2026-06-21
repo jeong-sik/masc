@@ -38,6 +38,12 @@ val json_check_to_yojson :
     [present].  [equals] retains its original [Yojson.Safe.t] shape
     (any JSON value is permitted as a comparand). *)
 
+val evidence_quality_issue_to_yojson :
+  Tool_call_quality_benchmark_types.evidence_quality_issue -> Yojson.Safe.t
+(** [evidence_quality_issue_to_yojson issue] renders one benchmark
+    evidence-quality diagnostic. These diagnostics describe harness/evidence
+    incompleteness, not model behavior. *)
+
 val summary_row_to_yojson :
   Tool_call_quality_benchmark_types.summary_row -> Yojson.Safe.t
 (** [summary_row_to_yojson row] renders one aggregate row.  22

@@ -24,6 +24,10 @@
           "tool_name": "keeper_tool_search",
           "success": true,
           "duration_ms": 24.0,
+          "route_evidence": {
+            "descriptor_id": "keeper.tool_search",
+            "eval_tags": ["capability_introspection"]
+          },
           "input": {
             "query": "prompt_fingerprint keeper_tool_call_log"
           }
@@ -32,6 +36,10 @@
           "tool_name": "tool_read_file",
           "success": true,
           "duration_ms": 31.0,
+          "route_evidence": {
+            "descriptor_id": "agent.read_file",
+            "eval_tags": []
+          },
           "input": {
             "path": "lib/keeper_tool_call_log.ml"
           }
@@ -62,6 +70,10 @@
           "tool_name": "keeper_tool_search",
           "success": true,
           "duration_ms": 23.0,
+          "route_evidence": {
+            "descriptor_id": "keeper.tool_search",
+            "eval_tags": ["capability_introspection"]
+          },
           "input": {
             "query": "prompt_fingerprint keeper_tool_call_log"
           }
@@ -70,6 +82,10 @@
           "tool_name": "tool_read_file",
           "success": true,
           "duration_ms": 33.0,
+          "route_evidence": {
+            "descriptor_id": "agent.read_file",
+            "eval_tags": []
+          },
           "input": {
             "path": "lib/keeper_tool_call_log.ml"
           }
@@ -100,6 +116,10 @@
           "tool_name": "keeper_tool_search",
           "success": true,
           "duration_ms": 19.0,
+          "route_evidence": {
+            "descriptor_id": "keeper.tool_search",
+            "eval_tags": ["capability_introspection"]
+          },
           "input": {
             "query": "prompt_fingerprint keeper_tool_call_log"
           }
@@ -108,6 +128,10 @@
           "tool_name": "tool_execute",
           "success": true,
           "duration_ms": 48.0,
+          "route_evidence": {
+            "descriptor_id": "agent.execute",
+            "eval_tags": []
+          },
           "input": {
             "cmd": "rg prompt_fingerprint lib"
           }
@@ -116,6 +140,10 @@
           "tool_name": "tool_read_file",
           "success": true,
           "duration_ms": 30.0,
+          "route_evidence": {
+            "descriptor_id": "agent.read_file",
+            "eval_tags": []
+          },
           "input": {
             "path": "lib/keeper_tool_call_log.ml"
           }
@@ -167,6 +195,10 @@
           "tool_name": "tool_read_file",
           "success": false,
           "duration_ms": 15.0,
+          "route_evidence": {
+            "descriptor_id": "agent.read_file",
+            "eval_tags": []
+          },
           "input": {
             "path": "lib/missing_file.ml"
           }
@@ -175,6 +207,10 @@
           "tool_name": "keeper_tool_search",
           "success": true,
           "duration_ms": 20.0,
+          "route_evidence": {
+            "descriptor_id": "keeper.tool_search",
+            "eval_tags": ["capability_introspection"]
+          },
           "input": {
             "query": "keeper_agent_run prompt_fingerprint"
           }
@@ -183,6 +219,10 @@
           "tool_name": "tool_read_file",
           "success": true,
           "duration_ms": 34.0,
+          "route_evidence": {
+            "descriptor_id": "agent.read_file",
+            "eval_tags": []
+          },
           "input": {
             "path": "lib/keeper/keeper_agent_run.ml"
           }
@@ -213,6 +253,10 @@
           "tool_name": "tool_read_file",
           "success": false,
           "duration_ms": 18.0,
+          "route_evidence": {
+            "descriptor_id": "agent.read_file",
+            "eval_tags": []
+          },
           "input": {
             "path": "lib/missing_file.ml"
           }
@@ -221,6 +265,10 @@
           "tool_name": "keeper_tool_search",
           "success": true,
           "duration_ms": 24.0,
+          "route_evidence": {
+            "descriptor_id": "keeper.tool_search",
+            "eval_tags": ["capability_introspection"]
+          },
           "input": {
             "query": "keeper_agent_run prompt_fingerprint"
           }
@@ -229,6 +277,10 @@
           "tool_name": "tool_read_file",
           "success": true,
           "duration_ms": 39.0,
+          "route_evidence": {
+            "descriptor_id": "agent.read_file",
+            "eval_tags": []
+          },
           "input": {
             "path": "lib/keeper/keeper_agent_run.ml"
           }
@@ -237,6 +289,10 @@
           "tool_name": "tool_read_file",
           "success": true,
           "duration_ms": 22.0,
+          "route_evidence": {
+            "descriptor_id": "agent.read_file",
+            "eval_tags": []
+          },
           "input": {
             "path": "lib/keeper/keeper_agent_run.ml"
           }

@@ -207,6 +207,7 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           context_window: 203000,
           price_input_per_million: 0.27,
           price_output_per_million: 1.1,
+          request_latency_ms: 1234,
           blocks: [
             { block: 'system', bytes: 1200, digest: '1111222233334444' },
             { block: 'user_model', bytes: 728, digest: '99887766554433221100' },
@@ -669,6 +670,10 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(drawerText).toContain('agent subturns')
     expect(drawerText).toContain('T9001')
     expect(drawerText).toContain('keeper_board_post_get')
+    // RFC-0233 §9: the gen (response-generation) phase carries
+    // request_latency_ms from the record (1234ms → "1.2s"), so it renders a
+    // measured duration instead of "측정 없음".
+    expect(drawerText).toContain('1.2s')
     expect(drawerText).toContain('54ms')
     expect(drawerText).not.toContain('0.50s')
 

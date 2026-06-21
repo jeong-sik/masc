@@ -50,6 +50,7 @@ let sample_record () : Turn_record.t =
   ; context_window = Some 131072
   ; price_input_per_million = Some 0.15
   ; price_output_per_million = Some 0.6
+  ; request_latency_ms = Some 1234
   ; sampling =
       { temperature = Some 0.3
       ; top_p = Some 0.9
@@ -94,6 +95,8 @@ let test_codec_roundtrip () =
       record.price_input_per_million decoded.price_input_per_million;
     check (option (float 0.0001)) "price_output_per_million"
       record.price_output_per_million decoded.price_output_per_million;
+    check (option int) "request_latency_ms round-trip" record.request_latency_ms
+      decoded.request_latency_ms;
     check (option (float 0.0001)) "temperature" record.sampling.temperature
       decoded.sampling.temperature;
     check (option (float 0.0001)) "top_p" record.sampling.top_p
@@ -118,6 +121,7 @@ let test_codec_optional_fields_absent () =
     ; context_window = None
     ; price_input_per_million = None
     ; price_output_per_million = None
+  ; request_latency_ms = None
     ; sampling =
         { temperature = None
         ; top_p = None
@@ -146,7 +150,9 @@ let test_codec_optional_fields_absent () =
      check bool "context_window key omitted when None" false
        (List.mem_assoc "context_window" fields);
      check bool "price_input_per_million key omitted when None" false
-       (List.mem_assoc "price_input_per_million" fields)
+       (List.mem_assoc "price_input_per_million" fields);
+     check bool "request_latency_ms key omitted when None" false
+       (List.mem_assoc "request_latency_ms" fields)
    | _ -> fail "to_json did not produce an object");
   match Turn_record.of_json json with
   | Error e -> failf "decode failed: %s" e
@@ -159,6 +165,8 @@ let test_codec_optional_fields_absent () =
       decoded.price_input_per_million;
     check (option (float 0.0001)) "price_output_per_million absent" None
       decoded.price_output_per_million;
+    check (option int) "request_latency_ms absent" None
+      decoded.request_latency_ms;
     check (option (float 0.0001)) "temperature absent" None
       decoded.sampling.temperature;
     check (option (float 0.0001)) "top_p absent" None decoded.sampling.top_p;

@@ -527,3 +527,121 @@ the shared-record field addition catches every literal construction site
 - FE: turn inspector opens the correct turn by id (not by window) given
   `turn_ref`; a board post navigates to its anchored chat turn and back.
   tsc + vitest, including a board↔chat navigation test.
+
+## §9 Amendment (2026-06-22) — response-generation phase duration: `request_latency_ms`
+
+### §9.1 Problem — the `gen` phase waterfall bar showed "측정 없음"
+
+The turn inspector's phase waterfall assembles four phases per turn —
+context assembly (`ctx`), thinking (`reason`), tool calls (`tool`), and
+response generation (`gen`). Only the `tool` phase carried a measured
+`duration_ms` (from `/api/v1/keepers/:name/tool-calls`). The other three
+were hardcoded `durationMs: null, durationSource: 'not_recorded'`, and the
+`gen` phase's own `meta` string declared *"provider/OAS duration is not
+recorded in turn-records"*. So every keeper turn's response-generation bar
+read "측정 없음" even though the provider call wall-clock was already
+measured — it just never reached the record.
+
+The measurement already exists in-process: the OAS `api_response.telemetry`
+field carries `inference_telemetry.request_latency_ms`, and the transport
+layer (`complete_common.patch_telemetry` non-streaming, `complete_stream`
+streaming) synthesizes it for every provider, so it is populated whenever a
+response was produced. `keeper_agent_result.ml:63` already retains that
+telemetry as `inference_telemetry` (= `result.response.telemetry`,
+`keeper_agent_run_finalize_response.ml:221`), exactly the source the keeper
+hooks already consume (`keeper_hooks_oas.ml:417` reads
+`t.request_latency_ms` off `response.telemetry`). The record simply never
+stored it, forcing the `gen` phase to render "측정 없음" — a view-side-repair
+violation of §2.3.
+
+### §9.2 Design — one option field, populated from OAS transport telemetry
+
+```ocaml
+; request_latency_ms : int option
+    (* wall-clock duration of the provider call in milliseconds *)
+```
+
+- Sourced at the write site (`lib/keeper/keeper_agent_run.ml`, next to the
+  `usage` binding) via `Option.bind result.inference_telemetry (fun t ->
+  t.request_latency_ms)`. `request_latency_ms` is itself `int option` in OAS
+  (`oas/lib/llm_provider/types.mli:197`), and `inference_telemetry` is an
+  outer `option`; `Option.bind` flattens the two layers rather than nesting
+  option-of-option. On the error path (or before a response existed) the
+  value is `None`.
+- The view maps it onto the `gen` phase: `durationMs = request_latency_ms`,
+  `durationSource = 'provider_telemetry'` (a new variant on the
+  `TurnPhase.durationSource` union, distinct from `'tool_call_log'` so the
+  tooltip names the real source). Absent → the existing `'not_recorded'` /
+  "측정 없음" render is preserved. No fabrication.
+- `ctx` and `reason` phases stay `'not_recorded'`: OAS `inference_telemetry`
+  has no isolated measurement for context assembly or thinking, so mapping
+  `request_latency_ms` onto them would mislabel the whole-call wall-clock.
+  This is an honest limit, not a gap to paper over.
+
+### §9.3 Boundary invariant (unchanged from §3)
+
+No OAS change. MASC reads `inference_telemetry` it already receives in the
+keeper turn result — the same consumption pattern as
+`keeper_hooks_oas.ml:287/326/417`, `lib/runtime/dashboard_oas_bridge.ml`,
+and `keeper_unified_turn_success.ml:253`. The telemetry record is an OAS
+generic asset (`types.mli:325` docstring: *"Parsed from the raw API
+response; never computed by downstream"*); `rg "MASC|masc|keeper"` in
+`oas/lib/api.ml` / `types.ml` returns 0 hits, so `patch_telemetry` is OAS's
+own transport pipeline, not MASC-requested code. Per
+`docs/OAS-MASC-BOUNDARY.md:16,50,52`, MASC consuming a public OAS response
+field is permitted; only adding MASC-specific code to OAS would not be.
+
+### §9.4 Non-goals
+
+- No phase-level split (`prefill_ms` / `ttfrc_ms` / `timings.{prompt_ms,
+  predicted_ms}`). Those are provider-native: `timings` is reported by
+  Ollama and llama-server only; `prefill_ms`/`ttfrc_ms` are wall-clock
+  derived on the streaming path and `None` non-streaming. Emitting them now
+  would show mostly-empty columns across the (predominantly cloud) keeper
+  fleet rather than measured signal — a Wave-2c candidate once a keeper's
+  runtime is known to populate them. `request_latency_ms` is the only field
+  every provider reports.
+- No derivation of `ctx`/`reason` durations by differencing
+  `request_latency_ms` against tool durations — that would fabricate a
+  measurement OAS does not provide (see §9.6).
+- No backfill: legacy rows decode `request_latency_ms` as `None`; the `gen`
+  phase renders "측정 없음" exactly as before.
+
+### §9.5 Migration
+
+Additive. `request_latency_ms` is a trailing optional field serialized only
+when `Some`; the decoder reads it via `opt_member` (absent → `None`). The
+writer gains one labeled argument (`~request_latency_ms`); the single call
+site passes it. The dashboard `TurnRecordEntry` gains one optional field
+and one `asNumber` decode line. The `gen` phase mapping and the new
+`'provider_telemetry'` variant on `TurnPhase.durationSource` are the only
+frontend logic changes (the `phaseDurationLabel` / `finalizePhaseOffsets`
+consumers already key off `durationMs != null`, so they pick the measured
+path automatically; only `phaseDurationTitle`'s switch gained an explicit
+case).
+
+### §9.6 Workaround guards (rejected per CLAUDE.md §워크어라운드)
+
+1. Deriving a `ctx` or `reason` duration as
+   `request_latency_ms − Σ tool durations` — constructs a measurement OAS
+   never made; silent on multi-SDK-turn keeper turns where multiple provider
+   calls occur. → leave those phases `'not_recorded'`.
+2. Defaulting `request_latency_ms` to 0 (the `keeper_hooks_oas.ml:417`
+   `Option.value ~default:0` pattern is for a tok/s log line, not a stored
+   record) — would render a 0ms bar indistinguishable from a real fast call.
+   → store `None`, render "측정 없음".
+3. Collapsing all phase timing into a single `total_turn_ms` — loses the
+   per-phase source attribution the waterfall exists to show. → one field,
+   one phase.
+
+### §9.7 Verification harness
+
+- Unit (`test/test_turn_record.ml`): round-trip of `request_latency_ms`
+  (`Some 1234`); the absent case (`None`) omits the JSON key and decodes
+  `None` (no fabricated duration on the wire).
+- Frontend: a grounded fixture (real `request_latency_ms`) renders a
+  `formatMsCompact` label on the `gen` phase with the `'provider_telemetry'`
+  tooltip, not "측정 없음"; an absent value still renders "측정 없음".
+- Behavioral: a turn whose provider call was measured shows a real `gen`
+  bar; an errored turn (no response) keeps `gen` as "측정 없음". tsc +
+  vitest.

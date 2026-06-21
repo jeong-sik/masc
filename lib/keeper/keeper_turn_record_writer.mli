@@ -16,6 +16,7 @@ val write :
   context_window:int option ->
   price_input_per_million:float option ->
   price_output_per_million:float option ->
+  request_latency_ms:int option ->
   sampling:Turn_record.sampling ->
   usage:Turn_record.usage ->
   execution_ids:Ids.Execution_id.t list ->

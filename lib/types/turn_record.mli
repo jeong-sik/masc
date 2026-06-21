@@ -66,6 +66,19 @@ type t =
   ; price_output_per_million : float option
     (* RFC-0233 §8 — USD per 1M output tokens, same source/absence rule as
        [price_input_per_million]. *)
+  ; request_latency_ms : int option
+    (* RFC-0233 §9 — wall-clock duration of the provider call in
+       milliseconds, sourced from OAS
+       [inference_telemetry.request_latency_ms] (the OAS transport layer
+       synthesizes it for every provider — [complete_common.patch_telemetry]
+       non-streaming, [complete_stream] streaming — so it is populated
+       whenever a response is produced). [None] on the error path or legacy
+       rows; the inspector renders absence rather than a fabricated duration
+       for the response-generation phase. Phase-level splits
+       (prefill/decode/ttfrc) are deliberately deferred: only the provider's
+       native timing objects carry them and most keepers' runtimes do not
+       report them, so emitting them would show mostly-empty columns rather
+       than measured signal. *)
   ; sampling : sampling
   ; usage : usage
   ; ts : float

@@ -60,6 +60,8 @@
     [dashboard_delta_for_sse], [env_cache_ttl_s],
     [client_buffer_limit_cache] /
     [client_buffer_limit_bytes],
+    [dashboard_ack_stale_threshold_cache] /
+    [dashboard_ack_stale_threshold_s],
     [session_is_backpressured],
     [max_inbound_frame_bytes] /
     [max_inbound_message_bytes],
@@ -444,6 +446,7 @@ val __test_slice_index_remove_session : string -> unit
 val __test_reset_env_caches : unit -> unit
 (** Test-only seam: resets the
     {!client_buffer_limit_bytes} and
+    {!dashboard_ack_stale_threshold_s} and
     {!slice_index_enabled} caches so the next call
     re-reads the environment. *)
 

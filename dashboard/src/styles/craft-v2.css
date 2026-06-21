@@ -81,6 +81,14 @@
 .v2-app[data-density="spacious"] .chat-bubble      { padding: 17px 21px; line-height: 1.7; }
 .v2-app[data-density="spacious"] .kw-composer-inner { padding: 16px 30px 22px; }
 .v2-app[data-density="spacious"] .kw-kp-row        { padding: 11px 11px; }
+/* Context rail + roster (design `.ctx-scroll`/`.ctx-card`/`.tps-card`/`.roster-*`
+   -> live `.kw-rail-scroll`/`.kw-sec`/`.kw-roster-*`). `.kw-sec` is scoped under
+   `.kw-rail` (context cards only). Verified on the running dashboard. */
+.v2-app[data-density="spacious"] .kw-rail-scroll   { padding: 20px; gap: 22px; }
+.v2-app[data-density="spacious"] .kw-rail .kw-sec  { padding: 14px 15px; }
+.v2-app[data-density="spacious"] .kw-roster-head   { padding: 15px 14px; }
+.v2-app[data-density="spacious"] .kw-roster-list   { padding: 9px 8px; }
+.v2-app[data-density="spacious"] .kw-roster-filters { padding: 12px 14px; }
 
 /* Board */
 .v2-app[data-density="spacious"] .bd-feed-head     { padding: 15px 24px; }
@@ -102,6 +110,7 @@
 .v2-app[data-density="compact"] .kw-chat-head     { padding: 10px 16px 9px; }
 .v2-app[data-density="compact"] .chat-transcript  { padding: 14px 22px 6px; }
 .v2-app[data-density="compact"] .kw-composer-inner { padding: 9px 18px 12px; }
+.v2-app[data-density="compact"] .kw-rail-scroll { padding: 11px; gap: 12px; }
 .v2-app[data-density="compact"] .bd-list       { padding: 11px 14px; gap: 8px; }
 .v2-app[data-density="compact"] .set-row       { padding: 10px 0; }
 

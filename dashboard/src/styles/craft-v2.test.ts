@@ -65,6 +65,20 @@ describe('craft-v2.css density chat console (retargeted to live classes)', () =>
       .toBe('9px 18px 12px')
   })
 
+  it('applies context-rail + roster spacious values to live classes', () => {
+    const rail = declarationsForSelector(css, '.v2-app[data-density="spacious"] .kw-rail-scroll')
+    expect(rail.padding).toBe('20px')
+    expect(rail.gap).toBe('22px')
+    expect(declarationsForSelector(css, '.v2-app[data-density="spacious"] .kw-rail .kw-sec').padding)
+      .toBe('14px 15px')
+    expect(declarationsForSelector(css, '.v2-app[data-density="spacious"] .kw-roster-head').padding)
+      .toBe('15px 14px')
+    expect(declarationsForSelector(css, '.v2-app[data-density="spacious"] .kw-roster-filters').padding)
+      .toBe('12px 14px')
+    expect(declarationsForSelector(css, '.v2-app[data-density="compact"] .kw-rail-scroll').padding)
+      .toBe('11px')
+  })
+
   it('does not target the design-only .thread / .bubble chat classes (regression guard)', () => {
     // The live keeper workspace renders `.kw-thread` / `.chat-bubble`; the design
     // class names `.thread` / `.bubble` never match, so a density rule on them is dead.

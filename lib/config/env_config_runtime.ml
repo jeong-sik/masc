@@ -393,7 +393,7 @@ module Approval_janitor = struct
     get_float ~default:60.0 "MASC_APPROVAL_JANITOR_INTERVAL_SEC"
 end
 
-(** {1 Keeper Max-Turn Watchdog (RFC-0109 P4)}
+(** {1 Keeper Max-Turn Watchdog (RFC-0125 P4)}
 
     Default-on keeper-level wall-clock watchdog. A [Running] keeper whose
     current turn exceeds the threshold is presumed hung and restarted via
@@ -413,10 +413,14 @@ end
     (which only detects in-turn no-progress, not "stuck for too long
     in a single attempt"). *)
 module Keeper_max_turn_watchdog = struct
+  let default_max_turn_watchdog_sec =
+    1800.0 (* 30 min: a single in-progress turn is presumed hung *)
+  ;;
+
   let timeout_sec_opt () =
     let v =
       get_float
-        ~default:1800.0
+        ~default:default_max_turn_watchdog_sec
         "MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC"
     in
     if v > 0.0 then Some v else None
@@ -436,8 +440,12 @@ end
     Default 1800s: a [Running] keeper that has not completed a turn in 30 min
     is presumed wedged. Set [MASC_KEEPER_STALE_RUN_SEC=0] to disable. *)
 module Keeper_stale_run = struct
+  let default_stale_run_sec =
+    1800.0 (* 30 min: no turn has completed at all *)
+  ;;
+
   let threshold_sec_opt () =
-    let v = get_float ~default:1800.0 "MASC_KEEPER_STALE_RUN_SEC" in
+    let v = get_float ~default:default_stale_run_sec "MASC_KEEPER_STALE_RUN_SEC" in
     if v > 0.0 then Some v else None
 end
 

@@ -183,14 +183,17 @@ module Approval_janitor : sig
   val interval_seconds : float
 end
 
-(** {1 Keeper max-turn watchdog (RFC-0109 P4)} *)
+(** {1 Keeper max-turn watchdog (RFC-0125 P4)} *)
 
 module Keeper_max_turn_watchdog : sig
   val timeout_sec_opt : unit -> float option
   (** [timeout_sec_opt ()] returns the keeper-level max-turn wall-clock
-      budget when [MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC] is set to
-      a positive number, or [None] when the env var is unset / zero /
-      negative.
+      budget for [MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC].
+
+      Default-on at [1800.0] (30 min): a [Running] keeper whose current
+      turn exceeds the threshold is presumed hung and restarted via the
+      existing [Stale_turn_timeout In_turn_hung] crash-recovery path.
+      Set the env var to [0] to disable.
 
       When [Some t] is returned, the supervisor races each keeper's
       [Keeper_keepalive.run_heartbeat_loop] against
@@ -198,11 +201,7 @@ module Keeper_max_turn_watchdog : sig
       cancels the keepalive fiber and stamps [Stale_turn_timeout
       "max_turn_watchdog"] on the registry so [sweep_and_recover]
       restarts the keeper instead of treating the cancellation as a
-      clean stop.
-
-      Default: [None] (disabled). Recommended live value: [600.0]
-      (10 minutes). Set lower for aggressive sangsu-style stuck
-      recovery, higher for long-running research keepers. *)
+      clean stop. *)
 end
 
 (** {1 Keeper stale-run window (RFC-0250)} *)
@@ -213,7 +212,7 @@ module Keeper_stale_run : sig
       when [MASC_KEEPER_STALE_RUN_SEC] is positive, or [None] when unset /
       zero / negative.
 
-      Distinct from [Keeper_max_turn_watchdog] (opt-in, [In_turn_hung]):
+      Distinct from [Keeper_max_turn_watchdog] (default-on, [In_turn_hung]):
       this keys on [last_turn_ts] while [current_turn_observation = None],
       producing [Idle_turn] — the no-turn-produced case. Default-on at
       [1800.0] (30 min). *)

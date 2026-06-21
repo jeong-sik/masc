@@ -3,7 +3,7 @@ rfc: "0125"
 title: "Bounded subprocess discipline: per-call Switch scope + Fiber.first timeout race"
 status: Active
 created: 2026-05-17
-updated: 2026-05-21
+updated: 2026-06-21
 author: vincent
 supersedes: []
 superseded_by: null
@@ -45,6 +45,29 @@ implementation. P5 closeout PR will land once
 0 for 30 consecutive days after P4 (#15964) merge.
 
 P4 (#15964) merged 2026-05-17 → 30-day window earliest 2026-06-16.
+
+### Amendment (2026-06-21): P4 default-on flip
+
+PR #21967 amends P4: the max-turn watchdog's default changes from
+**disabled** to **default-on at 1800s (30 min)**.
+
+- Rationale: the only `blast_radius_confirmed=true` recovery gap in the
+  adversarial review was that an in-turn-hung keeper had no recovery
+  path unless an operator explicitly set
+  `MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC`. Making the watchdog
+  default-on closes that gap without adding new constraints or variants.
+- Value choice: 1800s matches the existing `Keeper_stale_run` default
+  (`MASC_KEEPER_STALE_RUN_SEC`), keeping the two mutually-exclusive
+  watchdog paths on the same operational ceiling. Healthy turns finish
+  in seconds to a few minutes, so the ceiling is not expected to fire
+  under normal load.
+- Disable knob preserved: setting
+  `MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC=0` (or any non-positive
+  value) still returns `None` and disables the watchdog, preserving the
+  previous opt-out behavior for operators who need it.
+- Implementation traceability: the wiring in
+  `lib/keeper/keeper_supervisor_launch.ml` is unchanged; only the
+  default value and contract documentation are affected.
 
 ### Related RFC
 

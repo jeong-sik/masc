@@ -285,6 +285,55 @@ function countText(value: number | null | undefined): string {
   return typeof value === 'number' && Number.isFinite(value) ? formatNumber(value) : MISSING_DATA_DASH
 }
 
+function FleetCommandStrip() {
+  const runtime = shellRuntimeResolution.value
+  const fleetSafety = runtime?.fleet_safety ?? null
+  const fleet = fleetSafety?.keeper_fleet_safety
+  const pausedHealth = fleetSafety?.paused_keepers_health
+  const cdal = runtime?.cdal ?? null
+  const effective = fleet?.effective_reaction_capacity_count ?? fleet?.running_keeper_fiber_count ?? fleetSafety?.keeper_fibers
+  const executable = fleet?.executable_reaction_capacity_count ?? fleet?.executable_keeper_fiber_count
+  const target = fleet?.target_reaction_capacity_count ?? fleet?.autoboot_enabled_keeper_count
+  const shortfall = fleet?.reaction_capacity_shortfall_count
+  const pausedCount = pausedHealth?.count ?? fleet?.paused_keeper_count ?? fleetSafety?.paused_keepers
+  const tone = fleet?.status === 'blocked'
+    ? 'bad'
+    : fleet?.operator_action_required || fleet?.reaction_capacity_below_target || (pausedCount && pausedCount > 0)
+      ? 'warn'
+      : runtime?.status === 'ready' ? 'ok' : 'warn'
+  const runtimeLabel = runtime?.status === 'ready' ? '런타임 가동' : `런타임 ${runtime?.status ?? 'unknown'}`
+  const tick = cdal?.proof_store?.latest_activity_at ?? (fleetSafety ? 'runtime sample' : 'no runtime sample')
+
+  return html`
+    <section class="fl-shell v2-monitoring-card" data-testid="fleet-command-strip">
+      <div class="fl-top">
+        <div class="fl-brand">
+          <span class="fl-title">Keeper Fleet</span>
+          <span class="fl-tick mono">${tick}</span>
+        </div>
+        <div class="fl-health" aria-label="Fleet health">
+          <span class=${`fl-hpill ${tone}`}>${runtimeLabel}</span>
+          <span class=${`fl-hpill ${shortfall && shortfall > 0 ? 'warn' : 'ok'}`}>
+            capacity ${countText(effective)}/${countText(target)}
+          </span>
+          <span class="fl-hpill">exec ${countText(executable)}</span>
+          <span class=${`fl-hpill ${pausedCount && pausedCount > 0 ? 'warn' : 'ok'}`}>
+            일시정지 ${countText(pausedCount)}
+          </span>
+          <span class=${`fl-hpill ${cdalTone(cdal) === 'crit' ? 'bad' : cdalTone(cdal) === 'warn' ? 'warn' : 'ok'}`}>
+            CDAL ${cdal?.writer_status ?? 'unknown'}
+          </span>
+        </div>
+      </div>
+      <div class="fl-foot">
+        <span>target ${countText(target)}</span>
+        <span>shortfall ${countText(shortfall)}</span>
+        <span>paused names ${compactList(pausedHealth?.names ?? [])}</span>
+      </div>
+    </section>
+  `
+}
+
 function secondsText(value: number | null | undefined): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) return MISSING_DATA_DASH
   if (value < 60) return `${Math.max(0, Math.round(value))}s`
@@ -629,7 +678,7 @@ export function FleetHealthPanel() {
 
   return html`
     <div class="v2-monitoring-surface contain-content flex flex-col gap-4">
-      <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Keeper tool operations</div>
+      <${FleetCommandStrip} />
       <${FilterChips}
         chips=${VIEW_CHIPS}
         value=${view}

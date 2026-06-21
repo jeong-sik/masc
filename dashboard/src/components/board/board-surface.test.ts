@@ -349,6 +349,17 @@ describe('BoardSurface Component', () => {
     expect(container.querySelectorAll('.v2-workspace-panel.ss-card').length).toBeGreaterThanOrEqual(1)
   })
 
+  it('applies the v2 board summary class on focus surfaces', () => {
+    route.value = { params: { focus: 'mention-inbox' } } as any
+    boardPosts.value = [
+      makePost({ id: 'post-1', title: '기술 탐색: test topic', body: 'content', author: 'keeper' }),
+    ]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByTestId('bd-summary')).toHaveClass('bd-summary')
+  })
+
   it('renders loading state when loading', () => {
     boardLoading.value = true
     render(h(BoardSurface, null))

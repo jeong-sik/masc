@@ -124,6 +124,11 @@ describe('FusionSurface', () => {
     expect(container.textContent).toContain('Ship canary first, then expand.')
     expect(container.textContent).toContain('1,300')
     expect(container.textContent).toContain('360')
+    expect(container.querySelector('[data-testid="fusion-pipe"]')).not.toBeNull()
+    expect(container.querySelector('.fus-rdot.done')).not.toBeNull()
+    expect(container.textContent).toContain('panel ×2')
+    expect(container.textContent).toContain('board evidence')
+    expect(container.textContent).not.toContain('chat · board')
   })
 
   it('renders structured judge evidence from board metadata without local prototype state', () => {
@@ -295,69 +300,6 @@ describe('FusionSurface', () => {
     expect(container.textContent).not.toContain('No fusion runs found')
   })
 
-  it('reconciles registry rows against board-sink evidence without inventing missing detail', () => {
-    fusionBoardPosts.value = [
-      boardPost({
-        id: 'post-matched',
-        title: 'Matched fusion sink',
-        meta: {
-          source: 'fusion',
-          run_id: 'fus-matched',
-          question: 'matched run',
-          panel: [],
-          judge: { status: 'synthesized', resolved_answer: 'matched answer' },
-        },
-      }),
-      boardPost({
-        id: 'post-board-only',
-        title: 'Board-only fusion sink',
-        meta: {
-          source: 'fusion',
-          run_id: 'fus-board-only',
-          question: 'board only run',
-          panel: [],
-          judge: { status: 'synthesized', resolved_answer: 'board only answer' },
-        },
-      }),
-    ]
-    fusionRuns.value = [
-      {
-        runId: 'fus-matched',
-        keeper: 'sangsu',
-        preset: 'balanced',
-        startedAt: 1_780_000_000,
-        status: 'completed',
-      },
-      {
-        runId: 'fus-registry-only',
-        keeper: 'luna',
-        preset: 'deep',
-        startedAt: 1_780_000_100,
-        status: 'running',
-      },
-    ]
-
-    render(html`<${FusionSurface} />`, container)
-
-    expect(container.querySelector('[data-testid="fusion-reconcile-summary"]')?.textContent).toContain(
-      '1 matched · 1 registry-only · 1 board-only',
-    )
-    expect(container.querySelector('[data-testid="fusion-reconcile-matched"]')?.textContent).toContain('fus-matched')
-    expect(container.querySelector('[data-testid="fusion-reconcile-matched"]')?.textContent).toContain('board post-matched')
-    expect(container.querySelector('[data-testid="fusion-reconcile-registry-only"]')?.textContent).toContain('fus-registry-only')
-    expect(container.querySelector('[data-testid="fusion-reconcile-registry-only"]')?.textContent).toContain('Board sink pending')
-    expect(container.querySelector('[data-testid="fusion-reconcile-board-only"]')?.textContent).toContain('fus-board-only')
-    expect(container.querySelector('[data-testid="fusion-reconcile-board-only"]')?.textContent).toContain('board post-board-only')
-
-    const registryOnlyRow = container.querySelector('[data-testid="fusion-reconcile-registry-row"]')
-    expect(registryOnlyRow?.tagName).toBe('DIV')
-
-    const boardOnlyRow = container.querySelector<HTMLButtonElement>('[data-testid="fusion-reconcile-board-row"]')
-    boardOnlyRow?.click()
-    expect(route.value).toMatchObject({ tab: 'fusion', params: { run_id: 'fus-board-only' } })
-    expect(window.location.hash).toBe('#fusion?run_id=fus-board-only')
-  })
-
   it('manual Refresh fans out to both the board-meta detail and the run-status registry', () => {
     render(html`<${FusionSurface} />`, container)
     const refresh = container.querySelector<HTMLButtonElement>('.fus-refresh')
@@ -375,5 +317,38 @@ describe('FusionSurface', () => {
     const refresh = container.querySelector<HTMLButtonElement>('.fus-refresh')
     expect(refresh?.disabled).toBe(true)
     expect(refresh?.textContent).toContain('Refreshing')
+  })
+
+  it('counts only explicit panel failure statuses, not substrings like failover', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-fus-statuses',
+        title: 'Fusion deliberation (run fus-statuses): mixed',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-statuses',
+          question: 'Status edge cases?',
+          panel: [
+            { model: 'm1', status: 'failover', answer: 'Not a failure.' },
+            { model: 'm2', status: 'error', reason: 'provider error' },
+          ],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'One real failure.' },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const detail = container.querySelector('[data-testid="fusion-detail"]')
+    // Only the explicit 'error' status counts as failed; 'failover' is treated as answered.
+    expect(detail?.textContent).toContain('1/2')
+    expect(detail?.textContent).toContain('fail 1')
+    expect(detail?.textContent).not.toContain('0/2')
+    expect(detail?.textContent).not.toContain('fail 2')
+
+    const cards = container.querySelectorAll('.fus-panel-card')
+    expect(cards[0]?.classList.contains('answered')).toBe(true)
+    expect(cards[0]?.classList.contains('failed')).toBe(false)
+    expect(cards[1]?.classList.contains('failed')).toBe(true)
   })
 })

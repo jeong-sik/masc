@@ -42,6 +42,20 @@
   overflow: hidden;
 }
 
+.v2-board-surface .bd-summary,
+.v2-workspace-surface .bd-summary {
+  border-color: var(--border-main);
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--volt) 4%, transparent), transparent 70%),
+    var(--bg-panel);
+  color: var(--text-mid);
+}
+
+.v2-board-surface .bd-summary .v2-workspace-action,
+.v2-workspace-surface .bd-summary .v2-workspace-action {
+  min-height: 26px;
+}
+
 /* ════ LEFT RAIL (sub-boards + queues) ════ */
 .v2-board-surface .bd-rail {
   border-right: 1px solid var(--border-main);

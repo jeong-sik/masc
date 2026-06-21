@@ -1,6 +1,5 @@
 import { html } from 'htm/preact'
 import { useMemo } from 'preact/hooks'
-import type { FusionRunRecord } from '../../api/dashboard'
 import type { BoardPost } from '../../types'
 import { navigate, replaceRoute, route } from '../../router'
 import {
@@ -18,12 +17,19 @@ import { FusionRunsPanel } from './fusion-runs-panel'
 
 type FusionRunStatus = 'complete' | 'failed' | 'running'
 type FusionTone = 'ok' | 'warn' | 'bad' | 'volt' | 'muted'
+type FusionPanelStatus = 'answered' | 'failed' | 'error' | 'timeout' | 'unknown'
+
+const FAILED_PANEL_STATUSES: readonly string[] = ['failed', 'error']
+
+function isPanelFailure(status: string): status is 'failed' | 'error' {
+  return FAILED_PANEL_STATUSES.includes(status)
+}
 
 const FUSION_BOARD_SOURCE = 'fusion'
 
 interface FusionPanelEntry {
   model: string
-  status: string
+  status: FusionPanelStatus
   answer: string | null
   reason: string | null
   inputTokens: number | null
@@ -95,17 +101,6 @@ interface FusionRunView {
   updatedAt: string
 }
 
-interface FusionSourceMatch {
-  run: FusionRunView
-  registry: FusionRunRecord
-}
-
-interface FusionSourceReconciliation {
-  matched: FusionSourceMatch[]
-  registryOnly: FusionRunRecord[]
-  boardOnly: FusionRunView[]
-}
-
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   return value as Record<string, unknown>
@@ -168,7 +163,7 @@ function normalizePanelEntry(value: unknown, index: number): FusionPanelEntry | 
   const model = firstString(entry, ['model', 'name', 'provider']) ?? `panel-${index + 1}`
   return {
     model,
-    status: firstString(entry, ['status']) ?? 'unknown',
+    status: (firstString(entry, ['status']) ?? 'unknown') as FusionPanelStatus,
     answer: firstString(entry, ['answer', 'content', 'output']),
     reason: firstString(entry, ['reason', 'error', 'error_text']),
     inputTokens: firstNumber(entry, ['input_tokens', 'inputTokens']) ?? firstNumber(usage ?? {}, ['input_tokens', 'inputTokens']),
@@ -331,7 +326,7 @@ function statusFor(judge: FusionJudge, panel: FusionPanelEntry[]): FusionRunStat
   if (status.includes('fail')) return 'failed'
   if (judge.error) return 'failed'
   if (judge.resolvedAnswer || judge.synthesis || judge.decision || status.includes('synth')) return 'complete'
-  if (panel.length > 0 && panel.every(entry => entry.status.toLowerCase().includes('fail'))) return 'failed'
+  if (panel.length > 0 && panel.every(entry => isPanelFailure(entry.status))) return 'failed'
   return 'running'
 }
 
@@ -414,6 +409,12 @@ function statusLabel(status: FusionRunStatus): string {
   }
 }
 
+function statusDotClass(status: FusionRunStatus): 'done' | 'deny' | 'run' {
+  if (status === 'complete') return 'done'
+  if (status === 'failed') return 'deny'
+  return 'run'
+}
+
 function compactText(value: string, max = 180): string {
   const normalized = value.replace(/\s+/g, ' ').trim()
   if (normalized.length <= max) return normalized
@@ -429,168 +430,38 @@ function FusionMetric({ label, value, tone = 'muted' }: { label: string; value: 
   `
 }
 
-function boardRunsWithoutRegistryMatch(runs: FusionRunView[], registryRunIds: Set<string>): FusionRunView[] {
-  return runs.filter(run => !registryRunIds.has(run.runId))
+function FusionStatusGlyph({ status }: { status: FusionRunStatus }) {
+  return html`<span class=${`fus-rdot ${statusDotClass(status)}`} aria-hidden="true"></span>`
 }
 
-function reconcileFusionSources(
-  runs: FusionRunView[],
-  registryRuns: FusionRunRecord[],
-): FusionSourceReconciliation {
-  const boardByRunId = new Map(runs.map(run => [run.runId, run]))
-  const matched: FusionSourceMatch[] = []
-  const registryOnly: FusionRunRecord[] = []
-
-  for (const registry of registryRuns) {
-    const run = boardByRunId.get(registry.runId)
-    if (run) matched.push({ run, registry })
-    else registryOnly.push(registry)
-  }
-
-  const registryRunIds = new Set(registryRuns.map(run => run.runId))
-  return {
-    matched,
-    registryOnly,
-    boardOnly: boardRunsWithoutRegistryMatch(runs, registryRunIds),
-  }
-}
-
-function registryOnlyHint(run: FusionRunRecord): string {
-  switch (run.status) {
-    case 'running':
-      return 'Board sink pending'
-    case 'completed':
-      return 'Completed registry row has no board sink in the loaded window'
-    case 'failed':
-      return 'Failed before sink or sink write failed'
-  }
-}
-
-function sourceReconciliationSummary(reconciliation: FusionSourceReconciliation): string {
-  return `${reconciliation.matched.length} matched · ${reconciliation.registryOnly.length} registry-only · ${reconciliation.boardOnly.length} board-only`
-}
-
-function FusionSourceReconciliationPanel({
-  reconciliation,
-}: {
-  reconciliation: FusionSourceReconciliation
-}) {
-  const matchedPreview = reconciliation.matched.slice(0, 4)
-  const registryOnlyPreview = reconciliation.registryOnly.slice(0, 4)
-  const boardOnlyPreview = reconciliation.boardOnly.slice(0, 4)
+function FusionPipelineStrip({ run }: { run: FusionRunView }) {
+  const panelFailures = run.panel.filter(entry => isPanelFailure(entry.status)).length
+  const gateClass = run.status === 'failed' && run.panel.length === 0 ? 'deny' : 'gate'
+  const panelLabel = run.panel.length > 0 ? `panel ×${run.panel.length}` : 'panel pending'
+  const judgeLabel = run.judge.decision ?? run.judge.status ?? (run.status === 'running' ? 'judge pending' : 'judge')
 
   return html`
-    <section
-      class="fus-reconcile"
-      data-testid="fusion-source-reconcile"
-      aria-label="Fusion registry and board sink reconciliation"
-    >
-      <header class="fus-reconcile-head">
-        <div>
-          <h2>Registry ↔ board sink</h2>
-          <p>Cross-checks live registry rows against loaded board-sink evidence without inventing missing panel detail.</p>
-        </div>
-        <span class="fus-reconcile-summary" data-testid="fusion-reconcile-summary">
-          ${sourceReconciliationSummary(reconciliation)}
-        </span>
-      </header>
-
-      <div class="fus-reconcile-grid">
-        <div class="fus-reconcile-col" data-testid="fusion-reconcile-matched">
-          <div class="fus-reconcile-col-head">
-            <span>Matched</span>
-            <b>${reconciliation.matched.length}</b>
-          </div>
-          ${matchedPreview.length === 0
-            ? html`<p class="fus-reconcile-empty">No registry rows currently match loaded board sinks.</p>`
-            : html`
-                <div class="fus-reconcile-rows">
-                  ${matchedPreview.map(({ run, registry }) => html`
-                    <button
-                      type="button"
-                      class=${`fus-reconcile-row matched ${ringFocusClasses()}`}
-                      key=${`matched-${run.runId}`}
-                      data-testid="fusion-reconcile-matched-row"
-                      onClick=${() => replaceRoute('fusion', { run_id: run.runId })}
-                    >
-                      <span class="fus-reconcile-id">${run.runId}</span>
-                      <span class=${`fus-status tone-${registry.status === 'failed' ? 'bad' : registry.status === 'running' ? 'warn' : 'ok'}`}>
-                        ${registry.status}
-                      </span>
-                      <span class="fus-reconcile-note">board ${run.boardPostId}</span>
-                    </button>
-                  `)}
-                </div>
-              `}
-          ${reconciliation.matched.length > matchedPreview.length
-            ? html`<p class="fus-reconcile-more">+${reconciliation.matched.length - matchedPreview.length} more matched rows</p>`
-            : null}
-        </div>
-
-        <div class="fus-reconcile-col" data-testid="fusion-reconcile-registry-only">
-          <div class="fus-reconcile-col-head">
-            <span>Registry only</span>
-            <b>${reconciliation.registryOnly.length}</b>
-          </div>
-          ${registryOnlyPreview.length === 0
-            ? html`<p class="fus-reconcile-empty">No registry-only rows in the current response.</p>`
-            : html`
-                <div class="fus-reconcile-rows">
-                  ${registryOnlyPreview.map(run => html`
-                    <div
-                      class="fus-reconcile-row registry-only"
-                      key=${`registry-${run.runId}`}
-                      data-testid="fusion-reconcile-registry-row"
-                    >
-                      <span class="fus-reconcile-id">${run.runId}</span>
-                      <span class=${`fus-status tone-${run.status === 'failed' ? 'bad' : run.status === 'running' ? 'warn' : 'ok'}`}>
-                        ${run.status}
-                      </span>
-                      <span class="fus-reconcile-note">${run.keeper || 'system'} · ${registryOnlyHint(run)}</span>
-                    </div>
-                  `)}
-                </div>
-              `}
-          ${reconciliation.registryOnly.length > registryOnlyPreview.length
-            ? html`<p class="fus-reconcile-more">+${reconciliation.registryOnly.length - registryOnlyPreview.length} more registry-only rows</p>`
-            : null}
-        </div>
-
-        <div class="fus-reconcile-col" data-testid="fusion-reconcile-board-only">
-          <div class="fus-reconcile-col-head">
-            <span>Board sink only</span>
-            <b>${reconciliation.boardOnly.length}</b>
-          </div>
-          ${boardOnlyPreview.length === 0
-            ? html`<p class="fus-reconcile-empty">Every loaded board sink has a registry row.</p>`
-            : html`
-                <div class="fus-reconcile-rows">
-                  ${boardOnlyPreview.map(run => html`
-                    <button
-                      type="button"
-                      class=${`fus-reconcile-row board-only ${ringFocusClasses()}`}
-                      key=${`board-${run.runId}`}
-                      data-testid="fusion-reconcile-board-row"
-                      onClick=${() => replaceRoute('fusion', { run_id: run.runId })}
-                    >
-                      <span class="fus-reconcile-id">${run.runId}</span>
-                      <span class=${`fus-status tone-${run.tone}`}>${statusLabel(run.status)}</span>
-                      <span class="fus-reconcile-note">board ${run.boardPostId}</span>
-                    </button>
-                  `)}
-                </div>
-              `}
-          ${reconciliation.boardOnly.length > boardOnlyPreview.length
-            ? html`<p class="fus-reconcile-more">+${reconciliation.boardOnly.length - boardOnlyPreview.length} more board-only sinks</p>`
-            : null}
-        </div>
-      </div>
+    <section class="fus-pipe" data-testid="fusion-pipe" aria-label="Fusion run pipeline">
+      <span class="fus-pipe-node kp">
+        <${FusionStatusGlyph} status=${run.status} />
+        keeper turn
+      </span>
+      <span class="fus-pipe-arr" aria-hidden="true">→</span>
+      <span class=${`fus-pipe-node ${gateClass}`}>gate</span>
+      <span class="fus-pipe-arr" aria-hidden="true">→</span>
+      <span class=${`fus-pipe-node panel ${panelFailures > 0 ? 'warn' : ''}`}>
+        ${panelLabel}${panelFailures > 0 ? ` · fail ${panelFailures}` : ''}
+      </span>
+      <span class="fus-pipe-arr" aria-hidden="true">→</span>
+      <span class=${`fus-pipe-node judge ${run.status === 'failed' ? 'deny' : ''}`}>${judgeLabel}</span>
+      <span class="fus-pipe-arr" aria-hidden="true">→</span>
+      <span class="fus-pipe-node sink">board evidence</span>
     </section>
   `
 }
 
 function FusionPanelCard({ entry }: { entry: FusionPanelEntry }) {
-  const failed = entry.status.toLowerCase().includes('fail')
+  const failed = isPanelFailure(entry.status)
   const body = entry.answer ?? entry.reason ?? 'No panel output captured.'
   return html`
     <article class=${`fus-panel-card ${failed ? 'failed' : 'answered'}`}>
@@ -756,7 +627,10 @@ function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) 
       onClick=${() => replaceRoute('fusion', { run_id: run.runId })}
     >
       <span class="fus-row-top">
-        <span class="fus-run-id">${run.runId}</span>
+        <span class="fus-run-mark">
+          <${FusionStatusGlyph} status=${run.status} />
+          <span class="fus-run-id">${run.runId}</span>
+        </span>
         <span class=${`fus-status tone-${run.tone}`}>${statusLabel(run.status)}</span>
       </span>
       <span class="fus-row-question">${compactText(run.question, 110)}</span>
@@ -769,7 +643,7 @@ function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) 
 }
 
 function FusionRunDetail({ run }: { run: FusionRunView }) {
-  const answered = run.panel.filter(entry => !entry.status.toLowerCase().includes('fail')).length
+  const answered = run.panel.filter(entry => !isPanelFailure(entry.status)).length
   const failed = run.panel.length - answered
   const synthesis = run.judge.synthesis ?? run.judge.error ?? 'No judge synthesis captured.'
   const resolved = run.judge.resolvedAnswer ?? 'No resolved answer captured.'
@@ -779,6 +653,7 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
       <header class="fus-detail-head">
         <div class="fus-detail-title">
           <div class="fus-detail-meta">
+            <${FusionStatusGlyph} status=${run.status} />
             <span class=${`fus-status tone-${run.tone}`}>${statusLabel(run.status)}</span>
             <span class="fus-run-id">${run.runId}</span>
             <${TimeAgo} timestamp=${run.updatedAt} mode="both" />
@@ -798,6 +673,8 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
           >Open board post</button>
         </div>
       </header>
+
+      <${FusionPipelineStrip} run=${run} />
 
       <section class="fus-question">
         <div class="fus-label">Prompt</div>
@@ -838,7 +715,7 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
       <section class="fus-sink">
         <div>
           <div class="fus-label">Sink</div>
-          <p>Board post ${run.boardPostId}</p>
+          <p>board evidence · post ${run.boardPostId}</p>
         </div>
         <${AgentAvatar} name=${run.keeperName} size="sm" />
       </section>
@@ -850,14 +727,10 @@ export function FusionSurface() {
   const posts = fusionBoardPosts.value
   const runs = useMemo(() => buildFusionRuns(posts), [posts])
   const registryRuns = fusionRuns.value
-  const reconciliation = useMemo(() => reconcileFusionSources(runs, registryRuns), [runs, registryRuns])
-  const boardOnlyRuns = reconciliation.boardOnly
   const selectedRunId = route.value.params.run_id ?? route.value.params.run
   const selected = runs.find(run => run.runId === selectedRunId) ?? runs[0] ?? null
   const registryRunning = registryRuns.filter(run => run.status === 'running').length
   const registryFailed = registryRuns.filter(run => run.status === 'failed').length
-  const running = registryRunning + boardOnlyRuns.filter(run => run.status === 'running').length
-  const failed = registryFailed + boardOnlyRuns.filter(run => run.status === 'failed').length
 
   return html`
     <main class="ov ss-surface bg-surface-page text-text-primary v2-fusion-surface" data-testid="fusion-surface">
@@ -879,8 +752,6 @@ export function FusionSurface() {
 
         <${FusionRunsPanel} />
 
-        <${FusionSourceReconciliationPanel} reconciliation=${reconciliation} />
-
         <section class="fus-top-kpis" aria-label="Fusion overview">
           <${FusionMetric} label="board runs" value=${runs.length} tone=${runs.length ? 'ok' : 'muted'} />
           <${FusionMetric}
@@ -888,8 +759,8 @@ export function FusionSurface() {
             value=${registryRuns.length}
             tone=${registryRunning ? 'warn' : registryRuns.length ? 'ok' : 'muted'}
           />
-          <${FusionMetric} label="running" value=${running} tone=${running ? 'warn' : 'muted'} />
-          <${FusionMetric} label="failed" value=${failed} tone=${failed ? 'bad' : 'muted'} />
+          <${FusionMetric} label="running" value=${registryRunning} tone=${registryRunning ? 'warn' : 'muted'} />
+          <${FusionMetric} label="failed" value=${registryFailed} tone=${registryFailed ? 'bad' : 'muted'} />
         </section>
 
         ${runs.length === 0

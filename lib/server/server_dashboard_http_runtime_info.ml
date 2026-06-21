@@ -1312,6 +1312,37 @@ let runtime_assignment_governance_json ~default_id =
     ]
 ;;
 
+let governance_hitl_json () =
+  (* doc-03 P0#1 acceptance: surface whether human-in-the-loop approval is active
+     and why, so an operator can confirm the fail-closed default at runtime instead
+     of inferring it from the environment. [Env_config_core.disable_hitl] reads
+     MASC_DISABLE_HITL with a fail-closed [~default:false] — HITL stays enabled
+     unless an operator explicitly disables it; the thresholds mirror
+     [Governance_pipeline] so the "why" travels with the "whether". *)
+  let enabled = not (Env_config_core.disable_hitl ()) in
+  let threshold_json resolver =
+    match resolver "production" with
+    | Some level -> `String (Governance_pipeline.risk_level_to_string level)
+    | None -> `Null
+  in
+  `Assoc
+    [ "schema", `String "masc.governance_hitl.v1"
+    ; "enabled", `Bool enabled
+    ; "disable_env_key", `String Env_config_core.disable_hitl_env_key
+    ; "default_when_unset", `String "enabled"
+    ; ( "production_confirm_threshold"
+      , threshold_json Governance_pipeline.confirm_threshold )
+    ; ( "keeper_production_confirm_threshold"
+      , threshold_json Governance_pipeline.keeper_confirm_threshold )
+    ; ( "reason"
+      , `String
+          (if enabled
+           then "human approval required for high/critical actions (fail-closed default)"
+           else
+             "human approval gates disabled via " ^ Env_config_core.disable_hitl_env_key) )
+    ]
+;;
+
 let runtime_inventory_json () =
   let runtimes = Runtime.get_runtimes () in
   let default_id = runtime_default_runtime_id () in
@@ -1596,6 +1627,7 @@ let runtime_resolution_json (config : Workspace.config) =
       ; ( "deployment_state"
         , deployment_state_json ~build ~server_repo_commit ~workspace_commit
             ~resolved_base_commit ~upstream_status ~source_mismatch )
+      ; "governance_hitl", governance_hitl_json ()
       ]
       @ Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields () )
 ;;

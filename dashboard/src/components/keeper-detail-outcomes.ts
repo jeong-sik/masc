@@ -14,7 +14,8 @@ import { MutedSpan, DetailCard } from './keeper-detail-kpi'
 //     Counters pulled from [Keeper_transition_audit] (50-entry ring):
 //       ✅ successes.substantive_turns
 //       ⚠️ failures.turn_failed
-//       🚫 failures.gate_rejected (always 0 until CDAL #7531)
+//       🚫 failures.gate_rejected (live — counts Turn_gate_rejected audits from
+//          the keeper guards; source: lib/dashboard/dashboard_http_keeper_outcomes.ml)
 //     Rendered as compact inline counters + a stacked proportion bar.
 //     Secondary row lists compactions_ok / handoffs_ok as chips.
 //

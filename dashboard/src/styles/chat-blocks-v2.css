@@ -191,6 +191,12 @@
   background: var(--color-fg-disabled);
 }
 
+/* Turn has settled but the tool output never joined — a real gap, distinct from
+   the muted in-flight "pending" dot and from a reported failure. */
+.chat-block-tstep-status.missing {
+  background: var(--color-status-warn);
+}
+
 .chat-block-tstep-dur {
   font-family: var(--font-mono);
   font-size: var(--fs-2xs);

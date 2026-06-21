@@ -1802,6 +1802,64 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
     const step = container.querySelector('[data-chat-trace-step="tool"]')
     expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
   })
+
+  it('marks an unjoined tool step as missing once the owning turn has settled', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-unjoined-settled', label: 'keeper_board_comment', turnRef: 'trace-s#1' }),
+          entry({
+            id: 'a-settled',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-s#1',
+            streamState: null,
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    expect(bundle).not.toBeNull()
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
+    // Settled turn + never-joined output is a real gap, not an indefinite pending.
+    expect(step?.querySelector('.chat-block-tstep-status.missing')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
+    // The gap is surfaced in the card header so silent failures are visible.
+    expect(bundle?.textContent).toContain('결과 누락 1')
+  })
+
+  it('keeps an unjoined tool step pending while the owning turn is still streaming', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-unjoined-live', label: 'keeper_board_comment', turnRef: 'trace-l#1' }),
+          entry({
+            id: 'a-live',
+            text: '응답 작성 중',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-l#1',
+            streamState: 'streaming',
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
+    // Output may still arrive while the turn streams, so keep it pending.
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(step?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+    expect(bundle?.textContent).not.toContain('결과 누락')
+  })
 })
 
 describe('ChatMessageBubble — workspace source badge (C2)', () => {

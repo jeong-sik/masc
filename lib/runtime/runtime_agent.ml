@@ -378,21 +378,42 @@ let content_blocks_of_messages (messages : Agent_sdk.Types.message list) =
     (fun (message : Agent_sdk.Types.message) -> message.content)
     messages
 
+let checkpoint_messages = function
+  | None -> []
+  | Some (checkpoint : Agent_sdk.Checkpoint.t) -> checkpoint.messages
+
+let content_blocks_for_run_with_checkpoint
+    ~(checkpoint_messages : Agent_sdk.Types.message list)
+    ~(initial_messages : Agent_sdk.Types.message list)
+    ~(goal_blocks : Agent_sdk.Types.content_block list) =
+  content_blocks_of_messages initial_messages
+  @ content_blocks_of_messages checkpoint_messages
+  @ goal_blocks
+
 let content_blocks_for_run
     ~(initial_messages : Agent_sdk.Types.message list)
     ~(goal_blocks : Agent_sdk.Types.content_block list) =
-  content_blocks_of_messages initial_messages @ goal_blocks
+  content_blocks_for_run_with_checkpoint ~checkpoint_messages:[] ~initial_messages
+    ~goal_blocks
 
 let required_modalities_of_messages (messages : Agent_sdk.Types.message list) =
   messages
   |> content_blocks_of_messages
   |> required_modalities_of_content_blocks
 
+let required_modalities_for_run_with_checkpoint
+    ~(checkpoint_messages : Agent_sdk.Types.message list)
+    ~(initial_messages : Agent_sdk.Types.message list)
+    ~(goal_blocks : Agent_sdk.Types.content_block list) =
+  content_blocks_for_run_with_checkpoint ~checkpoint_messages ~initial_messages
+    ~goal_blocks
+  |> required_modalities_of_content_blocks
+
 let required_modalities_for_run
     ~(initial_messages : Agent_sdk.Types.message list)
     ~(goal_blocks : Agent_sdk.Types.content_block list) =
-  content_blocks_for_run ~initial_messages ~goal_blocks
-  |> required_modalities_of_content_blocks
+  required_modalities_for_run_with_checkpoint ~checkpoint_messages:[]
+    ~initial_messages ~goal_blocks
 
 let supported_modalities_of_capabilities
     (caps : Llm_provider.Capabilities.capabilities) =
@@ -479,15 +500,29 @@ let validate_content_blocks_against_capabilities
              ~supported
              ~reason:"provider does not support combined non-text modalities")
 
-let validate_content_blocks_for_run_against_capabilities
+let validate_content_blocks_for_run_against_capabilities_with_checkpoint
     ~(provider_label : string)
     (caps : Llm_provider.Capabilities.capabilities)
+    ~(checkpoint_messages : Agent_sdk.Types.message list)
     ~(initial_messages : Agent_sdk.Types.message list)
     ~(goal_blocks : Agent_sdk.Types.content_block list) =
   validate_content_blocks_against_capabilities
     ~provider_label
     caps
-    (content_blocks_for_run ~initial_messages ~goal_blocks)
+    (content_blocks_for_run_with_checkpoint ~checkpoint_messages ~initial_messages
+       ~goal_blocks)
+
+let validate_content_blocks_for_run_against_capabilities
+    ~(provider_label : string)
+    (caps : Llm_provider.Capabilities.capabilities)
+    ~(initial_messages : Agent_sdk.Types.message list)
+    ~(goal_blocks : Agent_sdk.Types.content_block list) =
+  validate_content_blocks_for_run_against_capabilities_with_checkpoint
+    ~provider_label
+    caps
+    ~checkpoint_messages:[]
+    ~initial_messages
+    ~goal_blocks
 
 let apply_runtime_model_input_capabilities
     (caps : Llm_provider.Capabilities.capabilities)
@@ -546,11 +581,13 @@ let media_reroute_candidates ~(exclude : string) :
        (r.Runtime.id, input_capabilities_of_runtime r))
 
 let validate_content_blocks_for_config
+    ?oas_checkpoint
     ~(config : config)
     (goal_blocks : Agent_sdk.Types.content_block list) =
-  validate_content_blocks_for_run_against_capabilities
+  validate_content_blocks_for_run_against_capabilities_with_checkpoint
     ~provider_label:(provider_label config.provider_cfg)
     (input_capabilities_for_config config)
+    ~checkpoint_messages:(checkpoint_messages oas_checkpoint)
     ~initial_messages:config.initial_messages
     ~goal_blocks
 
@@ -595,12 +632,14 @@ let decide_modality_reroute
    [initial_messages] plus current [blocks]). Pure [decide_modality_reroute] over
    impure candidate gathering. *)
 let decide_modality_reroute_for_runtime ~(assigned : Runtime.t)
+    ?(checkpoint_messages = [])
     ?(initial_messages = [])
     (blocks : Agent_sdk.Types.content_block list) : reroute_decision =
   decide_modality_reroute
     ~assigned_caps:(input_capabilities_of_runtime assigned)
     ~required_modalities:
-      (required_modalities_for_run ~initial_messages ~goal_blocks:blocks)
+      (required_modalities_for_run_with_checkpoint ~checkpoint_messages ~initial_messages
+         ~goal_blocks:blocks)
     ~candidates:(media_reroute_candidates ~exclude:assigned.Runtime.id)
 
 module For_testing = struct
@@ -617,11 +656,17 @@ module For_testing = struct
   let required_modalities_of_content_blocks = required_modalities_of_content_blocks
   let content_blocks_of_messages = content_blocks_of_messages
   let content_blocks_for_run = content_blocks_for_run
+  let content_blocks_for_run_with_checkpoint =
+    content_blocks_for_run_with_checkpoint
   let required_modalities_of_messages = required_modalities_of_messages
   let required_modalities_for_run = required_modalities_for_run
+  let required_modalities_for_run_with_checkpoint =
+    required_modalities_for_run_with_checkpoint
   let caps_admit_required_modalities = caps_admit_required_modalities
   let validate_content_blocks_for_run_against_capabilities =
     validate_content_blocks_for_run_against_capabilities
+  let validate_content_blocks_for_run_against_capabilities_with_checkpoint =
+    validate_content_blocks_for_run_against_capabilities_with_checkpoint
   let validate_content_blocks_against_capabilities =
     validate_content_blocks_against_capabilities
   let apply_runtime_model_input_capabilities =
@@ -854,6 +899,7 @@ let run_blocks
   : (run_result, Agent_sdk.Error.sdk_error) result =
   match
     validate_content_blocks_for_config
+      ?oas_checkpoint
       ~config
       goal_blocks
   with

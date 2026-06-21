@@ -232,14 +232,15 @@ val media_reroute_candidates :
 
 val decide_modality_reroute_for_runtime :
   assigned:Runtime.t ->
+  ?checkpoint_messages:Agent_sdk.Types.message list ->
   ?initial_messages:Agent_sdk.Types.message list ->
   Agent_sdk.Types.content_block list ->
   reroute_decision
 (** Keeper-dispatch convenience: gather candidates from the runtime cache and
     decide a reroute for [assigned] given the active run view: prior
-    [initial_messages] plus the current turn's content blocks. Composes
-    [input_capabilities_of_runtime] / [media_reroute_candidates] /
-    [decide_modality_reroute]. *)
+    [initial_messages], checkpoint resume messages, plus the current turn's
+    content blocks. Composes [input_capabilities_of_runtime] /
+    [media_reroute_candidates] / [decide_modality_reroute]. *)
 
 module For_testing : sig
   val request_runtime_fields_on_base_config :
@@ -271,10 +272,22 @@ module For_testing : sig
     goal_blocks:Agent_sdk.Types.content_block list ->
     Agent_sdk.Types.content_block list
 
+  val content_blocks_for_run_with_checkpoint :
+    checkpoint_messages:Agent_sdk.Types.message list ->
+    initial_messages:Agent_sdk.Types.message list ->
+    goal_blocks:Agent_sdk.Types.content_block list ->
+    Agent_sdk.Types.content_block list
+
   val required_modalities_of_messages :
     Agent_sdk.Types.message list -> string list
 
   val required_modalities_for_run :
+    initial_messages:Agent_sdk.Types.message list ->
+    goal_blocks:Agent_sdk.Types.content_block list ->
+    string list
+
+  val required_modalities_for_run_with_checkpoint :
+    checkpoint_messages:Agent_sdk.Types.message list ->
     initial_messages:Agent_sdk.Types.message list ->
     goal_blocks:Agent_sdk.Types.content_block list ->
     string list
@@ -285,6 +298,14 @@ module For_testing : sig
   val validate_content_blocks_for_run_against_capabilities :
     provider_label:string ->
     Llm_provider.Capabilities.capabilities ->
+    initial_messages:Agent_sdk.Types.message list ->
+    goal_blocks:Agent_sdk.Types.content_block list ->
+    (unit, Agent_sdk.Error.sdk_error) result
+
+  val validate_content_blocks_for_run_against_capabilities_with_checkpoint :
+    provider_label:string ->
+    Llm_provider.Capabilities.capabilities ->
+    checkpoint_messages:Agent_sdk.Types.message list ->
     initial_messages:Agent_sdk.Types.message list ->
     goal_blocks:Agent_sdk.Types.content_block list ->
     (unit, Agent_sdk.Error.sdk_error) result

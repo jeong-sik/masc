@@ -151,6 +151,48 @@ let test_history_media_floor_rejects_before_provider () =
   | Error err ->
       failf "expected InvalidConfig, got %s" (Agent_sdk.Error.to_string err)
 
+(* Regression: OAS resume checkpoints are provider input too. A prior image can
+   live only in [oas_checkpoint.messages], not in MASC [initial_messages]; that
+   still must drive reroute/floor validation before the provider sees it. *)
+let test_checkpoint_media_drives_reroute_and_floor () =
+  let checkpoint_messages =
+    [ message_with_blocks
+        [ Agent_sdk.Types.Text "checkpoint image turn"
+        ; Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+        ]
+    ]
+  in
+  let required =
+    Runtime_agent.For_testing.required_modalities_for_run_with_checkpoint
+      ~initial_messages:[]
+      ~checkpoint_messages
+      ~goal_blocks:[ Agent_sdk.Types.Text "text-only follow up" ]
+  in
+  check (list string) "checkpoint image required" [ "image" ] required;
+  check string "checkpoint image reroutes"
+    "reroute:vision_c:assigned runtime lacks image input"
+    (decision_to_string
+       (decide
+          ~assigned:(caps ())
+          ~required
+          ~candidates:[ ("text_b", caps ()); ("vision_c", caps ~image:true ()) ]));
+  match
+    Runtime_agent.For_testing
+    .validate_content_blocks_for_run_against_capabilities_with_checkpoint
+      ~provider_label:"glm-coding.glm-5-turbo"
+      (caps ())
+      ~initial_messages:[]
+      ~checkpoint_messages
+      ~goal_blocks:[ Agent_sdk.Types.Text "text-only follow up" ]
+  with
+  | Ok () -> fail "expected checkpoint image to be rejected before provider dispatch"
+  | Error (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail })) ->
+      check string "field" "multimodal_input" field;
+      check_contains "mentions unsupported image" ~needle:"unsupported image input" detail;
+      check_contains "mentions required modality" ~needle:"required=image" detail
+  | Error err ->
+      failf "expected InvalidConfig, got %s" (Agent_sdk.Error.to_string err)
+
 (* The decision is a pure function: identical inputs yield identical output. *)
 let test_decision_is_deterministic () =
   let candidates = [ ("text_b", caps ()); ("vision_c", caps ~image:true ()) ] in
@@ -188,6 +230,8 @@ let () =
         ; test_case "no capable floor" `Quick test_no_capable_runtime_floor
         ; test_case "history media floor rejects before provider" `Quick
             test_history_media_floor_rejects_before_provider
+        ; test_case "checkpoint media drives reroute and floor" `Quick
+            test_checkpoint_media_drives_reroute_and_floor
         ; test_case "deterministic" `Quick test_decision_is_deterministic
         ] )
     ; ( "caps_admit_required_modalities"

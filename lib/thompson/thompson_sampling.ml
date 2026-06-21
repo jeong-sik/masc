@@ -75,9 +75,21 @@ let ts_mu = Eio.Mutex.create ()
 let with_ts_rw f = Eio_guard.with_mutex ts_mu f
 let with_ts_ro f = Eio_guard.with_mutex_ro ts_mu f
 
+let clear_in_memory_stats_unlocked () =
+  Hashtbl.clear stats_table;
+  Hashtbl.clear pending_votes
+;;
+
 (** Set base path for stats storage. Call during server init. *)
 let set_base_path path =
-  with_ts_rw (fun () -> base_path_ref := Some path)
+  with_ts_rw (fun () ->
+    let changed =
+      match !base_path_ref with
+      | Some current -> not (String.equal current path)
+      | None -> true
+    in
+    if changed then clear_in_memory_stats_unlocked ();
+    base_path_ref := Some path)
 
 (** Stats file path — uses cluster base_path, not execution directory *)
 let stats_path () =
@@ -256,10 +268,31 @@ let stats_to_json (s : agent_stats) : Yojson.Safe.t =
     ("updated_at", `Float s.updated_at);
   ]
 
+let copy_stats (s : agent_stats) : agent_stats =
+  (* Deep-copy safe: [agent_stats] stores only immutable primitive fields, no
+     nested refs/containers that could alias the live table. *)
+  {
+    name = s.name;
+    alpha = s.alpha;
+    beta = s.beta;
+    selections = s.selections;
+    last_selected_at = s.last_selected_at;
+    total_votes_up = s.total_votes_up;
+    total_votes_down = s.total_votes_down;
+    posts_created = s.posts_created;
+    comments_created = s.comments_created;
+    skips = s.skips;
+    guard_penalties_total = s.guard_penalties_total;
+    updated_at = s.updated_at;
+  }
+
 let stats_of_json (json : Yojson.Safe.t) : agent_stats option =
   let name = Json_util.get_string_with_default json ~key:"name" ~default:"" in
-  let alpha = Json_util.get_float json "alpha" |> Option.value ~default:0.0 in
-  let beta = Json_util.get_float json "beta" |> Option.value ~default:0.0 in
+  if String.equal (String.trim name) "" then
+    None
+  else match Json_util.get_float json "alpha", Json_util.get_float json "beta" with
+  | None, _ | _, None -> None
+  | Some alpha, Some beta ->
   let selections = Json_util.get_int json "selections" |> Option.value ~default:0 in
   let last_selected_at = Json_util.get_float json "last_selected_at" |> Option.value ~default:0.0 in
   let total_votes_up = Json_util.get_int json "total_votes_up" |> Option.value ~default:0 in
@@ -284,13 +317,39 @@ let stats_of_json (json : Yojson.Safe.t) : agent_stats option =
     updated_at;
   }
 
+let apply_vote_counts ~decay (s : agent_stats) ~votes_up ~votes_down =
+  let total = votes_up + votes_down in
+  if total > 0 then begin
+    let success_rate = float_of_int votes_up /. float_of_int total in
+    s.alpha <- (s.alpha -. 1.0) *. decay +. 1.0 +. success_rate;
+    s.beta <- (s.beta -. 1.0) *. decay +. 1.0 +. (1.0 -. success_rate);
+    s.alpha <- Float.max min_prior s.alpha;
+    s.beta <- Float.max min_prior s.beta;
+    s.total_votes_up <- s.total_votes_up + votes_up;
+    s.total_votes_down <- s.total_votes_down + votes_down;
+    s.updated_at <- Time_compat.now ()
+  end
+
 (** {1 Persistence} *)
+
+let replace_stats_snapshot parsed =
+  with_ts_rw (fun () ->
+    clear_in_memory_stats_unlocked ();
+    List.iter (fun s -> Hashtbl.replace stats_table s.name s) parsed;
+    Hashtbl.length stats_table)
+;;
 
 let load_stats () =
   let path = stats_path () in
   if Fs_compat.file_exists path then begin
     try
-      let entries = Fs_compat.load_jsonl path in
+      (* Boot-safe: malformed JSONL rows are dropped with diagnostics by
+         Fs_compat; any remaining I/O/schema exception is logged below and does
+         not abort server startup. *)
+      let entries, malformed = Fs_compat.load_jsonl_diagnostics path in
+      if malformed > 0 then
+        Log.Thompson.warn "Dropped %d malformed stats line(s) from %s"
+          malformed path;
       (* Parse outside the lock — [stats_of_json] is pure and avoids
          holding [ts_mu] across per-line work — then install the whole
          batch under one critical section. *)
@@ -305,9 +364,7 @@ let load_stats () =
         ) entries
       in
       let count =
-        with_ts_rw (fun () ->
-          List.iter (fun s -> Hashtbl.replace stats_table s.name s) parsed;
-          Hashtbl.length stats_table)
+        replace_stats_snapshot parsed
       in
       Log.Metrics.debug "thompson sampling loaded stats for %d agents" count
     with
@@ -315,30 +372,68 @@ let load_stats () =
     | e ->
       Log.Thompson.error "Error loading stats: %s"
         (Printexc.to_string e)
+  end else begin
+    let count = replace_stats_snapshot [] in
+    Log.Metrics.debug "thompson sampling loaded stats for %d agents" count
   end
+
+let stats_snapshot_for_persistence () =
+  let decay = Env_config.AgentSelection.vote_decay_factor in
+  with_ts_ro (fun () ->
+    let by_name =
+      Hashtbl.create (Hashtbl.length stats_table + Hashtbl.length pending_votes)
+    in
+    Hashtbl.iter
+      (fun name stats -> Hashtbl.replace by_name name (copy_stats stats))
+      stats_table;
+    Hashtbl.iter
+      (fun name (votes_up, votes_down) ->
+         if votes_up + votes_down > 0 then begin
+           let stats =
+             match Hashtbl.find_opt by_name name with
+             | Some stats -> stats
+             | None ->
+                 let stats = make_default_stats name in
+                 Hashtbl.replace by_name name stats;
+                 stats
+           in
+           apply_vote_counts ~decay stats ~votes_up ~votes_down
+         end)
+      pending_votes;
+    Hashtbl.fold (fun _ stats acc -> stats :: acc) by_name [])
 
 let save_stats () =
   let path = stats_path () in
   try
-    (* Serialise the table under the lock so a concurrent [record_*]
-       cannot [Hashtbl.replace] mid-iteration and corrupt the
-       iteration. *)
-    let content, count =
-      with_ts_ro (fun () ->
-        let buf = Buffer.create 4096 in
-        Hashtbl.iter (fun _ s ->
-          Buffer.add_string buf (Yojson.Safe.to_string (stats_to_json s));
-          Buffer.add_char buf '\n'
-        ) stats_table;
-        (Buffer.contents buf, Hashtbl.length stats_table))
-    in
-    Fs_compat.save_file path content;
-    Log.Metrics.debug "thompson sampling saved stats for %d agents" count
+    (* Snapshot under the lock, then serialise the copies outside the
+       critical section. Pending votes are overlaid on the snapshot so a
+       graceful shutdown cannot lose batched feedback that has not reached
+       [flush_pending_votes] yet. *)
+    let snapshot = stats_snapshot_for_persistence () in
+    let buf = Buffer.create 4096 in
+    List.iter
+      (fun stats ->
+         Buffer.add_string buf (Yojson.Safe.to_string (stats_to_json stats));
+         Buffer.add_char buf '\n')
+      snapshot;
+    let content = Buffer.contents buf in
+    let count = List.length snapshot in
+    match Fs_compat.save_file_atomic path content with
+    | Ok () ->
+        Log.Metrics.debug "thompson sampling saved stats for %d agents" count
+    | Error msg ->
+        Log.Thompson.error "Error saving stats: %s" msg
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e ->
     Log.Thompson.error "Error saving stats: %s"
       (Printexc.to_string e)
+
+let persistence_configured () =
+  with_ts_ro (fun () -> Option.is_some !base_path_ref)
+
+let save_stats_if_configured () =
+  if persistence_configured () then save_stats ()
 
 (** {1 Feedback Updates} *)
 
@@ -350,7 +445,8 @@ let record_vote ~agent_name ~direction =
       | `Up -> (up + 1, down)
       | `Down -> (up, down + 1)
     in
-    Hashtbl.replace pending_votes agent_name (up', down'))
+    Hashtbl.replace pending_votes agent_name (up', down'));
+  save_stats_if_configured ()
 
 let flush_pending_votes () =
   (* [ts_mu] is documented as protecting [pending_votes], but this
@@ -376,20 +472,11 @@ let flush_pending_votes () =
     let total = votes_up + votes_down in
     if total > 0 then begin
       let s = get_stats agent_name in
-      let success_rate = float_of_int votes_up /. float_of_int total in
       with_ts_rw (fun () ->
-        (* Apply decay to existing priors, then add new evidence *)
-        s.alpha <- (s.alpha -. 1.0) *. decay +. 1.0 +. success_rate;
-        s.beta <- (s.beta -. 1.0) *. decay +. 1.0 +. (1.0 -. success_rate);
-        (* Clamp to minimum *)
-        s.alpha <- Float.max min_prior s.alpha;
-        s.beta <- Float.max min_prior s.beta;
-        (* Update totals *)
-        s.total_votes_up <- s.total_votes_up + votes_up;
-        s.total_votes_down <- s.total_votes_down + votes_down;
-        s.updated_at <- Time_compat.now ())
+        apply_vote_counts ~decay s ~votes_up ~votes_down)
     end
-  ) snapshot
+  ) snapshot;
+  if snapshot <> [] then save_stats_if_configured ()
 
 (* The record_* helpers below all mutate an [agent_stats] returned by
    [get_stats].  [get_stats] re-acquires [ts_mu] around the lookup, but
@@ -403,7 +490,8 @@ let record_selection ~agent_name =
   with_ts_rw (fun () ->
     s.selections <- s.selections + 1;
     s.last_selected_at <- Time_compat.now ();
-    s.updated_at <- Time_compat.now ())
+    s.updated_at <- Time_compat.now ());
+  save_stats_if_configured ()
 
 let record_action ~agent_name ~action =
   let s = get_stats agent_name in
@@ -412,7 +500,8 @@ let record_action ~agent_name ~action =
      | `Post -> s.posts_created <- s.posts_created + 1
      | `Comment -> s.comments_created <- s.comments_created + 1
      | `Skip -> s.skips <- s.skips + 1);
-    s.updated_at <- Time_compat.now ())
+    s.updated_at <- Time_compat.now ());
+  save_stats_if_configured ()
 
 (** {1 Quality Signal Integration} *)
 
@@ -450,7 +539,8 @@ let record_guard_penalty ~agent_name =
     s.beta <- s.beta +. guard_penalty_beta_nudge;
     s.beta <- Float.max min_prior s.beta;
     s.guard_penalties_total <- s.guard_penalties_total + 1;
-    s.updated_at <- Time_compat.now ())
+    s.updated_at <- Time_compat.now ());
+  save_stats_if_configured ()
 
 (** Record Post Verifier result into Thompson Sampling priors. *)
 let record_quality_signal ~agent_name ~(verdict : quality_verdict) =
@@ -462,7 +552,8 @@ let record_quality_signal ~agent_name ~(verdict : quality_verdict) =
      | Fail _ -> s.beta <- s.beta +. quality_fail_beta_penalty);
     s.alpha <- Float.max min_prior s.alpha;
     s.beta <- Float.max min_prior s.beta;
-    s.updated_at <- Time_compat.now ())
+    s.updated_at <- Time_compat.now ());
+  save_stats_if_configured ()
 
 (** {1 Selection Algorithm} *)
 

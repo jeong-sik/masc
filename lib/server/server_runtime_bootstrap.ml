@@ -213,8 +213,17 @@ let record_runtime_toml_load_failure msg =
        Otel_metric_store.inc_counter
          metric_keeper_runtime_config_load_failures
          ~labels:[ "reason", reason ]
-         ())
+      ())
     reason
+
+let thompson_shutdown_hook_registered = Atomic.make false
+
+let ensure_thompson_persistence ~base_path =
+  Thompson_sampling.set_base_path base_path;
+  Thompson_sampling.load_stats ();
+  if Atomic.compare_and_set thompson_shutdown_hook_registered false true then
+    Shutdown.register ~name:"thompson_sampling_save" ~priority:24 (fun () ->
+      Thompson_sampling.save_stats ())
 
 let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
     ?env ()
@@ -249,6 +258,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
     Env_config_core.base_path_input_env_key
     (Option.value ~default:"" input_base_path);
   Unix.putenv Env_config_core.base_path_env_key base_path;
+  ensure_thompson_persistence ~base_path;
   bootstrap_base_path_config_root ~base_path;
   (* Apply keeper runtime overrides from the resolved config root's
      runtime.toml. Must run before any module that reads

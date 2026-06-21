@@ -128,6 +128,7 @@ export async function fetchLogs(opts?: {
   level?: string
   module?: string
   since_seq?: number
+  before_seq?: number
   category?: string
   exclude_category?: string
 }): Promise<LogsResponse> {
@@ -137,6 +138,10 @@ export async function fetchLogs(opts?: {
   if (opts?.module) params.set('module', opts.module)
   if (typeof opts?.since_seq === 'number' && opts.since_seq >= 0) {
     params.set('since_seq', String(opts.since_seq))
+  }
+  // Backward "load older" cursor — entries strictly older than this seq.
+  if (typeof opts?.before_seq === 'number' && opts.before_seq >= 0) {
+    params.set('before_seq', String(opts.before_seq))
   }
   if (opts?.category) params.set('category', opts.category)
   if (opts?.exclude_category) params.set('exclude_category', opts.exclude_category)

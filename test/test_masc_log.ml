@@ -86,6 +86,35 @@ let test_recent_since_seq_returns_only_new_entries () =
     [ warn_message; info_message ]
     (List.map (fun (entry : Log.Ring.entry) -> entry.message) entries)
 
+let test_recent_before_seq_returns_only_older_entries () =
+  (* Backward "load older" pagination: before_seq is an exclusive upper bound,
+     so the cursor entry itself and anything newer are excluded. *)
+  let module_name = "TestLogBefore" in
+  let msg_a = Printf.sprintf "before a %f" (Unix.gettimeofday ()) in
+  let msg_b = Printf.sprintf "before b %f" (Unix.gettimeofday ()) in
+  let msg_c = Printf.sprintf "before c %f" (Unix.gettimeofday ()) in
+  Log.info ~ctx:module_name "%s" msg_a;
+  Log.info ~ctx:module_name "%s" msg_b;
+  Log.info ~ctx:module_name "%s" msg_c;
+  let seq_of message =
+    match find_entry ~module_name ~message with
+    | Some (entry : Log.Ring.entry) -> entry.seq
+    | None -> Alcotest.failf "entry %s not found in ring" message
+  in
+  let seq_c = seq_of msg_c in
+  let older =
+    Log.Ring.recent ~limit:10 ~module_filter:module_name ~before_seq:seq_c ()
+  in
+  Alcotest.(check (list string)) "older-than-c messages, newest first"
+    [ msg_b; msg_a ]
+    (List.map (fun (entry : Log.Ring.entry) -> entry.message) older);
+  (* Boundary: nothing is older than the first entry. *)
+  let seq_a = seq_of msg_a in
+  let none =
+    Log.Ring.recent ~limit:10 ~module_filter:module_name ~before_seq:seq_a ()
+  in
+  Alcotest.(check int) "nothing older than the first entry" 0 (List.length none)
+
 let oas_record ?(level = Agent_sdk.Log.Info) ~module_name ~message fields =
   Agent_sdk.Log.
     {
@@ -222,6 +251,8 @@ let () =
           test_legacy_traceln_records_metadata;
         Alcotest.test_case "recent since_seq returns only new entries" `Quick
           test_recent_since_seq_returns_only_new_entries;
+        Alcotest.test_case "recent before_seq returns only older entries" `Quick
+          test_recent_before_seq_returns_only_older_entries;
         Alcotest.test_case
           "oas bridge promotes MCP server failures"
           `Quick test_oas_bridge_promotes_mcp_server_failures_to_error;

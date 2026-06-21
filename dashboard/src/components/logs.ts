@@ -58,6 +58,13 @@ const providerLogLines = signal(200)
 const latestSeq = signal<number | null>(null)
 const categoryFilter = signal('')
 const hideFsmTransitions = signal(false)
+// Backward-pagination window: starts at logLimit and grows by a page each time
+// the operator loads older entries, so the live delta cap preserves what was
+// pulled in instead of trimming back to the default tail size.
+const logWindowLimit = signal(200)
+// Loading flag + "no more history" flag for the load-older affordance.
+const loadingOlder = signal(false)
+const olderExhausted = signal(false)
 const expandedLogSeq = signal<number | null>(null)
 
 const POLL_INTERVAL_MS = 3000
@@ -136,7 +143,7 @@ const LOG_KIND_LABELS: Record<LogDisplayKind, string> = {
   log: 'LOG',
 }
 
-type LoadMode = 'reset' | 'delta'
+type LoadMode = 'reset' | 'delta' | 'older'
 type FailureEnvelope = {
   surface: string
   entity_kind: string
@@ -468,6 +475,9 @@ async function loadLogs(mode: LoadMode = 'reset') {
   const requestId = ++latestRequestId
 
   if (mode === 'reset') {
+    // A fresh load collapses the window back to one page and re-arms load-older.
+    logWindowLimit.value = logLimit.value
+    olderExhausted.value = false
     return logResource.load(async () => {
       const resp = await fetchLogs({
         limit: logLimit.value,
@@ -486,6 +496,55 @@ async function loadLogs(mode: LoadMode = 'reset') {
     })
   }
 
+  if (mode === 'older') {
+    const s = logResource.state.value
+    if (s.status !== 'loaded') return
+    const currentEntries = s.data.entries
+    if (currentEntries.length === 0 || loadingOlder.value || olderExhausted.value) return
+    const before = currentEntries.reduce(
+      (min, entry) => Math.min(min, entry.seq),
+      currentEntries[0]?.seq ?? 0,
+    )
+    if (before <= 0) {
+      // seq 0 is the oldest entry the ring can hold — nothing older exists.
+      olderExhausted.value = true
+      return
+    }
+    loadingOlder.value = true
+    try {
+      const resp = await fetchLogs({
+        limit: logLimit.value,
+        level: levelFilter.value,
+        module: appliedModuleFilter.value || undefined,
+        before_seq: before,
+        category: categoryFilter.value || undefined,
+        exclude_category: hideFsmTransitions.value ? 'fsm' : undefined,
+      })
+      if (requestId !== latestRequestId) return
+      const incoming = sortLogEntries(resp.entries)
+      const fresh = incoming.filter(entry => entry.seq < before)
+      if (fresh.length === 0) {
+        olderExhausted.value = true
+        return
+      }
+      // Grow the window so the live delta below preserves these older entries.
+      logWindowLimit.value += logLimit.value
+      const nextEntries = mergeLogEntries(currentEntries, fresh, logWindowLimit.value)
+      // Older entries never change the newest seq → leave latestSeq untouched.
+      logResource.state.value = loaded({
+        ...s.data,
+        entries: nextEntries,
+        total: resp.total,
+      })
+    } catch {
+      if (requestId !== latestRequestId) return
+      // A failed older-load keeps the current view; the operator can retry.
+    } finally {
+      loadingOlder.value = false
+    }
+    return
+  }
+
   // delta mode — update existing loaded data
   try {
     const resp = await fetchLogs({
@@ -501,7 +560,7 @@ async function loadLogs(mode: LoadMode = 'reset') {
     const s = logResource.state.value
     const currentEntries = s.status === 'loaded' ? s.data.entries : []
     const incoming = sortLogEntries(resp.entries)
-    const nextEntries = mergeLogEntries(currentEntries, incoming, logLimit.value)
+    const nextEntries = mergeLogEntries(currentEntries, incoming, logWindowLimit.value)
 
     latestSeq.value = latestLogSeq(nextEntries)
     logResource.state.value = loaded({
@@ -1067,6 +1126,24 @@ export function LogViewer() {
                 className="v2-logs-stream"
               />
             `}
+
+        ${logEntries.length > 0
+          ? html`
+              <div class="v2-logs-older">
+                ${olderExhausted.value
+                  ? html`<span class="v2-logs-older-end text-2xs text-[var(--color-fg-muted)]">이전 로그를 모두 불러왔습니다</span>`
+                  : html`<button
+                      type="button"
+                      class="v2-logs-older-btn rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] disabled:opacity-50"
+                      disabled=${loadingOlder.value}
+                      onClick=${() => { void loadLogs('older') }}
+                      data-testid="logs-load-older"
+                    >
+                      ${loadingOlder.value ? '불러오는 중…' : '이전 로그 더 보기'}
+                    </button>`}
+              </div>
+            `
+          : null}
       </section>
     </div>
   `

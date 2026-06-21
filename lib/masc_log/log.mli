@@ -143,11 +143,17 @@ module Ring : sig
     ?min_level:int ->
     ?module_filter:string ->
     ?since_seq:int ->
+    ?before_seq:int ->
     ?order:[< `Newest_first | `Oldest_first > `Newest_first ] ->
     ?category_filter:string ->
     ?exclude_category:string list ->
     unit ->
     entry list
+  (** [since_seq] is an exclusive lower bound (entries newer than it — live
+      tailing); [before_seq] is an exclusive upper bound (entries older than it
+      — backward "load older" pagination). With [`Newest_first] and [limit] this
+      returns the [limit] most-recent entries strictly older than [before_seq],
+      so a client pages backwards by passing the oldest seq it has seen. *)
 
   val entry_to_json : entry -> Yojson.Safe.t
   val entry_of_json : Yojson.Safe.t -> entry

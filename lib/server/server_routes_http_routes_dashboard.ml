@@ -397,6 +397,15 @@ let add_routes ~sw ~clock router =
                  let seq = Server_utils.int_query_param req "since_seq" ~default:(-1) in
                  if seq < 0 then None else Some seq
            in
+           (* Backward "load older" cursor: clients pass the oldest seq they hold
+              to fetch the next page of entries strictly older than it. *)
+           let before_seq =
+             match Server_utils.query_param req "before_seq" with
+             | None -> None
+             | Some _ ->
+                 let seq = Server_utils.int_query_param req "before_seq" ~default:(-1) in
+                 if seq < 0 then None else Some seq
+           in
            let module_filter = match Server_utils.query_param req "module" with
              | Some v -> v
              | None -> ""
@@ -414,7 +423,7 @@ let add_routes ~sw ~clock router =
                  | xs -> Some xs
            in
            let entries =
-             Log.Ring.recent ~limit ~min_level ~module_filter ?since_seq
+             Log.Ring.recent ~limit ~min_level ~module_filter ?since_seq ?before_seq
                ?category_filter ?exclude_category ()
            in
            let json =

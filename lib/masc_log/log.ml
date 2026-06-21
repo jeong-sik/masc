@@ -627,6 +627,7 @@ module Ring = struct
 
   let recent ?(limit = 200) ?(min_level = 0) ?(module_filter = "")
       ?since_seq
+      ?before_seq
       ?(order = `Newest_first)
       ?category_filter
       ?exclude_category
@@ -640,9 +641,17 @@ module Ring = struct
         | Some seq -> max start (seq + 1)
         | None -> start
       in
+      (* Backward pagination: cap the newest-end of the scan at before_seq-1 so
+         only entries strictly older than the cursor are returned. Mirrors the
+         exclusive since_seq lower bound. *)
+      let upper =
+        match before_seq with
+        | Some seq -> min (t - 1) (seq - 1)
+        | None -> t - 1
+      in
       let entries = ref [] in
       let count = ref 0 in
-      let i = ref (t - 1) in
+      let i = ref upper in
       while !i >= start && !count < limit do
         let e = buf.(!i mod capacity) in
         let level_ok = level_to_int e.level >= min_level in

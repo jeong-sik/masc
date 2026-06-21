@@ -192,6 +192,59 @@ describe('LogViewer Code links', () => {
     )
   })
 
+  it('loads older entries via the oldest-held seq as the before_seq cursor', async () => {
+    const fetchLogs = vi.fn().mockImplementation((opts?: { before_seq?: number }) => {
+      if (typeof opts?.before_seq === 'number') {
+        return Promise.resolve({
+          total: 4,
+          entries: [entry({ seq: 98, message: 'older-98' }), entry({ seq: 97, message: 'older-97' })],
+        })
+      }
+      return Promise.resolve({
+        total: 4,
+        latest_seq: 100,
+        entries: [entry({ seq: 100, message: 'newest-100' }), entry({ seq: 99, message: 'newest-99' })],
+      })
+    })
+    const { LogViewer } = await loadLogs(fetchLogs)
+    const { container } = render(h(LogViewer, {}))
+
+    await waitFor(() =>
+      expect(container.querySelector('[data-testid="logs-load-older"]')).not.toBeNull(),
+    )
+    ;(container.querySelector('[data-testid="logs-load-older"]') as HTMLButtonElement).click()
+
+    // The oldest entry currently held (seq 99) becomes the exclusive before_seq cursor.
+    await waitFor(() =>
+      expect(fetchLogs).toHaveBeenCalledWith(expect.objectContaining({ before_seq: 99 })),
+    )
+  })
+
+  it('marks the load-older affordance exhausted when no older entries come back', async () => {
+    const fetchLogs = vi.fn().mockImplementation((opts?: { before_seq?: number }) => {
+      if (typeof opts?.before_seq === 'number') {
+        return Promise.resolve({ total: 1, entries: [] })
+      }
+      return Promise.resolve({
+        total: 1,
+        latest_seq: 100,
+        entries: [entry({ seq: 100, message: 'only-100' })],
+      })
+    })
+    const { LogViewer } = await loadLogs(fetchLogs)
+    const { container } = render(h(LogViewer, {}))
+
+    await waitFor(() =>
+      expect(container.querySelector('[data-testid="logs-load-older"]')).not.toBeNull(),
+    )
+    ;(container.querySelector('[data-testid="logs-load-older"]') as HTMLButtonElement).click()
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="logs-load-older"]')).toBeNull()
+      expect(container.querySelector('.v2-logs-older-end')).not.toBeNull()
+    })
+  })
+
   it('renders enabled provider log tail from the configured provider path', async () => {
     const fetchLogs = vi.fn().mockResolvedValue({ total: 0, entries: [] })
     const fetchProviderLogsCatalog = vi.fn().mockResolvedValue({

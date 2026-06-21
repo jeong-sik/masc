@@ -221,9 +221,10 @@ let render_recall_context ~fact_lines ~episode_lines =
          [ "facts_section", facts_section; "episodes_section", episodes_section ])
 ;;
 
-(* RFC-0239 R2 / RFC-0243: recall-time dedup keys on the shared
-   [Keeper_memory_os_types.normalize_claim] SSOT (was a local copy; RFC-0243
-   lifted it so the write-time upsert keys identically). Since RFC-0243 makes the
+(* RFC-0239 R2 / RFC-0243 / RFC-0259 §3.7: recall-time dedup keys on the shared
+   [Keeper_memory_os_types.claim_identity] SSOT (was a [normalize_claim] copy;
+   RFC-0243 lifted it so the write-time upsert keys identically, RFC-0259 §3.7
+   re-pointed it at the typed producer-identity key). Since RFC-0243 makes the
    librarian write path upsert-by-claim, the store no longer accumulates fresh
    duplicates; this read-time dedup remains as defense-in-depth for legacy rows
    written before the upsert landed. *)
@@ -231,7 +232,7 @@ let dedup_by_claim facts =
   let seen = Hashtbl.create 32 in
   List.filter
     (fun fact ->
-      let key = normalize_claim fact.claim in
+      let key = claim_identity fact in
       if Hashtbl.mem seen key then false else (Hashtbl.add seen key (); true))
     facts
 ;;
@@ -266,7 +267,7 @@ let facts_recency_ranked ~now facts =
 ;;
 
 (* RFC-0264 P2: render_context_exn returns the rendered block alongside the
-   normalize_claim keys it injected, so [render_if_enabled] can append a
+   claim_identity keys it injected, so [render_if_enabled] can append a
    deterministic recall-injection record (the join key for outcome eval). The
    keys are a by-product already computed for shared-store dedup
    ([private_keys]); surfacing them costs nothing extra on the hot path. *)
@@ -325,14 +326,14 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
          per-keeper stores, the consolidator rewrites the shared tier directly
          and does not apply [fact_store_max], so recall must scan every shared
          fact before ranking and taking the small communal slice. *)
-      let private_keys = List.map (fun f -> normalize_claim f.claim) facts in
+      let private_keys = List.map (fun f -> claim_identity f) facts in
       let shared_facts =
         if String.equal keeper_id shared_store_id
         then []
         else
           Keeper_memory_os_io.read_facts_all ~keeper_id:shared_store_id
           |> facts_recency_ranked ~now
-          |> List.filter (fun f -> not (List.mem (normalize_claim f.claim) private_keys))
+          |> List.filter (fun f -> not (List.mem (claim_identity f) private_keys))
           |> take default_max_shared_facts
       in
       facts, private_keys, shared_facts, n_facts_in_store)
@@ -345,7 +346,7 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
     |> take max_episodes
   in
   let injected_fact_keys =
-    private_keys @ List.map (fun f -> normalize_claim f.claim) shared_facts
+    private_keys @ List.map (fun f -> claim_identity f) shared_facts
   in
   let injected_episode_keys =
     List.map

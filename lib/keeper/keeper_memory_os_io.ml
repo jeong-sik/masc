@@ -294,8 +294,9 @@ let rewrite_facts_atomically ~keeper_id facts =
 
 (* Byte-level snapshot identity for the read-outside-lock, rewrite-under-lock
    pattern. [fact_to_json] has a stable key order (see Keeper_memory_os_types — the
-   external_ref key is appended last specifically to keep this fingerprint stable),
-   so a fact's canonical JSON is a sound content key. [same_fact_snapshot snapshot
+   optional external_ref and claim_id keys are appended last and omitted when None,
+   specifically to keep this fingerprint byte-identical for legacy rows), so a
+   fact's canonical JSON is a sound content key. [same_fact_snapshot snapshot
    current] is true iff the two lists are positionally byte-identical: any
    concurrent append (longer), cap/GC (shorter), or re-observation (a row's bytes
    change) makes them differ, so a caller that classified [snapshot] outside the
@@ -565,14 +566,14 @@ let merge_episode_facts ~merge ~existing ~incoming =
     (fun f ->
        let cell = ref f in
        order := cell :: !order;
-       let key = normalize_claim f.claim in
+       let key = claim_identity f in
        if not (Hashtbl.mem tbl key) then Hashtbl.add tbl key cell)
     existing;
   let merged = ref 0 in
   let appended = ref 0 in
   List.iter
     (fun inc ->
-       let key = normalize_claim inc.claim in
+       let key = claim_identity inc in
        match Hashtbl.find_opt tbl key with
        | Some cell ->
          cell := merge ~existing:!cell ~incoming:inc;

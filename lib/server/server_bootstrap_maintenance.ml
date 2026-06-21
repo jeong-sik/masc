@@ -129,7 +129,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   (* RFC-0247 §2.3: memory-os forgetting sweep. Off the keeper hot path — every
      [interval]s it runs the deterministic per-keeper GC ([run_gc]: hard-expire
      facts whose [valid_until] has passed, drop fully-decayed facts by retention
-     verdict, dedup by the [normalize_claim] SSOT) and rewrites each keeper's
+     verdict, dedup by the [claim_identity] SSOT) and rewrites each keeper's
      Tier-1 store atomically. This is [run_gc]'s first production caller; without
      it the TTL/lifetime machinery (now produced per-category at librarian write
      time) is unreachable. The shared store is skipped — the consolidator

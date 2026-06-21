@@ -61,6 +61,7 @@ let fact_fixture ~now () =
   ; Types.valid_until = None
   ; Types.last_verified_at = Some (now -. 3600.0)
   ; Types.schema_version = Types.schema_version
+  ; Types.claim_id = None
   }
 ;;
 
@@ -2692,6 +2693,35 @@ let test_consolidator_promotes_corroborated () =
   | _ -> Alcotest.fail "expected one shared fact"
 ;;
 
+(* RFC-0259 §3.7: a promoted shared fact carries the corroborating group's
+   [claim_id]. The group is keyed on [claim_identity], so contributors share one
+   id; the shared row must keep it so recall's private-precedence dedup matches it
+   against the same keeper's private (id-keyed) row across tiers instead of
+   injecting the conclusion twice. Guards the cross-tier dedup regression. *)
+let test_consolidator_promotes_carries_claim_id () =
+  let now = 1_000_000.0 in
+  let with_id claim =
+    { (mk_shared_fixture ~now claim) with Types.claim_id = Some "pr-321-merged" }
+  in
+  let keeper_facts =
+    [ "beta", [ with_id "PR #321 merged" ]
+    ; "alpha", [ with_id "pull request #321 was merged" ]
+    ]
+  in
+  let _considered, shared = Consolidator.promote_facts ~now ~keeper_facts () in
+  match shared with
+  | [ f ] ->
+    Alcotest.(check (option string))
+      "promoted shared fact carries the group claim_id"
+      (Some "pr-321-merged")
+      f.Types.claim_id;
+    Alcotest.(check string)
+      "shared identity uses the id key, matching contributors' private rows"
+      "id:pr-321-merged"
+      (Types.claim_identity f)
+  | _ -> Alcotest.fail "expected one shared fact"
+;;
+
 (* A claim held by a single keeper is never shared (below min_keepers). *)
 let test_consolidator_solo_not_promoted () =
   let now = 1_000_000.0 in
@@ -3213,24 +3243,280 @@ let test_fact_to_json_omits_external_ref_when_none () =
     (contains "external_ref" json_str)
 ;;
 
-let test_reobserve_refreshes_volatile_horizon () =
+(* RFC-0259 §3.7 (P6): the [claim_id] codec — a [Some] id round-trips intact; a
+   [None] id omits the JSON key (byte-stable for legacy rows) and decodes to None. *)
+let test_claim_id_codec_roundtrip () =
+  let now = 1_000_000.0 in
+  let with_id = { (fact_fixture ~now ()) with Types.claim_id = Some "pr-123-open" } in
+  let json_str = Yojson.Safe.to_string (Types.fact_to_json with_id) in
+  Alcotest.(check bool) "claim_id key present when Some" true (contains "claim_id" json_str);
+  let decoded = Option.get (Types.fact_of_json (Types.fact_to_json with_id)) in
+  Alcotest.(check (option string))
+    "claim_id round-trips intact"
+    (Some "pr-123-open")
+    decoded.Types.claim_id;
+  Alcotest.(check (option string))
+    "claim_id canonicalizes formatting variants"
+    (Some "pr-123-open")
+    (Types.normalize_claim_id " PR #123_Open ");
+  Alcotest.(check (option string))
+    "punctuation-only claim_id degrades to None"
+    None
+    (Types.normalize_claim_id " #!? ");
+  let messy_id = { with_id with Types.claim_id = Some " PR #123_Open " } in
+  let decoded_messy = Option.get (Types.fact_of_json (Types.fact_to_json messy_id)) in
+  Alcotest.(check (option string))
+    "claim_id stores canonical slug"
+    (Some "pr-123-open")
+    decoded_messy.Types.claim_id;
+  let no_id = fact_fixture ~now () in
+  let no_id_json = Yojson.Safe.to_string (Types.fact_to_json no_id) in
+  Alcotest.(check bool) "claim_id key omitted when None" false (contains "claim_id" no_id_json);
+  let decoded_none = Option.get (Types.fact_of_json (Types.fact_to_json no_id)) in
+  Alcotest.(check (option string))
+    "claim_id round-trips to None"
+    None
+    decoded_none.Types.claim_id;
+  let invalid_id = { with_id with Types.claim_id = Some " #!? " } in
+  let invalid_id_json = Yojson.Safe.to_string (Types.fact_to_json invalid_id) in
+  Alcotest.(check bool)
+    "invalid claim_id is omitted"
+    false
+    (contains "claim_id" invalid_id_json);
+  let decoded_invalid_id = Option.get (Types.fact_of_json (Types.fact_to_json invalid_id)) in
+  Alcotest.(check (option string))
+    "invalid claim_id decodes to None"
+    None
+    decoded_invalid_id.Types.claim_id
+;;
+
+(* RFC-0259 §3.7 (P6/E): [claim_identity] keys on the producer-emitted [claim_id]
+   (the CONCLUSION slug), NOT the referent. Two reworded extractions carrying the
+   same [claim_id] share a key (collapsing the re-mint), so a re-stated conclusion
+   UPSERTs. Two DIFFERENT [claim_id]s are distinct keys EVEN WITH the same
+   [external_ref] — a status transition ("PR #N open" -> "PR #N merged") stays two
+   rows, the regression the rejected referent-only key over-merged. A claim with no
+   [claim_id] falls back to the exact-text [normalize_claim] key. *)
+let test_claim_identity_keys_on_claim_id () =
+  let now = 1_000_000.0 in
+  let base = fact_fixture ~now () in
+  let pr_ref = Some { Types.kind = Types.Pr; Types.id = "123" } in
+  (* Same claim_id, DIFFERENT text -> same identity. *)
+  let a =
+    { base with
+      Types.claim = "PR #123 is open"
+    ; Types.external_ref = pr_ref
+    ; Types.claim_id = Some "pr-123-open"
+    }
+  in
+  let b =
+    { base with
+      Types.claim = "pull request #123 remains open"
+    ; Types.external_ref = pr_ref
+    ; Types.claim_id = Some "pr-123-open"
+    }
+  in
+  Alcotest.(check string)
+    "same claim_id, reworded text -> shared key"
+    (Types.claim_identity a)
+    (Types.claim_identity b);
+  Alcotest.(check string) "claim_id key uses the id: prefix" "id:pr-123-open" (Types.claim_identity a);
+  let sloppy_id = { b with Types.claim_id = Some " PR #123_Open " } in
+  Alcotest.(check string)
+    "claim_id key canonicalizes harmless id formatting"
+    (Types.claim_identity a)
+    (Types.claim_identity sloppy_id);
+  (* DIFFERENT claim_id, SAME external_ref -> distinct identity (no over-merge). *)
+  let c = { a with Types.claim = "PR #123 was merged"; Types.claim_id = Some "pr-123-merged" } in
+  Alcotest.(check bool)
+    "different claim_id (same external_ref) -> different key"
+    false
+    (String.equal (Types.claim_identity a) (Types.claim_identity c));
+  (* No claim_id -> normalize_claim fallback. *)
+  let no_id = { base with Types.claim = "User prefers terse output"; Types.claim_id = None } in
+  Alcotest.(check string)
+    "claim_id=None falls back to claim:<normalize_claim>"
+    ("claim:" ^ Types.normalize_claim no_id.Types.claim)
+    (Types.claim_identity no_id);
+  (* An empty/blank claim_id also degrades to the text key (guard in claim_identity). *)
+  let blank_id = { no_id with Types.claim_id = Some "   " } in
+  Alcotest.(check string)
+    "blank claim_id falls back to claim:<normalize_claim>"
+    ("claim:" ^ Types.normalize_claim blank_id.Types.claim)
+    (Types.claim_identity blank_id);
+  let invalid_id = { no_id with Types.claim_id = Some " #!? " } in
+  Alcotest.(check string)
+    "invalid claim_id falls back to claim:<normalize_claim>"
+    (Types.claim_identity no_id)
+    (Types.claim_identity invalid_id)
+;;
+
+(* RFC-0259 §3.7 (P6/E+F): the production write upsert ([merge_and_cap_facts] keyed by
+   [claim_identity]) folds a reworded re-extraction carrying the SAME [claim_id] into
+   the single existing row instead of appending a fresh one — even though the two
+   claim texts have different [normalize_claim] keys — and the prior row's
+   [first_seen] anchor is inherited. *)
+let test_merge_and_cap_upserts_same_claim_id () =
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "virtual-memory-keeper" in
+    let now = 1_000_000.0 in
+    let base = fact_fixture ~now () in
+    let pr_ref = Some { Types.kind = Types.Pr; Types.id = "123" } in
+    let first =
+      { base with
+        Types.claim = "PR #123 is open"
+      ; Types.category = Types.Fact
+      ; Types.external_ref = pr_ref
+      ; Types.claim_id = Some "pr-123-open"
+      ; Types.first_seen = now -. 50_000.0
+      }
+    in
+    Memory_io.append_fact ~keeper_id first;
+    let reworded =
+      { base with
+        Types.claim = "pull request #123 still open"
+      ; Types.category = Types.Fact
+      ; Types.external_ref = pr_ref
+      ; Types.claim_id = Some "pr-123-open"
+      }
+    in
+    let stats =
+      Memory_io.merge_and_cap_facts
+        ~keeper_id
+        ~merge:(Policy.reobserve_fact ~now)
+        ~incoming:[ reworded ]
+        ~keep:256
+        ~trigger:384
+        ~rank:(Policy.retention_rank ~now)
+    in
+    Alcotest.(check int) "same-claim_id reworded merged, not appended" 1 stats.Memory_io.merged;
+    Alcotest.(check int) "none appended" 0 stats.Memory_io.appended;
+    let rows = Memory_io.read_all_facts ~keeper_id in
+    Alcotest.(check int) "single row after upsert" 1 (List.length rows);
+    let row = List.hd rows in
+    Alcotest.(check (float 0.001))
+      "first observation's first_seen anchor inherited"
+      (now -. 50_000.0)
+      row.Types.first_seen;
+    Alcotest.(check string) "first observation's claim text kept" first.Types.claim row.Types.claim)
+;;
+
+(* RFC-0259 §3.7 (P6 regression guard): the case the rejected (referent, category)
+   key over-merged by construction. Two DIFFERENT conclusions about the SAME
+   referent ("PR #123 is open" then "PR #123 was merged") carry DIFFERENT
+   [claim_id]s, so the upsert keeps BOTH rows — the librarian's correction is not
+   silently dropped. *)
+let test_merge_and_cap_no_over_merge_distinct_conclusions () =
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "virtual-memory-keeper" in
+    let now = 1_000_000.0 in
+    let base = fact_fixture ~now () in
+    let pr_ref = Some { Types.kind = Types.Pr; Types.id = "123" } in
+    let opened =
+      { base with
+        Types.claim = "PR #123 is open"
+      ; Types.category = Types.Fact
+      ; Types.external_ref = pr_ref
+      ; Types.claim_id = Some "pr-123-open"
+      }
+    in
+    Memory_io.append_fact ~keeper_id opened;
+    let merged =
+      { base with
+        Types.claim = "PR #123 was merged"
+      ; Types.category = Types.Fact
+      ; Types.external_ref = pr_ref
+      ; Types.claim_id = Some "pr-123-merged"
+      }
+    in
+    let stats =
+      Memory_io.merge_and_cap_facts
+        ~keeper_id
+        ~merge:(Policy.reobserve_fact ~now)
+        ~incoming:[ merged ]
+        ~keep:256
+        ~trigger:384
+        ~rank:(Policy.retention_rank ~now)
+    in
+    Alcotest.(check int) "distinct conclusion appended, not merged" 1 stats.Memory_io.appended;
+    Alcotest.(check int) "none merged" 0 stats.Memory_io.merged;
+    let rows = Memory_io.read_all_facts ~keeper_id in
+    Alcotest.(check int) "two rows survive (correction not dropped)" 2 (List.length rows))
+;;
+
+(* RFC-0259 §3.7 (P6 regression): a durable (referent-free, [external_ref = None])
+   claim still advances its [last_verified_at] on re-observe — F applies only to
+   volatile claims; and the exact-text upsert behavior is unchanged: identical
+   non-ref claims merge to one row, distinct non-ref claims stay two. *)
+let test_reobserve_advances_durable_anchor () =
+  let now = 5_000_000.0 in
+  let existing =
+    { (fact_fixture ~now ()) with
+      Types.external_ref = None
+    ; Types.first_seen = now -. 86_400.0
+    ; Types.last_verified_at = Some (now -. 7_200.0)
+    }
+  in
+  let incoming = { existing with Types.last_verified_at = Some now } in
+  let reobserved = Policy.reobserve_fact ~now ~existing ~incoming in
+  Alcotest.(check (option (float 1e-9)))
+    "durable claim's last_verified_at advances to now"
+    (Some now)
+    reobserved.Types.last_verified_at;
+  Alcotest.(check (float 1e-9))
+    "first_seen preserved"
+    (now -. 86_400.0)
+    reobserved.Types.first_seen;
+  (* exact-text identity unchanged for referent-free claims *)
+  let p = fact_fixture ~now () in
+  let same = { p with Types.claim = "  user PREFERS concise   responses " } in
+  Alcotest.(check string)
+    "identical (case/space) non-ref claim shares a key"
+    (Types.claim_identity p)
+    (Types.claim_identity same);
+  let distinct = { p with Types.claim = "user prefers verbose responses" } in
+  Alcotest.(check bool)
+    "distinct non-ref claims keep different keys"
+    false
+    (String.equal (Types.claim_identity p) (Types.claim_identity distinct))
+;;
+
+(* RFC-0259 §3.7 (P6/F): producer re-extraction of a volatile (external-ref) claim
+   is NOT re-verification. The reobserved row inherits the prior anchors entirely —
+   [first_seen], [valid_until], and [last_verified_at] are all carried over from
+   [existing], NOT advanced to [now]. Only the reconciler ([Stale_open]) advances a
+   volatile claim's anchors. This reverses the pre-P6 "re-observing IS
+   re-verification" rule, so a re-mint cannot reset the volatile TTL or grounding
+   horizon. *)
+let test_reobserve_inherits_volatile_anchors () =
   let now = 5_000_000.0 in
   let older = now -. 100_000.0 in
-  let volatile =
+  let v0 = older +. Types.volatile_external_ttl_seconds in
+  let l0 = older +. 1_000.0 in
+  let existing =
     { (fact_fixture ~now:older ()) with
       Types.claim = "PR #42 is OPEN"
     ; Types.external_ref = Some { Types.kind = Types.Pr; Types.id = "42" }
-    ; Types.valid_until = Some (older +. Types.volatile_external_ttl_seconds)
+    ; Types.first_seen = older
+    ; Types.valid_until = Some v0
+    ; Types.last_verified_at = Some l0
     }
   in
-  let refreshed = Policy.reobserve_fact ~now ~existing:volatile ~incoming:volatile in
-  match refreshed.Types.valid_until with
-  | None -> Alcotest.fail "volatile fact lost its horizon on reobserve"
-  | Some vu ->
-    Alcotest.(check (float 0.001))
-      "horizon re-anchored to now on re-observation"
-      (now +. Types.volatile_external_ttl_seconds)
-      vu
+  (* incoming is a reworded re-extraction of the same referent claim *)
+  let incoming = { existing with Types.claim = "pull request #42 remains open" } in
+  let reobserved = Policy.reobserve_fact ~now ~existing ~incoming in
+  Alcotest.(check (float 0.001))
+    "first_seen inherited (not advanced to now)"
+    older
+    reobserved.Types.first_seen;
+  Alcotest.(check (option (float 0.001)))
+    "valid_until inherited (not re-anchored to now)"
+    (Some v0)
+    reobserved.Types.valid_until;
+  Alcotest.(check (option (float 0.001)))
+    "last_verified_at inherited (producer re-extraction is not re-verification)"
+    (Some l0)
+    reobserved.Types.last_verified_at
 ;;
 
 let test_retention_rank_demotes_volatile () =
@@ -3454,6 +3740,10 @@ let () =
             `Quick
             test_consolidator_promotes_corroborated
         ; Alcotest.test_case
+            "promoted shared fact carries the group claim_id (cross-tier dedup)"
+            `Quick
+            test_consolidator_promotes_carries_claim_id
+        ; Alcotest.test_case
             "solo claim not promoted"
             `Quick
             test_consolidator_solo_not_promoted
@@ -3550,13 +3840,33 @@ let () =
             `Quick
             test_fact_to_json_omits_external_ref_when_none
         ; Alcotest.test_case
-            "reobserve refreshes a volatile claim's horizon"
+            "claim_id codec round-trips Some and omits None (RFC-0259 §3.7 P6)"
             `Quick
-            test_reobserve_refreshes_volatile_horizon
+            test_claim_id_codec_roundtrip
+        ; Alcotest.test_case
+            "reobserve inherits a volatile claim's anchors (RFC-0259 §3.7 P6/F)"
+            `Quick
+            test_reobserve_inherits_volatile_anchors
         ; Alcotest.test_case
             "retention rank demotes a volatile fact below durable"
             `Quick
             test_retention_rank_demotes_volatile
+        ; Alcotest.test_case
+            "claim_identity: same claim_id shares a key, distinct claim_id stays distinct (RFC-0259 §3.7 P6/E)"
+            `Quick
+            test_claim_identity_keys_on_claim_id
+        ; Alcotest.test_case
+            "merge_and_cap upserts same-claim_id reworded claim to one row (P6/E)"
+            `Quick
+            test_merge_and_cap_upserts_same_claim_id
+        ; Alcotest.test_case
+            "merge_and_cap keeps distinct conclusions (different claim_id, same ref) as two rows (P6 regression)"
+            `Quick
+            test_merge_and_cap_no_over_merge_distinct_conclusions
+        ; Alcotest.test_case
+            "reobserve still advances a durable (non-ref) claim's anchor (P6 regression)"
+            `Quick
+            test_reobserve_advances_durable_anchor
         ] )
     ; ( "rfc-0259 reconcile-io"
       , [ Alcotest.test_case

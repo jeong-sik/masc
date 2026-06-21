@@ -22,6 +22,7 @@ let fact ?(external_ref = None) ?(valid_until = None) ~now claim =
   ; Types.valid_until
   ; Types.last_verified_at = Some now
   ; Types.schema_version = Types.schema_version
+  ; Types.claim_id = None
   }
 ;;
 

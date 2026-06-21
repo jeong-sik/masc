@@ -11,6 +11,7 @@ let fact
       ?valid_until
       ?last_verified_at
       ?(observed_by = [])
+      ?claim_id
       claim
   =
   let last_verified_at =
@@ -27,6 +28,7 @@ let fact
   ; valid_until
   ; last_verified_at
   ; schema_version = Types.schema_version
+  ; claim_id
   }
 ;;
 
@@ -235,6 +237,60 @@ let test_apply_preserves_ephemeral_expiry_and_verification_age () =
   | other -> Alcotest.failf "expected 1 merged fact, got %d" (List.length other)
 ;;
 
+let test_apply_preserves_shared_claim_id () =
+  let facts =
+    [ fact ~claim_id:"PR #123 Open" "PR #123 is open"
+    ; fact ~claim_id:"pr-123-open" "pull request 123 remains open"
+    ]
+  in
+  let plan =
+    { Consolidation.groups =
+        [ { Consolidation.member_indices = [ 0; 1 ]
+          ; consolidated_claim = "PR #123 remains open"
+          ; category = Types.Fact
+          }
+        ]
+    ; drop_indices = []
+    }
+  in
+  match Consolidation.apply_plan ~now ~facts plan with
+  | [ merged ] ->
+    Alcotest.(check (option string))
+      "shared claim_id preserved canonically"
+      (Some "pr-123-open")
+      merged.Types.claim_id;
+    Alcotest.(check string)
+      "consolidated row keeps id identity"
+      "id:pr-123-open"
+      (Types.claim_identity merged)
+  | other -> Alcotest.failf "expected 1 merged fact, got %d" (List.length other)
+;;
+
+let test_apply_drops_conflicting_claim_ids () =
+  let facts =
+    [ fact ~claim_id:"pr-123-open" "PR #123 is open"
+    ; fact ~claim_id:"pr-123-merged" "PR #123 was merged"
+    ]
+  in
+  let plan =
+    { Consolidation.groups =
+        [ { Consolidation.member_indices = [ 0; 1 ]
+          ; consolidated_claim = "PR #123 changed status"
+          ; category = Types.Fact
+          }
+        ]
+    ; drop_indices = []
+    }
+  in
+  match Consolidation.apply_plan ~now ~facts plan with
+  | [ merged ] ->
+    Alcotest.(check (option string))
+      "conflicting claim_ids are not invented into a new id"
+      None
+      merged.Types.claim_id
+  | other -> Alcotest.failf "expected 1 merged fact, got %d" (List.length other)
+;;
+
 let test_render_numbered_facts_keeps_one_fact_per_line () =
   let rendered =
     Consolidation.render_numbered_facts
@@ -320,6 +376,14 @@ let () =
             "preserves ephemeral expiry and verification age"
             `Quick
             test_apply_preserves_ephemeral_expiry_and_verification_age
+        ; Alcotest.test_case
+            "preserves a shared claim_id"
+            `Quick
+            test_apply_preserves_shared_claim_id
+        ; Alcotest.test_case
+            "drops conflicting claim_ids"
+            `Quick
+            test_apply_drops_conflicting_claim_ids
 	        ] )
 	    ; ( "parse"
 	      , [ Alcotest.test_case "parses a plan" `Quick test_parse_plan_json

@@ -92,6 +92,7 @@ let mk_fact
   ; Types.valid_until
   ; Types.last_verified_at = Some (now -. age_seconds)
   ; Types.schema_version = Types.schema_version
+  ; Types.claim_id = None
   }
 ;;
 

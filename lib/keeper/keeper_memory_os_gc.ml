@@ -27,11 +27,11 @@ let ttl_expired ~now (fact : fact) =
   | Some ts -> now > ts
 ;;
 
-(* Claim identity uses the shared SSOT [normalize_claim] (lowercase +
-   internal-whitespace-collapse + trailing-trim), the same key the write-time
-   upsert ([merge_and_cap_facts]) and recall dedup use, so GC's dedup cannot
-   diverge from them (RFC-0247 §2.3 fold). *)
-let normalized_claim_key fact = normalize_claim fact.claim
+(* Claim identity uses the shared SSOT [claim_identity] (RFC-0259 §3.7: the
+   producer-emitted [claim_id] when present, else [normalize_claim] of the text),
+   the same key the write-time upsert ([merge_and_cap_facts]) and recall dedup
+   use, so GC's dedup cannot diverge from them (RFC-0247 §2.3 fold). *)
+let normalized_claim_key fact = claim_identity fact
 
 (* The dedup winner's recency anchor: the type-level {!reference_time} SSOT, so
    GC's "which duplicate to keep" reads the same timestamp as recall ordering and

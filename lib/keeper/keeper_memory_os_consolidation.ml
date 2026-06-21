@@ -238,11 +238,22 @@ let last_verified_for_members members =
   max_optional_float (List.map (fun (m : fact) -> m.last_verified_at) members)
 ;;
 
+let shared_claim_id_for_members members =
+  let ids =
+    members
+    |> List.filter_map (fun (m : fact) -> Option.bind m.claim_id normalize_claim_id)
+    |> List.sort_uniq String.compare
+  in
+  match ids with
+  | [ id ] -> Some id
+  | [] | _ :: _ :: _ -> None
+;;
+
 (* The consolidated fact for one group: its claim/category come from the LLM; its
    provenance and temporal metadata are reconstructed structurally from the
    members so nothing is fabricated — earliest source/first_seen, the union of
-   corroborating keepers, existing Ephemeral expiry, and the newest verification
-   timestamp from the merged members. *)
+   corroborating keepers, existing Ephemeral expiry, the newest verification
+   timestamp, and any non-conflicting producer claim id from the merged members. *)
 let consolidated_fact ~now ~members (group : merge_group) =
   let earliest =
     match members with
@@ -271,6 +282,7 @@ let consolidated_fact ~now ~members (group : merge_group) =
   ; valid_until = valid_until_for_group ~now ~external_ref ~members group.category
   ; last_verified_at = last_verified_for_members members
   ; schema_version
+  ; claim_id = shared_claim_id_for_members members
   }
 ;;
 

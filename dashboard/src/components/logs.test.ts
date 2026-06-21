@@ -181,8 +181,9 @@ describe('deltaMergeCap (load-older erosion guard)', () => {
 
   it('prevents the delta poll from evicting paged-in older rows over multiple cycles', () => {
     // Reproduces the erosion: base limit 2, operator paged a third (older) row
-    // in (seq 8). Each delta poll appends one newer row. With the buggy cap
-    // (max(displayCap, limit) == 3) the newest-first slice would drop seq 8.
+    // in (seq 8). Each delta poll appends one newer row. A cap that only covered
+    // the currently shown rows (limit == 2, or the pre-deltaMergeCap
+    // max(displayCap, limit) shape) would let the newest-first slice drop seq 8.
     let current = [entry({ seq: 10 }), entry({ seq: 9 }), entry({ seq: 8, message: 'paged older' })]
     for (const fresh of [11, 12, 13]) {
       const incoming = [entry({ seq: fresh, message: `delta ${fresh}` })]

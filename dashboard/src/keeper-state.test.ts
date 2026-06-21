@@ -211,6 +211,44 @@ describe('thread history merge & persistence', () => {
     ])
   })
 
+  it('distributes identical-text assistant turns trace 1:1 across history rows (#21748)', () => {
+    // Two local optimistic assistants with the SAME reply text but distinct
+    // thinking traces. Before the fix, both history rows matched the FIRST
+    // local source via the role+text fallback, so the second row inherited the
+    // first turn's trace.
+    appendThreadEntry('echo', entry({
+      id: 'local-a',
+      role: 'assistant',
+      text: 'done',
+      rawText: 'done',
+      delivery: 'delivered',
+      streamState: null,
+      timestamp: '2026-06-10T00:00:01.000Z',
+    }))
+    appendThreadEntry('echo', entry({
+      id: 'local-b',
+      role: 'assistant',
+      text: 'done',
+      rawText: 'done',
+      delivery: 'delivered',
+      streamState: null,
+      timestamp: '2026-06-10T00:00:02.000Z',
+    }))
+    appendAssistantThinkingDelta('echo', 'local-a', 'first turn reasoning')
+    appendAssistantThinkingDelta('echo', 'local-b', 'second turn reasoning')
+
+    mergeServerHistoryEntries('echo', [
+      entry({ id: 'hist-a', role: 'assistant', text: 'done', rawText: 'done', delivery: 'history', timestamp: '2026-06-10T00:00:01.000Z' }),
+      entry({ id: 'hist-b', role: 'assistant', text: 'done', rawText: 'done', delivery: 'history', timestamp: '2026-06-10T00:00:02.000Z' }),
+    ])
+
+    const thread = keeperThreads.value.echo ?? []
+    const traceTextOf = (id: string) => thread.find(e => e.id === id)?.traceSteps?.[0]?.text
+    // Each history row carries its OWN local trace, not the other's.
+    expect(traceTextOf('hist-a')).toBe('first turn reasoning')
+    expect(traceTextOf('hist-b')).toBe('second turn reasoning')
+  })
+
   it('keeps local entries the server has not persisted yet', () => {
     appendThreadEntry('echo', entry({ id: 'local-1', text: 'not yet saved' }))
 

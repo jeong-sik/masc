@@ -632,6 +632,59 @@ describe('dashboard websocket route subscriptions', () => {
     expect(mockSockets).toHaveLength(1)
   })
 
+  it('reconnects with a fresh token after hello auth rejection', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+    setStoredToken('stale-token', { source: 'dev', actor: 'dashboard' })
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    expect(hello.params.token).toBe('stale-token')
+
+    socket.receive({ jsonrpc: '2.0', id: hello.id, error: { message: 'auth rejected' } })
+    await flushPromises()
+    expect(dashboardWsConnected.value).toBe(false)
+    expect(dashboardWsReady.value).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+    expect(mockSockets).toHaveLength(1)
+
+    setStoredToken('fresh-token', { source: 'dev', actor: 'dashboard' })
+    await flushPromises()
+
+    expect(mockSockets).toHaveLength(2)
+    const retry = mockSockets[1]!
+    retry.open()
+    const retryHello = parseRpc(retry, 0)
+    expect(retryHello.method).toBe('dashboard/hello')
+    expect(retryHello.params.token).toBe('fresh-token')
+  })
+
+  it('closes an authenticated socket when the stored token is cleared', async () => {
+    installWebSocketMocks()
+    setStoredToken('active-token', { source: 'manual' })
+
+    const socket = await connectReadyDashboard()
+    expect(dashboardWsReady.value).toBe(true)
+
+    clearStoredToken()
+    await flushPromises()
+
+    expect(socket.readyState).toBe(MockWebSocket.CLOSED)
+    expect(dashboardWsConnected.value).toBe(false)
+    expect(dashboardWsReady.value).toBe(false)
+    expect(mockSockets).toHaveLength(2)
+
+    const retry = mockSockets[1]!
+    retry.open()
+    const retryHello = parseRpc(retry, 0)
+    expect(retryHello.method).toBe('dashboard/hello')
+    expect(retryHello.params).not.toHaveProperty('token')
+  })
+
   it('subscribes the latest route captured while hello is still in flight', async () => {
     installWebSocketMocks()
 

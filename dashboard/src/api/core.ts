@@ -37,6 +37,34 @@ export interface StoredTokenMeta {
   scope?: string | null
 }
 
+export interface StoredTokenChange {
+  token: string | null
+  meta: StoredTokenMeta | null
+}
+
+type StoredTokenChangeListener = (change: StoredTokenChange) => void
+
+const storedTokenChangeListeners = new Set<StoredTokenChangeListener>()
+
+function notifyStoredTokenChange(change: StoredTokenChange): void {
+  for (const listener of storedTokenChangeListeners) {
+    try {
+      listener(change)
+    } catch (err) {
+      console.warn('[dashboard-auth] token change listener failed', err)
+    }
+  }
+}
+
+export function subscribeStoredTokenChanges(
+  listener: StoredTokenChangeListener,
+): () => void {
+  storedTokenChangeListeners.add(listener)
+  return () => {
+    storedTokenChangeListeners.delete(listener)
+  }
+}
+
 function normalizeStoredTokenMeta(value: unknown): StoredTokenMeta | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
   const record = value as Record<string, unknown>
@@ -110,12 +138,20 @@ export function setStoredToken(
     sessionStorage.removeItem(TOKEN_META_STORAGE_KEY)
   }
   setCanonicalDashboardActor(null)
+  notifyStoredTokenChange({
+    token: normalizedToken,
+    meta: nextMeta,
+  })
 }
 
 export function clearStoredToken(): void {
   sessionStorage.removeItem(TOKEN_STORAGE_KEY)
   sessionStorage.removeItem(TOKEN_META_STORAGE_KEY)
   setCanonicalDashboardActor(null)
+  notifyStoredTokenChange({
+    token: null,
+    meta: null,
+  })
 }
 
 export function isRemoteAccess(): boolean {

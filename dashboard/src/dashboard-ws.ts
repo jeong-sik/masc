@@ -2,7 +2,7 @@ import type { RouteState, SSEEvent } from './types'
 import { parseSSEMessage } from './schemas/sse'
 import { hydrateDashboardSlice, routeServerPushEvent } from './sse-store'
 import { batch } from '@preact/signals'
-import { dashboardBearerToken } from './api/core'
+import { dashboardBearerToken, subscribeStoredTokenChanges } from './api/core'
 import { parseWebSocketSseFrames } from './dashboard-ws-parse'
 import {
   GLOBAL_DASHBOARD_PUSH_SLICES,
@@ -624,6 +624,25 @@ function reconnectAfterCurrentSocketFailure(ws: WebSocket, err: unknown): void {
   closeSocket()
   scheduleReconnect()
 }
+
+function reconnectAfterAuthTokenChange(): void {
+  if (!desiredRouteState || typeof WebSocket === 'undefined') return
+  shouldReconnect = true
+  connectGeneration += 1
+  clearReconnectTimer()
+  lastSubscribeKey = ''
+  batch(() => {
+    dashboardWsConnected.value = false
+    dashboardWsReady.value = false
+  })
+  const nextRoute = desiredRouteState
+  closeSocket()
+  void connectDashboardWS(nextRoute)
+}
+
+subscribeStoredTokenChanges(() => {
+  reconnectAfterAuthTokenChange()
+})
 
 export async function subscribeDashboardRoute(routeState: DashboardRouteState): Promise<void> {
   const desired = rememberRouteState(routeState)

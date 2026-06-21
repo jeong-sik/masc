@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
-import { DashboardHealthStrip, DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute, shouldRenderSurfaceLead, SideRail, summarizeAttentionPreview } from './dashboard-shell'
+import { DashboardHealthStrip, DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute, SideRail, summarizeAttentionPreview } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
 import { dashboardLoading } from '../store'
@@ -63,23 +63,6 @@ describe('DashboardMain primary heading', () => {
     container.remove()
   })
 
-  it.each([
-    ['monitoring', 'Keeper Fleet'],
-    ['command', 'Actions'],
-    ['lab', 'Tools'],
-    ['board', 'Board'],
-  ] as const)(
-    'renders the generic lead for %s as the primary h1',
-    (tab, label) => {
-      route.value = { tab, params: {}, postId: null }
-
-      render(h(DashboardMain, {}), container)
-
-      const leadTitle = container.querySelector('.v2-shell-panel h1')
-      expect(leadTitle?.textContent?.trim()).toBe(label)
-    },
-  )
-
   it('renders a bespoke-header surface with one h1 and no generic lead h1', async () => {
     route.value = { tab: 'overview', params: {}, postId: null }
 
@@ -89,7 +72,7 @@ describe('DashboardMain primary heading', () => {
       expect([...container.querySelectorAll('h1')].map(node => node.textContent?.trim()))
         .toEqual(['운영 개요'])
     }, { timeout: 5000 })
-    expect(container.querySelector('.v2-shell-panel h1')).toBeNull()
+    expect(container.querySelector('.v2-surface-header h1')).toBeNull()
   })
 })
 
@@ -117,30 +100,6 @@ describe('isKeeperDetailDashboardRoute', () => {
       postId: null,
     })).toBe(false)
   })
-})
-
-describe('shouldRenderSurfaceLead', () => {
-  it('lets the Connectors prototype surface own its primary header', () => {
-    expect(shouldRenderSurfaceLead({
-      tab: 'connectors',
-      params: { section: 'connector-status' },
-      postId: null,
-    })).toBe(false)
-  })
-
-  it.each(['overview', 'approvals', 'fusion', 'workspace', 'logs', 'cockpit', 'settings'] as const)(
-    'suppresses the generic lead for %s (surface renders its own bespoke header)',
-    (tab) => {
-      expect(shouldRenderSurfaceLead({ tab, params: {}, postId: null })).toBe(false)
-    },
-  )
-
-  it.each(['monitoring', 'command', 'lab', 'board'] as const)(
-    'keeps the generic lead for %s (surface has no own header)',
-    (tab) => {
-      expect(shouldRenderSurfaceLead({ tab, params: {}, postId: null })).toBe(true)
-    },
-  )
 })
 
 describe('summarizeAttentionPreview', () => {

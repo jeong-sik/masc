@@ -6,6 +6,7 @@ import { DesignCanvas } from './design-canvas'
 import { LabPerf } from './lab-perf'
 import { MemoryExplore } from './memory/memory-explore'
 import { KeeperMemoryHealth } from './memory/keeper-memory-health'
+import { SurfaceHeader } from './common/surface-header'
 
 type LabSection = 'tools' | 'harness' | 'design-canvas' | 'performance' | 'memory-explore' | 'keeper-memory-health'
 
@@ -28,6 +29,7 @@ export function Lab() {
 
   return html`
     <div class="v2-lab-surface ss-surface bg-surface-page flex flex-col gap-6" data-testid="lab-surface">
+      <${SurfaceHeader} />
       ${section === 'tools' ? html`
         <${Tools} />
       ` : null}

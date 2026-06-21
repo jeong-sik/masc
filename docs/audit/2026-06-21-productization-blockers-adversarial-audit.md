@@ -224,6 +224,8 @@ rg -n 'let default_base\s*=\s*"/Users/dancer/me"|/Users/dancer/me' bin lib test 
 rg -n 'Sys\.getenv_opt|getenv|get_bool ~default|Sys\.readdir|Filename\.concat.*"\.masc"' bin lib scripts docs
 ```
 
+Verification limitation: the `rg` probes above are rule-based string searches, not AST/typed API checks. They can produce false positives and can miss aliases or wrappers around `Sys.getenv_opt`, direct `Sys.getenv`, `Unix.getenv`, `Unix.environment`, string interpolation, and transformed concatenations such as `Filename.concat base (".masc" ^ suffix)`. Follow-up guards should move these checks toward typed/AST-backed analysis where possible.
+
 Observed guard results:
 
 - `scripts/check-feature-flag-consistency.sh`: PASS, but falsely reports `MASC_KEEPER_DOCKER_PLAYGROUND` as stale.

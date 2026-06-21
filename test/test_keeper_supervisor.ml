@@ -2249,6 +2249,100 @@ let test_assess_stale_run () =
           ~now:300.0
           ~threshold:150.0))
 
+let test_assess_in_turn_progress () =
+  let make_turn_obs ~started_at ~last_progress_at ~last_progress_kind =
+    let open Masc.Keeper_registry_types in
+    ({ turn_id = 1
+     ; started_at
+     ; last_progress_at
+     ; last_progress_kind
+     ; turn_phase = Packed Turn_prompting
+     ; decision_stage = Packed Decision_undecided
+     ; measurement = None
+     ; measurement_bind_count = 0
+     ; selected_model = None
+     }
+      : Masc.Keeper_registry_types.turn_observation)
+  in
+  (* hung mid-turn: Running, turn live, last progress 400s ago, threshold 300s →
+     Some (Stale_turn_timeout (Mid_turn_no_progress { since_progress=400 })). *)
+  (match
+     Sup.assess_in_turn_progress
+       ~phase:KSM.Running
+       ~in_turn:
+         (Some
+            (make_turn_obs
+               ~started_at:1000.0
+               ~last_progress_at:1000.0
+               ~last_progress_kind:(Some "tool_completed:foo")))
+       ~now:1400.0
+       ~progress_timeout:300.0
+   with
+   | Some
+       (Reg.Stale_turn_timeout
+          (Reg.Mid_turn_no_progress
+             { since_progress_seconds
+             ; active_seconds
+             ; progress_timeout_threshold
+             ; last_progress_kind
+             })) ->
+     check int "since_progress=400" 400 (int_of_float since_progress_seconds);
+     check int "active=400" 400 (int_of_float active_seconds);
+     check int "threshold=300" 300 (int_of_float progress_timeout_threshold);
+     check
+       (option string)
+       "last_progress_kind preserved"
+       (Some "tool_completed:foo")
+       last_progress_kind
+   | _ -> check bool "hung must stamp Mid_turn_no_progress{400}" false true);
+  (* progressing: last progress only 100s ago → None. *)
+  check bool "recent progress → None" true
+    (Option.is_none
+       (Sup.assess_in_turn_progress
+          ~phase:KSM.Running
+          ~in_turn:
+            (Some
+               (make_turn_obs
+                  ~started_at:1000.0
+                  ~last_progress_at:1300.0
+                  ~last_progress_kind:(Some "tool_completed:bar")))
+          ~now:1400.0
+          ~progress_timeout:300.0));
+  (* boundary: since_progress exactly == threshold → None (strict >). *)
+  check bool "boundary since==threshold → None" true
+    (Option.is_none
+       (Sup.assess_in_turn_progress
+          ~phase:KSM.Running
+          ~in_turn:
+            (Some
+               (make_turn_obs
+                  ~started_at:1000.0
+                  ~last_progress_at:1000.0
+                  ~last_progress_kind:None))
+          ~now:1300.0
+          ~progress_timeout:300.0));
+  (* no turn in progress → None (mid-turn contract needs Some obs). *)
+  check bool "no turn → None" true
+    (Option.is_none
+       (Sup.assess_in_turn_progress
+          ~phase:KSM.Running
+          ~in_turn:None
+          ~now:9999.0
+          ~progress_timeout:300.0));
+  (* not-running: Crashed with a silent turn → None. *)
+  check bool "crashed → None" true
+    (Option.is_none
+       (Sup.assess_in_turn_progress
+          ~phase:KSM.Crashed
+          ~in_turn:
+            (Some
+               (make_turn_obs
+                  ~started_at:1000.0
+                  ~last_progress_at:1000.0
+                  ~last_progress_kind:None))
+          ~now:1400.0
+          ~progress_timeout:300.0))
+
 let () =
   run "keeper_supervisor" [
     "backoff", [
@@ -2405,5 +2499,10 @@ let () =
       test_case
         "assess_stale_run covers frozen/fresh/in-turn/fresh-start/not-running/boundary"
         `Quick test_assess_stale_run;
+    ];
+    "mid_turn_progress_window", [
+      test_case
+        "assess_in_turn_progress covers hung/progressing/boundary/no-turn/not-running"
+        `Quick test_assess_in_turn_progress;
     ];
   ]

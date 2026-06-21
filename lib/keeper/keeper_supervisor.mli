@@ -88,6 +88,21 @@ val assess_stale_run :
     turn ([last_turn_ts > 0]), and [now] exceeds [last_turn_ts] by more than
     [threshold]. [None] otherwise. Exposed for regression tests. *)
 
+val assess_in_turn_progress :
+     phase:Keeper_state_machine.phase
+  -> in_turn:Keeper_registry_types.turn_observation option
+  -> now:float
+  -> progress_timeout:float
+  -> Keeper_registry.failure_reason option
+(** RFC-0012: pure in-turn progress-silence assessment. Returns
+    [Some (Stale_turn_timeout (Mid_turn_no_progress { ... }))] — the
+    [Mid_turn_no_progress] variant's first real producer — when [phase = Running]
+    with a turn in progress ([in_turn = Some obs]) whose [last_progress_at] is
+    older than [progress_timeout]. [None] otherwise (not running, no turn in
+    progress, or progress recorded within the window). Keys on recorded progress
+    events, orthogonal to the wall-clock [In_turn_hung] and no-turn [Idle_turn].
+    Exposed for regression tests. *)
+
 val failure_reason_policy_decision_for_test :
   Keeper_registry.failure_reason option -> Keeper_failure_policy.decision option
 (** Pure supervisor-side bridge from registry failure reasons into the

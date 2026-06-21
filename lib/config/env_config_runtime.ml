@@ -438,6 +438,35 @@ module Keeper_stale_run = struct
     if v > 0.0 then Some v else None
 end
 
+(** {1 Keeper mid-turn progress watchdog (RFC-0012)}
+
+    Opt-in progress-silence window for the in-turn case. Distinct from
+    [Keeper_max_turn_watchdog] (wall-clock "one attempt taking too long",
+    produces [In_turn_hung]) and [Keeper_stale_run] (no turn produced at all,
+    produces [Idle_turn]): this keys on
+    [current_turn_observation.last_progress_at] while a turn IS running,
+    producing [Mid_turn_no_progress] when no forward-progress event
+    (tool_completed / sdk-turn boundary) has been recorded for longer than the
+    threshold.
+
+    Opt-in ([None] when unset) — NOT default-on — because progress is currently
+    stamped only on tool/sdk-boundary events
+    ([Keeper_registry.record_turn_progress] call sites in [keeper_hooks_oas.ml]),
+    not on thinking/text deltas. A default-on window would false-fire on a
+    legitimately long single-attempt thinking turn on a slow local model.
+    Operators enable per runtime; RFC-0012 recommends [300.0] when enabling. *)
+module Keeper_mid_turn_progress = struct
+  (** In-turn progress-silence threshold in seconds; produces
+      [Mid_turn_no_progress] when a running turn records no progress event for
+      this long. [None] / 0 disables (opt-in). RFC-0012 recommends 300 when
+      enabling. @category Timeouts @ops_class operator *)
+  let timeout_sec_opt () =
+    let v =
+      get_float ~default:0.0 "MASC_KEEPER_MID_TURN_PROGRESS_TIMEOUT_SEC"
+    in
+    if v > 0.0 then Some v else None
+end
+
 (** {1 Slot Scheduling} *)
 
 module Slot = struct

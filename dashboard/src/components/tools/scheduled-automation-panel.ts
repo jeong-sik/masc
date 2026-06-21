@@ -104,7 +104,7 @@ function assertNever(value: never): never {
   throw new Error(`Unhandled schedule filter key: ${String(value)}`)
 }
 
-function filterMatches(filter: ScheduleFilterKey, request: DashboardScheduledAutomationRequest): boolean {
+export function filterMatches(filter: ScheduleFilterKey, request: DashboardScheduledAutomationRequest): boolean {
   if (filter === 'all') return true
   const status = normalized(effectiveStatus(request))
   const readiness = normalized(request.execution_readiness)

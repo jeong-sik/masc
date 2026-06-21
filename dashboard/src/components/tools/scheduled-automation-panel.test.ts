@@ -20,7 +20,7 @@ vi.mock('../common/toast', () => ({
   showToast: mocks.showToast,
 }))
 
-import { ScheduledAutomationPanel, selectWakeSignals } from './scheduled-automation-panel'
+import { ScheduledAutomationPanel, selectWakeSignals, filterMatches } from './scheduled-automation-panel'
 
 function request(
   overrides: Partial<DashboardScheduledAutomationRequest> & { schedule_id: string },
@@ -549,5 +549,25 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.textContent).not.toContain('승인 — grant 발급')
     expect(container.textContent).not.toContain('거부')
     expect(container.textContent).not.toContain('취소')
+  })
+})
+
+describe('filterMatches', () => {
+  it('matches each ScheduleFilterKey against the right request shape', () => {
+    expect(filterMatches('all', request({ schedule_id: 'a' }))).toBe(true)
+    expect(filterMatches('ready', request({ schedule_id: 'r', execution_readiness: 'ready' }))).toBe(true)
+    expect(filterMatches('ready', request({ schedule_id: 'r2', execution_readiness: 'scheduled' }))).toBe(false)
+    expect(filterMatches('scheduled', request({ schedule_id: 's', status: 'scheduled' }))).toBe(true)
+    expect(filterMatches('terminal', request({ schedule_id: 't', status: 'succeeded' }))).toBe(true)
+    expect(filterMatches('terminal', request({ schedule_id: 't2', status: 'scheduled' }))).toBe(false)
+    expect(filterMatches('pending', request({ schedule_id: 'p', status: 'pending_approval' }))).toBe(true)
+    expect(filterMatches('due', request({ schedule_id: 'd', effective_status: 'due' }))).toBe(true)
+  })
+
+  it('throws on an out-of-union filter key instead of silently showing all', () => {
+    // Simulates a future ScheduleFilterKey added to the type/UI but missing a
+    // switch case: the assertNever default must surface the gap (Error) rather
+    // than fall through to `return true`. `as never` stands in for that bypass.
+    expect(() => filterMatches('archived' as never, request({ schedule_id: 'x' }))).toThrow()
   })
 })

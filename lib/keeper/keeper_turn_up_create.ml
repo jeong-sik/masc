@@ -281,26 +281,30 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                   (* Ensure full session dir tree, not just base_dir (issue #3019) *)
                   ignore (Keeper_fs.ensure_dir (Filename.concat base_dir trace_id));
                   let bundle_paths =
-                    try
-                      Keeper_alerting_path.ensure_sandbox_bundle_for_profile
-                        ~config:ctx.config ~name:p.name
-                        ~sandbox_profile
-                    with exn ->
-                      (* Surface masc-improver/sangsu sandbox boot
-                         silent-failure (2026-05-05).  Keeper_fs.ensure_dir
-                         raises on filesystem error; the previous [ignore]
-                         discarded it.  Now we log + emit a Otel_metric_store
-                         counter so the dashboard makes failure visible
-                         without aborting keeper boot. *)
-                      Log.Keeper.error
-                        "create_keeper sandbox bundle init raised: keeper=%s exn=%s"
-                        p.name (Printexc.to_string exn);
-                      Otel_metric_store.inc_counter
-                        Keeper_metrics.(to_string LifecycleDispatchRejections)
-                        ~labels:[("keeper", p.name);
-                                 ("event", "sandbox_bundle_init_raised")]
-                        ();
-                      []
+                    (* Surface masc-improver/sangsu sandbox boot
+                       silent-failure (2026-05-05).  Keeper_fs.ensure_dir
+                       raises on filesystem error; the previous [ignore]
+                       discarded it.  Now we log + emit a Otel_metric_store
+                       counter so the dashboard makes failure visible
+                       without aborting keeper boot.  ensure_dir runs under an
+                       Eio.Mutex and re-raises [Eio.Cancel.Cancelled], so route
+                       through the RFC-0106 SSOT combinator: a bare catch-all
+                       would swallow Cancelled and let a cancelled create keep
+                       booting a keeper that should not exist. *)
+                    Cancel_safe.protect
+                      ~on_exn:(fun exn ->
+                        Log.Keeper.error
+                          "create_keeper sandbox bundle init raised: keeper=%s exn=%s"
+                          p.name (Printexc.to_string exn);
+                        Otel_metric_store.inc_counter
+                          Keeper_metrics.(to_string LifecycleDispatchRejections)
+                          ~labels:[("keeper", p.name);
+                                   ("event", "sandbox_bundle_init_raised")]
+                          ();
+                        [])
+                      (fun () ->
+                        Keeper_alerting_path.ensure_sandbox_bundle_for_profile
+                          ~config:ctx.config ~name:p.name ~sandbox_profile)
                   in
                   List.iter (fun bp ->
                     if not (Sys.file_exists bp) then begin

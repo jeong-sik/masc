@@ -386,6 +386,14 @@
 .kti-k-reason { background: var(--color-status-info); }
 .kti-k-tool { background: var(--color-accent-fg); }
 .kti-k-gen { background: var(--color-status-ok); }
+/* Unmeasured phases (durationSource === 'not_recorded'): no real duration, so
+   the bar is a placeholder, not a measurement. Hatch + dim it so it never reads
+   as a measured span alongside the tool bars that carry real ms. */
+.kti-wf-bar.is-unmeasured {
+  opacity: 0.5;
+  background-image: repeating-linear-gradient(135deg, color-mix(in oklab, var(--color-bg-page) 60%, transparent) 0 5px, transparent 5px 10px);
+  border: 1px dashed color-mix(in oklab, var(--color-fg-muted) 45%, transparent);
+}
 
 .kti-wf-foot {
   display: flex;

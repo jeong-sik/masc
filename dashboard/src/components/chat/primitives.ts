@@ -10,8 +10,9 @@ import { parseMarkdownToBlocks } from './markdown-blocks'
 import { linkifyHtmlReferences } from './chat-linkify'
 import { showToast } from '../common/toast'
 import { copyToClipboard } from '../common/copyable-code'
-import { useVoiceInput } from './voice-input'
 import { ExternalLink, Mic, Square } from 'lucide-preact'
+import { prettyJsonDeep } from '../tool-call-shared'
+import { useVoiceInput } from './voice-input'
 
 const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
 import { formatTimeHms } from '../../lib/format-time'
@@ -1977,11 +1978,12 @@ function ChatMessageBubble({
 function prettyJsonish(text: string): string {
   const trimmed = text.trimStart()
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    try {
-      return JSON.stringify(JSON.parse(text), null, 2)
-    } catch {
-      // not valid JSON — show as-is
-    }
+    // prettyJsonDeep recursively un-nests double-encoded JSON in string values
+    // so legacy "<label>\n{json}" tool rows render structurally instead of
+    // showing literal "\n". Returns null when not valid JSON.
+    const pretty = prettyJsonDeep(text)
+    if (pretty !== null) return pretty
+    // not valid JSON — show as-is
   }
   return text
 }
@@ -2218,8 +2220,11 @@ type TraceOrderItem =
   | { kind: 'tool'; entry: KeeperConversationEntry; output: ToolCallEntry | null }
 
 function traceOrderTs(item: TraceOrderItem): string {
-  // ISO-8601 strings sort lexicographically == chronologically. A step without
-  // `ts` (backend-normalized, no timestamp surfaced from the wire) sorts first.
+  // ISO-8601 strings sort lexicographically within one clock domain. This merge
+  // spans two: think/reason `ts` is stamped on the client when the delta
+  // arrives, tool `entry.timestamp` comes from the server (ts_unix). Live
+  // ordering is best-effort chronological and can cross within ~1 RTT; a step
+  // without `ts` (backend-normalized, no timestamp from the wire) sorts first.
   if (item.kind === 'tool') return item.entry.timestamp ?? ''
   // Only think/reason carry `ts`; the tool variant of ChatTraceStep does not
   // (and is never a 'trace' item here, but narrow for type safety).

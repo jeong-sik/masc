@@ -195,12 +195,12 @@ let handle_vote ~tool_name ~start_time args =
 
 let handle_stats ~tool_name ~start_time _args : Tool_result.result =
   let stats = Board_dispatch.stats () in
-  Tool_result.make_ok
+  (* Structured result via [Tool_result.ok] so [stats] is parsed back into
+     structured [data] instead of a `String that double-encodes the JSON. *)
+  Tool_result.ok
     ~tool_name
     ~start_time
-    ~data:
-      (`String (Printf.sprintf "Board Stats:\n%s" (Yojson.Safe.pretty_to_string stats)))
-    ()
+    (Printf.sprintf "Board Stats:\n%s" (Yojson.Safe.pretty_to_string stats))
 ;;
 
 (** Search posts by keyword. *)
@@ -319,13 +319,12 @@ let handle_reaction ~tool_name ~start_time args : Tool_result.result =
     else (
       match Board_dispatch.toggle_reaction ~target_type ~target_id ~user_id ~emoji with
       | Ok result ->
+        (* Pass structured [data] directly (no prose label here), instead of a
+           `String holding stringified JSON that consumers would double-encode. *)
         Tool_result.make_ok
           ~tool_name
           ~start_time
-          ~data:
-            (`String
-               (Yojson.Safe.pretty_to_string
-                  (Board.reaction_toggle_result_to_yojson result)))
+          ~data:(Board.reaction_toggle_result_to_yojson result)
           ()
       | Error e ->
         Board_tool_format.error_of_board_error ~tool_name ~start_time e)

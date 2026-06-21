@@ -982,6 +982,23 @@ let test_dashboard_shell_light_includes_runtime_health_ssot () =
      | `Assoc _ -> true
      | _ -> false)
 
+let test_dashboard_fleet_composite_envelope_is_cached () =
+  (* [dashboard_fleet_composite_json] caches the fleet envelope so a second poll
+     inside the TTL returns the cached compute (identical generated_at) rather
+     than re-running the sequential N-keeper read path. Each keeper reaches
+     [Keeper_secret_projection.dashboard_status_json] (a synchronous disk
+     read), so an uncached poll costs N reads. This guards that regression. *)
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let json1 = Server_dashboard_http.dashboard_fleet_composite_json ~config () in
+  let json2 = Server_dashboard_http.dashboard_fleet_composite_json ~config () in
+  let open Yojson.Safe.Util in
+  let gen1 = json1 |> member "generated_at" |> to_float in
+  let gen2 = json2 |> member "generated_at" |> to_float in
+  Alcotest.(check bool)
+    "second fleet-composite poll hits cache (identical generated_at)"
+    true (gen1 = gen2)
+
 let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   ignore (Workspace.init config ~agent_name:None);
@@ -1268,5 +1285,7 @@ let () =
             test_project_snapshot_wire_returns_snapshot_when_populated;
           test_case "telemetry n default is bounded (freeze guard)" `Quick
             test_telemetry_n_default_is_bounded;
+          test_case "fleet-composite envelope is cached across polls" `Quick
+            test_dashboard_fleet_composite_envelope_is_cached;
         ] );
     ]

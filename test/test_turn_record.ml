@@ -48,7 +48,12 @@ let sample_record () : Turn_record.t =
   ; model = Some "deepseek-v4-flash"
   ; finish_reason = Some "completed"
   ; sampling =
-      { temperature = Some 0.3; thinking_budget = Some 1500; enable_thinking = Some true }
+      { temperature = Some 0.3
+      ; top_p = Some 0.9
+      ; max_tokens = Some 8192
+      ; thinking_budget = Some 1500
+      ; enable_thinking = Some true
+      }
   ; usage = { input_tokens = Some 18000; output_tokens = Some 412 }
   ; ts = 1781200000.5
   }
@@ -83,6 +88,10 @@ let test_codec_roundtrip () =
     check (option string) "finish_reason" record.finish_reason decoded.finish_reason;
     check (option (float 0.0001)) "temperature" record.sampling.temperature
       decoded.sampling.temperature;
+    check (option (float 0.0001)) "top_p" record.sampling.top_p
+      decoded.sampling.top_p;
+    check (option int) "max_tokens" record.sampling.max_tokens
+      decoded.sampling.max_tokens;
     check (option int) "thinking_budget" record.sampling.thinking_budget
       decoded.sampling.thinking_budget;
     check (option bool) "enable_thinking" record.sampling.enable_thinking
@@ -98,7 +107,13 @@ let test_codec_optional_fields_absent () =
     { (sample_record ()) with
       model = None
     ; finish_reason = None
-    ; sampling = { temperature = None; thinking_budget = None; enable_thinking = None }
+    ; sampling =
+        { temperature = None
+        ; top_p = None
+        ; max_tokens = None
+        ; thinking_budget = None
+        ; enable_thinking = None
+        }
     ; usage = { input_tokens = None; output_tokens = None }
     ; turn_ref = None
     }
@@ -111,7 +126,11 @@ let test_codec_optional_fields_absent () =
      check bool "finish_reason key omitted when None" false
        (List.mem_assoc "finish_reason" fields);
      check bool "model key omitted when None" false
-       (List.mem_assoc "model" fields)
+       (List.mem_assoc "model" fields);
+     check bool "top_p key omitted when None" false
+       (List.mem_assoc "top_p" fields);
+     check bool "max_tokens key omitted when None" false
+       (List.mem_assoc "max_tokens" fields)
    | _ -> fail "to_json did not produce an object");
   match Turn_record.of_json json with
   | Error e -> failf "decode failed: %s" e
@@ -121,6 +140,8 @@ let test_codec_optional_fields_absent () =
       decoded.finish_reason;
     check (option (float 0.0001)) "temperature absent" None
       decoded.sampling.temperature;
+    check (option (float 0.0001)) "top_p absent" None decoded.sampling.top_p;
+    check (option int) "max_tokens absent" None decoded.sampling.max_tokens;
     check (option int) "input_tokens absent" None decoded.usage.input_tokens;
     check bool "turn_ref absent" true (decoded.turn_ref = None)
 

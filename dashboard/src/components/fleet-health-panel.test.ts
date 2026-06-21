@@ -124,6 +124,9 @@ describe('FleetHealthPanel', () => {
   it('renders the compact Tool Monitor operations board when no view param', () => {
     render(html`<${FleetHealthPanel} />`)
 
+    expect(screen.getByTestId('fleet-command-strip')).toBeTruthy()
+    expect(screen.getByText('Keeper Fleet')).toBeTruthy()
+    expect(screen.getByText('런타임 unknown')).toBeTruthy()
     expect(screen.getByTestId('tool-monitor-default')).toBeTruthy()
     expect(screen.getByText('Keeper tool readiness')).toBeTruthy()
     expect(screen.getAllByText('m:board_post').length).toBeGreaterThan(0)
@@ -235,11 +238,56 @@ describe('FleetHealthPanel', () => {
     render(html`<${FleetHealthPanel} />`)
 
     expect(storeMock.refreshShell).toHaveBeenCalledWith({ force: true })
+    expect(screen.getByTestId('fleet-command-strip')).toBeTruthy()
+    expect(screen.getByText('런타임 가동')).toBeTruthy()
+    expect(screen.getByText('capacity 8/17')).toBeTruthy()
+    expect(screen.getByText('exec 13')).toBeTruthy()
+    expect(screen.getByText('일시정지 3')).toBeTruthy()
+    expect(screen.getByText('CDAL proof_store_incomplete')).toBeTruthy()
     expect(screen.getByTestId('runtime-blocker-board')).toBeTruthy()
     expect(screen.getByText('8/17')).toBeTruthy()
     expect(screen.getByText('analyst')).toBeTruthy()
     expect(screen.getAllByText('proof_store_incomplete').length).toBeGreaterThan(0)
     expect(screen.getByText(/cdal-stale-a/)).toBeTruthy()
+  })
+
+  it('marks the runtime health pill as warn when runtime.status is not ready', () => {
+    storeMock.shellRuntimeResolution.value = {
+      status: 'booting',
+      warnings: [],
+      fleet_safety: {
+        keeper_fibers: 8,
+        paused_keepers: 0,
+        keeper_fleet_no_fibers: false,
+        keeper_fd_pressure: null,
+        keeper_reaction_ledger: null,
+        paused_keepers_health: { count: 0, names: [], running_count: 0, running_names: [], durable_count: 0, durable_names: [], autoboot_enabled_count: 0, autoboot_enabled_names: [], read_error_count: 0, read_errors: [], details: [] },
+        keeper_fleet_safety: {
+          status: 'ok',
+          reason: null,
+          blocker: null,
+          admission_blocked: null,
+          admission_blocked_keepers: null,
+          blocked_keepers: null,
+          blocked_count: null,
+          running_keeper_fiber_count: 8,
+          executable_keeper_fiber_count: 8,
+          effective_reaction_capacity_count: 8,
+          executable_reaction_capacity_count: 8,
+          target_reaction_capacity_count: 8,
+          reaction_capacity_shortfall_count: 0,
+          operator_action_required: false,
+          reaction_capacity_below_target: false,
+        },
+      },
+      cdal: { writer_status: 'active', operator_action_required: false, proof_store_path_drift: false },
+    }
+
+    render(html`<${FleetHealthPanel} />`)
+
+    const runtimePill = screen.getByText('런타임 booting').closest('span')
+    expect(runtimePill?.classList.contains('warn')).toBe(true)
+    expect(runtimePill?.classList.contains('ok')).toBe(false)
   })
 
   it('renders TelemetryUnified alone for view=event-log', () => {

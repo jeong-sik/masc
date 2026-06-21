@@ -55,7 +55,7 @@
 .dock-picker { position: relative; flex: none; }
 .dock-picker-btn {
   display: flex; align-items: center; gap: var(--sp-2);
-  padding: 3px 9px 3px 3px; border-radius: var(--radius-pill);
+  padding: 3px 10px 3px 3px; border-radius: var(--radius-pill);
   border: 1px solid var(--border-main); background: var(--bg-card); cursor: pointer; transition: 0.14s;
 }
 .dock-picker-btn:hover { border-color: var(--border-highlight); }

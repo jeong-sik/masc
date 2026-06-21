@@ -145,7 +145,7 @@
 }
 
 .v2-overview-rollup {
-  margin-top: 18px;
+  margin-top: 20px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
   background: color-mix(in oklab, var(--bg-panel) 72%, transparent);

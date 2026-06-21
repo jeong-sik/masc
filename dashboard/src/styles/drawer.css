@@ -92,7 +92,7 @@
 .json-section:last-child { border-bottom: none; }
 .json-head {
   display: flex; align-items: center; gap: var(--sp-1h);
-  padding: 5px 10px; cursor: pointer; user-select: none;
+  padding: 6px 10px; cursor: pointer; user-select: none;
   font-size: var(--fs-11);
 }
 .json-head:hover { background: var(--color-bg-hover); }

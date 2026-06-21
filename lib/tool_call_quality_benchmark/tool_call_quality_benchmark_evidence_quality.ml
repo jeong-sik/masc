@@ -12,16 +12,40 @@ let semantic_selectors (benchmark_case : benchmark_case) =
   @ arg_selectors
   |> List.filter Eval_tool_selector.requires_route_evidence
 
+(* A semantic selector matches route_evidence only when the relevant field
+   carries a usable value: a non-empty descriptor/handler string, a non-empty
+   eval-tag list, or a receipt-label assoc with at least one non-empty string
+   value. Empty values ([{"descriptor_id": ""}], [{"eval_tags": []}], ...)
+   cannot match any parsed selector, because Eval_tool_selector.of_yojson
+   rejects empty selector values, so they are not route evidence. This mirrors
+   {!Eval_tool_selector.matches}, which reads the same fields via
+   Json_util.assoc_string_opt / json_string_list_member / the receipt_labels
+   assoc and likewise yields no match for empty values. Checking only key
+   presence here would let vacuous evidence pass the gate. *)
 let route_evidence_has_semantic_fields = function
-  | Some (`Assoc fields) ->
-      List.exists
-        (fun (key, _value) ->
-          String.equal key "descriptor_id"
-          || String.equal key "runtime_handler"
-          || String.equal key "receipt_labels"
-          || String.equal key "eval_tags")
-        fields
-  | _ -> false
+  | Some json ->
+      let has_string field =
+        Option.is_some (Json_util.assoc_string_opt field json)
+      in
+      let has_eval_tags =
+        match Json_util.json_string_list_member "eval_tags" json with
+        | [] -> false
+        | _ :: _ -> true
+      in
+      let has_receipt_label =
+        match Json_util.assoc_member_opt "receipt_labels" json with
+        | Some (`Assoc receipt_fields) ->
+            List.exists
+              (fun (_key, value) ->
+                match value with
+                | `String text -> not (String.equal (String.trim text) "")
+                | _ -> false)
+              receipt_fields
+        | _ -> false
+      in
+      has_string "descriptor_id" || has_string "runtime_handler" || has_eval_tags
+      || has_receipt_label
+  | None -> false
 
 let cases_by_id cases =
   cases

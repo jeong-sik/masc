@@ -50,7 +50,9 @@ let () =
       ("--view", Arg.Set_string view, "Summary view: provider-model-keeper, provider-model, keeper");
       ("--require-route-evidence",
        Arg.Set require_route_evidence,
-       "Fail if selector-backed cases have tool calls without route_evidence");
+       "Fail if selector-backed cases have tool calls without usable \
+        route_evidence (default: off; pass this flag in CI/live benchmarking \
+        to enforce evidence quality)");
       ("--models",
        Arg.String (fun value -> model_filters := parse_csv_arg value),
        "Comma-separated provider:model filters");

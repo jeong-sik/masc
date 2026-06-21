@@ -74,12 +74,6 @@ export function mcpExposedToolNames(items: readonly DashboardToolInventoryItem[]
     .sort((a, b) => a.localeCompare(b))
 }
 
-const RUNTIMES = [
-  { name: 'oas·seoul-1', endpoint: 'oas://seoul-1.masc.run', region: 'ap-northeast-2', kind: 'OAS', keepers: 3 },
-  { name: 'oas·tokyo-2', endpoint: 'oas://tokyo-2.masc.run', region: 'ap-northeast-1', kind: 'OAS', keepers: 2 },
-  { name: 'local·docker', endpoint: 'unix:///var/run/masc.sock', region: 'local', kind: 'Docker', keepers: 1 },
-]
-
 const APPROVAL_ACTIONS: [string, string, string][] = [
   ['git push / merge', 'always', '원격 브랜치에 쓰기'],
   ['배포 (infra/deploy)', 'always', 'deploy 트리거'],
@@ -500,8 +494,9 @@ export function SettingsSurface() {
   const cur = SET_SECTIONS.find(s => s[0] === sec) ?? SET_SECTIONS[0]!
 
   // Resolved runtime options (de-duplicated, derived from the live registry).
-  const runtimeIdOptions = (runtimeDefaults?.runtimes ?? []).map(r => r.id)
-  const runtimeModelOptions = [...new Set((runtimeDefaults?.runtimes ?? []).map(r => r.model))]
+  const runtimeEntries = runtimeDefaults?.runtimes ?? []
+  const runtimeIdOptions = runtimeEntries.map(r => r.id)
+  const runtimeModelOptions = [...new Set(runtimeEntries.map(r => r.model))]
   const keeperAssignments = runtimeDefaults?.model_routing.keeper_assignments ?? []
   const librarianRuntime = runtimeDefaults?.model_routing.librarian_runtime_id ?? null
   const crossVerifierRuntime = runtimeDefaults?.model_routing.cross_verifier_runtime_id ?? null
@@ -647,25 +642,26 @@ export function SettingsSurface() {
             `}
 
             ${sec === 'runtimes' && html`
-              <div class="set-hint" style=${{ marginBottom: '12px' }}>Registered runtime targets. Keepers run on one of these.</div>
-              ${RUNTIMES.map(rt => html`
-                <div key=${rt.name} class="set-rt">
-                  <div class="set-rt-top">
-                    <span class="set-rt-name mono">${rt.name}</span>
-                    <span class="set-rt-kind">${rt.kind}</span>
-                    <span class="set-rt-keepers">keeper ${rt.keepers}</span>
-                    <${VerifyBtn} label="Check" />
-                  </div>
-                  <div class="set-rt-row">
-                    <span class="sub-k">endpoint</span>
-                    <input class="set-input mono" defaultValue=${rt.endpoint} />
-                  </div>
-                  <div class="set-rt-row">
-                    <span class="sub-k">region</span>
-                    <span class="mono" style=${{ fontSize: '12px', color: 'var(--text-mid)' }}>${rt.region}</span>
-                  </div>
-                </div>
-              `)}
+              <div class="set-hint" style=${{ marginBottom: '12px' }}>Registered runtime targets resolved from runtime.toml.</div>
+              ${runtimeEntries.length === 0
+                ? html`<div class="set-hint" data-testid="runtime-nodes-empty">등록된 런타임이 없습니다.</div>`
+                : runtimeEntries.map(rt => html`
+                    <div key=${rt.id} class="set-rt" data-testid="runtime-node">
+                      <div class="set-rt-top">
+                        <span class="set-rt-name mono">${rt.id}</span>
+                        <span class="set-rt-kind">${rt.provider}</span>
+                        ${rt.is_default ? html`<span class="set-rt-keepers">default</span>` : null}
+                      </div>
+                      <div class="set-rt-row">
+                        <span class="sub-k">model</span>
+                        <span class="mono" style=${{ fontSize: '12px', color: 'var(--text-mid)' }}>${rt.model}</span>
+                      </div>
+                      <div class="set-rt-row">
+                        <span class="sub-k">max context</span>
+                        <span class="mono" style=${{ fontSize: '12px', color: 'var(--text-mid)' }}>${rt.max_context}</span>
+                      </div>
+                    </div>
+                  `)}
               <button type="button" class="set-add">＋ Add runtime</button>
             `}
 

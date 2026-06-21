@@ -250,6 +250,24 @@ describe('SettingsSurface', () => {
     expect(container.querySelectorAll('[data-testid="routing-assignment"]').length).toBe(0)
   })
 
+  it('runtime nodes section uses the resolved registry without sample targets', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    const runtimesNav = container.querySelector('[data-testid="settings-nav-runtimes"]') as HTMLElement
+    await fireEvent.click(runtimesNav)
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('[data-testid="runtime-node"]').length).toBe(3)
+    })
+    const text = container.textContent ?? ''
+    expect(text).toContain('rt-a')
+    expect(text).toContain('rt-b')
+    expect(text).toContain('rt-c')
+    expect(text).toContain('m1')
+    expect(text).not.toContain('oas://seoul-1.masc.run')
+    expect(text).not.toContain('local·docker')
+  })
+
   it('log filter chips filter live rows from the ring', async () => {
     // 6 ring entries mapped to rows: tool(/masc_/)=3, success(ok)=3, failure(fail)=2.
     apiMock.fetchLogs.mockResolvedValue({

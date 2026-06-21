@@ -166,9 +166,10 @@ val dashboard_execution_http_json :
   Yojson.Safe.t
 (** Implements the dashboard execution HTTP route.
     Reads through the per-request actor / fixture /
-    light-mode query params, then routes via
+    light-mode / force query params, then routes via
     [Dashboard_cache.get_or_compute_with_timeout] with
-    a 120 s TTL. *)
+    a 120 s TTL.  Default light [force=true] bypasses the
+    default execution cache once and updates it on success. *)
 
 val dashboard_execution_trust_http_json :
   state:Mcp_server.server_state ->

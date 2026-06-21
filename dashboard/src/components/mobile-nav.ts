@@ -79,6 +79,7 @@ export function DashboardNavRail({
       <aside
         id="dashboard-side-rail"
         aria-label="Sidebar navigation"
+        data-collapsed=${effectiveCollapsed ? 'true' : 'false'}
         data-testid="dashboard-nav-rail"
         class="v2-shell-rail ${sideRailWidthClass} shrink-0 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-rail-bg)] backdrop-blur-xl transition-[width] duration-[var(--t-slow)] ease-[var(--ease)] ${sideRailResponsiveClass}"
       >

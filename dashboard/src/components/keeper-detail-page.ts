@@ -40,7 +40,13 @@ import { KeeperDetailBody } from './keeper-detail-body'
 import { KeeperWorkspaceRoster } from './keeper-workspace/keeper-workspace-roster'
 import { KeeperWorkspaceChat } from './keeper-workspace/keeper-workspace-chat'
 import { KeeperWorkspaceRail } from './keeper-workspace/keeper-workspace-rail'
-import { beginPaneResize, clampPaneWidth, rosterWidth, railWidth } from './keeper-workspace/keeper-workspace-pane-resize'
+import {
+  beginPaneResize,
+  clampPaneWidth,
+  effectiveRosterWidthForViewport,
+  rosterWidth,
+  railWidth,
+} from './keeper-workspace/keeper-workspace-pane-resize'
 import { ringFocusClasses } from './common/ring'
 
 const CLOSE_BUTTON_FOCUS_CLASS = ringFocusClasses({
@@ -391,7 +397,7 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
   const paneResizable = !detailOpen && !isMobile
   const gridStyle = paneResizable
     ? {
-        ...(rosterOpen ? { '--kw-roster-w': `${clampPaneWidth('roster', rosterWidth.value)}px` } : {}),
+        ...(rosterOpen ? { '--kw-roster-w': `${effectiveRosterWidthForViewport(rosterWidth.value, isNarrow)}px` } : {}),
         ...(railOpen ? { '--kw-rail-w': `${clampPaneWidth('rail', railWidth.value)}px` } : {}),
       }
     : undefined

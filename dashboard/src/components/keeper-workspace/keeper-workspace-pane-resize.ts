@@ -24,6 +24,7 @@ const PANE_BOUNDS: Record<PaneKind, { min: number; max: number; cssVar: string }
 }
 
 export const DEFAULT_ROSTER_WIDTH = 286
+export const NARROW_ROSTER_WIDTH = 248
 export const DEFAULT_RAIL_WIDTH = 312
 
 /** Persisted column widths (px). Reads subscribe the component, but values only
@@ -49,6 +50,13 @@ export function clampPaneWidth(kind: PaneKind, px: unknown): number {
   const { min, max } = PANE_BOUNDS[kind]
   if (typeof px !== 'number' || !Number.isFinite(px)) return min
   return Math.max(min, Math.min(max, Math.round(px)))
+}
+
+/** Pure: desktop uses the persisted roster width, but the <=1180px layout drops
+ *  the right rail, so keep the left roster within that narrower grid budget. */
+export function effectiveRosterWidthForViewport(px: unknown, narrow: boolean): number {
+  const clamped = clampPaneWidth('roster', px)
+  return narrow ? Math.min(clamped, NARROW_ROSTER_WIDTH) : clamped
 }
 
 /** Start a pointer-drag resize of one pane. Sets the CSS var directly on the

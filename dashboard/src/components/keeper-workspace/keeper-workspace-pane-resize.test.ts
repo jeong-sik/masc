@@ -3,9 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   beginPaneResize,
   clampPaneWidth,
+  effectiveRosterWidthForViewport,
   rosterWidth,
   railWidth,
   DEFAULT_ROSTER_WIDTH,
+  NARROW_ROSTER_WIDTH,
   DEFAULT_RAIL_WIDTH,
 } from './keeper-workspace-pane-resize'
 
@@ -33,6 +35,20 @@ describe('clampPaneWidth', () => {
     expect(clampPaneWidth('roster', Number.NaN)).toBe(200)
     expect(clampPaneWidth('rail', Number.POSITIVE_INFINITY)).toBe(240)
     expect(clampPaneWidth('roster', 'wide')).toBe(200)
+  })
+})
+
+describe('effectiveRosterWidthForViewport', () => {
+  it('caps the default roster width on the narrow two-column workspace', () => {
+    expect(effectiveRosterWidthForViewport(DEFAULT_ROSTER_WIDTH, true)).toBe(NARROW_ROSTER_WIDTH)
+  })
+
+  it('keeps narrower user-selected roster widths while narrow', () => {
+    expect(effectiveRosterWidthForViewport(220, true)).toBe(220)
+  })
+
+  it('uses the persisted roster width on the full desktop workspace', () => {
+    expect(effectiveRosterWidthForViewport(360, false)).toBe(360)
   })
 })
 

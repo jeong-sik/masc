@@ -10,6 +10,7 @@ vi.mock('./dev-token', () => ({
 
 import {
   fetchDashboardShell,
+  fetchDashboardExecution,
   fetchLogs,
   fetchDashboardExecutionTrust,
   fetchDashboardGovernance,
@@ -119,6 +120,38 @@ describe('fetchDashboardShell', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/shell?light=true')
+  })
+})
+
+describe('fetchDashboardExecution', () => {
+  it('uses the cached execution endpoint by default', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ agents: [], tasks: [], messages: [], keepers: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchDashboardExecution()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/execution')
+  })
+
+  it('requests a forced execution snapshot when asked', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ agents: [], tasks: [], messages: [], keepers: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchDashboardExecution({ force: true })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/execution?force=1')
   })
 })
 

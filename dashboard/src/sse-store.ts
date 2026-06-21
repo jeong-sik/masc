@@ -129,6 +129,7 @@ type RefreshTarget = RouteRefreshTarget
 interface SimpleRoute {
   target: RefreshTarget
   debounceMs?: number
+  force?: boolean
 }
 
 // Route table maps SSE event type → refresh target. Only entries whose
@@ -141,10 +142,11 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   // Broadcasts — emitted by lib/mcp_tool_runtime_comm.ml
   broadcast:           { target: 'execution' },
   // Keeper lifecycle (also triggers operator refresh via handler)
-  keeper_handoff:       { target: 'execution' },
-  keeper_compaction:    { target: 'execution' },
-  keeper_guardrail:     { target: 'execution' },
-  keeper_phase_changed: { target: 'execution' },
+  keeper_handoff:       { target: 'execution', force: true },
+  keeper_compaction:    { target: 'execution', force: true },
+  keeper_guardrail:     { target: 'execution', force: true },
+  keeper_phase_changed: { target: 'execution', force: true },
+  keeper_turn_complete: { target: 'execution', force: true },
   // Board content — emitted by lib/mcp_tool_runtime_board.ml
   board_post:          { target: 'board' },
   'masc/board_post':    { target: 'board' },
@@ -458,9 +460,13 @@ export function routeServerPushEvent(event: SSEEvent): void {
   const routedType = normalizeSSEDispatchType(event.type)
   const simpleRoute = SIMPLE_ROUTES[routedType]
   if (simpleRoute) {
+    const refreshFn =
+      simpleRoute.force && simpleRoute.target === 'execution'
+        ? () => { void refreshExecution({ force: true }) }
+        : REFRESH_FNS[simpleRoute.target]
     scheduleTargetRefresh(
       simpleRoute.target,
-      REFRESH_FNS[simpleRoute.target],
+      refreshFn,
       simpleRoute.debounceMs,
     )
     if (BOARD_HEARTH_REFRESH_EVENTS.has(routedType)) {

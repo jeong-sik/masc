@@ -47,6 +47,9 @@ let sample_record () : Turn_record.t =
   ; runtime_profile = "ollama_cloud.deepseek-v4-flash"
   ; model = Some "deepseek-v4-flash"
   ; finish_reason = Some "completed"
+  ; context_window = Some 131072
+  ; price_input_per_million = Some 0.15
+  ; price_output_per_million = Some 0.6
   ; sampling =
       { temperature = Some 0.3
       ; top_p = Some 0.9
@@ -86,6 +89,11 @@ let test_codec_roundtrip () =
     check string "runtime_profile" record.runtime_profile decoded.runtime_profile;
     check (option string) "model" record.model decoded.model;
     check (option string) "finish_reason" record.finish_reason decoded.finish_reason;
+    check (option int) "context_window" record.context_window decoded.context_window;
+    check (option (float 0.0001)) "price_input_per_million"
+      record.price_input_per_million decoded.price_input_per_million;
+    check (option (float 0.0001)) "price_output_per_million"
+      record.price_output_per_million decoded.price_output_per_million;
     check (option (float 0.0001)) "temperature" record.sampling.temperature
       decoded.sampling.temperature;
     check (option (float 0.0001)) "top_p" record.sampling.top_p
@@ -107,6 +115,9 @@ let test_codec_optional_fields_absent () =
     { (sample_record ()) with
       model = None
     ; finish_reason = None
+    ; context_window = None
+    ; price_input_per_million = None
+    ; price_output_per_million = None
     ; sampling =
         { temperature = None
         ; top_p = None
@@ -119,8 +130,9 @@ let test_codec_optional_fields_absent () =
     }
   in
   let json = Turn_record.to_json record in
-  (* RFC-0233 §2.3: absent meta fields are omitted from the wire, never
-     emitted as a fabricated value (no "stop", no placeholder model). *)
+  (* RFC-0233 §2.3/§8: absent meta fields are omitted from the wire, never
+     emitted as a fabricated value (no "stop", no placeholder model, no
+     fabricated 200K window or Claude $3/$15 price). *)
   (match json with
    | `Assoc fields ->
      check bool "finish_reason key omitted when None" false
@@ -130,7 +142,11 @@ let test_codec_optional_fields_absent () =
      check bool "top_p key omitted when None" false
        (List.mem_assoc "top_p" fields);
      check bool "max_tokens key omitted when None" false
-       (List.mem_assoc "max_tokens" fields)
+       (List.mem_assoc "max_tokens" fields);
+     check bool "context_window key omitted when None" false
+       (List.mem_assoc "context_window" fields);
+     check bool "price_input_per_million key omitted when None" false
+       (List.mem_assoc "price_input_per_million" fields)
    | _ -> fail "to_json did not produce an object");
   match Turn_record.of_json json with
   | Error e -> failf "decode failed: %s" e
@@ -138,6 +154,11 @@ let test_codec_optional_fields_absent () =
     check (option string) "model absent stays None" None decoded.model;
     check (option string) "finish_reason absent stays None (not \"stop\")" None
       decoded.finish_reason;
+    check (option int) "context_window absent stays None" None decoded.context_window;
+    check (option (float 0.0001)) "price_input_per_million absent" None
+      decoded.price_input_per_million;
+    check (option (float 0.0001)) "price_output_per_million absent" None
+      decoded.price_output_per_million;
     check (option (float 0.0001)) "temperature absent" None
       decoded.sampling.temperature;
     check (option (float 0.0001)) "top_p absent" None decoded.sampling.top_p;

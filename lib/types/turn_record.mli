@@ -51,6 +51,21 @@ type t =
        receipt SSOT [Keeper_execution_receipt.stop_reason_to_string].
        [None] when the turn errored before a stop reason was recorded;
        an unknown reason is never collapsed to a fake "stop". *)
+  ; context_window : int option
+    (* RFC-0233 §8 — keeper-resolved effective context budget (tokens) for
+       this turn, the denominator the dashboard ctx-fill% uses. [None] on
+       legacy rows or the error path; the inspector renders absence rather
+       than the fabricated 200K. This is the keeper compaction ceiling
+       ([max_context]), NOT the provider's per-request num-ctx cap (an
+       Ollama-only transport detail). *)
+  ; price_input_per_million : float option
+    (* RFC-0233 §8 — USD per 1M input tokens declared on the runtime
+       binding in runtime.toml. [None] when the operator left it unset;
+       the inspector renders cost absence rather than a fabricated Claude
+       $3/$15 default. *)
+  ; price_output_per_million : float option
+    (* RFC-0233 §8 — USD per 1M output tokens, same source/absence rule as
+       [price_input_per_million]. *)
   ; sampling : sampling
   ; usage : usage
   ; ts : float

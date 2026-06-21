@@ -6,6 +6,9 @@ let write
       ~runtime_profile
       ~model
       ~finish_reason
+      ~context_window
+      ~price_input_per_million
+      ~price_output_per_million
       ~sampling
       ~usage
       ~execution_ids
@@ -22,6 +25,9 @@ let write
     ; runtime_profile
     ; model
     ; finish_reason
+    ; context_window
+    ; price_input_per_million
+    ; price_output_per_million
     ; sampling
     ; usage
     ; ts = Time_compat.now ()

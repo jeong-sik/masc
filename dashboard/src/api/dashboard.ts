@@ -3027,6 +3027,14 @@ export type TurnRecordEntry = {
   enable_thinking?: boolean
   input_tokens?: number
   output_tokens?: number
+  // RFC-0233 §8 — runtime model metadata. context_window is the keeper-resolved
+  // effective token budget (the ctx-fill% denominator); the two prices are USD
+  // per 1M tokens declared on the runtime binding. Absent (undefined) when the
+  // runtime is unknown or the operator left runtime.toml unset; the inspector
+  // renders "미상" (unknown) rather than a fabricated 200K / Claude $3·$15.
+  context_window?: number
+  price_input_per_million?: number
+  price_output_per_million?: number
   ts: number
 }
 
@@ -3165,6 +3173,9 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     enable_thinking: typeof raw.enable_thinking === 'boolean' ? raw.enable_thinking : undefined,
     input_tokens: asNumber(raw.input_tokens),
     output_tokens: asNumber(raw.output_tokens),
+    context_window: asNumber(raw.context_window),
+    price_input_per_million: asNumber(raw.price_input_per_million),
+    price_output_per_million: asNumber(raw.price_output_per_million),
     ts,
   }
 }

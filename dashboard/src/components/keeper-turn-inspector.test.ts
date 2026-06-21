@@ -204,6 +204,9 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           finish_reason: 'completed',
           input_tokens: 2400,
           output_tokens: 280,
+          context_window: 203000,
+          price_input_per_million: 0.27,
+          price_output_per_million: 1.1,
           blocks: [
             { block: 'system', bytes: 1200, digest: '1111222233334444' },
             { block: 'user_model', bytes: 728, digest: '99887766554433221100' },
@@ -635,6 +638,10 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(stats).toContain('도구')
     expect(stats).toContain('1')
     expect(stats).toContain('추정비용')
+    // RFC-0233 §8: turn 42 fixture carries real context_window + prices, so
+    // the nullable ctxPct/cost render grounded values — not "미상". Guards the
+    // number|null widening against a regression that drops the grounded path.
+    expect(stats).not.toContain('미상')
   })
 
   it('joins tool-call duration and agent subturn by execution_id', async () => {

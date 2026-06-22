@@ -226,7 +226,7 @@ let standalone_ws_eof_summary = function
 
 (** WebSocket handler factory for the standalone listener.  Delegates to
     the shared MCP session protocol
-    ({!Server_mcp_transport_ws.mcp_websocket_handler}, RFC-0280 S3.2) —
+    ({!Server_mcp_transport_ws.mcp_websocket_handler}, RFC-0281 S3.2) —
     session registration, SSE subscription, liveness heartbeat, and frame
     opcode handling — and injects the standalone close-code diagnostic
     and eof summary as observability hooks.  [~sw] is the per-connection

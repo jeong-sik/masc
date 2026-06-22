@@ -1228,7 +1228,7 @@ let send_upgrade_pong session =
     ([Server_routes_http_routes_frontend]) and the standalone listener
     ([Server_ws_standalone]).  The two paths differ only in how the
     socket is attached (Gluten upgrade vs. raw listener), not in the
-    session protocol.  RFC-0280 S3.2.
+    session protocol.  RFC-0281 S3.2.
 
     [on_connection_close] and [on_eof] are observability hooks invoked
     before {!cleanup_session}.  The defaults close the close-frame
@@ -1288,9 +1288,9 @@ let mcp_websocket_handler
     socket to a [Httpun_ws.Server_connection.t]: it sends the 101 via
     [respond_with_upgrade], then hands the connection to the Gluten
     runtime via [upgrade].  Omitting the [upgrade] call (the
-    pre-RFC-0280 defect) left the connection undriven, so inbound frames
+    pre-RFC-0281 defect) left the connection undriven, so inbound frames
     — including the client hello and protocol pongs — were never read.
-    RFC-0280 S3.1.
+    RFC-0281 S3.1.
 
     [handler] builds the per-connection [input_handlers] from the
     [Wsd.t]; the MCP session ({!mcp_websocket_handler}) and the IDE LSP

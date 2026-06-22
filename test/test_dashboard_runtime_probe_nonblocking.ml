@@ -183,6 +183,43 @@ let test_force_within_recent_window_serves_recent () =
     (probe_marker_of json);
   reset_probe_seams ()
 
+(* SWR soft-TTL fresh hit: a non-force value aged past the soft-TTL (15s) but
+   within the cache TTL (30s) must still be served as a [fresh] hit WITHOUT a
+   synchronous probe on the request path. The background refresh the soft-TTL
+   schedules is forked under a server switch in production; a unit test has no
+   switch, so [maybe_fork_dashboard_runtime_probe_refresh] is a no-op here and
+   the runner stays uninvoked. This pins the request-path contract for the SWR
+   branch: if a future change makes the soft-TTL hit refresh synchronously (or
+   downgrade the envelope), [slow_runner_invoked] becomes 1 or [refresh_state]
+   stops being [fresh] and this fails. The switch-bearing assertion that the
+   background refresh actually fires and pre-warms the cache needs an
+   [Eio.Switch] harness and is tracked as a follow-up. *)
+let test_soft_ttl_fresh_hit_serves_fresh_without_sync_probe () =
+  reset_probe_seams ();
+  Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_runner_for_tests
+    slow_runner;
+  slow_runner_invoked := 0;
+  let fresh_probe =
+    `Assoc
+      [ "probe_ok", `Bool true
+      ; "status", `String "reachable"
+      ; "marker", `String "soft-ttl-fresh-value"
+      ]
+  in
+  (* Past the soft-TTL (15s), still within the cache TTL (30s) and outside the
+     force window (10s): the soft-TTL refresh branch is taken. *)
+  Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_cache_for_tests
+    ~probe:fresh_probe ~age_sec:20.0 ();
+  let json =
+    Server_dashboard_http_runtime_info.dashboard_runtime_probe_http_json ()
+  in
+  check int "slow runner never invoked on soft-TTL fresh hit" 0 !slow_runner_invoked;
+  check string "refresh_state is fresh" "fresh" (refresh_state_of json);
+  check bool "cache_hit true (value still within TTL)" true (cache_hit_of json);
+  check (option string) "fresh value served verbatim" (Some "soft-ttl-fresh-value")
+    (probe_marker_of json);
+  reset_probe_seams ()
+
 let () =
   run "dashboard_runtime_probe_nonblocking"
     [ ( "non-blocking",
@@ -192,6 +229,8 @@ let () =
             test_force_with_stale_cache_serves_stale_without_probe
         ; test_case "force=1 recent serves recent hit, no probe" `Quick
             test_force_within_recent_window_serves_recent
+        ; test_case "soft-TTL fresh hit serves fresh, no sync probe" `Quick
+            test_soft_ttl_fresh_hit_serves_fresh_without_sync_probe
         ] )
     ; ( "failure visibility",
         [ test_case "failure envelope carries unreachable status" `Quick

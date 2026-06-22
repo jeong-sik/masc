@@ -239,8 +239,8 @@
   /* Backdrop overlays — modal scrim & full-blocker. Distinct semantic
      from --white-* (which are surface tints on top of dark). These are
      dark scrims that dim the underlying content for modal/dialog focus. */
-  --backdrop-deep: rgba(7, 12, 20, 0.82);
-  --backdrop-modal: rgba(10, 18, 34, 0.95);
+  --backdrop-deep: rgba(0, 0, 0, 0.80);
+  --backdrop-modal: rgba(0, 0, 0, 0.85);
 
   /* Tailwind-aligned base colors. Introduced in Phase G to absorb
      remaining inline #hex literals across the dashboard. Names mirror

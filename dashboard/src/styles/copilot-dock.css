@@ -279,13 +279,19 @@
 @media (max-width: 900px) {
   .v2-app[data-mobile="true"] .dock-fab {
     right: max(14px, env(safe-area-inset-right, 0px));
-    width: 44px;
-    height: 44px;
-    padding: 0;
     bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+    /* Keep the pill shape on mobile so the label stays readable; only adjust
+       position for the safe area and bottom nav. */
+    width: auto;
+    height: 44px;
+    padding: 0 14px 0 12px;
   }
-  /* On mobile the FAB reverts to an icon-only 44px circle (no room for the label). */
-  .v2-app[data-mobile="true"] .dock-fab-label { display: none; }
+  /* The label was hidden on mobile (icon-only circle). Restore it so the
+     button is self-describing without relying on the tooltip/aria-label. */
+  .v2-app[data-mobile="true"] .dock-fab-label {
+    display: inline;
+    font-size: 12px;
+  }
 
   .v2-app[data-mobile="true"][data-keeper-detail-mode="true"] .dock-fab {
     bottom: calc(14px + env(safe-area-inset-bottom, 0px));

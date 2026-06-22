@@ -28,6 +28,16 @@ type reaction_kind =
 val stimulus_kind_to_string : stimulus_kind -> string
 val reaction_kind_to_string : reaction_kind -> string
 
+val stimulus_kind_of_string : string -> stimulus_kind option
+(** Inverse of {!stimulus_kind_to_string}.  Strings outside the closed sum
+    (schema drift / corruption) map to [None].  Summary classification parses
+    through this and matches the variant exhaustively, so adding a stimulus
+    variant forces the classifier to be updated (RFC-0266 regression guard). *)
+
+val reaction_kind_of_string : string -> reaction_kind
+(** Inverse of {!reaction_kind_to_string}.  Total: unknown strings map to
+    [Unknown_reaction], mirroring the open [Unknown_reaction of string] escape. *)
+
 val board_stimulus_id : post_id:string -> string
 (** Stable id for board-originated stimuli. *)
 

@@ -42,6 +42,18 @@ let no_progress_recovery_stimulus ?(keeper_name = "no-progress-keeper") () :
   }
 ;;
 
+let fusion_completed_stimulus ?(run_id = "fus-ledger-1") () :
+  Keeper_event_queue.stimulus
+  =
+  { post_id = "fusion-run:" ^ run_id
+  ; urgency = Keeper_event_queue.Normal
+  ; arrived_at = 1234.5
+  ; payload =
+      Keeper_event_queue.Fusion_completed
+        { run_id; ok = true; resolved_answer = "use approach B"; board_post_id = "post-fus" }
+  }
+;;
+
 let check_member_string label expected key json =
   check string label expected (json |> member key |> to_string)
 ;;
@@ -351,6 +363,80 @@ let test_unknown_reaction_degrades_summary () =
    payload is unrepresentable — the prior [test_malformed_typed_payload_degrades_summary]
    covered a parse-error path that can no longer occur and was removed. *)
 
+(* RFC-0266 regression: a recorded [Fusion_completed] stimulus is a recognized
+   closed-sum kind and must NOT be miscounted as an unsupported stimulus.  The
+   prior string whitelist ([board_signal]/[bootstrap]/[no_progress_recovery])
+   dropped [fusion_completed] into [unsupported_stimulus_count], degrading the
+   summary on every async fusion wake.  (We assert only the unsupported counter:
+   with no reaction row the stimulus is still legitimately pending.) *)
+let test_fusion_completed_stimulus_is_supported () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "fusion-keeper" in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    (fusion_completed_stimulus ());
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check int "fusion_completed is not an unsupported stimulus" 0
+    (summary |> member "unsupported_stimulus_count" |> to_int)
+;;
+
+(* Drift guard: [stimulus_kind_of_string] must stay the inverse of
+   [stimulus_kind_to_string] for every closed-sum variant, and reject unknowns.
+   Pairs with the exhaustive match in [note_stimulus_kind] so a new variant
+   cannot silently fall back to [unsupported]. *)
+let test_stimulus_kind_string_roundtrip () =
+  let roundtrips k =
+    match
+      Keeper_reaction_ledger.stimulus_kind_of_string
+        (Keeper_reaction_ledger.stimulus_kind_to_string k)
+    with
+    | Some k' ->
+      String.equal
+        (Keeper_reaction_ledger.stimulus_kind_to_string k')
+        (Keeper_reaction_ledger.stimulus_kind_to_string k)
+    | None -> false
+  in
+  List.iter
+    (fun k ->
+      check bool "stimulus_kind round-trips through string" true (roundtrips k))
+    [ Keeper_reaction_ledger.Board_signal
+    ; Keeper_reaction_ledger.Bootstrap
+    ; Keeper_reaction_ledger.No_progress_recovery
+    ; Keeper_reaction_ledger.Fusion_completed
+    ];
+  check bool "unknown stimulus kind string is None" true
+    (Option.is_none (Keeper_reaction_ledger.stimulus_kind_of_string "totally_unknown"))
+;;
+
+(* Drift guard: [reaction_kind_of_string] is total — known strings round-trip to
+   their typed variant, unknown strings preserve the original via
+   [Unknown_reaction].  Pairs with the exhaustive match in [note_reaction_kind]. *)
+let test_reaction_kind_string_roundtrip () =
+  let roundtrips k =
+    String.equal
+      (Keeper_reaction_ledger.reaction_kind_to_string
+         (Keeper_reaction_ledger.reaction_kind_of_string
+            (Keeper_reaction_ledger.reaction_kind_to_string k)))
+      (Keeper_reaction_ledger.reaction_kind_to_string k)
+  in
+  List.iter
+    (fun k ->
+      check bool "reaction_kind round-trips through string" true (roundtrips k))
+    [ Keeper_reaction_ledger.Turn_started
+    ; Keeper_reaction_ledger.Execution_receipt
+    ; Keeper_reaction_ledger.Terminal_reason
+    ; Keeper_reaction_ledger.Cursor_ack
+    ; Keeper_reaction_ledger.Operator_escalation
+    ; Keeper_reaction_ledger.Supervisor_recovery_requested
+    ];
+  check string "unknown reaction string preserved as Unknown_reaction" "legacy_custom"
+    (Keeper_reaction_ledger.reaction_kind_to_string
+       (Keeper_reaction_ledger.reaction_kind_of_string "legacy_custom"))
+;;
+
 let () =
   run
     "keeper_reaction_ledger"
@@ -391,6 +477,18 @@ let () =
             "unknown reaction degrades summary"
             `Quick
             test_unknown_reaction_degrades_summary
+        ; test_case
+            "fusion_completed stimulus is supported (RFC-0266)"
+            `Quick
+            test_fusion_completed_stimulus_is_supported
+        ; test_case
+            "stimulus_kind string round-trip drift guard"
+            `Quick
+            test_stimulus_kind_string_roundtrip
+        ; test_case
+            "reaction_kind string round-trip drift guard"
+            `Quick
+            test_reaction_kind_string_roundtrip
         ] )
     ]
 ;;

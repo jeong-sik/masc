@@ -27,6 +27,18 @@ let stimulus_kind_to_string = function
   | Fusion_completed -> "fusion_completed"
 ;;
 
+(* stimulus_kind_to_string의 역. 닫힌 합에 없는 문자열(스키마 드리프트/손상 row)은
+   [None]. 소비자([note_stimulus_kind])가 파싱된 variant를 exhaustive match하므로 새
+   variant 추가 시 컴파일러가 분류 누락을 강제한다 — RFC-0266에서 [Fusion_completed]가
+   문자열 화이트리스트에 누락돼 정상 wake가 unsupported로 오집계된 회귀를 차단한다. *)
+let stimulus_kind_of_string = function
+  | "board_signal" -> Some Board_signal
+  | "bootstrap" -> Some Bootstrap
+  | "no_progress_recovery" -> Some No_progress_recovery
+  | "fusion_completed" -> Some Fusion_completed
+  | _ -> None
+;;
+
 let reaction_kind_to_string = function
   | Turn_started -> "turn_started"
   | Execution_receipt -> "execution_receipt"
@@ -35,6 +47,20 @@ let reaction_kind_to_string = function
   | Operator_escalation -> "operator_escalation"
   | Supervisor_recovery_requested -> "supervisor_recovery_requested"
   | Unknown_reaction value -> value
+;;
+
+(* reaction_kind_to_string의 역(전사). 알려진 문자열은 typed variant로, 그 외에는
+   [Unknown_reaction]으로 — reaction_kind는 [Unknown_reaction of string] escape를 가져
+   항상 전사다. 소비자([note_reaction_kind])가 exhaustive match하므로 새 typed variant
+   추가 시 컴파일러가 분류 누락을 강제한다(stimulus와 동일한 닫힌-합 안티패턴 방지). *)
+let reaction_kind_of_string = function
+  | "turn_started" -> Turn_started
+  | "execution_receipt" -> Execution_receipt
+  | "terminal_reason" -> Terminal_reason
+  | "cursor_ack" -> Cursor_ack
+  | "operator_escalation" -> Operator_escalation
+  | "supervisor_recovery_requested" -> Supervisor_recovery_requested
+  | other -> Unknown_reaction other
 ;;
 
 let option_json f = function
@@ -461,20 +487,26 @@ let summarize_rows ~keeper_name ~limit rows =
     | None -> ()
   in
   let note_reaction_kind = function
-    | Some "turn_started" -> incr turn_started_count
-    | Some "cursor_ack" -> incr cursor_ack_count
-    | Some "execution_receipt" -> incr execution_receipt_count
-    | Some "terminal_reason" -> incr terminal_reason_count
-    | Some "operator_escalation" -> incr operator_escalation_count
-    | Some "supervisor_recovery_requested" -> incr supervisor_recovery_requested_count
-    | Some _ -> incr unknown_reaction_count
     | None -> incr unknown_reaction_count
+    | Some raw ->
+      (match reaction_kind_of_string raw with
+       | Turn_started -> incr turn_started_count
+       | Cursor_ack -> incr cursor_ack_count
+       | Execution_receipt -> incr execution_receipt_count
+       | Terminal_reason -> incr terminal_reason_count
+       | Operator_escalation -> incr operator_escalation_count
+       | Supervisor_recovery_requested -> incr supervisor_recovery_requested_count
+       | Unknown_reaction _ -> incr unknown_reaction_count)
   in
   let note_stimulus_kind = function
-    | Some "board_signal"
-    | Some "bootstrap"
-    | Some "no_progress_recovery" -> ()
-    | Some _ | None -> incr unsupported_stimulus_count
+    | None -> incr unsupported_stimulus_count
+    | Some raw ->
+      (match stimulus_kind_of_string raw with
+       | None -> incr unsupported_stimulus_count
+       (* 닫힌 합의 모든 variant는 인식된 정상 stimulus다(미지원 아님). 새 variant
+          추가 시 이 or-pattern이 non-exhaustive가 되어 컴파일 에러 → 분류 갱신을
+          강제한다 (catch-all 금지). *)
+       | Some (Board_signal | Bootstrap | No_progress_recovery | Fusion_completed) -> ())
   in
   let note_payload_parse_error row =
     match assoc_field "stimulus" row with

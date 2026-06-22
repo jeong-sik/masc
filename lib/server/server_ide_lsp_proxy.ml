@@ -19,33 +19,6 @@ let send_text wsd s =
   Ws.Wsd.send_bytes ~kind:`Text wsd bytes ~off:0 ~len:(Bytes.length bytes)
 ;;
 
-(** Read a complete frame payload into a string. *)
-let read_frame_text ~len ~on_text payload =
-  if len = 0
-  then on_text ""
-  else (
-    let buffer = Bytes.create len in
-    let offset = ref 0 in
-    let rec schedule () =
-      if !offset >= len
-      then on_text (Bytes.unsafe_to_string buffer)
-      else
-        Ws.Payload.schedule_read
-          payload
-          ~on_eof:(fun () -> on_text (Bytes.sub_string buffer 0 !offset))
-          ~on_read:(fun bs ~off ~len:chunk_len ->
-            Bigstringaf.blit_to_bytes
-              bs
-              ~src_off:off
-              buffer
-              ~dst_off:!offset
-              ~len:chunk_len;
-            offset := !offset + chunk_len;
-            schedule ())
-    in
-    schedule ())
-;;
-
 (** Per-connection state shared across frame handler and relay fibers.
 
     [sw] is the server-lifetime switch (LSP processes + their reader
@@ -66,6 +39,12 @@ type conn_state =
   ; spawn_mutex : Eio.Mutex.t
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
   ; disconnected : bool Atomic.t
+  ; inbound : Server_mcp_transport_ws.Ws_inbound.t
+        (* Shared inbound-frame reassembler (RFC-0281 §3.2): reassembles
+           fragmented LSP messages across [`Continuation] frames and enforces
+           the same frame/message size caps as the MCP session path, replacing
+           B's former single-frame [read_frame_text] which dropped
+           [`Continuation] frames and applied no size cap. *)
   }
 
 let base_path_of_state state = (Mcp_server.workspace_config state).base_path
@@ -866,16 +845,37 @@ let add_routes ~sw ~clock router =
                           ; spawn_mutex = Eio.Mutex.create ()
                           ; clock
                           ; disconnected = Atomic.make false
+                          ; inbound = Server_mcp_transport_ws.Ws_inbound.create ()
                           }
                         in
                         { Ws.Websocket_connection.frame =
-                            (fun ~opcode ~is_fin:_ ~len payload ->
+                            (fun ~opcode ~is_fin ~len payload ->
                               match opcode with
-                              | `Text | `Binary ->
-                                read_frame_text
+                              | `Text | `Binary | `Continuation ->
+                                (* Route data frames through the shared inbound
+                                   reassembler so fragmented LSP messages
+                                   ([`Continuation], [is_fin = false]) survive
+                                   and the frame/message size caps apply
+                                   (RFC-0281 §3.2). *)
+                                Server_mcp_transport_ws.read_data_frame
+                                  cs.inbound
+                                  ~max_frame_bytes:
+                                    (Server_mcp_transport_ws.max_inbound_frame_bytes ())
+                                  ~max_message_bytes:
+                                    (Server_mcp_transport_ws.max_inbound_message_bytes ())
+                                  ~is_fin
                                   ~len
-                                  ~on_text:(fun msg -> dispatch_message cs msg)
                                   payload
+                                  ~on_outcome:(function
+                                    | Server_mcp_transport_ws.Inbound_message msg ->
+                                      dispatch_message cs msg
+                                    | Server_mcp_transport_ws.Inbound_incomplete -> ()
+                                    | Server_mcp_transport_ws.Inbound_rejected rejection
+                                      ->
+                                      Log.Server.warn
+                                        "LSP inbound frame rejected (%s); disconnecting"
+                                        rejection.Server_mcp_transport_ws.reason;
+                                      disconnect cs)
                               | `Ping ->
                                 (try Ws.Wsd.send_pong wsd with
                                  | exn ->
@@ -887,7 +887,7 @@ let add_routes ~sw ~clock router =
                                 Log.Server.info "LSP WebSocket disconnecting";
                                 disconnect cs;
                                 Ws.Payload.close payload
-                              | `Pong | `Continuation | `Other _ ->
+                              | `Pong | `Other _ ->
                                 Ws.Payload.close payload)
                         ; eof =
                             (fun ?error:_ () ->

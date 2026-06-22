@@ -14,6 +14,29 @@ module Startup_helpers = Keeper_supervisor_startup_helpers
 let backoff_delay = Startup_helpers.backoff_delay
 let keep_last_n = Startup_helpers.keep_last_n
 
+(* RFC-0125 P4 / RFC-0250: the max-turn watchdog was retired (it capped keeper
+   lifetime, not a turn — see [launch_supervised_fiber] below). The
+   [MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC] knob is no longer consumed by the
+   supervisor, so an operator who still sets it would otherwise get a silent
+   no-op. Emit one process-wide deprecation WARN (on the first set-and-launch)
+   so the dead knob is visible until the env module + auto-generated
+   runtime-tunables catalog are removed in a follow-up. *)
+let warned_retired_max_turn_watchdog = Atomic.make false
+
+let warn_retired_max_turn_watchdog_if_set () =
+  match Env_config_runtime.Keeper_max_turn_watchdog.timeout_sec_opt () with
+  | Some timeout_s
+    when not (Atomic.exchange warned_retired_max_turn_watchdog true) ->
+    Log.Keeper.warn
+      "MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC=%.1fs is set but the max-turn \
+       watchdog was retired (RFC-0125 P4 / RFC-0250: MASC must not impose a \
+       wall-clock timeout on a turn); it has no effect. Turn-scoped recovery \
+       uses MASC_KEEPER_STALE_RUN_SEC (Idle_turn) and \
+       MASC_KEEPER_MID_TURN_PROGRESS_TIMEOUT_SEC (Mid_turn_no_progress)."
+      timeout_s
+  | _ -> ()
+;;
+
 (** supervision_cohort cluster moved to Keeper_supervisor_types
     (intra-library file split, 2026-05-16). *)
 include Keeper_supervisor_types
@@ -179,7 +202,10 @@ let launch_supervised_fiber
                 따라서 keepalive loop 를 race 없이 직접 실행한다. [In_turn_hung]
                 variant 는 producer 가 사라져 consumer-only (closed sum) 로 남는다;
                 아래 watchdog_triggered 분기는 sweep 이 stamp 한 다른 stale reason
-                ([Idle_turn] / [Mid_turn_no_progress] 등) 으로 계속 작동한다. *)
+                ([Idle_turn] / [Mid_turn_no_progress] 등) 으로 계속 작동한다.
+                set-but-ignored knob 가 silent no-op 가 되지 않도록, retired knob
+                가 설정돼 있으면 1 회 deprecation WARN 을 남긴다. *)
+             warn_retired_max_turn_watchdog_if_set ();
              Keeper_keepalive.run_heartbeat_loop
                ~proactive_warmup_sec
                ctx

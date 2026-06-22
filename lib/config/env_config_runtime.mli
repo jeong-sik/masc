@@ -188,8 +188,10 @@ end
 module Keeper_max_turn_watchdog : sig
   val timeout_sec_opt : unit -> float option
   (** DEPRECATED / no-op. Parses [MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC]
-      ([Some t] when positive, else [None]), but the supervisor no longer calls
-      this, so the env var has no effect.
+      ([Some t] when positive, else [None]). The supervisor calls this only to
+      emit a one-time deprecation warning when the knob is set
+      ([Keeper_supervisor_launch.warn_retired_max_turn_watchdog_if_set]); it
+      never acts on the value, so the env var has no effect on behavior.
 
       The keeper-level max-turn wall-clock watchdog was removed from
       [keeper_supervisor_launch.ml] (RFC-0250 alignment). It used

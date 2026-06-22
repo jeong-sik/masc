@@ -124,6 +124,27 @@ describe('MemoryInspector — scope toggle', () => {
     )
   })
 
+  it('renders a status dot per row mapping run→ok / pause→idle / off→bad', () => {
+    // Mirrors the prototype StatusDot chain (keeper-v2/memory.jsx:196 →
+    // messages.jsx:8): the dot class drives the .dot2 palette in
+    // memory-inspector-v2.css (ok=--status-ok, idle=--status-idle,
+    // bad=--status-bad). A wrong class is a silent colour regression
+    // (e.g. an off keeper showing a brass dot instead of red).
+    const { container } = renderInspector()
+    fireEvent.click(
+      [...container.querySelectorAll('.mem-scope button')].find(b => b.textContent === '전체')!,
+    )
+    const dotClassFor = (id: string): string | undefined => {
+      const row = [...container.querySelectorAll('.mem-table .mem-tr:not(.mem-th)')].find(r =>
+        (r.querySelector('.mem-td-id .mono')?.textContent ?? '') === id,
+      )
+      return row?.querySelector('.mem-dot')?.className
+    }
+    expect(dotClassFor('nick0cave')).toContain('ok') // status 'run'
+    expect(dotClassFor('qa-king')).toContain('idle') // status 'pause'
+    expect(dotClassFor('drifter')).toContain('bad') // status 'off'
+  })
+
   it('drills back into a single keeper when an aggregate row is clicked', () => {
     const { container } = renderInspector()
     fireEvent.click(

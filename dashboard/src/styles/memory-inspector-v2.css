@@ -160,14 +160,16 @@
 .mem-td-id { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
 .mem-td-id .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* status dot in the keeper table — mirrors the prototype's <StatusDot>
-   (keeper-v2/memory.jsx:196 → window.KV.Dot state=ok|warn|idle|bad).
-   This dashboard has no KV.Dot primitive that carries the v2 status
-   palette, so a self-contained 7px dot is rendered with the same
-   run→ok / pause→idle / else→bad state mapping. */
-.mem-dot { display: inline-block; width: 7px; height: 7px; border-radius: var(--radius-pill); flex: none; background: var(--text-dim); }
-.mem-dot.ok { background: var(--status-ok); }
-.mem-dot.idle { background: var(--text-dim); }
-.mem-dot.bad { background: var(--volt); }
+   (keeper-v2/memory.jsx:196 → window.KV.Dot → .dot2, keeper-v2/styles/v2.css:395-398).
+   This dashboard has no .dot2 primitive that carries the v2 status palette,
+   so a self-contained 7px dot is rendered 1:1 with the prototype's .dot2:
+   base/idle → --status-idle, ok → --status-ok, bad → --status-bad, each
+   coloured state carrying the same `0 0 7px` glow. The prototype mapping is
+   run→ok / pause→idle / else→bad (StatusDot in keeper-v2/messages.jsx:8-11). */
+.mem-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--status-idle); }
+.mem-dot.ok { background: var(--status-ok); box-shadow: 0 0 7px var(--status-ok); }
+.mem-dot.idle { background: var(--status-idle); }
+.mem-dot.bad { background: var(--status-bad); box-shadow: 0 0 7px var(--status-bad); }
 .mem-td-bar { position: relative; display: flex; align-items: center; }
 .mem-td-bar i { position: absolute; left: 0; height: 6px; background: color-mix(in oklab, var(--status-ok) 45%, transparent); border-radius: 3px; }
 .mem-td-bar b { position: relative; margin-left: auto; font-weight: 500; font-size: 11px; color: var(--text-mid); }

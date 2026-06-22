@@ -237,6 +237,29 @@
   color: var(--text-mid);
 }
 
+/* eyebrow above the display header — surfaces.css:82 */
+.ov-eyebrow {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 7px;
+}
+
+/* purpose line under the header — surfaces.css:83-84 */
+.ov-purpose {
+  margin-top: 7px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.ov-purpose b {
+  color: var(--text-mid);
+  font-weight: 600;
+}
+
 .ov-clock {
   font-size: 18px;
   color: var(--text-mid);
@@ -248,9 +271,14 @@
   letter-spacing: 0.14em;
 }
 
+/* keeper-v2/overview.jsx renders 7 cross-surface KPI cells (overview.jsx:106-114)
+ * into the prototype's `.ov-kpis` grid. The prototype CSS (surfaces.css:88)
+ * declares `repeat(6, 1fr)`, leaving the 7th cell to wrap; this port renders the
+ * 7 cells on one row as specified, so the grid is widened to 7 columns to match
+ * the intended single-row layout. All other values mirror surfaces.css:88. */
 .ov-kpis {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(7, 1fr);
   gap: 1px;
   background: var(--border-soft);
   border: 1px solid var(--border-main);
@@ -288,6 +316,10 @@
 .ov-kpi-v.bad { color: var(--status-bad); }
 .ov-kpi-v.warn { color: var(--status-warn); }
 .ov-kpi-v.volt { color: var(--volt-strong); }
+
+/* clickable KPI cell (deep link into a surface) — surfaces.css:141-142 */
+.ov-kpi.link { cursor: pointer; transition: background 0.14s; }
+.ov-kpi.link:hover { background: var(--bg-panel-alt); }
 
 .ov-grid {
   display: grid;
@@ -584,6 +616,393 @@
 
 .ov-keeper-ctx {
   flex: none;
+}
+
+/* ── Domain status section — keeper-v2/overview.jsx:159-261 ─────────────────── */
+/* Every value below is transcribed verbatim from the prototype's
+ * styles/surfaces.css (line references in comments). */
+
+/* section header "도메인 현황" — surfaces.css:143 */
+.ov-section-h {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 4px 0 12px;
+}
+
+/* 7-card domain grid — surfaces.css:144 */
+.ov-domains {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: var(--gap-card);
+}
+
+/* domain summary card — surfaces.css:145-155 */
+.ov-dcard {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-md);
+  padding: 13px 15px 14px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ov-dcard-h {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 11px;
+}
+
+.ov-dcard-h h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--text-bright);
+  margin: 0;
+  white-space: nowrap;
+}
+
+.ov-dcount {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  color: var(--text-mid);
+  border: 1px solid var(--border-main);
+  background: var(--bg-card);
+}
+
+.ov-dcount.bad {
+  color: var(--status-bad);
+  border-color: color-mix(in oklab, var(--status-bad) 35%, transparent);
+  background: color-mix(in oklab, var(--status-bad) 11%, transparent);
+}
+
+.ov-dcount.warn {
+  color: var(--status-warn);
+  border-color: color-mix(in oklab, var(--status-warn) 35%, transparent);
+  background: color-mix(in oklab, var(--status-warn) 9%, transparent);
+}
+
+.ov-dcount.ok {
+  color: var(--status-ok);
+  border-color: color-mix(in oklab, var(--status-ok) 35%, transparent);
+  background: color-mix(in oklab, var(--status-ok) 9%, transparent);
+}
+
+.ov-dcount.volt {
+  color: var(--volt-strong);
+  border-color: var(--volt-dim);
+  background: var(--volt-wash);
+}
+
+.ov-dlink {
+  margin-left: auto;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--volt-strong);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  padding: 2px 0;
+  white-space: nowrap;
+}
+
+.ov-dlink:hover {
+  text-decoration: underline;
+}
+
+.ov-dcard-body {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  flex: 1;
+}
+
+/* WORK domain — goal rows — surfaces.css:158-167 */
+.ov-goal {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ov-goal + .ov-goal {
+  padding-top: 9px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.ov-goal-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.ov-goal-pri {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--text-dim);
+}
+
+.ov-goal-pri.high { background: var(--status-bad); }
+.ov-goal-pri.normal { background: var(--volt); }
+.ov-goal-pri.low { background: var(--text-dim); }
+
+.ov-goal-title {
+  font-size: 12.5px;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ov-goal-due {
+  font-size: 10px;
+  color: var(--text-dim);
+  flex: none;
+}
+
+.ov-goal-meter {
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-soft);
+  overflow: hidden;
+}
+
+.ov-goal-meter span {
+  display: block;
+  height: 100%;
+  background: var(--volt-dim);
+}
+
+.ov-goal-sub {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+/* APPROVALS domain — urgent card — surfaces.css:170-176 */
+.ov-urg {
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-soft);
+}
+
+.ov-urg-sev {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: var(--radius-xs);
+  margin-bottom: 5px;
+}
+
+.ov-urg-sev.sev-bad {
+  color: var(--status-bad);
+  background: color-mix(in oklab, var(--status-bad) 12%, transparent);
+}
+
+.ov-urg-sev.sev-warn {
+  color: var(--status-warn);
+  background: color-mix(in oklab, var(--status-warn) 11%, transparent);
+}
+
+.ov-urg-sev.sev-info {
+  color: var(--volt-strong);
+  background: var(--volt-wash);
+}
+
+.ov-urg-title {
+  font-size: 12.5px;
+  color: var(--text-bright);
+  line-height: 1.4;
+}
+
+.ov-urg-by {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+/* mini lists (approvals / schedule digests) — surfaces.css:177-179 */
+.ov-mini-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ov-mini-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ov-mini-txt {
+  font-size: 11.5px;
+  color: var(--text-mid);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* FUSION domain — surfaces.css:182-189 */
+.ov-fus {
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-soft);
+}
+
+.ov-fus-h {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.ov-fus-run {
+  font-size: 11px;
+  color: var(--text-mid);
+}
+
+.ov-fus-h .fus-dec-badge {
+  margin-left: auto;
+}
+
+.ov-fus-by {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 5px;
+}
+
+.ov-fus-foot {
+  font-size: 11px;
+}
+
+.ov-fus-live {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--status-warn);
+}
+
+.ov-fus-idle {
+  color: var(--text-dim);
+}
+
+/* BOARD / SCHEDULE / FLEET stat rows — surfaces.css:192-195 */
+.ov-stat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.ov-stat-row:last-child {
+  border-bottom: 0;
+}
+
+.ov-stat-row .k {
+  font-size: 11.5px;
+  color: var(--text-mid);
+}
+
+.ov-stat-row .v {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-bright);
+}
+
+/* CONNECTORS domain — pills — surfaces.css:198-204 */
+.ov-conn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ov-conn-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-main);
+  color: var(--text-mid);
+  background: var(--bg-card);
+}
+
+.ov-conn-pill .g {
+  font-size: 9px;
+}
+
+.ov-conn-pill.ok {
+  border-color: color-mix(in oklab, var(--status-ok) 32%, transparent);
+  color: var(--status-ok);
+}
+
+.ov-conn-pill.stale {
+  border-color: color-mix(in oklab, var(--status-warn) 38%, transparent);
+  color: var(--status-warn);
+  background: color-mix(in oklab, var(--status-warn) 7%, var(--bg-card));
+}
+
+.ov-conn-pill.off {
+  opacity: 0.5;
+}
+
+.ov-conn-warn {
+  font-size: 11px;
+  color: var(--status-warn);
+  margin-top: 4px;
+}
+
+/* FLEET domain — summary tiles — surfaces.css:207-211 */
+.ov-fleet-sum {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--border-soft);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.ov-fleet-stat {
+  background: var(--bg-card);
+  padding: 9px 6px;
+  text-align: center;
+}
+
+.ov-fleet-stat .v {
+  font-family: var(--font-mono);
+  font-size: 19px;
+  color: var(--text-bright);
+  display: block;
+}
+
+.ov-fleet-stat .v.ok { color: var(--status-ok); }
+.ov-fleet-stat .v.warn { color: var(--status-warn); }
+.ov-fleet-stat .v.bad { color: var(--status-bad); }
+
+.ov-fleet-stat .k {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-top: 2px;
+  display: block;
 }
 
 /* responsive */

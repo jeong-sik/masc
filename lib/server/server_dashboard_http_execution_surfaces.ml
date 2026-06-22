@@ -380,64 +380,85 @@ let dashboard_transport_health_snapshot_json () =
   Server_dashboard_http_cache.cached_surface_json transport_health_cache
 ;;
 
-(* Issue #8396: cache patchers used to recognise only 7 lifecycle event
-   names while [Keeper_lifecycle_events.all_event_names] now publishes
-   12. The drift left dashboard rows stale until the next full
-   recompute when the supervisor emitted [dead_cleaned],
-   [self_preservation], [paused_pruned], or the phase-derived [running].
+(* Issue #8396 / #22071: cache patchers project a wire lifecycle event name onto
+   dashboard row fields (keepalive_running / phase / pipeline_stage / paused).
+   Cache rows deserialise from JSON, so the input is a [string]; but the closed
+   custom-event vocabulary ([Keeper_lifecycle_events.t]) is parsed to the typed
+   verb and matched EXHAUSTIVELY in [display_of_custom_event]. Adding a custom
+   lifecycle variant now fails to compile here until its projection is defined —
+   replacing the prior raw-string whitelist that silently dropped new variants
+   to [None] (and an in-doc reference to a coverage test that did not exist).
 
-   The 4 patchers below remain string-typed (cache rows deserialise
-   from JSON), but each [match] now covers every name in the SSOT.
-   The sync test in [test/test_types.ml :: lifecycle_event_cache_patcher_coverage]
-   asserts every name in [Keeper_lifecycle_events.all_event_names]
-   returns [Some] from at least one of these patchers. *)
+   Phase-derived names ([running]/[stopped]/[crashed]/[dead]) and legacy operator
+   strings ([paused]/[resumed]) are not custom-event verbs and cross the JSON
+   boundary as raw strings, so they stay string-keyed and fail closed to [None]
+   for unknown input. Coverage over the SSOT vocabulary is pinned by
+   [test/test_dashboard_http_core.ml :: lifecycle_event_cache_patcher_coverage]. *)
 
-let keepalive_running_of_lifecycle_event = function
-  | "started" | "restarted" | "reconciled" | "running" -> Some true
-  | "resumed" | "self_preservation" | "auto_resumed" -> Some true
-  | "paused" -> Some true
-  | "paused_pruned" -> Some false (* prune == removed from supervision *)
-  | "admission_denied" -> Some false (* admission guard refused to launch a fiber *)
-  | "dead_cleaned" -> Some false (* cleanup == no longer alive *)
-  | "stopped" | "crashed" | "dead" -> Some false
+type lifecycle_display =
+  { ld_keepalive_running : bool
+  ; ld_phase : string
+  ; ld_pipeline_stage : string
+  ; ld_paused : bool
+  }
+
+(* Exhaustive over the closed custom-event sum. A new [Keeper_lifecycle_events.t]
+   variant breaks this match (no catch-all) until its dashboard projection is
+   declared. Values are byte-identical to the prior per-field string whitelist. *)
+let display_of_custom_event (verb : Keeper_lifecycle_events.t) : lifecycle_display =
+  let open Keeper_lifecycle_events in
+  match verb with
+  | Started | Restarted | Reconciled | Self_preservation | Auto_resumed ->
+    { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = false }
+  | Paused_pruned ->
+    (* prune == removed from supervision *)
+    { ld_keepalive_running = false; ld_phase = "stopped"; ld_pipeline_stage = "offline"; ld_paused = true }
+  | Admission_denied ->
+    (* admission guard refused to launch a fiber *)
+    { ld_keepalive_running = false; ld_phase = "offline"; ld_pipeline_stage = "offline"; ld_paused = false }
+  | Dead_cleaned ->
+    (* cleanup == no longer alive *)
+    { ld_keepalive_running = false; ld_phase = "dead"; ld_pipeline_stage = "offline"; ld_paused = false }
+;;
+
+(* Phase-derived + legacy operator strings (not custom-event verbs). Raw-string
+   keyed by necessity (JSON boundary); unknown input fails closed to [None]. *)
+let display_of_phase_or_legacy_string = function
+  | "running" ->
+    Some { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = false }
+  | "stopped" ->
+    Some { ld_keepalive_running = false; ld_phase = "stopped"; ld_pipeline_stage = "offline"; ld_paused = true }
+  | "crashed" ->
+    Some { ld_keepalive_running = false; ld_phase = "crashed"; ld_pipeline_stage = "crashed"; ld_paused = false }
+  | "dead" ->
+    Some { ld_keepalive_running = false; ld_phase = "dead"; ld_pipeline_stage = "offline"; ld_paused = false }
+  | "paused" ->
+    Some { ld_keepalive_running = true; ld_phase = "paused"; ld_pipeline_stage = "paused"; ld_paused = true }
+  | "resumed" ->
+    Some { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = false }
   | _ -> None
 ;;
 
-let phase_of_lifecycle_event = function
-  | "started" | "restarted" | "reconciled" | "running" -> Some "running"
-  | "resumed" | "self_preservation" | "auto_resumed" -> Some "running"
-  | "paused" -> Some "paused"
-  | "admission_denied" -> Some "offline"
-  | "paused_pruned" -> Some "stopped"
-  | "stopped" -> Some "stopped"
-  | "crashed" -> Some "crashed"
-  | "dead" | "dead_cleaned" -> Some "dead"
-  | _ -> None
+let lifecycle_display_of_event event =
+  match Keeper_lifecycle_events.event_of_string event with
+  | Some verb -> Some (display_of_custom_event verb)
+  | None -> display_of_phase_or_legacy_string event
 ;;
 
-let pipeline_stage_of_lifecycle_event = function
-  | "started" | "restarted" | "reconciled" | "running" -> Some "idle"
-  | "resumed" | "self_preservation" | "auto_resumed" -> Some "idle"
-  | "paused" -> Some "paused"
-  | "admission_denied" -> Some "offline"
-  | "paused_pruned" -> Some "offline"
-  | "stopped" | "dead" | "dead_cleaned" -> Some "offline"
-  | "crashed" -> Some "crashed"
-  | _ -> None
+let keepalive_running_of_lifecycle_event event =
+  Option.map (fun (d : lifecycle_display) -> d.ld_keepalive_running) (lifecycle_display_of_event event)
 ;;
 
-let paused_of_lifecycle_event = function
-  | "started"
-  | "restarted"
-  | "reconciled"
-  | "resumed"
-  | "running"
-  | "self_preservation"
-  | "auto_resumed" -> Some false
-  | "paused" | "paused_pruned" | "stopped" -> Some true
-  | "admission_denied" -> Some false
-  | "dead" | "dead_cleaned" | "crashed" -> Some false
-  | _ -> None
+let phase_of_lifecycle_event event =
+  Option.map (fun (d : lifecycle_display) -> d.ld_phase) (lifecycle_display_of_event event)
+;;
+
+let pipeline_stage_of_lifecycle_event event =
+  Option.map (fun (d : lifecycle_display) -> d.ld_pipeline_stage) (lifecycle_display_of_event event)
+;;
+
+let paused_of_lifecycle_event event =
+  Option.map (fun (d : lifecycle_display) -> d.ld_paused) (lifecycle_display_of_event event)
 ;;
 
 let keeper_agent_status_opt row =

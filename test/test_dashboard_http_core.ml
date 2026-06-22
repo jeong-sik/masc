@@ -1210,6 +1210,56 @@ let test_telemetry_n_default_is_bounded () =
     "explicit positive n honoured"
     500 (resolve ~has_time_window:true ~n_param:(Some "500"))
 
+(* Issue #22071: lifecycle event classification was reverse-mapped by a raw
+   string whitelist that bypassed compiler exhaustiveness, and the module
+   docstrings cited coverage tests ([lifecycle_events_ssot] /
+   [lifecycle_event_cache_patcher_coverage]) in a test/test_types.ml that does
+   not exist. These are the real guards. *)
+let test_lifecycle_event_of_string_roundtrip () =
+  List.iter
+    (fun verb ->
+      let s = Keeper_lifecycle_events.to_string verb in
+      check bool
+        ("event_of_string round-trips " ^ s)
+        true
+        (match Keeper_lifecycle_events.event_of_string s with
+         | Some v -> String.equal (Keeper_lifecycle_events.to_string v) s
+         | None -> false))
+    Keeper_lifecycle_events.all_custom_events;
+  check bool "unknown lifecycle event string is None" true
+    (Option.is_none
+       (Keeper_lifecycle_events.event_of_string "no_such_lifecycle_event"))
+
+let test_lifecycle_event_cache_patcher_coverage () =
+  (* Every name in the SSOT vocabulary must be classified ([Some]) by all four
+     dashboard cache patchers — the coverage the phantom test only promised. The
+     custom-event subset is also compiler-enforced via [display_of_custom_event]. *)
+  List.iter
+    (fun name ->
+      check bool
+        ("keepalive_running classifies " ^ name)
+        true
+        (Option.is_some
+           (Server_dashboard_http_execution_surfaces.keepalive_running_of_lifecycle_event
+              name));
+      check bool
+        ("phase classifies " ^ name)
+        true
+        (Option.is_some
+           (Server_dashboard_http_execution_surfaces.phase_of_lifecycle_event name));
+      check bool
+        ("pipeline_stage classifies " ^ name)
+        true
+        (Option.is_some
+           (Server_dashboard_http_execution_surfaces.pipeline_stage_of_lifecycle_event
+              name));
+      check bool
+        ("paused classifies " ^ name)
+        true
+        (Option.is_some
+           (Server_dashboard_http_execution_surfaces.paused_of_lifecycle_event name)))
+    Keeper_lifecycle_events.all_event_names
+
 let () =
   run "dashboard_http_core"
     [
@@ -1287,5 +1337,11 @@ let () =
             test_telemetry_n_default_is_bounded;
           test_case "fleet-composite envelope is cached across polls" `Quick
             test_dashboard_fleet_composite_envelope_is_cached;
+        ] );
+      ( "lifecycle event classification (#22071)",
+        [ test_case "event_of_string round-trips to_string" `Quick
+            test_lifecycle_event_of_string_roundtrip;
+          test_case "cache patchers cover the SSOT vocabulary" `Quick
+            test_lifecycle_event_cache_patcher_coverage;
         ] );
     ]

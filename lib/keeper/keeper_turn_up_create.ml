@@ -178,11 +178,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                   ~preferred:p.tool_denylist_opt
                   ~fallback:p.profile_defaults.tool_denylist
               in
-              let social_model =
-                p.profile_defaults.social_model
-                |> Option.value ~default:(Env_config_core.keeper_social_model ())
-                |> Keeper_social_model.normalize_social_model
-              in
               let will =
                 Option.value
                   ~default:
@@ -375,8 +370,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         short_goal;
         mid_goal;
         long_goal;
-
-        social_model;
         will;
         needs;
         desires;
@@ -470,11 +463,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           mention_reactive_turn_count = 0;
           noop_turn_count = 0;
           last_seen_message_seq = 0;
-          last_speech_act = "";
-          last_social_transition_reason = "";
 	          last_blocker = None;
 	          last_runtime_attempt = None;
-	          last_need = "";
 	          last_turn_tool_calls = [];
 	        };
       keeper_id = Some (Keeper_id.Uid.generate ());
@@ -566,7 +556,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("needs", `String meta.needs);
           ("desires", `String meta.desires);
           ("instructions", `String meta.instructions);
-          ("social_model", `String meta.social_model);
           ("tool_access", Json_util.json_string_list meta.tool_access);
           ("tool_denylist",
             `List (List.map (fun value -> `String value) meta.tool_denylist));

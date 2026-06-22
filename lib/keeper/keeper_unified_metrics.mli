@@ -140,8 +140,6 @@ val update_metrics_from_result :
   observation:Keeper_world_observation.world_observation ->
   ?is_autonomous_turn:bool ->
   ?update_proactive_rt:bool ->
-  ?social_state:Keeper_social_model.social_state ->
-  ?social_transition_reason:string ->
   ?context_max:int ->
   Keeper_agent_run.run_result ->
   Keeper_meta_contract.keeper_meta
@@ -151,8 +149,6 @@ val update_metrics_from_failure :
   latency_ms:int ->
   observation:Keeper_world_observation.world_observation ->
   reason:string ->
-  ?social_state:Keeper_social_model.social_state ->
-  ?social_transition_reason:string ->
   ?sdk_error:Agent_sdk.Error.sdk_error ->
   unit ->
   Keeper_meta_contract.keeper_meta
@@ -189,7 +185,6 @@ val append_decision_record :
   ?degraded_retry_runtime:string ->
   ?fallback_reason:string ->
   ?turn_mode:turn_mode ->
-  ?social_state:Keeper_social_model.social_state ->
   ?deliberation_execution:Keeper_deliberation.execution_result ->
   ?result:Keeper_agent_run.run_result option ->
   ?error:string ->

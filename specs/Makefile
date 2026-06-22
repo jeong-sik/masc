@@ -160,12 +160,12 @@ check-boundary: check-all
 #
 #   keeper-state-machine   ~4 min   (34 cfgs, dominated by KSM specs)
 #   masc-ecosystem         ~6 min   (MASCEcosystem 352s)
-#   social-and-state-prod  ~3 min   (SocialStateCap 180s top)
+#   social-and-state-prod  ~3 min   (StateProduct)
 #   others (15 dirs)       ~7 min   (incl. KeeperStaleKilled 182s + MemoryCompaction 181s)
 #
 # Wall-clock fan-out reduces TLA+ Main from ~22 min monolithic to ~7-8 min.
 
-SOCIAL_DIRS := social-state-cap state-product
+SOCIAL_DIRS := state-product
 check-social: CLEAN_CFGS := $(foreach d,$(SOCIAL_DIRS),$(call clean_cfgs_in,$(d)/))
 check-social: BUGGY_CFGS := $(foreach d,$(SOCIAL_DIRS),$(call buggy_cfgs_in,$(d)/))
 check-social: check-all

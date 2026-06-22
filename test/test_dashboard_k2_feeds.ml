@@ -156,7 +156,7 @@ let test_decisions_log_json_shape () =
     (`Assoc
         [ "ts_unix", `Float 1_234.0
         ; "keeper_name", `String meta.name
-        ; "speech_act", `String "assert"
+        ; "outcome", `String "assert"
         ; "blocker", `String "missing config"
         ]);
   let json = Dash.keeper_decisions_log_json ~config ~keepers:[ meta ] ~limit:10 () in

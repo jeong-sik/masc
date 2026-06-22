@@ -96,10 +96,11 @@ let removed_keeper_sandbox_input_key_names =
     "network_mode";
   ]
 
-let non_public_keeper_input_key_names =
-  [
-    "social_model";
-  ]
+(* Non-public keeper input keys: accepted for external-client
+   compatibility but with no runtime effect (#7447, #9752). Empty since the
+   social_model purge (RFC-0276) removed its only member; kept as the typed
+   extension point so a future such key warns rather than errors. *)
+let non_public_keeper_input_key_names : string list = []
 
 let removed_keeper_msg_input_key_names =
   [

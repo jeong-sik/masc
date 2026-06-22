@@ -3,7 +3,6 @@
 module KCB = Keeper_turn_runtime_budget
 module KEC = Keeper_context_runtime
 module KUM = Keeper_unified_metrics
-module Social = Keeper_social_model
 open Keeper_meta_contract
 
 (* RFC-0132 PR-2: success-path keeper-facing metric label = external boundary; redact via SSOT. *)
@@ -352,33 +351,6 @@ let emit_activity_graph
       (Printexc.to_string exn)
 ;;
 
-let record_accountability ~config ~updated_meta ~social_state ~result claim =
-  let trace_id = Keeper_id.Trace_id.to_string updated_meta.runtime.trace_id in
-  let validated_evidence = KUM.visible_run_validation result in
-  let strong_evidence =
-    KUM.has_substantive_tool_calls (Keeper_agent_result.tool_names result)
-    || Option.is_some validated_evidence
-  in
-  Keeper_accountability.record_completion_claim
-    config
-    ~keeper_name:updated_meta.name
-    ~agent_name:updated_meta.agent_name
-    ~trace_id
-    ~turn_number:updated_meta.runtime.usage.total_turns
-    ~subject:claim.Social.subject
-    ?task_id:claim.task_id
-    ~evidence_refs:claim.evidence_refs
-    ~surface:(Social.delivery_surface_to_string social_state.Social.delivery_surface)
-    ~strong_evidence
-    ~strong_evidence_refs:
-      (KUM.accountability_evidence_refs
-         ~trace_id
-         ~turn_number:updated_meta.runtime.usage.total_turns
-         ~result
-         ~validated_evidence)
-    ()
-;;
-
 let emit_usage_metrics_and_log
       ~updated_meta
       ~result
@@ -548,7 +520,6 @@ let handle
       ~meta
       ~turn_ctx_cell
       ~observation
-      ~previous_social_state
       ~final_execution
       ~latency_ms
       ~degraded_retry_applied
@@ -557,16 +528,8 @@ let handle
       ~last_provider_timeout_budget
       ~current_turn_blocker_info
       ~keeper_turn_id
-      ?(turn_ref : Ids.Turn_ref.t option)
       result
   =
-  let explicit_accountability_claim = Social.extract_accountability_claim result in
-  (* RFC-0233 §7: the social model may author a keeper board post (request-help);
-     thread the turn's minted join key so that post carries [origin.turn_ref]. *)
-  let result, social_state, social_transition_reason =
-    Social.apply_to_result ?turn_ref ~meta
-      ~previous_state:previous_social_state result
-  in
   let turn_cost = turn_cost result in
   let lifecycle =
     apply_lifecycle
@@ -582,8 +545,6 @@ let handle
       lifecycle.KEC.updated_meta
       ~latency_ms
       ~observation
-      ~social_state
-      ~social_transition_reason:(Social.transition_reason_to_string social_transition_reason)
       ~context_max:lifecycle.context_max
       ~update_proactive_rt:true
       result
@@ -642,12 +603,8 @@ let handle
     ?degraded_retry_runtime
     ?fallback_reason:(Option.map Keeper_error_classify.degraded_retry_reason_to_string fallback_reason)
     ~turn_mode
-    ~social_state
     ~result:(Some result)
     ();
-  (match explicit_accountability_claim with
-   | Some claim -> record_accountability ~config ~updated_meta ~social_state ~result claim
-   | None -> ());
   emit_usage_metrics_and_log
     ~updated_meta
     ~result

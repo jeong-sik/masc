@@ -18,7 +18,6 @@ type parsed_keeper_identity =
   ; pk_short_goal : string
   ; pk_mid_goal : string
   ; pk_long_goal : string
-  ; pk_social_model : string
   ; pk_will : string
   ; pk_needs : string
   ; pk_desires : string
@@ -87,12 +86,6 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
         ~long_goal_opt:
           (normalize_goal_horizon_opt (Safe_ops.json_string_opt "long_goal" json))
     in
-    let pk_social_model =
-      Safe_ops.json_string
-        ~default:(Env_config_core.keeper_social_model ())
-        "social_model"
-        json
-    in
     (* Layer 2 PR-B (commit 5): delegate the four personality fields
        to [Keeper_personality_io].  parse + coerce yields trim-only
        canonicalisation; truncation moved to the prompt-render path
@@ -125,7 +118,6 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
       ; pk_short_goal
       ; pk_mid_goal
       ; pk_long_goal
-      ; pk_social_model
       ; pk_will
       ; pk_needs
       ; pk_desires
@@ -386,25 +378,6 @@ let parse_keeper_state
   in
   let noop_turn_count = Safe_ops.json_int ~default:0 "noop_turn_count" json in
   let last_seen_message_seq = Safe_ops.json_int ~default:0 "last_seen_message_seq" json in
-  let last_speech_act = Safe_ops.json_string ~default:"" "last_speech_act" json in
-  let last_social_transition_reason =
-    Safe_ops.json_string ~default:"" "last_social_transition_reason" json
-  in
-  (* Gen12: cap narrative fields on load so pre-Gen8 checkpoints
-     (written before the write-side cap) cannot bleed unbounded
-     strings back into meta.runtime. Same budget as cap_social_state. *)
-  let cap_loaded =
-    Keeper_social_model_types.truncate_string
-      ~max_chars:Keeper_social_model_types.default_option_field_max_chars
-  in
-  (* #9933: blocker may carry a structured [masc_oas_error] JSON
-     payload. cap_loaded (narrative budget = 200 chars) would slice
-     the JSON mid-key and lose diagnostic fields (budget_sec,
-     keeper_turn_timeout_sec, estimated_input_tokens, source).
-     cap_blocker preserves structured payloads up to
-     masc_oas_error_max_chars and falls through to the narrative
-     budget for plain text. Symmetric with the write side in
-     Keeper_social_model_types.cap_social_state. *)
   (* Canonical format: last_blocker is a structured object
      (blocker_info_to_json output) or `Null. *)
   let last_blocker =
@@ -414,7 +387,6 @@ let parse_keeper_state
     | Some (`Assoc _ as json) -> blocker_info_of_json json
     | _ -> None
 	  in
-	  let last_need = cap_loaded (Safe_ops.json_string ~default:"" "last_need" json) in
 	  let last_turn_tool_calls =
 	    match json with
 	    | `Assoc fields ->
@@ -476,11 +448,8 @@ let parse_keeper_state
       ; mention_reactive_turn_count
       ; noop_turn_count
       ; last_seen_message_seq
-      ; last_speech_act
-      ; last_social_transition_reason
 	      ; last_blocker
 	      ; last_runtime_attempt
-	      ; last_need
 	      ; last_turn_tool_calls
 	      }
   }
@@ -541,7 +510,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; short_goal = identity.pk_short_goal
                    ; mid_goal = identity.pk_mid_goal
                    ; long_goal = identity.pk_long_goal
-                   ; social_model = identity.pk_social_model
                    ; will = identity.pk_will
                    ; needs = identity.pk_needs
                    ; desires = identity.pk_desires

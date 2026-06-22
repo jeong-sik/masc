@@ -324,7 +324,6 @@ let keeper_meta_persistent_drift_categories
       drift_if "proactive" (current.proactive <> target.proactive);
       drift_if "tool_access" (current.tool_access <> target.tool_access);
       drift_if "tool_denylist" (current.tool_denylist <> target.tool_denylist);
-      drift_if "social_model" (current.social_model <> target.social_model);
       drift_if "goal" (not (goal_horizon_text_equal current.goal target.goal));
       drift_if "short_goal"
         (not (goal_horizon_text_equal current.short_goal target.short_goal));
@@ -388,9 +387,6 @@ let ensure_keeper_meta_with_cause config name =
       apply_default defaults.proactive_cooldown_sec Keeper_config.default_proactive_cooldown_sec in
     let target_tool_access = resynced_tool_access defaults meta in
     let target_denylist = apply_default defaults.tool_denylist meta.tool_denylist in
-    let target_social_model =
-      apply_default defaults.social_model meta.social_model
-      |> Keeper_social_model.normalize_social_model in
     (* --- Personality --- *)
     let target_goal =
       match defaults.goal with
@@ -478,7 +474,6 @@ let ensure_keeper_meta_with_cause config name =
           cooldown_sec = target_cooldown_sec;
         };
         tool_denylist = target_denylist;
-        social_model = target_social_model;
         goal = target_goal;
         short_goal = target_short_goal;
         mid_goal = target_mid_goal;

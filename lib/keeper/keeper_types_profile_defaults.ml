@@ -34,7 +34,6 @@ type keeper_profile_defaults = {
   per_provider_timeout_state : per_provider_timeout_state;
   per_provider_timeout : float option;
   always_approve : bool option;
-  social_model : string option;
   (* Turn budget overrides. None = inherit env default
      (MASC_KEEPER_OAS_MAX_TURNS_PER_CALL / ..._SCHEDULED_AUTONOMOUS). *)
   max_turns_per_call : int option;
@@ -86,7 +85,6 @@ let empty_keeper_profile_defaults =
     per_provider_timeout_state = Per_provider_timeout_unset;
     per_provider_timeout = None;
     always_approve = None;
-    social_model = None;
     max_turns_per_call = None;
     max_turns_per_call_scheduled_autonomous = None;
     unknown_toml_keys = [];

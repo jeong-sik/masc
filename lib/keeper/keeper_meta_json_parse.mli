@@ -19,7 +19,6 @@ type parsed_keeper_identity =
   ; pk_short_goal : string
   ; pk_mid_goal : string
   ; pk_long_goal : string
-  ; pk_social_model : string
   ; pk_will : string
   ; pk_needs : string
   ; pk_desires : string

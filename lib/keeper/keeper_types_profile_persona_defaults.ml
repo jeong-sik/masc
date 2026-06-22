@@ -81,20 +81,6 @@ let load_from_path ~name path : keeper_profile_defaults =
                 Safe_ops.json_int_opt
                   "max_turns_per_call_scheduled_autonomous"
                   keeper_json;
-              social_model =
-                (match
-                   Normalizers.normalize_social_model_opt
-                     (Safe_ops.json_string_opt "social_model" keeper_json)
-                 with
-                 | Some _ as normalized -> normalized
-                 | None -> (
-                     match Safe_ops.json_string_opt "social_model" keeper_json with
-                     | Some raw ->
-                         Log.Keeper.warn
-                           "persona profile %s has invalid social_model '%s'; ignoring"
-                           path raw;
-                         None
-                     | None -> None));
               oas_env = [];
               unknown_toml_keys = [];
             }

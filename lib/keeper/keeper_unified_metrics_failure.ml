@@ -1,14 +1,13 @@
 (** Failure-path metric update for unified keeper cycle, extracted from
     keeper_unified_metrics.ml.
 
-    Pure write-only side-effect: updates keeper_meta runtime/social
-    fields based on a failure observation. *)
+    Pure write-only side-effect: updates keeper_meta runtime fields
+    based on a failure observation. *)
 
 open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
-module Social = Keeper_social_model
 
 include Keeper_unified_metrics_support
 include Keeper_unified_metrics_json_support
@@ -40,7 +39,7 @@ let provider_timeout_failure_summary
 
 let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     ~(observation : Keeper_world_observation.world_observation)
-    ~(reason : string) ?social_state ?social_transition_reason
+    ~(reason : string)
     ?sdk_error
     () : keeper_meta =
   let now_ts = Time_compat.now () in
@@ -150,42 +149,27 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
              meta.runtime.proactive_rt.consecutive_noop_count + 1
            else meta.runtime.proactive_rt.consecutive_noop_count);
       };
-      last_speech_act =
-        (match social_state with
-         | Some (state : Social.social_state) ->
-             Social.speech_act_to_string state.speech_act
-         | None -> meta.runtime.last_speech_act);
-      last_social_transition_reason =
-        (match social_transition_reason with
-         | Some value -> String.trim value
-         | None -> meta.runtime.last_social_transition_reason);
       last_blocker =
         (* Merge: typed klass from sdk_error becomes authoritative;
-           detail picks up the social-state blocker text or a public-
-           reason preview as observability context.  When the SDK
-           error carries no typed mapping we refuse to fabricate a
-           class — the previous string-only stamp is the substring
-           anti-pattern this refactor closes (CLAUDE.md
-           "워크어라운드 거부 기준 #2"). *)
+           detail is the public-reason preview as observability context.
+           When the SDK error carries no typed mapping we refuse to
+           fabricate a class — the previous string-only stamp is the
+           substring anti-pattern this refactor closes (CLAUDE.md
+           "워크어라운드 거부 기준 #2").  cap_blocker_detail preserves a
+           structured [masc_oas_error] payload up to ~2000 chars (#9933,
+           re-homed from the purged social model — RFC-0276 §3.3) and
+           truncates plain narrative to the narrative budget. *)
         (match sdk_error with
          | Some err ->
              (match Keeper_status_bridge.blocker_class_of_sdk_error err with
               | Some klass ->
                   let detail =
-                    match social_state with
-                    | Some (state : Social.social_state) ->
-                        Option.value ~default:"" state.blocker
-                    | None -> short_preview public_reason
+                    Keeper_internal_error.cap_blocker_detail public_reason
                   in
                   Some (Keeper_meta_contract.blocker_info_of_class
                           ~detail klass)
               | None -> None)
          | None -> None);
-      last_need =
-        (match social_state with
-         | Some (state : Social.social_state) ->
-             Option.value ~default:"" state.need
-         | None -> meta.runtime.last_need);
       last_turn_tool_calls = [];
     };
   }

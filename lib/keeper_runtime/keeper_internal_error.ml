@@ -247,6 +247,46 @@ type masc_internal_error =
 
 let masc_internal_error_prefix = "[masc_oas_error] "
 
+(* #9933: a keeper [blocker_info] detail string may carry a structured
+   [masc_oas_error] JSON payload — [masc_internal_error_prefix] above,
+   possibly wrapped by Agent_sdk.Error.to_string's "Internal error: ".
+   Truncating it at the narrative budget slices the JSON mid-key, so
+   downstream consumers (dashboard, retry classifier, log search) lose the
+   diagnostic fields (budget_sec, source, …). [cap_blocker_detail] keeps a
+   payload that begins with the prefix up to
+   [blocker_detail_structured_max_chars] and truncates plain narrative text
+   to [blocker_detail_narrative_max_chars]. Idempotent. Re-homed next to the
+   prefix SSOT when the keeper social model was purged (RFC-0276 §3.3);
+   applied where the runtime builds last_blocker.detail
+   (keeper_unified_metrics_failure). *)
+let blocker_detail_narrative_max_chars = 200
+
+(* ~2000 chars fits a Yojson-encoded masc_internal_error record of any
+   current variant plus the wrapping prefix, with headroom. Past this the
+   payload is pathological and we cap rather than store unbounded blobs. *)
+let blocker_detail_structured_max_chars = 2000
+
+let masc_oas_error_bare_prefix = String.trim masc_internal_error_prefix
+let masc_oas_error_wrapped_prefix = "Internal error: " ^ masc_oas_error_bare_prefix
+
+let has_masc_oas_error_prefix (s : string) : bool =
+  let starts_with prefix =
+    let pl = String.length prefix in
+    String.length s >= pl && String.sub s 0 pl = prefix
+  in
+  starts_with masc_oas_error_bare_prefix || starts_with masc_oas_error_wrapped_prefix
+
+let cap_blocker_detail (s : string) : string =
+  (* +3 bytes of headroom for the "…" ellipsis suffix. *)
+  let truncate ~max_chars s =
+    String_util.utf8_safe ~max_bytes:(max_chars + 3) ~suffix:"…" s
+    |> String_util.to_string
+  in
+  if has_masc_oas_error_prefix (String.trim s) then
+    if String.length s <= blocker_detail_structured_max_chars then s
+    else truncate ~max_chars:blocker_detail_structured_max_chars s
+  else truncate ~max_chars:blocker_detail_narrative_max_chars s
+
 let string_list_of_assoc key json =
   match Json_field.list json key |> Json_field.to_option with
   | None -> []

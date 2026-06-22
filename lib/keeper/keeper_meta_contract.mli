@@ -280,11 +280,8 @@ type agent_runtime_state = {
   board_reactive_turn_count : int;
   mention_reactive_turn_count : int;
   noop_turn_count : int;
-  last_speech_act : string;
-  last_social_transition_reason : string;
   last_blocker : blocker_info option;
   last_runtime_attempt : runtime_attempt_record option;
-  last_need : string;
   last_turn_tool_calls : tool_call_summary list;
   last_seen_message_seq : int;
   (** Highest message seq this keeper has scanned for direct mentions. *)
@@ -302,7 +299,6 @@ type keeper_meta = {
   short_goal : string;
   mid_goal : string;
   long_goal : string;
-  social_model : string;
   will : string;
   needs : string;
   desires : string;

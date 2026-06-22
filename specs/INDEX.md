@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-06-22T02:12:59Z (HEAD: b8a8470d5c)
+Generated: 2026-06-22T07:24:52Z (HEAD: 07404ce735)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,12 +13,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 92 |
-| Manual specs | 92 |
+| Total .tla files | 91 |
+| Manual specs | 91 |
 | TTrace (auto-generated) | 0 |
-| Directories | 19 |
-| Total .cfg files | 190 |
-| Buggy .cfg (bug-model pair) | 97 |
+| Directories | 18 |
+| Total .cfg files | 188 |
+| Buggy .cfg (bug-model pair) | 96 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -190,12 +190,6 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
 | ShellIRFirstClass.tla | ShellIRFirstClass | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | a9e3c0054525 |
-
-### specs/social-state-cap (1 specs)
-
-| File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
-|------|--------|------|-----|-------|-------------------------|---------------|
-| SocialStateCap.tla | SocialStateCap | manual | 2 | 1 | clean={inv:CapHolds, inv:PreservesEnum} buggy={inv:CapHolds} | 731488f25a91 |
 
 ### specs/state-product (2 specs)
 

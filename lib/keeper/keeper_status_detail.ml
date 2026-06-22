@@ -226,7 +226,6 @@ let effective_meta_overlay_hash (meta : keeper_meta) =
       ("will", meta.will);
       ("needs", meta.needs);
       ("desires", meta.desires);
-      ("social_model", meta.social_model);
       ("sandbox_profile", sandbox_profile_to_string meta.sandbox_profile);
       ("sandbox_image", opt_string meta.sandbox_image);
       ("network_mode", network_mode_to_string meta.network_mode);
@@ -911,40 +910,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("noop_turn_count", `Int m.runtime.noop_turn_count);
              ("tool_action_count", `Int m.runtime.autonomous_action_count);
            ]);
-           ("social", `Assoc [
-             ("model",
-               `String (Keeper_social_model.normalize_social_model m.social_model));
-             ("configured_model",
-               if String.trim m.social_model = ""
-               then `Null
-               else `String (String.trim m.social_model));
-             ("recognized_model", `Bool (Keeper_social_model.is_known_social_model m.social_model));
-             ("fallback_model",
-               Json_util.string_opt_to_json (Keeper_social_model.fallback_social_model m.social_model));
-             ("last_speech_act",
-               if String.trim m.runtime.last_speech_act = ""
-               then `Null
-               else `String m.runtime.last_speech_act);
-             ("delivery_surface_view",
-               Json_util.string_opt_to_json
-                 (Keeper_social_model.delivery_surface_view_of_meta m
-                  |> Option.map Keeper_social_model.delivery_surface_to_string));
-             ("delivery_surface_view_source",
-               Json_util.string_opt_to_json
-                 (Keeper_social_model.delivery_surface_view_source_of_meta m));
-             ("last_transition_reason",
-               if String.trim m.runtime.last_social_transition_reason = ""
-               then `Null
-               else `String m.runtime.last_social_transition_reason);
-             ("last_blocker",
-               match m.runtime.last_blocker with
-               | Some info -> Keeper_meta_contract.blocker_info_to_json info
-               | None -> `Null);
-             ("last_need",
-               if String.trim m.runtime.last_need = ""
-               then `Null
-               else `String m.runtime.last_need);
-          ]);
         ] @ runtime_blocker_fields @ attention_fields @ [
            ("compaction_policy", `Assoc [
              ("profile", `String m.compaction.profile);

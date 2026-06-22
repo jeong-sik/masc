@@ -304,16 +304,13 @@
 }
 
 .v2-app .v2-body {
-  /* White card stage with rounded-2xl and soft shadow. */
-  background: var(--ss-card);
-  border: 1px solid var(--ss-border);
-  border-radius: var(--ss-radius-card);
-  box-shadow: var(--ss-shadow-card);
+  /* Full-bleed surface — no card frame (matches the keeper-v2 prototype's
+     edge-to-edge .v2-body). The page background shows through; each surface
+     and its inner cards own their own backgrounds and borders. */
 
   /* Smooth transitions for the main surface as rails collapse/expand or the
      viewport changes. */
   transition:
-    border-radius var(--v2-shell-transition),
     flex var(--v2-shell-transition),
     opacity var(--v2-shell-transition),
     transform var(--v2-shell-transition);
@@ -348,15 +345,9 @@
   }
 }
 
-/* Bubble style variants (data-bubble mirrors v2 tweak panel). */
-.v2-app[data-bubble="card"] .v2-body {
-  box-shadow: var(--ss-shadow-card);
-}
-
-.v2-app[data-bubble="flat"] .v2-body {
-  box-shadow: none;
-  border-color: var(--ss-border);
-}
+/* The data-bubble tweak governs chat bubble styling (see craft-v2.css); it no
+   longer toggles a shell-frame shadow because the .v2-body card was removed
+   for the full-bleed shell. */
 
 /* ═══════════════════════════════════════════════════════════════
    FOCUS MODE CHROME

@@ -434,7 +434,7 @@ export function App() {
         <${DashboardHealthStrip} />
       `}
 
-      <div class=${compactChromeMode ? 'v2-shell-stage flex flex-1 overflow-hidden p-0' : 'v2-shell-stage flex flex-1 gap-2 overflow-hidden p-2 max-[1100px]:flex-col'}>
+      <div class=${compactChromeMode ? 'v2-shell-stage flex flex-1 overflow-hidden p-0' : 'v2-shell-stage flex flex-1 overflow-hidden max-[1100px]:flex-col'}>
         ${compactChromeMode
           ? null
           : html`
@@ -455,7 +455,7 @@ export function App() {
             id="main-content"
             tabindex=${-1}
             data-mpane=${mobileKeeperPane ?? undefined}
-            class=${compactChromeMode ? 'v2-body min-w-0 flex-1 overflow-hidden' : 'v2-body min-w-0 flex-1 overflow-hidden rounded-[var(--ss-radius-card)] border border-[var(--ss-border)] bg-[var(--ss-card)] shadow-[var(--ss-shadow-card)]'}
+            class="v2-body min-w-0 flex-1 overflow-hidden"
           >
             <div class=${isCodeSurface || widgetSoloMode ? 'h-full overflow-hidden p-0' : keeperDetailMode ? 'h-full p-0' : focusMode ? 'dashboard-main-scroll h-full overflow-y-auto p-3 max-[520px]:p-2 max-[900px]:pb-16' : 'dashboard-main-scroll h-full overflow-y-auto p-4 max-[900px]:pb-16'}>
               <div class="v2-surface" key=${currentTab}>

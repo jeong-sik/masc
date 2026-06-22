@@ -84,7 +84,7 @@ export function DashboardNavRail({
         aria-label="Sidebar navigation"
         data-collapsed=${effectiveCollapsed ? 'true' : 'false'}
         data-testid="dashboard-nav-rail"
-        class="v2-shell-rail ${sideRailWidthClass} shrink-0 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-rail-bg)] backdrop-blur-xl transition-[width] duration-[var(--t-slow)] ease-[var(--ease)] ${sideRailResponsiveClass}"
+        class="v2-shell-rail ${sideRailWidthClass} shrink-0 overflow-hidden border-r border-[var(--color-border-default)] bg-[var(--shell-rail-bg)] transition-[width] duration-[var(--t-slow)] ease-[var(--ease)] ${sideRailResponsiveClass}"
       >
         <${SideRail} collapsed=${effectiveCollapsed} onToggle=${onToggleCollapsed} primaryOnly=${!mobile} />
       </aside>

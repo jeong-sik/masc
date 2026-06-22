@@ -2088,7 +2088,7 @@ let tool_names_from_list_response response =
       | _ -> Alcotest.fail "result not an object")
   | _ -> Alcotest.fail "response not an object"
 
-let test_handle_request_tools_list_internal_keeper_runtime_includes_keeper_internal_tools
+let test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal_tools
     () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2111,8 +2111,15 @@ let test_handle_request_tools_list_internal_keeper_runtime_includes_keeper_inter
           ~internal_keeper_runtime:true state request
       in
       let names = tool_names_from_list_response response in
-      Alcotest.(check bool) "tool_execute listed" true
-        (List.mem "tool_execute" names);
+      (* internal_keeper_runtime no longer exposes keeper-internal tools to
+         tools/list: the Agent_internal surface was removed and
+         include_agent_internal adds no schema (see
+         mcp_server_eio_tool_profile.ml), so the Full-profile is_public_mcp
+         filter still drops them. Pin that tool_execute and masc_session stay
+         hidden even when the flag is set. A prior half-finished refactor left a
+         contradictory "tool_execute listed = true" assertion here against the
+         identical [List.mem] expression; it could never co-pass with the
+         hidden check below and is removed. *)
       Alcotest.(check bool) "retired tool_execute hidden" false
         (List.mem "tool_execute" names);
       Alcotest.(check bool) "system internal still hidden" false
@@ -2965,8 +2972,8 @@ let eio_tests = [
     test_handle_request_tools_call_records_keeper_usage_for_public_mcp;
   "handle tools/call blocks keeper internal tool", `Quick,
     test_handle_request_tools_call_blocks_keeper_internal_tool;
-  "handle tools/list internal keeper runtime includes keeper tools", `Quick,
-    test_handle_request_tools_list_internal_keeper_runtime_includes_keeper_internal_tools;
+  "handle tools/list internal keeper runtime hides keeper internal tools", `Quick,
+    test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal_tools;
   "handle tools/call internal keeper runtime allows keeper tool", `Quick,
     test_handle_request_tools_call_internal_keeper_runtime_allows_keeper_internal_tool;
   "internal keeper runtime cleanup preserves primary exception", `Quick,

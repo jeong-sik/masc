@@ -131,6 +131,31 @@ let test_system_prompt_includes_state_block_template_anchor () =
         "normal prompt does not need recovery fallback" false
         (contains_substring prompt "Recovery guard"))
 
+(* RFC-0282 self_model de-structure folded will/needs/desires into the persona
+   `instructions` channel. This pins that channel end-to-end at the render
+   boundary: the [instructions] argument must reach the built system prompt
+   verbatim. Without this, a future template change that drops the instructions
+   render would silently strip persona content (the deleted
+   test_keeper_prompt_personality_field_aggregation used to guard the old
+   will/needs/desires block). Field-level IO tests don't cover propagation;
+   this is the minimal channel pin (not an LLM-behavior A/B). *)
+let test_system_prompt_includes_instructions () =
+  with_repo_root_cwd (fun () ->
+      Lib.Keeper_prompt_external.reset_cache ();
+      let sentinel = "SENTINEL_PERSONA_INSTRUCTIONS_4f1c" in
+      let prompt =
+        Lib.Keeper_prompt.build_keeper_system_prompt
+          ~goal:"verify instructions propagation"
+          ~short_goal:"keep persona instructions in prompt"
+          ~mid_goal:"guard the folded self_model channel"
+          ~long_goal:"keep persona content reaching the LLM"
+          ~instructions:sentinel
+          ()
+      in
+      Alcotest.(check bool)
+        "persona instructions reach the rendered system prompt" true
+        (contains_substring prompt sentinel))
+
 let test_missing_returns_none () =
   with_repo_root_cwd (fun () ->
       Lib.Keeper_prompt_external.reset_cache ();
@@ -197,6 +222,8 @@ let () =
           Alcotest.test_case
             "system prompt includes state block template anchor" `Quick
             test_system_prompt_includes_state_block_template_anchor;
+          Alcotest.test_case "system prompt includes persona instructions"
+            `Quick test_system_prompt_includes_instructions;
           Alcotest.test_case "missing returns None" `Quick
             test_missing_returns_none;
           Alcotest.test_case "second lookup uses cache" `Quick

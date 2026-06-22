@@ -18,11 +18,32 @@ let active_model_of_meta (m : keeper_meta) : string =
   | _ -> Keeper_meta_contract.runtime_id_of_meta m
 
 let active_model_label_of_meta (m : keeper_meta) : string =
-  (* RFC-0132 PR-2: meta surface is external (status detail); redact via SSOT. *)
+  (* RFC-0132 PR-2: the meta surface is external (status detail); the model
+     label is redacted via SSOT ([Boundary_redaction.runtime_model_label]).
+     [meta.runtime.usage] carries only [last_input_tokens] — there is no
+     separate last-model-used field — so [last_model_used_label] at the emit
+     sites mirrors this same redacted value. Splitting the two would require
+     adding a model field to [usage_metrics] plus an RFC-0132 carve-out
+     (separate change). Intentionally identical to active by design. *)
   let _ = m in
   Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 
 let next_model_hint_of_meta (m : keeper_meta) : string option =
+  (* NOT-YET-IMPLEMENTED (#22080 follow-up): meta carries no field recording the
+     cascade's next-runtime fallback target, so there is nothing to read here.
+     The real source is [Keeper_unified_turn_cascade_resolution] /
+     [Keeper_error_classify] — the [next_runtime] of a degraded_retry, computed
+     during turn rotation but never persisted back into meta. Producing a real
+     hint requires extending the meta schema to persist next_runtime per keeper
+     (a separate change). Returns [None]; the dashboard already treats null as
+     "no hint" (keeper-store-normalize.ts). The emit sites stay wired so the
+     hint activates automatically once a source exists.
+
+     Unlike [models_resolved] (removed in this PR as a dead duplicate of the
+     live [models] field), [next_model_hint] is retained as forward-wiring:
+     same emit -> normalize -> unconsumed shape, but [models_resolved] had a
+     live sibling to serve the same data, whereas [next_model_hint] has no
+     source yet and lights up once [next_runtime] is persisted. *)
   let _ = m in
   None
 

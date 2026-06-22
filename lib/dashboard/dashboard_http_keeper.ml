@@ -967,11 +967,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                   (List.map
                      (fun s -> `String s)
                      (Keeper_model_labels.configured_model_labels_of_meta m)) );
-              ( "models_resolved"
-              , `List
-                  (List.map
-                     (fun s -> `String s)
-                     (Keeper_model_labels.configured_model_labels_of_meta m)) );
               ("primary_model", `String (Keeper_meta_contract.runtime_id_of_meta m));
               ("active_model", `String (Keeper_status_runtime.active_model_of_meta m));
               ( "next_model_hint"

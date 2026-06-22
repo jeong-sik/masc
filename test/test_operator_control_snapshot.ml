@@ -186,14 +186,12 @@ let test_compute_context_ratio_does_not_infer_provider_budget () =
   let meta =
     {
       base with
-      models = [ "codex_cli:auto" ];
       runtime =
         {
           base.runtime with
           usage =
             {
               base.runtime.usage with
-              last_model_used = "codex";
               last_input_tokens = 2_106_223;
             };
         };
@@ -247,14 +245,12 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
       let updated_meta =
         {
           meta with
-          models = [ "codex_cli:auto" ];
           runtime =
             {
               meta.runtime with
               usage =
                 {
                   meta.runtime.usage with
-                  last_model_used = "codex";
                   last_input_tokens = 6_637_033;
                   last_total_tokens = 6_670_646;
                 };

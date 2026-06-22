@@ -119,10 +119,10 @@ let degraded_keeper_dashboard_row
      ; ("runtime_id", runtime_id_json)
      ; ("runtime_canonical", runtime_id_json)
      ; ("selected_runtime_canonical", runtime_id_json)
-     ; ("primary_model", `Null)
-     ; ("active_model", `Null)
-     ; ("active_model_label", `Null)
-     ; ("last_model_used_label", `Null)
+      ; ("primary_model", `String (Keeper_meta_contract.runtime_id_of_meta m))
+      ; ("active_model", `String (Keeper_status_runtime.active_model_of_meta m))
+      ; ("active_model_label", `String (Keeper_status_runtime.active_model_label_of_meta m))
+      ; ("last_model_used_label", `String (Keeper_status_runtime.active_model_label_of_meta m))
      ])
 
 type keeper_activity_source =
@@ -451,7 +451,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
              §3.3 sunsets.  No replacement needed: unresolved runtimes
              surface on the canonical JSON field via the Result-returning
              resolver at the other call site below. *)
-          let primary_model = "" in
+          let primary_model = Keeper_meta_contract.runtime_id_of_meta m in
           let primary_model_norm = normalize_model_name primary_model in
           let last_compaction_saved_tokens =
             max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
@@ -968,11 +968,21 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 ("instructions",
                   if String.trim m.instructions = "" then `Null else `String m.instructions);
               ]);
-              ("models", `List []);
-              ("models_resolved", `List []);
-              ("primary_model", `Null);
-              ("active_model", `Null);
-              ("next_model_hint", `Null);
+              ( "models"
+              , `List
+                  (List.map
+                     (fun s -> `String s)
+                     (Keeper_model_labels.configured_model_labels_of_meta m)) );
+              ( "models_resolved"
+              , `List
+                  (List.map
+                     (fun s -> `String s)
+                     (Keeper_model_labels.configured_model_labels_of_meta m)) );
+              ("primary_model", `String (Keeper_meta_contract.runtime_id_of_meta m));
+              ("active_model", `String (Keeper_status_runtime.active_model_of_meta m));
+              ( "next_model_hint"
+              , Json_util.string_opt_to_json
+                  (Keeper_status_runtime.next_model_hint_of_meta m) );
               ("sandbox_profile",
                 `String (Keeper_types_profile_sandbox.sandbox_profile_to_string m.sandbox_profile));
               ("sandbox_target", `String sandbox_target);

@@ -659,7 +659,7 @@ let compute_metrics_window
     ("window_turns", `Int turn_points_int);
     ("window_series_max_lines", `Int series_points);
     ("window_series_max_bytes", `Int metrics_window_max_bytes);
-    ("primary_model", `Null);
+    ("primary_model", if primary_model = "" then `Null else `String primary_model);
     ("handoff_count", `Int acc.ma_handoff_count);
     ("compaction_events", `Int acc.ma_compaction_events);
     ("compaction_before_tokens", `Int acc.ma_compaction_before_tokens);

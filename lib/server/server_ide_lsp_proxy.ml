@@ -90,7 +90,11 @@ let disconnect cs =
 
 (** Thread-safe send: serializes WebSocket writes across fibers. *)
 let send cs msg =
-  Eio.Mutex.use_rw ~protect:true cs.send_mutex (fun () -> send_text cs.wsd msg)
+  if Atomic.get cs.disconnected
+  then ()
+  else
+    Eio.Mutex.use_rw ~protect:true cs.send_mutex (fun () ->
+      if not (Atomic.get cs.disconnected) then send_text cs.wsd msg)
 ;;
 
 (** JSON-RPC request ID — LSP spec allows integer or string. *)
@@ -263,7 +267,13 @@ let extract_line params =
 (** Ensure LSP process exists for a language.
     Spawns + initializes on first use, blocking until ready. *)
 let ensure_lsp_process cs lang_id =
-  Eio.Mutex.use_rw ~protect:true cs.spawn_mutex (fun () ->
+  if Atomic.get cs.disconnected
+  then Error "connection closed"
+  else
+    Eio.Mutex.use_rw ~protect:true cs.spawn_mutex (fun () ->
+      if Atomic.get cs.disconnected
+      then Error "connection closed"
+      else
     match Hashtbl.find_opt cs.processes lang_id with
     | Some proc -> Ok proc
     | None ->
@@ -721,9 +731,12 @@ let handle_document_highlight cs params id =
 
 (** Dispatch an incoming LSP message to the appropriate handler. *)
 let dispatch_message cs msg =
-  try
-    let json = Yojson.Safe.from_string msg in
-    match json with
+  if Atomic.get cs.disconnected
+  then ()
+  else
+    try
+      let json = Yojson.Safe.from_string msg in
+      match json with
     | `Assoc fields ->
       let method_opt =
         match List.assoc_opt "method" fields with
@@ -789,10 +802,12 @@ let dispatch_message cs msg =
           | None -> send_error cs n Mcp_error_code.(to_wire_code Method_not_found) ("Unhandled method: " ^ m))
        (* Server-initiated notification broadcast *)
        | Some m, None ->
-         Hashtbl.iter
-           (fun _lang_id proc ->
-              Lsp_message_router.send_notification cs.router proc ~method_:m ~params)
-           cs.processes
+         Eio.Mutex.use_rw ~protect:true cs.spawn_mutex (fun () ->
+           if not (Atomic.get cs.disconnected) then
+             Hashtbl.iter
+               (fun _lang_id proc ->
+                  Lsp_message_router.send_notification cs.router proc ~method_:m ~params)
+               cs.processes)
        (* No method field *)
        | None, Some n -> send_error cs n Mcp_error_code.(to_wire_code Invalid_request) "Missing method field"
        | None, None -> ())

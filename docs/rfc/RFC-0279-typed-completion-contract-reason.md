@@ -1,5 +1,5 @@
 ---
-rfc: "0278"
+rfc: "0279"
 title: "Typed completion-contract reason — structured backend emit replacing colon-composite string"
 status: Draft
 created: 2026-06-22
@@ -11,7 +11,7 @@ related: ["0150", "0140", "0089", "0062", "0135", "0174"]
 implementation_prs: []
 ---
 
-# RFC-0278: Typed completion-contract reason
+# RFC-0279: Typed completion-contract reason
 
 ## §0 한 줄 요약
 

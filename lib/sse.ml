@@ -123,8 +123,13 @@ let take = List.take
     while keeping dashboard metrics within 5 seconds of reality.
     Configurable via [MASC_SNAPSHOT_INTERVAL_SEC] env var (default 5.0). *)
 let snapshot_min_interval_sec =
-  try float_of_string (Sys.getenv "MASC_SNAPSHOT_INTERVAL_SEC")
-  with Not_found -> 5.0
+  (* Route through the validated helper (same idiom as [MASC_SSE_*] above):
+     a malformed value (e.g. "abc") previously raised [Failure] -- the
+     hand-rolled [with Not_found] only caught the unset case, so a typo in
+     this env var crashed the module at load. [get_float_nonneg] also maps
+     negative / NaN / +-inf to the default, which is correct for an
+     interval-seconds knob. *)
+  Env_config_core.get_float_nonneg ~default:5.0 "MASC_SNAPSHOT_INTERVAL_SEC"
 
 (** Timestamp of the last completed snapshot.  CAS-guarded so that
     concurrent [broadcast_impl] fibers racing to snapshot after the

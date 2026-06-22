@@ -472,6 +472,7 @@ describe('LogViewer Code links', () => {
     routeLinks.find(link => link.textContent === 'Telemetry')?.click()
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-nested&operation_id=op-nested&worker_run_id=wr-nested&q=turn-8')
   })
+.r . /tmp/logs_test_resolved_block.txt
 })
 
 describe('LogViewer kind column', () => {

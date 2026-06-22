@@ -106,10 +106,12 @@ const FUSION: FusionConfig = {
   maxToolCallsPerPanel: 0,
 }
 
-// tool_policy.toml named groups referenced by keeper tool_access lists —
+// Tool-group catalog for the prototype settings surface snapshot.
 // keeper-v2 settings.jsx:85-97 (TOOL_GROUPS). kind 'local' = [groups.*]
 // (keeper-local), 'masc' = [masc.*] (server). guard/optin map to the
 // [groups.execute] 3-layer guard and opt-in voice group.
+// NOTE: read-only snapshot only; live tool_policy/tier policy data is not yet
+// projected from backend policy SSOT.
 type ToolGroup = {
   readonly id: string
   readonly kind: 'local' | 'masc'
@@ -131,7 +133,8 @@ const TOOL_GROUPS: readonly ToolGroup[] = [
   { id: 'masc.goal', kind: 'masc', tools: ['masc_goal_list', 'masc_goal_upsert', 'masc_goal_transition', 'masc_goal_verify'] },
 ]
 // [groups.last_turn_safe] — keeper-v2 settings.jsx:99. On a keeper's final
-// turn, allowed tools are intersected with this set.
+// turn, allowed tools are intersected with this set. Snapshot from the
+// prototype settings view; backend parity is deferred.
 const LAST_TURN_SAFE: readonly string[] = ['keeper_board_post', 'keeper_board_comment', 'keeper_board_curation_submit', 'keeper_context_status', 'extend_turns', 'keeper_time_now', 'keeper_tool_search', 'keeper_broadcast', 'keeper_tasks_list', 'keeper_task_done', 'masc_tasks', 'masc_transition', 'tool_read_file', 'tool_search_files', 'tool_execute', 'masc_web_search', 'masc_web_fetch']
 // tool_execute 3-layer deterministic guard — keeper-v2 settings.jsx:101
 // ([groups.execute]).
@@ -819,6 +822,9 @@ export function SettingsSurface() {
             ${sec === 'policy' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
                 keeper 의 <span class="mono">tool_access</span> 는 named 그룹(<span class="mono">tool_policy.toml</span>)의 도구를 참조합니다. 여기서 namespace 기본 부여 그룹과 안전장치를 관리합니다.
+              </div>
+              <div class="set-hint" style=${{ marginBottom: '12px' }}>
+                현재는 live tool-policy 연동이 없어 prototype 표기 스냅샷으로 표시합니다. 런타임 도구 정책이 SSOT로 연동되면 값이 교체됩니다.
               </div>
               <div class="set-sub-h">도구 그룹 부여</div>
               ${TOOL_GROUPS.map(g => html`

@@ -406,8 +406,9 @@ describe('SettingsSurface', () => {
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-policy"]') as HTMLElement)
 
     expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('도구 정책')
-    // 11 named tool groups from tool_policy.toml.
+    // 11 named groups in the prototype snapshot.
     expect(container.querySelectorAll('[data-testid="set-tg-row"]').length).toBe(11)
+    expect(container.textContent).toContain('현재는 live tool-policy 연동이 없어 prototype 표기 스냅샷으로 표시합니다.')
     // execute group carries the 3-layer guard badge; voice is opt-in.
     const kinds = Array.from(container.querySelectorAll('.set-tg-kind')).map(n => n.textContent?.trim())
     expect(kinds).toContain('3-layer guard')

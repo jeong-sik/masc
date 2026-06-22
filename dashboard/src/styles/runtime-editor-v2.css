@@ -187,9 +187,7 @@ html[data-skin="v2"] .rt-note {
   margin-bottom: 14px;
 }
 html[data-skin="v2"] .rt-input {
-  /* runtime.css:33 — local --bg-well fallback (the prototype's deepest well
-     #06070a) resolves to canonical --bg-sunken, which the foundation does not
-     distinguish from --bg-well. See bg-well note at end of file. */
+  /* runtime.css:33 */
   background: var(--bg-sunken);
   border: 1px solid var(--border-main);
   border-radius: var(--radius-sm);
@@ -452,11 +450,13 @@ html[data-skin="v2"] .rt-assign-tag.pin { color: var(--volt-strong); } /* runtim
 
 /* toml — runtime.css:101 */
 html[data-skin="v2"] .rt-toml-wrap {
-  /* runtime.css:101 — --bg-well → --bg-sunken (see note below) */
+  /* runtime.css:101 — --bg-well (#06070a) is defined by the v2 foundation
+     (skin-v2.css / v2-skin-tokens.css), so use it verbatim instead of the
+     nearer --bg-sunken to keep the prototype's deepest code-well depth. */
   border: 1px solid var(--border-main);
   border-radius: var(--radius-sm);
   overflow: hidden;
-  background: var(--bg-sunken);
+  background: var(--bg-well);
 }
 html[data-skin="v2"] .rt-toml-bar {
   /* runtime.css:102 */
@@ -489,6 +489,21 @@ html[data-skin="v2"] .rt-copy:hover { border-color: var(--volt-dim); color: var(
    the canonical mono face inside this surface. */
 html[data-skin="v2"] .rt-shell .mono { font-family: var(--font-mono); }
 
+/* toml code well — runtime.css:107-108 */
+html[data-skin="v2"] .rt-toml {
+  margin: 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+  max-height: 60vh;
+}
+html[data-skin="v2"] .rt-toml code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--text-primary);
+  white-space: pre;
+}
+
 /* responsive — runtime.css:137 */
 @media (max-width: 720px) {
   html[data-skin="v2"] .rt-shell { grid-template-columns: 1fr; }
@@ -497,12 +512,3 @@ html[data-skin="v2"] .rt-shell .mono { font-family: var(--font-mono); }
   html[data-skin="v2"] .rt-nav-foot { display: none; }
   html[data-skin="v2"] .rt-select { min-width: 160px; }
 }
-
-/* ──────────────────────────────────────────────────────────────
-   --bg-well note: the Claude-Design prototype distinguishes three depths —
-   --bg-deep / --bg-sunken / --bg-well (deepest, #06070a, used for code/shell
-   wells). The canonical v2 foundation (ds-theme-tokens.css) only aliases
-   --bg-sunken (→ --bg-surface-muted) and does not define --bg-well. Rather
-   than invent a hex that would drift from the foundation, the toml well and
-   rt-input wells use --bg-sunken (the nearest canonical depth). If the
-   foundation later adds --bg-well, swap these two declarations. */

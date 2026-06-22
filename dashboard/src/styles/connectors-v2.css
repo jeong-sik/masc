@@ -26,7 +26,7 @@
   align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 18px;
+  margin-bottom: 20px;
 }
 
 .cn-surf-head .eyebrow {
@@ -35,7 +35,7 @@
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--text-dim);
-  margin-bottom: 5px;
+  margin-bottom: 6px;
 }
 
 .cn-surf-head h1 {
@@ -48,7 +48,7 @@
 }
 
 .cn-surf-sub {
-  margin-top: 5px;
+  margin-top: 6px;
   font-size: 12px;
   color: var(--text-dim);
 }
@@ -73,7 +73,7 @@
 .cn-act {
   font-family: var(--font-ui);
   font-size: 11px;
-  padding: 7px 12px;
+  padding: 8px 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-main);
   background: var(--bg-panel);
@@ -104,7 +104,7 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 6px;
   max-width: 100%;
   margin: -6px 0 16px;
   padding: 4px;
@@ -118,9 +118,9 @@
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 8px;
   min-height: 30px;
-  padding: 5px 10px;
+  padding: 6px 10px;
   border: 1px solid transparent;
   border-radius: var(--radius-xs);
   background: transparent;
@@ -164,7 +164,7 @@
   max-width: 360px;
   font-family: var(--font-mono);
   font-size: 12px;
-  padding: 7px 11px;
+  padding: 8px 12px;
   background: var(--bg-sunken);
   color: var(--text-bright);
   border: 1px solid var(--border-main);
@@ -268,8 +268,8 @@
 .cn-h {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 13px 15px;
+  gap: 12px;
+  padding: 14px 16px;
   border-bottom: 1px solid var(--border-soft);
   background: var(--bg-panel-alt);
 }
@@ -310,7 +310,7 @@
 .cn-status-pill {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -378,7 +378,7 @@
 
 .cn-kv .cell {
   background: var(--bg-panel);
-  padding: 8px 15px;
+  padding: 8px 16px;
 }
 
 .cn-kv .k {
@@ -405,8 +405,8 @@
 .cn-caps {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
-  padding: 10px 15px;
+  gap: 6px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--border-soft);
 }
 
@@ -422,7 +422,7 @@
 }
 
 .cn-bind {
-  padding: 10px 15px 13px;
+  padding: 10px 16px 14px;
   flex: 1;
 }
 
@@ -431,15 +431,15 @@
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--text-dim);
-  margin: 0 0 9px;
+  margin: 0 0 10px;
   font-weight: 600;
 }
 
 .cn-bind-row {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 7px 0;
+  gap: 10px;
+  padding: 8px 0;
   font-family: var(--font-mono);
   font-size: 12.5px;
   border-bottom: 1px dashed var(--border-soft);
@@ -506,7 +506,7 @@
 .cn-be {
   border: 1px solid var(--border-main);
   border-radius: var(--radius-sm);
-  padding: 9px 11px;
+  padding: 10px 12px;
   margin-bottom: 8px;
   background: var(--bg-card);
   transition: opacity 0.14s;
@@ -526,7 +526,7 @@
   flex: 1;
   min-width: 0;
   font-size: 12px;
-  padding: 5px 8px;
+  padding: 6px 8px;
   background: var(--bg-sunken);
   color: var(--text-bright);
   border: 1px solid var(--border-main);
@@ -552,7 +552,7 @@
 
 .cn-be-sel {
   font-size: 12px;
-  padding: 5px 8px;
+  padding: 6px 8px;
   background: var(--bg-sunken);
   color: var(--text-bright);
   border: 1px solid var(--border-main);
@@ -720,7 +720,7 @@
 }
 
 .cn-audit td {
-  padding: 7px 10px 7px 0;
+  padding: 8px 10px 8px 0;
   border-bottom: 1px solid var(--border-soft);
   color: var(--text-mid);
   font-family: var(--font-mono);
@@ -754,7 +754,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 11px 14px;
+  padding: 12px 14px;
   cursor: pointer;
   color: var(--text-mid);
   font-family: var(--font-display);
@@ -900,7 +900,7 @@
 .cn-drawer-tab {
   font-family: var(--font-ui);
   font-size: 12px;
-  padding: 7px 12px;
+  padding: 8px 12px;
   border: 0;
   background: transparent;
   color: var(--text-dim);
@@ -984,7 +984,7 @@
 .cn-set-input {
   font-family: var(--font-mono);
   font-size: 12px;
-  padding: 7px 10px;
+  padding: 8px 10px;
   background: var(--bg-sunken);
   color: var(--text-primary);
   border: 1px solid var(--border-main);
@@ -1018,7 +1018,7 @@
 .cn-set-seg-b {
   font-family: var(--font-mono);
   font-size: 11px;
-  padding: 5px 11px;
+  padding: 6px 12px;
   background: transparent;
   color: var(--text-dim);
   border: 0;
@@ -1045,7 +1045,7 @@
 .cn-set-add {
   margin-top: 10px;
   width: 100%;
-  padding: 9px;
+  padding: 10px;
   background: var(--bg-sunken);
   border: 1px dashed var(--border-highlight);
   border-radius: var(--radius-sm);
@@ -1064,7 +1064,7 @@
 .cn-test-btn {
   font-family: var(--font-ui);
   font-size: 11px;
-  padding: 6px 11px;
+  padding: 6px 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-main);
   background: var(--bg-card);

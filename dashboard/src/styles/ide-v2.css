@@ -111,7 +111,7 @@
 .ide-v2-view {
   font-family: var(--font-ui);
   font-size: 11px;
-  padding: 5px 12px;
+  padding: 6px 12px;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: none;
@@ -141,7 +141,7 @@
 .ide-v2-presence {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   flex: none;
   min-width: 0;
 }
@@ -256,7 +256,7 @@
 
 .ide-v2-tree .ide-explorer {
   height: 100%;
-  padding: 10px 7px;
+  padding: 10px 8px;
   border-right: 0;
   background: transparent;
 }
@@ -278,7 +278,7 @@
 .ide-v2-tree .ide-explorer-row {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   width: 100%;
   padding: 4px 8px;
   border-radius: var(--radius-sm);
@@ -327,8 +327,8 @@
   flex: none;
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 7px 14px;
+  gap: 8px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--border-soft);
   background: var(--bg-sunken);
   font-family: var(--font-mono);
@@ -380,14 +380,14 @@
   flex: none;
   display: flex;
   gap: 2px;
-  padding: 9px 10px 0;
+  padding: 10px 10px 0;
   border-bottom: 1px solid var(--border-soft);
 }
 
 .ide-v2-rail-tab {
   font-family: var(--font-ui);
   font-size: 11px;
-  padding: 6px 11px;
+  padding: 6px 12px;
   border: 0;
   background: none;
   color: var(--text-dim);
@@ -424,24 +424,24 @@
 }
 
 .ide-v2-rail .ide-plane-context-stack {
-  padding: 11px 12px;
+  padding: 12px 12px;
   overflow-y: visible;
   border-bottom: 1px solid var(--border-soft);
 }
 
 .ide-v2-rail .ide-plane-primary-rail {
-  padding: 11px 12px;
+  padding: 12px 12px;
   border-bottom: 1px solid var(--border-soft);
 }
 
 .ide-v2-rail .ide-plane-activity {
-  padding: 11px 12px;
+  padding: 12px 12px;
   flex: 1;
   min-height: 0;
 }
 
 .ide-v2-rail .ide-plane-cursors {
-  padding: 11px 12px;
+  padding: 12px 12px;
   display: grid;
   gap: 10px;
 }
@@ -456,7 +456,7 @@
 .ide-cursor-collision-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 6px;
 }
 
 .ide-cursor-collision-list > span {
@@ -487,7 +487,7 @@
 .ide-cursor-rail-row {
   display: grid;
   gap: 6px;
-  padding: 9px;
+  padding: 10px;
   border: 1px solid var(--border-soft);
   border-left: 3px solid var(--ide-cursor-color, var(--volt));
   border-radius: var(--radius-md);
@@ -572,7 +572,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 5px 14px;
+  padding: 6px 14px;
   cursor: pointer;
   font-family: var(--font-mono);
   font-size: 10.5px;

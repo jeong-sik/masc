@@ -84,7 +84,7 @@ body[data-mode="split"] .zone-deck { display: none; }
 
 .wc-chips { display: flex; gap: var(--sp-1); flex-wrap: nowrap; overflow: hidden; }
 .wc-chip {
-  display: inline-flex; align-items: center; gap: 5px;
+  display: inline-flex; align-items: center; gap: 6px;
   height: 22px; padding: 0 var(--sp-2);
   border: 1px solid var(--color-border-strong); border-radius: var(--r-1);
   background: var(--color-bg-elevated); color: var(--color-fg-secondary);
@@ -449,7 +449,7 @@ body[data-mode="split"] .zone-deck { display: none; }
   font-size: var(--fs-10);
 }
 .thread-kind {
-  font-size: var(--fs-9); padding: 1px 5px; border-radius: var(--r-0);
+  font-size: var(--fs-9); padding: 1px 6px; border-radius: var(--r-0);
   letter-spacing: .08em; text-transform: uppercase;
   font-family: var(--font-mono); font-weight: var(--fw-semi);
 }
@@ -497,7 +497,7 @@ body[data-mode="split"] .zone-deck { display: none; }
 }
 .activity-head .scope-pill {
   margin-left: auto;
-  font-size: var(--fs-9); padding: 1px 5px;
+  font-size: var(--fs-9); padding: 1px 6px;
   background: rgb(var(--brass-glow) / .1);
   color: var(--brass-1); border-radius: var(--r-0);
   letter-spacing: .06em;
@@ -588,7 +588,7 @@ body[data-mode="split"] .zone-deck { display: none; }
 /* —— cross-keeper conflict badge (later) —— */
 .conflict-warn {
   display: inline-flex; align-items: center; gap: var(--sp-1);
-  font-size: var(--fs-10); padding: 1px 5px;
+  font-size: var(--fs-10); padding: 1px 6px;
   background: rgb(var(--err-glow) / .1);
   color: var(--err); border: 1px solid rgb(var(--err-glow) / .3);
   border-radius: var(--r-0); font-family: var(--font-mono);
@@ -647,7 +647,7 @@ body[data-mode="split"] .zone-rail {
   font-family: var(--font-mono); font-size: var(--fs-10); color: var(--color-fg-disabled);
 }
 .cmd-hint-keys kbd {
-  display: inline-block; padding: 1px 5px;
+  display: inline-block; padding: 1px 6px;
   border: 1px solid var(--color-border-strong); border-radius: var(--r-0);
   background: var(--color-bg-hover); color: var(--color-fg-secondary);
   font-family: var(--font-mono); font-size: var(--fs-9);
@@ -679,7 +679,7 @@ body[data-mode="split"] .zone-rail {
   font-family: var(--font-mono); font-size: var(--fs-10); color: var(--color-fg-disabled);
 }
 .cmd-row .cmd-kind-tag {
-  font-size: var(--fs-9); padding: 1px 5px; border-radius: var(--r-0);
+  font-size: var(--fs-9); padding: 1px 6px; border-radius: var(--r-0);
   letter-spacing: .06em; text-transform: uppercase;
   background: var(--color-bg-elevated); color: var(--color-fg-muted); font-family: var(--font-mono);
 }
@@ -692,7 +692,7 @@ body[data-mode="split"] .zone-rail {
   color: var(--color-fg-disabled); font-size: var(--fs-11);
 }
 .cmd-empty kbd {
-  display: inline-block; padding: 1px 5px;
+  display: inline-block; padding: 1px 6px;
   border: 1px solid var(--color-border-strong); border-radius: var(--r-0);
   background: var(--color-bg-hover); color: var(--color-fg-secondary);
   font-family: var(--font-mono); font-size: var(--fs-9);
@@ -811,7 +811,7 @@ body:not(.term-open) .code-term { display: none; }
   padding: 2px 0;
 }
 .term-watch-pill {
-  font-size: var(--fs-9); padding: 1px 5px; border-radius: var(--r-0);
+  font-size: var(--fs-9); padding: 1px 6px; border-radius: var(--r-0);
   background: rgb(var(--brass-glow) / .1);
   color: var(--brass-1);
   letter-spacing: .06em; text-transform: uppercase;

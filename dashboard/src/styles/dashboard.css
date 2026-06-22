@@ -297,7 +297,7 @@
 }
 
 .ide-toolbar-context-focus > span {
-  padding: 1px 5px;
+  padding: 1px 6px;
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   background: var(--color-bg-page);
@@ -334,7 +334,7 @@
   gap: 3px;
   min-width: 0;
   height: 100%;
-  padding: 0 5px;
+  padding: 0 6px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -378,7 +378,7 @@
   min-width: 0;
   max-width: 132px;
   height: 18px;
-  padding: 0 5px;
+  padding: 0 6px;
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   background: var(--color-bg-page);
@@ -525,7 +525,7 @@
 }
 
 .ide-diff-context-focus > span:not(.ide-diff-context-links) {
-  padding: 1px 5px;
+  padding: 1px 6px;
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   background: var(--color-bg-page);
@@ -546,7 +546,7 @@
 
 .ide-diff-context-count {
   height: 18px;
-  padding: 0 5px;
+  padding: 0 6px;
   border: 1px solid var(--color-border-divider);
   border-radius: var(--r-1);
   background: var(--color-bg-surface);
@@ -561,7 +561,7 @@
   min-width: 0;
   max-width: 76px;
   height: 18px;
-  padding: 0 5px;
+  padding: 0 6px;
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   background: var(--color-bg-page);
@@ -682,7 +682,7 @@
   min-width: 0;
   max-width: 13rem;
   margin-left: auto;
-  padding: 1px 5px;
+  padding: 1px 6px;
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   background: var(--color-bg-page);
@@ -1054,7 +1054,7 @@ button.ide-persistence-focus:focus-visible {
   min-width: 0;
   max-width: 80px;
   height: 18px;
-  padding: 0 5px;
+  padding: 0 6px;
   overflow: hidden;
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
@@ -1275,7 +1275,7 @@ button.ide-persistence-focus:focus-visible {
   min-width: 0;
   max-width: 52px;
   height: 17px;
-  padding: 0 5px;
+  padding: 0 6px;
   overflow: hidden;
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
@@ -1435,7 +1435,7 @@ button.ide-persistence-focus:focus-visible {
   min-width: 0;
   max-width: 72px;
   height: 17px;
-  padding: 0 5px;
+  padding: 0 6px;
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   background: var(--color-bg-muted);
@@ -1486,7 +1486,7 @@ button.ide-persistence-focus:focus-visible {
 .ide-bdi-route-count,
 .ide-interject-context-count {
   height: 17px;
-  padding: 0 5px;
+  padding: 0 6px;
   border: 1px solid var(--color-border-divider);
   border-radius: var(--r-1);
   background: var(--color-bg-surface);
@@ -1501,7 +1501,7 @@ button.ide-persistence-focus:focus-visible {
   min-width: 0;
   max-width: 72px;
   height: 17px;
-  padding: 0 5px;
+  padding: 0 6px;
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   background: var(--color-bg-muted);
@@ -1542,7 +1542,7 @@ button.ide-persistence-focus:focus-visible {
   min-width: 0;
   max-width: 76px;
   height: 18px;
-  padding: 0 5px;
+  padding: 0 6px;
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   background: var(--color-bg-page);
@@ -1590,7 +1590,7 @@ button.ide-persistence-focus:focus-visible {
   align-items: center;
   flex-shrink: 0;
   min-height: 17px;
-  padding: 0 5px;
+  padding: 0 6px;
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   background: var(--color-bg-muted);
@@ -1848,7 +1848,7 @@ button.ide-persistence-focus:focus-visible {
   min-width: 0;
   max-width: 116px;
   min-height: 17px;
-  padding: 0 5px;
+  padding: 0 6px;
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   background: var(--color-bg-muted);
@@ -1887,7 +1887,7 @@ button.ide-persistence-focus:focus-visible {
   min-width: 0;
   max-width: 84px;
   height: 18px;
-  padding: 0 5px;
+  padding: 0 6px;
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   background: var(--color-bg-page);
@@ -2103,7 +2103,7 @@ button.ide-persistence-focus:focus-visible {
   display: inline-flex;
   align-items: center;
   height: 18px;
-  padding: 0 5px;
+  padding: 0 6px;
   border: 1px solid var(--color-border-muted);
   border-radius: var(--r-1);
   background: var(--color-bg-canvas);
@@ -2119,7 +2119,7 @@ button.ide-persistence-focus:focus-visible {
   min-width: 0;
   max-width: 76px;
   height: 18px;
-  padding: 0 5px;
+  padding: 0 6px;
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   background: var(--color-bg-page);
@@ -2234,7 +2234,7 @@ button.ide-persistence-focus:focus-visible {
   display: inline-flex;
   align-items: center;
   height: 17px;
-  padding: 0 5px;
+  padding: 0 6px;
   border: 1px solid var(--color-border-muted);
   border-radius: var(--r-1);
   background: var(--color-bg-canvas);
@@ -2250,7 +2250,7 @@ button.ide-persistence-focus:focus-visible {
   min-width: 0;
   max-width: 72px;
   height: 17px;
-  padding: 0 5px;
+  padding: 0 6px;
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   background: var(--color-bg-muted);
@@ -2332,7 +2332,7 @@ button.ide-persistence-focus:focus-visible {
   gap: 4px;
   min-width: 0;
   height: 18px;
-  padding: 0 5px;
+  padding: 0 6px;
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   background: var(--color-bg-page);
@@ -2371,7 +2371,7 @@ button.ide-persistence-focus:focus-visible {
 
 .ide-editor-context-route-count {
   height: 17px;
-  padding: 0 5px;
+  padding: 0 6px;
   border: 1px solid var(--color-border-divider);
   border-radius: var(--r-1);
   background: var(--color-bg-surface);
@@ -2386,7 +2386,7 @@ button.ide-persistence-focus:focus-visible {
   min-width: 0;
   max-width: 68px;
   height: 17px;
-  padding: 0 5px;
+  padding: 0 6px;
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   background: var(--color-bg-elevated);
@@ -2675,7 +2675,7 @@ button.ide-persistence-focus:focus-visible {
   display: inline-flex;
   align-items: center;
   min-height: 17px;
-  padding: 0 5px;
+  padding: 0 6px;
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   background: var(--color-bg-muted);

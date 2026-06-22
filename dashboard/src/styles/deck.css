@@ -115,7 +115,7 @@
   background: var(--color-bg-surface); border-bottom: 1px solid var(--color-border-strong);
   font-size: var(--fs-10); text-transform: uppercase; letter-spacing: .08em;
   color: var(--color-fg-secondary); font-weight: var(--fw-bold);
-  text-align: left; padding: 7px 12px;
+  text-align: left; padding: 8px 12px;
   z-index: 1;
 }
 .deck-table tbody td {
@@ -293,7 +293,7 @@
   font-size: var(--fs-11); color: var(--color-fg-secondary); font-family: var(--font-mono);
 }
 .runtime-step .cs-state {
-  display: flex; align-items: center; gap: 5px; font-size: var(--fs-11); margin-top: 2px;
+  display: flex; align-items: center; gap: 6px; font-size: var(--fs-11); margin-top: 2px;
 }
 .runtime-step .cs-arrow {
   position: absolute; right: -7px; top: 50%; transform: translateY(-50%);

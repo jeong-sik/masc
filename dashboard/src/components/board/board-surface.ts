@@ -342,8 +342,10 @@ function BoardSummary() {
 
 // ── Author sigil (v2) ──────────────────────────────────────────────
 function BdAuthor({ name, size = 24 }: { name: string; size?: number }) {
-  const label = name.slice(0, 2).toUpperCase()
   const isOperator = name.toLowerCase() === 'operator' || name.toLowerCase() === 'dashboard'
+  // Prototype board.jsx:8 renders the operator avatar as the literal "OP"
+  // glyph; keepers use a 2-letter monogram (SigilBadge style, fleet.jsx:8).
+  const label = isOperator ? 'OP' : name.slice(0, 2).toUpperCase()
   return html`<span class=${`bd-sigil ${isOperator ? 'op' : ''}`} style=${{ width: size, height: size }}>${label}</span>`
 }
 

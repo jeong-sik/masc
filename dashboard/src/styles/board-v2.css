@@ -783,25 +783,29 @@
 }
 
 /* ════ AUTHOR SIGIL ════ */
+/* Prototype SigilBadge style (fleet.jsx:8 -> .sigil v2.css:286-291): solid
+   fill + dark monogram, no border. The prototype's operator avatar
+   (board.jsx:8) is the .msg-av.op variant (v2.css:485): solid var(--volt)
+   fill with var(--volt-ink) glyph, inline borderRadius:5 / fontSize:9.
+   The 5px radius is a literal in the prototype (board.jsx:8 borderRadius:5),
+   not --radius-sm (4px), so it is set as a literal px here. */
 .v2-board-surface .bd-sigil {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-sm);
+  border-radius: 5px; /* prototype board.jsx:8 inline borderRadius:5 (literal, not --radius-sm=4px) */
   font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: var(--text-bright);
-  background: var(--bg-sunken);
-  border: 1px solid var(--border-soft);
+  font-size: 9px; /* prototype board.jsx:8 fontSize:9 */
+  font-weight: 700; /* prototype v2.css:291 .sigil font-weight:700 */
+  letter-spacing: 0;
+  color: var(--volt-ink); /* prototype v2.css:485 .msg-av.op color:var(--volt-ink) */
+  background: var(--volt); /* solid volt fill, prototype v2.css:485 .msg-av.op background:var(--volt) */
   flex: none;
 }
 
 .v2-board-surface .bd-sigil.op {
-  background: var(--volt-wash);
-  color: var(--volt-strong);
-  border-color: var(--volt-dim);
+  background: var(--volt); /* solid fill, not volt-wash; prototype v2.css:485 .msg-av.op */
+  color: var(--volt-ink); /* prototype v2.css:485 .msg-av.op color:var(--volt-ink) */
 }
 
 .v2-board-surface .bd-mobile-queues {

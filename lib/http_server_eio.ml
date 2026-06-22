@@ -446,7 +446,7 @@ module Router = struct
      require it to hand the post-101 socket to a
      [Httpun_ws.Server_connection.t] runtime.  Threaded through
      [dispatch] as a typed per-request value rather than captured
-     ambiently.  See RFC-0280. *)
+     ambiently.  See RFC-0281. *)
   type upgrade = Gluten.impl -> unit
 
   type ws_handler =
@@ -456,7 +456,7 @@ module Router = struct
      case) or upgrades the connection to WebSocket ([Ws]).  Encoding
      this as a typed variant keeps the route table the single source of
      truth for which paths upgrade, instead of a path-string match in
-     the connection handler.  RFC-0280 S3.3. *)
+     the connection handler.  RFC-0281 S3.3. *)
   type route_target =
     | Plain of request_handler
     | Ws of ws_handler
@@ -604,7 +604,7 @@ module Router = struct
 
   (** Register a WebSocket-upgrade route.  The handler additionally
       receives the Gluten [upgrade] capability so it can drive the
-      post-101 connection.  RFC-0280. *)
+      post-101 connection.  RFC-0281. *)
   let ws_get path handler router =
     add_kind Exact ~path ~methods:[`GET] ~handler:(Ws handler) router
 
@@ -673,7 +673,7 @@ module Router = struct
                    that cannot upgrade (e.g. the HTTP/2 dispatch path,
                    which has no Gluten upgrade).  Respond 426 explicitly
                    rather than silently dropping the request.
-                   RFC-0280 S3.3. *)
+                   RFC-0281 S3.3. *)
                 Response.text ~status:`Upgrade_required
                   "426 Upgrade Required: WebSocket upgrade unavailable on \
                    this transport"

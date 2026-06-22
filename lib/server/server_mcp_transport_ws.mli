@@ -280,7 +280,7 @@ val mcp_websocket_handler :
     standalone listener — they differ only in socket attachment, not the
     session protocol.  [on_connection_close] / [on_eof] are observability
     hooks invoked before cleanup (defaults: close payload / ignore).
-    RFC-0280 S3.2. *)
+    RFC-0281 S3.2. *)
 
 val respond_and_drive_upgrade :
   upgrade:(Gluten.impl -> unit) ->
@@ -290,7 +290,7 @@ val respond_and_drive_upgrade :
 (** Single source of truth for HTTP/1.1 -> WebSocket attachment: sends the
     101 via [respond_with_upgrade], then drives the connection by handing it
     to the Gluten runtime via [upgrade].  Omitting the [upgrade] call (the
-    pre-RFC-0280 defect) left inbound frames unread.  RFC-0280 S3.1. *)
+    pre-RFC-0281 defect) left inbound frames unread.  RFC-0281 S3.1. *)
 
 val upgrade_connection :
   ?sw:Eio.Switch.t ->

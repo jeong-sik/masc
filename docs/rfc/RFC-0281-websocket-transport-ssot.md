@@ -1,5 +1,5 @@
 ---
-rfc: "0280"
+rfc: "0281"
 title: "WebSocket transport SSOT — separate upgrade-attachment from session-protocol, drive the connection"
 status: Draft
 created: 2026-06-22
@@ -11,7 +11,7 @@ related: ["0100", "0204", "0106", "0138"]
 implementation_prs: []
 ---
 
-# RFC-0280: WebSocket transport SSOT
+# RFC-0281: WebSocket transport SSOT
 
 Status: Draft
 Author: jeong-sik (vincent), with Claude Opus 4.8

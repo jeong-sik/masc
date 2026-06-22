@@ -139,7 +139,7 @@ let test_frontend_transport_routes_present () =
       (Router.routes routes)
   in
   Alcotest.(check bool) "GET /ws route" true (has_route `GET "/ws");
-  (* RFC-0280: /ws must be a typed WebSocket-upgrade route ([Router.Ws]),
+  (* RFC-0281: /ws must be a typed WebSocket-upgrade route ([Router.Ws]),
      not a plain route.  Only a Ws route receives the Gluten [upgrade]
      capability and thus actually drives the post-101 connection.  A
      regression to [Router.Plain] (or to a main_eio special-case that
@@ -162,7 +162,7 @@ let test_frontend_transport_routes_present () =
     (has_route `POST "/webrtc/answer")
 ;;
 
-(* RFC-0280: typed WebSocket-upgrade routes.  [ws_get] registers a
+(* RFC-0281: typed WebSocket-upgrade routes.  [ws_get] registers a
    [Router.Ws] route (carrying the Gluten upgrade capability); [get]
    registers a [Router.Plain] route.  The variant is what lets
    [Router.dispatch] thread [upgrade] to WS routes and reject WS routes

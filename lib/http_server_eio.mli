@@ -252,7 +252,7 @@ module Router : sig
   (** The Gluten protocol-upgrade capability, available only at the
       httpun-eio connection-handler boundary.  WebSocket-upgrade routes
       ({!ws_get}) need it to drive the post-101 connection; plain routes
-      do not.  RFC-0280. *)
+      do not.  RFC-0281. *)
   type upgrade = Gluten.impl -> unit
 
   (** A WebSocket-upgrade route handler.  Receives the per-request
@@ -261,7 +261,7 @@ module Router : sig
     upgrade:upgrade -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 
   (** A route either handles the request in-band ([Plain]) or upgrades
-      the connection to WebSocket ([Ws]).  RFC-0280 S3.3. *)
+      the connection to WebSocket ([Ws]).  RFC-0281 S3.3. *)
   type route_target =
     | Plain of request_handler
     | Ws of ws_handler
@@ -306,7 +306,7 @@ module Router : sig
 
   (** [ws_get path handler routes] registers a WebSocket-upgrade route
       on GET [path].  The handler receives the Gluten {!upgrade}
-      capability so it can drive the post-101 connection.  RFC-0280. *)
+      capability so it can drive the post-101 connection.  RFC-0281. *)
   val ws_get : string -> ws_handler -> t -> t
 
   (** [prefix_get prefix handler routes] matches any GET whose
@@ -338,7 +338,7 @@ module Router : sig
       [?upgrade] supplies the Gluten upgrade capability for {!Ws}
       routes.  When a {!Ws} route is matched but [?upgrade] is absent
       (e.g. the HTTP/2 dispatch path), responds [`Upgrade_required]
-      (426) — an explicit error, never a silent drop.  RFC-0280. *)
+      (426) — an explicit error, never a silent drop.  RFC-0281. *)
   val dispatch
     :  t
     -> ?upgrade:upgrade

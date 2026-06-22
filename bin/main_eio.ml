@@ -222,7 +222,7 @@ let try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin req
     [GET /ws] (same-origin WebSocket upgrade + discovery) is owned by
     the route table ([Server_routes_http_routes_frontend] via
     [Http.Router.ws_get]) and reached through
-    [Http.Router.dispatch ~upgrade] below.  RFC-0280 consolidated the
+    [Http.Router.dispatch ~upgrade] below.  RFC-0281 consolidated the
     previously-duplicated main_eio upgrade/discovery handlers into the
     router so [/ws] has a single owner that actually drives the
     connection. *)
@@ -421,7 +421,7 @@ let make_extended_handler routes =
     (* Gluten upgrade capability — only available here at the connection
        boundary.  Threaded to [Http.Router.dispatch] so WebSocket routes
        ([Http.Router.ws_get]) can drive the post-101 connection.
-       RFC-0280. *)
+       RFC-0281. *)
     let upgrade = gluten_reqd.Gluten.Reqd.upgrade in
     let request = Httpun.Reqd.request reqd in
     (* Rate limiting: enforce before any auth or routing. *)

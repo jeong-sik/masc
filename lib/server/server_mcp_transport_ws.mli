@@ -264,13 +264,45 @@ val dispatch_inbound_message : string -> string -> unit
 (** Dispatches an inbound WebSocket message through the currently installed
     handler.  Used by both standalone WS and same-origin [/ws] upgrade paths. *)
 
+val mcp_websocket_handler :
+  ?sw:Eio.Switch.t ->
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  ?on_connection_close:
+    (session_id:string -> declared_len:int -> Httpun_ws.Payload.t -> unit) ->
+  ?on_eof:(session_id:string -> Httpun_ws.Websocket_connection.error option -> unit) ->
+  on_message:(string -> string -> unit) ->
+  origin_label:string ->
+  Httpun_ws.Wsd.t ->
+  Httpun_ws.Websocket_connection.input_handlers
+(** Single source of truth for the MCP-over-WebSocket session protocol:
+    session registration, SSE subscription, liveness heartbeat, and frame
+    opcode handling.  Shared by the same-origin upgrade path and the
+    standalone listener — they differ only in socket attachment, not the
+    session protocol.  [on_connection_close] / [on_eof] are observability
+    hooks invoked before cleanup (defaults: close payload / ignore).
+    RFC-0280 S3.2. *)
+
+val respond_and_drive_upgrade :
+  upgrade:(Gluten.impl -> unit) ->
+  reqd:Httpun.Reqd.t ->
+  handler:(Httpun_ws.Wsd.t -> Httpun_ws.Websocket_connection.input_handlers) ->
+  (unit, string) result
+(** Single source of truth for HTTP/1.1 -> WebSocket attachment: sends the
+    101 via [respond_with_upgrade], then drives the connection by handing it
+    to the Gluten runtime via [upgrade].  Omitting the [upgrade] call (the
+    pre-RFC-0280 defect) left inbound frames unread.  RFC-0280 S3.1. *)
+
 val upgrade_connection :
   ?sw:Eio.Switch.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?on_message:(string -> string -> unit) ->
+  upgrade:(Gluten.impl -> unit) ->
   Httpun.Reqd.t ->
   (unit, string) result
-(** Handles an HTTP/1.1 [GET /ws] upgrade on the main HTTP origin.  When [sw]
+(** Handles an HTTP/1.1 [GET /ws] upgrade on the main HTTP origin using the
+    shared MCP session protocol ({!mcp_websocket_handler}) and attachment
+    ({!respond_and_drive_upgrade}).  [upgrade] is the Gluten capability
+    threaded from the route via {!Http_server_eio.Router.ws_get}.  When [sw]
     and [clock] are provided, forks the protocol-level heartbeat on a
     per-connection switch (a child of [sw]) and closes the session after a
     configurable number of missed pongs. *)

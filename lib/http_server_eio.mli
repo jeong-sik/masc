@@ -249,11 +249,28 @@ end
 module Router : sig
   type route_kind = Exact | Prefix
 
+  (** The Gluten protocol-upgrade capability, available only at the
+      httpun-eio connection-handler boundary.  WebSocket-upgrade routes
+      ({!ws_get}) need it to drive the post-101 connection; plain routes
+      do not.  RFC-0280. *)
+  type upgrade = Gluten.impl -> unit
+
+  (** A WebSocket-upgrade route handler.  Receives the per-request
+      {!upgrade} capability in addition to the request + descriptor. *)
+  type ws_handler =
+    upgrade:upgrade -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+
+  (** A route either handles the request in-band ([Plain]) or upgrades
+      the connection to WebSocket ([Ws]).  RFC-0280 S3.3. *)
+  type route_target =
+    | Plain of request_handler
+    | Ws of ws_handler
+
   type route =
     { kind : route_kind
     ; path : string
     ; methods : Httpun.Method.t list
-    ; handler : request_handler
+    ; handler : route_target
     }
 
   type resolution =
@@ -287,6 +304,11 @@ module Router : sig
       POST / PUT / DELETE / OPTIONS. *)
   val any : string -> request_handler -> t -> t
 
+  (** [ws_get path handler routes] registers a WebSocket-upgrade route
+      on GET [path].  The handler receives the Gluten {!upgrade}
+      capability so it can drive the post-101 connection.  RFC-0280. *)
+  val ws_get : string -> ws_handler -> t -> t
+
   (** [prefix_get prefix handler routes] matches any GET whose
       path starts with [prefix]. *)
   val prefix_get : string -> request_handler -> t -> t
@@ -309,8 +331,18 @@ module Router : sig
       otherwise. *)
   val resolve : t -> Httpun.Request.t -> resolution
 
-  (** [dispatch routes request reqd] wires {!resolve} to the
+  (** [dispatch routes ?upgrade request reqd] wires {!resolve} to the
       route's handler, falling back to {!Response.not_found} /
-      {!Response.method_not_allowed} based on the resolution. *)
-  val dispatch : t -> request_handler
+      {!Response.method_not_allowed} based on the resolution.
+
+      [?upgrade] supplies the Gluten upgrade capability for {!Ws}
+      routes.  When a {!Ws} route is matched but [?upgrade] is absent
+      (e.g. the HTTP/2 dispatch path), responds [`Upgrade_required]
+      (426) — an explicit error, never a silent drop.  RFC-0280. *)
+  val dispatch
+    :  t
+    -> ?upgrade:upgrade
+    -> Httpun.Request.t
+    -> Httpun.Reqd.t
+    -> unit
 end

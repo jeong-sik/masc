@@ -439,11 +439,33 @@ end
 module Router = struct
   type route_kind = Exact | Prefix
 
+  (* The Gluten protocol-upgrade capability.  It is only available at
+     the httpun-eio connection-handler boundary, where the request
+     arrives as [Httpun.Reqd.t Gluten.reqd = { reqd; upgrade }].  Plain
+     HTTP routes never need it; WebSocket-upgrade routes ([ws_get])
+     require it to hand the post-101 socket to a
+     [Httpun_ws.Server_connection.t] runtime.  Threaded through
+     [dispatch] as a typed per-request value rather than captured
+     ambiently.  See RFC-0280. *)
+  type upgrade = Gluten.impl -> unit
+
+  type ws_handler =
+    upgrade:upgrade -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+
+  (* A route either handles the request in-band ([Plain], the common
+     case) or upgrades the connection to WebSocket ([Ws]).  Encoding
+     this as a typed variant keeps the route table the single source of
+     truth for which paths upgrade, instead of a path-string match in
+     the connection handler.  RFC-0280 S3.3. *)
+  type route_target =
+    | Plain of request_handler
+    | Ws of ws_handler
+
   type route = {
     kind: route_kind;
     path: string;
     methods: Httpun.Method.t list;
-    handler: request_handler;
+    handler: route_target;
   }
 
   type resolution =
@@ -569,7 +591,7 @@ module Router = struct
     router
 
   let add ~path ~methods ~handler router =
-    add_kind Exact ~path ~methods ~handler router
+    add_kind Exact ~path ~methods ~handler:(Plain handler) router
 
   let get path handler routes =
     add ~path ~methods:[`GET] ~handler routes
@@ -580,19 +602,25 @@ module Router = struct
   let any path handler routes =
     add ~path ~methods:[`GET; `POST; `PUT; `DELETE; `OPTIONS] ~handler routes
 
+  (** Register a WebSocket-upgrade route.  The handler additionally
+      receives the Gluten [upgrade] capability so it can drive the
+      post-101 connection.  RFC-0280. *)
+  let ws_get path handler router =
+    add_kind Exact ~path ~methods:[`GET] ~handler:(Ws handler) router
+
   (** Match by prefix: path field is treated as a prefix, not exact match.
       The suffix (path after the prefix) is available via [Request.path]. *)
   let prefix_get prefix handler routes =
-    add_kind Prefix ~path:prefix ~methods:[`GET] ~handler routes
+    add_kind Prefix ~path:prefix ~methods:[`GET] ~handler:(Plain handler) routes
 
   let prefix_post prefix handler routes =
-    add_kind Prefix ~path:prefix ~methods:[`POST] ~handler routes
+    add_kind Prefix ~path:prefix ~methods:[`POST] ~handler:(Plain handler) routes
 
   let prefix_delete prefix handler routes =
-    add_kind Prefix ~path:prefix ~methods:[`DELETE] ~handler routes
+    add_kind Prefix ~path:prefix ~methods:[`DELETE] ~handler:(Plain handler) routes
 
   let prefix_put prefix handler routes =
-    add_kind Prefix ~path:prefix ~methods:[`PUT] ~handler routes
+    add_kind Prefix ~path:prefix ~methods:[`PUT] ~handler:(Plain handler) routes
 
   let resolve_prefix routes req_path =
     let path_len = String.length req_path in
@@ -632,9 +660,24 @@ module Router = struct
         else
           `Not_found
 
-  let dispatch router request reqd =
+  let dispatch router ?upgrade request reqd =
     match resolve router request with
-    | `Matched route -> route.handler request reqd
+    | `Matched route -> (
+        match route.handler with
+        | Plain handler -> handler request reqd
+        | Ws handler -> (
+            match upgrade with
+            | Some upgrade -> handler ~upgrade request reqd
+            | None ->
+                (* A WebSocket-upgrade route was matched on a transport
+                   that cannot upgrade (e.g. the HTTP/2 dispatch path,
+                   which has no Gluten upgrade).  Respond 426 explicitly
+                   rather than silently dropping the request.
+                   RFC-0280 S3.3. *)
+                Response.text ~status:`Upgrade_required
+                  "426 Upgrade Required: WebSocket upgrade unavailable on \
+                   this transport"
+                  reqd))
     | `Not_found -> Response.not_found reqd
     | `Method_not_allowed -> Response.method_not_allowed reqd
 end

@@ -71,7 +71,7 @@ describe('DashboardMain primary heading', () => {
 
     await waitFor(() => {
       expect([...container.querySelectorAll('h1')].map(node => node.textContent?.trim()))
-        .toEqual(['운영 개요'])
+        .toEqual(['지금, 전체'])
     }, { timeout: 5000 })
     expect(container.querySelector('.v2-surface-header h1')).toBeNull()
   })

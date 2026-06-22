@@ -25,31 +25,37 @@ let outcome_of_result (model : string)
                (Agent_sdk.Error.to_string e))
       }
 
-let run ~sw ~net ~max_fibers ~timeout_s ~models ~system_prompt ~prompt
-    ~web_tools ~max_tool_calls_per_panel () : Fusion_types.panel_outcome list
+let run ~sw ~net ~max_fibers ~outer_timeout_s ~groups ~prompt ()
+  : Fusion_types.panel_outcome list
   =
-  let tools = if web_tools then Fusion_oas.web_tool_bundle () else [] in
-  (* 1. 각 모델을 에이전트로 빌드. 빌드 실패는 격리. *)
+  (* 1. 각 그룹의 모델을 그 그룹 설정(system_prompt/tools/max_tool_calls/timeout)으로
+        에이전트 빌드. 빌드 실패는 격리. 그룹순 × 그룹내 모델순으로 평탄화 —
+        순서 보존(단일 그룹이면 원 모델 순서 = 오늘과 동일). *)
   let built, build_failures =
     List.fold_left
-      (fun (oks, fails) model ->
-        match
-          Fusion_oas.build_agent ~sw ~net ~system_prompt ~tools
-            ~max_tool_calls:max_tool_calls_per_panel ~timeout_s model
-        with
-        | Ok agent -> ((agent, model) :: oks, fails)
-        | Error reason ->
-          (oks, Fusion_types.Failed { failed_model = model; reason } :: fails))
+      (fun acc (g : Fusion_policy.panel_group) ->
+        let tools = if g.web_tools then Fusion_oas.web_tool_bundle () else [] in
+        List.fold_left
+          (fun (oks, fails) model ->
+            match
+              Fusion_oas.build_agent ~sw ~net ~system_prompt:g.system_prompt ~tools
+                ~max_tool_calls:g.max_tool_calls ~timeout_s:g.timeout_s model
+            with
+            | Ok agent -> ((agent, model) :: oks, fails)
+            | Error reason ->
+              (oks, Fusion_types.Failed { failed_model = model; reason } :: fails))
+          acc g.models)
       ([], [])
-      models
+      groups
   in
   let built = List.rev built in
   let build_failures = List.rev build_failures in
-  (* 2. 병렬 실행. 전체는 run_safe로 구조적 타임아웃 강제. Async_agent.all이
-        돌려주는 name = 에이전트 카드명 = 우리가 준 model. *)
+  (* 2. 모든 그룹을 하나의 Async_agent.all에 union으로 던진다 — 이종 설정은 이미 각
+        agent에 baked되어 있으므로 단일 fan-out으로 충분. 외곽 run_safe는 그룹 timeout
+        중 max로 전체 멈춤을 막는 상한. 반환 name = 에이전트 카드명 = 우리가 준 model. *)
   let answered =
     match
-      Masc_oas_bridge.run_safe ~caller:"fusion_panel" ~timeout_s (fun () ->
+      Masc_oas_bridge.run_safe ~caller:"fusion_panel" ~timeout_s:outer_timeout_s (fun () ->
         Ok
           (Agent_sdk.Async_agent.all ~sw ~max_fibers
              (List.map (fun (agent, _model) -> (agent, prompt)) built)))

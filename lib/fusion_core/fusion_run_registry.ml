@@ -5,9 +5,9 @@
    show what is deliberating now and what just finished — instead of run_id only
    living in the caller's tool-result.
 
-   Lock-free Atomic + CAS, mirroring Fusion_budget; no extra deps. Server-
-   lifetime: a fork that dies on server shutdown takes its registry entry with
-   it, so no orphan [Running] survives a restart (RFC-0266 §10 #4).
+   Lock-free Atomic + CAS; no extra deps. Server-lifetime: a fork that dies on
+   server shutdown takes its registry entry with it, so no orphan [Running]
+   survives a restart (RFC-0266 §10 #4).
 
    This module never wakes a keeper (that is the WAKE half, Phase 1). Recording
    a run is the visibility half and is intentionally side-effect-free beyond the

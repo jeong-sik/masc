@@ -4,10 +4,12 @@
 type config_error =
   | Empty_presets
   | Invalid_panel_size of string * int
+  | Empty_panels of string
+  | Conflicting_panel_grammar of string
+  | Duplicate_panel_model of string * string
   | Missing_prompt of string
   | Missing_judge_model of string
   | Invalid_max_concurrent_panels of int
-  | Invalid_per_hour_budget of int
   | Invalid_max_tool_calls of string * int
   | Missing_default_preset of string
   | Toml_type_error of string
@@ -18,56 +20,80 @@ let disabled : Fusion_policy.t =
   ; default_preset = ""
   ; max_concurrent_panels = 1
   ; presets = []
-  ; per_hour_budget = 0
   }
 
-(* preset 한 명 파싱. 누락 필드는 명시적 default, 패널 크기는 검증(fail-fast). *)
-let parse_preset (name, tbl) : (Fusion_policy.preset, config_error) result =
-  let panel =
-    Otoml.find_or ~default:[] tbl (Otoml.get_array Otoml.get_string) [ "panel" ]
-  in
+(* 패널 그룹 한 개 파싱. 그룹 sub-table(새 [[...panels]] 문법)에도, preset table
+   자체(legacy flat 문법의 desugar)에도 동일하게 적용된다 — 두 문법이 같은 키
+   이름(panel/panel_system_prompt/web_tools/max_tool_calls_per_panel/panel_timeout_s)을
+   쓰므로 코드 재사용. 누락 필드는 명시적 default. *)
+let parse_group (tbl : Otoml.t) : Fusion_policy.panel_group =
+  { models =
+      Otoml.find_or ~default:[] tbl (Otoml.get_array Otoml.get_string) [ "panel" ]
+  ; system_prompt =
+      Otoml.find_or ~default:"" tbl Otoml.get_string [ "panel_system_prompt" ]
+  ; web_tools = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "web_tools" ]
+  ; max_tool_calls =
+      Otoml.find_or ~default:0 tbl Otoml.get_integer [ "max_tool_calls_per_panel" ]
+  ; timeout_s =
+      Otoml.find_or ~default:Fusion_policy.default_timeout_s tbl Otoml.get_float
+        [ "panel_timeout_s" ]
+  }
+
+(* 패널 그룹을 확정한 뒤 preset 완성 + 검증. judge_* 는 preset table에서 직접 읽는다
+   (심판은 preset당 1개, 그룹별 아님). 검증 순서: 크기(총합) → 프롬프트 → 심판모델 →
+   중복모델 → 그룹별 max_tool_calls 범위. *)
+let finish_preset name tbl (panels : Fusion_policy.panel_group list)
+  : (Fusion_policy.preset, config_error) result =
   let judge = Otoml.find_or ~default:"" tbl Otoml.get_string [ "judge" ] in
   (* 프롬프트는 행동을 정의하므로 코드 default로 채우지 않는다. 누락 시 ""로 읽혀
-     아래 preset_prompts_present 검증에서 Missing_prompt로 fail-fast된다. *)
-  let panel_system_prompt =
-    Otoml.find_or ~default:"" tbl Otoml.get_string [ "panel_system_prompt" ]
-  in
+     preset_prompts_present 검증에서 Missing_prompt로 fail-fast된다. *)
   let judge_system_prompt =
     Otoml.find_or ~default:"" tbl Otoml.get_string [ "judge_system_prompt" ]
-  in
-  let panel_timeout_s =
-    Otoml.find_or ~default:Fusion_policy.default_timeout_s tbl Otoml.get_float
-      [ "panel_timeout_s" ]
   in
   let judge_timeout_s =
     Otoml.find_or ~default:Fusion_policy.default_timeout_s tbl Otoml.get_float
       [ "judge_timeout_s" ]
   in
-  let web_tools =
-    Otoml.find_or ~default:false tbl Otoml.get_boolean [ "web_tools" ]
-  in
-  let max_tool_calls_per_panel =
-    Otoml.find_or ~default:0 tbl Otoml.get_integer [ "max_tool_calls_per_panel" ]
-  in
   let p : Fusion_policy.preset =
-    { name
-    ; panel
-    ; judge
-    ; panel_system_prompt
-    ; judge_system_prompt
-    ; panel_timeout_s
-    ; judge_timeout_s
-    ; web_tools
-    ; max_tool_calls_per_panel
-    }
+    { name; panels; judge; judge_system_prompt; judge_timeout_s }
   in
   if not (Fusion_policy.preset_size_ok p) then
-    Error (Invalid_panel_size (name, List.length panel))
+    Error (Invalid_panel_size (name, List.length (Fusion_policy.preset_models p)))
   else if not (Fusion_policy.preset_prompts_present p) then Error (Missing_prompt name)
   else if not (Fusion_policy.preset_judge_present p) then Error (Missing_judge_model name)
-  else if max_tool_calls_per_panel < 0 || max_tool_calls_per_panel > 16 then
-    Error (Invalid_max_tool_calls (name, max_tool_calls_per_panel))
-  else Ok p
+  else
+    match Fusion_policy.preset_duplicate_model p with
+    | Some m -> Error (Duplicate_panel_model (name, m))
+    | None ->
+      (match
+         List.find_opt
+           (fun (g : Fusion_policy.panel_group) ->
+             g.max_tool_calls < 0 || g.max_tool_calls > 16)
+           panels
+       with
+       | Some g -> Error (Invalid_max_tool_calls (name, g.max_tool_calls))
+       | None -> Ok p)
+
+(* preset 한 명 파싱. 두 문법 분기:
+   - 새 문법 [[fusion.presets.NAME.panels]] (array-of-tables) → 그룹별 파싱.
+   - legacy flat panel=[...] → 정확히 길이-1 그룹으로 desugar (운영자 TOML 무변경,
+     단일 그룹이면 오늘과 byte-identical).
+   둘 다 있으면 Conflicting_panel_grammar, panels=[](그룹 0개)면 Empty_panels로 명시적
+   거부 (silent 한쪽 선택 금지). 빈 panel=[](모델 0개)은 legacy 길이-1 그룹으로 desugar
+   되어 size 검증에서 Invalid_panel_size(_, 0)으로 잡힌다 — "그룹 0개"(Empty_panels)와
+   "모델 0개"(Invalid_panel_size)는 다른 조건이므로 다른 variant로 구분한다.
+   panels가 스칼라 등 malformed면 get_array가 Type_error를 내고, find_opt/find_or는
+   Key_error만 삼키고 Type_error는 전파하므로(otoml_base.ml:332-337) of_toml의
+   Type_error 핸들러가 Toml_type_error로 fail-fast한다. 여기서 find_opt는 panels/panel
+   존재 여부(Some/None) 판별에만 쓰인다 — Type_error 회피 목적이 아니다. *)
+let parse_preset (name, tbl) : (Fusion_policy.preset, config_error) result =
+  let groups_opt = Otoml.find_opt tbl (Otoml.get_array Otoml.get_value) [ "panels" ] in
+  let has_flat_panel = Option.is_some (Otoml.find_opt tbl Otoml.get_value [ "panel" ]) in
+  match groups_opt, has_flat_panel with
+  | Some _, true -> Error (Conflicting_panel_grammar name)
+  | Some [], _ -> Error (Empty_panels name)
+  | Some (_ :: _ as gs), false -> finish_preset name tbl (List.map parse_group gs)
+  | None, _ -> finish_preset name tbl [ parse_group tbl ]
 
 (* [fusion] 존재 확정 후의 본 파싱. Otoml.Type_error는 of_toml이 감싼다. *)
 let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result =
@@ -77,9 +103,6 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
   in
   let max_concurrent_panels =
     Otoml.find_or ~default:1 toml Otoml.get_integer [ "fusion"; "max_concurrent_panels" ]
-  in
-  let per_hour_budget =
-    Otoml.find_or ~default:0 toml Otoml.get_integer [ "fusion"; "gate"; "per_hour_budget" ]
   in
   let preset_entries =
     match Otoml.find_opt toml Otoml.get_table [ "fusion"; "presets" ] with
@@ -98,13 +121,6 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
   let errors =
     if enabled && max_concurrent_panels < 1 then
       Invalid_max_concurrent_panels max_concurrent_panels :: errors
-    else errors
-  in
-  (* per_hour_budget는 gate가 `count >= budget`로 판정하므로(fusion_policy.ml),
-     0/음수면 첫 호출부터 항상 deny-all = enabled-but-never-runs. 로드 단계 fail-fast. *)
-  let errors =
-    if enabled && per_hour_budget < 1 then
-      Invalid_per_hour_budget per_hour_budget :: errors
     else errors
   in
   (* enabled면 default_preset가 비어있지 않고 presets에 존재해야 한다. preset 생략
@@ -127,7 +143,6 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
       ; default_preset
       ; max_concurrent_panels
       ; presets
-      ; per_hour_budget
       }
 
 let of_toml (toml : Otoml.t) : (Fusion_policy.t, config_error list) result =

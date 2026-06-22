@@ -1,29 +1,38 @@
 (** Fusion — 결정론적 발동 게이트 (RFC-0252 §6).
 
-    비용 4×를 예측·테스트 가능하게 통제하는 순수 함수. config 상한과 트리거
-    적격성을 대조해 [Allow]/[Deny]를 낸다. 모델 판단(키퍼의 masc_fusion 호출)도
-    이 게이트의 예산 상한에 종속된다 — 즉 모델 판단은 보조, 결정론 상한이 주.
+    config 상한과 구조적 적격성을 대조해 [Allow]/[Deny]를 내는 순수 함수.
+    "이 턴이 심의할 가치가 있나"의 판단은 키퍼(이미 LLM)가 masc_fusion을 호출하는
+    것으로 표현되고, 게이트는 enabled/preset/depth의 구조적 안전만 본다.
 
     설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md *)
 
-(** 패널 preset — 명명된 N개 모델 + 심판 (RFC-0252 §9).
-    [panel]/[judge]는 runtime.toml bindings와 동일한 opaque "provider.model" 문자열. *)
-type preset =
-  { name : string
-  ; panel : string list  (** provider.model ids, {!min_panel}..{!max_panel} *)
-  ; judge : string
-  ; panel_system_prompt : string
-      (** 패널 모델 system prompt — config에서 필수(코드 default 없음). *)
-  ; judge_system_prompt : string
-      (** 심판 모델 system prompt — config에서 필수(코드 default 없음). *)
-  ; panel_timeout_s : float  (** 패널 fan-out 구조적 타임아웃 (초). *)
-  ; judge_timeout_s : float  (** 심판 호출 구조적 타임아웃 (초). *)
-  ; web_tools : bool  (** 패널/심판에 web_search/web_fetch 주입 여부. *)
-  ; max_tool_calls_per_panel : int  (** 패널 모델당 최대 tool 호출 수 (0=무제한). *)
+(** 한 패널 그룹 — 공통 설정으로 실행되는 모델 묶음. 한 preset이 이종
+    그룹 여럿을 가질 수 있다 (RFC-0252-A). 닫힌 record. *)
+type panel_group =
+  { models : string list  (** provider.model ids *)
+  ; system_prompt : string
+      (** 그룹 패널 모델 system prompt — config에서 필수(코드 default 없음). *)
+  ; web_tools : bool  (** 그룹에 web_search/web_fetch 주입 여부. *)
+  ; max_tool_calls : int  (** 그룹 모델당 최대 tool 호출 수 (0=무제한). *)
+  ; timeout_s : float  (** 그룹 패널 호출 구조적 타임아웃 (초). *)
   }
 [@@deriving show, eq]
 
-(** 패널 크기 하한/상한 (OpenRouter Fusion: 1..8 모델). *)
+(** 패널 preset — 이종 패널 그룹 리스트 + 단일 심판 (RFC-0252 §9, RFC-0252-A).
+    [judge]는 runtime.toml bindings와 동일한 opaque "provider.model" 문자열.
+    legacy flat 문법(panel=[...])은 {!Fusion_config}가 정확히 길이-1 그룹으로
+    desugar한다 — 그 경우 오늘과 byte-identical 동작. *)
+type preset =
+  { name : string
+  ; panels : panel_group list  (** 1개 이상 그룹; 모델 총합 {!min_panel}..{!max_panel} *)
+  ; judge : string
+  ; judge_system_prompt : string
+      (** 심판 모델 system prompt — config에서 필수(코드 default 없음). *)
+  ; judge_timeout_s : float  (** 심판 호출 구조적 타임아웃 (초). *)
+  }
+[@@deriving show, eq]
+
+(** 패널 크기(모델 총합) 하한/상한 (OpenRouter Fusion: 1..8 모델). *)
 val min_panel : int
 
 val max_panel : int
@@ -31,14 +40,35 @@ val max_panel : int
 (** 패널/심판 타임아웃 기본값 (config 미지정 시). 운영 노브 — named SSOT. *)
 val default_timeout_s : float
 
-(** 패널이 [min_panel]..[max_panel] 범위인가. config 로드 시 검증되지만 게이트도 방어. *)
+(** 모든 그룹의 모델을 평탄화 (그룹순 × 그룹내 모델순 보존). *)
+val preset_models : preset -> string list
+
+(** 패널 모델 총합이 [min_panel]..[max_panel] 범위이고 [panels]가 비어있지 않은가.
+    config 로드 시 검증되지만 게이트도 방어. *)
 val preset_size_ok : preset -> bool
 
-(** 패널·심판 system prompt가 둘 다 비어있지 않은가 (config 로드 시 fail-fast 검증). *)
+(** 평탄화 모델 리스트에 중복 id가 있으면 그 id를 반환 (없으면 [None]).
+    중복은 [Async_agent.all] 카드명 충돌로 silent 답변 손실을 부르므로 config
+    로드 시 거부한다 (RFC-0252-A §4.6). *)
+val preset_duplicate_model : preset -> string option
+
+(** 모든 그룹의 패널 system prompt + 심판 system prompt가 비어있지 않은가
+    (config 로드 시 fail-fast 검증). *)
 val preset_prompts_present : preset -> bool
 
 (** 심판 모델 id가 비어있지 않은가 (config 로드 시 fail-fast 검증). *)
 val preset_judge_present : preset -> bool
+
+(** 외곽 run_safe 타임아웃 = 그룹 timeout 중 max. 단일 그룹이면 그 그룹 timeout. *)
+val panel_outer_timeout_of : panel_group list -> float
+
+(** 심판 web_tools를 그룹들에서 derive: [req_web_tools] 또는 어느 그룹이든 web_tools.
+    단일 그룹이면 [req_web_tools || group.web_tools] (오늘과 byte-identical). *)
+val judge_web_tools_of : req_web_tools:bool -> panel_group list -> bool
+
+(** 심판 tool budget을 그룹들에서 derive: 0(무제한)이 흡수자, 그 외엔 그룹 max.
+    단일 그룹이면 그 그룹 [max_tool_calls] (오늘과 byte-identical). *)
+val judge_tool_budget_of : panel_group list -> int
 
 (** 해석된 [fusion] config. {!Fusion_config}가 runtime.toml에서 생성한다. *)
 type t =
@@ -46,7 +76,6 @@ type t =
   ; default_preset : string
   ; max_concurrent_panels : int
   ; presets : preset list
-  ; per_hour_budget : int
   }
 [@@deriving show, eq]
 
@@ -63,11 +92,7 @@ val find_preset : t -> string -> preset option
 
     "이 턴이 심의할 가치가 있나"는 게이트가 score/문자열로 판정하지 않는다.
     그 판단은 키퍼(이미 LLM)가 masc_fusion을 호출하는 것으로 표현되고, trigger는
-    발동 이유 라벨일 뿐이다. 남용은 [per_hour_budget] cap이 막는다.
-
-    시간당 예산([per_hour_budget])은 decide에서 검사하지 않는다 — 검사·소모를
-    원자적으로 묶어야 TOCTOU가 없으므로 [Fusion_budget.try_incr_if_under]가
-    게이트 통과 후 강제하고, 실패 시 호출자가 [Over_hourly_budget]로 Deny한다. *)
+    발동 이유 라벨일 뿐이다. *)
 val decide
   :  policy:t
   -> Fusion_types.fusion_request

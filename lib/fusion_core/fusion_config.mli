@@ -9,15 +9,19 @@
 (** config 파싱/검증 에러 — 닫힌 합. *)
 type config_error =
   | Empty_presets  (** enabled=true인데 preset 0개 *)
-  | Invalid_panel_size of string * int  (** (preset 이름, 패널 수) — 1..8 위반 *)
+  | Invalid_panel_size of string * int
+      (** (preset 이름, 모델 총합) — 그룹 모델 총합 1..8 위반 (빈 panel=[] 포함). *)
+  | Empty_panels of string
+      (** preset의 [panels]가 빈 배열 (그룹 0개). "모델 0개"(Invalid_panel_size)와 구분. *)
+  | Conflicting_panel_grammar of string
+      (** 같은 preset에 [[...panels]]와 flat [panel] 둘 다 존재 (silent 선택 금지). *)
+  | Duplicate_panel_model of string * string
+      (** (preset 이름, 모델 id) — 평탄화 모델 리스트에 중복 id (카드명 충돌 방지). *)
   | Missing_prompt of string
       (** preset의 panel/judge system prompt가 비어있음 (코드 default 금지) *)
   | Missing_judge_model of string
       (** preset의 judge 모델 id가 비어있음 (필수, 빈 문자열 default 거부) *)
   | Invalid_max_concurrent_panels of int  (** max_concurrent_panels < 1 *)
-  | Invalid_per_hour_budget of int
-      (** enabled인데 per_hour_budget < 1 — gate가 `count >= budget`로 deny하므로
-          0/음수는 모든 호출을 silent deny-all로 만든다 (enabled-but-never-runs). *)
   | Invalid_max_tool_calls of string * int
       (** (preset 이름, 값) — 0..16 범위 위반 *)
   | Missing_default_preset of string
@@ -34,11 +38,13 @@ val disabled : Fusion_policy.t
 
     - [fusion] 부재 → [Ok disabled].
     - enabled=true인데 preset 부재 → [Error [Empty_presets]].
-    - 패널 크기 1..8 위반 → [Error [Invalid_panel_size _]].
+    - 패널 모델 총합 1..8 위반 → [Error [Invalid_panel_size _]].
+    - [panels] 빈 배열(그룹 0개) → [Error [Empty_panels _]].
+    - [[...panels]]와 flat [panel] 동시 → [Error [Conflicting_panel_grammar _]].
+    - 그룹 간/내 모델 id 중복 → [Error [Duplicate_panel_model _]].
     - panel/judge system prompt 누락 → [Error [Missing_prompt _]].
     - judge 모델 id 누락 → [Error [Missing_judge_model _]].
     - max_concurrent_panels < 1 → [Error [Invalid_max_concurrent_panels _]].
-    - enabled + per_hour_budget < 1 → [Error [Invalid_per_hour_budget _]].
     - max_tool_calls_per_panel이 0..16 범위 밖 → [Error [Invalid_max_tool_calls _]].
     - default_preset가 presets에 없음 → [Error [Missing_default_preset _]].
     - 필드 타입 불일치 → [Error [Toml_type_error _]].

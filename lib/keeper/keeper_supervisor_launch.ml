@@ -158,51 +158,34 @@ let launch_supervised_fiber
       Eio_guard.protect
         (fun () ->
            try
-             (* RFC-0125 P4: opt-in keeper-level max-turn watchdog.
-                When [MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC] is set
-                to a positive float, race the keepalive loop against
-                [Eio.Time.sleep ctx.clock t] via [Eio.Fiber.first].
-                Timer expiry stamps
-                [Stale_turn_timeout (In_turn_hung ...)] BEFORE the
-                timer fiber returns so the existing watchdog_triggered
-                branch (below) treats the cancellation as a crash and
-                [sweep_and_recover] restarts the keeper. Default
-                disabled — opt-in. *)
-             (match
-                Env_config_runtime.Keeper_max_turn_watchdog.timeout_sec_opt
-                  ()
-              with
-              | None ->
-                Keeper_keepalive.run_heartbeat_loop
-                  ~proactive_warmup_sec
-                  ctx
-                  meta
-                  reg.fiber_stop
-                  ~wakeup:reg.fiber_wakeup
-              | Some timeout_s ->
-                Eio.Fiber.first
-                  (fun () ->
-                    Eio.Time.sleep ctx.clock timeout_s;
-                    Keeper_registry.set_failure_reason
-                      ~base_path
-                      meta.name
-                      (Some
-                         (Keeper_registry.Stale_turn_timeout
-                            (Keeper_registry_types.In_turn_hung
-                               { active_seconds = timeout_s
-                               ; timeout_threshold = timeout_s
-                               })));
-                    Log.Keeper.warn
-                      "%s: max-turn watchdog fired after %.1fs (RFC-0125 P4)"
-                      meta.name
-                      timeout_s)
-                  (fun () ->
-                    Keeper_keepalive.run_heartbeat_loop
-                      ~proactive_warmup_sec
-                      ctx
-                      meta
-                      reg.fiber_stop
-                      ~wakeup:reg.fiber_wakeup));
+             (* RFC-0125 P4 의 keeper-level max-turn watchdog ([In_turn_hung]
+                wall-clock timer) 를 제거한다 (RFC-0250 §"deliberately removed"
+                정렬). 그 타이머는 [Eio.Fiber.first] 로 keepalive loop 전체를 감싸
+                keeper *launch* 이후 wall-clock 을 쟀고 — 턴 경계마다 리셋되지
+                않으므로 — 단일 턴이 아니라 keeper lifetime 을 cap 했다. 결과적으로
+                30 분 넘게 사는 정상 keeper (짧은 턴을 여러 번 처리했든 idle 이든)
+                도 [In_turn_hung] 으로 강제 재시작되었다. [In_turn_hung] 이라는
+                이름과 달리 "현재 턴이 너무 오래" 가 아니라 "프로세스가 너무 오래"
+                를 측정한 것이다.
+
+                per-turn wall-clock timeout 은 의도적으로 금지된 패턴이다:
+                [Keeper_unified_turn_attempt_watchdog] .mli — "MASC must not impose
+                a wall-clock timeout around the whole provider/tool". in-turn-hung /
+                idle 복구는 supervisor sweep 의 [assess_in_turn_progress]
+                ([Mid_turn_no_progress], turn observation 의 last_progress_at 기준)
+                + [assess_stale_run] ([Idle_turn], last_turn_ts 기준) 가 담당하며,
+                둘 다 turn-scoped 라 이 원칙을 준수한다 (각각
+                test_assess_in_turn_progress / test_assess_stale_run 로 커버).
+                따라서 keepalive loop 를 race 없이 직접 실행한다. [In_turn_hung]
+                variant 는 producer 가 사라져 consumer-only (closed sum) 로 남는다;
+                아래 watchdog_triggered 분기는 sweep 이 stamp 한 다른 stale reason
+                ([Idle_turn] / [Mid_turn_no_progress] 등) 으로 계속 작동한다. *)
+             Keeper_keepalive.run_heartbeat_loop
+               ~proactive_warmup_sec
+               ctx
+               meta
+               reg.fiber_stop
+               ~wakeup:reg.fiber_wakeup;
              (* Check if watchdog set a failure reason that should trigger
               crash recovery instead of a clean stop. When the stale
               watchdog sets fiber_stop + Stale_turn_timeout, the heartbeat

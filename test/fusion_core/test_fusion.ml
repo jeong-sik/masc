@@ -22,17 +22,28 @@ let base_group : Fusion_policy.panel_group =
   ; timeout_s = 300.0
   }
 
+(* RFC-0280: presets는 [Validated_preset.t]라 private — of_preset로만 생성. 테스트
+   리터럴은 유효하므로 get_ok (실패하면 테스트 setup 버그). *)
+let validated (p : Fusion_policy.preset) : Fusion_policy.Validated_preset.t =
+  match Fusion_policy.Validated_preset.of_preset p with
+  | Ok vp -> vp
+  | Error _ -> Alcotest.fail "test setup: preset literal failed validation"
+
+(* validated preset에서 raw preset 필드를 읽는 coercion 단축. *)
+let raw = Fusion_policy.Validated_preset.preset
+
 let base_policy : Fusion_policy.t =
   { Fusion_policy.enabled = true
   ; default_preset = "trio"
   ; max_concurrent_panels = 2
   ; presets =
-      [ { Fusion_policy.name = "trio"
-        ; panels = [ base_group ]
-        ; judge = "a"
-        ; judge_system_prompt = "judge"
-        ; judge_timeout_s = 300.0
-        }
+      [ validated
+          { Fusion_policy.name = "trio"
+          ; panels = [ base_group ]
+          ; judge = "a"
+          ; judge_system_prompt = "judge"
+          ; judge_timeout_s = 300.0
+          }
       ]
   }
 
@@ -102,7 +113,8 @@ let test_config_valid () =
     Alcotest.(check bool) "enabled" true p.Fusion_policy.enabled;
     Alcotest.(check int) "one preset" 1 (List.length p.Fusion_policy.presets);
     (match p.Fusion_policy.presets with
-     | [ preset ] ->
+     | [ vp ] ->
+       let preset = raw vp in
        Alcotest.(check int) "one group (legacy desugar)" 1
          (List.length preset.Fusion_policy.panels);
        Alcotest.(check int) "three models total" 3
@@ -159,13 +171,13 @@ let test_config_panels_golden () =
   with
   | Ok flat, Ok grouped ->
     Alcotest.check preset_t "length-1 panels-list == flat desugar"
-      (List.hd flat.Fusion_policy.presets)
-      (List.hd grouped.Fusion_policy.presets);
+      (raw (List.hd flat.Fusion_policy.presets))
+      (raw (List.hd grouped.Fusion_policy.presets));
     (* legacy(라벨 없음) 패널 정체성 = model 그대로 → 정체성 축도 byte-identical
        (RFC-0278). 라벨이 도입돼도 기존 config의 정체성은 변하지 않는다. *)
     Alcotest.(check (list string)) "legacy panelist ids = models"
       [ "a"; "b"; "c" ]
-      (Fusion_policy.preset_panelist_ids (List.hd flat.Fusion_policy.presets))
+      (Fusion_policy.preset_panelist_ids (raw (List.hd flat.Fusion_policy.presets)))
   | _ -> Alcotest.fail "both must parse Ok"
 
 (* --- heterogeneous multi-group parse --- *)
@@ -195,7 +207,8 @@ let test_config_heterogeneous () =
   match Fusion_config.of_toml (parse multi_group_toml) with
   | Ok p ->
     (match p.Fusion_policy.presets with
-     | [ preset ] ->
+     | [ vp ] ->
+       let preset = raw vp in
        Alcotest.(check int) "two groups" 2 (List.length preset.Fusion_policy.panels);
        Alcotest.(check int) "three models total" 3
          (List.length (Fusion_policy.preset_models preset));
@@ -303,7 +316,8 @@ let test_config_same_model_diff_prompt () =
   match Fusion_config.of_toml (parse same_model_diff_prompt_toml) with
   | Ok p ->
     (match p.Fusion_policy.presets with
-     | [ preset ] ->
+     | [ vp ] ->
+       let preset = raw vp in
        Alcotest.(check int) "two groups" 2 (List.length preset.Fusion_policy.panels);
        Alcotest.(check int) "two models total (same id twice raw)" 2
          (List.length (Fusion_policy.preset_models preset));
@@ -553,13 +567,70 @@ let test_config_disabled_with_preset () =
     Alcotest.(check bool) "seed disabled" false p.Fusion_policy.enabled;
     Alcotest.(check int) "trio preset present" 1 (List.length p.Fusion_policy.presets);
     (match p.Fusion_policy.presets with
-     | [ preset ] ->
+     | [ vp ] ->
+       let preset = raw vp in
        Alcotest.(check int) "trio panel size (flattened)" 3
          (List.length (Fusion_policy.preset_models preset))
      | _ -> Alcotest.fail "expected exactly one preset")
   | Error es ->
     Alcotest.failf "seed [fusion] must parse, got errors: %s"
       (String.concat ", " (List.map Fusion_config.show_config_error es))
+
+(* --- RFC-0280: Validated_preset.of_preset smart constructor (검증 SSOT) ---
+   config의 config_error 매핑과 별개로 smart constructor 자체를 직접 핀한다. 각 테스트는
+   목표 결함 하나만 두고 나머지는 유효하게 해, 검증 순서(size→prompt→judge→dup→mtc)에서
+   그 변형이 발화하는지 확인한다. private 타입이라 외부는 of_preset로만 t를 만든다. *)
+let mk_preset ?(panels = [ base_group ]) ?(judge = "j") ?(judge_prompt = "synthesize")
+    (name : string) : Fusion_policy.preset =
+  { Fusion_policy.name
+  ; panels
+  ; judge
+  ; judge_system_prompt = judge_prompt
+  ; judge_timeout_s = 300.0
+  }
+
+let test_validated_ok () =
+  match Fusion_policy.Validated_preset.of_preset (mk_preset "ok") with
+  | Ok vp ->
+    Alcotest.(check int) "validated preset reads panels via coercion" 1
+      (List.length (raw vp).Fusion_policy.panels)
+  | Error _ -> Alcotest.fail "expected Ok for a valid preset"
+
+let test_validated_bad_size () =
+  let empty_group = { base_group with Fusion_policy.models = [] } in
+  match
+    Fusion_policy.Validated_preset.of_preset (mk_preset ~panels:[ empty_group ] "empty")
+  with
+  | Error (Fusion_policy.Validated_preset.Bad_size 0) -> ()
+  | _ -> Alcotest.fail "expected Bad_size 0 for zero models"
+
+let test_validated_missing_prompt () =
+  let no_prompt = { base_group with Fusion_policy.system_prompt = "" } in
+  match Fusion_policy.Validated_preset.of_preset (mk_preset ~panels:[ no_prompt ] "np") with
+  | Error Fusion_policy.Validated_preset.Missing_prompt -> ()
+  | _ -> Alcotest.fail "expected Missing_prompt for empty system_prompt"
+
+let test_validated_missing_judge () =
+  match Fusion_policy.Validated_preset.of_preset (mk_preset ~judge:"" "nj") with
+  | Error Fusion_policy.Validated_preset.Missing_judge_model -> ()
+  | _ -> Alcotest.fail "expected Missing_judge_model for empty judge"
+
+let test_validated_duplicate_panelist () =
+  let g model = { base_group with Fusion_policy.models = [ model ] } in
+  match
+    Fusion_policy.Validated_preset.of_preset (mk_preset ~panels:[ g "x"; g "x" ] "dup")
+  with
+  | Error (Fusion_policy.Validated_preset.Duplicate_panelist "x") -> ()
+  | _ -> Alcotest.fail "expected Duplicate_panelist x for same model no label"
+
+let test_validated_bad_max_tool_calls () =
+  let over =
+    { base_group with Fusion_policy.max_tool_calls = Fusion_policy.max_tool_calls_ceiling + 1 }
+  in
+  match Fusion_policy.Validated_preset.of_preset (mk_preset ~panels:[ over ] "mtc") with
+  | Error (Fusion_policy.Validated_preset.Bad_max_tool_calls v) ->
+    Alcotest.(check int) "over-ceiling value reported" 17 v
+  | _ -> Alcotest.fail "expected Bad_max_tool_calls over ceiling"
 
 (* --- execution-axis byte-identity: judge args + outer timeout derivations
        (RFC-0252-A §4.4, fixes adversarial findings 1.1/1.2/1.3). A single
@@ -723,6 +794,14 @@ let () =
             test_config_invalid_max_tool_calls
         ; Alcotest.test_case "empty_default_preset" `Quick test_config_empty_default_preset
         ; Alcotest.test_case "disabled_with_preset" `Quick test_config_disabled_with_preset
+        ] )
+    ; ( "validated_preset"
+      , [ Alcotest.test_case "ok" `Quick test_validated_ok
+        ; Alcotest.test_case "bad_size" `Quick test_validated_bad_size
+        ; Alcotest.test_case "missing_prompt" `Quick test_validated_missing_prompt
+        ; Alcotest.test_case "missing_judge" `Quick test_validated_missing_judge
+        ; Alcotest.test_case "duplicate_panelist" `Quick test_validated_duplicate_panelist
+        ; Alcotest.test_case "bad_max_tool_calls" `Quick test_validated_bad_max_tool_calls
         ] )
     ; ( "judge_args"
       , [ Alcotest.test_case "single_group_identity" `Quick

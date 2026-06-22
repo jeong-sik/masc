@@ -402,4 +402,8 @@ let () =
      | None ->
        Printf.eprintf "preset not found: %s\n" preset_name;
        exit 1
-     | Some preset -> run_harness ~sw ~net ~policy ~preset ~prompt ~config_path)
+     | Some vp ->
+       (* RFC-0280: find_preset가 검증된 preset을 돌려준다. 하네스는 raw preset으로
+          coerce해 arm을 구성한다(read-only). *)
+       let preset = Fusion_policy.Validated_preset.preset vp in
+       run_harness ~sw ~net ~policy ~preset ~prompt ~config_path)

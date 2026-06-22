@@ -17,7 +17,10 @@ let run ~sw ~net ~base_dir ~policy ~request () : outcome =
      | None ->
        (* 게이트가 preset 존재를 이미 검증했으므로 도달 불가. 방어적으로 Denied. *)
        Denied (Fusion_types.Preset_unknown req.Fusion_types.preset)
-     | Some preset ->
+     | Some vp ->
+          (* RFC-0280: find_preset가 검증된 preset을 돌려준다 — invariant 재검증 불필요.
+             raw preset으로 coerce해 필드를 읽는다(read-only). *)
+          let preset = Fusion_policy.Validated_preset.preset vp in
           (* 프롬프트·타임아웃은 preset(=config)에서. 코드 default 없음 — config 로드
              시 Missing_prompt로 fail-fast 검증됨. *)
           let groups = preset.Fusion_policy.panels in

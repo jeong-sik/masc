@@ -45,10 +45,10 @@ let parse_group (tbl : Otoml.t) : Fusion_policy.panel_group =
    (심판은 preset당 1개, 그룹별 아님). 검증 순서: 크기(총합) → 프롬프트 → 심판모델 →
    정체성 중복(panelist_id) → 그룹별 max_tool_calls 범위. *)
 let finish_preset name tbl (panels : Fusion_policy.panel_group list)
-  : (Fusion_policy.preset, config_error) result =
+  : (Fusion_policy.Validated_preset.t, config_error) result =
   let judge = Otoml.find_or ~default:"" tbl Otoml.get_string [ "judge" ] in
   (* 프롬프트는 행동을 정의하므로 코드 default로 채우지 않는다. 누락 시 ""로 읽혀
-     preset_prompts_present 검증에서 Missing_prompt로 fail-fast된다. *)
+     Validated_preset.of_preset 검증에서 Missing_prompt로 fail-fast된다. *)
   let judge_system_prompt =
     Otoml.find_or ~default:"" tbl Otoml.get_string [ "judge_system_prompt" ]
   in
@@ -59,22 +59,22 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
   let p : Fusion_policy.preset =
     { name; panels; judge; judge_system_prompt; judge_timeout_s }
   in
-  if not (Fusion_policy.preset_size_ok p) then
-    Error (Invalid_panel_size (name, List.length (Fusion_policy.preset_models p)))
-  else if not (Fusion_policy.preset_prompts_present p) then Error (Missing_prompt name)
-  else if not (Fusion_policy.preset_judge_present p) then Error (Missing_judge_model name)
-  else
-    match Fusion_policy.preset_duplicate_panelist p with
-    | Some id -> Error (Duplicate_panelist (name, id))
-    | None ->
-      (match
-         List.find_opt
-           (fun (g : Fusion_policy.panel_group) ->
-             g.max_tool_calls < 0 || g.max_tool_calls > 16)
-           panels
-       with
-       | Some g -> Error (Invalid_max_tool_calls (name, g.max_tool_calls))
-       | None -> Ok p)
+  (* 검증 SSOT는 Validated_preset.of_preset (RFC-0280). config는 그 [invalid]에 preset
+     이름을 붙여 자기 [config_error]로 매핑만 한다 (운영자에게 어느 preset인지 알림).
+     [open] 안 함 — invalid와 config_error가 Missing_prompt 등 동명 변형을 가져 LHS만
+     full-qualify해 shadow를 피한다. *)
+  match Fusion_policy.Validated_preset.of_preset p with
+  | Ok vp -> Ok vp
+  | Error invalid ->
+    Error
+      (match invalid with
+       | Fusion_policy.Validated_preset.Bad_size n -> Invalid_panel_size (name, n)
+       | Fusion_policy.Validated_preset.Missing_prompt -> Missing_prompt name
+       | Fusion_policy.Validated_preset.Missing_judge_model -> Missing_judge_model name
+       | Fusion_policy.Validated_preset.Duplicate_panelist id ->
+         Duplicate_panelist (name, id)
+       | Fusion_policy.Validated_preset.Bad_max_tool_calls v ->
+         Invalid_max_tool_calls (name, v))
 
 (* preset 한 명 파싱. 두 문법 분기:
    - 새 문법 [[fusion.presets.NAME.panels]] (array-of-tables) → 그룹별 파싱.
@@ -88,7 +88,7 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
    Key_error만 삼키고 Type_error는 전파하므로(otoml_base.ml:332-337) of_toml의
    Type_error 핸들러가 Toml_type_error로 fail-fast한다. 여기서 find_opt는 panels/panel
    존재 여부(Some/None) 판별에만 쓰인다 — Type_error 회피 목적이 아니다. *)
-let parse_preset (name, tbl) : (Fusion_policy.preset, config_error) result =
+let parse_preset (name, tbl) : (Fusion_policy.Validated_preset.t, config_error) result =
   let groups_opt = Otoml.find_opt tbl (Otoml.get_array Otoml.get_value) [ "panels" ] in
   let has_flat_panel = Option.is_some (Otoml.find_opt tbl Otoml.get_value [ "panel" ]) in
   match groups_opt, has_flat_panel with
@@ -133,7 +133,8 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
       enabled
       && not
            (List.exists
-              (fun (p : Fusion_policy.preset) -> String.equal p.name default_preset)
+              (fun (vp : Fusion_policy.Validated_preset.t) ->
+                String.equal (Fusion_policy.Validated_preset.preset vp).name default_preset)
               presets)
     then Missing_default_preset default_preset :: errors
     else errors

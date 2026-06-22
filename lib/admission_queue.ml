@@ -181,10 +181,29 @@ let check_host_resources_with ~surface ~keeper_name ~fd_count ~threshold =
   else Ok ()
 ;;
 
+(* Resolve the gate from the configured threshold.  [fd_count] is a thunk so
+   the [/dev/fd] scan in [Otel_metric_process.approximate_open_fd_count] runs
+   only when a finite threshold is configured.  When gating is disabled
+   ([None]) the scan is skipped entirely and the call is admitted.
+
+   Behaviour-preserving against the former [max_int] sentinel: that sentinel
+   admitted every call (no real fd count reaches [max_int * 9 / 10]) yet paid
+   the directory scan on every admission.  The admit decision is unchanged;
+   only the dead scan is dropped.  The MASC-side concurrency gate
+   (RFC-0124 admission denial boundary, RFC-0153 backpressure) is unrelated
+   and untouched; host-level fd pressure is handled out-of-process by the
+   RFC-0137 keeper_fd_pressure poller. *)
+let check_host_resources_for_threshold ~surface ~keeper_name ~threshold ~fd_count =
+  match threshold with
+  | None -> Ok ()
+  | Some threshold ->
+    check_host_resources_with ~surface ~keeper_name ~fd_count:(fd_count ()) ~threshold
+;;
+
 let check_host_resources ~surface ~keeper_name =
-  let fd_count = Otel_metric_process.approximate_open_fd_count () in
-  let threshold = Otel_metric_process.fd_warn_threshold in
-  check_host_resources_with ~surface ~keeper_name ~fd_count ~threshold
+  check_host_resources_for_threshold ~surface ~keeper_name
+    ~threshold:Otel_metric_process.fd_warn_threshold
+    ~fd_count:Otel_metric_process.approximate_open_fd_count
 ;;
 
 let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~runtime_id f =
@@ -280,4 +299,6 @@ module For_testing = struct
   let check_host_resources ~surface ~keeper_name ~fd_count ~threshold =
     check_host_resources_with ~surface ~keeper_name ~fd_count ~threshold
   ;;
+
+  let check_host_resources_for_threshold = check_host_resources_for_threshold
 end

@@ -226,6 +226,7 @@
   test_keeper_toml
   test_runtime_toml_overrides
   test_runtime_provider_auth_headers
+  test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
   test_keeper_tool_visibility_projection
   test_keeper_tool_capability_axis
@@ -530,6 +531,7 @@
   test_keeper_toml
   test_runtime_toml_overrides
   test_runtime_provider_auth_headers
+  test_dashboard_runtime_probe_nonblocking
   test_keeper_tool_policy_masc_surface
   test_keeper_tool_visibility_projection
   test_keeper_tool_capability_axis
@@ -667,6 +669,7 @@
 
 ; Fusion OAS failure-detail tests need Fusion_types constructors from
 ; masc.fusion_core, which is intentionally not re-exported via masc.
+
 (test
  (name test_fusion_oas_error_detail)
  (modules test_fusion_oas_error_detail)
@@ -675,6 +678,7 @@
 ; RFC-0266 Phase 3: masc_fusion_status tool — JSON projection of the run
 ; registry + keeper-LLM visibility (Pass B Default gate). Needs masc.fusion_core
 ; for the Fusion_run_registry module (not re-exported via masc_test_deps).
+
 (test
  (name test_fusion_status_tool)
  (modules test_fusion_status_tool)
@@ -683,6 +687,7 @@
 ; RFC-0252 §8 — judge_meta/panel_meta structured serialization. Needs
 ; masc.fusion_core for Fusion_types constructors (Answer/Recommend/Insufficient,
 ; judge_synthesis record) + Masc.Fusion_sink for the public meta serializers.
+
 (test
  (name test_fusion_sink_meta)
  (modules test_fusion_sink_meta)
@@ -1201,6 +1206,7 @@
  (libraries alcotest masc.json_field yojson))
 
 ; RFC-0264 P2: recall-injection ledger record serialiser unit tests.
+
 (test
  (name test_keeper_recall_injection_ledger)
  (modules test_keeper_recall_injection_ledger)
@@ -1238,17 +1244,41 @@
 (test
  (name test_schedule_store)
  (modules test_schedule_store)
- (libraries alcotest eio eio_main fs_compat masc_workspace masc_schedule unix yojson))
+ (libraries
+  alcotest
+  eio
+  eio_main
+  fs_compat
+  masc_workspace
+  masc_schedule
+  unix
+  yojson))
 
 (test
  (name test_schedule_service)
  (modules test_schedule_service)
- (libraries alcotest eio eio_main fs_compat masc_workspace masc_schedule unix yojson))
+ (libraries
+  alcotest
+  eio
+  eio_main
+  fs_compat
+  masc_workspace
+  masc_schedule
+  unix
+  yojson))
 
 (test
  (name test_schedule_runner)
  (modules test_schedule_runner)
- (libraries alcotest eio eio_main fs_compat masc_workspace masc_schedule unix yojson))
+ (libraries
+  alcotest
+  eio
+  eio_main
+  fs_compat
+  masc_workspace
+  masc_schedule
+  unix
+  yojson))
 
 (test
  (name test_schedule_consumer_dispatch)
@@ -2346,6 +2376,7 @@
  (preprocess
   (pps ppx_safe_shell))
  (libraries alcotest masc.masc_exec masc.exec_policy))
+
 ; Coverage regression tests for keeper/runtime immutable-state refactor (P9-P12).
 
 (test

@@ -130,6 +130,24 @@ function formatCheckedAt(probe: DashboardRuntimeProbeResponse | null): string {
   return formatRelativeAgeMs(Date.now() - ms)
 }
 
+function runtimeProbeFreshnessLabel(probe: DashboardRuntimeProbeResponse | null): string {
+  // Reflect the server's non-blocking refresh_state so a force=1 ("Live probe")
+  // response is not mislabelled "fresh probe" when it is actually a stale value
+  // returned with a background refresh scheduled. Falls back to the cache_hit
+  // flag for older servers that do not emit refresh_state.
+  switch (probe?.refresh_state) {
+    case 'served_stale':
+      return 'refreshing'
+    case 'warming_up':
+      return 'warming up'
+    case 'fresh':
+    case 'recent':
+      return 'cache hit'
+    default:
+      return probe?.cache_hit ? 'cache hit' : 'fresh probe'
+  }
+}
+
 function firstProblem(
   providers: DashboardRuntimeProvidersResponse | null,
   probe: DashboardRuntimeProbeResponse | null,
@@ -266,7 +284,7 @@ export function RuntimeHealthSnapshot() {
           label="checked"
           value=${formatCheckedAt(probe)}
           status=${probeError ? 'crit' : probe ? 'ok' : 'warn'}
-          delta=${{ direction: probeError ? 'down' : 'flat', text: probe?.cache_hit ? 'cache hit' : 'fresh probe' }}
+          delta=${{ direction: probeError ? 'down' : 'flat', text: runtimeProbeFreshnessLabel(probe) }}
         />
         <${StatTile}
           label="assignments"

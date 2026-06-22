@@ -9,6 +9,7 @@ let write
       ~context_window
       ~price_input_per_million
       ~price_output_per_million
+      ~request_latency_ms
       ~sampling
       ~usage
       ~execution_ids
@@ -28,6 +29,7 @@ let write
     ; context_window
     ; price_input_per_million
     ; price_output_per_million
+    ; request_latency_ms
     ; sampling
     ; usage
     ; ts = Time_compat.now ()

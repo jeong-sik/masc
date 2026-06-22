@@ -682,6 +682,24 @@ let run_turn
             }
           | Ok _ | Error _ -> { input_tokens = None; output_tokens = None }
         in
+        let request_latency_ms : int option =
+          (* RFC-0233 §9 — wall-clock duration of the provider call in
+             milliseconds, sourced from OAS
+             [inference_telemetry.request_latency_ms]. The OAS transport
+             layer ([complete_common.patch_telemetry] non-streaming,
+             [complete_stream] streaming) synthesizes it whenever a response
+             is produced. Both [inference_telemetry] and the field itself are
+             [option] (the transport layer may not synthesize a latency for
+             every code path), so [Option.bind] flattens the two layers
+             rather than nesting option-of-option; on the error path the
+             dashboard renders absence for the generation phase rather than a
+             fabricated duration. *)
+          match turn_result with
+          | Ok result ->
+              Option.bind result.inference_telemetry (fun t ->
+                t.request_latency_ms)
+          | Error _ -> None
+        in
         (* RFC-0233 §2.3 — views derive, no view-side repair: ground the
            inspector's [model] and [finish_reason] in the same refs the
            execution receipt already records this turn. [model] is the
@@ -714,6 +732,7 @@ let run_turn
           ~context_window:(Some max_context)
           ~price_input_per_million
           ~price_output_per_million
+          ~request_latency_ms
           ~sampling:
             { temperature = Some temperature
             ; top_p = None

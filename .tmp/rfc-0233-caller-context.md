@@ -35,3 +35,41 @@ Verification expectation:
   absent case omits the keys / decodes `None`.
 - The dashboard inspector renders "미상" when the fields are absent and a
   real `%` / `$` when present.
+
+## §9 Amendment (2026-06-22) — response-generation phase duration
+
+Caller context for the `request_latency_ms` field added under §9.
+
+Owner request, 2026-06-22 (same keeper-turn observability `/goal`):
+
+- The phase waterfall's `gen` (response-generation) phase showed "측정 없음"
+  on every turn; its own `meta` declared "provider/OAS duration is not
+  recorded in turn-records".
+- The provider call wall-clock was already measured — OAS
+  `inference_telemetry.request_latency_ms`, synthesized by the transport
+  layer for every provider — and already retained on the keeper turn result
+  (`keeper_agent_result.ml:63`, source `result.response.telemetry`). The
+  record simply never stored it.
+
+Design constraints:
+
+- One `option` field `request_latency_ms : int` on `Turn_record.t`. Both
+  `inference_telemetry` and the field itself are `option`, so the write site
+  uses `Option.bind` (not `Option.map`) to avoid nesting option-of-option.
+  `None` on the error path renders "측정 없음", never a fabricated 0.
+- The `gen` phase maps `request_latency_ms` to `durationMs` with a new
+  `durationSource` variant `'provider_telemetry'` (distinct from
+  `'tool_call_log'` so the tooltip names the real source). `ctx`/`reason`
+  stay `'not_recorded'`: OAS has no isolated measurement for those phases.
+- No OAS change: MASC consumes a public OAS response field, the same pattern
+  as `keeper_hooks_oas.ml:417` (`Option.value ~default:0 t.request_latency_ms`
+  — but that default-0 is for a tok/s log line, not a stored record).
+- No phase-level split (`prefill_ms`/`ttfrc_ms`/`timings`): provider-native,
+  mostly `None` across the cloud keeper fleet — a Wave-2c candidate.
+
+Verification expectation:
+
+- `test_turn_record.ml` proves `request_latency_ms` round-trips and that the
+  absent case omits the key / decodes `None`.
+- The inspector renders a real `formatMsCompact` on the `gen` phase when
+  present, "측정 없음" when absent.

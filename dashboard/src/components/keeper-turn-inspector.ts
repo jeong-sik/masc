@@ -420,7 +420,7 @@ type TurnPhase = {
   kind: 'ctx' | 'reason' | 'tool' | 'gen'
   mono?: boolean
   durationMs: number | null
-  durationSource: 'tool_call_log' | 'estimated' | 'not_recorded'
+  durationSource: 'tool_call_log' | 'provider_telemetry' | 'estimated' | 'not_recorded'
   visualDurationMs: number
   visualOffsetMs: number
   meta?: string
@@ -603,6 +603,8 @@ function phaseDurationTitle(phase: TurnPhase): string {
   switch (phase.durationSource) {
     case 'tool_call_log':
       return 'duration_ms from /api/v1/keepers/:name/tool-calls'
+    case 'provider_telemetry':
+      return 'request_latency_ms — provider call wall-clock (OAS inference_telemetry)'
     case 'estimated':
       return 'estimated only; no durable duration for this phase'
     case 'not_recorded':
@@ -704,11 +706,18 @@ function buildTurnDetail(
   phases.push({
     label: '응답 생성',
     kind: 'gen',
-    durationMs: null,
-    durationSource: 'not_recorded',
+    // RFC-0233 §9 — ground the generation phase in OAS request_latency_ms
+    // (provider call wall-clock). Absent on the error path or before a
+    // response existed → render "측정 없음" rather than fabricating a bar.
+    durationMs: record.request_latency_ms ?? null,
+    durationSource:
+      record.request_latency_ms != null ? 'provider_telemetry' : 'not_recorded',
     visualDurationMs: 0,
     visualOffsetMs: 0,
-    meta: 'provider/OAS duration is not recorded in turn-records',
+    meta:
+      record.request_latency_ms != null
+        ? 'provider call wall-clock (request_latency_ms)'
+        : 'provider/OAS duration is not recorded for this turn',
   })
   const { visualTotalMs, measuredDurationMs } = finalizePhaseOffsets(phases)
 

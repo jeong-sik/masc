@@ -46,12 +46,3 @@ val sanitize_messages_utf8 : Agent_sdk.Types.message list -> Agent_sdk.Types.mes
 
 (** Maximum concurrent model calls (from [MASC_MAX_CONCURRENT_MODELS], default 8). *)
 val max_concurrent_models : int
-
-(** Atomic counter tracking in-flight model calls (observability only). *)
-val inflight : int Atomic.t
-
-(** Available model permits: [max_concurrent_models - inflight]. *)
-val model_permits_available : unit -> int
-
-(** Model permits currently in use. *)
-val model_permits_in_use : unit -> int

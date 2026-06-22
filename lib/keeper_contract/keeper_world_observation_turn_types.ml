@@ -3,8 +3,7 @@
 
     [keeper_cycle_channel] tags whether a keeper cycle is reactive
     (driven by mentions/board/messages/tasks) or scheduled-autonomous
-    (proactive turns on a timer). [unified_turn_channel] is an alias
-    retained for legacy callers.
+    (proactive turns on a timer).
 
     [turn_reason] carries the reasons a keeper *runs* a turn
     (mention, board event, scope message, scheduled autonomous, idle
@@ -26,8 +25,6 @@
 type keeper_cycle_channel =
   | Reactive
   | Scheduled_autonomous
-
-type unified_turn_channel = keeper_cycle_channel
 
 type turn_reason =
   | Mention_pending

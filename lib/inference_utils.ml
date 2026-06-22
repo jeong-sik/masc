@@ -143,9 +143,3 @@ let sanitize_messages_utf8 (msgs : Agent_sdk.Types.message list) : Agent_sdk.Typ
     parallelism internally, and cloud APIs return rate-limit errors. *)
 let max_concurrent_models =
   int_of_env_default "MASC_MAX_CONCURRENT_MODELS" ~default:8 ~min_v:1 ~max_v:128
-
-(** Atomic counter tracking in-flight model calls (observability only). *)
-let inflight = Atomic.make 0
-
-let model_permits_available () = max_concurrent_models - Atomic.get inflight
-let model_permits_in_use () = Atomic.get inflight

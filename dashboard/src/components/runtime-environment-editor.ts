@@ -335,11 +335,10 @@ export function RuntimeEnvironmentEditor({
                     </span>
                   `}
               </div>
-              <div class="rt-caps" data-stub="no-provider-capability-source">
-                <span class="rt-cap">· mcp-tools</span>
-                <span class="rt-cap">· tool-events</span>
-                <span class="rt-cap">· mcp-http-headers</span>
-              </div>
+              ${/* Provider capability chips (mcp-tools/tool-events/mcp-http-headers)
+                   had no live source and rendered as if confirmed. Removed until a
+                   provider-capability source exists, rather than implying support
+                   with no backing (PR #22081 review P1: no stub). */ ''}
             </div>
           `)}
         </div>
@@ -370,9 +369,11 @@ export function RuntimeEnvironmentEditor({
                 ${capChip(model.toolsSupport, 'tools')}
                 ${capChip(model.thinkingSupport, 'thinking')}
                 ${capChip(model.streaming, 'streaming')}
-                <span class="rt-cap" data-stub="no-json-cap">· json</span>
-                <span class="rt-cap" data-stub="no-structured-cap">· structured</span>
-                <span class="rt-cap" data-stub="no-multimodal-cap">· multimodal</span>
+                ${/* json/structured/multimodal chips had no live source yet rendered
+                     styled identically to the real tools/thinking/streaming capChips,
+                     implying support. Removed until a model-capability source exists
+                     (PR #22081 review P1: no stub). effort stays — it states "미수집"
+                     honestly rather than faking a value. */ ''}
                 <span class="rt-cap tcf mono" data-stub="no-effort-source">effort: 미수집</span>
               </div>
             </div>

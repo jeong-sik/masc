@@ -102,19 +102,39 @@ replaced by (§3.4), each load-bearing claim adversarially verified (§9).
 ### 3.2 Decouple, do not remove — no-progress detector (RFC-0239)
 
 `keeper_unified_turn_success.ml:88-93` computes `surface_requires_evidence` by
-matching `social_state.delivery_surface`. Replace with a computation over
-`run_result` facts already in scope (`Keeper_agent_result`: `tool_names`,
-`response_text`, `run_validation`). Introduce a typed local enum to keep the
-classifier exhaustive (CLAUDE.md anti-pattern #4 — no `_ -> false` catch-all):
+matching `social_state.delivery_surface` — a *single already-resolved* enum. The
+resolution (collapsing multiple turn signals into one surface) happens upstream
+in the removed `inferred_tool_surface` (`bdi_speech_v1.ml:156-185`), a strict
+if/else-if: `board_comment > board_post > broadcast > claim > (else) visible`.
+That **precedence is load-bearing** and must be reproduced when the collapse
+moves into the new derivation, or a multi-signal turn (e.g. a board post that
+*also* emitted text) could be mis-routed and the anti-thrash invariant would
+flip. The replacement is therefore a *total* function over `run_result` facts
+already in scope (`Keeper_agent_result`: `tool_names`, `response_text`,
+`run_validation`), with the same precedence made explicit:
 
 ```ocaml
 (* Runtime-observed delivery classification, replacing the LLM self-declared
    delivery_surface. Derived once from turn facts; no social model. *)
 type turn_delivery =
-  | Peer_only      (* board/comment/broadcast tool, or no tools + no visible text *)
-  | User_facing    (* non-empty visible reply *)
-  | Task_claim     (* claim tool *)
+  | Peer_only   (* peer-surface tool (board/comment/broadcast/keeper-msg), or
+                   silent: no peer/claim tool and no visible text *)
+  | User_facing (* non-empty visible reply, no peer/claim tool *)
+  | Task_claim  (* task-claim tool *)
 
+(* Total derivation. Precedence (peer > claim > visible text > silent) mirrors
+   the removed inferred_tool_surface order: tools dominate text — text is
+   consulted only when no peer/claim tool is present — so a board-post-plus-text
+   turn stays Peer_only and cannot flip to exempt. Tool classification is
+   delegated to the typed Keeper_tool_capability_axis SSOT (no hardcoded
+   tool-name literals; CLAUDE.md anti-pattern #1). *)
+let classify_delivery ~tools ~has_visible_text =
+  if Keeper_tool_capability_axis.(supports_any Board_activity tools) then Peer_only
+  else if Keeper_tool_capability_axis.(supports_any Claim_task tools) then Task_claim
+  else if has_visible_text then User_facing
+  else Peer_only
+
+(* Exhaustive, no `_ ->` catch-all (CLAUDE.md anti-pattern #4). *)
 let surface_requires_evidence = function
   | Peer_only -> true
   | User_facing | Task_claim -> false
@@ -124,6 +144,21 @@ Invariant preserved (RFC-0239 anti-thrash): a board/broadcast/silent turn with
 no substantive tool calls and no validated output **counts as no-progress**; a
 visible reply or a task claim is exempt. The accountability-surface label at
 `keeper_unified_turn_success.ml:303` shares the new helper.
+
+**Peer-set expansion, as-built (Phase 2a).** Delegating to
+`Keeper_tool_capability_axis.Board_activity` makes the peer set
+`{keeper_board_post, keeper_board_comment, masc_broadcast, masc_keeper_msg}` —
+wider than the removed social-model set `{board_post, board_comment, broadcast}`
+by `masc_keeper_msg` (keeper→keeper message; `masc_broadcast` is the public name
+of the same `keeper_broadcast` tool, not a new entry). This is an **intentional,
+more complete** peer-surface definition: a turn that only sends a peer message
+with no durable evidence now accrues the streak (the old social model let it
+reset), which is exactly RFC-0239's "only posts to peers without evidence" case.
+Because the no-progress *policy* now reuses a multi-consumer *taxonomy*
+(`Board_activity` also serves tool disclosure), the intended peer set is **pinned
+by an explicit-literal test** (`test_no_progress_loop_detector`): any future
+`Board_activity` change fails that assertion and forces a conscious no-progress
+review, converting the coupling from silent to guarded.
 
 **Behavior change, made explicit (adversarial C1 finding).** The decouple is
 *not* a byte-exact reproduction of today's `delivery_surface`. Adversarial
@@ -187,6 +222,8 @@ Move the `[masc_oas_error]` non-truncation rule into whatever caps the
 ## 7. Verification / acceptance
 
 - [ ] `surface_requires_evidence` unit test: `Peer_only -> true`, `User_facing|Task_claim -> false`; thrash scenario (repeated toolless board post) accrues the streak.
+- [ ] `classify_delivery` **multi-signal precedence** test (not single-signal only): peer-tool + visible text -> `Peer_only`; peer-tool + claim-tool -> `Peer_only`; claim-tool + text -> `Task_claim`; no-tool + text -> `User_facing`; silent -> `Peer_only`.
+- [ ] Peer-set **drift guard**: the `Board_activity` set is pinned by explicit literal (`{keeper_board_post, keeper_board_comment, masc_broadcast, masc_keeper_msg}`), so adding an axis tool fails the test; the `masc_keeper_msg` inclusion vs the old social-model set is asserted as the documented intentional change.
 - [ ] `rg 'speech_act|delivery_surface|social_state|social_model' lib/ bin/ config/prompts/` returns zero (excluding this RFC + CHANGELOG).
 - [ ] Compiler green after deleting `masc.keeper_social` (no orphan consumers).
 - [ ] `check-spec-truth.sh`: 0 orphan refs; `make -C specs check-clean`; `tla-index.yml` regen clean.

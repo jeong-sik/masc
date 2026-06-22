@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import type { VNode } from 'preact'
 import { signal } from '@preact/signals'
 import { useEffect, useMemo } from 'preact/hooks'
 import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-preact'
@@ -119,7 +120,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   uncategorized: 'Uncategorized',
 }
 
-const LOG_KIND_FILTERS: readonly { value: string; label: string }[] = [
+const LOG_KIND_FILTERS: readonly { value: LogDisplayKind | ''; label: string }[] = [
   { value: '', label: '전체' },
   { value: 'tool', label: 'Tool' },
   { value: 'turn', label: 'Turn' },
@@ -642,6 +643,67 @@ async function loadSelectedProviderLog() {
   )
 }
 
+// Kind-aware key/value grid for the expanded detail panel. Fields are pulled
+// from the backend `details` object via detailLabel; absent fields are dropped
+// so the layout matches the Observatory reference when the data is present and
+// degrades gracefully (no row) otherwise. The generic level/module/source/
+// timestamp grid and tag row below it are preserved for every kind.
+function renderLogKindGrid(
+  kind: LogDisplayKind,
+  details: Record<string, unknown> | null,
+): VNode | null {
+  if (!details) return null
+  const d = detailLabel
+  const row = (k: string, v: string | null): VNode | null =>
+    v && v !== '' ? html`<div><span>${k}</span><b class="mono">${v}</b></div>` : null
+  const grid = (...rows: Array<VNode | null>): VNode | null => {
+    const filled = rows.filter((r): r is VNode => r !== null)
+    return filled.length ? html`<div class="v2-logs-detail-grid v2-logs-kind-grid">${filled}</div>` : null
+  }
+  if (kind === 'tool') {
+    return grid(
+      row('tool', d(details, 'tool_name') ?? d(details, 'tool')),
+      row('outcome', d(details, 'outcome') ?? d(details, 'status')),
+      row('latency', d(details, 'latency_ms') ?? d(details, 'duration_ms') ?? d(details, 'dur')),
+      row('namespace', d(details, 'namespace') ?? d(details, 'ns')),
+    )
+  }
+  if (kind === 'turn') {
+    const tools = (details as { tools_used?: unknown }).tools_used
+    const toolsStr = Array.isArray(tools) ? tools.join(', ') : d(details, 'tools_used')
+    return grid(
+      row('model', d(details, 'model')),
+      row('tools_used', toolsStr),
+      row('stop_reason', d(details, 'stop_reason')),
+      row('duration', d(details, 'duration_ms') ?? d(details, 'duration')),
+    )
+  }
+  if (kind === 'lifecycle') {
+    return grid(
+      row('from', d(details, 'from') ?? d(details, 'phase')),
+      row('to', d(details, 'to') ?? d(details, 'next_phase')),
+      row('trigger', d(details, 'trigger')),
+    )
+  }
+  if (kind === 'approval') {
+    const goalJob = [d(details, 'goal_id') ?? d(details, 'goal'), d(details, 'job_id') ?? d(details, 'job')]
+      .filter((v): v is string => v !== null)
+      .join(' · ')
+    return grid(
+      row('tool', d(details, 'tool')),
+      row('severity', d(details, 'severity')),
+      row('goal · job', goalJob || null),
+    )
+  }
+  if (kind === 'broadcast') {
+    return grid(
+      row('scope', d(details, 'scope') ?? d(details, 'namespace')),
+      row('via', d(details, 'via') ?? d(details, 'channel')),
+    )
+  }
+  return null
+}
+
 function renderLogRow(entry: LogEntry) {
   const level = normalizedLevel(entry)
   const source = entry.source || '(unknown source)'
@@ -720,6 +782,7 @@ function renderLogRow(entry: LogEntry) {
       ${isExpanded
         ? html`
           <div class="v2-logs-detail">
+            ${renderLogKindGrid(displayKind, details) ?? ''}
             <div class="v2-logs-detail-grid">
               <div><span>level</span><b style=${{ color: LEVEL_COLORS[level] ?? 'inherit' }}>${level}</b></div>
               <div><span>module</span><b>${entry.module || '(root)'}</b></div>
@@ -1044,7 +1107,7 @@ export function LogViewer() {
                 class="v2-logs-filter-chip"
                 data-testid=${`logs-filter-${filter.value || 'all'}`}
                 onClick=${() => {
-                  kindFilter.value = filter.value as LogDisplayKind | ''
+                  kindFilter.value = filter.value
                 }}
               >${filter.label}<//>
             `)}
@@ -1142,7 +1205,7 @@ export function LogViewer() {
               />
               자동
             </label>
-            <span class="v2-logs-live mono"><span class="dot" />${autoRefresh.value ? `WS open · ${eventRatePerMinute(logEntries)}δ/min` : 'WS paused'}</span>
+            <span class="v2-logs-live mono"><span class="dot" />${autoRefresh.value ? `masc-mcp · 3s polling · ${eventRatePerMinute(logEntries)}δ/min` : 'masc-mcp · WS paused'}</span>
             <button
               type="button"
               class="logs-refresh-btn v2-logs-refresh"

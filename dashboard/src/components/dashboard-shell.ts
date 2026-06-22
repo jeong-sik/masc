@@ -1117,13 +1117,19 @@ export function SideRail({
 
   return html`
     <nav class="v2-shell-surface flex flex-col h-full" aria-label="Dashboard navigation">
-      <div class="nav-brand v2-shell-toolbar flex items-center ${collapsed ? 'justify-center' : 'justify-between'} border-b border-[var(--color-border-default)] px-2 pt-2 pb-2">
-        ${!collapsed ? html`
-          <div class="px-1 leading-none">
-            <div class="nb-title font-mono text-[var(--fs-9)] font-bold uppercase tracking-[var(--track-brand)] text-[var(--color-fg-disabled)]">MASC</div>
-            <div class="nb-sub mt-1 font-mono text-[var(--fs-11)] font-semibold uppercase tracking-[0.14em] text-[var(--color-fg-secondary)]">Cockpit</div>
-          </div>
-        ` : null}
+      <div class="nav-brand v2-shell-toolbar flex ${collapsed ? 'flex-col items-center gap-1.5' : 'items-center justify-between'} border-b border-[var(--color-border-default)] px-2 pt-2 pb-2">
+        ${collapsed
+          ? html`
+            <!-- Collapsed brand = the keeper-v2 prototype's .nav-home logo box
+                 (v2.css:242): 38x38 volt-filled square, "M" monogram, glow. -->
+            <div class="nav-home" aria-hidden="true">M</div>
+          `
+          : html`
+            <div class="px-1 leading-none">
+              <div class="nb-title font-mono text-[var(--fs-9)] font-bold uppercase tracking-[var(--track-brand)] text-[var(--color-fg-disabled)]">MASC</div>
+              <div class="nb-sub mt-1 font-mono text-[var(--fs-11)] font-semibold uppercase tracking-[0.14em] text-[var(--color-fg-secondary)]">Cockpit</div>
+            </div>
+          `}
         <button type="button"
           class=${`v2-shell-action nav-collapse flex size-6 items-center justify-center rounded-[var(--r-0)] border border-transparent text-[var(--color-fg-muted)] cursor-pointer transition-[background-color,border-color,color] duration-[var(--t-med)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
           aria-label=${collapsed ? 'Expand sidebar' : 'Collapse sidebar'}

@@ -74,9 +74,30 @@
 }
 
 #dashboard-side-rail.v2-shell-rail[data-collapsed="true"] .nav-brand {
-  justify-content: center;
-  padding: 8px 6px;
+  /* Stack the logo box over the collapse toggle; prototype rail top is
+     padding:10px 0 (v2.css:239). */
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 6px 8px;
   margin-bottom: 6px;
+}
+
+/* Collapsed brand logo box — pixel-matched to the prototype .nav-home
+   (v2.css:242-249): 38x38 volt-filled square, var(--radius-sm)=4px corners,
+   display font 700 16px monogram on volt-ink, soft glow. */
+#dashboard-side-rail.v2-shell-rail .nav-brand .nav-home {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;             /* v2.css:243 */
+  height: 38px;            /* v2.css:243 */
+  border-radius: 4px;      /* v2.css:243 var(--radius-sm) = 4px */
+  font-family: var(--v2-font-display);
+  font-weight: 700;        /* v2.css:245 */
+  font-size: 16px;         /* v2.css:245 */
+  color: var(--volt-ink, var(--color-bg-page)); /* v2.css:246 --volt-ink */
+  background: var(--v2-accent-brand);           /* v2.css:246 --volt */
+  box-shadow: 0 0 14px var(--accent-glow, var(--ss-brand-tint)); /* v2.css:247 0 0 14px --volt-glow */
 }
 
 #dashboard-side-rail.v2-shell-rail .nav-brand .nb-title {
@@ -252,41 +273,72 @@
   box-shadow: inset 2px 0 0 var(--v2-accent-brand);
 }
 
-/* Collapsed rail: icon-only surface buttons */
+/* Collapsed rail: icon-only surface buttons.
+   Pixel-matched to the keeper-v2 prototype's .nav-item app-rail icon box
+   (v2.css:253-264): 46x46 box, radius var(--radius-sm)=4px, 22x22 svg,
+   text-dim default → text-bright on hover, volt-strong + left-edge bar on
+   active. Literal 46px/22px/4px because the dashboard's 2px-base --sp-*
+   tokens would not land on these exact prototype values. */
 #dashboard-side-rail.v2-shell-rail .nav-link-collapsed {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  margin: 2px auto;
-  border-radius: 10px;
+  width: 46px;             /* v2.css:254 .nav-item width */
+  height: 46px;            /* v2.css:254 .nav-item height */
+  margin: 0 auto;          /* vertical rhythm comes from the list gap (3px) */
+  border-radius: 4px;      /* v2.css:254 var(--radius-sm) = 4px (tokens v2.css:67) */
   border: 1px solid transparent;
   color: var(--v2-text-dim);
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  position: relative;      /* anchors the active left-edge ::before bar */
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
 }
 
-#dashboard-side-rail.v2-shell-rail[data-collapsed="true"] .nav-link-collapsed {
-  width: 38px;
-  height: 38px;
+/* Active = prototype .nav-item.on (v2.css:263): volt-strong glyph on bg-card,
+   with a 3px volt left-edge bar + glow (v2.css:264 ::before). */
+#dashboard-side-rail.v2-shell-rail .nav-link-collapsed.active {
+  background: var(--v2-surface-subtle);   /* prototype --bg-card */
+  color: var(--v2-accent-brand);          /* prototype --volt-strong (via accent) */
+  border-color: transparent;
+}
+
+#dashboard-side-rail.v2-shell-rail .nav-link-collapsed.active::before {
+  content: "";
+  position: absolute;
+  left: -10px;             /* v2.css:264 */
+  top: 10px;
+  bottom: 10px;
+  width: 3px;              /* v2.css:264 left-edge bar width */
+  background: var(--v2-accent-brand);     /* prototype --volt */
+  border-radius: 0 3px 3px 0;
+  box-shadow: 0 0 10px var(--accent-glow, var(--ss-brand-tint)); /* v2.css:264 0 0 10px var(--volt-glow) */
 }
 
 #dashboard-side-rail.v2-shell-rail .nav-link-collapsed:hover {
-  background: var(--v2-surface-subtle);
-  color: var(--v2-accent-brand);
-  border-color: var(--v2-border);
-}
-
-#dashboard-side-rail.v2-shell-rail .nav-link-collapsed.active {
-  background: var(--ss-brand-tint);
-  color: var(--v2-text-bright);
-  border-color: var(--v2-accent-brand);
+  background: var(--v2-surface-subtle);   /* prototype --bg-card (v2.css:262) */
+  color: var(--v2-text-bright);           /* prototype --text-bright (v2.css:262) */
+  border-color: transparent;
 }
 
 #dashboard-side-rail.v2-shell-rail .nav-link-collapsed .nav-icon > svg {
-  width: 18px;
-  height: 18px;
+  width: 22px;             /* v2.css:259 .nav-item svg */
+  height: 22px;
+}
+
+/* Collapsed nav list vertical rhythm — prototype .v2-nav uses gap:3px
+   (v2.css:238). The shared list uses Tailwind gap-1 (4px); tighten to the
+   prototype's 3px and center the icon column when collapsed. */
+#dashboard-side-rail.v2-shell-rail[data-collapsed="true"] .flex-1 > .flex.flex-col {
+  gap: 3px;
+  align-items: center;
+}
+
+/* Drop the list container's horizontal padding when collapsed so the 46px
+   icon box centers inside the 58px rail (prototype .v2-nav padding:10px 0,
+   v2.css:239). Tailwind px-2 (8px) would clip the box against overflow-hidden. */
+#dashboard-side-rail.v2-shell-rail[data-collapsed="true"] .flex-1.overflow-y-auto {
+  padding-left: 0;
+  padding-right: 0;
 }
 
 /* Health indicator footer */

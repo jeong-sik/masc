@@ -237,8 +237,11 @@ describe('App v2 header chrome', () => {
     const rail = container.querySelector('#dashboard-side-rail') as HTMLElement
     expect(rail).not.toBeNull()
     const cls = Array.from(rail.classList).join(' ')
-    // The desktop rail must carry a fixed width (w-14 or w-55), not w-full.
-    expect(cls).toMatch(/\bw-14\b|\bw-55\b/)
+    // The desktop rail must carry a fixed width, not w-full. Collapsed default
+    // renders the keeper-v2 prototype's 58px icon rail (w-[58px], --nav-w
+    // v2.css:232); expanded renders w-55.
+    expect(cls).toMatch(/w-\[58px\]|\bw-55\b/)
+    expect(cls).not.toMatch(/\bw-full\b/)
     expect(cls).not.toMatch(/\bmax-h-75\b/)
   })
 

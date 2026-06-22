@@ -680,11 +680,82 @@ let test_validated_judge_bad_max_tool_calls () =
       Fusion_policy.jmax_tool_calls = Fusion_policy.max_tool_calls_ceiling + 1
     }
   in
-  match
-    Fusion_policy.Validated_preset.of_preset (mk_preset ~judges:[ base_judge; over ] "jmtc")
-  with
+  (* 단일 over-ceiling judge — panel-side test_validated_bad_max_tool_calls(~panels:[ over ])와
+     대칭. base_judge를 더하면 jmodel="jm" 정체성이 겹쳐 Duplicate_judge가 먼저 발동하므로,
+     max_tool_calls 검사에 도달하려면 정체성 충돌이 없어야 한다. judges는 of_preset 레벨에서
+     최소 개수 요구가 없다(JOJ <2 에러는 orchestrator 런타임 책임). *)
+  match Fusion_policy.Validated_preset.of_preset (mk_preset ~judges:[ over ] "jmtc") with
   | Error (Fusion_policy.Validated_preset.Bad_max_tool_calls 17) -> ()
   | _ -> Alcotest.fail "expected Bad_max_tool_calls 17 for over-ceiling judge"
+
+(* --- JOJ 1차 심판 TOML 파싱 (RFC-0282). parse_judge_spec + finish_preset의
+       [[...judges]] array-of-tables 리더를 end-to-end로 검증한다. 위 of_preset
+       검증 테스트는 OCaml record를 직접 구성해 config 레이어를 우회하므로, TOML 키
+       이름(model/label/system_prompt/web_tools/max_tool_calls/timeout_s)과 getter
+       매핑은 이 테스트만 커버한다 — 잘못된 키/getter는 여기서만 잡힌다. panel
+       sub-table에는 동형 golden(test_config_panels_golden 등)이 있으나 judge에는
+       없었다. --- *)
+let judges_toml =
+  {|
+[fusion]
+enabled = true
+default_preset = "joj"
+[fusion.presets.joj]
+judge = "meta-model"
+judge_system_prompt = "reconcile"
+[[fusion.presets.joj.panels]]
+panel = ["p1", "p2"]
+panel_system_prompt = "answer"
+[[fusion.presets.joj.judges]]
+model = "judge-a"
+label = "strict"
+system_prompt = "lens A"
+web_tools = true
+max_tool_calls = 3
+timeout_s = 222.0
+[[fusion.presets.joj.judges]]
+model = "judge-b"
+label = "lenient"
+system_prompt = "lens B"
+|}
+
+let test_config_judges_parse () =
+  match Fusion_config.of_toml (parse judges_toml) with
+  | Ok p ->
+    (match p.Fusion_policy.presets with
+     | [ vp ] ->
+       (match (raw vp).Fusion_policy.judges with
+        | [ ja; jb ] ->
+          (* judge-a: 6개 키를 모두 distinct 값으로 채워 키↔getter 매핑을 핀한다. *)
+          Alcotest.(check string) "ja model" "judge-a" ja.Fusion_policy.jmodel;
+          Alcotest.(check string) "ja label" "strict" ja.Fusion_policy.jlabel;
+          Alcotest.(check string) "ja prompt" "lens A" ja.Fusion_policy.jsystem_prompt;
+          Alcotest.(check bool) "ja web" true ja.Fusion_policy.jweb_tools;
+          Alcotest.(check int) "ja tool budget" 3 ja.Fusion_policy.jmax_tool_calls;
+          Alcotest.(check (float 0.001)) "ja timeout" 222.0 ja.Fusion_policy.jtimeout_s;
+          (* judge-b: 누락 키는 find_or default 경로 (web=false / budget=0 / timeout=default). *)
+          Alcotest.(check string) "jb model" "judge-b" jb.Fusion_policy.jmodel;
+          Alcotest.(check string) "jb prompt" "lens B" jb.Fusion_policy.jsystem_prompt;
+          Alcotest.(check bool) "jb web default" false jb.Fusion_policy.jweb_tools;
+          Alcotest.(check int) "jb budget default" 0 jb.Fusion_policy.jmax_tool_calls;
+          Alcotest.(check (float 0.001)) "jb timeout default"
+            Fusion_policy.default_timeout_s jb.Fusion_policy.jtimeout_s
+        | _ -> Alcotest.fail "expected exactly two parsed judges")
+     | _ -> Alcotest.fail "expected exactly one preset")
+  | Error es ->
+    Alcotest.failf "expected Ok, got errors: %s"
+      (String.concat ", " (List.map Fusion_config.show_config_error es))
+
+(* judges sub-table 없는 preset → preset.judges = [] (단일 심판 위상 config). *)
+let test_config_no_judges () =
+  match Fusion_config.of_toml (parse golden_single_group_toml) with
+  | Ok p ->
+    (match p.Fusion_policy.presets with
+     | [ vp ] ->
+       Alcotest.(check int) "no judges sub-table = empty list" 0
+         (List.length (raw vp).Fusion_policy.judges)
+     | _ -> Alcotest.fail "expected one preset")
+  | Error _ -> Alcotest.fail "golden must parse Ok"
 
 (* --- execution-axis byte-identity: judge args + outer timeout derivations
        (RFC-0252-A §4.4, fixes adversarial findings 1.1/1.2/1.3). A single
@@ -978,6 +1049,8 @@ let () =
             test_config_invalid_max_tool_calls
         ; Alcotest.test_case "empty_default_preset" `Quick test_config_empty_default_preset
         ; Alcotest.test_case "disabled_with_preset" `Quick test_config_disabled_with_preset
+        ; Alcotest.test_case "judges_parse" `Quick test_config_judges_parse
+        ; Alcotest.test_case "no_judges" `Quick test_config_no_judges
         ] )
     ; ( "validated_preset"
       , [ Alcotest.test_case "ok" `Quick test_validated_ok

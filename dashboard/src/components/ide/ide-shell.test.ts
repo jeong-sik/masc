@@ -98,13 +98,6 @@ const dashboardFetchHandlers: ReadonlyArray<[
     current_phase: 'observe',
     memory_kind_usage: [],
   })],
-  [/\/bdi-snapshot/, () => jsonResponse({
-    keeper: 'sangsu',
-    generated_at: '2026-05-06T00:00:00Z',
-    poll_interval_ms: 5000,
-    recent_token_spend: [],
-    source: 'test',
-  })],
 ]
 
 function dashboardFetchMock(input: RequestInfo | URL): Promise<Response> {

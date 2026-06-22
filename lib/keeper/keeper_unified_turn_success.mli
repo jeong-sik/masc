@@ -16,7 +16,7 @@ module For_testing : sig
     -> int option
 
   (** RFC-0276 §3.2 runtime-observed delivery classification (replaces the LLM
-      self-declared [delivery_surface] as the no-progress detector input). *)
+      self-declared delivery header as the no-progress detector input). *)
   type turn_delivery =
     | Peer_only
     | User_facing

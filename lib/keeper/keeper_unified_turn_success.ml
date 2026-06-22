@@ -73,7 +73,7 @@ let no_work_budget_threshold_override
 ;;
 
 (* RFC-0276 §3.2: runtime-observed delivery classification. Replaces the LLM
-   self-declared [delivery_surface] (the social-model header protocol) as the
+   self-declared delivery class (the social-model header protocol) as the
    input to the no-progress loop detector. Derived once from turn facts already
    in scope — the tool names actually called and whether visible text was
    emitted — so the anti-thrash verdict no longer trusts a model-authored
@@ -125,8 +125,8 @@ let classify_turn_delivery result =
 
 (* A peer-only or silent turn must show durable evidence to count as progress; a
    user-facing reply or a task claim is exempt. Preserves the pre-RFC-0276
-   [delivery_surface] mapping (Board_*/Broadcast/Silent -> true;
-   Visible_reply/Task_claim -> false). Exhaustive, no [_ ->] catch-all
+   surface mapping (peer/broadcast/silent -> true; visible reply/task claim
+   -> false). Exhaustive, no [_ ->] catch-all
    (CLAUDE.md anti-pattern #4): a new [turn_delivery] variant must be classified
    here at compile time. *)
 let delivery_requires_evidence = function
@@ -137,10 +137,10 @@ let delivery_requires_evidence = function
 let apply_loop_detectors ~config ~observation updated_meta result =
   (* RFC-0239 §3 R3 / RFC-0276 §3.2: feed the loop detector a semantic
      no-progress verdict derived from observed turn facts, not the LLM
-     self-declared delivery_surface. A turn makes progress if it produced
-     durable evidence (substantive tool calls or validated output); a turn that
-     only posts to peers (board/comment/broadcast) or stays silent without such
-     evidence accrues the streak. The old speech_act="stay_silent" check reset
+     self-declared header. A turn makes progress if it produced durable
+     evidence (substantive tool calls or validated output); a turn that only
+     posts to peers (board/comment/broadcast) or stays silent without such
+     evidence accrues the streak. The retired self-report "stay silent" reset
      the streak whenever a keeper *posted* its "nothing to do" conclusion, so a
      cluster that thrashed by re-posting never tripped the detector. *)
   let strong_evidence =

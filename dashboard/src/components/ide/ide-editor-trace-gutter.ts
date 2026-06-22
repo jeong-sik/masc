@@ -295,8 +295,6 @@ function traceSourceColor(source: KeeperTraceSource): string {
       return 'var(--color-status-info)'
     case 'runtime-hop':
       return 'var(--color-accent-fg)'
-    case 'bdi-snapshot':
-      return 'var(--color-status-ok)'
     case 'decision-log':
       return 'var(--color-status-warn)'
   }
@@ -310,8 +308,6 @@ function traceSourceLabel(source: KeeperTraceSource): string {
       return 'activity'
     case 'runtime-hop':
       return 'runtime'
-    case 'bdi-snapshot':
-      return 'BDI'
     case 'decision-log':
       return 'decision'
   }
@@ -322,7 +318,6 @@ function traceEventFilePath(event: KeeperTraceEvent): string | null {
   if (event.source === 'activity-event') return event.filePath
   if (
     event.source === 'runtime-hop'
-    || event.source === 'bdi-snapshot'
     || event.source === 'decision-log'
   ) return event.filePath ?? null
   return null
@@ -337,7 +332,6 @@ function traceEventLine(event: KeeperTraceEvent): number | null {
   }
   if (
     event.source === 'runtime-hop'
-    || event.source === 'bdi-snapshot'
     || event.source === 'decision-log'
   ) {
     const line = event.line
@@ -356,7 +350,6 @@ function traceEventContextFields(event: KeeperTraceEvent): KeeperTraceContextFie
   if (
     event.source === 'activity-event'
     || event.source === 'runtime-hop'
-    || event.source === 'bdi-snapshot'
     || event.source === 'decision-log'
   ) return event
   return {}
@@ -405,7 +398,6 @@ function traceLineChipSurface(event: EditorKeeperTraceLineEvent): string {
   if (event.source === 'activity-event') return event.surface?.trim() || 'Activity'
   if (event.source === 'anchored-thread') return 'Thread'
   if (event.source === 'runtime-hop') return 'Runtime'
-  if (event.source === 'bdi-snapshot') return 'BDI'
   return 'Decision'
 }
 

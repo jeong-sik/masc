@@ -110,7 +110,6 @@ export function traceLineFocusSurface(event: { source: string; surface?: string 
   if (event.source === 'activity-event') return event.surface?.trim() || 'Activity'
   if (event.source === 'anchored-thread') return 'Thread'
   if (event.source === 'runtime-hop') return 'Runtime'
-  if (event.source === 'bdi-snapshot') return 'BDI'
   return 'Decision'
 }
 

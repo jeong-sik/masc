@@ -6,7 +6,6 @@ import { signal } from '@preact/signals'
  * Stitched read-side projection over existing IDE/runtime surfaces:
  *  - anchored-thread (RFC-0021)
  *  - runtime-hop     (RFC-0023)
- *  - bdi-snapshot    (RFC-0024)
  *  - decision-log    (RFC-0026)
  *  - activity-event  (/api/v1/activity/events normalized context)
  *
@@ -35,7 +34,6 @@ export const RETENTION_MS = 10 * 60 * 1000 // 10 minutes
 export type KeeperTraceSource =
   | 'anchored-thread'
   | 'runtime-hop'
-  | 'bdi-snapshot'
   | 'decision-log'
   | 'activity-event'
 
@@ -75,10 +73,6 @@ export type KeeperTraceEvent =
       readonly provider: string
     })
   | (KeeperTraceBase & KeeperTraceContextFields & {
-      readonly source: 'bdi-snapshot'
-      readonly intention: string | null
-    })
-  | (KeeperTraceBase & KeeperTraceContextFields & {
       readonly source: 'decision-log'
       readonly decisionId: string
       readonly semanticOutcome: string | null
@@ -106,7 +100,6 @@ export type KeeperTraceEvent =
 export type KeeperTraceEventInput =
   | Omit<Extract<KeeperTraceEvent, { source: 'anchored-thread' }>, 'count'>
   | Omit<Extract<KeeperTraceEvent, { source: 'runtime-hop' }>, 'count'>
-  | Omit<Extract<KeeperTraceEvent, { source: 'bdi-snapshot' }>, 'count'>
   | Omit<Extract<KeeperTraceEvent, { source: 'decision-log' }>, 'count'>
   | Omit<Extract<KeeperTraceEvent, { source: 'activity-event' }>, 'count'>
 
@@ -254,7 +247,6 @@ function sameTraceBucket(left: KeeperTraceEvent, right: KeeperTraceEvent): boole
 
 function hasTraceContext(event: KeeperTraceEvent): boolean {
   return event.source === 'runtime-hop'
-    || event.source === 'bdi-snapshot'
     || event.source === 'decision-log'
     ? traceContextKey(event) !== ''
     : false
@@ -263,7 +255,6 @@ function hasTraceContext(event: KeeperTraceEvent): boolean {
 function traceContextKey(event: KeeperTraceEvent): string {
   if (
     event.source !== 'runtime-hop'
-    && event.source !== 'bdi-snapshot'
     && event.source !== 'decision-log'
   ) return ''
 

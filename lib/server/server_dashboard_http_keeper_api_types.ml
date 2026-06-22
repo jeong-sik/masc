@@ -13,7 +13,6 @@ let keeper_suffix_clear = "/clear"
 let keeper_suffix_checkpoints = "/checkpoints"
 let keeper_suffix_runtime_trace = "/runtime-trace"
 let keeper_suffix_directive = "/directive"
-let keeper_suffix_bdi_snapshot = "/bdi-snapshot"
 
 type keeper_post_route_kind =
   | Keeper_post_tools

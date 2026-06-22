@@ -48,10 +48,10 @@ let update_streak_gauge keeper_name value =
    broadcast) or stays silent *without* such evidence is no-progress and
    accrues the loop streak.
 
-   This generalises the retired speech_act="stay_silent" predicate, which
+   This generalises the retired self-report "stay silent" predicate, which
    reset the streak whenever a keeper *posted* its "nothing to do" conclusion
    — so the detector never fired for a cluster that thrashed by re-posting
-   rather than by emitting the literal stay_silent act. Primitive bools keep
+   rather than by declaring idleness in a header. Primitive bools keep
    this module decoupled from the social-model type. *)
 let turn_made_progress ~strong_evidence ~surface_requires_evidence =
   strong_evidence || not surface_requires_evidence

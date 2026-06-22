@@ -308,7 +308,7 @@ let auto_approval_soft_forbidden ~tool_name ~input =
   destructive_tool_or_op ~tool_name ~input
 ;;
 
-let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock ()
+let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock ()
   : Agent_sdk.Hooks.approval_callback
   =
   let queue_risk_level = function
@@ -374,7 +374,7 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
       let runtime_contract =
         Option.map
           (fun keeper_meta ->
-             Keeper_runtime_contract.runtime_contract_json ?config keeper_meta)
+             Keeper_runtime_contract.runtime_contract_json ?config:(Some config) keeper_meta)
           meta
       in
       let sandbox_profile, backend, sandbox_target =
@@ -388,9 +388,7 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
       in
       let selected_model = selected_model_of_meta meta in
       let risk_level = queue_risk_level risk in
-      let base_path =
-        Option.map (fun (config : Workspace.config) -> config.base_path) config
-      in
+      let base_path = (config : Workspace.config).base_path in
       let hard_forbidden =
         runtime_auto_approval_blocked meta
         || risk = Critical
@@ -408,7 +406,7 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
         then None
         else
           Keeper_approval_queue.find_matching_rule
-            ?base_path
+            ~base_path
             ~keeper_name
             ~tool_name
             ~input
@@ -421,7 +419,7 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
       if (not forbidden) && always_approve
       then (
         Keeper_approval_queue.audit_approval_event
-          ?base_path
+          ~base_path
           ~event_type:"auto_approved_always"
           ~id:(Printf.sprintf "auto_always_%s_%s" keeper_name tool_name)
           ~keeper_name
@@ -443,7 +441,7 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
         match rule_match with
            | Some matched ->
              Keeper_approval_queue.audit_approval_event
-               ?base_path
+               ~base_path
                ~event_type:"auto_approved_rule_match"
                ~id:(Printf.sprintf "auto_%s_%s" keeper_name matched.rule_id)
                ~keeper_name
@@ -467,7 +465,7 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
                ~keeper_name
                ~tool_name
                ~input
-               ?base_path
+               ~base_path
                ?turn_id
                ?task_id
                ?goal_id

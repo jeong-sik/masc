@@ -104,7 +104,7 @@ val combinatorial_risk_escalation :
     escalate risk to at least High. Otherwise return base_risk unchanged. *)
 
 val to_oas_approval_callback :
-  ?config:Workspace.config ->
+  config:Workspace.config ->
   governance_level:string ->
   keeper_name:string ->
   ?meta:Keeper_meta_contract.keeper_meta ->

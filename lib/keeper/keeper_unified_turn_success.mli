@@ -14,6 +14,20 @@ module For_testing : sig
     -> surface_requires_evidence:bool
     -> observation:Keeper_world_observation.world_observation
     -> int option
+
+  (** RFC-0276 §3.2 runtime-observed delivery classification (replaces the LLM
+      self-declared [delivery_surface] as the no-progress detector input). *)
+  type turn_delivery =
+    | Peer_only
+    | User_facing
+    | Task_claim
+
+  val classify_delivery
+    :  tools:string list
+    -> has_visible_text:bool
+    -> turn_delivery
+
+  val delivery_requires_evidence : turn_delivery -> bool
 end
 
 val handle

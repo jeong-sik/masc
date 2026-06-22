@@ -134,14 +134,12 @@ type deny_reason =
   | Disabled
   | Preset_unknown of string
   | Depth_exceeded
-  | Over_hourly_budget
 [@@deriving yojson, show, eq]
 
 let deny_reason_label = function
   | Disabled -> "disabled"
   | Preset_unknown _ -> "preset_unknown"
   | Depth_exceeded -> "depth_exceeded"
-  | Over_hourly_budget -> "over_hourly_budget"
 
 type gate_decision =
   | Allow of fusion_request

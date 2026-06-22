@@ -111,8 +111,10 @@ let synthesize ~sw ~net ~(preset : Fusion_policy.preset) ~(prompt : string)
     ~judge_model:preset.Fusion_policy.judge
     ~question:prompt
     ~panel
-    ~web_tools:preset.Fusion_policy.web_tools
-    ~max_tool_calls:preset.Fusion_policy.max_tool_calls_per_panel
+    ~web_tools:
+      (Fusion_policy.judge_web_tools_of ~req_web_tools:false
+         preset.Fusion_policy.panels)
+    ~max_tool_calls:(Fusion_policy.judge_tool_budget_of preset.Fusion_policy.panels)
     ()
 
 (* Print a judge arm and return (resolved_answer, judge_in_tokens, judge_out_tokens). *)
@@ -141,8 +143,14 @@ let print_judge_arm ~(tag : string)
 
 let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.preset)
     ~(prompt : string) ~(config_path : string) : unit =
-  let n = List.length preset.Fusion_policy.panel in
+  let models_all = Fusion_policy.preset_models preset in
+  let n = List.length models_all in
   let max_fibers = max 1 policy.Fusion_policy.max_concurrent_panels in
+  (* 하네스는 동질 arm 비교 도구다(RFC-0252 §11). 이종 preset이면 첫 그룹의 plumbing
+     (system_prompt/web_tools/max_tool_calls/timeout)을 대표로 써 모든 arm을 같은
+     설정으로 돌린다 — arm 차이는 모델 집합·judge이지 plumbing이 아니다(legacy 단일
+     그룹이면 그 그룹 값 = 오늘과 동일). *)
+  let g0 = List.hd preset.Fusion_policy.panels in
   let incomplete = ref [] in
   let mark_incomplete msg = incomplete := msg :: !incomplete in
   Printf.printf
@@ -152,7 +160,7 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
     "config: %s\npreset: %s\npanel:  %s\njudge:  %s\nprompt: %s\n\n"
     config_path
     preset.Fusion_policy.name
-    (String.concat ", " preset.Fusion_policy.panel)
+    (String.concat ", " models_all)
     preset.Fusion_policy.judge
     prompt;
 
@@ -161,12 +169,9 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
       ~sw
       ~net
       ~max_fibers
-      ~timeout_s:preset.Fusion_policy.panel_timeout_s
-      ~models
-      ~system_prompt:preset.Fusion_policy.panel_system_prompt
+      ~outer_timeout_s:g0.Fusion_policy.timeout_s
+      ~groups:[ { g0 with Fusion_policy.models } ]
       ~prompt
-      ~web_tools:preset.Fusion_policy.web_tools
-      ~max_tool_calls_per_panel:preset.Fusion_policy.max_tool_calls_per_panel
       ()
   in
 
@@ -245,7 +250,7 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
     rule
     n
     rule;
-  let fusion_panel = run_panel ~max_fibers ~models:preset.Fusion_policy.panel in
+  let fusion_panel = run_panel ~max_fibers ~models:models_all in
   List.iter (print_outcome ~tag:"fusion") fusion_panel;
   let fusion_answer, fusion_judge_in, fusion_judge_out =
     match

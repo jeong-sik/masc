@@ -4,8 +4,8 @@
     The fusion tool calls {!register_running} at fork start and the sink/failure
     path calls {!mark_completed} on finish, so a status surface (Phase 3 tool,
     Phase 4 dashboard) can report what is deliberating now and what just
-    finished. Lock-free Atomic + CAS (mirrors {!Fusion_budget}); server-lifetime
-    in-memory (no orphan [Running] survives a restart). Never wakes a keeper. *)
+    finished. Lock-free Atomic + CAS; server-lifetime in-memory (no orphan
+    [Running] survives a restart). Never wakes a keeper. *)
 
 type run_status =
   | Running

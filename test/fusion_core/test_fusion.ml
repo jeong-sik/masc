@@ -1,38 +1,45 @@
-(* Standalone alcotest for the pure fusion core (RFC-0252 §6/§9/§10).
-   Proves: deterministic gate branches, TOML config validation, depth guard,
-   atomic budget check-and-increment. *)
+(* Standalone alcotest for the pure fusion core (RFC-0252 §6/§9, RFC-0252-A).
+   Proves: deterministic gate branches, TOML config validation + heterogeneous
+   panel-group parsing + legacy flat desugar (byte-identity), depth guard, and
+   the pure judge-arg derivations that keep a single-group preset behaving as
+   today. *)
 
 open Fusion_types
 
 (* alcotest testable over the derived show/eq of gate_decision. *)
 let gate = Alcotest.testable pp_gate_decision equal_gate_decision
 
-let base_policy : Fusion_policy.t =
-  { Fusion_policy.enabled = true
-  ; default_preset = "budget"
-  ; max_concurrent_panels = 2
-  ; presets =
-      [ { Fusion_policy.name = "budget"
-        ; panel = [ "a"; "b"; "c" ]
-        ; judge = "a"
-        ; panel_system_prompt = "panel"
-        ; judge_system_prompt = "judge"
-        ; panel_timeout_s = 300.0
-        ; judge_timeout_s = 300.0
-        ; web_tools = false
-        ; max_tool_calls_per_panel = 0
-        }
-      ]
-  ; per_hour_budget = 20
+(* alcotest testable over a preset — the @@deriving eq is the byte-identity
+   contract for the legacy-flat == single-group golden. *)
+let preset_t = Alcotest.testable Fusion_policy.pp_preset Fusion_policy.equal_preset
+
+let base_group : Fusion_policy.panel_group =
+  { Fusion_policy.models = [ "a"; "b"; "c" ]
+  ; system_prompt = "panel"
+  ; web_tools = false
+  ; max_tool_calls = 0
+  ; timeout_s = 300.0
   }
 
-let req ?(preset = "budget") ?(depth = Fusion_depth.Top) ?(trigger = Explicit_tool_call)
+let base_policy : Fusion_policy.t =
+  { Fusion_policy.enabled = true
+  ; default_preset = "trio"
+  ; max_concurrent_panels = 2
+  ; presets =
+      [ { Fusion_policy.name = "trio"
+        ; panels = [ base_group ]
+        ; judge = "a"
+        ; judge_system_prompt = "judge"
+        ; judge_timeout_s = 300.0
+        }
+      ]
+  }
+
+let req ?(preset = "trio") ?(depth = Fusion_depth.Top) ?(trigger = Explicit_tool_call)
     ?(web_tools = false) () : fusion_request =
   { run_id = "r1"; keeper = "k"; prompt = "p"; preset; web_tools; depth; trigger }
 
 let decide ?(policy = base_policy) r = Fusion_policy.decide ~policy r
-
-let ok_int = Alcotest.result Alcotest.int Alcotest.unit
 
 (* --- gate branches (RFC-0252 §6) --- *)
 
@@ -51,8 +58,7 @@ let test_depth_nested () =
     (decide (req ~depth:Fusion_depth.Nested ()))
 
 (* trigger는 발동 이유 라벨일 뿐 — 게이트는 종류로 거부하지 않는다(심의 가치는
-   키퍼/LLM이 판단). 구조(enabled/preset/depth)만 통과하면 어떤 trigger든 Allow.
-   예전 score<threshold / task_kind∈list 판정(Not_warranted)은 제거됐다. *)
+   키퍼/LLM이 판단). 구조(enabled/preset/depth)만 통과하면 어떤 trigger든 Allow. *)
 let test_low_confidence_trigger_allowed () =
   let r = req ~trigger:Low_confidence () in
   Alcotest.check gate "low_confidence label -> allow" (Allow r) (decide r)
@@ -65,15 +71,7 @@ let test_allow () =
   let r = req () in
   Alcotest.check gate "all pass -> allow" (Allow r) (decide r)
 
-(* budget gate applies even to explicit/operator triggers — 예산은 이제
-   orchestrator에서 [Fusion_budget.try_incr_if_under]로 원자적으로 소비한다. *)
-let test_explicit_still_budget_bound () =
-  let b = Fusion_budget.create () in
-  Alcotest.(check ok_int) "operator request still budget-bound after limit hit"
-    (Error ())
-    (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:0)
-
-(* --- config (RFC-0252 §9) --- *)
+(* --- config (RFC-0252 §9, RFC-0252-A) --- *)
 
 let parse s = Otoml.Parser.from_string s
 
@@ -86,15 +84,13 @@ let valid_toml =
   {|
 [fusion]
 enabled = true
-default_preset = "budget"
+default_preset = "trio"
 max_concurrent_panels = 2
-[fusion.gate]
-per_hour_budget = 20
-[fusion.presets.budget]
+[fusion.presets.trio]
 web_tools = false
 max_tool_calls_per_panel = 0
 panel = ["a", "b", "c"]
-judge = "a"
+judge = "j"
 panel_system_prompt = "answer independently"
 judge_system_prompt = "synthesize the panel"
 |}
@@ -104,15 +100,177 @@ let test_config_valid () =
   | Ok p ->
     Alcotest.(check bool) "enabled" true p.Fusion_policy.enabled;
     Alcotest.(check int) "one preset" 1 (List.length p.Fusion_policy.presets);
-    Alcotest.(check int) "per_hour" 20 p.Fusion_policy.per_hour_budget;
     (match p.Fusion_policy.presets with
      | [ preset ] ->
-       Alcotest.(check bool) "web_tools" false preset.Fusion_policy.web_tools;
-       Alcotest.(check int) "max_tool_calls" 0 preset.Fusion_policy.max_tool_calls_per_panel
+       Alcotest.(check int) "one group (legacy desugar)" 1
+         (List.length preset.Fusion_policy.panels);
+       Alcotest.(check int) "three models total" 3
+         (List.length (Fusion_policy.preset_models preset));
+       (match preset.Fusion_policy.panels with
+        | [ g ] ->
+          Alcotest.(check bool) "web_tools" false g.Fusion_policy.web_tools;
+          Alcotest.(check int) "max_tool_calls" 0 g.Fusion_policy.max_tool_calls
+        | _ -> Alcotest.fail "expected one group")
      | _ -> Alcotest.fail "expected exactly one preset")
   | Error es ->
     Alcotest.failf "expected Ok, got errors: %s"
       (String.concat ", " (List.map Fusion_config.show_config_error es))
+
+(* --- byte-identity: legacy flat preset == single explicit panel group --- *)
+
+let golden_flat_toml =
+  {|
+[fusion]
+enabled = true
+default_preset = "p"
+[fusion.presets.p]
+web_tools = true
+max_tool_calls_per_panel = 4
+panel_timeout_s = 123.0
+panel = ["a", "b", "c"]
+judge = "j"
+panel_system_prompt = "answer independently"
+judge_system_prompt = "synthesize"
+judge_timeout_s = 99.0
+|}
+
+let golden_single_group_toml =
+  {|
+[fusion]
+enabled = true
+default_preset = "p"
+[fusion.presets.p]
+judge = "j"
+judge_system_prompt = "synthesize"
+judge_timeout_s = 99.0
+[[fusion.presets.p.panels]]
+panel = ["a", "b", "c"]
+panel_system_prompt = "answer independently"
+web_tools = true
+max_tool_calls_per_panel = 4
+panel_timeout_s = 123.0
+|}
+
+let test_config_panels_golden () =
+  match
+    Fusion_config.of_toml (parse golden_flat_toml),
+    Fusion_config.of_toml (parse golden_single_group_toml)
+  with
+  | Ok flat, Ok grouped ->
+    Alcotest.check preset_t "length-1 panels-list == flat desugar"
+      (List.hd flat.Fusion_policy.presets)
+      (List.hd grouped.Fusion_policy.presets)
+  | _ -> Alcotest.fail "both must parse Ok"
+
+(* --- heterogeneous multi-group parse --- *)
+
+let multi_group_toml =
+  {|
+[fusion]
+enabled = true
+default_preset = "mixed"
+[fusion.presets.mixed]
+judge = "j"
+judge_system_prompt = "synthesize"
+[[fusion.presets.mixed.panels]]
+panel = ["fast1", "fast2"]
+panel_system_prompt = "quick"
+web_tools = false
+max_tool_calls_per_panel = 0
+[[fusion.presets.mixed.panels]]
+panel = ["careful1"]
+panel_system_prompt = "deliberate"
+web_tools = true
+max_tool_calls_per_panel = 4
+panel_timeout_s = 180.0
+|}
+
+let test_config_heterogeneous () =
+  match Fusion_config.of_toml (parse multi_group_toml) with
+  | Ok p ->
+    (match p.Fusion_policy.presets with
+     | [ preset ] ->
+       Alcotest.(check int) "two groups" 2 (List.length preset.Fusion_policy.panels);
+       Alcotest.(check int) "three models total" 3
+         (List.length (Fusion_policy.preset_models preset));
+       (match preset.Fusion_policy.panels with
+        | [ g1; g2 ] ->
+          Alcotest.(check bool) "g1 no web" false g1.Fusion_policy.web_tools;
+          Alcotest.(check bool) "g2 web" true g2.Fusion_policy.web_tools;
+          Alcotest.(check int) "g2 tool budget" 4 g2.Fusion_policy.max_tool_calls;
+          Alcotest.(check (float 0.001)) "g2 timeout" 180.0 g2.Fusion_policy.timeout_s;
+          Alcotest.(check (float 0.001)) "g1 default timeout"
+            Fusion_policy.default_timeout_s g1.Fusion_policy.timeout_s
+        | _ -> Alcotest.fail "expected two groups")
+     | _ -> Alcotest.fail "expected exactly one preset")
+  | Error es ->
+    Alcotest.failf "expected Ok, got errors: %s"
+      (String.concat ", " (List.map Fusion_config.show_config_error es))
+
+(* --- strict config errors (Unknown→Permissive 회피) --- *)
+
+let test_config_empty_panels () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p"
+[fusion.presets.p]
+panels = []
+judge = "j"
+judge_system_prompt = "x"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Empty_panels present" true
+      (List.mem (Fusion_config.Empty_panels "p") es)
+  | Ok _ -> Alcotest.fail "expected Error Empty_panels"
+
+let test_config_conflicting_grammar () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p"
+[fusion.presets.p]
+panel = ["a"]
+panel_system_prompt = "y"
+judge = "j"
+judge_system_prompt = "x"
+[[fusion.presets.p.panels]]
+panel = ["b"]
+panel_system_prompt = "z"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Conflicting_panel_grammar present" true
+      (List.mem (Fusion_config.Conflicting_panel_grammar "p") es)
+  | Ok _ -> Alcotest.fail "expected Error Conflicting_panel_grammar"
+
+let test_config_duplicate_model () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p"
+[fusion.presets.p]
+judge = "j"
+judge_system_prompt = "x"
+[[fusion.presets.p.panels]]
+panel = ["dup", "other"]
+panel_system_prompt = "y"
+[[fusion.presets.p.panels]]
+panel = ["dup"]
+panel_system_prompt = "z"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Duplicate_panel_model present" true
+      (List.mem (Fusion_config.Duplicate_panel_model ("p", "dup")) es)
+  | Ok _ -> Alcotest.fail "expected Error Duplicate_panel_model"
 
 let test_config_empty_presets () =
   match Fusion_config.of_toml (parse "[fusion]\nenabled = true\n") with
@@ -145,7 +303,7 @@ let test_config_missing_default () =
 [fusion]
 enabled = true
 default_preset = "ghost"
-[fusion.presets.budget]
+[fusion.presets.trio]
 panel = ["a", "b"]
 judge = "a"
 panel_system_prompt = "p"
@@ -182,8 +340,6 @@ let test_config_missing_judge_model () =
 [fusion]
 enabled = true
 default_preset = "p1"
-[fusion.gate]
-per_hour_budget = 20
 [fusion.presets.p1]
 panel = ["a", "b"]
 judge = ""
@@ -217,28 +373,6 @@ judge_system_prompt = "j"
       (List.mem (Fusion_config.Invalid_max_concurrent_panels 0) es)
   | Ok _ -> Alcotest.fail "expected Error Invalid_max_concurrent_panels"
 
-(* enabled + per_hour_budget=0 → gate가 count>=0으로 항상 deny-all. 로드 거부 강제. *)
-let test_config_bad_per_hour () =
-  let s =
-    {|
-[fusion]
-enabled = true
-default_preset = "p1"
-[fusion.gate]
-per_hour_budget = 0
-[fusion.presets.p1]
-panel = ["a", "b"]
-judge = "a"
-panel_system_prompt = "p"
-judge_system_prompt = "j"
-|}
-  in
-  match Fusion_config.of_toml (parse s) with
-  | Error es ->
-    Alcotest.(check bool) "Invalid_per_hour_budget present" true
-      (List.mem (Fusion_config.Invalid_per_hour_budget 0) es)
-  | Ok _ -> Alcotest.fail "expected Error Invalid_per_hour_budget"
-
 let test_config_invalid_max_tool_calls () =
   let s =
     {|
@@ -269,8 +403,6 @@ let test_config_empty_default_preset () =
     {|
 [fusion]
 enabled = true
-[fusion.gate]
-per_hour_budget = 20
 [fusion.presets.p1]
 panel = ["a", "b"]
 judge = "a"
@@ -284,18 +416,16 @@ judge_system_prompt = "j"
       (List.mem (Fusion_config.Missing_default_preset "") es)
   | Ok _ -> Alcotest.fail "expected Error Missing_default_preset"
 
-(* Mirrors the disabled [fusion] seed shipped in config/runtime.toml: a
-   populated default_preset + trio panel while enabled=false must parse to
-   [Ok] (Empty_presets / Missing_default_preset are enabled-gated). Pins the
-   seed-template structure against parser drift. *)
+(* Mirrors the disabled [fusion] seed shipped in config/runtime.toml: a populated
+   default_preset + trio panel while enabled=false must parse to [Ok]
+   (Empty_presets / Missing_default_preset are enabled-gated). Pins the
+   seed-template structure (legacy flat grammar) against parser drift. *)
 let seed_disabled_toml =
   {|
 [fusion]
 enabled = false
 default_preset = "trio"
 max_concurrent_panels = 2
-[fusion.gate]
-per_hour_budget = 20
 [fusion.presets.trio]
 web_tools = false
 max_tool_calls_per_panel = 0
@@ -318,11 +448,52 @@ let test_config_disabled_with_preset () =
     Alcotest.(check int) "trio preset present" 1 (List.length p.Fusion_policy.presets);
     (match p.Fusion_policy.presets with
      | [ preset ] ->
-       Alcotest.(check int) "trio panel size" 3 (List.length preset.Fusion_policy.panel)
+       Alcotest.(check int) "trio panel size (flattened)" 3
+         (List.length (Fusion_policy.preset_models preset))
      | _ -> Alcotest.fail "expected exactly one preset")
   | Error es ->
     Alcotest.failf "seed [fusion] must parse, got errors: %s"
       (String.concat ", " (List.map Fusion_config.show_config_error es))
+
+(* --- execution-axis byte-identity: judge args + outer timeout derivations
+       (RFC-0252-A §4.4, fixes adversarial findings 1.1/1.2/1.3). A single
+       group must reproduce today's judge/outer-timeout mapping; the parse-level
+       golden cannot see this (it compares two new-shape records), so it is
+       pinned here on the pure derivations. --- *)
+
+let g_web4 : Fusion_policy.panel_group =
+  { Fusion_policy.models = [ "a" ]
+  ; system_prompt = "p"
+  ; web_tools = true
+  ; max_tool_calls = 4
+  ; timeout_s = 123.0
+  }
+
+let test_judge_args_single_group_identity () =
+  let groups = [ g_web4 ] in
+  Alcotest.(check (float 0.001)) "outer timeout = sole group timeout" 123.0
+    (Fusion_policy.panel_outer_timeout_of groups);
+  Alcotest.(check bool) "judge web = req||group, req=false, group=true" true
+    (Fusion_policy.judge_web_tools_of ~req_web_tools:false groups);
+  Alcotest.(check bool) "judge web = req||group, both false" false
+    (Fusion_policy.judge_web_tools_of ~req_web_tools:false
+       [ { g_web4 with Fusion_policy.web_tools = false } ]);
+  Alcotest.(check bool) "judge web = req||group, req=true overrides" true
+    (Fusion_policy.judge_web_tools_of ~req_web_tools:true
+       [ { g_web4 with Fusion_policy.web_tools = false } ]);
+  Alcotest.(check int) "judge tool budget = sole group" 4
+    (Fusion_policy.judge_tool_budget_of groups)
+
+let test_judge_args_multi_group () =
+  let g_unlimited = { g_web4 with Fusion_policy.models = [ "x" ]; max_tool_calls = 0 } in
+  let g_slow = { g_web4 with Fusion_policy.models = [ "y" ]; timeout_s = 200.0 } in
+  Alcotest.(check (float 0.001)) "outer timeout = max over groups" 200.0
+    (Fusion_policy.panel_outer_timeout_of [ g_web4; g_slow ]);
+  Alcotest.(check int) "judge tool budget: 0 (unlimited) absorbs" 0
+    (Fusion_policy.judge_tool_budget_of [ g_web4; g_unlimited ]);
+  Alcotest.(check int) "judge tool budget: max when none unlimited" 4
+    (Fusion_policy.judge_tool_budget_of
+       [ { g_web4 with Fusion_policy.models = [ "z" ]; max_tool_calls = 2 }; g_web4 ])
 
 (* --- judge LLM-facing JSON parse (RFC-0252 §7.2) --- *)
 
@@ -408,67 +579,41 @@ let test_judge_tolerant_skip () =
   | Ok js -> Alcotest.(check int) "tolerant consensus" 1 (List.length js.consensus)
   | Error e -> Alcotest.failf "expected Ok, got %s" e
 
-(* --- budget counter (RFC-0252 §6/§10) --- *)
-
-let ok_or_fail = function Ok n -> n | Error () -> Alcotest.fail "expected Ok"
-
-let test_budget_basic () =
-  let b = Fusion_budget.create () in
-  Alcotest.(check int) "first" 1
-    (ok_or_fail (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:10));
-  Alcotest.(check int) "second" 2
-    (ok_or_fail (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:10))
-
-(* 검사+증가가 원자적: limit에 도달하면 Error로 거부하고 카운트를 늘리지 않는다. *)
-let test_budget_limit () =
-  let b = Fusion_budget.create () in
-  ignore (ok_or_fail (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:2) : int);
-  ignore (ok_or_fail (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:2) : int);
-  Alcotest.(check bool) "at limit -> Error" true
-    (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:2 = Error ())
-
-let test_budget_window_reset () =
-  let b = Fusion_budget.create () in
-  ignore (ok_or_fail (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:10) : int);
-  ignore (ok_or_fail (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:10) : int);
-  Alcotest.(check int) "new window resets to 1" 1
-    (ok_or_fail (Fusion_budget.try_incr_if_under b ~hour_bucket:"H2" ~limit:10))
-
-let test_budget_try_incr_if_under () =
-  let b = Fusion_budget.create () in
-  Alcotest.(check ok_int) "first under limit" (Ok 1)
-    (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:2);
-  Alcotest.(check ok_int) "second under limit" (Ok 2)
-    (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:2);
-  Alcotest.(check ok_int) "at limit -> error" (Error ())
-    (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:2);
-  Alcotest.(check ok_int) "new bucket resets" (Ok 1)
-    (Fusion_budget.try_incr_if_under b ~hour_bucket:"H2" ~limit:2)
-
 let () =
   Alcotest.run "fusion_core"
     [ ( "gate"
       , [ Alcotest.test_case "disabled" `Quick test_disabled
         ; Alcotest.test_case "unknown_preset" `Quick test_unknown_preset
         ; Alcotest.test_case "depth_nested" `Quick test_depth_nested
-        ; Alcotest.test_case "low_confidence_trigger_allowed" `Quick test_low_confidence_trigger_allowed
-        ; Alcotest.test_case "high_stakes_trigger_allowed" `Quick test_high_stakes_trigger_allowed
+        ; Alcotest.test_case "low_confidence_trigger_allowed" `Quick
+            test_low_confidence_trigger_allowed
+        ; Alcotest.test_case "high_stakes_trigger_allowed" `Quick
+            test_high_stakes_trigger_allowed
         ; Alcotest.test_case "allow" `Quick test_allow
-        ; Alcotest.test_case "explicit_still_budget_bound" `Quick test_explicit_still_budget_bound
         ] )
     ; ( "config"
       , [ Alcotest.test_case "absent" `Quick test_config_absent
         ; Alcotest.test_case "valid" `Quick test_config_valid
+        ; Alcotest.test_case "panels_golden" `Quick test_config_panels_golden
+        ; Alcotest.test_case "heterogeneous" `Quick test_config_heterogeneous
+        ; Alcotest.test_case "empty_panels" `Quick test_config_empty_panels
+        ; Alcotest.test_case "conflicting_grammar" `Quick test_config_conflicting_grammar
+        ; Alcotest.test_case "duplicate_model" `Quick test_config_duplicate_model
         ; Alcotest.test_case "empty_presets" `Quick test_config_empty_presets
         ; Alcotest.test_case "invalid_size" `Quick test_config_invalid_size
         ; Alcotest.test_case "missing_default" `Quick test_config_missing_default
         ; Alcotest.test_case "missing_prompt" `Quick test_config_missing_prompt
         ; Alcotest.test_case "missing_judge_model" `Quick test_config_missing_judge_model
         ; Alcotest.test_case "bad_concurrency" `Quick test_config_bad_concurrency
-        ; Alcotest.test_case "bad_per_hour" `Quick test_config_bad_per_hour
-        ; Alcotest.test_case "invalid_max_tool_calls" `Quick test_config_invalid_max_tool_calls
+        ; Alcotest.test_case "invalid_max_tool_calls" `Quick
+            test_config_invalid_max_tool_calls
         ; Alcotest.test_case "empty_default_preset" `Quick test_config_empty_default_preset
         ; Alcotest.test_case "disabled_with_preset" `Quick test_config_disabled_with_preset
+        ] )
+    ; ( "judge_args"
+      , [ Alcotest.test_case "single_group_identity" `Quick
+            test_judge_args_single_group_identity
+        ; Alcotest.test_case "multi_group" `Quick test_judge_args_multi_group
         ] )
     ; ( "judge_parse"
       , [ Alcotest.test_case "valid" `Quick test_judge_valid
@@ -479,11 +624,5 @@ let () =
         ; Alcotest.test_case "missing_decision" `Quick test_judge_missing_decision
         ; Alcotest.test_case "code_fence" `Quick test_judge_code_fence
         ; Alcotest.test_case "tolerant_skip" `Quick test_judge_tolerant_skip
-        ] )
-    ; ( "budget"
-      , [ Alcotest.test_case "basic" `Quick test_budget_basic
-        ; Alcotest.test_case "limit" `Quick test_budget_limit
-        ; Alcotest.test_case "window_reset" `Quick test_budget_window_reset
-        ; Alcotest.test_case "try_incr_if_under" `Quick test_budget_try_incr_if_under
         ] )
     ]

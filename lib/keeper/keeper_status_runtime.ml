@@ -13,8 +13,9 @@ open Keeper_types_profile
 let agent_staleness_threshold_s = 120.0
 
 let active_model_of_meta (m : keeper_meta) : string =
-  let _ = m in
-  ""
+  match m.runtime.last_runtime_attempt with
+  | Some record when String.trim record.provider_id <> "" -> record.provider_id
+  | _ -> Keeper_meta_contract.runtime_id_of_meta m
 
 let active_model_label_of_meta (m : keeper_meta) : string =
   (* RFC-0132 PR-2: meta surface is external (status detail); redact via SSOT. *)

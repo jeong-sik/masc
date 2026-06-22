@@ -429,11 +429,11 @@ let keepers_json
                          ; "last_compaction_ago_s", `Float last_compaction_ago_s
                          ; "last_proactive_ago_s", `Float last_proactive_ago_s
                          ; "last_activity_ago_s", `Float last_activity_ago_s
-                         ; "last_model_used", `Null
+                         ; "last_model_used", `String (Keeper_status_runtime.active_model_of_meta meta)
                          ]
                          @ keeper_runtime_identity_fields meta
                          @ [ "keepalive_running", `Bool keepalive_running
-                           ; "next_model_hint", `Null
+                           ; "next_model_hint", Json_util.string_opt_to_json (Keeper_status_runtime.next_model_hint_of_meta meta)
                            ; ( "active_goal_ids"
                              , `List
                                  (List.map

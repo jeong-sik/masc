@@ -15,6 +15,15 @@ import { TweaksPanelToggle } from '../tweaks-panel'
 import { StatusDot } from './primitives-v2'
 import { phaseStatus } from './keeper-fsm'
 import { surfaceLabel } from './nav-rail-v2'
+// Operational/safety chrome the v2 prototype omits but operators rely on
+// (connection state, transport telemetry, emergency stop, error inbox, auth,
+// build identity). Re-mounted into the v2 top bar so the reskin does not drop
+// live operational visibility (PR #22081 review P1). These are zero-prop
+// components that read their own signals.
+import { ConnectionStatus, ErrorCounterBadge, BuildIdentityBadge } from '../dashboard-shell'
+import { AuthStatus } from '../auth-status'
+import { EmergencyStopControl } from '../emergency-stop-control'
+import { TransportBeacon } from '../transport-beacon'
 
 const DEAD_PHASES = new Set(['Overflowed', 'Crashed', 'Dead', 'Zombie'])
 
@@ -95,12 +104,22 @@ export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
       <div class="v2-top-spacer"></div>
       <span class="v2-statchip live"><${StatusDot} status="run" pulse=${true} />${running} 실행 중</span>
       <${AttentionIndicatorV2} />
-      ${/* 예약(schedule): no live cron/schedule signal yet — see live-store-mapping §4.
-          Rendered as a navigable chip; data-stub marks the absent backend source. */ ''}
-      <button class="v2-statchip attn" data-stub="schedule" onClick=${() => navigate('schedule')} title="예약 자동화 큐 — 라이브 백엔드 신호 없음(표시용)">
-        ${'◷'} 예약 <b>정상</b>
+      ${/* 예약(schedule): no live cron/schedule signal yet. Rendered as a plain
+          navigation affordance only — no fabricated status (PR #22081 review:
+          no stub). Wire to a live schedule signal when the backend exposes one. */ ''}
+      <button class="v2-statchip" onClick=${() => navigate('schedule')} title="예약 자동화 큐">
+        ${'◷'} 예약
       </button>
+      ${/* Operational/safety status cluster (review P1: keep operator chrome). */ ''}
+      <div class="v2-top-ops">
+        <${ConnectionStatus} />
+        <${TransportBeacon} />
+        <${EmergencyStopControl} />
+        <${ErrorCounterBadge} />
+        <${AuthStatus} />
+      </div>
       <${CopilotDockTopBarButton} dock=${dock} />
+      <${BuildIdentityBadge} />
       <${TweaksPanelToggle} />
     </div>
   `

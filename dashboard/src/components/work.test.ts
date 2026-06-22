@@ -405,7 +405,12 @@ describe('Work', () => {
           horizon: 'short',
           title: 'Goal needing approval',
           priority: 9,
-          status: 'verifying',
+          // 'active' status does not auto-expand on mount (work.ts:403 only
+          // auto-expands priority===1 / at_risk / verifying / blocked). A
+          // 'verifying' goal would start open, so the click below would CLOSE
+          // it and drop the .wk-vchip chips. approval pill is status-independent
+          // (driven by require_completion_approval), so it still renders.
+          status: 'active',
           phase: 'executing',
           require_completion_approval: true,
           verifier_policy: {

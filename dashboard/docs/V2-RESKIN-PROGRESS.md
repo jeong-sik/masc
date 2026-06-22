@@ -5,11 +5,15 @@ keeper-v2 design prototype (icons, fonts, colors, margins, padding, weight),
 SSOT CSS, production-grade, no stub/hardcode/silent-failure.
 
 ## Ground truth (prototype)
-- Source: `/Users/dancer/Downloads/v2 2/project/keeper-v2/` (jsx + styles/).
-- Standalone (rendered target): served at `http://127.0.0.1:8971/Keeper%20Agent%20v2%20(standalone)%20(2).html`
-  (`?surface=<id>` deep-links). Python http.server over ~/Downloads.
-- Maps (workflow output): `/tmp/keeper-v2-maps/*.md`
-  - proto-data-contract, proto-keepers-dom, proto-css-tokens, live-store-mapping, current-shell-inventory.
+- Source: keeper-v2 design prototype (jsx + `styles/`), provided out-of-repo by the
+  designer. Point `$KEEPER_V2_PROTO` at its local checkout; the vendored SSOT copy of
+  its CSS lives in `src/styles/keeper-v2/` (the in-repo source of truth for the skin).
+- Standalone (rendered target): the `Keeper Agent v2 (standalone)` HTML from that
+  prototype, served locally (`?surface=<id>` deep-links) — e.g.
+  `python3 -m http.server` inside `$KEEPER_V2_PROTO`.
+- Maps (transient investigation output, regenerable, not committed):
+  proto-data-contract, proto-keepers-dom, proto-css-tokens, live-store-mapping,
+  current-shell-inventory.
 
 ## Dev
 - Worktree dev server: `pnpm dev` → http://localhost:5174/dashboard/ (proxies API to 8935 live backend).

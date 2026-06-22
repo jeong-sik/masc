@@ -28,7 +28,8 @@ import { ensureDevToken } from './api/dev-token'
 import { fetchDashboardConfig, parseContextThresholds } from './api/dashboard'
 import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from './config/constants'
 import { setContextThresholds } from './config/context-thresholds'
-import { DashboardMain, isKeeperDetailDashboardRoute } from './components/dashboard-shell'
+import { DashboardMain, DashboardHealthStrip, isKeeperDetailDashboardRoute } from './components/dashboard-shell'
+import { RemoteWarningBanner } from './components/auth-status'
 import { SkipLink } from './components/skip-link'
 import { selectedAgentName } from './components/agent-detail-selection'
 import { selectedTask } from './components/goals/task-detail-selection'
@@ -278,6 +279,11 @@ export function App() {
     >
       <${SkipLink} />
       ${compactChromeMode ? null : html`<${TopBarV2} dock=${dock} />`}
+      ${/* Operational/safety strips re-mounted under the v2 top bar (review P1):
+          remote-auth warning + the runtime health chip bar. Both self-gate
+          (render null when there is no warning / no health signal). */ ''}
+      ${compactChromeMode ? null : html`<${RemoteWarningBanner} />`}
+      ${compactChromeMode ? null : html`<${DashboardHealthStrip} />`}
 
       <div class="v2-stage">
         <div class="v2-body" style=${{ gridTemplateColumns: cols }}>

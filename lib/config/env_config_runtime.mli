@@ -183,26 +183,27 @@ module Approval_janitor : sig
   val interval_seconds : float
 end
 
-(** {1 Keeper max-turn watchdog (RFC-0109 P4)} *)
+(** {1 Keeper max-turn watchdog (RFC-0125 P4) — RETIRED} *)
 
 module Keeper_max_turn_watchdog : sig
   val timeout_sec_opt : unit -> float option
-  (** [timeout_sec_opt ()] returns the keeper-level max-turn wall-clock
-      budget when [MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC] is set to
-      a positive number, or [None] when the env var is unset / zero /
-      negative.
+  (** DEPRECATED / no-op. Parses [MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC]
+      ([Some t] when positive, else [None]). The supervisor calls this only to
+      emit a one-time deprecation warning when the knob is set
+      ([Keeper_supervisor_launch.warn_retired_max_turn_watchdog_if_set]); it
+      never acts on the value, so the env var has no effect on behavior.
 
-      When [Some t] is returned, the supervisor races each keeper's
-      [Keeper_keepalive.run_heartbeat_loop] against
-      [Eio.Time.sleep ctx.clock t] via [Eio.Fiber.first]. Timer expiry
-      cancels the keepalive fiber and stamps [Stale_turn_timeout
-      "max_turn_watchdog"] on the registry so [sweep_and_recover]
-      restarts the keeper instead of treating the cancellation as a
-      clean stop.
-
-      Default: [None] (disabled). Recommended live value: [600.0]
-      (10 minutes). Set lower for aggressive sangsu-style stuck
-      recovery, higher for long-running research keepers. *)
+      The keeper-level max-turn wall-clock watchdog was removed from
+      [keeper_supervisor_launch.ml] (RFC-0250 alignment). It used
+      [Eio.Fiber.first] to race the whole [Keeper_keepalive.run_heartbeat_loop]
+      against [Eio.Time.sleep], which measured keeper {e lifetime} from launch
+      (never reset per turn) and so capped long-lived keepers rather than a
+      single stuck turn. Per-turn wall-clock timeouts are a deliberately-removed
+      pattern ([Keeper_unified_turn_attempt_watchdog]: "MASC must not impose a
+      wall-clock timeout around the whole provider/tool"). Turn-scoped recovery
+      now lives in [Keeper_stale_run] ([Idle_turn]) and
+      [Keeper_mid_turn_progress] ([Mid_turn_no_progress]). Stub retained for
+      env-knob-catalog / in-flight-branch stability; remove in a follow-up. *)
 end
 
 (** {1 Keeper stale-run window (RFC-0250)} *)
@@ -213,7 +214,7 @@ module Keeper_stale_run : sig
       when [MASC_KEEPER_STALE_RUN_SEC] is positive, or [None] when unset /
       zero / negative.
 
-      Distinct from [Keeper_max_turn_watchdog] (opt-in, [In_turn_hung]):
+      Distinct from [Keeper_max_turn_watchdog] (retired; formerly [In_turn_hung]):
       this keys on [last_turn_ts] while [current_turn_observation = None],
       producing [Idle_turn] — the no-turn-produced case. Default-on at
       [1800.0] (30 min). *)
@@ -227,8 +228,8 @@ module Keeper_mid_turn_progress : sig
       when [MASC_KEEPER_MID_TURN_PROGRESS_TIMEOUT_SEC] is positive, or [None]
       when unset / zero / negative.
 
-      Distinct from [Keeper_max_turn_watchdog] (wall-clock, [In_turn_hung]) and
-      [Keeper_stale_run] (no-turn, [Idle_turn]): keys on
+      Distinct from [Keeper_max_turn_watchdog] (retired; formerly [In_turn_hung])
+      and [Keeper_stale_run] (no-turn, [Idle_turn]): keys on
       [current_turn_observation.last_progress_at] while a turn is running,
       producing [Mid_turn_no_progress] when no progress event has been recorded
       for longer than the threshold.

@@ -2368,7 +2368,14 @@ let test_assess_in_turn_progress () =
           ~now:1400.0
           ~progress_timeout:300.0));
   (* The suppression is count-gated, not timing: a long silent tool stays
-     excluded no matter how far past the threshold. *)
+     excluded no matter how far past the threshold. This is the exact invariant
+     the removed RFC-0125 P4 max-turn wall-clock watchdog violated: that
+     [Eio.Fiber.first] timer would have force-restarted this long-but-healthy
+     tool turn on keeper *lifetime* (now - launch), not on per-turn stall. After
+     its removal (RFC-0250 alignment), recovery relies only on no-progress
+     ([Mid_turn_no_progress]) + no-turn ([Idle_turn]); a turn making progress is
+     never killed by a wall-clock cap. Treat a regression here as a signal that a
+     lifetime/wall-clock watchdog was re-introduced. *)
   check bool "tool in flight far past threshold → None" true
     (Option.is_none
        (Sup.assess_in_turn_progress

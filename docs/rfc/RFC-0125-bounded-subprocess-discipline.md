@@ -23,8 +23,33 @@ window before semaphore over-release removal.
 | P1 ratchet | #15958 | **Closed** | `scripts/lint-spawn-bounded.sh` + `.github/workflows/spawn-bounded-check.yml` + 5-site allowlist (~135 LoC) |
 | P2 keeper_docker default audit | — | **Closed — no action** | audit revealed `default_timeout_sec () = 2s` (typed Sandbox caller); both sites already bounded |
 | P3 runtime socket budget | — | **Out of scope** | blocked on `Agent_sdk` upstream + RFC-0107 D.2c (runtime-facing client migration) |
-| P4 supervisor watchdog | #15964 | **Closed** | opt-in `MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC`, reuses `In_turn_hung` (no new variant) |
+| P4 supervisor watchdog | #15964 | **Retired (2026-06-22)** | opt-in `MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC`, reused `In_turn_hung`. **Removed** — the `Eio.Fiber.first` timer wrapped the whole keepalive loop, capping keeper *lifetime* (not a single turn). See Amendment (2026-06-22) below. |
 | P5 deprecation marker | #15973 | tracking | `force_release_holder_for` marked WORKAROUND; removal blocked on 30-day `metric_keeper_provider_timeout_watchdog_termination` trend -> 0 |
+
+### Amendment (2026-06-22): P4 retired — max-turn watchdog removed
+
+P4's keeper-level max-turn watchdog is **removed** from
+`keeper_supervisor_launch.ml`. Root cause: the
+`Eio.Fiber.first (Eio.Time.sleep clock t) (run_heartbeat_loop)` pattern wrapped
+the *entire* keepalive loop, so the timer measured keeper **lifetime** from
+launch and was never reset per turn. With a positive
+`MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC` (e.g. the default-on flip proposed in
+\#21967), every keeper alive past the threshold — healthy multi-turn or idle
+alike — was stamped `In_turn_hung` and force-restarted. Despite the
+`In_turn_hung` name it capped process lifetime, not a single stuck turn.
+
+Per-turn wall-clock timeouts are a deliberately-removed pattern
+(`keeper_unified_turn_attempt_watchdog`: "MASC must not impose a wall-clock
+timeout around the whole provider/tool"; RFC-0250 §"deliberately removed").
+In-turn / idle recovery is already provided, turn-scoped, by:
+
+- `assess_stale_run` → `Idle_turn` (no turn produced; `MASC_KEEPER_STALE_RUN_SEC`, default-on)
+- `assess_in_turn_progress` → `Mid_turn_no_progress` (in-turn no-progress; RFC-0012)
+
+`In_turn_hung` is now a producer-less variant (consumers retained for the closed
+sum). `MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC` is parsed but ignored (no-op
+stub; remove in a follow-up). Regression guard:
+`test_keeper_supervisor.ml` "tool in flight far past threshold → None".
 
 ### implementation_prs reconciliation
 

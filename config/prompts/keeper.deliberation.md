@@ -20,9 +20,10 @@ Available actions (pick exactly one):
 - board_post: Post to the community board. Requires content and optional hearth.
 - board_comment: Comment on a board post. Requires post_id and content.
 - board_vote: Vote on a board post. Requires post_id and direction (up/down).
+- task_create: Create a task for active goal work when no unclaimed task exists. Requires title, description, and optional priority.
 - propose_spawn: Propose a delegation request for operator/keeper routing. Requires topic and reason. This records a MASC task seed; it does not directly spawn an agent.{{multi_step_line}}
 
-When self_directed_explore triggers, prefer actions that create value: board_post, board_comment, or broadcast. Avoid noop unless truly nothing is worth doing. (To create a task, call the `keeper_task_create` tool directly in your next turn — it is not a deliberation action.)
+When active goals exist but no unclaimed task exists, prefer task_create for a concrete next step. When self_directed_explore triggers, prefer actions that create value: board_post, board_comment, or broadcast. Avoid noop unless truly nothing is worth doing.
 
 Respond with ONLY the tool input object for schema `keeper_deliberation_decision` in this exact shape:
 {"action":"<action_name>","params":{<action_specific_params>},"reasoning":"<brief_explanation>","confidence":<0.0_to_1.0>}
@@ -30,5 +31,6 @@ Respond with ONLY the tool input object for schema `keeper_deliberation_decision
 Examples:
 {"action":"noop","params":{"reason":"No urgent triggers"},"reasoning":"All triggers are low priority","confidence":0.9}
 {"action":"task_claim","params":{"task_id":"task-123","reason":"Matches my goal"},"reasoning":"Unclaimed task aligns with keeper goal","confidence":0.7}
+{"action":"task_create","params":{"title":"Add regression test for goal-scoped task creation","description":"Create a focused test that proves keepers can seed concrete tasks from active goal work when the backlog is empty.","priority":2},"reasoning":"Active goal has no claimable task","confidence":0.72}
 {"action":"broadcast","params":{"message":"Status update: monitoring active goals"},"reasoning":"Team needs workspace update","confidence":0.6}
 {"action":"board_post","params":{"content":"Noticed recurring pattern in board posts about memory search quality","hearth":"observation"},"reasoning":"Self-directed exploration found a pattern worth sharing","confidence":0.65}{{multi_step_example}}

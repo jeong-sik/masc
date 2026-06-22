@@ -34,6 +34,7 @@ let turn_intent_board_activity_guidance = "keeper.turn_intent.board_activity_gui
 let turn_intent_board_post_guidance = "keeper.turn_intent.board_post_guidance"
 let turn_intent_board_curation_guidance = "keeper.turn_intent.board_curation_guidance"
 let turn_intent_broadcast_guidance = "keeper.turn_intent.broadcast_guidance"
+let turn_intent_task_create_guidance = "keeper.turn_intent.task_create_guidance"
 
 (** User-prompt "Claimable Work" section body, emitted when a claimable backlog
     is visible and the keeper holds no task. *)

@@ -546,6 +546,13 @@ let fallback_externalized_bullet key =
        keeper_board_curation_submit with a concise snapshot."
   else if String.equal key Keeper_prompt_names.turn_intent_broadcast_guidance then
     Some "- Need to share broadly? Call keeper_broadcast."
+  else if String.equal key Keeper_prompt_names.turn_intent_task_create_guidance then
+    Some
+      "- Active goal work is present but no claimable task is available. \
+       If the goal has a concrete next step, create it with \
+       `keeper_task_create` using a clear title, description, priority, and \
+       the goal link. Do not wait for a human to pre-split obvious goal work \
+       into tasks."
   else if String.equal key Keeper_prompt_names.immediate_task_move then
     Some
       "- Claimable backlog exists. `keeper_task_claim {}` may claim the next \
@@ -717,6 +724,14 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     && not meta.paused
     && Option.is_none meta.current_task_id
   in
+  let show_task_create_guidance =
+    observation.active_goals <> []
+    && observation.claimable_task_count = 0
+    && observation.provider_capacity_blocked_task_count = 0
+    && tool_allowed "keeper_task_create"
+    && not meta.paused
+    && Option.is_none meta.current_task_id
+  in
   (* Turn intent body and each conditional guidance bullet live as markdown
      under config/prompts/. The OCaml side only computes the boolean toggle
      for each bullet and loads the prose via Prompt_registry; the prose
@@ -744,6 +759,11 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
       ~enabled:(tool_allowed "keeper_broadcast")
       Keeper_prompt_names.turn_intent_broadcast_guidance
   in
+  let task_create_guidance =
+    load_externalized_bullet
+      ~enabled:show_task_create_guidance
+      Keeper_prompt_names.turn_intent_task_create_guidance
+  in
   let claim_guidance_a =
     load_externalized_bullet
       ~enabled:show_claim_guidance
@@ -759,6 +779,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
       ("board_activity_guidance", board_activity_guidance);
       ("claim_guidance_a", claim_guidance_a);
       ("claim_guidance_b", claim_guidance_b);
+      ("task_create_guidance", task_create_guidance);
       ("board_post_guidance", board_post_guidance);
       ("board_curation_guidance", board_curation_guidance);
       ("broadcast_guidance", broadcast_guidance);

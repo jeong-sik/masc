@@ -45,6 +45,7 @@ type deliberation_action =
   | BoardComment of { post_id: string; content: string }
   | BoardVote of { post_id: string; direction: string }
   | TaskClaim of { task_id: string; reason: string }
+  | TaskCreate of { title: string; description: string; priority: int option }
   | Broadcast of { message: string }
   | ProposeSpawn of { topic: string; reason: string }
   | MultiStep of deliberation_action list
@@ -55,6 +56,7 @@ let rec deliberation_action_to_string = function
   | BoardComment _ -> "board_comment"
   | BoardVote _ -> "board_vote"
   | TaskClaim _ -> "task_claim"
+  | TaskCreate _ -> "task_create"
   | Broadcast _ -> "broadcast"
   | ProposeSpawn _ -> "propose_spawn"
   | MultiStep actions ->
@@ -69,6 +71,7 @@ let deliberation_action_to_policy_label = function
   | BoardComment _ -> "board_comment"
   | BoardVote _ -> "board_vote"
   | TaskClaim _ -> "task_claim"
+  | TaskCreate _ -> "task_create"
   | Broadcast _ -> "broadcast"
   | ProposeSpawn _ -> "propose_spawn"
   | MultiStep _ -> "multi_step"
@@ -104,6 +107,17 @@ let rec deliberation_action_to_json = function
           ("task_id", `String task_id);
           ("reason", `String reason);
         ]
+  | TaskCreate { title; description; priority } ->
+      `Assoc
+        ([
+           ("type", `String "task_create");
+           ("title", `String title);
+           ("description", `String description);
+         ]
+         @
+         match priority with
+         | Some priority -> [ ("priority", `Int priority) ]
+         | None -> [])
   | Broadcast { message } ->
       `Assoc [ ("type", `String "broadcast"); ("message", `String message) ]
   | ProposeSpawn { topic; reason } ->
@@ -440,6 +454,9 @@ let rec legality_error (obs : world_observation) = function
   | TaskClaim _ ->
       if obs.unclaimed_task_count > 0 then None
       else Some "task_claim requires unclaimed tasks"
+  | TaskCreate _ ->
+      if obs.active_goal_count > 0 && obs.unclaimed_task_count = 0 then None
+      else Some "task_create requires active goals and no unclaimed tasks"
   | Broadcast _ ->
       if has_operational_signal obs then None
       else Some "broadcast requires an operational signal"
@@ -566,6 +583,18 @@ let rec parse_action_from_json (json : Yojson.Safe.t)
       let reason = Safe_ops.json_string ~default:"" "reason" params in
       if task_id = "" then Error "task_claim requires non-empty task_id"
       else Ok (TaskClaim { task_id; reason })
+  | "task_create" ->
+      let title = Safe_ops.json_string ~default:"" "title" params |> String.trim in
+      let description =
+        Safe_ops.json_string ~default:"" "description" params |> String.trim
+      in
+      let priority =
+        Safe_ops.json_int_opt "priority" params
+        |> Option.map (fun value -> max 1 (min 5 value))
+      in
+      if title = "" then Error "task_create requires non-empty title"
+      else if description = "" then Error "task_create requires non-empty description"
+      else Ok (TaskCreate { title; description; priority })
   | "broadcast" ->
       let message = Safe_ops.json_string ~default:"" "message" params in
       if message = "" then Error "broadcast requires non-empty message"
@@ -670,7 +699,7 @@ let structured_result_schema : structured_result Agent_sdk.Structured.schema =
       [
         {
           Agent_sdk.Types.name = "action";
-          description = "One of: noop, task_claim, broadcast, board_post, board_comment, board_vote, propose_spawn, multi_step.";
+          description = "One of: noop, task_claim, task_create, broadcast, board_post, board_comment, board_vote, propose_spawn, multi_step.";
           param_type = Agent_sdk.Types.String;
           required = true;
         };

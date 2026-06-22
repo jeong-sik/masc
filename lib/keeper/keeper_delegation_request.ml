@@ -161,7 +161,7 @@ let rec of_action ~requester ?goal = function
   | MultiStep actions ->
       List.concat_map (of_action ~requester ?goal) actions
   | Noop _ | BoardPost _ | BoardComment _ | BoardVote _ | TaskClaim _
-  | Broadcast _ ->
+  | TaskCreate _ | Broadcast _ ->
       []
 
 

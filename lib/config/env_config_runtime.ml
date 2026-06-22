@@ -416,7 +416,9 @@ module Keeper_max_turn_watchdog = struct
   let default_max_turn_watchdog_sec =
     1800.0 (* 30 min: a single in-progress turn is presumed hung *)
 
-  (** Default-on at [1800.0] (30 min). Set the env var to [0] to disable. *)
+  (** Default-on at [1800.0] (30 min). Set the env var to [0] to disable.
+      @category Timeouts
+      @ops_class operator *)
   let timeout_sec_opt () =
     let v =
       get_float
@@ -443,7 +445,9 @@ module Keeper_stale_run = struct
   let default_stale_run_sec =
     1800.0 (* 30 min: no turn has completed at all *)
 
-  (** Default-on at [1800.0] (30 min). Set the env var to [0] to disable. *)
+  (** Default-on at [1800.0] (30 min). Set the env var to [0] to disable.
+      @category Timeouts
+      @ops_class operator *)
   let threshold_sec_opt () =
     let v = get_float ~default:default_stale_run_sec "MASC_KEEPER_STALE_RUN_SEC" in
     if v > 0.0 then Some v else None

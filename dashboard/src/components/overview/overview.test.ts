@@ -14,13 +14,15 @@ import {
   deriveKeeperAttentionReason,
   pickAttentionKeepers,
   computeOverviewStats,
+  computeOverviewDigest,
   buildOverviewTelemetrySnapshot,
   keeperModelLabel,
   OVERVIEW_TELEMETRY_BAR_COUNT,
   type FunnelCounts,
   Overview,
 } from './overview'
-import type { TelemetryEntry, TelemetrySourceSummary } from '../../api/dashboard'
+import type { FusionRunRecord, TelemetryEntry, TelemetrySourceSummary } from '../../api/dashboard'
+import type { Goal } from '../../types/core'
 
 // bar-seg ratio helper (mirrors FunnelCard inline logic)
 function segPct(counts: FunnelCounts, key: 'created' | 'inProgress' | 'awaiting' | 'completed'): number {
@@ -753,5 +755,202 @@ describe('Overview StyleSeed surfaces', () => {
     const grid = container.querySelector('[data-testid="overview-primary-grid"]')
     expect(grid?.classList.contains('ov-grid')).toBe(true)
     expect(grid?.classList.contains('v2-overview-primary-grid')).toBe(true)
+  })
+})
+
+// ─── Cross-surface digest ─────────────────────────────────────────────────────
+
+function makeGoal(partial: Partial<Goal>): Goal {
+  return {
+    id: 'g-1',
+    horizon: 'mid',
+    title: 'goal',
+    priority: 5,
+    status: 'active',
+    phase: 'observe',
+    created_at: localIsoAt(1),
+    updated_at: localIsoAt(1),
+    ...partial,
+  }
+}
+
+function makeFusionRun(partial: Partial<FusionRunRecord>): FusionRunRecord {
+  return {
+    runId: 'fr-1',
+    keeper: 'sangsu',
+    preset: 'default',
+    startedAt: 1_700_000_000,
+    status: 'running',
+    ...partial,
+  }
+}
+
+describe('computeOverviewDigest', () => {
+  it('returns zeroed digest with no data', () => {
+    const digest = computeOverviewDigest([], [], [])
+    expect(digest.openApprovals).toBe(0)
+    expect(digest.approvalsCritical).toBe(false)
+    expect(digest.topGoals).toEqual([])
+    expect(digest.topGoalLabel).toBeNull()
+    expect(digest.fusionRunning).toBe(0)
+    expect(digest.fusionDone).toBe(0)
+    expect(digest.fusionTotal).toBe(0)
+    expect(digest.fusionLatest).toBeNull()
+  })
+
+  it('counts operator-awaiting keepers as open approvals', () => {
+    const digest = computeOverviewDigest(
+      [
+        makeKeeper({ name: 'gate', runtime_blocker_continue_gate: true }),
+        makeKeeper({ name: 'op', runtime_blocker_class: 'awaiting_operator' }),
+        makeKeeper({ name: 'fine' }),
+      ],
+      [],
+      [],
+    )
+    expect(digest.openApprovals).toBe(2)
+    expect(digest.approvalsCritical).toBe(false)
+  })
+
+  it('flags approvals critical when a keeper is in a bad runtime state', () => {
+    const digest = computeOverviewDigest(
+      [makeKeeper({ name: 'dead', lifecycle_phase: 'Dead', runtime_blocker_class: 'exception' })],
+      [],
+      [],
+    )
+    expect(digest.approvalsCritical).toBe(true)
+  })
+
+  it('orders top goals by priority and labels the leader by due date', () => {
+    const digest = computeOverviewDigest(
+      [],
+      [
+        makeGoal({ id: 'low', priority: 2 }),
+        makeGoal({ id: 'lead', priority: 9, due_date: '2026-07-01' }),
+        makeGoal({ id: 'mid', priority: 5 }),
+      ],
+      [],
+    )
+    expect(digest.topGoals.map(g => g.id)).toEqual(['lead', 'mid', 'low'])
+    expect(digest.topGoalLabel).toBe('2026-07-01')
+  })
+
+  it('falls back to priority label when the leader has no due date', () => {
+    const digest = computeOverviewDigest([], [makeGoal({ id: 'lead', priority: 8, due_date: null })], [])
+    expect(digest.topGoalLabel).toBe('P8')
+  })
+
+  it('summarizes fusion runs by status and picks the newest as latest', () => {
+    const digest = computeOverviewDigest(
+      [],
+      [],
+      [
+        makeFusionRun({ runId: 'older', status: 'completed', startedAt: 100 }),
+        makeFusionRun({ runId: 'newest', status: 'running', startedAt: 300 }),
+        makeFusionRun({ runId: 'mid', status: 'running', startedAt: 200 }),
+      ],
+    )
+    expect(digest.fusionRunning).toBe(2)
+    expect(digest.fusionDone).toBe(1)
+    expect(digest.fusionTotal).toBe(3)
+    expect(digest.fusionLatest?.runId).toBe('newest')
+  })
+})
+
+// ─── Prototype overview surface (header / KPIs / domains) ─────────────────────
+
+describe('Overview prototype surface', () => {
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('renders the eyebrow + display header verbatim from the prototype', () => {
+    const { container } = render(h(Overview, null))
+    const head = container.querySelector('[data-testid="overview-head"]')
+    expect(head?.querySelector('.ov-eyebrow')?.textContent).toBe('운영 홈')
+    expect(head?.querySelector('h1')?.textContent).toBe('지금, 전체')
+    expect(head?.querySelector('.ov-sub')?.textContent).toBe('fleet 전체 — 목표 · 승인 · 심의 · 연결 한눈에')
+  })
+
+  it('renders exactly 7 cross-surface KPI cells with the prototype labels', () => {
+    const { container } = render(h(Overview, null))
+    const cells = container.querySelectorAll('[data-testid="overview-kpis"] .ov-kpi')
+    expect(cells).toHaveLength(7)
+    const labels = [...cells].map(c => c.querySelector('.ov-kpi-k')?.textContent)
+    expect(labels).toEqual([
+      '실행 중 keeper',
+      '주의 필요',
+      '열린 승인',
+      '최우선 목표',
+      '활성 커넥터',
+      '예약 승인',
+      '진행 심의',
+    ])
+  })
+
+  it('marks deep-link KPI cells as buttons', () => {
+    const { container } = render(h(Overview, null))
+    const runCell = container.querySelector('[data-testid="kpi-run"]')
+    expect(runCell?.classList.contains('link')).toBe(true)
+    expect(runCell?.getAttribute('role')).toBe('button')
+  })
+
+  it('renders the 도메인 현황 section header', () => {
+    const { container } = render(h(Overview, null))
+    const header = container.querySelector('[data-testid="overview-domains-header"]')
+    expect(header?.classList.contains('ov-section-h')).toBe(true)
+    expect(header?.textContent).toBe('도메인 현황')
+  })
+
+  it('renders all 7 domain cards in prototype order', () => {
+    const { container } = render(h(Overview, null))
+    const cards = container.querySelectorAll('[data-testid="overview-domains"] .ov-dcard')
+    expect(cards).toHaveLength(7)
+    const titles = [...cards].map(c => c.querySelector('.ov-dcard-h h3')?.textContent)
+    expect(titles).toEqual([
+      '작업 · 목표',
+      '승인 큐',
+      '예약 · 자동화',
+      'Fusion 심의',
+      '보드',
+      '커넥터',
+      'Fleet 요약',
+    ])
+  })
+
+  it('places the domain section after the fleet grid and before the rollup', () => {
+    const { container } = render(h(Overview, null))
+    const order = [...container.querySelectorAll(
+      '[data-testid="overview-fleet"], [data-testid="overview-domains"], [data-testid="overview-rollup"]',
+    )].map(el => el.getAttribute('data-testid'))
+    expect(order).toEqual(['overview-fleet', 'overview-domains', 'overview-rollup'])
+  })
+
+  // Gap 1: KPI grid uses 6-column layout (surfaces.css:88 `repeat(6, 1fr)`)
+  it('KPI grid declares 6-column repeat matching prototype surfaces.css:88', () => {
+    const { container } = render(h(Overview, null))
+    const grid = container.querySelector('[data-testid="overview-kpis"]') as HTMLElement | null
+    expect(grid).not.toBeNull()
+    // The grid class is ov-kpis; CSS sets grid-template-columns: repeat(6, 1fr)
+    expect(grid?.classList.contains('ov-kpis')).toBe(true)
+    // 7 cells exist — 7th wraps to second row in a 6-col grid (prototype intent)
+    expect(container.querySelectorAll('[data-testid="overview-kpis"] .ov-kpi')).toHaveLength(7)
+  })
+
+  // Gap 2: attention panel title includes full subtitle (overview.jsx:119)
+  it('attention panel h3 includes the full prototype title with subtitle', () => {
+    const { container } = render(h(Overview, null))
+    const attn = container.querySelector('[data-testid="overview-attention"]')
+    const h3 = attn?.querySelector('.ov-card-h h3')
+    expect(h3?.textContent).toBe('주의 필요 · 지금 손이 필요한 것')
+  })
+
+  // Gap 3: telemetry panel shows "로그 보기 →" button link (overview.jsx:143)
+  it('telemetry panel header shows a "로그 보기 →" link button', () => {
+    const { container } = render(h(Overview, null))
+    const tel = container.querySelector('[data-testid="overview-telemetry"]')
+    const btn = tel?.querySelector('button.ov-link')
+    expect(btn).not.toBeNull()
+    expect(btn?.textContent).toBe('로그 보기 →')
   })
 })

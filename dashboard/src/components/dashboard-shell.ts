@@ -1462,7 +1462,7 @@ export function isKeeperDetailDashboardRoute(routeState: RouteState): boolean {
 // design gives every surface a single bespoke header plus a slim top-bar crumb,
 // with no generic lead.
 //
-//   overview   → overview/overview.ts  <header class="ov-head">      <h1>운영 개요</h1>
+//   overview   → overview/overview.ts  <header class="ov-head">      <h1>지금, 전체</h1>
 //   approvals  → approvals-surface.ts  <header class="ov-head">      <h1>승인 · HITL 큐</h1>
 //   schedule   → schedule-surface.ts   <header class="ov-head">      <h1>예약 자동화</h1>
 //   fusion     → fusion-surface.ts     <header class="ov-head fus-head"> <h1>Fusion</h1>

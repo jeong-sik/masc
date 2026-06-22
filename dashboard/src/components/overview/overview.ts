@@ -25,8 +25,9 @@ import type { KpiCellKind } from '../kpi-shared'
 import { KpiStripIsland } from '../kpi-strip-island'
 import { AgentAvatar } from './agent-avatar'
 import { missionSnapshot } from '../../mission-store'
-import { agents, tasks, keepers, messages, boardPosts } from '../../store'
-import type { Agent, Task, Keeper, Message, BoardPost, KeeperRuntimeBlockerClass } from '../../types/core'
+import { agents, tasks, keepers, messages, boardPosts, goals, fusionRuns } from '../../store'
+import type { Agent, Task, Keeper, Message, BoardPost, Goal, KeeperRuntimeBlockerClass } from '../../types/core'
+import type { FusionRunRecord } from '../../api/dashboard'
 import { SYSTEM_ACTOR_NAME } from '../../types/core'
 import type {
   DashboardMissionResponse,
@@ -41,6 +42,7 @@ import { isAgentOffline } from '../../lib/agent-status'
 import { keeperRowLooksRunning } from '../../runtime-counts'
 import { createAsyncResource, type AsyncResource, type AsyncState } from '../../lib/async-state'
 import { navigate } from '../../router'
+import type { TabId } from '../../types/sse'
 import {
   normalizeSurfaceReadinessPayload,
   summarizeSurfaceReadiness,
@@ -52,7 +54,7 @@ import {
   type TelemetryEntry,
   type TelemetrySourceSummary,
 } from '../../api/dashboard'
-import { currentDashboardActor, get } from '../../api/core'
+import { get } from '../../api/core'
 
 // ─── Attention / Keeper v2 helpers ───────────────────────────────────────────
 
@@ -176,6 +178,76 @@ export function computeOverviewStats(keeperList: readonly Keeper[], taskList: re
     : 0
 
   return { run, att, hot, avgCtx, tasks, traces, total }
+}
+
+// ─── Cross-surface digest (overview.jsx:71-92) ───────────────────────────────
+//
+// The prototype reads window.GOALS / APPROVALS / CONNECTORS / FUSION_RUNS etc.
+// from a mock. The live v2 dashboard exposes goals + fusion runs as signals, and
+// surfaces operator-awaiting keepers as the approval queue. Connectors and the
+// scheduled-automation queue have no live store on this surface yet, so their KPI
+// values render as "—" (em dash) rather than inventing data — see CLAUDE.md
+// "Unknown → Permissive Default": absence is shown as unknown, not as 0.
+
+export interface OverviewDigest {
+  /** Keepers blocked awaiting an operator decision (the approval queue). */
+  openApprovals: number
+  /** Whether any awaiting-operator keeper is in a critical (bad) state. */
+  approvalsCritical: boolean
+  /** Top goals by priority (highest first), up to 3. */
+  topGoals: Goal[]
+  /** Most urgent goal label for the "최우선 목표" KPI, or null when none. */
+  topGoalLabel: string | null
+  /** Fusion runs currently executing. */
+  fusionRunning: number
+  /** Completed fusion runs (status === 'completed'). */
+  fusionDone: number
+  /** Total fusion runs. */
+  fusionTotal: number
+  /** Latest fusion run record (newest startedAt), or null. */
+  fusionLatest: FusionRunRecord | null
+}
+
+function goalPriorityClass(priority: number): 'high' | 'normal' | 'low' {
+  // overview.jsx:166 — priority >= 7 high, >= 4 normal, else low
+  if (priority >= 7) return 'high'
+  if (priority >= 4) return 'normal'
+  return 'low'
+}
+
+export function computeOverviewDigest(
+  keeperList: readonly Keeper[],
+  goalList: readonly Goal[],
+  fusionList: readonly FusionRunRecord[],
+): OverviewDigest {
+  const awaiting = keeperList.filter(
+    k => k.runtime_blocker_continue_gate === true || hasOperatorAttentionBlocker(k.runtime_blocker_class),
+  )
+  const approvalsCritical = keeperList.some(
+    k => hasCriticalAttentionBlocker(k.runtime_blocker_class)
+      || k.lifecycle_phase === 'Dead'
+      || k.lifecycle_phase === 'Crashed',
+  )
+
+  // Highest priority first; ties keep input order (stable sort).
+  const topGoals = [...goalList].sort((a, b) => b.priority - a.priority).slice(0, 3)
+  const lead = topGoals[0] ?? null
+  const topGoalLabel = lead ? (lead.due_date ?? `P${lead.priority}`) : null
+
+  const fusionRunning = fusionList.filter(r => r.status === 'running').length
+  const fusionDone = fusionList.filter(r => r.status === 'completed').length
+  const fusionLatest = [...fusionList].sort((a, b) => b.startedAt - a.startedAt)[0] ?? null
+
+  return {
+    openApprovals: awaiting.length,
+    approvalsCritical,
+    topGoals,
+    topGoalLabel,
+    fusionRunning,
+    fusionDone,
+    fusionTotal: fusionList.length,
+    fusionLatest,
+  }
 }
 
 // ─── Telemetry bars ──────────────────────────────────────────────────────────
@@ -880,21 +952,16 @@ function nowHMKst(): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-function OverviewHeader({ stats }: { stats: OverviewStats }) {
+function OverviewHeader() {
   useNowSecondsTicker()
   const clock = nowHMKst()
-  const actor = currentDashboardActor()
   return html`
     <header class="ov-head v2-overview-head" data-testid="overview-head">
       <div>
-        <h1>운영 개요</h1>
-        <p class="ov-sub">
-          <span title="데이터 출처 — 실제 dashboard execution projection">source <span class="mono">dashboard/execution</span></span>
-          <span> · </span>
-          <span title="등록된 keeper 총 수">Keeper ${stats.total}</span>
-          <span> · </span>
-          <span title="현재 dashboard actor">operator <b class="text-text-secondary">@${actor}</b></span>
-        </p>
+        <!-- eyebrow + display header + purpose: overview.jsx:99-101 (copy verbatim) -->
+        <span class="ov-eyebrow">운영 홈</span>
+        <h1>지금, 전체</h1>
+        <p class="ov-sub">fleet 전체 — 목표 · 승인 · 심의 · 연결 한눈에</p>
       </div>
       <div class="ov-clock v2-overview-clock mono" data-testid="overview-clock">
         ${clock} <span>KST</span>
@@ -909,30 +976,51 @@ function OverviewKpi({
   sub,
   tone,
   testId,
+  onClick,
 }: {
   label: string
   value: string
   sub?: string
   tone?: 'ok' | 'bad' | 'warn' | 'volt'
   testId: string
+  onClick?: () => void
 }) {
+  // overview.jsx:16-25 — clickable KPI cell gets .link + button role + keyboard handler
+  const onKeyDown = onClick
+    ? (e: KeyboardEvent) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onClick()
+        }
+      }
+    : undefined
   return html`
-    <div class="ov-kpi" data-testid=${testId}>
+    <div
+      class=${`ov-kpi ${onClick ? 'link' : ''}`}
+      data-testid=${testId}
+      onClick=${onClick}
+      role=${onClick ? 'button' : undefined}
+      tabIndex=${onClick ? 0 : undefined}
+      onKeyDown=${onKeyDown}
+    >
       <div class="ov-kpi-k">${label}</div>
       <div class=${`ov-kpi-v ${tone ?? ''}`}>${value}${sub !== undefined ? html`<small>${sub}</small>` : null}</div>
     </div>
   `
 }
 
-function OverviewKpiStrip({ stats }: { stats: OverviewStats }) {
+// Cross-surface KPI row — overview.jsx:106-114. Seven cells, each a deep link into
+// its surface. Labels and `sub` separators are copied verbatim from the prototype.
+function OverviewKpiStrip({ stats, digest }: { stats: OverviewStats; digest: OverviewDigest }) {
   return html`
-    <section class="ov-kpis v2-overview-kpis" aria-label="Fleet KPIs" data-testid="overview-kpis">
-      <${OverviewKpi} label="실행 중" value=${String(stats.run)} sub=${` / ${stats.total}`} tone="ok" testId="kpi-run" />
-      <${OverviewKpi} label="주의 필요" value=${String(stats.att)} tone=${stats.att > 0 ? 'bad' : undefined} testId="kpi-att" />
-      <${OverviewKpi} label="컨텍스트 압박" value=${String(stats.hot)} sub=" ≥85%" tone=${stats.hot > 0 ? 'warn' : undefined} testId="kpi-hot" />
-      <${OverviewKpi} label="평균 컨텍스트" value=${`${stats.avgCtx}%`} tone="volt" testId="kpi-avg-ctx" />
-      <${OverviewKpi} label="소유 태스크" value=${String(stats.tasks)} testId="kpi-tasks" />
-      <${OverviewKpi} label="누적 trace" value=${stats.traces.toLocaleString()} testId="kpi-traces" />
+    <section class="ov-kpis v2-overview-kpis" aria-label="Cross-surface KPIs" data-testid="overview-kpis">
+      <${OverviewKpi} label="실행 중 keeper" value=${String(stats.run)} sub=${` / ${stats.total}`} tone="ok" testId="kpi-run" onClick=${() => navigate('monitoring')} />
+      <${OverviewKpi} label="주의 필요" value=${String(stats.att)} tone=${stats.att > 0 ? 'bad' : undefined} testId="kpi-att" onClick=${() => navigate('monitoring')} />
+      <${OverviewKpi} label="열린 승인" value=${String(digest.openApprovals)} tone=${digest.approvalsCritical ? 'bad' : digest.openApprovals > 0 ? 'warn' : undefined} testId="kpi-approvals" onClick=${() => navigate('approvals')} />
+      <${OverviewKpi} label="최우선 목표" value=${digest.topGoalLabel ?? '—'} tone="volt" testId="kpi-top-goal" onClick=${() => navigate('workspace', { section: 'work' })} />
+      <${OverviewKpi} label="활성 커넥터" value="—" testId="kpi-connectors" onClick=${() => navigate('connectors')} />
+      <${OverviewKpi} label="예약 승인" value="—" testId="kpi-schedule" onClick=${() => navigate('schedule')} />
+      <${OverviewKpi} label="진행 심의" value=${String(digest.fusionRunning)} sub=${digest.fusionDone > 0 ? ` · 완료 ${digest.fusionDone}` : undefined} tone=${digest.fusionRunning > 0 ? 'volt' : undefined} testId="kpi-fusion" onClick=${() => navigate('fusion')} />
     </section>
   `
 }
@@ -957,7 +1045,7 @@ function OverviewAttentionPanel({ keeperList }: { keeperList: readonly Keeper[] 
     return html`
       <section class="ov-card ov-attn v2-overview-attention" data-testid="overview-attention">
         <div class="ov-card-h">
-          <h3>주의 필요</h3>
+          <h3>주의 필요 · 지금 손이 필요한 것</h3>
           <span class="ov-count">0</span>
         </div>
         <div class="ov-empty">모든 keeper 정상</div>
@@ -968,7 +1056,7 @@ function OverviewAttentionPanel({ keeperList }: { keeperList: readonly Keeper[] 
   return html`
     <section class="ov-card ov-attn v2-overview-attention" data-testid="overview-attention">
       <div class="ov-card-h">
-        <h3>주의 필요</h3>
+        <h3>주의 필요 · 지금 손이 필요한 것</h3>
         <span class="ov-count">${attn.length}</span>
       </div>
       <div class="ov-attn-list v2-overview-attention-list">
@@ -1034,7 +1122,7 @@ function OverviewTelemetry({
     <section class="ov-card ov-telemetry v2-overview-telemetry" data-testid="overview-telemetry">
       <div class="ov-card-h">
         <h3>텔레메트리</h3>
-        <span class="ov-legend mono">oas_event / 5m · last ${OVERVIEW_TELEMETRY_WINDOW_MINUTES}m</span>
+        <button type="button" class="ov-link" onClick=${() => navigate('logs')}>로그 보기 →</button>
       </div>
       ${snapshot
         ? html`
@@ -1150,6 +1238,154 @@ function OverviewFleetGrid({ keeperList }: { keeperList: readonly Keeper[] }) {
   `
 }
 
+// ─── Domain status section (overview.jsx:159-261) ────────────────────────────
+//
+// "도메인 현황" header over a 7-card grid: one summary card per surface
+// (work · approvals · schedule · fusion · board · connectors · fleet), each a
+// deep link. Card chrome mirrors the prototype DomainCard (overview.jsx:42-53).
+
+type DomainTone = 'ok' | 'bad' | 'warn' | 'volt'
+
+type DomainNav = { tab: TabId; params?: Record<string, string> }
+
+function DomainCard({
+  title,
+  count,
+  tone,
+  linkLabel,
+  nav,
+  testId,
+  children,
+}: {
+  title: string
+  count?: string | null
+  tone?: DomainTone
+  linkLabel: string
+  nav: DomainNav
+  testId: string
+  children: unknown
+}) {
+  return html`
+    <section class="ov-dcard v2-overview-dcard" data-testid=${testId}>
+      <div class="ov-dcard-h">
+        <h3>${title}</h3>
+        ${count != null ? html`<span class=${`ov-dcount ${tone ?? ''}`}>${count}</span>` : null}
+        <button type="button" class="ov-dlink" onClick=${() => navigate(nav.tab, nav.params)}>${linkLabel} →</button>
+      </div>
+      <div class="ov-dcard-body">${children}</div>
+    </section>
+  `
+}
+
+function OverviewDomainSection({
+  stats,
+  digest,
+}: {
+  stats: OverviewStats
+  digest: OverviewDigest
+}) {
+  return html`
+    <h2 class="ov-section-h v2-overview-section-h" data-testid="overview-domains-header">도메인 현황</h2>
+    <div class="ov-domains v2-overview-domains" data-testid="overview-domains">
+      <!-- WORK · overview.jsx:162-179 -->
+      <${DomainCard} title="작업 · 목표" linkLabel="작업" nav=${{ tab: 'workspace', params: { section: 'work' } }} testId="domain-work">
+        ${digest.topGoals.length > 0
+          ? digest.topGoals.map(g => {
+              const pri = goalPriorityClass(g.priority)
+              return html`
+                <div key=${g.id} class="ov-goal">
+                  <div class="ov-goal-top">
+                    <span class=${`ov-goal-pri ${pri}`}></span>
+                    <span class="ov-goal-title">${g.title}</span>
+                    <span class="ov-goal-due mono">${g.due_date ?? ''}</span>
+                  </div>
+                  <div class="ov-goal-sub mono">P${g.priority} · ${g.phase}</div>
+                </div>
+              `
+            })
+          : html`<div class="ov-mini-empty ov-empty">활성 목표 없음</div>`}
+      <//>
+
+      <!-- APPROVALS · overview.jsx:182-198 -->
+      <${DomainCard}
+        title="승인 큐"
+        count=${String(digest.openApprovals)}
+        tone=${digest.approvalsCritical ? 'bad' : 'warn'}
+        linkLabel="승인"
+        nav=${{ tab: 'approvals' }}
+        testId="domain-approvals"
+      >
+        <div class="ov-mini-list">
+          ${digest.openApprovals > 0
+            ? html`
+                <div class="ov-mini-row">
+                  <span class="inline-block size-1.5 rounded-full ${digest.approvalsCritical ? 'bg-destructive' : 'bg-warning'}"></span>
+                  <span class="ov-mini-txt">운영자 조치 대기 ${digest.openApprovals}건</span>
+                </div>
+              `
+            : html`<div class="ov-mini-empty ov-empty">대기 중 승인 없음</div>`}
+        </div>
+      <//>
+
+      <!-- SCHEDULE · overview.jsx:201-215 (no live schedule store yet) -->
+      <${DomainCard} title="예약 · 자동화" linkLabel="예약" nav=${{ tab: 'schedule' }} testId="domain-schedule">
+        <div class="ov-mini-list">
+          <div class="ov-mini-empty ov-empty">예약 데이터 미연결</div>
+        </div>
+      <//>
+
+      <!-- FUSION · overview.jsx:218-230 -->
+      <${DomainCard}
+        title="Fusion 심의"
+        count=${String(digest.fusionTotal)}
+        tone="volt"
+        linkLabel="Fusion"
+        nav=${{ tab: 'fusion' }}
+        testId="domain-fusion"
+      >
+        ${digest.fusionLatest
+          ? html`
+              <div class="ov-fus">
+                <div class="ov-fus-h">
+                  <span class="ov-fus-run mono">${digest.fusionLatest.runId}</span>
+                </div>
+                <div class="ov-fus-by mono">${digest.fusionLatest.keeper} · ${digest.fusionLatest.preset}</div>
+              </div>
+            `
+          : null}
+        <div class="ov-fus-foot">
+          ${digest.fusionRunning > 0
+            ? html`<span class="ov-fus-live"><span class="inline-block size-1.5 rounded-full bg-warning"></span>${digest.fusionRunning}건 심의 중</span>`
+            : html`<span class="ov-fus-idle">진행 중 심의 없음</span>`}
+        </div>
+      <//>
+
+      <!-- BOARD · overview.jsx:233-237 -->
+      <${DomainCard} title="보드" linkLabel="보드" nav=${{ tab: 'board' }} testId="domain-board">
+        <div class="ov-stat-row"><span class="k">전체 포스트</span><span class="v mono">${boardPosts.value.length}</span></div>
+      <//>
+
+      <!-- CONNECTORS · overview.jsx:240-249 (no live connector store yet) -->
+      <${DomainCard} title="커넥터" linkLabel="커넥터" nav=${{ tab: 'connectors' }} testId="domain-connectors">
+        <div class="ov-mini-list">
+          <div class="ov-mini-empty ov-empty">커넥터 데이터 미연결</div>
+        </div>
+      <//>
+
+      <!-- FLEET summary · overview.jsx:252-260 -->
+      <${DomainCard} title="Fleet 요약" linkLabel="Monitor" nav=${{ tab: 'monitoring' }} testId="domain-fleet">
+        <div class="ov-fleet-sum">
+          <div class="ov-fleet-stat"><span class="v ok">${stats.run}</span><span class="k">실행</span></div>
+          <div class="ov-fleet-stat"><span class="v warn">${stats.att}</span><span class="k">주의</span></div>
+          <div class="ov-fleet-stat"><span class=${`v ${stats.hot > 0 ? 'bad' : ''}`}>${stats.hot}</span><span class="k">압박</span></div>
+          <div class="ov-fleet-stat"><span class="v">${stats.total}</span><span class="k">전체</span></div>
+        </div>
+        <div class="ov-stat-row"><span class="k">전체 keeper</span><span class="v mono">${stats.total}</span></div>
+      <//>
+    </div>
+  `
+}
+
 // ─── Root ────────────────────────────────────────────────────────────────────
 
 export function Overview() {
@@ -1167,6 +1403,8 @@ export function Overview() {
   const agentList = agents.value
   const messageList = messages.value
   const boardPostList = boardPosts.value
+  const goalList = goals.value
+  const fusionList = fusionRuns.value
   const nowMs = nowSecondsSignal.value * 1000
   const active = useMemo(() => pickActiveSession(snap), [snap])
   const counts = useMemo(() => computeFunnelCounts(taskList, active, nowMs), [taskList, active, nowMs])
@@ -1177,18 +1415,23 @@ export function Overview() {
     [taskList, messageList, boardPostList, keeperList],
   )
   const stats = useMemo(() => computeOverviewStats(keeperList, taskList), [keeperList, taskList])
+  const digest = useMemo(
+    () => computeOverviewDigest(keeperList, goalList, fusionList),
+    [keeperList, goalList, fusionList],
+  )
   const telemetry = overviewTelemetryResource.state.value
 
   return html`
     <main class="ov v2-overview-surface ss-surface text-text-primary" data-testid="overview-surface">
       <div class="ov-scroll v2-overview-scroll">
-        <${OverviewHeader} stats=${stats} />
-        <${OverviewKpiStrip} stats=${stats} />
+        <${OverviewHeader} />
+        <${OverviewKpiStrip} stats=${stats} digest=${digest} />
         <div class="ov-grid v2-overview-primary-grid" data-testid="overview-primary-grid">
           <${OverviewAttentionPanel} keeperList=${keeperList} />
           <${OverviewTelemetry} telemetry=${telemetry} />
         </div>
         <${OverviewFleetGrid} keeperList=${keeperList} />
+        <${OverviewDomainSection} stats=${stats} digest=${digest} />
 
         <details class="v2-overview-rollup" data-testid="overview-rollup">
           <summary>운영 롤업</summary>

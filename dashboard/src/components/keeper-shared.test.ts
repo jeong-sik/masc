@@ -250,7 +250,7 @@ describe('KeeperConversationPanel', () => {
     expect(shell?.classList.contains('h-[clamp(30rem,calc(100svh-13rem),52rem)]')).toBe(true)
     expect(container.querySelector('.chat-transcript-airy')).not.toBeNull()
     expect(container.querySelector('.chat-transcript-airy')?.classList.contains('flex-1')).toBe(true)
-    expect(container.querySelector('.min-h-30')).not.toBeNull()
+    expect(container.querySelector('.composer-textarea')).not.toBeNull()
     expect(container.textContent).toContain('@sangsu')
     expect(container.textContent).not.toContain('Enter로 전송')
   })

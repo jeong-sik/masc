@@ -1051,6 +1051,91 @@ let run_dashboard_runtime_probe () =
     dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes
 ;;
 
+let dashboard_runtime_probe_degraded_envelope
+      ~status ~error ~observation ~limitation () =
+  (* Degraded probe envelope shared by the warming-up (cold start, no prior
+     cache value) and unreachable paths. Keeps [probe_ok] false and every
+     summary count zero so the dashboard surfaces a clear "no data yet" state
+     rather than stalling the HTTP response. *)
+  `Assoc
+    [ "source", `String runtime_inventory_source
+    ; "status", `String status
+    ; "probe_ok", `Bool false
+    ; "checked_at", `String (Masc_domain.now_iso ())
+    ; ( "summary"
+      , `Assoc
+          [ "runtimes", `Int 0
+          ; "probed", `Int 0
+          ; "reachable", `Int 0
+          ; "failed", `Int 0
+          ; "skipped", `Int 0
+          ; "default_runtime_id", `Null
+          ] )
+    ; "providers", `List []
+    ; "errors", `List [ `String error ]
+    ; "observations", `List [ `String observation ]
+    ; "limitations", `List [ `String limitation ]
+    ]
+;;
+
+let maybe_fork_dashboard_runtime_probe_refresh () =
+  (* Trigger a background refresh of the runtime probe cache without ever
+     blocking the caller. Single-flight via the
+     [dashboard_runtime_probe_refresh_in_flight] CAS: if a refresh is already
+     running, this is a no-op. On domains where a background [Eio.Fiber.fork]
+     is not permitted (Domain_pool worker domains, or when no server switch is
+     reachable), release the CAS and skip -- a subsequent request on the main
+     domain will pick it up. [Atomic.set] never yields, so the in-flight flag
+     is always cleared even when the forked fiber raises or is cancelled.
+
+     This replaces the previous synchronous wait (up to
+     [dashboard_runtime_probe_timeout_sec], i.e. 15s) that stalled the whole
+     dashboard shell on every cache-miss poll and every force=1 request.
+     Mirrors the git-rev-parse background-refresh pattern
+     ([maybe_refresh_git_rev_parse_short_in_background]) already in this
+     module. *)
+  if Atomic.compare_and_set dashboard_runtime_probe_refresh_in_flight false true
+  then begin
+    if background_refresh_domain_unavailable () then
+      Atomic.set dashboard_runtime_probe_refresh_in_flight false
+    else
+      match Eio_context.get_switch_opt () with
+      | None -> Atomic.set dashboard_runtime_probe_refresh_in_flight false
+      | Some sw ->
+        let run () =
+          match run_dashboard_runtime_probe () with
+          | fresh ->
+            let refreshed_at = Time_compat.now () in
+            Atomic.set
+              dashboard_runtime_probe_cache
+              (Some { probe = fresh; refreshed_at });
+            Atomic.set dashboard_runtime_probe_refresh_in_flight false
+          | exception Eio.Cancel.Cancelled _ ->
+            (* Switch cancelled (e.g. server shutdown): release CAS, leave
+               whatever cache value remains in place. *)
+            Atomic.set dashboard_runtime_probe_refresh_in_flight false
+          | exception Eio.Mutex.Poisoned cause ->
+            Atomic.set dashboard_runtime_probe_refresh_in_flight false;
+            Log.Dashboard.warn
+              "runtime probe background refresh skipped: HTTP pool mutex \
+               poisoned (%s)"
+              (Printexc.to_string cause)
+          | exception exn ->
+            Atomic.set dashboard_runtime_probe_refresh_in_flight false;
+            Log.Dashboard.warn
+              "runtime probe background refresh failed: %s"
+              (Printexc.to_string exn)
+        in
+        (try Eio.Fiber.fork ~sw run with
+         | exn when eio_switch_fork_unavailable exn ->
+           background_refresh_mark_domain_unavailable ();
+           Atomic.set dashboard_runtime_probe_refresh_in_flight false
+         | exn ->
+           Atomic.set dashboard_runtime_probe_refresh_in_flight false;
+           raise exn)
+  end
+;;
+
 let dashboard_runtime_probe_cached_value () =
   match Atomic.get dashboard_runtime_probe_cache with
   | Some entry -> Some (entry.probe, entry.refreshed_at)
@@ -1083,73 +1168,29 @@ let dashboard_runtime_probe_http_json ?(force = false) () =
     with
     | Some (cached, cached_at) -> cached, true, cached_at
     | None ->
-      if Atomic.compare_and_set dashboard_runtime_probe_refresh_in_flight false true
-      then (
-        (* Run the Eio-yielding probe outside any Stdlib mutex/Fun.protect
-             scope.  The CAS guard above serialises refreshes; the [match]
-             below ensures the in-flight flag is always cleared even when
-             the probe raises or is cancelled (Atomic.set never yields). *)
-        match run_dashboard_runtime_probe () with
-        | fresh ->
-          let refreshed_at = Time_compat.now () in
-          Atomic.set dashboard_runtime_probe_cache (Some { probe = fresh; refreshed_at });
-          Atomic.set dashboard_runtime_probe_refresh_in_flight false;
-          fresh, false, refreshed_at
-        | exception Eio.Mutex.Poisoned cause ->
-          Atomic.set dashboard_runtime_probe_refresh_in_flight false;
-          Log.Dashboard.warn
-            "runtime probe skipped: HTTP pool mutex poisoned (%s); \
-             returning degraded envelope"
-            (Printexc.to_string cause);
-          let degraded =
-            `Assoc
-              [ "source", `String runtime_inventory_source
-              ; "status", `String "unreachable"
-              ; "probe_ok", `Bool false
-              ; "checked_at", `String (Masc_domain.now_iso ())
-              ; ( "summary"
-                , `Assoc
-                    [ "runtimes", `Int 0
-                    ; "probed", `Int 0
-                    ; "reachable", `Int 0
-                    ; "failed", `Int 0
-                    ; "skipped", `Int 0
-                    ; "default_runtime_id", `Null
-                    ] )
-              ; "providers", `List []
-              ; "errors", `List [ `String "pool mutex poisoned; restart to recover" ]
-              ; ( "observations"
-                , `List
-                    [ `String
-                        (Printf.sprintf
-                           "Runtime probe failed: HTTP pool mutex poisoned (%s). \
-                            The pool recovers on next successful request; if this \
-                            persists, restart the server."
-                           (Printexc.to_string cause))
-                    ] )
-              ; "limitations"
-              , `List
-                  [ `String "Probe skipped due to poisoned pool mutex."
-                  ]
-              ]
-          in
-          degraded, false, 0.0
-        | exception exn ->
-          let bt = Printexc.get_raw_backtrace () in
-          Atomic.set dashboard_runtime_probe_refresh_in_flight false;
-          Printexc.raise_with_backtrace exn bt)
-      else (
-        let fallback_now = Time_compat.now () in
-        match
-          if not force
-          then dashboard_runtime_probe_fresh_value ~now:fallback_now
-          else None
-        with
-        | Some (cached, cached_at) -> cached, true, cached_at
-        | None ->
-          (match dashboard_runtime_probe_cached_value () with
-           | Some (cached, cached_at) -> cached, false, cached_at
-           | None -> `Null, false, 0.0))
+      (* Cache miss (or forced refresh): trigger a non-blocking background
+         refresh and return the best value available right now (stale cache,
+         or a warming-up envelope on cold start). This removes the synchronous
+         up-to-[dashboard_runtime_probe_timeout_sec] wait that previously
+         stalled the dashboard shell on every cache-miss poll and on every
+         force=1 request. *)
+      maybe_fork_dashboard_runtime_probe_refresh ();
+      (match dashboard_runtime_probe_cached_value () with
+       | Some (stale, stale_at) -> stale, false, stale_at
+       | None ->
+         ( dashboard_runtime_probe_degraded_envelope
+             ~status:"warming_up"
+             ~error:"background probe in progress"
+             ~observation:
+               "Runtime probe is running in the background after a cold \
+                start or cache expiry; the next poll returns the refreshed \
+                value."
+             ~limitation:
+               "First response with no prior cache value returns this \
+                placeholder until the background probe completes."
+             (),
+           false,
+           0.0 ))
   in
   let response_now = Time_compat.now () in
   let refreshed_at_json, cache_age_json =

@@ -19,6 +19,7 @@ import { TELEMETRY_AUTO_REFRESH_MS } from '../../config/constants'
 import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 import {
   isHighOrCriticalKeeperApprovalRisk,
+  keeperApprovalRiskLabel,
   keeperApprovalRiskVisualBand,
   type KeeperApprovalRiskVisualBand,
 } from '../../lib/governance-risk-level'
@@ -95,7 +96,7 @@ function approvalDetailRows(item: KeeperApprovalQueueItem): Array<{ label: strin
   return [
     { label: '키퍼', value: item.keeper_name },
     { label: '도구', value: item.tool_name },
-    { label: '위험도', value: item.risk_level.toUpperCase() },
+    { label: '위험도', value: keeperApprovalRiskLabel(item.risk_level) },
     { label: '대기', value: apAge(item.waiting_s) },
     { label: '작업', value: approvalWorkSummary(item) },
     { label: '런타임', value: approvalRuntimeSummary(item) },
@@ -140,7 +141,7 @@ function ApprovalCard({
       <div class="ap-rail"></div>
       <div class="ap-main">
         <div class="ap-h">
-          <span class=${`ap-kind sev-${sev}`}>${(item.risk_level ?? 'unknown').toUpperCase()}</span>
+          <span class=${`ap-kind sev-${sev}`}>${keeperApprovalRiskLabel(item.risk_level)}</span>
           <span class="ap-tool mono">${item.tool_name}</span>
           <span class="ap-id mono">${item.id}</span>
           <span class=${`ap-age sev-${sev}`}>${apAge(item.waiting_s)}</span>
@@ -232,7 +233,7 @@ function ApprovalDetailPanel({
       data-approval-id=${item.id}
     >
       <div class="ap-detail-panel-head">
-        <span class=${`ap-kind sev-${sev}`}>${item.risk_level.toUpperCase()}</span>
+        <span class=${`ap-kind sev-${sev}`}>${keeperApprovalRiskLabel(item.risk_level)}</span>
         <div class="ap-detail-panel-title">
           <strong>${approvalTitle(item)}</strong>
           <span class="mono">${item.id}</span>

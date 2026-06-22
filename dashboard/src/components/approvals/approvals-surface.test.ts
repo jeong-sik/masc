@@ -90,11 +90,12 @@ describe('ApprovalsSurface', () => {
     expect(cards.length).toBe(4)
     expect(container.textContent).toContain('masc-improver')
     expect(container.textContent).toContain('fs_write')
-    // risk_level is surfaced uppercased on the .ap-kind badge
-    expect(container.textContent).toContain('CRITICAL')
-    expect(container.textContent).toContain('HIGH')
-    expect(container.textContent).toContain('MEDIUM')
-    expect(container.textContent).toContain('LOW')
+    // risk_level is surfaced as a humanized Korean label on the .ap-kind badge
+    // (keeperApprovalRiskLabel — exhaustive over the closed risk-level union).
+    expect(container.textContent).toContain('심각')
+    expect(container.textContent).toContain('높음')
+    expect(container.textContent).toContain('보통')
+    expect(container.textContent).toContain('낮음')
     expect(container.querySelector('[data-approval-id="appr-1"]')?.className).toContain('sev-bad')
     expect(container.querySelector('[data-approval-id="appr-3"]')?.className).toContain('sev-warn')
     expect(container.querySelector('[data-approval-id="appr-4"]')?.className).toContain('sev-accent')

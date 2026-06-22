@@ -33,3 +33,37 @@ describe('board-v2.css mobile detail overlay', () => {
     expect(declarations.width).toBe('100%')
   })
 })
+
+function ruleDecls(selector: string): Record<string, string> {
+  const declarations: Record<string, string> = {}
+  parse(css).walkRules((rule) => {
+    // skip rules nested inside @media so the base-layer decls are read
+    if (rule.parent?.type === 'atrule') return
+    if (!rule.selectors.includes(selector)) return
+    rule.walkDecls((decl) => {
+      declarations[decl.prop] = decl.value.trim()
+    })
+  })
+  return declarations
+}
+
+describe('board-v2.css author sigil (SigilBadge prototype parity)', () => {
+  it('renders the base sigil as a solid volt fill with a 5px radius and dark glyph', () => {
+    const decls = ruleDecls('.v2-board-surface .bd-sigil')
+
+    // prototype board.jsx:8 inline borderRadius:5 — literal, not --radius-sm (4px)
+    expect(decls['border-radius']).toBe('5px')
+    // solid fill (prototype v2.css:485 .msg-av.op background:var(--volt)), not a wash
+    expect(decls.background).toBe('var(--volt)')
+    expect(decls.color).toBe('var(--volt-ink)')
+    expect(decls['font-weight']).toBe('700')
+  })
+
+  it('keeps the operator sigil on a solid volt fill rather than volt-wash', () => {
+    const decls = ruleDecls('.v2-board-surface .bd-sigil.op')
+
+    expect(decls.background).toBe('var(--volt)')
+    expect(decls.background).not.toBe('var(--volt-wash)')
+    expect(decls.color).toBe('var(--volt-ink)')
+  })
+})

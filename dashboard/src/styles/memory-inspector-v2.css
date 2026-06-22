@@ -184,3 +184,16 @@
 @media (max-width: 560px) {
   .turn-drawer { width: 100vw; }
 }
+
+/* Inspector trigger button — keeper-v2/styles/v2.css:1209-1216 (.cmp-open).
+   In the prototype this lives in the ctx-rail; here it opens the inspector
+   from the memory seam (agent-detail-memory). Ported verbatim: literal
+   11.5px / 10px font + 8px 10px padding (rails.jsx:513-515 text). */
+.cmp-open {
+  width: 100%; margin-top: 10px; display: flex; align-items: center; gap: 7px;
+  font-family: var(--font-ui); font-size: 11.5px; color: var(--text-mid);
+  padding: 8px 10px; background: var(--bg-sunken); border: 1px solid var(--border-main);
+  border-radius: var(--radius-sm); cursor: pointer; transition: 0.14s;
+}
+.cmp-open:hover { border-color: var(--volt-dim); color: var(--volt); }
+.cmp-open-sub { margin-left: auto; font-size: 10px; color: var(--text-dim); }

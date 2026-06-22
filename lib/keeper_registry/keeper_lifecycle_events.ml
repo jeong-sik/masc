@@ -20,10 +20,12 @@
     phases that fire a wire event ([Stopped] / [Crashed] / [Dead] /
     [Running]).
 
-    The sync test in [test/test_types.ml :: lifecycle_events_ssot]
-    asserts every literal event name still emitted by the supervisor
-    and keepalive lives in [all_event_names], so adding a new event
-    site without updating the SSOT fails CI. *)
+    NOTE (#22071): a previously-cited emit-site coverage test
+    ([test/test_types.ml :: lifecycle_events_ssot]) does not exist —
+    keep this vocabulary aligned with the supervisor/keepalive call
+    sites by hand. The [to_string]/[event_of_string] round-trip is
+    pinned by [test/test_dashboard_http_core.ml ::
+    lifecycle_event_of_string_roundtrip]. *)
 
 (** Custom (non-phase-derived) keeper lifecycle events. Each verb
     captures an action distinct from a phase noun:
@@ -56,6 +58,22 @@ let to_string = function
   | Auto_resumed -> "auto_resumed"
   | Admission_denied -> "admission_denied"
 
+(* Inverse of [to_string] over the closed custom-event sum. Strings outside the
+   vocabulary (phase-derived names, legacy/operator strings, garbage) map to
+   [None] so callers parse-then-exhaustive-match instead of reverse-classifying
+   the variant by raw string literals. The round-trip is pinned by
+   [test/test_dashboard_http_core.ml :: lifecycle_event_of_string_roundtrip]. *)
+let event_of_string = function
+  | "started" -> Some Started
+  | "reconciled" -> Some Reconciled
+  | "restarted" -> Some Restarted
+  | "dead_cleaned" -> Some Dead_cleaned
+  | "self_preservation" -> Some Self_preservation
+  | "paused_pruned" -> Some Paused_pruned
+  | "auto_resumed" -> Some Auto_resumed
+  | "admission_denied" -> Some Admission_denied
+  | _ -> None
+
 let all_custom_events : t list =
   [ Started; Reconciled; Restarted; Dead_cleaned;
     Self_preservation; Paused_pruned; Auto_resumed; Admission_denied ]
@@ -67,9 +85,9 @@ let valid_custom_event_strings : string list =
     {!Keeper_state_machine.phase_to_string} for the four lifecycle
     phases that publish a lifecycle event. The list is hand-rolled
     rather than generated to keep this module dependency-free
-    (Keeper_state_machine pulls in the full FSM module); the sync
-    test in [test/test_types.ml] asserts the strings stay aligned
-    with [Keeper_state_machine.phase_to_string]. *)
+    (Keeper_state_machine pulls in the full FSM module). Keep aligned
+    with [Keeper_state_machine.phase_to_string] by hand — the formerly
+    cited sync test ([test/test_types.ml]) does not exist (#22071). *)
 let phase_derived_event_strings : string list =
   [ "stopped"; "crashed"; "dead"; "running" ]
 
@@ -83,9 +101,9 @@ let all_event_names : string list =
 
     [publish_keeper_lifecycle] previously took [event:string ?phase] --
     a typo at any of the supervisor/keepalive call sites silently
-    landed on the bus as a garbage event name. The runtime SSOT test
-    in [test_types.ml :: lifecycle_events_ssot] caught drift at CI
-    time but not at compile time.
+    landed on the bus as a garbage event name. (A runtime SSOT test in
+    [test_types.ml :: lifecycle_events_ssot] was cited here but does
+    not exist — #22071.)
 
     This sum type unifies the two pre-existing typed vocabularies
     ([t] for the custom verbs, [Keeper_state_machine.phase] for the

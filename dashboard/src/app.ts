@@ -28,7 +28,6 @@ import {
   ErrorCounterBadge,
   isKeeperDetailDashboardRoute,
 } from './components/dashboard-shell'
-import { ThemeSwitch } from './components/theme-switch'
 import { EmergencyStopControl } from './components/emergency-stop-control'
 import { AttentionIndicator } from './components/attention-indicator'
 import { TransportBeacon } from './components/transport-beacon'
@@ -410,7 +409,6 @@ export function App() {
             <${ConnectionStatus} />
             <${ErrorCounterBadge} />
             <div class="v2-desktop-header-only"><${TransportBeacon} /></div>
-            <div class="v2-desktop-header-only"><${ThemeSwitch} /></div>
             <div class="v2-desktop-header-only"><${TweaksPanelToggle} /></div>
             <div class="v2-desktop-header-only"><${BuildIdentityBadge} /></div>
           </div>

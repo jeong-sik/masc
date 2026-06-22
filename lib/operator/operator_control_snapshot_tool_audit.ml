@@ -27,21 +27,35 @@ let lightweight_tool_audit_fallback_json (meta : Keeper_meta_contract.keeper_met
     ]
 ;;
 
+(* Decision-log tail projection.  [recent_tool_names_from_files] previously
+   re-read the last 120 KB of each keeper's decision log on every snapshot;
+   live measurement (reports/masc-live-perf-diagnosis-20260622.md) showed audit
+   was ~56% of keepers_json cost under disk I/O contention.  The projection
+   folds only newly appended lines (steady-state O(new bytes)) while returning
+   the same most-recent-[decision_tail_window] lines in file order, so the
+   unchanged [collect_recent_tool_names] downstream produces byte-identical
+   output.  Single serving domain: audit runs inside the keepers_json
+   Eio.Fiber.all on one compute domain (each fiber a distinct keeper = distinct
+   key), matching Jsonl_incremental_projection's contract and mirroring
+   Dashboard_http_keeper_feeds. *)
+let decision_tail_window = 120
+let decision_tail_bytes = 120000
+
+let decision_lines_projection : string list Jsonl_incremental_projection.t =
+  Jsonl_incremental_projection.create ()
+
 let recent_tool_names_from_files config keeper_name =
   let decision_lines =
     let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
-    if Fs_compat.file_exists path
-    then
-      match
-        Keeper_memory.read_file_tail_lines_result path
-          ~max_bytes:120000 ~max_lines:120
-      with
-      | Ok lines -> lines
-      | Error exn_class ->
-          Keeper_memory.record_memory_recall_read_error
-            ~site:"operator_tool_audit_decisions" path exn_class;
-          []
-    else []
+    (* file_exists guard preserves the prior "missing file -> []" behavior:
+       the projection would otherwise return its last cached lines for a file
+       that has since been removed. *)
+    if not (Fs_compat.file_exists path)
+    then []
+    else
+      Keeper_memory.recent_lines_or_record decision_lines_projection
+        ~site:"operator_tool_audit_decisions" ~key:path ~path
+        ~window:decision_tail_window ~initial_tail_bytes:decision_tail_bytes
   in
   let metrics_lines =
     let store = Keeper_types_support.keeper_metrics_store config keeper_name in

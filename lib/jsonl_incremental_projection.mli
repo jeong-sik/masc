@@ -30,3 +30,18 @@ val read :
     already-consumed line, so it is where a feed enforces a most-recent-N ring.
     A partial trailing line is held until the writer completes it; a file
     shorter than the consumed offset reseeds from the tail. *)
+
+val recent_lines :
+  string list t ->
+  key:string ->
+  path:string ->
+  window:int ->
+  initial_tail_bytes:int ->
+  string list
+(** [recent_lines t ~key ~path ~window ~initial_tail_bytes] projects the most
+    recent [window] complete lines of [path] in file order (oldest-first),
+    folding only newly appended bytes (steady-state O(new bytes)). A
+    convenience over {!read} for the common "tail the last N lines" shape: it
+    keeps a newest-first ring of at most [window] lines and reverses it so the
+    result matches a plain tail read. The caller handles any file I/O exception,
+    exactly as with {!read}. *)

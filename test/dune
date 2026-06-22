@@ -40,6 +40,7 @@
   test_keeper_librarian_retry
   test_surface_ref
   test_admission_fd_gate
+  test_audit_projection
   test_keeper_turn_outcome
   test_keeper_cycle_channel
   test_board_collect_pause_gate
@@ -343,6 +344,7 @@
   test_keeper_librarian_retry
   test_surface_ref
   test_admission_fd_gate
+  test_audit_projection
   test_keeper_turn_outcome
   test_keeper_cycle_channel
   test_board_collect_pause_gate

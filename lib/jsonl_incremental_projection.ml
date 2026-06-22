@@ -102,3 +102,18 @@ let read (t : 'a t) ~(key : string) ~(path : string) ~(empty : 'a)
             let acc = List.fold_left add base_acc (lines_of complete) in
             Hashtbl.replace t key (new_consumed, acc);
             acc)
+
+let recent_lines (t : string list t) ~(key : string) ~(path : string)
+    ~(window : int) ~(initial_tail_bytes : int) : string list =
+  (* [add] prepends, so the accumulator is newest-first; cap it to [window]
+     by dropping the oldest (tail) entries, then reverse to oldest-first so
+     the result is byte-for-byte the order a plain tail read would yield. *)
+  let newest_first =
+    read t ~key ~path ~empty:[]
+      ~add:(fun acc line ->
+        let acc = line :: acc in
+        if List.length acc <= window then acc
+        else List.filteri (fun idx _ -> idx < window) acc)
+      ~initial_tail_bytes
+  in
+  List.rev newest_first

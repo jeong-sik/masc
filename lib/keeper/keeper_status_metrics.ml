@@ -567,20 +567,28 @@ let latest_snapshot_of_lines lines ~parse_snapshot =
   let ordered = List.rev lines in
   List.find_map parse_snapshot ordered
 
+(* Decision-log tail projection for the latest tool-audit snapshot.  Mirrors
+   the projection in Operator_control_snapshot_tool_audit: folds only newly
+   appended lines (steady-state O(new bytes)) instead of re-reading the last
+   40 KB on every snapshot, while returning the same most-recent-12 lines so
+   the unchanged [latest_snapshot_of_lines] below yields byte-identical
+   output. *)
+let decision_audit_tail_window = 12
+let decision_audit_tail_bytes = 40000
+
+let decision_audit_lines_projection :
+    string list Jsonl_incremental_projection.t =
+  Jsonl_incremental_projection.create ()
+
 let latest_tool_audit_snapshot_from_decisions config keeper_name =
   let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
   if not (Fs_compat.file_exists path) then None
   else
     let lines =
-      match
-        Keeper_memory.read_file_tail_lines_result path
-          ~max_bytes:40000 ~max_lines:12
-      with
-      | Ok lines -> lines
-      | Error exn_class ->
-          Keeper_memory.record_memory_recall_read_error
-            ~site:"keeper_status_runtime_tool_audit" path exn_class;
-          []
+      Keeper_memory.recent_lines_or_record decision_audit_lines_projection
+        ~site:"keeper_status_runtime_tool_audit" ~key:path ~path
+        ~window:decision_audit_tail_window
+        ~initial_tail_bytes:decision_audit_tail_bytes
     in
     let report_drop ~reason ~detail =
       report_persistence_read_drop

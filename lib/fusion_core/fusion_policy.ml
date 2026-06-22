@@ -30,6 +30,10 @@ type preset =
 let min_panel = 1
 let max_panel = 8
 
+(* 그룹 모델당 max_tool_calls 상한 (0..max). 0=무제한, 그 외 양수는 에이전트
+   max_turns에 근사. SSOT 상수 (Magic Number 회피, RFC-0280에서 검증을 한 곳으로 모음). *)
+let max_tool_calls_ceiling = 16
+
 (* 패널/심판 호출 구조적 타임아웃 기본값 (preset이 명시 안 할 때). 운영 노브 —
    행동 휴리스틱이 아니므로 named SSOT 상수로 둔다 (Magic Number 회피). *)
 let default_timeout_s = 300.0
@@ -117,30 +121,77 @@ let judge_tool_budget_of (groups : panel_group list) =
   if List.exists (fun (g : panel_group) -> g.max_tool_calls = 0) groups then 0
   else List.fold_left (fun acc (g : panel_group) -> max acc g.max_tool_calls) 0 groups
 
+(* RFC-0280: 검증된 preset을 타입으로 증명한다 (Parse, don't validate).
+   [Validated_preset.t = private preset]이라 외부는 필드를 읽되([preset]/coercion)
+   검증 없이 생성할 수 없다 → invalid preset이 게이트·orchestrator로 흐를 수 없다.
+   검증 SSOT는 [of_preset] 한 곳 — 호출처(게이트)가 재검증하지 않는다. *)
+module Validated_preset = struct
+  type t = preset
+
+  (* 검증 실패 사유 — 닫힌 합. config 계층이 이를 자기 [config_error]로 매핑한다
+     (의존 방향: config → policy). *)
+  type invalid =
+    | Bad_size of int  (** 모델 총합(panels=[] 포함)이 min_panel..max_panel 밖 *)
+    | Missing_prompt  (** 패널 또는 심판 system prompt 비어있음 *)
+    | Missing_judge_model  (** 심판 model id 비어있음 *)
+    | Duplicate_panelist of string  (** 두 패널이 같은 정체성(panelist_id) *)
+    | Bad_max_tool_calls of int  (** 그룹 max_tool_calls가 0..max_tool_calls_ceiling 밖 *)
+
+  (* 검증 순서는 config 로드 시점과 동일(byte-identical config_error): size → prompt →
+     judge → 정체성 중복 → max_tool_calls 범위. *)
+  let of_preset (p : preset) : (t, invalid) result =
+    if not (preset_size_ok p) then Error (Bad_size (List.length (preset_models p)))
+    else if not (preset_prompts_present p) then Error Missing_prompt
+    else if not (preset_judge_present p) then Error Missing_judge_model
+    else
+      match preset_duplicate_panelist p with
+      | Some id -> Error (Duplicate_panelist id)
+      | None ->
+        (match
+           List.find_opt
+             (fun (g : panel_group) ->
+               g.max_tool_calls < 0 || g.max_tool_calls > max_tool_calls_ceiling)
+             p.panels
+         with
+         | Some g -> Error (Bad_max_tool_calls g.max_tool_calls)
+         | None -> Ok p)
+
+  let preset (t : t) : preset = t
+
+  (* private 타입 deriving 의존을 피해 underlying [preset]에 위임 (Fusion_policy.t가
+     derive할 때 Validated_preset.pp/equal을 참조한다). *)
+  let pp fmt (t : t) = pp_preset fmt t
+  let show (t : t) = show_preset t
+  let equal (a : t) (b : t) = equal_preset a b
+end
+
 type t =
   { enabled : bool
   ; default_preset : string
   ; max_concurrent_panels : int
-  ; presets : preset list
+  ; presets : Validated_preset.t list
   }
 [@@deriving show, eq]
 
 let find_preset (policy : t) name =
-  List.find_opt (fun (p : preset) -> String.equal p.name name) policy.presets
+  List.find_opt
+    (fun (vp : Validated_preset.t) ->
+      String.equal (Validated_preset.preset vp).name name)
+    policy.presets
 
 (* decide는 enabled/preset/depth의 구조적 판정만 담당한다 — "이 턴이 심의할 가치가
    있나"는 게이트가 score 비교나 문자열 매칭으로 판정하지 않고, 키퍼(이미 LLM)가
    판단해 masc_fusion을 호출하는 것으로 표현한다(RFC-0252 §6). 따라서 [req.trigger]는
-   발동 이유 라벨일 뿐 적격성 판정에 쓰이지 않는다. *)
+   발동 이유 라벨일 뿐 적격성 판정에 쓰이지 않는다.
+   size 재검증은 없다 — [find_preset]이 [Validated_preset.t]를 돌려주므로 size는
+   타입으로 증명됨 (RFC-0280, 기존 dead 재검증 제거). *)
 let decide ~(policy : t)
     (req : Fusion_types.fusion_request) : Fusion_types.gate_decision =
   if not policy.enabled then Fusion_types.Deny Fusion_types.Disabled
   else
     match find_preset policy req.preset with
     | None -> Fusion_types.Deny (Fusion_types.Preset_unknown req.preset)
-    | Some preset when not (preset_size_ok preset) ->
-      Fusion_types.Deny (Fusion_types.Preset_unknown req.preset)
-    | Some _preset ->
+    | Some _vp ->
       (match req.depth with
        | Fusion_types.Fusion_depth.Nested ->
          Fusion_types.Deny Fusion_types.Depth_exceeded

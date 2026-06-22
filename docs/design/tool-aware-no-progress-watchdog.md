@@ -61,7 +61,9 @@ read of `pending_tool_count` or a "lag ≤ X + pre-cancel recheck" protocol.
   dropped or out-of-order event cannot wedge the count. The same holds for tool
   errors: `ToolCompleted` carries `output = Error _` and the FSM transition
   decrements the count. The only remaining wedge is a hard crash that emits no
-  terminal event at all; that is covered by the `In_turn_hung` backstop (§6).
+  terminal event at all; that is covered by sweep-based crash recovery
+  (`assess_stale_run` → `Idle_turn`), since the per-turn `In_turn_hung` wall-clock
+  backstop was retired (RFC-0125 P4 amendment, 2026-06-22).
 - The registry's `update_entry_if_registered` (`keeper_registry_setup.ml:80-88`)
   uses an `Atomic.compare_and_set` retry loop, so concurrent
   `record_turn_progress` and `record_turn_tool_inflight` writes to the same
@@ -72,8 +74,10 @@ read of `pending_tool_count` or a "lag ≤ X + pre-cancel recheck" protocol.
   `MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC` is parsed but deliberately NOT
   forwarded to OAS "until OAS proves active tool execution is excluded from idle
   accounting" (`lib/config/env_config_keeper.ml:419-420`).
-- `In_turn_hung` (wall-clock, `Keeper_max_turn_watchdog`) remains the absolute
-  backstop for a turn that never terminates, independent of progress.
+- A turn that never terminates is caught by the no-turn / no-progress sweeps
+  (`assess_stale_run` → `Idle_turn`, `assess_in_turn_progress` →
+  `Mid_turn_no_progress`); the former per-turn `In_turn_hung` wall-clock watchdog
+  was retired (RFC-0125 P4 amendment, 2026-06-22).
 
 ## 3. Constraint that picks the seam
 

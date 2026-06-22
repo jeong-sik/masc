@@ -36,12 +36,6 @@ type stale_kill_class =
       (** [last_turn_ts] older than the idle threshold while the keeper
           phase is [Running] but no [current_turn_observation] is
           recorded. *)
-  | In_turn_hung of {
-      active_seconds : float;
-      timeout_threshold : float;
-    }
-      (** A turn started ([current_turn_observation = Some]) and ran past
-          [timeout_threshold] seconds. *)
   | Mid_turn_no_progress of {
       active_seconds : float;
       since_progress_seconds : float;

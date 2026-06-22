@@ -183,12 +183,6 @@ let stale_kill_class_summary (kill_class : Keeper_registry.stale_kill_class) =
       "idle_turn: no completed turn for %.0fs; stale watchdog stopped the keeper before \
        restart."
       stall_seconds
-  | Keeper_registry.In_turn_hung { active_seconds; timeout_threshold } ->
-    Printf.sprintf
-      "in_turn_hung: active turn ran for %.0fs past the %.0fs timeout; stale watchdog \
-       stopped the keeper."
-      active_seconds
-      timeout_threshold
   | Keeper_registry.Mid_turn_no_progress
       { active_seconds
       ; since_progress_seconds

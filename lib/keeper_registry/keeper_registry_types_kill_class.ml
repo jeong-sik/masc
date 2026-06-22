@@ -30,10 +30,6 @@ type ambiguous_partial_commit =
     See keeper_registry.mli for rationale. *)
 type stale_kill_class =
   | Idle_turn of { stall_seconds : float }
-  | In_turn_hung of
-      { active_seconds : float
-      ; timeout_threshold : float
-      }
   | Mid_turn_no_progress of
       { active_seconds : float
       ; since_progress_seconds : float
@@ -49,11 +45,6 @@ let progress_kind_label = function
 
 let stale_kill_class_to_string = function
   | Idle_turn { stall_seconds } -> Printf.sprintf "idle_turn(%.0fs)" stall_seconds
-  | In_turn_hung { active_seconds; timeout_threshold } ->
-    Printf.sprintf
-      "in_turn_hung(active=%.0fs threshold=%.0fs)"
-      active_seconds
-      timeout_threshold
   | Mid_turn_no_progress
       { active_seconds
       ; since_progress_seconds

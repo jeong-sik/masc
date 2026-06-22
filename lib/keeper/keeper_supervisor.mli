@@ -100,7 +100,7 @@ val assess_in_turn_progress :
     with a turn in progress ([in_turn = Some obs]) whose [last_progress_at] is
     older than [progress_timeout]. [None] otherwise (not running, no turn in
     progress, or progress recorded within the window). Keys on recorded progress
-    events, orthogonal to the wall-clock [In_turn_hung] and no-turn [Idle_turn].
+    events, distinct from the no-turn [Idle_turn] case (not raw turn wall-clock).
     Exposed for regression tests. *)
 
 val failure_reason_policy_decision_for_test :

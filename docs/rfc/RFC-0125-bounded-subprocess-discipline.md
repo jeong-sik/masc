@@ -46,9 +46,16 @@ In-turn / idle recovery is already provided, turn-scoped, by:
 - `assess_stale_run` → `Idle_turn` (no turn produced; `MASC_KEEPER_STALE_RUN_SEC`, default-on)
 - `assess_in_turn_progress` → `Mid_turn_no_progress` (in-turn no-progress; RFC-0012)
 
-`In_turn_hung` is now a producer-less variant (consumers retained for the closed
-sum). `MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC` is parsed but ignored (no-op
-stub; remove in a follow-up). Regression guard:
+The watchdog was the sole producer of `In_turn_hung`, so that kill-class variant
+is **removed** from `stale_kill_class` (canonical
+`keeper_registry_types_kill_class.ml` plus its `keeper_registry_types_failure`
+re-exports). The `MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC` env module
+(`env_config_runtime.ml`) and its auto-generated `docs/runtime-tunables.md` row
+are **removed** as well, so an operator setting the knob gets a no-such-knob
+result rather than a silent no-op. The terminal-code `Stale_turn_timeout_in_turn`
+is a distinct type and is **kept** — it remains the lossy wire-restore canonical
+for a stale turn whose kill-class sub-class was not preserved on the wire
+(`of_wire` / `of_failure_reason_option`). Regression guard:
 `test_keeper_supervisor.ml` "tool in flight far past threshold → None".
 
 ### implementation_prs reconciliation

@@ -18,10 +18,6 @@ type ambiguous_partial_commit =
 
 type stale_kill_class = Keeper_registry_types_kill_class.stale_kill_class =
   | Idle_turn of { stall_seconds : float }
-  | In_turn_hung of
-      { active_seconds : float
-      ; timeout_threshold : float
-      }
   | Mid_turn_no_progress of
       { active_seconds : float
       ; since_progress_seconds : float

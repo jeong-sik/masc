@@ -189,7 +189,14 @@ let test_supervisor_policy_restarts_stale_turn () =
     policy_decision_exn
       (Some
          (Reg.Stale_turn_timeout
-            (Reg.In_turn_hung { active_seconds = 60.0; timeout_threshold = 30.0 })))
+            (* formerly In_turn_hung (retired); any stale_kill_class drives the
+               same keeper-liveness restart decision. *)
+            (Reg.Mid_turn_no_progress
+               { active_seconds = 60.0
+               ; since_progress_seconds = 45.0
+               ; progress_timeout_threshold = 30.0
+               ; last_progress_kind = None
+               })))
   in
   check string "scope" "keeper_liveness"
     (KFP.failure_scope_to_label decision.failure_scope);

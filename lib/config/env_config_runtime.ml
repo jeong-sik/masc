@@ -393,41 +393,12 @@ module Approval_janitor = struct
     get_float ~default:60.0 "MASC_APPROVAL_JANITOR_INTERVAL_SEC"
 end
 
-(** {1 Keeper Max-Turn Watchdog (RFC-0109 P4)}
-
-    Opt-in keeper-level wall-clock watchdog. Default disabled — opt-in
-    via [MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC]. Backward-compat
-    until an operator turns it on.
-
-    When enabled, the supervisor races each keeper's keepalive loop
-    against [Eio.Time.sleep clock t] via [Eio.Fiber.first]. Timer
-    expiry cancels the loop fiber and the registry is stamped with
-    [Stale_turn_timeout "max_turn_watchdog"], which the existing
-    [sweep_and_recover] crash-recovery path already understands.
-
-    Closes the sangsu / masc-improver mid_turn_no_progress class of
-    stucks without touching the existing stale_turn_timeout fast path
-    (which only detects in-turn no-progress, not "stuck for too long
-    in a single attempt"). *)
-module Keeper_max_turn_watchdog = struct
-  let timeout_sec_opt () =
-    let v =
-      get_float
-        ~default:0.0
-        "MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC"
-    in
-    if v > 0.0 then Some v else None
-end
-
 (** {1 Keeper Stale-Run Window (RFC-0250)}
 
-    Default-on wall-clock window for the no-turn-produced case, distinct
-    from the opt-in [Keeper_max_turn_watchdog] above. The max-turn watchdog
-    produces [In_turn_hung] (a turn is taking too long); this window produces
-    [Idle_turn] (no turn has completed at all). It keys on [last_turn_ts]
-    while [current_turn_observation = None] — exactly the [Idle_turn]
-    variant's doc contract — so it does not re-introduce the per-turn
-    wall-clock timeout that was deliberately removed
+    Default-on wall-clock window for the no-turn-produced case. It keys on
+    [last_turn_ts] while [current_turn_observation = None] — exactly the
+    [Idle_turn] variant's doc contract — so it does not re-introduce the
+    per-turn wall-clock timeout that was deliberately removed
     ([keeper_unified_turn_attempt_watchdog]).
 
     Default 1800s: a [Running] keeper that has not completed a turn in 30 min
@@ -441,10 +412,9 @@ end
 (** {1 Keeper mid-turn progress watchdog (RFC-0012)}
 
     Opt-in progress-silence window for the in-turn case. Distinct from
-    [Keeper_max_turn_watchdog] (wall-clock "one attempt taking too long",
-    produces [In_turn_hung]) and [Keeper_stale_run] (no turn produced at all,
-    produces [Idle_turn]): this keys on
-    [current_turn_observation.last_progress_at] while a turn IS running,
+    [Keeper_stale_run] (no turn produced at all, produces [Idle_turn]): this
+    keys on [current_turn_observation.last_progress_at] while a turn IS
+    running,
     producing [Mid_turn_no_progress] when no forward-progress event
     (tool_completed / sdk-turn boundary) has been recorded for longer than the
     threshold.

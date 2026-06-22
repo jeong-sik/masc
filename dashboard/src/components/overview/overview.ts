@@ -38,6 +38,7 @@ import { openTaskDetail } from '../goals/task-detail-state'
 import { nowSecondsSignal, useNowSecondsTicker } from '../../lib/now-signal'
 import { keeperDisplayStatus, keeperRuntimeBlockerLabel } from '../../lib/keeper-runtime-display'
 import { isKeeperPaused } from '../../lib/keeper-predicates'
+import { attentionReasonLabel, nextHumanActionLabel } from '../../lib/keeper-attention-labels'
 import { isAgentOffline } from '../../lib/agent-status'
 import { keeperRowLooksRunning } from '../../runtime-counts'
 import { createAsyncResource, type AsyncResource, type AsyncState } from '../../lib/async-state'
@@ -90,8 +91,15 @@ function hasCriticalAttentionBlocker(blockerClass: Keeper['runtime_blocker_class
 export function deriveKeeperAttentionReason(keeper: Keeper): KeeperAttentionReason {
   const blockerClass = keeper.runtime_blocker_class ?? null
   const blockerLabel = keeperRuntimeBlockerLabel(blockerClass) ?? blockerClass?.replace(/_/g, ' ')
-  const attention = keeper.attention_reason?.trim() || keeper.trust?.attention_reason?.trim()
-  const nextAction = keeper.next_human_action?.trim() || keeper.trust?.next_human_action?.trim()
+  // Humanize the backend `attention_reason` / `next_human_action` wire codes
+  // through the shared SSOT instead of rendering raw tokens like
+  // `inspect_blocker_before_resume`. Unknown codes (e.g. composite reasons
+  // such as `completion_contract_result:*`) fall back to the raw string and
+  // warn in dev — matching the keeper detail alert strip.
+  const attentionRaw = keeper.attention_reason?.trim() || keeper.trust?.attention_reason?.trim() || null
+  const nextActionRaw = keeper.next_human_action?.trim() || keeper.trust?.next_human_action?.trim() || null
+  const attention = attentionReasonLabel(attentionRaw, false) ?? undefined
+  const nextAction = nextHumanActionLabel(nextActionRaw) ?? undefined
 
   if (keeper.runtime_blocker_continue_gate) {
     return {

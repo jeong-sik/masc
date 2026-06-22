@@ -554,6 +554,27 @@ describe('deriveKeeperAttentionReason', () => {
     expect(reason.text).toBe('승인 대기 3건')
     expect(reason.act).toBe('승인 검토')
   })
+
+  it('humanizes known attention_reason / next_human_action wire codes', () => {
+    const reason = deriveKeeperAttentionReason(makeKeeper({
+      name: 'coded',
+      attention_reason: 'runtime_blocked',
+      next_human_action: 'inspect_latest_error',
+    }))
+    expect(reason.text).toBe('런타임 근거 확인 필요')
+    expect(reason.act).toBe('최근 오류 확인')
+  })
+
+  it('keeps unknown composite reason codes raw rather than dropping them', () => {
+    // completion_contract_result:* is a colon-composite the union does not
+    // cover (backend reason leakage tracked separately); it must surface raw,
+    // not silently vanish.
+    const reason = deriveKeeperAttentionReason(makeKeeper({
+      name: 'composite',
+      attention_reason: 'completion_contract_result:passive_only',
+    }))
+    expect(reason.text).toBe('completion_contract_result:passive_only')
+  })
 })
 
 describe('pickAttentionKeepers', () => {

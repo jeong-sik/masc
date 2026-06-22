@@ -61,7 +61,8 @@ let iso_of_unix unix_ts =
 let record_operator_judgment config ~surface ~summary ?recommended_action ~fresh_for_sec () =
   let now_unix = Unix.gettimeofday () in
   ignore
-    (Operator_judgment.record config ~surface ~summary
+    (Operator_judgment.record config ~surface
+       ~target_type:Operator_judgment.Workspace ~target_id:None ~summary
        ~confidence:0.91 ?recommended_action ~generated_at:(Masc_domain.now_iso ())
        ~generated_at_unix:now_unix
        ~fresh_until:(iso_of_unix (now_unix +. fresh_for_sec))

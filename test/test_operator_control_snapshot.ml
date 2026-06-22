@@ -183,17 +183,20 @@ let test_compute_context_ratio_does_not_infer_provider_budget () =
     | Ok meta -> meta
     | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
   in
+  (* Model/provider self-report fields ([models], [last_model_used]) were
+     retired from keeper_meta/usage_metrics (RFC-0275/0276 social-model purge),
+     so no provider label can be expressed here. compute_context_ratio therefore
+     derives the ratio purely from the resolved context budget and recorded
+     token counts — never from a model label. *)
   let meta =
     {
       base with
-      models = [ "codex_cli:auto" ];
       runtime =
         {
           base.runtime with
           usage =
             {
               base.runtime.usage with
-              last_model_used = "codex";
               last_input_tokens = 2_106_223;
             };
         };
@@ -247,14 +250,12 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
       let updated_meta =
         {
           meta with
-          models = [ "codex_cli:auto" ];
           runtime =
             {
               meta.runtime with
               usage =
                 {
                   meta.runtime.usage with
-                  last_model_used = "codex";
                   last_input_tokens = 6_637_033;
                   last_total_tokens = 6_670_646;
                 };

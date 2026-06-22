@@ -130,8 +130,21 @@ describe('DashboardNavRail', () => {
     expect(container.querySelector('nav[aria-label="Primary mobile navigation"]')).toBeNull()
     const rail = container.querySelector('[data-testid="dashboard-nav-rail"]')
     expect(rail).not.toBeNull()
-    expect(rail?.className).toContain('w-14')
+    // Collapsed rail width matches the keeper-v2 prototype --nav-w: 58px
+    // (v2.css:232) — literal w-[58px], not Tailwind w-14 (56px).
+    expect(rail?.className).toContain('w-[58px]')
     expect(rail?.className).toContain('max-[1100px]:hidden')
+  })
+
+  it('renders the prototype icon-rail brand logo box when collapsed', () => {
+    renderNav({ mobile: false, drawerOpen: false, collapsed: true })
+
+    const rail = container.querySelector('[data-testid="dashboard-nav-rail"]')
+    expect(rail?.getAttribute('data-collapsed')).toBe('true')
+    // Collapsed brand = prototype .nav-home 38x38 monogram box (v2.css:242).
+    const brandHome = container.querySelector('.nav-brand .nav-home')
+    expect(brandHome).not.toBeNull()
+    expect(brandHome?.textContent?.trim()).toBe('M')
   })
 
   it('hides mobile tabs while reading keeper chat', () => {

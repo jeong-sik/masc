@@ -57,7 +57,10 @@ export function DashboardNavRail({
   onCloseDrawer,
 }: DashboardNavRailProps) {
   const effectiveCollapsed = mobile ? false : collapsed
-  const sideRailWidthClass = mobile ? 'w-72' : (collapsed ? 'w-14' : 'w-55')
+  // Collapsed rail = the keeper-v2 prototype's icon-only app rail.
+  // Width is the prototype's --nav-w: 58px (v2.css:232) — literal px because
+  // Tailwind's w-14 (56px) would shrink it by 2px off the spec.
+  const sideRailWidthClass = mobile ? 'w-72' : (collapsed ? 'w-[58px]' : 'w-55')
   const sideRailResponsiveClass = mobile
     ? drawerOpen
       ? 'block fixed inset-y-0 left-0 z-50 m-0 max-h-none rounded-none border-r'

@@ -78,9 +78,12 @@ import {
 // Sidebar collapsed state persists across reloads — a user who picks
 // the dense layout keeps it. Namespaced key avoids clashing with any
 // future per-user preference that might use plain \"sidebar-collapsed\".
+// Default = collapsed: a fresh load shows the keeper-v2 prototype's
+// icon-only 58px rail. Returning users keep their stored choice (the
+// persistent signal only falls back to this default when no value is set).
 const sidebarCollapsed = persistentSignal<boolean>({
   key: 'dashboard:sidebar-collapsed',
-  defaultValue: false,
+  defaultValue: true,
 })
 const mobileMenuOpen = signal(false)
 

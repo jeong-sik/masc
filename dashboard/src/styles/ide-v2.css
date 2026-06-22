@@ -556,7 +556,8 @@
 .ide-v2-drawer {
   flex: none;
   border-top: 1px solid var(--border-main);
-  background: var(--color-bg-page);
+  /* prototype surfaces.css:695 — well (deepest), not bg-page/bg-deep */
+  background: var(--bg-well);
   display: flex;
   flex-direction: column;
   max-height: 200px;

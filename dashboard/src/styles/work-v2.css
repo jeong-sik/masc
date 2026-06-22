@@ -191,38 +191,61 @@
   width: 12px;
 }
 
+/* wk-prio: prototype v2.css:815 — square chip (radius-xs), mono via .mono utility */
 .wk-prio {
   flex: none;
-  font-family: var(--font-mono);
   font-size: 10px;
-  letter-spacing: 0.02em;
-  padding: 2px 7px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--border-soft);
   color: var(--text-mid);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-xs);
+  padding: 1px 6px;
 }
 
-.wk-gstatus,
-.wk-approval {
+/* wk-gstatus: prototype v2.css:816 — pill, ui font, semantic status variants below */
+.wk-gstatus {
   flex: none;
   font-family: var(--font-ui);
   font-size: 9.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 2px 7px;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
   border-radius: var(--radius-pill);
-  border: 1px solid var(--border-soft);
+  border: 1px solid var(--border-main);
+  color: var(--text-dim);
 }
 
-.wk-gstatus {
-  color: var(--text-mid);
-  background: color-mix(in oklab, var(--bg-sunken) 70%, transparent);
+/* wk-gstatus semantic variants: prototype v2.css:817-820 */
+.wk-gstatus.ok {
+  color: var(--status-ok);
+  border-color: color-mix(in oklab, var(--status-ok) 38%, transparent);
 }
 
-.wk-approval {
+.wk-gstatus.warn {
   color: var(--status-warn);
-  border-color: color-mix(in oklab, var(--status-warn) 36%, transparent);
-  background: color-mix(in oklab, var(--status-warn) 10%, transparent);
+  border-color: color-mix(in oklab, var(--status-warn) 40%, transparent);
+  background: color-mix(in oklab, var(--status-warn) 8%, transparent);
+}
+
+.wk-gstatus.bad {
+  color: var(--status-bad);
+  border-color: color-mix(in oklab, var(--status-bad) 42%, transparent);
+  background: color-mix(in oklab, var(--status-bad) 8%, transparent);
+}
+
+.wk-gstatus.volt {
+  color: var(--volt-strong);
+  border-color: var(--volt-dim);
+  background: var(--volt-wash);
+}
+
+/* wk-approval: prototype v2.css:821 — volt theme (was warn) */
+.wk-approval {
+  flex: none;
+  font-size: 10px;
+  color: var(--volt-strong);
+  border: 1px solid var(--volt-dim);
+  background: var(--volt-wash);
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
 }
 
 .wk-goal-title {
@@ -284,7 +307,8 @@
 }
 
 .wk-seg.done { background: var(--status-ok); }
-.wk-seg.verify { background: var(--status-warn); }
+/* wk-seg.verify: prototype v2.css:823 — volt-strong (was status-warn) */
+.wk-seg.verify { background: var(--volt-strong); }
 .wk-seg.wip { background: var(--volt); }
 .wk-seg.blocked { background: var(--status-bad); }
 
@@ -333,13 +357,14 @@
   margin-bottom: 7px;
 }
 
+/* wk-vchip: prototype v2.css:827 — square (radius-xs), volt theme, mono via .mono utility */
 .wk-vchip {
-  font-size: 10px;
+  font-size: 9.5px;
+  color: var(--volt-strong);
+  border: 1px solid var(--volt-dim);
+  border-radius: var(--radius-xs);
   padding: 1px 6px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--border-soft);
-  background: var(--bg-sunken);
-  color: var(--text-mid);
+  background: var(--volt-wash);
 }
 
 /* ── Claimable backlog ────────────────────────────────────────────────────── */

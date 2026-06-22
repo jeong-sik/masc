@@ -77,43 +77,43 @@
    scoped to `data-keeper-chat-layout="workspace"` so density does not spill into
    primary/detail transcripts. The transcript's own `chat-transcript-airy` gap
    already spaces messages, so the design `thread-inner` gap is not re-applied. */
-.v2-app[data-density="spacious"] .kw-chat-head     { padding: 18px 28px 16px; gap: 16px; }
+.v2-app[data-density="spacious"] .kw-chat-head     { padding: 20px 28px 16px; gap: 16px; }
 .v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .chat-transcript  { padding: 34px 40px 14px; }
-.v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .chat-turn-bundle { gap: 15px; }
-.v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .chat-bubble      { padding: 17px 21px; line-height: 1.7; }
-.v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .kw-composer-inner { padding: 16px 30px 22px; }
-.v2-app[data-density="spacious"] .kw-kp-row        { padding: 11px 11px; }
+.v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .chat-turn-bundle { gap: 16px; }
+.v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .chat-bubble      { padding: 16px 20px; line-height: 1.7; }
+.v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .kw-composer-inner { padding: 16px 30px 24px; }
+.v2-app[data-density="spacious"] .kw-kp-row        { padding: 12px 12px; }
 /* Context rail + roster (design `.ctx-scroll`/`.ctx-card`/`.tps-card`/`.roster-*`
    -> live `.kw-rail-scroll`/`.kw-sec`/`.kw-roster-*`). `.kw-sec` is scoped under
    `.kw-rail` (context cards only). Verified on the running dashboard. */
-.v2-app[data-density="spacious"] .kw-rail-scroll   { padding: 20px; gap: 22px; }
-.v2-app[data-density="spacious"] .kw-rail .kw-sec  { padding: 14px 15px; }
-.v2-app[data-density="spacious"] .kw-roster-head   { padding: 15px 14px; }
-.v2-app[data-density="spacious"] .kw-roster-list   { padding: 9px 8px; }
+.v2-app[data-density="spacious"] .kw-rail-scroll   { padding: 20px; gap: 24px; }
+.v2-app[data-density="spacious"] .kw-rail .kw-sec  { padding: 14px 16px; }
+.v2-app[data-density="spacious"] .kw-roster-head   { padding: 16px 14px; }
+.v2-app[data-density="spacious"] .kw-roster-list   { padding: 10px 8px; }
 .v2-app[data-density="spacious"] .kw-roster-filters { padding: 12px 14px; }
 
 /* Board */
-.v2-app[data-density="spacious"] .bd-feed-head     { padding: 15px 24px; }
+.v2-app[data-density="spacious"] .bd-feed-head     { padding: 16px 24px; }
 .v2-app[data-density="spacious"] .bd-list          { padding: 20px 24px; gap: 14px; }
-.v2-app[data-density="spacious"] .bd-rail          { padding: 18px 12px; }
-.v2-app[data-density="spacious"] .bd-composer      { padding: 14px 24px 18px; }
-.v2-app[data-density="spacious"] .bd-detail-h      { padding: 16px 18px; }
-.v2-app[data-density="spacious"] .bd-detail-scroll { padding: 18px; gap: 14px; }
+.v2-app[data-density="spacious"] .bd-rail          { padding: 20px 12px; }
+.v2-app[data-density="spacious"] .bd-composer      { padding: 14px 24px 20px; }
+.v2-app[data-density="spacious"] .bd-detail-h      { padding: 16px 20px; }
+.v2-app[data-density="spacious"] .bd-detail-scroll { padding: 20px; gap: 14px; }
 
 /* Settings */
 .v2-app[data-density="spacious"] .settings-surf .set-card-b { padding: 12px 40px 56px; }
-.v2-app[data-density="spacious"] .set-content-h { padding: 26px 40px 18px; }
+.v2-app[data-density="spacious"] .set-content-h { padding: 26px 40px 20px; }
 .v2-app[data-density="spacious"] .set-row       { padding: 16px 0; }
-.v2-app[data-density="spacious"] .set-nav-item  { padding: 11px 13px; }
+.v2-app[data-density="spacious"] .set-nav-item  { padding: 12px 14px; }
 
 /* Compact overrides — chat console retargeted to live `.kw-*`/`.chat-*` classes
    (the v2 source `.thread`/`.chat-head`/`.composer` never matched). Verified on
    the running dashboard. */
-.v2-app[data-density="compact"] .kw-chat-head     { padding: 10px 16px 9px; }
-.v2-app[data-density="compact"] [data-keeper-chat-layout="workspace"] .chat-transcript  { padding: 14px 22px 6px; }
-.v2-app[data-density="compact"] [data-keeper-chat-layout="workspace"] .kw-composer-inner { padding: 9px 18px 12px; }
-.v2-app[data-density="compact"] .kw-rail-scroll { padding: 11px; gap: 12px; }
-.v2-app[data-density="compact"] .bd-list       { padding: 11px 14px; gap: 8px; }
+.v2-app[data-density="compact"] .kw-chat-head     { padding: 10px 16px 10px; }
+.v2-app[data-density="compact"] [data-keeper-chat-layout="workspace"] .chat-transcript  { padding: 14px 24px 6px; }
+.v2-app[data-density="compact"] [data-keeper-chat-layout="workspace"] .kw-composer-inner { padding: 10px 20px 12px; }
+.v2-app[data-density="compact"] .kw-rail-scroll { padding: 12px; gap: 12px; }
+.v2-app[data-density="compact"] .bd-list       { padding: 12px 14px; gap: 8px; }
 .v2-app[data-density="compact"] .set-row       { padding: 10px 0; }
 
 /* ── Motion ───────────────────────────────────────────────────── */

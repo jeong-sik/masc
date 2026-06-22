@@ -56,7 +56,7 @@
   background: var(--bg-sunken);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
-  padding: 7px 11px;
+  padding: 8px 12px;
 }
 
 .kv-state-a {
@@ -87,7 +87,7 @@
 .kv-skel-row {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 12px;
 }
 
 .kv-skel-av {

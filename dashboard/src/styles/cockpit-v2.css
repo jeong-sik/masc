@@ -147,7 +147,7 @@
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--text-dim);
-  margin: 0 0 5px;
+  margin: 0 0 6px;
 }
 
 .cp-head .cp-title {
@@ -248,7 +248,7 @@
 
 .cp-disc-row {
   background: var(--bg-panel);
-  padding: 11px 14px;
+  padding: 12px 14px;
 }
 
 .cp-disc-row .lvl {
@@ -280,9 +280,9 @@
   color: var(--text-mid);
   background: var(--bg-card);
   border: 1px solid var(--border-main);
-  padding: 1px 7px;
+  padding: 1px 8px;
   border-radius: var(--radius-pill);
-  margin-top: 7px;
+  margin-top: 8px;
 }
 
 .cp-plane {

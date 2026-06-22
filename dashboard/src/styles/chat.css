@@ -238,7 +238,7 @@
   color: var(--color-fg-primary);
   font-size: var(--fs-sm, 14px);
   line-height: 1.5;
-  padding: 9px 0;
+  padding: 10px 0;
   max-height: 160px;
   min-height: 24px;
 }
@@ -292,7 +292,7 @@
   letter-spacing: 0.04em;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   transition: 0.14s;
   white-space: nowrap;
   flex: none;
@@ -335,7 +335,7 @@
   border: 1px solid var(--color-border-default);
   border-bottom-width: 2px;
   border-radius: var(--r-0);
-  padding: 1px 5px;
+  padding: 1px 6px;
   color: var(--color-fg-muted);
 }
 
@@ -355,17 +355,17 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 0 0 9px;
+  margin: 0 0 10px;
 }
 
 .cdraft {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-0);
-  padding: 7px 9px;
+  padding: 8px 10px;
   position: relative;
 }
 
@@ -459,10 +459,10 @@
 
 .cdraft-tx {
   display: flex;
-  gap: 7px;
+  gap: 8px;
   align-items: baseline;
   flex-basis: 100%;
-  padding-top: 5px;
+  padding-top: 6px;
   border-top: 1px solid var(--color-border-default);
 }
 
@@ -507,7 +507,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 5px 4px 5px 10px;
+  padding: 6px 4px 6px 10px;
   min-height: 34px;
 }
 
@@ -751,7 +751,7 @@
 .chat-artifact-card-btn {
   font-size: var(--fs-2xs);
   font-weight: var(--fw-med);
-  padding: 4px 9px;
+  padding: 4px 10px;
   border-radius: var(--r-0);
   border: 1px solid var(--color-border-default);
   background: var(--color-bg-panel-alt);

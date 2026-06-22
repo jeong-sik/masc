@@ -46,7 +46,7 @@ describe('craft-v2.css data-bubble=flat toggle', () => {
 describe('craft-v2.css density chat console (retargeted to live classes)', () => {
   it('applies the spacious chat values to the live .kw-*/.chat-* classes', () => {
     expect(declarationsForSelector(css, '.v2-app[data-density="spacious"] .kw-chat-head').padding)
-      .toBe('18px 28px 16px')
+      .toBe('20px 28px 16px')
     expect(declarationsForSelector(
       css,
       '.v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .chat-transcript',
@@ -56,42 +56,42 @@ describe('craft-v2.css density chat console (retargeted to live classes)', () =>
       css,
       '.v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .chat-bubble',
     )
-    expect(bubble.padding).toBe('17px 21px')
+    expect(bubble.padding).toBe('16px 20px')
     expect(bubble['line-height']).toBe('1.7')
     expect(declarationsForSelector(
       css,
       '.v2-app[data-density="spacious"] [data-keeper-chat-layout="workspace"] .kw-composer-inner',
     ).padding)
-      .toBe('16px 30px 22px')
+      .toBe('16px 30px 24px')
   })
 
   it('applies the compact chat values to the live .kw-*/.chat-* classes', () => {
     expect(declarationsForSelector(css, '.v2-app[data-density="compact"] .kw-chat-head').padding)
-      .toBe('10px 16px 9px')
+      .toBe('10px 16px 10px')
     expect(declarationsForSelector(
       css,
       '.v2-app[data-density="compact"] [data-keeper-chat-layout="workspace"] .chat-transcript',
     ).padding)
-      .toBe('14px 22px 6px')
+      .toBe('14px 24px 6px')
     expect(declarationsForSelector(
       css,
       '.v2-app[data-density="compact"] [data-keeper-chat-layout="workspace"] .kw-composer-inner',
     ).padding)
-      .toBe('9px 18px 12px')
+      .toBe('10px 20px 12px')
   })
 
   it('applies context-rail + roster spacious values to live classes', () => {
     const rail = declarationsForSelector(css, '.v2-app[data-density="spacious"] .kw-rail-scroll')
     expect(rail.padding).toBe('20px')
-    expect(rail.gap).toBe('22px')
+    expect(rail.gap).toBe('24px')
     expect(declarationsForSelector(css, '.v2-app[data-density="spacious"] .kw-rail .kw-sec').padding)
-      .toBe('14px 15px')
+      .toBe('14px 16px')
     expect(declarationsForSelector(css, '.v2-app[data-density="spacious"] .kw-roster-head').padding)
-      .toBe('15px 14px')
+      .toBe('16px 14px')
     expect(declarationsForSelector(css, '.v2-app[data-density="spacious"] .kw-roster-filters').padding)
       .toBe('12px 14px')
     expect(declarationsForSelector(css, '.v2-app[data-density="compact"] .kw-rail-scroll').padding)
-      .toBe('11px')
+      .toBe('12px')
   })
 
   it('gives the keeper workspace scroll areas the themed webkit scrollbar', () => {

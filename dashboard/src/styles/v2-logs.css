@@ -39,7 +39,7 @@
   flex: none;
   align-items: flex-start;
   gap: 24px;
-  padding: 22px 26px 16px;
+  padding: 24px 26px 16px;
 }
 
 .v2-logs-head-main {
@@ -74,7 +74,7 @@
   min-width: 74px;
   flex-direction: column;
   gap: 3px;
-  padding: 8px 13px;
+  padding: 8px 14px;
   border: 1px solid var(--border-main);
   border-radius: var(--radius-sm);
   background: var(--bg-card);
@@ -179,7 +179,7 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 9px;
+  gap: 10px;
   color: var(--color-fg-muted);
   font-size: 11px;
 }
@@ -208,7 +208,7 @@
 }
 
 .v2-logs-count {
-  padding: 5px 10px;
+  padding: 6px 10px;
   border: 1px solid var(--border-main);
   border-radius: var(--radius-pill);
   color: var(--text-mid);
@@ -219,7 +219,7 @@
 .v2-logs-live {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   color: var(--text-dim);
   font-size: 11px;
 }
@@ -274,7 +274,7 @@
   flex: none;
   align-items: center;
   gap: 14px;
-  padding: 9px 26px;
+  padding: 10px 26px;
   border-top: 1px solid var(--border-main);
   color: var(--color-fg-muted);
   border-bottom: 1px solid var(--color-border-divider);
@@ -331,7 +331,7 @@
   grid-template-columns: var(--v2-logs-cols);
   align-items: center;
   gap: 14px;
-  padding: 9px 26px;
+  padding: 10px 26px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -353,7 +353,7 @@
 .v2-logs-who {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -445,7 +445,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 0 26px 9px calc(26px + 92px + 14px);
+  padding: 0 26px 10px calc(26px + 92px + 14px);
 }
 
 .v2-logs-detail {
@@ -458,7 +458,7 @@
 .v2-logs-detail-grid {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 22px;
+  gap: 6px 24px;
 }
 
 .v2-logs-detail-grid div {
@@ -531,7 +531,7 @@
   justify-content: space-between;
   gap: 12px;
   min-height: 34px;
-  padding: 7px 12px;
+  padding: 8px 12px;
   color: var(--text-mid);
   cursor: pointer;
   font-size: 12px;
@@ -584,7 +584,7 @@
   .v2-logs-head {
     flex-direction: column;
     gap: 14px;
-    padding: 18px 18px 14px;
+    padding: 20px 20px 14px;
   }
 
   .v2-logs-stats {
@@ -598,8 +598,8 @@
   .v2-logs-table-header,
   .v2-logs-line,
   .v2-logs-support {
-    padding-left: 18px;
-    padding-right: 18px;
+    padding-left: 20px;
+    padding-right: 20px;
   }
 
   .v2-logs-advanced {
@@ -612,7 +612,7 @@
   }
 
   .v2-logs-detail {
-    padding-left: 18px;
+    padding-left: 20px;
   }
 }
 
@@ -672,8 +672,8 @@
 
   .v2-logs-inline-links,
   .v2-logs-detail {
-    padding-right: 18px;
-    padding-left: 18px;
+    padding-right: 20px;
+    padding-left: 20px;
   }
 }
 

@@ -30,7 +30,7 @@
   background:
     linear-gradient(180deg, rgb(var(--brass-glow) / 0.05), transparent 42%),
     var(--color-bg-surface);
-  padding: 13px 14px;
+  padding: 14px 14px;
 }
 
 .v2-monitoring-surface .fl-top {
@@ -79,7 +79,7 @@
   font-size: 11px;
   font-weight: 760;
   line-height: 1;
-  padding: 0 9px;
+  padding: 0 10px;
   white-space: nowrap;
 }
 
@@ -105,7 +105,7 @@
   border-top: 1px solid var(--color-border-default);
   color: var(--color-fg-muted);
   font-size: 11px;
-  padding-top: 9px;
+  padding-top: 10px;
 }
 
 .v2-monitoring-panel,

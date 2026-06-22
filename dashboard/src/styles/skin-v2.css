@@ -102,6 +102,11 @@ html[data-skin="v2"]:not([data-theme="paper"]):not([data-theme="styleseed"]) {
   /* v2 type — sharp grotesque replaces the gothic Cinzel */
   --font-display: 'Space Grotesk', 'Noto Sans KR', system-ui, sans-serif;
   --font-body:    'Noto Sans KR', 'Space Grotesk', system-ui, sans-serif;
+  /* UI font was omitted here, so v2 fell through to the :root default
+     (Pretendard). Pin it to the prototype's intent
+     (design-system/prototype-v2/styles/colors_and_type.css:68) so UI chrome
+     reads in Noto Sans KR like the rest of the v2 skin. */
+  --font-ui:      'Noto Sans KR', 'IBM Plex Sans KR', -apple-system, sans-serif;
 
   /* ── TYPE LADDER — one heading system across every surface ──
      T1 surface/subject title · T2 region/panel title ·

@@ -6,7 +6,9 @@ import { resolve } from 'node:path'
 const cssPath = resolve(__dirname, 'styleseed-theme.css')
 const css = readFileSync(cssPath, 'utf-8')
 const v2ThemeCss = readFileSync(resolve(__dirname, 'v2-theme.css'), 'utf-8')
-const v2SkinTokensCss = readFileSync(resolve(__dirname, 'v2-skin-tokens.css'), 'utf-8')
+// skin-v2.css is the single SSOT for the dark v2 token block (the former
+// v2-skin-tokens.css duplicate was removed). It carries the same guard.
+const skinV2Css = readFileSync(resolve(__dirname, 'skin-v2.css'), 'utf-8')
 
 /**
  * Parse a CSS block for a given selector and return its declared custom
@@ -121,13 +123,13 @@ describe('styleseed-theme.css', () => {
   it('keeps later-loading dark v2 token sources out of StyleSeed', () => {
     expect(v2ThemeCss).toContain(':root:not([data-theme="paper"]):not([data-theme="styleseed"])')
     expect(v2ThemeCss).toContain('[data-theme="dark-fantasy"]')
-    expect(v2SkinTokensCss).toContain(
+    expect(skinV2Css).toContain(
       '[data-skin="v2"]:not([data-theme="paper"]):not([data-theme="styleseed"])'
     )
-    expect(v2SkinTokensCss).toContain(
+    expect(skinV2Css).toContain(
       '[data-skin="v2"][data-volt="blood"]:not([data-theme="paper"]):not([data-theme="styleseed"])'
     )
-    expect(v2SkinTokensCss).toContain(
+    expect(skinV2Css).toContain(
       '[data-skin="v2"][data-volt="ice"]:not([data-theme="paper"]):not([data-theme="styleseed"])'
     )
   })

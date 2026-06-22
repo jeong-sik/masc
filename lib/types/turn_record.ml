@@ -31,6 +31,7 @@ type t =
   ; price_input_per_million : float option
   ; price_output_per_million : float option
   ; request_latency_ms : int option
+  ; ttfrc_ms : float option
   ; sampling : sampling
   ; usage : usage
   ; ts : float
@@ -66,6 +67,7 @@ let to_json (r : t) : Yojson.Safe.t =
     @ opt_field "price_input_per_million" (fun v -> `Float v) r.price_input_per_million
     @ opt_field "price_output_per_million" (fun v -> `Float v) r.price_output_per_million
     @ opt_field "request_latency_ms" (fun v -> `Int v) r.request_latency_ms
+    @ opt_field "ttfrc_ms" (fun v -> `Float v) r.ttfrc_ms
     @ opt_field "temperature" (fun v -> `Float v) r.sampling.temperature
     @ opt_field "top_p" (fun v -> `Float v) r.sampling.top_p
     @ opt_field "max_tokens" (fun v -> `Int v) r.sampling.max_tokens
@@ -163,6 +165,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
       let* price_input_per_million = opt_member "price_input_per_million" fields as_float in
       let* price_output_per_million = opt_member "price_output_per_million" fields as_float in
       let* request_latency_ms = opt_member "request_latency_ms" fields as_int in
+      let* ttfrc_ms = opt_member "ttfrc_ms" fields as_float in
       let* temperature = opt_member "temperature" fields as_float in
       let* top_p = opt_member "top_p" fields as_float in
       let* max_tokens = opt_member "max_tokens" fields as_int in
@@ -186,6 +189,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; price_input_per_million
         ; price_output_per_million
         ; request_latency_ms
+        ; ttfrc_ms
         ; sampling = { temperature; top_p; max_tokens; thinking_budget; enable_thinking }
         ; usage = { input_tokens; output_tokens }
         ; ts

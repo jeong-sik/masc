@@ -421,6 +421,10 @@ type TurnPhase = {
   mono?: boolean
   durationMs: number | null
   durationSource: 'tool_call_log' | 'provider_telemetry' | 'estimated' | 'not_recorded'
+  // RFC-0233 §10 — time-to-first-token for the gen phase (null when not
+  // recorded). Kept separate from durationMs (end-to-end request_latency_ms)
+  // so the post-first-chunk decode split is never derived (§9.6 guard).
+  ttfrcMs?: number | null
   visualDurationMs: number
   visualOffsetMs: number
   meta?: string
@@ -594,7 +598,16 @@ function formatTurnList(values: number[]): string {
 }
 
 function phaseDurationLabel(phase: TurnPhase): string {
-  if (phase.durationMs != null) return formatMsCompact(phase.durationMs)
+  if (phase.durationMs != null) {
+    const base = formatMsCompact(phase.durationMs)
+    // RFC-0233 §10 — show time-to-first-token alongside the gen phase's
+    // end-to-end duration when ttfrc_ms is recorded. No decode split: the
+    // post-first-chunk duration is NOT derived (§9.6 fabrication guard).
+    if (phase.kind === 'gen' && phase.ttfrcMs != null) {
+      return `${base} · 첫 ${formatMsCompact(phase.ttfrcMs)}`
+    }
+    return base
+  }
   if (phase.durationSource === 'estimated') return '추정'
   return '측정 없음'
 }
@@ -712,11 +725,16 @@ function buildTurnDetail(
     durationMs: record.request_latency_ms ?? null,
     durationSource:
       record.request_latency_ms != null ? 'provider_telemetry' : 'not_recorded',
+    // RFC-0233 §10 — time-to-first-token. Populated on the streaming path for
+    // every provider; null for non-streaming turns and on the error path.
+    ttfrcMs: record.ttfrc_ms ?? null,
     visualDurationMs: 0,
     visualOffsetMs: 0,
     meta:
       record.request_latency_ms != null
-        ? 'provider call wall-clock (request_latency_ms)'
+        ? record.ttfrc_ms != null
+          ? `provider call wall-clock (request_latency_ms) · 첫 토큰 ${formatMsCompact(record.ttfrc_ms)} (ttfrc_ms)`
+          : 'provider call wall-clock (request_latency_ms)'
         : 'provider/OAS duration is not recorded for this turn',
   })
   const { visualTotalMs, measuredDurationMs } = finalizePhaseOffsets(phases)

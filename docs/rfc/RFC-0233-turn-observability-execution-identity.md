@@ -645,3 +645,69 @@ case).
 - Behavioral: a turn whose provider call was measured shows a real `gen`
   bar; an errored turn (no response) keeps `gen` as "측정 없음". tsc +
   vitest.
+
+## §10 Amendment (2026-06-22) — time-to-first-token: `ttfrc_ms`
+
+### §10.1 Problem
+
+§9 wired the `gen` phase to `request_latency_ms` (end-to-end provider call
+wall-clock), but the inspector still cannot distinguish *time-to-first-token*
+— how long the user waited before the first response chunk appeared — from
+the full generation duration. This is the half of latency users perceive
+("why is it thinking before it starts typing?").
+
+### §10.2 Design
+
+Add `ttfrc_ms : float option` to `Turn_record.t`, sourced from OAS
+`inference_telemetry.ttfrc_ms` (Time-To-First-Response-Chunk, wall-clock).
+Unlike `request_latency_ms`, this isolates the wait for the first SSE chunk.
+The inspector renders it alongside the `gen` phase's end-to-end duration
+(`"1.2s · 첫 568ms"`), never as a fabricated split.
+
+### §10.3 Provider fill matrix (grounding)
+
+`ttfrc_ms` is the one phase-level signal populated across the keeper fleet:
+the OAS streaming transport (`complete_stream.ml:573-574`) sets it as a
+provider-agnostic wall-clock measurement as soon as the first SSE chunk
+arrives. The keeper default fleet (deepseek-v4-flash / deepseek-v4-pro /
+glm-4-7-coding / minimax-m3, all `openai-compatible-http` + `streaming`)
+reports `Some` for every turn. Non-streaming turns and the error path leave
+it `None`.
+
+`prefill_ms` and `timings.{prompt_ms, predicted_ms}` remain deferred
+(§9.4): only Ollama/llama-server report them natively, so emitting them
+would show mostly-empty columns across the predominantly-cloud fleet.
+
+### §10.4 Why a single field (B), not a phase split (A)
+
+A full prefill/decode split (option A) was rejected by the grounding
+workflow: cloud keepers do not populate `prefill_ms`/`timings`, so the
+decode sub-phase would be `None` for the majority of turns. `ttfrc_ms` is
+the only phase-level field the streaming transport fills for every
+provider, so it alone carries fleet-wide signal. Option B (single field)
+captures that signal at ~10 LOC without the empty-column cost.
+
+### §10.5 Honesty guard (§9.6 reaffirmed)
+
+The decode (post-first-chunk) duration is intentionally NOT derived as
+`request_latency_ms - ttfrc_ms`. That difference would be indistinguishable
+from a measurement yet is an arithmetic artifact; decode stays
+`not_recorded` until a provider reports it natively. `ttfrc_ms` is shown as
+a separate annotation, never subtracted into a phase bar.
+
+### §10.6 Inspector wiring
+
+`TurnPhase.ttfrcMs` (number | null, separate from `durationMs`). The `gen`
+phase populates it from `record.ttfrc_ms`; `phaseDurationLabel` appends
+`· 첫 {formatMsCompact(ttfrc)}` when both `request_latency_ms` and
+`ttfrc_ms` are present; the `meta` tooltip notes both sources. Absent
+`ttfrc_ms` leaves the `gen` label at its end-to-end form.
+
+### §10.7 Verification harness
+
+- Unit (`test/test_turn_record.ml`): round-trip of `ttfrc_ms`
+  (`Some 567.8`); the absent case (`None`) omits the JSON key and decodes
+  `None`.
+- Frontend: a grounded fixture (`ttfrc_ms: 567.8`) renders `"첫 568ms"`
+  alongside the `gen` phase duration; an absent value leaves the label
+  unchanged. tsc + vitest.

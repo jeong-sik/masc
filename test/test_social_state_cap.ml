@@ -4,7 +4,7 @@
     (#7676) capped keeper_state_snapshot; this caps social_state so
     previous_state carried across turns by BDI speech v1 cannot grow
     monotonically when speech_act=Stay_silent preserves state.
-    RFC-0274 removed the belief_summary/active_desire/current_intention
+    RFC-0275 removed the belief_summary/active_desire/current_intention
     triple; blocker and need remain. *)
 
 module T = Keeper_social_model_types

@@ -151,7 +151,7 @@ let transition_reason_to_string = function
    them monotonically because speech_act=Stay_silent clears
    response_text but preserves state.
 
-   RFC-0274 removed the belief_summary/active_desire/current_intention
+   RFC-0275 removed the belief_summary/active_desire/current_intention
    triple (non-load-bearing narrative); the option-field budget remains
    a labeled-optional knob so a runtime-level policy can plug different
    budgets per speech model. *)

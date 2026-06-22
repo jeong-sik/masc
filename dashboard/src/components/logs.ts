@@ -16,7 +16,7 @@ import { TextInput } from './common/input'
 import { Select } from './common/select'
 import { Checkbox } from './common/checkbox'
 import { LogFilter } from './common/log-filter'
-import { kSlot, kSigil } from './keeper-badge'
+import { KeeperBadge } from './keeper-badge'
 import { createAsyncResource, loaded } from '../lib/async-state'
 import { toolCategory } from './tool-call-shared'
 import { StatusChip } from './common/status-chip'
@@ -765,7 +765,7 @@ function renderLogRow(entry: LogEntry) {
       >
         <span class="v2-logs-time mono">${formatLogClock(entry.ts)}</span>
         <span class="v2-logs-who">
-          <span class="v2-logs-sigil" data-keeper-slot=${kSlot(identity)} style=${{ background: `var(--color-keeper-${kSlot(identity)})`, borderColor: `color-mix(in oklab, var(--color-keeper-${kSlot(identity)}) 50%, transparent)` }} aria-hidden="true">${kSigil(identity)}</span>
+          <${KeeperBadge} id=${identity} variant="sigil" size="md" title=${identity} />
           <span class="v2-logs-identity" title=${identity}>${identity}</span>
         </span>
         <span class="v2-logs-kind" data-kind=${displayKind}>${LOG_KIND_LABELS[displayKind]}</span>
@@ -1087,6 +1087,7 @@ export function LogViewer() {
       <section class="v2-logs-panel" aria-label="로그 뷰어">
         <header class="v2-logs-head">
           <div class="v2-logs-head-main">
+            <p class="v2-logs-eyebrow">Observatory</p>
             <h1>이벤트 로그</h1>
             <p class="v2-logs-sub mono">live trace stream · masc runtime · ${logWindowLabel(logEntries)}</p>
           </div>
@@ -1247,7 +1248,7 @@ export function LogViewer() {
 
         <div class="v2-logs-table-header">
           <span>시각</span>
-          <span>소스</span>
+          <span>keeper</span>
           <span>유형</span>
           <span>이벤트</span>
           <span></span>

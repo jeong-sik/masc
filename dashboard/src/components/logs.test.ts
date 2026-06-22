@@ -472,6 +472,109 @@ describe('LogViewer Code links', () => {
     routeLinks.find(link => link.textContent === 'Telemetry')?.click()
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-nested&operation_id=op-nested&worker_run_id=wr-nested&q=turn-8')
   })
+  it('filters rows by kind chips and keeps kind-aware details for toolbar view', async () => {
+    const fetchLogs = vi.fn().mockResolvedValue({
+      total: 3,
+      generated_at_iso: '2026-05-15T01:00:00Z',
+      dashboard_surface: '/api/v1/dashboard/logs',
+      source: 'masc_log_ring',
+      retention: {
+        scope: 'dashboard_logs',
+        durable_store: '/Users/dancer/me/.masc/logs/system_log_2026-05-15.jsonl',
+      },
+      latest_seq: 3,
+      entries: [
+        entry({
+          seq: 1,
+          ts: '2026-05-14T00:00:00Z',
+          level: 'INFO',
+          module: 'keeper_tool',
+          category: 'tool',
+          message: 'tool event',
+          details: {
+            tool_name: 'fs.ls',
+            outcome: 'ok',
+            latency_ms: 128,
+            namespace: 'filesystem',
+          },
+        }),
+        entry({
+          seq: 2,
+          ts: '2026-05-14T00:00:01Z',
+          level: 'INFO',
+          module: 'keeper_turn',
+          category: 'routine',
+          turn_id: 2,
+          message: 'turn event',
+          details: {
+            model: 'gpt-4o-mini',
+            tools_used: ['planner', 'coder'],
+            stop_reason: 'stop_reason',
+            duration_ms: 321,
+          },
+        }),
+        entry({
+          seq: 3,
+          ts: '2026-05-14T00:00:02Z',
+          level: 'WARN',
+          module: 'keeper_fsm',
+          category: 'fsm',
+          message: 'lifecycle event',
+          details: {
+            from: 'idle',
+            to: 'running',
+            trigger: 'wake',
+          },
+        }),
+      ],
+    })
+
+    const { LogViewer } = await loadLogs(fetchLogs)
+    const { container } = render(h(LogViewer, {}))
+
+    await waitFor(() => expect(container.textContent).toContain('tool event'))
+    expect(container.textContent).toContain('turn event')
+    expect(container.textContent).toContain('lifecycle event')
+    expect(container.querySelector('.v2-logs-live')?.textContent).toContain('masc-mcp · WS open')
+
+    const toolChip = container.querySelector('[data-testid="logs-filter-tool"]') as HTMLButtonElement
+    await act(async () => {
+      fireEvent.click(toolChip)
+    })
+    await waitFor(() => expect(container.textContent).toContain('tool event'))
+    expect(container.textContent).not.toContain('turn event')
+    expect(container.textContent).not.toContain('lifecycle event')
+
+    const turnChip = container.querySelector('[data-testid="logs-filter-turn"]') as HTMLButtonElement
+    await act(async () => {
+      fireEvent.click(turnChip)
+    })
+    await waitFor(() => expect(container.textContent).toContain('turn event'))
+    expect(container.textContent).not.toContain('tool event')
+    expect(container.textContent).not.toContain('lifecycle event')
+
+    const lifecycleChip = container.querySelector('[data-testid="logs-filter-lifecycle"]') as HTMLButtonElement
+    await act(async () => {
+      fireEvent.click(lifecycleChip)
+    })
+    await waitFor(() => expect(container.textContent).toContain('lifecycle event'))
+    expect(container.textContent).not.toContain('tool event')
+    expect(container.textContent).not.toContain('turn event')
+
+    const allChip = container.querySelector('[data-testid="logs-filter-all"]') as HTMLButtonElement
+    await act(async () => {
+      fireEvent.click(allChip)
+    })
+    await waitFor(() => expect(container.textContent).toContain('tool event'))
+    expect(container.textContent).toContain('turn event')
+    expect(container.textContent).toContain('lifecycle event')
+
+    const row = container.querySelector('[data-testid="logs-row"]') as HTMLDivElement
+    fireEvent.click(row.querySelector('.v2-logs-line') as Element)
+    await waitFor(() =>
+      expect(container.querySelector('.v2-logs-kind-grid')?.textContent).toContain('tool'),
+    )
+  })
 })
 
 describe('LogViewer kind column', () => {

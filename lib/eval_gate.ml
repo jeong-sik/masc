@@ -185,13 +185,26 @@ let evasion_indicators : evasion_indicator list = [
     callers that render the matched substring. The typed kind is
     available via {!detect_evasion_typed} for callers that need to
     discriminate. *)
+(** Precompile each evasion pattern once at module load.  [detect_evasion_typed]
+    runs in the pre-check gate for every shell tool invocation; the previous
+    code recompiled all {!evasion_indicators} patterns ([Re.Pcre.re |> Re.compile])
+    on every call.  Pairing the compiled regex with its indicator keeps the
+    typed return value unchanged and matches the module-level-compile idiom used
+    by [drift_guard] / [cache_eio]. *)
+let compiled_evasion_indicators : (Re.re * evasion_indicator) list =
+  List.map
+    (fun (indicator : evasion_indicator) ->
+      (Re.Pcre.re indicator.pattern |> Re.compile, indicator))
+    evasion_indicators
+
 let detect_evasion_typed (command : string) : evasion_indicator option =
   let cmd_lower = String.lowercase_ascii command in
-  List.find_opt (fun { pattern; _ } ->
-    Safe_ops.protect ~default:false (fun () ->
-      let re = Re.Pcre.re pattern |> Re.compile in
-      Re.execp re cmd_lower)
-  ) evasion_indicators
+  List.find_map
+    (fun (re, indicator) ->
+      if Safe_ops.protect ~default:false (fun () -> Re.execp re cmd_lower)
+      then Some indicator
+      else None)
+    compiled_evasion_indicators
 
 let detect_evasion (command : string) : (string * string) option =
   match detect_evasion_typed command with

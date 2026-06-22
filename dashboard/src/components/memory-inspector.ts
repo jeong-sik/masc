@@ -16,9 +16,18 @@
 // memory-inspector-v2.css, which the *-v2.css glob in main.ts eagerly
 // imports). Scope toggle: 이 keeper / 전체 (memory.jsx:233-234).
 
+import { Fragment } from 'preact'
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
+
+// WORKAROUND: nested fragments use the Fragment tag, not htm's empty-string-tag
+// form. An empty string tag makes preact call document.createElement('') on
+// nested vnodes, which throws InvalidCharacterError in both jsdom and happy-dom
+// (and real browsers). An empty-string fragment only survives as a render *root*
+// because the test harness wraps it. Root cause: htm represents a fragment via
+// the Fragment export, not an empty tag name. This component is currently
+// imported nowhere, so the crash was never exercised; wiring is a later wave.
 
 // ── Window-window constant (memory-data.jsx:116 → ctx * 200000) ──
 const CONTEXT_WINDOW_TOK = 200000
@@ -405,7 +414,7 @@ function OneKeeperMemory({
   const filter = kindFilter.value
   const storeRows = filter === 'all' ? m.store : m.store.filter(s => s.kind === filter)
   return html`
-    <${''}>
+    <${Fragment}>
       <div class="turn-sec">
         <h4>컨텍스트 구성</h4>
         <${MemCompo} keeper=${keeper} store=${store} />
@@ -436,7 +445,7 @@ function OneKeeperMemory({
           <span class="mem-n mono">${m.store.length}</span>
         </div>
         ${m.store.length ? html`
-          <${''}>
+          <${Fragment}>
             ${kinds.length > 1 ? html`
               <div class="mem-filters">
                 <button class=${`mem-filter ${filter === 'all' ? 'on' : ''}`} onClick=${() => { kindFilter.value = 'all' }}>전체</button>
@@ -469,7 +478,7 @@ function OneKeeperMemory({
       <div class="turn-sec">
         <h4>압축 유지 · 요약 · 폐기</h4>
         ${lastCmp ? html`
-          <${''}>
+          <${Fragment}>
             <div class="cmp-trigger"><span class="sub-k">최근 컴팩션</span>${lastCmp.at} · ${lastCmp.trigger}</div>
             <div class="cmp-diff">
               <div class="cmp-col kept"><div class="cmp-col-h">${'◈'} 유지</div>${lastCmp.kept.map((x, i) => html`<div key=${i} class="cmp-li">${x}</div>`)}</div>
@@ -493,7 +502,7 @@ function AllKeepersMemory({
   const agg = memAggregate(keepers, store)
   const maxMem = Math.max(1, ...agg.rows.map(r => r.memTok))
   return html`
-    <${''}>
+    <${Fragment}>
       <div class="turn-sec">
         <h4>집계</h4>
         <div class="mem-stats">

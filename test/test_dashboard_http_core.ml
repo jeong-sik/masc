@@ -1267,6 +1267,53 @@ let test_lifecycle_event_cache_patcher_coverage () =
            (Server_dashboard_http_execution_surfaces.paused_of_lifecycle_event name)))
     Keeper_lifecycle_events.all_event_names
 
+let test_lifecycle_event_display_values () =
+  (* Pin the exact (keepalive_running, phase, pipeline_stage, paused) projection
+     for every lifecycle event string — including the legacy operator strings
+     [paused] / [resumed] that are outside [all_event_names]. This locks the
+     byte-identity the refactor preserves: a value drift in
+     [display_of_custom_event] or [display_of_phase_or_legacy_string] now fails
+     here instead of silently changing a dashboard row (the coverage test above
+     only asserts [Some], not the value). *)
+  let cases =
+    [ ("started", true, "running", "idle", false);
+      ("restarted", true, "running", "idle", false);
+      ("reconciled", true, "running", "idle", false);
+      ("self_preservation", true, "running", "idle", false);
+      ("auto_resumed", true, "running", "idle", false);
+      ("running", true, "running", "idle", false);
+      ("resumed", true, "running", "idle", false);
+      ("paused", true, "paused", "paused", true);
+      ("paused_pruned", false, "stopped", "offline", true);
+      ("admission_denied", false, "offline", "offline", false);
+      ("dead_cleaned", false, "dead", "offline", false);
+      ("stopped", false, "stopped", "offline", true);
+      ("crashed", false, "crashed", "crashed", false);
+      ("dead", false, "dead", "offline", false);
+    ]
+  in
+  List.iter
+    (fun (name, keepalive, phase, pipeline, paused) ->
+      check (option bool)
+        ("keepalive_running value for " ^ name)
+        (Some keepalive)
+        (Server_dashboard_http_execution_surfaces.keepalive_running_of_lifecycle_event
+           name);
+      check (option string)
+        ("phase value for " ^ name)
+        (Some phase)
+        (Server_dashboard_http_execution_surfaces.phase_of_lifecycle_event name);
+      check (option string)
+        ("pipeline_stage value for " ^ name)
+        (Some pipeline)
+        (Server_dashboard_http_execution_surfaces.pipeline_stage_of_lifecycle_event
+           name);
+      check (option bool)
+        ("paused value for " ^ name)
+        (Some paused)
+        (Server_dashboard_http_execution_surfaces.paused_of_lifecycle_event name))
+    cases
+
 let () =
   run "dashboard_http_core"
     [
@@ -1350,5 +1397,7 @@ let () =
             test_lifecycle_event_of_string_roundtrip;
           test_case "cache patchers cover the SSOT vocabulary" `Quick
             test_lifecycle_event_cache_patcher_coverage;
+          test_case "cache patchers pin byte-identical values" `Quick
+            test_lifecycle_event_display_values;
         ] );
     ]

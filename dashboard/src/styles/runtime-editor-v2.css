@@ -451,8 +451,8 @@ html[data-skin="v2"] .rt-assign-tag.pin { color: var(--volt-strong); } /* runtim
 /* toml — runtime.css:101 */
 html[data-skin="v2"] .rt-toml-wrap {
   /* runtime.css:101 — --bg-well (#06070a) is defined by the v2 foundation
-     (skin-v2.css / v2-skin-tokens.css), so use it verbatim instead of the
-     nearer --bg-sunken to keep the prototype's deepest code-well depth. */
+     (skin-v2.css), so use it verbatim instead of the nearer --bg-sunken to
+     keep the prototype's deepest code-well depth. */
   border: 1px solid var(--border-main);
   border-radius: var(--radius-sm);
   overflow: hidden;

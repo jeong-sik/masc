@@ -38,7 +38,10 @@
 @import "./v2-shell.css";
 @import "./app-shell-v2.css";
 @import "./v2-theme.css";
-@import "./v2-skin-tokens.css";
+/* v2-skin-tokens.css removed — it duplicated the skin-v2.css [data-skin=v2]
+ * token block verbatim (strict subset, zero value drift) and was shadowed by
+ * skin-v2.css's higher-specificity html[data-skin=v2] selector. Single SSOT is
+ * skin-v2.css. Do not re-add a separate token-only v2 file. */
 @import "./keeper-turn-inspector.css";
 @import "./v2-logs.css";
 @import "./v2-overview.css";

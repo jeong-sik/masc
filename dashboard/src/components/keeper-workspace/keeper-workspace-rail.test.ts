@@ -99,6 +99,28 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).not.toContain('T-9999')
   })
 
+  it('renders owned task status in the top row and title on its own line', () => {
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
+    const tag = container.querySelector('.kw-tasktag') as HTMLElement | null
+    expect(tag).not.toBeNull()
+    const row = tag?.querySelector('.kw-tasktag-row')
+    expect(row).not.toBeNull()
+    expect(row?.textContent).toContain('T-4412')
+    expect(row?.textContent).toContain('in_progress')
+    expect(tag?.textContent).toContain('세그먼트 리텐션 대시보드')
+  })
+
+  it('renders throughput range chips when a sparkline is available', () => {
+    const k = mkKeeper({
+      metrics_series: [{ wall_tokens_per_second: 10 }, { wall_tokens_per_second: 64 }] as unknown as Keeper['metrics_series'],
+    })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
+    const chips = container.querySelector('.kw-range-chips')
+    expect(chips).not.toBeNull()
+    expect(chips?.textContent).toContain('저부하')
+    expect(chips?.textContent).toContain('고부하')
+  })
+
   it('opens the planning task detail when an owned task is clicked', () => {
     const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
     fireEvent.click(getByRole('button', { name: /태스크 열기: T-4412/ }))

@@ -797,6 +797,14 @@ export type ChatShellBlock = { t: 'shell'; title?: string; lines: ChatShellLine[
 
 export type ChatArtifactBlock = { t: 'artifact'; kind?: string; name: string; size?: string; note?: string; data?: string; mimeType?: string }
 
+export type ChatChartSeries = { label: string; color?: string; values: number[] }
+export type ChatChartBlock = { t: 'chart'; title: string; series: ChatChartSeries[]; labels?: string[]; xLabel?: string; yMax?: number }
+
+export type ChatSuggestionItem = { icon?: string; label: string; action?: string }
+export type ChatSuggestionsBlock = { t: 'suggestions'; items: ChatSuggestionItem[] }
+
+export type ChatIssueBlock = { t: 'issue'; repo: string; number: number; title: string; status: 'open' | 'closed'; url?: string; meta?: string }
+
 export type ChatAttachBlock = {
   t: 'attach'
   name: string
@@ -849,6 +857,9 @@ export type ChatBlock =
   | ChatCodeBlock
   | ChatShellBlock
   | ChatArtifactBlock
+  | ChatChartBlock
+  | ChatSuggestionsBlock
+  | ChatIssueBlock
   | ChatAttachBlock
   | ChatVoiceBlock
   | ChatImageBlock

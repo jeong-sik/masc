@@ -69,6 +69,14 @@ describe('KeeperWorkspaceRoster', () => {
     expect(chips.some(c => c?.includes('주의') && c?.includes('1'))).toBe(true)
   })
 
+  it('renders a Keepers title with the total count above the search box', () => {
+    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
+    const title = host.querySelector('.kw-roster-title') as HTMLElement | null
+    expect(title).not.toBeNull()
+    expect(title?.textContent).toContain('Keepers')
+    expect(title?.textContent).toContain('3')
+  })
+
   it('renders a backed fleet summary band before scanning roster rows', () => {
     keepers.value = [
       mk({ name: 'running', status: 'running', lifecycle_phase: 'Running', context_ratio: 0.81 }),

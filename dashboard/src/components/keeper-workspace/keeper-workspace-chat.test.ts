@@ -135,6 +135,26 @@ describe('KeeperWorkspaceChat', () => {
     expect(container.querySelector('[data-testid="kw-chat-command-icons"]')).not.toBeNull()
   })
 
+  it('renders the keeper scope/path slug under the chat name', async () => {
+    const { KeeperWorkspaceChat } = await loadChat()
+    const keeperWithSlug = { ...mockKeeper, sandbox_target: '~/wt/sangsu', skill_primary: 'skill-primary' }
+
+    await act(async () => {
+      render(html`
+        <${KeeperWorkspaceChat}
+          keeper=${keeperWithSlug}
+          detailOpen=${false}
+          onToggleDetail=${vi.fn()}
+          onClear=${vi.fn()}
+        />
+      `, container)
+    })
+
+    const slug = container.querySelector('.kw-chat-slug') as HTMLElement | null
+    expect(slug).not.toBeNull()
+    expect(slug?.textContent).toContain('~/wt/sangsu')
+  })
+
   it('opens the turn inspector drawer when the turn inspector button is clicked', async () => {
     const { KeeperWorkspaceChat } = await loadChat()
 

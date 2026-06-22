@@ -149,12 +149,14 @@
   --font-body:    var(--font-sans);
   --font-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
-  --fs-9:  9px;
-  --fs-10: 10px;
-  --fs-11: 11px;
+  --fs-9:   9px;
+  --fs-9-5: 9.5px;
+  --fs-10:  10px;
+  --fs-11:  11px;
   --fs-12: 12px;
   --fs-13: 13px;
   --fs-14: 14px;
+  --fs-15: 15px;
   --fs-16: 16px;
   --fs-20: 20px;
   --fs-28: 28px;

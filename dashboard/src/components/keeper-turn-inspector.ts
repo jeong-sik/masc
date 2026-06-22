@@ -730,12 +730,15 @@ function buildTurnDetail(
     ttfrcMs: record.ttfrc_ms ?? null,
     visualDurationMs: 0,
     visualOffsetMs: 0,
-    meta:
-      record.request_latency_ms != null
-        ? record.ttfrc_ms != null
-          ? `provider call wall-clock (request_latency_ms) · 첫 토큰 ${formatMsCompact(record.ttfrc_ms)} (ttfrc_ms)`
-          : 'provider call wall-clock (request_latency_ms)'
-        : 'provider/OAS duration is not recorded for this turn',
+    meta: (() => {
+      if (record.request_latency_ms == null) {
+        return 'provider/OAS duration is not recorded for this turn'
+      }
+      if (record.ttfrc_ms != null) {
+        return `provider call wall-clock (request_latency_ms) · 첫 토큰 ${formatMsCompact(record.ttfrc_ms)} (ttfrc_ms)`
+      }
+      return 'provider call wall-clock (request_latency_ms)'
+    })(),
   })
   const { visualTotalMs, measuredDurationMs } = finalizePhaseOffsets(phases)
 

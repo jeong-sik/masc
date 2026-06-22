@@ -4,8 +4,8 @@
 - Author: Vincent (yousleepwhen) + Claude
 - Created: 2026-06-22
 - Parent: RFC-0252 (fusion-panel-judge-deliberation) §7 — 본 RFC는 패널 정체성(panel identity)을 개정한다. RFC-0277(이종 패널 그룹)의 후속 슬라이스.
-- Scope: `lib/fusion_core/` (policy/config/types), `lib/fusion/` (panel/oas). judge/sink/dashboard 무변경.
-- Boundary: OAS는 0줄 변경. judge/sink 계약 무변경. provider 라우팅 무변경.
+- Scope: `lib/fusion_core/` (policy/config/types), `lib/fusion/` (panel/oas/sink). judge/dashboard 무변경.
+- Boundary: provider 라우팅 무변경(언제나 raw model). judge 계약 무변경. sink는 패널 실패 렌더를 정체성 대신 raw-model attribution으로 분리(`panel_failure_text`, §2.5) — label 없는 config에는 byte-identical(§3).
 
 ---
 
@@ -82,7 +82,16 @@ RFC-0277의 `preset_duplicate_model`(model 유일성)을 `preset_duplicate_panel
 
 ### 2.4 정체성 plumbing (`lib/fusion/fusion_panel.ml:47`, `fusion_oas.ml:101`)
 
-`build_agent`에 `?name` 추가 — 카드명(`Async_agent.all` 반환 키)을 정체성으로 두되 provider 해석은 model로 한다. `fusion_panel.run`은 그룹별로 `panelist_id ~label ~model`을 계산해 `~name:panelist`로 빌드하고, outcome의 `model`/`failed_model`에 정체성을 담는다. 심판/sink는 `.model`/synthesis 문자열을 그대로 소비하므로 **무변경**.
+`build_agent`에 `?name` 추가 — 카드명(`Async_agent.all` 반환 키)을 정체성으로 두되 provider 해석은 model로 한다. `fusion_panel.run`은 그룹별로 `panelist_id ~label ~model`을 계산해 `~name:panelist`로 빌드하고, outcome의 `model`/`failed_model`에 정체성을 담는다. 심판은 `.model`/synthesis 문자열을 그대로 소비하므로 무변경.
+
+### 2.5 에러 attribution 분리 (`fusion_panel.ml`, `fusion_sink.ml`, `fusion_oas.ml`)
+
+정체성(panelist)과 routable model의 분리는 **성공 경로뿐 아니라 실패 경로에도** 적용된다. `provider_error_detail ~runtime_id`는 `Provider 'unknown'` → `Provider '<runtime_id>'` 치환·prefix 부여로, `runtime_id` 슬롯에 *실제 provider model*을 받는 계약이다(`test_fusion_oas_error_detail.ml`). 따라서:
+
+- `outcome_of_result`는 `~panelist ~model`을 따로 받아, `failed_model`에는 panelist(정체성)를, provider 에러 detail에는 `~runtime_id:model`(raw)을 쓴다. raw model은 `built : (agent, panelist, model)` triple로 `Async_agent.all`(=`Eio.Fiber.List.map`, 입력순 보존) 결과와 위치로 짝지어 thread한다 — panelist 문자열을 역파싱(string-classifier 안티패턴)하지 않는다.
+- `fusion_sink.panel_meta`는 이미 attribution된 detail을 `panel_failure_text`로 **재-attribution 없이** 렌더한다. 기존 `panel_failure_detail ~runtime_id:failed_model`(=panelist)은 라벨 적용 시 `Provider 'skeptic (claude)'` 가짜 provider id나 중복 prefix를 만들었다.
+
+근거: label 적용 시 panelist(`"skeptic (claude)"`)는 provider model id가 아니므로 `Provider '...'` 슬롯에 들어가면 provider별 집계·로그 디버깅이 오염된다.
 
 ---
 
@@ -92,8 +101,9 @@ label이 없는 모든 config(legacy flat + RFC-0277 이종 그룹, unique model
 
 - `panelist_id ~label:"" ~model = model` → 카드명·정체성·심판 태그·`panel_answer.model`이 모두 오늘과 동일.
 - `preset_duplicate_panelist`가 label 없는 동일 model을 RFC-0277의 `preset_duplicate_model`과 정확히 같게 거부.
+- §2.5 sink 변경도 byte-identical: label 없으면 panelist=model이라 기존 `panel_failure_detail ~runtime_id:model`은 이미-attribution된 detail에 **idempotent**(re-attribution 무효과)였고, 새 `panel_failure_text`는 그 detail을 그대로 반환 → 동일 문자열. Timeout/Empty도 동일("timeout"/"empty response"). 분리가 관측되는 건 라벨 적용 시뿐.
 
-검증: `test/fusion_core/test_fusion.ml`의 `config/panels_golden`(flat == 단일 그룹 + `preset_panelist_ids = ["a";"b";"c"]` = models)과 `config/panelist_id`(SSOT 단위)가 이 불변식을 핀한다.
+검증: `test/fusion_core/test_fusion.ml`의 `config/panels_golden`(flat == 단일 그룹 + `preset_panelist_ids = ["a";"b";"c"]` = models)과 `config/panelist_id`(SSOT 단위)가 정체성 불변식을, `test/test_fusion_sink_meta.ml`의 `panel_meta_identity_vs_provider`가 §2.5 분리(failed_model=panelist, reason_detail의 provider 슬롯=raw model)를 핀한다.
 
 ---
 

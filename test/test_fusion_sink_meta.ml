@@ -129,6 +129,42 @@ let test_error_branch () =
   check (option string) "error message" (Some "boom") (string_field a "error");
   check bool "no consensus on error" false (List.mem "consensus" (keys a))
 
+(* --- RFC-0278: panel_meta가 정체성(panelist)과 provider attribution을 분리 ---
+   failed_model = 패널 정체성("skeptic (claude)")이지만, reason_detail의 "Provider '...'"
+   슬롯에는 raw provider model("claude")만 남아야 한다. sink가 panelist로 재-attribution
+   하면 "skeptic (claude): Provider 'claude'..." 중복 prefix나 "Provider 'skeptic
+   (claude)'" 가짜 provider id가 생긴다. 이 테스트가 그 회귀를 잡는다. *)
+let test_panel_meta_failure_keeps_raw_provider () =
+  let o =
+    Failed
+      { failed_model = "skeptic (claude)"
+      ; reason = Provider_error "Provider 'claude': boom" }
+  in
+  let a = assoc_of (Masc.Fusion_sink.panel_meta o) in
+  check (option string) "model field = panel identity" (Some "skeptic (claude)")
+    (string_field a "model");
+  check (option string) "reason_detail keeps raw provider (no panelist leak)"
+    (Some "Provider 'claude': boom") (string_field a "reason_detail");
+  check (option string) "reason mirrors detail" (Some "Provider 'claude': boom")
+    (string_field a "reason");
+  check (option string) "reason_code stable" (Some "provider_error")
+    (string_field a "reason_code")
+
+let test_panel_meta_answered_uses_identity () =
+  let o = Answered { model = "skeptic (claude)"; answer = "hi"; usage = zero_usage } in
+  let a = assoc_of (Masc.Fusion_sink.panel_meta o) in
+  check (option string) "answered model = identity" (Some "skeptic (claude)")
+    (string_field a "model");
+  check (option string) "status answered" (Some "answered") (string_field a "status")
+
+let test_panel_meta_timeout_text () =
+  let o = Failed { failed_model = "skeptic (claude)"; reason = Timeout } in
+  let a = assoc_of (Masc.Fusion_sink.panel_meta o) in
+  check (option string) "timeout reason_detail" (Some "timeout")
+    (string_field a "reason_detail");
+  check (option string) "timeout reason_code" (Some "timeout")
+    (string_field a "reason_code")
+
 let () =
   run "Fusion_sink.judge_meta"
     [ ( "structured"
@@ -146,5 +182,11 @@ let () =
         ; test_case "coverage_gap_and_insight" `Quick
             test_key_mapping_coverage_and_insight
         ; test_case "contradiction_positions" `Quick test_contradiction_positions
+        ] )
+    ; ( "panel_meta_identity_vs_provider"
+      , [ test_case "failure_keeps_raw_provider" `Quick
+            test_panel_meta_failure_keeps_raw_provider
+        ; test_case "answered_uses_identity" `Quick test_panel_meta_answered_uses_identity
+        ; test_case "timeout_text" `Quick test_panel_meta_timeout_text
         ] )
     ]

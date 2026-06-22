@@ -23,7 +23,10 @@ Design constraints:
   (panelist_id 유일성)로 교체. 한 그룹 내 동일 model·라벨 없는 동일 model·동일 라벨+model을
   한 invariant로 흡수. 서로 다른 라벨의 동일 model은 통과.
 - config_error `Duplicate_panel_model` → `Duplicate_panelist` rename.
-- judge/sink/dashboard 무변경(이미 `.model`/synthesis 문자열 소비). OAS 0줄.
+- 정체성/routable model 분리는 실패 경로에도 적용(적대적 리뷰 P1):
+  `outcome_of_result ~panelist ~model`로 provider 에러 detail은 raw model attribution,
+  `failed_model`은 panelist. sink는 `panel_failure_text`로 재-attribution 제거.
+  judge/dashboard 무변경. OAS는 `panel_failure_text` 함수 추가.
 - byte-identity: label 없는 모든 config(legacy flat + RFC-0277 이종 그룹)는 정체성=model →
   오늘과 동일 동작.
 

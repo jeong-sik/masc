@@ -44,6 +44,17 @@ let panel_failure_detail ~runtime_id = function
   | Fusion_types.Provider_error detail -> provider_error_detail ~runtime_id detail
   | Fusion_types.Empty_response -> "empty response"
 
+(* 이미 attribution된 실패를 재-attribution 없이 렌더한다. Provider_error의 detail은
+   실패 시점(panel outcome_of_result / build_agent)에 provider_error_detail
+   ~runtime_id:model(raw)로 정규화돼 있으므로, sink가 다시 runtime_id를 입히면
+   panelist(정체성, 예 "skeptic (claude)")가 "Provider '...'" 슬롯에 새거나 중복
+   prefix가 붙는다 (RFC-0278). panelist는 panel_answer.model/failed_model에만 두고
+   provider attribution은 detail 안에 이미 박혀 있는 raw model을 쓴다. *)
+let panel_failure_text = function
+  | Fusion_types.Timeout -> "timeout"
+  | Fusion_types.Provider_error detail -> detail
+  | Fusion_types.Empty_response -> "empty response"
+
 let timeout_budget_opt timeout_s =
   if Float.is_finite timeout_s && timeout_s > 0.0 then Some timeout_s else None
 

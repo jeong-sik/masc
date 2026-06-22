@@ -6,9 +6,12 @@
 
 (* [panelist] = 패널 정체성 (RFC-0278, Fusion_policy.panelist_id) — 라벨 없으면 model
    그대로. panel_answer.model / panel_error.failed_model에 이 정체성을 담는다(심판·sink가
-   같은 식별자로 패널을 지칭). Async_agent.all이 카드명(=정체성)을 결과 키로 돌려주므로
-   여기 들어오는 name이 곧 정체성이다. *)
-let outcome_of_result (panelist : string)
+   같은 식별자로 패널을 지칭).
+   [model] = routable provider model id. 정체성과 분리해 다룬다: provider 에러
+   attribution(`Provider '...'` 슬롯)에는 raw [model]만 쓴다 — panelist(예
+   "skeptic (claude)")는 실제 provider id가 아니므로 그 슬롯에 새면 provider 집계/로그
+   디버깅이 오염된다 (RFC-0278 §2.4, 정체성·routable model 비압축 원칙). *)
+let outcome_of_result ~(panelist : string) ~(model : string)
     (res : (Agent_sdk.Types.api_response, Agent_sdk.Error.sdk_error) result)
   : Fusion_types.panel_outcome
   =
@@ -26,7 +29,7 @@ let outcome_of_result (panelist : string)
       { failed_model = panelist
       ; reason =
           Fusion_types.Provider_error
-            (Fusion_oas.provider_error_detail ~runtime_id:panelist
+            (Fusion_oas.provider_error_detail ~runtime_id:model
                (Agent_sdk.Error.to_string e))
       }
 
@@ -50,7 +53,7 @@ let run ~sw ~net ~max_fibers ~outer_timeout_s ~groups ~prompt ()
                 ~max_tool_calls:g.max_tool_calls ~timeout_s:g.timeout_s
                 ~name:panelist model
             with
-            | Ok agent -> ((agent, panelist) :: oks, fails)
+            | Ok agent -> ((agent, panelist, model) :: oks, fails)
             | Error reason ->
               (oks, Fusion_types.Failed { failed_model = panelist; reason } :: fails))
           acc g.models)
@@ -61,20 +64,27 @@ let run ~sw ~net ~max_fibers ~outer_timeout_s ~groups ~prompt ()
   let build_failures = List.rev build_failures in
   (* 2. 모든 그룹을 하나의 Async_agent.all에 union으로 던진다 — 이종 설정은 이미 각
         agent에 baked되어 있으므로 단일 fan-out으로 충분. 외곽 run_safe는 그룹 timeout
-        중 max로 전체 멈춤을 막는 상한. 반환 name = 에이전트 카드명 = 패널 정체성. *)
+        중 max로 전체 멈춤을 막는 상한.
+        [Async_agent.all]은 [Eio.Fiber.List.map] 기반이라 결과를 입력 순서대로 돌려준다.
+        그래서 반환 name(=카드명=정체성)에 의존하지 않고 [built]와 위치로 짝지어
+        (panelist, model) 둘 다 확보한다 — provider 에러 attribution에 정체성이 아닌
+        raw model을 쓰기 위함 (RFC-0278). *)
   let answered =
     match
       Masc_oas_bridge.run_safe ~caller:"fusion_panel" ~timeout_s:outer_timeout_s (fun () ->
         Ok
           (Agent_sdk.Async_agent.all ~sw ~max_fibers
-             (List.map (fun (agent, _panelist) -> (agent, prompt)) built)))
+             (List.map (fun (agent, _panelist, _model) -> (agent, prompt)) built)))
     with
     | Ok run_results ->
-      List.map (fun (name, res) -> outcome_of_result name res) run_results
+      List.map2
+        (fun (_agent, panelist, model) (_name, res) ->
+          outcome_of_result ~panelist ~model res)
+        built run_results
     | Error _ ->
       (* 구조적 타임아웃/취소: 빌드된 패널 전부 Timeout 처리. *)
       List.map
-        (fun (_agent, panelist) ->
+        (fun (_agent, panelist, _model) ->
           Fusion_types.Failed
             { failed_model = panelist; reason = Fusion_types.Timeout })
         built

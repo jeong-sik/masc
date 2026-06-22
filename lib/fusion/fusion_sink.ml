@@ -143,7 +143,10 @@ let panel_meta (o : Fusion_types.panel_outcome) : Yojson.Safe.t =
       ]
   | Fusion_types.Failed { failed_model; reason } ->
     let reason_code = Fusion_oas.panel_failure_code reason in
-    let reason_detail = Fusion_oas.panel_failure_detail ~runtime_id:failed_model reason in
+    (* reason detail은 실패 시점에 raw model로 이미 attribution됐다. 여기서
+       ~runtime_id:failed_model(=panelist)로 재-attribution하면 "skeptic (claude)"
+       같은 정체성이 provider 슬롯에 새거나 중복 prefix가 붙는다 (RFC-0278). *)
+    let reason_detail = Fusion_oas.panel_failure_text reason in
     `Assoc
       [ ("model", `String failed_model)
       ; ("status", `String "failed")

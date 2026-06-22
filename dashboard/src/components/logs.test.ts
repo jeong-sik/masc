@@ -504,7 +504,7 @@ describe('LogViewer Code links', () => {
           level: 'INFO',
           module: 'keeper_turn',
           category: 'routine',
-          turn_id: 'turn-2',
+          turn_id: 2,
           message: 'turn event',
           details: {
             model: 'gpt-4o-mini',
@@ -620,4 +620,3 @@ describe('LogViewer kind column', () => {
     expect(kindCell!.textContent).toBe('TOOL')
   })
 })
-

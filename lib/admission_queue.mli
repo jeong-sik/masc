@@ -43,8 +43,11 @@ val with_permit :
   (unit -> 'a) ->
   ('a, [> `Host_resource_saturated of string ]) result
 (** Run [f] in passthrough mode and record inflight observation for metrics
-    and snapshots. Returns [Error (`Host_resource_saturated msg)] if host FD
-    count exceeds the safety threshold. Otherwise returns [Ok (f ())].
+    and snapshots. When an fd-pressure threshold is configured
+    ([Otel_metric_process.fd_warn_threshold = Some _]) and the host FD count
+    reaches it, returns [Error (`Host_resource_saturated msg)]; otherwise
+    returns [Ok (f ())]. While the threshold is [None] (the default) the fd
+    scan is skipped and every call is admitted.
 
     No MASC-side concurrency gate is applied here; OAS runtime owns provider
     capacity, retry, and timeout behavior. *)
@@ -86,4 +89,14 @@ module For_testing : sig
     threshold:int ->
     (unit, [> `Host_resource_saturated of string ]) result
   (** Deterministic host-resource check for threshold tests. *)
+
+  val check_host_resources_for_threshold :
+    surface:Admission_queue_metrics.rejection_surface ->
+    keeper_name:string ->
+    threshold:int option ->
+    fd_count:(unit -> int) ->
+    (unit, [> `Host_resource_saturated of string ]) result
+  (** The production gate as a pure function: [fd_count] is forced only when
+      [threshold] is [Some _]. Tests pass a counting thunk to assert the
+      [/dev/fd] scan is skipped while gating is disabled ([None]). *)
 end

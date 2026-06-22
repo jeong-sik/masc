@@ -31,7 +31,7 @@ type pending_approval =
   ; selected_model : string option
   ; disposition : string option
   ; disposition_reason : string option
-  ; audit_base_path : string option
+  ; audit_base_path : string
   ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
   ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
   }

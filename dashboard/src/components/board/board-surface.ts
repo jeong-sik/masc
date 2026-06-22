@@ -12,7 +12,6 @@ import { Select } from '../common/select'
 import { Checkbox } from '../common/checkbox'
 import { RichContent } from '../common/rich-content'
 import { CursorPagination } from '../common/pagination'
-import { SurfaceHeader } from '../common/surface-header'
 import { stripStateBlocks } from '../../keeper-message'
 import { route } from '../../router'
 import { keepers as dashboardKeepers, messages, refreshExecution } from '../../store'
@@ -1502,7 +1501,6 @@ export function BoardSurface() {
       class="v2-board-surface ss-surface bg-surface-page text-text-primary"
       data-detail-width=${String(detailWidth)}
     >
-      <${SurfaceHeader} />
       <div class="bd-body" style=${`--bd-detail-width: ${detailWidth}px;`}>
         <${BdRail}
           activeSub=${activeSub}

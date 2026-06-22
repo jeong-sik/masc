@@ -700,6 +700,21 @@ let run_turn
                 t.request_latency_ms)
           | Error _ -> None
         in
+        let ttfrc_ms : float option =
+          (* RFC-0233 §10 — time-to-first-response-chunk (wall-clock, ms),
+             sourced from OAS [inference_telemetry.ttfrc_ms]. The streaming
+             transport ([complete_stream]) fills it for every provider on the
+             first SSE chunk, so it is populated across the streaming keeper
+             fleet; non-streaming turns and the error path leave it [None].
+             Both [inference_telemetry] and the field are [option], so
+             [Option.bind] flattens (same pattern as [request_latency_ms]
+             above). The decode (post-first-chunk) duration is NOT derived
+             from request_latency_ms - ttfrc_ms (§9.6 fabrication guard). *)
+          match turn_result with
+          | Ok result ->
+              Option.bind result.inference_telemetry (fun t -> t.ttfrc_ms)
+          | Error _ -> None
+        in
         (* RFC-0233 §2.3 — views derive, no view-side repair: ground the
            inspector's [model] and [finish_reason] in the same refs the
            execution receipt already records this turn. [model] is the
@@ -733,6 +748,7 @@ let run_turn
           ~price_input_per_million
           ~price_output_per_million
           ~request_latency_ms
+          ~ttfrc_ms
           ~sampling:
             { temperature = Some temperature
             ; top_p = None

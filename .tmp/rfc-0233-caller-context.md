@@ -73,3 +73,35 @@ Verification expectation:
   absent case omits the key / decodes `None`.
 - The inspector renders a real `formatMsCompact` on the `gen` phase when
   present, "측정 없음" when absent.
+
+## §10 Amendment (2026-06-22) — time-to-first-token: `ttfrc_ms`
+
+Caller context (R5): the Wave-2c field surfaces OAS
+`inference_telemetry.ttfrc_ms` through the same write path as §9
+(`keeper_agent_run.ml` → `Keeper_turn_record_writer` → `Turn_record.to_json`
+→ dashboard decoder). The field is populated across the streaming keeper
+fleet (provider-agnostic wall-clock at the first SSE chunk,
+`complete_stream.ml:573-574`); non-streaming turns and the error path leave
+it `None`. The decode (post-first-chunk) split is intentionally not derived
+(§9.6 fabrication guard) — `ttfrc_ms` is shown as a separate `gen`-phase
+annotation, never subtracted.
+
+Design constraints:
+
+- One `option` field `ttfrc_ms : float` on `Turn_record.t`. Same
+  `Option.bind` pattern as `request_latency_ms` (both `inference_telemetry`
+  and the field are `option`). `float`, not `int`, matching the OAS type.
+- The `gen` phase keeps `durationMs = request_latency_ms` (end-to-end) and
+  adds a separate `TurnPhase.ttfrcMs`; `phaseDurationLabel` appends
+  `· 첫 {formatMsCompact(ttfrc)}` only when both are present.
+- `prefill_ms`/`timings` stay deferred (§9.4): cloud keepers do not report
+  them, so a full prefill/decode split (option A) was rejected for empty
+  columns. `ttfrc_ms` is the one phase-level field every streaming provider
+  reports.
+
+Verification expectation:
+
+- `test_turn_record.ml` proves `ttfrc_ms` round-trips (`Some 567.8`) and
+  that the absent case omits the key / decodes `None`.
+- The inspector renders `"· 첫 568ms"` alongside the `gen` phase duration
+  when present, leaving the label at its end-to-end form when absent.

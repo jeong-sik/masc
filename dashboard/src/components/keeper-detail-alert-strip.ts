@@ -75,7 +75,7 @@ function SyntheticAwareText({ text }: { text: string }) {
 // just returns false and both lines render.
 const ATTENTION_PAIR_DUPLICATES: ReadonlyArray<readonly [AttentionReason, NextHumanAction]> = [
   ['runtime_blocked', 'inspect_runtime_blocker'],
-  ['paused_blocked', 'inspect_blocker_before_resume'],
+  ['paused', 'inspect_blocker_before_resume'],
   ['runtime_trust_snapshot_unavailable', 'inspect_keeper_runtime_trust'],
 ]
 const ATTENTION_PAIR_DUPLICATE_KEYS = new Set<string>(

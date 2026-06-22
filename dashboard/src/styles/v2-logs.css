@@ -306,18 +306,24 @@
 
 .v2-logs-row[data-sev="warn"] {
   border-left-color: color-mix(in oklab, var(--status-warn) 70%, transparent);
+  background: color-mix(in oklab, var(--status-warn) 5%, transparent);
 }
 
 .v2-logs-row[data-sev="bad"] {
   border-left-color: var(--status-bad);
+  background: color-mix(in oklab, var(--status-bad) 7%, transparent);
 }
 
+/* busy deliberately uses --volt (blue), NOT --status-busy (which aliases
+   --info/cyan), so busy and info severities stay visually distinct. */
 .v2-logs-row[data-sev="busy"] {
   border-left-color: var(--volt);
+  background: color-mix(in oklab, var(--volt) 4%, transparent);
 }
 
 .v2-logs-row[data-sev="info"] {
   border-left-color: color-mix(in oklab, var(--info) 60%, transparent);
+  background: color-mix(in oklab, var(--info) 4%, transparent);
 }
 
 .v2-logs-row.is-open {
@@ -326,6 +332,24 @@
 
 .v2-logs-row:hover {
   background: color-mix(in oklab, var(--text-bright) 4%, transparent);
+}
+
+/* Severity hover compounds: keep the severity tint visible on hover by
+   intensifying it rather than letting the neutral :hover above erase it. */
+.v2-logs-row[data-sev="warn"]:hover {
+  background: color-mix(in oklab, var(--status-warn) 9%, transparent);
+}
+.v2-logs-row[data-sev="bad"]:hover {
+  background: color-mix(in oklab, var(--status-bad) 11%, transparent);
+}
+.v2-logs-row[data-sev="busy"]:hover {
+  background: color-mix(in oklab, var(--volt) 8%, transparent);
+}
+.v2-logs-row[data-sev="info"]:hover {
+  background: color-mix(in oklab, var(--info) 8%, transparent);
+}
+.v2-logs-row[data-sev="bad"].is-open {
+  background: color-mix(in oklab, var(--status-bad) 9%, transparent);
 }
 
 .v2-logs-line {
@@ -360,21 +384,16 @@
   min-width: 0;
 }
 
-.v2-logs-sigil {
-  display: inline-flex;
-  width: 18px;
-  height: 18px;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid color-mix(in oklab, var(--volt) 30%, var(--border-main));
-  border-radius: var(--radius-sm);
-  background: color-mix(in oklab, var(--volt) 18%, var(--bg-card));
-  color: var(--text-bright);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0;
+/* Sigil is rendered by the canonical <KeeperBadge> (components/keeper-badge.ts),
+   which carries its own inline style + dark-on-keeper-color text for contrast.
+   The old .v2-logs-sigil rule was removed to avoid a third source of truth. */
+.v2-logs-eyebrow {
+  color: var(--text-dim);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin: 0 0 2px;
 }
 
 .v2-logs-identity {
@@ -405,7 +424,8 @@
 }
 
 .v2-logs-kind[data-kind="turn"] {
-  color: var(--text-mid);
+  color: var(--text-bright);
+  border-color: color-mix(in oklab, var(--text-mid) 30%, transparent);
 }
 
 .v2-logs-kind[data-kind="lifecycle"] {

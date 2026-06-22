@@ -318,6 +318,99 @@ let test_recent_direct_context_omits_transport_failure_as_self_reply () =
       Alcotest.(check bool) "failure text is not a self utterance" false
         (contains_substring rendered "Keeper request failed"))
 
+(* RFC-0276 / task-1468: a pre-purge assistant turn led with social-state
+   headers and then the real reply. The header lines must be stripped at the
+   parse boundary while the reply survives — otherwise the headers re-inject and
+   the BDI loop persists, or (the previous over-strip bug) the whole turn
+   including the reply is dropped. *)
+let test_recent_direct_context_strips_legacy_social_headers_keeps_reply () =
+  let base_dir = temp_base_path "keeper-chat-social-strip" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-social-strip" in
+      K.append_assistant_message ~base_dir ~keeper_name
+        ~content:
+          "SOCIAL_MODEL: cooperative\n\
+           BELIEF_SUMMARY: user is waiting\n\
+           SPEECH_ACT: inform\n\
+           DELIVERY_SURFACE: dashboard\n\
+           ACTIVE_DESIRE: finish task\n\
+           CURRENT_INTENTION: reply now\n\
+           BLOCKER: none\n\
+           NEED: nothing\n\
+           I finished reading the board and posted a summary."
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ();
+      let lines =
+        K.load ~base_dir ~keeper_name
+        |> MS.recent_direct_conversation_of_messages
+      in
+      Alcotest.(check (list string)) "row survives as a single assistant line"
+        [ "assistant" ] (recent_roles lines);
+      let rendered = MS.render_recent_direct_conversation_context lines in
+      Alcotest.(check bool) "real reply text is preserved" true
+        (contains_substring rendered
+           "I finished reading the board and posted a summary.");
+      List.iter
+        (fun header ->
+          Alcotest.(check bool)
+            (Printf.sprintf "social header %S is stripped" header)
+            false
+            (contains_substring rendered header))
+        [ "SOCIAL_MODEL:"; "BELIEF_SUMMARY:"; "SPEECH_ACT:"
+        ; "DELIVERY_SURFACE:"; "ACTIVE_DESIRE:"; "CURRENT_INTENTION:" ])
+
+(* An assistant row that is *only* headers carries no reply; after stripping it
+   collapses to empty and must drop out entirely rather than render a blank
+   "- assistant:" line. *)
+let test_recent_direct_context_drops_header_only_assistant_row () =
+  let base_dir = temp_base_path "keeper-chat-social-only" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-social-only" in
+      K.append_assistant_message ~base_dir ~keeper_name
+        ~content:"SOCIAL_MODEL: cooperative\nSPEECH_ACT: inform\nNEED: nothing"
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ();
+      K.append_assistant_message ~base_dir ~keeper_name
+        ~content:"A genuine reply with no headers."
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ();
+      let lines =
+        K.load ~base_dir ~keeper_name
+        |> MS.recent_direct_conversation_of_messages
+      in
+      Alcotest.(check (list string)) "header-only row dropped, real reply kept"
+        [ "assistant" ] (recent_roles lines);
+      let rendered = MS.render_recent_direct_conversation_context lines in
+      Alcotest.(check bool) "remaining reply is the genuine one" true
+        (contains_substring rendered "A genuine reply with no headers."))
+
+(* The strip is scoped to assistant rows: a user who literally types a line
+   starting with "BLOCKER:" or "NEED:" is conversational input, not a keeper
+   self-report header, and must not be filtered. *)
+let test_recent_direct_context_keeps_user_blocker_line () =
+  let base_dir = temp_base_path "keeper-chat-user-blocker" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-user-blocker" in
+      K.append_user_message ~base_dir ~keeper_name
+        ~content:"BLOCKER: the deploy is stuck, can you check?"
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ();
+      let lines =
+        K.load ~base_dir ~keeper_name
+        |> MS.recent_direct_conversation_of_messages
+      in
+      Alcotest.(check (list string)) "user line survives" [ "user" ]
+        (recent_roles lines);
+      let rendered = MS.render_recent_direct_conversation_context lines in
+      Alcotest.(check bool) "user BLOCKER: text is not stripped" true
+        (contains_substring rendered "the deploy is stuck"))
+
 let test_recent_direct_context_omits_voice_audio_self_echo () =
   let base_dir = temp_base_path "keeper-chat-recent-voice" in
   Fun.protect
@@ -1293,6 +1386,13 @@ let () =
             test_recent_direct_context_renders_prior_reply_and_tool_evidence;
           Alcotest.test_case "recent context omits transport failure as reply" `Quick
             test_recent_direct_context_omits_transport_failure_as_self_reply;
+          Alcotest.test_case "recent context strips legacy social headers, keeps reply"
+            `Quick
+            test_recent_direct_context_strips_legacy_social_headers_keeps_reply;
+          Alcotest.test_case "recent context drops header-only assistant row" `Quick
+            test_recent_direct_context_drops_header_only_assistant_row;
+          Alcotest.test_case "recent context keeps user BLOCKER: line" `Quick
+            test_recent_direct_context_keeps_user_blocker_line;
           Alcotest.test_case "recent context omits voice audio self echo" `Quick
             test_recent_direct_context_omits_voice_audio_self_echo;
           Alcotest.test_case "recent context is owner-direct only" `Quick

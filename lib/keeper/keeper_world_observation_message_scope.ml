@@ -94,6 +94,48 @@ let take_last limit items =
   drop (max 0 (len - limit)) items
 ;;
 
+(* RFC-0276 (Phase 2 purge) removed the keeper social-model self-report
+   protocol end to end: no code path emits these headers any more
+   (`rg "SOCIAL_MODEL:|BELIEF_SUMMARY:|SPEECH_ACT:|DELIVERY_SURFACE:|ACTIVE_DESIRE:|CURRENT_INTENTION:" lib/`
+   = 0 producers). They survive only in durable chat-store rows written before
+   the purge, when a keeper was told to "start every response with
+   machine-readable headers" (RFC-0276 §2.1). Re-injecting those stale header
+   lines into the next turn's prompt restored the social state the keeper then
+   re-emitted — a self-reinforcing loop that outlived the code purge (task-1468).
+
+   The set is closed (the producer is gone), so this is a parse-boundary reject
+   of un-migrated data, not a new open-ended classifier. It is scoped to
+   [Assistant] rows only — where the protocol ever wrote headers — so a user who
+   literally types "BLOCKER: …" is never stripped. It strips header *lines*, not
+   whole rows, so a real reply that followed the headers in the same pre-purge
+   turn is preserved.
+
+   Removal target: delete once a chat-store backfill (RFC-0276 follow-up) strips
+   these lines on write/migration and no pre-purge rows remain on disk. Until
+   then, rejecting at this projection boundary keeps the loop broken regardless
+   of how old the on-disk data is. *)
+let legacy_social_state_header_prefixes =
+  [ "SOCIAL_MODEL:"; "BELIEF_SUMMARY:"; "SPEECH_ACT:"; "DELIVERY_SURFACE:"
+  ; "ACTIVE_DESIRE:"; "CURRENT_INTENTION:"; "BLOCKER:"; "NEED:" ]
+;;
+
+let is_legacy_social_state_header line =
+  let line = String.trim line in
+  List.exists
+    (fun prefix -> String.starts_with ~prefix line)
+    legacy_social_state_header_prefixes
+;;
+
+(* Drop the legacy header lines from a pre-purge assistant message, keeping the
+   real reply lines. Operates on line structure (the headers were one-per-line),
+   so it runs before [collapse_line_breaks] flattens the newlines away. *)
+let strip_legacy_social_state_headers content =
+  content
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> not (is_legacy_social_state_header line))
+  |> String.concat "\n"
+;;
+
 let recent_direct_conversation_of_messages
       ?(limit = default_recent_direct_limit)
       (messages : Keeper_chat_store.chat_message list)
@@ -118,11 +160,21 @@ let recent_direct_conversation_of_messages
            (match m.audio with
             | Some _ -> None
             | None ->
-              Some
-                { role = Assistant
-                ; speaker_label = None
-                ; content
-                }))
+              (* Reject pre-purge social-state header lines at the parse
+                 boundary, then re-normalise: an all-header row collapses to
+                 "" and is dropped here, while a header+reply row keeps the
+                 reply. *)
+              let content =
+                collapse_line_breaks
+                  (strip_legacy_social_state_headers m.content)
+              in
+              if content = "" then None
+              else
+                Some
+                  { role = Assistant
+                  ; speaker_label = None
+                  ; content
+                  }))
       | Keeper_chat_store.Role.Tool ->
         (match m.tool_call_name with
          | None -> None
@@ -165,13 +217,9 @@ let render_recent_direct_conversation_context
       Printf.sprintf "- %s%s: %s"
         (direct_line_role_to_label line.role) speaker line.content
     in
-    let social_state_prefixes =
-      [ "SOCIAL_MODEL:"; "BELIEF_SUMMARY:"; "SPEECH_ACT:"; "DELIVERY_SURFACE:";
-        "ACTIVE_DESIRE:"; "CURRENT_INTENTION:"; "BLOCKER:"; "NEED:" ]
-    in
-    let is_social_state_line s =
-      List.exists (fun prefix -> String.starts_with ~prefix s) social_state_prefixes
-    in
+    (* Pure rendering: legacy social-state headers are already rejected at the
+       parse boundary in [recent_direct_conversation_of_messages], so this
+       function carries no classification logic. *)
     String.concat "\n"
       ([
          "--- Recent direct conversation (durable transcript) ---";
@@ -179,7 +227,7 @@ let render_recent_direct_conversation_context
          "Use them to answer continuity questions about your immediately previous replies.";
          "Do not claim that you checked board, task, file, status, or runtime state unless a listed tool_call supports it or you call the relevant tool in this turn; without tool evidence, say it has not been verified in this turn.";
        ]
-       @ (List.filter (fun line -> not (is_social_state_line line.content)) lines |> List.map render_line))
+       @ List.map render_line lines)
 ;;
 
 (* RFC-0230: the lane is the state. A mention is pending when it arrives after

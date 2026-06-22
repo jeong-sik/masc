@@ -32,7 +32,10 @@
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
+  /* prototype .turn-hd (keeper-v2/styles/v2.css:694): literal 14px 16px.
+     --sp-* is a 2px base under [data-skin=v2] (--sp-3 8px / --sp-4 10px),
+     which would shrink the header; pin the prototype literals. */
+  padding: 14px 16px;
   border-bottom: 1px solid var(--color-border-strong);
   background: var(--color-bg-elevated);
   flex-shrink: 0;
@@ -40,7 +43,15 @@
 
 .kti-head h3 {
   margin: 0;
-  font: var(--type-title);
+  /* prototype .turn-hd h3 (keeper-v2/styles/v2.css:695): display, uppercase,
+     letter-spacing 0.14em, 13px. var(--type-title) is sentence-case 14px, so
+     match the prototype heading explicitly. */
+  font-family: var(--font-display);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  /* --color-fg-primary maps to --text-bright under [data-skin=v2]
+     (skin-v2.css:247), matching the prototype heading's --text-bright. */
   color: var(--color-fg-primary);
   white-space: nowrap;
 }
@@ -69,7 +80,8 @@
   color: var(--color-fg-secondary);
   width: 24px;
   height: 24px;
-  border-radius: var(--r-1);
+  /* prototype .turn-close (v2.css:699): --radius-sm (4px). */
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: var(--fs-12);
   line-height: 1;
@@ -86,7 +98,10 @@
   align-items: center;
   gap: var(--sp-2);
   flex-wrap: wrap;
-  padding: var(--sp-2) var(--sp-4);
+  /* prototype .ti-sub (keeper-v2/styles/inspector.css:14): literal 0 16px 12px.
+     --sp-2/--sp-4 are 6px/10px on the 2px-base v2 scale and would shrink the
+     subline gutters; pin the prototype literals. */
+  padding: 0 16px 12px;
   border-bottom: 1px solid var(--color-border-muted);
 }
 
@@ -161,7 +176,10 @@
 
 /* ── Token economics bar ── */
 .kti-tok {
-  padding: var(--sp-3) var(--sp-4);
+  /* prototype .ti-tok (keeper-v2/styles/inspector.css:29): literal 13px 16px.
+     --sp-3/--sp-4 are 8px/10px on the 2px-base v2 scale and would shrink the
+     token-economics band; pin the prototype literals. */
+  padding: 13px 16px;
   border-bottom: 1px solid var(--color-border-muted);
 }
 
@@ -210,7 +228,9 @@
 
 .kti-tok-legend {
   display: flex;
-  gap: var(--sp-4);
+  /* prototype .ti-tok-legend (keeper-v2/styles/inspector.css:37): gap 18px.
+     --sp-4 is 10px under v2 and pinches the in/out legend; pin the literal. */
+  gap: 18px;
   margin-top: 10px;
   font-size: var(--fs-11);
   color: var(--color-fg-muted);
@@ -243,39 +263,49 @@
   font-weight: var(--fw-semi);
 }
 
-/* ── Tabs ── */
+/* ── Tabs — pill rail (prototype .turn-tabs / .turn-tab, keeper-v2/styles/v2.css:701-704) ── */
 .kti-tabs {
   display: flex;
-  gap: 0;
+  /* prototype .turn-tabs (v2.css:701): gap 5px; padding 9px 14px;
+     border-bottom 1px var(--border-soft). --sp-* would shrink the rail. */
+  gap: 5px;
   background: var(--color-bg-surface);
-  border-bottom: 1px solid var(--color-border-strong);
-  padding: 0 var(--sp-3);
+  /* prototype .turn-tabs border is --border-soft; --color-border-subtle maps to
+     --border-soft under [data-skin=v2] (skin-v2.css:235). (--color-border-muted,
+     used elsewhere in this file, is undefined — avoid it here.) */
+  border-bottom: 1px solid var(--color-border-subtle);
+  padding: 9px 14px;
   flex-shrink: 0;
 }
 
 .kti-tab {
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  padding: var(--sp-2) var(--sp-3);
-  color: var(--color-fg-muted);
+  /* prototype .turn-tab (v2.css:702): outlined pill, not an underline. */
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm); /* 4px under v2 (skin-v2.css:80) */
+  padding: 6px 12px;
+  color: var(--color-fg-disabled);
+  font-family: var(--font-ui);
   font-size: var(--fs-11);
-  font-weight: var(--fw-semi);
-  letter-spacing: 0.06em;
   text-transform: uppercase;
+  letter-spacing: 0.08em;
   cursor: pointer;
-  border-radius: 0;
+  transition: 0.14s;
 }
 
 .kti-tab:hover {
-  color: var(--color-fg-primary);
-  background: transparent;
+  /* prototype .turn-tab:hover (v2.css:703): color only */
+  color: var(--color-fg-muted);
 }
 
 .kti-tab.on {
+  /* prototype .turn-tab.on (v2.css:704): volt text + dim border + wash fill.
+     --color-accent-fg/-dim resolve to brass #e0b057 / #8a6a28 under v2,
+     matching the prototype --volt/--volt-dim; --volt-wash is the brass
+     rgba(224,176,87,0.10) wash. */
   color: var(--color-accent-fg);
-  border-bottom-color: var(--color-accent-fg);
-  background: transparent;
+  border-color: var(--color-accent-fg-dim);
+  background: var(--volt-wash);
 }
 
 /* ── Drawer body / section shell ── */
@@ -361,7 +391,8 @@
   position: relative;
   height: 18px;
   background: var(--color-bg-page);
-  border-radius: var(--r-1);
+  /* prototype .ti-wf-track (inspector.css:52): --radius-xs (3px). */
+  border-radius: var(--radius-xs);
   overflow: hidden;
 }
 
@@ -414,7 +445,10 @@
 
 .kti-wf-legend {
   display: flex;
-  gap: var(--sp-3);
+  /* prototype .ti-wf-legend (keeper-v2/styles/inspector.css:61): gap 14px.
+     --sp-3 is 8px under v2; pin the literal so the reason/tool/gen swatches
+     sit at the prototype rhythm. */
+  gap: 14px;
 }
 
 .kti-wf-legend span {
@@ -439,7 +473,8 @@
   background: none;
   border: 1px solid var(--color-border-default);
   color: var(--color-fg-disabled);
-  border-radius: var(--r-1);
+  /* prototype .ti-copy (inspector.css:73): --radius-xs (3px). */
+  border-radius: var(--radius-xs);
   font-family: var(--font-ui);
   font-size: var(--fs-10);
   padding: 3px 10px;
@@ -461,7 +496,8 @@
 /* ── Code / context card ── */
 .kti-code {
   border: 1px solid var(--color-border-muted);
-  border-radius: var(--r-1);
+  /* prototype .ti-code (inspector.css:66): --radius-sm (4px). */
+  border-radius: var(--radius-sm);
   overflow: hidden;
   background: var(--color-bg-page);
   margin-top: 6px;
@@ -513,7 +549,8 @@
 /* ── Structured tool card (transcript) ── */
 .kti-tool {
   border: 1px solid var(--color-border-default);
-  border-radius: var(--r-1);
+  /* prototype .ti-tool (inspector.css:78): --radius-sm (4px). */
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
@@ -570,7 +607,8 @@
 /* ── Role-tinted transcript message ── */
 .kti-msg {
   border: 1px solid var(--color-border-muted);
-  border-radius: var(--r-1);
+  /* prototype .ti-msg (inspector.css:89): --radius-sm (4px). */
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
@@ -589,7 +627,8 @@
   text-transform: uppercase;
   letter-spacing: 0.1em;
   padding: 1px 8px;
-  border-radius: var(--r-1);
+  /* prototype .ti-msg-role (inspector.css:91): --radius-xs (3px). */
+  border-radius: var(--radius-xs);
 }
 
 .kti-msg-role.system {
@@ -650,7 +689,8 @@
 /* ── Context section card ── */
 .kti-ctx-card {
   border: 1px solid var(--color-border-muted);
-  border-radius: var(--r-1);
+  /* prototype .ti-ctx-card (inspector.css:108): --radius-sm (4px). */
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 

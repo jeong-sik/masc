@@ -76,6 +76,13 @@ val dashboard_runtime_probe_http_json :
     includes a [cache_hit] flag so dashboards can show
     the freshness state. *)
 
+val dashboard_runtime_probe_failure_envelope_of_exn :
+  exn -> Yojson.Safe.t
+(** Pure builder for the failure envelope persisted to the cache when a
+    background refresh raises ([probe_ok=false], status [unreachable], the
+    exception message in [errors]). Exposed so the failure-visibility contract
+    is unit-testable independent of the cache/atomic plumbing. *)
+
 val dashboard_runtime_probe_payload_json_for_tests :
   ?default_id:string -> Runtime.t list -> Yojson.Safe.t
 (** Test-only pure projection for the production runtime reachability payload.

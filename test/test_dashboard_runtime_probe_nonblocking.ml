@@ -41,6 +41,38 @@ let probe_ok_of = function
      | _ -> true)
   | _ -> true
 
+(* Inspectors for an envelope value directly (top-level fields), used by the
+   failure-envelope contract test. *)
+
+let envelope_probe_ok = function
+  | `Assoc fields ->
+    (match List.assoc_opt "probe_ok" fields with
+     | Some (`Bool b) -> b
+     | _ -> true)
+  | _ -> true
+
+let envelope_status = function
+  | `Assoc fields ->
+    (match List.assoc_opt "status" fields with
+     | Some (`String s) -> s
+     | _ -> "?")
+  | _ -> "?"
+
+(* P1: failure-visibility contract. When the background refresh raises, the
+   failure envelope persisted to the cache must carry probe_ok=false and a
+   distinct [unreachable] status (not [warming_up]) so the dashboard can tell
+   "probe failed" apart from "probe still warming up". If this regresses to
+   "log only, never cache the cause", the operator loses the failure reason. *)
+
+let test_failure_envelope_carries_unreachable_status () =
+  let envelope =
+    Server_dashboard_http_runtime_info.dashboard_runtime_probe_failure_envelope_of_exn
+      (Failure "simulated ollama timeout")
+  in
+  check bool "failure envelope probe_ok false" false (envelope_probe_ok envelope);
+  check string "failure envelope status unreachable" "unreachable"
+    (envelope_status envelope)
+
 let test_http_json_does_not_block_on_cold_start () =
   Server_dashboard_http_runtime_info.clear_dashboard_runtime_probe_cache_for_tests ();
   Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_runner_for_tests
@@ -62,4 +94,7 @@ let () =
   run "dashboard_runtime_probe_nonblocking"
     [ "non-blocking",
         [ test_case "cold start does not block" `Quick
-            test_http_json_does_not_block_on_cold_start ] ]
+            test_http_json_does_not_block_on_cold_start ]
+    ; "failure visibility",
+        [ test_case "failure envelope carries unreachable status" `Quick
+            test_failure_envelope_carries_unreachable_status ] ]

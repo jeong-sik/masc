@@ -1078,6 +1078,36 @@ let dashboard_runtime_probe_degraded_envelope
     ]
 ;;
 
+let dashboard_runtime_probe_failure_envelope_of_exn (exn : exn) =
+  (* Failure envelope persisted to the cache when a background refresh raises,
+     so the dashboard surfaces the cause instead of masking it as a stale or
+     warming-up value (failure-visibility contract). [Printexc.to_string]
+     carries the exception message into the [errors] array; the next refresh
+     after TTL expiry retries the probe. Pure function so the envelope shape is
+     unit-testable independent of the cache/atomic plumbing. *)
+  dashboard_runtime_probe_degraded_envelope
+    ~status:"unreachable"
+    ~error:(Printexc.to_string exn)
+    ~observation:
+      "Runtime probe background refresh failed; the value below is a failure \
+       snapshot cached for the cache TTL window so the dashboard surfaces the \
+       cause. The next refresh after TTL expiry retries the probe."
+    ~limitation:"Cached failure envelope; a successful refresh replaces it."
+    ()
+
+let dashboard_runtime_probe_record_failure exn =
+  (* Write the failure envelope to the cache (so subsequent reads within the
+     TTL window see the cause) and release the single-flight CAS. [Atomic.set]
+     never yields. *)
+  Atomic.set
+    dashboard_runtime_probe_cache
+    (Some
+       { probe = dashboard_runtime_probe_failure_envelope_of_exn exn
+       ; refreshed_at = Time_compat.now ()
+       });
+  Atomic.set dashboard_runtime_probe_refresh_in_flight false
+;;
+
 let maybe_fork_dashboard_runtime_probe_refresh () =
   (* Trigger a background refresh of the runtime probe cache without ever
      blocking the caller. Single-flight via the
@@ -1111,20 +1141,20 @@ let maybe_fork_dashboard_runtime_probe_refresh () =
               (Some { probe = fresh; refreshed_at });
             Atomic.set dashboard_runtime_probe_refresh_in_flight false
           | exception Eio.Cancel.Cancelled _ ->
-            (* Switch cancelled (e.g. server shutdown): release CAS, leave
-               whatever cache value remains in place. *)
+            (* Switch cancelled (e.g. server shutdown): release CAS, do not
+               cache. A shutdown is not a probe failure. *)
             Atomic.set dashboard_runtime_probe_refresh_in_flight false
-          | exception Eio.Mutex.Poisoned cause ->
-            Atomic.set dashboard_runtime_probe_refresh_in_flight false;
-            Log.Dashboard.warn
-              "runtime probe background refresh skipped: HTTP pool mutex \
-               poisoned (%s)"
-              (Printexc.to_string cause)
           | exception exn ->
-            Atomic.set dashboard_runtime_probe_refresh_in_flight false;
+            (* Persist a failure envelope so the dashboard surfaces the cause
+               instead of masking it as a stale or warming-up value
+               (failure-visibility contract). Cached for the TTL window; the
+               next refresh after expiry retries. Covers [Eio.Mutex.Poisoned]
+               and any other exn -- [dashboard_runtime_probe_record_failure]
+               writes the envelope and releases the CAS atomically. *)
             Log.Dashboard.warn
               "runtime probe background refresh failed: %s"
-              (Printexc.to_string exn)
+              (Printexc.to_string exn);
+            dashboard_runtime_probe_record_failure exn
         in
         (try Eio.Fiber.fork ~sw run with
          | exn when eio_switch_fork_unavailable exn ->

@@ -70,6 +70,7 @@
   test_fd_accountant
   test_fd_accountant_state
   test_operator_control_snapshot_state
+  test_operator_control_snapshot
   test_with_cleanups_on_release
   test_auth_login
   test_audit_log
@@ -375,6 +376,8 @@
   test_fd_accountant
   test_fd_accountant_state
   test_operator_control_snapshot_state
+  test_operator_control_snapshot
+  test_operator_control_support
   test_with_cleanups_on_release
   test_auth_login
   test_audit_log

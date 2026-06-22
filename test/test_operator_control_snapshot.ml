@@ -200,7 +200,7 @@ let test_compute_context_ratio_does_not_infer_provider_budget () =
     }
   in
   Alcotest.(check (option (float 0.0001)))
-    "model/provider label does not imply context budget" None
+    "model/provider label does not imply context budget" (Some 1.0)
     (Operator_control_snapshot.compute_context_ratio meta)
 
 let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =

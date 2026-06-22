@@ -9,8 +9,14 @@
    again. *)
 
 let compute_context_ratio (meta : Keeper_meta_contract.keeper_meta) : float option =
-  let _ = meta in
-  None
+  let resolution = Keeper_context_runtime.resolve_max_context_resolution_of_meta meta in
+  let max_tokens = resolution.effective_budget in
+  let last_tokens = meta.runtime.usage.last_input_tokens in
+  if max_tokens > 0 && last_tokens > 0 then
+    let ratio = float_of_int last_tokens /. float_of_int max_tokens in
+    Some (Float.max 0.0 (Float.min 1.0 ratio))
+  else
+    None
 ;;
 
 type keeper_context_snapshot =
@@ -85,15 +91,15 @@ let latest_keeper_context_snapshot_from_files config keeper_name =
 ;;
 
 let fallback_keeper_context_snapshot (meta : Keeper_meta_contract.keeper_meta) =
-  (* context_max / context_source stay [None] because the provider-side budget
-     is not yet plumbed through meta (see top-of-file note). *)
+  let resolution = Keeper_context_runtime.resolve_max_context_resolution_of_meta meta in
+  let max_tokens = resolution.effective_budget in
   { context_ratio = compute_context_ratio meta
   ; context_tokens =
       (match meta.runtime.usage.last_input_tokens with
        | n when n > 0 -> Some n
        | _ -> None)
-  ; context_max = None
-  ; context_source = None
+  ; context_max = if max_tokens > 0 then Some max_tokens else None
+  ; context_source = Some "fallback_metadata"
   }
 ;;
 
@@ -104,6 +110,23 @@ let keeper_context_snapshot_of_meta config (meta : Keeper_meta_contract.keeper_m
 ;;
 
 let keeper_context_snapshot_fields (snapshot : keeper_context_snapshot) =
+  let assoc_fields =
+    [ ( "source"
+      , Json_util.string_opt_to_json snapshot.context_source )
+    ; ( "context_ratio"
+      , Json_util.option_to_yojson
+          (fun value -> `Float value)
+          snapshot.context_ratio )
+    ; ( "context_tokens"
+      , Json_util.option_to_yojson
+          (fun value -> `Int value)
+          snapshot.context_tokens )
+    ; ( "context_max"
+      , Json_util.option_to_yojson
+          (fun value -> `Int value)
+          snapshot.context_max )
+    ]
+  in
   [ ( "context_ratio"
     , Json_util.option_to_yojson
         (fun value -> `Float value)
@@ -118,5 +141,6 @@ let keeper_context_snapshot_fields (snapshot : keeper_context_snapshot) =
         snapshot.context_max )
   ; ( "context_source"
     , Json_util.string_opt_to_json snapshot.context_source )
+  ; ( "context", `Assoc assoc_fields )
   ]
 ;;

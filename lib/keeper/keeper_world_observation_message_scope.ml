@@ -179,7 +179,7 @@ let render_recent_direct_conversation_context
          "Use them to answer continuity questions about your immediately previous replies.";
          "Do not claim that you checked board, task, file, status, or runtime state unless a listed tool_call supports it or you call the relevant tool in this turn; without tool evidence, say it has not been verified in this turn.";
        ]
-       @ (List.map render_line lines |> List.filter (fun s -> not (is_social_state_line s))))
+       @ (List.filter (fun line -> not (is_social_state_line line.content)) lines |> List.map render_line))
 ;;
 
 (* RFC-0230: the lane is the state. A mention is pending when it arrives after

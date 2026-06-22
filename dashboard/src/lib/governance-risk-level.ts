@@ -49,6 +49,26 @@ export function keeperApprovalRiskVisualBand(value: unknown): KeeperApprovalRisk
   }
 }
 
+// Human-readable Korean label for a governance risk level. Exhaustive over the
+// closed `KeeperApprovalRiskLevel` union (same shape as
+// `keeperApprovalRiskVisualBand`) so a new backend risk level forces a compile
+// error here rather than silently falling through to a raw wire string. Unknown
+// / unparseable input renders as 미분류 (shown, not hidden or prettified).
+export function keeperApprovalRiskLabel(value: unknown): string {
+  switch (asKeeperApprovalRiskLevel(value)) {
+    case 'critical':
+      return '심각'
+    case 'high':
+      return '높음'
+    case 'medium':
+      return '보통'
+    case 'low':
+      return '낮음'
+    case null:
+      return '미분류'
+  }
+}
+
 export function isHighOrCriticalKeeperApprovalRisk(value: unknown): boolean {
   const level = asKeeperApprovalRiskLevel(value)
   return level === 'critical' || level === 'high'

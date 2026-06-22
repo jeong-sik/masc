@@ -26,7 +26,6 @@ import {
 } from './ide-toolbar'
 import { IdeBreadcrumb } from './ide-breadcrumb'
 import { IdeReviewFocusStrip } from './ide-review-focus-strip'
-import { InspectorKeeperBDI } from './inspector-keeper-bdi'
 import { pinKeeper } from './multi-keeper-pin-store'
 import { OverlayKeeperTrace } from './overlay-keeper-trace'
 import { IdePersistencePanel } from './ide-persistence-panel'
@@ -991,7 +990,6 @@ export function IdeShell() {
                     <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
                     <${IdePersistencePanel} keeperName=${terminalKeeper} />
                     <${IdeMemoryPanel} keeperName=${terminalKeeper} />
-                    <${InspectorKeeperBDI} traceActive=${activeLayers.has('keeper-trace')} />
                   </div>
                   <div
                     class="ide-plane-primary-rail"

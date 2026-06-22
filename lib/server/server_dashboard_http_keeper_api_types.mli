@@ -21,7 +21,6 @@ val keeper_suffix_clear : string
 val keeper_suffix_checkpoints : string
 val keeper_suffix_runtime_trace : string
 val keeper_suffix_directive : string
-val keeper_suffix_bdi_snapshot : string
 
 type keeper_post_route_kind =
   | Keeper_post_tools

@@ -286,19 +286,6 @@ let handle_keeper_get_subroutes state req request reqd =
         match st with `OK -> `OK | `Not_found -> `Not_found
       in
       Http.Response.json_value ~status ~compress:true ~request:req json reqd
-  else if ends_with keeper_suffix_bdi_snapshot then
-    let name = extract_name keeper_suffix_bdi_snapshot in
-    if String.length name = 0 then
-      respond_error reqd "keeper name is required"
-    else
-      let config = (Mcp_server.workspace_config state) in
-      let (st, json) =
-        Dashboard_http_keeper.keeper_bdi_snapshot_json config name
-      in
-      let status : Httpun.Status.t =
-        match st with `OK -> `OK | `Not_found -> `Not_found
-      in
-      Http.Response.json_value ~status ~compress:true ~request:req json reqd
   else if ends_with "/tool-stats" then
     let name = extract_name "/tool-stats" in
     if String.length name = 0 then

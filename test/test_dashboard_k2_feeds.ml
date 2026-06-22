@@ -90,16 +90,14 @@ let test_decisions_log_evidence_refs_are_real_refs () =
     (`Assoc
         [ "ts_unix", `Float 1_000.0
         ; "keeper_name", `String meta.name
-        ; "speech_act", `String "inform"
-        ; "belief_summary", `String "prose belief is not an evidence ref"
+        ; "summary", `String "prose summary is not an evidence ref"
         ]);
   append_jsonl
     path
     (`Assoc
         [ "ts_unix", `Float 1_001.0
         ; "keeper_name", `String meta.name
-        ; "speech_act", `String "request_help"
-        ; "belief_summary", `String "new prose summary"
+        ; "summary", `String "new prose summary"
         ; ( "evidence_refs"
           , `List [ `String "trace:k2"; `String ""; `String " artifact:k2 " ] )
         ]);
@@ -131,7 +129,6 @@ let test_decisions_log_clamps_low_limit () =
     (`Assoc
         [ "ts_unix", `Float 1_000.0
         ; "keeper_name", `String meta.name
-        ; "speech_act", `String "inform"
         ]);
   let json = Dash.keeper_decisions_log_json ~config ~keepers:[ meta ] ~limit:0 () in
   check int "clamped limit" 1 Json.(json |> member "limit" |> to_int);

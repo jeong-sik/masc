@@ -1,13 +1,7 @@
-(** Dashboard_http_keeper_snapshot — per-keeper snapshot and config rendering.
+(** Dashboard_http_keeper_snapshot — per-keeper config rendering and K2 feed
+    delegations.
 
-    Extracted from [dashboard_http_keeper.ml] during godfile decomposition.
-    Internal helpers ([recent_keeper_metric_jsons], [recent_token_spend_json],
-    [latest_tool_call_json]) stay private; only the external surface is exposed. *)
-
-val keeper_bdi_snapshot_json :
-  Workspace.config ->
-  string ->
-  [ `OK | `Not_found ] * Yojson.Safe.t
+    Extracted from [dashboard_http_keeper.ml] during godfile decomposition. *)
 
 val keeper_config_json :
   Workspace.config ->

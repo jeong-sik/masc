@@ -45,7 +45,7 @@ export const IDE_LAYERS: ReadonlyArray<OverlayLayer> = [
   {
     kind: 'keeper-trace',
     label: 'Trace',
-    description: '4-source stitched gutter chip (anchored-thread / runtime-hop / bdi-snapshot / decision-log)',
+    description: '3-source stitched gutter chip (anchored-thread / runtime-hop / decision-log)',
     conflictsWith: ['runtime'],
   },
   { kind: 'explode', label: 'EXPLODE', description: 'per-keeper ghost copies', mutuallyExclusive: true },

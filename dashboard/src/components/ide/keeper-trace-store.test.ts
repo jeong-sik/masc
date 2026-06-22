@@ -125,11 +125,12 @@ describe('keeper-trace-store', () => {
       id: 'a-2',
       tsMs: 1010,
       keeperName: 'scholar',
-      source: 'bdi-snapshot',
-      intention: 'inspect',
+      source: 'decision-log',
+      decisionId: 'dec-a-2',
+      semanticOutcome: 'success',
     })
     expect(keeperTraceState.value.events).toHaveLength(2)
-    expect(keeperTraceState.value.events.map(e => e.source)).toEqual(['runtime-hop', 'bdi-snapshot'])
+    expect(keeperTraceState.value.events.map(e => e.source)).toEqual(['runtime-hop', 'decision-log'])
   })
 
   it('does NOT coalesce same-source events for different keepers within the window', () => {
@@ -286,8 +287,9 @@ describe('keeper-trace-store', () => {
       id: 'a-3',
       tsMs: 3500,
       keeperName: 'scholar',
-      source: 'bdi-snapshot',
-      intention: 'inspect',
+      source: 'decision-log',
+      decisionId: 'dec-a-3',
+      semanticOutcome: 'success',
     })
     expect(keeperTraceState.value.events.map(e => e.tsMs)).toEqual([2000, 3500, 5000])
     expect(keeperTraceState.value.events.map(e => e.id)).toEqual(['a-2', 'a-3', 'a-1'])
@@ -348,8 +350,9 @@ describe('keeper-trace-store', () => {
       id: 'fresh-1',
       tsMs: RETENTION_MS + 500,
       keeperName: 'luna',
-      source: 'bdi-snapshot',
-      intention: 'review',
+      source: 'decision-log',
+      decisionId: 'dec-fresh-1',
+      semanticOutcome: 'success',
     })
     expect(keeperTraceState.value.events.map(e => e.id)).toEqual(['fresh-1'])
   })
@@ -369,8 +372,9 @@ describe('keeper-trace-store', () => {
       id: 'fresh',
       tsMs: RETENTION_MS + 10,
       keeperName: 'luna',
-      source: 'bdi-snapshot',
-      intention: 'review',
+      source: 'decision-log',
+      decisionId: 'dec-fresh',
+      semanticOutcome: 'success',
     })
     expect(keeperTraceState.value.events.map(e => e.id)).toEqual(['survivor', 'fresh'])
   })
@@ -450,19 +454,21 @@ describe('keeper-trace-store', () => {
       id: 'a-2',
       tsMs: 1100,
       keeperName: 'scholar',
-      source: 'bdi-snapshot',
-      intention: 'inspect',
+      source: 'decision-log',
+      decisionId: 'dec-a-2-bysource',
+      semanticOutcome: 'success',
     })
     pushTrace({
       id: 'a-3',
       tsMs: 1200,
       keeperName: 'moth',
-      source: 'bdi-snapshot',
-      intention: 'review',
+      source: 'decision-log',
+      decisionId: 'dec-a-3-bysource',
+      semanticOutcome: 'success',
     })
     expect(tracesBySource('runtime-hop').map(e => e.id)).toEqual(['a-1'])
-    expect(tracesBySource('bdi-snapshot').map(e => e.id)).toEqual(['a-2', 'a-3'])
-    expect(tracesBySource('decision-log')).toEqual([])
+    expect(tracesBySource('decision-log').map(e => e.id)).toEqual(['a-2', 'a-3'])
+    expect(tracesBySource('activity-event')).toEqual([])
   })
 
   it('preserves discriminated-union narrowing for each source', () => {
@@ -481,13 +487,6 @@ describe('keeper-trace-store', () => {
       source: 'runtime-hop',
       hopId: 'h-1',
       provider: 'glm',
-    })
-    pushTrace({
-      id: 'c-1',
-      tsMs: 1200,
-      keeperName: 'scholar',
-      source: 'bdi-snapshot',
-      intention: 'inspect',
     })
     pushTrace({
       id: 'd-1',
@@ -518,9 +517,6 @@ describe('keeper-trace-store', () => {
         case 'runtime-hop':
           expect(event.hopId).toBe('h-1')
           expect(event.provider).toBe('glm')
-          break
-        case 'bdi-snapshot':
-          expect(event.intention).toBe('inspect')
           break
         case 'decision-log':
           expect(event.decisionId).toBe('dec-1')

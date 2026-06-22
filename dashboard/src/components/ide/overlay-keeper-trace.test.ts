@@ -42,13 +42,14 @@ function pushAnchored(
   })
 }
 
-function pushBdi(id: string, keeperName: string, tsMs: number, intention: string | null = 'inspect'): void {
+function pushRuntime(id: string, keeperName: string, tsMs: number): void {
   pushTrace({
     id,
     tsMs,
     keeperName,
-    source: 'bdi-snapshot',
-    intention,
+    source: 'runtime-hop',
+    hopId: `hop-${id}`,
+    provider: 'weighted_score',
   })
 }
 
@@ -123,7 +124,7 @@ describe('bucketTraceEvents — RFC-0028 §5 grouping', () => {
   })
 
   it('non-anchored sources fall into the keeper-level no-line bucket', () => {
-    pushBdi('a', 'scholar', 1000)
+    pushRuntime('a', 'scholar', 1000)
     pushDecision('b', 'scholar', 1100)
     pushAnchored('c', 'scholar', 12, 1200, 'th-c', 'runtime.ts')
     pushActivity('d', 'scholar', 12, 1300)
@@ -132,18 +133,19 @@ describe('bucketTraceEvents — RFC-0028 §5 grouping', () => {
     const noLineBucket = buckets.find(b => b.line === null)
     expect(noLineBucket).toBeDefined()
     expect(noLineBucket?.events.length).toBe(2)
-    expect(noLineBucket?.events.map(e => e.source).sort()).toEqual(['bdi-snapshot', 'decision-log'])
+    expect(noLineBucket?.events.map(e => e.source).sort()).toEqual(['decision-log', 'runtime-hop'])
     const lineBucket = buckets.find(b => b.filePath === 'runtime.ts' && b.line === 12)
     expect(lineBucket?.events.map(e => e.source).sort()).toEqual(['activity-event', 'anchored-thread'])
   })
 
   it('record traces with optional file context enter file-line buckets', () => {
     pushTrace({
-      id: 'bdi-context',
+      id: 'runtime-context-scholar',
       tsMs: 1000,
       keeperName: 'scholar',
-      source: 'bdi-snapshot',
-      intention: 'verify route',
+      source: 'runtime-hop',
+      hopId: 'scholar-1',
+      provider: 'weighted_score',
       filePath: 'runtime.ts',
       line: 12,
     })
@@ -170,7 +172,7 @@ describe('bucketTraceEvents — RFC-0028 §5 grouping', () => {
 
     const buckets = bucketTraceEvents(keeperTraceState.value.events)
     const runtimeBucket = buckets.find(b => b.filePath === 'runtime.ts' && b.line === 12)
-    expect(runtimeBucket?.events.map(e => e.source).sort()).toEqual(['bdi-snapshot', 'decision-log'])
+    expect(runtimeBucket?.events.map(e => e.source).sort()).toEqual(['decision-log', 'runtime-hop'])
     const routerBucket = buckets.find(b => b.filePath === 'router.ts' && b.line === 44)
     expect(routerBucket?.events.map(e => e.source)).toEqual(['runtime-hop'])
   })
@@ -296,7 +298,7 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
 
   it('chips carry data-source attribute matching the event source', () => {
     pushAnchored('a', 'scholar', null, 1000) // no line → no-line bucket
-    pushBdi('b', 'scholar', 1100)
+    pushRuntime('b', 'scholar', 1100)
     pushDecision('c', 'scholar', 1200)
     pushActivity('d', 'scholar', 4, 1300)
 
@@ -305,7 +307,7 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
     const bucket = container.querySelector('[role="group"][data-keeper="scholar"][data-line="no-line"]')
     const chips = Array.from(bucket?.querySelectorAll('.ide-trace-chip') ?? [])
     const sources = chips.map(c => c.getAttribute('data-source'))
-    expect(sources).toEqual(expect.arrayContaining(['anchored-thread', 'bdi-snapshot', 'decision-log']))
+    expect(sources).toEqual(expect.arrayContaining(['anchored-thread', 'decision-log', 'runtime-hop']))
     const lineBucket = container.querySelector('[role="group"][data-keeper="scholar"][data-line="4"]')
     expect(lineBucket?.querySelector('.ide-trace-chip')?.getAttribute('data-source')).toBe('activity-event')
   })

@@ -22,14 +22,14 @@ import { routeLinkLabels } from './ide-context-route-helpers'
  * Reads `keeperTraceState` (the stitched trace store) and
  * renders a stacked gutter chip per RFC §5: cap=3 visible chips per
  * (keeperName, line) bucket plus a `+N` overflow indicator. Each chip is
- * colored by source (anchored-thread / runtime-hop / bdi-snapshot /
- * decision-log / activity-event) and exposes a hover tooltip with the
+ * colored by source (anchored-thread / runtime-hop / decision-log /
+ * activity-event) and exposes a hover tooltip with the
  * underlying event details.
  *
  * Bucket key (RFC §5 + §11 #3):
  *   `${keeperName}@${line ?? 'no-line'}`
  *
- * Events without a line (bdi-snapshot, decision-log without anchor) are
+ * Events without a line (decision-log without anchor) are
  * grouped under the keeper-level bucket, so a sidebar overlay can render
  * them next to the keeper avatar rather than at a specific line. PR-β
  * keeps the bucket-by-line shape; consumers (editor gutter, sidebar
@@ -48,7 +48,6 @@ const TRACE_ROUTE_LINK_CAP = 10
 const SOURCE_COLORS: Record<KeeperTraceSource, string> = {
   'anchored-thread': 'var(--color-status-info)',
   'runtime-hop': 'var(--color-accent-fg)',
-  'bdi-snapshot': 'var(--color-status-ok)',
   'decision-log': 'var(--color-status-warn)',
   'activity-event': 'var(--color-status-info)',
 }
@@ -57,7 +56,6 @@ const SOURCE_COLORS: Record<KeeperTraceSource, string> = {
 const SOURCE_LABELS: Record<KeeperTraceSource, string> = {
   'anchored-thread': 'thread',
   'runtime-hop': 'runtime',
-  'bdi-snapshot': 'BDI',
   'decision-log': 'decision',
   'activity-event': 'activity',
 }
@@ -107,7 +105,6 @@ export function bucketTraceEvents(
 function lineOf(event: KeeperTraceEvent): number | null {
   if (event.source === 'anchored-thread') return event.line
   if (event.source === 'activity-event') return event.line
-  if (event.source === 'bdi-snapshot') return event.line ?? null
   if (event.source === 'decision-log') return event.line ?? null
   if (event.source === 'runtime-hop') return event.line ?? null
   return null
@@ -116,7 +113,6 @@ function lineOf(event: KeeperTraceEvent): number | null {
 function filePathOf(event: KeeperTraceEvent): string | null {
   if (event.source === 'anchored-thread') return event.filePath ?? null
   if (event.source === 'activity-event') return event.filePath
-  if (event.source === 'bdi-snapshot') return event.filePath ?? null
   if (event.source === 'decision-log') return event.filePath ?? null
   if (event.source === 'runtime-hop') return event.filePath ?? null
   return null
@@ -404,29 +400,6 @@ function traceRouteContext(event: KeeperTraceEvent): IdeContextRouteContext {
       sourceId: `trace:${event.id}`,
       boardPostId: event.threadId,
       keeperId: event.keeperName,
-    }
-  }
-
-  if (event.source === 'bdi-snapshot') {
-    return {
-      filePath: event.filePath,
-      line: event.line,
-      surface: 'BDI',
-      label: event.intention ?? 'BDI snapshot',
-      sourceId: `trace:${event.id}`,
-      goalId: event.goalId,
-      taskId: event.taskId,
-      boardPostId: event.boardPostId,
-      commentId: event.commentId,
-      prId: event.prId,
-      gitRef: event.gitRef,
-      logId: event.logId,
-      sessionId: event.sessionId,
-      operationId: event.operationId,
-      workerRunId: event.workerRunId,
-      keeperId: event.keeperName,
-      telemetryQuery: event.logId ?? event.id,
-      telemetry: true,
     }
   }
 

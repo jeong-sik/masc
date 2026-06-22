@@ -685,6 +685,13 @@
  (modules test_fusion_status_tool)
  (libraries masc_test_deps masc.fusion_core))
 
+; 적대 리뷰 #22087 §1 — Fusion_judge.attach_usage가 파싱 실패 시에도 심판 usage를
+; 보존함을 핀한다 (refine degrade 비용 undercount 회귀 방지).
+(test
+ (name test_fusion_judge_usage)
+ (modules test_fusion_judge_usage)
+ (libraries masc_test_deps masc.fusion_core))
+
 ; RFC-0252 §8 — judge_meta/panel_meta structured serialization. Needs
 ; masc.fusion_core for Fusion_types constructors (Answer/Recommend/Insufficient,
 ; judge_synthesis record) + Masc.Fusion_sink for the public meta serializers.

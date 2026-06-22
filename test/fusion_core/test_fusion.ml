@@ -757,6 +757,125 @@ let test_judge_tolerant_skip () =
   | Ok js -> Alcotest.(check int) "tolerant consensus" 1 (List.length js.consensus)
   | Error e -> Alcotest.failf "expected Ok, got %s" e
 
+(* ---- 심의 위상(topology) ---------------------------------------------- *)
+
+(* round-trip drift-guard: of_string(to_string t) = Some t (전수). 닫힌 합이라
+   forward는 컴파일러가 보장하지만 역방향(string→variant)은 string 입력이라 강제되지
+   않으므로 여기서 핀(closed-sum-string-whitelist 안티패턴의 역방향 단언). *)
+let test_topology_roundtrip () =
+  List.iter
+    (fun t ->
+      Alcotest.(check (option string))
+        (Printf.sprintf "roundtrip %s" (fusion_topology_to_string t))
+        (Some (fusion_topology_to_string t))
+        (Option.map fusion_topology_to_string
+           (fusion_topology_of_string (fusion_topology_to_string t))))
+    all_fusion_topologies
+
+(* fail-closed: 닫힌 합 밖(오타·대문자·빈문자열·미래 위상명)은 None. *)
+let test_topology_unknown_is_none () =
+  List.iter
+    (fun s ->
+      Alcotest.(check bool)
+        (Printf.sprintf "unknown %S -> None" s)
+        true
+        (Option.is_none (fusion_topology_of_string s)))
+    [ ""; "Simple"; "REFINE"; "judge_of_judges"; "bogus"; " simple" ]
+
+(* wire vocabulary 핀 — 도구 스키마 허용값/에러 메시지가 이 목록에서 파생된다. *)
+let test_topology_strings () =
+  Alcotest.(check (list string))
+    "all topology wire strings" [ "simple"; "refine" ] all_fusion_topology_strings
+
+(* ---- render_prior_synthesis (refine 프롬프트 입력) --------------------- *)
+
+let str_contains ~needle haystack =
+  let nl = String.length needle and hl = String.length haystack in
+  if nl = 0 then true
+  else begin
+    let rec scan i =
+      if i + nl > hl then false
+      else if String.equal (String.sub haystack i nl) needle then true
+      else scan (i + 1)
+    in
+    scan 0
+  end
+
+let full_synthesis decision : judge_synthesis =
+  { consensus = [ { text = "C-TEXT"; supporting_models = [ "m1"; "m2" ] } ]
+  ; contradictions =
+      [ { topic = "TOPIC-X"
+        ; positions = [ ("m1", "yes"); ("m2", "no") ]
+        ; evidence = [ "EV-1" ]
+        }
+      ]
+  ; partial_coverage =
+      [ { gap_topic = "GAP-Y"; addressed_by = [ "m1" ]; missing = Some "MISS-Z" } ]
+  ; unique_insights = [ { insight_text = "INSIGHT-W"; from_model = "m3" } ]
+  ; blind_spots = [ "BLIND-V" ]
+  ; resolved_answer = "RESOLVED-U"
+  ; decision
+  }
+
+let check_contains label needle hay =
+  Alcotest.(check bool) (Printf.sprintf "contains %s" label) true
+    (str_contains ~needle hay)
+
+(* lossless: 7필드 전부 렌더 문자열에 살아남는다 (resolved_answer로 collapse하지 않음 —
+   B2/워크어라운드#2 회피의 회귀 가드). *)
+let test_render_lossless_fields () =
+  let r = render_prior_synthesis (full_synthesis (Answer "ANS-T")) in
+  check_contains "consensus text" "C-TEXT" r;
+  check_contains "supporting model" "m2" r;
+  check_contains "contradiction topic" "TOPIC-X" r;
+  check_contains "contradiction stance" "no" r;
+  check_contains "evidence" "EV-1" r;
+  check_contains "coverage gap" "GAP-Y" r;
+  check_contains "coverage missing" "MISS-Z" r;
+  check_contains "insight" "INSIGHT-W" r;
+  check_contains "insight model" "m3" r;
+  check_contains "blind spot" "BLIND-V" r;
+  check_contains "resolved answer" "RESOLVED-U" r
+
+(* decision 닫힌 합 3변형이 서로 구분되게 렌더된다 (exhaustive match, catch-all 없음). *)
+let test_render_decision_answer () =
+  let r = render_prior_synthesis (full_synthesis (Answer "ANS-T")) in
+  check_contains "answer decision" "Answer: ANS-T" r
+
+let test_render_decision_recommend () =
+  let r =
+    render_prior_synthesis
+      (full_synthesis (Recommend { action = "ACT-R"; rationale = "WHY-R" }))
+  in
+  check_contains "recommend action" "ACT-R" r;
+  check_contains "recommend rationale" "WHY-R" r
+
+let test_render_decision_insufficient () =
+  let r =
+    render_prior_synthesis
+      (full_synthesis (Insufficient { missing_for_decision = [ "NEED-A"; "NEED-B" ] }))
+  in
+  check_contains "insufficient label" "Insufficient" r;
+  check_contains "insufficient missing a" "NEED-A" r;
+  check_contains "insufficient missing b" "NEED-B" r
+
+(* 빈 리스트는 "(none)"으로 렌더 — 섹션 구조가 항상 노출되어 테스트/모델이 의존 가능. *)
+let test_render_empty_lists () =
+  let empty : judge_synthesis =
+    { consensus = []
+    ; contradictions = []
+    ; partial_coverage = []
+    ; unique_insights = []
+    ; blind_spots = []
+    ; resolved_answer = ""
+    ; decision = Answer ""
+    }
+  in
+  let r = render_prior_synthesis empty in
+  check_contains "consensus header" "CONSENSUS:" r;
+  check_contains "blind spots header" "BLIND SPOTS:" r;
+  check_contains "none placeholder" "(none)" r
+
 let () =
   Alcotest.run "fusion_core"
     [ ( "gate"
@@ -817,5 +936,17 @@ let () =
         ; Alcotest.test_case "missing_decision" `Quick test_judge_missing_decision
         ; Alcotest.test_case "code_fence" `Quick test_judge_code_fence
         ; Alcotest.test_case "tolerant_skip" `Quick test_judge_tolerant_skip
+        ] )
+    ; ( "topology"
+      , [ Alcotest.test_case "roundtrip" `Quick test_topology_roundtrip
+        ; Alcotest.test_case "unknown_is_none" `Quick test_topology_unknown_is_none
+        ; Alcotest.test_case "wire_strings" `Quick test_topology_strings
+        ; Alcotest.test_case "render_lossless_fields" `Quick test_render_lossless_fields
+        ; Alcotest.test_case "render_decision_answer" `Quick test_render_decision_answer
+        ; Alcotest.test_case "render_decision_recommend" `Quick
+            test_render_decision_recommend
+        ; Alcotest.test_case "render_decision_insufficient" `Quick
+            test_render_decision_insufficient
+        ; Alcotest.test_case "render_empty_lists" `Quick test_render_empty_lists
         ] )
     ]

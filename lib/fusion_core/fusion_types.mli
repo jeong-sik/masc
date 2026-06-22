@@ -195,3 +195,33 @@ type gate_decision =
   | Allow of fusion_request
   | Deny of deny_reason
 [@@deriving yojson, show, eq]
+
+(** {1 심의 위상 (topology)}
+
+    패널 답을 어떤 합성 구조로 reduce할지. 닫힌 합 — keeper가 [masc_fusion] 도구에서
+    이름으로 고르고(합성-by-selection), 게이트는 보지 않으며, 오케스트레이터가 이 변형으로
+    dispatch한다. 그래프 datatype이 아니라 named composition의 닫힌 집합(RFC-0252 §13 P2).
+    새 위상은 여기 추가 시 orchestrator dispatch가 exhaustive-match로 누락을 강제한다. *)
+type fusion_topology =
+  | Simple  (** panel → judge → sink (현행, byte-identical) *)
+  | Refine  (** panel → judge → judge'(1차 종합을 재검토) → sink *)
+[@@deriving yojson, show, eq]
+
+(** 안정적 wire 문자열 ([masc_fusion] 도구 인자·로깅용). *)
+val fusion_topology_to_string : fusion_topology -> string
+
+(** [fusion_topology_to_string]의 역함수. 닫힌 합 밖은 [None]=fail-closed
+    (Unknown→permissive default 회피). round-trip은
+    [test/fusion_core/test_fusion.ml :: fusion_topology_roundtrip]가 핀. *)
+val fusion_topology_of_string : string -> fusion_topology option
+
+(** 모든 위상 (도구 스키마 설명·테스트 vocabulary). *)
+val all_fusion_topologies : fusion_topology list
+
+(** [all_fusion_topologies]의 wire 문자열 (도구 인자 허용값 목록). *)
+val all_fusion_topology_strings : string list
+
+(** 1차 심판 종합을 refine 심판 프롬프트에 실을 lossless 텍스트로 렌더한다.
+    [judge_synthesis]의 7필드 + 닫힌 합 [decision]을 모두 보존한다(resolved_answer 한 줄로
+    collapse하지 않음 — CLAUDE.md 워크어라운드 #2 회피). 빈 리스트는 "(none)". 순수. *)
+val render_prior_synthesis : judge_synthesis -> string

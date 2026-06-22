@@ -49,9 +49,27 @@ let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
   let prompt = Tool_args.get_string args "prompt" "" in
   let preset = Tool_args.get_string args "preset" policy.Fusion_policy.default_preset in
   let web_tools = Tool_args.get_bool args "web_tools" false in
-  if String.equal (String.trim prompt) "" then
-    status_json ~ok:false [ ("error", `String "prompt is required") ]
-  else begin
+  (* topology: keeper가 합성 위상을 이름으로 선택(합성-by-selection, RFC-0252 §13 P2).
+     typed 파서 fail-closed — 닫힌 합 밖은 에러 상태 반환(Unknown→permissive default 회피).
+     default wire 문자열은 typed 값에서 파생한다 — 리터럴 "simple"을 중복하면 wire rename
+     시 default가 조용히 drift한다(적대 리뷰 #22087 §2). *)
+  let default_topology_str =
+    Fusion_types.fusion_topology_to_string Fusion_types.Simple
+  in
+  let topology_str = Tool_args.get_string args "topology" default_topology_str in
+  match
+    ( String.equal (String.trim prompt) ""
+    , Fusion_types.fusion_topology_of_string topology_str )
+  with
+  | true, _ -> status_json ~ok:false [ ("error", `String "prompt is required") ]
+  | _, None ->
+    status_json ~ok:false
+      [ ( "error"
+        , `String
+            (Printf.sprintf "topology must be one of: %s"
+               (String.concat ", " Fusion_types.all_fusion_topology_strings)) )
+      ]
+  | false, Some topology ->
     let request : Fusion_types.fusion_request =
       { run_id
       ; keeper
@@ -84,7 +102,8 @@ let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
          switch를 sw로 넘긴다 (turn switch면 턴 종료 시 심의가 취소됨). *)
       Eio.Fiber.fork ~sw (fun () ->
         match
-          Fusion_orchestrator.run ~sw ~net ~base_dir ~policy ~request:allowed ()
+          Fusion_orchestrator.run ~sw ~net ~base_dir ~policy ~topology
+            ~request:allowed ()
         with
         | Fusion_orchestrator.Completed _ -> ()
         | Fusion_orchestrator.Denied reason ->
@@ -114,4 +133,3 @@ let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
                (Printexc.to_string exn)));
       status_json ~ok:true
         [ ("status", `String "fusion_started"); ("run_id", `String run_id) ]
-  end

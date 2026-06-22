@@ -9,7 +9,7 @@ type outcome =
       ; judge : (Fusion_types.judge_synthesis, string) result
       }
 
-let run ~sw ~net ~base_dir ~policy ~request () : outcome =
+let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
   match Fusion_policy.decide ~policy request with
   | Fusion_types.Deny reason -> Denied reason
   | Fusion_types.Allow req ->
@@ -47,7 +47,8 @@ let run ~sw ~net ~base_dir ~policy ~request () : outcome =
               groups
           in
           let judge_max_tool_calls = Fusion_policy.judge_tool_budget_of groups in
-          let judge_full =
+          (* 1차 심판 — 모든 위상 공통. *)
+          let first_judge_full =
             Fusion_judge.run ~sw ~net
               ~timeout_s:preset.Fusion_policy.judge_timeout_s
               ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
@@ -55,13 +56,48 @@ let run ~sw ~net ~base_dir ~policy ~request () : outcome =
               ~question:req.Fusion_types.prompt ~panel ~web_tools:judge_web_tools
               ~max_tool_calls:judge_max_tool_calls ()
           in
+          (* 위상별 reduce. Simple은 1차 종합 그대로(현행과 byte-identical — downstream
+             judge/judge_usage/emit 동일). Refine는 1차 종합을 2차 심판이 재검토한다:
+             1차 실패면 refine할 종합이 없어 그대로 전파(Simple과 동일 에러 의미),
+             2차 실패면 1차 종합으로 graceful degrade(REFINE이 Simple보다 절대 나빠지지
+             않음 — 다만 silent 아님: warn 로깅). 두 심판 usage는 [add_usage]로 합산.
+             닫힌 합 exhaustive match라 새 위상 추가 시 컴파일 에러로 누락을 강제한다. *)
+          let judge_full =
+            match topology with
+            | Fusion_types.Simple -> first_judge_full
+            | Fusion_types.Refine ->
+              (match first_judge_full with
+               | Error _ as e -> e
+               | Ok (s1, u1) ->
+                 (match
+                    Fusion_judge.run_refine ~sw ~net
+                      ~timeout_s:preset.Fusion_policy.judge_timeout_s
+                      ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
+                      ~judge_model:preset.Fusion_policy.judge
+                      ~question:req.Fusion_types.prompt ~panel ~prior:s1
+                      ~web_tools:judge_web_tools
+                      ~max_tool_calls:judge_max_tool_calls ()
+                  with
+                  | Ok (s2, u2) -> Ok (s2, Fusion_types.add_usage u1 u2)
+                  | Error (msg, u2) ->
+                    (* 2차 심판이 토큰을 태운 뒤 파싱 실패해도 그 usage(u2)를 버리지
+                       않고 1차와 합산한다 — degrade가 비용을 undercount하지 않도록
+                       (적대 리뷰 #22087 §1). 종합은 1차로 graceful degrade. *)
+                    Log.Keeper.warn ~keeper_name:req.Fusion_types.keeper
+                      "fusion run %s refine judge failed, keeping first synthesis: \
+                       %s"
+                      req.Fusion_types.run_id msg;
+                    Ok (s1, Fusion_types.add_usage u1 u2)))
+          in
           (* 심판 종합과 토큰 usage를 분리: outcome.judge는 synthesis만(소비자 호환),
-             usage는 sink 비용 회계로(RFC §10 패널N+심판1). 실패한 심판은 0(패널 Failed와 대칭). *)
-          let judge = Result.map fst judge_full in
+             usage는 sink 비용 회계로(RFC §10 패널N+심판M). 심판 실패 시에도 소비한
+             토큰은 회계한다(run_composed가 에러에 usage를 동반 — 응답 받은 뒤 실패면
+             소비분, 그 전 실패면 zero). *)
+          let judge = judge_full |> Result.map fst |> Result.map_error fst in
           let judge_usage =
             match judge_full with
             | Ok (_, u) -> u
-            | Error _ -> Fusion_types.zero_usage
+            | Error (_, u) -> u
           in
           (match
              Fusion_sink.emit ~base_dir ~keeper:req.Fusion_types.keeper

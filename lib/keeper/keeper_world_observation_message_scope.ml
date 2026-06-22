@@ -165,6 +165,13 @@ let render_recent_direct_conversation_context
       Printf.sprintf "- %s%s: %s"
         (direct_line_role_to_label line.role) speaker line.content
     in
+    let social_state_prefixes =
+      [ "SOCIAL_MODEL:"; "BELIEF_SUMMARY:"; "SPEECH_ACT:"; "DELIVERY_SURFACE:";
+        "ACTIVE_DESIRE:"; "CURRENT_INTENTION:"; "BLOCKER:"; "NEED:" ]
+    in
+    let is_social_state_line s =
+      List.exists (fun prefix -> String.starts_with ~prefix s) social_state_prefixes
+    in
     String.concat "\n"
       ([
          "--- Recent direct conversation (durable transcript) ---";
@@ -172,7 +179,7 @@ let render_recent_direct_conversation_context
          "Use them to answer continuity questions about your immediately previous replies.";
          "Do not claim that you checked board, task, file, status, or runtime state unless a listed tool_call supports it or you call the relevant tool in this turn; without tool evidence, say it has not been verified in this turn.";
        ]
-       @ List.map render_line lines)
+       @ (List.map render_line lines |> List.filter (fun s -> not (is_social_state_line s))))
 ;;
 
 (* RFC-0230: the lane is the state. A mention is pending when it arrives after

@@ -97,6 +97,42 @@ let record_memory_recall_read_error ~site path exn_class =
     ()
 ;;
 
+(* Audit/snapshot read-path helper (RFC-0138 lock-free snapshot extension):
+   project the most recent [window] lines of [path] via
+   {!Jsonl_incremental_projection.recent_lines} — steady-state O(new bytes)
+   instead of re-reading the tail on every snapshot — recording a typed read
+   error and returning [] on file I/O failure, the same graceful degradation
+   the prior tail read gave with the same {!Keeper_memory_recall_exn_class}
+   classification.  Shared by the operator tool-audit and keeper status-metrics
+   snapshot paths so the projection wiring and error handling live in one
+   place. *)
+let recent_lines_or_record
+    (projection : string list Jsonl_incremental_projection.t)
+    ~(site : string)
+    ~(key : string)
+    ~(path : string)
+    ~(window : int)
+    ~(initial_tail_bytes : int) : string list =
+  try
+    Jsonl_incremental_projection.recent_lines projection ~key ~path ~window
+      ~initial_tail_bytes
+  with
+  (* Re-raise cancellation verbatim (RFC-0106): never absorb
+     [Eio.Cancel.Cancelled] into the read-error counter. *)
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    record_memory_recall_read_error ~site path
+      (Keeper_memory_recall_exn_class.classify exn);
+    (* Preserve the last successful projection instead of collapsing to [] on a
+       transient read error, so a briefly-unreadable or partially-corrupt tail
+       does not blank an otherwise-populated snapshot (the error is still
+       recorded above for observability). [peek] holds the newest-first ring, so
+       reverse it to the oldest-first order [recent_lines] returns. *)
+    (match Jsonl_incremental_projection.peek projection ~key with
+     | Some (_ :: _ as newest_first) -> List.rev newest_first
+     | _ -> [])
+;;
+
 (* RFC-0149 §3.1 — typed Result entry point.  Distinguishes "empty
    memory bank" ([Ok summary] where [summary] holds zero recent rows)
    from "memory bank read failed" ([Error class]).  Callers that want

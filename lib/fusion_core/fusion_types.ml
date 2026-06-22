@@ -157,12 +157,16 @@ type fusion_topology =
   | Conditional
       (** panel → judge → (1차 판정이 [Insufficient]일 때만) judge'(refine) → sink.
           애매할 때만 한 단계 더 깊이; 그 외엔 1차 종합 그대로. *)
+  | Judge_of_judges
+      (** panel → [N개 1차 심판] → meta-judge → sink (RFC-0282). 서로 다른 N개 1차
+          심판이 같은 패널을 독립 종합하고, meta가 reconcile. preset.judges >= 2 필요. *)
 [@@deriving yojson, show, eq]
 
 let fusion_topology_to_string = function
   | Simple -> "simple"
   | Refine -> "refine"
   | Conditional -> "conditional"
+  | Judge_of_judges -> "judge_of_judges"
 
 (* [to_string]의 역함수, 닫힌 합 밖은 [None]=fail-closed (Unknown→permissive 회피).
    keeper 입력 문자열을 typed 위상으로 parse한 뒤 exhaustive match하게 한다. round-trip은
@@ -171,9 +175,11 @@ let fusion_topology_of_string = function
   | "simple" -> Some Simple
   | "refine" -> Some Refine
   | "conditional" -> Some Conditional
+  | "judge_of_judges" -> Some Judge_of_judges
   | _ -> None
 
-let all_fusion_topologies : fusion_topology list = [ Simple; Refine; Conditional ]
+let all_fusion_topologies : fusion_topology list =
+  [ Simple; Refine; Conditional; Judge_of_judges ]
 
 let all_fusion_topology_strings : string list =
   List.map fusion_topology_to_string all_fusion_topologies

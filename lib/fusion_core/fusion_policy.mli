@@ -22,8 +22,22 @@ type panel_group =
   }
 [@@deriving show, eq]
 
+(** JOJ(judge-of-judges, RFC-0282)의 1차 심판 한 명. {!panel_group}과 동형이되 모델이
+    단수다(심판은 한 모델이 한 종합을 낸다). 필드는 [j] 접두 — panel_group의 동명 필드와
+    타입 추론 충돌을 피한다. 정체성 derive는 {!panelist_id}([jlabel]/[jmodel]). *)
+type judge_spec =
+  { jmodel : string  (** provider.model id *)
+  ; jlabel : string  (** 정체성 라벨. ""면 정체성=jmodel *)
+  ; jsystem_prompt : string  (** 이 1차 심판의 lens — config에서 필수(코드 default 없음). *)
+  ; jweb_tools : bool  (** web_search/web_fetch 주입 여부. *)
+  ; jmax_tool_calls : int  (** 최대 tool 호출 수 (0=무제한). *)
+  ; jtimeout_s : float  (** 호출 구조적 타임아웃 (초). *)
+  }
+[@@deriving show, eq]
+
 (** 패널 preset — 이종 패널 그룹 리스트 + 단일 심판 (RFC-0252 §9, RFC-0252-A).
-    [judge]는 runtime.toml bindings와 동일한 opaque "provider.model" 문자열.
+    [judge]는 runtime.toml bindings와 동일한 opaque "provider.model" 문자열이며,
+    simple/refine/conditional 위상의 심판이자 JOJ의 meta-judge(reducer)다 (RFC-0282).
     legacy flat 문법(panel=[...])은 {!Fusion_config}가 정확히 길이-1 그룹으로
     desugar한다 — 그 경우 오늘과 byte-identical 동작. *)
 type preset =
@@ -33,6 +47,9 @@ type preset =
   ; judge_system_prompt : string
       (** 심판 모델 system prompt — config에서 필수(코드 default 없음). *)
   ; judge_timeout_s : float  (** 심판 호출 구조적 타임아웃 (초). *)
+  ; judges : judge_spec list
+      (** JOJ 1차 심판들 (RFC-0282). 기본 []; simple/refine/conditional은 무시한다.
+          JOJ 위상은 런타임에 >= 2 를 요구한다. *)
   }
 [@@deriving show, eq]
 
@@ -76,6 +93,18 @@ val preset_prompts_present : preset -> bool
 (** 심판 모델 id가 비어있지 않은가 (config 로드 시 fail-fast 검증). *)
 val preset_judge_present : preset -> bool
 
+(** JOJ 1차 심판들의 정체성 ({!panelist_id}, [jlabel]/[jmodel]). 입력순 = meta 프롬프트
+    attribution 순서. judges=[]면 []. (RFC-0282) *)
+val preset_judge_ids : preset -> string list
+
+(** 두 1차 심판이 같은 정체성을 가지면 그 id ({!preset_duplicate_panelist}와 동형 — meta
+    프롬프트 attribution 모호성 방지). 없으면 [None]. judges=[]면 [None]. (RFC-0282) *)
+val preset_duplicate_judge : preset -> string option
+
+(** 모든 1차 심판의 system prompt(lens)가 비어있지 않은가. judges=[]면 vacuously [true]
+    (simple/refine/conditional은 judges를 안 쓴다). (RFC-0282) *)
+val preset_judge_prompts_present : preset -> bool
+
 (** 외곽 run_safe 타임아웃 = 그룹 timeout 중 max. 단일 그룹이면 그 그룹 timeout. *)
 val panel_outer_timeout_of : panel_group list -> float
 
@@ -100,7 +129,10 @@ module Validated_preset : sig
     | Missing_prompt  (** 패널 또는 심판 system prompt 비어있음 *)
     | Missing_judge_model  (** 심판 model id 비어있음 *)
     | Duplicate_panelist of string  (** 두 패널이 같은 정체성({!panelist_id}) *)
-    | Bad_max_tool_calls of int  (** 그룹 max_tool_calls가 0..[max_tool_calls_ceiling] 밖 *)
+    | Bad_max_tool_calls of int
+        (** 그룹 또는 JOJ 1차 심판 max_tool_calls가 0..[max_tool_calls_ceiling] 밖 *)
+    | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0282) *)
+    | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성 (RFC-0282) *)
 
   (** 검증 순서: size → prompt → judge → 정체성 중복 → max_tool_calls. 통과 시
       [Ok vp], 첫 위반에서 [Error invalid]. config 로드의 검증 순서와 동일. *)

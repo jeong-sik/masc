@@ -12,6 +12,8 @@ type config_error =
   | Invalid_max_concurrent_panels of int
   | Invalid_max_tool_calls of string * int
   | Missing_default_preset of string
+  | Judge_panel_prompt_missing of string  (** preset 이름; JOJ 1차 심판 prompt 누락 (RFC-0282) *)
+  | Duplicate_judge of string * string  (** (preset 이름, 중복 judge 정체성) (RFC-0282) *)
   | Toml_type_error of string
 [@@deriving show, eq]
 
@@ -41,9 +43,27 @@ let parse_group (tbl : Otoml.t) : Fusion_policy.panel_group =
         [ "panel_timeout_s" ]
   }
 
+(* JOJ 1차 심판 한 명 파싱 (RFC-0282). [[fusion.presets.NAME.judges]] sub-table의
+   키 model/label/system_prompt/web_tools/max_tool_calls/timeout_s를 읽는다. sub-table
+   이름(judges)이 scope를 주므로 키는 비-접두. parse_group과 동형. 누락 system_prompt는
+   ""로 읽혀 Validated_preset 검증에서 Judge_panel_prompt_missing으로 fail-fast된다. *)
+let parse_judge_spec (tbl : Otoml.t) : Fusion_policy.judge_spec =
+  { jmodel = Otoml.find_or ~default:"" tbl Otoml.get_string [ "model" ]
+  ; jlabel = Otoml.find_or ~default:"" tbl Otoml.get_string [ "label" ]
+  ; jsystem_prompt =
+      Otoml.find_or ~default:"" tbl Otoml.get_string [ "system_prompt" ]
+  ; jweb_tools = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "web_tools" ]
+  ; jmax_tool_calls =
+      Otoml.find_or ~default:0 tbl Otoml.get_integer [ "max_tool_calls" ]
+  ; jtimeout_s =
+      Otoml.find_or ~default:Fusion_policy.default_timeout_s tbl Otoml.get_float
+        [ "timeout_s" ]
+  }
+
 (* 패널 그룹을 확정한 뒤 preset 완성 + 검증. judge_* 는 preset table에서 직접 읽는다
-   (심판은 preset당 1개, 그룹별 아님). 검증 순서: 크기(총합) → 프롬프트 → 심판모델 →
-   정체성 중복(panelist_id) → 그룹별 max_tool_calls 범위. *)
+   (단일 심판 = simple/refine/conditional 심판이자 JOJ meta). [[...judges]] sub-table이
+   있으면 JOJ 1차 심판 목록으로 파싱(없으면 []). 검증 순서: 크기(총합) → 패널 프롬프트 →
+   심판모델 → 패널 정체성 중복 → 패널 max_tool_calls → 1차 심판 prompt/정체성/max_tool_calls. *)
 let finish_preset name tbl (panels : Fusion_policy.panel_group list)
   : (Fusion_policy.Validated_preset.t, config_error) result =
   let judge = Otoml.find_or ~default:"" tbl Otoml.get_string [ "judge" ] in
@@ -56,8 +76,13 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
     Otoml.find_or ~default:Fusion_policy.default_timeout_s tbl Otoml.get_float
       [ "judge_timeout_s" ]
   in
+  let judges =
+    match Otoml.find_opt tbl (Otoml.get_array Otoml.get_value) [ "judges" ] with
+    | Some entries -> List.map parse_judge_spec entries
+    | None -> []
+  in
   let p : Fusion_policy.preset =
-    { name; panels; judge; judge_system_prompt; judge_timeout_s }
+    { name; panels; judge; judge_system_prompt; judge_timeout_s; judges }
   in
   (* 검증 SSOT는 Validated_preset.of_preset (RFC-0280). config는 그 [invalid]에 preset
      이름을 붙여 자기 [config_error]로 매핑만 한다 (운영자에게 어느 preset인지 알림).
@@ -74,7 +99,11 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
        | Fusion_policy.Validated_preset.Duplicate_panelist id ->
          Duplicate_panelist (name, id)
        | Fusion_policy.Validated_preset.Bad_max_tool_calls v ->
-         Invalid_max_tool_calls (name, v))
+         Invalid_max_tool_calls (name, v)
+       | Fusion_policy.Validated_preset.Judge_panel_prompt_missing ->
+         Judge_panel_prompt_missing name
+       | Fusion_policy.Validated_preset.Duplicate_judge id ->
+         Duplicate_judge (name, id))
 
 (* preset 한 명 파싱. 두 문법 분기:
    - 새 문법 [[fusion.presets.NAME.panels]] (array-of-tables) → 그룹별 파싱.

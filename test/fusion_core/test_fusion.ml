@@ -785,7 +785,18 @@ let test_topology_unknown_is_none () =
 (* wire vocabulary 핀 — 도구 스키마 허용값/에러 메시지가 이 목록에서 파생된다. *)
 let test_topology_strings () =
   Alcotest.(check (list string))
-    "all topology wire strings" [ "simple"; "refine" ] all_fusion_topology_strings
+    "all topology wire strings"
+    [ "simple"; "refine"; "conditional" ]
+    all_fusion_topology_strings
+
+(* Conditional 에스컬레이트 정책 — 닫힌 합 전수 값-핀. Insufficient만 escalate. *)
+let test_escalation_policy () =
+  Alcotest.(check bool) "Insufficient escalates" true
+    (decision_warrants_escalation (Insufficient { missing_for_decision = [ "x" ] }));
+  Alcotest.(check bool) "Answer does not escalate" false
+    (decision_warrants_escalation (Answer "done"));
+  Alcotest.(check bool) "Recommend does not escalate" false
+    (decision_warrants_escalation (Recommend { action = "a"; rationale = "r" }))
 
 (* ---- render_prior_synthesis (refine 프롬프트 입력) --------------------- *)
 
@@ -941,6 +952,7 @@ let () =
       , [ Alcotest.test_case "roundtrip" `Quick test_topology_roundtrip
         ; Alcotest.test_case "unknown_is_none" `Quick test_topology_unknown_is_none
         ; Alcotest.test_case "wire_strings" `Quick test_topology_strings
+        ; Alcotest.test_case "escalation_policy" `Quick test_escalation_policy
         ; Alcotest.test_case "render_lossless_fields" `Quick test_render_lossless_fields
         ; Alcotest.test_case "render_decision_answer" `Quick test_render_decision_answer
         ; Alcotest.test_case "render_decision_recommend" `Quick

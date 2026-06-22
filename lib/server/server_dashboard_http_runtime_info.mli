@@ -96,6 +96,15 @@ val dashboard_runtime_probe_failure_envelope_of_exn :
     exception message in [errors]). Exposed so the failure-visibility contract
     is unit-testable independent of the cache/atomic plumbing. *)
 
+val maybe_fork_dashboard_runtime_probe_refresh : unit -> unit
+(** Schedule a non-blocking background refresh of the runtime-probe cache.
+    Single-flight via an internal CAS: a no-op when a refresh is already
+    running, when no server switch is reachable, or on Domain_pool worker
+    domains where a background [Eio.Fiber.fork] is not permitted. Called by
+    {!dashboard_runtime_probe_http_json} on cache miss / soft-TTL expiry, and by
+    the server boot path to warm the cache before the first dashboard request
+    so the first response is not a [warming_up] placeholder. *)
+
 val dashboard_runtime_probe_payload_json_for_tests :
   ?default_id:string -> Runtime.t list -> Yojson.Safe.t
 (** Test-only pure projection for the production runtime reachability payload.

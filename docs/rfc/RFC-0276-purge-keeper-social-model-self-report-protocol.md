@@ -196,8 +196,8 @@ Move the `[masc_oas_error]` non-truncation rule into whatever caps the
 
 ## 4. Removal plan (compiler-driven, phased)
 
-- **Phase 1** (RFC-0275, merged-pending on `feature/bdi-excision-0621`, CI green): BDI triple + `magentic_ledger_v1`. Done.
-- **Phase 2a — decouple** (low risk, independently landable): implement §3.2 `turn_delivery`; keep the social model compiling; unit-test the anti-thrash mapping. Ships green before any deletion.
+- **Phase 1** (RFC-0275, **merged to main** #22023): BDI triple + `magentic_ledger_v1`. Done.
+- **Phase 2a — decouple** (**merged to main** #22036): implemented §3.2 `turn_delivery`; social model still compiles; unit-tested the anti-thrash mapping + multi-signal precedence + peer-set drift guard. Shipped green before any deletion. Done.
 - **Phase 2b — purge** (high risk): delete prompt protocol + types lib + facade + registry + impl + protocol + TOML validation. The OCaml closed-sum deletion forces the compiler to enumerate every remaining consumer. Remove request-help post + reply-suppression arms. Fold §3.3.
 - **Phase 2c — clean-up**: dashboard TS dead fields, `/bdi-snapshot`, TLA+ `SocialStateCap.tla`, orphan `test_keeper_toml.ml`, metrics/decision writers, design-doc supersession.
 

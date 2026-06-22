@@ -502,6 +502,55 @@ describe('KeeperTurnInspector v2 drawer', () => {
     })
   })
 
+  it('renders the tab rail as a pill tablist with exactly one active pill', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-tab-timeline"]')).toBeTruthy()
+    })
+
+    // The pill rail container is the tablist styled by .kti-tabs.
+    const rail = container.querySelector('.kti-tabs')
+    expect(rail).toBeTruthy()
+    expect(rail?.getAttribute('role')).toBe('tablist')
+
+    // Every tab is a .kti-tab pill (the class the CSS pill rule targets),
+    // and the rail holds more than one pill so the gap/flex layout applies.
+    const pills = rail!.querySelectorAll('.kti-tab')
+    expect(pills.length).toBeGreaterThan(1)
+    pills.forEach((pill) => {
+      expect(pill.classList.contains('kti-tab')).toBe(true)
+      expect(pill.getAttribute('role')).toBe('tab')
+    })
+
+    // Exactly one pill carries the active `.kti-tab.on` class (the volt-wash
+    // fill state), and it is the timeline tab by default.
+    const activePills = rail!.querySelectorAll('.kti-tab.on')
+    expect(activePills.length).toBe(1)
+    expect(activePills[0]?.getAttribute('data-testid')).toBe('turn-tab-timeline')
+    expect(activePills[0]?.getAttribute('aria-selected')).toBe('true')
+
+    // Switching tabs moves the single active pill, never duplicates it.
+    fireEvent.click(container.querySelector('[data-testid="turn-tab-meta"]')!)
+
+    await waitFor(() => {
+      const nextActive = rail!.querySelectorAll('.kti-tab.on')
+      expect(nextActive.length).toBe(1)
+      expect(nextActive[0]?.getAttribute('data-testid')).toBe('turn-tab-meta')
+    })
+    expect(
+      container.querySelector('[data-testid="turn-tab-timeline"]')?.classList.contains('on'),
+    ).toBe(false)
+  })
+
   it('grounds model / finish_reason from the record and marks deferred fields n/a', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
 

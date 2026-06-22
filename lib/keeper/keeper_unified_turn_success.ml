@@ -73,9 +73,72 @@ let no_work_budget_threshold_override
   else None
 ;;
 
-let apply_loop_detectors ~config ~observation ~social_state updated_meta result =
-  (* RFC-0239 §3 R3: feed the loop detector a semantic no-progress verdict
-     instead of the literal speech_act. A turn makes progress if it produced
+(* RFC-0276 §3.2: runtime-observed delivery classification. Replaces the LLM
+   self-declared [delivery_surface] (the social-model header protocol) as the
+   input to the no-progress loop detector. Derived once from turn facts already
+   in scope — the tool names actually called and whether visible text was
+   emitted — so the anti-thrash verdict no longer trusts a model-authored
+   header.
+
+   Tool-capability classification is delegated to [Keeper_tool_capability_axis],
+   the typed SSOT for tool-name capabilities, rather than matching tool-name
+   string literals here (CLAUDE.md anti-pattern #1: no scattered hardcoded tool
+   names; the social-model [inferred_tool_surface] enumerated the same names and
+   is removed in RFC-0276 Phase 2b). *)
+type turn_delivery =
+  | Peer_only
+    (* peer-surface tool (board/comment/broadcast/keeper-msg), or silent:
+       no peer/claim tool and no visible text *)
+  | User_facing (* non-empty visible reply, no peer/claim tool *)
+  | Task_claim (* task-claim tool *)
+
+(* Classify from observable facts. Order is significant: a turn that calls a
+   peer-surface tool is [Peer_only] even if it also produced text, because the
+   board/broadcast post is the salient delivery; a claim turn is exempt because
+   claiming is itself progress (RFC-0239). This precedence (peer > claim > text)
+   mirrors the removed social-model [inferred_tool_surface] if/else-if order, so
+   a multi-signal turn cannot flip the anti-thrash verdict to exempt.
+
+   Behavior change (RFC-0276 §2.4): the [Board_activity] capability set is
+   {keeper_board_post, keeper_board_comment, masc_broadcast, masc_keeper_msg} —
+   wider than the old social-model peer set {board_post, board_comment,
+   broadcast} by [masc_keeper_msg] (keeper->keeper message). A turn that only
+   sends a peer message with no durable evidence now accrues the no-progress
+   streak (it previously reset it). This is intentional: a bare peer message is
+   exactly the "posts to peers without evidence" case RFC-0239 targets. The set
+   is pinned in test_no_progress_loop_detector so any axis change forces a
+   conscious no-progress review. *)
+let classify_delivery ~tools ~has_visible_text =
+  if Keeper_tool_capability_axis.(supports_any Board_activity tools)
+  then Peer_only
+  else if Keeper_tool_capability_axis.(supports_any Claim_task tools)
+  then Task_claim
+  else if has_visible_text
+  then User_facing
+  else Peer_only
+;;
+
+let classify_turn_delivery result =
+  classify_delivery
+    ~tools:(Keeper_agent_result.tool_names result)
+    ~has_visible_text:(String.trim result.Keeper_agent_run.response_text <> "")
+;;
+
+(* A peer-only or silent turn must show durable evidence to count as progress; a
+   user-facing reply or a task claim is exempt. Preserves the pre-RFC-0276
+   [delivery_surface] mapping (Board_*/Broadcast/Silent -> true;
+   Visible_reply/Task_claim -> false). Exhaustive, no [_ ->] catch-all
+   (CLAUDE.md anti-pattern #4): a new [turn_delivery] variant must be classified
+   here at compile time. *)
+let delivery_requires_evidence = function
+  | Peer_only -> true
+  | User_facing | Task_claim -> false
+;;
+
+let apply_loop_detectors ~config ~observation updated_meta result =
+  (* RFC-0239 §3 R3 / RFC-0276 §3.2: feed the loop detector a semantic
+     no-progress verdict derived from observed turn facts, not the LLM
+     self-declared delivery_surface. A turn makes progress if it produced
      durable evidence (substantive tool calls or validated output); a turn that
      only posts to peers (board/comment/broadcast) or stays silent without such
      evidence accrues the streak. The old speech_act="stay_silent" check reset
@@ -86,10 +149,7 @@ let apply_loop_detectors ~config ~observation ~social_state updated_meta result 
     || Option.is_some (KUM.visible_run_validation result)
   in
   let surface_requires_evidence =
-    match social_state.Social.delivery_surface with
-    | Social.Board_post | Social.Board_comment | Social.Broadcast_surface
-    | Social.Silent -> true
-    | Social.Visible_reply | Social.Task_claim_surface -> false
+    delivery_requires_evidence (classify_turn_delivery result)
   in
   let made_progress =
     Keeper_no_progress_loop_detector.turn_made_progress
@@ -129,6 +189,14 @@ let apply_loop_detectors ~config ~observation ~social_state updated_meta result 
 
 module For_testing = struct
   let no_work_budget_threshold_override = no_work_budget_threshold_override
+
+  type nonrec turn_delivery = turn_delivery =
+    | Peer_only
+    | User_facing
+    | Task_claim
+
+  let classify_delivery = classify_delivery
+  let delivery_requires_evidence = delivery_requires_evidence
 end
 
 let append_metrics_snapshot
@@ -521,7 +589,7 @@ let handle
       result
   in
   let updated_meta =
-    apply_loop_detectors ~config ~observation ~social_state updated_meta result
+    apply_loop_detectors ~config ~observation updated_meta result
   in
   append_metrics_snapshot
     ~config

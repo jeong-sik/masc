@@ -12,6 +12,7 @@ module D = Masc.Keeper_no_progress_loop_detector
 module Metrics = Masc.Otel_metric_store
 module Success = Masc.Keeper_unified_turn_success.For_testing
 module WO = Masc.Keeper_world_observation
+module Cap = Masc.Keeper_tool_capability_axis
 
 (* Detector now uses Eio.Mutex (was Stdlib.Mutex; the latter raised EDEADLK
    under any fiber contention). Every public entry needs an Eio fiber
@@ -247,6 +248,115 @@ let test_no_progress_board_post_accrues_streak () =
   Alcotest.(check int) "board posts without evidence accrue streak" 4
     (D.current_streak ~keeper_name:k)
 
+(* RFC-0276 §3.2: the no-progress detector input is derived from observed turn
+   facts (tool names + visible text) via [classify_delivery], replacing the LLM
+   self-declared delivery_surface. These tests pin the mapping the detector
+   relies on. *)
+let delivery_label = function
+  | Success.Peer_only -> "peer_only"
+  | Success.User_facing -> "user_facing"
+  | Success.Task_claim -> "task_claim"
+
+let classify ~tools ~has_visible_text =
+  delivery_label (Success.classify_delivery ~tools ~has_visible_text)
+
+let test_classify_delivery_mapping () =
+  let claim_tool = List.hd Cap.claim_task_tool_names in
+  (* Pin the EXACT peer-surface set that the no-progress classifier treats as
+     evidence-requiring. Intentionally an explicit literal, NOT
+     [Cap.board_activity_tool_names] iterated: iterating the axis would be
+     tautological (it could never detect the axis growing a 5th tool). If
+     [Keeper_tool_capability_axis] adds a Board_activity tool, this assertion
+     fails and forces a conscious decision about its no-progress impact —
+     converting the policy<->taxonomy coupling from silent to guarded.
+
+     vs the removed social-model [inferred_tool_surface] set
+     {keeper_board_comment, keeper_board_post, keeper_broadcast}: this set adds
+     [masc_keeper_msg] (keeper->keeper message; [masc_broadcast] is the public
+     name of the same [keeper_broadcast] tool). That is an intentional, more
+     complete peer-surface definition (RFC-0276 §2.4 / §3.2 behavior change): a
+     turn that only sends a peer message with no durable evidence now accrues
+     the streak, matching RFC-0239's "only posts to peers without evidence"
+     intent, where the old social model let a bare keeper-msg turn reset it. *)
+  let expected_peer_tools =
+    [ "keeper_board_comment"
+    ; "keeper_board_post"
+    ; "masc_broadcast"
+    ; "masc_keeper_msg"
+    ]
+  in
+  Alcotest.(check (slist string String.compare))
+    "peer-surface set is exactly the pinned list (axis-drift guard)"
+    expected_peer_tools Cap.board_activity_tool_names;
+  (* Every pinned peer tool -> Peer_only, with or without text: a turn that
+     calls a peer-surface tool is Peer_only even when it also produced text,
+     because the peer post is the salient delivery (tools dominate text). *)
+  List.iter
+    (fun t ->
+      Alcotest.(check string)
+        (Printf.sprintf "peer tool %s -> peer_only" t) "peer_only"
+        (classify ~tools:[ t ] ~has_visible_text:false);
+      Alcotest.(check string)
+        (Printf.sprintf "peer tool %s + text -> peer_only (tools dominate text)"
+           t)
+        "peer_only"
+        (classify ~tools:[ t ] ~has_visible_text:true))
+    expected_peer_tools;
+  (* Multi-signal precedence (RFC-0276 §3.2 total derivation): a turn carrying
+     both a peer tool and a claim tool, plus text, is Peer_only — peer-posting
+     dominates claim, which dominates text. Mirrors the removed
+     inferred_tool_surface if/else-if order so the anti-thrash invariant cannot
+     flip to exempt on a multi-signal turn. *)
+  Alcotest.(check string) "peer + claim + text -> peer_only" "peer_only"
+    (classify ~tools:[ "keeper_board_post"; claim_tool ] ~has_visible_text:true);
+  (* Claim tool is exempt (claiming is progress, RFC-0239); claim dominates
+     text. *)
+  Alcotest.(check string) "claim tool -> task_claim" "task_claim"
+    (classify ~tools:[ claim_tool ] ~has_visible_text:false);
+  Alcotest.(check string) "claim + text -> task_claim (claim dominates text)"
+    "task_claim"
+    (classify ~tools:[ claim_tool ] ~has_visible_text:true);
+  (* No peer/claim tool + visible text -> user-facing reply (exempt). *)
+  Alcotest.(check string) "no tool + text -> user_facing" "user_facing"
+    (classify ~tools:[] ~has_visible_text:true);
+  (* No peer/claim tool + no text = silent turn -> Peer_only (requires
+     evidence). This is the parse-don't-validate replacement for the old
+     DELIVERY_SURFACE: silent header self-declaration. *)
+  Alcotest.(check string) "no tool + no text (silent) -> peer_only" "peer_only"
+    (classify ~tools:[] ~has_visible_text:false);
+  (* A non-peer, non-claim tool with no visible text is still routed by surface
+     only (Peer_only); strong_evidence (substantive tool calls) is the separate
+     channel that lets such a turn count as progress. *)
+  let exec_tool = List.hd Cap.shell_command_input_tool_names in
+  Alcotest.(check string) "exec-only no text -> peer_only" "peer_only"
+    (classify ~tools:[ exec_tool ] ~has_visible_text:false)
+
+let test_delivery_requires_evidence_mapping () =
+  Alcotest.(check bool) "peer_only requires evidence" true
+    (Success.delivery_requires_evidence Success.Peer_only);
+  Alcotest.(check bool) "user_facing exempt" false
+    (Success.delivery_requires_evidence Success.User_facing);
+  Alcotest.(check bool) "task_claim exempt" false
+    (Success.delivery_requires_evidence Success.Task_claim)
+
+(* End-to-end: silent no-evidence turns (no tools, no visible text) accrue the
+   streak through the decoupled classification path, mirroring the board-post
+   anti-thrash test but via the RFC-0276 fact-derived surface. *)
+let test_silent_turns_accrue_streak () =
+  let k = "decouple_silent_thrash" in
+  for _ = 1 to 4 do
+    let surface_requires_evidence =
+      Success.delivery_requires_evidence
+        (Success.classify_delivery ~tools:[] ~has_visible_text:false)
+    in
+    record_turn ~keeper_name:k
+      ~made_progress:
+        (D.turn_made_progress ~strong_evidence:false ~surface_requires_evidence)
+    |> ignore_outcome
+  done;
+  Alcotest.(check int) "silent no-evidence turns accrue streak" 4
+    (D.current_streak ~keeper_name:k)
+
 let () =
   Alcotest.run "keeper_no_progress_loop_detector"
     [
@@ -275,6 +385,15 @@ let () =
             `Quick (with_eio test_latched_no_repeat_while_streak_grows);
           Alcotest.test_case "latch releases on reset, then re-fires"
             `Quick (with_eio test_latch_releases_on_reset_then_refires);
+        ] );
+      ( "RFC-0276 delivery decouple",
+        [
+          Alcotest.test_case "classify_delivery maps observed facts"
+            `Quick test_classify_delivery_mapping;
+          Alcotest.test_case "delivery_requires_evidence mapping"
+            `Quick test_delivery_requires_evidence_mapping;
+          Alcotest.test_case "silent no-evidence turns accrue streak"
+            `Quick (with_eio test_silent_turns_accrue_streak);
         ] );
       ( "per-keeper isolation",
         [

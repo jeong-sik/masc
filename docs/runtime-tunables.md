@@ -14,11 +14,11 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 355 unique knobs across 9 modules.
+**Total**: 354 unique knobs across 9 modules.
 
-**Typed getter classification**: 22/208 tagged (`operator`: 22, `algorithm`: 0, `unclassified`: 186).
+**Typed getter classification**: 22/207 tagged (`operator`: 22, `algorithm`: 0, `unclassified`: 185).
 
-## Env_config_core (29 knobs; typed classification 1/12)
+## Env_config_core (28 knobs; typed classification 1/11)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
@@ -35,11 +35,10 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_HOST` | string_literal | n/a | n/a | 201 | SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352). Defined here so in-process readers and out-of-process... |
 | `MASC_HTTP_BASE_URL` | string_literal | n/a | n/a | 243 | SSOT for the MASC_HTTP_BASE_URL env-var name (issue 8352). Defined here (above [masc_http_base_url]) so the constant ... |
 | `MASC_HTTP_PORT` | string_literal | n/a | n/a | 202 | SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352). Defined here so in-process readers and out-of-process... |
-| `MASC_KEEPER_DEFAULT_SANDBOX_PROFILE` | typed:string | unclassified | unclassified | 539 | Default sandbox profile for keepers. Default: "local". Set to "docker" to default all keepers to containerized execut... |
-| `MASC_KEEPER_DESIRES` | typed:string | unclassified | unclassified | 534 | Default keeper desires (drive statement). Default: "". |
-| `MASC_KEEPER_NEEDS` | typed:string | unclassified | unclassified | 530 | Default keeper needs (operational requirements). Default: "". |
-| `MASC_KEEPER_SOCIAL_MODEL` | typed:string | unclassified | unclassified | 522 | Default social model for keepers. Default: "bdi_speech_v1". |
-| `MASC_KEEPER_WILL` | typed:string | unclassified | unclassified | 526 | Default keeper will (long-term intent). Default: "". |
+| `MASC_KEEPER_DEFAULT_SANDBOX_PROFILE` | typed:string | unclassified | unclassified | 535 | Default sandbox profile for keepers. Default: "local". Set to "docker" to default all keepers to containerized execut... |
+| `MASC_KEEPER_DESIRES` | typed:string | unclassified | unclassified | 530 | Default keeper desires (drive statement). Default: "". |
+| `MASC_KEEPER_NEEDS` | typed:string | unclassified | unclassified | 526 | Default keeper needs (operational requirements). Default: "". |
+| `MASC_KEEPER_WILL` | typed:string | unclassified | unclassified | 522 | Default keeper will (long-term intent). Default: "". |
 | `MASC_LOG_LEVEL` | string_literal | n/a | n/a | 476 | SSOT for logging / observability env-var names (issue 8352). |
 | `MASC_LOG_ROUTINE_LEVEL` | string_literal | n/a | n/a | 477 | SSOT for logging / observability env-var names (issue 8352). |
 | `MASC_ORCHESTRATOR_ENABLED` | string_literal | n/a | n/a | 409 | SSOT for the MASC_ORCHESTRATOR_ENABLED env-var name (issue 8352). Referenced by feature_flag_registry catalog, env_co... |

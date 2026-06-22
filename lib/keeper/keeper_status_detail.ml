@@ -372,8 +372,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            compaction_policy_of_keeper m
          in
 
-         let models_resolved = `List [] in
-
          let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
          let metrics_path = Keeper_types_support.keeper_metrics_path config m.name in
          let memory_bank_path =
@@ -934,7 +932,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("turn_budget", `Int max_context_resolution.turn_budget);
              ("effective_budget", `Int max_context_resolution.effective_budget);
            ]);
-           ("models_resolved", models_resolved);
            ("model_observability", model_observability);
            ("runtime_trust", runtime_trust);
            ("chat_queue", chat_queue);

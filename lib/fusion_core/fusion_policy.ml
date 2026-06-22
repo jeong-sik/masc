@@ -7,6 +7,10 @@
    nested deriving 필수. *)
 type panel_group =
   { models : string list  (** provider.model ids *)
+  ; label : string
+      (** 패널 정체성 라벨 (RFC-0278). 같은 model을 다른 system_prompt로 여러 그룹에
+          둘 때(persona ensemble) 패널을 구분한다. ""(기본)이면 정체성=model 그대로
+          → legacy/단일-occurrence는 byte-identical. 정체성 derive는 [panelist_id]. *)
   ; system_prompt : string  (** 그룹 패널 모델 system prompt (config 필수) *)
   ; web_tools : bool  (** 그룹에 web_search/web_fetch 주입 여부 *)
   ; max_tool_calls : int  (** 그룹 모델당 최대 tool 호출 수 (0=무제한) *)
@@ -41,16 +45,43 @@ let preset_size_ok (p : preset) =
   let total = List.length (preset_models p) in
   p.panels <> [] && total >= min_panel && total <= max_panel
 
-(* 같은 provider.model이 평탄화 모델 리스트에 두 번 이상 나타나면 그 id를 반환.
-   Async_agent.all이 카드명(=model)으로 결과를 키잉하므로 중복은 답변 충돌(silent
-   손실)을 부른다. cross-group뿐 아니라 한 그룹 내 중복도 같은 이유로 거부한다
-   (RFC-0252-A §4.6 결정: parse-time 거부). *)
-let preset_duplicate_model (p : preset) =
+(* 패널 정체성 (RFC-0278). label이 비면 model 그대로(legacy byte-identity), 있으면
+   "label (model)". 이 문자열이 패널의 유일 식별자다: agent 카드명(Async_agent.all
+   반환 키) · 심판이 보는 패널 태그 · panel_answer.model 값. label은 model을 압축하지
+   않고 포함하므로 정보 손실이 없다 — provider 라우팅은 group.models의 원 model로
+   build 시점에 따로 수행된다. 포맷은 SSOT로 여기 한 곳에서만 정의한다. *)
+let panelist_id ~label ~model =
+  if String.equal label "" then model else Printf.sprintf "%s (%s)" label model
+
+(* 모든 그룹의 패널 정체성을 평탄화 (그룹순 × 그룹내 모델순 = fan-out 순서). *)
+let preset_panelist_ids (p : preset) =
+  List.concat_map
+    (fun (g : panel_group) ->
+      List.map (fun model -> panelist_id ~label:g.label ~model) g.models)
+    p.panels
+
+(* 두 패널이 같은 정체성([panelist_id])을 가지면 그 id를 반환. Async_agent.all이
+   카드명(=정체성)으로 결과 리스트를 만들고, 심판/synthesis가 정체성 문자열로 패널을
+   지칭하므로 중복 정체성은 모호성(어느 패널인지 구분 불가)을 부른다. 이 한 invariant가
+   세 경우를 모두 흡수한다: (a) 한 그룹 내 같은 model (label 동일 → 같은 id),
+   (b) 라벨 없는 두 그룹의 같은 model (둘 다 id=model), (c) 같은 라벨+같은 model.
+   서로 다른 라벨이면 같은 model이라도 정체성이 달라 통과(same-model-different-prompt).
+   (RFC-0278: parse-time 거부.)
+
+   dedup은 (label, model) 튜플이 아니라 *렌더된 정체성 문자열*에 건다. 이게 옳은 이유:
+   심판/sink/dashboard가 보는 namespace가 정확히 이 정체성 문자열이기 때문이다. panelist_id
+   포맷("%s (%s)")은 단사(injective)가 아니라서 label=""+model="x (y)"와 label="x"+model="y"가
+   같은 "x (y)"로 렌더될 수 있는데, 이 둘은 정체성 namespace에서 *실제로* 충돌한다(심판이
+   동일 <panel model="x (y)"> 태그 둘을 받아 구분 불가). 따라서 같은 문자열이면 거부하는 게
+   sound하다 — fail-closed. 튜플로 dedup하면 둘 다 통과시켜 그 모호성을 silent하게 흘린다(더
+   나쁨). 단, provider.model id가 " (...)"를 포함하는 경우에만 이 충돌이 닿으므로(실제 id는
+   "provider.model" opaque 문자열) 현실 config에선 latent하다. *)
+let preset_duplicate_panelist (p : preset) =
   let rec find_dup seen = function
     | [] -> None
-    | m :: rest -> if List.mem m seen then Some m else find_dup (m :: seen) rest
+    | id :: rest -> if List.mem id seen then Some id else find_dup (id :: seen) rest
   in
-  find_dup [] (preset_models p)
+  find_dup [] (preset_panelist_ids p)
 
 (* 모든 그룹의 패널 system prompt + 심판 system prompt가 비어있지 않은가. 프롬프트는
    행동을 정의하므로 코드 default로 채우지 않고 config에서 받는다 (없으면 fail-fast). *)

@@ -15,8 +15,10 @@ type config_error =
       (** preset의 [panels]가 빈 배열 (그룹 0개). "모델 0개"(Invalid_panel_size)와 구분. *)
   | Conflicting_panel_grammar of string
       (** 같은 preset에 [[...panels]]와 flat [panel] 둘 다 존재 (silent 선택 금지). *)
-  | Duplicate_panel_model of string * string
-      (** (preset 이름, 모델 id) — 평탄화 모델 리스트에 중복 id (카드명 충돌 방지). *)
+  | Duplicate_panelist of string * string
+      (** (preset 이름, panelist_id) — 두 패널이 같은 정체성을 가짐. 라벨 없는 두
+          그룹의 동일 model, 한 그룹 내 동일 model, 동일 라벨+model을 흡수한다.
+          서로 다른 라벨의 동일 model은 통과 (same-model-different-prompt, RFC-0278). *)
   | Missing_prompt of string
       (** preset의 panel/judge system prompt가 비어있음 (코드 default 금지) *)
   | Missing_judge_model of string
@@ -41,7 +43,8 @@ val disabled : Fusion_policy.t
     - 패널 모델 총합 1..8 위반 → [Error [Invalid_panel_size _]].
     - [panels] 빈 배열(그룹 0개) → [Error [Empty_panels _]].
     - [[...panels]]와 flat [panel] 동시 → [Error [Conflicting_panel_grammar _]].
-    - 그룹 간/내 모델 id 중복 → [Error [Duplicate_panel_model _]].
+    - 패널 정체성(panelist_id) 중복 → [Error [Duplicate_panelist _]]. 라벨이 다르면
+      같은 model이라도 통과(same-model-different-prompt, RFC-0278).
     - panel/judge system prompt 누락 → [Error [Missing_prompt _]].
     - judge 모델 id 누락 → [Error [Missing_judge_model _]].
     - max_concurrent_panels < 1 → [Error [Invalid_max_concurrent_panels _]].

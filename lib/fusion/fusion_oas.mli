@@ -14,6 +14,9 @@
     [timeout_s]는 OAS transport idle/body budget에만 매핑한다. Fusion의 구조적
     wall-clock budget은 호출자가 [Masc_oas_bridge.run_safe]로 소유하며, OAS
     [max_execution_time_s]에는 매핑하지 않는다.
+    [name]은 에이전트 카드명 — [Async_agent.all]이 결과 키로 반환하는 패널 정체성이다
+    (RFC-0278: 같은 model을 다른 라벨로 구분). 미지정이면 카드명=[model]. provider
+    라우팅은 카드명과 무관하게 [model]로 한다.
     미존재 runtime·빌드 실패는 [panel_failure]로. *)
 val build_agent
   :  sw:Eio.Switch.t
@@ -22,6 +25,7 @@ val build_agent
   -> ?tools:Agent_sdk.Tool.t list
   -> ?max_tool_calls:int
   -> ?timeout_s:float
+  -> ?name:string
   -> string
   -> (Agent_sdk.Agent.t, Fusion_types.panel_failure) result
 
@@ -46,6 +50,11 @@ val panel_failure_code : Fusion_types.panel_failure -> string
 
 (** Human-readable panel failure detail with runtime attribution when available. *)
 val panel_failure_detail : runtime_id:string -> Fusion_types.panel_failure -> string
+
+(** 이미 attribution된 실패를 재-attribution 없이 렌더 (sink 표시용). Provider_error는
+    detail 그대로(실패 시점에 raw model로 정규화됨), Timeout/Empty는 사람용 문자열.
+    panelist 정체성을 [Provider '...'] 슬롯에 다시 입히지 않는다 (RFC-0278). *)
+val panel_failure_text : Fusion_types.panel_failure -> string
 
 (** [masc_web_search] / [masc_web_fetch]를 [Agent_sdk.Tool.t]로 변환한 목록.
     [Keeper_tool_descriptor]에서 descriptor를 찾지 못하면 빈 목록을 반환한다. *)

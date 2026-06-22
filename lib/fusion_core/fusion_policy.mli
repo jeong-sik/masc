@@ -10,6 +10,10 @@
     그룹 여럿을 가질 수 있다 (RFC-0252-A). 닫힌 record. *)
 type panel_group =
   { models : string list  (** provider.model ids *)
+  ; label : string
+      (** 패널 정체성 라벨 (RFC-0278). 같은 model을 다른 system_prompt로 여러 그룹에
+          둘 때 패널을 구분한다. ""(기본)이면 정체성=model 그대로 → legacy byte-identical.
+          정체성 derive는 {!panelist_id}. *)
   ; system_prompt : string
       (** 그룹 패널 모델 system prompt — config에서 필수(코드 default 없음). *)
   ; web_tools : bool  (** 그룹에 web_search/web_fetch 주입 여부. *)
@@ -47,10 +51,19 @@ val preset_models : preset -> string list
     config 로드 시 검증되지만 게이트도 방어. *)
 val preset_size_ok : preset -> bool
 
-(** 평탄화 모델 리스트에 중복 id가 있으면 그 id를 반환 (없으면 [None]).
-    중복은 [Async_agent.all] 카드명 충돌로 silent 답변 손실을 부르므로 config
-    로드 시 거부한다 (RFC-0252-A §4.6). *)
-val preset_duplicate_model : preset -> string option
+(** 패널 정체성 (RFC-0278). [label]이 비면 [model] 그대로(legacy byte-identical),
+    있으면 ["label (model)"]. agent 카드명·심판 패널 태그·[panel_answer.model]에
+    쓰이는 유일 식별자. provider 라우팅은 원 model로 build 시점에 따로 한다. *)
+val panelist_id : label:string -> model:string -> string
+
+(** 모든 그룹의 {!panelist_id}를 평탄화 (그룹순 × 그룹내 모델순 = fan-out 순서). *)
+val preset_panelist_ids : preset -> string list
+
+(** 두 패널이 같은 {!panelist_id}를 가지면 그 id를 반환 (없으면 [None]). 중복 정체성은
+    [Async_agent.all] 결과/synthesis에서 패널 구분 불가(모호성)를 부르므로 config 로드
+    시 거부한다. 한 그룹 내 동일 model·라벨 없는 두 그룹의 동일 model·동일 라벨+model을
+    한 invariant로 흡수하고, 서로 다른 라벨의 동일 model은 통과한다 (RFC-0278). *)
+val preset_duplicate_panelist : preset -> string option
 
 (** 모든 그룹의 패널 system prompt + 심판 system prompt가 비어있지 않은가
     (config 로드 시 fail-fast 검증). *)

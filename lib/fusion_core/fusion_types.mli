@@ -53,6 +53,9 @@ type panel_failure =
     named record로 분리한다.) *)
 type panel_answer =
   { model : string
+      (** 패널 정체성 (RFC-0278, {!Fusion_policy.panelist_id}): 라벨 없으면 provider
+          model id, 라벨 있으면 ["label (model)"]. 심판/sink가 이 문자열로 패널을
+          지칭한다. 라벨 없는(legacy/단일-occurrence) 패널은 = provider model. *)
   ; answer : string
   ; usage : usage
   }
@@ -60,7 +63,7 @@ type panel_answer =
 
 (** 실패한 패널 한 명. *)
 type panel_error =
-  { failed_model : string
+  { failed_model : string  (** 패널 정체성 (panel_answer.model과 동일 의미). *)
   ; reason : panel_failure
   }
 [@@deriving yojson, show, eq]

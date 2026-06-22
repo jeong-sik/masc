@@ -472,9 +472,6 @@ describe('LogViewer Code links', () => {
     routeLinks.find(link => link.textContent === 'Telemetry')?.click()
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-nested&operation_id=op-nested&worker_run_id=wr-nested&q=turn-8')
   })
-.r . /tmp/logs_test_resolved_block.txt
-})
-
 describe('LogViewer kind column', () => {
   afterEach(() => {
     cleanup()
@@ -516,5 +513,79 @@ describe('LogViewer kind column', () => {
     expect(kindCell).not.toBeNull()
     expect(kindCell!.getAttribute('data-kind')).toBe('tool')
     expect(kindCell!.textContent).toBe('TOOL')
+  })
+
+  it('filters rows by kind chips and renders polling caption', async () => {
+    const fetchLogs = vi.fn().mockResolvedValue({
+      total: 3,
+      generated_at_iso: '2026-05-15T01:00:00Z',
+      dashboard_surface: '/api/v1/dashboard/logs',
+      source: 'masc_log_ring',
+      retention: {
+        scope: 'dashboard_logs',
+        durable_store: '/Users/dancer/me/.masc/logs/system_log_2026-05-15.jsonl',
+      },
+      latest_seq: 3,
+      entries: [
+        entry({
+          seq: 1,
+          ts: '2026-05-14T00:00:00Z',
+          level: 'INFO',
+          module: 'keeper_tool',
+          category: 'tool',
+          message: 'tool event',
+          details: { tool_name: 'fs.ls' },
+        }),
+        entry({
+          seq: 2,
+          ts: '2026-05-14T00:00:01Z',
+          level: 'INFO',
+          module: 'keeper_turn',
+          category: 'routine',
+          turn_id: 'turn-2',
+          message: 'turn event',
+        }),
+        entry({
+          seq: 3,
+          ts: '2026-05-14T00:00:02Z',
+          level: 'WARN',
+          module: 'keeper_fsm',
+          category: 'fsm',
+          message: 'lifecycle event',
+        }),
+      ],
+    })
+
+    const { LogViewer } = await loadLogs(fetchLogs)
+    const { container } = render(h(LogViewer, {}))
+
+    await waitFor(() => expect(container.textContent).toContain('tool event'))
+    expect(container.textContent).toContain('turn event')
+    expect(container.textContent).toContain('lifecycle event')
+    expect(container.querySelector('.v2-logs-live')?.textContent).toContain('WS open')
+
+    const toolChip = container.querySelector('[data-testid="logs-filter-tool"]') as HTMLButtonElement
+    await act(async () => {
+      fireEvent.click(toolChip)
+    })
+    await waitFor(() => expect(container.textContent).toContain('tool event'))
+    expect(container.textContent).not.toContain('turn event')
+    expect(container.textContent).not.toContain('lifecycle event')
+
+    const turnChip = container.querySelector('[data-testid="logs-filter-turn"]') as HTMLButtonElement
+    await act(async () => {
+      fireEvent.click(turnChip)
+    })
+    await waitFor(() => expect(container.textContent).toContain('turn event'))
+    expect(container.textContent).not.toContain('tool event')
+    expect(container.textContent).not.toContain('lifecycle event')
+
+    const allChip = container.querySelector('[data-testid="logs-filter-all"]') as HTMLButtonElement
+    await act(async () => {
+      fireEvent.click(allChip)
+    })
+    await waitFor(() => expect(container.textContent).toContain('turn event'))
+    expect(container.textContent).toContain('tool event')
+    expect(container.textContent).toContain('lifecycle event')
   })
 })

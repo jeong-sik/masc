@@ -72,7 +72,10 @@ describe('KeeperWorkspaceRail', () => {
 
   it('renders the runtime / throughput vitals', () => {
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
-    expect(container.textContent).toContain('런타임 · 처리량')
+    // v2 rail splits the old combined "런타임 · 처리량" header into separate
+    // "처리량" and "런타임" sections; assert both still render their vitals.
+    expect(container.textContent).toContain('처리량')
+    expect(container.textContent).toContain('런타임')
     expect(container.textContent).toContain('sonnet-4.6')
     expect(container.textContent).toContain('oas·seoul-1')
   })
@@ -80,15 +83,17 @@ describe('KeeperWorkspaceRail', () => {
   it('hides the model cell when no model was reported', () => {
     const k = mkKeeper({ runtime_canonical: 'runpod_gemma' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
-    expect(container.textContent).toContain('런타임 · 처리량')
+    expect(container.textContent).toContain('런타임')
     expect(container.textContent).toContain('runpod_gemma')
-    expect(container.textContent).not.toContain('모델')
-    expect(container.textContent).not.toContain('—')
+    // The model cell (.rtc-model) is not rendered when no model is reported.
+    expect(container.querySelector('.rtc-model')).toBeNull()
   })
 
   it('renders the context-window occupancy percent', () => {
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
-    expect(container.textContent).toContain('컨텍스트 점유')
+    // v2 renames the "컨텍스트 점유" header to "컨텍스트" with a "윈도우 사용량" usage label.
+    expect(container.textContent).toContain('컨텍스트')
+    expect(container.textContent).toContain('윈도우 사용량')
     expect(container.textContent).toContain('62%')
     expect(container.textContent).toContain('124.0k')
   })
@@ -101,24 +106,30 @@ describe('KeeperWorkspaceRail', () => {
 
   it('renders owned task status in the top row and title on its own line', () => {
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
-    const tag = container.querySelector('.kw-tasktag') as HTMLElement | null
+    // v2 renames .kw-tasktag → .tasktag and .kw-tasktag-row → .tasktag-top.
+    const tag = container.querySelector('.tasktag') as HTMLElement | null
     expect(tag).not.toBeNull()
-    const row = tag?.querySelector('.kw-tasktag-row')
+    const row = tag?.querySelector('.tasktag-top')
     expect(row).not.toBeNull()
     expect(row?.textContent).toContain('T-4412')
     expect(row?.textContent).toContain('in_progress')
-    expect(tag?.textContent).toContain('세그먼트 리텐션 대시보드')
+    // Title lives outside the top row on its own .ttl line.
+    expect(row?.textContent).not.toContain('세그먼트 리텐션 대시보드')
+    expect(tag?.querySelector('.ttl')?.textContent).toContain('세그먼트 리텐션 대시보드')
   })
 
-  it('renders throughput range chips when a sparkline is available', () => {
+  it('renders the throughput sparkline when a series is available', () => {
     const k = mkKeeper({
       metrics_series: [{ wall_tokens_per_second: 10 }, { wall_tokens_per_second: 64 }] as unknown as Keeper['metrics_series'],
     })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
-    const chips = container.querySelector('.kw-range-chips')
-    expect(chips).not.toBeNull()
-    expect(chips?.textContent).toContain('저부하')
-    expect(chips?.textContent).toContain('고부하')
+    // v2 dropped the labeled 저부하/고부하 load-range chips; the throughput
+    // section now renders the series as a .tps-spark sparkline (>= 2 points)
+    // alongside the latest tok/s value. Assert the viz renders from the series.
+    const spark = container.querySelector('.tps-spark')
+    expect(spark).not.toBeNull()
+    expect(spark?.querySelectorAll('span').length).toBeGreaterThanOrEqual(2)
+    expect(container.querySelector('.tps-val')?.textContent).toContain('64')
   })
 
   it('opens the planning task detail when an owned task is clicked', () => {
@@ -155,21 +166,22 @@ describe('KeeperWorkspaceRail', () => {
 
   it('renders the auto-compact threshold label', () => {
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
+    // With meter data the gate renders as the "compact NN%" meter mark.
     expect(container.textContent).toContain('compact 72%')
-    expect(container.textContent).toContain('ratio_gate 72%')
-    expect(container.textContent).toContain('profile balanced')
-    expect(container.textContent).toContain('message_gate 120')
+    // The meter mark also exposes the gate percentage via its label element.
+    expect(container.querySelector('.meter-mark-lbl')?.textContent).toContain('compact 72%')
   })
 
   it('renders context metrics as missing when only a zero default exists', () => {
     const k = mkKeeper({ context_ratio: 0, compaction_count: 0, last_compaction_ago_s: 0 })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
-    expect(container.textContent).toContain('컨텍스트 사용량 미수신')
-    expect(container.textContent).toContain('컴팩트 기록 없음')
+    // v2 collapses the missing-context state into a single "윈도우 사용률 미수신"
+    // empty card (.ctx-empty); no fake usage meter and no usage percentage.
+    expect(container.textContent).toContain('윈도우 사용률 미수신')
+    expect(container.querySelector('.ctx-empty')).not.toBeNull()
     expect(container.textContent).not.toContain('윈도우 사용량')
-    expect(container.querySelector('.kw-meter')).toBeNull()
-    expect(container.textContent).not.toContain('마지막 컴팩트 0초 전')
-    const button = container.querySelector('.kw-compact-btn') as HTMLButtonElement | null
+    expect(container.querySelector('.meter')).toBeNull()
+    const button = container.querySelector('.cmp-run') as HTMLButtonElement | null
     expect(button).not.toBeNull()
     expect(button?.disabled).toBe(true)
   })
@@ -180,14 +192,15 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('윈도우 사용률 미수신')
     expect(container.textContent).toContain('37.8k')
     expect(container.textContent).not.toContain('윈도우 사용량')
-    expect(container.querySelector('.kw-meter')).toBeNull()
-    expect(container.textContent).toContain('compact ratio_gate는 50%입니다')
+    expect(container.querySelector('.meter')).toBeNull()
+    // The empty card still surfaces the compaction gate (default 50%) as ratio_gate.
+    expect(container.textContent).toContain('ratio_gate 50%')
   })
 
   it('runs overflow compaction without force through the existing MCP tool', async () => {
     shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
     const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, phase: 'Overflowed' })} onToggleDetail=${() => {}} />`)
-    fireEvent.click(getByRole('button', { name: '지금 compact' }))
+    fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
     await waitFor(() => {
       expect(callMcpTool).toHaveBeenCalledWith('masc_keeper_compact', {
@@ -201,7 +214,7 @@ describe('KeeperWorkspaceRail', () => {
   it('confirms before forcing compaction on running keepers', async () => {
     shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
     const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, phase: 'Running' })} onToggleDetail=${() => {}} />`)
-    fireEvent.click(getByRole('button', { name: '지금 compact' }))
+    fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
     await waitFor(() => {
       expect(requestConfirm).toHaveBeenCalledWith(expect.objectContaining({
@@ -219,7 +232,7 @@ describe('KeeperWorkspaceRail', () => {
     vi.mocked(requestConfirm).mockResolvedValueOnce(false)
     shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
     const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, phase: 'Running' })} onToggleDetail=${() => {}} />`)
-    fireEvent.click(getByRole('button', { name: '지금 compact' }))
+    fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
     await waitFor(() => expect(requestConfirm).toHaveBeenCalled())
     expect(callMcpTool).not.toHaveBeenCalled()
@@ -228,10 +241,15 @@ describe('KeeperWorkspaceRail', () => {
   it('fires onToggleDetail from the 운영 상세 button', () => {
     const onToggle = vi.fn()
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${onToggle} />`)
-    const btn = container.querySelector('.kw-detail-btn') as HTMLElement
+    // v2 replaces the single .kw-detail-btn with .cmp-open inspector entries that
+    // route to the operational detail body. The compaction-snapshot entry carries
+    // the "운영 상세에서 보기" label and fires onToggleDetail.
+    const btn = Array.from(container.querySelectorAll('.cmp-open')).find(
+      el => el.textContent?.includes('운영 상세'),
+    ) as HTMLElement | undefined
     expect(btn).toBeTruthy()
-    expect(btn.textContent).toContain('운영 상세')
-    fireEvent.click(btn)
+    expect(btn?.textContent).toContain('운영 상세')
+    fireEvent.click(btn as HTMLElement)
     expect(onToggle).toHaveBeenCalled()
   })
 

@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useMemo } from 'preact/hooks'
+import { useMemo, useState } from 'preact/hooks'
 import type { BoardPost } from '../../types'
 import { navigate, replaceRoute, route } from '../../router'
 import {
@@ -15,6 +15,7 @@ import { ringFocusClasses } from '../common/ring'
 import { AgentAvatar } from '../overview/agent-avatar'
 import { FusionRunsPanel } from './fusion-runs-panel'
 import { asRecord, asString, asStringArray } from '../common/normalize'
+import { fusionDecisionSpec, type FusionDecisionSpec } from '../v2/fusion-constants'
 import {
   firstString,
   firstNumber,
@@ -251,6 +252,22 @@ function toneFor(status: FusionRunStatus, decision: string | null): FusionTone {
   return status === 'running' ? 'muted' : 'ok'
 }
 
+// Wire `decision` is a free-form string (`fusion_sink.render_decision` emits
+// `"answer — …"` / `"recommend — …"` / `"insufficient — missing: …"`), not the
+// clean OCaml variant. Map it to the canonical key the SSOT `fusionDecisionSpec`
+// understands, then defer label/glyph/tone to that shared spec (no inline
+// label/colour drift). Unknown / running / failed decisions fall through to the
+// spec's neutral fallback. This mirrors the existing `toneFor` substring logic —
+// the typed variant lives backend-side and is flattened to a string on the wire.
+function decisionSpecFor(decision: string | null): FusionDecisionSpec | null {
+  if (!decision) return null
+  const lower = decision.toLowerCase()
+  if (lower.includes('answer')) return fusionDecisionSpec('Answer')
+  if (lower.includes('recommend')) return fusionDecisionSpec('Recommend')
+  if (lower.includes('insufficient') || lower.includes('uncertain')) return fusionDecisionSpec('Insufficient')
+  return fusionDecisionSpec(decision)
+}
+
 function keeperNameFor(post: BoardPost): string {
   return post.author_identity?.display_name
     || post.author_identity?.id
@@ -311,14 +328,20 @@ function buildFusionRuns(posts: readonly BoardPost[]): FusionRunView[] {
     .sort((a, b) => timeValue(b.updatedAt) - timeValue(a.updatedAt))
 }
 
-function formatTokens(value: number | null | undefined): string {
-  if (value == null) return 'n/a'
-  return new Intl.NumberFormat().format(value)
-}
-
 function formatCost(value: number | null): string {
   if (value === null) return 'n/a'
   return `$${value.toFixed(4)}`
+}
+
+/** Combined panel+judge token total, in `Nk` form, for the detail KPI strip
+ *  (prototype collapses the in/out split into one figure). Returns `null` when
+ *  there is no token data so the cell renders an honest em-dash. */
+function combinedTokenLabel(usage: FusionUsage): string | null {
+  const input = usage.inputTokens ?? 0
+  const output = usage.outputTokens ?? 0
+  const total = input + output
+  if (total <= 0) return null
+  return total >= 1000 ? `${(total / 1000).toFixed(1)}k` : String(total)
 }
 
 function statusLabel(status: FusionRunStatus): string {
@@ -344,17 +367,50 @@ function compactText(value: string, max = 180): string {
   return `${normalized.slice(0, max - 1)}...`
 }
 
-function FusionMetric({ label, value, tone = 'muted' }: { label: string; value: string | number; tone?: FusionTone }) {
+// Prototype detail KPI cell (`.fus-kpi` with `.k`/`.v`, optional `.v` tone +
+// `<small>` unit). Replaces the dead `.fus-kpi-k`/`.fus-kpi-v` markup.
+function FusionMetric({
+  label,
+  value,
+  unit,
+  tone,
+}: {
+  label: string
+  value: string | number
+  unit?: string
+  tone?: FusionTone
+}) {
   return html`
-    <div class=${`fus-kpi tone-${tone}`}>
-      <div class="fus-kpi-k">${label}</div>
-      <div class="fus-kpi-v">${value}</div>
+    <div class="fus-kpi">
+      <div class="k">${label}</div>
+      <div class=${tone ? `v ${tone}` : 'v'}>
+        ${value}${unit ? html`<small> ${unit}</small>` : null}
+      </div>
     </div>
   `
 }
 
 function FusionStatusGlyph({ status }: { status: FusionRunStatus }) {
   return html`<span class=${`fus-rdot ${statusDotClass(status)}`} aria-hidden="true"></span>`
+}
+
+// Keeper identity link (prototype `.fus-who`/`.nm`). Navigates to the keeper
+// chat lane, preserving the existing `navigate('keepers', …)` wiring.
+function FusionKeeperLink({ keeper, size = 'sm' }: { keeper: string; size?: 'sm' | 'md' }) {
+  return html`
+    <button
+      type="button"
+      class=${`fus-who ${ringFocusClasses()}`}
+      title=${`${keeper} 대화 열기`}
+      onClick=${(event: Event) => {
+        event.stopPropagation()
+        navigate('keepers', { keeper })
+      }}
+    >
+      <${AgentAvatar} name=${keeper} size=${size} />
+      <span class="nm">${keeper}</span>
+    </button>
+  `
 }
 
 function FusionPipelineStrip({ run }: { run: FusionRunView }) {
@@ -370,33 +426,59 @@ function FusionPipelineStrip({ run }: { run: FusionRunView }) {
         keeper turn
       </span>
       <span class="fus-pipe-arr" aria-hidden="true">→</span>
-      <span class=${`fus-pipe-node ${gateClass}`}>gate</span>
+      <span class=${`fus-pipe-node ${gateClass} ${gateClass === 'gate' ? 'ok' : ''}`}>gate</span>
       <span class="fus-pipe-arr" aria-hidden="true">→</span>
-      <span class=${`fus-pipe-node panel ${panelFailures > 0 ? 'warn' : ''}`}>
+      <span class=${`fus-pipe-node panel ${run.status === 'failed' && run.panel.length === 0 ? 'off' : ''}`}>
         ${panelLabel}${panelFailures > 0 ? ` · fail ${panelFailures}` : ''}
       </span>
       <span class="fus-pipe-arr" aria-hidden="true">→</span>
-      <span class=${`fus-pipe-node judge ${run.status === 'failed' ? 'deny' : ''}`}>${judgeLabel}</span>
+      <span class=${`fus-pipe-node judge ${run.status === 'failed' || run.status === 'running' ? 'off' : ''}`}>${judgeLabel}</span>
       <span class="fus-pipe-arr" aria-hidden="true">→</span>
-      <span class="fus-pipe-node sink">board evidence</span>
+      <span class=${`fus-pipe-node sink ${run.status === 'complete' ? '' : 'off'}`}>board evidence</span>
     </section>
   `
 }
 
+// Prototype panel card (`.fus-pcard`). Retains `.fus-panel-card` +
+// `answered`/`failed` modifiers so existing tests keep matching, and adds the
+// vendored `.fus-pcard*` classes that actually style the card. The answer body
+// is collapsible (prototype `.fus-pans`).
 function FusionPanelCard({ entry }: { entry: FusionPanelEntry }) {
   const failed = isPanelFailure(entry.status)
+  const [open, setOpen] = useState(false)
   const body = entry.answer ?? entry.reason ?? 'No panel output captured.'
+  const tokenTotal = (entry.inputTokens ?? 0) + (entry.outputTokens ?? 0)
+  const tokenLabel = tokenTotal > 0
+    ? (tokenTotal >= 1000 ? `${(tokenTotal / 1000).toFixed(1)}k` : String(tokenTotal))
+    : null
+
   return html`
-    <article class=${`fus-panel-card ${failed ? 'failed' : 'answered'}`}>
-      <div class="fus-panel-head">
-        <span class="fus-panel-model">${entry.model}</span>
-        <span class=${`fus-mini-status ${failed ? 'bad' : 'ok'}`}>${entry.status}</span>
+    <article class=${`fus-pcard fus-panel-card ${failed ? 'failed' : 'answered'}`}>
+      <div class="fus-pcard-h">
+        <span class="fus-pmodel mono">${entry.model}</span>
+        ${failed
+          ? html`<span class="fus-pstate fail">${entry.reason ?? entry.status}</span>`
+          : tokenLabel
+            ? html`<span class="fus-ptok mono" title="입력+출력 토큰">${tokenLabel} tok</span>`
+            : null}
       </div>
-      <p class="fus-panel-body">${compactText(body, 360)}</p>
-      <div class="fus-panel-foot">
-        <span>in ${formatTokens(entry.inputTokens)}</span>
-        <span>out ${formatTokens(entry.outputTokens)}</span>
-      </div>
+      ${failed
+        ? null
+        : html`
+            <div
+              class=${`fus-pans ${open ? 'open' : ''}`}
+              role="button"
+              tabIndex=${0}
+              title=${open ? '접기' : '펼치기'}
+              onClick=${() => setOpen(prev => !prev)}
+              onKeyDown=${(event: KeyboardEvent) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  setOpen(prev => !prev)
+                }
+              }}
+            >${body}</div>
+          `}
     </article>
   `
 }
@@ -414,152 +496,139 @@ function hasStructuredJudgeEvidence(judge: FusionJudge): boolean {
 function FusionModelChips({ models }: { models: string[] }) {
   if (models.length === 0) return null
   return html`
-    <span class="fus-model-chips">
-      ${models.map(model => html`<span class="fus-model-chip" key=${model}>${model}</span>`)}
+    <span class="fus-mchips">
+      ${models.map(model => html`<span class="fus-mchip mono" key=${model}>${model}</span>`)}
     </span>
   `
 }
 
+// Structured judge synthesis (prototype `.fus-judge-body` / `.fus-jsec`).
+// Keeps `data-testid="fusion-judge-evidence"` + the "Structured judge evidence"
+// summary head (consumed by tests) and renders the five prototype groups with
+// glyphs + counts.
 function FusionJudgeEvidence({ judge }: { judge: FusionJudge }) {
   if (!hasStructuredJudgeEvidence(judge)) return null
 
   return html`
-    <div class="fus-judge-evidence" data-testid="fusion-judge-evidence">
-      <div class="fus-judge-evidence-head">
-        <span>Structured judge evidence</span>
-        <span>
-          ${judge.consensus.length} consensus · ${judge.contradictions.length} contradictions ·
-          ${judge.partialCoverage.length} coverage
-        </span>
-      </div>
-
-      ${judge.consensus.length > 0
-        ? html`
-            <div class="fus-jgroup">
-              <h4>Consensus</h4>
-              <div class="fus-jrows">
-                ${judge.consensus.map((claim, index) => html`
-                  <div class="fus-jrow" key=${`consensus-${index}`}>
-                    <p>${claim.text}</p>
-                    <${FusionModelChips} models=${claim.models} />
-                  </div>
-                `)}
-              </div>
+    <div class="fus-judge" data-testid="fusion-judge-evidence">
+      <div class="fus-judge-body">
+        <section class="fus-jsec consensus" hidden=${judge.consensus.length === 0}>
+          <h5>
+            <span class="fus-jglyph">≡</span>합의 <span class="n">${judge.consensus.length}</span>
+            <span class="fus-sub-note">Structured judge evidence</span>
+          </h5>
+          ${judge.consensus.map((claim, index) => html`
+            <div class="fus-claim" key=${`consensus-${index}`}>
+              <p>${claim.text}</p>
+              <${FusionModelChips} models=${claim.models} />
             </div>
-          `
-        : null}
+          `)}
+        </section>
 
-      ${judge.contradictions.length > 0
-        ? html`
-            <div class="fus-jgroup">
-              <h4>Contradictions</h4>
-              <div class="fus-jrows">
+        ${judge.contradictions.length > 0
+          ? html`
+              <section class="fus-jsec contra">
+                <h5><span class="fus-jglyph">⇄</span>상충 <span class="n">${judge.contradictions.length}</span></h5>
                 ${judge.contradictions.map((contradiction, index) => html`
-                  <div class="fus-jrow" key=${`contradiction-${index}`}>
-                    <strong>${contradiction.topic}</strong>
+                  <div class="fus-contra" key=${`contradiction-${index}`}>
+                    <div class="fus-contra-topic">${contradiction.topic}</div>
                     ${contradiction.positions.map(position => html`
-                      <span class="fus-position" key=${`${contradiction.topic}:${position.model}`}>
-                        <span>${position.model}</span>
-                        <span>${position.stance}</span>
-                      </span>
+                      <div class="fus-pos" key=${`${contradiction.topic}:${position.model}`}>
+                        <span class="fus-pos-m mono">${position.model}</span>
+                        <span class="fus-pos-s">${position.stance}</span>
+                      </div>
                     `)}
                   </div>
                 `)}
-              </div>
-            </div>
-          `
-        : null}
+              </section>
+            `
+          : null}
 
-      ${judge.partialCoverage.length > 0
-        ? html`
-            <div class="fus-jgroup">
-              <h4>Partial Coverage</h4>
-              <div class="fus-jrows">
+        ${judge.partialCoverage.length > 0
+          ? html`
+              <section class="fus-jsec coverage">
+                <h5><span class="fus-jglyph">◑</span>부분 커버리지 <span class="n">${judge.partialCoverage.length}</span></h5>
                 ${judge.partialCoverage.map((gap, index) => html`
-                  <div class="fus-jrow" key=${`coverage-${index}`}>
-                    <strong>${gap.topic}</strong>
-                    <${FusionModelChips} models=${gap.addressedBy} />
-                    <p><span class="fus-muted-key">missing</span>${gap.missing}</p>
+                  <div class="fus-gap" key=${`coverage-${index}`}>
+                    <div class="fus-gap-topic">${gap.topic}</div>
+                    <div class="fus-gap-row">
+                      <span class="k">다룸</span>
+                      <${FusionModelChips} models=${gap.addressedBy} />
+                    </div>
+                    <div class="fus-gap-row">
+                      <span class="k">누락</span>
+                      <span class="fus-gap-miss">${gap.missing}</span>
+                    </div>
                   </div>
                 `)}
-              </div>
-            </div>
-          `
-        : null}
+              </section>
+            `
+          : null}
 
-      ${judge.uniqueInsights.length > 0
-        ? html`
-            <div class="fus-jgroup">
-              <h4>Unique Insights</h4>
-              <div class="fus-jrows">
+        ${judge.uniqueInsights.length > 0
+          ? html`
+              <section class="fus-jsec insight">
+                <h5><span class="fus-jglyph">✦</span>고유 통찰 <span class="n">${judge.uniqueInsights.length}</span></h5>
                 ${judge.uniqueInsights.map((insight, index) => html`
-                  <div class="fus-jrow" key=${`insight-${index}`}>
+                  <div class="fus-insight" key=${`insight-${index}`}>
                     <p>${insight.text}</p>
-                    ${insight.model ? html`<${FusionModelChips} models=${[insight.model]} />` : null}
+                    ${insight.model ? html`<span class="fus-mchip mono">${insight.model}</span>` : null}
                   </div>
                 `)}
-              </div>
-            </div>
-          `
-        : null}
+              </section>
+            `
+          : null}
 
-      ${judge.blindSpots.length > 0 || judge.missingInputs.length > 0
-        ? html`
-            <div class="fus-jgroup fus-jgroup-split">
-              ${judge.blindSpots.length > 0
-                ? html`
-                    <div>
-                      <h4>Blind Spots</h4>
-                      <ul>${judge.blindSpots.map(item => html`<li key=${item}>${item}</li>`)}</ul>
-                    </div>
-                  `
-                : null}
-              ${judge.missingInputs.length > 0
-                ? html`
-                    <div>
-                      <h4>Missing Inputs</h4>
-                      <ul>${judge.missingInputs.map(item => html`<li key=${item}>${item}</li>`)}</ul>
-                    </div>
-                  `
-                : null}
-            </div>
-          `
-        : null}
+        ${judge.blindSpots.length > 0
+          ? html`
+              <section class="fus-jsec blind">
+                <h5><span class="fus-jglyph">⚠</span>사각지대 <span class="n">${judge.blindSpots.length}</span></h5>
+                <ul class="fus-blind">${judge.blindSpots.map(item => html`<li key=${item}>${item}</li>`)}</ul>
+              </section>
+            `
+          : null}
 
-      ${judge.recommendation
-        ? html`
-            <div class="fus-jgroup">
-              <h4>Recommendation</h4>
-              <div class="fus-jrow">
-                ${judge.recommendation.action ? html`<strong>${judge.recommendation.action}</strong>` : null}
-                ${judge.recommendation.rationale ? html`<p>${judge.recommendation.rationale}</p>` : null}
-              </div>
-            </div>
-          `
-        : null}
+        ${judge.missingInputs.length > 0
+          ? html`
+              <section class="fus-jsec blind">
+                <h5><span class="fus-jglyph">⚠</span>부족한 입력 <span class="n">${judge.missingInputs.length}</span></h5>
+                <ul class="fus-blind">${judge.missingInputs.map(item => html`<li key=${item}>${item}</li>`)}</ul>
+              </section>
+            `
+          : null}
+      </div>
     </div>
   `
 }
 
 function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) {
+  const dec = decisionSpecFor(run.judge.decision)
   return html`
     <button
       type="button"
-      class=${`fus-run-row ${active ? 'active' : ''} ${ringFocusClasses()}`}
+      class=${`fus-run-row fus-row ${active ? 'active sel' : ''} st-${run.status} ${ringFocusClasses()}`}
       aria-current=${active ? 'true' : undefined}
       onClick=${() => replaceRoute('fusion', { run_id: run.runId })}
     >
-      <span class="fus-row-top">
-        <span class="fus-run-mark">
-          <${FusionStatusGlyph} status=${run.status} />
-          <span class="fus-run-id">${run.runId}</span>
-        </span>
-        <span class=${`fus-status tone-${run.tone}`}>${statusLabel(run.status)}</span>
+      <span class="fus-row-h">
+        <${FusionStatusGlyph} status=${run.status} />
+        <span class="fus-run-id mono">${run.runId}</span>
+        <span class="fus-row-ts"><${TimeAgo} timestamp=${run.updatedAt} /></span>
       </span>
-      <span class="fus-row-question">${compactText(run.question, 110)}</span>
-      <span class="fus-row-meta">
-        <span>${run.keeperName}</span>
-        <${TimeAgo} timestamp=${run.updatedAt} />
+      <span class="fus-row-prompt">${compactText(run.question, 110)}</span>
+      <span class="fus-row-f">
+        <span class="fus-who static" title=${run.keeperName}>
+          <${AgentAvatar} name=${run.keeperName} size="sm" />
+          <span class="nm">${run.keeperName}</span>
+        </span>
+        <span class="spacer"></span>
+        ${run.status === 'running'
+          ? html`<span class="fus-dec-badge run">심의 중</span>`
+          : run.status === 'failed'
+            ? html`<span class="fus-dec-badge bad">실패</span>`
+            : dec
+              ? html`<span class=${`fus-dec-badge ${dec.cls}`}>${dec.glyph} ${dec.lbl}</span>`
+              : null}
       </span>
     </button>
   `
@@ -568,81 +637,161 @@ function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) 
 function FusionRunDetail({ run }: { run: FusionRunView }) {
   const answered = run.panel.filter(entry => !isPanelFailure(entry.status)).length
   const failed = run.panel.length - answered
-  const synthesis = run.judge.synthesis ?? run.judge.error ?? 'No judge synthesis captured.'
-  const resolved = run.judge.resolvedAnswer ?? 'No resolved answer captured.'
+  const resolved = run.judge.resolvedAnswer ?? run.judge.synthesis ?? run.judge.error ?? 'No resolved answer captured.'
+  const dec = decisionSpecFor(run.judge.decision)
+  const decClass = dec && dec.cls ? `dec-${dec.cls}` : ''
+  const tokenLabel = combinedTokenLabel(run.usage)
 
   return html`
-    <article class="fus-detail" data-testid="fusion-detail">
-      <header class="fus-detail-head">
-        <div class="fus-detail-title">
-          <div class="fus-detail-meta">
-            <${FusionStatusGlyph} status=${run.status} />
-            <span class=${`fus-status tone-${run.tone}`}>${statusLabel(run.status)}</span>
-            <span class="fus-run-id">${run.runId}</span>
-            <${TimeAgo} timestamp=${run.updatedAt} mode="both" />
-          </div>
-          <h2>${run.title}</h2>
+    <div class="fus-run-scroll" data-testid="fusion-detail">
+      <div class="fus-run-head">
+        <div class="fus-run-id-row">
+          <${FusionStatusGlyph} status=${run.status} />
+          <h1 class="mono">${run.runId}</h1>
+          <span class="fus-preset" title="runtime.toml [fusion.presets.*]" data-stub="preset not joined into board-derived run view (registry-only field)">preset · n/a</span>
+          <span class=${`fus-status tone-${run.tone}`}>${statusLabel(run.status)}</span>
         </div>
-        <div class="fus-actions">
+        <div class="fus-run-by">
+          <${FusionKeeperLink} keeper=${run.keeperName} size="md" />
+          <span class="fus-run-meta"><${TimeAgo} timestamp=${run.updatedAt} mode="both" /></span>
+          <span class="spacer"></span>
           <button
             type="button"
-            class=${`fus-action ${ringFocusClasses()}`}
+            class=${`fus-link inline ${ringFocusClasses()}`}
             onClick=${() => navigate('keepers', { keeper: run.keeperName })}
-          >Open keeper</button>
+          >키퍼 열기</button>
           <button
             type="button"
-            class=${`fus-action primary ${ringFocusClasses()}`}
+            class=${`fus-link inline ${ringFocusClasses()}`}
             onClick=${() => navigate('board', { post: run.boardPostId })}
-          >Open board post</button>
+          >보드 포스트 열기</button>
         </div>
-      </header>
+      </div>
 
       <${FusionPipelineStrip} run=${run} />
 
-      <section class="fus-question">
-        <div class="fus-label">Prompt</div>
-        <p>${run.question}</p>
-      </section>
+      <div class="fus-kpis" aria-label="Fusion run metrics">
+        <${FusionMetric}
+          label="패널"
+          value=${`${answered}/${run.panel.length}`}
+          unit="모델"
+          tone=${failed > 0 ? 'warn' : 'ok'}
+        />
+        <${FusionMetric} label="토큰 (패널+심판)" value=${tokenLabel ?? '—'} />
+        <${FusionMetric} label="비용 (관측)" value=${formatCost(run.usage.costUsd)} />
+        <${FusionMetric}
+          label="결정"
+          value=${dec ? dec.lbl : run.status === 'failed' ? '실패' : '대기'}
+          tone=${dec && (dec.cls === 'ok' || dec.cls === 'warn' || dec.cls === 'volt') ? dec.cls : run.status === 'failed' ? 'bad' : undefined}
+        />
+      </div>
 
-      <section class="fus-kpis" aria-label="Fusion run metrics">
-        <${FusionMetric} label="panel" value=${`${answered}/${run.panel.length}`} tone=${failed > 0 ? 'warn' : 'ok'} />
-        <${FusionMetric} label="input tokens" value=${formatTokens(run.usage.inputTokens)} />
-        <${FusionMetric} label="output tokens" value=${formatTokens(run.usage.outputTokens)} tone="volt" />
-        <${FusionMetric} label="cost" value=${formatCost(run.usage.costUsd)} />
-      </section>
+      <div class="fus-block">
+        <div class="fus-block-lbl">심의 프롬프트</div>
+        <div class="fus-prompt">${run.question}</div>
+      </div>
 
-      <section class="fus-section">
-        <div class="fus-section-head">
-          <h3>Panel</h3>
-          <span>${run.panel.length} models</span>
+      <div class="fus-block">
+        <div class="fus-block-lbl">
+          패널 · ${run.panel.length}개 모델 병렬
+          <span class="fus-sub-note">Async_agent.all · 실패 격리</span>
         </div>
         ${run.panel.length === 0
-          ? html`<div class="fus-empty-inline">No panel entries captured for this run.</div>`
+          ? html`<div class="fus-judge-wait">패널 응답이 기록되지 않았습니다.</div>`
           : html`<div class="fus-panel-grid">${run.panel.map(entry => html`<${FusionPanelCard} key=${entry.model} entry=${entry} />`)}</div>`}
-      </section>
+      </div>
 
-      <section class="fus-judge">
-        <div class="fus-section-head">
-          <h3>Judge</h3>
-          <span>${run.judge.decision ?? run.judge.status ?? 'n/a'}</span>
+      ${run.status === 'running'
+        ? html`
+            <div class="fus-block">
+              <div class="fus-block-lbl">심판 종합</div>
+              <div class="fus-judge-wait">
+                <span class="fus-rdot run"></span>패널 응답 대기 중 — 전원 도착 후 심판(Structured.extract)이 1회 호출됩니다.
+              </div>
+            </div>
+          `
+        : html`
+            <div class="fus-block">
+              <div class="fus-block-lbl">
+                심판 종합
+                <span class="fus-judge-model mono">${run.judge.decision ?? run.judge.status ?? 'n/a'}</span>
+                <span class="fus-sub-note">Structured.extract · 닫힌 타입 schema</span>
+              </div>
+              ${hasStructuredJudgeEvidence(run.judge)
+                ? html`<${FusionJudgeEvidence} judge=${run.judge} />`
+                : html`<div class="fus-judge-wait">구조화된 심판 근거가 기록되지 않았습니다.</div>`}
+            </div>
+          `}
+
+      <div class=${`fus-resolved ${decClass}`}>
+        <div class="fus-resolved-h">
+          ${dec
+            ? html`<span class=${`fus-dec-badge big ${dec.cls}`}>${dec.glyph} ${dec.lbl}</span>`
+            : html`<span class="fus-dec-badge big">${run.status === 'failed' ? '실패' : '미결'}</span>`}
+          ${run.judge.recommendation?.action
+            ? html`<span class="fus-rec-action">권고 · ${run.judge.recommendation.action}</span>`
+            : null}
         </div>
-        <pre class="fus-synthesis">${synthesis}</pre>
-        <${FusionJudgeEvidence} judge=${run.judge} />
-      </section>
+        <div class="fus-resolved-lbl">resolved_answer</div>
+        <p class="fus-resolved-body">${resolved}</p>
+        ${run.judge.recommendation?.rationale
+          ? html`<p class="fus-rec-rationale"><span class="k">근거</span>${run.judge.recommendation.rationale}</p>`
+          : null}
+        ${run.judge.missingInputs.length > 0
+          ? html`
+              <div class="fus-missing">
+                <span class="k">부족한 입력</span>
+                <ul>${run.judge.missingInputs.map(item => html`<li key=${item}>${item}</li>`)}</ul>
+              </div>
+            `
+          : null}
+      </div>
 
-      <section class="fus-resolved">
-        <div class="fus-label">Resolved answer</div>
-        <p>${resolved}</p>
-      </section>
-
-      <section class="fus-sink">
-        <div>
-          <div class="fus-label">Sink</div>
-          <p>board evidence · post ${run.boardPostId}</p>
-        </div>
-        <${AgentAvatar} name=${run.keeperName} size="sm" />
-      </section>
-    </article>
+      ${run.status === 'complete'
+        ? html`
+            <div class="fus-block">
+              <div class="fus-block-lbl">
+                결과 도착 · sink
+                <span class="fus-sub-note">judge 결론이 키퍼 흐름에 녹는 경로</span>
+              </div>
+              <div class="fus-sink">
+                <div class="fus-sink-tracks">
+                  <div class="fus-sink-track">
+                    <span class="fus-sink-ico chat">▭</span>
+                    <div class="fus-sink-tx">
+                      <button
+                        type="button"
+                        class=${`fus-sink-to ${ringFocusClasses()}`}
+                        onClick=${() => navigate('keepers', { keeper: run.keeperName })}
+                      >${run.keeperName} chat lane →</button>
+                      <span class="fus-sink-d">resolved_answer 1줄 append → 다음 턴 observation · librarian이 memory-os fact로 추출</span>
+                    </div>
+                  </div>
+                  <div class="fus-sink-track">
+                    <span class="fus-sink-ico board">▦</span>
+                    <div class="fus-sink-tx">
+                      <button
+                        type="button"
+                        class=${`fus-sink-to ${ringFocusClasses()}`}
+                        onClick=${() => navigate('board', { post: run.boardPostId })}
+                      >보드 포스트 #${run.boardPostId} →</button>
+                      <span class="fus-sink-d">패널 N + 심판 종합을 meta_json 증거로 발행 · run_id로 쿼리</span>
+                    </div>
+                  </div>
+                  <div class="fus-sink-track">
+                    <span class="fus-sink-ico wake">◉</span>
+                    <div class="fus-sink-tx">
+                      <span class="fus-sink-to static">키퍼 wake · Fusion_completed</span>
+                      <span class="fus-sink-d">RFC-0266 typed stimulus로 호출 키퍼를 깨워 결론을 actionable 입력으로 전달</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="fus-corr">correlation · <span class="mono">${run.runId}</span></div>
+              </div>
+            </div>
+          `
+        : null}
+    </div>
   `
 }
 
@@ -656,68 +805,78 @@ export function FusionSurface() {
   const registryFailed = registryRuns.filter(run => run.status === 'failed').length
 
   return html`
-    <main class="ov ss-surface bg-surface-page text-text-primary v2-fusion-surface" data-testid="fusion-surface">
-      <div class="ov-scroll fus-scroll">
-        <header class="ov-head fus-head">
-          <div>
-            <h1>Fusion</h1>
-            <p class="ov-sub">
-              Panel deliberations, judge synthesis, and board sink evidence from masc_fusion.
-            </p>
+    <main class="surf fus v2-fusion-surface" data-testid="fusion-surface" data-screen-label="Fusion">
+      <header class="surf-head fus-head">
+        <div>
+          <div class="eyebrow">RFC-0252 · 패널 + 심판</div>
+          <h1>Fusion</h1>
+          <p class="surf-sub ov-sub">
+            masc_fusion 패널 심의 · 심판 종합 · 보드 sink 증거.
+          </p>
+        </div>
+        <button
+          type="button"
+          class=${`fus-link inline fus-refresh ${ringFocusClasses()}`}
+          onClick=${() => { void refreshFusionBoard(); void refreshFusionRuns() }}
+          disabled=${fusionBoardLoading.value || fusionRunsLoading.value}
+        >${fusionBoardLoading.value || fusionRunsLoading.value ? 'Refreshing...' : 'Refresh'}</button>
+      </header>
+
+      <${FusionRunsPanel} />
+
+      <section class="fus-kpis" aria-label="Fusion overview">
+        <${FusionMetric} label="board runs" value=${runs.length} tone=${runs.length ? 'ok' : undefined} />
+        <${FusionMetric}
+          label="registry"
+          value=${registryRuns.length}
+          tone=${registryRunning ? 'warn' : registryRuns.length ? 'ok' : undefined}
+        />
+        <${FusionMetric} label="running" value=${registryRunning} tone=${registryRunning ? 'warn' : undefined} />
+        <${FusionMetric} label="failed" value=${registryFailed} tone=${registryFailed ? 'bad' : undefined} />
+      </section>
+
+      <div class="fus-body">
+        <aside class="fus-list" aria-label="Fusion runs">
+          <div class="fus-list-h">
+            <h4>심의 런</h4>
+            <span class="fus-list-sub">RFC-0252 · 패널+심판</span>
+            ${registryRunning > 0
+              ? html`<span class="fus-list-live"><span class="fus-rdot run"></span>${registryRunning} 진행</span>`
+              : null}
           </div>
-          <button
-            type="button"
-            class=${`fus-refresh ${ringFocusClasses()}`}
-            onClick=${() => { void refreshFusionBoard(); void refreshFusionRuns() }}
-            disabled=${fusionBoardLoading.value || fusionRunsLoading.value}
-          >${fusionBoardLoading.value || fusionRunsLoading.value ? 'Refreshing...' : 'Refresh'}</button>
-        </header>
-
-        <${FusionRunsPanel} />
-
-        <section class="fus-top-kpis" aria-label="Fusion overview">
-          <${FusionMetric} label="board runs" value=${runs.length} tone=${runs.length ? 'ok' : 'muted'} />
-          <${FusionMetric}
-            label="registry"
-            value=${registryRuns.length}
-            tone=${registryRunning ? 'warn' : registryRuns.length ? 'ok' : 'muted'}
-          />
-          <${FusionMetric} label="running" value=${registryRunning} tone=${registryRunning ? 'warn' : 'muted'} />
-          <${FusionMetric} label="failed" value=${registryFailed} tone=${registryFailed ? 'bad' : 'muted'} />
-        </section>
+          ${runs.length === 0
+            ? html`<div class="fus-list-scroll"><div class="ov-empty">보드 sink 심의 런이 없습니다</div></div>`
+            : html`
+                <div class="fus-list-scroll">
+                  ${runs.map(run => html`
+                    <${FusionRunRow}
+                      key=${run.runId}
+                      run=${run}
+                      active=${selected?.runId === run.runId}
+                    />
+                  `)}
+                </div>
+              `}
+        </aside>
 
         ${runs.length === 0
           ? html`
-              <section class="fus-empty" data-testid="fusion-empty">
-                <div class="fus-empty-mark">F</div>
-                <h2>No board-sink fusion posts yet</h2>
-                <p>
-                  Registry status is shown above from <code>/api/v1/dashboard/fusion-runs</code>;
-                  detailed panel and judge review appears after the fusion sink writes a board post
-                  with <code>meta.source = "fusion"</code>.
-                </p>
-              </section>
-            `
-          : html`
-              <div class="fus-layout">
-                <aside class="fus-list" aria-label="Fusion runs">
-                  <div class="fus-list-head">
-                    <span>Runs</span>
-                    <span>${runs.length}</span>
+              <div class="fus-run-scroll" data-testid="fusion-empty">
+                <div class="fus-block">
+                  <div class="fus-block-lbl">보드 sink 대기</div>
+                  <div class="fus-judge-wait">
+                    No board-sink fusion posts yet.
                   </div>
-                  <div class="fus-run-scroll">
-                    ${runs.map(run => html`
-                      <${FusionRunRow}
-                        key=${run.runId}
-                        run=${run}
-                        active=${selected?.runId === run.runId}
-                      />
-                    `)}
-                  </div>
-                </aside>
-                ${selected ? html`<${FusionRunDetail} run=${selected} />` : null}
+                  <p class="fus-rec-rationale">
+                    레지스트리 상태는 위 패널(<code>/api/v1/dashboard/fusion-runs</code>)에 표시됩니다.
+                    상세한 패널·심판 리뷰는 fusion sink가 <code>meta.source = "fusion"</code> 보드 포스트를 기록한 뒤 나타납니다.
+                  </p>
+                </div>
               </div>
-            `}
+            `
+          : selected
+            ? html`<${FusionRunDetail} run=${selected} />`
+            : null}
       </div>
     </main>
   `

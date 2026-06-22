@@ -1,0 +1,126 @@
+// MASC v2 — top bar (ported from prototype shell.jsx TopBar + AttentionIndicator).
+// Emits the prototype `.v2-top` DOM (crumb · live statchip · attention ·
+// schedule · Copilot). Wired to live signals: running count + attention
+// aggregate (governance approvals, needs-attention keepers, dead/overflowed,
+// stale connectors). The Copilot button reuses the existing dock controller.
+
+import { html } from 'htm/preact'
+import { useState, useEffect } from 'preact/hooks'
+import { navigate, route } from '../../router'
+import { keepers, staleKeepers } from '../../store'
+import { activeKeeperName } from '../../keeper-state'
+import { governanceData } from '../governance-signals'
+import { CopilotDockTopBarButton, type CopilotDockApi } from '../copilot-dock'
+import { TweaksPanelToggle } from '../tweaks-panel'
+import { StatusDot } from './primitives-v2'
+import { phaseStatus } from './keeper-fsm'
+import { surfaceLabel } from './nav-rail-v2'
+// Operational/safety chrome the v2 prototype omits but operators rely on
+// (connection state, transport telemetry, emergency stop, error inbox, auth,
+// build identity). Re-mounted into the v2 top bar so the reskin does not drop
+// live operational visibility (PR #22081 review P1). These are zero-prop
+// components that read their own signals.
+import { ConnectionStatus, ErrorCounterBadge, BuildIdentityBadge } from '../dashboard-shell'
+import { AuthStatus } from '../auth-status'
+import { EmergencyStopControl } from '../emergency-stop-control'
+import { TransportBeacon } from '../transport-beacon'
+
+const DEAD_PHASES = new Set(['Overflowed', 'Crashed', 'Dead', 'Zombie'])
+
+interface AttentionAgg {
+  approvals: number
+  keepers: number
+  dead: number
+  stale: number
+  total: number
+}
+
+function computeAttention(): AttentionAgg {
+  const ks = keepers.value
+  const approvals = governanceData.value?.approval_queue?.length ?? 0
+  const attKeepers = ks.filter((k) => k.needs_attention === true).length
+  const dead = ks.filter((k) => !!k.lifecycle_phase && DEAD_PHASES.has(k.lifecycle_phase)).length
+  const stale = staleKeepers.value.size
+  return { approvals, keepers: attKeepers, dead, stale, total: approvals + attKeepers + dead + stale }
+}
+
+function AttentionIndicatorV2() {
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    if (!open) return
+    const close = () => setOpen(false)
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [open])
+
+  const a = computeAttention()
+  if (!a.total) {
+    return html`<span class="v2-statchip live" title="처리할 항목 없음">${'✓'} 정상</span>`
+  }
+  const rows = [
+    { k: 'approvals', n: a.approvals, lbl: '승인 대기', sev: 'bad', nav: 'approvals' as const },
+    { k: 'keepers', n: a.keepers, lbl: '주의 keeper', sev: 'warn', nav: 'monitoring' as const },
+    { k: 'dead', n: a.dead, lbl: '죽음·넘침', sev: 'bad', nav: 'monitoring' as const },
+    { k: 'stale', n: a.stale, lbl: 'stale 게이트', sev: 'warn', nav: 'connectors' as const },
+  ].filter((r) => r.n > 0)
+  const tone = a.approvals > 0 || a.dead > 0 ? 'bad' : 'warn'
+  return html`
+    <div class="attn-wrap" onClick=${(e: Event) => e.stopPropagation()}>
+      <button class=${`v2-statchip attn ${tone}`} onClick=${() => setOpen((o) => !o)} title="지금 나를 필요로 하는 것">
+        ${'⚑'} 주의 <b>${a.total}</b>
+      </button>
+      ${open
+        ? html`
+            <div class="attn-menu">
+              <div class="attn-menu-h">지금 나를 필요로 하는 것</div>
+              ${rows.map(
+                (r) => html`
+                  <button key=${r.k} class="attn-row" onClick=${() => { setOpen(false); navigate(r.nav) }}>
+                    <span class=${`dot2 ${r.sev}`}></span>
+                    <span class="attn-row-lbl">${r.lbl}</span>
+                    <span class="attn-row-n mono">${r.n}</span>
+                  </button>
+                `,
+              )}
+            </div>
+          `
+        : null}
+    </div>
+  `
+}
+
+export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
+  const tab = route.value.tab
+  const running = keepers.value.filter((k) => phaseStatus(k.lifecycle_phase) === 'run').length
+  const crumbKeeper = tab === 'keepers' ? route.value.params.keeper?.trim() || activeKeeperName.value || '' : ''
+  return html`
+    <div class="v2-top">
+      <div class="crumb">
+        <span class=${tab === 'keepers' && crumbKeeper ? '' : 'on'}>${surfaceLabel(tab)}</span>
+        ${tab === 'keepers' && crumbKeeper
+          ? html`<span>/</span><span class="on">${crumbKeeper}</span>`
+          : null}
+      </div>
+      <div class="v2-top-spacer"></div>
+      <span class="v2-statchip live"><${StatusDot} status="run" pulse=${true} />${running} 실행 중</span>
+      <${AttentionIndicatorV2} />
+      ${/* 예약(schedule): no live cron/schedule signal yet. Rendered as a plain
+          navigation affordance only — no fabricated status (PR #22081 review:
+          no stub). Wire to a live schedule signal when the backend exposes one. */ ''}
+      <button class="v2-statchip" onClick=${() => navigate('schedule')} title="예약 자동화 큐">
+        ${'◷'} 예약
+      </button>
+      ${/* Operational/safety status cluster (review P1: keep operator chrome). */ ''}
+      <div class="v2-top-ops">
+        <${ConnectionStatus} />
+        <${TransportBeacon} />
+        <${EmergencyStopControl} />
+        <${ErrorCounterBadge} />
+        <${AuthStatus} />
+      </div>
+      <${CopilotDockTopBarButton} dock=${dock} />
+      <${BuildIdentityBadge} />
+      <${TweaksPanelToggle} />
+    </div>
+  `
+}

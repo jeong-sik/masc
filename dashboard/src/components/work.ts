@@ -29,30 +29,31 @@ function isWorkSection(v: string | undefined): v is WorkSection {
 
 // ── Task state mapping ──────────────────────────────────────────────────────
 
-type JobStateKey = 'done' | 'wip' | 'review' | 'blocked' | 'todo'
+// Bucket = progress-aggregation axis (done/wip/verify/blocked/todo).
+// cls    = the prototype's CSS modifier on .wk-task-dot/.wk-task-state.
+// They differ on purpose: the vendored v2.css defines dot/state variants
+// `done|wip|verify|claimed|cancelled|todo` (v2.css:832-850) but NOT
+// `review` or `blocked`, so emitting the prototype's exact class names is
+// what gets the row styled. `claimed` keeps its own (info-blue) color
+// instead of folding into wip; `cancelled` keeps the struck-through grey.
+type JobBucket = 'done' | 'wip' | 'verify' | 'blocked' | 'todo'
+type JobStateCls = 'done' | 'wip' | 'verify' | 'claimed' | 'cancelled' | 'todo'
 
 interface JobState {
   label: string
-  cls: JobStateKey
-}
-
-const JOB_STATE: Record<JobStateKey, JobState> = {
-  done: { label: '완료', cls: 'done' },
-  wip: { label: '진행 중', cls: 'wip' },
-  review: { label: '검증 대기', cls: 'review' },
-  blocked: { label: '막힘', cls: 'blocked' },
-  todo: { label: '대기', cls: 'todo' },
+  bucket: JobBucket
+  cls: JobStateCls
 }
 
 function jobStateForTask(task: Task): JobState {
   switch (task.status) {
-    case 'done': return JOB_STATE.done
-    case 'in_progress':
-    case 'claimed': return JOB_STATE.wip
-    case 'awaiting_verification': return JOB_STATE.review
-    case 'cancelled': return JOB_STATE.blocked
+    case 'done': return { label: '완료', bucket: 'done', cls: 'done' }
+    case 'in_progress': return { label: '진행 중', bucket: 'wip', cls: 'wip' }
+    case 'claimed': return { label: '클레임', bucket: 'wip', cls: 'claimed' }
+    case 'awaiting_verification': return { label: '검증 대기', bucket: 'verify', cls: 'verify' }
+    case 'cancelled': return { label: '취소', bucket: 'blocked', cls: 'cancelled' }
     case 'todo':
-    default: return JOB_STATE.todo
+    default: return { label: '대기', bucket: 'todo', cls: 'todo' }
   }
 }
 
@@ -118,6 +119,15 @@ function goalStatusClass(status: string): 'ok' | 'warn' | 'bad' | 'volt' {
   return GOAL_STATUS_CLASS[status] ?? 'ok'
 }
 
+// Gate evidence outcome → Korean outcome word for the right-aligned
+// .wk-gate-out column. Mirrors the prototype GATE_OUTCOME map
+// (data.jsx:369): satisfied 충족 / missing 누락 / failed 실패.
+const GATE_OUTCOME_LABEL: Record<'satisfied' | 'missing' | 'failed', string> = {
+  satisfied: '충족',
+  missing: '누락',
+  failed: '실패',
+}
+
 // ── Goal horizon mapping ────────────────────────────────────────────────────
 
 interface HorizonMeta {
@@ -133,10 +143,6 @@ const HORIZON_META: HorizonMeta[] = [
   { key: 'mid', label: '중기', sub: '이번 분기' },
   LONG_HORIZON_META,
 ]
-
-function horizonMetaForGoal(goal: Goal): HorizonMeta {
-  return HORIZON_META.find(h => h.key === goal.horizon) ?? LONG_HORIZON_META
-}
 
 function horizonKeyForGoal(goal: Goal): Goal['horizon'] {
   return HORIZON_META.some(h => h.key === goal.horizon) ? goal.horizon : 'long'
@@ -195,11 +201,11 @@ function goalProgressCounts(goalTasks: Task[]): GoalProgressCounts {
   const counts: GoalProgressCounts = { done: 0, wip: 0, verify: 0, blocked: 0, total: goalTasks.length }
   for (const t of goalTasks) {
     if (t.status === 'cancelled') continue
-    const state = jobStateForTask(t).cls
-    if (state === 'done') counts.done++
-    else if (state === 'blocked') counts.blocked++
-    else if (state === 'review') counts.verify++
-    else if (state === 'wip') counts.wip++
+    const bucket = jobStateForTask(t).bucket
+    if (bucket === 'done') counts.done++
+    else if (bucket === 'blocked') counts.blocked++
+    else if (bucket === 'verify') counts.verify++
+    else if (bucket === 'wip') counts.wip++
   }
   return counts
 }
@@ -234,8 +240,8 @@ function TaskGate({ rows }: { rows: ReturnType<typeof taskGateRows> }) {
           <span class="wk-gate-mark">
             ${g.outcome === 'satisfied' ? '✓' : g.outcome === 'failed' ? '✕' : '○'}
           </span>
-          <span class="wk-gate-label mono">${g.label}</span>
-          <span class="wk-gate-detail">${g.detail}</span>
+          <span class="wk-gate-ev"><span class="mono">${g.label}</span> · ${g.detail}</span>
+          <span class="wk-gate-out">${GATE_OUTCOME_LABEL[g.outcome]}</span>
         </div>
       `)}
     </div>
@@ -326,17 +332,22 @@ function GoalCard({
 }) {
   const progress = goalProgressCounts(goalTasks)
   const lead = leadKeeperForGoal(goal)
-  const horizon = horizonMetaForGoal(goal)
-  const hasBlock = progress.blocked > 0
 
+  // Border tint by goal status (prototype .wk-goal.st-warn/.st-bad/.st-volt,
+  // v2.css:812-814): at_risk→amber, blocked→bad, verifying→volt. `st-ok`
+  // has no rule (neutral border) which matches the prototype default.
   return html`
-    <div class=${`wk-goal ss-card ${open ? 'open' : ''} ${hasBlock ? 'has-block' : ''}`} data-testid="goal-card" data-goal-id=${goal.id}>
+    <div class=${`wk-goal ${open ? 'open' : ''} st-${goalStatusClass(goal.status)}`} data-testid="goal-card" data-goal-id=${goal.id}>
       <button type="button" class="wk-goal-h" onClick=${onToggle} aria-expanded=${open}>
         <span class="wk-caret" aria-hidden="true">${open ? '\u25BE' : '\u25B8'}</span>
         <span class="wk-prio mono" title=${`우선순위 ${goal.priority}`}>P${goal.priority}</span>
         <span class=${`wk-gstatus ${goalStatusClass(goal.status)}`}>${goalStatusLabel(goal.status)}</span>
         <span class="wk-goal-title">${goal.title}</span>
-        <span class="wk-goal-ns mono">${horizon.label}</span>
+        <!-- Prototype shows a namespace pill (.wk-goal-ns) here from g.ns.
+             The live Goal type has no namespace/ns field (types/core.ts:603),
+             so rather than fake it with the redundant horizon label (the card
+             already sits under a horizon section header), the pill is dropped
+             until a backend namespace field exists. Audit workspace.md #3. -->
         <span class="wk-spacer"></span>
         ${goal.require_completion_approval || goal.active_verification_request_id
           ? html`<span class="wk-approval" title="완료 승인 필요">✓ 완료 승인</span>`
@@ -353,6 +364,7 @@ function GoalCard({
         <span class="wk-prog-lbl mono">
           ${progress.done}/${progress.total}${progress.verify > 0 ? ` · 검증 ${progress.verify}` : ''}${progress.blocked > 0 ? ` · 막힘 ${progress.blocked}` : ''}
         </span>
+        ${goal.phase ? html`<span class="wk-goal-phase mono" title="goal phase">${goal.phase}</span>` : null}
         ${goal.metric ? html`<span class="wk-metric mono" title="목표 지표">${goal.metric}</span>` : null}
       </div>
       ${open ? html`
@@ -383,7 +395,12 @@ function WorkSurfaceV2() {
       const next = new Set(prev)
       for (const g of goalList) {
         const progress = goalProgressCounts(allTasks.filter(t => t.goal_id === g.id))
-        if (g.priority === 1 || progress.blocked > 0) next.add(g.id)
+        // Prototype auto-expands attention goals (priority >= 7 || at_risk ||
+        // verifying, work.jsx:138). The live priority scale (1=top vs 9=top)
+        // is not confirmed against the backend, so the priority trigger is
+        // left as-is and only the unambiguous status triggers are aligned:
+        // at_risk / verifying / any blocked task. Audit workspace.md #7.
+        if (g.priority === 1 || g.status === 'at_risk' || g.status === 'verifying' || progress.blocked > 0) next.add(g.id)
       }
       return next
     })
@@ -452,14 +469,13 @@ function WorkSurfaceV2() {
   }, [goalList, claimedTasks])
 
   return html`
-    <main class="wk-surface ss-surface bg-surface-page text-text-primary">
-      <div class="wk-scroll">
-        <div class="wk-inner space-y-6">
-          <header class="wk-head">
+    <main class="ov">
+      <div class="ov-scroll">
+        <header class="ov-head">
             <div>
-              <span class="wk-eyebrow">Goal Store</span>
+              <span class="ov-eyebrow">Goal Store</span>
               <h1>작업 · 목표</h1>
-              <p class="wk-sub">Goal → Task → keeper · horizon으로 묶고 게이트 증거로 검증</p>
+              <p class="ov-sub">Goal → Task → keeper · horizon으로 묶고 게이트 증거로 검증</p>
             </div>
             <button
               type="button"
@@ -472,31 +488,31 @@ function WorkSurfaceV2() {
             </button>
           </header>
 
-          <section class="wk-kpis ss-card" data-testid="work-kpis" style=${{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
-            <div class="wk-kpi">
-              <div class="wk-kpi-k">활성 목표</div>
-              <div class="wk-kpi-v volt" data-testid="kpi-goals">${totals.goals}</div>
+          <section class="ov-kpis" data-testid="work-kpis" style=${{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
+            <div class="ov-kpi">
+              <div class="ov-kpi-k">활성 목표</div>
+              <div class="ov-kpi-v volt" data-testid="kpi-goals">${totals.goals}</div>
             </div>
-            <div class="wk-kpi">
-              <div class="wk-kpi-k">전체 Task</div>
-              <div class="wk-kpi-v" data-testid="kpi-tasks">${totals.tasks}</div>
+            <div class="ov-kpi">
+              <div class="ov-kpi-k">전체 Task</div>
+              <div class="ov-kpi-v" data-testid="kpi-tasks">${totals.tasks}</div>
             </div>
-            <div class="wk-kpi">
-              <div class="wk-kpi-k">진행 중</div>
-              <div class=${`wk-kpi-v ${totals.wip > 0 ? 'volt' : ''}`} data-testid="kpi-wip">${totals.wip}</div>
+            <div class="ov-kpi">
+              <div class="ov-kpi-k">진행 중</div>
+              <div class=${`ov-kpi-v ${totals.wip > 0 ? 'volt' : ''}`} data-testid="kpi-wip">${totals.wip}</div>
             </div>
-            <div class="wk-kpi">
-              <div class="wk-kpi-k">검증 대기</div>
-              <div class=${`wk-kpi-v ${totals.verify > 0 ? 'warn' : ''}`} data-testid="kpi-verify">${totals.verify}</div>
+            <div class="ov-kpi">
+              <div class="ov-kpi-k">검증 대기</div>
+              <div class=${`ov-kpi-v ${totals.verify > 0 ? 'volt' : ''}`} data-testid="kpi-verify">${totals.verify}</div>
             </div>
-            <div class="wk-kpi">
-              <div class="wk-kpi-k">백로그</div>
-              <div class=${`wk-kpi-v ${totals.backlog > 0 ? 'warn' : ''}`} data-testid="kpi-backlog">${totals.backlog}</div>
+            <div class="ov-kpi">
+              <div class="ov-kpi-k">백로그</div>
+              <div class=${`ov-kpi-v ${totals.backlog > 0 ? 'warn' : ''}`} data-testid="kpi-backlog">${totals.backlog}</div>
             </div>
           </section>
 
           ${backlogTasks.length > 0 ? html`
-            <section class="wk-backlog ss-card mx-6" data-testid="work-backlog">
+            <section class="wk-backlog" data-testid="work-backlog">
               <div class="wk-backlog-h">
                 <span class="wk-backlog-glyph" aria-hidden="true">⊕</span>
                 클레임 가능 백로그
@@ -520,33 +536,29 @@ function WorkSurfaceV2() {
             </section>
           ` : null}
 
-          <div class="wk-horizons px-6">
-            ${horizonGroups.map(group => html`
-              <section class="wk-horizon" data-testid="work-horizon" data-horizon=${group.key}>
-                <div class="wk-hz-head">
-                  <span class="wk-hz-lbl">${group.label}</span>
-                  <span class="wk-hz-sub">${group.sub}</span>
-                  <span class="wk-spacer"></span>
-                  <span class="wk-hz-n mono">${group.goals.length} goals</span>
-                </div>
-                <div class="wk-list">
-                  ${group.goals.map(g => html`
-                    <${GoalCard}
-                      key=${g.id}
-                      goal=${g}
-                      open=${openSet.has(g.id)}
-                      onToggle=${() => toggleGoal(g.id)}
-                      goalTasks=${tasksByGoalId.get(g.id) ?? []}
-                      onClaim=${claimTask}
-                    />
-                  `)}
-                </div>
-              </section>
-            `)}
-          </div>
+          ${horizonGroups.map(group => html`
+            <div class="wk-horizon" data-testid="work-horizon" data-horizon=${group.key}>
+              <div class="wk-hz-head">
+                <span class="wk-hz-lbl">${group.label}</span>
+                <span class="wk-hz-sub">${group.sub}</span>
+                <span class="wk-hz-n mono">${group.goals.length}</span>
+              </div>
+              <div class="wk-list">
+                ${group.goals.map(g => html`
+                  <${GoalCard}
+                    key=${g.id}
+                    goal=${g}
+                    open=${openSet.has(g.id)}
+                    onToggle=${() => toggleGoal(g.id)}
+                    goalTasks=${tasksByGoalId.get(g.id) ?? []}
+                    onClaim=${claimTask}
+                  />
+                `)}
+              </div>
+            </div>
+          `)}
 
           <div class="wk-foot mono">Goal → Task → keeper · horizon(단기·중기·장기) · 완료는 게이트 증거 충족 후 done · 미배정 task 는 백로그에서 claim</div>
-        </div>
       </div>
     </main>
   `

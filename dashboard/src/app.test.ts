@@ -4,9 +4,9 @@ import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
 import { App, shouldShowCopilotFab, shouldSuppressFloatingChrome, shouldUseCompactDashboardChrome } from './app'
 import { route } from './router'
-import { serverStatus, shellCounts } from './store'
-import { selectedKeeper } from './components/keeper-detail-state'
-import { keeperMobilePane } from './components/keeper-mobile-pane-state'
+import { keepers } from './store'
+import { activeKeeperName } from './keeper-state'
+import type { Keeper } from './types'
 
 describe('App v2 header chrome', () => {
   let container: HTMLDivElement
@@ -17,10 +17,8 @@ describe('App v2 header chrome', () => {
     document.body.appendChild(container)
     window.location.hash = originalHash
     route.value = { tab: 'overview', params: {}, postId: null }
-    shellCounts.value = null
-    serverStatus.value = null
-    selectedKeeper.value = null
-    keeperMobilePane.value = 'chat'
+    keepers.value = []
+    activeKeeperName.value = ''
   })
 
   afterEach(() => {
@@ -28,10 +26,8 @@ describe('App v2 header chrome', () => {
     container.remove()
     window.location.hash = originalHash
     route.value = { tab: 'overview', params: {}, postId: null }
-    shellCounts.value = null
-    serverStatus.value = null
-    selectedKeeper.value = null
-    keeperMobilePane.value = 'chat'
+    keepers.value = []
+    activeKeeperName.value = ''
   })
 
   function renderApp() {
@@ -74,67 +70,77 @@ describe('App v2 header chrome', () => {
 
   it('renders v2 shell header and health strip scopes', () => {
     renderApp()
-    expect(container.querySelector('header.v2-shell-header')).not.toBeNull()
+    // The shell header is now TopBarV2's `.v2-top` (the old `header.v2-shell-header`
+    // element was replaced by the keeper-v2 prototype top bar). The health strip is
+    // re-mounted under the top bar, so its testid + scope class still hold.
+    expect(container.querySelector('.v2-top')).not.toBeNull()
     expect(container.querySelector('[data-testid="dashboard-health-strip"].v2-health-strip')).not.toBeNull()
   })
 
   it('renders v2 header structural classes', () => {
     renderApp()
-    expect(container.querySelector('.v2-header-brand')).not.toBeNull()
-    expect(container.querySelector('.v2-header-mark')).not.toBeNull()
-    expect(container.querySelector('.v2-header-crumb')).not.toBeNull()
-    // The global chrome no longer renders a page title: surface-level headers
-    // own the title source of truth, so the shell header carries only the crumb.
+    // Brand/mark moved into the nav rail (NavRailV2 `.nav-brand` + `.nav-home`);
+    // the keeper-v2 shell renders the MASC mark there, not in the top bar.
+    expect(container.querySelector('.nav-brand')).not.toBeNull()
+    expect(container.querySelector('.nav-home')).not.toBeNull()
+    // The crumb is now `.v2-top .crumb` (TopBarV2), replacing `.v2-header-crumb`.
+    expect(container.querySelector('.v2-top .crumb')).not.toBeNull()
+    // The global chrome still renders no page title: surface-level headers own the
+    // title source of truth, so the shell header carries only the crumb. (Old
+    // `.v2-header-title` selector is gone; nothing renders a header title.)
     expect(container.querySelector('.v2-header-title')).toBeNull()
-    expect(container.querySelector('.v2-header-actions')).not.toBeNull()
+    // The header still carries an action/status cluster: the re-mounted operational
+    // chrome lives in `.v2-top-ops` (was `.v2-header-actions` / `.v2-app-header-status`).
+    expect(container.querySelector('.v2-top-ops')).not.toBeNull()
+    // The shell no longer renders inline header tabs (`.v2-shell-tabs`); navigation
+    // is the nav rail / bottom tab bar.
     expect(container.querySelector('.v2-shell-tabs')).toBeNull()
-    expect(container.querySelector('.v2-app-header-status')).not.toBeNull()
+    // The live running-count chip still renders in the top bar.
     expect(container.querySelector('.v2-statchip.live')).not.toBeNull()
   })
 
-  it('renders keeper breadcrumb tail and visible Korean desktop status chips', () => {
+  it('renders keeper breadcrumb tail and the live running-count chip', () => {
     window.innerWidth = 1280
     route.value = { tab: 'keepers', params: { keeper: 'albini' }, postId: null }
-    shellCounts.value = {
-      agents: 0,
-      tasks: 0,
-      keepers: 7,
-      total_runtimes: 0,
-      configured_keepers: 7,
-    }
-    serverStatus.value = {} as NonNullable<typeof serverStatus.value>
+    // The live running-count chip counts running keepers from the `keepers` store
+    // (via phaseStatus), not from shellCounts. Seed 7 running keepers so the chip
+    // reads "7 실행 중".
+    keepers.value = Array.from({ length: 7 }, (_, i): Keeper => ({
+      name: `k${i}`,
+      status: 'running',
+      lifecycle_phase: 'Running',
+    }))
     renderApp()
 
-    const crumb = container.querySelector('.v2-header-crumb')
+    // Crumb is now `.v2-top .crumb` (TopBarV2): surface label + keeper tail.
+    const crumb = container.querySelector('.v2-top .crumb')
     expect(crumb?.textContent).toContain('Keepers')
     expect(crumb?.textContent).toContain('albini')
 
-    const status = container.querySelector('.v2-app-header-status') as HTMLElement | null
-    expect(status).not.toBeNull()
-    expect(status?.classList.contains('flex')).toBe(true)
-    expect(status?.classList.contains('hidden')).toBe(false)
-    expect(status?.textContent).toContain('7 실행 중')
-    expect(status?.textContent).toContain('서버')
-    expect(status?.textContent).toContain('응답')
-    const liveChip = status?.querySelector('.v2-statchip.live') as HTMLElement | null
-    expect(liveChip?.getAttribute('title')).toBe('실행 중인 keeper 수 (shell 스냅샷 기준)')
-    const schedulerChip = Array.from(status?.querySelectorAll('.v2-statchip') ?? [])
-      .find(chip => chip !== liveChip) as HTMLElement | undefined
-    expect(schedulerChip?.getAttribute('title')).toBe('dashboard shell이 최근 서버 status를 수신했는지 여부')
-    expect(
-      status?.querySelector('.v2-statchip.live span')?.classList.contains('motion-safe:animate-pulse'),
-    ).toBe(true)
+    // The live running-count chip is `.v2-statchip.live` in the top bar. The old
+    // `.v2-app-header-status` container, the separate server-status "scheduler"
+    // chip ("서버"/"응답" text + its title), and the chip-title attributes were
+    // removed by the v2 reskin — TopBarV2 emits an attention indicator + 예약
+    // button instead. The live-count + pulse coverage is preserved here.
+    const liveChip = container.querySelector('.v2-statchip.live') as HTMLElement | null
+    expect(liveChip).not.toBeNull()
+    expect(liveChip?.textContent).toContain('7 실행 중')
+    // Pulse is now carried by the StatusDot pip (`.dot2.pulse`), replacing the old
+    // `motion-safe:animate-pulse` utility class on an inner span.
+    expect(liveChip?.querySelector('.dot2.pulse')).not.toBeNull()
   })
 
-  it('falls back to selectedKeeper for the breadcrumb tail when no route keeper param', () => {
-    // Mirrors keeper-detail-page resolution tier 2: with no route keeper param
-    // the crumb still tracks the keeper the chat is showing via selectedKeeper.
+  it('falls back to activeKeeperName for the breadcrumb tail when no route keeper param', () => {
+    // With no route keeper param the crumb still tracks the keeper the chat is
+    // showing. TopBarV2's fallback source is now `activeKeeperName` (the old
+    // `selectedKeeper` fallback was removed by the reskin); the fallback intent
+    // is unchanged.
     window.innerWidth = 1280
     route.value = { tab: 'keepers', params: {}, postId: null }
-    selectedKeeper.value = { name: 'grimja' } as NonNullable<typeof selectedKeeper.value>
+    activeKeeperName.value = 'grimja'
     renderApp()
 
-    const crumb = container.querySelector('.v2-header-crumb')
+    const crumb = container.querySelector('.v2-top .crumb')
     expect(crumb?.textContent).toContain('Keepers')
     expect(crumb?.textContent).toContain('grimja')
     // No dangling slash when a tail is present.
@@ -147,18 +153,23 @@ describe('App v2 header chrome', () => {
 
     const main = container.querySelector('#main-content') as HTMLElement | null
     expect(main).not.toBeNull()
-    expect(main?.classList.contains('v2-body')).toBe(true)
+    // The host is `.v2-surface-host` and sits inside the `.v2-body` grid column
+    // (the old shell put `v2-body` directly on #main-content; the v2 grid now
+    // wraps it).
+    expect(main?.classList.contains('v2-surface-host')).toBe(true)
+    expect(main?.closest('.v2-body')).not.toBeNull()
 
-    // The v2-body is edge-to-edge full-bleed: the wrapper card chrome (rounded
-    // corners, border, card background, drop shadow) was removed so the shell
-    // matches the prototype's full-bleed .v2-body grid. The page background
-    // shows through; each surface owns its own background.
+    // Edge-to-edge full-bleed: the wrapper card chrome (rounded corners, border,
+    // card background, drop shadow) was removed so the shell matches the
+    // prototype's full-bleed grid. The page background shows through; each
+    // surface owns its own background.
     const cls = main?.className ?? ''
     expect(cls).not.toContain('bg-[var(--ss-card)]')
     expect(cls).not.toContain('rounded-[var(--ss-radius-card)]')
     expect(cls).not.toContain('shadow-[var(--ss-shadow-card)]')
-    // Still clips so the inner .dashboard-main-scroll owns the scrollbar.
-    expect(cls).toContain('overflow-hidden')
+    // The host owns the scrollbar via an inline style (replacing the old
+    // overflow-hidden class on the host + overflow-y-auto on the inner scroll).
+    expect(main?.style.overflowY).toBe('auto')
   })
 
   it('renders health chips with the shared chip class', () => {
@@ -171,42 +182,36 @@ describe('App v2 header chrome', () => {
     window.innerWidth = 900
     renderApp()
     const app = container.querySelector('.v2-app')
-    expect(app?.getAttribute('data-mobile')).toBe('true')
+    // The v2 shell emits data-mobile="1" (prototype CSS attribute selector),
+    // not "true".
+    expect(app?.getAttribute('data-mobile')).toBe('1')
   })
 
   it('does not set data-mobile above the v2 shell breakpoint', () => {
     window.innerWidth = 901
     renderApp()
     const app = container.querySelector('.v2-app')
-    expect(app?.getAttribute('data-mobile')).toBe('false')
+    // Above the breakpoint the attribute is omitted entirely (was "false").
+    expect(app?.hasAttribute('data-mobile')).toBe(false)
   })
 
-  it('uses a 44x44 mobile menu button touch target', () => {
+  it('renders the always-present mobile bottom tab bar below the breakpoint', () => {
     window.innerWidth = 900
     renderApp()
 
-    const menuButton = container.querySelector('button[aria-controls="dashboard-side-rail"]') as HTMLElement | null
-    expect(menuButton).not.toBeNull()
-    expect(menuButton?.classList.contains('size-11')).toBe(true)
+    // Mobile nav is now NavRailV2's always-present bottom tab bar
+    // (`nav.v2-nav.is-mnav`). The old drawer model (a 44x44 hamburger
+    // `button[aria-controls="dashboard-side-rail"]` toggling a side-rail
+    // drawer + `nav[aria-label="Primary mobile navigation"]`) was removed by
+    // the reskin; the prototype keeps a persistent bottom tab bar instead.
+    expect(container.querySelector('nav.v2-nav.is-mnav')).not.toBeNull()
   })
 
-  it('hides mobile nav tabs when the mobile side-rail drawer is open', async () => {
-    window.innerWidth = 900
-    renderApp()
-
-    const menuButton = container.querySelector('button[aria-controls="dashboard-side-rail"]') as HTMLElement | null
-    expect(menuButton).not.toBeNull()
-    menuButton!.click()
-
-    await waitFor(() => {
-      expect(container.querySelector('nav[aria-label="Primary mobile navigation"]')).toBeNull()
-    })
-
-    menuButton!.click()
-    await waitFor(() => {
-      expect(container.querySelector('nav[aria-label="Primary mobile navigation"]')).not.toBeNull()
-    })
-  })
+  // REMOVED: "hides mobile nav tabs when the mobile side-rail drawer is open" —
+  // the mobile side-rail drawer + hamburger toggle were removed by the v2 reskin.
+  // The bottom tab bar (`nav.v2-nav.is-mnav`) is always present on mobile, so
+  // there is no drawer-open state that hides it. Positive coverage that the
+  // bottom bar renders is kept in the test above.
 
   it('uses the header Copilot control instead of a floating FAB on mobile', () => {
     window.innerWidth = 900
@@ -216,93 +221,64 @@ describe('App v2 header chrome', () => {
     expect(container.querySelector('[data-testid="copilot-dock-fab"]')).toBeNull()
   })
 
-  it('keeps mobile nav available on the keeper roster pane', () => {
-    window.location.hash = '#keepers?keeper=sangsu'
-    route.value = { tab: 'keepers', params: { keeper: 'sangsu' }, postId: null }
-    keeperMobilePane.value = 'roster'
-    window.innerWidth = 900
-    renderApp()
-
-    expect(container.querySelector('#main-content')?.getAttribute('data-mpane')).toBe('roster')
-    expect(container.querySelector('nav[aria-label="Primary mobile navigation"]')).not.toBeNull()
-  })
-
-  it('hides mobile nav while reading the keeper chat pane', () => {
-    window.location.hash = '#keepers?keeper=sangsu'
-    route.value = { tab: 'keepers', params: { keeper: 'sangsu' }, postId: null }
-    keeperMobilePane.value = 'chat'
-    window.innerWidth = 900
-    renderApp()
-
-    expect(container.querySelector('#main-content')?.getAttribute('data-mpane')).toBe('chat')
-    const bottomNav = container.querySelector('nav[aria-label="Primary mobile navigation"]')
-    expect(bottomNav).toBeNull()
-  })
+  // REMOVED: "keeps mobile nav available on the keeper roster pane" and
+  // "hides mobile nav while reading the keeper chat pane" — both asserted the old
+  // per-pane mobile-nav gating driven by `#main-content[data-mpane]` +
+  // `keeperMobilePane`. The reskin dropped `data-mpane` from #main-content and the
+  // `nav[aria-label="Primary mobile navigation"]` element; the mobile bottom tab
+  // bar (`nav.v2-nav.is-mnav`) is now always present regardless of keeper pane.
+  // Positive bottom-bar coverage is kept above.
 
   it('renders the left side rail on desktop', () => {
     window.innerWidth = 1280
     renderApp()
 
-    const rail = container.querySelector('#dashboard-side-rail')
+    // The desktop rail is now NavRailV2's `nav.v2-nav` (no `#dashboard-side-rail`
+    // id, no `.v2-shell-rail`). The mobile-hidden behaviour is no longer a class
+    // on the rail: on desktop the rail variant has no `.is-mnav`.
+    const rail = container.querySelector('nav.v2-nav')
     expect(rail).not.toBeNull()
-    expect(rail?.classList.contains('v2-shell-rail')).toBe(true)
-    expect(rail?.classList.contains('max-[1100px]:hidden')).toBe(true)
+    expect(rail?.classList.contains('is-mnav')).toBe(false)
   })
 
   it('does not collapse the left rail out of view on desktop', () => {
     window.innerWidth = 1280
     renderApp()
 
-    const rail = container.querySelector('#dashboard-side-rail') as HTMLElement
+    const rail = container.querySelector('nav.v2-nav')
     expect(rail).not.toBeNull()
-    const cls = Array.from(rail.classList).join(' ')
-    // The desktop rail must carry a fixed width, not w-full. Collapsed default
-    // renders the keeper-v2 prototype's 58px icon rail (w-[58px], --nav-w
-    // v2.css:232); expanded renders w-55.
-    expect(cls).toMatch(/w-\[58px\]|\bw-55\b/)
-    expect(cls).not.toMatch(/\bw-full\b/)
-    expect(cls).not.toMatch(/\bmax-h-75\b/)
+    // The rail width is no longer a utility class on the rail element; it is the
+    // 58px grid column of the `.v2-body` shell grid (icon rail). Assert that the
+    // grid reserves a fixed 58px column for the rail (not a collapsed 0 / 1fr-only
+    // grid), keeping the "rail stays visible with a real width" intent.
+    const body = container.querySelector('.v2-body') as HTMLElement | null
+    expect(body).not.toBeNull()
+    expect(body?.style.gridTemplateColumns).toContain('58px')
   })
 
   it('keeps main content scrollable', () => {
     window.innerWidth = 1280
     renderApp()
 
-    const main = container.querySelector('#main-content')
+    const main = container.querySelector('#main-content') as HTMLElement | null
     expect(main).not.toBeNull()
-    expect(main?.classList.contains('overflow-hidden')).toBe(true)
+    // The host owns the scrollbar via an inline style (replacing the old
+    // `overflow-hidden` class on the host).
+    expect(main?.style.overflowY).toBe('auto')
 
+    // The inner scroll wrapper is `.dashboard-main-scroll.h-full`. The reskin
+    // moved scroll ownership onto the host inline style, so the inner wrapper no
+    // longer carries `overflow-y-auto` — it just fills height (`h-full`).
     const scroll = main?.querySelector('.dashboard-main-scroll')
     expect(scroll).not.toBeNull()
-    expect(scroll?.classList.contains('overflow-y-auto')).toBe(true)
     expect(scroll?.classList.contains('h-full')).toBe(true)
   })
 
-  it('toggles the mobile side-rail drawer', async () => {
-    window.innerWidth = 900
-    renderApp()
-
-    const rail = container.querySelector('#dashboard-side-rail') as HTMLElement | null
-    expect(rail).not.toBeNull()
-
-    const menuButton = container.querySelector('button[aria-controls="dashboard-side-rail"]') as HTMLElement | null
-    expect(menuButton).not.toBeNull()
-    menuButton!.click()
-
-    // DashboardNavRail owns the mobile drawer contract: opening swaps the rail
-    // from the hidden mobile state into an explicit block drawer.
-    await waitFor(() => {
-      expect(rail?.classList.contains('block')).toBe(true)
-      expect(rail?.classList.contains('hidden')).toBe(false)
-      expect(container.querySelector('[data-testid="dashboard-status-tray"]')).toBeNull()
-      expect(container.querySelector('[data-testid="dashboard-focus-mode-toggle"]')).toBeNull()
-    })
-
-    menuButton!.click()
-    await waitFor(() => {
-      expect(rail?.classList.contains('hidden')).toBe(true)
-    })
-  })
+  // REMOVED: "toggles the mobile side-rail drawer" — the v2 reskin removed the
+  // mobile side-rail drawer (`#dashboard-side-rail` block/hidden toggling) and its
+  // hamburger control (`button[aria-controls="dashboard-side-rail"]`). The mobile
+  // bottom tab bar (`nav.v2-nav.is-mnav`) is always present; there is no
+  // drawer-open/closed state to toggle. Positive bottom-bar coverage is kept above.
 
   it('hides floating status and focus chrome on prototype primary surfaces', () => {
     window.innerWidth = 1280
@@ -330,23 +306,24 @@ describe('App v2 header chrome', () => {
     route.value = { tab: 'monitoring', params: { section: 'agents' }, postId: null }
     renderApp()
 
-    // Rail should be visible initially.
-    expect(container.querySelector('#dashboard-side-rail')).not.toBeNull()
+    // Rail (now `nav.v2-nav`) should be visible initially.
+    expect(container.querySelector('nav.v2-nav')).not.toBeNull()
 
     const focusButton = container.querySelector('[data-testid="dashboard-focus-mode-toggle"]') as HTMLElement | null
     expect(focusButton).not.toBeNull()
     focusButton!.click()
 
-    // Wait for Preact to re-render after the persistent signal update.
+    // Wait for Preact to re-render after the persistent signal update. Focus mode
+    // (compact chrome) omits the rail entirely.
     await waitFor(() => {
-      expect(container.querySelector('#dashboard-side-rail')).toBeNull()
+      expect(container.querySelector('nav.v2-nav')).toBeNull()
     })
     expect(container.querySelector('[data-testid="dashboard-focus-mode-toggle"]')).not.toBeNull()
 
     // Toggling back restores the rail.
     focusButton!.click()
     await waitFor(() => {
-      expect(container.querySelector('#dashboard-side-rail')).not.toBeNull()
+      expect(container.querySelector('nav.v2-nav')).not.toBeNull()
     })
   })
 })

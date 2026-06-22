@@ -335,8 +335,10 @@ describe('KeeperDetailPage', () => {
     // 3-pane workspace renders (roster | conversation | context rail) without
     // tripping the monitoring error boundary.
     expect(container.querySelector('.kw-grid')).toBeTruthy()
-    expect(container.querySelector('.kw-roster')).toBeTruthy()
-    expect(container.querySelector('.kw-rail')).toBeTruthy()
+    // v2 reskin renamed the pane roots: KeeperWorkspaceRoster '.kw-roster' -> '.roster',
+    // KeeperWorkspaceRail '.kw-rail' -> '.ctx'. Same elements, retargeted selectors.
+    expect(container.querySelector('.roster')).toBeTruthy()
+    expect(container.querySelector('.ctx')).toBeTruthy()
     // The grid binds data-mobile-pane to the keeperMobilePane signal — the
     // load-bearing hook the <=860px CSS pane-switch depends on. Entering a
     // keeper resets the signal to 'chat', so the attribute must reflect that

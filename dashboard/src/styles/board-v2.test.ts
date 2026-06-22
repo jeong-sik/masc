@@ -47,6 +47,31 @@ function ruleDecls(selector: string): Record<string, string> {
   return declarations
 }
 
+describe('board-v2.css type ladder parity (prototype resolved values)', () => {
+  it('matches the prototype T2 region title size for the feed head (--fs-t2=16px)', () => {
+    // Prototype: surfaces.css TYPE LADDER (.bd-feed-head h2 -> T2) loads after
+    // the base rule and wins, so the rendered size is --fs-t2=16px, not 15px.
+    // Our .v2-board-surface prefix raises specificity above the ladder, so the
+    // literal must mirror the resolved T2 size.
+    const decls = ruleDecls('.v2-board-surface .bd-feed-head h2')
+    expect(decls['font-size']).toBe('16px')
+    expect(decls['font-weight']).toBe('600')
+    expect(decls['font-family']).toBe('var(--font-display)')
+  })
+
+  it('matches the prototype T4 micro-label tier for the rail heading (--fs-t4=9px, --fw-t4=600)', () => {
+    // Prototype: surfaces.css TYPE LADDER (.bd-rail h4 -> T4) loads after the
+    // base rule and wins (9px / weight 600), not the base 9.5px / weight 500.
+    const decls = ruleDecls('.v2-board-surface .bd-rail h4')
+    expect(decls['font-size']).toBe('9px')
+    expect(decls['font-weight']).toBe('600')
+    expect(decls['letter-spacing']).toBe('0.2em')
+    expect(decls['text-transform']).toBe('uppercase')
+    expect(decls['font-family']).toBe('var(--font-ui)')
+    expect(decls['color']).toBe('var(--text-dim)')
+  })
+})
+
 describe('board-v2.css author sigil (SigilBadge prototype parity)', () => {
   it('renders the base sigil as a solid volt fill with a 5px radius and dark glyph', () => {
     const decls = ruleDecls('.v2-board-surface .bd-sigil')

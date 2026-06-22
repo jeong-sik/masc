@@ -67,12 +67,18 @@
 
 .v2-board-surface .bd-rail h4 {
   font-family: var(--font-ui);
-  font-size: 9.5px;
+  /* Prototype: the authoritative TYPE LADDER (surfaces.css T4) loads after
+     the base .bd-rail h4 rule and wins, so the rendered values are the T4
+     tokens, not the base rule (9.5px / weight 500). Our .v2-board-surface
+     prefix raises specificity above the ladder, so the ladder is defeated —
+     mirror the resolved T4 values here. --fs-t4=9px, --fw-t4=600,
+     --tr-t4=0.2em (v2.css:101). */
+  font-size: 9px;
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--text-dim);
   margin: 0 0 8px 7px;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .v2-board-surface .bd-sub {
@@ -163,7 +169,11 @@
 .v2-board-surface .bd-feed-head h2 {
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: 15px;
+  /* Prototype: the TYPE LADDER (surfaces.css T2) loads after the base
+     .bd-feed-head h2 rule and wins, so the rendered size is --fs-t2=16px
+     (v2.css:99), not the base rule's 15px. Our .v2-board-surface prefix
+     raises specificity above the ladder, so mirror the resolved T2 size. */
+  font-size: 16px;
   color: var(--text-bright);
   margin: 0;
   white-space: nowrap;

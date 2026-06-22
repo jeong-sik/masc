@@ -120,7 +120,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   uncategorized: 'Uncategorized',
 }
 
-const LOG_KIND_FILTERS: readonly { value: string; label: string }[] = [
+const LOG_KIND_FILTERS: readonly { value: LogDisplayKind | ''; label: string }[] = [
   { value: '', label: '전체' },
   { value: 'tool', label: 'Tool' },
   { value: 'turn', label: 'Turn' },
@@ -1107,7 +1107,7 @@ export function LogViewer() {
                 class="v2-logs-filter-chip"
                 data-testid=${`logs-filter-${filter.value || 'all'}`}
                 onClick=${() => {
-                  kindFilter.value = filter.value as LogDisplayKind | ''
+                  kindFilter.value = filter.value
                 }}
               >${filter.label}<//>
             `)}
@@ -1205,7 +1205,7 @@ export function LogViewer() {
               />
               자동
             </label>
-            <span class="v2-logs-live mono"><span class="dot" />${autoRefresh.value ? `masc-mcp · WS open · ${eventRatePerMinute(logEntries)}δ/min` : 'masc-mcp · WS paused'}</span>
+            <span class="v2-logs-live mono"><span class="dot" />${autoRefresh.value ? `masc-mcp · 3s polling · ${eventRatePerMinute(logEntries)}δ/min` : 'masc-mcp · WS paused'}</span>
             <button
               type="button"
               class="logs-refresh-btn v2-logs-refresh"

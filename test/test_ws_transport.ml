@@ -664,6 +664,48 @@ let test_inbound_message_size_rejects_accumulated_fragments () =
       Alcotest.(check int) "limit" 1024 r.limit;
       Alcotest.(check int) "actual" 1100 r.actual
 
+(* RFC-0281 §3.2: a single application message may arrive across several WS
+   frames (an initial [`Text]/[`Binary] with [is_fin = false] then
+   [`Continuation] frames).  [inbound_accumulate] is the shared SSOT reassembler
+   used by both the MCP session handler and the IDE LSP proxy.  Before it was
+   shared, the LSP proxy ignored [is_fin] and dropped [`Continuation] frames, so
+   fragmented messages were silently truncated. *)
+let test_inbound_accumulate_single_complete_frame () =
+  let reader = Ws.Ws_inbound.create () in
+  match Ws.inbound_accumulate reader ~max_message_bytes:1024 ~is_fin:true "hello" with
+  | Ws.Inbound_message m -> Alcotest.(check string) "complete frame" "hello" m
+  | Ws.Inbound_incomplete -> Alcotest.fail "single fin frame should yield a message"
+  | Ws.Inbound_rejected _ -> Alcotest.fail "small frame should not be rejected"
+
+let test_inbound_accumulate_reassembles_fragments () =
+  let reader = Ws.Ws_inbound.create () in
+  (match
+     Ws.inbound_accumulate reader ~max_message_bytes:1024 ~is_fin:false {|{"a":|}
+   with
+   | Ws.Inbound_incomplete -> ()
+   | _ -> Alcotest.fail "first fragment must buffer (Incomplete)");
+  (match
+     Ws.inbound_accumulate reader ~max_message_bytes:1024 ~is_fin:false {|1,"b":|}
+   with
+   | Ws.Inbound_incomplete -> ()
+   | _ -> Alcotest.fail "middle fragment must buffer (Incomplete)");
+  match Ws.inbound_accumulate reader ~max_message_bytes:1024 ~is_fin:true "2}" with
+  | Ws.Inbound_message m ->
+      Alcotest.(check string) "reassembled across fragments" {|{"a":1,"b":2}|} m
+  | _ -> Alcotest.fail "final fragment must yield the joined message"
+
+let test_inbound_accumulate_rejects_oversized_message () =
+  let reader = Ws.Ws_inbound.create () in
+  (match Ws.inbound_accumulate reader ~max_message_bytes:8 ~is_fin:false "1234" with
+   | Ws.Inbound_incomplete -> ()
+   | _ -> Alcotest.fail "first fragment within cap must buffer");
+  match Ws.inbound_accumulate reader ~max_message_bytes:8 ~is_fin:false "56789" with
+  | Ws.Inbound_rejected r ->
+      Alcotest.(check string) "reason" "message_too_large" r.reason;
+      Alcotest.(check int) "partial buffer cleared on reject"
+        0 (Ws.Ws_inbound.buffered_bytes reader)
+  | _ -> Alcotest.fail "accumulated overflow must be rejected"
+
 let test_inbound_message_size_rejects_overflow_sum () =
   match
     Ws.classify_inbound_message_size ~current_bytes:(max_int - 10) ~chunk_len:20
@@ -1008,7 +1050,7 @@ let test_new_session_initializes_pong_state () =
     true
     (session.dashboard_last_delta_at <= Unix.gettimeofday ());
   Alcotest.(check int) "partial inbound byte count starts empty"
-    0 session.inbound_partial_text_bytes;
+    0 (Ws.Ws_inbound.buffered_bytes session.inbound);
   Alcotest.(check int) "inbound dispatch count starts empty"
     0 (Atomic.get session.inbound_dispatches)
 
@@ -1144,6 +1186,12 @@ let () =
         test_inbound_frame_size_rejects_negative_length;
       Alcotest.test_case "message cap rejects accumulated fragments" `Quick
         test_inbound_message_size_rejects_accumulated_fragments;
+      Alcotest.test_case "inbound single complete frame delivers message" `Quick
+        test_inbound_accumulate_single_complete_frame;
+      Alcotest.test_case "inbound reassembles fragmented message" `Quick
+        test_inbound_accumulate_reassembles_fragments;
+      Alcotest.test_case "inbound rejects oversized accumulated message" `Quick
+        test_inbound_accumulate_rejects_oversized_message;
       Alcotest.test_case "message cap rejects overflow sums" `Quick
         test_inbound_message_size_rejects_overflow_sum;
       Alcotest.test_case "size cap env defaults" `Quick

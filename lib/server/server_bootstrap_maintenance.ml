@@ -548,6 +548,12 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       Dashboard_snapshot.refresh_loop
         ~sw ~clock ~config:(Mcp_server.workspace_config state) ~state
         ~interval_sec:2.0 ());
+  (* Warm the runtime-probe cache before the first dashboard request so the
+     shell does not open on a [warming_up] placeholder (which reads as "runtime
+     down" to an operator). Non-blocking:
+     [maybe_fork_dashboard_runtime_probe_refresh] forks a background fiber under
+     this switch and the single-flight CAS makes a concurrent refresh a no-op. *)
+  Server_dashboard_http_runtime_info.maybe_fork_dashboard_runtime_probe_refresh ();
   let resolved_base = (Mcp_server.workspace_config state).base_path in
   let masc_dir = Workspace.masc_root_dir (Mcp_server.workspace_config state) in
   resolved_base, masc_dir

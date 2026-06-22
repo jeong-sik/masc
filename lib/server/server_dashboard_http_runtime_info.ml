@@ -15,7 +15,25 @@ let dashboard_runtime_probe_cache : dashboard_runtime_probe_cache_entry option A
 
 let dashboard_runtime_probe_cache_ttl_sec = 30.0
 let dashboard_runtime_probe_force_min_refresh_sec = 10.0
-let dashboard_runtime_probe_timeout_sec = 15
+(* Metadata-probe timeout. The dashboard probe hits provider metadata endpoints
+   only ([/api/tags] for Ollama, [/models] for messages/chat — see
+   {!dashboard_runtime_probe_url}); it never sends a completion request, so there
+   is no warm-KV inference to wait for. A dead/dropping runtime therefore fails
+   fast (RST) and a slow one is bounded here. 15s matched the completion-probe
+   timeout and let one unreachable runtime stall the whole dashboard for the
+   full window ("runtime-probe 한 번 잡히면 모든 게 다 느려짐"); 5s is a ~10x margin
+   over observed metadata latency (<500ms) while cutting the worst-case stall
+   by 3x. The completion-probe ([tool_local_runtime_probe]) keeps its own
+   longer timeout because it does run inference. *)
+let dashboard_runtime_probe_timeout_sec = 5
+(* Soft-TTL for stale-while-revalidate. A cache value is served as fresh for the
+   full [dashboard_runtime_probe_cache_ttl_sec], but once its age crosses this
+   threshold the request path schedules a non-blocking background refresh so the
+   *next* poll (default 30s) sees a fresh value instead of a post-expiry miss.
+   Set to half the TTL so a value refreshed on poll N is pre-warmed before
+   poll N+1 -- this is what closes the TTL==poll-interval hit-rate-0 trap
+   (cache expiry landing right at the next poll). *)
+let dashboard_runtime_probe_soft_refresh_sec = 15.0
 let dashboard_runtime_probe_refresh_in_flight = Atomic.make false
 
 let dashboard_runtime_probe_runner_hook : (unit -> Yojson.Safe.t) option Atomic.t =
@@ -993,7 +1011,33 @@ let dashboard_runtime_provider_probe_json
 ;;
 
 let dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes =
-  let probes = List.map dashboard_runtime_provider_probe_json runtimes in
+  (* Probe each runtime concurrently when a server switch is reachable (the
+     production background-refresh fiber). Each probe is an independent
+     runtime/URL/HTTP connection with no shared mutable state, so concurrent
+     execution is safe and probe latency collapses from [sum latencies] to
+     [max latencies] -- a dead runtime no longer serializes the probes after
+     it. Without a switch (unit tests, no fiber context) it falls back to a
+     sequential [List.map] so deterministic ordering and test seams are
+     preserved. Each probe body is Result-based, so a per-runtime failure
+     returns an error record instead of raising; [Eio.Cancel.Cancelled]
+     (server shutdown) propagates through the switch. *)
+  let probes =
+    match Eio_context.get_switch_opt () with
+    | None -> List.map dashboard_runtime_provider_probe_json runtimes
+    | Some sw ->
+      let promises =
+        List.map
+          (fun rt ->
+            let promise, resolver = Eio.Promise.create () in
+            let () =
+              Eio.Fiber.fork ~sw (fun () ->
+                Eio.Promise.resolve resolver (dashboard_runtime_provider_probe_json rt))
+            in
+            promise)
+          runtimes
+      in
+      List.map Eio.Promise.await promises
+  in
   let count pred = probes |> List.filter pred |> List.length in
   let skipped = count (fun p -> p.skipped) in
   let reachable = count (fun p -> Option.equal Bool.equal p.reachable (Some true)) in
@@ -1237,7 +1281,18 @@ let dashboard_runtime_probe_http_json ?(force = false) () =
     | Some (cached, cached_at) ->
       (* Cache hit: a force=1 hit inside the recent-value window is rate-limited
          (no new refresh) and tagged [recent]; a plain TTL-fresh hit is [fresh].
-         Neither schedules a background refresh. *)
+         Stale-while-revalidate: even on a TTL-fresh (non-force) hit, once the
+         cached value's age crosses the soft-TTL
+         [dashboard_runtime_probe_soft_refresh_sec] we schedule a non-blocking
+         background refresh. The single-flight CAS inside
+         {!maybe_fork_dashboard_runtime_probe_refresh} makes this a no-op when a
+         refresh is already running. This pre-warms the cache so the *next* poll
+         sees a fresh value instead of letting cache expiry land on a poll (the
+         TTL==poll-interval hit-rate-0 trap). The current response still serves
+         the fresh value; the refresh is invisible to the client. *)
+      let age = now -. cached_at in
+      if (not force) && age > dashboard_runtime_probe_soft_refresh_sec
+      then maybe_fork_dashboard_runtime_probe_refresh ();
       cached, true, cached_at, (if force then Refresh_recent else Refresh_fresh)
     | None ->
       (* Cache miss (or forced refresh past the recent window): trigger a

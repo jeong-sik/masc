@@ -91,8 +91,6 @@ let protocol_version_from_body =
 
 let get_session_id_query = Server_mcp_transport_http.get_session_id_query
 
-let get_header_any_case = Server_mcp_transport_http.get_header_any_case
-
 let get_cookie_value = Server_mcp_transport_http.get_cookie_value
 
 let get_session_id_any = Server_mcp_transport_http.get_session_id_any
@@ -216,94 +214,21 @@ let try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin req
   end
   else false
 
-let header_contains_token headers name token =
-  match get_header_any_case headers name with
-  | None -> false
-  | Some value ->
-    value
-    |> String.split_on_char ','
-    |> List.exists (fun part ->
-         String.equal
-           (String.lowercase_ascii (String.trim part))
-           (String.lowercase_ascii token))
-
-let header_equals_token headers name token =
-  match get_header_any_case headers name with
-  | None -> false
-  | Some value ->
-    String.equal
-      (String.lowercase_ascii (String.trim value))
-      (String.lowercase_ascii token)
-
-let is_websocket_upgrade_request request =
-  let headers = request.Httpun.Request.headers in
-  header_contains_token headers "connection" "upgrade"
-  && header_equals_token headers "upgrade" "websocket"
-
-let respond_ws_upgrade_unavailable ?(message = "websocket transport disabled") reqd =
-  let body =
-    Yojson.Safe.to_string (`Assoc [ ("error", `String message) ])
-  in
-  let headers =
-    Httpun.Headers.of_list
-      [ ("content-type", "application/json")
-      ; ("content-length", string_of_int (String.length body))
-      ]
-  in
-  let response = Httpun.Response.create ~headers `Service_unavailable in
-  safe_reqd_respond reqd response body
-
-let respond_ws_upgrade_bad_request message reqd =
-  let body =
-    Yojson.Safe.to_string (`Assoc [ ("error", `String message) ])
-  in
-  let headers =
-    Httpun.Headers.of_list
-      [ ("content-type", "application/json")
-      ; ("content-length", string_of_int (String.length body))
-      ]
-  in
-  let response = Httpun.Response.create ~headers `Bad_request in
-  safe_reqd_respond reqd response body
-
-let handle_websocket_upgrade reqd =
-  if not (Transport_metrics.ws_enabled ())
-  then respond_ws_upgrade_unavailable reqd
-  else if not (Transport_metrics.ws_same_origin_ready ())
-  then
-    respond_ws_upgrade_unavailable
-      ~message:"WebSocket transport not ready"
-      reqd
-  else
-    match
-      Server_mcp_transport_ws.upgrade_connection
-        ?sw:(Eio_context.get_switch_opt ())
-        ?clock:(Eio_context.get_clock_opt ())
-        ~on_message:Server_mcp_transport_ws.dispatch_inbound_message
-        reqd
-    with
-    | Ok () -> ()
-    | Error msg -> respond_ws_upgrade_bad_request msg reqd
 
 (** Method/path dispatcher for MCP-validated requests. Caller is
     responsible for rate limiting and origin/protocol-version checks
-    before invoking this function. *)
-let dispatch_route ~router ~request ~path reqd =
+    before invoking this function.
+
+    [GET /ws] (same-origin WebSocket upgrade + discovery) is owned by
+    the route table ([Server_routes_http_routes_frontend] via
+    [Http.Router.ws_get]) and reached through
+    [Http.Router.dispatch ~upgrade] below.  RFC-0280 consolidated the
+    previously-duplicated main_eio upgrade/discovery handlers into the
+    router so [/ws] has a single owner that actually drives the
+    connection. *)
+let dispatch_route ~router ~request ~path ~upgrade reqd =
   match request.Httpun.Request.meth, path with
   | `OPTIONS, _ -> options_handler request reqd
-  | `GET, "/ws" when is_websocket_upgrade_request request ->
-    handle_websocket_upgrade reqd
-  | `GET, "/ws" ->
-    let body =
-      Server_routes_http_runtime.websocket_discovery_json request
-      |> Yojson.Safe.to_string
-    in
-    let headers = Httpun.Headers.of_list [
-      ("content-type", "application/json");
-      ("content-length", string_of_int (String.length body));
-    ] in
-    let response = Httpun.Response.create ~headers `OK in
-    safe_reqd_respond reqd response body
   | `POST, "/webrtc/offer" when Server_webrtc_transport.is_enabled () ->
     Http.Request.read_body_async reqd (fun body ->
       match Server_webrtc_transport.handle_offer_request body with
@@ -471,7 +396,7 @@ let dispatch_route ~router ~request ~path reqd =
           ~config ~voter ~response_format:format ~post_id
       in
       Http.Response.json ~status body reqd
-  | _ -> Http.Router.dispatch router request reqd
+  | _ -> Http.Router.dispatch router ~upgrade request reqd
 
 let log_late_response_failure ~context msg =
   Log.Http.warn "%s: response already unwritable; skipped late response (%s)"
@@ -493,6 +418,11 @@ let try_internal_error_response reqd msg =
 let make_extended_handler routes =
   fun client_addr gluten_reqd ->
     let reqd = gluten_reqd.Gluten.Reqd.reqd in
+    (* Gluten upgrade capability — only available here at the connection
+       boundary.  Threaded to [Http.Router.dispatch] so WebSocket routes
+       ([Http.Router.ws_get]) can drive the post-101 connection.
+       RFC-0280. *)
+    let upgrade = gluten_reqd.Gluten.Reqd.upgrade in
     let request = Httpun.Reqd.request reqd in
     (* Rate limiting: enforce before any auth or routing. *)
     let path = Http.Request.path request in
@@ -506,7 +436,7 @@ let make_extended_handler routes =
       in
       let origin = get_origin request in
       if try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin reqd then ()
-      else dispatch_route ~router:routes ~request ~path reqd
+      else dispatch_route ~router:routes ~request ~path ~upgrade reqd
     with
     (* Re-raise cancellation so Eio structured concurrency propagates cleanly.
        Previously the catch-all swallowed Cancelled and tried to write a 500

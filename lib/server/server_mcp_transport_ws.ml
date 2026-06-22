@@ -1220,70 +1220,109 @@ let send_upgrade_pong session =
          session.id
          (Printexc.to_string exn))
 
-(** Handle an HTTP upgrade request to WebSocket.
+(** Build the MCP-over-WebSocket session handler for a freshly upgraded
+    [wsd].  Single source of truth for the MCP WebSocket session
+    protocol — session registration, SSE broadcast subscription,
+    liveness heartbeat, and frame opcode handling — shared by the
+    same-origin HTTP-upgrade path
+    ([Server_routes_http_routes_frontend]) and the standalone listener
+    ([Server_ws_standalone]).  The two paths differ only in how the
+    socket is attached (Gluten upgrade vs. raw listener), not in the
+    session protocol.  RFC-0280 S3.2.
 
-    Call this from the httpun request handler when path = "/ws".
-    Returns [Ok ()] on successful upgrade, [Error msg] on failure.
+    [on_connection_close] and [on_eof] are observability hooks invoked
+    before {!cleanup_session}.  The defaults close the close-frame
+    payload and ignore the eof error; the standalone path injects its
+    close-code diagnostic + eof summary.  Cleanup runs regardless of
+    the hook. *)
+let mcp_websocket_handler
+    ?sw
+    ?clock
+    ?(on_connection_close =
+      fun ~session_id:_ ~declared_len:_ payload -> Httpun_ws.Payload.close payload)
+    ?(on_eof = fun ~session_id:_ _error -> ())
+    ~on_message
+    ~origin_label
+    (wsd : Httpun_ws.Wsd.t)
+  : Httpun_ws.Websocket_connection.input_handlers =
+  let session_id = next_id () in
+  let session = new_session ~id:session_id ~wsd in
+  with_sessions_rw (fun () -> Hashtbl.replace sessions session_id session);
+  Transport_metrics.set_ws_sessions
+    (with_sessions_rw (fun () -> Hashtbl.length sessions));
+  (* Register as SSE external subscriber for broadcast events. *)
+  Sse.subscribe_external ~id:session_id
+    ~is_alive:(fun () -> not (is_session_closed session))
+    ~callback:(fun sse_event ->
+      if not (is_session_closed session)
+         && not (send_dashboard_or_raw_sse session sse_event)
+      then cleanup_session session_id)
+    ();
+  start_upgrade_heartbeat ?sw ?clock session_id session;
+  (* #10875: see cleanup_session — per-session lifecycle is DEBUG to
+     avoid logging amplification during WS storm (#10701). *)
+  Log.Server.debug "WebSocket session %s connected (%s)" session_id origin_label;
+  { Httpun_ws.Websocket_connection.
+    frame = (fun ~opcode ~is_fin ~len payload ->
+      match opcode with
+      | `Text | `Binary | `Continuation ->
+        read_inbound_message_frame session ~on_message ~is_fin ~len payload
+      | `Ping ->
+        send_upgrade_pong session;
+        Httpun_ws.Payload.close payload
+      | `Pong ->
+        record_pong session;
+        Httpun_ws.Payload.close payload
+      | `Connection_close ->
+        on_connection_close ~session_id ~declared_len:len payload;
+        cleanup_session session_id
+      | `Other _ ->
+        Httpun_ws.Payload.close payload)
+  ; eof = (fun ?error () ->
+      on_eof ~session_id error;
+      cleanup_session session_id)
+  }
 
-    @param reqd The httpun request descriptor.
-    @param on_message Optional callback for incoming text messages.
-      Default: log and ignore. *)
+(** Perform the HTTP/1.1 -> WebSocket upgrade and drive the resulting
+    connection.  Single source of truth for attaching an upgraded
+    socket to a [Httpun_ws.Server_connection.t]: it sends the 101 via
+    [respond_with_upgrade], then hands the connection to the Gluten
+    runtime via [upgrade].  Omitting the [upgrade] call (the
+    pre-RFC-0280 defect) left the connection undriven, so inbound frames
+    — including the client hello and protocol pongs — were never read.
+    RFC-0280 S3.1.
+
+    [handler] builds the per-connection [input_handlers] from the
+    [Wsd.t]; the MCP session ({!mcp_websocket_handler}) and the IDE LSP
+    session each supply their own. *)
+let respond_and_drive_upgrade
+    ~(upgrade : Gluten.impl -> unit)
+    ~(reqd : Httpun.Reqd.t)
+    ~(handler : Httpun_ws.Wsd.t -> Httpun_ws.Websocket_connection.input_handlers)
+  : (unit, string) result =
+  Httpun_ws.Handshake.respond_with_upgrade ~sha1 reqd (fun () ->
+    (* This callback runs after the HTTP 101 response is sent. *)
+    let ws_conn = Httpun_ws.Server_connection.create_websocket handler in
+    upgrade (Gluten.make (module Httpun_ws.Server_connection) ws_conn))
+
+(** Handle an HTTP/1.1 [GET /ws] upgrade on the main HTTP origin using
+    the shared MCP session protocol.  Requires the Gluten [upgrade]
+    capability, threaded from the route via
+    {!Http_server_eio.Router.ws_get}.  Returns [Ok ()] on a successful
+    101 + drive, [Error msg] on handshake failure.
+
+    @param on_message Callback for incoming text messages.
+      Default: ignore. *)
 let upgrade_connection
     ?sw
     ?clock
     ?(on_message = fun _session_id _text -> ())
+    ~(upgrade : Gluten.impl -> unit)
     (reqd : Httpun.Reqd.t)
   : (unit, string) result =
-  let session_id = next_id () in
-  Httpun_ws.Handshake.respond_with_upgrade ~sha1 reqd (fun () ->
-    (* This callback runs after the HTTP 101 response is sent.
-       We now have a live WebSocket connection via [Wsd.t]. *)
-    let ws_conn =
-      Httpun_ws.Server_connection.create_websocket
-        (fun wsd ->
-          let session = new_session ~id:session_id ~wsd in
-          with_sessions_rw (fun () ->
-            Hashtbl.replace sessions session_id session);
-          Transport_metrics.set_ws_sessions
-            (with_sessions_rw (fun () -> Hashtbl.length sessions));
-          (* Register as SSE external subscriber for broadcast events *)
-          Sse.subscribe_external ~id:session_id
-            ~is_alive:(fun () -> not (is_session_closed session))
-            ~callback:(fun sse_event ->
-              if not (is_session_closed session)
-                 && not (send_dashboard_or_raw_sse session sse_event)
-              then
-                cleanup_session session_id)
-            ();
-          start_upgrade_heartbeat ?sw ?clock session_id session;
-          (* #10875: see cleanup_session — per-session lifecycle is DEBUG
-             to avoid logging amplification during WS storm (#10701). *)
-          Log.Server.debug "WebSocket session %s connected (same-origin /ws)" session_id;
-          { Httpun_ws.Websocket_connection.
-            frame = (fun ~opcode ~is_fin ~len payload ->
-              match opcode with
-              | `Text | `Binary | `Continuation ->
-                read_inbound_message_frame session ~on_message ~is_fin ~len
-                  payload
-              | `Ping ->
-                send_upgrade_pong session;
-                Httpun_ws.Payload.close payload
-              | `Pong ->
-                record_pong session;
-                Httpun_ws.Payload.close payload
-              | `Connection_close ->
-                cleanup_session session_id;
-                Httpun_ws.Payload.close payload
-              | `Other _ ->
-                Httpun_ws.Payload.close payload
-            );
-            eof = (fun ?error:_ () ->
-              cleanup_session session_id)
-          })
-    in
-    (* The ws_conn needs to be driven by the I/O loop.
-       httpun-ws handles this internally when using respond_with_upgrade. *)
-    ignore ws_conn)
+  respond_and_drive_upgrade ~upgrade ~reqd
+    ~handler:
+      (mcp_websocket_handler ?sw ?clock ~on_message ~origin_label:"same-origin /ws")
 
 (** Outcome of {!send_to_session_result}.  [Sent] is the happy path;
     [Session_gone] is the expected case where the session has already

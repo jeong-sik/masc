@@ -88,7 +88,7 @@ let websocket_upgrade_unavailable_reason () =
   then Some "WebSocket transport not ready"
   else None
 
-let websocket_handler ?sw ?clock request reqd =
+let websocket_handler ?sw ?clock ~upgrade request reqd =
   if is_websocket_upgrade_request request then
     match websocket_upgrade_unavailable_reason () with
     | None ->
@@ -97,6 +97,7 @@ let websocket_handler ?sw ?clock request reqd =
            ?sw
            ?clock
            ~on_message:Server_mcp_transport_ws.dispatch_inbound_message
+           ~upgrade
            reqd
        with
        | Ok () -> ()
@@ -136,7 +137,7 @@ let add_routes ?sw ?clock ~port ~host router =
          with_public_read (fun _state req reqd ->
          Http.Response.json_value (Runtime.agent_card_json req) reqd)
          request reqd)
-  |> Http.Router.get "/ws" (websocket_handler ?sw ?clock)
+  |> Http.Router.ws_get "/ws" (websocket_handler ?sw ?clock)
   (* RFC-0217 S4-2 — Otel_metric_store scrape endpoint removed; metrics now
      export via OTLP push (Otel_metrics observable). *)
   |> Http.Router.get "/ag-ui/events" handle_ag_ui_events

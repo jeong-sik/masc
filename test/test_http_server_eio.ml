@@ -139,6 +139,18 @@ let test_frontend_transport_routes_present () =
       (Router.routes routes)
   in
   Alcotest.(check bool) "GET /ws route" true (has_route `GET "/ws");
+  (* RFC-0280: /ws must be a typed WebSocket-upgrade route ([Router.Ws]),
+     not a plain route.  Only a Ws route receives the Gluten [upgrade]
+     capability and thus actually drives the post-101 connection.  A
+     regression to [Router.Plain] (or to a main_eio special-case that
+     bypasses the router) silently reintroduces the undriven-socket
+     flicker bug — this assertion guards the consolidation. *)
+  (match Router.resolve routes (Httpun.Request.create `GET "/ws") with
+   | `Matched route ->
+     (match route.handler with
+      | Router.Ws _ -> ()
+      | Router.Plain _ -> Alcotest.fail "/ws must be a Router.Ws route, not Plain")
+   | `Method_not_allowed | `Not_found -> Alcotest.fail "/ws route must resolve");
   Alcotest.(check bool)
     "GET /api/v1/voice/config route"
     true
@@ -148,6 +160,33 @@ let test_frontend_transport_routes_present () =
     "POST /webrtc/answer route"
     true
     (has_route `POST "/webrtc/answer")
+;;
+
+(* RFC-0280: typed WebSocket-upgrade routes.  [ws_get] registers a
+   [Router.Ws] route (carrying the Gluten upgrade capability); [get]
+   registers a [Router.Plain] route.  The variant is what lets
+   [Router.dispatch] thread [upgrade] to WS routes and reject WS routes
+   on non-upgrade transports with 426. *)
+let test_router_ws_get_registers_ws_route () =
+  let handler ~upgrade:_ _req _reqd = () in
+  let routes = Router.create () |> Router.ws_get "/ws" handler in
+  match Router.resolve routes (Httpun.Request.create `GET "/ws") with
+  | `Matched route ->
+    (match route.handler with
+     | Router.Ws _ -> ()
+     | Router.Plain _ -> Alcotest.fail "ws_get must register a Router.Ws route")
+  | `Method_not_allowed | `Not_found -> Alcotest.fail "ws_get route must resolve"
+;;
+
+let test_router_get_registers_plain_route () =
+  let handler _req _reqd = () in
+  let routes = Router.create () |> Router.get "/plain" handler in
+  match Router.resolve routes (Httpun.Request.create `GET "/plain") with
+  | `Matched route ->
+    (match route.handler with
+     | Router.Plain _ -> ()
+     | Router.Ws _ -> Alcotest.fail "get must register a Router.Plain route")
+  | `Method_not_allowed | `Not_found -> Alcotest.fail "get route must resolve"
 ;;
 
 let with_env name value_opt f =
@@ -458,6 +497,8 @@ let router_tests =
     , `Quick
     , test_router_method_index_preserves_exact_405 )
   ; "frontend transport routes present", `Quick, test_frontend_transport_routes_present
+  ; "ws_get registers a Ws route", `Quick, test_router_ws_get_registers_ws_route
+  ; "get registers a Plain route", `Quick, test_router_get_registers_plain_route
   ; ( "frontend websocket upgrade waits for dispatcher"
     , `Quick
     , test_frontend_websocket_upgrade_waits_for_dispatcher )

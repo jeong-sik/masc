@@ -224,138 +224,28 @@ let standalone_ws_eof_summary = function
   | Some (`Exn exn) -> Printf.sprintf "error=%s" (Printexc.to_string exn)
 ;;
 
-(** WebSocket handler factory.  [~sw] is the per-connection switch so heartbeat
-    fibers exit with the connection instead of lingering on the server switch. *)
+(** WebSocket handler factory for the standalone listener.  Delegates to
+    the shared MCP session protocol
+    ({!Server_mcp_transport_ws.mcp_websocket_handler}, RFC-0280 S3.2) —
+    session registration, SSE subscription, liveness heartbeat, and frame
+    opcode handling — and injects the standalone close-code diagnostic
+    and eof summary as observability hooks.  [~sw] is the per-connection
+    switch so the heartbeat fiber exits with the connection. *)
 let make_websocket_handler ~sw ~clock ~on_message _client_addr (wsd : Ws.Wsd.t)
   : Ws.Websocket_connection.input_handlers
   =
-  let session_id = Server_mcp_transport_ws.next_id () in
-  let session = Server_mcp_transport_ws.new_session ~id:session_id ~wsd in
-  Server_mcp_transport_ws.with_sessions_rw (fun () ->
-    Hashtbl.replace Server_mcp_transport_ws.sessions session_id session);
-  Transport_metrics.set_ws_sessions
-    (Server_mcp_transport_ws.with_sessions_rw (fun () ->
-       Hashtbl.length Server_mcp_transport_ws.sessions));
-  (* Register as SSE external subscriber for broadcast events *)
-  Sse.subscribe_external
-    ~id:session_id
-    ~is_alive:(fun () -> not (Server_mcp_transport_ws.is_session_closed session))
-    ~callback:(fun sse_event ->
-      if
-        (not (Server_mcp_transport_ws.is_session_closed session))
-        && not (Server_mcp_transport_ws.send_dashboard_or_raw_sse session sse_event)
-      then (
-        Log.Server.debug
-          "[ws-standalone] session %s sse-forward send failed; cleaning up"
-          session_id;
-        Server_mcp_transport_ws.cleanup_session session_id))
-    ();
-  (* Heartbeat fiber: ping every [heartbeat_interval_s] and close the session
-     once it has gone [threshold] whole intervals with no pong, via the shared
-     Server_mcp_transport_ws.heartbeat_should_close (#21509). *)
-  let threshold = missed_pong_threshold () in
-  Eio.Fiber.fork ~sw (fun () ->
-    let send_ping () =
-      Eio_guard.with_mutex session.write_mutex (fun () ->
-        if not (Server_mcp_transport_ws.is_session_closed session) then
-          Ws.Wsd.send_ping session.wsd)
-    in
-    let rec loop () =
-      Eio.Time.sleep clock heartbeat_interval_s;
-      if Server_mcp_transport_ws.is_session_closed session
-      then ()
-      else begin
-        if
-          (* NDT-OK: wall-clock compared for liveness only, not output *)
-          Server_mcp_transport_ws.heartbeat_should_close
-            ~now:(Unix.gettimeofday ())
-            ~last_pong_at:(Atomic.get session.last_pong_at)
-            ~threshold
-            ~interval_s:heartbeat_interval_s
-        then begin
-          Log.Server.debug
-            "[ws-standalone] session %s pong timeout (no pong in %d intervals); closing"
-            session_id
-            threshold;
-          Server_mcp_transport_ws.cleanup_session session_id
-        end
-        else begin
-          let send_failed = ref false in
-          (try send_ping () with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-             send_failed := true;
-             (match Http_server_eio.Late_response.classify_write_failure exn with
-              | Some _ ->
-                Log.Server.debug
-                  "[ws-standalone] session %s heartbeat skipped (writer closed during \
-                   cancel race)"
-                  session_id
-              | None ->
-                Log.Server.warn
-                  "[ws-standalone] session %s heartbeat send_ping failed: %s"
-                  session_id
-                  (Printexc.to_string exn)));
-          if !send_failed
-          then
-            (* Drop the half-open session immediately so the loop does not
-               spin until the WSD observes the broken socket. *)
-            Server_mcp_transport_ws.cleanup_session session_id
-          else loop ()
-        end
-      end
-    in
-    loop ());
-  (* #10875: WS storm (#10701) emits ~190k connect/close lines/day at INFO,
-     drowning real signal in noise. Per-session lifecycle is DEBUG; aggregate
-     state surfaces via Transport_metrics.set_ws_sessions and shutdown_hooks
-     summary INFO. *)
-  Log.Server.debug "WebSocket session %s connected (standalone port)" session_id;
-  { Ws.Websocket_connection.frame =
-      (fun ~opcode ~is_fin ~len payload ->
-        match opcode with
-        | `Text | `Binary | `Continuation ->
-          Server_mcp_transport_ws.read_inbound_message_frame
-            session
-            ~on_message
-            ~is_fin
-            ~len
-            payload
-        | `Ping ->
-          (* Serialize the pong through the write mutex and re-check closure
-             under the lock to avoid racing cleanup/heartbeat.  Recognized
-             "writer closed during cancel" races are downgraded to debug. *)
-          (try
-             Eio_guard.with_mutex session.write_mutex (fun () ->
-               if not (Server_mcp_transport_ws.is_session_closed session) then
-                 Ws.Wsd.send_pong session.wsd)
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-             (match Http_server_eio.Late_response.classify_write_failure exn with
-              | Some _ ->
-                Log.Server.debug
-                  "[ws-standalone] send_pong skipped (writer closed during cancel race)"
-              | None ->
-                Log.Server.warn
-                  "[ws-standalone] send_pong failed: %s"
-                  (Printexc.to_string exn)));
-          Ws.Payload.close payload
-        | `Pong ->
-          Server_mcp_transport_ws.record_pong session;
-          Ws.Payload.close payload
-        | `Connection_close ->
-          log_ws_client_close_payload ~session_id ~declared_len:len payload;
-          Server_mcp_transport_ws.cleanup_session session_id
-        | `Other _ -> Ws.Payload.close payload)
-  ; eof =
-      (fun ?error () ->
-        Log.Server.debug
-          "[ws-standalone] session %s eof (%s)"
-          session_id
-          (standalone_ws_eof_summary error);
-        Server_mcp_transport_ws.cleanup_session session_id)
-  }
+  Server_mcp_transport_ws.mcp_websocket_handler
+    ~sw
+    ~clock
+    ~on_connection_close:log_ws_client_close_payload
+    ~on_eof:(fun ~session_id error ->
+      Log.Server.debug
+        "[ws-standalone] session %s eof (%s)"
+        session_id
+        (standalone_ws_eof_summary error))
+    ~on_message
+    ~origin_label:"standalone port"
+    wsd
 ;;
 
 (** Start the standalone WebSocket server.  Does nothing if

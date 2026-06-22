@@ -102,7 +102,7 @@
      --sp-2/--sp-4 are 6px/10px on the 2px-base v2 scale and would shrink the
      subline gutters; pin the prototype literals. */
   padding: 0 16px 12px;
-  border-bottom: 1px solid var(--color-border-muted);
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .kti-chip {
@@ -135,7 +135,7 @@
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 1px;
-  background: var(--color-border-muted);
+  background: var(--color-border-subtle);
   border-bottom: 1px solid var(--color-border-default);
 }
 
@@ -180,7 +180,7 @@
      --sp-3/--sp-4 are 8px/10px on the 2px-base v2 scale and would shrink the
      token-economics band; pin the prototype literals. */
   padding: 13px 16px;
-  border-bottom: 1px solid var(--color-border-muted);
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .kti-tok-top {
@@ -209,7 +209,7 @@
   border-radius: var(--radius-pill);
   overflow: hidden;
   background: var(--color-bg-page);
-  border: 1px solid var(--color-border-muted);
+  border: 1px solid var(--color-border-subtle);
 }
 
 .kti-tok-bar > span {
@@ -353,7 +353,7 @@
   gap: var(--sp-3);
   align-items: center;
   padding: 6px 0;
-  border-top: 1px solid var(--color-border-muted);
+  border-top: 1px solid var(--color-border-subtle);
 }
 
 .kti-wf-row:first-child {
@@ -495,7 +495,7 @@
 
 /* ── Code / context card ── */
 .kti-code {
-  border: 1px solid var(--color-border-muted);
+  border: 1px solid var(--color-border-subtle);
   /* prototype .ti-code (inspector.css:66): --radius-sm (4px). */
   border-radius: var(--radius-sm);
   overflow: hidden;
@@ -509,7 +509,7 @@
   gap: 8px;
   padding: 6px 10px;
   background: var(--color-bg-hover);
-  border-bottom: 1px solid var(--color-border-muted);
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .kti-code-h .cap {
@@ -606,7 +606,7 @@
 
 /* ── Role-tinted transcript message ── */
 .kti-msg {
-  border: 1px solid var(--color-border-muted);
+  border: 1px solid var(--color-border-subtle);
   /* prototype .ti-msg (inspector.css:89): --radius-sm (4px). */
   border-radius: var(--radius-sm);
   overflow: hidden;
@@ -618,7 +618,7 @@
   gap: 8px;
   padding: 8px 12px;
   background: var(--color-bg-hover);
-  border-bottom: 1px solid var(--color-border-muted);
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .kti-msg-role {
@@ -688,7 +688,7 @@
 
 /* ── Context section card ── */
 .kti-ctx-card {
-  border: 1px solid var(--color-border-muted);
+  border: 1px solid var(--color-border-subtle);
   /* prototype .ti-ctx-card (inspector.css:108): --radius-sm (4px). */
   border-radius: var(--radius-sm);
   overflow: hidden;
@@ -700,7 +700,7 @@
   gap: 8px;
   padding: 8px 12px;
   background: var(--color-bg-hover);
-  border-bottom: 1px solid var(--color-border-muted);
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .kti-ctx-h .t {
@@ -758,8 +758,8 @@
   display: grid;
   grid-template-columns: 120px 1fr;
   gap: 1px;
-  background: var(--color-border-muted);
-  border: 1px solid var(--color-border-muted);
+  background: var(--color-border-subtle);
+  border: 1px solid var(--color-border-subtle);
   border-radius: var(--r-1);
   overflow: hidden;
 }

@@ -44,7 +44,7 @@ type pending_approval =
   ; selected_model : string option
   ; disposition : string option
   ; disposition_reason : string option
-  ; audit_base_path : string option
+  ; audit_base_path : string
   ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
   ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
   }
@@ -95,10 +95,10 @@ val approval_audit_decision_to_string : approval_audit_decision -> string
 (** {1 Rule store (persisted)} *)
 
 (** List every persisted rule for the given [base_path]. *)
-val list_rules : ?base_path:string -> unit -> approval_rule list
+val list_rules : base_path:string -> unit -> approval_rule list
 
 (** Render the persisted rules as a dashboard-facing JSON document. *)
-val list_rules_dashboard_json : ?base_path:string -> unit -> Yojson.Safe.t
+val list_rules_dashboard_json : base_path:string -> unit -> Yojson.Safe.t
 
 (** Per-keeper policy summary projection consumed by the dashboard. *)
 val policy_summary_json :
@@ -110,7 +110,7 @@ val policy_summary_json :
     [(keeper_name, tool_name, request_fingerprint)] key. Save errors
     are logged but not surfaced to the caller. *)
 val upsert_rule :
-  ?base_path:string ->
+  base_path:string ->
   keeper_name:string ->
   tool_name:string ->
   input:Yojson.Safe.t ->
@@ -125,12 +125,12 @@ val upsert_rule :
 
 (** Delete the rule whose [id] matches. *)
 val delete_rule :
-  ?base_path:string -> id:string -> unit -> (approval_rule, string) result
+  base_path:string -> id:string -> unit -> (approval_rule, string) result
 
 (** Find a rule that satisfies the given keeper / tool / input
     request, updating [last_matched_at] and [match_count] on hit. *)
 val find_matching_rule :
-  ?base_path:string ->
+  base_path:string ->
   keeper_name:string ->
   tool_name:string ->
   input:Yojson.Safe.t ->
@@ -144,7 +144,7 @@ val find_matching_rule :
 (** {1 Audit log} *)
 
 val audit_approval_event :
-  ?base_path:string ->
+  base_path:string ->
   event_type:string ->
   id:string ->
   keeper_name:string ->
@@ -167,12 +167,12 @@ val audit_approval_event :
   unit
 
 val audit_rule_event :
-  ?base_path:string -> event_type:string -> approval_rule -> unit
+  base_path:string -> event_type:string -> approval_rule -> unit
 
 (** Read recent audit entries (default last 20), optionally filtered
     by keeper. *)
 val read_recent_audit :
-  ?base_path:string ->
+  base_path:string ->
   ?keeper_name:string ->
   ?n:int ->
   unit ->
@@ -199,7 +199,7 @@ val submit_and_await :
   tool_name:string ->
   input:Yojson.Safe.t ->
   risk_level:risk_level ->
-  ?base_path:string ->
+  base_path:string ->
   ?turn_id:int ->
   ?task_id:string ->
   ?goal_id:string ->
@@ -225,7 +225,7 @@ val submit_pending :
   tool_name:string ->
   input:Yojson.Safe.t ->
   risk_level:risk_level ->
-  ?base_path:string ->
+  base_path:string ->
   ?turn_id:int ->
   ?task_id:string ->
   ?goal_id:string ->
@@ -247,7 +247,7 @@ val submit_pending :
     as a rule. Returns [Not_found] when [id] is absent or
     [Already_resolved] on concurrent-resolve race. *)
 val resolve_with_policy :
-  ?base_path:string ->
+  base_path:string ->
   id:string ->
   decision:Agent_sdk.Hooks.approval_decision ->
   ?remember_rule:bool ->

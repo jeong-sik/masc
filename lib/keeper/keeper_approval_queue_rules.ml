@@ -100,12 +100,7 @@ let mutex_protect_allow_reentrant mutex f =
 
 let with_rules_lock f = mutex_protect_allow_reentrant rules_mu f
 
-let rules_path ?base_path () =
-  let base_path =
-    match base_path with
-    | Some base_path -> base_path
-    | None -> Env_config_core.base_path ()
-  in
+let rules_path ~base_path () =
   Filename.concat (Workspace_utils.masc_dir_from_base_path ~base_path) "approval-rules.json"
 ;;
 
@@ -172,26 +167,26 @@ let backend_of_runtime_context ?backend runtime_contract =
   | None -> backend_of_runtime_contract runtime_contract
 ;;
 
-let load_rules_unlocked ?base_path () =
-  match Safe_ops.read_json_file_safe (rules_path ?base_path ()) with
+let load_rules_unlocked ~base_path () =
+  match Safe_ops.read_json_file_safe (rules_path ~base_path ()) with
   | Ok (`List entries) -> entries |> List.filter_map approval_rule_of_yojson
   | _ -> []
 ;;
 
-let save_rules_unlocked ?base_path rules : (unit, string) result =
-  let path = rules_path ?base_path () in
+let save_rules_unlocked ~base_path rules : (unit, string) result =
+  let path = rules_path ~base_path () in
   Fs_compat.mkdir_p (Filename.dirname path);
   let json = `List (List.map approval_rule_to_yojson rules) in
   Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json)
 ;;
 
-let list_rules ?base_path () =
-  with_rules_lock (fun () -> load_rules_unlocked ?base_path ())
+let list_rules ~base_path () =
+  with_rules_lock (fun () -> load_rules_unlocked ~base_path ())
 ;;
 
-let list_rules_dashboard_json ?base_path () =
+let list_rules_dashboard_json ~base_path () =
   let rules =
-    list_rules ?base_path ()
+    list_rules ~base_path ()
     |> List.sort (fun left right -> Float.compare right.created_at left.created_at)
   in
   `List (List.map approval_rule_to_yojson rules)
@@ -222,7 +217,7 @@ let rule_identity_matches left right =
 ;;
 
 let upsert_rule
-      ?base_path
+      ~base_path
       ~keeper_name
       ~tool_name
       ~input
@@ -235,7 +230,7 @@ let upsert_rule
       ()
   =
   with_rules_lock (fun () ->
-    let rules = load_rules_unlocked ?base_path () in
+    let rules = load_rules_unlocked ~base_path () in
     let request_fingerprint = request_fingerprint input in
     let candidate =
       { id = make_generated_id "rule"
@@ -256,7 +251,7 @@ let upsert_rule
     match List.find_opt (fun rule -> rule_identity_matches rule candidate) rules with
     | Some existing -> existing, false
     | None ->
-      (match save_rules_unlocked ?base_path (candidate :: rules) with
+      (match save_rules_unlocked ~base_path (candidate :: rules) with
        | Ok () -> ()
        | Error msg ->
          Otel_metric_store.inc_counter
@@ -267,20 +262,20 @@ let upsert_rule
       candidate, true)
 ;;
 
-let delete_rule ?base_path ~id () =
+let delete_rule ~base_path ~id () =
   with_rules_lock (fun () ->
-    let rules = load_rules_unlocked ?base_path () in
+    let rules = load_rules_unlocked ~base_path () in
     match List.find_opt (fun rule -> String.equal rule.id id) rules with
     | None -> Error (Printf.sprintf "approval rule %s not found" id)
     | Some deleted ->
       let remaining = List.filter (fun rule -> not (String.equal rule.id id)) rules in
-      (match save_rules_unlocked ?base_path remaining with
+      (match save_rules_unlocked ~base_path remaining with
        | Ok () -> Ok deleted
        | Error msg -> Error msg))
 ;;
 
 let find_matching_rule
-      ?base_path
+      ~base_path
       ~keeper_name
       ~tool_name
       ~input
@@ -291,7 +286,7 @@ let find_matching_rule
       ()
   =
   with_rules_lock (fun () ->
-    let rules = load_rules_unlocked ?base_path () in
+    let rules = load_rules_unlocked ~base_path () in
     let request_fingerprint = request_fingerprint input in
     let sandbox_profile = sandbox_profile_of_runtime_context ?sandbox_profile runtime_contract in
     let backend = backend_of_runtime_context ?backend runtime_contract in
@@ -321,7 +316,7 @@ let find_matching_rule
              else current)
           rules
       in
-      (match save_rules_unlocked ?base_path updated_rules with
+      (match save_rules_unlocked ~base_path updated_rules with
        | Ok () -> ()
        | Error msg ->
          Otel_metric_store.inc_counter

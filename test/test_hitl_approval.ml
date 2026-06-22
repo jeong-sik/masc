@@ -271,6 +271,10 @@ let test_enterprise_blocks_high () =
 let test_approval_queue_submit_and_resolve () =
   Eio_main.run @@ fun _env ->
   (* Simulate: agent fiber submits, operator fiber resolves *)
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
   Eio.Switch.run @@ fun sw ->
   let result = ref None in
   (* Agent fiber: submit and await (will block until resolved) *)
@@ -281,6 +285,7 @@ let test_approval_queue_submit_and_resolve () =
         ~tool_name:"tool_edit_file"
         ~input:(`Assoc [("path", `String "/dangerous")])
         ~risk_level:AQ.Critical
+        ~base_path
         ()
     in
     result := Some decision
@@ -316,10 +321,14 @@ let test_approval_queue_submit_and_resolve () =
     Alcotest.fail ("expected Approve, got Reject: " ^ r)
   | Some (Agent_sdk.Hooks.Edit _) ->
     Alcotest.fail "expected Approve, got Edit"
-  | None -> Alcotest.fail "agent fiber did not resume"
+  | None -> Alcotest.fail "agent fiber did not resume")
 
 let test_approval_queue_reject () =
   Eio_main.run @@ fun _env ->
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
   Eio.Switch.run @@ fun sw ->
   let result = ref None in
   Eio.Fiber.fork ~sw (fun () ->
@@ -329,6 +338,7 @@ let test_approval_queue_reject () =
         ~tool_name:"masc_force_reset"
         ~input:(`Assoc [])
         ~risk_level:AQ.Critical
+        ~base_path
         ()
     in
     result := Some decision
@@ -350,10 +360,14 @@ let test_approval_queue_reject () =
   | Some (Agent_sdk.Hooks.Reject reason) ->
     Alcotest.(check bool) "reason contains text" true
       (String.length reason > 0)
-  | _ -> Alcotest.fail "expected Reject"
+  | _ -> Alcotest.fail "expected Reject")
 
 let test_approval_queue_expire_stale () =
   Eio_main.run @@ fun _env ->
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
   Eio.Switch.run @@ fun sw ->
   let result = ref None in
   Eio.Fiber.fork ~sw (fun () ->
@@ -363,6 +377,7 @@ let test_approval_queue_expire_stale () =
         ~tool_name:"masc_dangerous_tool"
         ~input:(`Assoc [])
         ~risk_level:AQ.High
+        ~base_path
         ()
     in
     result := Some decision
@@ -376,7 +391,7 @@ let test_approval_queue_expire_stale () =
   | Some (Agent_sdk.Hooks.Reject reason) ->
     Alcotest.(check bool) "timeout reason" true
       (String.starts_with ~prefix:"approval timed out" reason)
-  | _ -> Alcotest.fail "expected Reject from timeout"
+  | _ -> Alcotest.fail "expected Reject from timeout")
 
 let test_approval_queue_expire_skips_critical () =
   (* [Critical] entries originate from indefinite-wait operator gates
@@ -384,12 +399,17 @@ let test_approval_queue_expire_skips_critical () =
      create a 30-min expire / re-enqueue cycle and silently push the
      keeper into a permanent paused state. The janitor must skip them. *)
   Eio_main.run @@ fun _env ->
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
   let resolution = ref None in
   let id =
     AQ.submit_pending
       ~keeper_name:"test-keeper-critical"
       ~tool_name:"keeper_continue_after_reconcile"
       ~input:(`Assoc [])
+      ~base_path
       ~risk_level:AQ.Critical
       ~on_resolution:(fun decision -> resolution := Some decision)
       ()
@@ -406,11 +426,15 @@ let test_approval_queue_expire_skips_critical () =
      | Some _ -> Some "resolved");
   (* Cleanup: manually resolve so subsequent tests don't see stray state. *)
   match AQ.resolve ~id ~decision:(Agent_sdk.Hooks.Reject "test cleanup") with
-  | Ok () | Error _ -> ()
+  | Ok () | Error _ -> ())
 
 let test_submit_and_await_clock_timeout_skips_critical () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
   Eio.Switch.run @@ fun sw ->
   let keeper_name = "critical-clock-timeout-test" in
   let result = ref None in
@@ -421,6 +445,7 @@ let test_submit_and_await_clock_timeout_skips_critical () =
         ~tool_name:"keeper_continue_after_reconcile"
         ~input:(`Assoc [])
         ~risk_level:AQ.Critical
+        ~base_path
         ~clock
         ~timeout_s:0.01
         ()
@@ -447,11 +472,15 @@ let test_submit_and_await_clock_timeout_skips_critical () =
   | Some decision ->
       Alcotest.fail
         ("expected Approve, got " ^ AQ.approval_decision_to_string decision)
-  | None -> Alcotest.fail "Critical approval did not resume"
+  | None -> Alcotest.fail "Critical approval did not resume")
 
 let test_submit_and_await_clock_returns_manual_decision () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
   Eio.Switch.run @@ fun sw ->
   let keeper_name = "medium-clock-manual-test" in
   let result = ref None in
@@ -462,6 +491,7 @@ let test_submit_and_await_clock_returns_manual_decision () =
         ~tool_name:"tool_search_files"
         ~input:(`Assoc [ ("op", `String "write") ])
         ~risk_level:AQ.Medium
+        ~base_path
         ~clock
         ~timeout_s:1.0
         ()
@@ -483,7 +513,7 @@ let test_submit_and_await_clock_returns_manual_decision () =
   | Some decision ->
       Alcotest.fail
         ("expected Approve, got " ^ AQ.approval_decision_to_string decision)
-  | None -> Alcotest.fail "manual approval did not resume"
+  | None -> Alcotest.fail "manual approval did not resume")
 
 let test_approval_resolve_nonexistent () =
   Eio_main.run @@ fun _env ->
@@ -499,6 +529,10 @@ let test_approval_queue_cancel_cleans_up () =
   Eio_main.run @@ fun _env ->
   (* Simulate: agent fiber is cancelled (Switch closes) while awaiting.
      The pending entry must be cleaned up from the hashtbl. (#5949) *)
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
   let initial_count = AQ.pending_count () in
   (try
      Eio.Switch.run @@ fun sw ->
@@ -509,6 +543,7 @@ let test_approval_queue_cancel_cleans_up () =
            ~tool_name:"masc_dangerous"
            ~input:(`Assoc [])
            ~risk_level:AQ.Critical
+           ~base_path
            ()
        in
        ());
@@ -518,7 +553,7 @@ let test_approval_queue_cancel_cleans_up () =
    with Failure _ -> ());
   (* After cancellation, the pending entry should be cleaned up *)
   let final_count = AQ.pending_count () in
-  Alcotest.(check int) "no orphan entries" initial_count final_count
+  Alcotest.(check int) "no orphan entries" initial_count final_count)
 
 let test_approval_queue_cancel_records_terminal_audit () =
   Eio_main.run @@ fun _env ->
@@ -560,6 +595,10 @@ let test_approval_queue_cancel_records_terminal_audit () =
 
 let test_background_pending_callback_and_keeper_lookup () =
   Eio_main.run @@ fun _env ->
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
   let initial_count = AQ.pending_count () in
   let callback_result = ref None in
   let id =
@@ -568,6 +607,7 @@ let test_background_pending_callback_and_keeper_lookup () =
       ~tool_name:"keeper_continue_after_partial_commit"
       ~input:(`Assoc [("kind", `String "continue_gate_required")])
       ~risk_level:AQ.Critical
+      ~base_path
       ~on_resolution:(fun decision -> callback_result := Some decision)
       ()
   in
@@ -585,10 +625,14 @@ let test_background_pending_callback_and_keeper_lookup () =
   match !callback_result with
   | Some Agent_sdk.Hooks.Approve -> ()
   | Some _ -> Alcotest.fail "expected approve callback"
-  | None -> Alcotest.fail "expected callback to fire"
+  | None -> Alcotest.fail "expected callback to fire")
 
 let test_background_pending_reuses_existing_entry () =
   Eio_main.run @@ fun _env ->
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
   let initial_count = AQ.pending_count () in
   let first_callback = ref None in
   let second_callback = ref None in
@@ -598,6 +642,7 @@ let test_background_pending_reuses_existing_entry () =
       ~tool_name:"keeper_continue_after_partial_commit"
       ~input:(`Assoc [("kind", `String "continue_gate_required")])
       ~risk_level:AQ.Critical
+      ~base_path
       ~on_resolution:(fun decision -> first_callback := Some decision)
       ()
   in
@@ -608,6 +653,7 @@ let test_background_pending_reuses_existing_entry () =
       ~tool_name:"keeper_continue_after_partial_commit"
       ~input:(`Assoc [("kind", `String "continue_gate_required")])
       ~risk_level:AQ.Critical
+      ~base_path
       ~on_resolution:(fun decision -> second_callback := Some decision)
       ()
   in
@@ -622,9 +668,14 @@ let test_background_pending_reuses_existing_entry () =
   Alcotest.(check bool) "first callback fired" true
     (match !first_callback with Some Agent_sdk.Hooks.Approve -> true | _ -> false);
   Alcotest.(check bool) "second callback not attached to duplicate submit" true
-    (Option.is_none !second_callback)
+    (Option.is_none !second_callback))
 
 let test_background_pending_distinct_inputs_do_not_reuse_entry () =
+  Eio_main.run @@ fun _env ->
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
   let initial_count = AQ.pending_count () in
   let callback_result = ref [] in
   let id1 =
@@ -637,6 +688,7 @@ let test_background_pending_distinct_inputs_do_not_reuse_entry () =
           ; "argv", `List [ `String "status"; `String "--short" ]
           ])
       ~risk_level:AQ.Medium
+      ~base_path
       ~on_resolution:(fun decision -> callback_result := decision :: !callback_result)
       ()
   in
@@ -650,6 +702,7 @@ let test_background_pending_distinct_inputs_do_not_reuse_entry () =
           ; "argv", `List [ `String "log"; `String "--oneline"; `String "-1" ]
           ])
       ~risk_level:AQ.High
+      ~base_path
       ~on_resolution:(fun decision -> callback_result := decision :: !callback_result)
       ()
   in
@@ -659,10 +712,14 @@ let test_background_pending_distinct_inputs_do_not_reuse_entry () =
   ignore (AQ.resolve ~id:id1 ~decision:Agent_sdk.Hooks.Approve);
   ignore (AQ.resolve ~id:id2 ~decision:(Agent_sdk.Hooks.Reject "cleanup"));
   Alcotest.(check int) "cleanup restores count"
-    initial_count (AQ.pending_count ())
+    initial_count (AQ.pending_count ()))
 
 let test_approval_queue_get_pending_detail () =
   Eio_main.run @@ fun _env ->
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
   let initial_count = AQ.pending_count () in
   let callback_result = ref None in
   let input =
@@ -676,6 +733,7 @@ let test_approval_queue_get_pending_detail () =
     AQ.submit_pending
       ~keeper_name:"detail-keeper"
       ~tool_name:"tool_edit_file"
+      ~base_path
       ~input
       ~risk_level:AQ.Critical
       ~turn_id:7
@@ -727,9 +785,13 @@ let test_approval_queue_get_pending_detail () =
   Alcotest.(check bool) "callback fired" true
     (match !callback_result with Some Agent_sdk.Hooks.Approve -> true | _ -> false);
   Alcotest.(check int) "entry removed"
-    initial_count (AQ.pending_count ())
+    initial_count (AQ.pending_count ()))
 
 let test_approval_queue_keeps_sandbox_backend_out_of_runtime_contract () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
   let runtime_contract =
     Masc.Keeper_runtime_contract.runtime_contract_json_from_fields
       ~keeper_name:"redacted-contract-keeper"
@@ -755,6 +817,7 @@ let test_approval_queue_keeps_sandbox_backend_out_of_runtime_contract () =
       ~sandbox_profile:"docker"
       ~backend:"docker"
       ~runtime_contract
+      ~base_path
       ~on_resolution:(fun _ -> ())
       ()
   in
@@ -778,7 +841,7 @@ let test_approval_queue_keeps_sandbox_backend_out_of_runtime_contract () =
       Alcotest.(check bool)
         "detail runtime_contract keeps sandbox_profile redacted"
         false
-        (has_assoc_key "sandbox_profile" detail_contract))
+        (has_assoc_key "sandbox_profile" detail_contract)))
 
 let test_resolve_with_policy_remembers_medium_allow () =
   with_eio_base_path @@ fun base_path ->

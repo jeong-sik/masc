@@ -73,7 +73,12 @@ body.rail-resizing .v2-body { transition: none; }
 
 /* ════ OVERVIEW ════ */
 .ov { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg-deep); }
-.ov-scroll { flex: 1; overflow-y: auto; padding: var(--pad-surface); max-width: 1280px; width: 100%; margin: 0 auto; }
+/* OVERRIDE (intentional divergence from prototype): full-width, left-aligned.
+   Overview and Work share .ov-scroll. The prototype centers it in a 1280px
+   column; per design direction the dashboard fills the content area to match
+   the other surfaces (board/monitoring/command/lab/ide). Do not re-add
+   max-width / margin:auto on a prototype re-sync. See .cp-inner below. */
+.ov-scroll { flex: 1; overflow-y: auto; padding: var(--pad-surface); width: 100%; }
 .ov-head { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 18px; }
 .ov-head h1 { font-family: var(--font-display); font-weight: 500; font-size: 22px; color: var(--text-bright); margin: 0; }
 .ov-sub { margin-top: 5px; font-size: 12px; color: var(--text-dim); }
@@ -229,7 +234,9 @@ body.rail-resizing .v2-body { transition: none; }
 .cp-main { min-height: 0; overflow-y: auto; padding: var(--pad-surface); }
 .cp-main::-webkit-scrollbar { width: 9px; }
 .cp-main::-webkit-scrollbar-thumb { background: var(--border-main); border-radius: var(--radius-md); }
-.cp-inner { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--gap-card); }
+/* OVERRIDE (intentional divergence from prototype): full-width, left-aligned —
+   the prototype centers this in a 1080px column. See .ov-scroll above. */
+.cp-inner { display: flex; flex-direction: column; gap: var(--gap-card); }
 
 .cp-modebar { display: flex; align-items: center; gap: 8px; }
 .cp-mode { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; padding: 8px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-main); background: var(--bg-panel); color: var(--text-mid); cursor: pointer; font-family: var(--font-ui); transition: 0.15s; }

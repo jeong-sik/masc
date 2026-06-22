@@ -6,11 +6,11 @@ import { EmptyState } from './common/feedback-state'
 import { FilterChips } from './common/filter-chips'
 import { PanelCard } from './common/panel-card'
 import { KeeperBadge } from './keeper-badge'
-import { KeeperBDIPanel } from './keeper-bdi-panel'
+import { KeeperGoalHorizonsPanel } from './keeper-goal-horizons-panel'
 import { KeeperMemoryPanel } from './memory-subsystems'
 import { formatDuration } from '../lib/format-time'
 
-type KeeperInspectorFocus = 'bdi' | 'tool-access' | 'memory'
+type KeeperInspectorFocus = 'goals' | 'tool-access' | 'memory'
 
 interface ToolAccessRow {
   label: string
@@ -18,7 +18,7 @@ interface ToolAccessRow {
 }
 
 const FOCUS_CHIPS: Array<{ key: KeeperInspectorFocus; label: string; title: string }> = [
-  { key: 'bdi', label: 'BDI', title: 'Will, needs, desires, and goal horizons' },
+  { key: 'goals', label: 'Goals', title: 'Goal horizons' },
   { key: 'tool-access', label: 'Tool Access', title: 'Runtime tool and execution access snapshot' },
   { key: 'memory', label: 'Memory', title: 'Keeper memory bank entries (memory.jsonl)' },
 ]
@@ -41,16 +41,13 @@ export function selectKeeperForInspector(
     const exact = keeperList.find(keeper => keeperKeys(keeper).includes(requested))
     if (exact) return exact
   }
-  const withBdi = keeperList.find(hasBdiSnapshot)
-  return withBdi ?? keeperList[0] ?? null
+  const withGoals = keeperList.find(hasGoalHorizons)
+  return withGoals ?? keeperList[0] ?? null
 }
 
-export function hasBdiSnapshot(keeper: Keeper): boolean {
+export function hasGoalHorizons(keeper: Keeper): boolean {
   return Boolean(
-    keeper.will
-    || keeper.needs
-    || keeper.desires
-    || keeper.short_goal
+    keeper.short_goal
     || keeper.mid_goal
     || keeper.long_goal
     || keeper.goal_horizons?.short
@@ -119,7 +116,7 @@ function currentFocus(): KeeperInspectorFocus {
   const f = route.value.params.focus
   if (f === 'tool-access') return 'tool-access'
   if (f === 'memory') return 'memory'
-  return 'bdi'
+  return 'goals'
 }
 
 function navigateFocus(focus: KeeperInspectorFocus): void {
@@ -196,13 +193,10 @@ function ToolAccessSnapshot({ keeper }: { keeper: Keeper }) {
   `
 }
 
-function BdiSnapshot({ keeper }: { keeper: Keeper }) {
-  if (hasBdiSnapshot(keeper)) {
+function GoalHorizonsSnapshot({ keeper }: { keeper: Keeper }) {
+  if (hasGoalHorizons(keeper)) {
     return html`
-      <${KeeperBDIPanel}
-        will=${keeper.will}
-        needs=${keeper.needs}
-        desires=${keeper.desires}
+      <${KeeperGoalHorizonsPanel}
         short_goal=${keeper.short_goal}
         mid_goal=${keeper.mid_goal}
         long_goal=${keeper.long_goal}
@@ -211,8 +205,8 @@ function BdiSnapshot({ keeper }: { keeper: Keeper }) {
     `
   }
   return html`
-    <${PanelCard} title="BDI & Horizons">
-      <${EmptyState} compact=${true} message="No BDI snapshot is available for this keeper." />
+    <${PanelCard} title="Goal Horizons">
+      <${EmptyState} compact=${true} message="No goal horizons are configured for this keeper." />
     <//>
   `
 }
@@ -268,7 +262,7 @@ export function KeeperCognitionInspector() {
         ? html`<${ToolAccessSnapshot} keeper=${selected} />`
         : focus === 'memory'
           ? html`<${KeeperMemoryPanel} keeperName=${selected.name} />`
-          : html`<${BdiSnapshot} keeper=${selected} />`}
+          : html`<${GoalHorizonsSnapshot} keeper=${selected} />`}
     </section>
   `
 }

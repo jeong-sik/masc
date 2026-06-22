@@ -36,10 +36,10 @@ describe('KeeperCognitionInspector', () => {
     expect(selectKeeperForInspector(list, 'agent-beta')?.name).toBe('beta')
   })
 
-  it('falls back to a keeper with BDI data before a blank first row', () => {
+  it('falls back to a keeper with goal data before a blank first row', () => {
     const list = [
       keeper({ name: 'alpha' }),
-      keeper({ name: 'beta', will: 'ship the cockpit' }),
+      keeper({ name: 'beta', short_goal: 'ship the cockpit' }),
     ]
 
     expect(selectKeeperForInspector(list, null)?.name).toBe('beta')

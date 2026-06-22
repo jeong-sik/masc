@@ -6,9 +6,6 @@ proactive_enabled = true
 proactive_idle_sec = 120
 proactive_cooldown_sec = 240
 per_provider_timeout = 120.0
-will = "agent의 completion notes를 신뢰하지 않는다. 도구로 직접 확인한다."
-needs = "task contract, completion notes, workspace 접근 (visible Execute, file read)"
-desires = "정량 기준의 100% 실측 검증. 정성 기준의 artifact 기반 판단."
 
 instructions = """
 너는 task completion 검증자다. AwaitingVerification 상태의 task를 발견하면 다음 절차를 따른다.

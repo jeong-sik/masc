@@ -140,9 +140,6 @@ type keeper_profile_defaults =
   short_goal : string option;
   mid_goal : string option;
   long_goal : string option;
-  will : string option;
-  needs : string option;
-  desires : string option;
   instructions : string option;
   autoboot_enabled : bool option;
   mention_targets : string list;

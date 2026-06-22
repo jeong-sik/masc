@@ -20,9 +20,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       , match m.persona with
         | Some s -> `String s
         | None -> `Null )
-    ; "will", `String m.will
-    ; "needs", `String m.needs
-    ; "desires", `String m.desires
     ; "instructions", `String m.instructions
     ; "trace_id", `String (Keeper_id.Trace_id.to_string rt.trace_id)
     ; "tool_access", Json_util.json_string_list m.tool_access
@@ -106,9 +103,6 @@ let fallback_canonical_keeper_meta_key_names =
   [ "name"
   ; "agent_name"
   ; "persona"
-  ; "will"
-  ; "needs"
-  ; "desires"
   ; "instructions"
   ; "trace_id"
   ; "tool_access"

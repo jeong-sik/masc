@@ -1604,9 +1604,6 @@ describe('fetchKeeperConfig', () => {
         short_goal: 'Diagnose agent liveness',
         mid_goal: 'Reduce restart confusion',
         long_goal: 'Keep workspace stable',
-        will: 'Stay on call',
-        needs: 'Accurate runtime state',
-        desires: 'Clear operator feedback',
         instructions: 'Prefer direct remediation',
         system_prompt_blocks: {
           constitution: { key: 'keeper.constitution', source: 'file', text: 'constitution text' },

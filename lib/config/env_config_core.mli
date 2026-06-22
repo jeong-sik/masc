@@ -202,7 +202,4 @@ val pubsub_max_messages : unit -> int
 
 (** {1 Keeper defaults} *)
 
-val keeper_will : unit -> string
-val keeper_needs : unit -> string
-val keeper_desires : unit -> string
 val keeper_default_sandbox_profile_raw : unit -> string

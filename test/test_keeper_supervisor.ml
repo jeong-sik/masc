@@ -86,7 +86,7 @@ sandbox_profile = "local"
 |}
        name)
 
-let write_keeper_toml_without_goal config_dir ~name ~will =
+let write_keeper_toml_without_goal config_dir ~name ~instructions =
   write_file
     (Filename.concat (Filename.concat config_dir "keepers") (name ^ ".toml"))
     (Printf.sprintf
@@ -95,11 +95,9 @@ let write_keeper_toml_without_goal config_dir ~name ~will =
 name = "%s"
 sandbox_profile = "local"
 proactive_enabled = false
-will = "%s"
-needs = "keep fleet safety diagnosable"
-desires = "avoid silent declarative boot failures"
+instructions = "%s"
 |}
-       name will);
+       name instructions);
   Keeper_types_profile.invalidate_keeper_profile_defaults_cache name
 
 let write_empty_keeper_toml_without_goal config_dir ~name =
@@ -587,7 +585,7 @@ let keeper_runtime_context env sw config : _ Keeper_types_profile.context =
     net = Some (Eio.Stdenv.net env);
   }
 
-let test_declarative_boot_materializes_goal_from_will () =
+let test_declarative_boot_materializes_goal_from_instructions () =
   with_config_dir @@ fun config_dir ->
   Eio_main.run @@ fun env ->
   ensure_test_runtime ();
@@ -595,8 +593,8 @@ let test_declarative_boot_materializes_goal_from_will () =
   Eio.Switch.run @@ fun sw ->
   let base_dir = Filename.dirname config_dir in
   let name = "intent-only" in
-  let will = "watch fleet safety and repair keeper bootstrap" in
-  write_keeper_toml_without_goal config_dir ~name ~will;
+  let instructions = "watch fleet safety and repair keeper bootstrap" in
+  write_keeper_toml_without_goal config_dir ~name ~instructions;
   Eio.Switch.on_release sw (fun () ->
       Reg.clear ();
       KR.reset_test_state base_dir);
@@ -610,7 +608,8 @@ let test_declarative_boot_materializes_goal_from_will () =
       | Error err -> fail err
       | Ok resolution ->
       check bool "materialized from declarative TOML" true resolution.materialized;
-      check string "goal derived from will" will resolution.meta.goal;
+      check string "goal derived from instructions" instructions
+        resolution.meta.goal;
       check bool "boot failure cleared" true
         (Option.is_none
            (KR.boot_meta_failure_for ~base_path:config.base_path ~name)))
@@ -2441,8 +2440,8 @@ let () =
         test_missing_persona_without_profile_or_toml_is_error;
     ];
     "boot_meta_materialization", [
-      test_case "declarative boot derives missing goal from will" `Quick
-        test_declarative_boot_materializes_goal_from_will;
+      test_case "declarative boot derives missing goal from instructions" `Quick
+        test_declarative_boot_materializes_goal_from_instructions;
       test_case "declarative boot records goal-required failure" `Quick
         test_declarative_boot_records_goal_required_failure;
     ];

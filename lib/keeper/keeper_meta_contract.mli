@@ -299,9 +299,6 @@ type keeper_meta = {
   short_goal : string;
   mid_goal : string;
   long_goal : string;
-  will : string;
-  needs : string;
-  desires : string;
   instructions : string;
   (* Policy *)
   sandbox_profile : Keeper_types_profile.sandbox_profile;

@@ -49,7 +49,7 @@ import { KeeperEvalQualityPanel } from './keeper-eval-quality'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import { KeeperMemoryOsRecallPanel, KeeperTurnInspector } from './keeper-turn-inspector'
 import { SupervisorDiagnosticsPanel } from './keeper-supervisor-diagnostics'
-import { KeeperBDIPanel } from './keeper-bdi-panel'
+import { KeeperGoalHorizonsPanel } from './keeper-goal-horizons-panel'
 import { KeeperConfigPanel } from './keeper-config-panel'
 import { KeeperPromptAssemblyPanel } from './keeper-prompt-assembly-panel'
 import { KeeperRuntimeModelEditor } from './keeper-runtime-model-editor'
@@ -263,10 +263,7 @@ export function KeeperDetailBody({
             ? html`<div class="text-2xs text-[var(--color-fg-muted)] mt-1 leading-relaxed">${keeper.skill_reason}</div>`
             : null}
 
-          <${KeeperBDIPanel}
-            will=${keeper.will}
-            needs=${keeper.needs}
-            desires=${keeper.desires}
+          <${KeeperGoalHorizonsPanel}
             short_goal=${keeper.short_goal}
             mid_goal=${keeper.mid_goal}
             long_goal=${keeper.long_goal}

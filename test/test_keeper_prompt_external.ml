@@ -102,9 +102,6 @@ let test_system_prompt_includes_continuity_contract () =
           ~short_goal:"keep continuity contract loaded"
           ~mid_goal:"reduce source literal behavior blocks"
           ~long_goal:"keep prompt config operator-tunable"
-          ~will:"maintain coherent identity"
-          ~needs:"runtime truth"
-          ~desires:"observable progress"
           ~instructions:""
           ()
       in
@@ -124,9 +121,6 @@ let test_system_prompt_includes_state_block_template_anchor () =
           ~short_goal:"keep state template anchored"
           ~mid_goal:"avoid noisy recovery fallback"
           ~long_goal:"keep continuity prompt stable"
-          ~will:"maintain coherent identity"
-          ~needs:"runtime truth"
-          ~desires:"observable progress"
           ~instructions:""
           ()
       in
@@ -175,21 +169,9 @@ let test_source_has_no_generic_behavior_fallbacks () =
       Alcotest.(check bool)
         "missing behavior marker present" true
         (contains_substring src "Behavior prompt config drift");
-      Alcotest.(check bool)
-        "will generic fallback removed" false
-        (contains_substring src
-           "Maintain coherent identity and goal continuity.");
-      Alcotest.(check bool)
-        "needs generic fallback removed" false
-        (contains_substring src
-           "Reliable context continuity, factual grounding, and explicit next steps.");
-      Alcotest.(check bool)
-        "desires generic fallback removed" false
-        (contains_substring src
-           "Make progress that is observable and useful to the user.");
-      Alcotest.(check bool)
-        "missing personality marker present" true
-        (contains_substring src "Personality config drift");
+      (* RFC-0282 removed the will/needs/desires self_model triple and the
+         per-field personality config-drift marker along with it; only the
+         behavior-prompt drift marker above remains. *)
       Alcotest.(check bool)
         "connected surface behavior fallback removed" false
         (contains_substring unified_prompt_src

@@ -37,9 +37,6 @@ type parsed_args = {
   handoff_threshold_opt : float option;
   handoff_cooldown_sec_opt : int option;
   instructions_arg : string option;
-  will_opt : string option;
-  needs_opt : string option;
-  desires_opt : string option;
   profile_defaults : keeper_profile_defaults;
   instructions_opt : string option;
 }
@@ -229,9 +226,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       | Some _ -> instructions_arg
       | None -> profile_defaults.instructions
     in
-    let will_opt = parse_self_model_opt args "will" in
-    let needs_opt = parse_self_model_opt args "needs" in
-    let desires_opt = parse_self_model_opt args "desires" in
     match sandbox_profile_error, tool_denylist_opt_res with
     | Some msg, _ -> Error (tool_result_error msg)
     | None, Error msg -> Error (tool_result_error msg)
@@ -264,9 +258,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       handoff_threshold_opt;
       handoff_cooldown_sec_opt;
       instructions_arg;
-      will_opt;
-      needs_opt;
-      desires_opt;
       profile_defaults;
       instructions_opt;
     }

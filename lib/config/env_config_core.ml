@@ -517,18 +517,6 @@ let pubsub_max_messages () =
 
 (** {1 Keeper Defaults} *)
 
-(** Default keeper will (long-term intent). Default: "". *)
-let keeper_will () =
-  get_string ~default:"" "MASC_KEEPER_WILL"
-
-(** Default keeper needs (operational requirements). Default: "". *)
-let keeper_needs () =
-  get_string ~default:"" "MASC_KEEPER_NEEDS"
-
-(** Default keeper desires (drive statement). Default: "". *)
-let keeper_desires () =
-  get_string ~default:"" "MASC_KEEPER_DESIRES"
-
 (** Default sandbox profile for keepers. Default: "local".
     Set to "docker" to default all keepers to containerized execution. *)
 let keeper_default_sandbox_profile_raw () =

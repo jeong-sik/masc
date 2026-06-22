@@ -2101,6 +2101,10 @@ export interface DashboardRuntimeProbeResponse {
   cache_ttl_sec?: number
   cache_age_sec?: number
   cache_hit?: boolean
+  // Non-blocking route freshness tag. 'served_stale' / 'warming_up' mean a
+  // background refresh was scheduled and the fresh value arrives on the next
+  // poll — a force=1 ("Live probe") response is not guaranteed to be fresh.
+  refresh_state?: 'fresh' | 'recent' | 'served_stale' | 'warming_up'
   probe?: DashboardRuntimeProbePayload | null
 }
 

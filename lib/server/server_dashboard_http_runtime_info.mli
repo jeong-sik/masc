@@ -68,13 +68,26 @@ val light_runtime_resolution_json : Workspace.config -> Yojson.Safe.t
 
 val dashboard_runtime_probe_http_json :
   ?force:bool -> unit -> Yojson.Safe.t
-(** Returns the dashboard runtime-probe envelope.  With
-    [?force:true], bypasses the per-call freshness gate
-    and falls back to the recent-value gate; with
-    [?force:false] (default), skips the read entirely
-    when a fresh cache value is available.  Output
-    includes a [cache_hit] flag so dashboards can show
-    the freshness state. *)
+(** Returns the dashboard runtime-probe envelope. The route never blocks: on a
+    cache hit it returns the cached value; on a miss it schedules a non-blocking
+    background refresh and returns the best value available now (a stale cache
+    value, or a cold-start warming-up placeholder).
+
+    [?force:true] (the dashboard "Live probe" button) bypasses the per-call TTL
+    gate and uses the shorter recent-value window
+    ([dashboard_runtime_probe_force_min_refresh_sec]); past that window it still
+    only schedules a background refresh — it does NOT block for an immediate
+    fresh probe. Callers that expect "force = instant fresh value" must instead
+    read [refresh_state] and re-poll.
+
+    Output fields:
+    - [cache_hit]: the returned [probe] came from cache (it was not freshly
+      scheduled this call).
+    - [refresh_state]: one of [fresh] (TTL-fresh hit), [recent] (force=1 inside
+      the recent window), [served_stale] (stale value returned + background
+      refresh scheduled), or [warming_up] (cold-start placeholder + background
+      refresh scheduled). [served_stale]/[warming_up] mean the refreshed value
+      arrives on the next poll. *)
 
 val dashboard_runtime_probe_failure_envelope_of_exn :
   exn -> Yojson.Safe.t
@@ -160,6 +173,14 @@ val clear_dashboard_runtime_probe_cache_for_tests :
 (** Drops the cached runtime-probe value AND clears the
     refresh-in-flight gate so the next call observes a
     fresh state machine. *)
+
+val set_dashboard_runtime_probe_cache_for_tests :
+  probe:Yojson.Safe.t -> age_sec:float -> unit -> unit
+(** Seeds the runtime-probe cache with [probe], aged [age_sec] seconds. Drives
+    the fresh ([age_sec] < TTL, non-force) / recent ([age_sec] < force window,
+    force=1) / stale (older than both) branches of
+    {!dashboard_runtime_probe_http_json} deterministically, since unit tests
+    have no Eio switch for a real background refresh. *)
 
 (** {1 Git rev-parse short test seams + helper} *)
 

@@ -54,6 +54,18 @@ let clear_dashboard_runtime_probe_cache_for_tests () =
   Atomic.set dashboard_runtime_probe_refresh_in_flight false
 ;;
 
+let set_dashboard_runtime_probe_cache_for_tests ~probe ~age_sec () =
+  (* Seed the probe cache with a value [age_sec] seconds old so tests can drive
+     the fresh / recent-window / stale branches of [dashboard_runtime_probe_http_json]
+     deterministically. Unit tests have no Eio switch to fork a real background
+     refresh into, so the cache must be seeded directly. The [age_sec] is
+     translated to an absolute [refreshed_at] here so callers do not depend on
+     [Time_compat]. *)
+  Atomic.set
+    dashboard_runtime_probe_cache
+    (Some { probe; refreshed_at = Time_compat.now () -. age_sec })
+;;
+
 (* Per-path TTL cache for `git rev-parse --short HEAD`.  Each miss forks
    git and can take seconds on large worktrees (~/me etc.), yet HEAD
    changes infrequently, and every dashboard shell refresh calls this
@@ -1188,25 +1200,57 @@ let dashboard_runtime_probe_recent_value ~now =
   | _ -> None
 ;;
 
+(* Why this exists: force=1 callers (the dashboard "Live probe" button) expect an
+   immediate fresh value, but the route is non-blocking — a cache miss schedules
+   a background refresh and returns the best value available now. This tag makes
+   that contract explicit in the response so the client can tell "this is the
+   refreshed value" from "a refresh was scheduled; the next poll carries the new
+   value", instead of inferring it from [cache_hit] alone. Closed sum so adding a
+   freshness branch forces an exhaustive update of the serializer. *)
+type dashboard_runtime_probe_refresh_state =
+  | Refresh_fresh (* TTL-fresh cache hit (non-force); no background refresh triggered. *)
+  | Refresh_recent
+  (* force=1 within [dashboard_runtime_probe_force_min_refresh_sec]: the recent
+     value is served and no new refresh is triggered (force rate limit). *)
+  | Refresh_served_stale
+  (* Cache miss with a stale value: the stale value is returned and a background
+     refresh was scheduled; the next poll carries the fresh value. *)
+  | Refresh_warming_up
+(* Cold start (no cache value): a warming-up placeholder is returned and a
+     background refresh was scheduled; the next poll carries the fresh value. *)
+
+let dashboard_runtime_probe_refresh_state_to_string = function
+  | Refresh_fresh -> "fresh"
+  | Refresh_recent -> "recent"
+  | Refresh_served_stale -> "served_stale"
+  | Refresh_warming_up -> "warming_up"
+;;
+
 let dashboard_runtime_probe_http_json ?(force = false) () =
   let now = Time_compat.now () in
-  let probe, cache_hit, refreshed_at =
+  let probe, cache_hit, refreshed_at, refresh_state =
     match
       if force
       then dashboard_runtime_probe_recent_value ~now
       else dashboard_runtime_probe_fresh_value ~now
     with
-    | Some (cached, cached_at) -> cached, true, cached_at
+    | Some (cached, cached_at) ->
+      (* Cache hit: a force=1 hit inside the recent-value window is rate-limited
+         (no new refresh) and tagged [recent]; a plain TTL-fresh hit is [fresh].
+         Neither schedules a background refresh. *)
+      cached, true, cached_at, (if force then Refresh_recent else Refresh_fresh)
     | None ->
-      (* Cache miss (or forced refresh): trigger a non-blocking background
-         refresh and return the best value available right now (stale cache,
-         or a warming-up envelope on cold start). This removes the synchronous
-         up-to-[dashboard_runtime_probe_timeout_sec] wait that previously
-         stalled the dashboard shell on every cache-miss poll and on every
-         force=1 request. *)
+      (* Cache miss (or forced refresh past the recent window): trigger a
+         non-blocking background refresh and return the best value available
+         right now (stale cache, or a warming-up envelope on cold start). This
+         removes the synchronous up-to-[dashboard_runtime_probe_timeout_sec]
+         wait that previously stalled the dashboard shell on every cache-miss
+         poll and on every force=1 request. [refresh_state] tells the client a
+         refresh was scheduled, so a force=1 caller does not mistake the
+         stale/warming-up value for an immediate fresh probe. *)
       maybe_fork_dashboard_runtime_probe_refresh ();
       (match dashboard_runtime_probe_cached_value () with
-       | Some (stale, stale_at) -> stale, false, stale_at
+       | Some (stale, stale_at) -> stale, false, stale_at, Refresh_served_stale
        | None ->
          ( dashboard_runtime_probe_degraded_envelope
              ~status:"warming_up"
@@ -1220,7 +1264,8 @@ let dashboard_runtime_probe_http_json ?(force = false) () =
                 placeholder until the background probe completes."
              (),
            false,
-           0.0 ))
+           0.0,
+           Refresh_warming_up ))
   in
   let response_now = Time_compat.now () in
   let refreshed_at_json, cache_age_json =
@@ -1234,6 +1279,8 @@ let dashboard_runtime_probe_http_json ?(force = false) () =
     ; "cache_ttl_sec", `Float dashboard_runtime_probe_cache_ttl_sec
     ; "cache_age_sec", cache_age_json
     ; "cache_hit", `Bool cache_hit
+    ; ( "refresh_state"
+      , `String (dashboard_runtime_probe_refresh_state_to_string refresh_state) )
     ; "probe", probe
     ]
 ;;

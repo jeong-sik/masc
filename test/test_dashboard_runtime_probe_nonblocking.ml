@@ -1,7 +1,7 @@
 open Alcotest
 open Masc
 
-(* Regression test for the runtime-probe route's non-blocking background
+(* Regression tests for the runtime-probe route's non-blocking background
    refresh.
 
    Before the fix, a cache-miss [dashboard_runtime_probe_http_json] waited
@@ -11,25 +11,29 @@ open Masc
    background refresh via [maybe_fork_dashboard_runtime_probe_refresh] and
    returns a stale or warming-up envelope immediately.
 
-   This test pins that contract: a runner hook that would block for seconds if
-   called synchronously must NOT delay the [http_json] response. A unit test has
-   no Eio server switch, so [maybe_fork_dashboard_runtime_probe_refresh] skips
-   the background fork (no switch reachable) and [http_json] returns the
-   warming-up envelope without ever invoking the runner -- the exact behavior
-   that distinguishes the non-blocking route from the old synchronous one. If a
-   future change reintroduces a synchronous [run_dashboard_runtime_probe] call
-   on the request path, [slow_runner_invoked] becomes 1 and the wall-clock
-   budget is blown, failing this test. *)
+   The contract these tests pin is "no synchronous probe on the request path".
+   That is asserted with a deterministic invocation COUNTER ([slow_runner_invoked]),
+   not a wall-clock threshold: a unit test has no Eio server switch, so
+   [maybe_fork_dashboard_runtime_probe_refresh] skips the background fork and the
+   runner is never invoked from the request path. The [refresh_state] field of
+   the response is asserted directly, so every freshness branch (warming_up /
+   served_stale / recent) is verified by state transition rather than by timing.
+   If a future change reintroduces a synchronous [run_dashboard_runtime_probe]
+   call on the request path, [slow_runner_invoked] becomes 1 and these tests
+   fail. *)
 
 let slow_runner_invoked = ref 0
 
 let slow_runner () : Yojson.Safe.t =
   incr slow_runner_invoked;
-  (* Simulate an expensive probe (e.g. cold Ollama model load). If the route
-     ever regresses to calling the runner synchronously, the wall-clock budget
-     below is blown and [slow_runner_invoked] becomes 1. *)
+  (* Simulate an expensive probe (e.g. cold Ollama model load). The tests assert
+     on [slow_runner_invoked], not on elapsed time; the sleep only makes a
+     synchronous-call regression additionally visible as a slow run. *)
   Unix.sleepf 3.0;
   `Null
+
+(* Inspectors for the [http_json] response envelope (top-level fields wrapping
+   the [probe] value). *)
 
 let probe_ok_of = function
   | `Assoc fields ->
@@ -41,7 +45,33 @@ let probe_ok_of = function
      | _ -> true)
   | _ -> true
 
-(* Inspectors for an envelope value directly (top-level fields), used by the
+let cache_hit_of = function
+  | `Assoc fields ->
+    (match List.assoc_opt "cache_hit" fields with
+     | Some (`Bool b) -> b
+     | _ -> false)
+  | _ -> false
+
+let refresh_state_of = function
+  | `Assoc fields ->
+    (match List.assoc_opt "refresh_state" fields with
+     | Some (`String s) -> s
+     | _ -> "?")
+  | _ -> "?"
+
+(* Pull a marker string out of the [probe] field, to prove the cached value was
+   served verbatim (not replaced by a placeholder). *)
+let probe_marker_of = function
+  | `Assoc fields ->
+    (match List.assoc_opt "probe" fields with
+     | Some (`Assoc inner) ->
+       (match List.assoc_opt "marker" inner with
+        | Some (`String s) -> Some s
+        | _ -> None)
+     | _ -> None)
+  | _ -> None
+
+(* Inspectors for a bare envelope value (top-level fields), used by the
    failure-envelope contract test. *)
 
 let envelope_probe_ok = function
@@ -58,6 +88,10 @@ let envelope_status = function
      | _ -> "?")
   | _ -> "?"
 
+let reset_probe_seams () =
+  Server_dashboard_http_runtime_info.clear_dashboard_runtime_probe_runner_for_tests ();
+  Server_dashboard_http_runtime_info.clear_dashboard_runtime_probe_cache_for_tests ()
+
 (* P1: failure-visibility contract. When the background refresh raises, the
    failure envelope persisted to the cache must carry probe_ok=false and a
    distinct [unreachable] status (not [warming_up]) so the dashboard can tell
@@ -73,28 +107,94 @@ let test_failure_envelope_carries_unreachable_status () =
   check string "failure envelope status unreachable" "unreachable"
     (envelope_status envelope)
 
-let test_http_json_does_not_block_on_cold_start () =
-  Server_dashboard_http_runtime_info.clear_dashboard_runtime_probe_cache_for_tests ();
+(* Cold start: no cache value. The route must return a warming-up placeholder
+   without ever invoking the (synchronous) runner. *)
+let test_cold_start_returns_warming_up_without_probe () =
+  reset_probe_seams ();
   Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_runner_for_tests
     slow_runner;
   slow_runner_invoked := 0;
-  let t0 = Unix.gettimeofday () in
   let json =
     Server_dashboard_http_runtime_info.dashboard_runtime_probe_http_json ()
   in
-  let elapsed = Unix.gettimeofday () -. t0 in
-  check int "slow runner never invoked (no synchronous probe)" 0 !slow_runner_invoked;
+  check int "slow runner never invoked on cold start" 0 !slow_runner_invoked;
   check bool "warming-up envelope returned (probe_ok false)" false (probe_ok_of json);
-  check bool "http_json returns within the non-blocking budget" false
-    (elapsed >= 2.0);
-  Server_dashboard_http_runtime_info.clear_dashboard_runtime_probe_runner_for_tests ();
-  Server_dashboard_http_runtime_info.clear_dashboard_runtime_probe_cache_for_tests ()
+  check bool "cache_hit false on cold start" false (cache_hit_of json);
+  check string "refresh_state is warming_up" "warming_up" (refresh_state_of json);
+  reset_probe_seams ()
+
+(* force=1 with a stale cache value: the route must serve the stale value
+   immediately (no synchronous probe) and tag it [served_stale] so the client
+   knows a refresh was scheduled and the fresh value arrives on the next poll. *)
+let test_force_with_stale_cache_serves_stale_without_probe () =
+  reset_probe_seams ();
+  Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_runner_for_tests
+    slow_runner;
+  slow_runner_invoked := 0;
+  let stale_probe =
+    `Assoc
+      [ "probe_ok", `Bool true
+      ; "status", `String "reachable"
+      ; "marker", `String "stale-cache-value"
+      ]
+  in
+  (* Older than both the TTL (30s) and the force window (10s). *)
+  Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_cache_for_tests
+    ~probe:stale_probe ~age_sec:100.0 ();
+  let json =
+    Server_dashboard_http_runtime_info.dashboard_runtime_probe_http_json
+      ~force:true ()
+  in
+  check int "slow runner never invoked on force=1 stale" 0 !slow_runner_invoked;
+  check string "refresh_state is served_stale" "served_stale" (refresh_state_of json);
+  check bool "cache_hit false (value is stale, refresh scheduled)" false
+    (cache_hit_of json);
+  check (option string) "stale value served verbatim" (Some "stale-cache-value")
+    (probe_marker_of json);
+  reset_probe_seams ()
+
+(* force=1 within the recent-value window: the recent value is served as a hit
+   and tagged [recent]; no refresh is scheduled (force rate limit) and the
+   runner is not invoked. *)
+let test_force_within_recent_window_serves_recent () =
+  reset_probe_seams ();
+  Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_runner_for_tests
+    slow_runner;
+  slow_runner_invoked := 0;
+  let recent_probe =
+    `Assoc
+      [ "probe_ok", `Bool true
+      ; "status", `String "reachable"
+      ; "marker", `String "recent-cache-value"
+      ]
+  in
+  (* Within the force window (10s). *)
+  Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_cache_for_tests
+    ~probe:recent_probe ~age_sec:1.0 ();
+  let json =
+    Server_dashboard_http_runtime_info.dashboard_runtime_probe_http_json
+      ~force:true ()
+  in
+  check int "slow runner never invoked on force=1 recent" 0 !slow_runner_invoked;
+  check string "refresh_state is recent" "recent" (refresh_state_of json);
+  check bool "cache_hit true (recent value within force window)" true
+    (cache_hit_of json);
+  check (option string) "recent value served verbatim" (Some "recent-cache-value")
+    (probe_marker_of json);
+  reset_probe_seams ()
 
 let () =
   run "dashboard_runtime_probe_nonblocking"
-    [ "non-blocking",
-        [ test_case "cold start does not block" `Quick
-            test_http_json_does_not_block_on_cold_start ]
-    ; "failure visibility",
+    [ ( "non-blocking",
+        [ test_case "cold start returns warming_up, no probe" `Quick
+            test_cold_start_returns_warming_up_without_probe
+        ; test_case "force=1 stale serves served_stale, no probe" `Quick
+            test_force_with_stale_cache_serves_stale_without_probe
+        ; test_case "force=1 recent serves recent hit, no probe" `Quick
+            test_force_within_recent_window_serves_recent
+        ] )
+    ; ( "failure visibility",
         [ test_case "failure envelope carries unreachable status" `Quick
-            test_failure_envelope_carries_unreachable_status ] ]
+            test_failure_envelope_carries_unreachable_status
+        ] )
+    ]

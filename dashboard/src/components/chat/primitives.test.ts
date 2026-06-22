@@ -787,7 +787,7 @@ describe('ChatComposer queue & stall', () => {
     expect(container.querySelector('[data-chat-stall-hint]')).toBeNull()
   })
 
-  it('labels the idle send button 전송 (regression: corrupted 볂이기 literal)', () => {
+  it('labels the idle send button 전송 ↑ (prototype composer.jsx:235; regression: corrupted 볂이기 literal)', () => {
     render(
       html`<${ChatComposer}
         draft="보낼 메시지"
@@ -800,7 +800,8 @@ describe('ChatComposer queue & stall', () => {
       container,
     )
     const sendButton = [...container.querySelectorAll('button')].find((b) => b.classList.contains('send'))
-    expect(sendButton?.textContent?.trim()).toBe('전송')
+    // prototype renders 전송 followed by the ↑ (U+2191) send glyph.
+    expect(sendButton?.textContent?.trim()).toBe('전송 ↑')
     expect(container.textContent).not.toContain('볂이기')
   })
 })

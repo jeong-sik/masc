@@ -2773,7 +2773,10 @@ export function ChatComposer({
     ? canQueue
       ? '대기열 추가'
       : `응답 중${elapsed > 0 ? ` ${elapsed}s` : ''}`
-    : '전송'
+    : // prototype composer.jsx:235 — idle send label is "전송 ↑" (↑), the
+      // brass send affordance. Streaming/queue states are functional additions
+      // not present in the prototype, so they keep their own labels.
+      '전송 ↑'
   const isStreamWarning = streaming && elapsed > 60
   const hasContent = draft.trim() !== '' || attachments.length > 0
   const sendDisabled = disabled || !hasContent || (streaming && !queueEnabled)

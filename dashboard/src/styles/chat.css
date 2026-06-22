@@ -215,11 +215,17 @@
   display: flex;
   align-items: flex-end;
   gap: 10px;
-  background: var(--color-bg-surface);
+  /* prototype styles/v2.css:927 — background: var(--bg-card) (#1b1c25), NOT
+     bg-panel. --color-bg-elevated is the canonical --bg-card alias
+     (skin-v2.css:220); --color-bg-surface aliases --bg-panel (#0f1015), a
+     darker silent regression. */
+  background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-default);
   /* prototype styles/v2.css:927 — border-radius: var(--radius-md) (6px). */
   border-radius: var(--radius-md);
   padding: 6px 6px 6px 14px;
+  /* prototype styles/v2.css:929 — position: relative (slashmenu anchor). */
+  position: relative;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
@@ -241,7 +247,9 @@
   outline: 0;
   background: transparent;
   color: var(--color-fg-primary);
-  /* prototype styles/v2.css:934 — font-size: 14.5px. */
+  /* prototype styles/v2.css:934 — font-family: var(--font-ui); font-size:
+     14.5px. */
+  font-family: var(--font-ui);
   font-size: var(--fs-composer-input, 14.5px);
   line-height: 1.5;
   padding: 9px 0;
@@ -250,7 +258,10 @@
 }
 
 .composer textarea::placeholder {
-  color: var(--color-fg-muted);
+  /* prototype styles/v2.css:937 — color: var(--text-dim) (#a59db0); maps to
+     --color-fg-4 (skin-v2.css:253). --color-fg-muted is text-mid (#cabfac),
+     a lighter silent regression. */
+  color: var(--color-fg-4);
 }
 
 .composer-tools {
@@ -293,9 +304,15 @@
   border-radius: var(--radius-sm);
   cursor: pointer;
   background: var(--color-accent-fg);
-  color: var(--color-bg-surface);
+  /* prototype styles/v2.css:947 — color: var(--volt-ink) (#1a1405 in v2), a
+     brass-tinted ink that tracks the data-volt variant. --color-bg-surface
+     (#0f1015) is a blue-tinted near-match but a silent regression; --volt-ink
+     is defined in every skin/theme (skin-v2.css:71, variables.css). */
+  color: var(--volt-ink);
   border: 1px solid var(--color-accent-fg);
-  /* prototype styles/v2.css:948 — font-size: 12.5px. */
+  /* prototype styles/v2.css:948 — font-family: var(--font-ui); font-size:
+     12.5px. */
+  font-family: var(--font-ui);
   font-size: var(--fs-composer-send, 12.5px);
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -308,8 +325,11 @@
 }
 
 .send:hover {
-  filter: brightness(1.08);
-  box-shadow: 0 0 18px var(--color-accent-soft);
+  /* prototype styles/v2.css:952 — background: var(--volt-strong) (explicit
+     lighter brass, not a brightness filter); box-shadow uses var(--volt-glow)
+     (0.22 alpha), NOT --color-accent-soft (= --volt-wash, 0.10 alpha). */
+  background: var(--volt-strong);
+  box-shadow: 0 0 18px var(--volt-glow);
 }
 
 .send:disabled {
@@ -328,8 +348,10 @@
   align-items: center;
   justify-content: space-between;
   margin-top: 8px;
-  font-size: var(--fs-xs, 12px);
-  color: var(--color-fg-muted);
+  /* prototype styles/v2.css:954 — font-size: 11px (literal: --fs-xs resolves
+     to 12/14px); color: var(--text-dim) → --color-fg-4. */
+  font-size: 11px;
+  color: var(--color-fg-4);
 }
 
 .composer-foot .hint {
@@ -339,11 +361,14 @@
 
 .composer-foot kbd {
   font-family: var(--font-mono);
-  font-size: var(--fs-2xs, 10px);
-  background: var(--color-bg-surface);
+  /* prototype styles/v2.css:958 — font-size: 10px (literal: --fs-2xs resolves
+     to 11/13px); background: var(--bg-card) → --color-bg-elevated;
+     border-radius: var(--radius-xs) (3px), NOT --r-0 (2px). */
+  font-size: 10px;
+  background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-default);
   border-bottom-width: 2px;
-  border-radius: var(--r-0);
+  border-radius: var(--radius-xs, 3px);
   padding: 1px 5px;
   color: var(--color-fg-muted);
 }
@@ -371,9 +396,13 @@
   display: flex;
   align-items: center;
   gap: 9px;
-  background: var(--color-bg-surface);
+  /* prototype styles/v2.css:965 — background: var(--bg-card) (#1b1c25),
+     mapped via --color-bg-elevated (skin-v2.css:220). */
+  background: var(--color-bg-elevated);
   border: 1px solid var(--color-border-default);
-  border-radius: var(--r-0);
+  /* prototype styles/v2.css:965 — border-radius: var(--radius-sm) (4px);
+     --r-0 resolves to 2px (tokens.css:246), a silent under-round. */
+  border-radius: var(--radius-sm);
   padding: 7px 9px;
   position: relative;
 }
@@ -387,7 +416,8 @@
   width: 34px;
   height: 34px;
   flex: none;
-  border-radius: var(--radius-2xs, 2px);
+  /* prototype styles/v2.css:967 — border-radius: var(--radius-xs) (3px). */
+  border-radius: var(--radius-xs, 3px);
   overflow: hidden;
   background: var(--color-bg-panel-alt);
   display: flex;
@@ -403,7 +433,8 @@
 }
 
 .cdraft-glyph {
-  color: var(--color-fg-muted);
+  /* prototype styles/v2.css:969 — color: var(--text-dim) → --color-fg-4. */
+  color: var(--color-fg-4);
   font-size: 17px;
 }
 
@@ -415,7 +446,9 @@
 }
 
 .cdraft-name {
-  font-size: var(--fs-xs, 12px);
+  /* prototype styles/v2.css:971 — font-size: 11.5px (literal: --fs-xs
+     resolves to 12/14px, never the half-px step). */
+  font-size: 11.5px;
   color: var(--color-fg-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -432,8 +465,10 @@
 }
 
 .cdraft-sub {
-  font-size: var(--fs-2xs, 10px);
-  color: var(--color-fg-muted);
+  /* prototype styles/v2.css:972 — font-size: 10px (literal: --fs-2xs
+     resolves to 11/13px); color: var(--text-dim) → --color-fg-4. */
+  font-size: 10px;
+  color: var(--color-fg-4);
 }
 
 .cdraft.voice {
@@ -462,8 +497,10 @@
 }
 
 .cdraft-dur {
-  font-size: var(--fs-xs, 12px);
-  color: var(--color-fg-secondary);
+  /* prototype styles/v2.css:977 — font-size: 11px; color: var(--text-mid)
+     (= --color-fg-muted, NOT fg-secondary). */
+  font-size: 11px;
+  color: var(--color-fg-muted);
 }
 
 .cdraft-tx {
@@ -476,16 +513,21 @@
 }
 
 .cdraft-tx-k {
+  /* prototype styles/v2.css:979 — font-family: var(--font-display);
+     font-size: 9px (literal: --fs-2xs resolves to 11/13px). */
+  font-family: var(--font-display);
   text-transform: uppercase;
   letter-spacing: 0.14em;
-  font-size: var(--fs-2xs, 10px);
+  font-size: 9px;
   color: var(--color-accent-fg);
   flex: none;
 }
 
 .cdraft-tx-v {
-  font-size: var(--fs-xs, 12px);
-  color: var(--color-fg-secondary);
+  /* prototype styles/v2.css:980 — font-size: 11.5px; color: var(--text-mid)
+     (= --color-fg-muted, NOT fg-secondary). */
+  font-size: 11.5px;
+  color: var(--color-fg-muted);
   line-height: 1.45;
 }
 
@@ -500,7 +542,8 @@
   justify-content: center;
   border: 0;
   background: transparent;
-  color: var(--color-fg-muted);
+  /* prototype styles/v2.css:981 — color: var(--text-dim) → --color-fg-4. */
+  color: var(--color-fg-4);
   cursor: pointer;
   font-size: 10px;
   border-radius: var(--radius-2xs, 2px);
@@ -535,14 +578,19 @@
 }
 
 .rec-lbl {
+  /* prototype styles/v2.css:988 — font-family: var(--font-display);
+     font-size: 10px (literal: --fs-2xs resolves to 11/13px). */
+  font-family: var(--font-display);
   text-transform: uppercase;
   letter-spacing: 0.16em;
-  font-size: var(--fs-2xs, 10px);
+  font-size: 10px;
   color: var(--color-status-err);
 }
 
 .rec-clock {
-  font-size: var(--fs-sm, 14px);
+  /* prototype styles/v2.css:989 — font-size: 13px (literal: --fs-sm resolves
+     to 13/15px depending on cascade — pin the prototype value). */
+  font-size: 13px;
   color: var(--color-fg-primary);
 }
 
@@ -565,9 +613,13 @@
 .rec-btn {
   height: 30px;
   padding: 0 12px;
-  border-radius: var(--r-0);
+  /* prototype styles/v2.css:992 — border-radius: var(--radius-sm) (4px),
+     NOT --r-0 (2px); font-family: var(--font-ui); font-size: 12px (literal:
+     --fs-xs resolves to 12/14px). */
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: var(--fs-xs, 12px);
+  font-family: var(--font-ui);
+  font-size: 12px;
   transition: 0.14s;
   flex: none;
 }
@@ -586,12 +638,16 @@
 .rec-btn.stop {
   background: var(--color-accent-fg);
   border: 1px solid var(--color-accent-fg);
-  color: var(--color-bg-surface);
+  /* prototype styles/v2.css:995 — color: var(--volt-ink), NOT bg-surface. */
+  color: var(--volt-ink);
 }
 
 .rec-btn.stop:hover {
-  filter: brightness(1.08);
-  box-shadow: 0 0 16px var(--color-accent-soft);
+  /* prototype styles/v2.css has no .rec-btn.stop:hover; mirror the volt send
+     button's hover (v2.css:952) so the two volt-filled buttons read the same:
+     background var(--volt-strong) + box-shadow var(--volt-glow) (0.22 alpha). */
+  background: var(--volt-strong);
+  box-shadow: 0 0 16px var(--volt-glow);
 }
 
 .chat-block-attach-img {

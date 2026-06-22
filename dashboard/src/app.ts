@@ -337,7 +337,12 @@ export function App() {
       data-volt=${tweaksVolt.value}
       data-surface=${currentTab}
       style=${{
-        '--twk-font-scale': String(tweaksFontScale.value / 100),
+        // tweaksFontScale.value is a percentage integer (80..140, default 100).
+        // craft-v2.css resolves it as `calc(var(--twk-font-scale) * 1%)`, so the
+        // raw percentage must be passed through. Dividing by 100 here (regressed
+        // in #21998) double-applies the percentage: 100 -> `1 * 1%` -> 0.16px,
+        // collapsing every inherited-font-size glyph (emoji, icon chars) to ~0px.
+        '--twk-font-scale': String(tweaksFontScale.value),
         '--thread-w': `${tweaksThreadW.value}px`,
       }}
     >

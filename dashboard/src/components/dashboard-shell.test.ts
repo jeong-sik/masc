@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
-import { ConnectionStatus, DashboardHealthStrip, DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute, SideRail, summarizeAttentionPreview } from './dashboard-shell'
+import { ConnectionStatus, DashboardHealthStrip, DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute, shouldRenderSurfaceLead, SideRail, summarizeAttentionPreview } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
 import { dashboardWsConnected, dashboardWsLastError, dashboardWsReady, dashboardWsSseFallbackActive } from '../dashboard-ws-state'
@@ -1050,5 +1050,34 @@ describe('DashboardHealthStrip v2 chrome', () => {
     const strip = container.querySelector('[data-testid="dashboard-health-strip"]')
     expect(strip).not.toBeNull()
     expect(strip?.classList.contains('v2-health-strip')).toBe(true)
+  })
+})
+
+describe('shouldRenderSurfaceLead', () => {
+  afterEach(() => {
+    route.value = { tab: 'overview', params: {}, postId: null }
+  })
+
+  // Surfaces that render the shared SurfaceHeader in their own body must NOT
+  // also get the generic SurfaceLead — otherwise the title renders twice.
+  // board regressed in #22021; monitoring/command/lab carried the same gap.
+  it.each(['monitoring', 'command', 'lab', 'board'] as const)(
+    'suppresses the generic SurfaceLead for the %s surface (renders its own SurfaceHeader)',
+    tab => {
+      expect(shouldRenderSurfaceLead({ tab, params: {}, postId: null })).toBe(false)
+    },
+  )
+
+  // code (IDE) has no bespoke header and is not a keeper-detail route, so it
+  // still relies on the generic SurfaceLead — a control that the set was not
+  // broadened to suppress the lead everywhere.
+  it('keeps the generic SurfaceLead for the code surface', () => {
+    expect(shouldRenderSurfaceLead({ tab: 'code', params: {}, postId: null })).toBe(true)
+  })
+
+  // keepers always renders its own keeper UI (keeper-detail guard short-circuits
+  // before the set lookup), so it never gets the generic lead.
+  it('suppresses the generic SurfaceLead for the keepers surface via the keeper-detail guard', () => {
+    expect(shouldRenderSurfaceLead({ tab: 'keepers', params: {}, postId: null })).toBe(false)
   })
 })

@@ -49,6 +49,20 @@ describe('App v2 header chrome', () => {
     expect(app?.hasAttribute('data-surface')).toBe(true)
   })
 
+  it('passes the font-scale percentage to --twk-font-scale without double-dividing (regression #21998)', () => {
+    renderApp()
+    const app = container.querySelector('.v2-app') as HTMLElement | null
+    expect(app).not.toBeNull()
+    const dataScale = app?.getAttribute('data-font-scale') ?? ''
+    const cssVar = app?.style.getPropertyValue('--twk-font-scale').trim() ?? ''
+    // craft-v2.css resolves the scale as `calc(var(--twk-font-scale) * 1%)`, so
+    // the CSS variable must carry the same raw percentage integer as
+    // data-font-scale. #21998 divided by 100 (data=100 but var=1), collapsing
+    // .v2-app font-size to 0.16px and hiding every inherited-size glyph/emoji.
+    expect(Number(cssVar)).toBe(Number(dataScale))
+    expect(Number(cssVar)).toBeGreaterThan(1)
+  })
+
   it('defaults to the v2 dark skin (no data-theme on the dashboard root)', () => {
     // Theme ownership lives on <html> (bootstrapped by main.ts, toggled by
     // ThemeSwitch). The app root no longer hard-codes a theme, so the default

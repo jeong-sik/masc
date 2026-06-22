@@ -8,6 +8,7 @@ export const SETTINGS_ROUTE_SECTION_IDS = [
   'runtimes',
   'routing',
   'prompts',
+  'fusion',
   'policy',
   'lifecycle',
   'sandbox',

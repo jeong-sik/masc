@@ -27,7 +27,9 @@ const SET_SECTIONS: [SectionId, string, string][] = [
   ['runtimes', 'Runtimes', '런타임 관리'],
   ['routing', 'Routing', '모델 라우팅'],
   ['prompts', 'Prompts', '기본 프롬프트'],
-  ['policy', 'Policy', '승인 정책'],
+  // keeper-v2 settings.jsx:35-36 — Fusion '패널·심판 심의', Policy '도구 정책'.
+  ['fusion', 'Fusion', '패널·심판 심의'],
+  ['policy', 'Policy', '도구 정책'],
   ['lifecycle', 'Lifecycle', 'keeper 수명'],
   ['sandbox', 'Sandbox', '샌드박스'],
   ['ide', 'IDE', 'IDE · 편집기'],
@@ -42,7 +44,9 @@ const SET_GROUPS: [string, SectionId[]][] = [
   // KO group labels per keeper-v2 settings.jsx SET_GROUPS — matches the
   // Korean section names below (avoids EN-header / KO-item bilingual mismatch).
   ['계정', ['account']],
-  ['Keeper 운영', ['runtime', 'routing', 'prompts', 'lifecycle', 'policy']],
+  // keeper-v2 settings.jsx:49 — 'Keeper 운영' group order: runtime · routing ·
+  // prompts · fusion · lifecycle · policy.
+  ['Keeper 운영', ['runtime', 'routing', 'prompts', 'fusion', 'lifecycle', 'policy']],
   ['인프라 · 실행', ['runtimes', 'sandbox', 'paths']],
   ['연결 · 통합', ['mcp', 'gate', 'ide']],
   ['관측 · 표시', ['logs', 'notify', 'display']],
@@ -68,12 +72,77 @@ export function mcpExposedToolNames(items: readonly DashboardToolInventoryItem[]
     .sort((a, b) => a.localeCompare(b))
 }
 
-const APPROVAL_ACTIONS: [string, string, string][] = [
-  ['git push / merge', 'always', '원격 브랜치에 쓰기'],
-  ['배포 (infra/deploy)', 'always', 'deploy 트리거'],
-  ['외부 호출 (Slack·Discord 발신)', 'risky', '외부로 메시지 전송'],
-  ['파일 쓰기 (worktree)', 'auto', 'keeper 워크트리 내 편집'],
-  ['읽기 전용 도구', 'auto', 'query·trace·blame 등'],
+// [fusion] preset shape from config/runtime.toml [fusion] — keeper-v2
+// settings.jsx:68-81 (FUSION). Describes the trio preset structure (panel
+// families, judge, timeouts). Read-only preview; no fusion config write
+// endpoint exists yet, so these are the documented config defaults, not live
+// values.
+type FusionConfig = {
+  readonly enabled: boolean
+  readonly defaultPreset: string
+  readonly maxConcurrentPanels: number
+  readonly perHourBudget: number
+  readonly webTools: boolean
+  readonly panel: readonly string[]
+  readonly judge: string
+  readonly panelTimeoutS: number
+  readonly judgeTimeoutS: number
+  readonly maxToolCallsPerPanel: number
+}
+const FUSION: FusionConfig = {
+  enabled: true,
+  defaultPreset: 'trio',
+  maxConcurrentPanels: 2,
+  perHourBudget: 20,
+  webTools: false,
+  panel: [
+    'ollama_cloud.deepseek-v4-flash',
+    'glm-coding.glm-5-turbo',
+    'ollama_cloud.minimax-m3',
+  ],
+  judge: 'deepseek.deepseek-v4-pro',
+  panelTimeoutS: 300,
+  judgeTimeoutS: 300,
+  maxToolCallsPerPanel: 0,
+}
+
+// tool_policy.toml named groups referenced by keeper tool_access lists —
+// keeper-v2 settings.jsx:85-97 (TOOL_GROUPS). kind 'local' = [groups.*]
+// (keeper-local), 'masc' = [masc.*] (server). guard/optin map to the
+// [groups.execute] 3-layer guard and opt-in voice group.
+type ToolGroup = {
+  readonly id: string
+  readonly kind: 'local' | 'masc'
+  readonly tools: readonly string[]
+  readonly guard?: boolean
+  readonly optin?: boolean
+}
+const TOOL_GROUPS: readonly ToolGroup[] = [
+  { id: 'base', kind: 'local', tools: ['keeper_time_now', 'keeper_context_status', 'keeper_memory_search', 'keeper_memory_write', 'keeper_tool_search', 'keeper_tools_list'] },
+  { id: 'board_core', kind: 'local', tools: ['keeper_board_get', 'keeper_board_post', 'keeper_board_comment', 'keeper_board_vote', 'keeper_board_list', 'keeper_board_curation_read', 'keeper_board_curation_submit'] },
+  { id: 'workspace_core', kind: 'local', tools: ['keeper_tasks_list', 'keeper_task_claim', 'keeper_task_create', 'keeper_task_done', 'keeper_broadcast'] },
+  { id: 'filesystem', kind: 'local', tools: ['tool_read_file'] },
+  { id: 'workspace_write', kind: 'local', tools: ['tool_edit_file', 'tool_write_file'] },
+  { id: 'execute', kind: 'local', guard: true, tools: ['tool_execute'] },
+  { id: 'library', kind: 'local', tools: ['keeper_library_search', 'keeper_library_read'] },
+  { id: 'voice', kind: 'local', optin: true, tools: ['keeper_voice_speak', 'keeper_voice_listen', 'keeper_voice_agent', 'keeper_voice_sessions'] },
+  { id: 'masc.essential', kind: 'masc', tools: ['masc_status', 'masc_web_search', 'masc_web_fetch'] },
+  { id: 'masc.workspace', kind: 'masc', tools: ['masc_tasks', 'masc_claim_next', 'masc_transition', 'masc_add_task', 'masc_agents', 'masc_broadcast', 'masc_messages', 'masc_heartbeat'] },
+  { id: 'masc.goal', kind: 'masc', tools: ['masc_goal_list', 'masc_goal_upsert', 'masc_goal_transition', 'masc_goal_verify'] },
+]
+// [groups.last_turn_safe] — keeper-v2 settings.jsx:99. On a keeper's final
+// turn, allowed tools are intersected with this set.
+const LAST_TURN_SAFE: readonly string[] = ['keeper_board_post', 'keeper_board_comment', 'keeper_board_curation_submit', 'keeper_context_status', 'extend_turns', 'keeper_time_now', 'keeper_tool_search', 'keeper_broadcast', 'keeper_tasks_list', 'keeper_task_done', 'masc_tasks', 'masc_transition', 'tool_read_file', 'tool_search_files', 'tool_execute', 'masc_web_search', 'masc_web_fetch']
+// tool_execute 3-layer deterministic guard — keeper-v2 settings.jsx:101
+// ([groups.execute]).
+const EXEC_GUARD: readonly string[] = ['validate_command', 'destructive_guard', 'write_gate']
+// [discord].trigger_policy — keeper-v2 settings.jsx:103-108. env
+// MASC_DISCORD_TRIGGER_POLICY overrides.
+const DISCORD_TRIGGER: readonly [string, string][] = [
+  ['mention_or_thread', '스레드 자동 응답, 일반 채널은 멘션 필요 (기본)'],
+  ['mention_only', '@멘션된 메시지만 응답'],
+  ['all', '모든 메시지에 응답'],
+  ['user_only', '특정 사용자(snowflake)만'],
 ]
 
 // System-log row: [time, level, identity, message, status]. Derived from live
@@ -418,10 +487,21 @@ export function SettingsSurface() {
     return () => { active = false }
   }, [])
 
-  // policy
-  const [approve, setApprove] = useState<Record<string, string>>(
-    Object.fromEntries(APPROVAL_ACTIONS.map(a => [a[0], a[1]])),
+  // policy — tool-group grants (namespace default-grant per [groups.*]); opt-in groups
+  // start off. keeper-v2 settings.jsx:177.
+  const [grant, setGrant] = useState<Record<string, boolean>>(
+    Object.fromEntries(TOOL_GROUPS.map(g => [g.id, !g.optin])),
   )
+
+  // fusion (config/runtime.toml [fusion]) — keeper-v2 settings.jsx:178-182
+  const [fusionOn, setFusionOn] = useState(FUSION.enabled)
+  const [fusionPreset, setFusionPreset] = useState(FUSION.defaultPreset)
+  const [fusionPanels, setFusionPanels] = useState(FUSION.maxConcurrentPanels)
+  const [fusionBudget, setFusionBudget] = useState(FUSION.perHourBudget)
+  const [fusionWeb, setFusionWeb] = useState(FUSION.webTools)
+
+  // discord trigger policy (gate section) — keeper-v2 settings.jsx:183
+  const [discordTrigger, setDiscordTrigger] = useState('mention_or_thread')
 
   // lifecycle
   const [idleDrain, setIdleDrain] = useState(30)
@@ -699,21 +779,82 @@ export function SettingsSurface() {
               </div>
             `}
 
-            ${sec === 'policy' && html`
-              <div class="set-policy-legend">
-                <span><b class="mono">always</b> require approval</span>
-                <span><b class="mono">risky</b> only when risky</span>
-                <span><b class="mono">auto</b> allow automatically</span>
+            ${sec === 'fusion' && html`
+              <div class="set-hint" style=${{ marginBottom: '12px' }}>
+                <span class="mono">masc_fusion</span> 의 out-of-band 심의 루프 (RFC-0252). 서로 다른 모델 패밀리로 패널을 구성해 관점 다양성을 확보하고, 심판이 종합합니다. fusion이 발화 가치 있는지는 keeper가 판단하고 게이트는 남용만 막습니다.
               </div>
-              ${APPROVAL_ACTIONS.map(([action, , hint]) => html`
-                <${SetRow} key=${action} label=${action} hint=${hint}>
-                  <${SetSeg}
-                    value=${approve[action]}
-                    options=${['always', 'risky', 'auto']}
-                    onChange=${(v: string) => setApprove(p => ({ ...p, [action]: v }))}
-                  />
+              <${SetRow} label="Fusion 심의" hint="끄면 masc_fusion 호출이 게이트에서 Deny 반환">
+                <${SetToggle} on=${fusionOn} onChange=${setFusionOn} />
+              <//>
+              ${fusionOn && html`
+                <${SetRow} label="기본 프리셋" hint="default_preset">
+                  <${SetSeg} value=${fusionPreset} options=${['trio']} onChange=${setFusionPreset} />
                 <//>
+                <${SetRow} label="동시 패널 수" hint="max_concurrent_panels · Async_agent.all 상한">
+                  <${SetStepper} v=${fusionPanels} set=${setFusionPanels} min=${1} max=${8} />
+                <//>
+                <${SetRow} label="시간당 발화 budget" hint="[fusion.gate].per_hour_budget · UTC hour bucket">
+                  <${SetStepper} v=${fusionBudget} set=${setFusionBudget} min=${1} max=${100} />
+                <//>
+                <${SetRow} label="패널·심판 웹 도구" hint="web_search / web_fetch 주입 여부">
+                  <${SetToggle} on=${fusionWeb} onChange=${setFusionWeb} />
+                <//>
+                <div class="set-sub-h">trio 프리셋</div>
+                <div class="set-fus-preset">
+                  <div class="set-fus-lane">
+                    <div class="set-fus-lane-h">panel · ${FUSION.panel.length}</div>
+                    ${FUSION.panel.map(id => html`<div key=${id} class="set-fus-model mono">${id}</div>`)}
+                  </div>
+                  <div class="set-fus-lane">
+                    <div class="set-fus-lane-h">judge</div>
+                    <div class="set-fus-model judge mono">${FUSION.judge}</div>
+                  </div>
+                </div>
+                <div class="set-mcp-detail mono" style=${{ marginTop: '10px' }}>
+                  panel_timeout ${FUSION.panelTimeoutS}s · judge_timeout ${FUSION.judgeTimeoutS}s · max_tool_calls_per_panel ${FUSION.maxToolCallsPerPanel} (0 = 무제한)
+                </div>
+              `}
+            `}
+
+            ${sec === 'policy' && html`
+              <div class="set-hint" style=${{ marginBottom: '12px' }}>
+                keeper 의 <span class="mono">tool_access</span> 는 named 그룹(<span class="mono">tool_policy.toml</span>)의 도구를 참조합니다. 여기서 namespace 기본 부여 그룹과 안전장치를 관리합니다.
+              </div>
+              <div class="set-sub-h">도구 그룹 부여</div>
+              ${TOOL_GROUPS.map(g => html`
+                <div key=${g.id} class="set-tg-row" data-testid="set-tg-row">
+                  <div class="set-tg-l">
+                    <div class="set-tg-head">
+                      <span class="set-tg-id mono">${g.id}</span>
+                      <span class=${`set-tg-kind ${g.kind}`}>${g.kind}</span>
+                      ${g.guard ? html`<span class="set-tg-kind guard">3-layer guard</span>` : null}
+                      ${g.optin ? html`<span class="set-tg-kind optin">opt-in</span>` : null}
+                    </div>
+                    <div class="set-tg-tools">${g.tools.map(t => html`<span key=${t} class="set-tg-chip mono">${t}</span>`)}</div>
+                  </div>
+                  <${SetToggle}
+                    on=${grant[g.id] ?? false}
+                    onChange=${(v: boolean) => setGrant(p => ({ ...p, [g.id]: v }))}
+                  />
+                </div>
               `)}
+
+              <div class="set-sub-h">tool_execute 가드 — 3계층 결정적</div>
+              <div class="set-hint" style=${{ marginBottom: '8px' }}>
+                셸 타입된 argv 명령은 세 계층을 순차 통과해야 실행됩니다. redirection/tee 또는 직접 file write 우회는 여기서 막힙니다.
+              </div>
+              <div class="set-guard" data-testid="set-guard">
+                ${EXEC_GUARD.map((step, i) => html`
+                  ${i > 0 ? html`<span key=${`a${i}`} class="set-guard-arrow">→</span>` : null}
+                  <span key=${step} class="set-guard-step mono">${step}</span>
+                `)}
+              </div>
+
+              <div class="set-sub-h">마지막 턴 안전 도구 — last_turn_safe</div>
+              <div class="set-hint" style=${{ marginBottom: '8px' }}>
+                keeper 의 마지막 턴에서는 허용 도구가 이 집합과 교집합됩니다 (${LAST_TURN_SAFE.length}개).
+              </div>
+              <div class="set-tg-tools">${LAST_TURN_SAFE.map(t => html`<span key=${t} class="set-tg-chip mono safe">${t}</span>`)}</div>
             `}
 
             ${sec === 'lifecycle' && html`
@@ -872,6 +1013,30 @@ export function SettingsSurface() {
                   <${SetToggle} on=${gateOn[g]} onChange=${(v: boolean) => setGateOn(p => ({ ...p, [g]: v }))} />
                 <//>
               `)}
+              ${gateOn.Discord && html`
+                <div class="set-sub-h">Discord 트리거 정책</div>
+                <div class="set-hint" style=${{ marginBottom: '8px' }}>
+                  어떤 인바운드 이벤트에 봇이 응답할지 — <span class="mono">[discord].trigger_policy</span> · env <span class="mono">MASC_DISCORD_TRIGGER_POLICY</span> 우선.
+                </div>
+                ${DISCORD_TRIGGER.map(([val, hint]) => html`
+                  <button
+                    type="button"
+                    key=${val}
+                    class=${`set-trigger ${discordTrigger === val ? 'on' : ''}`}
+                    data-testid="set-trigger"
+                    data-active=${discordTrigger === val ? 'true' : 'false'}
+                    aria-disabled="true"
+                    disabled
+                    onClick=${() => setDiscordTrigger(val)}
+                  >
+                    <span class="set-trigger-radio"></span>
+                    <span class="set-trigger-l">
+                      <span class="mono">${val}</span>
+                      <span class="set-trigger-hint">${hint}</span>
+                    </span>
+                  </button>
+                `)}
+              `}
             `}
 
             ${sec === 'paths' && html`

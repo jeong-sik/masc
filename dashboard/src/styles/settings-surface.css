@@ -754,6 +754,207 @@
   color: var(--volt);
 }
 
+/* tool-group policy — keeper-v2 styles/surfaces.css:555-565 (.set-tg-*) */
+.set-tg-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.set-tg-l {
+  flex: 1;
+  min-width: 0;
+}
+
+.set-tg-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 7px;
+}
+
+.set-tg-id {
+  font-size: 12.5px;
+  color: var(--text-bright);
+}
+
+.set-tg-kind {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border-soft);
+  color: var(--text-dim);
+}
+
+.set-tg-kind.masc {
+  color: var(--volt);
+  border-color: var(--volt-dim);
+  background: var(--volt-wash);
+}
+
+.set-tg-kind.guard {
+  color: var(--status-warn);
+  border-color: color-mix(in oklab, var(--status-warn) 45%, transparent);
+}
+
+.set-tg-kind.optin {
+  color: var(--text-mid);
+}
+
+.set-tg-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.set-tg-chip {
+  font-size: 10.5px;
+  padding: 2px 7px;
+  background: var(--bg-well);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-xs);
+  color: var(--text-mid);
+}
+
+.set-tg-chip.safe {
+  border-color: color-mix(in oklab, var(--status-ok) 35%, transparent);
+  color: color-mix(in oklab, var(--status-ok) 80%, var(--text-mid));
+}
+
+/* tool_execute 3-layer guard — keeper-v2 styles/surfaces.css:567-569 */
+.set-guard {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  padding: 4px 0 4px;
+}
+
+.set-guard-step {
+  font-size: 12px;
+  padding: 6px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-sm);
+  color: var(--text-bright);
+  box-shadow: inset 0 0 0 1px var(--volt-wash);
+}
+
+.set-guard-arrow {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+/* fusion preset — keeper-v2 styles/surfaces.css:572-577 (.set-fus-*) */
+.set-fus-preset {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.set-fus-lane {
+  padding: 11px 13px;
+  background: var(--bg-well);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+}
+
+.set-fus-lane-h {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.set-fus-model {
+  font-size: 12px;
+  color: var(--text-mid);
+  padding: 5px 9px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-xs);
+  margin-bottom: 5px;
+}
+
+.set-fus-model:last-child {
+  margin-bottom: 0;
+}
+
+.set-fus-model.judge {
+  color: var(--volt);
+  border-color: var(--volt-dim);
+  background: var(--volt-wash);
+}
+
+/* Discord trigger radios — keeper-v2 styles/surfaces.css:580-587 (.set-trigger*) */
+.set-trigger {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: 0.14s;
+}
+
+.set-trigger:hover {
+  border-color: var(--volt-dim);
+}
+
+.set-trigger.on {
+  border-color: var(--volt-dim);
+  background: var(--volt-wash);
+}
+
+.set-trigger:disabled {
+  cursor: not-allowed;
+}
+
+.set-trigger-radio {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-highlight);
+  transition: 0.14s;
+}
+
+.set-trigger.on .set-trigger-radio {
+  border-color: var(--volt);
+  box-shadow: inset 0 0 0 3px var(--volt);
+}
+
+.set-trigger-l {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.set-trigger-l .mono {
+  font-size: 12.5px;
+  color: var(--text-bright);
+}
+
+.set-trigger-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
 /* v2.css utility classes referenced by the surface but not imported globally */
 .act {
   font-family: var(--font-ui);

@@ -383,6 +383,60 @@ describe('SettingsSurface', () => {
     })
   })
 
+  it('renders the fusion preset section (panel families + judge) read-only', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-fusion"]') as HTMLElement)
+
+    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('패널·심판 심의')
+    // trio preset lanes: 3 panel models + 1 judge, with prototype labels.
+    const lanes = container.querySelectorAll('.set-fus-lane')
+    expect(lanes.length).toBe(2)
+    const models = Array.from(container.querySelectorAll('.set-fus-model')).map(n => n.textContent)
+    expect(models).toContain('ollama_cloud.deepseek-v4-flash')
+    expect(models).toContain('glm-coding.glm-5-turbo')
+    expect(models).toContain('ollama_cloud.minimax-m3')
+    expect(container.querySelector('.set-fus-model.judge')?.textContent).toBe('deepseek.deepseek-v4-pro')
+    expect(container.querySelector('[data-testid="set-toggle"]')?.getAttribute('aria-disabled')).toBe('true')
+  })
+
+  it('renders the tool-group policy with exec-guard and last_turn_safe', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-policy"]') as HTMLElement)
+
+    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('도구 정책')
+    // 11 named tool groups from tool_policy.toml.
+    expect(container.querySelectorAll('[data-testid="set-tg-row"]').length).toBe(11)
+    // execute group carries the 3-layer guard badge; voice is opt-in.
+    const kinds = Array.from(container.querySelectorAll('.set-tg-kind')).map(n => n.textContent?.trim())
+    expect(kinds).toContain('3-layer guard')
+    expect(kinds).toContain('opt-in')
+    // exec-guard pipeline: validate_command → destructive_guard → write_gate.
+    const guardSteps = Array.from(
+      container.querySelectorAll('[data-testid="set-guard"] .set-guard-step'),
+    ).map(n => n.textContent)
+    expect(guardSteps).toEqual(['validate_command', 'destructive_guard', 'write_gate'])
+    expect(container.querySelectorAll('[data-testid="set-guard"] .set-guard-arrow').length).toBe(2)
+    // last_turn_safe chips carry the .safe modifier.
+    expect(container.querySelectorAll('.set-tg-chip.safe').length).toBeGreaterThan(0)
+  })
+
+  it('shows Discord trigger radios only while the Discord gate is on', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-gate"]') as HTMLElement)
+
+    // Discord gate defaults on → trigger radios visible with prototype values.
+    const triggers = () => Array.from(container.querySelectorAll('[data-testid="set-trigger"]'))
+    expect(triggers().length).toBe(4)
+    const vals = triggers().map(t => t.querySelector('.mono')?.textContent)
+    expect(vals).toEqual(['mention_or_thread', 'mention_only', 'all', 'user_only'])
+    // default selection is mention_or_thread; controls are read-only previews.
+    expect(triggers()[0]!.classList.contains('on')).toBe(true)
+    expect((triggers()[0] as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it('opens the live runtime.toml editor from runtime management', async () => {
     const runtimeConfig = {
       ok: true,

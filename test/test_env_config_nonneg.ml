@@ -111,6 +111,24 @@ let test_float_nonneg_garbage_uses_default () =
     (C.get_float_nonneg
        ~default:8.0 "MASC_TEST_NONNEG_FLOAT_GARBAGE")
 
+(* ── production knob regression anchors ───────────────────────────────
+   Pin the two knobs whose call sites (sse.ml [snapshot_min_interval_sec],
+   server_runtime_bootstrap.ml [gc_space_overhead]) were changed from a
+   hand-rolled [try _of_string (Sys.getenv ..) with Not_found -> default]
+   -- which let [Failure] escape and crash module load on a malformed
+   value -- to these validated helpers.  Garbage must now yield the
+   documented default rather than raise. *)
+
+let test_snapshot_interval_garbage_uses_default () =
+  with_env "MASC_SNAPSHOT_INTERVAL_SEC" "notafloat" @@ fun () ->
+  check_float "MASC_SNAPSHOT_INTERVAL_SEC garbage -> default 5.0" 5.0
+    (C.get_float_nonneg ~default:5.0 "MASC_SNAPSHOT_INTERVAL_SEC")
+
+let test_gc_space_overhead_garbage_uses_default () =
+  with_env "MASC_GC_SPACE_OVERHEAD" "abc" @@ fun () ->
+  check_int "MASC_GC_SPACE_OVERHEAD garbage -> default 100" 100
+    (C.get_int_nonneg ~default:100 "MASC_GC_SPACE_OVERHEAD")
+
 (* ── runner ───────────────────────────────────────────────────────── *)
 
 let () =
@@ -147,5 +165,12 @@ let () =
             test_float_nonneg_unset_uses_default;
           Alcotest.test_case "garbage → default" `Quick
             test_float_nonneg_garbage_uses_default;
+        ] );
+      ( "production_knob_regression",
+        [
+          Alcotest.test_case "MASC_SNAPSHOT_INTERVAL_SEC garbage → default"
+            `Quick test_snapshot_interval_garbage_uses_default;
+          Alcotest.test_case "MASC_GC_SPACE_OVERHEAD garbage → default"
+            `Quick test_gc_space_overhead_garbage_uses_default;
         ] );
     ]

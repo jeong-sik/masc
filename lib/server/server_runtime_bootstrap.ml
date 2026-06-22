@@ -155,9 +155,13 @@ let () =
   Dashboard_snapshot.register_namespace_truth_snapshot Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches;
   if Option.is_none (Sys.getenv_opt "OCAMLRUNPARAM") then begin
     let open Gc in
+    (* Route through the validated helper: a malformed value (e.g.
+       MASC_GC_SPACE_OVERHEAD=abc) previously raised [Failure] -- the
+       hand-rolled [with Not_found] only caught the unset case, so a typo
+       in this env var crashed server bootstrap. [get_int_nonneg] also
+       maps a negative value to the default. *)
     let gc_space_overhead =
-      try int_of_string (Sys.getenv "MASC_GC_SPACE_OVERHEAD")
-      with Not_found -> 100
+      Env_config_core.get_int_nonneg ~default:100 "MASC_GC_SPACE_OVERHEAD"
     in
     let ctrl = get () in
     set { ctrl with

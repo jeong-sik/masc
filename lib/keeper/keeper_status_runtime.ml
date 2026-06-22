@@ -37,7 +37,13 @@ let next_model_hint_of_meta (m : keeper_meta) : string option =
      hint requires extending the meta schema to persist next_runtime per keeper
      (a separate change). Returns [None]; the dashboard already treats null as
      "no hint" (keeper-store-normalize.ts). The emit sites stay wired so the
-     hint activates automatically once a source exists. *)
+     hint activates automatically once a source exists.
+
+     Unlike [models_resolved] (removed in this PR as a dead duplicate of the
+     live [models] field), [next_model_hint] is retained as forward-wiring:
+     same emit -> normalize -> unconsumed shape, but [models_resolved] had a
+     live sibling to serve the same data, whereas [next_model_hint] has no
+     source yet and lights up once [next_runtime] is persisted. *)
   let _ = m in
   None
 

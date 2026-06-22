@@ -13,9 +13,6 @@ open Server_utils
 module Http = Http_server_eio
 module Ws = Httpun_ws
 
-(** SHA1 for httpun-ws handshake. *)
-let sha1 s = Digestif.SHA1.(digest_string s |> to_raw_string)
-
 (** Send text frame via WebSocket. *)
 let send_text wsd s =
   let bytes = Bytes.unsafe_of_string s in
@@ -49,7 +46,14 @@ let read_frame_text ~len ~on_text payload =
     schedule ())
 ;;
 
-(** Per-connection state shared across frame handler and relay fibers. *)
+(** Per-connection state shared across frame handler and relay fibers.
+
+    [sw] is the server-lifetime switch (LSP processes + their reader
+    fibers are spawned on it).  Per-connection reclamation is explicit
+    via {!disconnect} rather than switch teardown, because under the
+    Gluten upgrade model ({!Server_mcp_transport_ws.respond_and_drive_upgrade})
+    the upgrade handler cannot block to hold a per-connection switch
+    open.  RFC-0281 Phase 2. *)
 type conn_state =
   { sw : Eio.Switch.t
   ; router : Lsp_message_router.t
@@ -61,22 +65,36 @@ type conn_state =
   ; send_mutex : Eio.Mutex.t
   ; spawn_mutex : Eio.Mutex.t
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
-  ; on_disconnect : unit Eio.Promise.u
   ; disconnected : bool Atomic.t
   }
 
 let base_path_of_state state = (Mcp_server.workspace_config state).base_path
 
-(** Signal connection end — resolves the disconnect promise so
-    [Eio.Switch.run] exits and cleans up all associated resources. *)
+(** Signal connection end.  Idempotent (guarded by [disconnected]).
+
+    Explicitly shuts down every spawned LSP process.
+    [Lsp_process_manager.shutdown] closes the process stdin/stdout/stderr
+    flows, which makes the response-reader and stderr-drain fibers' reads
+    raise so those fibers exit — so this reclaims the processes AND their
+    fibers without a switch teardown.  Required because [cs.sw] is the
+    server switch: without explicit shutdown the processes would leak
+    until server shutdown (RFC-0261).  Taken under [spawn_mutex] so it
+    cannot race a concurrent {!ensure_lsp_process}.  RFC-0281 Phase 2. *)
 let disconnect cs =
   if Atomic.compare_and_set cs.disconnected false true
-  then Eio.Promise.resolve cs.on_disconnect ()
+  then
+    Eio.Mutex.use_rw ~protect:true cs.spawn_mutex (fun () ->
+      Hashtbl.iter (fun _ proc -> Lsp_process_manager.shutdown proc) cs.processes;
+      Hashtbl.clear cs.processes)
 ;;
 
 (** Thread-safe send: serializes WebSocket writes across fibers. *)
 let send cs msg =
-  Eio.Mutex.use_rw ~protect:true cs.send_mutex (fun () -> send_text cs.wsd msg)
+  if Atomic.get cs.disconnected
+  then ()
+  else
+    Eio.Mutex.use_rw ~protect:true cs.send_mutex (fun () ->
+      if not (Atomic.get cs.disconnected) then send_text cs.wsd msg)
 ;;
 
 (** JSON-RPC request ID — LSP spec allows integer or string. *)
@@ -249,7 +267,13 @@ let extract_line params =
 (** Ensure LSP process exists for a language.
     Spawns + initializes on first use, blocking until ready. *)
 let ensure_lsp_process cs lang_id =
-  Eio.Mutex.use_rw ~protect:true cs.spawn_mutex (fun () ->
+  if Atomic.get cs.disconnected
+  then Error "connection closed"
+  else
+    Eio.Mutex.use_rw ~protect:true cs.spawn_mutex (fun () ->
+      if Atomic.get cs.disconnected
+      then Error "connection closed"
+      else
     match Hashtbl.find_opt cs.processes lang_id with
     | Some proc -> Ok proc
     | None ->
@@ -707,9 +731,12 @@ let handle_document_highlight cs params id =
 
 (** Dispatch an incoming LSP message to the appropriate handler. *)
 let dispatch_message cs msg =
-  try
-    let json = Yojson.Safe.from_string msg in
-    match json with
+  if Atomic.get cs.disconnected
+  then ()
+  else
+    try
+      let json = Yojson.Safe.from_string msg in
+      match json with
     | `Assoc fields ->
       let method_opt =
         match List.assoc_opt "method" fields with
@@ -775,10 +802,12 @@ let dispatch_message cs msg =
           | None -> send_error cs n Mcp_error_code.(to_wire_code Method_not_found) ("Unhandled method: " ^ m))
        (* Server-initiated notification broadcast *)
        | Some m, None ->
-         Hashtbl.iter
-           (fun _lang_id proc ->
-              Lsp_message_router.send_notification cs.router proc ~method_:m ~params)
-           cs.processes
+         Eio.Mutex.use_rw ~protect:true cs.spawn_mutex (fun () ->
+           if not (Atomic.get cs.disconnected) then
+             Hashtbl.iter
+               (fun _lang_id proc ->
+                  Lsp_message_router.send_notification cs.router proc ~method_:m ~params)
+               cs.processes)
        (* No method field *)
        | None, Some n -> send_error cs n Mcp_error_code.(to_wire_code Invalid_request) "Missing method field"
        | None, None -> ())
@@ -798,9 +827,9 @@ let dispatch_message cs msg =
 (** Register the /api/v1/ide/lsp WebSocket endpoint. *)
 let add_routes ~sw ~clock router =
   let router =
-    Http.Router.get
+    Http.Router.ws_get
       "/api/v1/ide/lsp"
-      (fun request reqd ->
+      (fun ~upgrade request reqd ->
          with_public_read
            (fun state _req reqd ->
               let origin =
@@ -812,58 +841,62 @@ let add_routes ~sw ~clock router =
                | None ->
                  Log.Server.warn "LSP WebSocket: no proc_mgr available"
                | Some proc_mgr ->
-               Ws.Handshake.respond_with_upgrade ~sha1 reqd (fun () ->
-                 Eio.Switch.run (fun conn_sw ->
-                   let done_promise, done_resolver = Eio.Promise.create () in
-                   let ws_conn =
-                     Ws.Server_connection.create_websocket (fun wsd ->
-                       Log.Server.info "LSP WebSocket connected from %s" origin;
-                       let cs =
-                         { sw = conn_sw
-                         ; router = Lsp_message_router.create ()
-                         ; processes = Hashtbl.create 4
-                         ; wsd
-                         ; base_path = base_path_of_state state
-                         ; proc_mgr
-                         ; workspace_root = ref (base_path_of_state state)
-                         ; send_mutex = Eio.Mutex.create ()
-                         ; spawn_mutex = Eio.Mutex.create ()
-                         ; clock
-                         ; on_disconnect = done_resolver
-                         ; disconnected = Atomic.make false
-                         }
-                      in
-                      { Ws.Websocket_connection.frame =
-                          (fun ~opcode ~is_fin:_ ~len payload ->
-                            match opcode with
-                            | `Text | `Binary ->
-                              read_frame_text
-                                ~len
-                                ~on_text:(fun msg -> dispatch_message cs msg)
-                                payload
-                            | `Ping ->
-                              (try Ws.Wsd.send_pong wsd with
-                               | exn ->
-                                 Log.Server.debug
-                                   "LSP send_pong failed: %s"
-                                   (Printexc.to_string exn));
-                              Ws.Payload.close payload
-                            | `Connection_close ->
-                              Log.Server.info "LSP WebSocket disconnecting";
-                              disconnect cs;
-                              Ws.Payload.close payload
-                            | `Pong | `Continuation | `Other _ -> Ws.Payload.close payload)
-                      ; eof =
-                          (fun ?error:_ () ->
-                            Log.Server.info "LSP WebSocket EOF";
-                            disconnect cs)
-                      })
-                  in
-                  ignore ws_conn;
-                  ignore (Eio.Promise.await done_promise)))
-              |> function
-              | Ok () -> ()
-              | Error e -> Log.Server.warn "WebSocket upgrade failed: %s" e))
+                 (* RFC-0281: drive the upgraded connection via the shared
+                    attachment SSOT.  The previous code built [ws_conn] and
+                    [ignore]d it (never calling Gluten [upgrade]), so frames
+                    were never read; it also blocked on a per-connection
+                    [Eio.Switch.run] + promise, which the Gluten model
+                    forbids.  Subprocesses are now reclaimed explicitly in
+                    {!disconnect} (called from [Connection_close]/[eof]). *)
+                 (match
+                    Server_mcp_transport_ws.respond_and_drive_upgrade
+                      ~upgrade
+                      ~reqd
+                      ~handler:(fun wsd ->
+                        Log.Server.info "LSP WebSocket connected from %s" origin;
+                        let cs =
+                          { sw
+                          ; router = Lsp_message_router.create ()
+                          ; processes = Hashtbl.create 4
+                          ; wsd
+                          ; base_path = base_path_of_state state
+                          ; proc_mgr
+                          ; workspace_root = ref (base_path_of_state state)
+                          ; send_mutex = Eio.Mutex.create ()
+                          ; spawn_mutex = Eio.Mutex.create ()
+                          ; clock
+                          ; disconnected = Atomic.make false
+                          }
+                        in
+                        { Ws.Websocket_connection.frame =
+                            (fun ~opcode ~is_fin:_ ~len payload ->
+                              match opcode with
+                              | `Text | `Binary ->
+                                read_frame_text
+                                  ~len
+                                  ~on_text:(fun msg -> dispatch_message cs msg)
+                                  payload
+                              | `Ping ->
+                                (try Ws.Wsd.send_pong wsd with
+                                 | exn ->
+                                   Log.Server.debug
+                                     "LSP send_pong failed: %s"
+                                     (Printexc.to_string exn));
+                                Ws.Payload.close payload
+                              | `Connection_close ->
+                                Log.Server.info "LSP WebSocket disconnecting";
+                                disconnect cs;
+                                Ws.Payload.close payload
+                              | `Pong | `Continuation | `Other _ ->
+                                Ws.Payload.close payload)
+                        ; eof =
+                            (fun ?error:_ () ->
+                              Log.Server.info "LSP WebSocket EOF";
+                              disconnect cs)
+                        })
+                  with
+                  | Ok () -> ()
+                  | Error e -> Log.Server.warn "WebSocket upgrade failed: %s" e)))
            request
            reqd)
       router

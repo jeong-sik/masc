@@ -1,6 +1,7 @@
 open Alcotest
 
 module Lsp = Server_ide_lsp_proxy.For_testing
+module Http = Masc.Http_server_eio
 
 let member key = function
   | `Assoc fields -> List.assoc_opt key fields
@@ -77,6 +78,30 @@ let test_file_uri_resolution_is_workspace_scoped () =
     (Lsp.resolve_relative ~base "file:///tmp/outside.ml")
 ;;
 
+(* RFC-0281 Phase 2: [/api/v1/ide/lsp] must be a typed WebSocket-upgrade
+   route ([Router.Ws]).  Only a Ws route receives the Gluten [upgrade]
+   capability, so a regression to [Router.Plain] would silently
+   reintroduce the undriven-socket defect (frames never read).  [add_routes]
+   only registers the closure here — no process is spawned — so the
+   [Eio_main.run] just supplies the switch + clock it captures. *)
+let test_lsp_route_is_ws () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let clock = Eio.Stdenv.clock env in
+      let router =
+        Server_ide_lsp_proxy.add_routes ~sw ~clock (Http.Router.create ())
+      in
+      let request = Httpun.Request.create `GET "/api/v1/ide/lsp" in
+      match Http.Router.resolve router request with
+      | `Matched route ->
+        (match route.Http.Router.handler with
+         | Http.Router.Ws _ -> ()
+         | Http.Router.Plain _ ->
+           fail "/api/v1/ide/lsp must be a Router.Ws route, not Plain")
+      | `Method_not_allowed | `Not_found ->
+        fail "/api/v1/ide/lsp route must resolve"))
+;;
+
 let () =
   run
     "server_ide_lsp_proxy"
@@ -87,6 +112,8 @@ let () =
             test_workspace_root_initialize_stays_in_base
         ; test_case "file uri resolution is workspace scoped" `Quick
             test_file_uri_resolution_is_workspace_scoped
+        ; test_case "/api/v1/ide/lsp is a Ws upgrade route" `Quick
+            test_lsp_route_is_ws
         ] )
     ]
 ;;

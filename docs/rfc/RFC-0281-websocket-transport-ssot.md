@@ -116,7 +116,11 @@ val mcp_websocket_handler
 - A (same-origin): `respond_and_drive_upgrade ~upgrade ~reqd ~handler:(mcp_websocket_handler ?sw ?clock ~on_message ~origin_label:"same-origin /ws")`.
 - C (standalone): `Ws_eio.Server.create_connection_handler ~sw (mcp_websocket_handler ~sw ~clock ~on_message ~origin_label:"standalone")`.
 
-B (IDE LSP) shares §3.1 attachment but **not** §3.2: it is a different protocol (LSP dispatch, not `dispatch_inbound_message`). Its `wsd -> Websocket_connection.t` builder stays in `server_ide_lsp_proxy.ml`, but routed through `respond_and_drive_upgrade` so it is actually driven (fixing the B liveness/no-read defect). Its `Pong` branch is corrected to record liveness.
+B (IDE LSP) shares §3.1 attachment but **not** §3.2: it is a different protocol (LSP dispatch, not `dispatch_inbound_message`). Its `wsd -> Websocket_connection.t` builder stays in `server_ide_lsp_proxy.ml`, but is routed through `respond_and_drive_upgrade` so it is actually driven (fixing the no-read defect).
+
+B also has no server-side heartbeat (it never pings the client), so its `Pong` branch stays a no-op close — there is no liveness to record. (Adding a heartbeat to the LSP socket for parity with the MCP path is a possible future enhancement, out of scope here.)
+
+Because the Gluten upgrade handler must return promptly (§3.1), B cannot keep its previous per-connection `Eio.Switch.run` + disconnect-promise scaffold (which scoped the spawned language-server processes by switch teardown). Instead, the spawned processes are bound to the server switch and reclaimed **explicitly** in `disconnect`: `Lsp_process_manager.shutdown` closes each process's stdin/stdout/stderr flows, which makes the response-reader and stderr-drain fibers' reads raise so those fibers exit — reclaiming both the processes and their fibers without a switch teardown. `disconnect` is idempotent (guarded by `disconnected`) and runs under `spawn_mutex`; it is invoked from the frame `Connection_close` and `eof` handlers, which httpun-ws delivers sequentially on the connection fiber (so it cannot race in-flight `dispatch_message`, which runs on that same fiber).
 
 ### 3.3 Threading `upgrade` to the route — typed WS route in the Router
 

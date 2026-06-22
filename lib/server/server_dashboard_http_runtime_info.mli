@@ -82,6 +82,14 @@ val dashboard_runtime_probe_payload_json_for_tests :
     HTTP execution is supplied through
     {!set_dashboard_runtime_provider_http_get_for_tests}. *)
 
+val governance_hitl_json : unit -> Yojson.Safe.t
+(** Returns the human-in-the-loop governance state surfaced inside
+    {!runtime_resolution_json} (schema [masc.governance_hitl.v1]): whether HITL is
+    [enabled] (the fail-closed [Env_config_core.disable_hitl] default), the
+    [disable_env_key], and the production confirm thresholds from
+    {!Governance_pipeline}. Pure read of config + governance policy; surfaces the
+    "whether and why" so operators do not have to infer it from the environment. *)
+
 val runtime_inventory_json : unit -> Yojson.Safe.t
 (** Returns the materialized runtime.toml inventory loaded by
     {!Runtime.init_default}. This is the dashboard-compatible projection for

@@ -535,7 +535,7 @@ describe('LogViewer Code links', () => {
     await waitFor(() => expect(container.textContent).toContain('tool event'))
     expect(container.textContent).toContain('turn event')
     expect(container.textContent).toContain('lifecycle event')
-    expect(container.querySelector('.v2-logs-live')?.textContent).toContain('masc-mcp · WS open')
+    expect(container.querySelector('.v2-logs-live')?.textContent).toContain('masc-mcp · 3s polling')
 
     const toolChip = container.querySelector('[data-testid="logs-filter-tool"]') as HTMLButtonElement
     await act(async () => {

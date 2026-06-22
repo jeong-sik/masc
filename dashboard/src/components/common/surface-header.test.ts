@@ -19,14 +19,15 @@ describe('SurfaceHeader', () => {
   })
 
   // Each surface that does not render a richer bespoke header (monitoring,
-  // command, lab, board) opts into SurfaceHeader, which surfaces the current
+  // command, lab) opts into SurfaceHeader, which surfaces the current
   // section/view label as the single primary h1. These labels match what the
   // former generic SurfaceLead rendered (same currentSectionForRoute logic).
+  // The board surface renders no title header (matches the prototype), so it
+  // is intentionally absent here.
   it.each([
     ['monitoring', 'Keeper Fleet'],
     ['command', 'Actions'],
     ['lab', 'Tools'],
-    ['board', 'Board'],
   ] as const)('renders the %s surface title as the primary h1', (tab, label) => {
     route.value = { tab, params: {}, postId: null }
     render(h(SurfaceHeader, {}), container)
@@ -35,7 +36,7 @@ describe('SurfaceHeader', () => {
   })
 
   it('carries the shared copy + solo-view affordances', () => {
-    route.value = { tab: 'board', params: {}, postId: null }
+    route.value = { tab: 'monitoring', params: {}, postId: null }
     render(h(SurfaceHeader, {}), container)
     expect(container.querySelector('.v2-surface-header-actions')).not.toBeNull()
     expect(container.querySelector('[data-testid="dashboard-widget-solo-link"]')).not.toBeNull()

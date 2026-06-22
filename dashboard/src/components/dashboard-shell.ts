@@ -1478,8 +1478,16 @@ export function isKeeperDetailDashboardRoute(routeState: RouteState): boolean {
 //   settings   → settings-surface.ts   <header class="set-content-h"> <h1>…</h1>
 //   connectors → connector-status.ts   (prototype surface, own header)
 //
-// Surfaces WITHOUT their own header (monitoring, command, lab, board) keep the
-// generic SurfaceLead, which supplies their title.
+// A second group renders the shared SurfaceHeader component (header.v2-surface-header)
+// at the top of their own body — the documented replacement for the generic lead
+// (see surface-header.test.ts). They must be listed here too, otherwise the shell
+// stacks SurfaceLead above SurfaceHeader and the title renders twice:
+//   monitoring → status.ts           <SurfaceHeader> <h1>Keeper Fleet</h1>
+//   command    → operations-panel.ts <SurfaceHeader> <h1>Actions</h1>
+//   lab        → lab.ts              <SurfaceHeader> <h1>Tools</h1>
+//   board      → board-surface.ts    <SurfaceHeader> <h1>Board</h1> (#22021)
+//
+// Surfaces that still rely on the generic SurfaceLead for their title: keepers, code.
 const SURFACE_OWN_LEAD_IDS: ReadonlySet<TabId> = new Set([
   'overview',
   'approvals',
@@ -1490,6 +1498,13 @@ const SURFACE_OWN_LEAD_IDS: ReadonlySet<TabId> = new Set([
   'cockpit',
   'settings',
   'connectors',
+  // Render the shared SurfaceHeader in their own body; without these the generic
+  // SurfaceLead stacked a duplicate title above each (board regressed in #22021,
+  // monitoring/command/lab carried the same gap from their SurfaceHeader adoption).
+  'monitoring',
+  'command',
+  'lab',
+  'board',
 ])
 
 export function shouldRenderSurfaceLead(routeState: RouteState): boolean {

@@ -1045,7 +1045,7 @@ function OverviewAttentionPanel({ keeperList }: { keeperList: readonly Keeper[] 
     return html`
       <section class="ov-card ov-attn v2-overview-attention" data-testid="overview-attention">
         <div class="ov-card-h">
-          <h3>주의 필요</h3>
+          <h3>주의 필요 · 지금 손이 필요한 것</h3>
           <span class="ov-count">0</span>
         </div>
         <div class="ov-empty">모든 keeper 정상</div>
@@ -1056,7 +1056,7 @@ function OverviewAttentionPanel({ keeperList }: { keeperList: readonly Keeper[] 
   return html`
     <section class="ov-card ov-attn v2-overview-attention" data-testid="overview-attention">
       <div class="ov-card-h">
-        <h3>주의 필요</h3>
+        <h3>주의 필요 · 지금 손이 필요한 것</h3>
         <span class="ov-count">${attn.length}</span>
       </div>
       <div class="ov-attn-list v2-overview-attention-list">
@@ -1122,7 +1122,7 @@ function OverviewTelemetry({
     <section class="ov-card ov-telemetry v2-overview-telemetry" data-testid="overview-telemetry">
       <div class="ov-card-h">
         <h3>텔레메트리</h3>
-        <span class="ov-legend mono">oas_event / 5m · last ${OVERVIEW_TELEMETRY_WINDOW_MINUTES}m</span>
+        <button type="button" class="ov-link" onClick=${() => navigate('logs')}>로그 보기 →</button>
       </div>
       ${snapshot
         ? html`

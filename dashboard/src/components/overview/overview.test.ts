@@ -925,4 +925,32 @@ describe('Overview prototype surface', () => {
     )].map(el => el.getAttribute('data-testid'))
     expect(order).toEqual(['overview-fleet', 'overview-domains', 'overview-rollup'])
   })
+
+  // Gap 1: KPI grid uses 6-column layout (surfaces.css:88 `repeat(6, 1fr)`)
+  it('KPI grid declares 6-column repeat matching prototype surfaces.css:88', () => {
+    const { container } = render(h(Overview, null))
+    const grid = container.querySelector('[data-testid="overview-kpis"]') as HTMLElement | null
+    expect(grid).not.toBeNull()
+    // The grid class is ov-kpis; CSS sets grid-template-columns: repeat(6, 1fr)
+    expect(grid?.classList.contains('ov-kpis')).toBe(true)
+    // 7 cells exist — 7th wraps to second row in a 6-col grid (prototype intent)
+    expect(container.querySelectorAll('[data-testid="overview-kpis"] .ov-kpi')).toHaveLength(7)
+  })
+
+  // Gap 2: attention panel title includes full subtitle (overview.jsx:119)
+  it('attention panel h3 includes the full prototype title with subtitle', () => {
+    const { container } = render(h(Overview, null))
+    const attn = container.querySelector('[data-testid="overview-attention"]')
+    const h3 = attn?.querySelector('.ov-card-h h3')
+    expect(h3?.textContent).toBe('주의 필요 · 지금 손이 필요한 것')
+  })
+
+  // Gap 3: telemetry panel shows "로그 보기 →" button link (overview.jsx:143)
+  it('telemetry panel header shows a "로그 보기 →" link button', () => {
+    const { container } = render(h(Overview, null))
+    const tel = container.querySelector('[data-testid="overview-telemetry"]')
+    const btn = tel?.querySelector('button.ov-link')
+    expect(btn).not.toBeNull()
+    expect(btn?.textContent).toBe('로그 보기 →')
+  })
 })

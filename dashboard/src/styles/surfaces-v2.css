@@ -271,14 +271,13 @@
   letter-spacing: 0.14em;
 }
 
-/* keeper-v2/overview.jsx renders 7 cross-surface KPI cells (overview.jsx:106-114)
- * into the prototype's `.ov-kpis` grid. The prototype CSS (surfaces.css:88)
- * declares `repeat(6, 1fr)`, leaving the 7th cell to wrap; this port renders the
- * 7 cells on one row as specified, so the grid is widened to 7 columns to match
- * the intended single-row layout. All other values mirror surfaces.css:88. */
+/* keeper-v2/overview.jsx renders 7 KPI cells (overview.jsx:106-114) into a
+ * 6-column grid as the prototype specifies (surfaces.css:88 `repeat(6, 1fr)`).
+ * The 7th cell ("진행 심의") wraps to a second row, matching prototype intent.
+ * All other values mirror surfaces.css:88. */
 .ov-kpis {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 1px;
   background: var(--border-soft);
   border: 1px solid var(--border-main);

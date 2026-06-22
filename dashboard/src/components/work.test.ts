@@ -361,6 +361,76 @@ describe('Work', () => {
       expect(cards[1]?.textContent).toContain('완료')
     })
 
+    // Pixel-match: .wk-gstatus carries a semantic status variant class so the
+    // prototype's ok/warn/bad/volt color rules (work-v2.css) apply.
+    it('applies the semantic status variant class to the goal status chip', () => {
+      goals.value = [
+        { id: 'G-ok', horizon: 'short', title: 'Active', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-warn', horizon: 'short', title: 'At risk', priority: 2, status: 'at_risk', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-bad', horizon: 'short', title: 'Blocked', priority: 2, status: 'blocked', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-volt', horizon: 'short', title: 'Verifying', priority: 2, status: 'verifying', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+      ]
+      tasks.value = []
+
+      const { container } = render(html`<${Work} />`)
+
+      const chipFor = (id: string) =>
+        container.querySelector(`[data-goal-id="${id}"] .wk-gstatus`)
+      expect(chipFor('G-ok')?.classList.contains('ok')).toBe(true)
+      expect(chipFor('G-warn')?.classList.contains('warn')).toBe(true)
+      expect(chipFor('G-bad')?.classList.contains('bad')).toBe(true)
+      expect(chipFor('G-volt')?.classList.contains('volt')).toBe(true)
+    })
+
+    it('falls back to the ok status variant for unknown goal statuses', () => {
+      goals.value = [
+        { id: 'G-x', horizon: 'short', title: 'Mystery', priority: 2, status: 'something_new', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+      ]
+      tasks.value = []
+
+      const { container } = render(html`<${Work} />`)
+
+      const chip = container.querySelector('[data-goal-id="G-x"] .wk-gstatus')
+      expect(chip?.classList.contains('ok')).toBe(true)
+      // unknown status text is passed through verbatim
+      expect(chip?.textContent).toContain('something_new')
+    })
+
+    // Pixel-match: the completion-approval pill (.wk-approval, volt theme) and
+    // verifier chips (.wk-vchip, mono) render when a goal requires approval.
+    it('renders the completion-approval pill and verifier chips', () => {
+      goals.value = [
+        {
+          id: 'G-1',
+          horizon: 'short',
+          title: 'Goal needing approval',
+          priority: 9,
+          status: 'verifying',
+          phase: 'executing',
+          require_completion_approval: true,
+          verifier_policy: {
+            inherit_mode: 'replace',
+            principals: [{ id: 'operator' }, { id: 'sangsu' }],
+          },
+          created_at: '2026-01-01',
+          updated_at: '2026-01-01',
+        },
+      ]
+      tasks.value = []
+
+      const { container } = render(html`<${Work} />`)
+
+      const approval = container.querySelector('[data-goal-id="G-1"] .wk-approval')
+      expect(approval).toBeTruthy()
+      expect(approval?.textContent).toContain('완료 승인')
+
+      // open the card to expose the verifier policy chips
+      fireEvent.click(container.querySelector('[data-goal-id="G-1"] .wk-goal-h')!)
+      const chips = Array.from(container.querySelectorAll('[data-goal-id="G-1"] .wk-vchip'))
+      expect(chips.map(c => c.textContent)).toEqual(['operator', 'sangsu'])
+      expect(chips.every(c => c.classList.contains('mono'))).toBe(true)
+    })
+
     it('does not render a task dossier sidebar for route-selected tasks', () => {
       routeSignal.value = {
         tab: 'workspace',

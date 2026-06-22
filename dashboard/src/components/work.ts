@@ -101,6 +101,23 @@ function goalStatusLabel(status: string): string {
   return GOAL_STATUS_LABEL[status] ?? status
 }
 
+// Goal status → semantic css class for .wk-gstatus variants.
+// Prototype data.jsx:355 maps active→ok, at_risk→warn, blocked→bad, verifying→volt
+// (default cls 'ok'). Repo statuses (active/completed/paused/cancelled) folded in.
+const GOAL_STATUS_CLASS: Record<string, 'ok' | 'warn' | 'bad' | 'volt'> = {
+  active: 'ok',
+  completed: 'ok',
+  at_risk: 'warn',
+  paused: 'warn',
+  blocked: 'bad',
+  cancelled: 'bad',
+  verifying: 'volt',
+}
+
+function goalStatusClass(status: string): 'ok' | 'warn' | 'bad' | 'volt' {
+  return GOAL_STATUS_CLASS[status] ?? 'ok'
+}
+
 // ── Goal horizon mapping ────────────────────────────────────────────────────
 
 interface HorizonMeta {
@@ -317,7 +334,7 @@ function GoalCard({
       <button type="button" class="wk-goal-h" onClick=${onToggle} aria-expanded=${open}>
         <span class="wk-caret" aria-hidden="true">${open ? '\u25BE' : '\u25B8'}</span>
         <span class="wk-prio mono" title=${`우선순위 ${goal.priority}`}>P${goal.priority}</span>
-        <span class="wk-gstatus">${goalStatusLabel(goal.status)}</span>
+        <span class=${`wk-gstatus ${goalStatusClass(goal.status)}`}>${goalStatusLabel(goal.status)}</span>
         <span class="wk-goal-title">${goal.title}</span>
         <span class="wk-goal-ns mono">${horizon.label}</span>
         <span class="wk-spacer"></span>

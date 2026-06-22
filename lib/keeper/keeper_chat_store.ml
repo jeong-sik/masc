@@ -985,6 +985,15 @@ let to_json_array ?base_dir (messages : chat_message list) : Yojson.Safe.t =
               @ opt_string_field "tool_call_id" m.tool_call_id
               @ opt_string_field "tool_call_name" m.tool_call_name
               @ opt_string_field "source" m.source
+              (* RFC-0232 P5: re-emit the structured surface so a history
+                 reload restores the connector deep-link, not only the
+                 derived [source] lane label. [encode_line] persists it with
+                 the same [Surface_ref.to_json] and [load] decodes it back
+                 into [m.surface]; this read-serve site had dropped it, so
+                 [surfaceLink] in the dashboard rendered nothing on reload. *)
+              @ (match m.surface with
+                 | None -> []
+                 | Some s -> [ ("surface", Surface_ref.to_json s) ])
               @ opt_string_field "conversation_id" m.conversation_id
               @ opt_string_field "external_message_id" m.external_message_id
               @ speaker_fields m.speaker

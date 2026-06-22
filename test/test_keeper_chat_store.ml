@@ -552,7 +552,21 @@ let test_append_user_message_roundtrip () =
                   assistant_json |> member "conversation_id" |> to_string);
               Alcotest.(check bool) "json assistant omits inbound message id" true
                 Yojson.Safe.Util.(
-                  assistant_json |> member "external_message_id" = `Null)
+                  assistant_json |> member "external_message_id" = `Null);
+              (* RFC-0232 P5: the structured surface must survive the
+                 read-serve emitter, not only the derived [source] label, so
+                 the dashboard rebuilds the connector deep-link on a history
+                 reload instead of dropping it. *)
+              let user_surface = Yojson.Safe.Util.member "surface" user_json in
+              Alcotest.(check bool) "json user row carries structured surface"
+                true (user_surface <> `Null);
+              (match Masc.Surface_ref.of_json user_surface with
+               | Ok s ->
+                   Alcotest.(check string)
+                     "surface round-trips to the discord gate lane" "discord"
+                     (Masc.Surface_ref.lane_label s)
+               | Error e ->
+                   Alcotest.failf "surface did not round-trip from json: %s" e)
           | rows ->
               Alcotest.failf "expected 2 json rows, got %d"
                 (List.length rows))

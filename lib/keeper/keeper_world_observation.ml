@@ -101,8 +101,6 @@ type keeper_cycle_channel =
   | Reactive
   | Scheduled_autonomous
 
-type unified_turn_channel = keeper_cycle_channel
-
 type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Mention_pending
   | Board_event_pending
@@ -154,8 +152,6 @@ type keeper_cycle_decision =
   ; task_reactive_cooldown : int option
   ; idle_gate_sec : int option
   }
-
-type unified_turn_decision = keeper_cycle_decision
 
 module Board_signal = Keeper_world_observation_board_signal
 
@@ -1208,8 +1204,6 @@ let keeper_cycle_decision
         ; idle_gate_sec = Some idle_gate_sec
         }))
 ;;
-
-let unified_turn_decision = keeper_cycle_decision
 
 let should_run_keeper_cycle ~(meta : keeper_meta) (observation : world_observation) =
   (keeper_cycle_decision ~meta observation).should_run

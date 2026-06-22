@@ -121,8 +121,6 @@ let runtime_status_json ?(include_models = true) () =
       ("models", `List (List.map (fun model -> `String model) models));
       ("model_count", `Int (List.length models));
       ("configured_max_concurrent_models", `Int Inference_utils.max_concurrent_models);
-      ("available_model_permits", `Int (Inference_utils.model_permits_available ()));
-      ("model_permits_in_use", `Int (Inference_utils.model_permits_in_use  ()));
       ("target_parallelism", `Int configured_capacity);
       ("managed_gap_to_target", `Int 0);
       ("runtime_count", `Int (List.length runtime_snapshots));

@@ -4,8 +4,6 @@ type keeper_cycle_channel =
   | Reactive
   | Scheduled_autonomous
 
-type unified_turn_channel = keeper_cycle_channel
-
 type turn_reason =
   | Mention_pending
   | Board_event_pending

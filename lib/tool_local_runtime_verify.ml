@@ -201,7 +201,6 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
          0
   in
   let configured_max_concurrent_models = Inference_utils.max_concurrent_models in
-  let available_model_permits = Inference_utils.model_permits_available () in
   let runtime_rows, provider_reachable, slot_reachable, actual_slots_total,
       active_slots_now, actual_ctxs, actual_models, chat_completion_compatible =
     List.fold_left
@@ -313,7 +312,6 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
       ("peak_hot_slots", `Int active_slots_now);
       ("configured_capacity", `Int configured_capacity);
       ("configured_max_concurrent_models", `Int configured_max_concurrent_models);
-      ("available_model_permits", `Int available_model_permits);
       ("runtime_blocker", Json_util.string_opt_to_json runtime_blocker);
       ("detail", Json_util.string_opt_to_json detail);
       ("pass", `Bool (Option.is_none runtime_blocker));
@@ -343,7 +341,6 @@ let runtime_verify_json_missing_discovery ?runtime_pool ?expected_slots
       ("peak_hot_slots", `Int 0);
       ("configured_capacity", `Int 0);
       ("configured_max_concurrent_models", `Int Inference_utils.max_concurrent_models);
-      ("available_model_permits", `Int (Inference_utils.model_permits_available ()));
       ("runtime_blocker", `String "oas_discovery_unavailable");
       ("detail", `String "runtime verification requires OAS discovery endpoints");
       ("pass", `Bool false);

@@ -153,8 +153,6 @@ type keeper_cycle_channel =
   | Reactive
   | Scheduled_autonomous
 
-type unified_turn_channel = keeper_cycle_channel
-
 (** Typed reason for running a keeper cycle. Each variant corresponds to
     exactly one code path in {!keeper_cycle_decision}. *)
 type turn_reason =
@@ -222,8 +220,6 @@ type keeper_cycle_decision = {
   task_reactive_cooldown : int option;
   idle_gate_sec : int option;
 }
-
-type unified_turn_decision = keeper_cycle_decision
 
 type board_signal_match = {
   explicit_mention : bool;
@@ -369,12 +365,6 @@ val keeper_cycle_decision :
     GLOBAL task backlog alone does not drive a turn — this prevents the
     all-keeper stampede on each task release/add. Per-keeper Reactive triggers
     and time-based liveness reasons are unaffected. *)
-
-val unified_turn_decision :
-  ?provider_cooldown_remaining_sec:
-    (keeper_name:string -> runtime_id:string -> int option) ->
-  ?reactive_wake:bool ->
-  meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision
 
 val should_run_keeper_cycle :
   meta:Keeper_meta_contract.keeper_meta -> world_observation -> bool

@@ -156,6 +156,9 @@ dune trap), then `dune runtest --root .` for the affected test stanzas.
   over `lib/ bin/ config/prompts dashboard/src` returns only intentional residue
   (e.g. back-compat tolerate-and-drop comments).
 - A resumed keeper loads a pre-change checkpoint without parse error (test).
+- TLA+ gates green after the magentic spec retirement (see §9.9):
+  `scripts/check-spec-truth.sh` → 0 orphans, `scripts/ci/check-tla-harness-coverage.sh`
+  → PASS, `specs/INDEX.md` regenerated to match `scripts/gen-tla-index.sh` output.
 
 ## 9. Implementation notes (as-built)
 
@@ -212,19 +215,34 @@ Deviations from the §5 plan discovered during implementation:
    those unrelated bugs, so the runtime-init enabler was reverted. The
    runtime-init gap + the three surfaced bugs are recorded separately (Issue
    Discovery Protocol) for a focused follow-up.
-9. **TLA+ specs deferred to a follow-up — out of scope here.** Two specs are
-   now stale, but both need TLC (Java) re-verification this worktree cannot run,
-   so they are deferred rather than edited blind:
-   - `specs/keeper-state-machine/KeeperSocialModelMagenticLedger.{tla,cfg,-buggy.cfg}`
-     model the deleted magentic FSM and are fully dead. Deleting them is not a
-     no-op: `scripts/tla-check.sh` hardcodes `run_tlc`/`run_tlc_buggy` on that
-     spec, and `specs/INDEX.md` carries a row for it, so a clean deletion also
-     edits the CI script + regenerates the index — a TLA-subsystem change best
-     done where TLC can confirm `make check-all` stays green.
-   - `specs/social-state-cap/SocialStateCap.tla` models `cap_social_state`; its
-     `EmitClean` still caps `belief`/`desire`/`intention`, which `cap_social_state`
-     no longer touches (now blocker+need only). The spec is self-consistent
-     abstract TLA+ (still model-checks green), so it does not break CI, but it is
-     semantically stale and needs a TLC-verified edit.
-   Leaving both untouched is CI-safe: no TLA workflow triggers on the paths this
-   PR changes, and the unchanged specs keep model-checking as on `main`.
+9. **magentic TLA+ spec deleted in-PR; `SocialStateCap.tla` semantic edit deferred.**
+   Initial scoping deferred both specs citing TLC (Java), which this worktree
+   cannot run. **That was wrong for the magentic spec.** The **Meta Guards**
+   bug-class gate `scripts/check-spec-truth.sh` scans `Mirrors:` annotations and
+   flagged `KeeperSocialModelMagenticLedger.tla` as an orphan reference to the
+   deleted `keeper_social_model_magentic_ledger_fsm.ml` (CI red on the first
+   push). Deletion — not TLC — is the correct repair (the gate's own message:
+   "remove the annotation if the mechanism was intentionally deleted"). So this
+   PR retires the spec atomically with the FSM:
+   - deleted `KeeperSocialModelMagenticLedger.{tla,cfg,-buggy.cfg}`
+   - removed the two `run_tlc`/`run_tlc_buggy` lines from `scripts/tla-check.sh`
+     (the harness-coverage gate `scripts/ci/check-tla-harness-coverage.sh` then
+     passes because the spec is no longer cfg-backed)
+   - regenerated `specs/INDEX.md` via `scripts/gen-tla-index.sh` (pure bash, no
+     TLC; the row drops, counts adjust 93→92 `.tla` / 192→190 `.cfg`). The
+     `tla-index.yml` comparator ignores the `Generated:` header line.
+   - removed the now-orphaned magentic mirror section from
+     `test/test_clean_only_bug_mirrors.ml` (the OCaml analogue of the deleted
+     spec's `StalledNeedsGoalOrFailure` invariant)
+   Verified locally without TLC: `check-spec-truth.sh` → 0 orphans / PASS;
+   `check-tla-harness-coverage.sh` → PASS; `make -C specs` discovers cfgs via
+   `find` so the deletion drops cleanly from the matrix; no other `.tla`
+   `EXTENDS`/`INSTANCE`s the module.
+   - **Still deferred (genuinely CI-safe):** `specs/social-state-cap/SocialStateCap.tla`.
+     Its `EmitClean` caps `belief`/`desire`/`intention`, which `cap_social_state`
+     no longer touches (blocker+need only). It has **no** `Mirrors:` annotation
+     to a deleted file, so `check-spec-truth.sh` does not flag it; it is
+     self-consistent abstract TLA+ that still model-checks green. The semantic
+     edit (rewrite `EmitClean`/invariants on blocker+need) needs TLC
+     verification, so it stays a follow-up (#22024), along with its `:58`
+     comment that references the deleted `keeper_social_model_magentic_ledger_v1.ml`.

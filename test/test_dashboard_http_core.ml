@@ -1228,7 +1228,14 @@ let test_lifecycle_event_of_string_roundtrip () =
     Keeper_lifecycle_events.all_custom_events;
   check bool "unknown lifecycle event string is None" true
     (Option.is_none
-       (Keeper_lifecycle_events.event_of_string "no_such_lifecycle_event"))
+       (Keeper_lifecycle_events.event_of_string "no_such_lifecycle_event"));
+  List.iter
+    (fun verb ->
+      check bool
+        ("legacy phase/operator event is not a custom verb: " ^ verb)
+        true
+        (Option.is_none (Keeper_lifecycle_events.event_of_string verb)))
+    [ "running"; "stopped"; "crashed"; "dead"; "paused"; "resumed" ]
 
 let test_lifecycle_event_cache_patcher_coverage () =
   (* Every name in the SSOT vocabulary must be classified ([Some]) by all four

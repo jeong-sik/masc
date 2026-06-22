@@ -402,6 +402,14 @@ type lifecycle_display =
   ; ld_paused : bool
   }
 
+type lifecycle_legacy_wire_event =
+  | Legacy_running
+  | Legacy_stopped
+  | Legacy_crashed
+  | Legacy_dead
+  | Legacy_paused
+  | Legacy_resumed
+
 (* Exhaustive over the closed custom-event sum. A new [Keeper_lifecycle_events.t]
    variant breaks this match (no catch-all) until its dashboard projection is
    declared. Values are byte-identical to the prior per-field string whitelist. *)
@@ -423,20 +431,36 @@ let display_of_custom_event (verb : Keeper_lifecycle_events.t) : lifecycle_displ
 
 (* Phase-derived + legacy operator strings (not custom-event verbs). Raw-string
    keyed by necessity (JSON boundary); unknown input fails closed to [None]. *)
-let display_of_phase_or_legacy_string = function
-  | "running" ->
-    Some { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = false }
-  | "stopped" ->
-    Some { ld_keepalive_running = false; ld_phase = "stopped"; ld_pipeline_stage = "offline"; ld_paused = true }
-  | "crashed" ->
-    Some { ld_keepalive_running = false; ld_phase = "crashed"; ld_pipeline_stage = "crashed"; ld_paused = false }
-  | "dead" ->
-    Some { ld_keepalive_running = false; ld_phase = "dead"; ld_pipeline_stage = "offline"; ld_paused = false }
-  | "paused" ->
-    Some { ld_keepalive_running = true; ld_phase = "paused"; ld_pipeline_stage = "paused"; ld_paused = true }
-  | "resumed" ->
-    Some { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = false }
+let lifecycle_legacy_wire_event_of_string = function
+  | "running" -> Some Legacy_running
+  | "stopped" -> Some Legacy_stopped
+  | "crashed" -> Some Legacy_crashed
+  | "dead" -> Some Legacy_dead
+  | "paused" -> Some Legacy_paused
+  | "resumed" -> Some Legacy_resumed
   | _ -> None
+;;
+
+let display_of_phase_or_legacy_event = function
+  | Legacy_running ->
+    Some { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = false }
+  | Legacy_stopped ->
+    Some
+      { ld_keepalive_running = false; ld_phase = "stopped"; ld_pipeline_stage = "offline"; ld_paused = true }
+  | Legacy_crashed ->
+    Some
+      { ld_keepalive_running = false; ld_phase = "crashed"; ld_pipeline_stage = "crashed"; ld_paused = false }
+  | Legacy_dead ->
+    Some { ld_keepalive_running = false; ld_phase = "dead"; ld_pipeline_stage = "offline"; ld_paused = false }
+  | Legacy_paused ->
+    Some { ld_keepalive_running = true; ld_phase = "paused"; ld_pipeline_stage = "paused"; ld_paused = true }
+  | Legacy_resumed ->
+    Some { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = false }
+
+let display_of_phase_or_legacy_string s =
+  match lifecycle_legacy_wire_event_of_string s with
+  | None -> None
+  | Some event -> display_of_phase_or_legacy_event event
 ;;
 
 let lifecycle_display_of_event event =

@@ -18,7 +18,7 @@ const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
 import { formatTimeHms } from '../../lib/format-time'
 import { formatCost, formatMsCompact } from '../../lib/format-number'
 import { isSubmitEnter } from '../../lib/keyboard'
-import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatLinkBlock, ChatMermaidBlock, ChatShellBlock, ChatTableBlock, ChatTraceStep, ChatVoiceBlock, KeeperUserInputBlock } from '../../types'
+import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatChartBlock, ChatIssueBlock, ChatLinkBlock, ChatMermaidBlock, ChatShellBlock, ChatSuggestionsBlock, ChatTableBlock, ChatTraceStep, ChatVoiceBlock, KeeperUserInputBlock } from '../../types'
 import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, KeeperConversationSource, SurfaceRef } from '../../types'
 import type { ToolCallEntry, ToolCallOutputBlob } from '../../api/dashboard'
 import { fetchBoardPost } from '../../api/board'
@@ -756,6 +756,153 @@ function ChatArtifactBlock({
   `
 }
 
+function ChatChartBlock({ title, series, labels, xLabel, yMax }: ChatChartBlock) {
+  const width = 540
+  const height = 180
+  const pad = { top: 18, right: 16, bottom: 34, left: 36 }
+  const chartW = width - pad.left - pad.right
+  const chartH = height - pad.top - pad.bottom
+
+  const allValues = series.flatMap((s) => s.values)
+  const computedMax = allValues.length > 0 ? Math.max(...allValues) : 0
+  const maxY = Math.max(yMax ?? 0, computedMax, 1)
+  const niceMax = Math.ceil(maxY / 10) * 10 || 10
+
+  const xFor = (i: number, len: number): number =>
+    pad.left + (len <= 1 ? chartW / 2 : (i / (len - 1)) * chartW)
+  const yFor = (v: number): number => pad.top + chartH - (v / niceMax) * chartH
+
+  const ticks = [0, niceMax / 2, niceMax]
+  const labelCount = labels?.length ?? Math.max(...series.map((s) => s.values.length), 0)
+
+  return html`
+    <div class="chat-block-chart" data-chat-block="chart">
+      <div class="chat-block-chart-title">${title}</div>
+      <svg
+        viewBox=${`0 0 ${width} ${height}`}
+        role="img"
+        aria-label=${title}
+        class="chat-block-chart-svg"
+      >
+        ${ticks.map((t) => {
+          const y = yFor(t)
+          return html`
+            <g key=${`grid-${t}`}>
+              <line
+                x1=${pad.left}
+                y1=${y}
+                x2=${width - pad.right}
+                y2=${y}
+                class="chat-block-chart-grid"
+              />
+              <text x=${pad.left - 6} y=${y + 3} class="chat-block-chart-ytick">${Math.round(t)}</text>
+            </g>
+          `
+        })}
+        <line
+          x1=${pad.left}
+          y1=${pad.top + chartH}
+          x2=${width - pad.right}
+          y2=${pad.top + chartH}
+          class="chat-block-chart-axis"
+        />
+        ${series.map((s, si) => {
+          const points = s.values.map((v, i) => `${xFor(i, s.values.length)},${yFor(v)}`).join(' ')
+          const color = s.color ?? (si === 0 ? '#c4a265' : '#6a5848')
+          return html`
+            <g key=${si}>
+              <polyline
+                fill="none"
+                stroke=${color}
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                points=${points}
+              />
+              ${s.values.map((v, i) => html`
+                <circle
+                  key=${i}
+                  cx=${xFor(i, s.values.length)}
+                  cy=${yFor(v)}
+                  r="3"
+                  fill=${color}
+                />
+              `)}
+            </g>
+          `
+        })}
+        ${labels && labelCount > 0
+          ? html`
+              <text
+                x=${width - pad.right}
+                y=${height - 6}
+                class="chat-block-chart-xlabel"
+                text-anchor="end"
+              >
+                ${xLabel ? `${xLabel} →` : '→'}
+              </text>
+            `
+          : null}
+      </svg>
+      <div class="chat-block-chart-legend">
+        ${series.map((s, i) => html`
+          <span key=${i} class="chat-block-chart-legend-item">
+            <span
+              class="chat-block-chart-legend-swatch"
+              style=${{ background: s.color ?? (i === 0 ? '#c4a265' : '#6a5848') }}
+            />
+            <span>${s.label}</span>
+          </span>
+        `)}
+      </div>
+    </div>
+  `
+}
+
+function ChatSuggestionsBlock({ items }: ChatSuggestionsBlock) {
+  return html`
+    <div class="chat-block-suggestions" data-chat-block="suggestions">
+      ${items.map((it, i) => html`
+        <button
+          key=${i}
+          type="button"
+          class="chat-block-suggestion-chip"
+          data-action=${it.action ?? ''}
+        >
+          <span class="chat-block-suggestion-pre">${it.icon ?? '▸'}</span>
+          <span class="chat-block-suggestion-label">${it.label}</span>
+        </button>
+      `)}
+    </div>
+  `
+}
+
+function ChatIssueBlock({ repo, number, title, status, url, meta }: ChatIssueBlock) {
+  const safeUrl = isSafeUrl(url ?? '') ? url : '#'
+  const unsafe = safeUrl === '#'
+  return html`
+    <a
+      class="chat-block-issue ${status}"
+      href=${safeUrl}
+      target="_blank"
+      rel=${unsafe ? undefined : 'noopener noreferrer'}
+      data-chat-block="issue"
+      onClick=${unsafe ? (e: MouseEvent) => { e.preventDefault() } : undefined}
+    >
+      <span class="chat-block-issue-icon">⚇</span>
+      <span class="chat-block-issue-body">
+        <span class="chat-block-issue-repo">${repo} #${number}</span>
+        <span class="chat-block-issue-title">${title}</span>
+        <span class="chat-block-issue-meta">
+          <span class="chat-block-issue-status ${status}">${status.toUpperCase()}</span>
+          ${meta ? html`<span>${meta}</span>` : null}
+        </span>
+      </span>
+      <span class="chat-block-issue-go">↗</span>
+    </a>
+  `
+}
+
 function ChatAttachBlock({ name, dims, src, svg, ph, via, size }: { name: string; dims?: string; src?: string; svg?: string; ph?: string; via?: string; size?: string }) {
   const safeSrc = src && isSafeMediaUrl(src, ['data:image/']) ? src : null
   return html`
@@ -1392,6 +1539,9 @@ function ChatBlock({ block, fallbackText }: { block: ChatBlock; fallbackText?: s
     case 'code': return html`<${ChatCodeBlock} cap=${block.cap} html=${block.html} source=${block.source} />`
     case 'shell': return html`<${ChatShellBlock} title=${block.title} lines=${block.lines} exit=${block.exit} dur=${block.dur} />`
     case 'artifact': return html`<${ChatArtifactBlock} kind=${block.kind} name=${block.name} size=${block.size} note=${block.note} data=${block.data} mimeType=${block.mimeType} />`
+    case 'chart': return html`<${ChatChartBlock} title=${block.title} series=${block.series} labels=${block.labels} xLabel=${block.xLabel} yMax=${block.yMax} />`
+    case 'suggestions': return html`<${ChatSuggestionsBlock} items=${block.items} />`
+    case 'issue': return html`<${ChatIssueBlock} repo=${block.repo} number=${block.number} title=${block.title} status=${block.status} url=${block.url} meta=${block.meta} />`
     case 'attach': return html`<${ChatAttachBlock} name=${block.name} dims=${block.dims} src=${block.src} svg=${block.svg} ph=${block.ph} via=${block.via} size=${block.size} />`
     case 'voice': return html`<${ChatVoiceBlock} secs=${block.secs} wave=${block.wave} via=${block.via} size=${block.size} transcript=${block.transcript} src=${block.src} />`
     case 'image': return html`<${ChatImageBlock} src=${block.src} ph=${block.ph} cap=${block.cap} />`
@@ -1616,6 +1766,9 @@ const CARD_BLOCK_TYPES: ReadonlySet<ChatBlock['t']> = new Set([
   'attach',
   'fusion',
   'artifact',
+  'chart',
+  'suggestions',
+  'issue',
   'broadcast',
   'trace',
   'shell',

@@ -1176,3 +1176,223 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-src-badge.internal { color: var(--color-fg-muted); }
 .kw-src-badge.tool     { color: var(--color-status-ok); border-color: rgb(var(--color-status-ok-glow) / 0.4); }
 .kw-src-badge.system   { color: var(--color-status-warn); border-color: rgb(var(--color-status-warn-glow) / 0.4); }
+
+/* ════ C3 — rich chat blocks (chart / suggestions / issue / artifact) ═════
+ * Keeper-v2 design-matched card styles for the new block types. Scoped to
+ * .kw-chat so only the workspace conversation surface is affected; other chat
+ * surfaces keep the generic chat-blocks-v2.css treatment.
+ * Palette uses the dark-fantasy/brass theme: #0a0706 deep, #14100d card,
+ * #2a1a14 border, #8a6a28 brass-dim, #c4a265 brass, #6a5848 muted,
+ * #b8a488 primary text.
+ */
+
+.kw-chat .chat-block-chart {
+  background: #14100d;
+  border: 1px solid #2a1a14;
+  border-radius: var(--r-2);
+  padding: 12px 14px 10px;
+}
+.kw-chat .chat-block-chart-title {
+  font-family: var(--font-mono);
+  font-size: var(--fs-13);
+  color: #b8a488;
+  margin-bottom: 10px;
+}
+.kw-chat .chat-block-chart-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.kw-chat .chat-block-chart-grid {
+  stroke: #2a1a14;
+  stroke-width: 1;
+}
+.kw-chat .chat-block-chart-axis {
+  stroke: #3b3d4e;
+  stroke-width: 1;
+}
+.kw-chat .chat-block-chart-ytick,
+.kw-chat .chat-block-chart-xlabel {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  fill: #6a5848;
+}
+.kw-chat .chat-block-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-top: 8px;
+}
+.kw-chat .chat-block-chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-11);
+  color: #b8a488;
+}
+.kw-chat .chat-block-chart-legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+.kw-chat .chat-block-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.kw-chat .chat-block-suggestion-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px;
+  border: 1px solid #2a1a14;
+  border-radius: 999px;
+  background: #14100d;
+  color: #b8a488;
+  font-size: var(--fs-13);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.kw-chat .chat-block-suggestion-chip:hover {
+  border-color: #8a6a28;
+  color: #c4a265;
+}
+.kw-chat .chat-block-suggestion-pre {
+  color: #c4a265;
+  font-size: 11px;
+}
+.kw-chat .chat-block-suggestion-label {
+  line-height: 1.3;
+}
+
+.kw-chat .chat-block-issue {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 11px 13px;
+  border: 1px solid #2a1a14;
+  border-radius: var(--r-2);
+  background: #14100d;
+  text-decoration: none;
+  transition: border-color 0.18s, background 0.18s;
+  max-width: 520px;
+}
+.kw-chat .chat-block-issue:hover {
+  border-color: #8a6a28;
+  background: #1b1612;
+}
+.kw-chat .chat-block-issue-icon {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #2a1a14;
+  border-radius: var(--r-1);
+  background: #0a0706;
+  color: #c4a265;
+  font-size: 14px;
+}
+.kw-chat .chat-block-issue-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+.kw-chat .chat-block-issue-repo {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: #6a5848;
+}
+.kw-chat .chat-block-issue-title {
+  font-size: var(--fs-13);
+  font-weight: var(--fw-med);
+  color: #b8a488;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kw-chat .chat-block-issue-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-11);
+  color: #6a5848;
+}
+.kw-chat .chat-block-issue-status {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: var(--r-1);
+  border: 1px solid #2a1a14;
+}
+.kw-chat .chat-block-issue-status.open {
+  color: #5a7a3a;
+  border-color: color-mix(in oklab, #5a7a3a 40%, transparent);
+  background: color-mix(in oklab, #5a7a3a 10%, transparent);
+}
+.kw-chat .chat-block-issue-status.closed {
+  color: #a01818;
+  border-color: color-mix(in oklab, #a01818 40%, transparent);
+  background: color-mix(in oklab, #a01818 10%, transparent);
+}
+.kw-chat .chat-block-issue-go {
+  flex: none;
+  color: #6a5848;
+  font-size: 13px;
+}
+.kw-chat .chat-block-issue:hover .chat-block-issue-go {
+  color: #c4a265;
+}
+
+/* Artifact card — restyled to match the v2 file-card design inside workspace. */
+.kw-chat .chat-block-artifact {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  background: #14100d;
+  border: 1px solid #2a1a14;
+  border-radius: var(--r-2);
+  padding: 11px 13px;
+  gap: 12px;
+}
+.kw-chat .chat-block-artifact-icon {
+  width: 36px;
+  height: 36px;
+  border: 1px solid #2a1a14;
+  border-radius: var(--r-1);
+  background: #0a0706;
+  color: #c4a265;
+  font-size: var(--fs-lg);
+}
+.kw-chat .chat-block-artifact-name {
+  color: #b8a488;
+}
+.kw-chat .chat-block-artifact-sub {
+  color: #6a5848;
+}
+.kw-chat .chat-block-artifact-btn {
+  background: #0a0706;
+  border: 1px solid #2a1a14;
+  color: #b8a488;
+  white-space: nowrap;
+}
+.kw-chat .chat-block-artifact-btn:first-of-type {
+  margin-left: auto;
+}
+.kw-chat .chat-block-artifact-btn:hover:not(:disabled) {
+  border-color: #8a6a28;
+  color: #c4a265;
+  background: #1b1612;
+}
+.kw-chat .chat-block-artifact-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

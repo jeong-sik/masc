@@ -96,12 +96,21 @@ let write_all_partition ~base_dir partition annotations =
   let lines = List.map Yojson.Safe.to_string jsons in
   let tmp_path = path ^ ".tmp" in
   let oc = open_out_bin tmp_path in
-  List.iter
-    (fun line ->
-       output_string oc line;
-       output_char oc '\n')
-    lines;
-  close_out oc;
+  (* [Fun.protect] guarantees the fd is closed even if [output_string] /
+     [output_char] / [flush] raises mid-write (e.g. ENOSPC). Without it the
+     fd leaked on exception, since [close_out] below was unreachable -- the
+     other writers in this codebase (fs_compat, masc_log) already guard this
+     way. [flush] inside the body surfaces write errors so a failed write
+     re-raises before [Sys.rename] promotes a partial file over the good one. *)
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+       List.iter
+         (fun line ->
+            output_string oc line;
+            output_char oc '\n')
+         lines;
+       flush oc);
   Sys.rename tmp_path path
 ;;
 

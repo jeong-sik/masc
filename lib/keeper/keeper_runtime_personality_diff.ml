@@ -13,11 +13,11 @@
     value aliases. *)
 
 (** #10269: trimmed text equality used by re-sync decision.  Wraps each
-    input as a [will] field of a [coerced_personality] record then
-    delegates to [Keeper_personality_io.compare_normalized]. *)
+    input as the [instructions] field of a [coerced_personality] record
+    then delegates to [Keeper_personality_io.compare_normalized]. *)
 let personality_text_equal a b =
   let one_field s : Keeper_personality_io.coerced_personality =
-    { Keeper_personality_io.will = s; needs = ""; desires = ""; instructions = "" }
+    { Keeper_personality_io.instructions = s }
     |> Keeper_personality_io.to_prompt_form
          ~max_bytes:Keeper_config.prompt_render_max_bytes
     |> Keeper_personality_io.coerce
@@ -31,8 +31,7 @@ let personality_text_equal a b =
     trimming used by [personality_text_equal]. *)
 let personality_field_diff_entry name current target =
   let one_field s : Keeper_personality_io.coerced_personality =
-    Keeper_personality_io.coerce
-      { will = s; needs = ""; desires = ""; instructions = "" }
+    Keeper_personality_io.coerce { instructions = s }
   in
   match
     Keeper_personality_io.compare_normalized (one_field current) (one_field target)

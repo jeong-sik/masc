@@ -1,13 +1,15 @@
 (** #10552: pin the WRITE/READ symmetry between TOML/persona profile
-    load and JSON meta load for the [will] / [needs] / [desires]
-    personality fields.
+    load and JSON meta load for the [instructions] personality field.
+    (RFC-0282 removed the [will]/[needs]/[desires] triple this test
+    originally also covered; the byte-cap math is identical for the
+    surviving [instructions] field.)
 
     Pre-fix #10479 made [personality_text_equal] symmetric at compare
     time, but [profile_defaults_of_toml] still loaded the raw TOML
-    string without [normalize_self_model_text].  When [target_desires]
-    was computed via [apply_default defaults.desires meta.desires]
-    with [defaults.desires = Some <raw>] (e.g. 322 bytes for
-    nick0cave) and [meta.desires] already normalized to 318 bytes,
+    string without [normalize_self_model_text].  When [target_instructions]
+    was computed via [apply_default defaults.instructions meta.instructions]
+    with [defaults.instructions = Some <raw>] (e.g. 322 bytes for
+    nick0cave) and [meta.instructions] already normalized to 318 bytes,
     the compare-time normalize then depended on whether
     [utf8_safe_prefix_bytes] backed up to the same UTF-8 boundary on
     both sides.  For nick0cave's specific byte alignment it didn't,
@@ -23,12 +25,22 @@
 module KTP = Masc.Keeper_types_profile
 module KC = Masc.Keeper_config
 
-(* nick0cave's actual desires field from .masc/config/keepers/nick0cave.toml
-   on the day the residual 4-byte drift was diagnosed.  322 raw bytes,
-   no trailing whitespace; the byte at position 320 sits inside a 3-byte
-   Korean codepoint, so [utf8_safe_prefix_bytes] backs up to 318 bytes —
-   the exact length [meta.desires] reads back as. *)
-let nick0cave_desires_322 =
+(* The 320-byte cap at which the documented 322 -> 318 -> 317 boundary
+   math holds.  [KC.prompt_render_max_bytes] was raised 320 -> 4096
+   (dashboard truncation UX, unrelated to #10552) and no longer truncates
+   this 322-byte fixture, so the UTF-8 boundary-backup algorithm this test
+   guards never fires under the production default.  Pin the cap explicitly
+   so the regression guard exercises the algorithm independent of the
+   deployment tunable. *)
+let boundary_cap_bytes = 320
+
+(* nick0cave's actual instructions field from
+   .masc/config/keepers/nick0cave.toml on the day the residual 4-byte
+   drift was diagnosed.  322 raw bytes, no trailing whitespace; the byte
+   at position 320 sits inside a 3-byte Korean codepoint, so
+   [utf8_safe_prefix_bytes] backs up to 318 bytes — the exact length
+   [meta.instructions] reads back as. *)
+let nick0cave_instructions_322 =
   "할 일이 계속 생기는 것. 백로그가 비어 있지 않은 것. PoC가 실제 \
    구현으로 이어지는 것. 다른 keeper들이 '이건 nick0cave가 만들어볼 것 \
    같다'고 기대하는 상태. 논쟁에서는 구현 로그, 테스트, 실행 결과, 권위 \
@@ -36,9 +48,9 @@ let nick0cave_desires_322 =
 
 let test_fixture_byte_length () =
   Alcotest.(check int)
-    "fixture matches the production-observed 322-byte nick0cave desires"
+    "fixture matches the production-observed 322-byte nick0cave instructions"
     322
-    (String.length nick0cave_desires_322)
+    (String.length nick0cave_instructions_322)
 
 let test_normalize_caps_to_317_idempotent () =
   (* utf8_safe_prefix_bytes backs up from byte 320 (mid-Korean) to the
@@ -49,27 +61,27 @@ let test_normalize_caps_to_317_idempotent () =
      application. *)
   let once =
     KC.normalize_self_model_text
-      ~max_bytes:KC.prompt_render_max_bytes nick0cave_desires_322
+      ~max_bytes:boundary_cap_bytes nick0cave_instructions_322
   in
   Alcotest.(check int) "first normalize: 317 bytes (idempotent)"
     317 (String.length once);
   let twice =
-    KC.normalize_self_model_text ~max_bytes:KC.prompt_render_max_bytes once
+    KC.normalize_self_model_text ~max_bytes:boundary_cap_bytes once
   in
   Alcotest.(check int) "second normalize: still 317 (idempotent)"
     317 (String.length twice);
   Alcotest.(check string) "idempotent: normalize(normalize x) = normalize x"
     once twice
 
-let test_profile_toml_normalizes_desires () =
+let test_profile_toml_normalizes_instructions () =
   (* Use a TOML basic-string literal — write the bytes inline rather
      than going through [Printf.sprintf "%S"], which would inject
      OCaml-style \xxx byte escapes the TOML parser does not accept. *)
   let toml_text =
     "[keeper]\n\
      persona_name = \"nick0cave\"\n\
-     desires = \""
-    ^ nick0cave_desires_322
+     instructions = \""
+    ^ nick0cave_instructions_322
     ^ "\"\n"
   in
   let doc =
@@ -80,91 +92,59 @@ let test_profile_toml_normalizes_desires () =
   match KTP.profile_defaults_of_toml doc with
   | Error e -> Alcotest.failf "profile_defaults_of_toml failed: %s" e
   | Ok defaults ->
-    (match defaults.desires with
-     | None -> Alcotest.fail "expected Some desires"
+    (match defaults.instructions with
+     | None -> Alcotest.fail "expected Some instructions"
      | Some loaded ->
        (* Load path keeps the raw TOML bytes; the idempotent
           [normalize_self_model_text] handles the compare-time
           equivalence in [personality_text_equal]. *)
        Alcotest.(check int)
-         "TOML defaults.desires preserves the raw 322 bytes"
+         "TOML defaults.instructions preserves the raw 322 bytes"
          322
          (String.length loaded);
        let n =
          KC.normalize_self_model_text
-           ~max_bytes:KC.prompt_render_max_bytes loaded
+           ~max_bytes:boundary_cap_bytes loaded
        in
        Alcotest.(check int)
          "normalize(raw_322 from TOML) yields the idempotent 317"
          317 (String.length n))
 
-let test_pre_fix_compare_normalized_vs_raw () =
-  (* Reproduce the PRE-fix production scenario:
-       meta.desires   = 318  (normalized at JSON load)
-       target_desires = 322  (raw TOML defaults via apply_default)
-     If [personality_text_equal] returns true here, the load-time
-     asymmetry is benign and #10557 is not needed.  If false, it
-     pins the structural drift this PR repairs. *)
-  let normalized =
-    KC.normalize_self_model_text
-      ~max_bytes:KC.prompt_render_max_bytes nick0cave_desires_322
-  in
-  Alcotest.(check int) "normalized is 317 bytes (idempotent shape)"
-    317 (String.length normalized);
-  Alcotest.(check int) "raw is 322 bytes"
-    322 (String.length nick0cave_desires_322);
-  let result =
-    Masc.Keeper_runtime.personality_text_equal
-      normalized nick0cave_desires_322
-  in
-  let hex s =
-    let b = Buffer.create (String.length s * 3) in
-    String.iter (fun c -> Buffer.add_string b (Printf.sprintf "%02x " (Char.code c))) s;
-    Buffer.contents b
-  in
-  let a_n =
-    KC.normalize_self_model_text ~max_bytes:KC.prompt_render_max_bytes normalized
-  in
-  let b_n =
-    KC.normalize_self_model_text
-      ~max_bytes:KC.prompt_render_max_bytes nick0cave_desires_322
-  in
-  Printf.printf "len(normalize(meta_318)) = %d\n" (String.length a_n);
-  Printf.printf "len(normalize(raw_322))  = %d\n" (String.length b_n);
-  Printf.printf "tail meta 30: %s\n"
-    (hex (String.sub a_n (max 0 (String.length a_n - 30)) (min 30 (String.length a_n))));
-  Printf.printf "tail raw  30: %s\n"
-    (hex (String.sub b_n (max 0 (String.length b_n - 30)) (min 30 (String.length b_n))));
-  Printf.printf "personality_text_equal(normalized_318, raw_322) = %b\n%!"
-    result;
-  Alcotest.(check bool)
-    "compare normalized vs raw — expected behavior of compare-time normalize"
-    true result
+(* The PRE-fix asymmetry case (meta normalized to 318 vs TOML raw 322,
+   compared through [personality_text_equal]) was removed here: it is
+   structurally unreachable at the current production cap.
+   [personality_text_equal] re-normalizes both sides with
+   [Keeper_config.prompt_render_max_bytes], which was raised 320 -> 4096
+   (unrelated to #10552).  A sub-4096 fixture is never truncated, so the
+   two load paths can no longer diverge to 318/322.  The surviving
+   no-drift invariant the case guarded is covered by
+   [test_apply_default_yields_no_drift]; the UTF-8 boundary-backup
+   algorithm is covered by the boundary-cap-pinned cases above. *)
 
 let test_apply_default_yields_no_drift () =
   (* End-to-end: simulate the reconcile compare site
-     [target_desires = apply_default defaults.desires meta.desires]
+     [target_instructions = apply_default defaults.instructions meta.instructions]
      with the post-fix invariants:
-       - defaults.desires = Some 318  (normalized at TOML load)
-       - meta.desires     = 318       (normalized at JSON read)
+       - defaults.instructions = Some 318  (normalized at TOML load)
+       - meta.instructions     = 318       (normalized at JSON read)
      Then [personality_text_equal] must return true so
      [personality_changed] is false and re-sync does NOT fire. *)
   let normalized =
     KC.normalize_self_model_text
-      ~max_bytes:KC.prompt_render_max_bytes nick0cave_desires_322
+      ~max_bytes:boundary_cap_bytes nick0cave_instructions_322
   in
-  let defaults_desires = Some normalized in
-  let meta_desires = normalized in
-  let target_desires =
-    match defaults_desires with
+  let defaults_instructions = Some normalized in
+  let meta_instructions = normalized in
+  let target_instructions =
+    match defaults_instructions with
     | Some v -> v
-    | None -> meta_desires
+    | None -> meta_instructions
   in
   Alcotest.(check bool)
     "post-fix: identical normalized values compare equal — no drift"
     true
     (Masc.Keeper_runtime.personality_text_equal
-       meta_desires target_desires)
+       meta_instructions target_instructions)
 
 let () =
   Alcotest.run "keeper_profile_normalize_10552"
@@ -175,10 +155,8 @@ let () =
             test_fixture_byte_length;
           Alcotest.test_case "normalize is idempotent (317 bytes)"
             `Quick test_normalize_caps_to_317_idempotent;
-          Alcotest.test_case "TOML profile load normalizes desires"
-            `Quick test_profile_toml_normalizes_desires;
-          Alcotest.test_case "compare normalized vs raw 322"
-            `Quick test_pre_fix_compare_normalized_vs_raw;
+          Alcotest.test_case "TOML profile load normalizes instructions"
+            `Quick test_profile_toml_normalizes_instructions;
           Alcotest.test_case "apply_default yields no drift" `Quick
             test_apply_default_yields_no_drift;
         ] );

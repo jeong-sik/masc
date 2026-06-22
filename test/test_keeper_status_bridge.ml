@@ -84,9 +84,6 @@ let defaults_with_prompt_fields =
     short_goal = Some "toml short";
     mid_goal = Some "toml mid";
     long_goal = Some "toml long";
-    will = Some "toml will";
-    needs = Some "toml needs";
-    desires = Some "toml desires";
     instructions = Some "toml instructions";
     mention_targets = [ "toml-target" ];
   }
@@ -100,9 +97,6 @@ let test_empty_live_meta_does_not_mask_profile_defaults_as_overrides () =
       short_goal = "";
       mid_goal = "";
       long_goal = "";
-      will = "";
-      needs = "";
-      desires = "";
       instructions = "";
       mention_targets = [];
     }
@@ -118,13 +112,13 @@ let test_nonempty_live_meta_still_reports_profile_override () =
   let meta =
     { (meta_with_summary "") with
       goal = "live goal";
-      will = "live will";
+      instructions = "live instructions";
       mention_targets = [ "live-target" ];
     }
   in
   Alcotest.(check (list string))
     "non-empty live prompt fields still surface as overrides"
-    [ "prompt.goal"; "prompt.will"; "workspace.mention_targets" ]
+    [ "prompt.goal"; "prompt.instructions"; "workspace.mention_targets" ]
     (Keeper_status_bridge.live_override_fields meta defaults_with_prompt_fields)
 ;;
 

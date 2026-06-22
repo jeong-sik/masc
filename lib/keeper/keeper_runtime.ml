@@ -15,12 +15,12 @@ open Keeper_types_profile
     Layer 1 (personality SSOT unification, see
     [planning/2026-04-25-keeper-identity-canonicalization-rfc.md]):
     [String.trim] alone is insufficient — when the persisted text
-    exceeds [Keeper_config.prompt_render_max_bytes] (e.g. nick0cave's
-    357-byte will), the read path normalises to ~319 bytes via
-    [normalize_self_model_text], while [target_will] computed from
-    [apply_default defaults.will meta.will] keeps the raw 357-byte
-    value.  trim-only compare flagged that 38-byte gap as drift on
-    every reconcile tick (~2880 redundant writes/day for nick0cave).
+    exceeds [Keeper_config.prompt_render_max_bytes] (e.g. a 357-byte
+    [instructions]), the read path normalises to ~319 bytes, while
+    [target_instructions] computed from
+    [apply_default defaults.instructions meta.instructions] keeps the
+    raw 357-byte value.  trim-only compare flagged that 38-byte gap as
+    drift on every reconcile tick (~2880 redundant writes/day).
     Apply the same byte-cap normalisation on both sides so write
     preserves disk-of-record (raw bytes), but compare uses the
     capped form that the prompt actually renders.  Disk data is
@@ -250,7 +250,6 @@ let declarative_materialization_goal
       defaults.short_goal;
       defaults.mid_goal;
       defaults.long_goal;
-      defaults.will;
       defaults.instructions;
     ]
 
@@ -331,10 +330,6 @@ let keeper_meta_persistent_drift_categories
         (not (goal_horizon_text_equal current.mid_goal target.mid_goal));
       drift_if "long_goal"
         (not (goal_horizon_text_equal current.long_goal target.long_goal));
-      drift_if "will" (not (personality_text_equal current.will target.will));
-      drift_if "needs" (not (personality_text_equal current.needs target.needs));
-      drift_if "desires"
-        (not (personality_text_equal current.desires target.desires));
       drift_if "instructions"
         (not (personality_text_equal current.instructions target.instructions));
       drift_if "autoboot_enabled"
@@ -402,9 +397,6 @@ let ensure_keeper_meta_with_cause config name =
     let target_short_goal = apply_default defaults.short_goal meta.short_goal in
     let target_mid_goal = apply_default defaults.mid_goal meta.mid_goal in
     let target_long_goal = apply_default defaults.long_goal meta.long_goal in
-    let target_will = apply_default defaults.will meta.will in
-    let target_needs = apply_default defaults.needs meta.needs in
-    let target_desires = apply_default defaults.desires meta.desires in
     let target_instructions = apply_default defaults.instructions meta.instructions in
 
     (* --- Policy --- *)
@@ -478,9 +470,6 @@ let ensure_keeper_meta_with_cause config name =
         short_goal = target_short_goal;
         mid_goal = target_mid_goal;
         long_goal = target_long_goal;
-        will = target_will;
-        needs = target_needs;
-        desires = target_desires;
         instructions = target_instructions;
         autoboot_enabled = target_autoboot_enabled;
         mention_targets = target_mention_targets;

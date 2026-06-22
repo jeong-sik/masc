@@ -54,9 +54,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
       let prompt_long_goal =
         default_prompt_string defaults.long_goal m.long_goal
       in
-      let prompt_will = default_prompt_string defaults.will m.will in
-      let prompt_needs = default_prompt_string defaults.needs m.needs in
-      let prompt_desires = default_prompt_string defaults.desires m.desires in
       let prompt_instructions =
         default_prompt_string defaults.instructions m.instructions
       in
@@ -108,9 +105,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
           ~short_goal:prompt_short_goal
           ~mid_goal:prompt_mid_goal
           ~long_goal:prompt_long_goal
-          ~will:prompt_will
-          ~needs:prompt_needs
-          ~desires:prompt_desires
           ~instructions:prompt_instructions
           ~persona_extended ~keeper_name:m.name
           ~active_goals
@@ -150,9 +144,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
           ("short_goal", `String prompt_short_goal);
           ("mid_goal", `String prompt_mid_goal);
           ("long_goal", `String prompt_long_goal);
-          ("will", `String prompt_will);
-          ("needs", `String prompt_needs);
-          ("desires", `String prompt_desires);
           ("instructions", `String prompt_instructions);
           ( "system_prompt_blocks",
             `Assoc

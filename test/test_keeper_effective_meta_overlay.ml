@@ -277,9 +277,6 @@ let test_profile_identity_snapshot_reaches_meta_json () =
   "persona_name": "probe",
   "display_name": "Probe",
   "keeper": {
-    "will": "profile will",
-    "needs": "profile needs",
-    "desires": "profile desires",
     "instructions": "profile instructions"
   }
 }
@@ -301,12 +298,6 @@ tool_access = ["tool_execute"]
         "persona overlays from profile"
         (Some "probe")
         meta.persona;
-      Alcotest.(check string) "will overlays from profile" "profile will" meta.will;
-      Alcotest.(check string) "needs overlays from profile" "profile needs" meta.needs;
-      Alcotest.(check string)
-        "desires overlays from profile"
-        "profile desires"
-        meta.desires;
       Alcotest.(check string)
         "instructions overlays from profile"
         "profile instructions"
@@ -316,10 +307,6 @@ tool_access = ["tool_execute"]
         "meta json keeps persona snapshot"
         (Some "probe")
         (json_string_field "persona" json);
-      Alcotest.(check (option string))
-        "meta json keeps will snapshot"
-        (Some "profile will")
-        (json_string_field "will" json);
       Alcotest.(check (option string))
         "meta json keeps instructions snapshot"
         (Some "profile instructions")

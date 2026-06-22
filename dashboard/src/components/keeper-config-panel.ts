@@ -51,9 +51,6 @@ type EditDraft = {
   short_goal: string
   mid_goal: string
   long_goal: string
-  will: string
-  needs: string
-  desires: string
   instructions: string
 }
 
@@ -123,9 +120,6 @@ function initDraftFromConfig(c: KeeperConfig): EditDraft {
     short_goal: c.prompt.short_goal,
     mid_goal: c.prompt.mid_goal,
     long_goal: c.prompt.long_goal,
-    will: c.prompt.will,
-    needs: c.prompt.needs,
-    desires: c.prompt.desires,
     instructions: c.prompt.instructions,
   }
 }
@@ -144,9 +138,6 @@ function buildPayload(draft: EditDraft, orig: KeeperConfig): KeeperConfigUpdateP
   setIfChanged('short_goal')
   setIfChanged('mid_goal')
   setIfChanged('long_goal')
-  setIfChanged('will')
-  setIfChanged('needs')
-  setIfChanged('desires')
   setIfChanged('instructions')
   return payload
 }
@@ -827,9 +818,6 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     <${EditTextarea} field="short_goal" label="단기 목표" rows=${5} />
     <${EditTextarea} field="mid_goal" label="중기 목표" rows=${5} />
     <${EditTextarea} field="long_goal" label="장기 목표" rows=${5} />
-    <${EditTextarea} field="will" label="의지" rows=${4} />
-    <${EditTextarea} field="needs" label="필요" rows=${4} />
-    <${EditTextarea} field="desires" label="욕구" rows=${4} />
     <${EditTextarea} field="instructions" label="지시사항" rows=${10} />
   ` : html`
     <${MajorSectionHeader} title="프롬프트" />

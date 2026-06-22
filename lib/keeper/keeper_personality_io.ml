@@ -1,34 +1,24 @@
-(** Keeper_personality_io — symmetric I/O harness (incremental).
+(** Keeper_personality_io — symmetric I/O harness for the keeper
+    [instructions] persona field.
 
-    Commit 1: types + parse + to_json. Future commits add coerce,
-    validate, merge_with_defaults, compare_normalized; caller migration
-    is the last step in this PR. *)
+    RFC-0282 removed the [will]/[needs]/[desires] BDI-state triple; the
+    harness now carries the single surviving free-text persona field
+    ([instructions]). It still provides the parse / coerce / byte-cap /
+    drift-compare / prompt-render machinery that [Keeper_meta_json_parse]
+    and [Keeper_runtime_personality_diff] depend on. *)
 
-type raw_personality = {
-  will : string;
-  needs : string;
-  desires : string;
-  instructions : string;
-}
+type raw_personality = { instructions : string }
 
-let empty = { will = ""; needs = ""; desires = ""; instructions = "" }
+let empty = { instructions = "" }
 
 let parse ?(defaults = empty) (json : Yojson.Safe.t) : raw_personality =
   {
-    will = Safe_ops.json_string ~default:defaults.will "will" json;
-    needs = Safe_ops.json_string ~default:defaults.needs "needs" json;
-    desires = Safe_ops.json_string ~default:defaults.desires "desires" json;
     instructions =
       Safe_ops.json_string ~default:defaults.instructions "instructions" json;
   }
 
 let to_json (p : raw_personality) : (string * Yojson.Safe.t) list =
-  [
-    ("will", `String p.will);
-    ("needs", `String p.needs);
-    ("desires", `String p.desires);
-    ("instructions", `String p.instructions);
-  ]
+  [ ("instructions", `String p.instructions) ]
 
 (* coerced_personality is just raw_personality under a different name.
    The .mli keeps the constructor private so callers cannot bypass
@@ -36,22 +26,13 @@ let to_json (p : raw_personality) : (string * Yojson.Safe.t) list =
 type coerced_personality = raw_personality
 
 let coerce (p : raw_personality) : coerced_personality =
-  {
-    will = String.trim p.will;
-    needs = String.trim p.needs;
-    desires = String.trim p.desires;
-    instructions = String.trim p.instructions;
-  }
+  { instructions = String.trim p.instructions }
 
 let to_raw (c : coerced_personality) : raw_personality = c
 
-type field = Will | Needs | Desires | Instructions
+type field = Instructions
 
-let field_to_string = function
-  | Will -> "will"
-  | Needs -> "needs"
-  | Desires -> "desires"
-  | Instructions -> "instructions"
+let field_to_string = function Instructions -> "instructions"
 
 type cap_warning = {
   field : field;
@@ -84,11 +65,7 @@ let check_byte_caps ?max_bytes (c : coerced_personality) =
       :: acc
     else acc
   in
-  []
-  |> check Instructions c.instructions
-  |> check Desires c.desires
-  |> check Needs c.needs
-  |> check Will c.will
+  [] |> check Instructions c.instructions
 
 type field_diff = {
   field : field;
@@ -124,12 +101,7 @@ let compare_normalized (current : coerced_personality)
   let diffs =
     List.filter_map
       (fun (field, c, t) -> field_diff_of_strings ~field ~current:c ~target:t)
-      [
-        (Will, current.will, target.will);
-        (Needs, current.needs, target.needs);
-        (Desires, current.desires, target.desires);
-        (Instructions, current.instructions, target.instructions);
-      ]
+      [ (Instructions, current.instructions, target.instructions) ]
   in
   match diffs with [] -> `Equal | _ :: _ -> `Drift diffs
 
@@ -140,9 +112,4 @@ let to_prompt_form ~max_bytes (p : raw_personality) : raw_personality =
      prior inline [trim → String_util.utf8_prefix] sequence; the value is
      in not having two copies of the trim/cap recipe drift apart. *)
   let render s = Keeper_config.normalize_self_model_text ~max_bytes s in
-  {
-    will = render p.will;
-    needs = render p.needs;
-    desires = render p.desires;
-    instructions = render p.instructions;
-  }
+  { instructions = render p.instructions }

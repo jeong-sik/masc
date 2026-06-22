@@ -486,9 +486,6 @@ type keeper_meta =
   ; short_goal : string
   ; mid_goal : string
   ; long_goal : string
-  ; will : string
-  ; needs : string
-  ; desires : string
   ; instructions : string
   ; (* -- Policy -- *)
     sandbox_profile : Keeper_types_profile.sandbox_profile
@@ -619,9 +616,6 @@ let effective_meta_of_profile_defaults
             apply_profile_default defaults.short_goal meta.short_goal;
           mid_goal = apply_profile_default defaults.mid_goal meta.mid_goal;
           long_goal = apply_profile_default defaults.long_goal meta.long_goal;
-          will = apply_profile_default defaults.will meta.will;
-          needs = apply_profile_default defaults.needs meta.needs;
-          desires = apply_profile_default defaults.desires meta.desires;
           instructions =
             apply_profile_default defaults.instructions meta.instructions;
           autoboot_enabled =

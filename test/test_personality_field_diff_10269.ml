@@ -1,7 +1,7 @@
 (** #10269: nick0cave personality re-syncs every reconcile cycle (~371
     events / 3000 logs) but the existing log line ["re-syncing
-    [personality] for nick0cave"] does not say which of the eight
-    personality fields differ or how.  These tests pin the
+    [personality] for nick0cave"] does not say which personality
+    field differs or how.  These tests pin the
     [personality_field_diff_summary] helper that the runtime now calls
     after the re-sync log so operators can map the storm to a concrete
     field + length signature. *)
@@ -23,7 +23,7 @@ let test_trim_equal_returns_none () =
   check opt_string "identical strings collapse"
     None
     (Kr.personality_field_diff_summary
-       ~field:"will" ~current:"x" ~target:"x")
+       ~field:"instructions" ~current:"x" ~target:"x")
 
 let test_inner_diff_returns_summary () =
   match

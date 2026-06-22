@@ -278,7 +278,6 @@
   test_adversarial_eval
   test_tool_call_quality_benchmark
   test_keeper_prompt_metrics
-  test_keeper_prompt_personality_field_aggregation
   test_keeper_prompt_constitution_fallback
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
@@ -588,7 +587,6 @@
   test_adversarial_eval
   test_tool_call_quality_benchmark
   test_keeper_prompt_metrics
-  test_keeper_prompt_personality_field_aggregation
   test_keeper_prompt_constitution_fallback
   test_keeper_reaction_ledger
   test_cache_metrics_wiring

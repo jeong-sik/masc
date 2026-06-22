@@ -151,9 +151,6 @@ let prepare_run_context
       ~short_goal:(prompt_profile_default profile_defaults.short_goal meta.short_goal)
       ~mid_goal:(prompt_profile_default profile_defaults.mid_goal meta.mid_goal)
       ~long_goal:(prompt_profile_default profile_defaults.long_goal meta.long_goal)
-      ~will:(prompt_profile_default profile_defaults.will meta.will)
-      ~needs:(prompt_profile_default profile_defaults.needs meta.needs)
-      ~desires:(prompt_profile_default profile_defaults.desires meta.desires)
       ~instructions:
         (prompt_profile_default profile_defaults.instructions meta.instructions)
       ~persona_extended

@@ -18,9 +18,6 @@ type parsed_keeper_identity =
   ; pk_short_goal : string
   ; pk_mid_goal : string
   ; pk_long_goal : string
-  ; pk_will : string
-  ; pk_needs : string
-  ; pk_desires : string
   ; pk_instructions : string
   }
 
@@ -86,27 +83,16 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
         ~long_goal_opt:
           (normalize_goal_horizon_opt (Safe_ops.json_string_opt "long_goal" json))
     in
-    (* Layer 2 PR-B (commit 5): delegate the four personality fields
+    (* Layer 2 PR-B (commit 5): delegate the surviving personality field
        to [Keeper_personality_io].  parse + coerce yields trim-only
        canonicalisation; truncation moved to the prompt-render path
        (Keeper_prompt) so disk and in-memory stay byte-identical.
        Decision Resolution: write raw, compare normalize, render
        truncate. *)
-    let personality_defaults : Keeper_personality_io.raw_personality =
-      {
-        will = Env_config_core.keeper_will ();
-        needs = Env_config_core.keeper_needs ();
-        desires = Env_config_core.keeper_desires ();
-        instructions = "";
-      }
-    in
     let personality =
-      Keeper_personality_io.parse ~defaults:personality_defaults json
+      Keeper_personality_io.parse json
       |> Keeper_personality_io.coerce |> Keeper_personality_io.to_raw
     in
-    let pk_will = personality.will in
-    let pk_needs = personality.needs in
-    let pk_desires = personality.desires in
     let pk_instructions = personality.instructions in
     Ok
       { pk_name
@@ -118,9 +104,6 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
       ; pk_short_goal
       ; pk_mid_goal
       ; pk_long_goal
-      ; pk_will
-      ; pk_needs
-      ; pk_desires
       ; pk_instructions
       }
 ;;
@@ -510,9 +493,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; short_goal = identity.pk_short_goal
                    ; mid_goal = identity.pk_mid_goal
                    ; long_goal = identity.pk_long_goal
-                   ; will = identity.pk_will
-                   ; needs = identity.pk_needs
-                   ; desires = identity.pk_desires
                    ; instructions = identity.pk_instructions
                    ; sandbox_profile = policy.pp_sandbox_profile
                    ; sandbox_image = policy.pp_sandbox_image

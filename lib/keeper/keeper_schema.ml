@@ -67,9 +67,6 @@ let keeper_schemas : tool_schema list = [
         ("mid_goal", `Assoc [("type", `String "string")]);
         ("long_goal", `Assoc [("type", `String "string")]);
         ("instructions", `Assoc [("type", `String "string")]);
-        ("will", `Assoc [("type", `String "string")]);
-        ("needs", `Assoc [("type", `String "string")]);
-        ("desires", `Assoc [("type", `String "string")]);
         ("mention_targets", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
@@ -161,18 +158,6 @@ let keeper_schemas : tool_schema list = [
         ("instructions", `Assoc [
           ("type", `String "string");
           ("description", `String "Optional: additional system instructions (kept across compaction/handoff).");
-        ]);
-        ("will", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: keeper's long-term will (의지).");
-        ]);
-        ("needs", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: keeper's operational needs (니즈).");
-        ]);
-        ("desires", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: keeper's desire/drive statement (욕구).");
         ]);
         ("mention_targets", `Assoc [
           ("type", `String "array");

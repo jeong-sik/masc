@@ -212,9 +212,6 @@ let test_direct_reply_prompt_matches_server_managed_heartbeat_policy () =
       ~short_goal:"verify prompt wording"
       ~mid_goal:"ship consistent keeper guidance"
       ~long_goal:"avoid stale operational instructions"
-      ~will:"maintain coherent identity"
-      ~needs:"factual grounding"
-      ~desires:"useful progress"
       ~instructions:""
       ()
   in
@@ -230,9 +227,6 @@ let test_keeper_prompt_preserves_snapshot_delta_anchors () =
       ~short_goal:"verify technical anchors"
       ~mid_goal:"prevent persona-only prompt regression"
       ~long_goal:"preserve operator safety through compaction"
-      ~will:"maintain coherent identity"
-      ~needs:"runtime truth and durable continuity"
-      ~desires:"observable progress"
       ~instructions:""
       ()
   in
@@ -334,9 +328,6 @@ let test_prompt_mentions_runtime_operator_approval_for_risky_actions () =
       ~short_goal:"verify approval wording"
       ~mid_goal:"ship coherent keeper guidance"
       ~long_goal:"avoid approval-policy drift"
-      ~will:"maintain coherent identity"
-      ~needs:"factual grounding"
-      ~desires:"safe execution"
       ~instructions:""
       ()
   in

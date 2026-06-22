@@ -223,9 +223,6 @@ let effective_meta_overlay_hash (meta : keeper_meta) =
       ("short_goal", meta.short_goal);
       ("mid_goal", meta.mid_goal);
       ("long_goal", meta.long_goal);
-      ("will", meta.will);
-      ("needs", meta.needs);
-      ("desires", meta.desires);
       ("sandbox_profile", sandbox_profile_to_string meta.sandbox_profile);
       ("sandbox_image", opt_string meta.sandbox_image);
       ("network_mode", network_mode_to_string meta.network_mode);
@@ -806,9 +803,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              match m.persona with
              | Some persona when String.trim persona <> "" -> `String persona
              | _ -> `Null );
-           ("will", if String.trim m.will = "" then `Null else `String m.will);
-           ("needs", if String.trim m.needs = "" then `Null else `String m.needs);
-           ("desires", if String.trim m.desires = "" then `Null else `String m.desires);
            ("instructions",
             if String.trim m.instructions = "" then `Null else `String m.instructions);
            ("self_model", `Assoc [
@@ -816,9 +810,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                match m.persona with
                | Some persona when String.trim persona <> "" -> `String persona
                | _ -> `Null );
-             ("will", if String.trim m.will = "" then `Null else `String m.will);
-             ("needs", if String.trim m.needs = "" then `Null else `String m.needs);
-             ("desires", if String.trim m.desires = "" then `Null else `String m.desires);
              ("instructions",
               if String.trim m.instructions = "" then `Null else `String m.instructions);
            ]);

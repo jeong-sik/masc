@@ -1215,9 +1215,6 @@ export interface Keeper {
   interests?: string[]
   primaryValue?: string
   activityLevel?: number
-  will?: string | null
-  needs?: string | null
-  desires?: string | null
   memory_recent_note?: string | null
   recent_input_preview?: string | null
   recent_output_preview?: string | null
@@ -1366,9 +1363,6 @@ interface KeeperConfigPrompt {
   short_goal: string
   mid_goal: string
   long_goal: string
-  will: string
-  needs: string
-  desires: string
   instructions: string
   system_prompt_blocks: {
     constitution: {

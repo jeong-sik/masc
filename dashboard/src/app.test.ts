@@ -127,7 +127,7 @@ describe('App v2 header chrome', () => {
     expect(crumb?.textContent?.trim().endsWith('/')).toBe(false)
   })
 
-  it('renders the main stage as a StyleSeed card (white, rounded-2xl, soft shadow)', () => {
+  it('renders the main stage full-bleed (no card frame — matches keeper-v2 prototype)', () => {
     window.innerWidth = 1280
     renderApp()
 
@@ -135,11 +135,16 @@ describe('App v2 header chrome', () => {
     expect(main).not.toBeNull()
     expect(main?.classList.contains('v2-body')).toBe(true)
 
+    // The v2-body is edge-to-edge full-bleed: the wrapper card chrome (rounded
+    // corners, border, card background, drop shadow) was removed so the shell
+    // matches the prototype's full-bleed .v2-body grid. The page background
+    // shows through; each surface owns its own background.
     const cls = main?.className ?? ''
-    expect(cls).toContain('bg-[var(--ss-card)]')
-    expect(cls).toContain('rounded-[var(--ss-radius-card)]')
-    expect(cls).toContain('shadow-[var(--ss-shadow-card)]')
-    expect(cls).toContain('border-[var(--ss-border)]')
+    expect(cls).not.toContain('bg-[var(--ss-card)]')
+    expect(cls).not.toContain('rounded-[var(--ss-radius-card)]')
+    expect(cls).not.toContain('shadow-[var(--ss-shadow-card)]')
+    // Still clips so the inner .dashboard-main-scroll owns the scrollbar.
+    expect(cls).toContain('overflow-hidden')
   })
 
   it('renders health chips with the shared chip class', () => {

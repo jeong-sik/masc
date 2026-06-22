@@ -1025,8 +1025,9 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 }
 
 @media (max-width: 860px) {
-  [data-keeper-detail-mode="true"] .v2-shell-stage { padding: 6px; }
-  [data-keeper-detail-mode="true"] .v2-body { border-radius: var(--r-2); }
+  /* Edge-to-edge on mobile keeper detail — the wrapper card (with its 6px
+     inset and rounded corners) was removed for the full-bleed shell, so the
+     stage padding and body border-radius that protected the card are gone. */
   [data-keeper-detail-mode="true"] .v2-header-brand { max-width: calc(100vw - 86px); }
 
   .kw-mobile-rail-drawer {

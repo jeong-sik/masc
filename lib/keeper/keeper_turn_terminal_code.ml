@@ -51,8 +51,9 @@ let of_wire = function
   | "healthy" -> Some Healthy
   | "stale_turn_timeout" ->
     (* Lossy: the wire string lost the sub-class. Canonicalise to
-         [In_turn_hung] (the most common observed sub-class in
-         production traces). PR-4 removes [of_wire] callers. *)
+         [Stale_turn_timeout_in_turn], the terminal-code canonical for a
+         stale turn whose kill-class sub-class was not preserved on the
+         wire. PR-4 removes [of_wire] callers. *)
     Some Stale_turn_timeout_in_turn
   | "stale_termination_storm" -> Some Stale_termination_storm
   | "stale_fleet_batch" -> Some Stale_fleet_batch
@@ -79,8 +80,6 @@ let of_failure_reason : Keeper_registry.failure_reason -> t = function
   | Keeper_registry.Turn_consecutive_failures _ -> Turn_failures
   | Keeper_registry.Stale_turn_timeout (Keeper_registry.Idle_turn _) ->
     Stale_turn_timeout_idle
-  | Keeper_registry.Stale_turn_timeout (Keeper_registry.In_turn_hung _) ->
-    Stale_turn_timeout_in_turn
   | Keeper_registry.Stale_turn_timeout (Keeper_registry.Mid_turn_no_progress _) ->
     Stale_turn_timeout_no_progress
   | Keeper_registry.Stale_turn_timeout (Keeper_registry.Noop_failure_loop _) ->
@@ -106,8 +105,8 @@ let of_failure_reason_option = function
   | Some fr -> of_failure_reason fr
   | None ->
     (* A stale keeper without a recorded failure reason still emits the
-       stale-turn cohort. Canonicalise to [In_turn_hung], matching the
-       lossy [of_wire] convention for ["stale_turn_timeout"]. *)
+       stale-turn cohort. Canonicalise to [Stale_turn_timeout_in_turn],
+       matching the lossy [of_wire] convention for ["stale_turn_timeout"]. *)
     Stale_turn_timeout_in_turn
 ;;
 

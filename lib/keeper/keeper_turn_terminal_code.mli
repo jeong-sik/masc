@@ -21,8 +21,9 @@ type t =
   (** [Keeper_registry.Stale_turn_timeout (Idle_turn _)]: the keeper
           was [Running] but never observed a turn-start. *)
   | Stale_turn_timeout_in_turn
-  (** [Keeper_registry.Stale_turn_timeout (In_turn_hung _)]: a turn
-          began and ran past its timeout threshold. *)
+  (** Terminal code for a stale turn whose kill-class sub-class was not
+          preserved on the wire (formerly the retired [In_turn_hung]); produced
+          by the lossy [of_wire] / [of_failure_reason_option] canonicalisation. *)
   | Stale_turn_timeout_no_progress
   (** [Keeper_registry.Stale_turn_timeout (Mid_turn_no_progress _)]: a live
           turn stayed inside its outer timeout but stopped producing
@@ -90,8 +91,7 @@ val to_wire : t -> string
     for PR-4, which removes the consumer side of [of_wire] entirely).
 
     Some wire strings are lossy ([stale_turn_timeout] cannot distinguish
-    [Idle_turn] / [In_turn_hung] / [Mid_turn_no_progress] /
-    [Noop_failure_loop]).
+    [Idle_turn] / [Mid_turn_no_progress] / [Noop_failure_loop]).
     Such wire strings deserialise to a single canonical sub-class —
     documented in the [.ml] — to avoid silent fallthrough. *)
 val of_wire : string -> t option

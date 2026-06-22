@@ -14,29 +14,6 @@ module Startup_helpers = Keeper_supervisor_startup_helpers
 let backoff_delay = Startup_helpers.backoff_delay
 let keep_last_n = Startup_helpers.keep_last_n
 
-(* RFC-0125 P4 / RFC-0250: the max-turn watchdog was retired (it capped keeper
-   lifetime, not a turn — see [launch_supervised_fiber] below). The
-   [MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC] knob is no longer consumed by the
-   supervisor, so an operator who still sets it would otherwise get a silent
-   no-op. Emit one process-wide deprecation WARN (on the first set-and-launch)
-   so the dead knob is visible until the env module + auto-generated
-   runtime-tunables catalog are removed in a follow-up. *)
-let warned_retired_max_turn_watchdog = Atomic.make false
-
-let warn_retired_max_turn_watchdog_if_set () =
-  match Env_config_runtime.Keeper_max_turn_watchdog.timeout_sec_opt () with
-  | Some timeout_s
-    when not (Atomic.exchange warned_retired_max_turn_watchdog true) ->
-    Log.Keeper.warn
-      "MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC=%.1fs is set but the max-turn \
-       watchdog was retired (RFC-0125 P4 / RFC-0250: MASC must not impose a \
-       wall-clock timeout on a turn); it has no effect. Turn-scoped recovery \
-       uses MASC_KEEPER_STALE_RUN_SEC (Idle_turn) and \
-       MASC_KEEPER_MID_TURN_PROGRESS_TIMEOUT_SEC (Mid_turn_no_progress)."
-      timeout_s
-  | _ -> ()
-;;
-
 (** supervision_cohort cluster moved to Keeper_supervisor_types
     (intra-library file split, 2026-05-16). *)
 include Keeper_supervisor_types
@@ -181,31 +158,28 @@ let launch_supervised_fiber
       Eio_guard.protect
         (fun () ->
            try
-             (* RFC-0125 P4 의 keeper-level max-turn watchdog ([In_turn_hung]
+             (* RFC-0125 P4 의 keeper-level max-turn watchdog (구 [In_turn_hung]
                 wall-clock timer) 를 제거한다 (RFC-0250 §"deliberately removed"
                 정렬). 그 타이머는 [Eio.Fiber.first] 로 keepalive loop 전체를 감싸
                 keeper *launch* 이후 wall-clock 을 쟀고 — 턴 경계마다 리셋되지
                 않으므로 — 단일 턴이 아니라 keeper lifetime 을 cap 했다. 결과적으로
                 30 분 넘게 사는 정상 keeper (짧은 턴을 여러 번 처리했든 idle 이든)
-                도 [In_turn_hung] 으로 강제 재시작되었다. [In_turn_hung] 이라는
-                이름과 달리 "현재 턴이 너무 오래" 가 아니라 "프로세스가 너무 오래"
-                를 측정한 것이다.
+                도 강제 재시작되었다. 이름과 달리 "현재 턴이 너무 오래" 가 아니라
+                "프로세스가 너무 오래" 를 측정한 것이다.
 
                 per-turn wall-clock timeout 은 의도적으로 금지된 패턴이다:
                 [Keeper_unified_turn_attempt_watchdog] .mli — "MASC must not impose
-                a wall-clock timeout around the whole provider/tool". in-turn-hung /
+                a wall-clock timeout around the whole provider/tool". in-turn /
                 idle 복구는 supervisor sweep 의 [assess_in_turn_progress]
                 ([Mid_turn_no_progress], turn observation 의 last_progress_at 기준)
                 + [assess_stale_run] ([Idle_turn], last_turn_ts 기준) 가 담당하며,
                 둘 다 turn-scoped 라 이 원칙을 준수한다 (각각
                 test_assess_in_turn_progress / test_assess_stale_run 로 커버).
-                따라서 keepalive loop 를 race 없이 직접 실행한다. [In_turn_hung]
-                variant 는 producer 가 사라져 consumer-only (closed sum) 로 남는다;
+                따라서 keepalive loop 를 race 없이 직접 실행한다. watchdog 의 유일
+                producer 였던 [In_turn_hung] kill-class variant 와 그 opt-in env
+                knob ([MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC]) 도 함께 제거됐다.
                 아래 watchdog_triggered 분기는 sweep 이 stamp 한 다른 stale reason
-                ([Idle_turn] / [Mid_turn_no_progress] 등) 으로 계속 작동한다.
-                set-but-ignored knob 가 silent no-op 가 되지 않도록, retired knob
-                가 설정돼 있으면 1 회 deprecation WARN 을 남긴다. *)
-             warn_retired_max_turn_watchdog_if_set ();
+                ([Idle_turn] / [Mid_turn_no_progress] 등) 으로 계속 작동한다. *)
              Keeper_keepalive.run_heartbeat_loop
                ~proactive_warmup_sec
                ctx

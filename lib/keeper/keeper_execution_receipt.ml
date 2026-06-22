@@ -760,7 +760,6 @@ let append (config : Workspace.config) (receipt : t) =
    blocked on a long call and would otherwise never produce a receipt. *)
 let stale_kill_class_label = function
   | Keeper_registry.Idle_turn _ -> "idle_turn"
-  | Keeper_registry.In_turn_hung _ -> "in_turn_hung"
   | Keeper_registry.Mid_turn_no_progress _ -> "mid_turn_no_progress"
   | Keeper_registry.Noop_failure_loop _ -> "noop_failure_loop"
 ;;

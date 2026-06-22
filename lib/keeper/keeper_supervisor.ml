@@ -64,7 +64,8 @@ let assess_stale_run
     routes the [Stale_turn_timeout _] to crash recovery. Keys on
     [last_progress_at] (tool_completed / sdk-turn boundary events recorded by
     [Keeper_registry.record_turn_progress]), never on raw turn wall-clock, so
-    it is orthogonal to [In_turn_hung] (wall-clock) and [Idle_turn] (no-turn). *)
+    it is distinct from the no-turn [Idle_turn] case (the per-turn wall-clock
+    timeout it would have contrasted with was deliberately removed). *)
 let assess_in_turn_progress
     ~(phase : Keeper_state_machine.phase)
     ~(in_turn : Keeper_registry_types.turn_observation option)
@@ -79,8 +80,8 @@ let assess_in_turn_progress
             execution, not no-progress. [active_tool_count] mirrors the event
             bus [pending_tool_count] (via [record_turn_tool_inflight]). A long
             silent tool call therefore does not produce [Mid_turn_no_progress];
-            a hung tool is bounded by the tool substrate budget and the
-            wall-clock [In_turn_hung] watchdog, not this signal. *)
+            a hung tool is bounded by the tool substrate budget, not this
+            signal. *)
          && obs.active_tool_count = 0
          && now -. obs.last_progress_at > progress_timeout ->
     Some
@@ -357,7 +358,7 @@ let sweep_and_recover (ctx : _ context) =
             producer); when stale, stamp the reason and invoke the
             dead [emit_stale_keeper_broadcast] (its first call site).
             The next sweep's [watchdog_stop_pending] routes it to
-            crash recovery exactly as [In_turn_hung].
+            crash recovery like any other [Stale_turn_timeout].
 
             RFC-0012: the in-turn counterpart. When a turn IS running
             but [last_progress_at] is older than

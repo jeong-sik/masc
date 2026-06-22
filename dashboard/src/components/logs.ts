@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import type { VNode } from 'preact'
 import { signal } from '@preact/signals'
 import { useEffect, useMemo } from 'preact/hooks'
 import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-preact'
@@ -59,6 +60,11 @@ const providerLogProvider = signal('')
 const providerLogLines = signal(200)
 const latestSeq = signal<number | null>(null)
 const categoryFilter = signal('')
+// Client-side display-kind filter for the primary toolbar chips
+// (전체/Tool/Turn/Lifecycle/Approval/Broadcast). Complementary to the
+// backend categoryFilter above: kind slices the streamed rows in the view
+// without re-querying, so switching kind is instant.
+const kindFilter = signal<LogDisplayKind | ''>('')
 const hideFsmTransitions = signal(false)
 const expandedLogSeq = signal<number | null>(null)
 // "load older" backward paging: the merge cap is derived per-poll by
@@ -114,13 +120,24 @@ const CATEGORY_LABELS: Record<string, string> = {
   uncategorized: 'Uncategorized',
 }
 
-const LOG_CATEGORY_FILTERS: readonly { value: string; label: string }[] = [
+const LOG_KIND_FILTERS: readonly { value: LogDisplayKind | ''; label: string }[] = [
   { value: '', label: '전체' },
   { value: 'tool', label: 'Tool' },
-  { value: 'task', label: 'Task' },
+  { value: 'turn', label: 'Turn' },
   { value: 'lifecycle', label: 'Lifecycle' },
-  { value: 'directive', label: 'Directive' },
-  { value: 'telemetry', label: 'Telemetry' },
+  { value: 'approval', label: 'Approval' },
+  { value: 'broadcast', label: 'Broadcast' },
+]
+// Backend log category, surfaced in the advanced (details) menu so the
+// provider-log category filter is preserved while the primary toolbar uses
+// the client-side display-kind chips above.
+const LOG_CATEGORY_OPTIONS: readonly { value: string; label: string }[] = [
+  { value: '', label: '전체 카테고리' },
+  { value: 'tool', label: 'tool' },
+  { value: 'task', label: 'task' },
+  { value: 'lifecycle', label: 'lifecycle' },
+  { value: 'directive', label: 'directive' },
+  { value: 'telemetry', label: 'telemetry' },
 ]
 
 function categoryLabel(category: string | null | undefined): string | null {
@@ -626,6 +643,67 @@ async function loadSelectedProviderLog() {
   )
 }
 
+// Kind-aware key/value grid for the expanded detail panel. Fields are pulled
+// from the backend `details` object via detailLabel; absent fields are dropped
+// so the layout matches the Observatory reference when the data is present and
+// degrades gracefully (no row) otherwise. The generic level/module/source/
+// timestamp grid and tag row below it are preserved for every kind.
+function renderLogKindGrid(
+  kind: LogDisplayKind,
+  details: Record<string, unknown> | null,
+): VNode | null {
+  if (!details) return null
+  const d = detailLabel
+  const row = (k: string, v: string | null): VNode | null =>
+    v && v !== '' ? html`<div><span>${k}</span><b class="mono">${v}</b></div>` : null
+  const grid = (...rows: Array<VNode | null>): VNode | null => {
+    const filled = rows.filter((r): r is VNode => r !== null)
+    return filled.length ? html`<div class="v2-logs-detail-grid v2-logs-kind-grid">${filled}</div>` : null
+  }
+  if (kind === 'tool') {
+    return grid(
+      row('tool', d(details, 'tool_name') ?? d(details, 'tool')),
+      row('outcome', d(details, 'outcome') ?? d(details, 'status')),
+      row('latency', d(details, 'latency_ms') ?? d(details, 'duration_ms') ?? d(details, 'dur')),
+      row('namespace', d(details, 'namespace') ?? d(details, 'ns')),
+    )
+  }
+  if (kind === 'turn') {
+    const tools = (details as { tools_used?: unknown }).tools_used
+    const toolsStr = Array.isArray(tools) ? tools.join(', ') : d(details, 'tools_used')
+    return grid(
+      row('model', d(details, 'model')),
+      row('tools_used', toolsStr),
+      row('stop_reason', d(details, 'stop_reason')),
+      row('duration', d(details, 'duration_ms') ?? d(details, 'duration')),
+    )
+  }
+  if (kind === 'lifecycle') {
+    return grid(
+      row('from', d(details, 'from') ?? d(details, 'phase')),
+      row('to', d(details, 'to') ?? d(details, 'next_phase')),
+      row('trigger', d(details, 'trigger')),
+    )
+  }
+  if (kind === 'approval') {
+    const goalJob = [d(details, 'goal_id') ?? d(details, 'goal'), d(details, 'job_id') ?? d(details, 'job')]
+      .filter((v): v is string => v !== null)
+      .join(' · ')
+    return grid(
+      row('tool', d(details, 'tool')),
+      row('severity', d(details, 'severity')),
+      row('goal · job', goalJob || null),
+    )
+  }
+  if (kind === 'broadcast') {
+    return grid(
+      row('scope', d(details, 'scope') ?? d(details, 'namespace')),
+      row('via', d(details, 'via') ?? d(details, 'channel')),
+    )
+  }
+  return null
+}
+
 function renderLogRow(entry: LogEntry) {
   const level = normalizedLevel(entry)
   const source = entry.source || '(unknown source)'
@@ -704,6 +782,7 @@ function renderLogRow(entry: LogEntry) {
       ${isExpanded
         ? html`
           <div class="v2-logs-detail">
+            ${renderLogKindGrid(displayKind, details) ?? ''}
             <div class="v2-logs-detail-grid">
               <div><span>level</span><b style=${{ color: LEVEL_COLORS[level] ?? 'inherit' }}>${level}</b></div>
               <div><span>module</span><b>${entry.module || '(root)'}</b></div>
@@ -990,7 +1069,17 @@ export function LogViewer() {
     ? ((summary.errors / logEntries.length) * 100).toFixed(1)
     : '0.0'
   const currentFilterLabel =
-    LOG_CATEGORY_FILTERS.find(filter => filter.value === categoryFilter.value)?.label ?? 'Custom'
+    LOG_KIND_FILTERS.find(filter => filter.value === kindFilter.value)?.label
+    ?? LOG_CATEGORY_OPTIONS.find(option => option.value === categoryFilter.value)?.label
+    ?? '전체'
+  // kindFilter is a preact signal: reading .value subscribes this render,
+  // so a plain derivation recomputes on kind change without a memo dep.
+  const visibleEntries = kindFilter.value === ''
+    ? logEntries
+    : logEntries.filter(entry => logDisplayKind(entry) === kindFilter.value)
+  let emptyMessage = '조건에 맞는 로그가 없습니다.'
+  if (logLoading) emptyMessage = '로그를 불러오는 중...'
+  else if (kindFilter.value !== '') emptyMessage = '해당하는 이벤트 없음'
   const providerDiagnostics = renderProviderLogPanel()
 
   return html`
@@ -1011,14 +1100,14 @@ export function LogViewer() {
 
         <div class="logs-toolbar v2-logs-toolbar">
           <div class="logs-filters v2-logs-filters">
-            ${LOG_CATEGORY_FILTERS.map(filter => html`
+            ${LOG_KIND_FILTERS.map(filter => html`
               <${LogFilter}
                 key=${filter.value || 'all'}
-                active=${categoryFilter.value === filter.value}
+                active=${kindFilter.value === filter.value}
                 class="v2-logs-filter-chip"
                 data-testid=${`logs-filter-${filter.value || 'all'}`}
                 onClick=${() => {
-                  categoryFilter.value = filter.value
+                  kindFilter.value = filter.value
                 }}
               >${filter.label}<//>
             `)}
@@ -1054,6 +1143,15 @@ export function LogViewer() {
                     { value: 'ERROR', label: 'ERROR' },
                   ]}
                   onInput=${(v: string) => { levelFilter.value = v }}
+                />
+
+                <${Select}
+                  class="logs-select px-3 py-2 text-xs"
+                  name="log-category"
+                  ariaLabel="카테고리"
+                  value=${categoryFilter.value}
+                  options=${LOG_CATEGORY_OPTIONS}
+                  onInput=${(v: string) => { categoryFilter.value = v }}
                 />
 
                 <${TextInput}
@@ -1107,7 +1205,7 @@ export function LogViewer() {
               />
               자동
             </label>
-            <span class="v2-logs-live mono"><span class="dot" />${autoRefresh.value ? 'live poll · 3s' : 'poll paused'}</span>
+            <span class="v2-logs-live mono"><span class="dot" />${autoRefresh.value ? `masc-mcp · 3s polling · ${eventRatePerMinute(logEntries)}δ/min` : 'masc-mcp · WS paused'}</span>
             <button
               type="button"
               class="logs-refresh-btn v2-logs-refresh"
@@ -1155,15 +1253,15 @@ export function LogViewer() {
           <span></span>
         </div>
 
-        ${logEntries.length === 0
+        ${visibleEntries.length === 0
           ? html`
               <div class="flex flex-1 items-center justify-center px-6 text-sm text-[var(--color-fg-muted)]" role="status">
-                ${logLoading ? '로그를 불러오는 중...' : '조건에 맞는 로그가 없습니다.'}
+                ${emptyMessage}
               </div>
             `
           : html`
               <${VirtualList}
-                items=${logEntries}
+                items=${visibleEntries}
                 estimatedItemHeight=${ESTIMATED_LOG_ROW_HEIGHT}
                 overscan=${6}
                 getKey=${(entry: LogEntry) => String(entry.seq)}

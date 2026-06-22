@@ -90,8 +90,14 @@ function taskGateRows(task: Task): Array<{ label: string; outcome: 'satisfied' |
   return rows
 }
 
+// Goal status → Korean label. Prototype data.jsx:355 GOAL_STATUS:
+//   active→'진행', at_risk→'위험', blocked→'막힘', verifying→'검증'.
+// Repo-only statuses (completed/paused/cancelled) folded in below.
 const GOAL_STATUS_LABEL: Record<string, string> = {
-  active: '진행 중',
+  active: '진행',
+  at_risk: '위험',
+  blocked: '막힘',
+  verifying: '검증',
   completed: '완료',
   paused: '일시정지',
   cancelled: '취소',
@@ -487,7 +493,7 @@ function WorkSurfaceV2() {
             </div>
             <div class="wk-kpi">
               <div class="wk-kpi-k">검증 대기</div>
-              <div class=${`wk-kpi-v ${totals.verify > 0 ? 'warn' : ''}`} data-testid="kpi-verify">${totals.verify}</div>
+              <div class=${`wk-kpi-v ${totals.verify > 0 ? 'volt' : ''}`} data-testid="kpi-verify">${totals.verify}</div>
             </div>
             <div class="wk-kpi">
               <div class="wk-kpi-k">백로그</div>
@@ -527,7 +533,7 @@ function WorkSurfaceV2() {
                   <span class="wk-hz-lbl">${group.label}</span>
                   <span class="wk-hz-sub">${group.sub}</span>
                   <span class="wk-spacer"></span>
-                  <span class="wk-hz-n mono">${group.goals.length} goals</span>
+                  <span class="wk-hz-n mono">${group.goals.length}</span>
                 </div>
                 <div class="wk-list">
                   ${group.goals.map(g => html`

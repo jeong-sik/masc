@@ -164,6 +164,44 @@ describe('Work', () => {
       expect(screen.getAllByTestId('work-horizon').map(section => section.getAttribute('data-horizon'))).toEqual(['short', 'mid'])
     })
 
+    it('themes the verify KPI and horizon count to match the prototype', () => {
+      // Prototype work.jsx:180 — 검증 대기 KPI uses the volt accent (not warn).
+      // Prototype work.jsx:206 — horizon count renders the number only.
+      goals.value = [
+        { id: 'G-1', horizon: 'short', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-2', horizon: 'short', title: 'Goal Two', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+      ]
+      tasks.value = [
+        { id: 'J-1', title: 'Awaiting', goal_id: 'G-1', status: 'awaiting_verification' },
+      ]
+
+      const { container } = render(html`<${Work} />`)
+
+      const verifyKpi = screen.getByTestId('kpi-verify')
+      expect(verifyKpi.classList.contains('volt')).toBe(true)
+      expect(verifyKpi.classList.contains('warn')).toBe(false)
+
+      const hzCount = container.querySelector('[data-horizon="short"] .wk-hz-n')
+      expect(hzCount?.textContent?.trim()).toBe('2')
+    })
+
+    it('renders the awaiting_verification task state with the volt verify class', () => {
+      // Prototype v2.css:835/848 — verify state is volt-strong (folded into .review).
+      goals.value = [
+        { id: 'G-1', horizon: 'short', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+      ]
+      tasks.value = [
+        { id: 'J-1', title: 'Awaiting verify', goal_id: 'G-1', status: 'awaiting_verification' },
+      ]
+
+      const { container } = render(html`<${Work} />`)
+      fireEvent.click(screen.getByTestId('goal-card').querySelector('.wk-goal-h')!)
+
+      const state = container.querySelector('[data-job-id="J-1"] .wk-task-state')
+      expect(state?.classList.contains('review')).toBe(true)
+      expect(state?.textContent).toContain('검증 대기')
+    })
+
     it('renders the reference new-goal placeholder button', () => {
       goals.value = [
         { id: 'G-1', horizon: 'short', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
@@ -357,7 +395,8 @@ describe('Work', () => {
       render(html`<${Work} />`)
 
       const cards = screen.getAllByTestId('goal-card')
-      expect(cards[0]?.textContent).toContain('진행 중')
+      // Prototype data.jsx:355 GOAL_STATUS active label is '진행' (not '진행 중').
+      expect(cards[0]?.textContent).toContain('진행')
       expect(cards[1]?.textContent).toContain('완료')
     })
 

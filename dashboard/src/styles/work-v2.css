@@ -77,11 +77,17 @@
 }
 
 /* ── KPI strip ────────────────────────────────────────────────────────────── */
+/* prototype v2.css .ov-kpis (surfaces.css:88) — border-main, radius-md (6px),
+   no card shadow. .ss-card supplies radius:16px + border-border + shadow, so
+   override those three back to the prototype's literal values. */
 .wk-kpis {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 1px;
   background: var(--border-soft);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-md);
+  box-shadow: none;
   overflow: hidden;
 }
 
@@ -132,23 +138,24 @@
   padding: 0 2px;
 }
 
+/* wk-hz-lbl: prototype v2.css:808 — display serif, weight 600, 14px (not ui caps). */
 .wk-hz-lbl {
-  font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
   color: var(--text-bright);
 }
 
+/* wk-hz-sub: prototype v2.css:809 — 11px. */
 .wk-hz-sub {
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--text-dim);
 }
 
+/* wk-hz-n: prototype v2.css:810 — text-dim count. */
 .wk-hz-n {
   font-size: 11px;
-  color: var(--text-mid);
+  color: var(--text-dim);
 }
 
 .wk-list {
@@ -158,7 +165,13 @@
   margin-top: 4px;
 }
 
+/* prototype v2.css:757 — .wk-goal { background: bg-card; border: 1px solid
+   border-main; border-radius: radius-sm (4px) } with no shadow. .ss-card
+   supplies radius:16px + border-border + shadow; override to match. */
 .wk-goal {
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-sm);
+  box-shadow: none;
   overflow: hidden;
 }
 
@@ -368,33 +381,40 @@
 }
 
 /* ── Claimable backlog ────────────────────────────────────────────────────── */
+/* prototype v2.css:883 — 1px DASHED warn-tinted border, radius-md (6px),
+   warn-tinted panel bg, no card shadow. .ss-card supplies a solid border /
+   radius:16px / shadow, so restate the prototype's box props explicitly. */
 .wk-backlog {
-  border-color: color-mix(in oklab, var(--status-warn) 18%, var(--border-main));
+  border: 1px dashed color-mix(in oklab, var(--status-warn) 30%, var(--border-main));
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--status-warn) 4%, var(--bg-panel));
+  box-shadow: none;
   overflow: hidden;
 }
 
+/* wk-backlog-h: prototype v2.css:884 — display font weight 500, text-bright,
+   gap 9px, margin-bottom 10px (single padded box, no header padding/divider). */
 .wk-backlog-h {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   padding: 11px 15px;
+  font-family: var(--font-display);
+  font-weight: 500;
   font-size: 13px;
-  font-weight: 600;
-  color: var(--text-mid);
+  color: var(--text-bright);
 }
 
+/* wk-backlog-glyph: prototype v2.css:885 — font-size 14px. */
 .wk-backlog-glyph {
   color: var(--status-warn);
+  font-size: 14px;
 }
 
+/* wk-backlog-h .n: prototype v2.css:886 — plain mono warn count (no pill). */
 .wk-backlog-h .n {
   font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 700;
-  padding: 1px 7px;
-  border-radius: var(--radius-pill);
-  background: color-mix(in oklab, var(--status-warn) 12%, transparent);
-  border: 1px solid color-mix(in oklab, var(--status-warn) 35%, transparent);
   color: var(--status-warn);
 }
 
@@ -412,20 +432,20 @@
   gap: 4px;
 }
 
+/* wk-bl-row: prototype v2.css:890 — bordered card row, padding 7px 9px. */
 .wk-bl-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 8px;
+  padding: 7px 9px;
   border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
 }
 
-.wk-bl-row:hover {
-  background: var(--bg-sunken);
-}
-
+/* wk-bl-title: prototype v2.css:891 — font-size 12.5px. */
 .wk-bl-title {
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--text-primary);
   display: flex;
   align-items: baseline;
@@ -434,12 +454,9 @@
   min-width: 0;
 }
 
+/* wk-bl-goal: prototype v2.css:892 — plain dim label (no pill). */
 .wk-bl-goal {
   font-size: 10px;
-  padding: 1px 6px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--border-soft);
-  background: var(--bg-sunken);
   color: var(--text-dim);
 }
 
@@ -450,12 +467,14 @@
 }
 
 /* ── Task row ─────────────────────────────────────────────────────────────── */
+/* wk-task / wk-task-main: prototype v2.css:829-831 — task rows use radius-xs
+   (2px); padding 7px 8px and the hover live on the row. */
 .wk-task {
   display: flex;
   flex-direction: column;
   gap: 5px;
   padding: 7px 8px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
 }
 
 .wk-task:hover {
@@ -480,14 +499,16 @@
 
 .wk-task-dot.done { background: var(--status-ok); }
 .wk-task-dot.wip { background: var(--volt); }
-.wk-task-dot.review { background: var(--status-warn); }
+/* review == prototype verify state: volt-strong + glow (v2.css:835), not warn. */
+.wk-task-dot.review { background: var(--volt-strong); box-shadow: 0 0 7px var(--volt-glow); }
 .wk-task-dot.blocked { background: var(--status-bad); }
 
+/* wk-task-id: prototype v2.css:839 — min-width 76px (task-gen, not 52px job-gen). */
 .wk-task-id {
   flex: none;
   font-size: 11px;
   color: var(--text-dim);
-  min-width: 52px;
+  min-width: 76px;
   font-family: var(--font-mono);
 }
 
@@ -510,10 +531,11 @@
   color: var(--status-bad);
 }
 
+/* wk-task-chev: prototype v2.css:844 — font-size 8px (was 11px). */
 .wk-task-chev {
   flex: none;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 8px;
 }
 
 .wk-task-state {
@@ -526,7 +548,8 @@
 
 .wk-task-state.done { color: var(--status-ok); }
 .wk-task-state.wip { color: var(--volt-strong); }
-.wk-task-state.review { color: var(--status-warn); }
+/* review == prototype verify state: volt-strong (v2.css:848), not warn. */
+.wk-task-state.review { color: var(--volt-strong); }
 .wk-task-state.blocked { color: var(--status-bad); }
 
 .wk-task-kp {
@@ -558,22 +581,26 @@
   cursor: default;
 }
 
+/* wk-task-claim: prototype v2.css:854 — volt-themed pill (volt-dim border,
+   volt-wash bg, volt-strong text), ui font, padding 3px 11px, white-space nowrap. */
 .wk-task-claim {
   flex: none;
   max-width: 11rem;
-  padding: 2px 10px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--border-highlight);
-  background: var(--bg-sunken);
-  color: var(--text-mid);
-  font: inherit;
+  font-family: var(--font-ui);
   font-size: 11px;
+  padding: 3px 11px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--volt-dim);
+  background: var(--volt-wash);
+  color: var(--volt-strong);
   cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease;
+  transition: 0.14s;
+  white-space: nowrap;
 }
 
+/* wk-task-claim:hover: prototype v2.css:855 */
 .wk-task-claim:hover {
-  border-color: var(--volt-strong);
+  background: color-mix(in oklab, var(--volt) 18%, transparent);
   color: var(--text-bright);
 }
 
@@ -593,31 +620,32 @@
   gap: 6px;
 }
 
+/* wk-gate-h: prototype v2.css:858 — plain mid-color 11px (not dim uppercase). */
 .wk-gate-h {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-dim);
+  font-size: 11px;
+  color: var(--text-mid);
 }
 
+/* wk-gate-open: prototype v2.css:859 — 9.5px, warn 38% border, padding 1px 7px,
+   no background fill. */
 .wk-gate-open {
-  font-size: 10px;
-  padding: 1px 6px;
+  font-size: 9.5px;
+  padding: 1px 7px;
   border-radius: var(--radius-pill);
-  border: 1px solid color-mix(in oklab, var(--status-warn) 35%, transparent);
-  background: color-mix(in oklab, var(--status-warn) 10%, transparent);
+  border: 1px solid color-mix(in oklab, var(--status-warn) 38%, transparent);
   color: var(--status-warn);
 }
 
+/* wk-gate-ok: prototype v2.css:860 — 9.5px, ok 38% border, padding 1px 7px,
+   no background fill. */
 .wk-gate-ok {
-  font-size: 10px;
-  padding: 1px 6px;
+  font-size: 9.5px;
+  padding: 1px 7px;
   border-radius: var(--radius-pill);
-  border: 1px solid color-mix(in oklab, var(--status-ok) 35%, transparent);
-  background: color-mix(in oklab, var(--status-ok) 10%, transparent);
+  border: 1px solid color-mix(in oklab, var(--status-ok) 38%, transparent);
   color: var(--status-ok);
 }
 
@@ -669,39 +697,49 @@
   white-space: nowrap;
 }
 
+/* wk-handoff: prototype v2.css:899 — info-accented box (2px info left border,
+   info-tinted sunken bg), margin-top 8px, padding 10px 12px. */
 .wk-handoff {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  padding: 9px 11px;
+  margin-top: 8px;
+  padding: 10px 12px;
   border-radius: var(--radius-sm);
-  background: var(--bg-sunken);
+  background: color-mix(in oklab, var(--info) 5%, var(--bg-sunken));
   border: 1px solid var(--border-soft);
+  border-left: 2px solid var(--info);
   color: var(--text-mid);
   font-size: 12px;
   line-height: 1.45;
 }
 
+/* wk-handoff-h: prototype v2.css:900 — info-colored 11px heading (not dim caps). */
 .wk-handoff-h {
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  margin-bottom: 2px;
+  font-size: 11px;
+  color: var(--info);
+  margin-bottom: 7px;
 }
 
+/* wk-handoff-row: prototype v2.css:901 — text-primary 12px, gap 9px, padding 2px 0. */
 .wk-handoff-row {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 9px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  padding: 2px 0;
 }
 
+/* wk-handoff-row .k: prototype v2.css:902 — 9px caps key, min-width 30px, pad-top 2px. */
 .wk-handoff-row .k {
   flex: none;
-  font-size: 10px;
+  font-size: 9px;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-dim);
-  min-width: 36px;
+  min-width: 30px;
+  padding-top: 2px;
 }
 
 /* ── Footer / new goal button ─────────────────────────────────────────────── */

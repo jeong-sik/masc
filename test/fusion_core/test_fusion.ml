@@ -15,6 +15,7 @@ let preset_t = Alcotest.testable Fusion_policy.pp_preset Fusion_policy.equal_pre
 
 let base_group : Fusion_policy.panel_group =
   { Fusion_policy.models = [ "a"; "b"; "c" ]
+  ; label = ""
   ; system_prompt = "panel"
   ; web_tools = false
   ; max_tool_calls = 0
@@ -159,7 +160,12 @@ let test_config_panels_golden () =
   | Ok flat, Ok grouped ->
     Alcotest.check preset_t "length-1 panels-list == flat desugar"
       (List.hd flat.Fusion_policy.presets)
-      (List.hd grouped.Fusion_policy.presets)
+      (List.hd grouped.Fusion_policy.presets);
+    (* legacy(라벨 없음) 패널 정체성 = model 그대로 → 정체성 축도 byte-identical
+       (RFC-0278). 라벨이 도입돼도 기존 config의 정체성은 변하지 않는다. *)
+    Alcotest.(check (list string)) "legacy panelist ids = models"
+      [ "a"; "b"; "c" ]
+      (Fusion_policy.preset_panelist_ids (List.hd flat.Fusion_policy.presets))
   | _ -> Alcotest.fail "both must parse Ok"
 
 (* --- heterogeneous multi-group parse --- *)
@@ -249,7 +255,8 @@ panel_system_prompt = "z"
       (List.mem (Fusion_config.Conflicting_panel_grammar "p") es)
   | Ok _ -> Alcotest.fail "expected Error Conflicting_panel_grammar"
 
-let test_config_duplicate_model () =
+(* 라벨 없는 두 그룹의 동일 model → 같은 정체성("dup") → Duplicate_panelist. *)
+let test_config_duplicate_panelist () =
   let s =
     {|
 [fusion]
@@ -268,9 +275,108 @@ panel_system_prompt = "z"
   in
   match Fusion_config.of_toml (parse s) with
   | Error es ->
-    Alcotest.(check bool) "Duplicate_panel_model present" true
-      (List.mem (Fusion_config.Duplicate_panel_model ("p", "dup")) es)
-  | Ok _ -> Alcotest.fail "expected Error Duplicate_panel_model"
+    Alcotest.(check bool) "Duplicate_panelist present" true
+      (List.mem (Fusion_config.Duplicate_panelist ("p", "dup")) es)
+  | Ok _ -> Alcotest.fail "expected Error Duplicate_panelist"
+
+(* 같은 model을 서로 다른 라벨로 둔 두 그룹(persona ensemble) → 정체성이 달라
+   ["skeptic (claude)"; "optimist (claude)"] → Ok. RFC-0278의 핵심 시나리오. *)
+let same_model_diff_prompt_toml =
+  {|
+[fusion]
+enabled = true
+default_preset = "dialectic"
+[fusion.presets.dialectic]
+judge = "j"
+judge_system_prompt = "synthesize"
+[[fusion.presets.dialectic.panels]]
+panel = ["claude"]
+label = "skeptic"
+panel_system_prompt = "argue against"
+[[fusion.presets.dialectic.panels]]
+panel = ["claude"]
+label = "optimist"
+panel_system_prompt = "argue for"
+|}
+
+let test_config_same_model_diff_prompt () =
+  match Fusion_config.of_toml (parse same_model_diff_prompt_toml) with
+  | Ok p ->
+    (match p.Fusion_policy.presets with
+     | [ preset ] ->
+       Alcotest.(check int) "two groups" 2 (List.length preset.Fusion_policy.panels);
+       Alcotest.(check int) "two models total (same id twice raw)" 2
+         (List.length (Fusion_policy.preset_models preset));
+       Alcotest.(check (list string)) "distinct panelist identities"
+         [ "skeptic (claude)"; "optimist (claude)" ]
+         (Fusion_policy.preset_panelist_ids preset);
+       Alcotest.(check bool) "no duplicate panelist" true
+         (Fusion_policy.preset_duplicate_panelist preset = None)
+     | _ -> Alcotest.fail "expected exactly one preset")
+  | Error es ->
+    Alcotest.failf "expected Ok, got errors: %s"
+      (String.concat ", " (List.map Fusion_config.show_config_error es))
+
+(* 같은 model을 라벨 없이 두 그룹에 두면 정체성 충돌 → Duplicate_panelist (모호성 거부). *)
+let test_config_same_model_no_label_rejected () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p"
+[fusion.presets.p]
+judge = "j"
+judge_system_prompt = "x"
+[[fusion.presets.p.panels]]
+panel = ["claude"]
+panel_system_prompt = "a"
+[[fusion.presets.p.panels]]
+panel = ["claude"]
+panel_system_prompt = "b"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Duplicate_panelist (claude) present" true
+      (List.mem (Fusion_config.Duplicate_panelist ("p", "claude")) es)
+  | Ok _ -> Alcotest.fail "expected Error Duplicate_panelist (no label, same model)"
+
+(* panelist_id SSOT: 라벨 없으면 model 그대로(byte-identity), 있으면 "label (model)". *)
+let test_panelist_id () =
+  Alcotest.(check string) "no label -> model" "claude"
+    (Fusion_policy.panelist_id ~label:"" ~model:"claude");
+  Alcotest.(check string) "label -> label (model)" "skeptic (claude)"
+    (Fusion_policy.panelist_id ~label:"skeptic" ~model:"claude")
+
+(* panelist_id 포맷("%s (%s)")은 단사가 아니다: label=""+model="skeptic (claude)"와
+   label="skeptic"+model="claude"가 같은 "skeptic (claude)"로 렌더된다. 이 둘은 정체성
+   namespace에서 실제로 충돌(심판이 동일 태그 둘을 구분 못 함)하므로, 같은 렌더 정체성을
+   parse-time에 거부하는 것이 sound하다 — fail-closed (silent 손실 아님). 현실 provider.model
+   id는 " (...)"를 포함하지 않아 latent하지만, 비단사 경계의 거부 동작을 핀한다. *)
+let test_config_panelist_id_collision_fail_closed () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p"
+[fusion.presets.p]
+judge = "j"
+judge_system_prompt = "x"
+[[fusion.presets.p.panels]]
+panel = ["skeptic (claude)"]
+panel_system_prompt = "a"
+[[fusion.presets.p.panels]]
+panel = ["claude"]
+label = "skeptic"
+panel_system_prompt = "b"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Duplicate_panelist (skeptic (claude)) present" true
+      (List.mem (Fusion_config.Duplicate_panelist ("p", "skeptic (claude)")) es)
+  | Ok _ ->
+    Alcotest.fail "expected Error Duplicate_panelist (non-injective panelist_id collision)"
 
 let test_config_empty_presets () =
   match Fusion_config.of_toml (parse "[fusion]\nenabled = true\n") with
@@ -463,6 +569,7 @@ let test_config_disabled_with_preset () =
 
 let g_web4 : Fusion_policy.panel_group =
   { Fusion_policy.models = [ "a" ]
+  ; label = ""
   ; system_prompt = "p"
   ; web_tools = true
   ; max_tool_calls = 4
@@ -598,7 +705,14 @@ let () =
         ; Alcotest.test_case "heterogeneous" `Quick test_config_heterogeneous
         ; Alcotest.test_case "empty_panels" `Quick test_config_empty_panels
         ; Alcotest.test_case "conflicting_grammar" `Quick test_config_conflicting_grammar
-        ; Alcotest.test_case "duplicate_model" `Quick test_config_duplicate_model
+        ; Alcotest.test_case "duplicate_panelist" `Quick test_config_duplicate_panelist
+        ; Alcotest.test_case "same_model_diff_prompt" `Quick
+            test_config_same_model_diff_prompt
+        ; Alcotest.test_case "same_model_no_label_rejected" `Quick
+            test_config_same_model_no_label_rejected
+        ; Alcotest.test_case "panelist_id" `Quick test_panelist_id
+        ; Alcotest.test_case "panelist_id_collision_fail_closed" `Quick
+            test_config_panelist_id_collision_fail_closed
         ; Alcotest.test_case "empty_presets" `Quick test_config_empty_presets
         ; Alcotest.test_case "invalid_size" `Quick test_config_invalid_size
         ; Alcotest.test_case "missing_default" `Quick test_config_missing_default

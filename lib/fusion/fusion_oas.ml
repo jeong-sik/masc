@@ -92,16 +92,22 @@ let web_tool_bundle () : Agent_sdk.Tool.t list =
   |> List.filter_map oas_tool_of_descriptor
 
 let build_agent ~sw ~net ~system_prompt ?(tools = []) ?(max_tool_calls = 0)
-    ?timeout_s (model : string)
+    ?timeout_s ?name (model : string)
   : (Agent_sdk.Agent.t, Fusion_types.panel_failure) result
   =
+  (* 카드명(Async_agent.all이 결과 키로 반환)은 패널 정체성([name], 예 "skeptic (claude)").
+     provider 라우팅·에러 귀속은 원 [model]로 따로 한다 — 정체성과 routable model을 한
+     문자열에 압축하지 않는다 (RFC-0278). [name] 미지정(judge·label 없는 panel)이면 카드명=model.
+     default=[model]은 외부 파싱된 unknown 입력의 편의적 추측이 아니라 byte-identity
+     계약(label 없으면 정체성=model)인 total mapping이라 sound-partial. DET-OK *)
+  let card_name = Option.value name ~default:model in
   match Runtime_oas_runner.resolve_runtime_providers ~runtime_id:model () with
   | Error e -> Error (Fusion_types.Provider_error e)
   | Ok [] -> Error (Fusion_types.Provider_error (model ^ ": no provider config"))
   | Ok (provider_cfg :: _) ->
     (* v1: runtime이 여러 provider를 주면 첫 번째만(단일 provider 가정). *)
     let base_config =
-      Runtime_agent.default_config ~name:model ~provider_cfg ~system_prompt ~tools
+      Runtime_agent.default_config ~name:card_name ~provider_cfg ~system_prompt ~tools
     in
     let base_config = apply_timeout_budget ?timeout_s base_config in
     (* max_tool_calls는 OpenRouter Fusion의 per-panel tool budget에 대응.

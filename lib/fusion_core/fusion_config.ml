@@ -6,7 +6,7 @@ type config_error =
   | Invalid_panel_size of string * int
   | Empty_panels of string
   | Conflicting_panel_grammar of string
-  | Duplicate_panel_model of string * string
+  | Duplicate_panelist of string * string
   | Missing_prompt of string
   | Missing_judge_model of string
   | Invalid_max_concurrent_panels of int
@@ -24,11 +24,13 @@ let disabled : Fusion_policy.t =
 
 (* 패널 그룹 한 개 파싱. 그룹 sub-table(새 [[...panels]] 문법)에도, preset table
    자체(legacy flat 문법의 desugar)에도 동일하게 적용된다 — 두 문법이 같은 키
-   이름(panel/panel_system_prompt/web_tools/max_tool_calls_per_panel/panel_timeout_s)을
-   쓰므로 코드 재사용. 누락 필드는 명시적 default. *)
+   이름(panel/label/panel_system_prompt/web_tools/max_tool_calls_per_panel/panel_timeout_s)을
+   쓰므로 코드 재사용. 누락 필드는 명시적 default. label 기본 ""(정체성=model 그대로)
+   → legacy flat은 label 키가 없으므로 byte-identical (RFC-0278). *)
 let parse_group (tbl : Otoml.t) : Fusion_policy.panel_group =
   { models =
       Otoml.find_or ~default:[] tbl (Otoml.get_array Otoml.get_string) [ "panel" ]
+  ; label = Otoml.find_or ~default:"" tbl Otoml.get_string [ "label" ]
   ; system_prompt =
       Otoml.find_or ~default:"" tbl Otoml.get_string [ "panel_system_prompt" ]
   ; web_tools = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "web_tools" ]
@@ -41,7 +43,7 @@ let parse_group (tbl : Otoml.t) : Fusion_policy.panel_group =
 
 (* 패널 그룹을 확정한 뒤 preset 완성 + 검증. judge_* 는 preset table에서 직접 읽는다
    (심판은 preset당 1개, 그룹별 아님). 검증 순서: 크기(총합) → 프롬프트 → 심판모델 →
-   중복모델 → 그룹별 max_tool_calls 범위. *)
+   정체성 중복(panelist_id) → 그룹별 max_tool_calls 범위. *)
 let finish_preset name tbl (panels : Fusion_policy.panel_group list)
   : (Fusion_policy.preset, config_error) result =
   let judge = Otoml.find_or ~default:"" tbl Otoml.get_string [ "judge" ] in
@@ -62,8 +64,8 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
   else if not (Fusion_policy.preset_prompts_present p) then Error (Missing_prompt name)
   else if not (Fusion_policy.preset_judge_present p) then Error (Missing_judge_model name)
   else
-    match Fusion_policy.preset_duplicate_model p with
-    | Some m -> Error (Duplicate_panel_model (name, m))
+    match Fusion_policy.preset_duplicate_panelist p with
+    | Some id -> Error (Duplicate_panelist (name, id))
     | None ->
       (match
          List.find_opt

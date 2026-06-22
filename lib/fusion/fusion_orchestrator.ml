@@ -79,20 +79,25 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                       ~max_tool_calls:judge_max_tool_calls ()
                   with
                   | Ok (s2, u2) -> Ok (s2, Fusion_types.add_usage u1 u2)
-                  | Error msg ->
+                  | Error (msg, u2) ->
+                    (* 2차 심판이 토큰을 태운 뒤 파싱 실패해도 그 usage(u2)를 버리지
+                       않고 1차와 합산한다 — degrade가 비용을 undercount하지 않도록
+                       (적대 리뷰 #22087 §1). 종합은 1차로 graceful degrade. *)
                     Log.Keeper.warn ~keeper_name:req.Fusion_types.keeper
                       "fusion run %s refine judge failed, keeping first synthesis: \
                        %s"
                       req.Fusion_types.run_id msg;
-                    Ok (s1, u1)))
+                    Ok (s1, Fusion_types.add_usage u1 u2)))
           in
           (* 심판 종합과 토큰 usage를 분리: outcome.judge는 synthesis만(소비자 호환),
-             usage는 sink 비용 회계로(RFC §10 패널N+심판M). 실패한 심판은 0(패널 Failed와 대칭). *)
-          let judge = Result.map fst judge_full in
+             usage는 sink 비용 회계로(RFC §10 패널N+심판M). 심판 실패 시에도 소비한
+             토큰은 회계한다(run_composed가 에러에 usage를 동반 — 응답 받은 뒤 실패면
+             소비분, 그 전 실패면 zero). *)
+          let judge = judge_full |> Result.map fst |> Result.map_error fst in
           let judge_usage =
             match judge_full with
             | Ok (_, u) -> u
-            | Error _ -> Fusion_types.zero_usage
+            | Error (_, u) -> u
           in
           (match
              Fusion_sink.emit ~base_dir ~keeper:req.Fusion_types.keeper

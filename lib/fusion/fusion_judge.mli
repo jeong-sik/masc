@@ -18,8 +18,11 @@ val compose_prompt : question:string -> panel:Fusion_types.panel_outcome list ->
     구성해 실행하고, 응답 텍스트를 {!Fusion_judge_parse.of_string}으로 파싱한다.
     [web_tools=true]면 심판 에이전트에 web_search/web_fetch를 주입한다.
     [max_tool_calls]: 0이면 무제한, 양수면 심판의 [max_turns]로 근approximate.
-    빌드/실행/빈응답/파싱 실패는 [Error msg]. 전체는 [Masc_oas_bridge.run_safe]로 감싼다.
-    성공 시 종합과 함께 심판이 소비한 토큰 [usage]를 반환한다(panel과 대칭, 비용 회계 RFC §10). *)
+    빌드/실행/빈응답/파싱 실패는 [Error (msg, usage)]. 전체는 [Masc_oas_bridge.run_safe]로
+    감싼다. 성공 시 종합 + 소비 토큰 [usage]를 반환하고(panel과 대칭, 비용 회계 RFC §10),
+    실패 시에도 usage를 동반한다 — 응답을 받은 뒤 실패(빈 응답/파싱 실패)는 소비분을,
+    토큰 소비 전 실패(빌드/실행/provider 에러)는 [Fusion_types.zero_usage]를 싣는다. 이로써
+    호출자(refine degrade 경로)가 파싱 실패한 심판의 비용을 0으로 버리지 않는다. *)
 val run
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -31,7 +34,9 @@ val run
   -> web_tools:bool
   -> max_tool_calls:int
   -> unit
-  -> (Fusion_types.judge_synthesis * Fusion_types.usage, string) result
+  -> ( Fusion_types.judge_synthesis * Fusion_types.usage
+     , string * Fusion_types.usage )
+     result
 
 (** REFINE 위상의 2차 심판 프롬프트를 구성한다. [compose_prompt]의 질문+패널 블록에
     더해, 1차 심판 종합 [prior]을 [Fusion_types.render_prior_synthesis]로 lossless 렌더해
@@ -46,7 +51,8 @@ val compose_refine_prompt
 (** REFINE 위상의 2차 심판을 실행한다. [run]과 동일한 빌드/실행/usage/파싱 경로이며,
     프롬프트만 [compose_refine_prompt ~prior]로 구성하는 점이 다르다([prior]는 1차
     [run] 성공이 낸 종합). 성공 시 개선된 종합 + 2차 심판 토큰 usage를 반환한다(호출자가
-    1차 usage와 [Fusion_types.add_usage]로 합산). 실패는 [run]과 동일한 [Error msg]. *)
+    1차 usage와 [Fusion_types.add_usage]로 합산). 실패는 [run]과 동일하게 [Error (msg,
+    usage)] — 파싱 실패 시 소비 토큰을 동반하므로 degrade 경로가 비용을 버리지 않는다. *)
 val run_refine
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -59,4 +65,16 @@ val run_refine
   -> web_tools:bool
   -> max_tool_calls:int
   -> unit
-  -> (Fusion_types.judge_synthesis * Fusion_types.usage, string) result
+  -> ( Fusion_types.judge_synthesis * Fusion_types.usage
+     , string * Fusion_types.usage )
+     result
+
+(** [attach_usage parsed usage]는 심판 응답 파싱 결과에 그 호출이 소비한 [usage]를 성공·
+    실패 양 분기 모두에 묶는다. 파싱 실패 시 usage를 버리면 refine degrade 경로가 비용을
+    undercount하므로(적대 리뷰 #22087 §1), 이 부착을 단일 지점으로 강제한다. 순수. *)
+val attach_usage
+  :  (Fusion_types.judge_synthesis, string) result
+  -> Fusion_types.usage
+  -> ( Fusion_types.judge_synthesis * Fusion_types.usage
+     , string * Fusion_types.usage )
+     result

@@ -570,14 +570,16 @@ describe('LogViewer Code links', () => {
     expect(container.textContent).toContain('lifecycle event')
 
     // Rows render newest-seq-first (sortLogEntries: b.seq - a.seq), so the tool
-    // entry (seq 1) is the last row, not the first. Select it by its kind cell
-    // instead of by position so the assertion tracks the intended row.
-    const toolRow = [...container.querySelectorAll('[data-testid="logs-row"]')].find(
-      r => r.querySelector('.v2-logs-kind')?.getAttribute('data-kind') === 'tool',
-    ) as HTMLDivElement
+    // entry (seq 1) is the last row, not the first. Select it by its kind marker.
+    const toolRow = [...container.querySelectorAll('[data-testid="logs-row"]')].find((row: Element) => {
+      const rowKind = row.getAttribute('data-kind')
+      const cellKind = row.querySelector('.v2-logs-kind')?.getAttribute('data-kind')
+      return rowKind === 'tool' || cellKind === 'tool'
+    }) as HTMLDivElement
+    expect(toolRow).not.toBeNull()
     fireEvent.click(toolRow.querySelector('.v2-logs-line') as Element)
     await waitFor(() =>
-      expect(container.querySelector('.v2-logs-kind-grid')?.textContent).toContain('tool'),
+      expect((toolRow as HTMLDivElement).querySelector('.v2-logs-kind-grid')?.textContent).toContain('tool'),
     )
   })
 })

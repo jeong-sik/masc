@@ -334,8 +334,8 @@
 
 .set-mcp-detail {
   margin: -4px 0 4px;
-  padding: 8px 12px;
-  background: var(--bg-sunken);
+  padding: 8px 11px;
+  background: var(--bg-well);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-xs);
   font-size: 11px;
@@ -451,7 +451,8 @@
   border: 1px solid var(--border-main);
   border-radius: var(--radius-sm);
   overflow: hidden;
-  background: var(--bg-sunken);
+  /* keeper-v2 styles/surfaces.css:506 — well (deepest), not sunken */
+  background: var(--bg-well);
 }
 
 .log-filters {

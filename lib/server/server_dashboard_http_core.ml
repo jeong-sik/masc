@@ -527,19 +527,44 @@ let dashboard_shell_payload_json
       := measure_json_projection "meta_cognition" (fun () ->
            meta_cognition_summary_cached config)
     else
+      (* Isolate each parallel section: in [Eio.Fiber.all] a single fiber's
+         exception cancels its siblings and fails the whole payload. Route each
+         through [Cancel_safe.observe] (RFC-0106 SSOT) so an unexpected section
+         failure logs and lets the other sections complete; the section's ref
+         keeps its [(`Null, 0)] default, so the payload renders that one section
+         as null instead of returning a 500. [Eio.Cancel.Cancelled] is re-raised
+         by [Cancel_safe.observe] so fiber-tree unwind is preserved. *)
       Eio.Fiber.all
         [ (fun () ->
-            meta_cognition_r
-            := measure_json_projection "meta_cognition" (fun () ->
-                 meta_cognition_summary_cached config))
+            Cancel_safe.observe
+              ~on_exn:(fun exn ->
+                Log.Dashboard.error
+                  "dashboard meta_cognition section failed: %s"
+                  (Printexc.to_string exn))
+              (fun () ->
+                meta_cognition_r
+                := measure_json_projection "meta_cognition" (fun () ->
+                     meta_cognition_summary_cached config)))
         ; (fun () ->
-            config_resolution_r
-            := measure_json_projection "config_resolution" (fun () ->
-                 Config_dir_resolver.(resolve () |> to_json)))
+            Cancel_safe.observe
+              ~on_exn:(fun exn ->
+                Log.Dashboard.error
+                  "dashboard config_resolution section failed: %s"
+                  (Printexc.to_string exn))
+              (fun () ->
+                config_resolution_r
+                := measure_json_projection "config_resolution" (fun () ->
+                     Config_dir_resolver.(resolve () |> to_json))))
         ; (fun () ->
-            runtime_resolution_r
-            := measure_json_projection "runtime_resolution" (fun () ->
-                 Server_dashboard_http_runtime_info.runtime_resolution_json config))
+            Cancel_safe.observe
+              ~on_exn:(fun exn ->
+                Log.Dashboard.error
+                  "dashboard runtime_resolution section failed: %s"
+                  (Printexc.to_string exn))
+              (fun () ->
+                runtime_resolution_r
+                := measure_json_projection "runtime_resolution" (fun () ->
+                     Server_dashboard_http_runtime_info.runtime_resolution_json config)))
         ];
     let meta_cognition_json, meta_cognition_ms = !meta_cognition_r in
     let config_resolution_json, config_resolution_ms = !config_resolution_r in

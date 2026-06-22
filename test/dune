@@ -1158,7 +1158,7 @@
 (test
  (name test_cancel_safe)
  (modules test_cancel_safe)
- (libraries alcotest masc_cancel_safe eio))
+ (libraries alcotest masc_cancel_safe eio eio_main))
 
 ; Warn-log dedup table stays bounded under distinct token-hash-prefix churn.
 

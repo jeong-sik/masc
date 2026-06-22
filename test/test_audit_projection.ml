@@ -97,6 +97,60 @@ let test_large_file_boundary () =
     Alcotest.(check (list string)) "large file boundary = tail" expected got)
 ;;
 
+(* Review fix [P2]: a file recreated at the same path with a NEW inode and a
+   size larger than the prior consumed offset must reseed. Only an inode check
+   (not [size < consumed]) detects this; without it the stale offset would skip
+   the new file's head and read mid-line garbage. *)
+let test_recreation_resets_offset () =
+  with_tmp "audit_proj_recreate" (fun path ->
+    write_append path [ {|{"tool":"old1"}|}; {|{"tool":"old2"}|} ];
+    let t = Jip.create () in
+    let _ : string list =
+      Jip.recent_lines t ~key:path ~path ~window:win ~initial_tail_bytes:bytes
+    in
+    Sys.remove path;
+    write_append path
+      [ {|{"tool":"new1"}|}; {|{"tool":"new2"}|}; {|{"tool":"new3"}|};
+        {|{"tool":"new4"}|} ];
+    let got =
+      Jip.recent_lines t ~key:path ~path ~window:win ~initial_tail_bytes:bytes
+    in
+    let expected = tail_oracle path ~max_bytes:bytes ~max_lines:win in
+    Alcotest.(check (list string)) "recreation reseeds from new file" expected
+      got)
+;;
+
+(* Review fix [P2]: whitespace-only lines are dropped, matching the tail oracle
+   ([String.trim] filter) rather than reaching a JSON parser. *)
+let test_blank_lines_filtered () =
+  with_tmp "audit_proj_blank" (fun path ->
+    write_append path
+      [ {|{"tool":"a"}|}; "   "; {|{"tool":"b"}|}; "\t"; {|{"tool":"c"}|} ];
+    let t = Jip.create () in
+    let got =
+      Jip.recent_lines t ~key:path ~path ~window:win ~initial_tail_bytes:bytes
+    in
+    let expected = tail_oracle path ~max_bytes:bytes ~max_lines:win in
+    Alcotest.(check (list string)) "blank lines filtered = tail" expected got)
+;;
+
+(* Review fix [P3]: [peek] exposes the cached accumulator (newest-first ring) so
+   a caller can fall back to the last good projection on a transient read
+   error. *)
+let test_peek_returns_last_projection () =
+  with_tmp "audit_proj_peek" (fun path ->
+    write_append path [ {|{"tool":"a"}|}; {|{"tool":"b"}|} ];
+    let t = Jip.create () in
+    let got =
+      Jip.recent_lines t ~key:path ~path ~window:win ~initial_tail_bytes:bytes
+    in
+    match Jip.peek t ~key:path with
+    | Some cached ->
+        Alcotest.(check (list string)) "peek reversed = recent_lines" got
+          (List.rev cached)
+    | None -> Alcotest.fail "peek returned None after a successful read")
+;;
+
 let () =
   Alcotest.run "audit_projection"
     [ ( "recent_lines_vs_tail"
@@ -108,6 +162,12 @@ let () =
             test_window_cap_matches_tail
         ; Alcotest.test_case "large file boundary matches tail" `Quick
             test_large_file_boundary
+        ; Alcotest.test_case "recreation resets offset (inode)" `Quick
+            test_recreation_resets_offset
+        ; Alcotest.test_case "blank lines filtered" `Quick
+            test_blank_lines_filtered
+        ; Alcotest.test_case "peek returns last projection" `Quick
+            test_peek_returns_last_projection
         ] )
     ]
 ;;

@@ -27,10 +27,22 @@
    rebuild of the same key re-folds the same new bytes into the same result and
    the later [Hashtbl.replace] wins, costing only repeated work. *)
 
-type 'a t = (string, int * 'a) Hashtbl.t
-(* key -> (consumed byte offset at a line boundary, accumulator) *)
+type 'a t = (string, int * int * 'a) Hashtbl.t
+(* key -> (consumed byte offset at a line boundary, file inode, accumulator).
+   The inode guards rotation/recreation: a same-path file with a new inode
+   resets the key even when its size exceeds the consumed offset. *)
 
 let create () : 'a t = Hashtbl.create 16
+
+(* Stable file identity for rotation detection. A path whose inode changed since
+   the last read is a different physical file (deleted+recreated or rotated), so
+   its consumed offset must not carry over. [-1] when the file cannot be stat'd,
+   which never matches a stored inode (guarded by [>= 0]) and forces a cold
+   reseed. *)
+let file_inode path : int =
+  match Unix.stat path with
+  | s -> s.Unix.st_ino
+  | exception Unix.Unix_error _ -> -1
 
 (* Read bytes [start, upto) from [path]. Robust to the file having grown since
    the size was sampled: never reads past the channel's own length. *)
@@ -59,25 +71,34 @@ let first_newline (s : string) : int option =
   String.index_opt s '\n'
 
 let lines_of (s : string) : string list =
-  String.split_on_char '\n' s |> List.filter (fun l -> l <> "")
+  (* Match the legacy [read_file_tail_lines_result] normalization: drop lines
+     that are empty after trimming, so a whitespace-only line never reaches a
+     downstream JSON parser. The returned line itself is left untrimmed. *)
+  String.split_on_char '\n' s |> List.filter (fun l -> String.trim l <> "")
 
 let read (t : 'a t) ~(key : string) ~(path : string) ~(empty : 'a)
     ~(add : 'a -> string -> 'a) ~(initial_tail_bytes : int) : 'a =
   match Fs_compat.file_size path with
   | None ->
       (* Missing file: keep whatever was last projected, else empty. *)
-      (match Hashtbl.find_opt t key with Some (_, acc) -> acc | None -> empty)
+      (match Hashtbl.find_opt t key with Some (_, _, acc) -> acc | None -> empty)
   | Some size ->
-      (* Resolve the starting offset and whether it is already line-aligned. *)
+      let inode = file_inode path in
+      (* Resolve the starting offset and whether it is already line-aligned.
+         Reuse the cached offset only when the file is the same physical file
+         (inode unchanged) and has not been truncated below it; otherwise — cold
+         key, truncation ([c > size]), or rotation/recreation (inode changed) —
+         reseed from the tail. *)
       let consumed, base_acc, aligned =
         match Hashtbl.find_opt t key with
-        | Some (c, acc) when c <= size -> (c, acc, true)
+        | Some (c, ino, acc) when ino = inode && ino >= 0 && c <= size ->
+            (c, acc, true)
         | _ ->
             let s = max 0 (size - initial_tail_bytes) in
             (s, empty, s = 0)
       in
       if consumed >= size then (
-        Hashtbl.replace t key (size, base_acc);
+        Hashtbl.replace t key (size, inode, base_acc);
         base_acc)
       else
         let buf = read_range path ~start:consumed ~upto:size in
@@ -94,13 +115,13 @@ let read (t : 'a t) ~(key : string) ~(path : string) ~(empty : 'a)
         (match last_newline buf with
         | None ->
             (* No complete line yet; hold the offset and wait for the writer. *)
-            Hashtbl.replace t key (consumed, base_acc);
+            Hashtbl.replace t key (consumed, inode, base_acc);
             base_acc
         | Some p ->
             let complete = String.sub buf 0 (p + 1) in
             let new_consumed = consumed + p + 1 in
             let acc = List.fold_left add base_acc (lines_of complete) in
-            Hashtbl.replace t key (new_consumed, acc);
+            Hashtbl.replace t key (new_consumed, inode, acc);
             acc)
 
 let recent_lines (t : string list t) ~(key : string) ~(path : string)
@@ -117,3 +138,6 @@ let recent_lines (t : string list t) ~(key : string) ~(path : string)
       ~initial_tail_bytes
   in
   List.rev newest_first
+
+let peek (t : 'a t) ~(key : string) : 'a option =
+  match Hashtbl.find_opt t key with Some (_, _, acc) -> Some acc | None -> None

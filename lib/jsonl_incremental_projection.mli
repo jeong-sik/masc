@@ -29,7 +29,8 @@ val read :
     runs exactly once per new complete line and is never re-run for an
     already-consumed line, so it is where a feed enforces a most-recent-N ring.
     A partial trailing line is held until the writer completes it; a file
-    shorter than the consumed offset reseeds from the tail. *)
+    shorter than the consumed offset, or one whose inode changed
+    (rotation/recreation), reseeds from the tail. *)
 
 val recent_lines :
   string list t ->
@@ -45,3 +46,9 @@ val recent_lines :
     keeps a newest-first ring of at most [window] lines and reverses it so the
     result matches a plain tail read. The caller handles any file I/O exception,
     exactly as with {!read}. *)
+
+val peek : 'a t -> key:string -> 'a option
+(** [peek t ~key] returns the last accumulator projected for [key] without
+    touching the file, or [None] if the key was never read. Lets a caller fall
+    back to the last good projection when a fresh {!read} / {!recent_lines}
+    raises a transient I/O error. *)

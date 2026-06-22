@@ -123,7 +123,14 @@ let recent_lines_or_record
   | exn ->
     record_memory_recall_read_error ~site path
       (Keeper_memory_recall_exn_class.classify exn);
-    []
+    (* Preserve the last successful projection instead of collapsing to [] on a
+       transient read error, so a briefly-unreadable or partially-corrupt tail
+       does not blank an otherwise-populated snapshot (the error is still
+       recorded above for observability). [peek] holds the newest-first ring, so
+       reverse it to the oldest-first order [recent_lines] returns. *)
+    (match Jsonl_incremental_projection.peek projection ~key with
+     | Some (_ :: _ as newest_first) -> List.rev newest_first
+     | _ -> [])
 ;;
 
 (* RFC-0149 §3.1 — typed Result entry point.  Distinguishes "empty

@@ -783,6 +783,14 @@ let masc_fusion_schema =
          web_fetch tools to ground their answers. Defaults to false; the \
          selected preset may also enable web tools on its own (the effective \
          setting is this flag OR the preset's)."
+    ; property
+        "topology"
+        "string"
+        "How to reduce the panel answers. \"simple\" (default): panel -> one \
+         judge -> result. \"refine\": panel -> judge -> a second judge that \
+         critically reviews and improves the first synthesis against the panel \
+         evidence -> result (deeper, two judge passes). Unknown values are \
+         rejected."
     ]
 ;;
 

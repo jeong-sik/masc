@@ -32,3 +32,31 @@ val run
   -> max_tool_calls:int
   -> unit
   -> (Fusion_types.judge_synthesis * Fusion_types.usage, string) result
+
+(** REFINE 위상의 2차 심판 프롬프트를 구성한다. [compose_prompt]의 질문+패널 블록에
+    더해, 1차 심판 종합 [prior]을 [Fusion_types.render_prior_synthesis]로 lossless 렌더해
+    <prior_synthesis> 블록으로 싣고, 2차 심판에게 그것을 패널 증거에 비추어 개선하라 지시한다
+    (가짜 panel_answer 날조 없음). 순수 — 테스트 가능. *)
+val compose_refine_prompt
+  :  question:string
+  -> panel:Fusion_types.panel_outcome list
+  -> prior:Fusion_types.judge_synthesis
+  -> string
+
+(** REFINE 위상의 2차 심판을 실행한다. [run]과 동일한 빌드/실행/usage/파싱 경로이며,
+    프롬프트만 [compose_refine_prompt ~prior]로 구성하는 점이 다르다([prior]는 1차
+    [run] 성공이 낸 종합). 성공 시 개선된 종합 + 2차 심판 토큰 usage를 반환한다(호출자가
+    1차 usage와 [Fusion_types.add_usage]로 합산). 실패는 [run]과 동일한 [Error msg]. *)
+val run_refine
+  :  sw:Eio.Switch.t
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> timeout_s:float
+  -> judge_system_prompt:string
+  -> judge_model:string
+  -> question:string
+  -> panel:Fusion_types.panel_outcome list
+  -> prior:Fusion_types.judge_synthesis
+  -> web_tools:bool
+  -> max_tool_calls:int
+  -> unit
+  -> (Fusion_types.judge_synthesis * Fusion_types.usage, string) result

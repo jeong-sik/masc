@@ -719,10 +719,66 @@ let test_document_highlights_related () =
          check int "two highlights" 2 (List.length highlights))))
 ;;
 
+(* Round-trip through [compact], which calls the internal
+   [write_all_partition].  Guards the [Fun.protect] fd-safe rewrite: the
+   happy path must still write every annotation back so a later [list]
+   sees them all. *)
+let test_compact_preserves_annotations () =
+  with_temp_dir (fun base_dir ->
+    let mk content =
+      match
+        Store.create
+          ~base_dir
+          ~keeper_id:"sangsu"
+          ~file_path:"lib/x.ml"
+          ~line_start:1
+          ~line_end:2
+          ~kind:Types.Comment
+          ~content
+          ~goal_id:"g"
+          ~task_id:"t"
+          ~board_post_id:"p"
+          ~comment_id:"c"
+          ~pr_id:"1"
+          ~git_ref:"r"
+          ~log_id:"l"
+          ~session_id:"s"
+          ~operation_id:"o"
+          ~worker_run_id:"w"
+          ()
+      with
+      | Error msg -> fail msg
+      | Ok created -> created
+    in
+    let a1 = mk "first" in
+    let a2 = mk "second" in
+    Store.compact ~base_dir ();
+    let filter =
+      { Types.file_path = None; keeper_id = None; goal_id = None; task_id = None }
+    in
+    let listed = Store.list ~base_dir ~filter () in
+    check int "compact preserves count" 2 (List.length listed);
+    let ids =
+      List.map (fun (a : Types.annotation) -> a.id) listed
+      |> List.sort String.compare
+    in
+    check
+      (list string)
+      "compact preserves ids"
+      (List.sort String.compare [ a1.id; a2.id ])
+      ids)
+;;
+
 let () =
   run
     "ide_annotations"
-    [ ( "route_context"
+    [ ( "compact"
+      , [ test_case
+            "compact preserves annotations (fd-safe write)"
+            `Quick
+            test_compact_preserves_annotations
+        ] )
+    ; ( "route_context"
       , [ test_case
             "annotation json preserves route context"
             `Quick

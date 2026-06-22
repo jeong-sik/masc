@@ -246,6 +246,44 @@ function activeStatusbarRepository(
     ?? repositories[0]
 }
 
+/**
+ * Derive a browsable https web URL from a git clone URL so the repo-origin
+ * block can render the prototype's `↗` external link.
+ *
+ * Total + deterministic: handles the two common clone forms
+ * (`https://host/owner/repo[.git]` and `git@host:owner/repo[.git]`) and
+ * returns `null` for anything else. A `null` result means "no usable web
+ * link" — the caller omits the `<a>` rather than fabricating a destination.
+ */
+function deriveRepoWebUrl(cloneUrl: string | null | undefined): string | null {
+  const raw = cloneUrl?.trim()
+  if (!raw) return null
+  const stripGitSuffix = (path: string): string => path.replace(/\.git$/i, '')
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const url = new URL(raw)
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+      url.pathname = stripGitSuffix(url.pathname)
+      url.username = ''
+      url.password = ''
+      return url.toString()
+    } catch {
+      return null
+    }
+  }
+  // scp-like syntax: git@host:owner/repo(.git)
+  const scpMatch = /^[^@\s]+@([^:\s]+):(.+)$/.exec(raw)
+  if (scpMatch) {
+    const host = scpMatch[1]
+    const rawPath = scpMatch[2]
+    if (!host || !rawPath) return null
+    const path = stripGitSuffix(rawPath.replace(/^\/+/, ''))
+    if (!path) return null
+    return `https://${host}/${path}`
+  }
+  return null
+}
+
 function statusbarWorkspaceLabel(
   repositories: ReadonlyArray<Repository> | undefined,
   activeRepositoryId: string | null | undefined,
@@ -617,6 +655,72 @@ function IdeCursorRailRow({ cursor }: { readonly cursor: KeeperCursor }) {
   `
 }
 
+/**
+ * Repo-origin block for the IDE top bar — prototype `.ide-repo` chrome.
+ *
+ * Renders the active repository's origin clone URL (copy-on-click), an
+ * optional GitHub-style web link, and the default branch using the vendored
+ * keeper-v2 `.ide-repo` / `.ide-remote` / `.ide-web` / `.br` skin classes.
+ *
+ * Data honesty:
+ *  - origin URL + default branch come from the live `Repository`.
+ *  - the web link is only rendered when a usable https URL can be derived.
+ *  - the prototype's "변경 N건" dirty count has no live source on
+ *    `Repository`, so it is surfaced as a `data-stub` placeholder (no number).
+ */
+function IdeRepoOrigin({
+  repositories,
+  activeRepositoryId,
+}: {
+  readonly repositories: ReadonlyArray<Repository> | undefined
+  readonly activeRepositoryId: string | null | undefined
+}) {
+  const [copied, setCopied] = useState(false)
+  const repository = activeStatusbarRepository(repositories, activeRepositoryId)
+  if (!repository) return null
+
+  const origin = repository.url.trim()
+  const branch = repository.default_branch.trim()
+  const webUrl = deriveRepoWebUrl(origin)
+
+  const copyOrigin = () => {
+    if (!origin) return
+    const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined
+    if (!clipboard) return
+    void clipboard.writeText(origin).then(() => {
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1100)
+    }).catch(() => {
+      // Clipboard can be blocked by permissions; leave the label unchanged.
+    })
+  }
+
+  return html`
+    <span
+      class="ide-repo"
+      data-testid="ide-repo-origin"
+      title=${`이 keeper 워크트리의 origin (git remote) · ${repository.local_path || repository.name}`}
+    >
+      ${origin
+        ? html`
+          <button
+            type="button"
+            class="ide-remote mono"
+            title="origin 클론 URL 복사"
+            onClick=${copyOrigin}
+          >${copied ? '✓ 복사됨' : origin}</button>
+        `
+        : html`<span class="ide-remote mono" data-stub="repo-origin">origin URL 미수신</span>`}
+      ${webUrl
+        ? html`<a class="ide-web" href=${webUrl} target="_blank" rel="noreferrer" title="웹에서 보기 ↗">↗</a>`
+        : null}
+      ${branch ? html`<span class="br" title="기본 브랜치 (default_branch)">${branch}</span>` : null}
+      ${' · '}
+      <span data-stub="repo-dirty-count" title="변경 파일 수 — 라이브 신호 없음">변경 미수신</span>
+    </span>
+  `
+}
+
 export function IdeShell() {
   const workspaceStore = useMemo(() => createIdeDataWorkspaceStore(), [])
 
@@ -883,6 +987,10 @@ export function IdeShell() {
               ? `base_path: ${statusbar.workspaceBasePath} (set MASC_BASE_PATH to change)`
               : undefined}
           >${statusbar.workspaceLabel}</span>
+          <${IdeRepoOrigin}
+            repositories=${repositories}
+            activeRepositoryId=${activeRepositoryId}
+          />
           <div
             class="ide-plane-statusbar-meta"
             aria-label="IDE operational context"
@@ -969,14 +1077,14 @@ export function IdeShell() {
               class="ide-plane-conversation ide-v2-rail v2-ide-panel"
               data-testid="ide-right-rail"
             >
-              <div class="ide-v2-rail-tabs" role="tablist" aria-label="IDE right rail">
+              <div class="ide-v2-rail-tabs ide-rail-tabs" role="tablist" aria-label="IDE right rail">
                 ${IDE_RIGHT_RAIL_TABS.map(tab => html`
                   <button
                     key=${tab.id}
                     type="button"
                     role="tab"
                     aria-selected=${rightRailTab === tab.id ? 'true' : 'false'}
-                    class=${`ide-v2-rail-tab ${rightRailTab === tab.id ? 'on' : ''}`}
+                    class=${`ide-v2-rail-tab ide-rail-tab ${rightRailTab === tab.id ? 'on' : ''}`}
                     onClick=${() => setRightRailTab(tab.id)}
                   >${tab.label}</button>
                 `)}

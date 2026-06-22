@@ -12,7 +12,6 @@ import { Select } from '../common/select'
 import { Checkbox } from '../common/checkbox'
 import { RichContent } from '../common/rich-content'
 import { CursorPagination } from '../common/pagination'
-import { SurfaceHeader } from '../common/surface-header'
 import { stripStateBlocks } from '../../keeper-message'
 import { route } from '../../router'
 import { keepers as dashboardKeepers, messages, refreshExecution } from '../../store'
@@ -526,12 +525,15 @@ function PostCard({ post }: { post: BoardPost }) {
 }
 
 // ── v2 board chrome ────────────────────────────────────────────────
+// Glyph vocabulary mirrors the keeper-v2 prototype (data-surfaces.jsx:7-12):
+// all→◈, incidents→⚠, watercooler→◌, every other hearth→⌗. Live hearth
+// names are data-driven, so the generic ⌗ default matches the prototype's
+// per-hearth glyph while the two named specials keep their prototype glyphs.
 const SUB_BOARD_GLYPHS: Record<string, string> = {
-  all: '＃',
-  ops: '⚙',
-  review: '⚖',
-  notice: '▣',
-  default: '＃',
+  all: '◈',
+  incidents: '⚠',
+  watercooler: '◌',
+  default: '⌗',
 }
 
 function countMentionMessages(): number {
@@ -590,13 +592,17 @@ function BdRail({ activeSub, onSub, onMentions }: {
   `
 }
 
-function BdFeedHead({ activeFilter, onFilter, count }: {
+function BdFeedHead({ activeFilter, onFilter, count, contentQuery, onContentQuery }: {
   activeFilter: 'all' | 'state' | 'mod'
   onFilter: (filter: 'all' | 'state' | 'mod') => void
   count: number
+  contentQuery: string
+  onContentQuery: (value: string) => void
 }) {
   const activeHearth = boardHearthFilter.value
-  const title = activeHearth === '' ? '전체 피드' : `#${activeHearth}`
+  // Prototype board.jsx:158 renders the bare hearth label (e.g. "core/scheduler")
+  // with no "#" prefix; the hearth name already carries its namespace path.
+  const title = activeHearth === '' ? '전체 피드' : activeHearth
   const filters: Array<{ key: 'all' | 'state' | 'mod'; label: string }> = [
     { key: 'all', label: '전체' },
     { key: 'state', label: '상태 블록' },
@@ -607,6 +613,14 @@ function BdFeedHead({ activeFilter, onFilter, count }: {
     <div class="bd-feed-head">
       <h2>${title}</h2>
       <span class="ns">${count}개 포스트</span>
+      <${TextInput}
+        type="search"
+        value=${contentQuery}
+        placeholder="제목/본문에서 검색"
+        ariaLabel="게시글 본문 필터"
+        onInput=${(e: Event) => onContentQuery((e.target as HTMLInputElement).value)}
+        class="min-w-40 max-w-64 !px-2 !py-1 !text-xs"
+      />
       <span class="spacer"></span>
       ${filters.map(f => html`
         <button
@@ -712,7 +726,7 @@ function BdThreadDetail({
         <div class="bd-th">
           <${BdAuthor} name=${authorAvatarKey} size=${26} />
           <div>
-            <div class="bd-th-hd"><span class="who">${authorLabel}</span><span class="ts"><${TimeAgo} timestamp=${post.created_at} /></span></div>
+            <div class="bd-th-hd"><span class="who">${authorLabel}</span><span class="ts mono"><${TimeAgo} timestamp=${post.created_at} /></span></div>
             <div class="bd-th-body">
               <div class="text-sm font-semibold mb-1">${stripInlineMarkdown(post.title)}</div>
               <${RichContent} text=${stripStateBlocks(post.body)} previewLimit=${4} />
@@ -1352,6 +1366,8 @@ function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => v
         activeFilter=${boardFilterMode.value}
         onFilter=${(filter: 'all' | 'state' | 'mod') => { boardFilterMode.value = filter }}
         count=${filteredByMode.length}
+        contentQuery=${contentQuery}
+        onContentQuery=${setContentQuery}
       />
       <${BdMobileQueues}
         activeFilter=${boardFilterMode.value}
@@ -1361,18 +1377,8 @@ function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => v
         onMentions=${onMentions}
       />
       <div class="bd-list">
-        <div class="mb-3 flex items-center gap-2">
-          <${TextInput}
-            type="search"
-            value=${contentQuery}
-            placeholder="제목/본문에서 검색"
-            ariaLabel="게시글 본문 필터"
-            onInput=${(e: Event) => setContentQuery((e.target as HTMLInputElement).value)}
-            class="min-w-45 max-w-80 flex-1 !px-2 !py-1 !text-xs"
-          />
-        </div>
         ${isFiltering && filteredByMode.length === 0 && posts.length > 0
-          ? html`<div class="bd-empty">필터 결과 없음 (${posts.length} items)</div>`
+          ? html`<div class="ov-empty">필터 결과 없음 (${posts.length} items)</div>`
           : filteredByMode.length === 0 && boardLoading.value
             ? html`<${LoadingState} title="게시판 불러오는 중…" />`
             : filteredByMode.length === 0
@@ -1502,7 +1508,6 @@ export function BoardSurface() {
       class="v2-board-surface ss-surface bg-surface-page text-text-primary"
       data-detail-width=${String(detailWidth)}
     >
-      <${SurfaceHeader} />
       <div class="bd-body" style=${`--bd-detail-width: ${detailWidth}px;`}>
         <${BdRail}
           activeSub=${activeSub}

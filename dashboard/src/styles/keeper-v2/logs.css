@@ -1,0 +1,118 @@
+/* ══════════════════════════════════════════════════════════════
+   MASC v2 — 이벤트 로그 (observe / trace stream) surface.
+   Tokens from colors_and_type.css + v2.css. Loads after them.
+   A dense, scannable, tail-style event stream: monospace clock,
+   keeper identity, kind badge, one-line summary; click to expand
+   the real event payload (args/result, turn meta, lifecycle, …).
+   ══════════════════════════════════════════════════════════════ */
+.lg {
+  height: 100%; min-height: 0; box-sizing: border-box;
+  display: flex; flex-direction: column;
+  background:
+    radial-gradient(ellipse at 14% 0%, color-mix(in oklab, var(--volt) 5%, transparent), transparent 55%),
+    var(--bg-deep);
+  color: var(--text-primary); font-family: var(--font-ui);
+  --lg-cols: 92px minmax(150px, 230px) 104px minmax(0, 1fr) 24px;
+}
+
+/* ── header ── */
+.lg-head { flex: none; display: flex; align-items: flex-start; gap: 24px; padding: 22px 26px 16px; }
+.lg-head-l h1 { margin: 0; font-family: var(--font-display); font-weight: 600; font-size: 22px; letter-spacing: -0.01em; color: var(--text-bright); }
+.lg-sub { margin: 6px 0 0; font-size: 11px; letter-spacing: 0.04em; color: var(--text-dim); }
+.lg-stats { margin-left: auto; display: flex; gap: 10px; }
+.lg-stat {
+  display: flex; flex-direction: column; gap: 3px; min-width: 74px;
+  padding: 8px 13px; border: 1px solid var(--border-main); border-radius: var(--radius-sm); background: var(--bg-card);
+}
+.lg-stat .k { font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-dim); }
+.lg-stat .v { font-size: 17px; font-weight: 600; color: var(--text-bright); font-variant-numeric: tabular-nums; }
+.lg-stat .v.bad { color: var(--status-bad); }
+
+/* ── toolbar ── */
+.lg-toolbar { flex: none; display: flex; align-items: center; gap: 10px; padding: 0 26px 14px; }
+.lg-filters { display: flex; gap: 4px; }
+.lg-fchip {
+  font-family: var(--font-ui); font-size: 12px; color: var(--text-mid);
+  padding: 6px 12px; border: 1px solid var(--border-main); background: transparent;
+  border-radius: var(--radius-pill); cursor: pointer; transition: color .18s ease, border-color .18s ease, background .18s ease;
+}
+.lg-fchip:hover { color: var(--text-bright); border-color: var(--volt-dim); }
+.lg-fchip.on { color: var(--bg-deep); background: var(--volt); border-color: var(--volt); font-weight: 600; }
+.lg-tb-spacer { flex: 1; }
+.lg-onlyerr {
+  font-family: var(--font-ui); font-size: 12px; color: var(--text-mid);
+  padding: 6px 12px; border: 1px solid var(--border-main); background: transparent;
+  border-radius: var(--radius-pill); cursor: pointer; transition: color .18s ease, border-color .18s ease;
+}
+.lg-onlyerr:hover { color: var(--text-bright); border-color: var(--volt-dim); }
+.lg-onlyerr.on { color: var(--status-warn); border-color: color-mix(in oklab, var(--status-warn) 50%, transparent); background: color-mix(in oklab, var(--status-warn) 10%, transparent); }
+.lg-live { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-dim); }
+.lg-live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--status-ok); box-shadow: 0 0 0 0 color-mix(in oklab, var(--status-ok) 60%, transparent); animation: lg-pulse 2.4s ease-in-out infinite; }
+@keyframes lg-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--status-ok) 55%, transparent); } 50% { box-shadow: 0 0 0 4px transparent; } }
+
+/* ── column header ── */
+.lg-colhd {
+  flex: none; display: grid; grid-template-columns: var(--lg-cols); gap: 14px; align-items: center;
+  padding: 9px 26px; margin: 0 0; border-top: 1px solid var(--border-main); border-bottom: 1px solid var(--border-main);
+  background: var(--bg-panel);
+}
+.lg-colhd span { font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
+
+/* ── stream ── */
+.lg-stream { flex: 1; min-height: 0; overflow-y: auto; }
+.lg-row { border-bottom: 1px solid var(--border-soft); border-left: 2px solid transparent; }
+.lg-row[data-sev="ok"]   { border-left-color: transparent; }
+.lg-row[data-sev="warn"] { border-left-color: color-mix(in oklab, var(--status-warn) 70%, transparent); }
+.lg-row[data-sev="bad"]  { border-left-color: var(--status-bad); }
+.lg-row[data-sev="busy"] { border-left-color: var(--volt); }
+.lg-row[data-sev="info"] { border-left-color: color-mix(in oklab, var(--info) 60%, transparent); }
+.lg-row.open { background: color-mix(in oklab, var(--volt) 4%, transparent); }
+
+.lg-line {
+  width: 100%; display: grid; grid-template-columns: var(--lg-cols); gap: 14px; align-items: center;
+  padding: 9px 26px; background: none; border: 0; cursor: pointer; text-align: left;
+  font-family: var(--font-ui); transition: background .12s ease;
+}
+.lg-line:hover { background: color-mix(in oklab, var(--text-bright) 4%, transparent); }
+.lg-time { font-size: 12px; color: var(--text-mid); font-variant-numeric: tabular-nums; }
+.lg-row[data-sev="bad"] .lg-time { color: var(--status-bad); }
+.lg-who { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.lg-kid { font-size: 13px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lg-nosig { width: 18px; height: 18px; border-radius: 4px; background: var(--bg-card); border: 1px solid var(--border-main); flex: none; }
+.lg-kind {
+  justify-self: start; font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.1em; font-weight: 600;
+  padding: 3px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border-main); color: var(--text-dim);
+  white-space: nowrap;
+}
+.lg-kind[data-kind="tool"]      { color: var(--volt); border-color: color-mix(in oklab, var(--volt) 36%, transparent); }
+.lg-kind[data-kind="turn"]      { color: var(--text-mid); }
+.lg-kind[data-kind="lifecycle"] { color: var(--status-warn); border-color: color-mix(in oklab, var(--status-warn) 36%, transparent); }
+.lg-kind[data-kind="approval"]  { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 40%, transparent); }
+.lg-kind[data-kind="broadcast"] { color: var(--info); border-color: color-mix(in oklab, var(--info) 40%, transparent); }
+.lg-msg { font-size: 13px; color: var(--text-primary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lg-caret { justify-self: center; font-size: 11px; color: var(--text-dim); }
+
+/* ── expanded detail ── */
+.lg-detail { padding: 4px 26px 16px calc(26px + 92px + 14px); display: flex; flex-direction: column; gap: 10px; }
+.lg-kv { display: flex; flex-wrap: wrap; gap: 6px 22px; }
+.lg-kv-row { display: flex; gap: 8px; align-items: baseline; }
+.lg-kv-k { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); }
+.lg-kv-v { font-size: 12px; color: var(--text-bright); }
+.lg-block { display: flex; flex-direction: column; gap: 4px; }
+.lg-block-h { font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-dim); }
+.lg-code {
+  margin: 0; padding: 10px 12px; border: 1px solid var(--border-main); border-radius: var(--radius-sm);
+  background: var(--bg-panel); color: var(--text-mid); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55;
+  white-space: pre-wrap; word-break: break-word; max-width: 760px;
+}
+.lg-note { font-size: 12.5px; line-height: 1.55; color: var(--text-mid); max-width: 720px; }
+.lg-note.dim { color: var(--text-dim); font-size: 11.5px; }
+.lg-recips { display: flex; flex-wrap: wrap; gap: 6px; }
+.lg-recip { font-size: 11px; color: var(--text-mid); padding: 3px 9px; border: 1px solid var(--border-main); border-radius: var(--radius-pill); }
+.lg-jump {
+  align-self: flex-start; font-family: var(--font-ui); font-size: 12px; color: var(--volt);
+  padding: 6px 12px; border: 1px solid color-mix(in oklab, var(--volt) 40%, transparent); background: transparent;
+  border-radius: var(--radius-sm); cursor: pointer; transition: background .18s ease, border-color .18s ease;
+}
+.lg-jump:hover { background: color-mix(in oklab, var(--volt) 12%, transparent); border-color: var(--volt); }
+.lg-empty { padding: 48px; text-align: center; color: var(--text-dim); font-size: 13px; }

@@ -1,8 +1,9 @@
-// Keeper Workspace — roster pane (left). Search + status filter chips +
-// status-grouped keeper rows. Ported from the v2 design (rails.jsx Roster),
-// wired to the live `keepers` store. Selecting a row routes to that keeper,
-// which swaps the conversation + rail panes (same route shape the detail
-// page already used, so deep links keep working).
+// Keeper Workspace — roster pane (left). Ported to the keeper-v2 prototype DOM
+// (rails.jsx Roster): `.roster` → `.roster-filters` (전체/실행/주의 + search
+// toggle + sort) → `.roster-list` of `.roster-group` + `.kp-row`. Styled by the
+// vendored SSOT CSS (keeper-v2/v2.css). All live wiring (the `keepers` store,
+// filtering/sorting, the FSM action menu, route-on-select) is unchanged from the
+// previous `.kw-*` implementation — only the emitted DOM/classes changed.
 
 import { html } from 'htm/preact'
 import {
@@ -20,19 +21,18 @@ import { keepers } from '../../store'
 import { navigate } from '../../router'
 import { selectKeeper } from '../../keeper-runtime'
 import { keeperMobilePane } from '../keeper-detail-state'
-import { keeperActivityDisplay, keeperWorkPreview } from '../../lib/keeper-runtime-display'
+import { keeperActivityDisplay } from '../../lib/keeper-runtime-display'
 import { keeperActionVisibility } from '../../lib/keeper-predicates'
 import type { Keeper } from '../../types'
 import { runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
 import { VirtualList } from '../common/virtual-list'
+import { kSlot, kSigil } from '../keeper-badge'
+import { SigilBadge, Dot } from '../v2/primitives-v2'
+import { phaseTone, phasePulse } from '../v2/keeper-fsm'
 import {
-  WorkspaceSigil,
-  StatusDot,
   keeperBucket,
-  keeperStatusTone,
   keeperPhaseLabel,
   type KeeperBucket,
-  type DotTone,
 } from './keeper-workspace-shared'
 
 type RosterFilter = 'all' | 'run' | 'att'
@@ -51,63 +51,30 @@ type RosterFleetSummary = {
 }
 
 const LIFECYCLE_COPY: Record<KeeperActionKey, { label: string; title: string; icon: IconComponent; danger?: boolean }> = {
-  pause: {
-    label: '일시정지',
-    title: '일시정지: 실행 중인 keeper 를 일시 멈춥니다',
-    icon: Pause,
-  },
-  resume: {
-    label: '재개',
-    title: '재개: 일시정지된 keeper 를 다시 실행합니다',
-    icon: Play,
-  },
-  wakeup: {
-    label: '깨우기',
-    title: '깨우기: 다음 turn 을 즉시 시도합니다',
-    icon: RotateCcw,
-  },
-  boot: {
-    label: '기동',
-    title: '기동: offline keeper 를 다시 시작합니다',
-    icon: Play,
-  },
-  shutdown: {
-    label: '종료',
-    title: '종료: keeper 를 완전 종료합니다',
-    icon: Square,
-    danger: true,
-  },
+  pause: { label: '일시정지', title: '일시정지: 실행 중인 keeper 를 일시 멈춥니다', icon: Pause },
+  resume: { label: '재개', title: '재개: 일시정지된 keeper 를 다시 실행합니다', icon: Play },
+  wakeup: { label: '깨우기', title: '깨우기: 다음 turn 을 즉시 시도합니다', icon: RotateCcw },
+  boot: { label: '기동', title: '기동: offline keeper 를 다시 시작합니다', icon: Play },
+  shutdown: { label: '종료', title: '종료: keeper 를 완전 종료합니다', icon: Square, danger: true },
 }
 const MENU_WIDTH = 190
 const MENU_ESTIMATED_HEIGHT = 246
 const MENU_VIEWPORT_MARGIN = 8
 
-const GROUP_ORDER: { bucket: KeeperBucket; label: string }[] = [
-  { bucket: 'running', label: '실행 중' },
-  { bucket: 'paused', label: '대기 · 일시정지' },
-  { bucket: 'offline', label: '중지 · 종료됨' },
+// Prototype group order + the short header label it uses (rails.jsx groupLabel).
+const GROUP_ORDER: { bucket: KeeperBucket; label: string; short: string; cls: string }[] = [
+  { bucket: 'running', label: '실행 중', short: '실행 중', cls: 'run' },
+  { bucket: 'paused', label: '대기 · 일시정지', short: '대기', cls: 'pause' },
+  { bucket: 'offline', label: '중지 · 종료됨', short: '중지', cls: 'off' },
 ]
+const GROUP_BY_BUCKET = Object.fromEntries(GROUP_ORDER.map((g) => [g.bucket, g])) as Record<KeeperBucket, (typeof GROUP_ORDER)[number]>
 
-/** Group-header status dot tone (design rails.jsx `.rg-dot` colored by groupCls).
- *  Reuses the shared StatusDot vocabulary instead of a bespoke dot so the header
- *  marker matches the per-row dots: running→ok, paused→warn, offline→idle. */
-const GROUP_BUCKET_TONE: Record<KeeperBucket, DotTone> = {
-  running: 'ok',
-  paused: 'warn',
-  offline: 'idle',
-}
-
-/** Flattened roster item used by the virtualized render path. */
 type RosterItem =
-  | { type: 'header'; bucket: KeeperBucket; label: string; count: number }
+  | { type: 'header'; bucket: KeeperBucket; count: number }
   | { type: 'row'; keeper: Keeper }
 
-/** Switch to the shared VirtualList once the roster is long enough that DOM
- *  weight matters. Below this we keep the identical grouped DOM structure and
- *  rely on content-visibility:auto for cheap off-screen skipping. */
 const WINDOW_AT = 60
 
-/** Blocked tasks + explicit attention flag → the roster attention badge. */
 function attentionCount(keeper: Keeper): number {
   return keeper.blocked_task_count ?? (keeper.needs_attention === true ? 1 : 0)
 }
@@ -117,15 +84,8 @@ function needsAttention(keeper: Keeper): boolean {
 
 export function rosterFleetSummary(rows: readonly Keeper[]): RosterFleetSummary {
   const summary: RosterFleetSummary = {
-    total: rows.length,
-    running: 0,
-    paused: 0,
-    offline: 0,
-    attention: 0,
-    approvalGate: 0,
-    highContext: 0,
+    total: rows.length, running: 0, paused: 0, offline: 0, attention: 0, approvalGate: 0, highContext: 0,
   }
-
   for (const keeper of rows) {
     const bucket = keeperBucket(keeper)
     if (bucket === 'running') summary.running += 1
@@ -137,47 +97,28 @@ export function rosterFleetSummary(rows: readonly Keeper[]): RosterFleetSummary 
       summary.highContext += 1
     }
   }
-
   return summary
 }
 
-/** Numeric attention weight for the 'att' sort: attention-needing keepers rank
- *  above the rest, ordered by blocked-task count (min 1 when only the flag is
- *  set, so a flagged-but-unblocked keeper still outranks a calm one). Mirrors
- *  the v2 roster's numeric `k.att` sort key. */
 function attentionScore(keeper: Keeper): number {
   return needsAttention(keeper) ? Math.max(1, attentionCount(keeper)) : 0
 }
 
-/** Comparator for the flat sort modes ('name'/'att'). 'status' keeps the bucket
- *  grouping instead and never reaches here. Name ties break alphabetically so
- *  the order is stable. */
 function compareKeepers(a: Keeper, b: Keeper, sort: Exclude<RosterSort, 'status'>): number {
   if (sort === 'name') return a.name.localeCompare(b.name)
   return attentionScore(b) - attentionScore(a) || a.name.localeCompare(b.name)
 }
 
-/** ns proxy: keepers have no namespace field; the skill path is the closest
- *  real scope signal, with the model as fallback. */
 function keeperScope(keeper: Keeper): string | null {
   return keeper.skill_primary ?? keeper.active_model ?? keeper.model ?? null
 }
 
-/** The keeper's sandbox location — the design's roster identity sub-line
- *  (rails.jsx renders `k.basepath` here). The live field is `sandbox_target`
- *  (keeper-detail-alert-strip.ts:252 uses the same field); for a `local`
- *  profile it is the worktree root path, for `docker` the container target.
- *  Unlike the alert strip, this deliberately does NOT fall back to
- *  `sandbox_profile`: a bare 'local'/'docker' literal is not a useful roster
- *  identity, so RosterRow falls through to the scope proxy (skill/model) instead. */
+// The keeper's sandbox location — the prototype roster identity sub-line
+// (rails.jsx renders `k.basepath`). Live field is `sandbox_target`.
 function keeperBasepath(keeper: Keeper): string {
   return keeper.sandbox_target?.trim() ?? ''
 }
 
-/** Local worktree roots are long absolute paths that end-ellipsis to an
- *  unhelpful common prefix in the narrow column, so show the last two segments
- *  (the identifying tail) with the full path in `title`. Non-path targets
- *  (e.g. a docker target) are shown verbatim. */
 function shortBasepath(value: string): string {
   if (!value.startsWith('/')) return value
   const parts = value.split('/').filter(Boolean)
@@ -188,6 +129,11 @@ function matchesQuery(keeper: Keeper, q: string): boolean {
   if (!q) return true
   const hay = `${keeper.name} ${keeper.koreanName ?? ''} ${keeperScope(keeper) ?? ''} ${keeper.model ?? ''} ${keeperBasepath(keeper)}`.toLowerCase()
   return hay.includes(q.toLowerCase())
+}
+
+// Prototype kp-state shows the raw English FSM phase ("Running", "Compacting").
+function phaseText(keeper: Keeper): string {
+  return keeper.lifecycle_phase ?? keeper.phase ?? keeperPhaseLabel(keeper)
 }
 
 function RosterRow({
@@ -204,22 +150,17 @@ function RosterRow({
   style?: string
 }) {
   const bucket = keeperBucket(keeper)
-  const tone = keeperStatusTone(keeper)
   const att = attentionCount(keeper)
-  const scope = keeperScope(keeper)
   const basepath = keeperBasepath(keeper)
-  // Design roster identity sub-line = basepath; fall back to the scope proxy
-  // when a keeper has no sandbox target yet so the row never loses its sub-label.
-  const handle = basepath ? shortBasepath(basepath) : scope
-  const handleTitle = basepath || scope || ''
+  const handle = basepath ? shortBasepath(basepath) : keeperScope(keeper)
+  const handleTitle = basepath || keeperScope(keeper) || ''
   const activity = keeperActivityDisplay(keeper)
-  const work = keeperWorkPreview(keeper)
   const select = () => onSelect(keeper.name)
   return html`
     <div
       role="button"
       tabindex="0"
-      class="kw-kp-row v2-monitoring-row"
+      class=${`kp-row${active ? ' sel' : ''}`}
       style=${style}
       aria-current=${active ? 'true' : 'false'}
       onClick=${select}
@@ -230,24 +171,23 @@ function RosterRow({
         select()
       }}
     >
-      <${WorkspaceSigil} id=${keeper.name} size=${38} beat=${bucket === 'running'} />
-      <div class="kw-kp-meta">
-        <div class="kw-kp-name">${keeper.koreanName ?? keeper.name}</div>
-        <div class="kw-kp-sub">
-          <span class="kw-kp-state"><${StatusDot} tone=${tone} pulse=${bucket === 'running'} />${keeperPhaseLabel(keeper)}</span>
-          ${handle ? html`<span aria-hidden="true">·</span><span class="kw-kp-handle" title=${handleTitle}>${handle}</span>` : null}
+      <${SigilBadge} slot=${kSlot(keeper.name)} sigil=${kSigil(keeper.name)} size=${38} beat=${bucket === 'running'} title=${keeper.name} />
+      <div class="kp-meta">
+        <div class="kp-name">${keeper.name}</div>
+        <div class="kp-sub">
+          <span class="kp-state"><${Dot} state=${phaseTone(keeper.lifecycle_phase)} pulse=${phasePulse(keeper.lifecycle_phase)} />${phaseText(keeper)}</span>
+          ${handle ? html`<span aria-hidden="true">·</span><span class="kp-handle" title=${handleTitle}>${handle}</span>` : null}
         </div>
-        <div class="kw-kp-work" title=${work ?? ''}>${work ?? '최근 작업 요약 없음'}</div>
       </div>
-      <div class="kw-kp-right">
-        ${activity.source !== 'none' ? html`<span class="kw-kp-time">${activity.label}</span>` : null}
-        ${att > 0 ? html`<span class="kw-kp-att" title=${`주의 ${att}건`}>${att}</span>` : null}
+      <div class="kp-right">
+        ${activity.source !== 'none' ? html`<span class="kp-time">${activity.label}</span>` : null}
+        ${att > 0 ? html`<span class="kp-att" title=${`주의 ${att}건 — 컨텍스트 레일에서 확인`}>${att}</span>` : null}
       </div>
       <button
         type="button"
-        class="kw-kp-more v2-monitoring-action"
+        class="kp-more"
         aria-label=${`${keeper.name} 명령`}
-        title="keeper 명령"
+        title="명령 메뉴"
         onClick=${(event: MouseEvent) => onMenu(keeper, event)}
         data-testid=${`kw-roster-menu-${keeper.name}`}
       >
@@ -269,20 +209,18 @@ function MiniRosterRow({
   onMenu: (keeper: Keeper, event: MouseEvent) => void
 }) {
   const bucket = keeperBucket(keeper)
-  const tone = keeperStatusTone(keeper)
-  const label = `${keeper.name} · ${keeperPhaseLabel(keeper)}`
+  const label = `${keeper.name} · ${phaseText(keeper)}`
   return html`
     <button
       type="button"
-      class="kw-kp-mini v2-monitoring-action"
+      class=${`kp-row mini${active ? ' sel' : ''}`}
       aria-current=${active ? 'true' : 'false'}
       aria-label=${label}
       title=${label}
       onClick=${() => onSelect(keeper.name)}
       onContextMenu=${(event: MouseEvent) => onMenu(keeper, event)}
     >
-      <${WorkspaceSigil} id=${keeper.name} size=${38} beat=${bucket === 'running'} />
-      <${StatusDot} tone=${tone} pulse=${bucket === 'running'} />
+      <${SigilBadge} slot=${kSlot(keeper.name)} sigil=${kSigil(keeper.name)} size=${38} beat=${bucket === 'running'} title=${keeper.name} />
     </button>
   `
 }
@@ -298,34 +236,6 @@ function lifecycleActions(keeper: Keeper): KeeperActionKey[] {
   return actions
 }
 
-function pct(count: number, total: number): string {
-  if (total <= 0 || count <= 0) return '0%'
-  return `${Math.max(4, Math.round((count / total) * 100))}%`
-}
-
-function KeeperFleetSummaryBand({ summary }: { summary: RosterFleetSummary }): VNode {
-  return html`
-    <section class="kw-roster-summary" data-testid="kw-roster-summary" aria-label="키퍼 플릿 요약">
-      <div class="kw-roster-meter" aria-hidden="true">
-        <span class="run" style=${{ width: pct(summary.running, summary.total) }}></span>
-        <span class="pause" style=${{ width: pct(summary.paused, summary.total) }}></span>
-        <span class="off" style=${{ width: pct(summary.offline, summary.total) }}></span>
-      </div>
-      <div class="kw-roster-summary-grid">
-        <div class="kw-roster-stat"><b>${summary.total}</b><span>전체</span></div>
-        <div class="kw-roster-stat ok"><b>${summary.running}</b><span>실행</span></div>
-        <div class="kw-roster-stat warn"><b>${summary.paused}</b><span>대기</span></div>
-        <div class="kw-roster-stat idle"><b>${summary.offline}</b><span>중지</span></div>
-      </div>
-      <div class="kw-roster-flags">
-        <span class=${summary.attention > 0 ? 'hot' : ''}>주의 ${summary.attention}</span>
-        <span class=${summary.approvalGate > 0 ? 'gate' : ''}>승인 ${summary.approvalGate}</span>
-        <span class=${summary.highContext > 0 ? 'ctx' : ''}>CTX 80%+ ${summary.highContext}</span>
-      </div>
-    </section>
-  `
-}
-
 function KeeperRosterMenu({
   state,
   onClose,
@@ -339,31 +249,25 @@ function KeeperRosterMenu({
 }): VNode {
   const keeper = state.keeper
   const actions = lifecycleActions(keeper)
-  const select = () => {
-    onSelect(keeper.name)
-    onClose()
-  }
+  const select = () => { onSelect(keeper.name); onClose() }
   const openConfig = () => {
     onSelect(keeper.name)
-    if (onOpenConfig) {
-      onOpenConfig(keeper.name)
-    }
+    if (onOpenConfig) onOpenConfig(keeper.name)
     onClose()
   }
-
   return html`
     <div
-      class="kw-kp-menu v2-monitoring-surface"
+      class="kp-menu"
       role="menu"
       style=${{ left: `${state.x}px`, top: `${state.y}px` }}
       onClick=${(event: Event) => event.stopPropagation()}
       data-testid="kw-roster-menu"
     >
-      <div class="kw-kp-menu-head v2-monitoring-toolbar">
-        <${WorkspaceSigil} id=${keeper.name} size=${22} beat=${keeperBucket(keeper) === 'running'} />
-        <span>${keeper.name}</span>
+      <div class="kp-menu-h">
+        <${SigilBadge} slot=${kSlot(keeper.name)} sigil=${kSigil(keeper.name)} size=${20} title=${keeper.name} />
+        <span class="mono">${keeper.name}</span>
       </div>
-      <button type="button" role="menuitem" class="kw-kp-menu-item" onClick=${select} data-testid="kw-roster-menu-open-chat">
+      <button type="button" role="menuitem" class="kp-menu-i" onClick=${select} data-testid="kw-roster-menu-open-chat">
         <${MessageSquare} size=${14} aria-hidden="true" />
         <span>대화 열기</span>
       </button>
@@ -375,12 +279,9 @@ function KeeperRosterMenu({
             key=${action}
             type="button"
             role="menuitem"
-            class=${`kw-kp-menu-item${copy.danger ? ' danger' : ''}`}
+            class=${`kp-menu-i${copy.danger ? ' danger' : ''}`}
             title=${copy.title}
-            onClick=${() => {
-              void runKeeperAction(keeper.name, action)
-              onClose()
-            }}
+            onClick=${() => { void runKeeperAction(keeper.name, action); onClose() }}
             data-testid=${`kw-roster-menu-${action}`}
           >
             <${Icon} size=${14} aria-hidden="true" />
@@ -389,10 +290,10 @@ function KeeperRosterMenu({
         `
       })}
       ${actions.length === 0
-        ? html`<div class="kw-kp-menu-note">현재 실행 가능한 명령 없음</div>`
+        ? html`<div class="kp-menu-note">현재 실행 가능한 명령 없음</div>`
         : null}
-      <div class="kw-kp-menu-sep"></div>
-      <button type="button" role="menuitem" class="kw-kp-menu-item" onClick=${openConfig} data-testid="kw-roster-menu-config">
+      <div class="kp-menu-sep"></div>
+      <button type="button" role="menuitem" class="kp-menu-i" onClick=${openConfig} data-testid="kw-roster-menu-config">
         <${Settings} size=${14} aria-hidden="true" />
         <span>keeper 설정</span>
       </button>
@@ -414,6 +315,7 @@ export function KeeperWorkspaceRoster({
   mini?: boolean
 }): VNode {
   const [query, setQuery] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
   const [filter, setFilter] = useState<RosterFilter>('all')
   const [sort, setSort] = useState<RosterSort>('status')
   const [menu, setMenu] = useState<RosterMenuState>(null)
@@ -421,9 +323,6 @@ export function KeeperWorkspaceRoster({
   useEffect(() => {
     if (!menu) return
     const close = () => setMenu(null)
-    // Esc closes the menu (was: any key — typing in the search box dismissed it);
-    // scroll closes it too (capture phase) so the row-anchored menu can't drift
-    // away from its row. Mirrors the design roster menu (rails.jsx).
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setMenu(null)
     }
@@ -438,7 +337,6 @@ export function KeeperWorkspaceRoster({
   }, [menu])
 
   const all = keepers.value
-  const summary = rosterFleetSummary(all)
   const counts = {
     all: all.length,
     run: all.filter(k => keeperBucket(k) === 'running').length,
@@ -451,15 +349,12 @@ export function KeeperWorkspaceRoster({
     return matchesQuery(k, query)
   })
 
-  const sortRows = (rows: Keeper[]): Keeper[] => {
-    return sort === 'status' ? rows : [...rows].sort((a, b) => compareKeepers(a, b, sort))
-  }
+  const sortRows = (rows: Keeper[]): Keeper[] =>
+    sort === 'status' ? rows : [...rows].sort((a, b) => compareKeepers(a, b, sort))
 
   const select = (name: string) => {
     setMenu(null)
     selectKeeper(name)
-    // On mobile the roster and conversation share one column; picking a keeper
-    // should reveal that keeper's chat (the roster is the "back" target).
     keeperMobilePane.value = 'chat'
     if (routeSurface === 'keepers') {
       navigate('keepers', { keeper: name })
@@ -470,16 +365,10 @@ export function KeeperWorkspaceRoster({
   }
 
   const openMenu = (keeper: Keeper, event: MouseEvent) => {
-    // Centralized here so both entry points behave: the ⋯ button click and a
-    // right-click on the row. preventDefault suppresses the browser's native
-    // context menu on right-click; stopPropagation keeps a ⋯ click from also
-    // selecting the row (the click would otherwise bubble to the row onClick).
     event.preventDefault()
     event.stopPropagation()
     const target = event.currentTarget as HTMLElement
-    const rosterRect = target.closest('.kw-roster')?.getBoundingClientRect() ?? { left: 0, top: 0 }
-    // Right-click anchors the menu at the cursor (design rails.jsx openMenu); the
-    // ⋯ button right-aligns the menu just below itself.
+    const rosterRect = target.closest('.roster')?.getBoundingClientRect() ?? { left: 0, top: 0 }
     let anchorRight: number
     let anchorTop: number
     if (event.type === 'contextmenu') {
@@ -498,52 +387,38 @@ export function KeeperWorkspaceRoster({
       MENU_VIEWPORT_MARGIN,
       Math.min(anchorTop, window.innerHeight - MENU_ESTIMATED_HEIGHT - MENU_VIEWPORT_MARGIN),
     )
-    setMenu({
-      keeper,
-      x: viewportX - rosterRect.left,
-      y: viewportY - rosterRect.top,
-    })
+    setMenu({ keeper, x: viewportX - rosterRect.left, y: viewportY - rosterRect.top })
   }
 
   const filterChips: { id: RosterFilter; label: string }[] = [
     { id: 'all', label: '전체' },
-    { id: 'run', label: '실행중' },
+    { id: 'run', label: '실행' },
     { id: 'att', label: '주의' },
   ]
 
-  // Flatten to [{ type: 'header'|'row', ... }] for windowing. 'status' keeps the
-  // bucket grouping with headers; 'name'/'att' produce a flat sorted list with no
-  // headers, mirroring the v2 roster sort modes (rails.jsx Roster).
   const items: RosterItem[] = []
   if (sort === 'status') {
     for (const group of GROUP_ORDER) {
       const rows = visible.filter(k => keeperBucket(k) === group.bucket)
       if (rows.length === 0) continue
-      items.push({ type: 'header', bucket: group.bucket, label: group.label, count: rows.length })
-      for (const keeper of rows) {
-        items.push({ type: 'row', keeper })
-      }
+      items.push({ type: 'header', bucket: group.bucket, count: rows.length })
+      for (const keeper of rows) items.push({ type: 'row', keeper })
     }
   } else {
-    for (const keeper of sortRows(visible)) {
-      items.push({ type: 'row', keeper })
-    }
+    for (const keeper of sortRows(visible)) items.push({ type: 'row', keeper })
   }
 
   const useVirtual = items.length > WINDOW_AT
   const rowStyle = 'content-visibility:auto;contain-intrinsic-size:auto 58px'
   const miniRows = sortRows(all)
 
-  // Single source for the group header so the windowed and non-windowed render
-  // paths can't drift (they previously inlined the header markup separately).
   function renderHeader(item: Extract<RosterItem, { type: 'header' }>): VNode {
-    return html`<div class="kw-roster-group v2-monitoring-row" key=${`h:${item.bucket}`}><${StatusDot} tone=${GROUP_BUCKET_TONE[item.bucket]} /><span class="kw-roster-group-label">${item.label}</span><span class="kw-roster-group-n">${item.count}</span></div>`
+    const g = GROUP_BY_BUCKET[item.bucket]
+    return html`<div class=${`roster-group ${g.cls}`} title=${g.label} key=${`h:${item.bucket}`}><span class="rg-dot"></span>${g.short}<span class="rg-n">${item.count}</span></div>`
   }
 
   function renderItem(item: RosterItem): VNode {
-    if (item.type === 'header') {
-      return renderHeader(item)
-    }
+    if (item.type === 'header') return renderHeader(item)
     return html`<${RosterRow} keeper=${item.keeper} active=${item.keeper.name === activeName} onSelect=${select} onMenu=${openMenu} />`
   }
 
@@ -552,37 +427,33 @@ export function KeeperWorkspaceRoster({
   }
 
   return html`
-    <aside class=${`kw-roster${mini ? ' mini' : ''} v2-monitoring-surface`} aria-label="키퍼 로스터">
+    <aside class=${`roster${mini ? ' mini' : ''}`} aria-label="키퍼 로스터">
       ${mini
-        ? html`<div class="kw-roster-mini-list">
+        ? html`<div class="roster-list mini-list">
             ${miniRows.map(k => html`<${MiniRosterRow} key=${k.name} keeper=${k} active=${k.name === activeName} onSelect=${select} onMenu=${openMenu} />`)}
           </div>`
         : html`
-          <div class="kw-roster-head v2-monitoring-toolbar">
-            <div class="kw-roster-title"><span>Keepers</span><span class="n">${counts.all}</span></div>
-            <input
-              class="kw-roster-search"
-              type="text"
-              placeholder="이름 · 스코프 검색…"
-              aria-label="키퍼 검색"
-              value=${query}
-              onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-            />
-          </div>
-          <${KeeperFleetSummaryBand} summary=${summary} />
-          <div class="kw-roster-filters v2-monitoring-toolbar" role="group" aria-label="상태 필터">
+          <div class="roster-filters" role="group" aria-label="상태 필터">
             ${filterChips.map(chip => html`
               <button
                 type="button"
-                class="kw-rfilter v2-monitoring-action"
+                class=${`rfilter${filter === chip.id ? ' on' : ''}`}
                 aria-pressed=${filter === chip.id ? 'true' : 'false'}
                 onClick=${() => setFilter(chip.id)}
               >
                 ${chip.label}<span class="n">${counts[chip.id]}</span>
               </button>
             `)}
+            <button
+              type="button"
+              class=${`rfilter-icon${searchOpen ? ' on' : ''}`}
+              title="검색"
+              aria-label="키퍼 검색 토글"
+              aria-pressed=${searchOpen ? 'true' : 'false'}
+              onClick=${() => setSearchOpen(o => !o)}
+            >${'⌕'}</button>
             <select
-              class="kw-roster-sort v2-monitoring-action"
+              class="roster-sort"
               aria-label="키퍼 정렬"
               value=${sort}
               onChange=${(e: Event) => setSort((e.target as HTMLSelectElement).value as RosterSort)}
@@ -592,17 +463,30 @@ export function KeeperWorkspaceRoster({
               <option value="att">주의순</option>
             </select>
           </div>
+          ${searchOpen
+            ? html`<div class="roster-head">
+                <input
+                  class="roster-search"
+                  type="text"
+                  placeholder="이름·basepath 검색…"
+                  aria-label="키퍼 검색"
+                  autofocus
+                  value=${query}
+                  onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
+                />
+              </div>`
+            : null}
           ${visible.length === 0
-            ? html`<div class="kw-roster-list"><div class="kw-roster-empty v2-monitoring-row">일치하는 키퍼가 없습니다</div></div>`
+            ? html`<div class="roster-list"><div class="roster-empty" style="padding:30px 12px;text-align:center;color:var(--text-dim);font-size:12px">일치하는 Keeper가 없습니다</div></div>`
         : useVirtual
           ? html`<${VirtualList}
               items=${items}
               estimatedItemHeight=${58}
-              className="kw-roster-list"
+              className="roster-list"
               renderItem=${renderItem}
               getKey=${getKey}
             />`
-          : html`<div class="kw-roster-list">
+          : html`<div class="roster-list">
               ${items.map(item => item.type === 'header'
                 ? renderHeader(item)
                 : html`<${RosterRow} key=${item.keeper.name} keeper=${item.keeper} active=${item.keeper.name === activeName} onSelect=${select} onMenu=${openMenu} style=${rowStyle} />`)}

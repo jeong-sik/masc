@@ -592,8 +592,9 @@ export function SettingsSurface() {
         <nav class="set-nav" aria-label="Settings categories">
           <div class="set-nav-h">
             <div class="eyebrow">Operator</div>
-            <div class="set-nav-title">Settings</div>
-            <div class="set-nav-sub mono">@operator · masc-mcp</div>
+            <!-- keeper-v2 settings.jsx:244-247 — nav header is eyebrow + KO title
+                 only; the prototype does not render a sub-line here. -->
+            <div class="set-nav-title">설정</div>
           </div>
           ${SET_GROUPS.map(([glabel, ids]) => html`
             <div key=${glabel} class="set-nav-group">
@@ -617,7 +618,8 @@ export function SettingsSurface() {
               })}
             </div>
           `)}
-          <div class="set-nav-note">Prototype controls are read-only previews; runtime.toml is live-backed.</div>
+          <!-- keeper-v2 settings.jsx:262 — KO nav-note copy. -->
+          <div class="set-nav-note">프로토타입 — 변경은 로컬에만 적용됩니다.</div>
         </nav>
 
         <div class="set-content">

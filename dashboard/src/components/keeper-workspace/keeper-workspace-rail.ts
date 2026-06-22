@@ -1,8 +1,10 @@
-// Keeper Workspace — context rail (right). Runtime/throughput, context-window
-// occupancy, owned tasks, recent tool calls, and the "운영 상세" toggle that
-// surfaces the full KeeperDetailBody. Most data comes from the live Keeper
-// object + the tasks store; the recent-tool-calls section lazy-loads the rich
-// per-call store (see keeper-workspace-tool-calls.ts).
+// Keeper Workspace — context rail (right). Ported to the keeper-v2 prototype DOM
+// (rails.jsx ContextRail): `.ctx` → `.ctx-scroll` → `.ctx-sec` sections (주의 /
+// 런타임 `.rtc-card` / 처리량 `.tps-card` / 컨텍스트 `.ctx-card` / 소유 태스크
+// `.ctx-list`), styled by the vendored SSOT CSS. Live wiring (Keeper object +
+// tasks store + masc_keeper_compact) is unchanged; only the DOM/classes changed.
+// Data gaps (runtime capability flags, effort segments, compaction/memory
+// inspectors) are MARKED, never faked.
 
 import { html } from 'htm/preact'
 import { useState } from 'preact/hooks'
@@ -11,8 +13,7 @@ import { shellAuthSummary, tasks } from '../../store'
 import type { Keeper, Task } from '../../types'
 import { navigate } from '../../router'
 import { keeperModelLabel, keeperRuntimeLabel } from './keeper-workspace-shared'
-import { KeeperWorkspaceRecentTools } from './keeper-workspace-tool-calls'
-import { formatDuration } from '../../lib/format-time'
+import { CountBadge } from '../v2/primitives-v2'
 import { callMcpTool } from '../../api/mcp'
 import { showToast } from '../common/toast'
 import { requestConfirm } from '../common/confirm-dialog'
@@ -79,9 +80,6 @@ function attentionFallback(keeper: Keeper): string | null {
 
 type AttentionItem = { sev: 'bad' | 'warn'; text: string }
 
-/** Attention items from the same live signals the roster badge counts
- *  (blocked tasks + explicit flag). No fabricated severities — the section
- *  is omitted entirely when there is nothing to surface. */
 function attentionItems(keeper: Keeper): AttentionItem[] {
   const items: AttentionItem[] = []
   const blocked = keeper.blocked_task_count ?? 0
@@ -97,13 +95,13 @@ function AttentionSection({ keeper }: { keeper: Keeper }): VNode | null {
   const items = attentionItems(keeper)
   if (items.length === 0) return null
   return html`
-    <div class="kw-sec v2-monitoring-panel">
-      <h4>주의 <span class="kw-kp-att">${items.length}</span></h4>
-      <div class="kw-att-list v2-monitoring-row">
+    <div class="ctx-sec">
+      <h4 style=${{ display: 'flex', alignItems: 'center', gap: '7px' }}>주의 <${CountBadge}>${items.length}</${CountBadge}></h4>
+      <div class="att-list">
         ${items.map((it, i) => html`
-          <div class=${`kw-att-item ${it.sev} v2-monitoring-row`} key=${`${it.text}-${i}`}>
-            <span class="kw-att-dot" aria-hidden="true"></span>
-            <span class="kw-att-text" title=${it.text}>${it.text}</span>
+          <div class=${`att-item ${it.sev}`} key=${`${it.text}-${i}`}>
+            <span class="att-dot" aria-hidden="true"></span>
+            <span class="att-text" title=${it.text}>${it.text}</span>
           </div>
         `)}
       </div>
@@ -111,9 +109,49 @@ function AttentionSection({ keeper }: { keeper: Keeper }): VNode | null {
   `
 }
 
-function formatAgo(seconds: number | null | undefined): string | null {
-  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return null
-  return `${formatDuration(seconds)} 전`
+function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
+  const model = keeperModelLabel(keeper)
+  const runtime = keeperRuntimeLabel(keeper)
+  const max = contextMax(keeper)
+  const ctxK = max ? formatK(max) : null
+  return html`
+    <div class="ctx-sec">
+      <h4>런타임</h4>
+      <div class="rtc-card">
+        <div class="rtc-id mono">${runtime ?? '런타임 미수신'}</div>
+        ${model
+          ? html`<div class="rtc-model mono">${model}${ctxK ? ` · ${ctxK} ctx` : ''}</div>`
+          : null}
+        ${/* Live execution snapshot carries no capability flags / effort segments
+             (multimodal/json/tool-choice, low/medium/high). Marked, not faked. */ ''}
+        <div class="rtc-na" data-stub="runtime-capabilities">능력·effort 정보 미수신</div>
+      </div>
+    </div>
+  `
+}
+
+function ThroughputSection({ keeper }: { keeper: Keeper }): VNode {
+  const series = tpsSeries(keeper)
+  const peak = Math.max(1, ...series)
+  const latest = series.at(-1) ?? 0
+  const live = keeper.status.toLowerCase() === 'running' || keeper.status.toLowerCase() === 'active'
+  return html`
+    <div class="ctx-sec">
+      <h4>처리량</h4>
+      <div class="tps-card">
+        <div class="tps-now">
+          <span class=${`tps-val${latest > 0 ? '' : ' idle'}`}>${latest > 0 ? latest : '—'}</span>
+          <span class="tps-unit">tok/s</span>
+          ${live && latest > 0 ? html`<span class="tps-flag"><span class="tps-dot"></span>live</span>` : null}
+        </div>
+        ${series.length >= 2
+          ? html`<div class="tps-spark" aria-hidden="true">
+              ${series.map(v => html`<span style=${{ height: `${Math.max(6, (v / peak) * 100)}%`, opacity: 0.35 + 0.65 * (v / peak) }}></span>`)}
+            </div>`
+          : null}
+      </div>
+    </div>
+  `
 }
 
 function compactionGatePct(keeper: Keeper): number {
@@ -132,7 +170,7 @@ function compactRequiresForce(keeper: Keeper): boolean {
   return status === 'running' || status === 'active' || status === 'busy' || status === 'failing'
 }
 
-function ContextSection({ keeper }: { keeper: Keeper }): VNode {
+function ContextSection({ keeper, onToggleDetail }: { keeper: Keeper; onToggleDetail: () => void }): VNode {
   const [compacting, setCompacting] = useState(false)
   const pct = contextPercent(keeper)
   const compactAt = compactionGatePct(keeper)
@@ -141,17 +179,8 @@ function ContextSection({ keeper }: { keeper: Keeper }): VNode {
   const baseTokens = keeper.context_tokens ?? keeper.context?.context_tokens ?? null
   const tokens = formatK(baseTokens)
   const maxLabel = formatK(max)
-  const msgCount = keeper.context?.message_count ?? null
-  const hasCheckpoint = keeper.context?.has_checkpoint ?? null
-  const contextSource = nonEmpty(keeper.context_source ?? keeper.context?.source)
   const compactionCount = keeper.compaction_count ?? null
-  const compactionProfile = nonEmpty(keeper.compaction_profile)
-  const messageGate = keeper.compaction_message_gate
-  const tokenGate = keeper.compaction_token_gate
   const hasCompactionHistory = typeof compactionCount === 'number' && compactionCount > 0
-  const lastCompactionAgo = hasCompactionHistory ? formatAgo(keeper.last_compaction_ago_s) : null
-  const lastCompactionSaved = hasCompactionHistory ? formatK(keeper.last_compaction_saved_tokens) : null
-  const hasUsageBreakdown = baseTokens !== null || max !== null || msgCount !== null || hasCheckpoint !== null || contextSource != null
   const hasMeterData = pct !== null && (pct > 0 || max !== null)
   const compactAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   const canCompact = compactAccess.allowed && !compacting
@@ -174,21 +203,12 @@ function ContextSection({ keeper }: { keeper: Keeper }): VNode {
       }
       setCompacting(true)
       try {
-        const raw = await callMcpTool('masc_keeper_compact', {
-          name: keeper.name,
-          force,
-        })
-        const parsed = JSON.parse(raw) as {
-          before_tokens?: number
-          after_tokens?: number
-          phase_after?: string
-        }
+        const raw = await callMcpTool('masc_keeper_compact', { name: keeper.name, force })
+        const parsed = JSON.parse(raw) as { before_tokens?: number; after_tokens?: number; phase_after?: string }
         const before = formatK(parsed.before_tokens)
         const after = formatK(parsed.after_tokens)
         showToast(
-          before && after
-            ? `${keeper.name} compact 완료: ${before} -> ${after}`
-            : `${keeper.name} compact 완료`,
+          before && after ? `${keeper.name} compact 완료: ${before} -> ${after}` : `${keeper.name} compact 완료`,
           'success',
         )
         await refreshAfterRuntimeAction()
@@ -199,125 +219,54 @@ function ContextSection({ keeper }: { keeper: Keeper }): VNode {
       }
     })()
   }
-  const contextMeta = html`
-    <div class="kw-ctx-meta">
-      ${msgCount !== null ? html`<span>메시지 ${msgCount}개</span>` : null}
-      ${hasCheckpoint === true ? html`<span>체크포인트 보유</span>` : null}
-      ${contextSource ? html`<span>출처 ${contextSource}</span>` : null}
+
+  const usageHeader = html`
+    <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+      <span style=${{ fontSize: '12px', color: 'var(--text-mid)' }}>윈도우 사용량</span>
+      <span class="mono" style=${{ fontSize: '14px', color: hot ? 'var(--status-bad)' : 'var(--volt-strong)' }}>${pct ?? 0}%</span>
     </div>
   `
-  let usageBody: VNode
-  if (hasMeterData) {
-    usageBody = html`
-      <div class="flex items-baseline justify-between">
-        <span class="text-xs text-[var(--color-fg-secondary)]">윈도우 사용량</span>
-        <span class=${`font-mono text-sm ${hot ? 'text-[var(--color-status-err)]' : 'text-[var(--color-accent-fg)]'}`}>${pct ?? 0}%</span>
-      </div>
-      <div class="kw-meter-wrap">
-        <div class=${`kw-meter${hot ? ' hot' : ''}`}><span style=${{ width: `${pct ?? 0}%` }}></span></div>
-        <span class="kw-meter-mark" style=${{ left: `${compactAt}%` }} title=${`compact ratio_gate ${compactAt}%`}>
-          <i class="kw-meter-mark-lbl">compact ${compactAt}%</i>
-        </span>
-      </div>
-      ${tokens || maxLabel
-        ? html`<div class="kw-ctx-tok">
-            <span class="mono">${tokens ?? '—'}</span>
-            <span aria-hidden="true">/</span>
-            <span class="mono">${maxLabel ?? '—'}</span>
-            <span class="lbl">사용 / 전체 윈도우</span>
-          </div>`
-        : null}
-      ${contextMeta}
-    `
-  } else if (hasUsageBreakdown) {
-    usageBody = html`
-      <div class="kw-context-empty">
-        <strong>윈도우 사용률 미수신</strong>
-        <span>전체 윈도우 총량이 없어 비율을 숨깁니다. compact ratio_gate는 ${compactAt}%입니다.</span>
-      </div>
-      ${tokens || maxLabel
-        ? html`<div class="kw-ctx-tok">
-            <span class="mono">${tokens ?? '—'}</span>
-            <span aria-hidden="true">/</span>
-            <span class="mono">${maxLabel ?? '—'}</span>
-            <span class="lbl">사용 / 전체 윈도우</span>
-          </div>`
-        : null}
-      ${contextMeta}
-    `
-  } else {
-    usageBody = html`
-      <div class="kw-context-empty">
-        <strong>컨텍스트 사용량 미수신</strong>
-        <span>런타임이 토큰/윈도우 메트릭을 아직 보내지 않았습니다.</span>
-      </div>
-    `
-  }
 
   return html`
-    <div class="kw-sec v2-monitoring-panel">
-      <h4>컨텍스트 점유</h4>
-      <div class="kw-card v2-monitoring-card">
-        ${usageBody}
-        <div class="kw-cmp-readonly">
-          ${hasCompactionHistory
-            ? html`
-                <span>누적 컴팩트 ${compactionCount}회</span>
-                ${lastCompactionAgo ? html`<span>마지막 ${lastCompactionAgo}</span>` : null}
-                ${lastCompactionSaved ? html`<span>절약 ${lastCompactionSaved} tok</span>` : null}
-              `
-            : html`<span>컴팩트 기록 없음</span>`}
-          ${compactionProfile ? html`<span>profile ${compactionProfile}</span>` : null}
-          <span>ratio_gate ${compactAt}%</span>
-          ${typeof messageGate === 'number' && messageGate > 0 ? html`<span>message_gate ${messageGate}</span>` : null}
-          ${typeof tokenGate === 'number' && tokenGate > 0 ? html`<span>token_gate ${formatK(tokenGate) ?? tokenGate}</span>` : null}
+    <div class="ctx-sec">
+      <h4>컨텍스트</h4>
+      <div class="ctx-card">
+        ${hasMeterData
+          ? html`
+              ${usageHeader}
+              <div class="meter-wrap">
+                <div class=${`meter${hot ? ' hot' : ''}`}><span style=${{ width: `${pct ?? 0}%` }}></span></div>
+                <span class=${`meter-mark${hot ? ' hot' : ''}`} style=${{ left: `${compactAt}%` }}>
+                  <i class="meter-mark-lbl">compact ${compactAt}%</i>
+                </span>
+              </div>
+            `
+          : html`<div class="ctx-empty" data-stub="context-window"><strong>윈도우 사용률 미수신</strong><span>런타임이 전체 윈도우 총량을 아직 보내지 않았습니다. ratio_gate ${compactAt}%.</span></div>`}
+        <div class="ctx-tok">
+          <span class="mono">${tokens ?? '—'}</span>
+          <span class="ctx-tok-sep">/</span>
+          <span class="mono ctx-tok-full">${maxLabel ?? '—'}</span>
+          <span class="ctx-tok-lbl">사용 / 전체 윈도우</span>
         </div>
-        <div class="kw-cmp-actions">
+        <div class="cmp-actions">
           <button
             type="button"
-            class="kw-act kw-compact-btn v2-monitoring-action"
+            class=${`cmp-run${compacting ? ' busy' : ''}`}
             disabled=${!canCompact}
-            title=${compactAccess.allowed ? 'masc_keeper_compact force=true 실행' : compactReason}
+            title=${compactAccess.allowed ? 'masc_keeper_compact 실행' : compactReason}
             onClick=${runCompact}
-          >${compacting ? 'compact 중...' : '지금 compact'}</button>
+          >${compacting ? html`<span class="cmp-spin"></span> 컴팩트 실행 중…` : '◉ 지금 컴팩트'}</button>
         </div>
+        ${/* The prototype opens dedicated compaction-snapshot / memory inspectors;
+             those live overlays do not exist yet, so both route to the operational
+             detail body (FSM · 진단 · 정체성 · memory). Marked as a deferred wiring. */ ''}
+        <button type="button" class="cmp-open" data-stub="compaction-inspector" onClick=${onToggleDetail}>
+          ◉ 컴팩션 스냅샷${hasCompactionHistory ? ` · ${compactionCount}` : ''} <span class="cmp-open-sub">운영 상세에서 보기</span>
+        </button>
+        <button type="button" class="cmp-open" data-stub="memory-inspector" onClick=${onToggleDetail}>
+          ◈ 메모리 보기 <span class="cmp-open-sub">FSM · 진단 · 정체성</span>
+        </button>
       </div>
-    </div>
-  `
-}
-
-function ThroughputSection({ keeper }: { keeper: Keeper }): VNode {
-  const model = keeperModelLabel(keeper)
-  const runtime = keeperRuntimeLabel(keeper)
-  // scope (skill_primary) used to live in the chat header sub-row; folded here
-  // so the slim single-row header loses no information.
-  const scope = keeper.skill_primary ?? null
-  const series = tpsSeries(keeper)
-  const peak = Math.max(1, ...series)
-  const latest = series.length ? series[series.length - 1] : 0
-  return html`
-    <div class="kw-sec v2-monitoring-panel">
-      <h4>런타임 · 처리량</h4>
-      <div class=${`kw-vitals ${model ? '' : 'single'} v2-monitoring-row`}>
-        <div class=${`kw-vital ${runtime ? '' : 'muted'}`}><div class="vk">런타임</div><div class="vv" title=${runtime ?? ''}>${runtime ?? '런타임 미수신'}</div></div>
-        ${model ? html`<div class="kw-vital"><div class="vk">모델</div><div class="vv" title=${model}>${model}</div></div>` : null}
-        ${scope ? html`<div class="kw-vital" style=${{ gridColumn: '1 / -1' }}><div class="vk">scope</div><div class="vv" title=${scope}>${scope}</div></div>` : null}
-      </div>
-      ${series.length >= 2
-        ? html`<div class="kw-card mt-2 v2-monitoring-card">
-            <div class="flex items-baseline justify-between">
-              <span class="font-mono text-base text-[var(--color-status-ok)]">${latest}</span>
-              <span class="text-2xs text-[var(--color-fg-muted)]">tok/s</span>
-            </div>
-            <div class="mt-2 flex h-7 items-end gap-0.5" aria-hidden="true">
-              ${series.map(v => html`<span class="flex-1 rounded-[1px] bg-[var(--color-status-ok)]" style=${{ height: `${Math.max(6, (v / peak) * 100)}%`, opacity: 0.35 + 0.65 * (v / peak) }}></span>`)}
-            </div>
-          </div>
-          <div class="kw-range-chips">
-            <span class="kw-range-chip">저부하</span>
-            <span class="kw-range-chip">고부하</span>
-          </div>`
-        : null}
     </div>
   `
 }
@@ -328,27 +277,27 @@ function OwnedTasksSection({ keeper }: { keeper: Keeper }): VNode {
     navigate('workspace', { section: 'planning', task: task.id })
   }
   return html`
-    <div class="kw-sec v2-monitoring-panel">
+    <div class="ctx-sec">
       <h4>소유 태스크</h4>
-      <div class="kw-list v2-monitoring-row">
+      <div class="ctx-list">
         ${owned.length
           ? owned.map(t => html`
               <button
                 type="button"
-                class="kw-tasktag v2-monitoring-row"
+                class="tasktag"
                 key=${t.id}
-                title=${`${t.id} · ${t.title}`}
+                title=${`작업으로 이동 · ${t.id} · ${t.title}`}
                 aria-label=${`태스크 열기: ${t.id} ${t.title}`}
                 onClick=${() => openTask(t)}
               >
-                <div class="kw-tasktag-row">
+                <div class="tasktag-top">
                   <span class="tid">${t.id}</span>
-                  ${t.status ? html`<span class=${`tstate ${taskStateClass(t.status)}`}>${t.status}</span>` : null}
+                  ${t.status ? html`<span class=${`tasktag-state ${taskStateClass(t.status)}`}>${t.status}</span>` : null}
                 </div>
                 <span class="ttl">${t.title}</span>
               </button>
             `)
-          : html`<div class="kw-list-empty v2-monitoring-row">할당된 태스크 없음</div>`}
+          : html`<div style=${{ fontSize: '12px', color: 'var(--text-dim)' }}>할당된 태스크 없음</div>`}
       </div>
     </div>
   `
@@ -362,19 +311,13 @@ export function KeeperWorkspaceRail({
   onToggleDetail: () => void
 }): VNode {
   return html`
-    <aside class="kw-rail v2-monitoring-surface" aria-label="키퍼 컨텍스트">
-      <div class="kw-rail-scroll v2-monitoring-panel">
+    <aside class="ctx" aria-label="키퍼 컨텍스트">
+      <div class="ctx-scroll">
         <${AttentionSection} keeper=${keeper} />
         <${ThroughputSection} keeper=${keeper} />
-        <${ContextSection} keeper=${keeper} />
+        <${RuntimeSection} keeper=${keeper} />
+        <${ContextSection} keeper=${keeper} onToggleDetail=${onToggleDetail} />
         <${OwnedTasksSection} keeper=${keeper} />
-        <${KeeperWorkspaceRecentTools} keeperName=${keeper.name} />
-        <div class="kw-sec v2-monitoring-toolbar">
-          <button type="button" class="kw-detail-btn v2-monitoring-action" onClick=${onToggleDetail}>
-            <span>운영 상세</span>
-            <span class="sub">FSM · 진단 · 정체성 · 설정 →</span>
-          </button>
-        </div>
       </div>
     </aside>
   `

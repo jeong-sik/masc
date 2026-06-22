@@ -28,13 +28,12 @@ import { keeperThreads } from '../../keeper-state'
 import { keeperDisplayStatus } from '../../lib/keeper-runtime-display'
 import { keeperActionVisibility } from '../../lib/keeper-predicates'
 import { runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
+import { Pill, type PillTone } from '../v2/primitives-v2'
+import { phaseTone, phasePulse } from '../v2/keeper-fsm'
 import {
   WorkspaceSigil,
-  StatusDot,
   keeperBucket,
-  keeperStatusTone,
   keeperPhaseLabel,
-  statePillTone,
 } from './keeper-workspace-shared'
 
 type WorkspaceUtilityAction = 'turn' | 'clear' | 'artifacts' | 'detail' | 'config'
@@ -243,7 +242,7 @@ function WorkspaceCommandButtons({
           <button
             key=${command.id}
             type="button"
-            class=${`kw-chat-command-icon${command.danger ? ' danger' : ''}${command.active ? ' active' : ''} v2-monitoring-action`}
+            class=${`act icon${command.danger ? ' danger' : ''}${command.active ? ' on' : ''}`}
             aria-label=${command.label}
             aria-pressed=${command.active ? 'true' : undefined}
             title=${command.title}
@@ -285,40 +284,42 @@ function ChatHeader({
   onOpenConfig?: () => void
 }): VNode {
   const bucket = keeperBucket(keeper)
-  const tone = keeperStatusTone(keeper)
-  const pill = statePillTone(tone)
   const live = bucket === 'running'
+  const tone = phaseTone(keeper.lifecycle_phase)
+  const pillTone: PillTone = tone === 'idle' ? 'neutral' : tone === 'busy' ? 'warn' : tone
+  const pulse = phasePulse(keeper.lifecycle_phase)
+  const phase = keeper.lifecycle_phase ?? keeper.phase ?? keeperPhaseLabel(keeper)
+  const basepath = keeper.sandbox_target ?? keeper.skill_primary ?? keeper.active_model ?? keeper.model ?? ''
 
-  // Single-row header: identity + status + actions only. Runtime / model /
-  // throughput / scope live in the context rail (ThroughputSection) — the
-  // canonical home — so the header stays slim and the conversation gets the
-  // vertical space instead of a redundant metadata sub-row.
+  // Prototype ChatHeader (shell.jsx): avatar + identity (name + phase pill) +
+  // basepath sub + action icons. The back button is mobile-only (desktop keeps
+  // the roster visible). Runtime/model/throughput live in the context rail.
   return html`
-    <div class="kw-chat-head v2-monitoring-toolbar">
-      <button
-        type="button"
-        class="kw-chat-back kw-act v2-monitoring-action"
-        title="키퍼 로스터"
-        aria-label="키퍼 로스터로 돌아가기"
-        onClick=${() => {
-          keeperMobilePane.value = 'roster'
-          onBack?.()
-        }}
-        data-testid="kw-chat-back-to-roster"
-      >
-        <${ChevronLeft} size=${16} aria-hidden="true" />
-      </button>
+    <div class=${`chat-head${mobile ? ' is-mobile' : ''}`}>
+      ${mobile
+        ? html`<button
+            type="button"
+            class="chat-back"
+            title="키퍼 로스터"
+            aria-label="키퍼 로스터로 돌아가기"
+            onClick=${() => {
+              keeperMobilePane.value = 'roster'
+              onBack?.()
+            }}
+            data-testid="kw-chat-back-to-roster"
+          ><${ChevronLeft} size=${16} aria-hidden="true" /></button>`
+        : null}
       <${WorkspaceSigil} id=${keeper.name} size=${40} beat=${live} />
-      <div class="kw-chat-id">
-        <div class="kw-chat-name-row">
-          <h2 class="kw-chat-name">${keeper.koreanName ?? keeper.name}</h2>
-          <span class=${`kw-state-pill ${pill}`} title=${keeperDisplayStatus(keeper)}>
-            <${StatusDot} tone=${tone} pulse=${live} />${keeperPhaseLabel(keeper)}
-          </span>
+      <div class="chat-id">
+        <div class="name-row">
+          <h2>${keeper.name}</h2>
+          <${Pill} tone=${pillTone} dot=${pillTone === 'neutral' ? 'idle' : pillTone} dotPulse=${pulse} title=${keeperDisplayStatus(keeper)}>${phase}</${Pill}>
         </div>
-        <div class="kw-chat-slug">${keeper.sandbox_target ?? keeper.skill_primary ?? keeper.active_model ?? keeper.model ?? ''}</div>
+        <div class="sub">
+          <span class="sub-ns" title="basepath — 이 keeper의 격리된 worktree 루트"><span class="mono">${basepath}</span></span>
+        </div>
       </div>
-      <div class="kw-chat-actions">
+      <div class="chat-actions">
         <${WorkspaceCommandButtons}
           keeper=${keeper}
           mobile=${mobile}

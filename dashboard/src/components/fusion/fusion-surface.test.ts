@@ -120,10 +120,19 @@ describe('FusionSurface', () => {
     expect(container.textContent).toContain('Which deploy path should we take?')
     expect(container.textContent).toContain('gpt-5')
     expect(container.textContent).toContain('claude-sonnet-4')
-    expect(container.textContent).toContain('Canary has the best rollback evidence.')
+    // The rebuilt detail surfaces the judge verdict as the humanized decision
+    // label ('answer' -> '해결 답안' via fusionDecisionSpec), then renders
+    // `resolved_answer` as the resolved body. The raw `judge.synthesis` string is
+    // only a fallback for `resolved_answer` (FusionRunDetail `resolved = ...`), so
+    // it is not shown when `resolved_answer` is present — assert the verdict the
+    // component actually renders from this judge metadata instead.
+    expect(container.textContent).toContain('해결 답안')
     expect(container.textContent).toContain('Ship canary first, then expand.')
-    expect(container.textContent).toContain('1,300')
-    expect(container.textContent).toContain('360')
+    // Tokens are no longer rendered as separate comma-formatted in/out figures;
+    // the detail KPI strip combines panel+judge into one `Nk` total
+    // (combinedTokenLabel: observed 1300 + 360 = 1660 -> '1.7k').
+    expect(container.textContent).toContain('토큰 (패널+심판)')
+    expect(container.textContent).toContain('1.7k')
     expect(container.querySelector('[data-testid="fusion-pipe"]')).not.toBeNull()
     expect(container.querySelector('.fus-rdot.done')).not.toBeNull()
     expect(container.textContent).toContain('panel ×2')
@@ -194,7 +203,10 @@ describe('FusionSurface', () => {
     expect(evidence?.textContent).toContain('Add the rollback caveat to the operator note.')
     expect(evidence?.textContent).toContain('No cost impact estimate.')
     expect(evidence?.textContent).toContain('staging rollback transcript')
-    expect(evidence?.textContent).toContain('publish operator note')
+    // The recommendation `action` is rendered in the `.fus-resolved` block as
+    // `권고 · <action>` (FusionRunDetail), not inside the structured judge-evidence
+    // panel — assert it against the full surface where it actually appears.
+    expect(container.textContent).toContain('publish operator note')
   })
 
   it('calls ringFocusClasses() for focus rings instead of stringifying the function', () => {

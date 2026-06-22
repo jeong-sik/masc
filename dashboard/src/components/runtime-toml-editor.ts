@@ -17,7 +17,7 @@ import { SectionCard } from './common/card'
 import { copyToClipboard } from './common/copyable-code'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { ringFocusClasses } from './common/ring'
-import { RuntimeEnvironmentEditor } from './runtime-environment-editor'
+import { RuntimeEnvironmentEditor, type RuntimeStructuredSection } from './runtime-environment-editor'
 
 type LoadState = 'idle' | 'loading' | 'loaded'
 
@@ -232,6 +232,16 @@ export function RuntimeTomlEditor() {
     }
   }
 
+  async function handleCopySource() {
+    const ok = await copyToClipboard(draft)
+    if (ok) {
+      setNotice('runtime.toml 복사됨')
+      setError(null)
+    } else {
+      setError('runtime.toml 복사 실패')
+    }
+  }
+
   function handleEditorScroll(event: Event) {
     const gutter = lineGutterRef.current
     if (!gutter) return
@@ -286,6 +296,9 @@ export function RuntimeTomlEditor() {
   // is toggled via the nav, so the editor wiring is never torn down on switch.
   const structuredActive = section !== 'toml'
   const tomlActive = section === 'toml'
+  // When the toml section is active, RuntimeEnvironmentEditor is hidden anyway;
+  // fall back to 'routing' so its `section` prop stays a valid structured id.
+  const structuredSection: RuntimeStructuredSection = section === 'toml' ? 'routing' : section
 
   const toolbar = html`
     <div class="v2-monitoring-toolbar sticky top-0 z-10 -mx-1 bg-[var(--color-bg-surface)]/95 px-1 py-2 backdrop-blur">
@@ -436,6 +449,7 @@ export function RuntimeTomlEditor() {
                 <div class=${structuredActive ? '' : 'hidden'} data-testid="runtime-toml-structured">
                   <${RuntimeEnvironmentEditor}
                     sourceText=${draft}
+                    section=${structuredSection}
                     dirty=${dirty}
                     disabled=${loadState !== 'loaded'}
                     saving=${saving}
@@ -449,36 +463,55 @@ export function RuntimeTomlEditor() {
                   />
                 </div>
 
-                <!-- toml section — read-only raw view with the working textarea +
-                     toolbar (runtime-editor.jsx:233-242). -->
+                <!-- toml section — prototype .rt-toml-wrap chrome
+                     (runtime-editor.jsx:233-242) around the working editable
+                     code-frame. The prototype preview is read-only; the live
+                     editor stays editable (intentional divergence — the toml
+                     section is the raw escape hatch), so the .rt-toml-bar note
+                     reads "직접 편집 가능" instead of "읽기 전용". The inner
+                     v2-monitoring-code-frame + line gutter + textarea are kept
+                     verbatim (data-testids the tests rely on). -->
                 <div class=${tomlActive ? 'flex flex-col gap-3' : 'hidden'} data-testid="runtime-toml-section">
                   ${toolbar}
-                  <div
-                    class="v2-monitoring-code-frame grid min-h-[32rem] max-h-[72vh] grid-cols-[3.5rem_minmax(0,1fr)] overflow-hidden rounded-[var(--r-1)] border border-[var(--input-border)] bg-[var(--input-bg)]"
-                    data-testid="runtime-toml-code-frame"
-                  >
-                    <pre
-                      ref=${lineGutterRef}
-                      class="select-none overflow-hidden border-r border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-3 text-right font-mono text-xs leading-relaxed text-[var(--color-fg-disabled)]"
-                      aria-hidden="true"
-                      data-testid="runtime-toml-line-numbers"
-                    >${lineNumbers}</pre>
-                    <textarea
-                      ref=${textareaRef}
-                      class="min-h-[32rem] w-full resize-y overflow-auto border-0 bg-transparent px-3 py-3 font-mono text-xs leading-relaxed text-[var(--color-fg-primary)] outline-none ${editorFocusClasses}"
-                      aria-label="runtime.toml source"
-                      data-testid="runtime-toml-source"
-                      value=${draft}
-                      rows=${32}
-                      wrap="off"
-                      spellcheck=${false}
-                      autocapitalize="off"
-                      autocorrect="off"
-                      disabled=${saving}
-                      onInput=${handleEditorInput}
-                      onKeyDown=${handleEditorKeyDown}
-                      onScroll=${handleEditorScroll}
-                    ></textarea>
+                  <div class="rt-toml-wrap">
+                    <div class="rt-toml-bar">
+                      <span class="mono">${path}</span>
+                      <span class="rt-toml-ro">직접 편집 가능 · 저장 시 라이브 적용</span>
+                      <button
+                        type="button"
+                        class="rt-copy"
+                        onClick=${handleCopySource}
+                        title="runtime.toml 복사"
+                        data-testid="runtime-toml-copy-source"
+                      >복사</button>
+                    </div>
+                    <div
+                      class="v2-monitoring-code-frame grid min-h-[32rem] max-h-[72vh] grid-cols-[3.5rem_minmax(0,1fr)] overflow-hidden rounded-[var(--r-1)] border border-[var(--input-border)] bg-[var(--input-bg)]"
+                      data-testid="runtime-toml-code-frame"
+                    >
+                      <pre
+                        ref=${lineGutterRef}
+                        class="select-none overflow-hidden border-r border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-3 text-right font-mono text-xs leading-relaxed text-[var(--color-fg-disabled)]"
+                        aria-hidden="true"
+                        data-testid="runtime-toml-line-numbers"
+                      >${lineNumbers}</pre>
+                      <textarea
+                        ref=${textareaRef}
+                        class="min-h-[32rem] w-full resize-y overflow-auto border-0 bg-transparent px-3 py-3 font-mono text-xs leading-relaxed text-[var(--color-fg-primary)] outline-none ${editorFocusClasses}"
+                        aria-label="runtime.toml source"
+                        data-testid="runtime-toml-source"
+                        value=${draft}
+                        rows=${32}
+                        wrap="off"
+                        spellcheck=${false}
+                        autocapitalize="off"
+                        autocorrect="off"
+                        disabled=${saving}
+                        onInput=${handleEditorInput}
+                        onKeyDown=${handleEditorKeyDown}
+                        onScroll=${handleEditorScroll}
+                      ></textarea>
+                    </div>
                   </div>
                 </div>
               </div>

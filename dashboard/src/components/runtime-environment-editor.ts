@@ -1,24 +1,36 @@
 import { html } from 'htm/preact'
 import { Save } from 'lucide-preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useMemo, useState } from 'preact/hooks'
 import {
+  deleteRuntimeTomlKey,
   parseRuntimeTomlEnvironment,
   setRuntimeTomlBindingField,
   setRuntimeTomlDefault,
-  setRuntimeTomlModelField,
+  setRuntimeTomlKey,
   setRuntimeTomlProviderCredential,
   setRuntimeTomlProviderField,
   type RuntimeTomlBinding,
   type RuntimeTomlCredentialType,
   type RuntimeTomlEnvironment,
-  type RuntimeTomlModel,
   type RuntimeTomlProvider,
-  type RuntimeTomlTransportKind,
 } from '../lib/runtime-toml-config'
+import { keepers } from '../store'
 import { ActionButton } from './common/button'
+import { StatusDot } from './common/status-dot'
+
+// rt-* section ids. Mirrors RUNTIME_SECTIONS in runtime-toml-editor.ts so the
+// nav can drive which prototype body is visible. 'toml' is rendered by the
+// parent, not here.
+export type RuntimeStructuredSection =
+  | 'routing'
+  | 'providers'
+  | 'models'
+  | 'bindings'
+  | 'assignments'
 
 interface RuntimeEnvironmentEditorProps {
   sourceText: string
+  section: RuntimeStructuredSection
   dirty: boolean
   disabled?: boolean
   saving?: boolean
@@ -26,67 +38,13 @@ interface RuntimeEnvironmentEditorProps {
   onSave: (sourceText?: string) => void
 }
 
-const FIELD_CLASS = 'w-full rounded-[var(--r-1)] border border-[var(--input-border)] bg-[var(--input-bg)] px-2 py-1.5 text-xs text-[var(--color-fg-primary)] outline-none focus:border-[var(--color-accent-fg)]'
-const CHECKBOX_CLASS = 'h-4 w-4 rounded-[var(--r-0)] border border-[var(--input-border)] bg-[var(--input-bg)]'
-
 function firstId<T extends { id: string }>(items: T[]): string {
   return items[0]?.id ?? ''
-}
-
-function selectedItem<T extends { id: string }>(items: T[], selectedId: string): T | null {
-  return items.find(item => item.id === selectedId) ?? items[0] ?? null
-}
-
-function numberValue(value: number | null): string {
-  return typeof value === 'number' && Number.isFinite(value) ? String(value) : ''
 }
 
 function parsePositiveInt(value: string): number | null {
   const parsed = Number.parseInt(value, 10)
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null
-}
-
-function FieldShell({
-  label,
-  hint,
-  children,
-}: {
-  label: string
-  hint?: string
-  children: unknown
-}) {
-  return html`
-    <label class="min-w-0">
-      <span class="mb-1 block text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${label}</span>
-      ${children}
-      ${hint ? html`<span class="mt-1 block text-3xs text-[var(--color-fg-disabled)]">${hint}</span>` : null}
-    </label>
-  `
-}
-
-function ToggleField({
-  label,
-  checked,
-  disabled,
-  onChange,
-}: {
-  label: string
-  checked: boolean
-  disabled?: boolean
-  onChange: (checked: boolean) => void
-}) {
-  return html`
-    <label class="flex min-h-9 items-center justify-between gap-3 rounded-[var(--r-1)] border border-[var(--color-border-subtle)] px-2 py-1.5">
-      <span class="text-xs text-[var(--color-fg-secondary)]">${label}</span>
-      <input
-        type="checkbox"
-        class=${CHECKBOX_CLASS}
-        checked=${checked}
-        disabled=${disabled}
-        onChange=${(event: Event) => onChange((event.currentTarget as HTMLInputElement).checked)}
-      />
-    </label>
-  `
 }
 
 function runtimeOptions(environment: RuntimeTomlEnvironment): string[] {
@@ -100,110 +58,79 @@ function credentialValue(provider: RuntimeTomlProvider): string {
   return ''
 }
 
-function credentialLabel(type: RuntimeTomlCredentialType): string {
-  if (type === 'env') return 'env key'
-  if (type === 'file') return 'file path'
-  if (type === 'inline') return 'inline value'
-  return 'credential'
-}
-
 function transportValue(provider: RuntimeTomlProvider): string {
   if (provider.transportKind === 'command') return provider.command
   return provider.endpoint
 }
 
-function SectionTitle({ children }: { children: unknown }) {
-  return html`
-    <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-primary)]">
-      ${children}
-    </div>
-  `
+// Prototype rt-model-ctx label — runtime-editor.jsx:176 `(max/1000).toFixed(0)}k ctx`.
+function protoContext(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '— ctx'
+  return `${(value / 1000).toFixed(0)}k ctx`
 }
 
-interface RuntimeCatalogEntry {
-  id: string
-  binding: RuntimeTomlBinding
-  provider: RuntimeTomlProvider | null
-  model: RuntimeTomlModel | null
-  isDefault: boolean
+// rt-cap chip — runtime-editor.jsx:17 rtCapChip. `on` toggles the ✓/· glyph
+// and the .on tone (runtime.css:64). Read-only capability readout.
+function capChip(on: boolean, label: string) {
+  return html`<span class="rt-cap ${on ? 'on' : ''}">${on ? '✓' : '·'} ${label}</span>`
 }
 
-function runtimeCatalogEntries(environment: RuntimeTomlEnvironment): RuntimeCatalogEntry[] {
-  return environment.bindings.map(binding => ({
-    id: binding.id,
-    binding,
-    provider: environment.providers.find(provider => provider.id === binding.providerId) ?? null,
-    model: environment.models.find(model => model.id === binding.modelId) ?? null,
-    isDefault: binding.id === environment.defaultRuntimeId || binding.isDefault,
-  }))
+// Read a bare [runtime] string value (librarian / cross_verifier) straight from
+// the draft. The parser only surfaces `default`, so the extra routing lanes are
+// read here from the same source text the parser consumes. Matches the
+// parser's [section] header + key = "value" grammar.
+function readRuntimeLaneValue(sourceText: string, key: string): string {
+  const lines = sourceText.split('\n')
+  let inRuntime = false
+  for (const rawLine of lines) {
+    const headerMatch = rawLine.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/)
+    if (headerMatch) {
+      inRuntime = headerMatch[1]?.trim() === 'runtime'
+      continue
+    }
+    if (!inRuntime) continue
+    const keyMatch = rawLine.match(/^\s*([A-Za-z0-9_-]+)\s*=\s*"([^"]*)"\s*(?:#.*)?$/)
+    if (keyMatch && keyMatch[1] === key) return keyMatch[2] ?? ''
+  }
+  return ''
 }
 
-function compactContext(value: number | null | undefined): string {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return 'ctx -'
-  if (value >= 1_000_000) return `${Number.parseFloat((value / 1_000_000).toFixed(1))}M ctx`
-  if (value >= 1_000) return `${Math.round(value / 1_000)}K ctx`
-  return `${value} ctx`
+// Read [runtime.assignments] keeper -> runtime id from the draft. Same grammar
+// as the parser; surfaces explicit assignments so each keeper row reflects what
+// runtime.toml actually pins (and falls back to default when absent).
+function readRuntimeAssignments(sourceText: string): Record<string, string> {
+  const lines = sourceText.split('\n')
+  let inSection = false
+  const assignments: Record<string, string> = {}
+  for (const rawLine of lines) {
+    const headerMatch = rawLine.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/)
+    if (headerMatch) {
+      inSection = headerMatch[1]?.trim() === 'runtime.assignments'
+      continue
+    }
+    if (!inSection) continue
+    const keyMatch = rawLine.match(/^\s*([A-Za-z0-9_.-]+)\s*=\s*"([^"]*)"\s*(?:#.*)?$/)
+    if (keyMatch?.[1]) assignments[keyMatch[1]] = keyMatch[2] ?? ''
+  }
+  return assignments
 }
 
-function compactTransport(provider: RuntimeTomlProvider | null): string {
-  if (!provider) return 'transport -'
-  if (provider.transportKind === 'command') return 'cli'
-  if (provider.endpoint.startsWith('http://127.0.0.1') || provider.endpoint.startsWith('http://localhost')) return 'local'
-  if (provider.endpoint !== '') return 'cloud'
-  return provider.transportKind
-}
-
-function boolToken(label: string, value: boolean | undefined): string {
-  return `${label}:${value === true ? 'on' : 'off'}`
-}
-
-function RuntimeCatalogStrip({
-  entries,
-  selectedRuntimeId,
-  disabled,
-  onSelect,
-}: {
-  entries: RuntimeCatalogEntry[]
-  selectedRuntimeId: string
-  disabled: boolean
-  onSelect: (entry: RuntimeCatalogEntry) => void
-}) {
-  if (entries.length === 0) return null
-  return html`
-    <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-3" data-testid="runtime-catalog-strip">
-      ${entries.map(entry => {
-        const active = entry.id === selectedRuntimeId
-        const providerLabel = entry.provider?.displayName || entry.provider?.id || entry.binding.providerId
-        const modelLabel = entry.model?.apiName || entry.model?.id || entry.binding.modelId
-        return html`
-          <button
-            type="button"
-            class="v2-monitoring-card min-w-0 rounded-[var(--r-1)] border px-3 py-2 text-left transition-colors ${active ? 'border-[var(--color-accent-fg)] bg-[var(--accent-10)]' : 'border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] hover:border-[var(--color-border-strong)]'}"
-            disabled=${disabled}
-            onClick=${() => onSelect(entry)}
-            aria-pressed=${active}
-          >
-            <div class="flex items-center justify-between gap-2">
-              <span class="truncate font-mono text-xs font-semibold text-[var(--color-fg-primary)]">${entry.id}</span>
-              ${entry.isDefault ? html`<span class="shrink-0 rounded-[var(--r-1)] border border-[var(--accent-30)] px-1.5 py-0.5 text-3xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-accent-fg)]">default</span>` : null}
-            </div>
-            <div class="mt-1 truncate text-xs text-[var(--color-fg-secondary)]">${providerLabel}</div>
-            <div class="truncate text-2xs text-[var(--color-fg-muted)]">${modelLabel} · ${compactContext(entry.model?.maxContext)} · ${compactTransport(entry.provider)}</div>
-            <div class="mt-1 flex flex-wrap gap-1 text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">
-              <span>${boolToken('tools', entry.model?.toolsSupport)}</span>
-              <span>${boolToken('thinking', entry.model?.thinkingSupport)}</span>
-              <span>${boolToken('stream', entry.model?.streaming)}</span>
-              <span>concurrency:${entry.binding.maxConcurrent ?? '-'}</span>
-            </div>
-          </button>
-        `
-      })}
-    </div>
-  `
+// keeper.status -> StatusDot tone (bg). Mirrors copilot-dock's run/idle/bad
+// split; tone classes are the existing --color-status-* tokens.
+function keeperDotTone(status: string): string {
+  const normalized = status.toLowerCase()
+  if (normalized === 'run' || normalized === 'running' || normalized === 'active') {
+    return 'bg-[var(--color-status-ok)]'
+  }
+  if (normalized === 'pause' || normalized === 'paused' || normalized === 'idle') {
+    return 'bg-[var(--color-status-warn)]'
+  }
+  return 'bg-[var(--color-status-err)]'
 }
 
 export function RuntimeEnvironmentEditor({
   sourceText,
+  section,
   dirty,
   disabled,
   saving,
@@ -211,91 +138,103 @@ export function RuntimeEnvironmentEditor({
   onSave,
 }: RuntimeEnvironmentEditorProps) {
   const environment = useMemo(() => parseRuntimeTomlEnvironment(sourceText), [sourceText])
-  const [selectedRuntimeId, setSelectedRuntimeId] = useState('')
-  const [selectedProviderId, setSelectedProviderId] = useState('')
-  const [selectedModelId, setSelectedModelId] = useState('')
+  const [modelQuery, setModelQuery] = useState('')
 
-  useEffect(() => {
-    const nextRuntimeId = environment.bindings.some(binding => binding.id === selectedRuntimeId)
-      ? selectedRuntimeId
-      : environment.defaultRuntimeId || firstId(environment.bindings)
-    const runtime = environment.bindings.find(binding => binding.id === nextRuntimeId) ?? environment.bindings[0] ?? null
-    const nextProviderId = environment.providers.some(provider => provider.id === selectedProviderId)
-      ? selectedProviderId
-      : runtime?.providerId ?? firstId(environment.providers)
-    const nextModelId = environment.models.some(model => model.id === selectedModelId)
-      ? selectedModelId
-      : runtime?.modelId ?? firstId(environment.models)
-    if (nextRuntimeId !== selectedRuntimeId) setSelectedRuntimeId(nextRuntimeId)
-    if (nextProviderId !== selectedProviderId) setSelectedProviderId(nextProviderId)
-    if (nextModelId !== selectedModelId) setSelectedModelId(nextModelId)
-  }, [environment, selectedModelId, selectedProviderId, selectedRuntimeId])
-
-  const bindings = runtimeOptions(environment)
-  const selectedRuntime = selectedItem<RuntimeTomlBinding>(environment.bindings, selectedRuntimeId)
-  const selectedProvider = selectedItem<RuntimeTomlProvider>(environment.providers, selectedProviderId)
-  const selectedModel = selectedItem<RuntimeTomlModel>(environment.models, selectedModelId)
+  const runtimeIds = runtimeOptions(environment)
   const isDisabled = disabled === true || saving === true
-  const catalogEntries = runtimeCatalogEntries(environment)
 
-  function selectRuntimeEntry(entry: RuntimeCatalogEntry) {
-    setSelectedRuntimeId(entry.id)
-    setSelectedProviderId(entry.binding.providerId)
-    setSelectedModelId(entry.binding.modelId)
-  }
+  const librarianLane = readRuntimeLaneValue(sourceText, 'librarian')
+  const crossVerifierLane = readRuntimeLaneValue(sourceText, 'cross_verifier')
+  const assignments = readRuntimeAssignments(sourceText)
+  const keeperList = keepers.value
+
+  const filteredModels = environment.models.filter(model => {
+    if (modelQuery.trim() === '') return true
+    const query = modelQuery.toLowerCase()
+    return model.id.toLowerCase().includes(query) || model.apiName.toLowerCase().includes(query)
+  })
 
   function updateDefault(runtimeId: string) {
-    setSelectedRuntimeId(runtimeId)
-    const runtime = environment.bindings.find(binding => binding.id === runtimeId)
-    if (runtime) {
-      setSelectedProviderId(runtime.providerId)
-      setSelectedModelId(runtime.modelId)
-    }
     onDraftChange(setRuntimeTomlDefault(sourceText, runtimeId))
   }
 
-  function updateProvider(field: 'display-name' | 'protocol' | 'endpoint' | 'command', value: string) {
-    if (!selectedProvider) return
-    onDraftChange(setRuntimeTomlProviderField(sourceText, selectedProvider.id, field, value))
+  function updateRoutingLane(lane: 'librarian' | 'cross_verifier', runtimeId: string) {
+    onDraftChange(setRuntimeTomlKey(sourceText, 'runtime', lane, runtimeId))
   }
 
-  function updateProviderTransport(kind: RuntimeTomlTransportKind) {
-    if (!selectedProvider || kind === 'missing') return
-    const value = kind === 'command'
-      ? selectedProvider.command || selectedProvider.endpoint
-      : selectedProvider.endpoint || selectedProvider.command
-    onDraftChange(setRuntimeTomlProviderField(sourceText, selectedProvider.id, kind, value))
+  function updateProvider(providerId: string, field: 'endpoint', value: string) {
+    onDraftChange(setRuntimeTomlProviderField(sourceText, providerId, field, value))
   }
 
-  function updateCredential(type: RuntimeTomlCredentialType, value: string) {
-    if (!selectedProvider) return
-    onDraftChange(setRuntimeTomlProviderCredential(sourceText, selectedProvider.id, type, value))
+  function updateCredential(providerId: string, type: RuntimeTomlCredentialType, value: string) {
+    onDraftChange(setRuntimeTomlProviderCredential(sourceText, providerId, type, value))
   }
 
-  function updateModel(
-    field: 'api-name' | 'max-context' | 'tools-support' | 'thinking-support' | 'streaming',
-    value: string | number | boolean,
-  ) {
-    if (!selectedModel) return
-    onDraftChange(setRuntimeTomlModelField(sourceText, selectedModel.id, field, value))
+  function setDefaultBinding(binding: RuntimeTomlBinding) {
+    onDraftChange(setRuntimeTomlDefault(sourceText, binding.id))
   }
 
   function updateBinding(
-    field: 'is-default' | 'max-concurrent' | 'keep-alive' | 'num-ctx',
-    value: string | number | boolean | null,
+    runtimeId: string,
+    field: 'max-concurrent' | 'num-ctx',
+    value: number | null,
   ) {
-    if (!selectedRuntime) return
-    onDraftChange(setRuntimeTomlBindingField(sourceText, selectedRuntime.id, field, value))
+    onDraftChange(setRuntimeTomlBindingField(sourceText, runtimeId, field, value))
+  }
+
+  function updateAssignment(keeperName: string, runtimeId: string) {
+    if (runtimeId === environment.defaultRuntimeId) {
+      // default == fallback; drop the explicit pin so toml stays minimal.
+      onDraftChange(deleteRuntimeTomlKey(sourceText, 'runtime.assignments', keeperName))
+      return
+    }
+    onDraftChange(setRuntimeTomlKey(sourceText, 'runtime.assignments', keeperName, runtimeId))
+  }
+
+  // rt-select — runtime.css:43. Inline width cap so the 248px min-width never
+  // crushes the flex sibling label in the narrow Settings embed (the prototype
+  // ran full-screen). flex-wrap on the row lets the control drop below the
+  // label instead of squeezing it to one-word-per-line.
+  const selectStyle = { minWidth: 0, maxWidth: '248px', flex: '1 1 200px' }
+  const laneStyle = { flexWrap: 'wrap' as const }
+
+  function laneRow(
+    lane: 'default' | 'librarian' | 'cross_verifier',
+    label: string,
+    hint: string,
+    value: string,
+    onChange: (runtimeId: string) => void,
+    needsJson: boolean,
+  ) {
+    return html`
+      <div class="rt-lane" style=${laneStyle}>
+        <div class="rt-lane-l">
+          <div class="rt-lane-lbl">${label}</div>
+          <div class="rt-lane-hint">${hint}</div>
+        </div>
+        <div class="rt-lane-c">
+          <select
+            class="rt-select mono"
+            style=${selectStyle}
+            value=${value}
+            disabled=${isDisabled}
+            aria-label=${lane === 'default' ? 'default runtime' : `${lane} runtime`}
+            onChange=${(event: Event) => onChange((event.currentTarget as HTMLSelectElement).value)}
+          >
+            ${runtimeIds.map(id => html`<option value=${id}>${id}</option>`)}
+          </select>
+          ${needsJson
+            ? html`<span class="rt-ok" data-stub="no-per-model-json-cap">JSON 모드 필요 · 모델 capability 미수집</span>`
+            : null}
+        </div>
+      </div>
+    `
   }
 
   return html`
-    <div class="v2-monitoring-detail border-t border-[var(--color-border-divider)] pt-3" data-testid="runtime-environment-editor">
-      <div class="mb-3 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-        <div class="min-w-0">
-          <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-accent-fg)]">
-            런타임 환경
-          </div>
-        </div>
+    <div data-testid="runtime-environment-editor">
+      <div class="rt-head-actions" style=${{ justifyContent: 'flex-end', marginBottom: '14px' }}>
+        <span class="rt-nav-sub mono" style=${{ marginRight: 'auto' }}>런타임 환경</span>
         <${ActionButton}
           variant="primary"
           size="sm"
@@ -313,262 +252,239 @@ export function RuntimeEnvironmentEditor({
       </div>
 
       ${environment.warnings.length > 0 ? html`
-        <div class="mb-3 rounded-[var(--r-1)] border border-[var(--color-status-warn)]/35 bg-[var(--warn-10)] px-3 py-2 text-xs text-[var(--color-status-warn)]">
+        <div class="rt-note" data-testid="runtime-environment-warnings">
           ${environment.warnings.join(' · ')}
         </div>
       ` : null}
 
-      ${bindings.length === 0 ? html`
-        <div class="v2-monitoring-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] px-3 py-4 text-xs text-[var(--color-fg-muted)]">
-          구조화해서 편집할 provider.model binding이 없습니다. 아래 raw editor에서 runtime.toml을 먼저 추가하세요.
+      ${runtimeIds.length === 0 ? html`
+        <div class="rt-note" data-testid="runtime-environment-empty">
+          구조화해서 편집할 provider.model binding이 없습니다. runtime.toml 섹션에서 먼저 추가하세요.
         </div>
-      ` : html`
-        <div class="mb-3 grid gap-2">
-          <${SectionTitle}>런타임 카탈로그<//>
-          <${RuntimeCatalogStrip}
-            entries=${catalogEntries}
-            selectedRuntimeId=${selectedRuntime?.id ?? ''}
-            disabled=${isDisabled}
-            onSelect=${selectRuntimeEntry}
-          />
-        </div>
-        <div class="grid gap-3 xl:grid-cols-[minmax(16rem,0.8fr)_minmax(0,1.1fr)_minmax(0,1.1fr)_minmax(0,1fr)]">
-          <div class="grid content-start gap-3 border-b border-[var(--color-border-divider)] pb-3 xl:border-b-0 xl:border-r xl:pb-0 xl:pr-3">
-            <${SectionTitle}>기본 런타임<//>
-            <${FieldShell} label="default runtime" hint="runtime.toml [runtime].default">
-              <select
-                class=${FIELD_CLASS}
-                value=${environment.defaultRuntimeId || selectedRuntimeId}
-                disabled=${isDisabled}
-                aria-label="default runtime"
-                onChange=${(event: Event) => updateDefault((event.currentTarget as HTMLSelectElement).value)}
-              >
-                ${bindings.map(id => html`<option value=${id}>${id}</option>`)}
-              </select>
-            <//>
-            <${FieldShell} label="binding" hint="편집할 provider.model">
-              <select
-                class=${FIELD_CLASS}
-                value=${selectedRuntime?.id ?? ''}
-                disabled=${isDisabled}
-                aria-label="runtime binding"
-                onChange=${(event: Event) => {
-                  const runtimeId = (event.currentTarget as HTMLSelectElement).value
-                  setSelectedRuntimeId(runtimeId)
-                  const runtime = environment.bindings.find(binding => binding.id === runtimeId)
-                  if (runtime) {
-                    setSelectedProviderId(runtime.providerId)
-                    setSelectedModelId(runtime.modelId)
-                  }
-                }}
-              >
-                ${bindings.map(id => html`<option value=${id}>${id}</option>`)}
-              </select>
-            <//>
-          </div>
+      ` : null}
 
-          <div class="grid content-start gap-3 border-b border-[var(--color-border-divider)] pb-3 xl:border-b-0 xl:border-r xl:pb-0 xl:pr-3">
-            <${SectionTitle}>Provider 연결<//>
-            <${FieldShell} label="provider">
-              <select
-                class=${FIELD_CLASS}
-                value=${selectedProvider?.id ?? ''}
-                disabled=${isDisabled}
-                aria-label="provider"
-                onChange=${(event: Event) => setSelectedProviderId((event.currentTarget as HTMLSelectElement).value)}
-              >
-                ${environment.providers.map(provider => html`<option value=${provider.id}>${provider.id}</option>`)}
-              </select>
-            <//>
-            <${FieldShell} label="display-name">
-              <input
-                class=${FIELD_CLASS}
-                value=${selectedProvider?.displayName ?? ''}
-                disabled=${isDisabled || !selectedProvider}
-                aria-label="provider display-name"
-                onInput=${(event: Event) => updateProvider('display-name', (event.currentTarget as HTMLInputElement).value)}
-              />
-            <//>
-            <${FieldShell} label="protocol">
-              <input
-                class=${FIELD_CLASS}
-                value=${selectedProvider?.protocol ?? ''}
-                disabled=${isDisabled || !selectedProvider}
-                aria-label="provider protocol"
-                onInput=${(event: Event) => updateProvider('protocol', (event.currentTarget as HTMLInputElement).value)}
-              />
-            <//>
-            <div class="grid grid-cols-[8rem_minmax(0,1fr)] gap-2">
-              <${FieldShell} label="transport">
-                <select
-                  class=${FIELD_CLASS}
-                  value=${selectedProvider?.transportKind === 'command' ? 'command' : 'endpoint'}
-                  disabled=${isDisabled || !selectedProvider}
-                  aria-label="provider transport"
-                  onChange=${(event: Event) => updateProviderTransport((event.currentTarget as HTMLSelectElement).value as RuntimeTomlTransportKind)}
-                >
-                  <option value="endpoint">endpoint</option>
-                  <option value="command">command</option>
-                </select>
-              <//>
-              <${FieldShell} label=${selectedProvider?.transportKind === 'command' ? 'command' : 'endpoint'}>
+      <!-- routing — runtime-editor.jsx:135-141. default lane is live; librarian /
+           cross_verifier are read from [runtime] and written back. -->
+      <div class=${section === 'routing' ? '' : 'hidden'} data-testid="runtime-section-routing">
+        <div class="rt-note">
+          런타임 id = <span class="mono">provider.model</span> (binding key). 레인은 등록된 바인딩 중에서 고릅니다.
+        </div>
+        ${laneRow(
+          'default',
+          '기본 런타임',
+          '[runtime].default — 배정 없는 keeper가 사용',
+          environment.defaultRuntimeId || firstId(environment.bindings),
+          updateDefault,
+          false,
+        )}
+        ${laneRow(
+          'librarian',
+          'memory-os 라이브러리안',
+          '[runtime].librarian — 턴 후 에피소드 추출, JSON 모드 필요',
+          librarianLane,
+          runtimeId => updateRoutingLane('librarian', runtimeId),
+          true,
+        )}
+        ${laneRow(
+          'cross_verifier',
+          'cross-verifier',
+          '[runtime].cross_verifier — 반-합리화 평가, JSON 모드 필요',
+          crossVerifierLane,
+          runtimeId => updateRoutingLane('cross_verifier', runtimeId),
+          true,
+        )}
+      </div>
+
+      <!-- providers — runtime-editor.jsx:144-165. endpoint + credential editable;
+           protocol shown read-only. provider capability chips
+           (mcp-tools/tool-events/mcp-http-headers) have no live source. -->
+      <div class=${section === 'providers' ? '' : 'hidden'} data-testid="runtime-section-providers">
+        <div class="rt-cards">
+          ${environment.providers.map(provider => html`
+            <div key=${provider.id} class="rt-card">
+              <div class="rt-card-h">
+                <span class="rt-card-id mono">${provider.id}</span>
+                <span class="rt-card-name">${provider.displayName}</span>
+                <span class="rt-proto mono">${provider.protocol || '—'}</span>
+              </div>
+              <div class="rt-field">
+                <span class="sub-k">endpoint</span>
                 <input
-                  class=${FIELD_CLASS}
-                  value=${selectedProvider ? transportValue(selectedProvider) : ''}
-                  disabled=${isDisabled || !selectedProvider}
+                  class="rt-input mono"
+                  value=${transportValue(provider)}
+                  disabled=${isDisabled}
                   aria-label="provider transport value"
-                  onInput=${(event: Event) => {
-                    const kind = selectedProvider?.transportKind === 'command' ? 'command' : 'endpoint'
-                    updateProvider(kind, (event.currentTarget as HTMLInputElement).value)
-                  }}
+                  onInput=${(event: Event) => updateProvider(provider.id, 'endpoint', (event.currentTarget as HTMLInputElement).value)}
                 />
-              <//>
+              </div>
+              <div class="rt-field">
+                <span class="sub-k">credential</span>
+                ${provider.credentialType === 'none'
+                  ? html`<span class="rt-cred-none mono">없음 (로컬)</span>`
+                  : html`
+                    <span class="rt-cred">
+                      <span class="rt-cred-type mono">${provider.credentialType}</span>
+                      <input
+                        class="rt-input mono"
+                        type=${provider.credentialType === 'inline' ? 'password' : 'text'}
+                        value=${credentialValue(provider)}
+                        disabled=${isDisabled}
+                        aria-label="provider credential value"
+                        onInput=${(event: Event) => updateCredential(provider.id, provider.credentialType, (event.currentTarget as HTMLInputElement).value)}
+                      />
+                    </span>
+                  `}
+              </div>
+              <div class="rt-caps" data-stub="no-provider-capability-source">
+                <span class="rt-cap">· mcp-tools</span>
+                <span class="rt-cap">· tool-events</span>
+                <span class="rt-cap">· mcp-http-headers</span>
+              </div>
             </div>
-            <div class="grid grid-cols-[8rem_minmax(0,1fr)] gap-2">
-              <${FieldShell} label="credential">
-                <select
-                  class=${FIELD_CLASS}
-                  value=${selectedProvider?.credentialType ?? 'none'}
-                  disabled=${isDisabled || !selectedProvider}
-                  aria-label="provider credential type"
-                  onChange=${(event: Event) => {
-                    const type = (event.currentTarget as HTMLSelectElement).value as RuntimeTomlCredentialType
-                    updateCredential(type, credentialValue(selectedProvider as RuntimeTomlProvider))
-                  }}
-                >
-                  <option value="none">none</option>
-                  <option value="env">env</option>
-                  <option value="file">file</option>
-                  <option value="inline">inline</option>
-                </select>
-              <//>
-              <${FieldShell} label=${credentialLabel(selectedProvider?.credentialType ?? 'none')}>
-                <input
-                  class=${FIELD_CLASS}
-                  type=${selectedProvider?.credentialType === 'inline' ? 'password' : 'text'}
-                  value=${selectedProvider ? credentialValue(selectedProvider) : ''}
-                  disabled=${isDisabled || !selectedProvider || selectedProvider.credentialType === 'none'}
-                  aria-label="provider credential value"
-                  onInput=${(event: Event) => {
-                    const type = selectedProvider?.credentialType ?? 'none'
-                    updateCredential(type, (event.currentTarget as HTMLInputElement).value)
-                  }}
-                />
-              <//>
-            </div>
-          </div>
-
-          <div class="grid content-start gap-3 border-b border-[var(--color-border-divider)] pb-3 xl:border-b-0 xl:border-r xl:pb-0 xl:pr-3">
-            <${SectionTitle}>Model<//>
-            <${FieldShell} label="model">
-              <select
-                class=${FIELD_CLASS}
-                value=${selectedModel?.id ?? ''}
-                disabled=${isDisabled}
-                aria-label="model"
-                onChange=${(event: Event) => setSelectedModelId((event.currentTarget as HTMLSelectElement).value)}
-              >
-                ${environment.models.map(model => html`<option value=${model.id}>${model.id}</option>`)}
-              </select>
-            <//>
-            <${FieldShell} label="api-name">
-              <input
-                class=${FIELD_CLASS}
-                value=${selectedModel?.apiName ?? ''}
-                disabled=${isDisabled || !selectedModel}
-                aria-label="model api-name"
-                onInput=${(event: Event) => updateModel('api-name', (event.currentTarget as HTMLInputElement).value)}
-              />
-            <//>
-            <${FieldShell} label="max-context">
-              <input
-                class=${FIELD_CLASS}
-                type="number"
-                min="1"
-                step="1024"
-                value=${numberValue(selectedModel?.maxContext ?? null)}
-                disabled=${isDisabled || !selectedModel}
-                aria-label="model max-context"
-                onInput=${(event: Event) => {
-                  const parsed = parsePositiveInt((event.currentTarget as HTMLInputElement).value)
-                  if (parsed !== null) updateModel('max-context', parsed)
-                }}
-              />
-            <//>
-            <${ToggleField}
-              label="tools-support"
-              checked=${selectedModel?.toolsSupport ?? false}
-              disabled=${isDisabled || !selectedModel}
-              onChange=${(checked: boolean) => updateModel('tools-support', checked)}
-            />
-            <${ToggleField}
-              label="thinking-support"
-              checked=${selectedModel?.thinkingSupport ?? false}
-              disabled=${isDisabled || !selectedModel}
-              onChange=${(checked: boolean) => updateModel('thinking-support', checked)}
-            />
-            <${ToggleField}
-              label="streaming"
-              checked=${selectedModel?.streaming ?? false}
-              disabled=${isDisabled || !selectedModel}
-              onChange=${(checked: boolean) => updateModel('streaming', checked)}
-            />
-          </div>
-
-          <div class="grid content-start gap-3">
-            <${SectionTitle}>Binding<//>
-            <${ToggleField}
-              label="is-default"
-              checked=${selectedRuntime?.isDefault ?? false}
-              disabled=${isDisabled || !selectedRuntime}
-              onChange=${(checked: boolean) => updateBinding('is-default', checked)}
-            />
-            <${FieldShell} label="max-concurrent">
-              <input
-                class=${FIELD_CLASS}
-                type="number"
-                min="1"
-                step="1"
-                value=${numberValue(selectedRuntime?.maxConcurrent ?? null)}
-                disabled=${isDisabled || !selectedRuntime}
-                aria-label="binding max-concurrent"
-                onInput=${(event: Event) => {
-                  const parsed = parsePositiveInt((event.currentTarget as HTMLInputElement).value)
-                  if (parsed !== null) updateBinding('max-concurrent', parsed)
-                }}
-              />
-            <//>
-            <${FieldShell} label="keep-alive">
-              <input
-                class=${FIELD_CLASS}
-                value=${selectedRuntime?.keepAlive ?? ''}
-                disabled=${isDisabled || !selectedRuntime}
-                placeholder="예: 10m"
-                aria-label="binding keep-alive"
-                onInput=${(event: Event) => {
-                  const value = (event.currentTarget as HTMLInputElement).value
-                  updateBinding('keep-alive', value.trim() === '' ? null : value)
-                }}
-              />
-            <//>
-            <${FieldShell} label="num-ctx">
-              <input
-                class=${FIELD_CLASS}
-                type="number"
-                min="1"
-                step="1024"
-                value=${numberValue(selectedRuntime?.numCtx ?? null)}
-                disabled=${isDisabled || !selectedRuntime}
-                aria-label="binding num-ctx"
-                onInput=${(event: Event) => {
-                  const value = (event.currentTarget as HTMLInputElement).value
-                  updateBinding('num-ctx', value.trim() === '' ? null : parsePositiveInt(value))
-                }}
-              />
-            <//>
-          </div>
+          `)}
         </div>
-      `}
+      </div>
+
+      <!-- models — runtime-editor.jsx:167-191. search + read-only chips. Live
+           model parse exposes tools/thinking/streaming/maxContext only; the
+           prototype's json/structured/multimodal/tool-choice/effort chips have
+           no live source. -->
+      <div class=${section === 'models' ? '' : 'hidden'} data-testid="runtime-section-models">
+        <input
+          class="rt-search mono"
+          placeholder="모델 검색 — id / api-name"
+          value=${modelQuery}
+          disabled=${isDisabled}
+          aria-label="모델 검색"
+          onInput=${(event: Event) => setModelQuery((event.currentTarget as HTMLInputElement).value)}
+        />
+        <div class="rt-models">
+          ${filteredModels.map(model => html`
+            <div key=${model.id} class="rt-model">
+              <div class="rt-model-h">
+                <span class="rt-model-id mono">${model.id}</span>
+                <span class="rt-model-api mono">${model.apiName}</span>
+                <span class="rt-model-ctx mono">${protoContext(model.maxContext)}</span>
+              </div>
+              <div class="rt-caps">
+                ${capChip(model.toolsSupport, 'tools')}
+                ${capChip(model.thinkingSupport, 'thinking')}
+                ${capChip(model.streaming, 'streaming')}
+                <span class="rt-cap" data-stub="no-json-cap">· json</span>
+                <span class="rt-cap" data-stub="no-structured-cap">· structured</span>
+                <span class="rt-cap" data-stub="no-multimodal-cap">· multimodal</span>
+                <span class="rt-cap tcf mono" data-stub="no-effort-source">effort: 미수집</span>
+              </div>
+            </div>
+          `)}
+          ${filteredModels.length === 0 ? html`
+            <div class="rt-note" data-testid="runtime-models-empty">일치하는 모델이 없습니다.</div>
+          ` : null}
+        </div>
+      </div>
+
+      <!-- bindings — runtime-editor.jsx:193-214. radio sets the default runtime;
+           max-conc / num-ctx editable. price / effort sub-line has no live
+           source. -->
+      <div class=${section === 'bindings' ? '' : 'hidden'} data-testid="runtime-section-bindings">
+        <div class="rt-binds">
+          <div class="rt-note">
+            바인딩 = 런타임 id <span class="mono">provider.model</span>. 라디오로 기본 런타임 지정.
+          </div>
+          ${environment.bindings.map(binding => {
+            const isDefault = binding.id === environment.defaultRuntimeId || binding.isDefault
+            const model = environment.models.find(m => m.id === binding.modelId) ?? null
+            return html`
+              <div key=${binding.id} class="rt-bind ${isDefault ? 'is-default' : ''}">
+                <button
+                  type="button"
+                  class="rt-radio ${isDefault ? 'on' : ''}"
+                  disabled=${isDisabled}
+                  title="기본 런타임으로"
+                  aria-label=${`${binding.id} 기본 런타임으로`}
+                  aria-pressed=${isDefault}
+                  onClick=${() => setDefaultBinding(binding)}
+                >${isDefault ? '◉' : '○'}</button>
+                <div class="rt-bind-main">
+                  <div class="rt-bind-key mono">
+                    ${binding.id}${isDefault ? html`<span class="rt-default-tag">default</span>` : null}
+                  </div>
+                  <div class="rt-bind-sub mono" data-stub="no-price-or-effort-source">
+                    ${protoContext(model?.maxContext ?? null)} · 가격/effort 미수집
+                  </div>
+                </div>
+                <div class="rt-bind-fields">
+                  <label class="rt-mini">
+                    <span>max-conc</span>
+                    <input
+                      class="rt-input-sm mono"
+                      value=${binding.maxConcurrent == null ? '' : String(binding.maxConcurrent)}
+                      placeholder="∞"
+                      disabled=${isDisabled}
+                      aria-label=${`${binding.id} max-concurrent`}
+                      onInput=${(event: Event) => {
+                        const raw = (event.currentTarget as HTMLInputElement).value
+                        updateBinding(binding.id, 'max-concurrent', raw.trim() === '' ? null : parsePositiveInt(raw))
+                      }}
+                    />
+                  </label>
+                  <label class="rt-mini">
+                    <span>num-ctx</span>
+                    <input
+                      class="rt-input-sm mono"
+                      value=${binding.numCtx == null ? '' : String(binding.numCtx)}
+                      placeholder="—"
+                      disabled=${isDisabled}
+                      aria-label=${`${binding.id} num-ctx`}
+                      onInput=${(event: Event) => {
+                        const raw = (event.currentTarget as HTMLInputElement).value
+                        updateBinding(binding.id, 'num-ctx', raw.trim() === '' ? null : parsePositiveInt(raw))
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+            `
+          })}
+        </div>
+      </div>
+
+      <!-- assignments — runtime-editor.jsx:216-231. keeper -> runtime id from
+           the live keepers signal + [runtime.assignments]. -->
+      <div class=${section === 'assignments' ? '' : 'hidden'} data-testid="runtime-section-assignments">
+        <div class="rt-assigns">
+          <div class="rt-note">
+            [runtime.assignments] — keeper → 런타임 id. <span class="mono">default</span>와 같으면 toml에서 생략(폴백).
+          </div>
+          ${keeperList.length === 0 ? html`
+            <div class="rt-note" data-testid="runtime-assignments-empty">표시할 keeper가 없습니다.</div>
+          ` : keeperList.map(keeper => {
+            const current = assignments[keeper.name] ?? environment.defaultRuntimeId
+            const isDefault = current === environment.defaultRuntimeId
+            return html`
+              <div key=${keeper.name} class="rt-assign">
+                <span class="rt-assign-k">
+                  <${StatusDot} size="sm" class=${keeperDotTone(keeper.status)} />
+                  <span class="mono">${keeper.name}</span>
+                </span>
+                <select
+                  class="rt-select mono"
+                  style=${selectStyle}
+                  value=${current}
+                  disabled=${isDisabled}
+                  aria-label=${`${keeper.name} 런타임 배정`}
+                  onChange=${(event: Event) => updateAssignment(keeper.name, (event.currentTarget as HTMLSelectElement).value)}
+                >
+                  ${runtimeIds.map(id => html`<option value=${id}>${id}</option>`)}
+                </select>
+                ${isDefault
+                  ? html`<span class="rt-assign-tag mono">↳ default 폴백</span>`
+                  : html`<span class="rt-assign-tag pin mono">고정</span>`}
+              </div>
+            `
+          })}
+        </div>
+      </div>
     </div>
   `
 }

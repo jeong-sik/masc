@@ -17,15 +17,8 @@
 
 import { html } from 'htm/preact'
 import { useEffect, useMemo } from 'preact/hooks'
-import { SectionCard } from '../common/card'
-import { StatTile } from '../common/stat-tile'
-import { TimeAgo } from '../common/time-ago'
-import { StatusDot } from '../common/status-dot'
-import type { KpiCellKind } from '../kpi-shared'
-import { KpiStripIsland } from '../kpi-strip-island'
 import { AgentAvatar } from './agent-avatar'
-import { missionSnapshot } from '../../mission-store'
-import { agents, tasks, keepers, messages, boardPosts, goals, fusionRuns } from '../../store'
+import { tasks, keepers, boardPosts, goals, fusionRuns } from '../../store'
 import type { Agent, Task, Keeper, Message, BoardPost, Goal, KeeperRuntimeBlockerClass } from '../../types/core'
 import type { FusionRunRecord } from '../../api/dashboard'
 import { SYSTEM_ACTOR_NAME } from '../../types/core'
@@ -33,9 +26,7 @@ import type {
   DashboardMissionResponse,
   DashboardMissionSessionCard,
 } from '../../types/dashboard-mission'
-import { openAgentDetail } from '../agent-detail-state'
-import { openTaskDetail } from '../goals/task-detail-state'
-import { nowSecondsSignal, useNowSecondsTicker } from '../../lib/now-signal'
+import { useNowSecondsTicker } from '../../lib/now-signal'
 import { keeperDisplayStatus, keeperRuntimeBlockerLabel } from '../../lib/keeper-runtime-display'
 import { isKeeperPaused } from '../../lib/keeper-predicates'
 import { isAgentOffline } from '../../lib/agent-status'
@@ -44,17 +35,11 @@ import { createAsyncResource, type AsyncResource, type AsyncState } from '../../
 import { navigate } from '../../router'
 import type { TabId } from '../../types/sse'
 import {
-  normalizeSurfaceReadinessPayload,
-  summarizeSurfaceReadiness,
-  type SurfaceReadinessEntry,
-} from '../surface-readiness-panel'
-import {
   fetchTelemetry,
   fetchTelemetrySummary,
   type TelemetryEntry,
   type TelemetrySourceSummary,
 } from '../../api/dashboard'
-import { get } from '../../api/core'
 
 // ─── Attention / Keeper v2 helpers ───────────────────────────────────────────
 
@@ -477,6 +462,20 @@ function pushTickerEvent(out: FleetTickerEvent[], event: Omit<FleetTickerEvent, 
   out.push({ ...event, timestampMs, text })
 }
 
+// Human-readable keeper status, used in the fleet ticker event text.
+function keeperStatusLabel(status?: string | null): string {
+  switch ((status ?? '').toLowerCase()) {
+    case 'active': case 'live': return 'Active'
+    case 'busy': case 'executing': return 'Busy'
+    case 'paused': return 'Paused'
+    case 'offline': return 'Offline'
+    case 'dead': return 'Dead'
+    case 'stopped': return 'Stopped'
+    case 'unbooted': return 'Unbooted'
+    default: return status ?? 'Unknown'
+  }
+}
+
 export function deriveFleetTickerEvents({
   taskList,
   messageList,
@@ -545,106 +544,6 @@ export function deriveFleetTickerEvents({
     .slice(0, Math.max(0, max))
 }
 
-function tickerToneClass(tone: FleetTickerEvent['tone']): string {
-  switch (tone) {
-    case 'ok':
-      return 'text-success'
-    case 'warn':
-      return 'text-warning'
-    case 'err':
-      return 'text-destructive'
-    case 'info':
-      return 'text-brand'
-    default:
-      return 'text-text-tertiary'
-  }
-}
-
-function FleetTicker({ events }: { events: FleetTickerEvent[] }) {
-  if (events.length === 0) return null
-  return html`
-    <${SectionCard}
-      title="Fleet Ticker"
-      class="v2-overview-ticker ss-card mx-6"
-      variant="standard"
-      right=${html`<span class="text-[12px] text-text-tertiary">latest ${events.length}</span>`}
-      data-testid="overview-fleet-ticker"
-    >
-      <div
-        role="list"
-        aria-label="Recent fleet events"
-        class="flex min-w-0 gap-2 overflow-x-auto pb-1"
-      >
-        ${events.map(event => html`
-          <div
-            key=${event.id}
-            role="listitem"
-            class="v2-overview-ticker-card grid min-w-[15rem] max-w-[22rem] max-[768px]:min-w-[12rem] flex-[0_0_auto] gap-1 rounded-md border border-border bg-card px-3 py-2"
-          >
-            <div class="flex min-w-0 items-center gap-2 font-mono text-[10px] uppercase tracking-wider">
-              <span class=${tickerToneClass(event.tone)}>${event.kind}</span>
-              <span class="truncate text-text-tertiary">${event.actor}</span>
-              <${TimeAgo} timestamp=${event.timestamp} class="ml-auto shrink-0 text-text-disabled" />
-            </div>
-            <div class="truncate text-[13px] font-semibold text-text-primary">${event.text}</div>
-            <div class="truncate font-mono text-[10px] uppercase tracking-wider text-text-disabled">${event.label}</div>
-          </div>
-        `)}
-      </div>
-    <//>
-  `
-}
-
-function AlertPanel({ agentAlerts, taskAlerts }: { agentAlerts: AgentAlert[]; taskAlerts: TaskAlert[] }) {
-  const allAlerts = [...agentAlerts, ...taskAlerts]
-  if (allAlerts.length === 0) return null
-  const hasCritical = allAlerts.some(a => a.severity === 'critical')
-  const criticalCount = allAlerts.filter(a => a.severity === 'critical').length
-  const warnCount = allAlerts.filter(a => a.severity === 'warn').length
-
-  return html`
-    <${SectionCard}
-      title="Alerts"
-      class="v2-overview-alerts ss-card mx-6"
-      variant="standard"
-      tone=${hasCritical ? 'border-destructive' : 'border-warning'}
-      right=${html`<${StatusDot} class=${hasCritical ? 'bg-destructive' : 'bg-warning'} />`}
-      data-testid="overview-alerts"
-    >
-      <div class="mb-4">
-        <${KpiStripIsland}
-          cols=${2}
-          cells=${[
-            { label: 'Critical', value: String(criticalCount), kind: 'err' },
-            { label: 'Warning', value: String(warnCount), kind: 'warn' },
-          ]}
-        />
-      </div>
-      <ul class="space-y-2 border-t border-border pt-4">
-        ${allAlerts.map(
-          a => html`
-            <li
-              class="flex items-start justify-between gap-4 cursor-pointer p-1 -m-1 rounded-md"
-              onClick=${() => {
-                if ('name' in a) openAgentDetail(a.name)
-                else openTaskDetail(a.task)
-              }}
-            >
-              <div class="flex-1 min-w-0">
-                <p class="text-[13px] font-semibold truncate text-text-primary">${'name' in a ? a.display : a.title}</p>
-                <p class="text-[11px] text-text-tertiary truncate">${'reason' in a ? a.reason : a.status}</p>
-              </div>
-              <span class=${`chip sm shrink-0 ${a.severity === 'critical' ? 'is-err' : 'is-warn'}`}>
-                ${a.severity.toUpperCase()}
-              </span>
-            </li>
-          `,
-        )}
-      </ul>
-    <//>
-  `
-}
-
 // ─── Funnel ──────────────────────────────────────────────────────────────────
 
 export interface FunnelCounts {
@@ -704,45 +603,6 @@ export function formatTargetRatio(counts: FunnelCounts): string {
   return `${counts.completed}/${counts.target} (${pct}%)`
 }
 
-function funnelSegStyle(pct: number): string {
-  return pct > 0 ? `width:${pct.toFixed(1)}%` : ''
-}
-
-function FunnelCard({ counts }: { counts: FunnelCounts }) {
-  const awaitingKind: KpiCellKind | undefined = counts.awaiting > 0 ? 'warn' : undefined
-  const total = counts.created + counts.inProgress + counts.awaiting + counts.completed
-  const segPct = (n: number) => total > 0 ? (n / total) * 100 : 0
-  return html`
-    <${SectionCard}
-      label="Today"
-      class="v2-overview-funnel ss-card mx-6"
-      variant="standard"
-      right=${html`<span class="text-[12px] text-text-tertiary">task basis</span>`}
-      data-testid="overview-funnel"
-    >
-      <${KpiStripIsland}
-        ariaLabel="Today funnel"
-        cols=${5}
-        cells=${[
-          { variant: 'stacked', label: 'New', value: String(counts.created), testId: 'funnel-created' },
-          { variant: 'stacked', label: 'Active', value: String(counts.inProgress), testId: 'funnel-in-progress' },
-          { variant: 'stacked', label: 'Verify', value: String(counts.awaiting), kind: awaitingKind, testId: 'funnel-awaiting' },
-          { variant: 'stacked', label: 'Done', value: String(counts.completed), kind: 'ok', testId: 'funnel-completed' },
-          { variant: 'stacked', label: 'Target', value: formatTargetRatio(counts), testId: 'funnel-target' },
-        ]}
-      />
-      ${total > 0 ? html`
-        <div class="bar-seg mt-4" style="height:var(--sp-1)" data-testid="funnel-seg">
-          ${counts.inProgress > 0 ? html`<span class="seg-idle" style=${funnelSegStyle(segPct(counts.inProgress))}></span>` : null}
-          ${counts.awaiting > 0 ? html`<span class="seg-warn" style=${funnelSegStyle(segPct(counts.awaiting))}></span>` : null}
-          ${counts.completed > 0 ? html`<span class="seg-ok" style=${funnelSegStyle(segPct(counts.completed))}></span>` : null}
-          ${counts.created > 0 ? html`<span class="seg-idle" style=${funnelSegStyle(segPct(counts.created))}></span>` : null}
-        </div>
-      ` : null}
-    <//>
-  `
-}
-
 // ─── Mission Party ────────────────────────────────────────────────────────────
 
 export function progressPct(session: DashboardMissionSessionCard | null): number | null {
@@ -753,86 +613,7 @@ export function progressPct(session: DashboardMissionSessionCard | null): number
   return Math.min(100, Math.round((cur / req) * 100))
 }
 
-function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | null }) {
-  if (!active) {
-    return html`
-      <${SectionCard} label="Active mission" class="v2-overview-party ss-card mx-6" variant="standard" data-testid="overview-party-empty">
-        <p class="text-[11px] text-text-tertiary italic">No active mission</p>
-      <//>
-    `
-  }
-
-  const progress = progressPct(active)
-  const status = active.status ?? 'unknown'
-  const members = active.member_names
-
-  return html`
-    <${SectionCard} label="Active Mission" class="v2-overview-party ss-card mx-6" variant="standard" data-testid="overview-party">
-      <div class="space-y-4">
-        <div class="flex items-center justify-between">
-           <p class="text-[13px] font-semibold text-text-primary truncate flex-1 mr-4">
-             ${active.goal}
-           </p>
-           <div class="flex -space-x-1.5">
-             ${members.map(m => html`<${AgentAvatar} key=${m} name=${m} size="xs" class="ring-1 ring-[var(--bg-surface-page)]" />`)}
-           </div>
-        </div>
-
-        <div class="grid grid-cols-2 gap-3">
-          <${StatTile}
-            label="Progress"
-            value=${progress === null ? 'n/a' : `${progress}%`}
-            status=${progress !== null && progress > 80 ? 'ok' : progress !== null ? 'brass' : undefined}
-            delta=${progress !== null ? { direction: progress > 50 ? 'up' : 'flat', text: progress > 80 ? 'on track' : `${progress}%` } : undefined}
-          />
-          <${StatTile}
-            label="Status"
-            value=${status.toUpperCase()}
-            status=${status === 'running' || status === 'active' ? 'ok' : status === 'paused' ? 'warn' : 'brass'}
-          />
-        </div>
-        ${progress !== null ? html`
-          <div class="bar ${progress > 80 ? 'is-ok' : progress > 50 ? '' : 'is-warn'}">
-            <span class="fill" style="width: ${progress}%"></span>
-          </div>
-        ` : null}
-      </div>
-    <//>
-  `
-}
-
 // ─── Keeper Strip ────────────────────────────────────────────────────────────
-
-function keeperPillClass(status?: string | null): string {
-  switch ((status ?? '').toLowerCase()) {
-    case 'active':
-    case 'live':
-      return 'pill is-ok'
-    case 'busy':
-    case 'executing':
-      return 'pill is-running'
-    case 'offline':
-    case 'dead':
-    case 'stopped':
-    case 'unbooted':
-      return 'pill is-err'
-    default:
-      return 'pill is-paused'
-  }
-}
-
-function keeperStatusLabel(status?: string | null): string {
-  switch ((status ?? '').toLowerCase()) {
-    case 'active': case 'live': return 'Active'
-    case 'busy': case 'executing': return 'Busy'
-    case 'paused': return 'Paused'
-    case 'offline': return 'Offline'
-    case 'dead': return 'Dead'
-    case 'stopped': return 'Stopped'
-    case 'unbooted': return 'Unbooted'
-    default: return status ?? 'Unknown'
-  }
-}
 
 export function pickActiveKeepers(keeperList: readonly Keeper[], max = 3): Keeper[] {
   return [...keeperList]
@@ -846,41 +627,6 @@ export function pickActiveKeepers(keeperList: readonly Keeper[], max = 3): Keepe
     .slice(0, max)
 }
 
-function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
-  const activeKeepers = pickActiveKeepers(keeperList)
-
-  if (activeKeepers.length === 0) {
-    return html`
-      <${SectionCard} label="Active Keepers" class="v2-overview-keepers ss-card mx-6" variant="standard" data-testid="overview-keepers-empty">
-        <p class="text-[11px] text-text-tertiary italic">No active keepers</p>
-      <//>
-    `
-  }
-
-  return html`
-    <${SectionCard} label="Active Keepers" class="v2-overview-keepers ss-card mx-6" variant="standard" data-testid="overview-keepers">
-      <ul class="flex flex-wrap gap-x-6 gap-y-2">
-        ${activeKeepers.map(
-          k => {
-            const displayStatus = keeperDisplayStatus(k)
-            return html`
-            <li key=${k.name} class="flex items-center gap-2">
-              <div class="min-w-0">
-                <p class="text-[13px] font-medium truncate text-text-primary">${k.koreanName && k.koreanName !== '' ? k.koreanName : k.name}</p>
-                ${k.last_heartbeat !== undefined
-                  ? html`<${TimeAgo} timestamp=${k.last_heartbeat} class="text-[10px] text-text-tertiary" />`
-                  : null}
-              </div>
-              <span class="${keeperPillClass(displayStatus)} text-[10px] shrink-0">${keeperStatusLabel(displayStatus)}</span>
-            </li>
-            `
-          },
-        )}
-      </ul>
-    <//>
-  `
-}
-
 export function pickActiveSession(snap: DashboardMissionResponse | null): DashboardMissionSessionCard | null {
   if (snap === null) return null
   const running = snap.sessions.find(s => s.status === 'running' || s.status === 'active' || s.status === 'busy')
@@ -889,16 +635,7 @@ export function pickActiveSession(snap: DashboardMissionResponse | null): Dashbo
 
 // ─── Surface Readiness Summary ───────────────────────────────────────────────
 
-const surfaceReadinessResource: AsyncResource<SurfaceReadinessEntry[]> = createAsyncResource()
 const overviewTelemetryResource: AsyncResource<OverviewTelemetrySnapshot> = createAsyncResource()
-
-function loadSurfaceReadiness(): Promise<void> {
-  return surfaceReadinessResource.load(async () => {
-    const raw = await get<unknown>('/api/v1/dashboard/surface-readiness')
-    const data = normalizeSurfaceReadinessPayload(raw)
-    return data.surfaces
-  })
-}
 
 function loadOverviewTelemetry(nowMs = Date.now()): Promise<void> {
   return overviewTelemetryResource.load(async () => {
@@ -915,33 +652,6 @@ function loadOverviewTelemetry(nowMs = Date.now()): Promise<void> {
       truncated: telemetry.truncated ?? false,
     })
   })
-}
-
-function SurfaceReadinessSummary() {
-  useEffect(() => { void loadSurfaceReadiness() }, [])
-
-  const state = surfaceReadinessResource.state.value
-  if (state.status !== 'loaded') return null
-
-  const summary = summarizeSurfaceReadiness(state.data)
-  return html`
-    <${SectionCard}
-      label="Surface Readiness"
-      class="v2-overview-readiness ss-card mx-6"
-      variant="standard"
-      data-testid="overview-surface-readiness"
-    >
-      <${KpiStripIsland}
-        ariaLabel="Surface readiness summary"
-        cols=${3}
-        cells=${[
-          { variant: 'stacked', label: 'Main', value: String(summary.main), testId: 'sr-main' },
-          { variant: 'stacked', label: 'Total', value: String(summary.total), testId: 'sr-total' },
-          { variant: 'stacked', label: 'Gaps', value: String(summary.gaps), kind: summary.gaps > 0 ? 'warn' : 'ok', testId: 'sr-gaps' },
-        ]}
-      />
-    <//>
-  `
 }
 
 // ─── Keeper-v2 overview surfaces ─────────────────────────────────────────────
@@ -1155,89 +865,6 @@ function OverviewTelemetry({
   `
 }
 
-function keeperNamespaceLabel(keeper: Keeper): string {
-  return keeper.runtime_canonical
-    ?? keeper.selected_runtime_canonical
-    ?? keeper.runtime_id
-    ?? keeper.agent_name
-    ?? 'runtime unavailable'
-}
-
-function OverviewFleetGrid({ keeperList }: { keeperList: readonly Keeper[] }) {
-  if (keeperList.length === 0) {
-    return html`
-      <section class="ov-card ov-fleet v2-overview-fleet" data-testid="overview-fleet">
-        <div class="ov-card-h">
-          <h3>Keeper 전체</h3>
-          <button type="button" class="ov-link" onClick=${() => navigate('monitoring', { section: 'agents' })}>전체 대화 보기 →</button>
-        </div>
-        <div class="ov-empty">No keepers</div>
-      </section>
-    `
-  }
-
-  const sorted = useMemo(
-    () => [...keeperList].sort((a, b) => {
-      const aAtt = pickAttentionKeepers([a]).length > 0 ? 1 : 0
-      const bAtt = pickAttentionKeepers([b]).length > 0 ? 1 : 0
-      if (aAtt !== bAtt) return bAtt - aAtt
-      const tsA = parseIsoMs(a.last_heartbeat) ?? 0
-      const tsB = parseIsoMs(b.last_heartbeat) ?? 0
-      return tsB - tsA
-    }),
-    [keeperList],
-  )
-
-  return html`
-    <section class="ov-card ov-fleet v2-overview-fleet" data-testid="overview-fleet">
-      <div class="ov-card-h">
-        <h3>Keeper 전체</h3>
-        <button type="button" class="ov-link" onClick=${() => navigate('monitoring', { section: 'agents' })}>전체 대화 보기 →</button>
-      </div>
-      <div class="ov-fleet-grid v2-overview-fleet-grid">
-        ${sorted.map(k => {
-          const displayStatus = keeperDisplayStatus(k)
-          const isRunning = keeperRowLooksRunning(k)
-          const ctx = k.context_ratio ?? 0
-          const ctxPct = Math.round(ctx * 100)
-          const displayName = k.koreanName && k.koreanName !== '' ? k.koreanName : k.name
-          return html`
-            <button
-              key=${k.name}
-              type="button"
-              class="ov-keeper v2-overview-keeper"
-              onClick=${() => navigate('monitoring', { section: 'agents', keeper: k.name })}
-              data-testid=${`overview-keeper-${k.name}`}
-            >
-              <div class="ov-keeper-top">
-                <${AgentAvatar} name=${k.name} size="sm" status=${displayStatus} />
-                <div class="ov-keeper-id">
-                  <div class="ov-keeper-name">${displayName}</div>
-                  <div class="ov-keeper-state">
-                    <${StatusDot} class=${isRunning ? 'bg-success' : 'bg-text-disabled'} />
-                    <span class="truncate">${k.phase ?? k.lifecycle_phase ?? displayStatus}</span>
-                  </div>
-                </div>
-                ${pickAttentionKeepers([k]).length > 0
-                  ? html`<span class="ov-keeper-att v2-overview-keeper-att">!</span>`
-                  : null}
-              </div>
-              <div class="ov-keeper-ns mono">${keeperNamespaceLabel(k)}</div>
-              <div class="ov-keeper-foot">
-                <span class="mono">${keeperModelLabel(k) || keeperNamespaceLabel(k)}</span>
-                <div class="ov-mini-meter v2-overview-mini-meter">
-                  <span class=${ctx >= 0.85 ? 'hot' : ''} style=${{ width: `${Math.min(100, ctxPct)}%` }}></span>
-                </div>
-                <span class="mono ov-keeper-ctx">${ctxPct}%</span>
-              </div>
-            </button>
-          `
-        })}
-      </div>
-    </section>
-  `
-}
-
 // ─── Domain status section (overview.jsx:159-261) ────────────────────────────
 //
 // "도메인 현황" header over a 7-card grid: one summary card per surface
@@ -1397,23 +1024,10 @@ export function Overview() {
     }, 60_000)
     return () => window.clearInterval(interval)
   }, [])
-  const snap = missionSnapshot.value
   const taskList = tasks.value
   const keeperList = keepers.value
-  const agentList = agents.value
-  const messageList = messages.value
-  const boardPostList = boardPosts.value
   const goalList = goals.value
   const fusionList = fusionRuns.value
-  const nowMs = nowSecondsSignal.value * 1000
-  const active = useMemo(() => pickActiveSession(snap), [snap])
-  const counts = useMemo(() => computeFunnelCounts(taskList, active, nowMs), [taskList, active, nowMs])
-  const agentAlerts = useMemo(() => deriveAgentAlerts(agentList), [agentList])
-  const taskAlerts = useMemo(() => deriveTaskAlerts(taskList, nowMs), [taskList, nowMs])
-  const tickerEvents = useMemo(
-    () => deriveFleetTickerEvents({ taskList, messageList, boardPostList, keeperList }),
-    [taskList, messageList, boardPostList, keeperList],
-  )
   const stats = useMemo(() => computeOverviewStats(keeperList, taskList), [keeperList, taskList])
   const digest = useMemo(
     () => computeOverviewDigest(keeperList, goalList, fusionList),
@@ -1430,20 +1044,7 @@ export function Overview() {
           <${OverviewAttentionPanel} keeperList=${keeperList} />
           <${OverviewTelemetry} telemetry=${telemetry} />
         </div>
-        <${OverviewFleetGrid} keeperList=${keeperList} />
         <${OverviewDomainSection} stats=${stats} digest=${digest} />
-
-        <details class="v2-overview-rollup" data-testid="overview-rollup">
-          <summary>운영 롤업</summary>
-          <div class="v2-overview-rollup-body">
-            <${AlertPanel} agentAlerts=${agentAlerts} taskAlerts=${taskAlerts} />
-            <${SurfaceReadinessSummary} />
-            <${FleetTicker} events=${tickerEvents} />
-            <${FunnelCard} counts=${counts} />
-            <${MissionPartyCard} active=${active} />
-            <${KeeperStrip} keeperList=${keeperList} />
-          </div>
-        </details>
       </div>
     </main>
   `

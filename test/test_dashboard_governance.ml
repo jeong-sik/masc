@@ -969,6 +969,7 @@ let test_dashboard_exposes_keeper_approval_queue () =
             ~tool_name:"tool_edit_file"
             ~input:(`Assoc [ ("path", `String "/tmp/danger") ])
             ~risk_level:Lib.Keeper_approval_queue.Critical
+            ~base_path:dir
             ~selected_model:"openai:gpt-5.4"
             ()
         in
@@ -1074,6 +1075,7 @@ let test_approval_queue_surfaces_action_key_and_sandbox_target () =
           ~risk_level:Lib.Keeper_approval_queue.Medium
           ~runtime_contract:
             (`Assoc [("backend", `String "docker"); ("sandbox_target", `String "docker")])
+          ~base_path:dir
           ~on_resolution:(fun _ -> ())
           ()
       in

@@ -420,7 +420,11 @@ type TurnPhase = {
   kind: 'ctx' | 'reason' | 'tool' | 'gen'
   mono?: boolean
   durationMs: number | null
-  durationSource: 'tool_call_log' | 'estimated' | 'not_recorded'
+  durationSource: 'tool_call_log' | 'provider_telemetry' | 'estimated' | 'not_recorded'
+  // RFC-0233 §10 — time-to-first-token for the gen phase (null when not
+  // recorded). Kept separate from durationMs (end-to-end request_latency_ms)
+  // so the post-first-chunk decode split is never derived (§9.6 guard).
+  ttfrcMs?: number | null
   visualDurationMs: number
   visualOffsetMs: number
   meta?: string
@@ -594,7 +598,16 @@ function formatTurnList(values: number[]): string {
 }
 
 function phaseDurationLabel(phase: TurnPhase): string {
-  if (phase.durationMs != null) return formatMsCompact(phase.durationMs)
+  if (phase.durationMs != null) {
+    const base = formatMsCompact(phase.durationMs)
+    // RFC-0233 §10 — show time-to-first-token alongside the gen phase's
+    // end-to-end duration when ttfrc_ms is recorded. No decode split: the
+    // post-first-chunk duration is NOT derived (§9.6 fabrication guard).
+    if (phase.kind === 'gen' && phase.ttfrcMs != null) {
+      return `${base} · 첫 ${formatMsCompact(phase.ttfrcMs)}`
+    }
+    return base
+  }
   if (phase.durationSource === 'estimated') return '추정'
   return '측정 없음'
 }
@@ -603,6 +616,8 @@ function phaseDurationTitle(phase: TurnPhase): string {
   switch (phase.durationSource) {
     case 'tool_call_log':
       return 'duration_ms from /api/v1/keepers/:name/tool-calls'
+    case 'provider_telemetry':
+      return 'request_latency_ms — provider call wall-clock (OAS inference_telemetry)'
     case 'estimated':
       return 'estimated only; no durable duration for this phase'
     case 'not_recorded':
@@ -704,11 +719,26 @@ function buildTurnDetail(
   phases.push({
     label: '응답 생성',
     kind: 'gen',
-    durationMs: null,
-    durationSource: 'not_recorded',
+    // RFC-0233 §9 — ground the generation phase in OAS request_latency_ms
+    // (provider call wall-clock). Absent on the error path or before a
+    // response existed → render "측정 없음" rather than fabricating a bar.
+    durationMs: record.request_latency_ms ?? null,
+    durationSource:
+      record.request_latency_ms != null ? 'provider_telemetry' : 'not_recorded',
+    // RFC-0233 §10 — time-to-first-token. Populated on the streaming path for
+    // every provider; null for non-streaming turns and on the error path.
+    ttfrcMs: record.ttfrc_ms ?? null,
     visualDurationMs: 0,
     visualOffsetMs: 0,
-    meta: 'provider/OAS duration is not recorded in turn-records',
+    meta: (() => {
+      if (record.request_latency_ms == null) {
+        return 'provider/OAS duration is not recorded for this turn'
+      }
+      if (record.ttfrc_ms != null) {
+        return `provider call wall-clock (request_latency_ms) · 첫 토큰 ${formatMsCompact(record.ttfrc_ms)} (ttfrc_ms)`
+      }
+      return 'provider call wall-clock (request_latency_ms)'
+    })(),
   })
   const { visualTotalMs, measuredDurationMs } = finalizePhaseOffsets(phases)
 

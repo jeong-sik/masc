@@ -3065,11 +3065,15 @@ export function ChatComposer({
             `
           : null}
         <div class=${boxClass}>
+          <!-- Flush borderless textarea: prototype composer.jsx <textarea> has
+               no inline styling; all box styling (border:0, outline:0,
+               transparent bg, padding:9px 0) comes from .composer textarea in
+               chat.css (mirrors styles/v2.css:932-936). Removing the prior
+               inline Tailwind (control-textarea + border + rounded + px/py +
+               bg + focus ring) drops the nested box the prototype lacks. -->
           <textarea
             ref=${textareaRef}
-            class=${(isPrimary
-              ? 'control-textarea min-h-30 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-4 py-4 text-base leading-loose'
-              : 'control-textarea min-h-24 rounded-card border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-3 py-3 text-base leading-loose') + ` ${CHAT_FOCUS_RING}`}
+            class="composer-textarea"
             placeholder=${placeholder}
             aria-label="메시지 입력"
             value=${draft}

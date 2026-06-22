@@ -3035,6 +3035,19 @@ export type TurnRecordEntry = {
   context_window?: number
   price_input_per_million?: number
   price_output_per_million?: number
+  // RFC-0233 §9 — wall-clock duration of the provider call (ms), sourced from
+  // OAS inference_telemetry.request_latency_ms. Absent when the turn errored
+  // before a response existed; the inspector renders "측정 없음" rather than a
+  // fabricated duration for the response-generation phase.
+  request_latency_ms?: number
+  // RFC-0233 §10 — time-to-first-response-chunk (ms, wall-clock), sourced from
+  // OAS inference_telemetry.ttfrc_ms. Unlike request_latency_ms (end-to-end),
+  // this isolates time-to-first-token on the streaming path; the streaming
+  // transport fills it for every provider, so it is populated across the
+  // streaming keeper fleet. Absent for non-streaming turns and on the error
+  // path. The decode (post-first-chunk) duration is NOT derived from
+  // request_latency_ms - ttfrc_ms (§9.6 fabrication guard).
+  ttfrc_ms?: number
   ts: number
 }
 
@@ -3176,6 +3189,8 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     context_window: asNumber(raw.context_window),
     price_input_per_million: asNumber(raw.price_input_per_million),
     price_output_per_million: asNumber(raw.price_output_per_million),
+    request_latency_ms: asNumber(raw.request_latency_ms),
+    ttfrc_ms: asNumber(raw.ttfrc_ms),
     ts,
   }
 }

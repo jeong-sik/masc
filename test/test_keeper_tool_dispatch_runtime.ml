@@ -310,9 +310,20 @@ let test_public_read_rejects_offset_with_tutor () =
         (contains_substring result.raw_output {|"tool":"Grep"|}))
 
 let counter_for_tool_not_allowed ~keeper ~tool ~reason =
+  (* Production emits ToolNotAllowed with a "tool_type" label derived from
+     [Tool_telemetry.tool_type_of_name] (RFC-0084), added to the single
+     emission site in keeper_tool_dispatch_runtime.ml. Otel_metric_store keys
+     metrics by the exact label set, so the query must carry tool_type or it
+     never matches the stored counter (reads as a permanent zero). *)
+  let tool_type = Masc.Tool_telemetry.tool_type_of_name tool in
   Masc.Otel_metric_store.metric_value_or_zero
     Keeper_metrics.(to_string ToolNotAllowed)
-    ~labels:[ ("keeper", keeper); ("tool", tool); ("reason", reason) ]
+    ~labels:
+      [ ("keeper", keeper)
+      ; ("tool", tool)
+      ; ("reason", reason)
+      ; ("tool_type", tool_type)
+      ]
     ()
 
 (* #13xxx: tool_not_allowed Otel_metric_store counter *)

@@ -29,7 +29,7 @@
 .chip.is-ghost { background: transparent; border-color: var(--color-border-strong); color: var(--color-fg-secondary); }
 
 /* chip size variants */
-.chip.sm { height: 16px; padding: 0 5px; font-size: var(--fs-10); }
+.chip.sm { height: 16px; padding: 0 6px; font-size: var(--fs-10); }
 .chip.lg { height: 22px; padding: 0 10px; font-size: var(--fs-12); }
 
 /* chip with leading dot */

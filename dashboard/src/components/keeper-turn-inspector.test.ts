@@ -207,6 +207,8 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           context_window: 203000,
           price_input_per_million: 0.27,
           price_output_per_million: 1.1,
+          request_latency_ms: 1234,
+          ttfrc_ms: 567.8,
           blocks: [
             { block: 'system', bytes: 1200, digest: '1111222233334444' },
             { block: 'user_model', bytes: 728, digest: '99887766554433221100' },
@@ -630,7 +632,11 @@ describe('KeeperTurnInspector v2 drawer', () => {
 
     const stats = container.querySelector('[data-testid="turn-summary-stats"]')?.textContent ?? ''
     expect(stats).toContain('실측')
-    expect(stats).toContain('54ms')
+    // RFC-0233 §9: the gen phase's request_latency_ms (1234ms) joins the tool
+    // duration (54ms) in the measured-total, so the strip reflects the
+    // provider call wall-clock too (1234 + 54 = 1288ms → "1.3s"). This is the
+    // sum of measured phases, not the turn wall-clock — see §9.4.
+    expect(stats).toContain('1.3s')
     expect(stats).toContain('입력')
     expect(stats).toContain('2.4k')
     expect(stats).toContain('출력')
@@ -669,6 +675,12 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(drawerText).toContain('agent subturns')
     expect(drawerText).toContain('T9001')
     expect(drawerText).toContain('keeper_board_post_get')
+    // RFC-0233 §9/§10: the gen (response-generation) phase carries
+    // request_latency_ms from the record (1234ms → "1.2s") plus ttfrc_ms
+    // (567.8ms → "568ms"), so it renders a measured duration with the
+    // time-to-first-token instead of "측정 없음".
+    expect(drawerText).toContain('1.2s')
+    expect(drawerText).toContain('첫 568ms')
     expect(drawerText).toContain('54ms')
     expect(drawerText).not.toContain('0.50s')
 

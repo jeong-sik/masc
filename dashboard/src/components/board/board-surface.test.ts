@@ -977,4 +977,42 @@ describe('BoardSurface Component', () => {
 
     expect(categoryVisibleLimits.value.article).toBe(PAGE_SIZE)
   })
+
+  it('renders the operator author sigil with the "OP" glyph and .op modifier', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'op-post',
+        title: '기술 탐색: operator broadcast',
+        body: 'operator authored content',
+        author: 'operator',
+        post_kind: 'direct',
+      }),
+    ]
+
+    const { container } = render(h(BoardSurface, null))
+
+    const sigil = container.querySelector<HTMLElement>('.bd-sigil')
+    expect(sigil).not.toBeNull()
+    expect(sigil?.classList.contains('op')).toBe(true)
+    expect(sigil?.textContent).toBe('OP')
+  })
+
+  it('renders a keeper author sigil with a 2-letter monogram and no .op modifier', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'kp-post',
+        title: '기술 탐색: keeper note',
+        body: 'keeper authored content',
+        author: 'sangsu',
+        post_kind: 'direct',
+      }),
+    ]
+
+    const { container } = render(h(BoardSurface, null))
+
+    const sigil = container.querySelector<HTMLElement>('.bd-sigil')
+    expect(sigil).not.toBeNull()
+    expect(sigil?.classList.contains('op')).toBe(false)
+    expect(sigil?.textContent).toBe('SA')
+  })
 })

@@ -87,7 +87,7 @@ let audit_today_path base_dir =
   Filename.concat dir day
 ;;
 
-let get_audit_store ?base_path () =
+let get_audit_store ~base_path () =
   let report_failure exn =
     Keeper_fd_pressure.note_exception ~site:"approval_audit.store_create" exn;
     Otel_metric_store.inc_counter
@@ -103,25 +103,20 @@ let get_audit_store ?base_path () =
     None
   in
   try
-    let base =
-      match base_path with
-      | Some base -> base
-      | None -> Env_config_core.base_path ()
-    in
     match
       mutex_protect_allow_reentrant audit_stores_mu (fun () ->
         try
           Ok
-            (match Hashtbl.find_opt audit_stores base with
+            (match Hashtbl.find_opt audit_stores base_path with
              | Some store -> Some store
              | None ->
                let dir =
                  Filename.concat
-                   (Common.masc_dir_from_base_path ~base_path:base)
+                   (Common.masc_dir_from_base_path ~base_path)
                    "audit-approvals"
                in
                let store = Dated_jsonl.create ~base_dir:dir () in
-               Hashtbl.replace audit_stores base store;
+               Hashtbl.replace audit_stores base_path store;
                Some store)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
@@ -135,7 +130,7 @@ let get_audit_store ?base_path () =
 ;;
 
 let audit_approval_event
-      ?base_path
+      ~base_path
       ~event_type
       ~id
       ~keeper_name
@@ -159,7 +154,7 @@ let audit_approval_event
   let decision =
     decision |> Option.map approval_audit_decision_to_string |> Option.value ~default:""
   in
-  match get_audit_store ?base_path () with
+  match get_audit_store ~base_path () with
   | None -> ()
   | Some store ->
     let json =
@@ -203,9 +198,9 @@ let audit_approval_event
       | exn -> record_queue_failure ~keeper_name ~site:"audit_append" ~id ~event_type exn)
 ;;
 
-let audit_rule_event ?base_path ~event_type (rule : approval_rule) =
+let audit_rule_event ~base_path ~event_type (rule : approval_rule) =
   audit_approval_event
-    ?base_path
+    ~base_path
     ~event_type
     ~id:rule.id
     ~keeper_name:rule.keeper_name
@@ -225,11 +220,11 @@ let audit_scan_window ?keeper_name n =
     max 500 (max n 1 * 64)
 ;;
 
-let read_recent_audit ?base_path ?keeper_name ?(n = 20) () : Yojson.Safe.t list =
+let read_recent_audit ~base_path ?keeper_name ?(n = 20) () : Yojson.Safe.t list =
   if n <= 0
   then []
   else (
-    match get_audit_store ?base_path () with
+    match get_audit_store ~base_path () with
     | None -> []
     | Some store ->
       try
@@ -335,7 +330,7 @@ let create_entry
       ?selected_model
       ?disposition
       ?disposition_reason
-      ?audit_base_path
+      ~audit_base_path
       ~resolver
       ~on_resolution
       ()
@@ -455,7 +450,7 @@ let record_pending (entry : pending_approval) =
     entry.tool_name
     (risk_level_to_string entry.risk_level);
   audit_approval_event
-    ?base_path:entry.audit_base_path
+    ~base_path:entry.audit_base_path
     ~event_type:"pending"
     ~id:entry.id
     ~keeper_name:entry.keeper_name
@@ -474,7 +469,7 @@ let record_pending (entry : pending_approval) =
   broadcast_pending entry
 ;;
 
-let resolve_entry ?base_path (entry : pending_approval) (decision : decision) =
+let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
   let decision_str = approval_decision_to_string decision in
   Log.Keeper.info
     "HITL_APPROVAL_RESOLVED: id=%s keeper=%s tool=%s decision=%s"
@@ -483,7 +478,7 @@ let resolve_entry ?base_path (entry : pending_approval) (decision : decision) =
     entry.tool_name
     decision_str;
   audit_approval_event
-    ?base_path
+    ~base_path:base_path
     ~event_type:"resolved"
     ~id:entry.id
     ~keeper_name:entry.keeper_name
@@ -627,7 +622,7 @@ let submit_and_await
       ~tool_name
       ~input
       ~risk_level
-      ?base_path
+      ~base_path
       ?turn_id
       ?task_id
       ?goal_id
@@ -664,7 +659,7 @@ let submit_and_await
       ?selected_model
       ?disposition
       ?disposition_reason
-      ?audit_base_path:base_path
+      ~audit_base_path:base_path
       ~resolver:(Some resolver)
       ~on_resolution:None
       ()
@@ -697,7 +692,7 @@ let submit_and_await
        | `Timeout ->
          let reason = Printf.sprintf "approval timeout after %.0fs" timeout_s in
          audit_approval_event
-           ?base_path:entry.audit_base_path
+           ~base_path:entry.audit_base_path
            ~event_type:"approval_timeout"
            ~id
            ~keeper_name
@@ -724,7 +719,7 @@ let submit_and_await
        | None ->
          let reason = "approval await cancelled before operator decision" in
          audit_approval_event
-           ?base_path:entry.audit_base_path
+           ~base_path:entry.audit_base_path
            ~event_type:"cancelled"
            ~id
            ~keeper_name
@@ -749,7 +744,7 @@ let submit_pending
       ~tool_name
       ~input
       ~risk_level
-      ?base_path
+      ~base_path
       ?turn_id
       ?task_id
       ?goal_id
@@ -806,7 +801,7 @@ let submit_pending
           ?selected_model
           ?disposition
           ?disposition_reason
-          ?audit_base_path:base_path
+          ~audit_base_path:base_path
           ~resolver:None
           ~on_resolution:(Some on_resolution)
           ()
@@ -832,7 +827,7 @@ let resolve_error_to_string = function
   | Already_resolved id -> Printf.sprintf "approval %s already resolved" id
 ;;
 
-let remember_rule_for_entry ?base_path ?created_by (entry : pending_approval) =
+let remember_rule_for_entry ~base_path ?created_by (entry : pending_approval) =
   let rememberable =
     match entry.risk_level with
     | Low | Medium -> true
@@ -844,7 +839,7 @@ let remember_rule_for_entry ?base_path ?created_by (entry : pending_approval) =
     try
       let rule, created =
         upsert_rule
-          ?base_path
+          ~base_path:base_path
           ~keeper_name:entry.keeper_name
           ~tool_name:entry.tool_name
           ~input:entry.input
@@ -856,7 +851,7 @@ let remember_rule_for_entry ?base_path ?created_by (entry : pending_approval) =
           ~source_approval_id:entry.id
           ()
       in
-      if created then audit_rule_event ?base_path ~event_type:"rule_created" rule;
+      if created then audit_rule_event ~base_path:base_path ~event_type:"rule_created" rule;
       Some rule
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -873,7 +868,7 @@ let remember_rule_for_entry ?base_path ?created_by (entry : pending_approval) =
 ;;
 
 let resolve_with_policy
-      ?base_path
+      ~base_path
       ~id
       ~(decision : Agent_sdk.Hooks.approval_decision)
       ?(remember_rule = false)
@@ -894,10 +889,10 @@ let resolve_with_policy
     let remembered_rule =
       match decision with
       | Agent_sdk.Hooks.Approve when remember_rule ->
-        remember_rule_for_entry ?base_path ?created_by entry
+        remember_rule_for_entry ~base_path ?created_by entry
       | _ -> None
     in
-    resolve_entry ?base_path entry decision;
+    resolve_entry ~base_path entry decision;
     Ok { remembered_rule }
 ;;
 
@@ -906,13 +901,25 @@ let resolve_with_policy
     [Error (Already_resolved _)] if the atomic update found no matching
     entry (concurrent resolve race).
     Called from the dashboard approval HTTP handler
-    ([server_dashboard_http.ml]) and MCP runtime. *)
+    ([server_dashboard_http.ml]) and MCP runtime.
+
+    [base_path] is sourced from the entry's captured [audit_base_path]
+    rather than threaded from the caller: the convenience wrapper takes
+    only an [id], so the entry is the authoritative workspace source
+    (RFC-0274 Wave A). *)
 let resolve ~id ~(decision : Agent_sdk.Hooks.approval_decision)
   : (unit, resolve_error) result
   =
-  match resolve_with_policy ~id ~decision () with
-  | Ok _ -> Ok ()
-  | Error _ as err -> err
+  (* The entry is the authoritative base_path source for the convenience
+     wrapper: it has no caller-threaded [base_path], and the pending map
+     is per-workspace so the entry's captured [audit_base_path] is the
+     workspace that owns the approval. RFC-0274 Wave A. *)
+  match SMap.find_opt id (Atomic.get pending) with
+  | None -> Error (Not_found id)
+  | Some entry ->
+    (match resolve_with_policy ~base_path:entry.audit_base_path ~id ~decision () with
+     | Ok _ -> Ok ()
+     | Error _ as err -> err)
 ;;
 
 (* ── Query ────────────────────────────────────────────────── *)
@@ -1034,7 +1041,7 @@ let expire_stale ~max_wait_s =
          entry.keeper_name
          entry.tool_name;
        audit_approval_event
-         ?base_path:entry.audit_base_path
+         ~base_path:entry.audit_base_path
          ~event_type:"expired"
          ~id
          ~keeper_name:entry.keeper_name

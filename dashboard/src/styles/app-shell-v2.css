@@ -249,7 +249,7 @@
 .v2-app .v2-header-actions .v2-statchip {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   padding: 4px 10px;
   border: 1px solid var(--ss-border);
   border-radius: var(--radius-pill);

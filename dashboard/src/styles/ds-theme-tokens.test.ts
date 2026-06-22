@@ -88,8 +88,10 @@ describe('ds-theme-tokens.css', () => {
     expect(theme['--brick']).toBe('#8B3A3A')
   })
 
-  it('contains local @font-face rules pointing to public/assets/fonts', () => {
-    expect(css).toContain("src: url('/assets/fonts/Cinzel-Regular.ttf') format('truetype')")
-    expect(css).toContain("src: url('/assets/fonts/NotoSansKR-Regular.ttf') format('truetype')")
+  it('contains local @font-face rules pointing to public/assets/fonts under the Vite base', () => {
+    // URLs carry the /dashboard/ Vite base prefix so the @font-face resolves
+    // at runtime (a bare /assets/... path 404s under the deployed base).
+    expect(css).toContain("src: url('/dashboard/assets/fonts/Cinzel-Regular.ttf') format('truetype')")
+    expect(css).toContain("src: url('/dashboard/assets/fonts/NotoSansKR-Regular.ttf') format('truetype')")
   })
 })

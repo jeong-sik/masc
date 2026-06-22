@@ -191,7 +191,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-roster-search {
   width: 100%;
   font-size: var(--fs-13);
-  padding: 8px 11px;
+  padding: 8px 12px;
   background: var(--color-bg-page);
   color: var(--color-fg-primary);
   border: 1px solid var(--color-border-default);
@@ -205,7 +205,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 14px 11px;
+  padding: 10px 14px 12px;
   border-bottom: 1px solid var(--color-border-divider);
   background: color-mix(in oklab, var(--color-bg-surface) 38%, transparent);
 }
@@ -227,7 +227,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 }
 .kw-roster-stat {
   min-width: 0;
-  padding: 6px 7px;
+  padding: 6px 8px;
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   background: var(--color-bg-page);
@@ -254,13 +254,13 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   display: flex;
   min-width: 0;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 6px;
 }
 .kw-roster-flags span {
   color: var(--color-fg-muted);
   border: 1px solid var(--color-border-default);
   border-radius: 9999px;
-  padding: 2px 7px;
+  padding: 2px 8px;
   font-family: var(--font-mono);
   font-size: var(--fs-10);
   white-space: nowrap;
@@ -269,12 +269,12 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-roster-flags .gate { color: var(--color-status-warn); border-color: rgb(var(--color-status-warn-glow) / 0.38); background: rgb(var(--color-status-warn-glow) / 0.09); }
 .kw-roster-flags .ctx { color: var(--color-accent-fg); border-color: var(--color-accent-fg-dim); background: var(--accent-10); }
 
-.kw-roster-filters { display: flex; gap: 5px; padding: 10px 14px; flex-wrap: wrap; border-bottom: 1px solid var(--color-border-divider); }
+.kw-roster-filters { display: flex; gap: 6px; padding: 10px 14px; flex-wrap: wrap; border-bottom: 1px solid var(--color-border-divider); }
 .kw-rfilter {
   font-size: var(--fs-11); letter-spacing: 0.06em; text-transform: uppercase;
   padding: 4px 10px; border-radius: 9999px; cursor: pointer;
   border: 1px solid var(--color-border-default); background: transparent; color: var(--color-fg-secondary);
-  display: inline-flex; gap: 5px; align-items: center;
+  display: inline-flex; gap: 6px; align-items: center;
   transition: color .15s, border-color .15s, background .15s;
 }
 .kw-rfilter:hover { color: var(--color-fg-primary); border-color: var(--color-border-strong); }
@@ -295,7 +295,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-roster-sort:focus { border-color: var(--color-accent-fg-dim); }
 .kw-roster-sort option { background: var(--color-bg-elevated); color: var(--color-fg-primary); }
 
-.kw-roster-list { flex: 1; overflow-y: auto; padding: 9px 8px; }
+.kw-roster-list { flex: 1; overflow-y: auto; padding: 10px 8px; }
 .kw-roster-mini-list { display: flex; flex: 1; flex-direction: column; align-items: center; gap: 8px; overflow-y: auto; padding: 12px; }
 .kw-roster-group {
   display: flex; align-items: center; gap: 6px;
@@ -329,7 +329,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
      so more keepers fit on screen. align-items stays `start` (not the
      standalone's `center`) because the live row carries a 3rd work-preview
      line the standalone's 2-line row does not. */
-  padding: 8px 9px; border-radius: var(--r-2); cursor: pointer;
+  padding: 8px 10px; border-radius: var(--r-2); cursor: pointer;
   border: 1px solid transparent; background: transparent;
   transition: background .14s, border-color .14s;
   position: relative;
@@ -350,7 +350,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-kp-meta { min-width: 0; }
 .kw-kp-name { font-weight: var(--fw-bold); font-size: var(--fs-15); color: var(--color-fg-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kw-kp-sub { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--color-fg-secondary); margin-top: 3px; min-width: 0; }
-.kw-kp-state { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.kw-kp-state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .kw-kp-handle { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .kw-kp-work { margin-top: 4px; font-size: var(--fs-12); color: var(--color-fg-secondary); line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kw-kp-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; padding-top: 2px; }
@@ -395,7 +395,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   position: absolute;
   z-index: var(--z-modal);
   min-width: 190px;
-  padding: 5px;
+  padding: 6px;
   border: 1px solid var(--color-border-strong);
   border-radius: var(--r-2);
   background: var(--color-bg-panel-alt);
@@ -405,7 +405,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 9px 8px;
+  padding: 8px 10px 8px;
   border-bottom: 1px solid var(--color-border-divider);
   margin-bottom: 4px;
   color: var(--color-fg-primary);
@@ -416,8 +416,8 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   display: flex;
   width: 100%;
   align-items: center;
-  gap: 9px;
-  padding: 8px 9px;
+  gap: 10px;
+  padding: 8px 10px;
   border: 0;
   border-radius: var(--r-1);
   background: transparent;
@@ -509,7 +509,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 
 .kw-state-pill {
   display: inline-flex; align-items: center; gap: 6px;
-  font-size: var(--fs-12); font-weight: var(--fw-med); letter-spacing: 0.02em; padding: 5px 11px; border-radius: 9999px;
+  font-size: var(--fs-12); font-weight: var(--fw-med); letter-spacing: 0.02em; padding: 6px 12px; border-radius: 9999px;
   background: var(--color-bg-surface); border: 1px solid var(--color-border-default); color: var(--color-fg-secondary);
 }
 .kw-state-pill.run { color: var(--color-status-ok); border-color: rgb(var(--color-status-ok-glow) / 0.45); background: rgb(var(--color-status-ok-glow) / 0.10); }
@@ -517,7 +517,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-state-pill.bad { color: var(--color-status-err); border-color: rgb(var(--color-status-err-glow) / 0.50); background: rgb(var(--color-status-err-glow) / 0.12); }
 .kw-state-pill.off { color: var(--color-fg-muted); }
 
-.kw-chat-actions { display: flex; gap: 7px; align-items: center; flex: none; }
+.kw-chat-actions { display: flex; gap: 8px; align-items: center; flex: none; }
 .kw-chat-command-icons {
   display: flex;
   align-items: center;
@@ -580,7 +580,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   min-width: 190px;
   flex-direction: column;
   gap: 2px;
-  padding: 5px;
+  padding: 6px;
   border: 1px solid var(--color-border-strong);
   border-radius: var(--r-2);
   background: var(--color-bg-panel-alt);
@@ -590,8 +590,8 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   display: flex;
   width: 100%;
   align-items: center;
-  gap: 9px;
-  padding: 8px 9px;
+  gap: 10px;
+  padding: 8px 10px;
   border: 0;
   border-radius: var(--r-1);
   background: transparent;
@@ -613,7 +613,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 }
 .kw-act {
   font-size: var(--fs-12); font-weight: var(--fw-med); letter-spacing: 0.02em;
-  padding: 7px 12px; border-radius: var(--r-1); cursor: pointer;
+  padding: 8px 12px; border-radius: var(--r-1); cursor: pointer;
   border: 1px solid var(--color-border-default); background: var(--color-bg-surface); color: var(--color-fg-secondary);
   white-space: nowrap; transition: color .15s, border-color .15s, background .15s;
 }
@@ -777,7 +777,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
  * horizontal scroll strip instead of overflowing. The "← 키퍼" back button
  * appears here as the pane-switch affordance. */
 @media (max-width: 860px) {
-  .kw-chat-head { flex-wrap: wrap; padding: 9px 14px; gap: 8px 10px; }
+  .kw-chat-head { flex-wrap: wrap; padding: 10px 14px; gap: 8px 10px; }
   .kw-chat-back { display: inline-flex; align-items: center; }
   .kw-chat-id { flex: 1 1 auto; }
   .kw-chat-actions {
@@ -866,7 +866,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-vital .vk { font-size: var(--fs-11); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-fg-secondary); font-weight: var(--fw-bold); }
 .kw-vital .vv { font-family: var(--font-mono); font-size: var(--fs-15); font-weight: var(--fw-semi); color: var(--color-fg-primary); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.kw-meter-wrap { position: relative; margin-top: 18px; }
+.kw-meter-wrap { position: relative; margin-top: 20px; }
 .kw-meter { height: 7px; border-radius: 9999px; background: var(--color-bg-page); border: 1px solid var(--color-border-divider); overflow: hidden; }
 .kw-meter > span { display: block; height: 100%; background: linear-gradient(90deg, var(--color-accent-fg-dim), var(--color-accent-fg)); }
 .kw-meter.hot > span { background: linear-gradient(90deg, var(--color-status-warn), var(--color-status-err)); }
@@ -876,7 +876,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   font-style: normal; font-size: var(--fs-9); letter-spacing: 0.04em; white-space: nowrap;
   color: var(--color-status-warn); opacity: 0.85;
 }
-.kw-ctx-tok { display: flex; align-items: baseline; gap: 5px; margin-top: 8px; font-size: var(--fs-12); }
+.kw-ctx-tok { display: flex; align-items: baseline; gap: 6px; margin-top: 8px; font-size: var(--fs-12); }
 .kw-ctx-tok .mono { font-family: var(--font-mono); color: var(--color-fg-primary); }
 .kw-ctx-tok .lbl { margin-left: auto; color: var(--color-fg-secondary); font-size: var(--fs-11); }
 .kw-ctx-meta {
@@ -901,7 +901,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   font-size: var(--fs-13);
 }
 
-.kw-list { display: flex; flex-direction: column; gap: 7px; }
+.kw-list { display: flex; flex-direction: column; gap: 8px; }
 .kw-list-empty { font-size: var(--fs-13); color: var(--color-fg-secondary); }
 .kw-tasktag {
   display: flex; flex-direction: column;
@@ -959,7 +959,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-toolcall.open { background: var(--color-bg-elevated); border: 1px solid var(--color-border-divider); }
 .kw-toolcall-head {
   display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 4px 7px; border-radius: var(--r-1); cursor: pointer;
+  padding: 4px 8px; border-radius: var(--r-1); cursor: pointer;
   background: none; border: none; text-align: left; color: var(--color-fg-secondary);
   font-size: var(--fs-13);
 }
@@ -1001,7 +1001,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--color-bg-page); }
 .kw-detail-head {
   flex: none; display: flex; align-items: center; gap: 10px;
-  padding: 12px 18px; border-bottom: 1px solid var(--color-border-default);
+  padding: 12px 20px; border-bottom: 1px solid var(--color-border-default);
   background: var(--color-bg-panel-alt);
 }
 .kw-detail-head strong {
@@ -1033,7 +1033,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
     width: min(100vw, 380px);
   }
   .kw-rail-scroll {
-    gap: 18px;
+    gap: 20px;
     padding: 16px 14px;
   }
   .kw-detail-head {
@@ -1081,10 +1081,10 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 }
 
 /* ════ ATTENTION (rail, top) ════════════════════════════════════ */
-.kw-att-list { display: flex; flex-direction: column; gap: 7px; }
+.kw-att-list { display: flex; flex-direction: column; gap: 8px; }
 .kw-att-item {
   display: flex; align-items: center; gap: 8px;
-  padding: 9px 11px; border-radius: var(--r-1); font-size: var(--fs-12);
+  padding: 10px 12px; border-radius: var(--r-1); font-size: var(--fs-12);
   background: var(--color-bg-elevated); border: 1px solid var(--color-border-divider); color: var(--color-fg-primary);
 }
 .kw-att-item.bad { border-color: rgb(var(--color-status-err-glow) / 0.35); background: rgb(var(--color-status-err-glow) / 0.1); color: var(--color-fg-primary); }

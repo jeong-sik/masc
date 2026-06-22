@@ -657,6 +657,26 @@ let test_history_compaction () =
   in
   check int "all 15 preserved" 15 (List.length results)
 
+let test_history_compaction_triggers () =
+  with_p11_base_path @@ fun base_path ->
+  let module H = Masc_exec.Bash_history in
+  (* Exceed max_entries (10_000) so [compact] actually rewrites the file via
+     the fd-protected write path (not the no-op branch above). *)
+  for i = 1 to 10_001 do
+    Result.get_ok
+      (H.append ~base_path ~keeper_name:"compact-trigger"
+         { ts = float_of_int i; cmd_hash = string_of_int i; cmd_prefix = "cmd";
+           semantic_kind = "Unknown"; duration_ms = 10; success = true })
+  done;
+  H.compact ~base_path ~keeper_name:"compact-trigger";
+  let results =
+    H.suggest ~base_path ~keeper_name:"compact-trigger" ~pattern:"cmd"
+      ~limit:20_000
+  in
+  (* compact keeps the last compact_to (1_000) entries; the rewrite went
+     through the Eio_guard.protect wrapper and produced a valid file. *)
+  check int "compacted to compact_to" 1_000 (List.length results)
+
 
 let () =
   run "exec_core"
@@ -753,5 +773,7 @@ let () =
             test_history_cmd_hash;
           test_case "compaction preserves entries below threshold"
             `Quick test_history_compaction;
+          test_case "compaction above threshold rewrites to compact_to"
+            `Slow test_history_compaction_triggers;
         ] );
     ]

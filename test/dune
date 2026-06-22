@@ -678,6 +678,14 @@
  (modules test_fusion_status_tool)
  (libraries masc_test_deps masc.fusion_core))
 
+; RFC-0252 §8 — judge_meta/panel_meta structured serialization. Needs
+; masc.fusion_core for Fusion_types constructors (Answer/Recommend/Insufficient,
+; judge_synthesis record) + Masc.Fusion_sink for the public meta serializers.
+(test
+ (name test_fusion_sink_meta)
+ (modules test_fusion_sink_meta)
+ (libraries masc_test_deps masc.fusion_core))
+
 ; RFC-0207: per-keeper LLM runtime routing (persona [model] selection + driver fail-fast).
 
 (test
@@ -1129,6 +1137,35 @@
  (name test_voice_config)
  (modules test_voice_config)
  (libraries alcotest yojson masc.voice_config))
+
+; MCP HTTP session persistence: save/forget/load round-trip through the
+; fd-safe write path (close_out_noerr finally guard).
+
+(test
+ (name test_server_mcp_session_persist)
+ (modules test_server_mcp_session_persist)
+ (libraries alcotest masc_server unix))
+
+; Bounded-cache eviction guard for client-keyed dashboard metrics caches.
+
+(test
+ (name test_server_utils_bounded_cache)
+ (modules test_server_utils_bounded_cache)
+ (libraries alcotest masc))
+
+; RFC-0106 cancel-safe combinator: re-raises Cancelled, routes others.
+
+(test
+ (name test_cancel_safe)
+ (modules test_cancel_safe)
+ (libraries alcotest masc_cancel_safe eio))
+
+; Warn-log dedup table stays bounded under distinct token-hash-prefix churn.
+
+(test
+ (name test_server_auth_warn_log_bound)
+ (modules test_server_auth_warn_log_bound)
+ (libraries alcotest masc masc_server eio_main))
 
 ; Focused dashboard nudge feed projection.
 

@@ -126,3 +126,4 @@ describe('TweaksPanel', () => {
     expect(tweaksOpen.value).toBe(false)
   })
 })
+// Keeper Agent v2 sync: coverage ratchet trigger

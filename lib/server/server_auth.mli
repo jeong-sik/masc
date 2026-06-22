@@ -126,6 +126,14 @@ val record_dashboard_actor_fallback :
     Reverse Engineering Design Map §개선 #2 (request identity state
     machine). *)
 
+val stale_token_warn_log_max_entries : int
+(** Ceiling on distinct token-hash prefixes retained for warn-log dedup.
+    Exposed for testing the bound. *)
+
+val stale_token_warn_log_entry_count : unit -> int
+(** Current number of tracked token-hash prefixes. Exposed for testing that
+    [record_dashboard_actor_fallback] keeps the dedup table bounded. *)
+
 val dashboard_actor_for_request :
   base_path:string -> Httpun.Request.t -> string option
 (** Resolve the dashboard actor name from the request. *)

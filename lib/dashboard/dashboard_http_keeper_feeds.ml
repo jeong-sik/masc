@@ -398,8 +398,6 @@ let parse_decision_event ~keeper_name line : decision_event option =
       | Some _ as value -> value
       | None -> number "latency_ms"
     in
-    let belief_summary = str "belief_summary" in
-    let current_intention = str "current_intention" in
     let blocker = str "blocker" in
     let channel = str "channel" in
     let summary_parts =
@@ -410,9 +408,7 @@ let parse_decision_event ~keeper_name line : decision_event option =
         ; (match terminal_reason_code with
            | Some code -> "reason: " ^ code
            | None -> "")
-        ; (if current_intention <> "" then "\xe2\x86\x92 " ^ current_intention else "")
         ; (if blocker <> "" then "blocked: " ^ blocker else "")
-        ; (if belief_summary <> "" then belief_summary else "")
         ]
     in
     let summary = String.concat " \xc2\xb7 " summary_parts in

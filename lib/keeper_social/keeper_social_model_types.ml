@@ -18,7 +18,6 @@ type delivery_surface =
 
 type model_id =
   | Bdi_speech_v1
-  | Magentic_ledger_v1
 
 type transition_reason =
   | Tool_only_comment_board
@@ -26,7 +25,6 @@ type transition_reason =
   | Tool_only_broadcast
   | Tool_only_claim_task
   | Tool_only_visible_reply
-  | Tool_only_progress_ledger
   | Explicit_social_headers
   | Missing_headers_fallback_visible_reply
   | Invalid_headers_fallback_visible_reply
@@ -38,9 +36,6 @@ type transition_reason =
 
 type social_state = {
   social_model : string;
-  belief_summary : string;
-  active_desire : string option;
-  current_intention : string option;
   blocker : string option;
   need : string option;
   speech_act : speech_act;
@@ -97,16 +92,14 @@ let delivery_surface_of_string value =
 
 let model_id_to_string = function
   | Bdi_speech_v1 -> "bdi_speech_v1"
-  | Magentic_ledger_v1 -> "magentic_ledger_v1"
 
-let all_model_ids = [ Bdi_speech_v1; Magentic_ledger_v1 ]
+let all_model_ids = [ Bdi_speech_v1 ]
 
 let valid_model_id_strings = List.map model_id_to_string all_model_ids
 
 let model_id_of_string value =
   match String.lowercase_ascii (String.trim value) with
   | "bdi_speech_v1" -> Some Bdi_speech_v1
-  | "magentic_ledger_v1" -> Some Magentic_ledger_v1
   | _ -> None
 
 let default_model_id = Bdi_speech_v1
@@ -134,7 +127,6 @@ let transition_reason_to_string = function
   | Tool_only_broadcast -> "tool_only:broadcast"
   | Tool_only_claim_task -> "tool_only:claim_task"
   | Tool_only_visible_reply -> "tool_only:visible_reply"
-  | Tool_only_progress_ledger -> "tool_only:progress_ledger"
   | Explicit_social_headers -> "headers:explicit_social_headers"
   | Missing_headers_fallback_visible_reply ->
       "headers_missing:fallback_visible_reply"
@@ -152,17 +144,17 @@ let transition_reason_to_string = function
 (* Gen8 persistence-layer cap for social_state narrative fields.
 
    Gen7 (#7676) capped keeper_state_snapshot before continuity_summary
-   rendering. The social_state record (belief_summary, active_desire,
-   current_intention, blocker, need) follows a parallel accumulation
-   path: BDI speech v1 carries these through previous_state into the
-   next turn's prompt. Without an explicit bound, a keeper repeating
-   "stay_silent" can still grow belief_summary monotonically because
-   speech_act=Stay_silent clears response_text but preserves state.
+   rendering. The social_state record's remaining narrative fields
+   (blocker, need) follow a parallel accumulation path: BDI speech v1
+   carries them through previous_state into the next turn's prompt.
+   Without an explicit bound, a keeper repeating "stay_silent" can grow
+   them monotonically because speech_act=Stay_silent clears
+   response_text but preserves state.
 
-   Same budget discipline as cap_snapshot (400 char primary, 200 char
-   option fields) kept as labeled-optional knobs so a runtime-level
-   policy can plug different budgets per speech model. *)
-let default_belief_summary_max_chars = 400
+   RFC-0274 removed the belief_summary/active_desire/current_intention
+   triple (non-load-bearing narrative); the option-field budget remains
+   a labeled-optional knob so a runtime-level policy can plug different
+   budgets per speech model. *)
 let default_option_field_max_chars = 200
 
 (* #9933: structured error payloads (e.g. [masc_oas_error] JSON, or
@@ -222,17 +214,10 @@ let cap_blocker_option ?option_max_chars = function
   | Some s -> Some (cap_blocker ?option_max_chars s)
 
 let cap_social_state
-    ?(belief_max_chars = default_belief_summary_max_chars)
     ?(option_max_chars = default_option_field_max_chars)
     (state : social_state) : social_state =
   {
     state with
-    belief_summary =
-      truncate_string ~max_chars:belief_max_chars state.belief_summary;
-    active_desire =
-      truncate_option ~max_chars:option_max_chars state.active_desire;
-    current_intention =
-      truncate_option ~max_chars:option_max_chars state.current_intention;
     blocker =
       cap_blocker_option ~option_max_chars state.blocker;
     need = truncate_option ~max_chars:option_max_chars state.need;

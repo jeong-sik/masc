@@ -159,16 +159,6 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         (match social_transition_reason with
          | Some value -> String.trim value
          | None -> meta.runtime.last_social_transition_reason);
-      last_active_desire =
-        (match social_state with
-         | Some (state : Social.social_state) ->
-             Option.value ~default:"" state.active_desire
-         | None -> meta.runtime.last_active_desire);
-      last_current_intention =
-        (match social_state with
-         | Some (state : Social.social_state) ->
-             Option.value ~default:"" state.current_intention
-         | None -> meta.runtime.last_current_intention);
       last_blocker =
         (* Merge: typed klass from sdk_error becomes authoritative;
            detail picks up the social-state blocker text or a public-

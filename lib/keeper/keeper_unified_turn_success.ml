@@ -496,7 +496,7 @@ let handle
   (* RFC-0233 §7: the social model may author a keeper board post (request-help);
      thread the turn's minted join key so that post carries [origin.turn_ref]. *)
   let result, social_state, social_transition_reason =
-    Social.apply_to_result ?turn_ref ~meta ~observation
+    Social.apply_to_result ?turn_ref ~meta
       ~previous_state:previous_social_state result
   in
   let turn_cost = turn_cost result in

@@ -23,7 +23,6 @@ type delivery_surface = Keeper_social_model_types.delivery_surface =
 
 type model_id = Keeper_social_model_types.model_id =
   | Bdi_speech_v1
-  | Magentic_ledger_v1
 
 type transition_reason = Keeper_social_model_types.transition_reason =
   | Tool_only_comment_board
@@ -31,7 +30,6 @@ type transition_reason = Keeper_social_model_types.transition_reason =
   | Tool_only_broadcast
   | Tool_only_claim_task
   | Tool_only_visible_reply
-  | Tool_only_progress_ledger
   | Explicit_social_headers
   | Missing_headers_fallback_visible_reply
   | Invalid_headers_fallback_visible_reply
@@ -43,9 +41,6 @@ type transition_reason = Keeper_social_model_types.transition_reason =
 
 type social_state = Keeper_social_model_types.social_state = {
   social_model : string;
-  belief_summary : string;
-  active_desire : string option;
-  current_intention : string option;
   blocker : string option;
   need : string option;
   speech_act : speech_act;
@@ -98,16 +93,14 @@ let previous_state_of_meta (meta : Keeper_meta_contract.keeper_meta) =
   let speech_act =
     Keeper_social_model_types.speech_act_of_string runtime.last_speech_act
   in
-  let active_desire = nonempty_opt runtime.last_active_desire in
-  let current_intention = nonempty_opt runtime.last_current_intention in
   let blocker =
     match runtime.last_blocker with
     | Some info -> nonempty_opt info.detail
     | None -> None
   in
   let need = nonempty_opt runtime.last_need in
-  match speech_act, active_desire, current_intention, blocker, need with
-  | None, None, None, None, None -> None
+  match speech_act, blocker, need with
+  | None, None, None -> None
   | _ ->
       (* #8605 family: when carry-state has any field but speech_act is
          missing or unparseable, default to Inform (the neutral verb).
@@ -128,9 +121,6 @@ let previous_state_of_meta (meta : Keeper_meta_contract.keeper_meta) =
       Some
         {
           social_model = normalize_social_model meta.social_model;
-          belief_summary = "runtime_carry";
-          active_desire;
-          current_intention;
           blocker;
           need;
           speech_act;

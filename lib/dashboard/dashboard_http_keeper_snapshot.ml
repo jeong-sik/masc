@@ -83,16 +83,14 @@ let keeper_bdi_snapshot_json (config : Workspace.config) (name : string)
       let latest_social =
         sort_by_latest_ts metrics
         |> List.find_opt (fun json ->
-               Option.is_some (string_member_nonempty "belief_summary" json)
-               || Option.is_some (string_member_nonempty "active_desire" json)
-               || Option.is_some (string_member_nonempty "current_intention" json)
-               || Option.is_some (string_member_nonempty "need" json))
+               Option.is_some (string_member_nonempty "need" json)
+               || Option.is_some (string_member_nonempty "blocker" json))
       in
       let metric_field key =
         Option.bind latest_social (string_member_nonempty key)
       in
-      let belief =
-        match metric_field "belief_summary" with
+      let blocker =
+        match metric_field "blocker" with
         | Some value -> Some value
         | None ->
             (match m.runtime.last_blocker with
@@ -103,18 +101,8 @@ let keeper_bdi_snapshot_json (config : Workspace.config) (name : string)
                      Keeper_meta_contract.blocker_class_to_string info.klass
                    else trimmed
                  in
-                 Some ("blocked: " ^ label)
+                 Some label
              | None -> None)
-      in
-      let desire =
-        match metric_field "active_desire" with
-        | Some value -> Some value
-        | None -> nonempty_string_opt m.runtime.last_active_desire
-      in
-      let intention =
-        match metric_field "current_intention" with
-        | Some value -> Some value
-        | None -> nonempty_string_opt m.runtime.last_current_intention
       in
       let need =
         match metric_field "need" with
@@ -127,9 +115,7 @@ let keeper_bdi_snapshot_json (config : Workspace.config) (name : string)
            ("keeper", `String m.name);
            ("generated_at", `String (Masc_domain.now_iso ()));
            ("poll_interval_ms", `Int 5000);
-           ("belief", Json_util.string_opt_to_json belief);
-           ("desire", Json_util.string_opt_to_json desire);
-           ("intention", Json_util.string_opt_to_json intention);
+           ("blocker", Json_util.string_opt_to_json blocker);
            ("need", Json_util.string_opt_to_json need);
            ("profile_will", Json_util.string_opt_to_json (nonempty_string_opt m.will));
            ("profile_needs", Json_util.string_opt_to_json (nonempty_string_opt m.needs));

@@ -158,7 +158,6 @@ let test_decisions_log_json_shape () =
         ; "keeper_name", `String meta.name
         ; "speech_act", `String "assert"
         ; "blocker", `String "missing config"
-        ; "current_intention", `String "deploy"
         ]);
   let json = Dash.keeper_decisions_log_json ~config ~keepers:[ meta ] ~limit:10 () in
   let events = Json.(json |> member "events" |> to_list) in
@@ -178,13 +177,7 @@ let test_decisions_log_json_shape () =
     "summary contains blocker"
     true
     (let s = Json.(event |> member "summary" |> to_string) in
-     contains_substring ~needle:"blocked" s);
-  check
-    bool
-    "summary contains intention"
-    true
-    (let s = Json.(event |> member "summary" |> to_string) in
-     contains_substring ~needle:"deploy" s)
+     contains_substring ~needle:"blocked" s)
 ;;
 
 let test_decisions_json_terminal_reason_duration_fallback () =

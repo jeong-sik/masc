@@ -89,9 +89,6 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
         Social.
           {
             social_model = meta.social_model;
-            belief_summary = "";
-            active_desire = None;
-            current_intention = None;
             blocker = None;
             need = None;
             speech_act = Social.Inform;
@@ -232,10 +229,6 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
         (match social_transition_reason with
          | Some reason -> String.trim reason
          | None -> rt.last_social_transition_reason);
-      last_active_desire =
-        Option.value ~default:"" social_state.active_desire;
-      last_current_intention =
-        Option.value ~default:"" social_state.current_intention;
       (* A successful turn means the keeper is not blocked.
          Clear unconditionally so stale error strings from previous
          failures do not persist in the runtime JSON and mislead the

@@ -93,9 +93,6 @@ let append_decision_record
     | Some state ->
         [
           ("social_model", `String state.Social.social_model);
-          ("belief_summary", `String state.belief_summary);
-          Json_util.string_opt_field "active_desire" state.active_desire;
-          Json_util.string_opt_field "current_intention" state.current_intention;
           Json_util.string_opt_field "blocker" state.blocker;
           Json_util.string_opt_field "need" state.need;
           ("speech_act", `String (Social.speech_act_to_string state.speech_act));

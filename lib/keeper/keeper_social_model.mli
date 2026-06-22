@@ -24,7 +24,6 @@ type delivery_surface = Keeper_social_model_types.delivery_surface =
 
 type model_id = Keeper_social_model_types.model_id =
   | Bdi_speech_v1
-  | Magentic_ledger_v1
 
 type transition_reason = Keeper_social_model_types.transition_reason =
   | Tool_only_comment_board
@@ -32,7 +31,6 @@ type transition_reason = Keeper_social_model_types.transition_reason =
   | Tool_only_broadcast
   | Tool_only_claim_task
   | Tool_only_visible_reply
-  | Tool_only_progress_ledger
   | Explicit_social_headers
   | Missing_headers_fallback_visible_reply
   | Invalid_headers_fallback_visible_reply
@@ -44,9 +42,6 @@ type transition_reason = Keeper_social_model_types.transition_reason =
 
 type social_state = Keeper_social_model_types.social_state = {
   social_model : string;
-  belief_summary : string;
-  active_desire : string option;
-  current_intention : string option;
   blocker : string option;
   need : string option;
   speech_act : speech_act;
@@ -89,7 +84,6 @@ val derive_failure_state :
 val apply_to_result :
   ?turn_ref:Ids.Turn_ref.t ->
   meta:Keeper_meta_contract.keeper_meta ->
-  observation:Keeper_world_observation.world_observation ->
   previous_state:social_state option ->
   Keeper_agent_run.run_result ->
   Keeper_agent_run.run_result * social_state * transition_reason

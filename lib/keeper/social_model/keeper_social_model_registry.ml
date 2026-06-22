@@ -10,16 +10,12 @@ let active_model_of_meta (meta : keeper_meta) =
   | None -> Types.default_model_id
 
 let apply_to_result ?(turn_ref : Ids.Turn_ref.t option) ~(meta : keeper_meta)
-    ~(observation : Keeper_world_observation.world_observation)
     ~(previous_state : Types.social_state option)
     (result : Keeper_agent_run.run_result) =
   match active_model_of_meta meta with
   | Types.Bdi_speech_v1 ->
       Keeper_social_model_bdi_speech_v1.apply_to_result ?turn_ref ~meta
-        ~observation ~previous_state result
-  | Types.Magentic_ledger_v1 ->
-      Keeper_social_model_magentic_ledger_v1.apply_to_result ?turn_ref ~meta
-        ~observation ~previous_state result
+        ~previous_state result
 
 let derive_failure_state ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
@@ -30,7 +26,4 @@ let derive_failure_state ~(meta : keeper_meta)
   match active_model_of_meta meta with
   | Types.Bdi_speech_v1 ->
       Keeper_social_model_bdi_speech_v1.derive_failure_state ~meta
-        ~observation ~previous_state ~is_auto_recoverable ~sdk_error ~reason
-  | Types.Magentic_ledger_v1 ->
-      Keeper_social_model_magentic_ledger_v1.derive_failure_state ~meta
         ~observation ~previous_state ~is_auto_recoverable ~sdk_error ~reason

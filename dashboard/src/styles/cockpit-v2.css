@@ -127,8 +127,9 @@
 }
 
 .cp-inner {
-  max-width: 1080px;
-  margin: 0 auto;
+  /* Full-width, left-aligned — consistency rationale in .ov-scroll
+     (surfaces-v2.css). Prototype centers this in a 1080px column; overridden
+     per design direction. */
   display: flex;
   flex-direction: column;
   gap: var(--gap-card);

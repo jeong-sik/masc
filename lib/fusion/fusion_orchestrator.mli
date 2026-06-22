@@ -22,9 +22,11 @@ type outcome =
     + [Allow]면 preset의 패널 모델로 [Fusion_panel.run], judge 모델로 [Fusion_judge.run].
       패널/심판 system prompt와 타임아웃은 preset(=config)에서 온다 — 코드 default 없음.
     + [topology]에 따라 reduce 위상을 고른다: [Simple]은 panel→judge→sink(현행),
-      [Refine]은 panel→judge→judge'(1차 종합 재검토)→sink. [Refine]에서 1차 심판이
-      실패하면 [Simple]과 동일하게 에러를 전파하고, 2차 심판이 실패하면 1차 종합으로
-      graceful degrade한다(warn 로깅). 두 심판 usage는 합산해 sink로 보낸다.
+      [Refine]은 panel→judge→judge'(1차 종합 재검토)→sink, [Conditional]은 1차 판정이
+      [Insufficient]일 때만 refine하고 그 외엔 [Simple]처럼 1차 종합 그대로
+      ([Fusion_types.decision_warrants_escalation]). 1차 심판이 실패하면 어느 위상이든
+      [Simple]과 동일하게 에러를 전파하고, refine(2차) 심판이 실패하면 1차 종합으로
+      graceful degrade한다(warn 로깅). refine한 경우 두 심판 usage는 합산해 sink로 보낸다.
     + [Fusion_sink.emit]으로 트랜스크립트를 키퍼 chat lane에 기록. 실패면 [Sink_failed].
     + [Completed]로 패널/심판 결과 반환. *)
 val run

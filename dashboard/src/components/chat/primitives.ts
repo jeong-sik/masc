@@ -808,7 +808,7 @@ function ChatChartBlock({ title, series, labels, xLabel, yMax }: ChatChartBlock)
         />
         ${series.map((s, si) => {
           const points = s.values.map((v, i) => `${xFor(i, s.values.length)},${yFor(v)}`).join(' ')
-          const color = s.color ?? (si === 0 ? '#c4a265' : '#6a5848')
+          const color = s.color ?? (si === 0 ? 'var(--accent-brass-bright)' : 'var(--text-dim)')
           return html`
             <g key=${si}>
               <polyline
@@ -849,7 +849,7 @@ function ChatChartBlock({ title, series, labels, xLabel, yMax }: ChatChartBlock)
           <span key=${i} class="chat-block-chart-legend-item">
             <span
               class="chat-block-chart-legend-swatch"
-              style=${{ background: s.color ?? (i === 0 ? '#c4a265' : '#6a5848') }}
+              style=${{ background: s.color ?? (i === 0 ? 'var(--accent-brass-bright)' : 'var(--text-dim)') }}
             />
             <span>${s.label}</span>
           </span>

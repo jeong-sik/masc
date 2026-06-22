@@ -56,9 +56,11 @@
   position: relative;
   background: var(--color-bg-page);
   color: var(--color-fg-primary);
-  --color-accent-fg: #8a6a28;
-  --color-accent-fg-dim: #5a4618;
-  --color-fg-muted: #6a5848;
+  /* Bridge the dashboard semantic tokens to the v2 Keeper theme palette so
+   * the workspace stays design-matched while remaining theme-adaptable. */
+  --color-accent-fg:     var(--accent-brass);
+  --color-accent-fg-dim: var(--accent-brass-dim);
+  --color-fg-muted:      var(--text-dim);
 }
 .kw-grid[data-roster="mini"] { --kw-roster-w: 72px; }
 .kw-grid[data-rail="closed"] { --kw-rail-w: 0px; }
@@ -178,11 +180,11 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-roster-head { padding: 14px; border-bottom: 1px solid var(--color-border-divider); }
 .kw-roster-title {
   display: flex; align-items: center; gap: 8px;
-  font-family: var(--font-display); font-size: 14px; text-transform: uppercase; letter-spacing: 0.12em;
+  font-family: var(--font-display); font-size: var(--fs-14); text-transform: uppercase; letter-spacing: 0.12em;
   margin-bottom: 10px; color: var(--color-fg-primary);
 }
 .kw-roster-title .n {
-  font-family: var(--font-mono); font-size: 10px; font-weight: var(--fw-semi);
+  font-family: var(--font-mono); font-size: var(--fs-10); font-weight: var(--fw-semi);
   padding: 2px 7px; border-radius: 999px;
   background: var(--color-bg-surface); border: 1px solid var(--color-border-default); color: var(--color-fg-muted);
 }
@@ -276,7 +278,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   transition: color .15s, border-color .15s, background .15s;
 }
 .kw-rfilter:hover { color: var(--color-fg-primary); border-color: var(--color-border-strong); }
-.kw-rfilter[aria-pressed="true"] { background: #8a6a28; border-color: #8a6a28; color: #0a0706; font-weight: var(--fw-semi); }
+.kw-rfilter[aria-pressed="true"] { background: var(--color-accent-fg); border-color: var(--color-accent-fg); color: var(--bg-deep); font-weight: var(--fw-semi); }
 .kw-rfilter .n { opacity: 0.8; }
 /* Roster sort <select> — ported from keeper-v2 v2.css .roster-sort. Pushed to
    the right of the filter chips; pill control with the same resting/hover/focus
@@ -297,7 +299,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-roster-mini-list { display: flex; flex: 1; flex-direction: column; align-items: center; gap: 8px; overflow-y: auto; padding: 12px; }
 .kw-roster-group {
   display: flex; align-items: center; gap: 6px;
-  font-size: 9.5px; font-weight: var(--fw-bold); letter-spacing: 0.18em; text-transform: uppercase; color: var(--color-fg-secondary);
+  font-size: var(--fs-9-5); font-weight: var(--fw-bold); letter-spacing: 0.18em; text-transform: uppercase; color: var(--color-fg-secondary);
   padding: 12px 8px 6px;
 }
 /* Per-group keeper count, right-aligned — mirrors the design roster's rg-n. */
@@ -346,7 +348,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   pointer-events: none;
 }
 .kw-kp-meta { min-width: 0; }
-.kw-kp-name { font-weight: var(--fw-bold); font-size: 15px; color: var(--color-fg-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kw-kp-name { font-weight: var(--fw-bold); font-size: var(--fs-15); color: var(--color-fg-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kw-kp-sub { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--color-fg-secondary); margin-top: 3px; min-width: 0; }
 .kw-kp-state { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .kw-kp-handle { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -494,16 +496,16 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
  * actions wrap to their own row instead (see .kw-chat-head flex-wrap). */
 .kw-chat-id { min-width: 9rem; flex: 1; }
 .kw-chat-name-row { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; }
-.kw-chat-slug { font-size: 12px; color: #6a5848; margin-top: 2px; }
+.kw-chat-slug { font-size: var(--fs-12); color: var(--color-fg-muted); margin-top: 2px; }
 /* Back-to-roster affordance: only meaningful on the single-pane mobile layout
  * (shown at ≤860px in the conversation media block). On desktop the roster is
  * always visible, so the button is hidden. */
 .kw-chat-back { display: none; flex: none; }
 /* B2: display-font name with positive tracking — the standalone's austere
    "instrument panel" voice (Space Grotesk under [data-skin=v2], theme-aware via
-   --font-display). Weight eased to semi (was bold) so the wider tracking reads
+   --font-display). Weight eased to regular (was bold) so the wider tracking reads
    engraved rather than heavy; tracking flipped negative→+0.02em. */
-.kw-chat-name { font-family: var(--font-display); font-size: var(--fs-20); font-weight: 400; letter-spacing: 0.02em; color: var(--color-fg-primary); margin: 0; white-space: nowrap; }
+.kw-chat-name { font-family: var(--font-display); font-size: var(--fs-20); font-weight: var(--fw-reg); letter-spacing: 0.02em; color: var(--color-fg-primary); margin: 0; white-space: nowrap; }
 
 .kw-state-pill {
   display: inline-flex; align-items: center; gap: 6px;
@@ -843,8 +845,8 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 }
 .kw-rail-scroll { overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 16px; }
 .kw-sec h4 {
-  font-family: var(--font-display); font-size: 11px; letter-spacing: 0.18em;
-  font-weight: 400; text-transform: uppercase;
+  font-family: var(--font-display); font-size: var(--fs-11); letter-spacing: 0.18em;
+  font-weight: var(--fw-reg); text-transform: uppercase;
   color: var(--color-fg-primary); margin: 0 0 9px;
   display: flex; align-items: center; gap: 7px;
 }
@@ -862,7 +864,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-vital { background: var(--color-bg-elevated); padding: 10px 12px; min-width: 0; }
 .kw-vital.muted .vv { color: var(--color-fg-muted); }
 .kw-vital .vk { font-size: var(--fs-11); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-fg-secondary); font-weight: var(--fw-bold); }
-.kw-vital .vv { font-family: var(--font-mono); font-size: 15px; font-weight: var(--fw-semi); color: var(--color-fg-primary); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kw-vital .vv { font-family: var(--font-mono); font-size: var(--fs-15); font-weight: var(--fw-semi); color: var(--color-fg-primary); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .kw-meter-wrap { position: relative; margin-top: 18px; }
 .kw-meter { height: 7px; border-radius: 9999px; background: var(--color-bg-page); border: 1px solid var(--color-border-divider); overflow: hidden; }
@@ -871,7 +873,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-meter-mark { position: absolute; top: -2px; width: 1px; height: 11px; background: rgb(var(--color-status-warn-glow) / 0.75); transform: translateX(-50%); pointer-events: none; }
 .kw-meter-mark-lbl {
   position: absolute; bottom: 11px; left: 50%; transform: translateX(-50%);
-  font-style: normal; font-size: 8.5px; letter-spacing: 0.04em; white-space: nowrap;
+  font-style: normal; font-size: var(--fs-9); letter-spacing: 0.04em; white-space: nowrap;
   color: var(--color-status-warn); opacity: 0.85;
 }
 .kw-ctx-tok { display: flex; align-items: baseline; gap: 5px; margin-top: 8px; font-size: var(--fs-12); }
@@ -909,14 +911,14 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   padding: 8px 10px;
   border-radius: var(--r-1);
   background: var(--color-bg-elevated);
-  border: 1px solid #2a1a14;
+  border: 1px solid var(--border-main);
   font-size: var(--fs-13);
   color: var(--color-fg-primary);
   text-align: left;
   cursor: pointer;
   transition: background .15s, border-color .15s;
 }
-.kw-tasktag:hover { background: var(--color-bg-hover); border-color: #3a251c; }
+.kw-tasktag:hover { background: var(--color-bg-hover); border-color: var(--border-main-hover); }
 .kw-tasktag:focus-visible { outline: 2px solid var(--color-accent-fg-dim); outline-offset: 2px; }
 .kw-tasktag-row {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -989,7 +991,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   overflow: hidden;
   color: var(--color-fg-secondary);
   font-size: var(--fs-12);
-  font-weight: 400;
+  font-weight: var(--fw-reg);
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1082,7 +1084,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-att-list { display: flex; flex-direction: column; gap: 7px; }
 .kw-att-item {
   display: flex; align-items: center; gap: 8px;
-  padding: 9px 11px; border-radius: var(--r-1); font-size: 12.5px;
+  padding: 9px 11px; border-radius: var(--r-1); font-size: var(--fs-12);
   background: var(--color-bg-elevated); border: 1px solid var(--color-border-divider); color: var(--color-fg-primary);
 }
 .kw-att-item.bad { border-color: rgb(var(--color-status-err-glow) / 0.35); background: rgb(var(--color-status-err-glow) / 0.1); color: var(--color-fg-primary); }
@@ -1109,11 +1111,11 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   margin-top: 10px;
 }
 .kw-compact-btn {
-  background: #8a6a28; color: #0a0706; border-radius: 999px;
+  background: var(--color-accent-fg); color: var(--bg-deep); border-radius: 999px;
   padding: 6px 10px;
   font-size: var(--fs-11);
 }
-.kw-compact-btn:hover { background: #a68233; color: #0a0706; }
+.kw-compact-btn:hover { background: var(--accent-brass-hover); color: var(--bg-deep); }
 .kw-compact-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ════ B3 — message bubbles: asymmetric "speech tail" + emboss ═══════
@@ -1181,21 +1183,21 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
  * Keeper-v2 design-matched card styles for the new block types. Scoped to
  * .kw-chat so only the workspace conversation surface is affected; other chat
  * surfaces keep the generic chat-blocks-v2.css treatment.
- * Palette uses the dark-fantasy/brass theme: #0a0706 deep, #14100d card,
- * #2a1a14 border, #8a6a28 brass-dim, #c4a265 brass, #6a5848 muted,
- * #b8a488 primary text.
+ * Palette uses the dark-fantasy/brass theme: var(--bg-deep) deep, var(--bg-panel) card,
+ * var(--border-main) border, var(--color-accent-fg) brass-dim, var(--accent-brass-bright) brass, var(--color-fg-muted) muted,
+ * var(--text-primary) primary text.
  */
 
 .kw-chat .chat-block-chart {
-  background: #14100d;
-  border: 1px solid #2a1a14;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-main);
   border-radius: var(--r-2);
   padding: 12px 14px 10px;
 }
 .kw-chat .chat-block-chart-title {
   font-family: var(--font-mono);
   font-size: var(--fs-13);
-  color: #b8a488;
+  color: var(--text-primary);
   margin-bottom: 10px;
 }
 .kw-chat .chat-block-chart-svg {
@@ -1204,18 +1206,18 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   display: block;
 }
 .kw-chat .chat-block-chart-grid {
-  stroke: #2a1a14;
+  stroke: var(--border-main);
   stroke-width: 1;
 }
 .kw-chat .chat-block-chart-axis {
-  stroke: #3b3d4e;
+  stroke: var(--color-border-strong);
   stroke-width: 1;
 }
 .kw-chat .chat-block-chart-ytick,
 .kw-chat .chat-block-chart-xlabel {
   font-family: var(--font-mono);
-  font-size: 10px;
-  fill: #6a5848;
+  font-size: var(--fs-10);
+  fill: var(--color-fg-muted);
 }
 .kw-chat .chat-block-chart-legend {
   display: flex;
@@ -1228,7 +1230,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   align-items: center;
   gap: 5px;
   font-size: var(--fs-11);
-  color: #b8a488;
+  color: var(--text-primary);
 }
 .kw-chat .chat-block-chart-legend-swatch {
   width: 10px;
@@ -1247,21 +1249,21 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   align-items: center;
   gap: 7px;
   padding: 7px 13px;
-  border: 1px solid #2a1a14;
+  border: 1px solid var(--border-main);
   border-radius: 999px;
-  background: #14100d;
-  color: #b8a488;
+  background: var(--bg-panel);
+  color: var(--text-primary);
   font-size: var(--fs-13);
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s;
 }
 .kw-chat .chat-block-suggestion-chip:hover {
-  border-color: #8a6a28;
-  color: #c4a265;
+  border-color: var(--color-accent-fg);
+  color: var(--accent-brass-bright);
 }
 .kw-chat .chat-block-suggestion-pre {
-  color: #c4a265;
-  font-size: 11px;
+  color: var(--accent-brass-bright);
+  font-size: var(--fs-11);
 }
 .kw-chat .chat-block-suggestion-label {
   line-height: 1.3;
@@ -1272,16 +1274,16 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   align-items: flex-start;
   gap: 11px;
   padding: 11px 13px;
-  border: 1px solid #2a1a14;
+  border: 1px solid var(--border-main);
   border-radius: var(--r-2);
-  background: #14100d;
+  background: var(--bg-panel);
   text-decoration: none;
   transition: border-color 0.18s, background 0.18s;
   max-width: 520px;
 }
 .kw-chat .chat-block-issue:hover {
-  border-color: #8a6a28;
-  background: #1b1612;
+  border-color: var(--color-accent-fg);
+  background: var(--bg-panel-alt);
 }
 .kw-chat .chat-block-issue-icon {
   flex: none;
@@ -1290,11 +1292,11 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #2a1a14;
+  border: 1px solid var(--border-main);
   border-radius: var(--r-1);
-  background: #0a0706;
-  color: #c4a265;
-  font-size: 14px;
+  background: var(--bg-deep);
+  color: var(--accent-brass-bright);
+  font-size: var(--fs-14);
 }
 .kw-chat .chat-block-issue-body {
   display: flex;
@@ -1306,12 +1308,12 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-chat .chat-block-issue-repo {
   font-family: var(--font-mono);
   font-size: var(--fs-11);
-  color: #6a5848;
+  color: var(--color-fg-muted);
 }
 .kw-chat .chat-block-issue-title {
   font-size: var(--fs-13);
   font-weight: var(--fw-med);
-  color: #b8a488;
+  color: var(--text-primary);
   line-height: 1.4;
   white-space: nowrap;
   overflow: hidden;
@@ -1322,34 +1324,34 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   align-items: center;
   gap: 8px;
   font-size: var(--fs-11);
-  color: #6a5848;
+  color: var(--color-fg-muted);
 }
 .kw-chat .chat-block-issue-status {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 1px 6px;
   border-radius: var(--r-1);
-  border: 1px solid #2a1a14;
+  border: 1px solid var(--border-main);
 }
 .kw-chat .chat-block-issue-status.open {
-  color: #5a7a3a;
-  border-color: color-mix(in oklab, #5a7a3a 40%, transparent);
-  background: color-mix(in oklab, #5a7a3a 10%, transparent);
+  color: var(--status-ok);
+  border-color: color-mix(in oklab, var(--status-ok) 40%, transparent);
+  background: color-mix(in oklab, var(--status-ok) 10%, transparent);
 }
 .kw-chat .chat-block-issue-status.closed {
-  color: #a01818;
-  border-color: color-mix(in oklab, #a01818 40%, transparent);
-  background: color-mix(in oklab, #a01818 10%, transparent);
+  color: var(--status-bad);
+  border-color: color-mix(in oklab, var(--status-bad) 40%, transparent);
+  background: color-mix(in oklab, var(--status-bad) 10%, transparent);
 }
 .kw-chat .chat-block-issue-go {
   flex: none;
-  color: #6a5848;
-  font-size: 13px;
+  color: var(--color-fg-muted);
+  font-size: var(--fs-13);
 }
 .kw-chat .chat-block-issue:hover .chat-block-issue-go {
-  color: #c4a265;
+  color: var(--accent-brass-bright);
 }
 
 /* Artifact card — restyled to match the v2 file-card design inside workspace. */
@@ -1357,8 +1359,8 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
-  background: #14100d;
-  border: 1px solid #2a1a14;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-main);
   border-radius: var(--r-2);
   padding: 11px 13px;
   gap: 12px;
@@ -1366,31 +1368,31 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-chat .chat-block-artifact-icon {
   width: 36px;
   height: 36px;
-  border: 1px solid #2a1a14;
+  border: 1px solid var(--border-main);
   border-radius: var(--r-1);
-  background: #0a0706;
-  color: #c4a265;
+  background: var(--bg-deep);
+  color: var(--accent-brass-bright);
   font-size: var(--fs-lg);
 }
 .kw-chat .chat-block-artifact-name {
-  color: #b8a488;
+  color: var(--text-primary);
 }
 .kw-chat .chat-block-artifact-sub {
-  color: #6a5848;
+  color: var(--color-fg-muted);
 }
 .kw-chat .chat-block-artifact-btn {
-  background: #0a0706;
-  border: 1px solid #2a1a14;
-  color: #b8a488;
+  background: var(--bg-deep);
+  border: 1px solid var(--border-main);
+  color: var(--text-primary);
   white-space: nowrap;
 }
 .kw-chat .chat-block-artifact-btn:first-of-type {
   margin-left: auto;
 }
 .kw-chat .chat-block-artifact-btn:hover:not(:disabled) {
-  border-color: #8a6a28;
-  color: #c4a265;
-  background: #1b1612;
+  border-color: var(--color-accent-fg);
+  color: var(--accent-brass-bright);
+  background: var(--bg-panel-alt);
 }
 .kw-chat .chat-block-artifact-btn:disabled {
   opacity: 0.45;

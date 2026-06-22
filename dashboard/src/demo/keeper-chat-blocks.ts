@@ -84,16 +84,21 @@ const userEntry: KeeperConversationEntry = {
 function Demo() {
   return html`
     <div
-      class="min-h-screen bg-[#0a0706] py-8"
+      class="min-h-screen py-8"
+      style="background: var(--bg-deep);"
       data-keeper-chat-layout="workspace"
     >
       <div class="mx-auto max-w-[700px] px-4">
         <h1
-          class="mb-6 text-center font-mono text-xs uppercase tracking-[0.2em] text-[#6a5848]"
+          class="mb-6 text-center font-mono text-xs uppercase tracking-[0.2em]"
+          style="color: var(--text-dim);"
         >
           Keeper Chat Blocks Demo
         </h1>
-        <div class="kw-chat rounded-[var(--r-2)] border border-[#2a1a14] bg-[#0f1015] p-4">
+        <div
+          class="kw-chat rounded-[var(--r-2)] border p-4"
+          style="background: var(--bg-panel); border-color: var(--border-main);"
+        >
           <${ChatTranscript}
             entries=${[assistantEntry, userEntry]}
             emptyText="No messages"

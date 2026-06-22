@@ -184,7 +184,7 @@ let with_temp_masc_base f =
        | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
        | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
       cleanup_dir base_path)
-    f
+    (fun () -> f base_path)
 
 (* ── 1. Risk classification ──────────────────────────────── *)
 
@@ -1336,20 +1336,20 @@ let test_callback_always_approve_respects_forbidden () =
       | None -> Alcotest.fail "destructive tool callback did not suspend for approval")
 
 let test_read_recent_audit_filters_after_wide_scan () =
-  with_temp_masc_base @@ fun () ->
+  with_temp_masc_base @@ fun base_path ->
   let keeper_name = "audit-target-keeper" in
-  AQ.audit_approval_event ~event_type:"resolved" ~id:"target-audit"
+  AQ.audit_approval_event ~base_path ~event_type:"resolved" ~id:"target-audit"
     ~keeper_name ~tool_name:"tool_search_files" ~risk_level:AQ.Medium
     ~selected_model:"openai:gpt-5.4"
     ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ();
   for i = 1 to 32 do
-    AQ.audit_approval_event ~event_type:"resolved"
+    AQ.audit_approval_event ~base_path ~event_type:"resolved"
       ~id:(Printf.sprintf "other-audit-%02d" i)
       ~keeper_name:(Printf.sprintf "busy-keeper-%02d" i)
       ~tool_name:"tool_search_files" ~risk_level:AQ.Medium
       ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ()
   done;
-  match AQ.read_recent_audit ~keeper_name ~n:1 () with
+  match AQ.read_recent_audit ~base_path ~keeper_name ~n:1 () with
   | [ json ] ->
       Alcotest.(check string) "target approval survives unrelated tail"
         "target-audit"

@@ -11,7 +11,6 @@ open Keeper_meta_contract
 open Keeper_meta_store
 open Keeper_types_profile
 open Keeper_context_runtime
-module Social = Keeper_social_model
 include Keeper_turn_helpers
 include Keeper_turn_liveness
 include Keeper_turn_runtime_budget
@@ -45,23 +44,12 @@ let run_keeper_cycle
      so dashboards/tests can inspect the same routing contract for blocked
      phases like Overflowed. *)
   let registry_base_path = config.base_path in
-  let previous_social_state = Social.previous_state_of_meta meta in
   (* Decide turn_id at function entry so phase-gate / runtime-routing /
      livelock skip paths can include it in the receipt and observability
      stream.  Previously this was [let turn_id = ...] only after several
      pre-dispatch checks (see turn_livelock guard below), leaving silent
      skip paths without a turn correlator. *)
   let keeper_turn_id = meta.runtime.usage.total_turns + 1 in
-  (* RFC-0233 §7.2 (mint once, thread down): mint the turn's join key from this
-     single pre-turn snapshot — the same (trace_id, total_turns + 1) pair the
-     manifest and Turn_record stamp — and thread it into the success handler so
-     a keeper-authored board post carries [origin.turn_ref]. Never re-derive at
-     a downstream seam from a post-lifecycle meta (trace_id rotates on handoff). *)
-  let turn_ref =
-    Ids.Turn_ref.make
-      ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-      ~absolute_turn:keeper_turn_id
-  in
   let runtime_manifest_context : Keeper_runtime_manifest.turn_context =
     { manifest_keeper_name = meta.name
     ; manifest_agent_name = Some meta.agent_name
@@ -746,15 +734,6 @@ let run_keeper_cycle
                     Keeper_metrics.(to_string OasExecutionErrors)
                     ~labels:[ "keeper", meta.name; "phase", Keeper_oas_execution_error_phase.(to_label Cycle_failed) ]
                     ();
-                  let social_state, social_transition_reason =
-                    Social.derive_failure_state
-                      ~meta
-                      ~observation
-                      ~previous_state:previous_social_state
-                      ~is_auto_recoverable
-                      ~sdk_error:(Some err)
-                      ~reason:e_str
-                  in
                   let failure_meta_base =
                     match turn_state.paused_meta_override with
                     | Some paused_meta -> paused_meta
@@ -766,9 +745,6 @@ let run_keeper_cycle
                       ~latency_ms
                       ~observation
                       ~reason:e_str
-                      ~social_state
-                      ~social_transition_reason:
-                        (Social.transition_reason_to_string social_transition_reason)
                       ~sdk_error:err
                       ()
                   in
@@ -876,7 +852,6 @@ let run_keeper_cycle
                     ?degraded_retry_runtime
                     ?fallback_reason:
                       (Option.map EC.degraded_retry_reason_to_string fallback_reason)
-                    ~social_state
                     ~error:e_str
                     ~terminal_reason
                     ();
@@ -983,7 +958,6 @@ dominant source of the observed CAS race exhaustion after
                       ~meta
                       ~turn_ctx_cell
                       ~observation
-                      ~previous_social_state
                       ~final_execution
                       ~latency_ms
                       ~degraded_retry_applied
@@ -992,7 +966,6 @@ dominant source of the observed CAS race exhaustion after
                       ~last_provider_timeout_budget:turn_state.last_provider_timeout_budget
                       ~current_turn_blocker_info:turn_state.current_turn_blocker_info
                       ~keeper_turn_id
-                      ~turn_ref
                       result
                   in
                   (* Cycle 45: KeeperTaskAcquisition.tla TurnComplete post-action. *)

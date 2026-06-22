@@ -23,7 +23,7 @@ let contains haystack needle =
   nl = 0 || loop 0
 
 let sample =
-  {|{"ts_unix": 100.5, "id": "d1", "ts": "2020-01-01T00:00:00Z", "speech_act": "decide", "channel": "board", "current_intention": "ship", "duration_ms": 42, "evidence_refs": ["e1", "e2"]}|}
+  {|{"ts_unix": 100.5, "id": "d1", "ts": "2020-01-01T00:00:00Z", "outcome": "decide", "channel": "board", "duration_ms": 42, "evidence_refs": ["e1", "e2"]}|}
 
 let test_parse_fields () =
   match F.parse_decision_event ~keeper_name:"fallback-k" sample with
@@ -33,7 +33,7 @@ let test_parse_fields () =
       check string "ts" "2020-01-01T00:00:00Z" ev.F.ts;
       check (float 0.0001) "ts_unix" 100.5 ev.F.ts_unix;
       check string "keeper falls back to argument" "fallback-k" ev.F.keeper;
-      check string "decision_type from speech_act" "decide" ev.F.decision_type;
+      check string "decision_type from outcome" "decide" ev.F.decision_type;
       check (option (float 0.0001)) "duration_ms" (Some 42.0) ev.F.duration_ms;
       check (list string) "evidence_refs" [ "e1"; "e2" ] ev.F.evidence_refs;
       check bool "summary mentions channel" true (contains ev.F.summary "via board")

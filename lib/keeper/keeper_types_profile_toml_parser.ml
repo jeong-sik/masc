@@ -49,20 +49,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   in
   let result =
     Result.bind result (fun () ->
-        match str "social_model" with
-        | Some raw -> (
-            match normalize_social_model_opt (Some raw) with
-            | Some _ -> Ok ()
-            | None ->
-                Error
-                  (Printf.sprintf
-                     "invalid social_model '%s' (allowed: %s)"
-                     raw
-                     (String.concat ", " valid_social_model_strings)))
-        | None -> Ok ())
-  in
-  let result =
-    Result.bind result (fun () ->
         match str "sandbox_profile" with
         | Some raw -> (
             match sandbox_profile_of_string raw with
@@ -179,7 +165,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         max_turns_per_call = int_ "max_turns_per_call";
         max_turns_per_call_scheduled_autonomous =
           int_ "max_turns_per_call_scheduled_autonomous";
-        social_model = normalize_social_model_opt (str "social_model");
         oas_env = extract_oas_env_from_doc doc;
         unknown_toml_keys = [];
       })
@@ -218,7 +203,6 @@ let parsed_field_key_names =
   ; "always_approve"
   ; "max_turns_per_call"
   ; "max_turns_per_call_scheduled_autonomous"
-  ; "social_model"
   ]
 
 (** Canonical TOML key names used by [detect_unknown_keeper_toml_keys].
@@ -260,7 +244,6 @@ let canonical_keeper_toml_key_names =
   ; "always_approve"
   ; "max_turns_per_call"
   ; "max_turns_per_call_scheduled_autonomous"
-  ; "social_model"
   ]
 
 let loader_level_keeper_toml_key_names = [ "base" ]
@@ -398,7 +381,6 @@ let merge_keeper_profile_defaults
     per_provider_timeout_state;
     per_provider_timeout;
     always_approve = prefer overlay.always_approve base.always_approve;
-    social_model = prefer overlay.social_model base.social_model;
     max_turns_per_call = prefer overlay.max_turns_per_call base.max_turns_per_call;
     max_turns_per_call_scheduled_autonomous =
       prefer overlay.max_turns_per_call_scheduled_autonomous

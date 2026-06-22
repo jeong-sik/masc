@@ -1,6 +1,15 @@
 # Keeper Social Model FSM
 
-**Status**: Draft  
+> **SUPERSEDED — RFC-0276 (Phase 2b, 2026-06-22).** The keeper social model and
+> its `social_model` FSM-dispatch direction (#7362) are purged: the
+> self-declared header protocol (`SOCIAL_MODEL`/`SPEECH_ACT`/`DELIVERY_SURFACE`),
+> the `social_state` record, the `speech_act`/`delivery_surface` enums, the
+> registry, and the sole `bdi_speech_v1` implementation are removed. No-progress
+> detection now runs on the runtime-observed `turn_delivery` classification
+> (`keeper_unified_turn_success`). This document is retained as a historical
+> record of the abandoned design.
+
+**Status**: Superseded by RFC-0276  
 **Date**: 2026-04-15  
 **Scope**: Keeper social-model abstraction and implementation contract  
 **One sentence**: Promote `social_model` from a runtime tag into a real model-specific FSM dispatch surface.

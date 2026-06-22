@@ -294,7 +294,6 @@
   masc.keeper_usage_trust
   masc.keeper_event_bus
   masc.keeper_failure_policy
-  masc.keeper_social
   ;; Runtime_provider_labels extracted to lib/runtime_provider_labels/.
   ;; Leaf boundary over agent_sdk.llm_provider canonical provider labels.
   masc.runtime_provider_labels

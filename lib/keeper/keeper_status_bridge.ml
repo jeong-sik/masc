@@ -231,9 +231,6 @@ let attention_fields_json (config : Workspace_utils.config) (meta : keeper_meta)
     Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
   in
   let runtime_blocker = runtime_blocker_surface_opt config meta in
-  let social_model_recognized =
-    Keeper_social_model.is_known_social_model meta.social_model
-  in
   let needs_attention, attention_reason, next_human_action =
     if pending_approval_count > 0
     then true, Some "approval_pending", Some "resolve_approval"
@@ -253,8 +250,6 @@ let attention_fields_json (config : Workspace_utils.config) (meta : keeper_meta)
         true, Some "fiber_unresolved", Some "inspect_turn_finalization"
       | Some _ -> true, Some "runtime_blocked", Some "inspect_runtime_blocker"
       | None when meta.paused -> true, Some "paused", Some "resume_or_review"
-      | None when not social_model_recognized ->
-        true, Some "social_model_fallback", Some "review_social_model"
       | None -> false, None, None)
   in
   [ "needs_attention", `Bool needs_attention
@@ -325,42 +320,6 @@ let trimmed_string_json value =
   if trimmed = "" then `Null else `String trimmed
 ;;
 
-let social_model_resolution_fields_json (meta : keeper_meta) =
-  let resolved = Keeper_social_model.normalize_social_model meta.social_model in
-  let recognized = Keeper_social_model.is_known_social_model meta.social_model in
-  [ "social_model", `String resolved
-  ; "configured_social_model", trimmed_string_json meta.social_model
-  ; "social_model_recognized", `Bool recognized
-  ; ( "social_model_fallback"
-    , Json_util.string_opt_to_json (Keeper_social_model.fallback_social_model meta.social_model) )
-  ]
-;;
-
-let social_runtime_fields_json (meta : keeper_meta) =
-  let delivery_surface_view =
-    Keeper_social_model.delivery_surface_view_of_meta meta
-    |> Option.map Keeper_social_model.delivery_surface_to_string
-  in
-  let delivery_surface_view_source =
-    Keeper_social_model.delivery_surface_view_source_of_meta meta
-  in
-  social_model_resolution_fields_json meta
-  @ [ "active_model_label", `Null
-    ; "last_model_used_label", `Null
-    ; "last_speech_act", trimmed_string_json meta.runtime.last_speech_act
-    ; "delivery_surface_view", Json_util.string_opt_to_json delivery_surface_view
-    ; ( "delivery_surface_view_source"
-      , Json_util.string_opt_to_json delivery_surface_view_source )
-    ; ( "last_social_transition_reason"
-      , trimmed_string_json meta.runtime.last_social_transition_reason )
-    ; ( "last_blocker"
-      , match meta.runtime.last_blocker with
-        | Some info -> blocker_info_to_json info
-        | None -> `Null )
-    ; "last_need", trimmed_string_json meta.runtime.last_need
-    ]
-;;
-
 let runtime_surface_json config (meta : keeper_meta) =
   let keepalive_running = runtime_keepalive_running config meta in
   let fiber_health =
@@ -380,7 +339,6 @@ let runtime_surface_json config (meta : keeper_meta) =
      ; "fiber_health", `String (Keeper_status_runtime.string_of_fiber_health fiber_health)
      ; "last_runtime_attempt", last_runtime_attempt_json meta
      ]
-     @ social_runtime_fields_json meta
      @ runtime_state_fields_json config meta
      @ runtime_blocker_fields_json config meta
      @ attention_fields_json config meta)

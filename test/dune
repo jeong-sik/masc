@@ -1880,10 +1880,6 @@
 
 (include stanzas/test_snapshot_size_cap.inc)
 
-(include stanzas/test_social_state_cap.inc)
-
-(include stanzas/test_social_state_cap_on_load.inc)
-
 (include stanzas/test_sse_retry_ssot.inc)
 
 (include stanzas/test_sse_storm_e2e.inc)

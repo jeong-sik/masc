@@ -163,7 +163,6 @@ type keeper_profile_defaults =
   per_provider_timeout_state : per_provider_timeout_state;
   per_provider_timeout : float option;
   always_approve : bool option;
-  social_model : string option;
   max_turns_per_call : int option;
   max_turns_per_call_scheduled_autonomous : int option;
   oas_env : (string * string) list;
@@ -173,8 +172,6 @@ val empty_keeper_profile_defaults : keeper_profile_defaults
 val dedupe_keep_order : 'a list -> 'a list
 val normalize_name_list : string list -> string list
 val normalize_name_list_opt : string list -> string list option
-val normalize_social_model_opt : string option -> string option
-val valid_social_model_strings : string list
 val lower_string_list_opt : string list -> string list option
 val first_some : 'a option -> 'a option -> 'a option
 val normalize_per_provider_timeout_opt :

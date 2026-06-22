@@ -57,12 +57,6 @@ val attention_fields_json :
 val attention_fields_with_runtime_trust :
   (string * Yojson.Safe.t) list -> Yojson.Safe.t -> (string * Yojson.Safe.t) list
 
-val social_model_resolution_fields_json :
-  keeper_meta -> (string * Yojson.Safe.t) list
-
-val social_runtime_fields_json :
-  keeper_meta -> (string * Yojson.Safe.t) list
-
 val runtime_surface_json :
   Workspace_utils.config -> keeper_meta -> Yojson.Safe.t
 

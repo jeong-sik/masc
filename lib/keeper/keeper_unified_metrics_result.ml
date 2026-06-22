@@ -1,14 +1,13 @@
 (** Success-path metric update for unified keeper cycle, extracted from
     keeper_unified_metrics.ml.
 
-    Pure write-only side-effect: updates keeper_meta runtime/social
-    fields based on a successful turn result. *)
+    Pure write-only side-effect: updates keeper_meta runtime fields
+    based on a successful turn result. *)
 
 open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
-module Social = Keeper_social_model
 
 include Keeper_unified_metrics_support
 include Keeper_unified_metrics_json_support
@@ -17,8 +16,6 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     ~(observation : Keeper_world_observation.world_observation)
     ?(is_autonomous_turn = true)
     ?(update_proactive_rt = true)
-    ?social_state
-    ?social_transition_reason
     ?(context_max = 0)
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
@@ -83,18 +80,6 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     has_text || has_substantive_tools || has_validated_evidence
   in
   let rt = meta.runtime in
-  let social_state : Social.social_state =
-    Option.value social_state
-      ~default:
-        Social.
-          {
-            social_model = meta.social_model;
-            blocker = None;
-            need = None;
-            speech_act = Social.Inform;
-            delivery_surface = Social.Visible_reply;
-          }
-  in
   (* #10474: proactive outcome counter for successful cycles. *)
   if update_proactive_rt && is_scheduled_autonomous_cycle then begin
     let outcome =
@@ -224,19 +209,11 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
         (if is_autonomous_turn && has_substantive_tools
          then now_iso ()
          else rt.last_autonomous_action_at);
-      last_speech_act = Social.speech_act_to_string social_state.speech_act;
-      last_social_transition_reason =
-        (match social_transition_reason with
-         | Some reason -> String.trim reason
-         | None -> rt.last_social_transition_reason);
       (* A successful turn means the keeper is not blocked.
          Clear unconditionally so stale error strings from previous
          failures do not persist in the runtime JSON and mislead the
-         dashboard into showing BLOCKED status.  The social model's
-         blocker field is a protocol-level signal; runtime last_blocker
-         tracks whether the keeper can make progress. *)
+         dashboard into showing BLOCKED status. *)
       last_blocker = None;
-      last_need = Option.value ~default:"" social_state.need;
       last_turn_tool_calls = [];
     };
   } in

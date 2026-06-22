@@ -782,9 +782,6 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
               Progress.stop_tracking turn_task_id;
               tool_result_error user_message
             | Ok result ->
-              let explicit_accountability_claim =
-                Keeper_social_model.extract_accountability_claim result
-              in
               (try
                  let _ = Trajectory.finalize trajectory_acc
                    Trajectory.Completed in
@@ -906,42 +903,6 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
                 ~turn_generation:lifecycle.turn_generation
                 ~compaction:lifecycle.compaction
                 ~handoff_json:lifecycle.handoff_json;
-              (match explicit_accountability_claim with
-              | Some claim ->
-                  let trace_id =
-                    Keeper_id.Trace_id.to_string updated_meta.runtime.trace_id
-                  in
-                  let tool_names = Keeper_agent_result.tool_names result in
-                  let strong_evidence =
-                    tool_names
-                    |> List.exists (fun tool_name ->
-                           let trimmed = String.trim tool_name in
-                           trimmed <> "")
-                  in
-                  let tool_refs =
-                    tool_names
-                    |> List.filter_map (fun tool_name ->
-                           let trimmed = String.trim tool_name in
-                           if trimmed = "" then None
-                           else Some ("tool:" ^ trimmed))
-                  in
-                  let turn_refs =
-                    [ Printf.sprintf "turn:%s:%d" trace_id
-                        updated_meta.runtime.usage.total_turns ]
-                  in
-                  Keeper_accountability.record_completion_claim ctx.config
-                    ~keeper_name:updated_meta.name
-                    ~agent_name:updated_meta.agent_name
-                    ~trace_id
-                    ~turn_number:updated_meta.runtime.usage.total_turns
-                    ~subject:claim.subject
-                    ?task_id:claim.task_id
-                    ~evidence_refs:claim.evidence_refs
-                    ~surface:"keeper_msg"
-                    ~strong_evidence
-                    ~strong_evidence_refs:(tool_refs @ turn_refs)
-                    ()
-              | None -> ());
               start_keepalive ctx updated_meta;
               Progress.Tracker.complete turn_tracker
                 ~message:(Printf.sprintf "Turn completed: %d tool calls" (Keeper_agent_result.tool_call_count result)) ();

@@ -134,7 +134,6 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.keeper_synthetic_marker",
     "masc.keeper_oas_timeout_message",
     "masc.keeper_tool_response",
-    "masc.keeper_social_model_types",
     "masc.keeper_discovered_tools",
     "masc.keeper_tool_execute_timeout",
     "masc.keeper_tool_execute_shell_ir",

@@ -259,7 +259,6 @@ let handle_keeper_list ctx args : tool_result =
                 then `Null
                 else `String m.runtime.proactive_rt.last_preview);
             ]
-            @ Keeper_status_bridge.social_runtime_fields_json m
             @ runtime_blocker_fields
             @ attention_fields @ [
               ("continuity_summary",

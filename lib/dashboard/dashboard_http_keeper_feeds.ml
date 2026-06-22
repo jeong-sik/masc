@@ -378,13 +378,11 @@ let parse_decision_event ~keeper_name line : decision_event option =
       let raw = str "ts" in
       if raw <> "" then raw else k2_iso8601_of_unix ts_unix
     in
+    (* RFC-0276: the social-model "speech_act" decision-JSON key is no longer
+       emitted; decision_type now derives from the turn outcome. *)
     let decision_type =
-      let sa = str "speech_act" in
-      if sa <> ""
-      then sa
-      else (
-        let outcome = str "outcome" in
-        if outcome <> "" then outcome else "turn")
+      let outcome = str "outcome" in
+      if outcome <> "" then outcome else "turn"
     in
     let terminal_reason_code = terminal_reason_code_of_decision_json json in
     let duration_ms =

@@ -104,11 +104,7 @@ let keeper_bdi_snapshot_json (config : Workspace.config) (name : string)
                  Some label
              | None -> None)
       in
-      let need =
-        match metric_field "need" with
-        | Some value -> Some value
-        | None -> nonempty_string_opt m.runtime.last_need
-      in
+      let need = metric_field "need" in
       (`OK,
        `Assoc
          [

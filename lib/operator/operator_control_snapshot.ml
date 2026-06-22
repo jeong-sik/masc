@@ -342,13 +342,6 @@ let keepers_json
                       Json_util.get_string audit_json "tool_audit_at"
                     in
                     dt_audit := Time_compat.now () -. t_audit;
-                    let delivery_surface_view =
-                      Keeper_social_model.delivery_surface_view_of_meta meta
-                      |> Option.map Keeper_social_model.delivery_surface_to_string
-                    in
-                    let delivery_surface_view_source =
-                      Keeper_social_model.delivery_surface_view_source_of_meta meta
-                    in
                     let surface_status =
                       if not agent_exists
                       then "offline"
@@ -479,20 +472,6 @@ let keepers_json
                              , Json_util.string_opt_to_json latest_action_source )
                            ; "tool_audit_source", Json_util.string_opt_to_json tool_audit_source
                            ; "tool_audit_at", Json_util.string_opt_to_json tool_audit_at
-                           ; ( "last_speech_act"
-                             , Json_util.string_opt_to_json
-                                 (let value = String.trim meta.runtime.last_speech_act in
-                                  if value = "" then None else Some value) )
-                           ; ( "delivery_surface_view"
-                             , Json_util.string_opt_to_json delivery_surface_view )
-                           ; ( "delivery_surface_view_source"
-                             , Json_util.string_opt_to_json delivery_surface_view_source )
-                           ; ( "last_social_transition_reason"
-                             , Json_util.string_opt_to_json
-                                 (let value =
-                                    String.trim meta.runtime.last_social_transition_reason
-                                  in
-                                  if value = "" then None else Some value) )
                            ; "proactive_enabled", `Bool meta.proactive.enabled
                            ; "proactive_idle_sec", `Int meta.proactive.idle_sec
                            ; "proactive_cooldown_sec", `Int meta.proactive.cooldown_sec

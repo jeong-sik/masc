@@ -8,7 +8,6 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
-module Social = Keeper_social_model
 
 include Keeper_unified_metrics_support
 include Keeper_unified_metrics_json_support
@@ -24,7 +23,6 @@ let append_decision_record
     ?degraded_retry_runtime
     ?fallback_reason
     ?turn_mode
-    ?social_state
     ?deliberation_execution
     ?(result : Keeper_agent_run.run_result option = None)
     ?error
@@ -86,20 +84,6 @@ let append_decision_record
   in
   let claim_executed =
     List.exists Keeper_tool_progress.is_claim_tool_name tool_names
-  in
-  let social_fields =
-    match social_state with
-    | None -> []
-    | Some state ->
-        [
-          ("social_model", `String state.Social.social_model);
-          Json_util.string_opt_field "blocker" state.blocker;
-          Json_util.string_opt_field "need" state.need;
-          ("speech_act", `String (Social.speech_act_to_string state.speech_act));
-          ( "delivery_surface",
-            `String
-              (Social.delivery_surface_to_string state.delivery_surface) );
-        ]
   in
   let turn_mode =
     match turn_mode, result with
@@ -382,8 +366,7 @@ let append_decision_record
                 ( "coverage_reason",
                   `String (coverage_reason_of_no_result_outcome outcome) );
               ] );
-      ]
-      @ social_fields)
+      ])
   in
   try
     Keeper_types_support.append_jsonl_line

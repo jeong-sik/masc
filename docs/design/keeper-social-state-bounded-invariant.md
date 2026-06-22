@@ -1,12 +1,20 @@
 # Keeper social_state bounded invariant
 
-Status: contract + post-mortem (Gen3 → Gen15)
+> **SUPERSEDED — RFC-0276 (Phase 2b, 2026-06-22).** The `social_state` record
+> and the `Keeper_social_model_registry` are purged. The narrative-length cap
+> described here survives only as the #9933 `[masc_oas_error]` non-truncation
+> rule, re-homed next to its prefix SSOT as
+> `Keeper_internal_error.cap_blocker_detail` and applied to `last_blocker.detail`
+> (`keeper_unified_metrics_failure`). The `SocialStateCap` TLA+ spec, the
+> `cap_social_state` call sites, and the `Keeper_social_model_types` budget
+> constants are removed. This document is retained as a historical record of the
+> post-mortem.
+
+Status: Superseded by RFC-0276 (historical post-mortem)
 
 See also:
 
-- `docs/design/keeper-social-model-inventory.md`
 - `docs/design/keeper-social-model-fsm.md`
-- `specs/social-state-cap/SocialStateCap.tla`
 
 ## Contract
 

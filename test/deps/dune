@@ -105,7 +105,6 @@
   (re_export masc.keeper_event_bus)
   (re_export masc.keeper_toml)
   (re_export masc.keeper_failure_policy)
-  (re_export masc.keeper_social)
   ;; Model inference metrics + runtime provider label leaves.
   (re_export masc.runtime_provider_labels)
   (re_export masc.model_inference_metrics)

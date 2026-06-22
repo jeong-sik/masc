@@ -457,7 +457,6 @@ goal = "analyze logs"
 short_goal = "current session"
 mid_goal = "build patterns"
 long_goal = "continuous improvement"
-social_model = "magentic_ledger_v1"
 will = "detect issues"
 needs = "log access"
 desires = "low false positives"
@@ -477,8 +476,6 @@ active_goal_ids = ["goal-runtime", "goal-masc"]
     | Ok d ->
       check (option string) "persona_name" (Some "analyst") d.persona_name;
       check (option string) "goal" (Some "analyze logs") d.goal;
-      check (option string) "social_model" (Some "magentic_ledger_v1")
-        d.social_model;
       check (option string) "will" (Some "detect issues") d.will;
       check int "mention_targets" 2 (List.length d.mention_targets);
       check (option bool) "proactive" (Some true) d.proactive_enabled;
@@ -502,27 +499,6 @@ proactive_idle_sec = 120
        | Error msg ->
            check bool "mentions missing cooldown" true
              (contains_substring msg "proactive_cooldown_sec is missing"))
-
-let test_profile_rejects_invalid_social_model () =
-  let input = {|
-[keeper]
-goal = "test"
-social_model = "experimental_v99"
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-      (match KTP.profile_defaults_of_toml doc with
-       | Ok _ -> fail "expected invalid social_model error"
-       | Error msg ->
-           check bool "mentions invalid social_model" true
-             (try
-                ignore
-                  (Str.search_forward
-                     (Str.regexp_string "invalid social_model")
-                     msg 0);
-                true
-              with Not_found -> false))
 
 let test_profile_rejects_removed_model_keys () =
   let input = {|
@@ -1139,35 +1115,6 @@ tool_denylist = ["OPERATOR_TODO: remove before spawn"]
       check bool "reports resolved payload field" true
         (contains_substring e "$.tool_denylist[0]")
 
-let test_persona_resolver_ignores_non_public_social_model_arg () =
-  with_personas_dir @@ fun personas_dir ->
-  let persona_dir = Filename.concat personas_dir "probe" in
-  mkdir_p persona_dir;
-  write_file
-    (Filename.concat persona_dir "profile.json")
-    {|
-{
-  "name": "Probe",
-  "keeper": {
-    "goal": "test persona keeper"
-  }
-}
-|};
-  match
-    KEP.resolved_keeper_args_from_persona
-      (`Assoc
-        [
-          ("persona_name", `String "probe");
-          ("social_model", `String "magentic_ledger_v1");
-        ])
-  with
-  | Error e -> fail ("resolver failed: " ^ e)
-  | Ok (_, resolved) ->
-      check bool "social_model arg omitted" true
-        (match Yojson.Safe.Util.member "social_model" resolved with
-         | `Null -> true
-         | _ -> false)
-
 let test_persona_resolver_preserves_autoboot_enabled_arg () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
@@ -1771,8 +1718,6 @@ let () =
           test_case "full" `Quick test_profile_full;
           test_case "rejects partial proactive interval pair" `Quick
             test_profile_rejects_partial_proactive_interval_pair;
-          test_case "rejects invalid social_model" `Quick
-            test_profile_rejects_invalid_social_model;
           test_case "rejects removed model keys" `Quick
             test_profile_rejects_removed_model_keys;
           test_case "rejects removed initiative keys" `Quick
@@ -1862,8 +1807,6 @@ let () =
             test_persona_resolver_reports_placeholder_defaults_source;
           test_case "persona resolver rejects placeholder in resolved payload" `Quick
             test_persona_resolver_rejects_placeholder_in_resolved_payload;
-          test_case "persona resolver ignores non-public social_model arg" `Quick
-            test_persona_resolver_ignores_non_public_social_model_arg;
           test_case "persona resolver preserves autoboot_enabled arg" `Quick
             test_persona_resolver_preserves_autoboot_enabled_arg;
           test_case "persona resolver preserves canonical tool_access and allowed_paths" `Quick

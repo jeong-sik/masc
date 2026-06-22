@@ -517,10 +517,6 @@ let pubsub_max_messages () =
 
 (** {1 Keeper Defaults} *)
 
-(** Default social model for keepers. Default: "bdi_speech_v1". *)
-let keeper_social_model () =
-  get_string ~default:"bdi_speech_v1" "MASC_KEEPER_SOCIAL_MODEL"
-
 (** Default keeper will (long-term intent). Default: "". *)
 let keeper_will () =
   get_string ~default:"" "MASC_KEEPER_WILL"

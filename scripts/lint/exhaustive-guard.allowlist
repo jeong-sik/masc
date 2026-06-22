@@ -487,7 +487,6 @@ lib/keeper/keeper_tool_execute_runtime.ml:274
 lib/keeper/keeper_tool_execute_runtime.ml:729
 lib/keeper/keeper_tool_execute_runtime.ml:744
 lib/keeper_skill_routing/keeper_skill_routing.ml:111
-lib/keeper/keeper_social_model.ml:164
 lib/keeper_state/keeper_state_machine_phase.ml::phase_of_string
 lib/keeper/keeper_status_bridge.ml:686
 lib/keeper/keeper_status_bridge.ml:703
@@ -549,12 +548,6 @@ lib/keeper/keeper_world_observation.ml:672
 lib/keeper/keeper_world_observation.ml:679
 lib/keeper/keeper_world_observation.ml:685
 lib/keeper/keeper_world_observation.ml:715
-lib/keeper/social_model/keeper_social_model_bdi_speech_v1.ml:348
-lib/keeper/social_model/keeper_social_model_bdi_speech_v1.ml:446
-lib/keeper/social_model/keeper_social_model_protocol.ml:25
-lib/keeper_social_model_types/keeper_social_model_types.ml:71
-lib/keeper_social_model_types/keeper_social_model_types.ml:97
-lib/keeper_social_model_types/keeper_social_model_types.ml:111
 lib/local/worker_container_types.ml:104
 lib/local/worker_container_types.ml:153
 lib/local/worker_container_types.ml:286

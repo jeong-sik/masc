@@ -70,8 +70,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "mention_reactive_turn_count", `Int rt.mention_reactive_turn_count
     ; "noop_turn_count", `Int rt.noop_turn_count
     ; "last_seen_message_seq", `Int rt.last_seen_message_seq
-    ; "last_speech_act", `String rt.last_speech_act
-    ; "last_social_transition_reason", `String rt.last_social_transition_reason
     ; ( "last_blocker"
       , match rt.last_blocker with
         | Some info -> blocker_info_to_json info
@@ -80,7 +78,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       , match rt.last_runtime_attempt with
         | Some record -> runtime_attempt_record_to_json record
         | None -> `Null )
-    ; "last_need", `String rt.last_need
     ; ( "last_turn_tool_calls"
       , `List
           (List.map
@@ -156,11 +153,8 @@ let fallback_canonical_keeper_meta_key_names =
   ; "mention_reactive_turn_count"
   ; "noop_turn_count"
   ; "last_seen_message_seq"
-  ; "last_speech_act"
-  ; "last_social_transition_reason"
   ; "last_blocker"
   ; "last_runtime_attempt"
-  ; "last_need"
   ; "last_turn_tool_calls"
   ; "paused"
   ; "auto_resume_after_sec"

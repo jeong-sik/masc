@@ -24,17 +24,6 @@ let normalize_name_list_opt items =
   | [] -> None
   | xs -> Some xs
 
-let normalize_social_model_opt = function
-  | None -> None
-  | Some raw -> (
-      match Keeper_social_model_types.model_id_of_string raw with
-      | Some model_id ->
-          Some (Keeper_social_model_types.model_id_to_string model_id)
-      | None -> None)
-
-let valid_social_model_strings =
-  Keeper_social_model_types.valid_model_id_strings
-
 let lower_string_list_opt = function
   | [] -> None
   | xs -> Some (List.map String.lowercase_ascii xs)

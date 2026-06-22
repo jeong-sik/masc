@@ -1052,7 +1052,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
 	                then `Null
 	                else `String m.runtime.proactive_rt.last_preview);
             ]
-            @ Keeper_status_bridge.social_runtime_fields_json m
             @ live_activity_fields
             @ [
 	              ("skill_primary", Json_util.string_opt_to_json last_skill_primary);

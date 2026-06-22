@@ -47,16 +47,30 @@ let max_timestamp (s : store) =
     (fun acc ev -> max acc ev.Chronicle_event.timestamp)
     0 s
 
-let to_gravity_item ~now_ms (ev : Chronicle_event.t) =
+let to_gravity_item ~now_ms ~store (ev : Chronicle_event.t) =
   let recency_seconds =
     let dt_ms = now_ms - ev.timestamp in
     if dt_ms < 0 then 0.0 else float_of_int dt_ms /. 1000.0
+  in
+  let freq =
+    let ev_kws = List.sort_uniq compare (event_keywords ev) in
+    let n = len store in
+    if n <= 1 then 0.0
+    else
+      let shared = ref 0 in
+      List.iter
+        (fun ev' ->
+          if ev'.Chronicle_event.id <> ev.id
+             && List.exists (fun kw -> List.mem kw (event_keywords ev')) ev_kws
+          then incr shared)
+        store;
+      float_of_int !shared /. float_of_int (n - 1)
   in
   Cognitive_gravity.{
     payload = ev;
     keywords = event_keywords ev;
     recency_seconds;
-    frequency_weight = 0.0;
+    frequency_weight = freq;
   }
 
 let take = List.take
@@ -71,7 +85,7 @@ let search (s : store) ~query ?now_ms ?limit () =
       let m = max_timestamp s in
       if m = 0 then 1 else m + 1
   in
-  let items = List.map (to_gravity_item ~now_ms:now) s in
+  let items = List.map (fun ev -> to_gravity_item ~now_ms:now ~store:s ev) s in
   let ranked = Cognitive_gravity.rank ~query items in
   let payload_pairs =
     List.map (fun (item, score) -> (item.Cognitive_gravity.payload, score)) ranked

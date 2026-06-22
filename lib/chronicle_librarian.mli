@@ -52,8 +52,8 @@ val len : store -> int
       tags ∪ summary tokens;
     - exponential recency decay relative to [now_ms] (defaults to
       the most-recent event's timestamp + 1 ms);
-    - frequency weight (always 0.0 in this slice — multi-touch
-      counting is a follow-up).
+    - frequency weight (normalised multi-touch count across the store;
+      clamped to [0.0, 1.0]).
 
     The default ranker weights (`Cognitive_gravity.default_weights`)
     apply. Custom weights are not exposed yet — clients that need

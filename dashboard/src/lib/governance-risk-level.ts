@@ -13,12 +13,36 @@ import type { KeeperApprovalRiskLevel } from '../types/governance'
 
 export type KeeperApprovalRiskVisualBand = 'bad' | 'warn' | 'accent' | 'info'
 
-const RISK_LEVEL_VALUES: ReadonlySet<string> = new Set([
-  'low',
-  'medium',
-  'high',
-  'critical',
-] satisfies readonly KeeperApprovalRiskLevel[])
+interface RiskLevelMeta {
+  readonly label: string
+  readonly band: KeeperApprovalRiskVisualBand
+  readonly rank: number
+}
+
+// Single source of truth, keyed by the closed `KeeperApprovalRiskLevel` union.
+//
+// This is what makes the exhaustiveness *compiler-enforced* rather than merely
+// asserted by a hand-written switch: `satisfies Record<KeeperApprovalRiskLevel,
+// …>` requires a key for EVERY union member (a missing key is a compile error,
+// independent of tsconfig flags like noImplicitReturns). A hand-listed Set or a
+// per-function switch only enforces a subset, so adding a backend risk level
+// could silently fall through to 미분류 / 'info' without a build failure. Every
+// derived view below (parser vocabulary, label, visual band, ordering rank)
+// reads from this one object, so a new risk level forces an update here once.
+const RISK_LEVEL_META = {
+  critical: { label: '심각', band: 'bad', rank: 4 },
+  high: { label: '높음', band: 'warn', rank: 3 },
+  medium: { label: '보통', band: 'accent', rank: 2 },
+  low: { label: '낮음', band: 'info', rank: 1 },
+} as const satisfies Record<KeeperApprovalRiskLevel, RiskLevelMeta>
+
+// Shown (not hidden or prettified) when input does not parse to a closed level.
+const UNCLASSIFIED_LABEL = '미분류'
+const UNCLASSIFIED_BAND: KeeperApprovalRiskVisualBand = 'info'
+
+// Parser vocabulary derived from the SSOT keys, so it cannot drift from the
+// label/band/rank views above.
+const RISK_LEVEL_VALUES: ReadonlySet<string> = new Set(Object.keys(RISK_LEVEL_META))
 
 export function isKeeperApprovalRiskLevel(
   value: string,
@@ -36,49 +60,22 @@ export function asKeeperApprovalRiskLevel(
 }
 
 export function keeperApprovalRiskVisualBand(value: unknown): KeeperApprovalRiskVisualBand {
-  switch (asKeeperApprovalRiskLevel(value)) {
-    case 'critical':
-      return 'bad'
-    case 'high':
-      return 'warn'
-    case 'medium':
-      return 'accent'
-    case 'low':
-    case null:
-      return 'info'
-  }
+  const level = asKeeperApprovalRiskLevel(value)
+  return level === null ? UNCLASSIFIED_BAND : RISK_LEVEL_META[level].band
 }
 
-// Human-readable Korean label for a governance risk level. Exhaustive over the
-// closed `KeeperApprovalRiskLevel` union (same shape as
-// `keeperApprovalRiskVisualBand`) so a new backend risk level forces a compile
-// error here rather than silently falling through to a raw wire string. Unknown
-// / unparseable input renders as 미분류 (shown, not hidden or prettified).
+// Human-readable Korean label for a governance risk level. Reads from the
+// `RISK_LEVEL_META` SSOT, so a new backend risk level is a compile error at the
+// SSOT (above) rather than a silent fall-through to a raw wire string here.
+// Unknown / unparseable input renders as 미분류 (shown, not hidden or prettified).
 export function keeperApprovalRiskLabel(value: unknown): string {
-  switch (asKeeperApprovalRiskLevel(value)) {
-    case 'critical':
-      return '심각'
-    case 'high':
-      return '높음'
-    case 'medium':
-      return '보통'
-    case 'low':
-      return '낮음'
-    case null:
-      return '미분류'
-  }
+  const level = asKeeperApprovalRiskLevel(value)
+  return level === null ? UNCLASSIFIED_LABEL : RISK_LEVEL_META[level].label
 }
 
 export function isHighOrCriticalKeeperApprovalRisk(value: unknown): boolean {
   const level = asKeeperApprovalRiskLevel(value)
   return level === 'critical' || level === 'high'
-}
-
-const RISK_RANK: Record<KeeperApprovalRiskLevel, number> = {
-  critical: 4,
-  high: 3,
-  medium: 2,
-  low: 1,
 }
 
 export function maxKeeperApprovalRiskLevel(
@@ -88,7 +85,7 @@ export function maxKeeperApprovalRiskLevel(
   let topLabel: KeeperApprovalRiskLevel | null = null
   for (const item of items) {
     const level = asKeeperApprovalRiskLevel(item.risk_level)
-    const rank = level ? RISK_RANK[level] : 0
+    const rank = level === null ? 0 : RISK_LEVEL_META[level].rank
     if (rank > topRank) {
       topRank = rank
       topLabel = level

@@ -3,6 +3,7 @@ import {
   asKeeperApprovalRiskLevel,
   keeperApprovalRiskLabel,
   keeperApprovalRiskVisualBand,
+  maxKeeperApprovalRiskLevel,
 } from './governance-risk-level'
 
 describe('keeperApprovalRiskLabel', () => {
@@ -32,5 +33,38 @@ describe('keeperApprovalRiskLabel', () => {
     expect(asKeeperApprovalRiskLevel('high')).toBe('high')
     expect(keeperApprovalRiskVisualBand('high')).toBe('warn')
     expect(keeperApprovalRiskLabel('high')).toBe('높음')
+  })
+})
+
+describe('keeperApprovalRiskVisualBand', () => {
+  it('maps each closed level through the shared SSOT', () => {
+    expect(keeperApprovalRiskVisualBand('critical')).toBe('bad')
+    expect(keeperApprovalRiskVisualBand('high')).toBe('warn')
+    expect(keeperApprovalRiskVisualBand('medium')).toBe('accent')
+    expect(keeperApprovalRiskVisualBand('low')).toBe('info')
+  })
+
+  it('falls back to info for unparseable input', () => {
+    expect(keeperApprovalRiskVisualBand(null)).toBe('info')
+    expect(keeperApprovalRiskVisualBand('nope')).toBe('info')
+  })
+})
+
+describe('maxKeeperApprovalRiskLevel', () => {
+  it('returns the highest-rank level from the SSOT ordering', () => {
+    expect(
+      maxKeeperApprovalRiskLevel([
+        { risk_level: 'low' },
+        { risk_level: 'critical' },
+        { risk_level: 'medium' },
+      ]),
+    ).toBe('critical')
+  })
+
+  it('ignores unparseable rows and returns null when none parse', () => {
+    expect(
+      maxKeeperApprovalRiskLevel([{ risk_level: 'nope' }, { risk_level: null }]),
+    ).toBe(null)
+    expect(maxKeeperApprovalRiskLevel([])).toBe(null)
   })
 })

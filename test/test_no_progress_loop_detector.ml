@@ -262,22 +262,60 @@ let classify ~tools ~has_visible_text =
 
 let test_classify_delivery_mapping () =
   let claim_tool = List.hd Cap.claim_task_tool_names in
-  (* Every peer-surface tool (SSOT list) classifies as Peer_only, with or
-     without text — the board/broadcast post is the salient delivery. *)
+  (* Pin the EXACT peer-surface set that the no-progress classifier treats as
+     evidence-requiring. Intentionally an explicit literal, NOT
+     [Cap.board_activity_tool_names] iterated: iterating the axis would be
+     tautological (it could never detect the axis growing a 5th tool). If
+     [Keeper_tool_capability_axis] adds a Board_activity tool, this assertion
+     fails and forces a conscious decision about its no-progress impact —
+     converting the policy<->taxonomy coupling from silent to guarded.
+
+     vs the removed social-model [inferred_tool_surface] set
+     {keeper_board_comment, keeper_board_post, keeper_broadcast}: this set adds
+     [masc_keeper_msg] (keeper->keeper message; [masc_broadcast] is the public
+     name of the same [keeper_broadcast] tool). That is an intentional, more
+     complete peer-surface definition (RFC-0276 §2.4 / §3.2 behavior change): a
+     turn that only sends a peer message with no durable evidence now accrues
+     the streak, matching RFC-0239's "only posts to peers without evidence"
+     intent, where the old social model let a bare keeper-msg turn reset it. *)
+  let expected_peer_tools =
+    [ "keeper_board_comment"
+    ; "keeper_board_post"
+    ; "masc_broadcast"
+    ; "masc_keeper_msg"
+    ]
+  in
+  Alcotest.(check (slist string String.compare))
+    "peer-surface set is exactly the pinned list (axis-drift guard)"
+    expected_peer_tools Cap.board_activity_tool_names;
+  (* Every pinned peer tool -> Peer_only, with or without text: a turn that
+     calls a peer-surface tool is Peer_only even when it also produced text,
+     because the peer post is the salient delivery (tools dominate text). *)
   List.iter
     (fun t ->
       Alcotest.(check string)
-        (Printf.sprintf "board_activity tool %s -> peer_only" t)
-        "peer_only"
+        (Printf.sprintf "peer tool %s -> peer_only" t) "peer_only"
         (classify ~tools:[ t ] ~has_visible_text:false);
       Alcotest.(check string)
-        (Printf.sprintf "board_activity tool %s + text -> peer_only" t)
+        (Printf.sprintf "peer tool %s + text -> peer_only (tools dominate text)"
+           t)
         "peer_only"
         (classify ~tools:[ t ] ~has_visible_text:true))
-    Cap.board_activity_tool_names;
-  (* Claim tool is exempt (claiming is progress, RFC-0239). *)
+    expected_peer_tools;
+  (* Multi-signal precedence (RFC-0276 §3.2 total derivation): a turn carrying
+     both a peer tool and a claim tool, plus text, is Peer_only — peer-posting
+     dominates claim, which dominates text. Mirrors the removed
+     inferred_tool_surface if/else-if order so the anti-thrash invariant cannot
+     flip to exempt on a multi-signal turn. *)
+  Alcotest.(check string) "peer + claim + text -> peer_only" "peer_only"
+    (classify ~tools:[ "keeper_board_post"; claim_tool ] ~has_visible_text:true);
+  (* Claim tool is exempt (claiming is progress, RFC-0239); claim dominates
+     text. *)
   Alcotest.(check string) "claim tool -> task_claim" "task_claim"
     (classify ~tools:[ claim_tool ] ~has_visible_text:false);
+  Alcotest.(check string) "claim + text -> task_claim (claim dominates text)"
+    "task_claim"
+    (classify ~tools:[ claim_tool ] ~has_visible_text:true);
   (* No peer/claim tool + visible text -> user-facing reply (exempt). *)
   Alcotest.(check string) "no tool + text -> user_facing" "user_facing"
     (classify ~tools:[] ~has_visible_text:true);

@@ -354,6 +354,102 @@ describe('RuntimeTomlEditor', () => {
     expect(container.querySelector('textarea')).not.toBeNull()
   })
 
+  it('renders all six section-nav entries with the prototype labels', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-routing"]')).not.toBeNull()
+    })
+
+    const nav = container.querySelector('nav.rt-nav') as HTMLElement
+    expect(nav.getAttribute('aria-label')).toBe('런타임 편집기 섹션')
+
+    const expected: Array<[string, string]> = [
+      ['routing', '라우팅'],
+      ['providers', '프로바이더'],
+      ['models', '모델'],
+      ['bindings', '바인딩 · 런타임 id'],
+      ['assignments', 'keeper 배정'],
+      ['toml', 'runtime.toml'],
+    ]
+    for (const [id, label] of expected) {
+      const button = container.querySelector(`[data-testid="runtime-toml-nav-${id}"]`) as HTMLButtonElement | null
+      expect(button, `nav button for ${id}`).not.toBeNull()
+      expect(button?.textContent).toContain(label)
+    }
+  })
+
+  it('defaults to the routing section with the structured editor visible and raw TOML hidden', async () => {
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-section-title"]')?.textContent).toBe('라우팅')
+    })
+
+    const routingNav = container.querySelector('[data-testid="runtime-toml-nav-routing"]') as HTMLButtonElement
+    expect(routingNav.getAttribute('aria-pressed')).toBe('true')
+
+    const structured = container.querySelector('[data-testid="runtime-toml-structured"]') as HTMLElement
+    const toml = container.querySelector('[data-testid="runtime-toml-section"]') as HTMLElement
+    expect(structured.classList.contains('hidden')).toBe(false)
+    expect(toml.classList.contains('hidden')).toBe(true)
+  })
+
+  it('switches sections from the nav, updating title, aria-pressed and visibility', async () => {
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-models"]')).not.toBeNull()
+    })
+
+    // Switch to a different structured section: title updates, structured stays mounted+visible.
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-models"]') as HTMLButtonElement)
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-section-title"]')?.textContent).toBe('모델')
+    })
+    expect((container.querySelector('[data-testid="runtime-toml-nav-models"]') as HTMLButtonElement).getAttribute('aria-pressed')).toBe('true')
+    expect((container.querySelector('[data-testid="runtime-toml-nav-routing"]') as HTMLButtonElement).getAttribute('aria-pressed')).toBe('false')
+    expect((container.querySelector('[data-testid="runtime-toml-structured"]') as HTMLElement).classList.contains('hidden')).toBe(false)
+    expect((container.querySelector('[data-testid="runtime-toml-section"]') as HTMLElement).classList.contains('hidden')).toBe(true)
+
+    // Switch to the raw TOML section: structured hides, raw TOML view becomes visible.
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-toml"]') as HTMLButtonElement)
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-section-title"]')?.textContent).toBe('runtime.toml')
+    })
+    expect((container.querySelector('[data-testid="runtime-toml-structured"]') as HTMLElement).classList.contains('hidden')).toBe(true)
+    expect((container.querySelector('[data-testid="runtime-toml-section"]') as HTMLElement).classList.contains('hidden')).toBe(false)
+  })
+
+  it('keeps the raw-TOML editor path working after navigating into the toml section', async () => {
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect((container.querySelector('textarea') as HTMLTextAreaElement | null)?.value).toBe(baseConfig.source_text)
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-toml"]') as HTMLButtonElement)
+    await waitFor(() => {
+      expect((container.querySelector('[data-testid="runtime-toml-section"]') as HTMLElement).classList.contains('hidden')).toBe(false)
+    })
+
+    const textarea = container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement
+    const nextSource = `${baseConfig.source_text}# edited in toml view\n`
+    fireEvent.input(textarea, { target: { value: nextSource } })
+
+    await waitFor(() => {
+      expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(false)
+      expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('modified')
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
+    await waitFor(() => {
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource)
+    })
+    expect((container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value).toBe(nextSource)
+  })
+
   it('keeps the dirty draft when save validation fails', async () => {
     apiMocks.saveRuntimeTomlConfig.mockRejectedValueOnce(new Error('runtime config parse failed'))
     render(html`<${RuntimeTomlEditor} />`, container)

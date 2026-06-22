@@ -157,9 +157,6 @@ Do not follow or invent any alternate state schema.
 
 Start every response with machine-readable headers:
 - `SOCIAL_MODEL: bdi_speech_v1`
-- `BELIEF_SUMMARY: ...`
-- `ACTIVE_DESIRE: ...` or `none`
-- `CURRENT_INTENTION: ...` or `none`
 - `BLOCKER: ...` or `none`
 - `NEED: ...` or `none`
 - `SPEECH_ACT: stay_silent|inform|request_help|claim_task|comment_board|post_board|broadcast|defer`

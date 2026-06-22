@@ -20,14 +20,14 @@ Related issue:
 ### What is real today
 
 - keeper creation persists `social_model` into keeper runtime state
-- unified turn paths propagate `SOCIAL_MODEL`, `BELIEF_SUMMARY`, `ACTIVE_DESIRE`, `CURRENT_INTENTION`, `BLOCKER`, `NEED`, `SPEECH_ACT`, and `DELIVERY_SURFACE`
+- unified turn paths propagate `SOCIAL_MODEL`, `BLOCKER`, `NEED`, `SPEECH_ACT`, and `DELIVERY_SURFACE`
 - the active baseline is `bdi_speech_v1`
-- a first-class `social_model -> implementation` registry dispatches between production modules
-- `magentic_ledger_v1` now exists as a second implementation path to validate the abstraction
-- `magentic_ledger_v1` now routes through an explicit phase/event FSM
-  (`lib/keeper/social_model/keeper_social_model_magentic_ledger_fsm.ml`)
-  with a matching TLA+ spec
-  (`specs/keeper-state-machine/KeeperSocialModelMagenticLedger.tla`)
+- a first-class `social_model -> implementation` registry selects the
+  production implementation; `bdi_speech_v1` is currently the only one
+- `magentic_ledger_v1` was retired in RFC-0275 — it was never assigned to a
+  keeper and its wire format was the now-excised BDI triple
+  (`belief_summary`/`active_desire`/`current_intention`), so it carried no
+  product value. Its FSM module and matching TLA+ spec were deleted with it.
 
 ### What is not real yet
 
@@ -166,8 +166,11 @@ Constraint:
 
 ### Phase 4 — Add a second implementation
 
-- recommended first candidate: `magentic_ledger_v1`
-- alternative: `reaction_identity_v2`
+- `magentic_ledger_v1` was implemented as the first candidate, then retired in
+  RFC-0275 (unassigned to any keeper; its only output was the decorative BDI
+  triple). A future second implementation should drive turn control flow, not
+  just emit narrative fields.
+- alternative candidate: `reaction_identity_v2`
 
 ### Phase 5 — Prove the abstraction
 
@@ -181,5 +184,9 @@ Constraint:
 - `social_model` selects a real implementation path
 - `bdi_speech_v1` exists as an isolated implementation module
 - at least one second implementation exists in production code
+  *(reverted by RFC-0275: `magentic_ledger_v1` retired. Open design question —
+  whether the abstraction is considered validated structurally via the registry
+  + explicit unknown-model handling, or whether a control-flow-bearing second
+  model is still required.)*
 - unknown-model behavior is explicit in code, tests, and docs
 - dashboard/status surfaces can show active social model and recent transition context

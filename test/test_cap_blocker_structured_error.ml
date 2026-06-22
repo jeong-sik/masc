@@ -113,12 +113,9 @@ let test_idempotence () =
 
 let test_cap_social_state_routes_blocker_through_cap_blocker () =
   let state : T.social_state = {
-    social_model = "magentic_ledger_v1";
+    social_model = "bdi_speech_v1";
     speech_act = T.Stay_silent;
     delivery_surface = T.Silent;
-    belief_summary = "bs";
-    active_desire = Some "ad";
-    current_intention = Some "ci";
     blocker = Some oas_error_payload_small;
     need = Some "nd";
   } in
@@ -130,20 +127,13 @@ let test_cap_social_state_routes_blocker_through_cap_blocker () =
 
 let test_cap_social_state_narrative_fields_still_truncated () =
   let state : T.social_state = {
-    social_model = "magentic_ledger_v1";
+    social_model = "bdi_speech_v1";
     speech_act = T.Stay_silent;
     delivery_surface = T.Silent;
-    belief_summary = narrative_long;
-    active_desire = Some narrative_long;
-    current_intention = Some narrative_long;
     blocker = None;
     need = Some narrative_long;
   } in
   let capped = T.cap_social_state state in
-  Alcotest.(check bool)
-    "belief_summary truncated"
-    true
-    (String.length capped.belief_summary < String.length narrative_long);
   let check_opt label = function
     | None -> Alcotest.fail (Printf.sprintf "expected Some for %s" label)
     | Some s ->
@@ -152,8 +142,6 @@ let test_cap_social_state_narrative_fields_still_truncated () =
         true
         (String.length s < String.length narrative_long)
   in
-  check_opt "active_desire" capped.active_desire;
-  check_opt "current_intention" capped.current_intention;
   check_opt "need" capped.need
 
 let () =

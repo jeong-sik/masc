@@ -10,7 +10,7 @@
     modules) — the goal is spec parity verification, not runtime
     enforcement.  Where a production guard already exists (e.g.,
     Keeper_composite_observer for KeeperCompositeLifecycle), that
-    pattern is preferred.  These four specs lacked such guards. *)
+    pattern is preferred.  These specs lacked such guards. *)
 
 (* ============================================================
    1. AmbiguousPartialCommit / BugOrphanMutations
@@ -40,42 +40,7 @@ let test_bug_orphan_mutations_caught () =
 ;;
 
 (* ============================================================
-   2. KeeperSocialModelMagenticLedger / BugStalledWithoutCause
-   ============================================================ *)
-
-type social_phase =
-  | Quiet
-  | Stalled
-  | Advancing
-  | Reactive
-
-(* TLA+ StalledNeedsGoalOrFailure ==
-     phase = "stalled" => has_active_goals \/ failure_observed *)
-let check_stalled_needs_goal_or_failure
-    ~(phase : social_phase)
-    ~(has_active_goals : bool)
-    ~(failure_observed : bool)
-  =
-  match phase with
-  | Stalled -> has_active_goals || failure_observed
-  | _ -> true
-;;
-
-let test_bug_stalled_without_cause_caught () =
-  let invariant_holds =
-    check_stalled_needs_goal_or_failure
-      ~phase:Stalled
-      ~has_active_goals:false
-      ~failure_observed:false
-  in
-  Alcotest.(check bool)
-    "StalledNeedsGoalOrFailure violated by BugStalledWithoutCause"
-    false
-    invariant_holds
-;;
-
-(* ============================================================
-   3. KeeperTraceSpec / BugDerivePhaseMismatch
+   2. KeeperTraceSpec / BugDerivePhaseMismatch
    ============================================================ *)
 
 type derived_phase =
@@ -113,7 +78,7 @@ let test_bug_derive_phase_mismatch_caught () =
 ;;
 
 (* ============================================================
-   4. KeeperTurnCycle / BugSelectingWithoutToolPolicy
+   3. KeeperTurnCycle / BugSelectingWithoutToolPolicy
    ============================================================ *)
 
 type runtime_state_tc =
@@ -183,30 +148,6 @@ let test_clean_holds_mutations_never_orphan () =
     (check_mutations_never_orphan ~turn_phase:Failed_amb ~mutating_committed:0)
 ;;
 
-let test_clean_holds_stalled_with_goal () =
-  Alcotest.(check bool)
-    "Stalled with goal is fine"
-    true
-    (check_stalled_needs_goal_or_failure
-       ~phase:Stalled
-       ~has_active_goals:true
-       ~failure_observed:false);
-  Alcotest.(check bool)
-    "Stalled with failure is fine"
-    true
-    (check_stalled_needs_goal_or_failure
-       ~phase:Stalled
-       ~has_active_goals:false
-       ~failure_observed:true);
-  Alcotest.(check bool)
-    "Quiet without cause is fine"
-    true
-    (check_stalled_needs_goal_or_failure
-       ~phase:Quiet
-       ~has_active_goals:false
-       ~failure_observed:false)
-;;
-
 let test_clean_holds_selecting_with_tool_policy () =
   Alcotest.(check bool)
     "Selecting with tool_policy is fine"
@@ -239,13 +180,6 @@ let () =
             "clean states hold"
             `Quick
             test_clean_holds_mutations_never_orphan
-        ] )
-    ; ( "KeeperSocialModelMagenticLedger"
-      , [ Alcotest.test_case
-            "BugStalledWithoutCause caught"
-            `Quick
-            test_bug_stalled_without_cause_caught
-        ; Alcotest.test_case "clean states hold" `Quick test_clean_holds_stalled_with_goal
         ] )
     ; ( "KeeperTraceSpec"
       , [ Alcotest.test_case

@@ -72,8 +72,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "last_seen_message_seq", `Int rt.last_seen_message_seq
     ; "last_speech_act", `String rt.last_speech_act
     ; "last_social_transition_reason", `String rt.last_social_transition_reason
-    ; "last_active_desire", `String rt.last_active_desire
-    ; "last_current_intention", `String rt.last_current_intention
     ; ( "last_blocker"
       , match rt.last_blocker with
         | Some info -> blocker_info_to_json info
@@ -160,8 +158,6 @@ let fallback_canonical_keeper_meta_key_names =
   ; "last_seen_message_seq"
   ; "last_speech_act"
   ; "last_social_transition_reason"
-  ; "last_active_desire"
-  ; "last_current_intention"
   ; "last_blocker"
   ; "last_runtime_attempt"
   ; "last_need"

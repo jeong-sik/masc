@@ -397,12 +397,6 @@ let parse_keeper_state
     Keeper_social_model_types.truncate_string
       ~max_chars:Keeper_social_model_types.default_option_field_max_chars
   in
-  let last_active_desire =
-    cap_loaded (Safe_ops.json_string ~default:"" "last_active_desire" json)
-  in
-  let last_current_intention =
-    cap_loaded (Safe_ops.json_string ~default:"" "last_current_intention" json)
-  in
   (* #9933: blocker may carry a structured [masc_oas_error] JSON
      payload. cap_loaded (narrative budget = 200 chars) would slice
      the JSON mid-key and lose diagnostic fields (budget_sec,
@@ -484,8 +478,6 @@ let parse_keeper_state
       ; last_seen_message_seq
       ; last_speech_act
       ; last_social_transition_reason
-      ; last_active_desire
-	      ; last_current_intention
 	      ; last_blocker
 	      ; last_runtime_attempt
 	      ; last_need

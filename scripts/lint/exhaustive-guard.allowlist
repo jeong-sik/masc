@@ -551,10 +551,6 @@ lib/keeper/keeper_world_observation.ml:685
 lib/keeper/keeper_world_observation.ml:715
 lib/keeper/social_model/keeper_social_model_bdi_speech_v1.ml:348
 lib/keeper/social_model/keeper_social_model_bdi_speech_v1.ml:446
-lib/keeper/social_model/keeper_social_model_magentic_ledger_fsm.ml:99
-lib/keeper/social_model/keeper_social_model_magentic_ledger_fsm.ml:115
-lib/keeper/social_model/keeper_social_model_magentic_ledger_fsm.ml:150
-lib/keeper/social_model/keeper_social_model_magentic_ledger_fsm.ml:159
 lib/keeper/social_model/keeper_social_model_protocol.ml:25
 lib/keeper_social_model_types/keeper_social_model_types.ml:71
 lib/keeper_social_model_types/keeper_social_model_types.ml:97

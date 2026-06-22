@@ -294,7 +294,6 @@
   test_keeper_state_machine_tla_correspondence
   test_keeper_lifecycle_hooks
   test_keeper_subprocess_registry
-  test_keeper_social_model_magentic_ledger_fsm
   test_keeper_overflow_recovery
   test_telemetry_unified
   test_telemetry_unified_source
@@ -601,7 +600,6 @@
   test_keeper_state_machine_tla_correspondence
   test_keeper_lifecycle_hooks
   test_keeper_subprocess_registry
-  test_keeper_social_model_magentic_ledger_fsm
   test_keeper_overflow_recovery
   test_telemetry_unified
   test_telemetry_unified_source
@@ -1798,8 +1796,6 @@
 (include stanzas/test_keeper_runtime_config_leaf.inc)
 
 (include stanzas/test_local_review_script.inc)
-
-(include stanzas/test_magentic_ledger_cap.inc)
 
 (include stanzas/test_masc_dirname_ssot.inc)
 

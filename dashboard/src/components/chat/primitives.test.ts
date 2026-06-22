@@ -2426,3 +2426,83 @@ describe('ChatMessageBubble — rich markdown rendering of assistant prose', () 
     expect(container.querySelector('[data-chat-block="code"]')).toBeNull()
   })
 })
+
+// Pixel-match of the v2 composer to the Claude-Design prototype (composer.jsx /
+// styles/v2.css). jsdom does not apply the .css files, so these assert the
+// markup contract the CSS depends on: the textarea must be a flush, borderless
+// element with NO inline Tailwind box styling (border/rounded/padding/bg/
+// control-textarea) — all box styling lives in .composer textarea (chat.css).
+describe('ChatComposer v2 prototype surface', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  function renderComposer() {
+    render(
+      html`<${ChatComposer}
+        draft=""
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+  }
+
+  it('renders the composer box, tools, and send button structure', () => {
+    renderComposer()
+    expect(container.querySelector('.composer')).not.toBeNull()
+    expect(container.querySelector('.composer-box')).not.toBeNull()
+    expect(container.querySelector('.composer-tools')).not.toBeNull()
+    expect(container.querySelector('.composer-tools .send')).not.toBeNull()
+    // attachment ctool always present
+    expect(container.querySelector('.composer-tools .ctool')).not.toBeNull()
+  })
+
+  it('renders a flush borderless textarea with no inline box styling', () => {
+    renderComposer()
+    const textarea = container.querySelector('.composer-box textarea') as HTMLTextAreaElement
+    expect(textarea).not.toBeNull()
+    const cls = textarea.className
+    // flush class hook present
+    expect(cls).toContain('composer-textarea')
+    // no inline Tailwind border / radius / padding / background / utility that
+    // would draw a nested box inside .composer-box (prototype has none).
+    expect(cls).not.toContain('control-textarea')
+    expect(cls).not.toMatch(/\bborder\b/)
+    expect(cls).not.toMatch(/\brounded/)
+    expect(cls).not.toMatch(/\bpx-/)
+    expect(cls).not.toMatch(/\bpy-/)
+    expect(cls).not.toMatch(/\bbg-\[/)
+  })
+
+  it('keeps send and attach controls operational', () => {
+    const onSend = vi.fn()
+    render(
+      html`<${ChatComposer}
+        draft="hello"
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        onDraftChange=${() => {}}
+        onSend=${onSend}
+      />`,
+      container,
+    )
+    const send = container.querySelector('.composer-tools .send') as HTMLButtonElement
+    expect(send).not.toBeNull()
+    expect(send.disabled).toBe(false)
+    send.click()
+    expect(onSend).toHaveBeenCalledTimes(1)
+  })
+})

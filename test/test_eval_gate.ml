@@ -363,6 +363,35 @@ let test_post_eval_result_to_yojson () =
     (json |> member "error_message" |> to_string)
 
 (* ================================================================ *)
+(* detect_evasion (guards the precompiled-regex refactor)           *)
+(* ================================================================ *)
+
+let test_detect_evasion_kinds () =
+  let check_kind label cmd expected =
+    match Eval_gate.detect_evasion_typed cmd with
+    | Some { Eval_gate.kind; _ } ->
+      Alcotest.(check string)
+        label
+        (Eval_gate.evasion_kind_to_string expected)
+        (Eval_gate.evasion_kind_to_string kind)
+    | None -> Alcotest.failf "%s: expected an evasion indicator" label
+  in
+  check_kind "variable expansion" "echo ${HOME}" Eval_gate.Variable_expansion;
+  check_kind "hex escape" {|printf \x41|} Eval_gate.Hex_escape;
+  check_kind "base64 decode pipe" "base64 -d payload"
+    Eval_gate.Base64_decode_pipe;
+  check_kind "eval invocation" "eval ls" Eval_gate.Eval_invocation;
+  check_kind "xargs destructive" "find . | xargs rm -f"
+    Eval_gate.Xargs_destructive
+
+let test_detect_evasion_benign () =
+  match Eval_gate.detect_evasion_typed "ls -la /tmp" with
+  | None -> ()
+  | Some { Eval_gate.kind; _ } ->
+    Alcotest.failf "benign command flagged as %s"
+      (Eval_gate.evasion_kind_to_string kind)
+
+(* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -371,6 +400,10 @@ let () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio_guard.enable ();
   Alcotest.run "Eval_gate" [
+    ("evasion_detection", [
+      Alcotest.test_case "kinds detected" `Quick test_detect_evasion_kinds;
+      Alcotest.test_case "benign not flagged" `Quick test_detect_evasion_benign;
+    ]);
     ("destructive_detection", [
       Alcotest.test_case "detect rm -rf" `Quick test_detect_rm_rf;
       Alcotest.test_case "detect force push" `Quick test_detect_force_push;

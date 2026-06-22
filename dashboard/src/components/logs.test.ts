@@ -662,3 +662,47 @@ describe('LogViewer kind column', () => {
     expect(container.textContent).toContain('lifecycle event')
   })
 })
+
+describe('LogViewer kind column', () => {
+  afterEach(() => {
+    cleanup()
+    vi.useRealTimers()
+    vi.clearAllMocks()
+    vi.resetModules()
+    vi.doUnmock('../api/dashboard.js')
+    window.location.hash = ''
+  })
+
+  it('renders the logs surface with the kind column header and a kind cell per row', async () => {
+    const fetchLogs = vi.fn().mockResolvedValue({
+      total: 1,
+      entries: [
+        entry({
+          seq: 42,
+          level: 'INFO',
+          source: 'structured',
+          module: 'keeper_tool',
+          message: 'read file',
+          category: 'tool',
+          details: { tool_name: 'tool_read_file', file_path: 'lib/runtime.ml' },
+        }),
+      ],
+    })
+    const { LogViewer } = await loadLogs(fetchLogs)
+    const { container } = render(h(LogViewer, {}))
+
+    await waitFor(() => expect(container.textContent).toContain('read file'))
+
+    // The table header carries the kind ("유형") column the --v2-logs-cols grid sizes.
+    const header = container.querySelector('.v2-logs-table-header') as HTMLElement | null
+    expect(header).not.toBeNull()
+    const headerLabels = [...header!.querySelectorAll('span')].map(s => s.textContent)
+    expect(headerLabels).toContain('유형')
+
+    // Each row exposes a kind cell with the resolved label + data-kind attribute.
+    const kindCell = container.querySelector('.v2-logs-kind') as HTMLElement | null
+    expect(kindCell).not.toBeNull()
+    expect(kindCell!.getAttribute('data-kind')).toBe('tool')
+    expect(kindCell!.textContent).toBe('TOOL')
+  })
+})

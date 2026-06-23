@@ -50,6 +50,14 @@ val close : conn -> unit
     socket. Idempotent — subsequent calls are no-ops. After [close], [read]
     raises and [send_text] acts on a closed descriptor. *)
 
+val spawn : conn -> (unit -> unit) -> unit
+(** [spawn conn f] forks [f] on [conn]'s session switch, so [f] is cancelled
+    when [close conn] tears the connection down. The gateway runs its reader
+    loop through this so the reader's lifetime is the connection's: a
+    per-connection close cancels the reader (its blocking [read] raises
+    [Cancelled]) rather than leaking it on the gateway-wide switch (RFC-0287
+    P0). Call before [close]; forking onto an already-closed connection raises. *)
+
 (** Pure bridge helpers, exposed for unit tests. *)
 module For_testing : sig
   type nonrec inbound = inbound =
@@ -81,4 +89,10 @@ module For_testing : sig
       defaulting a missing code to [close_code_no_status]. *)
 
   val close_code_no_status : int
+
+  val make_test_conn : sw:Eio.Switch.t -> conn
+  (** A connection with a real session switch + [spawn] / [close] but no socket
+      (the wsd is a bare, never-driven endpoint; the event stream stays empty).
+      For testing the reader-lifetime contract — that [spawn] forks on the
+      session switch and [close] cancels it — without a live WS handshake. *)
 end

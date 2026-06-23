@@ -232,8 +232,13 @@
   max-width: 760px;
 }
 
-.settings-surf .set-card-b-wide {
-  max-width: min(1180px, calc(100% - 56px));
+/* `.set-card-b.set-card-b-wide` (specificity 0,3,0) wins over the vendored
+   keeper-v2/surfaces.css `.settings-surf .set-card-b { max-width: 760px }` (0,2,0),
+   which loads last. With only `.set-card-b-wide` (also 0,2,0) the wide cap lost the
+   load-order tie, so the runtimes surface rendered at 760px (~43% of a 1780px
+   viewport). Widened to fit the two-pane runtime editor. */
+.settings-surf .set-card-b.set-card-b-wide {
+  max-width: min(1480px, calc(100% - 48px));
 }
 
 .settings-runtime-live {
@@ -266,7 +271,7 @@
 }
 
 @media (max-width: 900px) {
-  .settings-surf .set-card-b-wide {
+  .settings-surf .set-card-b.set-card-b-wide {
     max-width: 100%;
   }
   .settings-runtime-live-h {

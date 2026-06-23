@@ -711,7 +711,7 @@ function renderLogKindGrid(
   if (!details) return null
   const d = detailLabel
   const row = (k: string, v: string | null): VNode | null =>
-    v && v !== '' ? html`<div class="lg-kv-row"><span class="lg-kv-k mono">${k}</span><b class="lg-kv-v mono">${v}</b></div>` : null
+    v && v !== '' ? html`<div class="lg-kv-row"><span class="lg-kv-k mono">${k}</span><span class="lg-kv-v mono">${v}</span></div>` : null
   const grid = (...rows: Array<VNode | null>): VNode | null => {
     const filled = rows.filter((r): r is VNode => r !== null)
     return filled.length ? html`<div class="v2-logs-detail-grid v2-logs-kind-grid lg-kv">${filled}</div>` : null

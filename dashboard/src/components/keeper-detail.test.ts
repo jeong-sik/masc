@@ -40,8 +40,16 @@ vi.mock('./keeper-config-panel', async () => {
   const actual = await vi.importActual<typeof import('./keeper-config-panel')>('./keeper-config-panel')
   return {
     ...actual,
-    KeeperConfigPanel: ({ keeperName }: { keeperName: string }) =>
-      html`<div data-testid="keeper-config-panel" data-keeper=${keeperName}>Config ${keeperName}</div>`,
+    // The real panel now owns the .kcf-overlay modal shell (backdrop +
+    // close), so the page-level open/close flow asserts against the panel's
+    // own overlay/close testids rather than a host wrapper. The stub mirrors
+    // that contract: it renders the overlay container, the panel marker, and a
+    // close affordance wired to onClose.
+    KeeperConfigPanel: ({ keeperName, onClose }: { keeperName: string; onClose?: () => void }) =>
+      html`<div data-testid="kw-config-overlay">
+        <div data-testid="keeper-config-panel" data-keeper=${keeperName}>Config ${keeperName}</div>
+        <button type="button" data-testid="kw-config-close" onClick=${onClose}>닫기</button>
+      </div>`,
     loadKeeperConfig: mocks.loadKeeperConfig,
     resetKeeperConfig: mocks.resetKeeperConfig,
   }

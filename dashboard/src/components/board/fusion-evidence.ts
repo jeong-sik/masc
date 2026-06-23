@@ -3,9 +3,17 @@ import { RichContent } from '../common/rich-content'
 import type { BoardPost } from '../../types/core'
 import {
   extractFusionEvidence,
+  classifyFusionJudgeShape,
   type FusionJudgeView,
+  type FusionJudgeNode,
   type FusionPanelEntry,
 } from '../../lib/fusion-meta'
+import {
+  judgeShapeLabel,
+  judgeRoleLabel,
+  judgeNodeTokenLabel,
+  judgeNodeIdentity,
+} from '../fusion/fusion-judge-format'
 
 function formatTokens(value: number | null | undefined): string | null {
   return value == null ? null : `${value.toLocaleString()} tok`
@@ -64,6 +72,58 @@ function JudgeBlock({ judge }: { judge: FusionJudgeView }) {
   `
 }
 
+function JudgeNodeRow({ node }: { node: FusionJudgeNode }) {
+  const identity = judgeNodeIdentity(node)
+  return html`
+    <li
+      class=${`flex flex-wrap items-center gap-2 rounded-[var(--r-0)] border px-2 py-1 ${
+        node.failed
+          ? 'border-[var(--bad-30)] bg-[var(--bad-15)]'
+          : 'border-[var(--color-border-divider)] bg-[var(--color-bg-surface)]'
+      }`}
+      data-fusion-judge-node
+      data-role=${node.role}
+      data-failed=${node.failed ? 'true' : 'false'}
+    >
+      <span class="inline-flex rounded-[var(--r-0)] border border-[var(--color-brass-border)] px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wide text-[var(--color-fg-secondary)]">${judgeRoleLabel(node.role)}</span>
+      ${identity
+        ? html`<span class="min-w-0 flex-1 break-all font-mono text-2xs text-[var(--color-fg-muted)]" title=${identity}>${identity}</span>`
+        : html`<span class="flex-1"></span>`}
+      <span class="font-mono text-2xs text-[var(--color-fg-muted)]">${judgeNodeTokenLabel(node)}</span>
+      ${node.failed
+        ? html`<span class="text-2xs font-semibold text-[var(--bad-light)]" title=${node.error ?? 'failed'}>✗ 실패</span>`
+        : html`<span class="text-2xs text-[var(--color-status-ok)]">✓</span>`}
+    </li>
+  `
+}
+
+// RFC-0284 PR 2: observed judge-node topology inline on the board evidence card.
+// Mirrors the standalone fusion surface strip but in the board's token system —
+// the data layer (shape classification, node normalization in lib/fusion-meta)
+// and the i18n labels (fusion/fusion-judge-format) are shared, only the markup is
+// board-native. Renders nothing for older posts whose meta predates the `judges`
+// array, so the canonical singular judge block below stays the sole content there.
+function JudgeTopologyBlock({ nodes }: { nodes: readonly FusionJudgeNode[] }) {
+  if (nodes.length === 0) return null
+  const shape = classifyFusionJudgeShape(nodes)
+  return html`
+    <section
+      class="mb-3 rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--color-bg-elevated)] p-3"
+      data-testid="fusion-board-judges"
+    >
+      <div class="mb-2 flex flex-wrap items-center gap-2">
+        <span class="text-xs font-semibold text-[var(--color-fg-secondary)]">심판 위상 · ${judgeShapeLabel(shape)}</span>
+        <span class="font-mono text-3xs uppercase tracking-wide text-[var(--color-fg-muted)]">관측된 심판 노드 ${nodes.length}개 · RFC-0284</span>
+      </div>
+      <ul class="grid gap-2" role="list">
+        ${nodes.map(
+          (node, index) => html`<${JudgeNodeRow} key=${`${node.role}-${node.identity}-${index}`} node=${node} />`,
+        )}
+      </ul>
+    </section>
+  `
+}
+
 export function FusionBoardEvidence({
   post,
   class: className,
@@ -103,6 +163,8 @@ export function FusionBoardEvidence({
           </div>
         `
         : null}
+
+      <${JudgeTopologyBlock} nodes=${evidence.judges} />
 
       ${evidence.judge ? html`<${JudgeBlock} judge=${evidence.judge} />` : null}
 

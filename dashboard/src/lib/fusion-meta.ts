@@ -106,6 +106,10 @@ export type FusionEvidence = {
   question?: string | null
   panel: FusionPanelEntry[]
   judge: FusionJudgeView | null
+  // RFC-0284 per-judge-node observation array. Additive alongside the canonical
+  // singular `judge`; `[]` when the meta predates the `judges` array. Carries the
+  // execution topology (JoJ / refine / simple) for the board evidence card.
+  judges: FusionJudgeNode[]
   usage: FusionUsage | null
 }
 
@@ -275,6 +279,7 @@ export function extractFusionEvidence(meta: unknown): FusionEvidence | null {
     question: firstString(effective, ['question', 'prompt']),
     panel,
     judge,
+    judges: normalizeFusionJudgeNodes(effective.judges),
     usage: normalizeFusionUsage(effective, panel),
   }
 }

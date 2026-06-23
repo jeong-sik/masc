@@ -210,6 +210,35 @@ describe('extractFusionEvidence', () => {
     expect(evidence).not.toBeNull()
     expect(evidence?.source).toBe('fusion')
   })
+
+  it('carries the RFC-0284 judges observation array (judge-of-judges)', () => {
+    const evidence = extractFusionEvidence({
+      source: 'fusion',
+      run_id: 'fus-joj',
+      panel: [{ model: 'gpt-5', status: 'answered' }],
+      judge: { status: 'synthesized' },
+      judges: [
+        { role: 'first', identity: 'gpt-5', input_tokens: 10, output_tokens: 20 },
+        { role: 'first', identity: 'claude', status: 'failed', error: 'timeout' },
+        { role: 'meta', identity: 'meta' },
+      ],
+    })
+    expect(evidence?.judges).toHaveLength(3)
+    expect(evidence?.judges[0]).toMatchObject({ role: 'first', identity: 'gpt-5', failed: false })
+    // toMatchObject ignores extra keys, so pin that a success node carries no error
+    expect(evidence?.judges[0]?.error).toBeUndefined()
+    expect(evidence?.judges[1]).toMatchObject({ role: 'first', failed: true, error: 'timeout' })
+    expect(evidence?.judges[2]?.role).toBe('meta')
+  })
+
+  it('defaults judges to [] when the meta predates the array', () => {
+    const evidence = extractFusionEvidence({
+      source: 'fusion',
+      panel: [{ model: 'gpt-5', status: 'answered' }],
+      judge: { status: 'synthesized' },
+    })
+    expect(evidence?.judges).toEqual([])
+  })
 })
 
 describe('normalizeFusionJudgeNodes', () => {

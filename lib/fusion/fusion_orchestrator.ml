@@ -170,10 +170,18 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                  in
                  (Error err, first_nodes)
                | (_, first_s, _) :: _ ->
+                 (* usage = 성공 1차(ok_priors) + 실패 1차(sum_error_usage firsts). 1차 일부가
+                    실패해도 meta가 성공하면 실패한 1차가 태운 토큰을 잃지 않는다 — all-fail
+                    path(#22122)와 동일 원칙을 성공 meta 경로에도 적용한다(적대 리뷰 #22093
+                    B-1의 부분-실패 경로; all-fail은 부분집합일 뿐 부분-실패가 더 흔하다).
+                    ok_priors는 firsts의 Ok만, sum_error_usage는 Error만 더하므로 둘 합 =
+                    모든 1차 usage(중복/누락 없음). *)
                  let firsts_usage =
-                   List.fold_left
-                     (fun acc (_, _, u) -> Fusion_types.add_usage acc u)
-                     Fusion_types.zero_usage ok_priors
+                   Fusion_types.add_usage
+                     (List.fold_left
+                        (fun acc (_, _, u) -> Fusion_types.add_usage acc u)
+                        Fusion_types.zero_usage ok_priors)
+                     (Fusion_types.sum_error_usage firsts)
                  in
                  let priors = List.map (fun (id, s, _) -> (id, s)) ok_priors in
                  (match

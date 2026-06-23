@@ -1448,7 +1448,11 @@ let test_sandbox_root_git_cwd_zero_repo_blocks_before_exec () =
   | Some msg ->
     Alcotest.(check bool) "mentions no sandbox clones" true
       (contains_substring msg "no sandbox git clones");
-    Alcotest.(check bool) "mentions clone recovery" true
+    (* RFC-0284: the recovery must name the real Execute affordance, not a
+       phantom "visible clone tool" (no such tool exists in any keeper surface). *)
+    Alcotest.(check bool) "names the real Execute affordance" true
+      (contains_substring msg "Execute");
+    Alcotest.(check bool) "does not point at a non-existent clone tool" false
       (contains_substring msg "visible clone tool");
     Alcotest.(check bool) "mentions cwd recovery" true
       (contains_substring msg "cwd=\"repos/<repo>\"")
@@ -1465,6 +1469,37 @@ let test_sandbox_root_git_explicit_repos_target_keeps_cwd () =
     None
     error;
   Alcotest.(check string) "cwd stays sandbox root" playground cwd
+
+(* RFC-0284 §4.1 regression seam: the zero-repo recovery may name exactly one
+   tool — Execute. Assert every "tool" noun in the message is preceded by
+   "Execute". This is a closed invariant over the tool noun, not a blocklist of
+   known-bad phrasings (consistent with the RFC-0042 no-string-classifier
+   lineage): any phantom "<X> tool" with X <> Execute trips it. A phantom
+   phrased without the word "tool" is out of a string seam's reach — the closed
+   cross-producer enforcement is RFC-0284 §4.2 (render_reference routing). *)
+let recovery_names_only_execute_tool msg =
+  let is_tool_noun word = word = "tool" || word = "tool." || word = "tool," in
+  String.split_on_char ' ' msg
+  |> List.fold_left
+       (fun (ok, prev) word -> ok && (not (is_tool_noun word) || prev = "Execute"), word)
+       (true, "")
+  |> fst
+
+let test_sandbox_root_recovery_names_no_phantom_tool () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let _cwd, error =
+    resolve_sandbox_root_git_cwd_string ~config ~meta
+      ~cwd:playground ~cmd:"git status"
+  in
+  match error with
+  | None -> Alcotest.fail "expected missing repo guidance"
+  | Some msg ->
+    Alcotest.(check bool)
+      "every tool the recovery names is Execute (closed invariant)" true
+      (recovery_names_only_execute_tool msg);
+    Alcotest.(check bool) "recovery names the real Execute affordance" true
+      (contains_substring msg "Execute")
 
 let test_sandbox_root_git_cwd_single_repo_auto_chdir () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -2321,6 +2356,9 @@ let () =
           Alcotest.test_case
             "sandbox-root git with explicit repos target keeps cwd"
             `Quick test_sandbox_root_git_explicit_repos_target_keeps_cwd;
+          Alcotest.test_case
+            "sandbox-root recovery names no phantom tool (RFC-0284)"
+            `Quick test_sandbox_root_recovery_names_no_phantom_tool;
           Alcotest.test_case
             "sandbox-root git with one repo auto-selects cwd"
             `Quick test_sandbox_root_git_cwd_single_repo_auto_chdir;

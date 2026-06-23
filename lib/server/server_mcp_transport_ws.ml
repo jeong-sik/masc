@@ -395,6 +395,12 @@ let dashboard_slice_for_sse_type = function
       Some "transport"
   | "keeper_composite_changed" ->
       Some "composite"
+  (* RFC-0284: bridge the goal-loop status push into the existing "goals"
+     slice so its live delta reaches dashboard subscribers without adding a
+     new WS slice. Emitted by
+     [Server_dashboard_http_goal_loop_broadcast.broadcast_goal_loop_status]. *)
+  | "goal_loop_status" ->
+      Some "goals"
   | _ -> None
 
 let dashboard_session_result session =

@@ -53,6 +53,7 @@ import { timeBoardRequest } from './board-metrics'
 import { namespaceTruth, namespaceTruthError, namespaceTruthInitializing } from './namespace-truth-signals'
 import { normalizeNamespaceTruth } from './namespace-truth-normalizers'
 import { hydrateGoalTreeSnapshot } from './goal-tree-state'
+import { hydrateGoalLoopSnapshot } from './goal-loop-state'
 import {
   normalizeAgent, normalizeTask, normalizeMessage,
   normalizeExecutionWorkerSupportBrief,
@@ -720,6 +721,11 @@ function hydrateDashboardBootstrap(data: DashboardBootstrapResponse): void {
   }
   if (data.goals && !bootstrapSliceError(data.goals)) {
     hydrateGoalTreeSnapshot(data.goals)
+  }
+  if (data.goal_loop_status && !bootstrapSliceError(data.goal_loop_status)) {
+    // RFC-0284: seed the goal-loop store on first page load so the panel
+    // renders without its own fetch; live updates then arrive over SSE.
+    hydrateGoalLoopSnapshot(data.goal_loop_status)
   }
 }
 

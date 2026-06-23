@@ -1508,7 +1508,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
               class="kcf-btn ghost v2-monitoring-action"
               title="초기화: 변경한 런타임 설정 draft 를 서버 값으로 되돌립니다"
               onClick=${resetRuntimeDraft}
-            >초기화</button>
+            >초기화하기</button>
             <button type="button"
               class="kcf-btn save v2-monitoring-action"
               onClick=${saveRuntimeConfig}

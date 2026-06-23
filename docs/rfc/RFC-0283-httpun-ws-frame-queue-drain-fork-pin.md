@@ -77,7 +77,7 @@ Apply PR #80's one-liner to a masc-owned fork of `anmonteiro/httpun-ws` and pin 
 
 ### 3.2 Companion regression test
 
-A test that drives the **real** `Httpun_ws.Server_connection` frame queue (not masc's `inbound_accumulate`, which bypasses the library) with three coalesced fragments and asserts all three are delivered. It fails on stock 0.2.0 and passes with the pin, so it both proves the bug and guards the fix. This closes the gap noted in [[RFC-0281]] §5, where the inbound tests bypass the library frame queue.
+A test that drives the **real** `Httpun_ws.Server_connection` frame queue (not masc's `inbound_accumulate`, which bypasses the library) with three coalesced fragments and asserts all three are delivered. It fails on stock 0.2.0 and passes with the pin, so it both proves the bug and guards the fix. [[RFC-0281]] §5 verifies that frames are read at all (connection-attachment, live `hello` parity, IDE LSP round-trip) but none of its checks drive the library frame queue with 3+ coalesced fragments; this test closes that coverage gap.
 
 ## 4. Anti-pattern self-check (CLAUDE.md workaround bar)
 

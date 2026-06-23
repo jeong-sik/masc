@@ -37,6 +37,9 @@ WARM_TURNS_SEC="${WARM_TURNS_SEC:-20}"          # let keepers start turning befo
 THRESHOLD_MS="${THRESHOLD_MS:-250}"
 MAX_AMP="${MAX_AMP:-8}"
 PERSONA="${PERSONA:-analyst}"
+# Source root holding config/personas/<PERSONA>. Resolved from an explicit path,
+# never home-anchored (SSOT-R6): point it at a populated MASC root.
+PERSONA_SOURCE_ROOT="${MASC_PERSONA_SOURCE_ROOT:-}"
 BORROW_MODEL="${BORROW_MODEL:-deepseek-v4-flash}"  # must be an oas-models.toml id_prefix
 HOG_LEVELS="${HOG_LEVELS:-0 $((NCPU-1))}"       # host CPU hogs to sweep alongside keeper load
 
@@ -54,8 +57,10 @@ Usage: $(basename "$0") [options]
   --threshold-ms N     max /health p95 under load before RED (default: $THRESHOLD_MS)
   --max-amp N          max p95 amplification before RED (default: $MAX_AMP)
   -h|--help            this help
-Requires: python3, curl, jq. Boots a server with real keeper turns against a
-network-free mock provider; no cloud credentials needed.
+Requires: python3, curl, jq, and MASC_PERSONA_SOURCE_ROOT pointing at a
+populated MASC root (one that has config/personas/<persona>). Boots a server
+with real keeper turns against a network-free mock provider; no cloud
+credentials needed.
 EOF
 }
 
@@ -125,10 +130,15 @@ measure_level() {
 
 # ---- seed config ------------------------------------------------------------
 mkdir -p "$BASE_PATH/.masc/config/keepers" "$BASE_PATH/.masc/config/personas"
-if [[ -d "$HOME/me/.masc/config/personas/$PERSONA" ]]; then
-  cp -R "$HOME/me/.masc/config/personas/$PERSONA" "$BASE_PATH/.masc/config/personas/$PERSONA"
+if [[ -z "$PERSONA_SOURCE_ROOT" ]]; then
+  echo "ERROR: set MASC_PERSONA_SOURCE_ROOT to a populated MASC root (one that has" >&2
+  echo "       config/personas/$PERSONA), e.g. MASC_PERSONA_SOURCE_ROOT=<your-masc-root>" >&2
+  exit 1
+fi
+if [[ -d "$PERSONA_SOURCE_ROOT/config/personas/$PERSONA" ]]; then
+  cp -R "$PERSONA_SOURCE_ROOT/config/personas/$PERSONA" "$BASE_PATH/.masc/config/personas/$PERSONA"
 else
-  echo "ERROR: persona dir not found: ~/me/.masc/config/personas/$PERSONA" >&2; exit 1
+  echo "ERROR: persona dir not found: $PERSONA_SOURCE_ROOT/config/personas/$PERSONA" >&2; exit 1
 fi
 cp "$REPO_ROOT/config/tool_policy.toml" "$BASE_PATH/.masc/config/tool_policy.toml" 2>/dev/null || true
 

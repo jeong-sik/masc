@@ -82,7 +82,11 @@ keepers that run **real autonomous turns** against `mock_openai_provider.py` (ne
 probes `/health` while those keepers and optional host hogs contend for the one main Eio domain.
 
 ```bash
-scripts/harness/perf/keeper_load_gate.sh --keepers 12 --levels "0 15" --probes 25
+# MASC_PERSONA_SOURCE_ROOT points at a populated MASC root (one with
+# config/personas/<persona>); the gate copies that persona into its ephemeral
+# base path. It is resolved from an explicit path, never home-anchored (SSOT-R6).
+MASC_PERSONA_SOURCE_ROOT=<your-masc-root> \
+  scripts/harness/perf/keeper_load_gate.sh --keepers 12 --levels "0 15" --probes 25
 ```
 
 `mock_openai_provider.py` serves `POST /v1/chat/completions` in both non-streaming JSON (the

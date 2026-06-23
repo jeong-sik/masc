@@ -39,11 +39,36 @@ let test_attach_usage_on_parse_failure () =
       usage
   | Ok _ -> fail "expected Error with usage"
 
+let test_sum_error_usage_folds_all_failures () =
+  (* 적대 리뷰 #22093 all-fail: judge-of-judges 전원 실패 시 첫 에러의 usage만 전파하면
+     나머지 심판이 (병렬로) 태운 토큰을 잃어 비용을 undercount한다. sum_error_usage는
+     모든 Error usage를 합산하고 Ok는 무시함을 핀한다. *)
+  let u input_tokens output_tokens : Fusion_types.usage =
+    { Fusion_types.input_tokens; output_tokens }
+  in
+  let results =
+    [ ("j1", Error ("boom1", u 100 10))
+    ; ("j2", Ok (sample_synthesis, u 999 999)) (* Ok 원소는 무시되어야 함 *)
+    ; ("j3", Error ("boom3", u 25 5))
+    ]
+  in
+  check usage_t "sums every failed judge's usage and ignores Ok" (u 125 15)
+    (Fusion_types.sum_error_usage results)
+
+let test_sum_error_usage_empty_is_zero () =
+  check usage_t "no results -> zero usage" Fusion_types.zero_usage
+    (Fusion_types.sum_error_usage [])
+
 let () =
   run "fusion_judge_usage"
     [ ( "attach_usage"
       , [ test_case "success carries usage" `Quick test_attach_usage_on_success
         ; test_case "parse failure carries usage" `Quick
             test_attach_usage_on_parse_failure
+        ] )
+    ; ( "sum_error_usage"
+      , [ test_case "folds all failures, ignores Ok" `Quick
+            test_sum_error_usage_folds_all_failures
+        ; test_case "empty is zero" `Quick test_sum_error_usage_empty_is_zero
         ] )
     ]

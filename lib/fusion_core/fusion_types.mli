@@ -27,6 +27,11 @@ val zero_usage : usage
 (** 두 사용량의 합 (패널 N + 심판 회계용). *)
 val add_usage : usage -> usage -> usage
 
+(** [sum_error_usage results]는 [results]의 [Error] 원소가 소비한 usage를 모두 합산한다
+    ([Ok]은 무시). 전원 실패 등 degrade 경로에서 첫 에러의 usage만 전파해 나머지 심판이
+    태운 토큰을 잃는 undercount를 막는다(적대 리뷰 #22093 all-fail). *)
+val sum_error_usage : ('id * ('ok, 'msg * usage) result) list -> usage
+
 (** {1 재귀 가드} *)
 
 (** 심의 깊이. OpenRouter의 [x-openrouter-fusion-depth] 헤더에 대응하는 타입드

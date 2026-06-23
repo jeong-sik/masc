@@ -607,7 +607,7 @@ export function CopilotDockFab({ dock }: { dock: CopilotDockApi }) {
       aria-label="Open Chat Dock"
       title="Chat Dock 열기 (⌘J)"
     >
-      <span class="spark"><${MessageCircle} size=${20} strokeWidth=${2.4} aria-hidden="true" /></span>
+      <span class="spark"><${Sparkles} size=${17} aria-hidden="true" /></span>
       <span class="dock-fab-label">Chat</span>
     </button>
   `
@@ -623,7 +623,7 @@ export function CopilotDockTopBarButton({ dock }: { dock: CopilotDockApi }) {
       data-testid="copilot-dock-topbar-button"
       aria-label="Toggle Chat Dock"
     >
-      <${MessageCircle} class="spark" size=${14} strokeWidth=${2.2} aria-hidden="true" />
+      <${Sparkles} class="spark" size=${14} aria-hidden="true" />
       <span>Chat</span>
       <kbd>⌘J</kbd>
     </button>

@@ -323,6 +323,12 @@ let audit_severity ~action ~outcome =
       | Governance_deny | Governance_unauthorized -> "warn"
       | _ -> "info")
     | CircuitClose -> "warn"
+    (* A successful runtime.toml write rewrites global keeper routing
+       (RFC-0273 §3.2: the highest-risk surface). Surface it above
+       routine info events so a severity-filtered audit scan catches it,
+       consistent with [CircuitClose] elevating a significant successful
+       transition to "warn". *)
+    | RuntimeConfigWrite -> "warn"
     | _ -> "info")
 
 (** Build a human-readable one-line summary from action + details. *)

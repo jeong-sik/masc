@@ -156,7 +156,11 @@ let test_codec_empty_payload () =
 
 (* RFC-0273 §3.3 — the dashboard runtime.toml write logs a RuntimeConfigWrite
    action. Lock the operator-facing event projection: kind/summary/target must
-   surface the config path (not the body, which can carry provider secrets). *)
+   surface the config path (not the body, which can carry provider secrets).
+   Severity must be "warn" even on success: a runtime.toml write rewrites global
+   keeper routing (RFC-0273 §3.2, highest-risk surface), so it must rank above
+   routine info events in a severity-filtered audit scan. Without this assertion
+   a wildcard refactor in [audit_severity] could silently demote it to "info". *)
 let test_runtime_config_write_event_projection () =
   let entry : Audit_log.audit_entry =
     {
@@ -189,7 +193,8 @@ let test_runtime_config_write_event_projection () =
   check string "kind" "runtime_config_write" (field "kind");
   check string "summary" "runtime.toml updated: /x/config/runtime.toml"
     (field "summary");
-  check string "target" "/x/config/runtime.toml" (field "target")
+  check string "target" "/x/config/runtime.toml" (field "target");
+  check string "severity" "warn" (field "severity")
 
 let () =
   run "Audit_log"

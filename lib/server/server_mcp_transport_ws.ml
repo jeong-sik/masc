@@ -1149,7 +1149,9 @@ let mcp_websocket_handler
 
 (** Perform the HTTP/1.1 -> WebSocket upgrade and drive the resulting
     connection.  Single source of truth for attaching an upgraded
-    socket to a [Httpun_ws.Server_connection.t]: it sends the 101 via
+    socket to a ws-direct [Ws_endpoint] (Server role) packaged as a
+    [Gluten.impl] — drop-in for the former [Httpun_ws.Server_connection.t]
+    (RFC-0287 §4.1): it sends the 101 via
     [respond_with_upgrade], then hands the connection to the Gluten
     runtime via [upgrade].  Omitting the [upgrade] call (the
     pre-RFC-0281 defect) left the connection undriven, so inbound frames

@@ -43,6 +43,11 @@ val first_error_message : ('id * ('ok, 'msg * usage) result) list -> 'msg option
 val all_fail_error :
   fallback:'msg -> ('id * ('ok, 'msg * usage) result) list -> 'msg * usage
 
+(** [sum_all_usage results]는 [Ok]·[Error] 양 분기 usage를 모두 합산한다. 일부 성공/일부
+    실패한 fan-out(JOJ 1차 심판 등)이 태운 *모든* 토큰을 보존한다. 성공분 fold와 실패분
+    fold를 따로 더하던 부분-실패 경로를 단일 합산으로 단순화한다(적대 리뷰 #22134). *)
+val sum_all_usage : ('id * ('a * usage, 'b * usage) result) list -> usage
+
 (** {1 재귀 가드} *)
 
 (** 심의 깊이. OpenRouter의 [x-openrouter-fusion-depth] 헤더에 대응하는 타입드

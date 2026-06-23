@@ -85,6 +85,26 @@ let test_all_fail_error_no_errors_uses_fallback () =
   check string "no errors -> fallback message" "FALLBACK" msg;
   check usage_t "empty results -> zero usage" Fusion_types.zero_usage usage
 
+let test_sum_all_usage_folds_ok_and_error () =
+  (* 적대 리뷰 #22134 partial-fail: 1차 일부 성공/일부 실패 시 meta가 성공하면 *모든* 1차
+     심판이 태운 토큰(성공분 + 실패분)을 비용에 실어야 한다. sum_all_usage는 Ok와 Error를
+     모두 합산함을 핀한다 — sum_error_usage(실패분만, 위 테스트)와 대비된다. *)
+  let u input_tokens output_tokens : Fusion_types.usage =
+    { Fusion_types.input_tokens; output_tokens }
+  in
+  let results =
+    [ ("j1", Error ("boom1", u 100 10))
+    ; ("j2", Ok (sample_synthesis, u 999 999)) (* Ok도 합산되어야 함 *)
+    ; ("j3", Error ("boom3", u 25 5))
+    ]
+  in
+  check usage_t "sums every judge's usage, Ok and Error alike" (u 1124 1014)
+    (Fusion_types.sum_all_usage results)
+
+let test_sum_all_usage_empty_is_zero () =
+  check usage_t "no results -> zero usage" Fusion_types.zero_usage
+    (Fusion_types.sum_all_usage [])
+
 let () =
   run "fusion_judge_usage"
     [ ( "attach_usage"
@@ -102,5 +122,10 @@ let () =
             test_all_fail_error_sums_usage_and_first_msg
         ; test_case "no errors -> fallback + zero usage" `Quick
             test_all_fail_error_no_errors_uses_fallback
+        ] )
+    ; ( "sum_all_usage"
+      , [ test_case "folds Ok and Error usage alike" `Quick
+            test_sum_all_usage_folds_ok_and_error
+        ; test_case "empty is zero" `Quick test_sum_all_usage_empty_is_zero
         ] )
     ]

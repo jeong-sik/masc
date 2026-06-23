@@ -87,7 +87,8 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
              런타임 에러 = fail-closed). 1차는 [Eio.Fiber.List.map ~max_fibers]로 병렬(패널
              fan-out과 동일 fault-isolation idiom — Fusion_judge.run이 per-judge 실패를 Error로
              격리하므로 한 심판 실패가 나머지를 안 죽인다). 성공 종합만 meta 입력, 전원 실패면
-             첫 에러 전파. usage = 성공 1차 전부 + meta 합산. meta 실패 시 1차 첫 성공으로
+             첫 에러 전파. usage = 모든 1차 심판(성공·실패) + meta 합산(적대 리뷰 #22093
+             B-1). meta 실패 시 1차 첫 성공으로
              graceful degrade(RFC-0283 §5.1, warn) — meta가 태운 토큰(meta_u)도 합산해
              버리지 않는다(#22087 §1과 동일 원칙). 에러는 (string * usage) 동반: 토큰 소비 전
              구성 실패는 [zero_usage]를 싣는다. *)
@@ -117,25 +118,31 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                     match r with Ok (s, u) -> Some (id, s, u) | Error _ -> None)
                   firsts
               in
+              (* usage = 모든 1차 심판(성공·실패)이 태운 토큰 합. 실패 심판도 토큰을
+                 소비하므로 ok_priors가 아닌 firsts 전체에서 회수한다(적대 리뷰 #22093 B-1:
+                 filter_map의 [Error -> None]이 failed-first usage를 버리던 것을 교정). *)
+              let firsts_usage =
+                List.fold_left
+                  (fun acc (_, r) ->
+                    let u = match r with Ok (_, u) -> u | Error (_, u) -> u in
+                    Fusion_types.add_usage acc u)
+                  Fusion_types.zero_usage firsts
+              in
               (match ok_priors with
                | [] ->
-                 (* 전원 실패 — meta할 종합 없음. 첫 에러를 대표로 전파(usage 동반). *)
-                 (match
-                    List.find_map
-                      (fun (_, r) -> match r with Error e -> Some e | Ok _ -> None)
-                      firsts
-                  with
-                  | Some e -> Error e
+                 (* 전원 실패 — meta할 종합 없음. 첫 에러 메시지를 대표로 전파하되,
+                    모든 1차 심판이 태운 usage를 동반한다(비용 회계 보존). *)
+                 let first_error =
+                   List.find_map
+                     (fun (_, r) -> match r with Error (e, _) -> Some e | Ok _ -> None)
+                     firsts
+                 in
+                 (match first_error with
+                  | Some e -> Error (e, firsts_usage)
                   | None ->
                     Error
-                      ( "judge_of_judges: no judge produced a synthesis"
-                      , Fusion_types.zero_usage ))
+                      ("judge_of_judges: no judge produced a synthesis", firsts_usage))
                | (_, first_s, _) :: _ ->
-                 let firsts_usage =
-                   List.fold_left
-                     (fun acc (_, _, u) -> Fusion_types.add_usage acc u)
-                     Fusion_types.zero_usage ok_priors
-                 in
                  let priors = List.map (fun (id, s, _) -> (id, s)) ok_priors in
                  (match
                     Fusion_judge.run_meta ~sw ~net

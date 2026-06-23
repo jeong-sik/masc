@@ -49,8 +49,12 @@
 
 .v2-monitoring-surface .fl-title {
   color: var(--color-fg-primary);
-  font-size: 16px;
-  font-weight: 800;
+  /* Match the vendored prototype fleet title (keeper-v2/fleet.css): display
+     font, weight 600, 18px, tight tracking. Color stays on the live token. */
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
   line-height: 1.1;
 }
 
@@ -73,13 +77,15 @@
   align-items: center;
   min-height: 26px;
   border: 1px solid var(--color-border-default);
-  border-radius: var(--r-1);
+  /* Prototype health pills are full capsules (keeper-v2/fleet.css), not 3px
+     chips. The label inherits body weight 400; the inner count keeps 600 via
+     the vendored `.fl-hpill b` rule (so no font-weight override here). */
+  border-radius: var(--radius-pill);
   background: var(--color-bg-elevated);
   color: var(--color-fg-secondary);
   font-size: 11px;
-  font-weight: 760;
   line-height: 1;
-  padding: 0 10px;
+  padding: 5px 11px;
   white-space: nowrap;
 }
 

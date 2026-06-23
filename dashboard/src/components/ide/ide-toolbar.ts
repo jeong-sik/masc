@@ -187,10 +187,6 @@ export function IdeToolbar({
             tabIndex=${tab.id === activeView ? 0 : -1}
             onClick=${() => onViewChange(tab.id)}
             class=${`${TOOLBAR_BUTTON_BASE} ${VIEW_TAB_BASE}`}
-            style=${{
-              background: 'transparent',
-              color: tab.id === activeView ? 'var(--color-fg-primary)' : 'var(--color-fg-muted)',
-            }}
           >${tab.label}</button>
         `)}
       </div>

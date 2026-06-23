@@ -451,10 +451,12 @@
 
 /* ── Task row ─────────────────────────────────────────────────────────────── */
 .wk-task {
+  /* No row padding here — the prototype's inner .wk-task-main supplies it
+     (vendored v2.css:830, 7px 8px). flex-column/gap stays: it lays out the
+     expanded .wk-task-detail block below .wk-task-main. */
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px 8px;
   border-radius: var(--radius-sm);
 }
 

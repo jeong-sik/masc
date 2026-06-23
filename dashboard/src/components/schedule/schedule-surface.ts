@@ -56,11 +56,13 @@ export function ScheduleSurface() {
     <main class="ov sch-surf" data-screen-label="예약" data-testid="schedule-surface">
       <div class="ov-scroll">
         <header class="ov-head">
-          <div class="ov-eyebrow">Schedule</div>
-          <h1>예약 · 자동화 큐</h1>
-          <p class="ov-sub">
-            keeper가 예약한 미래 작업 · operator가 due 전 승인 · <span class="mono">lib/schedule</span>
-          </p>
+          <div>
+            <span class="ov-eyebrow">Schedule</span>
+            <h1>예약 · 자동화 큐</h1>
+            <p class="ov-sub">
+              keeper가 예약한 미래 작업 · operator가 due 전 승인 · <span class="mono">lib/schedule</span>
+            </p>
+          </div>
         </header>
 
         ${error ? html`<${ErrorState} message=${error} class="mb-4" />` : null}

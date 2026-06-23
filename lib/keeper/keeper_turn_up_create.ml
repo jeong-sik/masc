@@ -178,44 +178,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                   ~preferred:p.tool_denylist_opt
                   ~fallback:p.profile_defaults.tool_denylist
               in
-              let will =
-                Option.value
-                  ~default:
-                    (Option.value ~default:(Env_config_core.keeper_will ())
-                       p.profile_defaults.will)
-                  p.will_opt
-              in
-              let needs =
-                Option.value
-                  ~default:
-                    (Option.value ~default:(Env_config_core.keeper_needs ())
-                       p.profile_defaults.needs)
-                  p.needs_opt
-              in
-              let desires =
-                Option.value
-                  ~default:
-                    (Option.value ~default:(Env_config_core.keeper_desires ())
-                       p.profile_defaults.desires)
-                  p.desires_opt
-              in
-              (* Layer 1 boundary check: warn (not truncate) when persona
-                 fields exceed the prompt-render cap.  Disk preserves the
-                 raw value; only prompt rendering applies the cap.  This
-                 surfaces the situation at create time so the operator can
-                 decide whether to shorten the source. *)
-              let warn_personality_cap field value =
-                let len = String.length value in
-                if len > Keeper_config.prompt_render_max_bytes then
-                  Log.Keeper.warn
-                    "create_keeper personality.%s for %s exceeds prompt cap \
-                     (%d bytes > %d). Stored as-is; truncated only at prompt \
-                     rendering."
-                    field p.name len Keeper_config.prompt_render_max_bytes
-              in
-              warn_personality_cap "will" will;
-              warn_personality_cap "needs" needs;
-              warn_personality_cap "desires" desires;
               let (short_goal, mid_goal, long_goal) =
                 resolve_goal_horizons
                   ~goal
@@ -343,9 +305,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~short_goal
             ~mid_goal
             ~long_goal
-            ~will
-            ~needs
-            ~desires
             ~instructions
             ~persona_extended
             ~keeper_name:p.name
@@ -370,9 +329,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         short_goal;
         mid_goal;
         long_goal;
-        will;
-        needs;
-        desires;
         instructions;
         sandbox_profile;
         sandbox_image = None;
@@ -552,9 +508,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("short_goal", `String meta.short_goal);
           ("mid_goal", `String meta.mid_goal);
           ("long_goal", `String meta.long_goal);
-          ("will", `String meta.will);
-          ("needs", `String meta.needs);
-          ("desires", `String meta.desires);
           ("instructions", `String meta.instructions);
           ("tool_access", Json_util.json_string_list meta.tool_access);
           ("tool_denylist",

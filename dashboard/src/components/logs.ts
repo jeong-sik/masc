@@ -16,6 +16,7 @@ import { TextInput } from './common/input'
 import { Select } from './common/select'
 import { Checkbox } from './common/checkbox'
 import { LogFilter } from './common/log-filter'
+import { RouteLink } from './common/route-link'
 import { KeeperBadge } from './keeper-badge'
 import { createAsyncResource, loaded } from '../lib/async-state'
 import { toolCategory } from './tool-call-shared'
@@ -643,11 +644,66 @@ async function loadSelectedProviderLog() {
   )
 }
 
+// Pretty-print a nested details value as a JSON code block body, matching the
+// keeper-v2 prototype (`JSON.stringify(value, null, 1)`). Returns null for empty
+// objects/arrays/strings so absent payloads render no `lg-code` block at all
+// (no fabricated "{}" placeholders). Strings pass through verbatim — the backend
+// already emits some results as pre-rendered strings.
+function formatDetailCode(value: unknown): string | null {
+  if (value == null) return null
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed === '' ? null : trimmed
+  }
+  if (typeof value === 'object') {
+    if (Array.isArray(value) && value.length === 0) return null
+    if (!Array.isArray(value) && Object.keys(value as Record<string, unknown>).length === 0) return null
+    try {
+      return JSON.stringify(value, null, 1)
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+// Read a free-form note/gloss string from the details object. The backend
+// `details` schema is `record(string, unknown)`, so these keys are not
+// guaranteed to be present — callers render the `lg-note` block only when this
+// returns a non-empty value.
+function detailNote(details: Record<string, unknown> | null, ...keys: string[]): string | null {
+  if (!details) return null
+  for (const key of keys) {
+    const value = details[key]
+    if (typeof value === 'string' && value.trim() !== '') return value.trim()
+  }
+  return null
+}
+
+// Read a recipients[] array of human-readable strings from the details object.
+// Not present in the general log stream today (the backend emits scalar detail
+// fields only) — render conditionally so this never shows fabricated chips.
+function detailRecipients(details: Record<string, unknown> | null): string[] {
+  if (!details) return []
+  const value = details.recipients
+  if (!Array.isArray(value)) return []
+  return value
+    .map(item => (typeof item === 'string' ? item.trim() : ''))
+    .filter(item => item !== '')
+}
+
 // Kind-aware key/value grid for the expanded detail panel. Fields are pulled
 // from the backend `details` object via detailLabel; absent fields are dropped
-// so the layout matches the Observatory reference when the data is present and
+// so the layout matches the keeper-v2 prototype when the data is present and
 // degrades gracefully (no row) otherwise. The generic level/module/source/
 // timestamp grid and tag row below it are preserved for every kind.
+//
+// Class vocabulary: each k/v grid carries the prototype `.lg-kv`/`.lg-kv-row`/
+// `.lg-kv-k`/`.lg-kv-v` classes (vendored keeper-v2/logs.css, loaded last) plus
+// the legacy `.v2-logs-detail-grid`/`.v2-logs-kind-grid` classes the tests
+// query. The per-kind payload blocks (args/result code, note, recipients, the
+// HILT jump) use the prototype `.lg-block`/`.lg-code`/`.lg-note`/`.lg-recips`/
+// `.lg-jump` classes and render only when their data is present.
 function renderLogKindGrid(
   kind: LogDisplayKind,
   details: Record<string, unknown> | null,
@@ -655,18 +711,31 @@ function renderLogKindGrid(
   if (!details) return null
   const d = detailLabel
   const row = (k: string, v: string | null): VNode | null =>
-    v && v !== '' ? html`<div><span>${k}</span><b class="mono">${v}</b></div>` : null
+    v && v !== '' ? html`<div class="lg-kv-row"><span class="lg-kv-k mono">${k}</span><b class="lg-kv-v mono">${v}</b></div>` : null
   const grid = (...rows: Array<VNode | null>): VNode | null => {
     const filled = rows.filter((r): r is VNode => r !== null)
-    return filled.length ? html`<div class="v2-logs-detail-grid v2-logs-kind-grid">${filled}</div>` : null
+    return filled.length ? html`<div class="v2-logs-detail-grid v2-logs-kind-grid lg-kv">${filled}</div>` : null
   }
+  const codeBlock = (label: string, value: unknown): VNode | null => {
+    const body = formatDetailCode(value)
+    return body === null
+      ? null
+      : html`<div class="lg-block"><span class="lg-block-h">${label}</span><pre class="lg-code">${body}</pre></div>`
+  }
+  const note = (text: string | null, dim = false): VNode | null =>
+    text ? html`<div class=${`lg-note${dim ? ' dim' : ''}`}>${text}</div>` : null
+
   if (kind === 'tool') {
-    return grid(
-      row('tool', d(details, 'tool_name') ?? d(details, 'tool')),
-      row('outcome', d(details, 'outcome') ?? d(details, 'status')),
-      row('latency', d(details, 'latency_ms') ?? d(details, 'duration_ms') ?? d(details, 'dur')),
-      row('namespace', d(details, 'namespace') ?? d(details, 'ns')),
-    )
+    return html`
+      ${grid(
+        row('tool', d(details, 'tool_name') ?? d(details, 'tool')),
+        row('outcome', d(details, 'outcome') ?? d(details, 'status')),
+        row('latency', d(details, 'latency_ms') ?? d(details, 'duration_ms') ?? d(details, 'dur')),
+        row('namespace', d(details, 'namespace') ?? d(details, 'ns')),
+      )}
+      ${codeBlock('args', details.tool_args ?? details.args ?? details.input)}
+      ${codeBlock('result', details.result ?? details.output)}
+    `
   }
   if (kind === 'turn') {
     const tools = (details as { tools_used?: unknown }).tools_used
@@ -679,27 +748,49 @@ function renderLogKindGrid(
     )
   }
   if (kind === 'lifecycle') {
-    return grid(
-      row('from', d(details, 'from') ?? d(details, 'phase')),
-      row('to', d(details, 'to') ?? d(details, 'next_phase')),
-      row('trigger', d(details, 'trigger')),
-    )
+    return html`
+      ${grid(
+        row('from', d(details, 'from') ?? d(details, 'phase')),
+        row('to', d(details, 'to') ?? d(details, 'next_phase')),
+        row('trigger', d(details, 'trigger')),
+      )}
+      ${note(detailNote(details, 'gloss'))}
+    `
   }
   if (kind === 'approval') {
     const goalJob = [d(details, 'goal_id') ?? d(details, 'goal'), d(details, 'job_id') ?? d(details, 'job')]
       .filter((v): v is string => v !== null)
       .join(' · ')
-    return grid(
-      row('tool', d(details, 'tool')),
-      row('severity', d(details, 'severity')),
-      row('goal · job', goalJob || null),
-    )
+    const request = detailNote(details, 'req', 'request')
+    const extra = detailNote(details, 'detail')
+    return html`
+      ${grid(
+        row('tool', d(details, 'tool')),
+        row('severity', d(details, 'severity')),
+        row('goal · job', goalJob || null),
+      )}
+      ${request ? html`<div class="lg-note">“${request}”</div>` : null}
+      ${note(extra, true)}
+      <${RouteLink}
+        tab="approvals"
+        class="lg-jump"
+        data-testid="logs-approval-jump"
+        aria-label="HILT 승인 큐 열기"
+      >HILT 승인 큐 열기 →<//>
+    `
   }
   if (kind === 'broadcast') {
-    return grid(
-      row('scope', d(details, 'scope') ?? d(details, 'namespace')),
-      row('via', d(details, 'via') ?? d(details, 'channel')),
-    )
+    const recipients = detailRecipients(details)
+    return html`
+      ${grid(
+        row('scope', d(details, 'scope') ?? d(details, 'namespace')),
+        row('via', d(details, 'via') ?? d(details, 'channel')),
+      )}
+      ${note(detailNote(details, 'note'))}
+      ${recipients.length > 0
+        ? html`<div class="lg-recips">${recipients.map((r, i) => html`<span key=${i} class="lg-recip mono">${r}</span>`)}</div>`
+        : html`<div class="lg-recips" data-stub="no-recipients-source"><span class="lg-note dim">수신자 정보 없음 (현재 스트림에 수신자 데이터 없음)</span></div>`}
+    `
   }
   return null
 }
@@ -749,7 +840,7 @@ function renderLogRow(entry: LogEntry) {
   return html`
     <div
       key=${entry.seq}
-      class=${`logs-row v2-logs-row ${isExpanded ? 'is-open' : ''}`}
+      class=${`logs-row v2-logs-row lg-row ${isExpanded ? 'is-open open' : ''}`}
       data-testid="logs-row"
       data-log-seq=${entry.seq}
       data-sev=${severity}
@@ -757,22 +848,22 @@ function renderLogRow(entry: LogEntry) {
     >
       <button
         type="button"
-        class="v2-logs-line"
+        class="v2-logs-line lg-line"
         aria-expanded=${isExpanded}
         onClick=${() => {
           expandedLogSeq.value = isExpanded ? null : entry.seq
         }}
       >
-        <span class="v2-logs-time mono">${formatLogClock(entry.ts)}</span>
-        <span class="v2-logs-who">
+        <span class="v2-logs-time lg-time mono">${formatLogClock(entry.ts)}</span>
+        <span class="v2-logs-who lg-who">
           <${KeeperBadge} id=${identity} variant="sigil" size="md" title=${identity} />
-          <span class="v2-logs-identity" title=${identity}>${identity}</span>
+          <span class="v2-logs-identity lg-kid" title=${identity}>${identity}</span>
         </span>
-        <span class="v2-logs-kind" data-kind=${displayKind}>${LOG_KIND_LABELS[displayKind]}</span>
-        <span class="v2-logs-message" title=${failure ? `${renderedMessage}\n${failure.summary}` : renderedMessage}>
+        <span class="v2-logs-kind lg-kind" data-kind=${displayKind}>${LOG_KIND_LABELS[displayKind]}</span>
+        <span class="v2-logs-message lg-msg" title=${failure ? `${renderedMessage}\n${failure.summary}` : renderedMessage}>
           ${renderedMessage}
         </span>
-        <span class="v2-logs-caret" aria-hidden="true">
+        <span class="v2-logs-caret lg-caret" aria-hidden="true">
           ${isExpanded ? html`<${ChevronDown} size=${14} />` : html`<${ChevronRight} size=${14} />`}
         </span>
       </button>
@@ -781,7 +872,7 @@ function renderLogRow(entry: LogEntry) {
         : null}
       ${isExpanded
         ? html`
-          <div class="v2-logs-detail">
+          <div class="v2-logs-detail lg-detail">
             ${renderLogKindGrid(displayKind, details) ?? ''}
             <div class="v2-logs-detail-grid">
               <div><span>level</span><b style=${{ color: LEVEL_COLORS[level] ?? 'inherit' }}>${level}</b></div>
@@ -1083,29 +1174,29 @@ export function LogViewer() {
   const providerDiagnostics = renderProviderLogPanel()
 
   return html`
-    <div class="logs-viewer v2-logs-surface">
+    <div class="logs-viewer v2-logs-surface lg">
       <section class="v2-logs-panel" aria-label="로그 뷰어">
-        <header class="v2-logs-head">
-          <div class="v2-logs-head-main">
-            <p class="v2-logs-eyebrow">Observatory</p>
+        <header class="v2-logs-head lg-head">
+          <div class="v2-logs-head-main lg-head-l">
+            <span class="v2-logs-eyebrow ov-eyebrow">Observatory</span>
             <h1>이벤트 로그</h1>
-            <p class="v2-logs-sub mono">live trace stream · masc runtime · ${logWindowLabel(logEntries)}</p>
+            <p class="v2-logs-sub lg-sub mono">live trace stream · masc runtime · ${logWindowLabel(logEntries)}</p>
           </div>
-          <div class="v2-logs-stats" aria-label="로그 요약">
-            <div class="v2-logs-stat"><span class="k">이벤트/분</span><span class="v mono">${eventRatePerMinute(logEntries)}</span></div>
-            <div class="v2-logs-stat"><span class="k">오류율</span><span class=${`v mono ${summary.errors > 0 ? 'bad' : ''}`}>${errRate}%</span></div>
-            <div class="v2-logs-stat"><span class="k">tool 호출</span><span class="v mono">${toolCalls}</span></div>
-            <div class="v2-logs-stat"><span class="k">활성 keeper</span><span class="v mono">${logActiveIdentityCount(logEntries)}</span></div>
+          <div class="v2-logs-stats lg-stats" aria-label="로그 요약">
+            <div class="v2-logs-stat lg-stat"><span class="k">이벤트/분</span><span class="v mono">${eventRatePerMinute(logEntries)}</span></div>
+            <div class="v2-logs-stat lg-stat"><span class="k">오류율</span><span class=${`v mono ${summary.errors > 0 ? 'bad' : ''}`}>${errRate}%</span></div>
+            <div class="v2-logs-stat lg-stat"><span class="k">tool 호출</span><span class="v mono">${toolCalls}</span></div>
+            <div class="v2-logs-stat lg-stat"><span class="k">활성 keeper</span><span class="v mono">${logActiveIdentityCount(logEntries)}</span></div>
           </div>
         </header>
 
-        <div class="logs-toolbar v2-logs-toolbar">
-          <div class="logs-filters v2-logs-filters">
+        <div class="logs-toolbar v2-logs-toolbar lg-toolbar">
+          <div class="logs-filters v2-logs-filters lg-filters">
             ${LOG_KIND_FILTERS.map(filter => html`
               <${LogFilter}
                 key=${filter.value || 'all'}
                 active=${kindFilter.value === filter.value}
-                class="v2-logs-filter-chip"
+                class="v2-logs-filter-chip lg-fchip"
                 data-testid=${`logs-filter-${filter.value || 'all'}`}
                 onClick=${() => {
                   kindFilter.value = filter.value
@@ -1114,13 +1205,13 @@ export function LogViewer() {
             `)}
           </div>
 
-          <div class="v2-logs-toolbar-break"></div>
+          <div class="v2-logs-toolbar-break lg-tb-spacer"></div>
 
           <div class="logs-actions v2-logs-actions">
             ${renderLogProvenance(logData)}
             <button
               type="button"
-              class=${`v2-logs-attention ${levelFilter.value === 'WARN' ? 'on' : ''}`}
+              class=${`v2-logs-attention lg-onlyerr ${levelFilter.value === 'WARN' ? 'on' : ''}`}
               aria-pressed=${levelFilter.value === 'WARN'}
               onClick=${() => { levelFilter.value = levelFilter.value === 'WARN' ? 'INFO' : 'WARN' }}
             >
@@ -1206,7 +1297,7 @@ export function LogViewer() {
               />
               자동
             </label>
-            <span class="v2-logs-live mono"><span class="dot" />${autoRefresh.value ? `masc-mcp · 3s polling · ${eventRatePerMinute(logEntries)}δ/min` : 'masc-mcp · WS paused'}</span>
+            <span class="v2-logs-live lg-live mono"><span class="dot" />${autoRefresh.value ? `masc-mcp · 3s polling · ${eventRatePerMinute(logEntries)}δ/min` : 'masc-mcp · WS paused'}</span>
             <button
               type="button"
               class="logs-refresh-btn v2-logs-refresh"
@@ -1246,7 +1337,7 @@ export function LogViewer() {
             : null}
         </div>
 
-        <div class="v2-logs-table-header">
+        <div class="v2-logs-table-header lg-colhd">
           <span>시각</span>
           <span>keeper</span>
           <span>유형</span>
@@ -1256,7 +1347,7 @@ export function LogViewer() {
 
         ${visibleEntries.length === 0
           ? html`
-              <div class="flex flex-1 items-center justify-center px-6 text-sm text-[var(--color-fg-muted)]" role="status">
+              <div class="lg-empty" role="status">
                 ${emptyMessage}
               </div>
             `
@@ -1267,7 +1358,7 @@ export function LogViewer() {
                 overscan=${6}
                 getKey=${(entry: LogEntry) => String(entry.seq)}
                 renderItem=${(entry: LogEntry) => renderLogRow(entry)}
-                className="v2-logs-stream"
+                className="v2-logs-stream lg-stream"
               />
             `}
 

@@ -1478,16 +1478,25 @@ export function isKeeperDetailDashboardRoute(routeState: RouteState): boolean {
 //   settings   → settings-surface.ts   <header class="set-content-h"> <h1>…</h1>
 //   connectors → connector-status.ts   (prototype surface, own header)
 //
-// A second group renders the shared SurfaceHeader component (header.v2-surface-header)
-// at the top of their own body — the documented replacement for the generic lead
-// (see surface-header.test.ts). They must be listed here too, otherwise the shell
-// stacks SurfaceLead above SurfaceHeader and the title renders twice:
+// A second group renders their own primary header inside their body — the v2
+// migration moved the header decision into each surface: monitoring/command/lab
+// render the shared SurfaceHeader at their own call site (status.ts,
+// operations-panel.ts, lab.ts), board renders its own header (#22021), and the
+// reskinned prototype surfaces carry a bespoke header. They must be listed here
+// too, otherwise the shell stacks SurfaceLead above that header and the title
+// renders twice (the duplicate "Keeper Fleet" header observed on #monitoring,
+// 2026-06-22):
 //   monitoring → status.ts           <SurfaceHeader> <h1>Keeper Fleet</h1>
 //   command    → operations-panel.ts <SurfaceHeader> <h1>Actions</h1>
 //   lab        → lab.ts              <SurfaceHeader> <h1>Tools</h1>
 //   board      → board-surface.ts    <SurfaceHeader> <h1>Board</h1> (#22021)
 //
 // Surfaces that still rely on the generic SurfaceLead for their title: keepers, code.
+//
+// WORKAROUND: this allow-list is the exact N-of-M pattern surface-header.ts set
+// out to delete (a list the compiler cannot keep in sync with reality). Root fix:
+// drop SurfaceLead/SURFACE_OWN_LEAD_IDS entirely and give every surface its own
+// header. Tracked as a follow-up; corrected here so live surfaces stop double-rendering.
 const SURFACE_OWN_LEAD_IDS: ReadonlySet<TabId> = new Set([
   'overview',
   'approvals',
@@ -1498,8 +1507,8 @@ const SURFACE_OWN_LEAD_IDS: ReadonlySet<TabId> = new Set([
   'cockpit',
   'settings',
   'connectors',
-  // Render the shared SurfaceHeader in their own body; without these the generic
-  // SurfaceLead stacked a duplicate title above each (board regressed in #22021,
+  // Each renders its own header in its body; without these the generic SurfaceLead
+  // stacked a duplicate title above each (board regressed in #22021,
   // monitoring/command/lab carried the same gap from their SurfaceHeader adoption).
   'monitoring',
   'command',

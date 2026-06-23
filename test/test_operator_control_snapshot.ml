@@ -168,7 +168,12 @@ let test_max_turns_override_source_accepts_raised_ceiling () =
   Alcotest.(check string) "missing override comes from env" "env"
     (Operator_control_snapshot.max_turns_override_source None)
 
-let test_compute_context_ratio_does_not_infer_provider_budget () =
+let test_compute_context_ratio_resolves_budget_and_clamps_at_ceiling () =
+  (* The runtime_id ("primary") resolves to an effective context budget via
+     [Keeper_context_runtime]; [last_input_tokens] here is deliberately above
+     that budget, so the ratio is clamped to the [0,1] ceiling (1.0). The
+     pre-#22080 stub returned [None] (no budget was ever inferred); this test
+     now pins the resolved+clamped behaviour, not the absence of inference. *)
   let base =
     match
       Masc_test_deps.meta_of_json_fixture
@@ -192,13 +197,14 @@ let test_compute_context_ratio_does_not_infer_provider_budget () =
           usage =
             {
               base.runtime.usage with
+              (* over-budget on purpose: ratio clamps to 1.0 *)
               last_input_tokens = 2_106_223;
             };
         };
     }
   in
   Alcotest.(check (option (float 0.0001)))
-    "model/provider label does not imply context budget" (Some 1.0)
+    "resolved budget clamps an over-budget ratio to 1.0" (Some 1.0)
     (Operator_control_snapshot.compute_context_ratio meta)
 
 let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =

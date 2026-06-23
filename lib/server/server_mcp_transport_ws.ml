@@ -40,6 +40,29 @@ type dashboard_auth_state =
   | Unauthenticated
   | Authenticated of { agent : string option }
 
+(** Inbound WebSocket frame reassembly state.  A single message may arrive
+    across several frames (an initial [`Text]/[`Binary] with [is_fin = false]
+    followed by [`Continuation] frames); this holds the partial buffer until
+    the final fragment.  Shared SSOT for inbound framing across the MCP session
+    handler and the IDE LSP proxy so both reassemble fragments and enforce the
+    same size caps (RFC-0281 §3.2). *)
+module Ws_inbound = struct
+  type t =
+    { mutable partial : Buffer.t option
+    ; mutable partial_bytes : int
+    }
+
+  let create () = { partial = None; partial_bytes = 0 }
+
+  (** Drop any buffered partial message (on reject or close). *)
+  let reset t =
+    t.partial <- None;
+    t.partial_bytes <- 0
+
+  (** Bytes buffered so far for an in-progress fragmented message. *)
+  let buffered_bytes t = t.partial_bytes
+end
+
 (** Active WebSocket session state. *)
 type ws_session = {
   id: string;
@@ -79,8 +102,7 @@ type ws_session = {
       seqs are intentionally excluded because the browser only ACKs deltas. *)
   mutable dashboard_last_delta_seq: int;
   mutable dashboard_last_delta_at: float;
-  mutable inbound_partial_text: Buffer.t option;
-  mutable inbound_partial_text_bytes: int;
+  inbound: Ws_inbound.t;
   inbound_dispatches: int Atomic.t;
 }
 
@@ -232,8 +254,7 @@ let new_session ~id ~wsd =
     dashboard_last_ack_at = now;
     dashboard_last_delta_seq = 0;
     dashboard_last_delta_at = now;
-    inbound_partial_text = None;
-    inbound_partial_text_bytes = 0;
+    inbound = Ws_inbound.create ();
     inbound_dispatches = Atomic.make 0;
   }
 
@@ -1002,58 +1023,100 @@ let close_session_for_inbound_reject session rejection =
       close_detached_session_wsd ~code:`Message_too_big
         ~context:"reject close" detached_session
 
-let handle_inbound_text session ~on_message ~is_fin text =
+(** Outcome of feeding one decoded inbound data frame to
+    {!inbound_accumulate}.  [Inbound_message] carries a fully reassembled
+    application message; [Inbound_incomplete] means the fragment was buffered
+    (or was empty and produced nothing) and more frames are expected;
+    [Inbound_rejected] means a size cap was exceeded and the partial buffer was
+    dropped. *)
+type inbound_read_outcome =
+  | Inbound_message of string
+  | Inbound_incomplete
+  | Inbound_rejected of inbound_size_rejection
+
+(** Reassemble one decoded data-frame chunk into [reader]'s running message,
+    enforcing [max_message_bytes] across fragments.  The only side effect is
+    updating [reader]'s partial buffer, so it is unit testable without a live
+    connection.  Shared SSOT for the MCP session handler and the IDE LSP
+    proxy. *)
+let inbound_accumulate (reader : Ws_inbound.t) ~max_message_bytes ~is_fin text =
   let chunk_len = String.length text in
   let current_bytes =
-    match session.inbound_partial_text with
+    match reader.Ws_inbound.partial with
     | None -> 0
-    | Some _ -> session.inbound_partial_text_bytes
+    | Some _ -> reader.Ws_inbound.partial_bytes
   in
   match
-    classify_inbound_message_size ~current_bytes ~chunk_len
-      ~max_message_bytes:(max_inbound_message_bytes ())
+    classify_inbound_message_size ~current_bytes ~chunk_len ~max_message_bytes
   with
   | Inbound_reject rejection ->
-      session.inbound_partial_text <- None;
-      session.inbound_partial_text_bytes <- 0;
-      close_session_for_inbound_reject session rejection
+      Ws_inbound.reset reader;
+      Inbound_rejected rejection
   | Inbound_accept ->
       let message_bytes = add_bounded_or_max current_bytes chunk_len in
-      match session.inbound_partial_text, is_fin with
-      | None, true ->
-          if chunk_len > 0 then
-            on_message session.id text
-      | None, false ->
-          let initial_size =
-            if chunk_len > max_int / 2 then chunk_len else chunk_len * 2
-          in
-          let buffer = Buffer.create (max 16 initial_size) in
-          Buffer.add_string buffer text;
-          session.inbound_partial_text <- Some buffer;
-          session.inbound_partial_text_bytes <- message_bytes
-      | Some buffer, _ ->
-          Buffer.add_string buffer text;
-          if is_fin then begin
-            session.inbound_partial_text <- None;
-            session.inbound_partial_text_bytes <- 0;
-            let message = Buffer.contents buffer in
-            if String.length message > 0 then
-              on_message session.id message
-          end
-          else
-            session.inbound_partial_text_bytes <- message_bytes
+      (match reader.Ws_inbound.partial, is_fin with
+       | None, true ->
+           if chunk_len > 0 then Inbound_message text else Inbound_incomplete
+       | None, false ->
+           let initial_size =
+             if chunk_len > max_int / 2 then chunk_len else chunk_len * 2
+           in
+           let buffer = Buffer.create (max 16 initial_size) in
+           Buffer.add_string buffer text;
+           reader.Ws_inbound.partial <- Some buffer;
+           reader.Ws_inbound.partial_bytes <- message_bytes;
+           Inbound_incomplete
+       | Some buffer, _ ->
+           Buffer.add_string buffer text;
+           if is_fin
+           then begin
+             Ws_inbound.reset reader;
+             let message = Buffer.contents buffer in
+             if String.length message > 0 then Inbound_message message
+             else Inbound_incomplete
+           end
+           else begin
+             reader.Ws_inbound.partial_bytes <- message_bytes;
+             Inbound_incomplete
+           end)
 
-let read_inbound_message_frame session ~on_message ~is_fin ~len payload =
+(** Drain a WebSocket data-frame payload (frame-size capped) and feed it to
+    {!inbound_accumulate}, delivering the outcome via [on_outcome].  Both the
+    MCP session handler and the IDE LSP proxy route [`Text] / [`Binary] /
+    [`Continuation] frames through this, so both reassemble fragments and apply
+    identical frame/message size caps (RFC-0281 §3.2). *)
+let read_data_frame
+      (reader : Ws_inbound.t)
+      ~max_frame_bytes
+      ~max_message_bytes
+      ~is_fin
+      ~len
+      payload
+      ~on_outcome
+  =
   Transport_metrics.observe_ws_message_bytes_recv len;
-  match classify_inbound_frame_size ~len ~max_frame_bytes:(max_inbound_frame_bytes ()) with
+  match classify_inbound_frame_size ~len ~max_frame_bytes with
   | Inbound_reject rejection ->
       Httpun_ws.Payload.close payload;
-      session.inbound_partial_text <- None;
-      session.inbound_partial_text_bytes <- 0;
-      close_session_for_inbound_reject session rejection
+      Ws_inbound.reset reader;
+      on_outcome (Inbound_rejected rejection)
   | Inbound_accept ->
       read_payload_string payload ~len ~on_complete:(fun text ->
-          handle_inbound_text session ~on_message ~is_fin text)
+          on_outcome (inbound_accumulate reader ~max_message_bytes ~is_fin text))
+
+let read_inbound_message_frame session ~on_message ~is_fin ~len payload =
+  read_data_frame
+    session.inbound
+    ~max_frame_bytes:(max_inbound_frame_bytes ())
+    ~max_message_bytes:(max_inbound_message_bytes ())
+    ~is_fin
+    ~len
+    payload
+    ~on_outcome:(function
+      | Inbound_message msg -> on_message session.id msg
+      | Inbound_incomplete -> ()
+      | Inbound_rejected rejection ->
+          close_session_for_inbound_reject session rejection)
 
 type inbound_dispatch_rejection = {
   reason: string;

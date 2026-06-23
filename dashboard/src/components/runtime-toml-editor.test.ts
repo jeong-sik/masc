@@ -168,9 +168,13 @@ describe('RuntimeTomlEditor', () => {
 
     await waitFor(() => {
       expect(container.textContent).toContain('런타임 환경')
-      expect(container.textContent).toContain('런타임 카탈로그')
-      expect(container.textContent).toContain('128K ctx')
-      expect(container.textContent).toContain('tools:on')
+      // The prototype models section renders each model read-only: id + context
+      // (protoContext → "128k ctx") + capability chips. It replaced the legacy
+      // editable catalog grid; context length is now edited per-runtime via the
+      // binding num-ctx control (asserted below), not by mutating the model fact.
+      const modelsSection = container.querySelector('[data-testid="runtime-section-models"]')
+      expect(modelsSection?.textContent).toContain('qwen')
+      expect(modelsSection?.textContent).toContain('128k ctx')
       expect((container.querySelector('[aria-label="provider transport value"]') as HTMLInputElement | null)?.value)
         .toBe('https://runpod.example/v1')
     })
@@ -181,7 +185,7 @@ describe('RuntimeTomlEditor', () => {
     await waitFor(() => {
       expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toContain('endpoint = "https://runpod.example/v2"')
     })
-    fireEvent.input(container.querySelector('[aria-label="model max-context"]') as HTMLInputElement, {
+    fireEvent.input(container.querySelector('[aria-label="runpod_mtp.qwen num-ctx"]') as HTMLInputElement, {
       target: { value: '262144' },
     })
     fireEvent.click(container.querySelector('[data-testid="runtime-environment-save"]') as HTMLButtonElement)
@@ -191,7 +195,7 @@ describe('RuntimeTomlEditor', () => {
     })
     const savedSource = apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0] as string
     expect(savedSource).toContain('endpoint = "https://runpod.example/v2"')
-    expect(savedSource).toContain('max-context = 262144')
+    expect(savedSource).toContain('num-ctx = 262144')
     expect(savedSource).toContain('[providers.openai]')
   })
 

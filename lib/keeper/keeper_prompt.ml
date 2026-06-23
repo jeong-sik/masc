@@ -174,34 +174,9 @@ let behavior_prompt_block name =
          ask the operator to restore the missing behavior prompt file."
         name
 
-let missing_personality_field_marker field =
-  (* F-3: per-field Otel_metric_store counter retained (operator dashboards key on
-     specific field labels); WARN aggregation handled by caller so 3 missing
-     fields per cycle emit 1 WARN with structured field list instead of 3
-     separate WARNs. Pre-fix volume: ~666/24h (3 fields × 134 cycles + dups).
-     Post-fix worst case: ~134/24h with field list preserved in message. *)
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string PromptFailures)
-    ~labels:[("prompt", "personality/" ^ field)]
-    ();
-  Printf.sprintf
-    "Personality config drift: empty %s field. Preserve the keeper's \
-     configured goal, persona, and runtime policy; ask the operator to \
-     restore this self-model field."
-    field
-
-let log_missing_personality_fields missing_fields =
-  match missing_fields with
-  | [] -> ()
-  | fields ->
-      Log.Keeper.warn
-        "build_keeper_system_prompt: personality fields empty: [%s]; \
-         rendering config-drift markers instead of generic in-source \
-         self-model text"
-        (String.concat ", " fields)
 
 let build_keeper_system_prompt
-    ~goal ~short_goal ~mid_goal ~long_goal ~will ~needs ~desires
+    ~goal ~short_goal ~mid_goal ~long_goal
     ~instructions ?(persona_extended = "") ?(keeper_name = "")
     ?(home_ground = "") ?(active_goals = []) () =
   let goal = normalize_goal_horizon_text goal in
@@ -217,29 +192,6 @@ let build_keeper_system_prompt
      of silently changing persona policy. *)
   let profile_policy = behavior_prompt_block "profile_policy" in
   let continuity_contract = behavior_prompt_block "continuity_contract" in
-  (* Layer 2 PR-B (commit 7): three normalize_self_model_text calls
-     consolidated through [Keeper_personality_io.to_prompt_form]. Blank fields
-     now render config-drift markers instead of generic self-model text. *)
-  let rendered =
-    Keeper_personality_io.to_prompt_form
-      ~max_bytes:Keeper_config.prompt_render_max_bytes
-      { will; needs; desires; instructions = "" }
-  in
-  (* F-3: aggregate missing personality fields into a single WARN per
-     build_keeper_system_prompt call. Per-field Otel_metric_store counters and the
-     in-prompt config-drift marker remain unchanged so dashboards and the
-     LLM-visible drift signal are preserved. *)
-  let missing_personality = ref [] in
-  let render_personality_field field value =
-    if value = "" then begin
-      missing_personality := field :: !missing_personality;
-      missing_personality_field_marker field
-    end else value
-  in
-  let will = render_personality_field "will" rendered.will in
-  let needs = render_personality_field "needs" rendered.needs in
-  let desires = render_personality_field "desires" rendered.desires in
-  log_missing_personality_fields (List.rev !missing_personality);
   let custom =
     let s = String.trim instructions in
     if s = "" then ""
@@ -350,15 +302,6 @@ let build_keeper_system_prompt
       "\n\
        - Long-term: ";
       long_goal;
-      "\n\
-       Will: ";
-      will;
-      "\n\
-       Needs: ";
-      needs;
-      "\n\
-       Desires: ";
-      desires;
       "\n\
        ";
       custom;

@@ -11,9 +11,6 @@ type keeper_profile_defaults = {
   short_goal : string option;
   mid_goal : string option;
   long_goal : string option;
-  will : string option;
-  needs : string option;
-  desires : string option;
   instructions : string option;
   autoboot_enabled : bool option;
   mention_targets : string list;
@@ -63,9 +60,6 @@ let empty_keeper_profile_defaults =
     short_goal = None;
     mid_goal = None;
     long_goal = None;
-    will = None;
-    needs = None;
-    desires = None;
     instructions = None;
     autoboot_enabled = None;
     mention_targets = [];

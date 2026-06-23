@@ -14,9 +14,6 @@ let identity_fields : (string * (keeper_meta -> string)) list =
     ("short_goal", (fun m -> m.short_goal));
     ("mid_goal", (fun m -> m.mid_goal));
     ("long_goal", (fun m -> m.long_goal));
-    ("will", (fun m -> m.will));
-    ("needs", (fun m -> m.needs));
-    ("desires", (fun m -> m.desires));
     ("instructions", (fun m -> m.instructions));
   ]
 

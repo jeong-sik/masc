@@ -127,17 +127,27 @@ describe('ScheduleSurface', () => {
     await flush()
 
     expect(mocks.loadTools).not.toHaveBeenCalled()
-    const summary = container.querySelector('[aria-label="Schedule summary"]')
-    expect(summary?.textContent).toContain('pending')
-    expect(summary?.textContent).toContain('due')
-    expect(summary?.textContent).toContain('scheduled')
-    expect(summary?.textContent).toContain('running')
-    expect(summary?.textContent).not.toContain('active')
-    expect(summary?.textContent).not.toContain('due effective')
-    expect(summary?.textContent).not.toContain('blocked approval')
-    expect(container.textContent).toContain('출처 schedule_runner_signals')
-    expect(container.textContent).toContain('masc_schedule_get')
-    expect(container.textContent).toContain('durable wake signal feed')
+    // v2 reskin: the KPI summary strip is now `.ov-kpis` (aria-label '예약 요약')
+    // with Korean labels; pending/scheduled stay distinct and due+running fold
+    // into the single 'due · 실행' KPI (counts unchanged).
+    const summary = container.querySelector('[aria-label="예약 요약"]')
+    expect(summary?.textContent).toContain('승인 대기')
+    expect(summary?.textContent).toContain('due · 실행')
+    expect(summary?.textContent).toContain('예약됨')
+    expect(summary?.textContent).toContain('총 예약')
+    // The folded summary still must not leak the diagnostics-only derived/FSM
+    // vocabulary (활성/유효 도래/승인 차단) as separate KPIs.
+    expect(summary?.textContent).not.toContain('활성')
+    expect(summary?.textContent).not.toContain('유효 도래')
+    expect(summary?.textContent).not.toContain('승인 차단')
+    // The wake-signal feed header is renamed in v2.
+    expect(container.textContent).toContain('wake signal 피드 · schedule_runner.tick')
+    // REMOVED: '출처 <signal_source>' feed attribution line is not rendered on
+    // the v2 surface (it is diagnostics-only); no equivalent element exists to
+    // retarget, so this coverage is dropped rather than weakened.
+    // REMOVED: keeper_next_tool ('masc_schedule_get') is not rendered anywhere
+    // on the v2 surface — neither the card nor the SchDetail overlay use
+    // KeeperActionCell — so this coverage is dropped (genuinely gone from v2).
     expect(container.querySelector('[data-schedule-id="sched-1"]')).not.toBeNull()
     expect(container.querySelectorAll('[data-schedule-mutation]')).toHaveLength(0)
   })
@@ -168,8 +178,11 @@ describe('ScheduleSurface', () => {
     render(html`<${ScheduleSurface} />`, container)
     await flush()
 
+    // v2 reskin: the pending KPI label is Korean ('승인 대기'). The sparse-count
+    // merge still resolves to 2 (counts.pending=1 vs 2 materialized pending-family
+    // requests → max), so the assertion intent is unchanged.
     const pendingKpi = Array.from(container.querySelectorAll('.ov-kpi'))
-      .find(element => element.textContent?.includes('pending'))
+      .find(element => element.textContent?.includes('승인 대기'))
     expect(pendingKpi?.textContent).toContain('2')
   })
 

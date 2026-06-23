@@ -1453,6 +1453,16 @@ let test_sandbox_root_git_cwd_zero_repo_blocks_before_exec () =
     Alcotest.(check bool) "mentions cwd recovery" true
       (contains_substring msg "cwd=\"repos/<repo>\"")
 
+let test_sandbox_root_git_clone_allowed_from_root () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let cwd, error =
+    resolve_sandbox_root_git_cwd_string ~config ~meta
+      ~cwd:playground ~cmd:"git clone https://github.com/example/repo.git repos/repo"
+  in
+  Alcotest.(check (option string)) "no error for git clone from sandbox root" None error;
+  Alcotest.(check string) "cwd stays sandbox root" playground cwd
+
 let test_sandbox_root_git_cwd_single_repo_auto_chdir () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
@@ -2305,6 +2315,9 @@ let () =
           Alcotest.test_case
             "sandbox-root git with no repo blocks before docker exec"
             `Quick test_sandbox_root_git_cwd_zero_repo_blocks_before_exec;
+          Alcotest.test_case
+            "sandbox-root git clone is allowed from sandbox root"
+            `Quick test_sandbox_root_git_clone_allowed_from_root;
           Alcotest.test_case
             "sandbox-root git with one repo auto-selects cwd"
             `Quick test_sandbox_root_git_cwd_single_repo_auto_chdir;

@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
+import { fireEvent } from '@testing-library/preact'
 import { afterEach, describe, expect, it } from 'vitest'
 import { keepers, tasks } from '../store'
 import type { Keeper, Task } from '../types'
@@ -55,11 +56,21 @@ describe('KeeperWorkspaceRoster', () => {
     const container = renderInto(html`<${KeeperWorkspaceRoster} activeName="sangsu" />`)
 
     expect(container.textContent).toContain('전체3')
-    expect(container.textContent).toContain('실행중1')
-    expect(container.textContent).toContain('실행 중')
-    expect(container.textContent).toContain('대기 · 일시정지')
-    expect(container.textContent).toContain('중지 · 종료됨')
-    expect(container.querySelector('.kw-roster-search')).not.toBeNull()
+    // v2 filter chips carry the SHORT label + count ('실행' + '1'), not the old
+    // combined '실행중1' chip label (rails.jsx filter chips).
+    expect(container.textContent).toContain('실행1')
+    // v2 status group headers render the SHORT label + count in the body and the
+    // FULL label in the .roster-group title attribute; query the title to keep the
+    // exact full-label checks.
+    const groupTitles = Array.from(container.querySelectorAll('.roster-group')).map(g => g.getAttribute('title'))
+    expect(groupTitles).toContain('실행 중')
+    expect(groupTitles).toContain('대기 · 일시정지')
+    expect(groupTitles).toContain('중지 · 종료됨')
+    // v2 mounts the search input only after toggling the '⌕' .rfilter-icon
+    // (searchOpen defaults false); the class is now .roster-search.
+    expect(container.querySelector('.roster-search')).toBeNull()
+    fireEvent.click(container.querySelector('.rfilter-icon') as HTMLButtonElement)
+    expect(container.querySelector('.roster-search')).not.toBeNull()
     expect(container.querySelector('[aria-current="true"]')?.textContent).toContain('sangsu')
   })
 })
@@ -69,7 +80,12 @@ describe('KeeperWorkspaceRail', () => {
     tasks.value = [makeTask()]
     const container = renderInto(html`<${KeeperWorkspaceRail} keeper=${makeKeeper()} onToggleDetail=${() => {}} />`)
 
-    expect(container.textContent).toContain('런타임 · 처리량')
+    // v2 rail split the old combined '런타임 · 처리량' card into separate
+    // 런타임 (RuntimeSection / .rtc-card) and 처리량 (ThroughputSection) sections,
+    // each with its own .ctx-sec h4 header.
+    const sectionHeaders = Array.from(container.querySelectorAll('.ctx-sec h4')).map(h => h.textContent)
+    expect(sectionHeaders).toContain('런타임')
+    expect(sectionHeaders).toContain('처리량')
     expect(container.textContent).toContain('claude-sonnet-4')
     expect(container.textContent).toContain('oas-seoul-1')
     expect(container.textContent).toContain('62%')

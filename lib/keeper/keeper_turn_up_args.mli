@@ -39,9 +39,6 @@ type parsed_args =
   ; handoff_threshold_opt : float option
   ; handoff_cooldown_sec_opt : int option
   ; instructions_arg : string option
-  ; will_opt : string option
-  ; needs_opt : string option
-  ; desires_opt : string option
   ; profile_defaults : keeper_profile_defaults
   ; instructions_opt : string option
   }

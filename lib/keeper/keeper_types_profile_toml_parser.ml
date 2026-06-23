@@ -130,9 +130,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         long_goal =
           str "long_goal"
           |> normalize_goal_horizon_opt;
-        will = str "will";
-        needs = str "needs";
-        desires = str "desires";
         instructions = str "instructions";
         autoboot_enabled = bool_ "autoboot_enabled";
         mention_targets = strs "mention_targets";
@@ -180,9 +177,6 @@ let parsed_field_key_names =
   ; "short_goal"
   ; "mid_goal"
   ; "long_goal"
-  ; "will"
-  ; "needs"
-  ; "desires"
   ; "instructions"
   ; "autoboot_enabled"
   ; "mention_targets"
@@ -221,9 +215,6 @@ let canonical_keeper_toml_key_names =
   ; "short_goal"
   ; "mid_goal"
   ; "long_goal"
-  ; "will"
-  ; "needs"
-  ; "desires"
   ; "instructions"
   ; "autoboot_enabled"
   ; "mention_targets"
@@ -354,9 +345,6 @@ let merge_keeper_profile_defaults
     short_goal = prefer overlay.short_goal base.short_goal;
     mid_goal = prefer overlay.mid_goal base.mid_goal;
     long_goal = prefer overlay.long_goal base.long_goal;
-    will = prefer overlay.will base.will;
-    needs = prefer overlay.needs base.needs;
-    desires = prefer overlay.desires base.desires;
     instructions = prefer overlay.instructions base.instructions;
     autoboot_enabled = prefer overlay.autoboot_enabled base.autoboot_enabled;
     mention_targets =

@@ -302,6 +302,67 @@ export function rosterBlockerDisplay(
   return { cell, detail, title, kindLabel, rawKind }
 }
 
+// keeper-v2 Fleet skin (fleet.css .fl-*) helpers. The prototype keys every
+// chip / rail / aside-state on a 5-value tone vocabulary
+// (ok/warn/bad/busy/idle). masc's RuntimeBand collapses onto 4 of those via
+// ROSTER_BAND_TONE; the Korean tone label below is the same `FL_TONE_LABEL`
+// the prototype shipped, used for the aside "selected runtime" state line.
+type FleetTone = 'ok' | 'warn' | 'bad' | 'busy' | 'idle'
+
+const FL_TONE_LABEL: Record<FleetTone, string> = {
+  ok: '실행',
+  warn: '대기',
+  bad: '주의',
+  busy: '전이',
+  idle: '정지',
+}
+
+// CTX pressure threshold the prototype paints `hot` at (>=85%). Mirrors the
+// existing live threshold used in the aside CTX meter so both surfaces agree.
+const FLEET_CTX_HOT_PCT = 85
+
+type FleetVital = { k: string; v: string }
+
+// Build the aside `런타임` vitals grid from real keeper runtime fields only.
+// Fields with no live source (e.g. tps) are omitted rather than fabricated —
+// the audit (P1-6) flags `tps` as having no roster-model source.
+function fleetRuntimeVitals(
+  keeper: Keeper | null,
+  contextDetail: string | null,
+): FleetVital[] {
+  if (!keeper) return []
+  const vitals: FleetVital[] = []
+
+  const model = (keeper.active_model ?? keeper.model ?? keeper.last_model_used ?? '')
+    .trim()
+    .replace('claude-', '')
+  if (model) vitals.push({ k: 'model', v: model })
+
+  const runtime = (keeper.runtime_canonical ?? keeper.selected_runtime_canonical ?? '').trim()
+  if (runtime) vitals.push({ k: 'runtime', v: runtime })
+
+  if (typeof keeper.keeper_age_s === 'number' && Number.isFinite(keeper.keeper_age_s)) {
+    vitals.push({ k: 'uptime', v: formatDuration(keeper.keeper_age_s) })
+  }
+
+  const turns = keeper.total_turns ?? keeper.turn_count ?? null
+  if (typeof turns === 'number' && Number.isFinite(turns)) {
+    vitals.push({ k: 'turns', v: String(turns) })
+  }
+
+  const openTasks = keeper.goal_progress?.open_task_count
+  const doneTasks = keeper.goal_progress?.done_task_count
+  if (typeof openTasks === 'number' || typeof doneTasks === 'number') {
+    const open = typeof openTasks === 'number' ? openTasks : 0
+    const done = typeof doneTasks === 'number' ? doneTasks : 0
+    vitals.push({ k: 'tasks', v: `${open} / ${done}` })
+  }
+
+  if (contextDetail) vitals.push({ k: 'context', v: contextDetail })
+
+  return vitals
+}
+
 function registerKeeperLookup<T extends Pick<Keeper, 'keeper_id' | 'name' | 'agent_name'>>(
   lookup: Map<string, T>,
   source: T,
@@ -997,13 +1058,154 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     ? rosterBlockerDisplay(selectedRow.stateNote, selectedRow.keeperRuntime)
     : null
 
+  // keeper-v2 Fleet skin: partition the (already sorted) rows into an
+  // "attention" group and the steady remainder so the roster renders the
+  // prototype's `fl-group attn` / `fl-group` dividers + tone-rail rows.
+  // Sorting already pushes attention band to the top (see `filtered` order),
+  // so partitioning preserves order within each group.
+  const attentionRows = rosterRows.filter(row => row.band.key === 'attention')
+  const steadyRows = rosterRows.filter(row => row.band.key !== 'attention')
+
+  // Health pills (fl-hpill) read from the same band counts the status filter
+  // chips already compute. No title here — the shell's SurfaceLead owns the
+  // "Keeper Fleet" header for this surface (dashboard-shell SURFACE_OWN_LEAD).
+  const healthRun = counts.active
+  const healthPaused = counts.paused
+  const healthOffline = counts.offline
+  const healthAttention = counts.attention
+
+  const selectedTone: FleetTone = selectedRow ? ROSTER_BAND_TONE[selectedRow.band.key] : 'idle'
+  const selectedCtxPct = selectedRow?.contextMeta?.pct ?? null
+  const selectedCtxHot = selectedCtxPct != null && selectedCtxPct >= FLEET_CTX_HOT_PCT
+  const selectedVitals = selectedRow
+    ? fleetRuntimeVitals(selectedRow.keeperRuntime, selectedRow.contextMeta?.detail ?? null)
+    : []
+  const selectedKeeperId = selectedRow?.keeperRuntime?.keeper_id?.trim() || null
+  const selectedKoreanName = selectedRow?.keeperRuntime?.koreanName?.trim()
+    || selectedRow?.agent.koreanName?.trim()
+    || null
+
+  // Render one fleet roster row (.fl-row), layered with the live classes /
+  // test-ids the tests + CSS rely on (v2-monitoring-roster-row, data-tone,
+  // data-testid). The grid track comes from .fl-row (var(--fl-cols)).
+  const renderFleetRow = (row: (typeof rosterRows)[number]) => {
+    const selected = selectedRow?.key === row.key
+    const tone = ROSTER_BAND_TONE[row.band.key]
+    const blockerDisplay = rosterBlockerDisplay(row.stateNote, row.keeperRuntime)
+    const stageLabel =
+      row.fsmStageText
+      ?? row.monitoringEvidence?.phase?.label
+      ?? row.monitoringEvidence?.stage?.label
+      ?? null
+    // chip text: band label (운영판정) so the operational verdict reads first,
+    // matching the legacy column the tests + operators rely on. gloss line:
+    // blocker reason when present, else the stage/phase label. The band action
+    // hint (재개 대기 / 기동 필요 / 감시 중 / 연결 없음) renders as a second
+    // muted line. All fall back to honest copy, never faked.
+    const chipLabel = row.band.label
+    const glossText = row.stateNote
+      ? blockerDisplay.cell
+      : (stageLabel ?? '실행 중')
+    const glossTitle = row.stateNote ? blockerDisplay.title : (stageLabel ?? '')
+    const latestTool = row.recentTools[0] ?? (row.toolCallCount != null && row.toolCallCount > 0 ? `${row.toolCallCount} calls` : '—')
+    const ctxPct = row.contextMeta?.pct ?? null
+    const ctxHot = ctxPct != null && ctxPct >= FLEET_CTX_HOT_PCT
+    // namespace line: keeper id is the closest stable namespace handle the
+    // roster row model carries; agents without a keeper runtime show none.
+    const namespaceLine = row.keeperRuntime?.keeper_id?.trim()
+      || row.keeperRuntime?.agent_name?.trim()
+      || null
+
+    const handleRowKey = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        setSelectedKey(row.key)
+      }
+    }
+
+    return html`
+      <div
+        role="button"
+        tabIndex=${0}
+        key=${row.key}
+        data-testid="keeper-operations-row"
+        data-tone=${tone}
+        aria-label=${`${row.displayName} 선택`}
+        aria-pressed=${selected}
+        onClick=${() => setSelectedKey(row.key)}
+        onKeyDown=${handleRowKey}
+        class="fl-row v2-monitoring-roster-row ${selected ? 'sel' : ''} ${ringFocusClasses({ tone: 'accent-fg', width: 2 })}"
+      >
+        <div class="fl-id">
+          <span class="shrink-0">
+            <${AgentAvatar}
+              name=${row.agent.name}
+              status=${row.presenceDisplay.status}
+              traits=${row.agent.traits}
+              size="md"
+              currentWork=${row.currentWork}
+              activityAge=${row.lastActivityAge}
+            />
+          </span>
+          <div class="fl-id-txt">
+            <div class="fl-name">
+              <b>${row.displayName}</b>
+              ${row.band.key === 'attention' ? html`<span class="fl-att">▲</span>` : null}
+            </div>
+            <div class="mt-0.5 flex flex-wrap items-center gap-1.5 text-2xs text-[var(--color-fg-secondary)]">
+              <${AgentPresence} status=${row.presenceDisplay.status} detail=${row.presenceDisplay.detail} size="sm" />
+            </div>
+            ${namespaceLine ? html`<div class="fl-ns">${namespaceLine}</div>` : null}
+          </div>
+        </div>
+
+        <div class="fl-state">
+          <span class="fl-chip" data-tone=${tone} title=${row.band.description}>
+            <span class="inline-block h-1.5 w-1.5 rounded-full" style="background:currentColor" aria-hidden="true"></span>
+            ${chipLabel}
+          </span>
+          <span class="fl-gloss" title=${glossTitle}>${glossText}</span>
+          <span class="fl-gloss">${row.bandActionHint}</span>
+        </div>
+
+        <div class="fl-ctx">
+          ${ctxPct != null
+            ? html`
+                <div class="fl-ctx-bar"><span class=${ctxHot ? 'hot' : ''} style="width:${ctxPct}%"></span></div>
+                <span class="fl-ctx-val ${ctxHot ? 'hot' : ctxPct === 0 ? 'zero' : ''}">${ctxPct}%</span>
+              `
+            : html`<span class="fl-ctx-val zero" data-stub="no context_ratio">—</span>`}
+        </div>
+
+        <div class="fl-tool ${row.recentTools.length || (row.toolCallCount ?? 0) > 0 ? '' : 'none'}" title=${latestTool}>${latestTool}</div>
+
+        <div class="fl-actcell" onClick=${(e: Event) => e.stopPropagation()}>
+          ${row.keeperRuntime
+            ? html`<${KeeperActionButtons}
+                keeper=${row.keeperRuntime}
+                size="sm"
+                compact
+                stopPropagation
+              />`
+            : html`<span class="text-2xs text-[var(--color-fg-muted)]">—</span>`}
+        </div>
+      </div>
+    `
+  }
+
   return html`
-    <div class="v2-monitoring-surface agent-page flex w-full flex-col gap-5 px-0 py-1">
+    <div class="v2-monitoring-surface fl-shell agent-page">
       <section class="monitor-surface-card monitor-surface-card-strong v2-monitoring-card p-5" aria-label="에이전트 디렉터리">
         <div class="flex flex-col gap-5">
           <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-end">
-            <div class="flex min-w-0 flex-col gap-2">
-              <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-accent-soft)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]">${resultCountLabel}</span>
+            <div class="flex min-w-0 flex-col gap-2.5">
+              <div class="fl-health">
+                <span class="fl-hpill ok">런타임 가동 <b>${healthRun}</b></span>
+                <span class="fl-hpill warn">일시정지 <b>${healthPaused}</b></span>
+                <span class="fl-hpill">오프라인 <b>${healthOffline}</b></span>
+                ${healthAttention > 0 ? html`<span class="fl-hpill bad">주의 <b>${healthAttention}</b></span>` : null}
+              </div>
+              <span class="inline-flex w-fit items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-accent-soft)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]">${resultCountLabel}</span>
             </div>
 
             <label class="flex w-full flex-col gap-2 text-2xs font-semibold tracking-[var(--track-caps)] text-[var(--color-fg-muted)] uppercase">
@@ -1054,119 +1256,33 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         </div>
       </section>
 
-      <div class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <section class="monitor-surface-card monitor-surface-card-medium v2-monitoring-panel overflow-hidden" aria-label="Keeper operations list">
+      <div class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_372px]">
+        <section class="fl-main monitor-surface-card monitor-surface-card-medium v2-monitoring-panel overflow-hidden" aria-label="Keeper operations list">
           <!--
-            2026-05-27 KEEPER OPERATIONS row redesign:
-            - 현재 단계 column was almost always "-" for stuck keepers (the
-              dominant case the surface exists for) and duplicated the
-              SELECTED RUNTIME phase badge. Removed; the blocker/stage cell
-              now switches: blocker text when blocked, stage/phase label
-              when running.
-            - Row is now div role=button so inline action buttons
-              (재개 / 일시정지 / 깨우기 / 기동 / 종료) can be nested without
-              violating no-button-in-button HTML. Enter/Space keep
-              keyboard selection working.
-            - 차단 근거 셀이 truncate(1줄) 였던 것을 line-clamp-2 로 풀어 잘림을 완화.
+            keeper-v2 Fleet skin (fleet.css .fl-*): roster header + tone-rail
+            rows + attention/steady group dividers. The shell's SurfaceLead
+            owns the "Keeper Fleet" title for this surface, so this body
+            renders NO top-level page header (avoids the prior duplicate-header
+            regression). Live wiring (selection, filters, actions, presence) is
+            unchanged — only the markup/class tree is reskinned.
+
+            Column header labels keep 운영판정 / 차단 · 단계 / 액션 so existing
+            tests + operators read the same axis names; the cells below fold
+            them into the fl-state chip + fl-gloss as the prototype does.
           -->
-          <div class="grid grid-cols-[minmax(180px,1.35fr)_minmax(80px,0.5fr)_minmax(170px,1.1fr)_minmax(110px,0.65fr)_minmax(160px,0.9fr)] gap-3 border-b border-[var(--color-border-divider)] px-4 py-2.5 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] max-lg:hidden">
+          <div class="fl-rhead">
             <span>Keeper</span>
-            <span>운영판정</span>
-            <span>차단 · 단계</span>
+            <span>운영판정 · 차단 · 단계</span>
+            <span>컨텍스트</span>
             <span>최근 도구</span>
-            <span>액션</span>
+            <span class="r">액션</span>
           </div>
 
-          <div class="divide-y divide-[var(--color-border-divider)]">
-            ${rosterRows.map(row => {
-              const selected = selectedRow?.key === row.key
-              const blockerDisplay = rosterBlockerDisplay(row.stateNote, row.keeperRuntime)
-              const stageLabel =
-                row.fsmStageText
-                ?? row.monitoringEvidence?.phase?.label
-                ?? row.monitoringEvidence?.stage?.label
-                ?? null
-              // 차단이 있으면 차단 근거가 더 의미 있고, 차단이 없으면 현재 단계 라벨로 fallback.
-              // 둘 다 없으면 '-'.
-              const blockerOrStage = row.stateNote
-                ? blockerDisplay.cell
-                : (stageLabel ?? '-')
-              const blockerOrStageTitle = row.stateNote
-                ? blockerDisplay.title
-                : (stageLabel ?? '')
-              const latestTool = row.recentTools[0] ?? (row.toolCallCount != null && row.toolCallCount > 0 ? `${row.toolCallCount} calls` : '-')
-
-              const handleRowKey = (e: KeyboardEvent) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
-                  setSelectedKey(row.key)
-                }
-              }
-
-              return html`
-                <div
-                  role="button"
-                  tabIndex=${0}
-                  key=${row.key}
-                  data-testid="keeper-operations-row"
-                  data-tone=${ROSTER_BAND_TONE[row.band.key]}
-                  aria-label=${`${row.displayName} 선택`}
-                  aria-pressed=${selected}
-                  onClick=${() => setSelectedKey(row.key)}
-                  onKeyDown=${handleRowKey}
-                  class="v2-monitoring-roster-row grid w-full cursor-pointer grid-cols-1 gap-2 px-4 py-3 text-left transition-colors hover:bg-[var(--color-bg-elevated)] ${ringFocusClasses({ tone: 'accent-fg', width: 2 })} lg:grid-cols-[minmax(180px,1.35fr)_minmax(80px,0.5fr)_minmax(170px,1.1fr)_minmax(110px,0.65fr)_minmax(160px,0.9fr)] lg:items-center lg:gap-3 ${selected ? 'bg-[var(--color-bg-hover)]' : 'bg-transparent'}"
-                >
-                  <span class="flex min-w-0 items-center gap-3">
-                    <span class="shrink-0">
-                      <${AgentAvatar}
-                        name=${row.agent.name}
-                        status=${row.presenceDisplay.status}
-                        traits=${row.agent.traits}
-                        size="md"
-                        currentWork=${row.currentWork}
-                        activityAge=${row.lastActivityAge}
-                      />
-                    </span>
-                    <span class="min-w-0">
-                      <span class="block truncate text-sm font-semibold text-[var(--color-fg-primary)]">${row.displayName}</span>
-                      <span class="mt-0.5 flex flex-wrap items-center gap-1.5 text-2xs text-[var(--color-fg-secondary)]">
-                        <${AgentPresence} status=${row.presenceDisplay.status} detail=${row.presenceDisplay.detail} size="sm" />
-                      </span>
-                    </span>
-                  </span>
-
-                  <span
-                    class="inline-flex w-fit min-w-[4.5rem] flex-col items-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1 text-2xs font-medium leading-tight text-[var(--color-fg-primary)] lg:w-auto"
-                    title=${row.band.description}
-                  >
-                    <span>${row.band.label}</span>
-                    <span class="mt-0.5 text-2xs font-normal text-[var(--color-fg-secondary)]">${row.bandActionHint}</span>
-                  </span>
-
-                  <span class="min-w-0 text-xs leading-snug text-[var(--color-fg-primary)]">
-                    <span class="block truncate lg:hidden text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">차단 · 단계</span>
-                    <span class="line-clamp-2 break-words" title=${blockerOrStageTitle}>${blockerOrStage}</span>
-                  </span>
-
-                  <span class="min-w-0 text-xs leading-snug text-[var(--color-fg-primary)]">
-                    <span class="block truncate lg:hidden text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">최근 도구</span>
-                    <span class="block truncate" title=${latestTool}>${latestTool}</span>
-                  </span>
-
-                  <span class="min-w-0">
-                    <span class="block lg:hidden text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">액션</span>
-                    ${row.keeperRuntime
-                      ? html`<${KeeperActionButtons}
-                          keeper=${row.keeperRuntime}
-                          size="sm"
-                          compact
-                          stopPropagation
-                        />`
-                      : html`<span class="text-2xs text-[var(--color-fg-muted)]">—</span>`}
-                  </span>
-                </div>
-              `
-            })}
+          <div class="fl-roster">
+            ${attentionRows.length > 0 ? html`<div class="fl-group attn">주의 필요 · ${attentionRows.length}</div>` : null}
+            ${attentionRows.map(renderFleetRow)}
+            ${steadyRows.length > 0 ? html`<div class="fl-group">정상 · ${steadyRows.length}</div>` : null}
+            ${steadyRows.map(renderFleetRow)}
 
             ${rosterRows.length === 0 ? html`
               <div class="px-6 py-10">
@@ -1183,45 +1299,79 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           </div>
         </section>
 
-        <aside class="monitor-surface-card monitor-surface-card-medium v2-monitoring-panel p-4" aria-label="Selected keeper detail">
+        <aside class="fl-aside monitor-surface-card monitor-surface-card-medium v2-monitoring-panel" aria-label="Selected keeper detail">
           ${selectedRow ? html`
-            <div class="flex h-full flex-col gap-4">
-              <div class="flex items-start justify-between gap-3">
-                <div class="min-w-0">
-                  <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">selected runtime</span>
-                  <h3 class="m-0 mt-1 truncate text-xl font-semibold text-[var(--color-fg-primary)]">${selectedRow.displayName}</h3>
+            <div class="fl-as-head">
+              <span class="fl-as-ey">selected runtime</span>
+              <span class="fl-as-state">
+                <span class="inline-block h-1.5 w-1.5 rounded-full" style="background:currentColor" aria-hidden="true"></span>
+                ${FL_TONE_LABEL[selectedTone]}
+              </span>
+            </div>
+
+            <div class="fl-as-id">
+              <span class="shrink-0">
+                <${AgentAvatar}
+                  name=${selectedRow.agent.name}
+                  status=${selectedRow.presenceDisplay.status}
+                  traits=${selectedRow.agent.traits}
+                  size="lg"
+                  currentWork=${selectedRow.currentWork}
+                  activityAge=${selectedRow.lastActivityAge}
+                />
+              </span>
+              <div class="min-w-0">
+                <h3 class="fl-as-name m-0 truncate">${selectedRow.displayName}</h3>
+                ${selectedKoreanName || selectedKeeperId ? html`
+                  <div class="fl-as-kr">
+                    ${selectedKoreanName ?? ''}
+                    ${selectedKoreanName && selectedKeeperId ? ' · ' : ''}
+                    ${selectedKeeperId ? html`<span class="font-mono">${selectedKeeperId}</span>` : null}
+                  </div>
+                ` : null}
+                <div class="mt-1.5 flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-secondary)]">
+                  <${AgentPresence} status=${selectedRow.presenceDisplay.status} detail=${selectedRow.presenceDisplay.detail} size="sm" />
+                  <span class="inline-flex items-center gap-1 text-[var(--color-fg-muted)]">
+                    ${selectedRow.lastActivityLabel}
+                    <span class="text-[var(--color-fg-primary)]">
+                      ${selectedRow.lastActivityAt
+                        ? html`<${TimeAgo} timestamp=${selectedRow.lastActivityAt} />`
+                        : selectedRow.lastActivityAge != null
+                          ? `${formatDuration(selectedRow.lastActivityAge)} 전`
+                          : '기록 없음'}
+                    </span>
+                  </span>
                 </div>
-                <${AgentPresence} status=${selectedRow.presenceDisplay.status} detail=${selectedRow.presenceDisplay.detail} size="sm" />
               </div>
+            </div>
 
-              <p class="m-0 text-sm leading-paragraph text-[var(--color-fg-primary)]" title=${selectedRow.summaryText}>${selectedRow.summaryText}</p>
+            <div class="fl-as-cta">
+              <button
+                type="button"
+                class="fl-open-chat v2-monitoring-action"
+                aria-label=${selectedRow.detailLabel}
+                onClick=${selectedRow.openDetail}
+              >
+                <span>상세 열기</span><span class="arr">▸</span>
+              </button>
+            </div>
 
-              <div class="flex flex-wrap items-center gap-2">
+            <div class="fl-as-sec">
+              <div class="fl-as-phase">
                 ${selectedRow.isKeeper && selectedRow.fsmPhaseKey
                   ? html`<${KeeperPhaseBadge} phase=${selectedRow.fsmPhaseKey} compact />`
-                  : null}
+                  : html`<span class="fl-chip" data-tone=${selectedTone}>${selectedRow.band.label}</span>`}
                 ${selectedRow.fsmStageKey && selectedRow.fsmStageText ? html`
                   <span class="inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-2xs font-medium ${stageBadgeClass(selectedRow.fsmStageKey)}" title=${selectedRow.monitoringEvidence?.stage?.description ?? '활동 단계 정보가 없습니다.'}>
                     ${selectedRow.fsmStageText}
                   </span>
                 ` : null}
-                <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs text-[var(--color-fg-muted)]" title=${selectedRow.band.description}>
-                  상태 액션
-                  <span class="ml-1 text-[var(--color-fg-primary)]">${selectedRow.bandActionHint}</span>
-                </span>
-                <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs text-[var(--color-fg-muted)]">
-                  ${selectedRow.lastActivityLabel}
-                  <span class="ml-1 text-[var(--color-fg-primary)]">
-                    ${selectedRow.lastActivityAt
-                      ? html`<${TimeAgo} timestamp=${selectedRow.lastActivityAt} />`
-                      : selectedRow.lastActivityAge != null
-                        ? `${formatDuration(selectedRow.lastActivityAge)} 전`
-                        : '기록 없음'}
-                  </span>
-                </span>
               </div>
+              <div class="fl-as-gloss">${selectedRow.summaryText}</div>
+            </div>
 
-              ${selectedRow.stateNote ? html`
+            ${selectedRow.stateNote ? html`
+              <div class="fl-as-sec">
                 <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5">
                   <div class="flex flex-wrap items-center gap-2">
                     <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-status-warn)]">${selectedRow.stateNote.label}</span>
@@ -1234,22 +1384,38 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   </div>
                   <p class="m-0 mt-1 text-xs leading-relaxed text-[var(--color-fg-primary)]">${selectedBlockerDisplay?.detail}</p>
                 </div>
-              ` : null}
+              </div>
+            ` : null}
 
-              ${selectedRow.contextMeta ? html`
-                <div class="flex items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-xs text-[var(--color-fg-muted)]">
-                  <span class="font-semibold uppercase tracking-[var(--track-caps)]">CTX</span>
-                  <span class="font-mono text-[var(--color-fg-secondary)]">${selectedRow.contextMeta.pct}%</span>
-                  ${selectedRow.contextMeta.detail ? html`<span class="font-mono text-2xs">${selectedRow.contextMeta.detail}</span>` : null}
-                  <span class="ml-auto inline-block h-1.5 w-20 overflow-hidden rounded-[var(--r-0)] bg-[var(--color-bg-hover)]">
-                    <span class="block h-full rounded-[var(--r-0)] ${selectedRow.contextMeta.pct > 85 ? 'bg-[var(--color-status-err)]' : selectedRow.contextMeta.pct > 60 ? 'bg-[var(--color-status-warn)]' : 'bg-[var(--color-status-ok)]'}" style="width:${selectedRow.contextMeta.pct}%"></span>
-                  </span>
+            ${selectedCtxPct != null ? html`
+              <div class="fl-as-sec">
+                <h4>컨텍스트 압박</h4>
+                <div class="fl-ctxbig">
+                  <div class="fl-ctxbig-top">
+                    <span class="v ${selectedCtxHot ? 'hot' : ''}">${selectedCtxPct}%</span>
+                    <span class="l">${selectedCtxHot ? 'compact 임계 근접' : 'window 사용량'}</span>
+                  </div>
+                  <div class="bar"><span class=${selectedCtxHot ? 'hot' : ''} style="width:${selectedCtxPct}%"></span></div>
+                  ${selectedRow.contextMeta?.detail ? html`<div class="mt-1.5 font-mono text-2xs text-[var(--color-fg-muted)]">${selectedRow.contextMeta.detail}</div>` : null}
                 </div>
-              ` : null}
+              </div>
+            ` : null}
 
-              ${(selectedRow.recentTools.length > 0 || selectedRow.toolCallCount != null || selectedRow.toolAuditAt) ? html`
+            ${selectedVitals.length > 0 ? html`
+              <div class="fl-as-sec">
+                <h4>런타임</h4>
+                <div class="fl-vitals">
+                  ${selectedVitals.map(vital => html`
+                    <div class="fl-vital"><div class="k">${vital.k}</div><div class="v">${vital.v}</div></div>
+                  `)}
+                </div>
+              </div>
+            ` : null}
+
+            ${(selectedRow.recentTools.length > 0 || selectedRow.toolCallCount != null || selectedRow.toolAuditAt) ? html`
+              <div class="fl-as-sec">
+                <h4>최근 도구</h4>
                 <div class="flex flex-wrap items-center gap-1.5 text-2xs text-[var(--color-fg-muted)]">
-                  <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5">최근 도구</span>
                   <${AgentCapability} tools=${selectedRow.recentTools} maxVisible=${5} />
                   ${selectedRow.toolCallCount != null && selectedRow.toolCallCount > 0 ? html`
                     <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs">${selectedRow.toolCallCount}회 관찰됨</span>
@@ -1258,52 +1424,50 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs">감사 <${TimeAgo} timestamp=${selectedRow.toolAuditAt} /></span>
                   ` : null}
                 </div>
-              ` : null}
-
-              ${selectedRow.keeperRuntime ? html`
-                <div class="grid gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
-                  <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">detail lenses</div>
-                  <div class="flex flex-wrap gap-2">
-                    <${RouteLink}
-                      tab="monitoring"
-                      params=${{ section: 'cognition', view: 'keeper', keeper: selectedRow.keeperRuntime.name, focus: 'bdi' }}
-                      class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
-                    >
-                      Cognition
-                    <//>
-                    <${RouteLink}
-                      tab="monitoring"
-                      params=${{ section: 'cognition', view: 'keeper', keeper: selectedRow.keeperRuntime.name, focus: 'tool-access' }}
-                      class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
-                    >
-                      Tool Access
-                    <//>
-                    <${RouteLink}
-                      tab="monitoring"
-                      params=${{ section: 'runtime', view: 'inspector', keeper: selectedRow.keeperRuntime.name }}
-                      class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
-                    >
-                      Runtime Trace
-                    <//>
-                  </div>
-                </div>
-              ` : null}
-
-              <div class="mt-auto flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  class="v2-monitoring-action inline-flex items-center justify-center rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-3 py-2 text-xs font-medium text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--accent-20)]"
-                  aria-label=${selectedRow.detailLabel}
-                  onClick=${selectedRow.openDetail}
-                >
-                  상세 열기
-                </button>
               </div>
-            </div>
+            ` : null}
+
+            ${selectedRow.keeperRuntime ? html`
+              <div class="fl-as-sec">
+                <h4>상세 렌즈</h4>
+                <div class="flex flex-wrap gap-2">
+                  <${RouteLink}
+                    tab="monitoring"
+                    params=${{ section: 'cognition', view: 'keeper', keeper: selectedRow.keeperRuntime.name, focus: 'bdi' }}
+                    class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
+                  >
+                    Cognition
+                  <//>
+                  <${RouteLink}
+                    tab="monitoring"
+                    params=${{ section: 'cognition', view: 'keeper', keeper: selectedRow.keeperRuntime.name, focus: 'tool-access' }}
+                    class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
+                  >
+                    Tool Access
+                  <//>
+                  <${RouteLink}
+                    tab="monitoring"
+                    params=${{ section: 'runtime', view: 'inspector', keeper: selectedRow.keeperRuntime.name }}
+                    class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
+                  >
+                    Runtime Trace
+                  <//>
+                </div>
+              </div>
+            ` : null}
           ` : html`
-            <${EmptyState} message="선택할 keeper 또는 agent가 없습니다." compact />
+            <div class="fl-as-sec">
+              <${EmptyState} message="선택할 keeper 또는 agent가 없습니다." compact />
+            </div>
           `}
         </aside>
+      </div>
+
+      <div class="fl-foot">
+        <span class="fl-tick"><span class="k">keepers</span><span class="v">fresh ${healthRun}/${rosterRows.length}</span></span>
+        <span class="fl-tick"><span class="k">paused</span><span class="v">${healthPaused}</span></span>
+        <span class="fl-tick"><span class="k">offline</span><span class="v">${healthOffline}</span></span>
+        <span class="fl-tick"><span class="k">attention</span><span class="v ${healthAttention ? 'warn' : 'ok'}">${healthAttention}</span></span>
       </div>
     </div>
   `

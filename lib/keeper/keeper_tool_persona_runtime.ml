@@ -42,7 +42,7 @@ let find_jsonl_row_by_action_id rows action_id =
 
 let resolved_keeper_args_to_json
     ~name ~persona_name ~goal ~short_goal ~mid_goal ~long_goal
-    ~instructions ~will ~needs ~desires
+    ~instructions
     ~mention_targets
     ~allowed_paths_opt
     ~autoboot_enabled_opt
@@ -59,9 +59,6 @@ let resolved_keeper_args_to_json
       ("mid_goal", `String mid_goal);
       ("long_goal", `String long_goal);
       ("instructions", `String instructions);
-      ("will", `String will);
-      ("needs", `String needs);
-      ("desires", `String desires);
       ("mention_targets", Json_util.json_string_list mention_targets);
       ("tool_denylist", Json_util.json_string_list tool_denylist);
       ("proactive_enabled", `Bool proactive_enabled);
@@ -207,9 +204,6 @@ let render_keeper_toml_from_resolved_args (json : Yojson.Safe.t) :
               let fields = append_optional_string_field fields "short_goal" json in
               let fields = append_optional_string_field fields "mid_goal" json in
               let fields = append_optional_string_field fields "long_goal" json in
-              let fields = append_optional_string_field fields "will" json in
-              let fields = append_optional_string_field fields "needs" json in
-              let fields = append_optional_string_field fields "desires" json in
               let fields = append_optional_string_field fields "instructions" json in
               let fields =
                 append_optional_bool_field fields "autoboot_enabled" json
@@ -363,21 +357,6 @@ let resolved_keeper_args_from_persona args :
           |> Dashboard_utils.first_some defaults.instructions
           |> Option.value ~default:""
         in
-        let will =
-          parse_self_model_opt args "will"
-          |> Dashboard_utils.first_some defaults.will
-          |> Option.value ~default:(Env_config_core.keeper_will ())
-        in
-        let needs =
-          parse_self_model_opt args "needs"
-          |> Dashboard_utils.first_some defaults.needs
-          |> Option.value ~default:(Env_config_core.keeper_needs ())
-        in
-        let desires =
-          parse_self_model_opt args "desires"
-          |> Dashboard_utils.first_some defaults.desires
-          |> Option.value ~default:(Env_config_core.keeper_desires ())
-        in
             let mention_targets =
               let explicit = get_string_list args "mention_targets" in
               let raw =
@@ -430,7 +409,7 @@ let resolved_keeper_args_from_persona args :
                      ~name
                      ~persona_name
                      ~goal ~short_goal ~mid_goal ~long_goal
-                     ~instructions  ~will ~needs ~desires
+                     ~instructions
                      ~mention_targets
                      ~allowed_paths_opt:allowed_paths
                      ~autoboot_enabled_opt:autoboot_enabled

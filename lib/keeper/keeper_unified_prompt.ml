@@ -649,24 +649,18 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     () : string * string
     =
   ignore base_path;
-  let will, needs, desires, instructions =
+  (* Total deterministic resolution between two known instruction sources
+     (profile default else meta), not a permissive unknown-input default;
+     pre-existing pattern, was the 4th tuple element before RFC-0282. *)
+  let instructions =
+    (* DET-OK: total default between two known sources (RFC-0282). *)
     match profile_defaults with
-    | Some d ->
-        ( Option.value d.will ~default:meta.will
-        , Option.value d.needs ~default:meta.needs
-        , Option.value d.desires ~default:meta.desires
-        , Option.value d.instructions ~default:meta.instructions )
-    | None -> (meta.will, meta.needs, meta.desires, meta.instructions)
+    | Some d -> Option.value d.instructions ~default:meta.instructions
+    | None -> meta.instructions
   in
-  let trait_lines =
-    String.concat ""
-      [
-
-        line_block "Will" will;
-        line_block "Needs" needs;
-        line_block "Desires" desires;
-      ]
-  in
+  (* RFC-0282 removed the will/needs/desires self_model triple; the
+     [trait_lines] template slot is now always empty. *)
+  let trait_lines = "" in
   let instructions_block =
     if instructions = "" then ""
     else Printf.sprintf "\nInstructions:\n%s\n" instructions

@@ -705,9 +705,8 @@ describe('Overview v2 marker classes', () => {
     const { container } = render(h(Overview, null))
 
     expect(container.querySelector('.v2-overview-surface')).not.toBeNull()
-    expect(container.querySelector('.v2-overview-rollup')).not.toBeNull()
-    expect(container.querySelector('.v2-overview-rollup .v2-overview-funnel')).not.toBeNull()
-    expect(container.querySelector('.v2-overview-rollup .v2-overview-keepers')).not.toBeNull()
+    expect(container.querySelector('.v2-overview-primary-grid')).not.toBeNull()
+    expect(container.querySelector('.v2-overview-domains')).not.toBeNull()
   })
 
   it('renders keeper-v2 port marker classes', () => {
@@ -717,7 +716,7 @@ describe('Overview v2 marker classes', () => {
     expect(container.querySelector('.v2-overview-kpis')).not.toBeNull()
     expect(container.querySelector('.v2-overview-attention')).not.toBeNull()
     expect(container.querySelector('.v2-overview-telemetry')).not.toBeNull()
-    expect(container.querySelector('.v2-overview-fleet')).not.toBeNull()
+    expect(container.querySelector('.v2-overview-domains')).not.toBeNull()
   })
 })
 
@@ -734,20 +733,19 @@ describe('Overview StyleSeed surfaces', () => {
     expect(root?.classList.contains('text-text-primary')).toBe(true)
   })
 
-  it('renders the prototype primary sequence before the legacy rollup', () => {
+  it('renders the prototype primary sequence (kpis → grid → domains)', () => {
     const { container } = render(h(Overview, null))
     const sequence = [...container.querySelectorAll(
-      '[data-testid="overview-kpis"], [data-testid="overview-primary-grid"], [data-testid="overview-fleet"], [data-testid="overview-rollup"]',
+      '[data-testid="overview-kpis"], [data-testid="overview-primary-grid"], [data-testid="overview-domains"]',
     )].map(el => el.getAttribute('data-testid'))
 
     expect(sequence).toEqual([
       'overview-kpis',
       'overview-primary-grid',
-      'overview-fleet',
-      'overview-rollup',
+      'overview-domains',
     ])
     expect(container.querySelector('.v2-overview-kpis')?.classList.contains('ov-kpis')).toBe(true)
-    expect(container.querySelector('.v2-overview-fleet')?.classList.contains('ov-card')).toBe(true)
+    expect(container.querySelector('.v2-overview-domains')?.classList.contains('ov-domains')).toBe(true)
   })
 
   it('uses the prototype two-column overview grid container', () => {
@@ -918,12 +916,12 @@ describe('Overview prototype surface', () => {
     ])
   })
 
-  it('places the domain section after the fleet grid and before the rollup', () => {
+  it('places the domain section last, after the primary grid', () => {
     const { container } = render(h(Overview, null))
     const order = [...container.querySelectorAll(
-      '[data-testid="overview-fleet"], [data-testid="overview-domains"], [data-testid="overview-rollup"]',
+      '[data-testid="overview-primary-grid"], [data-testid="overview-domains"]',
     )].map(el => el.getAttribute('data-testid'))
-    expect(order).toEqual(['overview-fleet', 'overview-domains', 'overview-rollup'])
+    expect(order).toEqual(['overview-primary-grid', 'overview-domains'])
   })
 
   // Gap 1: KPI grid uses 6-column layout (surfaces.css:88 `repeat(6, 1fr)`)

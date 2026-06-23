@@ -51,9 +51,6 @@ let test_self_model_keys_are_canonical () =
       ; ("agent_name", `String "self-model")
       ; ("trace_id", `String "trace-self-model")
       ; ("tool_access", `List [])
-      ; ("will", `String "persist intent")
-      ; ("needs", `String "runtime truth")
-      ; ("desires", `String "quiet logs")
       ; ("instructions", `String "preserve operator guidance")
       ]);
   let after = counter_total () in

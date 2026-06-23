@@ -72,11 +72,15 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                 ~web_tools:judge_web_tools ~max_tool_calls:judge_max_tool_calls ()
             with
             | Ok (s2, u2) -> Ok (s2, Fusion_types.add_usage u1 u2)
-            | Error msg ->
+            | Error (msg, u2) ->
+              (* 2차 심판이 토큰을 태운 뒤 파싱 실패해도 그 usage(u2)를 버리지 않고
+                 1차와 합산한다 — degrade가 비용을 undercount하지 않도록 (적대 리뷰
+                 #22087 §1). run_refine 이 #22087 에서 Error of (string * usage) 로
+                 바뀌었으므로 conditional 의 refine_over 도 동일하게 usage 를 보존한다. *)
               Log.Keeper.warn ~keeper_name:req.Fusion_types.keeper
                 "fusion run %s refine judge failed, keeping first synthesis: %s"
                 req.Fusion_types.run_id msg;
-              Ok (s1, u1)
+              Ok (s1, Fusion_types.add_usage u1 u2)
           in
           (* JOJ(judge-of-judges, RFC-0283): N개 1차 심판이 같은 패널을 독립 종합 → meta가
              reconcile. preset.judges >= 2 필요(미구성/1개는 단일 심판 위상으로 표현 가능하므로
@@ -84,13 +88,16 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
              fan-out과 동일 fault-isolation idiom — Fusion_judge.run이 per-judge 실패를 Error로
              격리하므로 한 심판 실패가 나머지를 안 죽인다). 성공 종합만 meta 입력, 전원 실패면
              첫 에러 전파. usage = 성공 1차 전부 + meta 합산. meta 실패 시 1차 첫 성공으로
-             graceful degrade(RFC-0283 §5.1, warn). *)
+             graceful degrade(RFC-0283 §5.1, warn) — meta가 태운 토큰(meta_u)도 합산해
+             버리지 않는다(#22087 §1과 동일 원칙). 에러는 (string * usage) 동반: 토큰 소비 전
+             구성 실패는 [zero_usage]를 싣는다. *)
           let run_judge_of_judges () =
             match preset.Fusion_policy.judges with
             | [] | [ _ ] ->
               Error
-                "judge_of_judges requires >= 2 judges configured in the preset \
-                 ([[fusion.presets.<name>.judges]])"
+                ( "judge_of_judges requires >= 2 judges configured in the preset \
+                   ([[fusion.presets.<name>.judges]])"
+                , Fusion_types.zero_usage )
             | judges ->
               let firsts =
                 Eio.Fiber.List.map
@@ -112,14 +119,17 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
               in
               (match ok_priors with
                | [] ->
-                 (* 전원 실패 — meta할 종합 없음. 첫 에러를 대표로 전파. *)
+                 (* 전원 실패 — meta할 종합 없음. 첫 에러를 대표로 전파(usage 동반). *)
                  (match
                     List.find_map
                       (fun (_, r) -> match r with Error e -> Some e | Ok _ -> None)
                       firsts
                   with
                   | Some e -> Error e
-                  | None -> Error "judge_of_judges: no judge produced a synthesis")
+                  | None ->
+                    Error
+                      ( "judge_of_judges: no judge produced a synthesis"
+                      , Fusion_types.zero_usage ))
                | (_, first_s, _) :: _ ->
                  let firsts_usage =
                    List.fold_left
@@ -137,12 +147,12 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                   with
                   | Ok (meta_s, meta_u) ->
                     Ok (meta_s, Fusion_types.add_usage firsts_usage meta_u)
-                  | Error msg ->
+                  | Error (msg, meta_u) ->
                     Log.Keeper.warn ~keeper_name:req.Fusion_types.keeper
                       "fusion run %s meta judge failed, keeping first judge \
                        synthesis: %s"
                       req.Fusion_types.run_id msg;
-                    Ok (first_s, firsts_usage)))
+                    Ok (first_s, Fusion_types.add_usage firsts_usage meta_u)))
           in
           (* 위상별 reduce. Simple은 1차 종합 그대로(현행과 byte-identical — downstream
              judge/judge_usage/emit 동일). Refine는 무조건 refine. Conditional은 1차 판정이
@@ -167,12 +177,14 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
             | Fusion_types.Judge_of_judges -> run_judge_of_judges ()
           in
           (* 심판 종합과 토큰 usage를 분리: outcome.judge는 synthesis만(소비자 호환),
-             usage는 sink 비용 회계로(RFC §10 패널N+심판M). 실패한 심판은 0(패널 Failed와 대칭). *)
-          let judge = Result.map fst judge_full in
+             usage는 sink 비용 회계로(RFC §10 패널N+심판M). 심판 실패 시에도 소비한
+             토큰은 회계한다(run_composed가 에러에 usage를 동반 — 응답 받은 뒤 실패면
+             소비분, 그 전 실패면 zero). *)
+          let judge = judge_full |> Result.map fst |> Result.map_error fst in
           let judge_usage =
             match judge_full with
             | Ok (_, u) -> u
-            | Error _ -> Fusion_types.zero_usage
+            | Error (_, u) -> u
           in
           (match
              Fusion_sink.emit ~base_dir ~keeper:req.Fusion_types.keeper

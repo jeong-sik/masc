@@ -78,6 +78,44 @@ import './styles/ss-keeper-v2-bridge.css'
 // v2 rule overrides its v1 counterpart (.gd-board, .mg-board, .ide-plane-shell).
 import.meta.glob('./styles/*-v2.css', { eager: true })
 
+// ── keeper-v2 prototype CSS — the SSOT skin (big-bang v2 reskin) ──
+// Vendored verbatim from the design prototype (keeper-v2/styles/*), loaded
+// LAST so the prototype's shell/skin classes (.v2-top/.v2-body/.v2-nav/.kp-row
+// /.thread/.bubble/.ctx-*/.ov-*) win over any legacy *-v2.css drift on shared
+// names. Load order is the prototype's <link> order (notes/css-map.md): tokens
+// → v2 (shell+chat) → surfaces → per-surface overrides; craft.css after v2 so
+// density rules win. As surfaces migrate to prototype DOM, the legacy CSS above
+// is removed (final cleanup PR). Fonts: Google Fonts via index.html + the
+// @import at the top of colors_and_type.css (the local 9.9MB ttf is not bundled).
+import './styles/keeper-v2/colors_and_type.css'
+import './styles/keeper-v2/v2.css'
+import './styles/keeper-v2/surfaces.css'
+import './styles/keeper-v2/dock.css'
+import './styles/keeper-v2/craft.css'
+import './styles/keeper-v2/inspector.css'
+import './styles/keeper-v2/perf.css'
+import './styles/keeper-v2/fleet.css'
+import './styles/keeper-v2/logs.css'
+import './styles/keeper-v2/keeper-config.css'
+import './styles/keeper-v2/fusion.css'
+import './styles/keeper-v2/memory.css'
+import './styles/keeper-v2/schedule.css'
+import './styles/keeper-v2/runtime.css'
+
+// ── CSS SSOT removal scope (PR #22081 review P1) ──
+// `styles/craft-v2.css` (loaded via the *-v2.css glob above) is NOT yet removable:
+// it is the sole owner of rules the vendored keeper-v2 CSS does not cover, all keyed
+// to LIVE dashboard classes (keeper-v2/craft.css targets design-only .thread/.bubble
+// /.roster-list that the live DOM never renders, so it cannot replace these):
+//   1. `--twk-font-scale` var + `.v2-app[data-font-scale]` font-size calc (app.ts:275)
+//   2. `.v2-app[data-density]` → `.kw-*` workspace density + scrollbar rules
+//   3. `.v2-app[data-bubble='flat'] .chat-bubble` (live class; keeper-v2 targets .bubble)
+//   4. `.twk-panel` / `.twk-*` tweaks-panel UI
+// Removal plan (follow-up): migrate (1)-(4) into keeper-v2/* retargeted to the live
+// classes, verify craft-v2.test.ts + app.test.ts green after each step, then delete
+// craft-v2.css and drop it from the glob. Until then keeper-v2 loads LAST (wins on
+// shared selectors); craft-v2.css supplies only the unique rules above — no
+// live-selector conflict, so single-ownership holds per selector today.
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { App } from './app'

@@ -50,8 +50,13 @@ let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
   let preset = Tool_args.get_string args "preset" policy.Fusion_policy.default_preset in
   let web_tools = Tool_args.get_bool args "web_tools" false in
   (* topology: keeper가 합성 위상을 이름으로 선택(합성-by-selection, RFC-0252 §13 P2).
-     typed 파서 fail-closed — 닫힌 합 밖은 에러 상태 반환(Unknown→permissive default 회피). *)
-  let topology_str = Tool_args.get_string args "topology" "simple" in
+     typed 파서 fail-closed — 닫힌 합 밖은 에러 상태 반환(Unknown→permissive default 회피).
+     default wire 문자열은 typed 값에서 파생한다 — 리터럴 "simple"을 중복하면 wire rename
+     시 default가 조용히 drift한다(적대 리뷰 #22087 §2). *)
+  let default_topology_str =
+    Fusion_types.fusion_topology_to_string Fusion_types.Simple
+  in
+  let topology_str = Tool_args.get_string args "topology" default_topology_str in
   match
     ( String.equal (String.trim prompt) ""
     , Fusion_types.fusion_topology_of_string topology_str )

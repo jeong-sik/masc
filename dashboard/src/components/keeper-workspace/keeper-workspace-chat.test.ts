@@ -150,7 +150,7 @@ describe('KeeperWorkspaceChat', () => {
       `, container)
     })
 
-    const slug = container.querySelector('.kw-chat-slug') as HTMLElement | null
+    const slug = container.querySelector('.chat-head .sub .sub-ns') as HTMLElement | null
     expect(slug).not.toBeNull()
     expect(slug?.textContent).toContain('~/wt/sangsu')
   })
@@ -193,6 +193,8 @@ describe('KeeperWorkspaceChat', () => {
     const { keeperMobilePane } = await import('../keeper-detail-state')
     keeperMobilePane.value = 'chat'
 
+    // The back button is mobile-only in the reskinned ChatHeader (desktop keeps
+    // the roster visible), so render in mobile mode to exercise the same behavior.
     await act(async () => {
       render(html`
         <${KeeperWorkspaceChat}
@@ -200,6 +202,7 @@ describe('KeeperWorkspaceChat', () => {
           detailOpen=${false}
           onToggleDetail=${vi.fn()}
           onClear=${vi.fn()}
+          mobile=${true}
         />
       `, container)
     })

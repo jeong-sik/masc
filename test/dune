@@ -278,7 +278,6 @@
   test_adversarial_eval
   test_tool_call_quality_benchmark
   test_keeper_prompt_metrics
-  test_keeper_prompt_personality_field_aggregation
   test_keeper_prompt_constitution_fallback
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
@@ -588,7 +587,6 @@
   test_adversarial_eval
   test_tool_call_quality_benchmark
   test_keeper_prompt_metrics
-  test_keeper_prompt_personality_field_aggregation
   test_keeper_prompt_constitution_fallback
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
@@ -685,6 +683,13 @@
 (test
  (name test_fusion_status_tool)
  (modules test_fusion_status_tool)
+ (libraries masc_test_deps masc.fusion_core))
+
+; 적대 리뷰 #22087 §1 — Fusion_judge.attach_usage가 파싱 실패 시에도 심판 usage를
+; 보존함을 핀한다 (refine degrade 비용 undercount 회귀 방지).
+(test
+ (name test_fusion_judge_usage)
+ (modules test_fusion_judge_usage)
  (libraries masc_test_deps masc.fusion_core))
 
 ; RFC-0252 §8 — judge_meta/panel_meta structured serialization. Needs

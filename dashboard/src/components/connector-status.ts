@@ -1662,19 +1662,25 @@ function ConnectorsSurfaceHeader({
   onRefresh: () => void
 }) {
   return html`
-    <header class="cn-surf-head">
+    <header class="cn-surf-head surf-head">
       <div>
         <div class="eyebrow">Gate</div>
         <h1>${filterId ? CONNECTOR_DISPLAY_NAMES[filterId] ?? '커넥터' : '커넥터'}</h1>
-        <div class="cn-surf-sub">
+        <div class="cn-surf-sub surf-sub">
           외부 게이트 ${connectorCount}개 · <b>${activeCount} active</b> ·
           <span class="mono">GET /api/v1/gate/connectors</span>
         </div>
       </div>
-      <div class="cn-surf-actions">
+      <div class="cn-surf-actions" style=${{ display: 'flex', gap: 8 }}>
         <button
           type="button"
-          class="cn-act"
+          class="cn-act act"
+          aria-label="게이트 설정 열기"
+          onClick=${() => { navigate('settings') }}
+        >게이트 설정 →</button>
+        <button
+          type="button"
+          class="cn-act act"
           aria-label="게이트 새로고침"
           onClick=${onRefresh}
         >게이트 새로고침 ↻</button>
@@ -1743,10 +1749,14 @@ function GateStatusStrip({
   connectors: GateConnectorInfo[]
 }) {
   const healthy = gate !== null && connectors.some(c => c.gate_healthy === true)
-  function statusClass(): string {
-    if (healthy) return 'run'
-    if (gate === null) return 'off'
-    return 'pause'
+  // Prototype gate-strip dot is <StatusDot status pulse/> → window.KV.Dot → `.dot2`
+  // (messages.jsx:8 maps run→ok, pause→warn, off→idle). The vendored CSS styles
+  // `.dot2` / `.dot2.ok` / `.dot2.warn` (v2.css:395); there is no `.status-dot`
+  // rule, so emit the prototype's `.dot2` vocabulary instead.
+  function statusDotClass(): string {
+    if (healthy) return 'dot2 ok pulse'
+    if (gate === null) return 'dot2'
+    return 'dot2 warn'
   }
   function statusLabel(): string {
     if (healthy) return 'healthy'
@@ -1761,9 +1771,9 @@ function GateStatusStrip({
   const generatedAt = resolveGeneratedAt()
 
   return html`
-    <div class="cn-gate-strip" data-testid="connector-gate-strip">
+    <div class="cn-gate-strip gate-strip" data-testid="connector-gate-strip">
       <span>
-        <span class=${`status-dot ${statusClass()}`}></span>
+        <span class=${statusDotClass()}></span>
         gate <b>${statusLabel()}</b>
       </span>
       <span class="sep"></span>
@@ -1895,7 +1905,12 @@ function ConnectorGateCard({
   const pillClass = connectorStatusPillClass(label)
   const bindings = connector?.configured_bindings ?? EMPTY_CONFIGURED_BINDINGS
   const caps = connector?.capabilities?.length ? connector.capabilities : ['bindings']
-  const baseOrGuilds = connector?.gate_base_url || (connector?.guild_count ? `${connector.guild_count} guilds` : '')
+  // Prototype card cell label is exactly `Base URL` (webhook) or `Guilds`
+  // (connectors.jsx:96); value is the base URL or the numeric guild count.
+  // Mirror the existing connectorScopeLabel/connectorScopeValue helpers
+  // (below) so the card and the live panel agree on the same wiring.
+  const scopeLabel = connectorScopeLabel(connector)
+  const scopeValue = connectorScopeValue(connector)
 
   return html`
     <article
@@ -1926,7 +1941,7 @@ function ConnectorGateCard({
       <div class="cn-kv">
         <${ConnectorValueCell} label="Bot" value=${connector?.bot_user_name || connector?.bot_user_id} highlight />
         <${ConnectorValueCell} label="Reply mode" value=${connector?.reply_mode || 'manual'} />
-        <${ConnectorValueCell} label=${connector?.channel === 'webhook' ? 'Base URL' : 'Base URL / Guilds'} value=${baseOrGuilds} />
+        <${ConnectorValueCell} label=${scopeLabel} value=${scopeValue} />
         <${ConnectorValueCell} label="PID" value=${connector?.pid || '-'} />
         <${ConnectorValueCell} label="Last ready" value=${connector?.last_ready_at ? timeAgo(connector.last_ready_at) : '-'} />
         <${ConnectorValueCell} label="Updated" value=${connector?.updated_at ? timeAgo(connector.updated_at) : '-'} />
@@ -2003,9 +2018,9 @@ function ConnectorsAuditLog({ connectors }: { connectors: GateConnectorInfo[] })
 
   return html`
     <section class="cn-audit" data-testid="connector-audit-log">
-      <div class="cn-audit-h">
+      <div class="cn-audit-h ov-card-h">
         <h3>최근 감사 로그</h3>
-        <span class="cn-audit-legend">recent_audit · last 5</span>
+        <span class="cn-audit-legend ov-legend mono">recent_audit · last 5</span>
       </div>
       ${rows.length
         ? html`
@@ -2318,7 +2333,8 @@ export function ConnectorStatusPanel() {
   const activeCount = allConnectors.filter(c => connectorStateLabel(c) === 'connected').length
 
   return html`
-    <div class="contain-content v2-connector-status v2-connectors-surface ss-surface bg-surface-page">
+    <main class="v2-connector-status v2-connectors-surface surf" data-screen-label="커넥터">
+      <div class="surf-scroll">
       <${ConnectorsSurfaceHeader}
         filterId=${filterId as KnownConnectorId | null}
         connectorCount=${connectorCount}
@@ -2412,6 +2428,7 @@ export function ConnectorStatusPanel() {
         : null}
 
       ${filterId ? html`<${GateAnalyticsSection} gate=${d} gateError=${snapshot.gateError} />` : null}
+      </div>
 
       ${configDrawerConnectorId.value
         ? html`
@@ -2422,7 +2439,7 @@ export function ConnectorStatusPanel() {
             />
           `
         : null}
-    </div>
+    </main>
   `
 }
 

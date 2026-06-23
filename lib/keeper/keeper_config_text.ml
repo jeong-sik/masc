@@ -109,20 +109,12 @@ let removed_keeper_msg_input_key_names =
     "mid_goal";
     "long_goal";
     "instructions";
-
-    "will";
-    "needs";
-    "desires";
     "require_existing";
     "new_goal";
     "new_short_goal";
     "new_mid_goal";
     "new_long_goal";
     "new_instructions";
-
-    "new_will";
-    "new_needs";
-    "new_desires";
 
     (* Tool-task coupling purged (#19806): keeper turns no longer accept
        per-message tool forcing hints; reject them so older harnesses fail

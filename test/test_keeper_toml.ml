@@ -457,9 +457,6 @@ goal = "analyze logs"
 short_goal = "current session"
 mid_goal = "build patterns"
 long_goal = "continuous improvement"
-will = "detect issues"
-needs = "log access"
-desires = "low false positives"
 instructions = "You are a log analyzer."
 mention_targets = ["sherlock", "log-analyzer"]
 proactive_enabled = true
@@ -476,7 +473,8 @@ active_goal_ids = ["goal-runtime", "goal-masc"]
     | Ok d ->
       check (option string) "persona_name" (Some "analyst") d.persona_name;
       check (option string) "goal" (Some "analyze logs") d.goal;
-      check (option string) "will" (Some "detect issues") d.will;
+      check (option string) "instructions" (Some "You are a log analyzer.")
+        d.instructions;
       check int "mention_targets" 2 (List.length d.mention_targets);
       check (option bool) "proactive" (Some true) d.proactive_enabled;
       check (option bool) "autoboot_enabled" (Some false) d.autoboot_enabled;
@@ -725,17 +723,6 @@ goal = "works"
     (Sys.readdir tmp_dir);
   Unix.rmdir tmp_dir
 
-let require_nonempty_option path field value =
-  match value with
-  | Some text when String.trim text <> "" -> ()
-  | _ ->
-    fail
-      (Printf.sprintf
-         "%s must resolve non-empty keeper.%s from persona defaults or TOML \
-          overlay"
-         path
-         field)
-
 let test_bundled_keeper_profiles_resolve_prompt_self_model () =
   let repo = repo_root () in
   let original_config = Sys.getenv_opt "MASC_CONFIG_DIR" in
@@ -765,10 +752,11 @@ let test_bundled_keeper_profiles_resolve_prompt_self_model () =
            let name = Filename.chop_extension file in
            match KTP.load_keeper_profile_defaults_result name with
            | Error e -> fail (Printf.sprintf "%s failed to resolve: %s" path e)
-           | Ok defaults ->
-             require_nonempty_option path "will" defaults.will;
-             require_nonempty_option path "needs" defaults.needs;
-             require_nonempty_option path "desires" defaults.desires))
+           | Ok _defaults ->
+             (* RFC-0282 removed the will/needs/desires self_model triple;
+                this gate now just asserts every bundled keeper TOML
+                resolves its profile defaults without error. *)
+             ()))
 
 let test_bundled_issue_king_uses_local_sandbox () =
   let repo = repo_root () in
@@ -992,9 +980,6 @@ let test_persona_defaults_load_self_model_fields () =
   "name": "Probe",
   "keeper": {
     "goal": "test persona keeper",
-    "will": "legacy will",
-    "needs": "legacy needs",
-    "desires": "legacy desires",
     "instructions": "legacy instructions"
   }
 }
@@ -1002,10 +987,6 @@ let test_persona_defaults_load_self_model_fields () =
   let defaults = KTP.load_keeper_profile_defaults_from_persona "probe" in
   check (option string) "goal still loads" (Some "test persona keeper")
     defaults.goal;
-  check (option string) "will loads" (Some "legacy will") defaults.will;
-  check (option string) "needs loads" (Some "legacy needs") defaults.needs;
-  check (option string) "desires loads" (Some "legacy desires")
-    defaults.desires;
   check (option string) "instructions load" (Some "legacy instructions")
     defaults.instructions
 

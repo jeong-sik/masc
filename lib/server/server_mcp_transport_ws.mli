@@ -70,7 +70,7 @@
     [slice_index_enabled_cache] /
     [slice_index_enabled],
     [__test_reset_env_caches],
-    [read_payload_string], [handle_inbound_text],
+    [read_payload_string], [inbound_accumulate], [read_data_frame],
     [send_to_session],
     [broadcast_ws]). *)
 
@@ -83,6 +83,25 @@ type dashboard_auth_state =
     read on the SSE forward hot path and the dashboard RPC auth gates.  Held
     in an [Atomic.t] field so the single write and many reads are tear-free if
     dashboard serving moves off the main Eio domain (RFC-0204 §8.4, Phase 1). *)
+
+(** Inbound WebSocket frame reassembly state.  A single application message may
+    arrive across several frames (an initial [`Text]/[`Binary] with
+    [is_fin = false] followed by [`Continuation] frames); this holds the partial
+    buffer until the final fragment.  Shared SSOT for inbound framing across the
+    MCP session handler and the IDE LSP proxy so both reassemble fragments and
+    enforce identical size caps (RFC-0281 §3.2). *)
+module Ws_inbound : sig
+  type t
+
+  val create : unit -> t
+  (** Fresh reassembly state with no buffered partial message. *)
+
+  val reset : t -> unit
+  (** Drop any buffered partial message (on reject or close). *)
+
+  val buffered_bytes : t -> int
+  (** Bytes buffered so far for an in-progress fragmented message. *)
+end
 
 type ws_session = {
   id : string;
@@ -99,8 +118,7 @@ type ws_session = {
   mutable dashboard_last_ack_at : float;
   mutable dashboard_last_delta_seq : int;
   mutable dashboard_last_delta_at : float;
-  mutable inbound_partial_text : Buffer.t option;
-  mutable inbound_partial_text_bytes : int;
+  inbound : Ws_inbound.t;
   inbound_dispatches : int Atomic.t;
 }
 (** Per-WS session state.  Concrete record because
@@ -232,6 +250,40 @@ type inbound_dispatch_admission =
   | Inbound_dispatch_rejected of inbound_dispatch_rejection
   | Inbound_dispatch_session_gone
 (** Result of attempting to reserve one per-session inbound dispatch slot. *)
+
+type inbound_read_outcome =
+  | Inbound_message of string
+  | Inbound_incomplete
+  | Inbound_rejected of inbound_size_rejection
+(** Outcome of {!inbound_accumulate} / {!read_data_frame}: a fully reassembled
+    application message, a buffered (or empty) fragment awaiting more frames, or
+    a size-cap rejection (the partial buffer is dropped). *)
+
+val inbound_accumulate :
+  Ws_inbound.t ->
+  max_message_bytes:int ->
+  is_fin:bool ->
+  string ->
+  inbound_read_outcome
+(** Reassemble one decoded data-frame chunk into the reader's running message,
+    enforcing [max_message_bytes] across fragments.  Pure state transition over
+    the reader (only its partial buffer is mutated); unit testable without a
+    live connection. *)
+
+val read_data_frame :
+  Ws_inbound.t ->
+  max_frame_bytes:int ->
+  max_message_bytes:int ->
+  is_fin:bool ->
+  len:int ->
+  Httpun_ws.Payload.t ->
+  on_outcome:(inbound_read_outcome -> unit) ->
+  unit
+(** Drain a WebSocket data-frame [payload] (frame-size capped) and feed it to
+    {!inbound_accumulate}, delivering the outcome via [on_outcome].  Both the
+    MCP session handler and the IDE LSP proxy route [`Text] / [`Binary] /
+    [`Continuation] frames through this, so both reassemble fragments and apply
+    identical frame/message size caps (RFC-0281 §3.2). *)
 
 val read_inbound_message_frame :
   ws_session ->

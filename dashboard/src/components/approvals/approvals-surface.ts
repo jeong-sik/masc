@@ -37,6 +37,24 @@ function apSev(riskLevel: string | null | undefined): KeeperApprovalRiskVisualBa
   return keeperApprovalRiskVisualBand(riskLevel)
 }
 
+// Prototype's .ap-kind chip leads with a glyph (data.jsx APPROVAL_KIND). The live
+// queue item has no `kind` taxonomy field, so we do NOT fabricate a kind glyph;
+// instead the chip leads with a glyph derived from the real risk visual band —
+// the icon affordance the prototype shows, keyed only off data we actually have.
+// Exhaustive over KeeperApprovalRiskVisualBand so a new band is a compile error.
+function apSevGlyph(band: KeeperApprovalRiskVisualBand): string {
+  switch (band) {
+    case 'bad':
+      return '⚠' // ⚠ destructive / irreversible
+    case 'warn':
+      return '▲' // ▲ elevated
+    case 'accent':
+      return '◆' // ◆ moderate
+    case 'info':
+      return '●' // ● low
+  }
+}
+
 // seconds-waited → "N분 N초 대기" (prototype apAge).
 function apAge(sec: number | null | undefined): string {
   const s = Math.max(0, Math.round(sec ?? 0))
@@ -141,7 +159,7 @@ function ApprovalCard({
       <div class="ap-rail"></div>
       <div class="ap-main">
         <div class="ap-h">
-          <span class=${`ap-kind sev-${sev}`}>${keeperApprovalRiskLabel(item.risk_level)}</span>
+          <span class=${`ap-kind sev-${sev}`}>${apSevGlyph(sev)} ${keeperApprovalRiskLabel(item.risk_level)}</span>
           <span class="ap-tool mono">${item.tool_name}</span>
           <span class="ap-id mono">${item.id}</span>
           <span class=${`ap-age sev-${sev}`}>${apAge(item.waiting_s)}</span>
@@ -233,7 +251,7 @@ function ApprovalDetailPanel({
       data-approval-id=${item.id}
     >
       <div class="ap-detail-panel-head">
-        <span class=${`ap-kind sev-${sev}`}>${keeperApprovalRiskLabel(item.risk_level)}</span>
+        <span class=${`ap-kind sev-${sev}`}>${apSevGlyph(sev)} ${keeperApprovalRiskLabel(item.risk_level)}</span>
         <div class="ap-detail-panel-title">
           <strong>${approvalTitle(item)}</strong>
           <span class="mono">${item.id}</span>
@@ -277,6 +295,7 @@ export function ApprovalsSurface() {
       <div class="ov-scroll">
         <header class="ov-head">
           <div>
+            <span class="ov-eyebrow">HITL</span>
             <h1>승인 · HITL 큐</h1>
             <p class="ov-sub">
               keeper가 위험·비가역 행동 전 결재를 청한 항목 ·
@@ -296,7 +315,7 @@ export function ApprovalsSurface() {
             <div class=${`ov-kpi-v ${items.length ? 'warn' : 'ok'}`}>${items.length}</div>
           </div>
           <div class="ov-kpi">
-            <div class="ov-kpi-k">위험 · 높음</div>
+            <div class="ov-kpi-k">비가역 · 위험</div>
             <div class=${`ov-kpi-v ${stats.risky ? 'bad' : ''}`}>${stats.risky}</div>
           </div>
           <div class="ov-kpi">

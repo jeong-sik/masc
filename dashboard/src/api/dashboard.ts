@@ -2336,9 +2336,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       short_goal: asNullableString(prompt.short_goal) ?? '',
       mid_goal: asNullableString(prompt.mid_goal) ?? '',
       long_goal: asNullableString(prompt.long_goal) ?? '',
-      will: asNullableString(prompt.will) ?? '',
-      needs: asNullableString(prompt.needs) ?? '',
-      desires: asNullableString(prompt.desires) ?? '',
       instructions: asNullableString(prompt.instructions) ?? '',
       system_prompt_blocks: {
         constitution: normalizePromptBlock(promptBlocks.constitution, 'keeper.constitution'),
@@ -2484,9 +2481,6 @@ export type KeeperConfigUpdatePayload = {
   short_goal?: string
   mid_goal?: string
   long_goal?: string
-  will?: string
-  needs?: string
-  desires?: string
   instructions?: string
   // Proactive
   proactive_enabled?: boolean

@@ -160,50 +160,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
       ~preferred:p.tool_denylist_opt
       ~fallback:profile_or_old
   in
-  let new_will =
-    match p.will_opt with
-    | Some w -> w
-    | None ->
-        if preserve_prompt_defaults then old.will
-        else if String.trim old.will <> "" then old.will
-        else Option.value ~default:(Env_config_core.keeper_will ()) p.profile_defaults.will
-  in
-  let new_needs =
-    match p.needs_opt with
-    | Some n -> n
-    | None ->
-        if preserve_prompt_defaults then old.needs
-        else if String.trim old.needs <> "" then old.needs
-        else Option.value ~default:(Env_config_core.keeper_needs ()) p.profile_defaults.needs
-  in
-  let new_desires =
-    match p.desires_opt with
-    | Some d -> d
-    | None ->
-        if preserve_prompt_defaults then old.desires
-        else if String.trim old.desires <> "" then old.desires
-        else Option.value ~default:(Env_config_core.keeper_desires ()) p.profile_defaults.desires
-  in
-  (* Layer 1 boundary check: warn (not truncate) when an update brings a
-     persona field above the prompt-render cap.  Skip when the value
-     equals [old.*] — a silent read-back must not spam logs.  Disk
-     preserves the raw value; only prompt rendering applies the cap. *)
-  let warn_personality_cap field old_value new_value =
-    if not (String.equal old_value new_value) then
-      let len = String.length new_value in
-      if len > Keeper_config.prompt_render_max_bytes then
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string TurnUpUpdateFailures)
-          ~labels:[("keeper", old.name); ("site", Keeper_turn_up_update_failure_site.(to_label Prompt_cap))]
-          ();
-        Log.Keeper.warn
-          "update_keeper personality.%s for %s exceeds prompt cap \
-           (%d bytes > %d). Stored as-is; truncated only at prompt rendering."
-          field old.name len Keeper_config.prompt_render_max_bytes
-  in
-  warn_personality_cap "will" old.will new_will;
-  warn_personality_cap "needs" old.needs new_needs;
-  warn_personality_cap "desires" old.desires new_desires;
   let resume_paused_keeper =
     old.paused && not (paused_state_requires_approval old)
   in
@@ -244,9 +200,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
     short_goal;
     mid_goal;
     long_goal;
-    will = new_will;
-    needs = new_needs;
-    desires = new_desires;
     instructions =
       (match p.instructions_arg with
        | Some v -> v

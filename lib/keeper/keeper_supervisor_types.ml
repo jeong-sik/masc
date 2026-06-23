@@ -71,9 +71,6 @@ let keeper_defaults_have_inline_identity
   || Option.is_some defaults.short_goal
   || Option.is_some defaults.mid_goal
   || Option.is_some defaults.long_goal
-  || Option.is_some defaults.will
-  || Option.is_some defaults.needs
-  || Option.is_some defaults.desires
   || Option.is_some defaults.instructions
   || defaults.mention_targets <> []
 ;;

@@ -89,18 +89,6 @@ let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaul
        defaults.long_goal
        (default_string defaults.long_goal meta.long_goal)
   |> maybe_string_override
-       "prompt.will"
-       defaults.will
-       (default_string defaults.will meta.will)
-  |> maybe_string_override
-       "prompt.needs"
-       defaults.needs
-       (default_string defaults.needs meta.needs)
-  |> maybe_string_override
-       "prompt.desires"
-       defaults.desires
-       (default_string defaults.desires meta.desires)
-  |> maybe_string_override
        "prompt.instructions"
        defaults.instructions
        (default_string defaults.instructions meta.instructions)

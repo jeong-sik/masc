@@ -14,9 +14,6 @@ open Masc
    it does not pin a key the JSON serialisation no longer emits. *)
 let target_keys =
   [ "trace_history"
-  ; "will"
-  ; "needs"
-  ; "desires"
   ; "instructions"
   ; "last_runtime_attempt"
   ; "last_turn_tool_calls"

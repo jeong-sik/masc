@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import {
   resolveScheduleApproval,
   type DashboardScheduleDecision,
@@ -13,6 +13,14 @@ import { formatDateTimeKo } from '../../lib/format-time'
 import { ActionButton } from '../common/button'
 import { StatusChip, type StatusChipTone } from '../common/status-chip'
 import { showToast } from '../common/toast'
+import { SigilBadge } from '../v2/primitives-v2'
+import { kSigil, kSlot } from '../keeper-badge'
+import {
+  schedPayloadSpec,
+  schedRiskSpec,
+  schedStatusSpec,
+  type SchedStatusSpec,
+} from '../v2/schedule-constants'
 
 type ScheduleFilterKey = 'all' | 'pending' | 'due' | 'ready' | 'scheduled' | 'terminal'
 
@@ -802,12 +810,455 @@ function DurableSignalItem({
   `
 }
 
-export function ScheduledAutomationPanel({
+/* ════════════════════════════════════════════════════════════════════════
+   keeper-v2 prototype surface (schedule.jsx). Emits the vendored `.sch-*` /
+   `.turn-*` DOM so styles/keeper-v2/schedule.css applies. Opt-in via
+   `variant="v2"`; the default `diagnostics` path above is the dense FSM view
+   reused by the Tools surface and must stay byte-stable.
+
+   Live data only — no fabricated operator/timestamps. Live fields absent in the
+   prototype model (relative due text "4h 12m 후", structured decision
+   provenance, payload `body`) are rendered from the real ISO timestamps /
+   marked data-stub rather than invented (audit P2 #11, #12). The live approval
+   API supports approve/reject only (no cancel), so the prototype's cancel
+   action is omitted here rather than wired to a no-op. */
+
+// Live status strings are lower_snake (pending_approval); the vendored
+// SCHED_STATUS map is keyed on Schedule_domain PascalCase. Total function:
+// unknown statuses fall back to schedStatusSpec's dim spec.
+const LIVE_STATUS_TO_SPEC_KEY: Readonly<Record<string, string>> = {
+  pending_approval: 'Pending_approval',
+  awaiting_approval: 'Pending_approval',
+  blocked_approval: 'Pending_approval',
+  scheduled: 'Scheduled',
+  due: 'Due',
+  due_pending_refresh: 'Due',
+  running: 'Running',
+  succeeded: 'Succeeded',
+  failed: 'Failed',
+  rejected: 'Rejected',
+  cancelled: 'Cancelled',
+  canceled: 'Cancelled',
+  expired: 'Expired',
+}
+
+// Live risk_class strings are lower_snake (workspace_write); SCHED_RISK is keyed
+// PascalCase. Same total-function fallback contract.
+const LIVE_RISK_TO_SPEC_KEY: Readonly<Record<string, string>> = {
+  reminder_only: 'Reminder_only',
+  read_only: 'Read_only',
+  workspace_write: 'Workspace_write',
+  external_write: 'External_write',
+  destructive: 'Destructive',
+  cost_bearing: 'Cost_bearing',
+}
+
+function statusSpecForLive(status: string | null | undefined): SchedStatusSpec {
+  const key = LIVE_STATUS_TO_SPEC_KEY[normalized(status)]
+  // Pass the resolved PascalCase key when known, else the raw value so the
+  // fallback renders the original string rather than a generic placeholder.
+  return schedStatusSpec(key ?? status ?? undefined)
+}
+
+function riskSpecForLive(risk: string | null | undefined): { lbl: string; cls: string } {
+  const key = LIVE_RISK_TO_SPEC_KEY[normalized(risk)]
+  return schedRiskSpec(key ?? risk ?? undefined)
+}
+
+// Card rail tone class. SCHED_STATUS specs only ever yield warn/info/ok/bad/dim
+// for statuses; .sch-card.st-volt is not defined, so clamp anything else to dim.
+const CARD_RAIL_TONES: ReadonlySet<string> = new Set(['ok', 'warn', 'bad', 'info', 'dim'])
+function cardRailTone(cls: string): string {
+  return CARD_RAIL_TONES.has(cls) ? cls : 'dim'
+}
+
+// Prototype filter tabs (audit P0 #3): 5 tabs, prototype labels/ordering.
+type SchTabKey = 'pending' | 'scheduled' | 'active' | 'done' | 'all'
+interface SchTabDef {
+  readonly key: SchTabKey
+  readonly label: string
+  // Effective-status values (live, normalized) this tab includes; null = all.
+  readonly statuses: readonly string[] | null
+}
+const SCH_TABS: readonly SchTabDef[] = [
+  { key: 'pending', label: '승인 대기', statuses: ['pending_approval', 'awaiting_approval', 'blocked_approval'] },
+  { key: 'scheduled', label: '예약됨', statuses: ['scheduled'] },
+  { key: 'active', label: 'due · 실행', statuses: ['due', 'due_pending_refresh', 'running'] },
+  { key: 'done', label: '완료 · 종료', statuses: ['succeeded', 'failed', 'rejected', 'cancelled', 'canceled', 'expired'] },
+  { key: 'all', label: '전체', statuses: null },
+]
+
+function schTabMatches(tab: SchTabDef, request: DashboardScheduledAutomationRequest): boolean {
+  if (tab.statuses === null) return true
+  return tab.statuses.includes(normalized(effectiveStatus(request)))
+}
+
+function recurrenceText(request: DashboardScheduledAutomationRequest): string {
+  return recurrenceLabel(request)
+}
+
+/** `.sch-pill` status chip with glyph (audit P0 #2). */
+function SchStatusPill({ status }: { status: string | null | undefined }) {
+  const spec = statusSpecForLive(status)
+  return html`<span class=${`sch-pill ${spec.cls}`}>${spec.glyph} ${spec.lbl}</span>`
+}
+
+/** `.sch-risk` chip (audit P0 #1 head row). */
+function SchRiskChip({ risk }: { risk: string | null | undefined }) {
+  const spec = riskSpecForLive(risk)
+  return html`<span class=${`sch-risk ${spec.cls}`} title=${`risk_class = ${risk ?? '-'}`}>${spec.lbl}</span>`
+}
+
+/** Keeper attribution on `.sch-meta` — sigil + id (audit P0/P1 #8). No live
+ *  keeper-chat nav callback is wired into the schedule route, so the id is
+ *  shown as text rather than a fake nav button. */
+function SchKeeperMeta({ actor }: { actor: DashboardScheduledAutomationActor | null | undefined }) {
+  const id = actor?.id?.trim()
+  if (!id) {
+    return html`<span class="sch-by"><span class="sch-actor-kind mono" data-stub="no scheduled_by actor">예약</span></span>`
+  }
+  return html`
+    <span class="sch-by">
+      <${SigilBadge} slot=${kSlot(id)} sigil=${kSigil(id)} size=${22} title=${id} />
+      <span class="sch-klink" title=${actorLabel(actor)}>${id}</span>
+      <span class="sch-actor-kind mono">예약</span>
+    </span>
+  `
+}
+
+function SchCard({
+  request,
+  onOpen,
+}: {
+  request: DashboardScheduledAutomationRequest
+  onOpen: (request: DashboardScheduledAutomationRequest) => void
+}) {
+  const status = effectiveStatus(request)
+  const spec = statusSpecForLive(status)
+  const payload = schedPayloadSpec(request.payload_kind)
+  const dueIso = request.next_due_at_iso ?? request.due_at_iso ?? null
+  const summary = request.payload_summary?.trim() || null
+  return html`
+    <article class=${`sch-card st-${cardRailTone(spec.cls)}`} data-schedule-id=${request.schedule_id}>
+      <div class="sch-card-rail"></div>
+      <div class="sch-card-main">
+        <button
+          type="button"
+          class="sch-card-head"
+          data-schedule-detail=${request.schedule_id}
+          onClick=${() => { onOpen(request) }}
+        >
+          <span class="sch-kind">${payload.glyph} ${payload.lbl}</span>
+          <span class="sch-id mono">${request.schedule_id}</span>
+          <${SchRiskChip} risk=${request.risk_class} />
+          <span class="sch-rec mono" title="recurrence">↻ ${recurrenceText(request)}</span>
+          <span class="sch-head-sp"></span>
+          <${SchStatusPill} status=${status} />
+        </button>
+        ${summary
+          ? html`<button type="button" class="sch-summary" onClick=${() => { onOpen(request) }}>${summary}</button>`
+          : html`<button type="button" class="sch-summary" data-stub="no payload_summary" onClick=${() => { onOpen(request) }}>요약 없음 · 상세 보기</button>`}
+        <div class="sch-meta">
+          <${SchKeeperMeta} actor=${request.scheduled_by} />
+          <span class="sch-due" title="due_at"><span class="sub-k">due</span> ${formatDateTimeKo(dueIso)}</span>
+          ${request.requires_separate_human_grant
+            ? html`<span class="sch-need mono" title="별도 사람(operator) 승인 필요">⊙ 승인 필요</span>`
+            : null}
+        </div>
+      </div>
+    </article>
+  `
+}
+
+/** Detail overlay `.turn-overlay > .turn-drawer.sch-drawer` (audit P0 #4). */
+function SchDetail({
+  request,
+  onClose,
+  onResolved,
+}: {
+  request: DashboardScheduledAutomationRequest
+  onClose: () => void
+  onResolved?: () => Promise<void> | void
+}) {
+  // External-system sync: Escape-to-close keyboard listener (legitimate effect).
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation()
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => { window.removeEventListener('keydown', onKey) }
+  }, [onClose])
+
+  const status = effectiveStatus(request)
+  const payload = schedPayloadSpec(request.payload_kind)
+  const dueIso = request.next_due_at_iso ?? request.due_at_iso ?? null
+  const requestedAtIso = request.requested_at_iso ?? null
+  const expiresAtIso = request.expires_at_iso ?? null
+  const execution = request.last_execution
+  const summary = request.payload_summary?.trim() || null
+  const approval = request.approval_policy ?? (request.approval_required ? 'required' : 'not_required')
+  // Live payload has no `body` — only kind/digest/target/summary. Render what is
+  // available in the envelope and mark the absent body honestly (audit #12).
+  const payloadEnvelope = JSON.stringify(
+    {
+      kind: request.payload_kind ?? null,
+      digest: request.payload_digest ?? null,
+      target: request.payload_target ?? null,
+      summary: summary,
+    },
+    null,
+    2,
+  )
+
+  return html`
+    <div class="turn-overlay" onClick=${onClose}>
+      <div
+        class="turn-drawer sch-drawer"
+        data-schedule-detail-panel=${request.schedule_id}
+        onClick=${(event: MouseEvent) => { event.stopPropagation() }}
+      >
+        <div class="turn-hd">
+          <h3>예약 상세</h3>
+          <span class="tid">${request.schedule_id}</span>
+          <span class="sch-hd-sp" style=${{ marginLeft: 'auto' }}></span>
+          <${SchStatusPill} status=${status} />
+          <button type="button" class="turn-close" onClick=${onClose} title="닫기 (Esc)">✕</button>
+        </div>
+        <div class="turn-body">
+          <div class="turn-sec">
+            <h4>${payload.glyph} ${payload.lbl}</h4>
+            ${summary
+              ? html`<p class="sch-d-summary">${summary}</p>`
+              : html`<p class="sch-d-summary" data-stub="no payload_summary">요약 없음</p>`}
+            <div class="sch-badges">
+              <${SchRiskChip} risk=${request.risk_class} />
+              <span class="sch-rec mono">↻ ${recurrenceText(request)}</span>
+              <span class="sch-src mono">${enumLabel(request.source)}</span>
+            </div>
+          </div>
+
+          <div class="turn-sec">
+            <h4>주체 · 직무분리</h4>
+            <div class="sch-kvs">
+              <div class="sch-kv"><span class="k">requested_by</span><span class="v mono">${actorLabel(request.requested_by)}</span></div>
+              <div class="sch-kv"><span class="k">scheduled_by</span><span class="v mono">${actorLabel(request.scheduled_by)}</span></div>
+              <div class="sch-kv"><span class="k">approval_required</span><span class="v mono">${String(request.approval_required)}</span></div>
+            </div>
+            ${request.scheduled_by?.id
+              ? html`<div class="sch-sod">승인자(operator)는 요청자·예약자와 달라야 실행 grant가 발급됩니다 — 예약 주체는 keeper(<b>${request.scheduled_by.id}</b>), 승인 주체는 operator.</div>`
+              : html`<div class="sch-sod">승인자(operator)는 요청자·예약자와 달라야 실행 grant가 발급됩니다.</div>`}
+          </div>
+
+          <div class="turn-sec">
+            <h4>타이밍</h4>
+            <div class="sch-kvs">
+              <div class="sch-kv"><span class="k">요청</span><span class="v mono">${formatDateTimeKo(requestedAtIso)}</span></div>
+              <div class="sch-kv"><span class="k">due</span><span class="v mono">${formatDateTimeKo(dueIso)}</span></div>
+              <div class="sch-kv"><span class="k">만료</span><span class="v mono">${formatDateTimeKo(expiresAtIso)}</span></div>
+              <div class="sch-kv"><span class="k">recurrence</span><span class="v mono">${recurrenceText(request)}</span></div>
+            </div>
+          </div>
+
+          <div class="turn-sec">
+            <h4>승인 정책</h4>
+            <div class="sch-kvs">
+              <div class="sch-kv"><span class="k">approval_policy</span><span class="v mono">${enumLabel(approval)}</span></div>
+              <div class="sch-kv"><span class="k">운영자 조치</span><span class="v mono">${enumLabel(request.operator_action)}</span></div>
+              <div class="sch-kv"><span class="k">실행 준비</span><span class="v mono">${enumLabel(request.execution_readiness)}</span></div>
+            </div>
+          </div>
+
+          <div class="turn-sec">
+            <h4>payload 봉투</h4>
+            <pre class="turn-pre" data-stub="payload body not in projection">${payloadEnvelope}</pre>
+          </div>
+
+          <div class="turn-sec">
+            <h4>최근 실행 기록</h4>
+            <${SchExecution} execution=${execution} />
+          </div>
+
+          <${SchDetailActions} request=${request} onResolved=${onResolved} onClose=${onClose} />
+        </div>
+      </div>
+    </div>
+  `
+}
+
+function SchExecution({ execution }: { execution: DashboardScheduledAutomationExecution | null | undefined }) {
+  if (!execution) {
+    return html`<div class="sch-kvs"><div class="sch-kv"><span class="k">status</span><span class="v mono" data-stub="no last_execution">실행 기록 없음</span></div></div>`
+  }
+  const detailRows = executionDetailRows(execution.detail)
+  return html`
+    <div class="sch-kvs">
+      <div class="sch-kv"><span class="k">status</span><span class="v mono">${enumLabel(execution.status)}</span></div>
+      <div class="sch-kv"><span class="k">시작</span><span class="v mono">${formatDateTimeKo(execution.started_at_iso ?? null)}</span></div>
+      <div class="sch-kv"><span class="k">종료</span><span class="v mono">${formatDateTimeKo(execution.finished_at_iso ?? null)}</span></div>
+      ${detailRows.map(row => html`
+        <div class="sch-kv" data-execution-detail-row=${row.label}><span class="k">${row.label}</span><span class="v mono">${row.value}</span></div>
+      `)}
+    </div>
+    ${execution.error ? html`<div class="sch-exec bad">${execution.error}</div>` : null}
+  `
+}
+
+/** Detail-overlay actions. Wired to the real approve/reject API only — the
+ *  prototype's cancel action has no live endpoint, so it is omitted. Buttons
+ *  render only when an `onResolved` refresh callback exists (mirrors the
+ *  diagnostics ApprovalCell contract: no callback → read-only). */
+function SchDetailActions({
+  request,
+  onResolved,
+  onClose,
+}: {
+  request: DashboardScheduledAutomationRequest
+  onResolved?: () => Promise<void> | void
+  onClose: () => void
+}) {
+  const [pendingDecision, setPendingDecision] = useState<DashboardScheduleDecision | null>(null)
+  if (!onResolved || !isApprovalActionable(request)) return null
+  const busy = pendingDecision !== null
+
+  async function decide(decision: DashboardScheduleDecision) {
+    setPendingDecision(decision)
+    try {
+      await resolveScheduleApproval(
+        request.schedule_id,
+        decision,
+        decision === 'reject' ? 'rejected from dashboard' : undefined,
+      )
+      showToast(`${request.schedule_id} ${decision === 'approve' ? 'approved' : 'rejected'}`, 'success')
+      await onResolved?.()
+      onClose()
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'schedule approval failed', 'error')
+    } finally {
+      setPendingDecision(null)
+    }
+  }
+
+  return html`
+    <div class="turn-sec sch-detail-actions">
+      <button
+        type="button"
+        class="sch-act approve"
+        data-schedule-mutation="approve"
+        data-testid=${`schedule-approve-${request.schedule_id}`}
+        disabled=${busy}
+        aria-busy=${pendingDecision === 'approve' ? 'true' : 'false'}
+        onClick=${() => { void decide('approve') }}
+      >승인 — grant 발급</button>
+      <button
+        type="button"
+        class="sch-act deny"
+        data-schedule-mutation="reject"
+        data-testid=${`schedule-reject-${request.schedule_id}`}
+        disabled=${busy}
+        aria-busy=${pendingDecision === 'reject' ? 'true' : 'false'}
+        onClick=${() => { void decide('reject') }}
+      >거부</button>
+    </div>
+  `
+}
+
+function SchedulePrototypeSurface({
   automation,
   onResolved,
 }: {
+  automation: DashboardScheduledAutomation
+  onResolved?: () => Promise<void> | void
+}) {
+  const [tab, setTab] = useState<SchTabKey>('pending')
+  const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null)
+
+  const rows = automation.requests ?? []
+  const tabDef = SCH_TABS.find(definition => definition.key === tab) ?? SCH_TABS[0]!
+  const filtered = rows.filter(request => schTabMatches(tabDef, request))
+  // Durable runner signals (real source). Keep one feed (audit P0/P1 #9).
+  const durableSignals = [...(automation.signals ?? [])].sort((a, b) => signalTimestamp(a) - signalTimestamp(b))
+  const selected = selectedScheduleId
+    ? rows.find(request => request.schedule_id === selectedScheduleId) ?? null
+    : null
+
+  return html`
+    <div class="sch-panel">
+      <div class="sch-tabs" role="tablist" aria-label="예약 필터">
+        ${SCH_TABS.map(definition => {
+          const count = definition.statuses === null
+            ? rows.length
+            : rows.filter(request => schTabMatches(definition, request)).length
+          const active = definition.key === tab
+          return html`
+            <button
+              type="button"
+              role="tab"
+              aria-selected=${active ? 'true' : 'false'}
+              class=${`sch-tab ${active ? 'on' : ''}`}
+              data-schedule-filter=${definition.key}
+              onClick=${() => { setTab(definition.key) }}
+            >${definition.label}<span class="sch-tab-n mono">${count.toLocaleString()}</span></button>
+          `
+        })}
+      </div>
+
+      ${filtered.length === 0
+        ? html`<div class="sch-empty">이 필터에 해당하는 예약이 없습니다.</div>`
+        : html`
+            <div class="sch-list">
+              ${filtered.map(request => html`
+                <${SchCard}
+                  request=${request}
+                  onOpen=${(next: DashboardScheduledAutomationRequest) => { setSelectedScheduleId(next.schedule_id) }}
+                />
+              `)}
+            </div>
+          `}
+
+      <section class="sch-signals">
+        <div class="ov-card-h"><h3>wake signal 피드 · schedule_runner.tick</h3></div>
+        ${durableSignals.length === 0
+          ? html`<div class="sch-empty" data-stub="no durable runner signals">durable wake signal 없음</div>`
+          : html`
+              <div class="sch-sig-list">
+                ${durableSignals.map(signal => {
+                  const spec = statusSpecForLive(signal.kind)
+                  return html`
+                    <div class="sch-sig" data-schedule-signal-id=${signal.signal_id}>
+                      <span class="sch-sig-at mono" data-schedule-signal-at=${signal.signal_id}>${compactTimeLabel(signal.emitted_at_iso ?? signal.due_at_iso ?? null)}</span>
+                      <span class=${`sch-sig-kind ${spec.cls}`} data-schedule-signal-kind=${signal.kind}>${enumLabel(signal.kind || signal.event_type)}</span>
+                      <button
+                        type="button"
+                        class="sch-sig-id mono"
+                        data-schedule-signal-schedule=${signal.schedule_id}
+                        onClick=${() => { setSelectedScheduleId(signal.schedule_id) }}
+                      >${signal.schedule_id}</button>
+                      <span class="sch-sig-risk mono" data-schedule-signal-risk=${signal.signal_id}>${enumLabel(signal.risk_class)}</span>
+                    </div>
+                  `
+                })}
+              </div>
+            `}
+      </section>
+
+      ${selected
+        ? html`<${SchDetail} request=${selected} onClose=${() => { setSelectedScheduleId(null) }} onResolved=${onResolved} />`
+        : null}
+    </div>
+  `
+}
+
+export function ScheduledAutomationPanel({
+  automation,
+  onResolved,
+  variant = 'diagnostics',
+}: {
   automation?: DashboardScheduledAutomation | null
   onResolved?: () => Promise<void> | void
+  variant?: 'diagnostics' | 'v2'
 }) {
   const [activeFilter, setActiveFilter] = useState<ScheduleFilterKey>('all')
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null)
@@ -818,6 +1269,10 @@ export function ScheduledAutomationPanel({
         예약 자동화 projection 없음
       </div>
     `
+  }
+
+  if (variant === 'v2') {
+    return html`<${SchedulePrototypeSurface} automation=${automation} onResolved=${onResolved} />`
   }
 
   const nonzeroCounts = Object.entries(automation.counts ?? {})

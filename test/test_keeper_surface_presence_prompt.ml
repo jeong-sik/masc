@@ -262,21 +262,12 @@ let test_profile_defaults_feed_identity_prompt () =
   let profile_defaults =
     {
       KTP.empty_keeper_profile_defaults with
-      will = Some "soul will";
-      needs = Some "soul needs";
-      desires = Some "soul desires";
       instructions = Some "soul instructions";
     }
   in
   let system =
     system_prompt ~profile_defaults base_observation
   in
-  check bool "profile will in system prompt" true
-    (contains ~needle:"Will: soul will" system);
-  check bool "profile needs in system prompt" true
-    (contains ~needle:"Needs: soul needs" system);
-  check bool "profile desires in system prompt" true
-    (contains ~needle:"Desires: soul desires" system);
   check bool "profile instructions in system prompt" true
     (contains ~needle:"Instructions:\nsoul instructions" system)
 

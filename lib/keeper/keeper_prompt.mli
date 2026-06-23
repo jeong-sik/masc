@@ -34,9 +34,6 @@ val build_keeper_system_prompt :
   short_goal:string ->
   mid_goal:string ->
   long_goal:string ->
-  will:string ->
-  needs:string ->
-  desires:string ->
   instructions:string ->
   ?persona_extended:string ->
   ?keeper_name:string ->

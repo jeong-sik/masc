@@ -99,7 +99,10 @@ let first_some (f : 'a -> 'b option) (xs : 'a list) : 'b option =
     None
     xs
 
-(* Run the judge over a panel; returns the synthesis and the judge's own usage. *)
+(* Run the judge over a panel; returns the synthesis and the judge's own usage.
+   This debug CLI does not account for error-path usage (the orchestrator does),
+   so the [Error] usage carried by [Fusion_judge.run] is dropped here, keeping
+   the existing [(.. , string) result] contract for the print helpers below. *)
 let synthesize ~sw ~net ~(preset : Fusion_policy.preset) ~(prompt : string)
     ~(panel : Fusion_types.panel_outcome list)
   : (Fusion_types.judge_synthesis * Fusion_types.usage, string) result =
@@ -116,6 +119,7 @@ let synthesize ~sw ~net ~(preset : Fusion_policy.preset) ~(prompt : string)
          preset.Fusion_policy.panels)
     ~max_tool_calls:(Fusion_policy.judge_tool_budget_of preset.Fusion_policy.panels)
     ()
+  |> Result.map_error fst
 
 (* Print a judge arm and return (resolved_answer, judge_in_tokens, judge_out_tokens). *)
 let print_judge_arm ~(tag : string)

@@ -192,11 +192,9 @@ export function RuntimeEnvironmentEditor({
   }
 
   // rt-select — runtime.css:43. Inline width cap so the 248px min-width never
-  // crushes the flex sibling label in the narrow Settings embed (the prototype
-  // ran full-screen). flex-wrap on the row lets the control drop below the
-  // label instead of squeezing it to one-word-per-line.
-  const selectStyle = { minWidth: 0, maxWidth: '248px', flex: '1 1 200px' }
-  const laneStyle = { flexWrap: 'wrap' as const }
+  // Layout is now handled by keeper-v2/runtime.css (.rt-lane/.rt-lane-c/.rt-select)
+  // so the narrow Settings embed stacks label above control instead of squeezing
+  // the label to one-word-per-line.
 
   function laneRow(
     lane: 'default' | 'librarian' | 'cross_verifier',
@@ -207,7 +205,7 @@ export function RuntimeEnvironmentEditor({
     needsJson: boolean,
   ) {
     return html`
-      <div class="rt-lane" style=${laneStyle}>
+      <div class="rt-lane">
         <div class="rt-lane-l">
           <div class="rt-lane-lbl">${label}</div>
           <div class="rt-lane-hint">${hint}</div>
@@ -215,7 +213,6 @@ export function RuntimeEnvironmentEditor({
         <div class="rt-lane-c">
           <select
             class="rt-select mono"
-            style=${selectStyle}
             value=${value}
             disabled=${isDisabled}
             aria-label=${lane === 'default' ? 'default runtime' : `${lane} runtime`}
@@ -470,7 +467,6 @@ export function RuntimeEnvironmentEditor({
                 </span>
                 <select
                   class="rt-select mono"
-                  style=${selectStyle}
                   value=${current}
                   disabled=${isDisabled}
                   aria-label=${`${keeper.name} 런타임 배정`}

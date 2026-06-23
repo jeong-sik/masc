@@ -7,12 +7,12 @@
 // inspectors) are MARKED, never faked.
 
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import { shellAuthSummary, tasks } from '../../store'
 import type { Keeper, Task } from '../../types'
 import { navigate } from '../../router'
-import { keeperModelLabel, keeperRuntimeLabel } from './keeper-workspace-shared'
+import { keeperBucket, keeperModelLabel, keeperPhaseToken, keeperRuntimeLabel } from './keeper-workspace-shared'
 import { CountBadge } from '../v2/primitives-v2'
 import { callMcpTool } from '../../api/mcp'
 import { showToast } from '../common/toast'
@@ -21,6 +21,18 @@ import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
 import { errorToString } from '../../lib/format-string'
 import { refreshAfterRuntimeAction } from '../keeper-detail-helpers'
 import { contextThresholds } from '../../config/context-thresholds'
+import {
+  findRuntimeCatalogEntry,
+  loadRuntimeCatalog,
+  runtimeCatalogState,
+} from '../../lib/runtime-catalog-resource'
+import { CompactionInspectorOverlay } from './compaction-inspector-overlay'
+import { recordManualCompaction } from './compaction-snapshots'
+import {
+  MemoryInspector,
+  type MemoryKeeper,
+} from '../memory-inspector'
+import { keepers } from '../../store'
 
 function contextRatio(keeper: Keeper): number | null {
   const ratio = keeper.context_ratio ?? keeper.context?.context_ratio
@@ -43,13 +55,6 @@ function contextMax(keeper: Keeper): number | null {
 function formatK(n: number | null | undefined): string | null {
   if (typeof n !== 'number') return null
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`
-}
-
-/** Newest-last per-turn throughput series for the rail sparkline. */
-function tpsSeries(keeper: Keeper): number[] {
-  return (keeper.metrics_series ?? [])
-    .map(p => (typeof p.wall_tokens_per_second === 'number' ? Math.max(0, p.wall_tokens_per_second) : 0))
-    .slice(-24)
 }
 
 function ownedTasks(keeper: Keeper): Task[] {
@@ -109,63 +114,111 @@ function AttentionSection({ keeper }: { keeper: Keeper }): VNode | null {
   `
 }
 
+function formatCtxK(n: number | null | undefined): string | null {
+  if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) return null
+  return `${Math.round(n / 1000)}k ctx`
+}
+
 function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
+  useEffect(() => {
+    loadRuntimeCatalog()
+  }, [])
+
   const model = keeperModelLabel(keeper)
   const runtime = keeperRuntimeLabel(keeper)
-  const max = contextMax(keeper)
-  const ctxK = max ? formatK(max) : null
+  const catalog = runtimeCatalogState.value.status === 'loaded' ? runtimeCatalogState.value.data : []
+  const entry = runtime ? findRuntimeCatalogEntry(catalog, runtime) : null
+  const ctxK = formatCtxK(entry?.max_context ?? contextMax(keeper))
+
   return html`
     <div class="ctx-sec">
       <h4>런타임</h4>
       <div class="rtc-card">
         <div class="rtc-id mono">${runtime ?? '런타임 미수신'}</div>
-        ${model
-          ? html`<div class="rtc-model mono">${model}${ctxK ? ` · ${ctxK} ctx` : ''}</div>`
-          : null}
-        ${/* Live execution snapshot carries no capability flags / effort segments
-             (multimodal/json/tool-choice, low/medium/high). Marked, not faked. */ ''}
-        <div class="rtc-na" data-stub="runtime-capabilities">능력·effort 정보 미수신</div>
+        <div class="rtc-model mono">
+          ${entry?.model_api_name ?? model ?? '—'}${ctxK ? html` · ${ctxK}` : null}
+        </div>
+        ${entry
+          ? html`
+              <div class="rtc-flags">
+                <span class=${`rtc-flag ${entry.tools_support ? 'on' : 'off'}`}>
+                  ${entry.tools_support ? '✓' : '✕'} tools
+                </span>
+                <span class=${`rtc-flag ${entry.thinking_support ? 'on' : 'off'}`}>
+                  ${entry.thinking_support ? '✓' : '✕'} thinking
+                </span>
+                <span class=${`rtc-flag ${entry.streaming ? 'on' : 'off'}`}>
+                  ${entry.streaming ? '✓' : '✕'} streaming
+                </span>
+              </div>
+            `
+          : html`<div class="rtc-na" data-stub="runtime-capabilities">capabilities — n/a</div>`}
+        <div class="rtc-effort">
+          <span class="rtc-effort-k">effort</span>
+          <span class="rtc-eff-na" data-stub="runtime-effort">조정 불가 · 미수집</span>
+        </div>
       </div>
     </div>
   `
 }
 
+type TpsRange = '15m' | '1h' | '6h'
+const RANGE_CFG: Record<TpsRange, { label: string; points: number }> = {
+  '15m': { label: '15m', points: 30 },
+  '1h': { label: '1h', points: 60 },
+  '6h': { label: '6h', points: 120 },
+}
+
 function ThroughputSection({ keeper }: { keeper: Keeper }): VNode {
-  const series = tpsSeries(keeper)
+  const [open, setOpen] = useState(false)
+  const [range, setRange] = useState<TpsRange>('15m')
+  const cfg = RANGE_CFG[range]
+  const allSeries = (keeper.metrics_series ?? [])
+    .map(p => (typeof p.wall_tokens_per_second === 'number' ? Math.max(0, p.wall_tokens_per_second) : 0))
+  const series = allSeries.slice(-cfg.points)
   const peak = Math.max(1, ...series)
-  const latest = series.at(-1) ?? 0
+  const latest = allSeries.at(-1) ?? 0
+  const avg = series.length ? Math.round(series.reduce((a, b) => a + b, 0) / series.length) : 0
   const live = keeper.status.toLowerCase() === 'running' || keeper.status.toLowerCase() === 'active'
-  // Prototype hides the throughput card by default behind a collapsible header
-  // with an inline summary (keeper-v2/rails.jsx:422,477-482). .ctx-h-toggle /
-  // .ctx-h-caret carry no CSS in any stylesheet — they are inline-styled in the
-  // prototype, so they are inline-styled here too.
-  const [tpsOpen, setTpsOpen] = useState(false)
   return html`
     <div class="ctx-sec">
       <h4
         class="ctx-h-toggle"
-        onClick=${() => setTpsOpen((v) => !v)}
         style=${{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+        onClick=${() => setOpen(o => !o)}
       >
-        <span class="ctx-h-caret" style=${{ fontSize: '9px', color: 'var(--text-dim)' }}>${tpsOpen ? '▾' : '▸'}</span>
+        <span style=${{ fontSize: '9px', color: 'var(--text-dim)' }}>${open ? '▾' : '▸'}</span>
         처리량
-        ${!tpsOpen
-          ? html`<span class="mono" style=${{ marginLeft: 'auto', fontSize: '11px', color: 'var(--text-dim)' }}>${live && latest > 0 ? `${latest} tok/s` : '유휴'}</span>`
+        ${!open
+          ? html`<span class="mono" style=${{ marginLeft: 'auto', fontSize: '11px', color: 'var(--text-dim)' }}>${live ? `${latest} tok/s` : '유휴'}</span>`
           : null}
       </h4>
-      ${tpsOpen
-        ? html`<div class="tps-card">
-            <div class="tps-now">
-              <span class=${`tps-val${latest > 0 ? '' : ' idle'}`}>${latest > 0 ? latest : '—'}</span>
-              <span class="tps-unit">tok/s</span>
-              ${live && latest > 0 ? html`<span class="tps-flag"><span class="tps-dot"></span>live</span>` : null}
+      ${open
+        ? html`
+            <div class="tps-card">
+              <div class="tps-now">
+                <span class=${`tps-val${latest > 0 ? '' : ' idle'}`}>${latest > 0 ? latest : '—'}</span>
+                <span class="tps-unit">tok/s</span>
+                ${live && latest > 0 ? html`<span class="tps-flag"><span class="tps-dot"></span>live</span>` : null}
+              </div>
+              <div class="tps-ranges">
+                ${(Object.keys(RANGE_CFG) as TpsRange[]).map(r => html`
+                  <button
+                    key=${r}
+                    type="button"
+                    class=${`tps-range ${range === r ? 'on' : ''}`}
+                    onClick=${() => setRange(r)}
+                  >${RANGE_CFG[r].label}</button>
+                `)}
+                <span class="tps-avg">${live ? `평균 ${avg}` : '유휴'}</span>
+              </div>
+              ${series.length >= 2
+                ? html`<div class="tps-spark" aria-hidden="true">
+                    ${series.map((v, i) => html`<span key=${i} style=${{ height: `${Math.max(6, (v / peak) * 100)}%`, opacity: live ? 0.3 + 0.7 * (i / series.length) : 0.15 }}></span>`)}
+                  </div>`
+                : null}
             </div>
-            ${series.length >= 2
-              ? html`<div class="tps-spark" aria-hidden="true">
-                  ${series.map((v) => html`<span style=${{ height: `${Math.max(6, (v / peak) * 100)}%`, opacity: 0.35 + 0.65 * (v / peak) }}></span>`)}
-                </div>`
-              : null}
-          </div>`
+          `
         : null}
     </div>
   `
@@ -180,14 +233,22 @@ function compactionGatePct(keeper: Keeper): number {
 }
 
 function compactRequiresForce(keeper: Keeper): boolean {
-  const phase = (keeper.phase ?? keeper.lifecycle_phase ?? '').toLowerCase()
+  const phase = keeperPhaseToken(keeper)
   if (phase === 'overflowed' || phase === 'paused' || phase === 'compacting') return false
   if (phase === 'running' || phase === 'failing') return true
   const status = keeper.status.toLowerCase()
   return status === 'running' || status === 'active' || status === 'busy' || status === 'failing'
 }
 
-function ContextSection({ keeper, onToggleDetail }: { keeper: Keeper; onToggleDetail: () => void }): VNode {
+function ContextSection({
+  keeper,
+  onOpenCompaction,
+  onOpenMemory,
+}: {
+  keeper: Keeper
+  onOpenCompaction: () => void
+  onOpenMemory: () => void
+}): VNode {
   const [compacting, setCompacting] = useState(false)
   const pct = contextPercent(keeper)
   const compactAt = compactionGatePct(keeper)
@@ -224,6 +285,12 @@ function ContextSection({ keeper, onToggleDetail }: { keeper: Keeper; onToggleDe
         const parsed = JSON.parse(raw) as { before_tokens?: number; after_tokens?: number; phase_after?: string }
         const before = formatK(parsed.before_tokens)
         const after = formatK(parsed.after_tokens)
+        recordManualCompaction(
+          keeper.name,
+          parsed.before_tokens,
+          parsed.after_tokens,
+          keeperRuntimeLabel(keeper) ?? '—',
+        )
         showToast(
           before && after ? `${keeper.name} compact 완료: ${before} -> ${after}` : `${keeper.name} compact 완료`,
           'success',
@@ -258,7 +325,7 @@ function ContextSection({ keeper, onToggleDetail }: { keeper: Keeper; onToggleDe
                 </span>
               </div>
             `
-          : html`<div class="ctx-empty" data-stub="context-window"><strong>윈도우 사용률 미수신</strong><span>런타임이 전체 윈도우 총량을 아직 보내지 않았습니다. ratio_gate ${compactAt}%.</span></div>`}
+          : html`<div class="ctx-empty" data-stub="context-window"><strong>윈도우 사용률 미수신</strong><span>런타임이 전체 윈도우 총량을 아직 보내지 않았습니다.</span></div>`}
         <div class="ctx-tok">
           <span class="mono">${tokens ?? '—'}</span>
           <span class="ctx-tok-sep">/</span>
@@ -274,14 +341,11 @@ function ContextSection({ keeper, onToggleDetail }: { keeper: Keeper; onToggleDe
             onClick=${runCompact}
           >${compacting ? html`<span class="cmp-spin"></span> 컴팩트 실행 중…` : '◉ 지금 컴팩트'}</button>
         </div>
-        ${/* The prototype opens dedicated compaction-snapshot / memory inspectors;
-             those live overlays do not exist yet, so both route to the operational
-             detail body (FSM · 진단 · 정체성 · memory). Marked as a deferred wiring. */ ''}
-        <button type="button" class="cmp-open" data-stub="compaction-inspector" onClick=${onToggleDetail}>
-          ◉ 컴팩션 스냅샷${hasCompactionHistory ? ` · ${compactionCount}` : ''} <span class="cmp-open-sub">운영 상세에서 보기</span>
+        <button type="button" class="cmp-open" data-testid="open-compaction-inspector" onClick=${onOpenCompaction}>
+          ◉ 컴팩션 스냅샷${hasCompactionHistory ? ` · ${compactionCount}` : ''} <span class="cmp-open-sub">before/after 보기</span>
         </button>
-        <button type="button" class="cmp-open" data-stub="memory-inspector" onClick=${onToggleDetail}>
-          ◈ 메모리 보기 <span class="cmp-open-sub">FSM · 진단 · 정체성</span>
+        <button type="button" class="cmp-open" data-testid="open-memory-inspector" onClick=${onOpenMemory}>
+          ◈ 메모리 보기 <span class="cmp-open-sub">핀 · 스토어 · 회상</span>
         </button>
       </div>
     </div>
@@ -320,22 +384,51 @@ function OwnedTasksSection({ keeper }: { keeper: Keeper }): VNode {
   `
 }
 
+function toMemoryKeeper(k: Keeper): MemoryKeeper {
+  const bucket = keeperBucket(k)
+  const status = bucket === 'running' ? 'run' : bucket === 'paused' ? 'pause' : 'off'
+  return {
+    id: k.name,
+    ctx: contextRatio(k) ?? 0,
+    status,
+  }
+}
+
 export function KeeperWorkspaceRail({
   keeper,
-  onToggleDetail,
 }: {
   keeper: Keeper
-  onToggleDetail: () => void
 }): VNode {
+  const [overlay, setOverlay] = useState<'compaction' | 'memory' | null>(null)
+  const memoryKeeper = toMemoryKeeper(keeper)
+  const memoryKeepers = keepers.value.map(toMemoryKeeper)
+
   return html`
     <aside class="ctx" aria-label="키퍼 컨텍스트">
       <div class="ctx-scroll">
         <${AttentionSection} keeper=${keeper} />
         <${ThroughputSection} keeper=${keeper} />
         <${RuntimeSection} keeper=${keeper} />
-        <${ContextSection} keeper=${keeper} onToggleDetail=${onToggleDetail} />
+        <${ContextSection}
+          keeper=${keeper}
+          onOpenCompaction=${() => setOverlay('compaction')}
+          onOpenMemory=${() => setOverlay('memory')}
+        />
         <${OwnedTasksSection} keeper=${keeper} />
       </div>
     </aside>
+
+    ${overlay === 'compaction'
+      ? html`<${CompactionInspectorOverlay} keeper=${keeper} onClose=${() => setOverlay(null)} />`
+      : null}
+    ${overlay === 'memory'
+      ? html`<${MemoryInspector}
+          keeper=${memoryKeeper}
+          keepers=${memoryKeepers}
+          memory=${{}}
+          compactions=${{}}
+          onClose=${() => setOverlay(null)}
+        />`
+      : null}
   `
 }

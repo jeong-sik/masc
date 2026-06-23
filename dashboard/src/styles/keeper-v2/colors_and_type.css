@@ -314,10 +314,12 @@ hr {
   color: var(--text-primary);
   border-radius: var(--radius-xs);
   cursor: pointer;
-  transition: border-color 0.18s, color 0.18s, background 0.18s, transform 0.08s;
+  transition: border-color 0.18s, color 0.18s, background 0.18s;
 }
 .btn:hover { border-color: var(--accent-brass-dim); color: var(--accent-brass); }
-.btn:active { transform: translateY(1px); }
+/* No translateY press: moving the button while active shifts it out from under
+ * the pointer and causes missed clicks on small toggles. */
+.btn:active { transform: none; }
 .btn.primary {
   border-color: var(--accent-brass);
   color: var(--accent-brass);

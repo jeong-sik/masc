@@ -107,7 +107,10 @@
               transform var(--dur-fast) var(--ease-out);
 }
 
-/* Press — every button sinks 1px on active (brand: translateY press). */
+/* Press feedback is handled by background/border changes only.
+ * translateY press effects were removed because they shift the hit box while
+ * the pointer is held down, causing clicks to miss on small toggle/filter/
+ * action buttons (especially the collapsed rail / size-bar toggles). */
 .v2-app[data-motion]:not([data-motion="off"]) .act:active,
 .v2-app[data-motion]:not([data-motion="off"]) .send:not(:disabled):active,
 .v2-app[data-motion]:not([data-motion="off"]) .rfilter:active,
@@ -127,7 +130,7 @@
 .v2-app[data-motion]:not([data-motion="off"]) .cn-config:active,
 .v2-app[data-motion]:not([data-motion="off"]) .topbar-copilot:active,
 .v2-app[data-motion]:not([data-motion="off"]) .set-nav-item:active {
-  transform: translateY(var(--press));
+  transform: none;
 }
 
 /* Hover lift on genuine cards (not list rows). */

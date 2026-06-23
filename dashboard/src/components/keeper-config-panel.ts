@@ -26,10 +26,39 @@ import { createAsyncResource, loaded } from '../lib/async-state'
 import { SetupGuideCard } from './setup-guide-card'
 import { SectionHeader } from './common/section-header'
 import { StatusDot } from './common/status-dot'
+import { KeeperBadge } from './keeper-badge'
 
 function MutedLabel({ children }: { children: unknown }) {
   return html`<span class="text-xs font-medium text-text-muted">${children}</span>`
 }
+
+// ── v2 prototype config modal: left rail tabs (keeper-config.css .kcf-*) ──
+// The full keeper config redesign (keeper-v2/keeper-config.jsx) presents the
+// field set as a fullscreen .kcf-overlay modal with an 8-tab left rail instead
+// of a single vertical accordion. Each tab groups the existing live fields by
+// concern; no field, save flow, or shared signal is dropped — only regrouped.
+export type KcfTabId =
+  | 'identity'
+  | 'prompt'
+  | 'runtime'
+  | 'policy'
+  | 'access'
+  | 'goals'
+  | 'hooks'
+  | 'health'
+
+const KCF_TABS: readonly (readonly [KcfTabId, string, string])[] = [
+  ['identity', '정체성', '◈'],
+  ['prompt', '프롬프트', '¶'],
+  ['runtime', '런타임', '◷'],
+  ['policy', '실행 정책', '⚖'],
+  ['access', '권한·샌드박스', '⚿'],
+  ['goals', '목표', '◎'],
+  ['hooks', '훅', '⬡'],
+  ['health', '상태·진단', '◉'],
+]
+
+const kcfTab = signal<KcfTabId>('identity')
 
 // ── State ────────────────────────────────────────────────
 
@@ -342,6 +371,7 @@ export function resetKeeperConfig(): void {
   denylistSaving.value = false
   hookFilterQuery.value = ''
   globalArchExpanded.value = false
+  kcfTab.value = 'identity'
 }
 
 /**
@@ -647,7 +677,7 @@ function runtimeSelectionSummary(c: KeeperConfig): string {
 
 // ── Main component ───────────────────────────────────────
 
-export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
+export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string; onClose?: () => void }) {
   const state = configState.value
 
   // Trigger load on first render or name change
@@ -658,12 +688,36 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     void loadGoalOptions()
   }
 
+  // Loading / error states render inside the same .kcf-overlay frame so the
+  // modal does not pop in only after the config resolves (the panel is mounted
+  // modal-only; onClose is supplied in production).
+  const inModalShell = (inner: unknown) => html`
+    <div
+      class="kcf-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label=${`${keeperName} keeper 설정`}
+      data-testid="kw-config-overlay"
+      onClick=${onClose ?? (() => {})}
+    >
+      <div class="kcf v2-monitoring-surface" onClick=${(event: Event) => event.stopPropagation()}>
+        <div class="kcf-top">
+          <${KeeperBadge} id=${keeperName} name=${keeperName} variant="sigil" size="lg" />
+          <div class="kcf-top-id"><div class="kcf-top-name">${keeperName}</div></div>
+          <div class="kcf-top-spacer"></div>
+          ${onClose ? html`<button type="button" class="kcf-top-x" onClick=${onClose} data-testid="kw-config-close" title="닫기 (Esc)">✕</button>` : null}
+        </div>
+        <div class="kcf-main v2-monitoring-panel">${inner}</div>
+      </div>
+    </div>
+  `
+
   if (state.status === 'loading') {
-    return html`<${LoadingState}>설정 불러오는 중...<//>`
+    return inModalShell(html`<${LoadingState}>설정 불러오는 중...<//>`)
   }
 
   if (state.status === 'error') {
-    return html`<${ErrorState} message=${state.message} />`
+    return inModalShell(html`<${ErrorState} message=${state.message} />`)
   }
 
   if (state.status !== 'loaded') return null
@@ -882,418 +936,484 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     ? selectedActiveGoalIds.filter((goalId) => !knownGoalIds.has(goalId))
     : []
 
-  return html`
-    <div class="flex flex-col gap-1.5 v2-monitoring-surface">
-      ${toolbar}
+  // ── Tab content (the live fields, regrouped under the 8 prototype tabs) ──
+  // identity ◈ — access-summary facts + source provenance + verifier role
+  const identityTab = html`
+    <${KeeperToolAccessSummary} config=${c} />
 
-      <${KeeperToolAccessSummary} config=${c} />
+    <${Callout}
+      title="편집 가능 범위"
+      body="여기서 저장되는 값은 keeper 프롬프트, live override 계층, runtime.toml의 [runtime.assignments]입니다."
+    />
 
-      <${Callout}
-        title="편집 가능 범위"
-        body="여기서 저장되는 값은 keeper 프롬프트, live override 계층, runtime.toml의 [runtime.assignments]입니다."
+    <${MajorSectionHeader} title="소스 · 정체성" />
+    <${ConfigRow} label="기본 소스" value=${c.sources.default_source_kind || MISSING_DATA_DASH} />
+    <${BoolRow} label="라이브 오버라이드" value=${c.sources.has_live_override} />
+    <${SectionHeader} size="xs" class="mt-2 mb-0.5">라이브 메타 경로</${SectionHeader}>
+    <${LongText} text=${c.sources.live_meta_path} />
+    ${c.sources.default_manifest_path ? html`
+      <${SectionHeader} size="xs" class="mt-2 mb-0.5">기본 매니페스트 경로</${SectionHeader}>
+      <${LongText} text=${c.sources.default_manifest_path} />
+    ` : null}
+    <div class="mt-1.5">
+      <${SectionHeader} size="xs" class="mb-1">우선순위</${SectionHeader}>
+      <${ModelList} models=${c.sources.precedence} />
+    </div>
+    <div class="mt-1.5">
+      <${SectionHeader} size="xs" class="mb-1">오버라이드 필드</${SectionHeader}>
+      <${ModelList} models=${c.sources.override_fields} />
+    </div>
+    ${isVerifierRoleKeeper(currentMentionTargets) ? html`
+    <div class="mt-2 mb-2 flex items-center gap-2 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-3 py-2">
+      <span class="rounded-[var(--r-1)] border border-[var(--accent-40)] bg-[var(--accent-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent-fg">검증자</span>
+      <span class="text-2xs text-text-body">이 keeper는 task completion_contract를 독립 실측하는 검증자 역할입니다.</span>
+    </div>
+    ` : null}
+  `
+
+  // prompt ¶ — edit toolbar + horizon goals + instructions + system prompt preview
+  const promptTab = html`
+    ${toolbar}
+    ${promptSection}
+  `
+
+  // runtime ◷ — runtime selection + execution profile (read-only introspection + runtime_id picker)
+  const runtimeTab = html`
+    <${MajorSectionHeader} title="런타임 선택" />
+    <${Callout}
+      title="Runtime 선택"
+      body=${runtimeSelectionSummary(c)}
+    />
+    ${rd && runtimeCanEdit ? html`
+      <${InlineSelectRow}
+        label="runtime_id"
+        value=${rd.runtime_id}
+        options=${runtimeOptions}
+        onChange=${(value: string) => updateRuntimeDraft('runtime_id', value)}
+        dirty=${dirtyFlags.runtime_id}
       />
+    ` : html`
+      <${ConfigRow} label="선택 runtime" value=${c.execution.selected_runtime_id || MISSING_DATA_DASH} />
+    `}
+    ${c.execution.selected_runtime_canonical
+      && c.execution.selected_runtime_canonical !== c.execution.selected_runtime_id
+      ? html`<${ConfigRow}
+          label="정규화 runtime"
+          value=${c.execution.selected_runtime_canonical}
+        />`
+      : null}
 
-      ${promptSection}
+    <${MajorSectionHeader} title="실행" />
+    <${ConfigRow} label="활성 런타임" value=${c.execution.active_model ? 'runtime' : MISSING_DATA_DASH} />
+    <${ConfigRow} label="runtime timeout" value=${perProviderTimeoutLabel(c.execution)} />
+    <div class="mb-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
+      runtime fallback 중 마지막 runtime을 제외한 runtime들에만 적용됩니다.
+    </div>
+    <div class="mt-1.5">
+      <${SectionHeader} size="xs" class="mb-1">런타임 후보</${SectionHeader}>
+      <${RuntimeList} runtimes=${c.execution.models} />
+    </div>
+  `
 
-      <div class="mt-2">
-        <${Callout}
-          title="런타임 설정"
-          body="Runtime 선택, 실행 범위, 프로액티브, 컴팩션, 핸드오프를 인라인 편집할 수 있습니다. 레지스트리 상태와 소스 경로는 읽기 전용입니다."
-        />
-      </div>
+  // policy ⚖ — verify gate + compaction + proactive + handoff + tool denylist
+  const policyTab = html`
+    <${MajorSectionHeader} title="검증" />
+    <${BoolRow} label="검증" value=${c.execution.verify} />
 
-      ${runtimeHasChanges ? html`
-        <div class="sticky top-0 z-20 flex flex-wrap items-center gap-2 p-3 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-5)] shadow-[var(--shadow-2)] mb-3 v2-monitoring-toolbar">
-          <span class="text-xs font-semibold text-accent-fg">변경된 런타임 설정이 있습니다</span>
-          <div class="flex-1"></div>
-          <button type="button"
-            class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] text-sm v2-monitoring-action"
-            onClick=${saveRuntimeConfig}
-            disabled=${runtimeSaving.value}
-          >${runtimeSaving.value ? '저장 중...' : '런타임 설정 저장'}</button>
-          <button type="button"
-            class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)] text-sm v2-monitoring-action"
-            title="초기화: 변경한 런타임 설정 draft 를 서버 값으로 되돌립니다"
-            onClick=${resetRuntimeDraft}
-          >초기화하기</button>
-        </div>
-      ` : null}
+    <${SectionHeader} title="컴팩션" />
+    <${ConfigRow} label="프로필" value=${c.compaction.profile || MISSING_DATA_DASH} />
+    ${rd ? html`
+      <${InlineNumberRow} label="비율 게이트 (%)" value=${Math.round(rd.compaction_ratio_gate * 100)}
+        onChange=${(v: number) => updateRuntimeDraft('compaction_ratio_gate', v / 100)}
+        min=${0} max=${100} step=${5} suffix="%"
+        dirty=${dirtyFlags.compaction_ratio_gate} />
+      <${InlineNumberRow} label="메시지 게이트" value=${rd.compaction_message_gate}
+        onChange=${(v: number) => updateRuntimeDraft('compaction_message_gate', v)}
+        min=${0} max=${500} step=${5}
+        dirty=${dirtyFlags.compaction_message_gate} />
+      <${InlineNumberRow} label="토큰 게이트" value=${rd.compaction_token_gate}
+        onChange=${(v: number) => updateRuntimeDraft('compaction_token_gate', v)}
+        min=${0} max=${1000000} step=${1000} suffix="tok"
+        dirty=${dirtyFlags.compaction_token_gate} />
+      <${InlineNumberRow} label="쿨다운 (초)" value=${rd.compaction_cooldown_sec}
+        onChange=${(v: number) => updateRuntimeDraft('compaction_cooldown_sec', v)}
+        min=${0} max=${3600} step=${30} suffix="s"
+        dirty=${dirtyFlags.compaction_cooldown_sec} />
+    ` : html`
+      <${ConfigRow} label="비율 게이트" value=${formatPct(c.compaction.ratio_gate)} />
+      <${ConfigRow} label="메시지 게이트" value=${String(c.compaction.message_gate)} />
+      <${ConfigRow} label="토큰 게이트" value=${formatTokens(c.compaction.token_gate)} />
+      <${ConfigRow} label="쿨다운" value=${c.compaction.cooldown_sec + 's'} />
+    `}
 
-      <${MajorSectionHeader} title="소스" />
-      <${Callout}
-        title="Runtime 선택"
-        body=${runtimeSelectionSummary(c)}
-      />
-      <${ConfigRow} label="기본 소스" value=${c.sources.default_source_kind || MISSING_DATA_DASH} />
-      ${rd && runtimeCanEdit ? html`
-        <${InlineSelectRow}
-          label="runtime_id"
-          value=${rd.runtime_id}
-          options=${runtimeOptions}
-          onChange=${(value: string) => updateRuntimeDraft('runtime_id', value)}
-          dirty=${dirtyFlags.runtime_id}
-        />
-      ` : html`
-        <${ConfigRow} label="선택 runtime" value=${c.execution.selected_runtime_id || MISSING_DATA_DASH} />
-      `}
-      ${c.execution.selected_runtime_canonical
-        && c.execution.selected_runtime_canonical !== c.execution.selected_runtime_id
-        ? html`<${ConfigRow}
-            label="정규화 runtime"
-            value=${c.execution.selected_runtime_canonical}
-          />`
-        : null}
-      <${BoolRow} label="라이브 오버라이드" value=${c.sources.has_live_override} />
-      <${SectionHeader} size="xs" class="mt-2 mb-0.5">라이브 메타 경로</${SectionHeader}>
-      <${LongText} text=${c.sources.live_meta_path} />
-      ${c.sources.default_manifest_path ? html`
-        <${SectionHeader} size="xs" class="mt-2 mb-0.5">기본 매니페스트 경로</${SectionHeader}>
-        <${LongText} text=${c.sources.default_manifest_path} />
-      ` : null}
-      <div class="mt-1.5">
-        <${SectionHeader} size="xs" class="mb-1">우선순위</${SectionHeader}>
-        <${ModelList} models=${c.sources.precedence} />
-      </div>
-      <div class="mt-1.5">
-        <${SectionHeader} size="xs" class="mb-1">오버라이드 필드</${SectionHeader}>
-        <${ModelList} models=${c.sources.override_fields} />
-      </div>
+    <${SectionHeader} title="프로액티브" />
+    ${rd ? html`
+      <${InlineToggleRow} label="활성" value=${rd.proactive_enabled}
+        onChange=${(v: boolean) => updateRuntimeDraft('proactive_enabled', v)}
+        dirty=${dirtyFlags.proactive_enabled} />
+      <${InlineNumberRow} label="유휴 트리거 (초)" value=${rd.proactive_idle_sec}
+        onChange=${(v: number) => updateRuntimeDraft('proactive_idle_sec', v)}
+        min=${10} max=${3600} step=${10} suffix="s"
+        dirty=${dirtyFlags.proactive_idle_sec} />
+      <${InlineNumberRow} label="쿨다운 (초)" value=${rd.proactive_cooldown_sec}
+        onChange=${(v: number) => updateRuntimeDraft('proactive_cooldown_sec', v)}
+        min=${10} max=${3600} step=${10} suffix="s"
+        dirty=${dirtyFlags.proactive_cooldown_sec} />
+    ` : html`
+      <${BoolRow} label="활성" value=${c.proactive.enabled} />
+      <${ConfigRow} label="유휴 트리거" value=${c.proactive.idle_sec + 's'} />
+      <${ConfigRow} label="쿨다운" value=${c.proactive.cooldown_sec + 's'} />
+    `}
 
-      <${MajorSectionHeader} title="실행" />
-      <${ConfigRow} label="활성 런타임" value=${c.execution.active_model ? 'runtime' : MISSING_DATA_DASH} />
-      <${ConfigRow} label="runtime timeout" value=${perProviderTimeoutLabel(c.execution)} />
-      <div class="mb-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
-        runtime fallback 중 마지막 runtime을 제외한 runtime들에만 적용됩니다.
-      </div>
-      <${BoolRow} label="검증" value=${c.execution.verify} />
-      <div class="mt-1.5">
-        <${SectionHeader} size="xs" class="mb-1">런타임 후보</${SectionHeader}>
-        <${RuntimeList} runtimes=${c.execution.models} />
-      </div>
+    <${SectionHeader} title="핸드오프" />
+    ${rd ? html`
+      <${InlineToggleRow} label="자동" value=${rd.auto_handoff}
+        onChange=${(v: boolean) => updateRuntimeDraft('auto_handoff', v)}
+        dirty=${dirtyFlags.auto_handoff} />
+      <${InlineNumberRow} label="임계값 (%)" value=${Math.round(rd.handoff_threshold * 100)}
+        onChange=${(v: number) => updateRuntimeDraft('handoff_threshold', v / 100)}
+        min=${0} max=${100} step=${5} suffix="%"
+        dirty=${dirtyFlags.handoff_threshold} />
+      <${InlineNumberRow} label="쿨다운 (초)" value=${rd.handoff_cooldown_sec}
+        onChange=${(v: number) => updateRuntimeDraft('handoff_cooldown_sec', v)}
+        min=${0} max=${3600} step=${30} suffix="s"
+        dirty=${dirtyFlags.handoff_cooldown_sec} />
+    ` : html`
+      <${BoolRow} label="자동" value=${c.handoff.auto} />
+      <${ConfigRow} label="임계값" value=${formatPct(c.handoff.threshold)} />
+      <${ConfigRow} label="쿨다운" value=${c.handoff.cooldown_sec + 's'} />
+    `}
 
-      <${SectionHeader} title="컴팩션" />
-      <${ConfigRow} label="프로필" value=${c.compaction.profile || MISSING_DATA_DASH} />
-      ${rd ? html`
-        <${InlineNumberRow} label="비율 게이트 (%)" value=${Math.round(rd.compaction_ratio_gate * 100)}
-          onChange=${(v: number) => updateRuntimeDraft('compaction_ratio_gate', v / 100)}
-          min=${0} max=${100} step=${5} suffix="%"
-          dirty=${dirtyFlags.compaction_ratio_gate} />
-        <${InlineNumberRow} label="메시지 게이트" value=${rd.compaction_message_gate}
-          onChange=${(v: number) => updateRuntimeDraft('compaction_message_gate', v)}
-          min=${0} max=${500} step=${5}
-          dirty=${dirtyFlags.compaction_message_gate} />
-        <${InlineNumberRow} label="토큰 게이트" value=${rd.compaction_token_gate}
-          onChange=${(v: number) => updateRuntimeDraft('compaction_token_gate', v)}
-          min=${0} max=${1000000} step=${1000} suffix="tok"
-          dirty=${dirtyFlags.compaction_token_gate} />
-        <${InlineNumberRow} label="쿨다운 (초)" value=${rd.compaction_cooldown_sec}
-          onChange=${(v: number) => updateRuntimeDraft('compaction_cooldown_sec', v)}
-          min=${0} max=${3600} step=${30} suffix="s"
-          dirty=${dirtyFlags.compaction_cooldown_sec} />
-      ` : html`
-        <${ConfigRow} label="비율 게이트" value=${formatPct(c.compaction.ratio_gate)} />
-        <${ConfigRow} label="메시지 게이트" value=${String(c.compaction.message_gate)} />
-        <${ConfigRow} label="토큰 게이트" value=${formatTokens(c.compaction.token_gate)} />
-        <${ConfigRow} label="쿨다운" value=${c.compaction.cooldown_sec + 's'} />
-      `}
-
-      <${SectionHeader} title="실행 범위" />
-      ${rd ? html`
-        <${InlineSelectRow}
-          label="sandbox_profile"
-          value=${rd.sandbox_profile}
-          options=${['local', 'docker'] as const}
-          onChange=${(value: string) => updateRuntimeDraft('sandbox_profile', value as SandboxProfile)}
-          dirty=${dirtyFlags.sandbox_profile}
-        />
-        ${c.sandbox_profile === 'docker' && rd.sandbox_profile === 'local' ? html`
-          <${Callout}
-            title="격리 해제 경고"
-            body="Docker → Local 전환은 컨테이너 격리를 해제하고 호스트 프로세스 네임스페이스에서 실행합니다."
-            tone="warn"
-          />
-        ` : null}
-        <${InlineSelectRow}
-          label="network_mode"
-          value=${rd.network_mode}
-          options=${rd.sandbox_profile === 'docker' ? ['inherit', 'none'] as const : ['inherit'] as const}
-          onChange=${(value: string) => updateRuntimeDraft('network_mode', value as SandboxNetworkMode)}
-          dirty=${dirtyFlags.network_mode}
-        />
-        <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${dirtyFlags.allowed_paths ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-sm text-[var(--color-fg-secondary)]">allowed_paths</span>
-            <span class="text-xs text-[var(--color-fg-muted)]">한 줄에 하나씩. 명시 경로만 허용됩니다.</span>
-          </div>
-          <textarea aria-label="allowed_paths" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y"
+    ${(() => {
+      const denyText = denylistDraftText.value ?? c.tools.tool_denylist.join('\n')
+      const deduped = parseDenylistDraft(denyText)
+      const changed = JSON.stringify(deduped) !== JSON.stringify(c.tools.tool_denylist)
+      return html`
+        <${SectionHeader} title="도구 거부 목록 (정책)" />
+        <p class="text-3xs text-text-muted mb-2 px-1 leading-relaxed">
+          이 keeper가 사용할 수 없는 도구 이름(한 줄에 하나). 저장 시 set_policy 로 적용되며 현재 도구 접근(tool_access ${c.tools.tool_access.length}개)은 보존됩니다.
+        </p>
+        <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${changed ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
+          <textarea aria-label="tool_denylist" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y"
             rows=${4}
-            value=${rd.allowed_paths_text}
-            placeholder=".masc/keepers/<name>/"
-            onInput=${(e: Event) => updateRuntimeDraft('allowed_paths_text', (e.target as HTMLTextAreaElement).value)}
+            value=${denyText}
+            placeholder="예: Execute"
+            onInput=${(e: Event) => { denylistDraftText.value = (e.target as HTMLTextAreaElement).value }}
           ></textarea>
-        </div>
-        ${(c.effective_allowed_paths ?? []).length > 0 ? html`
-          <div class="py-1.5 px-3 text-3xs text-[var(--color-fg-muted)]">
-            effective: ${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'}
+          <div class="flex items-center gap-2 mt-2">
+            <span class="text-3xs text-text-muted">${deduped.length} deny</span>
+            <div class="flex-1"></div>
+            <button type="button"
+              class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] text-xs"
+              onClick=${saveToolDenylist}
+              disabled=${denylistSaving.value || !changed}
+            >${denylistSaving.value ? '저장 중...' : '정책 저장'}</button>
+            <button type="button"
+              class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)] text-xs"
+              title="초기화: 편집한 거부 목록을 서버 값으로 되돌립니다"
+              onClick=${() => { denylistDraftText.value = null }}
+              disabled=${denylistSaving.value || !changed}
+            >초기화하기</button>
           </div>
-        ` : null}
-        ${rd.sandbox_profile === 'docker' ? html`
-          <${SetupGuideCard} connectorId="sandbox_hardened" />
-        ` : null}
-        <${Callout}
-          title="기본 경로 앵커"
-          body="상대 allowed_paths는 keeper 작업 경로 기준으로 해석됩니다."
-        />
-        ${rd.sandbox_profile === 'docker' ? html`
-          <${SetupGuideCard} connectorId="sandbox_hardened" />
-        ` : null}
-      ` : html`
-        <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? 'local'} />
-        <${ConfigRow} label="network_mode" value=${c.network_mode ?? 'inherit'} />
+        </div>
+      `
+    })()}
+  `
 
-        <${ConfigRow} label="allowed_paths" value=${(c.allowed_paths ?? []).join(', ') || '(computed default)'} />
-        <${ConfigRow} label="effective_paths" value=${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'} />
-      `}
-
-      ${c.sandbox_last_error ? html`
+  // access ⚿ — sandbox / network / allowed_paths + mention targets + bound namespaces
+  const accessTab = html`
+    <${MajorSectionHeader} title="실행 범위 · 샌드박스" />
+    ${rd ? html`
+      <${InlineSelectRow}
+        label="sandbox_profile"
+        value=${rd.sandbox_profile}
+        options=${['local', 'docker'] as const}
+        onChange=${(value: string) => updateRuntimeDraft('sandbox_profile', value as SandboxProfile)}
+        dirty=${dirtyFlags.sandbox_profile}
+      />
+      ${c.sandbox_profile === 'docker' && rd.sandbox_profile === 'local' ? html`
         <${Callout}
-          title="샌드박스 오류"
-          body=${c.sandbox_last_error}
+          title="격리 해제 경고"
+          body="Docker → Local 전환은 컨테이너 격리를 해제하고 호스트 프로세스 네임스페이스에서 실행합니다."
           tone="warn"
         />
       ` : null}
-
-      <${SectionHeader} title="프로액티브" />
-      ${rd ? html`
-        <${InlineToggleRow} label="활성" value=${rd.proactive_enabled}
-          onChange=${(v: boolean) => updateRuntimeDraft('proactive_enabled', v)}
-          dirty=${dirtyFlags.proactive_enabled} />
-        <${InlineNumberRow} label="유휴 트리거 (초)" value=${rd.proactive_idle_sec}
-          onChange=${(v: number) => updateRuntimeDraft('proactive_idle_sec', v)}
-          min=${10} max=${3600} step=${10} suffix="s"
-          dirty=${dirtyFlags.proactive_idle_sec} />
-        <${InlineNumberRow} label="쿨다운 (초)" value=${rd.proactive_cooldown_sec}
-          onChange=${(v: number) => updateRuntimeDraft('proactive_cooldown_sec', v)}
-          min=${10} max=${3600} step=${10} suffix="s"
-          dirty=${dirtyFlags.proactive_cooldown_sec} />
-      ` : html`
-        <${BoolRow} label="활성" value=${c.proactive.enabled} />
-        <${ConfigRow} label="유휴 트리거" value=${c.proactive.idle_sec + 's'} />
-        <${ConfigRow} label="쿨다운" value=${c.proactive.cooldown_sec + 's'} />
-      `}
-
-      <${SectionHeader} title="런타임" />
-      <${BoolRow} label="일시정지" value=${c.runtime.paused} />
-      <${BoolRow} label="자동 부팅 등록" value=${c.runtime.registered} />
-      <${BoolRow} label="킵얼라이브 실행" value=${c.runtime.keepalive_running} />
-      <${ConfigRow} label="레지스트리 상태" value=${c.runtime.registry_state || MISSING_DATA_DASH} />
-      <${ConfigRow} label="파이버 상태" value=${c.runtime.fiber_health || MISSING_DATA_DASH} />
-
-      <${SectionHeader} title="네임스페이스 조율" />
-      <div class="py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm mb-1.5">
-        <div class="flex items-center justify-between gap-3 mb-2">
-          <${MutedLabel}>active_goal_ids</${MutedLabel}>
-          <span class="text-3xs text-[var(--color-fg-muted)]">${selectedActiveGoalIds.length}개 선택</span>
+      <${InlineSelectRow}
+        label="network_mode"
+        value=${rd.network_mode}
+        options=${rd.sandbox_profile === 'docker' ? ['inherit', 'none'] as const : ['inherit'] as const}
+        onChange=${(value: string) => updateRuntimeDraft('network_mode', value as SandboxNetworkMode)}
+        dirty=${dirtyFlags.network_mode}
+      />
+      <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${dirtyFlags.allowed_paths ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-sm text-[var(--color-fg-secondary)]">allowed_paths</span>
+          <span class="text-xs text-[var(--color-fg-muted)]">한 줄에 하나씩. 명시 경로만 허용됩니다.</span>
         </div>
-        ${goalState.status === 'loading' ? html`
-          <div class="text-2xs text-[var(--color-fg-muted)]" role="status">목표 목록 로딩 중...</div>
-        ` : goalState.status === 'error' ? html`
-          <div class="text-2xs text-[var(--color-status-err)]">${goalState.message}</div>
-        ` : goalOptions.length > 0 && rd ? html`
-          <div class="grid gap-1.5">
-            ${goalOptions.map((goal) => {
-              const checked = rd.active_goal_ids.includes(goal.id)
-              return html`
-                <label class="flex items-center gap-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] px-2 py-1.5 text-xs text-[var(--color-fg-secondary)]">
-                  <input
-                    type="checkbox"
-                    checked=${checked}
-                    onChange=${(event: Event) => {
-                      toggleRuntimeActiveGoal(goal.id, (event.currentTarget as HTMLInputElement).checked)
-                    }}
-                  />
-                  <span class="min-w-[4.5rem] font-mono text-3xs text-[var(--color-fg-muted)]">${goal.horizon}</span>
-                  <span class="flex-1 truncate">${goal.title}</span>
-                  <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${goal.id}</span>
-                </label>
-              `
-            })}
-          </div>
-        ` : selectedActiveGoalIds.length > 0 ? html`
-          <${ModelList} models=${selectedActiveGoalIds} />
-        ` : html`
-          <div class="text-2xs text-[var(--color-fg-muted)]">활성 목표가 연결되어 있지 않습니다.</div>
-        `}
-        ${unknownSelectedGoalIds.length > 0 ? html`
-          <div class="mt-2 text-2xs text-[var(--color-status-warn)]">
-            Goal Store에서 찾을 수 없는 연결: ${unknownSelectedGoalIds.join(', ')}
-          </div>
-        ` : null}
+        <textarea aria-label="allowed_paths" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y"
+          rows=${4}
+          value=${rd.allowed_paths_text}
+          placeholder=".masc/keepers/<name>/"
+          onInput=${(e: Event) => updateRuntimeDraft('allowed_paths_text', (e.target as HTMLTextAreaElement).value)}
+        ></textarea>
       </div>
-      ${isVerifierRoleKeeper(currentMentionTargets) ? html`
-      <div class="mb-2 flex items-center gap-2 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-3 py-2">
-        <span class="rounded-[var(--r-1)] border border-[var(--accent-40)] bg-[var(--accent-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent-fg">검증자</span>
-        <span class="text-2xs text-text-body">이 keeper는 task completion_contract를 독립 실측하는 검증자 역할입니다.</span>
-      </div>
-      ` : null}
-      ${rd ? html`
-        <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${dirtyFlags.mention_targets ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-sm text-[var(--color-fg-secondary)]">mention_targets</span>
-            <span class="text-xs text-[var(--color-fg-muted)]">${currentMentionTargets.length}개</span>
-          </div>
-          <textarea aria-label="mention_targets" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y"
-            rows=${3}
-            value=${rd.mention_targets_text}
-            placeholder="sangsu"
-            onInput=${(e: Event) => updateRuntimeDraft('mention_targets_text', (e.target as HTMLTextAreaElement).value)}
-          ></textarea>
-        </div>
-      ` : currentMentionTargets.length > 0 ? html`
-        <div class="mt-1.5">
-          <${SectionHeader} size="xs" class="mb-1">멘션 대상</${SectionHeader}>
-          <${ModelList} models=${currentMentionTargets} />
+      ${(c.effective_allowed_paths ?? []).length > 0 ? html`
+        <div class="py-1.5 px-3 text-3xs text-[var(--color-fg-muted)]">
+          effective: ${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'}
         </div>
       ` : null}
+      ${rd.sandbox_profile === 'docker' ? html`
+        <${SetupGuideCard} connectorId="sandbox_hardened" />
+      ` : null}
+      <${Callout}
+        title="기본 경로 앵커"
+        body="상대 allowed_paths는 keeper 작업 경로 기준으로 해석됩니다."
+      />
+    ` : html`
+      <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? 'local'} />
+      <${ConfigRow} label="network_mode" value=${c.network_mode ?? 'inherit'} />
+
+      <${ConfigRow} label="allowed_paths" value=${(c.allowed_paths ?? []).join(', ') || '(computed default)'} />
+      <${ConfigRow} label="effective_paths" value=${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'} />
+    `}
+
+    ${c.sandbox_last_error ? html`
+      <${Callout}
+        title="샌드박스 오류"
+        body=${c.sandbox_last_error}
+        tone="warn"
+      />
+    ` : null}
+
+    <${SectionHeader} title="멘션 · 네임스페이스" />
+    ${rd ? html`
+      <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${dirtyFlags.mention_targets ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-sm text-[var(--color-fg-secondary)]">mention_targets</span>
+          <span class="text-xs text-[var(--color-fg-muted)]">${currentMentionTargets.length}개</span>
+        </div>
+        <textarea aria-label="mention_targets" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y"
+          rows=${3}
+          value=${rd.mention_targets_text}
+          placeholder="sangsu"
+          onInput=${(e: Event) => updateRuntimeDraft('mention_targets_text', (e.target as HTMLTextAreaElement).value)}
+        ></textarea>
+      </div>
+    ` : currentMentionTargets.length > 0 ? html`
       <div class="mt-1.5">
-        <${SectionHeader} size="xs" class="mb-1">참여 네임스페이스</${SectionHeader}>
-        <${ModelList} models=${c.workspace.bound_workspace_ids} />
+        <${SectionHeader} size="xs" class="mb-1">멘션 대상</${SectionHeader}>
+        <${ModelList} models=${currentMentionTargets} />
       </div>
+    ` : null}
+    <div class="mt-1.5">
+      <${SectionHeader} size="xs" class="mb-1">참여 네임스페이스</${SectionHeader}>
+      <${ModelList} models=${c.workspace.bound_workspace_ids} />
+    </div>
+  `
 
-      <${SectionHeader} title="핸드오프" />
-      ${rd ? html`
-        <${InlineToggleRow} label="자동" value=${rd.auto_handoff}
-          onChange=${(v: boolean) => updateRuntimeDraft('auto_handoff', v)}
-          dirty=${dirtyFlags.auto_handoff} />
-        <${InlineNumberRow} label="임계값 (%)" value=${Math.round(rd.handoff_threshold * 100)}
-          onChange=${(v: number) => updateRuntimeDraft('handoff_threshold', v / 100)}
-          min=${0} max=${100} step=${5} suffix="%"
-          dirty=${dirtyFlags.handoff_threshold} />
-        <${InlineNumberRow} label="쿨다운 (초)" value=${rd.handoff_cooldown_sec}
-          onChange=${(v: number) => updateRuntimeDraft('handoff_cooldown_sec', v)}
-          min=${0} max=${3600} step=${30} suffix="s"
-          dirty=${dirtyFlags.handoff_cooldown_sec} />
-      ` : html`
-        <${BoolRow} label="자동" value=${c.handoff.auto} />
+  // goals ◎ — assigned goal-store bindings (active_goal_ids picker)
+  const goalsTab = html`
+    <${MajorSectionHeader} title="배정 목표" />
+    <div class="py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm mb-1.5">
+      <div class="flex items-center justify-between gap-3 mb-2">
+        <${MutedLabel}>active_goal_ids</${MutedLabel}>
+        <span class="text-3xs text-[var(--color-fg-muted)]">${selectedActiveGoalIds.length}개 선택</span>
+      </div>
+      ${goalState.status === 'loading' ? html`
+        <div class="text-2xs text-[var(--color-fg-muted)]" role="status">목표 목록 로딩 중...</div>
+      ` : goalState.status === 'error' ? html`
+        <div class="text-2xs text-[var(--color-status-err)]">${goalState.message}</div>
+      ` : goalOptions.length > 0 && rd ? html`
+        <div class="grid gap-1.5">
+          ${goalOptions.map((goal) => {
+            const checked = rd.active_goal_ids.includes(goal.id)
+            return html`
+              <label class="flex items-center gap-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] px-2 py-1.5 text-xs text-[var(--color-fg-secondary)]">
+                <input
+                  type="checkbox"
+                  checked=${checked}
+                  onChange=${(event: Event) => {
+                    toggleRuntimeActiveGoal(goal.id, (event.currentTarget as HTMLInputElement).checked)
+                  }}
+                />
+                <span class="min-w-[4.5rem] font-mono text-3xs text-[var(--color-fg-muted)]">${goal.horizon}</span>
+                <span class="flex-1 truncate">${goal.title}</span>
+                <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${goal.id}</span>
+              </label>
+            `
+          })}
         </div>
-        <${ConfigRow} label="임계값" value=${formatPct(c.handoff.threshold)} />
-        <${ConfigRow} label="쿨다운" value=${c.handoff.cooldown_sec + 's'} />
+      ` : selectedActiveGoalIds.length > 0 ? html`
+        <${ModelList} models=${selectedActiveGoalIds} />
+      ` : html`
+        <div class="text-2xs text-[var(--color-fg-muted)]">활성 목표가 연결되어 있지 않습니다.</div>
       `}
-
-      ${runtimeHasChanges ? html`
-        <div class="sticky bottom-4 z-20 flex flex-wrap items-center gap-2 mt-4 mb-2 p-4 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-5)] shadow-[var(--shadow-2)]">
-          <span class="text-sm font-semibold text-accent-fg">변경된 설정을 저장하세요</span>
-          <div class="flex-1"></div>
-          <button type="button"
-            class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] text-sm"
-            onClick=${saveRuntimeConfig}
-            disabled=${runtimeSaving.value}
-          >${runtimeSaving.value ? '저장 중...' : '런타임 설정 저장'}</button>
-          <button type="button"
-            class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)] text-sm"
-            title="초기화: 변경한 런타임 설정 draft 를 서버 값으로 되돌립니다"
-            onClick=${resetRuntimeDraft}
-          >초기화하기</button>
+      ${unknownSelectedGoalIds.length > 0 ? html`
+        <div class="mt-2 text-2xs text-[var(--color-status-warn)]">
+          Goal Store에서 찾을 수 없는 연결: ${unknownSelectedGoalIds.join(', ')}
         </div>
       ` : null}
+    </div>
+  `
 
-      ${(() => {
-        const denyText = denylistDraftText.value ?? c.tools.tool_denylist.join('\n')
-        const deduped = parseDenylistDraft(denyText)
-        const changed = JSON.stringify(deduped) !== JSON.stringify(c.tools.tool_denylist)
-        return html`
-          <${SectionHeader} title="도구 거부 목록 (정책)" />
-          <p class="text-3xs text-text-muted mb-2 px-1 leading-relaxed">
-            이 keeper가 사용할 수 없는 도구 이름(한 줄에 하나). 저장 시 set_policy 로 적용되며 현재 도구 접근(tool_access ${c.tools.tool_access.length}개)은 보존됩니다.
-          </p>
-          <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${changed ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
-            <textarea aria-label="tool_denylist" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y"
-              rows=${4}
-              value=${denyText}
-              placeholder="예: Execute"
-              onInput=${(e: Event) => { denylistDraftText.value = (e.target as HTMLTextAreaElement).value }}
-            ></textarea>
-            <div class="flex items-center gap-2 mt-2">
-              <span class="text-3xs text-text-muted">${deduped.length} deny</span>
-              <div class="flex-1"></div>
-              <button type="button"
-                class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] text-xs"
-                onClick=${saveToolDenylist}
-                disabled=${denylistSaving.value || !changed}
-              >${denylistSaving.value ? '저장 중...' : '정책 저장'}</button>
-              <button type="button"
-                class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)] text-xs"
-                title="초기화: 편집한 거부 목록을 서버 값으로 되돌립니다"
-                onClick=${() => { denylistDraftText.value = null }}
-                disabled=${denylistSaving.value || !changed}
-              >초기화하기</button>
-            </div>
-          </div>
-        `
-      })()}
-
-      ${c.hooks ? (() => {
-        const allEntries: readonly HookSlotEntry[] = Object.entries(c.hooks.slots) as HookSlotEntry[]
-        const activeCount = allEntries.filter(([, slot]) => slot.active).length
-        const visibleEntries = filterHookSlots(allEntries, hookFilterQuery.value)
-        const isFiltering = hookFilterQuery.value.trim() !== ''
-        const expanded = globalArchExpanded.value
-        return html`
-          <button
-            type="button"
-            onClick=${() => { globalArchExpanded.value = !globalArchExpanded.value }}
-            aria-expanded=${expanded}
-            class="w-full text-left rounded-[var(--r-3)] border border-[var(--accent-20)] bg-[var(--accent-5)] px-4 py-3 mt-8 mb-4 flex items-center gap-2 shadow-[var(--shadow-1)] v2-monitoring-panel"
-          >
-            <span class="text-2xs text-accent-fg w-3 shrink-0" aria-hidden="true">${expanded ? '▾' : '▸'}</span>
-            <span class="text-xs font-bold uppercase tracking-[var(--track-caps)] text-accent-fg">전역 런타임 아키텍처</span>
-            <span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]">전역 · 읽기 전용</span>
-            <div class="flex-1"></div>
-            <span class="text-3xs text-text-muted">${activeCount}/${allEntries.length} 슬롯 활성</span>
-          </button>
-          ${expanded ? html`
-            <p class="text-3xs text-text-muted mb-3 px-1 leading-relaxed">
-              모든 keeper에 공통인 런타임 hook 합성입니다. keeper별로 다르지 않으며 이 화면에서 편집할 수 없습니다.
-            </p>
-            <div class="flex items-center justify-between gap-2 mb-2">
-              <span class="text-3xs text-text-muted">${allEntries.length} slots</span>
-              <input
-                type="search"
-                value=${hookFilterQuery.value}
-                placeholder="슬롯 이름 / source / gate 필터"
-                aria-label="훅 슬롯 필터"
-                onInput=${(e: Event) => { hookFilterQuery.value = (e.target as HTMLInputElement).value }}
-                class="min-w-40 max-w-65 flex-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs text-[var(--color-fg-secondary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
-              />
-            </div>
-            ${isFiltering && visibleEntries.length === 0 && allEntries.length > 0
-              ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${allEntries.length} slots)</div>`
-              : visibleEntries.map(([name, slot]) => html`
-                  <div class="flex items-start gap-2 py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 mb-1.5">
-                    <span class="mt-1 w-2 h-2 rounded-full shrink-0 ${slot.active ? 'bg-[var(--color-status-ok)] shadow-[0_0_6px_var(--ok-48)]' : 'bg-[var(--color-fg-disabled)]'}" aria-hidden="true"></span>
-                    <div class="flex-1 min-w-0">
-                      <div class="flex justify-between">
-                        <span class="text-xs font-semibold text-text-strong">${name}</span>
-                        <span class="text-3xs text-text-muted">${slot.source}</span>
-                      </div>
-                      ${hookSlotDetails(slot).length > 0 ? html`
-                        <div class="flex flex-wrap gap-1 mt-1">
-                          ${hookSlotDetails(slot).map((d: string) => html`
-                            <span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] ${d.endsWith('_off') ? 'bg-[var(--color-bg-hover)] text-[var(--color-fg-disabled)]' : 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] opacity-80'}">${d}</span>
-                          `)}
-                        </div>
-                      ` : null}
-                    </div>
+  // hooks ⬡ — global runtime hook architecture (keeper-agnostic, read-only)
+  const hooksTab = c.hooks ? (() => {
+    const allEntries: readonly HookSlotEntry[] = Object.entries(c.hooks.slots) as HookSlotEntry[]
+    const activeCount = allEntries.filter(([, slot]) => slot.active).length
+    const visibleEntries = filterHookSlots(allEntries, hookFilterQuery.value)
+    const isFiltering = hookFilterQuery.value.trim() !== ''
+    const expanded = globalArchExpanded.value
+    return html`
+      <button
+        type="button"
+        onClick=${() => { globalArchExpanded.value = !globalArchExpanded.value }}
+        aria-expanded=${expanded}
+        class="w-full text-left rounded-[var(--r-3)] border border-[var(--accent-20)] bg-[var(--accent-5)] px-4 py-3 mb-4 flex items-center gap-2 shadow-[var(--shadow-1)] v2-monitoring-panel"
+      >
+        <span class="text-2xs text-accent-fg w-3 shrink-0" aria-hidden="true">${expanded ? '▾' : '▸'}</span>
+        <span class="text-xs font-bold uppercase tracking-[var(--track-caps)] text-accent-fg">전역 런타임 아키텍처</span>
+        <span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]">전역 · 읽기 전용</span>
+        <div class="flex-1"></div>
+        <span class="text-3xs text-text-muted">${activeCount}/${allEntries.length} 슬롯 활성</span>
+      </button>
+      ${expanded ? html`
+        <p class="text-3xs text-text-muted mb-3 px-1 leading-relaxed">
+          모든 keeper에 공통인 런타임 hook 합성입니다. keeper별로 다르지 않으며 이 화면에서 편집할 수 없습니다.
+        </p>
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <span class="text-3xs text-text-muted">${allEntries.length} slots</span>
+          <input
+            type="search"
+            value=${hookFilterQuery.value}
+            placeholder="슬롯 이름 / source / gate 필터"
+            aria-label="훅 슬롯 필터"
+            onInput=${(e: Event) => { hookFilterQuery.value = (e.target as HTMLInputElement).value }}
+            class="min-w-40 max-w-65 flex-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs text-[var(--color-fg-secondary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+          />
+        </div>
+        ${isFiltering && visibleEntries.length === 0 && allEntries.length > 0
+          ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${allEntries.length} slots)</div>`
+          : visibleEntries.map(([name, slot]) => html`
+              <div class="flex items-start gap-2 py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 mb-1.5">
+                <span class="mt-1 w-2 h-2 rounded-full shrink-0 ${slot.active ? 'bg-[var(--color-status-ok)] shadow-[0_0_6px_var(--ok-48)]' : 'bg-[var(--color-fg-disabled)]'}" aria-hidden="true"></span>
+                <div class="flex-1 min-w-0">
+                  <div class="flex justify-between">
+                    <span class="text-xs font-semibold text-text-strong">${name}</span>
+                    <span class="text-3xs text-text-muted">${slot.source}</span>
                   </div>
-                `)}
-            <${ConfigRow} label="거부 목록 수" value=${String(c.hooks.deny_list.length)} />
-            <${ConfigRow} label="파괴 검사 도구" value=${formatHookDestructiveTools(c.hooks.destructive_check_tools)} />
-            <${ConfigRow} label="비용 예산 (텔레메트리 · 미강제)" value=${c.hooks.cost_budget.active ? formatCost(c.hooks.cost_budget.max_cost_usd ?? 0) : '미설정'} />
-          ` : null}
-        `
-      })() : null}
+                  ${hookSlotDetails(slot).length > 0 ? html`
+                    <div class="flex flex-wrap gap-1 mt-1">
+                      ${hookSlotDetails(slot).map((d: string) => html`
+                        <span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] ${d.endsWith('_off') ? 'bg-[var(--color-bg-hover)] text-[var(--color-fg-disabled)]' : 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] opacity-80'}">${d}</span>
+                      `)}
+                    </div>
+                  ` : null}
+                </div>
+              </div>
+            `)}
+        <${ConfigRow} label="거부 목록 수" value=${String(c.hooks.deny_list.length)} />
+        <${ConfigRow} label="파괴 검사 도구" value=${formatHookDestructiveTools(c.hooks.destructive_check_tools)} />
+        <${ConfigRow} label="비용 예산 (텔레메트리 · 미강제)" value=${c.hooks.cost_budget.active ? formatCost(c.hooks.cost_budget.max_cost_usd ?? 0) : '미설정'} />
+      ` : null}
+    `
+  })() : html`<div class="text-2xs text-[var(--color-fg-muted)] py-4">hook 정보가 없습니다.</div>`
 
-      ${'' /* Metrics removed — duplicates KpiGrid, MetricsCharts, and header model badge */}
+  // health ◉ — runtime liveness / registry / fiber diagnostics
+  const healthTab = html`
+    <${MajorSectionHeader} title="런타임 상태" />
+    <${BoolRow} label="일시정지" value=${c.runtime.paused} />
+    <${BoolRow} label="자동 부팅 등록" value=${c.runtime.registered} />
+    <${BoolRow} label="킵얼라이브 실행" value=${c.runtime.keepalive_running} />
+    <${ConfigRow} label="레지스트리 상태" value=${c.runtime.registry_state || MISSING_DATA_DASH} />
+    <${ConfigRow} label="파이버 상태" value=${c.runtime.fiber_health || MISSING_DATA_DASH} />
+  `
+
+  const tabContent: Record<KcfTabId, unknown> = {
+    identity: identityTab,
+    prompt: promptTab,
+    runtime: runtimeTab,
+    policy: policyTab,
+    access: accessTab,
+    goals: goalsTab,
+    hooks: hooksTab,
+    health: healthTab,
+  }
+  const activeTab = kcfTab.value
+  const activeTabLabel = KCF_TABS.find((t) => t[0] === activeTab)?.[1] ?? ''
+  const phaseLabel = c.runtime.paused
+    ? '일시정지'
+    : c.runtime.keepalive_running
+      ? '실행'
+      : c.runtime.registered
+        ? '대기'
+        : '오프라인'
+
+  return html`
+    <div
+      class="kcf-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label=${`${keeperName} keeper 설정`}
+      data-testid="kw-config-overlay"
+      onClick=${onClose ?? (() => {})}
+    >
+      <div class="kcf v2-monitoring-surface" onClick=${(event: Event) => event.stopPropagation()}>
+        <div class="kcf-top">
+          <${KeeperBadge} id=${keeperName} name=${keeperName} variant="sigil" size="lg" />
+          <div class="kcf-top-id">
+            <div class="kcf-top-name">${keeperName}</div>
+            <div class="kcf-top-sub mono">${c.execution.selected_runtime_id || c.sources.default_source_kind || MISSING_DATA_DASH}</div>
+          </div>
+          <span class="kcf-top-phase">${phaseLabel}</span>
+          <div class="kcf-top-spacer"></div>
+          ${onClose ? html`
+            <button type="button" class="kcf-top-x" onClick=${onClose} data-testid="kw-config-close" title="닫기 (Esc)">✕</button>
+          ` : null}
+        </div>
+
+        <div class="kcf-body">
+          <nav class="kcf-tabs" role="tablist" aria-label="keeper 설정 탭">
+            ${KCF_TABS.map(([id, lbl, ic]) => html`
+              <button
+                type="button"
+                role="tab"
+                key=${id}
+                aria-selected=${activeTab === id ? 'true' : 'false'}
+                class=${`kcf-tab ${activeTab === id ? 'on' : ''}`}
+                onClick=${() => { kcfTab.value = id }}
+              >
+                <span class="kcf-tab-ic" aria-hidden="true">${ic}</span>
+                <span class="kcf-tab-lbl">${lbl}</span>
+              </button>
+            `)}
+          </nav>
+
+          <div class="kcf-main v2-monitoring-panel">
+            ${tabContent[activeTab]}
+          </div>
+        </div>
+
+        <div class="kcf-foot v2-monitoring-toolbar">
+          <span class="kcf-foot-note mono">${activeTabLabel} · ${keeperName}</span>
+          <div class="kcf-foot-spacer"></div>
+          ${runtimeHasChanges ? html`
+            <span class="text-xs font-semibold text-accent-fg mr-1">변경된 런타임 설정</span>
+            <button type="button"
+              class="kcf-btn ghost v2-monitoring-action"
+              title="초기화: 변경한 런타임 설정 draft 를 서버 값으로 되돌립니다"
+              onClick=${resetRuntimeDraft}
+            >초기화</button>
+            <button type="button"
+              class="kcf-btn save v2-monitoring-action"
+              onClick=${saveRuntimeConfig}
+              disabled=${runtimeSaving.value}
+            >${runtimeSaving.value ? '저장 중...' : '런타임 설정 저장'}</button>
+          ` : null}
+          ${onClose ? html`
+            <button type="button" class="kcf-btn ghost v2-monitoring-action" onClick=${onClose}>닫기</button>
+          ` : null}
+        </div>
+      </div>
     </div>
   `
 }

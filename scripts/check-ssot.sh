@@ -65,7 +65,7 @@ check_rule() {
 # SSOT-R1 — .masc path concat bypasses Workspace_utils.masc_dir helper.
 # Tracked: #8355 (37 files at filing; current ratchet from main).
 # Excluded: the helper impl + backend setters where the literal IS the SSOT.
-check_rule "R1-masc-path" 11 \
+check_rule "R1-masc-path" 2 \
   "Workspace_utils.masc_dir <config>" \
   'Filename\.concat\s+[a-zA-Z_]+\s+"\.masc"' \
   'workspace_utils_paths_backend|workspace_utils_backend_setup|workspace_eio' \
@@ -83,7 +83,7 @@ check_rule "R2-loopback-literal" 1 \
 # SSOT-R4 — config filename literal.
 # Tracked: #8414. Helper to be added (Config_filenames) in the fix.
 # No exclusion — every site should eventually route through the helper.
-check_rule "R4-config-filename" 11 \
+check_rule "R4-config-filename" 2 \
   "Config_filenames.<name> (add helper per #8414)" \
   '"(runtime\.json|keeper_runtime\.toml|tool_policy\.toml)"' \
   '' \

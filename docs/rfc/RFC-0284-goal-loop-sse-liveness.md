@@ -8,7 +8,7 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0201", "0022", "0113"]
-implementation_prs: []
+implementation_prs: ["22135"]
 ---
 
 # RFC-0284: Goal-loop status SSE liveness
@@ -93,6 +93,27 @@ changed** since the last broadcast. This:
 - degrades to today's behavior if detection is unavailable (the HTTP pull stays
   as a fallback for first paint and reconnect hydration).
 
+### §3.3 Implementation note — a `goal_loop_status` event type is required (amended 2026-06-23)
+
+§3.1 assumed the `goals` snapshot is already pushed live and that no new event
+type would be needed. Grounding the live path against the code showed otherwise:
+the dashboard live-update path is the SSE → `dashboard/delta` bridge in
+`server_mcp_transport_ws.ml`, which keys deltas by `dashboard_slice_for_sse_type
+event_type`. The `goals` slice has **no** entry there, so the `case 'goals'`
+handler in `sse-store.ts` only runs on the initial `dashboard/snapshot` burst,
+never on a live delta. Reusing `goals` with no event type therefore cannot
+deliver live updates.
+
+The implementation threads the needle: a dedicated `goal_loop_status` event type
+is broadcast (change-gated) and **bridged onto the existing `goals` slice**
+(`dashboard_slice_for_sse_type "goal_loop_status" -> Some "goals"`). The frontend
+handles it in `hydrateDashboardSlice`'s event-type switch (a `case`, not an
+exact-match `event.type === 'X'` route), so the parity gate (PR #22124) stays
+unaffected — its inventory only tracks exact-match routes. This keeps the §3.1
+goal (reuse the `goals` slice, no new WS slice, parity gate untouched) while
+adding the one event type the live delta bridge actually requires. The `goals`
+snapshot still carries the `loop` sub-field for the initial-burst / HTTP path.
+
 ## §4 Frontend
 
 - `sse-store.ts` `case 'goals'`: when `record.loop` is present, hydrate it into a
@@ -115,21 +136,32 @@ changed** since the last broadcast. This:
 
 ## §6 Verification
 
-- Server: a test that a status change produces exactly one `goals` snapshot with
-  a `loop` field, and an unchanged status produces none (change-detection gate).
-- Frontend: a test that a `goals` snapshot carrying `loop` updates the goal-loop
-  store without an HTTP fetch (mirrors the existing `project_snapshot`
-  no-HTTP-fetch test), and that reconnect re-hydrates.
-- Parity gate (PR #22124): unaffected — `goals` is a snapshot sub-kind routed via
-  the `case 'goals'` switch, not an exact-match `event.type === 'X'` route, so it
-  is outside the gate's exact-match inventory by design.
+- Server: a test that a status change produces exactly one `goal_loop_status`
+  broadcast carrying the status as `payload`, and an unchanged status produces
+  none (`test_goal_loop_broadcast.ml`, change-detection gate). A `generated_at`-
+  only delta also produces none, proving the volatile-key exclusion (§3.2).
+- Frontend: a test that a pushed snapshot updates the goal-loop store and the
+  panel renders it without an HTTP fetch (mirrors the existing no-HTTP-fetch
+  tests), a post-mount signal write re-renders the panel (push reactivity), and
+  reconnect re-hydrates via the existing dashboard refresh.
+- Parity gate (PR #22124): unaffected — `goal_loop_status` is handled in
+  `hydrateDashboardSlice`'s eventType switch (`case 'goal_loop_status'`), bridged
+  onto the `goals` slice (§3.3), not an exact-match `event.type === 'X'` route,
+  so it is outside the gate's exact-match inventory by design. Because the gate
+  does not track it, a dedicated cross-boundary drift guard
+  (`goal-loop-event-type-drift.test.ts`) binds the three `goal_loop_status`
+  literals (BE emit / BE WS bridge / FE case) so a one-sided rename fails instead
+  of silently breaking live updates.
 
 ## §7 Alternatives considered
 
-- **A new `goal_loop_status` SSE event** — a dedicated exact-match event +
-  handler. Pro: the parity gate would auto-enforce it. Con: widens the event-type
-  contract surface for a resource that fits the existing `goals` snapshot shape;
-  rejected in favor of §3.1.
+- **A new `goal_loop_status` exact-match SSE event** — a dedicated exact-match
+  `event.type === 'goal_loop_status'` route + handler. Pro: the parity gate would
+  auto-enforce it. Con: widens the parity-gated exact-match contract surface.
+  Rejected in favor of the §3.3 hybrid: a `goal_loop_status` event type is used
+  (the delta bridge requires one) but bridged onto the existing `goals` slice and
+  handled in the slice event-type switch, so it is **not** an exact-match route
+  and the parity gate is unaffected.
 - **Worker → broadcast** — have the Python worker notify the server (HTTP/IPC) to
   broadcast. Rejected (§2): couples the out-of-process worker to the OCaml
   transport; the server already reads the file, so change detection is strictly

@@ -16,6 +16,7 @@ import { asString, isRecord } from './common/normalize'
 import { formatMsCompact } from '../lib/format-number'
 import { errorToString } from '../lib/format-string'
 import { hydrateGoalTreeSnapshot } from '../goal-tree-state'
+import { goalLoopStatusData } from '../goal-loop-state'
 import { navigate } from '../router'
 import {
   GOAL_LOOP_PHASES,
@@ -523,8 +524,14 @@ function GoalLoopDetailDrawer({
 }
 
 export function GoalLoopPanel({ initialStatus }: GoalLoopPanelProps) {
-  const [status, setStatus] = useState<GoalLoopStatusResponse | null>(initialStatus ?? null)
-  const [loading, setLoading] = useState(initialStatus === undefined)
+  // RFC-0284: render from the shared pushed store (hydrated by the SSE
+  // goal_loop_status delta / goals snapshot / bootstrap), falling back to the
+  // SSR/prop status until the first push arrives. Reading the signal here makes
+  // the panel re-render on every live update — no mount fetch, no polling.
+  const status = goalLoopStatusData.value ?? initialStatus ?? null
+  const [loading, setLoading] = useState(
+    goalLoopStatusData.value === null && initialStatus === undefined,
+  )
   const [error, setError] = useState<string | null>(null)
   const [selectedPhase, setSelectedPhase] = useState<GoalLoopPhaseName | null>(null)
 
@@ -532,16 +539,22 @@ export function GoalLoopPanel({ initialStatus }: GoalLoopPanelProps) {
     setLoading(true)
     setError(null)
     void fetchGoalLoopStatus()
-      .then(setStatus)
+      .then((next) => {
+        goalLoopStatusData.value = next
+      })
       .catch((err) => {
         setError(errorToString(err))
       })
       .finally(() => setLoading(false))
   }, [])
 
+  // First-paint fallback only: if no snapshot has been pushed (no SSE delta, no
+  // bootstrap hydration) and none was provided, fetch once. This syncs the
+  // empty store with the server — an external-data effect, not state derivation.
   useEffect(() => {
-    if (initialStatus !== undefined) return
-    refresh()
+    if (goalLoopStatusData.value === null && initialStatus === undefined) {
+      refresh()
+    }
   }, [initialStatus, refresh])
 
   if (loading && status === null) {

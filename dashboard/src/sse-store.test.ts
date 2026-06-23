@@ -43,6 +43,7 @@ const replayOasRuntimeTelemetry = vi.fn<() => Promise<void>>(async () => {})
 const compositeTick = signal({ name: '', ts_unix: 0 })
 const hydrateFleetCompositeSnapshot = vi.fn<(payload: unknown) => void>()
 const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
+const hydrateGoalLoopSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
 const noteKeeperChatAppended = vi.fn<(name: string, audio?: unknown, blocks?: unknown) => void>()
 
 async function flushAsyncWork(): Promise<void> {
@@ -95,6 +96,9 @@ async function loadSseStore() {
   vi.doMock('./goal-tree-state', () => ({
     hydrateGoalTreeSnapshot,
   }))
+  vi.doMock('./goal-loop-state', () => ({
+    hydrateGoalLoopSnapshot,
+  }))
   vi.doMock('./keeper-runtime', () => ({
     noteKeeperChatAppended,
   }))
@@ -130,6 +134,8 @@ describe('setupSSEReaction reconnect hydration', () => {
     hydrateFleetCompositeSnapshot.mockClear()
     hydrateGoalTreeSnapshot.mockClear()
     hydrateGoalTreeSnapshot.mockReturnValue(true)
+    hydrateGoalLoopSnapshot.mockClear()
+    hydrateGoalLoopSnapshot.mockReturnValue(true)
     namespaceTruth.value = null
     namespaceTruthError.value = null
     boardPosts.value = []
@@ -705,6 +711,7 @@ describe('setupSSEReaction reconnect hydration', () => {
     sseStore.hydrateDashboardSlice('goals', {
       planning: { goals: [], generated_at: 'now' },
       tree: { tree: [], summary: { total_goals: 0 } },
+      loop: { schema_version: 1, loop_iteration: '3', overall_status: 'ok' },
     })
     sseStore.hydrateDashboardSlice('composite', {
       generated_at: 1,
@@ -715,11 +722,31 @@ describe('setupSSEReaction reconnect hydration', () => {
     expect(hydrateBoardSnapshot).toHaveBeenCalledWith({ posts: [], generated_at: 'now' })
     expect(hydratePlanningSnapshot).toHaveBeenCalledWith({ goals: [], generated_at: 'now' })
     expect(hydrateGoalTreeSnapshot).toHaveBeenCalledWith({ tree: [], summary: { total_goals: 0 } })
+    // RFC-0284: the goals snapshot's loop sub-field hydrates the goal-loop store.
+    expect(hydrateGoalLoopSnapshot).toHaveBeenCalledWith({
+      schema_version: 1,
+      loop_iteration: '3',
+      overall_status: 'ok',
+    })
     expect(hydrateFleetCompositeSnapshot).toHaveBeenCalledWith({
       generated_at: 1,
       count: 0,
       snapshots: [],
     })
+  })
+
+  it('routes the goal_loop_status delta to the goal-loop store, not as a goals snapshot', async () => {
+    const { sseStore } = await loadSseStore()
+
+    // RFC-0284: live goal-loop delta bridged onto the "goals" slice carries the
+    // status directly + the goal_loop_status event type. It must hydrate the
+    // goal-loop store and must NOT be unpacked as a {planning,tree} snapshot.
+    const status = { schema_version: 1, loop_iteration: '8', overall_status: 'warning' }
+    sseStore.hydrateDashboardSlice('goals', status, 'goal_loop_status')
+
+    expect(hydrateGoalLoopSnapshot).toHaveBeenCalledWith(status)
+    expect(hydratePlanningSnapshot).not.toHaveBeenCalled()
+    expect(hydrateGoalTreeSnapshot).not.toHaveBeenCalled()
   })
 
   it('handles every dashboard push slice advertised to route subscriptions', async () => {

@@ -8,7 +8,7 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0201", "0022", "0113"]
-implementation_prs: []
+implementation_prs: ["22135"]
 ---
 
 # RFC-0284: Goal-loop status SSE liveness

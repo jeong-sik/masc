@@ -5,9 +5,9 @@
     [MASC_WS_ENABLED=0].
 
     Unlike the [/ws] upgrade path on the HTTP port, this server
-    owns the full TCP socket so [httpun-ws] can run the HTTP→WS
-    upgrade lifecycle end-to-end without conflicting with
-    [gluten]'s protocol management.
+    owns the full TCP socket and drives the ws-direct connection
+    driver ({!Ws_direct_eio.Server}, RFC-0287) end-to-end — TCP
+    accept, the 101 handshake, and the frame loop.
 
     Session state is shared with {!Server_mcp_transport_ws}: the
     same [sessions] hashtable, [send_to_session], and
@@ -34,25 +34,6 @@ val is_enabled : unit -> bool
     and the bootstrap loop all branch on this predicate. *)
 
 module For_testing : sig
-  val max_ws_close_reason_log_len : int
-
-  val max_ws_close_payload_len : int
-
-  val truncate_ws_close_reason : string -> string
-
-  val summarize_ws_close_payload :
-    bytes -> received_len:int -> declared_len:int -> string
-
-  val immediate_ws_close_payload_summary : declared_len:int -> string option
-
-  type ws_close_payload_chunk_plan =
-    | Reject_empty_chunk of string
-    | Copy_then_finish of { copy_len : int; next_offset : int }
-    | Copy_then_continue of { copy_len : int; next_offset : int }
-
-  val plan_ws_close_payload_chunk :
-    offset:int -> declared_len:int -> chunk_len:int -> ws_close_payload_chunk_plan
-
   val heartbeat_interval_s : float
 
   val pong_timeout_intervals : int

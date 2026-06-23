@@ -195,6 +195,51 @@ let test_sha1_different_inputs () =
   let r2 = Digestif.SHA1.(digest_string "b" |> to_raw_string) in
   Alcotest.(check bool) "different inputs different hashes" true (r1 <> r2)
 
+(* ====== WebSocket handshake accept (RFC 6455 §1.3 / §4.2.1) ====== *)
+
+(* The canonical example from RFC 6455 §1.3: the masc-local accept computation
+   (GUID + sha1 + base64) must reproduce it, or the handshake silently breaks. *)
+let test_sec_websocket_accept_canonical () =
+  Alcotest.(check string)
+    "RFC 6455 §1.3 canonical accept token"
+    "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+    (Ws.sec_websocket_accept "dGhlIHNhbXBsZSBub25jZQ==")
+
+let ws_upgrade_request ?(meth = `GET) ?(version = "13") ~key () =
+  let headers =
+    Httpun.Headers.of_list
+      [ "Host", "localhost"
+      ; "Upgrade", "websocket"
+      ; "Connection", "Upgrade"
+      ; "Sec-WebSocket-Key", key
+      ; "Sec-WebSocket-Version", version
+      ]
+  in
+  Httpun.Request.create ~headers meth "/"
+
+(* A 16-byte key (the §1.3 nonce decodes to "the sample nonce") is accepted and
+   yields the matching accept token. *)
+let test_ws_upgrade_accept_valid () =
+  match Ws.ws_upgrade_accept (ws_upgrade_request ~key:"dGhlIHNhbXBsZSBub25jZQ==" ()) with
+  | Ok accept ->
+    Alcotest.(check string) "accept matches canonical" "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" accept
+  | Error e -> Alcotest.failf "expected Ok, got Error %S" e
+
+(* RFC 6455 §4.1 requires a 16-byte key; a shorter one must be rejected. *)
+let test_ws_upgrade_accept_rejects_short_key () =
+  let short_key = Base64.encode_string "short" (* 5 bytes, not 16 *) in
+  match Ws.ws_upgrade_accept (ws_upgrade_request ~key:short_key ()) with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "expected a non-16-byte key to be rejected"
+
+let test_ws_upgrade_accept_rejects_wrong_version () =
+  match
+    Ws.ws_upgrade_accept
+      (ws_upgrade_request ~version:"8" ~key:"dGhlIHNhbXBsZSBub25jZQ==" ())
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "expected a non-13 Sec-WebSocket-Version to be rejected"
+
 (* ====== Dashboard route-scoped slices ====== *)
 
 let test_dashboard_route_scoped_slices_are_valid () =
@@ -1026,6 +1071,16 @@ let () =
       Alcotest.test_case "produces 20 bytes" `Quick test_sha1_produces_20_bytes;
       Alcotest.test_case "deterministic" `Quick test_sha1_deterministic;
       Alcotest.test_case "different inputs" `Quick test_sha1_different_inputs;
+    ]);
+    ("handshake accept", [
+      Alcotest.test_case "RFC 6455 §1.3 canonical accept" `Quick
+        test_sec_websocket_accept_canonical;
+      Alcotest.test_case "valid upgrade request accepted" `Quick
+        test_ws_upgrade_accept_valid;
+      Alcotest.test_case "non-16-byte key rejected" `Quick
+        test_ws_upgrade_accept_rejects_short_key;
+      Alcotest.test_case "wrong Sec-WebSocket-Version rejected" `Quick
+        test_ws_upgrade_accept_rejects_wrong_version;
     ]);
     ("dashboard", [
       Alcotest.test_case "route scoped slices are valid" `Quick

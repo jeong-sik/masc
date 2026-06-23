@@ -260,6 +260,17 @@ val mcp_websocket_handler :
     Endpoint handler rather than a frame-opcode switch.  [on_close_log] /
     [on_eof] are observability hooks invoked before cleanup.  RFC-0287 §4.1. *)
 
+val sec_websocket_accept : string -> string
+(** [sec_websocket_accept key] computes the RFC 6455 §1.3 handshake response
+    token: [base64(sha1(key ^ GUID))].  Exposed for the canonical-vector
+    regression test (the GUID and base64/sha1 wiring must not drift). *)
+
+val ws_upgrade_accept : Httpun.Request.t -> (string, string) result
+(** Validate an HTTP/1.1 -> WebSocket upgrade request (RFC 6455 §4.2.1): [GET],
+    [Upgrade: websocket], [Connection] listing [upgrade], [Sec-WebSocket-Version:
+    13], and a [Sec-WebSocket-Key] that base64-decodes to exactly 16 bytes.
+    Returns the accept token on success.  Exposed for unit tests. *)
+
 val respond_and_drive_upgrade :
   upgrade:(Gluten.impl -> unit) ->
   reqd:Httpun.Reqd.t ->

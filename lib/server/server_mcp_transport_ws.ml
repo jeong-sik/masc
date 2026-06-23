@@ -187,7 +187,7 @@ let __test_slice_index_remove_session session_id =
   with_sessions_rw (fun () -> slice_index_remove_session_locked session_id)
 
 (** Detach a session from the global registry before doing any wire-level
-    shutdown.  Closing [Httpun_ws.Wsd.t] takes the per-session [write_mutex]
+    shutdown.  Closing [Ws_wsd.t] takes the per-session [write_mutex]
     and may run transport code; doing that while [sessions_mutex] is held can
     stall every session lookup, fanout snapshot, and cleanup path behind one
     slow or wedged socket. *)

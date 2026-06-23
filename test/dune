@@ -1976,7 +1976,7 @@
 
 (include stanzas/test_worker_safety_gates.inc)
 
-(include stanzas/test_ws_standalone_close_payload.inc)
+(include stanzas/test_ws_standalone_lifecycle.inc)
 
 (test
  (name test_dashboard_yjs)

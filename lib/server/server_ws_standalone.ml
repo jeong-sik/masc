@@ -34,118 +34,14 @@ let accept_backoff_cap_s = 5.0
 (** Factor for accept-error backoff jitter (±20%). *)
 let accept_backoff_jitter_frac = 0.2
 
-let max_ws_close_reason_log_len = 96
-let max_ws_close_payload_len = 125
-
-let utf8_codepoint_width first_byte =
-  let byte = Char.code first_byte in
-  if byte land 0x80 = 0
-  then 1
-  else if byte land 0xE0 = 0xC0
-  then 2
-  else if byte land 0xF0 = 0xE0
-  then 3
-  else if byte land 0xF8 = 0xF0
-  then 4
-  else 1
-;;
-
-let truncate_ws_close_reason reason =
-  if String.length reason <= max_ws_close_reason_log_len
-  then reason
-  else (
-    let rec boundary idx =
-      if idx >= String.length reason || idx >= max_ws_close_reason_log_len
-      then idx
-      else (
-        let next_idx = idx + utf8_codepoint_width reason.[idx] in
-        if next_idx > max_ws_close_reason_log_len then idx else boundary next_idx)
-    in
-    String.sub reason 0 (boundary 0) ^ "...<truncated>")
-;;
-
-let summarize_ws_close_payload bytes ~received_len ~declared_len =
-  if received_len = 0
-  then Printf.sprintf "code=none received_len=0 declared_len=%d" declared_len
-  else if received_len = 1
-  then
-    Printf.sprintf "malformed_close_payload received_len=1 declared_len=%d" declared_len
-  else (
-    let code = (Char.code (Bytes.get bytes 0) lsl 8) lor Char.code (Bytes.get bytes 1) in
-    let reason_len = received_len - 2 in
-    let reason =
-      if reason_len = 0
-      then "reason=<empty>"
-      else (
-        let reason = Bytes.sub_string bytes 2 reason_len |> truncate_ws_close_reason in
-        Printf.sprintf "reason=%S" reason)
-    in
-    let partial = if received_len = declared_len then "" else " partial=true" in
-    Printf.sprintf
-      "code=%d %s received_len=%d declared_len=%d%s"
-      code
-      reason
-      received_len
-      declared_len
-      partial)
-;;
-
-let immediate_ws_close_payload_summary ~declared_len =
-  if declared_len <= 0
-  then Some (Printf.sprintf "code=none received_len=0 declared_len=%d" declared_len)
-  else if declared_len > max_ws_close_payload_len
-  then Some (Printf.sprintf "payload_len=%d exceeds_control_frame_limit" declared_len)
-  else None
-;;
-
-type ws_close_payload_chunk_plan =
-  | Reject_empty_chunk of string
-  | Copy_then_finish of
-      { copy_len : int
-      ; next_offset : int
-      }
-  | Copy_then_continue of
-      { copy_len : int
-      ; next_offset : int
-      }
-
-let plan_ws_close_payload_chunk ~offset ~declared_len ~chunk_len =
-  if chunk_len <= 0
-  then
-    Reject_empty_chunk
-      (Printf.sprintf
-         "payload_read_empty_chunk received_len=%d declared_len=%d"
-         offset
-         declared_len)
-  else (
-    let remaining = max 0 (declared_len - offset) in
-    let copy_len = min chunk_len remaining in
-    let next_offset = offset + copy_len in
-    if next_offset >= declared_len
-    then Copy_then_finish { copy_len; next_offset }
-    else Copy_then_continue { copy_len; next_offset })
-;;
+(* RFC-0287: the ws-direct Endpoint parses and validates the Close frame
+   (RFC 6455 §5.5.1) and hands [on_close] the code + reason directly, so there
+   is no longer a raw close payload to read off the wire here. The former CPS
+   close-payload reader and its pure helpers (truncate / summarize /
+   immediate_summary / plan_chunk) were production-dead after that swap and are
+   removed. *)
 
 module For_testing = struct
-  let max_ws_close_reason_log_len = max_ws_close_reason_log_len
-  let max_ws_close_payload_len = max_ws_close_payload_len
-  let truncate_ws_close_reason = truncate_ws_close_reason
-  let summarize_ws_close_payload = summarize_ws_close_payload
-  let immediate_ws_close_payload_summary = immediate_ws_close_payload_summary
-
-  type nonrec ws_close_payload_chunk_plan = ws_close_payload_chunk_plan =
-    | Reject_empty_chunk of string
-    | Copy_then_finish of
-        { copy_len : int
-        ; next_offset : int
-        }
-    | Copy_then_continue of
-        { copy_len : int
-        ; next_offset : int
-        }
-
-  let plan_ws_close_payload_chunk = plan_ws_close_payload_chunk
-
   let heartbeat_interval_s = heartbeat_interval_s
   let pong_timeout_intervals = pong_timeout_intervals
   let missed_pong_threshold = missed_pong_threshold

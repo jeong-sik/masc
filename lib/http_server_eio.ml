@@ -1,6 +1,7 @@
 (** Http_server_eio - Eio-native HTTP server using httpun-eio
 
-    Conflict-free with httpun-ws-eio (no cohttp 6.x dependency).
+    The WebSocket upgrade on top of this server is driven by the masc-owned
+    ws-direct stack (RFC-0287), not httpun-ws.
     Phase 2 of Eio migration.
 
     @see <https://github.com/anmonteiro/httpun> httpun documentation

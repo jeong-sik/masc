@@ -789,8 +789,10 @@ let masc_fusion_schema =
         "How to reduce the panel answers. \"simple\" (default): panel -> one \
          judge -> result. \"refine\": panel -> judge -> a second judge that \
          critically reviews and improves the first synthesis against the panel \
-         evidence -> result (deeper, two judge passes). Unknown values are \
-         rejected."
+         evidence -> result (deeper, two judge passes). \"conditional\": like \
+         simple, but escalates to a second (refine) judge only when the first \
+         judge could not decide (verdict insufficient); otherwise returns the \
+         first synthesis. Unknown values are rejected."
     ]
 ;;
 

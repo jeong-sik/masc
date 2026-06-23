@@ -91,7 +91,28 @@ export function CompactionInspectorOverlay({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const ev = events[idx]!
+  if (events.length === 0) {
+    return html`
+      <div class="turn-overlay" onClick=${onClose}>
+        <div class="turn-drawer" onClick=${(e: MouseEvent) => e.stopPropagation()}>
+          <div class="turn-hd">
+            <h3>컴팩션 스냅샷</h3>
+            <span class="tid">${keeper.name}</span>
+            <button type="button" class="turn-close" onClick=${onClose} title="닫기 (Esc)">${'✕'}</button>
+          </div>
+          <div class="turn-body">
+            <div class="cmp-empty">
+              아직 이 keeper에서 실행된 컴팩션이 없습니다.<br />
+              컨텍스트가 임계치를 넘으면 자동으로 기록되며, ‘지금 컴팩트’를 눌러 수동 결과를 남길 수 있습니다.
+            </div>
+          </div>
+        </div>
+      </div>
+    `
+  }
+
+  const safeIdx = Math.max(0, Math.min(idx, events.length - 1))
+  const ev = events[safeIdx]!
   const reduction = Math.round((1 - ev.after.tok / Math.max(1, ev.before.tok)) * 100)
 
   return html`
@@ -103,91 +124,80 @@ export function CompactionInspectorOverlay({
           <button type="button" class="turn-close" onClick=${onClose} title="닫기 (Esc)">${'✕'}</button>
         </div>
 
-        ${events.length === 0
-          ? html`
-            <div class="turn-body">
-              <div class="cmp-empty">
-                아직 이 keeper에서 실행된 컴팩션이 없습니다.<br />
-                컨텍스트가 임계치를 넘으면 자동으로 기록되며, ‘지금 컴팩트’를 눌러 수동 결과를 남길 수 있습니다.
-              </div>
-            </div>
-          `
-          : html`
-            <div class="turn-tabs">
-              ${events.map((e, i) => html`
-                <button
-                  key=${e.id}
-                  type="button"
-                  class=${`turn-tab ${idx === i ? 'on' : ''}`}
-                  onClick=${() => setIdx(i)}
-                >
-                  ${e.at} <span class="mono" style=${{ opacity: 0.6 }}>${e.id}</span>
-                </button>
-              `)}
-            </div>
-            <div class="turn-body">
-              <div class="cmp-trigger"><span class="sub-k">트리거</span>${ev.trigger}</div>
-              <div class="cmp-trigger"><span class="sub-k">수행 런타임</span><span class="mono">${ev.runtime}</span></div>
+        <div class="turn-tabs">
+          ${events.map((e, i) => html`
+            <button
+              key=${e.id}
+              type="button"
+              class=${`turn-tab ${safeIdx === i ? 'on' : ''}`}
+              onClick=${() => setIdx(i)}
+            >
+              ${e.at} <span class="mono" style=${{ opacity: 0.6 }}>${e.id}</span>
+            </button>
+          `)}
+        </div>
+        <div class="turn-body">
+          <div class="cmp-trigger"><span class="sub-k">트리거</span>${ev.trigger}</div>
+          <div class="cmp-trigger"><span class="sub-k">수행 런타임</span><span class="mono">${ev.runtime}</span></div>
 
-              <div class="turn-sec">
-                <h4>Before → After</h4>
-                <div class="cmp-headline">
-                  <span class="mono">${fmtTok(ev.before.tok)}</span>
-                  <span class="cmp-arrow">${'→'}</span>
-                  <span class="mono" style=${{ color: 'var(--status-ok)' }}>${fmtTok(ev.after.tok)}</span>
-                  <span class="cmp-reduce">${'−'}${reduction}%</span>
+          <div class="turn-sec">
+            <h4>Before → After</h4>
+            <div class="cmp-headline">
+              <span class="mono">${fmtTok(ev.before.tok)}</span>
+              <span class="cmp-arrow">${'→'}</span>
+              <span class="mono" style=${{ color: 'var(--status-ok)' }}>${fmtTok(ev.after.tok)}</span>
+              <span class="cmp-reduce">${'−'}${reduction}%</span>
+            </div>
+            <${CmpStat} label="토큰" a=${ev.before.tok} b=${ev.after.tok} unit="k" max=${Math.max(ev.before.tok, 1)} />
+            ${ev.before.msgs != null && ev.after.msgs != null
+              ? html`<${CmpStat} label="메시지" a=${ev.before.msgs} b=${ev.after.msgs} max=${Math.max(ev.before.msgs, 1)} />`
+              : null}
+            ${ev.before.traces != null && ev.after.traces != null
+              ? html`<${CmpStat} label="trace" a=${ev.before.traces} b=${ev.after.traces} max=${Math.max(ev.before.traces, 1)} />`
+              : null}
+          </div>
+
+          <div class="turn-sec">
+            <h4>유지 · 요약 · 폐기</h4>
+            ${ev.kept.length === 0 && ev.summarized.length === 0 && ev.dropped.length === 0
+              ? html`<${DataGapNote}>백엔드에서 아직 상세 분류(kept / summarized / dropped)를 병렬하지 않습니다.</${DataGapNote}>`
+              : html`
+                <div class="cmp-diff">
+                  <div class="cmp-col kept">
+                    <div class="cmp-col-h">${'◈'} 유지</div>
+                    ${ev.kept.length
+                      ? ev.kept.map((x, i) => html`<div key=${i} class="cmp-li">${x}</div>`)
+                      : html`<div class="cmp-li">—</div>`}
+                  </div>
+                  <div class="cmp-col summ">
+                    <div class="cmp-col-h">${'◉'} 요약</div>
+                    ${ev.summarized.length
+                      ? ev.summarized.map((x, i) => html`<div key=${i} class="cmp-li">${x}</div>`)
+                      : html`<div class="cmp-li">—</div>`}
+                  </div>
+                  <div class="cmp-col drop">
+                    <div class="cmp-col-h">${'◌'} 폐기</div>
+                    ${ev.dropped.length
+                      ? ev.dropped.map((x, i) => html`<div key=${i} class="cmp-li">${x}</div>`)
+                      : html`<div class="cmp-li">—</div>`}
+                  </div>
                 </div>
-                <${CmpStat} label="토큰" a=${ev.before.tok} b=${ev.after.tok} unit="k" max=${Math.max(ev.before.tok, 1)} />
-                ${ev.before.msgs != null && ev.after.msgs != null
-                  ? html`<${CmpStat} label="메시지" a=${ev.before.msgs} b=${ev.after.msgs} max=${Math.max(ev.before.msgs, 1)} />`
-                  : null}
-                ${ev.before.traces != null && ev.after.traces != null
-                  ? html`<${CmpStat} label="trace" a=${ev.before.traces} b=${ev.after.traces} max=${Math.max(ev.before.traces, 1)} />`
-                  : null}
-              </div>
+              `}
+          </div>
 
-              <div class="turn-sec">
-                <h4>유지 · 요약 · 폐기</h4>
-                ${ev.kept.length === 0 && ev.summarized.length === 0 && ev.dropped.length === 0
-                  ? html`<${DataGapNote}>백엔드에서 아직 상세 분류(kept / summarized / dropped)를 병렬하지 않습니다.</${DataGapNote}>`
-                  : html`
-                    <div class="cmp-diff">
-                      <div class="cmp-col kept">
-                        <div class="cmp-col-h">${'◈'} 유지</div>
-                        ${ev.kept.length
-                          ? ev.kept.map((x, i) => html`<div key=${i} class="cmp-li">${x}</div>`)
-                          : html`<div class="cmp-li">—</div>`}
-                      </div>
-                      <div class="cmp-col summ">
-                        <div class="cmp-col-h">${'◉'} 요약</div>
-                        ${ev.summarized.length
-                          ? ev.summarized.map((x, i) => html`<div key=${i} class="cmp-li">${x}</div>`)
-                          : html`<div class="cmp-li">—</div>`}
-                      </div>
-                      <div class="cmp-col drop">
-                        <div class="cmp-col-h">${'◌'} 폐기</div>
-                        ${ev.dropped.length
-                          ? ev.dropped.map((x, i) => html`<div key=${i} class="cmp-li">${x}</div>`)
-                          : html`<div class="cmp-li">—</div>`}
-                      </div>
-                    </div>
-                  `}
-              </div>
-
-              <div class="turn-sec">
-                <h4>전체 컨텍스트 (실제 프롬프트)</h4>
-                <div class="cmp-side-toggle">
-                  <button type="button" class=${`cmp-side ${side === 'before' ? 'on' : ''}`} onClick=${() => setSide('before')}>
-                    압축 전 · ${fmtTok(ev.before.tok)}
-                  </button>
-                  <button type="button" class=${`cmp-side ${side === 'after' ? 'on' : ''}`} onClick=${() => setSide('after')}>
-                    압축 후 · ${fmtTok(ev.after.tok)}
-                  </button>
-                </div>
-                <pre class="turn-pre cmp-ctx-pre">${cmpFullCtx(ev, side)}</pre>
-              </div>
+          <div class="turn-sec">
+            <h4>전체 컨텍스트 (실제 프롬프트)</h4>
+            <div class="cmp-side-toggle">
+              <button type="button" class=${`cmp-side ${side === 'before' ? 'on' : ''}`} onClick=${() => setSide('before')}>
+                압축 전 · ${fmtTok(ev.before.tok)}
+              </button>
+              <button type="button" class=${`cmp-side ${side === 'after' ? 'on' : ''}`} onClick=${() => setSide('after')}>
+                압축 후 · ${fmtTok(ev.after.tok)}
+              </button>
             </div>
-          `}
+            <pre class="turn-pre cmp-ctx-pre">${cmpFullCtx(ev, side)}</pre>
+          </div>
+        </div>
       </div>
     </div>
   `

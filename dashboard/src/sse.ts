@@ -631,7 +631,7 @@ function handleEvent(event: SSEEvent): void {
         beforeTokCompaction,
         afterTokCompaction,
         event.trigger ?? '자동',
-        asString((event as unknown as Record<string, unknown>).runtime) ?? '—',
+        event.runtime ?? '—',
       )
       addTypedJournalEntry(
         keeperNameCompaction,

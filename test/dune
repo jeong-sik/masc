@@ -1216,6 +1216,16 @@
  (modules memory_os_brain_harness)
  (libraries masc_test_deps))
 
+; Memory-quality eval harness (Harness-First). Offline, deterministic, read-only.
+; No args  -> runs synthetic self-tests (pass/fail), CI-safe.
+; --recall-dir <dir> [--keepers-dir <dir>] [--top N] [--json] -> live baseline
+;   report of echo rate / churn / near-duplicate slots / fact composition.
+;   dune exec test/memory_quality_eval.exe -- --recall-dir <base>/.masc/recall_injections
+(test
+ (name memory_quality_eval)
+ (modules memory_quality_eval)
+ (libraries masc_test_deps))
+
 (test
  (name test_json_field)
  (modules test_json_field)

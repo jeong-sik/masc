@@ -38,6 +38,9 @@ and (_, _, _, _) command =
       ; branch : string option
       ; depth : int option
         (** [None] = unlimited (no [--depth] flag); [Some n] = shallow clone. *)
+      ; dest_dir : string option
+        (** Optional local directory to clone into. When [None], git uses the
+            basename of [repo]. *)
       }
       -> (unit, string, [ `Audited ], [ `Host | `Docker ]) command
   | Curl :

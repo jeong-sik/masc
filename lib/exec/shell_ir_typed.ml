@@ -55,15 +55,17 @@ let pp fmt = function
       path
       case_sensitive
   | W (Git_status { short }) -> Format.fprintf fmt "Git_status(short=%b)" short
-  | W (Git_clone { repo; branch; depth }) ->
+  | W (Git_clone { repo; branch; depth; dest_dir }) ->
     Format.fprintf
       fmt
-      "Git_clone(repo=%s, branch=%a, depth=%a)"
+      "Git_clone(repo=%s, branch=%a, depth=%a, dest_dir=%a)"
       repo
       (Format.pp_print_option Format.pp_print_string)
       branch
       (Format.pp_print_option Format.pp_print_int)
       depth
+      (Format.pp_print_option Format.pp_print_string)
+      dest_dir
   | W (Curl { url; method_; headers; body; output_file; follow_redirects; insecure }) ->
     Format.fprintf
       fmt
@@ -701,8 +703,9 @@ let path_args : wrapped -> string list = function
   | W (Patch { file = None; _ }) -> []
   | W (Make { directory = Some d; _ }) -> [ d ]
   | W (Make { directory = None; _ }) -> []
+  | W (Git_clone { dest_dir = Some d; _ }) -> [ d ]
   (* Remote / URL — not local filesystem paths *)
-  | W (Git_clone _) -> []
+  | W (Git_clone { dest_dir = None; _ }) -> []
   | W (Curl _) -> []
   | W (Wget _) -> []
   | W (Ssh _) -> []

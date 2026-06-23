@@ -422,6 +422,49 @@ let test_sangsu_claim_idle_loop_accrues () =
     (D.turn_made_progress ~strong_evidence:false
        ~surface_requires_evidence:(not (Success.claim_bound_work bound)))
 
+(* audit D1 producer: the handler's rejection branches pass a typed [Error]
+   through [workflow_rejection_error_json ?typed_outcome], which injects it as a
+   top-level [typed_outcome] field via ?extra_fields (see
+   [Workflow_rejection_payload.payload_json], which merges extra_fields into the
+   top-level assoc). Verify the channel round-trips: a typed Error serialized
+   into the payload is restored by [Keeper_tool_outcome.of_json], so the detector
+   reads it as non-progress instead of falling back to the name-based evidence
+   path. The failed-transition branch reuses [keeper_tool_result_json]'s
+   already-tested typed_outcome channel. *)
+let test_done_rejection_emits_typed_error () =
+  let payload ?(alternatives = []) ~reason message =
+    Masc.Task.Payloads.workflow_rejection_payload_json
+      ~scope_policy:"observe"
+      ~alternatives
+      ~extra_fields:[ "typed_outcome", Outcome.to_json (Outcome.Error { reason }) ]
+      message
+  in
+  let typed_outcome_of json =
+    match Yojson.Safe.from_string json with
+    | `Assoc fields -> Option.bind (List.assoc_opt "typed_outcome" fields) Outcome.of_json
+    | _ -> None
+  in
+  let reason_of = function
+    | Some (Outcome.Error { reason }) -> Some reason
+    | _ -> None
+  in
+  Alcotest.(check (option string))
+    "task_id rejection typed Error round-trips" (Some "task_id_required")
+    (reason_of
+       (typed_outcome_of
+          (payload
+             ~alternatives:[ "keeper_task_claim"; "keeper_tasks_list" ]
+             ~reason:"task_id_required"
+             "task_id is required")));
+  Alcotest.(check (option string))
+    "result rejection typed Error round-trips" (Some "result_required")
+    (reason_of
+       (typed_outcome_of
+          (payload
+             ~alternatives:[ "keeper_task_done" ]
+             ~reason:"result_required"
+             "result is required")))
+
 let () =
   Alcotest.run "keeper_no_progress_loop_detector"
     [
@@ -465,6 +508,8 @@ let () =
             `Quick test_strong_evidence_outcome_aware;
           Alcotest.test_case "sangsu claim-idle loop accrues streak"
             `Quick test_sangsu_claim_idle_loop_accrues;
+          Alcotest.test_case "done rejection emits typed Error (D1 producer)"
+            `Quick test_done_rejection_emits_typed_error;
         ] );
       ( "per-keeper isolation",
         [

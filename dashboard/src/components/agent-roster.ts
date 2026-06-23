@@ -53,7 +53,6 @@ import {
   keeperRowLooksRunning,
   resolveRuntimeCounts,
   runtimeDetailRows,
-  runtimeCountSourceLabel,
   shouldShowExecutionFallbackState,
 } from '../runtime-counts'
 import {
@@ -469,7 +468,7 @@ function expectedCountForKeeperFilter(
 const FILTER_META: Record<StatusFilter, { label: string; description: string }> = {
   all: {
     label: '전체 상세',
-    description: 'execution 상세 행 전체를 보여줍니다. 런타임 가동 총계와는 별도 기준입니다.',
+    description: '모든 키퍼와 에이전트를 표시합니다.',
   },
   active: { label: runtimeBandMeta('active').label, description: runtimeBandMeta('active').description },
   attention: { label: runtimeBandMeta('attention').label, description: runtimeBandMeta('attention').description },
@@ -796,7 +795,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     shellConfiguredKeepers: shellCounts.value?.configured_keepers,
   })
   const expectedScopedCount = expectedCountForKeeperFilter(keeperFilter, runtimeCounts)
-  const countSourceLabel = runtimeCountSourceLabel(runtimeCounts.source)
   const namespaceStatus = namespaceTruth.value?.root.status ?? serverStatus.value
   const namespaceName = namespaceStatus?.project ?? 'default'
 
@@ -887,13 +885,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     expectedScopedCount > scopedAgents.length
       ? (
           filtered.length === scopedAgents.length
-            ? `상세 행 ${filtered.length}개 로드됨 · 예상 ${expectedScopedCount}개`
-            : `상세 행 ${filtered.length} / ${scopedAgents.length}개 표시 · 예상 ${expectedScopedCount}개`
+            ? `항목 ${filtered.length}개 표시 · 예상 ${expectedScopedCount}개`
+            : `항목 ${filtered.length} / ${scopedAgents.length}개 표시 · 예상 ${expectedScopedCount}개`
         )
       : (
           filtered.length === scopedAgents.length
-            ? `상세 행 ${filtered.length}개 표시 중`
-            : `상세 행 ${filtered.length} / ${scopedAgents.length}개 표시 중`
+            ? `항목 ${filtered.length}개 표시 중`
+            : `항목 ${filtered.length} / ${scopedAgents.length}개 표시 중`
         )
   const statusChips = (['all', 'attention', 'active', 'paused', 'offline'] as StatusFilter[]).map(key => ({
     key,
@@ -938,16 +936,16 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       : `키퍼 ${keeperStateHints.join(' · ')}`
   const fallbackStateTitle =
     executionError.value
-      ? '상세 상태 불러오기 실패'
+      ? '상태 불러오기 실패'
       : executionLoaded.value
-        ? '상세 상태 부분 동기화'
-        : '상세 상태 동기화 중'
+        ? '일부만 불러옴'
+        : '불러오는 중'
   const fallbackStateMessage =
     executionError.value
-      ? `${countSourceLabel} 기준 ${scopeLabel}입니다. 상세 상태 정보를 아직 가져오지 못했습니다.`
+      ? `${scopeLabel}. 상태 정보를 아직 불러오지 못했습니다.`
       : executionLoaded.value
-        ? `${countSourceLabel} 기준 ${scopeLabel}입니다. 일부만 상세 목록에 반영됐습니다.${configuredIdleHint ? ` ${configuredIdleHint}.` : ''}`
-        : `${countSourceLabel} 기준 ${scopeLabel}입니다.${configuredIdleHint ? ` ${configuredIdleHint}.` : ''} 상세 상태 정보가 올라오면 상태별 분류와 카드가 채워집니다.`
+        ? `${scopeLabel}. 일부만 불러왔습니다.${configuredIdleHint ? ` ${configuredIdleHint}.` : ''}`
+        : `${scopeLabel}.${configuredIdleHint ? ` ${configuredIdleHint}.` : ''} 상태 정보가 올라오면 목록이 채워집니다.`
 
   const rosterRows = useMemo(() => filtered.map((agent: Agent) => {
     const keeperRuntime =
@@ -1241,11 +1239,10 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   <div class="flex flex-col gap-2">
                     <div class="flex flex-wrap items-center gap-2">
                       <strong class="text-xs font-semibold text-[var(--color-fg-primary)]">${fallbackStateTitle}</strong>
-                      <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-2 py-0.5 text-2xs font-medium text-[var(--color-fg-muted)]">${countSourceLabel}</span>
                     </div>
                     <p class="m-0 text-xs leading-paragraph text-[var(--color-fg-primary)]">${fallbackStateMessage}</p>
                     <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
-                      <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5">scope ${namespaceName}</span>
+                      <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5">프로젝트 ${namespaceName}</span>
                       ${configuredIdleHint ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5">${configuredIdleHint}</span>` : null}
                     </div>
                   </div>
@@ -1290,7 +1287,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   message=${normalizedSearch && scopedAgents.length > 0
                     ? `필터 결과 없음 (${scopedAgents.length} items)`
                     : showExecutionFallbackState && expectedScopedCount > 0
-                      ? `${fallbackStateTitle}: ${countSourceLabel} 기준 ${scopeLabel}가 보이지만, 현재 조건에 맞는 상세 row는 아직 없습니다.`
+                      ? `${fallbackStateTitle}: ${scopeLabel}가 있지만, 현재 조건에 맞는 항목은 아직 없습니다.`
                       : '조건에 맞는 에이전트가 없습니다.'}
                   compact
                 />

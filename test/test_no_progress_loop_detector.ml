@@ -357,6 +357,71 @@ let test_silent_turns_accrue_streak () =
   Alcotest.(check int) "silent no-evidence turns accrue streak" 4
     (D.current_streak ~keeper_name:k)
 
+(* RFC-0239 / audit D1·D3: the no-progress detector reads the typed outcome
+   recorded on each tool call, not just the tool name. *)
+module Outcome = Keeper_tool_outcome
+
+let no_eligible_outcome =
+  Outcome.No_progress
+    { reason =
+        Outcome.No_eligible_tasks
+          { scope_excluded_count = 0
+          ; blocked_count = 0
+          ; verification_blocked_count = 0
+          ; all_goals_excluded = false
+          }
+    }
+
+(* audit D3: a [Task_claim] turn is exempt only when a claim bound work. A claim
+   that typed [No_eligible_tasks] did not bind work (the sangsu claim-idle loop,
+   PR #21065), so it must require evidence and accrue the streak. *)
+let test_claim_outcome_aware_exemption () =
+  let claim = List.hd Cap.claim_task_tool_names in
+  Alcotest.(check bool) "claim No_eligible_tasks did not bind work" false
+    (Success.claim_bound_work [ (claim, Some no_eligible_outcome) ]);
+  Alcotest.(check bool) "claim Progress bound work" true
+    (Success.claim_bound_work [ (claim, Some Outcome.Progress) ]);
+  Alcotest.(check bool) "untyped claim stays exempt (legacy back-compat)" true
+    (Success.claim_bound_work [ (claim, None) ])
+
+(* audit D1: a completion tool that typed a failure is not substantive evidence;
+   an untyped completion keeps the legacy name-based behavior. *)
+let test_strong_evidence_outcome_aware () =
+  let done_tool = List.hd Masc.Keeper_tool_progress.completion_tool_names in
+  let claim = List.hd Cap.claim_task_tool_names in
+  Alcotest.(check bool) "errored completion is not evidence" false
+    (Success.has_substantive_tool_calls_with_outcome
+       [ (done_tool, Some (Outcome.Error { reason = "rejected" })) ]);
+  Alcotest.(check bool) "no-progress completion is not evidence" false
+    (Success.has_substantive_tool_calls_with_outcome
+       [ (done_tool, Some no_eligible_outcome) ]);
+  Alcotest.(check bool) "successful completion is evidence" true
+    (Success.has_substantive_tool_calls_with_outcome
+       [ (done_tool, Some Outcome.Progress) ]);
+  Alcotest.(check bool) "untyped completion keeps legacy evidence" true
+    (Success.has_substantive_tool_calls_with_outcome [ (done_tool, None) ]);
+  Alcotest.(check bool) "a claim is never execution evidence" false
+    (Success.has_substantive_tool_calls_with_outcome
+       [ (claim, Some Outcome.Progress) ])
+
+(* End-to-end: the sangsu claim-idle loop now accrues the streak; a claim that
+   bound work stays exempt. *)
+let test_sangsu_claim_idle_loop_accrues () =
+  let claim = List.hd Cap.claim_task_tool_names in
+  let idle = [ (claim, Some no_eligible_outcome) ] in
+  let strong_evidence = Success.has_substantive_tool_calls_with_outcome idle in
+  let surface_requires_evidence = not (Success.claim_bound_work idle) in
+  Alcotest.(check bool) "no strong evidence from a no-eligible claim" false
+    strong_evidence;
+  Alcotest.(check bool) "no-eligible claim now requires evidence" true
+    surface_requires_evidence;
+  Alcotest.(check bool) "made_progress false => streak accrues" false
+    (D.turn_made_progress ~strong_evidence ~surface_requires_evidence);
+  let bound = [ (claim, Some Outcome.Progress) ] in
+  Alcotest.(check bool) "claim that bound work stays exempt" true
+    (D.turn_made_progress ~strong_evidence:false
+       ~surface_requires_evidence:(not (Success.claim_bound_work bound)))
+
 let () =
   Alcotest.run "keeper_no_progress_loop_detector"
     [
@@ -394,6 +459,12 @@ let () =
             `Quick test_delivery_requires_evidence_mapping;
           Alcotest.test_case "silent no-evidence turns accrue streak"
             `Quick (with_eio test_silent_turns_accrue_streak);
+          Alcotest.test_case "claim exemption is outcome-aware (D3)"
+            `Quick test_claim_outcome_aware_exemption;
+          Alcotest.test_case "strong evidence drops typed-failure completions (D1)"
+            `Quick test_strong_evidence_outcome_aware;
+          Alcotest.test_case "sangsu claim-idle loop accrues streak"
+            `Quick test_sangsu_claim_idle_loop_accrues;
         ] );
       ( "per-keeper isolation",
         [

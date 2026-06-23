@@ -346,7 +346,7 @@ let add_routes ~sw ~clock router =
          request reqd)
   |> Http.Router.post "/api/v1/runtime/config/raw" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state _agent_name req reqd ->
+         (fun state agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
              match parse_runtime_config_raw_body body_str with
              | Error msg ->
@@ -358,6 +358,29 @@ let add_routes ~sw ~clock router =
                 | Ok () ->
                   (match Runtime_config_file.load_config_text () with
                    | Ok (path, saved_text) ->
+                     (* RFC-0273 §3.3 — this write rewrites the global keeper
+                        routing (runtime.toml), so the operator action is
+                        recorded to the governance audit trail (actor + path +
+                        size) on top of the CanAdmin gate. The config body is
+                        deliberately NOT in the audit payload: runtime.toml can
+                        carry provider secrets (RFC-0132 redaction), so only the
+                        path and byte/line size of the now-live config are kept. *)
+                     Audit_log.log_action
+                       (Mcp_server.workspace_config state)
+                       ~agent_id:agent_name
+                       ~action:Audit_log.RuntimeConfigWrite
+                       ~details:
+                         (`Assoc
+                            [
+                              ("path", `String path);
+                              ("bytes", `Int (String.length saved_text));
+                              ( "lines",
+                                `Int
+                                  (List.length (String.split_on_char '\n' saved_text))
+                              );
+                            ])
+                       ~outcome:Audit_log.Success
+                       ();
                      Http.Response.json_value ~compress:true ~request:req
                        (runtime_config_raw_json
                           ~path

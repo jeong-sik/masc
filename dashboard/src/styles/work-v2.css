@@ -35,9 +35,9 @@
 }
 
 .wk-inner {
-  max-width: 1280px;
+  /* Full-width, left-aligned — consistency rationale in .ov-scroll
+     (surfaces-v2.css). Prototype centers this; overridden per design direction. */
   width: 100%;
-  margin: 0 auto;
 }
 
 .wk-head {
@@ -451,10 +451,12 @@
 
 /* ── Task row ─────────────────────────────────────────────────────────────── */
 .wk-task {
+  /* No row padding here — the prototype's inner .wk-task-main supplies it
+     (vendored v2.css:830, 7px 8px). flex-column/gap stays: it lays out the
+     expanded .wk-task-detail block below .wk-task-main. */
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px 8px;
   border-radius: var(--radius-sm);
 }
 
@@ -588,9 +590,10 @@
 }
 
 .wk-gate {
+  /* No row gap — the prototype's gate rows sit flush, separated by the
+     border-top the vendored keeper-v2/v2.css supplies. */
   display: flex;
   flex-direction: column;
-  gap: 6px;
 }
 
 .wk-gate-h {

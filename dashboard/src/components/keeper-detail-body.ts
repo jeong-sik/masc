@@ -50,7 +50,6 @@ import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import { KeeperMemoryOsRecallPanel, KeeperTurnInspector } from './keeper-turn-inspector'
 import { SupervisorDiagnosticsPanel } from './keeper-supervisor-diagnostics'
 import { KeeperGoalHorizonsPanel } from './keeper-goal-horizons-panel'
-import { KeeperConfigPanel } from './keeper-config-panel'
 import { KeeperPromptAssemblyPanel } from './keeper-prompt-assembly-panel'
 import { KeeperRuntimeModelEditor } from './keeper-runtime-model-editor'
 import { KeeperConditionsDivergent } from './keeper-conditions-divergent'
@@ -313,11 +312,6 @@ export function KeeperDetailBody({
             </div>
           <//>
           <${PlaygroundReposPanel} keeperName=${keeper.name} />
-          <${CollapsibleSection} title="Keeper 설정">
-            <div class="mt-4">
-              <${KeeperConfigPanel} keeperName=${keeper.name} />
-            </div>
-          <//>
         <//>
 
         <${KeeperDetailSection}

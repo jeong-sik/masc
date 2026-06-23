@@ -155,45 +155,86 @@ let panel_meta (o : Fusion_types.panel_outcome) : Yojson.Safe.t =
       ; ("reason", `String reason_detail)
       ]
 
-(* 심판 결과를 board meta_json 원소로. *)
+(* judge_synthesis → board meta_json 필드 리스트 (status/decision/resolved_answer/
+   synthesis + 구조화 5섹션 + decision-variant 최상위 recommend|missing). judge_meta
+   (canonical [judge] 키)와 judge_node_meta(관측 [judges] 배열, RFC-0284)가 공유한다 —
+   같은 5섹션 직렬화(키 매핑 gap_topic→topic 등)를 두 번 짜면 한쪽만 회귀하므로 추출
+   (N-of-M 회피). test_fusion_sink_meta.ml이 이 매핑을 핀한다. *)
+let judge_synthesis_fields (j : Fusion_types.judge_synthesis) :
+  (string * Yojson.Safe.t) list =
+  let { Fusion_types.consensus; contradictions; partial_coverage; unique_insights
+      ; blind_spots; resolved_answer; decision } =
+    j
+  in
+  (* base 7필드: status/decision/resolved_answer/synthesis(평탄화 markdown, 호환) +
+     구조화 5섹션. synthesis를 남기는 건 구형 프론트/로그 호환 — 구조화 필드가
+     canonical이므로 신규 프론트는 5섹션을 우선 소비한다. *)
+  let base =
+    [ ("status", `String "synthesized")
+    ; ("decision", `String (render_decision decision))
+    ; ("resolved_answer", `String resolved_answer)
+    ; ("synthesis", `String (render_judge j))
+    ; ("consensus", `List (List.map claim_to_json consensus))
+    ; ("contradictions", `List (List.map contradiction_to_json contradictions))
+    ; ("partial_coverage", `List (List.map coverage_gap_to_json partial_coverage))
+    ; ("unique_insights", `List (List.map insight_to_json unique_insights))
+    ; ("blind_spots", `List (List.map (fun b -> `String b) blind_spots))
+    ]
+  in
+  (* decision variant에 따라 keeper-v2 스키마의 최상위 recommend/missing를 붙인다.
+     Answer → 추가 없음, Recommend → recommend:{action,rationale},
+     Insufficient → missing:[...]. 프론트 normalizeRecommendation/normalizeJudge 가
+     judge.recommend / judge.missing 을 읽는다. *)
+  match decision with
+  | Fusion_types.Recommend r -> ("recommend", recommendation_to_json r) :: base
+  | Fusion_types.Insufficient { missing_for_decision } ->
+    ("missing", `List (List.map (fun m -> `String m) missing_for_decision)) :: base
+  | Fusion_types.Answer _ -> base
+
+(* 심판 종합을 board meta_json [judge] 원소로 (canonical 단일 키 — RFC-0284 이전 호환). *)
 let judge_meta (judge : (Fusion_types.judge_synthesis, string) result) : Yojson.Safe.t =
   (* status는 형제 panel_meta와 같은 동사형(판이 무엇을 했는가): 종합 산출은
      "synthesized", 실패는 "failed". tool-result ok-봉투("ok")가 아니라 board
      증거의 judge 서술 필드다 (no-inline-ok-envelope 가드 대상과 별개 개념). *)
   match judge with
-  | Ok j ->
-    let { Fusion_types.consensus; contradictions; partial_coverage; unique_insights
-        ; blind_spots; resolved_answer; decision } =
-      j
-    in
-    (* base 7필드: status/decision/resolved_answer/synthesis(평탄화 markdown, 호환) +
-       구조화 5섹션. synthesis를 남기는 건 구형 프론트/로그 호환 — 구조화 필드가
-       canonical이므로 신규 프론트는 5섹션을 우선 소비한다. *)
-    let base =
-      [ ("status", `String "synthesized")
-      ; ("decision", `String (render_decision decision))
-      ; ("resolved_answer", `String resolved_answer)
-      ; ("synthesis", `String (render_judge j))
-      ; ("consensus", `List (List.map claim_to_json consensus))
-      ; ("contradictions", `List (List.map contradiction_to_json contradictions))
-      ; ("partial_coverage", `List (List.map coverage_gap_to_json partial_coverage))
-      ; ("unique_insights", `List (List.map insight_to_json unique_insights))
-      ; ("blind_spots", `List (List.map (fun b -> `String b) blind_spots))
-      ]
-    in
-    (* decision variant에 따라 keeper-v2 스키마의 최상위 recommend/missing를 붙인다.
-       Answer → 추가 없음, Recommend → recommend:{action,rationale},
-       Insufficient → missing:[...]. 프론트 normalizeRecommendation/normalizeJudge 가
-       judge.recommend / judge.missing 을 읽는다. *)
-    let with_decision_fields =
-      match decision with
-      | Fusion_types.Recommend r -> ("recommend", recommendation_to_json r) :: base
-      | Fusion_types.Insufficient { missing_for_decision } ->
-        ("missing", `List (List.map (fun m -> `String m) missing_for_decision)) :: base
-      | Fusion_types.Answer _ -> base
-    in
-    `Assoc with_decision_fields
+  | Ok j -> `Assoc (judge_synthesis_fields j)
   | Error e -> `Assoc [ ("status", `String "failed"); ("error", `String e) ]
+
+(* 심판 노드의 위상 역할/정체성 → board meta_json 필드 (RFC-0284). [role]은 위상 의미
+   (single/refine/first/meta), [identity]는 [First]면 panelist_id(panel model과 대칭),
+   그 외는 role과 동일. 프론트는 role로 노드 종류를, identity로 1차 심판을 구분해 위상
+   이름 없이 배열 shape만으로 구조를 렌더한다(1=simple, 2=refine, N개 first+meta=JOJ). *)
+let judge_role_fields (role : Fusion_types.judge_role) : (string * Yojson.Safe.t) list =
+  let kind, identity =
+    match role with
+    | Fusion_types.Single -> ("single", "single")
+    | Fusion_types.Refine_pass -> ("refine", "refine")
+    | Fusion_types.First id -> ("first", id)
+    | Fusion_types.Meta -> ("meta", "meta")
+  in
+  [ ("role", `String kind); ("identity", `String identity) ]
+
+(* 심판 실행 노드 한 건을 board meta_json [judges] 배열 원소로 (RFC-0284). panel_meta와
+   동형: [Synthesized] → role/identity + judge_synthesis 5섹션 + 노드별 실측 usage,
+   [Judge_failed] → role/identity + status="failed" + error + 노드별 실측 usage(RFC-0284 E:
+   실패한 심판도 토큰을 태웠으면 관측 record에 비용을 남긴다). *)
+let judge_node_meta (o : Fusion_types.judge_outcome) : Yojson.Safe.t =
+  match o with
+  | Fusion_types.Synthesized { role; synthesis; usage } ->
+    `Assoc
+      (judge_role_fields role
+       @ judge_synthesis_fields synthesis
+       @ [ ("input_tokens", `Int usage.Fusion_types.input_tokens)
+         ; ("output_tokens", `Int usage.Fusion_types.output_tokens)
+         ])
+  | Fusion_types.Judge_failed { failed_role; error; usage } ->
+    `Assoc
+      (judge_role_fields failed_role
+       @ [ ("status", `String "failed")
+         ; ("error", `String error)
+         ; ("input_tokens", `Int usage.Fusion_types.input_tokens)
+         ; ("output_tokens", `Int usage.Fusion_types.output_tokens)
+         ])
 
 (* RFC-0266: 심의 완료 시 호출 키퍼를 typed [Fusion_completed] stimulus로 깨운다.
    board post + chat append(영속)와 별개로, 잠든(Running) 키퍼를 즉시 깨워
@@ -248,7 +289,7 @@ let wake_keeper_on_fusion_completion
       run_id
       (Printexc.to_string exn)
 
-let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judge_usage :
+let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage :
     (unit, string) result =
   try
     (* 비용 관측(제약 아님) — 패널 N + 심판 1 실측 토큰 합산 (RFC §10). board 증거에만
@@ -281,6 +322,10 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judge_usage :
            ; ("question", `String question)
            ; ("panel", `List (List.map panel_meta panel))
            ; ("judge", judge_meta judge)
+             (* RFC-0284: 실행된 심판 노드 관측 배열 (panel과 동형). 기존 단일 [judge]
+                키는 canonical로 ADDITIVE 유지(구 프론트/디스크 reader 호환) — 제거는
+                후속 마이그레이션. 대시보드는 이 배열 shape로 위상 구조를 렌더한다. *)
+           ; ("judges", `List (List.map judge_node_meta judges))
            ; ( "observed_usage"
              , `Assoc
                  [ ("input_tokens", `Int total_usage.Fusion_types.input_tokens)

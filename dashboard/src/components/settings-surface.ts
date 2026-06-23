@@ -13,6 +13,7 @@ import { navigate, route } from '../router'
 import { fetchDashboardTools, fetchLogs, fetchRuntimeDefaults } from '../api/dashboard.js'
 import type { DashboardToolInventoryItem, LogEntry, RuntimeDefaultsResponse } from '../api/dashboard.js'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
+import { ThemeSwitch } from './theme-switch'
 import type { ComponentChildren } from 'preact'
 
 type SectionId = SettingsRouteSectionId
@@ -1129,6 +1130,9 @@ export function SettingsSurface() {
             `}
 
             ${sec === 'display' && html`
+              <${SetRow} label="Theme" hint="Color palette — Dark / StyleSeed / Paper">
+                <${ThemeSwitch} />
+              <//>
               <${SetRow} label="Density" hint="List/card spacing">
                 <${SetSeg} value=${density} options=${['compact', 'regular']} onChange=${setDensity} />
               <//>

@@ -342,7 +342,13 @@
 }
 
 .cn-status-pill.run .dot {
+  /* Status-dot glow, mirroring the prototype dot (keeper-v2/v2.css:396-399). */
+  box-shadow: 0 0 7px var(--status-ok);
   animation: cn-pulse 1.4s ease-in-out infinite;
+}
+
+.cn-status-pill.pause .dot {
+  box-shadow: 0 0 7px var(--status-warn);
 }
 
 @keyframes cn-pulse {

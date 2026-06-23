@@ -256,9 +256,42 @@ describe('BoardSurface Component', () => {
     expect(container.querySelector('.v2-board-surface')).not.toBeNull()
   })
 
-  it('shows the mention inbox detail rail by default', () => {
+  it('renders no title header — board goes straight to the feed (matches prototype)', () => {
     const { container } = render(h(BoardSurface, null))
+    // The board surface intentionally omits SurfaceHeader; the sub-board rail
+    // and "전체 피드" heading are the only structure above the posts. board is
+    // in SURFACE_OWN_LEAD_IDS so the generic SurfaceLead is also suppressed.
+    expect(container.querySelector('header.v2-surface-header')).toBeNull()
+  })
+
+  it('collapses the detail column by default (two-column rail + feed)', () => {
+    const { container } = render(h(BoardSurface, null))
+    // No post selected and the mention inbox closed: neither detail rail renders
+    // and .bd-body collapses to two columns by setting the inline
+    // --bd-detail-width to 0 (the third grid track). Matches the v2 prototype,
+    // which only expands the detail column on demand.
+    expect(container.querySelector('[data-testid="bd-mention-detail"]')).toBeNull()
+    expect(container.querySelector('[data-testid="bd-thread-detail"]')).toBeNull()
+    const surface = container.querySelector<HTMLElement>('.v2-board-surface')
+    const body = container.querySelector<HTMLElement>('.bd-body')
+    expect(surface?.getAttribute('data-detail-open')).toBe('false')
+    // Collapse is driven by the inline custom property (0px third track), not a
+    // .no-detail class that would race the legacy grid on load order.
+    expect(body?.getAttribute('style')).toContain('--bd-detail-width: 0px')
+  })
+
+  it('opens the mention inbox detail rail from the rail queue action', () => {
+    const { container } = render(h(BoardSurface, null))
+    fireEvent.click(screen.getByTestId('bd-queue-mentions'))
     expect(container.querySelector('[data-testid="bd-mention-detail"]')).not.toBeNull()
+    const surface = container.querySelector<HTMLElement>('.v2-board-surface')
+    const body = container.querySelector<HTMLElement>('.bd-body')
+    expect(surface?.getAttribute('data-detail-open')).toBe('true')
+    // Opening a detail rail restores a non-zero third track via the same inline
+    // property (the persisted/default width), not a class toggle.
+    expect(body?.getAttribute('style')).toContain(
+      `--bd-detail-width: ${BOARD_DETAIL_WIDTH_DEFAULT}px`,
+    )
   })
 
   it('normalizes persisted Board detail rail widths to the supported range', () => {
@@ -272,6 +305,9 @@ describe('BoardSurface Component', () => {
     setLocalStorageItem(BOARD_DETAIL_WIDTH_STORAGE_KEY, JSON.stringify(430))
 
     const { container } = render(h(BoardSurface, null))
+    // The detail column is collapsed until opened; open the mention inbox so the
+    // persisted width is applied and the resize handle renders.
+    fireEvent.click(screen.getByTestId('bd-queue-mentions'))
 
     const surface = container.querySelector<HTMLElement>('.v2-board-surface')
     const body = container.querySelector<HTMLElement>('.bd-body')
@@ -283,6 +319,8 @@ describe('BoardSurface Component', () => {
 
   it('resizes the Board detail rail with pointer drag and keyboard controls', async () => {
     const { container } = render(h(BoardSurface, null))
+    // Open the mention inbox so the detail rail (and its resize handle) renders.
+    fireEvent.click(screen.getByTestId('bd-queue-mentions'))
 
     const surface = container.querySelector<HTMLElement>('.v2-board-surface')
     const handle = screen.getByTestId('bd-detail-resize') as HTMLButtonElement
@@ -316,8 +354,8 @@ describe('BoardSurface Component', () => {
     ]
     render(h(BoardSurface, null))
 
-    const detail = screen.getByTestId('bd-mention-detail')
-    expect(detail).not.toHaveClass('is-mobile-open')
+    // Detail column is collapsed until the mention inbox is opened.
+    expect(screen.queryByTestId('bd-mention-detail')).toBeNull()
 
     const queues = screen.getByTestId('bd-mobile-queues')
     const mentionQueue = within(queues).getByTestId('bd-mobile-queue-mentions')
@@ -325,11 +363,12 @@ describe('BoardSurface Component', () => {
     expect(mentionQueue).toHaveTextContent('1')
 
     fireEvent.click(mentionQueue)
+    const detail = screen.getByTestId('bd-mention-detail')
     expect(detail).toHaveClass('is-mobile-open')
     expect(within(detail).getByText('@dashboard')).toBeInTheDocument()
 
     fireEvent.click(screen.getByLabelText('멘션 인박스 닫기'))
-    expect(detail).not.toHaveClass('is-mobile-open')
+    expect(screen.queryByTestId('bd-mention-detail')).toBeNull()
   })
 
   it('keeps v2 workspace panels for category cards', () => {

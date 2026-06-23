@@ -27,13 +27,22 @@ val panel_meta : Fusion_types.panel_outcome -> Yojson.Safe.t
     LLM-facing JSON 스키마와 대칭이며, 프론트가 markdown 재파싱 없이 5섹션을 렌더한다. *)
 val judge_meta : (Fusion_types.judge_synthesis, string) result -> Yojson.Safe.t
 
+(** [judge_node_meta o] — 심판 실행 노드 한 건을 board meta_json [judges] 배열 원소로
+    직렬화 (RFC-0284). [Synthesized] → role/identity + judge_synthesis 5섹션 + 노드별
+    실측 usage, [Judge_failed] → role/identity + status="failed" + error. [judge_meta]와
+    같은 5섹션 스키마(judge_synthesis_fields)를 공유한다. role ∈ single|refine|first|meta,
+    identity는 [First]면 panelist_id. 프론트는 배열 shape만으로 위상 구조를 렌더한다. *)
+val judge_node_meta : Fusion_types.judge_outcome -> Yojson.Safe.t
+
 (** judge 결론을 키퍼 메인 chat lane에 남기고 board에 패널/심판 구조화 증거를 post한다.
 
     chat lane: judge가 [Ok]면 "결론 — resolved_answer" 한 줄을 메인 conversation에
     append하고 [chat_appended]로 대시보드에 알린다(judge 실패면 메인 흐름 비오염을 위해
     생략). board: [Board_dispatch.create_post]로 meta_json(source/run_id/question/panel
     답변 전체/judge 종합/observed_usage = panel N + judge 1 합산) 증거를 남긴다. [judge_usage]는
-    심판이 소비한 토큰(orchestrator가 [Fusion_judge.run]에서 분리해 주입). [base_dir]는 호출자 주입.
+    심판이 소비한 토큰(orchestrator가 [Fusion_judge.run]에서 분리해 주입). [judges]는 실제로
+    실행된 심판 노드 관측 배열(RFC-0284)로 board meta_json [judges] 키에 panel과 동형으로
+    직렬화된다 — canonical 단일 [judge] 키는 ADDITIVE 유지. [base_dir]는 호출자 주입.
 
     chat store append 또는 board post 생성 실패는 [Error msg]로 반환한다.
     [chat_appended] SSE broadcast는 {!Keeper_chat_broadcast} 정책을 따른다:
@@ -46,6 +55,7 @@ val emit
   -> question:string
   -> panel:Fusion_types.panel_outcome list
   -> judge:(Fusion_types.judge_synthesis, string) result
+  -> judges:Fusion_types.judge_outcome list
   -> judge_usage:Fusion_types.usage
   -> (unit, string) result
 

@@ -102,6 +102,43 @@ type judge_synthesis =
   }
 [@@deriving yojson, show, eq]
 
+(* 심판 실행 관측 record (RFC-0284). [panel_outcome]와 구조 동형 — 실제로 실행된 심판
+   노드를 *사후* record로 보존한다. JOJ의 N개 1차 심판 + meta가 orchestrator 내부에서만
+   존재하다 [Result.map fst]로 소실되던 것을, 패널처럼 배열로 board 증거에 남긴다.
+   이것은 *관측 데이터*(무엇이 실행됐나)이지 *실행 추상*(어떻게 조립하나 — purge된
+   ChainEngine node-graph DSL)이 아니다: 대시보드는 위상 이름 없이 이 배열의 shape만으로
+   구조를 렌더한다(1=simple, 2=refine, N+meta=judge-of-judges). 콤비네이터/그래프 어휘는
+   도입하지 않는다(RFC-0284 §4: 추상 추출은 5번째 위상이 강제할 때까지 defer). *)
+type judge_role =
+  | Single  (** Simple 위상의 단일 심판. *)
+  | Refine_pass  (** Refine/Conditional의 2차(재검토) 심판. *)
+  | First of string  (** JOJ 1차 심판. panelist_id를 정체성으로 보존(panel model과 대칭). *)
+  | Meta  (** JOJ meta(reconcile) 심판. *)
+[@@deriving yojson, show, eq]
+
+type judge_node =
+  { role : judge_role
+  ; synthesis : judge_synthesis
+  ; usage : usage
+  }
+[@@deriving yojson, show, eq]
+
+type judge_error_node =
+  { failed_role : judge_role
+  ; error : string
+  ; usage : usage
+      (** 실패해도 태운 토큰 — 관측 record가 비용을 버리지 않는다(RFC-0284, 적대 리뷰 #22112 E).
+          [panel_error]와 달리 심판 실패는 토큰 소비 후일 수 있어 usage를 동반한다. *)
+  }
+[@@deriving yojson, show, eq]
+
+(* 심판 한 명의 실행 결과 — 성공 또는 격리된 실패. [panel_outcome] (Answered/Failed)와
+   구조 동형이라 sink/대시보드가 패널과 같은 배열 렌더 경로를 재사용한다. *)
+type judge_outcome =
+  | Synthesized of judge_node  (** panel [Answered] 대칭. *)
+  | Judge_failed of judge_error_node  (** panel [Failed] 대칭. *)
+[@@deriving yojson, show, eq]
+
 type fusion_trigger =
   | Explicit_tool_call
   | Low_confidence
@@ -154,11 +191,19 @@ type gate_decision =
 type fusion_topology =
   | Simple  (** panel → judge → sink (현행, byte-identical) *)
   | Refine  (** panel → judge → judge'(1차 종합을 재검토) → sink *)
+  | Conditional
+      (** panel → judge → (1차 판정이 [Insufficient]일 때만) judge'(refine) → sink.
+          애매할 때만 한 단계 더 깊이; 그 외엔 1차 종합 그대로. *)
+  | Judge_of_judges
+      (** panel → [N개 1차 심판] → meta-judge → sink (RFC-0283). 서로 다른 N개 1차
+          심판이 같은 패널을 독립 종합하고, meta가 reconcile. preset.judges >= 2 필요. *)
 [@@deriving yojson, show, eq]
 
 let fusion_topology_to_string = function
   | Simple -> "simple"
   | Refine -> "refine"
+  | Conditional -> "conditional"
+  | Judge_of_judges -> "judge_of_judges"
 
 (* [to_string]의 역함수, 닫힌 합 밖은 [None]=fail-closed (Unknown→permissive 회피).
    keeper 입력 문자열을 typed 위상으로 parse한 뒤 exhaustive match하게 한다. round-trip은
@@ -166,12 +211,24 @@ let fusion_topology_to_string = function
 let fusion_topology_of_string = function
   | "simple" -> Some Simple
   | "refine" -> Some Refine
+  | "conditional" -> Some Conditional
+  | "judge_of_judges" -> Some Judge_of_judges
   | _ -> None
 
-let all_fusion_topologies : fusion_topology list = [ Simple; Refine ]
+let all_fusion_topologies : fusion_topology list =
+  [ Simple; Refine; Conditional; Judge_of_judges ]
 
 let all_fusion_topology_strings : string list =
   List.map fusion_topology_to_string all_fusion_topologies
+
+(* Conditional 위상의 에스컬레이트 정책: 1차 심판 판정이 더 깊은 심의를 요하는가.
+   [Insufficient](패널이 결정에 부족 = 애매)면 escalate, [Answer]/[Recommend](결론 있음)이면
+   1차 종합 유지. 닫힌 합 exhaustive match(catch-all 없음) — 새 decision 변형 추가 시 여기서
+   컴파일 에러로 escalate 정책을 명시 갱신하게 강제한다. confidence "축"을 새로 만들어 역분류하지
+   않고(reverse-classifier 회피) 기존 닫힌 합을 직접 본다. 순수 — 테스트 가능. *)
+let decision_warrants_escalation = function
+  | Insufficient _ -> true
+  | Answer _ | Recommend _ -> false
 
 (* 1차 심판 종합을 refine 심판 프롬프트에 실어 보낼 lossless 텍스트 렌더. judge_synthesis의
    7필드 + 닫힌 합 decision을 모두 보존한다(CLAUDE.md 워크어라운드 #2 "두 개념을 한 string

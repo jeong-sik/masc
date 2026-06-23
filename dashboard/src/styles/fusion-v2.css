@@ -144,29 +144,33 @@
   padding: 10px;
 }
 
+/* Carded run rows, matching the vendored prototype `.fus-row`
+   (keeper-v2/fusion.css:25-27). The live class is `.fus-run-row`, so the
+   vendored rule cannot apply by name — adopt its card treatment here instead of
+   the prior transparent/min-height:96px row. Tokens are the same ones the
+   working vendored `.fus-row` uses, so they resolve. */
 .v2-fusion-surface .fus-run-row {
   width: 100%;
-  border: 1px solid transparent;
-  border-radius: var(--r-2);
-  background: transparent;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
   color: var(--fus-text);
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  min-height: 96px;
-  padding: 12px;
+  gap: 7px;
+  padding: 10px 11px;
   text-align: left;
 }
 
 .v2-fusion-surface .fus-run-row:hover {
-  border-color: var(--fus-line);
-  background: var(--color-bg-hover);
+  border-color: var(--border-highlight);
 }
 
 .v2-fusion-surface .fus-run-row.active {
-  border-color: var(--ok-border);
-  background: color-mix(in srgb, var(--ok-soft) 72%, var(--fus-panel));
+  border-color: var(--volt-dim);
+  background: var(--bg-card-hover);
+  box-shadow: inset 2px 0 0 var(--volt);
 }
 
 .v2-fusion-surface .fus-row-top,
@@ -219,29 +223,10 @@
   gap: 8px;
 }
 
-.v2-fusion-surface .fus-rdot {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: var(--fus-muted);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--fus-muted) 14%, transparent);
-}
-
-.v2-fusion-surface .fus-rdot.done {
-  background: var(--ok-fg);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok-fg) 16%, transparent);
-}
-
-.v2-fusion-surface .fus-rdot.deny {
-  background: var(--bad-light);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad-light) 16%, transparent);
-}
-
-.v2-fusion-surface .fus-rdot.run {
-  background: var(--warn-fg);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn-fg) 16%, transparent);
-}
+/* .fus-rdot overrides removed — the live class matches the vendored prototype
+   rule (keeper-v2/fusion.css:9-12): 9px dot, .run gets var(--volt) + the
+   fus-pulse expanding-ring animation instead of a static halo. Letting the
+   vendored rule apply restores the running-run pulse and voltage semantics. */
 
 .v2-fusion-surface .fus-status,
 .v2-fusion-surface .fus-mini-status {
@@ -320,60 +305,12 @@
   padding: 12px;
 }
 
-.v2-fusion-surface .fus-pipe-node {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 28px;
-  border: 1px solid var(--fus-line);
-  border-radius: var(--r-1);
-  background: var(--color-bg-surface);
-  color: var(--fus-text);
-  font-size: 11px;
-  font-weight: 800;
-  line-height: 1;
-  padding: 0 10px;
-  text-transform: uppercase;
-}
-
-.v2-fusion-surface .fus-pipe-node.kp {
-  border-color: color-mix(in srgb, var(--volt-strong) 34%, transparent);
-  background: var(--volt-wash);
-  color: var(--volt-strong);
-}
-
-.v2-fusion-surface .fus-pipe-node.gate {
-  border-color: var(--ok-border);
-  background: var(--ok-soft);
-  color: var(--ok-fg);
-}
-
-.v2-fusion-surface .fus-pipe-node.panel {
-  border-color: color-mix(in srgb, var(--volt-strong) 26%, var(--fus-line));
-}
-
-.v2-fusion-surface .fus-pipe-node.judge {
-  border-color: var(--warn-border);
-  background: var(--warn-soft);
-  color: var(--warn-fg);
-}
-
-.v2-fusion-surface .fus-pipe-node.sink {
-  border-color: var(--ok-border);
-  background: color-mix(in srgb, var(--ok-soft) 68%, var(--fus-panel-strong));
-  color: var(--ok-fg);
-}
-
-.v2-fusion-surface .fus-pipe-node.warn {
-  border-color: var(--warn-border);
-  color: var(--warn-fg);
-}
-
-.v2-fusion-surface .fus-pipe-node.deny {
-  border-color: var(--bad-30);
-  background: var(--bad-10);
-  color: var(--bad-light);
-}
+/* .fus-pipe-node overrides removed — the live class matches the vendored
+   prototype rule (keeper-v2/fusion.css:68-73): mono font, mixed case, normal
+   weight, 4px radius, subtle text-color-only state tints (outline chips). The
+   prior override forced uppercase weight-800 filled chips. Live node types `.kp`
+   and `.sink` have no dedicated vendored rule and fall back to the base
+   outline, matching the prototype's lightweight intent. */
 
 .v2-fusion-surface .fus-pipe-arr {
   color: var(--fus-muted);
@@ -433,11 +370,10 @@
   font-weight: 700;
 }
 
-.v2-fusion-surface .fus-panel-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
+/* .fus-panel-grid override removed (base + both media-query rules below) so the
+   vendored prototype rule (keeper-v2/fusion.css:97) governs: a single
+   `repeat(auto-fit, minmax(248px, 1fr))` that collapses columns intrinsically as
+   the container narrows — no fixed 3/2/1-col breakpoints needed. */
 
 .v2-fusion-surface .fus-panel-card {
   border: 1px solid var(--fus-line);
@@ -814,10 +750,6 @@ button.fus-reconcile-row:hover {
     max-height: 360px;
   }
 
-  .v2-fusion-surface .fus-panel-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .v2-fusion-surface .fus-reconcile-grid {
     grid-template-columns: 1fr;
   }
@@ -825,8 +757,7 @@ button.fus-reconcile-row:hover {
 
 @media (max-width: 720px) {
   .v2-fusion-surface .fus-top-kpis,
-  .v2-fusion-surface .fus-kpis,
-  .v2-fusion-surface .fus-panel-grid {
+  .v2-fusion-surface .fus-kpis {
     grid-template-columns: 1fr;
   }
 

@@ -27,3 +27,30 @@ describe('keeper-v2 main surfaces are full-width (no centered column)', () => {
     expect(d['flex-direction']).toBe('column')
   })
 })
+
+// Regression guard: board detail collapse is driven by the inline
+// --bd-detail-width custom property, so the keeper-v2 .bd-body grid must consume
+// it as the third track (set to 0 by board-surface.ts when no detail is open).
+// If a prototype re-sync hardcodes the third track back to `minmax(290px, 360px)`
+// without the var, collapse silently stops working once the legacy board-v2.css
+// grid is removed (main.ts:114 migration) — this test fails on purpose so the
+// single source of truth is not lost. Pairs with board-surface.test.ts, which
+// asserts the runtime value (0px collapsed / width open).
+describe('keeper-v2 board grid consumes --bd-detail-width (collapse SSOT)', () => {
+  it('the base .bd-body grid uses var(--bd-detail-width) as its third track', () => {
+    // declarationsForSelector merges the responsive .bd-body override (a 2-track
+    // mobile grid inside a media query) with the base rule, so assert against the
+    // base rule text directly: some .bd-body block drives its grid from the
+    // property. If a prototype re-sync hardcodes the track without the var, this
+    // fails before the collapse silently breaks post-migration.
+    expect(css).toMatch(
+      /\.bd-body\s*\{[^}]*grid-template-columns:[^;]*var\(--bd-detail-width/,
+    )
+  })
+
+  it('no .bd-body.no-detail rule remains (replaced by the inline property)', () => {
+    expect(() => declarationsForSelector(css, '.bd-body.no-detail')).toThrow(
+      /Selector not found/,
+    )
+  })
+})

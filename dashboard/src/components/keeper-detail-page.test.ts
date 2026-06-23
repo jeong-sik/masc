@@ -82,10 +82,12 @@ describe('KeeperWorkspaceRail', () => {
 
     // v2 rail split the old combined '런타임 · 처리량' card into separate
     // 런타임 (RuntimeSection / .rtc-card) and 처리량 (ThroughputSection) sections,
-    // each with its own .ctx-sec h4 header.
-    const sectionHeaders = Array.from(container.querySelectorAll('.ctx-sec h4')).map(h => h.textContent ?? '')
-    expect(sectionHeaders.some(t => t.includes('런타임'))).toBe(true)
-    expect(sectionHeaders.some(t => t.includes('처리량'))).toBe(true)
+    // each with its own .ctx-sec h4 header. The 처리량 header is now a collapse
+    // toggle (.ctx-h-toggle) whose text bundles the caret + an idle/rate summary
+    // (e.g. '▸처리량유휴'), so match it by substring rather than exact text.
+    const sectionHeaders = Array.from(container.querySelectorAll('.ctx-sec h4')).map(h => h.textContent)
+    expect(sectionHeaders).toContain('런타임')
+    expect(sectionHeaders.some(h => h?.includes('처리량'))).toBe(true)
     expect(container.textContent).toContain('claude-sonnet-4')
     expect(container.textContent).toContain('oas-seoul-1')
     expect(container.textContent).toContain('62%')

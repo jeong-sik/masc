@@ -50,7 +50,7 @@ let of_command = function
   | Shell_ir_typed.W (Git_status { short }) ->
     let args = arg "status" :: (if short then [ arg "-s" ] else []) in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Git, args) ]
-  | Shell_ir_typed.W (Git_clone { repo; branch; depth }) ->
+  | Shell_ir_typed.W (Git_clone { repo; branch; depth; dest_dir }) ->
     let args =
       (arg "clone"
        :: (match depth with
@@ -60,6 +60,9 @@ let of_command = function
          | None -> []
          | Some b -> [ arg "-b"; arg b ])
       @ [ arg repo ]
+      @ (match dest_dir with
+         | None -> []
+         | Some d -> [ arg d ])
     in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Git, args) ]
   | Shell_ir_typed.W (Curl { url; method_; headers; body; output_file; follow_redirects; insecure }) ->

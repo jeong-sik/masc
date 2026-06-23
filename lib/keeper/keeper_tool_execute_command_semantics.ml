@@ -258,33 +258,36 @@ let resolve_sandbox_root_git_cwd
   else if cwd_normalized = host_root && stages_target_repo_commands stages
   then (
     let resolve_without_explicit_git_c () =
-      match repos_in_playground () with
-      | [ single_repo ] ->
-        Filename.concat (Filename.concat host_root "repos") single_repo, None
-      | [] ->
-        ( cwd
-        , Some
-            (Printf.sprintf
-                "sandbox root cannot run git/gh: mount point %s is not a git repository and \
-                no sandbox git clones exist under repos/. First clone a repo with \
-                the visible clone tool, then retry with cwd=\"repos/<repo>\"."
-               host_root) )
-      | example_repo :: _ as many ->
-        let suggested_cwd =
-          match repos_path_hint_of_stages ~cmd:(String.trim cmd) stages with
-          | Some (path, _) -> path
-          | None -> "repos/" ^ example_repo
-        in
-        ( cwd
-        , Some
-            (Printf.sprintf
-               "sandbox root cannot run git/gh: mount point %s is not a git repository and \
-                multiple sandbox repos exist. Set cwd explicitly before retrying. Example \
-                next call: Execute { \"executable\": \"git\", \"argv\": [\"status\"], \"cwd\": %S }. Available repos: %s. \
-                Do not retry the same cmd from sandbox root."
-               host_root
-               suggested_cwd
-               (String.concat ", " many)) )
+      (* If the command itself names a target under repos/ (e.g. git clone <url>
+         repos/foo), keep the sandbox-root cwd and let the command operate on
+         that explicit path. This avoids special-casing git clone while still
+         helping plain git status/log calls resolve to the intended repo. *)
+      match repos_path_hint_of_stages ~cmd:(String.trim cmd) stages with
+      | Some (_path, _cmd) -> cwd, None
+      | None -> (
+        match repos_in_playground () with
+        | [ single_repo ] ->
+          Filename.concat (Filename.concat host_root "repos") single_repo, None
+        | [] ->
+          ( cwd
+          , Some
+              (Printf.sprintf
+                  "sandbox root cannot run git/gh: mount point %s is not a git repository and \
+                  no sandbox git clones exist under repos/. First clone a repo with \
+                  the visible clone tool, then retry with cwd=\"repos/<repo>\"."
+                 host_root) )
+        | example_repo :: _ as many ->
+          let suggested_cwd = "repos/" ^ example_repo in
+          ( cwd
+          , Some
+              (Printf.sprintf
+                 "sandbox root cannot run git/gh: mount point %s is not a git repository and \
+                  multiple sandbox repos exist. Set cwd explicitly before retrying. Example \
+                  next call: Execute { \"executable\": \"git\", \"argv\": [\"status\"], \"cwd\": %S }. Available repos: %s. \
+                  Do not retry the same cmd from sandbox root."
+                 host_root
+                 suggested_cwd
+                 (String.concat ", " many)) ))
     in
     let explicit_git_c_path_groups = git_global_c_path_groups_of_stages stages in
     let base_for_git_c_paths = function

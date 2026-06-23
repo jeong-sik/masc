@@ -186,6 +186,17 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="log-viewer"]')).not.toBeNull()
   })
 
+  it('renders the theme switch inside the display section (moved out of the top bar)', () => {
+    route.value = { tab: 'settings', params: { section: 'display' }, postId: null }
+
+    render(html`<${SettingsSurface} />`, container)
+
+    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('표시')
+    const themeButton = [...container.querySelectorAll('button')]
+      .find(b => /DARK|STYLESEED|PAPER/.test(b.textContent ?? ''))
+    expect(themeButton).toBeTruthy()
+  })
+
   it('falls invalid settings sections back to account without a fake subsection', () => {
     expect(normalizeSettingsSection('not-real')).toBe('account')
     route.value = { tab: 'settings', params: { section: 'not-real' }, postId: null }

@@ -143,7 +143,11 @@ function runtimeStatusToneClass(statusLabel: string): string {
   return ''
 }
 
-export function RuntimeTomlEditor() {
+export interface RuntimeTomlEditorProps {
+  onClose?: () => void
+}
+
+export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const lineGutterRef = useRef<HTMLPreElement | null>(null)
   const [loadState, setLoadState] = useState<LoadState>('loading')
@@ -153,6 +157,18 @@ export function RuntimeTomlEditor() {
   const [notice, setNotice] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [section, setSection] = useState<RuntimeSectionId>('routing')
+
+  useEffect(() => {
+    if (!onClose) return undefined
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   const dirty = config !== null && draft !== config.source_text
 
@@ -378,146 +394,160 @@ export function RuntimeTomlEditor() {
     </div>
   `
 
+  const statusPill = html`
+    <span
+      class="rt-status ${runtimeStatusToneClass(statusLabel)}"
+      data-testid="runtime-toml-status"
+    >
+      ${statusLabel}
+    </span>
+  `
+
+  const headerActions = onClose
+    ? html`
+      <div class="rt-head-actions">
+        ${statusPill}
+        <button
+          type="button"
+          class="rt-close"
+          onClick=${onClose}
+          title="닫기 (Esc)"
+          data-testid="runtime-toml-close"
+        >${'✕'}</button>
+      </div>
+    `
+    : null
+
+  const body = loadState === 'loading'
+    ? html`
+      ${toolbar}
+      ${error ? html`<${ErrorState} message=${error} />` : null}
+      <${LoadingState}>runtime.toml 불러오는 중...<//>
+    `
+    : html`
+      <!-- rt-shell: 218px section-nav + fluid content (runtime-editor.jsx:110,
+           runtime.css:6). -->
+      <div class="rt-shell">
+        <nav class="rt-nav" aria-label="런타임 편집기 섹션">
+          <div class="rt-nav-h">
+            <div class="eyebrow">Operator</div>
+            <div class="rt-nav-title">런타임 편집기</div>
+            <div class="rt-nav-sub mono">config/runtime.toml</div>
+          </div>
+          ${RUNTIME_SECTIONS.map(s => html`
+            <button
+              key=${s.id}
+              type="button"
+              class="rt-nav-item ${section === s.id ? 'on' : ''}"
+              aria-pressed=${section === s.id}
+              data-testid=${`runtime-toml-nav-${s.id}`}
+              onClick=${() => setSection(s.id)}
+            >
+              <span class="rt-nav-gl mono">${s.glyph}</span><span>${s.label}</span>
+            </button>
+          `)}
+          <div class="rt-nav-foot mono">${runtimeCount} 런타임 · ${providerCount} 프로바이더</div>
+        </nav>
+
+        <div class="rt-content">
+          <header class="rt-head">
+            <h1 data-testid="runtime-toml-section-title">${runtimeSectionTitle(section)}</h1>
+            ${headerActions}
+          </header>
+
+          <div class="rt-body">
+            ${error ? html`<${ErrorState} message=${error} />` : null}
+            ${notice ? html`
+              <div
+                class="px-1 text-xs text-[var(--color-status-ok)]"
+                role="status"
+                data-testid="runtime-toml-notice"
+              >
+                ${notice}
+              </div>
+            ` : null}
+
+            <div class=${structuredActive ? '' : 'hidden'} data-testid="runtime-toml-structured">
+              <${RuntimeEnvironmentEditor}
+                sourceText=${draft}
+                section=${structuredSection}
+                dirty=${dirty}
+                disabled=${loadState !== 'loaded'}
+                saving=${saving}
+                onDraftChange=${(nextSourceText: string) => {
+                  setDraft(nextSourceText)
+                  setNotice(null)
+                }}
+                onSave=${(nextSourceText?: string) => {
+                  void handleSave(nextSourceText)
+                }}
+              />
+            </div>
+
+            <div class=${tomlActive ? 'flex flex-col gap-3' : 'hidden'} data-testid="runtime-toml-section">
+              ${toolbar}
+              <div class="rt-toml-wrap">
+                <div class="rt-toml-bar">
+                  <span class="mono">${path}</span>
+                  <span class="rt-toml-ro">직접 편집 가능 · 저장 시 라이브 적용</span>
+                  <button
+                    type="button"
+                    class="rt-copy"
+                    onClick=${handleCopySource}
+                    title="runtime.toml 복사"
+                    data-testid="runtime-toml-copy-source"
+                  >복사</button>
+                </div>
+                <div
+                  class="v2-monitoring-code-frame grid min-h-[32rem] max-h-[72vh] grid-cols-[3.5rem_minmax(0,1fr)] overflow-hidden rounded-[var(--r-1)] border border-[var(--input-border)] bg-[var(--input-bg)]"
+                  data-testid="runtime-toml-code-frame"
+                >
+                  <pre
+                    ref=${lineGutterRef}
+                    class="select-none overflow-hidden border-r border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-3 text-right font-mono text-xs leading-relaxed text-[var(--color-fg-disabled)]"
+                    aria-hidden="true"
+                    data-testid="runtime-toml-line-numbers"
+                  >${lineNumbers}</pre>
+                  <textarea
+                    ref=${textareaRef}
+                    class="min-h-[32rem] w-full resize-y overflow-auto border-0 bg-transparent px-3 py-3 font-mono text-xs leading-relaxed text-[var(--color-fg-primary)] outline-none ${editorFocusClasses}"
+                    aria-label="runtime.toml source"
+                    data-testid="runtime-toml-source"
+                    value=${draft}
+                    rows=${32}
+                    wrap="off"
+                    spellcheck=${false}
+                    autocapitalize="off"
+                    autocorrect="off"
+                    disabled=${saving}
+                    onInput=${handleEditorInput}
+                    onKeyDown=${handleEditorKeyDown}
+                    onScroll=${handleEditorScroll}
+                  ></textarea>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `
+
+  if (onClose) {
+    return html`
+      <div class="rt-overlay" data-testid="runtime-toml-editor" onClick=${onClose}>
+        ${body}
+      </div>
+    `
+  }
+
   return html`
     <${SectionCard}
       class="v2-monitoring-panel"
       label="runtime.toml"
       testId="runtime-toml-editor"
-      right=${html`
-        <!-- status pill — prototype rt-head status chrome (runtime-editor.jsx:129
-             .rt-save scale). is-modified/is-saved tone from runtime-editor-v2.css. -->
-        <span
-          class="rt-status ${runtimeStatusToneClass(statusLabel)}"
-          data-testid="runtime-toml-status"
-        >
-          ${statusLabel}
-        </span>
-      `}
+      right=${statusPill}
     >
-      ${loadState === 'loading'
-        ? html`
-          ${toolbar}
-          ${error ? html`<${ErrorState} message=${error} />` : null}
-          <${LoadingState}>runtime.toml 불러오는 중...<//>
-        `
-        : html`
-          <!-- rt-shell: 218px section-nav + fluid content (runtime-editor.jsx:110,
-               runtime.css:6). -->
-          <div class="rt-shell">
-            <nav class="rt-nav" aria-label="런타임 편집기 섹션">
-              <div class="rt-nav-h">
-                <div class="eyebrow">Operator</div>
-                <div class="rt-nav-title">런타임 편집기</div>
-                <div class="rt-nav-sub mono">config/runtime.toml</div>
-              </div>
-              ${RUNTIME_SECTIONS.map(s => html`
-                <button
-                  key=${s.id}
-                  type="button"
-                  class="rt-nav-item ${section === s.id ? 'on' : ''}"
-                  aria-pressed=${section === s.id}
-                  data-testid=${`runtime-toml-nav-${s.id}`}
-                  onClick=${() => setSection(s.id)}
-                >
-                  <span class="rt-nav-gl mono">${s.glyph}</span><span>${s.label}</span>
-                </button>
-              `)}
-              <div class="rt-nav-foot mono">${runtimeCount} 런타임 · ${providerCount} 프로바이더</div>
-            </nav>
-
-            <div class="rt-content">
-              <header class="rt-head">
-                <h1 data-testid="runtime-toml-section-title">${runtimeSectionTitle(section)}</h1>
-              </header>
-
-              <div class="rt-body">
-                ${error ? html`<${ErrorState} message=${error} />` : null}
-                ${notice ? html`
-                  <div
-                    class="px-1 text-xs text-[var(--color-status-ok)]"
-                    role="status"
-                    data-testid="runtime-toml-notice"
-                  >
-                    ${notice}
-                  </div>
-                ` : null}
-
-                <!-- structured editor — routing/providers/models/bindings/
-                     assignments (runtime-editor.jsx:135-231). Kept mounted; the
-                     nav toggles visibility so editor state survives section
-                     switches. -->
-                <div class=${structuredActive ? '' : 'hidden'} data-testid="runtime-toml-structured">
-                  <${RuntimeEnvironmentEditor}
-                    sourceText=${draft}
-                    section=${structuredSection}
-                    dirty=${dirty}
-                    disabled=${loadState !== 'loaded'}
-                    saving=${saving}
-                    onDraftChange=${(nextSourceText: string) => {
-                      setDraft(nextSourceText)
-                      setNotice(null)
-                    }}
-                    onSave=${(nextSourceText?: string) => {
-                      void handleSave(nextSourceText)
-                    }}
-                  />
-                </div>
-
-                <!-- toml section — prototype .rt-toml-wrap chrome
-                     (runtime-editor.jsx:233-242) around the working editable
-                     code-frame. The prototype preview is read-only; the live
-                     editor stays editable (intentional divergence — the toml
-                     section is the raw escape hatch), so the .rt-toml-bar note
-                     reads "직접 편집 가능" instead of "읽기 전용". The inner
-                     v2-monitoring-code-frame + line gutter + textarea are kept
-                     verbatim (data-testids the tests rely on). -->
-                <div class=${tomlActive ? 'flex flex-col gap-3' : 'hidden'} data-testid="runtime-toml-section">
-                  ${toolbar}
-                  <div class="rt-toml-wrap">
-                    <div class="rt-toml-bar">
-                      <span class="mono">${path}</span>
-                      <span class="rt-toml-ro">직접 편집 가능 · 저장 시 라이브 적용</span>
-                      <button
-                        type="button"
-                        class="rt-copy"
-                        onClick=${handleCopySource}
-                        title="runtime.toml 복사"
-                        data-testid="runtime-toml-copy-source"
-                      >복사</button>
-                    </div>
-                    <div
-                      class="v2-monitoring-code-frame grid min-h-[32rem] max-h-[72vh] grid-cols-[3.5rem_minmax(0,1fr)] overflow-hidden rounded-[var(--r-1)] border border-[var(--input-border)] bg-[var(--input-bg)]"
-                      data-testid="runtime-toml-code-frame"
-                    >
-                      <pre
-                        ref=${lineGutterRef}
-                        class="select-none overflow-hidden border-r border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-3 text-right font-mono text-xs leading-relaxed text-[var(--color-fg-disabled)]"
-                        aria-hidden="true"
-                        data-testid="runtime-toml-line-numbers"
-                      >${lineNumbers}</pre>
-                      <textarea
-                        ref=${textareaRef}
-                        class="min-h-[32rem] w-full resize-y overflow-auto border-0 bg-transparent px-3 py-3 font-mono text-xs leading-relaxed text-[var(--color-fg-primary)] outline-none ${editorFocusClasses}"
-                        aria-label="runtime.toml source"
-                        data-testid="runtime-toml-source"
-                        value=${draft}
-                        rows=${32}
-                        wrap="off"
-                        spellcheck=${false}
-                        autocapitalize="off"
-                        autocorrect="off"
-                        disabled=${saving}
-                        onInput=${handleEditorInput}
-                        onKeyDown=${handleEditorKeyDown}
-                        onScroll=${handleEditorScroll}
-                      ></textarea>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        `}
+      ${body}
     <//>
   `
 }

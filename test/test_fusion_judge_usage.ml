@@ -39,11 +39,61 @@ let test_attach_usage_on_parse_failure () =
       usage
   | Ok _ -> fail "expected Error with usage"
 
+let test_sum_error_usage_folds_all_failures () =
+  (* 적대 리뷰 #22093 all-fail: judge-of-judges 전원 실패 시 첫 에러의 usage만 전파하면
+     나머지 심판이 (병렬로) 태운 토큰을 잃어 비용을 undercount한다. sum_error_usage는
+     모든 Error usage를 합산하고 Ok는 무시함을 핀한다. *)
+  let u input_tokens output_tokens : Fusion_types.usage =
+    { Fusion_types.input_tokens; output_tokens }
+  in
+  let results =
+    [ ("j1", Error ("boom1", u 100 10))
+    ; ("j2", Ok (sample_synthesis, u 999 999)) (* Ok 원소는 무시되어야 함 *)
+    ; ("j3", Error ("boom3", u 25 5))
+    ]
+  in
+  check usage_t "sums every failed judge's usage and ignores Ok" (u 125 15)
+    (Fusion_types.sum_error_usage results)
+
+let test_sum_error_usage_empty_is_zero () =
+  check usage_t "no results -> zero usage" Fusion_types.zero_usage
+    (Fusion_types.sum_error_usage [])
+
+let test_sum_all_usage_folds_ok_and_error () =
+  (* 적대 리뷰 #22134 partial-fail: 1차 일부 성공/일부 실패 시 meta가 성공하면 *모든* 1차
+     심판이 태운 토큰(성공분 + 실패분)을 비용에 실어야 한다. sum_all_usage는 Ok와 Error를
+     모두 합산함을 핀한다 — sum_error_usage(실패분만, 위 테스트)와 대비된다. *)
+  let u input_tokens output_tokens : Fusion_types.usage =
+    { Fusion_types.input_tokens; output_tokens }
+  in
+  let results =
+    [ ("j1", Error ("boom1", u 100 10))
+    ; ("j2", Ok (sample_synthesis, u 999 999)) (* Ok도 합산되어야 함 *)
+    ; ("j3", Error ("boom3", u 25 5))
+    ]
+  in
+  check usage_t "sums every judge's usage, Ok and Error alike" (u 1124 1014)
+    (Fusion_types.sum_all_usage results)
+
+let test_sum_all_usage_empty_is_zero () =
+  check usage_t "no results -> zero usage" Fusion_types.zero_usage
+    (Fusion_types.sum_all_usage [])
+
 let () =
   run "fusion_judge_usage"
     [ ( "attach_usage"
       , [ test_case "success carries usage" `Quick test_attach_usage_on_success
         ; test_case "parse failure carries usage" `Quick
             test_attach_usage_on_parse_failure
+        ] )
+    ; ( "sum_error_usage"
+      , [ test_case "folds all failures, ignores Ok" `Quick
+            test_sum_error_usage_folds_all_failures
+        ; test_case "empty is zero" `Quick test_sum_error_usage_empty_is_zero
+        ] )
+    ; ( "sum_all_usage"
+      , [ test_case "folds Ok and Error usage alike" `Quick
+            test_sum_all_usage_folds_ok_and_error
+        ; test_case "empty is zero" `Quick test_sum_all_usage_empty_is_zero
         ] )
     ]

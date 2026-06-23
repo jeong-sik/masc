@@ -14,6 +14,28 @@ let add_usage a b =
   ; output_tokens = a.output_tokens + b.output_tokens
   }
 
+(* [Error] 분기의 usage를 모두 합산한다([Ok]는 무시). 전원 실패 같은 degrade 경로에서
+   첫 에러의 usage만 전파하면 나머지 심판이 태운 토큰을 undercount하므로(적대 리뷰
+   #22093 all-fail), 실패분 usage를 fold해 총 소비를 보존한다. *)
+let sum_error_usage results =
+  List.fold_left
+    (fun acc (_, r) ->
+      match r with
+      | Error (_, u) -> add_usage acc u
+      | Ok _ -> acc)
+    zero_usage results
+
+(* [Ok]·[Error] 양 분기의 usage를 모두 합산한다. 일부 성공/일부 실패한 fan-out(JOJ
+   1차 심판 등)이 태운 *모든* 토큰을 보존한다. [sum_error_usage](실패분만)와 의도가
+   구분된다 — 이쪽은 "실행된 전부", 저쪽은 "실패한 것만". 부분-실패 경로에서
+   성공분 fold + 실패분 fold를 따로 더하는 대신 한 번에 합산한다(적대 리뷰 #22134). *)
+let sum_all_usage results =
+  List.fold_left
+    (fun acc (_, r) ->
+      match r with
+      | Ok (_, u) | Error (_, u) -> add_usage acc u)
+    zero_usage results
+
 module Fusion_depth = struct
   type t =
     | Top

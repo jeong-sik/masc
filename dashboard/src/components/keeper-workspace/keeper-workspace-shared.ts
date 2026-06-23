@@ -95,6 +95,20 @@ const ERROR_STATUS_TOKENS = new Set(['failing', 'overflowed', 'crashed', 'dead',
 /** Transient / attention phases that warrant a warn (amber) dot. */
 const WARN_STATUS_TOKENS = new Set(['paused', 'compacting', 'handoff', 'draining', 'restarting'])
 
+/** Canonical lower-cased phase token, preferring the FSM lifecycle_phase and
+ *  falling back to the legacy phase field. Used whenever logic (rather than
+ *  display text) needs a normalized phase. */
+export function keeperPhaseToken(keeper: Keeper): string {
+  return (keeper.lifecycle_phase ?? keeper.phase ?? '').toLowerCase()
+}
+
+/** True for phases the backend treats as terminal/unrecoverable. Kept in the
+ *  same SSOT module as ERROR_STATUS_TOKENS so roster / rail / chat do not
+ *  re-implement this with inline literal comparisons. */
+export function isTerminalPhase(keeper: Keeper): boolean {
+  return ERROR_STATUS_TOKENS.has(keeperPhaseToken(keeper))
+}
+
 /** Health tone for the status dot + header pill.
  *
  *  Distinct from keeperBucket, which only groups running/paused/offline for

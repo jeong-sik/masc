@@ -481,9 +481,6 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
             </button>
             <${KeeperWorkspaceChat}
               keeper=${keeper}
-              detailOpen=${false}
-              onToggleDetail=${() => setDetailOpen(true)}
-              onClear=${() => setClearDialogOpen(true)}
               mobile=${isMobile}
               onBack=${() => {
                 keeperMobilePane.value = 'roster'
@@ -492,6 +489,7 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
               onOpenConfig=${() => {
                 openKeeperConfig()
               }}
+              onOpenDetail=${() => setDetailOpen(true)}
             />
             <button
               type="button"
@@ -505,7 +503,7 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
                 ? html`<${ChevronRight} size=${14} aria-hidden="true" />`
                 : html`<${ChevronLeft} size=${14} aria-hidden="true" />`}
             </button>
-            ${!isMobile && railOpen ? html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => setDetailOpen(true)} />` : null}
+            ${!isMobile && railOpen ? html`<${KeeperWorkspaceRail} keeper=${keeper} />` : null}
             ${isMobile && mobileRailOpen
               ? html`
                   <div
@@ -525,10 +523,7 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
                           onClick=${() => setMobileRailOpen(false)}
                         >닫기</button>
                       </div>
-                      <${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {
-                        setMobileRailOpen(false)
-                        setDetailOpen(true)
-                      }} />
+                      <${KeeperWorkspaceRail} keeper=${keeper} />
                     </div>
                   </div>
                 `

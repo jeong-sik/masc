@@ -1269,7 +1269,7 @@
   color: var(--text-mid); font-size: 18px; cursor: pointer; transition: 0.14s;
 }
 .chat-ovf:hover { border-color: var(--volt-dim); color: var(--volt); }
-.chat-ovf:active { transform: translateY(1px); }
+.chat-ovf:active { transform: none; }
 .chat-ovf-menu {
   position: absolute; top: 42px; right: 0; z-index: 80; min-width: 188px; padding: 5px;
   background: var(--bg-panel); border: 1px solid var(--border-highlight);
@@ -1331,7 +1331,7 @@
   background: var(--bg-card); border: 1px solid var(--border-main);
   color: var(--text-mid); font-size: 16px; cursor: pointer; transition: 0.14s;
 }
-.chat-back:active, .chat-ctx-btn:active { transform: translateY(1px); }
+.chat-back:active, .chat-ctx-btn:active { transform: none; }
 .chat-ctx-btn { margin-left: auto; }
 .chat-back:hover, .chat-ctx-btn:hover { border-color: var(--volt-dim); color: var(--volt); }
 

@@ -179,6 +179,7 @@ export interface SSEEvent {
   after_tokens?: number
   saved_tokens?: number
   trigger?: string
+  runtime?: string
   reason?: string
   // Keeper phase transition fields
   prev_phase?: string

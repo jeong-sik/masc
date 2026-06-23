@@ -43,6 +43,7 @@ let base_policy : Fusion_policy.t =
           ; judge = "a"
           ; judge_system_prompt = "judge"
           ; judge_timeout_s = 300.0
+          ; judges = []
           }
       ]
   }
@@ -581,12 +582,13 @@ let test_config_disabled_with_preset () =
    목표 결함 하나만 두고 나머지는 유효하게 해, 검증 순서(size→prompt→judge→dup→mtc)에서
    그 변형이 발화하는지 확인한다. private 타입이라 외부는 of_preset로만 t를 만든다. *)
 let mk_preset ?(panels = [ base_group ]) ?(judge = "j") ?(judge_prompt = "synthesize")
-    (name : string) : Fusion_policy.preset =
+    ?(judges = []) (name : string) : Fusion_policy.preset =
   { Fusion_policy.name
   ; panels
   ; judge
   ; judge_system_prompt = judge_prompt
   ; judge_timeout_s = 300.0
+  ; judges
   }
 
 let test_validated_ok () =
@@ -631,6 +633,129 @@ let test_validated_bad_max_tool_calls () =
   | Error (Fusion_policy.Validated_preset.Bad_max_tool_calls v) ->
     Alcotest.(check int) "over-ceiling value reported" 17 v
   | _ -> Alcotest.fail "expected Bad_max_tool_calls over ceiling"
+
+(* --- JOJ 1차 심판 목록 검증 (RFC-0283) --- *)
+
+let base_judge : Fusion_policy.judge_spec =
+  { Fusion_policy.jmodel = "jm"
+  ; jlabel = ""
+  ; jsystem_prompt = "lens"
+  ; jweb_tools = false
+  ; jmax_tool_calls = 0
+  ; jtimeout_s = 300.0
+  }
+
+(* judges=[]면 (simple/refine/conditional preset) 기존과 동일하게 유효 = byte-identity. *)
+let test_validated_judges_empty_ok () =
+  match Fusion_policy.Validated_preset.of_preset (mk_preset ~judges:[] "je") with
+  | Ok _ -> ()
+  | Error _ -> Alcotest.fail "empty judges must stay valid (simple/refine/conditional)"
+
+(* 두 1차 심판이 같은 lens(다른 model)면 통과; 같은 정체성이면 Duplicate_judge. *)
+let test_validated_judges_ok () =
+  let j m = { base_judge with Fusion_policy.jmodel = m } in
+  match Fusion_policy.Validated_preset.of_preset (mk_preset ~judges:[ j "a"; j "b" ] "jok") with
+  | Ok _ -> ()
+  | Error _ -> Alcotest.fail "distinct judge models must validate"
+
+let test_validated_judge_prompt_missing () =
+  let no_lens = { base_judge with Fusion_policy.jsystem_prompt = "" } in
+  match
+    Fusion_policy.Validated_preset.of_preset (mk_preset ~judges:[ base_judge; no_lens ] "jnp")
+  with
+  | Error Fusion_policy.Validated_preset.Judge_panel_prompt_missing -> ()
+  | _ -> Alcotest.fail "expected Judge_panel_prompt_missing for empty judge lens"
+
+let test_validated_duplicate_judge () =
+  let j m = { base_judge with Fusion_policy.jmodel = m } in
+  match
+    Fusion_policy.Validated_preset.of_preset (mk_preset ~judges:[ j "x"; j "x" ] "jdup")
+  with
+  | Error (Fusion_policy.Validated_preset.Duplicate_judge "x") -> ()
+  | _ -> Alcotest.fail "expected Duplicate_judge x for same judge identity"
+
+let test_validated_judge_bad_max_tool_calls () =
+  let over =
+    { base_judge with
+      Fusion_policy.jmax_tool_calls = Fusion_policy.max_tool_calls_ceiling + 1
+    }
+  in
+  (* 단일 over-ceiling judge — panel-side test_validated_bad_max_tool_calls(~panels:[ over ])와
+     대칭. base_judge를 더하면 jmodel="jm" 정체성이 겹쳐 Duplicate_judge가 먼저 발동하므로,
+     max_tool_calls 검사에 도달하려면 정체성 충돌이 없어야 한다. judges는 of_preset 레벨에서
+     최소 개수 요구가 없다(JOJ <2 에러는 orchestrator 런타임 책임). *)
+  match Fusion_policy.Validated_preset.of_preset (mk_preset ~judges:[ over ] "jmtc") with
+  | Error (Fusion_policy.Validated_preset.Bad_max_tool_calls 17) -> ()
+  | _ -> Alcotest.fail "expected Bad_max_tool_calls 17 for over-ceiling judge"
+
+(* --- JOJ 1차 심판 TOML 파싱 (RFC-0283). parse_judge_spec + finish_preset의
+       [[...judges]] array-of-tables 리더를 end-to-end로 검증한다. 위 of_preset
+       검증 테스트는 OCaml record를 직접 구성해 config 레이어를 우회하므로, TOML 키
+       이름(model/label/system_prompt/web_tools/max_tool_calls/timeout_s)과 getter
+       매핑은 이 테스트만 커버한다 — 잘못된 키/getter는 여기서만 잡힌다. panel
+       sub-table에는 동형 golden(test_config_panels_golden 등)이 있으나 judge에는
+       없었다. --- *)
+let judges_toml =
+  {|
+[fusion]
+enabled = true
+default_preset = "joj"
+[fusion.presets.joj]
+judge = "meta-model"
+judge_system_prompt = "reconcile"
+[[fusion.presets.joj.panels]]
+panel = ["p1", "p2"]
+panel_system_prompt = "answer"
+[[fusion.presets.joj.judges]]
+model = "judge-a"
+label = "strict"
+system_prompt = "lens A"
+web_tools = true
+max_tool_calls = 3
+timeout_s = 222.0
+[[fusion.presets.joj.judges]]
+model = "judge-b"
+label = "lenient"
+system_prompt = "lens B"
+|}
+
+let test_config_judges_parse () =
+  match Fusion_config.of_toml (parse judges_toml) with
+  | Ok p ->
+    (match p.Fusion_policy.presets with
+     | [ vp ] ->
+       (match (raw vp).Fusion_policy.judges with
+        | [ ja; jb ] ->
+          (* judge-a: 6개 키를 모두 distinct 값으로 채워 키↔getter 매핑을 핀한다. *)
+          Alcotest.(check string) "ja model" "judge-a" ja.Fusion_policy.jmodel;
+          Alcotest.(check string) "ja label" "strict" ja.Fusion_policy.jlabel;
+          Alcotest.(check string) "ja prompt" "lens A" ja.Fusion_policy.jsystem_prompt;
+          Alcotest.(check bool) "ja web" true ja.Fusion_policy.jweb_tools;
+          Alcotest.(check int) "ja tool budget" 3 ja.Fusion_policy.jmax_tool_calls;
+          Alcotest.(check (float 0.001)) "ja timeout" 222.0 ja.Fusion_policy.jtimeout_s;
+          (* judge-b: 누락 키는 find_or default 경로 (web=false / budget=0 / timeout=default). *)
+          Alcotest.(check string) "jb model" "judge-b" jb.Fusion_policy.jmodel;
+          Alcotest.(check string) "jb prompt" "lens B" jb.Fusion_policy.jsystem_prompt;
+          Alcotest.(check bool) "jb web default" false jb.Fusion_policy.jweb_tools;
+          Alcotest.(check int) "jb budget default" 0 jb.Fusion_policy.jmax_tool_calls;
+          Alcotest.(check (float 0.001)) "jb timeout default"
+            Fusion_policy.default_timeout_s jb.Fusion_policy.jtimeout_s
+        | _ -> Alcotest.fail "expected exactly two parsed judges")
+     | _ -> Alcotest.fail "expected exactly one preset")
+  | Error es ->
+    Alcotest.failf "expected Ok, got errors: %s"
+      (String.concat ", " (List.map Fusion_config.show_config_error es))
+
+(* judges sub-table 없는 preset → preset.judges = [] (단일 심판 위상 config). *)
+let test_config_no_judges () =
+  match Fusion_config.of_toml (parse golden_single_group_toml) with
+  | Ok p ->
+    (match p.Fusion_policy.presets with
+     | [ vp ] ->
+       Alcotest.(check int) "no judges sub-table = empty list" 0
+         (List.length (raw vp).Fusion_policy.judges)
+     | _ -> Alcotest.fail "expected one preset")
+  | Error _ -> Alcotest.fail "golden must parse Ok"
 
 (* --- execution-axis byte-identity: judge args + outer timeout derivations
        (RFC-0252-A §4.4, fixes adversarial findings 1.1/1.2/1.3). A single
@@ -780,13 +905,13 @@ let test_topology_unknown_is_none () =
         (Printf.sprintf "unknown %S -> None" s)
         true
         (Option.is_none (fusion_topology_of_string s)))
-    [ ""; "Simple"; "REFINE"; "judge_of_judges"; "bogus"; " simple" ]
+    [ ""; "Simple"; "REFINE"; "Judge_of_judges"; "joj"; "bogus"; " simple" ]
 
 (* wire vocabulary 핀 — 도구 스키마 허용값/에러 메시지가 이 목록에서 파생된다. *)
 let test_topology_strings () =
   Alcotest.(check (list string))
     "all topology wire strings"
-    [ "simple"; "refine"; "conditional" ]
+    [ "simple"; "refine"; "conditional"; "judge_of_judges" ]
     all_fusion_topology_strings
 
 (* Conditional 에스컬레이트 정책 — 닫힌 합 전수 값-핀. Insufficient만 escalate. *)
@@ -924,6 +1049,8 @@ let () =
             test_config_invalid_max_tool_calls
         ; Alcotest.test_case "empty_default_preset" `Quick test_config_empty_default_preset
         ; Alcotest.test_case "disabled_with_preset" `Quick test_config_disabled_with_preset
+        ; Alcotest.test_case "judges_parse" `Quick test_config_judges_parse
+        ; Alcotest.test_case "no_judges" `Quick test_config_no_judges
         ] )
     ; ( "validated_preset"
       , [ Alcotest.test_case "ok" `Quick test_validated_ok
@@ -932,6 +1059,12 @@ let () =
         ; Alcotest.test_case "missing_judge" `Quick test_validated_missing_judge
         ; Alcotest.test_case "duplicate_panelist" `Quick test_validated_duplicate_panelist
         ; Alcotest.test_case "bad_max_tool_calls" `Quick test_validated_bad_max_tool_calls
+        ; Alcotest.test_case "judges_empty_ok" `Quick test_validated_judges_empty_ok
+        ; Alcotest.test_case "judges_ok" `Quick test_validated_judges_ok
+        ; Alcotest.test_case "judge_prompt_missing" `Quick test_validated_judge_prompt_missing
+        ; Alcotest.test_case "duplicate_judge" `Quick test_validated_duplicate_judge
+        ; Alcotest.test_case "judge_bad_max_tool_calls" `Quick
+            test_validated_judge_bad_max_tool_calls
         ] )
     ; ( "judge_args"
       , [ Alcotest.test_case "single_group_identity" `Quick

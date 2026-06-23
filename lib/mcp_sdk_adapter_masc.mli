@@ -1,12 +1,12 @@
-(** Mcp_sdk_adapter_masc — narrow adapter between MASC's local
-    {!Mcp_server} surface and the MCP protocol SDK
-    ({!Mcp_protocol_eio.Handler} / {!Mcp_protocol.Mcp_types}).
+(** Mcp_sdk_adapter_masc — narrow adapter for the SDK-owned slice of
+    the MCP JSON-RPC surface.
 
-    Three external entries — the rest of the module is internal
-    glue (yojson parsers, schema converters, handler builder) that
-    has no caller outside this file.  The narrow surface is
-    deliberate: SDK / MASC type bridging stays here so the protocol
-    layer stays clean. *)
+    Two external entries — {!handles_method} and {!dispatch_request} —
+    cover the methods the SDK adapter answers directly (currently only
+    ["ping"]).  Every other method falls through to the MASC-native
+    handler.  The narrow surface is deliberate: the protocol router
+    asks {!handles_method} first and only delegates the small SDK-owned
+    set here. *)
 
 val handles_method : string -> bool
 (** [handles_method m] is [true] iff the SDK adapter dispatches

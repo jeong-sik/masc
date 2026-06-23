@@ -1,5 +1,5 @@
 ---
-rfc: "0287"
+rfc: "0289"
 title: "Closed SSE event-type sum + typed broadcast — RFC-0004 Phase A0 Wave 2 increment"
 status: Draft
 created: 2026-06-23
@@ -11,7 +11,7 @@ related: ["0004", "0284", "0042"]
 implementation_prs: []
 ---
 
-# RFC-0287: Closed SSE event-type sum + typed broadcast
+# RFC-0289: Closed SSE event-type sum + typed broadcast
 
 Status: Draft · The SSE wire `type` discriminator is stringly-typed across ~34
 backend emit sites. The frontend parity gate only inventories exact-match

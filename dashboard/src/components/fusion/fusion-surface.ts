@@ -21,7 +21,11 @@ import {
   firstNumber,
   normalizeFusionPanel,
   normalizeFusionUsage,
+  normalizeFusionJudgeNodes,
+  classifyFusionJudgeShape,
   type FusionPanelEntry,
+  type FusionJudgeNode,
+  type FusionJudgeShape,
 } from '../../lib/fusion-meta'
 
 type FusionRunStatus = 'complete' | 'failed' | 'running'
@@ -95,6 +99,7 @@ interface FusionRunView {
   tone: FusionTone
   panel: FusionPanelEntry[]
   judge: FusionJudge
+  judges: FusionJudgeNode[]
   usage: FusionUsage
   createdAt: string
   updatedAt: string
@@ -292,6 +297,7 @@ function fusionRunFromPost(post: BoardPost): FusionRunView | null {
 
   const panel = normalizeFusionPanel(meta.panel)
   const judge = normalizeJudge(meta.judge)
+  const judges = normalizeFusionJudgeNodes(meta.judges)
   const usage = normalizeUsage(meta, panel)
   const runId = firstString(meta, ['run_id', 'runId', 'id']) ?? post.id
   const question = firstString(meta, ['question', 'prompt']) ?? post.body ?? post.content ?? post.title
@@ -308,6 +314,7 @@ function fusionRunFromPost(post: BoardPost): FusionRunView | null {
     tone,
     panel,
     judge,
+    judges,
     usage,
     createdAt: post.created_at,
     updatedAt: post.updated_at || post.created_at,
@@ -410,6 +417,87 @@ function FusionKeeperLink({ keeper, size = 'sm' }: { keeper: string; size?: 'sm'
       <${AgentAvatar} name=${keeper} size=${size} />
       <span class="nm">${keeper}</span>
     </button>
+  `
+}
+
+// Display label for a shape classification (i18n lives in the component layer;
+// `classifyFusionJudgeShape` stays language-free in lib/fusion-meta).
+const JUDGE_SHAPE_LABEL: Record<FusionJudgeShape, string> = {
+  single: '단일 심판',
+  refine: '재검토',
+  'judge-of-judges': '심판의 심판',
+  custom: '심판 위상',
+}
+
+// Korean badge for a backend judge role. Unknown roles fall through to the raw
+// string so a new backend role still renders (the enum is closed on the backend,
+// so this is defensive rather than expected).
+function judgeRoleLabel(role: string): string {
+  switch (role) {
+    case 'first':
+      return '1차'
+    case 'meta':
+      return '메타'
+    case 'refine':
+      return '재검토'
+    case 'single':
+      return '단일'
+    default:
+      return role
+  }
+}
+
+// Per-node combined token figure (`Nk tok` / `N tok`), em-dash when no usage.
+function judgeNodeTokenLabel(node: FusionJudgeNode): string {
+  const total = (node.inputTokens ?? 0) + (node.outputTokens ?? 0)
+  if (total <= 0) return '—'
+  return total >= 1000 ? `${(total / 1000).toFixed(1)}k tok` : `${total} tok`
+}
+
+// A meaningful node identity, or null. The backend only carries a real model id
+// for `first` nodes (the panelist_id); single/refine/meta echo their role string
+// as the identity (fusion_sink.ml judge_role_fields), which is redundant with the
+// role badge, so suppress it rather than print the role twice.
+function judgeNodeIdentity(node: FusionJudgeNode): string | null {
+  return node.identity && node.identity !== node.role ? node.identity : null
+}
+
+// RFC-0284 PR 2: render the observed judge nodes as a structural strip so the
+// execution topology (JoJ = N 1차 + 메타, refine = 2, simple = 1) is visible
+// instead of collapsing into the single canonical judge. Topology is read from
+// the array shape alone; the canonical synthesis below is unchanged. Renders
+// nothing for older board posts that predate the `judges` array.
+export function FusionJudgesStrip({ nodes }: { nodes: readonly FusionJudgeNode[] }) {
+  if (nodes.length === 0) return null
+  const shape = classifyFusionJudgeShape(nodes)
+  return html`
+    <div class="fus-block">
+      <div class="fus-block-lbl">
+        심판 위상 · ${JUDGE_SHAPE_LABEL[shape]}
+        <span class="fus-sub-note">관측된 심판 노드 ${nodes.length}개 · RFC-0284</span>
+      </div>
+      <ul class="fus-judges" data-testid="fusion-judges" role="list">
+        ${nodes.map(
+          (node, index) => html`
+            <li
+              class=${`fus-judge-node ${node.failed ? 'failed' : 'ok'}`}
+              key=${`${node.role}-${node.identity}-${index}`}
+              data-role=${node.role}
+              data-failed=${node.failed ? 'true' : 'false'}
+            >
+              <span class="fus-jn-role">${judgeRoleLabel(node.role)}</span>
+              <span class="fus-jn-id mono" title=${judgeNodeIdentity(node) ?? ''}>
+                ${judgeNodeIdentity(node) ?? ''}
+              </span>
+              <span class="fus-jn-tok">${judgeNodeTokenLabel(node)}</span>
+              ${node.failed
+                ? html`<span class="fus-jn-status deny" title=${node.error ?? 'failed'}>✗ 실패</span>`
+                : html`<span class="fus-jn-status done">✓</span>`}
+            </li>
+          `,
+        )}
+      </ul>
+    </div>
   `
 }
 
@@ -700,6 +788,8 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
           ? html`<div class="fus-judge-wait">패널 응답이 기록되지 않았습니다.</div>`
           : html`<div class="fus-panel-grid">${run.panel.map(entry => html`<${FusionPanelCard} key=${entry.model} entry=${entry} />`)}</div>`}
       </div>
+
+      <${FusionJudgesStrip} nodes=${run.judges} />
 
       ${run.status === 'running'
         ? html`

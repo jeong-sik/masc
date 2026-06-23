@@ -1,10 +1,12 @@
 // @ts-nocheck
 import { describe, expect, it } from 'vitest'
 import {
+  classifyFusionJudgeShape,
   extractFusionEvidence,
   firstNumber,
   firstString,
   normalizeFusionJudge,
+  normalizeFusionJudgeNodes,
   normalizeFusionPanel,
   normalizeFusionPanelReason,
   normalizeFusionUsage,
@@ -207,5 +209,66 @@ describe('extractFusionEvidence', () => {
     })
     expect(evidence).not.toBeNull()
     expect(evidence?.source).toBe('fusion')
+  })
+})
+
+describe('normalizeFusionJudgeNodes', () => {
+  it('returns [] for a non-array', () => {
+    expect(normalizeFusionJudgeNodes(undefined)).toEqual([])
+    expect(normalizeFusionJudgeNodes({})).toEqual([])
+    expect(normalizeFusionJudgeNodes(null)).toEqual([])
+  })
+
+  it('parses Synthesized and Judge_failed nodes (status:"failed" marks failure)', () => {
+    const nodes = normalizeFusionJudgeNodes([
+      { role: 'first', identity: 'gpt-4o', input_tokens: 100, output_tokens: 10 },
+      { role: 'first', identity: 'gemini', status: 'failed', error: 'timeout', input_tokens: 5, output_tokens: 0 },
+      { role: 'meta', identity: 'o1', input_tokens: 2000, output_tokens: 418 },
+    ])
+    expect(nodes).toEqual([
+      { role: 'first', identity: 'gpt-4o', failed: false, error: undefined, inputTokens: 100, outputTokens: 10 },
+      { role: 'first', identity: 'gemini', failed: true, error: 'timeout', inputTokens: 5, outputTokens: 0 },
+      { role: 'meta', identity: 'o1', failed: false, error: undefined, inputTokens: 2000, outputTokens: 418 },
+    ])
+  })
+
+  it('drops non-record elements and defaults a missing role/identity', () => {
+    const nodes = normalizeFusionJudgeNodes([null, 'x', { input_tokens: 1 }])
+    expect(nodes).toHaveLength(1)
+    expect(nodes[0].role).toBe('judge')
+    expect(nodes[0].identity).toBe('judge-3')
+  })
+})
+
+describe('classifyFusionJudgeShape', () => {
+  // role values match fusion_sink.ml judge_role_fields: single | refine | first | meta.
+  const node = role => ({ role, identity: 'm', failed: false })
+
+  it('a lone single node -> single', () => {
+    expect(classifyFusionJudgeShape([node('single')])).toBe('single')
+  })
+
+  it('Single + Refine_pass (refine/conditional 2nd judge) -> refine', () => {
+    expect(classifyFusionJudgeShape([node('single'), node('refine')])).toBe('refine')
+  })
+
+  it('N first-judges + a meta -> judge-of-judges', () => {
+    expect(classifyFusionJudgeShape([node('first'), node('first'), node('meta')])).toBe(
+      'judge-of-judges',
+    )
+  })
+
+  it('all-fail JoJ (first-judges, no meta) -> judge-of-judges, not refine', () => {
+    // `first` is JoJ-exclusive on the backend, so two first-judges with no meta
+    // (every first judge failed → meta never ran) must not be read as refine.
+    expect(classifyFusionJudgeShape([node('first'), node('first')])).toBe('judge-of-judges')
+    expect(classifyFusionJudgeShape([node('first'), node('first'), node('first')])).toBe(
+      'judge-of-judges',
+    )
+  })
+
+  it('an unanticipated shape -> custom (still renders structurally)', () => {
+    expect(classifyFusionJudgeShape([])).toBe('custom')
+    expect(classifyFusionJudgeShape([node('single'), node('single')])).toBe('custom')
   })
 })

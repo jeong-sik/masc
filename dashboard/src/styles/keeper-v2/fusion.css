@@ -165,6 +165,18 @@
 
 .fus-judge-wait { display: flex; align-items: center; gap: 9px; font-size: 12px; color: var(--text-dim); padding: 14px 16px; background: var(--bg-panel); border: 1px dashed var(--border-main); border-radius: var(--radius-md); }
 
+/* ── RFC-0284 PR 2: observed judge-node strip (1차/메타 토폴로지 가시화) ── */
+.fus-judges { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.fus-judge-node { display: flex; align-items: center; gap: 10px; padding: 7px 11px; background: var(--bg-card); border: 1px solid var(--border-main); border-radius: var(--radius-sm); font-size: 11.5px; }
+.fus-judge-node.failed { border-color: color-mix(in oklab, var(--status-bad) 45%, transparent); background: color-mix(in oklab, var(--status-bad) 7%, transparent); }
+.fus-jn-role { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; padding: 2px 7px; border-radius: var(--radius-sm); border: 1px solid var(--volt-dim); color: var(--volt-strong); white-space: nowrap; }
+.fus-judge-node.failed .fus-jn-role { border-color: color-mix(in oklab, var(--status-bad) 40%, transparent); color: var(--status-bad); }
+.fus-jn-id { color: var(--text-mid); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
+.fus-jn-tok { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); white-space: nowrap; }
+.fus-jn-status { font-size: 11px; white-space: nowrap; }
+.fus-jn-status.done { color: var(--status-ok); }
+.fus-jn-status.deny { color: var(--status-bad); }
+
 /* ── resolved + decision ── */
 .fus-resolved { border: 1px solid var(--border-main); border-radius: var(--radius-md); padding: 16px 18px; margin-bottom: 20px; background: var(--bg-panel); }
 .fus-resolved.dec-ok   { border-color: color-mix(in oklab, var(--status-ok) 32%, var(--border-main)); background: linear-gradient(120deg, color-mix(in oklab, var(--status-ok) 6%, var(--bg-panel)), var(--bg-panel) 55%); }

@@ -1,8 +1,14 @@
 (** Manifest append helpers for [Keeper_unified_turn].
 
     Extracted from [run_keeper_cycle] so the orchestrator does not own
-    manifest-construction details. All functions are pure state transformers
-    on the immutable [Keeper_unified_turn_types.turn_state] accumulator.
+    manifest-construction details. These functions perform best-effort manifest
+    append I/O ([Keeper_runtime_manifest.append_best_effort]). When
+    [clock_refs] is omitted they also read the monotonic clock
+    ([Mtime_clock.now]) for elapsed-time clock refs and return a new
+    [turn_state] whose [manifest_seq] is incremented; when [clock_refs] is
+    supplied explicitly the provided refs are used and [manifest_seq] is left
+    unchanged. The [Keeper_unified_turn_types.turn_state] is threaded
+    immutably in both cases.
 
     @since God file decomposition *)
 

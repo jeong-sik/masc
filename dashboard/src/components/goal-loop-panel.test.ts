@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/pr
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GoalLoopPanel } from './goal-loop-panel'
 import { normalizeGoalLoopStatus } from '../goal-loop-status'
+import { goalLoopStatusData } from '../goal-loop-state'
 
 const mocks = vi.hoisted(() => ({
   callMcpTool: vi.fn(),
@@ -96,6 +97,21 @@ describe('GoalLoopPanel', () => {
     mocks.fetchDashboardGoalsTree.mockReset()
     mocks.hydrateGoalTreeSnapshot.mockReset()
     mocks.navigate.mockReset()
+    // RFC-0284: the panel now reads a module-global signal; reset it so a
+    // pushed/refreshed status in one test cannot leak into the next.
+    goalLoopStatusData.value = null
+  })
+
+  it('renders a pushed goal-loop snapshot from the store without a mount fetch', () => {
+    // RFC-0284 §6 FE: a snapshot already in the store renders with no
+    // initialStatus prop and triggers no HTTP fetch (push, not poll).
+    goalLoopStatusData.value = blockedStatus()
+
+    render(html`<${GoalLoopPanel} />`)
+
+    expect(screen.getByTestId('goal-loop-panel')).toBeTruthy()
+    expect(screen.getByTestId('goal-loop-next-action').textContent).toContain('D-EMERGENCY-2')
+    expect(mocks.fetchGoalLoopStatus).not.toHaveBeenCalled()
   })
 
   it('renders phase table, audit, and next action', () => {

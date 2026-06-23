@@ -54,7 +54,13 @@ type contribution =
 (* RFC-0259 §3.2(b): a volatile (external-ref) claim is per-keeper status, not
    durable cross-keeper knowledge — exclude it from promotion so it cannot be
    resurrected as an immortal shared fact (the #21363 shape). *)
-let eligible fact = is_promotable fact.category && Option.is_none fact.external_ref
+(* RFC-0285 §3.5: a [Self_observation] is transient keeper-local self-state, never
+   cross-keeper knowledge — gate it here (the single promotion SSOT) rather than
+   widening [is_promotable]'s exhaustive category signature. *)
+let eligible fact =
+  is_promotable fact.category
+  && Option.is_none fact.external_ref
+  && fact.claim_kind <> Some Self_observation
 
 (* Pick the representative fact for a claim group by a structural total order:
    earliest first_seen, then lexically smallest claim, then keeper id — so
@@ -95,6 +101,10 @@ let consolidate_into_shared ~now ~min_keepers contribs =
         { claim = rep.fact.claim
         ; category = rep.fact.category
         ; external_ref = rep.fact.external_ref
+          (* RFC-0285 §3.5: carry the representative's tag (parallel to [claim_id]).
+             [eligible] already drops [Self_observation], so a promoted shared fact is
+             never self-observation; this preserves [External_state]/[None] verbatim. *)
+        ; claim_kind = rep.fact.claim_kind
         ; source = rep.fact.source
         ; observed_by = keepers
         ; first_seen =
@@ -103,7 +113,12 @@ let consolidate_into_shared ~now ~min_keepers contribs =
              backstop — [eligible] already excludes external-ref claims, so this is
              [None] for promotable facts, but a volatile claim could never become an
              immortal shared fact even if that filter regressed. *)
-        ; valid_until = fact_valid_until ~now ~external_ref:rep.fact.external_ref rep.fact.category
+        ; valid_until =
+            fact_valid_until
+              ~now
+              ~external_ref:rep.fact.external_ref
+              ~claim_kind:rep.fact.claim_kind
+              rep.fact.category
           (* The consolidation IS the verification of the shared fact. *)
         ; last_verified_at = Some now
         ; schema_version

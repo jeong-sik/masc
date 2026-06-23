@@ -220,18 +220,27 @@ let max_optional_float values =
     values
 ;;
 
-let valid_until_for_group ~now ~external_ref ~members category =
-  match external_ref with
-  (* RFC-0259 §3.2(b): a referenced claim is volatile regardless of category. *)
-  | Some _ -> Some (now +. volatile_external_ttl_seconds)
-  | None ->
-    (match category with
-     | Ephemeral ->
-       (match min_optional_float (List.map (fun (m : fact) -> m.valid_until) members) with
-        | Some _ as valid_until -> valid_until
-        | None -> category_valid_until ~now category)
-     | Fact | Constraint | Preference | Blocker | Goal | Code_change
-     | Validated_approach | Lesson | Unknown _ -> category_valid_until ~now category)
+let valid_until_for_group ~now ~external_ref ~claim_kind ~members category =
+  match claim_kind with
+  (* RFC-0285 §3.3/§4 re-mint property: a self-observation group inherits the
+     earliest member's horizon so a reworded re-mint does NOT extend it past the
+     first-mint anchor; only when no member carried one does it get a fresh horizon. *)
+  | Some Self_observation ->
+    (match min_optional_float (List.map (fun (m : fact) -> m.valid_until) members) with
+     | Some _ as valid_until -> valid_until
+     | None -> Some (now +. self_observation_ttl_seconds))
+  | Some External_state | Some Durable_knowledge | None ->
+    (match external_ref with
+     (* RFC-0259 §3.2(b): a referenced claim is volatile regardless of category. *)
+     | Some _ -> Some (now +. volatile_external_ttl_seconds)
+     | None ->
+       (match category with
+        | Ephemeral ->
+          (match min_optional_float (List.map (fun (m : fact) -> m.valid_until) members) with
+           | Some _ as valid_until -> valid_until
+           | None -> category_valid_until ~now category)
+        | Fact | Constraint | Preference | Blocker | Goal | Code_change
+        | Validated_approach | Lesson | Unknown _ -> category_valid_until ~now category))
 ;;
 
 let last_verified_for_members members =
@@ -276,10 +285,19 @@ let consolidated_fact ~now ~members (group : merge_group) =
   { claim = group.consolidated_claim
   ; category = group.category
   ; external_ref
+    (* RFC-0285 §3.1: carry the earliest member's tag; a group shares one claim
+       identity, so its members share a claim_kind. *)
+  ; claim_kind = earliest.claim_kind
   ; source = earliest.source
   ; observed_by
   ; first_seen
-  ; valid_until = valid_until_for_group ~now ~external_ref ~members group.category
+  ; valid_until =
+      valid_until_for_group
+        ~now
+        ~external_ref
+        ~claim_kind:earliest.claim_kind
+        ~members
+        group.category
   ; last_verified_at = last_verified_for_members members
   ; schema_version
   ; claim_id = shared_claim_id_for_members members

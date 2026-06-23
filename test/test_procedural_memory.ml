@@ -113,6 +113,7 @@ let memory_fact ?(category = M.Validated_approach) ?(trace_id = "trace-1") ?(tur
     claim;
     category;
     external_ref = None;
+    claim_kind = None;
     source;
     observed_by = [];
     first_seen = 0.0;

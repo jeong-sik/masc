@@ -39,7 +39,10 @@ describe('App v2 header chrome', () => {
     const app = container.querySelector('.v2-app')
     expect(app).not.toBeNull()
     expect(app?.hasAttribute('data-theme')).toBe(false)
-    expect(app?.getAttribute('data-density')).toBe('regular')
+    // density boots at 'spacious' to match the keeper-v2 prototype SSOT
+    // (tweaksDensity defaultValue, aligned to the prototype in main 5230b5fa).
+    // Users switch to 'regular'/'compact' via the Tweaks panel.
+    expect(app?.getAttribute('data-density')).toBe('spacious')
     expect(app?.getAttribute('data-motion')).toBe('subtle')
     expect(app?.getAttribute('data-bubble')).toBe('card')
     expect(app?.hasAttribute('data-surface')).toBe(true)

@@ -620,12 +620,20 @@ function handleEvent(event: SSEEvent): void {
         typeof event.before_tokens === 'number' && Number.isFinite(event.before_tokens)
           ? event.before_tokens
           : null
-      const afterTokCompaction =
-        typeof event.after_tokens === 'number' && Number.isFinite(event.after_tokens)
-          ? event.after_tokens
-          : typeof event.saved_tokens === 'number' && Number.isFinite(event.saved_tokens) && beforeTokCompaction != null
-            ? Math.max(0, beforeTokCompaction - event.saved_tokens)
-            : null
+      // Three-step fallback for the post-compaction token count: prefer the
+      // reported after_tokens, else derive it from saved_tokens relative to the
+      // known before count, else leave it unknown. Written as if/else (not a
+      // nested ternary) to satisfy no-nested-ternary and keep the priority clear.
+      let afterTokCompaction: number | null = null
+      if (typeof event.after_tokens === 'number' && Number.isFinite(event.after_tokens)) {
+        afterTokCompaction = event.after_tokens
+      } else if (
+        typeof event.saved_tokens === 'number'
+        && Number.isFinite(event.saved_tokens)
+        && beforeTokCompaction != null
+      ) {
+        afterTokCompaction = Math.max(0, beforeTokCompaction - event.saved_tokens)
+      }
       recordSseCompaction(
         keeperNameCompaction,
         beforeTokCompaction,

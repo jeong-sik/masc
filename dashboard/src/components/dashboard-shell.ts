@@ -574,6 +574,11 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
   })
   const configured = runtimeCounts.configured.keepers
   const liveKeepers = runtimeCounts.live.keepers
+  // Scope note (#22110): the agent-roster surface dropped the count-source label
+  // from its always-visible operational copy. Here the same label feeds the
+  // keeper-count-basis chip's `detail` tooltip (hover-only, diagnostic) below —
+  // an on-demand explanation of where the running count comes from, which is the
+  // actionable detail that review kept. Retained intentionally, not an oversight.
   const runningCountSource = input.counts !== null
     ? 'shell'
     : input.keepers.length > 0

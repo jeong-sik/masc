@@ -140,3 +140,24 @@ unfixed ~15–16 ms loaded p95, both RED). The dominant main-domain cost under l
 serialization + gzip of the payload, which stays on main even on a cache hit; offloading only the
 parse attacks a minor cost. See the revert commit for the full A/B. This is the gate doing its job:
 falsifying a fix before it shipped.
+
+## Structural levers tested (gated by this harness, M3 Max 16-core)
+
+Three candidate fixes for the starvation were tested **with the harness before writing any
+production code**, varying a knob and measuring rather than guessing. Two were refuted; one is a
+partial mitigation.
+
+| lever | how tested | result |
+|---|---|---|
+| **Offload `turn-records` compute** (cache + `submit_io_or_inline`) | two-binary A/B, real data | **refuted** — fixed ≈ unfixed, both RED (the parse is not the dominant cost) |
+| **Reserve scheduler cores** (fewer worker domains) | sweep `MASC_EXECUTOR_DOMAIN_COUNT` ∈ {2,4,8,15} under 48 inproc + 15 hogs | **refuted (noise)** — a first sweep showed 15→8 halving amp (110×→43×), but an interleaved repeat found 15 ≈ 8 (amp 72–92× both); variance swamps the effect. Idle/blocked worker domains do not hold cores away from the main thread, so cutting them frees nothing |
+| **OS priority / QoS** (deprioritize competing load) | one server, hogs at `nice 0` vs `nice 19`, 48 inproc both | **partial** — `nice 19` hogs cut amp 46× → 32× (~31%), but `/health` is still 120 ms (RED). The residual comes from the 48 normal-priority inproc requests, which QoS cannot touch |
+
+**Conclusion the harness points to:** the dominant, irreducible axis is **serving concurrency
+serialized on the single main Eio domain** — host contention (QoS-mitigable, ~31%) and the
+offloadable parse (negligible) are secondary. The only lever that addresses the dominant axis is
+architectural: **RFC-0204 Phase 3 — a dedicated serving domain** so N concurrent requests are
+handled off the main domain, leaving it for keepers + the scheduler. That is a large change
+constrained by RFC-0059 (keepers are pinned to the main domain; only *serving* may move) and should
+go through an RFC, validated by the Mode B keeper-load gate once its sustained-load refinements land.
+launchd `ProcessType=Interactive` is a worthwhile but partial deployment-side mitigation.

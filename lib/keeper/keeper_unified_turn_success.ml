@@ -134,6 +134,45 @@ let delivery_requires_evidence = function
   | User_facing | Task_claim -> false
 ;;
 
+(* RFC-0239 / audit D1·D3: the no-progress verdict reads the typed
+   determinism-boundary outcome ([Keeper_tool_outcome]) recorded on each tool
+   call, not just the tool name. A completion/execution call that typed a
+   failure is not evidence; a claim that typed [No_progress] did not bind work,
+   so the [Task_claim] exemption must not apply to it. A [None] typed outcome
+   keeps the legacy name-based behavior: this only DEMOTES on an explicit typed
+   failure / no-progress signal, never promotes, so tools that do not emit a
+   typed outcome are never newly flagged as no-progress. *)
+let typed_outcome_is_nonprogress (outcome : Keeper_tool_outcome.t option) =
+  match outcome with
+  | Some (Keeper_tool_outcome.No_progress _ | Keeper_tool_outcome.Error _) -> true
+  | Some Keeper_tool_outcome.Progress | None -> false
+;;
+
+(* Outcome-aware substantive evidence: an execution/completion tool whose typed
+   outcome is not a failure. Mirrors [Keeper_unified_metrics.has_substantive_tool_calls]
+   (name-only) but drops calls the typed channel marked errored / no-progress. *)
+let has_substantive_tool_calls_with_outcome
+      (calls : (string * Keeper_tool_outcome.t option) list) =
+  List.exists
+    (fun (name, outcome) ->
+       Keeper_tool_progress.is_execution_progress_tool_name name
+       && not (typed_outcome_is_nonprogress outcome))
+    calls
+;;
+
+(* A [Task_claim] turn is exempt from evidence only when a claim actually bound
+   work. A claim that typed [No_progress] (No_eligible_tasks / No_work_available
+   / Resource_conflict) did not bind work and must accrue the no-progress streak
+   (the sangsu claim-idle loop, PR #21065 diagnosis). An untyped claim ([None])
+   stays exempt for back-compat. *)
+let claim_bound_work (calls : (string * Keeper_tool_outcome.t option) list) =
+  List.exists
+    (fun (name, outcome) ->
+       Keeper_tool_progress.is_claim_context_tool_name name
+       && not (typed_outcome_is_nonprogress outcome))
+    calls
+;;
+
 let apply_loop_detectors ~config ~observation updated_meta result =
   (* RFC-0239 §3 R3 / RFC-0276 §3.2: feed the loop detector a semantic
      no-progress verdict derived from observed turn facts, not the LLM
@@ -143,12 +182,23 @@ let apply_loop_detectors ~config ~observation updated_meta result =
      evidence accrues the streak. The retired self-report "stay silent" reset
      the streak whenever a keeper *posted* its "nothing to do" conclusion, so a
      cluster that thrashed by re-posting never tripped the detector. *)
+  let calls_with_outcomes =
+    List.map
+      (fun (d : Keeper_agent_result.tool_call_detail) ->
+         d.tool_name, d.typed_outcome)
+      result.Keeper_agent_run.tool_calls
+  in
   let strong_evidence =
-    KUM.has_substantive_tool_calls (Keeper_agent_result.tool_names result)
+    has_substantive_tool_calls_with_outcome calls_with_outcomes
     || Option.is_some (KUM.visible_run_validation result)
   in
+  (* [Task_claim] is exempt only when a claim bound work; a claim that typed
+     [No_progress] (e.g. No_eligible_tasks) now requires evidence and so accrues
+     the streak. Other surfaces keep the exhaustive name-based mapping. *)
   let surface_requires_evidence =
-    delivery_requires_evidence (classify_turn_delivery result)
+    match classify_turn_delivery result with
+    | Task_claim -> not (claim_bound_work calls_with_outcomes)
+    | (Peer_only | User_facing) as delivery -> delivery_requires_evidence delivery
   in
   let made_progress =
     Keeper_no_progress_loop_detector.turn_made_progress
@@ -196,6 +246,8 @@ module For_testing = struct
 
   let classify_delivery = classify_delivery
   let delivery_requires_evidence = delivery_requires_evidence
+  let has_substantive_tool_calls_with_outcome = has_substantive_tool_calls_with_outcome
+  let claim_bound_work = claim_bound_work
 end
 
 let append_metrics_snapshot

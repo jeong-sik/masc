@@ -28,6 +28,18 @@ module For_testing : sig
     -> turn_delivery
 
   val delivery_requires_evidence : turn_delivery -> bool
+
+  (** Outcome-aware substantive evidence (audit D1): an execution/completion
+      tool whose typed outcome is not a failure. A [None] typed outcome keeps
+      the legacy name-based behavior. *)
+  val has_substantive_tool_calls_with_outcome
+    : (string * Keeper_tool_outcome.t option) list -> bool
+
+  (** Did a claim-context call bind work (audit D3)? [Progress]/[None] => yes;
+      a typed [No_progress]/[Error] claim did not bind work, so a [Task_claim]
+      turn is no longer exempt from the no-progress streak. *)
+  val claim_bound_work
+    : (string * Keeper_tool_outcome.t option) list -> bool
 end
 
 val handle

@@ -52,6 +52,12 @@ HOG_LEVELS="${HOG_LEVELS:-$DEFAULT_LEVELS}"
 # approximates the "busy" axis without a live keeper fleet.
 INPROC_LOAD="${INPROC_LOAD:-0}"
 LOAD_ENDPOINT="${LOAD_ENDPOINT:-/api/v1/dashboard/execution}"
+# Production browsers send Accept-Encoding, so the server runs its serialize+compress
+# path (Response.json -> compress_body). Bare curl sends no Accept-Encoding, so
+# compress_body short-circuits (accepts_zstd_header=false) and the harness underweights
+# the main-domain response-finalisation cost this gate exists to measure. Send it by
+# default to match production; set LOAD_ACCEPT_ENCODING="" to restore the bare-curl path.
+LOAD_ACCEPT_ENCODING="${LOAD_ACCEPT_ENCODING:-zstd}"
 
 # Attach mode: if BASE_URL is given, probe an already-running server (e.g. the live runtime)
 # instead of booting an ephemeral one. Booting is the default and is fully self-contained.
@@ -136,7 +142,7 @@ spawn_inproc_load() {
   local n="$1" url="$2" i
   INPROC_PIDS=()
   for ((i = 0; i < n; i++)); do
-    ( while true; do curl -sS -o /dev/null --max-time 5 "$url" 2>/dev/null || true; done ) &
+    ( while true; do curl -sS -o /dev/null ${LOAD_ACCEPT_ENCODING:+-H Accept-Encoding:$LOAD_ACCEPT_ENCODING} --max-time 5 "$url" 2>/dev/null || true; done ) &
     INPROC_PIDS+=("$!")
     disown 2>/dev/null || true   # stop job-control tracking so kill is quiet
   done
@@ -187,7 +193,9 @@ measure_level() {
 
 # ---- server -----------------------------------------------------------------
 if [[ -z "$BASE_URL" ]]; then
-  SERVER_EXE="$(harness_find_server_exe "$REPO_ROOT")" || {
+  # MASC_HARNESS_SERVER_EXE pins a specific binary (e.g. an A/B-saved exe) so two
+  # builds can be compared without overwriting _build between runs.
+  SERVER_EXE="$(harness_find_server_exe "$REPO_ROOT" "${MASC_HARNESS_SERVER_EXE:-}")" || {
     echo "ERROR: no server executable; build ./bin/main_eio.exe first" >&2; exit 1; }
   PORT="${PORT:-$(harness_pick_free_port)}"
   BASE_PATH="$(harness_mktemp_dir "masc-starvation-base")"

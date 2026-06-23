@@ -21,6 +21,7 @@ import { kSlot, kSigil } from '../keeper-badge'
 import { SigilBadge, Dot } from '../v2/primitives-v2'
 import { phaseTone, phasePulse } from '../v2/keeper-fsm'
 import {
+  isTerminalPhase,
   keeperBucket,
   keeperPhaseLabel,
   keeperRuntimeLabel,
@@ -43,11 +44,11 @@ type RosterFleetSummary = {
 }
 
 const LIFECYCLE_COPY: Record<KeeperActionKey, { label: string; title: string; glyph: string; danger?: boolean }> = {
-  pause: { label: '일시정지', title: '일시정지: 실행 중인 keeper 를 일시 멈춥니다', glyph: '⏸' },
-  resume: { label: '재개', title: '재개: 일시정지된 keeper 를 다시 실행합니다', glyph: '▶' },
-  wakeup: { label: '깨우기', title: '깨우기: 다음 turn 을 즉시 시도합니다', glyph: '◉' },
-  boot: { label: '기동', title: '기동: offline keeper 를 다시 시작합니다', glyph: '▶' },
-  shutdown: { label: '종료', title: '종료: keeper 를 완전 종료합니다', glyph: '■', danger: true },
+  pause: { label: '일시정지', title: '일시정지: 실행 중인 keeper 를 일시 멈춥니다', glyph: '\u23F8\uFE0E' },
+  resume: { label: '재개', title: '재개: 일시정지된 keeper 를 다시 실행합니다', glyph: '\u25B6\uFE0E' },
+  wakeup: { label: '깨우기', title: '깨우기: 다음 turn 을 즉시 시도합니다', glyph: '\u25C9' },
+  boot: { label: '기동', title: '기동: offline keeper 를 다시 시작합니다', glyph: '\u25B6\uFE0E' },
+  shutdown: { label: '종료', title: '종료: keeper 를 완전 종료합니다', glyph: '\u25A0', danger: true },
 }
 const MENU_WIDTH = 190
 const MENU_ESTIMATED_HEIGHT = 246
@@ -155,6 +156,7 @@ function RosterRow({
   const handleTitle = basepath || keeperScope(keeper) || ''
   const activity = keeperActivityDisplay(keeper)
   const activityTime = formatHHMM(activity.timestamp)
+  const activityLabel = activityTime ?? (activity.source !== 'none' ? activity.label : null)
   const select = () => onSelect(keeper.name)
   return html`
     <div
@@ -180,7 +182,7 @@ function RosterRow({
         </div>
       </div>
       <div class="kp-right">
-        ${activityTime ? html`<span class="kp-time" title=${activity.label}>${activityTime}</span>` : null}
+        ${activityLabel ? html`<span class="kp-time" title=${activity.label}>${activityLabel}</span>` : null}
         ${att > 0 ? html`<span class="kp-att" title=${`주의 ${att}건 — 컨텍스트 레일에서 확인`}>${att}</span>` : null}
       </div>
       <button
@@ -191,7 +193,7 @@ function RosterRow({
         onClick=${(event: MouseEvent) => onMenu(keeper, event)}
         data-testid=${`kw-roster-menu-${keeper.name}`}
       >
-        <span aria-hidden="true">⋯</span>
+        <span aria-hidden="true">${'\u22EF'}</span>
       </button>
     </div>
   `
@@ -298,11 +300,11 @@ function KeeperRosterMenu({
         `
       })}
       ${actions.length === 0
-        ? html`<div class="kp-menu-note">${(keeper.lifecycle_phase ?? keeper.phase ?? '').toLowerCase() === 'dead' ? '복구 불가 — 명령 없음' : '전이 중 — 잠시 후'}</div>`
+        ? html`<div class="kp-menu-note">${isTerminalPhase(keeper) ? '복구 불가 — 명령 없음' : '전이 중 — 잠시 후'}</div>`
         : null}
       <div class="kp-menu-sep"></div>
       <button type="button" role="menuitem" class="kp-menu-i" onClick=${openConfig} data-testid="kw-roster-menu-config">
-        <span aria-hidden="true">⚙</span>
+        <span aria-hidden="true">${'\u2699\uFE0E'}</span>
         <span>keeper 설정</span>
       </button>
     </div>

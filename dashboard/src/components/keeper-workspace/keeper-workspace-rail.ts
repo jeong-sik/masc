@@ -12,7 +12,7 @@ import type { VNode } from 'preact'
 import { shellAuthSummary, tasks } from '../../store'
 import type { Keeper, Task } from '../../types'
 import { navigate } from '../../router'
-import { keeperBucket, keeperModelLabel, keeperRuntimeLabel } from './keeper-workspace-shared'
+import { keeperBucket, keeperModelLabel, keeperPhaseToken, keeperRuntimeLabel } from './keeper-workspace-shared'
 import { CountBadge } from '../v2/primitives-v2'
 import { callMcpTool } from '../../api/mcp'
 import { showToast } from '../common/toast'
@@ -233,7 +233,7 @@ function compactionGatePct(keeper: Keeper): number {
 }
 
 function compactRequiresForce(keeper: Keeper): boolean {
-  const phase = (keeper.phase ?? keeper.lifecycle_phase ?? '').toLowerCase()
+  const phase = keeperPhaseToken(keeper)
   if (phase === 'overflowed' || phase === 'paused' || phase === 'compacting') return false
   if (phase === 'running' || phase === 'failing') return true
   const status = keeper.status.toLowerCase()

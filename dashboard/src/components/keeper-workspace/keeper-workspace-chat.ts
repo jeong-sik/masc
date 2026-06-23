@@ -40,27 +40,27 @@ const LIFECYCLE_COPY: Record<
   pause: {
     label: '일시정지',
     title: '일시정지: 실행 중인 keeper 를 일시 멈춥니다',
-    glyph: '⏸',
+    glyph: '\u23F8\uFE0E',
   },
   resume: {
     label: '재개',
     title: '재개: 일시정지된 keeper 를 다시 실행합니다',
-    glyph: '▶',
+    glyph: '\u25B6\uFE0E',
   },
   wakeup: {
     label: '깨우기',
     title: '깨우기: 다음 turn 을 즉시 시도합니다',
-    glyph: '◉',
+    glyph: '\u25C9',
   },
   boot: {
     label: '기동',
     title: '기동: offline keeper 를 다시 시작합니다',
-    glyph: '▶',
+    glyph: '\u25B6\uFE0E',
   },
   shutdown: {
     label: '종료',
     title: '종료: keeper 를 완전 종료합니다',
-    glyph: '■',
+    glyph: '\u25A0',
     danger: true,
   },
 }
@@ -112,7 +112,7 @@ function WorkspaceCommandButtons({
     id: 'config',
     label: 'keeper 설정',
     title: 'keeper 설정',
-    glyph: '⚙',
+    glyph: '\u2699\uFE0E',
     onClick: onOpenConfig ?? (() => {}),
   }
   const lifecycle = lifecycleCommands(keeper)
@@ -200,7 +200,7 @@ function WorkspaceCommandButtons({
         onClick=${() => { void run(config) }}
         data-testid="kw-chat-command-config"
       >
-        <span aria-hidden="true">⚙</span>
+        <span aria-hidden="true">${'\u2699\uFE0E'}</span>
       </button>
     </div>
   `

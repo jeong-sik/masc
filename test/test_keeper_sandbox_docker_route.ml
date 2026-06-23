@@ -1448,7 +1448,11 @@ let test_sandbox_root_git_cwd_zero_repo_blocks_before_exec () =
   | Some msg ->
     Alcotest.(check bool) "mentions no sandbox clones" true
       (contains_substring msg "no sandbox git clones");
-    Alcotest.(check bool) "mentions clone recovery" true
+    (* RFC-0284: the recovery must name the real Execute affordance, not a
+       phantom "visible clone tool" (no such tool exists in any keeper surface). *)
+    Alcotest.(check bool) "names the real Execute affordance" true
+      (contains_substring msg "Execute");
+    Alcotest.(check bool) "does not point at a non-existent clone tool" false
       (contains_substring msg "visible clone tool");
     Alcotest.(check bool) "mentions cwd recovery" true
       (contains_substring msg "cwd=\"repos/<repo>\"")
@@ -1465,6 +1469,40 @@ let test_sandbox_root_git_explicit_repos_target_keeps_cwd () =
     None
     error;
   Alcotest.(check string) "cwd stays sandbox root" playground cwd
+
+(* RFC-0284 §4.1 regression seam: a schema-allowed recovery message must not
+   instruct the keeper to call a tool that resolves to no dispatchable surface.
+   The historical defect named "the visible clone tool" — a capability with no
+   tool. A new recovery branch that points at a phantom "<capability> tool"
+   re-trips this assertion instead of reaching a keeper. *)
+let recovery_mentions_phantom_tool msg =
+  (* A phantom is an imperative to CALL a tool that does not exist. An honest
+     negation ("there is no clone tool") is allowed; "with/use the <X> tool" —
+     instructing a call to a non-dispatchable tool — is not. *)
+  List.exists
+    (fun phantom -> contains_substring msg phantom)
+    [ "visible clone tool"
+    ; "with the clone tool"
+    ; "use the clone tool"
+    ; "with the provisioning tool"
+    ; "use the provisioning tool"
+    ]
+
+let test_sandbox_root_recovery_names_no_phantom_tool () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let _cwd, error =
+    resolve_sandbox_root_git_cwd_string ~config ~meta
+      ~cwd:playground ~cmd:"git status"
+  in
+  match error with
+  | None -> Alcotest.fail "expected missing repo guidance"
+  | Some msg ->
+    Alcotest.(check bool)
+      "recovery does not reference a non-dispatchable phantom tool" false
+      (recovery_mentions_phantom_tool msg);
+    Alcotest.(check bool) "recovery names the real Execute affordance" true
+      (contains_substring msg "Execute")
 
 let test_sandbox_root_git_cwd_single_repo_auto_chdir () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -2321,6 +2359,9 @@ let () =
           Alcotest.test_case
             "sandbox-root git with explicit repos target keeps cwd"
             `Quick test_sandbox_root_git_explicit_repos_target_keeps_cwd;
+          Alcotest.test_case
+            "sandbox-root recovery names no phantom tool (RFC-0284)"
+            `Quick test_sandbox_root_recovery_names_no_phantom_tool;
           Alcotest.test_case
             "sandbox-root git with one repo auto-selects cwd"
             `Quick test_sandbox_root_git_cwd_single_repo_auto_chdir;

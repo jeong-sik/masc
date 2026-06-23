@@ -160,54 +160,6 @@ let api_error_terminal_reason_code (err : Agent_sdk.Error.api_error) : string =
   | Agent_sdk.Retry.Timeout _ -> Keeper_terminal_reason.wire_api_error_timeout
 ;;
 
-let provider_error_terminal_reason_code
-    (err : Agent_sdk.Error.provider_error)
-  : string
-  =
-  match err with
-  | Llm_provider.Error.MissingApiKey _ -> "provider_error_missing_api_key"
-  | Llm_provider.Error.InvalidConfig { field; _ } ->
-    Printf.sprintf "provider_error_invalid_config:%s" field
-  | Llm_provider.Error.ParseError _ -> "provider_error_parse"
-  | Llm_provider.Error.UnknownVariant { type_name; value } ->
-    Printf.sprintf "provider_error_unknown_variant:%s:%s" type_name value
-  | Llm_provider.Error.ProviderUnavailable { provider; _ } ->
-    Printf.sprintf "provider_error_unavailable:%s" provider
-  | Llm_provider.Error.RateLimit { provider; _ } ->
-    Printf.sprintf "provider_error_rate_limited:%s" provider
-  | Llm_provider.Error.HardQuota { provider; _ } ->
-    Printf.sprintf "provider_error_hard_quota:%s" provider
-  | Llm_provider.Error.CapacityExhausted { scope; _ } ->
-    Printf.sprintf
-      "provider_error_capacity_backpressure:%s"
-      (Llm_provider.Error.capacity_scope_to_string scope)
-  | Llm_provider.Error.AuthError { provider; _ } ->
-    Printf.sprintf "provider_error_auth:%s" provider
-  | Llm_provider.Error.ServerError { provider; code; _ } ->
-    Printf.sprintf "provider_error_server:%s:%d" provider code
-  | Llm_provider.Error.NetworkError { provider; kind; _ } ->
-    Printf.sprintf
-      "provider_error_network:%s:%s"
-      provider
-      (match kind with
-       | Llm_provider.Http_client.Connection_refused -> "connection_refused"
-       | Llm_provider.Http_client.Dns_failure -> "dns_failure"
-       | Llm_provider.Http_client.Tls_error -> "tls_error"
-       | Llm_provider.Http_client.Timeout -> "timeout"
-       | Llm_provider.Http_client.Local_resource_exhaustion ->
-         "local_resource_exhaustion"
-       | Llm_provider.Http_client.End_of_file -> "end_of_file"
-       | Llm_provider.Http_client.Unknown -> "unknown")
-  | Llm_provider.Error.Timeout { provider; _ } ->
-    Printf.sprintf "provider_error_timeout:%s" provider
-  | Llm_provider.Error.InvalidRequest { provider; _ } ->
-    Printf.sprintf "provider_error_invalid_request:%s" provider
-  | Llm_provider.Error.NotFound { provider; _ } ->
-    Printf.sprintf "provider_error_not_found:%s" provider
-  | Llm_provider.Error.ProviderTerminal { provider; reason; _ } ->
-    Printf.sprintf "provider_error_terminal:%s:%s" provider reason
-;;
-
 (* Per-variant terminal_reason_code for Agent_sdk.Error.Agent.
    Previously every Agent failure collapsed to "agent_error", mirroring
    the old Api behaviour. Memory: no-collapse-richer-enum-at-sdk-boundary. *)

@@ -499,110 +499,92 @@ let handle_keeper_get_subroutes state req request reqd =
         |> max 1 |> min trajectory_max_limit
       in
       let config = (Mcp_server.workspace_config state) in
-      (* RFC-0204 Phase 0: this turn-records read (Dated_jsonl directory scan +
-         per-row Yojson decode + consecutive-pair block diff + memory_os/
-         user_model file reads) previously ran inline on the calling fiber's
-         main Eio domain, uncached, fanned out per keeper. Under serving
-         concurrency that synchronous head-of-line work starves the single
-         serving domain (scheduler_starvation_gate.sh reproduces it). Mirror the
-         sibling /tool-stats handler above and PRs #19088 / #19097: cache +
-         offload, with the key including every input that changes the result. *)
-      let cache_key =
-        Printf.sprintf "keeper:turn-records:%s:%s:%d"
-          (Workspace.masc_root_dir config) name limit
+      let store = Keeper_types_support.keeper_turn_record_store config name in
+      let raw_rows = Dated_jsonl.read_recent store limit in
+      (* Strict decode: malformed rows are counted and reported, never
+         repaired or silently dropped (RFC-0233 §4). *)
+      let records_rev, skipped_rows =
+        List.fold_left
+          (fun (acc, skipped) json ->
+            match Turn_record.of_json json with
+            | Ok record -> (record :: acc, skipped)
+            | Error _ -> (acc, skipped + 1))
+          ([], 0) raw_rows
       in
-      let json =
-        Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
-          Domain_pool_ref.submit_io_or_inline (fun () ->
-            let store =
-              Keeper_types_support.keeper_turn_record_store config name
-            in
-            let raw_rows = Dated_jsonl.read_recent store limit in
-            (* Strict decode: malformed rows are counted and reported, never
-               repaired or silently dropped (RFC-0233 §4). *)
-            let records_rev, skipped_rows =
-              List.fold_left
-                (fun (acc, skipped) json ->
-                  match Turn_record.of_json json with
-                  | Ok record -> (record :: acc, skipped)
-                  | Error _ -> (acc, skipped + 1))
-                ([], 0) raw_rows
-            in
-            let records = List.rev records_rev in
-            let block_json = Turn_record.prompt_block_to_json in
-            let entries =
-              Turn_record.entries_with_diffs records
-              |> List.map (fun ((record : Turn_record.t), diff) ->
-                   let diff_vs_prev =
-                     match diff with
-                     | Some (d : Turn_record.block_diff) ->
-                       `Assoc
-                         [ ("added", `List (List.map block_json d.added))
-                         ; ("removed", `List (List.map block_json d.removed))
-                         ; ( "changed"
-                           , `List
-                               (List.map
-                                  (fun (prev_b, next_b) ->
-                                    `Assoc
-                                      [ ("prev", block_json prev_b)
-                                      ; ("next", block_json next_b)
-                                      ])
-                                  d.changed) )
-                         ]
-                     | None -> `Null
-                   in
-                   `Assoc
-                     [ ("record", Turn_record.to_json record)
-                     ; ("diff_vs_prev", diff_vs_prev)
-                     ])
-            in
-            let latest_ts =
-              List.fold_left
-                (fun acc (r : Turn_record.t) ->
-                  match acc with
-                  | Some existing when existing >= r.ts -> acc
-                  | _ -> Some r.ts)
-                None records
-            in
-            let latest_age_s =
-              match latest_ts with
-              | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
-              | None -> None
-            in
-            let health, stale_reason =
-              match latest_age_s with
-              | None -> ("empty", "no_entries")
-              | Some age when age > freshness_slo_s ->
-                  ("stale", "freshness_slo_exceeded")
-              | Some _ -> ("ok", "")
-            in
-            `Assoc [
-              ("keeper", `String name);
-              ("count", `Int (List.length records));
-              ("skipped_rows", `Int skipped_rows);
-              ("source", `String "turn_record");
-              ("producer", `String "keeper_agent_run.run_turn|keeper_turn_record_writer");
-              ( "durable_store",
-                `String
-                  (Filename.concat
-                     (Workspace.masc_root_dir config)
-                     (Printf.sprintf "keepers/%s/turn-records" name)) );
-              ("dashboard_surface", `String "/api/v1/keepers/:name/turn-records");
-              ("freshness_slo_s", `Float freshness_slo_s);
-              ("latest_ts_unix", Json_util.float_opt_to_json latest_ts);
-              ( "latest_ts_iso",
-                match latest_ts with
-                | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
-                | None -> `Null );
-              ("latest_age_s", Json_util.float_opt_to_json latest_age_s);
-              ("health", `String health);
-              ( "stale_reason",
-                if stale_reason = "" then `Null else `String stale_reason );
-              ("memory_os", memory_os_dashboard_json ~keeper_id:name);
-              ("user_model", user_model_dashboard_json ~keeper_id:name);
-              ("entries", `List entries);
-            ]))
+      let records = List.rev records_rev in
+      let block_json = Turn_record.prompt_block_to_json in
+      let entries =
+        Turn_record.entries_with_diffs records
+        |> List.map (fun ((record : Turn_record.t), diff) ->
+             let diff_vs_prev =
+               match diff with
+               | Some (d : Turn_record.block_diff) ->
+                 `Assoc
+                   [ ("added", `List (List.map block_json d.added))
+                   ; ("removed", `List (List.map block_json d.removed))
+                   ; ( "changed"
+                     , `List
+                         (List.map
+                            (fun (prev_b, next_b) ->
+                              `Assoc
+                                [ ("prev", block_json prev_b)
+                                ; ("next", block_json next_b)
+                                ])
+                            d.changed) )
+                   ]
+               | None -> `Null
+             in
+             `Assoc
+               [ ("record", Turn_record.to_json record)
+               ; ("diff_vs_prev", diff_vs_prev)
+               ])
       in
+      let latest_ts =
+        List.fold_left
+          (fun acc (r : Turn_record.t) ->
+            match acc with
+            | Some existing when existing >= r.ts -> acc
+            | _ -> Some r.ts)
+          None records
+      in
+      let latest_age_s =
+        match latest_ts with
+        | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
+        | None -> None
+      in
+      let health, stale_reason =
+        match latest_age_s with
+        | None -> ("empty", "no_entries")
+        | Some age when age > freshness_slo_s ->
+            ("stale", "freshness_slo_exceeded")
+        | Some _ -> ("ok", "")
+      in
+      let json = `Assoc [
+        ("keeper", `String name);
+        ("count", `Int (List.length records));
+        ("skipped_rows", `Int skipped_rows);
+        ("source", `String "turn_record");
+        ("producer", `String "keeper_agent_run.run_turn|keeper_turn_record_writer");
+        ( "durable_store",
+          `String
+            (Filename.concat
+               (Workspace.masc_root_dir config)
+               (Printf.sprintf "keepers/%s/turn-records" name)) );
+        ("dashboard_surface", `String "/api/v1/keepers/:name/turn-records");
+        ("freshness_slo_s", `Float freshness_slo_s);
+        ("latest_ts_unix", Json_util.float_opt_to_json latest_ts);
+        ( "latest_ts_iso",
+          match latest_ts with
+          | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
+          | None -> `Null );
+        ("latest_age_s", Json_util.float_opt_to_json latest_age_s);
+        ("health", `String health);
+        ( "stale_reason",
+          if stale_reason = "" then `Null else `String stale_reason );
+        ("memory_os", memory_os_dashboard_json ~keeper_id:name);
+        ("user_model", user_model_dashboard_json ~keeper_id:name);
+        ("entries", `List entries);
+      ] in
       Http.Response.json_value ~compress:true ~request:req json reqd
   else if ends_with "/turn-transcript" then
     (* RFC-0233 §7: serve one keeper turn's operator request + keeper

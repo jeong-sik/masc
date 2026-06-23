@@ -74,15 +74,72 @@ against a live runtime (see below).
 
 Re-run the same command after a fix; the amplification should drop below `MAX_AMP`.
 
-## Limitations / next iteration
+## Keeper-load injection (WIP — provider mock done, autoboot wiring pending)
 
-- **No live keepers in boot mode.** The faithful keeper-vs-serving reproduction (RFC-0204 §5
-  keeper-burst isolation) needs real keeper compute. Two paths: (a) `--base-url` against the live
-  MASC where the 24 keepers are actually running, then add host hogs; (b) extend the harness to
-  `MASC_AUTONOMY_ENABLED=1` + seeded keeper configs + a mock streaming provider. Path (b) is the
-  committed-CI form and is the documented next step.
+`mock_openai_provider.py` is a network-free OpenAI-compatible provider for driving real keeper
+turns in a boot harness, so the gate can reproduce the faithful keeper-vs-serving contention
+(RFC-0204 §5) instead of the milder serving-only regime an idle (autoboot-disabled) boot produces.
+It serves `POST /v1/chat/completions` in both modes: non-streaming JSON (the
+`backend_openai_request.ml` default `?(stream = false)` path) and SSE `chat.completion.chunk`
+frames when the request sets `stream:true`. Every request is logged one-JSON-line to `--log` so a
+harness can count provider calls = turns fired.
+
+```bash
+python3 scripts/harness/perf/mock_openai_provider.py --port 8899 --log /tmp/mock.jsonl --delay-ms 0
+```
+
+**What is verified to work:** the server boots against this mock with a runtime.toml that routes a
+catalog-valid model id to the mock endpoint. `Runtime.init_default_strict` (the OAS capability
+gate, `server_runtime_bootstrap.ml`) rejects any model whose `api-name` is not in the OAS catalog
+(`oas-models.toml`), so the runtime.toml must **borrow a real catalog id** while pointing its
+provider at the mock:
+
+```toml
+[runtime]
+default = "mock.mockmodel"
+[providers.mock]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:8899"
+[models.mockmodel]
+api-name = "deepseek-v4-flash"   # must be an oas-models.toml id_prefix
+[models.mockmodel.capabilities]
+supports-native-streaming = true
+[mock.mockmodel]
+is-default = true
+```
+
+Boot env (note: do **not** use `harness_start_server`, which hardcodes the bootstrap off; boot the
+exe directly): `MASC_KEEPER_BOOTSTRAP_ENABLED=true`, `MASC_ORCHESTRATOR_ENABLED=1`,
+`MASC_KEEPER_HEARTBEAT_INTERVAL_SEC=5`, `MASC_STORAGE_TYPE=filesystem`, plus a keeper TOML under
+`$BASE/.masc/config/keepers/` and a persona dir under `$BASE/.masc/config/personas/`.
+
+**The remaining blocker (the documented next step):** declarative (config-TOML) keepers are
+excluded from autoboot by design — `keeper_runtime.ml:154 autoboot_exclusion_reason` returns
+`declarative_autoboot_disabled` unless the keeper profile sets `autoboot_enabled = true`, and
+`keeper_activation_readiness.ml:16` also requires `proactive.enabled = true` and `paused = false`.
+A copied live keeper config (e.g. `analyst.toml`) boots the server but yields `0 keeper(s) to boot`
+for this reason. Finishing path (b) means: (1) author a keeper TOML with `autoboot_enabled` /
+`proactive_enabled` set (field parsed under `lib/keeper/` `profile_defaults_for_config`), (2)
+confirm a turn actually issues a provider call (the mock log goes non-empty), then (3) wire a
+`--with-keepers` mode into the gate that starts the mock, seeds configs, and boots with the env
+above. This was stopped at the 3-Try boundary after the gate/boot succeeded but autoboot stayed
+disabled; it is a bounded two-flag fix plus a work-discovery liveness check, not a new approach.
+
+## Other limitations
+
 - **`--inproc-load` hits a serving endpoint, not keeper compute.** It reproduces serving-domain
   head-of-line blocking, which is one real amplifier, but it is not identical to keeper-turn
-  compute competing with serving.
+  compute competing with serving. Until path (b) lands, the faithful keeper regime is only
+  reachable via `--base-url` against the live MASC (where the real keepers run) plus host hogs.
 - Run against the deploy host to capture the real concurrent-process load; the numbers above are
   from a developer box and are illustrative of the *shape*, not absolute production latency.
+
+## What this harness has already caught
+
+The `turn-records` cache+offload fix (a plausible RFC-0204 Phase 0 change mirroring the sibling
+`/tool-stats` handler) was implemented, compiled, committed, then **reverted** when a controlled
+two-binary A/B under this gate showed it does not reduce `/health` starvation (fixed ~17–21 ms vs
+unfixed ~15–16 ms loaded p95, both RED). The dominant main-domain cost under load is response
+serialization + gzip of the payload, which stays on main even on a cache hit; offloading only the
+parse attacks a minor cost. See the revert commit for the full A/B. This is the gate doing its job:
+falsifying a fix before it shipped.

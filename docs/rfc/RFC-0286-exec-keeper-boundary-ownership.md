@@ -13,7 +13,7 @@
 
 2026-06-23, executor keeper의 한 run에서 `unsupported redirect in native dispatch: fd 1 write to .../mind/loop-prevention-guidelines.md` 에러가 발생했다. 단발성 비정상 run(run은 `ContractOk`로 정상 종료됨)의 일시적 증상이었지만, 원인을 추적하는 과정에서 **흩어진 silent 모순 여럿**이 드러났다. 본 RFC는 그 모순들을 개별 버그가 아니라 **하나의 설계 병**으로 진단하고, 경계 소유권(boundary ownership)을 명시하는 것을 목적으로 한다.
 
-근거 로그: `~/me/.masc/logs/system_log_2026-06-23.jsonl` (`keeper_name=executor`, 00:10–02:08Z, 244라인).
+근거 로그: `system_log_2026-06-23.jsonl` (`keeper_name=executor`, 00:10–02:08Z, 244라인).
 
 ## 2. 진단 — 두 축의 모순 매핑
 

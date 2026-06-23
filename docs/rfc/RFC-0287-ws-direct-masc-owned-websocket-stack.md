@@ -169,7 +169,7 @@ staged so each PR is built, tested, and revertable on its own.
 0. **Pin** (this RFC's companion change): add `ws-direct` to
    `scripts/opam-pin-external-deps.sh` (`WS_DIRECT_SHA` constant +
    `opam_pin_add ws-direct-core/ws-direct-gluten/ws-direct-eio`), `masc.opam.locked`
-   `pin-depends`, and `dune-project`. Pin SHA: `ab157ce` (github.com/jeong-sik/ws-direct).
+   `pin-depends`, and `dune-project`. Pin SHA: `a5534ae` (github.com/jeong-sik/ws-direct).
 
 1. **PR 1 — server**: swap `server_mcp_transport_ws.ml`, `server_ide_lsp_proxy.ml`,
    `server_ws_standalone.ml` to `Ws_direct_gluten` / `Ws_direct_eio.Server`;

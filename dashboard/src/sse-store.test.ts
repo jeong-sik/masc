@@ -199,9 +199,11 @@ describe('setupSSEReaction reconnect hydration', () => {
     const refreshGovernance = vi.fn<() => void>()
     sseStore.registerGovernanceRefresh(refreshGovernance)
 
-    // Locks the event-type string shared with the backend broadcast
-    // (keeper_approval_queue.ml broadcast_pending: "approval:pending"). A drift
-    // here silently stops the nav-rail/topbar approval badge from updating.
+    // Pins the FRONTEND routing contract: an `approval:pending` event must
+    // reach the governance refresh (and thus the nav-rail/topbar badge). This
+    // asserts only the FE literal — the cross-boundary pin that also fails when
+    // the backend (keeper_approval_queue.ml) renames the emitted string lives
+    // in sse-approval-event-drift.test.ts.
     sseStore.routeServerPushEvent({ type: 'approval:pending' })
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()

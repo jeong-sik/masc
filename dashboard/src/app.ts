@@ -202,8 +202,10 @@ export function App() {
     // Without an eager registration a pending HITL approval emits its
     // `approval:pending` SSE event into a null handler and the badge stays 0
     // until the operator manually opens the approvals surface. Register the
-    // refresh eagerly (governance-actions stays lazy via dynamic import) and
-    // load once at boot so an approval already pending at open is shown.
+    // refresh eagerly; governance-actions is dynamically imported but the boot
+    // call below eagerly triggers that chunk load (its components still render
+    // only on surface mount). Loading once at boot shows an approval already
+    // pending at open.
     const refreshGovernanceLazy = () => {
       void import('./components/governance-actions')
         .then(({ refreshGovernance }) => refreshGovernance())

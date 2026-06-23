@@ -1589,7 +1589,7 @@
 
 (include stanzas/test_discord_rest_client.inc)
 
-(include stanzas/test_discord_wss_writer.inc)
+(include stanzas/test_discord_wss_bridge.inc)
 
 (include stanzas/test_keeper_chat_discord.inc)
 
@@ -1976,7 +1976,7 @@
 
 (include stanzas/test_worker_safety_gates.inc)
 
-(include stanzas/test_ws_standalone_close_payload.inc)
+(include stanzas/test_ws_standalone_lifecycle.inc)
 
 (test
  (name test_dashboard_yjs)

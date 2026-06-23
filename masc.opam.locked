@@ -92,8 +92,6 @@ depends: [
   "httpun" {= "0.2.0"}
   "httpun-eio" {= "0.2.0"}
   "httpun-types" {= "0.2.0"}
-  "httpun-ws" {= "0.2.0"}
-  "httpun-ws-eio" {= "0.2.0"}
   "integers" {= "0.7.0"}
   "iomux" {= "0.4"}
   "ipaddr" {= "5.6.2"}
@@ -194,7 +192,9 @@ depends: [
   "uuidm" {= "0.9.10"}
   "uunf" {= "17.0.0"}
   "uutf" {= "1.0.4"}
-  "websocket" {= "2.17"}
+  "ws-direct-core" {= "0.1.0"}
+  "ws-direct-eio" {= "0.1.0"}
+  "ws-direct-gluten" {= "0.1.0"}
   "x509" {= "1.0.6"}
   "yojson" {= "3.0.0"}
   "zarith" {= "1.14"}
@@ -240,5 +240,17 @@ pin-depends: [
     "ocaml-webrtc.0.2.6"
     "git+https://github.com/jeong-sik/ocaml-webrtc.git#1b7993605b293f45169369d488f970ba15132a9f"
   ]
+  [
+  "ws-direct-core.0.1.0"
+  "git+https://github.com/jeong-sik/ws-direct.git#c1dc5640d70b86b90dc314f09cb7a9c250e15181"
+]
+  [
+  "ws-direct-eio.0.1.0"
+  "git+https://github.com/jeong-sik/ws-direct.git#c1dc5640d70b86b90dc314f09cb7a9c250e15181"
+]
+  [
+  "ws-direct-gluten.0.1.0"
+  "git+https://github.com/jeong-sik/ws-direct.git#c1dc5640d70b86b90dc314f09cb7a9c250e15181"
+]
 ]
 x-maintenance-intent: ["(latest)"]

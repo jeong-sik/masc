@@ -84,28 +84,15 @@ type dashboard_auth_state =
     in an [Atomic.t] field so the single write and many reads are tear-free if
     dashboard serving moves off the main Eio domain (RFC-0204 §8.4, Phase 1). *)
 
-(** Inbound WebSocket frame reassembly state.  A single application message may
-    arrive across several frames (an initial [`Text]/[`Binary] with
-    [is_fin = false] followed by [`Continuation] frames); this holds the partial
-    buffer until the final fragment.  Shared SSOT for inbound framing across the
-    MCP session handler and the IDE LSP proxy so both reassemble fragments and
-    enforce identical size caps (RFC-0281 §3.2). *)
-module Ws_inbound : sig
-  type t
-
-  val create : unit -> t
-  (** Fresh reassembly state with no buffered partial message. *)
-
-  val reset : t -> unit
-  (** Drop any buffered partial message (on reject or close). *)
-
-  val buffered_bytes : t -> int
-  (** Bytes buffered so far for an in-progress fragmented message. *)
-end
+(* RFC-0287: inbound reassembly + UTF-8 validation moved into the ws-direct
+   Connection layer, which delivers complete messages to the Endpoint
+   [on_message] handler. The [Ws_inbound] reassembler and the manual
+   read/classify machinery are gone; only the [max_inbound_*] size knobs remain,
+   fed to [Endpoint.create]. *)
 
 type ws_session = {
   id : string;
-  wsd : Httpun_ws.Wsd.t;
+  wsd : Ws_direct_core.Endpoint.Wsd.t;
   closed : bool Atomic.t;
   write_mutex : Eio.Mutex.t;
   last_pong_at : float Atomic.t;
@@ -118,7 +105,6 @@ type ws_session = {
   mutable dashboard_last_ack_at : float;
   mutable dashboard_last_delta_seq : int;
   mutable dashboard_last_delta_at : float;
-  inbound : Ws_inbound.t;
   inbound_dispatches : int Atomic.t;
 }
 (** Per-WS session state.  Concrete record because
@@ -187,7 +173,7 @@ val next_id : unit -> string
 (** Generates a fresh session id.  Internal counter is
     monotonically increasing for the process lifetime. *)
 
-val new_session : id:string -> wsd:Httpun_ws.Wsd.t -> ws_session
+val new_session : id:string -> wsd:Ws_direct_core.Endpoint.Wsd.t -> ws_session
 (** Builds a fresh {!ws_session} with [closed = false]
     and the dashboard handshake state cleared.  Caller
     inserts the result into {!sessions} under
@@ -224,20 +210,6 @@ val close_all : unit -> int
 
 (** {1 Inbound framing} *)
 
-type inbound_size_rejection = {
-  reason : string;
-  limit : int;
-  actual : int;
-}
-(** Structured reject reason for inbound frame/message size gates.  [limit = 0]
-    means the corresponding gate is disabled and is therefore never emitted. *)
-
-type inbound_size_decision =
-  | Inbound_accept
-  | Inbound_reject of inbound_size_rejection
-(** Pure decision used before allocating inbound payload buffers and before
-    appending fragmented messages. *)
-
 type inbound_dispatch_rejection = {
   reason : string;
   limit : int;
@@ -250,52 +222,6 @@ type inbound_dispatch_admission =
   | Inbound_dispatch_rejected of inbound_dispatch_rejection
   | Inbound_dispatch_session_gone
 (** Result of attempting to reserve one per-session inbound dispatch slot. *)
-
-type inbound_read_outcome =
-  | Inbound_message of string
-  | Inbound_incomplete
-  | Inbound_rejected of inbound_size_rejection
-(** Outcome of {!inbound_accumulate} / {!read_data_frame}: a fully reassembled
-    application message, a buffered (or empty) fragment awaiting more frames, or
-    a size-cap rejection (the partial buffer is dropped). *)
-
-val inbound_accumulate :
-  Ws_inbound.t ->
-  max_message_bytes:int ->
-  is_fin:bool ->
-  string ->
-  inbound_read_outcome
-(** Reassemble one decoded data-frame chunk into the reader's running message,
-    enforcing [max_message_bytes] across fragments.  Pure state transition over
-    the reader (only its partial buffer is mutated); unit testable without a
-    live connection. *)
-
-val read_data_frame :
-  Ws_inbound.t ->
-  max_frame_bytes:int ->
-  max_message_bytes:int ->
-  is_fin:bool ->
-  len:int ->
-  Httpun_ws.Payload.t ->
-  on_outcome:(inbound_read_outcome -> unit) ->
-  unit
-(** Drain a WebSocket data-frame [payload] (frame-size capped) and feed it to
-    {!inbound_accumulate}, delivering the outcome via [on_outcome].  Both the
-    MCP session handler and the IDE LSP proxy route [`Text] / [`Binary] /
-    [`Continuation] frames through this, so both reassemble fragments and apply
-    identical frame/message size caps (RFC-0281 §3.2). *)
-
-val read_inbound_message_frame :
-  ws_session ->
-  on_message:(string -> string -> unit) ->
-  is_fin:bool ->
-  len:int ->
-  Httpun_ws.Payload.t ->
-  unit
-(** Consumes a single WS data frame off [payload],
-    accumulates partial-text fragments across [is_fin =
-    false] frames, and invokes [on_message ~session_id
-    ~body] when a final fragment arrives. *)
 
 val max_inbound_dispatches_per_session : unit -> int
 (** Maximum concurrent JSON-RPC dispatch fibers admitted from one WS session.
@@ -319,30 +245,44 @@ val dispatch_inbound_message : string -> string -> unit
 val mcp_websocket_handler :
   ?sw:Eio.Switch.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  ?on_connection_close:
-    (session_id:string -> declared_len:int -> Httpun_ws.Payload.t -> unit) ->
-  ?on_eof:(session_id:string -> Httpun_ws.Websocket_connection.error option -> unit) ->
+  ?on_close_log:(session_id:string -> code:int option -> reason:string -> unit) ->
+  ?on_eof:(session_id:string -> unit) ->
   on_message:(string -> string -> unit) ->
   origin_label:string ->
-  Httpun_ws.Wsd.t ->
-  Httpun_ws.Websocket_connection.input_handlers
+  Ws_direct_core.Endpoint.Wsd.t ->
+  Ws_direct_core.Endpoint.handlers
 (** Single source of truth for the MCP-over-WebSocket session protocol:
-    session registration, SSE subscription, liveness heartbeat, and frame
-    opcode handling.  Shared by the same-origin upgrade path and the
-    standalone listener — they differ only in socket attachment, not the
-    session protocol.  [on_connection_close] / [on_eof] are observability
-    hooks invoked before cleanup (defaults: close payload / ignore).
-    RFC-0281 S3.2. *)
+    session registration, SSE subscription, liveness heartbeat, and message
+    handling.  Shared by the same-origin upgrade path and the standalone
+    listener — they differ only in socket attachment, not the session protocol.
+    ws-direct delivers complete (reassembled, UTF-8-validated, size-capped)
+    messages to [on_message] and auto-replies to pings, so this builds an
+    Endpoint handler rather than a frame-opcode switch.  [on_close_log] /
+    [on_eof] are observability hooks invoked before cleanup.  RFC-0287 §4.1. *)
+
+val sec_websocket_accept : string -> string
+(** [sec_websocket_accept key] computes the RFC 6455 §1.3 handshake response
+    token: [base64(sha1(key ^ GUID))].  Exposed for the canonical-vector
+    regression test (the GUID and base64/sha1 wiring must not drift). *)
+
+val ws_upgrade_accept : Httpun.Request.t -> (string, string) result
+(** Validate an HTTP/1.1 -> WebSocket upgrade request (RFC 6455 §4.2.1): [GET],
+    [Upgrade: websocket], [Connection] listing [upgrade], [Sec-WebSocket-Version:
+    13], and a [Sec-WebSocket-Key] that base64-decodes to exactly 16 bytes.
+    Returns the accept token on success.  Exposed for unit tests. *)
 
 val respond_and_drive_upgrade :
   upgrade:(Gluten.impl -> unit) ->
   reqd:Httpun.Reqd.t ->
-  handler:(Httpun_ws.Wsd.t -> Httpun_ws.Websocket_connection.input_handlers) ->
+  max_message:int ->
+  max_frame:int ->
+  handler:(Ws_direct_core.Endpoint.Wsd.t -> Ws_direct_core.Endpoint.handlers) ->
   (unit, string) result
-(** Single source of truth for HTTP/1.1 -> WebSocket attachment: sends the
-    101 via [respond_with_upgrade], then drives the connection by handing it
-    to the Gluten runtime via [upgrade].  Omitting the [upgrade] call (the
-    pre-RFC-0281 defect) left inbound frames unread.  RFC-0281 S3.1. *)
+(** Single source of truth for HTTP/1.1 -> WebSocket attachment: validates the
+    request (RFC 6455 §4.2.1), writes the 101 on [reqd], then drives the
+    post-101 connection by handing a ws-direct Endpoint (Server role, bounded by
+    [max_message] / [max_frame]) to the Gluten runtime via [upgrade] as a
+    drop-in for the former Httpun_ws.Server_connection.  RFC-0287 §4.1. *)
 
 val upgrade_connection :
   ?sw:Eio.Switch.t ->
@@ -484,16 +424,6 @@ val max_inbound_frame_bytes : unit -> int
 val max_inbound_message_bytes : unit -> int
 (** Maximum accumulated inbound WebSocket message size across fragments.
     [0] disables the message gate. *)
-
-val classify_inbound_frame_size :
-  len:int -> max_frame_bytes:int -> inbound_size_decision
-(** Rejects a single frame whose declared payload [len] exceeds
-    [max_frame_bytes]. *)
-
-val classify_inbound_message_size :
-  current_bytes:int -> chunk_len:int -> max_message_bytes:int -> inbound_size_decision
-(** Rejects an accumulated fragmented message when adding [chunk_len] to
-    [current_bytes] would exceed [max_message_bytes]. *)
 
 val slice_index_enabled : unit -> bool
 (** Whether the per-slice fanout side index is active.

@@ -65,35 +65,21 @@ let now_mono env =
   let m = Eio.Time.Mono.now (Eio.Stdenv.mono_clock env) in
   Int64.to_float (Mtime.to_uint64_ns m) /. 1e9
 
-let frame_to_input frame =
-  let module F = Websocket.Frame in
-  match frame.F.opcode with
-  | Text ->
-    (match Yojson.Safe.from_string frame.F.content with
+(* RFC-0287: ws-direct delivers complete, reassembled, UTF-8-validated text
+   messages and the peer Close as typed [inbound] events (Ping/Pong are
+   handled inside the endpoint), so this collapses to a two-case match. *)
+let frame_to_input (inbound : Discord_wss_connection.inbound) =
+  match inbound with
+  | Discord_wss_connection.Message content ->
+    (match Yojson.Safe.from_string content with
      | exception Yojson.Json_error msg ->
        Some (Discord_gateway_state.Frame_parse_error ("json: " ^ msg))
      | json ->
        (match Discord_gateway_state.parse_frame json with
         | Ok f -> Some (Discord_gateway_state.Frame_received f)
         | Error msg -> Some (Discord_gateway_state.Frame_parse_error msg)))
-  | Close ->
-    let content = frame.F.content in
-    let code =
-      if String.length content >= 2 then
-        ((Char.code content.[0]) lsl 8) lor (Char.code content.[1])
-      else 1005
-    in
-    let reason =
-      if String.length content > 2
-      then String.sub content 2 (String.length content - 2)
-      else "remote close"
-    in
+  | Discord_wss_connection.Closed { code; reason } ->
     Some (Discord_gateway_state.Wss_closed { code; reason })
-  | Binary | Continuation | Ping | Pong | Ctrl _ | Nonctrl _ ->
-    (* Discord with compress=false uses only Text+Close on app frames;
-       Ping/Pong are protocol-level and the websocket lib handles them
-       transparently. *)
-    None
 
 let log_effect level message =
   match level with
@@ -236,8 +222,8 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
                { code = 1011; reason = Printexc.to_string e })
         in
         ()
-      | frame ->
-        (match frame_to_input frame with
+      | inbound ->
+        (match frame_to_input inbound with
          | Some inp ->
            if enqueue_if_current conn inp then begin
              (* Side-channel: track heartbeat ACK arrival for I/O-layer
@@ -327,10 +313,7 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
        | Some conn ->
          let json = Discord_gateway_state.encode_frame f in
          let payload = Yojson.Safe.to_string json in
-         let ws =
-           Websocket.Frame.create ~opcode:Text ~content:payload ()
-         in
-         Discord_wss_connection.write conn ws)
+         Discord_wss_connection.send_text conn payload)
     | Schedule_heartbeat { interval_ms } ->
       heartbeat_ms := Some interval_ms;
       (* New HELLO received (fresh connect or reconnect) — reset the

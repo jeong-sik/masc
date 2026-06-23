@@ -57,6 +57,9 @@ fi
 readonly WEBRTC_SHA="1b7993605b293f45169369d488f970ba15132a9f"
 readonly GRPC_DIRECT_SHA="d7269ebebf9e4688486cc6591c66e794607e7b0f"
 readonly NEO4J_BOLT_SHA="a1ca30c1247db5c58934e99306fe330419f7b21a"
+# RFC-0283: 0.2.0 + upstream PR #80 (frame-queue drain). Remove when upstream
+# releases the fix. Tracking: jeong-sik/masc#22100.
+readonly HTTPUN_WS_SHA="dec94b202b7fb1efef0995b297b74818f0fa55e6"
 
 include_bisect=false
 include_compact_protocol=false
@@ -340,6 +343,15 @@ opam_pin_add neo4j_bolt "https://github.com/jeong-sik/ocaml-neo4j-bolt.git#${NEO
 pinned_pkgs+=("neo4j_bolt")
 opam_pin_add neo4j_bolt_eio "https://github.com/jeong-sik/ocaml-neo4j-bolt.git#${NEO4J_BOLT_SHA}" -n -y
 pinned_pkgs+=("neo4j_bolt_eio")
+
+# RFC-0283: httpun-ws 0.2.0 stalls when 3+ inbound WebSocket frames coalesce
+# into one read with a non-final middle frame (upstream PR #80, unmerged, no
+# release). Pin both packages (same repo) to a fork carrying the one-line
+# frame-queue drain fix. Tracking: jeong-sik/masc#22100.
+opam_pin_add httpun-ws "https://github.com/jeong-sik/httpun-ws.git#${HTTPUN_WS_SHA}" -n -y
+pinned_pkgs+=("httpun-ws")
+opam_pin_add httpun-ws-eio "https://github.com/jeong-sik/httpun-ws.git#${HTTPUN_WS_SHA}" -n -y
+pinned_pkgs+=("httpun-ws-eio")
 
 if $include_bisect; then
   # bisect_ppx opam constraints lag newer compilers; keep CI solvable under OCaml 5.4 by pinning.

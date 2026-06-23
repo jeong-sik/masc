@@ -225,6 +225,14 @@ pin-depends: [
     "git+https://github.com/patricoferris/bisect_ppx.git#5.2"
   ]
   [
+    "httpun-ws.0.2.0"
+    "git+https://github.com/jeong-sik/httpun-ws.git#dec94b202b7fb1efef0995b297b74818f0fa55e6"
+  ]
+  [
+    "httpun-ws-eio.0.2.0"
+    "git+https://github.com/jeong-sik/httpun-ws.git#dec94b202b7fb1efef0995b297b74818f0fa55e6"
+  ]
+  [
   "grpc-direct.0.2.6"
   "git+https://github.com/jeong-sik/grpc-direct.git#d7269ebebf9e4688486cc6591c66e794607e7b0f"
 ]

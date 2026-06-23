@@ -59,6 +59,32 @@ let test_sum_error_usage_empty_is_zero () =
   check usage_t "no results -> zero usage" Fusion_types.zero_usage
     (Fusion_types.sum_error_usage [])
 
+let test_all_fail_error_sums_usage_and_first_msg () =
+  (* 적대 리뷰 #22099 P2: all_fail_error는 sum_error_usage 합산 + 첫 Error 메시지 pick을
+     한 번에 계산. 인라인이던 회계 wiring을 분리해 firsts만으로 검증한다. Ok 원소는
+     무시, 첫 Error 메시지가 대표, 모든 실패 usage가 합산됨을 핀. *)
+  let u input_tokens output_tokens : Fusion_types.usage =
+    { Fusion_types.input_tokens; output_tokens }
+  in
+  let results =
+    [ ("j1", Error ("boom1", u 100 10))
+    ; ("j2", Ok (sample_synthesis, u 999 999)) (* Ok 원소는 무시 *)
+    ; ("j3", Error ("boom3", u 25 5))
+    ]
+  in
+  let msg, usage =
+    Fusion_types.all_fail_error ~fallback:"FALLBACK" results
+  in
+  check string "first error's message is the representative" "boom1" msg;
+  check usage_t "sums every failed judge's usage, ignores Ok" (u 125 15) usage
+
+let test_all_fail_error_no_errors_uses_fallback () =
+  (* 도달불가 분기 핀: ok_priors=[]이면 firsts는 전부 Error이므로 실제로는 안 온다.
+     [Error]가 하나도 없으면 fallback 메시지 + 합산 usage(빈이면 zero)를 반환. *)
+  let msg, usage = Fusion_types.all_fail_error ~fallback:"FALLBACK" [] in
+  check string "no errors -> fallback message" "FALLBACK" msg;
+  check usage_t "empty results -> zero usage" Fusion_types.zero_usage usage
+
 let () =
   run "fusion_judge_usage"
     [ ( "attach_usage"
@@ -70,5 +96,11 @@ let () =
       , [ test_case "folds all failures, ignores Ok" `Quick
             test_sum_error_usage_folds_all_failures
         ; test_case "empty is zero" `Quick test_sum_error_usage_empty_is_zero
+        ] )
+    ; ( "all_fail_error"
+      , [ test_case "sums usage, picks first error message" `Quick
+            test_all_fail_error_sums_usage_and_first_msg
+        ; test_case "no errors -> fallback + zero usage" `Quick
+            test_all_fail_error_no_errors_uses_fallback
         ] )
     ]

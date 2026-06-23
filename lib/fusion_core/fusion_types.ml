@@ -25,6 +25,24 @@ let sum_error_usage results =
       | Ok _ -> acc)
     zero_usage results
 
+(* [first_error_message]는 results에서 첫 [Error]의 메시지를 추출한다(usage는 버림).
+   all-fail 분기의 대표 메시지 선정용. *)
+let first_error_message results =
+  List.find_map
+    (fun (_, r) -> match r with Error (msg, _) -> Some msg | Ok _ -> None)
+    results
+
+(* [all_fail_error ~fallback results]는 전원 실패(degrade) 경로의 회계를 한 번에 계산한다:
+   [sum_error_usage]로 모든 실패 usage를 합산하고, 첫 [Error] 메시지를 대표로 결합한다.
+   [Error]가 하나도 없으면(도달 불가 분기) [fallback]을 합산 usage(빈이면 zero)와 묶는다.
+   분리 전엔 fusion_orchestrator [] 분기에 인라인이라 회계 wiring(합산 usage가 Error에 실리는가,
+   첫 메시지가 대표로 pick되는가)을 단위 테스트할 수 없었는데(적대 리뷰 #22099 P2),
+   다형적 순수 함수로 빼내어 firsts만으로 검증한다. *)
+let all_fail_error ~fallback results =
+  let failed_usage = sum_error_usage results in
+  let msg = match first_error_message results with Some m -> m | None -> fallback in
+  (msg, failed_usage)
+
 module Fusion_depth = struct
   type t =
     | Top

@@ -32,6 +32,17 @@ val add_usage : usage -> usage -> usage
     태운 토큰을 잃는 undercount를 막는다(적대 리뷰 #22093 all-fail). *)
 val sum_error_usage : ('id * ('ok, 'msg * usage) result) list -> usage
 
+(** [first_error_message results]는 results의 첫 [Error] 메시지를 추출한다(usage는 버림).
+    [Error]가 없으면 [None]. all-fail 분기의 대표 메시지 선정용. *)
+val first_error_message : ('id * ('ok, 'msg * usage) result) list -> 'msg option
+
+(** [all_fail_error ~fallback results]는 전원 실패 경로의 회계를 한 번에 계산한다:
+    [sum_error_usage]로 실패 usage를 합산하고 첫 [Error] 메시지를 대표로 묶는다.
+    [Error]가 없으면(도달 불가) [fallback]과 합산 usage(빈이면 zero)를 묶는다
+    (적대 리뷰 #22099 P2 — 인라인 회계 wiring을 순수 함수로 분리해 단위 테스트). *)
+val all_fail_error :
+  fallback:'msg -> ('id * ('ok, 'msg * usage) result) list -> 'msg * usage
+
 (** {1 재귀 가드} *)
 
 (** 심의 깊이. OpenRouter의 [x-openrouter-fusion-depth] 헤더에 대응하는 타입드

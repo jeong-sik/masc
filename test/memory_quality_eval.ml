@@ -150,6 +150,18 @@ let percentile sorted_asc p =
   if n = 0 then 0 else sorted_asc.(min (n - 1) (int_of_float (p *. float_of_int n)))
 ;;
 
+(* Pure churn statistics over recall records, extracted so self_test pins the exact
+   arithmetic report_churn prints: (mean keys/turn, max keys/turn, max store size).
+   Sharing one function avoids a mock-vs-mock test that re-derives the formula. *)
+let churn_stats records =
+  let keys_per = List.map (fun r -> List.length r.fact_keys) records in
+  let store_sizes = List.map (fun r -> r.n_facts_in_store) records in
+  let sum l = List.fold_left ( + ) 0 l in
+  let avg l = if l = [] then 0.0 else float_of_int (sum l) /. float_of_int (List.length l) in
+  let maxl l = List.fold_left max 0 l in
+  avg keys_per, maxl keys_per, maxl store_sizes
+;;
+
 (* ---------- near-duplicate helpers ---------- *)
 
 let strip_key_prefix k =
@@ -185,9 +197,20 @@ let self_test () =
   let desc = counts_desc tbl in
   check "top key is id:a" (match desc with (k, _) :: _ -> String.equal k "id:a" | [] -> false);
   check "distinct keys = 3" (List.length desc = 3);
+  (* pin the full order: count-desc primary AND key-asc tie-break (id:b before id:c).
+     Asserting only the head would let a reversed/dropped secondary key pass while
+     breaking the byte-identical reproducibility the top-N listing depends on. *)
+  check "counts_desc tie-break is key-ascending" (List.map fst desc = [ "id:a"; "id:b"; "id:c" ]);
   let counts_asc = desc |> List.map snd |> List.sort compare |> Array.of_list in
   check "max (p1.0) = 4" (percentile counts_asc 1.0 = 4);
   check "min (p0.0) = 1" (percentile counts_asc 0.0 = 1);
+  (* interior percentile indices — the live report emits p50/p90/p99, none of which
+     hit the clamp arms the two checks above exercise. Pin the multiply-truncate
+     arithmetic so an off-by-one cannot silently corrupt the §8 baseline numbers. *)
+  let p10 = [| 1; 2; 3; 4; 5; 6; 7; 8; 9; 10 |] in
+  check "percentile p0.5 interior = 6" (percentile p10 0.5 = 6);
+  check "percentile p0.9 interior = 10" (percentile p10 0.9 = 10);
+  check "percentile p0.99 interior = 10" (percentile p10 0.99 = 10);
   check "parse recall line"
     (match
        parse_recall_line
@@ -206,7 +229,13 @@ let self_test () =
           (strip_key_prefix "claim:checkpoint saved and keeper remains scheduled")) = false
      (* honest: normalize_claim is whitespace/case only, so these do NOT collide
         on a 6-word prefix ("saved;" vs "saved" differ) — proving the heuristic
-        is a coarse flag, not a real dedup; the real fix is a stable claim_id. *))
+        is a coarse flag, not a real dedup; the real fix is a stable claim_id. *));
+  (* churn arithmetic over the same fixture: keys/turn lengths [2;1;2;1] -> mean 1.5,
+     max 2; n_facts_in_store [2;2;3;1] -> max 3. report_churn shares churn_stats. *)
+  let mean_kp, max_kp, max_store = churn_stats recs in
+  check "churn mean keys/turn = 1.5" (Float.abs (mean_kp -. 1.5) < 1e-9);
+  check "churn max keys/turn = 2" (max_kp = 2);
+  check "churn max store size = 3" (max_store = 3)
 ;;
 
 (* ---------- live-baseline reports ---------- *)
@@ -244,13 +273,9 @@ let report_per_keeper records =
 
 let report_churn records =
   section "RECALL CHURN";
-  let keys_per = List.map (fun r -> List.length r.fact_keys) records in
-  let store_sizes = List.map (fun r -> r.n_facts_in_store) records in
-  let sum l = List.fold_left ( + ) 0 l in
-  let avg l = if l = [] then 0.0 else float_of_int (sum l) /. float_of_int (List.length l) in
-  let maxl l = List.fold_left max 0 l in
-  note "injected fact_keys per turn: mean=%.1f max=%d" (avg keys_per) (maxl keys_per);
-  note "n_facts_in_store: max=%d" (maxl store_sizes)
+  let mean_kp, max_kp, max_store = churn_stats records in
+  note "injected fact_keys per turn: mean=%.1f max=%d" mean_kp max_kp;
+  note "n_facts_in_store: max=%d" max_store
 ;;
 
 let report_near_dup records ~top_n =

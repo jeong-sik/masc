@@ -142,6 +142,44 @@ type judge_synthesis =
   }
 [@@deriving yojson, show, eq]
 
+(** {1 심판 실행 관측 (RFC-0284)}
+
+    실제로 실행된 심판 노드의 *사후* record. [panel_outcome]와 구조 동형이라 board
+    증거/대시보드가 패널과 같은 배열 렌더 경로를 재사용한다. JOJ의 N개 1차 심판 + meta
+    구조가 [Result.map fst] 평탄화로 소실되던 것을 보존한다. *관측 데이터*(무엇이
+    실행됐나)이지 *실행 추상*(조립 DSL = purge된 ChainEngine)이 아니다. *)
+
+(** 심판 노드의 위상 역할. [First]는 panelist_id를 정체성으로 보존. *)
+type judge_role =
+  | Single
+  | Refine_pass
+  | First of string
+  | Meta
+[@@deriving yojson, show, eq]
+
+(** 성공한 심판 노드 — 역할 + 종합 + 노드별 실측 usage. *)
+type judge_node =
+  { role : judge_role
+  ; synthesis : judge_synthesis
+  ; usage : usage
+  }
+[@@deriving yojson, show, eq]
+
+(** 격리된 심판 실패 노드. *)
+type judge_error_node =
+  { failed_role : judge_role
+  ; error : string
+  ; usage : usage
+      (** 실패해도 태운 토큰 — 관측 record가 비용을 버리지 않는다(RFC-0284, 적대 리뷰 #22112 E). *)
+  }
+[@@deriving yojson, show, eq]
+
+(** 심판 한 명의 실행 결과 — [panel_outcome] (Answered/Failed)와 동형. *)
+type judge_outcome =
+  | Synthesized of judge_node
+  | Judge_failed of judge_error_node
+[@@deriving yojson, show, eq]
+
 (** {1 트리거} *)
 
 (** fusion 발동 사유 — 게이트 입력(이유 라벨). catch-all 없음.

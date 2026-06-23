@@ -25,14 +25,6 @@ let strip_simple_shell_quotes token =
   then String.sub token 1 (len - 2)
   else token
 
-let safe_repo_name name =
-  name <> ""
-  && name <> "."
-  && name <> ".."
-  && not (String.contains name '/')
-  && not (String.contains name '\\')
-  && not (String.contains name '\000')
-
 let stages_target_repo_commands stages =
   List.exists (fun stage ->
     let bin = normalize_command_name stage.bin in
@@ -199,29 +191,6 @@ let path_is_existing_dir path =
   try Sys.file_exists path && Sys.is_directory path with
   | Sys_error _ -> false
 
-let normalize_repos_path_token token =
-  let token = strip_simple_shell_quotes token |> String.trim in
-  let token =
-    if String.starts_with ~prefix:"./" token then
-      String.sub token 2 (String.length token - 2)
-    else token
-  in
-  match String.split_on_char '/' token with
-  | "repos" :: repo :: _ when safe_repo_name repo -> Some token
-  | _ -> None
-
-let repos_path_hint_of_stages ~cmd stages =
-  List.find_map (fun stage ->
-    let bin = normalize_command_name stage.bin in
-    if bin <> "git" && bin <> "gh"
-    then None
-    else
-      stage.args
-      |> List.find_map (fun token ->
-           match normalize_repos_path_token token with
-           | Some path -> Some (path, cmd)
-           | None -> None)) stages
-
 let resolve_sandbox_root_git_cwd
     ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) ~cwd ~cmd ir
   =
@@ -257,39 +226,11 @@ let resolve_sandbox_root_git_cwd
   then cwd, None
   else if cwd_normalized = host_root && stages_target_repo_commands stages
   then (
-    let resolve_without_explicit_git_c () =
-      (* If the command itself names a target under repos/ (e.g. git clone <url>
-         repos/foo), keep the sandbox-root cwd and let the command operate on
-         that explicit path. This avoids special-casing git clone while still
-         helping plain git status/log calls resolve to the intended repo. *)
-      match repos_path_hint_of_stages ~cmd:(String.trim cmd) stages with
-      | Some (_path, _cmd) -> cwd, None
-      | None -> (
-        match repos_in_playground () with
-        | [ single_repo ] ->
-          Filename.concat (Filename.concat host_root "repos") single_repo, None
-        | [] ->
-          ( cwd
-          , Some
-              (Printf.sprintf
-                  "sandbox root cannot run git/gh: mount point %s is not a git repository and \
-                  no sandbox git clones exist under repos/. Clone via the Execute tool into \
-                  repos/<repo>, then retry with cwd=\"repos/<repo>\", or report the blocker \
-                  for an operator to provision."
-                 host_root) )
-        | example_repo :: _ as many ->
-          let suggested_cwd = "repos/" ^ example_repo in
-          ( cwd
-          , Some
-              (Printf.sprintf
-                 "sandbox root cannot run git/gh: mount point %s is not a git repository and \
-                  multiple sandbox repos exist. Set cwd explicitly before retrying. Example \
-                  next call: Execute { \"executable\": \"git\", \"argv\": [\"status\"], \"cwd\": %S }. Available repos: %s. \
-                  Do not retry the same cmd from sandbox root."
-                 host_root
-                 suggested_cwd
-                 (String.concat ", " many)) ))
-    in
+    (* Sandbox root is the keeper's own mount point. We no longer require an
+       explicit repos/ target or a single existing repo: let git/gh run from
+       the root and fail/succeed naturally inside the container. We only
+       preflight explicit -C paths so that missing targets surface as clear
+       errors before docker exec. *)
     let explicit_git_c_path_groups = git_global_c_path_groups_of_stages stages in
     let base_for_git_c_paths = function
       | first :: _ when bare_worktrees_path first ->
@@ -326,7 +267,7 @@ let resolve_sandbox_root_git_cwd
              target)
     in
     match explicit_git_c_path_groups with
-    | [] -> resolve_without_explicit_git_c ()
+    | [] -> cwd, None
     | groups ->
       (match List.find_map
                (fun paths ->
@@ -336,8 +277,5 @@ let resolve_sandbox_root_git_cwd
                groups
        with
        | Some msg -> cwd, Some msg
-       | None ->
-         if List.exists (List.exists bare_worktrees_path) groups
-         then resolve_without_explicit_git_c ()
-         else cwd, None))
+       | None -> cwd, None))
   else cwd, None

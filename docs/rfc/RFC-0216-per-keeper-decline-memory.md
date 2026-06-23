@@ -6,7 +6,7 @@
 
 ## Problem
 
-Measured (`~/me/.masc/logs/system_log_2026-06-04.jsonl`): 132 task releases in one day across 11 tasks; `task-575` alone claimed↔released ~60 cycles over 5.5h (00:56→06:35) with zero completion. Each cycle: claim → start → real keeper execution (~30s–8min) → release. A slow livelock that burns keeper turns and LLM execution continuously. It is benign for safety (`workflow_rejection` is circuit-breaker-exempt, no data loss) but drains a measurable fraction of keeper capacity.
+Measured (`<MASC_BASE_PATH>/.masc/logs/system_log_2026-06-04.jsonl`): 132 task releases in one day across 11 tasks; `task-575` alone claimed↔released ~60 cycles over 5.5h (00:56→06:35) with zero completion. Each cycle: claim → start → real keeper execution (~30s–8min) → release. A slow livelock that burns keeper turns and LLM execution continuously. It is benign for safety (`workflow_rejection` is circuit-breaker-exempt, no data loss) but drains a measurable fraction of keeper capacity.
 
 The driver is an active, reasoned decline, e.g. the recorded release reason `"Releasing P3 planning task — implementation keeper 不适合 P3 plan. Going for P1 implementable cleanup."` — a keeper claims a task, judges it unsuitable, releases it; the scheduler offers the same task back; repeat.
 

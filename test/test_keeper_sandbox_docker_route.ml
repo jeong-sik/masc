@@ -1435,7 +1435,7 @@ let run_docker_shell_command ~config ~(meta : Keeper_meta_contract.keeper_meta) 
           result.Keeper_sandbox_docker.output;
       docker_run_line log_path
 
-let test_sandbox_root_git_cwd_zero_repo_blocks_before_exec () =
+let test_sandbox_root_git_cwd_zero_repo_allows_exec () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   let cwd, error =
@@ -1443,19 +1443,7 @@ let test_sandbox_root_git_cwd_zero_repo_blocks_before_exec () =
       ~cwd:playground ~cmd:"git status"
   in
   Alcotest.(check string) "cwd remains sandbox root" playground cwd;
-  match error with
-  | None -> Alcotest.fail "expected missing repo guidance"
-  | Some msg ->
-    Alcotest.(check bool) "mentions no sandbox clones" true
-      (contains_substring msg "no sandbox git clones");
-    (* RFC-0284: the recovery must name the real Execute affordance, not a
-       phantom "visible clone tool" (no such tool exists in any keeper surface). *)
-    Alcotest.(check bool) "names the real Execute affordance" true
-      (contains_substring msg "Execute");
-    Alcotest.(check bool) "does not point at a non-existent clone tool" false
-      (contains_substring msg "visible clone tool");
-    Alcotest.(check bool) "mentions cwd recovery" true
-      (contains_substring msg "cwd=\"repos/<repo>\"")
+  Alcotest.(check (option string)) "no artificial repo guidance" None error
 
 let test_sandbox_root_git_explicit_repos_target_keeps_cwd () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -1470,38 +1458,25 @@ let test_sandbox_root_git_explicit_repos_target_keeps_cwd () =
     error;
   Alcotest.(check string) "cwd stays sandbox root" playground cwd
 
-(* RFC-0284 §4.1 regression seam: the zero-repo recovery may name exactly one
-   tool — Execute. Assert every "tool" noun in the message is preceded by
-   "Execute". This is a closed invariant over the tool noun, not a blocklist of
-   known-bad phrasings (consistent with the RFC-0042 no-string-classifier
-   lineage): any phantom "<X> tool" with X <> Execute trips it. A phantom
-   phrased without the word "tool" is out of a string seam's reach — the closed
-   cross-producer enforcement is RFC-0284 §4.2 (render_reference routing). *)
-let recovery_names_only_execute_tool msg =
-  let is_tool_noun word = word = "tool" || word = "tool." || word = "tool," in
-  String.split_on_char ' ' msg
-  |> List.fold_left
-       (fun (ok, prev) word -> ok && (not (is_tool_noun word) || prev = "Execute"), word)
-       (true, "")
-  |> fst
-
-let test_sandbox_root_recovery_names_no_phantom_tool () =
+let test_sandbox_root_git_arbitrary_target_allowed () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
-  let _cwd, error =
-    resolve_sandbox_root_git_cwd_string ~config ~meta
-      ~cwd:playground ~cmd:"git status"
+  let assert_allows cmd =
+    let cwd, error =
+      resolve_sandbox_root_git_cwd_string ~config ~meta ~cwd:playground ~cmd
+    in
+    Alcotest.(check string) "cwd remains sandbox root" playground cwd;
+    Alcotest.(check (option string)) "no artificial guidance" None error
   in
-  match error with
-  | None -> Alcotest.fail "expected missing repo guidance"
-  | Some msg ->
-    Alcotest.(check bool)
-      "every tool the recovery names is Execute (closed invariant)" true
-      (recovery_names_only_execute_tool msg);
-    Alcotest.(check bool) "recovery names the real Execute affordance" true
-      (contains_substring msg "Execute")
+  assert_allows "git clone https://github.com/example/repo.git repos/valid/../../escape";
+  assert_allows "git clone https://github.com/example/repo.git repos/valid/../..";
+  assert_allows "git clone https://github.com/example/repo.git repos/..";
+  assert_allows "git clone https://github.com/example/repo.git repos/../escape";
+  assert_allows "git clone https://github.com/example/repo.git repos/valid/subdir";
+  assert_allows "git status repos/valid/subdir/../file";
+  assert_allows "git log ./repos/valid"
 
-let test_sandbox_root_git_cwd_single_repo_auto_chdir () =
+let test_sandbox_root_git_cwd_single_repo_does_not_auto_chdir () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc" in
@@ -1511,12 +1486,8 @@ let test_sandbox_root_git_cwd_single_repo_auto_chdir () =
     resolve_sandbox_root_git_cwd_string ~config ~meta
       ~cwd:playground ~cmd:"git status"
   in
-  let repo =
-    Keeper_alerting_path.normalize_path_for_check repo
-    |> Keeper_alerting_path.strip_trailing_slashes
-  in
   Alcotest.(check (option string)) "no error" None error;
-  Alcotest.(check string) "auto cwd selects the only repo" repo cwd
+  Alcotest.(check string) "cwd stays sandbox root" playground cwd
 
 let test_sandbox_root_git_c_container_path_preflight_uses_host_path () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -1632,14 +1603,10 @@ let test_sandbox_root_git_subcommand_c_is_not_cwd () =
       ~cwd:playground
       ~cmd:"git commit -C HEAD"
   in
-  let repo =
-    Keeper_alerting_path.normalize_path_for_check repo
-    |> Keeper_alerting_path.strip_trailing_slashes
-  in
-  Alcotest.(check string) "subcommand -C keeps single-repo auto cwd" repo cwd;
+  Alcotest.(check string) "subcommand -C keeps sandbox-root cwd" playground cwd;
   Alcotest.(check (option string)) "subcommand -C is not a cwd preflight" None error
 
-let test_sandbox_root_git_cwd_multi_repo_blocks_before_exec () =
+let test_sandbox_root_git_cwd_multi_repo_allows_exec () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   let repos = Filename.concat playground "repos" in
@@ -1654,18 +1621,7 @@ let test_sandbox_root_git_cwd_multi_repo_blocks_before_exec () =
       ~cwd:playground ~cmd:"gh pr list"
   in
   Alcotest.(check string) "cwd remains sandbox root" playground cwd;
-  match error with
-  | None -> Alcotest.fail "expected multi repo cwd guidance"
-  | Some msg ->
-    Alcotest.(check bool) "mentions multiple repos" true
-      (contains_substring msg "multiple sandbox repos");
-    Alcotest.(check bool) "mentions public Execute retry shape" true
-      (contains_substring msg
-         "Execute { \"executable\": \"git\", \"argv\": [\"status\"], \"cwd\": \"repos/alpha\" }");
-    Alcotest.(check bool) "legacy tool_execute retry shape removed" false
-      (contains_substring msg "tool_execute");
-    Alcotest.(check bool) "lists beta too" true
-      (contains_substring msg "alpha, beta")
+  Alcotest.(check (option string)) "no artificial multi-repo guidance" None error
 
 let test_sandbox_root_git_cwd_cd_chain_is_not_interpreted () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -2351,17 +2307,17 @@ let () =
             "turn runtime projects keeper secret directory"
             `Quick test_turn_runtime_projects_keeper_secret_dir;
           Alcotest.test_case
-            "sandbox-root git with no repo blocks before docker exec"
-            `Quick test_sandbox_root_git_cwd_zero_repo_blocks_before_exec;
+            "sandbox-root git with no repo allows docker exec"
+            `Quick test_sandbox_root_git_cwd_zero_repo_allows_exec;
           Alcotest.test_case
             "sandbox-root git with explicit repos target keeps cwd"
             `Quick test_sandbox_root_git_explicit_repos_target_keeps_cwd;
           Alcotest.test_case
-            "sandbox-root recovery names no phantom tool (RFC-0284)"
-            `Quick test_sandbox_root_recovery_names_no_phantom_tool;
+            "sandbox-root git arbitrary target is allowed"
+            `Quick test_sandbox_root_git_arbitrary_target_allowed;
           Alcotest.test_case
-            "sandbox-root git with one repo auto-selects cwd"
-            `Quick test_sandbox_root_git_cwd_single_repo_auto_chdir;
+            "sandbox-root git with one repo does not auto-select cwd"
+            `Quick test_sandbox_root_git_cwd_single_repo_does_not_auto_chdir;
           Alcotest.test_case
             "sandbox-root git -C container path checks host path"
             `Quick
@@ -2387,8 +2343,8 @@ let () =
             `Quick
             test_sandbox_root_git_subcommand_c_is_not_cwd;
           Alcotest.test_case
-            "sandbox-root git with multiple repos gives cwd correction"
-            `Quick test_sandbox_root_git_cwd_multi_repo_blocks_before_exec;
+            "sandbox-root git with multiple repos allows docker exec"
+            `Quick test_sandbox_root_git_cwd_multi_repo_allows_exec;
           Alcotest.test_case
             "sandbox-root git cd-chain is not interpreted by cwd policy"
             `Quick

@@ -126,9 +126,9 @@ let message_to_event (m : Ws_msg.t) =
 ;;
 
 let close_to_event ~code ~reason =
-  (* DET-OK: RFC 6455 §7.1.5 — a Close frame carrying no status code maps to
-     1005 (close_code_no_status, "No Status Received"), a protocol-defined
-     sentinel for an absent code, not a permissive default on unknown input. *)
+  (* RFC 6455 §7.1.5 — a Close frame carrying no status code maps to 1005
+     (close_code_no_status, "No Status Received"), a protocol-defined sentinel
+     for an absent code. DET-OK: not a permissive default on unknown input. *)
   Ev_closed { code = Option.value code ~default:close_code_no_status; reason }
 ;;
 

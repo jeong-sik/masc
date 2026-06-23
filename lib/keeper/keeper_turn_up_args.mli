@@ -15,9 +15,6 @@ type parsed_args =
   { name : string
   ; compaction_profile_opt : string option
   ; goal_opt : string option
-  ; short_goal_opt : string option
-  ; mid_goal_opt : string option
-  ; long_goal_opt : string option
   ; runtime_id_opt : string option
   ; allowed_paths_opt : string list option
   ; autoboot_enabled_opt : bool option

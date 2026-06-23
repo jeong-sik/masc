@@ -439,13 +439,13 @@ describe('keeperActivityDisplay', () => {
 })
 
 describe('keeperWorkPreview', () => {
-  it('prefers a message output over the proactive preview and goals', () => {
+  it('prefers a message output over the proactive preview and goal', () => {
     expect(
       keeperWorkPreview(
         makeKeeper({
           recent_output_preview: '메시지 출력',
           last_proactive_preview: 'proactive',
-          short_goal: '목표',
+          goal: '목표',
         }),
       ),
     ).toBe('메시지 출력')
@@ -465,8 +465,7 @@ describe('keeperWorkPreview', () => {
     ).toBe('Continuation checkpoint saved.')
   })
 
-  it('falls through to short_goal then goal then current_task', () => {
-    expect(keeperWorkPreview(makeKeeper({ short_goal: 'short', goal: 'long' }))).toBe('short')
+  it('falls through to goal then current_task', () => {
     expect(keeperWorkPreview(makeKeeper({ goal: 'long' }))).toBe('long')
     expect(keeperWorkPreview(makeKeeper({ agent: { current_task: 'task-7' } }))).toBe('task-7')
   })

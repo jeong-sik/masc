@@ -110,9 +110,6 @@ let degraded_keeper_snapshot_row (meta : Keeper_meta_contract.keeper_meta) =
      ; "agent_name", `String meta.agent_name
      ; ( "trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
      ; "goal", `String meta.goal
-     ; "short_goal", `String meta.short_goal
-     ; "mid_goal", `String meta.mid_goal
-     ; "long_goal", `String meta.long_goal
      ; "status", `String "degraded"
      ; "agent", `Null
      ; "generation", `Int meta.runtime.generation

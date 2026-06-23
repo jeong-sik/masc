@@ -220,35 +220,6 @@ let normalize_goal_horizon_text ?(max_len = default_goal_horizon_max_chars) (raw
   if s = "" then ""
   else String_util.utf8_prefix ~max_bytes:max_len s
 
-let normalize_goal_horizon_opt (raw_opt : string option) : string option =
-  match raw_opt with
-  | None -> None
-  | Some raw ->
-    let normalized = normalize_goal_horizon_text raw in
-    if normalized = "" then None else Some normalized
-
-let parse_goal_horizon_opt args key : string option =
-  normalize_goal_horizon_opt (get_string_opt args key)
-
-let resolve_goal_horizons
-    ~(goal : string)
-    ~(short_goal_opt : string option)
-    ~(mid_goal_opt : string option)
-    ~(long_goal_opt : string option) : string * string * string =
-  let short_goal =
-    Option.value ~default:goal short_goal_opt
-    |> normalize_goal_horizon_text
-  in
-  let mid_goal =
-    Option.value ~default:goal mid_goal_opt
-    |> normalize_goal_horizon_text
-  in
-  let long_goal =
-    Option.value ~default:goal long_goal_opt
-    |> normalize_goal_horizon_text
-  in
-  (short_goal, mid_goal, long_goal)
-
 let split_semicolon_clauses (raw : string) : string list =
   raw
   |> String.split_on_char ';'

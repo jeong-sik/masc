@@ -220,9 +220,6 @@ let effective_meta_overlay_hash (meta : keeper_meta) =
   let fields =
     [
       ("goal", meta.goal);
-      ("short_goal", meta.short_goal);
-      ("mid_goal", meta.mid_goal);
-      ("long_goal", meta.long_goal);
       ("sandbox_profile", sandbox_profile_to_string meta.sandbox_profile);
       ("sandbox_image", opt_string meta.sandbox_image);
       ("network_mode", network_mode_to_string meta.network_mode);
@@ -789,14 +786,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("name", `String name);
            ("meta", Keeper_meta_json.meta_to_json m);
            ("goal", `String m.goal);
-           ("short_goal", `String m.short_goal);
-           ("mid_goal", `String m.mid_goal);
-           ("long_goal", `String m.long_goal);
-           ("goal_horizons", `Assoc [
-             ("short", `String m.short_goal);
-             ("mid", `String m.mid_goal);
-             ("long", `String m.long_goal);
-           ]);
            ( "persona",
              match m.persona with
              | Some persona when String.trim persona <> "" -> `String persona

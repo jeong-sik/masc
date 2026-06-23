@@ -41,7 +41,7 @@ let find_jsonl_row_by_action_id rows action_id =
          | _ -> None)
 
 let resolved_keeper_args_to_json
-    ~name ~persona_name ~goal ~short_goal ~mid_goal ~long_goal
+    ~name ~persona_name ~goal
     ~instructions
     ~mention_targets
     ~allowed_paths_opt
@@ -55,9 +55,6 @@ let resolved_keeper_args_to_json
       ("name", `String name);
       ("persona_name", `String persona_name);
       ("goal", `String goal);
-      ("short_goal", `String short_goal);
-      ("mid_goal", `String mid_goal);
-      ("long_goal", `String long_goal);
       ("instructions", `String instructions);
       ("mention_targets", Json_util.json_string_list mention_targets);
       ("tool_denylist", Json_util.json_string_list tool_denylist);
@@ -201,9 +198,6 @@ let render_keeper_toml_from_resolved_args (json : Yojson.Safe.t) :
               let fields = append_string_field fields "name" name in
               let fields = append_string_field fields "persona_name" persona_name in
               let fields = append_optional_string_field fields "goal" json in
-              let fields = append_optional_string_field fields "short_goal" json in
-              let fields = append_optional_string_field fields "mid_goal" json in
-              let fields = append_optional_string_field fields "long_goal" json in
               let fields = append_optional_string_field fields "instructions" json in
               let fields =
                 append_optional_bool_field fields "autoboot_enabled" json
@@ -334,24 +328,6 @@ let resolved_keeper_args_from_persona args :
           |> Option.value ~default:""
           |> normalize_goal_horizon_text
         in
-        let short_goal =
-          parse_goal_horizon_opt args "short_goal"
-          |> Dashboard_utils.first_some defaults.short_goal
-          |> Option.value ~default:goal
-          |> normalize_goal_horizon_text
-        in
-        let mid_goal =
-          parse_goal_horizon_opt args "mid_goal"
-          |> Dashboard_utils.first_some defaults.mid_goal
-          |> Option.value ~default:goal
-          |> normalize_goal_horizon_text
-        in
-        let long_goal =
-          parse_goal_horizon_opt args "long_goal"
-          |> Dashboard_utils.first_some defaults.long_goal
-          |> Option.value ~default:goal
-          |> normalize_goal_horizon_text
-        in
         let instructions =
           get_string_opt args "instructions"
           |> Dashboard_utils.first_some defaults.instructions
@@ -408,7 +384,7 @@ let resolved_keeper_args_from_persona args :
                    resolved_keeper_args_to_json
                      ~name
                      ~persona_name
-                     ~goal ~short_goal ~mid_goal ~long_goal
+                     ~goal
                      ~instructions
                      ~mention_targets
                      ~allowed_paths_opt:allowed_paths

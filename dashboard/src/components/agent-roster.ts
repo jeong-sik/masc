@@ -549,7 +549,6 @@ function keeperRuntimeAgentProjection(source: Keeper): RosterAgent | null {
   const liveCurrentTask =
     source.recent_output_preview
     ?? source.recent_input_preview
-    ?? source.short_goal
     ?? source.goal
     ?? null
 

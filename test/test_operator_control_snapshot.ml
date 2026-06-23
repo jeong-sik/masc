@@ -368,7 +368,6 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
                 ("agent_name", `String (Keeper_identity.keeper_agent_name keeper_name));
                 ("trace_id", `String "trace-paused-runtime-trust");
                 ("goal", `String "Expose paused keeper failure in summary");
-                ("short_goal", `String "Expose paused keeper failure in summary");
                 ("runtime_id", `String "runtime.primary");
               ])
         with

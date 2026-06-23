@@ -1131,14 +1131,6 @@ export interface Keeper {
   next_human_action?: string | null
   active_goal_ids?: string[]
   goal?: string | null
-  short_goal?: string | null
-  mid_goal?: string | null
-  long_goal?: string | null
-  goal_horizons?: {
-    short?: string | null
-    mid?: string | null
-    long?: string | null
-  } | null
   sandbox_profile?: 'local' | 'docker' | null
   sandbox_target?: string | null
   sandbox_last_error?: string | null
@@ -1360,9 +1352,6 @@ interface KeeperSupervisorDiagnostics {
 
 interface KeeperConfigPrompt {
   goal: string
-  short_goal: string
-  mid_goal: string
-  long_goal: string
   instructions: string
   system_prompt_blocks: {
     constitution: {

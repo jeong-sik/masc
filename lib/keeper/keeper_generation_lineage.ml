@@ -11,9 +11,6 @@ type continuity_judgment = {
 let identity_fields : (string * (keeper_meta -> string)) list =
   [
     ("goal", (fun m -> m.goal));
-    ("short_goal", (fun m -> m.short_goal));
-    ("mid_goal", (fun m -> m.mid_goal));
-    ("long_goal", (fun m -> m.long_goal));
     ("instructions", (fun m -> m.instructions));
   ]
 

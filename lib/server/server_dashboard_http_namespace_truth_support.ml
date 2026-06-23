@@ -405,18 +405,9 @@ let json_bool_field key json ~default =
 let keeper_live keeper =
   json_bool_field "keepalive_running" keeper ~default:false
 
-let keeper_goal_horizon keeper key =
-  let goal_horizons = json_assoc_field "goal_horizons" keeper in
-  match json_string_field_opt key goal_horizons with
-  | Some _ as value -> value
-  | None -> json_string_field_opt (key ^ "_goal") keeper
-
 let keeper_has_goal keeper =
   json_list_field "active_goal_ids" keeper <> []
   || Option.is_some (json_string_field_opt "goal" keeper)
-  || Option.is_some (keeper_goal_horizon keeper "short")
-  || Option.is_some (keeper_goal_horizon keeper "mid")
-  || Option.is_some (keeper_goal_horizon keeper "long")
 
 let keeper_actor_names keeper =
   [ json_string_field_opt "name" keeper; json_string_field_opt "agent_name" keeper ]

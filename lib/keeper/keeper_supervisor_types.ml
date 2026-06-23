@@ -68,9 +68,6 @@ let keeper_defaults_have_inline_identity
     (defaults : Keeper_types_profile.keeper_profile_defaults)
   =
   Option.is_some defaults.goal
-  || Option.is_some defaults.short_goal
-  || Option.is_some defaults.mid_goal
-  || Option.is_some defaults.long_goal
   || Option.is_some defaults.instructions
   || defaults.mention_targets <> []
 ;;

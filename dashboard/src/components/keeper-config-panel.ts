@@ -73,9 +73,6 @@ const saveError = signal<string | null>(null)
 // Draft values for editable fields (only used in edit mode)
 type EditDraft = {
   goal: string
-  short_goal: string
-  mid_goal: string
-  long_goal: string
   instructions: string
 }
 
@@ -142,9 +139,6 @@ export function filterHookSlots(
 function initDraftFromConfig(c: KeeperConfig): EditDraft {
   return {
     goal: c.prompt.goal,
-    short_goal: c.prompt.short_goal,
-    mid_goal: c.prompt.mid_goal,
-    long_goal: c.prompt.long_goal,
     instructions: c.prompt.instructions,
   }
 }
@@ -160,9 +154,6 @@ function buildPayload(draft: EditDraft, orig: KeeperConfig): KeeperConfigUpdateP
     }
   }
   setIfChanged('goal')
-  setIfChanged('short_goal')
-  setIfChanged('mid_goal')
-  setIfChanged('long_goal')
   setIfChanged('instructions')
   return payload
 }
@@ -982,26 +973,11 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   const promptSection = isEditing ? html`
     <${MajorSectionHeader} title="프롬프트 (편집)" />
     <${EditTextarea} field="goal" label="목표" rows=${8} />
-    <${EditTextarea} field="short_goal" label="단기 목표" rows=${5} />
-    <${EditTextarea} field="mid_goal" label="중기 목표" rows=${5} />
-    <${EditTextarea} field="long_goal" label="장기 목표" rows=${5} />
     <${EditTextarea} field="instructions" label="지시사항" rows=${10} />
   ` : html`
     <${MajorSectionHeader} title="프롬프트" />
     <${SectionHeader} size="xs" class="mb-0.5">목표</${SectionHeader}>
     <${LongText} text=${c.prompt.goal} />
-    ${c.prompt.short_goal ? html`
-      <${SectionHeader} size="xs" class="mt-2 mb-0.5">단기 목표</${SectionHeader}>
-      <${LongText} text=${c.prompt.short_goal} />
-    ` : null}
-    ${c.prompt.mid_goal ? html`
-      <${SectionHeader} size="xs" class="mt-2 mb-0.5">중기 목표</${SectionHeader}>
-      <${LongText} text=${c.prompt.mid_goal} />
-    ` : null}
-    ${c.prompt.long_goal ? html`
-      <${SectionHeader} size="xs" class="mt-2 mb-0.5">장기 목표</${SectionHeader}>
-      <${LongText} text=${c.prompt.long_goal} />
-    ` : null}
     ${c.prompt.instructions ? html`
       <${SectionHeader} size="xs" class="mt-2 mb-0.5">지시사항</${SectionHeader}>
       <${LongText} text=${c.prompt.instructions} />

@@ -206,9 +206,7 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                       ("last_turn_ago_s", member_assoc "last_turn_ago_s" keeper);
                       ( "current_work",
                         Json_util.string_opt_to_json
-                          (match String_util.trim_to_option (string_field "short_goal" keeper) with
-                           | Some value -> Some value
-                           | None -> String_util.trim_to_option (string_field "goal" keeper)) );
+                          (String_util.trim_to_option (string_field "goal" keeper)) );
                       ("last_autonomous_action_at", member_assoc "last_autonomous_action_at" keeper);
                     ]
                     @ keeper_tool_audit_json_fields config registry_lookup keeper

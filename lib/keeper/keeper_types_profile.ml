@@ -141,9 +141,6 @@ let persona_operator_todo_placeholder_fields
       ("role", summary.role);
       ("trait", summary.trait);
       ("keeper.goal", defaults.goal);
-      ("keeper.short_goal", defaults.short_goal);
-      ("keeper.mid_goal", defaults.mid_goal);
-      ("keeper.long_goal", defaults.long_goal);
     ]
 
 let keeper_toml_path_opt name =

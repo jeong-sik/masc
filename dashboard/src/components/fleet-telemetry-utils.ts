@@ -238,15 +238,7 @@ function keeperRecentTools(keeper: Keeper): string[] {
 }
 
 function keeperGoalLabel(keeper: Keeper): string | null {
-  return firstNonEmptyString(
-    keeper.short_goal,
-    keeper.goal_horizons?.short,
-    keeper.goal,
-    keeper.mid_goal,
-    keeper.goal_horizons?.mid,
-    keeper.long_goal,
-    keeper.goal_horizons?.long,
-  )
+  return firstNonEmptyString(keeper.goal)
 }
 
 function keeperToolCallCount(keeper: Keeper, toolQualityCalls?: number): number {

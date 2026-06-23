@@ -74,56 +74,53 @@ against a live runtime (see below).
 
 Re-run the same command after a fix; the amplification should drop below `MAX_AMP`.
 
-## Keeper-load injection (WIP — provider mock done, autoboot wiring pending)
+## Mode B: keeper-load gate (`keeper_load_gate.sh`)
 
-`mock_openai_provider.py` is a network-free OpenAI-compatible provider for driving real keeper
-turns in a boot harness, so the gate can reproduce the faithful keeper-vs-serving contention
-(RFC-0204 §5) instead of the milder serving-only regime an idle (autoboot-disabled) boot produces.
-It serves `POST /v1/chat/completions` in both modes: non-streaming JSON (the
-`backend_openai_request.ml` default `?(stream = false)` path) and SSE `chat.completion.chunk`
-frames when the request sets `stream:true`. Every request is logged one-JSON-line to `--log` so a
-harness can count provider calls = turns fired.
+Mode A drives the main domain with serving load only; an idle (autoboot-disabled) boot has no
+keeper compute, so its absolute regime is milder than production. Mode B seeds N declarative
+keepers that run **real autonomous turns** against `mock_openai_provider.py` (network-free), then
+probes `/health` while those keepers and optional host hogs contend for the one main Eio domain.
 
 ```bash
-python3 scripts/harness/perf/mock_openai_provider.py --port 8899 --log /tmp/mock.jsonl --delay-ms 0
+scripts/harness/perf/keeper_load_gate.sh --keepers 12 --levels "0 15" --probes 25
 ```
 
-**What is verified to work:** the server boots against this mock with a runtime.toml that routes a
-catalog-valid model id to the mock endpoint. `Runtime.init_default_strict` (the OAS capability
-gate, `server_runtime_bootstrap.ml`) rejects any model whose `api-name` is not in the OAS catalog
-(`oas-models.toml`), so the runtime.toml must **borrow a real catalog id** while pointing its
-provider at the mock:
+`mock_openai_provider.py` serves `POST /v1/chat/completions` in both non-streaming JSON (the
+`backend_openai_request.ml` default `?(stream = false)` path) and SSE `chat.completion.chunk` modes
+(`stream:true`), logging one JSON line per request so the gate counts provider calls = turns fired.
 
-```toml
-[runtime]
-default = "mock.mockmodel"
-[providers.mock]
-protocol = "openai-compatible-http"
-endpoint = "http://127.0.0.1:8899"
-[models.mockmodel]
-api-name = "deepseek-v4-flash"   # must be an oas-models.toml id_prefix
-[models.mockmodel.capabilities]
-supports-native-streaming = true
-[mock.mockmodel]
-is-default = true
-```
+**The boot recipe (verified — keepers issue real turns; FSM reaches `awaiting_provider -> streaming`):**
 
-Boot env (note: do **not** use `harness_start_server`, which hardcodes the bootstrap off; boot the
-exe directly): `MASC_KEEPER_BOOTSTRAP_ENABLED=true`, `MASC_ORCHESTRATOR_ENABLED=1`,
-`MASC_KEEPER_HEARTBEAT_INTERVAL_SEC=5`, `MASC_STORAGE_TYPE=filesystem`, plus a keeper TOML under
-`$BASE/.masc/config/keepers/` and a persona dir under `$BASE/.masc/config/personas/`.
+1. **runtime.toml must borrow a catalog-valid model id.** `Runtime.init_default_strict`
+   (`server_runtime_bootstrap.ml`) rejects any model whose `api-name` is absent from the OAS catalog
+   (`oas-models.toml`). Set `api-name = "deepseek-v4-flash"` (a catalog `id_prefix`) while pointing
+   the provider `endpoint` at the local mock.
+2. **The keeper TOML must opt into autoboot.** Declarative keepers are excluded by design unless the
+   `[keeper]` section sets `autoboot_enabled = true` (`keeper_runtime.ml:154`) **and**
+   `proactive_enabled = true` (`keeper_activation_readiness.ml:16`, with `paused` false). A copied
+   live config (e.g. `analyst.toml`, which ships `autoboot_enabled = false`) yields `0 keeper(s) to
+   boot`.
+3. **The keeper TOML must set `sandbox_profile = "local"`** (or `"docker"`) — boot rejects without it.
+4. Boot env: `MASC_KEEPER_BOOTSTRAP_ENABLED=true`, `MASC_ORCHESTRATOR_ENABLED=1`,
+   `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC=<n>`, `MASC_STORAGE_TYPE=filesystem`. Boot the exe directly —
+   **not** via `harness_start_server`, which hardcodes the bootstrap off. (`MASC_AUTONOMY_ENABLED`
+   does not exist in the code; the lib sets it as a harmless no-op.)
+5. A persona directory must exist under `$BASE/.masc/config/personas/<persona_name>/`; the gate
+   copies a real one (`analyst`) to avoid format guessing.
 
-**The remaining blocker (the documented next step):** declarative (config-TOML) keepers are
-excluded from autoboot by design — `keeper_runtime.ml:154 autoboot_exclusion_reason` returns
-`declarative_autoboot_disabled` unless the keeper profile sets `autoboot_enabled = true`, and
-`keeper_activation_readiness.ml:16` also requires `proactive.enabled = true` and `paused = false`.
-A copied live keeper config (e.g. `analyst.toml`) boots the server but yields `0 keeper(s) to boot`
-for this reason. Finishing path (b) means: (1) author a keeper TOML with `autoboot_enabled` /
-`proactive_enabled` set (field parsed under `lib/keeper/` `profile_defaults_for_config`), (2)
-confirm a turn actually issues a provider call (the mock log goes non-empty), then (3) wire a
-`--with-keepers` mode into the gate that starts the mock, seeds configs, and boots with the env
-above. This was stopped at the 3-Try boundary after the gate/boot succeeded but autoboot stayed
-disabled; it is a bounded two-flag fix plus a work-discovery liveness check, not a new approach.
+The gate refuses to report numbers if zero provider calls are seen during warmup (the mock wiring
+is then broken), and it records a `turns_during` column per level.
+
+**Known limitation (the gate self-warns):** keepers do an initial autoboot burst, then their
+scheduled-autonomous cadence outruns the short `/health` probe window, so `turns_during` is
+typically 0 at the measured levels — the measurement overlaps keepers *resident* but not *mid-turn*,
+which is only marginally more faithful than Mode A. A GREEN verdict under that condition is weak and
+the gate prints a `WARN` saying so. Two refinements make it bite: (1) drive **continuous** turns via
+the reactive channel (inject board activity) rather than relying on the scheduled-autonomous cadence;
+(2) have the mock return **large, realistic responses** (with tool calls) so the post-await parsing /
+record-write / snapshot work — which is the real keeper main-domain cost, since the provider await
+itself is I/O-bound and yields — actually loads the domain. `--mock-delay-ms` lengthens the await but
+does not add main-domain CPU.
 
 ## Other limitations
 

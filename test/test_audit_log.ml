@@ -112,7 +112,9 @@ let test_codec_roundtrip_simple_actions () =
   action_roundtrip "AuthFailure" Audit_log.AuthFailure "auth_failure";
   action_roundtrip "CircuitOpen" Audit_log.CircuitOpen "circuit_open";
   action_roundtrip "CircuitClose" Audit_log.CircuitClose "circuit_close";
-  action_roundtrip "SearchRefinement" Audit_log.SearchRefinement "search_refinement"
+  action_roundtrip "SearchRefinement" Audit_log.SearchRefinement "search_refinement";
+  action_roundtrip "RuntimeConfigWrite" Audit_log.RuntimeConfigWrite
+    "runtime_config_write"
 
 let test_codec_roundtrip_parametric_actions () =
   action_roundtrip "ToolCall"
@@ -152,6 +154,48 @@ let test_codec_empty_payload () =
   let decoded_tc = Audit_log.string_to_action "tool_call:" in
   check string "empty ToolCall payload" "tool_call:" (Audit_log.action_to_string decoded_tc)
 
+(* RFC-0273 §3.3 — the dashboard runtime.toml write logs a RuntimeConfigWrite
+   action. Lock the operator-facing event projection: kind/summary/target must
+   surface the config path (not the body, which can carry provider secrets).
+   Severity must be "warn" even on success: a runtime.toml write rewrites global
+   keeper routing (RFC-0273 §3.2, highest-risk surface), so it must rank above
+   routine info events in a severity-filtered audit scan. Without this assertion
+   a wildcard refactor in [audit_severity] could silently demote it to "info". *)
+let test_runtime_config_write_event_projection () =
+  let entry : Audit_log.audit_entry =
+    {
+      timestamp = 1_700_000_000.0;
+      agent_id = "operator";
+      action = Audit_log.RuntimeConfigWrite;
+      workspace_id = None;
+      details =
+        `Assoc
+          [
+            ("path", `String "/x/config/runtime.toml");
+            ("bytes", `Int 100);
+            ("lines", `Int 5);
+          ];
+      outcome = Audit_log.Success;
+      cost_estimate = None;
+      token_count = None;
+      trace_id = None;
+    }
+  in
+  let json = Audit_log.audit_event_json entry in
+  let field key =
+    match json with
+    | `Assoc fields -> (
+        match List.assoc_opt key fields with
+        | Some (`String v) -> v
+        | _ -> failf "missing string field %s" key)
+    | _ -> failf "audit_event_json is not an object"
+  in
+  check string "kind" "runtime_config_write" (field "kind");
+  check string "summary" "runtime.toml updated: /x/config/runtime.toml"
+    (field "summary");
+  check string "target" "/x/config/runtime.toml" (field "target");
+  check string "severity" "warn" (field "severity")
+
 let () =
   run "Audit_log"
     [
@@ -172,5 +216,7 @@ let () =
             test_codec_unknown_preserves_wire;
           test_case "empty payload edge case" `Quick
             test_codec_empty_payload;
+          test_case "runtime_config_write event projection" `Quick
+            test_runtime_config_write_event_projection;
         ] );
     ]

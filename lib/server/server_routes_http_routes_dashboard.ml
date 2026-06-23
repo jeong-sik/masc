@@ -161,6 +161,19 @@ let runtime_config_raw_json ~path ~source_text ~reloaded =
     ; ("reloaded", `Bool reloaded)
     ]
 
+(* Line count for the audit [lines] metric. [String.split_on_char '\n'] counts a
+   trailing newline as an extra empty line ("a\nb\n" -> 3 elements), so count
+   newline-separated lines treating a final '\n' as terminating the last line
+   rather than starting a new one ("a\nb\n" -> 2). *)
+let runtime_config_line_count text =
+  if String.length text = 0
+  then 0
+  else (
+    let newlines =
+      String.fold_left (fun n c -> if Char.equal c '\n' then n + 1 else n) 0 text
+    in
+    if Char.equal text.[String.length text - 1] '\n' then newlines else newlines + 1)
+
 let parse_runtime_config_raw_body body_str =
   try
     match Yojson.Safe.from_string body_str with
@@ -346,18 +359,55 @@ let add_routes ~sw ~clock router =
          request reqd)
   |> Http.Router.post "/api/v1/runtime/config/raw" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state _agent_name req reqd ->
+         (fun state agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
              match parse_runtime_config_raw_body body_str with
              | Error msg ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
              | Ok source_text ->
+               (* RFC-0273 §3.3 — record the runtime.toml write to the governance
+                  audit trail (actor + path + size) on top of the CanAdmin gate.
+                  The config body is deliberately excluded: runtime.toml can carry
+                  provider secrets (RFC-0132 redaction). Accountability is a side
+                  effect that must never fail the primary write's response, so
+                  audit I/O errors (ENOSPC/EACCES) are demoted to a warning — by
+                  this point the routing change is already live (or already
+                  rejected), and a propagated 5xx would make the operator resubmit
+                  a committed change. Both outcomes are logged: a rejected
+                  CanAdmin routing change is itself a governance signal. *)
+               let audit_runtime_write ?path ~text ~outcome () =
+                 try
+                   Audit_log.log_action
+                     (Mcp_server.workspace_config state)
+                     ~agent_id:agent_name
+                     ~action:Audit_log.RuntimeConfigWrite
+                     ~details:
+                       (`Assoc
+                          ((match path with
+                            | Some p -> [ ("path", `String p) ]
+                            | None -> [])
+                          @ [ ("bytes", `Int (String.length text))
+                            ; ("lines", `Int (runtime_config_line_count text))
+                            ]))
+                     ~outcome
+                     ()
+                 with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
+                   Log.Dashboard.warn
+                     "runtime.toml audit log failed: %s"
+                     (Printexc.to_string exn)
+               in
                (match Runtime_config_file.save_config_text source_text with
                 | Error msg ->
+                  audit_runtime_write ~text:source_text
+                    ~outcome:(Audit_log.Failure msg) ();
                   respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
                 | Ok () ->
                   (match Runtime_config_file.load_config_text () with
                    | Ok (path, saved_text) ->
+                     audit_runtime_write ~path ~text:saved_text
+                       ~outcome:Audit_log.Success ();
                      Http.Response.json_value ~compress:true ~request:req
                        (runtime_config_raw_json
                           ~path

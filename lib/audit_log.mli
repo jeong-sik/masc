@@ -56,6 +56,7 @@ type action =
   | CircuitClose
   | SearchRefinement
   | GovernanceDecision of governance_audit_decision
+  | RuntimeConfigWrite
   | Custom of string
   | Unknown of string
 [@@deriving tla]

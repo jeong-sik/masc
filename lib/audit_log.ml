@@ -44,6 +44,7 @@ type action =
   | CircuitClose [@tla.symbol "circuit_close"]
   | SearchRefinement [@tla.symbol "search_refinement"]
   | GovernanceDecision of governance_audit_decision [@tla.symbol "governance_decision"]
+  | RuntimeConfigWrite [@tla.symbol "runtime_config_write"]
   | Custom of string [@tla.symbol "custom"]
   | Unknown of string [@tla.symbol "unknown"]
 [@@deriving tla]
@@ -103,6 +104,7 @@ let action_to_string = function
   | SearchRefinement -> "search_refinement"
   | GovernanceDecision decision ->
       "governance_decision:" ^ governance_audit_decision_to_string decision
+  | RuntimeConfigWrite -> "runtime_config_write"
   | Custom name -> "custom:" ^ name
   | Unknown raw -> raw
 
@@ -142,6 +144,7 @@ let string_to_action s =
      | "circuit_open" -> CircuitOpen
      | "circuit_close" -> CircuitClose
      | "search_refinement" -> SearchRefinement
+     | "runtime_config_write" -> RuntimeConfigWrite
      | _ -> unknown_action s)
 
 let outcome_to_json = function
@@ -320,6 +323,12 @@ let audit_severity ~action ~outcome =
       | Governance_deny | Governance_unauthorized -> "warn"
       | _ -> "info")
     | CircuitClose -> "warn"
+    (* A successful runtime.toml write rewrites global keeper routing
+       (RFC-0273 §3.2: the highest-risk surface). Surface it above
+       routine info events so a severity-filtered audit scan catches it,
+       consistent with [CircuitClose] elevating a significant successful
+       transition to "warn". *)
+    | RuntimeConfigWrite -> "warn"
     | _ -> "info")
 
 (** Build a human-readable one-line summary from action + details. *)
@@ -354,6 +363,10 @@ let audit_summary ~action ~details =
     (match extract_str "task_id" with
      | Some id -> Printf.sprintf "cancel_task %s" id
      | None -> "cancel_task")
+  | RuntimeConfigWrite ->
+    (match extract_str "path" with
+     | Some p -> Printf.sprintf "runtime.toml updated: %s" p
+     | None -> "runtime.toml updated")
   | _ -> kind
 
 (** Extract primary target from action + details, if any. *)
@@ -371,6 +384,7 @@ let audit_target ~action ~details =
   | ClaimTask | StartTask | DoneTask | CancelTask | ReleaseTask ->
     extract_str "task_id"
   | Suspend -> extract_str "target_agent"
+  | RuntimeConfigWrite -> extract_str "path"
   | Custom _ -> extract_str "tool_name"
   | _ -> None
 

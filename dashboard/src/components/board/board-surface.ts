@@ -746,14 +746,14 @@ function BdThreadDetail({
 function BdDetail({
   post,
   detailWidth,
-  mentionMobileOpen,
+  mentionsOpen,
   onDetailWidthChange,
   onClose,
   onCloseMentions,
 }: {
   post: BoardPost | null
   detailWidth: number
-  mentionMobileOpen: boolean
+  mentionsOpen: boolean
   onDetailWidthChange: (width: number) => void
   onClose: () => void
   onCloseMentions: () => void
@@ -766,8 +766,13 @@ function BdDetail({
       onClose=${onClose}
     />
   `
+  // No post selected and the mention inbox is closed: render nothing so the
+  // detail grid track collapses to 0 (two-column rail + feed). The mention
+  // inbox is reachable from the rail (bd-queue-mentions). Matches the v2
+  // prototype, which only expands the detail column on demand.
+  if (!mentionsOpen) return null
   return html`
-    <aside class=${`bd-detail is-mentions ${mentionMobileOpen ? 'is-mobile-open' : ''}`} data-testid="bd-mention-detail">
+    <aside class="bd-detail is-mentions is-mobile-open" data-testid="bd-mention-detail">
       <${BdDetailResizeHandle} width=${detailWidth} onWidthChange=${onDetailWidthChange} />
       <div class="bd-detail-h">
         <h3>멘션 인박스</h3>
@@ -1396,7 +1401,11 @@ function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => v
 
 // ── Main Board component (public API) ──────────────────────────────
 export function BoardSurface() {
-  const [mobileMentionInboxOpen, setMobileMentionInboxOpen] = useState(false)
+  // The mention inbox opens on demand (from the rail's bd-queue-mentions button),
+  // on desktop and mobile alike. When neither a post nor the mention inbox is open
+  // the detail column collapses to a two-column rail + feed layout — see the
+  // --bd-detail-width computation below. Matches the standalone v2 prototype.
+  const [mentionInboxOpen, setMentionInboxOpen] = useState(false)
   const [detailWidth, setDetailWidth] = useState<number>(readStoredBoardDetailWidth)
   useEffect(() => () => { selectedPostIds.value = new Set() }, [])
   useEffect(() => registerBoardHearthsRefresh(() => {
@@ -1494,7 +1503,7 @@ export function BoardSurface() {
 
   function openMentionInbox(): void {
     selectedBoardPostId.value = null
-    setMobileMentionInboxOpen(true)
+    setMentionInboxOpen(true)
   }
 
   function setPersistentDetailWidth(width: number): void {
@@ -1503,17 +1512,30 @@ export function BoardSurface() {
     writeStoredBoardDetailWidth(normalized)
   }
 
+  // Detail column is reserved only when a post thread or the mention inbox is
+  // open; otherwise the grid track collapses to 0 (two-column rail + feed).
+  const detailOpen = !!selectedPost || mentionInboxOpen
+
   return html`
     <div
       class="v2-board-surface ss-surface bg-surface-page text-text-primary"
       data-detail-width=${String(detailWidth)}
+      data-detail-open=${String(detailOpen)}
     >
-      <div class="bd-body" style=${`--bd-detail-width: ${detailWidth}px;`}>
+      <!-- Collapse is driven by the inline --bd-detail-width custom property
+           (0 when no detail is open), which BOTH the legacy board-v2.css and the
+           keeper-v2 surfaces.css .bd-body grids consume as their third track.
+           This is the single source of truth: it does not depend on a separate
+           .no-detail rule winning a same-specificity (0,2,0) cascade by load
+           order (the #22098/#22103 split-brain), and it survives the legacy
+           board-v2.css removal (main.ts:114 migration). -->
+      <div class="bd-body" style=${`--bd-detail-width: ${detailOpen ? detailWidth : 0}px;`}>
         <${BdRail}
           activeSub=${activeSub}
           onSub=${(sub: string) => {
             boardHearthFilter.value = sub
             selectedBoardPostId.value = null
+            setMentionInboxOpen(false)
             refreshBoard()
           }}
           onMentions=${openMentionInbox}
@@ -1522,10 +1544,10 @@ export function BoardSurface() {
         <${BdDetail}
           post=${selectedPost}
           detailWidth=${detailWidth}
-          mentionMobileOpen=${mobileMentionInboxOpen}
+          mentionsOpen=${mentionInboxOpen}
           onDetailWidthChange=${setPersistentDetailWidth}
           onClose=${() => { selectedBoardPostId.value = null }}
-          onCloseMentions=${() => setMobileMentionInboxOpen(false)}
+          onCloseMentions=${() => setMentionInboxOpen(false)}
         />
       </div>
     </div>

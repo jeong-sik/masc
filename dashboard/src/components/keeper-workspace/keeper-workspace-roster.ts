@@ -23,6 +23,7 @@ import { phaseTone, phasePulse } from '../v2/keeper-fsm'
 import {
   keeperBucket,
   keeperPhaseLabel,
+  keeperRuntimeLabel,
   type KeeperBucket,
 } from './keeper-workspace-shared'
 
@@ -30,6 +31,7 @@ type RosterFilter = 'all' | 'run' | 'att'
 type RosterSort = 'status' | 'name' | 'att'
 type KeeperWorkspaceRouteSurface = 'monitoring' | 'keepers'
 type RosterMenuState = { keeper: Keeper; x: number; y: number } | null
+type RosterHoverState = { keeper: Keeper; x: number; y: number } | null
 type RosterFleetSummary = {
   total: number
   running: number
@@ -200,14 +202,20 @@ function MiniRosterRow({
   active,
   onSelect,
   onMenu,
+  onHover,
 }: {
   keeper: Keeper
   active: boolean
   onSelect: (name: string) => void
   onMenu: (keeper: Keeper, event: MouseEvent) => void
+  onHover?: (keeper: Keeper | null, event?: MouseEvent) => void
 }) {
   const bucket = keeperBucket(keeper)
   const label = `${keeper.name} · ${phaseText(keeper)}`
+  const updateHover = (event: MouseEvent) => {
+    onHover?.(keeper, event)
+    event.stopPropagation()
+  }
   return html`
     <button
       type="button"
@@ -217,6 +225,9 @@ function MiniRosterRow({
       title=${label}
       onClick=${() => onSelect(keeper.name)}
       onContextMenu=${(event: MouseEvent) => onMenu(keeper, event)}
+      onMouseEnter=${updateHover}
+      onMouseMove=${updateHover}
+      onMouseLeave=${() => onHover?.(null)}
     >
       <${SigilBadge} slot=${kSlot(keeper.name)} sigil=${kSigil(keeper.name)} size=${38} beat=${bucket === 'running'} title=${keeper.name} />
     </button>
@@ -298,6 +309,27 @@ function KeeperRosterMenu({
   `
 }
 
+function RosterFlyout({ state }: { state: Exclude<RosterHoverState, null> }): VNode {
+  const k = state.keeper
+  const basepath = keeperBasepath(k)
+  const runtime = keeperRuntimeLabel(k)
+  const att = attentionCount(k)
+  return html`
+    <div class="kp-flyout" style=${{ left: `${state.x}px`, top: `${state.y}px` }}>
+      <div class="kpf-h">
+        <${SigilBadge} slot=${kSlot(k.name)} sigil=${kSigil(k.name)} size=${26} title=${k.name} />
+        <div class="kpf-id">
+          <div class="kpf-name">${k.name}</div>
+          <div class="kpf-phase"><${Dot} state=${phaseTone(k.lifecycle_phase)} pulse=${phasePulse(k.lifecycle_phase)} />${phaseText(k)}</div>
+        </div>
+      </div>
+      ${basepath ? html`<div class="kpf-row"><span class="kpf-k">basepath</span><span class="mono">${basepath}</span></div>` : null}
+      ${runtime ? html`<div class="kpf-row"><span class="kpf-k">runtime</span><span class="mono">${runtime}</span></div>` : null}
+      ${att > 0 ? html`<div class="kpf-att">${'⚠'} 주의 ${att}건</div>` : null}
+    </div>
+  `
+}
+
 export function KeeperWorkspaceRoster({
   activeName,
   onSelect,
@@ -316,6 +348,17 @@ export function KeeperWorkspaceRoster({
   const [filter, setFilter] = useState<RosterFilter>('all')
   const [sort, setSort] = useState<RosterSort>('status')
   const [menu, setMenu] = useState<RosterMenuState>(null)
+  const [peek, setPeek] = useState(false)
+  const [hover, setHover] = useState<RosterHoverState>(null)
+
+  const handleMiniHover = (keeper: Keeper | null, event?: MouseEvent) => {
+    if (!keeper || !event) {
+      setHover(null)
+      return
+    }
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+    setHover({ keeper, x: rect.right + 10, y: rect.top + rect.height / 2 })
+  }
 
   useEffect(() => {
     if (!menu) return
@@ -424,11 +467,25 @@ export function KeeperWorkspaceRoster({
   }
 
   return html`
-    <aside class=${`roster${mini ? ' mini' : ''}`} aria-label="키퍼 로스터">
-      ${mini
-        ? html`<div class="roster-list mini-list">
-            ${miniRows.map(k => html`<${MiniRosterRow} key=${k.name} keeper=${k} active=${k.name === activeName} onSelect=${select} onMenu=${openMenu} />`)}
-          </div>`
+    <aside
+      class=${`roster${mini ? ' mini' : ''}${mini && peek ? ' peek' : ''}`}
+      aria-label="키퍼 로스터"
+      onMouseEnter=${mini ? () => setPeek(true) : undefined}
+      onMouseLeave=${mini ? () => { setPeek(false); setHover(null) } : undefined}
+    >
+      ${mini && !peek
+        ? html`
+          <div class="roster-list mini-list">
+            ${miniRows.map(k => html`<${MiniRosterRow}
+              key=${k.name}
+              keeper=${k}
+              active=${k.name === activeName}
+              onSelect=${select}
+              onMenu=${openMenu}
+              onHover=${handleMiniHover}
+            />`)}
+          </div>
+        `
         : html`
           <div class="roster-filters" role="group" aria-label="상태 필터">
             ${filterChips.map(chip => html`
@@ -497,6 +554,7 @@ export function KeeperWorkspaceRoster({
             onOpenConfig=${onOpenConfig}
           />`
         : null}
+      ${hover && mini && !peek ? html`<${RosterFlyout} state=${hover} />` : null}
     </aside>
   `
 }

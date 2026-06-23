@@ -470,6 +470,14 @@ export function SettingsSurface() {
   const [maxPar, setMaxPar] = useState(6)
   const [compactAt, setCompactAt] = useState(85)
   const [autoCompact, setAutoCompact] = useState(true)
+  const [rtEditorOpen, setRtEditorOpen] = useState(false)
+
+  const runtimeStats = {
+    ids: runtimeDefaults?.runtimes.length ?? 0,
+    providers: new Set(runtimeDefaults?.runtimes.map(r => r.provider) ?? []).size,
+    models: new Set(runtimeDefaults?.runtimes.map(r => r.model) ?? []).size,
+    default: runtimeDefaults?.default_runtime_id ?? '—',
+  }
 
   useEffect(() => {
     let active = true
@@ -720,19 +728,21 @@ export function SettingsSurface() {
             `}
 
             ${sec === 'runtimes' && html`
-              <div class="settings-runtime-live" data-testid="settings-runtime-live">
-                <div class="settings-runtime-live-h">
-                  <div>
-                    <div class="set-sub-h">Live runtime.toml</div>
-                    <div class="set-hint">
-                      Runtime targets, providers, model bindings, routing lanes, and keeper assignments are edited through
-                      the same API-backed runtime.toml editor used by the Runtime surface.
-                    </div>
-                  </div>
-                  <span class="settings-runtime-live-source mono">/api/v1/runtime/config/raw</span>
+              <div class="set-rt-launch" data-testid="settings-runtime-launch">
+                <h3>런타임 편집기</h3>
+                <p>
+                  provider × model × binding 구조의 실제
+                  <span class="mono">config/runtime.toml</span>을 편집 — 라우팅 레인, 프로바이더, 모델 능력, 바인딩(런타임 id), keeper 배정.
+                </p>
+                <div class="set-rt-launch-stats">
+                  <div class="set-rt-launch-stat"><span class="v mono">${runtimeStats.ids}</span><span class="k">런타임 id</span></div>
+                  <div class="set-rt-launch-stat"><span class="v mono">${runtimeStats.providers}</span><span class="k">프로바이더</span></div>
+                  <div class="set-rt-launch-stat"><span class="v mono">${runtimeStats.models}</span><span class="k">모델</span></div>
                 </div>
-                <${RuntimeTomlEditor} />
+                <div class="set-mcp-detail mono" style=${{ marginBottom: '14px' }}>default = ${runtimeStats.default}</div>
+                <button type="button" class="set-rt-open" onClick=${() => setRtEditorOpen(true)} data-testid="settings-open-runtime-editor">런타임 편집기 열기 →</button>
               </div>
+              ${rtEditorOpen ? html`<${RuntimeTomlEditor} onClose=${() => setRtEditorOpen(false)} />` : null}
             `}
 
             ${sec === 'routing' && html`

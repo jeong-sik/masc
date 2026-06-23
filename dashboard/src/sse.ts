@@ -17,6 +17,7 @@ import {
 } from './journal-entry'
 import { appendLiveToolCall } from './components/session-trace/session-trace-live-store'
 import { scheduleSessionTraceReload } from './components/session-trace/session-trace-state'
+import { recordSseCompaction } from './components/keeper-workspace/compaction-snapshots'
 import { appendAuditEntry } from './live-store'
 import { isCrashedPhase } from './lib/keeper-predicates'
 import { dashboardBearerToken } from './api/core'
@@ -613,9 +614,27 @@ function handleEvent(event: SSEEvent): void {
         },
       )
       break
-    case 'keeper_compaction':
+    case 'keeper_compaction': {
+      const keeperNameCompaction = event.name ?? agent
+      const beforeTokCompaction =
+        typeof event.before_tokens === 'number' && Number.isFinite(event.before_tokens)
+          ? event.before_tokens
+          : null
+      const afterTokCompaction =
+        typeof event.after_tokens === 'number' && Number.isFinite(event.after_tokens)
+          ? event.after_tokens
+          : typeof event.saved_tokens === 'number' && Number.isFinite(event.saved_tokens) && beforeTokCompaction != null
+            ? Math.max(0, beforeTokCompaction - event.saved_tokens)
+            : null
+      recordSseCompaction(
+        keeperNameCompaction,
+        beforeTokCompaction,
+        afterTokCompaction,
+        event.trigger ?? '자동',
+        asString((event as unknown as Record<string, unknown>).runtime) ?? '—',
+      )
       addTypedJournalEntry(
-        event.name ?? agent,
+        keeperNameCompaction,
         `Compaction saved ${event.saved_tokens ?? '?'} tokens (${event.trigger ?? '?'})`,
         'keepers',
         'keeper_compaction',
@@ -623,11 +642,12 @@ function handleEvent(event: SSEEvent): void {
           severity: event.severity,
           source: event.source,
           narrativeText:
-            `${actorLabel(event.name ?? agent)}가 context compaction을 수행했습니다`
+            `${actorLabel(keeperNameCompaction)}가 context compaction을 수행했습니다`
             + ` (${event.saved_tokens ?? '?'} tokens, ${event.trigger ?? '?'})`,
         },
       )
       break
+    }
     case 'keeper_guardrail':
       addTypedJournalEntry(
         event.name ?? agent,
@@ -903,6 +923,13 @@ function handleEvent(event: SSEEvent): void {
       const before = asNumber(p.before_tokens)
       const after = asNumber(p.after_tokens)
       const phase = asString(p.phase)
+      recordSseCompaction(
+        agentName,
+        before,
+        after,
+        phase ? `OAS ${phase}` : 'OAS context_compacted',
+        asString(p.runtime) ?? '—',
+      )
       addTypedJournalEntry(
         agentName,
         `OAS compact${before != null && after != null ? ` · ${before}→${after}` : ''}${phase ? ` · ${phase}` : ''}`,

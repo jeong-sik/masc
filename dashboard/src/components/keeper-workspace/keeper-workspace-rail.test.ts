@@ -74,7 +74,7 @@ describe('KeeperWorkspaceRail', () => {
   })
 
   it('renders the runtime / throughput vitals', () => {
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
     // v2 rail splits the old combined "런타임 · 처리량" header into separate
     // "처리량" and "런타임" sections; assert both still render their vitals.
     expect(container.textContent).toContain('처리량')
@@ -85,7 +85,7 @@ describe('KeeperWorkspaceRail', () => {
 
   it('shows the model line as missing when no model was reported', () => {
     const k = mkKeeper({ runtime_canonical: 'runpod_gemma' })
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
     expect(container.textContent).toContain('런타임')
     expect(container.textContent).toContain('runpod_gemma')
     // v2 always renders the model cell; when no model is reported it falls back
@@ -95,7 +95,7 @@ describe('KeeperWorkspaceRail', () => {
   })
 
   it('renders the context-window occupancy percent', () => {
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
     // v2 renames the "컨텍스트 점유" header to "컨텍스트" with a "윈도우 사용량" usage label.
     expect(container.textContent).toContain('컨텍스트')
     expect(container.textContent).toContain('윈도우 사용량')
@@ -104,13 +104,13 @@ describe('KeeperWorkspaceRail', () => {
   })
 
   it('lists only the keeper-owned tasks', () => {
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
     expect(container.textContent).toContain('T-4412')
     expect(container.textContent).not.toContain('T-9999')
   })
 
   it('renders owned task status in the top row and title on its own line', () => {
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
     // v2 renames .kw-tasktag → .tasktag and .kw-tasktag-row → .tasktag-top.
     const tag = container.querySelector('.tasktag') as HTMLElement | null
     expect(tag).not.toBeNull()
@@ -127,7 +127,7 @@ describe('KeeperWorkspaceRail', () => {
     const k = mkKeeper({
       metrics_series: [{ wall_tokens_per_second: 10 }, { wall_tokens_per_second: 64 }] as unknown as Keeper['metrics_series'],
     })
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
     // v2 throughput section is collapsed by default; toggle it open before
     // asserting the sparkline and current tok/s value render.
     const toggle = container.querySelector('.ctx-h-toggle') as HTMLElement
@@ -140,39 +140,39 @@ describe('KeeperWorkspaceRail', () => {
   })
 
   it('opens the planning task detail when an owned task is clicked', () => {
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
     fireEvent.click(getByRole('button', { name: /태스크 열기: T-4412/ }))
     expect(navigate).toHaveBeenCalledWith('workspace', { section: 'planning', task: 'T-4412' })
   })
 
   it('renders the attention section from live blocked-task signal', () => {
     const k = mkKeeper({ blocked_task_count: 2 })
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
     expect(container.textContent).toContain('주의')
     expect(container.textContent).toContain('차단된 태스크 2건')
   })
 
   it('omits the attention section when there is nothing to surface', () => {
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
     expect(container.textContent).not.toContain('차단된 태스크')
   })
 
   it('uses explicit attention reason text instead of a vague maintenance label', () => {
     const k = mkKeeper({ needs_attention: true, attention_reason: 'approval_pending', next_human_action: 'resolve_approval' })
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
     expect(container.textContent).toContain('approval_pending · resolve_approval')
     expect(container.textContent).not.toContain('점검이 필요합니다')
   })
 
   it('labels unqualified attention flags as missing cause data', () => {
     const k = mkKeeper({ needs_attention: true })
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
     expect(container.textContent).toContain('runtime_attention.needs_attention=true · 원인/조치 미수신')
     expect(container.textContent).not.toContain('점검이 필요합니다')
   })
 
   it('renders the auto-compact threshold label', () => {
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
     // With meter data the gate renders as the "compact NN%" meter mark.
     expect(container.textContent).toContain('compact 72%')
     // The meter mark also exposes the gate percentage via its label element.
@@ -181,7 +181,7 @@ describe('KeeperWorkspaceRail', () => {
 
   it('renders context metrics as missing when only a zero default exists', () => {
     const k = mkKeeper({ context_ratio: 0, compaction_count: 0, last_compaction_ago_s: 0 })
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
     // v2 collapses the missing-context state into a single "윈도우 사용률 미수신"
     // empty card (.ctx-empty); no fake usage meter and no usage percentage.
     expect(container.textContent).toContain('윈도우 사용률 미수신')
@@ -195,7 +195,7 @@ describe('KeeperWorkspaceRail', () => {
 
   it('shows token-only context without a fake window percentage', () => {
     const k = mkKeeper({ context_ratio: 0, context_tokens: 37800 })
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
     expect(container.textContent).toContain('윈도우 사용률 미수신')
     expect(container.textContent).toContain('37.8k')
     expect(container.textContent).not.toContain('윈도우 사용량')
@@ -204,7 +204,7 @@ describe('KeeperWorkspaceRail', () => {
 
   it('runs overflow compaction without force through the existing MCP tool', async () => {
     shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, phase: 'Overflowed' })} onToggleDetail=${() => {}} />`)
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, phase: 'Overflowed' })} />`)
     fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
     await waitFor(() => {
@@ -218,7 +218,7 @@ describe('KeeperWorkspaceRail', () => {
 
   it('confirms before forcing compaction on running keepers', async () => {
     shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, phase: 'Running' })} onToggleDetail=${() => {}} />`)
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, phase: 'Running' })} />`)
     fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
     await waitFor(() => {
@@ -236,31 +236,38 @@ describe('KeeperWorkspaceRail', () => {
   it('does not compact running keepers when force confirmation is cancelled', async () => {
     vi.mocked(requestConfirm).mockResolvedValueOnce(false)
     shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, phase: 'Running' })} onToggleDetail=${() => {}} />`)
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, phase: 'Running' })} />`)
     fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
     await waitFor(() => expect(requestConfirm).toHaveBeenCalled())
     expect(callMcpTool).not.toHaveBeenCalled()
   })
 
-  it('fires onToggleDetail from the 운영 상세 button', () => {
-    const onToggle = vi.fn()
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${onToggle} />`)
-    // v2 replaces the single .kw-detail-btn with .cmp-open inspector entries that
-    // route to the operational detail body. The compaction-snapshot entry carries
-    // the "before/after 보기" label and fires onToggleDetail.
+  it('opens the compaction inspector overlay from the context rail', () => {
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
     const btn = Array.from(container.querySelectorAll('.cmp-open')).find(
       el => el.textContent?.includes('before/after'),
     ) as HTMLElement | undefined
     expect(btn).toBeTruthy()
-    expect(btn?.textContent).toContain('before/after 보기')
     fireEvent.click(btn as HTMLElement)
-    expect(onToggle).toHaveBeenCalled()
+    expect(container.querySelector('.turn-overlay')).toBeTruthy()
+    expect(container.textContent).toContain('컴팩션 스냅샷')
+  })
+
+  it('opens the memory inspector overlay from the context rail', () => {
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
+    const btn = Array.from(container.querySelectorAll('.cmp-open')).find(
+      el => el.textContent?.includes('메모리 보기'),
+    ) as HTMLElement | undefined
+    expect(btn).toBeTruthy()
+    fireEvent.click(btn as HTMLElement)
+    expect(container.querySelector('.turn-overlay')).toBeTruthy()
+    expect(container.textContent).toContain('Keeper 메모리')
   })
 
   it('shows the empty state when no tasks are owned', () => {
     tasks.value = []
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
     expect(container.textContent).toContain('할당된 태스크 없음')
   })
 })

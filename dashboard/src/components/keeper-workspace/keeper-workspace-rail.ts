@@ -12,7 +12,7 @@ import type { VNode } from 'preact'
 import { shellAuthSummary, tasks } from '../../store'
 import type { Keeper, Task } from '../../types'
 import { navigate } from '../../router'
-import { keeperModelLabel, keeperRuntimeLabel } from './keeper-workspace-shared'
+import { keeperBucket, keeperModelLabel, keeperRuntimeLabel } from './keeper-workspace-shared'
 import { CountBadge } from '../v2/primitives-v2'
 import { callMcpTool } from '../../api/mcp'
 import { showToast } from '../common/toast'
@@ -26,6 +26,13 @@ import {
   loadRuntimeCatalog,
   runtimeCatalogState,
 } from '../../lib/runtime-catalog-resource'
+import { CompactionInspectorOverlay } from './compaction-inspector-overlay'
+import { recordManualCompaction } from './compaction-snapshots'
+import {
+  MemoryInspector,
+  type MemoryKeeper,
+} from '../memory-inspector'
+import { keepers } from '../../store'
 
 function contextRatio(keeper: Keeper): number | null {
   const ratio = keeper.context_ratio ?? keeper.context?.context_ratio
@@ -233,7 +240,15 @@ function compactRequiresForce(keeper: Keeper): boolean {
   return status === 'running' || status === 'active' || status === 'busy' || status === 'failing'
 }
 
-function ContextSection({ keeper, onToggleDetail }: { keeper: Keeper; onToggleDetail: () => void }): VNode {
+function ContextSection({
+  keeper,
+  onOpenCompaction,
+  onOpenMemory,
+}: {
+  keeper: Keeper
+  onOpenCompaction: () => void
+  onOpenMemory: () => void
+}): VNode {
   const [compacting, setCompacting] = useState(false)
   const pct = contextPercent(keeper)
   const compactAt = compactionGatePct(keeper)
@@ -270,6 +285,12 @@ function ContextSection({ keeper, onToggleDetail }: { keeper: Keeper; onToggleDe
         const parsed = JSON.parse(raw) as { before_tokens?: number; after_tokens?: number; phase_after?: string }
         const before = formatK(parsed.before_tokens)
         const after = formatK(parsed.after_tokens)
+        recordManualCompaction(
+          keeper.name,
+          parsed.before_tokens,
+          parsed.after_tokens,
+          keeperRuntimeLabel(keeper) ?? '—',
+        )
         showToast(
           before && after ? `${keeper.name} compact 완료: ${before} -> ${after}` : `${keeper.name} compact 완료`,
           'success',
@@ -320,13 +341,10 @@ function ContextSection({ keeper, onToggleDetail }: { keeper: Keeper; onToggleDe
             onClick=${runCompact}
           >${compacting ? html`<span class="cmp-spin"></span> 컴팩트 실행 중…` : '◉ 지금 컴팩트'}</button>
         </div>
-        ${/* The prototype opens dedicated compaction-snapshot / memory inspectors;
-             those live overlays do not exist yet, so both route to the operational
-             detail body (FSM · 진단 · 정체성 · memory). Marked as a deferred wiring. */ ''}
-        <button type="button" class="cmp-open" data-stub="compaction-inspector" onClick=${onToggleDetail}>
+        <button type="button" class="cmp-open" data-testid="open-compaction-inspector" onClick=${onOpenCompaction}>
           ◉ 컴팩션 스냅샷${hasCompactionHistory ? ` · ${compactionCount}` : ''} <span class="cmp-open-sub">before/after 보기</span>
         </button>
-        <button type="button" class="cmp-open" data-stub="memory-inspector" onClick=${onToggleDetail}>
+        <button type="button" class="cmp-open" data-testid="open-memory-inspector" onClick=${onOpenMemory}>
           ◈ 메모리 보기 <span class="cmp-open-sub">핀 · 스토어 · 회상</span>
         </button>
       </div>
@@ -366,22 +384,51 @@ function OwnedTasksSection({ keeper }: { keeper: Keeper }): VNode {
   `
 }
 
+function toMemoryKeeper(k: Keeper): MemoryKeeper {
+  const bucket = keeperBucket(k)
+  const status = bucket === 'running' ? 'run' : bucket === 'paused' ? 'pause' : 'off'
+  return {
+    id: k.name,
+    ctx: contextRatio(k) ?? 0,
+    status,
+  }
+}
+
 export function KeeperWorkspaceRail({
   keeper,
-  onToggleDetail,
 }: {
   keeper: Keeper
-  onToggleDetail: () => void
 }): VNode {
+  const [overlay, setOverlay] = useState<'compaction' | 'memory' | null>(null)
+  const memoryKeeper = toMemoryKeeper(keeper)
+  const memoryKeepers = keepers.value.map(toMemoryKeeper)
+
   return html`
     <aside class="ctx" aria-label="키퍼 컨텍스트">
       <div class="ctx-scroll">
         <${AttentionSection} keeper=${keeper} />
         <${ThroughputSection} keeper=${keeper} />
         <${RuntimeSection} keeper=${keeper} />
-        <${ContextSection} keeper=${keeper} onToggleDetail=${onToggleDetail} />
+        <${ContextSection}
+          keeper=${keeper}
+          onOpenCompaction=${() => setOverlay('compaction')}
+          onOpenMemory=${() => setOverlay('memory')}
+        />
         <${OwnedTasksSection} keeper=${keeper} />
       </div>
     </aside>
+
+    ${overlay === 'compaction'
+      ? html`<${CompactionInspectorOverlay} keeper=${keeper} onClose=${() => setOverlay(null)} />`
+      : null}
+    ${overlay === 'memory'
+      ? html`<${MemoryInspector}
+          keeper=${memoryKeeper}
+          keepers=${memoryKeepers}
+          memory=${{}}
+          compactions=${{}}
+          onClose=${() => setOverlay(null)}
+        />`
+      : null}
   `
 }

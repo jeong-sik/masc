@@ -212,12 +212,14 @@ function ChatHeader({
   onBack,
   onOpenRail,
   onOpenConfig,
+  onOpenDetail,
 }: {
   keeper: Keeper
   mobile?: boolean
   onBack?: () => void
   onOpenRail?: () => void
   onOpenConfig?: () => void
+  onOpenDetail?: () => void
 }): VNode {
   const bucket = keeperBucket(keeper)
   const live = bucket === 'running'
@@ -262,6 +264,20 @@ function ChatHeader({
           mobile=${mobile}
           onOpenConfig=${onOpenConfig}
         />
+        ${onOpenDetail
+          ? html`
+              <button
+                type="button"
+                class="act icon"
+                aria-label="상세"
+                title="운영 상세"
+                onClick=${onOpenDetail}
+                data-testid="kw-chat-detail"
+              >
+                <span aria-hidden="true">ℹ</span>
+              </button>
+            `
+          : null}
         ${mobile
           ? html`
               <button
@@ -318,12 +334,14 @@ export function KeeperWorkspaceChat({
   onBack,
   onOpenRail,
   onOpenConfig,
+  onOpenDetail,
 }: {
   keeper: Keeper
   mobile?: boolean
   onBack?: () => void
   onOpenRail?: () => void
   onOpenConfig?: () => void
+  onOpenDetail?: () => void
 }): VNode {
   const [turnInspectorOpen, setTurnInspectorOpen] = useState(false)
   const [turnInspectorEntry, setTurnInspectorEntry] = useState<KeeperConversationEntry | null>(null)
@@ -340,6 +358,7 @@ export function KeeperWorkspaceChat({
         onBack=${onBack}
         onOpenRail=${onOpenRail}
         onOpenConfig=${onOpenConfig}
+        onOpenDetail=${onOpenDetail}
       />
       <div class="kw-chat-body">
         <${KeeperConversationPanel}

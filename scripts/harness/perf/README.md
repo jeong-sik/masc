@@ -21,6 +21,11 @@ and reports p50 / p95 / max in ms plus timeout count.
 
 ## Measured results (origin/main `af959bfeff`, M3 Max 16-core, 2026-06-23)
 
+These predate the `LOAD_ACCEPT_ENCODING` default: load requests sent no `Accept-Encoding`, so the
+server skipped compression. With the default `Accept-Encoding: zstd` (production-faithful) the
+amplification rises to ~82× — see the json-offload falsification below. Compression on the main
+domain makes starvation worse, not better.
+
 | condition | `/health` p95 | amplification | verdict |
 |---|---|---|---|
 | baseline (idle) | ~1.1 ms | 1.0× | — |
@@ -60,6 +65,10 @@ scripts/harness/perf/scheduler_starvation_gate.sh --base-url http://127.0.0.1:89
 Artifacts (`logs/perf-starvation/<run-id>/`): `levels.csv`, `summary.json`, per-level raw TTFB,
 `server.log`. Knobs: `--endpoint`, `--probes`, `--levels`, `--inproc-load`, `--load-endpoint`,
 `--threshold-ms`, `--max-amp`, `--base-url`, `--keep-server` (env equivalents mirror each flag).
+Env-only: `LOAD_ACCEPT_ENCODING` (default `zstd` — load requests send `Accept-Encoding` so the
+server runs its serialize+compress path as production browsers trigger; set empty for bare curl)
+and `MASC_HARNESS_SERVER_EXE` (pin a specific binary so two builds can be A/B-compared without
+overwriting `_build`).
 
 The booted server runs with `MASC_AUTONOMY_ENABLED=0` (harness lib default): **no keepers run**, so
 the in-process axis is the only "busy domain" source. To exercise the keeper axis, use `--base-url`
@@ -145,21 +154,43 @@ serialization + gzip of the payload, which stays on main even on a cache hit; of
 parse attacks a minor cost. See the revert commit for the full A/B. This is the gate doing its job:
 falsifying a fix before it shipped.
 
+The `Response.json` / `json_value` **serialize + zstd-compress offload** (move the per-response
+`Yojson.Safe.to_string` + `compress_body` off the main domain to the executor pool via
+`submit_cpu_or_inline`, at the chokepoint every HTTP/1.1 JSON response passes through) was likewise
+implemented, compiled, then **reverted**. A single 12-probe A/B looked promising at low host
+contention (loaded `/health` p95 79→52 ms), but an interleaved 3-round A/B at the dominant axis
+(48 in-process + 1 hog, 25 probes, `Accept-Encoding: zstd` sent so the production compress path
+actually runs) found no reliable gain: unfixed loaded p95 {68.9, 70.9, 79.8} ms (mean 73), fixed
+{42.9, 89.6, 76.9} ms (mean 70) — a −5% mean inside the noise band, with the fixed arm's variance
+*wider* than unfixed. Same root as turn-records: the main domain still shepherds every one of the N
+concurrent requests through accept → handler → submit → await → write, so offloading one sub-step
+(serialize/compress) does not change that N requests serialize on one cooperative domain. Two
+independent per-request micro-offloads are now refuted; the dominant axis is structural, not a
+per-request cost.
+
+(Surfacing this required a harness-fidelity fix: production browsers send `Accept-Encoding`, so the
+server runs serialize+compress, but bare `curl` does not — without it `compress_body`
+short-circuits and the gate underweights the cost. Sending it by default raised the measured
+amplification from the earlier ~39–73× to ~82×, i.e. compression on the main domain makes the
+starvation worse, not better.)
+
 ## Structural levers tested (gated by this harness, M3 Max 16-core)
 
-Three candidate fixes for the starvation were tested **with the harness before writing any
-production code**, varying a knob and measuring rather than guessing. Two were refuted; one is a
+Four candidate fixes for the starvation were tested **with the harness before shipping any
+production code**, varying a knob and measuring rather than guessing. Three were refuted; one is a
 partial mitigation.
 
 | lever | how tested | result |
 |---|---|---|
 | **Offload `turn-records` compute** (cache + `submit_io_or_inline`) | two-binary A/B, real data | **refuted** — fixed ≈ unfixed, both RED (the parse is not the dominant cost) |
+| **Offload `json` serialize + compress** (`submit_cpu_or_inline` at the `Response.json`/`json_value` chokepoint) | interleaved 3-round A/B, 48 inproc + 1 hog, 25 probes, `Accept-Encoding` on | **refuted** — unfixed loaded p95 mean 73 ms, fixed 70 ms (−5%, within noise); fixed-arm variance wider. Main domain still orchestrates all N requests (accept→handler→submit→await→write); offloading one sub-step doesn't unstarve it |
 | **Reserve scheduler cores** (fewer worker domains) | sweep `MASC_EXECUTOR_DOMAIN_COUNT` ∈ {2,4,8,15} under 48 inproc + 15 hogs | **refuted (noise)** — a first sweep showed 15→8 halving amp (110×→43×), but an interleaved repeat found 15 ≈ 8 (amp 72–92× both); variance swamps the effect. Idle/blocked worker domains do not hold cores away from the main thread, so cutting them frees nothing |
 | **OS priority / QoS** (deprioritize competing load) | one server, hogs at `nice 0` vs `nice 19`, 48 inproc both | **partial** — `nice 19` hogs cut amp 46× → 32× (~31%), but `/health` is still 120 ms (RED). The residual comes from the 48 normal-priority inproc requests, which QoS cannot touch |
 
 **Conclusion the harness points to:** the dominant, irreducible axis is **serving concurrency
-serialized on the single main Eio domain** — host contention (QoS-mitigable, ~31%) and the
-offloadable parse (negligible) are secondary. The only lever that addresses the dominant axis is
+serialized on the single main Eio domain** — host contention (QoS-mitigable, ~31%) is secondary,
+and every per-request micro-offload tried (parse; serialize + compress) was refuted because the
+main domain still orchestrates all N requests. The only lever that addresses the dominant axis is
 architectural: **RFC-0204 Phase 3 — a dedicated serving domain** so N concurrent requests are
 handled off the main domain, leaving it for keepers + the scheduler. That is a large change
 constrained by RFC-0059 (keepers are pinned to the main domain; only *serving* may move) and should

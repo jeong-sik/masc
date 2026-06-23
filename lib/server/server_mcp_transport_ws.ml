@@ -5,7 +5,7 @@
     full-duplex communication.
 
     Upgrade path: GET /ws with Connection: Upgrade header.
-    Uses ws-direct for the WebSocket protocol on top of httpun (RFC-0286):
+    Uses ws-direct for the WebSocket protocol on top of httpun (RFC-0287):
     the HTTP 101 handshake is written on the httpun reqd, then the post-101
     connection is driven by a ws-direct Endpoint via the gluten adapter.
 
@@ -50,7 +50,7 @@ type dashboard_auth_state =
   | Unauthenticated
   | Authenticated of { agent : string option }
 
-(* RFC-0286: inbound frame reassembly + UTF-8 validation now live in the
+(* RFC-0287: inbound frame reassembly + UTF-8 validation now live in the
    ws-direct Connection layer, which delivers complete messages via the
    Endpoint [on_message] handler. The former [Ws_inbound] reassembler and the
    manual [read_data_frame] / [read_payload_string] machinery are gone; only the
@@ -1078,7 +1078,7 @@ let start_upgrade_heartbeat ?sw ?clock session_id session =
       "[ws-upgrade] session %s heartbeat disabled (missing switch or clock)"
       session_id
 
-(* RFC-0286: ping->pong is automatic in the ws-direct Endpoint, so the former
+(* RFC-0287: ping->pong is automatic in the ws-direct Endpoint, so the former
    [send_upgrade_pong] is gone; [record_pong] still fires from the [on_pong]
    handler to refresh the liveness timestamp. *)
 
@@ -1123,7 +1123,7 @@ let mcp_websocket_handler
   (* #10875: see cleanup_session — per-session lifecycle is DEBUG to
      avoid logging amplification during WS storm (#10701). *)
   Log.Server.debug "WebSocket session %s connected (%s)" session_id origin_label;
-  (* RFC-0286: ws-direct reassembles fragments + validates UTF-8 + enforces the
+  (* RFC-0287: ws-direct reassembles fragments + validates UTF-8 + enforces the
      size caps internally, so [on_message] receives a complete message and a
      protocol/size violation surfaces as [on_close]/[on_error] with the right
      close code — no frame-opcode switch or manual reassembly here. Ping is
@@ -1195,7 +1195,7 @@ let respond_and_drive_upgrade
     in
     (* Sends the 101 on the reqd, then the callback attaches the post-101
        socket: a ws-direct Endpoint (Server role) packaged as a Gluten.impl,
-       drop-in for the former Httpun_ws.Server_connection. RFC-0286 §4.1. *)
+       drop-in for the former Httpun_ws.Server_connection. RFC-0287 §4.1. *)
     Httpun.Reqd.respond_with_upgrade reqd headers (fun () ->
       let endpoint =
         Ws_endpoint.create Ws_endpoint.Server ~max_message ~max_frame handler

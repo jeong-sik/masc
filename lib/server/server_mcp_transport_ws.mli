@@ -84,7 +84,7 @@ type dashboard_auth_state =
     in an [Atomic.t] field so the single write and many reads are tear-free if
     dashboard serving moves off the main Eio domain (RFC-0204 §8.4, Phase 1). *)
 
-(* RFC-0286: inbound reassembly + UTF-8 validation moved into the ws-direct
+(* RFC-0287: inbound reassembly + UTF-8 validation moved into the ws-direct
    Connection layer, which delivers complete messages to the Endpoint
    [on_message] handler. The [Ws_inbound] reassembler and the manual
    read/classify machinery are gone; only the [max_inbound_*] size knobs remain,
@@ -258,7 +258,7 @@ val mcp_websocket_handler :
     ws-direct delivers complete (reassembled, UTF-8-validated, size-capped)
     messages to [on_message] and auto-replies to pings, so this builds an
     Endpoint handler rather than a frame-opcode switch.  [on_close_log] /
-    [on_eof] are observability hooks invoked before cleanup.  RFC-0286 §4.1. *)
+    [on_eof] are observability hooks invoked before cleanup.  RFC-0287 §4.1. *)
 
 val respond_and_drive_upgrade :
   upgrade:(Gluten.impl -> unit) ->
@@ -271,7 +271,7 @@ val respond_and_drive_upgrade :
     request (RFC 6455 §4.2.1), writes the 101 on [reqd], then drives the
     post-101 connection by handing a ws-direct Endpoint (Server role, bounded by
     [max_message] / [max_frame]) to the Gluten runtime via [upgrade] as a
-    drop-in for the former Httpun_ws.Server_connection.  RFC-0286 §4.1. *)
+    drop-in for the former Httpun_ws.Server_connection.  RFC-0287 §4.1. *)
 
 val upgrade_connection :
   ?sw:Eio.Switch.t ->

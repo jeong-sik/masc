@@ -1,5 +1,5 @@
 ---
-rfc: "0286"
+rfc: "0287"
 title: "ws-direct — a single masc-owned WebSocket stack for server and client"
 status: Draft
 created: 2026-06-23
@@ -11,7 +11,7 @@ related: ["0281", "0203", "0100", "0204"]
 implementation_prs: []
 ---
 
-# RFC-0286: ws-direct — a single masc-owned WebSocket stack
+# RFC-0287: ws-direct — a single masc-owned WebSocket stack
 
 Status: Draft
 Author: jeong-sik (vincent), with Claude Opus 4.8
@@ -194,7 +194,7 @@ this defect, not a replacement for an interim. PR 1 removes the httpun-ws
 dependency entirely; #22111 is then closed as superseded by this RFC (its
 3-coalesced-fragment regression is reproduced in the ws-direct Connection
 harness). #22111 also carried an RFC-0283 number that is now held by an
-unrelated merged RFC (fusion-judge-of-judges); ws-direct uses RFC-0286.
+unrelated merged RFC (fusion-judge-of-judges); ws-direct uses RFC-0287.
 
 ## 6. What this does not touch
 

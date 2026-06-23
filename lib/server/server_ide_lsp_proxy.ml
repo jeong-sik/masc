@@ -39,7 +39,7 @@ type conn_state =
   ; spawn_mutex : Eio.Mutex.t
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
   ; disconnected : bool Atomic.t
-        (* RFC-0286: fragment reassembly + size caps now live in the ws-direct
+        (* RFC-0287: fragment reassembly + size caps now live in the ws-direct
            Endpoint, which delivers complete messages to [on_message]; the
            former shared [Ws_inbound] reassembler field is gone. *)
   }
@@ -824,7 +824,7 @@ let add_routes ~sw ~clock router =
                     [Eio.Switch.run] + promise, which the Gluten model
                     forbids.  Subprocesses are now reclaimed explicitly in
                     {!disconnect} (called from [Connection_close]/[eof]). *)
-                 (* RFC-0286: drive the upgraded connection via the shared
+                 (* RFC-0287: drive the upgraded connection via the shared
                     ws-direct attachment SSOT. The Endpoint reassembles
                     fragments, validates UTF-8, enforces the size caps, and
                     auto-replies to pings, so [on_message] receives a complete

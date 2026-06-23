@@ -28,7 +28,6 @@ depends: [
   "cmdliner" {>= "1.1"}
   "cohttp" {>= "5.0"}
   "cohttp-eio" {>= "6.0"}
-  "websocket" {>= "2.17"}
   "piaf" {>= "0.2.0"}
   "eio-ssl" {>= "0.3.0"}
   "agent_sdk" {>= "0.207.7"}

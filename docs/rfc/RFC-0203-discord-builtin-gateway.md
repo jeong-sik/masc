@@ -5,12 +5,20 @@ status: Implemented (Phase 3 cutover landed 2026-05-29)
 created: 2026-05-28
 updated: 2026-05-29
 author: vincent
-related: ["0088"]
+related: ["0088", "0287"]
 ---
 
 # RFC-0203 — In-process Discord connector
 
 OCaml Gateway client replaces `sidecars/discord-bot/`. One tool out, push in.
+
+> **WSS stack superseded by [[RFC-0287]] (2026-06-23).** §Why below rejected
+> the httpun-ws client (fd-backed) and chose `Tls_eio + Cohttp_eio + Websocket`
+> functor over `Buf_read`/`Buf_write`. RFC-0287 replaces that stack with the
+> masc-owned ws-direct client (`Ws_direct_eio.Client` over the same TLS flow):
+> ws-direct speaks plain `Eio.Flow.two_way`, so the fd impedance that motivated
+> the functor workaround is gone, and `websocket` 2.17 is dropped as a
+> dependency. The connector design (this RFC) is otherwise unchanged.
 
 > **Phase 3 cutover note (2026-05-29).** Phase 1 (#19355) and Phase 2
 > REST/state (#19362) landed as planned. Phase 2 dual-run

@@ -2,7 +2,7 @@
 
     Runs on a separate port (default 8937, configurable via MASC_WS_PORT).
     Session state is shared with {!Server_mcp_transport_ws}; this module only
-    wires TCP accept + the ws-direct connection driver (RFC-0286). *)
+    wires TCP accept + the ws-direct connection driver (RFC-0287). *)
 
 module Ws_server = Ws_direct_eio.Server
 
@@ -155,7 +155,7 @@ module For_testing = struct
   let next_accept_backoff backoff_s = Float.min accept_backoff_cap_s (backoff_s *. 1.5)
 end
 
-(* RFC-0286: the ws-direct Endpoint parses and validates the Close frame, so
+(* RFC-0287: the ws-direct Endpoint parses and validates the Close frame, so
    [on_close] hands over the code + reason directly — no need to read the close
    payload off the wire (the former CPS [log_ws_client_close_payload]). The pure
    summary helpers (immediate / summarize / plan_ws_close_payload chunk) stay
@@ -168,7 +168,7 @@ let log_ws_client_close ~session_id ~(code : int option) ~reason =
 
 (** WebSocket handler factory for the standalone listener.  Delegates to the
     shared MCP session protocol
-    ({!Server_mcp_transport_ws.mcp_websocket_handler}, RFC-0286 §4) and injects
+    ({!Server_mcp_transport_ws.mcp_websocket_handler}, RFC-0287 §4) and injects
     the standalone close diagnostic as an observability hook.  [~sw] is the
     per-connection switch so the heartbeat fiber exits with the connection. *)
 let make_websocket_handler ~sw ~clock ~on_message _client_addr

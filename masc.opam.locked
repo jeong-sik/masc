@@ -192,7 +192,6 @@ depends: [
   "uuidm" {= "0.9.10"}
   "uunf" {= "17.0.0"}
   "uutf" {= "1.0.4"}
-  "websocket" {= "2.17"}
   "ws-direct-core" {= "0.1.0"}
   "ws-direct-eio" {= "0.1.0"}
   "ws-direct-gluten" {= "0.1.0"}

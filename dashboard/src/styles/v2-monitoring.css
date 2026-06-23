@@ -72,6 +72,13 @@
   gap: 8px;
 }
 
+/* The foot ticker reads left-to-right (prototype keeper-v2/fleet.css), unlike the
+   right-aligned health pills above; restore its forward flow + wider gap. */
+.v2-monitoring-surface .fl-foot {
+  justify-content: flex-start;
+  gap: 22px;
+}
+
 .v2-monitoring-surface .fl-hpill {
   display: inline-flex;
   align-items: center;

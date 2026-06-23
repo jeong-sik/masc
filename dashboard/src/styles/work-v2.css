@@ -590,9 +590,10 @@
 }
 
 .wk-gate {
+  /* No row gap — the prototype's gate rows sit flush, separated by the
+     border-top the vendored keeper-v2/v2.css supplies. */
   display: flex;
   flex-direction: column;
-  gap: 6px;
 }
 
 .wk-gate-h {

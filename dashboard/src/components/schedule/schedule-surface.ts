@@ -78,7 +78,7 @@ export function ScheduleSurface() {
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">due · 실행</div>
-            <div class=${`ov-kpi-v ${dueRunning > 0 ? 'warn' : 'ok'}`}>${countLabel(dueRunning)}</div>
+            <div class=${`ov-kpi-v ${dueRunning > 0 ? 'warn' : ''}`}>${countLabel(dueRunning)}</div>
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">총 예약</div>

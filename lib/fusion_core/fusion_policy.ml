@@ -18,7 +18,7 @@ type panel_group =
   }
 [@@deriving show, eq]
 
-(* JOJ(judge-of-judges, RFC-0282)의 1차 심판 한 명. panel_group과 동형이되 model이
+(* JOJ(judge-of-judges, RFC-0283)의 1차 심판 한 명. panel_group과 동형이되 model이
    복수가 아니라 단수다 (심판은 한 모델이 한 종합을 낸다). [label]로 같은 model을 다른
    lens(system_prompt)로 여러 1차 심판에 둘 수 있다 (judge_id로 정체성 derive). *)
 type judge_spec =
@@ -35,11 +35,11 @@ type preset =
   { name : string
   ; panels : panel_group list
   ; judge : string
-      (** simple/refine/conditional 심판이자 JOJ의 meta-judge(reducer). (RFC-0282) *)
+      (** simple/refine/conditional 심판이자 JOJ의 meta-judge(reducer). (RFC-0283) *)
   ; judge_system_prompt : string
   ; judge_timeout_s : float
   ; judges : judge_spec list
-      (** JOJ 1차 심판들 (RFC-0282). 기본 []; simple/refine/conditional은 무시한다.
+      (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
   }
 [@@deriving show, eq]
@@ -118,7 +118,7 @@ let preset_prompts_present (p : preset) =
    load 단계에서 fail-fast (Unknown→Permissive 회피). *)
 let preset_judge_present (p : preset) = String.length (String.trim p.judge) > 0
 
-(* JOJ 1차 심판들의 정체성 (RFC-0282). 정체성 포맷은 [panelist_id]를 그대로 쓴다
+(* JOJ 1차 심판들의 정체성 (RFC-0283). 정체성 포맷은 [panelist_id]를 그대로 쓴다
    (label+model → 식별 문자열, SSOT 한 곳). 입력순 보존 = meta 프롬프트 attribution 순서. *)
 let preset_judge_ids (p : preset) =
   List.map
@@ -179,11 +179,11 @@ module Validated_preset = struct
     | Duplicate_panelist of string  (** 두 패널이 같은 정체성(panelist_id) *)
     | Bad_max_tool_calls of int
         (** 그룹 또는 JOJ 1차 심판 max_tool_calls가 0..max_tool_calls_ceiling 밖 *)
-    | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0282) *)
-    | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성(judge_id) (RFC-0282) *)
+    | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0283) *)
+    | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성(judge_id) (RFC-0283) *)
 
   (* 검증 순서는 config 로드 시점과 동일(byte-identical config_error): size → 패널 prompt →
-     judge model → 패널 정체성 중복 → 패널 max_tool_calls 범위 → (RFC-0282) 1차 심판 prompt
+     judge model → 패널 정체성 중복 → 패널 max_tool_calls 범위 → (RFC-0283) 1차 심판 prompt
      → 1차 심판 정체성 중복 → 1차 심판 max_tool_calls 범위. judges=[]면 마지막 셋은 통과
      (simple/refine/conditional preset은 기존과 동일 결과 = byte-identity). *)
   let of_preset (p : preset) : (t, invalid) result =

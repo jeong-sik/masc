@@ -78,13 +78,13 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                 req.Fusion_types.run_id msg;
               Ok (s1, u1)
           in
-          (* JOJ(judge-of-judges, RFC-0282): N개 1차 심판이 같은 패널을 독립 종합 → meta가
+          (* JOJ(judge-of-judges, RFC-0283): N개 1차 심판이 같은 패널을 독립 종합 → meta가
              reconcile. preset.judges >= 2 필요(미구성/1개는 단일 심판 위상으로 표현 가능하므로
              런타임 에러 = fail-closed). 1차는 [Eio.Fiber.List.map ~max_fibers]로 병렬(패널
              fan-out과 동일 fault-isolation idiom — Fusion_judge.run이 per-judge 실패를 Error로
              격리하므로 한 심판 실패가 나머지를 안 죽인다). 성공 종합만 meta 입력, 전원 실패면
              첫 에러 전파. usage = 성공 1차 전부 + meta 합산. meta 실패 시 1차 첫 성공으로
-             graceful degrade(RFC-0282 §5.1, warn). *)
+             graceful degrade(RFC-0283 §5.1, warn). *)
           let run_judge_of_judges () =
             match preset.Fusion_policy.judges with
             | [] | [ _ ] ->

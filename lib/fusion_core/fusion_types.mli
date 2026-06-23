@@ -209,7 +209,7 @@ type fusion_topology =
       (** panel → judge → (1차 판정이 [Insufficient]일 때만) judge'(refine) → sink.
           애매할 때만 한 단계 더 깊이; 그 외엔 1차 종합 그대로(= Simple). *)
   | Judge_of_judges
-      (** panel → [N개 1차 심판] → meta-judge → sink (RFC-0282). 서로 다른 N개 1차
+      (** panel → [N개 1차 심판] → meta-judge → sink (RFC-0283). 서로 다른 N개 1차
           심판이 같은 패널을 독립 종합하고, meta가 reconcile. preset.judges >= 2 필요. *)
 [@@deriving yojson, show, eq]
 

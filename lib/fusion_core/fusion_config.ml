@@ -12,8 +12,8 @@ type config_error =
   | Invalid_max_concurrent_panels of int
   | Invalid_max_tool_calls of string * int
   | Missing_default_preset of string
-  | Judge_panel_prompt_missing of string  (** preset 이름; JOJ 1차 심판 prompt 누락 (RFC-0282) *)
-  | Duplicate_judge of string * string  (** (preset 이름, 중복 judge 정체성) (RFC-0282) *)
+  | Judge_panel_prompt_missing of string  (** preset 이름; JOJ 1차 심판 prompt 누락 (RFC-0283) *)
+  | Duplicate_judge of string * string  (** (preset 이름, 중복 judge 정체성) (RFC-0283) *)
   | Toml_type_error of string
 [@@deriving show, eq]
 
@@ -43,7 +43,7 @@ let parse_group (tbl : Otoml.t) : Fusion_policy.panel_group =
         [ "panel_timeout_s" ]
   }
 
-(* JOJ 1차 심판 한 명 파싱 (RFC-0282). [[fusion.presets.NAME.judges]] sub-table의
+(* JOJ 1차 심판 한 명 파싱 (RFC-0283). [[fusion.presets.NAME.judges]] sub-table의
    키 model/label/system_prompt/web_tools/max_tool_calls/timeout_s를 읽는다. sub-table
    이름(judges)이 scope를 주므로 키는 비-접두. parse_group과 동형. 누락 system_prompt는
    ""로 읽혀 Validated_preset 검증에서 Judge_panel_prompt_missing으로 fail-fast된다. *)

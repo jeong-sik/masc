@@ -26,7 +26,7 @@ type outcome =
       [Insufficient]일 때만 refine하고 그 외엔 [Simple]처럼 1차 종합 그대로
       ([Fusion_types.decision_warrants_escalation]), [Judge_of_judges]는 preset.judges의
       N개(>=2) 1차 심판이 같은 패널을 병렬 독립 종합하고 preset.judge(meta)가 reconcile한다
-      (RFC-0282; judges<2면 에러, 1차 전원 실패면 첫 에러, meta 실패면 1차 첫 성공으로 degrade).
+      (RFC-0283; judges<2면 에러, 1차 전원 실패면 첫 에러, meta 실패면 1차 첫 성공으로 degrade).
       단일-심판 위상에서 1차 심판이 실패하면 [Simple]과 동일하게 에러를 전파하고,
       refine(2차)/meta 심판이 실패하면 1차 종합으로 graceful degrade한다(warn 로깅).
       refine/JOJ는 관여한 심판 usage를 모두 합산해 sink로 보낸다.

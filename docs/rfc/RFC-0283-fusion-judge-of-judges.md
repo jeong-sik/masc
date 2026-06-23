@@ -1,4 +1,4 @@
-# RFC-0282 — Fusion: judge-of-judges 위상 (N개 1차 심판 + meta 심판)
+# RFC-0283 — Fusion: judge-of-judges 위상 (N개 1차 심판 + meta 심판)
 
 - Status: Draft
 - Author: Vincent (yousleepwhen) + Claude

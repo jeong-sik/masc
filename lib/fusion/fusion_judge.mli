@@ -61,7 +61,7 @@ val run_refine
   -> unit
   -> (Fusion_types.judge_synthesis * Fusion_types.usage, string) result
 
-(** JOJ(judge-of-judges, RFC-0282) meta 심판 프롬프트를 구성한다. [compose_refine_prompt]와
+(** JOJ(judge-of-judges, RFC-0283) meta 심판 프롬프트를 구성한다. [compose_refine_prompt]와
     동형이되 N개 1차 종합 [priors]((정체성, synthesis) 쌍)를 각각 [<judge id="...">] 블록으로
     lossless 렌더하고, meta 심판에게 패널 증거에 비추어 reconcile하라 지시한다. 순수 — 테스트 가능. *)
 val compose_meta_prompt
@@ -70,7 +70,7 @@ val compose_meta_prompt
   -> priors:(string * Fusion_types.judge_synthesis) list
   -> string
 
-(** JOJ meta 심판을 실행한다(RFC-0282). [run]/[run_refine]와 동일한 빌드/실행/usage/파싱
+(** JOJ meta 심판을 실행한다(RFC-0283). [run]/[run_refine]와 동일한 빌드/실행/usage/파싱
     경로이며, 프롬프트만 [compose_meta_prompt ~priors]로 구성한다([priors]는 N개 1차 심판이
     낸 (정체성, 종합) 쌍). 성공 시 reconcile된 종합 + meta 심판 usage를 반환한다(호출자가
     1차 심판 usage들과 [Fusion_types.add_usage]로 합산). 실패는 [run]과 동일한 [Error msg]. *)

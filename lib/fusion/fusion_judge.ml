@@ -66,7 +66,7 @@ let compose_refine_prompt ~question ~panel ~prior =
     (escape_xml (Fusion_types.render_prior_synthesis prior))
     Fusion_judge_parse.expected_json_doc
 
-(* JOJ(judge-of-judges, RFC-0282) meta 심판 프롬프트. [compose_refine_prompt]와 동형이되
+(* JOJ(judge-of-judges, RFC-0283) meta 심판 프롬프트. [compose_refine_prompt]와 동형이되
    1개가 아니라 N개 1차 종합을 [<judge id="...">] 블록으로 각각 lossless 렌더한다([priors]는
    (정체성, synthesis) 쌍 — id로 어느 1차 심판인지 attribute). meta 심판은 N개 종합을 패널
    증거에 비추어 reconcile해 하나의 개선본을 *같은* JSON으로 낸다. id/종합 모두 모델 생성물이라

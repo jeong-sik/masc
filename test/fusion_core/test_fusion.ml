@@ -634,7 +634,7 @@ let test_validated_bad_max_tool_calls () =
     Alcotest.(check int) "over-ceiling value reported" 17 v
   | _ -> Alcotest.fail "expected Bad_max_tool_calls over ceiling"
 
-(* --- JOJ 1차 심판 목록 검증 (RFC-0282) --- *)
+(* --- JOJ 1차 심판 목록 검증 (RFC-0283) --- *)
 
 let base_judge : Fusion_policy.judge_spec =
   { Fusion_policy.jmodel = "jm"
@@ -688,7 +688,7 @@ let test_validated_judge_bad_max_tool_calls () =
   | Error (Fusion_policy.Validated_preset.Bad_max_tool_calls 17) -> ()
   | _ -> Alcotest.fail "expected Bad_max_tool_calls 17 for over-ceiling judge"
 
-(* --- JOJ 1차 심판 TOML 파싱 (RFC-0282). parse_judge_spec + finish_preset의
+(* --- JOJ 1차 심판 TOML 파싱 (RFC-0283). parse_judge_spec + finish_preset의
        [[...judges]] array-of-tables 리더를 end-to-end로 검증한다. 위 of_preset
        검증 테스트는 OCaml record를 직접 구성해 config 레이어를 우회하므로, TOML 키
        이름(model/label/system_prompt/web_tools/max_tool_calls/timeout_s)과 getter

@@ -1470,23 +1470,20 @@ let test_sandbox_root_git_explicit_repos_target_keeps_cwd () =
     error;
   Alcotest.(check string) "cwd stays sandbox root" playground cwd
 
-(* RFC-0284 §4.1 regression seam: a schema-allowed recovery message must not
-   instruct the keeper to call a tool that resolves to no dispatchable surface.
-   The historical defect named "the visible clone tool" — a capability with no
-   tool. A new recovery branch that points at a phantom "<capability> tool"
-   re-trips this assertion instead of reaching a keeper. *)
-let recovery_mentions_phantom_tool msg =
-  (* A phantom is an imperative to CALL a tool that does not exist. An honest
-     negation ("there is no clone tool") is allowed; "with/use the <X> tool" —
-     instructing a call to a non-dispatchable tool — is not. *)
-  List.exists
-    (fun phantom -> contains_substring msg phantom)
-    [ "visible clone tool"
-    ; "with the clone tool"
-    ; "use the clone tool"
-    ; "with the provisioning tool"
-    ; "use the provisioning tool"
-    ]
+(* RFC-0284 §4.1 regression seam: the zero-repo recovery may name exactly one
+   tool — Execute. Assert every "tool" noun in the message is preceded by
+   "Execute". This is a closed invariant over the tool noun, not a blocklist of
+   known-bad phrasings (consistent with the RFC-0042 no-string-classifier
+   lineage): any phantom "<X> tool" with X <> Execute trips it. A phantom
+   phrased without the word "tool" is out of a string seam's reach — the closed
+   cross-producer enforcement is RFC-0284 §4.2 (render_reference routing). *)
+let recovery_names_only_execute_tool msg =
+  let is_tool_noun word = word = "tool" || word = "tool." || word = "tool," in
+  String.split_on_char ' ' msg
+  |> List.fold_left
+       (fun (ok, prev) word -> ok && (not (is_tool_noun word) || prev = "Execute"), word)
+       (true, "")
+  |> fst
 
 let test_sandbox_root_recovery_names_no_phantom_tool () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -1499,8 +1496,8 @@ let test_sandbox_root_recovery_names_no_phantom_tool () =
   | None -> Alcotest.fail "expected missing repo guidance"
   | Some msg ->
     Alcotest.(check bool)
-      "recovery does not reference a non-dispatchable phantom tool" false
-      (recovery_mentions_phantom_tool msg);
+      "every tool the recovery names is Execute (closed invariant)" true
+      (recovery_names_only_execute_tool msg);
     Alcotest.(check bool) "recovery names the real Execute affordance" true
       (contains_substring msg "Execute")
 

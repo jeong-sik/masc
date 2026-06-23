@@ -45,7 +45,7 @@ Corollary for the `[]` branch: when no repo is cloned and no clone tool exists, 
 
 1. Rewrite the `[]`-branch recovery message to satisfy §3: remove the phantom "visible clone tool"; name the Execute affordance and the operator-provisioning resolver. Keep the existing true substrings (`no sandbox git clones`, `cwd="repos/<repo>"`).
 2. Replace the pinned forward-assertion (`test_keeper_sandbox_docker_route.ml:1451-1452`) so it asserts the honest properties instead of the phantom.
-3. Add a regression-seam test over the producer's recovery messages (`[]` and `many` branches): assert no message instructs the keeper to call a "… tool" other than the real tool set (`Execute`, structured recovery), and that the zero-repo message names a real affordance. Re-introducing a phantom recovery string at this producer then fails a test.
+3. Add a regression-seam test over the zero-repo (`[]`) recovery message: assert it names the real `Execute` affordance, and that every "… tool" noun it contains is `Execute` — a closed invariant over the tool noun, not a blocklist of known-bad phrasings (keeps the seam consistent with the RFC-0042 no-string-classifier lineage). Re-introducing a phantom `<X> tool` at this producer then fails the test. The `many` branch never contained a phantom and is not exercised by this seam; the string seam also cannot catch a phantom phrased without the word "tool" — full cross-producer enforcement is the §4.2 `render_reference` routing.
 
 ### 4.2 Follow-up (out of scope here)
 
@@ -56,7 +56,7 @@ Corollary for the `[]` branch: when no repo is cloned and no clone tool exists, 
 ## 5. Verification
 
 - `test_sandbox_root_git_cwd_zero_repo_blocks_before_exec` updated and green: message contains `no sandbox git clones`, `cwd="repos/<repo>"`, names the Execute tool, and does not contain `visible clone tool`.
-- New regression-seam test green: no producer recovery message references a non-dispatchable "… tool".
+- New regression-seam test green: the zero-repo recovery message names `Execute` and every "… tool" noun it contains is `Execute`.
 - `test_sandbox_root_git_clone_allowed_from_root` remains green (the honest affordance the new message points at is still permitted).
 - `dune build` for the affected libraries and the focused test executable.
 

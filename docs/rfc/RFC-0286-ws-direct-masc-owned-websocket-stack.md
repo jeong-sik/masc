@@ -32,7 +32,7 @@ against masc's world (Eio + httpun/gluten + TLS-as-flow):
 
 | Role | Library | Pain |
 |---|---|---|
-| Server (`/ws`, dashboard, IDE-LSP, `:8937`) | `httpun-ws` 0.2.0 | A frame-queue coalescing bug stalls a one-frame-per-read drainer; carried as a fork-pin (PR #22111). Upstream PR #80 unmerged. |
+| Server (`/ws`, dashboard, IDE-LSP, `:8937`) | `httpun-ws` 0.2.0 | A frame-queue coalescing bug stalls a one-frame-per-read drainer. A fork-pin was *proposed* (PR #22111, unmerged — it also collided on the RFC-0283 number) but never landed, so main runs stock 0.2.0 with the bug. Upstream PR #80 unmerged. |
 | Discord client (`wss://` outbound) | `ocaml-websocket` 2.17 | `Httpun_ws_eio.Client.connect` wants an fd-backed socket, but TLS is a flow (`Tls_eio.t`, no fd). [[RFC-0203]] worked around this with `Websocket.Make(Cohttp_eio.Private.IO)` — a functor over a library-private module. |
 
 Both are byte-transport adapters around RFC 6455 framing. masc owns neither, so a
@@ -169,14 +169,14 @@ staged so each PR is built, tested, and revertable on its own.
 0. **Pin** (this RFC's companion change): add `ws-direct` to
    `scripts/opam-pin-external-deps.sh` (`WS_DIRECT_SHA` constant +
    `opam_pin_add ws-direct-core/ws-direct-gluten/ws-direct-eio`), `masc.opam.locked`
-   `pin-depends`, and `dune-project`. Pin SHA: `aa7bb5e` (github.com/jeong-sik/ws-direct).
+   `pin-depends`, and `dune-project`. Pin SHA: `ab157ce` (github.com/jeong-sik/ws-direct).
 
 1. **PR 1 — server**: swap `server_mcp_transport_ws.ml`, `server_ide_lsp_proxy.ml`,
    `server_ws_standalone.ml` to `Ws_direct_gluten` / `Ws_direct_eio.Server`;
    write the 101 handshake on the reqd; change `ws_session.wsd` to
    `Endpoint.Wsd.t`; drop the inline reassembly. Remove `httpun-ws`,
    `httpun-ws-eio` from `dune-project`, `lib/server/dune`, `lib/dashboard/dune`,
-   `lib/operator/dune`. Remove the PR #22111 fork-pin. Verify: `dune build`,
+   `lib/operator/dune`. Verify: `dune build`,
    `test_ws_transport`, live `/ws` hello round-trip.
 
 2. **PR 2 — Discord client**: swap `discord_wss_connection.ml` to
@@ -188,8 +188,13 @@ staged so each PR is built, tested, and revertable on its own.
 3. **Benchmark** (§3): large-frame parse/serialize throughput vs the prior stack,
    before any performance claim.
 
-PR #22111 (the httpun-ws fork-pin) stays as the interim server fix until PR 1
-lands; PR 1 removes the fork-pin, the pin, and the httpun-ws dependency together.
+PR #22111 (the proposed httpun-ws fork-pin) was never merged — main runs stock
+`httpun-ws` 0.2.0 with the coalescing bug — so PR 1 is the first landed fix for
+this defect, not a replacement for an interim. PR 1 removes the httpun-ws
+dependency entirely; #22111 is then closed as superseded by this RFC (its
+3-coalesced-fragment regression is reproduced in the ws-direct Connection
+harness). #22111 also carried an RFC-0283 number that is now held by an
+unrelated merged RFC (fusion-judge-of-judges); ws-direct uses RFC-0286.
 
 ## 6. What this does not touch
 

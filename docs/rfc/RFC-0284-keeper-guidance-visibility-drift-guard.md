@@ -53,6 +53,22 @@ Corollary for the `[]` branch: when no repo is cloned and no clone tool exists, 
 - The handler-coverage leg (E4): assert every visible schema name resolves to a non-`None` dispatch site, replacing the `keeper_tool_surface` string-match (`_ -> None` catch-all) with an exhaustive closed sum mirroring the keeper-internal descriptor path. Tracked separately under the Tool Orchestration Lane drift-guard work (#21517).
 - A provisioning resolver / typed `Network_blocked` deterministic reason for the sandbox-clone dead end (audit findings C1/C2), gated by RFC-0254 + RFC-0219; separate RFC.
 
+### 4.3 Superseded — zero-repo routing constraint removed (RFC-0219 extension, PR #22126)
+
+§4.1 landed an honest-blocker recovery message for the zero-repo `[]` branch. PR #22126 supersedes that slice by removing the zero-repo routing constraint itself, so the recovery message is no longer emitted. Both address the §2.1 albini phantom; #22126 removes it by deleting the constraint and the prompt rather than rewriting the prompt.
+
+**Decision.** The zero/single/many repo-count routing in `resolve_sandbox_root_git_cwd` is an unnecessary constraint plus an unnecessary prompt. Inside the keeper sandbox mount, git/gh run from the root and fail or succeed naturally. The only remaining preflight is validation of explicit `-C` paths (missing targets still surface before `docker exec`).
+
+**Recovery path (no guidance string).** When a keeper runs `git status` from the sandbox root with no repo cloned, git itself returns "not a git repository". The keeper recovers via the RFC-0198 typed `cwd` Execute affordance: `Execute { "executable": "git", "argv": ["clone", <url>, "repos/<repo>"] }`, then retries with `cwd="repos/<repo>"`. The dispatchable affordance exists, so no model-facing recovery string is needed.
+
+**albini reinterpreted.** §2.1's thrash was caused by the phantom "visible clone tool" (a non-existent tool the message named), not by the absence of guidance. #22121 replaced the phantom with the real Execute affordance; #22126 removes the message entirely. Either resolves the phantom, but #22126 is more fundamental — it deletes the constraint that forced the prompt in the first place.
+
+**RFC-0219 scope extension.** RFC-0219 removed `validate_cwd_ready` / `validate_path_args_ready` repo-patrol gates because they deadlocked keepers that need Execute to self-heal. The zero/single/many routing branch is the same class — a pre-emptive gate ahead of git/gh execution. #22126 completes that removal.
+
+**Monitoring, not precondition.** The raw-error → Execute-clone recovery pattern is observable via RFC-0239 (no-progress loop detector). If thrash recurs, the §4.2 provisioning resolver (typed `Network_blocked`) is the fallback — it is not a blocking precondition for removing the constraint. Removing the prompt is the SSOT; the resolver remains a follow-up.
+
+**Reconciles** the 13-minute landing collision: #22121 (03:51Z, §4.1 honest message) and #22126 (constraint removal) touched the same `[]` branch of `resolve_sandbox_root_git_cwd`. This section records #22126 as the surviving policy and retires §4.1's "keep the message" instruction.
+
 ## 5. Verification
 
 - `test_sandbox_root_git_cwd_zero_repo_blocks_before_exec` updated and green: message contains `no sandbox git clones`, `cwd="repos/<repo>"`, names the Execute tool, and does not contain `visible clone tool`.

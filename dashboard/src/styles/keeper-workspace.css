@@ -518,48 +518,6 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-state-pill.off { color: var(--color-fg-muted); }
 
 .kw-chat-actions { display: flex; gap: 8px; align-items: center; flex: none; }
-.kw-chat-command-icons {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.kw-chat-command-icon,
-.kw-chat-command-menu-toggle,
-.kw-chat-ctx-mobile {
-  display: inline-flex;
-  width: 34px;
-  height: 34px;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--r-1);
-  background: var(--color-bg-surface);
-  color: var(--color-fg-secondary);
-  cursor: pointer;
-  transition: color .15s, border-color .15s, background .15s, transform .12s;
-}
-.kw-chat-command-icon:hover,
-.kw-chat-command-menu-toggle:hover,
-.kw-chat-ctx-mobile:hover {
-  color: var(--color-fg-primary);
-  border-color: var(--color-border-strong);
-  background: var(--color-bg-hover);
-}
-.kw-chat-command-icon.active { color: var(--color-accent-fg); border-color: var(--color-accent-fg-dim); background: var(--accent-10); }
-.kw-chat-command-icon.danger,
-.kw-chat-command-item.danger { color: var(--color-status-err); }
-.kw-chat-command-icon.danger:hover,
-.kw-chat-command-item.danger:hover {
-  border-color: rgb(var(--color-status-err-glow) / 0.5);
-  background: rgb(var(--color-status-err-glow) / 0.12);
-}
-.kw-chat-command-icon:disabled,
-.kw-chat-command-menu-toggle:disabled,
-.kw-chat-command-item:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
 .kw-chat-mobile-actions {
   display: inline-flex;
   align-items: center;

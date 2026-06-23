@@ -80,10 +80,6 @@ async function loadChat() {
   vi.doMock('../keeper-action-panel', () => ({
     runKeeperAction: vi.fn(async () => undefined),
   }))
-  vi.doMock('../chat/artifact-panel', () => ({
-    ChatArtifactPanel: ({ entries }: { entries: unknown[] }) =>
-      html`<div data-testid="kw-artifact-panel" data-artifact-count=${entries.length}>Artifacts</div>`,
-  }))
   vi.doMock('../keeper-detail-state', () => ({
     keeperMobilePane: signal<'roster' | 'chat'>('chat'),
   }))
@@ -111,7 +107,6 @@ describe('KeeperWorkspaceChat', () => {
     vi.doUnmock('../../lib/keeper-runtime-display')
     vi.doUnmock('../../lib/keeper-predicates')
     vi.doUnmock('../keeper-action-panel')
-    vi.doUnmock('../chat/artifact-panel')
     vi.doUnmock('../keeper-detail-state')
   })
 
@@ -122,17 +117,17 @@ describe('KeeperWorkspaceChat', () => {
       render(html`
         <${KeeperWorkspaceChat}
           keeper=${mockKeeper}
-          detailOpen=${false}
-          onToggleDetail=${vi.fn()}
-          onClear=${vi.fn()}
         />
       `, container)
     })
 
     expect(container.querySelector('[data-testid="kw-sigil"]')?.textContent).toBe('sangsu')
     expect(container.querySelector('[data-testid="kw-conversation-panel"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="kw-chat-command-turn"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="kw-chat-command-icons"]')).not.toBeNull()
+    // Prototype desktop header: only FSM glyphs + settings (⚙).
+    expect(container.querySelector('[data-testid="kw-chat-command-turn"]')).toBeNull()
+    expect(container.querySelector('[data-testid="kw-chat-command-artifacts"]')).toBeNull()
+    expect(container.querySelector('[data-testid="kw-chat-command-config"]')).not.toBeNull()
   })
 
   it('renders the keeper scope/path slug under the chat name', async () => {
@@ -143,9 +138,6 @@ describe('KeeperWorkspaceChat', () => {
       render(html`
         <${KeeperWorkspaceChat}
           keeper=${keeperWithSlug}
-          detailOpen=${false}
-          onToggleDetail=${vi.fn()}
-          onClear=${vi.fn()}
         />
       `, container)
     })
@@ -153,39 +145,6 @@ describe('KeeperWorkspaceChat', () => {
     const slug = container.querySelector('.chat-head .sub .sub-ns') as HTMLElement | null
     expect(slug).not.toBeNull()
     expect(slug?.textContent).toContain('~/wt/sangsu')
-  })
-
-  it('opens the turn inspector drawer when the turn inspector button is clicked', async () => {
-    const { KeeperWorkspaceChat } = await loadChat()
-
-    await act(async () => {
-      render(html`
-        <${KeeperWorkspaceChat}
-          keeper=${mockKeeper}
-          detailOpen=${false}
-          onToggleDetail=${vi.fn()}
-          onClear=${vi.fn()}
-        />
-      `, container)
-    })
-
-    expect(container.querySelector('[data-testid="kw-chat-turn-inspector-drawer"]')).toBeNull()
-
-    const btn = container.querySelector('[data-testid="kw-chat-command-turn"]') as HTMLButtonElement
-    await act(async () => {
-      btn.click()
-    })
-
-    const drawer = container.querySelector('[data-testid="kw-chat-turn-inspector-drawer"]')
-    expect(drawer).not.toBeNull()
-    expect(container.querySelector('[data-testid="kw-turn-inspector"]')?.getAttribute('data-keeper')).toBe('sangsu')
-
-    const close = container.querySelector('[data-testid="kw-chat-turn-inspector-close"]') as HTMLButtonElement
-    await act(async () => {
-      close.click()
-    })
-
-    expect(container.querySelector('[data-testid="kw-chat-turn-inspector-drawer"]')).toBeNull()
   })
 
   it('switches the mobile pane to roster when the back button is clicked', async () => {
@@ -199,9 +158,6 @@ describe('KeeperWorkspaceChat', () => {
       render(html`
         <${KeeperWorkspaceChat}
           keeper=${mockKeeper}
-          detailOpen=${false}
-          onToggleDetail=${vi.fn()}
-          onClear=${vi.fn()}
           mobile=${true}
         />
       `, container)
@@ -224,9 +180,6 @@ describe('KeeperWorkspaceChat', () => {
       render(html`
         <${KeeperWorkspaceChat}
           keeper=${mockKeeper}
-          detailOpen=${false}
-          onToggleDetail=${vi.fn()}
-          onClear=${vi.fn()}
         />
       `, container)
     })
@@ -246,41 +199,6 @@ describe('KeeperWorkspaceChat', () => {
     expect(container.querySelector('[data-testid="kw-turn-inspector"]')?.getAttribute('data-initial-turn-timestamp')).toBe('2026-03-24T00:02:00.000Z')
   })
 
-  it('toggles the artifact panel when the artifacts button is clicked', async () => {
-    const { KeeperWorkspaceChat } = await loadChat()
-
-    await act(async () => {
-      render(html`
-        <${KeeperWorkspaceChat}
-          keeper=${mockKeeper}
-          detailOpen=${false}
-          onToggleDetail=${vi.fn()}
-          onClear=${vi.fn()}
-        />
-      `, container)
-    })
-
-    expect(container.querySelector('[data-testid="kw-artifact-panel"]')).toBeNull()
-
-    const btn = container.querySelector('[data-testid="kw-chat-command-artifacts"]') as HTMLButtonElement
-    expect(btn?.getAttribute('aria-label')).toBe('아티팩트')
-
-    await act(async () => {
-      btn.click()
-    })
-
-    const panel = container.querySelector('[data-testid="kw-artifact-panel"]')
-    expect(panel).not.toBeNull()
-    expect(btn?.getAttribute('aria-label')).toBe('아티팩트 숨김')
-    expect(btn?.getAttribute('aria-pressed')).toBe('true')
-
-    await act(async () => {
-      btn.click()
-    })
-
-    expect(container.querySelector('[data-testid="kw-artifact-panel"]')).toBeNull()
-  })
-
   it('renders mobile roster and context controls when mobile mode is enabled', async () => {
     const { KeeperWorkspaceChat } = await loadChat()
     const onBack = vi.fn()
@@ -291,9 +209,6 @@ describe('KeeperWorkspaceChat', () => {
       render(html`
         <${KeeperWorkspaceChat}
           keeper=${mockKeeper}
-          detailOpen=${false}
-          onToggleDetail=${vi.fn()}
-          onClear=${vi.fn()}
           mobile=${true}
           onBack=${onBack}
           onOpenRail=${onOpenRail}
@@ -310,6 +225,7 @@ describe('KeeperWorkspaceChat', () => {
     expect(back?.getAttribute('aria-label')).toBe('키퍼 로스터로 돌아가기')
     expect(context).not.toBeNull()
     expect(menuToggle).not.toBeNull()
+    // Config lives inside the mobile overflow menu, not as a top-level icon.
     expect(container.querySelector('[data-testid="kw-chat-command-config"]')).toBeNull()
 
     await act(async () => {

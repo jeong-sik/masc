@@ -494,12 +494,14 @@ describe('SettingsSurface', () => {
 
     expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('런타임 관리')
     expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('runtime.toml live-backed')
-    expect(container.querySelector('.set-card-b')?.getAttribute('data-preview-locked')).toBe('false')
-    expect(container.textContent).toContain('/api/v1/runtime/config/raw')
+    expect(container.querySelector('[data-testid="settings-runtime-launch"]')).not.toBeNull()
     expect(container.querySelector('.set-rt')).toBeNull()
     expect(container.textContent).not.toContain('Add runtime')
 
+    await fireEvent.click(container.querySelector('[data-testid="settings-open-runtime-editor"]') as HTMLElement)
+
     await waitFor(() => {
+      expect(container.querySelector('.rt-overlay')).not.toBeNull()
       expect(container.querySelector('[data-testid="runtime-toml-editor"]')).not.toBeNull()
       expect(container.textContent).toContain('/tmp/.masc/config/runtime.toml')
     })

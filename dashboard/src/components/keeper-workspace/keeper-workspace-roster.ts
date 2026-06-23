@@ -6,15 +6,6 @@
 // previous `.kw-*` implementation — only the emitted DOM/classes changed.
 
 import { html } from 'htm/preact'
-import {
-  MessageSquare,
-  MoreHorizontal,
-  Pause,
-  Play,
-  RotateCcw,
-  Settings,
-  Square,
-} from 'lucide-preact'
 import { useEffect, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import { keepers } from '../../store'
@@ -30,8 +21,10 @@ import { kSlot, kSigil } from '../keeper-badge'
 import { SigilBadge, Dot } from '../v2/primitives-v2'
 import { phaseTone, phasePulse } from '../v2/keeper-fsm'
 import {
+  isTerminalPhase,
   keeperBucket,
   keeperPhaseLabel,
+  keeperRuntimeLabel,
   type KeeperBucket,
 } from './keeper-workspace-shared'
 
@@ -39,7 +32,7 @@ type RosterFilter = 'all' | 'run' | 'att'
 type RosterSort = 'status' | 'name' | 'att'
 type KeeperWorkspaceRouteSurface = 'monitoring' | 'keepers'
 type RosterMenuState = { keeper: Keeper; x: number; y: number } | null
-type IconComponent = typeof Play
+type RosterHoverState = { keeper: Keeper; x: number; y: number } | null
 type RosterFleetSummary = {
   total: number
   running: number
@@ -50,12 +43,12 @@ type RosterFleetSummary = {
   highContext: number
 }
 
-const LIFECYCLE_COPY: Record<KeeperActionKey, { label: string; title: string; icon: IconComponent; danger?: boolean }> = {
-  pause: { label: '일시정지', title: '일시정지: 실행 중인 keeper 를 일시 멈춥니다', icon: Pause },
-  resume: { label: '재개', title: '재개: 일시정지된 keeper 를 다시 실행합니다', icon: Play },
-  wakeup: { label: '깨우기', title: '깨우기: 다음 turn 을 즉시 시도합니다', icon: RotateCcw },
-  boot: { label: '기동', title: '기동: offline keeper 를 다시 시작합니다', icon: Play },
-  shutdown: { label: '종료', title: '종료: keeper 를 완전 종료합니다', icon: Square, danger: true },
+const LIFECYCLE_COPY: Record<KeeperActionKey, { label: string; title: string; glyph: string; danger?: boolean }> = {
+  pause: { label: '일시정지', title: '일시정지: 실행 중인 keeper 를 일시 멈춥니다', glyph: '\u23F8\uFE0E' },
+  resume: { label: '재개', title: '재개: 일시정지된 keeper 를 다시 실행합니다', glyph: '\u25B6\uFE0E' },
+  wakeup: { label: '깨우기', title: '깨우기: 다음 turn 을 즉시 시도합니다', glyph: '\u25C9' },
+  boot: { label: '기동', title: '기동: offline keeper 를 다시 시작합니다', glyph: '\u25B6\uFE0E' },
+  shutdown: { label: '종료', title: '종료: keeper 를 완전 종료합니다', glyph: '\u25A0', danger: true },
 }
 const MENU_WIDTH = 190
 const MENU_ESTIMATED_HEIGHT = 246
@@ -131,6 +124,13 @@ function matchesQuery(keeper: Keeper, q: string): boolean {
   return hay.includes(q.toLowerCase())
 }
 
+function formatHHMM(timestamp: string | null | undefined): string | null {
+  if (!timestamp) return null
+  const d = new Date(timestamp)
+  if (Number.isNaN(d.getTime())) return null
+  return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
 // Prototype kp-state shows the raw English FSM phase ("Running", "Compacting").
 function phaseText(keeper: Keeper): string {
   return keeper.lifecycle_phase ?? keeper.phase ?? keeperPhaseLabel(keeper)
@@ -155,6 +155,8 @@ function RosterRow({
   const handle = basepath ? shortBasepath(basepath) : keeperScope(keeper)
   const handleTitle = basepath || keeperScope(keeper) || ''
   const activity = keeperActivityDisplay(keeper)
+  const activityTime = formatHHMM(activity.timestamp)
+  const activityLabel = activityTime ?? (activity.source !== 'none' ? activity.label : null)
   const select = () => onSelect(keeper.name)
   return html`
     <div
@@ -180,7 +182,7 @@ function RosterRow({
         </div>
       </div>
       <div class="kp-right">
-        ${activity.source !== 'none' ? html`<span class="kp-time">${activity.label}</span>` : null}
+        ${activityLabel ? html`<span class="kp-time" title=${activity.label}>${activityLabel}</span>` : null}
         ${att > 0 ? html`<span class="kp-att" title=${`주의 ${att}건 — 컨텍스트 레일에서 확인`}>${att}</span>` : null}
       </div>
       <button
@@ -191,7 +193,7 @@ function RosterRow({
         onClick=${(event: MouseEvent) => onMenu(keeper, event)}
         data-testid=${`kw-roster-menu-${keeper.name}`}
       >
-        <${MoreHorizontal} size=${15} aria-hidden="true" />
+        <span aria-hidden="true">${'\u22EF'}</span>
       </button>
     </div>
   `
@@ -202,14 +204,20 @@ function MiniRosterRow({
   active,
   onSelect,
   onMenu,
+  onHover,
 }: {
   keeper: Keeper
   active: boolean
   onSelect: (name: string) => void
   onMenu: (keeper: Keeper, event: MouseEvent) => void
+  onHover?: (keeper: Keeper | null, event?: MouseEvent) => void
 }) {
   const bucket = keeperBucket(keeper)
   const label = `${keeper.name} · ${phaseText(keeper)}`
+  const updateHover = (event: MouseEvent) => {
+    onHover?.(keeper, event)
+    event.stopPropagation()
+  }
   return html`
     <button
       type="button"
@@ -219,6 +227,9 @@ function MiniRosterRow({
       title=${label}
       onClick=${() => onSelect(keeper.name)}
       onContextMenu=${(event: MouseEvent) => onMenu(keeper, event)}
+      onMouseEnter=${updateHover}
+      onMouseMove=${updateHover}
+      onMouseLeave=${() => onHover?.(null)}
     >
       <${SigilBadge} slot=${kSlot(keeper.name)} sigil=${kSigil(keeper.name)} size=${38} beat=${bucket === 'running'} title=${keeper.name} />
     </button>
@@ -268,12 +279,11 @@ function KeeperRosterMenu({
         <span class="mono">${keeper.name}</span>
       </div>
       <button type="button" role="menuitem" class="kp-menu-i" onClick=${select} data-testid="kw-roster-menu-open-chat">
-        <${MessageSquare} size=${14} aria-hidden="true" />
+        <span aria-hidden="true">◈</span>
         <span>대화 열기</span>
       </button>
       ${actions.map(action => {
         const copy = LIFECYCLE_COPY[action]
-        const Icon = copy.icon
         return html`
           <button
             key=${action}
@@ -284,19 +294,40 @@ function KeeperRosterMenu({
             onClick=${() => { void runKeeperAction(keeper.name, action); onClose() }}
             data-testid=${`kw-roster-menu-${action}`}
           >
-            <${Icon} size=${14} aria-hidden="true" />
+            <span aria-hidden="true">${copy.glyph}</span>
             <span>${copy.label}</span>
           </button>
         `
       })}
       ${actions.length === 0
-        ? html`<div class="kp-menu-note">현재 실행 가능한 명령 없음</div>`
+        ? html`<div class="kp-menu-note">${isTerminalPhase(keeper) ? '복구 불가 — 명령 없음' : '전이 중 — 잠시 후'}</div>`
         : null}
       <div class="kp-menu-sep"></div>
       <button type="button" role="menuitem" class="kp-menu-i" onClick=${openConfig} data-testid="kw-roster-menu-config">
-        <${Settings} size=${14} aria-hidden="true" />
+        <span aria-hidden="true">${'\u2699\uFE0E'}</span>
         <span>keeper 설정</span>
       </button>
+    </div>
+  `
+}
+
+function RosterFlyout({ state }: { state: Exclude<RosterHoverState, null> }): VNode {
+  const k = state.keeper
+  const basepath = keeperBasepath(k)
+  const runtime = keeperRuntimeLabel(k)
+  const att = attentionCount(k)
+  return html`
+    <div class="kp-flyout" style=${{ left: `${state.x}px`, top: `${state.y}px` }}>
+      <div class="kpf-h">
+        <${SigilBadge} slot=${kSlot(k.name)} sigil=${kSigil(k.name)} size=${26} title=${k.name} />
+        <div class="kpf-id">
+          <div class="kpf-name">${k.name}</div>
+          <div class="kpf-phase"><${Dot} state=${phaseTone(k.lifecycle_phase)} pulse=${phasePulse(k.lifecycle_phase)} />${phaseText(k)}</div>
+        </div>
+      </div>
+      ${basepath ? html`<div class="kpf-row"><span class="kpf-k">basepath</span><span class="mono">${basepath}</span></div>` : null}
+      ${runtime ? html`<div class="kpf-row"><span class="kpf-k">runtime</span><span class="mono">${runtime}</span></div>` : null}
+      ${att > 0 ? html`<div class="kpf-att">${'⚠'} 주의 ${att}건</div>` : null}
     </div>
   `
 }
@@ -319,6 +350,17 @@ export function KeeperWorkspaceRoster({
   const [filter, setFilter] = useState<RosterFilter>('all')
   const [sort, setSort] = useState<RosterSort>('status')
   const [menu, setMenu] = useState<RosterMenuState>(null)
+  const [peek, setPeek] = useState(false)
+  const [hover, setHover] = useState<RosterHoverState>(null)
+
+  const handleMiniHover = (keeper: Keeper | null, event?: MouseEvent) => {
+    if (!keeper || !event) {
+      setHover(null)
+      return
+    }
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+    setHover({ keeper, x: rect.right + 10, y: rect.top + rect.height / 2 })
+  }
 
   useEffect(() => {
     if (!menu) return
@@ -427,11 +469,25 @@ export function KeeperWorkspaceRoster({
   }
 
   return html`
-    <aside class=${`roster${mini ? ' mini' : ''}`} aria-label="키퍼 로스터">
-      ${mini
-        ? html`<div class="roster-list mini-list">
-            ${miniRows.map(k => html`<${MiniRosterRow} key=${k.name} keeper=${k} active=${k.name === activeName} onSelect=${select} onMenu=${openMenu} />`)}
-          </div>`
+    <aside
+      class=${`roster${mini ? ' mini' : ''}${mini && peek ? ' peek' : ''}`}
+      aria-label="키퍼 로스터"
+      onMouseEnter=${mini ? () => setPeek(true) : undefined}
+      onMouseLeave=${mini ? () => { setPeek(false); setHover(null) } : undefined}
+    >
+      ${mini && !peek
+        ? html`
+          <div class="roster-list mini-list">
+            ${miniRows.map(k => html`<${MiniRosterRow}
+              key=${k.name}
+              keeper=${k}
+              active=${k.name === activeName}
+              onSelect=${select}
+              onMenu=${openMenu}
+              onHover=${handleMiniHover}
+            />`)}
+          </div>
+        `
         : html`
           <div class="roster-filters" role="group" aria-label="상태 필터">
             ${filterChips.map(chip => html`
@@ -500,6 +556,7 @@ export function KeeperWorkspaceRoster({
             onOpenConfig=${onOpenConfig}
           />`
         : null}
+      ${hover && mini && !peek ? html`<${RosterFlyout} state=${hover} />` : null}
     </aside>
   `
 }

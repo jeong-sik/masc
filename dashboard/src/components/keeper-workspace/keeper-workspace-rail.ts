@@ -261,10 +261,10 @@ function ContextSection({ keeper, onToggleDetail }: { keeper: Keeper; onToggleDe
              those live overlays do not exist yet, so both route to the operational
              detail body (FSM · 진단 · 정체성 · memory). Marked as a deferred wiring. */ ''}
         <button type="button" class="cmp-open" data-stub="compaction-inspector" onClick=${onToggleDetail}>
-          ◉ 컴팩션 스냅샷${hasCompactionHistory ? ` · ${compactionCount}` : ''} <span class="cmp-open-sub">운영 상세에서 보기</span>
+          ◉ 컴팩션 스냅샷${hasCompactionHistory ? ` · ${compactionCount}` : ''} <span class="cmp-open-sub">before/after 보기</span>
         </button>
         <button type="button" class="cmp-open" data-stub="memory-inspector" onClick=${onToggleDetail}>
-          ◈ 메모리 보기 <span class="cmp-open-sub">FSM · 진단 · 정체성</span>
+          ◈ 메모리 보기 <span class="cmp-open-sub">핀 · 스토어 · 회상</span>
         </button>
       </div>
     </div>
@@ -297,7 +297,7 @@ function OwnedTasksSection({ keeper }: { keeper: Keeper }): VNode {
                 <span class="ttl">${t.title}</span>
               </button>
             `)
-          : html`<div style=${{ fontSize: '12px', color: 'var(--text-dim)' }}>—</div>`}
+          : html`<div style=${{ fontSize: '12px', color: 'var(--text-dim)' }}>할당된 태스크 없음</div>`}
       </div>
     </div>
   `

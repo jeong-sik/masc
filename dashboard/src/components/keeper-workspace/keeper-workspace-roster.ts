@@ -8,7 +8,6 @@
 import { html } from 'htm/preact'
 import {
   MessageSquare,
-  MoreHorizontal,
   Pause,
   Play,
   RotateCcw,
@@ -183,7 +182,7 @@ function RosterRow({
       <div class="kp-meta">
         <div class="kp-name">${keeper.name}</div>
         <div class="kp-sub">
-          <span class="kp-state" title=${phaseText(keeper)}><${Dot} state=${phaseTone(keeper.lifecycle_phase)} pulse=${phasePulse(keeper.lifecycle_phase)} /></span>
+          <span class="kp-state"><${Dot} state=${phaseTone(keeper.lifecycle_phase)} pulse=${phasePulse(keeper.lifecycle_phase)} />${phaseText(keeper)}</span>
           ${handle ? html`<span aria-hidden="true">·</span><span class="kp-handle" title=${handleTitle}>${handle}</span>` : null}
         </div>
       </div>
@@ -199,7 +198,7 @@ function RosterRow({
         onClick=${(event: MouseEvent) => onMenu(keeper, event)}
         data-testid=${`kw-roster-menu-${keeper.name}`}
       >
-        <${MoreHorizontal} size=${15} aria-hidden="true" />
+        <span aria-hidden="true">⋯</span>
       </button>
     </div>
   `

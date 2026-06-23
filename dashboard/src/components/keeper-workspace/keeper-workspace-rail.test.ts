@@ -241,12 +241,12 @@ describe('KeeperWorkspaceRail', () => {
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${onToggle} />`)
     // v2 replaces the single .kw-detail-btn with .cmp-open inspector entries that
     // route to the operational detail body. The compaction-snapshot entry carries
-    // the "운영 상세에서 보기" label and fires onToggleDetail.
+    // the "before/after 보기" label and fires onToggleDetail.
     const btn = Array.from(container.querySelectorAll('.cmp-open')).find(
-      el => el.textContent?.includes('운영 상세'),
+      el => el.textContent?.includes('before/after'),
     ) as HTMLElement | undefined
     expect(btn).toBeTruthy()
-    expect(btn?.textContent).toContain('운영 상세')
+    expect(btn?.textContent).toContain('before/after 보기')
     fireEvent.click(btn as HTMLElement)
     expect(onToggle).toHaveBeenCalled()
   })
@@ -254,6 +254,6 @@ describe('KeeperWorkspaceRail', () => {
   it('shows the empty state when no tasks are owned', () => {
     tasks.value = []
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
-    expect(container.textContent).toContain('—')
+    expect(container.textContent).toContain('할당된 태스크 없음')
   })
 })

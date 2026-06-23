@@ -1104,6 +1104,88 @@ let test_missed_pong_threshold_reads_env () =
   with_env_var "MASC_WS_MISSED_PONG_THRESHOLD" "-2" (fun () ->
     Alcotest.(check int) "negative values clamp to 0" 0 (Ws.__test_missed_pong_threshold ()))
 
+(* RFC-0283: regression for the httpun-ws coalesced-fragment frame-queue stall.
+   Drives the REAL Httpun_ws.Server_connection frame queue (not masc's
+   inbound_accumulate, which bypasses it) with three frames coalesced into one
+   read. On stock httpun-ws 0.2.0 only 2 of 3 fragments are delivered and
+   next_read_operation returns `Read (stall); with the upstream PR #80 drain
+   fix (pinned fork) all 3 are delivered. See jeong-sik/masc#22100. *)
+let coalesced_fragment_frame_queue_delivers_all () =
+  let mask_key = "\x12\x34\x56\x78" in
+  let append_frame buf ~fin ~opcode ~payload =
+    let len = String.length payload in
+    let b0 = (if fin then 0x80 else 0x00) lor opcode in
+    Buffer.add_char buf (Char.chr b0);
+    Buffer.add_char buf (Char.chr (0x80 lor len));
+    (* MASK bit + 7-bit length *)
+    Buffer.add_string buf mask_key;
+    String.iteri
+      (fun i c ->
+        let m = Char.code mask_key.[i land 3] in
+        Buffer.add_char buf (Char.chr (Char.code c lxor m)))
+      payload
+  in
+  (* Mirror masc read_payload_string so the payload input_state matches
+     production usage (server_mcp_transport_ws.ml:937). *)
+  let delivered = ref [] in
+  let read_payload_string payload ~len ~on_complete =
+    let buffer = Bytes.create len in
+    let offset = ref 0 in
+    let completed = ref false in
+    let complete () =
+      if not !completed then begin
+        completed := true;
+        on_complete (Bytes.sub_string buffer 0 !offset)
+      end
+    in
+    let rec schedule () =
+      if !completed then ()
+      else if !offset >= len then complete ()
+      else
+        Httpun_ws.Payload.schedule_read payload ~on_eof:complete
+          ~on_read:(fun bs ~off ~len:chunk_len ->
+            let copy_len = min chunk_len (len - !offset) in
+            Bigstringaf.blit_to_bytes bs ~src_off:off buffer ~dst_off:!offset
+              ~len:copy_len;
+            offset := !offset + copy_len;
+            if !offset >= len then complete () else schedule ())
+    in
+    if len = 0 then complete () else schedule ()
+  in
+  let handler _wsd =
+    let frame ~opcode:_ ~is_fin ~len payload =
+      read_payload_string payload ~len ~on_complete:(fun text ->
+          delivered := (is_fin, text) :: !delivered)
+    in
+    let eof ?error () = ignore error in
+    { Httpun_ws.Websocket_connection.frame; eof }
+  in
+  let conn = Httpun_ws.Server_connection.create_websocket handler in
+  let buf = Buffer.create 64 in
+  append_frame buf ~fin:false ~opcode:0x1 ~payload:"AA";
+  append_frame buf ~fin:false ~opcode:0x0 ~payload:"BB";
+  append_frame buf ~fin:true ~opcode:0x0 ~payload:"CC";
+  let s = Buffer.contents buf in
+  let n = String.length s in
+  let bs = Bigstringaf.create n in
+  Bigstringaf.blit_from_string s ~src_off:0 bs ~dst_off:0 ~len:n;
+  (* All three frames arrive as one coalesced TCP read. *)
+  let (_ : int) = Httpun_ws.Server_connection.read conn bs ~off:0 ~len:n in
+  (* gluten's read loop: `Read means "go block on the socket". With no further
+     client bytes (the client awaits its reply), the queue must already be
+     drained by now or the connection deadlocks. *)
+  let (_ : [ `Read | `Yield | `Close ]) =
+    Httpun_ws.Server_connection.next_read_operation conn
+  in
+  let d = List.rev !delivered in
+  Alcotest.(check int)
+    "all 3 coalesced fragments delivered (PR #80 drain)" 3 (List.length d);
+  Alcotest.(check bool)
+    "final fragment (is_fin=true) delivered" true
+    (List.exists (fun (fin, _) -> fin) d);
+  Alcotest.(check string) "reassembled message" "AABBCC"
+    (String.concat "" (List.map snd d))
+
 let () =
   Alcotest.run "WebSocket Transport" [
 	    ("session_registry", [
@@ -1268,5 +1350,10 @@ let () =
         test_missed_pong_threshold_default;
       Alcotest.test_case "threshold reads env and clamps negatives" `Quick
         test_missed_pong_threshold_reads_env;
+    ]);
+    ("frame_queue_coalescing", [
+      Alcotest.test_case
+        "coalesced 3-fragment message fully delivered (RFC-0283, #22100)" `Quick
+        coalesced_fragment_frame_queue_delivers_all;
     ]);
   ]

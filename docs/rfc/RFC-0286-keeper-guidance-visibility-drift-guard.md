@@ -1,4 +1,4 @@
-# RFC-0284: Keeper Guidance Visibility-Leg Drift Guard
+# RFC-0286: Keeper Guidance Visibility-Leg Drift Guard
 
 **Status**: Draft
 **Date**: 2026-06-23

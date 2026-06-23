@@ -135,7 +135,7 @@ make release-evidence
 
 레일 외부에서 접근 가능한 추가 서피스: Monitor (keeper fleet, 도구 모니터, 런타임, observatory), Command (개입·거버넌스·승인), Lab (도구 진단, safety harness, 성능, Memory OS, 키퍼 메모리 상태).
 
-섹션을 가진 서피스의 예시 라우트: `dashboard#workspace?section=verification`, `dashboard#monitoring?section=agents`, `dashboard#lab?section=memory-subsystems`, `dashboard#command?section=operations`.
+라우트 예시: `dashboard#monitoring?section=journey` (hidden diagnostic), `dashboard#command?section=operations`, `dashboard#connectors?section=connector-status`, `dashboard#workspace?section=verification`.
 
 ---
 

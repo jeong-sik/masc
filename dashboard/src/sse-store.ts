@@ -365,6 +365,11 @@ async function hydrateAfterReconnect(): Promise<void> {
     console.warn('[SSE] reconnect OAS replay failed', err instanceof Error ? err.message : err)
   }
   requestNamespaceTruthNow()
+  // Recover approval-queue state that may have changed while disconnected: the
+  // always-visible nav-rail approvals badge reads governanceData regardless of
+  // the active surface, so an approval that arrived (or resolved) during the
+  // gap must be re-fetched on reconnect, not only on the governance surface.
+  handleGovernance()
   void refreshDashboard({ force: true }).catch(err =>
     console.warn('[SSE] reconnect dashboard refresh failed', err instanceof Error ? err.message : err),
   )

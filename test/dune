@@ -692,6 +692,12 @@
  (modules test_fusion_judge_usage)
  (libraries masc_test_deps masc.fusion_core))
 
+; RFC-0284 — Fusion deliberation OTel metrics: label wiring + counter emission.
+(test
+ (name test_fusion_metrics)
+ (modules test_fusion_metrics)
+ (libraries masc_test_deps masc.fusion_core))
+
 ; RFC-0252 §8 — judge_meta/panel_meta structured serialization. Needs
 ; masc.fusion_core for Fusion_types constructors (Answer/Recommend/Insufficient,
 ; judge_synthesis record) + Masc.Fusion_sink for the public meta serializers.

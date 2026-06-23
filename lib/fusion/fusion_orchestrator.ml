@@ -11,11 +11,14 @@ type outcome =
 
 let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
   match Fusion_policy.decide ~policy request with
-  | Fusion_types.Deny reason -> Denied reason
+  | Fusion_types.Deny reason ->
+    Fusion_metrics.record_invocation ~topology `Denied;
+    Denied reason
   | Fusion_types.Allow req ->
     (match Fusion_policy.find_preset policy req.Fusion_types.preset with
      | None ->
        (* 게이트가 preset 존재를 이미 검증했으므로 도달 불가. 방어적으로 Denied. *)
+       Fusion_metrics.record_invocation ~topology `Denied;
        Denied (Fusion_types.Preset_unknown req.Fusion_types.preset)
      | Some vp ->
           (* RFC-0280: find_preset가 검증된 preset을 돌려준다 — invariant 재검증 불필요.
@@ -256,10 +259,16 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
             | Ok (_, u) -> u
             | Error (_, u) -> u
           in
+          (* RFC-0284 observation record → OTel counters. *)
+          List.iter (Fusion_metrics.record_judge_execution ~topology) judge_nodes;
           (match
              Fusion_sink.emit ~base_dir ~keeper:req.Fusion_types.keeper
                ~run_id:req.Fusion_types.run_id ~question:req.Fusion_types.prompt
                ~panel ~judge ~judges:judge_nodes ~judge_usage
            with
-           | Ok () -> Completed { panel; judge }
-           | Error msg -> Sink_failed msg))
+           | Ok () ->
+             Fusion_metrics.record_invocation ~topology `Completed;
+             Completed { panel; judge }
+           | Error msg ->
+             Fusion_metrics.record_invocation ~topology `Sink_failed;
+             Sink_failed msg))

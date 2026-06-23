@@ -3,6 +3,7 @@ import type { ComponentChildren, VNode } from 'preact'
 import { marked } from 'marked'
 import { JsonViewerCard } from '../common/json-viewer'
 import { sanitizeHtml as purifyHtml } from '../../lib/dompurify'
+import { renderMermaidSvg, useMermaidInView } from '../common/mermaid-graph'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { ringFocusClasses } from '../common/ring'
 import { collectAttachments } from './attachments'
@@ -1072,19 +1073,20 @@ function ChatSvgBlock({ svg, cap }: { svg: string; cap?: string }) {
 
 function ChatMermaidBlock({ source, caption }: ChatMermaidBlock) {
   const id = useId()
+  const [containerRef, shouldRender] = useMermaidInView<HTMLElement>('200px')
   const [svg, setSvg] = useState<string | null>(null)
   const [error, setError] = useState(false)
 
   useEffect(() => {
+    if (!shouldRender) return undefined
     let active = true
     const run = async () => {
       try {
-        const mod = await import('mermaid')
-        const mermaid = mod.default
-        if (typeof mermaid.initialize === 'function') {
-          mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'dark' })
-        }
-        const { svg: rendered } = await mermaid.render(`mermaid-${id}`, source)
+        // Use the shared mermaid path: it initializes once, serializes renders
+        // to avoid SVG corruption, and mermaid's securityLevel:'strict' already
+        // sanitizes the output. Re-running DOMPurify here added ~1s+ of main
+        // thread work for large diagrams (see dashboard perf audit).
+        const rendered = await renderMermaidSvg(source, `mermaid-${id}`)
         if (active) setSvg(rendered)
       } catch {
         if (active) setError(true)
@@ -1092,18 +1094,18 @@ function ChatMermaidBlock({ source, caption }: ChatMermaidBlock) {
     }
     void run()
     return () => { active = false }
-  }, [source, id])
+  }, [source, id, shouldRender])
 
   if (error) {
     return html`<${ChatCodeBlock} cap="mermaid" html=${escapeHtml(source)} source=${source} />`
   }
 
   return html`
-    <figure class="chat-block-media" data-chat-block="mermaid">
+    <figure class="chat-block-media" data-chat-block="mermaid" ref=${containerRef}>
       <div class="chat-block-mermaid">
         ${svg
-          ? html`<div dangerouslySetInnerHTML=${{ __html: sanitizeHtml(svg) }} />`
-          : html`<div class="chat-block-media-ph">다이어그램 렌더링 중…</div>`}
+          ? html`<div dangerouslySetInnerHTML=${{ __html: svg }} />`
+          : html`<div class="chat-block-media-ph">${shouldRender ? '다이어그램 렌더링 중…' : '다이어그램 (스크롤 시 렌더링)'}</div>`}
       </div>
       ${caption ? html`<figcaption class="chat-block-media-cap">${caption}</figcaption>` : null}
     </figure>

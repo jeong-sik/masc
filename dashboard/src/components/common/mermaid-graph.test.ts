@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import { waitFor } from '@testing-library/preact'
-import { MermaidGraph } from './mermaid-graph'
+import { MermaidGraph, clearMermaidSvgCache } from './mermaid-graph'
 
 const mockRender = vi.fn()
 const mockInitialize = vi.fn()
@@ -26,6 +26,7 @@ describe('MermaidGraph', () => {
     mockRender.mockReset()
     mockInitialize.mockReset()
     mockRender.mockResolvedValue({ svg: '<svg><rect /></svg>' })
+    clearMermaidSvgCache()
   })
 
   afterEach(() => {

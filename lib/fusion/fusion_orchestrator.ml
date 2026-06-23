@@ -149,18 +149,24 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
               in
               (match ok_priors with
                | [] ->
-                 (* 전원 실패 — meta할 종합 없음. 첫 에러를 대표로 전파(usage 동반).
-                    관측엔 1차 실패 노드만 남는다(meta 노드 없음, RFC-0284). *)
+                 (* 전원 실패 — meta할 종합 없음. 첫 에러를 대표 메시지로 전파하되, 모든 1차
+                    심판이 태운 토큰을 sum_error_usage로 합산해 usage에 싣는다(undercount
+                    교정, 적대 리뷰 #22093 all-fail; ok_priors=[]이면 firsts는 전부 Error라
+                    fold가 모든 실패 usage를 모은다). 관측엔 1차 실패 노드만 남는다(meta
+                    노드 없음, RFC-0284). observe(#22112)의 (Error err, first_nodes) 관측
+                    구조와 #22122의 usage 회계를 합친 형태 — 두 축은 직교한다. *)
+                 let failed_usage = Fusion_types.sum_error_usage firsts in
                  let err =
                    match
                      List.find_map
-                       (fun (_, r) -> match r with Error e -> Some e | Ok _ -> None)
+                       (fun (_, r) ->
+                         match r with Error (msg, _) -> Some msg | Ok _ -> None)
                        firsts
                    with
-                   | Some e -> e
+                   | Some msg -> (msg, failed_usage)
                    | None ->
-                     ( "judge_of_judges: no judge produced a synthesis"
-                     , Fusion_types.zero_usage )
+                     (* 도달 불가: ok_priors=[]이면 firsts는 전부 Error. fail-closed 방어. *)
+                     ("judge_of_judges: no judge produced a synthesis", failed_usage)
                  in
                  (Error err, first_nodes)
                | (_, first_s, _) :: _ ->

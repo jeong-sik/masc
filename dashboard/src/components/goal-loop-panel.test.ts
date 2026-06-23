@@ -114,6 +114,26 @@ describe('GoalLoopPanel', () => {
     expect(mocks.fetchGoalLoopStatus).not.toHaveBeenCalled()
   })
 
+  it('re-renders when the store signal is written after mount (push reactivity)', async () => {
+    // RFC-0284 §6 FE: the panel reads goalLoopStatusData.value in its render
+    // body, which subscribes it to the signal. A post-mount write (the SSE
+    // push path) must drive a re-render with no fetch and no re-mount. Moving
+    // the read into a useCallback/useMemo closure would break the subscription
+    // and turn this test red — that is the regression this pins.
+    goalLoopStatusData.value = blockedStatus()
+    render(html`<${GoalLoopPanel} />`)
+    expect(screen.getByTestId('goal-loop-next-action').textContent).toContain('D-EMERGENCY-2')
+
+    const pushed = blockedStatus()
+    pushed.nextAction = { ...(pushed.nextAction ?? {}), decision_id: 'D-PUSHED-7' }
+    goalLoopStatusData.value = pushed
+
+    await waitFor(() => {
+      expect(screen.getByTestId('goal-loop-next-action').textContent).toContain('D-PUSHED-7')
+    })
+    expect(mocks.fetchGoalLoopStatus).not.toHaveBeenCalled()
+  })
+
   it('renders phase table, audit, and next action', () => {
     const { container } = render(html`<${GoalLoopPanel} initialStatus=${blockedStatus()} />`)
 

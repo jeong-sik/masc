@@ -136,14 +136,22 @@ snapshot still carries the `loop` sub-field for the initial-burst / HTTP path.
 
 ## §6 Verification
 
-- Server: a test that a status change produces exactly one `goals` snapshot with
-  a `loop` field, and an unchanged status produces none (change-detection gate).
-- Frontend: a test that a `goals` snapshot carrying `loop` updates the goal-loop
-  store without an HTTP fetch (mirrors the existing `project_snapshot`
-  no-HTTP-fetch test), and that reconnect re-hydrates.
-- Parity gate (PR #22124): unaffected — `goals` is a snapshot sub-kind routed via
-  the `case 'goals'` switch, not an exact-match `event.type === 'X'` route, so it
-  is outside the gate's exact-match inventory by design.
+- Server: a test that a status change produces exactly one `goal_loop_status`
+  broadcast carrying the status as `payload`, and an unchanged status produces
+  none (`test_goal_loop_broadcast.ml`, change-detection gate). A `generated_at`-
+  only delta also produces none, proving the volatile-key exclusion (§3.2).
+- Frontend: a test that a pushed snapshot updates the goal-loop store and the
+  panel renders it without an HTTP fetch (mirrors the existing no-HTTP-fetch
+  tests), a post-mount signal write re-renders the panel (push reactivity), and
+  reconnect re-hydrates via the existing dashboard refresh.
+- Parity gate (PR #22124): unaffected — `goal_loop_status` is handled in
+  `hydrateDashboardSlice`'s eventType switch (`case 'goal_loop_status'`), bridged
+  onto the `goals` slice (§3.3), not an exact-match `event.type === 'X'` route,
+  so it is outside the gate's exact-match inventory by design. Because the gate
+  does not track it, a dedicated cross-boundary drift guard
+  (`goal-loop-event-type-drift.test.ts`) binds the three `goal_loop_status`
+  literals (BE emit / BE WS bridge / FE case) so a one-sided rename fails instead
+  of silently breaking live updates.
 
 ## §7 Alternatives considered
 

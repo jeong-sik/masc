@@ -56,7 +56,7 @@ Because the text reaches the model, this is a **behavior change**, and its magni
 |---|---|---|
 | `config/personas/*/profile.json` (19) | `keeper.short_goal`/`mid_goal`/`long_goal` | fold → `keeper.instructions`, delete keys |
 | `config/keepers/masc-improver.toml` | horizon lines | fold → `instructions`, delete keys |
-| `~/.masc/config/keepers/*.toml` (6, runtime) | horizon lines | runtime migration (out-of-PR data; same fold) |
+| `<masc_dir>/config/keepers/*.toml` (6, runtime) | horizon lines | runtime migration (out-of-PR data; same fold) |
 | `lib/keeper/keeper_meta_contract.ml/.mli` | `keeper_meta.{short_goal,mid_goal,long_goal}`, `apply_profile_default` | delete fields |
 | `lib/keeper/keeper_config_text.ml` | `resolve_goal_horizons`, `normalize_goal_horizon_opt`, `parse_goal_horizon_opt` | delete (dead) — **KEEP `normalize_goal_horizon_text` / `default_goal_horizon_max_chars` / `MASC_KEEPER_GOAL_HORIZON_MAX_CHARS`: they normalize the surviving `goal` field, see §9** |
 | `lib/keeper/keeper_meta_json_parse.ml` | `pk_short/mid/long_goal` | delete |
@@ -76,7 +76,7 @@ Because the text reaches the model, this is a **behavior change**, and its magni
 
 ## 5. Migration design
 
-1. **Config (content-preserving first, deterministic).** A mechanical script folds each keeper's non-empty horizon text verbatim into its `instructions` as a labeled "목표 계층" block, then deletes the three keys — from both `config/personas/*/profile.json` and `config/keepers/*.toml`. No judgment, no data loss. Runtime configs (`~/.masc/config/keepers/*.toml`) are migrated by the same script as an out-of-PR data step; un-migrated runtime configs degrade gracefully (unknown TOML keys are WARN-and-ignore, not fail-loud — `keeper_types_profile_toml_parser.ml` `warn_unknown_keeper_toml_keys`).
+1. **Config (content-preserving first, deterministic).** A mechanical script folds each keeper's non-empty horizon text verbatim into its `instructions` as a labeled "목표 계층" block, then deletes the three keys — from both `config/personas/*/profile.json` and `config/keepers/*.toml`. No judgment, no data loss. Runtime configs (`<masc_dir>/config/keepers/*.toml`) are migrated by the same script as an out-of-PR data step; un-migrated runtime configs degrade gracefully (unknown TOML keys are WARN-and-ignore, not fail-loud — `keeper_types_profile_toml_parser.ml` `warn_unknown_keeper_toml_keys`).
 2. **Types + parsers (compiler-driven).** Remove the fields from `keeper_meta`, `keeper_profile_defaults`, both parsers, and `canonical_keeper_toml_key_names`. The OCaml compiler enumerates every consumer; each error site is resolved explicitly (no `_` catch-all added).
 3. **Prompt assembly.** Remove the `Short/Mid/Long-term goal` render blocks and the `~short_goal ~mid_goal ~long_goal` parameters. `<identity>` keeps `Goal: <goal>` and the separate `<available_goals>` Goal_store block.
 4. **Non-display consumers.** Collapse the stigmergy and memory-recall keyword sources to `[goal]` (no behavior change — already flattened).
@@ -101,7 +101,7 @@ Because the text reaches the model, this is a **behavior change**, and its magni
 
 ## 8. Rollout
 
-Single PR (the config fold + code removal are inseparable — the compiler will not build with fields removed from types but still referenced). Draft → local verification (§6) → adversarial review → Ready. Runtime config migration applied to `~/.masc` as an out-of-band data step alongside merge.
+Single PR (the config fold + code removal are inseparable — the compiler will not build with fields removed from types but still referenced). Draft → local verification (§6) → adversarial review → Ready. Runtime config migration applied to `<masc_dir>` as an out-of-band data step alongside merge.
 
 ## 9. Intentional survivors (not vestigial — documented to avoid mistaken "incomplete purge" reads)
 

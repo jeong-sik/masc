@@ -122,6 +122,8 @@ export function attentionReasonLabel(reason: string | null, paused: boolean): st
 //      inspect_runtime_attempts, reconcile_partial_commit, inspect_latest_error)
 //   - lib/keeper_runtime/keeper_fd_pressure.ml ('restore_fd_headroom')
 //   - lib/dashboard/dashboard_goals.ml ('inspect_keeper_runtime_trust')
+//   - lib/keeper/keeper_status_bridge.ml runtime_trust fallback
+//     ('inspect_keeper_runtime_trust')
 export const NEXT_HUMAN_ACTIONS = [
   'resolve_approval',
   'approve_or_reject_continue',

@@ -44,6 +44,23 @@ function statusBridgePairs(): Array<{ reason: string; action: string }> {
   return pairs
 }
 
+// keeper_status_bridge.ml `attention_fields_with_runtime_trust` can also emit
+// standalone `Some "<action>"` fallbacks (e.g. when runtime_trust has no
+// next_human_action / latest_next_action). These are not part of the `true,`
+// triples above, so scan that function body separately.
+function statusBridgeStandaloneActions(): string[] {
+  const src = read('lib/keeper/keeper_status_bridge.ml')
+  const start = src.indexOf('let attention_fields_with_runtime_trust')
+  expect(
+    start,
+    'attention_fields_with_runtime_trust present in keeper_status_bridge.ml',
+  ).toBeGreaterThan(-1)
+  const body = src.slice(start, src.indexOf(';;', start))
+  return [...body.matchAll(/Some "([a-z_]+)"/g)]
+    .map((m) => m[1])
+    .filter((token): token is string => token !== undefined)
+}
+
 // keeper_turn_disposition.ml `next_action` returns `Some "<action>"` per arm.
 // Scope to that function body so `to_wire` / label arms are not picked up.
 function dispositionActions(): string[] {
@@ -61,6 +78,7 @@ describe('keeper attention vocabulary drift guard', () => {
     // If extraction silently returns nothing, the coverage assertions below
     // would vacuously pass — assert the emit sites are actually being read.
     expect(statusBridgePairs().length).toBeGreaterThan(4)
+    expect(statusBridgeStandaloneActions().length).toBeGreaterThan(0)
     expect(dispositionActions().length).toBeGreaterThan(2)
   })
 
@@ -76,6 +94,16 @@ describe('keeper attention vocabulary drift guard', () => {
       (action) => !isNextHumanAction(action),
     )
     expect(missing, `next_human_action codes emitted by the backend with no union arm: ${missing.join(', ')}`).toEqual([])
+  })
+
+  it('every keeper_status_bridge standalone next_human_action fallback has a frontend label', () => {
+    const missing = [...new Set(statusBridgeStandaloneActions())].filter(
+      (action) => !isNextHumanAction(action),
+    )
+    expect(
+      missing,
+      `standalone next_human_action fallbacks with no union arm: ${missing.join(', ')}`,
+    ).toEqual([])
   })
 
   it('every keeper_turn_disposition next_action has a frontend label', () => {

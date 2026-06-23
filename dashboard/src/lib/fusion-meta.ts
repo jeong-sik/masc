@@ -156,6 +156,80 @@ export function normalizeFusionJudge(value: unknown): FusionJudgeView | null {
   }
 }
 
+// ---------------------------------------------------------------------------
+// RFC-0284 judge-node observation array (`judges`)
+// ---------------------------------------------------------------------------
+
+// One judge execution node from `fusion_sink.ml judge_node_meta`. `role` is the
+// closed backend enum (single | refine | first | meta) but kept as a string so
+// an unanticipated role degrades to a raw badge instead of being dropped. Only
+// structural fields are retained — the dashboard renders topology from the
+// shape of the array, and the per-node synthesis text is carried by the
+// canonical singular `judge`.
+export type FusionJudgeNode = {
+  role: string
+  identity: string
+  failed: boolean
+  error?: string | null
+  inputTokens?: number | null
+  outputTokens?: number | null
+}
+
+// Structural classification of a judges array, derived from shape alone (the
+// array carries no topology field). Language-free so the lib stays i18n-neutral;
+// the component maps it to a display label.
+export type FusionJudgeShape = 'single' | 'refine' | 'judge-of-judges' | 'custom'
+
+/**
+ * Normalize the RFC-0284 `judges` observation array. Each element is a
+ * Synthesized node (role/identity + synthesis sections + per-node usage) or a
+ * Judge_failed node (role/identity + status:"failed" + error + usage); only the
+ * Judge_failed node carries `status`, so absence of `status === 'failed'` marks
+ * a successful node. Non-record elements are dropped (total over loose wire
+ * data); missing role/identity get safe defaults rather than being discarded.
+ */
+export function normalizeFusionJudgeNodes(value: unknown): FusionJudgeNode[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item, index) => {
+    const node = asRecord(item)
+    if (!node) return []
+    const failed = firstString(node, ['status']) === 'failed'
+    return [
+      {
+        role: firstString(node, ['role']) ?? 'judge',
+        identity: firstString(node, ['identity', 'model', 'name']) ?? `judge-${index + 1}`,
+        failed,
+        error: failed ? firstString(node, ['error', 'reason', 'error_text']) ?? undefined : undefined,
+        inputTokens: firstNumber(node, ['input_tokens', 'inputTokens']) ?? undefined,
+        outputTokens: firstNumber(node, ['output_tokens', 'outputTokens']) ?? undefined,
+      },
+    ]
+  })
+}
+
+/**
+ * Classify a judges array by its shape, never by a topology field (RFC-0284
+ * §line 27: the frontend must not hardcode topology-name vocabulary). The
+ * classification reads the per-node `role` — an observed fact carried in each
+ * array element, not a topology label — which is exactly the array shape and is
+ * more robust than a raw node count:
+ *  - any `first` node ⟹ judge-of-judges. `First` is JoJ-exclusive on the
+ *    backend (`fusion_orchestrator.ml run_judge_of_judges`), so this also
+ *    classifies an all-fail JoJ correctly, where the meta node is absent and a
+ *    bare count of two first-judges would otherwise read as refine.
+ *  - any `refine` node ⟹ refine (the `Refine_pass` 2nd judge of refine /
+ *    conditional).
+ *  - a single node ⟹ single (Simple, or a refine/conditional whose 1st judge
+ *    failed before the 2nd ran).
+ *  - anything else ⟹ custom, so an unanticipated topology still renders.
+ */
+export function classifyFusionJudgeShape(nodes: readonly FusionJudgeNode[]): FusionJudgeShape {
+  if (nodes.some(node => node.role === 'first')) return 'judge-of-judges'
+  if (nodes.some(node => node.role === 'refine')) return 'refine'
+  if (nodes.length === 1) return 'single'
+  return 'custom'
+}
+
 export function normalizeFusionUsage(
   meta: Record<string, unknown>,
   panel?: FusionPanelEntry[],

@@ -11,7 +11,8 @@ import {
   refreshFusionBoard,
   refreshFusionRuns,
 } from '../../store'
-import { FusionSurface } from './fusion-surface'
+import type { FusionJudgeNode } from '../../lib/fusion-meta'
+import { FusionJudgesStrip, FusionSurface } from './fusion-surface'
 
 // Mock only the refresh side effects; keep the real signals (fusionBoardLoading /
 // fusionRunsLoading) via ...actual so the component reads live state. The manual
@@ -138,6 +139,47 @@ describe('FusionSurface', () => {
     expect(container.textContent).toContain('panel ×2')
     expect(container.textContent).toContain('board evidence')
     expect(container.textContent).not.toContain('chat · board')
+  })
+
+  it('renders the RFC-0284 judge-node strip for a judge-of-judges run', () => {
+    // Wiring pin: a board post carrying the `judges` observation array must
+    // surface the per-node topology in the detail view. Before RFC-0284 PR 2
+    // the backend emitted this array but the dashboard dropped it (collapsed to
+    // the singular judge) — this test red-guards that silent regression.
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-joj',
+        title: 'Fusion deliberation (run joj-1): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'joj-1',
+          question: 'Which judge topology?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'a' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'reconciled answer' },
+          judges: [
+            { role: 'first', identity: 'gpt-4o', input_tokens: 100, output_tokens: 10 },
+            { role: 'first', identity: 'gemini', status: 'failed', error: 'timeout', input_tokens: 5, output_tokens: 0 },
+            { role: 'meta', identity: 'o1', input_tokens: 2000, output_tokens: 418 },
+          ],
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const strip = container.querySelector('[data-testid="fusion-judges"]')
+    expect(strip).not.toBeNull()
+    expect(strip?.querySelectorAll('li')).toHaveLength(3)
+    // shape-derived header + role badges (topology is read from the array shape)
+    expect(container.textContent).toContain('심판의 심판')
+    expect(container.textContent).toContain('1차')
+    expect(container.textContent).toContain('메타')
+    // a failed first-judge node is marked, not dropped
+    expect(
+      container.querySelector('[data-testid="fusion-judges"] [data-failed="true"]'),
+    ).not.toBeNull()
+    // the canonical synthesis below the strip is unchanged
+    expect(container.textContent).toContain('reconciled answer')
   })
 
   it('renders structured judge evidence from board metadata without local prototype state', () => {
@@ -362,5 +404,55 @@ describe('FusionSurface', () => {
     expect(cards[0]?.classList.contains('answered')).toBe(true)
     expect(cards[0]?.classList.contains('failed')).toBe(false)
     expect(cards[1]?.classList.contains('failed')).toBe(true)
+  })
+})
+
+describe('FusionJudgesStrip', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  // meta/single/refine echo their role as identity (fusion_sink judge_role_fields);
+  // only `first` carries a real panelist id.
+  const nodes: FusionJudgeNode[] = [
+    { role: 'first', identity: 'gpt-4o', failed: false, inputTokens: 100, outputTokens: 10 },
+    { role: 'first', identity: 'gemini', failed: true, error: 'timeout', inputTokens: 5, outputTokens: 0 },
+    { role: 'meta', identity: 'meta', failed: false, inputTokens: 2000, outputTokens: 418 },
+  ]
+
+  it('renders one row per node with role/failed data attributes and the token label', () => {
+    render(html`<${FusionJudgesStrip} nodes=${nodes} />`, container)
+    const items = container.querySelectorAll('[data-testid="fusion-judges"] li')
+    expect(items).toHaveLength(3)
+    expect(items[0]?.getAttribute('data-role')).toBe('first')
+    expect(items[0]?.getAttribute('data-failed')).toBe('false')
+    expect(items[1]?.getAttribute('data-failed')).toBe('true')
+    expect(items[2]?.getAttribute('data-role')).toBe('meta')
+    // 2000 + 418 = 2418 -> 2.4k tok
+    expect(container.textContent).toContain('2.4k tok')
+    const failed = container.querySelector('[data-failed="true"] .fus-jn-status')
+    expect(failed?.getAttribute('title')).toBe('timeout')
+    expect(failed?.textContent).toContain('실패')
+  })
+
+  it('shows a panelist id for first nodes but suppresses the role-echo identity of a meta node', () => {
+    render(html`<${FusionJudgesStrip} nodes=${nodes} />`, container)
+    const items = container.querySelectorAll('[data-testid="fusion-judges"] li')
+    expect(items[0]?.querySelector('.fus-jn-id')?.textContent?.trim()).toBe('gpt-4o')
+    // meta identity === role ('meta') is redundant with the badge, so it is blank
+    expect(items[2]?.querySelector('.fus-jn-id')?.textContent?.trim()).toBe('')
+  })
+
+  it('renders nothing for a board post that predates the judges array', () => {
+    render(html`<${FusionJudgesStrip} nodes=${[]} />`, container)
+    expect(container.querySelector('[data-testid="fusion-judges"]')).toBeNull()
   })
 })

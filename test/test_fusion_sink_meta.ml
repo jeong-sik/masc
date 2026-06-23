@@ -165,6 +165,72 @@ let test_panel_meta_timeout_text () =
   check (option string) "timeout reason_code" (Some "timeout")
     (string_field a "reason_code")
 
+(* --- RFC-0284: judge_node_meta — 관측 record를 board [judges] 배열 원소로 직렬화 ---
+   role(위상 의미) + identity(First는 panelist_id) + judge_meta와 동일한 5섹션 스키마
+   공유 + 노드별 usage 를 핀한다. 값-핀(value-blind coverage 회피): role/identity가
+   정확히 무엇인지 박아 First id가 role로 새거나 정체성이 누락되는 회귀를 잡는다. *)
+let int_field a k =
+  match lookup k a with Some (_, `Int n) -> Some n | _ -> None
+
+let test_node_first_carries_panelist_identity () =
+  let o =
+    Synthesized
+      { role = First "skeptic (claude)"
+      ; synthesis = full_synthesis ()
+      ; usage = { input_tokens = 3; output_tokens = 4 } }
+  in
+  let a = assoc_of (Masc.Fusion_sink.judge_node_meta o) in
+  check (option string) "role = first" (Some "first") (string_field a "role");
+  check (option string) "identity = panelist_id" (Some "skeptic (claude)")
+    (string_field a "identity");
+  (* judge_meta와 동일한 5섹션 스키마 공유 *)
+  check bool "consensus section present" true (List.mem "consensus" (keys a));
+  check (option string) "resolved_answer preserved" (Some "RA")
+    (string_field a "resolved_answer");
+  (* 노드별 실측 usage *)
+  check (option int) "node input_tokens" (Some 3) (int_field a "input_tokens");
+  check (option int) "node output_tokens" (Some 4) (int_field a "output_tokens")
+
+let test_node_meta_role () =
+  let o = Synthesized { role = Meta; synthesis = full_synthesis (); usage = zero_usage } in
+  let a = assoc_of (Masc.Fusion_sink.judge_node_meta o) in
+  check (option string) "role = meta" (Some "meta") (string_field a "role");
+  check (option string) "identity = meta" (Some "meta") (string_field a "identity")
+
+let test_node_single_and_refine_roles () =
+  let single =
+    assoc_of
+      (Masc.Fusion_sink.judge_node_meta
+         (Synthesized { role = Single; synthesis = full_synthesis (); usage = zero_usage }))
+  in
+  check (option string) "single role" (Some "single") (string_field single "role");
+  let refine =
+    assoc_of
+      (Masc.Fusion_sink.judge_node_meta
+         (Synthesized
+            { role = Refine_pass; synthesis = full_synthesis (); usage = zero_usage }))
+  in
+  check (option string) "refine role" (Some "refine") (string_field refine "role")
+
+let test_node_failed_keeps_identity () =
+  let o =
+    Judge_failed
+      { failed_role = First "a (m)"
+      ; error = "boom"
+      ; usage = { input_tokens = 7; output_tokens = 8 }
+      }
+  in
+  let a = assoc_of (Masc.Fusion_sink.judge_node_meta o) in
+  check (option string) "failed node role = first" (Some "first") (string_field a "role");
+  check (option string) "failed node identity preserved" (Some "a (m)")
+    (string_field a "identity");
+  check (option string) "status failed" (Some "failed") (string_field a "status");
+  check (option string) "error message" (Some "boom") (string_field a "error");
+  check bool "no consensus on failed node" false (List.mem "consensus" (keys a));
+  check (option int) "failed node input_tokens (E)" (Some 7) (int_field a "input_tokens");
+  check (option int) "failed node output_tokens (E)" (Some 8)
+    (int_field a "output_tokens")
+
 let () =
   run "Fusion_sink.judge_meta"
     [ ( "structured"
@@ -188,5 +254,12 @@ let () =
             test_panel_meta_failure_keeps_raw_provider
         ; test_case "answered_uses_identity" `Quick test_panel_meta_answered_uses_identity
         ; test_case "timeout_text" `Quick test_panel_meta_timeout_text
+        ] )
+    ; ( "judge_node_meta_observation"
+      , [ test_case "first_carries_panelist_identity" `Quick
+            test_node_first_carries_panelist_identity
+        ; test_case "meta_role" `Quick test_node_meta_role
+        ; test_case "single_and_refine_roles" `Quick test_node_single_and_refine_roles
+        ; test_case "failed_keeps_identity" `Quick test_node_failed_keeps_identity
         ] )
     ]

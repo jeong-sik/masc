@@ -1012,6 +1012,49 @@ let test_render_empty_lists () =
   check_contains "blind spots header" "BLIND SPOTS:" r;
   check_contains "none placeholder" "(none)" r
 
+(* --- RFC-0284: judge_outcome 관측 record yojson round-trip ---
+   판 노드 관측이 직렬화/역직렬화 무손실인지(board judges:[] emit + 디스크/SSE 호환).
+   First는 panelist_id를, decision 닫힌 합 3변형을, 성공/실패 노드를 모두 핀한다. *)
+let test_judge_outcome_roundtrip () =
+  let synth d : judge_synthesis =
+    { consensus = [ { text = "c"; supporting_models = [ "m" ] } ]
+    ; contradictions = []
+    ; partial_coverage = []
+    ; unique_insights = []
+    ; blind_spots = [ "b" ]
+    ; resolved_answer = "ra"
+    ; decision = d }
+  in
+  let nodes =
+    [ Synthesized
+        { role = Single
+        ; synthesis = synth (Answer "a")
+        ; usage = { input_tokens = 1; output_tokens = 2 } }
+    ; Synthesized
+        { role = First "skeptic (claude)"
+        ; synthesis = synth (Recommend { action = "do"; rationale = "why" })
+        ; usage = zero_usage }
+    ; Synthesized
+        { role = Meta
+        ; synthesis = synth (Insufficient { missing_for_decision = [ "x" ] })
+        ; usage = zero_usage }
+    ; Synthesized
+        { role = Refine_pass; synthesis = synth (Answer "r"); usage = zero_usage }
+    ; Judge_failed
+        { failed_role = Meta
+        ; error = "boom"
+        ; usage = { input_tokens = 9; output_tokens = 10 }
+        }
+    ]
+  in
+  List.iter
+    (fun o ->
+      match judge_outcome_of_yojson (judge_outcome_to_yojson o) with
+      | Ok o' ->
+        Alcotest.(check bool) "judge_outcome roundtrip" true (equal_judge_outcome o o')
+      | Error e -> Alcotest.failf "judge_outcome roundtrip failed: %s" e)
+    nodes
+
 let () =
   Alcotest.run "fusion_core"
     [ ( "gate"
@@ -1094,4 +1137,6 @@ let () =
             test_render_decision_insufficient
         ; Alcotest.test_case "render_empty_lists" `Quick test_render_empty_lists
         ] )
+    ; ( "judge_outcome"
+      , [ Alcotest.test_case "roundtrip" `Quick test_judge_outcome_roundtrip ] )
     ]

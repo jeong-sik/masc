@@ -102,6 +102,43 @@ type judge_synthesis =
   }
 [@@deriving yojson, show, eq]
 
+(* 심판 실행 관측 record (RFC-0284). [panel_outcome]와 구조 동형 — 실제로 실행된 심판
+   노드를 *사후* record로 보존한다. JOJ의 N개 1차 심판 + meta가 orchestrator 내부에서만
+   존재하다 [Result.map fst]로 소실되던 것을, 패널처럼 배열로 board 증거에 남긴다.
+   이것은 *관측 데이터*(무엇이 실행됐나)이지 *실행 추상*(어떻게 조립하나 — purge된
+   ChainEngine node-graph DSL)이 아니다: 대시보드는 위상 이름 없이 이 배열의 shape만으로
+   구조를 렌더한다(1=simple, 2=refine, N+meta=judge-of-judges). 콤비네이터/그래프 어휘는
+   도입하지 않는다(RFC-0284 §4: 추상 추출은 5번째 위상이 강제할 때까지 defer). *)
+type judge_role =
+  | Single  (** Simple 위상의 단일 심판. *)
+  | Refine_pass  (** Refine/Conditional의 2차(재검토) 심판. *)
+  | First of string  (** JOJ 1차 심판. panelist_id를 정체성으로 보존(panel model과 대칭). *)
+  | Meta  (** JOJ meta(reconcile) 심판. *)
+[@@deriving yojson, show, eq]
+
+type judge_node =
+  { role : judge_role
+  ; synthesis : judge_synthesis
+  ; usage : usage
+  }
+[@@deriving yojson, show, eq]
+
+type judge_error_node =
+  { failed_role : judge_role
+  ; error : string
+  ; usage : usage
+      (** 실패해도 태운 토큰 — 관측 record가 비용을 버리지 않는다(RFC-0284, 적대 리뷰 #22112 E).
+          [panel_error]와 달리 심판 실패는 토큰 소비 후일 수 있어 usage를 동반한다. *)
+  }
+[@@deriving yojson, show, eq]
+
+(* 심판 한 명의 실행 결과 — 성공 또는 격리된 실패. [panel_outcome] (Answered/Failed)와
+   구조 동형이라 sink/대시보드가 패널과 같은 배열 렌더 경로를 재사용한다. *)
+type judge_outcome =
+  | Synthesized of judge_node  (** panel [Answered] 대칭. *)
+  | Judge_failed of judge_error_node  (** panel [Failed] 대칭. *)
+[@@deriving yojson, show, eq]
+
 type fusion_trigger =
   | Explicit_tool_call
   | Low_confidence

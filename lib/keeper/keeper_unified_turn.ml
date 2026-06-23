@@ -73,50 +73,13 @@ let run_keeper_cycle
     ; retry_phase_started_at = None
     }
   in
-  let append_manifest (turn_state : Keeper_unified_turn_execution.turn_state)
-        ?status ?decision ?runtime_id ?clock_refs ~site event =
-    let decision, manifest_seq =
-      let decision =
-        match decision with
-        | Some value -> value
-        | None -> `Assoc []
-      in
-      match clock_refs with
-      | Some value ->
-        ( Some (Keeper_runtime_manifest.with_clock_refs ~clock_refs:value decision)
-        , turn_state.manifest_seq )
-      | None ->
-        let manifest_seq = turn_state.manifest_seq + 1 in
-        let elapsed_ms =
-          let ns =
-            Mtime.Span.to_uint64_ns
-              (Mtime.span turn_start (Mtime_clock.now ()))
-          in
-          Some (Int64.to_int (Int64.div ns 1_000_000L))
-        in
-        let clock_refs =
-          Keeper_runtime_manifest.clock_refs_for_context
-            runtime_manifest_context ~event ?elapsed_ms
-            ~logical_seq:manifest_seq ()
-        in
-        Some (Keeper_runtime_manifest.with_clock_refs ~clock_refs decision), manifest_seq
-    in
-    Keeper_runtime_manifest.make_for_context runtime_manifest_context ~event
-      ?runtime_id ?status ?decision ()
-    |> Keeper_runtime_manifest.append_best_effort ~site config;
-    { turn_state with manifest_seq }
-  in
-  let append_phase_gate_decision
-        (turn_state : Keeper_unified_turn_execution.turn_state)
-        turn_plan
-    =
-    append_manifest turn_state ~site:"phase_gate_decided"
-      ~status:(turn_plan_manifest_status turn_plan)
-      ~decision:(turn_plan_manifest_decision turn_plan)
-      Keeper_runtime_manifest.Phase_gate_decided
-  in
   let turn_state =
-    append_manifest initial_turn_state ~site:"turn_started"
+    Keeper_unified_turn_manifest.append_manifest
+      ~config
+      ~runtime_manifest_context
+      ~turn_start
+      ~turn_state:initial_turn_state
+      ~site:"turn_started"
       ~decision:
         (`Assoc
           [
@@ -163,7 +126,11 @@ let run_keeper_cycle
         ~labels:[("keeper", meta.name); ("runtime_id", effective_runtime_id); ("source", source)]
         ();
       let turn_state =
-        append_manifest turn_state
+        Keeper_unified_turn_manifest.append_manifest
+          ~config
+          ~runtime_manifest_context
+          ~turn_start
+          ~turn_state
           ~site:"runtime_routed"
           ~runtime_id:effective_runtime_id
           (* RFC-0132-EXEMPT: internal observability — manifest decision reason label, not a redacted public surface *)
@@ -561,7 +528,12 @@ let run_keeper_cycle
                    else "empty"
                in
                let turn_state =
-                 append_manifest turn_state ~site:"event_bus_correlated"
+                 Keeper_unified_turn_manifest.append_manifest
+                   ~config
+                   ~runtime_manifest_context
+                   ~turn_start
+                   ~turn_state
+                   ~site:"event_bus_correlated"
                    ~status:event_bus_manifest_status
                    ~clock_refs:
                      (Keeper_runtime_manifest.clock_refs_for_context
@@ -976,7 +948,12 @@ dominant source of the observed CAS race exhaustion after
                   Ok updated_meta, turn_state)))))
   in
   let append_phase_gate_decision_for_gate turn_plan turn_state =
-    append_phase_gate_decision turn_state turn_plan
+    Keeper_unified_turn_manifest.append_phase_gate_decision
+      ~config
+      ~runtime_manifest_context
+      ~turn_start
+      ~turn_state
+      turn_plan
   in
   let phase_gate_outcome, turn_state =
     Keeper_unified_turn_phase_gate.decide_and_record

@@ -118,14 +118,19 @@ describe('KeeperWorkspaceRail', () => {
     expect(tag?.querySelector('.ttl')?.textContent).toContain('세그먼트 리텐션 대시보드')
   })
 
-  it('renders the throughput sparkline when a series is available', () => {
+  it('collapses the throughput card by default and expands the sparkline on click', () => {
     const k = mkKeeper({
       metrics_series: [{ wall_tokens_per_second: 10 }, { wall_tokens_per_second: 64 }] as unknown as Keeper['metrics_series'],
     })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
-    // v2 dropped the labeled 저부하/고부하 load-range chips; the throughput
-    // section now renders the series as a .tps-spark sparkline (>= 2 points)
-    // alongside the latest tok/s value. Assert the viz renders from the series.
+    // The prototype hides the throughput card behind a collapsible header with an
+    // inline summary; the .tps-spark sparkline only renders once expanded.
+    const toggle = Array.from(container.querySelectorAll<HTMLElement>('.ctx-h-toggle')).find((el) =>
+      el.textContent?.includes('처리량'),
+    )
+    expect(toggle).not.toBeUndefined()
+    expect(container.querySelector('.tps-spark')).toBeNull()
+    fireEvent.click(toggle as HTMLElement)
     const spark = container.querySelector('.tps-spark')
     expect(spark).not.toBeNull()
     expect(spark?.querySelectorAll('span').length).toBeGreaterThanOrEqual(2)

@@ -1,0 +1,54 @@
+/* ── Operational/safety status cluster (`.v2-top-ops`) ───────────────────────
+   NOT part of the vendored keeper-v2 prototype. The v2 prototype top bar has no
+   operational chrome; PR #22081 re-mounted the dashboard's operational/safety
+   components (ConnectionStatus, TransportBeacon, EmergencyStopControl,
+   ErrorCounterBadge, AuthStatus, BuildIdentityBadge) into the top bar so the
+   reskin does not drop live operational visibility.
+
+   Those components carry the dashboard-shell `--color-*` token tone + small
+   `--r-0/--r-1` radii, which read as a different design system next to the
+   keeper-v2 `.v2-statchip` pills. This file harmonizes their SHAPE (pill radius,
+   padding, label typography) to the statchip family while PRESERVING each
+   component's semantic state colors (danger red on Emergency Stop, error red on
+   the error badge, connection/transport state colors). Loaded after keeper-v2 in
+   main.ts so it wins on shape without touching the vendored prototype CSS.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.v2-top-ops {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Leaf chips whose root `.v2-shell-panel` is itself the visible chip
+   (ConnectionStatus, TransportBeacon). */
+.v2-top-ops > .v2-shell-panel:not(:has(button)) {
+  padding: 5px 10px;
+  gap: 6px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+/* Root panels that only group a button (AuthStatus, BuildIdentityBadge,
+   ErrorCounterBadge, EmergencyStopControl) become transparent groupers so the
+   inner button is the single pill — no double border. The dropdown popovers are
+   nested deeper (not a direct child), so they are untouched. */
+.v2-top-ops > .v2-shell-panel:has(button) {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+/* The interactive chip itself — the action button (Auth/Build/Error) or a direct
+   button (EmergencyStop). Shape only; the component keeps its own state colors. */
+.v2-top-ops .v2-shell-action,
+.v2-top-ops > .v2-shell-panel > button {
+  padding: 5px 10px;
+  gap: 6px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}

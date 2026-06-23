@@ -279,8 +279,12 @@ body.rail-resizing .v2-body { transition: none; }
 .cp-route .cp-cov { align-self: flex-start; }
 
 /* ════ BOARD ════ */
-.bd-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 200px minmax(0, 1fr) minmax(290px, 360px); }
-.bd-body.no-detail { grid-template-columns: 200px minmax(0, 1fr); }
+/* Third track is driven by the inline --bd-detail-width custom property
+   (set to 0 by board-surface.ts when no detail is open) so collapse is a single
+   source of truth shared with the legacy board-v2.css grid — no separate
+   .no-detail rule competing on load order. Fallback keeps the open width when
+   the property is unset. */
+.bd-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 200px minmax(0, 1fr) var(--bd-detail-width, minmax(290px, 360px)); }
 
 .bd-rail { position: relative; border-right: 1px solid var(--border-main); background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep) 70%); padding: 14px 9px; overflow-y: auto; }
 .bd-rail h4 { font-size: 9.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-dim); margin: 0 0 8px 7px; font-weight: 500; }

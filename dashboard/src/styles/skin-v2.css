@@ -108,6 +108,13 @@ html[data-skin="v2"]:not([data-theme="paper"]):not([data-theme="styleseed"]) {
      reads in Noto Sans KR like the rest of the v2 skin. */
   --font-ui:      'Noto Sans KR', 'IBM Plex Sans KR', -apple-system, sans-serif;
 
+  /* Base body weight. The :root token ladder sets --fw-body: 425 (a deliberate
+     low-DPI readability bump, tokens.css). The v2 prototype renders body copy at
+     400 (keeper-v2/colors_and_type.css default), so every v2 surface read ~6%
+     heavier than the design SSOT. Pin v2 back to 400; paper/styleseed keep 425
+     via the :not() exclusions on this selector. */
+  --fw-body: 400;
+
   /* ── TYPE LADDER — one heading system across every surface ──
      T1 surface/subject title · T2 region/panel title ·
      T3 card/section header (UPPER) · T4 micro label (UPPER).

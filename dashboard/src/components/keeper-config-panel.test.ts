@@ -607,6 +607,17 @@ async function flush() {
   await new Promise(resolve => setTimeout(resolve, 0))
 }
 
+// The panel renders the config field set behind an 8-tab left rail (.kcf-tab).
+// Each field now lives under exactly one tab, so DOM assertions must first
+// activate the tab that owns the field. Match by the tab's visible label.
+function selectKcfTab(container: HTMLElement, label: string): void {
+  const tab = Array.from(container.querySelectorAll('button[role="tab"]')).find((button) =>
+    button.textContent?.includes(label),
+  )
+  if (!tab) throw new Error(`kcf tab not found: ${label}`)
+  tab.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+}
+
 describe('KeeperConfigPanel', () => {
   let container: HTMLDivElement
 
@@ -635,23 +646,38 @@ describe('KeeperConfigPanel', () => {
     expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(1)
     expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(1)
     expect(mocks.fetchRuntimeProfiles).not.toHaveBeenCalled()
+
+    // identity tab (default): edit-scope callout + source provenance.
     expect(container.textContent).toContain('편집 가능 범위')
     expect(container.textContent).toContain('runtime.toml')
     expect(container.textContent).toContain('[runtime.assignments]')
+    expect(container.textContent).toContain('/tmp/config/keepers/default.toml')
+    expect(container.textContent).toContain('/tmp/.masc/keepers/keeper-sangsu/live.json')
+
+    // runtime tab: runtime selection summary + execution metadata.
+    selectKcfTab(container, '런타임')
+    await flush()
     expect(container.textContent).toContain('Runtime 선택')
     expect(container.textContent).toContain('tier-group.keeper_unified')
-    expect(container.textContent).toContain('/tmp/config/keepers/default.toml')
-    expect(container.textContent).toContain('런타임 설정')
+    expect(container.textContent).toContain('활성 런타임')
+
+    // goals tab: assigned goal-store bindings.
+    selectKcfTab(container, '목표')
+    await flush()
     expect(container.textContent).toContain('active_goal_ids')
     expect(container.textContent).toContain('Ship runtime clarity')
-    expect(container.textContent).toContain('/tmp/.masc/keepers/keeper-sangsu/live.json')
-    expect(container.textContent).toContain('활성 런타임')
+
+    // health tab: runtime liveness / registry diagnostics.
+    selectKcfTab(container, '상태·진단')
+    await flush()
     expect(container.textContent).toContain('레지스트리 상태')
     expect(container.textContent).toContain('running')
 
-    // The "전역 런타임 아키텍처" block is keeper-agnostic and collapsed by
-    // default; its content (deny list / destructive tools / cost budget) is
-    // hidden until the operator expands it.
+    // hooks tab: the "전역 런타임 아키텍처" block is keeper-agnostic and
+    // collapsed by default; its content (deny list / destructive tools / cost
+    // budget) is hidden until the operator expands it.
+    selectKcfTab(container, '훅')
+    await flush()
     expect(container.textContent).not.toContain('dynamic_boundary (Tool_dispatch.is_destructive)')
     const archToggle = Array.from(container.querySelectorAll('button')).find(button =>
       button.textContent?.includes('전역 런타임 아키텍처'),
@@ -661,6 +687,9 @@ describe('KeeperConfigPanel', () => {
     await flush()
     expect(container.textContent).toContain('dynamic_boundary (Tool_dispatch.is_destructive)')
 
+    // prompt tab: editable prompt controls.
+    selectKcfTab(container, '프롬프트')
+    await flush()
     const editButton = Array.from(container.querySelectorAll('button')).find(button =>
       button.textContent?.includes('편집'),
     )
@@ -680,6 +709,9 @@ describe('KeeperConfigPanel', () => {
     await flush()
     await flush()
 
+    selectKcfTab(container, '실행 정책')
+    await flush()
+
     const tokenGateInput = container.querySelector(
       'input[aria-label="토큰 게이트"]',
     ) as HTMLInputElement | null
@@ -693,6 +725,9 @@ describe('KeeperConfigPanel', () => {
     mocks.setKeeperToolPolicy.mockClear()
     render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
     await flush()
+    await flush()
+
+    selectKcfTab(container, '실행 정책')
     await flush()
 
     const denylist = container.querySelector(
@@ -731,6 +766,9 @@ describe('KeeperConfigPanel', () => {
     )
     render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
     await flush()
+    await flush()
+
+    selectKcfTab(container, '실행 정책')
     await flush()
 
     const denylist = container.querySelector(
@@ -772,6 +810,9 @@ describe('KeeperConfigPanel', () => {
     await flush()
     await flush()
 
+    selectKcfTab(container, '런타임')
+    await flush()
+
     const runtimeSelect = container.querySelector('select[aria-label="runtime_id"]') as HTMLSelectElement | null
     expect(runtimeSelect).not.toBeNull()
     runtimeSelect!.value = 'tier.resilient_breaker'
@@ -807,6 +848,9 @@ describe('KeeperConfigPanel', () => {
 
     render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
     await flush()
+    await flush()
+
+    selectKcfTab(container, '권한·샌드박스')
     await flush()
 
     const sandboxProfile = container.querySelector('select[aria-label="sandbox_profile"]') as HTMLSelectElement | null
@@ -859,13 +903,20 @@ describe('KeeperConfigPanel', () => {
     await flush()
     await flush()
 
+    // mention_targets lives in the access tab; the runtime draft is a shared
+    // signal, so editing it there persists when we switch to the policy tab.
+    selectKcfTab(container, '권한·샌드박스')
+    await flush()
     const mentionTargets = container.querySelector('textarea[aria-label="mention_targets"]') as HTMLTextAreaElement | null
-    const tokenGate = container.querySelector('input[aria-label="토큰 게이트"]') as HTMLInputElement | null
     expect(mentionTargets).not.toBeNull()
-    expect(tokenGate).not.toBeNull()
-
     mentionTargets!.value = 'alpha\n beta \nalpha\n'
     mentionTargets!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+
+    selectKcfTab(container, '실행 정책')
+    await flush()
+    const tokenGate = container.querySelector('input[aria-label="토큰 게이트"]') as HTMLInputElement | null
+    expect(tokenGate).not.toBeNull()
     tokenGate!.value = '32000'
     tokenGate!.dispatchEvent(new Event('input', { bubbles: true }))
     await flush()
@@ -889,6 +940,9 @@ describe('KeeperConfigPanel', () => {
   it('shows the sandbox preflight guide when docker is selected', async () => {
     render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
     await flush()
+    await flush()
+
+    selectKcfTab(container, '권한·샌드박스')
     await flush()
 
     expect(container.textContent).not.toContain('Docker Sandbox 프리플라이트')

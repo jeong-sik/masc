@@ -5,7 +5,9 @@
     full-duplex communication.
 
     Upgrade path: GET /ws with Connection: Upgrade header.
-    Uses httpun-ws for the WebSocket protocol on top of httpun.
+    Uses ws-direct for the WebSocket protocol on top of httpun (RFC-0286):
+    the HTTP 101 handshake is written on the httpun reqd, then the post-101
+    connection is driven by a ws-direct Endpoint via the gluten adapter.
 
     Outbound events: registered as an Sse external subscriber,
     so all broadcast events are forwarded to WebSocket clients.
@@ -13,9 +15,17 @@
     Inbound messages: JSON-RPC requests are dispatched to the
     same tool dispatcher used by the MCP HTTP transport. *)
 
-(** SHA1 function required by httpun-ws handshake. *)
+module Ws_endpoint = Ws_direct_core.Endpoint
+module Ws_wsd = Ws_direct_core.Endpoint.Wsd
+module Ws_msg = Ws_direct_core.Connection.Message
+
+(** SHA1 (raw 20-byte digest) for the RFC 6455 §1.3 handshake accept proof. *)
 let sha1 s =
   Digestif.SHA1.(digest_string s |> to_raw_string)
+
+(* RFC 6455 §1.3 handshake GUID + the Sec-WebSocket-Accept proof. *)
+let websocket_guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+let sec_websocket_accept key = Base64.encode_string (sha1 (key ^ websocket_guid))
 
 let inbound_message_handler : (string -> string -> unit) Atomic.t =
   Atomic.make (fun session_id _body ->
@@ -40,33 +50,17 @@ type dashboard_auth_state =
   | Unauthenticated
   | Authenticated of { agent : string option }
 
-(** Inbound WebSocket frame reassembly state.  A single message may arrive
-    across several frames (an initial [`Text]/[`Binary] with [is_fin = false]
-    followed by [`Continuation] frames); this holds the partial buffer until
-    the final fragment.  Shared SSOT for inbound framing across the MCP session
-    handler and the IDE LSP proxy so both reassemble fragments and enforce the
-    same size caps (RFC-0281 §3.2). *)
-module Ws_inbound = struct
-  type t =
-    { mutable partial : Buffer.t option
-    ; mutable partial_bytes : int
-    }
-
-  let create () = { partial = None; partial_bytes = 0 }
-
-  (** Drop any buffered partial message (on reject or close). *)
-  let reset t =
-    t.partial <- None;
-    t.partial_bytes <- 0
-
-  (** Bytes buffered so far for an in-progress fragmented message. *)
-  let buffered_bytes t = t.partial_bytes
-end
+(* RFC-0286: inbound frame reassembly + UTF-8 validation now live in the
+   ws-direct Connection layer, which delivers complete messages via the
+   Endpoint [on_message] handler. The former [Ws_inbound] reassembler and the
+   manual [read_data_frame] / [read_payload_string] machinery are gone; only the
+   size-cap knobs survive, fed to [Endpoint.create] as [max_message] /
+   [max_frame]. *)
 
 (** Active WebSocket session state. *)
 type ws_session = {
   id: string;
-  wsd: Httpun_ws.Wsd.t;
+  wsd: Ws_wsd.t;
   closed: bool Atomic.t;
   (** All writes to [wsd] (text frames, pings, pongs, close) are serialized
       through [write_mutex] so fibers sharing one connection cannot interleave
@@ -102,7 +96,6 @@ type ws_session = {
       seqs are intentionally excluded because the browser only ACKs deltas. *)
   mutable dashboard_last_delta_seq: int;
   mutable dashboard_last_delta_at: float;
-  inbound: Ws_inbound.t;
   inbound_dispatches: int Atomic.t;
 }
 
@@ -208,13 +201,10 @@ let detach_session_for_close session_id =
           slice_index_remove_session_locked session_id;
           Some session)
 
-let close_detached_session_wsd ?code ~context session =
+let close_detached_session_wsd ?(code : int option) ~context session =
   try
     Eio_guard.with_mutex session.write_mutex (fun () ->
-        if not (Httpun_ws.Wsd.is_closed session.wsd) then
-          match code with
-          | None -> Httpun_ws.Wsd.close session.wsd
-          | Some code -> Httpun_ws.Wsd.close ~code session.wsd)
+        if not (Ws_wsd.is_closed session.wsd) then Ws_wsd.send_close ?code session.wsd ())
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -254,7 +244,6 @@ let new_session ~id ~wsd =
     dashboard_last_ack_at = now;
     dashboard_last_delta_seq = 0;
     dashboard_last_delta_at = now;
-    inbound = Ws_inbound.create ();
     inbound_dispatches = Atomic.make 0;
   }
 
@@ -262,7 +251,7 @@ let new_session ~id ~wsd =
     shut down.  Reads the atomic [closed] flag and the WSD state; safe from any
     fiber. *)
 let is_session_closed session =
-  Atomic.get session.closed || Httpun_ws.Wsd.is_closed session.wsd
+  Atomic.get session.closed || Ws_wsd.is_closed session.wsd
 
 (** Record a client pong: refresh [last_pong_at].  Called from the WS frame
     handler on every [Pong] frame; this is the liveness signal the heartbeat
@@ -274,11 +263,9 @@ let record_pong session =
 (** Send a pre-allocated frame to a WebSocket client.
 
     The caller owns the [bytes] buffer; this function only reads it.  In
-    server mode httpun-ws does not mask (see httpun-ws 0.2.0
-    [Serialize.serialize_bytes]: [apply_mask_bytes] is only called when
-    [mode = `Client]), and [Faraday.write_bytes] copies into its internal
-    buffer synchronously, so the same [bytes] value can safely be passed
-    to multiple sessions in one broadcast without re-allocation. *)
+    server mode ws-direct does not mask (RFC 6455 §5.3), and the payload is
+    copied into the faraday writer synchronously, so the same [bytes] value can
+    safely be passed to multiple sessions in one broadcast. *)
 let send_frame_bytes session bytes ~len =
   if is_session_closed session then begin
     Atomic.set session.closed true;
@@ -288,8 +275,7 @@ let send_frame_bytes session bytes ~len =
       if is_session_closed session then false
       else begin
         try
-          Httpun_ws.Wsd.send_bytes session.wsd
-            ~kind:`Text bytes ~off:0 ~len;
+          Ws_wsd.send_text session.wsd (Bytes.sub_string bytes 0 len);
           Transport_metrics.inc_ws_bytes_sent ~bytes:len;
           Transport_metrics.observe_ws_message_bytes_sent len;
           true
@@ -934,46 +920,6 @@ let send_dashboard_or_raw_sse session sse_event =
     true
   end
 
-let read_payload_string payload ~len ~on_complete =
-  let buffer = Bytes.create len in
-  let offset = ref 0 in
-  let completed = ref false in
-  let complete () =
-    if not !completed then begin
-      completed := true;
-      let text =
-        if !offset = len then Bytes.unsafe_to_string buffer
-        else Bytes.sub_string buffer 0 !offset
-      in
-      on_complete text
-    end
-  in
-  let rec schedule () =
-    if !completed then ()
-    else if !offset >= len then complete ()
-    else
-      Httpun_ws.Payload.schedule_read payload
-        ~on_eof:complete
-        ~on_read:(fun bs ~off ~len:chunk_len ->
-          let remaining = len - !offset in
-          let copy_len = min chunk_len remaining in
-          Bigstringaf.blit_to_bytes bs ~src_off:off buffer
-            ~dst_off:!offset ~len:copy_len;
-          offset := !offset + copy_len;
-          if !offset >= len then complete () else schedule ())
-  in
-  if len = 0 then complete () else schedule ()
-
-type inbound_size_rejection = {
-  reason: string;
-  limit: int;
-  actual: int;
-}
-
-type inbound_size_decision =
-  | Inbound_accept
-  | Inbound_reject of inbound_size_rejection
-
 let max_inbound_frame_bytes () =
   Env_config_core.get_int_nonneg ~default:1048576
     "MASC_WS_MAX_INBOUND_FRAME_BYTES"
@@ -985,138 +931,6 @@ let max_inbound_message_bytes () =
 let max_inbound_dispatches_per_session () =
   Env_config_core.get_int_nonneg ~default:32
     "MASC_WS_MAX_INBOUND_DISPATCHES_PER_SESSION"
-
-let classify_inbound_frame_size ~len ~max_frame_bytes =
-  if len < 0 then
-    Inbound_reject
-      { reason = "invalid_frame_length"; limit = max_frame_bytes; actual = len }
-  else if max_frame_bytes > 0 && len > max_frame_bytes then
-    Inbound_reject
-      { reason = "frame_too_large"; limit = max_frame_bytes; actual = len }
-  else
-    Inbound_accept
-
-let add_bounded_or_max a b =
-  if a < 0 || b < 0 || b > max_int - a then max_int else a + b
-
-let classify_inbound_message_size ~current_bytes ~chunk_len ~max_message_bytes =
-  let actual = add_bounded_or_max current_bytes chunk_len in
-  if max_message_bytes > 0 && actual > max_message_bytes then
-    Inbound_reject
-      { reason = "message_too_large"; limit = max_message_bytes; actual }
-  else
-    Inbound_accept
-
-let close_session_for_inbound_reject session rejection =
-  Log.Transport.warn
-    "WS inbound message rejected for session=%s reason=%s actual=%d limit=%d"
-    session.id
-    rejection.reason
-    rejection.actual
-    rejection.limit;
-  let detached = detach_session_for_close session.id in
-  update_ws_session_count_metric ();
-  Sse.unsubscribe_external session.id;
-  match detached with
-  | None -> ()
-  | Some detached_session ->
-      close_detached_session_wsd ~code:`Message_too_big
-        ~context:"reject close" detached_session
-
-(** Outcome of feeding one decoded inbound data frame to
-    {!inbound_accumulate}.  [Inbound_message] carries a fully reassembled
-    application message; [Inbound_incomplete] means the fragment was buffered
-    (or was empty and produced nothing) and more frames are expected;
-    [Inbound_rejected] means a size cap was exceeded and the partial buffer was
-    dropped. *)
-type inbound_read_outcome =
-  | Inbound_message of string
-  | Inbound_incomplete
-  | Inbound_rejected of inbound_size_rejection
-
-(** Reassemble one decoded data-frame chunk into [reader]'s running message,
-    enforcing [max_message_bytes] across fragments.  The only side effect is
-    updating [reader]'s partial buffer, so it is unit testable without a live
-    connection.  Shared SSOT for the MCP session handler and the IDE LSP
-    proxy. *)
-let inbound_accumulate (reader : Ws_inbound.t) ~max_message_bytes ~is_fin text =
-  let chunk_len = String.length text in
-  let current_bytes =
-    match reader.Ws_inbound.partial with
-    | None -> 0
-    | Some _ -> reader.Ws_inbound.partial_bytes
-  in
-  match
-    classify_inbound_message_size ~current_bytes ~chunk_len ~max_message_bytes
-  with
-  | Inbound_reject rejection ->
-      Ws_inbound.reset reader;
-      Inbound_rejected rejection
-  | Inbound_accept ->
-      let message_bytes = add_bounded_or_max current_bytes chunk_len in
-      (match reader.Ws_inbound.partial, is_fin with
-       | None, true ->
-           if chunk_len > 0 then Inbound_message text else Inbound_incomplete
-       | None, false ->
-           let initial_size =
-             if chunk_len > max_int / 2 then chunk_len else chunk_len * 2
-           in
-           let buffer = Buffer.create (max 16 initial_size) in
-           Buffer.add_string buffer text;
-           reader.Ws_inbound.partial <- Some buffer;
-           reader.Ws_inbound.partial_bytes <- message_bytes;
-           Inbound_incomplete
-       | Some buffer, _ ->
-           Buffer.add_string buffer text;
-           if is_fin
-           then begin
-             Ws_inbound.reset reader;
-             let message = Buffer.contents buffer in
-             if String.length message > 0 then Inbound_message message
-             else Inbound_incomplete
-           end
-           else begin
-             reader.Ws_inbound.partial_bytes <- message_bytes;
-             Inbound_incomplete
-           end)
-
-(** Drain a WebSocket data-frame payload (frame-size capped) and feed it to
-    {!inbound_accumulate}, delivering the outcome via [on_outcome].  Both the
-    MCP session handler and the IDE LSP proxy route [`Text] / [`Binary] /
-    [`Continuation] frames through this, so both reassemble fragments and apply
-    identical frame/message size caps (RFC-0281 §3.2). *)
-let read_data_frame
-      (reader : Ws_inbound.t)
-      ~max_frame_bytes
-      ~max_message_bytes
-      ~is_fin
-      ~len
-      payload
-      ~on_outcome
-  =
-  Transport_metrics.observe_ws_message_bytes_recv len;
-  match classify_inbound_frame_size ~len ~max_frame_bytes with
-  | Inbound_reject rejection ->
-      Httpun_ws.Payload.close payload;
-      Ws_inbound.reset reader;
-      on_outcome (Inbound_rejected rejection)
-  | Inbound_accept ->
-      read_payload_string payload ~len ~on_complete:(fun text ->
-          on_outcome (inbound_accumulate reader ~max_message_bytes ~is_fin text))
-
-let read_inbound_message_frame session ~on_message ~is_fin ~len payload =
-  read_data_frame
-    session.inbound
-    ~max_frame_bytes:(max_inbound_frame_bytes ())
-    ~max_message_bytes:(max_inbound_message_bytes ())
-    ~is_fin
-    ~len
-    payload
-    ~on_outcome:(function
-      | Inbound_message msg -> on_message session.id msg
-      | Inbound_incomplete -> ()
-      | Inbound_rejected rejection ->
-          close_session_for_inbound_reject session rejection)
 
 type inbound_dispatch_rejection = {
   reason: string;
@@ -1237,7 +1051,7 @@ let start_upgrade_heartbeat ?sw ?clock session_id session =
             (try
                Eio_guard.with_mutex session.write_mutex (fun () ->
                  if not (is_session_closed session) then
-                   Httpun_ws.Wsd.send_ping session.wsd)
+                   Ws_wsd.send_ping session.wsd ())
              with
              | Eio.Cancel.Cancelled _ as e -> raise e
              | exn ->
@@ -1264,24 +1078,9 @@ let start_upgrade_heartbeat ?sw ?clock session_id session =
       "[ws-upgrade] session %s heartbeat disabled (missing switch or clock)"
       session_id
 
-let send_upgrade_pong session =
-  try
-    Eio_guard.with_mutex session.write_mutex (fun () ->
-      if not (is_session_closed session) then
-        Httpun_ws.Wsd.send_pong session.wsd)
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    (match Http_server_eio.Late_response.classify_write_failure exn with
-     | Some _ ->
-       Log.Server.debug
-         "[ws-upgrade] session %s send_pong skipped (writer closed during cancel race)"
-         session.id
-     | None ->
-       Log.Server.warn
-         "[ws-upgrade] session %s send_pong failed: %s"
-         session.id
-         (Printexc.to_string exn))
+(* RFC-0286: ping->pong is automatic in the ws-direct Endpoint, so the former
+   [send_upgrade_pong] is gone; [record_pong] still fires from the [on_pong]
+   handler to refresh the liveness timestamp. *)
 
 (** Build the MCP-over-WebSocket session handler for a freshly upgraded
     [wsd].  Single source of truth for the MCP WebSocket session
@@ -1301,13 +1100,12 @@ let send_upgrade_pong session =
 let mcp_websocket_handler
     ?sw
     ?clock
-    ?(on_connection_close =
-      fun ~session_id:_ ~declared_len:_ payload -> Httpun_ws.Payload.close payload)
-    ?(on_eof = fun ~session_id:_ _error -> ())
+    ?(on_close_log = fun ~session_id:_ ~code:_ ~reason:_ -> ())
+    ?(on_eof = fun ~session_id:_ -> ())
     ~on_message
     ~origin_label
-    (wsd : Httpun_ws.Wsd.t)
-  : Httpun_ws.Websocket_connection.input_handlers =
+    (wsd : Ws_wsd.t)
+  : Ws_endpoint.handlers =
   let session_id = next_id () in
   let session = new_session ~id:session_id ~wsd in
   with_sessions_rw (fun () -> Hashtbl.replace sessions session_id session);
@@ -1325,26 +1123,23 @@ let mcp_websocket_handler
   (* #10875: see cleanup_session — per-session lifecycle is DEBUG to
      avoid logging amplification during WS storm (#10701). *)
   Log.Server.debug "WebSocket session %s connected (%s)" session_id origin_label;
-  { Httpun_ws.Websocket_connection.
-    frame = (fun ~opcode ~is_fin ~len payload ->
-      match opcode with
-      | `Text | `Binary | `Continuation ->
-        read_inbound_message_frame session ~on_message ~is_fin ~len payload
-      | `Ping ->
-        send_upgrade_pong session;
-        Httpun_ws.Payload.close payload
-      | `Pong ->
-        record_pong session;
-        Httpun_ws.Payload.close payload
-      | `Connection_close ->
-        on_connection_close ~session_id ~declared_len:len payload;
-        cleanup_session session_id
-      | `Other _ ->
-        Httpun_ws.Payload.close payload)
-  ; eof = (fun ?error () ->
-      on_eof ~session_id error;
+  (* RFC-0286: ws-direct reassembles fragments + validates UTF-8 + enforces the
+     size caps internally, so [on_message] receives a complete message and a
+     protocol/size violation surfaces as [on_close]/[on_error] with the right
+     close code — no frame-opcode switch or manual reassembly here. Ping is
+     auto-ponged by the Endpoint; [on_pong] only refreshes liveness. *)
+  Ws_endpoint.handlers
+    ~on_message:(fun (m : Ws_msg.t) ->
+      on_message session_id (Bigstringaf.to_string m.Ws_msg.payload))
+    ~on_pong:(fun _ -> record_pong session)
+    ~on_close:(fun ~code ~reason ->
+      on_close_log ~session_id ~code ~reason;
       cleanup_session session_id)
-  }
+    ~on_error:(fun _reason -> cleanup_session session_id)
+    ~on_eof:(fun () ->
+      on_eof ~session_id;
+      cleanup_session session_id)
+    ()
 
 (** Perform the HTTP/1.1 -> WebSocket upgrade and drive the resulting
     connection.  Single source of truth for attaching an upgraded
@@ -1358,15 +1153,55 @@ let mcp_websocket_handler
     [handler] builds the per-connection [input_handlers] from the
     [Wsd.t]; the MCP session ({!mcp_websocket_handler}) and the IDE LSP
     session each supply their own. *)
+(* RFC 6455 §4.2.1 scrutiny: the request must be a GET with Host, an
+   [Upgrade: websocket] header, a [Connection] list containing "upgrade", a 16-
+   byte base64 [Sec-WebSocket-Key], and [Sec-WebSocket-Version: 13]. *)
+let ws_upgrade_accept (request : Httpun.Request.t) : (string, string) result =
+  let h name = Httpun.Headers.get request.Httpun.Request.headers name in
+  let ci_eq a b = String.equal (String.lowercase_ascii a) b in
+  let connection_lists_upgrade v =
+    List.exists
+      (fun tok -> ci_eq (String.trim tok) "upgrade")
+      (String.split_on_char ',' v)
+  in
+  match
+    request.Httpun.Request.meth, h "host", h "upgrade", h "connection",
+    h "sec-websocket-key", h "sec-websocket-version"
+  with
+  | `GET, Some _host, Some upgrade, Some connection, Some key, Some "13"
+    when ci_eq upgrade "websocket"
+         && connection_lists_upgrade connection
+         && (try String.length (Base64.decode_exn key) = 16 with _ -> false) ->
+    Ok (sec_websocket_accept key)
+  | _ -> Error "websocket upgrade request did not pass RFC 6455 §4.2.1 scrutiny"
+
 let respond_and_drive_upgrade
     ~(upgrade : Gluten.impl -> unit)
     ~(reqd : Httpun.Reqd.t)
-    ~(handler : Httpun_ws.Wsd.t -> Httpun_ws.Websocket_connection.input_handlers)
+    ~(max_message : int)
+    ~(max_frame : int)
+    ~(handler : Ws_wsd.t -> Ws_endpoint.handlers)
   : (unit, string) result =
-  Httpun_ws.Handshake.respond_with_upgrade ~sha1 reqd (fun () ->
-    (* This callback runs after the HTTP 101 response is sent. *)
-    let ws_conn = Httpun_ws.Server_connection.create_websocket handler in
-    upgrade (Gluten.make (module Httpun_ws.Server_connection) ws_conn))
+  let request = Httpun.Reqd.request reqd in
+  match ws_upgrade_accept request with
+  | Error _ as e -> e
+  | Ok accept ->
+    let headers =
+      Httpun.Headers.of_list
+        [ "Upgrade", "websocket"
+        ; "Connection", "Upgrade"
+        ; "Sec-WebSocket-Accept", accept
+        ]
+    in
+    (* Sends the 101 on the reqd, then the callback attaches the post-101
+       socket: a ws-direct Endpoint (Server role) packaged as a Gluten.impl,
+       drop-in for the former Httpun_ws.Server_connection. RFC-0286 §4.1. *)
+    Httpun.Reqd.respond_with_upgrade reqd headers (fun () ->
+      let endpoint =
+        Ws_endpoint.create Ws_endpoint.Server ~max_message ~max_frame handler
+      in
+      upgrade (Ws_direct_gluten.impl endpoint));
+    Ok ()
 
 (** Handle an HTTP/1.1 [GET /ws] upgrade on the main HTTP origin using
     the shared MCP session protocol.  Requires the Gluten [upgrade]
@@ -1384,6 +1219,8 @@ let upgrade_connection
     (reqd : Httpun.Reqd.t)
   : (unit, string) result =
   respond_and_drive_upgrade ~upgrade ~reqd
+    ~max_message:(max_inbound_message_bytes ())
+    ~max_frame:(max_inbound_frame_bytes ())
     ~handler:
       (mcp_websocket_handler ?sw ?clock ~on_message ~origin_label:"same-origin /ws")
 

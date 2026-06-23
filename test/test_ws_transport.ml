@@ -140,7 +140,10 @@ let test_close_all_empty () =
 
 let test_session_close_wire_calls_stay_outside_registry_lock () =
   let source = read_source_file "lib/server/server_mcp_transport_ws.ml" in
-  let close_marker = "Httpun_ws.Wsd.close" in
+  (* RFC-0286: the wire close is now ws-direct's Wsd.send_close; the isolation
+     invariant (all wire closes confined to close_detached_session_wsd, off the
+     registry lock) is unchanged. *)
+  let close_marker = "Ws_wsd.send_close" in
   let detach_helper =
     substring_between source
       ~start_marker:"let detach_session_for_close"
@@ -624,97 +627,6 @@ let test_backpressure_gate_stale_ack_throttles_delivery () =
   Alcotest.(check (float 0.001)) "throttle counter increments"
     1.0 (read_counter name -. before)
 
-(* ====== Inbound payload size gates ====== *)
-
-let test_inbound_frame_size_accepts_limit_and_disable () =
-  Alcotest.(check bool) "at limit accepted"
-    true
-    (match Ws.classify_inbound_frame_size ~len:1024 ~max_frame_bytes:1024 with
-     | Ws.Inbound_accept -> true
-     | Ws.Inbound_reject _ -> false);
-  Alcotest.(check bool) "zero disables frame gate"
-    true
-    (match Ws.classify_inbound_frame_size ~len:4096 ~max_frame_bytes:0 with
-     | Ws.Inbound_accept -> true
-     | Ws.Inbound_reject _ -> false)
-
-let test_inbound_frame_size_rejects_before_allocation () =
-  match Ws.classify_inbound_frame_size ~len:1025 ~max_frame_bytes:1024 with
-  | Ws.Inbound_accept -> Alcotest.fail "expected oversized frame rejection"
-  | Ws.Inbound_reject r ->
-      Alcotest.(check string) "reason" "frame_too_large" r.reason;
-      Alcotest.(check int) "limit" 1024 r.limit;
-      Alcotest.(check int) "actual" 1025 r.actual
-
-let test_inbound_frame_size_rejects_negative_length () =
-  match Ws.classify_inbound_frame_size ~len:(-1) ~max_frame_bytes:1024 with
-  | Ws.Inbound_accept -> Alcotest.fail "expected invalid frame length rejection"
-  | Ws.Inbound_reject r ->
-      Alcotest.(check string) "reason" "invalid_frame_length" r.reason;
-      Alcotest.(check int) "actual" (-1) r.actual
-
-let test_inbound_message_size_rejects_accumulated_fragments () =
-  match
-    Ws.classify_inbound_message_size ~current_bytes:900 ~chunk_len:200
-      ~max_message_bytes:1024
-  with
-  | Ws.Inbound_accept -> Alcotest.fail "expected accumulated message rejection"
-  | Ws.Inbound_reject r ->
-      Alcotest.(check string) "reason" "message_too_large" r.reason;
-      Alcotest.(check int) "limit" 1024 r.limit;
-      Alcotest.(check int) "actual" 1100 r.actual
-
-(* RFC-0281 §3.2: a single application message may arrive across several WS
-   frames (an initial [`Text]/[`Binary] with [is_fin = false] then
-   [`Continuation] frames).  [inbound_accumulate] is the shared SSOT reassembler
-   used by both the MCP session handler and the IDE LSP proxy.  Before it was
-   shared, the LSP proxy ignored [is_fin] and dropped [`Continuation] frames, so
-   fragmented messages were silently truncated. *)
-let test_inbound_accumulate_single_complete_frame () =
-  let reader = Ws.Ws_inbound.create () in
-  match Ws.inbound_accumulate reader ~max_message_bytes:1024 ~is_fin:true "hello" with
-  | Ws.Inbound_message m -> Alcotest.(check string) "complete frame" "hello" m
-  | Ws.Inbound_incomplete -> Alcotest.fail "single fin frame should yield a message"
-  | Ws.Inbound_rejected _ -> Alcotest.fail "small frame should not be rejected"
-
-let test_inbound_accumulate_reassembles_fragments () =
-  let reader = Ws.Ws_inbound.create () in
-  (match
-     Ws.inbound_accumulate reader ~max_message_bytes:1024 ~is_fin:false {|{"a":|}
-   with
-   | Ws.Inbound_incomplete -> ()
-   | _ -> Alcotest.fail "first fragment must buffer (Incomplete)");
-  (match
-     Ws.inbound_accumulate reader ~max_message_bytes:1024 ~is_fin:false {|1,"b":|}
-   with
-   | Ws.Inbound_incomplete -> ()
-   | _ -> Alcotest.fail "middle fragment must buffer (Incomplete)");
-  match Ws.inbound_accumulate reader ~max_message_bytes:1024 ~is_fin:true "2}" with
-  | Ws.Inbound_message m ->
-      Alcotest.(check string) "reassembled across fragments" {|{"a":1,"b":2}|} m
-  | _ -> Alcotest.fail "final fragment must yield the joined message"
-
-let test_inbound_accumulate_rejects_oversized_message () =
-  let reader = Ws.Ws_inbound.create () in
-  (match Ws.inbound_accumulate reader ~max_message_bytes:8 ~is_fin:false "1234" with
-   | Ws.Inbound_incomplete -> ()
-   | _ -> Alcotest.fail "first fragment within cap must buffer");
-  match Ws.inbound_accumulate reader ~max_message_bytes:8 ~is_fin:false "56789" with
-  | Ws.Inbound_rejected r ->
-      Alcotest.(check string) "reason" "message_too_large" r.reason;
-      Alcotest.(check int) "partial buffer cleared on reject"
-        0 (Ws.Ws_inbound.buffered_bytes reader)
-  | _ -> Alcotest.fail "accumulated overflow must be rejected"
-
-let test_inbound_message_size_rejects_overflow_sum () =
-  match
-    Ws.classify_inbound_message_size ~current_bytes:(max_int - 10) ~chunk_len:20
-      ~max_message_bytes:1024
-  with
-  | Ws.Inbound_accept -> Alcotest.fail "expected overflow-sized message rejection"
-  | Ws.Inbound_reject r ->
-      Alcotest.(check string) "reason" "message_too_large" r.reason;
-      Alcotest.(check int) "overflow sum saturates" max_int r.actual
 
 let test_inbound_size_env_defaults () =
   with_env_var "MASC_WS_MAX_INBOUND_FRAME_BYTES" "" (fun () ->
@@ -1049,8 +961,6 @@ let test_new_session_initializes_pong_state () =
   Alcotest.(check bool) "delta timestamp is initialized"
     true
     (session.dashboard_last_delta_at <= Unix.gettimeofday ());
-  Alcotest.(check int) "partial inbound byte count starts empty"
-    0 (Ws.Ws_inbound.buffered_bytes session.inbound);
   Alcotest.(check int) "inbound dispatch count starts empty"
     0 (Atomic.get session.inbound_dispatches)
 
@@ -1177,23 +1087,11 @@ let () =
       Alcotest.test_case "stale ack throttles delivery before send" `Quick
         test_backpressure_gate_stale_ack_throttles_delivery;
     ]);
+    (* RFC-0286: the frame/message reassembly + size-classify unit tests were
+       removed with the manual reassembler; ws-direct's Connection owns that
+       logic and is covered by its own test suite. The env-default knob test
+       stays — masc still reads the caps and feeds them to Endpoint.create. *)
     ("inbound_size_gate", [
-      Alcotest.test_case "frame cap accepts limit and disabled mode" `Quick
-        test_inbound_frame_size_accepts_limit_and_disable;
-      Alcotest.test_case "frame cap rejects before allocation" `Quick
-        test_inbound_frame_size_rejects_before_allocation;
-      Alcotest.test_case "frame cap rejects negative lengths" `Quick
-        test_inbound_frame_size_rejects_negative_length;
-      Alcotest.test_case "message cap rejects accumulated fragments" `Quick
-        test_inbound_message_size_rejects_accumulated_fragments;
-      Alcotest.test_case "inbound single complete frame delivers message" `Quick
-        test_inbound_accumulate_single_complete_frame;
-      Alcotest.test_case "inbound reassembles fragmented message" `Quick
-        test_inbound_accumulate_reassembles_fragments;
-      Alcotest.test_case "inbound rejects oversized accumulated message" `Quick
-        test_inbound_accumulate_rejects_oversized_message;
-      Alcotest.test_case "message cap rejects overflow sums" `Quick
-        test_inbound_message_size_rejects_overflow_sum;
       Alcotest.test_case "size cap env defaults" `Quick
         test_inbound_size_env_defaults;
     ]);

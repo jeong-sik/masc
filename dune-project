@@ -34,6 +34,9 @@
   (ocaml-webrtc (>= 0.2.3))
   (grpc-direct-core (>= 0.1.0))
   (grpc-direct (>= 0.1.0))
+  (ws-direct-core (>= 0.1.0))
+  (ws-direct-gluten (>= 0.1.0))
+  (ws-direct-eio (>= 0.1.0))
   ; Standard dependencies
   (re (>= 1.10))
   (yojson (>= 2.0))
@@ -70,8 +73,6 @@
   (zstd (>= 0.4))
   (httpun (>= 0.2))
   (httpun-eio (>= 0.2))
-  (httpun-ws (>= 0.2))
-  (httpun-ws-eio (>= 0.2))
   (bigstringaf (>= 0.10))
   (eio (>= 1.0))
   (eio_main (>= 1.0))

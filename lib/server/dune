@@ -33,8 +33,9 @@
   base64
   graphql
   graphql_parser
-  httpun-ws
-  httpun-ws-eio
+  ws-direct-core
+  ws-direct-gluten
+  ws-direct-eio
   bigstringaf
   sqlite3
   unix

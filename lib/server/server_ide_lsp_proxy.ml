@@ -11,12 +11,12 @@
 open Server_auth
 open Server_utils
 module Http = Http_server_eio
-module Ws = Httpun_ws
+module Ws_endpoint = Ws_direct_core.Endpoint
+module Ws_wsd = Ws_direct_core.Endpoint.Wsd
+module Ws_msg = Ws_direct_core.Connection.Message
 
 (** Send text frame via WebSocket. *)
-let send_text wsd s =
-  let bytes = Bytes.unsafe_of_string s in
-  Ws.Wsd.send_bytes ~kind:`Text wsd bytes ~off:0 ~len:(Bytes.length bytes)
+let send_text wsd s = Ws_wsd.send_text wsd s
 ;;
 
 (** Per-connection state shared across frame handler and relay fibers.
@@ -31,7 +31,7 @@ type conn_state =
   { sw : Eio.Switch.t
   ; router : Lsp_message_router.t
   ; processes : (string, Lsp_process_manager.lsp_process) Hashtbl.t
-  ; wsd : Ws.Wsd.t
+  ; wsd : Ws_wsd.t
   ; base_path : string
   ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t
   ; workspace_root : string ref
@@ -39,12 +39,9 @@ type conn_state =
   ; spawn_mutex : Eio.Mutex.t
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
   ; disconnected : bool Atomic.t
-  ; inbound : Server_mcp_transport_ws.Ws_inbound.t
-        (* Shared inbound-frame reassembler (RFC-0281 §3.2): reassembles
-           fragmented LSP messages across [`Continuation] frames and enforces
-           the same frame/message size caps as the MCP session path, replacing
-           B's former single-frame [read_frame_text] which dropped
-           [`Continuation] frames and applied no size cap. *)
+        (* RFC-0286: fragment reassembly + size caps now live in the ws-direct
+           Endpoint, which delivers complete messages to [on_message]; the
+           former shared [Ws_inbound] reassembler field is gone. *)
   }
 
 let base_path_of_state state = (Mcp_server.workspace_config state).base_path
@@ -827,10 +824,17 @@ let add_routes ~sw ~clock router =
                     [Eio.Switch.run] + promise, which the Gluten model
                     forbids.  Subprocesses are now reclaimed explicitly in
                     {!disconnect} (called from [Connection_close]/[eof]). *)
+                 (* RFC-0286: drive the upgraded connection via the shared
+                    ws-direct attachment SSOT. The Endpoint reassembles
+                    fragments, validates UTF-8, enforces the size caps, and
+                    auto-replies to pings, so [on_message] receives a complete
+                    LSP message and a violation surfaces as on_close/on_error. *)
                  (match
                     Server_mcp_transport_ws.respond_and_drive_upgrade
                       ~upgrade
                       ~reqd
+                      ~max_message:(Server_mcp_transport_ws.max_inbound_message_bytes ())
+                      ~max_frame:(Server_mcp_transport_ws.max_inbound_frame_bytes ())
                       ~handler:(fun wsd ->
                         Log.Server.info "LSP WebSocket connected from %s" origin;
                         let cs =
@@ -845,55 +849,22 @@ let add_routes ~sw ~clock router =
                           ; spawn_mutex = Eio.Mutex.create ()
                           ; clock
                           ; disconnected = Atomic.make false
-                          ; inbound = Server_mcp_transport_ws.Ws_inbound.create ()
                           }
                         in
-                        { Ws.Websocket_connection.frame =
-                            (fun ~opcode ~is_fin ~len payload ->
-                              match opcode with
-                              | `Text | `Binary | `Continuation ->
-                                (* Route data frames through the shared inbound
-                                   reassembler so fragmented LSP messages
-                                   ([`Continuation], [is_fin = false]) survive
-                                   and the frame/message size caps apply
-                                   (RFC-0281 §3.2). *)
-                                Server_mcp_transport_ws.read_data_frame
-                                  cs.inbound
-                                  ~max_frame_bytes:
-                                    (Server_mcp_transport_ws.max_inbound_frame_bytes ())
-                                  ~max_message_bytes:
-                                    (Server_mcp_transport_ws.max_inbound_message_bytes ())
-                                  ~is_fin
-                                  ~len
-                                  payload
-                                  ~on_outcome:(function
-                                    | Server_mcp_transport_ws.Inbound_message msg ->
-                                      dispatch_message cs msg
-                                    | Server_mcp_transport_ws.Inbound_incomplete -> ()
-                                    | Server_mcp_transport_ws.Inbound_rejected rejection
-                                      ->
-                                      Log.Server.warn
-                                        "LSP inbound frame rejected (%s); disconnecting"
-                                        rejection.Server_mcp_transport_ws.reason;
-                                      disconnect cs)
-                              | `Ping ->
-                                (try Ws.Wsd.send_pong wsd with
-                                 | exn ->
-                                   Log.Server.debug
-                                     "LSP send_pong failed: %s"
-                                     (Printexc.to_string exn));
-                                Ws.Payload.close payload
-                              | `Connection_close ->
-                                Log.Server.info "LSP WebSocket disconnecting";
-                                disconnect cs;
-                                Ws.Payload.close payload
-                              | `Pong | `Other _ ->
-                                Ws.Payload.close payload)
-                        ; eof =
-                            (fun ?error:_ () ->
-                              Log.Server.info "LSP WebSocket EOF";
-                              disconnect cs)
-                        })
+                        Ws_endpoint.handlers
+                          ~on_message:(fun (m : Ws_msg.t) ->
+                            dispatch_message cs (Bigstringaf.to_string m.Ws_msg.payload))
+                          ~on_close:(fun ~code:_ ~reason:_ ->
+                            Log.Server.info "LSP WebSocket disconnecting";
+                            disconnect cs)
+                          ~on_error:(fun reason ->
+                            Log.Server.warn
+                              "LSP inbound rejected (%s); disconnecting" reason;
+                            disconnect cs)
+                          ~on_eof:(fun () ->
+                            Log.Server.info "LSP WebSocket EOF";
+                            disconnect cs)
+                          ())
                   with
                   | Ok () -> ()
                   | Error e -> Log.Server.warn "WebSocket upgrade failed: %s" e)))

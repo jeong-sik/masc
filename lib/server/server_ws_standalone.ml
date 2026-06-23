@@ -2,10 +2,9 @@
 
     Runs on a separate port (default 8937, configurable via MASC_WS_PORT).
     Session state is shared with {!Server_mcp_transport_ws}; this module only
-    wires TCP accept + the httpun-ws connection handler. *)
+    wires TCP accept + the ws-direct connection driver (RFC-0286). *)
 
-module Ws = Httpun_ws
-module Ws_eio = Httpun_ws_eio
+module Ws_server = Ws_direct_eio.Server
 
 (** SSOT: [Env_config.Transport.ws_port]. *)
 let default_port = Env_config.Transport.ws_port
@@ -156,93 +155,32 @@ module For_testing = struct
   let next_accept_backoff backoff_s = Float.min accept_backoff_cap_s (backoff_s *. 1.5)
 end
 
-let log_ws_client_close_payload ~session_id ~declared_len payload =
-  (* Terminal action for a single close-payload handling: log once + close
-     payload once.  Every reachable leaf of the read state machine (early
-     reject, on_eof, on_read completion, schedule re-entry on full buffer,
-     exception) routes through here so the payload is never logged twice
-     and never leaked. *)
-  let finish =
-    let finished = ref false in
-    fun summary ->
-      if not !finished
-      then (
-        finished := true;
-        Log.Server.debug "[ws-standalone] session %s client close (%s)" session_id summary;
-        Ws.Payload.close payload)
-  in
-  match immediate_ws_close_payload_summary ~declared_len with
-  | Some summary -> finish summary
-  | None ->
-    let buffer = Bytes.create declared_len in
-    let offset = ref 0 in
-    let rec schedule () =
-      if !offset >= declared_len
-      then finish (summarize_ws_close_payload buffer ~received_len:!offset ~declared_len)
-      else
-        Ws.Payload.schedule_read
-          payload
-          ~on_eof:(fun () ->
-            finish (summarize_ws_close_payload buffer ~received_len:!offset ~declared_len))
-          ~on_read:(fun bs ~off ~len:chunk_len ->
-            match
-              plan_ws_close_payload_chunk ~offset:!offset ~declared_len ~chunk_len
-            with
-            | Reject_empty_chunk summary -> finish summary
-            | Copy_then_finish { copy_len; next_offset } ->
-              Bigstringaf.blit_to_bytes
-                bs
-                ~src_off:off
-                buffer
-                ~dst_off:!offset
-                ~len:copy_len;
-              offset := next_offset;
-              finish
-                (summarize_ws_close_payload buffer ~received_len:!offset ~declared_len)
-            | Copy_then_continue { copy_len; next_offset } ->
-              Bigstringaf.blit_to_bytes
-                bs
-                ~src_off:off
-                buffer
-                ~dst_off:!offset
-                ~len:copy_len;
-              offset := next_offset;
-              schedule ())
-    in
-    (try schedule () with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       finish
-         (Printf.sprintf
-            "payload_read_error=%s declared_len=%d"
-            (Printexc.to_string exn)
-            declared_len))
+(* RFC-0286: the ws-direct Endpoint parses and validates the Close frame, so
+   [on_close] hands over the code + reason directly — no need to read the close
+   payload off the wire (the former CPS [log_ws_client_close_payload]). The pure
+   summary helpers (immediate / summarize / plan_ws_close_payload chunk) stay
+   exported for their unit tests. *)
+let log_ws_client_close ~session_id ~(code : int option) ~reason =
+  let code_str = match code with Some c -> string_of_int c | None -> "none" in
+  Log.Server.debug "[ws-standalone] session %s client close (code=%s reason=%S)"
+    session_id code_str reason
 ;;
 
-let standalone_ws_eof_summary = function
-  | None -> "error=none"
-  | Some (`Exn exn) -> Printf.sprintf "error=%s" (Printexc.to_string exn)
-;;
-
-(** WebSocket handler factory for the standalone listener.  Delegates to
-    the shared MCP session protocol
-    ({!Server_mcp_transport_ws.mcp_websocket_handler}, RFC-0281 S3.2) —
-    session registration, SSE subscription, liveness heartbeat, and frame
-    opcode handling — and injects the standalone close-code diagnostic
-    and eof summary as observability hooks.  [~sw] is the per-connection
-    switch so the heartbeat fiber exits with the connection. *)
-let make_websocket_handler ~sw ~clock ~on_message _client_addr (wsd : Ws.Wsd.t)
-  : Ws.Websocket_connection.input_handlers
+(** WebSocket handler factory for the standalone listener.  Delegates to the
+    shared MCP session protocol
+    ({!Server_mcp_transport_ws.mcp_websocket_handler}, RFC-0286 §4) and injects
+    the standalone close diagnostic as an observability hook.  [~sw] is the
+    per-connection switch so the heartbeat fiber exits with the connection. *)
+let make_websocket_handler ~sw ~clock ~on_message _client_addr
+    (wsd : Ws_direct_core.Endpoint.Wsd.t)
+  : Ws_direct_core.Endpoint.handlers
   =
   Server_mcp_transport_ws.mcp_websocket_handler
     ~sw
     ~clock
-    ~on_connection_close:log_ws_client_close_payload
-    ~on_eof:(fun ~session_id error ->
-      Log.Server.debug
-        "[ws-standalone] session %s eof (%s)"
-        session_id
-        (standalone_ws_eof_summary error))
+    ~on_close_log:log_ws_client_close
+    ~on_eof:(fun ~session_id ->
+      Log.Server.debug "[ws-standalone] session %s eof" session_id)
     ~on_message
     ~origin_label:"standalone port"
     wsd
@@ -289,11 +227,6 @@ let start
                       handler and WebSocket handler are created here so the
                       heartbeat fiber runs on [conn_sw], not the server switch. *)
                    Eio.Switch.run (fun conn_sw ->
-                     let connection_handler =
-                       Ws_eio.Server.create_connection_handler
-                         ~sw:conn_sw
-                         (make_websocket_handler ~sw:conn_sw ~clock ~on_message)
-                     in
                      Eio.Switch.on_release conn_sw (fun () ->
                        try Eio.Flow.close flow with
                        | Eio.Cancel.Cancelled _ as e -> raise e
@@ -301,7 +234,18 @@ let start
                          Log.Server.warn
                            "[ws-standalone] flow close failed: %s"
                            (Printexc.to_string exn));
-                     try connection_handler client_addr flow with
+                     (* ws-direct reads the upgrade request off the raw socket,
+                        replies 101, then drives the Server-role Endpoint.
+                        max_frame stays at the default here (less-exposed
+                        MASC_WS_PORT); max_message is enforced. *)
+                     try
+                       Ws_server.handle
+                         ~max_message:
+                           (Server_mcp_transport_ws.max_inbound_message_bytes ())
+                         flow
+                         (make_websocket_handler ~sw:conn_sw ~clock ~on_message
+                            client_addr)
+                     with
                      | Eio.Cancel.Cancelled _ as e -> raise e
                      | exn ->
                        (match

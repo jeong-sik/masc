@@ -15,8 +15,6 @@
   base64
   graphql
   graphql_parser
-  httpun-ws
-  httpun-ws-eio
   bigstringaf
   sqlite3
   unix

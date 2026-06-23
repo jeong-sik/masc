@@ -39,7 +39,12 @@ const VOLT_OPTIONS: readonly Volt[] = ['brass', 'blood', 'ice']
 // persistent signals for all 9 preferences
 export const tweaksDensity = persistentSignal<Density>({
   key: 'dashboard:tweaks:density-v2',
-  defaultValue: 'regular',
+  // Prototype boots at spacious (keeper-v2/app.jsx:9 "density": "spacious"), and
+  // craft.css density rules (e.g. .kp-row 11px, .ctx-card 14/15px) are authored
+  // to that baseline. Defaulting to 'regular' rendered every surface tighter than
+  // the design SSOT; align the unset default to spacious. Users keep 'regular'/
+  // 'compact' via the Tweaks panel.
+  defaultValue: 'spacious',
 })
 
 export const tweaksMotion = persistentSignal<Motion>({

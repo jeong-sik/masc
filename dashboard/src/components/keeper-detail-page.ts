@@ -578,32 +578,9 @@ function KeeperConfigOverlay({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  return html`
-    <div
-      class="kw-config-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-label=${`${keeperName} keeper 설정`}
-      data-testid="kw-config-overlay"
-      onClick=${onClose}
-    >
-      <div class="kw-config-drawer v2-monitoring-surface" onClick=${(event: Event) => event.stopPropagation()}>
-        <div class="kw-config-head v2-monitoring-toolbar">
-          <div class="min-w-0">
-            <h3>keeper 설정</h3>
-            <p>${keeperName}</p>
-          </div>
-          <button
-            type="button"
-            class=${`kw-act ${CLOSE_BUTTON_FOCUS_CLASS} v2-monitoring-action`}
-            onClick=${onClose}
-            data-testid="kw-config-close"
-          >닫기</button>
-        </div>
-        <div class="kw-config-scroll v2-monitoring-panel">
-          <${KeeperConfigPanel} keeperName=${keeperName} />
-        </div>
-      </div>
-    </div>
-  `
+  // The panel now owns the full .kcf-overlay modal shell (top bar + 8-tab rail +
+  // footer close), so the host is a thin wrapper that only supplies the ESC
+  // keybinding and the onClose callback. (Backdrop click + the footer/top 닫기
+  // buttons are rendered by the panel itself.)
+  return html`<${KeeperConfigPanel} keeperName=${keeperName} onClose=${onClose} />`
 }

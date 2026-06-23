@@ -10,6 +10,7 @@ import { DASHBOARD_NAV_ITEMS } from '../config/navigation'
 import { isSubmitEnter } from '../lib/keyboard'
 import { streamKeeperMessage } from '../api/keeper'
 import { currentDashboardActor } from '../api/core'
+import { KeeperBadge } from './keeper-badge'
 import type { Keeper } from '../types'
 import { useIsMobile } from '../hooks/use-is-mobile'
 
@@ -69,28 +70,6 @@ function nowHM(): string {
 function statusLooksRunning(status?: string | null): boolean {
   const s = (status ?? '').toLowerCase()
   return s === 'running' || s === 'run' || s === 'online' || s === 'healthy'
-}
-
-function keeperColor(name: string): string {
-  const map: Record<string, string> = {
-    nick0cave: 'var(--k-nick)',
-    'masc-improver': 'var(--k-masc)',
-    sangsu: 'var(--k-sangsu)',
-    'qa-king': 'var(--k-qa)',
-    rama: 'var(--k-rama)',
-  }
-  return map[name] ?? 'var(--brass-1)'
-}
-
-function keeperGlow(name: string): string {
-  const map: Record<string, string> = {
-    nick0cave: 'var(--k-nick-glow)',
-    'masc-improver': 'var(--k-masc-glow)',
-    sangsu: 'var(--k-sangsu-glow)',
-    'qa-king': 'var(--k-qa-glow)',
-    rama: 'var(--k-rama-glow)',
-  }
-  return map[name] ?? 'var(--brass-glow)'
 }
 
 function mdInline(s: string): string {
@@ -334,26 +313,6 @@ export function useCopilotDockShortcuts(dock: CopilotDockApi): void {
   }, [dock])
 }
 
-function DockAvatar({ keeper, size = 26, beat = false }: { keeper: DockKeeper; size?: number; beat?: boolean }) {
-  const color = keeperColor(keeper.id)
-  const glow = keeperGlow(keeper.id)
-  const initials = keeper.kr.slice(0, 2).toUpperCase()
-  return html`
-    <div
-      class="dmsg-av k"
-      style=${{
-        width: `${size}px`,
-        height: `${size}px`,
-        background: color,
-        boxShadow: beat ? `0 0 6px rgb(${glow} / .6)` : undefined,
-      }}
-      title=${keeper.kr}
-    >
-      ${initials}
-    </div>
-  `
-}
-
 function StatusDot({ status }: { status: string }) {
   const running = status === 'run'
   return html`
@@ -376,7 +335,7 @@ function DockMessageRow({ m, keeper, onPick }: { m: DockMessage; keeper: DockKee
     <div class=${`dmsg ${isUser ? 'user' : ''}`} data-dock-message=${m.role}>
       ${isUser
         ? html`<div class="dmsg-av op">YOU<//>`
-        : html`<${DockAvatar} keeper=${keeper} size=${26} beat=${statusLooksRunning(keeper.status)} />`}
+        : html`<${KeeperBadge} id=${keeper.id} name=${keeper.kr} variant="sigil" size="lg" beat=${statusLooksRunning(keeper.status)} />`}
       <div class="dmsg-col">
         <div class="dmsg-hd">
           <span class="who">${isUser ? 'operator' : keeper.kr}</span>
@@ -530,7 +489,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
             onClick=${() => setPickOpen(o => !o)}
             data-testid="copilot-dock-picker"
           >
-            <${DockAvatar} keeper=${keeper} size=${20} beat=${statusLooksRunning(keeper.status)} />
+            <${KeeperBadge} id=${keeper.id} name=${keeper.kr} variant="sigil" size="md" beat=${statusLooksRunning(keeper.status)} />
             <span class="nm">${keeper.kr}</span>
             <span class="cv"><${ChevronDown} size=${12} aria-hidden="true" /></span>
           </button>
@@ -543,7 +502,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
                       class=${`dock-menu-row ${k.id === keeper.id ? 'on' : ''}`}
                       onClick=${() => { dock.setKeeper(k.id); setPickOpen(false) }}
                     >
-                      <${DockAvatar} keeper=${k} size=${26} beat=${statusLooksRunning(k.status)} />
+                      <${KeeperBadge} id=${k.id} name=${k.kr} variant="sigil" size="lg" beat=${statusLooksRunning(k.status)} />
                       <div class="minfo">
                         <div class="nm">${k.kr} <span class="h">${k.id}</span></div>
                         <div class="sub"><${StatusDot} status=${k.status} />${k.phase} · ${k.ns}</div>
@@ -594,7 +553,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
               ${streaming
                 ? html`
                     <div class="dmsg" data-dock-message="assistant">
-                      <${DockAvatar} keeper=${keeper} size=${26} beat=${true} />
+                      <${KeeperBadge} id=${keeper.id} name=${keeper.kr} variant="sigil" size="lg" beat=${true} />
                       <div class="dmsg-col">
                         <div class="dmsg-hd"><span class="who">${keeper.kr}</span><span class="ts mono">작성 중…</span></div>
                         <div class="dbubble"><${Para} text=${streaming.shown} /><span class="dcaret"></span></div>

@@ -135,21 +135,38 @@ function ThroughputSection({ keeper }: { keeper: Keeper }): VNode {
   const peak = Math.max(1, ...series)
   const latest = series.at(-1) ?? 0
   const live = keeper.status.toLowerCase() === 'running' || keeper.status.toLowerCase() === 'active'
+  // Prototype hides the throughput card by default behind a collapsible header
+  // with an inline summary (keeper-v2/rails.jsx:422,477-482). .ctx-h-toggle /
+  // .ctx-h-caret carry no CSS in any stylesheet — they are inline-styled in the
+  // prototype, so they are inline-styled here too.
+  const [tpsOpen, setTpsOpen] = useState(false)
   return html`
     <div class="ctx-sec">
-      <h4>처리량</h4>
-      <div class="tps-card">
-        <div class="tps-now">
-          <span class=${`tps-val${latest > 0 ? '' : ' idle'}`}>${latest > 0 ? latest : '—'}</span>
-          <span class="tps-unit">tok/s</span>
-          ${live && latest > 0 ? html`<span class="tps-flag"><span class="tps-dot"></span>live</span>` : null}
-        </div>
-        ${series.length >= 2
-          ? html`<div class="tps-spark" aria-hidden="true">
-              ${series.map(v => html`<span style=${{ height: `${Math.max(6, (v / peak) * 100)}%`, opacity: 0.35 + 0.65 * (v / peak) }}></span>`)}
-            </div>`
+      <h4
+        class="ctx-h-toggle"
+        onClick=${() => setTpsOpen((v) => !v)}
+        style=${{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+      >
+        <span class="ctx-h-caret" style=${{ fontSize: '9px', color: 'var(--text-dim)' }}>${tpsOpen ? '▾' : '▸'}</span>
+        처리량
+        ${!tpsOpen
+          ? html`<span class="mono" style=${{ marginLeft: 'auto', fontSize: '11px', color: 'var(--text-dim)' }}>${live && latest > 0 ? `${latest} tok/s` : '유휴'}</span>`
           : null}
-      </div>
+      </h4>
+      ${tpsOpen
+        ? html`<div class="tps-card">
+            <div class="tps-now">
+              <span class=${`tps-val${latest > 0 ? '' : ' idle'}`}>${latest > 0 ? latest : '—'}</span>
+              <span class="tps-unit">tok/s</span>
+              ${live && latest > 0 ? html`<span class="tps-flag"><span class="tps-dot"></span>live</span>` : null}
+            </div>
+            ${series.length >= 2
+              ? html`<div class="tps-spark" aria-hidden="true">
+                  ${series.map((v) => html`<span style=${{ height: `${Math.max(6, (v / peak) * 100)}%`, opacity: 0.35 + 0.65 * (v / peak) }}></span>`)}
+                </div>`
+              : null}
+          </div>`
+        : null}
     </div>
   `
 }

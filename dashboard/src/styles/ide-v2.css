@@ -136,23 +136,9 @@
   flex: 1;
 }
 
-/* ── Presence strip in top chrome ──────────────────────────────────────────── */
-
-.ide-v2-presence {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
-  min-width: 0;
-}
-
-.ide-v2-presence .lbl {
-  font-size: 9.5px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  margin-right: 4px;
-}
+/* Presence strip: the `.ide-v2-presence` / `.ide-v2-presence .lbl` rules were
+   dead (referenced by zero components — IdePresenceStrip is fully inline-styled),
+   so they were removed rather than left as misleading ported CSS. */
 
 /* ── Three-pane body ───────────────────────────────────────────────────────── */
 

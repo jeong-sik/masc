@@ -288,7 +288,7 @@ let attention_fields_with_runtime_trust attention_fields runtime_trust =
          | None ->
            (match json_string_opt_member runtime_trust "latest_next_action" with
             | Some _ as value -> value
-            | None -> Some "inspect_runtime_trust"))
+            | None -> Some "inspect_keeper_runtime_trust"))
     in
     let attention_fields = assoc_upsert attention_fields "needs_attention" (`Bool true) in
     let attention_fields =

@@ -1132,6 +1132,11 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock;
+      (* RFC-0284: push goal-loop OODA status over SSE on change so the panel
+         stops polling. The worker is out-of-process (Python), so the trigger
+         is this server-side tick reading the cached status.json. *)
+      Server_dashboard_http_goal_loop_broadcast.start_goal_loop_refresh_loop
+        ~state ~sw ~clock;
       (* Pre-warm shell cache in a separate fiber so it cannot block
          lazy startup tasks or later keeper loop startup
          (#keeper-bootstrap-stuck). *)

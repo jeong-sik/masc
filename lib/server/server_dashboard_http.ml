@@ -539,9 +539,14 @@ let dashboard_goals_tree_http_json ~(config : Workspace.config) : Yojson.Safe.t 
 ;;
 
 let dashboard_goals_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
+  (* RFC-0284: carry the goal-loop OODA status alongside planning/tree so the
+     WS "goals" slice's initial snapshot (and the /goals HTTP pull) paint the
+     goal-loop panel without a separate fetch. Live updates arrive via the
+     [goal_loop_status] delta (Server_dashboard_http_goal_loop_broadcast). *)
   `Assoc
     [ "planning", dashboard_planning_http_json ~config
     ; "tree", dashboard_goals_tree_http_json ~config
+    ; "loop", Dashboard_goal_loop.status_json ~base_path:config.base_path ()
     ]
 
 let dashboard_ide_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =

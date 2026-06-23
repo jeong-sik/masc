@@ -59,34 +59,15 @@ describe('KeeperRuntimeAlertStrip', () => {
     expect(text).not.toContain('증명')
   })
 
-  it('canonicalizes runtime attention tokens before rendering operator copy', () => {
-    const { container } = render(h(KeeperRuntimeAlertStrip, {
-      keeper: keeper({
-        needs_attention: true,
-        attention_reason: 'watchdog_stale_turn',
-        next_human_action: 'inspect_watchdog_root_cause',
-      }),
-    }))
-
-    const text = container.textContent ?? ''
-    expect(text).toContain('런타임 근거 확인 필요')
-    expect(text).not.toContain('watchdog_stale_turn')
-    expect(text).not.toContain('inspect_watchdog_root_cause')
-  })
-
-  // Lock the remaining producer-side attention reasons that
-  // [canonicalAttentionReason] folds into runtime_blocked. Producers
-  // live at Keeper_status_bridge.ml:782/784/791 (runtime_attempts_exhausted,
-  // provider_tool_capability_missing, fiber_unresolved). The previous
-  // canonicalizes-* it() blocks already cover watchdog_stale_turn and
-  // completion_contract_violation; this parametrises the rest. The
-  // rendered Korean copy "런타임 근거 확인 필요" is the user-visible label
-  // mapped from runtime_blocked in ATTENTION_REASON_LABELS.
+  // Trust-snapshot runtime-failure tokens (keeper_runtime_trust_snapshot.ml)
+  // are not first-class status_bridge reasons; canonicalAttentionReason folds
+  // the enumerated trust set to the coarse `runtime_blocked` label so the strip
+  // shows a label rather than a raw token, pending the trust-vocabulary RFC.
   it.each([
-    'runtime_attempts_exhausted',
-    'provider_tool_capability_missing',
-    'fiber_unresolved',
-  ])('canonicalizes %s into runtime_blocked operator copy', (reason) => {
+    'completion_contract_violation',
+    'fsm_invariant',
+    'runtime_exhausted',
+  ])('folds trust runtime-failure token %s to the coarse runtime_blocked copy', (reason) => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
       keeper: keeper({
         needs_attention: true,
@@ -99,7 +80,27 @@ describe('KeeperRuntimeAlertStrip', () => {
     expect(text).not.toContain(reason)
   })
 
-  it('canonicalizes turn-disposition timeout actions before rendering operator copy', () => {
+  // First-class status_bridge reasons keep their OWN labels — they are no
+  // longer folded into runtime_blocked, so the operator sees the specific
+  // failure the backend distinguished.
+  it.each([
+    ['runtime_attempts_exhausted', '런타임 재시도 소진'],
+    ['fiber_unresolved', '미완료 작업(fiber) 정리 필요'],
+    ['stale_turn_timeout', '응답 지연(stale) 타임아웃'],
+  ])('labels first-class status_bridge reason %s distinctly', (reason, label) => {
+    const { container } = render(h(KeeperRuntimeAlertStrip, {
+      keeper: keeper({
+        needs_attention: true,
+        attention_reason: reason,
+      }),
+    }))
+
+    const text = container.textContent ?? ''
+    expect(text).toContain(label)
+    expect(text).not.toContain(reason)
+  })
+
+  it('labels turn-disposition timeout actions distinctly (no fold)', () => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
       keeper: keeper({
         needs_attention: true,
@@ -108,7 +109,7 @@ describe('KeeperRuntimeAlertStrip', () => {
     }))
 
     const text = container.textContent ?? ''
-    expect(text).toContain('런타임 근거 확인')
+    expect(text).toContain('턴 타임아웃 원인 확인')
     expect(text).not.toContain('inspect_turn_timeout')
   })
 
@@ -141,20 +142,16 @@ describe('KeeperRuntimeAlertStrip', () => {
     expect(text).not.toContain('inspect_latest_error')
   })
 
-  // Lock the remaining producer-side action wires that
-  // [canonicalNextHumanAction] folds into inspect_runtime_blocker. Each
-  // wire here has a live producer in lib/keeper (see
-  // Keeper_turn_disposition.next_action and Keeper_status_bridge), so
-  // dropping any rewrite branch silently in a future sweep would leak
-  // the raw legacy label into operator copy. The previous
-  // canonicalizes-* it() blocks already cover inspect_watchdog_root_cause
-  // and inspect_turn_timeout.
+  // First-class next_human_action wires (Keeper_turn_disposition.next_action /
+  // Keeper_status_bridge) each keep their own label — they are no longer folded
+  // into inspect_runtime_blocker, so the operator sees the specific action.
   it.each([
-    'inspect_runtime_attempts',
-    'inspect_provider_tool_lane',
-    'inspect_completion_contract',
-    'inspect_turn_finalization',
-  ])('canonicalizes %s into inspect_runtime_blocker operator copy', (action) => {
+    ['inspect_runtime_attempts', '재시도별 원인 확인'],
+    ['inspect_turn_finalization', '턴 정리 상태 확인'],
+    ['inspect_stale_turn_root_cause', '응답 지연(stale) 원인 확인'],
+    ['provide_input_or_decline', '입력 제공 또는 거절'],
+    ['reconcile_partial_commit', '부분 커밋 정합성 확인'],
+  ])('labels first-class next_human_action %s distinctly', (action, label) => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
       keeper: keeper({
         needs_attention: true,
@@ -163,7 +160,7 @@ describe('KeeperRuntimeAlertStrip', () => {
     }))
 
     const text = container.textContent ?? ''
-    expect(text).toContain('런타임 근거 확인')
+    expect(text).toContain(label)
     expect(text).not.toContain(action)
   })
 

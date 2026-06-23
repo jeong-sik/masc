@@ -21,7 +21,7 @@ import {
   resumeQueuedOasRuntimeIngress,
 } from './sse'
 import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './namespace-truth-store'
-import { cancelPendingSSERefreshes, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
+import { cancelPendingSSERefreshes, registerGovernanceRefresh, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { refreshShell } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
 import { ensureDevToken } from './api/dev-token'
@@ -193,6 +193,26 @@ export function App() {
           console.warn('[app] mission refresh unavailable', err instanceof Error ? err.message : err)
         })
     })
+
+    // Governance/HITL approvals feed the always-visible nav-rail approvals
+    // badge and topbar attention indicator (see approvalsBadge below), so the
+    // governance resource must refresh globally — not only while the
+    // governance/approvals surface is mounted (those surfaces are the only
+    // importers of governance-actions, which is what registers this refresh).
+    // Without an eager registration a pending HITL approval emits its
+    // `approval:pending` SSE event into a null handler and the badge stays 0
+    // until the operator manually opens the approvals surface. Register the
+    // refresh eagerly (governance-actions stays lazy via dynamic import) and
+    // load once at boot so an approval already pending at open is shown.
+    const refreshGovernanceLazy = () => {
+      void import('./components/governance-actions')
+        .then(({ refreshGovernance }) => refreshGovernance())
+        .catch(err => {
+          console.warn('[app] governance refresh unavailable', err instanceof Error ? err.message : err)
+        })
+    }
+    registerGovernanceRefresh(refreshGovernanceLazy)
+    refreshGovernanceLazy()
 
     const unsubSSE = setupSSEReaction()
     startPeriodicRefresh()

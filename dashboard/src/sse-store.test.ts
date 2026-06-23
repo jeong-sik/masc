@@ -175,6 +175,40 @@ describe('setupSSEReaction reconnect hydration', () => {
     cleanup()
   })
 
+  it('refreshes the governance approval queue on reconnect (nav-rail badge recovery)', async () => {
+    const { sseStore, sse } = await loadSseStore()
+    const cleanup = sseStore.setupSSEReaction()
+    const refreshGovernance = vi.fn<() => void>()
+    sseStore.registerGovernanceRefresh(refreshGovernance)
+
+    sse.connected.value = true
+    sse.lastDisconnectedAt.value = Date.now() - 1_000
+    sse.reconnectCount.value += 1
+    await flushAsyncWork()
+
+    // Approvals can arrive/resolve during a disconnect; the always-visible
+    // badge must recover them on reconnect, not only on the governance surface.
+    expect(refreshGovernance).toHaveBeenCalled()
+
+    vi.clearAllTimers()
+    cleanup()
+  })
+
+  it('routes an approval:pending SSE event to the governance refresh (HITL badge contract)', async () => {
+    const { sseStore } = await loadSseStore()
+    const refreshGovernance = vi.fn<() => void>()
+    sseStore.registerGovernanceRefresh(refreshGovernance)
+
+    // Locks the event-type string shared with the backend broadcast
+    // (keeper_approval_queue.ml broadcast_pending: "approval:pending"). A drift
+    // here silently stops the nav-rail/topbar approval badge from updating.
+    sseStore.routeServerPushEvent({ type: 'approval:pending' })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshGovernance).toHaveBeenCalled()
+  })
+
   it('hydrates the canonical project_snapshot SSE event without an HTTP fetch', async () => {
     const { sseStore, sse } = await loadSseStore()
     const cleanup = sseStore.setupSSEReaction()

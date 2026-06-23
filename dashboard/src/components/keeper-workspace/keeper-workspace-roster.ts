@@ -6,14 +6,6 @@
 // previous `.kw-*` implementation — only the emitted DOM/classes changed.
 
 import { html } from 'htm/preact'
-import {
-  MessageSquare,
-  Pause,
-  Play,
-  RotateCcw,
-  Settings,
-  Square,
-} from 'lucide-preact'
 import { useEffect, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import { keepers } from '../../store'
@@ -38,7 +30,6 @@ type RosterFilter = 'all' | 'run' | 'att'
 type RosterSort = 'status' | 'name' | 'att'
 type KeeperWorkspaceRouteSurface = 'monitoring' | 'keepers'
 type RosterMenuState = { keeper: Keeper; x: number; y: number } | null
-type IconComponent = typeof Play
 type RosterFleetSummary = {
   total: number
   running: number
@@ -49,12 +40,12 @@ type RosterFleetSummary = {
   highContext: number
 }
 
-const LIFECYCLE_COPY: Record<KeeperActionKey, { label: string; title: string; icon: IconComponent; danger?: boolean }> = {
-  pause: { label: '일시정지', title: '일시정지: 실행 중인 keeper 를 일시 멈춥니다', icon: Pause },
-  resume: { label: '재개', title: '재개: 일시정지된 keeper 를 다시 실행합니다', icon: Play },
-  wakeup: { label: '깨우기', title: '깨우기: 다음 turn 을 즉시 시도합니다', icon: RotateCcw },
-  boot: { label: '기동', title: '기동: offline keeper 를 다시 시작합니다', icon: Play },
-  shutdown: { label: '종료', title: '종료: keeper 를 완전 종료합니다', icon: Square, danger: true },
+const LIFECYCLE_COPY: Record<KeeperActionKey, { label: string; title: string; glyph: string; danger?: boolean }> = {
+  pause: { label: '일시정지', title: '일시정지: 실행 중인 keeper 를 일시 멈춥니다', glyph: '⏸' },
+  resume: { label: '재개', title: '재개: 일시정지된 keeper 를 다시 실행합니다', glyph: '▶' },
+  wakeup: { label: '깨우기', title: '깨우기: 다음 turn 을 즉시 시도합니다', glyph: '◉' },
+  boot: { label: '기동', title: '기동: offline keeper 를 다시 시작합니다', glyph: '▶' },
+  shutdown: { label: '종료', title: '종료: keeper 를 완전 종료합니다', glyph: '■', danger: true },
 }
 const MENU_WIDTH = 190
 const MENU_ESTIMATED_HEIGHT = 246
@@ -275,12 +266,11 @@ function KeeperRosterMenu({
         <span class="mono">${keeper.name}</span>
       </div>
       <button type="button" role="menuitem" class="kp-menu-i" onClick=${select} data-testid="kw-roster-menu-open-chat">
-        <${MessageSquare} size=${14} aria-hidden="true" />
+        <span aria-hidden="true">◈</span>
         <span>대화 열기</span>
       </button>
       ${actions.map(action => {
         const copy = LIFECYCLE_COPY[action]
-        const Icon = copy.icon
         return html`
           <button
             key=${action}
@@ -291,17 +281,17 @@ function KeeperRosterMenu({
             onClick=${() => { void runKeeperAction(keeper.name, action); onClose() }}
             data-testid=${`kw-roster-menu-${action}`}
           >
-            <${Icon} size=${14} aria-hidden="true" />
+            <span aria-hidden="true">${copy.glyph}</span>
             <span>${copy.label}</span>
           </button>
         `
       })}
       ${actions.length === 0
-        ? html`<div class="kp-menu-note">현재 실행 가능한 명령 없음</div>`
+        ? html`<div class="kp-menu-note">${(keeper.lifecycle_phase ?? keeper.phase ?? '').toLowerCase() === 'dead' ? '복구 불가 — 명령 없음' : '전이 중 — 잠시 후'}</div>`
         : null}
       <div class="kp-menu-sep"></div>
       <button type="button" role="menuitem" class="kp-menu-i" onClick=${openConfig} data-testid="kw-roster-menu-config">
-        <${Settings} size=${14} aria-hidden="true" />
+        <span aria-hidden="true">⚙</span>
         <span>keeper 설정</span>
       </button>
     </div>

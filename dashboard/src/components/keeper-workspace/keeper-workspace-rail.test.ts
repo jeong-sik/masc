@@ -193,8 +193,6 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('37.8k')
     expect(container.textContent).not.toContain('윈도우 사용량')
     expect(container.querySelector('.meter')).toBeNull()
-    // The empty card still surfaces the compaction gate (default 50%) as ratio_gate.
-    expect(container.textContent).toContain('ratio_gate 50%')
   })
 
   it('runs overflow compaction without force through the existing MCP tool', async () => {
@@ -256,6 +254,6 @@ describe('KeeperWorkspaceRail', () => {
   it('shows the empty state when no tasks are owned', () => {
     tasks.value = []
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
-    expect(container.textContent).toContain('할당된 태스크 없음')
+    expect(container.textContent).toContain('—')
   })
 })

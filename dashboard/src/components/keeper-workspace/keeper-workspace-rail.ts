@@ -124,7 +124,7 @@ function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
           : null}
         ${/* Live execution snapshot carries no capability flags / effort segments
              (multimodal/json/tool-choice, low/medium/high). Marked, not faked. */ ''}
-        <div class="rtc-na" data-stub="runtime-capabilities">능력·effort 정보 미수신</div>
+        <div class="rtc-na" data-stub="runtime-capabilities">capabilities — n/a</div>
       </div>
     </div>
   `
@@ -241,7 +241,7 @@ function ContextSection({ keeper, onToggleDetail }: { keeper: Keeper; onToggleDe
                 </span>
               </div>
             `
-          : html`<div class="ctx-empty" data-stub="context-window"><strong>윈도우 사용률 미수신</strong><span>런타임이 전체 윈도우 총량을 아직 보내지 않았습니다. ratio_gate ${compactAt}%.</span></div>`}
+          : html`<div class="ctx-empty" data-stub="context-window"><strong>윈도우 사용률 미수신</strong><span>런타임이 전체 윈도우 총량을 아직 보내지 않았습니다.</span></div>`}
         <div class="ctx-tok">
           <span class="mono">${tokens ?? '—'}</span>
           <span class="ctx-tok-sep">/</span>
@@ -297,7 +297,7 @@ function OwnedTasksSection({ keeper }: { keeper: Keeper }): VNode {
                 <span class="ttl">${t.title}</span>
               </button>
             `)
-          : html`<div style=${{ fontSize: '12px', color: 'var(--text-dim)' }}>할당된 태스크 없음</div>`}
+          : html`<div style=${{ fontSize: '12px', color: 'var(--text-dim)' }}>—</div>`}
       </div>
     </div>
   `

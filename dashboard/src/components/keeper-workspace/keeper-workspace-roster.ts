@@ -131,6 +131,13 @@ function matchesQuery(keeper: Keeper, q: string): boolean {
   return hay.includes(q.toLowerCase())
 }
 
+function formatHHMM(timestamp: string | null | undefined): string | null {
+  if (!timestamp) return null
+  const d = new Date(timestamp)
+  if (Number.isNaN(d.getTime())) return null
+  return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
 // Prototype kp-state shows the raw English FSM phase ("Running", "Compacting").
 function phaseText(keeper: Keeper): string {
   return keeper.lifecycle_phase ?? keeper.phase ?? keeperPhaseLabel(keeper)
@@ -155,6 +162,7 @@ function RosterRow({
   const handle = basepath ? shortBasepath(basepath) : keeperScope(keeper)
   const handleTitle = basepath || keeperScope(keeper) || ''
   const activity = keeperActivityDisplay(keeper)
+  const activityTime = formatHHMM(activity.timestamp)
   const select = () => onSelect(keeper.name)
   return html`
     <div
@@ -175,12 +183,12 @@ function RosterRow({
       <div class="kp-meta">
         <div class="kp-name">${keeper.name}</div>
         <div class="kp-sub">
-          <span class="kp-state"><${Dot} state=${phaseTone(keeper.lifecycle_phase)} pulse=${phasePulse(keeper.lifecycle_phase)} />${phaseText(keeper)}</span>
+          <span class="kp-state" title=${phaseText(keeper)}><${Dot} state=${phaseTone(keeper.lifecycle_phase)} pulse=${phasePulse(keeper.lifecycle_phase)} /></span>
           ${handle ? html`<span aria-hidden="true">·</span><span class="kp-handle" title=${handleTitle}>${handle}</span>` : null}
         </div>
       </div>
       <div class="kp-right">
-        ${activity.source !== 'none' ? html`<span class="kp-time">${activity.label}</span>` : null}
+        ${activityTime ? html`<span class="kp-time" title=${activity.label}>${activityTime}</span>` : null}
         ${att > 0 ? html`<span class="kp-att" title=${`주의 ${att}건 — 컨텍스트 레일에서 확인`}>${att}</span>` : null}
       </div>
       <button

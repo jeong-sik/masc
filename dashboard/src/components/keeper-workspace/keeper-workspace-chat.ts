@@ -45,36 +45,45 @@ interface WorkspaceCommand {
   label: string
   title: string
   icon: IconComponent
+  glyph?: string
   danger?: boolean
   active?: boolean
   onClick: () => void | Promise<void>
 }
 
-const LIFECYCLE_COPY: Record<KeeperActionKey, { label: string; title: string; icon: IconComponent; danger?: boolean }> = {
+const LIFECYCLE_COPY: Record<
+  KeeperActionKey,
+  { label: string; title: string; icon: IconComponent; glyph: string; danger?: boolean }
+> = {
   pause: {
     label: '일시정지',
     title: '일시정지: 실행 중인 keeper 를 일시 멈춥니다',
     icon: Pause,
+    glyph: '⏸',
   },
   resume: {
     label: '재개',
     title: '재개: 일시정지된 keeper 를 다시 실행합니다',
     icon: Play,
+    glyph: '▶',
   },
   wakeup: {
     label: '깨우기',
     title: '깨우기: 다음 turn 을 즉시 시도합니다',
     icon: RotateCcw,
+    glyph: '◉',
   },
   boot: {
     label: '기동',
     title: '기동: offline keeper 를 다시 시작합니다',
     icon: Play,
+    glyph: '▶',
   },
   shutdown: {
     label: '종료',
     title: '종료: keeper 를 완전 종료합니다',
     icon: Square,
+    glyph: '■',
     danger: true,
   },
 }
@@ -95,6 +104,7 @@ function lifecycleCommands(keeper: Keeper): WorkspaceCommand[] {
       label: copy.label,
       title: copy.title,
       icon: copy.icon,
+      glyph: copy.glyph,
       danger: copy.danger,
       onClick: () => runKeeperAction(keeper.name, key),
     }
@@ -187,6 +197,9 @@ function WorkspaceCommandButtons({
     }
   }
 
+  const lifecycleIds: WorkspaceCommandId[] = ['pause', 'resume', 'wakeup', 'boot', 'shutdown']
+  const isLifecycle = (id: WorkspaceCommandId) => lifecycleIds.includes(id)
+
   if (mobile) {
     return html`
       <div class="kw-chat-mobile-actions">
@@ -235,9 +248,10 @@ function WorkspaceCommandButtons({
   }
 
   return html`
-    <div class="kw-chat-command-icons" data-testid="kw-chat-command-icons">
+    <div class="chat-actions" data-testid="kw-chat-command-icons">
       ${commands.map(command => {
         const Icon = command.icon
+        const isLife = isLifecycle(command.id)
         return html`
           <button
             key=${command.id}
@@ -250,7 +264,9 @@ function WorkspaceCommandButtons({
             onClick=${() => { void run(command) }}
             data-testid=${`kw-chat-command-${command.id}`}
           >
-            <${Icon} size=${14} aria-hidden="true" />
+            ${isLife && command.glyph
+              ? html`<span aria-hidden="true">${command.glyph}</span>`
+              : html`<${Icon} size=${14} aria-hidden="true" />`}
           </button>
         `
       })}
@@ -289,7 +305,8 @@ function ChatHeader({
   const pillTone: PillTone = tone === 'idle' ? 'neutral' : tone === 'busy' ? 'warn' : tone
   const pulse = phasePulse(keeper.lifecycle_phase)
   const phase = keeper.lifecycle_phase ?? keeper.phase ?? keeperPhaseLabel(keeper)
-  const basepath = keeper.sandbox_target ?? keeper.skill_primary ?? keeper.active_model ?? keeper.model ?? ''
+  // Prototype ChatHeader sub-line shows the keeper's sandbox basepath only.
+  const basepath = keeper.sandbox_target ?? ''
 
   // Prototype ChatHeader (shell.jsx): avatar + identity (name + phase pill) +
   // basepath sub + action icons. The back button is mobile-only (desktop keeps
@@ -316,7 +333,7 @@ function ChatHeader({
           <${Pill} tone=${pillTone} dot=${pillTone === 'neutral' ? 'idle' : pillTone} dotPulse=${pulse} title=${keeperDisplayStatus(keeper)}>${phase}</${Pill}>
         </div>
         <div class="sub">
-          <span class="sub-ns" title="basepath — 이 keeper의 격리된 worktree 루트"><span class="mono">${basepath}</span></span>
+          <span class="sub-ns" title="basepath — 이 keeper의 격리된 worktree 루트"><span class="mono">${basepath || '—'}</span></span>
         </div>
       </div>
       <div class="chat-actions">

@@ -205,6 +205,12 @@ type gate_decision =
 type fusion_topology =
   | Simple  (** panel → judge → sink (현행, byte-identical) *)
   | Refine  (** panel → judge → judge'(1차 종합을 재검토) → sink *)
+  | Conditional
+      (** panel → judge → (1차 판정이 [Insufficient]일 때만) judge'(refine) → sink.
+          애매할 때만 한 단계 더 깊이; 그 외엔 1차 종합 그대로(= Simple). *)
+  | Judge_of_judges
+      (** panel → [N개 1차 심판] → meta-judge → sink (RFC-0283). 서로 다른 N개 1차
+          심판이 같은 패널을 독립 종합하고, meta가 reconcile. preset.judges >= 2 필요. *)
 [@@deriving yojson, show, eq]
 
 (** 안정적 wire 문자열 ([masc_fusion] 도구 인자·로깅용). *)
@@ -220,6 +226,11 @@ val all_fusion_topologies : fusion_topology list
 
 (** [all_fusion_topologies]의 wire 문자열 (도구 인자 허용값 목록). *)
 val all_fusion_topology_strings : string list
+
+(** [Conditional] 위상의 에스컬레이트 정책. 1차 심판 [decision]이 더 깊은 심의를 요하면
+    [true]. v1: [Insufficient]만 [true]([Answer]/[Recommend]는 [false]). 닫힌 합
+    exhaustive — 새 [judge_decision] 변형 추가 시 컴파일 에러로 정책 갱신을 강제한다. *)
+val decision_warrants_escalation : judge_decision -> bool
 
 (** 1차 심판 종합을 refine 심판 프롬프트에 실을 lossless 텍스트로 렌더한다.
     [judge_synthesis]의 7필드 + 닫힌 합 [decision]을 모두 보존한다(resolved_answer 한 줄로

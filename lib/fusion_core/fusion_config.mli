@@ -30,6 +30,10 @@ type config_error =
       (** enabled인데 default_preset가 비었거나 presets에 없음. 빈 문자엏도 거부 —
           preset 생략 호출이 default_preset로 폭빽하는데 ""는 항상 Preset_unknown로
           deny되기 때문. *)
+  | Judge_panel_prompt_missing of string
+      (** preset 이름 — JOJ 1차 심판 system prompt 누락 (RFC-0283). *)
+  | Duplicate_judge of string * string
+      (** (preset 이름, 중복 judge 정체성) — 두 JOJ 1차 심판이 같은 정체성 (RFC-0283). *)
   | Toml_type_error of string  (** 필드 타입 불일치 (Otoml.Type_error) *)
 [@@deriving show, eq]
 

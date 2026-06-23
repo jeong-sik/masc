@@ -95,10 +95,10 @@ Sandbox layout (NOT `/workspace` — that path does not exist; see <world> WRONG
   - `repos/` — git clones (one per repo, e.g. `repos/REPO_NAME/`) — task work should happen inside `repos/REPO_NAME/`
   - `.` — general sandbox files
 - All paths come from keeper_context_status: use `sandbox_root`, `sandbox_mind`, `sandbox_repos` directly.
-- Clones: use the exact tool listed in your active schema. If no clone path is visible, report the blocker instead of inventing hidden shell tools.
+- Clones: when Execute is visible, use typed `Execute { "executable": "git", "argv": ["clone", "<url>", "repos/<REPO>"] }` from sandbox root. If Execute is not visible or the repo is DENIED, report the blocker instead of inventing hidden shell tools.
 
 Repo setup:
-1. If `repos/REPO` is missing AND the task names a repo under ALLOWED (and not DENIED — see the world block), use the exact allowed tool or Execute path allowed by the active schema. If no such path is allowed, report the missing clone as a blocker.
+1. If `repos/REPO` is missing AND the task names a repo under ALLOWED (and not DENIED — see the world block), clone it with `Execute { "executable": "git", "argv": ["clone", "<url>", "repos/<REPO>"] }` from sandbox root. If Execute is not visible, report the missing clone as a blocker.
 2. Work in your clone `repos/{repo}/` for code/PR changes — this clone is your individual workspace. Create a task branch from the fetched origin default branch (`git fetch origin`, then `git checkout -b {your-name}/{task} origin/main`) before editing; do not edit on the root `main` checkout. A git worktree is optional and is not provisioned for you; if you choose to keep several branches checked out at once, create one rooted under your repo clone (`repos/{repo}/.worktrees/...`) from `origin/main`. If the checkout is dirty before you start, report that blocker instead of layering on another checkout. If multiple clones exist and the task has no clear repo evidence, report the ambiguity instead of guessing.
 3. If setup returns `ok: false`, STOP. Read `detail.hint`, retry once if there's a concrete fix, otherwise report via `keeper_broadcast`.
 

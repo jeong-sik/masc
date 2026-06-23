@@ -308,7 +308,7 @@ parse false args|}
     }
   ; { name = "Git_clone"
     ; anon_pattern = "Git_clone _"
-    ; bind_pattern = "Git_clone { repo; branch; depth }"
+    ; bind_pattern = "Git_clone { repo; branch; depth; dest_dir }"
     ; risk = "`Audited"
     ; sandbox = "`Docker"
     ; to_simple_body =
@@ -317,6 +317,7 @@ parse false args|}
         (match depth with Some d -> [ "--depth"; string_of_int d ] | None -> [])
         @ (match branch with None -> [] | Some b -> [ "-b"; b ])
         @ [ repo ]
+        @ (match dest_dir with None -> [] | Some d -> [ d ])
       in
       { Shell_ir.bin = Exec_program.of_known Exec_program.Git
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) ("clone" :: args)
@@ -329,34 +330,37 @@ parse false args|}
     ; parse_body =
         Some
           {|
-let rec parse depth branch repo dd = function
+let rec parse depth branch repo dest_dir dd = function
   | [] ->
     (match repo with
-     | Some r -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_clone { repo = r; branch; depth }))
+     | Some r -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_clone { repo = r; branch; depth; dest_dir }))
      | None -> None)
   | "--depth" :: n :: rest when not dd ->
     (match int_of_string_opt n with
-     | Some d -> parse (Some d) branch repo dd rest
+     | Some d -> parse (Some d) branch repo dest_dir dd rest
      | None -> None)
-  | "-b" :: b :: rest | "--branch" :: b :: rest when not dd -> parse depth (Some b) repo dd rest
+  | "-b" :: b :: rest | "--branch" :: b :: rest when not dd -> parse depth (Some b) repo dest_dir dd rest
   | arg :: rest when not dd && Shell_ir_typed_types.is_eq_form_flag arg ["--depth"] ->
     let n = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--depth"]) in
     (match int_of_string_opt n with
-     | Some d -> parse (Some d) branch repo dd rest
-     | None -> parse depth branch repo dd rest)
+     | Some d -> parse (Some d) branch repo dest_dir dd rest
+     | None -> parse depth branch repo dest_dir dd rest)
   | arg :: rest when not dd && Shell_ir_typed_types.is_eq_form_flag arg ["--branch"] ->
     let b = Option.get (Shell_ir_typed_types.eq_form_flag_value arg ["--branch"]) in
-    parse depth (Some b) repo dd rest
-  | "--" :: rest -> parse depth branch repo true rest
+    parse depth (Some b) repo dest_dir dd rest
+  | "--" :: rest -> parse depth branch repo dest_dir true rest
   | arg :: rest ->
     if not dd && String.length arg > 0 && arg.[0] = '-'
-    then parse depth branch repo dd rest
+    then parse depth branch repo dest_dir dd rest
     else (
       match repo with
-      | None -> parse depth branch (Some arg) dd rest
-      | Some _ -> None)
+      | None -> parse depth branch (Some arg) dest_dir dd rest
+      | Some _ ->
+        (match dest_dir with
+         | None -> parse depth branch repo (Some arg) dd rest
+         | Some _ -> None))
 in
-parse None None None false args|}
+parse None None None None false args|}
     ; no_expand_combined = false
     }
   ; { name = "Curl"

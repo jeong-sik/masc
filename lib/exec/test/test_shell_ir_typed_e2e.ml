@@ -292,6 +292,7 @@ let test_git_commands () =
     ; "git clone https://github.com/x/y.git", "Git_clone"
     ; "git clone --depth 1 https://github.com/x/y.git", "Git_clone"
     ; "git clone -b main https://github.com/x/y.git", "Git_clone"
+    ; "git clone https://github.com/x/y.git repos/z", "Git_clone"
     ]
 ;;
 

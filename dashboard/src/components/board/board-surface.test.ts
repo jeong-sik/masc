@@ -256,6 +256,14 @@ describe('BoardSurface Component', () => {
     expect(container.querySelector('.v2-board-surface')).not.toBeNull()
   })
 
+  it('renders no title header — board goes straight to the feed (matches prototype)', () => {
+    const { container } = render(h(BoardSurface, null))
+    // The board surface intentionally omits SurfaceHeader; the sub-board rail
+    // and "전체 피드" heading are the only structure above the posts. board is
+    // in SURFACE_OWN_LEAD_IDS so the generic SurfaceLead is also suppressed.
+    expect(container.querySelector('header.v2-surface-header')).toBeNull()
+  })
+
   it('collapses the detail column by default (two-column rail + feed)', () => {
     const { container } = render(h(BoardSurface, null))
     // No post selected and the mention inbox closed: neither detail rail renders

@@ -35,9 +35,9 @@
 }
 
 .wk-inner {
-  max-width: 1280px;
+  /* Full-width, left-aligned — consistency rationale in .ov-scroll
+     (surfaces-v2.css). Prototype centers this; overridden per design direction. */
   width: 100%;
-  margin: 0 auto;
 }
 
 .wk-head {

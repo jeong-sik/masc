@@ -18,12 +18,29 @@ type panel_group =
   }
 [@@deriving show, eq]
 
+(* JOJ(judge-of-judges, RFC-0283)의 1차 심판 한 명. panel_group과 동형이되 model이
+   복수가 아니라 단수다 (심판은 한 모델이 한 종합을 낸다). [label]로 같은 model을 다른
+   lens(system_prompt)로 여러 1차 심판에 둘 수 있다 (judge_id로 정체성 derive). *)
+type judge_spec =
+  { jmodel : string  (** provider.model id *)
+  ; jlabel : string  (** 정체성 라벨 ([panelist_id]와 동형). ""면 정체성=jmodel *)
+  ; jsystem_prompt : string  (** 이 1차 심판의 lens (config 필수) *)
+  ; jweb_tools : bool  (** web_search/web_fetch 주입 여부 *)
+  ; jmax_tool_calls : int  (** 최대 tool 호출 수 (0=무제한) *)
+  ; jtimeout_s : float  (** 호출 구조적 타임아웃 (초) *)
+  }
+[@@deriving show, eq]
+
 type preset =
   { name : string
   ; panels : panel_group list
   ; judge : string
+      (** simple/refine/conditional 심판이자 JOJ의 meta-judge(reducer). (RFC-0283) *)
   ; judge_system_prompt : string
   ; judge_timeout_s : float
+  ; judges : judge_spec list
+      (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
+          JOJ 위상은 런타임에 >= 2 를 요구한다. *)
   }
 [@@deriving show, eq]
 
@@ -101,6 +118,31 @@ let preset_prompts_present (p : preset) =
    load 단계에서 fail-fast (Unknown→Permissive 회피). *)
 let preset_judge_present (p : preset) = String.length (String.trim p.judge) > 0
 
+(* JOJ 1차 심판들의 정체성 (RFC-0283). 정체성 포맷은 [panelist_id]를 그대로 쓴다
+   (label+model → 식별 문자열, SSOT 한 곳). 입력순 보존 = meta 프롬프트 attribution 순서. *)
+let preset_judge_ids (p : preset) =
+  List.map
+    (fun (j : judge_spec) -> panelist_id ~label:j.jlabel ~model:j.jmodel)
+    p.judges
+
+(* 두 1차 심판이 같은 정체성([judge_id])을 가지면 그 id를 반환. meta 프롬프트가 정체성
+   문자열로 각 종합을 attribute하므로 중복은 모호성(어느 1차 심판인지 구분 불가)을 부른다.
+   [preset_duplicate_panelist]와 동형 — fail-closed. judges=[]면 항상 None. *)
+let preset_duplicate_judge (p : preset) =
+  let rec find_dup seen = function
+    | [] -> None
+    | id :: rest -> if List.mem id seen then Some id else find_dup (id :: seen) rest
+  in
+  find_dup [] (preset_judge_ids p)
+
+(* 모든 1차 심판의 system prompt(lens)가 비어있지 않은가. 1차 심판의 lens는 행동을
+   정의하므로 코드 default로 채우지 않는다. judges=[]면 vacuously true(simple/refine/
+   conditional은 judges를 안 쓰므로 검증 무관). *)
+let preset_judge_prompts_present (p : preset) =
+  List.for_all
+    (fun (j : judge_spec) -> String.length (String.trim j.jsystem_prompt) > 0)
+    p.judges
+
 (* 외곽 run_safe 타임아웃 = 그룹 timeout 중 max. 하나의 Async_agent.all은 하나의
    외곽 타임아웃만 가지므로(RFC-0252-A §4.3), 그룹별 정밀 timeout은 build_agent에
    반영하고 외곽은 상한으로만 둔다. 단일 그룹(legacy desugar)이면 그 그룹 timeout =
@@ -135,10 +177,15 @@ module Validated_preset = struct
     | Missing_prompt  (** 패널 또는 심판 system prompt 비어있음 *)
     | Missing_judge_model  (** 심판 model id 비어있음 *)
     | Duplicate_panelist of string  (** 두 패널이 같은 정체성(panelist_id) *)
-    | Bad_max_tool_calls of int  (** 그룹 max_tool_calls가 0..max_tool_calls_ceiling 밖 *)
+    | Bad_max_tool_calls of int
+        (** 그룹 또는 JOJ 1차 심판 max_tool_calls가 0..max_tool_calls_ceiling 밖 *)
+    | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0283) *)
+    | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성(judge_id) (RFC-0283) *)
 
-  (* 검증 순서는 config 로드 시점과 동일(byte-identical config_error): size → prompt →
-     judge → 정체성 중복 → max_tool_calls 범위. *)
+  (* 검증 순서는 config 로드 시점과 동일(byte-identical config_error): size → 패널 prompt →
+     judge model → 패널 정체성 중복 → 패널 max_tool_calls 범위 → (RFC-0283) 1차 심판 prompt
+     → 1차 심판 정체성 중복 → 1차 심판 max_tool_calls 범위. judges=[]면 마지막 셋은 통과
+     (simple/refine/conditional preset은 기존과 동일 결과 = byte-identity). *)
   let of_preset (p : preset) : (t, invalid) result =
     if not (preset_size_ok p) then Error (Bad_size (List.length (preset_models p)))
     else if not (preset_prompts_present p) then Error Missing_prompt
@@ -154,7 +201,21 @@ module Validated_preset = struct
              p.panels
          with
          | Some g -> Error (Bad_max_tool_calls g.max_tool_calls)
-         | None -> Ok p)
+         | None ->
+           if not (preset_judge_prompts_present p) then Error Judge_panel_prompt_missing
+           else (
+             match preset_duplicate_judge p with
+             | Some id -> Error (Duplicate_judge id)
+             | None ->
+               (match
+                  List.find_opt
+                    (fun (j : judge_spec) ->
+                      j.jmax_tool_calls < 0
+                      || j.jmax_tool_calls > max_tool_calls_ceiling)
+                    p.judges
+                with
+                | Some j -> Error (Bad_max_tool_calls j.jmax_tool_calls)
+                | None -> Ok p)))
 
   let preset (t : t) : preset = t
 

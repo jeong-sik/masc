@@ -154,11 +154,19 @@ type gate_decision =
 type fusion_topology =
   | Simple  (** panel → judge → sink (현행, byte-identical) *)
   | Refine  (** panel → judge → judge'(1차 종합을 재검토) → sink *)
+  | Conditional
+      (** panel → judge → (1차 판정이 [Insufficient]일 때만) judge'(refine) → sink.
+          애매할 때만 한 단계 더 깊이; 그 외엔 1차 종합 그대로. *)
+  | Judge_of_judges
+      (** panel → [N개 1차 심판] → meta-judge → sink (RFC-0283). 서로 다른 N개 1차
+          심판이 같은 패널을 독립 종합하고, meta가 reconcile. preset.judges >= 2 필요. *)
 [@@deriving yojson, show, eq]
 
 let fusion_topology_to_string = function
   | Simple -> "simple"
   | Refine -> "refine"
+  | Conditional -> "conditional"
+  | Judge_of_judges -> "judge_of_judges"
 
 (* [to_string]의 역함수, 닫힌 합 밖은 [None]=fail-closed (Unknown→permissive 회피).
    keeper 입력 문자열을 typed 위상으로 parse한 뒤 exhaustive match하게 한다. round-trip은
@@ -166,12 +174,24 @@ let fusion_topology_to_string = function
 let fusion_topology_of_string = function
   | "simple" -> Some Simple
   | "refine" -> Some Refine
+  | "conditional" -> Some Conditional
+  | "judge_of_judges" -> Some Judge_of_judges
   | _ -> None
 
-let all_fusion_topologies : fusion_topology list = [ Simple; Refine ]
+let all_fusion_topologies : fusion_topology list =
+  [ Simple; Refine; Conditional; Judge_of_judges ]
 
 let all_fusion_topology_strings : string list =
   List.map fusion_topology_to_string all_fusion_topologies
+
+(* Conditional 위상의 에스컬레이트 정책: 1차 심판 판정이 더 깊은 심의를 요하는가.
+   [Insufficient](패널이 결정에 부족 = 애매)면 escalate, [Answer]/[Recommend](결론 있음)이면
+   1차 종합 유지. 닫힌 합 exhaustive match(catch-all 없음) — 새 decision 변형 추가 시 여기서
+   컴파일 에러로 escalate 정책을 명시 갱신하게 강제한다. confidence "축"을 새로 만들어 역분류하지
+   않고(reverse-classifier 회피) 기존 닫힌 합을 직접 본다. 순수 — 테스트 가능. *)
+let decision_warrants_escalation = function
+  | Insufficient _ -> true
+  | Answer _ | Recommend _ -> false
 
 (* 1차 심판 종합을 refine 심판 프롬프트에 실어 보낼 lossless 텍스트 렌더. judge_synthesis의
    7필드 + 닫힌 합 decision을 모두 보존한다(CLAUDE.md 워크어라운드 #2 "두 개념을 한 string

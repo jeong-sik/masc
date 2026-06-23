@@ -477,6 +477,81 @@ function KcfReadonlyText({ label, hint, text }: { label: string; hint?: string; 
   `
 }
 
+// .set-* inline controls — keeper-v2 primitives (SetRow / Toggle / Segmented),
+// styled by the vendored surfaces.css. Used for the editable boolean toggles and
+// the bounded percentage gates so they read like the prototype. The numeric
+// gates (token/message/cooldown/idle) stay as free number inputs — the
+// prototype renders those as fixed presets or read-only, which would drop the
+// live editor's arbitrary-value capability.
+function SetRow({
+  label,
+  hint,
+  dirty = false,
+  children,
+}: {
+  label: string
+  hint?: unknown
+  dirty?: boolean
+  children: unknown
+}) {
+  return html`
+    <div class="set-row">
+      <div class="set-row-l">
+        <div class="set-label">${label}${dirty ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</div>
+        ${hint ? html`<div class="set-hint">${hint}</div>` : null}
+      </div>
+      <div class="set-row-c">${children}</div>
+    </div>
+  `
+}
+
+function SetToggle({ on, onChange, ariaLabel }: { on: boolean; onChange: (v: boolean) => void; ariaLabel: string }) {
+  return html`
+    <button
+      type="button"
+      class=${`set-toggle ${on ? 'on' : ''}`}
+      role="switch"
+      aria-checked=${on ? 'true' : 'false'}
+      aria-label=${ariaLabel}
+      onClick=${() => onChange(!on)}
+    >
+      <span class="knob"></span>
+    </button>
+  `
+}
+
+// Segmented selector for a bounded numeric value. To avoid silently dropping a
+// value that is not one of the presets, the current value is folded into the
+// option list (sorted) so it stays visible and selectable.
+function SetSeg({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+}: {
+  value: number
+  options: readonly number[]
+  onChange: (v: number) => void
+  ariaLabel: string
+}) {
+  const opts = options.includes(value)
+    ? options
+    : [...options, value].sort((a, b) => a - b)
+  return html`
+    <div class="set-seg" role="radiogroup" aria-label=${ariaLabel}>
+      ${opts.map((o) => html`
+        <button
+          type="button"
+          key=${o}
+          class=${`set-seg-b ${o === value ? 'on' : ''}`}
+          aria-pressed=${o === value ? 'true' : 'false'}
+          onClick=${() => onChange(o)}
+        >${o}</button>
+      `)}
+    </div>
+  `
+}
+
 function ConfigRow({ label, value }: { label: string; value: string }) {
   return html`
     <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2 v2-monitoring-row">
@@ -613,22 +688,6 @@ function PromptBlock({
 }
 
 // ── Inline editing components for runtime config ────────
-
-function InlineToggleRow({ label, value, onChange, dirty = false }: { label: string; value: boolean; onChange: (v: boolean) => void; dirty?: boolean }) {
-  return html`
-    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)] border-card-border/50' : 'border-card-border/50'} bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2 v2-monitoring-row">
-      <span class="text-sm font-medium text-text-muted">${label}${dirty ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</span>
-      <button type="button"
-        class="relative inline-flex h-6 w-11 items-center rounded-[var(--r-0)] transition-colors cursor-pointer ${value ? 'bg-ok/60' : 'bg-[var(--color-bg-hover)]'}"
-        aria-label=${`${label} ${value ? '비활성화' : '활성화'}`}
-        aria-pressed=${value ? 'true' : 'false'}
-        onClick=${() => onChange(!value)}
-      >
-        <span class="inline-block h-4 w-4 rounded-[var(--r-0)] bg-white shadow-1 transition-transform ${value ? 'translate-x-[22px]' : 'translate-x-[3px]'}" />
-      </button>
-    </div>
-  `
-}
 
 function InlineNumberRow({ label, value, onChange, min, max, step, suffix, dirty = false }: {
   label: string; value: number; onChange: (v: number) => void;
@@ -1071,10 +1130,11 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     <${SectionHeader} title="컴팩션" />
     <${ConfigRow} label="프로필" value=${c.compaction.profile || MISSING_DATA_DASH} />
     ${rd ? html`
-      <${InlineNumberRow} label="비율 게이트 (%)" value=${Math.round(rd.compaction_ratio_gate * 100)}
-        onChange=${(v: number) => updateRuntimeDraft('compaction_ratio_gate', v / 100)}
-        min=${0} max=${100} step=${5} suffix="%"
-        dirty=${dirtyFlags.compaction_ratio_gate} />
+      <${SetRow} label="비율 게이트" hint="컨텍스트 사용률 %" dirty=${dirtyFlags.compaction_ratio_gate}>
+        <${SetSeg} ariaLabel="비율 게이트" value=${Math.round(rd.compaction_ratio_gate * 100)}
+          options=${[75, 80, 85, 90]}
+          onChange=${(v: number) => updateRuntimeDraft('compaction_ratio_gate', v / 100)} />
+      </${SetRow}>
       <${InlineNumberRow} label="메시지 게이트" value=${rd.compaction_message_gate}
         onChange=${(v: number) => updateRuntimeDraft('compaction_message_gate', v)}
         min=${0} max=${500} step=${5}
@@ -1096,9 +1156,10 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
     <${SectionHeader} title="프로액티브" />
     ${rd ? html`
-      <${InlineToggleRow} label="활성" value=${rd.proactive_enabled}
-        onChange=${(v: boolean) => updateRuntimeDraft('proactive_enabled', v)}
-        dirty=${dirtyFlags.proactive_enabled} />
+      <${SetRow} label="활성" hint="유휴 시 keeper 자가 기동" dirty=${dirtyFlags.proactive_enabled}>
+        <${SetToggle} ariaLabel="프로액티브 활성" on=${rd.proactive_enabled}
+          onChange=${(v: boolean) => updateRuntimeDraft('proactive_enabled', v)} />
+      </${SetRow}>
       <${InlineNumberRow} label="유휴 트리거 (초)" value=${rd.proactive_idle_sec}
         onChange=${(v: number) => updateRuntimeDraft('proactive_idle_sec', v)}
         min=${10} max=${3600} step=${10} suffix="s"
@@ -1115,13 +1176,15 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
     <${SectionHeader} title="핸드오프" />
     ${rd ? html`
-      <${InlineToggleRow} label="자동" value=${rd.auto_handoff}
-        onChange=${(v: boolean) => updateRuntimeDraft('auto_handoff', v)}
-        dirty=${dirtyFlags.auto_handoff} />
-      <${InlineNumberRow} label="임계값 (%)" value=${Math.round(rd.handoff_threshold * 100)}
-        onChange=${(v: number) => updateRuntimeDraft('handoff_threshold', v / 100)}
-        min=${0} max=${100} step=${5} suffix="%"
-        dirty=${dirtyFlags.handoff_threshold} />
+      <${SetRow} label="자동" hint="컨텍스트 임계 도달 시 자동 인계" dirty=${dirtyFlags.auto_handoff}>
+        <${SetToggle} ariaLabel="자동 핸드오프" on=${rd.auto_handoff}
+          onChange=${(v: boolean) => updateRuntimeDraft('auto_handoff', v)} />
+      </${SetRow}>
+      <${SetRow} label="임계값" hint="컨텍스트 %" dirty=${dirtyFlags.handoff_threshold}>
+        <${SetSeg} ariaLabel="핸드오프 임계값" value=${Math.round(rd.handoff_threshold * 100)}
+          options=${[80, 85, 90, 95]}
+          onChange=${(v: number) => updateRuntimeDraft('handoff_threshold', v / 100)} />
+      </${SetRow}>
       <${InlineNumberRow} label="쿨다운 (초)" value=${rd.handoff_cooldown_sec}
         onChange=${(v: number) => updateRuntimeDraft('handoff_cooldown_sec', v)}
         min=${0} max=${3600} step=${30} suffix="s"

@@ -28,7 +28,7 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Cat { path = "/dev/null" })
   ; W (Rg { pattern = "."; path = None; case_sensitive = false })
   ; W (Git_status { short = false })
-  ; W (Git_clone { repo = "x"; branch = None; depth = None })
+  ; W (Git_clone { repo = "x"; branch = None; depth = None; dest_dir = None })
   ; W (Curl { url = "http://x"; method_ = `GET; headers = None; body = None; output_file = None; follow_redirects = false; insecure = false })
   ; W (Rm { paths = [ "/tmp/x" ]; recursive = false; force = false })
   ; W (Sudo { target_argv = [ "sh"; "-c"; "echo hi" ] })
@@ -236,7 +236,7 @@ let test_of_simple_round_trip () =
     ; W (Cat { path = "/etc/passwd" })
     ; W (Rg { pattern = "TODO"; path = Some "."; case_sensitive = true })
     ; W (Git_status { short = true })
-    ; W (Git_clone { repo = "git@github.com:x/y.git"; branch = Some "main"; depth = Some 1 })
+    ; W (Git_clone { repo = "git@github.com:x/y.git"; branch = Some "main"; depth = Some 1; dest_dir = None })
     ; W
         (Curl
            { url = "http://example.com"
@@ -459,6 +459,27 @@ let test_flag_equals_parsing () =
    | W (Git_clone { depth = Some 5; branch = Some "develop"; repo = "repo.git"; _ }) -> ()
    | w ->
      Alcotest.failf "Git_clone --flag=value: expected depth=5 branch=develop, got %a" pp w);
+  (* Git_clone: with destination directory *)
+  let gc2 =
+    of_simple
+      { (base "git") with
+        args = [ lit "clone"; lit "https://github.com/example/repo.git"; lit "repos/myrepo" ]
+      }
+  in
+  (match gc2 with
+   | W
+       (Git_clone
+          { repo = "https://github.com/example/repo.git"
+          ; branch = None
+          ; depth = None
+          ; dest_dir = Some "repos/myrepo"
+          ; _
+          }) -> ()
+   | w ->
+     Alcotest.failf
+       "Git_clone with dest_dir: expected repos/myrepo, got %a"
+       pp
+       w);
   (* Gh: --body=hello --title=world *)
   let gh =
     of_simple

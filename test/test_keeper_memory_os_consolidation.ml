@@ -12,6 +12,7 @@ let fact
       ?last_verified_at
       ?(observed_by = [])
       ?claim_id
+      ?(claim_kind = None)
       claim
   =
   let last_verified_at =
@@ -22,6 +23,7 @@ let fact
   { Types.claim
   ; category
   ; external_ref = None
+  ; claim_kind
   ; source = { Types.trace_id = "t"; turn = 1; tool_call_id = None }
   ; observed_by
   ; first_seen
@@ -200,6 +202,87 @@ let test_apply_rejects_category_upgrade () =
     (claims (Consolidation.apply_plan ~now ~facts plan))
 ;;
 
+(* RFC-0285 §3.1: [group_preserves_category] is orthogonal to [claim_kind], so the
+   LLM can group a Self_observation with a durable claim of the SAME category. The
+   merge must be refused (both kept) — otherwise [earliest.claim_kind] would, by
+   first_seen order, either immortalize the self-observation or expire the durable
+   claim. Earliest here is the durable claim; merging would carry [Durable_knowledge]
+   and re-immortalize the self-observation echo this RFC exists to stop. *)
+let test_apply_rejects_mixed_claim_kind () =
+  let facts =
+    [ fact
+        ~first_seen:100.0
+        ~category:Types.Lesson
+        ~claim_kind:(Some Types.Durable_knowledge)
+        "Bounded retries prevent loop starvation"
+    ; fact
+        ~first_seen:200.0
+        ~category:Types.Lesson
+        ~claim_kind:(Some Types.Self_observation)
+        "the agent is stuck in a retry loop this turn"
+    ]
+  in
+  let plan =
+    { Consolidation.groups =
+        [ { Consolidation.member_indices = [ 0; 1 ]
+          ; consolidated_claim = "retry loops need bounds"
+          ; category = Types.Lesson
+          }
+        ]
+    ; drop_indices = []
+    }
+  in
+  Alcotest.(check (list string))
+    "mixed-claim_kind group is skipped; both facts survive unchanged"
+    [ "Bounded retries prevent loop starvation"
+    ; "the agent is stuck in a retry loop this turn"
+    ]
+    (claims (Consolidation.apply_plan ~now ~facts plan))
+;;
+
+(* RFC-0285 §3.3/§4 re-mint at the consolidation boundary: a homogeneous
+   Self_observation group DOES merge, the consolidated fact stays [Self_observation],
+   and its horizon is the member-min — a reworded re-mint never extends the horizon
+   past the earliest member's anchor. *)
+let test_apply_self_observation_group_inherits_min_horizon () =
+  let facts =
+    [ fact
+        ~first_seen:100.0
+        ~valid_until:1_700_000.0
+        ~category:Types.Lesson
+        ~claim_kind:(Some Types.Self_observation)
+        "the agent is looping"
+    ; fact
+        ~first_seen:200.0
+        ~valid_until:2_000_000.0
+        ~category:Types.Lesson
+        ~claim_kind:(Some Types.Self_observation)
+        "the agent remains in a loop"
+    ]
+  in
+  let plan =
+    { Consolidation.groups =
+        [ { Consolidation.member_indices = [ 0; 1 ]
+          ; consolidated_claim = "the agent is stuck looping"
+          ; category = Types.Lesson
+          }
+        ]
+    ; drop_indices = []
+    }
+  in
+  match Consolidation.apply_plan ~now ~facts plan with
+  | [ merged ] ->
+    Alcotest.(check bool)
+      "consolidated fact stays a self-observation"
+      true
+      (merged.Types.claim_kind = Some Types.Self_observation);
+    Alcotest.(check (option (float 1e-9)))
+      "horizon is the member-min anchor, not extended"
+      (Some 1_700_000.0)
+      merged.Types.valid_until
+  | other -> Alcotest.failf "expected 1 merged fact, got %d" (List.length other)
+;;
+
 let test_apply_preserves_ephemeral_expiry_and_verification_age () =
   let facts =
     [ fact
@@ -372,6 +455,11 @@ let () =
 	        ; Alcotest.test_case "first group wins contested fact" `Quick test_apply_first_group_wins_contested
 	        ; Alcotest.test_case "rejects category downgrade" `Quick test_apply_rejects_category_downgrade
         ; Alcotest.test_case "rejects category upgrade" `Quick test_apply_rejects_category_upgrade
+        ; Alcotest.test_case "rejects mixed claim_kind" `Quick test_apply_rejects_mixed_claim_kind
+        ; Alcotest.test_case
+            "self-observation group inherits min horizon"
+            `Quick
+            test_apply_self_observation_group_inherits_min_horizon
         ; Alcotest.test_case
             "preserves ephemeral expiry and verification age"
             `Quick

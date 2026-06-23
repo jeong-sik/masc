@@ -76,6 +76,30 @@ let category_of_string s =
   | _ -> Unknown s
 ;;
 
+(* RFC-0285 §3.1: producer-emitted origin tag, orthogonal to [category] (a [Lesson]
+   can be a self-observation). A closed sum classified ONCE at the librarian write
+   boundary — not a read-time string match (the project's workaround signature #2).
+   An absent/unrecognized tag yields [None] in [claim_kind_of_string], which routes
+   to the durable pre-RFC path (safe), never to wrong-volatile. *)
+type claim_kind =
+  | Self_observation (* transient first-person agent state: idle, looping, tool-timeout *)
+  | External_state (* about the world/PR/issue; verifiable elsewhere *)
+  | Durable_knowledge (* timeless rule / lesson independent of transient state *)
+
+let claim_kind_to_string = function
+  | Self_observation -> "self_observation"
+  | External_state -> "external_state"
+  | Durable_knowledge -> "durable_knowledge"
+;;
+
+let claim_kind_of_string s =
+  match String.lowercase_ascii (String.trim s) with
+  | "self_observation" -> Some Self_observation
+  | "external_state" -> Some External_state
+  | "durable_knowledge" -> Some Durable_knowledge
+  | _ -> None
+;;
+
 (* Exhaustive promotability: only objective, durable claim kinds cross keepers.
    Extends the prior [Fact; Constraint] whitelist with the two outcome-derived
    kinds [Validated_approach] and [Lesson] — a validated approach and a hard-won
@@ -227,15 +251,28 @@ let category_valid_until ~now = function
    not a score); 1 day matches the ephemeral horizon. *)
 let volatile_external_ttl_seconds = 86_400.0
 
-(* RFC-0259 §3.2: the write-side [valid_until] producer. An [external_ref] claim is
-   never durable — it gets the volatile horizon regardless of category, so a
-   PR-status claim mislabeled [Fact] (the #21363 shape) or [Unknown] still decays.
-   [external_ref] is checked first so it takes precedence; otherwise the category
-   decides (only [Ephemeral] is finite). *)
-let fact_valid_until ~now ~external_ref category =
-  match external_ref with
-  | Some _ -> Some (now +. volatile_external_ttl_seconds)
-  | None -> category_valid_until ~now category
+(* RFC-0285 §3.4: transient first-person self-state (idle/looping/tool-timeout) is
+   MORE volatile than external state — a PR's status changes slowly, "am I idle"
+   changes every turn — so it gets a horizon SHORTER than the external one to quiet
+   the self-observation echo faster. Not so short a legitimate short-lived self-state
+   ("waiting on this block") vanishes within the same turn. A TIME, not a score;
+   named, not magic; tune in cycles (RFC §7). *)
+let self_observation_ttl_seconds = 3_600.0
+
+(* RFC-0259 §3.2 / RFC-0285 §3.4: the write-side [valid_until] producer. Precedence:
+   a [Self_observation] claim_kind gets the shortest finite horizon regardless of
+   category or external_ref (it is keeper-local transient state); otherwise an
+   [external_ref] claim gets the volatile horizon (so a PR-status claim mislabeled
+   [Fact] still decays); otherwise the category decides (only [Ephemeral] is finite).
+   [External_state]/[Durable_knowledge] tags carry no horizon of their own — the
+   external_ref / category arms already cover them. *)
+let fact_valid_until ~now ~external_ref ~claim_kind category =
+  match claim_kind with
+  | Some Self_observation -> Some (now +. self_observation_ttl_seconds)
+  | Some External_state | Some Durable_knowledge | None ->
+    (match external_ref with
+     | Some _ -> Some (now +. volatile_external_ttl_seconds)
+     | None -> category_valid_until ~now category)
 ;;
 
 (* RFC-0247 (purge): the fact carries only structure — the claim, its typed
@@ -252,6 +289,12 @@ type fact =
        claim names a PR/issue/task id. Orthogonal to [category] (a [Constraint]
        can reference a PR). Drives [fact_valid_until]: a referenced claim is
        volatile, never durable. Omitted from JSON when [None]. *)
+  ; claim_kind : claim_kind option
+    (* RFC-0285 §3.1: producer ([librarian]) -emitted origin tag, parallel to
+       [external_ref] and orthogonal to [category]. Drives [fact_valid_until]
+       ([Self_observation] gets a short finite horizon) and gates promotion
+       ([Self_observation] never crosses keepers — consolidator [eligible]). Omitted
+       from JSON when [None]; a missing tag degrades to the durable pre-RFC path. *)
   ; source : provenance_event
   ; observed_by : string list
     (* RFC-0244 Tier 2 (shared semantic store) ONLY: the sorted set of distinct
@@ -521,6 +564,12 @@ let fact_to_json f =
     @ (match Option.bind f.claim_id normalize_claim_id with
        | Some id -> [ "claim_id", `String id ]
        | None -> [])
+    (* RFC-0285 §3.1: the producer-emitted origin tag. Omitted when [None] so legacy
+       rows stay byte-identical, appended LAST to keep the prior key order stable for
+       the snapshot fingerprint. *)
+    @ (match f.claim_kind with
+       | Some k -> [ "claim_kind", `String (claim_kind_to_string k) ]
+       | None -> [])
   in
   `Assoc fields
 ;;
@@ -573,12 +622,18 @@ let fact_of_json (json : Yojson.Safe.t) =
           (* RFC-0259 §3.7 (P6): absent on legacy / id-less rows, defaulting to
              [None] so [claim_identity] falls back to [normalize_claim] for them. *)
           let claim_id = Option.bind (json_string_field "claim_id" fields) normalize_claim_id in
+          (* RFC-0285 §3.1: absent on legacy rows -> [None] (durable path). Closed sum,
+             so an unrecognized string also yields [None] (graceful-degrade). The
+             write-side [valid_until] is preserved as-is above; legacy self-observation
+             rows are not retrofitted a horizon (RFC §5 non-goal). *)
+          let claim_kind = Option.bind (json_string_field "claim_kind" fields) claim_kind_of_string in
           Some
             { claim
             ; (* Parse-once at the read boundary; legacy free-string categories
                  on disk map to their arm or [Unknown] (graceful-degrade). *)
               category = category_of_string category_str
             ; external_ref
+            ; claim_kind
             ; source
             ; observed_by
             ; first_seen

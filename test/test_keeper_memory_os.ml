@@ -55,6 +55,7 @@ let fact_fixture ~now () =
   { Types.claim = "User prefers concise responses"
   ; Types.category = Types.Preference
   ; Types.external_ref = None
+  ; Types.claim_kind = None
   ; Types.source = { Types.trace_id = "trace-123"; Types.turn = 5; Types.tool_call_id = None }
   ; Types.observed_by = []
   ; Types.first_seen = now -. 86400.0
@@ -2109,7 +2110,8 @@ let suppression_corpus ~now =
     ; Types.category = Types.Blocker
     ; Types.external_ref
     ; Types.first_seen
-    ; Types.valid_until = Types.fact_valid_until ~now:first_seen ~external_ref Types.Blocker
+    ; Types.valid_until =
+        Types.fact_valid_until ~now:first_seen ~external_ref ~claim_kind:None Types.Blocker
     ; Types.last_verified_at = last_verified
     }
   in
@@ -3387,15 +3389,142 @@ let test_fact_valid_until_volatile () =
   Alcotest.(check (option (float 0.001)))
     "external-ref Fact gets the finite volatile horizon"
     (Some (now +. Types.volatile_external_ttl_seconds))
-    (Types.fact_valid_until ~now ~external_ref:pr_ref Types.Fact);
+    (Types.fact_valid_until ~now ~external_ref:pr_ref ~claim_kind:None Types.Fact);
   Alcotest.(check bool)
     "durable Fact with no ref stays durable (None)"
     true
-    (Option.is_none (Types.fact_valid_until ~now ~external_ref:None Types.Fact));
+    (Option.is_none (Types.fact_valid_until ~now ~external_ref:None ~claim_kind:None Types.Fact));
   Alcotest.(check bool)
     "Ephemeral with no ref still finite"
     true
-    (Option.is_some (Types.fact_valid_until ~now ~external_ref:None Types.Ephemeral))
+    (Option.is_some (Types.fact_valid_until ~now ~external_ref:None ~claim_kind:None Types.Ephemeral));
+  (* RFC-0285 §3.4: a Self_observation gets the short finite horizon regardless of
+     category — even an otherwise-durable Fact — and shorter than the external one. *)
+  Alcotest.(check (option (float 0.001)))
+    "Self_observation Fact gets the short self-observation horizon"
+    (Some (now +. Types.self_observation_ttl_seconds))
+    (Types.fact_valid_until
+       ~now
+       ~external_ref:None
+       ~claim_kind:(Some Types.Self_observation)
+       Types.Fact);
+  Alcotest.(check bool)
+    "self-observation horizon is shorter than the external one"
+    true
+    (Types.self_observation_ttl_seconds < Types.volatile_external_ttl_seconds)
+;;
+
+(* RFC-0285 §4: claim_kind tokens round-trip, and an unrecognized token degrades to
+   [None] (the durable pre-RFC path), never to a wrong-volatile guess. *)
+let test_claim_kind_round_trip () =
+  List.iter
+    (fun k ->
+       Alcotest.(check (option string))
+         "claim_kind round-trips to_string -> of_string -> to_string"
+         (Some (Types.claim_kind_to_string k))
+         (Option.map
+            Types.claim_kind_to_string
+            (Types.claim_kind_of_string (Types.claim_kind_to_string k))))
+    [ Types.Self_observation; Types.External_state; Types.Durable_knowledge ];
+  Alcotest.(check bool)
+    "unrecognized claim_kind token -> None (durable path)"
+    true
+    (Option.is_none (Types.claim_kind_of_string "not_a_kind"))
+;;
+
+(* RFC-0285 §4 (load-bearing): a self-observation gets a finite horizon even under a
+   durable category; a re-mint inherits the prior row so the horizon is NOT extended
+   past the first-mint anchor; it expires after its horizon; durable knowledge with no
+   horizon survives indefinitely. *)
+let test_self_observation_horizon_and_remint () =
+  let now = 1_000_000.0 in
+  let mk_self ?(first_seen = now) () =
+    { (fact_fixture ~now ()) with
+      Types.claim = "the agent is idle this turn"
+    ; Types.category = Types.Lesson (* an otherwise-durable category... *)
+    ; Types.claim_kind = Some Types.Self_observation (* ...made finite by the tag *)
+    ; Types.first_seen
+    ; Types.valid_until =
+        Types.fact_valid_until
+          ~now:first_seen
+          ~external_ref:None
+          ~claim_kind:(Some Types.Self_observation)
+          Types.Lesson
+    ; Types.claim_id = Some "self-obs-idle"
+    }
+  in
+  let existing = mk_self () in
+  Alcotest.(check bool)
+    "self-observation is finite despite a durable Lesson category"
+    true
+    (Option.is_some existing.Types.valid_until);
+  (* re-mint property: re-observing the same self-observation later inherits the prior
+     row entirely, so the horizon is not pushed past the original anchor. *)
+  let later = now +. 1_800.0 in
+  let incoming = mk_self ~first_seen:later () in
+  let merged = Policy.reobserve_fact ~now:later ~existing ~incoming in
+  Alcotest.(check (option (float 0.001)))
+    "re-mint does not extend the self-observation horizon past the first anchor"
+    existing.Types.valid_until
+    merged.Types.valid_until;
+  (* it drops from recall once now passes its horizon. *)
+  let past = now +. Types.self_observation_ttl_seconds +. 1.0 in
+  Alcotest.(check bool)
+    "self-observation drops from recall after its horizon"
+    false
+    (Types.fact_is_current ~now:past existing);
+  (* a Durable_knowledge lesson with no horizon survives indefinitely. *)
+  let durable =
+    { (fact_fixture ~now ()) with
+      Types.category = Types.Lesson
+    ; Types.claim_kind = Some Types.Durable_knowledge
+    ; Types.valid_until = None
+    }
+  in
+  Alcotest.(check bool)
+    "durable knowledge survives past the self-observation horizon"
+    true
+    (Types.fact_is_current ~now:past durable)
+;;
+
+(* RFC-0285 §3.5 / §4: a self-observation is never promoted to the shared tier even
+   with a promotable category and enough corroborating keepers; durable knowledge is. *)
+let test_self_observation_not_promoted () =
+  let now = 1_000_000.0 in
+  let self_obs marker =
+    { (fact_fixture ~now ()) with
+      Types.claim = "the agent is looping (" ^ marker ^ ")"
+    ; Types.category = Types.Lesson
+    ; Types.claim_kind = Some Types.Self_observation
+    ; Types.claim_id = Some "self-obs-loop"
+    }
+  in
+  let durable marker =
+    { (fact_fixture ~now ()) with
+      Types.claim = "merging requires two approvals (" ^ marker ^ ")"
+    ; Types.category = Types.Constraint
+    ; Types.claim_kind = Some Types.Durable_knowledge
+    ; Types.claim_id = Some "two-approvals-rule"
+    }
+  in
+  let keeper_facts =
+    [ "k1", [ self_obs "k1"; durable "k1" ]; "k2", [ self_obs "k2"; durable "k2" ] ]
+  in
+  let _considered, shared =
+    Consolidator.promote_facts ~min_keepers:2 ~now ~keeper_facts ()
+  in
+  Alcotest.(check bool)
+    "self-observation is never promoted to the shared tier"
+    false
+    (List.exists
+       (fun (f : Types.fact) -> f.Types.claim_kind = Some Types.Self_observation)
+       shared);
+  Alcotest.(check bool)
+    "durable knowledge with two keepers IS promoted"
+    true
+    (List.exists
+       (fun (f : Types.fact) -> f.Types.claim_id = Some "two-approvals-rule")
+       shared)
 ;;
 
 let test_fact_of_json_rederives_legacy_volatile () =
@@ -4052,6 +4181,18 @@ let () =
             "fact_valid_until: external ref -> finite, durable -> none"
             `Quick
             test_fact_valid_until_volatile
+        ; Alcotest.test_case
+            "claim_kind round-trips; unknown -> None (RFC-0285 §4)"
+            `Quick
+            test_claim_kind_round_trip
+        ; Alcotest.test_case
+            "self-observation: finite horizon, re-mint no extend, expiry (RFC-0285 §4)"
+            `Quick
+            test_self_observation_horizon_and_remint
+        ; Alcotest.test_case
+            "self-observation never promoted; durable is (RFC-0285 §3.5)"
+            `Quick
+            test_self_observation_not_promoted
         ; Alcotest.test_case
             "fact_of_json re-derives a legacy volatile row past horizon"
             `Quick

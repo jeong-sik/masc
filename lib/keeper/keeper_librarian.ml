@@ -215,6 +215,13 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
          fallback to [normalize_claim] keying); we never derive/hash an id in code,
          which would be the string-classifier workaround the RFC rejects. *)
       let claim_id = optional_string_field "claim_id" fields in
+      (* RFC-0285 §3.1/§3.2(a): the producer-emitted origin tag. Pass-through only —
+         the librarian LLM classifies at the live-context boundary; deriving
+         claim_kind in code would be the read-time string-classifier workaround the
+         RFC rejects. Absent/unrecognized => [None], routing to the durable path. *)
+      let claim_kind =
+        Option.bind (optional_string_field "claim_kind" fields) claim_kind_of_string
+      in
       (* Parse-once at the producer boundary: the LLM's free-text category becomes
          a typed [category] here, so no surface string reaches the store or the
          consolidator (RFC-0244 §2.3 / #21241; RFC-0247 §2.5). The category drives
@@ -230,12 +237,13 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
         { claim
         ; category
         ; external_ref
+        ; claim_kind
          ; source = claim_source ~trace_id turn tool_call_id
          (* Tier-1 (per-keeper) facts carry no distinct-keeper corroboration set;
             the consolidator populates observed_by only on promotion (RFC-0244). *)
          ; observed_by = []
          ; first_seen = now
-         ; valid_until = fact_valid_until ~now ~external_ref category
+         ; valid_until = fact_valid_until ~now ~external_ref ~claim_kind category
          ; last_verified_at = Some now
          ; schema_version
          ; claim_id

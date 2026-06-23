@@ -93,6 +93,7 @@ let fact ?(category = Types.Preference) ?(trace_id = "trace-user-model")
   { claim
   ; category
   ; external_ref = None
+  ; claim_kind = None
   ; source = { trace_id; turn; tool_call_id = None }
   ; observed_by = []
   ; first_seen

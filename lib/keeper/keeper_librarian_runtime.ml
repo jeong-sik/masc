@@ -298,7 +298,7 @@ let parse_retry_nudge =
    object. Respond with ONLY a single JSON object — no markdown fences, no \
    prose. Required shape:\n\
    {\"episode_summary\": \"string\",\n\
-   \"claims\": [{\"claim\": \"string\", \"category\": \"fact|preference|blocker|goal|constraint|ephemeral|validated_approach|lesson|code_change\", \"source_turn\": 0, \"source_tool_call_id\": \"optional-string\"}],\n\
+   \"claims\": [{\"claim\": \"string\", \"category\": \"fact|preference|blocker|goal|constraint|ephemeral|validated_approach|lesson|code_change\", \"source_turn\": 0, \"source_tool_call_id\": \"optional-string\", \"claim_kind\": \"self_observation|external_state|durable_knowledge\"}],\n\
    \"open_items\": [\"string\"],\n\
    \"constraints\": [\"string\"],\n\
    \"preserved_tool_refs\": [\"string\"]}\n\
@@ -430,6 +430,9 @@ let unstructured_episode ~now ~generation (inp : Keeper_librarian.input) ~reason
     { claim = note
     ; category = Keeper_memory_os_types.Ephemeral
     ; external_ref = None
+    ; (* RFC-0285: a parse-retry fallback note is not a librarian-classified claim;
+         leave it untagged ([None]) so it follows the Ephemeral category horizon. *)
+      claim_kind = None
     ; source = { trace_id = inp.trace_id; turn = 0; tool_call_id = None }
     ; observed_by = []
     ; first_seen = now
@@ -437,6 +440,7 @@ let unstructured_episode ~now ~generation (inp : Keeper_librarian.input) ~reason
         Keeper_memory_os_types.fact_valid_until
           ~now
           ~external_ref:None
+          ~claim_kind:None
           Keeper_memory_os_types.Ephemeral
     ; last_verified_at = Some now
     ; schema_version = Keeper_memory_os_types.schema_version

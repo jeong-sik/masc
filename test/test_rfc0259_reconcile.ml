@@ -22,6 +22,7 @@ let fact ?(external_ref = None) ?last_verified_at ~first_seen claim =
   { Types.claim
   ; category = Types.Fact
   ; external_ref
+  ; claim_kind = None
   ; source = { Types.trace_id = "t"; turn = 1; tool_call_id = None }
   ; observed_by = []
   ; first_seen

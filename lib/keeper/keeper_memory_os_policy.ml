@@ -51,20 +51,22 @@ let retention_rank ~now (f : fact) =
    both fed the deleted composite score and are gone. There is no numeric
    strength to move — re-observation is a binary "seen again now". *)
 let reobserve_fact ~now ~existing ~incoming:(_ : fact) =
-  match existing.external_ref with
-  | Some _ ->
-    (* RFC-0259 §3.7 (P6/F): the librarian re-extracting a volatile (external-ref)
-       claim — possibly reworded — is NOT re-verification; it is the same self-
-       narrative re-emitted from memory. Inherit the prior row entirely so a
-       re-mint cannot reset the volatile TTL or grounding horizon. Only the
-       reconciler ([Stale_open], an external GitHub re-check) advances a volatile
-       claim's [last_verified_at]. This reverses the pre-P6 "re-observing IS
-       re-verification" rule for volatile claims. *)
+  match existing.external_ref, existing.claim_kind with
+  | Some _, _ | _, Some Self_observation ->
+    (* RFC-0259 §3.7 (P6/F) + RFC-0285 §3.3: inherit the prior row entirely for a
+       volatile (external-ref) OR self-observation claim. The librarian re-extracting
+       it — possibly reworded — is NOT re-verification; it is the same self-narrative
+       re-emitted from memory. Inheriting avoids advancing [last_verified_at], which
+       would raise [retention_rank] and make the cap keep a self-observation as
+       "recently verified" — the opposite of the goal. The finite horizon set at first
+       mint (L3) still governs expiry; a re-mint cannot extend it past the anchor.
+       Only the reconciler ([Stale_open], an external re-check) advances a volatile
+       claim's [last_verified_at]. *)
     existing
-  | None ->
-    (* Non-volatile (durable [None] / Ephemeral expiry) re-observe: the librarian
-       re-asserting a durable claim is fresh evidence it still holds, so advance
-       the staleness marker. There is no decay horizon to reset (durable
-       [valid_until] is unchanged), so F does not apply. *)
+  | None, (Some External_state | Some Durable_knowledge | None) ->
+    (* Non-volatile, non-self-observation re-observe: the librarian re-asserting a
+       durable claim is fresh evidence it still holds, so advance the staleness
+       marker. There is no decay horizon to reset (durable [valid_until] is
+       unchanged), so F does not apply. *)
     { existing with last_verified_at = Some now }
 ;;

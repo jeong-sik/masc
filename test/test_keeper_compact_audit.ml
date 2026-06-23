@@ -74,6 +74,7 @@ let fact_fixture ~now ~claim ?valid_until () =
   { Memory_types.claim = claim
   ; category = Memory_types.Ephemeral
   ; external_ref = None
+  ; claim_kind = None
   ; source =
       { trace_id = "trace-kca-gc"
       ; turn = 1

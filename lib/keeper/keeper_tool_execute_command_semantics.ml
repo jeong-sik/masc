@@ -37,6 +37,17 @@ let stages_target_repo_commands stages =
   List.exists (fun stage ->
     let bin = normalize_command_name stage.bin in
     bin = "git" || bin = "gh") stages
+;;
+
+let stages_are_git_clone stages =
+  List.exists
+    (fun stage ->
+       normalize_command_name stage.bin = "git"
+       &&
+       match stage.args with
+       | "clone" :: _ -> true
+       | _ -> false)
+    stages
 
 let stages_target_repo_hosting_cli stages =
   List.exists (fun stage -> normalize_command_name stage.bin = "gh") stages
@@ -255,6 +266,11 @@ let resolve_sandbox_root_git_cwd
     cwd_normalized = host_root && stages_target_repo_hosting_cli stages
     && stages_have_repo_hosting_cli_repo_flag stages
   then cwd, None
+  else if cwd_normalized = host_root && stages_are_git_clone stages
+  then (
+    (* git clone is intentionally run from sandbox root to create a new
+       repository under repos/. Do not redirect cwd into an existing clone. *)
+    cwd, None)
   else if cwd_normalized = host_root && stages_target_repo_commands stages
   then (
     let resolve_without_explicit_git_c () =

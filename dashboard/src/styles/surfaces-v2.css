@@ -203,9 +203,12 @@
   flex: 1;
   overflow-y: auto;
   padding: var(--pad-surface);
-  max-width: 1280px;
+  /* Full-width, left-aligned. Main surfaces fill the content area to match
+     board/monitoring/command/lab/ide (which have no centered column). This is
+     an intentional divergence from the v2 prototype, which centers .ov-scroll
+     in a 1280px column; overridden per design direction for cross-surface
+     consistency. Root: see .wk-inner (work-v2.css), .cp-inner (cockpit-v2.css). */
   width: 100%;
-  margin: 0 auto;
 }
 
 .ov-head {

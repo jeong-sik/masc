@@ -13,11 +13,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import {
-  fetchRuntimeProviders,
-  patchKeeperConfig,
-  type DashboardRuntimeProviderSnapshot,
-} from '../api/dashboard'
+import { patchKeeperConfig, type DashboardRuntimeProviderSnapshot } from '../api/dashboard'
 import type { KeeperConfig } from '../types'
 import {
   InlineSelectRow,
@@ -30,7 +26,11 @@ import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { BTN_FILLED_BASE } from './common/button-filled-base'
 import { MISSING_DATA_DASH } from '../lib/format-string'
-import { createAsyncResource } from '../lib/async-state'
+import {
+  findRuntimeCatalogEntry,
+  loadRuntimeCatalog,
+  runtimeCatalogState,
+} from '../lib/runtime-catalog-resource'
 
 // Pending dropdown selection before save. `null` = no pending change (show the
 // server's current value). Module-level singleton: at most one editor renders at
@@ -40,16 +40,6 @@ const modelDraft = signal<string | null>(null)
 // leaking across keeper navigation (A's dropdown choice showing up on B).
 const modelDraftKeeper = signal<string>('')
 const modelSaving = signal(false)
-const runtimeCatalogResource = createAsyncResource<DashboardRuntimeProviderSnapshot[]>()
-const runtimeCatalogState = runtimeCatalogResource.state
-
-function loadRuntimeCatalog(): void {
-  if (runtimeCatalogState.value.status !== 'idle') return
-  void runtimeCatalogResource.load(async () => {
-    const response = await fetchRuntimeProviders()
-    return response.providers
-  })
-}
 
 /** Dedupe + drop empty, preserving first-seen order. */
 export function uniqueNonEmpty(values: readonly string[]): string[] {
@@ -71,18 +61,6 @@ export function uniqueNonEmpty(values: readonly string[]): string[] {
  */
 export function canEditRuntime(c: KeeperConfig): boolean {
   return c.sources.default_source_kind === 'toml' && Boolean(c.sources.default_manifest_path)
-}
-
-export function findRuntimeCatalogEntry(
-  catalog: readonly DashboardRuntimeProviderSnapshot[],
-  runtimeId: string,
-): DashboardRuntimeProviderSnapshot | null {
-  const needle = runtimeId.trim()
-  if (needle === '') return null
-  return catalog.find(item => {
-    const ids = [item.runtime_id, item.provider]
-    return ids.some(id => id?.trim() === needle)
-  }) ?? null
 }
 
 function formatContextTokens(value: number | null | undefined): string {

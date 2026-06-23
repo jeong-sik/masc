@@ -7,6 +7,7 @@ import { callMcpTool } from '../../api/mcp'
 import { requestConfirm } from '../common/confirm-dialog'
 import { KeeperWorkspaceRail } from './keeper-workspace-rail'
 import type { Keeper, Task } from '../../types'
+import { resetRuntimeCatalog } from '../../lib/runtime-catalog-resource'
 
 // The recent-tool-calls section now lazy-loads via fetchKeeperToolCalls (rather
 // than rendering keeper.recent_tool_names). Stub it so these rail tests never hit
@@ -21,6 +22,7 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
       source: 'tool_call_io',
       entries: [],
     }),
+    fetchRuntimeProviders: vi.fn().mockResolvedValue({ providers: [] }),
   }
 })
 
@@ -55,6 +57,7 @@ afterEach(() => {
   tasks.value = []
   shellAuthSummary.value = null
   vi.clearAllMocks()
+  resetRuntimeCatalog()
 })
 
 describe('KeeperWorkspaceRail', () => {
@@ -80,13 +83,15 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('oas·seoul-1')
   })
 
-  it('hides the model cell when no model was reported', () => {
+  it('shows the model line as missing when no model was reported', () => {
     const k = mkKeeper({ runtime_canonical: 'runpod_gemma' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
     expect(container.textContent).toContain('런타임')
     expect(container.textContent).toContain('runpod_gemma')
-    // The model cell (.rtc-model) is not rendered when no model is reported.
-    expect(container.querySelector('.rtc-model')).toBeNull()
+    // v2 always renders the model cell; when no model is reported it falls back
+    // to an em-dash rather than omitting the line.
+    expect(container.querySelector('.rtc-model')).not.toBeNull()
+    expect(container.querySelector('.rtc-model')?.textContent).toContain('—')
   })
 
   it('renders the context-window occupancy percent', () => {
@@ -123,9 +128,11 @@ describe('KeeperWorkspaceRail', () => {
       metrics_series: [{ wall_tokens_per_second: 10 }, { wall_tokens_per_second: 64 }] as unknown as Keeper['metrics_series'],
     })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
-    // v2 dropped the labeled 저부하/고부하 load-range chips; the throughput
-    // section now renders the series as a .tps-spark sparkline (>= 2 points)
-    // alongside the latest tok/s value. Assert the viz renders from the series.
+    // v2 throughput section is collapsed by default; toggle it open before
+    // asserting the sparkline and current tok/s value render.
+    const toggle = container.querySelector('.ctx-h-toggle') as HTMLElement
+    expect(toggle).not.toBeNull()
+    fireEvent.click(toggle)
     const spark = container.querySelector('.tps-spark')
     expect(spark).not.toBeNull()
     expect(spark?.querySelectorAll('span').length).toBeGreaterThanOrEqual(2)

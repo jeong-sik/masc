@@ -481,9 +481,6 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
             </button>
             <${KeeperWorkspaceChat}
               keeper=${keeper}
-              detailOpen=${false}
-              onToggleDetail=${() => setDetailOpen(true)}
-              onClear=${() => setClearDialogOpen(true)}
               mobile=${isMobile}
               onBack=${() => {
                 keeperMobilePane.value = 'roster'

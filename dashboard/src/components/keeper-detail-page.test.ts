@@ -83,9 +83,9 @@ describe('KeeperWorkspaceRail', () => {
     // v2 rail split the old combined '런타임 · 처리량' card into separate
     // 런타임 (RuntimeSection / .rtc-card) and 처리량 (ThroughputSection) sections,
     // each with its own .ctx-sec h4 header.
-    const sectionHeaders = Array.from(container.querySelectorAll('.ctx-sec h4')).map(h => h.textContent)
-    expect(sectionHeaders).toContain('런타임')
-    expect(sectionHeaders).toContain('처리량')
+    const sectionHeaders = Array.from(container.querySelectorAll('.ctx-sec h4')).map(h => h.textContent ?? '')
+    expect(sectionHeaders.some(t => t.includes('런타임'))).toBe(true)
+    expect(sectionHeaders.some(t => t.includes('처리량'))).toBe(true)
     expect(container.textContent).toContain('claude-sonnet-4')
     expect(container.textContent).toContain('oas-seoul-1')
     expect(container.textContent).toContain('62%')

@@ -7,7 +7,7 @@
 // inspectors) are MARKED, never faked.
 
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import { shellAuthSummary, tasks } from '../../store'
 import type { Keeper, Task } from '../../types'
@@ -21,6 +21,11 @@ import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
 import { errorToString } from '../../lib/format-string'
 import { refreshAfterRuntimeAction } from '../keeper-detail-helpers'
 import { contextThresholds } from '../../config/context-thresholds'
+import {
+  findRuntimeCatalogEntry,
+  loadRuntimeCatalog,
+  runtimeCatalogState,
+} from '../../lib/runtime-catalog-resource'
 
 function contextRatio(keeper: Keeper): number | null {
   const ratio = keeper.context_ratio ?? keeper.context?.context_ratio
@@ -43,13 +48,6 @@ function contextMax(keeper: Keeper): number | null {
 function formatK(n: number | null | undefined): string | null {
   if (typeof n !== 'number') return null
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`
-}
-
-/** Newest-last per-turn throughput series for the rail sparkline. */
-function tpsSeries(keeper: Keeper): number[] {
-  return (keeper.metrics_series ?? [])
-    .map(p => (typeof p.wall_tokens_per_second === 'number' ? Math.max(0, p.wall_tokens_per_second) : 0))
-    .slice(-24)
 }
 
 function ownedTasks(keeper: Keeper): Task[] {
@@ -109,47 +107,112 @@ function AttentionSection({ keeper }: { keeper: Keeper }): VNode | null {
   `
 }
 
+function formatCtxK(n: number | null | undefined): string | null {
+  if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) return null
+  return `${Math.round(n / 1000)}k ctx`
+}
+
 function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
+  useEffect(() => {
+    loadRuntimeCatalog()
+  }, [])
+
   const model = keeperModelLabel(keeper)
   const runtime = keeperRuntimeLabel(keeper)
-  const max = contextMax(keeper)
-  const ctxK = max ? formatK(max) : null
+  const catalog = runtimeCatalogState.value.status === 'loaded' ? runtimeCatalogState.value.data : []
+  const entry = runtime ? findRuntimeCatalogEntry(catalog, runtime) : null
+  const ctxK = formatCtxK(entry?.max_context ?? contextMax(keeper))
+
   return html`
     <div class="ctx-sec">
       <h4>런타임</h4>
       <div class="rtc-card">
         <div class="rtc-id mono">${runtime ?? '런타임 미수신'}</div>
-        ${model
-          ? html`<div class="rtc-model mono">${model}${ctxK ? ` · ${ctxK} ctx` : ''}</div>`
-          : null}
-        ${/* Live execution snapshot carries no capability flags / effort segments
-             (multimodal/json/tool-choice, low/medium/high). Marked, not faked. */ ''}
-        <div class="rtc-na" data-stub="runtime-capabilities">capabilities — n/a</div>
+        <div class="rtc-model mono">
+          ${entry?.model_api_name ?? model ?? '—'}${ctxK ? html` · ${ctxK}` : null}
+        </div>
+        ${entry
+          ? html`
+              <div class="rtc-flags">
+                <span class=${`rtc-flag ${entry.tools_support ? 'on' : 'off'}`}>
+                  ${entry.tools_support ? '✓' : '✕'} tools
+                </span>
+                <span class=${`rtc-flag ${entry.thinking_support ? 'on' : 'off'}`}>
+                  ${entry.thinking_support ? '✓' : '✕'} thinking
+                </span>
+                <span class=${`rtc-flag ${entry.streaming ? 'on' : 'off'}`}>
+                  ${entry.streaming ? '✓' : '✕'} streaming
+                </span>
+              </div>
+            `
+          : html`<div class="rtc-na" data-stub="runtime-capabilities">capabilities — n/a</div>`}
+        <div class="rtc-effort">
+          <span class="rtc-effort-k">effort</span>
+          <span class="rtc-eff-na" data-stub="runtime-effort">조정 불가 · 미수집</span>
+        </div>
       </div>
     </div>
   `
 }
 
+type TpsRange = '15m' | '1h' | '6h'
+const RANGE_CFG: Record<TpsRange, { label: string; points: number }> = {
+  '15m': { label: '15m', points: 30 },
+  '1h': { label: '1h', points: 60 },
+  '6h': { label: '6h', points: 120 },
+}
+
 function ThroughputSection({ keeper }: { keeper: Keeper }): VNode {
-  const series = tpsSeries(keeper)
+  const [open, setOpen] = useState(false)
+  const [range, setRange] = useState<TpsRange>('15m')
+  const cfg = RANGE_CFG[range]
+  const allSeries = (keeper.metrics_series ?? [])
+    .map(p => (typeof p.wall_tokens_per_second === 'number' ? Math.max(0, p.wall_tokens_per_second) : 0))
+  const series = allSeries.slice(-cfg.points)
   const peak = Math.max(1, ...series)
-  const latest = series.at(-1) ?? 0
+  const latest = allSeries.at(-1) ?? 0
+  const avg = series.length ? Math.round(series.reduce((a, b) => a + b, 0) / series.length) : 0
   const live = keeper.status.toLowerCase() === 'running' || keeper.status.toLowerCase() === 'active'
   return html`
     <div class="ctx-sec">
-      <h4>처리량</h4>
-      <div class="tps-card">
-        <div class="tps-now">
-          <span class=${`tps-val${latest > 0 ? '' : ' idle'}`}>${latest > 0 ? latest : '—'}</span>
-          <span class="tps-unit">tok/s</span>
-          ${live && latest > 0 ? html`<span class="tps-flag"><span class="tps-dot"></span>live</span>` : null}
-        </div>
-        ${series.length >= 2
-          ? html`<div class="tps-spark" aria-hidden="true">
-              ${series.map(v => html`<span style=${{ height: `${Math.max(6, (v / peak) * 100)}%`, opacity: 0.35 + 0.65 * (v / peak) }}></span>`)}
-            </div>`
+      <h4
+        class="ctx-h-toggle"
+        style=${{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+        onClick=${() => setOpen(o => !o)}
+      >
+        <span style=${{ fontSize: '9px', color: 'var(--text-dim)' }}>${open ? '▾' : '▸'}</span>
+        처리량
+        ${!open
+          ? html`<span class="mono" style=${{ marginLeft: 'auto', fontSize: '11px', color: 'var(--text-dim)' }}>${live ? `${latest} tok/s` : '유휴'}</span>`
           : null}
-      </div>
+      </h4>
+      ${open
+        ? html`
+            <div class="tps-card">
+              <div class="tps-now">
+                <span class=${`tps-val${latest > 0 ? '' : ' idle'}`}>${latest > 0 ? latest : '—'}</span>
+                <span class="tps-unit">tok/s</span>
+                ${live && latest > 0 ? html`<span class="tps-flag"><span class="tps-dot"></span>live</span>` : null}
+              </div>
+              <div class="tps-ranges">
+                ${(Object.keys(RANGE_CFG) as TpsRange[]).map(r => html`
+                  <button
+                    key=${r}
+                    type="button"
+                    class=${`tps-range ${range === r ? 'on' : ''}`}
+                    onClick=${() => setRange(r)}
+                  >${RANGE_CFG[r].label}</button>
+                `)}
+                <span class="tps-avg">${live ? `평균 ${avg}` : '유휴'}</span>
+              </div>
+              ${series.length >= 2
+                ? html`<div class="tps-spark" aria-hidden="true">
+                    ${series.map((v, i) => html`<span key=${i} style=${{ height: `${Math.max(6, (v / peak) * 100)}%`, opacity: live ? 0.3 + 0.7 * (i / series.length) : 0.15 }}></span>`)}
+                  </div>`
+                : null}
+            </div>
+          `
+        : null}
     </div>
   `
 }

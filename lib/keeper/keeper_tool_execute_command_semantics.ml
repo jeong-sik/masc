@@ -207,7 +207,14 @@ let normalize_repos_path_token token =
     else token
   in
   match String.split_on_char '/' token with
-  | "repos" :: repo :: _ when safe_repo_name repo -> Some token
+  | "repos" :: repo :: rest
+    when safe_repo_name repo
+         && not (List.exists (fun seg -> seg = ".." || seg = ".") rest) ->
+    (* repos/<safe-name>/... 만 repos/ 타겟으로 인정한다. 첫 세그먼트는
+       [safe_repo_name]으로, 뒤 세그먼트는 [..]/[.] 부재로 검사한다. 이전 구현은
+       첫 세그먼트만 검사해 [repos/valid/../../escape]가 repos/ 밖으로 빠져나가면서도
+       hint를 통과했다(적대 리뷰 #22118 finding B — repos/-containment 불변식 위반). *)
+    Some token
   | _ -> None
 
 let repos_path_hint_of_stages ~cmd stages =

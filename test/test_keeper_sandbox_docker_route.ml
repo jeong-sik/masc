@@ -1466,6 +1466,23 @@ let test_sandbox_root_git_explicit_repos_target_keeps_cwd () =
     error;
   Alcotest.(check string) "cwd stays sandbox root" playground cwd
 
+let test_sandbox_root_git_repos_target_rejects_dotdot_escape () =
+  (* 적대 리뷰 #22118 finding B: [repos/<safe>/../../escape]는 repos/ 밖으로
+     빠져나가므로 repos/ 타겟으로 인정하면 안 된다. hint가 거부되어, 빈 playground
+     에서는 "no sandbox git clones" 에러로 떨어진다. 첫 세그먼트만 검사하던 이전
+     구현은 이 토큰을 통과시켜 cwd를 sandbox root로 유지했다(불변식 위반). *)
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let _cwd, error =
+    resolve_sandbox_root_git_cwd_string ~config ~meta
+      ~cwd:playground
+      ~cmd:"git clone https://github.com/example/repo.git repos/repo/../../escape"
+  in
+  Alcotest.(check bool)
+    "dotdot-escaping repos target is not accepted as a repos/ hint"
+    true
+    (Option.is_some error)
+
 let test_sandbox_root_git_cwd_single_repo_auto_chdir () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
@@ -2321,6 +2338,9 @@ let () =
           Alcotest.test_case
             "sandbox-root git with explicit repos target keeps cwd"
             `Quick test_sandbox_root_git_explicit_repos_target_keeps_cwd;
+          Alcotest.test_case
+            "sandbox-root git repos target rejects .. escape"
+            `Quick test_sandbox_root_git_repos_target_rejects_dotdot_escape;
           Alcotest.test_case
             "sandbox-root git with one repo auto-selects cwd"
             `Quick test_sandbox_root_git_cwd_single_repo_auto_chdir;

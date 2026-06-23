@@ -25,17 +25,30 @@ let keeper_task_result_json ?(typed_outcome = (None : Keeper_tool_outcome.t opti
 let workflow_rejection_error_json
       ?(rule_id = "keeper_task_argument_rejected")
       ?(alternatives = [])
+      ?(typed_outcome : Keeper_tool_outcome.t option)
       message
   =
   (* RFC-0195 P0: [alternatives] is a typed list of tool names the
      LLM can call instead.  Empty list omits the field; non-empty
      surfaces it directly in the JSON payload so the LLM does not
      have to parse prose [hint] strings to discover next-tool
-     candidates. *)
+     candidates.
+
+     RFC-0239 / audit D1: [typed_outcome] carries a top-level
+     [typed_outcome] field (extracted by the PostToolUse hook into
+     [tool_call_detail.typed_outcome]) so a rejected completion is seen
+     as no-progress by the loop detector rather than counted as
+     evidence by tool name alone. *)
+  let extra_fields =
+    match typed_outcome with
+    | Some outcome -> [ "typed_outcome", Keeper_tool_outcome.to_json outcome ]
+    | None -> []
+  in
   Task.Payloads.workflow_rejection_payload_json
     ~rule_id
     ~scope_policy:"observe"
     ~alternatives
+    ~extra_fields
     message
 ;;
 
@@ -784,6 +797,9 @@ let handle_keeper_task_tool
     then
       workflow_rejection_error_json
         ~alternatives:[ "keeper_task_claim"; "keeper_tasks_list" ]
+        ~typed_outcome:
+          (Keeper_tool_outcome.Error
+             { reason = "keeper_task_done rejected: task_id required" })
         "task_id is required. Use the task_id you got from keeper_task_claim."
     else if result_text = ""
     then
@@ -799,6 +815,9 @@ let handle_keeper_task_tool
          error names the field the keeper actually sent. *)
       workflow_rejection_error_json
         ~alternatives:[ "keeper_task_done" ]
+        ~typed_outcome:
+          (Keeper_tool_outcome.Error
+             { reason = "keeper_task_done rejected: result required" })
         "result is required. Audit trail: describe what you completed. \
          Example: result='Refactored module X, all tests green, no flake'."
     else (
@@ -830,7 +849,14 @@ let handle_keeper_task_tool
         ~typed_outcome:
           (if Tool_result.is_success transition_result
            then Some Keeper_tool_outcome.Progress
-           else None)
+           else
+             (* RFC-0239 / audit D1: a rejected completion (wrong owner, stale
+                or invalid transition) is not progress. Emit a typed Error so the
+                no-progress detector demotes it instead of counting the tool name
+                as evidence. *)
+             Some
+               (Keeper_tool_outcome.Error
+                  { reason = Tool_result.message transition_result }))
         ~failure_class:(Tool_result.failure_class transition_result)
         ~ok:(Tool_result.is_success transition_result)
         ~message:(Tool_result.message transition_result)

@@ -28,10 +28,6 @@ import { SectionHeader } from './common/section-header'
 import { StatusDot } from './common/status-dot'
 import { KeeperBadge } from './keeper-badge'
 
-function MutedLabel({ children }: { children: unknown }) {
-  return html`<span class="text-xs font-medium text-text-muted">${children}</span>`
-}
-
 // ── v2 prototype config modal: left rail tabs (keeper-config.css .kcf-*) ──
 // The full keeper config redesign (keeper-v2/keeper-config.jsx) presents the
 // field set as a fullscreen .kcf-overlay modal with an 8-tab left rail instead
@@ -422,6 +418,64 @@ async function loadGoalOptions(options?: { force?: boolean }): Promise<void> {
 }
 
 // ── Helpers ──────────────────────────────────────────────
+
+// .kcf-* widgets — keeper-v2/keeper-config.jsx contract, styled by the vendored
+// keeper-config.css. Used inside the 8-tab modal so the field set matches the
+// prototype's section/fact/text-field anatomy. The editable widgets keep the
+// live input model + aria-labels; only the read-only display adopts .kcf-facts.
+
+type KcfFactRow = readonly [key: string, value: string | number | null | undefined, mono?: boolean]
+
+function KcfSec({
+  title,
+  desc,
+  right,
+  children,
+}: {
+  title: string
+  desc?: string
+  right?: unknown
+  children: unknown
+}) {
+  return html`
+    <section class="kcf-sec">
+      <div class="kcf-sec-h">
+        <h3>${title}</h3>
+        ${right ?? null}
+      </div>
+      ${desc ? html`<p class="kcf-sec-desc">${desc}</p>` : null}
+      <div class="kcf-sec-body">${children}</div>
+    </section>
+  `
+}
+
+// Read-only 2-column fact grid. Rows whose value is null/undefined/'' are
+// dropped (matches the prototype, which hides empty facts rather than printing
+// a dash). booleans render as ON/OFF text so the grid stays uniform.
+function KcfFacts({ rows }: { rows: readonly KcfFactRow[] }) {
+  const visible = rows.filter((r) => r[1] !== null && r[1] !== undefined && r[1] !== '')
+  if (visible.length === 0) return null
+  return html`
+    <div class="kcf-facts">
+      ${visible.map(([k, v, mono], i) => html`
+        <div key=${i} class="kcf-fact">
+          <span class="kcf-fact-k">${k}</span>
+          <span class=${`kcf-fact-v ${mono ? 'mono' : ''}`}>${v}</span>
+        </div>
+      `)}
+    </div>
+  `
+}
+
+function KcfReadonlyText({ label, hint, text }: { label: string; hint?: string; text: string }) {
+  const value = text && text.trim() !== '' ? text : MISSING_DATA_DASH
+  return html`
+    <div class="kcf-textfield">
+      <div class="kcf-tf-h"><label>${label}</label>${hint ? html`<span class="kcf-tf-hint">${hint}</span>` : null}</div>
+      <div class="kcf-text mono" style="white-space:pre-wrap; max-height:9rem; overflow-y:auto;">${value}</div>
+    </div>
+  `
+}
 
 function ConfigRow({ label, value }: { label: string; value: string }) {
   return html`
@@ -941,32 +995,32 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   const identityTab = html`
     <${KeeperToolAccessSummary} config=${c} />
 
-    <${Callout}
-      title="편집 가능 범위"
-      body="여기서 저장되는 값은 keeper 프롬프트, live override 계층, runtime.toml의 [runtime.assignments]입니다."
-    />
+    <${KcfSec} title="편집 가능 범위" desc="여기서 저장되는 값은 keeper 프롬프트, live override 계층, runtime.toml의 [runtime.assignments]입니다.">
+      <${KcfFacts} rows=${[
+        ['기본 소스', c.sources.default_source_kind],
+        ['라이브 오버라이드', c.sources.has_live_override ? 'ON' : 'OFF'],
+      ]} />
+    </${KcfSec}>
 
-    <${MajorSectionHeader} title="소스 · 정체성" />
-    <${ConfigRow} label="기본 소스" value=${c.sources.default_source_kind || MISSING_DATA_DASH} />
-    <${BoolRow} label="라이브 오버라이드" value=${c.sources.has_live_override} />
-    <${SectionHeader} size="xs" class="mt-2 mb-0.5">라이브 메타 경로</${SectionHeader}>
-    <${LongText} text=${c.sources.live_meta_path} />
-    ${c.sources.default_manifest_path ? html`
-      <${SectionHeader} size="xs" class="mt-2 mb-0.5">기본 매니페스트 경로</${SectionHeader}>
-      <${LongText} text=${c.sources.default_manifest_path} />
-    ` : null}
-    <div class="mt-1.5">
-      <${SectionHeader} size="xs" class="mb-1">우선순위</${SectionHeader}>
-      <${ModelList} models=${c.sources.precedence} />
-    </div>
-    <div class="mt-1.5">
-      <${SectionHeader} size="xs" class="mb-1">오버라이드 필드</${SectionHeader}>
-      <${ModelList} models=${c.sources.override_fields} />
-    </div>
+    <${KcfSec} title="소스 · 경로" desc="등록 상태와 매니페스트 경로는 읽기 전용입니다.">
+      <${KcfReadonlyText} label="라이브 메타 경로" text=${c.sources.live_meta_path} />
+      ${c.sources.default_manifest_path ? html`<${KcfReadonlyText} label="기본 매니페스트 경로" text=${c.sources.default_manifest_path} />` : null}
+      <div style="margin-top:14px;">
+        <div class="kcf-tf-h"><label>우선순위</label></div>
+        <${ModelList} models=${c.sources.precedence} />
+      </div>
+      <div style="margin-top:10px;">
+        <div class="kcf-tf-h"><label>오버라이드 필드</label></div>
+        <${ModelList} models=${c.sources.override_fields} />
+      </div>
+    </${KcfSec}>
+
     ${isVerifierRoleKeeper(currentMentionTargets) ? html`
-    <div class="mt-2 mb-2 flex items-center gap-2 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-3 py-2">
-      <span class="rounded-[var(--r-1)] border border-[var(--accent-40)] bg-[var(--accent-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent-fg">검증자</span>
-      <span class="text-2xs text-text-body">이 keeper는 task completion_contract를 독립 실측하는 검증자 역할입니다.</span>
+    <div class="kcf-sec" style="margin-bottom:18px;">
+      <div class="flex items-center gap-2 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-3 py-2">
+        <span class="rounded-[var(--r-1)] border border-[var(--accent-40)] bg-[var(--accent-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent-fg">검증자</span>
+        <span class="text-2xs text-text-body">이 keeper는 task completion_contract를 독립 실측하는 검증자 역할입니다.</span>
+      </div>
     </div>
     ` : null}
   `
@@ -979,40 +1033,34 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
   // runtime ◷ — runtime selection + execution profile (read-only introspection + runtime_id picker)
   const runtimeTab = html`
-    <${MajorSectionHeader} title="런타임 선택" />
-    <${Callout}
-      title="Runtime 선택"
-      body=${runtimeSelectionSummary(c)}
-    />
-    ${rd && runtimeCanEdit ? html`
-      <${InlineSelectRow}
-        label="runtime_id"
-        value=${rd.runtime_id}
-        options=${runtimeOptions}
-        onChange=${(value: string) => updateRuntimeDraft('runtime_id', value)}
-        dirty=${dirtyFlags.runtime_id}
-      />
-    ` : html`
-      <${ConfigRow} label="선택 runtime" value=${c.execution.selected_runtime_id || MISSING_DATA_DASH} />
-    `}
-    ${c.execution.selected_runtime_canonical
-      && c.execution.selected_runtime_canonical !== c.execution.selected_runtime_id
-      ? html`<${ConfigRow}
-          label="정규화 runtime"
-          value=${c.execution.selected_runtime_canonical}
-        />`
-      : null}
+    <${KcfSec} title="Runtime 선택" desc=${runtimeSelectionSummary(c)}>
+      ${rd && runtimeCanEdit ? html`
+        <${InlineSelectRow}
+          label="runtime_id"
+          value=${rd.runtime_id}
+          options=${runtimeOptions}
+          onChange=${(value: string) => updateRuntimeDraft('runtime_id', value)}
+          dirty=${dirtyFlags.runtime_id}
+        />
+      ` : html`
+        <${KcfFacts} rows=${[['선택 runtime', c.execution.selected_runtime_id, true]]} />
+      `}
+      ${c.execution.selected_runtime_canonical
+        && c.execution.selected_runtime_canonical !== c.execution.selected_runtime_id
+        ? html`<${KcfFacts} rows=${[['정규화 runtime', c.execution.selected_runtime_canonical, true]]} />`
+        : null}
+    </${KcfSec}>
 
-    <${MajorSectionHeader} title="실행" />
-    <${ConfigRow} label="활성 런타임" value=${c.execution.active_model ? 'runtime' : MISSING_DATA_DASH} />
-    <${ConfigRow} label="runtime timeout" value=${perProviderTimeoutLabel(c.execution)} />
-    <div class="mb-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
-      runtime fallback 중 마지막 runtime을 제외한 runtime들에만 적용됩니다.
-    </div>
-    <div class="mt-1.5">
-      <${SectionHeader} size="xs" class="mb-1">런타임 후보</${SectionHeader}>
-      <${RuntimeList} runtimes=${c.execution.models} />
-    </div>
+    <${KcfSec} title="실행" desc="런타임 후보·타임아웃은 읽기 전용입니다. fallback 은 마지막 runtime 을 제외한 항목에 순서대로 적용됩니다.">
+      <${KcfFacts} rows=${[
+        ['활성 런타임', c.execution.active_model ? 'runtime' : null],
+        ['runtime timeout', perProviderTimeoutLabel(c.execution), true],
+      ]} />
+      <div style="margin-top:14px;">
+        <div class="kcf-tf-h"><label>런타임 후보</label></div>
+        <${RuntimeList} runtimes=${c.execution.models} />
+      </div>
+    </${KcfSec}>
   `
 
   // policy ⚖ — verify gate + compaction + proactive + handoff + tool denylist
@@ -1212,48 +1260,52 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   `
 
   // goals ◎ — assigned goal-store bindings (active_goal_ids picker)
+  const horizonLabel = (h: string): string => (h === 'short' ? '단기' : h === 'long' ? '장기' : h === 'mid' ? '중기' : h)
   const goalsTab = html`
-    <${MajorSectionHeader} title="배정 목표" />
-    <div class="py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm mb-1.5">
-      <div class="flex items-center justify-between gap-3 mb-2">
-        <${MutedLabel}>active_goal_ids</${MutedLabel}>
-        <span class="text-3xs text-[var(--color-fg-muted)]">${selectedActiveGoalIds.length}개 선택</span>
+    <${KcfSec}
+      title="배정 목표"
+      desc="goal store 카탈로그에서 이 keeper가 소유할 goal을 고릅니다."
+      right=${html`<span class="kcf-goals-count mono">active_goal_ids · ${selectedActiveGoalIds.length} 배정</span>`}
+    >
+      <div class="kcf-goals">
+        ${goalState.status === 'loading' ? html`
+          <div class="text-2xs text-[var(--color-fg-muted)]" role="status">목표 목록 로딩 중...</div>
+        ` : goalState.status === 'error' ? html`
+          <div class="text-2xs text-[var(--color-status-err)]">${goalState.message}</div>
+        ` : goalOptions.length > 0 && rd ? html`
+          <div class="kcf-goals-list">
+            ${goalOptions.map((goal) => {
+              const checked = rd.active_goal_ids.includes(goal.id)
+              return html`
+                <button
+                  type="button"
+                  key=${goal.id}
+                  class=${`kcf-goal ${checked ? 'on' : ''}`}
+                  aria-pressed=${checked ? 'true' : 'false'}
+                  onClick=${() => { toggleRuntimeActiveGoal(goal.id, !checked) }}
+                >
+                  <span class="kcf-goal-check">${checked ? '✓' : ''}</span>
+                  <span class="kcf-goal-body">
+                    <span class="kcf-goal-title">${goal.title}</span>
+                    <span class="kcf-goal-id mono">${goal.id}</span>
+                  </span>
+                  <span class=${`kcf-goal-hz hz-${goal.horizon}`}>${horizonLabel(goal.horizon)}</span>
+                </button>
+              `
+            })}
+          </div>
+        ` : selectedActiveGoalIds.length > 0 ? html`
+          <${ModelList} models=${selectedActiveGoalIds} />
+        ` : html`
+          <div class="kcf-goals-empty">활성 목표가 연결되어 있지 않습니다.</div>
+        `}
+        ${unknownSelectedGoalIds.length > 0 ? html`
+          <div class="mt-2 text-2xs text-[var(--color-status-warn)]">
+            Goal Store에서 찾을 수 없는 연결: ${unknownSelectedGoalIds.join(', ')}
+          </div>
+        ` : null}
       </div>
-      ${goalState.status === 'loading' ? html`
-        <div class="text-2xs text-[var(--color-fg-muted)]" role="status">목표 목록 로딩 중...</div>
-      ` : goalState.status === 'error' ? html`
-        <div class="text-2xs text-[var(--color-status-err)]">${goalState.message}</div>
-      ` : goalOptions.length > 0 && rd ? html`
-        <div class="grid gap-1.5">
-          ${goalOptions.map((goal) => {
-            const checked = rd.active_goal_ids.includes(goal.id)
-            return html`
-              <label class="flex items-center gap-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] px-2 py-1.5 text-xs text-[var(--color-fg-secondary)]">
-                <input
-                  type="checkbox"
-                  checked=${checked}
-                  onChange=${(event: Event) => {
-                    toggleRuntimeActiveGoal(goal.id, (event.currentTarget as HTMLInputElement).checked)
-                  }}
-                />
-                <span class="min-w-[4.5rem] font-mono text-3xs text-[var(--color-fg-muted)]">${goal.horizon}</span>
-                <span class="flex-1 truncate">${goal.title}</span>
-                <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${goal.id}</span>
-              </label>
-            `
-          })}
-        </div>
-      ` : selectedActiveGoalIds.length > 0 ? html`
-        <${ModelList} models=${selectedActiveGoalIds} />
-      ` : html`
-        <div class="text-2xs text-[var(--color-fg-muted)]">활성 목표가 연결되어 있지 않습니다.</div>
-      `}
-      ${unknownSelectedGoalIds.length > 0 ? html`
-        <div class="mt-2 text-2xs text-[var(--color-status-warn)]">
-          Goal Store에서 찾을 수 없는 연결: ${unknownSelectedGoalIds.join(', ')}
-        </div>
-      ` : null}
-    </div>
+    </${KcfSec}>
   `
 
   // hooks ⬡ — global runtime hook architecture (keeper-agnostic, read-only)
@@ -1293,39 +1345,44 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         </div>
         ${isFiltering && visibleEntries.length === 0 && allEntries.length > 0
           ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${allEntries.length} slots)</div>`
-          : visibleEntries.map(([name, slot]) => html`
-              <div class="flex items-start gap-2 py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 mb-1.5">
-                <span class="mt-1 w-2 h-2 rounded-full shrink-0 ${slot.active ? 'bg-[var(--color-status-ok)] shadow-[0_0_6px_var(--ok-48)]' : 'bg-[var(--color-fg-disabled)]'}" aria-hidden="true"></span>
-                <div class="flex-1 min-w-0">
-                  <div class="flex justify-between">
-                    <span class="text-xs font-semibold text-text-strong">${name}</span>
-                    <span class="text-3xs text-text-muted">${slot.source}</span>
-                  </div>
-                  ${hookSlotDetails(slot).length > 0 ? html`
-                    <div class="flex flex-wrap gap-1 mt-1">
-                      ${hookSlotDetails(slot).map((d: string) => html`
-                        <span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] ${d.endsWith('_off') ? 'bg-[var(--color-bg-hover)] text-[var(--color-fg-disabled)]' : 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] opacity-80'}">${d}</span>
-                      `)}
-                    </div>
-                  ` : null}
+          : html`
+            <div class="kcf-hooks">
+              <div class="kcf-hook-hd"><span>슬롯</span><span>source</span><span>gate · effect</span></div>
+              ${visibleEntries.map(([name, slot]) => html`
+                <div key=${name} class=${`kcf-hook ${slot.active ? '' : 'off'}`}>
+                  <span class="kcf-hook-slot mono">${name}</span>
+                  <span class=${`kcf-hook-src mono ${slot.active ? '' : 'na'}`}>${slot.source}</span>
+                  <span class="kcf-hook-gate">
+                    ${hookSlotDetails(slot).length > 0
+                      ? html`<div class="flex flex-wrap gap-1">${hookSlotDetails(slot).map((d: string) => html`<span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] ${d.endsWith('_off') ? 'bg-[var(--color-bg-hover)] text-[var(--color-fg-disabled)]' : 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] opacity-80'}">${d}</span>`)}</div>`
+                      : (slot.active ? '—' : '비등록')}
+                  </span>
                 </div>
-              </div>
-            `)}
-        <${ConfigRow} label="거부 목록 수" value=${String(c.hooks.deny_list.length)} />
-        <${ConfigRow} label="파괴 검사 도구" value=${formatHookDestructiveTools(c.hooks.destructive_check_tools)} />
-        <${ConfigRow} label="비용 예산 (텔레메트리 · 미강제)" value=${c.hooks.cost_budget.active ? formatCost(c.hooks.cost_budget.max_cost_usd ?? 0) : '미설정'} />
+              `)}
+            </div>
+          `}
+        <div style="margin-top:14px;">
+          <${KcfFacts} rows=${[
+            ['거부 목록 수', String(c.hooks.deny_list.length), true],
+            ['파괴 검사 도구', formatHookDestructiveTools(c.hooks.destructive_check_tools), true],
+            ['비용 예산 (텔레메트리·미강제)', c.hooks.cost_budget.active ? formatCost(c.hooks.cost_budget.max_cost_usd ?? 0) : '미설정'],
+          ]} />
+        </div>
       ` : null}
     `
   })() : html`<div class="text-2xs text-[var(--color-fg-muted)] py-4">hook 정보가 없습니다.</div>`
 
   // health ◉ — runtime liveness / registry / fiber diagnostics
   const healthTab = html`
-    <${MajorSectionHeader} title="런타임 상태" />
-    <${BoolRow} label="일시정지" value=${c.runtime.paused} />
-    <${BoolRow} label="자동 부팅 등록" value=${c.runtime.registered} />
-    <${BoolRow} label="킵얼라이브 실행" value=${c.runtime.keepalive_running} />
-    <${ConfigRow} label="레지스트리 상태" value=${c.runtime.registry_state || MISSING_DATA_DASH} />
-    <${ConfigRow} label="파이버 상태" value=${c.runtime.fiber_health || MISSING_DATA_DASH} />
+    <${KcfSec} title="런타임 상태" desc="이 keeper의 라이브니스 · 등록 · 파이버 진단입니다.">
+      <${KcfFacts} rows=${[
+        ['일시정지', c.runtime.paused ? 'ON' : 'OFF'],
+        ['자동 부팅 등록', c.runtime.registered ? 'ON' : 'OFF'],
+        ['킵얼라이브 실행', c.runtime.keepalive_running ? 'ON' : 'OFF'],
+        ['레지스트리 상태', c.runtime.registry_state, true],
+        ['파이버 상태', c.runtime.fiber_health, true],
+      ]} />
+    </${KcfSec}>
   `
 
   const tabContent: Record<KcfTabId, unknown> = {

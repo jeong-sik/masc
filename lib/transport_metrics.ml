@@ -461,23 +461,16 @@ let ws_listening () = ws_enabled () && Atomic.get ws_runtime_listening
 let ws_same_origin_ready () =
   ws_enabled () && Atomic.get ws_same_origin_runtime_ready
 
-let tcp_port_reachable port =
-  try
-    let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-    Eio_guard.protect
-      ~finally:(fun () ->
-        try Unix.close sock with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | _ -> ())
-      (fun () ->
-         Unix.connect
-           sock
-           (Unix.ADDR_INET
-              (Unix.inet_addr_of_string Masc_network_defaults.masc_http_default_host, port));
-         true)
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ -> false
+(* [tcp_port_reachable] is intentionally [false], matching the canonical
+   decision in [Transport_read_model.tcp_port_reachable]. A stdlib
+   [Unix.connect] probe here would (a) block the Eio domain on a syscall
+   inside the transport-health refresh path and (b) only ever flip to
+   [true] by racing a foreign listener on the same port, which is not a
+   useful health signal. With this, [grpc_reachable]/[ws_reachable]
+   collapse to their [*_live] (listener-bound) state, the single source
+   of truth shared with the read model. Argument kept for call-site
+   stability. *)
+let tcp_port_reachable (_port : int) : bool = false
 ;;
 
 let hot_session_json (session : hot_queue_session) =

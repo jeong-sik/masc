@@ -1522,7 +1522,14 @@ export function BoardSurface() {
       data-detail-width=${String(detailWidth)}
       data-detail-open=${String(detailOpen)}
     >
-      <div class=${`bd-body${detailOpen ? '' : ' no-detail'}`} style=${`--bd-detail-width: ${detailWidth}px;`}>
+      <!-- Collapse is driven by the inline --bd-detail-width custom property
+           (0 when no detail is open), which BOTH the legacy board-v2.css and the
+           keeper-v2 surfaces.css .bd-body grids consume as their third track.
+           This is the single source of truth: it does not depend on a separate
+           .no-detail rule winning a same-specificity (0,2,0) cascade by load
+           order (the #22098/#22103 split-brain), and it survives the legacy
+           board-v2.css removal (main.ts:114 migration). -->
+      <div class="bd-body" style=${`--bd-detail-width: ${detailOpen ? detailWidth : 0}px;`}>
         <${BdRail}
           activeSub=${activeSub}
           onSub=${(sub: string) => {

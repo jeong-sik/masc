@@ -259,14 +259,17 @@ describe('BoardSurface Component', () => {
   it('collapses the detail column by default (two-column rail + feed)', () => {
     const { container } = render(h(BoardSurface, null))
     // No post selected and the mention inbox closed: neither detail rail renders
-    // and .bd-body collapses to two columns via .no-detail. Matches the v2
-    // prototype, which only expands the detail column on demand.
+    // and .bd-body collapses to two columns by setting the inline
+    // --bd-detail-width to 0 (the third grid track). Matches the v2 prototype,
+    // which only expands the detail column on demand.
     expect(container.querySelector('[data-testid="bd-mention-detail"]')).toBeNull()
     expect(container.querySelector('[data-testid="bd-thread-detail"]')).toBeNull()
     const surface = container.querySelector<HTMLElement>('.v2-board-surface')
     const body = container.querySelector<HTMLElement>('.bd-body')
     expect(surface?.getAttribute('data-detail-open')).toBe('false')
-    expect(body?.classList.contains('no-detail')).toBe(true)
+    // Collapse is driven by the inline custom property (0px third track), not a
+    // .no-detail class that would race the legacy grid on load order.
+    expect(body?.getAttribute('style')).toContain('--bd-detail-width: 0px')
   })
 
   it('opens the mention inbox detail rail from the rail queue action', () => {
@@ -276,7 +279,11 @@ describe('BoardSurface Component', () => {
     const surface = container.querySelector<HTMLElement>('.v2-board-surface')
     const body = container.querySelector<HTMLElement>('.bd-body')
     expect(surface?.getAttribute('data-detail-open')).toBe('true')
-    expect(body?.classList.contains('no-detail')).toBe(false)
+    // Opening a detail rail restores a non-zero third track via the same inline
+    // property (the persisted/default width), not a class toggle.
+    expect(body?.getAttribute('style')).toContain(
+      `--bd-detail-width: ${BOARD_DETAIL_WIDTH_DEFAULT}px`,
+    )
   })
 
   it('normalizes persisted Board detail rail widths to the supported range', () => {

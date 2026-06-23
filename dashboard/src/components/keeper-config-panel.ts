@@ -1404,6 +1404,13 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       : c.runtime.registered
         ? '대기'
         : '오프라인'
+  // Phase pill status dot (prototype .kcf-top-phase carries a StatusDot): green
+  // when running, amber when paused, dim otherwise.
+  const phaseDotColor = c.runtime.keepalive_running
+    ? 'var(--status-ok)'
+    : c.runtime.paused
+      ? 'var(--status-warn)'
+      : 'var(--text-dim)'
 
   return html`
     <div
@@ -1421,7 +1428,10 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
             <div class="kcf-top-name">${keeperName}</div>
             <div class="kcf-top-sub mono">${c.execution.selected_runtime_id || c.sources.default_source_kind || MISSING_DATA_DASH}</div>
           </div>
-          <span class="kcf-top-phase">${phaseLabel}</span>
+          <span class="kcf-top-phase">
+            <span style=${`width:7px;height:7px;border-radius:50%;background:${phaseDotColor};display:inline-block;${c.runtime.keepalive_running ? 'box-shadow:0 0 6px ' + phaseDotColor + ';' : ''}`} aria-hidden="true"></span>
+            ${phaseLabel}
+          </span>
           <div class="kcf-top-spacer"></div>
           ${onClose ? html`
             <button type="button" class="kcf-top-x" onClick=${onClose} data-testid="kw-config-close" title="닫기 (Esc)">✕</button>

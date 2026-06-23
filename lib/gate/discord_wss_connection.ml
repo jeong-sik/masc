@@ -66,6 +66,12 @@ type conn =
   { wsd : Ws_wsd.t
   ; events : event Eio.Stream.t
   ; close : unit -> unit
+  ; spawn : (unit -> unit) -> unit
+      (* Fork [f] on this connection's session switch, so it is cancelled when
+         [close] tears the connection down. The gateway runs its reader through
+         this so the reader's lifetime is the connection's, not the gateway's:
+         a per-connection close cancels the reader (its blocking read raises
+         [Cancelled]) instead of leaking it on the outer switch (RFC-0287 P0). *)
   }
 
 (* RFC 6455 §7.4: a Close frame with no body maps to status code 1005
@@ -177,34 +183,63 @@ let build_session ~sw ~env ~url =
   wsd, events
 ;;
 
-let connect ~sw ~env ~url =
-  init_rng ();
+(* Raised inside the session fiber to turn the session switch off on [close].
+   An Eio switch cancels its forked fibers only when it FAILS (or its run-body
+   raises) — a plain return just WAITS for them. So [close] cannot be a normal
+   return: the driver and reader would block forever and the switch would hang
+   waiting for them. Failing the switch with this cancels them, and the fork's
+   handler swallows it (a requested close is not an error). *)
+exception Session_closed
+
+(* Run a connection session on its own switch and expose [spawn] / [close] over
+   it. [setup ~sw] builds the wsd + inbound event stream on the session switch;
+   whatever it forks there (the ws-direct driver) and whatever a consumer later
+   forks via [spawn] is cancelled together when [close] fails the switch.
+   Any exception [setup] raises is re-raised in the caller. *)
+let run_session ~sw ~setup =
   let setup_promise, setup_resolver = Eio.Promise.create () in
   let close_signal, close_trigger = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
-    Eio.Switch.run (fun session_sw ->
-      let result =
-        try Ok (build_session ~sw:session_sw ~env ~url) with
-        | e -> Error e
-      in
-      Eio.Promise.resolve setup_resolver result;
-      match result with
-      | Error _ -> () (* let session_sw exit; socket/flow get released *)
-      | Ok _ -> Eio.Promise.await close_signal));
+    try
+      Eio.Switch.run (fun session_sw ->
+        let result =
+          try Ok (setup ~sw:session_sw) with
+          | e -> Error e
+        in
+        (* Hand the session switch back to the caller alongside the session so
+           consumers (the reader) can fork fibers whose lifetime is this
+           connection's: closing the connection cancels them. *)
+        Eio.Promise.resolve setup_resolver
+          (Result.map (fun (wsd, events) -> (wsd, events, session_sw)) result);
+        match result with
+        | Error _ -> () (* let session_sw exit; socket/flow get released *)
+        | Ok _ ->
+          Eio.Promise.await close_signal;
+          (* Cancel the driver + any spawned reader by failing the switch (a
+             plain return would only wait for them — see [Session_closed]). *)
+          Eio.Switch.fail session_sw Session_closed)
+    with Session_closed -> ());
   match Eio.Promise.await setup_promise with
   | Error e -> raise e
-  | Ok (wsd, events) ->
+  | Ok (wsd, events, session_sw) ->
     let close () =
       match Eio.Promise.peek close_signal with
       | Some () -> () (* idempotent *)
       | None -> Eio.Promise.resolve close_trigger ()
     in
-    { wsd; events; close }
+    let spawn f = Eio.Fiber.fork ~sw:session_sw f in
+    { wsd; events; close; spawn }
+;;
+
+let connect ~sw ~env ~url =
+  init_rng ();
+  run_session ~sw ~setup:(fun ~sw -> build_session ~sw ~env ~url)
 ;;
 
 let read c = read_event (Eio.Stream.take c.events)
 let send_text c s = Ws_wsd.send_text c.wsd s
 let close c = c.close ()
+let spawn c f = c.spawn f
 
 module For_testing = struct
   type nonrec inbound = inbound =
@@ -227,4 +262,14 @@ module For_testing = struct
   let message_to_event = message_to_event
   let close_to_event = close_to_event
   let close_code_no_status = close_code_no_status
+
+  (* A connection with a real session switch + spawn/close but no socket: the
+     wsd is a bare, never-driven endpoint and the event stream stays empty. For
+     testing the reader-lifetime contract (spawn forks on the session switch;
+     close cancels it) independent of WS framing. *)
+  let make_test_conn ~sw =
+    run_session ~sw ~setup:(fun ~sw:_ ->
+      let ep = Ws_endpoint.create Ws_endpoint.Client (fun _ -> Ws_endpoint.handlers ()) in
+      Ws_endpoint.wsd ep, Eio.Stream.create inbound_capacity)
+  ;;
 end

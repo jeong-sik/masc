@@ -275,7 +275,12 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
       (match Discord_wss_connection.connect ~sw ~env ~url with
        | conn ->
          conn_ref := Some conn;
-         Eio.Fiber.fork ~sw (fun () -> reader_loop conn)
+         (* Fork the reader on the connection's OWN session switch (not the
+            gateway-wide [sw]) so a per-connection [Close_wss] cancels it. On
+            the gateway-wide [sw] the reader would survive close — blocked in
+            [Stream.take] with nothing left to wake it — and leak one fiber per
+            reconnect cycle (RFC-0287 P0). *)
+         Discord_wss_connection.spawn conn (fun () -> reader_loop conn)
        | exception (Eio.Cancel.Cancelled _ as e) -> raise e
        | exception exn ->
          (* DNS / connect / TLS handshake failure: the socket never came up.
@@ -289,13 +294,13 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
          Eio.Stream.add input_mailbox
            (Discord_gateway_state.Connect_failed { reason }))
     | Close_wss { code; reason = _ } ->
-      (* Phase 1.4b: explicit close. Discord_wss_connection.close
-         resolves the inner session switch's close-signal promise,
-         which lets that switch return, which cancels reader/writer
-         fibers and releases the socket + TLS flow. The reader's
-         pending read raises Cancelled; reader_loop treats cancellation
-         as terminal so a stale reader cannot enqueue a late Wss_closed
-         for the next connection. *)
+      (* Phase 1.4b: explicit close. Discord_wss_connection.close resolves the
+         inner session switch's close-signal promise, which lets that switch
+         return, turning it off and cancelling every fiber forked on it — the
+         driver, and (because Open_wss forked it via [spawn]) this reader. The
+         reader's pending [Stream.take] therefore raises Cancelled; reader_loop
+         treats cancellation as terminal (the [:211] arm) so a stale reader
+         cannot enqueue a late Wss_closed for the next connection. *)
       Discord_observability.record_gateway_close ~code;
       (match !conn_ref with
        | Some c -> Discord_wss_connection.close c

@@ -4,6 +4,15 @@
 ## Unreleased
 
 
+## [0.19.48] - 2026-06-22
+
+### Changed
+- `agent_sdk`: bumped the OAS runtime pin from `v0.207.6` (`fdc35ccc`) to
+  `v0.207.7` (`b84af27e`, OAS `main` HEAD, release 0.207.7 #2166) and raised
+  the dependency floor to `>= 0.207.7` in `dune-project` / `masc.opam`. This
+  release pulls in the Ollama native `/api/chat` multimodal serialization fix
+  (jeong-sik/oas#2165).
+
 ## [0.19.47] - 2026-06-20
 
 ### Changed

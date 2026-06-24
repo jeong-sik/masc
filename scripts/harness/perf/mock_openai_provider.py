@@ -20,15 +20,31 @@ import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-# A short, fixed assistant reply. Keepers parse message.content; content stays
-# small so the mock models provider *latency*, not payload weight (the harness
-# studies main-domain scheduling, not response size on the provider side).
+# Assistant reply text. Default is a short "ack" (models provider latency only).
+# For the keeper-burst gate, --reply-bytes makes it large: a keeper turn is
+# I/O-bound (the provider await yields the main domain), so the real main-domain
+# cost is *after* the await — parsing the response and writing the turn record /
+# snapshot. A trivial "ack" barely loads the domain even mid-turn; a large,
+# realistic body is what makes a resident keeper actually contend with serving.
 REPLY_TEXT = "ack"
+
+
+def build_reply(reply_bytes):
+    """Reply text padded to ~reply_bytes so post-await parse/record loads main."""
+    if reply_bytes <= len(REPLY_TEXT):
+        return REPLY_TEXT
+    # Sentence-like filler (not one giant token) so the parse path is realistic.
+    filler = "The keeper observes the board and continues its task. "
+    body = REPLY_TEXT + " "
+    while len(body) < reply_bytes:
+        body += filler
+    return body[:reply_bytes]
 
 
 class Handler(BaseHTTPRequestHandler):
     log_path = None
     delay_ms = 0
+    reply_text = REPLY_TEXT
     counter = [0]
 
     def _count(self):
@@ -76,7 +92,7 @@ class Handler(BaseHTTPRequestHandler):
             "choices": [
                 {
                     "index": 0,
-                    "message": {"role": "assistant", "content": REPLY_TEXT},
+                    "message": {"role": "assistant", "content": self.reply_text},
                     "finish_reason": "stop",
                 }
             ],
@@ -105,7 +121,7 @@ class Handler(BaseHTTPRequestHandler):
             }
 
         frames = [
-            chunk({"role": "assistant", "content": REPLY_TEXT}, None),
+            chunk({"role": "assistant", "content": self.reply_text}, None),
             chunk({}, "stop"),
         ]
         self.send_response(200)
@@ -135,9 +151,13 @@ def main():
     ap.add_argument("--log", default=None, help="append one JSON line per request")
     ap.add_argument("--delay-ms", type=int, default=0,
                     help="simulated provider latency per call")
+    ap.add_argument("--reply-bytes", type=int, default=0,
+                    help="pad the assistant reply to ~N bytes so the keeper's "
+                         "post-await parse/record loads the main domain (0 = 'ack')")
     args = ap.parse_args()
     Handler.log_path = args.log
     Handler.delay_ms = args.delay_ms
+    Handler.reply_text = build_reply(args.reply_bytes)
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     sys.stderr.write("[mock] listening on 127.0.0.1:%d\n" % args.port)
     sys.stderr.flush()

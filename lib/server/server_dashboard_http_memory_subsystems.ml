@@ -123,6 +123,15 @@ let user_model_prompt_json () =
     ]
 ;;
 
+(* The Hebbian synapse weight is a DISPLAY-only saturation scale for the
+   dashboard graph, not a learned or normalized synaptic strength: a keeper pair
+   reaches [max_synapse_weight] once they co-observe [synapse_saturation_facts]
+   shared facts, scaling linearly below that. Named so the scale is explicit and
+   reviewable rather than an unexplained literal (it drives no behavior — purely
+   how thick the dashboard edge renders). *)
+let max_synapse_weight = 1.0
+let synapse_saturation_facts = 10.0
+
 (* RFC-0244 Tier 2: derive the Hebbian synapse view from cross-keeper
    corroboration. Each shared fact that was observed by multiple keepers
    becomes one or more synapses; [last_consolidation] is the most recent
@@ -162,7 +171,9 @@ let compute_hebbian ~base_path ~now () =
     let synapses =
       Hashtbl.fold
         (fun (a, b) count acc ->
-           let weight = Float.min 1.0 (float_of_int count *. 0.1) in
+           let weight =
+             Float.min max_synapse_weight (float_of_int count /. synapse_saturation_facts)
+           in
            `Assoc
              [ "from_agent", `String a
              ; "to_agent", `String b
@@ -175,7 +186,15 @@ let compute_hebbian ~base_path ~now () =
     `Assoc [ "synapses", `List synapses; "last_consolidation", `Float last_consolidation ]
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ -> `Assoc [ "synapses", `List []; "last_consolidation", `Float 0.0 ]
+  | exn ->
+    (* Log rather than silently swallow: a persistent fact-store read failure
+       must be distinguishable from a genuinely empty graph, otherwise it
+       presents as the same last_consolidation=0.0 "unviewable" state this
+       function was added to fix. *)
+    Log.Server.warn
+      "compute_hebbian: synapse view derivation failed, returning empty graph: %s"
+      (Printexc.to_string exn);
+    `Assoc [ "synapses", `List []; "last_consolidation", `Float 0.0 ]
 ;;
 
 let dashboard_memory_subsystems_http_json

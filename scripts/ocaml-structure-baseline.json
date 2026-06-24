@@ -4,7 +4,7 @@
   "keeper_mli_missing": 14,
   "workspace_mli_missing": 2,
   "godsplit_count": 0,
-  "lib_dune_lines": 562,
+  "lib_dune_lines": 560,
   "inferred_dump_headers": 0,
-  "lib_other_mli_missing": 0
+  "lib_other_mli_missing": 1
 }

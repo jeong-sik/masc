@@ -1,0 +1,43 @@
+(** Drift-guard for [Provider_http_error.to_message] — pins the rendering
+    for the simple variants and the 200-byte HTTP body truncation that the
+    four former copies shared. Uses only the field-only variants
+    ([AcceptRejected], [HttpError]) so the test carries no dependency on
+    the nested [network_error_kind] / [timeout_phase] / [provider_*_kind]
+    types. *)
+
+(* [masc] is a wrapped library, so reach the new module through its
+   namespace (the same pattern existing tests use, e.g. [Masc.Auth]).
+   [Llm_provider] comes from agent_sdk.llm_provider and is bound directly. *)
+module Provider_http_error = Masc.Provider_http_error
+
+let msg = Alcotest.(check string)
+
+let test_simple_variants () =
+  msg "AcceptRejected -> reason verbatim" "no transport injected"
+    (Provider_http_error.to_message
+       (Llm_provider.Http_client.AcceptRejected
+          { reason = "no transport injected" }));
+  msg "HttpError short body -> HTTP code: body" "HTTP 503: upstream down"
+    (Provider_http_error.to_message
+       (Llm_provider.Http_client.HttpError
+          { code = 503; body = "upstream down" }))
+
+let test_http_body_truncation () =
+  let body = String.make (Provider_http_error.max_body_length + 50) 'x' in
+  let expected =
+    "HTTP 500: "
+    ^ String.make Provider_http_error.max_body_length 'x'
+    ^ Provider_http_error.body_truncation_suffix
+  in
+  msg "HTTP body > max_body_length truncated with ellipsis" expected
+    (Provider_http_error.to_message
+       (Llm_provider.Http_client.HttpError { code = 500; body }))
+
+let () =
+  Alcotest.run "provider_http_error"
+    [ ( "to_message"
+      , [ Alcotest.test_case "simple variants" `Quick test_simple_variants
+        ; Alcotest.test_case "200-byte body truncation" `Quick
+            test_http_body_truncation
+        ] )
+    ]

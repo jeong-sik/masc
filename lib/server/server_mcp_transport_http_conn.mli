@@ -17,8 +17,8 @@ type sse_conn_info = {
   client_id : int;
   writer : Httpun.Body.Writer.t;
   mutex : Eio.Mutex.t;
-  stop : bool ref;
-  mutable closed : bool;
+  stop : bool Atomic.t;
+  closed : bool Atomic.t;
   stop_promise : unit Eio.Promise.t;
   resolve_stop : unit Eio.Promise.u;
 }
@@ -27,15 +27,26 @@ type sse_conn_info = {
     via {!make_sse_conn} for the SSE handler.  [client_id = -1]
     indicates an inline response (see {!make_inline_sse_conn}).
 
-    [stop] is a [bool ref] (not [Atomic.t]) because all callers
-    update it from a single fiber under [mutex]; the
-    cross-fiber visibility is established via
-    [Eio.Mutex.use_rw].
+    [closed] and [stop] are [Atomic.t] because the close paths run
+    on different domains once serving moves off the main domain
+    (a client disconnect on the serving domain vs keeper-driven
+    eviction / shutdown on the main domain) — they are not confined
+    to one fiber under [mutex].  [closed] is the single-close guard:
+    {!close_sse_conn} flips it false->true with [compare_and_set] so
+    exactly one caller runs the close body.
+
+    Readers treat either [stop=true] or [closed=true] as terminal, so
+    the intermediate state where one flag is set before the other is
+    benign.  The safety invariant is not that a particular transient
+    is unobservable, but that every reader branches to the closed/stop
+    path as soon as it sees either flag.
 
     [stop_promise]/[resolve_stop] is resolved exactly once by
-    {!close_sse_conn}; {!run_sse_pumps} awaits it to release the
-    per-connection pump switch.  Construct via {!make_sse_conn} so
-    the promise is always paired with the connection. *)
+    {!close_sse_conn} (guaranteed by the [closed] claim above; a
+    second resolve of a one-shot promise raises [Invalid_argument]);
+    {!run_sse_pumps} awaits it to release the per-connection pump
+    switch.  Construct via {!make_sse_conn} so the promise is always
+    paired with the connection. *)
 
 (** {1 Connect-rate guard env knobs} *)
 
@@ -65,11 +76,23 @@ val register_sse_conn :
     the previous connection first via {!stop_sse_session}. *)
 
 val close_sse_conn : sse_conn_info -> unit
-(** [close_sse_conn info] flushes + closes the writer, sets
-    [info.closed = true], [info.stop = true], and unregisters
-    the SSE client.  Idempotent — safe to call multiple times.
-    Errors during writer close log at {!Log.Misc.debug} but do
-    not propagate. *)
+(** [close_sse_conn info] sets [info.closed = true] / [info.stop = true]
+    (via the single-close [compare_and_set] claim), resolves the one-shot
+    stop promise exactly once, closes the writer, and unregisters the SSE
+    client.  Idempotent — safe to call multiple times.
+
+    The writer is closed under [info.mutex] so it never runs concurrently
+    with a [send_raw] / evict write on another domain; consequently this
+    must be called from within an Eio scheduler context (every production
+    close path is).  Errors during writer close log at {!Log.Misc.debug}
+    but do not propagate. *)
+
+val __test_claim_close : sse_conn_info -> bool
+(** Test-only seam: the close-claim used by {!close_sse_conn}.  Returns [true]
+    for the single caller that wins the right to run the close body (resolve the
+    one-shot stop promise).  Exposed so the cross-domain regression test can
+    race two domains on one connection and assert at most one wins — two winners
+    would double-resolve the promise and crash. *)
 
 val stop_sse_session : string -> unit
 (** [stop_sse_session session_id] removes the registry entry
@@ -146,7 +169,7 @@ val make_sse_conn :
   unit ->
   sse_conn_info
 (** [make_sse_conn ~session_id ~client_id ~writer ~mutex ()] builds an
-    [sse_conn_info] with [stop = ref false], [closed = false], and a fresh
+    [sse_conn_info] with [stop] and [closed] both [Atomic.make false], and a fresh
     [stop_promise]/[resolve_stop] pair.  All SSE handlers construct connections
     through this so the stop promise is never omitted. *)
 

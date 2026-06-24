@@ -123,7 +123,7 @@ let handle_ag_ui_events ~deps request reqd =
                       let rec drain () =
                         let event = Eio.Stream.take event_stream in
                         (try
-                          if not (info.closed || !(info.stop)) then
+                          if not (Atomic.get info.closed || (Atomic.get info.stop)) then
                             if not (send_raw info event) then
                               Log.Server.debug "ag-ui drain send failed for session %s"
                                 info.session_id
@@ -131,7 +131,7 @@ let handle_ag_ui_events ~deps request reqd =
                           Log.Server.error "ag-ui drain write error: %s"
                             (Printexc.to_string exn);
                           stop_sse_session_preserve_guard info.session_id);
-                        if not !(info.stop) then drain ()
+                        if not (Atomic.get info.stop) then drain ()
                       in
                       try drain ()
                       with Eio.Cancel.Cancelled _ as e -> raise e
@@ -140,14 +140,14 @@ let handle_ag_ui_events ~deps request reqd =
                              (Printexc.to_string exn))
                     ~ping:(fun () ->
                       let rec loop () =
-                        if not !(info.stop) then (
+                        if not (Atomic.get info.stop) then (
                           (try Eio.Time.sleep clock sse_ping_interval_s
                            with Eio.Cancel.Cancelled _ as exn -> raise exn
                               | exn -> Log.Server.debug "SSE ping sleep interrupted: %s" (Printexc.to_string exn));
                           (try
-                             if info.closed then
+                             if Atomic.get info.closed then
                                stop_sse_session_preserve_guard info.session_id
-                             else if not !(info.stop) then
+                             else if not (Atomic.get info.stop) then
                                if not (send_raw info ": ping\n\n") then
                                  Log.Server.debug "ag-ui ping send failed for session %s"
                                    info.session_id
@@ -228,7 +228,7 @@ let handle_presence_events ~deps request reqd =
                   let rec drain () =
                     let event = Eio.Stream.take event_stream in
                     (try
-                       if not (info.closed || !(info.stop)) then
+                       if not (Atomic.get info.closed || (Atomic.get info.stop)) then
                          if not (send_raw info event) then
                            Log.Server.debug
                              "presence drain send failed for session %s"
@@ -239,7 +239,7 @@ let handle_presence_events ~deps request reqd =
                          Log.Server.error "presence drain write error: %s"
                            (Printexc.to_string exn);
                          stop_sse_session_preserve_guard info.session_id);
-                    if not !(info.stop) then drain ()
+                    if not (Atomic.get info.stop) then drain ()
                   in
                   try drain ()
                   with
@@ -249,7 +249,7 @@ let handle_presence_events ~deps request reqd =
                         (Printexc.to_string exn))
                 ~ping:(fun () ->
                   let rec loop () =
-                    if not !(info.stop) then (
+                    if not (Atomic.get info.stop) then (
                       (try Eio.Time.sleep clock sse_ping_interval_s
                        with
                        | Eio.Cancel.Cancelled _ as e -> raise e
@@ -258,9 +258,9 @@ let handle_presence_events ~deps request reqd =
                              "presence ping sleep interrupted: %s"
                              (Printexc.to_string exn));
                       (try
-                         if info.closed then
+                         if Atomic.get info.closed then
                            stop_sse_session_preserve_guard info.session_id
-                         else if not !(info.stop) then
+                         else if not (Atomic.get info.stop) then
                            if not (send_raw info ": ping\n\n") then
                              Log.Server.debug
                                "presence ping send failed for session %s"

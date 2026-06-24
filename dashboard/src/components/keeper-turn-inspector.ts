@@ -1451,8 +1451,8 @@ export function KeeperTurnInspector({
           </div>
         `
         : null}
-      ${sorted.map((row, index) => html`<${TurnRow}
-        key=${`${row.record.trace_id}-${row.record.absolute_turn}-${row.record.ts}-${index}`}
+      ${sorted.map(row => html`<${TurnRow}
+        key=${`${row.record.trace_id}-${row.record.absolute_turn}-${row.record.ts}`}
         row=${row}
         onOpen=${setSelectedRow}
       />`)}

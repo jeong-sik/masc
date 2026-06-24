@@ -326,7 +326,7 @@ let resolved_keeper_args_from_persona args :
           get_string_opt args "goal"
           |> Dashboard_utils.first_some defaults.goal
           |> Option.value ~default:""
-          |> normalize_goal_horizon_text
+          |> normalize_goal_text
         in
         let instructions =
           get_string_opt args "instructions"

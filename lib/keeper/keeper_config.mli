@@ -43,7 +43,7 @@ val default_proactive_enabled : bool
 val default_proactive_idle_sec : int
 val default_proactive_cooldown_sec : int
 val approval_queue_stale_max_wait_sec : float
-val default_goal_horizon_max_chars : int
+val default_goal_max_chars : int
 val default_drift_max_clauses : int
 
 (** Maximum bytes of personality text included in the rendered keeper prompt.
@@ -114,7 +114,7 @@ val utf8_repair_string : string -> string
     on a UTF-8 character boundary. Caller MUST pass [max_bytes] explicitly so
     the unit (bytes, not chars) is visible at every call site. *)
 val normalize_self_model_text : max_bytes:int -> string -> string
-val normalize_goal_horizon_text : ?max_len:int -> string -> string
+val normalize_goal_text : ?max_len:int -> string -> string
 
 val split_semicolon_clauses : string -> string list
 val take_last : int -> 'a list -> 'a list

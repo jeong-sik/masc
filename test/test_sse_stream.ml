@@ -15,6 +15,11 @@ let jsonrpc_notification method_name =
   `Assoc [ ("jsonrpc", `String "2.0"); ("method", `String method_name) ]
 
 let register_exn ~auth ?kind session_id ~last_event_id =
+  (* Pre-create the MCP session so registration validates an existing
+     session rather than auto-bootstrapping one (security/sse-auth-validation). *)
+  let (_ : Session.McpSessionStore.mcp_session) =
+    Session.McpSessionStore.get_or_create ~id:session_id ()
+  in
   match Sse.register ?kind ~auth session_id ~last_event_id with
   | Ok result -> result
   | Error e ->

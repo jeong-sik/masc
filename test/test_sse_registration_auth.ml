@@ -1,6 +1,12 @@
 (** Regression tests for SSE registration token + session validation.
     PR-MASC-3: Sse.register now requires a valid (token, session) pair and
-    returns a typed [registration_error] on failure. *)
+    returns a typed [registration_error] on failure.
+
+    Security fix: validate_registration uses Session.McpSessionStore.peek
+    instead of get_or_create, so a client-provided session_id cannot
+    auto-bootstrap a new session. Unknown session_ids now return
+    Unknown_session; session creation remains in the initialize handler
+    (RFC-0099 session lifecycle; credential/auth context RFC-0008 / RFC-0019). *)
 
 open Alcotest
 
@@ -18,6 +24,10 @@ let test_valid_token_registers () =
   let workspace, auth = setup () in
   Fun.protect ~finally:(fun () -> cleanup workspace) (fun () ->
     let session_id = "valid-reg-session" in
+    let (_ : Session.McpSessionStore.mcp_session) =
+      Session.McpSessionStore.get_or_create ~id:session_id
+        ~agent_name:"sse-reg-test-agent" ()
+    in
     match Sse.register ~auth session_id ~last_event_id:0 with
     | Ok (client_id, _stream, _evicted) ->
         check bool "registered" true (Sse.exists session_id);
@@ -50,6 +60,20 @@ let test_forged_token_rejected () =
     | Error e ->
         fail
           (Printf.sprintf "expected Invalid_token, got: %s"
+             (Sse.registration_error_to_string e)))
+
+let test_unknown_session_rejected () =
+  let workspace, auth = setup () in
+  Fun.protect ~finally:(fun () -> cleanup workspace) (fun () ->
+    (* No session created; the client-provided id must not auto-create. *)
+    let session_id = "unknown-session" in
+    match Sse.register ~auth session_id ~last_event_id:0 with
+    | Ok _ -> fail "registration with unknown session should fail"
+    | Error (Sse.Unknown_session { session_id = sid }) ->
+        check string "unknown session id" session_id sid
+    | Error e ->
+        fail
+          (Printf.sprintf "expected Unknown_session, got: %s"
              (Sse.registration_error_to_string e)))
 
 let test_expired_session_rejected () =
@@ -102,6 +126,7 @@ let () =
           test_case "valid token registers" `Quick test_valid_token_registers;
           test_case "missing token rejected" `Quick test_missing_token_rejected;
           test_case "forged token rejected" `Quick test_forged_token_rejected;
+          test_case "unknown session rejected" `Quick test_unknown_session_rejected;
           test_case "expired session rejected" `Quick test_expired_session_rejected;
           test_case "session owner mismatch rejected" `Quick
             test_session_owner_mismatch_rejected;

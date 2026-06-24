@@ -467,7 +467,11 @@ let invoke_disconnect_hook_for session_id =
 (** Validate the bearer token and MCP session pair for an SSE registration.
     Token resolution is delegated to [Auth.find_credential_by_token]; session
     existence and expiry are checked via [Session.McpSessionStore.peek] so
-    the validation read does not refresh the session's activity window. *)
+    the validation read does not refresh the session's activity window.
+
+    Session creation is intentionally not performed here: an SSE registration
+    must reference a session already issued by the initialize handler
+    (RFC-0099 § session lifecycle; credential surface RFC-0008 / RFC-0019). *)
 let validate_registration ~(auth : registration_auth) session_id : (Masc_domain.agent_credential, registration_error) result =
   let open Masc_domain in
   if String.trim auth.token = "" then
@@ -481,18 +485,19 @@ let validate_registration ~(auth : registration_auth) session_id : (Masc_domain.
     | Error e ->
         Error (Invalid_token { reason = masc_error_to_string e })
     | Ok credential ->
-        let session =
-          Session.McpSessionStore.get_or_create ~id:session_id ~agent_name:credential.agent_name ()
-        in
-        let now = Time_compat.now () in
-        if now -. session.last_activity > Env_config.Session.max_age_seconds then
-          Error (Session_expired { session_id })
-        else
-          match session.agent_name with
-          | Some session_agent when not (String.equal session_agent credential.agent_name) ->
-              Error (Session_owner_mismatch { session_agent; token_agent = credential.agent_name })
-          | _ ->
-              Ok credential
+        match Session.McpSessionStore.peek session_id with
+        | None ->
+            Error (Unknown_session { session_id })
+        | Some session ->
+            let now = Time_compat.now () in
+            if now -. session.last_activity > Env_config.Session.max_age_seconds then
+              Error (Session_expired { session_id })
+            else
+              match session.agent_name with
+              | Some session_agent when not (String.equal session_agent credential.agent_name) ->
+                  Error (Session_owner_mismatch { session_agent; token_agent = credential.agent_name })
+              | _ ->
+                  Ok credential
 
 (** Register a new SSE client.
     Returns (client_id, event_stream, evicted_session_id option).

@@ -11,6 +11,11 @@ let with_test_workspace f =
     (fun () -> f auth)
 
 let register_exn ~auth session_id ~last_event_id =
+  (* Pre-create the MCP session so registration validates an existing
+     session rather than auto-bootstrapping one (security/sse-auth-validation). *)
+  let (_ : Session.McpSessionStore.mcp_session) =
+    Session.McpSessionStore.get_or_create ~id:session_id ()
+  in
   match Sse.register ~auth session_id ~last_event_id with
   | Ok result -> result
   | Error e ->

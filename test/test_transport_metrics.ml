@@ -308,6 +308,11 @@ let test_transport_health_json () =
     Masc_test_deps.make_sse_auth base_dir "transport-metrics-agent"
   in
   let register_exn ?kind session_id ~last_event_id =
+    (* Pre-create the MCP session so registration validates an existing
+       session rather than auto-bootstrapping one (security/sse-auth-validation). *)
+    let (_ : Masc.Session.McpSessionStore.mcp_session) =
+      Masc.Session.McpSessionStore.get_or_create ~id:session_id ()
+    in
     match Masc.Sse.register ?kind ~auth session_id ~last_event_id with
     | Ok result -> result
     | Error e ->

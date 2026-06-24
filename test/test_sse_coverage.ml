@@ -16,6 +16,7 @@ let jsonrpc_notification method_name =
   `Assoc [ ("jsonrpc", `String "2.0"); ("method", `String method_name) ]
 
 module Sse = Masc.Sse
+module Session = Masc.Session
 
 let workspace = Masc_test_deps.setup_test_workspace ()
 let auth = Masc_test_deps.make_sse_auth workspace "sse-coverage-agent"
@@ -23,6 +24,11 @@ let auth = Masc_test_deps.make_sse_auth workspace "sse-coverage-agent"
 let () = at_exit (fun () -> Masc_test_deps.cleanup_test_workspace workspace)
 
 let register_exn ?kind ?on_disconnect session_id ~last_event_id =
+  (* Pre-create the MCP session so registration validates an existing
+     session rather than auto-bootstrapping one (security/sse-auth-validation). *)
+  let (_ : Session.McpSessionStore.mcp_session) =
+    Session.McpSessionStore.get_or_create ~id:session_id ()
+  in
   match Masc.Sse.register ?kind ?on_disconnect ~auth session_id ~last_event_id with
   | Ok result -> result
   | Error e ->

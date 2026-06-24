@@ -9,6 +9,7 @@
     is asserted by behavior rather than by inspecting the fingerprint. *)
 
 module Sse = Masc.Sse
+module Session = Masc.Session
 module Broadcast = Server_dashboard_http_goal_loop_broadcast
 
 let status ~iter ~generated_at =
@@ -44,6 +45,11 @@ let drain session_id =
   loop 0
 
 let register_exn ~auth ?kind session_id ~last_event_id =
+  (* Pre-create the MCP session so registration validates an existing
+     session rather than auto-bootstrapping one (security/sse-auth-validation). *)
+  let (_ : Session.McpSessionStore.mcp_session) =
+    Session.McpSessionStore.get_or_create ~id:session_id ()
+  in
   match Sse.register ?kind ~auth session_id ~last_event_id with
   | Ok result -> result
   | Error e ->

@@ -51,6 +51,13 @@ val of_patterns : enabled:bool -> destructive_pattern list -> (t, load_error lis
     Returns an error if [enabled = true] but the pattern list is empty,
     or if any pattern has an empty [pattern] or [description] string. *)
 
+val disabled : t
+(** A policy with detection disabled and an empty catalogue. Total — no
+    parsing or validation. Use this where a caller needs an explicitly
+    disabled policy (e.g. {!Eval_gate.guarded_execute} when
+    [destructive_check_enabled = false]) instead of unwrapping
+    [of_patterns ~enabled:false []]. *)
+
 (** {1 Accessors} *)
 
 val enabled : t -> bool

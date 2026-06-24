@@ -469,12 +469,8 @@ let guarded_execute
     : Trajectory.gate_decision * string option * post_eval_result option * int =
 
   let effective_policy =
-    if config.destructive_check_enabled then
-      destructive_ops_policy
-    else
-      match Destructive_ops_policy.of_patterns ~enabled:false [] with
-      | Ok p -> p
-      | Error _ -> destructive_ops_policy
+    if config.destructive_check_enabled then destructive_ops_policy
+    else Destructive_ops_policy.disabled
   in
 
   let decision = pre_check ~config ~destructive_ops_policy:effective_policy ~accumulated_cost

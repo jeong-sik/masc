@@ -2,7 +2,7 @@ import { appendLiveOasEvent } from './components/session-trace/session-trace-liv
 import { isRecord, asNumber, asString } from './components/common/normalize'
 import { toKeeperPhase } from './keeper-store-normalize'
 import { fetchTelemetry, type TelemetryEntry } from './api/dashboard'
-import { OAS_TELEMETRY_REPLAY_LIMIT } from './config/constants'
+import { OAS_TELEMETRY_REPLAY_LIMIT, OAS_EVENT_PREFIX } from './config/constants'
 import {
   oasTotalEvents,
   oasAgentEvents,
@@ -564,7 +564,7 @@ function ingestRuntimeProjection(
 function coerceOasRuntimeEnvelope(raw: unknown): OasRuntimeEnvelope | null {
   if (!isRecord(raw)) return null
   const type = asString(raw.type)
-  if (!type || !type.startsWith('oas:')) return null
+  if (!type || !type.startsWith(OAS_EVENT_PREFIX)) return null
   return {
     ...raw,
     type,

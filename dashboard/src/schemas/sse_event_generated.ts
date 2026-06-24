@@ -104,10 +104,17 @@ export type AgentCompletedPayload = {
   elapsed_s: number;
 }
 
+export type JsonValue = any
+
 export type AgentFailedPayload = {
   agent_name: string;
   task_id: string;
   elapsed_s: number;
+  error: string;
+  error_domain: string;
+  error_code: string;
+  error_retryable: boolean;
+  error_detail: JsonValue;
 }
 
 export function writeAgentStartedPayload(x: AgentStartedPayload, context: any = x): any {
@@ -350,11 +357,24 @@ export function readAgentCompletedPayload(x: any, context: any = x): AgentComple
   };
 }
 
+export function writeJsonValue(x: JsonValue, context: any = x): any {
+  return ((x: any, context): any => x)(x, context);
+}
+
+export function readJsonValue(x: any, context: any = x): JsonValue {
+  return ((x: any, context): any => x)(x, context);
+}
+
 export function writeAgentFailedPayload(x: AgentFailedPayload, context: any = x): any {
   return {
     'agent_name': _atd_write_required_field('AgentFailedPayload', 'agent_name', _atd_write_string, x.agent_name, x),
     'task_id': _atd_write_required_field('AgentFailedPayload', 'task_id', _atd_write_string, x.task_id, x),
     'elapsed_s': _atd_write_required_field('AgentFailedPayload', 'elapsed_s', _atd_write_float, x.elapsed_s, x),
+    'error': _atd_write_required_field('AgentFailedPayload', 'error', _atd_write_string, x.error, x),
+    'error_domain': _atd_write_required_field('AgentFailedPayload', 'error_domain', _atd_write_string, x.error_domain, x),
+    'error_code': _atd_write_required_field('AgentFailedPayload', 'error_code', _atd_write_string, x.error_code, x),
+    'error_retryable': _atd_write_required_field('AgentFailedPayload', 'error_retryable', _atd_write_bool, x.error_retryable, x),
+    'error_detail': _atd_write_required_field('AgentFailedPayload', 'error_detail', writeJsonValue, x.error_detail, x),
   };
 }
 
@@ -363,6 +383,11 @@ export function readAgentFailedPayload(x: any, context: any = x): AgentFailedPay
     agent_name: _atd_read_required_field('AgentFailedPayload', 'agent_name', _atd_read_string, x['agent_name'], x),
     task_id: _atd_read_required_field('AgentFailedPayload', 'task_id', _atd_read_string, x['task_id'], x),
     elapsed_s: _atd_read_required_field('AgentFailedPayload', 'elapsed_s', _atd_read_float, x['elapsed_s'], x),
+    error: _atd_read_required_field('AgentFailedPayload', 'error', _atd_read_string, x['error'], x),
+    error_domain: _atd_read_required_field('AgentFailedPayload', 'error_domain', _atd_read_string, x['error_domain'], x),
+    error_code: _atd_read_required_field('AgentFailedPayload', 'error_code', _atd_read_string, x['error_code'], x),
+    error_retryable: _atd_read_required_field('AgentFailedPayload', 'error_retryable', _atd_read_bool, x['error_retryable'], x),
+    error_detail: _atd_read_required_field('AgentFailedPayload', 'error_detail', readJsonValue, x['error_detail'], x),
   };
 }
 

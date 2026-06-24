@@ -915,8 +915,9 @@ let effective_scheduled_autonomous_cooldown
   : int
   =
   (* Noop backoff: consecutive observation-only cycles multiply the base
-     cooldown by 2^min(n, 3), capping at 8x. This prevents token waste when
-     the keeper repeatedly reads board_list without taking action. *)
+     cooldown by 2^min(n, 2), capping at 4x (see [noop_multiplier] below: the
+     shift is [min consecutive_noop_count 2], i.e. 1, 2, 4). This prevents
+     token waste when the keeper repeatedly reads board_list without acting. *)
   let noop_multiplier =
     if consecutive_noop_count <= 0 then 1 else 1 lsl min consecutive_noop_count 2
     (* 1, 2, 4 *)

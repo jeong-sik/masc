@@ -866,13 +866,13 @@ describe('ChatComposer IME composition guard', () => {
     // composer's internal draft instead of the host panel — that is what stops
     // the transcript from re-rendering on every character. The composer must
     // still capture the text and carry it on the send payload (`text`).
-    let payload: ChatComposerSendPayload | null = null
+    const onSend = vi.fn()
     render(
       html`<${ChatComposer}
         placeholder="메시지 입력..."
         disabled=${false}
         streaming=${false}
-        onSend=${(p: ChatComposerSendPayload) => { payload = p }}
+        onSend=${onSend}
       />`,
       container,
     )
@@ -882,8 +882,9 @@ describe('ChatComposer IME composition guard', () => {
     fireEvent.input(textarea, { target: { value: '소주에 갑오징어' } })
     textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
 
-    expect(payload).not.toBeNull()
-    expect(payload?.text).toBe('소주에 갑오징어')
+    expect(onSend).toHaveBeenCalledTimes(1)
+    const sent = onSend.mock.calls[0]?.[0] as ChatComposerSendPayload | undefined
+    expect(sent?.text).toBe('소주에 갑오징어')
   })
 })
 

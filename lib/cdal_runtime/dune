@@ -1,23 +1,32 @@
-; RFC-OAS-011 MM-1 — Skeleton dune sublibrary for OAS CDAL runtime migration.
+; RFC-OAS-011 — masc.cdal_runtime sublibrary: the agent-runtime/producer side
+; of CDAL, migrated out of OAS (agent_sdk) into masc.
 ;
-; This sublibrary will host the agent-runtime side of CDAL (Cdal_proof,
-; Mode_enforcer, Risk_contract, Execution_mode, Proof_capture, Audit, ...)
-; once MM-2 leaf-first migration begins. It is intentionally separated from
-; masc's existing CDAL Phase 1A evaluators (lib/cdal_*.ml + lib/cdal/)
-; because the two layers have different responsibilities:
+; Migration status (2026-06-24): MM-1~MM-4 landed 2026-05-08~11 — #14247
+; (skeleton), #14248~#14264 (B1~B5 batches), #14267 (MM-3-rewire atomic flip
+; Agent_sdk.* -> Masc_cdal_runtime.*), #14285 (MM-4 agent_sdk pin bump). The
+; RFC document itself is still marked Draft (doc-lag); the code is complete.
 ;
-;   masc (本体, lib/cdal_*.ml + lib/cdal/) — CDAL Phase 1A evaluator:
-;     consumer-side judge, verdict_gate, labeling, adversarial_eval.
+; The contract/proof runtime pipeline migrated in B1~B5 was later PURGED in
+; #19469 ("Track B", 2026-05-29, -4987 LoC). Removed modules — do NOT expect
+; them here: cdal_proof, mode_enforcer, mode_resolver, risk_class,
+; risk_contract, execution_mode, effect_evidence, proof_capture, proof_store,
+; contract_runner, cognitive_event, criteria, internal_error_substrate.
 ;
-;   masc.cdal_runtime (this) — CDAL runtime/producer:
-;     proof capture middleware, mode enforcement, risk contract typing.
+; Surviving modules (all in active use):
+;   autonomy_exec    — external execution primitive (used by fd_accountant)
+;   direct_evidence  — proof/evidence materialization (used by worker_container)
+;   sessions_proof   — worker-run + proof_bundle assembly (used by worker_container)
+;   conformance      — session-proof conformance checks
+;   runtime_evidence — telemetry + file evidence bundles
 ;
-; Dependencies are intentionally minimal: only OAS's *core* (agent_sdk.base
-; for Tool/Hooks/Types) plus Yojson for serialization. NO dependency on the
-; masc main library — the producer side must remain reusable independently.
+; Intentionally separated from masc's CDAL Phase 1A evaluator (lib/cdal/,
+; masc.cdal, Adversarial_eval): different responsibility (producer vs
+; consumer-side judge) and different deps (this needs agent_sdk; the evaluator
+; needs none). NO dependency on the masc main library — the producer side must
+; remain reusable independently.
 ;
 ; @rfc RFC-OAS-011 (CDAL Migration to masc)
-; @phase MM-2-leaves — B1 batch (execution_mode, effect_evidence, guardrail_llm)
+; @phase Implemented (post-#19469 maintenance)
 
 ; The parent [lib/dune] uses [(include_subdirs unqualified)] which would
 ; otherwise absorb every .ml under lib/ into the main [masc] library
@@ -34,32 +43,32 @@
  (libraries
   masc_core
   agent_sdk.base
-  ; agent_sdk (full) is needed for Guardrails_async, referenced from
-  ; guardrail_llm.{ml,mli}.  The dune-package places guardrails_async
-  ; in the wrapped [agent_sdk] library, not under agent_sdk.base.
+  ; agent_sdk (full): originally added for Guardrails_async, referenced by the
+  ; now-purged guardrail_llm (#19469). Also backs the [-open Agent_sdk] flag
+  ; below, so it cannot be dropped without auditing the flag. Whether any
+  ; surviving module still needs the full agent_sdk is unverified (deps audit
+  ; deferred — see header).
   agent_sdk
-  ; unix is needed for [Unix.gettimeofday] in conformance.ml (added by
-  ; PR #14255 RFC-OAS-011 MM-2-mid B3).  Listed explicitly so dune
-  ; resolves the [Unix] module without requiring the consumer to open
-  ; it.
+  ; unix: [Unix.gettimeofday] in conformance.ml (surviving module).
   unix
-  ; eio + eio.unix are needed by guardrails_async.mli, guardrail_tripwire.ml,
-  ; autonomy_exec.{ml,mli}, contract_runner.mli (added by PR #14264
-  ; RFC-OAS-011 MM-2-top B5).  These modules have async fiber-based
-  ; signatures (Eio.*) and call Eio_unix.* helpers.
+  ; eio + eio.unix: async fiber signatures in autonomy_exec.{ml,mli} (surviving).
+  ; The other original users (guardrails_async, guardrail_tripwire,
+  ; contract_runner) were purged in #19469.
   eio
   eio.unix
-  ; eio_main needed by autonomy_exec.ml (Eio_main.run for async runtime entry).
+  ; eio_main: [Eio_main.run] in autonomy_exec.ml (surviving module).
   eio_main
-  ; agent_sdk.llm_provider is needed by contract_runner.ml (Llm_provider.*).
+  ; agent_sdk.llm_provider: originally for contract_runner ([Llm_provider.*]),
+  ; purged in #19469 — likely dead, removal deferred pending a deps audit.
   agent_sdk.llm_provider
   yojson
   ppx_deriving_yojson.runtime)
  ; Mirror agent_sdk's flag so migrated modules' `open Types` /
  ; `open Result_syntax` resolve against Agent_sdk_base, matching their
  ; original OAS compilation context.  Also open the wrapped [Agent_sdk]
- ; namespace so unqualified references such as [Guardrails_async] in
- ; [guardrail_llm.{ml,mli}] resolve to [Agent_sdk.Guardrails_async].
+ ; namespace for unqualified references to agent_sdk submodules.  (The
+ ; original example, [Guardrails_async] in guardrail_llm, was purged in
+ ; #19469; the flag is kept because [-open Agent_sdk__] below relies on it.)
  ; XXX -open Agent_sdk__ accesses agent_sdk's internal wrapper module
  ; (no .mli, so all submodule aliases are visible — including
  ; [Sessions_types], which is referenced by sessions_proof.mli but

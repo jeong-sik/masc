@@ -15,9 +15,25 @@
    lint cleanups.
 
    The baseline lives at [test/masc_dirname_ssot_baseline.txt] (one
-   [file:line] per line, sorted). To update after a real fix:
+   [relative_file<TAB>normalized_line] per line, sorted). To update
+   after a real fix:
      MASC_DIRNAME_SSOT_DUMP=1 dune exec test/test_masc_dirname_ssot.exe
    regenerates the file in place.
+
+   Keying — by (file, normalized source line), NOT (file, line number).
+   A [file:line] key breaks whenever an unrelated edit shifts line
+   numbers in a tolerated file: every shifted literal reads as one
+   baseline entry "removed" plus one "new violation" appearing, so a
+   large merge (#21864 line-shifted ~10 baselined files at once) turns
+   the ratchet red against literals that did not change. Keying on the
+   normalized line content (trimmed + internal whitespace collapsed)
+   is stable across line shifts and reindentation, while still flagging
+   a genuinely new literal — new content in any file is a new key, and
+   a copy into a different file carries that file into the key. The one
+   tolerated blind spot is a second identical literal added to the same
+   file (same key); that is far lower-risk than the false-positive red
+   it removes. Prior art for content- over position-keyed baselines:
+   Jane Street [expect-test] (compares text, not offsets).
 
    If the test fails with a non-empty "new violations" list, a new
    call site inlined [".masc"] where it should not have. The fix is
@@ -112,7 +128,28 @@ let line_is_comment_noise line =
      after the literal on the same line. *)
   || has_substring_after ~needle:"*)" ~after:"\"" line
 
-type occ = { file : string; line_no : int }
+(* Normalize a source line into a position-independent ratchet key
+   payload: drop leading/trailing whitespace and collapse every internal
+   run of spaces/tabs to a single space. Reindentation and line-number
+   shifts then leave the key untouched, while a genuinely different
+   literal still produces a different key. *)
+let normalize_ws s =
+  let buf = Buffer.create (String.length s) in
+  let pending_space = ref false in
+  let seen_nonspace = ref false in
+  String.iter
+    (fun c ->
+      if c = ' ' || c = '\t' then pending_space := true
+      else begin
+        if !seen_nonspace && !pending_space then Buffer.add_char buf ' ';
+        Buffer.add_char buf c;
+        seen_nonspace := true;
+        pending_space := false
+      end)
+    s;
+  Buffer.contents buf
+
+type occ = { file : string; text : string }
 
 let literal_occurrences_in_file file =
   let ic = open_in file in
@@ -130,7 +167,7 @@ let literal_occurrences_in_file file =
           with Not_found -> false)
       in
       if has_literal && not (line_is_comment_noise line) then
-        loop (n + 1) ({ file; line_no = n } :: acc)
+        loop (n + 1) ({ file; text = line } :: acc)
       else loop (n + 1) acc
     | exception End_of_file -> List.rev acc
   in
@@ -146,7 +183,7 @@ let rel path ~root =
     String.sub path start (plen - start)
   else path
 
-let key occ ~root = Printf.sprintf "%s:%d" (rel occ.file ~root) occ.line_no
+let key occ ~root = rel occ.file ~root ^ "\t" ^ normalize_ws occ.text
 
 (* The SSOT module itself is permitted — it is the definition. *)
 let is_ssot_module path =

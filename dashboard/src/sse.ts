@@ -22,6 +22,10 @@ import { appendAuditEntry } from './live-store'
 import { isCrashedPhase } from './lib/keeper-predicates'
 import { dashboardBearerToken } from './api/core'
 import { parseSSEMessage } from './schemas/sse'
+import {
+  parseOasPayload,
+  type TypedOasPayload,
+} from './schemas/sse-event-payload'
 import { asNumber } from './components/common/normalize'
 import { RingBuffer } from './lib/ring-buffer'
 import { createSseTransport } from './transports/sse-transport'
@@ -206,6 +210,22 @@ function envelopeFromEvent(event: SSEEvent): Pick<JournalEntry, 'correlationId' 
     out.oasTs = event.ts_unix
   }
   return out
+}
+
+/** Parse an OAS event payload through the atdgen-generated typed boundary.
+ *  Returns the typed payload on success, or null on failure; failures are
+ *  logged with structured issues so malformed events are not silently dropped. */
+function parseOasPayloadOrWarn(
+  eventType: string,
+  payload: unknown,
+): TypedOasPayload | null {
+  const result = parseOasPayload(eventType, payload)
+  if (result.success) return result.data
+  console.warn('[SSE] dropping malformed OAS payload', {
+    issues: result.error.issues,
+    payload,
+  })
+  return null
 }
 
 // --- SSE Manager ---
@@ -821,132 +841,190 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
-    case 'oas:agent_started':
-    case 'oas:agent_completed': {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const agentName = asString(p.agent_name) ?? asString(event.agent_name) ?? agent
-      const taskId = asString(p.task_id)
-      const elapsed = asNumber(p.elapsed_s)
-      const phase = type === 'oas:agent_started' ? 'started' : 'completed'
+    case 'oas:agent_started': {
+      const parsed = parseOasPayloadOrWarn(type, event.payload)
+      if (!parsed || parsed.kind !== 'agent_started') break
+      const { payload } = parsed
       addTypedJournalEntry(
-        agentName,
-        `Agent run ${phase}${taskId ? ` · ${taskId}` : ''}${elapsed != null ? ` · ${elapsed.toFixed(1)}s` : ''}`,
+        payload.agent_name,
+        `Agent run started${payload.task_id ? ` · ${payload.task_id}` : ''}`,
         'oas',
         'oas_event',
         {
           severity: event.severity,
           source: event.source,
-          narrativeText: `${actorLabel(agentName)} agent run ${phase}${taskId ? ` (${taskId})` : ''}`,
-          preview: taskId,
+          narrativeText: `${actorLabel(payload.agent_name)} agent run started${payload.task_id ? ` (${payload.task_id})` : ''}`,
+          preview: payload.task_id,
+          ...envelopeFromEvent(event),
+        },
+      )
+      break
+    }
+    case 'oas:agent_completed': {
+      const parsed = parseOasPayloadOrWarn(type, event.payload)
+      if (!parsed || parsed.kind !== 'agent_completed') break
+      const { payload } = parsed
+      addTypedJournalEntry(
+        payload.agent_name,
+        `Agent run completed${payload.task_id ? ` · ${payload.task_id}` : ''} · ${payload.elapsed_s.toFixed(1)}s`,
+        'oas',
+        'oas_event',
+        {
+          severity: event.severity,
+          source: event.source,
+          narrativeText: `${actorLabel(payload.agent_name)} agent run completed${payload.task_id ? ` (${payload.task_id})` : ''}`,
+          preview: payload.task_id,
           ...envelopeFromEvent(event),
         },
       )
       break
     }
     case 'oas:agent_failed': {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const agentName = asString(p.agent_name) ?? asString(event.agent_name) ?? agent
-      const taskId = asString(p.task_id)
-      const elapsed = asNumber(p.elapsed_s)
-      const error = asString(p.error)
+      const parsed = parseOasPayloadOrWarn(type, event.payload)
+      if (!parsed || parsed.kind !== 'agent_failed') break
+      const { payload } = parsed
       addTypedJournalEntry(
-        agentName,
-        `Agent run failed${taskId ? ` · ${taskId}` : ''}${elapsed != null ? ` · ${elapsed.toFixed(1)}s` : ''}${error ? ` · ${error}` : ''}`,
+        payload.agent_name,
+        `Agent run failed${payload.task_id ? ` · ${payload.task_id}` : ''} · ${payload.elapsed_s.toFixed(1)}s${payload.error ? ` · ${payload.error}` : ''}`,
         'oas',
         'oas_event',
         {
           severity: event.severity,
           source: event.source,
-          narrativeText: `${actorLabel(agentName)} agent run failed${taskId ? ` (${taskId})` : ''}${error ? `: ${error}` : ''}`,
-          preview: taskId ?? error,
+          narrativeText: `${actorLabel(payload.agent_name)} agent run failed${payload.task_id ? ` (${payload.task_id})` : ''}${payload.error ? `: ${payload.error}` : ''}`,
+          preview: payload.task_id ?? payload.error,
           ...envelopeFromEvent(event),
         },
       )
       break
     }
-    case 'oas:tool_called':
-    case 'oas:tool_completed': {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const agentName = asString(p.agent_name) ?? asString(event.agent_name) ?? agent
-      const toolName = asString(p.tool_name) ?? 'unknown'
-      const phase = type === 'oas:tool_called' ? 'called' : 'completed'
+    case 'oas:tool_called': {
+      const parsed = parseOasPayloadOrWarn(type, event.payload)
+      if (!parsed || parsed.kind !== 'tool_called') break
+      const { payload } = parsed
       addTypedJournalEntry(
-        agentName,
-        `Tool ${phase}: ${toolName}`,
+        payload.agent_name,
+        `Tool called: ${payload.tool_name}`,
         'oas',
         'oas_tool',
         {
           severity: event.severity,
           source: event.source,
-          narrativeText: `${actorLabel(agentName)} 도구 ${phase}: ${toolName}`,
+          narrativeText: `${actorLabel(payload.agent_name)} 도구 called: ${payload.tool_name}`,
         },
       )
       break
     }
-    case 'oas:handoff_requested':
-    case 'oas:handoff_completed': {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const fromAgent = asString(p.from_agent) ?? asString(event.agent_name) ?? agent
-      const toAgent = asString(p.to_agent) ?? 'unknown'
-      const elapsed = asNumber(p.elapsed_s)
-      const reason = asString(p.reason)
-      const phase = type === 'oas:handoff_requested' ? 'requested' : 'completed'
+    case 'oas:tool_completed': {
+      const parsed = parseOasPayloadOrWarn(type, event.payload)
+      if (!parsed || parsed.kind !== 'tool_completed') break
+      const { payload } = parsed
       addTypedJournalEntry(
-        fromAgent,
-        `Handoff ${phase} · ${fromAgent}→${toAgent}${elapsed != null ? ` · ${elapsed.toFixed(1)}s` : ''}${reason ? ` · ${reason}` : ''}`,
+        payload.agent_name,
+        `Tool completed: ${payload.tool_name}`,
+        'oas',
+        'oas_tool',
+        {
+          severity: event.severity,
+          source: event.source,
+          narrativeText: `${actorLabel(payload.agent_name)} 도구 completed: ${payload.tool_name}`,
+        },
+      )
+      break
+    }
+    case 'oas:handoff_requested': {
+      const parsed = parseOasPayloadOrWarn(type, event.payload)
+      if (!parsed || parsed.kind !== 'handoff_requested') break
+      const { payload } = parsed
+      addTypedJournalEntry(
+        payload.from_agent,
+        `Handoff requested · ${payload.from_agent}→${payload.to_agent}${payload.reason ? ` · ${payload.reason}` : ''}`,
         'oas',
         'oas_event',
         {
           severity: event.severity,
           source: event.source,
-          narrativeText: `Handoff ${phase}: ${actorLabel(fromAgent)} → ${actorLabel(toAgent)}${reason ? ` (${reason})` : ''}`,
-          preview: `${fromAgent}→${toAgent}`,
+          narrativeText: `Handoff requested: ${actorLabel(payload.from_agent)} → ${actorLabel(payload.to_agent)}${payload.reason ? ` (${payload.reason})` : ''}`,
+          preview: `${payload.from_agent}→${payload.to_agent}`,
           ...envelopeFromEvent(event),
         },
       )
       break
     }
-    case 'oas:turn_started':
-    case 'oas:turn_completed': {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const agentName = asString(p.agent_name) ?? asString(event.agent_name) ?? agent
-      const turn = asNumber(p.turn)
-      const phase = type === 'oas:turn_started' ? 'started' : 'completed'
+    case 'oas:handoff_completed': {
+      const parsed = parseOasPayloadOrWarn(type, event.payload)
+      if (!parsed || parsed.kind !== 'handoff_completed') break
+      const { payload } = parsed
       addTypedJournalEntry(
-        agentName,
-        `Turn ${phase}${turn != null ? ` · T${turn}` : ''}`,
+        payload.from_agent,
+        `Handoff completed · ${payload.from_agent}→${payload.to_agent} · ${payload.elapsed_s.toFixed(1)}s`,
+        'oas',
+        'oas_event',
+        {
+          severity: event.severity,
+          source: event.source,
+          narrativeText: `Handoff completed: ${actorLabel(payload.from_agent)} → ${actorLabel(payload.to_agent)}`,
+          preview: `${payload.from_agent}→${payload.to_agent}`,
+          ...envelopeFromEvent(event),
+        },
+      )
+      break
+    }
+    case 'oas:turn_started': {
+      const parsed = parseOasPayloadOrWarn(type, event.payload)
+      if (!parsed || parsed.kind !== 'turn_started') break
+      const { payload } = parsed
+      addTypedJournalEntry(
+        payload.agent_name,
+        `Turn started · T${payload.turn}`,
         'oas',
         'oas_turn',
         {
           severity: event.severity,
           source: event.source,
-          narrativeText: `${actorLabel(agentName)} turn ${phase}${turn != null ? ` (T${turn})` : ''}`,
+          narrativeText: `${actorLabel(payload.agent_name)} turn started (T${payload.turn})`,
+        },
+      )
+      break
+    }
+    case 'oas:turn_completed': {
+      const parsed = parseOasPayloadOrWarn(type, event.payload)
+      if (!parsed || parsed.kind !== 'turn_completed') break
+      const { payload } = parsed
+      addTypedJournalEntry(
+        payload.agent_name,
+        `Turn completed · T${payload.turn}`,
+        'oas',
+        'oas_turn',
+        {
+          severity: event.severity,
+          source: event.source,
+          narrativeText: `${actorLabel(payload.agent_name)} turn completed (T${payload.turn})`,
         },
       )
       break
     }
     case 'oas:context_compacted': {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const agentName = asString(p.agent_name) ?? asString(event.agent_name) ?? agent
-      const before = asNumber(p.before_tokens)
-      const after = asNumber(p.after_tokens)
-      const phase = asString(p.phase)
+      const parsed = parseOasPayloadOrWarn(type, event.payload)
+      if (!parsed || parsed.kind !== 'context_compacted') break
+      const { payload } = parsed
+      const trigger = payload.phase ? `OAS ${payload.phase}` : 'OAS context_compacted'
       recordSseCompaction(
-        agentName,
-        before,
-        after,
-        phase ? `OAS ${phase}` : 'OAS context_compacted',
-        asString(p.runtime) ?? '—',
+        payload.agent_name,
+        payload.before_tokens,
+        payload.after_tokens,
+        trigger,
+        payload.runtime ?? '—',
       )
       addTypedJournalEntry(
-        agentName,
-        `OAS compact${before != null && after != null ? ` · ${before}→${after}` : ''}${phase ? ` · ${phase}` : ''}`,
+        payload.agent_name,
+        `OAS compact · ${payload.before_tokens}→${payload.after_tokens} · ${payload.phase}`,
         'oas',
         'oas_context',
         {
           severity: event.severity,
           source: event.source,
-          narrativeText: `${actorLabel(agentName)} OAS context compact${phase ? ` (${phase})` : ''}`,
+          narrativeText: `${actorLabel(payload.agent_name)} OAS context compact (${payload.phase})`,
         },
       )
       break

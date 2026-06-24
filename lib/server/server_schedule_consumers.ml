@@ -2,7 +2,7 @@
    [Schedule_runner] and persisted as execution records; the server maintenance
    loop logs aggregate dispatch counts for runtime telemetry. *)
 
-let supported_payload_kinds = [ "masc.board_post" ]
+let supported_payload_kinds = Schedule_supported_kinds.supported
 
 let ( let* ) = Result.bind
 

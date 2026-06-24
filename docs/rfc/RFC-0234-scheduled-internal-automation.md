@@ -197,6 +197,37 @@ clarification payload such as `kind = "operator.clarification_request"`. The
 schedule core treats that as opaque data too; the consumer decides how to ask
 and what later schedule, if any, to create from the answer.
 
+### Supported payload kind contract (creation gate)
+
+The schedule domain keeps the payload envelope opaque (above), but the
+**creation tool path** rejects **side-effecting** payload kinds the
+production consumer cannot dispatch. Read-only/reminder kinds carry no side
+effect, so they stay opaque and are allowed; the consumer records a visible
+failed execution if it cannot interpret one. The single source of truth for
+dispatchable side-effecting kinds is
+`lib/schedule/schedule_supported_kinds.ml`, referenced by both the creation
+validator (`lib/tool_schedule.ml:validate_known_payload_request`) and the
+consumer (`lib/server/server_schedule_consumers.ml:supported_payload_kinds`).
+Adding a kind to that list is the contract surface; the consumer adapter
+must still implement `accepts`/`dispatch` for it.
+
+This closes the accept-then-die gap. Before this gate, a producer could
+create a schedule with any `kind` string (`orphan_auto_release`,
+`task_goal_generation`, `backlog_depletion_check`, `keeper_surface_post`)
+the consumer could not interpret. The schedule was persisted, became due,
+and the consumer rejected it at dispatch — recorded as a failed execution
+with `error = "unsupported schedule payload kind: ..."` (`fail_due_candidate`
+in `lib/schedule/schedule_store.ml`). The failure was already visible through
+the dashboard (`last_execution.error`), but the schedule was already dead and
+left terminal clutter in the ledger. The creation gate rejects the kind up
+front so the producer learns immediately and cannot fill the queue with work
+that cannot run.
+
+Those keeper-autonomous kinds are intentionally **not** in the supported set:
+they require keeper runtime context (bound surfaces, keeper identity, secret
+redaction) the schedule consumer does not own. They belong in the keeper
+`scheduled_autonomous` path, not the generic schedule queue.
+
 ## §5 Separation-of-duties invariant
 
 The central predicate is:

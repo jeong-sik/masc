@@ -67,28 +67,39 @@ let find_write_escape (caps : Capability.t list) : Path_scope.t option =
 [@@warning "-4"]
 
 (* Scan for a binary that is catastrophic by identity — never legitimate for
-   a keeper regardless of arguments (currently [mkfs]).  Part of the
-   trust-independent floor (RFC-0254 §5.4).
+   a keeper regardless of arguments.  Part of the trust-independent floor
+   (RFC-0254 §5.4).  Two families:
+   - filesystem format ([mkfs] and the [mkfs.<fstype>] helpers, normalized to
+     [Mkfs] in [Exec_program.of_string]);
+   - system-power control ([shutdown], [reboot], [halt], [poweroff]):
+     path-independent, and a keeper has no legitimate argument form for halting
+     or rebooting the host.  All four are floored together so encoding only a
+     subset would leave a sparse-match bypass (RFC eliminate-substring-
+     destructive-classifier §2.3 / §3-A).
 
    Path-bearing destructive programs ([rm], [dd], [chmod], …) are
    deliberately absent: their danger is a function of the *target path*, which
    is jailed to the workspace by [Exec_policy.validate_shell_ir_paths]
    downstream of the gate (a [rm -rf /] target fails the path whitelist there,
-   gate on or off).  This scan is only for binaries denied even with a
-   workspace-internal argument.
+   gate on or off).  [dd] specifically stays out for the same reason: [dd
+   of=./out.img] is an ordinary workspace write, only [dd of=/dev/sda] is
+   catastrophic, and that is a path question.  This scan is only for binaries
+   denied even with a workspace-internal argument.
 
    [@@warning "-4"] (on the function below): the [_ :: rest] arm and the
    [Some _ | None] arm are a find-first scan that intentionally skips every
    non-matching capability and every non-catastrophic binary, future ctors
    included — RFC-0071 §3.4.1 nested find-first scan exemption (same rationale
    as [find_destructive_git]).  A new catastrophic binary is added as a
-   positive arm beside [Some Exec_program.Mkfs]. *)
+   positive arm in the match below. *)
 let find_catastrophic_program (caps : Capability.t list) : Exec_program.t option =
   let rec scan = function
     | [] -> None
     | Capability.Exec_program (bin, _) :: rest ->
       (match Exec_program.known bin with
-       | Some Exec_program.Mkfs -> Some bin
+       | Some
+           ( Exec_program.Mkfs | Exec_program.Shutdown | Exec_program.Reboot
+           | Exec_program.Halt | Exec_program.Poweroff ) -> Some bin
        | Some _ | None -> scan rest)
     | Capability.Pipeline_fold inner :: rest ->
       (match scan inner with

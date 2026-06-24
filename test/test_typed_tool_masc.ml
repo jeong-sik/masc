@@ -81,7 +81,7 @@ let test_e2e_success () =
   let oas_tool = Typed_tool_masc.to_oas Tool_broadcast_typed.tool in
   let json = `Assoc [("message", `String "typed e2e")] in
   match Agent_sdk.Typed_tool.execute oas_tool json with
-  | Ok { content } ->
+  | Ok { content; _ } ->
     let result = Yojson.Safe.from_string content in
     let open Yojson.Safe.Util in
     Alcotest.(check bool) "delivered" true (result |> member "delivered" |> to_bool)
@@ -96,7 +96,7 @@ let test_e2e_parse_error () =
 let test_e2e_coerced_input () =
   let oas_tool = Typed_tool_masc.to_oas Tool_broadcast_typed.tool in
   match Agent_sdk.Typed_tool.execute oas_tool (`Assoc [("message", `Int 99)]) with
-  | Ok { content } ->
+  | Ok { content; _ } ->
     let result = Yojson.Safe.from_string content in
     let open Yojson.Safe.Util in
     Alcotest.(check bool) "delivered" true (result |> member "delivered" |> to_bool);

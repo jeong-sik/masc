@@ -1303,7 +1303,7 @@ let make_delayed_read_tool clock name delay_ms =
     ~parameters:[]
     (fun _args ->
        Eio.Time.sleep clock (Float.of_int delay_ms /. 1000.0);
-       Ok { Agent_sdk.Types.content = name })
+       Ok { Agent_sdk.Types.content = name; _meta = None })
 ;;
 
 let execute_tools_in_env env ~tools tool_uses =

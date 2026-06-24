@@ -74,6 +74,10 @@ val decide_keepalive_scheduling :
   ?runtime_resilience_of_name:(string -> string option) ->
   ?keeper_resilience_of_name:(string -> string option) ->
   ?reactive_wake:bool ->
+  ?wake_tombstone_decide:
+    (origin:Keeper_wake_tombstone.wake_origin ->
+     keeper_name:string ->
+     Keeper_wake_tombstone.wake_decision) ->
   stop:bool Atomic.t ->
   meta:keeper_meta ->
   Keeper_world_observation.world_observation ->

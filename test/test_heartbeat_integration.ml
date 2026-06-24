@@ -33,6 +33,42 @@ let temp_dir prefix =
   Unix.mkdir dir 0o755;
   dir
 
+(* The autonomous keeper_cycle_decision path resolves a runtime id
+   (Keeper_meta_contract.runtime_id_of_meta -> Runtime.get_default_runtime_id),
+   which fails with no silent fallback (RFC-0206 §2.1) unless a default runtime
+   is initialized. Reactive turns return before that point, so only the
+   autonomous R2b test needs this. Tolerant of an already-initialized runtime
+   (Alcotest runs the whole binary in one process). *)
+let ensure_default_runtime () =
+  let runtime_toml =
+    {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+  in
+  let path = Filename.temp_file "heartbeat_integ_runtime_" ".toml" in
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc runtime_toml);
+  (* Ignore Error: a prior test in the binary may have initialized it already. *)
+  ignore (Runtime.init_default ~config_path:path)
+
 let cleanup_dir dir =
   let rec rm path =
     if Sys.file_exists path then
@@ -872,6 +908,61 @@ let test_keeper_health_backpressure_uses_keeper_name () =
      check string "keeper health reason" "keeper_health_unhealthy" reason
    | Obs.Runtime_admitted -> fail "keeper health should reject turn")
 
+(* RFC-0294 R2b: a scheduled-autonomous (self-cadence) cycle that the world
+   wants to run is suppressed when the keeper is latched in a no-progress loop.
+   The tombstone gate is injected so the test does not depend on global detector
+   state. [requested_should_run_turn] stays true (the world wanted a turn); only
+   [should_run_turn] flips to false (admission gate, like backpressure). *)
+let test_self_cadence_tombstone_suppresses_autonomous_turn () =
+  ensure_default_runtime ();
+  let meta = make_meta "r2b-self-cadence-latched" in
+  let obs = { base_observation with claimable_task_count = 1 } in
+  let suppress_self_cadence ~origin ~keeper_name:_ =
+    match origin with
+    | Masc.Keeper_wake_tombstone.Self_cadence ->
+      Masc.Keeper_wake_tombstone.Suppressed
+        Masc.Keeper_wake_tombstone.Tombstoned_no_progress_loop
+    | _ -> Masc.Keeper_wake_tombstone.Wake_allowed
+  in
+  let decision =
+    KHL.decide_keepalive_scheduling
+      ~runtime_id_of_meta:(fun _ -> "runtime-test")
+      ~wake_tombstone_decide:suppress_self_cadence
+      ~stop:(Atomic.make false)
+      ~meta
+      obs
+  in
+  check bool "autonomous turn was requested" true
+    decision.requested_should_run_turn;
+  check bool "self-cadence tombstone suppresses the run" false
+    decision.should_run_turn;
+  check bool "verdict reasons include the tombstone label" true
+    (List.mem "tombstone_no_progress_loop" decision.verdict_reasons)
+
+(* RFC-0294 R2b false-positive guard: the self-cadence gate applies only to the
+   autonomous channel. A reactive turn (external mention) is gated upstream in
+   the registry, so even a suppressor that would reject every origin must not
+   pause a reactive cycle here — the gate never consults it. *)
+let test_self_cadence_tombstone_does_not_gate_reactive_turn () =
+  let meta = make_meta "r2b-reactive-not-gated" in
+  let obs =
+    { base_observation with pending_mentions = [ "operator", "please run" ] }
+  in
+  let suppress_everything ~origin:_ ~keeper_name:_ =
+    Masc.Keeper_wake_tombstone.Suppressed
+      Masc.Keeper_wake_tombstone.Tombstoned_no_progress_loop
+  in
+  let decision =
+    KHL.decide_keepalive_scheduling
+      ~runtime_id_of_meta:(fun _ -> "runtime-test")
+      ~wake_tombstone_decide:suppress_everything
+      ~stop:(Atomic.make false)
+      ~meta
+      obs
+  in
+  check bool "reactive turn runs despite a self-cadence suppressor" true
+    decision.should_run_turn
+
 let test_crashed_cycle_records_health_failure () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -953,6 +1044,10 @@ let () =
         test_runtime_backpressure_blocks_requested_turn;
       test_case "keeper health blocks by keeper name" `Quick
         test_keeper_health_backpressure_uses_keeper_name;
+      test_case "R2b self-cadence tombstone suppresses autonomous turn" `Quick
+        test_self_cadence_tombstone_suppresses_autonomous_turn;
+      test_case "R2b self-cadence tombstone does not gate reactive turn" `Quick
+        test_self_cadence_tombstone_does_not_gate_reactive_turn;
       test_case "crashed cycles feed agent health breaker" `Quick
         test_crashed_cycle_records_health_failure;
     ];

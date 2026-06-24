@@ -34,7 +34,12 @@ let get_clock_opt () = Eio_context.get_clock_opt ()
 (** {1 State Construction} *)
 let get_clock () = Eio_context.get_clock ()
 
-let create_state ?test_mode:_ ~base_path () = Mcp_server.create_state ~base_path
+let create_state ?test_mode ~base_path () =
+  let state = Mcp_server.create_state ~base_path in
+  (match test_mode with
+   | Some true -> Auth.disable_auth base_path
+   | _ -> ());
+  state
 
 let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   Mcp_server.create_state_eio

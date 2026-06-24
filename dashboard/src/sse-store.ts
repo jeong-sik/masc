@@ -59,6 +59,7 @@ import { hydrateGoalTreeSnapshot } from './goal-tree-state'
 import { hydrateGoalLoopSnapshot } from './goal-loop-state'
 import { showToast } from './components/common/toast'
 import type { ErrorCode } from './types/error'
+import { parseOasPayloadOrNull } from './schemas/sse-event-payload'
 import { route } from './router'
 import { routeWantsRefreshTarget, type RouteRefreshTarget } from './refresh-scope'
 import {
@@ -533,17 +534,16 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
   }
 
   if (event.type === 'oas:agent_failed') {
-    const p = (event.payload ?? {}) as Record<string, unknown>
-    const rawCode = typeof p.error_code === 'string' ? p.error_code : undefined
+    const parsed = parseOasPayloadOrNull(event.type, event.payload)
+    if (!parsed || parsed.kind !== 'agent_failed') return false
+    const { payload: p } = parsed
     void import('./components/common/error-notification')
       .then(({ handleAgentFailed }) => {
         handleAgentFailed({
-          agentName: typeof p.agent_name === 'string' ? p.agent_name
-            : event.agent_name ?? 'unknown',
-          taskId: typeof p.task_id === 'string' ? p.task_id : undefined,
-          errorCode: rawCode as ErrorCode | undefined,
-          error: typeof p.error === 'string' ? p.error
-            : event.error_text ?? '알 수 없는 오류',
+          agentName: (p.agent_name || event.agent_name) ?? 'unknown',
+          taskId: p.task_id,
+          errorCode: p.error_code as ErrorCode | undefined,
+          error: (p.error || event.error_text) ?? '알 수 없는 오류',
         })
       })
       .catch(err => {

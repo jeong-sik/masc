@@ -5,6 +5,7 @@
 // boot, so keep validation direct and limited to the boundary guarantees the
 // handlers rely on.
 
+import { OAS_EVENT_PREFIX } from '../config/constants'
 import type {
   Attribution,
   AttributionOutcome,
@@ -189,7 +190,7 @@ function isIgnorableMcpNotification(value: unknown): boolean {
 
 function isSSEEventType(value: unknown): value is SSEEventType {
   return typeof value === 'string' && (
-    FIXED_SSE_EVENT_TYPES.has(value) || value.startsWith('oas:')
+    FIXED_SSE_EVENT_TYPES.has(value) || value.startsWith(OAS_EVENT_PREFIX)
   )
 }
 
@@ -299,7 +300,7 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
     }
   }
 
-  if (value.payload != null && !isRecord(value.payload) && !value.type.startsWith('oas:')) {
+  if (value.payload != null && !isRecord(value.payload) && !value.type.startsWith(OAS_EVENT_PREFIX)) {
     return fail('payload', 'Expected payload object')
   }
   if (value.attribution != null) {

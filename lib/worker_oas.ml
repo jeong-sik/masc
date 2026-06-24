@@ -524,8 +524,7 @@ let rec run_worker_via_oas
           ()
   : (Worker_container_types.run_result, string) result
   =
-  Masc_runtime_events.emit_turn_start ();
-  Eio_guard.protect ~finally:Masc_runtime_events.emit_turn_end
+  Masc_runtime_events.with_turn_span
   @@ fun () ->
   let session_id = meta.mcp_session_id in
   let worker_name = meta.worker_name in
@@ -584,8 +583,7 @@ and resume_worker_via_oas
       ()
   : (Worker_container_types.run_result, string) result
   =
-  Masc_runtime_events.emit_turn_start ();
-  Eio_guard.protect ~finally:Masc_runtime_events.emit_turn_end
+  Masc_runtime_events.with_turn_span
   @@ fun () ->
   let worker_name = meta.worker_name in
   let session_id = meta.mcp_session_id in

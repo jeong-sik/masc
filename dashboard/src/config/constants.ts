@@ -7,6 +7,12 @@ export const DEFAULT_MASC_HOST = 'localhost'
 export const DEFAULT_MASC_PORT = 8935
 export const DEFAULT_MASC_ORIGIN = `http://${DEFAULT_MASC_HOST}:${DEFAULT_MASC_PORT}`
 
+// --- OAS event namespace ---
+// SSE event types emitted by the OAS keeper runtime are namespaced with this
+// prefix (e.g. "oas:context_compacted"). Single source so the prefix string and
+// its strip length stay in sync across the parser and ingress guards.
+export const OAS_EVENT_PREFIX = 'oas:'
+
 // --- HTTP timeouts (milliseconds) ---
 // Backend dashboard timeout is 30s; frontend must wait slightly longer.
 export const DEFAULT_GET_TIMEOUT_MS = 35_000

@@ -34,6 +34,9 @@
   test_keeper_memory_lane
   test_keeper_reactive_wake_backlog_gate
   test_keeper_no_signal_silence
+  test_keeper_failed_task_not_proactive_driver
+  test_advisory_only_affordance_never_drives_wake
+  test_keeper_failed_task_orphan_does_not_livelock
   test_broadcast_wakeup_policy
   test_keeper_mention_scope
   test_keeper_lane_mentions
@@ -343,6 +346,9 @@
   test_env_keeper_scrub
   test_keeper_reactive_wake_backlog_gate
   test_keeper_no_signal_silence
+  test_keeper_failed_task_not_proactive_driver
+  test_advisory_only_affordance_never_drives_wake
+  test_keeper_failed_task_orphan_does_not_livelock
   test_broadcast_wakeup_policy
   test_keeper_mention_scope
   test_keeper_lane_mentions

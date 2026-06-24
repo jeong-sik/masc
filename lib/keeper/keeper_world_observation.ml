@@ -484,6 +484,10 @@ let pending_board_event_of_stimulus
   | Keeper_event_queue.Fusion_completed fc ->
     Some (pending_board_event_of_fusion_completion ~meta ~arrived_at:stimulus.arrived_at fc)
   | Keeper_event_queue.Bootstrap | Keeper_event_queue.No_progress_recovery -> None
+  | Keeper_event_queue.Bg_completed _ ->
+    (* RFC-0290 Phase 1: no producer emits Bg_completed yet; surfacing the bg
+       outcome as a pending_board_event lands with the executor in Phase 3. *)
+    None
 ;;
 
 (** Collect recent board activity using cursor-based tracking.

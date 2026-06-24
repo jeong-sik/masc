@@ -15,6 +15,7 @@ type stimulus_kind =
   | Bootstrap
   | No_progress_recovery
   | Fusion_completed  (** RFC-0266: async masc_fusion completion wake *)
+  | Bg_completed  (** RFC-0290: generic background job completion wake *)
 
 type reaction_kind =
   | Turn_started

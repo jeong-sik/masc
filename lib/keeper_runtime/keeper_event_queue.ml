@@ -31,6 +31,11 @@ type stimulus_payload =
       (* RFC-0266: an async [masc_fusion] deliberation finished. Wakes the
          calling keeper so the resolved answer arrives as actionable turn
          input on its next cycle, instead of being discovered passively. *)
+  | Bg_completed of bg_job_completion
+      (* RFC-0290: a generic background job finished. Mirrors [Fusion_completed]
+         — wakes the calling keeper so the outcome arrives as actionable turn
+         input. Phase 1 adds the variant only; no producer emits it yet
+         (executor lands in RFC-0290 Phase 3). *)
 
 and fusion_completion = {
   run_id : string;
@@ -41,9 +46,36 @@ and fusion_completion = {
   (* correlates to the sink's board evidence post; "" if none was created. *)
 }
 
+and bg_job_completion = {
+  bg_run_id : string;
+  bg_kind : bg_job_kind;
+  bg_outcome : bg_job_outcome;
+  bg_board_post_id : string;
+  (* correlates to an optional board evidence post; "" if none was created. *)
+}
+
+and bg_job_kind = Subprocess
+      (* RFC-0290: closed sum of background job kinds (v1 = [Subprocess]); a new
+         kind forces every match to add an arm rather than defaulting. *)
+
+and bg_job_outcome =
+  | Bg_ok of string  (* result payload *)
+  | Bg_failed of string  (* failure label *)
+
 let fusion_completion_post_id (fc : fusion_completion) =
   if String.equal fc.board_post_id "" then "fusion-run:" ^ fc.run_id
   else fc.board_post_id
+
+let bg_job_completion_post_id (c : bg_job_completion) =
+  if String.equal c.bg_board_post_id "" then "bg-run:" ^ c.bg_run_id
+  else c.bg_board_post_id
+
+let bg_job_kind_to_string = function
+  | Subprocess -> "subprocess"
+
+let bg_job_kind_of_string = function
+  | "subprocess" -> Ok Subprocess
+  | other -> Error (Printf.sprintf "unknown bg_job_kind: %s" other)
 
 type stimulus = {
   post_id : post_id;
@@ -120,10 +152,12 @@ let payload_kind_label = function
   | Bootstrap -> "bootstrap"
   | No_progress_recovery -> "no_progress_recovery"
   | Fusion_completed _ -> "fusion_completed"
+  | Bg_completed _ -> "bg_completed"
 
 let is_board_signal = function
   | Board_signal _ -> true
-  | Bootstrap | No_progress_recovery | Fusion_completed _ -> false
+  | Bootstrap | No_progress_recovery | Fusion_completed _ | Bg_completed _ ->
+    false
 
 let drain_board_window ?(window_sec = 2.0) (queue : t) : stimulus list * t =
   let now = Unix.gettimeofday () in
@@ -238,6 +272,18 @@ let payload_to_yojson = function
       ; "resolved_answer", `String fusion.resolved_answer
       ; "board_post_id", `String fusion.board_post_id
       ]
+  | Bg_completed c ->
+    let ok, payload =
+      match c.bg_outcome with Bg_ok s -> (true, s) | Bg_failed s -> (false, s)
+    in
+    `Assoc
+      [ "kind", `String "bg_completed"
+      ; "run_id", `String c.bg_run_id
+      ; "job_kind", `String (bg_job_kind_to_string c.bg_kind)
+      ; "ok", `Bool ok
+      ; "payload", `String payload
+      ; "board_post_id", `String c.bg_board_post_id
+      ]
 
 let payload_of_yojson json =
   let context = "stimulus.payload" in
@@ -261,6 +307,17 @@ let payload_of_yojson json =
     let* resolved_answer = string_field ~context "resolved_answer" fields in
     let* board_post_id = string_field ~context "board_post_id" fields in
     Ok (Fusion_completed { run_id; ok; resolved_answer; board_post_id })
+  | "bg_completed" ->
+    let* run_id = string_field ~context "run_id" fields in
+    let* job_kind_s = string_field ~context "job_kind" fields in
+    let* bg_kind = bg_job_kind_of_string job_kind_s in
+    let* ok = bool_field ~context "ok" fields in
+    let* payload = string_field ~context "payload" fields in
+    let* board_post_id = string_field ~context "board_post_id" fields in
+    let bg_outcome = if ok then Bg_ok payload else Bg_failed payload in
+    Ok
+      (Bg_completed
+         { bg_run_id = run_id; bg_kind; bg_outcome; bg_board_post_id = board_post_id })
   | value -> Error (Printf.sprintf "unknown stimulus payload kind: %s" value)
 
 let stimulus_to_yojson (stimulus : stimulus) =

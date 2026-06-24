@@ -54,6 +54,65 @@ let () =
          { run_id = "fus-2"; ok = false; resolved_answer = "sink_failed"; board_post_id = "" })
       "fusion-run:fus-2");
 
+  (* RFC-0290: Bg_completed is a non-board stimulus with its own label; its
+     post_id falls back to "bg-run:<run_id>" when no board post correlates. *)
+  let bg_payload () =
+    Bg_completed
+      { bg_run_id = "bg-1"
+      ; bg_kind = Subprocess
+      ; bg_outcome = Bg_ok "done"
+      ; bg_board_post_id = "post-2"
+      }
+  in
+  assert (not (is_board_signal (bg_payload ())));
+  assert (String.equal (payload_kind_label (bg_payload ())) "bg_completed");
+  assert (
+    String.equal
+      (bg_job_completion_post_id
+         { bg_run_id = "bg-1"
+         ; bg_kind = Subprocess
+         ; bg_outcome = Bg_ok "done"
+         ; bg_board_post_id = "post-2"
+         })
+      "post-2");
+  assert (
+    String.equal
+      (bg_job_completion_post_id
+         { bg_run_id = "bg-2"
+         ; bg_kind = Subprocess
+         ; bg_outcome = Bg_failed "exit 1"
+         ; bg_board_post_id = ""
+         })
+      "bg-run:bg-2");
+
+  (* RFC-0290: Bg_completed survives the stimulus codec round-trip, preserving
+     the outcome variant ([Bg_failed]) and empty board post id. *)
+  (match
+     stimulus_of_yojson
+       (stimulus_to_yojson
+          { post_id = "bgp1"
+          ; urgency = Low
+          ; arrived_at = 3.0
+          ; payload =
+              Bg_completed
+                { bg_run_id = "bg-3"
+                ; bg_kind = Subprocess
+                ; bg_outcome = Bg_failed "boom"
+                ; bg_board_post_id = ""
+                }
+          })
+   with
+   | Ok s ->
+     (match s.payload with
+      | Bg_completed
+          { bg_run_id; bg_kind = Subprocess; bg_outcome = Bg_failed msg; bg_board_post_id }
+        ->
+        assert (String.equal bg_run_id "bg-3");
+        assert (String.equal msg "boom");
+        assert (String.equal bg_board_post_id "")
+      | _ -> Alcotest.fail "Bg_completed codec round-trip changed payload shape")
+   | Error msg -> Alcotest.fail ("Bg_completed stimulus round-trip failed: " ^ msg));
+
   (* --- queue operations preserved --- *)
   let board_stim =
     { post_id = "p1"; urgency = Normal; arrived_at = 0.0; payload = board_payload () }

@@ -111,7 +111,6 @@ val handle_request :
   ?otel_mcp_protocol_version:string ->
   ?otel_transport_context:Otel_dispatch_hook.transport_context ->
   ?auth_token:string ->
-  ?for_testing_auth_bypass:Mcp_server_eio_protocol.For_testing.auth_bypass_token ->
   ?internal_keeper_runtime:bool ->
   server_state ->
   string ->

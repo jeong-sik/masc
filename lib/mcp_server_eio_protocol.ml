@@ -58,44 +58,32 @@ let make_auth_error ~id reason =
   make_error_typed ~id Mcp_error_code.Auth_error (auth_rejection_message reason)
 ;;
 
-(** Test-only bypass token.  The abstract type ensures that only code that
-    opens the {!For_testing} module can disable the gate; production callers
-    cannot construct a value of this type. *)
-module For_testing = struct
-  type auth_bypass_token = Auth_bypass_token
-
-  let bypass_auth () = Auth_bypass_token
-end
-
-let require_auth ~base_path ~requirement ~id ?auth_token ?for_testing_auth_bypass () =
-  match for_testing_auth_bypass with
-  | Some For_testing.Auth_bypass_token -> Ok (auth_token, None)
-  | None ->
-    if not (Auth.is_auth_enabled base_path)
-    then Ok (auth_token, None)
-    else (
-      match requirement with
-      | Auth_requirement.Public -> Ok (auth_token, None)
-      | Internal_only ->
-        (match auth_token with
-         | None -> Error (make_auth_error ~id Internal_token_required)
-         | Some token ->
-           if Auth.verify_internal_keeper_token base_path ~token
-           then Ok (auth_token, None)
-           else Error (make_auth_error ~id Internal_token_required))
-      | Requires_auth ->
-        (match auth_token with
-         | None -> Error (make_auth_error ~id Missing_token)
-         | Some token -> (
-           match Auth_credential_token.find_credential_by_token base_path ~token with
-           | Error (Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired agent)) ->
-             Error (make_auth_error ~id (Token_expired agent))
-           | Error _ -> Error (make_auth_error ~id Invalid_token)
-           | Ok cred -> Ok (Some token, Some cred))))
+let require_auth ~base_path ~requirement ~id ?auth_token () =
+  if not (Auth.is_auth_enabled base_path)
+  then Ok (auth_token, None)
+  else (
+    match requirement with
+    | Auth_requirement.Public -> Ok (auth_token, None)
+    | Internal_only ->
+      (match auth_token with
+       | None -> Error (make_auth_error ~id Internal_token_required)
+       | Some token ->
+         if Auth.verify_internal_keeper_token base_path ~token
+         then Ok (auth_token, None)
+         else Error (make_auth_error ~id Internal_token_required))
+    | Requires_auth ->
+      (match auth_token with
+       | None -> Error (make_auth_error ~id Missing_token)
+       | Some token -> (
+         match Auth_credential_token.find_credential_by_token base_path ~token with
+         | Error (Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired agent)) ->
+           Error (make_auth_error ~id (Token_expired agent))
+         | Error _ -> Error (make_auth_error ~id Invalid_token)
+         | Ok cred -> Ok (Some token, Some cred))))
 ;;
 
-let with_required_auth ~base_path ~id ~requirement ?auth_token ?for_testing_auth_bypass f =
-  match require_auth ~base_path ~requirement ~id ?auth_token ?for_testing_auth_bypass () with
+let with_required_auth ~base_path ~id ~requirement ?auth_token f =
+  match require_auth ~base_path ~requirement ~id ?auth_token () with
   | Error e -> e
   | Ok (auth_token, _cred) -> f auth_token
 ;;
@@ -726,7 +714,6 @@ let handle_request
       ?otel_mcp_protocol_version
       ?otel_transport_context
       ?auth_token
-      ?for_testing_auth_bypass
       ?(internal_keeper_runtime = false)
       state
       request_str
@@ -776,7 +763,6 @@ let handle_request
                 ~id
                 ~requirement:Auth_requirement.Public
                 ?auth_token
-                ?for_testing_auth_bypass
                 (fun _auth_token ->
                    handle_dashboard_ack_notification ?mcp_session_id req.params)
             | _ -> `Null)
@@ -789,7 +775,6 @@ let handle_request
                   ~id
                   ~requirement:Auth_requirement.Public
                   ?auth_token
-                  ?for_testing_auth_bypass
                   (fun _auth_token -> handle_server_discover_eio ~profile id)
               | "initialize" ->
                 with_required_auth
@@ -797,7 +782,6 @@ let handle_request
                   ~id
                   ~requirement:Auth_requirement.Public
                   ?auth_token
-                  ?for_testing_auth_bypass
                   (fun _auth_token -> handle_initialize_eio ~profile id req.params)
               | "initialized" | "notifications/initialized" ->
                 with_required_auth
@@ -805,7 +789,6 @@ let handle_request
                   ~id
                   ~requirement:Auth_requirement.Public
                   ?auth_token
-                  ?for_testing_auth_bypass
                   (fun _auth_token -> make_response ~id `Null)
               | "resources/list" ->
                 with_required_auth
@@ -813,7 +796,6 @@ let handle_request
                   ~id
                   ~requirement:Auth_requirement.Requires_auth
                   ?auth_token
-                  ?for_testing_auth_bypass
                   (fun _auth_token ->
                      match TP.parse_cursor_only_params req.params with
                      | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
@@ -824,7 +806,6 @@ let handle_request
                   ~id
                   ~requirement:Auth_requirement.Requires_auth
                   ?auth_token
-                  ?for_testing_auth_bypass
                   (fun _auth_token -> handle_read_resource_eio state id req.params)
               | "resources/templates/list" ->
                 with_required_auth
@@ -832,7 +813,6 @@ let handle_request
                   ~id
                   ~requirement:Auth_requirement.Requires_auth
                   ?auth_token
-                  ?for_testing_auth_bypass
                   (fun _auth_token ->
                      match TP.parse_cursor_only_params req.params with
                      | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
@@ -843,7 +823,6 @@ let handle_request
                   ~id
                   ~requirement:Auth_requirement.Requires_auth
                   ?auth_token
-                  ?for_testing_auth_bypass
                   (fun _auth_token ->
                      handle_resources_subscribe_eio id ?mcp_session_id req.params)
               | "resources/unsubscribe" ->
@@ -852,7 +831,6 @@ let handle_request
                   ~id
                   ~requirement:Auth_requirement.Requires_auth
                   ?auth_token
-                  ?for_testing_auth_bypass
                   (fun _auth_token ->
                      handle_resources_unsubscribe_eio id ?mcp_session_id req.params)
               | "dashboard/hello" ->
@@ -861,7 +839,6 @@ let handle_request
                   ~id
                   ~requirement:Auth_requirement.Public
                   ?auth_token
-                  ?for_testing_auth_bypass
                   (fun _auth_token ->
                      handle_dashboard_hello_eio state id ?mcp_session_id req.params)
               | "dashboard/subscribe" ->
@@ -870,7 +847,6 @@ let handle_request
                   ~id
                   ~requirement:Auth_requirement.Public
                   ?auth_token
-                  ?for_testing_auth_bypass
                   (fun _auth_token ->
                      handle_dashboard_subscribe_eio state id ?mcp_session_id req.params)
               | "dashboard/unsubscribe" ->
@@ -879,7 +855,6 @@ let handle_request
                   ~id
                   ~requirement:Auth_requirement.Public
                   ?auth_token
-                  ?for_testing_auth_bypass
                   (fun _auth_token ->
                      handle_dashboard_unsubscribe_eio id ?mcp_session_id req.params)
               | "dashboard/ping" ->
@@ -888,7 +863,6 @@ let handle_request
                   ~id
                   ~requirement:Auth_requirement.Public
                   ?auth_token
-                  ?for_testing_auth_bypass
                   (fun _auth_token ->
                      handle_dashboard_ping_eio id ?mcp_session_id req.params)
               | "dashboard/ack" ->
@@ -897,7 +871,6 @@ let handle_request
                   ~id
                   ~requirement:Auth_requirement.Public
                   ?auth_token
-                  ?for_testing_auth_bypass
                   (fun _auth_token ->
                      handle_dashboard_ack_eio id ?mcp_session_id req.params)
               | "prompts/list" ->
@@ -906,7 +879,6 @@ let handle_request
                   ~id
                   ~requirement:Auth_requirement.Requires_auth
                   ?auth_token
-                  ?for_testing_auth_bypass
                   (fun _auth_token ->
                      match TP.parse_cursor_only_params req.params with
                      | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
@@ -917,7 +889,6 @@ let handle_request
                   ~id
                   ~requirement:Auth_requirement.Requires_auth
                   ?auth_token
-                  ?for_testing_auth_bypass
                   (fun _auth_token -> handle_get_prompt_eio state id req.params)
               | "tools/list" ->
                 with_required_auth
@@ -925,7 +896,6 @@ let handle_request
                   ~id
                   ~requirement:Auth_requirement.Requires_auth
                   ?auth_token
-                  ?for_testing_auth_bypass
                   (fun auth_token ->
                      match TP.requested_tool_list_params req.params with
                      | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
@@ -1077,7 +1047,6 @@ let handle_request
                   ~id
                   ~requirement:Auth_requirement.Requires_auth
                   ?auth_token
-                  ?for_testing_auth_bypass
                   handle_tools_call
               | method_ when Mcp_sdk_adapter_masc.handles_method method_ ->
                 with_required_auth
@@ -1085,7 +1054,6 @@ let handle_request
                   ~id
                   ~requirement:Auth_requirement.Requires_auth
                   ?auth_token
-                  ?for_testing_auth_bypass
                   (fun auth_token ->
                      match
                        Mcp_sdk_adapter_masc.dispatch_request
@@ -1106,7 +1074,6 @@ let handle_request
                   ~id
                   ~requirement:Auth_requirement.Public
                   ?auth_token
-                  ?for_testing_auth_bypass
                   (fun _auth_token ->
                      make_error_typed
                        ~id

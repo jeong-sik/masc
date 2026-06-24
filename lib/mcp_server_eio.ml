@@ -144,7 +144,6 @@ let handle_request
       ?otel_mcp_protocol_version
       ?otel_transport_context
       ?auth_token
-      ?for_testing_auth_bypass
       ?(internal_keeper_runtime = false)
       state
       request_str
@@ -183,7 +182,6 @@ let handle_request
     ?otel_mcp_protocol_version
     ?otel_transport_context
     ?auth_token
-    ?for_testing_auth_bypass
     ~internal_keeper_runtime
     state
     request_str

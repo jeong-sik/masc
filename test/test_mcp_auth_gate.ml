@@ -10,7 +10,6 @@
 open Alcotest
 
 module Mcp_eio = Masc.Mcp_server_eio
-module Mcp_protocol = Masc.Mcp_server_eio_protocol
 module Mcp_server = Masc.Mcp_server
 
 let () = Mirage_crypto_rng_unix.use_default ()
@@ -110,12 +109,12 @@ let setup_auth_workspace () =
   base_path, state, raw_token
 ;;
 
-let run_request ?auth_token ?for_testing_auth_bypass state request_str =
+let run_request ?auth_token state request_str =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
-  Mcp_eio.handle_request ?auth_token ?for_testing_auth_bypass ~clock ~sw state request_str
+  Mcp_eio.handle_request ?auth_token ~clock ~sw state request_str
 ;;
 
 let test_initialize_is_public () =
@@ -228,21 +227,6 @@ let test_tools_call_requires_auth () =
        check int "auth error code" (-32001) (error_code_exn response))
 ;;
 
-let test_bypass_token_allows_authenticated_handler () =
-  let base_path, state, _token = setup_auth_workspace () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-       let req = request ~id:(`Int 8) ~method_:"tools/list" ~params:(`Assoc []) () in
-       let response =
-         run_request
-           state
-           ~for_testing_auth_bypass:(Mcp_protocol.For_testing.bypass_auth ())
-           req
-       in
-       check bool "bypass token allows tools/list" true (has_result response))
-;;
-
 let () =
   run
     "MCP protocol auth gate"
@@ -259,10 +243,6 @@ let () =
         ] )
     ; ( "authenticated handlers accept valid credentials"
       , [ test_case "tools/list with valid token" `Quick test_tools_list_succeeds_with_valid_token
-        ] )
-    ; ( "test-only bypass"
-      , [ test_case "bypass token allows gated handler" `Quick
-            test_bypass_token_allows_authenticated_handler
         ] )
     ]
 ;;

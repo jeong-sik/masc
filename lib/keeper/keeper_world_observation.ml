@@ -806,6 +806,34 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   }
 ;;
 
+(* RFC-0294: a task-backlog signal drives a proactive turn only if the
+   affordance it grants can mutate task state (and thus clear the signal that
+   surfaced it).  [failed_task] grants only [Task_audit], whose tools are
+   read-only, so [failed_drives_wake] is structurally [false]: a keeper cannot
+   clear an orphan it does not own, and waking it on that signal produces an
+   unbounded no-op livelock (the failed_task incident, 2026-06-21..24).
+
+   Routing every task signal through [Keeper_agent_tool_surface.affordance_can_mutate]
+   (rather than hand-deleting failed_task at each call site) keeps the
+   policy<->affordance coupling a single source of truth: a future signal whose
+   affordance is read-only is excluded automatically, and its consistency with
+   [tools_for_affordance] is pinned by
+   test_advisory_only_affordance_never_drives_wake. *)
+let claimable_drives_wake claimable_task_count =
+  claimable_task_count > 0
+  && Keeper_agent_tool_surface.affordance_can_mutate
+       Keeper_agent_tool_surface.Task_claim
+
+let failed_drives_wake failed_task_count =
+  failed_task_count > 0
+  && Keeper_agent_tool_surface.affordance_can_mutate
+       Keeper_agent_tool_surface.Task_audit
+
+let verification_drives_wake pending_verification_count =
+  pending_verification_count > 0
+  && Keeper_agent_tool_surface.affordance_can_mutate
+       Keeper_agent_tool_surface.Task_verify
+
 let durable_signal_present
       ~pending_board_events
       ~(config : Workspace.config)
@@ -841,9 +869,9 @@ let durable_signal_present
   pending_mentions <> []
   || pending_board_events <> []
   || pending_scope_messages <> []
-  || claimable_task_count > 0
-  || failed_task_count > 0
-  || pending_verification_count > 0
+  || claimable_drives_wake claimable_task_count
+  || failed_drives_wake failed_task_count
+  || verification_drives_wake pending_verification_count
   || scheduled_automation.due_ready_count > 0
   || scheduled_automation.blocked_approval_count > 0
 ;;
@@ -852,18 +880,18 @@ let actionable_signal_present (observation : world_observation) =
   observation.pending_mentions <> []
   || observation.pending_board_events <> []
   || observation.pending_scope_messages <> []
-  || observation.claimable_task_count > 0
-  || observation.failed_task_count > 0
-  || observation.pending_verification_count > 0
+  || claimable_drives_wake observation.claimable_task_count
+  || failed_drives_wake observation.failed_task_count
+  || verification_drives_wake observation.pending_verification_count
   || observation.scheduled_automation.due_ready_count > 0
   || observation.scheduled_automation.blocked_approval_count > 0
 ;;
 
 let proactive_work_signal_present ~(meta : keeper_meta) (observation : world_observation) =
   let task_backlog_signal =
-    observation.claimable_task_count > 0
-     || observation.failed_task_count > 0
-     || observation.pending_verification_count > 0
+    claimable_drives_wake observation.claimable_task_count
+     || failed_drives_wake observation.failed_task_count
+     || verification_drives_wake observation.pending_verification_count
   in
   observation.pending_mentions <> []
   || observation.pending_board_events <> []
@@ -1006,8 +1034,12 @@ let keeper_cycle_decision
         let task_reactive_cooldown =
           max task_cooldown_floor (effective_cooldown / max 1 task_cooldown_divisor)
         in
+        (* RFC-0294: failed_task no longer contributes — Task_audit is
+           advisory-only, so an orphan this keeper cannot clear must not drive
+           the backlog cadence.  claimable (Task_claim) remains actionable. *)
         let has_actionable_tasks =
-          observation.claimable_task_count > 0 || observation.failed_task_count > 0
+          claimable_drives_wake observation.claimable_task_count
+          || failed_drives_wake observation.failed_task_count
         in
         let has_actionable_schedule =
           observation.scheduled_automation.due_ready_count > 0

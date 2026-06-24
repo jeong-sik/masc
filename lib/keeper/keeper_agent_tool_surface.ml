@@ -82,6 +82,29 @@ let tools_for_affordance = function
     [ "keeper_tasks_list"; "keeper_tasks_audit";
       "keeper_task_done"; "masc_transition" ]
 
+(* RFC-0294: does this affordance grant the keeper a tool that can change
+   task/world state (and thus clear the signal that surfaced it)?  Exhaustive
+   match over the closed [turn_affordance] sum, so adding a new affordance
+   forces a decision here at compile time.  [Task_audit] is the sole
+   advisory-only affordance: its tools (keeper_tasks_audit/list, masc_tasks)
+   are read-only, so a keeper woken by a [Task_audit]-only signal cannot clear
+   that signal — driving a proactive turn on it produces an unbounded no-op
+   livelock (the failed_task incident, 2026-06-21..24).
+
+   Why an explicit match instead of deriving from [tools_for_affordance] via
+   [Keeper_tool_progress.effect_domain_for_tool_name]: the task mutators
+   (keeper_task_claim / keeper_task_done / masc_transition) are
+   [effect_domain = Masc_workspace], which the durable-evidence oracle
+   [is_mutating_tool] classifies as non-mutating — reusing it would
+   misclassify Task_claim/Task_verify as advisory-only and kill legitimate
+   wake drivers.  "task-state mutation" and "durable evidence" are different
+   axes.  The consistency of this match with [tools_for_affordance] is pinned
+   by test_advisory_only_affordance_never_drives_wake. *)
+let affordance_can_mutate : turn_affordance -> bool = function
+  | Board_curation | Board_post_or_comment | Message_sweep
+  | Task_claim | Task_verify -> true
+  | Task_audit -> false
+
 let satisfying_tools_for_turn ~(turn_affordances : string list) ~(allowed_tool_names : string list)
   : string list
   =

@@ -629,13 +629,14 @@ let autonomous_trigger_lines
                     "- Since last autonomous turn: %ds, effective cooldown: %ds"
                     since_last cooldown)
            | _ -> None);
+          (* RFC-0294: failed_task no longer accelerates the backlog cadence
+             (Task_audit is read-only; the keeper cannot act on an orphan), so
+             only claimable tasks justify the acceleration framing here. *)
           (match decision.task_reactive_cooldown with
-           | Some cooldown
-             when observation.claimable_task_count > 0
-                  || observation.failed_task_count > 0 ->
+           | Some cooldown when observation.claimable_task_count > 0 ->
                Some
                  (Printf.sprintf
-                    "- Backlog acceleration cooldown: %ds for claimable/failed tasks"
+                    "- Backlog acceleration cooldown: %ds for claimable tasks"
                     cooldown)
            | _ -> None);
         ]
@@ -852,7 +853,10 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
         observation.unclaimed_task_count > 0
         || observation.claimable_task_count > 0
         || observation.provider_capacity_blocked_task_count > 0
-        || observation.failed_task_count > 0
+        (* RFC-0294: failed_task does not, by itself, warrant the Namespace
+           State section — an orphan is GC-owned, not keeper-actionable.  It is
+           still shown (as non-actionable telemetry) when the section renders
+           for another reason. *)
         || observation.running_keeper_fiber_count > 0
       then (
         let ubuf = Buffer.create 256 in
@@ -885,9 +889,12 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
             (Printf.sprintf
                "- Provider-capacity blocked claimable tasks: %d\n"
                observation.provider_capacity_blocked_task_count);
+        (* RFC-0294: label orphaned/failed tasks as GC-owned so the model does
+           not try to audit or act on them (the executor no-op livelock). *)
         if observation.failed_task_count > 0 then
           Buffer.add_string ubuf
-            (Printf.sprintf "- Failed tasks: %d\n"
+            (Printf.sprintf
+               "- Failed tasks (orphaned; GC-owned, no keeper action required): %d\n"
                observation.failed_task_count);
         Buffer.add_string ubuf
           (Printf.sprintf

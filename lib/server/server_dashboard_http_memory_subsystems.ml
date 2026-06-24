@@ -123,6 +123,61 @@ let user_model_prompt_json () =
     ]
 ;;
 
+(* RFC-0244 Tier 2: derive the Hebbian synapse view from cross-keeper
+   corroboration. Each shared fact that was observed by multiple keepers
+   becomes one or more synapses; [last_consolidation] is the most recent
+   verification timestamp of any shared fact. Before this, the field was a
+   hardcoded placeholder that always reported an empty graph and
+   last_consolidation=0.0, so recorded memory appeared unviewable. *)
+let compute_hebbian ~base_path ~now () =
+  try
+    let keepers_dir =
+      Config_dir_resolver.keepers_dir_for_base_path ~base_path
+    in
+    let shared_facts =
+      Keeper_memory_os_io.read_facts_all_for_keepers_dir
+        ~keepers_dir
+        ~keeper_id:Keeper_memory_os_types.shared_store_id
+      |> List.filter (Keeper_memory_os_types.fact_is_current ~now)
+    in
+    let last_consolidation =
+      shared_facts
+      |> List.filter_map (fun (f : Keeper_memory_os_types.fact) -> f.last_verified_at)
+      |> List.fold_left Float.max 0.0
+    in
+    let synapse_counts : ((string * string), int) Hashtbl.t = Hashtbl.create 16 in
+    shared_facts
+    |> List.iter (fun (fact : Keeper_memory_os_types.fact) ->
+      let keepers = fact.observed_by in
+      let n = List.length keepers in
+      for i = 0 to n - 1 do
+        for j = i + 1 to n - 1 do
+          let a = List.nth keepers i in
+          let b = List.nth keepers j in
+          let key = if String.compare a b <= 0 then a, b else b, a in
+          let prev = Option.value (Hashtbl.find_opt synapse_counts key) ~default:0 in
+          Hashtbl.replace synapse_counts key (prev + 1)
+        done
+      done);
+    let synapses =
+      Hashtbl.fold
+        (fun (a, b) count acc ->
+           let weight = Float.min 1.0 (float_of_int count *. 0.1) in
+           `Assoc
+             [ "from_agent", `String a
+             ; "to_agent", `String b
+             ; "weight", `Float weight
+             ]
+           :: acc)
+        synapse_counts
+        []
+    in
+    `Assoc [ "synapses", `List synapses; "last_consolidation", `Float last_consolidation ]
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ -> `Assoc [ "synapses", `List []; "last_consolidation", `Float 0.0 ]
+;;
+
 let dashboard_memory_subsystems_http_json
       ~(config : Workspace_utils.config)
       ?include_memory_entries
@@ -150,11 +205,8 @@ let dashboard_memory_subsystems_http_json
     |> Option.map (fun s -> String.trim s |> String.lowercase_ascii)
     |> Fun.flip Option.bind (fun s -> if s = "" then None else Some s)
   in
-  let hebbian =
-    try `Null with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | _ -> `Assoc [ "synapses", `List []; "last_consolidation", `Float 0.0 ]
-  in
+  let now = Unix.gettimeofday () in
+  let hebbian = compute_hebbian ~base_path:config.base_path ~now () in
   let all_episodes =
     try Institution_eio.load_recent_episodes_jsonl ~limit:max_int with
     | Eio.Cancel.Cancelled _ as e -> raise e

@@ -1,5 +1,5 @@
 ---
-rfc: "0294"
+rfc: "keeper-proactive-wake-actionability-invariant"
 title: "Keeper Proactive-Wake Actionability Invariant + Self-Cadence Tombstone Gate"
 status: Draft
 created: 2026-06-24
@@ -11,7 +11,7 @@ related: ["0246", "0220", "0233", "0239"]
 implementation_prs: []
 ---
 
-# RFC-0294 — Keeper Proactive-Wake Actionability Invariant + Self-Cadence Tombstone Gate
+# RFC (keeper-proactive-wake-actionability-invariant) — Keeper Proactive-Wake Actionability Invariant + Self-Cadence Tombstone Gate
 
 - Status: Draft
 - Area: `lib/keeper/` (world observation, proactive scheduler, no-progress detector, wake tombstone), `lib/workspace/` (orphan surfacing)

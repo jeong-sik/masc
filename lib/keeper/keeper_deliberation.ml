@@ -216,7 +216,7 @@ let triage (obs : world_observation) : triage_result =
   (* L1 Reactive triggers *)
   if obs.direct_mention then add DirectMention;
   if obs.unclaimed_task_count > 0 then add NewUnclaimedTask;
-  (* RFC-0294: failed_task (orphan) is NOT an actionable trigger.  Its only
+  (* RFC-keeper-proactive-wake-actionability-invariant: failed_task (orphan) is NOT an actionable trigger.  Its only
      affordance, Task_audit, is read-only, so the keeper cannot clear the
      signal; waking on it produced the executor livelock.  Orphan resolution is
      the GC/supervisor's job and visibility is the orphan surfacer's — not a

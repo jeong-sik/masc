@@ -1,4 +1,4 @@
-(** RFC-0294 T2 — advisory-only affordance never drives a proactive wake.
+(** RFC-keeper-proactive-wake-actionability-invariant T2 — advisory-only affordance never drives a proactive wake.
 
     [affordance_can_mutate] is the single source of truth for "can a keeper
     woken by this signal clear it".  This file pins:

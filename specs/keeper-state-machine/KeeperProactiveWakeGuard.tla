@@ -1,7 +1,7 @@
 ---- MODULE KeeperProactiveWakeGuard ----
 EXTENDS Naturals
 (***************************************************************************)
-(* KeeperProactiveWakeGuard — RFC-0294 actionability invariant.            *)
+(* KeeperProactiveWakeGuard — RFC-keeper-proactive-wake-actionability-invariant actionability invariant.            *)
 (*                                                                         *)
 (* Models the keeper proactive-wake decision for a level-triggered task    *)
 (* signal (failed_task / orphan).  The bug: a signal whose only affordance *)

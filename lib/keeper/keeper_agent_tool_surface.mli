@@ -46,7 +46,7 @@ val tools_for_affordance : turn_affordance -> string list
     change task/world state (and thus clear the signal that surfaced it).
     [Task_audit] is the sole advisory-only ([false]) affordance: a signal whose
     only affordance is [Task_audit] must never drive a proactive wake, or the
-    keeper livelocks on a signal it cannot clear (RFC-0294). Exhaustive over the
+    keeper livelocks on a signal it cannot clear (RFC-keeper-proactive-wake-actionability-invariant). Exhaustive over the
     closed [turn_affordance] sum. *)
 val affordance_can_mutate : turn_affordance -> bool
 

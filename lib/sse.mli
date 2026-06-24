@@ -49,15 +49,46 @@ val max_clients : int
 val max_buffer_size : int
 val buffer_ttl_seconds : float
 
+(** {1 Registration Authentication} *)
+
+(** Authentication context supplied by SSE transport callers.
+    [config] is the workspace base path used by [Auth] credential lookup.
+    [token] is the raw bearer token presented by the connecting client,
+    or [None] when no token was supplied. *)
+type registration_auth = {
+  config : string;
+  token : string option;
+}
+
+(** Failure modes for SSE registration.  Transport callers translate these
+    into typed HTTP responses and close the connection cleanly. *)
+type registration_error =
+  | Missing_token
+  | Invalid_token of { reason : string }
+  | Token_expired of { agent_name : string }
+  | Auth_lookup_error of { reason : Masc_domain.masc_error }
+  | Unknown_session of { session_id : string }
+  | Session_expired of { session_id : string }
+  | Session_owner_mismatch of { session_agent : string; token_agent : string }
+
+val registration_error_to_string : registration_error -> string
+
 (** {1 Session Management} *)
 
 val register :
   ?kind:session_kind -> ?on_disconnect:(unit -> unit) ->
-  string -> last_event_id:int ->
-  int * string Eio.Stream.t * string option
-(** [?on_disconnect] is installed atomically with registration via
+  auth:registration_auth -> string -> last_event_id:int ->
+  (int * string Eio.Stream.t * string option, registration_error) result
+(** [register ~auth session_id ~last_event_id] validates the supplied
+    bearer token and MCP session pair before admitting the client.
+
+    [?on_disconnect] is installed atomically with registration via
     {!set_disconnect_hook} before the client becomes broadcast-visible,
-    so a concurrent queue-overflow [unregister] always finds the hook. *)
+    so a concurrent queue-overflow [unregister] always finds the hook.
+
+    On validation failure a typed [registration_error] is returned so the
+    transport layer can respond with an auth error and close the connection
+    without leaking a half-registered SSE client. *)
 
 val unregister : string -> unit
 val unregister_if_current : string -> int -> unit
@@ -129,7 +160,7 @@ val cleanup_expired_events : unit -> int
 
 (** {1 Snapshots} *)
 
-val sync_transport_snapshot : unit -> unit
+val sync_transport_snapshot : ?force:bool -> unit -> unit
 val session_kind_to_string : session_kind -> string
 
 (** {1 Test Hooks} *)

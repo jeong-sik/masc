@@ -555,6 +555,8 @@ module McpSessionStore = struct
     | Generate_id of string Eio.Promise.u
     | Create of string option * float * mcp_session Eio.Promise.u
     | Get of string * float * mcp_session option Eio.Promise.u
+    | Peek of string * mcp_session option Eio.Promise.u
+    | Get_or_create of string * string option * float * mcp_session Eio.Promise.u
     | Cleanup_stale of float * float * int Eio.Promise.u
     | List_all of mcp_session list Eio.Promise.u
     | Remove of string * bool Eio.Promise.u
@@ -611,6 +613,27 @@ module McpSessionStore = struct
              let session' = { session with last_activity = now; request_count = session.request_count + 1 } in
              Eio.Promise.resolve p (Some session');
              AgentMap.add session_id session' state)
+
+    | Peek (session_id, p) ->
+        Eio.Promise.resolve p (AgentMap.find_opt session_id state);
+        state
+
+    | Get_or_create (id, agent_name, now, p) ->
+        (match AgentMap.find_opt id state with
+         | Some session ->
+             Eio.Promise.resolve p session;
+             state
+         | None ->
+             let session = {
+               id;
+               created_at = now;
+               last_activity = now;
+               agent_name;
+               metadata = [];
+               request_count = 0;
+             } in
+             Eio.Promise.resolve p session;
+             AgentMap.add id session state)
 
     | Cleanup_stale (now, max_age_val, p) ->
         let state', stale_count =
@@ -671,6 +694,16 @@ module McpSessionStore = struct
   let get session_id =
     let p, r = Eio.Promise.create () in
     dispatch (Get (session_id, Time_compat.now (), r));
+    await_if_needed p
+
+  let peek session_id =
+    let p, r = Eio.Promise.create () in
+    dispatch (Peek (session_id, r));
+    await_if_needed p
+
+  let get_or_create ~id ?agent_name () =
+    let p, r = Eio.Promise.create () in
+    dispatch (Get_or_create (id, agent_name, Time_compat.now (), r));
     await_if_needed p
 
   let cleanup_stale () =

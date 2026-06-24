@@ -230,6 +230,7 @@
   /* bad — Crashed / Dead, red-group */
   --bad: var(--brick);
   --bad-10: var(--brick-fill);
+  --bad-15: var(--brick-fill);
   --bad-20: var(--brick-fill);
   --bad-light: var(--brick);
   --bad-soft: var(--brick-fill);

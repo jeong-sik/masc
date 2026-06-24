@@ -9,6 +9,7 @@
     is asserted by behavior rather than by inspecting the fingerprint. *)
 
 module Sse = Masc.Sse
+module Session = Masc.Session
 module Broadcast = Server_dashboard_http_goal_loop_broadcast
 
 let status ~iter ~generated_at =
@@ -43,35 +44,53 @@ let drain session_id =
   in
   loop 0
 
+let register_exn ~auth ?kind session_id ~last_event_id =
+  (* Pre-create the MCP session so registration validates an existing
+     session rather than auto-bootstrapping one (security/sse-auth-validation). *)
+  let (_ : Session.McpSessionStore.mcp_session) =
+    Session.McpSessionStore.get_or_create ~id:session_id ()
+  in
+  match Sse.register ?kind ~auth session_id ~last_event_id with
+  | Ok result -> result
+  | Error e ->
+      Alcotest.fail
+        (Printf.sprintf "Sse.register failed: %s"
+           (Sse.registration_error_to_string e))
+
 let test_change_gated_broadcast () =
   Eio_main.run @@ fun _env ->
-  let session_id = Printf.sprintf "goal_loop_test_%d" (Random.int 1_000_000) in
-  let _ = Sse.register ~kind:Sse.Observer session_id ~last_event_id:0 in
-  let (_ : int) = drain session_id in
-  let s1 = status ~iter:1 ~generated_at:"2026-06-23T00:00:00Z" in
-  Alcotest.(check bool)
-    "first status broadcasts" true (Broadcast.broadcast_goal_loop_status s1);
-  Alcotest.(check int) "first status emits one event" 1 (drain session_id);
-  (* identical content -> no rebroadcast *)
-  Alcotest.(check bool)
-    "unchanged status is skipped" false
-    (Broadcast.broadcast_goal_loop_status
-       (status ~iter:1 ~generated_at:"2026-06-23T00:00:00Z"));
-  Alcotest.(check int) "unchanged status emits nothing" 0 (drain session_id);
-  (* only generated_at differs -> still skipped (volatile key excluded) *)
-  Alcotest.(check bool)
-    "generated_at-only change is skipped" false
-    (Broadcast.broadcast_goal_loop_status
-       (status ~iter:1 ~generated_at:"2026-06-23T11:11:11Z"));
-  Alcotest.(check int)
-    "generated_at-only change emits nothing" 0 (drain session_id);
-  (* real OODA change (loop_iteration) -> broadcast *)
-  Alcotest.(check bool)
-    "changed status broadcasts" true
-    (Broadcast.broadcast_goal_loop_status
-       (status ~iter:2 ~generated_at:"2026-06-23T11:11:11Z"));
-  Alcotest.(check int) "changed status emits one event" 1 (drain session_id);
-  Sse.unregister session_id
+  let workspace = Masc_test_deps.setup_test_workspace () in
+  let auth = Masc_test_deps.make_sse_auth workspace "goal-loop-agent" in
+  Fun.protect
+    ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace workspace)
+    (fun () ->
+      let session_id = Printf.sprintf "goal_loop_test_%d" (Random.int 1_000_000) in
+      let _ = register_exn ~auth ~kind:Sse.Observer session_id ~last_event_id:0 in
+      let (_ : int) = drain session_id in
+      let s1 = status ~iter:1 ~generated_at:"2026-06-23T00:00:00Z" in
+      Alcotest.(check bool)
+        "first status broadcasts" true (Broadcast.broadcast_goal_loop_status s1);
+      Alcotest.(check int) "first status emits one event" 1 (drain session_id);
+      (* identical content -> no rebroadcast *)
+      Alcotest.(check bool)
+        "unchanged status is skipped" false
+        (Broadcast.broadcast_goal_loop_status
+           (status ~iter:1 ~generated_at:"2026-06-23T00:00:00Z"));
+      Alcotest.(check int) "unchanged status emits nothing" 0 (drain session_id);
+      (* only generated_at differs -> still skipped (volatile key excluded) *)
+      Alcotest.(check bool)
+        "generated_at-only change is skipped" false
+        (Broadcast.broadcast_goal_loop_status
+           (status ~iter:1 ~generated_at:"2026-06-23T11:11:11Z"));
+      Alcotest.(check int)
+        "generated_at-only change emits nothing" 0 (drain session_id);
+      (* real OODA change (loop_iteration) -> broadcast *)
+      Alcotest.(check bool)
+        "changed status broadcasts" true
+        (Broadcast.broadcast_goal_loop_status
+           (status ~iter:2 ~generated_at:"2026-06-23T11:11:11Z"));
+      Alcotest.(check int) "changed status emits one event" 1 (drain session_id);
+      Sse.unregister session_id)
 
 let () =
   Alcotest.run "goal_loop_broadcast"

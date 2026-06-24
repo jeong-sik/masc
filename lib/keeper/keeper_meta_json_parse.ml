@@ -68,7 +68,7 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
       Safe_ops.json_string_list "trace_history" json |> List.filter validate_name
     in
     let pk_goal =
-      Safe_ops.json_string ~default:"" "goal" json |> normalize_goal_horizon_text
+      Safe_ops.json_string ~default:"" "goal" json |> normalize_goal_text
     in
     (* Layer 2 PR-B (commit 5): delegate the surviving personality field
        to [Keeper_personality_io].  parse + coerce yields trim-only

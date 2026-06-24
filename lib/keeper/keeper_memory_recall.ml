@@ -330,7 +330,7 @@ let goal_horizon_candidates (meta : keeper_meta) : string list =
   [meta.goal]
   |> List.filter_map (fun raw ->
        raw
-       |> normalize_goal_horizon_text
+       |> normalize_goal_text
        |> String_util.trim_nonempty)
   |> List.fold_left
        (fun acc goal ->

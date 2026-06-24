@@ -239,7 +239,7 @@ let first_non_empty_goal_candidate candidates =
   |> List.find_map (function
        | None -> None
        | Some raw ->
-         let value = normalize_goal_horizon_text raw in
+         let value = normalize_goal_text raw in
          if value = "" then None else Some value)
 
 let declarative_materialization_goal
@@ -307,8 +307,8 @@ let drift_if label changed =
 
 let goal_horizon_text_equal current target =
   String.equal
-    (normalize_goal_horizon_text current)
-    (normalize_goal_horizon_text target)
+    (normalize_goal_text current)
+    (normalize_goal_text target)
 
 let keeper_meta_persistent_drift_categories
     ~(defaults : Keeper_types_profile.keeper_profile_defaults)
@@ -378,7 +378,7 @@ let ensure_keeper_meta_with_cause config name =
       match defaults.goal with
       | Some goal -> goal
       | None -> (
-          match normalize_goal_horizon_text meta.goal with
+          match normalize_goal_text meta.goal with
           | "" -> (
               match declarative_materialization_goal defaults with
               | Some derived -> derived

@@ -21,33 +21,51 @@
 
     This harness models (1) and (2): the COMMAND-SHAPE classifiers (command
     identity / git op / redirect). It deliberately EXCLUDES the path jail (3),
-    for two reasons:
+    because the path jail is a SEPARATE, PERMANENT policy axis — not because it
+    is temporary:
 
-      - The path jail is env-gated ([Shell_ir_path_jail.enabled]) and is an
-        explicit "short-lived valve, not a steady state" with removal target
-        RFC-0255 P5. A retirement that depends on it would rest on a defense
-        scheduled for removal.
-      - It only constrains the TARGET PATH, so it never covers path-
-        independent destructive commands (kill, pkill, shutdown, reboot, or
-        SQL passed as a psql/-c string), and it does not block in-workspace
-        destructive targets (e.g. `rm -r ./src`).
+      - The path jail is default-ON ([Shell_ir_path_jail.enabled] defaults to
+        true, env_config_runtime.ml:956). RFC-0255 §3 rejects removing it
+        (alternative C: "the jail is the only write-escape guard on Host"), and
+        RFC-0255 P5 GRADUATES it to the only path — i.e. makes it permanent. The
+        "short-lived valve, not a steady state" with removal target P5 is the
+        kill-switch's DISABLED state (setting the flag to false), NOT the jail.
+        Depending on the path jail is therefore depending on a permanent
+        defense.
+      - Command-shape (what binary / git op / redirect) and path-scope (where
+        the argument points) are orthogonal axes. A command-shape differential
+        that folded in the path jail would conflate the two and could never
+        isolate "destructiveness the command identity alone implies".
 
     So the gap measured here is "destructiveness the command-shape classifiers
-    do not capture" — the set that must be lifted into typed risk arms before
-    the substring layer can be deleted WITHOUT depending on the temporary path
-    jail. The gap is split into:
+    do not capture". It is split by whether the permanent path jail can ever
+    apply:
 
-      - path-INDEPENDENT (irreducible): no path argument, so no path defense
-        can ever cover them — the hard core of the work-list;
-      - path-BEARING: targeted at an IN-WORKSPACE path here (the worst case the
-        path jail cannot help); out-of-workspace variants are additionally
-        covered TODAY by the path jail, but that coverage is temporary.
+      - path-INDEPENDENT: the command has no path argument, so the path jail can
+        NEVER constrain it (kill, pkill, shutdown, reboot, SQL passed as a
+        psql/-c string). This is the genuine command-shape work-list: each must
+        be lifted into a typed risk arm / the catastrophic floor, or explicitly
+        decided, before the substring layer is deleted.
+      - path-BEARING: the command targets a path. The PERMANENT path jail covers
+        an OUT-OF-WORKSPACE target. The IN-WORKSPACE representative used here
+        (e.g. [rm -r ./build], [chmod 777 ./script.sh]) is a LEGITIMATE keeper
+        operation that the path jail allows by design — see
+        [test_rm_root_allowed_at_policy_layer_jailed_downstream] in
+        lib/exec/test/test_approval_policy.ml, which pins that argv paths stay
+        OUT of the command-shape floor. The substring catalogue blocks these
+        in-workspace forms over-broadly; Phase 3 deletion deliberately drops
+        that over-broad block. So path-bearing entries are resolved by the
+        permanent jail (out-of-workspace) + a documented policy refinement
+        (in-workspace), NOT by lifting them into the command-shape floor.
 
-    Safety invariant for retirement: forall cmd. substring_blocks cmd =>
-    command-shape typed_blocks cmd. It does NOT hold yet; the gap is the
-    Phase-2 work-list, pinned by [test_gap_baseline] as a ratchet so it cannot
-    grow silently. Retirement (Phase 3) is gated on the baseline reaching
-    empty. *)
+    Retirement (Phase 3) safety invariant: deleting the substring layer must not
+    newly ALLOW anything dangerous. For each substring-blocked command the typed
+    system must then either (a) command-shape-block it [path-independent
+    catastrophic], (b) permanent-path-jail-block it [path-bearing,
+    out-of-workspace], or (c) deliberately allow it because substring was
+    over-broad [path-bearing in-workspace, or a path-independent op explicitly
+    decided to allow]. The two baselines below pin (a)'s remaining work-list and
+    (b)'s stable set so neither grows silently. *)
 
 open Masc
 module Exec = Masc_exec
@@ -73,9 +91,8 @@ let simple_ir bin_str args =
 
 (* An entry binds the substring view (the command string) to the typed view
    (the IR) from one (bin, args) pair, so both verdicts see identical tokens.
-   [path_independent] marks commands with no path argument: no path-based
-   defense (write-escape or the path jail) can ever cover them, so they are the
-   irreducible core of the gap. *)
+   [path_independent] marks commands with no path argument: the permanent path
+   jail can NEVER cover them, so they are the irreducible command-shape gap. *)
 type entry =
   { cls : string
   ; bin_ : string
@@ -102,11 +119,12 @@ let typed_blocks e =
 
 (* One representative command per pattern in config/destructive_ops.toml.
    Path-bearing patterns target an IN-WORKSPACE relative path (./…): that is the
-   worst case the path jail cannot help, so a gap here is a genuine command-shape
-   gap, not an artifact of omitting the path jail. The redirect-shaped
-   device_write pattern "> /dev/" is not represented (it needs a Redirect_scope
-   value and is covered by catastrophic_floor write-escape on a separate path);
-   [dd] represents the device_write class. Logged in the report (no silent cap). *)
+   case the permanent path jail allows (a legitimate keeper op), so a gap here
+   is a genuine command-shape observation, not an artifact of omitting the path
+   jail. The redirect-shaped device_write pattern "> /dev/" is not represented
+   (it needs a Redirect_scope value and is covered by catastrophic_floor
+   write-escape on a separate path); [dd] represents the device_write class.
+   Logged in the report (no silent cap). *)
 let destructive_corpus =
   [ mk "recursive_delete" "rm" [ "-rf"; "./build" ]
   ; mk "recursive_delete" "rm" [ "-r"; "./build" ]
@@ -139,25 +157,41 @@ let safe_corpus =
 (* The gap: commands the substring catalogue blocks but the command-shape typed
    classifiers allow. *)
 let gap () = List.filter (fun e -> substring_blocks e && not (typed_blocks e)) destructive_corpus
+let independent_gap () = List.filter (fun e -> e.path_independent) (gap ())
+let bearing_gap () = List.filter (fun e -> not e.path_independent) (gap ())
 
-(* Baseline ratchet. Measured 2026-06-24 on origin/main. Shrinks as Phase 2
-   lifts each class into a typed risk arm; retirement (Phase 3) requires it
-   empty. Format: the [label] "[class] cmd string". Already covered by the
-   command-shape classifiers (NOT in the gap): rm -rf, git push --force,
+(* Baseline ratchet 1 — the path-INDEPENDENT command-shape gap. No path
+   argument, so the permanent path jail can never cover these: each is genuine
+   command-shape work that must be lifted into a typed risk arm / the
+   catastrophic floor, or explicitly decided, before retirement. Shrinks as
+   Phase 2 lifts a class. Measured 2026-06-24 on origin/main. Already covered by
+   the command-shape classifiers (NOT in the gap): rm -rf, git push --force,
    git push -f, git reset --hard, git clean -f, mkfs. *)
-let expected_gap_baseline =
-  [ "[device_write] dd if=/dev/zero of=./out.img"
-  ; "[privilege_escalation] chmod 777 ./script.sh"
-  ; "[process_signal] kill -9 1234"
+let expected_independent_gap =
+  [ "[process_signal] kill -9 1234"
   ; "[process_signal] pkill -f node"
-  ; "[recursive_delete] rm -r ./build"
-  ; "[recursive_delete] rmdir ./build"
   ; "[sql_destructive] psql -c delete from users"
   ; "[sql_destructive] psql -c drop database prod"
   ; "[sql_destructive] psql -c drop table users"
   ; "[sql_destructive] psql -c truncate table users"
   ; "[system_control] reboot"
   ; "[system_control] shutdown -h now"
+  ]
+;;
+
+(* Baseline ratchet 2 — the path-BEARING gap. Each targets an in-workspace path.
+   The PERMANENT path jail (validate_shell_ir_paths, default-on, graduated to
+   the only path at RFC-0255 P5) covers the out-of-workspace variant; the
+   in-workspace form shown is a legitimate keeper operation that the design
+   keeps OUT of the command-shape floor
+   ([test_rm_root_allowed_at_policy_layer_jailed_downstream]). These are
+   resolved by the permanent jail + a documented drop of substring
+   over-broadness, NOT lifted into the floor. Pinned so the set cannot grow. *)
+let expected_bearing_gap =
+  [ "[device_write] dd if=/dev/zero of=./out.img"
+  ; "[privilege_escalation] chmod 777 ./script.sh"
+  ; "[recursive_delete] rm -r ./build"
+  ; "[recursive_delete] rmdir ./build"
   ]
 ;;
 
@@ -174,12 +208,14 @@ let test_safe_controls_not_blocked () =
 let test_report () =
   let n = List.length destructive_corpus in
   let covered = List.filter typed_blocks destructive_corpus in
-  let g = gap () in
-  let independent, bearing = List.partition (fun e -> e.path_independent) g in
+  let independent = independent_gap () in
+  let bearing = bearing_gap () in
   Printf.printf "\n=== substring -> command-shape typed differential ===\n";
   Printf.printf "destructive corpus: %d patterns\n" n;
   Printf.printf "command-shape typed also blocks: %d/%d\n" (List.length covered) n;
-  Printf.printf "GAP (substring blocks, command-shape typed ALLOWS): %d\n" (List.length g);
+  Printf.printf
+    "GAP (substring blocks, command-shape typed ALLOWS): %d\n"
+    (List.length independent + List.length bearing);
   let print_group title entries =
     Printf.printf "%s: %d\n" title (List.length entries);
     List.iter
@@ -190,21 +226,33 @@ let test_report () =
            (Risk.string_of_risk_class (Risk.risk_class (classify e))))
       entries
   in
-  print_group "  path-INDEPENDENT (irreducible — no path defense possible)" independent;
-  print_group "  path-BEARING (in-workspace worst case; out-of-workspace also path-jailed, temporary)" bearing;
+  print_group
+    "  path-INDEPENDENT (work-list — path jail can never cover; must lift or decide)"
+    independent;
+  print_group
+    "  path-BEARING (in-workspace legit; out-of-workspace covered by the PERMANENT path jail)"
+    bearing;
   Printf.printf
-    "NOTE: path jail (validate_shell_ir_paths, RFC-0255 P5 removal) excluded by \
-     design; device_write \"> /dev/\" redirect form not in corpus (dd represents the class).\n";
+    "NOTE: path jail (validate_shell_ir_paths, default-on, graduated to the only \
+     path at RFC-0255 P5) excluded as a separate permanent axis; device_write \
+     \"> /dev/\" redirect form not in corpus (dd represents the class).\n";
   Alcotest.(check bool) "harness ran over a non-empty corpus" true (n > 0)
 ;;
 
-(* Ratchet: the gap must equal the recorded baseline. Fails on growth (new
-   uncovered pattern = regression) or unrecorded shrink (Phase-2 progress to
-   capture). *)
+(* Ratchet: each partition of the gap must equal its recorded baseline. Fails on
+   growth (new uncovered pattern = regression) or unrecorded shrink (Phase-2
+   progress to capture). *)
 let test_gap_baseline () =
-  let actual = List.sort compare (List.map label (gap ())) in
-  let expected = List.sort compare expected_gap_baseline in
-  Alcotest.(check (list string)) "gap matches baseline ratchet" expected actual
+  let actual_independent = List.sort compare (List.map label (independent_gap ())) in
+  let actual_bearing = List.sort compare (List.map label (bearing_gap ())) in
+  Alcotest.(check (list string))
+    "path-independent gap matches work-list baseline"
+    (List.sort compare expected_independent_gap)
+    actual_independent;
+  Alcotest.(check (list string))
+    "path-bearing gap matches jail-covered baseline"
+    (List.sort compare expected_bearing_gap)
+    actual_bearing
 ;;
 
 let () =

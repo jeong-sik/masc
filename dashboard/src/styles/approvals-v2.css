@@ -1,71 +1,71 @@
 /* ════════════════════════════════════════════════════════════════
-   APPROVALS — Keeper HITL 결재 큐 (v2 surface)
-   Ported from the keeper-v2 prototype (styles/surfaces.css §APPROVALS).
-   Reuses the shared .ov-* overview classes (already defined live in
-   surfaces-v2.css) for the surface shell, header, and KPI strip.
+   APPROVALS — Keeper HITL 결재 큐 (live-surface deltas only)
+
+   The shared .ap-* card / queue / action / kind styles are owned by the
+   vendored design SSOT keeper-v2/surfaces.css (§APPROVALS). main.ts loads that
+   file AFTER the *-v2.css glob, so the prototype values win over any *-v2.css
+   drift on shared selectors (see main.ts load-order note).
+
+   This file therefore carries ONLY what the live approvals surface adds on top
+   of that SSOT and surfaces.css does NOT define:
+     - the queue↔detail-rail workspace grid (.ap-workspace, .ap-detail-panel*,
+       .ap-dossier*) and the live "상세" toggle (.ap-detail-toggle)
+     - the live decision set: disabled state + the "항상 승인" Approve+Always
+       button (.ap-act:disabled, .ap-act.always, the :hover:not(:disabled) guards)
+     - the accent severity band (.ap-*.sev-accent) the live risk model can emit
+       but the 3-band prototype does not
+     - the error banner (.ap-error) and nav-rail count badges (.ap-nav-*)
+     - two augmentations of surfaces.css base rules: .ap-req-goal button-reset
+       (the goal link renders as a keyboard-navigable <button>) and
+       .ap-req-quote word wrapping for long input previews
+
    Auto-imported via the *-v2.css glob in main.ts — do not add an import line.
 
-   Adapted to the live model: the live keeper-approval decision set is the
-   closed {approve, reject} + approve-with-rule. The prototype's defer/undo
-   and the resolved-history log have no backing endpoint, so those rules are
-   intentionally omitted here (a defer button would post nowhere). The third
-   action is the live "항상 승인"(Approve+Always rule) → .ap-act.always.
+   History: this file once re-declared the shared selectors with a 2px-grid snap
+   (#22025); #22081 then vendored surfaces.css verbatim, which loads later and
+   shadowed those values — leaving them dead and divergent from the design SSOT.
+   They are removed here so the file no longer redefines surfaces.css-owned
+   selectors. The no-overlap invariant is guarded by approvals-css-ownership.test.ts.
+   The prototype's defer / undo / resolved-history rules stay omitted: the live
+   decision model is the closed {approve, reject}(+rule) set with no backing
+   endpoint for those.
    ════════════════════════════════════════════════════════════════ */
 
-.ap-sla { font-size: 11px; color: var(--status-warn); border: 1px solid color-mix(in oklab, var(--status-warn) 35%, var(--border-main)); background: color-mix(in oklab, var(--status-warn) 8%, transparent); padding: 4px 10px; border-radius: var(--radius-pill); white-space: nowrap; }
-
+/* Queue ↔ detail-rail two-column workspace (live surface; not in the prototype,
+   which uses a right operations aside instead). */
 .ap-workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); gap: 14px; align-items: start; margin-bottom: 24px; }
-.ap-queue { display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px; }
 .ap-workspace .ap-queue { margin-bottom: 0; }
-.ap-card { display: flex; background: var(--bg-panel); border: 1px solid var(--border-main); border-radius: var(--radius-md); overflow: hidden; transition: border-color 0.16s; }
-.ap-card:hover { border-color: var(--border-highlight); }
-.ap-card[data-selected="true"] { border-color: var(--volt-dim); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--volt-strong) 28%, transparent); }
-.ap-card .ap-rail { flex: none; width: 3px; background: var(--border-main); }
-.ap-card.sev-bad  .ap-rail { background: var(--status-bad); }
-.ap-card.sev-warn .ap-rail { background: var(--status-warn); }
-.ap-card.sev-accent .ap-rail { background: var(--accent-fg); }
-.ap-card.sev-info .ap-rail { background: var(--volt-dim); }
-.ap-card.sev-bad { border-color: color-mix(in oklab, var(--status-bad) 32%, var(--border-main)); background: linear-gradient(100deg, color-mix(in oklab, var(--status-bad) 6%, var(--bg-panel)), var(--bg-panel) 60%); }
-.ap-main { flex: 1; min-width: 0; padding: 14px 16px 14px; }
 
-.ap-h { display: flex; align-items: center; gap: 10px; }
-.ap-kind { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 8px; border-radius: var(--radius-xs); border: 1px solid var(--border-main); color: var(--text-mid); white-space: nowrap; }
-.ap-kind.sev-bad  { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 45%, transparent); background: color-mix(in oklab, var(--status-bad) 9%, transparent); }
-.ap-kind.sev-warn { color: var(--status-warn); border-color: color-mix(in oklab, var(--status-warn) 42%, transparent); background: color-mix(in oklab, var(--status-warn) 7%, transparent); }
+/* Selected card highlight — drives the detail rail. */
+.ap-card[data-selected="true"] { border-color: var(--volt-dim); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--volt-strong) 28%, transparent); }
+
+/* Accent severity band: the live risk model (keeperApprovalRiskVisualBand) has a
+   4th "accent" band the 3-band prototype lacks. Only the deltas vs surfaces.css. */
+.ap-card.sev-accent .ap-rail { background: var(--accent-fg); }
 .ap-kind.sev-accent { color: var(--accent-fg); border-color: var(--accent-30); background: var(--accent-10); }
-.ap-kind.sev-info { color: var(--volt-strong); border-color: var(--volt-dim); background: var(--volt-wash); }
-.ap-tool { font-size: 10px; color: var(--text-dim); }
-.ap-id { font-size: 10px; color: var(--text-dim); margin-left: auto; letter-spacing: 0.06em; }
-.ap-age { font-size: 10px; font-family: var(--font-mono); color: var(--text-dim); white-space: nowrap; }
-.ap-age.sev-bad { color: var(--status-bad); } .ap-age.sev-warn { color: var(--status-warn); } .ap-age.sev-accent { color: var(--accent-fg); }
+.ap-age.sev-accent { color: var(--accent-fg); }
+
+/* "상세" request-detail toggle on each card (live affordance; opens the dossier). */
 .ap-detail-toggle { flex: none; font-family: var(--font-ui); font-size: 10.5px; padding: 4px 8px; border-radius: var(--radius-xs); border: 1px solid var(--border-soft); color: var(--text-dim); background: var(--bg-sunken); cursor: pointer; }
 .ap-detail-toggle:hover { color: var(--volt-strong); border-color: var(--volt-dim); }
 .ap-detail-toggle[aria-pressed="true"] { color: var(--text-bright); border-color: var(--volt-dim); background: var(--volt-wash); }
 
-.ap-title { font-family: var(--font-display); font-weight: 500; font-size: 15px; color: var(--text-bright); margin: 10px 0 4px; line-height: 1.35; }
-.ap-detail { font-size: 12px; color: var(--text-mid); line-height: 1.55; margin: 0 0 12px; }
+/* Augmentations of surfaces.css base rules (size/colour come from there):
+   the goal link renders as a <button> so it needs the chrome reset; a long
+   single-token input preview must wrap instead of overflowing the card. */
+.ap-req-goal { background: none; border: 0; padding: 0; font-family: var(--font-mono); }
+.ap-req-quote { word-break: break-word; }
 
-.ap-req { display: flex; gap: 10px; padding: 10px 12px; background: var(--bg-sunken); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); margin-bottom: 12px; }
-.ap-req-body { min-width: 0; flex: 1; }
-.ap-req-who { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
-.ap-klink { font-family: var(--font-display); font-weight: 600; font-size: 12px; color: var(--text-bright); background: none; border: 0; padding: 0; cursor: pointer; }
-.ap-klink:hover { color: var(--volt-strong); }
-.ap-req-goal { font-size: 10px; color: var(--text-dim); cursor: pointer; background: none; border: 0; padding: 0; font-family: var(--font-mono); }
-.ap-req-goal:hover { color: var(--volt-strong); }
-.ap-req-quote { font-size: 12.5px; color: var(--text-primary); line-height: 1.5; font-style: italic; word-break: break-word; }
-
-.ap-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.ap-act { font-family: var(--font-ui); font-size: 11.5px; letter-spacing: 0.04em; padding: 8px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border-main); background: var(--bg-card); color: var(--text-mid); cursor: pointer; transition: 0.14s; }
+/* Live decision set: disabled (in-flight) state + the "항상 승인" Approve+Always
+   action, plus :hover:not(:disabled) guards so a busy button shows no hover. */
 .ap-act:disabled { opacity: 0.5; cursor: default; }
-.ap-act.approve { border-color: color-mix(in oklab, var(--status-ok) 50%, transparent); color: var(--status-ok); }
 .ap-act.approve:hover:not(:disabled) { background: color-mix(in oklab, var(--status-ok) 14%, transparent); color: var(--text-bright); }
 .ap-act.always { border-color: color-mix(in oklab, var(--volt-strong) 40%, transparent); color: var(--volt-strong); }
 .ap-act.always:hover:not(:disabled) { background: var(--volt-wash); }
-.ap-act.deny { border-color: color-mix(in oklab, var(--status-bad) 50%, transparent); color: var(--status-bad); }
 .ap-act.deny:hover:not(:disabled) { background: color-mix(in oklab, var(--status-bad) 12%, transparent); }
-.ap-act.ghost { margin-left: auto; border-color: transparent; color: var(--text-dim); padding: 8px 4px; }
 .ap-act.ghost:hover:not(:disabled) { color: var(--volt-strong); }
 
+/* Request-detail rail / inline dossier (live surface). */
 .ap-detail-panel { position: sticky; top: 14px; background: var(--bg-panel); border: 1px solid var(--border-main); border-radius: var(--radius-md); padding: 14px; min-width: 0; }
 .ap-detail-panel-inline { display: none; }
 .ap-detail-panel-rail { display: block; }
@@ -78,14 +78,10 @@
 .ap-dossier-row dt { color: var(--text-dim); font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
 .ap-dossier-row dd { margin: 0; color: var(--text-primary); font-size: 12px; line-height: 1.45; word-break: break-word; }
 
-.ap-clear { text-align: center; padding: 52px 20px; display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--text-dim); }
-.ap-clear .ico { width: 46px; height: 46px; display: flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 22px; color: var(--status-ok); border: 1px solid color-mix(in oklab, var(--status-ok) 40%, transparent); background: color-mix(in oklab, var(--status-ok) 8%, transparent); }
-.ap-clear h3 { font-family: var(--font-display); font-weight: 500; font-size: 15px; color: var(--text-mid); margin: 4px 0 0; }
-.ap-clear-sub { font-size: 12px; max-width: 360px; line-height: 1.6; }
-
+/* Fetch error banner (live surface). */
 .ap-error { font-size: 12px; color: var(--status-bad); border: 1px solid color-mix(in oklab, var(--status-bad) 35%, var(--border-main)); background: color-mix(in oklab, var(--status-bad) 7%, transparent); padding: 10px 12px; border-radius: var(--radius-sm); margin-bottom: 14px; }
 
-/* Nav-rail count badge for the approvals surface (open-approval count). */
+/* Nav-rail count badge / dot for the approvals surface (open-approval count). */
 .ap-nav-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 6px; border-radius: var(--radius-pill); font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; line-height: 1; color: var(--status-bad); background: color-mix(in oklab, var(--status-bad) 16%, transparent); border: 1px solid color-mix(in oklab, var(--status-bad) 38%, transparent); }
 .ap-nav-dot { position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--status-bad); box-shadow: 0 0 0 2px var(--bg-panel); }
 

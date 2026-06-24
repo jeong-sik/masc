@@ -43,10 +43,13 @@ val default : t
     Raises [Failure] only if the embedded catalogue is malformed, which
     is a build-time bug and must fail fast. *)
 
-val of_patterns : enabled:bool -> destructive_pattern list -> t
+val of_patterns : enabled:bool -> destructive_pattern list -> (t, load_error list) result
 (** Build a policy from an explicit list. Used by tests and by callers
     that compose a policy programmatically. [enabled = false] disables
-    destructive-pattern detection without changing the catalogue. *)
+    destructive-pattern detection without changing the catalogue.
+
+    Returns an error if [enabled = true] but the pattern list is empty,
+    or if any pattern has an empty [pattern] or [description] string. *)
 
 (** {1 Accessors} *)
 

@@ -147,6 +147,21 @@ let test_pre_safe_bash () =
   | Trajectory.Pass -> ()
   | Trajectory.Reject r -> Alcotest.fail (Printf.sprintf "Should pass: %s" r)
 
+let test_pre_disabled_policy_bypasses_destructive_check () =
+  let disabled_policy =
+    match Destructive_ops_policy.of_patterns ~enabled:false [] with
+    | Ok p -> p
+    | Error _ -> Alcotest.fail "failed to build disabled policy"
+  in
+  let config = { default_config with destructive_check_enabled = true } in
+  let decision = Eval_gate.pre_check
+    ~config ~destructive_ops_policy:disabled_policy ~accumulated_cost:0.0 ~trajectory_acc:None
+    ~tool_name:"tool_execute"
+    ~args_json:"{\"command\": \"rm -rf /tmp/dangerous\"}" in
+  match decision with
+  | Trajectory.Pass -> ()
+  | Trajectory.Reject r -> Alcotest.fail (Printf.sprintf "disabled policy should bypass: %s" r)
+
 (* ================================================================ *)
 (* Test: pre_check — entropy detection with accumulator              *)
 (* ================================================================ *)
@@ -420,6 +435,7 @@ let () =
       Alcotest.test_case "cost within budget" `Quick test_pre_cost_within_budget;
       Alcotest.test_case "destructive bash" `Quick test_pre_destructive_bash;
       Alcotest.test_case "safe bash" `Quick test_pre_safe_bash;
+      Alcotest.test_case "disabled policy bypasses destructive check" `Quick test_pre_disabled_policy_bypasses_destructive_check;
       Alcotest.test_case "entropy" `Quick test_pre_entropy;
       Alcotest.test_case "entropy different args" `Quick test_pre_entropy_different_args;
       Alcotest.test_case "turn limit" `Quick test_pre_turn_limit;

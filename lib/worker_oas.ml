@@ -30,6 +30,14 @@ let oas_model_of_effective_model (model_id : string) : string = model_id
 
 let worker_max_turns_cap = 20
 
+(* Worker sampling overrides. The [worker_default] inference profile leaves
+   top_p/top_k unset (None); these are worker_oas's own fixed sampling
+   choice, applied at both the agent_config record and the Builder below.
+   Named here so the two send sites cannot drift (CLAUDE.md magic-number
+   rule). See also the min_p note in [agent_config_of_worker_meta]. *)
+let worker_top_p = 0.95
+let worker_top_k = 40
+
 (** Derive max_turns from worker meta timeout budget.
     Worker runtime no longer stores a separate max_turns contract. *)
 let effective_max_turns (meta : Worker_container_types.worker_container_meta) : int =
@@ -56,8 +64,8 @@ let agent_config_of_worker_meta
   ; max_tokens = Some max_tokens
   ; max_turns = effective_max_turns meta
   ; temperature = Some Runtime_provider_defaults.worker_default_temperature
-  ; top_p = Some 0.95
-  ; top_k = Some 40
+  ; top_p = Some worker_top_p
+  ; top_k = Some worker_top_k
   ; (* min_p intentionally omitted: the constant is 0.0 (no-op) and some
        cloud providers (Groq, GLM) reject the field itself with
        "Invalid request: property 'min_p' is unsupported". OAS capability
@@ -172,8 +180,8 @@ let build_agent
     | None -> b)
     |> Agent_sdk.Builder.with_max_turns config.max_turns
     |> Agent_sdk.Builder.with_temperature Runtime_provider_defaults.worker_default_temperature
-    |> Agent_sdk.Builder.with_top_p 0.95
-    |> Agent_sdk.Builder.with_top_k 40
+    |> Agent_sdk.Builder.with_top_p worker_top_p
+    |> Agent_sdk.Builder.with_top_k worker_top_k
     (* with_min_p intentionally omitted — see agent_config_of_worker_meta
        above for the reason. min_p of 0.0 is a no-op and cloud providers
        (Groq, GLM) reject the field itself. *)

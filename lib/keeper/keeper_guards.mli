@@ -185,11 +185,11 @@ val cost_guard :
   Agent_sdk.Hooks.hooks
 
 (** Destructive-pattern detection for tools flagged by descriptor-aware
-    capability projection; runs only when [enabled]. *)
+    capability projection; runs only when the supplied policy is enabled. *)
 val destructive_guard :
   meta_ref:Keeper_meta_contract.keeper_meta ref ->
   on_gate_decision:(gate_decision_event -> unit) ->
-  enabled:bool ->
+  policy:Destructive_ops_policy.t ->
   Agent_sdk.Hooks.hooks
 
 (** Governance gate. Escalates via [ApprovalRequired] when the
@@ -209,7 +209,7 @@ val build_chain :
   streak_threshold:int ->
   denied:string list ->
   max_cost_usd:float option ->
-  destructive_check:bool ->
+  destructive_ops_policy:Destructive_ops_policy.t ->
   on_gate_decision:(gate_decision_event -> unit) ->
   pre_tool_use_guard:
     (tool_name:string -> input:Yojson.Safe.t -> string option) ->

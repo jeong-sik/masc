@@ -238,8 +238,11 @@ let rec collect_string_list_values ~keys json =
     that uses command substitution to Critical — which is the bulk of
     real-world Execute invocations.  Splitting the severity here lets
     governance treat the two cases differently (Critical vs Medium). *)
+let default_policy = Destructive_ops_policy.default
+
 let destructive_pattern_strings =
-  lazy (List.map fst Eval_gate.destructive_patterns)
+  lazy (List.map (fun p -> p.Shell_safety_types.pattern)
+          (Destructive_ops_policy.patterns default_policy))
 
 (** Outcome of inspecting a tool input payload for shell-style risk.
     Strictly internal — drives {!classify_with_payload}'s level decision. *)
@@ -260,7 +263,7 @@ let payload_severity input : payload_severity =
   let rec loop acc = function
     | [] -> acc
     | text :: rest ->
-        (match Eval_gate.detect_destructive text with
+        (match Eval_gate.detect_destructive default_policy text with
          | None -> loop acc rest
          | Some (pat, _) ->
              if List.mem pat dest_pats then Payload_destructive

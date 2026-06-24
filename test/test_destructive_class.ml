@@ -1,15 +1,18 @@
 (* Tick 13: typed destructive classification.
 
-   Core covenant: every row in Eval_gate.destructive_patterns must
+   Core covenant: every pattern in the destructive-ops policy must
    classify to exactly one destructive_class via the shared shell-safety
-   mapping.  If Eval_gate adds a new pattern and Shell_safety_types does
+   mapping.  If the policy adds a new pattern and Shell_safety_types does
    not, this test fails loudly, preventing silent coverage drift between
-   the regex allowlist and the typed classifier. *)
+   the substring catalogue and the typed classifier. *)
 
 open Alcotest
 
-let classify =
-  Masc.Shell_safety_types.classify_destructive
+let policy = Masc.Destructive_ops_policy.default
+
+let patterns = Masc.Destructive_ops_policy.patterns policy
+
+let classify = Masc.Shell_safety_types.classify_destructive patterns
 
 let class_to_string =
   Masc.Shell_safety_types.destructive_class_to_string
@@ -20,14 +23,13 @@ let class_name_of_cmd cmd =
   | None -> "no_match"
 
 let test_all_patterns_classify () =
-  let patterns = Masc.Eval_gate.destructive_patterns in
-  List.iter (fun (pat, desc) ->
-    match classify pat with
+  List.iter (fun { Masc.Shell_safety_types.pattern; description; _ } ->
+    match classify pattern with
     | Some _ -> ()
     | None ->
         fail (Printf.sprintf
-                "Eval_gate pattern %S (%s) has no destructive_class mapping"
-                pat desc)
+                "policy pattern %S (%s) has no destructive_class mapping"
+                pattern description)
   ) patterns
 
 let test_longest_match_wins () =
@@ -56,13 +58,12 @@ let test_class_names_stable () =
 
 let test_coverage_count () =
   (* Plan Phase 5 cites 19 destructive patterns. *)
-  let patterns = Masc.Eval_gate.destructive_patterns in
   check int "19 destructive patterns" 19 (List.length patterns)
 
 let () =
   run "destructive_class" [
     ("covenant", [
-      test_case "every eval_gate pattern classifies" `Quick
+      test_case "every policy pattern classifies" `Quick
         test_all_patterns_classify;
       test_case "19 patterns present" `Quick test_coverage_count;
     ]);

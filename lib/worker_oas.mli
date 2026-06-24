@@ -28,6 +28,7 @@ val build_agent :
 
 val make_tool_tracking_hooks :
   ?gate_config:Eval_gate.gate_config ->
+  ?destructive_ops_policy:Destructive_ops_policy.t ->
   ?context:Agent_sdk.Context.t ->
   unit ->
   string list ref * Agent_sdk.Hooks.hooks

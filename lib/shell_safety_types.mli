@@ -24,17 +24,14 @@ type destructive_pattern =
   ; description : string
   }
 
-val destructive_patterns : destructive_pattern list
-(** The canonical destructive-pattern catalogue.
-
-    Order matters: longer substrings come first so [rm -rf] matches
-    before [rm -r]. Length is pinned by
-    [test_destructive_class.test_coverage_count]. *)
-
-val classify_destructive : string -> (destructive_class * string) option
-(** [classify_destructive cmd] returns the first matching
+val classify_destructive :
+  destructive_pattern list -> string -> (destructive_class * string) option
+(** [classify_destructive patterns cmd] returns the first matching
     [(class, substring)] pair in declaration order, or [None] when no
-    pattern matches. Matching is case-insensitive. *)
+    pattern matches. Matching is case-insensitive.
+
+    The pattern catalogue is owned by {!Destructive_ops_policy}; this
+    function performs only the typed classification over a given list. *)
 
 val cmd_hash_for_log : string -> string
 (** [cmd_hash_for_log cmd] returns a deterministic 12-hex-char prefix

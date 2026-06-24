@@ -74,17 +74,16 @@ let tool_policy_of_config (config : gate_config) =
 (* Destructive pattern detection                                     *)
 (* ================================================================ *)
 
-(** Known destructive shell patterns — derived from the SSOT in
-    [Shell_safety_types.destructive_patterns].  Drops the typed class
-    field because [detect_destructive] only needs (substring, desc)
-    for its return shape; callers that need the class go through
-    [Shell_safety_types.classify_destructive].  Sharing the source list
-    means a new entry must update one place, not two. *)
-let destructive_patterns : (string * string) list =
+(** Convert a loaded policy into the (substring, description) list
+    used by [detect_destructive].  Drops the typed class field because
+    this layer only needs (substring, desc) for its return shape;
+    callers that need the class go through [Shell_safety_types.classify_destructive]
+    over [Destructive_ops_policy.patterns]. *)
+let patterns_of_policy (policy : Destructive_ops_policy.t) : (string * string) list =
   List.map
     (fun { Shell_safety_types.pattern; description; class_ = _ } ->
        pattern, description)
-    Shell_safety_types.destructive_patterns
+    (Destructive_ops_policy.patterns policy)
 
 (** Normalize a command string for pattern matching.
     Strips inline single/double quotes and collapses whitespace.
@@ -220,21 +219,19 @@ let detect_evasion (command : string) : (string * string) option =
        that normalization cannot catch (hex escapes, variable expansion, etc.)
 
     Both passes must clear for the command to be considered safe. *)
-let detect_destructive (command : string) : (string * string) option =
-  let cmd_lower = String.lowercase_ascii (normalize_command command) in
-  match
-    List.find_opt (fun (pattern, _desc) ->
-      let pat_lower = String.lowercase_ascii pattern in
-      let rec find_at i =
-        if i + String.length pat_lower > String.length cmd_lower then false
-        else if String.sub cmd_lower i (String.length pat_lower) = pat_lower then true
-        else find_at (i + 1)
-      in
-      find_at 0
-    ) destructive_patterns
-  with
-  | Some _ as hit -> hit
-  | None -> detect_evasion command
+let detect_destructive (policy : Destructive_ops_policy.t) (command : string)
+  : (string * string) option
+  =
+  if not (Destructive_ops_policy.enabled policy) then None
+  else
+    let cmd_lower = String.lowercase_ascii (normalize_command command) in
+    match
+      List.find_opt (fun (pattern, _desc) ->
+        String_util.contains_substring_ci cmd_lower pattern)
+        (patterns_of_policy policy)
+    with
+    | Some _ as hit -> hit
+    | None -> detect_evasion command
 
 (* ================================================================ *)
 (* Pre-execution gate                                                *)
@@ -266,6 +263,7 @@ let extract_all_strings_from_json (json_str : string) : string =
 
 let pre_check
     ~(config : gate_config)
+    ~(destructive_ops_policy : Destructive_ops_policy.t)
     ~(accumulated_cost : float)
     ~(trajectory_acc : Trajectory.accumulator option)
     ~(tool_name : string)
@@ -325,7 +323,7 @@ let pre_check
                  && Tool_capability.has Tool_capability.Destructive tool_name then
                 let cmd_str = extract_all_strings_from_json args_json
                 in
-                begin match detect_destructive cmd_str with
+                begin match detect_destructive destructive_ops_policy cmd_str with
                 | Some (pattern, desc) ->
                     Trajectory.Reject (Printf.sprintf
                       "destructive pattern in %s: '%s' (%s)" tool_name pattern desc)
@@ -349,7 +347,7 @@ let pre_check
               extract_strings (Yojson.Safe.from_string args_json)
             with Yojson.Json_error _ -> ""
           in
-          begin match detect_destructive cmd_str with
+          begin match detect_destructive destructive_ops_policy cmd_str with
           | Some (pattern, desc) ->
               Trajectory.Reject (Printf.sprintf
                 "destructive pattern in %s: '%s' (%s)" tool_name pattern desc)
@@ -464,6 +462,7 @@ let post_eval
     This is the main integration point for keeper_tool_surface.ml. *)
 let guarded_execute
     ~(config : gate_config)
+    ~(destructive_ops_policy : Destructive_ops_policy.t)
     ~(accumulated_cost : float)
     ~(trajectory_acc : Trajectory.accumulator option)
     ~(tool_name : string)
@@ -471,8 +470,8 @@ let guarded_execute
     ~(execute : unit -> string)
     : Trajectory.gate_decision * string option * post_eval_result option * int =
 
-  let decision = pre_check ~config ~accumulated_cost ~trajectory_acc
-    ~tool_name ~args_json in
+  let decision = pre_check ~config ~destructive_ops_policy ~accumulated_cost
+    ~trajectory_acc ~tool_name ~args_json in
 
   let record_trajectory ~gate_decision ~result ~error ~duration_ms =
     match trajectory_acc with

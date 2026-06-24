@@ -660,6 +660,13 @@
  (modules test_runtime_config_validity)
  (libraries masc_test_deps))
 
+; Destructive-ops policy TOML loader + typed default catalogue.
+
+(test
+ (name test_destructive_ops_policy)
+ (modules test_destructive_ops_policy)
+ (libraries masc_test_deps))
+
 ; Dashboard /runtime-defaults JSON builder — resolved defaults + model routing
 ; projection, plus the no-fabrication (null/empty) contract.
 

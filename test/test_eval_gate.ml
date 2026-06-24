@@ -20,36 +20,37 @@ let make_acc dir =
     ~trace_id:"gate-test" ~generation:0 ()
 
 let default_config = Eval_gate.default_config
+let default_policy = Destructive_ops_policy.default
 
 (* ================================================================ *)
 (* Test: detect_destructive                                          *)
 (* ================================================================ *)
 
 let test_detect_rm_rf () =
-  match Eval_gate.detect_destructive "rm -rf /tmp/test" with
+  match Eval_gate.detect_destructive default_policy "rm -rf /tmp/test" with
   | Some (_pat, desc) ->
       Alcotest.(check string) "rm -rf desc" "recursive forced deletion" desc
   | None -> Alcotest.fail "Should detect rm -rf"
 
 let test_detect_force_push () =
-  match Eval_gate.detect_destructive "git push --force origin main" with
+  match Eval_gate.detect_destructive default_policy "git push --force origin main" with
   | Some (_pat, desc) ->
       Alcotest.(check string) "force push desc" "force push" desc
   | None -> Alcotest.fail "Should detect force push"
 
 let test_detect_safe_command () =
-  match Eval_gate.detect_destructive "ls -la /tmp" with
+  match Eval_gate.detect_destructive default_policy "ls -la /tmp" with
   | Some _ -> Alcotest.fail "ls should be safe"
   | None -> ()
 
 let test_detect_drop_table () =
-  match Eval_gate.detect_destructive "psql -c 'DROP TABLE users'" with
+  match Eval_gate.detect_destructive default_policy "psql -c 'DROP TABLE users'" with
   | Some (_pat, desc) ->
       Alcotest.(check string) "drop table desc" "SQL table drop" desc
   | None -> Alcotest.fail "Should detect DROP TABLE"
 
 let test_detect_case_insensitive () =
-  match Eval_gate.detect_destructive "RM -RF /data" with
+  match Eval_gate.detect_destructive default_policy "RM -RF /data" with
   | Some _ -> ()
   | None -> Alcotest.fail "Should detect RM -RF (case insensitive)"
 
@@ -60,8 +61,8 @@ let test_detect_case_insensitive () =
 let test_pre_deny_list () =
   let config = { default_config with denied_tools = ["evil_tool"] } in
   let decision = Eval_gate.pre_check
-    ~config ~accumulated_cost:0.0 ~trajectory_acc:None
-    ~tool_name:"evil_tool" ~args_json:"{}" in
+    ~config ~destructive_ops_policy:default_policy ~accumulated_cost:0.0
+    ~trajectory_acc:None ~tool_name:"evil_tool" ~args_json:"{}" in
   match decision with
   | Trajectory.Reject reason ->
       Alcotest.(check bool) "deny list reason" true
@@ -81,7 +82,7 @@ let test_pre_allowlist_reject () =
     allowed_tools = ["tool_execute"; "tool_read_file"];
   } in
   let decision = Eval_gate.pre_check
-    ~config ~accumulated_cost:0.0 ~trajectory_acc:None
+    ~config ~destructive_ops_policy:default_policy ~accumulated_cost:0.0 ~trajectory_acc:None
     ~tool_name:"keeper_dangerous" ~args_json:"{}" in
   match decision with
   | Trajectory.Reject _ -> ()
@@ -93,7 +94,7 @@ let test_pre_allowlist_pass () =
     allowed_tools = ["tool_execute"; "tool_read_file"];
   } in
   let decision = Eval_gate.pre_check
-    ~config ~accumulated_cost:0.0 ~trajectory_acc:None
+    ~config ~destructive_ops_policy:default_policy ~accumulated_cost:0.0 ~trajectory_acc:None
     ~tool_name:"tool_execute" ~args_json:"{}" in
   match decision with
   | Trajectory.Pass -> ()
@@ -105,7 +106,7 @@ let test_pre_allowlist_pass () =
 
 let test_pre_cost_exceeded () =
   let decision = Eval_gate.pre_check
-    ~config:default_config ~accumulated_cost:0.60 ~trajectory_acc:None
+    ~config:default_config ~destructive_ops_policy:default_policy ~accumulated_cost:0.60 ~trajectory_acc:None
     ~tool_name:"tool_execute" ~args_json:"{\"command\": \"echo hi\"}" in
   match decision with
   | Trajectory.Pass -> ()
@@ -114,7 +115,7 @@ let test_pre_cost_exceeded () =
 
 let test_pre_cost_within_budget () =
   let decision = Eval_gate.pre_check
-    ~config:default_config ~accumulated_cost:0.10 ~trajectory_acc:None
+    ~config:default_config ~destructive_ops_policy:default_policy ~accumulated_cost:0.10 ~trajectory_acc:None
     ~tool_name:"tool_execute" ~args_json:"{\"command\": \"echo hi\"}" in
   match decision with
   | Trajectory.Pass -> ()
@@ -126,7 +127,7 @@ let test_pre_cost_within_budget () =
 
 let test_pre_destructive_bash () =
   let decision = Eval_gate.pre_check
-    ~config:default_config ~accumulated_cost:0.0 ~trajectory_acc:None
+    ~config:default_config ~destructive_ops_policy:default_policy ~accumulated_cost:0.0 ~trajectory_acc:None
     ~tool_name:"tool_execute"
     ~args_json:"{\"command\": \"rm -rf /tmp/dangerous\"}" in
   match decision with
@@ -139,7 +140,7 @@ let test_pre_destructive_bash () =
 
 let test_pre_safe_bash () =
   let decision = Eval_gate.pre_check
-    ~config:default_config ~accumulated_cost:0.0 ~trajectory_acc:None
+    ~config:default_config ~destructive_ops_policy:default_policy ~accumulated_cost:0.0 ~trajectory_acc:None
     ~tool_name:"tool_execute"
     ~args_json:"{\"command\": \"ls -la\"}" in
   match decision with
@@ -168,7 +169,7 @@ let test_pre_entropy () =
     Trajectory.record_entry acc (mk "tool_execute" repeated_args);
     Trajectory.record_entry acc (mk "tool_execute" repeated_args);
     let decision = Eval_gate.pre_check
-      ~config:default_config ~accumulated_cost:0.0
+      ~config:default_config ~destructive_ops_policy:default_policy ~accumulated_cost:0.0
       ~trajectory_acc:(Some acc)
       ~tool_name:"tool_execute"
       ~args_json:repeated_args in
@@ -201,7 +202,7 @@ let test_pre_entropy_different_args () =
     Trajectory.record_entry acc (mk "tool_execute" "{\"command\": \"echo b\"}");
     Trajectory.record_entry acc (mk "tool_execute" "{\"command\": \"echo c\"}");
     let decision = Eval_gate.pre_check
-      ~config:default_config ~accumulated_cost:0.0
+      ~config:default_config ~destructive_ops_policy:default_policy ~accumulated_cost:0.0
       ~trajectory_acc:(Some acc)
       ~tool_name:"tool_execute"
       ~args_json:"{\"command\": \"echo d\"}" in
@@ -230,7 +231,7 @@ let test_pre_turn_limit () =
     Trajectory.record_entry acc (mk "tool_execute");
     Trajectory.record_entry acc (mk "tool_read_file");
     let decision = Eval_gate.pre_check
-      ~config ~accumulated_cost:0.0
+      ~config ~destructive_ops_policy:default_policy ~accumulated_cost:0.0
       ~trajectory_acc:(Some acc)
       ~tool_name:"keeper_status"
       ~args_json:"{}" in
@@ -291,7 +292,7 @@ let test_post_eval_slow () =
 let test_guarded_execute_pass () =
   let (decision, result_opt, eval_opt, duration_ms) =
     Eval_gate.guarded_execute
-      ~config:default_config ~accumulated_cost:0.0
+      ~config:default_config ~destructive_ops_policy:default_policy ~accumulated_cost:0.0
       ~trajectory_acc:None
       ~tool_name:"tool_execute"
       ~args_json:"{\"command\": \"echo hello\"}"
@@ -306,7 +307,7 @@ let test_guarded_execute_reject () =
   let executed = ref false in
   let (decision, result_opt, _eval_opt, _duration_ms) =
     Eval_gate.guarded_execute
-      ~config:default_config ~accumulated_cost:0.0
+      ~config:default_config ~destructive_ops_policy:default_policy ~accumulated_cost:0.0
       ~trajectory_acc:None
       ~tool_name:"tool_execute"
       ~args_json:"{\"command\": \"rm -rf /\"}"
@@ -320,7 +321,7 @@ let test_guarded_execute_reject () =
 let test_guarded_execute_exception () =
   let (decision, result_opt, eval_opt, _duration_ms) =
     Eval_gate.guarded_execute
-      ~config:default_config ~accumulated_cost:0.0
+      ~config:default_config ~destructive_ops_policy:default_policy ~accumulated_cost:0.0
       ~trajectory_acc:None
       ~tool_name:"keeper_status"
       ~args_json:"{}"

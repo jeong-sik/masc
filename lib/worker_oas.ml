@@ -308,7 +308,11 @@ let render_worker_skip_reason ~tool_name ~reason_code ~reason_text =
     When [gate_config] is None, only name tracking is performed (backward compat).
 
     @since Audit #2 — Worker safety gates *)
-let make_tool_tracking_hooks ?gate_config ?context () =
+let make_tool_tracking_hooks
+      ?gate_config
+      ?(destructive_ops_policy = Destructive_ops_policy.default)
+      ?context
+      () =
   let tool_names_ref = ref [] in
   let tracking =
     { Agent_sdk.Hooks.empty with
@@ -337,7 +341,7 @@ let make_tool_tracking_hooks ?gate_config ?context () =
                    && Tool_capability.has Tool_capability.Destructive tool_name
                  then (
                    let cmd = extract_command_from_input input in
-                   match Eval_gate.detect_destructive cmd with
+                   match Eval_gate.detect_destructive destructive_ops_policy cmd with
                    | Some (pattern, desc) ->
                      let reason_text = Printf.sprintf "pattern='%s' (%s)" pattern desc in
                      Log.LocalWorker.warn

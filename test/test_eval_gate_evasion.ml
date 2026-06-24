@@ -7,6 +7,8 @@
 
 module Eval_gate = Masc.Eval_gate
 
+let default_policy = Masc.Destructive_ops_policy.default
+
 (* ============================================================
    Normalization tests
    ============================================================ *)
@@ -41,45 +43,45 @@ let test_normalize_mixed () =
    ============================================================ *)
 
 let test_catches_quoted_rm () =
-  match Eval_gate.detect_destructive "'rm' '-rf' /data" with
+  match Eval_gate.detect_destructive default_policy "'rm' '-rf' /data" with
   | Some (_, desc) ->
     Alcotest.(check string) "caught quoted rm" "recursive forced deletion" desc
   | None -> Alcotest.fail "Should catch quoted rm -rf"
 
 let test_catches_double_quoted_rm () =
-  match Eval_gate.detect_destructive {|"rm" "-rf" /data|} with
+  match Eval_gate.detect_destructive default_policy {|"rm" "-rf" /data|} with
   | Some _ -> ()
   | None -> Alcotest.fail "Should catch double-quoted rm -rf"
 
 let test_catches_extra_whitespace () =
-  match Eval_gate.detect_destructive "rm    -rf    /data" with
+  match Eval_gate.detect_destructive default_policy "rm    -rf    /data" with
   | Some _ -> ()
   | None -> Alcotest.fail "Should catch rm with extra whitespace"
 
 let test_catches_tabbed_rm () =
-  match Eval_gate.detect_destructive "rm\t-rf\t/data" with
+  match Eval_gate.detect_destructive default_policy "rm\t-rf\t/data" with
   | Some _ -> ()
   | None -> Alcotest.fail "Should catch rm with tabs"
 
 let test_catches_backslash_rm () =
-  match Eval_gate.detect_destructive "r\\m -rf /data" with
+  match Eval_gate.detect_destructive default_policy "r\\m -rf /data" with
   | Some _ -> ()
   | None -> Alcotest.fail "Should catch backslash-escaped rm"
 
 let test_catches_quoted_git_push () =
-  match Eval_gate.detect_destructive "'git' 'push' '--force'" with
+  match Eval_gate.detect_destructive default_policy "'git' 'push' '--force'" with
   | Some (_, desc) ->
     Alcotest.(check string) "caught quoted git push" "force push" desc
   | None -> Alcotest.fail "Should catch quoted git push --force"
 
 let test_catches_quoted_drop_table () =
-  match Eval_gate.detect_destructive "'drop' 'table' users" with
+  match Eval_gate.detect_destructive default_policy "'drop' 'table' users" with
   | Some (_, desc) ->
     Alcotest.(check string) "caught quoted drop" "SQL table drop" desc
   | None -> Alcotest.fail "Should catch quoted DROP TABLE"
 
 let test_catches_newline_separated () =
-  match Eval_gate.detect_destructive "git push\n--force origin" with
+  match Eval_gate.detect_destructive default_policy "git push\n--force origin" with
   | Some _ -> ()
   | None -> Alcotest.fail "Should catch newline-separated force push"
 
@@ -90,25 +92,25 @@ let test_catches_newline_separated () =
 
 let test_gap_variable_expansion () =
   (* ${IFS} expands to space in bash, so rm${IFS}-rf becomes rm -rf *)
-  let result = Eval_gate.detect_destructive "rm${IFS}-rf /data" in
+  let result = Eval_gate.detect_destructive default_policy "rm${IFS}-rf /data" in
   Alcotest.(check bool) "variable expansion now detected"
     true (Option.is_some result)
 
 let test_gap_command_substitution () =
   (* $(echo rm) -rf expands to rm -rf in bash *)
-  let result = Eval_gate.detect_destructive "$(echo rm) -rf /data" in
+  let result = Eval_gate.detect_destructive default_policy "$(echo rm) -rf /data" in
   Alcotest.(check bool) "command substitution now detected"
     true (Option.is_some result)
 
 let test_gap_hex_escape () =
   (* $'\x72\x6d' expands to rm in bash *)
-  let result = Eval_gate.detect_destructive "$'\\x72\\x6d' -rf /data" in
+  let result = Eval_gate.detect_destructive default_policy "$'\\x72\\x6d' -rf /data" in
   Alcotest.(check bool) "hex escape now detected"
     true (Option.is_some result)
 
 let test_gap_base64_decode () =
   (* echo cm0gLXJm | base64 -d | sh → executes rm -rf *)
-  let result = Eval_gate.detect_destructive
+  let result = Eval_gate.detect_destructive default_policy
     "echo cm0gLXJm | base64 -d | sh" in
   Alcotest.(check bool) "base64 pipe now detected"
     true (Option.is_some result)
@@ -118,17 +120,17 @@ let test_gap_base64_decode () =
    ============================================================ *)
 
 let test_safe_echo () =
-  match Eval_gate.detect_destructive "echo 'hello world'" with
+  match Eval_gate.detect_destructive default_policy "echo 'hello world'" with
   | Some _ -> Alcotest.fail "Safe echo should not trigger"
   | None -> ()
 
 let test_safe_grep () =
-  match Eval_gate.detect_destructive "grep -r 'pattern' /src" with
+  match Eval_gate.detect_destructive default_policy "grep -r 'pattern' /src" with
   | None -> ()
   | Some _ -> Alcotest.fail "grep should be safe"
 
 let test_safe_git_push () =
-  match Eval_gate.detect_destructive "git push origin main" with
+  match Eval_gate.detect_destructive default_policy "git push origin main" with
   | None -> ()
   | Some _ -> Alcotest.fail "normal git push should be safe"
 
@@ -141,14 +143,14 @@ let test_safe_git_push () =
 
 let test_false_positive_echo_pattern () =
   (* echo 'rm -rf ...' is safe in bash, but normalization strips quotes *)
-  let result = Eval_gate.detect_destructive "echo 'rm -rf is dangerous'" in
+  let result = Eval_gate.detect_destructive default_policy "echo 'rm -rf is dangerous'" in
   Alcotest.(check bool)
     "echo with pattern triggers (false positive, conservative)"
     true (result <> None)
 
 let test_false_positive_nested_quotes () =
   (* Nested quotes: outer double-quote preserves inner single-quote as literal *)
-  let result = Eval_gate.detect_destructive {|psql -c "'drop' 'table' users"|} in
+  let result = Eval_gate.detect_destructive default_policy {|psql -c "'drop' 'table' users"|} in
   (* Inner quotes are preserved when inside outer quotes — pattern not found *)
   Alcotest.(check bool)
     "nested quotes bypass (known false negative)"

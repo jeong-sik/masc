@@ -74,28 +74,40 @@ type ws_session = {
       responsive client could accumulate against (#21509). *)
   last_pong_at: float Atomic.t;
   dashboard_auth: dashboard_auth_state Atomic.t;
-  mutable dashboard_route: string option;
-  dashboard_slices: (string, unit) Hashtbl.t;
-  mutable dashboard_seq: int;
+  dashboard_route: string option Atomic.t;
+  (** Slices this session subscribes to, held as an immutable list inside an
+      [Atomic.t].  Subscribe / unsubscribe (under [sessions_mutex]) publish a
+      fresh list with [Atomic.set]; the SSE fanout reads it lock-free with
+      [Atomic.get].  An immutable snapshot is never mutated in place, so a
+      reader on the serving domain cannot observe a torn list or trip a
+      [Hashtbl] resize on the keeper-loop broadcast path (RFC-0204 Phase 3). *)
+  dashboard_slices: string list Atomic.t;
+  dashboard_seq: int Atomic.t;
   (** Last seq value the client has acknowledged.  0 until the first ack
       arrives.  Paired with {!dashboard_last_buffered_amount} so the server
       can reason about client liveness without touching the wire. *)
-  mutable dashboard_last_ack_seq: int;
+  dashboard_last_ack_seq: int Atomic.t;
   (** Last [WebSocket.bufferedAmount] the client reported in a
       [dashboard/ack] notification.  A growing value is a leading indicator
       that the client cannot drain deltas as fast as the server pushes them;
       sustained growth should eventually gate further sends.  Observability
       lands first — gating is a follow-up once thresholds are established
       from production distributions. *)
-  mutable dashboard_last_buffered_amount: int;
+  dashboard_last_buffered_amount: int Atomic.t;
   (** Last wall-clock time a [dashboard/ack] notification arrived.  A
       subscribed dashboard that stops ACKing can keep a low bufferedAmount
       forever. *)
-  mutable dashboard_last_ack_at: float;
+  dashboard_last_ack_at: float Atomic.t;
   (** Last dashboard/delta seq that expects a browser [dashboard/ack].  Snapshot
       seqs are intentionally excluded because the browser only ACKs deltas. *)
-  mutable dashboard_last_delta_seq: int;
-  mutable dashboard_last_delta_at: float;
+  (** [dashboard_last_delta_seq] / [dashboard_last_delta_at] are written
+      together on the fanout (one delta) and read together by
+      {!session_is_backpressured}.  As independent [Atomic.t]s a cross-domain
+      reader may observe a one-tick-stale pair; that is benign for the stale-ACK
+      backpressure heuristic, which is monotonic and re-evaluates on the next
+      delta (RFC-0204 Phase 3 — deliberate, not an oversight). *)
+  dashboard_last_delta_seq: int Atomic.t;
+  dashboard_last_delta_at: float Atomic.t;
   inbound_dispatches: int Atomic.t;
 }
 
@@ -236,14 +248,14 @@ let new_session ~id ~wsd =
     write_mutex = Eio.Mutex.create ();
     last_pong_at = Atomic.make now;
     dashboard_auth = Atomic.make Unauthenticated;
-    dashboard_route = None;
-    dashboard_slices = Hashtbl.create 8;
-    dashboard_seq = 0;
-    dashboard_last_ack_seq = 0;
-    dashboard_last_buffered_amount = 0;
-    dashboard_last_ack_at = now;
-    dashboard_last_delta_seq = 0;
-    dashboard_last_delta_at = now;
+    dashboard_route = Atomic.make None;
+    dashboard_slices = Atomic.make [];
+    dashboard_seq = Atomic.make 0;
+    dashboard_last_ack_seq = Atomic.make 0;
+    dashboard_last_buffered_amount = Atomic.make 0;
+    dashboard_last_ack_at = Atomic.make now;
+    dashboard_last_delta_seq = Atomic.make 0;
+    dashboard_last_delta_at = Atomic.make now;
     inbound_dispatches = Atomic.make 0;
   }
 
@@ -354,9 +366,18 @@ let jsonrpc_notification method_ params =
       ("params", params);
     ]
 
-let next_dashboard_seq session =
-  session.dashboard_seq <- session.dashboard_seq + 1;
-  session.dashboard_seq
+(* Cross-domain-safe seq allocator: [fetch_and_add] atomically claims a unique
+   slot, so two domains never hand out the same seq.  The old plain
+   read-modify-write lost ~half its updates under true parallelism (RFC-0204
+   Phase 3 gate). *)
+let next_dashboard_seq session = Atomic.fetch_and_add session.dashboard_seq 1 + 1
+
+(* Monotonic-max update for a cross-domain counter: retries until our value
+   lands or a concurrent writer has already raised the field to >= v.  Replaces
+   the old non-atomic "if v > x then x <- v", which lost concurrent acks. *)
+let rec atomic_bump_max a v =
+  let cur = Atomic.get a in
+  if v > cur && not (Atomic.compare_and_set a cur v) then atomic_bump_max a v
 
 let valid_dashboard_slice = function
   | "shell"
@@ -391,9 +412,9 @@ let dashboard_slice_for_sse_type = function
 
 let dashboard_session_result session =
   let slices =
-    Hashtbl.fold (fun slice () acc -> `String slice :: acc)
-      session.dashboard_slices []
+    Atomic.get session.dashboard_slices
     |> List.sort compare
+    |> List.map (fun slice -> `String slice)
   in
   let auth = dashboard_auth session in
   `Assoc
@@ -402,9 +423,9 @@ let dashboard_session_result session =
       ("session_id", `String session.id);
       ("authenticated", `Bool (dashboard_auth_is_authenticated auth));
       ( "agent", Json_util.string_opt_to_json (dashboard_auth_agent auth) );
-      ( "route", Json_util.string_opt_to_json session.dashboard_route );
+      ( "route", Json_util.string_opt_to_json (Atomic.get session.dashboard_route) );
       ("slices", `List slices);
-      ("seq", `Int session.dashboard_seq);
+      ("seq", `Int (Atomic.get session.dashboard_seq));
     ]
 
 let find_session session_id =
@@ -476,19 +497,18 @@ let dashboard_hello ~base_path ~session_id ?token () =
 
 let dashboard_snapshot session =
   let slices =
-    Hashtbl.fold
-      (fun slice () acc ->
-        match !dashboard_snapshot_provider slice with
-        | Some json -> (slice, json) :: acc
-        | None -> acc)
-      session.dashboard_slices []
+    Atomic.get session.dashboard_slices
+    |> List.filter_map (fun slice ->
+           match !dashboard_snapshot_provider slice with
+           | Some json -> Some (slice, json)
+           | None -> None)
     |> List.sort (fun (a, _) (b, _) -> String.compare a b)
   in
   `Assoc
     [
       ("protocol", `String "dashboard-ws.v1");
       ("seq", `Int (next_dashboard_seq session));
-      ( "route", Json_util.string_opt_to_json session.dashboard_route );
+      ( "route", Json_util.string_opt_to_json (Atomic.get session.dashboard_route) );
       ("slices", `Assoc slices);
     ]
 
@@ -508,13 +528,12 @@ let dashboard_subscribe ~session_id ?route ~slices () =
         | [] ->
             with_sessions_rw (fun () ->
                 slice_index_remove_session_locked session_id;
-                Hashtbl.clear session.dashboard_slices;
+                Atomic.set session.dashboard_slices
+                  (List.sort_uniq compare slices);
                 List.iter
-                  (fun slice ->
-                    Hashtbl.replace session.dashboard_slices slice ();
-                    slice_index_add_locked ~session_id ~slice)
+                  (fun slice -> slice_index_add_locked ~session_id ~slice)
                   slices);
-            session.dashboard_route <- route;
+            Atomic.set session.dashboard_route route;
             Ok
               (`Assoc
                 [
@@ -533,13 +552,15 @@ let dashboard_unsubscribe ~session_id ?slices () =
         with_sessions_rw (fun () ->
             match slices with
             | None ->
-                Hashtbl.clear session.dashboard_slices;
+                Atomic.set session.dashboard_slices [];
                 slice_index_remove_session_locked session_id
             | Some slices ->
+                Atomic.set session.dashboard_slices
+                  (List.filter
+                     (fun s -> not (List.mem s slices))
+                     (Atomic.get session.dashboard_slices));
                 List.iter
-                  (fun slice ->
-                    Hashtbl.remove session.dashboard_slices slice;
-                    slice_index_remove_locked ~session_id ~slice)
+                  (fun slice -> slice_index_remove_locked ~session_id ~slice)
                   slices);
         Ok (`Assoc [ ("session", dashboard_session_result session) ])
       end
@@ -556,7 +577,7 @@ let dashboard_ping ~session_id () =
             [
               ("ok", `Bool true);
               ("session_id", `String session.id);
-              ("seq", `Int session.dashboard_seq);
+              ("seq", `Int (Atomic.get session.dashboard_seq));
             ])
 
 let dashboard_ack ~session_id ~seq ?buffered_amount () =
@@ -566,12 +587,11 @@ let dashboard_ack ~session_id ~seq ?buffered_amount () =
       if not (dashboard_auth_is_authenticated (dashboard_auth session)) then
         Error "dashboard/ack requires dashboard/hello first"
       else begin
-        session.dashboard_last_ack_at <- Time_compat.now ();
-        if seq > session.dashboard_last_ack_seq then
-          session.dashboard_last_ack_seq <- seq;
+        Atomic.set session.dashboard_last_ack_at (Time_compat.now ());
+        atomic_bump_max session.dashboard_last_ack_seq seq;
         (match buffered_amount with
          | Some n when n >= 0 ->
-             session.dashboard_last_buffered_amount <- n;
+             Atomic.set session.dashboard_last_buffered_amount n;
              Transport_metrics.observe_ws_client_buffered_bytes n
          | _ -> ());
         Ok
@@ -579,9 +599,10 @@ let dashboard_ack ~session_id ~seq ?buffered_amount () =
             [
               ("session_id", `String session.id);
               ("ack", `Int seq);
-              ("server_last_ack_seq", `Int session.dashboard_last_ack_seq);
+              ("server_last_ack_seq",
+                `Int (Atomic.get session.dashboard_last_ack_seq));
               ("server_last_buffered_amount",
-                `Int session.dashboard_last_buffered_amount);
+                `Int (Atomic.get session.dashboard_last_buffered_amount));
             ])
       end
 
@@ -722,11 +743,11 @@ let parse_sse_dashboard_event sse_event =
 let dashboard_delta_for_parsed session parsed =
   match parsed with
   | Some { event_type; slice = Some slice; payload; broadcast_ts }
-    when Hashtbl.mem session.dashboard_slices slice ->
+    when List.mem slice (Atomic.get session.dashboard_slices) ->
       Transport_metrics.inc_ws_delta_built ();
       let seq = next_dashboard_seq session in
-      session.dashboard_last_delta_seq <- seq;
-      session.dashboard_last_delta_at <- Time_compat.now ();
+      Atomic.set session.dashboard_last_delta_seq seq;
+      Atomic.set session.dashboard_last_delta_at (Time_compat.now ());
       Some
         (jsonrpc_notification "dashboard/delta"
            (`Assoc
@@ -813,14 +834,14 @@ let session_is_backpressured session =
   else
     let limit = client_buffer_limit_bytes () in
     let buffered_limit_exceeded =
-      limit > 0 && session.dashboard_last_buffered_amount >= limit
+      limit > 0 && Atomic.get session.dashboard_last_buffered_amount >= limit
     in
     let ack_stale =
       dashboard_ack_is_stale
         ~now:(Time_compat.now ())
-        ~last_delta_at:session.dashboard_last_delta_at
-        ~last_delta_seq:session.dashboard_last_delta_seq
-        ~last_ack_seq:session.dashboard_last_ack_seq
+        ~last_delta_at:(Atomic.get session.dashboard_last_delta_at)
+        ~last_delta_seq:(Atomic.get session.dashboard_last_delta_seq)
+        ~last_ack_seq:(Atomic.get session.dashboard_last_ack_seq)
         ~threshold_s:(dashboard_ack_stale_threshold_s ())
     in
     buffered_limit_exceeded || ack_stale
@@ -1024,6 +1045,12 @@ let missed_pong_threshold () =
   max 0 (Env_config_core.get_int ~default:3 "MASC_WS_MISSED_PONG_THRESHOLD")
 
 let __test_missed_pong_threshold = missed_pong_threshold
+
+(* Exposed for the cross-domain delivery-state gate (RFC-0204 Phase 3): the gate
+   drives two domains through the seq allocator and asserts the final counter
+   equals the total number of calls (no lost updates). *)
+let __test_next_dashboard_seq = next_dashboard_seq
+let __test_dashboard_seq_value session = Atomic.get session.dashboard_seq
 
 let start_upgrade_heartbeat ?sw ?clock session_id session =
   match sw, clock with

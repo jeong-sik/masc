@@ -8,6 +8,7 @@ val metric_auth_strict_unknown_tool_denials : string
 val metric_auth_credential_token_duplicate : string
 val metric_auth_credential_token_rotated : string
 val metric_auth_credential_ambiguous_lookup : string
+val metric_auth_credential_hash_collision : string
 val metric_auth_credential_index_cache_hits : string
 val metric_auth_credential_index_cache_misses : string
 val metric_silent_auth_token_resolve_error : string

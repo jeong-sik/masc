@@ -21,6 +21,10 @@ let metric_auth_credential_ambiguous_lookup =
   Otel_metric_store_core.declare_counter "masc_auth_credential_ambiguous_lookup_total"
 ;;
 
+let metric_auth_credential_hash_collision =
+  Otel_metric_store_core.declare_counter "masc_auth_credential_hash_collision_total"
+;;
+
 let metric_auth_credential_index_cache_hits =
   Otel_metric_store_core.declare_counter "masc_auth_credential_index_cache_hits_total"
 ;;

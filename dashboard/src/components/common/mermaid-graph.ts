@@ -3,6 +3,7 @@ import type { RefObject } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { EmptyState } from './feedback-state'
 import { sanitizeHtml } from '../../lib/dompurify.js'
+import { memoizeLru } from '../../lib/lru-cache'
 import { loadMermaid, type MermaidApi } from './mermaid-loader'
 
 /**
@@ -81,51 +82,54 @@ function serializedRender(
   return job
 }
 
-// Bounded LRU cache for rendered mermaid SVGs. Re-rendering the same
-// diagram (e.g., switching keepers and back, or re-mounting chat history)
-// is expensive because mermaid re-runs its full DOMPurify pass. Caching
-// the validated SVG string skips that work entirely.
-const MAX_CACHED_SVGS = 50
-const svgCache = new Map<string, string>()
+interface RenderSvgArgs {
+  source: string
+  id?: string
+}
 
-function cacheKey(source: string, id?: string): string {
+function cacheKey({ source, id }: RenderSvgArgs): string {
   // JSON tuple avoids collisions that a `source::id` delimiter would create
   // when the source itself contains the delimiter.
   return JSON.stringify([source, id])
 }
 
-function getCachedSvg(source: string, id?: string): string | undefined {
-  const key = cacheKey(source, id)
-  const svg = svgCache.get(key)
-  if (svg === undefined) return undefined
-  // Touch the entry so it moves to the end (LRU).
-  svgCache.delete(key)
-  svgCache.set(key, svg)
-  return svg
-}
-
-function setCachedSvg(source: string, id: string | undefined, svg: string): void {
-  const key = cacheKey(source, id)
-  if (svgCache.size >= MAX_CACHED_SVGS) {
-    const firstKey = svgCache.keys().next().value
-    if (firstKey !== undefined) {
-      svgCache.delete(firstKey)
+// Bounded LRU cache for rendered mermaid SVGs. Re-rendering the same
+// diagram (e.g., switching keepers and back, or re-mounting chat history)
+// is expensive because mermaid re-runs its full DOMPurify pass. Caching
+// the validated SVG string skips that work entirely.
+const MAX_CACHED_SVGS = 50
+const renderSvg = memoizeLru(
+  async ({ source, id }: RenderSvgArgs): Promise<string> => {
+    const mermaid = await getMermaid()
+    const renderId = id ?? nextRenderId('mermaid-shared')
+    const { svg } = await serializedRender(mermaid, renderId, source)
+    // Mermaid's securityLevel:'strict' already sanitizes, but callers inject the
+    // result directly via dangerouslySetInnerHTML. An explicit pass preserves the
+    // prior security contract without paying the cost of duplicate sanitization
+    // per chat block (the original perf bottleneck was sanitizing once per block).
+    const clean = sanitizeHtml(svg)
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(clean, 'image/svg+xml')
+    const parseError = doc.querySelector('parsererror')
+    const rootTag = doc.documentElement?.tagName?.toLowerCase()
+    if (parseError || rootTag !== 'svg') {
+      throw new Error('SVG parse failed')
     }
-  }
-  svgCache.set(key, svg)
-}
+    return clean
+  },
+  {
+    max: MAX_CACHED_SVGS,
+    key: cacheKey,
+  },
+)
 
 /**
  * Clear the rendered-SVG cache. Exported only for test isolation;
  * production code should not call this.
  */
 export function clearMermaidSvgCache(): void {
-  svgCache.clear()
+  renderSvg.clear()
 }
-
-// Per-key in-flight render promises. Prevents concurrent callers with the same
-// source+id from each missing the cache and triggering duplicate mermaid renders.
-const renderPromises = new Map<string, Promise<string>>()
 
 /**
  * Reset module-level mutable render state. Exported only for test isolation;
@@ -135,7 +139,7 @@ export function resetMermaidRenderState(): void {
   mermaidConfigured = false
   mermaidRenderCount = 0
   renderQueue = Promise.resolve()
-  renderPromises.clear()
+  renderSvg.clear()
 }
 
 /**
@@ -149,39 +153,12 @@ export async function renderMermaidSvg(
   source: string,
   id?: string,
 ): Promise<string> {
-  const key = cacheKey(source, id)
-  const cached = getCachedSvg(source, id)
-  if (cached !== undefined) return cached
-
-  const existing = renderPromises.get(key)
-  if (existing !== undefined) return existing
-
-  const promise = (async (): Promise<string> => {
-    try {
-      const mermaid = await getMermaid()
-      const renderId = id ?? nextRenderId('mermaid-shared')
-      const { svg } = await serializedRender(mermaid, renderId, source)
-      // Mermaid's securityLevel:'strict' already sanitizes, but callers inject the
-      // result directly via dangerouslySetInnerHTML. An explicit pass preserves the
-      // prior security contract without paying the cost of duplicate sanitization
-      // per chat block (the original perf bottleneck was sanitizing once per block).
-      const clean = sanitizeHtml(svg)
-      const parser = new DOMParser()
-      const doc = parser.parseFromString(clean, 'image/svg+xml')
-      const parseError = doc.querySelector('parsererror')
-      const rootTag = doc.documentElement?.tagName?.toLowerCase()
-      if (parseError || rootTag !== 'svg') {
-        throw new Error('SVG parse failed')
-      }
-      setCachedSvg(source, id, clean)
-      return clean
-    } finally {
-      renderPromises.delete(key)
-    }
-  })()
-
-  renderPromises.set(key, promise)
-  return promise
+  try {
+    return await renderSvg({ source, id })
+  } catch (err) {
+    renderSvg.delete({ source, id })
+    throw err
+  }
 }
 
 interface MermaidGraphProps {

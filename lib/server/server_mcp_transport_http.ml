@@ -597,6 +597,14 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
         Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
       in
       remember_mcp_profile ~otel_transport_context session_id profile;
+      let token =
+        match sse_kind with
+        | Sse.Observer | Sse.Presence ->
+            Server_auth.observer_sse_auth_token_from_request request
+        | Sse.Agent_stream ->
+            Server_auth.auth_token_from_request request
+      in
+      let auth = { Sse.config = base_path; token } in
       (match check_sse_connect_guard session_id with
       | Error (reason, retry_after_s) ->
           respond_sse_rate_limited ~deps ~origin ~session_id ~protocol_version
@@ -613,11 +621,18 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           let writer = Httpun.Reqd.respond_with_streaming reqd response in
           let mutex = Eio.Mutex.create () in
           let info_ref : sse_conn_info option ref = ref None in
-          let client_id, event_stream, evicted =
-            Sse.register ~kind:sse_kind session_id
-              ~last_event_id:(Option.value ~default:0 last_event_id)
-              ~on_disconnect:(fun () -> stop_sse_session session_id)
-          in
+          (match
+             Sse.register ~kind:sse_kind ~auth session_id
+               ~last_event_id:(Option.value ~default:0 last_event_id)
+               ~on_disconnect:(fun () -> stop_sse_session session_id)
+           with
+           | Error reg_err ->
+               let msg = Sse.registration_error_to_string reg_err in
+               (* Headers already sent with streaming response; close the
+                  connection cleanly and log the typed failure. *)
+               Log.Server.warn "%s" msg;
+               Httpun.Body.Writer.close writer
+           | Ok (client_id, event_stream, evicted) ->
           (match evicted with
           | Some evicted_sid ->
               (* RFC-0099 PR-3: cap-exceeded eviction publishes typed
@@ -701,7 +716,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           let client_count = Sse.client_count () in
           if client_count > Sse.max_clients / 2 then
             Log.Server.info "SSE connected: %s (active: %d/%d)"
-              session_id client_count Sse.max_clients)))
+              session_id client_count Sse.max_clients))))
 
 
 let handle_get_operator_mcp ~deps request reqd =

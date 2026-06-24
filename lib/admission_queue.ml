@@ -42,9 +42,13 @@ type waiter =
   ; cancelled : bool Atomic.t
   }
 
+type counters =
+  { active : int
+  ; max_slots : int
+  }
+
 type t =
-  { mutable max_slots : int
-  ; mutable active : int
+  { mutable counters : counters
   ; mutable waiters : waiter list
   ; mutex : Eio.Mutex.t
   }
@@ -84,38 +88,93 @@ let initial_max_concurrent_of_env getenv =
 ;;
 
 let global : t =
-  { max_slots = initial_max_concurrent_of_env Sys.getenv_opt
-  ; active = 0
+  { counters = { max_slots = initial_max_concurrent_of_env Sys.getenv_opt; active = 0 }
   ; waiters = []
   ; mutex = Eio.Mutex.create ()
   }
 ;;
 
-let () = Admission_queue_metrics.set_max_concurrent global.max_slots
+let () = Admission_queue_metrics.set_max_concurrent global.counters.max_slots
 let now_ts () = Unix.gettimeofday ()
 let wait_ms_since enqueue_ts = int_of_float ((now_ts () -. enqueue_ts) *. 1000.0)
 
-let bump_active delta =
+let apply_active_delta counters ~delta =
+  let new_active = counters.active + delta in
+  if new_active < 0
+  then Error (`Counter_underflow new_active)
+  else Ok { counters with active = new_active }
+;;
+
+let bump_active ?(loc = "unknown") delta =
   Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
-    global.active <- max 0 (global.active + delta))
+    match apply_active_delta global.counters ~delta with
+    | Ok counters ->
+      global.counters <- counters;
+      Ok ()
+    | Error (`Counter_underflow raw) as e ->
+      (* A mismatch between acquire and release paths previously silently
+         clamped the counter to zero.  Surface the drift so operators can
+         detect accounting bugs instead of masking them.  The counter is left
+         unchanged; callers must decide whether to abort or continue.
+         FIXME: type-level pair acquire/release would make underflow
+         impossible; defer that larger refactor. *)
+      Log.Misc.warn
+        "admission_queue active counter underflow: raw=%d loc=%s; leaving counter unchanged"
+        raw loc;
+      e)
 ;;
 
 let with_inflight_observation ~keeper_name ~runtime_id f =
-  bump_active 1;
+  let raise_underflow loc raw =
+    failwith
+      (Printf.sprintf
+         "admission_queue counter underflow in %s for keeper=%s runtime_id=%s: raw=%d"
+         loc
+         keeper_name
+         runtime_id
+         raw)
+  in
+  (match bump_active ~loc:"acquire" 1 with
+   | Ok () -> ()
+   | Error (`Counter_underflow raw) -> raise_underflow "acquire" raw);
   (match Admission_queue_metrics.on_acquire ~keeper_name ~runtime_id ~wait_ms:0 with
    | () -> ()
    | exception exn ->
-     bump_active (-1);
+     (match bump_active ~loc:"on_acquire_exn" (-1) with
+      | Ok () -> ()
+      | Error (`Counter_underflow raw) ->
+        Log.Misc.warn
+          "admission_queue counter underflow in on_acquire_exn for keeper=%s runtime_id=%s: \
+           raw=%d; leaving counter unchanged"
+          keeper_name
+          runtime_id
+          raw);
      raise exn);
-  Eio_guard.protect
-    ~finally:(fun () ->
-      (match Admission_queue_metrics.on_release ~keeper_name ~runtime_id with
-       | () -> ()
-       | exception exn ->
-         bump_active (-1);
-         raise exn);
-      bump_active (-1))
-    f
+  let release_underflow = ref None in
+  let result =
+    Eio_guard.protect
+      ~finally:(fun () ->
+        (match Admission_queue_metrics.on_release ~keeper_name ~runtime_id with
+         | () -> ()
+         | exception exn ->
+           (match bump_active ~loc:"on_release_exn" (-1) with
+            | Ok () -> ()
+            | Error (`Counter_underflow raw) ->
+              Log.Misc.warn
+                "admission_queue counter underflow in on_release_exn for keeper=%s runtime_id=%s: \
+                 raw=%d; leaving counter unchanged"
+                keeper_name
+                runtime_id
+                raw);
+           raise exn);
+        match bump_active ~loc:"release" (-1) with
+        | Ok () -> ()
+        | Error (`Counter_underflow raw) -> release_underflow := Some raw)
+      f
+  in
+  match !release_underflow with
+  | Some raw -> raise_underflow "release" raw
+  | None -> result
 ;;
 
 (* ── Public API ────────────────────────────────────────── *)
@@ -240,9 +299,10 @@ let try_with_permit ~priority:_ ~keeper_name ~runtime_id f =
 
 let snapshot () =
   Eio.Mutex.use_ro global.mutex (fun () ->
-    { max_concurrent = global.max_slots
-    ; active = global.active
-    ; available = max 0 (global.max_slots - global.active)
+    let { active; max_slots } = global.counters in
+    { max_concurrent = max_slots
+    ; active
+    ; available = max 0 (max_slots - active)
     ; queue_depth = List.length global.waiters
     ; waiters = List.map (fun (w : waiter) -> w.info) global.waiters
     })
@@ -280,17 +340,17 @@ let set_max_concurrent n =
   then
     invalid_arg
       (Printf.sprintf "Admission_queue.set_max_concurrent: must be >= 1, got %d" n);
-  Eio.Mutex.use_rw ~protect:true global.mutex (fun () -> global.max_slots <- n);
+  Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
+    global.counters <- { global.counters with max_slots = n });
   Admission_queue_metrics.set_max_concurrent n
 ;;
 
-let max_concurrent () = global.max_slots
+let max_concurrent () = global.counters.max_slots
 
 (* For test access — reset queue state between tests. *)
 let reset_for_test ~max_slots =
   Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
-    global.max_slots <- max_slots;
-    global.active <- 0;
+    global.counters <- { max_slots; active = 0 };
     global.waiters <- []);
   Admission_queue_metrics.set_max_concurrent max_slots
 ;;
@@ -301,4 +361,14 @@ module For_testing = struct
   ;;
 
   let check_host_resources_for_threshold = check_host_resources_for_threshold
+
+  let apply_active_delta ~active ~delta =
+    match apply_active_delta { active; max_slots = 0 } ~delta with
+    | Ok counters -> Ok counters.active
+    | Error _ as e -> e
+  ;;
+
+  let bump_active = bump_active
+
+  let get_active () = Eio.Mutex.use_ro global.mutex (fun () -> global.counters.active)
 end

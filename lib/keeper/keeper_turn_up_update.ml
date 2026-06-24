@@ -54,7 +54,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
   in
   let goal =
     match p.goal_opt with
-    | Some g -> normalize_goal_horizon_text g
+    | Some g -> normalize_goal_text g
     | None ->
         if preserve_prompt_defaults then old.goal
         else

@@ -46,7 +46,7 @@ let make_post_tool_use ~content : THooks.hook_event =
     { tool_use_id = "tu-1"
     ; tool_name = "fake_tool"
     ; input = `Assoc []
-    ; output = Ok ({ TT.content } : TT.tool_output)
+    ; output = Ok ({ TT.content; _meta = None } : TT.tool_output)
     ; result_bytes = String.length content
     ; duration_ms = 1.0
     ; schedule = dummy_schedule

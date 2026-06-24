@@ -876,7 +876,7 @@ let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
       ~name:"probe_tool"
       ~description:"probe tool"
       ~parameters:[]
-      (fun _input -> Ok { content = "ok" })
+      (fun _input -> Ok { content = "ok"; _meta = None })
   in
   let config =
     Runtime_agent.default_config

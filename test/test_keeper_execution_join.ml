@@ -84,7 +84,7 @@ let test_tool_completed_stamps_execution_id () =
       (mk_event ~caused_by:"run-called-1"
          (Agent_sdk.Event_bus.ToolCompleted
             { agent_name = "keeper-x-agent"; tool_name = "Read"
-            ; tool_use_id = "tu-4"; output = Ok { content = "ok" }; turn = 1 }))
+            ; tool_use_id = "tu-4"; output = Ok { content = "ok"; _meta = None }; turn = 1 }))
     |> Option.get
   in
   check (option string) "payload execution_id" (Some "exec-2-0001")
@@ -104,7 +104,7 @@ let test_tool_completed_without_entry_omits_execution_id () =
       (mk_event
          (Agent_sdk.Event_bus.ToolCompleted
             { agent_name = "oas-worker"; tool_name = "Execute"
-            ; tool_use_id = "tu-5"; output = Ok { content = "ok" }; turn = 2 }))
+            ; tool_use_id = "tu-5"; output = Ok { content = "ok"; _meta = None }; turn = 2 }))
     |> Option.get
   in
   check bool "no execution_id field for non-keeper execution" true

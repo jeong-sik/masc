@@ -8,12 +8,6 @@ open Sessions_types
 open Sessions_store
 open Result_syntax
 
-let participant_by_name (session : Runtime.session) name =
-  List.find_opt
-    (fun (participant : Runtime.participant) -> String.equal participant.name name)
-    session.participants
-;;
-
 let resolved_provider_of_participant
       (session : Runtime.session)
       (participant : Runtime.participant option)
@@ -88,7 +82,9 @@ let worker_run_of_raw
       (summary : raw_trace_summary)
       (validation : raw_trace_validation)
   =
-  let participant = participant_by_name session summary.run_ref.agent_name in
+  let participant =
+    Agent_sdk.Sessions.participant_by_name session summary.run_ref.agent_name
+  in
   let provider = resolved_provider_of_participant session participant in
   let model = resolved_model_of_participant session participant in
   let final_text =

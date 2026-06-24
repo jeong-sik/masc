@@ -28,7 +28,7 @@ let make_dispatch_handler (tool : (_, _) t) : Tool_dispatch.handler =
   fun ~name ~args ->
     let start_time = Time_compat.now () in
     match Agent_sdk.Typed_tool.execute tool.oas_tool args with
-    | Ok { content } -> Some (Tool_result.ok ~tool_name:name ~start_time content)
+    | Ok { content; _ } -> Some (Tool_result.ok ~tool_name:name ~start_time content)
     | Error { message; recoverable; error_class } ->
       (* RFC-0189: source-typed mapping from [Agent_sdk.tool_error]
          to [Tool_result.tool_failure_class].  The SDK's typed

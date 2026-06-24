@@ -83,6 +83,24 @@ describe('applyOptimisticKeeperDirective', () => {
     expect(phasePulse(keepers.value[0]!.lifecycle_phase)).toBe(true)
   })
 
+  it('reverts lifecycle_phase to the original on failure (no stale Running dot)', () => {
+    // Failure rollback: runKeeperAction calls the returned revert thunk on a
+    // non-ok response and on throw (keeper-action-panel.ts:96-117). Since the
+    // dot reads lifecycle_phase, the revert must restore it — otherwise a
+    // failed resume would leave the dot stuck on a stale 'Running' (a silent
+    // UI lie). Locks the rollback of the field this change introduced.
+    keepers.value = [
+      baseKeeper({ name: 'rondo', paused: true, phase: 'Paused', lifecycle_phase: 'Paused' }),
+    ]
+    const revert = applyOptimisticKeeperDirective('rondo', 'resume')
+    expect(phaseTone(keepers.value[0]!.lifecycle_phase)).toBe('ok')
+
+    revert()
+
+    expect(keepers.value[0]!.lifecycle_phase).toBe('Paused')
+    expect(phaseTone(keepers.value[0]!.lifecycle_phase)).toBe('warn')
+  })
+
   it('returns a no-op revert when the keeper is not in the local list', () => {
     const before = keepers.value
     const revert = applyOptimisticKeeperDirective('ghost', 'pause')

@@ -713,6 +713,7 @@ aside.v2-status-tray .tray-action-link:hover {
   --err-soft: rgb(212 24 61 / .12);
   --bad-soft: rgb(212 24 61 / .15);
   --bad-10: rgb(212 24 61 / .10);
+  --bad-15: rgb(212 24 61 / .15);
   --bad-30: rgb(212 24 61 / .30);
   --err-fg: color-mix(in srgb, var(--ss-destructive) 85%, black);
   --bad-light: color-mix(in srgb, var(--ss-destructive) 90%, black);

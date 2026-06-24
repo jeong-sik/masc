@@ -147,6 +147,7 @@
   --warn-10: color-mix(in srgb, var(--warning) 10%, transparent);
   --warn-20: color-mix(in srgb, var(--warning) 20%, transparent);
   --bad-10: color-mix(in srgb, var(--destructive) 10%, transparent);
+  --bad-15: color-mix(in srgb, var(--destructive) 15%, transparent);
   --bad-soft: color-mix(in srgb, var(--destructive) 12%, transparent);
   --err-border: color-mix(in srgb, var(--destructive) 40%, transparent);
   --bad-light: var(--destructive);

@@ -107,6 +107,7 @@
   --err-soft: var(--bad-soft);
   --bad-6: rgb(var(--err-glow) / .06);
   --bad-10: rgb(var(--err-glow) / .10);
+  --bad-15: rgb(var(--err-glow) / .15);
   --bad-20: rgb(var(--err-glow) / .20);
   --bad-30: rgb(var(--err-glow) / .30);
   --bad-50: rgb(var(--err-glow) / .50);

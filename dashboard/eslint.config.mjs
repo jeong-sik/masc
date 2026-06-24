@@ -85,6 +85,7 @@ const TEST_FILES = [
   'src/schemas/sse-event-payload.test.ts',
   'src/schemas/sse.test.ts',
   'src/sse-store.test.ts',
+  'src/styles/approvals-css-ownership.test.ts',
   'src/styles/chat-blocks-v2.test.ts',
   'src/styles/css-test-utils.ts',
   'src/styles/paper-theme.test.ts',

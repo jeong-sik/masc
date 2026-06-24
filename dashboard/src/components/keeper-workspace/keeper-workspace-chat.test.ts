@@ -83,6 +83,12 @@ async function loadChat() {
   vi.doMock('../keeper-detail-state', () => ({
     keeperMobilePane: signal<'roster' | 'chat'>('chat'),
   }))
+  // Preserve the real router but capture navigate() so the pending-approval cue's
+  // "결재 큐에서 처리" link can be asserted.
+  vi.doMock('../../router', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../router')>()),
+    navigate: vi.fn(),
+  }))
   return import('./keeper-workspace-chat')
 }
 
@@ -108,6 +114,42 @@ describe('KeeperWorkspaceChat', () => {
     vi.doUnmock('../../lib/keeper-predicates')
     vi.doUnmock('../keeper-action-panel')
     vi.doUnmock('../keeper-detail-state')
+    vi.doUnmock('../../router')
+  })
+
+  it('shows a pending-approval cue linking to the approvals queue when the keeper awaits a decision', async () => {
+    const { KeeperWorkspaceChat } = await loadChat()
+    const { navigate } = await import('../../router')
+    const pendingKeeper: Keeper = {
+      ...mockKeeper,
+      trust: { approval_state: { pending_first: { id: 'appr-1', tool_name: 'fs_write' } } },
+    }
+
+    await act(async () => {
+      render(html`<${KeeperWorkspaceChat} keeper=${pendingKeeper} />`, container)
+    })
+
+    const cue = container.querySelector('[data-testid="keeper-pending-approval-cue"]')
+    expect(cue).not.toBeNull()
+    expect(cue?.textContent).toContain('결재 대기')
+    expect(cue?.textContent).toContain('fs_write')
+
+    const link = cue?.querySelector('button')
+    expect(link?.textContent).toContain('결재 큐에서 처리')
+    await act(async () => {
+      link?.click()
+    })
+    expect(navigate).toHaveBeenCalledWith('approvals')
+  })
+
+  it('hides the pending-approval cue when the keeper has no pending decision', async () => {
+    const { KeeperWorkspaceChat } = await loadChat()
+
+    await act(async () => {
+      render(html`<${KeeperWorkspaceChat} keeper=${mockKeeper} />`, container)
+    })
+
+    expect(container.querySelector('[data-testid="keeper-pending-approval-cue"]')).toBeNull()
   })
 
   it('renders the chat header and conversation panel', async () => {

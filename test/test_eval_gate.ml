@@ -158,6 +158,24 @@ let test_pre_disabled_policy_bypasses_destructive_check () =
   | Trajectory.Pass -> ()
   | Trajectory.Reject r -> Alcotest.fail (Printf.sprintf "disabled policy should bypass: %s" r)
 
+(* pre_check no longer gates on config.destructive_check_enabled: with the flag
+   OFF but an ENABLED policy, a destructive command must still be rejected. This
+   pins the actual delta of routing the enable/disable decision through
+   policy.enabled — the disabled-policy bypass test above only exercises the
+   disabled-policy cell, which is Pass regardless of this edit. Reverting the
+   pre_check edit reintroduces the [config.destructive_check_enabled &&] conjunct
+   and turns this case back into Pass, so this test is non-vacuous. *)
+let test_pre_flag_off_enabled_policy_still_detects () =
+  let config = { default_config with destructive_check_enabled = false } in
+  let decision = Eval_gate.pre_check
+    ~config ~destructive_ops_policy:default_policy ~accumulated_cost:0.0 ~trajectory_acc:None
+    ~tool_name:"tool_execute"
+    ~args_json:"{\"command\": \"rm -rf /tmp/dangerous\"}" in
+  match decision with
+  | Trajectory.Reject _ -> ()
+  | Trajectory.Pass ->
+      Alcotest.fail "flag off + enabled policy must still reject destructive"
+
 (* ================================================================ *)
 (* Test: pre_check — entropy detection with accumulator              *)
 (* ================================================================ *)
@@ -432,6 +450,7 @@ let () =
       Alcotest.test_case "destructive bash" `Quick test_pre_destructive_bash;
       Alcotest.test_case "safe bash" `Quick test_pre_safe_bash;
       Alcotest.test_case "disabled policy bypasses destructive check" `Quick test_pre_disabled_policy_bypasses_destructive_check;
+      Alcotest.test_case "flag off + enabled policy still detects" `Quick test_pre_flag_off_enabled_policy_still_detects;
       Alcotest.test_case "entropy" `Quick test_pre_entropy;
       Alcotest.test_case "entropy different args" `Quick test_pre_entropy_different_args;
       Alcotest.test_case "turn limit" `Quick test_pre_turn_limit;

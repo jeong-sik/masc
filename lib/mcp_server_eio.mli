@@ -65,7 +65,9 @@ val get_clock : unit -> (float Eio.Time.clock_ty Eio.Resource.t, string) result
 (** {1 State Management} *)
 
 (** Create server state (synchronous, no effect)
-    @param test_mode Optional flag (ignored, for API compatibility)
+    @param test_mode When [true], disable workspace authentication so
+    unit tests can exercise handlers without provisioning credentials.
+    Production callers must leave this unset.
     @param base_path Workspace/base path; MASC data lives under [<base_path>/.masc]. *)
 val create_state : ?test_mode:bool -> base_path:string -> unit -> server_state
 
@@ -109,6 +111,7 @@ val handle_request :
   ?otel_mcp_protocol_version:string ->
   ?otel_transport_context:Otel_dispatch_hook.transport_context ->
   ?auth_token:string ->
+  ?for_testing_auth_bypass:Mcp_server_eio_protocol.For_testing.auth_bypass_token ->
   ?internal_keeper_runtime:bool ->
   server_state ->
   string ->

@@ -70,6 +70,35 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
     [lib/mcp_server_eio.ml]) coerce it through the
     {!Mcp_server_eio_types.tool_profile} alias. *)
 
+(** {1 Authentication requirement} *)
+
+module Auth_requirement : sig
+  type t =
+    | Public
+    | Requires_auth
+    | Internal_only
+end
+(** Per-handler authentication classification.  The
+    {!handle_request} dispatcher is the single enforcement
+    point; every method routes through it before invoking
+    its handler. *)
+
+(** {1 Test-only authentication bypass} *)
+
+module For_testing : sig
+  type auth_bypass_token
+  (** Abstract token that disables the auth gate for a
+      single request.  Production callers cannot construct
+      values of this type; only {!bypass_auth} can create
+      one, keeping test shortcuts compile-time distinct from
+      real traffic. *)
+
+  val bypass_auth : unit -> auth_bypass_token
+  (** Produce a bypass token.  Intended for test fixtures
+      that exercise handlers without setting up a credential
+      store. *)
+end
+
 (** {1 Session-bound resource subscription cleanup} *)
 
 val clear_resource_subscriptions_for_session : string -> unit
@@ -121,6 +150,7 @@ val handle_request :
   ?otel_mcp_protocol_version:string ->
   ?otel_transport_context:Otel_dispatch_hook.transport_context ->
   ?auth_token:string ->
+  ?for_testing_auth_bypass:For_testing.auth_bypass_token ->
   ?internal_keeper_runtime:bool ->
   Mcp_server.server_state ->
   string ->
@@ -128,7 +158,7 @@ val handle_request :
 (** [handle_request ~handle_call_tool_eio
     ~handle_read_resource_eio ~clock ~sw ?profile
     ?mcp_session_id ?otel_mcp_protocol_version ?otel_transport_context
-    ?auth_token ?internal_keeper_runtime
+    ?auth_token ?for_testing_auth_bypass ?internal_keeper_runtime
     state request_str] parses [request_str] as JSON-RPC,
     routes the [method] to the matching internal handler
     (server/discover / initialize / tools/list / tools/call

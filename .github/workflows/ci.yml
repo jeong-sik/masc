@@ -576,9 +576,6 @@ jobs:
     timeout-minutes: 60
     needs: [pr-live-gate, changes]
     if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && needs.changes.outputs.build == 'true' }}
-    outputs:
-      advisory_status: ${{ steps.build_advisory_status.outputs.advisory_status }}
-
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -613,10 +610,8 @@ jobs:
       - name: Build
         id: build_step
         # NO continue-on-error: dune build is deterministic and must hard-fail.
-        # Test execution steps below remain continue-on-error (flake-tolerant).
-        # Why: PR #11709 merged with Build and Test = IN_PROGRESS / failing,
-        # because all steps had continue-on-error. CI Gate only saw the job
-        # as "success" and never blocked. Build break propagated to main.
+        # Test execution steps below are also required: any failing test suite
+        # now fails the Build and Test job and blocks merge via the CI Gate.
         # See: PR #11721 followup, memory feedback_admin_merge_can_bypass_build_ci.md.
         env:
           # Reduce parallelism to minimize Eio fiber scheduling flakes in tests.
@@ -731,7 +726,6 @@ jobs:
 
       - name: Run tests (quick suite)
         id: quick_suite
-        continue-on-error: true
         # scripts/ci-run-tests.sh has its own 1200s timeout and diagnostics,
         # but this step-level bound keeps a stuck timeout/diagnostic path from
         # holding the shared runner for the full Build and Test job budget.
@@ -776,7 +770,6 @@ jobs:
 
       - name: Run operator control suite
         id: operator_control_suite
-        continue-on-error: true
         env:
           ME_ROOT: /tmp/me
           ALCOTEST_QUICK_TESTS: "1"
@@ -793,7 +786,6 @@ jobs:
 
       - name: Run SSE reconnect e2e
         id: sse_reconnect_e2e
-        continue-on-error: true
         env:
           ME_ROOT: /tmp/me
           CI_TEST_TIMEOUT_SEC: 900
@@ -806,7 +798,6 @@ jobs:
 
       - name: Run transport harness suite
         id: transport_harness_suite
-        continue-on-error: true
         env:
           ME_ROOT: /tmp/me
           CI_TEST_TIMEOUT_SEC: 900
@@ -831,7 +822,6 @@ jobs:
 
       - name: Run contract harness suite
         id: contract_harness_suite
-        continue-on-error: true
         env:
           ME_ROOT: /tmp/me
           CI_TEST_TIMEOUT_SEC: 900
@@ -863,7 +853,7 @@ jobs:
       - name: Verification matrix summary
         if: ${{ always() }}
         run: |
-          echo "::notice::dune build is hard-required (blocks merge via CI Gate); test execution failures are advisory and summarized below"
+          echo "::notice::dune build and all test suites are hard-required and block merge via CI Gate"
 
       - name: Config diagnostic drift report
         if: ${{ always() && steps.build_step.outcome == 'success' }}
@@ -876,52 +866,6 @@ jobs:
           else
             echo "::notice::main_eio.exe not found, skipping config-diagnostic"
           fi
-      - name: Summarize advisory build status
-        if: ${{ always() }}
-        id: build_advisory_status
-        env:
-          QUICK_SUITE_OUTCOME: ${{ steps.quick_suite.outcome }}
-          OPERATOR_CONTROL_OUTCOME: ${{ steps.operator_control_suite.outcome }}
-          SSE_RECONNECT_OUTCOME: ${{ steps.sse_reconnect_e2e.outcome }}
-          TRANSPORT_HARNESS_OUTCOME: ${{ steps.transport_harness_suite.outcome }}
-          CONTRACT_HARNESS_OUTCOME: ${{ steps.contract_harness_suite.outcome }}
-        run: |
-          set -euo pipefail
-          advisory_failures=()
-          add_failure() {
-            local label=$1
-            local outcome=$2
-            if [[ "$outcome" == "failure" ]]; then
-              advisory_failures+=("$label")
-            fi
-          }
-
-          # Build outcome is no longer reported here: dune build is hard-required
-          # at the job level (no continue-on-error on the Build step), so a
-          # compile failure already fails the job and CI Gate. This step only
-          # tracks advisory test-execution failures.
-          add_failure "quick-suite" "$QUICK_SUITE_OUTCOME"
-          add_failure "operator-control" "$OPERATOR_CONTROL_OUTCOME"
-          add_failure "sse-reconnect-e2e" "$SSE_RECONNECT_OUTCOME"
-          add_failure "transport-harness" "$TRANSPORT_HARNESS_OUTCOME"
-          add_failure "contract-harness" "$CONTRACT_HARNESS_OUTCOME"
-
-          if [[ ${#advisory_failures[@]} -eq 0 ]]; then
-            echo "advisory_status=clean" >> "$GITHUB_OUTPUT"
-            echo "Advisory verification status: clean" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          advisory_list=$(IFS=', '; echo "${advisory_failures[*]}")
-          echo "advisory_status=warning" >> "$GITHUB_OUTPUT"
-          echo "::warning::Build and Test advisory failures: ${advisory_list}"
-          {
-            echo "### Build and Test advisory failures"
-            echo
-            echo "- ${advisory_list}"
-            echo
-            echo "CI Gate remains authoritative for merge blocking. This job is observability-only."
-          } >> "$GITHUB_STEP_SUMMARY"
 
   lint:
     name: Lint
@@ -1194,25 +1138,20 @@ jobs:
           STRUCTURE_RATCHET_RESULT: ${{ needs.structure-ratchet.result }}
           SHELL_IR_RATCHET_RESULT: ${{ needs.shell-ir-ratchet.result }}
           TLA_RESULT: ${{ needs.tla-specs.result }}
-          BUILD_ADVISORY_STATUS: ${{ needs.build.outputs.advisory_status }}
         run: |
           set -euo pipefail
           fail=0
           # mode=required (default): fail → block merge
           # mode=advisory: fail → log a WARN line, do not block
           #
-          # Build job policy (revised 2026-04-29 after PR #11709 → #11721 runtime):
-          #   - dune build (compile-only) is HARD REQUIRED — Build step now lacks
+          # Build job policy (revised 2026-06-24 by PR-MASC-7):
+          #   - dune build (compile-only) is HARD REQUIRED — Build step lacks
           #     continue-on-error, so a compile failure makes the job result =
-          #     failure → check "build" required = block merge. This catches
-          #     module-rename sweep misses, type errors, .mli/.ml mismatches.
+          #     failure → check "build" required = block merge.
           #   - Test execution (quick-suite, operator-control, sse, transport,
-          #     contract harness) keeps continue-on-error and surfaces only via
-          #     BUILD_ADVISORY_STATUS = "warning" (warn_if_advisory below).
-          #   - Rationale: 22/80 admin-bypass merges over 2026-04-18..04-20 were
-          #     Eio quick-suite flakes — those stay advisory. But PR #11709 was
-          #     a deterministic compile break that the old "build advisory"
-          #     policy let through. We separate the two failure classes.
+          #     contract harness) is now HARD REQUIRED as well. Each test step
+          #     lacks continue-on-error, so a test failure fails the Build and
+          #     Test job and blocks merge.
           check() {
             local name=$1
             local result=$2
@@ -1226,13 +1165,6 @@ jobs:
               fail=1
             fi
           }
-          warn_if_advisory() {
-            local name=$1
-            local status=$2
-            if [[ "$status" == "warning" ]]; then
-              printf 'WARN  %-20s advisory failures logged in Build and Test\n' "$name"
-            fi
-          }
           check "pr-sync-check"   "$PR_SYNC_RESULT"
           # pr-live-gate folds skipped non-PR sync checks into run_heavy=true,
           # while failed live-state lookup remains a hard merge blocker.
@@ -1240,7 +1172,6 @@ jobs:
           check "changes"         "$CHANGES_RESULT"
           check "meta"            "$META_RESULT"
           check "build"           "$BUILD_RESULT"
-          warn_if_advisory "build" "$BUILD_ADVISORY_STATUS"
           check "lint"            "$LINT_RESULT"
           check "dashboard"       "$DASHBOARD_RESULT"
           check "health"          "$HEALTH_RESULT"

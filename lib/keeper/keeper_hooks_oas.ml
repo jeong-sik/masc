@@ -221,7 +221,8 @@ let make_hooks
     ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
     ~(generation : int)
     ?(max_cost_usd : float option)
-    ?(destructive_check : bool = true)
+    ?(destructive_ops_policy : Destructive_ops_policy.t =
+        Destructive_ops_policy.default)
     ?(pre_tool_use_guard :
         tool_name:string -> input:Yojson.Safe.t -> string option =
         fun ~tool_name:_ ~input:_ -> None)
@@ -264,7 +265,7 @@ let make_hooks
       ~streak_threshold
       ~denied:keeper_denied_tools
       ~max_cost_usd
-      ~destructive_check
+      ~destructive_ops_policy
       ~on_gate_decision:record_gate_decision
       ~pre_tool_use_guard
   in

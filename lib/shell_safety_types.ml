@@ -32,95 +32,15 @@ type destructive_pattern =
   ; description : string
   }
 
-let destructive_patterns : destructive_pattern list =
-  [ { class_ = Recursive_delete
-    ; pattern = "rm -rf"
-    ; description = "recursive forced deletion"
-    }
-  ; { class_ = Recursive_delete
-    ; pattern = "rm -r"
-    ; description = "recursive deletion"
-    }
-  ; { class_ = Recursive_delete
-    ; pattern = "rmdir"
-    ; description = "directory removal"
-    }
-  ; { class_ = Sql_destructive
-    ; pattern = "drop table"
-    ; description = "SQL table drop"
-    }
-  ; { class_ = Sql_destructive
-    ; pattern = "drop database"
-    ; description = "SQL database drop"
-    }
-  ; { class_ = Sql_destructive
-    ; pattern = "truncate table"
-    ; description = "SQL table truncate"
-    }
-  ; { class_ = Sql_destructive
-    ; pattern = "delete from"
-    ; description = "SQL bulk delete"
-    }
-  ; { class_ = Forced_git_mutation
-    ; pattern = "git push --force"
-    ; description = "force push"
-    }
-  ; { class_ = Forced_git_mutation
-    ; pattern = "git push -f"
-    ; description = "force push"
-    }
-  ; { class_ = Forced_git_mutation
-    ; pattern = "git reset --hard"
-    ; description = "hard reset"
-    }
-  ; { class_ = Forced_git_mutation
-    ; pattern = "git clean -f"
-    ; description = "forced clean"
-    }
-  ; { class_ = Privilege_escalation
-    ; pattern = "chmod 777"
-    ; description = "world-writable permissions"
-    }
-  ; { class_ = Filesystem_format
-    ; pattern = "mkfs"
-    ; description = "filesystem format"
-    }
-  ; { class_ = Device_write
-    ; pattern = "> /dev/"
-    ; description = "device write"
-    }
-  ; { class_ = Device_write
-    ; pattern = "dd if="
-    ; description = "raw disk operation"
-    }
-  ; { class_ = Process_signal
-    ; pattern = "kill -9"
-    ; description = "forced process kill"
-    }
-  ; { class_ = Process_signal
-    ; pattern = "pkill"
-    ; description = "pattern-based process kill"
-    }
-  ; { class_ = System_control
-    ; pattern = "shutdown"
-    ; description = "system shutdown"
-    }
-  ; { class_ = System_control
-    ; pattern = "reboot"
-    ; description = "system reboot"
-    }
-  ]
-;;
-
 let contains_sub_ci s sub =
   if sub = "" then true else String_util.contains_substring_ci s sub
 ;;
 
-let classify_destructive cmd : (destructive_class * string) option =
+let classify_destructive patterns cmd : (destructive_class * string) option =
   List.find_map
     (fun { class_; pattern; description = _ } ->
        if contains_sub_ci cmd pattern then Some (class_, pattern) else None)
-    destructive_patterns
+    patterns
 ;;
 
 let cmd_hash_for_log (cmd : string) : string =

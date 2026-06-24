@@ -623,18 +623,18 @@ let cost_guard
   hooks_of_pre_tool_use (fun _event -> Agent_sdk.Hooks.Continue)
 
 (** Destructive pattern detection for bash/edit style tools.
-    Only applies when [enabled] is [true] and descriptor/catalog capability
-    lookup flags the observed tool name as destructive. *)
+    Only applies when the supplied policy is enabled and descriptor/catalog
+    capability lookup flags the observed tool name as destructive. *)
 let destructive_guard
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~on_gate_decision
-    ~(enabled : bool)
+    ~(policy : Destructive_ops_policy.t)
   : Agent_sdk.Hooks.hooks =
   hooks_of_pre_tool_use (fun event ->
     match event with
     | Agent_sdk.Hooks.PreToolUse
         { tool_name; input; accumulated_cost_usd; turn; _ } ->
-      if not enabled then Agent_sdk.Hooks.Continue
+      if not (Destructive_ops_policy.enabled policy) then Agent_sdk.Hooks.Continue
       else if
         not
           (Keeper_tool_descriptor_resolution.capability_has
@@ -646,7 +646,7 @@ let destructive_guard
         let t0 = Time_compat.now () in
         let keeper_name = (!meta_ref).name in
         let cmd = extract_command_from_input input in
-        (match Eval_gate.detect_destructive cmd with
+        (match Eval_gate.detect_destructive policy cmd with
          | None -> Agent_sdk.Hooks.Continue
          | Some (pattern, desc) ->
            let reason_text =
@@ -736,7 +736,7 @@ let build_chain
     ~(streak_threshold : int)
     ~(denied : string list)
     ~(max_cost_usd : float option)
-    ~(destructive_check : bool)
+    ~(destructive_ops_policy : Destructive_ops_policy.t)
     ~on_gate_decision
     ~(pre_tool_use_guard :
         tool_name:string -> input:Yojson.Safe.t -> string option)
@@ -747,6 +747,6 @@ let build_chain
     streak_guard ~meta_ref ~on_gate_decision ~state:streak_state ~threshold:streak_threshold;
     deny_guard ~meta_ref ~on_gate_decision ~denied;
     cost_guard ~meta_ref ~on_gate_decision ~max_cost_usd;
-    destructive_guard ~meta_ref ~on_gate_decision ~enabled:destructive_check;
+    destructive_guard ~meta_ref ~on_gate_decision ~policy:destructive_ops_policy;
     governance_approval_guard ~meta_ref ~on_gate_decision;
   ]

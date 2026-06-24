@@ -172,7 +172,7 @@ val make_hooks :
   turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell ->
   generation:int ->
   ?max_cost_usd:float ->
-  ?destructive_check:bool ->
+  ?destructive_ops_policy:Destructive_ops_policy.t ->
   ?pre_tool_use_guard:(tool_name:string ->
                        input:Yojson.Safe.t -> string option) ->
   ?on_tool_executed:(tool_name:string ->

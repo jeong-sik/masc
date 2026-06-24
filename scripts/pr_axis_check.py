@@ -17,6 +17,7 @@ Exit codes:
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -42,6 +43,27 @@ class AxisRisk:
         return (
             f"| #{self.merged_pr} | `{self.risk_type}` | {files_str} | {self.confidence} |"
         )
+
+
+# --- RFC number cross-open-PR collision detection ---------------------------
+# rfc_enforcer.py (--check-numbering) only compares a PR against origin/main and
+# the PR's own diff, so two *open* PRs that each add the same new RFC-NNNN both
+# pass that gate; they only conflict after one side merges (the RFC-0078 ledger
+# race). When stale-green PRs auto-merge without re-validating against the other,
+# a duplicate number can land on main. This sideways check scans concurrent open
+# PRs for the same newly-added RFC number, before either merges.
+_RFC_CLAIM_RE = re.compile(r"(?:^|/)docs/rfc/RFC-(\d{4})-[A-Za-z0-9._-]+\.md$")
+
+
+@dataclass(frozen=True)
+class RfcCollision:
+    rfc_number: str
+    # Sorted ((pr_number, claiming_file_path), ...) for the colliding PRs.
+    prs: Tuple[Tuple[int, str], ...]
+
+    def describe(self) -> str:
+        claimants = ", ".join(f"#{n} ({path})" for n, path in self.prs)
+        return f"RFC-{self.rfc_number}: claimed by {claimants}"
 
 
 def _run_gh(args: List[str]) -> Any:
@@ -356,6 +378,127 @@ query {{
     return results
 
 
+def detect_rfc_collisions(open_prs: List[Dict[str, Any]]) -> List[RfcCollision]:
+    """Find RFC numbers newly claimed by two or more open PRs.
+
+    Pure over its inputs so the self-test can feed synthetic PRs. Each entry in
+    ``open_prs`` is ``{"number": int, "added_rfc_files": [path, ...]}`` where the
+    paths are RFC files ADDED (not modified) by that PR. A number claimed by a
+    single PR — even across multiple files (multi-phase) — is not a collision;
+    only the same new number across distinct PRs is.
+    """
+    by_number: Dict[str, List[Tuple[int, str]]] = {}
+    for pr in open_prs:
+        number_seen: Set[str] = set()
+        for path in pr.get("added_rfc_files", []):
+            match = _RFC_CLAIM_RE.search(path)
+            if match is None:
+                continue
+            number = match.group(1)
+            if number in number_seen:
+                continue  # same PR claiming one number across files — one claim
+            number_seen.add(number)
+            by_number.setdefault(number, []).append((int(pr["number"]), path))
+
+    collisions: List[RfcCollision] = []
+    for number, claims in sorted(by_number.items()):
+        distinct_prs = {pr_num for pr_num, _ in claims}
+        if len(distinct_prs) >= 2:
+            collisions.append(RfcCollision(number, tuple(sorted(claims))))
+    return collisions
+
+
+def get_open_prs_with_added_rfc_files(
+    owner: str, repo: str
+) -> List[Dict[str, Any]]:
+    """Fetch open PRs and the RFC files each one ADDS (GraphQL changeType)."""
+    query = f"""
+query {{
+  repository(owner: "{owner}", name: "{repo}") {{
+    pullRequests(states: OPEN, first: 50) {{
+      nodes {{
+        number
+        title
+        files(first: 100) {{
+          nodes {{ path changeType }}
+        }}
+      }}
+    }}
+  }}
+}}
+"""
+    data = _run_gh_graphql(query)
+    nodes = (
+        data.get("data", {})
+        .get("repository", {})
+        .get("pullRequests", {})
+        .get("nodes", [])
+    )
+    result: List[Dict[str, Any]] = []
+    for pr in nodes:
+        file_nodes = (pr.get("files") or {}).get("nodes") or []
+        added = [
+            f["path"]
+            for f in file_nodes
+            if f.get("changeType") == "ADDED"
+            and _RFC_CLAIM_RE.search(f.get("path", ""))
+        ]
+        if added:
+            result.append(
+                {
+                    "number": pr["number"],
+                    "title": pr.get("title", ""),
+                    "added_rfc_files": added,
+                }
+            )
+    return result
+
+
+def self_test() -> int:
+    """Fixture-based check of detect_rfc_collisions (clean + colliding cases)."""
+    clean = [
+        {"number": 1, "added_rfc_files": ["docs/rfc/RFC-0289-foo.md"]},
+        {"number": 2, "added_rfc_files": ["docs/rfc/RFC-0290-bar.md"]},
+    ]
+    assert detect_rfc_collisions(clean) == [], "distinct numbers must not collide"
+    print("self-test: distinct RFC numbers -> no collision (PASS)")
+
+    buggy = [
+        {
+            "number": 22158,
+            "added_rfc_files": ["docs/rfc/RFC-0289-keeper-progress-lib-split.md"],
+        },
+        {
+            "number": 22144,
+            "added_rfc_files": ["docs/rfc/RFC-0289-closed-sse-event-type-sum.md"],
+        },
+    ]
+    collisions = detect_rfc_collisions(buggy)
+    assert len(collisions) == 1, f"expected 1 collision, got {len(collisions)}"
+    assert collisions[0].rfc_number == "0289"
+    assert {n for n, _ in collisions[0].prs} == {22144, 22158}
+    print(f"self-test: two open PRs claim RFC-0289 -> {collisions[0].describe()} (PASS)")
+
+    multiphase = [
+        {
+            "number": 30,
+            "added_rfc_files": ["docs/rfc/RFC-0300-a.md", "docs/rfc/RFC-0300-b.md"],
+        },
+    ]
+    assert detect_rfc_collisions(multiphase) == [], "single PR multi-file is not a collision"
+    print("self-test: single PR, one number across files -> no collision (PASS)")
+
+    noise = [
+        {"number": 40, "added_rfc_files": ["docs/rfc/README.md", "src/RFC-0289-x.txt"]},
+        {"number": 41, "added_rfc_files": ["docs/rfc/RFC-0289-real.md"]},
+    ]
+    assert detect_rfc_collisions(noise) == [], "non-RFC-claim paths must not collide"
+    print("self-test: non-RFC paths ignored -> no collision (PASS)")
+
+    print("pr_axis_check self-test: all RFC-collision cases passed")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="PR Axis Cross-Check")
     parser.add_argument("--pr", type=int, help="PR number to check")
@@ -363,9 +506,38 @@ def main() -> int:
     parser.add_argument("--hours", type=int, default=24, help="Lookback window in hours")
     parser.add_argument("--limit", type=int, default=20, help="Max recent merged PRs to check")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
+    parser.add_argument(
+        "--check-rfc-collisions",
+        action="store_true",
+        help="Scan all open PRs for the same newly-claimed RFC number",
+    )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Run fixture-based self-test of RFC collision detection",
+    )
     args = parser.parse_args()
 
+    if args.self_test:
+        return self_test()
+
     owner, repo = get_repo_slug()
+
+    if args.check_rfc_collisions:
+        open_prs = get_open_prs_with_added_rfc_files(owner, repo)
+        collisions = detect_rfc_collisions(open_prs)
+        if collisions:
+            print("RFC number collisions among open PRs:\n")
+            for collision in collisions:
+                print(f"  - {collision.describe()}")
+            print(
+                "\nTwo open PRs cannot both claim the same RFC number. One must "
+                "renumber via scripts/rfc-allocate-next.sh (rewrites the file, "
+                "title, references, and docs/rfc/.next-number). See RFC-0078."
+            )
+            return 1
+        print("No RFC number collisions among open PRs.")
+        return 0
 
     def _block(r: AxisRisk) -> bool:
         return r.confidence != "LOW"

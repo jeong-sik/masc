@@ -422,7 +422,7 @@ let test_sangsu_claim_idle_loop_accrues () =
     (D.turn_made_progress ~strong_evidence:false
        ~surface_requires_evidence:(not (Success.claim_bound_work bound)))
 
-(* RFC-0288 / SSOT: [Keeper_tool_outcome.is_nonprogress] is the single owner of
+(* RFC-0289 / SSOT: [Keeper_tool_outcome.is_nonprogress] is the single owner of
    the outcome gate (previously inlined in [typed_outcome_is_nonprogress], now a
    thin delegate). Pin its mapping directly against the variant so the
    predicate travels with the variant: a future outcome constructor added
@@ -481,7 +481,7 @@ let () =
             `Quick test_strong_evidence_outcome_aware;
           Alcotest.test_case "sangsu claim-idle loop accrues streak"
             `Quick test_sangsu_claim_idle_loop_accrues;
-          Alcotest.test_case "is_nonprogress 4-arm mapping (RFC-0288 SSOT)"
+          Alcotest.test_case "is_nonprogress 4-arm mapping (RFC-0289 SSOT)"
             `Quick test_is_nonprogress_branches;
         ] );
       ( "per-keeper isolation",

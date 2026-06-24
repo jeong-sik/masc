@@ -143,7 +143,7 @@ let delivery_requires_evidence = function
    failure / no-progress signal, never promotes, so tools that do not emit a
    typed outcome are never newly flagged as no-progress. *)
 (* Outcome gate delegates to [Keeper_tool_outcome.is_nonprogress], the single
-   owner (RFC-0288 §"Why not the smaller option": the execution-predicate half
+   owner (RFC-0289 §"Why not the smaller option": the execution-predicate half
    of "substantive" is unified by the library split; the outcome gate is unified
    here, in the module that owns the variant). *)
 let typed_outcome_is_nonprogress (outcome : Keeper_tool_outcome.t option) =

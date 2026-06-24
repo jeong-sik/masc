@@ -1,4 +1,4 @@
-# RFC-0288: Extract progress-classification into its own library for a single substantive-evidence owner
+# RFC-0289: Extract progress-classification into its own library for a single substantive-evidence owner
 
 - Status: Draft
 - Date: 2026-06-23

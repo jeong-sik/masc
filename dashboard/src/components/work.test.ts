@@ -183,12 +183,12 @@ describe('Work', () => {
       expect(button).not.toBeDisabled()
 
       // Form is hidden initially
-      expect(screen.queryByTestId('goal-create-form')).toBeNull()
+      expect(screen.queryByTestId('goal-create-panel')).toBeNull()
 
       fireEvent.click(button)
 
-      // Form appears after click
-      expect(screen.getByTestId('goal-create-form')).toBeTruthy()
+      // Side panel appears after click
+      expect(screen.getByTestId('goal-create-panel')).toBeTruthy()
     })
 
     it('renders a collapsed goal card per goal and expands on click', () => {
@@ -490,7 +490,7 @@ describe('Work', () => {
 
         // Open the form
         fireEvent.click(screen.getByTestId('work-new-goal'))
-        expect(screen.getByTestId('goal-create-form')).toBeTruthy()
+        expect(screen.getByTestId('goal-create-panel')).toBeTruthy()
 
         // Fill in the title
         const titleInput = screen.getByTestId('goal-create-title-input')

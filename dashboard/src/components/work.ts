@@ -1136,7 +1136,7 @@ function WorkSurfaceV2() {
   }, [])
 
   return html`
-    <main class="ov ov-2col">
+    <main class=${`ov ov-2col ${showGoalCreate.value ? 'ov-with-panel' : ''}`}>
       <div class="ov-scroll">
         <header class="ov-head wk-head">
           <div>
@@ -1250,6 +1250,7 @@ function WorkSurfaceV2() {
 
           <div class="wk-foot mono">Goal → Task → keeper · 우선순위 순 정렬 · 완료는 게이트 증거 충족 후 done · 미배정 task 는 백로그에서 claim</div>
       </div>
+      ${showGoalCreate.value ? html`<${GoalCreateForm} />` : null}
       <${WorkAside}
         flagged=${wkaFlagged}
         approvals=${wkaApprovals}
@@ -1272,23 +1273,20 @@ export function Work() {
 
   return html`
     <div class="v2-workspace-surface flex min-w-0 flex-col gap-3">
-      <div class="min-w-0 transition-opacity duration-[var(--t-slow)]">
-        <${ErrorBoundary} label=${current}>
-          ${current === 'work' ? html`<${WorkSurfaceV2} />`
-            : current === 'board' ? html`<${BoardSurface} />`
-            : current === 'sub-boards' ? html`<${SubBoardSurface} />`
-            : current === 'moderation' ? html`<${BoardModerationSurface} />`
-            : current === 'planning' ? html`<${PlanningPanel} />`
-            : current === 'repositories' ? html`
-              <${Suspense} fallback=${html`<${LoadingState}>저장소 화면 불러오는 중...<//>`}>
-                <${LazyRepositoryManagement} />
-              <//>
-            `
-            : html`<${VerificationRequestsPanel} />`
-          }
-        <//>
-      </div>
-      <${GoalCreateForm} />
+      <${ErrorBoundary} label=${current}>
+        ${current === 'work' ? html`<${WorkSurfaceV2} />`
+          : current === 'board' ? html`<${BoardSurface} />`
+          : current === 'sub-boards' ? html`<${SubBoardSurface} />`
+          : current === 'moderation' ? html`<${BoardModerationSurface} />`
+          : current === 'planning' ? html`<${PlanningPanel} />`
+          : current === 'repositories' ? html`
+            <${Suspense} fallback=${html`<${LoadingState}>저장소 화면 불러오는 중...<//>`}>
+              <${LazyRepositoryManagement} />
+            <//>
+          `
+          : html`<${VerificationRequestsPanel} />`
+        }
+      <//>
     </div>
   `
 }

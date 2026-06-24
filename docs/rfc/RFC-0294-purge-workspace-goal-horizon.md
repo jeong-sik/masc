@@ -160,9 +160,10 @@ silent gap). The phases group by file, but P1–P3-OCaml land in one buildable u
 5. **Persistence migration** (§5): legacy goal JSON still has a `"horizon"` key; the
    reader stops reading it (documented intentional drop) and writes omit it.
 
-### Open decision — stagnation threshold re-base (consumer #5)
+### Resolved — stagnation threshold re-base (consumer #5)
 
-`stagnation_threshold_seconds : horizon -> int` must become `horizon`-free. Options:
+Operator selected **(a)**: `stagnation_threshold_seconds` becomes a single constant
+`= Masc_time_constants.day_int` (1 day, the former Mid bucket). Options considered:
 
 - **(a) single named constant** `default_stagnation_threshold_seconds` (no per-goal
   variation). Most surgical; introduces no new axis. Question: which value — the Mid
@@ -172,26 +173,38 @@ silent gap). The phases group by file, but P1–P3-OCaml land in one buildable u
   better "how-urgent" signal). Changes semantics; needs its own justification.
 - **(c) drop stagnation entirely** — rejected: it is a live, surfaced health feature.
 
-This is the only behavior-visible change and is gated on operator input before P1
-lands (it is the spine of the "no heuristic / justification-first" constraint).
+This is the only behavior-visible change in the purge. (a) keeps the value a named
+policy constant — not a magic number and not a priority→time heuristic table —
+which is why it was chosen under the "no heuristic / justification-first"
+constraint. Short goals now alert later (24h vs 6h) and Long goals earlier (24h vs
+72h); priority-derived stagnation (b) remains a possible future refinement.
 
 ## 5. Migration & no-silent-failure
 
-Persisted records at `Goal_store.goals_path` carry `"horizon"`
-(`lib/goal/goal_store.ml:129`, read back at `:173`). After the field is removed from
-`type goal`, the loader must handle the legacy key **explicitly**, not by accident:
+Persisted goal records still carry a `"horizon"` key on disk. After the field is
+removed from `type goal`, removal is handled as **standard schema evolution**, not
+an ad-hoc patch:
 
-- The deserializer ignores a present-but-unknown `"horizon"` member and logs at
-  `info` once per load when it is dropped (visible, not silent). This is a
-  read-time tolerance, not a write-time default.
-- New writes omit the key. A one-pass `update_state` rewrite (already the mechanism
-  at `lib/goal/goal_store.ml:828`'s `update_state`) drops it from every record on
-  the next mutation; no separate migration binary is needed.
-- MCP `masc_goal_upsert` with an explicit `horizon` arg returns a validation error
-  (not a no-op) so callers learn the field is gone rather than having it absorbed.
+- `goal_of_yojson` simply stops reading the `"horizon"` member (it is no longer
+  part of the match). A `(* RFC-0294 *)` comment documents that the legacy key is
+  intentionally ignored, so a future reader does not mistake the omission for a
+  bug. There is no per-load info log: dropping a retired optional field is not a
+  failure, and `read_state` runs often enough that a log line would be pure noise.
+- `goal_to_yojson` no longer emits the key, so it disappears from each record on
+  its next write through the existing `update_state` read-modify-write path. No
+  separate migration binary is needed.
+- MCP rejection of an explicit `horizon` arg is **declarative**: the
+  `masc_goal_list` / `masc_goal_upsert` schemas carry `"additionalProperties":
+  false`, so once `horizon` is no longer an advertised property the validation
+  layer rejects it as an unknown property. A hand-written `if horizon present then
+  error` guard is deliberately avoided — that would be the forbidden string-match
+  pattern and a maintenance wart.
 
-This satisfies "no silent failure": a legacy field is logged when dropped, and a
-caller still sending `horizon` is told, not ignored.
+This satisfies "no silent failure": the on-disk drop is intentional and documented
+(no error to swallow), and a caller still sending `horizon` is rejected by the
+schema, not silently absorbed. The legacy-load path is covered by the existing
+`test_goal_store` fixture whose goal JSON includes a `"horizon"` key and still
+loads.
 
 ## 6. To-Be — the Goal/Task screen without horizon
 

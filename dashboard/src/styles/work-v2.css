@@ -1396,6 +1396,95 @@
   margin-top: auto;
 }
 
+.wk-goal-create-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.wk-chip {
+  padding: 0.375rem 0.75rem;
+  border-radius: var(--r-1);
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-elevated);
+  color: var(--color-fg-muted);
+  font-size: var(--text-2xs);
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.wk-chip.on {
+  border-color: var(--color-accent-fg);
+  background: var(--color-brass-soft);
+  color: var(--color-accent-fg);
+}
+
+.wk-goal-create-range {
+  width: 100%;
+  margin-top: 0.25rem;
+  accent-color: var(--color-accent-fg);
+}
+
+.wk-goal-create-risk {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--r-0);
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-elevated);
+}
+
+.wk-goal-create-risk-level {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-status-ok);
+}
+
+.wk-goal-create-risk-desc {
+  font-size: var(--text-xs);
+  color: var(--color-fg-secondary);
+}
+
+.wk-goal-create-keepers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.wk-keeper-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--r-1);
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-elevated);
+  color: var(--color-fg-muted);
+  font-size: var(--text-3xs);
+  cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.wk-keeper-chip.on {
+  border-color: var(--color-accent-fg);
+  box-shadow: 0 0 0 1px var(--color-accent-fg);
+  color: var(--color-fg-primary);
+}
+
+.wk-keeper-avatar-none {
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border-default);
+  font-size: var(--text-3xs);
+  color: var(--color-fg-muted);
+}
+
 /* ── Kanban board ────────────────────────────────────────────────────────── */
 
 .wk-kanban {

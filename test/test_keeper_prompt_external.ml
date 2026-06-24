@@ -99,9 +99,6 @@ let test_system_prompt_includes_continuity_contract () =
       let prompt =
         Lib.Keeper_prompt.build_keeper_system_prompt
           ~goal:"verify prompt behavior externalization"
-          ~short_goal:"keep continuity contract loaded"
-          ~mid_goal:"reduce source literal behavior blocks"
-          ~long_goal:"keep prompt config operator-tunable"
           ~instructions:""
           ()
       in
@@ -118,9 +115,6 @@ let test_system_prompt_includes_state_block_template_anchor () =
       let prompt =
         Lib.Keeper_prompt.build_keeper_system_prompt
           ~goal:"verify prompt anchors"
-          ~short_goal:"keep state template anchored"
-          ~mid_goal:"avoid noisy recovery fallback"
-          ~long_goal:"keep continuity prompt stable"
           ~instructions:""
           ()
       in
@@ -146,9 +140,6 @@ let test_system_prompt_includes_instructions () =
       let prompt =
         Lib.Keeper_prompt.build_keeper_system_prompt
           ~goal:"verify instructions propagation"
-          ~short_goal:"keep persona instructions in prompt"
-          ~mid_goal:"guard the folded self_model channel"
-          ~long_goal:"keep persona content reaching the LLM"
           ~instructions:sentinel
           ()
       in

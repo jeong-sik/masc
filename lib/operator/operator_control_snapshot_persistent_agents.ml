@@ -42,9 +42,6 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                  ; "agent_name", field_or_null "agent_name"
                  ; "trace_id", field_or_null "trace_id"
                  ; "goal", field_or_null "goal"
-                 ; "short_goal", field_or_null "short_goal"
-                 ; "mid_goal", field_or_null "mid_goal"
-                 ; "long_goal", field_or_null "long_goal"
                  ; "status", field_or_null "status"
                  ; "generation", field_or_null "generation"
                  ; "turn_count", field_or_null "turn_count"
@@ -112,9 +109,6 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                     ; ( "trace_id"
                       , `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
                     ; "goal", `String meta.goal
-                    ; "short_goal", `String meta.short_goal
-                    ; "mid_goal", `String meta.mid_goal
-                    ; "long_goal", `String meta.long_goal
                     ; "status", `String agent_status
                     ; "generation", `Int meta.runtime.generation
                     ; "turn_count", `Int meta.runtime.usage.total_turns

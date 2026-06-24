@@ -296,9 +296,6 @@ type keeper_meta = {
   agent_name : string;
   persona : string option;
   goal : string;
-  short_goal : string;
-  mid_goal : string;
-  long_goal : string;
   instructions : string;
   (* Policy *)
   sandbox_profile : Keeper_types_profile.sandbox_profile;

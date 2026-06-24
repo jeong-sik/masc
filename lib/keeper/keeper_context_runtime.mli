@@ -294,9 +294,6 @@ val keeper_constitution : unit -> string
 
 val build_keeper_system_prompt
   :  goal:string
-  -> short_goal:string
-  -> mid_goal:string
-  -> long_goal:string
   -> instructions:string
   -> ?persona_extended:string
   -> ?keeper_name:string

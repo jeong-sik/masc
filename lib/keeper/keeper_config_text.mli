@@ -53,17 +53,6 @@ val normalize_self_model_text : max_bytes:int -> string -> string
 
 val normalize_goal_horizon_text : ?max_len:int -> string -> string
 
-val normalize_goal_horizon_opt : string option -> string option
-
-val parse_goal_horizon_opt : Yojson.Safe.t -> string -> string option
-
-val resolve_goal_horizons :
-  goal:string ->
-  short_goal_opt:string option ->
-  mid_goal_opt:string option ->
-  long_goal_opt:string option ->
-  string * string * string
-
 val split_semicolon_clauses : string -> string list
 
 val take_last : int -> 'a list -> 'a list

@@ -297,7 +297,6 @@ let render_keeper_detail (state : state) =
     (* Goals section *)
     add_section "Goals";
     add_row "Goal:" (fit_width k.k_goal (inner - 26));
-    add_row "Short Goal:" (fit_width k.k_short_goal (inner - 26));
     add_empty ();
 
     (* Live Context section (Phase 2) *)

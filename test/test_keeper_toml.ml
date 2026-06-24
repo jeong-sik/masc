@@ -454,9 +454,6 @@ let test_profile_full () =
 [keeper]
 persona_name = "analyst"
 goal = "analyze logs"
-short_goal = "current session"
-mid_goal = "build patterns"
-long_goal = "continuous improvement"
 instructions = "You are a log analyzer."
 mention_targets = ["sherlock", "log-analyzer"]
 proactive_enabled = true
@@ -1173,9 +1170,6 @@ let test_persona_resolver_renders_durable_keeper_toml () =
         ("name", `String "probe-keeper");
         ("persona_name", `String "probe");
         ("goal", `String "line1\nline2");
-        ("short_goal", `String "short");
-        ("mid_goal", `String "mid");
-        ("long_goal", `String "long");
         ("instructions", `String "quote: \"ok\"");
         ("autoboot_enabled", `Bool false);
         ("mention_targets", `List [ `String "probe"; `String "@probe" ]);

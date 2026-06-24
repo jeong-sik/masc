@@ -148,9 +148,6 @@ let prepare_run_context
   let base_system_prompt =
     Keeper_prompt.build_keeper_system_prompt
       ~goal:(prompt_profile_default profile_defaults.goal meta.goal)
-      ~short_goal:(prompt_profile_default profile_defaults.short_goal meta.short_goal)
-      ~mid_goal:(prompt_profile_default profile_defaults.mid_goal meta.mid_goal)
-      ~long_goal:(prompt_profile_default profile_defaults.long_goal meta.long_goal)
       ~instructions:
         (prompt_profile_default profile_defaults.instructions meta.instructions)
       ~persona_extended

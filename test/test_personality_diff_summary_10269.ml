@@ -97,15 +97,15 @@ let test_multiple_diff_fields_preserve_input_order () =
     KR.personality_diff_summary
       [
         ("goal", same, same);                 (* equal: skipped *)
-        ("short_goal", "abc", "abd");         (* differs at 2 *)
-        ("mid_goal", same, same);             (* equal: skipped *)
+        ("persona", "abc", "abd");            (* differs at 2 *)
+        ("trait", same, same);                (* equal: skipped *)
         ("instructions", "longer", "longish");(* differs at 4 *)
       ]
   in
   check (list string)
     "stable order, equal fields filtered"
     [
-      "short_goal(cur=3,tgt=3,diff@2)";
+      "persona(cur=3,tgt=3,diff@2)";
       "instructions(cur=6,tgt=7,diff@4)";
     ]
     entries

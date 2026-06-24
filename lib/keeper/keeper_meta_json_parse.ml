@@ -15,9 +15,6 @@ type parsed_keeper_identity =
   ; pk_trace_id : Keeper_id.Trace_id.t
   ; pk_trace_history : string list
   ; pk_goal : string
-  ; pk_short_goal : string
-  ; pk_mid_goal : string
-  ; pk_long_goal : string
   ; pk_instructions : string
   }
 
@@ -73,16 +70,6 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
     let pk_goal =
       Safe_ops.json_string ~default:"" "goal" json |> normalize_goal_horizon_text
     in
-    let pk_short_goal, pk_mid_goal, pk_long_goal =
-      resolve_goal_horizons
-        ~goal:pk_goal
-        ~short_goal_opt:
-          (normalize_goal_horizon_opt (Safe_ops.json_string_opt "short_goal" json))
-        ~mid_goal_opt:
-          (normalize_goal_horizon_opt (Safe_ops.json_string_opt "mid_goal" json))
-        ~long_goal_opt:
-          (normalize_goal_horizon_opt (Safe_ops.json_string_opt "long_goal" json))
-    in
     (* Layer 2 PR-B (commit 5): delegate the surviving personality field
        to [Keeper_personality_io].  parse + coerce yields trim-only
        canonicalisation; truncation moved to the prompt-render path
@@ -101,9 +88,6 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
       ; pk_trace_id
       ; pk_trace_history
       ; pk_goal
-      ; pk_short_goal
-      ; pk_mid_goal
-      ; pk_long_goal
       ; pk_instructions
       }
 ;;
@@ -490,9 +474,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                         else identity.pk_agent_name)
                    ; persona = identity.pk_persona
                    ; goal = identity.pk_goal
-                   ; short_goal = identity.pk_short_goal
-                   ; mid_goal = identity.pk_mid_goal
-                   ; long_goal = identity.pk_long_goal
                    ; instructions = identity.pk_instructions
                    ; sandbox_profile = policy.pp_sandbox_profile
                    ; sandbox_image = policy.pp_sandbox_image

@@ -2333,9 +2333,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     effective_allowed_paths: normalizeStringList(data.effective_allowed_paths),
     prompt: {
       goal: asNullableString(prompt.goal) ?? '',
-      short_goal: asNullableString(prompt.short_goal) ?? '',
-      mid_goal: asNullableString(prompt.mid_goal) ?? '',
-      long_goal: asNullableString(prompt.long_goal) ?? '',
       instructions: asNullableString(prompt.instructions) ?? '',
       system_prompt_blocks: {
         constitution: normalizePromptBlock(promptBlocks.constitution, 'keeper.constitution'),
@@ -2478,9 +2475,6 @@ export type KeeperConfigUpdatePayload = {
   network_mode?: SandboxNetworkMode
   // Prompt fields
   goal?: string
-  short_goal?: string
-  mid_goal?: string
-  long_goal?: string
   instructions?: string
   // Proactive
   proactive_enabled?: boolean

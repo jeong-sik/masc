@@ -154,7 +154,7 @@ let stigmergy_match ~(meta : keeper_meta) ~(signal : Board_dispatch.board_signal
   =
   let signal_text = String.lowercase_ascii (text signal) in
   let goal_keywords =
-    [ meta.goal; meta.short_goal; meta.mid_goal; meta.long_goal ]
+    [ meta.goal ]
     |> List.filter (fun s -> String.trim s <> "")
     |> List.concat_map (fun g ->
       String.split_on_char ' ' (String.lowercase_ascii g)

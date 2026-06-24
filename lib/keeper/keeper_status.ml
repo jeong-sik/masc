@@ -205,14 +205,6 @@ let handle_keeper_list ctx args : tool_result =
               ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id));
               ("generation", `Int m.runtime.generation);
               ("goal", `String m.goal);
-              ("short_goal", `String m.short_goal);
-              ("mid_goal", `String m.mid_goal);
-              ("long_goal", `String m.long_goal);
-              ("goal_horizons", `Assoc [
-                ("short", `String m.short_goal);
-                ("mid", `String m.mid_goal);
-                ("long", `String m.long_goal);
-              ]);
               ("keepalive_running", `Bool (runtime_keepalive_running ctx.config m));
               ("active_model", `String active_model);
               ("next_model_hint", Json_util.string_opt_to_json next_model_hint);

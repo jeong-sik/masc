@@ -483,9 +483,6 @@ type keeper_meta =
   ; agent_name : string
   ; persona : string option
   ; goal : string
-  ; short_goal : string
-  ; mid_goal : string
-  ; long_goal : string
   ; instructions : string
   ; (* -- Policy -- *)
     sandbox_profile : Keeper_types_profile.sandbox_profile
@@ -612,10 +609,6 @@ let effective_meta_of_profile_defaults
           tool_denylist =
             apply_profile_default defaults.tool_denylist meta.tool_denylist;
           goal = apply_profile_default defaults.goal meta.goal;
-          short_goal =
-            apply_profile_default defaults.short_goal meta.short_goal;
-          mid_goal = apply_profile_default defaults.mid_goal meta.mid_goal;
-          long_goal = apply_profile_default defaults.long_goal meta.long_goal;
           instructions =
             apply_profile_default defaults.instructions meta.instructions;
           autoboot_enabled =

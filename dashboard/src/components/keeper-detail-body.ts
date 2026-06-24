@@ -49,7 +49,6 @@ import { KeeperEvalQualityPanel } from './keeper-eval-quality'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import { KeeperMemoryOsRecallPanel, KeeperTurnInspector } from './keeper-turn-inspector'
 import { SupervisorDiagnosticsPanel } from './keeper-supervisor-diagnostics'
-import { KeeperGoalHorizonsPanel } from './keeper-goal-horizons-panel'
 import { KeeperPromptAssemblyPanel } from './keeper-prompt-assembly-panel'
 import { KeeperRuntimeModelEditor } from './keeper-runtime-model-editor'
 import { KeeperConditionsDivergent } from './keeper-conditions-divergent'
@@ -261,13 +260,6 @@ export function KeeperDetailBody({
           ${keeper.skill_reason
             ? html`<div class="text-2xs text-[var(--color-fg-muted)] mt-1 leading-relaxed">${keeper.skill_reason}</div>`
             : null}
-
-          <${KeeperGoalHorizonsPanel}
-            short_goal=${keeper.short_goal}
-            mid_goal=${keeper.mid_goal}
-            long_goal=${keeper.long_goal}
-            goal_horizons=${keeper.goal_horizons}
-          />
             <//>
 
           ${keeper.inventory && keeper.inventory.length > 0

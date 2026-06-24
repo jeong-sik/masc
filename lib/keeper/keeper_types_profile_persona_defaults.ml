@@ -38,15 +38,6 @@ let load_from_path ~name path : keeper_profile_defaults =
               manifest_path = Some path;
               persona_name = Some name;
               goal = Safe_ops.json_string_opt "goal" keeper_json;
-              short_goal =
-                Normalizers.normalize_goal_horizon_opt
-                  (Safe_ops.json_string_opt "short_goal" keeper_json);
-              mid_goal =
-                Normalizers.normalize_goal_horizon_opt
-                  (Safe_ops.json_string_opt "mid_goal" keeper_json);
-              long_goal =
-                Normalizers.normalize_goal_horizon_opt
-                  (Safe_ops.json_string_opt "long_goal" keeper_json);
               instructions = Safe_ops.json_string_opt "instructions" keeper_json;
               autoboot_enabled = None;
               mention_targets = Safe_ops.json_string_list "mention_targets" keeper_json;

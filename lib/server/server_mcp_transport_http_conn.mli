@@ -35,6 +35,12 @@ type sse_conn_info = {
     {!close_sse_conn} flips it false->true with [compare_and_set] so
     exactly one caller runs the close body.
 
+    Readers treat either [stop=true] or [closed=true] as terminal, so
+    the intermediate state where one flag is set before the other is
+    benign.  The safety invariant is not that a particular transient
+    is unobservable, but that every reader branches to the closed/stop
+    path as soon as it sees either flag.
+
     [stop_promise]/[resolve_stop] is resolved exactly once by
     {!close_sse_conn} (guaranteed by the [closed] claim above; a
     second resolve of a one-shot promise raises [Invalid_argument]);

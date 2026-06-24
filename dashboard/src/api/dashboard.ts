@@ -14,12 +14,9 @@ import { normalizeKeeperTrustTerminalReason } from '../keeper-store-normalize'
 import { currentDashboardActor, get, post, withRetries, type AbortableRequestOptions } from './core'
 import { ensureDevToken } from './dev-token'
 import { DEFAULT_WINDOW_MINUTES_24H } from '../config/constants'
+import type { TelemetryFreshnessMetadata, DashboardFeedMetadata } from './dashboard-shared'
+import { decodeDashboardFeedMetadata, decodeTelemetryFreshnessMetadata } from './dashboard-shared'
 import {
-  parseAgentRelationsResponse,
-  type AgentRelationsResponse,
-} from './schemas/agent-relations'
-import {
-  parseAgentTimelineResponse,
   type AgentTimelineEvent,
   type AgentTimelineResponse,
 } from './schemas/agent-timeline'
@@ -52,10 +49,6 @@ import type {
   DashboardExecutionResponse,
   DashboardGovernanceResponse,
   DashboardMemoryResponse,
-  DashboardMissionBriefingResponse,
-  DashboardMissionResponse,
-  DashboardMissionSessionDetailResponse,
-  DashboardPlanningResponse,
   DashboardGoalsTreeResponse,
   DashboardGoalDetailResponse,
   GoalDetailKeeper,
@@ -93,30 +86,13 @@ export type {
 } from './schemas/dashboard-config'
 export { reportToolHostFailure } from './tool-host-failure'
 export { fetchDashboardBootstrap, fetchDashboardShell } from './dashboard-hot'
+export type { FusionRunStatusLabel, FusionRunRecord, DashboardFusionRunsResponse } from './dashboard-fusion'
+export { parseFusionRunsResponse, fetchFusionRuns } from './dashboard-fusion'
 
 // --- Dashboard projections ---
 
-export type DashboardFeedRetention = Record<string, unknown> & {
-  scope?: string
-  durable_store?: string
-  durable_replay_surface?: string
-}
-
-export type DashboardFeedMetadata = {
-  generated_at_iso?: string
-  dashboard_surface?: string
-  source?: string
-  retention?: DashboardFeedRetention
-}
-
-function decodeDashboardFeedMetadata(raw: Record<string, unknown>): DashboardFeedMetadata {
-  return {
-    generated_at_iso: asString(raw.generated_at_iso),
-    dashboard_surface: asString(raw.dashboard_surface),
-    source: asString(raw.source),
-    retention: isRecord(raw.retention) ? raw.retention : undefined,
-  }
-}
+export type { DashboardFeedRetention, DashboardFeedMetadata } from './dashboard-shared'
+export { decodeDashboardFeedMetadata } from './dashboard-shared'
 
 // --- System logs ---
 
@@ -177,27 +153,14 @@ export async function fetchProviderLogTail(
 export type { AgentTimelineEvent, AgentTimelineResponse }
 export { AgentTimelineSchemaDriftError } from './schemas/agent-timeline'
 
-export async function fetchAgentTimeline(
-  agentName: string,
-  sinceHours = 4,
-  limit = 20,
-): Promise<AgentTimelineResponse> {
-  const raw = await get<unknown>(
-    `/api/v1/agent-timeline?agent_name=${encodeURIComponent(agentName)}&since_hours=${sinceHours}&limit=${limit}`,
-  )
-  return parseAgentTimelineResponse(raw)
-}
+export { fetchAgentTimeline } from './dashboard-agent'
 
 export type {
   AgentRelation,
   AgentRelationsResponse,
 } from './schemas/agent-relations'
 export { AgentRelationsSchemaDriftError } from './schemas/agent-relations'
-
-export async function fetchAgentRelations(agentName: string): Promise<AgentRelationsResponse> {
-  const raw = await get<unknown>(`/api/v1/agent-relations?agent_name=${encodeURIComponent(agentName)}`)
-  return parseAgentRelationsResponse(raw)
-}
+export { fetchAgentRelations } from './dashboard-agent'
 
 export async function fetchDashboardConfig(): Promise<DashboardConfigResponse> {
   await ensureDevToken()
@@ -234,62 +197,6 @@ export function parseContextThresholds(
 export { fetchDashboardNamespaceTruth } from './dashboard-hot'
 
 // --- RFC-0266 §7 Phase 4: fusion run registry (in-progress + recent) ---
-
-/** Status of a tracked fusion deliberation, mirroring the backend
-    Fusion_run_registry.status_label vocabulary: a run is `running`, or finished
-    `completed` (judge ok) / `failed` (denied / sink-failed / aborted). */
-export type FusionRunStatusLabel = 'running' | 'completed' | 'failed'
-
-/** One row of the fusion run registry from GET /api/v1/dashboard/fusion-runs.
-    The registry tracks what the board-post view cannot: an in-progress
-    deliberation has no board post yet, so only the registry shows it as
-    `running`. Distinct from `FusionRunView` (board-meta-derived detail). */
-export interface FusionRunRecord {
-  runId: string
-  keeper: string
-  preset: string
-  startedAt: number // unix seconds
-  status: FusionRunStatusLabel
-}
-
-export interface DashboardFusionRunsResponse {
-  runs: FusionRunRecord[]
-  count: number
-  generatedAt: string | null
-}
-
-// The backend emits a closed three-label enum, so an unrecognized value can only
-// come from a protocol break. Map it to `failed` (conservative: never let a
-// garbled row pose as a healthy `completed` or an active `running`) rather than
-// to a convenient default — see CLAUDE.md "Unknown → Permissive Default".
-function asFusionRunStatus(value: unknown): FusionRunStatusLabel {
-  return value === 'running' || value === 'completed' || value === 'failed' ? value : 'failed'
-}
-
-export function parseFusionRunsResponse(raw: unknown): DashboardFusionRunsResponse {
-  const root = isRecord(raw) ? raw : {}
-  const runs: FusionRunRecord[] = asRecordArray(root.runs)
-    .map(row => ({
-      runId: asString(row.run_id) ?? '',
-      keeper: asString(row.keeper) ?? '',
-      preset: asString(row.preset) ?? '',
-      startedAt: asNumber(row.started_at) ?? 0,
-      status: asFusionRunStatus(row.status),
-    }))
-    .filter(run => run.runId.length > 0)
-  return {
-    runs,
-    count: asInt(root.count) ?? runs.length,
-    generatedAt: asString(root.generated_at) ?? null,
-  }
-}
-
-export async function fetchFusionRuns(
-  opts?: AbortableRequestOptions,
-): Promise<DashboardFusionRunsResponse> {
-  const raw = await get<unknown>('/api/v1/dashboard/fusion-runs', { signal: opts?.signal })
-  return parseFusionRunsResponse(raw)
-}
 
 type DashboardExecutionRequestOptions = AbortableRequestOptions & {
   force?: boolean
@@ -641,21 +548,7 @@ export async function decideGovernanceExecutionOrder(
   throw governanceCasesRetiredError()
 }
 
-export function fetchDashboardBriefing(): Promise<DashboardMissionResponse> {
-  return get('/api/v1/dashboard/briefing')
-}
-
-export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
-  return fetchDashboardBriefing()
-}
-
-export function fetchDashboardMissionSession(
-  sessionId: string,
-  opts?: { signal?: AbortSignal },
-): Promise<DashboardMissionSessionDetailResponse> {
-  const query = `?session_id=${encodeURIComponent(sessionId)}`
-  return get(`/api/v1/dashboard/session${query}`, { signal: opts?.signal })
-}
+export { fetchDashboardBriefing, fetchDashboardMission, fetchDashboardMissionSession } from './dashboard-mission'
 
 interface DashboardRuntimeProviderDiscovery {
   healthy?: boolean
@@ -1260,17 +1153,7 @@ export async function fetchKeeperDecisions(
   return decoded
 }
 
-export function fetchDashboardMissionBriefing(
-  force = false,
-  opts?: { signal?: AbortSignal },
-): Promise<DashboardMissionBriefingResponse> {
-  const query = force ? '?force=1' : ''
-  return get(`/api/v1/dashboard/briefing/sections${query}`, { signal: opts?.signal })
-}
-
-export function fetchDashboardPlanning(): Promise<DashboardPlanningResponse> {
-  return get('/api/v1/dashboard/planning')
-}
+export { fetchDashboardMissionBriefing, fetchDashboardPlanning } from './dashboard-mission'
 
 function decodeGoalVerificationPrincipal(
   raw: unknown,
@@ -2566,431 +2449,18 @@ export async function saveRuntimeTomlConfig(sourceText: string): Promise<Runtime
   }).then(normalizeRuntimeTomlConfig)
 }
 
-// --- Keeper trajectory (tool call history) ---
-
-type TrajectoryGate = {
-  status: 'pass' | 'reject'
-  reason?: string
-}
-
-export type TrajectoryEntry = {
-  type?: 'thinking'  // absent for tool calls, 'thinking' for thinking blocks
-  ts: number
-  ts_iso: string
-  turn: number
-  // RFC-0233: canonical execution identity minted at dispatch (absent on pre-PR-1 rows)
-  execution_id?: string
-  // Tool-call fields (absent on thinking entries)
-  round?: number
-  tool_name?: string
-  args?: Record<string, unknown> | string
-  gate?: TrajectoryGate
-  result?: string | null
-  duration_ms?: number
-  error?: string | null
-  cost_usd?: number
-  // Thinking-specific fields
-  content?: string
-  content_length?: number
-  redacted?: boolean
-}
-
-export type TrajectoryResponse = {
-  keeper: string
-  trace_id: string
-  generation: number
-  total_entries: number
-  showing: number
-  entries: TrajectoryEntry[]
-}
-
-export function fetchKeeperTrajectory(
-  name: string,
-  limit?: number,
-  includeThinking = true,
-  fullOutput = false,
-): Promise<TrajectoryResponse> {
-  const params = new URLSearchParams()
-  if (limit != null) params.set('limit', String(limit))
-  // Always send include_thinking explicitly — backend defaults to false,
-  // so omitting the param means "don't include".
-  params.set('include_thinking', includeThinking ? 'true' : 'false')
-  // Request full output for session trace detail view.
-  // content_max_len=0 → no cap: surface the COMPLETE reasoning text in the
-  // detail view (남김없이). The backend persists thinking untruncated and
-  // treats 0 as "no truncation"; size is intentionally accepted here, this is
-  // the drill-in surface (the timeline list keeps the default preview cap).
-  if (fullOutput) {
-    params.set('result_max_len', '10000')
-    params.set('content_max_len', '0')
-  }
-  const qs = params.toString()
-  return get<TrajectoryResponse>(
-    `/api/v1/keepers/${encodeURIComponent(name)}/trajectory${qs ? `?${qs}` : ''}`,
-  )
-}
+export type { TrajectoryEntry, TrajectoryResponse } from './dashboard-keeper-trajectory'
+export { fetchKeeperTrajectory } from './dashboard-keeper-trajectory'
 
 // ── Keeper tool stats (server-side aggregation) ──────────
-
-export type ToolStat = {
-  name: string
-  call_count: number
-  success_count: number
-  failure_count: number
-  avg_duration_ms: number
-  p95_duration_ms: number
-  max_duration_ms: number
-  total_cost_usd: number
-  last_used_at: string
-}
-
-export type HourlyBucket = {
-  hour: string
-  call_count: number
-  error_count: number
-}
-
-export type TelemetryFreshnessMetadata = {
-  source?: string
-  producer?: string
-  durable_store?: string
-  dashboard_surface?: string
-  dashboard_surface_envelope?: DashboardSurfaceEnvelope | null
-  freshness_slo_s?: number | null
-  latest_ts_unix?: number | null
-  latest_ts_iso?: string | null
-  latest_age_s?: number | null
-  health?: string
-  stale_reason?: string | null
-  entry_count?: number
-  exists?: boolean
-  coverage_gaps?: TelemetryCoverageGap[]
-  coverage_gap_count?: number
-  // Count of gaps not yet recovered (source latest_ts < gap ts), distinct from
-  // the total coverage_gap_count — the actionable "still failing" number.
-  active_coverage_gap_count?: number
-}
-
-export type DashboardSurfaceEnvelope = {
-  schema?: string
-  schema_version?: number
-  surface?: string
-  source?: string
-  generated_at_iso?: string
-  cache?: {
-    state?: string
-    key?: string | null
-    ttl_s?: number | null
-    stale?: boolean
-    stale_reason?: string | null
-    latest_age_s?: number | null
-    health?: string | null
-  }
-  migration?: {
-    body_shape?: string
-    rule?: string
-  }
-}
-
-export type TelemetryCoverageGap = {
-  schema?: string
-  ts?: number
-  ts_iso?: string | null
-  source?: string
-  producer?: string
-  durable_store?: string
-  dashboard_surface?: string
-  stale_reason?: string
-  keeper_name?: string | null
-  trace_id?: string | null
-  error?: string | null
-  // RFC-0154 PR-2: backend-classified typed tag. Absent on v1 rows; present
-  // on v2 rows. Values are the short tags from `System_error_class.to_short_tag`
-  // ("fd_exhaustion" / "disk_exhaustion" / "permission_denied" /
-  // "connection_refused" / "timeout" / "other"). Consumers should fall back to
-  // substring matching on `error` when this field is null (legacy / pre-PR-2).
-  error_class?: string | null
-}
-
-function decodeDashboardSurfaceEnvelope(raw: unknown): DashboardSurfaceEnvelope | null {
-  if (!isRecord(raw)) return null
-  const cache = isRecord(raw.cache)
-    ? {
-        state: asString(raw.cache.state),
-        key: asNullableString(raw.cache.key),
-        ttl_s: asNumber(raw.cache.ttl_s),
-        stale: asBoolean(raw.cache.stale),
-        stale_reason: asNullableString(raw.cache.stale_reason),
-        latest_age_s: asNumber(raw.cache.latest_age_s),
-        health: asNullableString(raw.cache.health),
-      }
-    : undefined
-  const migration = isRecord(raw.migration)
-    ? {
-        body_shape: asString(raw.migration.body_shape),
-        rule: asString(raw.migration.rule),
-      }
-    : undefined
-  return {
-    schema: asString(raw.schema),
-    schema_version: asNumber(raw.schema_version),
-    surface: asString(raw.surface),
-    source: asString(raw.source),
-    generated_at_iso: asString(raw.generated_at_iso),
-    cache,
-    migration,
-  }
-}
-
-function decodeTelemetryCoverageGap(raw: unknown): TelemetryCoverageGap | null {
-  if (!isRecord(raw)) return null
-  return {
-    schema: asString(raw.schema),
-    ts: asNumber(raw.ts),
-    ts_iso: asNullableString(raw.ts_iso),
-    source: asString(raw.source),
-    producer: asString(raw.producer),
-    durable_store: asString(raw.durable_store),
-    dashboard_surface: asString(raw.dashboard_surface),
-    stale_reason: asString(raw.stale_reason),
-    keeper_name: asNullableString(raw.keeper_name),
-    trace_id: asNullableString(raw.trace_id),
-    error: asNullableString(raw.error),
-    error_class: asNullableString(raw.error_class),
-  }
-}
-
-function decodeTelemetryFreshnessMetadata(raw: Record<string, unknown>): TelemetryFreshnessMetadata {
-  const coverageGaps = asRecordArray(raw.coverage_gaps)
-    .map(decodeTelemetryCoverageGap)
-    .filter((gap): gap is TelemetryCoverageGap => gap !== null)
-  return {
-    source: asString(raw.source),
-    producer: asString(raw.producer),
-    durable_store: asString(raw.durable_store),
-    dashboard_surface: asString(raw.dashboard_surface),
-    dashboard_surface_envelope: decodeDashboardSurfaceEnvelope(raw.dashboard_surface_envelope),
-    freshness_slo_s: asNumber(raw.freshness_slo_s),
-    latest_ts_unix: asNumber(raw.latest_ts_unix),
-    latest_ts_iso: asNullableString(raw.latest_ts_iso),
-    latest_age_s: asNumber(raw.latest_age_s),
-    health: asString(raw.health),
-    stale_reason: asNullableString(raw.stale_reason),
-    entry_count: asNumber(raw.entry_count),
-    exists: asBoolean(raw.exists),
-    coverage_gaps: coverageGaps,
-    coverage_gap_count: asNumber(raw.coverage_gap_count, coverageGaps.length),
-    active_coverage_gap_count: asNumber(raw.active_coverage_gap_count),
-  }
-}
-
-export type ToolStatsResponse = TelemetryFreshnessMetadata & {
-  keeper: string
-  window_hours: number
-  total_entries: number
-  tools: ToolStat[]
-  timeline: HourlyBucket[]
-}
-
-function decodeToolStat(raw: unknown): ToolStat | null {
-  if (!isRecord(raw)) return null
-  const name = asString(raw.name)
-  if (!name) return null
-  return {
-    name,
-    call_count: asNumber(raw.call_count, 0),
-    success_count: asNumber(raw.success_count, 0),
-    failure_count: asNumber(raw.failure_count, 0),
-    avg_duration_ms: asNumber(raw.avg_duration_ms, 0),
-    p95_duration_ms: asNumber(raw.p95_duration_ms, 0),
-    max_duration_ms: asNumber(raw.max_duration_ms, 0),
-    total_cost_usd: asNumber(raw.total_cost_usd, 0),
-    last_used_at: asString(raw.last_used_at, ''),
-  }
-}
-
-function decodeHourlyBucket(raw: unknown): HourlyBucket | null {
-  if (!isRecord(raw)) return null
-  const hour = asString(raw.hour)
-  if (!hour) return null
-  return {
-    hour,
-    call_count: asNumber(raw.call_count, 0),
-    error_count: asNumber(raw.error_count, 0),
-  }
-}
-
-function decodeToolStatsResponse(raw: unknown): ToolStatsResponse | null {
-  if (!isRecord(raw)) return null
-  const keeper = asString(raw.keeper)
-  if (!keeper) return null
-  return {
-    ...decodeTelemetryFreshnessMetadata(raw),
-    keeper,
-    window_hours: asNumber(raw.window_hours, 24),
-    total_entries: asNumber(raw.total_entries, 0),
-    tools: asRecordArray(raw.tools)
-      .map(decodeToolStat)
-      .filter((tool): tool is ToolStat => tool !== null),
-    timeline: asRecordArray(raw.timeline)
-      .map(decodeHourlyBucket)
-      .filter((bucket): bucket is HourlyBucket => bucket !== null),
-  }
-}
-
-export function fetchKeeperToolStats(
-  name: string,
-  windowHours?: number,
-  opts?: AbortableRequestOptions,
-): Promise<ToolStatsResponse> {
-  const params = windowHours != null ? `?window_hours=${windowHours}` : ''
-  return get<Record<string, unknown>>(
-    `/api/v1/keepers/${encodeURIComponent(name)}/tool-stats${params}`,
-    { signal: opts?.signal },
-  ).then((raw) => {
-    const decoded = decodeToolStatsResponse(raw)
-    if (!decoded) throw new Error('유효하지 않은 keeper tool stats payload')
-    return decoded
-  })
-}
+export type { TelemetryFreshnessMetadata, DashboardSurfaceEnvelope, TelemetryCoverageGap } from './dashboard-shared'
+export { decodeTelemetryFreshnessMetadata } from './dashboard-shared'
+export type { ToolStat, HourlyBucket, ToolStatsResponse } from './dashboard-keeper-tool-stats'
+export { fetchKeeperToolStats } from './dashboard-keeper-tool-stats'
 
 // ── Keeper tool call log (full I/O) ──────────────────────
-
-// Output is either an inline string (legacy / small payload) or a
-// normalized blob descriptor — see lib/keeper_tool_call_log.ml
-// `blob_aware_output_json`. The renderer must accept both shapes.
-export type ToolCallOutputBlob = {
-  _blob: {
-    sha256: string
-    bytes: number
-    mime: string
-    preview: string
-  }
-}
-
-export type ToolCallEntry = {
-  ts: number
-  keeper: string
-  tool: string
-  input: unknown
-  output: string | ToolCallOutputBlob
-  success: boolean
-  duration_ms: number | null
-  model?: string
-  trace_id?: string
-  session_id?: string
-  turn?: number
-  keeper_turn_id?: number
-  task_id?: string
-  lane?: string
-  // RFC-0233: canonical execution identity minted at dispatch (absent on pre-PR-1 rows)
-  execution_id?: string
-  // RFC-0233 PR-2: provider call id (oas-event join key). Equals the chat tool
-  // row's tool_call_id for the same execution, so the chat ToolCallBubble can
-  // join this entry's output onto the transcript. Absent when the call carried
-  // no provider id (synthesised tc-<position> rows) or on pre-PR-2 logs.
-  tool_use_id?: string
-  // Parsed-output failure mode, distinct from the transport `success` above
-  // (keeper_tool_call_log.ml semantic_outcome_of_output): success / no_match /
-  // partial / blocked / timeout / runtime_error / policy_denied /
-  // structured_error / tool_failure. Left open-string for forward-compat — the
-  // backend can mint a new outcome ahead of the dashboard; the renderer maps
-  // known values and shows the raw label otherwise.
-  semantic_outcome?: string
-  // Whether the parsed output signals success. A call can be transport
-  // success=true while semantic_success=false (e.g. blocked/timeout), which the
-  // binary `success` flag alone renders as green/ok.
-  semantic_success?: boolean
-  // Goal id(s) this call was attributed to (conditional on the row carrying
-  // them), for goal-scoped drill-down alongside task_id/turn.
-  goal_ids?: string[]
-}
-
-export type ToolCallsResponse = TelemetryFreshnessMetadata & {
-  keeper: string
-  count: number
-  entries: ToolCallEntry[]
-}
-
-function decodeToolCallOutput(raw: unknown): string | ToolCallOutputBlob {
-  if (typeof raw === 'string') return raw
-  if (
-    isRecord(raw) &&
-    isRecord(raw._blob) &&
-    typeof raw._blob.sha256 === 'string' &&
-    typeof raw._blob.bytes === 'number' &&
-    typeof raw._blob.mime === 'string' &&
-    typeof raw._blob.preview === 'string'
-  ) {
-    return {
-      _blob: {
-        sha256: raw._blob.sha256,
-        bytes: raw._blob.bytes,
-        mime: raw._blob.mime,
-        preview: raw._blob.preview,
-      },
-    }
-  }
-  return ''
-}
-
-function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
-  if (!isRecord(raw)) return null
-  const keeper = asString(raw.keeper)
-  const tool = asString(raw.tool)
-  if (!keeper || !tool) return null
-  return {
-    ts: asNumber(raw.ts, 0),
-    keeper,
-    tool,
-    input: raw.input,
-    output: decodeToolCallOutput(raw.output),
-    success: asBoolean(raw.success, false),
-    duration_ms: asNumber(raw.duration_ms) ?? null,
-    model: asString(raw.model),
-    trace_id: asString(raw.trace_id),
-    session_id: asString(raw.session_id),
-    turn: asNumber(raw.turn),
-    keeper_turn_id: asNumber(raw.keeper_turn_id),
-    task_id: asString(raw.task_id),
-    lane: asString(raw.lane),
-    execution_id: asString(raw.execution_id),
-    tool_use_id: asString(raw.tool_use_id),
-    semantic_outcome: asString(raw.semantic_outcome),
-    semantic_success: asBoolean(raw.semantic_success),
-    goal_ids: asStringArray(raw.goal_ids),
-  }
-}
-
-function decodeToolCallsResponse(raw: unknown): ToolCallsResponse | null {
-  if (!isRecord(raw)) return null
-  const keeper = asString(raw.keeper)
-  if (!keeper) return null
-  return {
-    ...decodeTelemetryFreshnessMetadata(raw),
-    keeper,
-    count: asNumber(raw.count, 0),
-    entries: asRecordArray(raw.entries)
-      .map(decodeToolCallEntry)
-      .filter((entry): entry is ToolCallEntry => entry !== null),
-  }
-}
-
-export function fetchKeeperToolCalls(
-  name: string,
-  limit?: number,
-  opts?: AbortableRequestOptions,
-): Promise<ToolCallsResponse> {
-  const params = limit != null ? `?limit=${limit}` : ''
-  return get<Record<string, unknown>>(
-    `/api/v1/keepers/${encodeURIComponent(name)}/tool-calls${params}`,
-    { signal: opts?.signal },
-  ).then((raw) => {
-    const decoded = decodeToolCallsResponse(raw)
-    if (!decoded) throw new Error('유효하지 않은 keeper tool call payload')
-    return decoded
-  })
-}
+export type { ToolCallOutputBlob, ToolCallEntry, ToolCallsResponse } from './dashboard-keeper-tool-calls'
+export { fetchKeeperToolCalls } from './dashboard-keeper-tool-calls'
 
 // ── Keeper turn records (RFC-0233 PR-4) ─────────────────
 

@@ -182,7 +182,6 @@ describe('PlanningPanel', () => {
     goalsSignal.value = [
       {
         id: 'goal-runtime',
-        horizon: 'short',
         title: 'Runtime context goal',
         priority: 1,
         status: 'active',
@@ -289,7 +288,6 @@ describe('PlanningPanel', () => {
     goalsSignal.value = [
       {
         id: 'goal-ledger',
-        horizon: 'short',
         title: 'Verifier readiness',
         priority: 1,
         status: 'active',

@@ -208,9 +208,6 @@ describe('GoalLoopPanel', () => {
     fireEvent.input(screen.getByLabelText('Goal title'), {
       target: { value: 'Stabilize runtime truth' },
     })
-    fireEvent.change(screen.getByLabelText('Horizon'), {
-      target: { value: 'mid' },
-    })
     fireEvent.change(screen.getByLabelText('Priority'), {
       target: { value: '2' },
     })
@@ -219,7 +216,6 @@ describe('GoalLoopPanel', () => {
     await waitFor(() => {
       expect(mocks.callMcpTool).toHaveBeenCalledWith('masc_goal_upsert', {
         title: 'Stabilize runtime truth',
-        horizon: 'mid',
         priority: 2,
       })
     })

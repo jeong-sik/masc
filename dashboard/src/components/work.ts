@@ -571,19 +571,20 @@ interface KanbanTask extends Task {
 function KanbanCard({
   task,
   onClaim,
-  onJumpGoal,
 }: {
   task: KanbanTask
   onClaim: (id: string) => void
-  onJumpGoal: (goalId: string) => void
 }) {
   const state = jobStateForTask(task)
   const keeper = keeperByName(task.assignee)
   const blocker = blockerNoteForTask(task)
-  const hasHandoff = !!(task.handoff_context?.summary || task.handoff_context?.next_step)
+  const p = task.priority ?? 4
+  const normalizedPrio = p <= 3 ? p : 4
+  const description = task.description ?? ''
+  const hasDescription = description.length > 0
 
   return html`
-    <div
+    <article
       class=${`wk-kcard ${state.cls}`}
       role="button"
       tabIndex=${0}
@@ -603,19 +604,12 @@ function KanbanCard({
     >
       <div class="wk-kcard-top">
         <span class="wk-kcard-id mono">${task.id}</span>
-        <span class="wk-kcard-prio mono">P${task.priority ?? 0}</span>
+        <span class=${`wk-kcard-prio prio-${normalizedPrio}`}>P${p}</span>
       </div>
       <div class="wk-kcard-title">${task.title}</div>
       ${blocker ? html`<div class="wk-kcard-block">⚠ ${blocker}</div>` : null}
-      <button
-        class="wk-kcard-goal"
-        type="button"
-        title=${`소속 목표로 이동 · ${task._goalTitle}`}
-        onClick=${(e: Event) => { e.stopPropagation(); onJumpGoal(task._goalId) }}
-      >↳ ${task._goalTitle}</button>
+      ${hasDescription ? html`<p class="wk-kcard-desc">${description}</p>` : null}
       <div class="wk-kcard-foot">
-        ${hasHandoff ? html`<span class="wk-kcard-ho" title="핸드오프 이력">⇄</span>` : null}
-        <span class="wk-spacer"></span>
         ${keeper
           ? html`
             <button
@@ -636,20 +630,18 @@ function KanbanCard({
                 onClick=${(e: Event) => { e.stopPropagation(); onClaim(task.id) }}
               >＋</button>
             `
-            : html`<span class="wk-kcard-kp none mono">·</span>`}
+            : html`<span class="wk-kcard-kp none mono">미배정</span>`}
       </div>
-    </div>
+    </article>
   `
 }
 
 function KanbanView({
   kanbanTasks,
   onClaim,
-  onJumpGoal,
 }: {
   kanbanTasks: ReadonlyArray<KanbanTask>
   onClaim: (id: string) => void
-  onJumpGoal: (goalId: string) => void
 }) {
   return html`
     <div class="wk-kanban" data-testid="work-kanban">
@@ -658,9 +650,8 @@ function KanbanView({
         return html`
           <div key=${status} class=${`wk-kcol ${cls}`} data-testid=${`kanban-col-${status}`}>
             <div class="wk-kcol-h">
-              <span class=${`wk-kcol-dot ${cls}`} aria-hidden="true"></span>
-              ${label}
-              <span class="wk-kcol-n mono">${col.length}</span>
+              <span class="wk-kcol-title">${label}</span>
+              <span class="wk-kcol-count">${col.length}</span>
             </div>
             <div class="wk-kcol-body">
               ${col.length === 0
@@ -670,7 +661,6 @@ function KanbanView({
                     key=${t.id}
                     task=${t}
                     onClaim=${onClaim}
-                    onJumpGoal=${onJumpGoal}
                   />
                 `)}
             </div>
@@ -1255,7 +1245,6 @@ function WorkSurfaceV2() {
               <${KanbanView}
                 kanbanTasks=${kanbanTasks}
                 onClaim=${claimTask}
-                onJumpGoal=${jumpToGoal}
               />
             `}
 

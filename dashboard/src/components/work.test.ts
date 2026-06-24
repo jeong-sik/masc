@@ -892,7 +892,7 @@ describe('Work', () => {
         expect(colFor('done')?.querySelector('[data-kanban-task-id="T-done"]')).toBeTruthy()
       })
 
-      it('shows the goal title on each kanban card and hides the backlog strip in kanban view', () => {
+      it('shows task titles on kanban cards and hides the backlog strip in kanban view', () => {
         goals.value = [
           { id: 'G-1', title: 'Target Goal', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
@@ -905,9 +905,10 @@ describe('Work', () => {
         render(html`<${Work} />`)
         fireEvent.click(screen.getByTestId('work-view-kanban'))
 
-        // Goal title appears in card goal link
+        // Task titles appear on cards
         const board = screen.getByTestId('work-kanban')
-        expect(board.textContent).toContain('Target Goal')
+        expect(board.textContent).toContain('Some task')
+        expect(board.textContent).toContain('Claimable')
 
         // Backlog strip (.wk-backlog) must NOT be present in kanban view
         expect(screen.queryByTestId('work-backlog')).toBeNull()

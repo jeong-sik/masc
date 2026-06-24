@@ -99,6 +99,38 @@ let set_timestamps tracker category ts =
 (* Max notification queue size per session. Oldest events are dropped when exceeded. *)
 let max_notification_queue = 1000
 
+(** Classification of notifications so overflow logging is typed, not stringly. *)
+type notification_kind =
+  | Message
+  | System_notification
+
+let notification_kind_label = function
+  | Message -> "message"
+  | System_notification -> "system_notification"
+;;
+
+(** Drop the oldest event from a full session queue and return a structured log
+    record.  Previously the result of [Eio.Stream.take_nonblocking] was silently
+    discarded with [ignore]. *)
+let drop_oldest_event ~agent_name ~kind st =
+  match Eio.Stream.take_nonblocking st with
+  | None ->
+    (* Stream reported non-blocking take unavailable despite [length] being at
+       capacity.  This is a transient race; log it so operators can see it. *)
+    Log.Session.warn
+      "Notification queue race for %s (kind=%s): take_nonblocking returned none"
+      agent_name
+      (notification_kind_label kind);
+    None
+  | Some dropped_event ->
+    Log.Session.warn
+      "Dropped oldest notification for %s (queue capacity %d exceeded; kind=%s)"
+      agent_name
+      max_notification_queue
+      (notification_kind_label kind);
+    Some dropped_event
+;;
+
 let process_msg config state msg =
   match msg with
   | Register (agent_name, now, p) ->
@@ -158,13 +190,15 @@ let process_msg config state msg =
           in
           if should_send then begin
             let rec try_add st ev =
-            if Eio.Stream.length st >= max_notification_queue then begin
-              ignore (Eio.Stream.take_nonblocking st);
-              try_add st ev
-            end else
-              Eio.Stream.add st ev
-          in
-          try_add session.message_queue notification;
+              if Eio.Stream.length st >= max_notification_queue then begin
+                let (_ : Yojson.Safe.t option) =
+                  drop_oldest_event ~agent_name:name ~kind:Message st
+                in
+                try_add st ev
+              end else
+                Eio.Stream.add st ev
+            in
+            try_add session.message_queue notification;
             targets := name :: !targets
           end
         end
@@ -179,7 +213,9 @@ let process_msg config state msg =
       AgentMap.iter (fun _name session ->
         let rec try_add st ev =
           if Eio.Stream.length st >= max_notification_queue then begin
-            ignore (Eio.Stream.take_nonblocking st);
+            let (_ : Yojson.Safe.t option) =
+              drop_oldest_event ~agent_name:_name ~kind:System_notification st
+            in
             try_add st ev
           end else
             Eio.Stream.add st ev

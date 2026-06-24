@@ -42,9 +42,13 @@ type waiter =
   ; cancelled : bool Atomic.t
   }
 
+type counters =
+  { active : int
+  ; max_slots : int
+  }
+
 type t =
-  { mutable max_slots : int
-  ; mutable active : int
+  { mutable counters : counters
   ; mutable waiters : waiter list
   ; mutex : Eio.Mutex.t
   }
@@ -84,20 +88,35 @@ let initial_max_concurrent_of_env getenv =
 ;;
 
 let global : t =
-  { max_slots = initial_max_concurrent_of_env Sys.getenv_opt
-  ; active = 0
+  { counters = { max_slots = initial_max_concurrent_of_env Sys.getenv_opt; active = 0 }
   ; waiters = []
   ; mutex = Eio.Mutex.create ()
   }
 ;;
 
-let () = Admission_queue_metrics.set_max_concurrent global.max_slots
+let () = Admission_queue_metrics.set_max_concurrent global.counters.max_slots
 let now_ts () = Unix.gettimeofday ()
 let wait_ms_since enqueue_ts = int_of_float ((now_ts () -. enqueue_ts) *. 1000.0)
 
+let apply_active_delta counters ~delta =
+  let new_active = counters.active + delta in
+  if new_active < 0
+  then Error (`Counter_underflow new_active)
+  else Ok { counters with active = new_active }
+;;
+
 let bump_active delta =
   Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
-    global.active <- max 0 (global.active + delta))
+    match apply_active_delta global.counters ~delta with
+    | Ok counters -> global.counters <- counters
+    | Error (`Counter_underflow raw) ->
+      (* A mismatch between acquire and release paths previously silently
+         clamped the counter to zero.  Surface the drift so operators can
+         detect accounting bugs instead of masking them. *)
+      Log.Misc.warn
+        "admission_queue active counter underflow: raw=%d; clamping to 0"
+        raw;
+      global.counters <- { global.counters with active = 0 })
 ;;
 
 let with_inflight_observation ~keeper_name ~runtime_id f =
@@ -240,9 +259,10 @@ let try_with_permit ~priority:_ ~keeper_name ~runtime_id f =
 
 let snapshot () =
   Eio.Mutex.use_ro global.mutex (fun () ->
-    { max_concurrent = global.max_slots
-    ; active = global.active
-    ; available = max 0 (global.max_slots - global.active)
+    let { active; max_slots } = global.counters in
+    { max_concurrent = max_slots
+    ; active
+    ; available = max 0 (max_slots - active)
     ; queue_depth = List.length global.waiters
     ; waiters = List.map (fun (w : waiter) -> w.info) global.waiters
     })
@@ -280,17 +300,17 @@ let set_max_concurrent n =
   then
     invalid_arg
       (Printf.sprintf "Admission_queue.set_max_concurrent: must be >= 1, got %d" n);
-  Eio.Mutex.use_rw ~protect:true global.mutex (fun () -> global.max_slots <- n);
+  Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
+    global.counters <- { global.counters with max_slots = n });
   Admission_queue_metrics.set_max_concurrent n
 ;;
 
-let max_concurrent () = global.max_slots
+let max_concurrent () = global.counters.max_slots
 
 (* For test access — reset queue state between tests. *)
 let reset_for_test ~max_slots =
   Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
-    global.max_slots <- max_slots;
-    global.active <- 0;
+    global.counters <- { max_slots; active = 0 };
     global.waiters <- []);
   Admission_queue_metrics.set_max_concurrent max_slots
 ;;
@@ -301,4 +321,12 @@ module For_testing = struct
   ;;
 
   let check_host_resources_for_threshold = check_host_resources_for_threshold
+
+  let apply_active_delta ~active ~delta =
+    match apply_active_delta { active; max_slots = 0 } ~delta with
+    | Ok counters -> Ok counters.active
+    | Error _ as e -> e
+  ;;
+
+  let get_active () = Eio.Mutex.use_ro global.mutex (fun () -> global.counters.active)
 end

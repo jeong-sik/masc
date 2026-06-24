@@ -66,6 +66,48 @@ let test_just_below_threshold_admits () =
   check bool "just below 90% admits" true (is_ok r);
   check int "scan forced exactly once" 1 !calls
 
+(* Counter-state tests: the previous implementation silently clamped negative
+   active counts to zero inside [bump_active].  These tests pin the explicit
+   underflow result and the acquire/release accounting. *)
+
+let test_apply_active_delta_underflow () =
+  match A.For_testing.apply_active_delta ~active:0 ~delta:(-1) with
+  | Error (`Counter_underflow (-1)) ->
+    check bool "reports explicit underflow" true true
+  | Ok _ -> fail "expected Counter_underflow error"
+  | Error (`Counter_underflow n) ->
+    failf "unexpected underflow value %d" n
+
+let test_apply_active_delta_advances () =
+  match A.For_testing.apply_active_delta ~active:2 ~delta:1 with
+  | Ok 3 -> check bool "advances counter" true true
+  | Ok n -> failf "expected active=3, got %d" n
+  | Error _ -> fail "unexpected underflow"
+
+let test_with_permit_releases_active_on_success () =
+  Eio_main.run @@ fun _env ->
+  A.reset_for_test ~max_slots:10;
+  check int "initial active" 0 (A.For_testing.get_active ());
+  let r =
+    A.with_permit ~priority:Llm_provider.Request_priority.Background
+      ~keeper_name:"rel-keeper" ~runtime_id:"r1" (fun () -> 42)
+  in
+  check bool "returns value" true (Result.is_ok r);
+  check int "active released after success" 0 (A.For_testing.get_active ())
+
+let test_with_permit_releases_active_on_exception () =
+  Eio_main.run @@ fun _env ->
+  A.reset_for_test ~max_slots:10;
+  check int "initial active" 0 (A.For_testing.get_active ());
+  (try
+     A.with_permit ~priority:Llm_provider.Request_priority.Background
+       ~keeper_name:"rel-keeper" ~runtime_id:"r2" (fun () -> failwith "boom")
+     |> ignore
+   with
+   | Failure _ -> ()
+   | _ -> fail "expected Failure");
+  check int "active released after exception" 0 (A.For_testing.get_active ())
+
 let () =
   run "admission_fd_gate"
     [
@@ -77,5 +119,15 @@ let () =
           test_case "at threshold rejects" `Quick test_at_threshold_rejects;
           test_case "just below threshold admits" `Quick
             test_just_below_threshold_admits;
+        ] );
+      ( "counter-state",
+        [
+          test_case "apply delta underflow is explicit" `Quick
+            test_apply_active_delta_underflow;
+          test_case "apply delta advances" `Quick test_apply_active_delta_advances;
+          test_case "release active on success" `Quick
+            test_with_permit_releases_active_on_success;
+          test_case "release active on exception" `Quick
+            test_with_permit_releases_active_on_exception;
         ] );
     ]

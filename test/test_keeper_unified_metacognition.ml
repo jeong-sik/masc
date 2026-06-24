@@ -88,7 +88,6 @@ let test_on_idle_tools_list_loop_suggests_surface_read () =
       ~allowed_tools:
         [ "keeper_context_status"
         ; "keeper_tool_search"
-        ; "extend_turns"
         ; "keeper_broadcast"
         ; "keeper_tasks_list"
         ; "keeper_surface_read"

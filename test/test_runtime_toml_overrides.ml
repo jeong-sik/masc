@@ -66,38 +66,6 @@ let test_missing_file_returns_zero () =
   | Error msg -> failf "unexpected error: %s" msg
 
 
-let test_applies_autonomous_max_turns () =
-  let doc = parse_or_fail "[autonomous]\nmax_turns_per_call = 7\n" in
-  let count, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
-  in
-  check int "applied count" 1 count;
-  check (option string) "env var mapped"
-    (Some "7")
-    (List.assoc_opt
-       "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS"
-       overrides)
-
-let test_applies_multiple_overrides () =
-  let doc = parse_or_fail
-    "[autonomous]\n\
-     max_turns_per_call = 7\n\
-     [reactive]\n\
-     max_turns_per_call = 20\n"
-  in
-  let count, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
-  in
-  check int "applied 2" 2 count;
-  check (option string) "autonomous max_turns"
-    (Some "7")
-    (List.assoc_opt
-       "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS"
-       overrides);
-  check (option string) "reactive max_turns"
-    (Some "20")
-    (List.assoc_opt "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL" overrides)
-
 let test_applies_sleep_and_throttle_overrides () =
   let doc = parse_or_fail
     "[bootstrap]\n\
@@ -250,18 +218,6 @@ let test_memory_bank_reads_boot_override_knobs () =
     true
     (Keeper_memory_bank.memory_llm_summary_enabled ())
 
-let test_caller_env_wins_over_toml () =
-  let doc = parse_or_fail "[autonomous]\nmax_turns_per_call = 7\n" in
-  let fake_env =
-    env_with
-      [("MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS", "3")]
-  in
-  let count, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:fake_env doc
-  in
-  check int "applied 0 (env preempts)" 0 count;
-  check int "no overrides" 0 (List.length overrides)
-
 let test_deprecated_autoboot_env_does_not_preempt_toml () =
   let doc = parse_or_fail "[bootstrap]\nautoboot_max = 12\n" in
   let fake_env = env_with [("MASC_KEEPER_AUTOBOT_MAX", "2")] in
@@ -272,19 +228,6 @@ let test_deprecated_autoboot_env_does_not_preempt_toml () =
   check (option string) "deprecated typo env ignored"
     (Some "12")
     (List.assoc_opt "MASC_KEEPER_AUTOBOOT_MAX" overrides)
-
-let test_unknown_keys_ignored () =
-  let doc = parse_or_fail
-    "[autonomous]\n\
-     max_turns_per_call = 7\n\
-     unknown_field = \"ignored\"\n\
-     [future_section]\n\
-     some_key = 42\n"
-  in
-  let count, _ =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
-  in
-  check int "only known keys applied" 1 count
 
 let test_parse_error_returns_error () =
   with_base_path @@ fun base_path ->
@@ -357,35 +300,18 @@ let test_resolved_runtime_freezes_toml_values_after_init () =
   with_base_path @@ fun base_path ->
   write_toml base_path
     "[turn]\n\
-     timeout_sec = 500\n\
-     [reactive]\n\
-     max_turns_per_call = 12\n";
+     timeout_sec = 500\n";
   (match Keeper_runtime_config.load_and_apply ~base_path with
    | Error msg -> failf "unexpected error: %s" msg
    | Ok _ -> ());
   Keeper_runtime_resolved.init ();
   Config_boot_overrides.set "MASC_KEEPER_TURN_TIMEOUT_SEC" "900";
-  Config_boot_overrides.set "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL" "4";
   let runtime = Keeper_runtime_resolved.current () in
   check (float 0.0001) "turn timeout frozen from toml"
     500.0 runtime.turn_timeout_sec.value;
   check string "turn timeout source"
     "toml"
-    (Keeper_runtime_resolved.source_to_string runtime.turn_timeout_sec.source);
-  check int "reactive max turns frozen from toml"
-    12 runtime.reactive_max_turns_per_call.value
-
-let test_resolved_runtime_accepts_max_turns_ceiling () =
-  with_clean_boot_overrides @@ fun () ->
-  Config_boot_overrides.set "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL" "100";
-  Config_boot_overrides.set
-    "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS" "100";
-  Keeper_runtime_resolved.init ();
-  let runtime = Keeper_runtime_resolved.current () in
-  check int "reactive max turns accepts 100"
-    100 runtime.reactive_max_turns_per_call.value;
-  check int "autonomous max turns accepts 100"
-    100 runtime.autonomous_max_turns_per_call.value
+    (Keeper_runtime_resolved.source_to_string runtime.turn_timeout_sec.source)
 
 let test_resolved_stream_idle_timeout_defaults_and_clamps_to_total () =
   with_clean_boot_overrides @@ fun () ->
@@ -564,25 +490,20 @@ let () =
   run "runtime_toml_overrides"
     [ ( "resolve_overrides"
       , [ test_case "missing file returns 0 overrides" `Quick test_missing_file_returns_zero
-        ; test_case "applies autonomous max_turns_per_call" `Quick test_applies_autonomous_max_turns
-        ; test_case "applies multiple overrides" `Quick test_applies_multiple_overrides
         ; test_case "applies sleep/throttle overrides" `Quick test_applies_sleep_and_throttle_overrides
         ; test_case "applies turn execution overrides" `Quick test_applies_turn_execution_overrides
         ; test_case "applies proactive min interval override" `Quick test_applies_proactive_min_interval_override
         ; test_case "applies memory overrides" `Quick test_applies_memory_overrides
         ; test_case "memory bank reads boot override knobs" `Quick test_memory_bank_reads_boot_override_knobs
-        ; test_case "caller env wins over TOML" `Quick test_caller_env_wins_over_toml
         ; test_case
             "deprecated autoboot env does not preempt TOML"
             `Quick
             test_deprecated_autoboot_env_does_not_preempt_toml
-        ; test_case "unknown keys ignored" `Quick test_unknown_keys_ignored
         ; test_case "parse error returns Error" `Quick test_parse_error_returns_error
         ; test_case "load_and_apply records boot override" `Quick test_load_and_apply_records_boot_override
         ; test_case "explicit MASC_CONFIG_DIR wins over base path" `Quick test_explicit_config_dir_wins_over_base_path
         ; test_case "float value round trip" `Quick test_float_value_round_trip
         ; test_case "resolved runtime freezes toml values after init" `Quick test_resolved_runtime_freezes_toml_values_after_init
-        ; test_case "resolved runtime accepts max_turns ceiling" `Quick test_resolved_runtime_accepts_max_turns_ceiling
         ; test_case "resolved stream idle timeout defaults and clamps to total" `Quick test_resolved_stream_idle_timeout_defaults_and_clamps_to_total
         ; test_case "resolved stream idle timeout uses toml" `Quick test_resolved_stream_idle_timeout_uses_toml
         ; test_case "execution idle timeout default disabled" `Quick test_resolved_execution_idle_timeout_default_disabled

@@ -160,14 +160,6 @@ let test_align_keeper_runtime_status_tolerates_null_status_json () =
   Alcotest.(check string) "null runtime status keeps surface status" "inactive"
     status
 
-let test_max_turns_override_source_accepts_raised_ceiling () =
-  Alcotest.(check string) "100 is a valid profile override" "override"
-    (Operator_control_snapshot.max_turns_override_source (Some 100));
-  Alcotest.(check string) "101 remains invalid" "override_invalid"
-    (Operator_control_snapshot.max_turns_override_source (Some 101));
-  Alcotest.(check string) "missing override comes from env" "env"
-    (Operator_control_snapshot.max_turns_override_source None)
-
 let test_compute_context_ratio_resolves_budget_and_clamps_at_ceiling () =
   (* The runtime_id ("primary") resolves to an effective context budget via
      [Keeper_context_runtime]; [last_input_tokens] here is deliberately above

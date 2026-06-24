@@ -832,86 +832,6 @@ let with_config_dir f =
       Config_dir_resolver.reset ();
       f config_dir)
 
-let test_profile_max_turns_overrides () =
-  let input = {|
-[keeper]
-goal = "test"
-max_turns_per_call = 25
-max_turns_per_call_scheduled_autonomous = 3
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    (match KTP.profile_defaults_of_toml doc with
-     | Error e -> fail e
-     | Ok d ->
-       check (option int) "max_turns_per_call" (Some 25) d.max_turns_per_call;
-       check (option int) "max_turns_per_call_scheduled_autonomous"
-         (Some 3) d.max_turns_per_call_scheduled_autonomous;
-       check int "effective reactive uses override" 25
-         (KTP.effective_max_turns_per_call d);
-       (* autonomous is capped by reactive global cap, but 3 < env default 30 *)
-       check int "effective autonomous uses override" 3
-         (KTP.effective_max_turns_per_call_scheduled_autonomous d))
-
-let test_profile_max_turns_defaults_when_absent () =
-  let input = {|
-[keeper]
-goal = "test"
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    (match KTP.profile_defaults_of_toml doc with
-     | Error e -> fail e
-     | Ok d ->
-       check (option int) "max_turns_per_call absent" None d.max_turns_per_call;
-       check (option int) "max_turns_per_call_scheduled_autonomous absent"
-         None d.max_turns_per_call_scheduled_autonomous;
-       (* helpers fall back to resolved runtime defaults (30 and min(global, 10)=10) *)
-       check int "effective reactive default" 30
-         (KTP.effective_max_turns_per_call d);
-       check int "effective autonomous default" 10
-         (KTP.effective_max_turns_per_call_scheduled_autonomous d))
-
-let test_profile_max_turns_accepts_raised_ceiling () =
-  let input = {|
-[keeper]
-goal = "test"
-max_turns_per_call = 99
-max_turns_per_call_scheduled_autonomous = 0
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    (match KTP.profile_defaults_of_toml doc with
-     | Error e -> fail e
-     | Ok d ->
-       check int "reactive accepts raised ceiling" 99
-         (KTP.effective_max_turns_per_call d);
-       check int "zero autonomous falls back" 10
-         (KTP.effective_max_turns_per_call_scheduled_autonomous d))
-
-let test_profile_max_turns_rejects_out_of_range () =
-  let input = {|
-[keeper]
-goal = "test"
-max_turns_per_call = 101
-max_turns_per_call_scheduled_autonomous = 0
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    (match KTP.profile_defaults_of_toml doc with
-     | Error e -> fail e
-     | Ok d ->
-       (* Values are parsed as-is but clamp_max_turns_override rejects them,
-          so helpers fall back to env defaults. *)
-       check int "out-of-range reactive falls back" 30
-         (KTP.effective_max_turns_per_call d);
-       check int "zero autonomous falls back" 10
-         (KTP.effective_max_turns_per_call_scheduled_autonomous d))
-
 (* persona⊥{model,runtime}: keeper TOML no longer carries a runtime/model
    selection; a [keeper.runtime_id] (or legacy [keeper.model]) key is rejected
    at load, pointing the operator at runtime.toml [[runtime.assignments]]. *)
@@ -1703,14 +1623,6 @@ let () =
             test_profile_rejects_runtime_id_key;
           test_case "rejects keeper.model key" `Quick
             test_profile_rejects_model_key;
-          test_case "max_turns overrides parsed and applied" `Quick
-            test_profile_max_turns_overrides;
-          test_case "max_turns defaults when absent" `Quick
-            test_profile_max_turns_defaults_when_absent;
-          test_case "max_turns accepts raised ceiling" `Quick
-            test_profile_max_turns_accepts_raised_ceiling;
-          test_case "max_turns rejects out-of-range values" `Quick
-            test_profile_max_turns_rejects_out_of_range;
         ] );
       ( "unknown_keys",
         [

@@ -18,8 +18,8 @@
       {!snapshot_view_of_string_opt}, {!snapshot_view}
       (consumed by [tool_operator] tool schema +
       [test/test_types]).
-    - {!align_keeper_runtime_status}, {!max_turns_override_source}
-      (test-only direct callers).
+    - {!align_keeper_runtime_status}
+      (test-only direct caller).
     - {!get_payload} (runtime-include
       consumer {!Operator_control_action} reaches it
       unqualified).
@@ -130,17 +130,6 @@ val align_keeper_runtime_status :
     unchanged when keepalive is off or the live signal
     does not promote.  Specifically lifts [inactive] /
     [offline] surface labels to the live runtime status. *)
-
-(** {1 Override source classifier} *)
-
-val max_turns_override_source : int option -> string
-(** Classifies a [max_turns] value:
-    - [Some n] within
-      {!Keeper_runtime_resolved.max_turns_per_call_min} ..
-      [_max] → ["override"].
-    - [Some _] outside the range → ["override_invalid"].
-    - [None] → ["env"] (no override; env default in
-      effect). *)
 
 (** {1 Context ratio} *)
 

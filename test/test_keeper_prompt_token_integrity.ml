@@ -18,7 +18,7 @@ let test_known_tokens_are_not_reported () =
   let prompt =
     String.concat " "
       [ "Use keeper_board_post to post, keeper_task_claim to claim,"
-      ; "masc_keeper_status to inspect, and extend_turns when needed."
+      ; "masc_keeper_status to inspect."
       ; "For direct execution, call Execute."
       ]
   in

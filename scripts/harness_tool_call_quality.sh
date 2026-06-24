@@ -348,7 +348,6 @@ write_benchmark_persona_profile() {
         tool_access: ["masc_status", "masc_tasks", "masc_claim_next", "masc_transition", "masc_board_post"],
         proactive_enabled: false,
         telemetry_feedback_enabled: false,
-        max_turns_per_call: 6,
         runtime_id: "keeper_unified",
         models: [$model]
       }

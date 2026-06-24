@@ -6,12 +6,11 @@
 // the real render path, matching markdown-renderer.test.ts / dompurify.test.ts.
 import { html } from 'htm/preact'
 import { render } from 'preact'
+import { waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatBlock, KeeperConversationEntry } from '../../types'
 import * as shikiHighlighter from '../common/shiki-highlighter'
 import { ChatTranscript } from './primitives'
-
-const flushUi = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 40))
 
 function entry(
   overrides: Partial<KeeperConversationEntry> & Pick<KeeperConversationEntry, 'id' | 'text'>,
@@ -60,8 +59,7 @@ describe('ChatCodeBlock Shiki highlighting', () => {
     expect(code).not.toBeNull()
     expect(code?.textContent).toContain('config.ml')
 
-    await flushUi()
-    expect(code?.textContent).toContain('let x = 1')
+    await waitFor(() => expect(code?.textContent).toContain('let x = 1'))
 
     const copy = code?.querySelector('button[aria-label="코드 복사"]')
     expect(copy).not.toBeNull()
@@ -83,12 +81,13 @@ describe('ChatCodeBlock Shiki highlighting', () => {
       container,
     )
 
-    await flushUi()
-    const copy = container.querySelector('[data-chat-block="code"] button[aria-label="코드 복사"]') as HTMLButtonElement
+    const copy = await waitFor(() => {
+      const btn = container.querySelector('[data-chat-block="code"] button[aria-label="코드 복사"]') as HTMLButtonElement | null
+      expect(btn).not.toBeNull()
+      return btn as HTMLButtonElement
+    })
     copy.click()
-    await flushUi()
-
-    expect(writeText).toHaveBeenCalledWith('<script>alert(1)</script>')
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('<script>alert(1)</script>'))
 
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -101,9 +100,8 @@ describe('ChatCodeBlock Shiki highlighting', () => {
 
     render(renderBlocks([{ t: 'code', cap: 'weirdlang', html: 'a &lt; b', source: 'a < b' }]), container)
 
-    await flushUi()
     const code = container.querySelector('[data-chat-block="code"]')
-    expect(code?.classList.contains('chat-block-code-fallback')).toBe(true)
+    await waitFor(() => expect(code?.classList.contains('chat-block-code-fallback')).toBe(true))
     expect(code?.textContent).toContain('a < b')
   })
 })
@@ -128,10 +126,9 @@ describe('ChatMermaidBlock diagram rendering', () => {
     expect(block).not.toBeNull()
     expect(block?.textContent).toContain('flow')
 
-    await flushUi()
     // happy-dom + DOMPurify strip the root <svg> tag in tests, but the rendered
     // diagram text survives inside the figure body.
-    expect(block?.textContent).toContain('graph TD')
+    await waitFor(() => expect(block?.textContent).toContain('graph TD'))
   })
 
   it('falls back to a code block when mermaid rendering errors', async () => {
@@ -140,8 +137,7 @@ describe('ChatMermaidBlock diagram rendering', () => {
 
     render(renderBlocks([{ t: 'mermaid', source: 'invalid diagram', caption: 'broken' }]), container)
 
-    await flushUi()
-    expect(container.querySelector('[data-chat-block="mermaid"]')).toBeNull()
+    await waitFor(() => expect(container.querySelector('[data-chat-block="mermaid"]')).toBeNull())
     const code = container.querySelector('[data-chat-block="code"]')
     expect(code).not.toBeNull()
     expect(code?.textContent).toContain('invalid diagram')

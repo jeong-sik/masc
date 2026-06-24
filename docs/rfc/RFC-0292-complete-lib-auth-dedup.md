@@ -88,6 +88,17 @@ the copies.
 2. Repoint the 68 test references from `Masc.Auth*` to the production modules — add
    `masc.auth` to the relevant `test/dune` targets and use the bare `Auth*`
    identifiers (`Auth.find_credential_by_token`, `Auth_credential_base.*`, …).
+   - **First resolve the `.mli` surface delta — step 2 is not a pure rename.**
+     `lib/auth.ml` (`Masc.Auth`) ships no `.mli`, so it exposes every binding;
+     `lib/auth/auth.ml` (`masc.auth`) restricts its surface through a curated
+     338-line `auth.mli`. Any test that reaches a `Masc.Auth*.*` symbol absent from
+     `lib/auth/auth.mli` (a private helper) fails to compile after the move. Before
+     repointing, compute `{ test Masc.Auth*.* symbols } \ { lib/auth/*.mli vals }`
+     and resolve that delta first — by rewriting the test against the public
+     surface, not by widening the `.mli` (widening the public auth surface is a
+     non-goal, cf. §5). The common helpers (`generate_token`, `sha256_hash`,
+     `verify_token`, `load_auth_config`) are already exposed, so most refs are
+     safe; the delta isolates the few that are not.
 3. Delete the `lib/` copies: `auth.ml`, `auth_credential_base.ml`, `auth_login.ml`,
    `auth_error_kind.ml` (and any further `lib/auth_*.ml` whose twin lives in
    `lib/auth/`).

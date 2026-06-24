@@ -540,9 +540,9 @@ let agent_completed
     payload_json
 ;;
 
-(** Emit an [agent_failed] envelope.  The runtime arm invokes
-    [agent_failed_error_fields error] to project the [Agent_sdk]
-    [Error.t] into the [error_fields] addendum. *)
+(** Emit an [agent_failed] envelope.  All five error fields are
+    encoded in the atd schema; the caller passes the simple
+    projections directly. *)
 let agent_failed
       ~(ts_unix : float)
       ~(correlation_id : string)
@@ -550,16 +550,27 @@ let agent_failed
       ~(agent_name : string)
       ~(task_id : string)
       ~(elapsed_s : float)
-      ~(error_fields : (string * Yojson.Safe.t) list)
+      ~(error : string)
+      ~(error_domain : string)
+      ~(error_code : string)
+      ~(error_retryable : bool)
+      ~(error_detail : Yojson.Safe.t)
   : Yojson.Safe.t
   =
-  let base_json =
+  let payload_json =
     let p : Sse_event_t.agent_failed_payload =
-      { agent_name; task_id; elapsed_s }
+      { agent_name
+      ; task_id
+      ; elapsed_s
+      ; error
+      ; error_domain
+      ; error_code
+      ; error_retryable
+      ; error_detail
+      }
     in
     Yojson.Safe.from_string (Sse_event_j.string_of_agent_failed_payload p)
   in
-  let payload_json = merge_addendum_into_record base_json error_fields in
   wrap_envelope
     { event_type = "agent_failed"
     ; ts_unix

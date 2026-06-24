@@ -161,7 +161,7 @@ describe('SSE OAS typed-payload handlers', () => {
     expect(lastJournalEntry()?.text).toBe('Agent run completed · t1 · 12.5s')
   })
 
-  it('creates a journal entry from a typed oas:agent_failed payload with error addendum', async () => {
+  it('creates a journal entry from a typed oas:agent_failed payload with all error fields', async () => {
     const { connectSSE } = await importSseConnect()
     connectSSE()
     MockEventSource.instances[0]!.simulateOpen()
@@ -175,7 +175,16 @@ describe('SSE OAS typed-payload handlers', () => {
       task_id: 't1',
       turn: null,
       tool_name: null,
-      payload: { agent_name: 'alpha', task_id: 't1', elapsed_s: 3.0, error: 'boom' },
+      payload: {
+        agent_name: 'alpha',
+        task_id: 't1',
+        elapsed_s: 3.0,
+        error: 'boom',
+        error_domain: 'api',
+        error_code: 'rate_limited',
+        error_retryable: true,
+        error_detail: { variant: 'rate_limited', message: 'slow down' },
+      },
     })
     expect(lastJournalEntry()?.text).toBe('Agent run failed · t1 · 3.0s · boom')
   })

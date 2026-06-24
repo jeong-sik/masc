@@ -9,6 +9,8 @@
 // Unknown event types and malformed payloads are rejected with a structured
 // error; the caller decides whether to drop the event or fall back.
 
+import { assertExhaustive } from '../lib/exhaustive'
+
 import {
   readAgentCompletedPayload,
   readAgentFailedPayload,
@@ -68,7 +70,7 @@ export type OasPayloadParseResult<T> =
 export type TypedOasPayload =
   | { kind: 'agent_started'; payload: AgentStartedPayload }
   | { kind: 'agent_completed'; payload: AgentCompletedPayload }
-  | { kind: 'agent_failed'; payload: AgentFailedPayload & { error?: string } }
+  | { kind: 'agent_failed'; payload: AgentFailedPayload }
   | { kind: 'tool_called'; payload: ToolCalledPayload }
   | { kind: 'tool_completed'; payload: ToolCompletedPayload }
   | { kind: 'turn_started'; payload: TurnStartedPayload }
@@ -83,24 +85,42 @@ export type TypedOasPayload =
   | { kind: 'content_replacement_kept'; payload: ContentReplacementKeptPayload }
   | { kind: 'slot_scheduler_observed'; payload: SlotSchedulerObservedPayload }
 
-const OAS_PAYLOAD_EVENT_TYPES = [
-  'agent_started',
-  'agent_completed',
-  'agent_failed',
-  'tool_called',
-  'tool_completed',
-  'turn_started',
-  'turn_completed',
-  'turn_ready',
-  'handoff_requested',
-  'handoff_completed',
-  'context_compacted',
-  'context_overflow_imminent',
-  'context_compact_started',
-  'content_replacement_replaced',
-  'content_replacement_kept',
-  'slot_scheduler_observed',
-] as const
+/** Discriminant extracted from the closed union.  Keeping the kind literal in
+ *  one place (the union above) eliminates the manual array/switch duplication
+ *  that previously required touching three sites for every new payload kind. */
+export type OasPayloadKind = TypedOasPayload['kind']
+
+type PayloadReader<T> = (raw: unknown, context?: unknown) => T
+
+type ReaderMap = {
+  [K in OasPayloadKind]: PayloadReader<Extract<TypedOasPayload, { kind: K }>['payload']>
+}
+
+/** Exhaustive map from payload kind to its atdgen reader.  The mapped type
+ *  guarantees every union member has a reader and that no stale kind lingers
+ *  after the union changes. */
+const READERS: ReaderMap = {
+  agent_started: readAgentStartedPayload,
+  agent_completed: readAgentCompletedPayload,
+  agent_failed: readAgentFailedPayload,
+  tool_called: readToolCalledPayload,
+  tool_completed: readToolCompletedPayload,
+  turn_started: readTurnStartedPayload,
+  turn_completed: readTurnCompletedPayload,
+  turn_ready: readTurnReadyPayload,
+  handoff_requested: readHandoffRequestedPayload,
+  handoff_completed: readHandoffCompletedPayload,
+  context_compacted: readContextCompactedPayload,
+  context_overflow_imminent: readContextOverflowImminentPayload,
+  context_compact_started: readContextCompactStartedPayload,
+  content_replacement_replaced: readContentReplacementReplacedPayload,
+  content_replacement_kept: readContentReplacementKeptPayload,
+  slot_scheduler_observed: readSlotSchedulerObservedPayload,
+}
+
+/** Runtime inventory derived from the reader keys.  The type assertion is
+ *  safe because ReaderMap's keys are exactly OasPayloadKind. */
+export const OAS_PAYLOAD_EVENT_TYPES = Object.keys(READERS) as readonly OasPayloadKind[]
 
 type OasPayloadEventType = (typeof OAS_PAYLOAD_EVENT_TYPES)[number]
 
@@ -116,8 +136,6 @@ function fail(eventType: string, message: string): OasPayloadParseFailure {
   return { success: false, error: { issues: [{ eventType, message }] } }
 }
 
-type PayloadReader<T> = (raw: unknown, context?: unknown) => T
-
 function tryRead<T>(
   eventType: string,
   reader: PayloadReader<T>,
@@ -131,14 +149,11 @@ function tryRead<T>(
   }
 }
 
-function readOptionalString(
-  raw: Record<string, unknown>,
-  key: string,
-): string | undefined {
-  const value = raw[key]
-  if (value === undefined || value === null) return undefined
-  if (typeof value !== 'string') return undefined
-  return value
+function buildPayload<K extends OasPayloadKind>(
+  kind: K,
+  payload: TypedOasPayload['payload'],
+): TypedOasPayload {
+  return { kind, payload } as unknown as TypedOasPayload
 }
 
 /** Parse an OAS event payload into a typed, discriminated union.
@@ -153,95 +168,40 @@ export function parseOasPayload(
     return fail(eventType, `No typed payload reader for event type "${eventType}"`)
   }
 
-  const rawRecord =
-    typeof raw === 'object' && raw !== null
-      ? (raw as Record<string, unknown>)
-      : {}
-
   switch (suffix) {
-    case 'agent_started': {
-      const result = tryRead(eventType, readAgentStartedPayload, raw)
-      if (!result.success) return result
-      return ok({ kind: 'agent_started', payload: result.data })
-    }
-    case 'agent_completed': {
-      const result = tryRead(eventType, readAgentCompletedPayload, raw)
-      if (!result.success) return result
-      return ok({ kind: 'agent_completed', payload: result.data })
-    }
-    case 'agent_failed': {
-      const result = tryRead(eventType, readAgentFailedPayload, raw)
-      if (!result.success) return result
-      const error = readOptionalString(rawRecord, 'error')
-      return ok({ kind: 'agent_failed', payload: { ...result.data, error } })
-    }
-    case 'tool_called': {
-      const result = tryRead(eventType, readToolCalledPayload, raw)
-      if (!result.success) return result
-      return ok({ kind: 'tool_called', payload: result.data })
-    }
-    case 'tool_completed': {
-      const result = tryRead(eventType, readToolCompletedPayload, raw)
-      if (!result.success) return result
-      return ok({ kind: 'tool_completed', payload: result.data })
-    }
-    case 'turn_started': {
-      const result = tryRead(eventType, readTurnStartedPayload, raw)
-      if (!result.success) return result
-      return ok({ kind: 'turn_started', payload: result.data })
-    }
-    case 'turn_completed': {
-      const result = tryRead(eventType, readTurnCompletedPayload, raw)
-      if (!result.success) return result
-      return ok({ kind: 'turn_completed', payload: result.data })
-    }
-    case 'turn_ready': {
-      const result = tryRead(eventType, readTurnReadyPayload, raw)
-      if (!result.success) return result
-      return ok({ kind: 'turn_ready', payload: result.data })
-    }
-    case 'handoff_requested': {
-      const result = tryRead(eventType, readHandoffRequestedPayload, raw)
-      if (!result.success) return result
-      return ok({ kind: 'handoff_requested', payload: result.data })
-    }
-    case 'handoff_completed': {
-      const result = tryRead(eventType, readHandoffCompletedPayload, raw)
-      if (!result.success) return result
-      return ok({ kind: 'handoff_completed', payload: result.data })
-    }
     case 'context_compacted': {
-      const result = tryRead(eventType, readContextCompactedPayload, raw)
+      const result = tryRead(eventType, READERS[suffix], raw)
       if (!result.success) return result
-      const runtime = readOptionalString(rawRecord, 'runtime')
-      return ok({ kind: 'context_compacted', payload: { ...result.data, runtime } })
+      const rawRecord =
+        typeof raw === 'object' && raw !== null
+          ? (raw as Record<string, unknown>)
+          : {}
+      const runtimeValue = rawRecord.runtime
+      const runtime =
+        typeof runtimeValue === 'string' ? runtimeValue : undefined
+      return ok(buildPayload(suffix, { ...result.data, runtime }))
     }
-    case 'context_overflow_imminent': {
-      const result = tryRead(eventType, readContextOverflowImminentPayload, raw)
-      if (!result.success) return result
-      return ok({ kind: 'context_overflow_imminent', payload: result.data })
-    }
-    case 'context_compact_started': {
-      const result = tryRead(eventType, readContextCompactStartedPayload, raw)
-      if (!result.success) return result
-      return ok({ kind: 'context_compact_started', payload: result.data })
-    }
-    case 'content_replacement_replaced': {
-      const result = tryRead(eventType, readContentReplacementReplacedPayload, raw)
-      if (!result.success) return result
-      return ok({ kind: 'content_replacement_replaced', payload: result.data })
-    }
-    case 'content_replacement_kept': {
-      const result = tryRead(eventType, readContentReplacementKeptPayload, raw)
-      if (!result.success) return result
-      return ok({ kind: 'content_replacement_kept', payload: result.data })
-    }
+    case 'agent_started':
+    case 'agent_completed':
+    case 'agent_failed':
+    case 'tool_called':
+    case 'tool_completed':
+    case 'turn_started':
+    case 'turn_completed':
+    case 'turn_ready':
+    case 'handoff_requested':
+    case 'handoff_completed':
+    case 'context_overflow_imminent':
+    case 'context_compact_started':
+    case 'content_replacement_replaced':
+    case 'content_replacement_kept':
     case 'slot_scheduler_observed': {
-      const result = tryRead(eventType, readSlotSchedulerObservedPayload, raw)
+      const result = tryRead(eventType, READERS[suffix] as PayloadReader<unknown>, raw)
       if (!result.success) return result
-      return ok({ kind: 'slot_scheduler_observed', payload: result.data })
+      return ok(buildPayload(suffix, result.data as TypedOasPayload['payload']))
     }
   }
+  return assertExhaustive(suffix, 'OasPayloadKind')
 }
 
 /** Convenience wrapper that returns the typed payload or null.

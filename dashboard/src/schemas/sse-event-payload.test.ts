@@ -3,8 +3,168 @@ import { describe, expect, it } from 'vitest'
 import {
   parseOasPayload,
   parseOasPayloadOrNull,
+  OAS_PAYLOAD_EVENT_TYPES,
   type TypedOasPayload,
 } from './sse-event-payload'
+import {
+  writeAgentCompletedPayload,
+  writeAgentFailedPayload,
+  writeAgentStartedPayload,
+  writeContentReplacementKeptPayload,
+  writeContentReplacementReplacedPayload,
+  writeContextCompactStartedPayload,
+  writeContextCompactedPayload,
+  writeContextOverflowImminentPayload,
+  writeHandoffCompletedPayload,
+  writeHandoffRequestedPayload,
+  writeSlotSchedulerObservedPayload,
+  writeToolCalledPayload,
+  writeToolCompletedPayload,
+  writeTurnCompletedPayload,
+  writeTurnReadyPayload,
+  writeTurnStartedPayload,
+} from './sse_event_generated'
+
+/** Full payload kind coverage used by both the round-trip sweep and the
+ *  array<->union parity test.  Keeping the inventory in one place guarantees
+ *  a new kind forces an update here instead of slipping through with a
+ *  partial round-trip. */
+const ALL_PAYLOAD_CASES: TypedOasPayload[] = [
+  { kind: 'agent_started', payload: { agent_name: 'a', task_id: 't' } },
+  {
+    kind: 'agent_completed',
+    payload: { agent_name: 'a', task_id: 't', elapsed_s: 1 },
+  },
+  {
+    kind: 'agent_failed',
+    payload: {
+      agent_name: 'a',
+      task_id: 't',
+      elapsed_s: 1,
+      error: 'boom',
+      error_domain: 'api',
+      error_code: 'rate_limited',
+      error_retryable: true,
+      error_detail: { variant: 'rate_limited', message: 'slow down' },
+    },
+  },
+  { kind: 'tool_called', payload: { agent_name: 'a', tool_name: 'bash' } },
+  { kind: 'tool_completed', payload: { agent_name: 'a', tool_name: 'bash' } },
+  { kind: 'turn_started', payload: { agent_name: 'a', turn: 1 } },
+  { kind: 'turn_completed', payload: { agent_name: 'a', turn: 1 } },
+  {
+    kind: 'turn_ready',
+    payload: {
+      agent_name: 'a',
+      turn: 1,
+      count: 2,
+      names_hash: 'h',
+      tool_names: ['bash', 'cat'],
+    },
+  },
+  {
+    kind: 'handoff_requested',
+    payload: { from_agent: 'a', to_agent: 'b', reason: 'r' },
+  },
+  {
+    kind: 'handoff_completed',
+    payload: { from_agent: 'a', to_agent: 'b', elapsed_s: 1 },
+  },
+  {
+    kind: 'context_compacted',
+    payload: {
+      agent_name: 'a',
+      before_tokens: 10,
+      after_tokens: 5,
+      phase: 'p',
+      runtime: 'oas-runtime',
+    },
+  },
+  {
+    kind: 'context_overflow_imminent',
+    payload: {
+      agent_name: 'a',
+      estimated_tokens: 9000,
+      limit_tokens: 10000,
+      ratio: 0.9,
+    },
+  },
+  {
+    kind: 'context_compact_started',
+    payload: { agent_name: 'a', trigger: 'threshold' },
+  },
+  {
+    kind: 'content_replacement_replaced',
+    payload: {
+      tool_use_id: 'tu1',
+      preview: 'preview',
+      original_chars: 100,
+      seen_count_after: 1,
+    },
+  },
+  {
+    kind: 'content_replacement_kept',
+    payload: { tool_use_id: 'tu1', seen_count_after: 1 },
+  },
+  {
+    kind: 'slot_scheduler_observed',
+    payload: {
+      max_slots: 4,
+      active: 2,
+      available: 2,
+      queue_length: 0,
+      state: 'healthy',
+    },
+  },
+]
+
+function serializePayload(payload: TypedOasPayload): Record<string, unknown> {
+  switch (payload.kind) {
+    case 'agent_started':
+      return writeAgentStartedPayload(payload.payload)
+    case 'agent_completed':
+      return writeAgentCompletedPayload(payload.payload)
+    case 'agent_failed':
+      return writeAgentFailedPayload(payload.payload)
+    case 'tool_called':
+      return writeToolCalledPayload(payload.payload)
+    case 'tool_completed':
+      return writeToolCompletedPayload(payload.payload)
+    case 'turn_started':
+      return writeTurnStartedPayload(payload.payload)
+    case 'turn_completed':
+      return writeTurnCompletedPayload(payload.payload)
+    case 'turn_ready':
+      return writeTurnReadyPayload(payload.payload)
+    case 'handoff_requested':
+      return writeHandoffRequestedPayload(payload.payload)
+    case 'handoff_completed':
+      return writeHandoffCompletedPayload(payload.payload)
+    case 'context_compacted': {
+      const raw = writeContextCompactedPayload(payload.payload)
+      if (payload.payload.runtime !== undefined) {
+        raw.runtime = payload.payload.runtime
+      }
+      return raw
+    }
+    case 'context_overflow_imminent':
+      return writeContextOverflowImminentPayload(payload.payload)
+    case 'context_compact_started':
+      return writeContextCompactStartedPayload(payload.payload)
+    case 'content_replacement_replaced':
+      return writeContentReplacementReplacedPayload(payload.payload)
+    case 'content_replacement_kept':
+      return writeContentReplacementKeptPayload(payload.payload)
+    case 'slot_scheduler_observed':
+      return writeSlotSchedulerObservedPayload(payload.payload)
+  }
+}
+
+function roundTripPayload(original: TypedOasPayload): TypedOasPayload | null {
+  const raw = serializePayload(original)
+  const result = parseOasPayload(`oas:${original.kind}`, raw)
+  return result.success ? result.data : null
+}
 
 describe('parseOasPayload', () => {
   it('parses oas:agent_started payload', () => {
@@ -37,12 +197,16 @@ describe('parseOasPayload', () => {
     expect(data.payload.elapsed_s).toBe(12.5)
   })
 
-  it('parses oas:agent_failed payload with error addendum', () => {
+  it('parses oas:agent_failed payload with all typed error fields', () => {
     const result = parseOasPayload('oas:agent_failed', {
       agent_name: 'gamma',
       task_id: 'task_7',
       elapsed_s: 3.0,
       error: 'boom',
+      error_domain: 'api',
+      error_code: 'rate_limited',
+      error_retryable: true,
+      error_detail: { variant: 'rate_limited', message: 'slow down' },
     })
     expect(result.success).toBe(true)
     if (!result.success) return
@@ -51,6 +215,25 @@ describe('parseOasPayload', () => {
     if (data.kind !== 'agent_failed') return
     expect(data.payload.agent_name).toBe('gamma')
     expect(data.payload.error).toBe('boom')
+    expect(data.payload.error_domain).toBe('api')
+    expect(data.payload.error_code).toBe('rate_limited')
+    expect(data.payload.error_retryable).toBe(true)
+    expect(data.payload.error_detail).toEqual({
+      variant: 'rate_limited',
+      message: 'slow down',
+    })
+  })
+
+  it('rejects non-string agent_failed.error via the atdgen error path', () => {
+    const result = parseOasPayload('oas:agent_failed', {
+      agent_name: 'gamma',
+      task_id: 'task_7',
+      elapsed_s: 3.0,
+      error: 42,
+    })
+    expect(result.success).toBe(false)
+    if (result.success) return
+    expect(result.error.issues[0]?.message).toMatch(/string/)
   })
 
   it('parses oas:tool_called payload', () => {
@@ -106,6 +289,22 @@ describe('parseOasPayload', () => {
     expect(data.payload.turn).toBe(3)
   })
 
+  it('parses oas:turn_ready payload', () => {
+    const result = parseOasPayload('oas:turn_ready', {
+      agent_name: 'alpha',
+      turn: 1,
+      count: 2,
+      names_hash: 'h',
+      tool_names: ['bash'],
+    })
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    expect(result.data.kind).toBe('turn_ready')
+    if (result.data.kind !== 'turn_ready') return
+    expect(result.data.payload.count).toBe(2)
+    expect(result.data.payload.tool_names).toEqual(['bash'])
+  })
+
   it('parses oas:handoff_requested payload', () => {
     const result = parseOasPayload('oas:handoff_requested', {
       from_agent: 'alpha',
@@ -136,7 +335,7 @@ describe('parseOasPayload', () => {
     expect(data.payload.elapsed_s).toBe(0.5)
   })
 
-  it('parses oas:context_compacted payload', () => {
+  it('parses oas:context_compacted payload and preserves runtime augmentation', () => {
     const result = parseOasPayload('oas:context_compacted', {
       agent_name: 'alpha',
       before_tokens: 1000,
@@ -153,6 +352,73 @@ describe('parseOasPayload', () => {
     expect(data.payload.after_tokens).toBe(800)
     expect(data.payload.phase).toBe('summarize')
     expect(data.payload.runtime).toBe('oas-runtime')
+  })
+
+  it('parses oas:context_overflow_imminent payload', () => {
+    const result = parseOasPayload('oas:context_overflow_imminent', {
+      agent_name: 'alpha',
+      estimated_tokens: 9000,
+      limit_tokens: 10000,
+      ratio: 0.9,
+    })
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    expect(result.data.kind).toBe('context_overflow_imminent')
+    if (result.data.kind !== 'context_overflow_imminent') return
+    expect(result.data.payload.ratio).toBe(0.9)
+  })
+
+  it('parses oas:context_compact_started payload', () => {
+    const result = parseOasPayload('oas:context_compact_started', {
+      agent_name: 'alpha',
+      trigger: 'threshold',
+    })
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    expect(result.data.kind).toBe('context_compact_started')
+    if (result.data.kind !== 'context_compact_started') return
+    expect(result.data.payload.trigger).toBe('threshold')
+  })
+
+  it('parses oas:content_replacement_replaced payload', () => {
+    const result = parseOasPayload('oas:content_replacement_replaced', {
+      tool_use_id: 'tu1',
+      preview: 'preview',
+      original_chars: 100,
+      seen_count_after: 1,
+    })
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    expect(result.data.kind).toBe('content_replacement_replaced')
+    if (result.data.kind !== 'content_replacement_replaced') return
+    expect(result.data.payload.preview).toBe('preview')
+  })
+
+  it('parses oas:content_replacement_kept payload', () => {
+    const result = parseOasPayload('oas:content_replacement_kept', {
+      tool_use_id: 'tu1',
+      seen_count_after: 1,
+    })
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    expect(result.data.kind).toBe('content_replacement_kept')
+    if (result.data.kind !== 'content_replacement_kept') return
+    expect(result.data.payload.seen_count_after).toBe(1)
+  })
+
+  it('parses oas:slot_scheduler_observed payload', () => {
+    const result = parseOasPayload('oas:slot_scheduler_observed', {
+      max_slots: 4,
+      active: 2,
+      available: 2,
+      queue_length: 0,
+      state: 'healthy',
+    })
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    expect(result.data.kind).toBe('slot_scheduler_observed')
+    if (result.data.kind !== 'slot_scheduler_observed') return
+    expect(result.data.payload.state).toBe('healthy')
   })
 
   it('rejects an unknown event type', () => {
@@ -182,32 +448,17 @@ describe('parseOasPayload', () => {
   })
 
   it('round-trips through write/read for every handled payload kind', () => {
-    const cases: TypedOasPayload[] = [
-      { kind: 'agent_started', payload: { agent_name: 'a', task_id: 't' } },
-      { kind: 'agent_completed', payload: { agent_name: 'a', task_id: 't', elapsed_s: 1 } },
-      { kind: 'agent_failed', payload: { agent_name: 'a', task_id: 't', elapsed_s: 1 } },
-      { kind: 'tool_called', payload: { agent_name: 'a', tool_name: 'bash' } },
-      { kind: 'tool_completed', payload: { agent_name: 'a', tool_name: 'bash' } },
-      { kind: 'turn_started', payload: { agent_name: 'a', turn: 1 } },
-      { kind: 'turn_completed', payload: { agent_name: 'a', turn: 1 } },
-      {
-        kind: 'handoff_requested',
-        payload: { from_agent: 'a', to_agent: 'b', reason: 'r' },
-      },
-      {
-        kind: 'handoff_completed',
-        payload: { from_agent: 'a', to_agent: 'b', elapsed_s: 1 },
-      },
-      {
-        kind: 'context_compacted',
-        payload: { agent_name: 'a', before_tokens: 10, after_tokens: 5, phase: 'p' },
-      },
-    ]
-    for (const original of cases) {
-      const result = parseOasPayload(`oas:${original.kind}`, original.payload)
-      expect(result.success).toBe(true)
-      if (!result.success) continue
-      expect(result.data.kind).toBe(original.kind)
+    for (const original of ALL_PAYLOAD_CASES) {
+      const result = roundTripPayload(original)
+      expect(result, `round-trip failed for ${original.kind}`).not.toBeNull()
+      expect(result?.kind).toBe(original.kind)
+      expect(result?.payload).toEqual(original.payload)
     }
+  })
+
+  it('has parity between OAS_PAYLOAD_EVENT_TYPES and TypedOasPayload kind union', () => {
+    const fromArray = new Set(OAS_PAYLOAD_EVENT_TYPES)
+    const fromUnion = new Set(ALL_PAYLOAD_CASES.map(c => c.kind))
+    expect(fromArray).toEqual(fromUnion)
   })
 })

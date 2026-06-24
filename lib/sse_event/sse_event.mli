@@ -138,17 +138,20 @@ val slot_scheduler_observed
   -> state:string
   -> Yojson.Safe.t
 
-(** [agent_completed] and [agent_failed] carry a variable-shape
-    payload tail beyond the three base fields ([agent_name],
-    [task_id], [elapsed_s]).  The tail comes from runtime-local
-    helpers ([agent_completed_result_fields] /
-    [agent_failed_error_fields]) that close over [Agent_sdk]
-    variant types.  To keep [Sse_event] free of [Agent_sdk]
-    dependencies, the caller projects the tail into a
+(** [agent_completed] carries a variable-shape result tail beyond
+    the three base fields ([agent_name], [task_id], [elapsed_s]).
+    The tail comes from a runtime-local helper that closes over
+    [Agent_sdk] variant types.  To keep [Sse_event] free of
+    [Agent_sdk] dependencies, the caller projects the tail into a
     [(string * Yojson.Safe.t) list] and passes it via
-    [~result_fields] / [~error_fields].  The list is appended to
-    the atd-emitted base record in declaration order, preserving
-    byte equality with the previous inline `Assoc-construction path. *)
+    [~result_fields].  The list is appended to the atd-emitted base
+    record in declaration order, preserving byte equality with the
+    previous inline `Assoc-construction path.
+
+    [agent_failed]'s five error fields are simple projections
+    (string/bool/Yojson.Safe.t) and are encoded directly in the atd
+    schema, so they are passed as labeled arguments instead of an
+    addendum list. *)
 
 val agent_completed
   :  ts_unix:float
@@ -167,5 +170,9 @@ val agent_failed
   -> agent_name:string
   -> task_id:string
   -> elapsed_s:float
-  -> error_fields:(string * Yojson.Safe.t) list
+  -> error:string
+  -> error_domain:string
+  -> error_code:string
+  -> error_retryable:bool
+  -> error_detail:Yojson.Safe.t
   -> Yojson.Safe.t

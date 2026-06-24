@@ -95,8 +95,13 @@ probes `/health` while those keepers and optional host hogs contend for the one 
 # config/personas/<persona>); the gate copies that persona into its ephemeral
 # base path. It is resolved from an explicit path, never home-anchored (SSOT-R6).
 MASC_PERSONA_SOURCE_ROOT=<your-masc-root> \
-  scripts/harness/perf/keeper_load_gate.sh --keepers 12 --levels "0 15" --probes 25
+  MOCK_REPLY_BYTES=150000 INJECT_INTERVAL=0.05 WARM_TURNS_SEC=30 \
+  scripts/harness/perf/keeper_load_gate.sh --keepers 24 --levels "0 8" --probes 50
 ```
+
+`MASC_PERSONA_SOURCE_ROOT` is the `.masc` dir that holds `config/personas/<persona>` (e.g.
+`<root>/.masc`); the gate copies that persona into its ephemeral base path (resolved from an explicit
+path, never home-anchored — SSOT-R6).
 
 `mock_openai_provider.py` serves `POST /v1/chat/completions` in both non-streaming JSON (the
 `backend_openai_request.ml` default `?(stream = false)` path) and SSE `chat.completion.chunk` modes
@@ -124,16 +129,36 @@ MASC_PERSONA_SOURCE_ROOT=<your-masc-root> \
 The gate refuses to report numbers if zero provider calls are seen during warmup (the mock wiring
 is then broken), and it records a `turns_during` column per level.
 
-**Known limitation (the gate self-warns):** keepers do an initial autoboot burst, then their
-scheduled-autonomous cadence outruns the short `/health` probe window, so `turns_during` is
-typically 0 at the measured levels — the measurement overlaps keepers *resident* but not *mid-turn*,
-which is only marginally more faithful than Mode A. A GREEN verdict under that condition is weak and
-the gate prints a `WARN` saying so. Two refinements make it bite: (1) drive **continuous** turns via
-the reactive channel (inject board activity) rather than relying on the scheduled-autonomous cadence;
-(2) have the mock return **large, realistic responses** (with tool calls) so the post-await parsing /
-record-write / snapshot work — which is the real keeper main-domain cost, since the provider await
-itself is I/O-bound and yields — actually loads the domain. `--mock-delay-ms` lengthens the await but
-does not add main-domain CPU.
+**Sustained-load (the original `turns_during=0` limitation, now resolved).** A first cut found
+keepers did an autoboot burst then quiesced (load-generating keepers with "do minimal work"
+instructions see no real work, so the autonomous cadence stops firing), leaving `turns_during=0`
+during the probe window — a GREEN there was meaningless. Two changes make the keeper axis bite, and
+the gate now reproduces RED on current main:
+
+1. **Reactive board injection** (`REACTIVE_INJECT=1`, default): a background loop posts
+   `masc_board_post` over `/mcp` @-mentioning a rotating keeper, driving the `Board_reactive` wake
+   path (`keeper_world_observation_board_signal.ml`) so keepers keep turning instead of quiescing.
+   This needs three things the harness now sets up: MCP auth is disabled for the ephemeral base path
+   (`.masc/auth/config.json` `enabled:false` — `default_auth_config` is enabled+require_token, which
+   otherwise 401s the injector); the `/mcp` transport is stateful, so the injector does the
+   `initialize` → `Mcp-Session-Id` → `notifications/initialized` handshake and carries the session
+   header; the session is acquired lazily and re-acquired on error (the booting fleet can saturate the
+   server so the first `initialize` times out).
+2. **Large mock replies** (`MOCK_REPLY_BYTES`): a keeper turn is I/O-bound (the provider await yields
+   the main domain), so the real main-domain cost is *after* the await — parsing the response and
+   writing the turn record. A trivial `"ack"` barely loads the domain even mid-turn; a large body
+   (`--reply-bytes`) makes a resident keeper actually contend with serving.
+
+**Measured (M3 Max 16-core, 2026-06-23, 24 keepers, 150 KB replies):** level 0 (keeper-burst, no
+hogs) drove `/health` p95 to **~1.6 s** with `turns_during` 12; +8 host hogs ~0.8 s — both **RED**
+(threshold 250 ms). Idle/light keeper load (16 keepers, 50 KB) stays GREEN (~1–24 ms), so the gate
+discriminates. The RED is the merge gate for RFC-0204 Phase 3: keeper turns parsing/recording on the
+single main Eio domain starve trivial serving, and a dedicated serving domain should flip it GREEN.
+The gate still prints a `WARN` only if `turns_during` is genuinely 0 (injection inert).
+
+Note: the Mode B verdict's amplification number is not meaningful (keepers run at every level, so
+there is no idle in-run baseline); the RED criterion that bites is the **absolute** `loaded p95 >
+THRESHOLD_MS`.
 
 ## Other limitations
 
@@ -194,5 +219,6 @@ main domain still orchestrates all N requests. The only lever that addresses the
 architectural: **RFC-0204 Phase 3 — a dedicated serving domain** so N concurrent requests are
 handled off the main domain, leaving it for keepers + the scheduler. That is a large change
 constrained by RFC-0059 (keepers are pinned to the main domain; only *serving* may move) and should
-go through an RFC, validated by the Mode B keeper-load gate once its sustained-load refinements land.
+go through an RFC, validated by the Mode B keeper-load gate (whose sustained-load refinements have
+landed and now reproduce the keeper-burst RED — the gate Phase 3 must flip GREEN).
 launchd `ProcessType=Interactive` is a worthwhile but partial deployment-side mitigation.

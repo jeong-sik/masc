@@ -179,7 +179,7 @@ let build_keeper_system_prompt
     ~goal
     ~instructions ?(persona_extended = "") ?(keeper_name = "")
     ?(home_ground = "") ?(active_goals = []) () =
-  let goal = normalize_goal_horizon_text goal in
+  let goal = normalize_goal_text goal in
   (* Behavior prompt blocks live under
      [<prompts_dir>/behavior/<name>.md] and are read once per process via
      [Keeper_prompt_external.get]. Missing/unreadable files no longer inject

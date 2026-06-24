@@ -185,10 +185,61 @@ let test_of_patterns_programmatic () =
     ; description = "forced process kill"
     }
   ] in
-  let policy = Masc.Destructive_ops_policy.of_patterns ~enabled:true patterns in
+  let policy = assert_ok (Masc.Destructive_ops_policy.of_patterns ~enabled:true patterns) in
   check (option (pair string string)) "custom pattern detected"
     (Some ("kill -9", "forced process kill"))
     (Masc.Eval_gate.detect_destructive policy "kill -9 1234")
+
+let test_of_patterns_rejects_empty_pattern () =
+  let patterns = [
+    { Masc.Shell_safety_types.class_ = Masc.Shell_safety_types.Process_signal
+    ; pattern = ""
+    ; description = "empty pattern"
+    }
+  ] in
+  assert_error (Masc.Destructive_ops_policy.of_patterns ~enabled:true patterns)
+
+let test_of_patterns_rejects_empty_description () =
+  let patterns = [
+    { Masc.Shell_safety_types.class_ = Masc.Shell_safety_types.Process_signal
+    ; pattern = "kill -9"
+    ; description = ""
+    }
+  ] in
+  assert_error (Masc.Destructive_ops_policy.of_patterns ~enabled:true patterns)
+
+let test_of_patterns_rejects_enabled_empty_list () =
+  assert_error (Masc.Destructive_ops_policy.of_patterns ~enabled:true [])
+
+let test_of_patterns_disabled_empty_list_ok () =
+  let _policy = assert_ok (Masc.Destructive_ops_policy.of_patterns ~enabled:false []) in
+  ()
+
+let test_load_string_field_type_error () =
+  let toml = {|
+[destructive_ops]
+enabled = true
+
+[[destructive_ops.patterns]]
+class = 1
+pattern = "rm -rf"
+description = "recursive forced deletion"
+|} in
+  match Masc.Destructive_ops_policy.load_string toml with
+  | Ok _ -> fail "expected Error"
+  | Error errs ->
+    let got =
+      String.concat "; "
+        (List.map
+           (fun e ->
+              Printf.sprintf "%s: %s" e.Masc.Destructive_ops_policy.path e.message)
+           errs)
+    in
+    (match errs with
+     | [ e ] when
+         e.Masc.Destructive_ops_policy.path = "destructive_ops.patterns[0].class"
+         && String.starts_with ~prefix:"pattern class: expected string" e.message -> ()
+     | _ -> fail ("expected field-level type error, got: " ^ got))
 
 (* ================================================================ *)
 (* Runner                                                             *)
@@ -216,5 +267,10 @@ let () =
     ]);
     ("constructor", [
       test_case "of_patterns programmatic" `Quick test_of_patterns_programmatic;
+      test_case "of_patterns rejects empty pattern" `Quick test_of_patterns_rejects_empty_pattern;
+      test_case "of_patterns rejects empty description" `Quick test_of_patterns_rejects_empty_description;
+      test_case "of_patterns rejects enabled empty list" `Quick test_of_patterns_rejects_enabled_empty_list;
+      test_case "of_patterns disabled empty list ok" `Quick test_of_patterns_disabled_empty_list_ok;
+      test_case "load_string field type error" `Quick test_load_string_field_type_error;
     ]);
   ]

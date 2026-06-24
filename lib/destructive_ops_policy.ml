@@ -30,8 +30,6 @@ type load_error = {
 let enabled t = t.enabled
 let patterns t = t.patterns
 
-let of_patterns ~enabled patterns = { enabled; patterns }
-
 (* ------------------------------------------------------------------ *)
 (* Error helpers                                                      *)
 (* ------------------------------------------------------------------ *)
@@ -46,6 +44,24 @@ let partition_results results =
       results
   in
   if errs <> [] then Error (List.concat errs) else Ok oks
+;;
+
+let of_patterns ~enabled patterns : (t, load_error list) result =
+  let validate i { class_; pattern; description } =
+    let path = Printf.sprintf "patterns[%d]" i in
+    let check ~key value msg =
+      if String.trim value = "" then single_error (path ^ "." ^ key) (msg ^ ": empty string")
+      else Ok value
+    in
+    Result.bind (check ~key:"pattern" pattern "pattern substring") (fun pattern ->
+      Result.bind (check ~key:"description" description "pattern description") (fun description ->
+        Ok { class_; pattern; description }))
+  in
+  if enabled && patterns = [] then
+    single_error "patterns" "enabled policy requires at least one pattern"
+  else
+    Result.map (fun patterns -> { enabled; patterns })
+      (partition_results (List.mapi validate patterns))
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -82,13 +98,17 @@ let find_or_default ~path ~expected toml default accessor key_path =
 (* ------------------------------------------------------------------ *)
 
 let parse_pattern ~path (tbl : Otoml.t) : (destructive_pattern, load_error list) result =
-  try
-    let require_string ~key ~msg =
+  let require_string ~key ~msg =
+    try
       match Otoml.find_opt tbl Otoml.get_string [ key ] with
       | Some value when String.trim value <> "" -> Ok value
       | Some _ -> single_error (path ^ "." ^ key) (msg ^ ": empty string")
       | None -> single_error (path ^ "." ^ key) (msg ^ ": missing")
-    in
+    with
+    | Otoml.Type_error type_msg ->
+      single_error (path ^ "." ^ key) (Printf.sprintf "%s: expected string, got %s" msg type_msg)
+  in
+  try
     match require_string ~key:"class" ~msg:"pattern class" with
     | Error errs -> Error errs
     | Ok class_str ->

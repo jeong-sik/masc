@@ -53,8 +53,15 @@ async function loadSurface(approval_queue: KeeperApprovalQueueItem[]) {
     submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'x' } }),
   }))
   vi.doMock('../../sse-store', () => ({ registerGovernanceRefresh: vi.fn() }))
+  // Preserve the real router (route signal etc.) but capture navigate() so the
+  // "open keeper conversation" wiring can be asserted without a real route change.
+  const navigate = vi.fn()
+  vi.doMock('../../router', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../router')>()),
+    navigate,
+  }))
   const mod = await import('./approvals-surface')
-  return { ApprovalsSurface: mod.ApprovalsSurface, resolveGovernanceApproval }
+  return { ApprovalsSurface: mod.ApprovalsSurface, resolveGovernanceApproval, navigate }
 }
 
 describe('ApprovalsSurface', () => {
@@ -276,5 +283,77 @@ describe('ApprovalsSurface', () => {
     await flushUi()
 
     expect(resolveGovernanceApproval).toHaveBeenCalledWith('appr-9', 'approve', false)
+  })
+
+  it('routes the 거부 action through resolveGovernanceApproval with the reject decision', async () => {
+    const { ApprovalsSurface, resolveGovernanceApproval } = await loadSurface([
+      queueItem({ id: 'appr-r', keeper_name: 'masc-improver' }),
+    ])
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    container.querySelector<HTMLButtonElement>('.ap-card .ap-act.deny')?.click()
+    await flushUi()
+
+    expect(resolveGovernanceApproval).toHaveBeenCalledWith('appr-r', 'reject', false)
+  })
+
+  it('routes the 항상 승인 action through resolveGovernanceApproval with rememberRule=true', async () => {
+    const { ApprovalsSurface, resolveGovernanceApproval } = await loadSurface([
+      queueItem({ id: 'appr-a', keeper_name: 'masc-improver' }),
+    ])
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    container.querySelector<HTMLButtonElement>('.ap-card .ap-act.always')?.click()
+    await flushUi()
+
+    expect(resolveGovernanceApproval).toHaveBeenCalledWith('appr-a', 'approve', true)
+  })
+
+  it('surfaces a visible error and re-enables the actions when a decision fails (no silent failure)', async () => {
+    const { ApprovalsSurface, resolveGovernanceApproval } = await loadSurface([
+      queueItem({ id: 'appr-e', keeper_name: 'masc-improver' }),
+    ])
+    // The next decision call rejects: the operator must SEE the failure, because a
+    // silently-failed reject would let the keeper proceed while the queue clears.
+    resolveGovernanceApproval.mockRejectedValueOnce(new Error('승인 서버 연결 실패'))
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    container.querySelector<HTMLButtonElement>('.ap-card .ap-act.deny')?.click()
+    await flushUi()
+
+    // visible error banner with the failure message
+    const errorBanner = container.querySelector('[data-testid="approvals-error"]')
+    expect(errorBanner).not.toBeNull()
+    expect(errorBanner?.textContent).toContain('승인 서버 연결 실패')
+    // actions are re-enabled (finally cleared the busy state) so the operator can retry
+    const denyBtn = container.querySelector<HTMLButtonElement>('.ap-card .ap-act.deny')
+    expect(denyBtn?.disabled).toBe(false)
+  })
+
+  it('opens the keeper conversation from 대화에서 검토', async () => {
+    const { ApprovalsSurface, navigate } = await loadSurface([
+      queueItem({ id: 'appr-k', keeper_name: 'masc-improver' }),
+    ])
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const reviewBtn = container.querySelector<HTMLButtonElement>('.ap-card .ap-act.ghost')
+    expect(reviewBtn?.textContent).toContain('대화에서 검토')
+    reviewBtn?.click()
+    await flushUi()
+
+    // routes to the keeper's detail page (which defaults to the conversation view)
+    expect(navigate).toHaveBeenCalledWith('monitoring', {
+      section: 'agents',
+      view: 'keepers',
+      keeper: 'masc-improver',
+    })
   })
 })

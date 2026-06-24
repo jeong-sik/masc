@@ -1185,26 +1185,26 @@ function WorkSurfaceV2() {
           </div>
         </header>
 
-          <section class="ov-kpis" data-testid="work-kpis" style=${{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
-            <div class="ov-kpi">
-              <div class="ov-kpi-k">활성 목표</div>
-              <div class="ov-kpi-v volt" data-testid="kpi-goals">${totals.goals}</div>
+          <section class="wk-kpis" data-testid="work-kpis">
+            <div class="wk-kpi">
+              <div class="wk-kpi-k">활성 목표</div>
+              <div class="wk-kpi-v brass" data-testid="kpi-goals">${totals.goals}</div>
             </div>
-            <div class="ov-kpi">
-              <div class="ov-kpi-k">전체 Task</div>
-              <div class="ov-kpi-v" data-testid="kpi-tasks">${totals.tasks}</div>
+            <div class="wk-kpi">
+              <div class="wk-kpi-k">전체 TASK</div>
+              <div class="wk-kpi-v" data-testid="kpi-tasks">${totals.tasks}</div>
             </div>
-            <div class="ov-kpi">
-              <div class="ov-kpi-k">진행 중</div>
-              <div class=${`ov-kpi-v ${totals.wip > 0 ? 'volt' : ''}`} data-testid="kpi-wip">${totals.wip}</div>
+            <div class="wk-kpi">
+              <div class="wk-kpi-k">진행 중</div>
+              <div class=${`wk-kpi-v ${totals.wip > 0 ? 'volt' : ''}`} data-testid="kpi-wip">${totals.wip}</div>
             </div>
-            <div class="ov-kpi">
-              <div class="ov-kpi-k">검증 대기</div>
-              <div class=${`ov-kpi-v ${totals.verify > 0 ? 'volt' : ''}`} data-testid="kpi-verify">${totals.verify}</div>
+            <div class="wk-kpi">
+              <div class="wk-kpi-k">검증 대기</div>
+              <div class=${`wk-kpi-v ${totals.verify > 0 ? 'volt' : ''}`} data-testid="kpi-verify">${totals.verify}</div>
             </div>
-            <div class="ov-kpi">
-              <div class="ov-kpi-k">백로그</div>
-              <div class=${`ov-kpi-v ${totals.backlog > 0 ? 'warn' : ''}`} data-testid="kpi-backlog">${totals.backlog}</div>
+            <div class="wk-kpi">
+              <div class="wk-kpi-k">백로그</div>
+              <div class=${`wk-kpi-v ${totals.backlog > 0 ? 'warn' : ''}`} data-testid="kpi-backlog">${totals.backlog}</div>
             </div>
           </section>
 

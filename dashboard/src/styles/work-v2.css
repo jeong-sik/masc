@@ -1256,6 +1256,48 @@
   color: var(--color-bg-page);
 }
 
+/* ── KPI cards ───────────────────────────────────────────────────────────── */
+
+.wk-kpis {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.75rem;
+}
+
+.wk-kpi {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 0.875rem 1rem;
+  border-radius: var(--r-1);
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-surface);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+}
+
+.wk-kpi-k {
+  font-size: var(--text-2xs);
+  color: var(--color-fg-muted);
+}
+
+.wk-kpi-v {
+  margin-top: 0.5rem;
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  color: var(--color-fg-primary);
+  line-height: 1;
+}
+
+.wk-kpi-v.brass { color: var(--color-accent-fg); }
+.wk-kpi-v.volt { color: var(--color-status-volt); }
+.wk-kpi-v.warn { color: var(--color-status-warn); }
+
+@media (max-width: 700px) {
+  .wk-kpis {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 /* ── Kanban board ────────────────────────────────────────────────────────── */
 
 .wk-kanban {

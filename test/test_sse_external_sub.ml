@@ -181,42 +181,36 @@ let test_external_subscriber_count_linearized_under_domain_contention () =
 (* RFC-0204 Phase 3 prerequisite.  [close_sse_conn] resolves a one-shot stop
    promise; two close paths can race across domains once serving moves off the
    main domain (a client disconnect on the serving domain vs keeper-driven
-   eviction / shutdown on the main domain).  The close body is gated on
-   [claim_close = Atomic.compare_and_set info.closed false true]; if two callers
-   both won, both would [Eio.Promise.resolve] the same promise and raise
-   [Invalid_argument].
+   eviction / shutdown on the main domain).  The close body is gated by
+   [Conn.For_test.run_on_first_close], which runs the body for exactly the first
+   caller that flips the flag false->true; if two callers both won, both would
+   [Eio.Promise.resolve] the same promise and raise [Invalid_argument].
 
-   This drives the [claim_close] PRIMITIVE (via [__test_claim_close]) from two
-   domains over many fresh connections and asserts no connection is claimed by
-   both.  Two winners is exactly the double-resolve precondition.  It proves the
-   primitive, not the wiring — close_sse_conn itself cannot be called in a unit
-   test because it closes a [Httpun.Body.Writer.t], which has no public
-   constructor; [test_close_sse_conn_resolve_is_claim_gated] below pins the
-   wiring at the source level.  RED on the plain check-then-set guard (measured
-   208/50000 double-claims), GREEN on the Atomic compare_and_set. *)
-let test_claim_close_admits_one_winner_across_domains () =
-  if Domain.recommended_domain_count () < 2 then
+   This drives the gate itself — the exact function [close_sse_conn] composes
+   its body through — from two domains over many fresh flags and asserts the
+   gated action runs for at most one domain per flag.  Because the close body
+   (resolve + writer close + unregister) lives inside the gate's [~f] closure,
+   "resolve outside the gate" is not expressible, so no source-level drift guard
+   is needed.  RED on a plain check-then-set gate (measured 208/50000
+   double-runs), GREEN on the Atomic compare_and_set gate. *)
+let test_close_gate_admits_one_winner_across_domains () =
+  if Domain.recommended_domain_count () < 2 then (
     (* On a single-vCPU host the two domains time-slice instead of running in
-       parallel, so the race cannot occur and a green here proves nothing.  Log
-       the skip so a CI run on such a host does not read as real coverage. *)
+       parallel, so the race cannot occur and a green here would prove nothing.
+       Report the skip explicitly so the run is recorded as skipped, not as
+       passing coverage. *)
     Printf.eprintf
-      "[close_race] SKIP test_claim_close_admits_one_winner_across_domains: \
+      "[close_race] SKIP test_close_gate_admits_one_winner_across_domains: \
        recommended_domain_count=%d (<2); cross-domain race cannot manifest\n%!"
-      (Domain.recommended_domain_count ())
+      (Domain.recommended_domain_count ());
+    Alcotest.skip ())
   else begin
     let trials = 50_000 in
-    (* The claim path touches only [info.closed]; [mutex] is a real (free) Eio
-       mutex and [writer] is never dereferenced here, so a stub writer is safe. *)
-    let mutex = Eio.Mutex.create () in
-    let infos =
-      Array.init trials (fun _ ->
-        Conn.make_sse_conn ~session_id:"close-race" ~client_id:0
-          ~writer:(Obj.magic ()) ~mutex ())
-    in
+    let flags = Array.init trials (fun _ -> Atomic.make false) in
     let won = Array.make_matrix 2 trials false in
     (* Two-phase counting barrier across two long-lived domains: at trial [t],
-       both must arrive (2*(t+1) total) before either claims, so the two claims
-       on [infos.(t)] run in true overlap. *)
+       both must arrive (2*(t+1) total) before either closes, so the two close
+       attempts on [flags.(t)] run in true overlap. *)
     let arrived = Atomic.make 0 in
     let worker who =
       for t = 0 to trials - 1 do
@@ -224,7 +218,8 @@ let test_claim_close_admits_one_winner_across_domains () =
         while Atomic.get arrived < 2 * (t + 1) do
           Domain.cpu_relax ()
         done;
-        won.(who).(t) <- Conn.__test_claim_close infos.(t)
+        Conn.For_test.run_on_first_close flags.(t)
+          ~f:(fun () -> won.(who).(t) <- true)
       done
     in
     let other = Domain.spawn (fun () -> worker 1) in
@@ -235,71 +230,15 @@ let test_claim_close_admits_one_winner_across_domains () =
       if won.(0).(t) && won.(1).(t) then incr double
     done;
     Alcotest.(check int)
-      "claim_close never admits two winners (would double-resolve the promise)"
+      "close gate never runs the body for two winners (would double-resolve)"
       0 !double
   end
-
-(* Read a repo source file by walking up from the test's cwd to the directory
-   that contains it. *)
-let read_repo_source rel =
-  let rec find dir hops =
-    if hops > 8 then Alcotest.failf "source root not found from %s" (Sys.getcwd ())
-    else if Sys.file_exists (Filename.concat dir rel) then Filename.concat dir rel
-    else
-      let parent = Filename.dirname dir in
-      if String.equal parent dir then
-        Alcotest.failf "source root not found for %s" rel
-      else find parent (hops + 1)
-  in
-  let path = find (Sys.getcwd ()) 0 in
-  let ic = open_in_bin path in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () -> really_input_string ic (in_channel_length ic))
-
-let substring_index hay needle =
-  let hl = String.length hay and nl = String.length needle in
-  let rec loop i =
-    if i + nl > hl then -1
-    else if String.equal (String.sub hay i nl) needle then i
-    else loop (i + 1)
-  in
-  loop 0
-
-let substring_count hay needle =
-  let hl = String.length hay and nl = String.length needle in
-  let rec loop i acc =
-    if i + nl > hl then acc
-    else if String.equal (String.sub hay i nl) needle then loop (i + nl) (acc + 1)
-    else loop (i + 1) acc
-  in
-  loop 0 0
-
-(* Drift guard for the wiring the behavioral test cannot exercise (no
-   constructible Httpun writer): close_sse_conn must resolve the one-shot stop
-   promise at exactly one site, and that site must sit under the [claim_close]
-   CAS guard.  Catches a refactor that resolves outside / before the guard. *)
-let test_close_sse_conn_resolve_is_claim_gated () =
-  let src = read_repo_source "lib/server/server_mcp_transport_http_conn.ml" in
-  (* The applied call form ([... ()]); the doc comment above the function
-     mentions [Eio.Promise.resolve info.resolve_stop] in brackets without the
-     application, so this needle matches only the real call site. *)
-  let resolve = "Eio.Promise.resolve info.resolve_stop ()" in
-  let guard = "if claim_close info then" in
-  Alcotest.(check int) "stop promise resolved at exactly one call site"
-    1 (substring_count src resolve);
-  let gi = substring_index src guard in
-  let ri = substring_index src resolve in
-  Alcotest.(check bool) "the resolve sits under the claim_close CAS guard"
-    true (gi >= 0 && ri > gi)
 
 let () =
   Alcotest.run "SSE External Subscribers" [
     ("close_race", [
-      Alcotest.test_case "claim_close admits one winner across domains"
-        `Quick test_claim_close_admits_one_winner_across_domains;
-      Alcotest.test_case "close_sse_conn resolve is claim_close-gated (source)"
-        `Quick test_close_sse_conn_resolve_is_claim_gated;
+      Alcotest.test_case "close gate admits one winner across domains"
+        `Quick test_close_gate_admits_one_winner_across_domains;
     ]);
     ("lifecycle", [
       Alcotest.test_case "subscribe and unsubscribe" `Quick

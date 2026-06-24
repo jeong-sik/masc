@@ -76,12 +76,15 @@ val close_sse_conn : sse_conn_info -> unit
     Errors during writer close log at {!Log.Misc.debug} but do
     not propagate. *)
 
-val __test_claim_close : sse_conn_info -> bool
-(** Test-only seam: the close-claim used by {!close_sse_conn}.  Returns [true]
-    for the single caller that wins the right to run the close body (resolve the
-    one-shot stop promise).  Exposed so the cross-domain regression test can
-    race two domains on one connection and assert at most one wins — two winners
-    would double-resolve the promise and crash. *)
+(** Test-only seam. *)
+module For_test : sig
+  val run_on_first_close : bool Atomic.t -> f:(unit -> unit) -> unit
+  (** The one-shot close gate used by {!close_sse_conn}: runs [f] for exactly
+      the first caller that flips the flag false->true.  Exposed so the
+      cross-domain regression test can race two domains on one flag and assert
+      [f] runs for at most one — two winners would double-resolve the stop
+      promise and crash. *)
+end
 
 val stop_sse_session : string -> unit
 (** [stop_sse_session session_id] removes the registry entry

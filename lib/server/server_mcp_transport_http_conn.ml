@@ -11,8 +11,9 @@ type sse_conn_info = {
   (* [stop] and [closed] are touched from more than one domain once serving
      runs off the main domain (a disconnect close racing keeper-driven eviction
      / shutdown), so they are [Atomic.t], not a plain [ref] / [mutable].
-     [closed] is the single-close guard: [claim_close] flips it false->true with
-     [compare_and_set] so exactly one caller resolves the one-shot stop promise. *)
+     [closed] is the single-close guard: [run_on_first_close] flips it
+     false->true with [compare_and_set] so exactly one caller runs the close
+     body and resolves the one-shot stop promise. *)
   stop : bool Atomic.t;
   closed : bool Atomic.t;
   (* Resolved exactly once by [close_sse_conn]. [run_sse_pumps] forks the
@@ -103,20 +104,22 @@ let guard_expired ~now ~session_id state =
 let register_sse_conn ~session_id ~info =
   atomic_update sse_conn_by_session (fun map -> SMap.add session_id info map)
 
-(* Claim the single close of [info]: returns [true] for exactly one caller even
-   under concurrent close paths (a disconnect on one domain racing eviction or
-   shutdown on another).  The close body below — including
-   [Eio.Promise.resolve info.resolve_stop] — must run at most once; a second
-   resolve of a one-shot promise raises [Invalid_argument]. *)
-let claim_close info = Atomic.compare_and_set info.closed false true
-
-let __test_claim_close = claim_close
+(* [run_on_first_close closed ~f] runs [f] for exactly the first caller that
+   flips [closed] false->true; later callers are no-ops.  [close_sse_conn]
+   composes its entire close body — including the one-shot
+   [Eio.Promise.resolve info.resolve_stop], whose second call would raise
+   [Invalid_argument] — through this gate, so a disconnect on the serving domain
+   racing eviction or shutdown on the main domain resolves the promise at most
+   once.  Putting the body inside [~f] makes "resolve outside the gate"
+   unrepresentable rather than something a separate drift test has to police. *)
+let run_on_first_close closed ~f =
+  if Atomic.compare_and_set closed false true then f ()
 
 let close_sse_conn info =
-  if claim_close info then (
+  run_on_first_close info.closed ~f:(fun () ->
     Atomic.set info.stop true;
-    (* Release the per-connection pump switch (run_sse_pumps). [claim_close]
-       admits exactly one caller, so the promise is resolved exactly once. *)
+    (* Resolve releases the per-connection pump switch (run_sse_pumps); the gate
+       admits exactly one caller, so this one-shot resolve runs at most once. *)
     Eio.Promise.resolve info.resolve_stop ();
     (try Httpun.Body.Writer.close info.writer
      with
@@ -125,6 +128,10 @@ let close_sse_conn info =
        Log.Misc.debug "close_sse_conn: %s"
          (Printexc.to_string exn));
     Sse.unregister_if_current info.session_id info.client_id)
+
+module For_test = struct
+  let run_on_first_close = run_on_first_close
+end
 
 let stop_sse_session_impl ~clear_guard session_id =
   let info_opt = ref None in

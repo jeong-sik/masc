@@ -255,8 +255,11 @@ let test_close_sse_conn_claim_race_at_most_one_winner () =
    [close_sse_conn] might bypass [claim_close] and resolve the promise twice. *)
 let test_close_sse_conn_idempotent () =
   let info = make_test_sse_conn ~session_id:"close-idempotent" () in
-  Conn.close_sse_conn info;
-  Conn.close_sse_conn info;
+  (* [close_sse_conn] closes the writer under [info.mutex], which needs an Eio
+     scheduler context — every production close path already has one. *)
+  Eio_main.run (fun _env ->
+    Conn.close_sse_conn info;
+    Conn.close_sse_conn info);
   Alcotest.(check bool) "closed after double close" true (Atomic.get info.closed);
   Alcotest.(check bool) "stop after double close" true (Atomic.get info.stop)
 

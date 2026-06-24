@@ -76,11 +76,16 @@ val register_sse_conn :
     the previous connection first via {!stop_sse_session}. *)
 
 val close_sse_conn : sse_conn_info -> unit
-(** [close_sse_conn info] flushes + closes the writer, sets
-    [info.closed = true], [info.stop = true], and unregisters
-    the SSE client.  Idempotent — safe to call multiple times.
-    Errors during writer close log at {!Log.Misc.debug} but do
-    not propagate. *)
+(** [close_sse_conn info] sets [info.closed = true] / [info.stop = true]
+    (via the single-close [compare_and_set] claim), resolves the one-shot
+    stop promise exactly once, closes the writer, and unregisters the SSE
+    client.  Idempotent — safe to call multiple times.
+
+    The writer is closed under [info.mutex] so it never runs concurrently
+    with a [send_raw] / evict write on another domain; consequently this
+    must be called from within an Eio scheduler context (every production
+    close path is).  Errors during writer close log at {!Log.Misc.debug}
+    but do not propagate. *)
 
 val __test_claim_close : sse_conn_info -> bool
 (** Test-only seam: the close-claim used by {!close_sse_conn}.  Returns [true]

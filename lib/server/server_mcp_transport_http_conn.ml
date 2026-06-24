@@ -125,7 +125,17 @@ let close_sse_conn info =
     (* Release the per-connection pump switch (run_sse_pumps). [claim_close]
        admits exactly one caller, so the promise is resolved exactly once. *)
     Eio.Promise.resolve info.resolve_stop ();
-    (try Httpun.Body.Writer.close info.writer
+    (* Close the writer under [info.mutex] so it cannot run concurrently with a
+       [send_raw] / evict write on another domain — httpun's writer is not
+       domain-safe, and every write path already serializes on [info.mutex].
+       Mirrors [close_stream] in server_activity_http.ml.  [close_sse_conn] is
+       never called while [info.mutex] is held (every call site is outside the
+       mutex or in an exception handler after [use_rw] has returned), so this is
+       deadlock-free even though [Eio.Mutex] is not reentrant.  Requires an Eio
+       context, which every production close path already runs within. *)
+    (try
+       Eio.Mutex.use_rw ~protect:true info.mutex (fun () ->
+           Httpun.Body.Writer.close info.writer)
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->

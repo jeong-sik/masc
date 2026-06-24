@@ -95,12 +95,15 @@ let test_triage_unclaimed_task () =
       check bool "contains NewUnclaimedTask" true
         (List.mem D.NewUnclaimedTask triggers)
 
-let test_triage_failed_task () =
+(* RFC-0294: failed_task (orphan) must NOT be an actionable triage trigger —
+   Task_audit is read-only, so waking on it cannot clear it (the executor
+   livelock).  An orphan-only observation yields no trigger. *)
+let test_triage_failed_task_is_not_a_trigger () =
   let obs = { base_obs with failed_task_count = 1 } in
   match D.triage obs with
-  | D.Skip _ -> fail "expected Triggered for failed task"
+  | D.Skip _ -> ()
   | D.Triggered triggers ->
-      check bool "contains FailedTask" true
+      check bool "failed_task must NOT be a trigger" false
         (List.mem D.FailedTask triggers)
 
 let test_triage_keeper_fiber_count_change () =
@@ -1335,8 +1338,8 @@ let () =
             test_triage_direct_mention;
           test_case "unclaimed task triggers" `Quick
             test_triage_unclaimed_task;
-          test_case "failed task triggers" `Quick
-            test_triage_failed_task;
+          test_case "failed task is NOT a trigger (RFC-0294)" `Quick
+            test_triage_failed_task_is_not_a_trigger;
           test_case "keeper fiber count change triggers" `Quick
             test_triage_keeper_fiber_count_change;
           test_case "board mention triggers" `Quick

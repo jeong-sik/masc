@@ -216,7 +216,14 @@ let triage (obs : world_observation) : triage_result =
   (* L1 Reactive triggers *)
   if obs.direct_mention then add DirectMention;
   if obs.unclaimed_task_count > 0 then add NewUnclaimedTask;
-  if obs.failed_task_count > 0 then add FailedTask;
+  (* RFC-0294: failed_task (orphan) is NOT an actionable trigger.  Its only
+     affordance, Task_audit, is read-only, so the keeper cannot clear the
+     signal; waking on it produced the executor livelock.  Orphan resolution is
+     the GC/supervisor's job and visibility is the orphan surfacer's — not a
+     proactive wake.  Mirrors [affordance_can_mutate Task_audit = false] in
+     keeper_world_observation.  (The [FailedTask] variant is retained for the
+     Broadcast/ProposeSpawn legality gates below: communicating ABOUT an orphan
+     is a deliberate action, distinct from being woken by it.) *)
   if obs.keeper_fiber_count_changed then add KeeperFiberStartedOrStopped;
 
   (* L2 Proactive triggers — goal-directed *)

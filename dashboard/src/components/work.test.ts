@@ -59,6 +59,7 @@ describe('Work', () => {
   afterEach(() => {
     cleanup()
     navigateMock.mockClear()
+    selectedTask.value = null
   })
 
   beforeEach(() => {
@@ -840,7 +841,6 @@ describe('Work', () => {
         tasks.value = [
           { id: 'T-todo', title: 'Todo item', goal_id: 'G-1', status: 'todo' },
         ]
-        selectedTask.value = null
 
         render(html`<${Work} />`)
         fireEvent.click(screen.getByTestId('work-view-kanban'))
@@ -853,7 +853,6 @@ describe('Work', () => {
         // openTaskDetail() set the shared selection signal (TaskDetailOverlay is
         // mounted globally in app.ts and renders off this signal).
         expect(selectedTask.value?.id).toBe('T-todo')
-        selectedTask.value = null
       })
     })
   })

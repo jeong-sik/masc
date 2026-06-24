@@ -59,8 +59,8 @@ export async function refreshGovernance() {
     return data
   })
   const s = governanceResource.state.value
-  if (s.status === 'error') {
-    governanceError.value = s.message
+  if (s.error) {
+    governanceError.value = s.error
   }
 }
 

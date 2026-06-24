@@ -4,14 +4,19 @@ import type {
   GovernanceCaseBundle,
 } from '../types'
 import type { GovernanceFilter } from './governance-utils'
-import { createAsyncResource, getData } from '../lib/async-state'
+import { createManagedAsyncResource } from '../lib/async-state'
 
 // ── Main governance resource ──
-export const governanceResource = createAsyncResource<DashboardGovernanceResponse>()
+// Managed (stale-while-revalidate): a refetch keeps the previously loaded data
+// visible while `loading` is true, instead of blanking to a dataless state.
+// createAsyncResource cleared data on every load(), so each auto-refresh and
+// each post-action refresh made governanceData null mid-flight — the approvals
+// queue (and the governance surface) flashed its empty state every cycle.
+export const governanceResource = createManagedAsyncResource<DashboardGovernanceResponse>()
 
-export const governanceLoading = computed(() => governanceResource.state.value.status === 'loading')
+export const governanceLoading = computed(() => governanceResource.state.value.loading)
 export const governanceError = signal('')
-export const governanceData = computed(() => getData(governanceResource.state.value) ?? null)
+export const governanceData = computed(() => governanceResource.state.value.data)
 
 // ── Action-specific loading flags (not data-fetch trios) ──
 export const governanceStarting = signal(false)

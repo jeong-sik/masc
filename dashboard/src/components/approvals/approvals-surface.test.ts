@@ -344,6 +344,9 @@ describe('ApprovalsSurface', () => {
     expect(errorBanner).not.toBeNull()
     expect(errorBanner?.textContent).toContain('승인 큐 로드 실패')
     expect(container.querySelector('[data-testid="approvals-empty"]')).toBeNull()
+    // the error must be announced to assistive tech — a HITL decision failure that
+    // a screen reader never reads out is a silent failure for AT users.
+    expect(errorBanner?.getAttribute('role')).toBe('alert')
   })
 
   it('labels the surface with the shared data-screen-label convention', async () => {

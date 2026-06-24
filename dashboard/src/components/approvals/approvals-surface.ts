@@ -317,7 +317,7 @@ export function ApprovalsSurface() {
             : null}
         </header>
 
-        ${error ? html`<div class="ap-error" data-testid="approvals-error">${error}</div>` : null}
+        ${error ? html`<div class="ap-error" role="alert" data-testid="approvals-error">${error}</div>` : null}
 
         ${firstLoad
           ? html`<${LoadingState}>승인 큐 불러오는 중...<//>`

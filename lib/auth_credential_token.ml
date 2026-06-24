@@ -3,16 +3,186 @@
 open Masc_domain
 open Auth_credential_base
 
+(* ============================================ *)
+(* Full credential comparison                   *)
+(* ============================================ *)
+
+(** Structured description of which credential fields differ between two
+    credentials that share the same token hash.  Uses typed variants rather
+    than string matching so callers can dispatch on the difference. *)
+type credential_field_diff =
+  | Agent_name of { left : string; right : string }
+  | Role of { left : agent_role; right : agent_role }
+  | Created_at of { left : string; right : string }
+  | Expires_at of { left : string option; right : string option }
+  | Agent_id of { left : string option; right : string option }
+  | Credential_id of { left : string option; right : string option }
+  | Token_hash of { left : string; right : string }
+
+(** Observability payload emitted when two credentials hash to the same
+    value but are not identical.  Includes a short hash prefix for
+    correlation and the involved agent names so operators can triage. *)
+type collision_log = {
+  token_hash_prefix : string;
+  left_agent : string;
+  right_agent : string;
+  field_diffs : credential_field_diff list;
+}
+
+(** Pure comparison result: [Equal] means the two credentials are
+    identical on every field; [Different log] carries a typed record
+    of the divergence. *)
+type credential_comparison =
+  | Equal
+  | Different of collision_log
+
+let collision_log_to_yojson log =
+  let field_diff_to_yojson = function
+    | Agent_name { left; right } ->
+      `Assoc
+        [ "field", `String "agent_name"
+        ; "left", `String left
+        ; "right", `String right
+        ]
+    | Role { left; right } ->
+      `Assoc
+        [ "field", `String "role"
+        ; "left", `String (agent_role_to_string left)
+        ; "right", `String (agent_role_to_string right)
+        ]
+    | Created_at { left; right } ->
+      `Assoc
+        [ "field", `String "created_at"
+        ; "left", `String left
+        ; "right", `String right
+        ]
+    | Expires_at { left; right } ->
+      `Assoc
+        [ "field", `String "expires_at"
+        ; "left", Option.fold ~none:`Null ~some:(fun s -> `String s) left
+        ; "right", Option.fold ~none:`Null ~some:(fun s -> `String s) right
+        ]
+    | Agent_id { left; right } ->
+      `Assoc
+        [ "field", `String "agent_id"
+        ; "left", Option.fold ~none:`Null ~some:(fun s -> `String s) left
+        ; "right", Option.fold ~none:`Null ~some:(fun s -> `String s) right
+        ]
+    | Credential_id { left; right } ->
+      `Assoc
+        [ "field", `String "credential_id"
+        ; "left", Option.fold ~none:`Null ~some:(fun s -> `String s) left
+        ; "right", Option.fold ~none:`Null ~some:(fun s -> `String s) right
+        ]
+    | Token_hash { left; right } ->
+      `Assoc
+        [ "field", `String "token_hash"
+        ; "left", `String left
+        ; "right", `String right
+        ]
+  in
+  `Assoc
+    [ "token_hash_prefix", `String log.token_hash_prefix
+    ; "left_agent", `String log.left_agent
+    ; "right_agent", `String log.right_agent
+    ; "field_diffs", `List (List.map field_diff_to_yojson log.field_diffs)
+    ]
+;;
+
+(** Compare two credentials field-by-field.  The caller supplies the
+    token hash prefix for the collision log; the comparison itself is
+    pure and depends only on the two records. *)
+let compare_credentials ~token_hash_prefix left right : credential_comparison =
+  let field_diffs = [] in
+  let field_diffs =
+    if not (String.equal left.agent_name right.agent_name)
+    then Agent_name { left = left.agent_name; right = right.agent_name } :: field_diffs
+    else field_diffs
+  in
+  let field_diffs =
+    if left.role <> right.role
+    then Role { left = left.role; right = right.role } :: field_diffs
+    else field_diffs
+  in
+  let field_diffs =
+    if not (String.equal left.created_at right.created_at)
+    then Created_at { left = left.created_at; right = right.created_at } :: field_diffs
+    else field_diffs
+  in
+  let field_diffs =
+    if not (Option.equal String.equal left.expires_at right.expires_at)
+    then Expires_at { left = left.expires_at; right = right.expires_at } :: field_diffs
+    else field_diffs
+  in
+  let field_diffs =
+    let id_to_string = Option.map Credential_id.to_string in
+    if not (Option.equal String.equal (id_to_string left.id) (id_to_string right.id))
+    then
+      Credential_id { left = id_to_string left.id; right = id_to_string right.id }
+      :: field_diffs
+    else field_diffs
+  in
+  let field_diffs =
+    let id_to_string = Option.map Agent_id.to_string in
+    if not (Option.equal String.equal (id_to_string left.agent_id) (id_to_string right.agent_id))
+    then
+      Agent_id { left = id_to_string left.agent_id; right = id_to_string right.agent_id }
+      :: field_diffs
+    else field_diffs
+  in
+  let field_diffs =
+    if not (String.equal left.token right.token)
+    then Token_hash { left = left.token; right = right.token } :: field_diffs
+    else field_diffs
+  in
+  match field_diffs with
+  | [] -> Equal
+  | _ :: _ ->
+    Different
+      { token_hash_prefix
+      ; left_agent = left.agent_name
+      ; right_agent = right.agent_name
+      ; field_diffs = List.rev field_diffs
+      }
+;;
+
+let emit_collision_event collision_log =
+  Log.Auth.emit
+    Log.Warn
+    ~details:(collision_log_to_yojson collision_log)
+    ~category:Log.Routine
+    "Token hash collision detected: full credential comparison rejected lookup";
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_auth_credential_hash_collision
+    ~labels:[ "left_agent", collision_log.left_agent; "right_agent", collision_log.right_agent ]
+    ()
+;;
+
+(** Walk a list of credentials that share the same token hash.  If every
+    pair compares equal, return [Ok ()].  On the first differing pair,
+    emit a structured collision event and return [Error]. *)
+let rec check_credential_collisions ~token_hash_prefix first = function
+  | [] -> Ok ()
+  | next :: rest ->
+    (match compare_credentials ~token_hash_prefix first next with
+     | Equal -> check_credential_collisions ~token_hash_prefix first rest
+     | Different collision_log ->
+       emit_collision_event collision_log;
+       Error (Auth (Auth_error.InvalidToken "Token hash collision detected")))
+;;
+
 (** Find credential by raw token (hash lookup + expiry check).
 
     #9786 runtime complement: when N>=2 credentials share the
     token hash, [List.find_opt] silently routed to the first
     match - the root of the [bearer token belongs to X]
-    regression.  We keep the legacy first-match return so
-    existing callers do not need migration, but we WARN and
+    regression.  We now compare the full credential before
+    treating two hash matches as equal; if the credentials differ,
+    the lookup fails with [InvalidToken] and a structured collision
+    event is emitted so operators can detect brute-force attempts.
+    When N>=2 credentials are fully identical we still warn and
     increment {!Otel_metric_store.metric_auth_credential_ambiguous_lookup}
-    so an alert can fire on the live blast radius rather than
-    just the one-shot boot audit. *)
+    so the duplicate-token audit path remains observable. *)
 let find_credential_by_token config ~token : (agent_credential, masc_error) result =
   let token_hash = sha256_hash token in
   let idx = credential_token_index config in
@@ -37,13 +207,16 @@ let find_credential_by_token config ~token : (agent_credential, masc_error) resu
          Otel_metric_store.metric_auth_credential_ambiguous_lookup
          ~labels:[ "first_match", first.agent_name ]
          ());
-    (match first.expires_at with
-     | None -> Ok first
-     | Some exp_str ->
-       let now = now_iso () in
-       if now > exp_str
-       then Error (Auth (Auth_error.TokenExpired first.agent_name))
-       else Ok first)
+    (match check_credential_collisions ~token_hash_prefix:(token_hash_prefix_of token_hash) first rest with
+     | Error e -> Error e
+     | Ok () ->
+       (match first.expires_at with
+        | None -> Ok first
+        | Some exp_str ->
+          let now = now_iso () in
+          if now > exp_str
+          then Error (Auth (Auth_error.TokenExpired first.agent_name))
+          else Ok first))
 ;;
 
 (** Resolve agent_name from raw token *)

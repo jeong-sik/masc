@@ -119,12 +119,12 @@ The task satisfies the membership rule of **no** pool. It is unreachable by ever
 
 ### 1.5 Empirical evidence (runtime store, verified 2026-06-09)
 
-Runtime store `~/me/.masc/verifications/`:
+Runtime store `<base-path>/.masc/verifications/`:
 
 - `vrf-ea67cb9bbe54e69eee764d8a587f3b6a.json` — `task_id: task-628`, `verifier: null`, `status: { status: pending }`, `created_at: 1780338285.19` (2026-06-02 03:24 KST), `worker: keeper-echo-agent`.
 - `vrf-13cae6cf48ef468a4d70898f474b741c.json` — `task_id: task-629`, `verifier: null`, `status: { status: pending }`, `created_at: 1780336332.14` (2026-06-02 02:52 KST), `worker: keeper-ramarama-agent`.
 
-Backlog `~/me/.masc/tasks/backlog.json`:
+Backlog `<base-path>/.masc/tasks/backlog.json`:
 
 - `task-628` — `status: "todo"`
 - `task-629` — `status: "todo"`
@@ -190,7 +190,7 @@ With this:
 
 ### 3.2 The request store degrades to an immutable evidence record
 
-The verification request file (`~/me/.masc/verifications/vrf-*.json`) keeps existing, but it is no longer a *status* store. It becomes an append-once **evidence/payload record** keyed by `verification_id`:
+The verification request file (`<base-path>/.masc/verifications/vrf-*.json`) keeps existing, but it is no longer a *status* store. It becomes an append-once **evidence/payload record** keyed by `verification_id`:
 
 - carries: `criteria`, `evidence_refs`, `output`, `worker`, `created_at`, and (once a verdict is reached) the `verdict` + verifier identity as an audit fact.
 - does **not** carry the authoritative claimable status. Schedulers read `task_status` only.

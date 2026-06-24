@@ -15,7 +15,7 @@ implementation_prs: []
 
 Status: Draft · Producer-side completion convergence · Parse-don't-validate on "what is done"
 Drafted by: Claude Opus 4.8 (autonomous diagnosis session 2026-06-09), pending owner review.
-Diagnosis source: live-log trace `~/me/.masc/logs/system_log_2026-06-09.jsonl` (workflow w3vzy2yvq, 3-agent: log / prompt / gate) + own code reads.
+Diagnosis source: live-log trace `<base-path>/.masc/logs/system_log_2026-06-09.jsonl` (workflow w3vzy2yvq, 3-agent: log / prompt / gate) + own code reads.
 
 > Anchors marked **(verified)** were read against the working tree on 2026-06-09 while writing. Anchors marked **(trace)** come from the diagnosis subagent and must be re-verified before implementation.
 

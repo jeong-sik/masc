@@ -127,14 +127,9 @@ let prepare_run_context
     List.filter_map
       (fun goal_id ->
          match Goal_store.get_goal config ~goal_id with
-         | Some { Goal_store.id; title; horizon } ->
-             let horizon_str =
-               match horizon with
-               | Goal_store.Short -> "short"
-               | Goal_store.Mid -> "mid"
-               | Goal_store.Long -> "long"
-             in
-             Some (id, title, horizon_str)
+         (* RFC-0294: active_goals tuple dropped its horizon element. *)
+         | Some { Goal_store.id; title; _ } ->
+             Some (id, title)
          | None -> None)
       meta.active_goal_ids
   in

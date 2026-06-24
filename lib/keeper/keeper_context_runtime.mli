@@ -298,7 +298,7 @@ val build_keeper_system_prompt
   -> ?persona_extended:string
   -> ?keeper_name:string
   -> ?home_ground:string
-  -> ?active_goals:(string * string * string) list
+  -> ?active_goals:(string * string) list
   -> unit
   -> string
 

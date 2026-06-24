@@ -69,6 +69,37 @@ let memory_os_episode_json ~now (episode : Keeper_memory_os_types.episode) =
     ]
 ;;
 
+(* RFC-0293 §4a: surface the fact rows the panel renders, mirroring
+   [memory_os_episode_json]. Serializes ONLY the existing [fact] structure —
+   claim, typed category, provenance, the three timestamps, and current-ness —
+   never the deleted score fields (confidence / access_count / last_accessed,
+   RFC-0247): they are absent from the [fact] record, so the type system makes
+   re-emitting them unrepresentable. [reference_time] is the shared staleness
+   anchor (last_verified_at else first_seen), reused rather than re-inlined.
+   [external_ref] / [claim_kind] are omitted when [None] so a claim without them
+   stays a minimal row. The on-disk [fact_to_json] is untouched — this is a
+   read-only dashboard projection, not a storage change. *)
+let memory_os_fact_json ~now (fact : Keeper_memory_os_types.fact) =
+  `Assoc
+    ([ "claim", `String fact.claim
+     ; "category", `String (Keeper_memory_os_types.category_to_string fact.category)
+     ; "source", Keeper_memory_os_types.provenance_event_to_json fact.source
+     ; "first_seen", `Float fact.first_seen
+     ; "first_seen_iso", `String (Masc_domain.iso8601_of_unix_seconds fact.first_seen)
+     ; "reference_time", `Float (Keeper_memory_os_types.reference_time fact)
+     ; "valid_until", json_float_opt fact.valid_until
+     ; "valid_until_iso", json_time_iso_opt fact.valid_until
+     ; "last_verified_at", json_float_opt fact.last_verified_at
+     ; "current", `Bool (memory_os_fact_is_current ~now fact)
+     ]
+    @ (match fact.external_ref with
+       | Some r -> [ "external_ref", Keeper_memory_os_types.external_ref_to_json r ]
+       | None -> [])
+    @ (match fact.claim_kind with
+       | Some k -> [ "claim_kind", `String (Keeper_memory_os_types.claim_kind_to_string k) ]
+       | None -> []))
+;;
+
 let memory_os_dashboard_json ~keeper_id =
   let now = Time_compat.now () in
   let recent_episode_limit = 12 in
@@ -119,6 +150,10 @@ let memory_os_dashboard_json ~keeper_id =
           ; "shown", `Int (List.length facts)
           ; "current", `Int current_facts
           ; "expired", `Int (List.length facts - current_facts)
+            (* RFC-0293 §4a: the individual fact rows (previously counts-only).
+               Bounded by [fact_tail_limit]; [shown] documents the bound so a
+               truncated tail is visible, not silent. *)
+          ; "items", `List (List.map (memory_os_fact_json ~now) facts)
           ] )
     ]
 ;;

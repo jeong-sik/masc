@@ -3857,6 +3857,66 @@ let test_retention_rank_demotes_volatile () =
     (Policy.retention_rank ~now volatile < Policy.retention_rank ~now durable)
 ;;
 
+(* RFC-0293 §4a / §8: the dashboard fact projection serializes the real [fact]
+   structure and never the score fields RFC-0247 deleted. Drift guard sibling of
+   [test_legacy_row_with_dead_score_keys_decodes]: a future edit that re-adds
+   confidence / access_count / last_accessed / salience / uses turns this red. *)
+let test_dashboard_fact_json_omits_score_keys () =
+  let now = 1_000_000.0 in
+  let f =
+    { (fact_fixture ~now ()) with
+      Types.category = Types.Validated_approach
+    ; Types.external_ref = Some { Types.kind = Types.Pr; Types.id = "42" }
+    ; Types.claim_kind = Some Types.Durable_knowledge
+    ; Types.valid_until = Some (now +. 3600.0)
+    }
+  in
+  let fields =
+    match Server_dashboard_http_keeper_api.memory_os_fact_json ~now f with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.fail "memory_os_fact_json must be a JSON object"
+  in
+  let has k = List.mem_assoc k fields in
+  List.iter
+    (fun k -> Alcotest.(check bool) (Printf.sprintf "present: %s" k) true (has k))
+    [ "claim"; "category"; "source"; "first_seen"; "first_seen_iso"
+    ; "reference_time"; "valid_until"; "last_verified_at"; "current"
+    ; "external_ref"; "claim_kind" ];
+  List.iter
+    (fun k -> Alcotest.(check bool) (Printf.sprintf "deleted score key absent: %s" k) false (has k))
+    [ "confidence"; "access_count"; "last_accessed"; "stale_factor"
+    ; "expected_lifetime_cycles"; "salience"; "uses" ];
+  (match List.assoc_opt "category" fields with
+   | Some (`String s) ->
+     Alcotest.(check string) "category is the typed producer string" "validated_approach" s
+   | _ -> Alcotest.fail "category must be a string");
+  match List.assoc_opt "current" fields with
+  | Some (`Bool b) -> Alcotest.(check bool) "current when valid_until is in the future" true b
+  | _ -> Alcotest.fail "current must be a bool"
+;;
+
+(* Optional keys (external_ref / claim_kind) are omitted when [None]; the
+   staleness anchor [reference_time] uses last_verified_at when set. *)
+let test_dashboard_fact_json_omits_optional_when_none () =
+  let now = 1_000_000.0 in
+  let fields =
+    match
+      Server_dashboard_http_keeper_api.memory_os_fact_json ~now (fact_fixture ~now ())
+    with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.fail "memory_os_fact_json must be a JSON object"
+  in
+  Alcotest.(check bool)
+    "external_ref omitted when None" false (List.mem_assoc "external_ref" fields);
+  Alcotest.(check bool)
+    "claim_kind omitted when None" false (List.mem_assoc "claim_kind" fields);
+  match List.assoc_opt "reference_time" fields with
+  | Some (`Float t) ->
+    Alcotest.(check (float 0.001))
+      "reference_time falls back to last_verified_at" (now -. 3600.0) t
+  | _ -> Alcotest.fail "reference_time must be a float"
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_os"
@@ -3919,6 +3979,14 @@ let () =
             "librarian runtime reports fact upsert failure"
             `Quick
             test_librarian_runtime_reports_fact_upsert_failure
+        ; Alcotest.test_case
+            "dashboard fact json omits deleted score keys (RFC-0293 §4a)"
+            `Quick
+            test_dashboard_fact_json_omits_score_keys
+        ; Alcotest.test_case
+            "dashboard fact json omits optional keys when None"
+            `Quick
+            test_dashboard_fact_json_omits_optional_when_none
         ] )
     ; ( "policy"
       , [ Alcotest.test_case

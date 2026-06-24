@@ -319,6 +319,19 @@
   overflow: hidden;
 }
 
+/* preview 카드 본문 헤더 평탄화: post-detail은 title이 text-2xl이라 본문 헤더가
+   section 역할을 하지만, preview 카드는 title이 13.5px라 본문 h1(16px)/h2(14px)가
+   역전되어 과대 표시된다. 미리보기는 헤딩 위계가 필요 없으므로 body 컨테이너
+   타이포(12.5px)로 귀결시킨다. .markdown-content h1(ui.css)보다 specificity가
+   높아 안전하게 덮어쓴다. */
+.v2-board-surface .bd-post-body :is(h1, h2, h3, h4, h5, h6) {
+  font-size: inherit;
+  font-weight: var(--fw-semi);
+  margin: 0;
+  color: inherit;
+  line-height: inherit;
+}
+
 .v2-board-surface .bd-post-body code,
 .v2-board-surface .bd-th-body code {
   font-family: var(--font-mono);

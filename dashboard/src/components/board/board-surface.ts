@@ -47,6 +47,7 @@ import {
   contributorQualityPercent,
   navigateToAuthor,
   stripInlineMarkdown,
+  dedupeLeadingHeading,
 } from '../../lib/board-utils'
 import {
   firstMentionNameFromMessage,
@@ -363,7 +364,7 @@ function BdStateBlock({ block }: { block: ParsedStateBlock }) {
 // ── Post card (v2 list item) ───────────────────────────────────────
 function PostCard({ post }: { post: BoardPost }) {
   const isDeleting = deletingPostId.value === post.id
-  const previewBody = stripStateBlocks(post.body)
+  const previewBody = dedupeLeadingHeading(post.title, stripStateBlocks(post.body))
   const authorLabel = boardActorDisplayName(post.author, post.author_identity)
   const authorAvatarKey = boardActorAvatarKey(post.author, post.author_identity)
   const authorTitle = boardActorTitle(post.author, post.author_identity)

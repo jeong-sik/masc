@@ -172,9 +172,15 @@ class KeeperProductionReadinessGateTest(unittest.TestCase):
                 / f"{trace}.jsonl"
             )
             text = manifest.read_text(encoding="utf-8")
+            # check_timestamp_order groups rows per (keeper, trace, generation,
+            # turn), so the corruption must be an intra-turn violation. fixture_ts()
+            # spaces turns one minute apart (turn N -> 00:0N:..), so a later-finish
+            # or cross-turn bump stays monotonic within the turn and yields zero
+            # violations. Pull turn 1's turn_finished (offset 7) before its own
+            # turn's first event so the terminal event predates the turn it closes.
             text = text.replace(
                 '"ts": "2026-05-13T00:01:07Z"',
-                '"ts": "2026-05-13T00:01:59Z"',
+                '"ts": "2026-05-13T00:01:00Z"',
                 1,
             )
             manifest.write_text(text, encoding="utf-8")

@@ -78,7 +78,19 @@ let require_auth ~base_path ~requirement ~id ?auth_token () =
          match Auth_credential_token.find_credential_by_token base_path ~token with
          | Error (Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired agent)) ->
            Error (make_auth_error ~id (Token_expired agent))
-         | Error _ -> Error (make_auth_error ~id Invalid_token)
+         | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _)) ->
+           Error (make_auth_error ~id Invalid_token)
+         | Error err ->
+           let cause = Masc_domain.masc_error_to_string err in
+           Log.Auth.error
+             "MCP credential-store lookup failed for request %s: %s"
+             (Yojson.Safe.to_string id)
+             cause;
+           Error
+             (make_error_typed
+                ~id
+                Mcp_error_code.Internal_error
+                "Internal credential-store error")
          | Ok cred -> Ok (Some token, Some cred))))
 ;;
 

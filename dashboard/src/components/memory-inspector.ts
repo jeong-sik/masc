@@ -119,17 +119,21 @@ export function memCompositionFromBlocks(blocks: readonly TurnBlock[]): Composit
   return { totalBytes, parts }
 }
 
-// The most recent turn's blocks (entries are append-ordered; last is newest).
-export function latestEntryBlocks(rows: readonly TurnRecordRow[]): readonly TurnBlock[] {
+// The most recent turn that actually assembled a prompt (has blocks). Entries
+// are append-ordered; an error/empty-block turn at the tail is skipped so the
+// composition reflects the last real prompt assembly — and the header token
+// figures are read from this same row, never a blank tail.
+export function latestEntryWithBlocks(rows: readonly TurnRecordRow[]): TurnRecordRow | null {
   for (let i = rows.length - 1; i >= 0; i--) {
-    const blocks = rows[i]?.record.blocks
-    if (blocks && blocks.length > 0) return blocks
+    const row = rows[i]
+    if (row && row.record.blocks.length > 0) return row
   }
-  return []
+  return null
 }
 
-function latestEntry(rows: readonly TurnRecordRow[]): TurnRecordRow | null {
-  return rows.length > 0 ? rows[rows.length - 1]! : null
+// Blocks of that row (thin accessor; same row MemCompoReal renders figures from).
+export function latestEntryBlocks(rows: readonly TurnRecordRow[]): readonly TurnBlock[] {
+  return latestEntryWithBlocks(rows)?.record.blocks ?? []
 }
 
 // ── fact category meta (real, exhaustive over the typed union) ──
@@ -314,7 +318,7 @@ function OneKeeperMemoryReal({
 
       <div class="turn-sec">
         <h4>컨텍스트 구성</h4>
-        <${MemCompoReal} row=${latestEntry(rows)} />
+        <${MemCompoReal} row=${latestEntryWithBlocks(rows)} />
       </div>
 
       <div class="turn-sec">

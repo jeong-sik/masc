@@ -6,12 +6,14 @@ import {
   DEFAULT_MEMORY_KEEPERS,
   MemoryInspector,
   factCategoryMeta,
+  latestEntryWithBlocks,
   memCompositionFromBlocks,
   memFmtBytes,
   memFmtTok,
   promptBlockMeta,
   type MemoryKeeper,
 } from './memory-inspector'
+import type { TurnRecordRow } from '../api/dashboard'
 
 afterEach(() => {
   cleanup()
@@ -290,6 +292,23 @@ describe('memory view-model helpers', () => {
     expect(comp.totalBytes).toBe(2000)
     expect(comp.parts.map(p => p.key)).toEqual(['persona', 'memory_os_recall'])
     expect(comp.parts[0]?.lbl).toBe('페르소나')
+  })
+
+  it('latestEntryWithBlocks skips an empty-block tail turn and returns the last assembled prompt', () => {
+    const mkRow = (turn: number, blocks: { block: string; bytes: number; digest: string }[]): TurnRecordRow => ({
+      record: {
+        keeper: 'k', trace_id: 't', absolute_turn: turn, ts: turn, runtime_profile: 'local',
+        blocks, execution_ids: [],
+      },
+      diff_vs_prev: null,
+    })
+    const assembled = mkRow(1, [{ block: 'persona', bytes: 100, digest: 'd' }])
+    const errorTail = mkRow(2, []) // e.g. an error turn with no prompt blocks
+    // last row has no blocks → fall back to the most recent row that does
+    expect(latestEntryWithBlocks([assembled, errorTail])?.record.absolute_turn).toBe(1)
+    // empty input → null, not a fabricated row
+    expect(latestEntryWithBlocks([])).toBeNull()
+    expect(latestEntryWithBlocks([errorTail])).toBeNull()
   })
 
   it('promptBlockMeta maps known Prompt_block_id tokens and keeps unknown tokens raw', () => {

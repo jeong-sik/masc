@@ -860,6 +860,31 @@ describe('ChatComposer IME composition guard', () => {
     )
     expect(sent).toBe(0)
   })
+
+  it('keeps its own draft when uncontrolled and surfaces the typed text on send', () => {
+    // The keeper-workspace chat omits onDraftChange so a keystroke updates the
+    // composer's internal draft instead of the host panel — that is what stops
+    // the transcript from re-rendering on every character. The composer must
+    // still capture the text and carry it on the send payload (`text`).
+    let payload: ChatComposerSendPayload | null = null
+    render(
+      html`<${ChatComposer}
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        onSend=${(p: ChatComposerSendPayload) => { payload = p }}
+      />`,
+      container,
+    )
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    expect(textarea).not.toBeNull()
+
+    fireEvent.input(textarea, { target: { value: '소주에 갑오징어' } })
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+
+    expect(payload).not.toBeNull()
+    expect(payload?.text).toBe('소주에 갑오징어')
+  })
 })
 
 describe('Keeper v2 chat blocks', () => {

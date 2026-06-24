@@ -42,6 +42,9 @@ export interface ChatComposerSendPayload {
   blocks: ChatBlock[]
   userBlocks: KeeperUserInputBlock[]
   clientActionId: string
+  /** The trimmed text entered by the operator at send time. Added so hosts can
+      read the message without maintaining a mirrored controlled draft state. */
+  text: string
 }
 
 /** Status dot wrapper — maps keeper-v2 status strings to shared StatusDot tones. */
@@ -2862,7 +2865,7 @@ export function AttachDraftChip({
 }
 
 export function ChatComposer({
-  draft,
+  draft: draftProp,
   placeholder,
   disabled,
   streaming,
@@ -2875,7 +2878,7 @@ export function ChatComposer({
   onAbort,
   layout = 'default',
 }: {
-  draft: string
+  draft?: string
   placeholder: string
   disabled: boolean
   streaming: boolean
@@ -2886,7 +2889,10 @@ export function ChatComposer({
    *  enqueues the message instead of dispatching it immediately. */
   queueEnabled?: boolean
   queueCount?: number
-  onDraftChange: (value: string) => void
+  /** Optional controlled draft handler. When omitted the composer keeps its
+   *  own draft state, which prevents the host from re-rendering on every
+   *  keystroke (see keeper-workspace chat performance). */
+  onDraftChange?: (value: string) => void
   onSend: (payload: ChatComposerSendPayload) => void | Promise<void>
   onAbort?: () => void
   layout?: 'default' | 'primary'
@@ -2895,6 +2901,16 @@ export function ChatComposer({
   const [focus, setFocus] = useState(false)
   const [drag, setDrag] = useState(false)
   const [attachments, setAttachments] = useState<KeeperConversationAttachment[]>([])
+  const [internalDraft, setInternalDraft] = useState('')
+  const isControlled = typeof draftProp === 'string'
+  const draft = isControlled ? draftProp : internalDraft
+  const setDraft = (value: string) => {
+    if (isControlled) {
+      onDraftChange?.(value)
+    } else {
+      setInternalDraft(value)
+    }
+  }
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
@@ -2903,7 +2919,7 @@ export function ChatComposer({
   // auto-send) so the operator can correct a transcription before it lands.
   const voice = useVoiceInput({
     onTranscribed: (text) => {
-      onDraftChange(draft.trim() === '' ? text : `${draft}\n${text}`)
+      setDraft(draft.trim() === '' ? text : `${draft}\n${text}`)
     },
   })
 
@@ -3000,15 +3016,16 @@ export function ChatComposer({
       blocks,
       userBlocks,
       clientActionId: nextComposerClientActionId(),
+      text,
     })
-    onDraftChange('')
+    setDraft('')
     setAttachments([])
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
   const grow = (event: Event) => {
     const target = event.target as HTMLTextAreaElement
-    onDraftChange(target.value)
+    setDraft(target.value)
     target.style.height = 'auto'
     target.style.height = `${Math.min(target.scrollHeight, 160)}px`
   }

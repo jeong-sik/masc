@@ -690,5 +690,147 @@ describe('Work', () => {
         expect(aside.querySelector('[data-testid="wka-flagged-calm"]')).toBeTruthy()
       })
     })
+
+    // ── Kanban view ─────────────────────────────────────────────────────────
+    describe('kanban view toggle', () => {
+      beforeEach(() => {
+        // Reset persisted view state so tests start from the default 'list' view
+        try { localStorage.removeItem('v2.workView') } catch (_) { /* noop */ }
+      })
+
+      it('renders the view toggle with list active by default', () => {
+        goals.value = []
+        tasks.value = []
+
+        render(html`<${Work} />`)
+
+        const seg = screen.getByTestId('work-viewseg')
+        expect(seg).toBeTruthy()
+        const listBtn = screen.getByTestId('work-view-list')
+        const kanbanBtn = screen.getByTestId('work-view-kanban')
+        expect(listBtn.classList.contains('on')).toBe(true)
+        expect(kanbanBtn.classList.contains('on')).toBe(false)
+        // List view: goal list container present (even if empty)
+        expect(screen.queryByTestId('work-kanban')).toBeNull()
+      })
+
+      it('switches to kanban board on clicking the 칸반 button', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = [
+          { id: 'J-1', title: 'Todo task', goal_id: 'G-1', status: 'todo' },
+          { id: 'J-2', title: 'In progress', goal_id: 'G-1', status: 'in_progress' },
+          { id: 'J-3', title: 'Done task', goal_id: 'G-1', status: 'done' },
+          // Cancelled tasks must not appear in kanban
+          { id: 'J-4', title: 'Cancelled task', goal_id: 'G-1', status: 'cancelled' },
+        ]
+
+        render(html`<${Work} />`)
+
+        // Initially in list view
+        expect(screen.queryByTestId('work-kanban')).toBeNull()
+        expect(screen.getByTestId('work-goal-list')).toBeTruthy()
+
+        // Switch to kanban
+        fireEvent.click(screen.getByTestId('work-view-kanban'))
+
+        // Kanban board present; list view gone
+        const board = screen.getByTestId('work-kanban')
+        expect(board).toBeTruthy()
+        expect(screen.queryByTestId('work-goal-list')).toBeNull()
+
+        // Toggle button state updated
+        expect(screen.getByTestId('work-view-kanban').classList.contains('on')).toBe(true)
+        expect(screen.getByTestId('work-view-list').classList.contains('on')).toBe(false)
+
+        // The 5 KANBAN_COLUMNS are rendered
+        expect(screen.getByTestId('kanban-col-todo')).toBeTruthy()
+        expect(screen.getByTestId('kanban-col-claimed')).toBeTruthy()
+        expect(screen.getByTestId('kanban-col-in_progress')).toBeTruthy()
+        expect(screen.getByTestId('kanban-col-awaiting_verification')).toBeTruthy()
+        expect(screen.getByTestId('kanban-col-done')).toBeTruthy()
+
+        // Tasks appear in the correct columns (by data-testid selector)
+        const todoCol = screen.getByTestId('kanban-col-todo')
+        const wipCol  = screen.getByTestId('kanban-col-in_progress')
+        const doneCol = screen.getByTestId('kanban-col-done')
+        expect(todoCol.textContent).toContain('Todo task')
+        expect(wipCol.textContent).toContain('In progress')
+        expect(doneCol.textContent).toContain('Done task')
+
+        // Cancelled task must be absent from all columns
+        expect(board.textContent).not.toContain('Cancelled task')
+      })
+
+      it('switches back to list view on clicking the 리스트 button', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = []
+
+        render(html`<${Work} />`)
+
+        // Go to kanban
+        fireEvent.click(screen.getByTestId('work-view-kanban'))
+        expect(screen.getByTestId('work-kanban')).toBeTruthy()
+
+        // Back to list
+        fireEvent.click(screen.getByTestId('work-view-list'))
+        expect(screen.queryByTestId('work-kanban')).toBeNull()
+        expect(screen.getByTestId('work-view-list').classList.contains('on')).toBe(true)
+      })
+
+      it('places tasks in the correct column by status using typed KANBAN_COLUMNS (no string-match classification)', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        // One task per non-cancelled status
+        tasks.value = [
+          { id: 'T-todo',   title: 'Todo item',   goal_id: 'G-1', status: 'todo' },
+          { id: 'T-claim',  title: 'Claimed item', goal_id: 'G-1', status: 'claimed', assignee: 'keeper-x' },
+          { id: 'T-wip',    title: 'WIP item',    goal_id: 'G-1', status: 'in_progress', assignee: 'keeper-y' },
+          { id: 'T-verify', title: 'Verify item', goal_id: 'G-1', status: 'awaiting_verification', assignee: 'keeper-z' },
+          { id: 'T-done',   title: 'Done item',   goal_id: 'G-1', status: 'done', assignee: 'keeper-w' },
+        ]
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('work-view-kanban'))
+
+        const board = screen.getByTestId('work-kanban')
+        const cards = board.querySelectorAll('[data-testid="kanban-card"]')
+        // All 5 non-cancelled tasks present
+        expect(cards.length).toBe(5)
+
+        // Each card sits inside the correct column
+        const colFor = (status: string) => board.querySelector(`[data-testid="kanban-col-${status}"]`)
+        expect(colFor('todo')?.querySelector('[data-kanban-task-id="T-todo"]')).toBeTruthy()
+        expect(colFor('claimed')?.querySelector('[data-kanban-task-id="T-claim"]')).toBeTruthy()
+        expect(colFor('in_progress')?.querySelector('[data-kanban-task-id="T-wip"]')).toBeTruthy()
+        expect(colFor('awaiting_verification')?.querySelector('[data-kanban-task-id="T-verify"]')).toBeTruthy()
+        expect(colFor('done')?.querySelector('[data-kanban-task-id="T-done"]')).toBeTruthy()
+      })
+
+      it('shows the goal title on each kanban card and hides the backlog strip in kanban view', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Target Goal', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = [
+          { id: 'J-1', title: 'Some task', goal_id: 'G-1', status: 'in_progress', assignee: 'keeper-a' },
+          // Claimable todo to verify backlog strip hidden
+          { id: 'J-2', title: 'Claimable', goal_id: 'G-1', status: 'todo' },
+        ]
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('work-view-kanban'))
+
+        // Goal title appears in card goal link
+        const board = screen.getByTestId('work-kanban')
+        expect(board.textContent).toContain('Target Goal')
+
+        // Backlog strip (.wk-backlog) must NOT be present in kanban view
+        expect(screen.queryByTestId('work-backlog')).toBeNull()
+      })
+    })
   })
 })

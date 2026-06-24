@@ -1256,3 +1256,261 @@
     display: none;
   }
 }
+
+/* ── View toggle (list | kanban) ─────────────────────────────────────────── */
+
+.wk-head-r {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wk-viewseg {
+  display: inline-flex;
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.wk-viewseg button {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  padding: 6px 14px;
+  background: var(--bg-sunken);
+  color: var(--text-dim);
+  border: 0;
+  cursor: pointer;
+  transition: 0.14s;
+}
+
+.wk-viewseg button + button {
+  border-left: 1px solid var(--border-main);
+}
+
+.wk-viewseg button:hover {
+  color: var(--text-bright);
+}
+
+.wk-viewseg button.on {
+  background: var(--volt-wash);
+  color: var(--volt-strong);
+}
+
+/* ── Kanban board ────────────────────────────────────────────────────────── */
+
+.wk-kanban {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(244px, 1fr);
+  gap: 12px;
+  margin-top: 6px;
+  align-items: start;
+  overflow-x: auto;
+  padding-bottom: 14px;
+}
+
+@media (min-width: 1321px) {
+  .wk-kanban {
+    grid-auto-flow: unset;
+    grid-auto-columns: unset;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+.wk-kcol {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+}
+
+.wk-kcol-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 12px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-mid);
+  border-bottom: 1px solid var(--border-soft);
+  position: sticky;
+  top: 0;
+  background: var(--bg-sunken);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  z-index: 1;
+}
+
+.wk-kcol-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.wk-kcol-dot.todo    { background: var(--text-dim); }
+.wk-kcol-dot.claimed { background: var(--text-mid); }
+.wk-kcol-dot.wip     { background: var(--volt-strong); }
+.wk-kcol-dot.verify  { background: var(--info); }
+.wk-kcol-dot.done    { background: var(--status-ok); }
+
+.wk-kcol-n {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.wk-kcol-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  min-height: 60px;
+}
+
+.wk-kcol-empty {
+  color: var(--text-faint);
+  font-size: 12px;
+  text-align: center;
+  padding: 14px 0;
+}
+
+/* ── Kanban card ─────────────────────────────────────────────────────────── */
+
+.wk-kcard {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 11px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-left: 2px solid var(--border-main);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease, transform 0.12s ease;
+}
+
+.wk-kcard:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-highlight);
+  transform: translateY(-1px);
+}
+
+.wk-kcard:focus-visible {
+  outline: 2px solid var(--volt-dim);
+  outline-offset: 1px;
+}
+
+.wk-kcard.wip     { border-left-color: var(--volt-strong); }
+.wk-kcard.verify  { border-left-color: var(--info); }
+.wk-kcard.done    { border-left-color: var(--status-ok); opacity: 0.82; }
+.wk-kcard.claimed { border-left-color: var(--text-mid); }
+
+.wk-kcard-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wk-kcard-id {
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+.wk-kcard-prio {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-dim);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-pill);
+  padding: 0 6px;
+}
+
+.wk-kcard-title {
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--text-primary);
+  text-wrap: pretty;
+}
+
+.wk-kcard.done .wk-kcard-title {
+  color: var(--text-mid);
+}
+
+.wk-kcard-block {
+  font-size: 10.5px;
+  color: var(--status-bad);
+}
+
+.wk-kcard-goal {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.14s ease;
+}
+
+.wk-kcard-goal:hover {
+  color: var(--volt-strong);
+}
+
+.wk-kcard-ho {
+  color: var(--volt-strong);
+  font-size: 12px;
+}
+
+.wk-kcard-foot {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.wk-kcard-kp {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+.wk-kcard-kp.none {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.wk-kcard-claim {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--volt-dim);
+  background: var(--volt-wash);
+  color: var(--volt-strong);
+  cursor: pointer;
+  transition: 0.14s;
+}
+
+.wk-kcard-claim:hover {
+  background: color-mix(in oklab, var(--volt) 20%, transparent);
+  color: var(--text-bright);
+}

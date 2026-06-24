@@ -39,6 +39,22 @@ function isWorkSection(v: string | undefined): v is WorkSection {
 type JobBucket = 'done' | 'wip' | 'verify' | 'blocked' | 'todo'
 type JobStateCls = 'done' | 'wip' | 'verify' | 'claimed' | 'cancelled' | 'todo'
 
+// ── Kanban view columns ─────────────────────────────────────────────────────
+// Closed tuple — cancelled is excluded by design (it has its own aside panel).
+// Each entry: [task.status value, Korean column label, CSS modifier cls].
+// The cls values come directly from JobStateCls so KanbanCard can reuse the
+// same .wk-kcard.<cls> and .wk-kcol-dot.<cls> rules without extra mapping.
+type KanbanStatus = 'todo' | 'claimed' | 'in_progress' | 'awaiting_verification' | 'done'
+type KanbanColumn = readonly [status: KanbanStatus, label: string, cls: JobStateCls]
+
+const KANBAN_COLUMNS: ReadonlyArray<KanbanColumn> = [
+  ['todo',                  '백로그', 'todo'],
+  ['claimed',               '클레임', 'claimed'],
+  ['in_progress',           '진행',   'wip'],
+  ['awaiting_verification', '검증',   'verify'],
+  ['done',                  '완료',   'done'],
+] as const
+
 interface JobState {
   label: string
   bucket: JobBucket
@@ -502,6 +518,22 @@ interface WorkAsideProps {
   onOpenKeeper?: (name: string) => void
 }
 
+// ── View mode persistence ───────────────────────────────────────────────────
+type WorkView = 'list' | 'kanban'
+const WK_VIEW_KEY = 'v2.workView'
+
+function readStoredWorkView(): WorkView {
+  try {
+    const v = localStorage.getItem(WK_VIEW_KEY)
+    if (v === 'kanban') return 'kanban'
+  } catch (_) { /* storage unavailable */ }
+  return 'list'
+}
+
+function writeStoredWorkView(v: WorkView): void {
+  try { localStorage.setItem(WK_VIEW_KEY, v) } catch (_) { /* noop */ }
+}
+
 // Aside width persistence — min 312, max 520, default 360.
 const WKA_ASIDE_W_KEY = 'v2.wkAsideW'
 const WKA_ASIDE_COLLAPSED_KEY = 'v2.wkAsideCollapsed'
@@ -522,6 +554,118 @@ function readStoredAsideW(): number {
 
 function readStoredAsideCollapsed(): boolean {
   try { return localStorage.getItem(WKA_ASIDE_COLLAPSED_KEY) === '1' } catch (_) { return false }
+}
+
+// ── Kanban sub-components ───────────────────────────────────────────────────
+
+// KanbanTask enriches a Task with goal context for the board view.
+// Goal id/title are needed because kanban tasks are flattened across goals.
+interface KanbanTask extends Task {
+  readonly _goalId: string
+  readonly _goalTitle: string
+}
+
+function KanbanCard({
+  task,
+  onClaim,
+  onJumpGoal,
+}: {
+  task: KanbanTask
+  onClaim: (id: string) => void
+  onJumpGoal: (goalId: string) => void
+}) {
+  const state = jobStateForTask(task)
+  const keeper = keeperByName(task.assignee)
+  const blocker = blockerNoteForTask(task)
+  const hasHandoff = !!(task.handoff_context?.summary || task.handoff_context?.next_step)
+
+  return html`
+    <div
+      class=${`wk-kcard ${state.cls}`}
+      role="button"
+      tabIndex=${0}
+      data-testid="kanban-card"
+      data-kanban-task-id=${task.id}
+      onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') { /* no-op: inline detail not shown in kanban */ } }}
+    >
+      <div class="wk-kcard-top">
+        <span class="wk-kcard-id mono">${task.id}</span>
+        <span class="wk-kcard-prio mono">P${task.priority ?? 0}</span>
+      </div>
+      <div class="wk-kcard-title">${task.title}</div>
+      ${blocker ? html`<div class="wk-kcard-block">⚠ ${blocker}</div>` : null}
+      <button
+        class="wk-kcard-goal"
+        type="button"
+        title=${`소속 목표로 이동 · ${task._goalTitle}`}
+        onClick=${(e: Event) => { e.stopPropagation(); onJumpGoal(task._goalId) }}
+      >↳ ${task._goalTitle}</button>
+      <div class="wk-kcard-foot">
+        ${hasHandoff ? html`<span class="wk-kcard-ho" title="핸드오프 이력">⇄</span>` : null}
+        <span class="wk-spacer"></span>
+        ${keeper
+          ? html`
+            <button
+              type="button"
+              class="wk-kcard-kp"
+              title=${`${keeper.name} 대화 열기`}
+              onClick=${(e: Event) => { e.stopPropagation(); openKeeperWorkspace(keeper.name) }}
+            >
+              <${KeeperBadge} id=${keeper.name} size="sm" variant="sigil" />
+            </button>
+          `
+          : task.status === 'todo'
+            ? html`
+              <button
+                type="button"
+                class="wk-kcard-claim"
+                title="keeper_task_claim"
+                onClick=${(e: Event) => { e.stopPropagation(); onClaim(task.id) }}
+              >＋</button>
+            `
+            : html`<span class="wk-kcard-kp none mono">·</span>`}
+      </div>
+    </div>
+  `
+}
+
+function KanbanView({
+  kanbanTasks,
+  onClaim,
+  onJumpGoal,
+}: {
+  kanbanTasks: ReadonlyArray<KanbanTask>
+  onClaim: (id: string) => void
+  onJumpGoal: (goalId: string) => void
+}) {
+  return html`
+    <div class="wk-kanban" data-testid="work-kanban">
+      ${KANBAN_COLUMNS.map(([status, label, cls]) => {
+        const col = kanbanTasks.filter(t => t.status === status)
+        return html`
+          <div key=${status} class=${`wk-kcol ${cls}`} data-testid=${`kanban-col-${status}`}>
+            <div class="wk-kcol-h">
+              <span class=${`wk-kcol-dot ${cls}`} aria-hidden="true"></span>
+              ${label}
+              <span class="wk-kcol-n mono">${col.length}</span>
+            </div>
+            <div class="wk-kcol-body">
+              ${col.length === 0
+                ? html`<div class="wk-kcol-empty mono">—</div>`
+                : col.map(t => html`
+                  <${KanbanCard}
+                    key=${t.id}
+                    task=${t}
+                    onClaim=${onClaim}
+                    onJumpGoal=${onJumpGoal}
+                  />
+                `)}
+            </div>
+          </div>
+        `
+      })}
+    </div>
+  `
 }
 
 function WorkAside({
@@ -790,6 +934,7 @@ function WorkSurfaceV2() {
   const goalList = goals.value
   const allTasks = tasks.value
 
+  const [view, setView] = useState<WorkView>(readStoredWorkView)
   const [openSet, setOpenSet] = useState<Set<string>>(new Set())
   const [claimed, setClaimed] = useState<Set<string>>(new Set())
 
@@ -971,6 +1116,22 @@ function WorkSurfaceV2() {
     return map
   }, [goalList, claimedTasks])
 
+  // Flat list of all non-cancelled tasks with goal context injected.
+  // Used by KanbanView to group by status column.
+  const kanbanTasks = useMemo((): ReadonlyArray<KanbanTask> =>
+    goalList.flatMap(g => {
+      const gTasks = tasksByGoalId.get(g.id) ?? []
+      return gTasks
+        .filter(t => t.status !== 'cancelled')
+        .map(t => ({ ...t, _goalId: g.id, _goalTitle: g.title }))
+    }),
+  [goalList, tasksByGoalId])
+
+  const switchView = useCallback((next: WorkView) => {
+    setView(next)
+    writeStoredWorkView(next)
+  }, [])
+
   return html`
     <main class="ov ov-2col">
       <div class="ov-scroll">
@@ -980,15 +1141,35 @@ function WorkSurfaceV2() {
               <h1>작업 · 목표</h1>
               <p class="ov-sub">Goal → Task → keeper · 우선순위 순으로 정렬 · 게이트 증거로 검증</p>
             </div>
-            <button
-              type="button"
-              class="set-add wk-newgoal"
-              data-testid="work-new-goal"
-              title="새 목표 생성 — 다음 단계에서 설계"
-              disabled=${true}
-            >
-              ＋ 새 목표
-            </button>
+            <div class="wk-head-r">
+              <div class="wk-viewseg" role="tablist" data-testid="work-viewseg">
+                <button
+                  type="button"
+                  class=${view === 'list' ? 'on' : ''}
+                  role="tab"
+                  aria-selected=${view === 'list'}
+                  data-testid="work-view-list"
+                  onClick=${() => switchView('list')}
+                >리스트</button>
+                <button
+                  type="button"
+                  class=${view === 'kanban' ? 'on' : ''}
+                  role="tab"
+                  aria-selected=${view === 'kanban'}
+                  data-testid="work-view-kanban"
+                  onClick=${() => switchView('kanban')}
+                >칸반</button>
+              </div>
+              <button
+                type="button"
+                class="set-add wk-newgoal"
+                data-testid="work-new-goal"
+                title="새 목표 생성 — 다음 단계에서 설계"
+                disabled=${true}
+              >
+                ＋ 새 목표
+              </button>
+            </div>
           </header>
 
           <section class="ov-kpis" data-testid="work-kpis" style=${{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
@@ -1014,7 +1195,7 @@ function WorkSurfaceV2() {
             </div>
           </section>
 
-          ${backlogTasks.length > 0 ? html`
+          ${view === 'list' && backlogTasks.length > 0 ? html`
             <section class="wk-backlog" data-testid="work-backlog">
               <div class="wk-backlog-h">
                 <span class="wk-backlog-glyph" aria-hidden="true">⊕</span>
@@ -1039,23 +1220,31 @@ function WorkSurfaceV2() {
             </section>
           ` : null}
 
-          ${/* RFC-0294: flat priority-sorted list replaces horizon grouping */
-          goalList.length > 0 ? html`
-            <div class="wk-list" data-testid="work-goal-list">
-              ${[...goalList]
-                .sort((a, b) => (a.priority ?? 4) - (b.priority ?? 4) || (b.updated_at ?? b.created_at ?? '').localeCompare(a.updated_at ?? a.created_at ?? ''))
-                .map(g => html`
-                <${GoalCard}
-                  key=${g.id}
-                  goal=${g}
-                  open=${openSet.has(g.id)}
-                  onToggle=${() => toggleGoal(g.id)}
-                  goalTasks=${tasksByGoalId.get(g.id) ?? []}
-                  onClaim=${claimTask}
-                />
-              `)}
-            </div>
-          ` : null}
+          ${view === 'list'
+            ? /* RFC-0294: flat priority-sorted list replaces horizon grouping */
+              goalList.length > 0 ? html`
+                <div class="wk-list" data-testid="work-goal-list">
+                  ${[...goalList]
+                    .sort((a, b) => (a.priority ?? 4) - (b.priority ?? 4) || (b.updated_at ?? b.created_at ?? '').localeCompare(a.updated_at ?? a.created_at ?? ''))
+                    .map(g => html`
+                    <${GoalCard}
+                      key=${g.id}
+                      goal=${g}
+                      open=${openSet.has(g.id)}
+                      onToggle=${() => toggleGoal(g.id)}
+                      goalTasks=${tasksByGoalId.get(g.id) ?? []}
+                      onClaim=${claimTask}
+                    />
+                  `)}
+                </div>
+              ` : null
+            : html`
+              <${KanbanView}
+                kanbanTasks=${kanbanTasks}
+                onClaim=${claimTask}
+                onJumpGoal=${jumpToGoal}
+              />
+            `}
 
           <div class="wk-foot mono">Goal → Task → keeper · 우선순위 순 정렬 · 완료는 게이트 증거 충족 후 done · 미배정 task 는 백로그에서 claim</div>
       </div>

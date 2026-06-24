@@ -56,6 +56,7 @@ type stimulus_payload =
   | Bootstrap
   | No_progress_recovery
   | Fusion_completed of fusion_completion
+  | Bg_completed of bg_job_completion
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
@@ -75,10 +76,38 @@ and fusion_completion = {
     answer (or a failure label when [ok = false]); [board_post_id] correlates to
     the sink's board evidence post ("" when none was created). *)
 
+and bg_job_completion = {
+  bg_run_id : string;
+  bg_kind : bg_job_kind;
+  bg_outcome : bg_job_outcome;
+  bg_board_post_id : string;
+}
+(** RFC-0290 payload for [Bg_completed]: mirrors [fusion_completion]. [bg_kind]
+    is a closed sum so a new job kind forces exhaustive handling; [bg_outcome]
+    carries the result payload ([Bg_ok]) or a failure label ([Bg_failed]);
+    [bg_board_post_id] correlates to an optional board evidence post ("" if
+    none). *)
+
+and bg_job_kind = Subprocess
+(** RFC-0290: background job kinds. Closed sum (v1 = [Subprocess]); a new kind
+    forces every match to add an arm rather than defaulting. *)
+
+and bg_job_outcome =
+  | Bg_ok of string  (** result payload *)
+  | Bg_failed of string  (** failure label *)
+
 val fusion_completion_post_id : fusion_completion -> post_id
 (** Dedup/correlation id for [Fusion_completed]. Uses [board_post_id] when the
     sink created a board evidence post, otherwise falls back to
     ["fusion-run:<run_id>"]. *)
+
+val bg_job_completion_post_id : bg_job_completion -> post_id
+(** RFC-0290 dedup/correlation id for [Bg_completed]. Uses [bg_board_post_id]
+    when the producer set it, otherwise falls back to ["bg-run:<run_id>"]. *)
+
+val bg_job_kind_to_string : bg_job_kind -> string
+(** RFC-0290: stable label for a background job kind, for logs and correlation
+    (["subprocess"]). *)
 
 type stimulus = {
   post_id : post_id;
@@ -127,7 +156,7 @@ val summary : t -> string
 
 val payload_kind_label : stimulus_payload -> string
 (** Stable short label for logs/metrics: ["board_signal"], ["bootstrap"],
-    ["no_progress_recovery"], or ["fusion_completed"]. *)
+    ["no_progress_recovery"], ["fusion_completed"], or ["bg_completed"]. *)
 
 val is_board_signal : stimulus_payload -> bool
 (** [true] iff the payload is a [Board_signal]. *)

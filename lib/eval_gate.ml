@@ -227,14 +227,8 @@ let detect_destructive (policy : Destructive_ops_policy.t) (command : string)
     let cmd_lower = String.lowercase_ascii (normalize_command command) in
     match
       List.find_opt (fun (pattern, _desc) ->
-        let pat_lower = String.lowercase_ascii pattern in
-        let rec find_at i =
-          if i + String.length pat_lower > String.length cmd_lower then false
-          else if String.sub cmd_lower i (String.length pat_lower) = pat_lower then true
-          else find_at (i + 1)
-        in
-        find_at 0
-      ) (patterns_of_policy policy)
+        String_util.contains_substring_ci cmd_lower pattern)
+        (patterns_of_policy policy)
     with
     | Some _ as hit -> hit
     | None -> detect_evasion command

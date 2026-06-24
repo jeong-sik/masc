@@ -188,9 +188,12 @@ val make_hooks :
     and trajectory hooks all wired together. *)
 
 val hook_introspection_json :
-  ?max_cost_usd:float -> ?destructive_check:bool -> unit -> Yojson.Safe.t
+  ?max_cost_usd:float ->
+  ?destructive_ops_policy:Destructive_ops_policy.t ->
+  unit -> Yojson.Safe.t
 (** JSON snapshot describing which hooks are active for the dashboard
-    diagnostics surface. *)
+    diagnostics surface. The destructive-pattern gate reflects whether
+    [destructive_ops_policy] is enabled. *)
 
 module For_testing : sig
   val tool_input_shape_for_log : Yojson.Safe.t -> string

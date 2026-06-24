@@ -23,7 +23,10 @@ let hook_slot_json ?(features = []) ?(gates = []) ?(effects = []) ?reason
 ;;
 
 let hook_introspection_json ~denied_tools ?(max_cost_usd : float option)
-    ?(destructive_check : bool = true) () : Yojson.Safe.t =
+    ?(destructive_ops_policy : Destructive_ops_policy.t =
+        Destructive_ops_policy.default)
+    () : Yojson.Safe.t =
+  let destructive_enabled = Destructive_ops_policy.enabled destructive_ops_policy in
   let denied_json = `List (List.map (fun s -> `String s) denied_tools) in
   let destructive_json = `String "dynamic_boundary (Tool_capability.Destructive)" in
   let slot ?features ?gates ?effects ?reason ~active ~source name =
@@ -72,7 +75,7 @@ let hook_introspection_json ~denied_tools ?(max_cost_usd : float option)
             "custom_guard";
             "streak_gate";
             "keeper_deny_list";
-            (if destructive_check then "destructive_pattern" else "destructive_pattern_off");
+            (if destructive_enabled then "destructive_pattern" else "destructive_pattern_off");
             "governance_approval";
           ]
         ~features:

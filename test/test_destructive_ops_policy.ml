@@ -111,6 +111,53 @@ let test_load_file_missing () =
   assert_error
     (Masc.Destructive_ops_policy.load_file "/nonexistent/destructive_ops.toml")
 
+let test_load_wrong_destructive_ops_type () =
+  let toml = {|destructive_ops = "foo"|} in
+  assert_error (Masc.Destructive_ops_policy.load_string toml)
+
+let test_load_wrong_enabled_type () =
+  let toml = {|
+[destructive_ops]
+enabled = "true"
+
+[[destructive_ops.patterns]]
+class = "recursive_delete"
+pattern = "rm -rf"
+description = "recursive forced deletion"
+|} in
+  assert_error (Masc.Destructive_ops_policy.load_string toml)
+
+let test_load_wrong_patterns_type () =
+  let toml = {|
+[destructive_ops]
+patterns = "rm -rf"
+|} in
+  assert_error (Masc.Destructive_ops_policy.load_string toml)
+
+let test_load_pattern_element_not_table () =
+  let toml = {|
+[destructive_ops]
+
+[[destructive_ops.patterns]]
+class = "recursive_delete"
+pattern = "rm -rf"
+description = "recursive forced deletion"
+
+[[destructive_ops.patterns]]
+"not a table"
+|} in
+  assert_error (Masc.Destructive_ops_policy.load_string toml)
+
+let test_load_file_preserves_exception_message () =
+  match Masc.Destructive_ops_policy.load_file "/nonexistent/destructive_ops.toml" with
+  | Ok _ -> fail "expected Error"
+  | Error errs ->
+    (match errs with
+     | [ e ] when String.starts_with ~prefix:"file not found or unreadable:" e.message ->
+       (* exception message preserved *)
+       ()
+     | _ -> fail "expected a single io error with exception details")
+
 (* ================================================================ *)
 (* Default catalogue                                                  *)
 (* ================================================================ *)
@@ -157,6 +204,11 @@ let () =
       test_case "empty pattern field rejected" `Quick test_load_empty_pattern_field;
       test_case "disabled policy disables detection" `Quick test_load_disabled_policy;
       test_case "missing file rejected" `Quick test_load_file_missing;
+      test_case "wrong destructive_ops type rejected" `Quick test_load_wrong_destructive_ops_type;
+      test_case "wrong enabled type rejected" `Quick test_load_wrong_enabled_type;
+      test_case "wrong patterns type rejected" `Quick test_load_wrong_patterns_type;
+      test_case "pattern element not a table rejected" `Quick test_load_pattern_element_not_table;
+      test_case "load_file preserves exception message" `Quick test_load_file_preserves_exception_message;
     ]);
     ("default", [
       test_case "19 patterns" `Quick test_default_has_19_patterns;

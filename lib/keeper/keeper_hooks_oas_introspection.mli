@@ -6,7 +6,8 @@
 val hook_introspection_json :
   denied_tools:string list ->
   ?max_cost_usd:float ->
-  ?destructive_check:bool ->
+  ?destructive_ops_policy:Destructive_ops_policy.t ->
   unit -> Yojson.Safe.t
 (** JSON snapshot describing which hook slots are active for the dashboard
-    diagnostics surface. *)
+    diagnostics surface. The destructive-pattern gate reflects whether
+    [destructive_ops_policy] is enabled. *)

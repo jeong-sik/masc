@@ -65,28 +65,45 @@ let class_of_string = function
 ;;
 
 (* ------------------------------------------------------------------ *)
+(* TOML access helpers                                                *)
+(* ------------------------------------------------------------------ *)
+
+(** [find_or_default ~path ~expected toml default accessor key_path] is like
+    [Otoml.find_or] but converts [Otoml.Type_error] into a structured
+    [load_error] at [path] instead of letting it escape. *)
+let find_or_default ~path ~expected toml default accessor key_path =
+  try Ok (Otoml.find_or ~default toml accessor key_path) with
+  | Otoml.Type_error msg ->
+    single_error path (Printf.sprintf "expected %s: %s" expected msg)
+;;
+
+(* ------------------------------------------------------------------ *)
 (* Pattern parsing                                                    *)
 (* ------------------------------------------------------------------ *)
 
 let parse_pattern ~path (tbl : Otoml.t) : (destructive_pattern, load_error list) result =
-  let require_string ~key ~msg =
-    match Otoml.find_opt tbl Otoml.get_string [ key ] with
-    | Some value when String.trim value <> "" -> Ok value
-    | Some _ -> single_error (path ^ "." ^ key) (msg ^ ": empty string")
-    | None -> single_error (path ^ "." ^ key) (msg ^ ": missing")
-  in
-  match require_string ~key:"class" ~msg:"pattern class" with
-  | Error errs -> Error errs
-  | Ok class_str ->
-    (match class_of_string class_str with
-     | Error msg -> single_error (path ^ ".class") msg
-     | Ok class_ ->
-       match require_string ~key:"pattern" ~msg:"pattern substring" with
-       | Error errs -> Error errs
-       | Ok pattern ->
-         match require_string ~key:"description" ~msg:"pattern description" with
+  try
+    let require_string ~key ~msg =
+      match Otoml.find_opt tbl Otoml.get_string [ key ] with
+      | Some value when String.trim value <> "" -> Ok value
+      | Some _ -> single_error (path ^ "." ^ key) (msg ^ ": empty string")
+      | None -> single_error (path ^ "." ^ key) (msg ^ ": missing")
+    in
+    match require_string ~key:"class" ~msg:"pattern class" with
+    | Error errs -> Error errs
+    | Ok class_str ->
+      (match class_of_string class_str with
+       | Error msg -> single_error (path ^ ".class") msg
+       | Ok class_ ->
+         match require_string ~key:"pattern" ~msg:"pattern substring" with
          | Error errs -> Error errs
-         | Ok description -> Ok { class_; pattern; description })
+         | Ok pattern ->
+           match require_string ~key:"description" ~msg:"pattern description" with
+           | Error errs -> Error errs
+           | Ok description -> Ok { class_; pattern; description })
+  with
+  | Otoml.Type_error msg ->
+    single_error path (Printf.sprintf "expected table: %s" msg)
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -94,43 +111,65 @@ let parse_pattern ~path (tbl : Otoml.t) : (destructive_pattern, load_error list)
 (* ------------------------------------------------------------------ *)
 
 let load_string (content : string) : (t, load_error list) result =
-  let doc =
+  let ( let* ) = Result.bind in
+  let* doc =
     match Otoml.Parser.from_string_result content with
     | Ok doc -> Ok doc
     | Error msg -> single_error "<toml>" (Printf.sprintf "TOML parse error: %s" msg)
   in
-  Result.bind doc (fun doc ->
-    let ops_tbl =
-      Otoml.find_or ~default:(Otoml.TomlTable []) doc Fun.id [ "destructive_ops" ]
+  let* ops_tbl =
+    find_or_default
+      ~path:"destructive_ops"
+      ~expected:"table"
+      doc
+      (Otoml.TomlTable [])
+      Fun.id
+      [ "destructive_ops" ]
+  in
+  let* enabled =
+    find_or_default
+      ~path:"destructive_ops.enabled"
+      ~expected:"boolean"
+      ops_tbl
+      true
+      Otoml.get_boolean
+      [ "enabled" ]
+  in
+  let* pattern_tables =
+    find_or_default
+      ~path:"destructive_ops.patterns"
+      ~expected:"array"
+      ops_tbl
+      []
+      (Otoml.get_array Fun.id)
+      [ "patterns" ]
+  in
+  if pattern_tables = [] then
+    single_error "destructive_ops.patterns" "at least one pattern is required"
+  else
+    let* patterns =
+      partition_results
+        (List.mapi
+           (fun i tbl ->
+              parse_pattern ~path:(Printf.sprintf "destructive_ops.patterns[%d]" i) tbl)
+           pattern_tables)
     in
-    let enabled =
-      Otoml.find_or ~default:true ops_tbl Otoml.get_boolean [ "enabled" ]
-    in
-    let pattern_tables =
-      Otoml.find_or ~default:[] ops_tbl (Otoml.get_array Fun.id) [ "patterns" ]
-    in
-    if pattern_tables = [] then
-      single_error "destructive_ops.patterns" "at least one pattern is required"
-    else
-      match
-        partition_results
-          (List.mapi
-             (fun i tbl -> parse_pattern ~path:(Printf.sprintf "destructive_ops.patterns[%d]" i) tbl)
-             pattern_tables)
-      with
-      | Error errs -> Error errs
-      | Ok patterns -> Ok { enabled; patterns })
+    Ok { enabled; patterns }
 ;;
 
 let load_file (path : string) : (t, load_error list) result =
-  match
-    Safe_ops.protect ~default:None (fun () -> Some (Fs_compat.load_file path))
-  with
-  | None -> Error [ error (path ^ ":io") "file not found or unreadable" ]
-  | Some content ->
-    Result.map_error
-      (List.map (fun e -> { e with path = path ^ ":" ^ e.path }))
-      (load_string content)
+  Safe_ops.handle
+    (fun () ->
+       let content = Fs_compat.load_file path in
+       Result.map_error
+         (List.map (fun e -> { e with path = path ^ ":" ^ e.path }))
+         (load_string content))
+    (fun exn ->
+       Error
+         [ error
+             (path ^ ":io")
+             (Printf.sprintf "file not found or unreadable: %s" (Printexc.to_string exn))
+         ])
 ;;
 
 (* ------------------------------------------------------------------ *)

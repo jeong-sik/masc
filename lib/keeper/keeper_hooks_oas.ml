@@ -202,7 +202,8 @@ include Keeper_hooks_oas_cost_events
     @param meta_ref Mutable ref to keeper metadata
     @param generation Current generation counter
     @param max_cost_usd Optional advisory cost threshold; never rejects tool calls
-    @param destructive_check Enable destructive pattern detection (default true)
+    @param destructive_ops_policy Destructive operations policy used for
+           pattern detection. Defaults to {!Destructive_ops_policy.default}.
     @param pre_tool_use_guard Optional callback that can short-circuit a tool
            before execution by returning an inline override response.
     @param on_tool_executed Optional callback after each tool execution
@@ -883,13 +884,14 @@ let make_hooks
 
 let hook_introspection_json
     ?(max_cost_usd : float option)
-    ?(destructive_check : bool = true)
+    ?(destructive_ops_policy : Destructive_ops_policy.t =
+        Destructive_ops_policy.default)
     ()
   : Yojson.Safe.t =
   Keeper_hooks_oas_introspection.hook_introspection_json
     ~denied_tools:keeper_denied_tools
     ?max_cost_usd
-    ~destructive_check
+    ~destructive_ops_policy
     ()
 
 module For_testing = struct

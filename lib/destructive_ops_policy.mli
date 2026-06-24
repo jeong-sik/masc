@@ -61,4 +61,5 @@ val load_string : string -> (t, load_error list) result
 
 val load_file : string -> (t, load_error list) result
 (** Read a TOML file and parse it. File I/O failures are reported as a
-    single [load_error] with path ["<file>:io"]. *)
+    single [load_error] with path ["<file>:io"]; the original exception
+    message is preserved in [message]. *)

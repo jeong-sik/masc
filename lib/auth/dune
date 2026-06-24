@@ -6,7 +6,6 @@
  (wrapped false)
  (private_modules
   auth_credential_base
-  auth_credential_token
   auth_metric_store)
  (libraries
   yojson

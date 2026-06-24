@@ -206,23 +206,23 @@ let find_credential_by_token config ~token : (agent_credential, masc_error) resu
   match matches with
   | [] -> Error (Auth (Auth_error.InvalidToken "Token mismatch"))
   | first :: rest ->
-    (match rest with
-     | [] -> ()
-     | _ :: _ ->
-       let names = List.map (fun (c : agent_credential) -> c.agent_name) matches in
-       Log.Misc.warn
-         "auth: token shared by %d agents [%s] - routing to %s (first match); rotate via \
-          Auth.create_token to disambiguate (#9786)"
-         (List.length matches)
-         (String.concat ", " names)
-         first.agent_name;
-       Auth_metric_store.inc_counter
-         Auth_metric_store.metric_auth_credential_ambiguous_lookup
-         ~labels:[ "first_match", first.agent_name ]
-         ());
     (match check_credential_collisions ~token_hash_prefix:(token_hash_prefix_of token_hash) first rest with
      | Error e -> Error e
      | Ok () ->
+       (match rest with
+        | [] -> ()
+        | _ :: _ ->
+          let names = List.map (fun (c : agent_credential) -> c.agent_name) matches in
+          Log.Misc.warn
+            "auth: token shared by %d agents [%s] - routing to %s (first match); rotate via \
+             Auth.create_token to disambiguate (#9786)"
+            (List.length matches)
+            (String.concat ", " names)
+            first.agent_name;
+          Auth_metric_store.inc_counter
+            Auth_metric_store.metric_auth_credential_ambiguous_lookup
+            ~labels:[ "first_match", first.agent_name ]
+            ());
        (match first.expires_at with
         | None -> Ok first
         | Some exp_str ->

@@ -92,7 +92,7 @@ let snapshot () = List.map (fun metric -> { metric with labels = metric.labels }
 let update_pool_metrics_gauges () = ()
 
 let metric_auth_credential_ambiguous_lookup = "masc_auth_credential_ambiguous_lookup_total"
-let metric_auth_credential_hash_collision = "masc_auth_credential_hash_collision_total"
+let metric_auth_credential_hash_collision = Otel_identity_metric_names.metric_auth_credential_hash_collision
 let metric_auth_strict_unknown_tool_denials = "masc_auth_strict_unknown_tool_denials_total"
 let metric_after_turn_response_model_empty = "masc_after_turn_response_model_empty_total"
 let metric_after_turn_response_model_alias = "masc_after_turn_response_model_alias_total"

@@ -12,8 +12,8 @@ module Types = Masc_domain
    This test pins:
    - Single match -> no counter increment, returns Ok
    - Two distinct credentials with the same hash -> ambiguous lookup
-     counter +1, collision counter +1, returns Error
-   - Repeated lookups accumulate both counters
+     counter unchanged, collision counter +1, returns Error
+   - Repeated lookups accumulate only the collision counter
    - first_match label is the routed agent_name (so operators can
      attribute the wrong serving if the collision guard were disabled). *)
 
@@ -145,8 +145,8 @@ let test_duplicate_hash_rejects_collision () =
             cred.agent_name)
      | Error _ -> ());
     Alcotest.(check (float 0.0001))
-      "ambiguous lookup counter +1"
-      (before_ambiguous_first +. 1.0)
+      "ambiguous lookup counter unchanged on collision"
+      before_ambiguous_first
       (ambiguous_counter_for ~first_match);
     Alcotest.(check (float 0.0001))
       "non-routed ambiguous counter unchanged"
@@ -180,8 +180,8 @@ let test_repeated_lookups_accumulate () =
       ()
     done;
     Alcotest.(check (float 0.0001))
-      "+3 ambiguous lookups over 3 calls"
-      (before_ambiguous +. 3.0)
+      "ambiguous lookup counter unchanged over 3 calls"
+      before_ambiguous
       (ambiguous_counter_for ~first_match);
     Alcotest.(check (float 0.0001))
       "+3 collisions over 3 calls"

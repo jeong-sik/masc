@@ -3,7 +3,7 @@ let metric_auth_credential_index_cache_hits = "masc_auth_credential_index_cache_
 let metric_auth_credential_index_cache_misses = "masc_auth_credential_index_cache_misses_total"
 let metric_auth_credential_ambiguous_lookup = "masc_auth_credential_ambiguous_lookup_total"
 let metric_auth_bearer_token_mismatch = "masc_auth_bearer_token_mismatch_total"
-let metric_auth_credential_hash_collision = "masc_auth_credential_hash_collision_total"
+let metric_auth_credential_hash_collision = Otel_identity_metric_names.metric_auth_credential_hash_collision
 
 let inc_counter name ?labels ?delta () = Otel_metric_store_core.inc_counter name ?labels ?delta ()
 let set_gauge name ?labels value = Otel_metric_store_core.set_gauge name ?labels value

@@ -161,20 +161,34 @@ let audit_orphan_tasks config : (Masc_domain.task * string) list =
       | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
     ) backlog.tasks
 
-(* RFC-0294 PR-4: the status classes [audit_orphan_tasks] can return — exactly
-   the three "active-assignee" statuses it matches (Claimed / InProgress /
-   AwaitingVerification, see the [task_status] match above). Held as a fixed set
-   so the orphan gauge always reports every class (0 when a class is empty)
-   rather than leaving a stale value behind when a class clears. The string
-   labels mirror [Masc_domain.task_status_to_string]; the surfacer test pins that
-   correspondence (drift guard) so a rename of the canonical strings fails the
-   test instead of silently splitting the metric vocabulary. *)
+(* RFC-0294 PR-4: the single typed source of truth for "is this status
+   orphan-eligible, and under which gauge class". EXHAUSTIVE over [task_status]
+   ([@warning "-4"] absent on purpose): adding a new constructor forces a
+   classification decision here at compile time, so a future orphan-eligible
+   status can never be silently dropped from the gauge — the exact failure the
+   old [String.equal (task_status_to_string …)] round-trip allowed. The label
+   strings are the [Masc_domain.task_status_to_string] values for the active
+   statuses, kept here so the metric vocabulary has one owner. Must stay aligned
+   with the orphan-eligibility match in [audit_orphan_tasks] above (both select
+   Claimed / InProgress / AwaitingVerification); the surfacer test pins both the
+   Some-labels and the None-set so a divergence fails the test. *)
+let orphan_status_class_of_status : Masc_domain.task_status -> string option = function
+  | Masc_domain.Claimed _ -> Some "claimed"
+  | Masc_domain.InProgress _ -> Some "in_progress"
+  | Masc_domain.AwaitingVerification _ -> Some "awaiting_verification"
+  | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
+
+(* The fixed class set the gauge reports (0 when a class is empty, so a cleared
+   class resets rather than going stale). Exactly the Some-range of
+   [orphan_status_class_of_status]; the drift-guard test pins that equality. *)
 let orphan_status_classes = [ "claimed"; "in_progress"; "awaiting_verification" ]
 
 (* Pure: count orphan-audit results per status class over the fixed class set.
-   Separated from the metric I/O (the gauge emitter lives in the orchestrator
-   pulse, which owns the Otel dependency) so the grouping is unit-testable
-   without workspace or metric-store side effects. *)
+   Membership is decided by the typed [orphan_status_class_of_status], not a
+   string round-trip, so the grouping shares one exhaustive classifier with the
+   gauge vocabulary. Separated from the metric I/O (the gauge emitter lives in
+   the orchestrator pulse, which owns the Otel dependency) so the grouping is
+   unit-testable without workspace or metric-store side effects. *)
 let orphan_counts_by_status_class (orphans : (Masc_domain.task * string) list)
   : (string * int) list =
   List.map
@@ -183,9 +197,9 @@ let orphan_counts_by_status_class (orphans : (Masc_domain.task * string) list)
          List.length
            (List.filter
               (fun ((task : Masc_domain.task), _assignee) ->
-                 String.equal
-                   (Masc_domain.task_status_to_string task.task_status)
-                   status_class)
+                 match orphan_status_class_of_status task.task_status with
+                 | Some c -> String.equal c status_class
+                 | None -> false)
               orphans)
        in
        status_class, count)

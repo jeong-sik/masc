@@ -110,6 +110,47 @@ let test_class_labels_match_task_status_to_string () =
     "orphan_status_classes mirror task_status_to_string (drift guard)"
     expected WQ.orphan_status_classes
 
+(* The typed classifier is the membership SSOT: every orphan-eligible status maps
+   to its Some-label, every non-orphan status maps to None, and the Some-range
+   equals orphan_status_classes. A new task_status constructor is a compile error
+   in orphan_status_class_of_status (it cannot reach here as a silent drop); this
+   test additionally pins that the Some-range and the reported class set agree, so
+   adding a class without listing it (or vice versa) fails. *)
+let test_classifier_is_membership_ssot () =
+  let some label = Some label in
+  Alcotest.(check (option string)) "claimed -> Some claimed"
+    (some "claimed")
+    (WQ.orphan_status_class_of_status (MD.Claimed { assignee = "x"; claimed_at = "t" }));
+  Alcotest.(check (option string)) "in_progress -> Some in_progress"
+    (some "in_progress")
+    (WQ.orphan_status_class_of_status (MD.InProgress { assignee = "x"; started_at = "t" }));
+  Alcotest.(check (option string)) "awaiting -> Some awaiting_verification"
+    (some "awaiting_verification")
+    (WQ.orphan_status_class_of_status
+       (MD.AwaitingVerification
+          { assignee = "x"; submitted_at = "t"; verification_id = "v"; phase = MD.Awaiting_verifier }));
+  Alcotest.(check (option string)) "todo -> None" None
+    (WQ.orphan_status_class_of_status MD.Todo);
+  Alcotest.(check (option string)) "done -> None" None
+    (WQ.orphan_status_class_of_status (MD.Done { assignee = "x"; completed_at = "t"; notes = None }));
+  Alcotest.(check (option string)) "cancelled -> None" None
+    (WQ.orphan_status_class_of_status (MD.Cancelled { cancelled_at = "t"; cancelled_by = "x"; reason = None }));
+  (* Some-range over every constructor equals the reported class set. *)
+  let some_range =
+    List.filter_map WQ.orphan_status_class_of_status
+      [ MD.Todo
+      ; MD.Claimed { assignee = "x"; claimed_at = "t" }
+      ; MD.InProgress { assignee = "x"; started_at = "t" }
+      ; MD.AwaitingVerification
+          { assignee = "x"; submitted_at = "t"; verification_id = "v"; phase = MD.Awaiting_verifier }
+      ; MD.Done { assignee = "x"; completed_at = "t"; notes = None }
+      ; MD.Cancelled { cancelled_at = "t"; cancelled_by = "x"; reason = None }
+      ]
+  in
+  Alcotest.(check (list string))
+    "classifier Some-range == orphan_status_classes"
+    WQ.orphan_status_classes some_range
+
 let () =
   Alcotest.run "orphan_surfacer"
     [ ( "orphan_counts_by_status_class"
@@ -120,5 +161,7 @@ let () =
             test_empty_is_all_zero
         ; Alcotest.test_case "class labels match task_status_to_string" `Quick
             test_class_labels_match_task_status_to_string
+        ; Alcotest.test_case "typed classifier is membership SSOT" `Quick
+            test_classifier_is_membership_ssot
         ] )
     ]

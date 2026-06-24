@@ -131,11 +131,6 @@ export function latestEntryWithBlocks(rows: readonly TurnRecordRow[]): TurnRecor
   return null
 }
 
-// Blocks of that row (thin accessor; same row MemCompoReal renders figures from).
-export function latestEntryBlocks(rows: readonly TurnRecordRow[]): readonly TurnBlock[] {
-  return latestEntryWithBlocks(rows)?.record.blocks ?? []
-}
-
 // ── fact category meta (real, exhaustive over the typed union) ──
 export interface FactKindMeta {
   readonly lbl: string

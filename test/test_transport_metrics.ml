@@ -304,14 +304,25 @@ let test_transport_health_json () =
   let base_dir = temp_dir () in
   let config = Masc.Workspace.default_config base_dir in
   ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
+  let auth =
+    Masc_test_deps.make_sse_auth base_dir "transport-metrics-agent"
+  in
+  let register_exn ?kind session_id ~last_event_id =
+    match Masc.Sse.register ?kind ~auth session_id ~last_event_id with
+    | Ok result -> result
+    | Error e ->
+        fail
+          (Printf.sprintf "Sse.register failed: %s"
+             (Masc.Sse.registration_error_to_string e))
+  in
   ignore
-    (Masc.Sse.register ~kind:Masc.Sse.Observer "observer-session"
+    (register_exn ~kind:Masc.Sse.Observer "observer-session"
        ~last_event_id:0);
   ignore
-    (Masc.Sse.register ~kind:Masc.Sse.Agent_stream "agent_stream-session"
+    (register_exn ~kind:Masc.Sse.Agent_stream "agent_stream-session"
        ~last_event_id:0);
   ignore
-    (Masc.Sse.register ~kind:Masc.Sse.Presence "presence-session"
+    (register_exn ~kind:Masc.Sse.Presence "presence-session"
        ~last_event_id:0);
   TM.set_grpc_active_streams 1;
   TM.set_grpc_subscribers 2;
@@ -335,6 +346,7 @@ let test_transport_health_json () =
   in
   TM.observe_ws_dashboard_hello_latency ~success:true 0.125;
   Masc.Sse.broadcast (`Assoc [ ("type", `String "transport-test") ]);
+  Masc.Sse.sync_transport_snapshot ~force:true ();
   let json = TM.transport_health_json ~config in
   let sse_json = json |> U.member "sse" in
   let streamable_json = json |> U.member "streamable_http" in

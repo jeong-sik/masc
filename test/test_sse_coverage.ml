@@ -17,6 +17,17 @@ let jsonrpc_notification method_name =
 
 module Sse = Masc.Sse
 
+let workspace = Masc_test_deps.setup_test_workspace ()
+let auth = Masc_test_deps.make_sse_auth workspace "sse-coverage-agent"
+
+let () = at_exit (fun () -> Masc_test_deps.cleanup_test_workspace workspace)
+
+let register_exn ?kind ?on_disconnect session_id ~last_event_id =
+  match Masc.Sse.register ?kind ?on_disconnect ~auth session_id ~last_event_id with
+  | Ok result -> result
+  | Error e ->
+      Alcotest.fail (Sse.registration_error_to_string e)
+
 let run_domains_together count fn =
   let ready = Atomic.make 0 in
   let go = Atomic.make false in
@@ -98,14 +109,14 @@ let test_next_id_sequential () =
 let test_register_creates_client () =
   let session_id = "test_register_" ^ string_of_int (Random.int 10000) in
   let _push _ = () in
-  let (_id, _, _) = Sse.register session_id ~last_event_id:0 in
+  let (_id, _, _) = register_exn session_id ~last_event_id:0 in
   check bool "exists after register" true (Sse.exists session_id);
   Sse.unregister session_id
 
 let test_unregister_removes_client () =
   let session_id = "test_unregister_" ^ string_of_int (Random.int 10000) in
   let _push _ = () in
-  let (_id, _, _) = Sse.register session_id ~last_event_id:0 in
+  let (_id, _, _) = register_exn session_id ~last_event_id:0 in
   Sse.unregister session_id;
   check bool "not exists after unregister" false (Sse.exists session_id)
 
@@ -116,8 +127,8 @@ let test_register_returns_unique_id () =
   let session1 = "test_unique1_" ^ string_of_int (Random.int 10000) in
   let session2 = "test_unique2_" ^ string_of_int (Random.int 10000) in
   let _push _ = () in
-  let (id1, _, _) = Sse.register session1 ~last_event_id:0 in
-  let (id2, _, _) = Sse.register session2 ~last_event_id:0 in
+  let (id1, _, _) = register_exn session1 ~last_event_id:0 in
+  let (id2, _, _) = register_exn session2 ~last_event_id:0 in
   check bool "unique ids" true (id1 <> id2);
   Sse.unregister session1;
   Sse.unregister session2
@@ -145,7 +156,7 @@ let test_register_uses_successful_commit_time_after_retry () =
              ignore (Unix.select [] [] [] 0.02);
              retry_barrier := Unix.gettimeofday ()
            end));
-      ignore (Sse.register session_id ~last_event_id:0);
+      ignore (register_exn session_id ~last_event_id:0);
       check bool "forced retry triggered" true (Atomic.get forced_retry);
       match Sse.SMap.find_opt session_id (Atomic.get Sse.clients).entries with
       | Some client ->
@@ -167,7 +178,7 @@ let test_client_count_increments () =
   let before = Sse.client_count () in
   let session_id = "test_count_" ^ string_of_int (Random.int 10000) in
   let _push _ = () in
-  let (_id, _, _) = Sse.register session_id ~last_event_id:0 in
+  let (_id, _, _) = register_exn session_id ~last_event_id:0 in
   let after = Sse.client_count () in
   Sse.unregister session_id;
   check bool "incremented" true (after > before || after = before)
@@ -181,8 +192,8 @@ let test_client_count_exact_unregister_decrement () =
       Sse.unregister session1;
       Sse.unregister session2)
     (fun () ->
-      let (_id1, _, _) = Sse.register session1 ~last_event_id:0 in
-      let (_id2, _, _) = Sse.register session2 ~last_event_id:0 in
+      let (_id1, _, _) = register_exn session1 ~last_event_id:0 in
+      let (_id2, _, _) = register_exn session2 ~last_event_id:0 in
       check int "two registrations increment count by two"
         (before + 2) (Sse.client_count ());
       Sse.unregister session1;
@@ -202,9 +213,9 @@ let test_client_count_by_kind_tracks_session_roles () =
       Sse.unregister observer;
       Sse.unregister agent_stream)
     (fun () ->
-      let (_id1, _, _) = Sse.register ~kind:Sse.Observer observer ~last_event_id:0 in
+      let (_id1, _, _) = register_exn ~kind:Sse.Observer observer ~last_event_id:0 in
       let (_id2, _, _) =
-        Sse.register ~kind:Sse.Agent_stream agent_stream ~last_event_id:0
+        register_exn ~kind:Sse.Agent_stream agent_stream ~last_event_id:0
       in
       check int "observer count increments"
         (before_observer + 1)
@@ -228,8 +239,8 @@ let test_unregister_if_current_replacement_count () =
   Fun.protect
     ~finally:(fun () -> Sse.unregister session_id)
     (fun () ->
-      let (old_client_id, _, _) = Sse.register session_id ~last_event_id:0 in
-      let (new_client_id, _, _) = Sse.register session_id ~last_event_id:0 in
+      let (old_client_id, _, _) = register_exn session_id ~last_event_id:0 in
+      let (new_client_id, _, _) = register_exn session_id ~last_event_id:0 in
       check int "replacement keeps one live session"
         (before + 1) (Sse.client_count ());
       Sse.unregister_if_current session_id old_client_id;
@@ -345,7 +356,7 @@ let test_client_type_fields () =
   let session_id = "test_client_" ^ string_of_int (Random.int 10000) in
   let received = ref [] in
   let _push msg = received := msg :: !received in
-  let (_id, _, _) = Sse.register session_id ~last_event_id:5 in
+  let (_id, _, _) = register_exn session_id ~last_event_id:5 in
   check bool "exists" true (Sse.exists session_id);
   Sse.unregister session_id
 
@@ -356,7 +367,7 @@ let test_client_type_fields () =
 let test_unregister_if_current_matches () =
   let session_id = "test_unreg_match_" ^ string_of_int (Random.int 10000) in
   let _push _ = () in
-  let (client_id, _, _) = Sse.register session_id ~last_event_id:0 in
+  let (client_id, _, _) = register_exn session_id ~last_event_id:0 in
   check bool "exists before" true (Sse.exists session_id);
   Sse.unregister_if_current session_id client_id;
   check bool "removed when matching" false (Sse.exists session_id)
@@ -364,7 +375,7 @@ let test_unregister_if_current_matches () =
 let test_unregister_if_current_no_match () =
   let session_id = "test_unreg_nomatch_" ^ string_of_int (Random.int 10000) in
   let _push _ = () in
-  let (_client_id, _, _) = Sse.register session_id ~last_event_id:0 in
+  let (_client_id, _, _) = register_exn session_id ~last_event_id:0 in
   check bool "exists before" true (Sse.exists session_id);
   Sse.unregister_if_current session_id 999999;  (* wrong client id *)
   check bool "not removed when not matching" true (Sse.exists session_id);
@@ -381,7 +392,7 @@ let test_unregister_if_current_nonexistent () =
 let test_update_last_event_id_exists () =
   let session_id = "test_update_id_" ^ string_of_int (Random.int 10000) in
   let _push _ = () in
-  let (_id, _, _) = Sse.register session_id ~last_event_id:0 in
+  let (_id, _, _) = register_exn session_id ~last_event_id:0 in
   Sse.update_last_event_id session_id 42;
   ();
   Sse.unregister session_id
@@ -397,7 +408,7 @@ let test_update_last_event_id_nonexistent () =
 let test_broadcast_sends_to_clients () =
   let session_id = "test_broadcast_" ^ string_of_int (Random.int 10000) in
   let _push _ = () in
-  let (_id, _, _) = Sse.register ~kind:Sse.Observer session_id ~last_event_id:0 in
+  let (_id, _, _) = register_exn ~kind:Sse.Observer session_id ~last_event_id:0 in
   Sse.broadcast (`Assoc [("test", `String "value")]);
   (* Events are queued in the per-session stream, not pushed directly *)
   let event = Sse.try_pop session_id in
@@ -419,7 +430,7 @@ let test_broadcast_empty_clients () =
 let test_send_to_existing () =
   let session_id = "test_send_to_" ^ string_of_int (Random.int 10000) in
   let _push _ = () in
-  let (_id, _, _) = Sse.register session_id ~last_event_id:0 in
+  let (_id, _, _) = register_exn session_id ~last_event_id:0 in
   Sse.send_to session_id (jsonrpc_notification "notifications/test");
   (* Events are queued in the per-session stream *)
   let event = Sse.try_pop session_id in
@@ -447,7 +458,7 @@ let test_sync_transport_snapshot_throttle_idempotent () =
   Fun.protect
     ~finally:(fun () -> Sse.unregister session_id)
     (fun () ->
-      let (_id, _, _) = Sse.register session_id ~last_event_id:0 in
+      let (_id, _, _) = register_exn session_id ~last_event_id:0 in
       for _ = 1 to 20 do
         Sse.sync_transport_snapshot ()
       done;
@@ -461,7 +472,7 @@ let test_broadcast_throttled_snapshot_stability () =
   Fun.protect
     ~finally:(fun () -> Sse.unregister session_id)
     (fun () ->
-      let (_id, _, _) = Sse.register session_id ~last_event_id:0 in
+      let (_id, _, _) = register_exn session_id ~last_event_id:0 in
       let payload = `Assoc [ "test", `String "throttle" ] in
       for _ = 1 to 20 do
         Sse.broadcast payload

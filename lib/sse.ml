@@ -24,6 +24,36 @@
     immutable snapshots plus CAS, so readers can inspect counts without
     waiting on a lock held by another fiber. *)
 
+(** Authentication context supplied by SSE transport callers. *)
+type registration_auth = {
+  config : string;
+  token : string;
+}
+
+(** Failure modes for SSE registration. *)
+type registration_error =
+  | Missing_token
+  | Invalid_token of { reason : string }
+  | Token_expired of { agent_name : string }
+  | Unknown_session of { session_id : string }
+  | Session_expired of { session_id : string }
+  | Session_owner_mismatch of { session_agent : string; token_agent : string }
+
+let registration_error_to_string = function
+  | Missing_token -> "SSE registration failed: bearer token is required"
+  | Invalid_token { reason } ->
+      Printf.sprintf "SSE registration failed: invalid token (%s)" reason
+  | Token_expired { agent_name } ->
+      Printf.sprintf "SSE registration failed: token for %s has expired" agent_name
+  | Unknown_session { session_id } ->
+      Printf.sprintf "SSE registration failed: unknown session %s" session_id
+  | Session_expired { session_id } ->
+      Printf.sprintf "SSE registration failed: session %s has expired" session_id
+  | Session_owner_mismatch { session_agent; token_agent } ->
+      Printf.sprintf
+        "SSE registration failed: session belongs to %s but token belongs to %s"
+        session_agent token_agent
+
 (** Classification of an SSE session's traffic role. *)
 module SMap = Set_util.StringMap
 
@@ -137,10 +167,10 @@ let snapshot_min_interval_sec =
     compare-and-set and runs the full iteration. *)
 let last_snapshot_time : float Atomic.t = Atomic.make 0.0
 
-let sync_transport_snapshot () =
+let sync_transport_snapshot ?(force = false) () =
   let now = Time_compat.now () in
   let last = Atomic.get last_snapshot_time in
-  if now -. last < snapshot_min_interval_sec then ()
+  if (not force) && now -. last < snapshot_min_interval_sec then ()
   else if not (Atomic.compare_and_set last_snapshot_time last now) then ()
   else begin
   (* Single-pass aggregation: previously [SMap.fold] built a
@@ -434,13 +464,46 @@ let invoke_disconnect_hook_for session_id =
            Log.Server.error "SSE disconnect hook failed for %s: %s"
              session_id (Printexc.to_string exn))
 
+(** Validate the bearer token and MCP session pair for an SSE registration.
+    Token resolution is delegated to [Auth.find_credential_by_token]; session
+    existence and expiry are checked via [Session.McpSessionStore.peek] so
+    the validation read does not refresh the session's activity window. *)
+let validate_registration ~(auth : registration_auth) session_id : (Masc_domain.agent_credential, registration_error) result =
+  let open Masc_domain in
+  if String.trim auth.token = "" then
+    Error Missing_token
+  else
+    match Auth.find_credential_by_token auth.config ~token:auth.token with
+    | Error (Auth (Auth_error.InvalidToken reason)) ->
+        Error (Invalid_token { reason })
+    | Error (Auth (Auth_error.TokenExpired agent_name)) ->
+        Error (Token_expired { agent_name })
+    | Error e ->
+        Error (Invalid_token { reason = masc_error_to_string e })
+    | Ok credential ->
+        let session =
+          Session.McpSessionStore.get_or_create ~id:session_id ~agent_name:credential.agent_name ()
+        in
+        let now = Time_compat.now () in
+        if now -. session.last_activity > Env_config.Session.max_age_seconds then
+          Error (Session_expired { session_id })
+        else
+          match session.agent_name with
+          | Some session_agent when not (String.equal session_agent credential.agent_name) ->
+              Error (Session_owner_mismatch { session_agent; token_agent = credential.agent_name })
+          | _ ->
+              Ok credential
+
 (** Register a new SSE client.
     Returns (client_id, event_stream, evicted_session_id option).
     [?on_disconnect], if supplied, is installed BEFORE the client is
     published to [clients] — closes the race window where a concurrent
     [broadcast] could observe the new entry, hit queue overflow, fire
     [unregister], and find no hook to wake the drain fiber. *)
-let register ?(kind = Agent_stream) ?on_disconnect session_id ~last_event_id =
+let register ?(kind = Agent_stream) ?on_disconnect ~(auth : registration_auth) session_id ~last_event_id =
+  match validate_registration ~auth session_id with
+  | Error e -> Error e
+  | Ok _credential ->
   let client_id = Atomic.fetch_and_add client_id_counter 1 + 1 in
   let last_event_id = Atomic.make last_event_id in
   let event_stream = Eio.Stream.create stream_capacity in
@@ -506,8 +569,8 @@ let register ?(kind = Agent_stream) ?on_disconnect session_id ~last_event_id =
        invoke_disconnect_hook_for sid
    | None ->
        ());
-  sync_transport_snapshot ();
-  (client_id, event_stream, evicted)
+  sync_transport_snapshot ~force:true ();
+  Ok (client_id, event_stream, evicted)
 
 (** Unregister an SSE client *)
 let unregister session_id =
@@ -544,7 +607,7 @@ let unregister session_id =
        and no infinite-loop risk.  Snapshot recording is sequenced AFTER the
        hook so observers see [info.closed = true] in the same tick. *)
     invoke_disconnect_hook_for session_id;
-    sync_transport_snapshot ()
+    sync_transport_snapshot ~force:true ()
   end else
     (* Even on no-op unregister we still clear any orphaned hook to avoid
        slow leaks across reconnects.  [clear_disconnect_hook] is idempotent. *)
@@ -577,7 +640,7 @@ let unregister_if_current session_id client_id =
   if removed then begin
     (* See [unregister] for the hook ordering rationale. *)
     invoke_disconnect_hook_for session_id;
-    sync_transport_snapshot ()
+    sync_transport_snapshot ~force:true ()
   end
 
 (** Check if client exists *)
@@ -992,7 +1055,7 @@ let close_all_clients () =
         result = sessions;
       })
   in
-  sync_transport_snapshot ();
+  sync_transport_snapshot ~force:true ();
   List.length sessions
 
 (** Remove clients idle longer than max_age_s (default 30 min).

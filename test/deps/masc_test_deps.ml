@@ -145,6 +145,49 @@ let tla_quoted_set_from_repo_file_exn ~relpath ~symbol =
 
 let sorted_strings = List.sort String.compare
 
+(** Create an isolated temporary workspace for tests that need credentials.
+    The directory and its [.masc/] subtree are removed by
+    {!cleanup_test_workspace}. *)
+let setup_test_workspace () =
+  let unique_id =
+    Printf.sprintf "masc-sse-test-%d-%d"
+      (Unix.getpid ())
+      (int_of_float (Unix.gettimeofday () *. 1000.))
+  in
+  let tmp = Filename.concat (Filename.get_temp_dir_name ()) unique_id in
+  Unix.mkdir tmp 0o755;
+  let masc_dir = Filename.concat tmp Common.masc_dirname in
+  Unix.mkdir masc_dir 0o755;
+  tmp
+
+let cleanup_test_workspace dir =
+  let rec rm_rf path =
+    if Sys.is_directory path then begin
+      Array.iter (fun f -> rm_rf (Filename.concat path f)) (Sys.readdir path);
+      Unix.rmdir path
+    end else
+      Sys.remove path
+  in
+  try rm_rf dir with _ -> ()
+
+let rng_initialized = Atomic.make false
+
+let ensure_rng_initialized () =
+  if Atomic.compare_and_set rng_initialized false true then
+    Mirage_crypto_rng_unix.use_default ()
+
+(** Create a valid bearer token for [agent_name] in [workspace] and return
+    the [Masc.Sse.registration_auth] record used by {!Masc.Sse.register}. *)
+let make_sse_auth workspace agent_name =
+  ensure_rng_initialized ();
+  match Auth.create_token workspace ~agent_name ~role:Masc_domain.Worker with
+  | Ok (raw_token, _cred) -> { Masc.Sse.config = workspace; token = raw_token }
+  | Error e ->
+      failwith
+        (Printf.sprintf "make_sse_auth failed for %s: %s"
+           agent_name
+           (Masc_domain.masc_error_to_string e))
+
 let assert_same_string_set ~label ~expected ~actual =
   let expected = sorted_strings expected in
   let actual = sorted_strings actual in

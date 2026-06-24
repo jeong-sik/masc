@@ -9,24 +9,9 @@ import { useRef, useEffect, useMemo } from 'preact/hooks'
 import { Marked } from 'marked'
 
 import { highlightCodeHtml } from './shiki-highlighter'
-import { loadMermaid, type MermaidApi } from './mermaid-loader'
+import { renderMermaidSvg } from './mermaid-graph'
 import { sanitizeHtml } from '../../lib/dompurify'
-
-// ── Lazy mermaid loader ──────────────────────────────────────
-let mermaidConfigured = false
-let mermaidRenderCount = 0
-
-function getMermaid(): Promise<MermaidApi> {
-  return loadMermaid().then(mermaid => {
-    if (mermaidConfigured) return mermaid
-    mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict', suppressErrorRendering: true })
-    mermaidConfigured = true
-    return mermaid
-  }).catch((err) => {
-    mermaidConfigured = false
-    throw err
-  })
-}
+import { memoizeLru } from '../../lib/lru-cache'
 
 // ── Marked instance (GFM tables + line-break support) ────────
 const md = new Marked({ gfm: true, breaks: true })
@@ -62,17 +47,14 @@ function sanitize(raw: string): string {
   return sanitizeHtml(raw, PURIFY_CONFIG)
 }
 
-function sanitizeMermaidSvg(raw: string): SVGElement | null {
-  const safeSvg = sanitizeHtml(raw, {
-    USE_PROFILES: { svg: true },
-  })
-  if (!safeSvg || !safeSvg.includes('<svg')) {
-    return null
-  }
-  const parsed = new DOMParser().parseFromString(safeSvg, 'image/svg+xml')
-  const svg = parsed.documentElement
+// `renderMermaidSvg` returns an already-sanitized SVG string; parse it once
+// into an element for insertion (mirrors MermaidGraph's consumer). appendChild
+// adopts the cross-document node into the live tree.
+function parseSvgElement(clean: string): Element | null {
+  const doc = new DOMParser().parseFromString(clean, 'image/svg+xml')
+  const svg = doc.documentElement
   if (!svg || svg.tagName.toLowerCase() !== 'svg') return null
-  return document.importNode(svg, true) as unknown as SVGElement
+  return svg
 }
 
 // ── Repair truncated markdown ────────────────────────────────
@@ -100,7 +82,7 @@ function repairTruncatedMarkdown(text: string): string {
 // ── Parse markdown with <think> block extraction ─────────────
 // Think blocks are extracted first, their content is parsed
 // separately as markdown, then reassembled as <details>.
-function renderMarkdown(text: string): string {
+function renderMarkdownUncached(text: string): string {
   const repaired = repairTruncatedMarkdown(text)
   const parts: string[] = []
   let lastIdx = 0
@@ -125,6 +107,14 @@ function renderMarkdown(text: string): string {
   return sanitize(parts.join(''))
 }
 
+// Cache the sanitized HTML by source text. `renderMarkdownUncached` is pure
+// (given the module `md` instance + PURIFY_CONFIG), and each call runs marked
+// + DOMPurify, where DOMPurify parses HTML via DOMParser. Identical content
+// re-rendered across component mounts (e.g. a keeper turn list that remounts)
+// then reuses the result instead of re-parsing. Exported for tests.
+const MARKDOWN_CACHE_MAX = 256
+export const renderMarkdown = memoizeLru(renderMarkdownUncached, { max: MARKDOWN_CACHE_MAX })
+
 // ── Component ────────────────────────────────────────────────
 export function MarkdownContent({ text, class: className }: { text: string; class?: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -140,20 +130,21 @@ export function MarkdownContent({ text, class: className }: { text: string; clas
 
     let cancelled = false
     void (async () => {
-      const mermaid = await getMermaid()
-      if (cancelled) return
       for (const codeEl of mermaidCodes) {
+        if (cancelled) break
         const pre = codeEl.parentElement
         if (!pre) continue
         const code = codeEl.textContent ?? ''
         try {
-          const id = `mermaid-md-${++mermaidRenderCount}`
-          const { svg } = await mermaid.render(id, code)
+          // Shared, cached render path (deduped across the dashboard). No id is
+          // passed so the cache is keyed by source: identical diagrams across
+          // turns reuse the render instead of re-running mermaid.
+          const svg = await renderMermaidSvg(code)
           if (!cancelled && pre.parentElement) {
+            const safeSvg = parseSvgElement(svg)
+            if (!safeSvg) continue // keep original code block on parse failure
             const div = document.createElement('div')
             div.className = 'mermaid-rendered'
-            const safeSvg = sanitizeMermaidSvg(svg)
-            if (!safeSvg) continue // keep original code block on sanitization failure
             div.appendChild(safeSvg)
             pre.replaceWith(div)
           }

@@ -2221,13 +2221,15 @@
  (modules test_rfc_0085_pr6_host_config_from_env)
  (libraries alcotest masc.host_config unix))
 
-; RFC-0085 PR-4 — tool_library + cdal proof_store /tmp fallback purge.
+; RFC-0085 PR-4 — tool_library /tmp fallback purge. The cdal proof_store guard
+; was dropped: proof_store.ml was purged in #19469, so depending on it here made
+; dune fail with "No rule found".
 
 (test
  (name test_rfc_0085_pr4_tool_library_proof_store)
  (modules test_rfc_0085_pr4_tool_library_proof_store)
  (libraries alcotest ast_grep)
- (deps ../lib/tool_library.ml ../lib/cdal_runtime/proof_store.ml))
+ (deps ../lib/tool_library.ml))
 
 ; Verify the shared MCP dispatch finalizer fires typed observers and applies
 ; the result transformer before observers run.

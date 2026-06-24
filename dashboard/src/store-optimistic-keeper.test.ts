@@ -4,6 +4,7 @@ import {
   applyOptimisticKeeperDirectives,
   keepers,
 } from './store'
+import { phasePulse, phaseTone } from './components/v2/keeper-fsm'
 import type { Keeper } from './types'
 
 const baseKeeper = (overrides: Partial<Keeper> & { name: string }): Keeper => ({
@@ -29,6 +30,9 @@ describe('applyOptimisticKeeperDirective', () => {
     const after = keepers.value.find(k => k.name === 'rondo')!
     expect(after.paused).toBe(true)
     expect(after.phase).toBe('Paused')
+    // The roster status dot renders lifecycle_phase, not phase — patch it so
+    // the left-list dot flips on the same click (see patchForDirective).
+    expect(after.lifecycle_phase).toBe('Paused')
     expect(after.pipeline_stage).toBe('paused')
     // Other keepers untouched.
     expect(keepers.value.find(k => k.name === 'qa-king')!.paused).toBe(false)
@@ -50,6 +54,7 @@ describe('applyOptimisticKeeperDirective', () => {
     const after = keepers.value[0]!
     expect(after.paused).toBe(false)
     expect(after.phase).toBe('Running')
+    expect(after.lifecycle_phase).toBe('Running')
 
     revert()
     expect(keepers.value[0]).toEqual(original)
@@ -60,6 +65,22 @@ describe('applyOptimisticKeeperDirective', () => {
     applyOptimisticKeeperDirective('rondo', 'wakeup')
     expect(keepers.value[0]!.paused).toBe(false)
     expect(keepers.value[0]!.phase).toBe('Running')
+    expect(keepers.value[0]!.lifecycle_phase).toBe('Running')
+  })
+
+  it('patches lifecycle_phase so the roster status dot tone flips immediately', () => {
+    keepers.value = [
+      baseKeeper({ name: 'rondo', paused: true, phase: 'Paused', lifecycle_phase: 'Paused' }),
+    ]
+    // Before: the dot reads the paused tone from lifecycle_phase.
+    expect(phaseTone(keepers.value[0]!.lifecycle_phase)).toBe('warn')
+
+    applyOptimisticKeeperDirective('rondo', 'resume')
+
+    // After the optimistic resume, the dot tone is the running tone with no
+    // server round-trip. This is the field keeper-workspace-roster renders.
+    expect(phaseTone(keepers.value[0]!.lifecycle_phase)).toBe('ok')
+    expect(phasePulse(keepers.value[0]!.lifecycle_phase)).toBe(true)
   })
 
   it('returns a no-op revert when the keeper is not in the local list', () => {

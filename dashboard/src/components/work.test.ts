@@ -52,6 +52,7 @@ vi.mock('./repository-management', () => ({
 }))
 
 import { goals, keepers, tasks } from '../store'
+import { selectedTask } from './goals/task-detail-selection'
 import { Work } from './work'
 
 describe('Work', () => {
@@ -830,6 +831,29 @@ describe('Work', () => {
 
         // Backlog strip (.wk-backlog) must NOT be present in kanban view
         expect(screen.queryByTestId('work-backlog')).toBeNull()
+      })
+
+      it('opens the shared task detail overlay when a kanban card is clicked', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = [
+          { id: 'T-todo', title: 'Todo item', goal_id: 'G-1', status: 'todo' },
+        ]
+        selectedTask.value = null
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('work-view-kanban'))
+
+        const card = screen
+          .getByTestId('work-kanban')
+          .querySelector('[data-kanban-task-id="T-todo"]') as HTMLElement
+        expect(selectedTask.value).toBeNull()
+        fireEvent.click(card)
+        // openTaskDetail() set the shared selection signal (TaskDetailOverlay is
+        // mounted globally in app.ts and renders off this signal).
+        expect(selectedTask.value?.id).toBe('T-todo')
+        selectedTask.value = null
       })
     })
   })

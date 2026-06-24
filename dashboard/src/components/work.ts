@@ -15,6 +15,7 @@ import { VerificationRequestsPanel } from './verification-requests-panel'
 import { ErrorBoundary } from './common/error-boundary'
 import { LoadingState } from './common/feedback-state'
 import { KeeperBadge } from './keeper-badge'
+import { openTaskDetail } from './goals/task-detail-state'
 import type { Goal, Task, Keeper } from '../types'
 
 type WorkSection = 'work' | 'board' | 'sub-boards' | 'moderation' | 'planning' | 'repositories' | 'verification'
@@ -586,7 +587,17 @@ function KanbanCard({
       tabIndex=${0}
       data-testid="kanban-card"
       data-kanban-task-id=${task.id}
-      onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') { /* no-op: inline detail not shown in kanban */ } }}
+      aria-label=${`${task.title} 상세 열기`}
+      onClick=${() => openTaskDetail(task)}
+      onKeyDown=${(e: KeyboardEvent) => {
+        // Kanban cards have no inline expansion (unlike TaskRow); Enter/Space
+        // opens the shared TaskDetailOverlay (app.ts-mounted) via openTaskDetail,
+        // which also loads the task's real trace events.
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          openTaskDetail(task)
+        }
+      }}
     >
       <div class="wk-kcard-top">
         <span class="wk-kcard-id mono">${task.id}</span>

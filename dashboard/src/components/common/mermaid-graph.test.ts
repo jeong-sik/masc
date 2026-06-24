@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import { waitFor } from '@testing-library/preact'
-import { MermaidGraph, clearMermaidSvgCache } from './mermaid-graph'
+import { MermaidGraph, clearMermaidSvgCache, resetMermaidRenderState } from './mermaid-graph'
 
 const mockRender = vi.fn()
 const mockInitialize = vi.fn()
@@ -21,12 +21,17 @@ vi.mock('mermaid', () => ({
   },
 }))
 
+vi.mock('../../lib/dompurify.js', () => ({
+  sanitizeHtml: (raw: string) => raw,
+}))
+
 describe('MermaidGraph', () => {
   beforeEach(() => {
     mockRender.mockReset()
     mockInitialize.mockReset()
     mockRender.mockResolvedValue({ svg: '<svg><rect /></svg>' })
     clearMermaidSvgCache()
+    resetMermaidRenderState()
   })
 
   afterEach(() => {

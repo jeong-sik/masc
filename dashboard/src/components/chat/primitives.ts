@@ -1079,13 +1079,14 @@ function ChatMermaidBlock({ source, caption }: ChatMermaidBlock) {
 
   useEffect(() => {
     if (!shouldRender) return undefined
+    setError(false)
     let active = true
     const run = async () => {
       try {
         // Use the shared mermaid path: it initializes once, serializes renders
-        // to avoid SVG corruption, and mermaid's securityLevel:'strict' already
-        // sanitizes the output. Re-running DOMPurify here added ~1s+ of main
-        // thread work for large diagrams (see dashboard perf audit).
+        // to avoid SVG corruption, and returns DOMPurify-sanitized output.
+        // Re-running DOMPurify per chat block added ~1s+ of main-thread work
+        // for large diagrams (see dashboard perf audit).
         const rendered = await renderMermaidSvg(source, `mermaid-${id}`)
         if (active) setSvg(rendered)
       } catch {

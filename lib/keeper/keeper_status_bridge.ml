@@ -73,7 +73,7 @@ let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaul
   []
   |> maybe_string_override
        "prompt.goal"
-       ~normalize:normalize_goal_horizon_text
+       ~normalize:normalize_goal_text
        defaults.goal
        (default_string defaults.goal meta.goal)
   |> maybe_string_override

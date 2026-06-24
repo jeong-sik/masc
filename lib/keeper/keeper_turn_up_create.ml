@@ -29,10 +29,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   let now_ts = Time_compat.now () in
   let goal =
     match p.goal_opt with
-    | Some goal -> normalize_goal_horizon_text goal
+    | Some goal -> normalize_goal_text goal
     | None ->
         p.profile_defaults.goal |> Option.value ~default:""
-        |> normalize_goal_horizon_text
+        |> normalize_goal_text
   in
   let autoboot_enabled =
     Dashboard_utils.first_some p.autoboot_enabled_opt p.profile_defaults.autoboot_enabled

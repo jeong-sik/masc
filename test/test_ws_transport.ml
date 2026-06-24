@@ -660,8 +660,8 @@ let test_backpressure_gate_stale_ack_throttles_delivery () =
   with_env_var "MASC_WS_ACK_STALE_THRESHOLD_SEC" "0.001" (fun () ->
     let session = Ws.new_session ~id:"stale-ack" ~wsd:(Obj.magic ()) in
     Atomic.set session.dashboard_auth (Ws.Authenticated { agent = None });
-    session.dashboard_last_delta_seq <- 1;
-    session.dashboard_last_delta_at <- Unix.gettimeofday () -. 10.0;
+    Atomic.set session.dashboard_last_delta_seq 1;
+    Atomic.set session.dashboard_last_delta_at (Unix.gettimeofday () -. 10.0);
     Alcotest.(check bool) "stale ack skips send without closing session"
       true
       (Ws.send_dashboard_or_raw_sse session
@@ -1000,12 +1000,12 @@ let test_new_session_initializes_pong_state () =
     (Atomic.get session.last_pong_at <= Unix.gettimeofday ());
   Alcotest.(check bool) "dashboard ack timestamp is initialized"
     true
-    (session.dashboard_last_ack_at <= Unix.gettimeofday ());
+    (Atomic.get session.dashboard_last_ack_at <= Unix.gettimeofday ());
   Alcotest.(check int) "no delta is pending ack"
-    0 session.dashboard_last_delta_seq;
+    0 (Atomic.get session.dashboard_last_delta_seq);
   Alcotest.(check bool) "delta timestamp is initialized"
     true
-    (session.dashboard_last_delta_at <= Unix.gettimeofday ());
+    (Atomic.get session.dashboard_last_delta_at <= Unix.gettimeofday ());
   Alcotest.(check int) "inbound dispatch count starts empty"
     0 (Atomic.get session.inbound_dispatches)
 
@@ -1059,8 +1059,70 @@ let test_missed_pong_threshold_reads_env () =
   with_env_var "MASC_WS_MISSED_PONG_THRESHOLD" "-2" (fun () ->
     Alcotest.(check int) "negative values clamp to 0" 0 (Ws.__test_missed_pong_threshold ()))
 
+(* ====== Cross-domain delivery-state safety (RFC-0204 Phase 3 gate) ====== *)
+
+(* The per-session dashboard delivery counters are read and written on the SSE
+   fanout callback, which fires from the main domain (keeper keepalive / event
+   bridge / registry / goal-loop refresh broadcasts) AND from serving handlers
+   (HTTP-route broadcasts).  Today that is safe only because a single Eio
+   domain runs cooperative fibers that never preempt mid-update.  RFC-0204
+   Phase 3 moves serving to a second domain; the moment two domains run in
+   parallel, a plain [int] read-modify-write in [next_dashboard_seq] loses
+   updates and hands two callers the same seq, breaking the dashboard-ws.v1
+   seq/ack contract.
+
+   This drives two real domains through [next_dashboard_seq] and asserts the
+   final counter equals the total number of calls — i.e. no increment was lost.
+   It depends only on the public [int] seams, not the field representation, so
+   it compiles against both the plain-int and the Atomic version: RED on the
+   plain field (a tight contended read-modify-write loses ~half its updates on a
+   multicore host), GREEN once the counter is an [int Atomic.t] allocated via
+   [Atomic.fetch_and_add].  The final-count assertion is far more sensitive than
+   a uniqueness check: a single lost update already drops the total below
+   [2 * iters].
+
+   Scope: this proves the [fetch_and_add] seq path — the most severe site (~half
+   the updates lost on a multicore host).  The other delivery fields are simpler
+   conversions verified by inspection and guarded by the rest of the suite:
+   [dashboard_last_ack_seq] uses a CAS-retry monotonic max ([atomic_bump_max]);
+   the buffered / delta / ack_at fields are single [Atomic.set]/[get]. *)
+let test_dashboard_seq_no_lost_updates_across_domains () =
+  (* A single-vCPU host time-slices domains rather than running them in
+     parallel, so the lost-update race cannot manifest there and a pass would be
+     meaningless.  Skip rather than assert a vacuous green. *)
+  if Domain.recommended_domain_count () < 2 then ()
+  else
+  let session = Ws.new_session ~id:"seq-xdomain" ~wsd:(Obj.magic ()) in
+  let iters = 1_000_000 in
+  (* Two-way start barrier: each domain announces arrival and spins until both
+     are present, so the increment loops run in true overlap.  Without it the
+     spawned domain's startup latency can exceed the loop's runtime, the main
+     domain drains its loop before the other starts, and the race never occurs
+     — the test would then pass even on the buggy plain field (a vacuous gate). *)
+  let ready = Atomic.make 0 in
+  let work () =
+    Atomic.incr ready;
+    while Atomic.get ready < 2 do
+      Domain.cpu_relax ()
+    done;
+    for _ = 1 to iters do
+      ignore (Ws.__test_next_dashboard_seq session)
+    done
+  in
+  let other = Domain.spawn work in
+  work ();
+  Domain.join other;
+  Alcotest.(check int)
+    "no dashboard seq increments lost across two domains"
+    (2 * iters)
+    (Ws.__test_dashboard_seq_value session)
+
 let () =
   Alcotest.run "WebSocket Transport" [
+	    ("delivery_xdomain", [
+	      Alcotest.test_case "next_dashboard_seq loses no updates across domains"
+	        `Quick test_dashboard_seq_no_lost_updates_across_domains;
+	    ]);
 	    ("session_registry", [
 	      Alcotest.test_case "initial count" `Quick test_initial_session_count;
 	      Alcotest.test_case "close_all empty" `Quick test_close_all_empty;

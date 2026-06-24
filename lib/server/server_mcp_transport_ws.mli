@@ -97,28 +97,36 @@ type ws_session = {
   write_mutex : Eio.Mutex.t;
   last_pong_at : float Atomic.t;
   dashboard_auth : dashboard_auth_state Atomic.t;
-  mutable dashboard_route : string option;
-  dashboard_slices : (string, unit) Hashtbl.t;
-  mutable dashboard_seq : int;
-  mutable dashboard_last_ack_seq : int;
-  mutable dashboard_last_buffered_amount : int;
-  mutable dashboard_last_ack_at : float;
-  mutable dashboard_last_delta_seq : int;
-  mutable dashboard_last_delta_at : float;
+  dashboard_route : string option Atomic.t;
+  dashboard_slices : string list Atomic.t;
+  dashboard_seq : int Atomic.t;
+  dashboard_last_ack_seq : int Atomic.t;
+  dashboard_last_buffered_amount : int Atomic.t;
+  dashboard_last_ack_at : float Atomic.t;
+  dashboard_last_delta_seq : int Atomic.t;
+  dashboard_last_delta_at : float Atomic.t;
   inbound_dispatches : int Atomic.t;
 }
 (** Per-WS session state.  Concrete record because
     [server_ws_standalone] threads the value through
     {!read_inbound_message_frame} +
     {!send_dashboard_or_raw_sse} and reaches the
-    {!sessions} table directly.  Mutable fields track
-    the dashboard handshake / ack state machine; see the
-    [#10648] / dashboard-ws.v1 protocol notes in the .ml
-    for the field semantics.
+    {!sessions} table directly.  The dashboard handshake /
+    ack state machine is tracked in the [dashboard_*] fields;
+    see the [#10648] / dashboard-ws.v1 protocol notes in the
+    .ml for the field semantics.
 
-    Cross-fiber scalar state ([closed], [last_pong_at]) is
-    held in [Atomic.t] values; all writes to [wsd] are serialized through
-    [write_mutex]. *)
+    All cross-domain state is held in [Atomic.t]: the
+    connection scalars ([closed], [last_pong_at],
+    [inbound_dispatches]); the per-session dashboard delivery
+    counters ([dashboard_seq], the ack / delta / buffered fields)
+    and the subscribed-[dashboard_slices] snapshot, all
+    read / written on the SSE fanout callback that fires from both
+    the main domain (keeper / refresh broadcasts) and serving
+    handlers; and [dashboard_route], written under concurrent
+    per-session dispatch.  Plain mutable fields would race once
+    serving moves to its own domain (RFC-0204 Phase 3).  All writes
+    to [wsd] are serialized through [write_mutex]. *)
 
 val dashboard_auth_is_authenticated : dashboard_auth_state -> bool
 (** [true] once [dashboard_hello] has authenticated the session. *)
@@ -467,3 +475,13 @@ val __test_reset_env_caches : unit -> unit
 val __test_missed_pong_threshold : unit -> int
 (** Test-only seam: exposes the configured missed-pong threshold so tests can
     verify default / env-var / clamping behavior. *)
+
+val __test_next_dashboard_seq : ws_session -> int
+(** Test-only seam: the per-session dashboard seq allocator.  Exposed so the
+    cross-domain delivery-state gate can drive two Eio domains through it
+    (RFC-0204 Phase 3 prerequisite). *)
+
+val __test_dashboard_seq_value : ws_session -> int
+(** Test-only seam: reads the current per-session dashboard seq counter so the
+    cross-domain gate can assert the final value equals the total number of
+    allocations (no lost updates under true parallelism). *)

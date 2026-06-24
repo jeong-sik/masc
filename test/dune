@@ -59,6 +59,7 @@
   test_masc_runtime_events
   test_cancel_wall_bucket
   test_provider_http_error
+  test_stop_reason_label
   test_workspace
   test_workspace_state_recovery
   test_exec_tap
@@ -367,6 +368,7 @@
   test_masc_runtime_events
   test_cancel_wall_bucket
   test_provider_http_error
+  test_stop_reason_label
   test_workspace
   test_workspace_state_recovery
   test_exec_tap

@@ -135,7 +135,9 @@ make release-evidence
 
 레일 외부에서 접근 가능한 추가 서피스: Monitor (keeper fleet, 도구 모니터, 런타임, observatory), Command (개입·거버넌스·승인), Lab (도구 진단, safety harness, 성능, Memory OS, 키퍼 메모리 상태).
 
-라우트 예시: `dashboard#monitoring?section=journey` (hidden diagnostic), `dashboard#command?section=operations`, `dashboard#connectors?section=connector-status`, `dashboard#workspace?section=verification`.
+라우트 예시: `dashboard#monitoring?section=agents`, `dashboard#command?section=operations`, `dashboard#lab?section=memory-subsystems`, `dashboard#workspace?section=verification`.
+
+(`journey` 같은 일부 진단 뷰는 `navigation.ts`가 아닌 `dashboard/src/config/status.ts`의 라우트-전용 매핑으로 제공되므로 위 예시에서 제외했다.)
 
 ---
 

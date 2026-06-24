@@ -36,6 +36,7 @@ import {
   RECONNECT_BASE_MS,
   RECONNECT_MAX_MS,
   MAX_JOURNAL_ENTRIES,
+  OAS_EVENT_PREFIX,
 } from './config/constants'
 
 const SSE_SESSION_KEY = 'masc_dashboard_sse_session_id'
@@ -393,13 +394,13 @@ function handleEvent(event: SSEEvent): void {
   // MASC Custom("masc.*") payloads as oas:masc:* events; audit ledger
   // events still belong to the dashboard audit stream.
   const rawType = event.type
-  if (pauseOasRuntimeIngress && rawType.startsWith('oas:')) {
+  if (pauseOasRuntimeIngress && rawType.startsWith(OAS_EVENT_PREFIX)) {
     queuedOasEvents.push(event)
     return
   }
   const type = normalizeSSEDispatchType(rawType)
   const agent = event.agent ?? event.author ?? event.from ?? event.from_agent ?? ''
-  if (rawType.startsWith('oas:')) {
+  if (rawType.startsWith(OAS_EVENT_PREFIX)) {
     void loadOasRuntimeStore()
       .then(({ applyOasRuntimeEvent }) => {
         applyOasRuntimeEvent(event, { includeLiveTrace: true })
@@ -1009,12 +1010,15 @@ function handleEvent(event: SSEEvent): void {
       if (!parsed || parsed.kind !== 'context_compacted') break
       const { payload } = parsed
       const trigger = payload.phase ? `OAS ${payload.phase}` : 'OAS context_compacted'
+      // The OAS context_compacted wire carries no runtime field
+      // (lib/sse_event/sse_event.atd context_compacted_payload has 4 fields),
+      // so the snapshot runtime is unknown on this path.
       recordSseCompaction(
         payload.agent_name,
         payload.before_tokens,
         payload.after_tokens,
         trigger,
-        payload.runtime ?? '—',
+        '—',
       )
       addTypedJournalEntry(
         payload.agent_name,

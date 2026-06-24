@@ -77,7 +77,6 @@ const ALL_PAYLOAD_CASES: TypedOasPayload[] = [
       before_tokens: 10,
       after_tokens: 5,
       phase: 'p',
-      runtime: 'oas-runtime',
     },
   },
   {
@@ -140,13 +139,8 @@ function serializePayload(payload: TypedOasPayload): Record<string, unknown> {
       return writeHandoffRequestedPayload(payload.payload)
     case 'handoff_completed':
       return writeHandoffCompletedPayload(payload.payload)
-    case 'context_compacted': {
-      const raw = writeContextCompactedPayload(payload.payload)
-      if (payload.payload.runtime !== undefined) {
-        raw.runtime = payload.payload.runtime
-      }
-      return raw
-    }
+    case 'context_compacted':
+      return writeContextCompactedPayload(payload.payload)
     case 'context_overflow_imminent':
       return writeContextOverflowImminentPayload(payload.payload)
     case 'context_compact_started':
@@ -335,7 +329,10 @@ describe('parseOasPayload', () => {
     expect(data.payload.elapsed_s).toBe(0.5)
   })
 
-  it('parses oas:context_compacted payload and preserves runtime augmentation', () => {
+  it('parses oas:context_compacted to the 4 wire fields and does not surface an unmodeled runtime', () => {
+    // The context_compacted wire format has exactly 4 fields
+    // (lib/sse_event/sse_event.atd context_compacted_payload). A stray runtime
+    // key on the wire must be ignored, not surfaced as a phantom field.
     const result = parseOasPayload('oas:context_compacted', {
       agent_name: 'alpha',
       before_tokens: 1000,
@@ -351,7 +348,7 @@ describe('parseOasPayload', () => {
     expect(data.payload.before_tokens).toBe(1000)
     expect(data.payload.after_tokens).toBe(800)
     expect(data.payload.phase).toBe('summarize')
-    expect(data.payload.runtime).toBe('oas-runtime')
+    expect('runtime' in data.payload).toBe(false)
   })
 
   it('parses oas:context_overflow_imminent payload', () => {

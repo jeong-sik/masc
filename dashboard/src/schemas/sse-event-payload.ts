@@ -9,6 +9,7 @@
 // Unknown event types and malformed payloads are rejected with a structured
 // error; the caller decides whether to drop the event or fall back.
 
+import { OAS_EVENT_PREFIX } from '../config/constants'
 import { assertExhaustive } from '../lib/exhaustive'
 
 import {
@@ -78,7 +79,7 @@ export type TypedOasPayload =
   | { kind: 'turn_ready'; payload: TurnReadyPayload }
   | { kind: 'handoff_requested'; payload: HandoffRequestedPayload }
   | { kind: 'handoff_completed'; payload: HandoffCompletedPayload }
-  | { kind: 'context_compacted'; payload: ContextCompactedPayload & { runtime?: string } }
+  | { kind: 'context_compacted'; payload: ContextCompactedPayload }
   | { kind: 'context_overflow_imminent'; payload: ContextOverflowImminentPayload }
   | { kind: 'context_compact_started'; payload: ContextCompactStartedPayload }
   | { kind: 'content_replacement_replaced'; payload: ContentReplacementReplacedPayload }
@@ -163,24 +164,15 @@ export function parseOasPayload(
   eventType: string,
   raw: unknown,
 ): OasPayloadParseResult<TypedOasPayload> {
-  const suffix = eventType.startsWith('oas:') ? eventType.slice(4) : eventType
+  const suffix = eventType.startsWith(OAS_EVENT_PREFIX)
+    ? eventType.slice(OAS_EVENT_PREFIX.length)
+    : eventType
   if (!isOasPayloadEventType(suffix)) {
     return fail(eventType, `No typed payload reader for event type "${eventType}"`)
   }
 
   switch (suffix) {
-    case 'context_compacted': {
-      const result = tryRead(eventType, READERS[suffix], raw)
-      if (!result.success) return result
-      const rawRecord =
-        typeof raw === 'object' && raw !== null
-          ? (raw as Record<string, unknown>)
-          : {}
-      const runtimeValue = rawRecord.runtime
-      const runtime =
-        typeof runtimeValue === 'string' ? runtimeValue : undefined
-      return ok(buildPayload(suffix, { ...result.data, runtime }))
-    }
+    case 'context_compacted':
     case 'agent_started':
     case 'agent_completed':
     case 'agent_failed':

@@ -40,7 +40,7 @@ let iso_now () = Masc_domain.now_iso ()
 let make_goal id title =
   let ts = iso_now () in
   {
-    Goal_store.id; horizon = Short; title;
+    Goal_store.id; title;
     metric = None; target_value = None; due_date = None;
     priority = 3; status = Active; phase = Goal_phase.Executing;
     verifier_policy = None; require_completion_approval = false;

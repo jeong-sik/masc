@@ -668,7 +668,6 @@ let field_value fixture ~tool_name field_name schema =
   | "criteria" -> `List []
   | "topic" -> `String (ensure_library_topic fixture)
   | "include_candidates" -> `Bool true
-  | "horizon" -> `String "short"
   | "mode" -> (
       match enum_choice with
       | Some value -> `String value

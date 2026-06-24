@@ -181,7 +181,7 @@ let ensure_rng_initialized () =
 let make_sse_auth workspace agent_name =
   ensure_rng_initialized ();
   match Auth.create_token workspace ~agent_name ~role:Masc_domain.Worker with
-  | Ok (raw_token, _cred) -> { Masc.Sse.config = workspace; token = raw_token }
+  | Ok (raw_token, _cred) -> { Masc.Sse.config = workspace; token = Some raw_token }
   | Error e ->
       failwith
         (Printf.sprintf "make_sse_auth failed for %s: %s"

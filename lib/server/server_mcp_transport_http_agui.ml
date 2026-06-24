@@ -62,7 +62,7 @@ let handle_ag_ui_events ~deps request reqd =
         ~protocol_version msg
   | Ok () ->
       let token = Server_auth.observer_sse_auth_token_from_request request in
-      let auth = { Sse.config = base_path; token = Option.value ~default:"" token } in
+      let auth = { Sse.config = base_path; token } in
       (match check_sse_connect_guard session_id with
       | Error (reason, retry_after_s) ->
           respond_sse_rate_limited ~deps ~origin ~session_id ~protocol_version
@@ -179,7 +179,7 @@ let handle_presence_events ~deps request reqd =
         ~protocol_version msg
   | Ok () ->
       let token = Server_auth.observer_sse_auth_token_from_request request in
-      let auth = { Sse.config = base_path; token = Option.value ~default:"" token } in
+      let auth = { Sse.config = base_path; token } in
       (match check_sse_connect_guard session_id with
       | Error (reason, retry_after_s) ->
           respond_sse_rate_limited ~deps ~origin ~session_id

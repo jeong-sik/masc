@@ -27,7 +27,7 @@
 (** Authentication context supplied by SSE transport callers. *)
 type registration_auth = {
   config : string;
-  token : string;
+  token : string option;
 }
 
 (** Failure modes for SSE registration. *)
@@ -35,6 +35,7 @@ type registration_error =
   | Missing_token
   | Invalid_token of { reason : string }
   | Token_expired of { agent_name : string }
+  | Auth_lookup_error of { reason : Masc_domain.masc_error }
   | Unknown_session of { session_id : string }
   | Session_expired of { session_id : string }
   | Session_owner_mismatch of { session_agent : string; token_agent : string }
@@ -45,6 +46,9 @@ let registration_error_to_string = function
       Printf.sprintf "SSE registration failed: invalid token (%s)" reason
   | Token_expired { agent_name } ->
       Printf.sprintf "SSE registration failed: token for %s has expired" agent_name
+  | Auth_lookup_error { reason } ->
+      Printf.sprintf "SSE registration failed: auth lookup error (%s)"
+        (Masc_domain.masc_error_to_string reason)
   | Unknown_session { session_id } ->
       Printf.sprintf "SSE registration failed: unknown session %s" session_id
   | Session_expired { session_id } ->
@@ -474,16 +478,19 @@ let invoke_disconnect_hook_for session_id =
     (RFC-0099 § session lifecycle; credential surface RFC-0008 / RFC-0019). *)
 let validate_registration ~(auth : registration_auth) session_id : (Masc_domain.agent_credential, registration_error) result =
   let open Masc_domain in
-  if String.trim auth.token = "" then
-    Error Missing_token
-  else
-    match Auth.find_credential_by_token auth.config ~token:auth.token with
+  match auth.token with
+  | None ->
+      Error Missing_token
+  | Some token ->
+    match Auth.find_credential_by_token auth.config ~token with
     | Error (Auth (Auth_error.InvalidToken reason)) ->
         Error (Invalid_token { reason })
     | Error (Auth (Auth_error.TokenExpired agent_name)) ->
         Error (Token_expired { agent_name })
     | Error e ->
-        Error (Invalid_token { reason = masc_error_to_string e })
+        Log.Server.warn "SSE registration auth lookup failed: %s"
+          (masc_error_to_string e);
+        Error (Auth_lookup_error { reason = e })
     | Ok credential ->
         match Session.McpSessionStore.peek session_id with
         | None ->

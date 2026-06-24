@@ -604,7 +604,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
         | Sse.Agent_stream ->
             Server_auth.auth_token_from_request request
       in
-      let auth = { Sse.config = base_path; token = Option.value ~default:"" token } in
+      let auth = { Sse.config = base_path; token } in
       (match check_sse_connect_guard session_id with
       | Error (reason, retry_after_s) ->
           respond_sse_rate_limited ~deps ~origin ~session_id ~protocol_version

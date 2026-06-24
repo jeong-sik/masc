@@ -41,7 +41,7 @@ let test_valid_token_registers () =
 let test_missing_token_rejected () =
   let workspace, _auth = setup () in
   Fun.protect ~finally:(fun () -> cleanup workspace) (fun () ->
-    let bad_auth = { Sse.config = workspace; token = "" } in
+    let bad_auth = { Sse.config = workspace; token = None } in
     match Sse.register ~auth:bad_auth "missing-token-session" ~last_event_id:0 with
     | Ok _ -> fail "registration with missing token should fail"
     | Error Sse.Missing_token -> ()
@@ -53,7 +53,7 @@ let test_missing_token_rejected () =
 let test_forged_token_rejected () =
   let workspace, _auth = setup () in
   Fun.protect ~finally:(fun () -> cleanup workspace) (fun () ->
-    let bad_auth = { Sse.config = workspace; token = "not-a-real-token" } in
+    let bad_auth = { Sse.config = workspace; token = Some "not-a-real-token" } in
     match Sse.register ~auth:bad_auth "forged-token-session" ~last_event_id:0 with
     | Ok _ -> fail "registration with forged token should fail"
     | Error (Sse.Invalid_token _) -> ()

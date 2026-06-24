@@ -53,10 +53,11 @@ val buffer_ttl_seconds : float
 
 (** Authentication context supplied by SSE transport callers.
     [config] is the workspace base path used by [Auth] credential lookup.
-    [token] is the raw bearer token presented by the connecting client. *)
+    [token] is the raw bearer token presented by the connecting client,
+    or [None] when no token was supplied. *)
 type registration_auth = {
   config : string;
-  token : string;
+  token : string option;
 }
 
 (** Failure modes for SSE registration.  Transport callers translate these
@@ -65,6 +66,7 @@ type registration_error =
   | Missing_token
   | Invalid_token of { reason : string }
   | Token_expired of { agent_name : string }
+  | Auth_lookup_error of { reason : Masc_domain.masc_error }
   | Unknown_session of { session_id : string }
   | Session_expired of { session_id : string }
   | Session_owner_mismatch of { session_agent : string; token_agent : string }

@@ -90,20 +90,14 @@ let run_safe ~caller ~timeout_s fn =
   | Eio.Cancel.Cancelled inner_exn as exn ->
     (* Mirror of #10942 (keeper_llm_bridge) for masc_oas_bridge: same opaque
        cancel message ate both wall-duration class and the inner cancel reason.
-       Bucket boundaries are kept identical so metric queries can union the two
-       sources into one bimodal view (fast/short_tail/mid_tail/long_mid/
-       long_tail). [inner=...] surfaces the parent fiber's exception payload
-       so [Eio.Cancel.Cancel_hook] vs supervisor-pause vs runtime-rotation
-       can be told apart at the WARN line. *)
+       Bucket boundaries come from the shared Cancel_wall_bucket SSOT so metric
+       queries can union the two sources into one bimodal view. [inner=...]
+       surfaces the parent fiber's exception payload so [Eio.Cancel.Cancel_hook]
+       vs supervisor-pause vs runtime-rotation can be told apart at the WARN
+       line. *)
     let bt = Printexc.get_raw_backtrace () in
     let wall = elapsed () in
-    let bucket =
-      if wall < 60.0 then "fast"
-      else if wall < 300.0 then "short_tail"
-      else if wall < 600.0 then "mid_tail"
-      else if wall < 1800.0 then "long_mid"
-      else "long_tail"
-    in
+    let bucket = Cancel_wall_bucket.of_wall wall in
     let inner_str =
       match inner_exn with
       | Failure msg -> "Failure(" ^ msg ^ ")"

@@ -58,19 +58,11 @@ let trajectory_duration_ms duration_ms =
    (intra-library file split, 2026-05-16). *)
 
 (* usage_has_tokens / is_keeper_board_write_tool_name / current_keeper_model
-   / stop_reason_label_* moved to Keeper_hooks_oas_types (intra-library
-   file split, 2026-05-16). *)
-
-let stop_reason_to_label = function
-  | Agent_sdk.Types.EndTurn -> stop_reason_label_end_turn
-  | Agent_sdk.Types.StopToolUse -> stop_reason_label_tool_use
-  | Agent_sdk.Types.MaxTokens -> stop_reason_label_max_tokens
-  | Agent_sdk.Types.StopSequence -> stop_reason_label_stop_sequence
-  | Agent_sdk.Types.Refusal -> "refusal"
-  | Agent_sdk.Types.PauseTurn -> "pause_turn"
-  | Agent_sdk.Types.Compaction -> "compaction"
-  | Agent_sdk.Types.ContextWindowExceeded -> "model_context_window_exceeded"
-  | Agent_sdk.Types.Unknown _ -> stop_reason_label_unknown
+   / stop_reason_label_* / stop_reason_to_label moved to
+   Keeper_hooks_oas_types (intra-library file split, 2026-05-16;
+   stop_reason_to_label unified with keeper_hooks_oas_response_metrics
+   on 2026-06-24 to remove the duplicate 9-arm match). [include
+   Keeper_hooks_oas_types] above re-exports it for the call sites here. *)
 
 let idle_severity_to_label = function
   | Agent_sdk.Hooks.Idle_severity.Nudge -> "nudge"

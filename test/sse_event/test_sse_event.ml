@@ -691,17 +691,25 @@ let agent_completed_error_fields : (string * Yojson.Safe.t) list =
   ]
 ;;
 
+let agent_failed_error : string = "MaxTurnsExceeded { turns = 20; limit = 20 }"
+let agent_failed_error_domain : string = "max_turns"
+let agent_failed_error_code : string = "max_turns_exceeded"
+let agent_failed_error_retryable : bool = false
+
+let agent_failed_error_detail : Yojson.Safe.t =
+  `Assoc
+    [ "variant", `String "max_turns_exceeded"
+    ; "turns", `Int 20
+    ; "limit", `Int 20
+    ]
+;;
+
 let agent_failed_error_fields_sample : (string * Yojson.Safe.t) list =
-  [ "error", `String "MaxTurnsExceeded { turns = 20; limit = 20 }"
-  ; "error_domain", `String "max_turns"
-  ; "error_code", `String "max_turns_exceeded"
-  ; "error_retryable", `Bool false
-  ; ( "error_detail"
-    , `Assoc
-        [ "variant", `String "max_turns_exceeded"
-        ; "turns", `Int 20
-        ; "limit", `Int 20
-        ] )
+  [ "error", `String agent_failed_error
+  ; "error_domain", `String agent_failed_error_domain
+  ; "error_code", `String agent_failed_error_code
+  ; "error_retryable", `Bool agent_failed_error_retryable
+  ; "error_detail", agent_failed_error_detail
   ]
 ;;
 
@@ -775,7 +783,11 @@ let test_agent_failed_byte_equal () =
          ~agent_name:"alpha"
          ~task_id:"task_42"
          ~elapsed_s:3.5
-         ~error_fields:agent_failed_error_fields_sample)
+         ~error:agent_failed_error
+         ~error_domain:agent_failed_error_domain
+         ~error_code:agent_failed_error_code
+         ~error_retryable:agent_failed_error_retryable
+         ~error_detail:agent_failed_error_detail)
   in
   Alcotest.(check string) "agent_failed typed == baseline" baseline typed
 ;;

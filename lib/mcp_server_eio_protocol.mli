@@ -70,6 +70,19 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
     [lib/mcp_server_eio.ml]) coerce it through the
     {!Mcp_server_eio_types.tool_profile} alias. *)
 
+(** {1 Authentication requirement} *)
+
+module Auth_requirement : sig
+  type t =
+    | Public
+    | Requires_auth
+    | Internal_only
+end
+(** Per-handler authentication classification.  The
+    {!handle_request} dispatcher is the single enforcement
+    point; every method routes through it before invoking
+    its handler. *)
+
 (** {1 Session-bound resource subscription cleanup} *)
 
 val clear_resource_subscriptions_for_session : string -> unit

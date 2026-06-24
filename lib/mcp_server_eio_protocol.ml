@@ -25,6 +25,81 @@ let get_id = Mcp_transport_protocol.get_id
 let is_valid_request_id = Mcp_transport_protocol.is_valid_request_id
 let jsonrpc_request_of_yojson = Mcp_transport_protocol.jsonrpc_request_of_yojson
 
+(** {1 Authentication gate}
+
+    Every JSON-RPC method declares its requirement via {!Auth_requirement.t}.
+    The gate is the single enforcement point: handlers receive the raw bearer
+    token only after it has been verified against the workspace credential
+    store.  When authentication is disabled in the workspace config the gate
+    still runs, but it allows all requests so the behavior is controlled by
+    configuration rather than bypassed by code paths. *)
+
+module Auth_requirement = struct
+  type t =
+    | Public
+    | Requires_auth
+    | Internal_only
+end
+
+type auth_rejection_reason =
+  | Missing_token
+  | Invalid_token
+  | Token_expired of string
+  | Internal_token_required
+
+let auth_rejection_message = function
+  | Missing_token -> "Unauthorized: bearer token required"
+  | Invalid_token -> "Unauthorized: invalid bearer token"
+  | Token_expired agent -> Printf.sprintf "Unauthorized: bearer token expired for %s" agent
+  | Internal_token_required -> "Unauthorized: internal keeper token required"
+;;
+
+let make_auth_error ~id reason =
+  make_error_typed ~id Mcp_error_code.Auth_error (auth_rejection_message reason)
+;;
+
+let require_auth ~base_path ~requirement ~id ?auth_token () =
+  if not (Auth.is_auth_enabled base_path)
+  then Ok (auth_token, None)
+  else (
+    match requirement with
+    | Auth_requirement.Public -> Ok (auth_token, None)
+    | Internal_only ->
+      (match auth_token with
+       | None -> Error (make_auth_error ~id Internal_token_required)
+       | Some token ->
+         if Auth.verify_internal_keeper_token base_path ~token
+         then Ok (auth_token, None)
+         else Error (make_auth_error ~id Internal_token_required))
+    | Requires_auth ->
+      (match auth_token with
+       | None -> Error (make_auth_error ~id Missing_token)
+       | Some token -> (
+         match Auth_credential_token.find_credential_by_token base_path ~token with
+         | Error (Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired agent)) ->
+           Error (make_auth_error ~id (Token_expired agent))
+         | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _)) ->
+           Error (make_auth_error ~id Invalid_token)
+         | Error err ->
+           let cause = Masc_domain.masc_error_to_string err in
+           Log.Auth.error
+             "MCP credential-store lookup failed for request %s: %s"
+             (Yojson.Safe.to_string id)
+             cause;
+           Error
+             (make_error_typed
+                ~id
+                Mcp_error_code.Internal_error
+                "Internal credential-store error")
+         | Ok cred -> Ok (Some token, Some cred))))
+;;
+
+let with_required_auth ~base_path ~id ~requirement ?auth_token f =
+  match require_auth ~base_path ~requirement ~id ?auth_token () with
+  | Error e -> e
+  | Ok (auth_token, _cred) -> f auth_token
+;;
+
 let unavailable_tool_message name =
   Printf.sprintf "Tool '%s' is not available on this MCP endpoint." name
 ;;
@@ -684,6 +759,7 @@ let handle_request
           make_error_typed ~id:`Null ~data:(`String msg) Mcp_error_code.Invalid_request "Invalid Request"
         | Ok req ->
           let id = get_id req in
+          let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
           if not (is_valid_request_id id)
           then
             make_error_typed
@@ -694,63 +770,167 @@ let handle_request
           then (
             match req.method_ with
             | "dashboard/ack" ->
-              handle_dashboard_ack_notification ?mcp_session_id req.params
+              with_required_auth
+                ~base_path
+                ~id
+                ~requirement:Auth_requirement.Public
+                ?auth_token
+                (fun _auth_token ->
+                   handle_dashboard_ack_notification ?mcp_session_id req.params)
             | _ -> `Null)
           else (
             try
               match req.method_ with
-              | "server/discover" -> handle_server_discover_eio ~profile id
-              | "initialize" -> handle_initialize_eio ~profile id req.params
-              | "initialized" | "notifications/initialized" -> make_response ~id `Null
+              | "server/discover" ->
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Public
+                  ?auth_token
+                  (fun _auth_token -> handle_server_discover_eio ~profile id)
+              | "initialize" ->
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Public
+                  ?auth_token
+                  (fun _auth_token -> handle_initialize_eio ~profile id req.params)
+              | "initialized" | "notifications/initialized" ->
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Public
+                  ?auth_token
+                  (fun _auth_token -> make_response ~id `Null)
               | "resources/list" ->
-                (match TP.parse_cursor_only_params req.params with
-                 | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
-                 | Ok { cursor } -> handle_list_resources_eio id cursor)
-              | "resources/read" -> handle_read_resource_eio state id req.params
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Requires_auth
+                  ?auth_token
+                  (fun _auth_token ->
+                     match TP.parse_cursor_only_params req.params with
+                     | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
+                     | Ok { cursor } -> handle_list_resources_eio id cursor)
+              | "resources/read" ->
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Requires_auth
+                  ?auth_token
+                  (fun _auth_token -> handle_read_resource_eio state id req.params)
               | "resources/templates/list" ->
-                (match TP.parse_cursor_only_params req.params with
-                 | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
-                 | Ok { cursor } -> handle_list_resource_templates_eio id cursor)
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Requires_auth
+                  ?auth_token
+                  (fun _auth_token ->
+                     match TP.parse_cursor_only_params req.params with
+                     | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
+                     | Ok { cursor } -> handle_list_resource_templates_eio id cursor)
               | "resources/subscribe" ->
-                handle_resources_subscribe_eio id ?mcp_session_id req.params
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Requires_auth
+                  ?auth_token
+                  (fun _auth_token ->
+                     handle_resources_subscribe_eio id ?mcp_session_id req.params)
               | "resources/unsubscribe" ->
-                handle_resources_unsubscribe_eio id ?mcp_session_id req.params
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Requires_auth
+                  ?auth_token
+                  (fun _auth_token ->
+                     handle_resources_unsubscribe_eio id ?mcp_session_id req.params)
               | "dashboard/hello" ->
-                handle_dashboard_hello_eio state id ?mcp_session_id req.params
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Public
+                  ?auth_token
+                  (fun _auth_token ->
+                     handle_dashboard_hello_eio state id ?mcp_session_id req.params)
               | "dashboard/subscribe" ->
-                handle_dashboard_subscribe_eio state id ?mcp_session_id req.params
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Public
+                  ?auth_token
+                  (fun _auth_token ->
+                     handle_dashboard_subscribe_eio state id ?mcp_session_id req.params)
               | "dashboard/unsubscribe" ->
-                handle_dashboard_unsubscribe_eio id ?mcp_session_id req.params
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Public
+                  ?auth_token
+                  (fun _auth_token ->
+                     handle_dashboard_unsubscribe_eio id ?mcp_session_id req.params)
               | "dashboard/ping" ->
-                handle_dashboard_ping_eio id ?mcp_session_id req.params
-              | "dashboard/ack" -> handle_dashboard_ack_eio id ?mcp_session_id req.params
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Public
+                  ?auth_token
+                  (fun _auth_token ->
+                     handle_dashboard_ping_eio id ?mcp_session_id req.params)
+              | "dashboard/ack" ->
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Public
+                  ?auth_token
+                  (fun _auth_token ->
+                     handle_dashboard_ack_eio id ?mcp_session_id req.params)
               | "prompts/list" ->
-                (match TP.parse_cursor_only_params req.params with
-                 | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
-                 | Ok { cursor } -> handle_list_prompts_eio id cursor)
-              | "prompts/get" -> handle_get_prompt_eio state id req.params
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Requires_auth
+                  ?auth_token
+                  (fun _auth_token ->
+                     match TP.parse_cursor_only_params req.params with
+                     | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
+                     | Ok { cursor } -> handle_list_prompts_eio id cursor)
+              | "prompts/get" ->
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Requires_auth
+                  ?auth_token
+                  (fun _auth_token -> handle_get_prompt_eio state id req.params)
               | "tools/list" ->
-                (match TP.requested_tool_list_params req.params with
-                 | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
-                 | Ok { names; include_hidden; include_usage; cursor }
-                   ->
-                   let list_profile =
-                     match profile with
-                     | Managed_agent | Operator_remote -> profile
-                     | Full -> Full
-                   in
-                   handle_list_tools_eio
-                     ~profile:list_profile
-                     ?names
-                     ~include_hidden
-                     ~include_usage
-                     ~include_agent_internal:internal_keeper_runtime
-                     ?cursor
-                     ?agent_id:auth_token
-                     state
-                     id)
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Requires_auth
+                  ?auth_token
+                  (fun auth_token ->
+                     match TP.requested_tool_list_params req.params with
+                     | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
+                     | Ok { names; include_hidden; include_usage; cursor }
+                       ->
+                       let list_profile =
+                         match profile with
+                         | Managed_agent | Operator_remote -> profile
+                         | Full -> Full
+                       in
+                       handle_list_tools_eio
+                         ~profile:list_profile
+                         ?names
+                         ~include_hidden
+                         ~include_usage
+                         ~include_agent_internal:internal_keeper_runtime
+                         ?cursor
+                         ?agent_id:auth_token
+                         state
+                         id)
               | "tools/call" ->
-                let operation_start_time = Eio.Time.now clock in
+                let handle_tools_call auth_token =
+                  let operation_start_time = Eio.Time.now clock in
                 let otel_context =
                   otel_tool_request_context
                     ~id
@@ -873,18 +1053,44 @@ let handle_request
 	                        msg)
 	                 | None ->
 	                   failed_tool_call_error Mcp_error_code.Invalid_params "Missing params")
-              | method_ when Mcp_sdk_adapter_masc.handles_method method_ ->
-                Mcp_sdk_adapter_masc.dispatch_request
-                  ~handle_call_tool_eio
-                  ~state
-                  ~profile
-                  ~sw
-                  ~clock
-                  ?mcp_session_id
+                in
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Requires_auth
                   ?auth_token
-                  json
-                |> Option.value ~default:`Null
-              | method_ -> make_error_typed ~id Mcp_error_code.Method_not_found ("Method not found: " ^ method_)
+                  handle_tools_call
+              | method_ when Mcp_sdk_adapter_masc.handles_method method_ ->
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Requires_auth
+                  ?auth_token
+                  (fun auth_token ->
+                     match
+                       Mcp_sdk_adapter_masc.dispatch_request
+                         ~handle_call_tool_eio
+                         ~state
+                         ~profile
+                         ~sw
+                         ~clock
+                         ?mcp_session_id
+                         ?auth_token
+                         json
+                     with
+                     | Some response -> response
+                     | None -> `Null)
+              | method_ ->
+                with_required_auth
+                  ~base_path
+                  ~id
+                  ~requirement:Auth_requirement.Public
+                  ?auth_token
+                  (fun _auth_token ->
+                     make_error_typed
+                       ~id
+                       Mcp_error_code.Method_not_found
+                       ("Method not found: " ^ method_))
             with
             | Workspace.Not_initialized ->
               make_error_typed

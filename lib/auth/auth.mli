@@ -174,6 +174,39 @@ val rotate_shared_tokens_for_agents :
 val find_credential_by_token :
   string -> token:string -> (agent_credential, masc_error) result
 
+(** Structured description of which credential fields differ between two
+    credentials that share the same token hash. *)
+type credential_field_diff =
+  | Agent_name of { left : string; right : string }
+  | Role of { left : agent_role; right : agent_role }
+  | Created_at of { left : string; right : string }
+  | Expires_at of { left : string option; right : string option }
+  | Agent_id of { left : string option; right : string option }
+  | Credential_id of { left : string option; right : string option }
+  | Token_hash of { left : string; right : string }
+
+(** Observability payload emitted when two credentials hash to the same
+    value but are not identical. *)
+type collision_log = {
+  token_hash_prefix : string;
+  left_agent : string;
+  right_agent : string;
+  field_diffs : credential_field_diff list;
+}
+
+(** Pure comparison result: [Equal] means the two credentials are
+    identical on every field; [Different log] carries a typed record
+    of the divergence. *)
+type credential_comparison =
+  | Equal
+  | Different of collision_log
+
+(** Compare two credentials field-by-field.  The caller supplies the
+    token hash prefix for the collision log; the comparison itself is
+    pure and depends only on the two records. *)
+val compare_credentials :
+  token_hash_prefix:string -> agent_credential -> agent_credential -> credential_comparison
+
 val resolve_agent_from_token :
   string -> token:string -> (string, masc_error) result
 

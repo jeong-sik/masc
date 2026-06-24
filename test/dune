@@ -63,6 +63,7 @@
   test_workspace_state_recovery
   test_exec_tap
   test_auth
+  test_auth_credential_hash_collision
   test_auth_credential_index_cache
   test_auth_error_kind
   test_auth_error_kind_dashboard_fallback
@@ -370,6 +371,7 @@
   test_workspace_state_recovery
   test_exec_tap
   test_auth
+  test_auth_credential_hash_collision
   test_auth_credential_index_cache
   test_auth_error_kind
   test_auth_error_kind_dashboard_fallback

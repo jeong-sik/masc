@@ -203,4 +203,5 @@
 (library
  (name otel_metric_test_store)
  (wrapped false)
- (modules otel_metric_store))
+ (modules otel_metric_store)
+ (libraries masc.otel_metric_store))

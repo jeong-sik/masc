@@ -53,8 +53,8 @@ let approval_queue_stale_max_wait_sec = 600.0
    because silent truncation in the dashboard made operators think edits were
    not persisting. Operators can lower them via env vars if a deployment needs
    tighter prompt budgets. *)
-let default_goal_horizon_max_chars =
-  match Env_config_core.raw_value_opt "MASC_KEEPER_GOAL_HORIZON_MAX_CHARS" with
+let default_goal_max_chars =
+  match Env_config_core.raw_value_opt "MASC_KEEPER_GOAL_MAX_CHARS" with
   | Some v ->
     (match int_of_string_opt (String.trim v) with
      | Some n when n > 0 -> n
@@ -215,7 +215,7 @@ let normalize_self_model_text ~(max_bytes : int) (raw : string) : string =
     let cut = String_util.utf8_prefix ~max_bytes s in
     String.trim cut
 
-let normalize_goal_horizon_text ?(max_len = default_goal_horizon_max_chars) (raw : string) : string =
+let normalize_goal_text ?(max_len = default_goal_max_chars) (raw : string) : string =
   let s = String.trim raw in
   if s = "" then ""
   else String_util.utf8_prefix ~max_bytes:max_len s

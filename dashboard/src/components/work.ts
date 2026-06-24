@@ -1148,42 +1148,42 @@ function WorkSurfaceV2() {
   return html`
     <main class="ov ov-2col">
       <div class="ov-scroll">
-        <header class="ov-head">
-            <div>
-              <span class="ov-eyebrow">Goal Store</span>
-              <h1>작업 · 목표</h1>
-              <p class="ov-sub">Goal → Task → keeper · 우선순위 순으로 정렬 · 게이트 증거로 검증</p>
-            </div>
-            <div class="wk-head-r">
-              <div class="wk-viewseg" role="tablist" data-testid="work-viewseg">
-                <button
-                  type="button"
-                  class=${view === 'list' ? 'on' : ''}
-                  role="tab"
-                  aria-selected=${view === 'list'}
-                  data-testid="work-view-list"
-                  onClick=${() => switchView('list')}
-                >리스트</button>
-                <button
-                  type="button"
-                  class=${view === 'kanban' ? 'on' : ''}
-                  role="tab"
-                  aria-selected=${view === 'kanban'}
-                  data-testid="work-view-kanban"
-                  onClick=${() => switchView('kanban')}
-                >칸반</button>
-              </div>
+        <header class="ov-head wk-head">
+          <div>
+            <span class="ov-eyebrow">GOAL STORE</span>
+            <h1>작업 · 목표</h1>
+            <p class="ov-sub">Goal → Task → keeper · horizon으로 묶고 게이트 증거로 검증</p>
+          </div>
+          <div class="wk-head-r">
+            <div class="wk-viewseg" role="tablist" data-testid="work-viewseg">
               <button
                 type="button"
-                class="set-add wk-newgoal"
-                data-testid="work-new-goal"
-                title="새 목표 생성"
-                onClick=${() => { showGoalCreate.value = true }}
-              >
-                ＋ 새 목표
-              </button>
+                class=${view === 'list' ? 'on' : ''}
+                role="tab"
+                aria-selected=${view === 'list'}
+                data-testid="work-view-list"
+                onClick=${() => switchView('list')}
+              >리스트</button>
+              <button
+                type="button"
+                class=${view === 'kanban' ? 'on' : ''}
+                role="tab"
+                aria-selected=${view === 'kanban'}
+                data-testid="work-view-kanban"
+                onClick=${() => switchView('kanban')}
+              >칸반</button>
             </div>
-          </header>
+            <button
+              type="button"
+              class="wk-newgoal"
+              data-testid="work-new-goal"
+              title="새 목표 생성"
+              onClick=${() => { showGoalCreate.value = true }}
+            >
+              ＋ 새 목표
+            </button>
+          </div>
+        </header>
 
           <section class="ov-kpis" data-testid="work-kpis" style=${{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
             <div class="ov-kpi">

@@ -138,6 +138,7 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
         shown: 9,
         current: 8,
         expired: 1,
+        items: [],
       },
     },
     user_model: {

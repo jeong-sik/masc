@@ -161,6 +161,36 @@ let audit_orphan_tasks config : (Masc_domain.task * string) list =
       | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
     ) backlog.tasks
 
+(* RFC-0294 PR-4: the status classes [audit_orphan_tasks] can return — exactly
+   the three "active-assignee" statuses it matches (Claimed / InProgress /
+   AwaitingVerification, see the [task_status] match above). Held as a fixed set
+   so the orphan gauge always reports every class (0 when a class is empty)
+   rather than leaving a stale value behind when a class clears. The string
+   labels mirror [Masc_domain.task_status_to_string]; the surfacer test pins that
+   correspondence (drift guard) so a rename of the canonical strings fails the
+   test instead of silently splitting the metric vocabulary. *)
+let orphan_status_classes = [ "claimed"; "in_progress"; "awaiting_verification" ]
+
+(* Pure: count orphan-audit results per status class over the fixed class set.
+   Separated from the metric I/O (the gauge emitter lives in the orchestrator
+   pulse, which owns the Otel dependency) so the grouping is unit-testable
+   without workspace or metric-store side effects. *)
+let orphan_counts_by_status_class (orphans : (Masc_domain.task * string) list)
+  : (string * int) list =
+  List.map
+    (fun status_class ->
+       let count =
+         List.length
+           (List.filter
+              (fun ((task : Masc_domain.task), _assignee) ->
+                 String.equal
+                   (Masc_domain.task_status_to_string task.task_status)
+                   status_class)
+              orphans)
+       in
+       status_class, count)
+    orphan_status_classes
+
 let is_agent_active_at_path config path =
   match read_json_opt config path with
   | None -> false

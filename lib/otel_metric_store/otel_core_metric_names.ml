@@ -21,6 +21,11 @@ let metric_error_events = Otel_metric_store_core.declare_counter "masc_error_eve
 let metric_workspace_route_failures = Otel_metric_store_core.declare_counter "masc_workspace_route_failures_total"
 let metric_active_agents = "masc_active_agents"
 let metric_pending_tasks = "masc_pending_tasks"
+
+(* RFC-0294 PR-4: gauge of orphaned tasks (claimed/in_progress/awaiting_verification
+   whose assignee is no longer active), labeled by status_class. A gauge (current
+   count), not a counter — no [_total] suffix, matching masc_pending_tasks. *)
+let metric_orphan_tasks = "masc_orphan_tasks"
 let metric_goal_attainment_pct = "masc_goal_attainment_pct"
 let metric_goal_attainment_measured = "masc_goal_attainment_measured"
 let metric_sse_reconnects = Otel_metric_store_core.declare_counter "masc_sse_reconnects_total"

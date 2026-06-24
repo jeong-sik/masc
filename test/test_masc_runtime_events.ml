@@ -39,11 +39,34 @@ let test_turn_span_roundtrip () =
       "expected [Begin; End], got %d event(s)"
       (List.length observed)
 
+(* with_turn_span composes emit_turn_start/emit_turn_end (covered by the
+   round-trip above), so these cases pin only the bracket contract that is
+   new: the body result flows through, and the body exception is re-raised
+   (after the [finally] emits End). They deliberately do not read the
+   process-global ring so they cannot interfere with the round-trip cursor. *)
+
+let test_with_turn_span_returns_body () =
+  let result = Masc_runtime_events.with_turn_span (fun () -> 7) in
+  Alcotest.(check int) "with_turn_span returns the body's result" 7 result
+
+let test_with_turn_span_propagates_exn () =
+  Alcotest.check_raises
+    "with_turn_span re-raises the body exception"
+    (Failure "boom")
+    (fun () ->
+      ignore (Masc_runtime_events.with_turn_span (fun () -> failwith "boom")))
+
 let () =
   Alcotest.run "masc_runtime_events"
     [ ( "span-roundtrip"
       , [ Alcotest.test_case
             "emit_turn_start/emit_turn_end visible to in-process cursor"
             `Quick test_turn_span_roundtrip
+        ] )
+    ; ( "with_turn_span"
+      , [ Alcotest.test_case "returns body result" `Quick
+            test_with_turn_span_returns_body
+        ; Alcotest.test_case "propagates body exception" `Quick
+            test_with_turn_span_propagates_exn
         ] )
     ]

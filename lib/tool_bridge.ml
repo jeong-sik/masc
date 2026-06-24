@@ -280,7 +280,7 @@ let oas_descriptor_of_masc_tool name =
 
 let to_oas_typed_result (tr : Tool_result.result) : Agent_sdk.Types.tool_result =
   if Tool_result.is_success tr
-  then Ok { Agent_sdk.Types.content = maybe_externalize (Tool_result.message tr) }
+  then Ok { Agent_sdk.Types.content = maybe_externalize (Tool_result.message tr); _meta = None }
   else (
     let msg = Tool_result.message tr in
     let json_recoverable, json_error_class =

@@ -531,9 +531,9 @@ def main() -> int:
             for collision in collisions:
                 print(f"  - {collision.describe()}")
             print(
-                "\nTwo open PRs cannot both claim the same RFC number. One must "
-                "renumber via scripts/rfc-allocate-next.sh (rewrites the file, "
-                "title, references, and docs/rfc/.next-number). See RFC-0078."
+                "\nTwo open PRs cannot both claim the same RFC number. The number "
+                "allocator was removed; rename one RFC file to a free number, or "
+                "give new RFCs a slug-only filename so they share no number."
             )
             return 1
         print("No RFC number collisions among open PRs.")

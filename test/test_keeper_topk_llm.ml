@@ -12,7 +12,7 @@ open Masc
 (** Create a minimal OAS Tool.t from name and description. *)
 let make_tool name description : Agent_sdk.Tool.t =
   Agent_sdk.Tool.create ~name ~description ~parameters:[]
-    (fun _input -> Ok { content = "ok" })
+    (fun _input -> Ok { content = "ok"; _meta = None })
 
 (** A mock rerank_fn that returns the first [k] candidates in order. *)
 let mock_rerank_passthrough ~context:_ ~candidates =

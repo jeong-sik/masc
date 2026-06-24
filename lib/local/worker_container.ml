@@ -319,7 +319,7 @@ let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name =
                | Ok result when result.is_error ->
                  oas_tool_error result.text
                | Ok result ->
-                 Ok { Agent_sdk.Types.content = result.text }
+                 Ok { Agent_sdk.Types.content = result.text; _meta = None }
                | Error e ->
                  oas_tool_error e
              in

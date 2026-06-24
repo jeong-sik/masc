@@ -1,28 +1,21 @@
 #!/usr/bin/env python3
-"""RFC §1 Enforcer and number-collision guard.
+"""RFC §1 Enforcer.
 
-§1 mode (default): ensure caller-context completeness in RFC drafts.
+§1 mode: ensure caller-context completeness in RFC drafts.
   R1: No <!-- TODO --> comments in §1
   R2: At least 3 file:line citations
   R3: At least 1 code block
   R4: No sub-agent placeholder text
   R5: .tmp/rfc-NNNN-caller-context.md companion file exists
 
---check-numbering mode (RFC-0078): block RFC number collisions.
-  Reads PR-added RFC-NNNN-*.md files (added since base ref) and rejects
-  any NNNN that already has a different file on the base ref. Multi-phase
-  additions opt in via PR body line ``RFC-EXTEND: NNNN`` (env PR_BODY) or
-  RFC frontmatter ``extends: "NNNN"``.
-
---check-ledger-monotonic mode: ensure docs/rfc/.next-number is greater than
-  every RFC-NNNN-*.md file currently present in the checkout.
+RFC numbering was removed: RFCs are identified by slug filename. There is no
+  .next-number ledger, allocator, or number-collision guard — the monotonic
+  counter was a TOCTOU source (concurrent PRs claiming the same number across a
+  stale base) and a slug filename carries no such shared mutable allocation.
 
 Usage:
     python scripts/rfc_enforcer.py --check docs/rfc/
     python scripts/rfc_enforcer.py --check docs/rfc/ --strict
-    python scripts/rfc_enforcer.py --check-numbering \
-        --base-ref origin/main --head-ref HEAD
-    python scripts/rfc_enforcer.py --check-ledger-monotonic
 
 Exit codes:
     0 — all checks pass
@@ -31,13 +24,11 @@ Exit codes:
 """
 
 import argparse
-import os
 import re
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Set, Tuple
+from typing import List, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -178,261 +169,12 @@ def check_all_rfcs(rfc_dir: Path, check_tmp_file: bool = True) -> Tuple[List[Vio
     return all_violations, files_checked, files_passed
 
 
-_RFC_FILENAME_RE = re.compile(r"^RFC-(\d{4})-[a-zA-Z0-9._-]+\.md$")
-_RFC_EXTEND_RE = re.compile(r"^RFC-EXTEND:\s*(\d{4})\s*$", re.MULTILINE)
-_FRONTMATTER_EXTENDS_RE = re.compile(
-    r'^extends:\s*\[?\s*"?(\d{4})"?\s*\]?\s*$', re.MULTILINE
-)
-
-
-def _git(*args: str) -> str:
-    """Run git and return stdout (stripped). Raises on non-zero."""
-    result = subprocess.run(
-        ["git", *args], check=True, capture_output=True, text=True
-    )
-    return result.stdout.strip()
-
-
-def _added_rfc_files(base_ref: str, head_ref: str) -> List[str]:
-    """Return paths of RFC-*.md files added on head vs base."""
-    out = _git(
-        "diff",
-        "--name-only",
-        "--diff-filter=A",
-        f"{base_ref}...{head_ref}",
-        "--",
-        "docs/rfc/",
-    )
-    return [
-        line
-        for line in out.splitlines()
-        if _RFC_FILENAME_RE.match(Path(line).name)
-    ]
-
-
-def _base_rfc_files_for_number(base_ref: str, number: str) -> List[str]:
-    """Return paths of RFC-NNNN-*.md files present on base_ref."""
-    out = _git("ls-tree", "--name-only", base_ref, "docs/rfc/")
-    return [
-        line
-        for line in out.splitlines()
-        if _RFC_FILENAME_RE.match(Path(line).name)
-        and Path(line).name.startswith(f"RFC-{number}-")
-    ]
-
-
-def _extends_optin_numbers(pr_body: str, added_files: List[str]) -> Set[str]:
-    """Collect numbers that this PR is explicitly extending.
-
-    Two opt-in sources:
-      - PR body line ``RFC-EXTEND: NNNN``
-      - Frontmatter ``extends: "NNNN"`` in any of the added RFC files
-    """
-    numbers: Set[str] = set()
-    for match in _RFC_EXTEND_RE.finditer(pr_body or ""):
-        numbers.add(match.group(1))
-    for path in added_files:
-        try:
-            content = Path(path).read_text(encoding="utf-8")
-        except OSError:
-            continue
-        for match in _FRONTMATTER_EXTENDS_RE.finditer(content):
-            numbers.add(match.group(1))
-    return numbers
-
-
-def check_ledger_monotonic(rfc_dir: Path) -> List[Violation]:
-    """Return violations when .next-number can allocate an existing RFC number."""
-    violations: List[Violation] = []
-    ledger = rfc_dir / ".next-number"
-    if not ledger.exists():
-        return [
-            Violation(
-                ledger,
-                0,
-                "RFC_LEDGER_MISSING",
-                "RFC ledger file is missing",
-            )
-        ]
-
-    value = ledger.read_text(encoding="utf-8").strip()
-    if re.fullmatch(r"\d{4}", value) is None:
-        return [
-            Violation(
-                ledger,
-                1,
-                "RFC_LEDGER_INVALID",
-                f"RFC ledger value must be a 4-digit number, got: {value!r}",
-            )
-        ]
-
-    max_existing = 0
-    max_name = None
-    for rfc_file in rfc_dir.glob("RFC-*.md"):
-        match = _RFC_FILENAME_RE.match(rfc_file.name)
-        if match is None:
-            continue
-        number = int(match.group(1), 10)
-        if number > max_existing:
-            max_existing = number
-            max_name = rfc_file.name
-
-    current = int(value, 10)
-    if current <= max_existing:
-        expected = f"{max_existing + 1:04d}"
-        violations.append(
-            Violation(
-                ledger,
-                1,
-                "RFC_LEDGER_NOT_MONOTONIC",
-                (
-                    f"ledger is {value}, but highest existing RFC is "
-                    f"{max_existing:04d} ({max_name}); expected at least {expected}"
-                ),
-            )
-        )
-
-    return violations
-
-
-def check_numbering(base_ref: str, head_ref: str, pr_body: str) -> List[Violation]:
-    """Return collision violations for RFC numbers added in this PR."""
-    violations: List[Violation] = []
-    try:
-        added = _added_rfc_files(base_ref, head_ref)
-    except subprocess.CalledProcessError as exc:
-        msg = exc.stderr.strip() or str(exc)
-        return [Violation(Path("git"), 0, "GIT_ERROR", msg)]
-
-    optin = _extends_optin_numbers(pr_body, added)
-
-    for path in added:
-        name = Path(path).name
-        m = _RFC_FILENAME_RE.match(name)
-        if m is None:
-            continue
-        number = m.group(1)
-        try:
-            existing = _base_rfc_files_for_number(base_ref, number)
-        except subprocess.CalledProcessError:
-            existing = []
-        if not existing:
-            continue
-        if number in optin:
-            continue
-        existing_str = ", ".join(sorted(existing))
-        violations.append(
-            Violation(
-                Path(path),
-                0,
-                "RFC_NUMBER_COLLISION",
-                (
-                    f"RFC-{number} already exists on {base_ref}: {existing_str}. "
-                    "Allocate next via scripts/rfc-allocate-next.sh, or opt in "
-                    f"to multi-phase via PR body 'RFC-EXTEND: {number}' or "
-                    f'frontmatter \'extends: "{number}"\'.'
-                ),
-            )
-        )
-
-    violations.extend(_check_ledger_bumped(head_ref, added, optin))
-    return violations
-
-
-def _ledger_value_at(ref: str) -> Optional[int]:
-    """Return .next-number parsed from the given ref, or None."""
-    try:
-        out = _git("show", f"{ref}:docs/rfc/.next-number")
-    except subprocess.CalledProcessError:
-        return None
-    value = out.strip()
-    if re.fullmatch(r"[0-9]{4}", value) is None:
-        return None
-    return int(value)
-
-
-def _check_ledger_bumped(
-    head_ref: str, added: List[str], optin: Set[str]
-) -> List[Violation]:
-    """Require a PR that claims a new RFC number to move the ledger past it.
-
-    Collision against base_ref only catches a race after one side merges.
-    When the claiming PR must also bump docs/rfc/.next-number in the same
-    PR, two concurrent claims of the frontier number both rewrite the
-    ledger line, so the second one surfaces at merge time (conflict or a
-    rerun collision) instead of landing silently (the #20764 / #20761
-    race, same class as #20717 / #20718).
-    """
-    claimed: List[int] = []
-    for path in added:
-        m = _RFC_FILENAME_RE.match(Path(path).name)
-        if m is None or m.group(1) in optin:
-            continue
-        claimed.append(int(m.group(1)))
-    if not claimed:
-        return []
-    highest = max(claimed)
-    ledger = _ledger_value_at(head_ref)
-    if ledger is None:
-        return [
-            Violation(
-                Path("docs/rfc/.next-number"),
-                0,
-                "RFC_LEDGER_UNREADABLE",
-                f"PR adds RFC-{highest:04d} but docs/rfc/.next-number on "
-                f"{head_ref} is missing or not a 4-digit number.",
-            )
-        ]
-    if ledger <= highest:
-        return [
-            Violation(
-                Path("docs/rfc/.next-number"),
-                0,
-                "RFC_LEDGER_NOT_BUMPED",
-                (
-                    f"PR adds RFC-{highest:04d} but .next-number is "
-                    f"{ledger:04d}. Bump docs/rfc/.next-number to at least "
-                    f"{highest + 1:04d} in the same PR (scripts/"
-                    "rfc-allocate-next.sh does both) so a concurrent claim "
-                    "of the same number conflicts instead of merging."
-                ),
-            )
-        ]
-    return []
-
-
 def main() -> int:
-    parser = argparse.ArgumentParser(description="RFC §1 Enforcer + number guard")
+    parser = argparse.ArgumentParser(description="RFC §1 Enforcer")
     parser.add_argument(
         "--check",
         type=Path,
         help="Directory containing RFC files to check (§1 mode)",
-    )
-    parser.add_argument(
-        "--check-numbering",
-        action="store_true",
-        help="Check for RFC number collisions between PR additions and base ref",
-    )
-    parser.add_argument(
-        "--check-ledger-monotonic",
-        action="store_true",
-        help="Check that docs/rfc/.next-number is above every existing RFC number",
-    )
-    parser.add_argument(
-        "--rfc-dir",
-        type=Path,
-        default=Path("docs/rfc"),
-        help="RFC directory for --check-ledger-monotonic (default: docs/rfc)",
-    )
-    parser.add_argument(
-        "--base-ref",
-        default="origin/main",
-        help="Base git ref for --check-numbering (default: origin/main)",
-    )
-    parser.add_argument(
-        "--head-ref",
-        default="HEAD",
-        help="Head git ref for --check-numbering (default: HEAD)",
     )
     parser.add_argument(
         "--files",
@@ -457,32 +199,8 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    # --check-numbering and --check-ledger-monotonic run independently of --check.
-    if args.check_numbering:
-        pr_body = os.environ.get("PR_BODY", "")
-        violations = check_numbering(args.base_ref, args.head_ref, pr_body)
-        if violations:
-            print(f"Found {len(violations)} RFC numbering violation(s):\n")
-            for v in violations:
-                print(v.format())
-            print()
-            return 1
-        print("RFC numbering: no collisions detected.")
-        return 0
-
-    if args.check_ledger_monotonic:
-        violations = check_ledger_monotonic(args.rfc_dir)
-        if violations:
-            print(f"Found {len(violations)} RFC ledger violation(s):\n")
-            for v in violations:
-                print(v.format())
-            print()
-            return 1
-        print("RFC ledger: monotonic.")
-        return 0
-
     if args.check is None:
-        parser.error("--check is required unless --check-numbering is used")
+        parser.error("--check is required")
 
     # Determine which files to check
     if args.files:

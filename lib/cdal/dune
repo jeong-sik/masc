@@ -6,9 +6,12 @@
 ; this is Phase 0 budget G3 / G5 in RFC-0056.
 ;
 ; Pairs with lib/cdal_runtime/ which hosts the producer side.
-; Dependency direction: masc main lib -> masc.cdal -> masc_core
-; (no cycle by construction; Phase 1 will add masc.cdal_runtime once
-; cdal_judge / cdal_eval_v1 / cdal_loader join this sub-library).
+; Dependency direction: masc main lib -> masc.cdal -> masc_core.
+; NOTE (2026-06-24): the masc.cdal_runtime dependency was removed — it was
+; declared in (libraries) but never referenced by adversarial_eval.ml, the
+; sole module in this sub-library (a dead build-graph edge). The RFC-0056
+; "Phase 1" plan to fold cdal_judge / cdal_eval_v1 / cdal_loader here was
+; not carried out; re-add the edge only when a module here actually uses it.
 
 (include_subdirs no)
 
@@ -25,5 +28,4 @@
   masc_core
   masc.config
   masc.masc_exec
-  masc.dated_jsonl
-  masc.cdal_runtime))
+  masc.dated_jsonl))

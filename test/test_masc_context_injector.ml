@@ -6,7 +6,7 @@ module MCI = Masc.Masc_context_injector
 (* ── Helpers ──────────────────────────────────────────── *)
 
 let ok_output content : Agent_sdk.Types.tool_result =
-  Ok { Agent_sdk.Types.content }
+  Ok { Agent_sdk.Types.content; _meta = None }
 
 let err_output message : Agent_sdk.Types.tool_result =
   Error { Agent_sdk.Types.message; recoverable = true; error_class = None }

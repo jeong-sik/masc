@@ -12,9 +12,6 @@
       consumers that have not migrated to phases yet
       (derived from phase on write, inferred on read for
       old rows),
-    - a {!horizon} ([Short] / [Mid] / [Long]) used by the
-      refresh / snapshot scheduler to decide which cohort
-      to scan,
     - an optional {!Goal_verification.goal_verifier_policy}
       that gates entry into [Goal_phase.Completed].
 
@@ -25,22 +22,22 @@
     [lib/server/server_dashboard_http]) construct goal records
     by literal, pattern-match on every variant constructor,
     and access record fields ([.id], [.phase],
-    [.updated_at], [.horizon], [.title], …) directly.
+    [.updated_at], [.title], …) directly.
 
-    Internal helpers stay private at this boundary
-    ([refresh_mode], [snapshot_mode], [snapshot] type +
-    function, [refresh_result], [refresh],
-    [parse_refresh_mode], [parse_snapshot_mode],
-    [snapshot_mode_of_refresh_mode], [normalize_lower],
-    [now_ms], [gen_goal_id], [find_goal], [replace_goal],
-    [update_state], [normalize_goal], [sort_goals],
-    [parse_yyyy_mm_dd], [days_until],
-    [should_refresh_goal], [reprioritize], [active_goals],
-    [has_scheduler_state], [scheduler_state_path],
-    [snapshots_dir], [ensure_dirs], [default_state],
-    [clamp_priority]). *)
+    RFC-0294 removed the workspace-goal [horizon] and its dead
+    refresh/snapshot scheduler ([refresh_mode], [snapshot_mode],
+    [snapshot], [refresh_result], [refresh], [parse_refresh_mode],
+    [parse_snapshot_mode], [snapshot_mode_of_refresh_mode],
+    [should_refresh_goal], [reprioritize], [has_scheduler_state],
+    [scheduler_state_path], [snapshots_dir], [parse_yyyy_mm_dd],
+    [days_until]).
 
-(** {1 Status / horizon variants} *)
+    Internal helpers that stay private: [normalize_lower], [now_ms],
+    [gen_goal_id], [find_goal], [replace_goal], [update_state],
+    [normalize_goal], [sort_goals], [active_goals], [ensure_dirs],
+    [default_state], [clamp_priority]. *)
+
+(** {1 Status variants} *)
 
 type goal_status =
   | Active
@@ -57,22 +54,7 @@ val goal_status_to_yojson : goal_status -> Yojson.Safe.t
 val goal_status_of_yojson :
   Yojson.Safe.t -> (goal_status, string) result
 
-type horizon =
-  | Short
-  | Mid
-  | Long
-  (** Time-bucket the goal belongs to.  Used by the
-      refresh scheduler ([Daily] → [Short], [Weekly] →
-      [Mid], [Monthly] → [Long]) to decide which cohort to
-      reprioritise. *)
-
-val horizon_to_yojson : horizon -> Yojson.Safe.t
-
 (** {1 Parsers (string → variant option)} *)
-
-val parse_horizon : string option -> horizon option
-(** Case-insensitive, trim-tolerant.  [None]/empty string
-    pass through as [None]. *)
 
 val parse_goal_status : string option -> goal_status option
 (** Same shape as {!parse_horizon}. *)
@@ -101,7 +83,6 @@ val phase_of_goal_status : goal_status -> Goal_phase.t
 
 type goal = {
   id : string;
-  horizon : horizon;
   title : string;
   metric : string option;
   target_value : string option;
@@ -141,9 +122,6 @@ type state = {
 (** {1 Rollup} *)
 
 type rollup = {
-  short_count : int;
-  mid_count : int;
-  long_count : int;
   active_count : int;
   paused_count : int;
   done_count : int;
@@ -156,9 +134,8 @@ type rollup = {
 val rollup_to_yojson : rollup -> Yojson.Safe.t
 
 val compute_rollup : goal list -> rollup
-(** Field-wise count of goals per horizon and per legacy
-    status.  Single pass; no allocation beyond the result
-    record. *)
+(** Field-wise count of goals per legacy status.  Single
+    pass; no allocation beyond the result record. *)
 
 (** {1 Persistence paths} *)
 
@@ -224,18 +201,16 @@ val delete_goal :
 
 val list_goals :
   Workspace_utils.config ->
-  ?horizon:horizon ->
   ?status:goal_status ->
   ?phase:Goal_phase.t ->
   unit ->
   goal list
 (** Reads the state, applies optional filters, then sorts
-    by [(horizon, priority, updated_at desc)]. *)
+    by [(priority, updated_at desc)]. *)
 
 val upsert_goal :
   Workspace_utils.config ->
   ?id:string ->
-  ?horizon:horizon ->
   ?title:string ->
   ?metric:string ->
   ?target_value:string ->

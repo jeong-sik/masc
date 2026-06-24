@@ -10,7 +10,6 @@ import type { Goal, Task } from '../../types'
 
 // -- Filter state ------------------------------------------------
 
-type HorizonFilter = 'all' | 'short' | 'mid' | 'long'
 export type GoalPhaseFilter =
   | 'all'
   | 'executing'
@@ -20,9 +19,6 @@ export type GoalPhaseFilter =
   | 'paused'
   | 'completed'
   | 'dropped'
-
-const horizonFilter = signal<HorizonFilter>('all')
-const phaseFilter = signal<GoalPhaseFilter>('all')
 
 // -- Task-level search (case-insensitive, title + description + assignee) --
 
@@ -58,28 +54,6 @@ export function toggleTaskExpand(id: string) {
   else next.add(id)
   expandedTasks.value = next
 }
-
-// -- Derived data ------------------------------------------------
-
-const filteredGoals = computed(() => {
-  let list = goals.value
-  if (horizonFilter.value !== 'all') {
-    list = list.filter(g => g.horizon === horizonFilter.value)
-  }
-  if (phaseFilter.value !== 'all') {
-    list = list.filter(g => g.phase === phaseFilter.value)
-  }
-  return list
-})
-
-export const groupedByHorizon = computed(() => {
-  const groups: Record<string, Goal[]> = { short: [], mid: [], long: [] }
-  for (const g of filteredGoals.value) {
-    const bucket = groups[g.horizon]
-    if (bucket) bucket.push(g)
-  }
-  return groups
-})
 
 // -- Lookups -----------------------------------------------------
 
@@ -134,39 +108,6 @@ export function goalProgressFor(goalId: string): GoalProgress {
   return goalProgressMap.value.get(goalId) ?? ZERO_PROGRESS
 }
 
-export const horizonProgress = computed<Record<'short' | 'mid' | 'long', GoalProgress>>(() => {
-  const goalsByHorizon: Record<'short' | 'mid' | 'long', Set<string>> = {
-    short: new Set(),
-    mid: new Set(),
-    long: new Set(),
-  }
-  for (const g of goals.value) {
-    const bucket = goalsByHorizon[g.horizon as 'short' | 'mid' | 'long']
-    if (bucket) bucket.add(g.id)
-  }
-  const acc: Record<'short' | 'mid' | 'long', GoalProgress> = {
-    short: { done: 0, total: 0, ratio: 0 },
-    mid: { done: 0, total: 0, ratio: 0 },
-    long: { done: 0, total: 0, ratio: 0 },
-  }
-  for (const t of tasks.value) {
-    const gid = t.goal_id
-    if (!gid || !isCountedTask(t)) continue
-    for (const h of ['short', 'mid', 'long'] as const) {
-      if (goalsByHorizon[h].has(gid)) {
-        acc[h].total += 1
-        if (isDoneTask(t)) acc[h].done += 1
-        break
-      }
-    }
-  }
-  for (const h of ['short', 'mid', 'long'] as const) {
-    const bucket = acc[h]
-    bucket.ratio = bucket.total > 0 ? bucket.done / bucket.total : 0
-  }
-  return acc
-})
-
 export function formatProgressPct(p: GoalProgress): string {
   if (p.total === 0) return '0%'
   return `${Math.round(p.ratio * 100)}%`
@@ -196,24 +137,6 @@ export function TaskProgressBar({ done, total, size = 'md' }: { done: number; to
 
 export function priorityStars(n: number): string {
   return '\u2605'.repeat(Math.min(n, 5)) + '\u2606'.repeat(Math.max(0, 5 - n))
-}
-
-export function horizonLabel(h: string): string {
-  switch (h) {
-    case 'short': return '단기'
-    case 'mid': return '중기'
-    case 'long': return '장기'
-    default: return h
-  }
-}
-
-export function horizonColor(h: string): string {
-  switch (h) {
-    case 'short': return 'var(--color-status-ok)'
-    case 'mid': return 'var(--amber-bright)'
-    case 'long': return 'var(--indigo)'
-    default: return 'var(--color-fg-muted)'
-  }
 }
 
 export function goalPhaseLabel(phase: string): string {

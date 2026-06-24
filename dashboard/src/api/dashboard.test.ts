@@ -21,6 +21,8 @@ import {
   fetchKeeperToolCalls,
   fetchKeeperToolStats,
   fetchKeeperTurnRecords,
+  parseMemoryOsFactCategory,
+  parseMemoryOsClaimKind,
   fetchKeeperTurnTranscript,
   fetchDashboardMemory,
   fetchDashboardMission,
@@ -57,7 +59,6 @@ function makeRawGoalNode(overrides: Record<string, unknown> = {}) {
   return {
     id: 'goal-1',
     title: 'Goal 1',
-    horizon: 'quarterly',
     status: 'active',
     status_color: '#fff',
     phase: 'executing',
@@ -540,6 +541,155 @@ describe('keeper tool telemetry fetchers', () => {
     expect(result.entries[0]?.record.finish_reason).toBe('completed')
     expect(result.entries[1]?.record.model).toBeUndefined()
     expect(result.entries[1]?.record.finish_reason).toBeUndefined()
+  })
+})
+
+describe('parseMemoryOsFactCategory (SSOT mirror of category_of_string)', () => {
+  it('maps every known token to its tag and absorbs the rest as a typed Unknown', () => {
+    const known = [
+      'code_change',
+      'fact',
+      'preference',
+      'blocker',
+      'goal',
+      'constraint',
+      'ephemeral',
+      'validated_approach',
+      'lesson',
+    ] as const
+    for (const token of known) {
+      expect(parseMemoryOsFactCategory(token)).toEqual({ tag: token })
+    }
+    // trim + lowercase, like the backend's String.lowercase_ascii (String.trim s)
+    expect(parseMemoryOsFactCategory('  FACT ')).toEqual({ tag: 'fact' })
+    // out-of-vocabulary preserves the raw label so a rising-Unknown rate is visible
+    expect(parseMemoryOsFactCategory('Speculation')).toEqual({ tag: 'unknown', raw: 'Speculation' })
+    expect(parseMemoryOsFactCategory('')).toEqual({ tag: 'unknown', raw: '' })
+  })
+})
+
+describe('parseMemoryOsClaimKind (SSOT mirror of claim_kind_of_string)', () => {
+  it('maps the three kinds and yields undefined for anything else', () => {
+    expect(parseMemoryOsClaimKind('self_observation')).toBe('self_observation')
+    expect(parseMemoryOsClaimKind('external_state')).toBe('external_state')
+    expect(parseMemoryOsClaimKind('durable_knowledge')).toBe('durable_knowledge')
+    expect(parseMemoryOsClaimKind(' DURABLE_KNOWLEDGE ')).toBe('durable_knowledge')
+    expect(parseMemoryOsClaimKind('nonsense')).toBeUndefined()
+  })
+})
+
+describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel-real-data §4a)', () => {
+  it('decodes fact rows with typed category / provenance / TTL, absorbs Unknown, drops malformed and the deleted score model', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        count: 0,
+        source: 'turn_record',
+        entries: [],
+        memory_os: {
+          schema: 'keeper.memory_os.recall_observability.v1',
+          keeper: 'keeper-alpha',
+          source: 'memory_os_files',
+          producer: 'keeper_librarian|keeper_memory_os_recall',
+          facts_store: '.masc/config/keepers/keeper-alpha.facts.jsonl',
+          episodes_store: '.masc/config/keepers/keeper-alpha/episodes',
+          recall_enabled: true,
+          now: 1_790_000_000,
+          now_iso: '2026-09-21T00:00:00Z',
+          read_errors: [],
+          episodes: { tail_limit: 12, shown: 0, current: 0, expired: 0, terminal_markers: 0, items: [] },
+          facts: {
+            tail_limit: 256,
+            shown: 3,
+            current: 2,
+            expired: 1,
+            items: [
+              {
+                claim: 'retention D0 = signup day',
+                category: 'constraint',
+                source: { trace_id: 't-1', turn: 4, tool_call_id: 'call_9' },
+                first_seen: 1_789_000_000,
+                first_seen_iso: '2026-09-09T...Z',
+                reference_time: 1_789_500_000,
+                valid_until: null,
+                valid_until_iso: null,
+                last_verified_at: 1_789_500_000,
+                current: true,
+                claim_kind: 'durable_knowledge',
+                external_ref: { kind: 'pr', id: '22198' },
+                // RFC-0247-deleted score fields: present on the wire here as a
+                // poison payload; the decoder must never copy them through.
+                salience: 0.92,
+                uses: 14,
+                confidence: 0.8,
+              },
+              {
+                claim: 'librarian emitted a category outside the taxonomy',
+                category: 'Speculation', // out-of-vocabulary → Unknown drift absorber
+                source: { trace_id: 't-2', turn: 5 }, // tool_call_id omitted → null
+                first_seen: 1_789_100_000,
+                first_seen_iso: '2026-09-09T...Z',
+                reference_time: 1_789_100_000,
+                valid_until: 1_789_900_000,
+                valid_until_iso: '2026-09-10T...Z',
+                last_verified_at: null,
+                current: false,
+                // claim_kind + external_ref omitted entirely → null
+              },
+              {
+                // malformed: missing required `claim` → dropped, never fabricated
+                category: 'fact',
+                source: { trace_id: 't-3', turn: 6 },
+                first_seen: 1,
+                reference_time: 1,
+                current: true,
+              },
+            ],
+          },
+        },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperTurnRecords('keeper-alpha')
+    const items = result.memory_os?.facts.items ?? []
+
+    // 3 rows in, malformed row dropped, 2 decoded
+    expect(items).toHaveLength(2)
+
+    const [first, second] = items
+    expect(first?.claim).toBe('retention D0 = signup day')
+    expect(first?.category).toEqual({ tag: 'constraint' })
+    expect(first?.source).toEqual({ trace_id: 't-1', turn: 4, tool_call_id: 'call_9' })
+    expect(first?.current).toBe(true)
+    expect(first?.valid_until).toBeNull()
+    expect(first?.reference_time).toBe(1_789_500_000)
+    expect(first?.claim_kind).toBe('durable_knowledge')
+    expect(first?.external_ref).toEqual({ kind: 'pr', id: '22198' })
+
+    // out-of-vocabulary category → typed Unknown arm carrying the raw label
+    expect(second?.category).toEqual({ tag: 'unknown', raw: 'Speculation' })
+    // omitted optionals are null, not fabricated
+    expect(second?.source.tool_call_id).toBeNull()
+    expect(second?.claim_kind).toBeNull()
+    expect(second?.external_ref).toBeNull()
+    expect(second?.current).toBe(false)
+
+    // RFC-0247 drift guard: the deleted composite-score fields never reappear,
+    // even when the wire payload carries them.
+    const deletedScoreKeys = [
+      'salience',
+      'uses',
+      'lastUsed',
+      'confidence',
+      'access_count',
+      'last_accessed',
+      'stale_factor',
+      'expected_lifetime_cycles',
+    ]
+    for (const key of deletedScoreKeys) {
+      expect(first as Record<string, unknown>).not.toHaveProperty(key)
+    }
   })
 })
 
@@ -1679,7 +1829,7 @@ describe('fetchKeeperConfig', () => {
         bound_workspace_ids: 'default',
         active_goal_ids: ['goal-runtime'],
         active_goals: [
-          { id: 'goal-runtime', title: 'Ship runtime clarity', horizon: 'mid' },
+          { id: 'goal-runtime', title: 'Ship runtime clarity' },
         ],
         active_goal_count: '1',
         missing_active_goal_ids: [],

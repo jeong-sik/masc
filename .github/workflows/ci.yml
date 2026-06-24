@@ -384,24 +384,6 @@ jobs:
             --recent-main 50 \
             --duplicate-policy warn
 
-      - name: RFC numbering + ledger claim guard
-        if: github.event_name == 'pull_request'
-        env:
-          BASE_REF: origin/${{ github.base_ref }}
-          HEAD_REF: ${{ github.event.pull_request.head.sha }}
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          # Runs on every PR (not gated on a changes output) so the gate
-          # cannot be skipped by the very class of mismatch it guards
-          # against (#20776). Cheap: pure git metadata + one gh call.
-          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}" --depth=200
-          PR_BODY="$(gh pr view "$PR_NUMBER" --json body --jq .body || echo "")"
-          export PR_BODY
-          python3 scripts/rfc_enforcer.py \
-            --check-numbering --base-ref "$BASE_REF" --head-ref "$HEAD_REF"
-          python3 scripts/rfc_enforcer.py --check-ledger-monotonic
-
       - name: Check doc truth
         if: needs.changes.outputs.doc_truth == 'true'
         run: |

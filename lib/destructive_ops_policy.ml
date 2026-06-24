@@ -115,22 +115,23 @@ let parse_pattern ~path (tbl : Otoml.t) : (destructive_pattern, load_error list)
     | Otoml.Type_error type_msg ->
       single_error (path ^ "." ^ key) (Printf.sprintf "%s: expected string, got %s" msg type_msg)
   in
-  try
-    match require_string ~key:"class" ~msg:"pattern class" with
-    | Error errs -> Error errs
-    | Ok class_str ->
-      (match class_of_string class_str with
-       | Error msg -> single_error (path ^ ".class") msg
-       | Ok class_ ->
-         match require_string ~key:"pattern" ~msg:"pattern substring" with
+  (* Every [Otoml] access lives inside [require_string], which catches
+     [Otoml.Type_error] and reports it at the field path.  Nothing else here
+     touches [Otoml] (class_of_string and the record build are pure), so there
+     is no outer [Otoml.Type_error] to catch — a non-table [tbl] surfaces as a
+     field-level error from the first [require_string] call. *)
+  match require_string ~key:"class" ~msg:"pattern class" with
+  | Error errs -> Error errs
+  | Ok class_str ->
+    (match class_of_string class_str with
+     | Error msg -> single_error (path ^ ".class") msg
+     | Ok class_ ->
+       match require_string ~key:"pattern" ~msg:"pattern substring" with
+       | Error errs -> Error errs
+       | Ok pattern ->
+         match require_string ~key:"description" ~msg:"pattern description" with
          | Error errs -> Error errs
-         | Ok pattern ->
-           match require_string ~key:"description" ~msg:"pattern description" with
-           | Error errs -> Error errs
-           | Ok description -> Ok { class_; pattern; description })
-  with
-  | Otoml.Type_error msg ->
-    single_error path (Printf.sprintf "expected table: %s" msg)
+         | Ok description -> Ok { class_; pattern; description })
 ;;
 
 (* ------------------------------------------------------------------ *)

@@ -111,6 +111,30 @@ describe('ApprovalsSurface', () => {
     expect(container.querySelector('[data-testid="approvals-queue"]')).not.toBeNull()
   }, 20000)
 
+  it('counts only the bad (critical) visual band in the 비가역·위험 KPI, matching the red card rails', async () => {
+    const { ApprovalsSurface } = await loadSurface([
+      queueItem({ id: 'c1', risk_level: 'critical' }),
+      queueItem({ id: 'h1', risk_level: 'high' }),
+      queueItem({ id: 'm1', risk_level: 'medium' }),
+      queueItem({ id: 'l1', risk_level: 'low' }),
+      queueItem({ id: 'c2', risk_level: 'critical' }),
+    ])
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    // Two critical items render the red sev-bad rail; high/medium/low do not.
+    const badCards = container.querySelectorAll('.ap-card.sev-bad')
+    expect(badCards.length).toBe(2)
+
+    // The KPI must equal that bad-band card count (not high+critical), so the
+    // red-styled value never claims irreversible items no card flags red.
+    const kpi = container.querySelector('[data-testid="approvals-kpi-irreversible"]')
+    expect(kpi).not.toBeNull()
+    expect(kpi?.textContent?.trim()).toBe('2')
+    expect(kpi?.className).toContain('bad')
+  }, 20000)
+
   it('renders a selected request dossier from backed approval queue fields', async () => {
     const { ApprovalsSurface } = await loadSurface([
       queueItem({

@@ -18,7 +18,6 @@ import type { KeeperApprovalQueueItem } from '../../types'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../../config/constants'
 import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 import {
-  isHighOrCriticalKeeperApprovalRisk,
   keeperApprovalRiskLabel,
   keeperApprovalRiskVisualBand,
   type KeeperApprovalRiskVisualBand,
@@ -284,10 +283,15 @@ export function ApprovalsSurface() {
   const selectedItem = items.find(item => item.id === selectedId) ?? items[0] ?? null
 
   const stats = useMemo(() => {
-    const risky = items.filter(i => isHighOrCriticalKeeperApprovalRisk(i.risk_level)).length
+    // "비가역 · 위험" counts the bad visual band only (critical), matching the red
+    // sev-bad card rail and the prototype's `sev === 'bad'` KPI. The broader
+    // high+critical predicate over-counts: a `high` item renders the warn (amber)
+    // band, so including it made the red-styled KPI claim irreversible items that
+    // no card flags red.
+    const irreversible = items.filter(i => keeperApprovalRiskVisualBand(i.risk_level) === 'bad').length
     const longest = items.reduce((max, i) => Math.max(max, i.waiting_s ?? 0), 0)
     const keepers = new Set(items.map(i => i.keeper_name)).size
-    return { risky, longest, keepers }
+    return { irreversible, longest, keepers }
   }, [items])
 
   return html`
@@ -316,7 +320,7 @@ export function ApprovalsSurface() {
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">비가역 · 위험</div>
-            <div class=${`ov-kpi-v ${stats.risky ? 'bad' : ''}`}>${stats.risky}</div>
+            <div class=${`ov-kpi-v ${stats.irreversible ? 'bad' : ''}`} data-testid="approvals-kpi-irreversible">${stats.irreversible}</div>
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">최장 대기</div>

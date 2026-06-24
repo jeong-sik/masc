@@ -8,6 +8,7 @@ type stimulus_kind =
   | Bootstrap
   | No_progress_recovery
   | Fusion_completed  (* RFC-0266: async masc_fusion completion wake *)
+  | Bg_completed  (* RFC-0290: generic background job completion wake *)
 
 type reaction_kind =
   | Turn_started
@@ -25,6 +26,7 @@ let stimulus_kind_to_string = function
   | Bootstrap -> "bootstrap"
   | No_progress_recovery -> "no_progress_recovery"
   | Fusion_completed -> "fusion_completed"
+  | Bg_completed -> "bg_completed"
 ;;
 
 (* stimulus_kind_to_string의 역. 닫힌 합에 없는 문자열(스키마 드리프트/손상 row)은
@@ -36,6 +38,7 @@ let stimulus_kind_of_string = function
   | "bootstrap" -> Some Bootstrap
   | "no_progress_recovery" -> Some No_progress_recovery
   | "fusion_completed" -> Some Fusion_completed
+  | "bg_completed" -> Some Bg_completed
   | _ -> None
 ;;
 
@@ -79,6 +82,7 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Bootstrap -> Bootstrap
   | Keeper_event_queue.No_progress_recovery -> No_progress_recovery
   | Keeper_event_queue.Fusion_completed _ -> Fusion_completed
+  | Keeper_event_queue.Bg_completed _ -> Bg_completed
 ;;
 
 let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -148,6 +152,11 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
   | Keeper_event_queue.No_progress_recovery -> "no_progress_recovery"
   | Keeper_event_queue.Fusion_completed fc ->
     Printf.sprintf "fusion_completed run_id=%s ok=%b" fc.run_id fc.ok
+  | Keeper_event_queue.Bg_completed c ->
+    Printf.sprintf
+      "bg_completed run_id=%s kind=%s"
+      c.bg_run_id
+      (Keeper_event_queue.bg_job_kind_to_string c.bg_kind)
 ;;
 
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
@@ -159,7 +168,8 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Board_signal bs -> bs.updated_at
     | Keeper_event_queue.Bootstrap
     | Keeper_event_queue.No_progress_recovery
-    | Keeper_event_queue.Fusion_completed _ -> None
+    | Keeper_event_queue.Fusion_completed _
+    | Keeper_event_queue.Bg_completed _ -> None
   in
   `Assoc
     (base_fields
@@ -506,7 +516,9 @@ let summarize_rows ~keeper_name ~limit rows =
        (* 닫힌 합의 모든 variant는 인식된 정상 stimulus다(미지원 아님). 새 variant
           추가 시 이 or-pattern이 non-exhaustive가 되어 컴파일 에러 → 분류 갱신을
           강제한다 (catch-all 금지). *)
-       | Some (Board_signal | Bootstrap | No_progress_recovery | Fusion_completed) -> ())
+       | Some
+           (Board_signal | Bootstrap | No_progress_recovery | Fusion_completed | Bg_completed)
+         -> ())
   in
   let note_payload_parse_error row =
     match assoc_field "stimulus" row with

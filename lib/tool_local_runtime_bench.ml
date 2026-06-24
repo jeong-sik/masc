@@ -21,20 +21,8 @@ include Tool_local_runtime_http
 module Oas_types = Agent_sdk.Types
 
 
-let http_error_message (err : Llm_provider.Http_client.http_error) =
-  match err with
-  | Llm_provider.Http_client.NetworkError { message; _ } -> message
-  | Llm_provider.Http_client.TimeoutError { message; phase } ->
-      Printf.sprintf "provider timeout: %s: %s"
-        (Llm_provider.Http_client.timeout_phase_to_label phase) message
-  | Llm_provider.Http_client.AcceptRejected { reason } -> reason
-  | Llm_provider.Http_client.ProviderTerminal { kind; message } ->
-      Printf.sprintf "provider terminal: %s" message
-  | Llm_provider.Http_client.ProviderFailure { kind; message } ->
-      Llm_provider.Http_client.provider_failure_to_string ~kind ~message
-  | Llm_provider.Http_client.HttpError { code; body } ->
-      Printf.sprintf "HTTP %d: %s" code
-        (if String.length body > 200 then String.sub body 0 200 ^ "..." else body)
+(* http_error_message moved to Provider_http_error.to_message (SSOT,
+   2026-06-24): four byte-for-output-identical copies unified. *)
 let pctl percentile values =
   match values with
   | [] -> None
@@ -48,7 +36,7 @@ let pctl percentile values =
       in
       List.nth_opt sorted index
 
-let error_message_of_http_error = http_error_message
+let error_message_of_http_error = Provider_http_error.to_message
 
 let per_runtime_breakdown_to_yojson counts =
   counts

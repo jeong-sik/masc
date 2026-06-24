@@ -57,10 +57,13 @@
   test_dashboard_attribution
   test_dashboard_oas_bridge
   test_masc_runtime_events
+  test_cancel_wall_bucket
+  test_provider_http_error
   test_workspace
   test_workspace_state_recovery
   test_exec_tap
   test_auth
+  test_auth_credential_hash_collision
   test_auth_credential_index_cache
   test_auth_error_kind
   test_auth_error_kind_dashboard_fallback
@@ -362,10 +365,13 @@
   test_dashboard_attribution
   test_dashboard_oas_bridge
   test_masc_runtime_events
+  test_cancel_wall_bucket
+  test_provider_http_error
   test_workspace
   test_workspace_state_recovery
   test_exec_tap
   test_auth
+  test_auth_credential_hash_collision
   test_auth_credential_index_cache
   test_auth_error_kind
   test_auth_error_kind_dashboard_fallback
@@ -1194,7 +1200,7 @@
 (test
  (name test_goal_loop_broadcast)
  (modules test_goal_loop_broadcast)
- (libraries alcotest masc masc_server eio_main))
+ (libraries alcotest masc masc_server masc_test_deps eio_main))
 
 ; Focused dashboard nudge feed projection.
 
@@ -1439,6 +1445,19 @@
   test_tool_args_envelope
   test_circuit_breaker)
  (libraries masc_test_deps))
+
+; PR-MASC-3: SSE registration token+session validation.
+; Runs with a tiny session max age so the expired-session regression case
+; can age out a session deterministically without waiting for the default
+; one-hour window.
+
+(test
+ (name test_sse_registration_auth)
+ (modules test_sse_registration_auth)
+ (libraries masc_test_deps)
+ (action
+  (setenv MASC_SESSION_MAX_AGE_SEC "0.5"
+   (run %{test}))))
 
 ; Special: Multi-module test suites
 

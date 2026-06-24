@@ -33,7 +33,18 @@ WARMUP_PROBES="${WARMUP_PROBES:-8}"
 PROBE_MAX_SEC="${PROBE_MAX_SEC:-15}"
 HEARTBEAT_SEC="${HEARTBEAT_SEC:-3}"              # keeper turn cadence (lower = more load)
 MOCK_DELAY_MS="${MOCK_DELAY_MS:-150}"           # simulated provider latency (keeps turns in-flight)
+MOCK_REPLY_BYTES="${MOCK_REPLY_BYTES:-50000}"   # mock reply size; large => each turn's post-await
+                                                # parse/record loads the main domain (the real keeper
+                                                # cost; a trivial "ack" barely contends with serving)
 WARM_TURNS_SEC="${WARM_TURNS_SEC:-20}"          # let keepers start turning before measuring
+# Reactive board injection: load-generating keepers with "do minimal work"
+# instructions quiesce after their autoboot burst (no real work => no turn), so
+# autonomous cadence alone leaves turns_during=0 during the probe window. Posting
+# board activity that @mentions a rotating keeper drives the Board_reactive wake
+# path (keeper_world_observation_board_signal.ml) so turns fire continuously.
+REACTIVE_INJECT="${REACTIVE_INJECT:-1}"
+INJECT_INTERVAL="${INJECT_INTERVAL:-0.3}"       # seconds between board posts
+INJECT_AUTHOR="${INJECT_AUTHOR:-operator}"
 THRESHOLD_MS="${THRESHOLD_MS:-250}"
 MAX_AMP="${MAX_AMP:-8}"
 PERSONA="${PERSONA:-analyst}"
@@ -88,19 +99,76 @@ SUMMARY_FILE="$RUN_DIR/summary.json"
 SERVER_LOG="$RUN_DIR/server.log"
 MOCK_LOG="$RUN_DIR/mock_requests.jsonl"
 MOCK_ERR="$RUN_DIR/mock_stderr.log"
+INJECT_LOG="$RUN_DIR/board_inject.log"
 BASE_PATH="$(harness_mktemp_dir "masc-keeperload-base")"
 echo "level_hogs,probes,p50_ms,p95_ms,max_ms,timeouts,turns_during" > "$CSV_FILE"
 
 MOCK_PID=""
 SERVER_PID=""
+INJECT_PID=""
 HOG_PIDS=()
 
 cleanup() {
   if [[ ${#HOG_PIDS[@]} -gt 0 ]]; then kill "${HOG_PIDS[@]}" 2>/dev/null; wait "${HOG_PIDS[@]}" 2>/dev/null; fi
+  [[ -n "$INJECT_PID" ]] && { kill "$INJECT_PID" 2>/dev/null; pkill -P "$INJECT_PID" 2>/dev/null; }
   [[ -n "$SERVER_PID" ]] && harness_stop_server "$SERVER_PID" >/dev/null 2>&1
   [[ -n "$MOCK_PID" ]] && kill "$MOCK_PID" 2>/dev/null
 }
 trap cleanup EXIT
+
+# Background loop posting board activity that @mentions a rotating keeper, driving
+# the reactive wake path so keepers turn continuously (not just the autoboot burst).
+# MCP Streamable HTTP is stateful: initialize -> capture Mcp-Session-Id from the
+# response headers -> notifications/initialized, then every tools/call carries the
+# session header. Without it the server returns -32600 "Mcp-Session-Id required".
+# Returns the session id on stdout (empty on failure).
+_mcp_open_session() {
+  local mcp="$1" hdr sid
+  hdr="$(mktemp)"
+  curl -sS -m 5 -D "$hdr" -o /dev/null -X POST "$mcp" \
+    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    -d '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"perf-harness","version":"1.0"},"capabilities":{}}}' \
+    2>/dev/null || true
+  sid="$(awk 'tolower($0) ~ /^mcp-session-id:/ {sub(/^[^:]+:[[:space:]]*/,"",$0); sub(/\r$/,"",$0); print; exit}' "$hdr")"
+  rm -f "$hdr"
+  [[ -z "$sid" ]] && { printf ''; return 1; }
+  curl -sS -m 5 -X POST "$mcp" \
+    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    -H "mcp-session-id: $sid" \
+    -d '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' >/dev/null 2>&1 || true
+  printf '%s' "$sid"
+}
+
+start_board_injector() {
+  [[ "$REACTIVE_INJECT" == "1" ]] || { echo "[harness] reactive injection disabled" >&2; return 0; }
+  local base_url="$1"
+  local mcp="${base_url%/}/mcp"
+  # Self-healing loop: lazily (re)open a session — the server can be too busy
+  # booting the keeper fleet to answer initialize at first, and a session can be
+  # dropped under load — so acquire it inside the loop and re-acquire on any
+  # session error rather than giving up once.
+  (
+    sid=""; i=0
+    while :; do
+      if [[ -z "$sid" ]]; then
+        sid="$(_mcp_open_session "$mcp")"
+        [[ -z "$sid" ]] && { sleep 1; continue; }
+      fi
+      i=$((i + 1)); k=$(( (i % KEEPERS) + 1 ))
+      resp="$(curl -sS --max-time 4 -X POST "$mcp" \
+        -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+        -H "mcp-session-id: $sid" \
+        -d "{\"jsonrpc\":\"2.0\",\"id\":$i,\"method\":\"tools/call\",\"params\":{\"name\":\"masc_board_post\",\"arguments\":{\"author\":\"$INJECT_AUTHOR\",\"title\":\"burst-$i\",\"content\":\"@perf_keeper_$k status check $i, please take a turn\",\"visibility\":\"internal\"}}}" \
+        2>/dev/null)"
+      printf '%s\n' "$resp" >>"$INJECT_LOG"
+      case "$resp" in *Mcp-Session-Id*|*"session"*required*|*-32600*) sid="" ;; esac
+      sleep "$INJECT_INTERVAL"
+    done
+  ) &
+  INJECT_PID=$!
+  disown 2>/dev/null || true
+  echo "[harness] board injector started (pid=$INJECT_PID, self-healing session, every ${INJECT_INTERVAL}s)" >&2
+}
 
 spawn_hogs() { local n="$1" i; HOG_PIDS=(); for ((i=0;i<n;i++)); do yes >/dev/null 2>&1 & HOG_PIDS+=("$!"); done; }
 kill_hogs() { if [[ ${#HOG_PIDS[@]} -gt 0 ]]; then kill "${HOG_PIDS[@]}" 2>/dev/null; wait "${HOG_PIDS[@]}" 2>/dev/null; fi; HOG_PIDS=(); }
@@ -130,6 +198,14 @@ measure_level() {
 
 # ---- seed config ------------------------------------------------------------
 mkdir -p "$BASE_PATH/.masc/config/keepers" "$BASE_PATH/.masc/config/personas"
+# Disable MCP auth for this ephemeral local harness so the board injector can call
+# masc_board_post without a Bearer token. default_auth_config (types_auth.ml) is
+# enabled+require_token when no file exists, which 401s the injector. This base
+# path is a throwaway temp dir on loopback only.
+mkdir -p "$BASE_PATH/.masc/auth"
+cat > "$BASE_PATH/.masc/auth/config.json" <<EOF
+{"enabled": false, "workspace_secret_hash": null, "require_token": false, "token_expiry_hours": 24}
+EOF
 if [[ -z "$PERSONA_SOURCE_ROOT" ]]; then
   echo "ERROR: set MASC_PERSONA_SOURCE_ROOT to a populated MASC root (one that has" >&2
   echo "       config/personas/$PERSONA), e.g. MASC_PERSONA_SOURCE_ROOT=<your-masc-root>" >&2
@@ -186,7 +262,7 @@ EOF
 done
 
 # ---- start mock + server ----------------------------------------------------
-python3 "$SCRIPT_DIR/mock_openai_provider.py" --port "$MOCK_PORT" --log "$MOCK_LOG" --delay-ms "$MOCK_DELAY_MS" >"$MOCK_ERR" 2>&1 &
+python3 "$SCRIPT_DIR/mock_openai_provider.py" --port "$MOCK_PORT" --log "$MOCK_LOG" --delay-ms "$MOCK_DELAY_MS" --reply-bytes "$MOCK_REPLY_BYTES" >"$MOCK_ERR" 2>&1 &
 MOCK_PID=$!
 : > "$MOCK_LOG"
 sleep 1
@@ -218,6 +294,8 @@ if ! harness_wait_for_health "$PORT" 45; then
   echo "ERROR: server failed health check" >&2; harness_print_log_tail "$SERVER_LOG"; exit 1
 fi
 BASE_URL="http://127.0.0.1:$PORT"
+: > "$INJECT_LOG"
+start_board_injector "$BASE_URL"
 echo "[harness] server pid=$SERVER_PID port=$PORT, $KEEPERS keeper(s) seeded; warming turns ${WARM_TURNS_SEC}s..." >&2
 sleep "$WARM_TURNS_SEC"
 

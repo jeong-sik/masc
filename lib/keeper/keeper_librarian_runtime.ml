@@ -359,25 +359,8 @@ let messages_for_librarian (inp : Keeper_librarian.input) =
          ])
 ;;
 
-let http_error_message (err : Llm_provider.Http_client.http_error) =
-  match err with
-  | Llm_provider.Http_client.NetworkError { message; _ } -> message
-  | Llm_provider.Http_client.TimeoutError { message; phase } ->
-    Printf.sprintf
-      "provider timeout: %s: %s"
-      (Llm_provider.Http_client.timeout_phase_to_label phase)
-      message
-  | Llm_provider.Http_client.AcceptRejected { reason } -> reason
-  | Llm_provider.Http_client.ProviderTerminal { kind = _; message } ->
-    Printf.sprintf "provider terminal: %s" message
-  | Llm_provider.Http_client.ProviderFailure { kind; message } ->
-    Llm_provider.Http_client.provider_failure_to_string ~kind ~message
-  | Llm_provider.Http_client.HttpError { code; body } ->
-    Printf.sprintf
-      "HTTP %d: %s"
-      code
-      (if String.length body > 200 then String.sub body 0 200 ^ "..." else body)
-;;
+(* http_error_message moved to Provider_http_error.to_message (SSOT,
+   2026-06-24): four byte-for-output-identical copies unified. *)
 
 let with_timeout ?clock ~timeout_sec f =
   match clock with
@@ -485,7 +468,7 @@ let extract_with_provider
           complete ~sw ~net ?clock ~config:provider_cfg ~messages ())
       with
       | None -> Transport_failed "librarian provider timed out"
-      | Some (Error err) -> Transport_failed (http_error_message err)
+      | Some (Error err) -> Transport_failed (Provider_http_error.to_message err)
       | Some (Ok response) ->
         let raw = Agent_sdk_response.text_of_response response |> String.trim in
         if String.equal raw ""

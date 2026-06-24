@@ -155,6 +155,15 @@ module McpSessionStore : sig
   (** Look up an MCP session by ID (updates activity). *)
   val get : string -> mcp_session option
 
+  (** Look up an MCP session by ID without updating activity or request
+      count.  Used by validation paths that should not refresh the session
+      expiry window. *)
+  val peek : string -> mcp_session option
+
+  (** Return an existing session by [id], or create one if missing.
+      Does not update activity when returning an existing session. *)
+  val get_or_create : id:string -> ?agent_name:string -> unit -> mcp_session
+
   (** Remove stale sessions exceeding max age.
       Returns the number removed. *)
   val cleanup_stale : unit -> int

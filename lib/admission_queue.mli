@@ -99,4 +99,17 @@ module For_testing : sig
   (** The production gate as a pure function: [fd_count] is forced only when
       [threshold] is [Some _]. Tests pass a counting thunk to assert the
       [/dev/fd] scan is skipped while gating is disabled ([None]). *)
+
+  val apply_active_delta :
+    active:int -> delta:int -> (int, [> `Counter_underflow of int ]) result
+  (** Pure counter update. Returns the new active count, or an explicit
+      underflow error instead of silently clamping. *)
+
+  val bump_active :
+    ?loc:string -> int -> (unit, [> `Counter_underflow of int ]) result
+  (** Global counter update used in production. Returns the explicit underflow
+      error and leaves the counter unchanged instead of silently clamping. *)
+
+  val get_active : unit -> int
+  (** Current active count from the global queue cell. *)
 end

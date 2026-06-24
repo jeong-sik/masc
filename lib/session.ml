@@ -99,6 +99,38 @@ let set_timestamps tracker category ts =
 (* Max notification queue size per session. Oldest events are dropped when exceeded. *)
 let max_notification_queue = 1000
 
+(** Classification of notifications so overflow logging is typed, not stringly. *)
+type notification_kind =
+  | Message
+  | System_notification
+
+let notification_kind_label = function
+  | Message -> "message"
+  | System_notification -> "system_notification"
+;;
+
+(** Drop the oldest event from a full session queue and return a structured log
+    record.  Previously the result of [Eio.Stream.take_nonblocking] was silently
+    discarded with [ignore]. *)
+let drop_oldest_event ~agent_name ~kind st =
+  match Eio.Stream.take_nonblocking st with
+  | None ->
+    (* Stream reported non-blocking take unavailable despite [length] being at
+       capacity.  This is a transient race; log it so operators can see it. *)
+    Log.Session.warn
+      "Notification queue race for %s (kind=%s): take_nonblocking returned none"
+      agent_name
+      (notification_kind_label kind);
+    None
+  | Some dropped_event ->
+    Log.Session.warn
+      "Dropped oldest notification for %s (queue capacity %d exceeded; kind=%s)"
+      agent_name
+      max_notification_queue
+      (notification_kind_label kind);
+    Some dropped_event
+;;
+
 let process_msg config state msg =
   match msg with
   | Register (agent_name, now, p) ->
@@ -158,13 +190,15 @@ let process_msg config state msg =
           in
           if should_send then begin
             let rec try_add st ev =
-            if Eio.Stream.length st >= max_notification_queue then begin
-              ignore (Eio.Stream.take_nonblocking st);
-              try_add st ev
-            end else
-              Eio.Stream.add st ev
-          in
-          try_add session.message_queue notification;
+              if Eio.Stream.length st >= max_notification_queue then begin
+                let (_ : Yojson.Safe.t option) =
+                  drop_oldest_event ~agent_name:name ~kind:Message st
+                in
+                try_add st ev
+              end else
+                Eio.Stream.add st ev
+            in
+            try_add session.message_queue notification;
             targets := name :: !targets
           end
         end
@@ -179,7 +213,9 @@ let process_msg config state msg =
       AgentMap.iter (fun _name session ->
         let rec try_add st ev =
           if Eio.Stream.length st >= max_notification_queue then begin
-            ignore (Eio.Stream.take_nonblocking st);
+            let (_ : Yojson.Safe.t option) =
+              drop_oldest_event ~agent_name:_name ~kind:System_notification st
+            in
             try_add st ev
           end else
             Eio.Stream.add st ev
@@ -519,6 +555,8 @@ module McpSessionStore = struct
     | Generate_id of string Eio.Promise.u
     | Create of string option * float * mcp_session Eio.Promise.u
     | Get of string * float * mcp_session option Eio.Promise.u
+    | Peek of string * mcp_session option Eio.Promise.u
+    | Get_or_create of string * string option * float * mcp_session Eio.Promise.u
     | Cleanup_stale of float * float * int Eio.Promise.u
     | List_all of mcp_session list Eio.Promise.u
     | Remove of string * bool Eio.Promise.u
@@ -575,6 +613,27 @@ module McpSessionStore = struct
              let session' = { session with last_activity = now; request_count = session.request_count + 1 } in
              Eio.Promise.resolve p (Some session');
              AgentMap.add session_id session' state)
+
+    | Peek (session_id, p) ->
+        Eio.Promise.resolve p (AgentMap.find_opt session_id state);
+        state
+
+    | Get_or_create (id, agent_name, now, p) ->
+        (match AgentMap.find_opt id state with
+         | Some session ->
+             Eio.Promise.resolve p session;
+             state
+         | None ->
+             let session = {
+               id;
+               created_at = now;
+               last_activity = now;
+               agent_name;
+               metadata = [];
+               request_count = 0;
+             } in
+             Eio.Promise.resolve p session;
+             AgentMap.add id session state)
 
     | Cleanup_stale (now, max_age_val, p) ->
         let state', stale_count =
@@ -635,6 +694,16 @@ module McpSessionStore = struct
   let get session_id =
     let p, r = Eio.Promise.create () in
     dispatch (Get (session_id, Time_compat.now (), r));
+    await_if_needed p
+
+  let peek session_id =
+    let p, r = Eio.Promise.create () in
+    dispatch (Peek (session_id, r));
+    await_if_needed p
+
+  let get_or_create ~id ?agent_name () =
+    let p, r = Eio.Promise.create () in
+    dispatch (Get_or_create (id, agent_name, Time_compat.now (), r));
     await_if_needed p
 
   let cleanup_stale () =

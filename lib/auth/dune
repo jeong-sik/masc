@@ -6,7 +6,6 @@
  (wrapped false)
  (private_modules
   auth_credential_base
-  auth_credential_token
   auth_metric_store)
  (libraries
   yojson
@@ -24,6 +23,7 @@
   masc.fs_compat
   masc.masc_log
   masc.masc_tool_dispatch
+  masc.otel_metric_store
   masc.tool_types
   time_compat)
  (preprocess

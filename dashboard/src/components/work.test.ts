@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
@@ -225,7 +225,9 @@ describe('Work', () => {
       const row = screen.getByTestId('job-row')
       expect(row).toBeTruthy()
       expect(row.classList.contains('wk-task')).toBe(true)
-      expect(screen.getByText('Blocked job')).toBeTruthy()
+      // Scope text search to the goal card — the WorkAside also surfaces this
+      // task as a blocker, so screen.getByText() would find multiple matches.
+      expect(within(card! as HTMLElement).getByText('Blocked job')).toBeTruthy()
       expect(screen.getByTestId('job-blocker').textContent).toContain('dependency missing')
       expect(screen.queryByTestId('job-detail')).toBeNull()
     })
@@ -449,6 +451,244 @@ describe('Work', () => {
 
       expect(screen.queryByTestId('work-task-detail')).toBeNull()
       expect(screen.queryByTestId('job-detail')).toBeNull()
+    })
+
+    // ── WorkAside operator triage panel ─────────────────────────────────────
+    describe('WorkAside operator triage panel', () => {
+      // All WorkAside tests use section: 'work' (set in beforeEach above)
+
+      it('renders the aside panel alongside the main goal list', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Active Goal', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = []
+
+        render(html`<${Work} />`)
+
+        // The main goal list and KPI strip should still be present
+        expect(screen.getByTestId('work-kpis')).toBeTruthy()
+        // The aside panel should be present
+        expect(screen.getByTestId('work-aside')).toBeTruthy()
+      })
+
+      it('shows calm empty state when no flagged goals, no todos, and no recent tasks', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Normal Goal', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = []
+
+        render(html`<${Work} />`)
+
+        const aside = screen.getByTestId('work-aside')
+        // "지금 상황" calm state
+        expect(aside.querySelector('[data-testid="wka-flagged-calm"]')?.textContent).toContain('주의 목표 없음')
+        // "해야 할 일" calm state
+        expect(aside.querySelector('[data-testid="wka-todo-calm"]')?.textContent).toContain('대기 중인 작업 없음')
+        // "최근 한 일" calm state
+        expect(aside.querySelector('[data-testid="wka-recent-calm"]')?.textContent).toContain('완료된 task 없음')
+      })
+
+      it('flags goals whose phase is not executing (blocked, paused, awaiting_verification, awaiting_approval)', () => {
+        goals.value = [
+          { id: 'G-ok', title: 'Executing Goal', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-bl', title: 'Blocked Goal', priority: 2, status: 'active', phase: 'blocked', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-pa', title: 'Paused Goal', priority: 3, status: 'active', phase: 'paused', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-vf', title: 'Verify Goal', priority: 4, status: 'active', phase: 'awaiting_verification', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = []
+
+        render(html`<${Work} />`)
+
+        const aside = screen.getByTestId('work-aside')
+        const flaggedItems = aside.querySelectorAll('[data-testid="wka-flagged-item"]')
+        // G-ok (executing) must NOT appear; the other 3 must appear
+        expect(flaggedItems.length).toBe(3)
+        const titles = Array.from(flaggedItems).map(el => el.textContent ?? '')
+        expect(titles.some(t => t.includes('Blocked Goal'))).toBe(true)
+        expect(titles.some(t => t.includes('Paused Goal'))).toBe(true)
+        expect(titles.some(t => t.includes('Verify Goal'))).toBe(true)
+        expect(titles.some(t => t.includes('Executing Goal'))).toBe(false)
+        // No calm state should be shown
+        expect(aside.querySelector('[data-testid="wka-flagged-calm"]')).toBeNull()
+      })
+
+      it('surfaces approval items for goals with require_completion_approval=true and phase=awaiting_approval', () => {
+        goals.value = [
+          {
+            id: 'G-ap',
+            title: 'Approval Goal',
+            priority: 1,
+            status: 'active',
+            phase: 'awaiting_approval',
+            require_completion_approval: true,
+            verifier_policy: {
+              inherit_mode: 'replace' as const,
+              principals: [{ id: 'lead-keeper' }],
+            },
+            created_at: '2026-01-01',
+            updated_at: '2026-01-01',
+          },
+          // require_completion_approval=true but NOT awaiting_approval phase → no approval item
+          {
+            id: 'G-ex',
+            title: 'Executing With Approval Policy',
+            priority: 2,
+            status: 'active',
+            phase: 'executing',
+            require_completion_approval: true,
+            created_at: '2026-01-01',
+            updated_at: '2026-01-01',
+          },
+        ]
+        tasks.value = []
+
+        render(html`<${Work} />`)
+
+        const aside = screen.getByTestId('work-aside')
+        const approvalItems = aside.querySelectorAll('[data-testid="wka-approval-item"]')
+        expect(approvalItems.length).toBe(1)
+        expect(approvalItems[0]?.textContent).toContain('Approval Goal')
+        expect(approvalItems[0]?.textContent).toContain('lead-keeper')
+      })
+
+      it('surfaces verify tasks (awaiting_verification status) with unsatisfied gate count', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = [
+          {
+            id: 'J-vf',
+            title: 'Verify Me',
+            goal_id: 'G-1',
+            status: 'awaiting_verification',
+            gate: {
+              done: { status: 'blocked', checks: [], reasons: ['ci failing'] },
+              inspect_to_implement: { status: 'ready', checks: [], reasons: [] },
+            },
+          },
+        ]
+
+        render(html`<${Work} />`)
+
+        const aside = screen.getByTestId('work-aside')
+        const verifyItems = aside.querySelectorAll('[data-testid="wka-verify-item"]')
+        expect(verifyItems.length).toBe(1)
+        expect(verifyItems[0]?.textContent).toContain('Verify Me')
+        // 1 unsatisfied gate (done=blocked, inspect=ready → 1 open)
+        expect(verifyItems[0]?.textContent).toContain('1 미충족')
+      })
+
+      it('surfaces tasks with a blocker note (cancelled with handoff_context.reason)', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = [
+          {
+            id: 'J-bl',
+            title: 'Blocked Task',
+            goal_id: 'G-1',
+            status: 'cancelled',
+            handoff_context: { summary: '', reason: 'dependency unavailable' },
+          },
+        ]
+
+        render(html`<${Work} />`)
+
+        const aside = screen.getByTestId('work-aside')
+        const blockerItems = aside.querySelectorAll('[data-testid="wka-blocker-item"]')
+        expect(blockerItems.length).toBe(1)
+        expect(blockerItems[0]?.textContent).toContain('Blocked Task')
+        expect(blockerItems[0]?.textContent).toContain('dependency unavailable')
+      })
+
+      it('surfaces claimable backlog tasks as a single aggregate claim button', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = [
+          { id: 'J-1', title: 'Unassigned A', goal_id: 'G-1', status: 'todo' },
+          { id: 'J-2', title: 'Unassigned B', goal_id: 'G-1', status: 'todo' },
+          { id: 'J-3', title: 'Assigned', goal_id: 'G-1', status: 'todo', assignee: 'sangsu' },
+        ]
+
+        render(html`<${Work} />`)
+
+        const aside = screen.getByTestId('work-aside')
+        const backlogItem = aside.querySelector('[data-testid="wka-backlog-item"]')
+        expect(backlogItem).toBeTruthy()
+        expect(backlogItem?.textContent).toContain('미배정 task 2건')
+      })
+
+      it('surfaces done tasks in the 최근 한 일 section', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = [
+          { id: 'J-done1', title: 'Finished Task', goal_id: 'G-1', status: 'done' },
+          { id: 'J-done2', title: 'Another Done', goal_id: 'G-1', status: 'done' },
+          { id: 'J-wip', title: 'In Progress', goal_id: 'G-1', status: 'in_progress' },
+        ]
+
+        render(html`<${Work} />`)
+
+        const aside = screen.getByTestId('work-aside')
+        const recentItems = aside.querySelectorAll('[data-testid="wka-recent-item"]')
+        expect(recentItems.length).toBe(2)
+        const texts = Array.from(recentItems).map(el => el.textContent ?? '')
+        expect(texts.some(t => t.includes('Finished Task'))).toBe(true)
+        expect(texts.some(t => t.includes('Another Done'))).toBe(true)
+        expect(aside.querySelector('[data-testid="wka-recent-calm"]')).toBeNull()
+      })
+
+      it('toggles to collapsed rail on collapse button click and back on railbtn click', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = []
+
+        // Clear any persisted collapsed state from other tests
+        try { localStorage.removeItem('v2.wkAsideCollapsed') } catch (_) { /* noop */ }
+
+        render(html`<${Work} />`)
+
+        // Expanded state: main aside is visible
+        expect(screen.getByTestId('work-aside')).toBeTruthy()
+        expect(screen.queryByTestId('work-aside-collapsed')).toBeNull()
+
+        // Click collapse button
+        const collapseBtn = screen.getByTestId('work-aside').querySelector('.wka-collapse')
+        expect(collapseBtn).toBeTruthy()
+        fireEvent.click(collapseBtn!)
+
+        // Collapsed rail should now render
+        expect(screen.queryByTestId('work-aside')).toBeNull()
+        expect(screen.getByTestId('work-aside-collapsed')).toBeTruthy()
+
+        // Click expand
+        const railBtn = screen.getByTestId('work-aside-collapsed').querySelector('.wka-railbtn')
+        expect(railBtn).toBeTruthy()
+        fireEvent.click(railBtn!)
+
+        // Back to expanded
+        expect(screen.getByTestId('work-aside')).toBeTruthy()
+        expect(screen.queryByTestId('work-aside-collapsed')).toBeNull()
+      })
+
+      it('does not mix phase classification with string substring matching', () => {
+        // Regression guard: goals in `executing` phase must never appear as flagged,
+        // even if their title/status string contains substrings like 'blocked'.
+        goals.value = [
+          { id: 'G-tricky', title: 'Not blocked — just named oddly', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = []
+
+        render(html`<${Work} />`)
+
+        const aside = screen.getByTestId('work-aside')
+        // No flagged items — executing goals are not flagged
+        expect(aside.querySelectorAll('[data-testid="wka-flagged-item"]').length).toBe(0)
+        expect(aside.querySelector('[data-testid="wka-flagged-calm"]')).toBeTruthy()
+      })
     })
   })
 })

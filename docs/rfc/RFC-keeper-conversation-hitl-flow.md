@@ -1,6 +1,6 @@
 # RFC: Keeper-conversation HITL review flow (post-"대화에서 검토")
 
-- Status: Draft
+- Status: Accepted (§4.1-A implemented PR #22230; §4.2 deferred)
 - Author: vincent (+ Claude Opus 4.8)
 - Created: 2026-06-24
 - Related: approvals surface fidelity series (PRs #22201/#22202/#22204/#22211/#22216 — the approvals surface itself, now landed)
@@ -64,9 +64,9 @@ One module (`keeper_approval_queue`, the in-memory HITL queue) is the single sou
 - 4.1-A: render `KeeperDetailPage` for a keeper whose `trust.approval_state.pending_first` is set, assert the conversation view shows the cue + a link to the approvals surface; assert it is absent when no pending approval. Non-vacuous via revert.
 - 4.2: assert `openKeeperWorkspace` passes `turn`; assert the conversation reads `params.turn` and scrolls/highlights that turn node.
 
-## 7. Open decisions (blocking implementation)
+## 7. Decisions (resolved 2026-06-24)
 
-1. §4.1: option A / B / C?
-2. §4.2: now or defer?
+1. §4.1: **Option A** (slim pending-review cue in the conversation view, linking to the approvals queue). Implemented in PR #22230.
+2. §4.2 (turn-anchoring): **deferred** — not pursued now; §4.1-A delivers the landing-context value, and turn-anchoring is a larger 2-surface change.
 
-Until these are answered, no code lands — this is a design-only RFC. The approvals surface (the pixel-perfect HITL screen the loop targeted) is complete; this RFC covers the adjacent keeper-detail surface, which the design mock does not specify.
+The approvals surface (the pixel-perfect HITL screen the loop targeted) is complete; this RFC covers the adjacent keeper-detail surface, which the design mock does not specify. With §4.1-A landed and §4.2 deferred, this RFC's scope is resolved; §4.2 can be reopened as a follow-up if turn-anchoring is wanted.

@@ -1,5 +1,5 @@
 ---
-rfc: "0293"
+rfc: "keeper-memory-panel-real-data"
 title: "Keeper memory panel: real-data backing (no fabrication, no score resurrection)"
 status: Draft
 created: 2026-06-24
@@ -11,7 +11,7 @@ related: ["0233", "0244", "0247", "0259", "0285"]
 implementation_prs: []
 ---
 
-# RFC-0293: Keeper memory panel — real-data backing
+# RFC (keeper-memory-panel-real-data): Keeper memory panel — real-data backing
 
 Status: Draft · The live "Keeper 메모리" panel renders zeros from an empty-prop wiring, and the
 Claude-Design prototype it ports encodes a `score · usage · pin · timeline` model the backend
@@ -102,7 +102,7 @@ Lowest risk, highest value, no new persistence. Backend touches one function; th
 exist on `fact`** (no new fields):
 
 ```ocaml
-(* RFC-0293 §4a: surface the fact rows the panel renders. Serializes only
+(* RFC-keeper-memory-panel-real-data §4a: surface the fact rows the panel renders. Serializes only
    existing [fact] structure — claim, typed category, provenance, the three
    timestamps, current-ness — NOT the deleted score fields (RFC-0247). *)
 let memory_os_fact_json ~now (f : Keeper_memory_os_types.fact) =

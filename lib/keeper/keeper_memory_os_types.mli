@@ -244,7 +244,7 @@ val provenance_event_to_json : provenance_event -> Yojson.Safe.t
 val provenance_event_of_json : Yojson.Safe.t -> provenance_event option
 
 val external_ref_to_json : external_ref -> Yojson.Safe.t
-(** RFC-0293: the on-disk external-ref JSON shape ([{ kind; id }]). Exported so
+(** RFC-keeper-memory-panel-real-data: the on-disk external-ref JSON shape ([{ kind; id }]). Exported so
     the dashboard fact projection ([Server_dashboard_http_keeper_api.memory_os_fact_json])
     surfaces an external_ref byte-identical to storage, instead of re-inlining the
     shape in the server (SSOT). *)

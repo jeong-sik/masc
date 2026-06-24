@@ -3068,7 +3068,7 @@ export type MemoryOsEpisodeSummary = {
   summary: string
 }
 
-// RFC-0293 §4a: the librarian taxonomy as a closed TS union mirroring the OCaml
+// RFC-keeper-memory-panel-real-data §4a: the librarian taxonomy as a closed TS union mirroring the OCaml
 // `category` sum (keeper_memory_os_types.ml — category_to_string is the wire SSOT).
 // The wire carries a string token; it is parsed once at this decode boundary into
 // a tagged value. An out-of-vocabulary token becomes { tag: 'unknown', raw } — the
@@ -3182,7 +3182,7 @@ export type MemoryOsTurnRecordSnapshot = {
     shown: number
     current: number
     expired: number
-    // RFC-0293 §4a: the individual fact rows (bounded by tail_limit; `shown`
+    // RFC-keeper-memory-panel-real-data §4a: the individual fact rows (bounded by tail_limit; `shown`
     // documents the bound so a truncated tail is visible, not silent).
     items: MemoryOsFact[]
   }

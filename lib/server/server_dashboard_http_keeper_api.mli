@@ -182,7 +182,7 @@ val handle_keeper_get_subroutes :
 
 val memory_os_fact_json :
   now:float -> Keeper_memory_os_types.fact -> Yojson.Safe.t
-(** RFC-0293 §4a: one fact's read-only dashboard projection — claim, typed
+(** RFC-keeper-memory-panel-real-data §4a: one fact's read-only dashboard projection — claim, typed
     category, provenance, the three timestamps, current-ness, and the optional
     external_ref / claim_kind. Serializes only fields present on [fact]; it
     cannot emit the score fields RFC-0247 deleted (they are not on the record).

@@ -69,7 +69,7 @@ let memory_os_episode_json ~now (episode : Keeper_memory_os_types.episode) =
     ]
 ;;
 
-(* RFC-0293 §4a: surface the fact rows the panel renders, mirroring
+(* RFC-keeper-memory-panel-real-data §4a: surface the fact rows the panel renders, mirroring
    [memory_os_episode_json]. Serializes ONLY the existing [fact] structure —
    claim, typed category, provenance, the three timestamps, and current-ness —
    never the deleted score fields (confidence / access_count / last_accessed,
@@ -150,7 +150,7 @@ let memory_os_dashboard_json ~keeper_id =
           ; "shown", `Int (List.length facts)
           ; "current", `Int current_facts
           ; "expired", `Int (List.length facts - current_facts)
-            (* RFC-0293 §4a: the individual fact rows (previously counts-only).
+            (* RFC-keeper-memory-panel-real-data §4a: the individual fact rows (previously counts-only).
                Bounded by [fact_tail_limit]; [shown] documents the bound so a
                truncated tail is visible, not silent. *)
           ; "items", `List (List.map (memory_os_fact_json ~now) facts)

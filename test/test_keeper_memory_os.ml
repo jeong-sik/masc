@@ -3857,7 +3857,7 @@ let test_retention_rank_demotes_volatile () =
     (Policy.retention_rank ~now volatile < Policy.retention_rank ~now durable)
 ;;
 
-(* RFC-0293 §4a / §8: the dashboard fact projection serializes the real [fact]
+(* RFC-keeper-memory-panel-real-data §4a / §8: the dashboard fact projection serializes the real [fact]
    structure and never the score fields RFC-0247 deleted. Drift guard sibling of
    [test_legacy_row_with_dead_score_keys_decodes]: a future edit that re-adds
    confidence / access_count / last_accessed / salience / uses turns this red. *)
@@ -3980,7 +3980,7 @@ let () =
             `Quick
             test_librarian_runtime_reports_fact_upsert_failure
         ; Alcotest.test_case
-            "dashboard fact json omits deleted score keys (RFC-0293 §4a)"
+            "dashboard fact json omits deleted score keys (RFC-keeper-memory-panel-real-data §4a)"
             `Quick
             test_dashboard_fact_json_omits_score_keys
         ; Alcotest.test_case

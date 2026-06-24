@@ -74,7 +74,7 @@
 
 /* keeper-v2/styles/memory.css:16-20 */
 .mem-empty { font-size: 12px; color: var(--text-dim); padding: 10px 2px; }
-/* RFC-0293: honest disclosure for a section whose backend source lands in a
+/* RFC-keeper-memory-panel-real-data: honest disclosure for a section whose backend source lands in a
    later phase — visually distinct from a plain empty state (left accent), but
    not styled as data. */
 .mem-disclosure { border-left: 2px solid var(--border-main); padding-left: 10px; color: var(--text-dim); }

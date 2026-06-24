@@ -579,7 +579,7 @@ describe('parseMemoryOsClaimKind (SSOT mirror of claim_kind_of_string)', () => {
   })
 })
 
-describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-0293 §4a)', () => {
+describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel-real-data §4a)', () => {
   it('decodes fact rows with typed category / provenance / TTL, absorbs Unknown, drops malformed and the deleted score model', async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({

@@ -3,11 +3,11 @@
 // Pixel-matched to the Claude-Design prototype keeper-v2/memory.jsx — same
 // drawer shell, section headers, scope toggle, and `.mem-*` classes
 // (memory-inspector-v2.css) — but every datum is REAL, fetched from
-// `GET /api/v1/keepers/:name/turn-records` (RFC-0293). The prototype's
+// `GET /api/v1/keepers/:name/turn-records` (RFC-keeper-memory-panel-real-data). The prototype's
 // fixture model (fabricated `memComposition` magic + the RFC-0247-deleted
 // salience/uses/lastUsed score fields) is gone.
 //
-// Section data sources (RFC-0293 §4; hybrid treatment confirmed 2026-06-24):
+// Section data sources (RFC-keeper-memory-panel-real-data §4; hybrid treatment confirmed 2026-06-24):
 //   컨텍스트 구성        ← real prompt-assembly block bytes (entries[latest].blocks)
 //   장기 메모리 스토어    ← real memory_os.facts.items (typed category, provenance, TTL)
 //   압축 유지·요약        ← real memory_os.episodes.items (summary + terminal_marker)

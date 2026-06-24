@@ -7,17 +7,17 @@
     dispatch, and neither layer reaches across the [lib/tool] <-> [lib/server]
     boundary (software-development.md boundary-violation antipattern).
 
-    Adding a kind here makes it (a) accepted by the creation validator and
-    (b) declared as supported by the consumer. The consumer adapter must still
-    implement [accepts]/[dispatch] for the kind — this list is the contract,
-    the adapter is the implementation. A supported kind without an adapter
-    branch surfaces at dispatch time as a failed execution with a recorded
-    reason, rather than being silently accepted at creation and dying later:
-    that silent accept-then-die gap is exactly what this module closes. *)
+    Adding a kind here makes it (a) declared as dispatchable by the consumer and
+    (b) listed in {!unsupported_error}'s allow-list. It does NOT by itself make
+    the kind accepted at creation: each side-effecting kind carries its own
+    payload + risk-class contract, enforced by a per-kind branch in
+    [Tool_schedule.validate_known_payload_request]. A kind listed here but
+    without a validator branch stays rejected at creation as an unsupported
+    side-effecting kind — closing the silent accept-then-die gap, just in the
+    safe (reject) direction. So a new side-effecting kind needs BOTH the list
+    entry and a validator branch. *)
 
 let supported = [ "masc.board_post" ]
-
-let is_supported kind = List.mem kind supported
 
 let supported_list_string () = String.concat ", " supported
 

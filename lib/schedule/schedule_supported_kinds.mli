@@ -3,18 +3,19 @@
     This neutral module is the contract surface between the schedule creation
     tool layer ({!Tool_schedule}) and the production consumer
     ({!Server_schedule_consumers}); see {!Schedule_supported_kinds} for the
-    full design rationale. Both layers reference this list so that a payload
-    kind accepted at creation is exactly one the consumer declares it can
-    dispatch, with neither layer reaching across the [lib/tool] <-> [lib/server]
-    boundary. *)
+    full design rationale. Neither layer reaches across the
+    [lib/tool] <-> [lib/server] boundary. *)
 
 val supported : string list
 (** Dispatchable side-effecting payload kinds the production consumer can run.
-    Adding a kind here makes it accepted by the creation validator and declared
-    as supported by the consumer; the consumer adapter must still implement
-    [accepts]/[dispatch] for it. *)
-
-val is_supported : string -> bool
+    This is the consumer's dispatch set and the allow-list in
+    {!unsupported_error}. Note: the creation validator does NOT grant
+    acceptance from this list alone — each side-effecting kind carries its own
+    payload + risk-class contract enforced by a per-kind branch in
+    [Tool_schedule.validate_known_payload_request]. So adding a side-effecting
+    kind requires BOTH an entry here (consumer dispatch + reject message) AND a
+    validator branch (creation acceptance); the list alone leaves it rejected at
+    creation as an unsupported side-effecting kind. *)
 
 val supported_list_string : unit -> string
 

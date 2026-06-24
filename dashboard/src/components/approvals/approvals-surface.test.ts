@@ -446,4 +446,28 @@ describe('ApprovalsSurface', () => {
       keeper: 'masc-improver',
     })
   })
+
+  it('renders sandbox metadata as a non-interactive span, not a clickable goal link', async () => {
+    const { ApprovalsSurface } = await loadSurface([
+      queueItem({ id: 'appr-sb', keeper_name: 'masc-improver', sandbox_target: 'project-root', task_id: 'T-1' }),
+    ])
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const card = container.querySelector('[data-approval-id="appr-sb"]')
+    // sandbox text is a static .ap-req-meta span (no click affordance)
+    const meta = card?.querySelector('.ap-req-meta')
+    expect(meta).not.toBeNull()
+    expect(meta?.tagName).toBe('SPAN')
+    expect(meta?.textContent).toContain('sandbox')
+    expect(meta?.textContent).toContain('project-root')
+    // the clickable .ap-req-goal is the task/goal button only — never the sandbox
+    const goalEls = Array.from(card?.querySelectorAll('.ap-req-goal') ?? [])
+    expect(goalEls.length).toBeGreaterThan(0)
+    for (const el of goalEls) {
+      expect(el.tagName).toBe('BUTTON')
+      expect(el.textContent).not.toContain('sandbox')
+    }
+  })
 })

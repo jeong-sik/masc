@@ -194,7 +194,7 @@ function ApprovalCard({
                     .filter(Boolean)
                     .join(' · ')}</button>`
                 : null}
-              ${sandbox ? html`<span class="ap-req-goal mono">sandbox ${sandbox}</span>` : null}
+              ${sandbox ? html`<span class="ap-req-meta mono">sandbox ${sandbox}</span>` : null}
             </div>
             <div class="ap-req-quote">
               ${item.input_preview?.trim() ? `“${item.input_preview.trim()}”` : '입력 미리보기 없음'}

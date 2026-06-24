@@ -1,4 +1,4 @@
-# RFC-0289 caller context — closed SSE event-type sum
+# RFC-0291 caller context — closed SSE event-type sum
 
 Grounding source: 5-lens workflow (wf_42c2aeb6-624, 2026-06-23) over
 `origin/main` (`ad4b654f48`). Read with the Read tool / plain grep (rg masks

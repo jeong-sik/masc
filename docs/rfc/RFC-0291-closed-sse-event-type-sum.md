@@ -1,9 +1,9 @@
 ---
-rfc: "0289"
+rfc: "0291"
 title: "Closed SSE event-type sum + typed broadcast — RFC-0004 Phase A0 Wave 2 increment"
 status: Draft
 created: 2026-06-23
-updated: 2026-06-23
+updated: 2026-06-24
 author: vincent
 supersedes: []
 superseded_by: null
@@ -11,7 +11,7 @@ related: ["0004", "0284", "0042"]
 implementation_prs: []
 ---
 
-# RFC-0289: Closed SSE event-type sum + typed broadcast
+# RFC-0291: Closed SSE event-type sum + typed broadcast
 
 Status: Draft · The SSE wire `type` discriminator is stringly-typed across ~34
 backend emit sites. The frontend parity gate only inventories exact-match
@@ -178,17 +178,32 @@ Three delivery channels carry event-types: the Observers/All broadcast bus, the
 `broadcast_presence` (presence-class `keeper_heartbeat`/`keeper_composite_changed`).
 This RFC types the **payload `"type"` axis shared by all three** — the builder is
 channel-agnostic, so the two indirect emits (§3.4) and presence emits use the
-same `Sse_event_type.t`. The ban-lint keys on `("type", \`String "…")`
-construction regardless of which channel function consumes it.
+same `Sse_event_type.t`. The ban-lint keys on `("type", \`String …)`
+construction — literal, label-argument, or variable-binding — regardless of
+which channel function consumes it.
 
 ## §5 Raw-string ban-lint
 Add `scripts/ci/check-sse-event-type-safety.sh`, modeled on the existing
 **diff-aware** `scripts/ci/check-enum-string-safety.sh` (meta-issue #9521):
 
 - Scans `base...head` + staged + worktree diffs (`--base`/`--head` modes).
-- Fails on a **new** raw `("type", \`String "literal")` (or `"type":"literal"`
-  in TS) introduced at/near a broadcast/payload site that is not produced via
-  `Sse_event_type.to_string` / the typed builder.
+- Fails on **new** raw event-type string construction in any of the following
+  shapes, unless the value is produced via `Sse_event_type.to_string` / the typed
+  builder:
+  1. **Literal pair construction** in OCaml: `("type", \`String "literal")`
+     (or the equivalent `"type":"literal"` in TypeScript).
+  2. **Label-argument literal** in OCaml: `~event_type:"operator_snapshot"`,
+     `~event_type:"operator_digest"`, `~event_type:"execution_snapshot"`,
+     `~event_type:"transport_health_snapshot"`, and any other label that feeds
+     a payload `"type"` field (e.g. `server_dashboard_http_execution_surfaces.ml`
+     helper signatures).
+  3. **Variable-binding pair construction** in OCaml:
+     `("type", \`String event_type)` or
+     `("type", \`String goal_loop_broadcast_event_type)` — i.e. the right-hand
+     side is an identifier rather than a constructor, even when the identifier
+     itself is bound from a typed value. These are permitted only when the
+     identifier's type is `Sse_event_type.t` (or the expression is the typed
+     builder's output), not when it is an unvalidated `string`.
 - Honors an inline escape comment for the one sanctioned dynamic site
   (`Unknown_oas`), following the established `STR-OK | STRING-BOUNDARY-OK`
   convention (`check-enum-string-safety.sh:66-74`).

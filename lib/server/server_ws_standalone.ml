@@ -138,6 +138,7 @@ let start
                        Ws_server.handle
                          ~max_message:
                            (Server_mcp_transport_ws.max_inbound_message_bytes ())
+                         ~clock
                          flow
                          (make_websocket_handler ~sw:conn_sw ~clock ~on_message
                             client_addr)

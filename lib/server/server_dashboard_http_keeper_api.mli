@@ -188,3 +188,10 @@ val memory_os_fact_json :
     cannot emit the score fields RFC-0247 deleted (they are not on the record).
     Exported so the test suite can assert the JSON shape (and that drift guard)
     in isolation, per the module's "JSON shapes exported for testing" convention. *)
+
+val memory_os_dashboard_json : keeper_id:string -> Yojson.Safe.t
+(** RFC-keeper-memory-panel-real-data §4a: the full recall-observability payload
+    for one keeper — episode/fact counts plus the per-row [items] arrays read
+    from the keeper's on-disk stores. Exported so the test suite can assert the
+    facts [items] are wired (one row per persisted fact); [memory_os_fact_json],
+    being a pure per-fact projection, cannot guard that wiring on its own. *)

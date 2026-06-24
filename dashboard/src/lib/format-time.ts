@@ -16,6 +16,15 @@ export function formatRelativeSec(deltaSec: number): string {
   return rtf.format(-Math.round(deltaSec / SECONDS_PER_DAY), 'day')
 }
 
+/** Mirror of {@link formatRelativeSec} for a FUTURE instant: a non-negative
+ *  "seconds until" delta formatted with a positive sign — "1시간 후", "3분 후". */
+export function formatRelativeUntilSec(deltaSec: number): string {
+  if (deltaSec < SECONDS_PER_MINUTE) return rtf.format(deltaSec, 'second')
+  if (deltaSec < SECONDS_PER_HOUR) return rtf.format(Math.round(deltaSec / SECONDS_PER_MINUTE), 'minute')
+  if (deltaSec < SECONDS_PER_DAY) return rtf.format(Math.round(deltaSec / SECONDS_PER_HOUR), 'hour')
+  return rtf.format(Math.round(deltaSec / SECONDS_PER_DAY), 'day')
+}
+
 export function normalizeTimestampMs(ts: number): number {
   return ts < UNIX_MS_THRESHOLD ? ts * 1000 : ts
 }
@@ -115,6 +124,19 @@ export function formatTimeAgo(ts: string | number): string {
       ? normalizeTimestampMs(ts)
       : new Date(ts).getTime()
   return formatRelativeSec(Math.max(0, Math.floor((now - then) / 1000)))
+}
+
+/** Relative time until a FUTURE timestamp — "1시간 후", "3분 후". Mirror of
+ *  {@link formatTimeAgo}; an already-past instant clamps to 0 ("지금"). Use this
+ *  (not formatTimeAgo) for future instants — formatTimeAgo floors the future to
+ *  0 and renders "지금", which is wrong for a not-yet-elapsed deadline. */
+export function formatTimeUntil(ts: string | number): string {
+  const now = Date.now()
+  const then =
+    typeof ts === 'number'
+      ? normalizeTimestampMs(ts)
+      : new Date(ts).getTime()
+  return formatRelativeUntilSec(Math.max(0, Math.floor((then - now) / 1000)))
 }
 
 /** Format any date value (ISO string, unix seconds, or null) as Korean localized datetime.

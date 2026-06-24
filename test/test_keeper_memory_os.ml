@@ -3861,6 +3861,11 @@ let test_retention_rank_demotes_volatile () =
    structure and never the score fields RFC-0247 deleted. Drift guard sibling of
    [test_legacy_row_with_dead_score_keys_decodes]: a future edit that re-adds
    confidence / access_count / last_accessed / salience / uses turns this red. *)
+(* Honest scope: the score keys are absent by construction today — [type fact]
+   carries no such fields, so [memory_os_fact_json] structurally cannot emit
+   them. This case therefore guards a *re-introduction*: it would go red only if
+   a score field were added back to BOTH the record and the projection. It is
+   not (and cannot be) load-bearing against the current code alone. *)
 let test_dashboard_fact_json_omits_score_keys () =
   let now = 1_000_000.0 in
   let f =
@@ -3915,6 +3920,41 @@ let test_dashboard_fact_json_omits_optional_when_none () =
     Alcotest.(check (float 0.001))
       "reference_time falls back to last_verified_at" (now -. 3600.0) t
   | _ -> Alcotest.fail "reference_time must be a float"
+;;
+
+(* The [items] wiring lives in [memory_os_dashboard_json], not the pure
+   [memory_os_fact_json]; the two fact_json tests above exercise the projection
+   in isolation and would stay green if the dashboard payload stopped emitting
+   the rows (FE then degrades silently to a zero-row panel). This drives the
+   integration path on disk: persist N facts, then assert facts.items carries
+   one row per fact, so reverting the [items] wiring (back to counts-only) is
+   caught here. *)
+let test_dashboard_json_wires_one_fact_item_per_fact () =
+  with_temp_keepers_dir (fun _dir ->
+    let now = 1_000_000.0 in
+    let keeper_id = "memory-panel-test" in
+    let facts =
+      [ { (fact_fixture ~now ()) with Types.claim = "first claim" }
+      ; { (fact_fixture ~now ()) with Types.claim = "second claim" }
+      ; { (fact_fixture ~now ()) with Types.claim = "third claim" }
+      ]
+    in
+    List.iter (Memory_io.append_fact ~keeper_id) facts;
+    let items =
+      match Server_dashboard_http_keeper_api.memory_os_dashboard_json ~keeper_id with
+      | `Assoc top ->
+        (match List.assoc_opt "facts" top with
+         | Some (`Assoc facts_obj) ->
+           (match List.assoc_opt "items" facts_obj with
+            | Some (`List items) -> items
+            | _ -> Alcotest.fail "facts.items must be a JSON list")
+         | _ -> Alcotest.fail "facts must be a JSON object")
+      | _ -> Alcotest.fail "memory_os_dashboard_json must be a JSON object"
+    in
+    Alcotest.(check int)
+      "facts.items emits one row per persisted fact (items wiring)"
+      (List.length facts)
+      (List.length items))
 ;;
 
 let () =
@@ -3987,6 +4027,10 @@ let () =
             "dashboard fact json omits optional keys when None"
             `Quick
             test_dashboard_fact_json_omits_optional_when_none
+        ; Alcotest.test_case
+            "dashboard json wires one facts.items row per persisted fact"
+            `Quick
+            test_dashboard_json_wires_one_fact_item_per_fact
         ] )
     ; ( "policy"
       , [ Alcotest.test_case

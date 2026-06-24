@@ -6,6 +6,7 @@ import {
   DEFAULT_MEMORY_KEEPERS,
   MemoryInspector,
   factCategoryMeta,
+  factTtlLabel,
   latestEntryWithBlocks,
   memCompositionFromBlocks,
   memFmtBytes,
@@ -13,7 +14,7 @@ import {
   promptBlockMeta,
   type MemoryKeeper,
 } from './memory-inspector'
-import type { TurnRecordRow } from '../api/dashboard'
+import type { MemoryOsFact, TurnRecordRow } from '../api/dashboard'
 
 afterEach(() => {
   cleanup()
@@ -328,5 +329,34 @@ describe('memory view-model helpers', () => {
       expect(meta.glyph.length).toBeGreaterThan(0)
     }
     expect(factCategoryMeta({ tag: 'unknown', raw: 'Speculation' }).lbl).toBe('Speculation')
+  })
+
+  it('factTtlLabel renders a future expiry as remaining TTL ("…후"), never "지금"', () => {
+    const makeFact = (over: Partial<MemoryOsFact>): MemoryOsFact => ({
+      claim: 'x',
+      category: { tag: 'fact' },
+      source: { trace_id: 't', turn: 0, tool_call_id: null },
+      first_seen: 0,
+      first_seen_iso: null,
+      reference_time: 0,
+      valid_until: null,
+      valid_until_iso: null,
+      last_verified_at: null,
+      current: true,
+      external_ref: null,
+      claim_kind: null,
+      ...over,
+    })
+    const nowSec = Math.floor(Date.now() / 1000)
+    // permanent fact
+    expect(factTtlLabel(makeFact({ valid_until: null, current: true }))).toBe('영구')
+    // current ⟺ valid_until in the future: must show remaining TTL, not collapse
+    // to "지금" (the drift this guards — formatTimeAgo floors the future to 0).
+    const live = factTtlLabel(makeFact({ valid_until: nowSec + 2 * 3600, current: true }))
+    expect(live).not.toContain('지금')
+    expect(live).toContain('후')
+    // an already-expired fact keeps the past form
+    const dead = factTtlLabel(makeFact({ valid_until: nowSec - 2 * 3600, current: false }))
+    expect(dead).toContain('전')
   })
 })

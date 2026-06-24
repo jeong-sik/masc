@@ -20,7 +20,7 @@ import { Fragment } from 'preact'
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
-import { formatTimeAgo } from '../lib/format-time'
+import { formatTimeAgo, formatTimeUntil } from '../lib/format-time'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import {
   fetchKeeperTurnRecords,
@@ -173,10 +173,13 @@ export function factCategoryMeta(category: MemoryOsFactCategory): FactKindMeta {
 function factAgeLabel(fact: MemoryOsFact): string {
   return formatTimeAgo(fact.reference_time)
 }
-function factTtlLabel(fact: MemoryOsFact): string {
+export function factTtlLabel(fact: MemoryOsFact): string {
   if (fact.valid_until == null) return '영구'
+  // current ⟺ valid_until is in the future: show the remaining TTL ("…후").
+  // formatTimeAgo would floor the future delta to 0 and render "만료 지금",
+  // the exact opposite of a not-yet-elapsed deadline. Past expiry keeps "…전".
   return fact.current
-    ? `만료 ${formatTimeAgo(fact.valid_until)}`
+    ? `만료 ${formatTimeUntil(fact.valid_until)}`
     : `만료됨 ${formatTimeAgo(fact.valid_until)}`
 }
 

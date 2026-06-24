@@ -39,3 +39,14 @@ jobs:
             PR_NUM=${{ inputs.pr_number }}
           fi
           python scripts/pr_axis_check.py --pr "$PR_NUM" --hours 24 --limit 20
+
+      - name: RFC collision detector self-test
+        if: always()
+        run: python scripts/pr_axis_check.py --self-test
+
+      - name: Check RFC number collisions across open PRs
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/pr_axis_check.py --check-rfc-collisions

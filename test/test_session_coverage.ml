@@ -299,6 +299,67 @@ let test_status_string_empty () =
 (* Note: Tests with Session.register require Eio runtime *)
 
 (* ============================================================
+   Notification queue overflow logging
+   ============================================================ *)
+
+let contains_substring s sub =
+  let len = String.length sub in
+  let rec scan i =
+    if i + len > String.length s then false
+    else if String.sub s i len = sub then true
+    else scan (i + 1)
+  in
+  scan 0
+;;
+
+let test_message_queue_overflow_is_logged () =
+  Log.set_level Log.Warn;
+  let before_seq =
+    match Log.Ring.recent ~limit:1 () with
+    | entry :: _ -> entry.Log.Ring.seq
+    | [] -> -1
+  in
+  let registry = Session.create () in
+  let (_ : Session.session) = Session.register registry ~agent_name:"drop-test" in
+  (* Messages are broadcast to every session except the sender, so push from a
+     distinct sender to fill drop-test's queue. *)
+  for i = 1 to Session.max_notification_queue do
+    let (_ : string list) =
+      Session.push_message registry ~from_agent:"sender"
+        ~content:(Printf.sprintf "msg-%d" i) ~mention:None
+    in
+    ()
+  done;
+  let (_ : string list) =
+    Session.push_message registry ~from_agent:"sender" ~content:"overflow"
+      ~mention:None
+  in
+  (* The oldest event (msg-1) was dropped to make room; the next consumable
+     event is therefore msg-2. *)
+  (match Session.pop_message registry ~agent_name:"drop-test" with
+   | Some (`Assoc fields) ->
+     (match List.assoc_opt "content" fields with
+      | Some (`String "msg-2") -> ()
+      | _ -> fail "expected msg-2 after overflow drop")
+   | _ -> fail "expected a message after overflow");
+  let entries =
+    Log.Ring.recent
+      ~module_filter:"Session"
+      ~min_level:(Log.level_to_int Log.Warn)
+      ~since_seq:before_seq
+      ()
+  in
+  let found =
+    List.exists
+      (fun (entry : Log.Ring.entry) ->
+         contains_substring entry.Log.Ring.message "Dropped oldest notification"
+         && contains_substring entry.Log.Ring.message "drop-test")
+      entries
+  in
+  check bool "overflow produced a structured warning" true found
+;;
+
+(* ============================================================
    connected_agents Tests (empty only - register needs Eio)
    ============================================================ *)
 
@@ -347,6 +408,9 @@ let () =
     "session", [
       test_case "type" `Quick test_session_type;
       test_case "with messages" `Quick test_session_with_messages;
+    ];
+    "queue_overflow", [
+      test_case "drop is logged" `Quick test_message_queue_overflow_is_logged;
     ];
     "rate_tracker", [
       test_case "type" `Quick test_rate_tracker_type;

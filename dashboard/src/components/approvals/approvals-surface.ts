@@ -24,9 +24,11 @@ import {
 } from '../../lib/governance-risk-level'
 import { navigate } from '../../router'
 import { AgentAvatar } from '../overview/agent-avatar'
+import { LoadingState } from '../common/feedback-state'
 import {
   governanceData,
   governanceError,
+  governanceLoading,
   governanceApprovalActing,
   refreshGovernance,
   respondToKeeperApproval,
@@ -279,6 +281,10 @@ export function ApprovalsSurface() {
 
   const items = governanceData.value?.approval_queue ?? []
   const error = governanceError.value
+  // First load only: governanceResource is stale-while-revalidate, so a refetch
+  // keeps the previous data — governanceData is null ONLY before the first load
+  // resolves. Show a loading state then, instead of asserting the empty queue.
+  const firstLoad = governanceLoading.value && governanceData.value === null
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const selectedItem = items.find(item => item.id === selectedId) ?? items[0] ?? null
 
@@ -313,6 +319,9 @@ export function ApprovalsSurface() {
 
         ${error ? html`<div class="ap-error" data-testid="approvals-error">${error}</div>` : null}
 
+        ${firstLoad
+          ? html`<${LoadingState}>승인 큐 불러오는 중...<//>`
+          : html`
         <section class="ov-kpis" style=${{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
           <div class="ov-kpi">
             <div class="ov-kpi-k">열린 승인</div>
@@ -332,15 +341,8 @@ export function ApprovalsSurface() {
           </div>
         </section>
 
-        ${items.length === 0
+        ${items.length > 0
           ? html`
-              <div class="ap-clear" data-testid="approvals-empty">
-                <div class="ico">${'✓'}</div>
-                <h3>열린 승인이 없습니다</h3>
-                <div class="ap-clear-sub">HITL 큐가 비어 있습니다 — keeper들이 결재 대기 없이 진행 중입니다.</div>
-              </div>
-            `
-          : html`
               <div class="ap-workspace" data-testid="approvals-workspace">
                 <div class="ap-queue" data-testid="approvals-queue">
                   ${items.map(item => html`
@@ -358,7 +360,18 @@ export function ApprovalsSurface() {
                 </div>
                 <${ApprovalDetailPanel} item=${selectedItem} variant="rail" />
               </div>
-            `}
+            `
+          : null}
+        ${items.length === 0 && !error
+          ? html`
+              <div class="ap-clear" data-testid="approvals-empty">
+                <div class="ico">${'✓'}</div>
+                <h3>열린 승인이 없습니다</h3>
+                <div class="ap-clear-sub">HITL 큐가 비어 있습니다 — keeper들이 결재 대기 없이 진행 중입니다.</div>
+              </div>
+            `
+          : null}
+      `}
       </div>
     </main>
   `

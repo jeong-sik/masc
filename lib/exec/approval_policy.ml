@@ -110,6 +110,84 @@ let find_catastrophic_program (caps : Capability.t list) : Exec_program.t option
   scan caps
 [@@warning "-4"]
 
+(* The SQL-carrying flag pair (short, long) for a database CLI, or [None] for
+   any other binary.  psql executes [-c]/[--command]; mysql/mariadb execute
+   [-e]/[--execute]. *)
+let db_command_flags (bin : Exec_program.t) : (string * string) option =
+  match Exec_program.known bin with
+  | Some Exec_program.Psql -> Some ("-c", "--command")
+  | Some (Exec_program.Mysql | Exec_program.Mariadb) -> Some ("-e", "--execute")
+  | Some _ | None -> None
+[@@warning "-4"]
+
+let arg_lit : Shell_ir.arg -> string option = function
+  | Shell_ir.Lit (s, _) -> Some s
+  | Shell_ir.Var _ | Shell_ir.Concat _ -> None
+;;
+
+(* Pull the SQL string out of a database CLI's argv: the token after a bare
+   [-c]/[--command] ([-e]/[--execute]), the value attached to the short flag
+   ([-cSELECT…]), or after [--command=] ([--execute=]).  Returns [None] when no
+   such flag is present or the value is not a literal (a [Var]/[Concat] value
+   cannot be classified syntactically — it is left to graded handling, exactly
+   as the substring layer could not see it either). *)
+let extract_db_sql ~(short : string) ~(long : string) (args : Shell_ir.arg list)
+  : string option
+  =
+  let long_eq = long ^ "=" in
+  let rec go = function
+    | [] -> None
+    | a :: rest ->
+      (match arg_lit a with
+       | Some tok when String.equal tok short || String.equal tok long ->
+         (match rest with
+          | v :: _ -> arg_lit v
+          | [] -> None)
+       | Some tok
+         when String.length tok > String.length short
+              && String.starts_with ~prefix:short tok
+              && not (String.starts_with ~prefix:"--" tok) ->
+         Some (String.sub tok (String.length short) (String.length tok - String.length short))
+       | Some tok when String.starts_with ~prefix:long_eq tok ->
+         Some (String.sub tok (String.length long_eq) (String.length tok - String.length long_eq))
+       | Some _ | None -> go rest)
+  in
+  go args
+;;
+
+(* Scan for a database CLI ([psql]/[mysql]/[mariadb]) whose [-c]/[-e] SQL leads
+   with a destructive verb ([DROP]/[TRUNCATE]/[DELETE], classified by
+   {!Db_op}).  Part of the trust-independent floor — the typed replacement for
+   the [sql_destructive] substring catalogue (RFC eliminate-substring-
+   destructive-classifier §3-A).  Non-destructive SQL ([SELECT], [INSERT], …),
+   an unrecognized verb, or a non-literal [-c] value floor nothing here and are
+   graded normally (psql/mysql are [`Audited]).
+
+   [@@warning "-4"]: the [_ :: rest] arm is a find-first scan that intentionally
+   skips every non-matching capability — same rationale as
+   [find_destructive_git]. *)
+let find_destructive_db (caps : Capability.t list) : Db_op.t option =
+  let rec scan = function
+    | [] -> None
+    | Capability.Exec_program (bin, args) :: rest ->
+      (match db_command_flags bin with
+       | Some (short, long) ->
+         (match extract_db_sql ~short ~long args with
+          | Some sql ->
+            (match Db_op.of_command sql with
+             | Ok op when Db_op.is_destructive op -> Some op
+             | Ok _ | Error _ -> scan rest)
+          | None -> scan rest)
+       | None -> scan rest)
+    | Capability.Pipeline_fold inner :: rest ->
+      (match scan inner with
+       | Some _ as found -> found
+       | None -> scan rest)
+    | _ :: rest -> scan rest
+  in
+  scan caps
+[@@warning "-4"]
+
 (* Trust-INDEPENDENT catastrophic floor (RFC-0254 §5.3-5.4).  Evaluated
    before any trust level, so loosening an overlay can never re-enable these.
    This is now the {e only} place destructive git is decided: it is no longer
@@ -124,7 +202,10 @@ let catastrophic_floor (caps : Capability.t list) : Verdict.deny_reason option =
      | None ->
        (match find_catastrophic_program caps with
         | Some bin -> Some (Verdict.Catastrophic_program bin)
-        | None -> None))
+        | None ->
+          (match find_destructive_db caps with
+           | Some op -> Some (Verdict.Destructive_db op)
+           | None -> None)))
 
 (* Highest program risk observed in the full cap tree. *)
 let max_risk (caps : Capability.t list) : Exec_program.risk_class =

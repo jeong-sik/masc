@@ -115,6 +115,12 @@ type known =
   | Ffplay
   | Mpg123
   | Open
+  (* Database CLIs: network clients.  Destructiveness lives in the SQL verb
+     ([Db_op]), floored by [Approval_policy.find_destructive_db], not in the
+     binary identity — so these are [`Audited], not [`Privileged]. *)
+  | Psql
+  | Mysql
+  | Mariadb
   (* Privileged *)
   | Sudo
   | Su
@@ -227,6 +233,9 @@ let known_metadata : known -> known_metadata = function
   | Ffplay -> { name = "ffplay"; risk = `Audited; kind = `Other_audited }
   | Mpg123 -> { name = "mpg123"; risk = `Audited; kind = `Other_audited }
   | Open -> { name = "open"; risk = `Audited; kind = `Other_audited }
+  | Psql -> { name = "psql"; risk = `Audited; kind = `Other_audited }
+  | Mysql -> { name = "mysql"; risk = `Audited; kind = `Other_audited }
+  | Mariadb -> { name = "mariadb"; risk = `Audited; kind = `Other_audited }
   | Sudo -> { name = "sudo"; risk = `Privileged; kind = `Privileged_program }
   | Su -> { name = "su"; risk = `Privileged; kind = `Privileged_program }
   | Chmod -> { name = "chmod"; risk = `Privileged; kind = `Privileged_program }
@@ -327,6 +336,9 @@ let all_known =
   ; Ffplay
   ; Mpg123
   ; Open
+  ; Psql
+  ; Mysql
+  ; Mariadb
   ; Sudo
   ; Su
   ; Chmod

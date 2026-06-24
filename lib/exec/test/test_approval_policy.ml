@@ -295,6 +295,38 @@ let test_system_power_denied_under_autonomous () =
        | _ -> assert false)
     [ "shutdown", [ "-h"; "now" ]; "reboot", []; "halt", []; "poweroff", [] ]
 
+(* Destructive SQL on a database CLI is the typed replacement for the
+   sql_destructive substring catalogue: floored under every overlay including
+   autonomous. psql executes [-c], mysql/mariadb execute [-e]. RFC
+   eliminate-substring-destructive-classifier §3-A. *)
+let test_destructive_sql_denied_under_autonomous () =
+  List.iter
+    (fun (bin, flag, sql) ->
+       let s = simple (bin_ok bin) ~args:[ lit flag; lit sql ] in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps
+           ~simple:s
+       with
+       | Verdict.Deny { reason = Destructive_db _; _ } -> ()
+       | _ -> Alcotest.failf "%s %s %S: expected Deny Destructive_db" bin flag sql)
+    [ "psql", "-c", "drop table users"
+    ; "psql", "-c", "DELETE FROM logs"
+    ; "psql", "--command", "truncate table cache"
+    ; "mysql", "-e", "drop database prod"
+    ; "mariadb", "-e", "delete from sessions"
+    ]
+
+(* A read query on a database CLI is NOT floored — psql/mysql are audited, so
+   under the autonomous overlay it is Allow (a keeper may query). This pins that
+   the DB floor keys on the SQL verb, not the binary identity. *)
+let test_read_sql_allowed_under_autonomous () =
+  let s = simple (bin_ok "psql") ~args:[ lit "-c"; lit "select count(*) from users" ] in
+  let caps = Capability_check.of_simple s in
+  match Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps ~simple:s with
+  | Verdict.Allow t -> assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "psql")
+  | _ -> Alcotest.fail "psql -c select should be Allow under autonomous"
+
 (* Floor completeness — [git clean] with a bundled force flag ([-fd], the
    common force-delete-untracked form) is destructive and hits the floor.
    Probe finding 2026-06-18: [git clean -fd] was graded as plain audited git
@@ -398,6 +430,8 @@ let () =
   test_mkfs_denied_under_autonomous ();
   test_mkfs_family_denied_under_autonomous ();
   test_system_power_denied_under_autonomous ();
+  test_destructive_sql_denied_under_autonomous ();
+  test_read_sql_allowed_under_autonomous ();
   test_git_clean_bundled_force_denied ();
   (* RFC-0255 §4.5 review response: no raw destructive-git demotion. *)
   test_reset_hard_floored_under_autonomous ();

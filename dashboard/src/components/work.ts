@@ -16,6 +16,8 @@ import { ErrorBoundary } from './common/error-boundary'
 import { LoadingState } from './common/feedback-state'
 import { KeeperBadge } from './keeper-badge'
 import { openTaskDetail } from './goals/task-detail-state'
+import { GoalCreateForm } from './goals/goal-create-form'
+import { showGoalCreate } from './goals/goal-create-state'
 import type { Goal, Task, Keeper } from '../types'
 
 type WorkSection = 'work' | 'board' | 'sub-boards' | 'moderation' | 'planning' | 'repositories' | 'verification'
@@ -1175,8 +1177,8 @@ function WorkSurfaceV2() {
                 type="button"
                 class="set-add wk-newgoal"
                 data-testid="work-new-goal"
-                title="새 목표 생성 — 다음 단계에서 설계"
-                disabled=${true}
+                title="새 목표 생성"
+                onClick=${() => { showGoalCreate.value = true }}
               >
                 ＋ 새 목표
               </button>
@@ -1297,6 +1299,7 @@ export function Work() {
           }
         <//>
       </div>
+      <${GoalCreateForm} />
     </div>
   `
 }

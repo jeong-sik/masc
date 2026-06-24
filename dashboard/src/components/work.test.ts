@@ -15,6 +15,11 @@ const routeSignal = signal<{
 })
 
 const navigateMock = vi.hoisted(() => vi.fn())
+const callMcpToolMock = vi.hoisted(() => vi.fn<() => Promise<string>>())
+
+vi.mock('../api/mcp', () => ({
+  callMcpTool: callMcpToolMock,
+}))
 
 vi.mock('../router', () => ({
   get route() { return routeSignal },
@@ -25,6 +30,7 @@ vi.mock('../store', () => ({
   goals: signal([]),
   tasks: signal([]),
   keepers: signal([]),
+  refreshGoals: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('./board/board-moderation-surface', () => ({
@@ -165,7 +171,7 @@ describe('Work', () => {
       expect(screen.getByTestId('work-goal-list')).toBeTruthy()
     })
 
-    it('renders the reference new-goal placeholder button', () => {
+    it('renders the new-goal button as enabled and opens the form on click', () => {
       goals.value = [
         { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
@@ -174,7 +180,15 @@ describe('Work', () => {
 
       const button = screen.getByTestId('work-new-goal')
       expect(button.textContent).toContain('새 목표')
-      expect(button).toBeDisabled()
+      expect(button).not.toBeDisabled()
+
+      // Form is hidden initially
+      expect(screen.queryByTestId('goal-create-form')).toBeNull()
+
+      fireEvent.click(button)
+
+      // Form appears after click
+      expect(screen.getByTestId('goal-create-form')).toBeTruthy()
     })
 
     it('renders a collapsed goal card per goal and expands on click', () => {
@@ -453,6 +467,71 @@ describe('Work', () => {
 
       expect(screen.queryByTestId('work-task-detail')).toBeNull()
       expect(screen.queryByTestId('job-detail')).toBeNull()
+    })
+
+    // ── Goal-create composer ─────────────────────────────────────────────────
+    describe('goal-create composer', () => {
+      beforeEach(async () => {
+        callMcpToolMock.mockReset()
+        // Reset the goal-create signals and local form state before each test
+        const { showGoalCreate } = await import('./goals/goal-create-state')
+        const { resetGoalCreateFormLocal } = await import('./goals/goal-create-form')
+        showGoalCreate.value = false
+        resetGoalCreateFormLocal()
+      })
+
+      it('calls masc_goal_upsert with title and priority when form is submitted', async () => {
+        callMcpToolMock.mockResolvedValue('ok')
+
+        goals.value = []
+        tasks.value = []
+
+        render(html`<${Work} />`)
+
+        // Open the form
+        fireEvent.click(screen.getByTestId('work-new-goal'))
+        expect(screen.getByTestId('goal-create-form')).toBeTruthy()
+
+        // Fill in the title
+        const titleInput = screen.getByTestId('goal-create-title-input')
+        fireEvent.input(titleInput, { target: { value: 'SLO 400ms 회복' } })
+
+        // Submit
+        fireEvent.click(screen.getByTestId('goal-create-submit'))
+
+        // Wait for async createGoal to resolve
+        await new Promise(resolve => setTimeout(resolve, 0))
+
+        expect(callMcpToolMock).toHaveBeenCalledWith('masc_goal_upsert', expect.objectContaining({
+          title: 'SLO 400ms 회복',
+          priority: expect.any(Number),
+        }))
+        // No horizon field: extract args from the first call via toHaveBeenCalledWith
+        const rawCalls = callMcpToolMock.mock.calls as unknown as [string, Record<string, unknown>][]
+        const callArgs = rawCalls[0]?.[1] ?? {}
+        expect(callArgs).not.toHaveProperty('horizon')
+        expect(callArgs).not.toHaveProperty('status')
+        expect(callArgs).not.toHaveProperty('phase')
+      })
+
+      it('does not call masc_goal_upsert when title is empty or whitespace', async () => {
+        callMcpToolMock.mockResolvedValue('ok')
+
+        goals.value = []
+        tasks.value = []
+
+        render(html`<${Work} />`)
+
+        // Open the form
+        fireEvent.click(screen.getByTestId('work-new-goal'))
+
+        // Leave title empty and click submit
+        fireEvent.click(screen.getByTestId('goal-create-submit'))
+
+        await new Promise(resolve => setTimeout(resolve, 0))
+
+        expect(callMcpToolMock).not.toHaveBeenCalled()
+      })
     })
 
     // ── WorkAside operator triage panel ─────────────────────────────────────

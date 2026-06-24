@@ -1080,6 +1080,7 @@ function ChatMermaidBlock({ source, caption }: ChatMermaidBlock) {
   useEffect(() => {
     if (!shouldRender) return undefined
     setError(false)
+    setSvg(null)
     let active = true
     const run = async () => {
       try {

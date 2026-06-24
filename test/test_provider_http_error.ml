@@ -23,9 +23,13 @@ let test_simple_variants () =
           { code = 503; body = "upstream down" }))
 
 let test_http_body_truncation () =
-  let body = String.make 250 'x' in
-  let expected = "HTTP 500: " ^ String.make 200 'x' ^ "..." in
-  msg "HTTP body > 200 bytes truncated with ellipsis" expected
+  let body = String.make (Provider_http_error.max_body_length + 50) 'x' in
+  let expected =
+    "HTTP 500: "
+    ^ String.make Provider_http_error.max_body_length 'x'
+    ^ Provider_http_error.body_truncation_suffix
+  in
+  msg "HTTP body > max_body_length truncated with ellipsis" expected
     (Provider_http_error.to_message
        (Llm_provider.Http_client.HttpError { code = 500; body }))
 

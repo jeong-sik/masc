@@ -9,6 +9,9 @@
     field, the others bound it unused). Centralising removes the drift
     surface. *)
 
+let max_body_length = 200
+let body_truncation_suffix = "..."
+
 let to_message (err : Llm_provider.Http_client.http_error) : string =
   match err with
   | Llm_provider.Http_client.NetworkError { message; _ } -> message
@@ -22,4 +25,6 @@ let to_message (err : Llm_provider.Http_client.http_error) : string =
       Llm_provider.Http_client.provider_failure_to_string ~kind ~message
   | Llm_provider.Http_client.HttpError { code; body } ->
       Printf.sprintf "HTTP %d: %s" code
-        (if String.length body > 200 then String.sub body 0 200 ^ "..." else body)
+        (if String.length body > max_body_length
+         then String.sub body 0 max_body_length ^ body_truncation_suffix
+         else body)

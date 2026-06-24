@@ -105,35 +105,37 @@ let apply_active_delta counters ~delta =
   else Ok { counters with active = new_active }
 ;;
 
-let bump_active delta =
+let bump_active ?(loc = "unknown") delta =
   Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
     match apply_active_delta global.counters ~delta with
     | Ok counters -> global.counters <- counters
     | Error (`Counter_underflow raw) ->
       (* A mismatch between acquire and release paths previously silently
          clamped the counter to zero.  Surface the drift so operators can
-         detect accounting bugs instead of masking them. *)
+         detect accounting bugs instead of masking them.
+         FIXME: type-level pair acquire/release would make underflow
+         impossible; defer that larger refactor. *)
       Log.Misc.warn
-        "admission_queue active counter underflow: raw=%d; clamping to 0"
-        raw;
+        "admission_queue active counter underflow: raw=%d loc=%s; clamping to 0"
+        raw loc;
       global.counters <- { global.counters with active = 0 })
 ;;
 
 let with_inflight_observation ~keeper_name ~runtime_id f =
-  bump_active 1;
+  bump_active ~loc:"acquire" 1;
   (match Admission_queue_metrics.on_acquire ~keeper_name ~runtime_id ~wait_ms:0 with
    | () -> ()
    | exception exn ->
-     bump_active (-1);
+     bump_active ~loc:"on_acquire_exn" (-1);
      raise exn);
   Eio_guard.protect
     ~finally:(fun () ->
       (match Admission_queue_metrics.on_release ~keeper_name ~runtime_id with
        | () -> ()
        | exception exn ->
-         bump_active (-1);
+         bump_active ~loc:"on_release_exn" (-1);
          raise exn);
-      bump_active (-1))
+      bump_active ~loc:"release" (-1))
     f
 ;;
 

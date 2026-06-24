@@ -1,7 +1,13 @@
 (** SSE External Subscriber Tests
 
     Verifies that Sse.subscribe_external / unsubscribe_external
-    correctly hooks into the broadcast fan-out path. *)
+    correctly hooks into the broadcast fan-out path.
+
+    Also hosts the SSE connection close-race regression
+    (Server_mcp_transport_http_conn), which shares this file's domain-contention
+    harness. *)
+
+module Conn = Server_mcp_transport_http_conn
 
 let received_events : string list ref = ref []
 
@@ -172,8 +178,58 @@ let test_external_subscriber_count_linearized_under_domain_contention () =
         count_before
         (Masc.Sse.external_subscriber_count_with_prefix prefix))
 
+(* RFC-0204 Phase 3 prerequisite: [close_sse_conn] resolves a one-shot stop
+   promise.  Two close paths can race across domains once serving moves off the
+   main domain (a client disconnect on the serving domain vs keeper-driven
+   eviction / shutdown on the main domain).  The claim guard must admit exactly
+   one closer; two would both [Eio.Promise.resolve] the same promise and raise
+   [Invalid_argument].  This races two domains on the claim for many fresh
+   connections and asserts no connection is ever claimed by both — two winners
+   is exactly the double-resolve crash precondition.  RED on the plain
+   check-then-set guard, GREEN once it is an Atomic compare_and_set.  Skips on
+   single-vCPU hosts where the race cannot manifest. *)
+let test_close_sse_conn_claims_at_most_one_closer () =
+  if Domain.recommended_domain_count () < 2 then ()
+  else begin
+    let trials = 50_000 in
+    (* writer / mutex are never touched by the claim path, so a stub is safe. *)
+    let infos =
+      Array.init trials (fun _ ->
+        Conn.make_sse_conn ~session_id:"close-race" ~client_id:0
+          ~writer:(Obj.magic ()) ~mutex:(Obj.magic ()) ())
+    in
+    let won = Array.make_matrix 2 trials false in
+    (* Two-phase counting barrier across two long-lived domains: at trial [t],
+       both must arrive (2*(t+1) total) before either claims, so the two claims
+       on [infos.(t)] run in true overlap. *)
+    let arrived = Atomic.make 0 in
+    let worker who =
+      for t = 0 to trials - 1 do
+        ignore (Atomic.fetch_and_add arrived 1);
+        while Atomic.get arrived < 2 * (t + 1) do
+          Domain.cpu_relax ()
+        done;
+        won.(who).(t) <- Conn.__test_claim_close infos.(t)
+      done
+    in
+    let other = Domain.spawn (fun () -> worker 1) in
+    worker 0;
+    Domain.join other;
+    let double = ref 0 in
+    for t = 0 to trials - 1 do
+      if won.(0).(t) && won.(1).(t) then incr double
+    done;
+    Alcotest.(check int)
+      "close claim never admits two closers (would double-resolve the promise)"
+      0 !double
+  end
+
 let () =
   Alcotest.run "SSE External Subscribers" [
+    ("close_race", [
+      Alcotest.test_case "close_sse_conn claims at most one closer across domains"
+        `Quick test_close_sse_conn_claims_at_most_one_closer;
+    ]);
     ("lifecycle", [
       Alcotest.test_case "subscribe and unsubscribe" `Quick
         test_subscribe_and_unsubscribe;

@@ -734,3 +734,783 @@
     display: none;
   }
 }
+
+/* ── WorkAside operator triage panel ─────────────────────────────────────────
+ *
+ * Ported from keeper-v2/styles/v2.css lines 809-878, 1047-1182.
+ * Uses dashboard token aliases defined in .wk-surface (above).
+ * The .ov-aside shell is in surfaces-v2.css (.ov.ov-2col layout);
+ * these rules cover the WorkAside-specific internals.
+ *
+ * Token mapping: prototype → dashboard
+ *   var(--bg-panel)      → var(--color-bg-panel-alt)
+ *   var(--bg-deep)       → var(--color-bg-page)
+ *   var(--bg-card)       → var(--color-bg-surface)
+ *   var(--bg-card-hover) → var(--color-bg-surface-hover, var(--color-bg-surface))
+ *   var(--bg-sunken)     → var(--color-bg-sunken, var(--color-bg-page))
+ *   var(--border-main)   → var(--color-border)
+ *   var(--border-soft)   → var(--color-border-subtle)
+ *   var(--border-highlight) → var(--border-strong)
+ *   var(--text-bright)   → var(--color-text-primary)
+ *   var(--text-mid)      → var(--color-text-secondary)
+ *   var(--text-dim)      → var(--text-muted)
+ *   var(--text-faint)    → var(--color-text-disabled, var(--text-muted))
+ *   var(--volt-strong)   → var(--color-volt-strong, var(--color-accent))
+ *   var(--volt-dim)      → var(--color-volt-dim, var(--color-accent-subtle))
+ *   var(--volt-wash)     → var(--color-volt-wash, color-mix(in oklab, var(--color-accent) 10%, transparent))
+ *   var(--volt)          → var(--color-volt, var(--color-accent))
+ *   var(--status-ok)     → var(--color-status-ok)
+ *   var(--status-warn)   → var(--color-status-warn)
+ *   var(--status-bad)    → var(--color-status-bad)
+ *   var(--radius-xs)     → var(--radius-xs, 3px)
+ *   var(--radius-sm)     → var(--radius-sm, 4px)
+ *   var(--radius-pill)   → var(--radius-pill, 999px)
+ *   var(--font-display)  → ui-sans-serif, -apple-system, system-ui, sans-serif
+ *   var(--font-mono)     → ui-monospace, "SF Mono", Menlo, Consolas, monospace
+ *   var(--font-ui)       → ui-sans-serif, -apple-system, system-ui, sans-serif
+ */
+
+/* ── Aside shell ── */
+.ov-aside {
+  flex: none;
+  width: 360px; /* default; overridden inline by resize state */
+  border-left: 1px solid var(--color-border);
+  background: color-mix(in oklab, var(--color-bg-panel-alt) 45%, var(--color-bg-page));
+  overflow-y: auto;
+  padding: 26px 22px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+}
+
+/* Collapsed rail mode — narrow fixed width, vertical labels */
+.ov-aside.wka.collapsed {
+  width: 54px;
+  padding: 14px 0 18px;
+  gap: 16px;
+  align-items: center;
+  overflow: visible;
+  cursor: pointer;
+  transition: background 0.16s ease;
+}
+
+.ov-aside.wka.collapsed:hover {
+  background: color-mix(in oklab, var(--color-bg-panel-alt) 62%, var(--color-bg-page));
+}
+
+/* Expanded wka resets .ov-aside defaults to match prototype */
+.ov-aside.wka {
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ── Resizer handle ── */
+.wka-resizer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 6;
+}
+
+.wka-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: transparent;
+  transition: background 0.14s ease;
+}
+
+.wka-resizer:hover::after,
+.wka-resizer:focus-visible::after {
+  background: var(--color-volt-strong, var(--color-accent));
+}
+
+/* ── Top bar ── */
+.wka-bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 16px 18px 12px;
+  flex: none;
+}
+
+.wka-bar-t {
+  font-family: ui-sans-serif, -apple-system, system-ui, sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-text-primary);
+}
+
+.wka-bar-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.wka-livedot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-status-ok);
+  box-shadow: 0 0 6px var(--color-status-ok);
+}
+
+.wka-collapse,
+.wka-railbtn {
+  display: grid;
+  place-items: center;
+  background: var(--color-bg-sunken, var(--color-bg-page));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs, 3px);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.14s ease, border-color 0.14s ease;
+}
+
+.wka-collapse {
+  margin-left: auto;
+  width: 24px;
+  height: 24px;
+  font-size: 13px;
+}
+
+.wka-railbtn {
+  width: 28px;
+  height: 28px;
+  font-size: 13px;
+}
+
+.wka-collapse:hover,
+.wka-railbtn:hover,
+.wka-collapse:focus-visible,
+.wka-railbtn:focus-visible {
+  color: var(--color-volt-strong, var(--color-accent));
+  border-color: var(--color-volt-dim, var(--color-accent-subtle));
+}
+
+/* ── HUD counts strip ── */
+.wka-hud {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: 1px solid var(--color-border-subtle);
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: color-mix(in oklab, var(--color-bg-surface) 60%, transparent);
+  flex: none;
+}
+
+.wka-hud-c {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 11px 6px 12px 14px;
+  border-left: 1px solid var(--color-border-subtle);
+}
+
+.wka-hud-c:first-child {
+  border-left: 0;
+}
+
+.wka-hud-k {
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.wka-hud-v {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.wka-hud-v.volt {
+  color: var(--color-volt-strong, var(--color-accent));
+}
+
+.wka-hud-v.warn {
+  color: var(--color-status-warn);
+}
+
+/* ── Scrollable section content ── */
+.wka-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 18px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ── Section header ── */
+.wka-sec {
+  display: flex;
+  flex-direction: column;
+}
+
+.wka-h {
+  font-family: ui-sans-serif, -apple-system, system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 11px;
+  white-space: nowrap;
+}
+
+.wka-h .n,
+.wka-h-n {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0;
+}
+
+.wka-h-n.bad {
+  color: var(--color-status-bad);
+}
+
+.wka-h-n.dim {
+  color: var(--text-muted);
+}
+
+.wka-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wka-calm {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 5px 2px;
+}
+
+/* ── Flagged goal row ── */
+.wka-flag {
+  text-align: left;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--color-border-subtle);
+  border-left-width: 2px;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--color-bg-surface);
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease;
+  width: 100%;
+}
+
+.wka-flag:hover,
+.wka-flag:focus-visible {
+  background: var(--color-bg-surface-hover, var(--color-bg-surface));
+  border-color: var(--border-strong);
+}
+
+.wka-flag.st-warn {
+  border-left-color: var(--color-status-warn);
+}
+
+.wka-flag.st-bad {
+  border-left-color: var(--color-status-bad);
+}
+
+.wka-flag.st-volt {
+  border-left-color: var(--color-volt-strong, var(--color-accent));
+}
+
+.wka-flag-tag {
+  grid-column: 1;
+  align-self: start;
+  font-family: ui-sans-serif, -apple-system, system-ui, sans-serif;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill, 999px);
+  border: 1px solid var(--color-border);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.wka-flag-tag.warn {
+  color: var(--color-status-warn);
+  border-color: color-mix(in oklab, var(--color-status-warn) 40%, transparent);
+}
+
+.wka-flag-tag.bad {
+  color: var(--color-status-bad);
+  border-color: color-mix(in oklab, var(--color-status-bad) 42%, transparent);
+}
+
+.wka-flag-tag.volt {
+  color: var(--color-volt-strong, var(--color-accent));
+  border-color: var(--color-volt-dim, var(--color-accent-subtle));
+}
+
+.wka-flag-title {
+  grid-column: 2;
+  font-size: 12.5px;
+  color: var(--color-text-primary);
+  line-height: 1.3;
+}
+
+.wka-flag-reason {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Todo items (approvals / verify / blockers / backlog) ── */
+.wka-todo {
+  text-align: left;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 9px;
+  padding: 8px 11px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--color-bg-surface);
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease;
+  width: 100%;
+}
+
+.wka-todo:hover,
+.wka-todo:focus-visible {
+  background: var(--color-bg-surface-hover, var(--color-bg-surface));
+  border-color: var(--border-strong);
+}
+
+.wka-todo-k {
+  grid-column: 1;
+  align-self: start;
+  font-family: ui-sans-serif, -apple-system, system-ui, sans-serif;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill, 999px);
+  white-space: nowrap;
+}
+
+.wka-todo.approve .wka-todo-k {
+  color: var(--color-volt-strong, var(--color-accent));
+  background: var(--color-volt-wash, color-mix(in oklab, var(--color-accent) 10%, transparent));
+  border: 1px solid var(--color-volt-dim, var(--color-accent-subtle));
+}
+
+.wka-todo.verify .wka-todo-k {
+  color: var(--color-volt-strong, var(--color-accent));
+  border: 1px solid var(--color-volt-dim, var(--color-accent-subtle));
+}
+
+.wka-todo.block .wka-todo-k {
+  color: var(--color-status-bad);
+  border: 1px solid color-mix(in oklab, var(--color-status-bad) 42%, transparent);
+}
+
+.wka-todo.claim .wka-todo-k {
+  color: var(--color-status-warn);
+  border: 1px solid color-mix(in oklab, var(--color-status-warn) 40%, transparent);
+}
+
+.wka-todo-t {
+  grid-column: 2;
+  font-size: 12.5px;
+  color: var(--color-text-primary);
+  line-height: 1.3;
+}
+
+.wka-todo-m {
+  grid-column: 2;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Recent done items ── */
+.wka-done {
+  text-align: left;
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 6px 10px;
+  border-radius: var(--radius-xs, 3px);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  transition: background 0.16s ease;
+  width: 100%;
+}
+
+.wka-done:hover,
+.wka-done:focus-visible {
+  background: var(--color-bg-sunken, var(--color-bg-page));
+}
+
+.wka-done-mark {
+  flex: none;
+  color: var(--color-status-ok);
+  font-size: 11px;
+}
+
+.wka-done-t {
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+  line-height: 1.3;
+}
+
+/* ── Collapsed rail stats ── */
+.wka-rail-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  align-items: center;
+}
+
+.wka-rail-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.wka-rail-stat b {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 17px;
+  line-height: 1;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.wka-rail-stat span {
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.wka-rail-stat.volt b {
+  color: var(--color-volt-strong, var(--color-accent));
+}
+
+.wka-rail-stat.warn b {
+  color: var(--color-status-warn);
+}
+
+.wka-rail-stat.bad b {
+  color: var(--color-status-bad);
+}
+
+.wka-rail-lbl {
+  margin-top: auto;
+  writing-mode: vertical-rl;
+  font-family: ui-sans-serif, -apple-system, system-ui, sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.wka-rail-hint {
+  writing-mode: vertical-rl;
+  font-family: ui-sans-serif, -apple-system, system-ui, sans-serif;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--color-text-disabled, var(--text-muted));
+  text-transform: uppercase;
+  margin-top: 8px;
+}
+
+/* Hide aside at narrow viewports — can't fit 2 columns below 1180px */
+@media (max-width: 1180px) {
+  .ov-aside {
+    display: none;
+  }
+}
+
+/* ── View toggle (list | kanban) ─────────────────────────────────────────── */
+
+.wk-head-r {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wk-viewseg {
+  display: inline-flex;
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.wk-viewseg button {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  padding: 6px 14px;
+  background: var(--bg-sunken);
+  color: var(--text-dim);
+  border: 0;
+  cursor: pointer;
+  transition: 0.14s;
+}
+
+.wk-viewseg button + button {
+  border-left: 1px solid var(--border-main);
+}
+
+.wk-viewseg button:hover {
+  color: var(--text-bright);
+}
+
+.wk-viewseg button.on {
+  background: var(--volt-wash);
+  color: var(--volt-strong);
+}
+
+/* ── Kanban board ────────────────────────────────────────────────────────── */
+
+.wk-kanban {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(244px, 1fr);
+  gap: 12px;
+  margin-top: 6px;
+  align-items: start;
+  overflow-x: auto;
+  padding-bottom: 14px;
+}
+
+@media (min-width: 1321px) {
+  .wk-kanban {
+    grid-auto-flow: unset;
+    grid-auto-columns: unset;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+.wk-kcol {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+}
+
+.wk-kcol-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 12px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-mid);
+  border-bottom: 1px solid var(--border-soft);
+  position: sticky;
+  top: 0;
+  background: var(--bg-sunken);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  z-index: 1;
+}
+
+.wk-kcol-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.wk-kcol-dot.todo    { background: var(--text-dim); }
+.wk-kcol-dot.claimed { background: var(--text-mid); }
+.wk-kcol-dot.wip     { background: var(--volt-strong); }
+.wk-kcol-dot.verify  { background: var(--info); }
+.wk-kcol-dot.done    { background: var(--status-ok); }
+
+.wk-kcol-n {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.wk-kcol-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  min-height: 60px;
+}
+
+.wk-kcol-empty {
+  color: var(--text-faint);
+  font-size: 12px;
+  text-align: center;
+  padding: 14px 0;
+}
+
+/* ── Kanban card ─────────────────────────────────────────────────────────── */
+
+.wk-kcard {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 11px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-left: 2px solid var(--border-main);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease, transform 0.12s ease;
+}
+
+.wk-kcard:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-highlight);
+  transform: translateY(-1px);
+}
+
+.wk-kcard:focus-visible {
+  outline: 2px solid var(--volt-dim);
+  outline-offset: 1px;
+}
+
+.wk-kcard.wip     { border-left-color: var(--volt-strong); }
+.wk-kcard.verify  { border-left-color: var(--info); }
+.wk-kcard.done    { border-left-color: var(--status-ok); opacity: 0.82; }
+.wk-kcard.claimed { border-left-color: var(--text-mid); }
+
+.wk-kcard-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wk-kcard-id {
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+.wk-kcard-prio {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-dim);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-pill);
+  padding: 0 6px;
+}
+
+.wk-kcard-title {
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--text-primary);
+  text-wrap: pretty;
+}
+
+.wk-kcard.done .wk-kcard-title {
+  color: var(--text-mid);
+}
+
+.wk-kcard-block {
+  font-size: 10.5px;
+  color: var(--status-bad);
+}
+
+.wk-kcard-goal {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.14s ease;
+}
+
+.wk-kcard-goal:hover {
+  color: var(--volt-strong);
+}
+
+.wk-kcard-ho {
+  color: var(--volt-strong);
+  font-size: 12px;
+}
+
+.wk-kcard-foot {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.wk-kcard-kp {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+.wk-kcard-kp.none {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.wk-kcard-claim {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--volt-dim);
+  background: var(--volt-wash);
+  color: var(--volt-strong);
+  cursor: pointer;
+  transition: 0.14s;
+}
+
+.wk-kcard-claim:hover {
+  background: color-mix(in oklab, var(--volt) 20%, transparent);
+  color: var(--text-bright);
+}

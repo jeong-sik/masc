@@ -1,10 +1,10 @@
 // MASC Dashboard — Work Tab (keeper-v2 goal/task layout)
 // Surface: Goal list (priority-sorted), Task terminology, inline expandable gate detail,
-// claimable backlog, and the 5 KPI strip from the reference design.
+// claimable backlog, the 5 KPI strip, and WorkAside operator triage panel.
 
 import { html } from 'htm/preact'
 import { lazy, Suspense } from 'preact/compat'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { route, navigate } from '../router'
 import { goals, tasks, keepers } from '../store'
 import { BoardModerationSurface } from './board/board-moderation-surface'
@@ -362,6 +362,430 @@ function GoalCard({
   `
 }
 
+// ── WorkAside — operator triage panel (right column) ──────────────────────
+//
+// Phase → "flagged" mapping rationale:
+//   Prototype uses `status !== 'active'`.  The live Goal type has no `status`
+//   separate from `phase` for the operator triage purpose.  We classify by
+//   `phase` enum — never by substring.
+//
+//   • "flagged" (지금 상황):  phases that need operator attention:
+//       awaiting_verification | awaiting_approval | blocked | paused
+//     `executing` = normal active flow — not flagged.
+//     `completed` | `dropped` = terminal — excluded (already closed out).
+//
+//   • "approvals" (완료 승인): goals with require_completion_approval=true
+//     AND phase=awaiting_approval (final sign-off pending).
+//
+//   • "verifyTasks" (게이트): tasks with status=awaiting_verification.
+//     open-gate count from taskGateRows().
+//
+//   • "blockers": tasks where handoff_context.failure_mode or handoff_context.reason
+//     indicates blockage (status=cancelled OR explicit blocker via blockerNoteForTask).
+//     IMPORTANT: status === 'cancelled' in the live model means "blocked/failed"
+//     (prototype `t.blocker` field does not exist in live Task type; we use
+//     blockerNoteForTask() which reads handoff_context fields).
+//
+//   • "backlog": tasks that isClaimableBacklogTask() returns true for.
+//
+//   • "recent": tasks with status === 'done'.
+
+// Phase semantic class for the .wka-flag border tint.
+// Mirrors prototype goalMeta() / STATUS_COLS cls (data.jsx:340-350).
+// Using the existing GOAL_STATUS_CLASS mapping which covers these phases.
+type WkaFlagCls = 'ok' | 'warn' | 'bad' | 'volt'
+
+const GOAL_PHASE_FLAG_CLS: Record<string, WkaFlagCls> = {
+  executing: 'ok',
+  awaiting_verification: 'volt',
+  awaiting_approval: 'volt',
+  blocked: 'bad',
+  paused: 'warn',
+  completed: 'ok',
+  dropped: 'bad',
+}
+
+const GOAL_PHASE_FLAG_LBL: Record<string, string> = {
+  executing: '진행 중',
+  awaiting_verification: '검증 대기',
+  awaiting_approval: '승인 대기',
+  blocked: '차단',
+  paused: '일시정지',
+  completed: '완료',
+  dropped: '폐기',
+}
+
+function goalPhaseFlagCls(phase: string): WkaFlagCls {
+  return GOAL_PHASE_FLAG_CLS[phase] ?? 'warn'
+}
+
+function goalPhaseFlagLbl(phase: string): string {
+  return GOAL_PHASE_FLAG_LBL[phase] ?? phase
+}
+
+// Goals needing operator attention — positive enumeration of the triage
+// phases only. `executing` (normal active flow) and the terminal phases
+// (`completed` / `dropped`) are deliberately excluded: a closed-out goal is
+// not part of "지금 상황". Exact membership on the phase enum, never a
+// substring match. (Adding a new Goal phase requires deciding here whether it
+// needs triage.)
+const GOAL_ATTENTION_PHASES: ReadonlySet<string> = new Set([
+  'awaiting_verification',
+  'awaiting_approval',
+  'blocked',
+  'paused',
+])
+
+function isGoalFlagged(goal: Goal): boolean {
+  return GOAL_ATTENTION_PHASES.has(goal.phase)
+}
+
+// WorkAside derived data shapes — immutable, computed from signals.
+interface WkaFlaggedGoal {
+  readonly id: string
+  readonly cls: WkaFlagCls
+  readonly lbl: string
+  readonly title: string
+  readonly reason: string | null | undefined
+}
+
+interface WkaApprovalGoal {
+  readonly id: string
+  readonly title: string
+  readonly verifiers: ReadonlyArray<string>
+}
+
+interface WkaVerifyTask {
+  readonly id: string
+  readonly title: string
+  readonly goalId: string
+  readonly open: number // unsatisfied gates
+}
+
+interface WkaBlockerTask {
+  readonly id: string
+  readonly title: string
+  readonly blocker: string
+  readonly goalId: string
+}
+
+interface WkaBacklogTask {
+  readonly id: string
+  readonly title: string
+  readonly goal: string
+  readonly goalId: string
+  readonly priority: number
+}
+
+interface WkaRecentTask {
+  readonly id: string
+  readonly title: string
+  readonly goalId: string
+}
+
+interface WkaCounts {
+  readonly active: number
+  readonly wip: number
+  readonly verify: number
+  readonly backlog: number
+}
+
+interface WorkAsideProps {
+  flagged: ReadonlyArray<WkaFlaggedGoal>
+  approvals: ReadonlyArray<WkaApprovalGoal>
+  verifyTasks: ReadonlyArray<WkaVerifyTask>
+  blockers: ReadonlyArray<WkaBlockerTask>
+  backlog: ReadonlyArray<WkaBacklogTask>
+  recent: ReadonlyArray<WkaRecentTask>
+  counts: WkaCounts
+  onJump: (goalId: string) => void
+  onOpenKeeper?: (name: string) => void
+}
+
+// Aside width persistence — min 312, max 520, default 360.
+const WKA_ASIDE_W_KEY = 'v2.wkAsideW'
+const WKA_ASIDE_COLLAPSED_KEY = 'v2.wkAsideCollapsed'
+const WKA_ASIDE_DEFAULT_W = 360
+const WKA_ASIDE_MIN_W = 312
+const WKA_ASIDE_MAX_W = 520
+
+function readStoredAsideW(): number {
+  try {
+    const v = localStorage.getItem(WKA_ASIDE_W_KEY)
+    if (v) {
+      const n = parseInt(v, 10)
+      if (!isNaN(n)) return Math.max(WKA_ASIDE_MIN_W, Math.min(WKA_ASIDE_MAX_W, n))
+    }
+  } catch (_) { /* storage unavailable */ }
+  return WKA_ASIDE_DEFAULT_W
+}
+
+function readStoredAsideCollapsed(): boolean {
+  try { return localStorage.getItem(WKA_ASIDE_COLLAPSED_KEY) === '1' } catch (_) { return false }
+}
+
+function WorkAside({
+  flagged, approvals, verifyTasks, blockers, backlog, recent, counts, onJump,
+}: WorkAsideProps) {
+  const needTotal = approvals.length + verifyTasks.length + blockers.length + backlog.length
+
+  const [collapsed, setCollapsed] = useState<boolean>(readStoredAsideCollapsed)
+  const [w, setW] = useState<number>(readStoredAsideW)
+  const wRef = useRef(w)
+  wRef.current = w
+
+  const setCol = useCallback((v: boolean) => {
+    setCollapsed(v)
+    try { localStorage.setItem(WKA_ASIDE_COLLAPSED_KEY, v ? '1' : '0') } catch (_) { /* noop */ }
+  }, [])
+
+  const persistW = useCallback((next: number) => {
+    setW(next)
+    try { localStorage.setItem(WKA_ASIDE_W_KEY, String(next)) } catch (_) { /* noop */ }
+  }, [])
+
+  const startResize = useCallback((e: PointerEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = wRef.current
+    document.body.classList.add('rail-resizing')
+    const move = (ev: PointerEvent) => {
+      // Dragging the LEFT edge of the right aside: moving left → wider
+      persistW(Math.max(WKA_ASIDE_MIN_W, Math.min(WKA_ASIDE_MAX_W, startW - (ev.clientX - startX))))
+    }
+    const up = () => {
+      document.body.classList.remove('rail-resizing')
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }, [persistW])
+
+  if (collapsed) {
+    return html`
+      <aside
+        class="ov-aside wka collapsed"
+        role="button"
+        tabIndex=${0}
+        title="클릭하여 운영 상태 패널 펼치기"
+        aria-expanded=${false}
+        aria-label="운영 상태 패널 펼치기"
+        onClick=${() => setCol(false)}
+        onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCol(false) } }}
+        data-testid="work-aside-collapsed"
+      >
+        <button
+          type="button"
+          class="wka-railbtn"
+          aria-label="운영 상태 패널 펼치기"
+          onClick=${(e: Event) => { e.stopPropagation(); setCol(false) }}
+        >«</button>
+        <div class="wka-rail-stats" aria-hidden="true">
+          <div class="wka-rail-stat">
+            <b class="mono">${counts.wip}</b>
+            <span>진행</span>
+          </div>
+          <div class=${`wka-rail-stat ${counts.verify ? 'volt' : ''}`}>
+            <b class="mono">${counts.verify}</b>
+            <span>검증</span>
+          </div>
+          <div class=${`wka-rail-stat ${needTotal ? 'volt' : ''}`}>
+            <b class="mono">${needTotal}</b>
+            <span>할일</span>
+          </div>
+          <div class=${`wka-rail-stat ${flagged.length ? 'bad' : ''}`}>
+            <b class="mono">${flagged.length}</b>
+            <span>주의</span>
+          </div>
+        </div>
+        <div class="wka-rail-lbl" aria-hidden="true">운영 상태</div>
+        <div class="wka-rail-hint" aria-hidden="true">펼치기</div>
+      </aside>
+    `
+  }
+
+  return html`
+    <aside
+      class="ov-aside wka"
+      style=${{ width: `${w}px` }}
+      aria-label="운영 상태 패널"
+      data-testid="work-aside"
+    >
+      <div
+        class="wka-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="패널 폭 조절 — 드래그"
+        tabIndex=${0}
+        onPointerDown=${startResize}
+        onKeyDown=${(e: KeyboardEvent) => {
+          if (e.key === 'ArrowLeft') { e.preventDefault(); persistW(Math.max(WKA_ASIDE_MIN_W, wRef.current + 8)) }
+          if (e.key === 'ArrowRight') { e.preventDefault(); persistW(Math.min(WKA_ASIDE_MAX_W, wRef.current - 8)) }
+        }}
+      ></div>
+
+      <div class="wka-bar">
+        <span class="wka-bar-t">운영 상태</span>
+        <span class="wka-bar-live">
+          <span class="wka-livedot" aria-hidden="true"></span>
+          ${counts.active} active
+        </span>
+        <button
+          type="button"
+          class="wka-collapse"
+          aria-label="운영 상태 패널 접기"
+          aria-expanded=${true}
+          onClick=${() => setCol(true)}
+          title="접기 — Chat 열 때 공간 확보"
+        >»</button>
+      </div>
+
+      <div class="wka-hud" aria-label="작업 현황 요약">
+        <div class="wka-hud-c">
+          <span class="wka-hud-k">진행</span>
+          <span class="wka-hud-v">${counts.wip}</span>
+        </div>
+        <div class="wka-hud-c">
+          <span class="wka-hud-k">검증</span>
+          <span class=${`wka-hud-v ${counts.verify ? 'volt' : ''}`}>${counts.verify}</span>
+        </div>
+        <div class="wka-hud-c">
+          <span class="wka-hud-k">백로그</span>
+          <span class=${`wka-hud-v ${counts.backlog ? 'warn' : ''}`}>${counts.backlog}</span>
+        </div>
+        <div class="wka-hud-c">
+          <span class="wka-hud-k">할 일</span>
+          <span class=${`wka-hud-v ${needTotal ? 'volt' : ''}`}>${needTotal}</span>
+        </div>
+      </div>
+
+      <div class="wka-scroll">
+
+        <section class="wka-sec" aria-labelledby="wka-h-flagged">
+          <div class="wka-h" id="wka-h-flagged" role="heading" aria-level=${3}>
+            지금 상황
+            ${flagged.length > 0 ? html`<span class="wka-h-n bad">${flagged.length}</span>` : null}
+          </div>
+          ${flagged.length === 0
+            ? html`<div class="wka-calm mono" data-testid="wka-flagged-calm">주의 목표 없음 · 정상 순환</div>`
+            : html`
+              <div class="wka-list" data-testid="wka-flagged-list">
+                ${flagged.map(g => html`
+                  <button
+                    key=${g.id}
+                    type="button"
+                    class=${`wka-flag st-${g.cls}`}
+                    onClick=${() => onJump(g.id)}
+                    data-testid="wka-flagged-item"
+                  >
+                    <span class=${`wka-flag-tag ${g.cls}`}>${g.lbl}</span>
+                    <span class="wka-flag-title">${g.title}</span>
+                    ${g.reason ? html`<span class="wka-flag-reason">${g.reason}</span>` : null}
+                  </button>
+                `)}
+              </div>
+            `}
+        </section>
+
+        <section class="wka-sec" aria-labelledby="wka-h-todo">
+          <div class="wka-h" id="wka-h-todo" role="heading" aria-level=${3}>
+            해야 할 일
+            ${needTotal > 0 ? html`<span class="wka-h-n">${needTotal}</span>` : null}
+          </div>
+          <div class="wka-list" data-testid="wka-todo-list">
+            ${approvals.map(g => html`
+              <button
+                key=${g.id}
+                type="button"
+                class="wka-todo approve"
+                onClick=${() => onJump(g.id)}
+                data-testid="wka-approval-item"
+              >
+                <span class="wka-todo-k">완료 승인</span>
+                <span class="wka-todo-t">${g.title}</span>
+                ${g.verifiers.length > 0
+                  ? html`<span class="wka-todo-m mono">${g.verifiers.join(' · ')}</span>`
+                  : null}
+              </button>
+            `)}
+            ${verifyTasks.map(t => html`
+              <button
+                key=${t.id}
+                type="button"
+                class="wka-todo verify"
+                onClick=${() => onJump(t.goalId)}
+                data-testid="wka-verify-item"
+              >
+                <span class="wka-todo-k">게이트</span>
+                <span class="wka-todo-t">${t.title}</span>
+                <span class="wka-todo-m mono">${t.open > 0 ? `${t.open} 미충족` : '검증 대기'}</span>
+              </button>
+            `)}
+            ${blockers.map(t => html`
+              <button
+                key=${t.id}
+                type="button"
+                class="wka-todo block"
+                onClick=${() => onJump(t.goalId)}
+                data-testid="wka-blocker-item"
+              >
+                <span class="wka-todo-k">차단</span>
+                <span class="wka-todo-t">${t.title}</span>
+                <span class="wka-todo-m">${t.blocker}</span>
+              </button>
+            `)}
+            ${backlog.length > 0 ? (() => {
+              // backlog[0] is safe here: length > 0 is checked above, but
+              // TypeScript can't narrow through html`` template literals.
+              const firstGoalId = backlog[0]?.goalId ?? ''
+              return html`
+                <button
+                  type="button"
+                  class="wka-todo claim"
+                  onClick=${() => onJump(firstGoalId)}
+                  data-testid="wka-backlog-item"
+                >
+                  <span class="wka-todo-k">클레임</span>
+                  <span class="wka-todo-t">미배정 task ${backlog.length}건</span>
+                  <span class="wka-todo-m mono">keeper_task_claim</span>
+                </button>
+              `
+            })() : null}
+            ${needTotal === 0
+              ? html`<div class="wka-calm mono" data-testid="wka-todo-calm">대기 중인 작업 없음</div>`
+              : null}
+          </div>
+        </section>
+
+        <section class="wka-sec" aria-labelledby="wka-h-recent">
+          <div class="wka-h" id="wka-h-recent" role="heading" aria-level=${3}>
+            최근 한 일
+            ${recent.length > 0 ? html`<span class="wka-h-n dim">${recent.length}</span>` : null}
+          </div>
+          <div class="wka-list">
+            ${recent.length === 0
+              ? html`<div class="wka-calm mono" data-testid="wka-recent-calm">완료된 task 없음</div>`
+              : recent.map(t => html`
+                <button
+                  key=${t.id}
+                  type="button"
+                  class="wka-done"
+                  onClick=${() => onJump(t.goalId)}
+                  data-testid="wka-recent-item"
+                >
+                  <span class="wka-done-mark">✓</span>
+                  <span class="wka-done-t">${t.title}</span>
+                </button>
+              `)}
+          </div>
+        </section>
+
+      </div>
+    </aside>
+  `
+}
+
 function WorkSurfaceV2() {
   const goalList = goals.value
   const allTasks = tasks.value
@@ -430,6 +854,111 @@ function WorkSurfaceV2() {
     })
   }
 
+  // Expand a goal and scroll its card into view in the left column.
+  // GoalCard renders with data-goal-id so this selector is stable.
+  const jumpToGoal = useCallback((id: string) => {
+    setOpenSet(prev => {
+      const next = new Set(prev)
+      next.add(id)
+      return next
+    })
+    requestAnimationFrame(() => {
+      const scroll = document.querySelector('.ov-2col .ov-scroll')
+      const card = document.querySelector(`[data-goal-id="${id}"]`)
+      if (scroll && card) {
+        const r = card.getBoundingClientRect()
+        const sr = scroll.getBoundingClientRect()
+        scroll.scrollTo({ top: (scroll as HTMLElement).scrollTop + r.top - sr.top - 80, behavior: 'smooth' })
+      } else if (card) {
+        card.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      }
+    })
+  }, [])
+
+  // ── WorkAside derivations (immutable, phase-enum based) ──────────────────
+  // All computed from the same claimedTasks / goalList signals.
+  // See WorkAside phase-mapping comment for rationale.
+
+  const wkaFlagged = useMemo((): ReadonlyArray<WkaFlaggedGoal> =>
+    goalList
+      .filter(isGoalFlagged)
+      .map(g => ({
+        id: g.id,
+        cls: goalPhaseFlagCls(g.phase),
+        lbl: goalPhaseFlagLbl(g.phase),
+        title: g.title,
+        reason: g.last_review_note,
+      })),
+  [goalList])
+
+  const wkaApprovals = useMemo((): ReadonlyArray<WkaApprovalGoal> =>
+    goalList
+      .filter(g => g.require_completion_approval === true && g.phase === 'awaiting_approval')
+      .map(g => ({
+        id: g.id,
+        title: g.title,
+        verifiers: g.verifier_policy?.principals.map(p => p.id) ?? [],
+      })),
+  [goalList])
+
+  const wkaVerifyTasks = useMemo((): ReadonlyArray<WkaVerifyTask> =>
+    claimedTasks
+      .filter(t => t.status === 'awaiting_verification')
+      .map(t => ({
+        id: t.id,
+        title: t.title,
+        goalId: t.goal_id ?? '',
+        open: taskGateRows(t).filter(r => r.outcome !== 'satisfied').length,
+      })),
+  [claimedTasks])
+
+  // Live Task has no freeform `blocker` string field; blockerNoteForTask()
+  // reads handoff_context.failure_mode / reason.  We surface tasks where
+  // that note is non-null (excluding done/awaiting_verification which have
+  // their own sections).
+  const wkaBlockers = useMemo((): ReadonlyArray<WkaBlockerTask> =>
+    claimedTasks
+      .filter(t => {
+        if (t.status === 'done' || t.status === 'awaiting_verification') return false
+        return blockerNoteForTask(t) !== null
+      })
+      .map(t => ({
+        id: t.id,
+        title: t.title,
+        blocker: blockerNoteForTask(t) ?? '',
+        goalId: t.goal_id ?? '',
+      })),
+  [claimedTasks])
+
+  const wkaBacklog = useMemo((): ReadonlyArray<WkaBacklogTask> =>
+    claimedTasks
+      .filter(isClaimableBacklogTask)
+      .map(t => ({
+        id: t.id,
+        title: t.title,
+        goal: t.goal_id ? (goalList.find(g => g.id === t.goal_id)?.title ?? '') : '',
+        goalId: t.goal_id ?? '',
+        priority: t.priority ?? 0,
+      })),
+  [claimedTasks, goalList])
+
+  const wkaRecent = useMemo((): ReadonlyArray<WkaRecentTask> =>
+    claimedTasks
+      .filter(t => t.status === 'done')
+      .map(t => ({
+        id: t.id,
+        title: t.title,
+        goalId: t.goal_id ?? '',
+      })),
+  [claimedTasks])
+
+  const wkaCounts = useMemo((): WkaCounts => ({
+    active: goalList.length,
+    wip: totals.wip,
+    verify: totals.verify,
+    backlog: totals.backlog,
+  }), [goalList, totals])
+
   const tasksByGoalId = useMemo(() => {
     const map = new Map<string, Task[]>()
     for (const g of goalList) map.set(g.id, [])
@@ -443,7 +972,7 @@ function WorkSurfaceV2() {
   }, [goalList, claimedTasks])
 
   return html`
-    <main class="ov">
+    <main class="ov ov-2col">
       <div class="ov-scroll">
         <header class="ov-head">
             <div>
@@ -530,6 +1059,17 @@ function WorkSurfaceV2() {
 
           <div class="wk-foot mono">Goal → Task → keeper · 우선순위 순 정렬 · 완료는 게이트 증거 충족 후 done · 미배정 task 는 백로그에서 claim</div>
       </div>
+      <${WorkAside}
+        flagged=${wkaFlagged}
+        approvals=${wkaApprovals}
+        verifyTasks=${wkaVerifyTasks}
+        blockers=${wkaBlockers}
+        backlog=${wkaBacklog}
+        recent=${wkaRecent}
+        counts=${wkaCounts}
+        onJump=${jumpToGoal}
+        onOpenKeeper=${openKeeperWorkspace}
+      />
     </main>
   `
 }

@@ -249,6 +249,19 @@ describe('ApprovalsSurface', () => {
     expect(container.querySelector('[data-testid="approvals-queue"]')).toBeNull()
   })
 
+  it('labels the surface with the shared data-screen-label convention', async () => {
+    // Every v2 surface (fusion/schedule/settings/connector/copilot) tags its
+    // <main> with data-screen-label; the prototype names this screen 승인 큐.
+    // Asserting it keeps the approvals surface consistent with that convention.
+    const { ApprovalsSurface } = await loadSurface([])
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const main = container.querySelector('[data-testid="approvals-surface"]')
+    expect(main?.getAttribute('data-screen-label')).toBe('승인 큐')
+  })
+
   it('routes the 승인 action through respondToKeeperApproval → resolveGovernanceApproval', async () => {
     const { ApprovalsSurface, resolveGovernanceApproval } = await loadSurface([
       queueItem({ id: 'appr-9', keeper_name: 'masc-improver' }),

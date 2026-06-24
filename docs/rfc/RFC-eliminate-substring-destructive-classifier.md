@@ -43,38 +43,57 @@ worker 도구는 전부 MCP 프록시(`worker_container.ml:298-332` `build_oas_m
 `keeper_tool_execute_runtime.ml` (RFC-0254 §5.2/§5.5): Ask 에 답할 인간/resolver 가 없어 overlay 는
 `autonomous` — **모든 non-catastrophic risk class 는 `Observe` ⇒ Allow + telemetry**.
 
-### 2.3 autonomous keeper 의 typed 무조건 차단은 두 가지뿐
+### 2.3 autonomous keeper 의 typed 무조건 차단은 세 가지
 1. `Shell_ir_risk.is_destructive` (risk = `Destructive_protected`) — `keeper_tool_execute_runtime.ml:513`
-   hard block.
+   hard block. **command-shape**.
 2. `Approval_policy.catastrophic_floor` (`approval_policy.ml:107`) — `find_destructive_git` /
-   `find_write_escape` / `find_catastrophic_program`. `dispatch_classified` 의 trust·flag 독립 floor.
+   `find_write_escape`(redirect 만) / `find_catastrophic_program`(mkfs 등 identity). `dispatch_classified` 의
+   trust·flag 독립 floor. **command-shape**.
+3. `Exec_policy.validate_shell_ir_paths` (path jail, `keeper_tool_execute_shell_ir.ml:82`) — 명령 **인자 경로**를
+   workspace whitelist 로 가둠. **path-based**.
 
 `Approval_policy.decide` 의 등급 채점(`max_risk` × trust overlay)은 autonomous 에서 전부 `Observe`⇒Allow 이므로
-위 두 가지 외에는 아무것도 막지 않는다. 즉 **R2_Irreversible(비-catastrophic)은 autonomous keeper 에서 허용**된다.
+위 세 가지 외에는 아무것도 막지 않는다.
+
+**중요 — caps 는 redirect 만 path cap 을 emit** (`capability_check.mli:13-16`): `rm`/`chmod`/`dd` 의 인자 경로는
+cap 이 아니라 단순 arg 이므로 `find_write_escape`(catastrophic_floor)가 못 본다. 이들의 경로 차단은 오직 path
+jail(3)이 한다. 그리고 path jail 은 `Shell_ir_path_jail.enabled` env-gated 이며 **RFC-0255 P5 에서 제거 예정인
+임시 밸브**("short-lived valve, not a steady state")다.
+
+### 2.4 측정 framing — command-shape only (path jail 의도적 제외)
+본 RFC 의 harness 와 gap 은 (1)+(2) **command-shape 분류기**만 측정하고 (3) path jail 을 **의도적으로 제외**한다.
+근거: ① path jail 은 제거 예정 임시 밸브라 그것에 의존한 retirement 는 사라질 방어에 기대는 것; ② path jail 은
+target 경로만 제약하므로 path-independent 명령(kill/pkill/shutdown/reboot/SQL)을 절대 못 막고, **workspace 내부**
+파괴 target(예: `rm -r ./src`)도 못 막는다. 따라서 substring 의 정책은 임시 path jail 이 아니라 **command-shape
+typed risk arm 에 인코딩**돼야 하며, 그 전제에서 command-shape gap 이 올바른 work-list 다.
 
 ## 3. 측정된 gap (differential harness, §5)
 
 `test/test_destructive_floor_differential.ml` 는 `config/destructive_ops.toml` 18개 패턴 각각에 대해
-substring verdict 과 autonomous-keeper typed verdict 을 계산한다. 결과:
+substring verdict 과 autonomous-keeper **command-shape** typed verdict(§2.4)을 계산한다. 결과:
 
 | 상태 | 수 | 패턴 |
 |---|---|---|
-| **typed 이미 커버** (즉시 삭제 가능) | 6 | `rm -rf`, `git push --force`, `git push -f`, `git reset --hard`, `git clean -f`, `mkfs` |
-| **GAP** (substring 차단 / autonomous keeper 허용) | 12 | 아래 |
+| **command-shape typed 이미 커버** (즉시 삭제 가능) | 6 | `rm -rf`, `git push --force`, `git push -f`, `git reset --hard`, `git clean -f`, `mkfs` |
+| **GAP** (substring 차단 / command-shape typed 허용) | 12 | 아래 |
 
-GAP 12 (= Phase 2 work-list):
+GAP 12 (= Phase 2 work-list). path-independence 로 분할 — path-independent 는 path 방어가 절대 못 돕는
+**irreducible core**, path-bearing 은 in-workspace worst-case(workspace 밖 변형은 path jail 이 *임시로* 추가
+커버):
 
-| class | 대표 명령 | typed 가 못 막는 이유 |
-|---|---|---|
-| sql_destructive | `psql -c "drop table …"` / `drop database` / `truncate table` / `delete from` | SQL 이 psql 문자열 인자 — typed 는 셸 파서라 caps 에 안 잡힘 |
-| recursive_delete | `rm -r` (force 없음), `rmdir` | `is_destructive_bash_operation` 은 `rm` 에 recursive **AND** force 요구; rmdir 미모델 |
-| privilege_escalation | `chmod 777` | catastrophic_floor 비대상 |
-| process_signal | `kill -9`, `pkill` | catastrophic_floor 비대상 |
-| system_control | `shutdown`, `reboot` | catastrophic_floor 비대상 |
-| device_write | `dd if=…` | `mkfs` 는 catastrophic_program 인데 `dd` 는 누락 (typed floor 내부 비일관성) |
+| 분류 | class | 대표 명령 | typed command-shape 가 못 막는 이유 |
+|---|---|---|---|
+| **path-independent** | sql_destructive | `psql -c "drop table …"` / `drop database` / `truncate table` / `delete from` | SQL 이 psql 문자열 인자 — 셸 파서 caps 에 안 잡힘 |
+| | process_signal | `kill -9`, `pkill` | catastrophic_floor 비대상, path 없음 |
+| | system_control | `shutdown`, `reboot` | catastrophic_floor 비대상, path 없음 |
+| **path-bearing** | recursive_delete | `rm -r ./build`(force 없음), `rmdir ./build` | `is_destructive_bash_operation` 은 `rm` 에 recursive **AND** force 요구; rmdir 미모델. 인자 경로는 cap 아님→catastrophic_floor 못 봄 |
+| | privilege_escalation | `chmod 777 ./script.sh` | catastrophic_floor 비대상; 인자 경로 cap 아님 |
+| | device_write | `dd if=… of=./out.img` | `mkfs` 는 catastrophic_program 인데 `dd` 는 누락 (typed floor 내부 비일관성) |
 
-**결론**: substring 을 지금 삭제하면 위 12개의 유일한 차단막이 사라진다 — autonomous keeper 안전 회귀.
-substring 은 레거시 중복이 아니라 "irreversible/privileged 도 차단"이라는 *더 엄격한 정책의 유일한 인코딩*이다.
+**결론**: command-shape 분류기만으로는 위 12개를 못 막는다. path jail(임시)을 빼면 substring 이 이들의 유일한
+차단막이며, 특히 path-independent 6종(SQL/kill/pkill/shutdown/reboot)과 **workspace 내부** 파괴(`rm -r ./build`
+등)는 path jail 로도 못 막는 진짜 gap 이다. substring 은 레거시 중복이 아니라 "irreversible/privileged 도 차단"
+이라는 *더 엄격한 정책의 유일한 command-shape 인코딩*이다.
 
 ## 4. 결정 (Decisions)
 
@@ -99,8 +118,9 @@ DB-capability 로 다룰지, 또는 autonomous keeper 에서 허용으로 완화
 실행 토폴로지(§2) + `Tool_capability.Destructive` 는 셸 전용 아님(Tool_catalog 플래그) 확인.
 
 ### Phase 1 — differential-safety harness (완료, 본 PR)
-`test/test_destructive_floor_differential.ml`. read-only 결정론. substring verdict vs autonomous-keeper typed
-verdict 을 18 패턴에 대해 계산하고, gap 을 baseline ratchet 으로 고정(현재 12). gap 이 silent 하게 늘면 red.
+`test/test_destructive_floor_differential.ml`. read-only 결정론. substring verdict vs autonomous-keeper
+**command-shape** typed verdict(§2.4, path jail 제외)을 18 패턴에 대해 계산하고, gap 을 baseline ratchet 으로
+고정(현재 12, path-independent/bearing 분할 보고). gap 이 silent 하게 늘면 red.
 
 ### Phase 2 — typed floor 확장 (gap 축소)
 class 별로 typed risk arm / catastrophic_floor 를 확장해 gap baseline 을 줄인다. 각 PR 은 harness baseline 을
@@ -125,5 +145,10 @@ worker/keeper_guards/eval_gate pre-hook 제거. drift-guard 로 substring 분류
 - gap 이 12개로 크다 — naive 삭제의 위험을 정량 입증. 작업은 *typed 안전 floor 확장*(중간 규모)이다.
 - harness 모델은 autonomous overlay(가장 관대 = 안전 worst-case)를 기준 — enforced/HITL keeper 는 gap 이 더
   작다. 보수적 선택.
+- **path jail 제외(§2.4)**: harness 는 command-shape 만 측정한다. path-bearing gap(rm -r/rmdir/chmod/dd)의
+  workspace 밖 변형은 path jail 이 *오늘은* 추가 차단하지만, path jail 은 RFC-0255 P5 제거 대상 임시 밸브다.
+  따라서 gap 을 path jail 에 의존해 축소하지 않고 command-shape typed arm 으로 닫는 것이 retirement 의 전제다.
+  path-independent gap(SQL/kill/pkill/shutdown/reboot)과 in-workspace 파괴는 path jail 로도 못 막으므로 framing
+  과 무관하게 진짜 gap 이다.
 - device_write `> /dev/` (redirect 형)은 harness corpus 에서 제외(Redirect_scope 구성 필요); catastrophic_floor
   write-escape 가 별도 커버. `dd if=` 가 class 대표.

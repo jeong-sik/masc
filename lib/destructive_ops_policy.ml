@@ -30,6 +30,13 @@ type load_error = {
 let enabled t = t.enabled
 let patterns t = t.patterns
 
+(* A policy with detection disabled and an empty catalogue. Total: no parsing
+   or validation, because "disabled" is a value, not a parse result. Callers
+   that need to pass an explicitly-disabled policy use this instead of
+   [of_patterns ~enabled:false []] (which is fallible only to satisfy the
+   validated programmatic path and would force a dead error branch here). *)
+let disabled = { enabled = false; patterns = [] }
+
 (* ------------------------------------------------------------------ *)
 (* Error helpers                                                      *)
 (* ------------------------------------------------------------------ *)

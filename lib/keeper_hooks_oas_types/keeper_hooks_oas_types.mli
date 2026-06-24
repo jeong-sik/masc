@@ -185,6 +185,13 @@ val stop_reason_label_max_tokens : string
 val stop_reason_label_stop_sequence : string
 val stop_reason_label_unknown : string
 
+val stop_reason_to_label : Agent_sdk.Types.stop_reason -> string
+(** Canonical telemetry/metric label for a turn stop reason.  Shared by
+    [keeper_hooks_oas] (finish-reason hook field) and
+    [keeper_hooks_oas_response_metrics] (metric label) so the two cannot
+    drift; the four named [stop_reason_label_*] constants back the arms
+    that recur across call sites. *)
+
 val zero_usage : Agent_sdk.Types.api_usage
 (** Internal: zero-token api_usage marker used by classify_usage_trust
     when telemetry is missing. *)

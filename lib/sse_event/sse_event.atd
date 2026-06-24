@@ -109,22 +109,16 @@ type slot_scheduler_observed_payload = {
 
 (* PR-3b events: agent_completed, agent_failed.
 
-   These two events carry a variable-shape payload tail beyond the
+   agent_completed carries a variable-shape result tail beyond the
    three base fields (agent_name, task_id, elapsed_s).  The tail is
-   produced by runtime-local helpers that close over Agent_sdk
-   variant types (Agent_sdk.Types.api_response, Agent_sdk.Error.t,
-   Keeper_agent_error / Keeper_turn_terminal_code).
+   produced by a runtime-local helper that closes over Agent_sdk
+   variant types (Agent_sdk.Types.api_response), so the constructor
+   in [Sse_event] keeps the caller-supplied addendum splice.
 
-   Bringing those variant types into a leaf event library would
-   force Agent_sdk dependency on the leaf -- the same boundary
-   violation that motivated splitting agent_completed / agent_failed
-   off of PR-3.
-
-   Design choice: atd encodes the three base fields only, and the
-   typed constructor in [Sse_event] accepts a caller-supplied
-   [(string * Yojson.Safe.t) list] addendum which is appended to
-   the atd record output.  Byte-equality with the previous inline
-   `Assoc-construction path is verified in test_sse_event.ml. *)
+   agent_failed's five error fields are simple projections of
+   Agent_sdk.Error.t (string/bool/Yojson.Safe.t) and are encoded
+   directly in the atd schema so the dashboard no longer drops them
+   during typed parsing. *)
 
 type agent_completed_payload = {
   agent_name: string;
@@ -132,8 +126,19 @@ type agent_completed_payload = {
   elapsed_s: float;
 }
 
+(* Free-form JSON object carried inside agent_failed.error_detail.
+   The exact shape is variant-specific (see
+   keeper_event_bridge_error_json.ml:sdk_error_json); the dashboard
+   treats it as an opaque value and passes it through unchanged. *)
+type json_value <ocaml module="Yojson.Safe" t="t"> = abstract
+
 type agent_failed_payload = {
   agent_name: string;
   task_id: string;
   elapsed_s: float;
+  error: string;
+  error_domain: string;
+  error_code: string;
+  error_retryable: bool;
+  error_detail: json_value;
 }

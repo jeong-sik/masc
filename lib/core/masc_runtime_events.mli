@@ -23,6 +23,13 @@ val emit_turn_end : unit -> unit
     [emit_turn_start] around the turn body (the consumer pairs them
     by domain+timestamp). *)
 
+val with_turn_span : (unit -> 'a) -> 'a
+(** [with_turn_span f] emits the [Begin] bound, runs [f], and emits the
+    [End] bound even if [f] raises.  Uses {!Eio_guard.protect} so the
+    closing bound runs under [Eio.Switch] when the runtime is active and
+    a body exception is preserved.  Brackets the pair so a caller cannot
+    emit a start without its matching end. *)
+
 val start_listener : unit -> unit
 (** Install the Runtime_events ring buffer listener.
 

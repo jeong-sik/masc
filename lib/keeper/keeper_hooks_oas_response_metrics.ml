@@ -72,16 +72,11 @@ let resolve_after_turn_model ~keeper_name
     runtime_lane_label
   end
 
-let stop_reason_metric_label = function
-  | Agent_sdk.Types.EndTurn -> "end_turn"
-  | Agent_sdk.Types.StopToolUse -> "tool_use"
-  | Agent_sdk.Types.MaxTokens -> "max_tokens"
-  | Agent_sdk.Types.StopSequence -> "stop_sequence"
-  | Agent_sdk.Types.Refusal -> "refusal"
-  | Agent_sdk.Types.PauseTurn -> "pause_turn"
-  | Agent_sdk.Types.Compaction -> "compaction"
-  | Agent_sdk.Types.ContextWindowExceeded -> "model_context_window_exceeded"
-  | Agent_sdk.Types.Unknown _ -> "unknown"
+(* stop_reason_metric_label unified into
+   Keeper_hooks_oas_types.stop_reason_to_label (2026-06-24): it was a
+   byte-for-output-identical 9-arm match that bypassed the
+   stop_reason_label_* SSOT constants by inlining their literals.  [open
+   Keeper_hooks_oas_types] above brings stop_reason_to_label into scope. *)
 
 let content_block_has_visible_or_tool_progress = function
   | Agent_sdk.Types.Text text -> String.trim text <> ""
@@ -116,7 +111,7 @@ let record_response_content_quality_metric ~keeper_name
       ~labels:
         [
           (label_keeper, keeper_name);
-          (label_stop_reason, stop_reason_metric_label response.stop_reason);
+          (label_stop_reason, stop_reason_to_label response.stop_reason);
           (label_shape, response_content_empty_shape response.content);
         ]
       ()

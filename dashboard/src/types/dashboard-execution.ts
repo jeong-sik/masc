@@ -918,7 +918,6 @@ export interface GoalKeeperTrustSummary {
 export interface GoalTreeNode {
   id: string
   title: string
-  horizon: string
   status: string
   status_color: string
   phase: string

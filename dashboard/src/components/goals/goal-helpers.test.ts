@@ -1,8 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
   priorityStars,
-  horizonLabel,
-  horizonColor,
   priorityLabel,
   phaseFilterLabel,
   matchesGoalPhaseFilter,
@@ -39,50 +37,6 @@ describe('priorityStars', () => {
 
   it('returns 3 filled + 2 empty for 3', () => {
     expect(priorityStars(3)).toBe('\u2605\u2605\u2605\u2606\u2606')
-  })
-})
-
-// ================================================================
-// horizonLabel
-// ================================================================
-
-describe('horizonLabel', () => {
-  it('returns 단기 for short', () => {
-    expect(horizonLabel('short')).toBe('단기')
-  })
-
-  it('returns 중기 for mid', () => {
-    expect(horizonLabel('mid')).toBe('중기')
-  })
-
-  it('returns 장기 for long', () => {
-    expect(horizonLabel('long')).toBe('장기')
-  })
-
-  it('returns raw value for unknown', () => {
-    expect(horizonLabel('custom')).toBe('custom')
-  })
-})
-
-// ================================================================
-// horizonColor
-// ================================================================
-
-describe('horizonColor', () => {
-  it('returns green for short', () => {
-    expect(horizonColor('short')).toBe('var(--color-status-ok)')
-  })
-
-  it('returns amber for mid', () => {
-    expect(horizonColor('mid')).toBe('var(--amber-bright)')
-  })
-
-  it('returns indigo for long', () => {
-    expect(horizonColor('long')).toBe('var(--indigo)')
-  })
-
-  it('returns muted for unknown', () => {
-    expect(horizonColor('unknown')).toBe('var(--color-fg-muted)')
   })
 })
 

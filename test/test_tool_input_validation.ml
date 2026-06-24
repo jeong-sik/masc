@@ -1420,7 +1420,6 @@ let test_registered_hook_goal_list_strips_blank_optional_enums () =
   let args =
     `Assoc
       [
-        ("horizon", `String "");
         ("phase", `String " ");
       ]
   in
@@ -1432,8 +1431,6 @@ let test_registered_hook_goal_list_strips_blank_optional_enums () =
       ()
   in
   Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
-  Alcotest.(check bool) "horizon removed" true
-    (Yojson.Safe.Util.member "horizon" forwarded = `Null);
   Alcotest.(check bool) "phase removed" true
     (Yojson.Safe.Util.member "phase" forwarded = `Null)
 
@@ -1449,7 +1446,9 @@ let test_registered_hook_goal_list_rejects_status_filter () =
   Alcotest.(check bool) "blocked" true (Option.is_some blocked)
 
 let test_registered_hook_goal_list_preserves_invalid_enum_for_handler () =
-  let args = `Assoc [("horizon", `String "week")] in
+  (* RFC-0294: horizon removed; phase is the surviving optional enum. An invalid
+     enum value must pass the hook so the handler performs the rejection. *)
+  let args = `Assoc [("phase", `String "notaphase")] in
   let blocked, forwarded =
     run_registered_hook
       ~schema:masc_goal_list_schema
@@ -1458,8 +1457,8 @@ let test_registered_hook_goal_list_preserves_invalid_enum_for_handler () =
       ()
   in
   Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
-  Alcotest.(check string) "invalid value preserved for handler validation" "week"
-    (assoc_string "horizon" forwarded)
+  Alcotest.(check string) "invalid value preserved for handler validation" "notaphase"
+    (assoc_string "phase" forwarded)
 
 let test_registered_hook_required_enum_blank_is_not_stripped () =
   let schema =

@@ -211,10 +211,11 @@ let build_keeper_system_prompt
     | goals ->
         let lines =
           List.map
-            (fun (id, title, horizon) ->
-               Printf.sprintf "- %s [%s] %s"
+            (fun (id, title) ->
+               (* RFC-0294: available-goals line was "- <id> [<horizon>] <title>";
+                  horizon removed, so it is now "- <id> <title>". *)
+               Printf.sprintf "- %s %s"
                  (String_util.escape_xml id)
-                 (String_util.escape_xml horizon)
                  (String_util.escape_xml title))
             goals
         in

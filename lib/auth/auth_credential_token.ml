@@ -89,6 +89,20 @@ let collision_log_to_yojson log =
     ]
 ;;
 
+(** Constant-time string equality for raw bearer tokens.  It XOR-accumulates
+    every byte of the shorter input and checks length equality separately so
+    the comparison does not short-circuit on the first differing byte. *)
+let constant_time_string_equal a b =
+  let len_a = String.length a in
+  let len_b = String.length b in
+  let acc = ref 0 in
+  let min_len = min len_a len_b in
+  for i = 0 to min_len - 1 do
+    acc := !acc lor (Char.code a.[i] lxor Char.code b.[i])
+  done;
+  !acc = 0 && len_a = len_b
+;;
+
 (** Compare two credentials field-by-field.  The caller supplies the
     token hash prefix for the collision log; the comparison itself is
     pure and depends only on the two records. *)
@@ -131,7 +145,7 @@ let compare_credentials ~token_hash_prefix left right : credential_comparison =
     else field_diffs
   in
   let field_diffs =
-    if not (String.equal left.token right.token)
+    if not (constant_time_string_equal left.token right.token)
     then Token_hash { left = left.token; right = right.token } :: field_diffs
     else field_diffs
   in

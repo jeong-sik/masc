@@ -1,0 +1,200 @@
+// MASC Dashboard — Governance approvals / HITL / schedule / case fetchers.
+// Extracted from dashboard.ts (domain split). Public symbols re-exported
+// from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
+
+import { get, post, withRetries } from './core'
+import { isRecord, asBoolean, asInt, asNullableString, asString } from '../components/common/normalize'
+import {
+  asNullableIsoTimestamp,
+  normalizeGovernanceDecisionItem,
+  normalizeGovernanceTimelineEvent,
+  normalizeGovernanceJudgeSummary,
+  normalizeGovernanceJudgment,
+  normalizeKeeperApprovalQueueItem,
+} from './board'
+import { normalizePendingConfirmation } from '../pending-confirm'
+import { asKeeperApprovalRiskLevel } from '../lib/governance-risk-level'
+import type {
+  KeeperApprovalRule,
+  DashboardGovernanceResponse,
+  GovernanceDecisionItem,
+  GovernanceTimelineEvent,
+  GovernanceJudgment,
+  KeeperApprovalQueueItem,
+  GovernanceCaseBundle,
+  PendingConfirmation,
+} from '../types'
+
+function normalizeKeeperApprovalRule(raw: unknown): KeeperApprovalRule | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id, '').trim()
+  const keeperName = asString(raw.keeper_name, '').trim()
+  const toolName = asString(raw.tool_name, '').trim()
+  if (!id || !keeperName || !toolName) return null
+  return {
+    id,
+    keeper_name: keeperName,
+    tool_name: toolName,
+    sandbox_profile: asNullableString(raw.sandbox_profile),
+    backend: asNullableString(raw.backend),
+    request_fingerprint: asNullableString(raw.request_fingerprint) ?? undefined,
+    request_fingerprint_preview:
+      asNullableString(raw.request_fingerprint_preview) ?? undefined,
+    max_risk: asKeeperApprovalRiskLevel(raw.max_risk) ?? undefined,
+    created_at: asNullableIsoTimestamp(raw.created_at_iso ?? raw.created_at),
+    created_by: asNullableString(raw.created_by),
+    last_matched_at:
+      asNullableIsoTimestamp(raw.last_matched_at_iso ?? raw.last_matched_at),
+    match_count: asInt(raw.match_count) ?? undefined,
+    source_approval_id: asNullableString(raw.source_approval_id),
+  }
+}
+
+function normalizeHitlStatus(raw: unknown): DashboardGovernanceResponse['hitl'] | undefined {
+  if (!isRecord(raw)) return undefined
+  return {
+    enabled: asBoolean(raw.enabled) ?? false,
+    disabled_by_env: asBoolean(raw.disabled_by_env) ?? false,
+    env_name: asString(raw.env_name, 'MASC_DISABLE_HITL'),
+    default_enabled: asBoolean(raw.default_enabled) ?? true,
+  }
+}
+
+export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse> {
+  return withRetries('fetchDashboardGovernance', async () => {
+    const raw = await get<Record<string, unknown>>('/api/v1/dashboard/governance')
+    const items = Array.isArray(raw.items)
+      ? raw.items
+          .map(item => normalizeGovernanceDecisionItem(item))
+          .filter((item): item is GovernanceDecisionItem => item !== null)
+      : []
+    const pendingActions = Array.isArray(raw.pending_actions)
+      ? raw.pending_actions
+          .map(item => normalizePendingConfirmation(item))
+          .filter((item): item is PendingConfirmation => item !== null)
+      : []
+    const approvalQueue = Array.isArray(raw.approval_queue)
+      ? raw.approval_queue
+          .map(item => normalizeKeeperApprovalQueueItem(item))
+          .filter((item): item is KeeperApprovalQueueItem => item !== null)
+      : []
+    const approvalRules = Array.isArray(raw.approval_rules)
+      ? raw.approval_rules
+          .map(item => normalizeKeeperApprovalRule(item))
+          .filter((item): item is KeeperApprovalRule => item !== null)
+      : []
+    return {
+      generated_at: asNullableIsoTimestamp(raw.generated_at) ?? undefined,
+      note: typeof raw.note === 'string' && raw.note.trim() !== '' ? raw.note.trim() : undefined,
+      summary: isRecord(raw.summary)
+        ? {
+            cases_open: asInt(raw.summary.cases_open) ?? undefined,
+            pending_ruling: asInt(raw.summary.pending_ruling) ?? undefined,
+            ready_auto_execute: asInt(raw.summary.ready_auto_execute) ?? undefined,
+            needs_human_gate: asInt(raw.summary.needs_human_gate) ?? undefined,
+            executed: asInt(raw.summary.executed) ?? undefined,
+            blocked: asInt(raw.summary.blocked) ?? undefined,
+            ready_to_execute: asInt(raw.summary.ready_to_execute) ?? undefined,
+            oldest_open_case_age_s:
+              typeof raw.summary.oldest_open_case_age_s === 'number'
+                ? raw.summary.oldest_open_case_age_s
+                : null,
+            last_activity_age_s:
+              typeof raw.summary.last_activity_age_s === 'number'
+                ? raw.summary.last_activity_age_s
+                : null,
+            judge_online:
+              typeof raw.summary.judge_online === 'boolean'
+                ? raw.summary.judge_online
+                : undefined,
+            judge_last_seen_at: asNullableIsoTimestamp(raw.summary.judge_last_seen_at),
+          }
+        : undefined,
+      items,
+      activity: Array.isArray(raw.activity)
+        ? raw.activity
+            .map(item => normalizeGovernanceTimelineEvent(item))
+            .filter((item): item is GovernanceTimelineEvent => item !== null)
+        : [],
+      judge: normalizeGovernanceJudgeSummary(raw.judge),
+      judgments: Array.isArray(raw.judgments)
+        ? raw.judgments
+            .map(item => normalizeGovernanceJudgment(item))
+            .filter((item): item is GovernanceJudgment => item !== null)
+        : [],
+      pending_actions: pendingActions,
+      approval_queue: approvalQueue,
+      approval_rules: approvalRules,
+      hitl: normalizeHitlStatus(raw.hitl),
+    }
+  })
+}
+
+export function resolveGovernanceApproval(
+  id: string,
+  decision: 'approve' | 'reject',
+  rememberRule?: boolean,
+  reason?: string,
+): Promise<{ ok: boolean; id: string; decision: 'approve' | 'reject'; rule_id?: string | null }> {
+  return post('/api/v1/dashboard/governance/approvals/resolve', {
+    id,
+    decision,
+    remember_rule: rememberRule,
+    reason,
+  })
+}
+
+export function deleteGovernanceApprovalRule(
+  id: string,
+): Promise<{ ok: boolean; id: string }> {
+  return post('/api/v1/dashboard/governance/approvals/rules/delete', { id })
+}
+
+export type DashboardScheduleDecision = 'approve' | 'reject'
+
+export interface DashboardScheduleResolveResponse {
+  ok: boolean
+  schedule_id: string
+  decision: DashboardScheduleDecision
+  approved_by?: unknown
+  schedule?: unknown
+}
+
+export function resolveScheduleApproval(
+  scheduleId: string,
+  decision: DashboardScheduleDecision,
+  reason?: string,
+): Promise<DashboardScheduleResolveResponse> {
+  return post('/api/v1/dashboard/schedule/resolve', {
+    schedule_id: scheduleId,
+    decision,
+    reason,
+  })
+}
+
+export function fetchGovernanceCaseStatus(caseId: string): Promise<GovernanceCaseBundle> {
+  return get(`/api/v1/governance/cases/${encodeURIComponent(caseId)}`)
+}
+
+function governanceCasesRetiredError(): Error {
+  return new Error('Governance case write APIs are retired; use live judge and HITL approvals instead.')
+}
+
+export async function submitGovernancePetition(_title: string): Promise<{ case: { id: string } }> {
+  throw governanceCasesRetiredError()
+}
+
+export async function submitGovernanceCaseBrief(
+  _caseId: string,
+  _stance: 'support' | 'oppose' | 'neutral',
+  _summary: string,
+): Promise<GovernanceCaseBundle> {
+  throw governanceCasesRetiredError()
+}
+
+export async function decideGovernanceExecutionOrder(
+  _caseId: string,
+  _decision: 'confirm' | 'deny',
+): Promise<void> {
+  throw governanceCasesRetiredError()
+}

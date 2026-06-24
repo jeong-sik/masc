@@ -1,17 +1,8 @@
 // MASC Dashboard — Dashboard projections, resource fetchers, tool metrics
 
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asRecordArray, asString, asStringArray } from '../components/common/normalize'
-import {
-  asNullableIsoTimestamp,
-  normalizeGovernanceDecisionItem,
-  normalizeGovernanceTimelineEvent,
-  normalizeGovernanceJudgeSummary,
-  normalizeGovernanceJudgment,
-  normalizeKeeperApprovalQueueItem,
-} from './board'
-import { normalizePendingConfirmation } from '../pending-confirm'
 import { normalizeKeeperTrustTerminalReason } from '../keeper-store-normalize'
-import { currentDashboardActor, get, post, withRetries, type AbortableRequestOptions } from './core'
+import { get, post, type AbortableRequestOptions } from './core'
 import { ensureDevToken } from './dev-token'
 import { DEFAULT_WINDOW_MINUTES_24H } from '../config/constants'
 import type { TelemetryFreshnessMetadata, DashboardFeedMetadata } from './dashboard-shared'
@@ -20,11 +11,7 @@ import {
   type AgentTimelineEvent,
   type AgentTimelineResponse,
 } from './schemas/agent-timeline'
-import {
-  parseDashboardConfigResponse,
-  type DashboardConfigResponse,
-} from './schemas/dashboard-config'
-import { parseLogsResponse, type LogEntry, type LogsResponse } from './schemas/logs'
+import { type LogEntry, type LogsResponse } from './schemas/logs'
 import {
   parseRuntimeDefaultsResponse,
   type RuntimeDefaultsResponse,
@@ -33,22 +20,16 @@ import {
   type ModelRouting,
 } from './schemas/runtime-defaults'
 import {
-  parseProviderLogTailResponse,
-  parseProviderLogsCatalogResponse,
   type ProviderLogCatalogEntry,
   type ProviderLogsCatalogResponse,
   type ProviderLogTailLine,
   type ProviderLogTailResponse,
 } from './schemas/provider-logs'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
-import { asKeeperApprovalRiskLevel } from '../lib/governance-risk-level'
 import type {
   KeeperConfig,
   KeeperFeatureStatus,
   KeeperHookSlot,
-  DashboardExecutionResponse,
-  DashboardGovernanceResponse,
-  DashboardMemoryResponse,
   DashboardGoalsTreeResponse,
   DashboardGoalDetailResponse,
   GoalDetailKeeper,
@@ -66,14 +47,6 @@ import type {
   GoalVerificationRequest,
   GoalVerificationSummary,
   GoalVerificationVote,
-  BoardSortMode,
-  GovernanceCaseBundle,
-  GovernanceDecisionItem,
-  GovernanceJudgment,
-  KeeperApprovalRule,
-  KeeperApprovalQueueItem,
-  GovernanceTimelineEvent,
-  PendingConfirmation,
   DashboardConfigResolution,
   DashboardRuntimeResolution,
 } from '../types'
@@ -108,47 +81,13 @@ export type {
 }
 export { ProviderLogsSchemaDriftError } from './schemas/provider-logs'
 
-export async function fetchLogs(opts?: {
-  limit?: number
-  level?: string
-  module?: string
-  since_seq?: number
-  before_seq?: number
-  category?: string
-  exclude_category?: string
-}): Promise<LogsResponse> {
-  const params = new URLSearchParams()
-  if (opts?.limit) params.set('limit', String(opts.limit))
-  if (opts?.level) params.set('level', opts.level)
-  if (opts?.module) params.set('module', opts.module)
-  if (typeof opts?.since_seq === 'number' && opts.since_seq >= 0) {
-    params.set('since_seq', String(opts.since_seq))
-  }
-  if (typeof opts?.before_seq === 'number' && opts.before_seq >= 0) {
-    params.set('before_seq', String(opts.before_seq))
-  }
-  if (opts?.category) params.set('category', opts.category)
-  if (opts?.exclude_category) params.set('exclude_category', opts.exclude_category)
-  const qs = params.toString()
-  const raw = await get<unknown>(`/api/v1/dashboard/logs${qs ? `?${qs}` : ''}`)
-  return parseLogsResponse(raw)
-}
-
-export async function fetchProviderLogsCatalog(): Promise<ProviderLogsCatalogResponse> {
-  const raw = await get<unknown>('/api/v1/dashboard/provider-logs')
-  return parseProviderLogsCatalogResponse(raw)
-}
-
-export async function fetchProviderLogTail(
-  provider: string,
-  opts?: { lines?: number },
-): Promise<ProviderLogTailResponse> {
-  const params = new URLSearchParams()
-  params.set('provider', provider)
-  if (opts?.lines) params.set('lines', String(opts.lines))
-  const raw = await get<unknown>(`/api/v1/dashboard/provider-logs/tail?${params.toString()}`)
-  return parseProviderLogTailResponse(raw)
-}
+export {
+  fetchLogs,
+  fetchProviderLogsCatalog,
+  fetchProviderLogTail,
+  fetchDashboardConfig,
+  parseContextThresholds,
+} from './dashboard-logs'
 
 export type { AgentTimelineEvent, AgentTimelineResponse }
 export { AgentTimelineSchemaDriftError } from './schemas/agent-timeline'
@@ -162,31 +101,6 @@ export type {
 export { AgentRelationsSchemaDriftError } from './schemas/agent-relations'
 export { fetchAgentRelations } from './dashboard-agent'
 
-export async function fetchDashboardConfig(): Promise<DashboardConfigResponse> {
-  await ensureDevToken()
-  return get<unknown>('/api/v1/dashboard/config').then(parseDashboardConfigResponse)
-}
-
-/** Parse runtime context-ratio thresholds from the dashboard config response.
-    Falls back to the compiled defaults when keys are missing or malformed. */
-export function parseContextThresholds(
-  data: DashboardConfigResponse,
-  defaults: { critical: number; warn: number; compacting: number },
-): { critical: number; warn: number; compacting: number } {
-  const cat = data.categories.dashboard ?? []
-  const find = (env: string): number | null => {
-    const entry = cat.find(e => e.env === env)
-    if (!entry || entry.value == null) return null
-    const n = parseFloat(entry.value)
-    return Number.isFinite(n) ? n : null
-  }
-  return {
-    critical: find('MASC_DASHBOARD_CTX_HANDOFF_IMMINENT') ?? defaults.critical,
-    warn: find('MASC_DASHBOARD_CTX_PREPARING') ?? defaults.warn,
-    compacting: find('MASC_DASHBOARD_CTX_COMPACTING') ?? defaults.compacting,
-  }
-}
-
 // Re-export from the hot-path API barrel where the SSOT definition lives
 // alongside `fetchDashboardShell` / `fetchDashboardBootstrap` (all three
 // share the same hot/bootstrap consumer profile). Until 2026-05-27 the
@@ -196,358 +110,34 @@ export function parseContextThresholds(
 // that could drift independently. SSOT now lives in `./dashboard-hot`.
 export { fetchDashboardNamespaceTruth } from './dashboard-hot'
 
-// --- RFC-0266 §7 Phase 4: fusion run registry (in-progress + recent) ---
+export type {
+  DashboardExecutionTrustKeeper,
+  DashboardExecutionTrustResponse,
+  ToolQualityHourlyPoint,
+  ToolQualityResponse,
+  DashboardPerfRow,
+  DashboardPerfComparisonRow,
+  DashboardPerfResponse,
+} from './dashboard-execution'
+export {
+  fetchDashboardExecution,
+  fetchDashboardExecutionTrust,
+  fetchToolQuality,
+  fetchDashboardPerf,
+  fetchDashboardMemory,
+} from './dashboard-execution'
 
-type DashboardExecutionRequestOptions = AbortableRequestOptions & {
-  force?: boolean
-}
-
-export function fetchDashboardExecution(opts?: DashboardExecutionRequestOptions): Promise<DashboardExecutionResponse> {
-  const query = opts?.force ? '?force=1' : ''
-  return get(`/api/v1/dashboard/execution${query}`, { signal: opts?.signal })
-}
-
-export type DashboardExecutionTrustKeeper = Record<string, unknown> & {
-  name?: string
-  agent_name?: string | null
-  keeper_id?: string | null
-  phase?: string | null
-  pipeline_stage?: string | null
-  status?: string | null
-  trace_id?: string | null
-  trust?: unknown
-}
-
-export type DashboardExecutionTrustResponse = TelemetryFreshnessMetadata & {
-  generated_at?: string
-  total: number
-  keepers: DashboardExecutionTrustKeeper[]
-}
-
-export function fetchDashboardExecutionTrust(opts?: AbortableRequestOptions): Promise<DashboardExecutionTrustResponse> {
-  return get<DashboardExecutionTrustResponse>('/api/v1/dashboard/execution-trust', { signal: opts?.signal })
-}
-
-type ToolQualityToolStat = {
-  name: string
-  calls: number
-  success_pct: number
-  avg_ms: number
-  output_truncated_count?: number
-  avg_output_chars?: number
-}
-
-type ToolQualityKeeperStat = {
-  name: string
-  calls: number
-  success_pct: number
-}
-
-type ToolQualityFailureCategory = {
-  category: string
-  count: number
-}
-
-export type ToolQualityHourlyPoint = {
-  hour: string
-  calls: number
-  success: number
-  success_rate: number
-}
-
-export type ToolQualityResponse = TelemetryFreshnessMetadata & {
-  generated_at?: string
-  sampling_mode?: 'recent_n' | 'window_hours' | string
-  sample_limit?: number | null
-  window_hours?: number | null
-  total: number
-  success: number
-  failure: number
-  success_rate: number
-  by_tool: ToolQualityToolStat[]
-  by_keeper: ToolQualityKeeperStat[]
-  by_runtime?: ToolQualityKeeperStat[]
-  failure_categories: ToolQualityFailureCategory[]
-  hourly_trend?: ToolQualityHourlyPoint[]
-}
-
-export function fetchToolQuality(opts?: { n?: number; windowHours?: number; signal?: AbortSignal }): Promise<ToolQualityResponse> {
-  const params = new URLSearchParams()
-  if (opts?.n != null) params.set('n', String(opts.n))
-  if (opts?.windowHours != null) params.set('window_hours', String(opts.windowHours))
-  const qs = params.toString()
-  return get<ToolQualityResponse>(`/api/v1/dashboard/tool-quality${qs ? `?${qs}` : ''}`, { signal: opts?.signal })
-}
-
-export interface DashboardPerfRow {
-  benchmark: string
-  avg_ms: number
-  p50_ms: number
-  p95_ms: number
-  max_ms: number
-  notes: string
-  note_tags?: Record<string, string>
-}
-
-export interface DashboardPerfComparisonRow {
-  benchmark: string
-  avg_delta_ms: number
-  avg_delta_pct?: number | null
-  p95_delta_ms: number
-  p95_delta_pct?: number | null
-  max_delta_ms: number
-  verdict: 'improved' | 'stable' | 'mixed' | 'regressed' | string
-}
-
-export interface DashboardPerfResponse {
-  generated_at?: string
-  status: 'ok' | 'empty' | string
-  message?: string
-  candidate_dirs?: string[]
-  source?: {
-    results_dir: string
-    result_file: string
-    meta_file?: string | null
-    baseline_file?: string | null
-  }
-  latest_run?: {
-    timestamp?: string | null
-    started_at?: string | null
-    pattern?: string | null
-    iterations?: number | null
-    warmup_iterations?: number | null
-    session_warmup_iterations?: number | null
-    benchmark_count?: number
-  }
-  highlights?: {
-    session_init?: DashboardPerfRow | null
-    worst_live_mcp?: DashboardPerfRow | null
-    runtime_status?: DashboardPerfRow | null
-    runtime_single?: DashboardPerfRow | null
-  }
-  benchmarks: DashboardPerfRow[]
-  comparison?: {
-    baseline_file?: string | null
-    verdict_counts?: {
-      improved?: number
-      stable?: number
-      mixed?: number
-      regressed?: number
-    }
-    top_changes?: DashboardPerfComparisonRow[]
-  } | null
-}
-
-export function fetchDashboardPerf(): Promise<DashboardPerfResponse> {
-  return get('/api/v1/dashboard/perf')
-}
-
-interface FetchDashboardMemoryOptions {
-  excludeSystem?: boolean
-  excludeAutomation?: boolean
-  author?: string
-  hearth?: string
-  /** Page size. Defaults to 200 when any filter is active, else 100. */
-  limit?: number
-  /** Number of posts to skip from the start of the sorted list. Defaults to 0. */
-  offset?: number
-}
-
-export function fetchDashboardMemory(
-  sortMode: BoardSortMode,
-  opts?: FetchDashboardMemoryOptions,
-): Promise<DashboardMemoryResponse> {
-  const params = new URLSearchParams()
-  params.set('sort_by', sortMode)
-  const hasFilter = opts?.excludeSystem || opts?.excludeAutomation || opts?.author || opts?.hearth
-  const defaultLimit = hasFilter ? 200 : 100
-  const limit = Math.max(1, Math.min(500, opts?.limit ?? defaultLimit))
-  const offset = Math.max(0, Math.min(5000, opts?.offset ?? 0))
-  params.set('limit', String(limit))
-  if (offset > 0) params.set('offset', String(offset))
-  params.set('voter', currentDashboardActor())
-  params.set('blind_votes', 'true')
-  if (opts?.excludeSystem) params.set('exclude_system', 'true')
-  if (opts?.excludeAutomation) params.set('exclude_automation', 'true')
-  if (opts?.author) params.set('author', opts.author)
-  if (opts?.hearth) params.set('hearth', opts.hearth)
-  return get(`/api/v1/dashboard/board${params.toString() ? `?${params}` : ''}`)
-}
-
-function normalizeKeeperApprovalRule(raw: unknown): KeeperApprovalRule | null {
-  if (!isRecord(raw)) return null
-  const id = asString(raw.id, '').trim()
-  const keeperName = asString(raw.keeper_name, '').trim()
-  const toolName = asString(raw.tool_name, '').trim()
-  if (!id || !keeperName || !toolName) return null
-  return {
-    id,
-    keeper_name: keeperName,
-    tool_name: toolName,
-    sandbox_profile: asNullableString(raw.sandbox_profile),
-    backend: asNullableString(raw.backend),
-    request_fingerprint: asNullableString(raw.request_fingerprint) ?? undefined,
-    request_fingerprint_preview:
-      asNullableString(raw.request_fingerprint_preview) ?? undefined,
-    max_risk: asKeeperApprovalRiskLevel(raw.max_risk) ?? undefined,
-    created_at: asNullableIsoTimestamp(raw.created_at_iso ?? raw.created_at),
-    created_by: asNullableString(raw.created_by),
-    last_matched_at:
-      asNullableIsoTimestamp(raw.last_matched_at_iso ?? raw.last_matched_at),
-    match_count: asInt(raw.match_count) ?? undefined,
-    source_approval_id: asNullableString(raw.source_approval_id),
-  }
-}
-
-function normalizeHitlStatus(raw: unknown): DashboardGovernanceResponse['hitl'] | undefined {
-  if (!isRecord(raw)) return undefined
-  return {
-    enabled: asBoolean(raw.enabled) ?? false,
-    disabled_by_env: asBoolean(raw.disabled_by_env) ?? false,
-    env_name: asString(raw.env_name, 'MASC_DISABLE_HITL'),
-    default_enabled: asBoolean(raw.default_enabled) ?? true,
-  }
-}
-
-export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse> {
-  return withRetries('fetchDashboardGovernance', async () => {
-    const raw = await get<Record<string, unknown>>('/api/v1/dashboard/governance')
-    const items = Array.isArray(raw.items)
-      ? raw.items
-          .map(item => normalizeGovernanceDecisionItem(item))
-          .filter((item): item is GovernanceDecisionItem => item !== null)
-      : []
-    const pendingActions = Array.isArray(raw.pending_actions)
-      ? raw.pending_actions
-          .map(item => normalizePendingConfirmation(item))
-          .filter((item): item is PendingConfirmation => item !== null)
-      : []
-    const approvalQueue = Array.isArray(raw.approval_queue)
-      ? raw.approval_queue
-          .map(item => normalizeKeeperApprovalQueueItem(item))
-          .filter((item): item is KeeperApprovalQueueItem => item !== null)
-      : []
-    const approvalRules = Array.isArray(raw.approval_rules)
-      ? raw.approval_rules
-          .map(item => normalizeKeeperApprovalRule(item))
-          .filter((item): item is KeeperApprovalRule => item !== null)
-      : []
-    return {
-      generated_at: asNullableIsoTimestamp(raw.generated_at) ?? undefined,
-      note: typeof raw.note === 'string' && raw.note.trim() !== '' ? raw.note.trim() : undefined,
-      summary: isRecord(raw.summary)
-        ? {
-            cases_open: asInt(raw.summary.cases_open) ?? undefined,
-            pending_ruling: asInt(raw.summary.pending_ruling) ?? undefined,
-            ready_auto_execute: asInt(raw.summary.ready_auto_execute) ?? undefined,
-            needs_human_gate: asInt(raw.summary.needs_human_gate) ?? undefined,
-            executed: asInt(raw.summary.executed) ?? undefined,
-            blocked: asInt(raw.summary.blocked) ?? undefined,
-            ready_to_execute: asInt(raw.summary.ready_to_execute) ?? undefined,
-            oldest_open_case_age_s:
-              typeof raw.summary.oldest_open_case_age_s === 'number'
-                ? raw.summary.oldest_open_case_age_s
-                : null,
-            last_activity_age_s:
-              typeof raw.summary.last_activity_age_s === 'number'
-                ? raw.summary.last_activity_age_s
-                : null,
-            judge_online:
-              typeof raw.summary.judge_online === 'boolean'
-                ? raw.summary.judge_online
-                : undefined,
-            judge_last_seen_at: asNullableIsoTimestamp(raw.summary.judge_last_seen_at),
-          }
-        : undefined,
-      items,
-      activity: Array.isArray(raw.activity)
-        ? raw.activity
-            .map(item => normalizeGovernanceTimelineEvent(item))
-            .filter((item): item is GovernanceTimelineEvent => item !== null)
-        : [],
-      judge: normalizeGovernanceJudgeSummary(raw.judge),
-      judgments: Array.isArray(raw.judgments)
-        ? raw.judgments
-            .map(item => normalizeGovernanceJudgment(item))
-            .filter((item): item is GovernanceJudgment => item !== null)
-        : [],
-      pending_actions: pendingActions,
-      approval_queue: approvalQueue,
-      approval_rules: approvalRules,
-      hitl: normalizeHitlStatus(raw.hitl),
-    }
-  })
-}
-
-export function resolveGovernanceApproval(
-  id: string,
-  decision: 'approve' | 'reject',
-  rememberRule?: boolean,
-  reason?: string,
-): Promise<{ ok: boolean; id: string; decision: 'approve' | 'reject'; rule_id?: string | null }> {
-  return post('/api/v1/dashboard/governance/approvals/resolve', {
-    id,
-    decision,
-    remember_rule: rememberRule,
-    reason,
-  })
-}
-
-export function deleteGovernanceApprovalRule(
-  id: string,
-): Promise<{ ok: boolean; id: string }> {
-  return post('/api/v1/dashboard/governance/approvals/rules/delete', { id })
-}
-
-export type DashboardScheduleDecision = 'approve' | 'reject'
-
-export interface DashboardScheduleResolveResponse {
-  ok: boolean
-  schedule_id: string
-  decision: DashboardScheduleDecision
-  approved_by?: unknown
-  schedule?: unknown
-}
-
-export function resolveScheduleApproval(
-  scheduleId: string,
-  decision: DashboardScheduleDecision,
-  reason?: string,
-): Promise<DashboardScheduleResolveResponse> {
-  return post('/api/v1/dashboard/schedule/resolve', {
-    schedule_id: scheduleId,
-    decision,
-    reason,
-  })
-}
-
-export function fetchGovernanceCaseStatus(caseId: string): Promise<GovernanceCaseBundle> {
-  return get(`/api/v1/governance/cases/${encodeURIComponent(caseId)}`)
-}
-
-function governanceCasesRetiredError(): Error {
-  return new Error('Governance case write APIs are retired; use live judge and HITL approvals instead.')
-}
-
-export async function submitGovernancePetition(_title: string): Promise<{ case: { id: string } }> {
-  throw governanceCasesRetiredError()
-}
-
-export async function submitGovernanceCaseBrief(
-  _caseId: string,
-  _stance: 'support' | 'oppose' | 'neutral',
-  _summary: string,
-): Promise<GovernanceCaseBundle> {
-  throw governanceCasesRetiredError()
-}
-
-export async function decideGovernanceExecutionOrder(
-  _caseId: string,
-  _decision: 'confirm' | 'deny',
-): Promise<void> {
-  throw governanceCasesRetiredError()
-}
-
+export type { DashboardScheduleDecision, DashboardScheduleResolveResponse } from './dashboard-governance'
+export {
+  fetchDashboardGovernance,
+  resolveGovernanceApproval,
+  deleteGovernanceApprovalRule,
+  resolveScheduleApproval,
+  fetchGovernanceCaseStatus,
+  submitGovernancePetition,
+  submitGovernanceCaseBrief,
+  decideGovernanceExecutionOrder,
+} from './dashboard-governance'
 export { fetchDashboardBriefing, fetchDashboardMission, fetchDashboardMissionSession } from './dashboard-mission'
 
 interface DashboardRuntimeProviderDiscovery {

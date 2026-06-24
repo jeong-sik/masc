@@ -31,8 +31,39 @@ let require_eio ?sw ?net () =
   | None, _ -> Error "Eio switch not available (running outside server context)"
   | _, None -> Error "Eio net not available (running outside server context)"
 
+(* SSOT for the [InvalidConfig.field] tag that marks the MASC-internal
+   "Eio context unavailable" error. Both the producer
+   ([eio_context_error_to_sdk_error]) and the structural classifier
+   ([is_eio_context_error]) reference this single binding, so the two sides
+   cannot drift apart. *)
+let eio_context_field = "eio_context"
+
 let eio_context_error_to_sdk_error detail =
-  Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field = "eio_context"; detail })
+  Agent_sdk.Error.Config
+    (Agent_sdk.Error.InvalidConfig { field = eio_context_field; detail })
+
+(* [true] iff [err] is the "Eio switch/net unavailable" config error this
+   module produces (running outside a server context). Matched structurally
+   on the typed [Config (InvalidConfig { field })] tag — NOT by substring-
+   scanning [Agent_sdk.Error.to_string]: the rendered Eio wording is not a
+   contract and a wording change must not silently drop the fatal-environment
+   promotion in the heartbeat loop. The producer and this predicate live in
+   one module so the [field] tag is the single source of truth. The [when]
+   guard keeps the [Config _] arm reachable regardless of how many
+   constructors the wrapped config-error type carries. *)
+let is_eio_context_error (err : Agent_sdk.Error.sdk_error) : bool =
+  match err with
+  | Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; _ })
+    when String.equal field eio_context_field -> true
+  | Agent_sdk.Error.Config _ -> false
+  | Agent_sdk.Error.Provider _ -> false
+  | Agent_sdk.Error.Api _ -> false
+  | Agent_sdk.Error.Agent _ -> false
+  | Agent_sdk.Error.Mcp _ -> false
+  | Agent_sdk.Error.Serialization _ -> false
+  | Agent_sdk.Error.Io _ -> false
+  | Agent_sdk.Error.Orchestration _ -> false
+  | Agent_sdk.Error.Internal _ -> false
 
 let runtime_catalog_error_to_sdk_error detail =
   Agent_sdk.Error.Config

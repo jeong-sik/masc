@@ -66,10 +66,12 @@ let run_keeper_cycle_admitted
   | Error err ->
     let e_str = Agent_sdk.Error.to_string err in
     Log.Keeper.debug "%s: keeper cycle failed: %s" meta_after_triage.name e_str;
-    if
-      String_util.contains_substring e_str "Eio switch not available"
-      || String_util.contains_substring e_str "Eio net not available"
-    then (
+    (* Classify on the typed [Config (InvalidConfig { field = "eio_context" })]
+       tag via [Runtime_oas_runner.is_eio_context_error], not by substring-
+       scanning [e_str]: an Eio wording change must not silently drop this
+       fatal-environment promotion. [e_str] is kept for the log/failure-reason
+       message only. *)
+    if Runtime_oas_runner.is_eio_context_error err then (
       Log.Keeper.error
         "%s: fatal environment error — promoting to Keeper_fiber_crash: %s"
         meta_after_triage.name

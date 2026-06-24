@@ -138,6 +138,7 @@ type isolation = {
 - **D1 (pipeline silent-None)**: §2.4의 두 가드 match는 `[@warning "-4"]`를 지워도 None 잔여 arm을 항상 요구한다. 3번째 변형이 오면 자연스러운 수정은 그 잔여 arm을 `| External_shell _ -> None`으로 확장하는 것 — anti-pattern #4를 명명 arm으로 다시 쓰는 셈. **완화책**: pipeline 지원 여부를 변형의 boolean이 아니라 `pipeline_runner` payload의 유무로만 판정하고, "pipeline 미지원"을 명령 거부가 아닌 **타입드 `Unsupported_pipeline` 결과**로 표면화(컴파일러가 None 증발을 못 막으므로 런타임 계약으로 보강). 이건 워크어라운드임을 인정하며, 근본은 pipeline 분해를 endpoint와 직교한 별도 계약으로 빼는 것(별도 RFC).
 - **D2 (isolation flag-map)**: `isolation`은 4-bool 레코드 + 전사 함수 `isolation_of`로, 설계가 거부한다던 flag-map 그 자체다. `External_shell { net_none = true }`가 표현 가능하고 손으로 쓴 `isolation_of` 본문만 막는다. **결정**: isolation을 "illegal state 표현 불가"로 *주장하지 않는다*. 대신 §4가 그것을 읽는 **단일 소비자**(승인 게이트)를 명시하고, 능력 미달 필드는 hard-forbid 또는 risk-bump로 매핑한다. (타입-carried 격리는 follow-up RFC.)
 - **D3 (untyped 경로)**: "닫힌 합이 모든 소비자를 강제한다"는 **Phase 2 전엔 거짓**이다. `keeper_sandbox_docker.ml:276`은 `Sandbox_target` 참조가 0건이라 컴파일러가 arm을 강제할 수 없다. config 측 `all_sandbox_profiles`(`keeper_types_profile_sandbox.ml:59`)도 손-유지 리스트(컴파일러 비강제)다.
+- **D4 (sandbox_profile 이중 해상도 split-brain)**: 같은 config 키 `[keeper] sandbox_profile`이 **두 경로로 다르게 해석**된다 — 실행 게이트는 `meta.sandbox_profile`(base 병합본, `merge_keeper_profile_defaults` at `keeper_types_profile_toml_parser.ml:340` `prefer overlay base`)을 쓰고, **host 경로 투영**(`host_root_rel_of_agent` → 샌드박스 repos/시크릿 파일의 host 위치)은 `sandbox_profile_of_agent`(`keeper_sandbox_config.ml:48` raw read, **base 병합 안 함** → 미설정 시 `Local` default)를 쓴다. `base = "base.toml"`만 있고 자기 값이 없는 keeper면 **실행=Docker(`playgrounds/docker/<name>/`), 경로=Local(`bundle_root`)** 로 갈려 샌드박스가 repos를 엉뚱한 host 디렉토리에서 찾는다. 현재는 런타임 13개를 전부 명시 docker로 통일해 **휴면**이나, `sandbox_profile` 미설정 keeper가 추가되면 발현. **Phase 0 수정 대상**: `sandbox_profile_of_agent`를 base-merge하거나 `meta`를 단일 소스로 통일.
 
 ---
 
@@ -187,7 +188,7 @@ masc는 operator가 명명한 엔드포인트의 OS/계정을 **전적으로 신
 
 | Phase | 내용 | 동작 변화 | 전제/게이트 |
 |-------|------|-----------|-------------|
-| **0** | 전제조건. §2.4 catch-all 2곳을 현행 2-arm에 대해 정리(D1 완화 계약 포함). §5 dead seam 정리 + RFC-0097 frontmatter 정정. **§4.1 backend-aware 승인** 골격(endpoint를 risk 계산 전에 해석). | 없음 | — |
+| **0** | 전제조건. §2.4 catch-all 2곳을 현행 2-arm에 대해 정리(D1 완화 계약 포함). §5 dead seam 정리 + RFC-0097 frontmatter 정정. **D4 split-brain 통일**(`sandbox_profile_of_agent` base-merge 또는 `meta` 단일 소스). **§4.1 backend-aware 승인** 골격(endpoint를 risk 계산 전에 해석). | 없음 | — |
 | **1** | `Docker`→`Ephemeral_docker` 개명. 컴파일러가 모든 exhaustive-match 소비자(§7)를 강제 순회. | 없음(레버리지 시연) | Phase 0 |
 | **2** | 비타입드 `docker run --rm` 경로(`keeper_sandbox_docker.ml:276`)를 동일 `Ephemeral_docker` 엔드포인트로 통합 → dispatch 1개. | 없음(경로 통합) | Phase 1. **이때부터 D3 해소** |
 | **3** | `Persistent_docker_exec` arm 추가. **per-exec 시크릿 주입+scratch/PID scrub를 HARD 전제**(prose 아님). lazy-recreate 복구. `MASC_KEEPER_SANDBOX_MODE oneshot→persistent` 게이트(RFC-0097 4-phase 재사용). | flag-on 시만 | Phase 2 + scrub 계약(§8 OQ3) |

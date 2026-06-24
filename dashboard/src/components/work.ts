@@ -1,5 +1,5 @@
 // MASC Dashboard — Work Tab (keeper-v2 goal/task layout)
-// Surface: horizon buckets, Task terminology, inline expandable gate detail,
+// Surface: Goal list (priority-sorted), Task terminology, inline expandable gate detail,
 // claimable backlog, and the 5 KPI strip from the reference design.
 
 import { html } from 'htm/preact'
@@ -126,26 +126,6 @@ const GATE_OUTCOME_LABEL: Record<'satisfied' | 'missing' | 'failed', string> = {
   satisfied: '충족',
   missing: '누락',
   failed: '실패',
-}
-
-// ── Goal horizon mapping ────────────────────────────────────────────────────
-
-interface HorizonMeta {
-  key: Goal['horizon']
-  label: string
-  sub: string
-}
-
-const LONG_HORIZON_META: HorizonMeta = { key: 'long', label: '장기', sub: '방향' }
-
-const HORIZON_META: HorizonMeta[] = [
-  { key: 'short', label: '단기', sub: '매 사이클 · 즉시' },
-  { key: 'mid', label: '중기', sub: '이번 분기' },
-  LONG_HORIZON_META,
-]
-
-function horizonKeyForGoal(goal: Goal): Goal['horizon'] {
-  return HORIZON_META.some(h => h.key === goal.horizon) ? goal.horizon : 'long'
 }
 
 // ── Keeper lookup ───────────────────────────────────────────────────────────
@@ -345,8 +325,7 @@ function GoalCard({
         <span class="wk-goal-title">${goal.title}</span>
         <!-- Prototype shows a namespace pill (.wk-goal-ns) here from g.ns.
              The live Goal type has no namespace/ns field (types/core.ts:603),
-             so rather than fake it with the redundant horizon label (the card
-             already sits under a horizon section header), the pill is dropped
+             the card's goal-status pill is dropped here to avoid duplication
              until a backend namespace field exists. Audit workspace.md #3. -->
         <span class="wk-spacer"></span>
         ${goal.require_completion_approval || goal.active_verification_request_id
@@ -433,11 +412,6 @@ function WorkSurfaceV2() {
     backlog: claimedTasks.filter(t => isClaimableBacklogTask(t)).length,
   }), [goalList, liveTasks, claimedTasks])
 
-  const horizonGroups = useMemo(() => HORIZON_META.map(meta => ({
-    ...meta,
-    goals: goalList.filter(goal => horizonKeyForGoal(goal) === meta.key),
-  })).filter(group => group.goals.length > 0), [goalList])
-
   const backlogTasks = useMemo(() => {
     return claimedTasks
       .filter(t => isClaimableBacklogTask(t))
@@ -475,7 +449,7 @@ function WorkSurfaceV2() {
             <div>
               <span class="ov-eyebrow">Goal Store</span>
               <h1>작업 · 목표</h1>
-              <p class="ov-sub">Goal → Task → keeper · horizon으로 묶고 게이트 증거로 검증</p>
+              <p class="ov-sub">Goal → Task → keeper · 우선순위 순으로 정렬 · 게이트 증거로 검증</p>
             </div>
             <button
               type="button"
@@ -536,29 +510,25 @@ function WorkSurfaceV2() {
             </section>
           ` : null}
 
-          ${horizonGroups.map(group => html`
-            <div class="wk-horizon" data-testid="work-horizon" data-horizon=${group.key}>
-              <div class="wk-hz-head">
-                <span class="wk-hz-lbl">${group.label}</span>
-                <span class="wk-hz-sub">${group.sub}</span>
-                <span class="wk-hz-n mono">${group.goals.length}</span>
-              </div>
-              <div class="wk-list">
-                ${group.goals.map(g => html`
-                  <${GoalCard}
-                    key=${g.id}
-                    goal=${g}
-                    open=${openSet.has(g.id)}
-                    onToggle=${() => toggleGoal(g.id)}
-                    goalTasks=${tasksByGoalId.get(g.id) ?? []}
-                    onClaim=${claimTask}
-                  />
-                `)}
-              </div>
+          ${/* RFC-0294: flat priority-sorted list replaces horizon grouping */
+          goalList.length > 0 ? html`
+            <div class="wk-list" data-testid="work-goal-list">
+              ${[...goalList]
+                .sort((a, b) => (a.priority ?? 4) - (b.priority ?? 4) || (b.updated_at ?? b.created_at ?? '').localeCompare(a.updated_at ?? a.created_at ?? ''))
+                .map(g => html`
+                <${GoalCard}
+                  key=${g.id}
+                  goal=${g}
+                  open=${openSet.has(g.id)}
+                  onToggle=${() => toggleGoal(g.id)}
+                  goalTasks=${tasksByGoalId.get(g.id) ?? []}
+                  onClaim=${claimTask}
+                />
+              `)}
             </div>
-          `)}
+          ` : null}
 
-          <div class="wk-foot mono">Goal → Task → keeper · horizon(단기·중기·장기) · 완료는 게이트 증거 충족 후 done · 미배정 task 는 백로그에서 claim</div>
+          <div class="wk-foot mono">Goal → Task → keeper · 우선순위 순 정렬 · 완료는 게이트 증거 충족 후 done · 미배정 task 는 백로그에서 claim</div>
       </div>
     </main>
   `

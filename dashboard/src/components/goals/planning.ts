@@ -15,25 +15,19 @@ import {
 } from '../../store'
 import { navigate } from '../../router'
 import {
-  groupedByHorizon,
-  horizonProgress,
-  formatProgressPct,
   goalProgressFor,
   TaskProgressBar,
-  horizonLabel,
   goalPhaseLabel,
 } from './goal-helpers'
 import { TaskBacklog } from './kanban-components'
 import { TaskStaleAlert } from './task-stale-alert'
 import { TaskWall } from './task-wall'
 import { TaskCreateForm } from '../task-manage/task-create-form'
-import { DECK_CHIP, DECK_LABEL, DECK_META, DECK_PANEL } from './deck-classes'
+import { DECK_CHIP, DECK_LABEL, DECK_PANEL } from './deck-classes'
 
 const QUICK_START_DOC_URL = 'https://github.com/jeong-sik/masc/blob/main/docs/QUICK-START.md'
 const DECK_HEAD = 'flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5 shadow-[inset_0_2px_0_var(--color-accent-fg)]'
 const DECK_CARD = 'rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3'
-const BRASS_CHIP = 'rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-1.5 py-0.5 font-mono text-3xs text-[var(--color-accent-fg)]'
-
 function PlanningStat({
   label,
   value,
@@ -208,8 +202,6 @@ export function Planning() {
   const totalTasks = todo.length + inProgress.length + done.length
   const highPriority = [...todo, ...inProgress].filter(t => (t.priority ?? 4) <= 2).length
 
-  const grouped = groupedByHorizon.value
-  const hp = horizonProgress.value
   const hasGoals = goals.value.length > 0
   const onlyBacklogActive = totalTasks > 0 && !hasGoals
   const planStatusHeadline = onlyBacklogActive
@@ -269,7 +261,7 @@ export function Planning() {
               title="장기 목표 파이프라인"
               count=${goals.value.length}
               summary=${hasGoals
-                ? '등록된 목표를 단기/중기/장기로 나눠 추적합니다.'
+                ? '등록된 목표를 우선순위 순으로 추적합니다.'
                 : '등록된 목표가 없습니다. 목표를 등록하면 여기에 표시됩니다.'}
               docHref=${QUICK_START_DOC_URL}
               docLabel="빠른 시작"
@@ -307,112 +299,26 @@ export function Planning() {
         </div>
         ${hasGoals ? html`
           <div class="flex flex-col gap-2 p-3">
-            <div class="flex flex-wrap gap-1.5">
-              ${(grouped.short ?? []).length > 0 ? html`
-                <span class="rounded-[var(--r-0)] border border-ok/25 bg-ok/10 px-1.5 py-0.5 font-mono text-3xs text-ok">
-                  단기 ${(grouped.short ?? []).length}${hp.short.total > 0 ? ` · ${hp.short.done}/${hp.short.total} (${formatProgressPct(hp.short)})` : ''}
-                </span>
-              ` : null}
-              ${(grouped.mid ?? []).length > 0 ? html`
-                <span class="rounded-[var(--r-0)] border border-warn/25 bg-warn/10 px-1.5 py-0.5 font-mono text-3xs text-warn">
-                  중기 ${(grouped.mid ?? []).length}${hp.mid.total > 0 ? ` · ${hp.mid.done}/${hp.mid.total} (${formatProgressPct(hp.mid)})` : ''}
-                </span>
-              ` : null}
-              ${(grouped.long ?? []).length > 0 ? html`
-                <span class="${BRASS_CHIP}">
-                  장기 ${(grouped.long ?? []).length}${hp.long.total > 0 ? ` · ${hp.long.done}/${hp.long.total} (${formatProgressPct(hp.long)})` : ''}
-                </span>
-              ` : null}
-            </div>
-            ${(hp.short.total + hp.mid.total + hp.long.total) > 0 ? html`
-              <div class="flex flex-col gap-1">
-                ${hp.short.total > 0 ? html`
-                  <div class="flex items-center gap-2 text-3xs">
-                    <span class="${DECK_META} w-8 shrink-0">단기</span>
-                    <div
-                      class="relative h-1 grow overflow-hidden rounded-[var(--r-0)] bg-[var(--color-bg-elevated)]"
-                      role="progressbar"
-                      aria-valuenow=${Math.round(hp.short.ratio * 100)}
-                      aria-valuemin="0"
-                      aria-valuemax="100"
-                      aria-label=${`단기 목표 진행 ${hp.short.done}/${hp.short.total}`}
-                    >
-                      <div
-                        class="absolute inset-y-0 left-0 bg-ok"
-                        style=${`width: ${(hp.short.ratio * 100).toFixed(1)}%`}
-                      ></div>
-                    </div>
-                  </div>
-                ` : null}
-                ${hp.mid.total > 0 ? html`
-                  <div class="flex items-center gap-2 text-3xs">
-                    <span class="${DECK_META} w-8 shrink-0">중기</span>
-                    <div
-                      class="relative h-1 grow overflow-hidden rounded-[var(--r-0)] bg-[var(--color-bg-elevated)]"
-                      role="progressbar"
-                      aria-valuenow=${Math.round(hp.mid.ratio * 100)}
-                      aria-valuemin="0"
-                      aria-valuemax="100"
-                      aria-label=${`중기 목표 진행 ${hp.mid.done}/${hp.mid.total}`}
-                    >
-                      <div
-                        class="absolute inset-y-0 left-0 bg-warn"
-                        style=${`width: ${(hp.mid.ratio * 100).toFixed(1)}%`}
-                      ></div>
-                    </div>
-                  </div>
-                ` : null}
-                ${hp.long.total > 0 ? html`
-                  <div class="flex items-center gap-2 text-3xs">
-                    <span class="${DECK_META} w-8 shrink-0">장기</span>
-                    <div
-                      class="relative h-1 grow overflow-hidden rounded-[var(--r-0)] bg-[var(--color-bg-elevated)]"
-                      role="progressbar"
-                      aria-valuenow=${Math.round(hp.long.ratio * 100)}
-                      aria-valuemin="0"
-                      aria-valuemax="100"
-                      aria-label=${`장기 목표 진행 ${hp.long.done}/${hp.long.total}`}
-                    >
-                      <div
-                        class="absolute inset-y-0 left-0 bg-[var(--color-accent-fg)]"
-                        style=${`width: ${(hp.long.ratio * 100).toFixed(1)}%`}
-                      ></div>
-                    </div>
-                  </div>
-                ` : null}
-              </div>
-            ` : null}
-            <div class="mt-3 flex flex-col gap-2">
-              ${(['short', 'mid', 'long'] as const).map(h => {
-                const list = grouped[h] ?? []
-                if (list.length === 0) return null
+            ${/* RFC-0294: flat priority-sorted list replaces horizon grouping */
+            [...goals.value]
+              .sort((a, b) => (a.priority ?? 4) - (b.priority ?? 4) || (b.updated_at ?? b.created_at ?? '').localeCompare(a.updated_at ?? a.created_at ?? ''))
+              .map(g => {
+                const p = goalProgressFor(g.id)
                 return html`
-                  <div key=${h}>
-                    <div class="${DECK_LABEL} mb-1.5">
-                      ${horizonLabel(h)} 목표
+                  <div key=${g.id} class="flex items-center gap-2 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1.5">
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-2">
+                        <span class="truncate text-xs font-medium text-[var(--color-fg-primary)]">${g.title}</span>
+                        <span class="${DECK_CHIP} shrink-0 text-[var(--color-fg-muted)]">${goalPhaseLabel(g.phase)}</span>
+                      </div>
                     </div>
-                    <div class="flex flex-col gap-1.5">
-                      ${list.map(g => {
-                        const p = goalProgressFor(g.id)
-                        return html`
-                          <div key=${g.id} class="flex items-center gap-2 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1.5">
-                            <div class="min-w-0 flex-1">
-                              <div class="flex items-center gap-2">
-                                <span class="truncate text-xs font-medium text-[var(--color-fg-primary)]">${g.title}</span>
-                                <span class="${DECK_CHIP} shrink-0 text-[var(--color-fg-muted)]">${goalPhaseLabel(g.phase)}</span>
-                              </div>
-                            </div>
-                            <div class="w-28">
-                              <${TaskProgressBar} done=${p.done} total=${p.total} size="sm" />
-                            </div>
-                          </div>
-                        `
-                      })}
+                    <div class="w-28">
+                      <${TaskProgressBar} done=${p.done} total=${p.total} size="sm" />
                     </div>
                   </div>
                 `
-              })}
-            </div>
+              })
+            }
           </div>
         ` : html`
           <p class="p-3 text-xs text-[var(--color-fg-muted)]">등록된 목표가 없습니다. 목표 트리에서 추가할 수 있습니다.</p>

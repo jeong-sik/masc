@@ -602,7 +602,6 @@ export type KeeperLifecycleState =
 
 export interface Goal {
   id: string
-  horizon: 'short' | 'mid' | 'long'
   title: string
   metric?: string | null
   target_value?: string | null
@@ -1427,7 +1426,6 @@ interface KeeperConfigHandoff {
 export interface KeeperConfigActiveGoal {
   id: string
   title: string
-  horizon: string
 }
 
 export interface KeeperConfigRuntimeTrust {

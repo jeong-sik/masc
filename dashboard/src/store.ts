@@ -881,15 +881,13 @@ function applyPlanningEnvelope(data: DashboardPlanningResponse): void {
       if (!isRecord(row)) return null
       const id = asString(row.id)
       const title = asString(row.title)
-      const horizon = asString(row.horizon)
       const status = asString(row.status)
       const phase = asString(row.phase)
       const createdAt = asString(row.created_at)
       const updatedAt = asString(row.updated_at)
-      if (!id || !title || !horizon || !status || !phase || !createdAt || !updatedAt) return null
+      if (!id || !title || !status || !phase || !createdAt || !updatedAt) return null
       return {
         id,
-        horizon: horizon as Goal['horizon'],
         title,
         metric: asString(row.metric) ?? null,
         target_value: asString(row.target_value) ?? null,

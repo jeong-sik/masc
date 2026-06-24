@@ -35,19 +35,11 @@ interface GoalLoopPanelProps {
   initialStatus?: GoalLoopStatusResponse
 }
 
-type GoalHorizon = 'short' | 'mid' | 'long'
-
 interface CreatedGoal {
   title: string
   goalId: string | null
   taskLinkField: string | null
 }
-
-const GOAL_HORIZON_OPTIONS = [
-  { value: 'short', label: 'Short' },
-  { value: 'mid', label: 'Mid' },
-  { value: 'long', label: 'Long' },
-]
 
 const GOAL_PRIORITY_OPTIONS = [
   { value: '1', label: 'P1' },
@@ -272,7 +264,6 @@ function parseGoalUpsertResult(text: string): Omit<CreatedGoal, 'title'> {
 
 function GoalCreateBlock({ onCreated }: { onCreated: () => void }) {
   const [title, setTitle] = useState('')
-  const [horizon, setHorizon] = useState<GoalHorizon>('short')
   const [priority, setPriority] = useState('3')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -290,13 +281,11 @@ function GoalCreateBlock({ onCreated }: { onCreated: () => void }) {
     setCreated(null)
     void callMcpTool('masc_goal_upsert', {
       title: trimmedTitle,
-      horizon,
       priority: Number(priority),
     })
       .then((resultText) => {
         const upsertResult = parseGoalUpsertResult(resultText)
         setTitle('')
-        setHorizon('short')
         setPriority('3')
         setCreated({
           title: trimmedTitle,
@@ -312,11 +301,11 @@ function GoalCreateBlock({ onCreated }: { onCreated: () => void }) {
         setError(errorToString(err))
       })
       .finally(() => setSubmitting(false))
-  }, [horizon, onCreated, priority, title])
+  }, [onCreated, priority, title])
 
   return html`
     <${SectionCard} label="Create Goal" data-testid="goal-loop-create-goal">
-      <form class="grid gap-3 md:grid-cols-[minmax(0,1fr)_8rem_6rem_auto]" onSubmit=${submit}>
+      <form class="grid gap-3 md:grid-cols-[minmax(0,1fr)_6rem_auto]" onSubmit=${submit}>
         <label class="flex min-w-0 flex-col gap-1 text-2xs font-medium text-[var(--color-fg-muted)]">
           Title
           <${TextInput}
@@ -325,15 +314,6 @@ function GoalCreateBlock({ onCreated }: { onCreated: () => void }) {
             ariaLabel="Goal title"
             disabled=${submitting}
             onInput=${(e: Event) => setTitle((e.target as HTMLInputElement).value)}
-          />
-        </label>
-        <label class="flex min-w-0 flex-col gap-1 text-2xs font-medium text-[var(--color-fg-muted)]">
-          Horizon
-          <${Select}
-            value=${horizon}
-            options=${GOAL_HORIZON_OPTIONS}
-            disabled=${submitting}
-            onInput=${(next: string) => setHorizon(next as GoalHorizon)}
           />
         </label>
         <label class="flex min-w-0 flex-col gap-1 text-2xs font-medium text-[var(--color-fg-muted)]">

@@ -57,7 +57,6 @@ function makeRawGoalNode(overrides: Record<string, unknown> = {}) {
   return {
     id: 'goal-1',
     title: 'Goal 1',
-    horizon: 'quarterly',
     status: 'active',
     status_color: '#fff',
     phase: 'executing',
@@ -1679,7 +1678,7 @@ describe('fetchKeeperConfig', () => {
         bound_workspace_ids: 'default',
         active_goal_ids: ['goal-runtime'],
         active_goals: [
-          { id: 'goal-runtime', title: 'Ship runtime clarity', horizon: 'mid' },
+          { id: 'goal-runtime', title: 'Ship runtime clarity' },
         ],
         active_goal_count: '1',
         missing_active_goal_ids: [],

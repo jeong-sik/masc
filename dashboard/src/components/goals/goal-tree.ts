@@ -42,8 +42,6 @@ import type {
   GoalVerificationSummary,
 } from '../../types'
 import {
-  horizonLabel,
-  horizonColor,
   priorityStars,
   countAwaitingVerificationTasks,
   countAwaitingVerificationInTree,
@@ -1017,12 +1015,6 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
 
         <div class="min-w-0 flex-1">
           <div class="mb-1 flex flex-wrap items-center gap-2">
-            <span
-              class="shrink-0 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-bold uppercase tracking-[var(--track-caps)]"
-              style="color:${horizonColor(node.horizon)}"
-            >
-              ${horizonLabel(node.horizon)}
-            </span>
             <${StatusBadge} status=${goalPhaseStatus(node.phase)} label=${goalPhaseLabel(node.phase)} />
             <${GoalFsmBadge} fsm=${node.goal_fsm} />
             <span class="break-words text-base font-semibold text-text-strong line-clamp-2">${node.title}</span>
@@ -1402,9 +1394,6 @@ function GoalDetailPanel({
             <${StatusBadge} status=${selectedNode.status} />
             <${StatusBadge} status=${goalPhaseStatus(selectedNode.phase)} label=${goalPhaseLabel(selectedNode.phase)} />
             <${GoalFsmBadge} fsm=${selectedNode.goal_fsm} />
-            <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)]" style="color:${horizonColor(selectedNode.horizon)}">
-              ${horizonLabel(selectedNode.horizon)}
-            </span>
             ${selectedNode.metric ? html`
               <span
                 class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 font-mono text-3xs text-text-secondary"

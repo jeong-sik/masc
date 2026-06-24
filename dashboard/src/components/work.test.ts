@@ -52,7 +52,6 @@ vi.mock('./repository-management', () => ({
 }))
 
 import { goals, keepers, tasks } from '../store'
-import type { Goal } from '../types'
 import { Work } from './work'
 
 describe('Work', () => {
@@ -142,8 +141,8 @@ describe('Work', () => {
 
     it('renders the reference 5 KPI counts from goals and tasks', () => {
       goals.value = [
-        { id: 'G-1', horizon: 'short', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
-        { id: 'G-2', horizon: 'mid', title: 'Goal Two', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-2', title: 'Goal Two', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         { id: 'J-1', title: 'Job one', goal_id: 'G-1', status: 'done' },
@@ -161,12 +160,12 @@ describe('Work', () => {
       expect(screen.getByTestId('kpi-verify').textContent).toBe('1')
       expect(screen.getByTestId('kpi-backlog').textContent).toBe('2')
       expect(screen.getByText(/백로그에서 claim/).textContent).toContain('claim')
-      expect(screen.getAllByTestId('work-horizon').map(section => section.getAttribute('data-horizon'))).toEqual(['short', 'mid'])
+      expect(screen.getByTestId('work-goal-list')).toBeTruthy()
     })
 
     it('renders the reference new-goal placeholder button', () => {
       goals.value = [
-        { id: 'G-1', horizon: 'short', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
 
       render(html`<${Work} />`)
@@ -178,7 +177,7 @@ describe('Work', () => {
 
     it('renders a collapsed goal card per goal and expands on click', () => {
       goals.value = [
-        { id: 'G-1', horizon: 'short', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         { id: 'J-1', title: 'Job one', goal_id: 'G-1', status: 'in_progress' },
@@ -196,23 +195,21 @@ describe('Work', () => {
       expect(screen.getByText('Job one')).toBeTruthy()
     })
 
-    it('keeps goals with unexpected wire horizons visible in the fallback bucket', () => {
+    it('renders all goals in a flat list regardless of any legacy horizon field', () => {
       goals.value = [
-        { id: 'G-X', horizon: 'quarterly' as unknown as Goal['horizon'], title: 'Unexpected horizon goal', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-X', title: 'Goal visible in flat list', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = []
 
       render(html`<${Work} />`)
 
-      const horizon = screen.getByTestId('work-horizon')
-      expect(horizon.getAttribute('data-horizon')).toBe('long')
-      expect(screen.getByText('Unexpected horizon goal')).toBeTruthy()
-      expect(horizon.textContent).toContain('장기')
+      expect(screen.getByTestId('work-goal-list')).toBeTruthy()
+      expect(screen.getByText('Goal visible in flat list')).toBeTruthy()
     })
 
     it('renders job rows with state, id, title, and blocker note', () => {
       goals.value = [
-        { id: 'G-1', horizon: 'short', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         { id: 'J-1', title: 'Blocked job', goal_id: 'G-1', status: 'cancelled', handoff_context: { summary: '', reason: 'dependency missing' } },
@@ -235,7 +232,7 @@ describe('Work', () => {
 
     it('navigates to keeper workspace when keeper assignment is clicked', () => {
       goals.value = [
-        { id: 'G-1', horizon: 'short', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         { id: 'J-1', title: 'Assigned job', goal_id: 'G-1', status: 'in_progress', assignee: 'sangsu' },
@@ -257,7 +254,7 @@ describe('Work', () => {
 
     it('surfaces claimable backlog tasks in a dedicated backlog section', () => {
       goals.value = [
-        { id: 'G-1', horizon: 'short', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         { id: 'J-1', title: 'Linked job', goal_id: 'G-1', status: 'todo' },
@@ -280,7 +277,7 @@ describe('Work', () => {
 
     it('expands inline task detail for gate evidence and handoff context', () => {
       goals.value = [
-        { id: 'G-1', horizon: 'short', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         {
@@ -319,7 +316,7 @@ describe('Work', () => {
 
     it('renders all defined gate evaluations including verify_to_review', () => {
       goals.value = [
-        { id: 'G-1', horizon: 'short', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         {
@@ -349,8 +346,8 @@ describe('Work', () => {
 
     it('maps known goal status IDs to Korean labels', () => {
       goals.value = [
-        { id: 'G-1', horizon: 'short', title: 'Active goal', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
-        { id: 'G-2', horizon: 'mid', title: 'Completed goal', priority: 3, status: 'completed', phase: 'done', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Active goal', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-2', title: 'Completed goal', priority: 3, status: 'completed', phase: 'done', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = []
 
@@ -365,10 +362,10 @@ describe('Work', () => {
     // prototype's ok/warn/bad/volt color rules (work-v2.css) apply.
     it('applies the semantic status variant class to the goal status chip', () => {
       goals.value = [
-        { id: 'G-ok', horizon: 'short', title: 'Active', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
-        { id: 'G-warn', horizon: 'short', title: 'At risk', priority: 2, status: 'at_risk', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
-        { id: 'G-bad', horizon: 'short', title: 'Blocked', priority: 2, status: 'blocked', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
-        { id: 'G-volt', horizon: 'short', title: 'Verifying', priority: 2, status: 'verifying', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-ok', title: 'Active', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-warn', title: 'At risk', priority: 2, status: 'at_risk', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-bad', title: 'Blocked', priority: 2, status: 'blocked', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-volt', title: 'Verifying', priority: 2, status: 'verifying', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = []
 
@@ -384,7 +381,7 @@ describe('Work', () => {
 
     it('falls back to the ok status variant for unknown goal statuses', () => {
       goals.value = [
-        { id: 'G-x', horizon: 'short', title: 'Mystery', priority: 2, status: 'something_new', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-x', title: 'Mystery', priority: 2, status: 'something_new', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = []
 
@@ -402,7 +399,6 @@ describe('Work', () => {
       goals.value = [
         {
           id: 'G-1',
-          horizon: 'short',
           title: 'Goal needing approval',
           priority: 9,
           // 'active' status does not auto-expand on mount (work.ts:403 only
@@ -443,7 +439,7 @@ describe('Work', () => {
         postId: null,
       }
       goals.value = [
-        { id: 'G-1', horizon: 'short', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         { id: 'J-1', title: 'Selectable job', goal_id: 'G-1', status: 'todo' },

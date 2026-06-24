@@ -319,8 +319,7 @@ let pre_check
               Trajectory.Reject reason
           | None ->
               (* 6. Destructive pattern check (bash tools only) *)
-              if config.destructive_check_enabled
-                 && Tool_capability.has Tool_capability.Destructive tool_name then
+              if Tool_capability.has Tool_capability.Destructive tool_name then
                 let cmd_str = extract_all_strings_from_json args_json
                 in
                 begin match detect_destructive destructive_ops_policy cmd_str with
@@ -334,8 +333,7 @@ let pre_check
           end
     | None ->
         (* No trajectory accumulator — skip entropy and turn-limit checks *)
-        if config.destructive_check_enabled
-           && Tool_capability.has Tool_capability.Destructive tool_name then
+        if Tool_capability.has Tool_capability.Destructive tool_name then
           let cmd_str =
             try
               let rec extract_strings = function
@@ -470,7 +468,16 @@ let guarded_execute
     ~(execute : unit -> string)
     : Trajectory.gate_decision * string option * post_eval_result option * int =
 
-  let decision = pre_check ~config ~destructive_ops_policy ~accumulated_cost
+  let effective_policy =
+    if config.destructive_check_enabled then
+      destructive_ops_policy
+    else
+      match Destructive_ops_policy.of_patterns ~enabled:false [] with
+      | Ok p -> p
+      | Error _ -> destructive_ops_policy
+  in
+
+  let decision = pre_check ~config ~destructive_ops_policy:effective_policy ~accumulated_cost
     ~trajectory_acc ~tool_name ~args_json in
 
   let record_trajectory ~gate_decision ~result ~error ~duration_ms =

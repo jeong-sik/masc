@@ -13,9 +13,6 @@ type parsed_args = {
   name : string;
   compaction_profile_opt : string option;
   goal_opt : string option;
-  short_goal_opt : string option;
-  mid_goal_opt : string option;
-  long_goal_opt : string option;
   runtime_id_opt : string option;
   allowed_paths_opt : string list option;
   autoboot_enabled_opt : bool option;
@@ -164,9 +161,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       Ok mention_targets_opt,
       Ok runtime_id_opt ->
     let goal_opt = get_string_opt args "goal" in
-    let short_goal_opt = parse_goal_horizon_opt args "short_goal" in
-    let mid_goal_opt = parse_goal_horizon_opt args "mid_goal" in
-    let long_goal_opt = parse_goal_horizon_opt args "long_goal" in
     let autoboot_enabled_opt = get_bool_opt args "autoboot_enabled" in
     let max_context_override_opt =
       let min_keeper_context = Keeper_config.min_keeper_context_tokens in
@@ -234,9 +228,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       name;
       compaction_profile_opt;
       goal_opt;
-      short_goal_opt;
-      mid_goal_opt;
-      long_goal_opt;
       runtime_id_opt;
       allowed_paths_opt;
       active_goal_ids_opt;

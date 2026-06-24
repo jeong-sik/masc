@@ -81,9 +81,6 @@ let defaults_with_prompt_fields =
     manifest_path = Some "/tmp/keeper.toml";
     sandbox_profile = Some Keeper_types_profile_sandbox.Local;
     goal = Some "toml goal";
-    short_goal = Some "toml short";
-    mid_goal = Some "toml mid";
-    long_goal = Some "toml long";
     instructions = Some "toml instructions";
     mention_targets = [ "toml-target" ];
   }
@@ -94,9 +91,6 @@ let test_empty_live_meta_does_not_mask_profile_defaults_as_overrides () =
   let meta =
     { (meta_with_summary "") with
       goal = "";
-      short_goal = "";
-      mid_goal = "";
-      long_goal = "";
       instructions = "";
       mention_targets = [];
     }

@@ -331,7 +331,7 @@ describe('FleetTelemetryPanel', () => {
         {
           ...executionResponse.keepers[0],
           active_goal_ids: ['goal-1'],
-          short_goal: 'Ship safer keeper ops',
+          goal: 'Ship safer keeper ops',
           sandbox_profile: 'docker',
           sandbox_last_error: 'bind EPERM at /var/folders/tmp',
           runtime_blocker_continue_gate: true,

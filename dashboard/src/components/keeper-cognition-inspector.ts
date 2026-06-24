@@ -6,11 +6,10 @@ import { EmptyState } from './common/feedback-state'
 import { FilterChips } from './common/filter-chips'
 import { PanelCard } from './common/panel-card'
 import { KeeperBadge } from './keeper-badge'
-import { KeeperGoalHorizonsPanel } from './keeper-goal-horizons-panel'
 import { KeeperMemoryPanel } from './memory-subsystems'
 import { formatDuration } from '../lib/format-time'
 
-type KeeperInspectorFocus = 'goals' | 'tool-access' | 'memory'
+type KeeperInspectorFocus = 'tool-access' | 'memory'
 
 interface ToolAccessRow {
   label: string
@@ -18,7 +17,6 @@ interface ToolAccessRow {
 }
 
 const FOCUS_CHIPS: Array<{ key: KeeperInspectorFocus; label: string; title: string }> = [
-  { key: 'goals', label: 'Goals', title: 'Goal horizons' },
   { key: 'tool-access', label: 'Tool Access', title: 'Runtime tool and execution access snapshot' },
   { key: 'memory', label: 'Memory', title: 'Keeper memory bank entries (memory.jsonl)' },
 ]
@@ -41,19 +39,7 @@ export function selectKeeperForInspector(
     const exact = keeperList.find(keeper => keeperKeys(keeper).includes(requested))
     if (exact) return exact
   }
-  const withGoals = keeperList.find(hasGoalHorizons)
-  return withGoals ?? keeperList[0] ?? null
-}
-
-export function hasGoalHorizons(keeper: Keeper): boolean {
-  return Boolean(
-    keeper.short_goal
-    || keeper.mid_goal
-    || keeper.long_goal
-    || keeper.goal_horizons?.short
-    || keeper.goal_horizons?.mid
-    || keeper.goal_horizons?.long,
-  )
+  return keeperList[0] ?? null
 }
 
 function displayValue(value: string | number | boolean | null | undefined): string {
@@ -114,9 +100,8 @@ export function toolAccessRowsForKeeper(keeper: Keeper): ToolAccessRow[] {
 
 function currentFocus(): KeeperInspectorFocus {
   const f = route.value.params.focus
-  if (f === 'tool-access') return 'tool-access'
   if (f === 'memory') return 'memory'
-  return 'goals'
+  return 'tool-access'
 }
 
 function navigateFocus(focus: KeeperInspectorFocus): void {
@@ -193,24 +178,6 @@ function ToolAccessSnapshot({ keeper }: { keeper: Keeper }) {
   `
 }
 
-function GoalHorizonsSnapshot({ keeper }: { keeper: Keeper }) {
-  if (hasGoalHorizons(keeper)) {
-    return html`
-      <${KeeperGoalHorizonsPanel}
-        short_goal=${keeper.short_goal}
-        mid_goal=${keeper.mid_goal}
-        long_goal=${keeper.long_goal}
-        goal_horizons=${keeper.goal_horizons}
-      />
-    `
-  }
-  return html`
-    <${PanelCard} title="Goal Horizons">
-      <${EmptyState} compact=${true} message="No goal horizons are configured for this keeper." />
-    <//>
-  `
-}
-
 export function KeeperCognitionInspector() {
   const keeperList = keepers.value
   const selected = selectKeeperForInspector(
@@ -258,11 +225,9 @@ export function KeeperCognitionInspector() {
         />
       </div>
 
-      ${focus === 'tool-access'
-        ? html`<${ToolAccessSnapshot} keeper=${selected} />`
-        : focus === 'memory'
-          ? html`<${KeeperMemoryPanel} keeperName=${selected.name} />`
-          : html`<${GoalHorizonsSnapshot} keeper=${selected} />`}
+      ${focus === 'memory'
+        ? html`<${KeeperMemoryPanel} keeperName=${selected.name} />`
+        : html`<${ToolAccessSnapshot} keeper=${selected} />`}
     </section>
   `
 }

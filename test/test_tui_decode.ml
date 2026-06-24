@@ -48,7 +48,6 @@ let keeper_json ?(models = `List [ `String "glm-5.1" ]) ?(last_turn_ts = `String
   `Assoc
     ([
        ("goal", `String "keep the system healthy");
-       ("short_goal", `String "stay responsive");
        ("soul_profile", `String "balanced");
        ("generation", `Int 2);
        ("models", models);

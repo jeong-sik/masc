@@ -35,9 +35,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     effective_allowed_paths: ['/tmp/workspace'],
     prompt: {
       goal: 'Ship stable keeper ops',
-      short_goal: 'Diagnose agent liveness',
-      mid_goal: 'Reduce restart confusion',
-      long_goal: 'Keep workspace stable',
       instructions: 'Prefer direct remediation',
       system_prompt_blocks: {
         constitution: { key: 'keeper.constitution', source: 'file', text: 'constitution text' },

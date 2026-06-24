@@ -66,6 +66,25 @@ export function stripInlineMarkdown(text: string): string {
     .replace(/`(.+?)`/g, '$1')
 }
 
+/**
+ * preview 카드에서 본문 첫 heading이 title과 같은 내용이면 해당 heading 줄을 생략.
+ *
+ * post-detail은 title이 text-2xl(~24px)이라 본문 헤더가 section 역할을 하지만,
+ * preview 카드는 title 타이포가 13.5px라 본문 h1(16px)/h2(14px)가 역전되어
+ * "제목이 두 벌로, 그리고 더 크게" 보이는 현상의 원인이 된다. 미리보기 목적상
+ * title과 중복되는 첫 헤더는 제거한다. title 요약 + body 전개 같은 의도적 구조는
+ * heading 텍스트가 title과 다르면 그대로 유지된다.
+ */
+export function dedupeLeadingHeading(title: string, body: string): string {
+  const normTitle = stripInlineMarkdown(title).trim().replace(/^#+\s*/, '')
+  if (!normTitle) return body
+  const heading = body.match(/^#{1,6}\s+(.+?)\s*$/m)
+  if (heading && stripInlineMarkdown(heading[1] ?? '').trim() === normTitle) {
+    return body.replace(/^#{1,6}\s+.+\n?/m, '')
+  }
+  return body
+}
+
 export function boardActorDisplayName(
   authorName: string,
   identity?: BoardActorIdentity | null,

@@ -327,7 +327,7 @@ let previous_assistant_message_content
   | _ -> None
 
 let goal_horizon_candidates (meta : keeper_meta) : string list =
-  [meta.short_goal; meta.mid_goal; meta.long_goal; meta.goal]
+  [meta.goal]
   |> List.filter_map (fun raw ->
        raw
        |> normalize_goal_horizon_text

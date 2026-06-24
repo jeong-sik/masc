@@ -63,9 +63,6 @@ let keeper_schemas : tool_schema list = [
           ("description", `String "If true, return the resolved keeper args and validation errors without creating the keeper.");
         ]);
         ("goal", `Assoc [("type", `String "string")]);
-        ("short_goal", `Assoc [("type", `String "string")]);
-        ("mid_goal", `Assoc [("type", `String "string")]);
-        ("long_goal", `Assoc [("type", `String "string")]);
         ("instructions", `Assoc [("type", `String "string")]);
         ("mention_targets", `Assoc [
           ("type", `String "array");
@@ -142,18 +139,6 @@ let keeper_schemas : tool_schema list = [
         ("goal", `Assoc [
           ("type", `String "string");
           ("description", `String "Keeper goal/system purpose (required when creating)");
-        ]);
-        ("short_goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: short-term goal horizon (default: goal).");
-        ]);
-        ("mid_goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: mid-term goal horizon (default: goal).");
-        ]);
-        ("long_goal", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: long-term goal horizon (default: goal).");
         ]);
         ("instructions", `Assoc [
           ("type", `String "string");

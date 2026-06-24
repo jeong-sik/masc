@@ -725,16 +725,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         trust,
         active_goal_ids: asStringArray(row.active_goal_ids) ?? [],
         goal: asString(row.goal) ?? null,
-        short_goal: asString(row.short_goal) ?? null,
-        mid_goal: asString(row.mid_goal) ?? null,
-        long_goal: asString(row.long_goal) ?? null,
-        goal_horizons: isRecord(row.goal_horizons)
-          ? {
-              short: asString(row.goal_horizons.short) ?? null,
-              mid: asString(row.goal_horizons.mid) ?? null,
-              long: asString(row.goal_horizons.long) ?? null,
-            }
-          : null,
         sandbox_profile: normalizeKeeperSandboxProfile(row.sandbox_profile),
         sandbox_target: asString(row.sandbox_target) ?? null,
         sandbox_last_error: asString(row.sandbox_last_error) ?? null,

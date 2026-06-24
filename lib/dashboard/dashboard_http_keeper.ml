@@ -101,9 +101,6 @@ let degraded_keeper_dashboard_row
      ; ("created_at", `String m.created_at)
      ; ("updated_at", `String m.updated_at)
      ; ("goal", `String m.goal)
-     ; ("short_goal", `String m.short_goal)
-     ; ("mid_goal", `String m.mid_goal)
-     ; ("long_goal", `String m.long_goal)
      ; ("phase", `String "degraded")
      ; ("pipeline_stage", `String "degraded")
      ; ("status", `String "degraded")
@@ -921,18 +918,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("active_goal_ids",
                 `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids));
               ("goal", if include_goals then `String m.goal else `Null);
-              ("short_goal", if include_goals then `String m.short_goal else `Null);
-              ("mid_goal", if include_goals then `String m.mid_goal else `Null);
-              ("long_goal", if include_goals then `String m.long_goal else `Null);
-              ( "goal_horizons",
-                if include_goals then
-                  `Assoc [
-                    ("short", `String m.short_goal);
-                    ("mid", `String m.mid_goal);
-                    ("long", `String m.long_goal);
-                  ]
-                else
-                  `Null );
               ( "active_goals_tree",
                 if (not compact) && include_goals && m.active_goal_ids <> [] then
                   let all_goals = Goal_store.list_goals config () in

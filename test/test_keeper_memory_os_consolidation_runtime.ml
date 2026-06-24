@@ -12,6 +12,7 @@ let fact claim =
   { Types.claim
   ; category = Types.Fact
   ; external_ref = None
+  ; claim_kind = None
   ; source = { Types.trace_id = "t"; turn = 1; tool_call_id = None }
   ; observed_by = []
   ; first_seen = now

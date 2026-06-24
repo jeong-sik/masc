@@ -684,15 +684,6 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
             the operator explicitly requested new repo, goal, or task creation.\n\
             Do not stay silent when you have no goal.\n"
          else "");
-        (if meta.short_goal <> "" && meta.short_goal <> meta.goal then
-           line_block "Short-term goal" meta.short_goal
-         else "");
-        (if meta.mid_goal <> "" && meta.mid_goal <> meta.goal then
-           line_block "Mid-term goal" meta.mid_goal
-         else "");
-        (if meta.long_goal <> "" && meta.long_goal <> meta.goal then
-           line_block "Long-term goal" meta.long_goal
-         else "");
       ]
   in
   let base_system_prompt =

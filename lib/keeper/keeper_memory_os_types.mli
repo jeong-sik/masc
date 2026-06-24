@@ -57,6 +57,23 @@ val category_to_string : category -> string
     anything outside the taxonomy becomes [Unknown] carrying the raw label. *)
 val category_of_string : string -> category
 
+(** RFC-0285 §3.1: producer-emitted origin tag, orthogonal to {!category} (a [Lesson]
+    can be a self-observation). A closed sum classified ONCE at the librarian write
+    boundary — not a read-time string match. Drives {!fact_valid_until}
+    ([Self_observation] gets a short finite horizon) and gates promotion. *)
+type claim_kind =
+  | Self_observation
+  | External_state
+  | Durable_knowledge
+
+(** Canonical lowercase token (round-trips with [claim_kind_of_string]). *)
+val claim_kind_to_string : claim_kind -> string
+
+(** Parse a claim_kind token (trimmed, case-insensitive on known tokens); an
+    absent/unrecognized label yields [None], routing to the durable pre-RFC path
+    (safe), never to wrong-volatile. *)
+val claim_kind_of_string : string -> claim_kind option
+
 (** Whether a category may be promoted into the shared semantic tier. Exhaustive
     over {!category}; only [Fact] and [Constraint] promote (preserving the prior
     ["fact";"constraint"] whitelist), so a new or typo'd category cannot silently
@@ -108,14 +125,21 @@ val category_valid_until : now:float -> category -> float option
     reconciler (P2) lands. *)
 val volatile_external_ttl_seconds : float
 
-(** RFC-0259 §3.2: the write-side [valid_until] producer. An [external_ref] claim
-    is never durable — it gets [volatile_external_ttl_seconds] regardless of
-    category (so a PR-status claim mislabeled [Fact]/[Unknown] still decays);
-    otherwise the category decides (only [Ephemeral] is finite). [external_ref]
-    takes precedence. *)
+(** RFC-0285 §3.4: the self-observation decay horizon (a TIME, not a score). Shorter
+    than [volatile_external_ttl_seconds] — transient first-person self-state changes
+    every turn, so a tighter horizon quiets the echo faster. Tune in cycles. *)
+val self_observation_ttl_seconds : float
+
+(** RFC-0259 §3.2 / RFC-0285 §3.4: the write-side [valid_until] producer. Precedence:
+    [Self_observation] claim_kind gets the shortest finite horizon
+    ([self_observation_ttl_seconds]) regardless of category/external_ref; otherwise an
+    [external_ref] claim gets [volatile_external_ttl_seconds] (so a PR-status claim
+    mislabeled [Fact]/[Unknown] still decays); otherwise the category decides (only
+    [Ephemeral] is finite). *)
 val fact_valid_until
   :  now:float
   -> external_ref:external_ref option
+  -> claim_kind:claim_kind option
   -> category
   -> float option
 
@@ -133,6 +157,11 @@ type fact =
     (** RFC-0259 §3.2(b): set by the producer when the claim names a PR/issue/task
         id. Orthogonal to [category]. Drives [fact_valid_until] (a referenced
         claim is volatile, never durable). Omitted from JSON when [None]. *)
+  ; claim_kind : claim_kind option
+    (** RFC-0285 §3.1: producer-emitted origin tag, parallel to [external_ref] and
+        orthogonal to [category]. Drives [fact_valid_until] ([Self_observation] gets a
+        short horizon) and gates promotion ([Self_observation] never crosses keepers).
+        Omitted from JSON when [None]; a missing tag degrades to the durable path. *)
   ; source : provenance_event
   ; observed_by : string list
     (** RFC-0244 Tier 2 (shared semantic store) only: the sorted set of distinct

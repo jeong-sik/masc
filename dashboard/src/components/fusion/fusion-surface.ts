@@ -25,8 +25,13 @@ import {
   classifyFusionJudgeShape,
   type FusionPanelEntry,
   type FusionJudgeNode,
-  type FusionJudgeShape,
 } from '../../lib/fusion-meta'
+import {
+  judgeShapeLabel,
+  judgeRoleLabel,
+  judgeNodeTokenLabel,
+  judgeNodeIdentity,
+} from './fusion-judge-format'
 
 type FusionRunStatus = 'complete' | 'failed' | 'running'
 type FusionTone = 'ok' | 'warn' | 'bad' | 'volt' | 'muted'
@@ -420,48 +425,6 @@ function FusionKeeperLink({ keeper, size = 'sm' }: { keeper: string; size?: 'sm'
   `
 }
 
-// Display label for a shape classification (i18n lives in the component layer;
-// `classifyFusionJudgeShape` stays language-free in lib/fusion-meta).
-const JUDGE_SHAPE_LABEL: Record<FusionJudgeShape, string> = {
-  single: '단일 심판',
-  refine: '재검토',
-  'judge-of-judges': '심판의 심판',
-  custom: '심판 위상',
-}
-
-// Korean badge for a backend judge role. Unknown roles fall through to the raw
-// string so a new backend role still renders (the enum is closed on the backend,
-// so this is defensive rather than expected).
-function judgeRoleLabel(role: string): string {
-  switch (role) {
-    case 'first':
-      return '1차'
-    case 'meta':
-      return '메타'
-    case 'refine':
-      return '재검토'
-    case 'single':
-      return '단일'
-    default:
-      return role
-  }
-}
-
-// Per-node combined token figure (`Nk tok` / `N tok`), em-dash when no usage.
-function judgeNodeTokenLabel(node: FusionJudgeNode): string {
-  const total = (node.inputTokens ?? 0) + (node.outputTokens ?? 0)
-  if (total <= 0) return '—'
-  return total >= 1000 ? `${(total / 1000).toFixed(1)}k tok` : `${total} tok`
-}
-
-// A meaningful node identity, or null. The backend only carries a real model id
-// for `first` nodes (the panelist_id); single/refine/meta echo their role string
-// as the identity (fusion_sink.ml judge_role_fields), which is redundant with the
-// role badge, so suppress it rather than print the role twice.
-function judgeNodeIdentity(node: FusionJudgeNode): string | null {
-  return node.identity && node.identity !== node.role ? node.identity : null
-}
-
 // RFC-0284 PR 2: render the observed judge nodes as a structural strip so the
 // execution topology (JoJ = N 1차 + 메타, refine = 2, simple = 1) is visible
 // instead of collapsing into the single canonical judge. Topology is read from
@@ -473,7 +436,7 @@ export function FusionJudgesStrip({ nodes }: { nodes: readonly FusionJudgeNode[]
   return html`
     <div class="fus-block">
       <div class="fus-block-lbl">
-        심판 위상 · ${JUDGE_SHAPE_LABEL[shape]}
+        심판 위상 · ${judgeShapeLabel(shape)}
         <span class="fus-sub-note">관측된 심판 노드 ${nodes.length}개 · RFC-0284</span>
       </div>
       <ul class="fus-judges" data-testid="fusion-judges" role="list">

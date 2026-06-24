@@ -38,6 +38,7 @@ let fact
   { Types.claim
   ; category
   ; external_ref = None
+  ; claim_kind = None
   ; source = { trace_id; turn; tool_call_id = None }
   ; observed_by
   ; first_seen = now -. float_of_int turn

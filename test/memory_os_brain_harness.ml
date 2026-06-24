@@ -81,11 +81,13 @@ let mk_fact
       ?(category = Types.Fact)
       ?(valid_until = None)
       ?(age_seconds = 3600.0)
+      ?(claim_kind = None)
       claim
   =
   { Types.claim
   ; Types.category
   ; Types.external_ref = None
+  ; Types.claim_kind
   ; Types.source = { Types.trace_id = "harness-trace"; Types.turn = 1; Types.tool_call_id = None }
   ; Types.observed_by = []
   ; Types.first_seen = now -. age_seconds

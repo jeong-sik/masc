@@ -178,15 +178,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                   ~preferred:p.tool_denylist_opt
                   ~fallback:p.profile_defaults.tool_denylist
               in
-              let (short_goal, mid_goal, long_goal) =
-                resolve_goal_horizons
-                  ~goal
-                  ~short_goal_opt:
-                    (Dashboard_utils.first_some p.short_goal_opt p.profile_defaults.short_goal)
-                  ~mid_goal_opt:(Dashboard_utils.first_some p.mid_goal_opt p.profile_defaults.mid_goal)
-                  ~long_goal_opt:
-                    (Dashboard_utils.first_some p.long_goal_opt p.profile_defaults.long_goal)
-              in
               let instructions = Option.value ~default:"" p.instructions_opt in
               let (env_ratio_gate, env_message_gate, env_token_gate) =
                 keeper_compaction_policy_from_env ()
@@ -302,9 +293,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         let system_prompt =
           build_keeper_system_prompt
             ~goal
-            ~short_goal
-            ~mid_goal
-            ~long_goal
             ~instructions
             ~persona_extended
             ~keeper_name:p.name
@@ -326,9 +314,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         agent_name = Keeper_identity.keeper_agent_name p.name;
         persona = Some persona_extended;
         goal;
-        short_goal;
-        mid_goal;
-        long_goal;
         instructions;
         sandbox_profile;
         sandbox_image = None;
@@ -505,9 +490,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
           ("generation", `Int meta.runtime.generation);
           ("goal", `String meta.goal);
-          ("short_goal", `String meta.short_goal);
-          ("mid_goal", `String meta.mid_goal);
-          ("long_goal", `String meta.long_goal);
           ("instructions", `String meta.instructions);
           ("tool_access", Json_util.json_string_list meta.tool_access);
           ("tool_denylist",

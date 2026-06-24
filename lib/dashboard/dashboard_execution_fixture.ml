@@ -424,7 +424,6 @@ let execution_smoke_fixture_json () =
                 ("model", `String "runtime");
                 ("active_model", `String "runtime");
                 ("goal", `String "masc-keeper-autonomy");
-                ("short_goal", `String "masc-keeper-autonomy");
                 ("updated_at", `String generated_at);
                 ("created_at", `String generated_at);
               ];

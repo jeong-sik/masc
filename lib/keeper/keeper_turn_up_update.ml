@@ -47,7 +47,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
   match resolve_active_goal_ids ctx.config p old.active_goal_ids with
   | Error msg -> tool_result_error msg
   | Ok active_goal_ids ->
-  let goal_provided = Option.is_some p.goal_opt in
   let profile_default_text opt fallback =
     match opt with
     | Some value when String.trim value <> "" -> value
@@ -61,32 +60,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
         else
           profile_default_text p.profile_defaults.goal
             (if String.trim old.goal <> "" then old.goal else "")
-  in
-  let short_goal_default = if goal_provided then goal else old.short_goal in
-  let mid_goal_default = if goal_provided then goal else old.mid_goal in
-  let long_goal_default = if goal_provided then goal else old.long_goal in
-  let horizon_default profile_opt old_default =
-    if goal_provided then old_default
-    else if preserve_prompt_defaults then old_default
-    else profile_default_text profile_opt old_default
-  in
-  let short_goal =
-    Option.value
-      ~default:(horizon_default p.profile_defaults.short_goal short_goal_default)
-      p.short_goal_opt
-    |> normalize_goal_horizon_text
-  in
-  let mid_goal =
-    Option.value
-      ~default:(horizon_default p.profile_defaults.mid_goal mid_goal_default)
-      p.mid_goal_opt
-    |> normalize_goal_horizon_text
-  in
-  let long_goal =
-    Option.value
-      ~default:(horizon_default p.profile_defaults.long_goal long_goal_default)
-      p.long_goal_opt
-    |> normalize_goal_horizon_text
   in
   let allowed_paths =
     Option.value ~default:old.allowed_paths p.allowed_paths_opt
@@ -197,9 +170,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
       old.name;
   let updated = { old with
     goal;
-    short_goal;
-    mid_goal;
-    long_goal;
     instructions =
       (match p.instructions_arg with
        | Some v -> v

@@ -209,9 +209,6 @@ let test_direct_reply_prompt_matches_server_managed_heartbeat_policy () =
   let prompt =
     KP.build_keeper_system_prompt
       ~goal:"Keep keeper guidance aligned with runtime behavior"
-      ~short_goal:"verify prompt wording"
-      ~mid_goal:"ship consistent keeper guidance"
-      ~long_goal:"avoid stale operational instructions"
       ~instructions:""
       ()
   in
@@ -224,9 +221,6 @@ let test_keeper_prompt_preserves_snapshot_delta_anchors () =
   let prompt =
     KP.build_keeper_system_prompt
       ~goal:"Keep live snapshot continuity safe"
-      ~short_goal:"verify technical anchors"
-      ~mid_goal:"prevent persona-only prompt regression"
-      ~long_goal:"preserve operator safety through compaction"
       ~instructions:""
       ()
   in
@@ -325,9 +319,6 @@ let test_prompt_mentions_runtime_operator_approval_for_risky_actions () =
   let prompt =
     KP.build_keeper_system_prompt
       ~goal:"Keep keeper guidance aligned with runtime behavior"
-      ~short_goal:"verify approval wording"
-      ~mid_goal:"ship coherent keeper guidance"
-      ~long_goal:"avoid approval-policy drift"
       ~instructions:""
       ()
   in

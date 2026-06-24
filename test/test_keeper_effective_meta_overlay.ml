@@ -343,7 +343,6 @@ let test_ensure_keeper_meta_persists_toml_identity_snapshot () =
 persona_name = "masc-improver"
 sandbox_profile = "docker"
 goal = "Improve MASC autonomously"
-short_goal = "Restore aggressive keeper autonomy"
 proactive_enabled = true
 proactive_idle_sec = 77
 proactive_cooldown_sec = 88
@@ -364,7 +363,6 @@ active_goal_ids = ["goal-masc-improver"]
       persisted with
       persona = Some "analyst";
       goal = "stale goal";
-      short_goal = "stale short goal";
       proactive = { enabled = false; idle_sec = 1; cooldown_sec = 2 };
       tool_access = [ "masc_status" ];
       allowed_paths = [ "/tmp/stale-local-path" ];
@@ -406,10 +404,6 @@ active_goal_ids = ["goal-masc-improver"]
     "returned goal is TOML canonical"
     "Improve MASC autonomously"
     returned.goal;
-  Alcotest.(check string)
-    "returned short_goal is TOML canonical"
-    "Restore aggressive keeper autonomy"
-    returned.short_goal;
   Alcotest.(check bool)
     "returned proactive enabled is TOML canonical"
     true

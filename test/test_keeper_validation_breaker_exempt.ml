@@ -17,6 +17,9 @@ module U = Yojson.Safe.Util
 (* Tool_result lives in the leaf [masc_tool_types] lib (wrapped false), so
    it is referenced bare — not under [Masc.] — matching existing tests. *)
 module TR = Tool_result
+(* Keeper_tool_outcome lives in the [keeper_metrics] lib (wrapped false), so it
+   is referenced bare — not under [Masc.] — matching the bare [Tool_result]. *)
+module Outcome = Keeper_tool_outcome
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_task_create_" "" in
@@ -146,6 +149,67 @@ let test_keeper_report_state_returns_state_block () =
        check bool "state report returns typed outcome" true
          (json |> U.member "typed_outcome" <> `Null))
 
+(* RFC-0239 / audit D1: a rejected keeper_task_done must carry a typed
+   [Error] outcome so the no-progress loop detector demotes it (PR #22127
+   wired the detector to read typed_outcome; this proves the producer emits
+   it on rejection instead of leaving it [None] and being counted as
+   evidence by tool name alone). *)
+let rejected_done_typed_outcome ~base_path:_ config meta args =
+  let payload =
+    Task.handle_keeper_task_tool ~config ~meta ~name:"keeper_task_done" ~args
+  in
+  let json = Yojson.Safe.from_string payload in
+  check bool "rejected done is not ok" false (json |> U.member "ok" |> U.to_bool);
+  Outcome.of_json (json |> U.member "typed_outcome")
+
+let test_done_missing_task_id_emits_typed_error () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = meta_with_active_goals [] in
+       (* task_id omitted -> early workflow_rejection path. *)
+       match
+         rejected_done_typed_outcome ~base_path config meta
+           (`Assoc [ "result", `String "done" ])
+       with
+       | Some (Outcome.Error _) -> ()
+       | other ->
+         failf "expected typed_outcome = Error, got %s"
+           (match other with
+            | None -> "None"
+            | Some Outcome.Progress -> "Progress"
+            | Some (Outcome.No_progress _) -> "No_progress"
+            | Some (Outcome.Error _) -> "Error"))
+
+let test_done_failed_transition_emits_typed_error () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = meta_with_active_goals [] in
+       (* A done on a task that does not exist fails the transition -> the
+          [else] branch must emit a typed [Error], not [None]. *)
+       match
+         rejected_done_typed_outcome ~base_path config meta
+           (`Assoc
+             [ "task_id", `String "task-does-not-exist"
+             ; "result", `String "completed"
+             ])
+       with
+       | Some (Outcome.Error _) -> ()
+       | other ->
+         failf "expected typed_outcome = Error, got %s"
+           (match other with
+            | None -> "None"
+            | Some Outcome.Progress -> "Progress"
+            | Some (Outcome.No_progress _) -> "No_progress"
+            | Some (Outcome.Error _) -> "Error"))
+
 let () =
   run "keeper validation breaker exemption"
     [ ( "validation_failure_class"
@@ -161,5 +225,9 @@ let () =
             test_task_create_multi_active_goals_without_goal_id_is_unscoped
         ; test_case "keeper_report_state returns state block" `Quick
             test_keeper_report_state_returns_state_block
+        ; test_case "rejected done (missing task_id) emits typed Error (D1)"
+            `Quick test_done_missing_task_id_emits_typed_error
+        ; test_case "rejected done (failed transition) emits typed Error (D1)"
+            `Quick test_done_failed_transition_emits_typed_error
         ] )
     ]

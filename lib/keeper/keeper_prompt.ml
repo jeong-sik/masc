@@ -176,14 +176,10 @@ let behavior_prompt_block name =
 
 
 let build_keeper_system_prompt
-    ~goal ~short_goal ~mid_goal ~long_goal
+    ~goal
     ~instructions ?(persona_extended = "") ?(keeper_name = "")
     ?(home_ground = "") ?(active_goals = []) () =
   let goal = normalize_goal_horizon_text goal in
-  let short_goal, mid_goal, long_goal =
-    resolve_goal_horizons ~goal ~short_goal_opt:(Some short_goal)
-      ~mid_goal_opt:(Some mid_goal) ~long_goal_opt:(Some long_goal)
-  in
   (* Behavior prompt blocks live under
      [<prompts_dir>/behavior/<name>.md] and are read once per process via
      [Keeper_prompt_external.get]. Missing/unreadable files no longer inject
@@ -293,15 +289,6 @@ let build_keeper_system_prompt
       "<identity>\n\
        Goal: ";
       goal;
-      "\n\
-       - Short-term: ";
-      short_goal;
-      "\n\
-       - Mid-term: ";
-      mid_goal;
-      "\n\
-       - Long-term: ";
-      long_goal;
       "\n\
        ";
       custom;

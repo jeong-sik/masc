@@ -8,9 +8,6 @@ type keeper_profile_defaults = {
   manifest_path : string option;
   persona_name : string option;
   goal : string option;
-  short_goal : string option;
-  mid_goal : string option;
-  long_goal : string option;
   instructions : string option;
   autoboot_enabled : bool option;
   mention_targets : string list;
@@ -57,9 +54,6 @@ let empty_keeper_profile_defaults =
     manifest_path = None;
     persona_name = None;
     goal = None;
-    short_goal = None;
-    mid_goal = None;
-    long_goal = None;
     instructions = None;
     autoboot_enabled = None;
     mention_targets = [];

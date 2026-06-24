@@ -508,12 +508,6 @@ let test_masc_keeper_up_schema () =
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
       | Some props ->
-          Alcotest.(check bool) "has short_goal" true
-            (List.mem_assoc "short_goal" props);
-          Alcotest.(check bool) "has mid_goal" true
-            (List.mem_assoc "mid_goal" props);
-          Alcotest.(check bool) "has long_goal" true
-            (List.mem_assoc "long_goal" props);
           Alcotest.(check bool) "omits sandbox_profile" false
             (List.mem_assoc "sandbox_profile" props);
           Alcotest.(check bool) "omits network_mode" false
@@ -560,12 +554,6 @@ let test_masc_keeper_msg_schema () =
       | Some props ->
           Alcotest.(check bool) "omits new_goal" false
             (List.mem_assoc "new_goal" props);
-          Alcotest.(check bool) "omits new_short_goal" false
-            (List.mem_assoc "new_short_goal" props);
-          Alcotest.(check bool) "omits new_mid_goal" false
-            (List.mem_assoc "new_mid_goal" props);
-          Alcotest.(check bool) "omits new_long_goal" false
-            (List.mem_assoc "new_long_goal" props);
           Alcotest.(check bool) "omits required_tools" false
             (List.mem_assoc "required_tools" props);
           Alcotest.(check bool) "omits required_tool_names" false

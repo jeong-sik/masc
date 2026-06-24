@@ -36,13 +36,13 @@ describe('KeeperCognitionInspector', () => {
     expect(selectKeeperForInspector(list, 'agent-beta')?.name).toBe('beta')
   })
 
-  it('falls back to a keeper with goal data before a blank first row', () => {
+  it('falls back to the first keeper when no name is requested', () => {
     const list = [
       keeper({ name: 'alpha' }),
-      keeper({ name: 'beta', short_goal: 'ship the cockpit' }),
+      keeper({ name: 'beta' }),
     ]
 
-    expect(selectKeeperForInspector(list, null)?.name).toBe('beta')
+    expect(selectKeeperForInspector(list, null)?.name).toBe('alpha')
   })
 
   it('formats live tool access rows from keeper runtime fields', () => {

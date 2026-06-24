@@ -86,6 +86,24 @@ let group_preserves_category ~members (group : merge_group) =
        members
 ;;
 
+(* RFC-0285 §3.1: a merge must not mix [claim_kind]s. [consolidated_fact] takes the
+   earliest member's tag and [valid_until_for_group] inherits the member-min horizon;
+   both are sound ONLY if every member shares one [claim_kind]. Unlike the
+   [claim_identity]-keyed cross-keeper consolidator, an LLM index-group carries no
+   such constraint — and [claim_kind] is orthogonal to [category], so
+   [group_preserves_category] does NOT prevent grouping a [Self_observation] with a
+   durable claim of the same category. Letting [first_seen] order then pick the
+   volatility class would either immortalize the self-observation (earliest durable)
+   or expire the durable claim (earliest self-observation). Refusing the merge keeps
+   the self-observation finite AND the durable claim immortal — strictly safer
+   (RFC-0247 §7 R7: never lose a good fact to a hallucinated plan). *)
+let group_preserves_claim_kind ~members =
+  match members with
+  | [] -> true
+  | (first : fact) :: rest ->
+    List.for_all (fun (m : fact) -> m.claim_kind = first.claim_kind) rest
+;;
+
 (* ---------- JSON parsing (defensive, like the librarian) ---------- *)
 
 let int_list_of_json = function
@@ -220,18 +238,27 @@ let max_optional_float values =
     values
 ;;
 
-let valid_until_for_group ~now ~external_ref ~members category =
-  match external_ref with
-  (* RFC-0259 §3.2(b): a referenced claim is volatile regardless of category. *)
-  | Some _ -> Some (now +. volatile_external_ttl_seconds)
-  | None ->
-    (match category with
-     | Ephemeral ->
-       (match min_optional_float (List.map (fun (m : fact) -> m.valid_until) members) with
-        | Some _ as valid_until -> valid_until
-        | None -> category_valid_until ~now category)
-     | Fact | Constraint | Preference | Blocker | Goal | Code_change
-     | Validated_approach | Lesson | Unknown _ -> category_valid_until ~now category)
+let valid_until_for_group ~now ~external_ref ~claim_kind ~members category =
+  match claim_kind with
+  (* RFC-0285 §3.3/§4 re-mint property: a self-observation group inherits the
+     earliest member's horizon so a reworded re-mint does NOT extend it past the
+     first-mint anchor; only when no member carried one does it get a fresh horizon. *)
+  | Some Self_observation ->
+    (match min_optional_float (List.map (fun (m : fact) -> m.valid_until) members) with
+     | Some _ as valid_until -> valid_until
+     | None -> Some (now +. self_observation_ttl_seconds))
+  | Some External_state | Some Durable_knowledge | None ->
+    (match external_ref with
+     (* RFC-0259 §3.2(b): a referenced claim is volatile regardless of category. *)
+     | Some _ -> Some (now +. volatile_external_ttl_seconds)
+     | None ->
+       (match category with
+        | Ephemeral ->
+          (match min_optional_float (List.map (fun (m : fact) -> m.valid_until) members) with
+           | Some _ as valid_until -> valid_until
+           | None -> category_valid_until ~now category)
+        | Fact | Constraint | Preference | Blocker | Goal | Code_change
+        | Validated_approach | Lesson | Unknown _ -> category_valid_until ~now category))
 ;;
 
 let last_verified_for_members members =
@@ -276,10 +303,21 @@ let consolidated_fact ~now ~members (group : merge_group) =
   { claim = group.consolidated_claim
   ; category = group.category
   ; external_ref
+    (* RFC-0285 §3.1: carry the earliest member's tag. The merge gate
+       ([group_preserves_claim_kind] in [apply_plan]) guarantees every member shares
+       one claim_kind, so the earliest's tag IS the group's — sound regardless of
+       which member is earliest. *)
+  ; claim_kind = earliest.claim_kind
   ; source = earliest.source
   ; observed_by
   ; first_seen
-  ; valid_until = valid_until_for_group ~now ~external_ref ~members group.category
+  ; valid_until =
+      valid_until_for_group
+        ~now
+        ~external_ref
+        ~claim_kind:earliest.claim_kind
+        ~members
+        group.category
   ; last_verified_at = last_verified_for_members members
   ; schema_version
   ; claim_id = shared_claim_id_for_members members
@@ -312,6 +350,7 @@ let apply_plan ~now ~facts plan =
        then (
          let member_facts = List.map (fun i -> facts_arr.(i)) members in
          if group_preserves_category ~members:member_facts group
+            && group_preserves_claim_kind ~members:member_facts
          then (
            let anchor =
              (* members is guaranteed non-empty by the [>= 2] guard above *)

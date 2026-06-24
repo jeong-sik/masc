@@ -247,9 +247,6 @@ let declarative_materialization_goal
   first_non_empty_goal_candidate
     [
       defaults.goal;
-      defaults.short_goal;
-      defaults.mid_goal;
-      defaults.long_goal;
       defaults.instructions;
     ]
 
@@ -324,12 +321,6 @@ let keeper_meta_persistent_drift_categories
       drift_if "tool_access" (current.tool_access <> target.tool_access);
       drift_if "tool_denylist" (current.tool_denylist <> target.tool_denylist);
       drift_if "goal" (not (goal_horizon_text_equal current.goal target.goal));
-      drift_if "short_goal"
-        (not (goal_horizon_text_equal current.short_goal target.short_goal));
-      drift_if "mid_goal"
-        (not (goal_horizon_text_equal current.mid_goal target.mid_goal));
-      drift_if "long_goal"
-        (not (goal_horizon_text_equal current.long_goal target.long_goal));
       drift_if "instructions"
         (not (personality_text_equal current.instructions target.instructions));
       drift_if "autoboot_enabled"
@@ -394,9 +385,6 @@ let ensure_keeper_meta_with_cause config name =
               | None -> meta.goal)
           | normalized -> normalized)
     in
-    let target_short_goal = apply_default defaults.short_goal meta.short_goal in
-    let target_mid_goal = apply_default defaults.mid_goal meta.mid_goal in
-    let target_long_goal = apply_default defaults.long_goal meta.long_goal in
     let target_instructions = apply_default defaults.instructions meta.instructions in
 
     (* --- Policy --- *)
@@ -467,9 +455,6 @@ let ensure_keeper_meta_with_cause config name =
         };
         tool_denylist = target_denylist;
         goal = target_goal;
-        short_goal = target_short_goal;
-        mid_goal = target_mid_goal;
-        long_goal = target_long_goal;
         instructions = target_instructions;
         autoboot_enabled = target_autoboot_enabled;
         mention_targets = target_mention_targets;

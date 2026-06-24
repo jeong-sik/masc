@@ -567,7 +567,6 @@ export function keeperWorkPreview(keeper: Keeper | null | undefined): string | n
     keeper.recent_output_preview,
     keeper.recent_input_preview,
     keeper.last_proactive_preview,
-    keeper.short_goal,
     keeper.goal,
     keeper.agent?.current_task,
   )

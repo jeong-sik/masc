@@ -16,6 +16,7 @@ let fact ?(external_ref = None) ?(valid_until = None) ~now claim =
   { Types.claim
   ; Types.category = Types.Fact
   ; Types.external_ref
+  ; Types.claim_kind = None
   ; Types.source = { Types.trace_id = "health-test"; Types.turn = 1; Types.tool_call_id = None }
   ; Types.observed_by = []
   ; Types.first_seen = now

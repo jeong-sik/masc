@@ -238,7 +238,6 @@ let keepers_json
                            ; "status", `String "paused"
                            ; "paused", `Bool true
                            ; "goal", `String meta.goal
-                           ; "short_goal", `String meta.short_goal
                            ; "turn_count", `Int meta.runtime.usage.total_turns
                            ; "updated_at", `String meta.updated_at
                            ; "created_at", `String meta.created_at
@@ -415,9 +414,6 @@ let keepers_json
                            , `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                            )
                          ; "goal", `String meta.goal
-                         ; "short_goal", `String meta.short_goal
-                         ; "mid_goal", `String meta.mid_goal
-                         ; "long_goal", `String meta.long_goal
                          ; "status", `String aligned_status
                          ; "paused", `Bool meta.paused
                          ; "pause_state", `String (if meta.paused then "paused" else "active")

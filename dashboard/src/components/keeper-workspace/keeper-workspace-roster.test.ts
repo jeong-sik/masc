@@ -270,7 +270,7 @@ describe('KeeperWorkspaceRoster', () => {
     expect(host.querySelector('.kp-row.mini[aria-current="true"]')).not.toBeNull()
   })
 
-  // The per-row work-preview line (.kw-kp-work — recent_output > short_goal >
+  // The per-row work-preview line (.kw-kp-work — recent_output >
   // goal/current_task > last_proactive_preview > empty fallback) was removed in
   // the v2 reskin: the prototype roster row is a compact picker (name + FSM state
   // + basepath handle + activity time/attention), and a selected keeper's work

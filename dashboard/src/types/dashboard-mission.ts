@@ -376,7 +376,6 @@ export interface OperatorKeeperSnapshot {
   last_turn_ago_s?: number
   model?: string
   goal?: string
-  short_goal?: string
   turn_count?: number
   context_tokens?: number
   context_max?: number

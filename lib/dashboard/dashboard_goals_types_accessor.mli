@@ -78,5 +78,8 @@ val receipt_has_runtime_risk : Yojson.Safe.t -> bool
 val iso_max : string -> string -> string
 val latest_iso : ?fallback:string -> string list -> string option
 
-val stagnation_threshold_seconds : Goal_store.horizon -> int
+val stagnation_threshold_seconds : int
+(** RFC-0294: single policy constant (1 day) after the per-horizon table was
+    removed with the workspace-goal horizon. *)
+
 val human_duration : int -> string

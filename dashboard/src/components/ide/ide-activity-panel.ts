@@ -14,7 +14,6 @@ import { goals, tasks } from '../../store'
 import {
   formatProgressPct,
   goalPhaseLabel,
-  horizonLabel,
   type GoalProgress,
 } from '../goals/goal-helpers'
 import { ideConversationThreadSnapshot } from './ide-context-bridge'
@@ -148,7 +147,6 @@ export interface IdeRunProgressGoal {
   readonly goalId: string
   readonly taskId: string | null
   readonly title: string
-  readonly horizon: string
   readonly phase: string
   readonly progress: GoalProgress
   readonly progressLabel: string
@@ -716,7 +714,7 @@ function RunProgressGoalTrack(goal: IdeRunProgressGoal) {
     >
       <div class="ide-run-progress-goal-top">
         <span>GOAL TRACK</span>
-        <span>${goal.horizon} · ${goal.phase}</span>
+        <span>${goal.phase}</span>
       </div>
       <strong title=${goal.title}>${goal.title}</strong>
       <div class="ide-run-progress-goal-bar" aria-hidden="true">
@@ -781,7 +779,6 @@ function activeRunGoal(
     goalId,
     taskId: hit.taskId,
     title: goal?.title ?? goalId,
-    horizon: goal ? horizonLabel(goal.horizon) : 'unknown',
     phase: goal ? goalPhaseLabel(goal.phase) : 'unknown',
     progress,
     progressLabel: formatProgressPct(progress),

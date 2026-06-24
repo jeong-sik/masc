@@ -30,14 +30,9 @@ let keeper_config_json (config : Workspace.config) (name : string)
         List.filter_map
           (fun goal_id ->
              match Goal_store.get_goal config ~goal_id with
-             | Some { Goal_store.id; title; horizon } ->
-                 let horizon_str =
-                   match horizon with
-                   | Goal_store.Short -> "short"
-                   | Goal_store.Mid -> "mid"
-                   | Goal_store.Long -> "long"
-                 in
-                 Some (id, title, horizon_str)
+             (* RFC-0294: active_goals tuple dropped its horizon element. *)
+             | Some { Goal_store.id; title; _ } ->
+                 Some (id, title)
                | None -> None)
           m.active_goal_ids
       in
@@ -56,16 +51,15 @@ let keeper_config_json (config : Workspace.config) (name : string)
       let active_goals_json =
         `List
           (List.map
-             (fun (id, title, horizon) ->
+             (fun (id, title) ->
                 `Assoc [
                   ("id", `String id);
                   ("title", `String title);
-                  ("horizon", `String horizon);
                 ])
              active_goals)
       in
       let resolved_active_goal_ids =
-        List.map (fun (id, _, _) -> id) active_goals
+        List.map (fun (id, _) -> id) active_goals
       in
       let missing_active_goal_ids =
         m.active_goal_ids

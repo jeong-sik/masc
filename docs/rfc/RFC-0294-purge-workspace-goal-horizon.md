@@ -48,7 +48,10 @@ every layer:
 So "the concept is gone" is an instruction to *make it gone*, not a description of
 the current code. RFC-0288 removed the keeper-meta horizon and explicitly recorded
 that the `Goal_store` horizon "survived as a separate system." This RFC retires that
-survivor, on new evidence (§3) that its single piece of control logic is dead.
+survivor. Its largest control consumer (the refresh cadence) is dead, but — unlike
+RFC-0288's keeper-meta horizon — it is **not entirely dead**: one small live path
+(the dashboard stagnation threshold) re-bases off horizon and must be redesigned,
+not merely deleted (§3).
 
 ## 2. Two different "horizon"s — what this RFC must NOT touch
 
@@ -68,10 +71,21 @@ break them. They stay untouched:
 The purge is therefore scoped by *type identity* (`Goal_store.horizon` and its
 transitive references), not by the word "horizon".
 
-## 3. Justification — horizon's only control logic is dead code
+## 3. Justification — one dead control path, one live one to re-base
 
-`horizon` looks load-bearing because it drives a periodic re-prioritization
-scheduler, but that scheduler is never wired:
+`horizon` has a full census of consumers (origin/main `3086e33d99`):
+
+| # | consumer | role | verdict |
+|---|---|---|---|
+| 1 | `should_refresh_goal`/`reprioritize`/`refresh` (`goal_store.ml:806`–`853`) | re-prioritization cadence | **dead** (delete) |
+| 2 | `sort_goals` `horizon_rank` (`goal_store.ml:531`–`542`) | primary sort key | collapse to `(priority, updated_at desc)` |
+| 3 | `compute_rollup` `short/mid/long_count` (`goal_store.ml:741`–`743`) | count rollup | delete (no external consumer — `rg short_count` hits only `test_keeper_tool_affinity`, an unrelated tool stat) |
+| 4 | `list_goals ?horizon` (`goal_store.ml:551`) + MCP schema | filter | delete (P2) |
+| 5 | `Dashboard_goals_types.stagnation_threshold_seconds` (`dashboard_goals_types_accessor.ml:215`) | **live** stalled-goal threshold (Short 6h / Mid 1d / Long 3d), used at `dashboard_goals_types_builder.ml:396` → `stagnation_status` JSON + health badge | **re-base** (§4) |
+| 6 | keeper prompt context (`keeper_turn_up_create.ml:282`, `keeper_run_context.ml:130`) | injects `horizon_str` into `active_goals` tuple | drop the field from the tuple |
+| 7 | dashboard JSON (`dashboard_goals.ml:204`, `dashboard_http_keeper_snapshot.ml:36`) | serializes horizon | drop the key |
+
+Consumer **#1 is the dead scheduler** — the original premise for the purge:
 
 ```ocaml
 (* lib/goal/goal_store.ml:806 — the cohort selector *)
@@ -97,61 +111,100 @@ Grounding (origin/main `3086e33d99`):
   `compute = goal_loop_status_for_state`, never `Goal_store.refresh`.
 - No test locks `refresh` / `should_refresh_goal` / `reprioritize`.
 
-This mirrors RFC-0288's finding on the keeper-meta horizon ("스케줄러 0"). Once the
-dead cadence is removed, `horizon`'s remaining roles are all non-logic:
+Consumer #1 mirrors RFC-0288's keeper-meta finding ("스케줄러 0"): private, no
+non-test caller, no test lock — deleting it is safe. Consumers #2/#3/#4/#6/#7 only
+sort, count, display, or inject text; none *decide* anything, so they collapse or
+drop cleanly.
 
-1. a persisted field (migration concern, §5);
-2. the primary sort key — `lib/goal/goal_store.ml:531` `horizon_rank` in the
-   `(horizon, priority, updated_at desc)` comparator (`:538`–`:542`);
-3. an optional list filter — `lib/goal/goal_store.ml:551`;
-4. a count rollup — `lib/goal/goal_store.ml:741`–`:743` (`short_count`/`mid_count`/`long_count`);
-5. display (badge/filter/group/progress) on the dashboard.
-
-None of these *decide* anything; they classify, sort, and display. Removing
-`horizon` collapses the sort key to `(priority, updated_at desc)` and deletes the
-dead scheduler outright.
+The one consumer that **does decide** is #5: the dashboard marks a goal `stalled`
+when `stagnation_seconds >= stagnation_threshold_seconds goal.horizon`, and the
+threshold is per-horizon (Short 6h / Mid 1d / Long 3d). Removing `horizon` does not
+remove the need for *a* threshold — stagnation detection is a live, surfaced feature
+(`stagnation_status` is serialized at `dashboard_goals.ml:275` and rendered as a
+health badge at `dashboard_goals_types_health.ml:61`). So #5 must be **re-based onto
+a surviving axis**, not deleted. That choice (single constant vs priority-derived)
+is §4's open decision; it is the only behavior-visible change in this purge and the
+reason the RFC's earlier "only dead logic" framing was wrong.
 
 ## 4. Proposal
 
-Remove `Goal_store.horizon` and everything that exists only to serve it, in four
-phases (§7), each independently compilable and tested:
+`Goal_store.horizon` is the type identity; every consumer in the §3 census is in a
+single OCaml compilation graph (`masc_goal` → `workspace_goals` / `dashboard` /
+`keeper`), so the OCaml side **cannot** be split into independently-green commits —
+removing the field breaks all consumers at once (the compiler enforces totality, no
+silent gap). The phases group by file, but P1–P3-OCaml land in one buildable unit:
 
-1. **Backend type + dead cadence**: delete `type horizon`, `horizon_to_yojson`,
-   `horizon_of_yojson`, `parse_horizon`, the `horizon` record field, `horizon_rank`,
-   `should_refresh_goal`, `reprioritize`, `refresh`, and the `short/mid/long`
-   counts in `rollup`. Collapse the `list_goals` comparator to
-   `(priority, updated_at desc)`. Drop the `?horizon` parameter from `list_goals`
-   and `upsert_goal` and from `goal_store.mli`.
-2. **MCP boundary**: delete `goal_horizon_strings` / `parse_optional_horizon`
-   (`lib/workspace_goals.ml`) and the `horizon` enum + schema fields
-   (`lib/tool_schemas/tool_schemas_workspace_extra.ml`). `masc_goal_list` /
-   `masc_goal_upsert` lose the `horizon` arg; an explicit `horizon` arg now returns
-   an `unknown field` validation error (parse-don't-validate — no silent ignore).
-3. **Dashboard**: delete `HorizonFilter`, the `short/mid/long` grouping
-   (`goal-helpers.ts:76`), `horizonProgress`, `horizonLabel`, `horizonColor`, and
-   the badge spans in `goal-tree.ts`. The Goal screen's primary organization becomes
-   the existing goal tree (parent/child, sorted by priority); the kanban view, KPI
-   strip, claimable-backlog, task drawer, and operator aside are unchanged (§6).
-4. **Persistence migration** (§5): legacy goal JSON on disk still has a `"horizon"`
-   key; the reader drops it explicitly and writes records without it.
+1. **`goal_store.ml(i)`**: delete `type horizon`, `horizon_to/of_yojson`,
+   `parse_horizon`, the `horizon` record field, `horizon_rank`, the dead cadence
+   (`should_refresh_goal`/`reprioritize`/`refresh`) and its now-orphaned scaffolding
+   (`refresh_mode`/`snapshot_mode`/`snapshot`/`refresh_result` types,
+   `parse_refresh_mode`/`parse_snapshot_mode`/`snapshot_mode_of_refresh_mode`,
+   `snapshots_dir`/`scheduler_state_path`/`has_scheduler_state`/`parse_yyyy_mm_dd`/
+   `days_until`), and the `short/mid/long` `rollup` counts. Collapse the comparator
+   to `(priority, updated_at desc)`. Drop `?horizon` from `list_goals`/`upsert_goal`.
+   `ensure_dirs` stops creating `snapshots_dir`.
+2. **OCaml consumers** (same build): drop `horizon_str` from the keeper
+   `active_goals` tuple (`keeper_turn_up_create.ml`, `keeper_run_context.ml`); drop
+   the `"horizon"` key from `dashboard_goals.ml:204` and `dashboard_http_keeper_snapshot.ml`;
+   **re-base stagnation** (see decision below) in `dashboard_goals_types_accessor.ml`
+   + its `.mli`/`dashboard_goals_types.mli` signatures and the `..._builder.ml:396`
+   call site.
+3. **MCP boundary** (same build): delete `goal_horizon_strings` /
+   `parse_optional_horizon` (`lib/workspace_goals.ml`) and the `horizon` enum +
+   schema fields (`lib/tool_schemas/tool_schemas_workspace_extra.ml`). An explicit
+   `horizon` arg to `masc_goal_upsert` returns an `unknown field` validation error
+   (parse-don't-validate — no silent ignore).
+4. **TS dashboard** (separate build): delete `HorizonFilter`, the `short/mid/long`
+   grouping (`goal-helpers.ts:76`), `horizonProgress`, `horizonLabel`, `horizonColor`,
+   and the badge spans in `goal-tree.ts`. Primary view becomes the goal tree (§6).
+5. **Persistence migration** (§5): legacy goal JSON still has a `"horizon"` key; the
+   reader stops reading it (documented intentional drop) and writes omit it.
+
+### Resolved — stagnation threshold re-base (consumer #5)
+
+Operator selected **(a)**: `stagnation_threshold_seconds` becomes a single constant
+`= Masc_time_constants.day_int` (1 day, the former Mid bucket). Options considered:
+
+- **(a) single named constant** `default_stagnation_threshold_seconds` (no per-goal
+  variation). Most surgical; introduces no new axis. Question: which value — the Mid
+  bucket (1 day) preserves the median behavior but makes Short goals alert later and
+  Long goals earlier.
+- **(b) priority-derived** `f : priority -> int` (priority survives the purge and is a
+  better "how-urgent" signal). Changes semantics; needs its own justification.
+- **(c) drop stagnation entirely** — rejected: it is a live, surfaced health feature.
+
+This is the only behavior-visible change in the purge. (a) keeps the value a named
+policy constant — not a magic number and not a priority→time heuristic table —
+which is why it was chosen under the "no heuristic / justification-first"
+constraint. Short goals now alert later (24h vs 6h) and Long goals earlier (24h vs
+72h); priority-derived stagnation (b) remains a possible future refinement.
 
 ## 5. Migration & no-silent-failure
 
-Persisted records at `Goal_store.goals_path` carry `"horizon"`
-(`lib/goal/goal_store.ml:129`, read back at `:173`). After the field is removed from
-`type goal`, the loader must handle the legacy key **explicitly**, not by accident:
+Persisted goal records still carry a `"horizon"` key on disk. After the field is
+removed from `type goal`, removal is handled as **standard schema evolution**, not
+an ad-hoc patch:
 
-- The deserializer ignores a present-but-unknown `"horizon"` member and logs at
-  `info` once per load when it is dropped (visible, not silent). This is a
-  read-time tolerance, not a write-time default.
-- New writes omit the key. A one-pass `update_state` rewrite (already the mechanism
-  at `lib/goal/goal_store.ml:828`'s `update_state`) drops it from every record on
-  the next mutation; no separate migration binary is needed.
-- MCP `masc_goal_upsert` with an explicit `horizon` arg returns a validation error
-  (not a no-op) so callers learn the field is gone rather than having it absorbed.
+- `goal_of_yojson` simply stops reading the `"horizon"` member (it is no longer
+  part of the match). A `(* RFC-0294 *)` comment documents that the legacy key is
+  intentionally ignored, so a future reader does not mistake the omission for a
+  bug. There is no per-load info log: dropping a retired optional field is not a
+  failure, and `read_state` runs often enough that a log line would be pure noise.
+- `goal_to_yojson` no longer emits the key, so it disappears from each record on
+  its next write through the existing `update_state` read-modify-write path. No
+  separate migration binary is needed.
+- MCP rejection of an explicit `horizon` arg is **declarative**: the
+  `masc_goal_list` / `masc_goal_upsert` schemas carry `"additionalProperties":
+  false`, so once `horizon` is no longer an advertised property the validation
+  layer rejects it as an unknown property. A hand-written `if horizon present then
+  error` guard is deliberately avoided — that would be the forbidden string-match
+  pattern and a maintenance wart.
 
-This satisfies "no silent failure": a legacy field is logged when dropped, and a
-caller still sending `horizon` is told, not ignored.
+This satisfies "no silent failure": the on-disk drop is intentional and documented
+(no error to swallow), and a caller still sending `horizon` is rejected by the
+schema, not silently absorbed. The legacy-load path is covered by the existing
+`test_goal_store` fixture whose goal JSON includes a `"horizon"` key and still
+loads.
 
 ## 6. To-Be — the Goal/Task screen without horizon
 

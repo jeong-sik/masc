@@ -393,7 +393,7 @@ let rec build_tree context goals goal =
       "goal_metadata"
   in
   let stale_by_threshold =
-    stagnation_seconds >= stagnation_threshold_seconds goal.Goal_store.horizon
+    stagnation_seconds >= stagnation_threshold_seconds
   in
   let observed_for_stagnation =
     not (String.equal activity_observation "goal_metadata")

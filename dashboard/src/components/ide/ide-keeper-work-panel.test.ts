@@ -221,7 +221,6 @@ function taskFixture(partial: Partial<Task> = {}): Task {
 function goalFixture(partial: Partial<Goal> = {}): Goal {
   return {
     id: 'goal-runtime',
-    horizon: 'short',
     title: 'Runtime goal',
     metric: 'green CI',
     target_value: '100%',

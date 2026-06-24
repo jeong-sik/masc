@@ -54,7 +54,6 @@ let validation_error_result
     (validation_error_response errors)
 ;;
 
-let goal_horizon_strings = [ "short"; "mid"; "long" ]
 let goal_status_strings = [ "active"; "paused"; "done"; "dropped" ]
 
 (* RFC-0089: derive the accepted-value sets from the Goal_phase ADT (the goal
@@ -86,23 +85,10 @@ let make_type_field_error ~field ~constraint_violated ~expected ~received =
   }
 ;;
 
-let parse_optional_horizon args field =
-  match Json_util.assoc_member_opt field args with
-  | None | Some `Null -> Ok None
-  | Some (`String raw) when String.trim raw = "" -> Ok None
-  | Some (`String raw) ->
-    (match Goal_store.parse_horizon (Some raw) with
-     | Some horizon -> Ok (Some horizon)
-     | None ->
-       Error (make_enum_field_error ~field ~allowed:goal_horizon_strings ~received:raw))
-  | Some json ->
-    Error
-      (make_type_field_error
-         ~field
-         ~constraint_violated:Type_string
-         ~expected:"string"
-         ~received:(Yojson.Safe.to_string json))
-;;
+(* RFC-0294: parse_optional_horizon removed with the workspace-goal horizon.
+   The masc_goal_* schemas no longer advertise a horizon arg; rejection of an
+   unexpected horizon key is governed by the schema's additionalProperties
+   policy, not a hand-written substring guard. *)
 
 let parse_optional_goal_status args field =
   match Json_util.assoc_member_opt field args with
@@ -372,13 +358,12 @@ let emit_goal_event = Workspace_goals_verification.emit_goal_event
 let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.result =
   match
     ( reject_retired_goal_list_status args
-    , parse_optional_horizon args "horizon"
     , parse_optional_goal_phase args "phase" )
   with
-  | Error err, _, _ | _, Error err, _ | _, _, Error err ->
+  | Error err, _ | _, Error err ->
     validation_error_result ~tool_name ~start_time [ err ]
-  | Ok (), Ok horizon, Ok phase ->
-    let goals = Goal_store.list_goals ctx.config ?horizon ?phase () in
+  | Ok (), Ok phase ->
+    let goals = Goal_store.list_goals ctx.config ?phase () in
     let rollup = Goal_store.compute_rollup goals in
     ok_result
       ~tool_name
@@ -392,21 +377,18 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
 
 let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result.result =
   match
-    ( parse_optional_horizon args "horizon"
-    , parse_optional_goal_status args "status"
+    ( parse_optional_goal_status args "status"
     , parse_optional_goal_phase args "phase"
     , parse_optional_priority args "priority"
     , parse_optional_policy args "verifier_policy"
     , parse_optional_bool args "require_completion_approval" )
   with
-  | Error err, _, _, _, _, _
-  | _, Error err, _, _, _, _
-  | _, _, Error err, _, _, _
-  | _, _, _, Error err, _, _
-  | _, _, _, _, Error err, _
-  | _, _, _, _, _, Error err -> validation_error_result ~tool_name ~start_time [ err ]
-  | ( Ok horizon
-    , Ok status
+  | Error err, _, _, _, _
+  | _, Error err, _, _, _
+  | _, _, Error err, _, _
+  | _, _, _, Error err, _
+  | _, _, _, _, Error err -> validation_error_result ~tool_name ~start_time [ err ]
+  | ( Ok status
     , Ok phase
     , Ok priority
     , Ok verifier_policy
@@ -425,7 +407,6 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
           Goal_store.upsert_goal
             ctx.config
             ?id
-            ?horizon
             ?title
             ?metric
             ?target_value

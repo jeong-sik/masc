@@ -294,7 +294,7 @@ let test_masc_goal_list_schema () =
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
       | Some props ->
-          Alcotest.(check bool) "has horizon" true (List.mem_assoc "horizon" props);
+          Alcotest.(check bool) "horizon filter removed (RFC-0294)" false (List.mem_assoc "horizon" props);
           Alcotest.(check bool) "has phase" true (List.mem_assoc "phase" props);
           Alcotest.(check bool) "no legacy status filter" false (List.mem_assoc "status" props)
       | None -> Alcotest.fail "masc_goal_list missing properties"
@@ -307,7 +307,7 @@ let test_masc_goal_upsert_schema () =
       | Some props ->
           Alcotest.(check bool) "has id" true (List.mem_assoc "id" props);
           Alcotest.(check bool) "has title" true (List.mem_assoc "title" props);
-          Alcotest.(check bool) "has horizon" true (List.mem_assoc "horizon" props);
+          Alcotest.(check bool) "horizon removed (RFC-0294)" false (List.mem_assoc "horizon" props);
           Alcotest.(check bool) "omits status lifecycle field" false
             (List.mem_assoc "status" props);
           Alcotest.(check bool) "omits phase lifecycle field" false

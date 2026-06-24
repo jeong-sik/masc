@@ -110,47 +110,6 @@
 .wk-kpi-v.warn { color: var(--status-warn); }
 .wk-kpi-v.volt { color: var(--volt-strong); }
 
-/* ── Horizon / Goal list ──────────────────────────────────────────────────── */
-.wk-horizons {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  margin-top: 4px;
-}
-
-.wk-horizon {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.wk-hz-head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-height: 22px;
-  padding: 0 2px;
-}
-
-.wk-hz-lbl {
-  font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-bright);
-}
-
-.wk-hz-sub {
-  font-size: 11.5px;
-  color: var(--text-dim);
-}
-
-.wk-hz-n {
-  font-size: 11px;
-  color: var(--text-mid);
-}
-
 .wk-list {
   display: flex;
   flex-direction: column;

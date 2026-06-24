@@ -321,6 +321,21 @@ let make_tool_tracking_hooks
       ?(destructive_ops_policy = Destructive_ops_policy.default)
       ?context
       () =
+  (* Single source of truth for destructive gating: project the gate's
+     [destructive_check_enabled] flag into the policy once, up front, so the
+     per-tool-call check below consults only [policy.enabled] (via
+     [detect_destructive]). A disabled gate yields
+     [Destructive_ops_policy.disabled]. This mirrors the keeper path
+     ([Keeper_guards]), which gates on the policy alone, and removes the
+     dual-flag where [destructive_check_enabled] and [policy.enabled] could
+     disagree in any future caller that passes a custom policy. *)
+  let destructive_ops_policy =
+    match gate_config with
+    | Some (gate : Eval_gate.gate_config)
+      when not gate.destructive_check_enabled ->
+        Destructive_ops_policy.disabled
+    | _ -> destructive_ops_policy
+  in
   let tool_names_ref = ref [] in
   let tracking =
     { Agent_sdk.Hooks.empty with
@@ -344,9 +359,11 @@ let make_tool_tracking_hooks
                         ~reason_code:"worker_deny"
                         ~reason_text:"tool is on the worker deny list"))
                  else if
-                   (* Gate 1: Destructive pattern detection *)
-                   gate.destructive_check_enabled
-                   && Tool_capability.has Tool_capability.Destructive tool_name
+                   (* Gate 1: Destructive pattern detection. Gated on the policy
+                      alone — [destructive_check_enabled] was projected into
+                      [destructive_ops_policy] above, so a disabled gate makes
+                      [detect_destructive] return [None]. *)
+                   Tool_capability.has Tool_capability.Destructive tool_name
                  then (
                    let cmd = extract_command_from_input input in
                    match Eval_gate.detect_destructive destructive_ops_policy cmd with

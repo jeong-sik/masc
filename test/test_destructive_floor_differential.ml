@@ -49,8 +49,13 @@
         [Approval_policy.find_destructive_db], inside catastrophic_floor); and
         kill/pkill DELIBERATELY ALLOWED (a keeper legitimately signals processes
         it spawned, with no safe ownership boundary at the syntax layer — user
-        decision). So the residual path-independent gap is the deliberately-
-        allowed set only.
+        decision). The residual path-independent gap is therefore the
+        deliberately-allowed set (kill/pkill) PLUS a measured fail-open: the
+        typed DB floor recognizes only psql/mysql/mariadb, so destructive SQL on
+        a non-enumerated CLI is allowed where substring blocked it. So the
+        must-floor work-list is NOT empty — Phase 3 must retain the SQL substring
+        for non-enumerated bins (and the non-literal -c case, RFC §8) or accept
+        it as a deliberate scope cut.
       - path-BEARING: the command targets a path. The PERMANENT path jail covers
         an OUT-OF-WORKSPACE target. The IN-WORKSPACE representative used here
         (e.g. [rm -r ./build], [chmod 777 ./script.sh]) is a LEGITIMATE keeper
@@ -147,6 +152,17 @@ let destructive_corpus =
   ; mk "device_write" "dd" [ "if=/dev/zero"; "of=./out.img" ]
   ; mk "process_signal" "kill" [ "-9"; "1234" ] ~path_independent:true
   ; mk "process_signal" "pkill" [ "-f"; "node" ] ~path_independent:true
+    (* Non-enumerated DB CLI: substring is bin-agnostic and blocks the
+       destructive SQL, but the typed DB floor ([find_destructive_db]) only
+       recognizes psql/mysql/mariadb, so it ALLOWS this. Pinned as a measured
+       KNOWN fail-open — typed SQL coverage is narrower than substring by the
+       producer-enumeration cost, so the must-floor work-list is NOT empty.
+       Phase 3 must either retain the SQL substring for non-enumerated bins or
+       accept this as a deliberate scope cut. The analogous non-literal -c case
+       (e.g. [psql -c "$SQL"], a Concat/Var arg) is the other fail-open dimension
+       but cannot be built from the all-literal [mk] helper, so it is documented
+       in the RFC rather than measured here (no silent cap: stated, not hidden). *)
+  ; mk "sql_destructive" "cockroach" [ "sql"; "-e"; "drop table users" ] ~path_independent:true
   ; mk "system_control" "shutdown" [ "-h"; "now" ] ~path_independent:true
   ; mk "system_control" "reboot" [] ~path_independent:true
   ]
@@ -182,14 +198,18 @@ let bearing_gap () = List.filter (fun e -> not e.path_independent) (gap ())
      until Phase 3, then drops as over-broad — like the path-bearing set, it is
      resolved by deliberate allowance, NOT by a floor lift.
 
-   The command-shape must-floor work-list is now EMPTY. A NEW path-independent
-   destructive pattern appearing here is a red that demands a classify-or-decide
-   — the ratchet's purpose. Already covered (NOT in the gap): rm -rf, git push
-   --force/-f, git reset --hard, git clean -f, filesystem format, shutdown,
-   reboot, destructive SQL. *)
+   The command-shape must-floor work-list is NOT empty: besides the
+   deliberately-allowed kill/pkill, the typed DB floor recognizes only
+   psql/mysql/mariadb, so destructive SQL on a non-enumerated CLI (cockroach
+   here) is a measured fail-open — substring blocks it, typed allows it. A NEW
+   path-independent destructive pattern appearing here is a red that demands a
+   classify-or-decide — the ratchet's purpose. Already covered (NOT in the gap):
+   rm -rf, git push --force/-f, git reset --hard, git clean -f, filesystem
+   format, shutdown, reboot, destructive SQL on psql/mysql/mariadb. *)
 let expected_independent_gap =
   [ "[process_signal] kill -9 1234"
   ; "[process_signal] pkill -f node"
+  ; "[sql_destructive] cockroach sql -e drop table users"
   ]
 ;;
 

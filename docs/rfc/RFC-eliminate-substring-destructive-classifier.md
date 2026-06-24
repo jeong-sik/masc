@@ -134,8 +134,12 @@ worker command 는 keeper typed 게이트(Gate 2)를 반드시 통과(§2.1). ga
     막고, in-workspace 형은 정당 작업. `test_rm_root_allowed_at_policy_layer_jailed_downstream` 가 경계(argv 경로는
     floor 밖)를 pin.
 
-→ **command-shape must-floor work-list = 0** 도달. 남은 path-independent gap(kill/pkill)은 전부 의도적 허용이라,
-substring 삭제(Phase 3) 안전 전제가 충족된다.
+→ command-shape must-floor work-list 은 **거의 비었으나 0 은 아니다**(자가 측정 정정). 남은 path-independent gap 은
+(1) 의도적 허용 kill/pkill, (2) **typed DB floor 의 fail-open**: `find_destructive_db` 는 psql/mysql/mariadb 만
+인식하므로 비열거 DB CLI(예: `cockroach sql -e "drop table …"`)의 destructive SQL 을 substring 은 막지만 typed 는
+허용한다(harness corpus 에 측정 케이스로 pin). 또 비-literal `-c` 값(`psql -c "$SQL"`, Concat/Var)도 fail-open
+(§8). 따라서 Phase 3 는 SQL substring 을 *비열거 bin·비literal 인자에 한해 유지*하거나 이 narrowing 을 명시적 scope
+cut 으로 수용해야 한다. 나머지(literal psql/mysql/mariadb)는 typed 가 커버.
 
 ### D4. gh 등 string-borne 위험은 RFC-0208 §4(B1)대로 word-list floor 가 영구 소유
 "전멸"의 스코프는 *eval_gate substring 계층* 제거이지 B1 floor 폐지가 아니다.
@@ -155,11 +159,13 @@ silent 하게 늘면 red.
 - **2a (SHIPPED #22234)**: `shutdown`/`reboot`(+`halt`/`poweroff`)을 `find_catastrophic_program` 에 흡수 →
   independent baseline 8→6.
 - **2b (SHIPPED 본 PR)**: SQL `drop`/`truncate`/`delete` 를 typed DB-capability(`Db_op` + `find_destructive_db`)로
-  흡수 → SQL 4 가 covered 로 이동. `kill`/`pkill` 은 deliberately-allow 결정(차단 안 함) → independent gap 에 잔류하나
-  work-list 아님. independent baseline = {kill, pkill}, **must-floor work-list = 0**.
+  흡수 → **literal psql/mysql/mariadb** SQL 이 covered 로 이동. `kill`/`pkill` 은 deliberately-allow 결정(차단 안 함).
+  단 비열거 DB CLI(`cockroach`)·비-literal `-c` 값은 fail-open 으로 잔존(harness `cockroach` 케이스로 측정). independent
+  baseline = {kill, pkill, cockroach-fail-open}, **must-floor work-list 은 거의 비었으나 0 은 아니다**(§6 정정).
 
 ### Phase 3 — substring 삭제 + drift-guard
-must-floor work-list = 0 도달했으므로 진행 가능. `detect_destructive`/`detect_evasion`/dead
+SQL substring 을 *비열거 bin·비literal 인자에 한해 유지*하거나 그 narrowing 을 명시적 scope cut 으로 수용한 뒤 진행한다
+(나머지는 typed 가 커버). `detect_destructive`/`detect_evasion`/dead
 `pre_check`·`guarded_execute` 제거, worker/keeper_guards/eval_gate pre-hook 제거. 이때 deliberately-allow 집합
 (kill/pkill + path-BEARING in-workspace)의 과잉 차단이 의도적으로 드롭됨(영구 path jail 이 workspace 밖을 계속 보호).
 drift-guard 로 substring 분류기 재등장 차단.

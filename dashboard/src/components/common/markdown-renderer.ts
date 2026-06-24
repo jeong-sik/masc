@@ -148,8 +148,9 @@ export function MarkdownContent({ text, class: className }: { text: string; clas
             div.appendChild(safeSvg)
             pre.replaceWith(div)
           }
-        } catch {
-          // Keep code block as fallback on render error
+        } catch (err) {
+          // Keep code block as fallback on render error, but remain observable.
+          console.warn('[markdown-renderer] mermaid fence render failed', err)
         }
       }
     })()

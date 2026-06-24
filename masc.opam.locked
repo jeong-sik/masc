@@ -242,15 +242,15 @@ pin-depends: [
   ]
   [
   "ws-direct-core.0.1.0"
-  "git+https://github.com/jeong-sik/ws-direct.git#c1dc5640d70b86b90dc314f09cb7a9c250e15181"
+  "git+https://github.com/jeong-sik/ws-direct.git#3595406fe28713dbc4638c277e567031da339cd0"
 ]
   [
   "ws-direct-eio.0.1.0"
-  "git+https://github.com/jeong-sik/ws-direct.git#c1dc5640d70b86b90dc314f09cb7a9c250e15181"
+  "git+https://github.com/jeong-sik/ws-direct.git#3595406fe28713dbc4638c277e567031da339cd0"
 ]
   [
   "ws-direct-gluten.0.1.0"
-  "git+https://github.com/jeong-sik/ws-direct.git#c1dc5640d70b86b90dc314f09cb7a9c250e15181"
+  "git+https://github.com/jeong-sik/ws-direct.git#3595406fe28713dbc4638c277e567031da339cd0"
 ]
 ]
 x-maintenance-intent: ["(latest)"]

@@ -57,6 +57,7 @@
   test_dashboard_attribution
   test_dashboard_oas_bridge
   test_masc_runtime_events
+  test_cancel_wall_bucket
   test_workspace
   test_workspace_state_recovery
   test_exec_tap
@@ -363,6 +364,7 @@
   test_dashboard_attribution
   test_dashboard_oas_bridge
   test_masc_runtime_events
+  test_cancel_wall_bucket
   test_workspace
   test_workspace_state_recovery
   test_exec_tap

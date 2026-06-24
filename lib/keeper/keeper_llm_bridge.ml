@@ -70,11 +70,9 @@ let cause_code_provider_timeout = "provider_timeout"
 let site_cancelled = "cancelled"
 let site_execution_error = "execution_error"
 let channel_oas_bridge = "oas_bridge"
-let bucket_fast = "fast"
-let bucket_short_tail = "short_tail"
-let bucket_mid_tail = "mid_tail"
-let bucket_long_mid = "long_mid"
-let bucket_long_tail = "long_tail"
+(* cancel-bucket labels + of_wall classifier moved to Cancel_wall_bucket
+   (SSOT, 2026-06-24): boundaries are shared with masc_oas_bridge so the
+   two cancel-metric sources stay unionable (#10942). *)
 
 
 let bridge_details fields envelope =
@@ -100,17 +98,6 @@ let with_hitl_approval_headroom timeout_s =
     (Keeper_approval_queue.default_noncritical_approval_timeout_s +. 30.0)
 ;;
 
-let cancel_bucket_of_wall wall =
-  if wall < 60.0
-  then bucket_fast
-  else if wall < 300.0
-  then bucket_short_tail
-  else if wall < 600.0
-  then bucket_mid_tail
-  else if wall < 1800.0
-  then bucket_long_mid
-  else bucket_long_tail
-;;
 
 type cancel_classification =
   | Unknown_cancel
@@ -306,7 +293,7 @@ let run_with_timeout_and_fallback
           internal exception name or wall-clock bucket. *)
        let bt = Printexc.get_raw_backtrace () in
        let wall = elapsed () in
-       let bucket = cancel_bucket_of_wall wall in
+       let bucket = Cancel_wall_bucket.of_wall wall in
        let inner_str =
          match inner_exn with
          | Failure msg -> "Failure(" ^ msg ^ ")"

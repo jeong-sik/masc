@@ -1,168 +1,248 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render } from '@testing-library/preact'
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  DEFAULT_COMPACTIONS,
   DEFAULT_MEMORY_KEEPERS,
-  KEEPER_MEMORY,
   MemoryInspector,
-  memAggregate,
-  memComposition,
+  factCategoryMeta,
+  memCompositionFromBlocks,
+  memFmtBytes,
   memFmtTok,
+  promptBlockMeta,
   type MemoryKeeper,
 } from './memory-inspector'
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
-// masc-improver: ctx 0.86, has pinned facts, store entries, recall timeline,
-// and a compaction record — exercises every section in the one-keeper view.
-const improver: MemoryKeeper = DEFAULT_MEMORY_KEEPERS.find(k => k.id === 'masc-improver')!
+// A turn-records payload exercising the two real-data sections (composition,
+// facts), the episode-backed 압축 section, and read_errors. The unbacked
+// sections (핀 / 회상) render disclosures regardless of payload.
+function turnRecordsPayload() {
+  return {
+    keeper: 'masc-improver',
+    count: 1,
+    source: 'turn_record',
+    memory_os: {
+      schema: 'keeper.memory_os.recall_observability.v1',
+      keeper: 'masc-improver',
+      source: 'memory_os_files',
+      producer: 'keeper_librarian',
+      facts_store: '.masc/config/keepers/masc-improver.facts.jsonl',
+      episodes_store: '.masc/config/keepers/masc-improver/episodes',
+      recall_enabled: true,
+      now: 1_790_000_000,
+      now_iso: '2026-09-21T00:00:00Z',
+      read_errors: [{ scope: 'facts', error: 'one malformed row skipped' }],
+      episodes: {
+        tail_limit: 12,
+        shown: 1,
+        current: 1,
+        expired: 0,
+        terminal_markers: 1,
+        items: [
+          {
+            trace_id: 'trace-ep1',
+            generation: 3,
+            created_at: 1_789_900_000,
+            created_at_iso: '2026-09-20T...Z',
+            valid_until: null,
+            valid_until_iso: null,
+            current: true,
+            terminal_marker: 'handoff_complete',
+            claim_count: 4,
+            summary: '리텐션 코호트 정의를 정리하고 amplitude 쿼리를 표로 캐시함.',
+          },
+        ],
+      },
+      facts: {
+        tail_limit: 256,
+        shown: 2,
+        current: 1,
+        expired: 1,
+        items: [
+          {
+            claim: 'retention D0 = 가입일, 첫 세션 기준',
+            category: 'constraint',
+            source: { trace_id: 'trace-a', turn: 4, tool_call_id: null },
+            first_seen: 1_789_000_000,
+            first_seen_iso: '2026-09-09T...Z',
+            reference_time: 1_789_500_000,
+            valid_until: null,
+            valid_until_iso: null,
+            last_verified_at: 1_789_500_000,
+            current: true,
+            claim_kind: 'durable_knowledge',
+            external_ref: { kind: 'pr', id: '22198' },
+          },
+          {
+            claim: 'amplitude 캐시는 만료됨',
+            category: 'Speculation', // out-of-vocabulary → Unknown chip
+            source: { trace_id: 'trace-b', turn: 5 },
+            first_seen: 1_789_100_000,
+            first_seen_iso: '2026-09-09T...Z',
+            reference_time: 1_789_100_000,
+            valid_until: 1_789_200_000,
+            valid_until_iso: '2026-09-09T...Z',
+            last_verified_at: null,
+            current: false,
+          },
+        ],
+      },
+    },
+    user_model: null,
+    entries: [
+      {
+        record: {
+          keeper: 'masc-improver',
+          trace_id: 'trace-a',
+          absolute_turn: 7,
+          ts: 1_789_999_000,
+          runtime_profile: 'local',
+          blocks: [
+            { block: 'persona', bytes: 1200, digest: 'aaaa1111bbbb' },
+            { block: 'memory_os_recall', bytes: 800, digest: 'cccc2222dddd' },
+            { block: 'dynamic_context', bytes: 400, digest: 'eeee3333ffff' },
+            { block: 'zero_block', bytes: 0, digest: '000000000000' },
+          ],
+          execution_ids: [],
+          input_tokens: 3500,
+          context_window: 200000,
+        },
+        diff_vs_prev: null,
+      },
+    ],
+  }
+}
+
+function stubFetch(payload: unknown = turnRecordsPayload()) {
+  const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+    new Response(JSON.stringify(payload), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+  ))
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+const improver: MemoryKeeper = { id: 'masc-improver', ctx: 0.86, status: 'run' }
 
 function renderInspector(keeper: MemoryKeeper = improver, onClose = vi.fn()) {
   return render(html`<${MemoryInspector} keeper=${keeper} onClose=${onClose} />`)
 }
 
-describe('MemoryInspector — one-keeper scope', () => {
-  it('renders the drawer shell scoped to the active keeper', () => {
+describe('MemoryInspector — one-keeper scope (real data)', () => {
+  it('fetches turn-records for the keeper and renders the drawer shell', async () => {
+    const fetchMock = stubFetch()
     const { container } = renderInspector()
     expect(container.querySelector('.turn-overlay')).toBeTruthy()
     expect(container.querySelector('.mem-drawer')).toBeTruthy()
-    // header title + the active keeper id
     expect(container.querySelector('.turn-hd h3')?.textContent).toContain('Keeper 메모리')
     expect(container.querySelector('.tid')?.textContent).toBe('masc-improver')
+    await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/masc-improver/turn-records?limit=24')
   })
 
-  it('renders the context-composition bar and a legend derived from live ctx tokens', () => {
+  it('builds the composition bar from real prompt-block bytes (zero blocks dropped)', async () => {
+    stubFetch()
     const { container } = renderInspector()
-    const bar = container.querySelector('.mem-bar')
-    expect(bar).toBeTruthy()
-    // memComposition filters out zero-token parts; masc-improver has 5 parts.
-    const comp = memComposition(improver)
-    expect(comp.parts.length).toBeGreaterThan(0)
-    expect(bar!.querySelectorAll('span').length).toBe(comp.parts.length)
-    // legend rows mirror the parts
-    expect(container.querySelectorAll('.mem-leg').length).toBe(comp.parts.length)
-    // 86% header readout (Math.round(0.86 * 100))
-    expect(container.querySelector('.mem-compo-sub')?.textContent).toContain('86%')
+    const bar = await waitFor(() => {
+      const b = container.querySelector('.mem-bar')
+      expect(b).toBeTruthy()
+      return b!
+    })
+    // 4 blocks in payload, 1 has 0 bytes → 3 segments + 3 legend rows.
+    expect(bar.querySelectorAll('span').length).toBe(3)
+    expect(container.querySelectorAll('.mem-leg').length).toBe(3)
+    // total bytes = 1200+800+400 = 2400, shown as KB; token readout from input_tokens.
+    expect(container.querySelector('.mem-compo-tot')?.textContent).toBe('2.3KB')
+    expect(container.querySelector('.mem-compo-sub')?.textContent).toContain('3.5k tok')
+    // block labels come from the Prompt_block_id mirror, not raw tokens.
+    expect(container.textContent).toContain('메모리 회상')
+    expect(container.textContent).toContain('동적 컨텍스트')
   })
 
-  it('renders pinned facts with their count and operator/auto provenance', () => {
+  it('renders one store row per real fact with typed category chips and Unknown absorption', async () => {
+    stubFetch()
     const { container } = renderInspector()
-    const pinHeads = [...container.querySelectorAll('.turn-sec h4')].map(h => h.textContent ?? '')
-    expect(pinHeads.some(t => t.startsWith('핀 고정 사실'))).toBe(true)
-    const pins = container.querySelectorAll('.mem-pin')
-    expect(pins.length).toBe(KEEPER_MEMORY['masc-improver']!.pinned.length)
-    // first pinned fact text is rendered verbatim
-    expect(container.textContent).toContain('retention 정의: D0 = 가입일, 첫 세션 기준')
+    await waitFor(() => expect(container.querySelectorAll('.mem-store-row').length).toBeGreaterThan(0))
+    // 2 fact items + 1 episode row all use .mem-store-row; assert facts by claim text.
+    expect(container.textContent).toContain('retention D0 = 가입일, 첫 세션 기준')
+    expect(container.textContent).toContain('제약') // constraint chip label
+    // out-of-vocabulary category surfaces its raw label, not a fabricated kind.
+    expect(container.textContent).toContain('Speculation')
+    // external_ref rendered
+    expect(container.textContent).toContain('pr 22198')
+    // NO salience meter — the deleted score model must not reappear.
+    expect(container.querySelector('.mem-sal')).toBeFalsy()
   })
 
-  it('renders the salience store with one row per entry', () => {
+  it('surfaces read_errors and renders honest disclosures for the unbacked sections', async () => {
+    stubFetch()
     const { container } = renderInspector()
-    const rows = container.querySelectorAll('.mem-store-row')
-    expect(rows.length).toBe(KEEPER_MEMORY['masc-improver']!.store.length)
-    // salience meter present on each row
-    expect(container.querySelectorAll('.mem-store-row .mem-sal').length).toBe(rows.length)
+    await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
+    // read_errors visible (no silent failure)
+    expect(container.querySelector('.mem-read-error')?.textContent).toContain('one malformed row skipped')
+    // pins → Phase 2 disclosure, timeline → Phase 3 disclosure (no fabricated rows)
+    const disclosures = [...container.querySelectorAll('.mem-disclosure')].map(d => d.textContent ?? '')
+    expect(disclosures.some(t => t.includes('Phase 2'))).toBe(true)
+    expect(disclosures.some(t => t.includes('Phase 3'))).toBe(true)
+    // no prototype fixture leakage
+    expect(container.querySelector('.mem-pin')).toBeFalsy()
+    expect(container.querySelector('.mem-tl-row')).toBeFalsy()
   })
 
-  it('filters the store by kind when a kind filter is clicked', () => {
+  it('renders the compaction section from real episodes (summary + terminal marker)', async () => {
+    stubFetch()
     const { container } = renderInspector()
-    const allRows = container.querySelectorAll('.mem-store-row').length
-    // masc-improver has 5 distinct kinds, so filter buttons render.
-    const declButtons = [...container.querySelectorAll('.mem-filter')]
-    const decisionBtn = declButtons.find(b => (b.textContent ?? '').includes('결정'))
-    expect(decisionBtn).toBeTruthy()
-    fireEvent.click(decisionBtn!)
-    const afterRows = container.querySelectorAll('.mem-store-row').length
-    expect(afterRows).toBeLessThan(allRows)
-    expect(afterRows).toBe(1) // exactly one 'decision' entry in the fixture
+    await waitFor(() => expect(container.textContent).toContain('리텐션 코호트 정의'))
+    expect(container.textContent).toContain('terminal=handoff_complete')
+    expect(container.textContent).toContain('4 claims')
   })
 
-  it('renders the recall timeline rows', () => {
-    const { container } = renderInspector()
-    const tlRows = container.querySelectorAll('.mem-tl-row')
-    expect(tlRows.length).toBe(KEEPER_MEMORY['masc-improver']!.recall.length)
-    // a compaction op row carries a negative token delta rendered with the minus glyph
-    expect(container.querySelector('.mem-tl-tok.neg')?.textContent).toContain('−')
-  })
-
-  it('renders the compaction diff with kept / summarized / dropped columns', () => {
-    const { container } = renderInspector()
-    expect(container.querySelector('.cmp-diff')).toBeTruthy()
-    expect(container.querySelector('.cmp-col.kept')).toBeTruthy()
-    expect(container.querySelector('.cmp-col.summ')).toBeTruthy()
-    expect(container.querySelector('.cmp-col.drop')).toBeTruthy()
-    const cmp = DEFAULT_COMPACTIONS['masc-improver']![0]!
-    expect(container.querySelector('.cmp-trigger')?.textContent).toContain(cmp.trigger)
-  })
-
-  it('shows the empty-state when a keeper has no compaction history', () => {
-    // sangsu has store/pins but no DEFAULT_COMPACTIONS entry.
-    const sangsu = DEFAULT_MEMORY_KEEPERS.find(k => k.id === 'sangsu')!
-    const { container } = renderInspector(sangsu)
-    expect(container.textContent).toContain('컴팩션 이력 없음')
+  it('shows an explicit empty state when memory_os is absent (no fabrication)', async () => {
+    stubFetch({ keeper: 'ghost', count: 0, source: 'turn_record', memory_os: null, user_model: null, entries: [] })
+    const { container } = renderInspector({ id: 'ghost', ctx: 0, status: 'off' })
+    await waitFor(() => expect(container.textContent).toContain('memory-os 소스 없음'))
+    expect(container.querySelector('.mem-bar')).toBeFalsy()
   })
 })
 
 describe('MemoryInspector — scope toggle', () => {
-  it('switches from one-keeper to the aggregate (전체) view', () => {
+  it('switches to the aggregate (전체) view showing the real roster + a deferral note', async () => {
+    stubFetch()
     const { container } = renderInspector()
-    // one-keeper view first: a single composition bar, no aggregate table.
-    expect(container.querySelector('.mem-table')).toBeFalsy()
-    const allBtn = [...container.querySelectorAll('.mem-scope button')].find(
-      b => b.textContent === '전체',
-    )
+    await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
+    const allBtn = [...container.querySelectorAll('.mem-scope button')].find(b => b.textContent === '전체')
     expect(allBtn).toBeTruthy()
     fireEvent.click(allBtn!)
-    // aggregate view: keeper table + stats + kind distribution appear.
-    expect(container.querySelector('.mem-table')).toBeTruthy()
-    expect(container.querySelectorAll('.mem-stat').length).toBe(4)
     expect(container.querySelector('.tid')?.textContent).toBe('전체 keeper')
-    // one table row per keeper in the roster.
-    expect(container.querySelectorAll('.mem-table .mem-tr:not(.mem-th)').length).toBe(
-      DEFAULT_MEMORY_KEEPERS.length,
-    )
+    // roster table = one row per default keeper (ids + status are real)
+    expect(container.querySelectorAll('.mem-table .mem-tr:not(.mem-th)').length).toBe(DEFAULT_MEMORY_KEEPERS.length)
+    // aggregate memory totals are deferred, disclosed — not fabricated
+    expect([...container.querySelectorAll('.mem-disclosure')].some(d => (d.textContent ?? '').includes('추후 연결'))).toBe(true)
   })
 
-  it('renders a status dot per row mapping run→ok / pause→idle / off→bad', () => {
-    // Mirrors the prototype StatusDot chain (keeper-v2/memory.jsx:196 →
-    // messages.jsx:8): the dot class drives the .dot2 palette in
-    // memory-inspector-v2.css (ok=--status-ok, idle=--status-idle,
-    // bad=--status-bad). A wrong class is a silent colour regression
-    // (e.g. an off keeper showing a brass dot instead of red).
+  it('maps roster status to dot state run→ok / pause→idle / off→bad', async () => {
+    stubFetch()
     const { container } = renderInspector()
-    fireEvent.click(
-      [...container.querySelectorAll('.mem-scope button')].find(b => b.textContent === '전체')!,
-    )
+    await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
+    fireEvent.click([...container.querySelectorAll('.mem-scope button')].find(b => b.textContent === '전체')!)
     const dotClassFor = (id: string): string | undefined => {
       const row = [...container.querySelectorAll('.mem-table .mem-tr:not(.mem-th)')].find(r =>
-        (r.querySelector('.mem-td-id .mono')?.textContent ?? '') === id,
-      )
+        (r.querySelector('.mem-td-id .mono')?.textContent ?? '') === id)
       return row?.querySelector('.mem-dot')?.className
     }
-    expect(dotClassFor('nick0cave')).toContain('ok') // status 'run'
-    expect(dotClassFor('qa-king')).toContain('idle') // status 'pause'
-    expect(dotClassFor('drifter')).toContain('bad') // status 'off'
-  })
-
-  it('drills back into a single keeper when an aggregate row is clicked', () => {
-    const { container } = renderInspector()
-    fireEvent.click(
-      [...container.querySelectorAll('.mem-scope button')].find(b => b.textContent === '전체')!,
-    )
-    const nickRow = [...container.querySelectorAll('.mem-table .mem-tr:not(.mem-th)')].find(
-      r => (r.textContent ?? '').includes('nick0cave'),
-    )
-    expect(nickRow).toBeTruthy()
-    fireEvent.click(nickRow!)
-    // back to one-keeper scope, now showing the picked keeper.
-    expect(container.querySelector('.tid')?.textContent).toBe('nick0cave')
-    expect(container.querySelector('.mem-table')).toBeFalsy()
+    expect(dotClassFor('nick0cave')).toContain('ok')
+    expect(dotClassFor('qa-king')).toContain('idle')
+    expect(dotClassFor('drifter')).toContain('bad')
   })
 })
 
 describe('MemoryInspector — close behaviour', () => {
   it('invokes onClose on overlay click and on the ✕ button', () => {
+    stubFetch()
     const onClose = vi.fn()
     const { container } = renderInspector(improver, onClose)
     fireEvent.click(container.querySelector('.turn-close')!)
@@ -172,6 +252,7 @@ describe('MemoryInspector — close behaviour', () => {
   })
 
   it('does not close when the drawer body itself is clicked (stopPropagation)', () => {
+    stubFetch()
     const onClose = vi.fn()
     const { container } = renderInspector(improver, onClose)
     fireEvent.click(container.querySelector('.mem-drawer')!)
@@ -179,6 +260,7 @@ describe('MemoryInspector — close behaviour', () => {
   })
 
   it('closes on Escape keydown', () => {
+    stubFetch()
     const onClose = vi.fn()
     renderInspector(improver, onClose)
     fireEvent.keyDown(window, { key: 'Escape' })
@@ -186,32 +268,46 @@ describe('MemoryInspector — close behaviour', () => {
   })
 })
 
-describe('memory model helpers', () => {
+describe('memory view-model helpers', () => {
   it('memFmtTok abbreviates thousands and prefixes negatives with the minus glyph', () => {
     expect(memFmtTok(120)).toBe('120')
     expect(memFmtTok(1840)).toBe('1.8k')
     expect(memFmtTok(-110600)).toBe('−110.6k')
   })
 
-  it('memComposition returns no parts for a stopped (ctx 0) keeper', () => {
-    const drifter = DEFAULT_MEMORY_KEEPERS.find(k => k.id === 'drifter')!
-    const comp = memComposition(drifter)
-    expect(comp.total).toBe(0)
-    expect(comp.parts).toEqual([])
+  it('memFmtBytes scales B / KB / MB', () => {
+    expect(memFmtBytes(500)).toBe('500B')
+    expect(memFmtBytes(1536)).toBe('1.5KB')
+    expect(memFmtBytes(2 * 1024 * 1024)).toBe('2.0MB')
   })
 
-  it('memAggregate sums pins/store across keepers and caps topFacts at 6', () => {
-    const agg = memAggregate(DEFAULT_MEMORY_KEEPERS)
-    expect(agg.keeperCount).toBe(DEFAULT_MEMORY_KEEPERS.length)
-    const expectedStore = DEFAULT_MEMORY_KEEPERS.reduce(
-      (n, k) => n + (KEEPER_MEMORY[k.id]?.store.length ?? 0),
-      0,
-    )
-    expect(agg.store).toBe(expectedStore)
-    expect(agg.topFacts.length).toBeLessThanOrEqual(6)
-    // topFacts are sorted by descending salience.
-    for (let i = 1; i < agg.topFacts.length; i++) {
-      expect(agg.topFacts[i - 1]!.salience).toBeGreaterThanOrEqual(agg.topFacts[i]!.salience)
+  it('memCompositionFromBlocks sums real bytes and drops zero-byte blocks', () => {
+    const comp = memCompositionFromBlocks([
+      { block: 'persona', bytes: 1200, digest: 'x' },
+      { block: 'memory_os_recall', bytes: 800, digest: 'y' },
+      { block: 'empty', bytes: 0, digest: 'z' },
+    ])
+    expect(comp.totalBytes).toBe(2000)
+    expect(comp.parts.map(p => p.key)).toEqual(['persona', 'memory_os_recall'])
+    expect(comp.parts[0]?.lbl).toBe('페르소나')
+  })
+
+  it('promptBlockMeta maps known Prompt_block_id tokens and keeps unknown tokens raw', () => {
+    expect(promptBlockMeta('user_model').lbl).toBe('사용자 모델')
+    expect(promptBlockMeta('connected_surface').lbl).toBe('연결 표면')
+    expect(promptBlockMeta('some_future_block').lbl).toBe('some_future_block')
+  })
+
+  it('factCategoryMeta covers every taxonomy arm and carries the raw Unknown label', () => {
+    const tags = [
+      'code_change', 'fact', 'preference', 'blocker', 'goal',
+      'constraint', 'ephemeral', 'validated_approach', 'lesson',
+    ] as const
+    for (const tag of tags) {
+      const meta = factCategoryMeta({ tag })
+      expect(meta.lbl.length).toBeGreaterThan(0)
+      expect(meta.glyph.length).toBeGreaterThan(0)
     }
+    expect(factCategoryMeta({ tag: 'unknown', raw: 'Speculation' }).lbl).toBe('Speculation')
   })
 })

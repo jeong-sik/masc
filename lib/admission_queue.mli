@@ -105,6 +105,11 @@ module For_testing : sig
   (** Pure counter update. Returns the new active count, or an explicit
       underflow error instead of silently clamping. *)
 
+  val bump_active :
+    ?loc:string -> int -> (unit, [> `Counter_underflow of int ]) result
+  (** Global counter update used in production. Returns the explicit underflow
+      error and leaves the counter unchanged instead of silently clamping. *)
+
   val get_active : unit -> int
   (** Current active count from the global queue cell. *)
 end

@@ -78,6 +78,27 @@ let test_apply_active_delta_underflow () =
   | Error (`Counter_underflow n) ->
     failf "unexpected underflow value %d" n
 
+let test_bump_active_underflow_leaves_counter () =
+  Eio_main.run @@ fun _env ->
+  A.reset_for_test ~max_slots:10;
+  check int "initial active" 0 (A.For_testing.get_active ());
+  match A.For_testing.bump_active ~loc:"test" (-1) with
+  | Error (`Counter_underflow (-1)) ->
+    check int "counter unchanged on underflow" 0 (A.For_testing.get_active ())
+  | Ok _ -> fail "expected Counter_underflow error"
+  | Error (`Counter_underflow n) -> failf "unexpected underflow value %d" n
+
+let test_bump_active_advances_counter () =
+  Eio_main.run @@ fun _env ->
+  A.reset_for_test ~max_slots:10;
+  check int "initial active" 0 (A.For_testing.get_active ());
+  (match A.For_testing.bump_active ~loc:"test" 1 with
+   | Ok () -> check int "active after bump" 1 (A.For_testing.get_active ())
+   | Error _ -> fail "unexpected underflow");
+  (match A.For_testing.bump_active ~loc:"test" (-1) with
+   | Ok () -> check int "active after release" 0 (A.For_testing.get_active ())
+   | Error _ -> fail "unexpected underflow")
+
 let test_apply_active_delta_advances () =
   match A.For_testing.apply_active_delta ~active:2 ~delta:1 with
   | Ok 3 -> check bool "advances counter" true true
@@ -124,6 +145,10 @@ let () =
         [
           test_case "apply delta underflow is explicit" `Quick
             test_apply_active_delta_underflow;
+          test_case "bump active underflow leaves counter" `Quick
+            test_bump_active_underflow_leaves_counter;
+          test_case "bump active advances and releases" `Quick
+            test_bump_active_advances_counter;
           test_case "apply delta advances" `Quick test_apply_active_delta_advances;
           test_case "release active on success" `Quick
             test_with_permit_releases_active_on_success;

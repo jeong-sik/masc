@@ -108,35 +108,73 @@ let apply_active_delta counters ~delta =
 let bump_active ?(loc = "unknown") delta =
   Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
     match apply_active_delta global.counters ~delta with
-    | Ok counters -> global.counters <- counters
-    | Error (`Counter_underflow raw) ->
+    | Ok counters ->
+      global.counters <- counters;
+      Ok ()
+    | Error (`Counter_underflow raw) as e ->
       (* A mismatch between acquire and release paths previously silently
          clamped the counter to zero.  Surface the drift so operators can
-         detect accounting bugs instead of masking them.
+         detect accounting bugs instead of masking them.  The counter is left
+         unchanged; callers must decide whether to abort or continue.
          FIXME: type-level pair acquire/release would make underflow
          impossible; defer that larger refactor. *)
       Log.Misc.warn
-        "admission_queue active counter underflow: raw=%d loc=%s; clamping to 0"
+        "admission_queue active counter underflow: raw=%d loc=%s; leaving counter unchanged"
         raw loc;
-      global.counters <- { global.counters with active = 0 })
+      e)
 ;;
 
 let with_inflight_observation ~keeper_name ~runtime_id f =
-  bump_active ~loc:"acquire" 1;
+  let raise_underflow loc raw =
+    failwith
+      (Printf.sprintf
+         "admission_queue counter underflow in %s for keeper=%s runtime_id=%s: raw=%d"
+         loc
+         keeper_name
+         runtime_id
+         raw)
+  in
+  (match bump_active ~loc:"acquire" 1 with
+   | Ok () -> ()
+   | Error (`Counter_underflow raw) -> raise_underflow "acquire" raw);
   (match Admission_queue_metrics.on_acquire ~keeper_name ~runtime_id ~wait_ms:0 with
    | () -> ()
    | exception exn ->
-     bump_active ~loc:"on_acquire_exn" (-1);
+     (match bump_active ~loc:"on_acquire_exn" (-1) with
+      | Ok () -> ()
+      | Error (`Counter_underflow raw) ->
+        Log.Misc.warn
+          "admission_queue counter underflow in on_acquire_exn for keeper=%s runtime_id=%s: \
+           raw=%d; leaving counter unchanged"
+          keeper_name
+          runtime_id
+          raw);
      raise exn);
-  Eio_guard.protect
-    ~finally:(fun () ->
-      (match Admission_queue_metrics.on_release ~keeper_name ~runtime_id with
-       | () -> ()
-       | exception exn ->
-         bump_active ~loc:"on_release_exn" (-1);
-         raise exn);
-      bump_active ~loc:"release" (-1))
-    f
+  let release_underflow = ref None in
+  let result =
+    Eio_guard.protect
+      ~finally:(fun () ->
+        (match Admission_queue_metrics.on_release ~keeper_name ~runtime_id with
+         | () -> ()
+         | exception exn ->
+           (match bump_active ~loc:"on_release_exn" (-1) with
+            | Ok () -> ()
+            | Error (`Counter_underflow raw) ->
+              Log.Misc.warn
+                "admission_queue counter underflow in on_release_exn for keeper=%s runtime_id=%s: \
+                 raw=%d; leaving counter unchanged"
+                keeper_name
+                runtime_id
+                raw);
+           raise exn);
+        match bump_active ~loc:"release" (-1) with
+        | Ok () -> ()
+        | Error (`Counter_underflow raw) -> release_underflow := Some raw)
+      f
+  in
+  match !release_underflow with
+  | Some raw -> raise_underflow "release" raw
+  | None -> result
 ;;
 
 (* ── Public API ────────────────────────────────────────── *)
@@ -329,6 +367,8 @@ module For_testing = struct
     | Ok counters -> Ok counters.active
     | Error _ as e -> e
   ;;
+
+  let bump_active = bump_active
 
   let get_active () = Eio.Mutex.use_ro global.mutex (fun () -> global.counters.active)
 end

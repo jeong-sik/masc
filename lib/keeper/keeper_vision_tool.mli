@@ -123,6 +123,10 @@ val run_vision
     [Vo_provider] so eager ingestion can keep the turn alive with a typed unread
     placeholder. *)
 
+val vision_store_dir : keeper_name:string -> string
+(** Per-keeper artifact store directory used by [analyze_image] and eager image
+    eviction. *)
+
 (** Typed outcome of {!run_vision}. SSOT shared by the tool handler (renders to
     JSON) and eager ingestion eviction ({!Keeper_vision_ingest}, renders to a
     placeholder). *)

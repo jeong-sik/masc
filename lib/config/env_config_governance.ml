@@ -120,7 +120,9 @@ module Operator = struct
 
   (** Stale-while-revalidate grace factor. After the TTL expires, the
       previous snapshot is still served for [ttl * factor] seconds while a
-      background fiber recomputes. Default: 3.0 (max 90 s stale at default TTL). *)
+      background fiber recomputes. Default: 3.0 (max 90 s stale at default TTL).
+      @category Timeouts
+      @ops_class operator *)
   let cache_stale_grace_factor =
     Float.max 0.0 (get_float ~default:3.0 "MASC_OPERATOR_CACHE_STALE_GRACE_FACTOR")
 

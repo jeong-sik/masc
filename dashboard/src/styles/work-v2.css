@@ -1569,6 +1569,9 @@
 .wk-kcard-prio.prio-1 { border-color: var(--color-err-border); background: var(--color-err-soft); color: var(--color-err-fg); }
 .wk-kcard-prio.prio-2 { border-color: var(--color-warn-border); background: var(--color-warn-soft); color: var(--color-warn-fg); }
 .wk-kcard-prio.prio-3 { border-color: var(--color-info-border); background: var(--color-info-soft); color: var(--color-info-fg); }
+/* P4 and P5 share the muted base style defined on .wk-kcard-prio. */
+.wk-kcard-prio.prio-4,
+.wk-kcard-prio.prio-5 { }
 
 .wk-kcard-title {
   font-size: var(--text-sm);

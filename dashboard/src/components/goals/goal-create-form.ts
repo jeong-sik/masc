@@ -14,6 +14,7 @@ import {
   goalCreateError,
   createGoal,
   resetGoalCreateForm,
+  goalCreateErrorMessage,
   GOAL_PRIORITY_MIN,
   GOAL_PRIORITY_MAX,
   GOAL_PRIORITY_DEFAULT,
@@ -109,9 +110,9 @@ export function GoalCreateForm() {
             autoFocus=${true}
             onInput=${(e: Event) => { titleSignal.value = (e.target as HTMLInputElement).value }}
           />
-          ${isTitleEmpty && goalCreateError.value === '제목을 입력하세요' ? html`
+          ${isTitleEmpty && goalCreateError.value?.kind === 'title_empty' ? html`
             <p class="wk-goal-create-err" role="alert" data-testid="goal-create-title-error">
-              ${goalCreateError.value}
+              ${goalCreateErrorMessage(goalCreateError.value)}
             </p>
           ` : null}
         </div>
@@ -155,10 +156,10 @@ export function GoalCreateForm() {
           </label>
         </div>
 
-        ${goalCreateError.value && goalCreateError.value !== '제목을 입력하세요' ? html`
+        ${goalCreateError.value?.kind === 'submit' ? html`
           <div class="wk-goal-create-sec">
             <p class="wk-goal-create-err" role="alert" data-testid="goal-create-error">
-              ${goalCreateError.value}
+              ${goalCreateErrorMessage(goalCreateError.value)}
             </p>
           </div>
         ` : null}

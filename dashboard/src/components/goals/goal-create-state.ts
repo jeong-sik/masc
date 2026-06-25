@@ -15,7 +15,12 @@ export const GOAL_PRIORITY_DEFAULT = 3
 
 export const showGoalCreate = signal(false)
 export const goalCreating = signal(false)
-export const goalCreateError = signal<string | null>(null)
+
+export type GoalCreateError =
+  | { kind: 'title_empty' }
+  | { kind: 'submit'; message: string }
+
+export const goalCreateError = signal<GoalCreateError | null>(null)
 
 export interface GoalCreateInput {
   title: string
@@ -23,10 +28,16 @@ export interface GoalCreateInput {
   require_completion_approval: boolean
 }
 
+export function goalCreateErrorMessage(err: GoalCreateError | null): string | null {
+  if (err === null) return null
+  if (err.kind === 'title_empty') return '제목을 입력하세요'
+  return err.message
+}
+
 export async function createGoal(input: GoalCreateInput): Promise<boolean> {
   const trimmedTitle = input.title.trim()
   if (!trimmedTitle) {
-    goalCreateError.value = '제목을 입력하세요'
+    goalCreateError.value = { kind: 'title_empty' }
     return false
   }
   goalCreating.value = true
@@ -46,7 +57,7 @@ export async function createGoal(input: GoalCreateInput): Promise<boolean> {
     return true
   } catch (err) {
     const message = errorToString(err)
-    goalCreateError.value = message
+    goalCreateError.value = { kind: 'submit', message }
     showToast(`목표 생성 실패: ${message}`, 'error')
     return false
   } finally {

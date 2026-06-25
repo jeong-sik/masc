@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/preact'
 import '@testing-library/jest-dom'
 import { h } from 'preact'
-import { showGoalCreate, resetGoalCreateForm } from './goal-create-state'
+import { showGoalCreate, resetGoalCreateForm, goalCreateError } from './goal-create-state'
 import { GoalCreateForm, resetGoalCreateFormLocal } from './goal-create-form'
 
 describe('GoalCreateForm side panel', () => {
@@ -55,5 +55,19 @@ describe('GoalCreateForm side panel', () => {
     render(h(GoalCreateForm, {}))
     fireEvent.click(screen.getByTestId('goal-create-close'))
     expect(showGoalCreate.value).toBe(false)
+  })
+
+  it('renders a title-empty error by discriminant instead of string matching', () => {
+    goalCreateError.value = { kind: 'title_empty' }
+    render(h(GoalCreateForm, {}))
+    expect(screen.getByTestId('goal-create-title-error')).toHaveTextContent('제목을 입력하세요')
+    expect(screen.queryByTestId('goal-create-error')).toBeNull()
+  })
+
+  it('renders a submit error by discriminant and hides the title-empty error', () => {
+    goalCreateError.value = { kind: 'submit', message: 'backend rejected goal' }
+    render(h(GoalCreateForm, {}))
+    expect(screen.getByTestId('goal-create-error')).toHaveTextContent('backend rejected goal')
+    expect(screen.queryByTestId('goal-create-title-error')).toBeNull()
   })
 })

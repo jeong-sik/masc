@@ -17,7 +17,7 @@ import { LoadingState } from './common/feedback-state'
 import { KeeperBadge } from './keeper-badge'
 import { openTaskDetail } from './goals/task-detail-state'
 import { GoalCreateForm } from './goals/goal-create-form'
-import { showGoalCreate } from './goals/goal-create-state'
+import { showGoalCreate, GOAL_PRIORITY_MAX } from './goals/goal-create-state'
 import type { Goal, Task, Keeper } from '../types'
 
 type WorkSection = 'work' | 'board' | 'sub-boards' | 'moderation' | 'planning' | 'repositories' | 'verification'
@@ -568,6 +568,12 @@ interface KanbanTask extends Task {
   readonly _goalTitle: string
 }
 
+// Task priorities share the goal 1–5 scale (1 = highest). The prototype only
+// accents P1–P3 in the kanban card chip; P4+ render with the muted base style.
+const TASK_PRIORITY_DEFAULT = GOAL_PRIORITY_MAX
+const KANBAN_ACCENT_PRIORITY_MAX = 3
+const KANBAN_MUTED_PRIORITY_BUCKET = 4
+
 function KanbanCard({
   task,
   onClaim,
@@ -578,8 +584,8 @@ function KanbanCard({
   const state = jobStateForTask(task)
   const keeper = keeperByName(task.assignee)
   const blocker = blockerNoteForTask(task)
-  const p = task.priority ?? 4
-  const normalizedPrio = p <= 3 ? p : 4
+  const p = task.priority ?? TASK_PRIORITY_DEFAULT
+  const normalizedPrio = p <= KANBAN_ACCENT_PRIORITY_MAX ? p : KANBAN_MUTED_PRIORITY_BUCKET
   const description = task.description ?? ''
   const hasDescription = description.length > 0
 
@@ -1231,7 +1237,7 @@ function WorkSurfaceV2() {
               goalList.length > 0 ? html`
                 <div class="wk-list" data-testid="work-goal-list">
                   ${[...goalList]
-                    .sort((a, b) => (a.priority ?? 4) - (b.priority ?? 4) || (b.updated_at ?? b.created_at ?? '').localeCompare(a.updated_at ?? a.created_at ?? ''))
+                    .sort((a, b) => (a.priority ?? GOAL_PRIORITY_MAX) - (b.priority ?? GOAL_PRIORITY_MAX) || (b.updated_at ?? b.created_at ?? '').localeCompare(a.updated_at ?? a.created_at ?? ''))
                     .map(g => html`
                     <${GoalCard}
                       key=${g.id}

@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { route, navigate } from '../router'
 import { goals, tasks, keepers } from '../store'
 import { goalTreeData } from '../goal-tree-state'
-import { normalizeTaskStatus } from '../store-normalizers'
+import { normalizeTask } from '../store-normalizers'
 import { BoardModerationSurface } from './board/board-moderation-surface'
 import { BoardSurface } from './board/board-surface'
 import { SubBoardSurface } from './board/sub-board-surface'
@@ -23,6 +23,7 @@ import { showGoalCreate, GOAL_PRIORITY_MAX } from './goals/goal-create-state'
 import type { Goal, GoalTreeNode, GoalTreeTask, Task, Keeper } from '../types'
 
 type WorkSection = 'work' | 'board' | 'sub-boards' | 'moderation' | 'planning' | 'repositories' | 'verification'
+const UNLINKED_GOAL_TITLE = '미연결 목표'
 
 const LazyRepositoryManagement = lazy(async () => ({
   default: (await import('./repository-management')).RepositoryManagement,
@@ -212,32 +213,46 @@ function goalProgressCounts(goalTasks: Task[]): GoalProgressCounts {
 }
 
 function taskFromGoalTreeTask(task: GoalTreeTask): Task | null {
-  const status = normalizeTaskStatus(task.status)
-  if (!status) return null
-  return {
-    id: task.id,
-    title: task.title,
-    goal_id: task.goal_id,
-    status,
-    priority: task.priority,
-    assignee: task.assignee ?? undefined,
-    created_at: task.created_at,
-    updated_at: task.updated_at,
-    completed_at: status === 'done' || status === 'cancelled' ? task.updated_at : undefined,
+  const normalized = normalizeTask({
+    ...task,
+    completed_at:
+      task.status === 'done' || task.status === 'cancelled'
+        ? task.updated_at
+        : undefined,
+  })
+  if (!normalized?.status) {
+    console.warn('[Work] dropped Goal Store task with invalid status', {
+      id: task.id,
+      status: task.status,
+    })
+    return null
   }
+  return normalized
 }
 
 function collectGoalTreeTasks(nodes: ReadonlyArray<GoalTreeNode>): Task[] {
-  const result: Task[] = []
-  const visit = (node: GoalTreeNode) => {
-    for (const task of node.tasks) {
-      const normalized = taskFromGoalTreeTask(task)
-      if (normalized) result.push(normalized)
+  return nodes.flatMap(node => [
+    ...node.tasks
+      .map(taskFromGoalTreeTask)
+      .filter((task): task is Task => task !== null),
+    ...collectGoalTreeTasks(node.children),
+  ])
+}
+
+function mergeTaskRecord(previous: Task, task: Task): Task {
+  const merged: Task = { ...previous, ...task }
+  for (const key of Object.keys(task) as Array<keyof Task>) {
+    const nextValue = task[key]
+    const previousValue = previous[key]
+    if (
+      (nextValue === null || nextValue === undefined) &&
+      previousValue !== null &&
+      previousValue !== undefined
+    ) {
+      ;(merged as Record<keyof Task, unknown>)[key] = previousValue
     }
-    for (const child of node.children) visit(child)
   }
-  for (const node of nodes) visit(node)
-  return result
+  return merged
 }
 
 function mergeTaskSnapshot(goalStoreTasks: ReadonlyArray<Task>, executionTasks: ReadonlyArray<Task>): Task[] {
@@ -245,23 +260,7 @@ function mergeTaskSnapshot(goalStoreTasks: ReadonlyArray<Task>, executionTasks: 
   for (const task of goalStoreTasks) byId.set(task.id, task)
   for (const task of executionTasks) {
     const previous = byId.get(task.id)
-    byId.set(task.id, previous
-      ? {
-          ...previous,
-          ...task,
-          goal_id: task.goal_id ?? previous.goal_id,
-          status: task.status ?? previous.status,
-          priority: task.priority ?? previous.priority,
-          assignee: task.assignee ?? previous.assignee,
-          created_at: task.created_at ?? previous.created_at,
-          updated_at: task.updated_at ?? previous.updated_at,
-          completed_at: task.completed_at ?? previous.completed_at,
-          contract: task.contract ?? previous.contract,
-          handoff_context: task.handoff_context ?? previous.handoff_context,
-          gate: task.gate ?? previous.gate,
-          execution_links: task.execution_links ?? previous.execution_links,
-        }
-      : task)
+    byId.set(task.id, previous ? mergeTaskRecord(previous, task) : task)
   }
   return Array.from(byId.values())
 }
@@ -1052,7 +1051,7 @@ function WorkSurfaceV2() {
 
   const liveTasks = claimedTasks.filter(t => t.status !== 'cancelled')
   const totals = useMemo(() => ({
-    goals: goalTreeSnapshot?.summary.total_goals ?? goalList.length,
+    goals: goalTreeSnapshot?.summary.active_goals ?? goalList.length,
     tasks: goalTreeSnapshot?.summary.total_tasks ?? liveTasks.length,
     wip: liveTasks.filter(t => t.status === 'in_progress' || t.status === 'claimed').length,
     verify: liveTasks.filter(t => t.status === 'awaiting_verification').length,
@@ -1176,11 +1175,11 @@ function WorkSurfaceV2() {
   [claimedTasks])
 
   const wkaCounts = useMemo((): WkaCounts => ({
-    active: goalList.length,
+    active: totals.goals,
     wip: totals.wip,
     verify: totals.verify,
     backlog: totals.backlog,
-  }), [goalList, totals])
+  }), [totals])
 
   const tasksByGoalId = useMemo(() => {
     const map = new Map<string, Task[]>()
@@ -1207,7 +1206,7 @@ function WorkSurfaceV2() {
       .map(t => ({
         ...t,
         _goalId: t.goal_id ?? '',
-        _goalTitle: t.goal_id ? (goalTitleById.get(t.goal_id) ?? '미연결 목표') : '미연결 목표',
+        _goalTitle: t.goal_id ? (goalTitleById.get(t.goal_id) ?? UNLINKED_GOAL_TITLE) : UNLINKED_GOAL_TITLE,
       })),
   [claimedTasks, goalTitleById])
 

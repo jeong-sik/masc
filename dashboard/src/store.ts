@@ -52,7 +52,7 @@ import { setCanonicalDashboardActor } from './lib/dashboard-session-actor'
 import { timeBoardRequest } from './board-metrics'
 import { namespaceTruth, namespaceTruthError, namespaceTruthInitializing } from './namespace-truth-signals'
 import { normalizeNamespaceTruth } from './namespace-truth-normalizers'
-import { hydrateGoalTreeSnapshot } from './goal-tree-state'
+import { goalTreeError, hydrateGoalTreeSnapshot } from './goal-tree-state'
 import { hydrateGoalLoopSnapshot } from './goal-loop-state'
 import {
   normalizeAgent, normalizeTask, normalizeMessage,
@@ -1245,18 +1245,34 @@ export async function refreshGoals(): Promise<void> {
       fetchDashboardPlanning(),
       fetchDashboardGoalsTree(),
     ])
+    const errors: string[] = []
     if (planning.status === 'fulfilled') {
       hydratePlanningSnapshot(planning.value)
     } else {
       console.warn('[Planning] fetch error:', planning.reason)
+      errors.push(errorMessageOr(planning.reason, 'Planning data failed to load'))
     }
     if (tree.status === 'fulfilled') {
-      hydrateGoalTreeSnapshot(tree.value)
+      const hydrated = hydrateGoalTreeSnapshot(tree.value)
+      if (!hydrated) {
+        const message = 'Goal Store tree payload was malformed'
+        goalTreeError.value = message
+        errors.push(message)
+      }
     } else {
       console.warn('[Goals] tree fetch error:', tree.reason)
+      const message = errorMessageOr(tree.reason, 'Goal Store tree failed to load')
+      goalTreeError.value = message
+      errors.push(message)
+    }
+    if (errors.length > 0) {
+      showToast('목표 데이터를 일부 불러오지 못했습니다', 'error', 5000)
     }
   } catch (err) {
     console.warn('[Planning] fetch error:', err)
+    const message = errorMessageOr(err, 'Goal refresh failed')
+    goalTreeError.value = message
+    showToast('목표 데이터를 불러오지 못했습니다', 'error', 5000)
   } finally {
     goalsLoading.value = false
   }

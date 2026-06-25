@@ -134,6 +134,76 @@ describe('refreshDashboard bootstrap', () => {
     expect(goalTreeState.goalTreeData.value?.summary.total_tasks).toBe(124)
   })
 
+  it('surfaces a partial error when the Goal Store tree fetch fails', async () => {
+    apiMocks.fetchDashboardPlanning.mockResolvedValue({
+      generated_at: '2026-06-25T00:00:00Z',
+      goals: [],
+      rollup: {},
+      workspace_fsm: null,
+    })
+    apiMocks.fetchDashboardGoalsTree.mockRejectedValue(new Error('tree offline'))
+
+    const store = await import('./store')
+    const goalTreeState = await import('./goal-tree-state')
+
+    await store.refreshGoals()
+
+    expect(store.lastGoalsRefreshAt.value).toBe('2026-06-25T00:00:00Z')
+    expect(goalTreeState.goalTreeError.value).toContain('tree offline')
+    expect(toastMocks.showToast).toHaveBeenCalledWith(
+      '목표 데이터를 일부 불러오지 못했습니다',
+      'error',
+      5000,
+    )
+  })
+
+  it('surfaces a partial error when the planning fetch fails but Goal Store succeeds', async () => {
+    apiMocks.fetchDashboardPlanning.mockRejectedValue(new Error('planning offline'))
+    apiMocks.fetchDashboardGoalsTree.mockResolvedValue({
+      generated_at: '2026-06-25T00:00:01Z',
+      tree: [],
+      summary: { total_goals: 1, active_goals: 1, total_tasks: 2 },
+    })
+
+    const store = await import('./store')
+    const goalTreeState = await import('./goal-tree-state')
+
+    await store.refreshGoals()
+
+    expect(goalTreeState.goalTreeData.value?.summary.total_tasks).toBe(2)
+    expect(toastMocks.showToast).toHaveBeenCalledWith(
+      '목표 데이터를 일부 불러오지 못했습니다',
+      'error',
+      5000,
+    )
+  })
+
+  it('sets goalTreeError when the tree payload is malformed', async () => {
+    apiMocks.fetchDashboardPlanning.mockResolvedValue({
+      generated_at: '2026-06-25T00:00:00Z',
+      goals: [],
+      rollup: {},
+      workspace_fsm: null,
+    })
+    apiMocks.fetchDashboardGoalsTree.mockResolvedValue({
+      generated_at: '2026-06-25T00:00:01Z',
+      tree: null,
+      summary: { total_goals: 1, active_goals: 1, total_tasks: 2 },
+    })
+
+    const store = await import('./store')
+    const goalTreeState = await import('./goal-tree-state')
+
+    await store.refreshGoals()
+
+    expect(goalTreeState.goalTreeError.value).toBe('Goal Store tree payload was malformed')
+    expect(toastMocks.showToast).toHaveBeenCalledWith(
+      '목표 데이터를 일부 불러오지 못했습니다',
+      'error',
+      5000,
+    )
+  })
+
   it('falls back to legacy shell and execution fetches when a required bootstrap slice is unavailable', async () => {
     apiMocks.fetchDashboardBootstrap.mockResolvedValue({
       served_at: '2026-05-14T06:00:00Z',

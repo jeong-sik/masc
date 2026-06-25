@@ -1280,60 +1280,13 @@
   color: var(--color-bg-page);
 }
 
-/* ── KPI summary strip ───────────────────────────────────────────────────── */
-
-.wk-kpis {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0;
-  overflow: hidden;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--r-1);
-  background: color-mix(in oklab, var(--color-bg-surface) 72%, transparent);
-}
-
-.wk-kpi {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  min-width: 0;
-  padding: 0.625rem 0.75rem;
-  border-right: 1px solid var(--color-border-default);
-  background: transparent;
-  box-shadow: none;
-}
-
-.wk-kpi:last-child {
-  border-right: 0;
-}
-
-.wk-kpi.primary {
-  background: color-mix(in oklab, var(--color-accent-fg) 8%, transparent);
-}
-
-.wk-kpi-k {
-  font-size: var(--text-2xs);
-  color: var(--color-fg-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.wk-kpi-v {
-  margin-top: 0.25rem;
-  font-size: var(--text-xl);
-  font-weight: 700;
-  color: var(--color-fg-primary);
-  line-height: 1;
-}
-
-.wk-kpi-v.brass { color: var(--color-accent-fg); }
-.wk-kpi-v.volt { color: var(--color-status-volt); }
-.wk-kpi-v.warn { color: var(--color-status-warn); }
-
 @media (max-width: 700px) {
   .wk-kpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wk-kpi:nth-child(3n) {
+    border-right: 1px solid var(--border-soft);
   }
 
   .wk-kpi:nth-child(2n) {

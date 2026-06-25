@@ -1080,6 +1080,36 @@ describe('Work', () => {
         expect(wipCol.textContent).toContain('Live unscoped task')
       })
 
+      it('uses Goal Store fields as nullable fallback when merging execution tasks', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              tasks: [
+                goalTreeTask({ id: 'T-shared', title: 'Goal store title', goal_id: 'G-1', status: 'todo' }),
+              ],
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1, total_tasks: 1 }),
+        }
+        tasks.value = [
+          { id: 'T-shared', title: 'Live shared task', goal_id: null, status: 'in_progress', assignee: 'keeper-a' },
+        ]
+
+        render(html`<${Work} />`)
+
+        const goalCard = screen.getByTestId('goal-card')
+        if (!goalCard.querySelector('[data-job-id="T-shared"]')) {
+          fireEvent.click(within(goalCard).getByRole('button'))
+        }
+        const row = goalCard.querySelector('[data-job-id="T-shared"]')
+        expect(row).toBeTruthy()
+        expect(row?.textContent).toContain('Live shared task')
+      })
+
       it('shows task titles on kanban cards and hides the backlog strip in kanban view', () => {
         goals.value = [
           { id: 'G-1', title: 'Target Goal', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },

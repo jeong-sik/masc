@@ -172,6 +172,45 @@ harness_wait_for_health() {
   return 1
 }
 
+harness_mint_admin_token() {
+  local server_exe="$1"
+  local port="$2"
+  local base_path="$3"
+  local agent="${4:-contract-harness-admin}"
+  local token_json token
+
+  if [[ ! -x "$server_exe" ]]; then
+    echo "server executable missing for auth bootstrap: $server_exe" >&2
+    return 1
+  fi
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "jq is required for auth bootstrap token extraction" >&2
+    return 1
+  fi
+
+  if ! token_json="$(
+    "$server_exe" login \
+      --base-path "$base_path" \
+      --host 127.0.0.1 \
+      --port "$port" \
+      --agent "$agent" \
+      --role admin \
+      --client-env MCP_AUTH_TOKEN \
+      --no-expiry \
+      --json
+  )"; then
+    echo "failed to mint harness admin token for base_path=$base_path" >&2
+    return 1
+  fi
+
+  token="$(printf '%s\n' "$token_json" | jq -r '.bearer_token // empty')"
+  if [[ -z "$token" ]]; then
+    echo "login output did not include bearer_token for base_path=$base_path" >&2
+    return 1
+  fi
+  printf '%s\n' "$token"
+}
+
 harness_start_server() {
   local server_exe="$1"
   local port="$2"

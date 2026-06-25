@@ -2416,8 +2416,10 @@ function ToolTraceStep({ entry, output, canMarkMissing = false }: { entry: Keepe
 type TraceOrderItem =
   | { kind: 'trace'; step: ChatTraceStep }
   | { kind: 'tool'; entry: KeeperConversationEntry; output: ToolCallEntry | null }
+  | { kind: 'chat'; entry: KeeperConversationEntry }
 
 function traceOrderTs(item: TraceOrderItem): string {
+  if (item.kind === 'chat') return item.entry.timestamp ?? '\uffff'
   // ISO-8601 strings sort lexicographically within one clock domain. This merge
   // spans two: think/reason `ts` is stamped on the client when the delta
   // arrives, tool `entry.timestamp` comes from the server (ts_unix). Live
@@ -2447,15 +2449,40 @@ export function interleaveTraceAndTools(
   })
 }
 
+function chatResponsePreview(entry: KeeperConversationEntry): string {
+  const liveLabel = liveMessageLabel(entry)
+  if (liveLabel) return liveLabel
+  const text = entry.text.trim().replace(/\s+/g, ' ')
+  if (!text) return '응답 본문 없음'
+  return text.length > 96 ? `${text.slice(0, 96)}…` : text
+}
+
+function ChatResponseTraceStep({ entry }: { entry: KeeperConversationEntry }) {
+  return html`
+    <div class="chat-block-tstep chat" data-chat-trace-step="chat">
+      <span class="chat-block-tnode"></span>
+      <div class="min-w-0 flex-1">
+        <div class="chat-block-tstep-row">
+          <span class="chat-block-tstep-kind">Chat</span>
+          <span class="chat-block-tstep-name">응답</span>
+          <span class="chat-block-tstep-text">${chatResponsePreview(entry)}</span>
+        </div>
+      </div>
+    </div>
+  `
+}
+
 function ToolTraceCard({
   tools,
   traceSteps = [],
+  assistant = null,
   turnComplete = false,
   toolOutputsCoveredSinceMs = null,
   toolOutputsCoveredThroughMs = null,
 }: {
   tools: KeeperConversationEntry[]
   traceSteps?: ChatTraceStep[]
+  assistant?: KeeperConversationEntry | null
   turnComplete?: boolean
   toolOutputsCoveredSinceMs?: number | null
   toolOutputsCoveredThroughMs?: number | null
@@ -2467,7 +2494,10 @@ function ToolTraceCard({
   // Merge think/reason steps and tool entries into a single occurrence-ordered
   // sequence. Aggregates below (failN/missingN/totalMs/stepN) stay entry-based,
   // so #21892 missing detection and the status taxonomy are unaffected.
-  const ordered = interleaveTraceAndTools(traceSteps, steps)
+  const ordered = assistant
+    ? [...interleaveTraceAndTools(traceSteps, steps), { kind: 'chat' as const, entry: assistant }]
+    : interleaveTraceAndTools(traceSteps, steps)
+  const thinkN = traceSteps.filter((step) => step.kind === 'think' || step.kind === 'reason').length
   const failN = steps.filter(
     (s) => s.output !== null && (s.output.success === false || s.output.semantic_success === false),
   ).length
@@ -2476,7 +2506,8 @@ function ToolTraceCard({
   const missingN = steps.filter((s) => s.output === null && canMarkMissingForEntry(s.entry)).length
   const totalMs = steps.reduce((sum, s) => sum + (s.output?.duration_ms ?? 0), 0)
   const durLabel = totalMs > 0 ? formatMsCompact(totalMs) : null
-  const stepN = traceSteps.length + tools.length
+  const chatN = assistant ? 1 : 0
+  const stepN = traceSteps.length + tools.length + chatN
 
   return html`
     <div class="chat-block-trace ${open ? 'open' : ''}" data-chat-block="trace" data-chat-work-trace data-chat-tool-trace>
@@ -2488,10 +2519,12 @@ function ToolTraceCard({
       >
         <span class="chat-block-trace-chev">${open ? '▾' : '▸'}</span>
         <span>◈</span>
-        <span class="chat-block-trace-label">작업 과정</span>
+        <span class="chat-block-trace-label">턴 타임라인</span>
         <span class="chat-block-trace-count">${stepN}단계</span>
         <span class="chat-block-trace-meta">
+          ${thinkN > 0 ? html`<span>Think ${thinkN}</span>` : null}
           ${tools.length > 0 ? html`<span>도구 ${tools.length}</span>` : null}
+          ${chatN > 0 ? html`<span>Chat ${chatN}</span>` : null}
           ${failN > 0 ? html`<span class="text-[var(--color-status-err)]">실패 ${failN}</span>` : null}
           ${missingN > 0 ? html`<span class="text-[var(--color-status-warn)]">결과 누락 ${missingN}</span>` : null}
           ${durLabel ? html`<span class="tnum">${durLabel}</span>` : null}
@@ -2504,12 +2537,14 @@ function ToolTraceCard({
               ${ordered.map((item, index) =>
                 item.kind === 'trace'
                   ? html`<${ChatTraceStep} key=${`trace-${index}`} step=${item.step} />`
-                  : html`<${ToolTraceStep}
+                  : item.kind === 'tool'
+                    ? html`<${ToolTraceStep}
                       key=${`tool-${item.entry.id}`}
                       entry=${item.entry}
                       output=${item.output}
                       canMarkMissing=${canMarkMissingForEntry(item.entry)}
-                    />`)}
+                    />`
+                    : html`<${ChatResponseTraceStep} key=${`chat-${item.entry.id}`} entry=${item.entry} />`)}
             </div>
           `
         : null}
@@ -2545,6 +2580,7 @@ function TurnWorkBundle({
       <${ToolTraceCard}
         tools=${tools}
         traceSteps=${traceSteps}
+        assistant=${assistant}
         turnComplete=${turnComplete}
         toolOutputsCoveredSinceMs=${toolOutputsCoveredSinceMs}
         toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}

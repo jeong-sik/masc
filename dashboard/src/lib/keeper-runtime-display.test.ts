@@ -436,6 +436,18 @@ describe('keeperActivityDisplay', () => {
     expect(result.source).toBe('created')
     expect(result.label).toBe('생성')
   })
+
+  it('can suppress created_at when a surface only wants operational activity', () => {
+    const result = keeperActivityDisplay(
+      {
+        created_at: '2026-03-28T18:00:00Z',
+      },
+      undefined,
+      { includeCreated: false },
+    )
+    expect(result.source).toBe('none')
+    expect(result.ageSeconds).toBeNull()
+  })
 })
 
 describe('keeperWorkPreview', () => {

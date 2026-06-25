@@ -96,6 +96,44 @@ describe('KeeperWorkspaceRoster', () => {
     expect(allChip?.textContent).toContain('3')
   })
 
+  it('shows explicit recent activity age instead of a creation-date fallback', () => {
+    keepers.value = [
+      mk({
+        name: 'recent-turn',
+        status: 'running',
+        lifecycle_phase: 'Running',
+        last_turn_ago_s: 180,
+      }),
+      mk({
+        name: 'created-only',
+        status: 'running',
+        lifecycle_phase: 'Running',
+        created_at: '2026-03-28T18:00:00Z',
+      }),
+    ]
+
+    render(html`<${KeeperWorkspaceRoster} activeName="recent-turn" />`, host)
+
+    const rows = Array.from(host.querySelectorAll('.kp-row')) as HTMLElement[]
+    const recent = rows.find(row => row.textContent?.includes('recent-turn')) as HTMLElement
+    const createdOnly = rows.find(row => row.textContent?.includes('created-only')) as HTMLElement
+    expect(recent.textContent).toContain('마지막 턴')
+    expect(recent.textContent).toContain('3분 전')
+    expect(createdOnly.textContent).not.toContain('생성')
+  })
+
+  it('labels attention as an attention signal rather than a bare count', () => {
+    keepers.value = [
+      mk({ name: 'blocked', status: 'running', lifecycle_phase: 'Running', blocked_task_count: 1 }),
+    ]
+
+    render(html`<${KeeperWorkspaceRoster} activeName="blocked" />`, host)
+
+    const attention = host.querySelector('.kp-att') as HTMLElement
+    expect(attention?.textContent).toBe('주의 1')
+    expect(attention?.getAttribute('title')).toContain('메시지 수가 아니라')
+  })
+
   // The fleet-summary band ([data-testid="kw-roster-summary"] with total/running/
   // paused/offline + 주의/승인/CTX aggregates) was removed in the v2 reskin — the
   // prototype roster opens straight into the .roster-filters band (전체/실행/주의
@@ -236,6 +274,7 @@ describe('KeeperWorkspaceRoster', () => {
 
   it('filters by search query', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
+    fireEvent.click(host.querySelector('.kw-rfilter-icon') as HTMLButtonElement)
     const search = host.querySelector('.kw-roster-search') as HTMLInputElement
     fireEvent.input(search, { target: { value: 'rama' } })
     const rows = host.querySelectorAll('.kw-kp-row')
@@ -358,6 +397,7 @@ describe('KeeperWorkspaceRoster', () => {
       mk({ name: 'beta', status: 'running', sandbox_target: '/srv/worktrees/beta-tree' }),
     ]
     render(html`<${KeeperWorkspaceRoster} activeName="alpha" />`, host)
+    fireEvent.click(host.querySelector('.kw-rfilter-icon') as HTMLButtonElement)
     fireEvent.input(host.querySelector('.kw-roster-search') as HTMLInputElement, { target: { value: 'beta-tree' } })
     const rows = host.querySelectorAll('.kw-kp-row')
     expect(rows.length).toBe(1)

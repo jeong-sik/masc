@@ -142,6 +142,17 @@
   background: var(--color-border-strong);
   flex-shrink: 0;
 }
+.chat-block-tstep.think .chat-block-tnode,
+.chat-block-tstep.reason .chat-block-tnode {
+  background: var(--color-accent-fg);
+}
+.chat-block-tstep.tool .chat-block-tnode {
+  background: var(--chat-tool-fg, var(--color-fg-secondary));
+}
+.chat-block-tstep.chat .chat-block-tnode {
+  background: var(--color-status-ok);
+  box-shadow: 0 0 0 3px rgb(var(--color-status-ok-glow) / 0.14);
+}
 
 .chat-block-tstep-row {
   display: flex;
@@ -215,6 +226,14 @@
      reasoning that single-line flow folded into one run-on line). */
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+.chat-block-tstep.chat .chat-block-tstep-text {
+  flex: 1 1 160px;
+  color: var(--color-fg-secondary);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chat-block-reason-detail {

@@ -11,6 +11,7 @@ import {
   Pause,
   Play,
   RotateCcw,
+  Search,
   Settings,
   Square,
 } from 'lucide-preact'
@@ -20,7 +21,9 @@ import { keepers } from '../../store'
 import { navigate } from '../../router'
 import { selectKeeper } from '../../keeper-runtime'
 import { keeperMobilePane } from '../keeper-detail-state'
-import { keeperActivityDisplay, keeperWorkPreview } from '../../lib/keeper-runtime-display'
+import { formatRelativeSec } from '../../lib/format-time'
+import { keeperActivityDisplay } from '../../lib/keeper-runtime-display'
+import type { KeeperActivityDisplay } from '../../lib/keeper-runtime-display'
 import { keeperActionVisibility } from '../../lib/keeper-predicates'
 import type { Keeper } from '../../types'
 import { runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
@@ -34,7 +37,6 @@ import {
   keeperStatusTone,
   keeperPhaseLabel,
   type KeeperBucket,
-  type DotTone,
 } from './keeper-workspace-shared'
 
 type RosterFilter = 'all' | 'run' | 'att'
@@ -91,16 +93,6 @@ const GROUP_ORDER: { bucket: KeeperBucket; label: string }[] = [
   { bucket: 'offline', label: '중지 · 종료됨' },
 ]
 
-/** Group-header status dot tone (design rails.jsx `.rg-dot` colored by groupCls).
- *  Reuses the shared StatusDot vocabulary instead of a bespoke dot so the header
- *  marker matches the per-row dots: running→ok, paused→warn, offline→idle. */
-const GROUP_BUCKET_TONE: Record<RosterHeaderBucket, DotTone> = {
-  attention: 'bad',
-  running: 'ok',
-  paused: 'warn',
-  offline: 'idle',
-}
-
 /** Flattened roster item used by the virtualized render path. */
 type RosterItem =
   | { type: 'header'; bucket: RosterHeaderBucket; label: string; count: number }
@@ -127,21 +119,6 @@ function keeperContextRatio(keeper: Keeper): number {
   const current = keeper.context_tokens ?? keeper.context?.context_tokens ?? 0
   const max = keeper.context_max ?? keeper.context?.context_max ?? 0
   return max > 0 ? Math.max(0, Math.min(1, current / max)) : 0
-}
-
-function keeperAttentionGloss(keeper: Keeper): string {
-  const bits: string[] = []
-  const blocked = keeper.blocked_task_count ?? 0
-  if (blocked > 0) bits.push(`차단 ${blocked}건`)
-  if (keeper.current_gate?.kind === 'approval_required') bits.push('승인 대기')
-  const blocker = keeper.runtime_blocker_summary?.trim()
-  const reason = keeper.attention_reason?.trim()
-  const action = keeper.next_human_action?.trim()
-  if (blocker) bits.push(blocker)
-  if (reason) bits.push(reason)
-  if (action) bits.push(action)
-  if (bits.length > 0) return bits.slice(0, 2).join(' · ')
-  return keeperPhaseLabel(keeper) || keeperWorkPreview(keeper) || '최근 상태 미수신'
 }
 
 function keeperStatusRank(keeper: Keeper): number {
@@ -283,10 +260,9 @@ function RosterRow({
       : null
   const contextPct = contextRatio === null ? null : Math.round(contextRatio * 100)
   const contextHot = contextRatio !== null && contextRatio >= 0.8
-  const activity = keeperActivityDisplay(keeper)
-  const work = keeperWorkPreview(keeper)
+  const activity = keeperActivityDisplay(keeper, undefined, { includeCreated: false })
+  const activityText = rosterActivityText(activity)
   const recentTool = keeperRecentTool(keeper)
-  const gloss = keeperAttentionGloss(keeper)
   const inlineActions = lifecycleActions(keeper).filter(action => action !== 'shutdown').slice(0, 2)
   const [pendingAction, setPendingAction] = useState<KeeperActionKey | null>(null)
   const select = () => onSelect(keeper.name)
@@ -294,7 +270,7 @@ function RosterRow({
     <div
       role="button"
       tabindex="0"
-      class="kw-kp-row v2-monitoring-row"
+      class="kw-kp-row kp-row v2-monitoring-row"
       data-tone=${tone}
       style=${style}
       aria-current=${active ? 'true' : 'false'}
@@ -311,10 +287,8 @@ function RosterRow({
         <div class="kw-kp-name">${keeper.koreanName ?? keeper.name}</div>
         <div class="kw-kp-sub">
           <span class="kw-kp-state"><${StatusDot} tone=${tone} pulse=${bucket === 'running'} />${keeperPhaseLabel(keeper)}</span>
-          ${handle ? html`<span aria-hidden="true">·</span><span class="kw-kp-handle" title=${handleTitle}>${handle}</span>` : null}
+          ${handle ? html`<span aria-hidden="true">·</span><span class="kw-kp-handle kp-handle" title=${handleTitle}>${handle}</span>` : null}
         </div>
-        <div class="kw-kp-gloss" title=${gloss}>${gloss}</div>
-        <div class="kw-kp-work" title=${work ?? ''}>${work ?? '최근 작업 요약 없음'}</div>
         ${contextPct !== null
           ? html`
               <div class="kw-kp-context" title=${`context ${contextPct}%`}>
@@ -335,8 +309,10 @@ function RosterRow({
           : null}
       </div>
       <div class="kw-kp-right">
-        ${activity.source !== 'none' ? html`<span class="kw-kp-time">${activity.label}</span>` : null}
-        ${att > 0 ? html`<span class="kw-kp-att" title=${`주의 ${att}건`}>${att}</span>` : null}
+        ${activityText ? html`<span class="kw-kp-time" title=${activity.timestamp ?? activityText}>${activityText}</span>` : null}
+        ${att > 0
+          ? html`<span class="kw-kp-att kp-att" title=${`주의 신호 ${att}건 · 메시지 수가 아니라 blocked/attention 상태입니다`}>주의 ${att}</span>`
+          : null}
       </div>
       <button
         type="button"
@@ -413,7 +389,7 @@ function MiniRosterRow({
   return html`
     <button
       type="button"
-      class="kw-kp-mini v2-monitoring-action"
+      class="kw-kp-mini kp-row mini v2-monitoring-action"
       aria-current=${active ? 'true' : 'false'}
       aria-label=${label}
       title=${label}
@@ -442,32 +418,16 @@ async function runRosterKeeperAction(name: string, action: KeeperActionKey): Pro
   await refreshAfterRuntimeAction()
 }
 
-function pct(count: number, total: number): string {
-  if (total <= 0 || count <= 0) return '0%'
-  return `${Math.max(4, Math.round((count / total) * 100))}%`
+function rosterActivityText(activity: KeeperActivityDisplay): string | null {
+  if (activity.source === 'none' || activity.ageSeconds === null) return null
+  return `${activity.label} ${formatRelativeSec(activity.ageSeconds)}`
 }
 
-function KeeperFleetSummaryBand({ summary }: { summary: RosterFleetSummary }): VNode {
-  return html`
-    <section class="kw-roster-summary" data-testid="kw-roster-summary" aria-label="키퍼 플릿 요약">
-      <div class="kw-roster-meter" aria-hidden="true">
-        <span class="run" style=${{ width: pct(summary.running, summary.total) }}></span>
-        <span class="pause" style=${{ width: pct(summary.paused, summary.total) }}></span>
-        <span class="off" style=${{ width: pct(summary.offline, summary.total) }}></span>
-      </div>
-      <div class="kw-roster-summary-grid">
-        <div class="kw-roster-stat"><b>${summary.total}</b><span>전체</span></div>
-        <div class="kw-roster-stat ok"><b>${summary.running}</b><span>실행</span></div>
-        <div class="kw-roster-stat warn"><b>${summary.paused}</b><span>대기</span></div>
-        <div class="kw-roster-stat idle"><b>${summary.offline}</b><span>중지</span></div>
-      </div>
-      <div class="kw-roster-flags">
-        <span class=${summary.attention > 0 ? 'hot' : ''}>주의 ${summary.attention}</span>
-        <span class=${summary.approvalGate > 0 ? 'gate' : ''}>승인 ${summary.approvalGate}</span>
-        <span class=${summary.highContext > 0 ? 'ctx' : ''}>CTX 80%+ ${summary.highContext}</span>
-      </div>
-    </section>
-  `
+function groupBucketClass(bucket: RosterHeaderBucket): string {
+  if (bucket === 'attention') return 'att'
+  if (bucket === 'running') return 'run'
+  if (bucket === 'paused') return 'pause'
+  return 'off'
 }
 
 function KeeperRosterMenu({
@@ -583,7 +543,6 @@ export function KeeperWorkspaceRoster({
   }, [menu])
 
   const all = keepers.value
-  const summary = rosterFleetSummary(all)
   const counts = {
     all: all.length,
     run: all.filter(k => keeperBucket(k) === 'running').length,
@@ -652,7 +611,7 @@ export function KeeperWorkspaceRoster({
 
   const filterChips: { id: RosterFilter; label: string }[] = [
     { id: 'all', label: '전체' },
-    { id: 'run', label: '실행중' },
+    { id: 'run', label: '실행' },
     { id: 'att', label: '주의' },
   ]
 
@@ -691,7 +650,18 @@ export function KeeperWorkspaceRoster({
   // Single source for the group header so the windowed and non-windowed render
   // paths can't drift (they previously inlined the header markup separately).
   function renderHeader(item: Extract<RosterItem, { type: 'header' }>): VNode {
-    return html`<div class="kw-roster-group roster-group v2-monitoring-row" title=${item.label} key=${`h:${item.bucket}`}><${StatusDot} tone=${GROUP_BUCKET_TONE[item.bucket]} /><span class="kw-roster-group-label">${item.label}</span><span class="kw-roster-group-n">${item.count}</span></div>`
+    const bucketClass = groupBucketClass(item.bucket)
+    return html`
+      <div
+        class=${`kw-roster-group roster-group ${bucketClass} v2-monitoring-row`}
+        key=${`h:${item.bucket}`}
+        title=${item.label}
+      >
+        <span class="rg-dot" aria-hidden="true"></span>
+        <span class="kw-roster-group-label">${item.label}</span>
+        <span class="kw-roster-group-n rg-n">${item.count}</span>
+      </div>
+    `
   }
 
   function renderItem(item: RosterItem): VNode {
@@ -713,58 +683,63 @@ export function KeeperWorkspaceRoster({
           </div>`
         : html`
           <div class="kw-roster-head v2-monitoring-toolbar">
-            <button
-              type="button"
-              class="rfilter-icon v2-monitoring-action"
-              aria-label="키퍼 검색"
-              aria-expanded=${searchOpen ? 'true' : 'false'}
-              onClick=${() => setSearchOpen(open => !open)}
-            >
-              ⌕
-            </button>
-            <input
-              class=${`kw-roster-search${searchOpen ? ' roster-search' : ''}`}
-              type="text"
-              placeholder="이름 · 스코프 검색…"
-              aria-label="키퍼 검색"
-              value=${query}
-              onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-            />
-          </div>
-          <${KeeperFleetSummaryBand} summary=${summary} />
-          <div class="kw-roster-filters v2-monitoring-toolbar" role="group" aria-label="상태 필터">
-            ${filterChips.map(chip => html`
+            <div class="kw-roster-filters roster-filters" role="group" aria-label="상태 필터">
+              ${filterChips.map(chip => html`
+                <button
+                  type="button"
+                  class="kw-rfilter rfilter v2-monitoring-action"
+                  aria-pressed=${filter === chip.id ? 'true' : 'false'}
+                  onClick=${() => setFilter(chip.id)}
+                >
+                  ${chip.label}<span class="n">${counts[chip.id]}</span>
+                </button>
+              `)}
               <button
                 type="button"
-                class="kw-rfilter v2-monitoring-action"
-                aria-pressed=${filter === chip.id ? 'true' : 'false'}
-                onClick=${() => setFilter(chip.id)}
+                class="kw-rfilter-icon rfilter-icon v2-monitoring-action"
+                aria-label="키퍼 검색"
+                title="키퍼 검색"
+                aria-pressed=${searchOpen ? 'true' : 'false'}
+                aria-expanded=${searchOpen ? 'true' : 'false'}
+                onClick=${() => setSearchOpen(open => !open)}
               >
-                ${chip.label}<span class="n">${counts[chip.id]}</span>
+                <${Search} size=${14} aria-hidden="true" />
               </button>
-            `)}
-            <select
-              class="kw-roster-sort v2-monitoring-action"
-              aria-label="키퍼 정렬"
-              value=${sort}
-              onChange=${(e: Event) => setSort((e.target as HTMLSelectElement).value as RosterSort)}
-            >
-              <option value="status">상태순</option>
-              <option value="name">이름순</option>
-              <option value="att">주의순</option>
-            </select>
+              <select
+                class="kw-roster-sort roster-sort v2-monitoring-action"
+                aria-label="키퍼 정렬"
+                value=${sort}
+                onChange=${(e: Event) => setSort((e.target as HTMLSelectElement).value as RosterSort)}
+              >
+                <option value="status">상태순</option>
+                <option value="name">이름순</option>
+                <option value="att">주의순</option>
+              </select>
+            </div>
+            ${searchOpen || query
+              ? html`
+                  <input
+                    class="kw-roster-search roster-search"
+                    type="text"
+                    placeholder="이름 · 스코프 검색…"
+                    aria-label="키퍼 검색"
+                    value=${query}
+                    onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
+                  />
+                `
+              : null}
           </div>
           ${visible.length === 0
-            ? html`<div class="kw-roster-list"><div class="kw-roster-empty v2-monitoring-row">일치하는 키퍼가 없습니다</div></div>`
+            ? html`<div class="kw-roster-list roster-list"><div class="kw-roster-empty v2-monitoring-row">일치하는 키퍼가 없습니다</div></div>`
         : useVirtual
           ? html`<${VirtualList}
               items=${items}
               estimatedItemHeight=${ROSTER_ROW_ESTIMATED_HEIGHT}
-              className="kw-roster-list"
+              className="kw-roster-list roster-list"
               renderItem=${renderItem}
               getKey=${getKey}
             />`
-          : html`<div class="kw-roster-list">
+          : html`<div class="kw-roster-list roster-list">
               ${items.map(item => item.type === 'header'
                 ? renderHeader(item)
                 : html`<${RosterRow} key=${item.keeper.name} keeper=${item.keeper} active=${item.keeper.name === activeName} onSelect=${select} onMenu=${openMenu} style=${rowStyle} />`)}

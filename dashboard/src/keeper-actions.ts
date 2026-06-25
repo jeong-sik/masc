@@ -58,7 +58,7 @@ import {
   setRecordValue,
   setStatusDetail,
 } from './keeper-state'
-import { abortKeeperThreadMessage, applyKeeperStreamEvent } from './keeper-stream'
+import { abortKeeperThreadMessage, applyKeeperStreamEvent, TERMINAL_REQUEST_STATUSES } from './keeper-stream'
 import {
   KEEPER_HISTORY_TAIL_MESSAGES,
 } from './config/constants'
@@ -74,7 +74,6 @@ type KeeperInterjectActionKind = 'send' | 'approve' | 'pause' | 'drain'
 
 const TOOL_ONLY_EMPTY_REPLY_TEXT = 'Tool-only turn ended without a final reply.'
 const pendingKeeperThreadCancels = new Map<string, Promise<boolean>>()
-const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'lost', 'cancelled'])
 
 interface KeeperInterjectCommand {
   readonly kind: KeeperInterjectActionKind

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   _resetLiveSendRequestOwnersForTests,
+  activeStreamRequestId,
   appendThreadEntry,
   setActiveStreamRequestId,
 } from './keeper-state'
@@ -137,6 +138,26 @@ describe('applyKeeperStreamEvent', () => {
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.delivery).toBe('sending')
     expect(entry?.streamState).toBe('opening')
+  })
+
+  it('ignores no-id terminal events while a request id is active', () => {
+    assistantEntry()
+    setActiveStreamRequestId('sangsu', 'kmsg_current')
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REQUEST_TERMINAL',
+      value: {
+        status: 'cancelled',
+        ok: false,
+        message: 'legacy terminal without request id',
+      },
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.delivery).toBe('sending')
+    expect(entry?.streamState).toBe('opening')
+    expect(activeStreamRequestId('sangsu')).toBe('kmsg_current')
   })
 
   it('ignores non-terminal request status events', () => {

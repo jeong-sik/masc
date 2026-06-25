@@ -74,4 +74,29 @@ val tally_of_records : record list -> tally
     chronological, so the last record for a turn is the current vote — a
     re-vote or a [Cleared] supersedes earlier ones). [Cleared] is counted but
     excluded from [net] (a retraction is "no opinion", not a negative). No
-    magic multipliers, no time-decay, no fabricated 0..1 score. *)
+    magic multipliers, no time-decay, no fabricated 0..1 score.
+
+    NB: the input list must be in append/chronological order (oldest first) for
+    last-wins to mean most-recent; {!read_tally} guarantees this. *)
+
+(** {2 Durable sink + log aggregation — Stdlib I/O via the sibling-log family} *)
+
+val record : config:Workspace.config -> record -> (unit, [ `Io of string ]) result
+(** Append [r] to its keeper's feedback log
+    ({!Keeper_types_support.keeper_feedback_log_path}, derived from
+    [r.keeper_id]) via the sibling-family writer
+    {!Keeper_types_support.append_jsonl_line} — so the feedback log shares the
+    .policy/.decisions log family: identical JSONL format and the same
+    size-threshold rotation. [append_jsonl_line]'s underlying [append_file]
+    raises [Sys_error] on an IO fault; it is caught here and returned as [`Io],
+    so a write is never silently dropped. *)
+
+val read_tally :
+  config:Workspace.config -> keeper_id:string -> (tally, [ `Io of string ]) result
+(** Read [keeper_id]'s feedback log and fold it into a {!tally}. Reuses the
+    family reader {!Fs_compat.load_jsonl_diagnostics} (parsed values + count of
+    JSON-malformed lines, oldest-first). A line that parses as JSON but not as
+    a {!record} ([of_json] = [Error]) also increments [malformed], so a corrupt
+    vote is counted and visible — never silently skipped to zero, never fatally
+    zeroing the whole tally. A missing log (no votes yet) reads as
+    {!empty_tally}; a read IO fault on an existing log surfaces as [`Io]. *)

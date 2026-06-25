@@ -114,6 +114,55 @@ let test_tally_deterministic () =
   check "same input -> same tally" (F.tally_of_records recs = F.tally_of_records recs);
   check "empty tally" (F.tally_of_records [] = F.empty_tally)
 
+(* ── durable sink + read_tally (Stdlib I/O; default_config needs no Eio) ── *)
+
+let with_tmp_config f =
+  let tmp = Filename.temp_dir "krf_test" "" in
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote tmp))))
+    (fun () -> f (Masc.Workspace.default_config tmp))
+
+let ok_exn = function Ok x -> x | Error (`Io m) -> failwith ("unexpected `Io: " ^ m)
+
+let test_sink_roundtrip () =
+  with_tmp_config (fun config ->
+    let put turn_id signal recorded_at =
+      ok_exn (F.record ~config (mk ~keeper_id:"k1" ~turn_id ~signal ~recorded_at ()))
+    in
+    put "t1" F.Helpful 1.0;
+    put "t2" F.Helpful 2.0;
+    put "t3" F.Not_helpful 3.0;
+    put "t1" F.Cleared 4.0;
+    (* re-read from disk *)
+    let t = ok_exn (F.read_tally ~config ~keeper_id:"k1") in
+    check "sink helpful=1 (t1 cleared, t2 helpful)" (t.F.helpful = 1);
+    check "sink not_helpful=1" (t.F.not_helpful = 1);
+    check "sink cleared=1 (t1 latest)" (t.F.cleared = 1);
+    check "sink net=0" (t.F.net = 0);
+    check "sink malformed=0" (t.F.malformed = 0);
+    check "sink last_at=4.0" (t.F.last_at = Some 4.0))
+
+let test_read_missing_log_is_empty () =
+  with_tmp_config (fun config ->
+    let t = ok_exn (F.read_tally ~config ~keeper_id:"never-voted") in
+    check "missing log -> empty tally" (t = F.empty_tally))
+
+let test_malformed_counted_not_fatal () =
+  with_tmp_config (fun config ->
+    ok_exn (F.record ~config (mk ~keeper_id:"k2" ~turn_id:"t1" ~signal:F.Helpful ~recorded_at:1.0 ()));
+    (* a non-JSON line and a valid-JSON-but-not-a-record line, appended raw *)
+    let path = Masc.Keeper_types_support.keeper_feedback_log_path config "k2" in
+    let oc = open_out_gen [ Open_append; Open_creat ] 0o644 path in
+    output_string oc "this is not json\n";
+    output_string oc "{\"foo\":1}\n";
+    close_out oc;
+    ok_exn (F.record ~config (mk ~keeper_id:"k2" ~turn_id:"t2" ~signal:F.Not_helpful ~recorded_at:2.0 ()));
+    let t = ok_exn (F.read_tally ~config ~keeper_id:"k2") in
+    (* valid votes survive; the two bad lines are counted, not zeroing the tally *)
+    check "malformed: helpful=1" (t.F.helpful = 1);
+    check "malformed: not_helpful=1" (t.F.not_helpful = 1);
+    check "malformed: count=2 (non-json + non-record)" (t.F.malformed = 2))
+
 let () =
   test_signal_wire_roundtrip ();
   test_signal_unknown_is_error ();
@@ -124,4 +173,7 @@ let () =
   test_tally_cleared_excluded_from_net ();
   test_tally_retraction_supersedes ();
   test_tally_deterministic ();
+  test_sink_roundtrip ();
+  test_read_missing_log_is_empty ();
+  test_malformed_counted_not_fatal ();
   print_endline "test_keeper_response_feedback: OK"

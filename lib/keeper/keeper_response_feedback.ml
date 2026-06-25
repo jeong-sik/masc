@@ -122,3 +122,34 @@ let tally_of_records (records : record list) : tally =
       empty_tally
   in
   { counted with net = counted.helpful - counted.not_helpful }
+
+(* ── Durable sink + log read — Stdlib I/O via the sibling-log family ──── *)
+
+let record ~(config : Workspace.config) (r : record) : (unit, [ `Io of string ]) result =
+  let path = Keeper_types_support.keeper_feedback_log_path config r.keeper_id in
+  (* append_jsonl_line shares the .policy/.decisions writer (rotation included).
+     append_file raises Sys_error on IO fault — caught here, surfaced as `Io,
+     never silently dropped. *)
+  match Keeper_types_support.append_jsonl_line path (to_json r) with
+  | () -> Ok ()
+  | exception Sys_error msg -> Error (`Io msg)
+
+let read_tally ~(config : Workspace.config) ~keeper_id : (tally, [ `Io of string ]) result =
+  let path = Keeper_types_support.keeper_feedback_log_path config keeper_id in
+  match Fs_compat.load_jsonl_diagnostics path with
+  | exception Sys_error msg -> Error (`Io msg)
+  | jsons, json_malformed ->
+    (* load_jsonl_diagnostics returns rows oldest-first + JSON-malformed count.
+       A row that is valid JSON but not a valid record (of_json = Error) is an
+       additional malformed line — counted, not silently skipped. *)
+    let records, semantic_malformed =
+      List.fold_left
+        (fun (recs, bad) j ->
+          match of_json j with
+          | Ok r -> (r :: recs, bad)
+          | Error _ -> (recs, bad + 1))
+        ([], 0)
+        jsons
+    in
+    let base = tally_of_records (List.rev records) in
+    Ok { base with malformed = json_malformed + semantic_malformed }

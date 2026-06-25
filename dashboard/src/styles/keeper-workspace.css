@@ -31,16 +31,21 @@
   height: 100%;
 }
 
-/* Keeper detail is a focused single-keeper view. On mobile the global header's
- * action chips (Copilot / auth / connection / error) wrap onto two extra rows
- * (~76px) that crowd out the conversation. Hide them and tighten the header
- * padding here. Kept: the brand block + hamburger, and the global Emergency
- * Stop (namespace pause) — a safety control with no other on-surface affordance
- * here (marked [data-mobile-detail-keep] in app.ts). The bottom nav is hidden
- * only while the chat pane is active; the roster pane keeps it. */
+/* Keeper detail is a focused single-keeper view. On mobile the prototype topbar
+ * only keeps the breadcrumb + primary status chips; the re-mounted operational
+ * cluster is too wide for the phone chrome and pushes the breadcrumb off-screen.
+ * Hide that cluster for keeper detail while preserving the full desktop chrome. */
 @media (max-width: 768px) {
-  [data-keeper-detail-mode="true"] .v2-shell-header { padding-top: 4px; padding-bottom: 4px; }
-  [data-keeper-detail-mode="true"] .v2-header-actions > *:not([data-mobile-detail-keep]) { display: none; }
+  [data-keeper-detail-mode="true"] .v2-top {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  [data-keeper-detail-mode="true"] .v2-top-ops,
+  [data-keeper-detail-mode="true"] .v2-top > .v2-shell-panel,
+  [data-keeper-detail-mode="true"] .v2-top > [data-testid="tweaks-panel-toggle"] {
+    display: none;
+  }
 }
 
 .kw-grid {
@@ -1075,10 +1080,19 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
  */
 @media (max-width: 900px) {
   .v2-app[data-reading="true"] .v2-mobile-bottom-bar,
+  .v2-app[data-reading="true"] .v2-nav.is-mnav,
+  .v2-app[data-reading="true"] .v2-health-strip,
+  .v2-app[data-reading="true"] > .v2-shell-panel,
   .v2-app[data-reading="true"] .dashboard-status-tray,
   .v2-app[data-reading="true"] .dashboard-focus-mode-toggle,
   .v2-app[data-reading="true"] .topbar-copilot,
   .v2-app[data-reading="true"] .kw-chat-actions {
+    display: none;
+  }
+
+  .v2-app[data-keeper-detail-mode="true"] .v2-top-ops,
+  .v2-app[data-keeper-detail-mode="true"] .v2-top > .v2-shell-panel,
+  .v2-app[data-keeper-detail-mode="true"] .v2-top > [data-testid="tweaks-panel-toggle"] {
     display: none;
   }
 }

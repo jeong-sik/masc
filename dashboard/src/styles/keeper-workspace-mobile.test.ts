@@ -117,6 +117,29 @@ describe('keeper workspace v2 (26) mobile contract', () => {
       mediaRuleDecls('.v2-app[data-reading="true"] .v2-mobile-bottom-bar', SHELL_MOBILE_CHROME_BREAKPOINT).display,
     ).toBe('none')
     expect(
+      mediaRuleDecls('.v2-app[data-reading="true"] .v2-nav.is-mnav', SHELL_MOBILE_CHROME_BREAKPOINT).display,
+    ).toBe('none')
+    expect(
+      mediaRuleDecls('.v2-app[data-reading="true"] .v2-health-strip', SHELL_MOBILE_CHROME_BREAKPOINT).display,
+    ).toBe('none')
+    expect(
+      mediaRuleDecls('.v2-app[data-reading="true"] > .v2-shell-panel', SHELL_MOBILE_CHROME_BREAKPOINT).display,
+    ).toBe('none')
+    expect(
+      mediaRuleDecls('.v2-app[data-keeper-detail-mode="true"] .v2-top-ops', SHELL_MOBILE_CHROME_BREAKPOINT)
+        .display,
+    ).toBe('none')
+    expect(
+      mediaRuleDecls('.v2-app[data-keeper-detail-mode="true"] .v2-top > .v2-shell-panel', SHELL_MOBILE_CHROME_BREAKPOINT)
+        .display,
+    ).toBe('none')
+    expect(
+      mediaRuleDecls(
+        '.v2-app[data-keeper-detail-mode="true"] .v2-top > [data-testid="tweaks-panel-toggle"]',
+        SHELL_MOBILE_CHROME_BREAKPOINT,
+      ).display,
+    ).toBe('none')
+    expect(
       mediaRuleDecls('.v2-app[data-reading="true"] .dashboard-status-tray', SHELL_MOBILE_CHROME_BREAKPOINT).display,
     ).toBe('none')
     expect(

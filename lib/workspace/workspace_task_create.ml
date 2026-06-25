@@ -45,10 +45,51 @@ let find_duplicate_task (backlog : backlog) ~(title : string)
     |> Option.map (fun (t : task) -> t.id)
 ;;
 
+type add_task_success =
+  { task_id : string
+  ; summary : string
+  ; title : string
+  ; priority : int
+  ; description : string
+  ; goal_id : string option
+  }
+
+type add_task_error =
+  | Backlog_read_failed of string
+  | Rejected of string
+  | Duplicate of { title : string; existing_id : string }
+  | Unexpected_error of string
+
+type batch_add_tasks_success =
+  { task_ids : string list
+  ; summary : string
+  ; count : int
+  }
+
+type batch_add_tasks_error =
+  | Batch_backlog_read_failed of string
+  | Batch_unexpected_error of string
+
+let add_task_error_to_string = function
+  | Backlog_read_failed msg -> Printf.sprintf "Error: %s" msg
+  | Rejected msg -> Printf.sprintf "Error: %s" msg
+  | Duplicate { title; existing_id } ->
+    Printf.sprintf
+      "Duplicate rejected: '%s' matches existing %s. Use that task instead."
+      title
+      existing_id
+  | Unexpected_error msg -> Printf.sprintf "Error: %s" msg
+;;
+
+let batch_add_tasks_error_to_string = function
+  | Batch_backlog_read_failed msg -> Printf.sprintf "Error adding batch tasks: %s" msg
+  | Batch_unexpected_error msg -> Printf.sprintf "Error adding batch tasks: %s" msg
+;;
+
 (** Add task — file-locked to prevent task ID collision under concurrency.
     Rejects tasks with duplicate titles (exact match after normalization)
     to prevent the same work from being created multiple times. *)
-let add_task
+let add_task_with_result
       ?contract
       ?goal_id
       ?created_by
@@ -65,21 +106,18 @@ let add_task
   try
     with_file_lock config backlog_path (fun () ->
       match read_backlog_r config with
-      | Error msg -> Printf.sprintf "Error: %s" msg
+      | Error msg -> Error (Backlog_read_failed msg)
       | Ok backlog ->
         (match reject_if with
          | Some reject_if -> reject_if backlog
          | None -> None)
         |> (function
-          | Some msg -> Printf.sprintf "Error: %s" msg
+          | Some msg -> Error (Rejected msg)
           | None ->
         (* Dedup guard: reject if an active task with the same normalized title exists *)
         (match find_duplicate_task backlog ~title with
          | Some existing_id ->
-           Printf.sprintf
-             "Duplicate rejected: '%s' matches existing %s. Use that task instead."
-             title
-             existing_id
+           Error (Duplicate { title; existing_id })
          | None ->
            let task_id = Printf.sprintf "task-%03d" (next_task_number config backlog) in
            let contract =
@@ -143,20 +181,38 @@ let add_task
                ~from_agent:actor
                ~content:(Printf.sprintf "New quest: %s" title)
            in
-           Printf.sprintf "Added %s: %s" task_id title)))
+           let summary = Printf.sprintf "Added %s: %s" task_id title in
+           Ok { task_id; summary; title; priority; description; goal_id })))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | e -> Printf.sprintf "Error: %s" (Printexc.to_string e)
+  | e -> Error (Unexpected_error (Printexc.to_string e))
+;;
+
+let add_task ?contract ?goal_id ?created_by ?reject_if config ~title ~priority
+    ~description =
+  match
+    add_task_with_result
+      ?contract
+      ?goal_id
+      ?created_by
+      ?reject_if
+      config
+      ~title
+      ~priority
+      ~description
+  with
+  | Ok created -> created.summary
+  | Error err -> add_task_error_to_string err
 ;;
 
 (** Add multiple tasks in a batch *)
-let batch_add_tasks_internal ?created_by config tasks =
+let batch_add_tasks_internal_with_result ?created_by config tasks =
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   let actor = Option.value ~default:"system" created_by in
   with_file_lock config backlog_path (fun () ->
     match read_backlog_r config with
-    | Error msg -> Printf.sprintf "Error adding batch tasks: %s" msg
+    | Error msg -> Error (Batch_backlog_read_failed msg)
     | Ok backlog ->
       (try
          let next_num = ref (next_task_number config backlog) in
@@ -238,10 +294,19 @@ let batch_add_tasks_internal ?created_by config tasks =
              summary
          in
          let _ = broadcast config ~from_agent:actor ~content:msg in
-         Printf.sprintf "Added %d tasks: %s" (List.length added_tasks) summary
+         let count = List.length added_tasks in
+         let task_ids = List.map (fun (task : Masc_domain.task) -> task.id) added_tasks in
+         let summary = Printf.sprintf "Added %d tasks: %s" count summary in
+         Ok { task_ids; summary; count }
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
-       | e -> Printf.sprintf "Error adding batch tasks: %s" (Printexc.to_string e)))
+       | e -> Error (Batch_unexpected_error (Printexc.to_string e))))
+;;
+
+let batch_add_tasks_internal ?created_by config tasks =
+  match batch_add_tasks_internal_with_result ?created_by config tasks with
+  | Ok created -> created.summary
+  | Error err -> batch_add_tasks_error_to_string err
 ;;
 
 let batch_add_tasks ?created_by config tasks =
@@ -256,4 +321,8 @@ let batch_add_tasks ?created_by config tasks =
 
 let batch_add_tasks_with_contracts ?created_by config tasks =
   batch_add_tasks_internal ?created_by config tasks
+;;
+
+let batch_add_tasks_with_contracts_result ?created_by config tasks =
+  batch_add_tasks_internal_with_result ?created_by config tasks
 ;;

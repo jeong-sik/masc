@@ -53,13 +53,52 @@ call_method() {
   jsonrpc_normalize_response "$raw" "$id"
 }
 
-CLEANUP_TASK_FINALIZED=0
+CLEANUP_TASK_IDS=()
+CLEANUP_TASK_FINALIZED_IDS=()
+
+remember_cleanup_task_id() {
+  local new_task_id="$1"
+  local existing_task_id
+  for existing_task_id in "${CLEANUP_TASK_IDS[@]}"; do
+    if [[ "$existing_task_id" == "$new_task_id" ]]; then
+      return 0
+    fi
+  done
+  CLEANUP_TASK_IDS+=("$new_task_id")
+}
+
+cleanup_task_is_finalized() {
+  local task_id_to_check="$1"
+  local finalized_task_id
+  for finalized_task_id in "${CLEANUP_TASK_FINALIZED_IDS[@]}"; do
+    if [[ "$finalized_task_id" == "$task_id_to_check" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+mark_cleanup_task_finalized() {
+  local finalized_task_id="$1"
+  remember_cleanup_task_id "$finalized_task_id"
+  if cleanup_task_is_finalized "$finalized_task_id"; then
+    return 0
+  fi
+  CLEANUP_TASK_FINALIZED_IDS+=("$finalized_task_id")
+}
+
 # shellcheck disable=SC2329 # invoked by EXIT trap
 cleanup_contract_task() {
   local exit_status=$?
-  if [ "$CLEANUP_TASK_FINALIZED" -ne 1 ] && [ -n "${task_id:-}" ]; then
-    call_tool 5999 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"cancel",notes:"public tool sweep cleanup after unsuccessful run"}')" >/dev/null 2>&1 || true
-  fi
+  local cleanup_call_id=5999
+  local cleanup_task_id
+  for cleanup_task_id in "${CLEANUP_TASK_IDS[@]}"; do
+    if cleanup_task_is_finalized "$cleanup_task_id"; then
+      continue
+    fi
+    call_tool "$cleanup_call_id" "masc_transition" "$(jq -cn --arg task_id "$cleanup_task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"cancel",notes:"public tool sweep cleanup after unsuccessful run"}')" >/dev/null 2>&1 || true
+    cleanup_call_id=$((cleanup_call_id + 1))
+  done
   exit "$exit_status"
 }
 trap 'cleanup_contract_task' EXIT
@@ -140,10 +179,25 @@ task_id="$(
 if [[ -z "$task_id" ]]; then
   mcp_fail_with_context "masc_add_task: could not extract task_id" "$r_add_task"
 fi
+remember_cleanup_task_id "$task_id"
 
 echo "[12/36] masc_batch_add_tasks"
 r_batch_add="$(call_tool 5016 "masc_batch_add_tasks" "$(jq -cn --arg goal_id "$GOAL_ID" '{tasks:[{title:"Public Sweep Batch A",goal_id:$goal_id,priority:3,description:"batch-a"},{title:"Public Sweep Batch B",goal_id:$goal_id,priority:4,description:"batch-b"}]}')")"
 expect_ok "masc_batch_add_tasks" "$r_batch_add"
+batch_task_ids=()
+while IFS= read -r batch_task_id; do
+  if [[ -z "$batch_task_id" ]]; then
+    continue
+  fi
+  batch_task_ids+=("$batch_task_id")
+  remember_cleanup_task_id "$batch_task_id"
+done < <(
+  printf '%s' "$r_batch_add" \
+    | jq -r 'try (.result.structuredContent.task_ids[]?) catch empty | strings'
+)
+if [[ "${#batch_task_ids[@]}" -ne 2 ]]; then
+  mcp_fail_with_context "masc_batch_add_tasks: expected two structured task_ids" "$r_batch_add"
+fi
 
 echo "[13/36] masc_tasks"
 r_tasks="$(call_tool 5017 "masc_tasks" '{}')"
@@ -245,17 +299,26 @@ echo "[33/36] masc_persona_list"
 r_persona_list="$(call_tool 5037 "masc_persona_list" '{"detailed":false}')"
 expect_ok "masc_persona_list" "$r_persona_list"
 
-echo "[34/36] masc_goal_transition"
-r_goal_transition="$(call_tool 5038 "masc_goal_transition" "$(jq -cn --arg goal_id "$GOAL_ID" --arg actor "$AGENT_NAME" '{goal_id:$goal_id,action:"request_complete",actor:{id:$actor},note:"public sweep verification request"}')")"
-expect_ok "masc_goal_transition" "$r_goal_transition"
-
-echo "[35/36] masc_goal_verify"
-r_goal_verify="$(call_tool 5039 "masc_goal_verify" "$(jq -cn --arg goal_id "$GOAL_ID" --arg principal "${AGENT_NAME}-verifier" '{goal_id:$goal_id,principal:{id:$principal},decision:"approve",note:"public sweep verifier approval"}')")"
-expect_ok "masc_goal_verify" "$r_goal_verify"
-
-echo "[36/36] masc_transition (done)"
-r_done="$(call_tool 5040 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:"public tool sweep done"}')")"
+echo "[34/36] masc_transition (finish linked tasks)"
+finish_call_id=5038
+for batch_task_id in "${batch_task_ids[@]}"; do
+  r_cancel_batch="$(call_tool "$finish_call_id" "masc_transition" "$(jq -cn --arg task_id "$batch_task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"cancel",notes:"public tool sweep batch cleanup before goal completion"}')")"
+  expect_ok "masc_transition cancel ${batch_task_id}" "$r_cancel_batch"
+  mark_cleanup_task_finalized "$batch_task_id"
+  finish_call_id=$((finish_call_id + 1))
+done
+r_done="$(call_tool "$finish_call_id" "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:"public tool sweep done"}')")"
 expect_ok "masc_transition done" "$r_done"
-CLEANUP_TASK_FINALIZED=1
+mark_cleanup_task_finalized "$task_id"
+finish_call_id=$((finish_call_id + 1))
+
+echo "[35/36] masc_goal_transition"
+r_goal_transition="$(call_tool "$finish_call_id" "masc_goal_transition" "$(jq -cn --arg goal_id "$GOAL_ID" --arg actor "$AGENT_NAME" '{goal_id:$goal_id,action:"request_complete",actor:{id:$actor},note:"public sweep verification request"}')")"
+expect_ok "masc_goal_transition" "$r_goal_transition"
+finish_call_id=$((finish_call_id + 1))
+
+echo "[36/36] masc_goal_verify"
+r_goal_verify="$(call_tool "$finish_call_id" "masc_goal_verify" "$(jq -cn --arg goal_id "$GOAL_ID" --arg principal "${AGENT_NAME}-verifier" '{goal_id:$goal_id,principal:{id:$principal},decision:"approve",note:"public sweep verifier approval"}')")"
+expect_ok "masc_goal_verify" "$r_goal_verify"
 
 echo "PASS: public MCP tool live sweep"

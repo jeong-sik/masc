@@ -264,6 +264,52 @@ let () = test "handle_add_task_returns_structured_task_id" (fun () ->
   | Some summary -> assert (str_contains summary "Added task-001")
   | None -> failwith "missing summary")
 
+let () = test "workspace_add_task_with_result_returns_typed_task_id" (fun () ->
+  let ctx = make_test_ctx () in
+  match
+    Workspace.add_task_with_result
+      ctx.config
+      ~title:"Structured task: title punctuation is display-only"
+      ~priority:2
+      ~description:"structured workspace add-task regression"
+  with
+  | Ok created ->
+    assert (created.task_id = "task-001");
+    assert (created.title = "Structured task: title punctuation is display-only");
+    assert (created.priority = 2);
+    assert (created.goal_id = None)
+  | Error err ->
+    failwith
+      (Printf.sprintf
+         "expected typed add_task success, got %s"
+         (Workspace.add_task_error_to_string err)))
+
+let () = test "handle_batch_add_tasks_returns_structured_task_ids" (fun () ->
+  let ctx = make_test_ctx () in
+  let result =
+    Task.Tool.handle_batch_add_tasks ~tool_name:"masc_batch_add_tasks" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ( "tasks",
+            `List
+              [
+                `Assoc [ ("title", `String "Structured batch A") ];
+                `Assoc [ ("title", `String "Structured batch B") ];
+              ] );
+        ])
+  in
+  assert (Tool_result.is_success result);
+  let data = Tool_result.data result in
+  assert (Json_util.get_bool data "ok" = Some true);
+  assert (Json_util.get_int data "count" = Some 2);
+  assert (Json_util.assoc_member_opt "result" data = None);
+  (match Json_util.assoc_member_opt "task_ids" data with
+   | Some (`List [ `String "task-001"; `String "task-002" ]) -> ()
+   | _ -> failwith "missing structured batch task_ids");
+  match Json_util.get_string data "summary" with
+  | Some summary -> assert (str_contains summary "Added 2 tasks")
+  | None -> failwith "missing summary")
+
 (* Test dispatch tasks *)
 let () = test "dispatch_tasks" (fun () ->
   let ctx = make_test_ctx () in

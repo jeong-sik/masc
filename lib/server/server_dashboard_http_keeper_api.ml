@@ -14,16 +14,6 @@ let keeper_composite_cache_ttl_s = 5.0
 (* Maximum number of trajectory/trace entries returned per query. *)
 let trajectory_max_limit = 500
 
-let cache_segment_of_string_opt = function
-  | Some value -> value
-  | None -> "-"
-;;
-
-let cache_segment_of_int_opt = function
-  | Some value -> string_of_int value
-  | None -> "-"
-;;
-
 let cached_assoc_body_or_self cached fields =
   match List.assoc_opt "body" fields with
   | Some body -> body
@@ -242,13 +232,7 @@ let memory_os_dashboard_json ~keeper_id =
 
 let cached_keeper_runtime_trace_json config name ?trace_id ?turn_id ~limit () =
   let cache_key =
-    Printf.sprintf
-      "keeper:runtime-trace:%s:%s:%s:%s:%d"
-      (Workspace.masc_root_dir config)
-      name
-      (cache_segment_of_string_opt trace_id)
-      (cache_segment_of_int_opt turn_id)
-      limit
+    keeper_runtime_trace_cache_key config name ?trace_id ?turn_id ~limit ()
   in
   let cached =
     Dashboard_cache.get_or_compute cache_key ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
@@ -278,12 +262,7 @@ let cached_keeper_runtime_trace_json config name ?trace_id ?turn_id ~limit () =
 ;;
 
 let cached_keeper_config_json config name =
-  let cache_key =
-    Printf.sprintf
-      "keeper:config:%s:%s"
-      (Workspace.masc_root_dir config)
-      name
-  in
+  let cache_key = keeper_config_cache_key config name in
   let cached =
     Dashboard_cache.get_or_compute cache_key ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
       let status, body =
@@ -368,19 +347,15 @@ let keeper_composite_status_to_string = function
   | `Internal_server_error -> "internal_server_error"
 ;;
 
-let keeper_composite_status_of_string = function
-  | "not_found" -> `Not_found
-  | "internal_server_error" -> `Internal_server_error
-  | _ -> `OK
+let keeper_composite_status_of_string_opt = function
+  | "ok" -> Some `OK
+  | "not_found" -> Some `Not_found
+  | "internal_server_error" -> Some `Internal_server_error
+  | _ -> None
 ;;
 
 let cached_keeper_composite_json config name =
-  let cache_key =
-    Printf.sprintf
-      "keeper:composite:%s:%s"
-      (Workspace.masc_root_dir config)
-      name
-  in
+  let cache_key = keeper_composite_cache_key config name in
   let cached =
     Dashboard_cache.get_or_compute cache_key ~ttl:keeper_composite_cache_ttl_s (fun () ->
       let status, body =
@@ -405,8 +380,11 @@ let cached_keeper_composite_json config name =
   | `Assoc fields ->
     let status =
       match List.assoc_opt "status" fields with
-      | Some (`String value) -> keeper_composite_status_of_string value
-      | _ -> `OK
+      | Some (`String value) ->
+        (match keeper_composite_status_of_string_opt value with
+         | Some status -> status
+         | None -> `Internal_server_error)
+      | _ -> `Internal_server_error
     in
     let body = cached_assoc_body_or_self cached fields in
     status, body

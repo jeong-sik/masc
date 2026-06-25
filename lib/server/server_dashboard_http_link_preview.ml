@@ -483,21 +483,25 @@ let dashboard_link_previews_http_json ~state ~(args : Yojson.Safe.t) :
   | _, _, (Error _ as error) -> error
   | Some clock, Some net, Ok urls ->
       let preview_for_url url =
-        match cache_lookup url with
-        | Some cached -> (
-          match error_reason_of_json cached with
-          | Some reason -> Preview_error reason
-          | None -> Preview (with_cache_state cached "hit"))
-        | None -> (
-          match fetch_preview ~clock ~net url with
-          | Ok preview ->
-            let persisted = with_cache_state preview "miss" in
-            cache_store ~ttl:cache_ttl_sec url persisted;
-            Preview persisted
-          | Error reason ->
-            let error_preview = error_json ~url ~reason ~cache_state:"miss" () in
-            cache_store ~ttl:error_ttl_sec url error_preview;
-            Preview_error reason)
+        try
+          match cache_lookup url with
+          | Some cached -> (
+            match error_reason_of_json cached with
+            | Some reason -> Preview_error reason
+            | None -> Preview (with_cache_state cached "hit"))
+          | None -> (
+            match fetch_preview ~clock ~net url with
+            | Ok preview ->
+              let persisted = with_cache_state preview "miss" in
+              cache_store ~ttl:cache_ttl_sec url persisted;
+              Preview persisted
+            | Error reason ->
+              let error_preview = error_json ~url ~reason ~cache_state:"miss" () in
+              cache_store ~ttl:error_ttl_sec url error_preview;
+              Preview_error reason)
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Preview_error (Printexc.to_string exn)
       in
       let results =
         Eio.Fiber.List.map

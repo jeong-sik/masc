@@ -22,6 +22,26 @@ val keeper_suffix_checkpoints : string
 val keeper_suffix_runtime_trace : string
 val keeper_suffix_directive : string
 
+(** {1 Dashboard cache keys} *)
+
+val keeper_config_cache_key : Workspace.config -> string -> string
+(** Cache key for [/api/v1/keepers/<name>/config]. Used by both read and
+    invalidation paths. *)
+
+val keeper_composite_cache_key : Workspace.config -> string -> string
+(** Cache key for [/api/v1/keepers/<name>/composite]. *)
+
+val keeper_runtime_trace_cache_key :
+  Workspace.config ->
+  string ->
+  ?trace_id:string ->
+  ?turn_id:int ->
+  limit:int ->
+  unit ->
+  string
+(** Cache key for [/api/v1/keepers/<name>/runtime-trace]. Optional query
+    fields are tagged so absent values cannot collide with literal payloads. *)
+
 type keeper_post_route_kind =
   | Keeper_post_tools
   | Keeper_post_config

@@ -139,10 +139,7 @@ let handle_keeper_tools_post state req reqd =
                   with
                   | Ok () ->
                       Dashboard_cache.invalidate
-                        (Printf.sprintf
-                           "keeper:config:%s:%s"
-                           (Workspace.masc_root_dir config)
-                           name);
+                        (keeper_config_cache_key config name);
                       Http.Response.json_value ~compress:true ~request:req
                         (keeper_tools_response_json meta') reqd
                   | Error e ->
@@ -455,10 +452,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                        respond_error reqd (Keeper_types_profile.tool_result_body result)
                      else (
                        Dashboard_cache.invalidate
-                         (Printf.sprintf
-                            "keeper:config:%s:%s"
-                            (Workspace.masc_root_dir config)
-                            name);
+                         (keeper_config_cache_key config name);
                        let (_st, json) =
                          Dashboard_http_keeper.keeper_config_json config name
                        in

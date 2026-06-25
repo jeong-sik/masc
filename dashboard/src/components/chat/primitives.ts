@@ -508,7 +508,15 @@ function traceStepMarkdown(raw: string): { __html: string } {
 }
 
 function highlightJson(obj: unknown): string {
-  const s = JSON.stringify(obj, null, 2)
+  let value = obj
+  if (typeof obj === 'string') {
+    try {
+      value = JSON.parse(obj)
+    } catch {
+      value = obj
+    }
+  }
+  const s = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
   return sanitizeHtml(
     s
       .replace(/("[^"]+"):/g, '<span class="chat-json-key">$1</span>:')

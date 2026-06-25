@@ -132,7 +132,7 @@ expect_ok "masc_goal_list" "$r_goal_list"
 echo "[11/36] masc_add_task"
 r_add_task="$(call_tool 5015 "masc_add_task" "$(jq -cn --arg goal_id "$GOAL_ID" '{title:"Public Tool Sweep Task",goal_id:$goal_id,priority:2,description:"live public surface verification"}')")"
 expect_ok "masc_add_task" "$r_add_task"
-task_id="$( 
+task_id="$(
   printf '%s' "$r_add_task" \
     | jq -r 'try (.result.structuredContent.task_id // .result.structuredContent.id) catch empty | strings' \
     | head -n1

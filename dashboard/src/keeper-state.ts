@@ -45,6 +45,7 @@ export const THREAD_ENTRY_CAP = 200
 
 const keeperStreamControllers = new Map<string, AbortController>()
 const keeperStreamEntryIds = new Map<string, string>()
+const keeperStreamRequestIds = new Map<string, string>()
 // requestId -> keeperName: which queued requests a live in-session send
 // stream currently owns. Resume defers to this so an SPA remount does not
 // spin up a second handler/entry for a request the live send already drives.
@@ -1113,6 +1114,7 @@ export function setActiveStream(name: string, entryId: string, controller: Abort
 export function clearActiveStream(name: string): void {
   keeperStreamEntryIds.delete(name)
   keeperStreamControllers.delete(name)
+  keeperStreamRequestIds.delete(name)
 }
 
 export function activeStreamEntryId(name: string): string | null {
@@ -1121,6 +1123,18 @@ export function activeStreamEntryId(name: string): string | null {
 
 export function getStreamController(name: string): AbortController | undefined {
   return keeperStreamControllers.get(name)
+}
+
+export function setActiveStreamRequestId(name: string, requestId: string): void {
+  const keeperName = name.trim()
+  const id = requestId.trim()
+  if (!keeperName || !id) return
+  if (!keeperStreamControllers.has(keeperName)) return
+  keeperStreamRequestIds.set(keeperName, id)
+}
+
+export function activeStreamRequestId(name: string): string | null {
+  return keeperStreamRequestIds.get(name.trim()) ?? null
 }
 
 // --- Live send ownership (in-session, requestId-keyed) ---

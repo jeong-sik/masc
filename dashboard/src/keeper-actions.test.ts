@@ -82,6 +82,10 @@ import {
   pendingKeeperChatRequestsForKeeper,
   upsertPendingKeeperChatRequest,
 } from './keeper-chat-pending'
+import {
+  _resetCancelledKeeperThreadRequestsForTests,
+  abortKeeperThreadMessage,
+} from './keeper-stream'
 import { KEEPER_HISTORY_TAIL_MESSAGES } from './config/constants'
 import {
   resetToolCallOutputs,
@@ -248,7 +252,9 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     _clearPendingKeeperChatRequestsForTests()
     _resetKeeperThreadMessageSendGuardsForTests()
     _resetLiveSendRequestOwnersForTests()
+    _resetCancelledKeeperThreadRequestsForTests()
     streamKeeperMessage.mockReset()
+    cancelQueuedKeeperMessage.mockReset()
     fetchKeeperChatHistory.mockReset()
     fetchQueuedKeeperMessageResult.mockReset()
     isTerminalQueuedKeeperMessage.mockClear()
@@ -438,6 +444,38 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     await secondSend
     expect(keeperSending.value.echo).toBe(false)
     expect(activeStreamEntryId('echo')).toBeNull()
+  })
+
+  it('cancels the server keeper request immediately when the operator aborts an active stream', async () => {
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        signal?: AbortSignal
+        onEvent: (event: KeeperChatStreamEvent) => void
+      },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_QUEUE_REQUEST',
+        value: { request_id: 'kmsg_echo_1', status: 'queued' },
+      })
+      return new Promise<{ terminal: boolean }>((_resolve, reject) => {
+        opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
+      })
+    })
+
+    const sendPromise = sendKeeperThreadMessage('echo', 'stuck turn').catch(err => err)
+    await Promise.resolve()
+
+    abortKeeperThreadMessage('echo')
+
+    expect(cancelQueuedKeeperMessage).toHaveBeenCalledTimes(1)
+    expect(cancelQueuedKeeperMessage).toHaveBeenCalledWith('kmsg_echo_1')
+    const err = await sendPromise
+    expect(err).toBeInstanceOf(Error)
+    expect(err.name).toBe('AbortError')
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
   })
 
   it('does not duplicate the pending assistant when a live send is still streaming and the panel remounts', async () => {

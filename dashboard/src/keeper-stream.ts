@@ -1,5 +1,6 @@
 import { normalizeKeeperConversationDetails, formatKeeperVisibleReply } from './keeper-message'
 import { parseTextToChatBlocks } from './lib/chat-blocks'
+import { cancelQueuedKeeperMessage } from './api/keeper'
 import type { KeeperChatStreamEvent } from './api'
 import {
   appendAssistantDelta,
@@ -10,6 +11,7 @@ import {
   finalizeAssistantEntry,
   clearActiveStream,
   activeStreamEntryId,
+  activeStreamRequestId,
   getStreamController,
   keeperSending,
   keeperStreamStartedAt,
@@ -22,9 +24,27 @@ const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 // Most recent TOOL_CALL_START id per keeper — fallback target for
 // TOOL_CALL_ARGS / TOOL_CALL_END events that omit toolCallId.
 const lastToolCallIds = new Map<string, string>()
+const cancelledRequestIds = new Set<string>()
 
 function toolEntryId(toolCallId: string): string {
   return `tool-${toolCallId}`
+}
+
+export function cancelKeeperThreadRequest(keeperName: string, requestId: string): void {
+  const name = keeperName.trim()
+  const id = requestId.trim()
+  if (!name || !id || cancelledRequestIds.has(id)) return
+  cancelledRequestIds.add(id)
+  void cancelQueuedKeeperMessage(id).catch((err) => {
+    console.warn(
+      `[keeper-stream] server cancel failed for ${name} request=${id}`,
+      err instanceof Error ? err.message : err,
+    )
+  })
+}
+
+export function _resetCancelledKeeperThreadRequestsForTests(): void {
+  cancelledRequestIds.clear()
 }
 
 export function abortKeeperThreadMessage(name: string): void {
@@ -32,7 +52,9 @@ export function abortKeeperThreadMessage(name: string): void {
   if (!keeperName) return
   const controller = getStreamController(keeperName)
   const entryId = activeStreamEntryId(keeperName)
-  console.debug(`[keeper-stream] aborting stream for ${keeperName}${entryId ? ` (entry=${entryId})` : ''}`)
+  const requestId = activeStreamRequestId(keeperName)
+  console.debug(`[keeper-stream] aborting stream for ${keeperName}${entryId ? ` (entry=${entryId})` : ''}${requestId ? ` request=${requestId}` : ''}`)
+  if (requestId) cancelKeeperThreadRequest(keeperName, requestId)
   if (controller) controller.abort()
   if (entryId) {
     finalizeAssistantEntry(keeperName, entryId, {

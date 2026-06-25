@@ -1,7 +1,6 @@
 import { callMcpTool } from './api/mcp'
 import { runOperatorAction } from './api/core'
 import {
-  cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
   fetchQueuedKeeperMessageResult,
   isTerminalQueuedKeeperMessage,
@@ -53,10 +52,11 @@ import {
   liveSendOwnsRequest,
   releaseLiveSendRequest,
   setActiveStream,
+  setActiveStreamRequestId,
   setRecordValue,
   setStatusDetail,
 } from './keeper-state'
-import { abortKeeperThreadMessage, applyKeeperStreamEvent } from './keeper-stream'
+import { abortKeeperThreadMessage, applyKeeperStreamEvent, cancelKeeperThreadRequest } from './keeper-stream'
 import {
   KEEPER_HISTORY_TAIL_MESSAGES,
 } from './config/constants'
@@ -707,6 +707,7 @@ export async function sendKeeperThreadMessage(
             // This live send now owns the request; resume must defer to it
             // (and not mint a duplicate pending entry) until handoff/finally.
             claimLiveSendRequest(requestId, keeperName)
+            setActiveStreamRequestId(keeperName, requestId)
             upsertPendingKeeperChatRequest({
               requestId,
               keeperName,
@@ -790,11 +791,7 @@ export async function sendKeeperThreadMessage(
   } catch (err) {
     if (isAbortError(err)) {
       if (requestId) {
-        try {
-          await cancelQueuedKeeperMessage(requestId)
-        } catch (cancelErr) {
-          console.warn(`[keeper] queue cancel failed for ${keeperName}`, cancelErr instanceof Error ? cancelErr.message : cancelErr)
-        }
+        cancelKeeperThreadRequest(keeperName, requestId)
         removePendingKeeperChatRequest(requestId)
       }
       finalizeAssistantEntry(keeperName, localId, {

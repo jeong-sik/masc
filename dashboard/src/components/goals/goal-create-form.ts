@@ -8,8 +8,6 @@ import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { TextInput } from '../common/input'
 import { ActionButton } from '../common/button'
-import { KeeperBadge } from '../keeper-badge'
-import { keepers } from '../../store'
 import {
   showGoalCreate,
   goalCreating,
@@ -19,25 +17,18 @@ import {
   GOAL_PRIORITY_MIN,
   GOAL_PRIORITY_MAX,
   GOAL_PRIORITY_DEFAULT,
-  GOAL_HORIZONS,
-  GOAL_HORIZON_LABELS,
 } from './goal-create-state'
-import type { GoalHorizon } from './goal-create-state'
 
 // ── Local form state signals ─────────────────────────────────────────────────
 
 const titleSignal = signal('')
 const prioritySignal = signal(GOAL_PRIORITY_DEFAULT)
 const approvalSignal = signal(false)
-const horizonSignal = signal<GoalHorizon>('long')
-const leadKeeperSignal = signal<string | null>(null)
 
 export function resetGoalCreateFormLocal(): void {
   titleSignal.value = ''
   prioritySignal.value = GOAL_PRIORITY_DEFAULT
   approvalSignal.value = false
-  horizonSignal.value = 'long'
-  leadKeeperSignal.value = null
   resetGoalCreateForm()
 }
 
@@ -68,8 +59,6 @@ export function GoalCreateForm() {
       title: titleSignal.value,
       priority: prioritySignal.value,
       require_completion_approval: approvalSignal.value,
-      horizon: horizonSignal.value,
-      lead_keeper: leadKeeperSignal.value,
     }).then(ok => {
       if (ok) resetLocalForm()
     })
@@ -128,22 +117,6 @@ export function GoalCreateForm() {
         </div>
 
         <div class="wk-goal-create-sec">
-          <label class="wk-goal-create-label">호라이즌 · 계획 주기</label>
-          <div class="wk-goal-create-chips" role="radiogroup" aria-label="호라이즌">
-            ${GOAL_HORIZONS.map(h => html`
-              <button
-                type="button"
-                key=${h}
-                class=${`wk-chip ${horizonSignal.value === h ? 'on' : ''}`}
-                role="radio"
-                aria-checked=${horizonSignal.value === h}
-                onClick=${() => { horizonSignal.value = h }}
-              >${GOAL_HORIZON_LABELS[h]}</button>
-            `)}
-          </div>
-        </div>
-
-        <div class="wk-goal-create-sec">
           <label
             for="goal-create-priority"
             class="wk-goal-create-label"
@@ -163,39 +136,10 @@ export function GoalCreateForm() {
         </div>
 
         <div class="wk-goal-create-sec">
-          <label class="wk-goal-create-label">예상 위험도 horizon + priority</label>
+          <label class="wk-goal-create-label">예상 위험도 · priority</label>
           <div class="wk-goal-create-risk">
             <span class="wk-goal-create-risk-level">Safe</span>
             <span class="wk-goal-create-risk-desc">가드 통과 · 자율 실행</span>
-          </div>
-        </div>
-
-        <div class="wk-goal-create-sec">
-          <label class="wk-goal-create-label">리드 KEEPER</label>
-          <div class="wk-goal-create-keepers">
-            <button
-              type="button"
-              class=${`wk-keeper-chip ${leadKeeperSignal.value === null ? 'on' : ''}`}
-              onClick=${() => { leadKeeperSignal.value = null }}
-              title="미지정"
-              aria-label="미지정"
-            >
-              <span class="wk-keeper-avatar-none" aria-hidden="true">?</span>
-              <span>미지정</span>
-            </button>
-            ${keepers.value.map(k => html`
-              <button
-                type="button"
-                key=${k.name}
-                class=${`wk-keeper-chip ${leadKeeperSignal.value === k.name ? 'on' : ''}`}
-                onClick=${() => { leadKeeperSignal.value = k.name }}
-                title=${k.name}
-                aria-label=${k.name}
-              >
-                <${KeeperBadge} id=${k.name} size="sm" variant="sigil" />
-                <span>${k.name}</span>
-              </button>
-            `)}
           </div>
         </div>
 

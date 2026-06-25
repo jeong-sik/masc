@@ -1446,45 +1446,6 @@
   color: var(--color-fg-secondary);
 }
 
-.wk-goal-create-keepers {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.375rem;
-}
-
-.wk-keeper-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.25rem 0.5rem;
-  border-radius: var(--r-1);
-  border: 1px solid var(--color-border-default);
-  background: var(--color-bg-elevated);
-  color: var(--color-fg-muted);
-  font-size: var(--text-3xs);
-  cursor: pointer;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
-}
-
-.wk-keeper-chip.on {
-  border-color: var(--color-accent-fg);
-  box-shadow: 0 0 0 1px var(--color-accent-fg);
-  color: var(--color-fg-primary);
-}
-
-.wk-keeper-avatar-none {
-  width: 1.25rem;
-  height: 1.25rem;
-  border-radius: 9999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-bg-page);
-  border: 1px solid var(--color-border-default);
-  font-size: var(--text-3xs);
-  color: var(--color-fg-muted);
-}
-
 /* ── Kanban board ────────────────────────────────────────────────────────── */
 
 .wk-kanban {

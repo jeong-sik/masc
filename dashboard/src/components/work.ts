@@ -1145,7 +1145,7 @@ function WorkSurfaceV2() {
           <div>
             <span class="ov-eyebrow">GOAL STORE</span>
             <h1>작업 · 목표</h1>
-            <p class="ov-sub">Goal → Task → keeper · horizon으로 묶고 게이트 증거로 검증</p>
+            <p class="ov-sub">Goal → Task → keeper · 우선순위 순 정렬과 게이트 증거로 검증</p>
           </div>
           <div class="wk-head-r">
             <div class="wk-viewseg" role="tablist" data-testid="work-viewseg">

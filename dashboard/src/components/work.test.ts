@@ -516,6 +516,7 @@ describe('Work', () => {
         const rawCalls = callMcpToolMock.mock.calls as unknown as [string, Record<string, unknown>][]
         const callArgs = rawCalls[0]?.[1] ?? {}
         expect(callArgs).not.toHaveProperty('horizon')
+        expect(callArgs).not.toHaveProperty('lead_keeper')
         expect(callArgs).not.toHaveProperty('status')
         expect(callArgs).not.toHaveProperty('phase')
       })

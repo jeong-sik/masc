@@ -571,7 +571,7 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
     shellCounts: input.counts,
     shellConfiguredKeepers: input.counts?.configured_keepers,
     runtimeFleetSafety: runtime?.fleet_safety ?? null,
-    runtimeHealthGeneratedAt: input.runtimeGeneratedAt,
+    runtimeHealthGeneratedAt: input.runtimeGeneratedAt ?? runtime?.generated_at ?? null,
   })
   const configured = runtimeCounts.configured.keepers
   const liveKeepers = runtimeCounts.live.keepers
@@ -756,7 +756,7 @@ export function DashboardHealthStrip() {
       namespaceTruthConfiguredKeepers: namespaceTruth.value?.root.configured_keepers,
       keepers: keepers.value,
       runtimeResolution: shellRuntimeResolution.value,
-      runtimeGeneratedAt: serverStatus.value?.generated_at ?? null,
+      runtimeGeneratedAt: shellRuntimeResolution.value?.generated_at ?? null,
       runtimeProviderProbe: shellRuntimeProviderProbe.value,
       runtimeProviderProbeError: shellRuntimeProviderProbeError.value,
       executionError: executionError.value,

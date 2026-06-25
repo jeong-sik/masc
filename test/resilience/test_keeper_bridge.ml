@@ -301,7 +301,8 @@ let test_pipeline_writes_attempted_then_outcome_audit_when_executor_supplied
   assert (Option.is_some outcome.audit_envelope_id);
   let recent = Shared_audit.Store.recent store ~n:2 in
   assert (List.length recent = 2);
-  (* recent returns chronological order: pre-flight attempt, then outcome. *)
+  (* Store.recent returns the most recent entries in chronological order:
+     pre-flight RecoveryAttempted, then the outcome. *)
   match recent with
   | [ attempted_env; outcome_env ] ->
       assert (

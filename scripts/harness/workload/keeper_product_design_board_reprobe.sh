@@ -185,9 +185,13 @@ init_mcp_session() {
     return 0
   fi
 
-  local headers_file body_file init_body session_id protocol_version deadline
+  local headers_file body_file auth_header_file init_body session_id protocol_version deadline
   headers_file="$(mcp_mktemp_file "keeper-product-design-init" ".headers")"
   body_file="$(mcp_mktemp_file "keeper-product-design-init" ".body")"
+  auth_header_file=""
+  if [[ -n "${MCP_TOKEN:-}" ]]; then
+    auth_header_file="$(_mcp_auth_header_file)" || auth_header_file=""
+  fi
   init_body="$(
     jq -cn --arg client_name "$MCP_CLIENT_NAME" \
       '{jsonrpc:"2.0", id:1, method:"initialize", params:{protocolVersion:"2025-11-25", clientInfo:{name:$client_name, version:"1.0"}, capabilities:{}}}'
@@ -215,8 +219,8 @@ init_mcp_session() {
       -H "Content-Type: application/json"
       -H "Accept: application/json, text/event-stream"
     )
-    if [[ -n "$MCP_TOKEN" ]]; then
-      cmd+=( -H "Authorization: Bearer $MCP_TOKEN" )
+    if [[ -n "$auth_header_file" ]]; then
+      cmd+=( -H "@$auth_header_file" )
     fi
     cmd+=( --data-binary "$init_body" )
 
@@ -236,7 +240,7 @@ init_mcp_session() {
   if [[ -z "${session_id:-}" ]]; then
     echo "MCP initialize did not return Mcp-Session-Id before ${INIT_TIMEOUT_SEC}s deadline" >&2
     cat "$body_file" >&2 || true
-    rm -f "$headers_file" "$body_file"
+    rm -f "$headers_file" "$body_file" "$auth_header_file"
     exit 1
   fi
 
@@ -246,7 +250,7 @@ init_mcp_session() {
     MCP_PROTOCOL_VERSION="$protocol_version"
     export MCP_PROTOCOL_VERSION
   fi
-  rm -f "$headers_file" "$body_file"
+  rm -f "$headers_file" "$body_file" "$auth_header_file"
 }
 
 ensure_mcp_session_if_needed() {

@@ -92,7 +92,8 @@ let masc_dashboard_spec : tool_spec =
        to choose the current task-focused view or the full workspace view."
   ; parameters =
       [ { p_name = "scope"
-        ; p_type = T_string { enum = Some dashboard_scope_enum_strings; default = Some "current" }
+        ; p_type =
+            T_string { enum = Some dashboard_scope_enum_strings; default = Some "current" }
         ; p_description = "Dashboard scope: current or all"
         ; p_required = false
         }

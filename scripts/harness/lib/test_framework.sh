@@ -29,6 +29,10 @@ curl_post_mcp() {
   local output=""
   local auth_token
   auth_token="$(mcp_default_auth_token)"
+  local auth_header_file=""
+  if [ -n "$auth_token" ]; then
+    auth_header_file="$(_mcp_auth_header_file "$auth_token")" || auth_header_file=""
+  fi
   local -a headers=(
     -H 'Content-Type: application/json'
     -H 'Accept: application/json, text/event-stream'
@@ -36,13 +40,14 @@ curl_post_mcp() {
   if [ -n "$MCP_SESSION_ID" ]; then
     headers+=( -H "mcp-session-id: $MCP_SESSION_ID" )
   fi
-  if [ -n "$auth_token" ]; then
-    headers+=( -H "Authorization: Bearer $auth_token" )
+  if [ -n "$auth_header_file" ]; then
+    headers+=( -H "@$auth_header_file" )
   fi
   while [ "$attempt" -le "$CURL_RETRY_COUNT" ]; do
     if output="$(curl -sS -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
       "${headers[@]}" \
       -d "$body" 2>/dev/null)"; then
+      rm -f "$auth_header_file"
       printf "%s" "$output"
       return 0
     fi
@@ -51,21 +56,26 @@ curl_post_mcp() {
     fi
     attempt=$((attempt + 1))
   done
+  rm -f "$auth_header_file"
   return 1
 }
 
 initialize_mcp_session() {
-  local headers_file body_file
+  local headers_file body_file auth_header_file=""
   headers_file="$(mcp_mktemp_file "masc-init-headers")"
   body_file="$(mcp_mktemp_file "masc-init-body")"
   local auth_token
   auth_token="$(mcp_default_auth_token)"
+  if [ -n "$auth_token" ]; then
+    auth_header_file="$(_mcp_auth_header_file "$auth_token")" || auth_header_file=""
+  fi
+  trap 'rm -f "$headers_file" "$body_file" "$auth_header_file"' RETURN
   local -a init_headers=(
     -H 'Content-Type: application/json'
     -H 'Accept: application/json, text/event-stream'
   )
-  if [ -n "$auth_token" ]; then
-    init_headers+=( -H "Authorization: Bearer $auth_token" )
+  if [ -n "$auth_header_file" ]; then
+    init_headers+=( -H "@$auth_header_file" )
   fi
 
   if curl -sS -m "$CURL_TIMEOUT_SEC" -D "$headers_file" -o "$body_file" -X POST "$MCP_URL" \
@@ -89,8 +99,8 @@ initialize_mcp_session() {
         -H 'Accept: application/json, text/event-stream'
         -H "mcp-session-id: $MCP_SESSION_ID"
       )
-      if [ -n "$auth_token" ]; then
-        initialized_headers+=( -H "Authorization: Bearer $auth_token" )
+      if [ -n "$auth_header_file" ]; then
+        initialized_headers+=( -H "@$auth_header_file" )
       fi
       curl -sS -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
         "${initialized_headers[@]}" \
@@ -99,7 +109,7 @@ initialize_mcp_session() {
     fi
   fi
 
-  rm -f "$headers_file" "$body_file"
+  rm -f "$headers_file" "$body_file" "$auth_header_file"
   [ -n "$MCP_SESSION_ID" ]
 }
 

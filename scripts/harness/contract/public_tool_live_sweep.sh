@@ -73,11 +73,16 @@ call_method() {
   jsonrpc_normalize_response "$raw" "$id"
 }
 
-extract_token() {
-  local text="$1"
-  local pattern="$2"
-  printf '%s\n' "$text" | grep -oE "$pattern" | head -n1 || true
+CLEANUP_TASK_FINALIZED=0
+# shellcheck disable=SC2329 # invoked by EXIT trap
+cleanup_contract_task() {
+  local exit_status=$?
+  if [ "$CLEANUP_TASK_FINALIZED" -ne 1 ] && [ -n "${task_id:-}" ]; then
+    call_tool 5999 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"cancel",notes:"public tool sweep cleanup after unsuccessful run"}')" >/dev/null 2>&1 || true
+  fi
+  exit "$exit_status"
 }
+trap 'cleanup_contract_task' EXIT
 
 manifest_json="$(
   env -u DUNE_RPC MASC_STORAGE_TYPE=filesystem \
@@ -91,6 +96,10 @@ initialize_mcp_session || {
   echo "FAIL: failed to initialize MCP session" >&2
   exit 1
 }
+if [[ -z "${MCP_SESSION_ID:-}" ]]; then
+  echo "FAIL: empty MCP_SESSION_ID after initialize" >&2
+  exit 1
+fi
 
 echo "[2/31] tools/list matches expected public surface"
 tools_list_payload="$(call_method 5001 "tools/list" '{}')"
@@ -149,9 +158,6 @@ task_id="$(
     | head -n1
 )"
 if [[ -z "$task_id" ]]; then
-  task_id="$(response_text_or_error "$r_add_task" | grep -oE 'task-[A-Za-z0-9_-]+' | head -n1 || true)"
-fi
-if [[ -z "$task_id" ]]; then
   mcp_fail_with_context "masc_add_task: could not extract task_id" "$r_add_task"
 fi
 
@@ -208,9 +214,6 @@ post_id="$(
     | head -n1
 )"
 if [[ -z "$post_id" ]]; then
-  post_id="$(response_text_or_error "$r_board_post" | grep -oE '(post|p)-[A-Za-z0-9_-]+' | head -n1 || true)"
-fi
-if [[ -z "$post_id" ]]; then
   mcp_fail_with_context "masc_board_post: could not extract post_id" "$r_board_post"
 fi
 
@@ -231,7 +234,7 @@ comment_id="$(
     | head -n1
 )"
 if [[ -z "$comment_id" ]]; then
-  comment_id="$(response_text_or_error "$r_board_comment" | grep -oE '(comment|c)-[A-Za-z0-9_-]+' | head -n1 || true)"
+  mcp_fail_with_context "masc_board_comment: could not extract comment_id" "$r_board_comment"
 fi
 
 echo "[27/31] masc_board_vote"
@@ -257,5 +260,6 @@ expect_ok "masc_persona_list" "$r_persona_list"
 echo "[31/31] masc_agent_timeline"
 r_agent_timeline="$(call_tool 5036 "masc_agent_timeline" "$(jq -cn --arg agent_name "$AGENT_NAME" '{agent_name:$agent_name,limit:5}')")"
 expect_ok "masc_agent_timeline" "$r_agent_timeline"
+CLEANUP_TASK_FINALIZED=1
 
 echo "PASS: public MCP tool live sweep"

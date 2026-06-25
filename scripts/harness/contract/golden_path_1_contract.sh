@@ -12,22 +12,37 @@
 #   MCP_URL=http://127.0.0.1:9935/mcp ./golden_path_1_contract.sh  # dev instance
 set -euo pipefail
 
-AGENT_NAME="${AGENT_NAME:-admin}"
+AGENT_NAME="${AGENT_NAME:-golden-path-1-harness}"
 MCP_SESSION_ID="${MCP_SESSION_ID:-}"
 export MCP_SESSION_ID
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-START_PATH="${BASE_PATH:-$ROOT_DIR}"
 source "${SCRIPT_DIR}/../lib/test_framework.sh"
-
-extract_text() {
-  jq -r 'if ._harness_error? then empty else try (.result.content[0].text) catch empty end'
-}
 
 PASS=0
 FAIL=0
 GOAL_ID=""
+CLEANUP_TASK_FINALIZED=0
+START_PATH="${BASE_PATH:-$PWD}"
+
+# shellcheck disable=SC2329 # invoked by EXIT trap
+cleanup_contract_task() {
+  local exit_status=$?
+  if [ "$CLEANUP_TASK_FINALIZED" -ne 1 ] && [ -n "${task_id:-}" ]; then
+    call_tool 1999 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"cancel",notes:"GP1 contract cleanup after unsuccessful run"}')" >/dev/null 2>&1 || true
+  fi
+  exit "$exit_status"
+}
+trap 'cleanup_contract_task' EXIT
+
+initialize_mcp_session || {
+  echo "FAIL: failed to initialize MCP session" >&2
+  exit 1
+}
+if [ -z "${MCP_SESSION_ID:-}" ]; then
+  echo "FAIL: empty MCP_SESSION_ID after initialize" >&2
+  exit 1
+fi
 
 ensure_contract_goal() {
   local goal_payload
@@ -41,15 +56,8 @@ ensure_contract_goal() {
   fi
 }
 
-ensure_contract_goal
-
 step_pass() { PASS=$((PASS + 1)); echo "  PASS"; }
 step_fail() { FAIL=$((FAIL + 1)); echo "  FAIL: $1"; }
-
-cleanup() {
-  :
-}
-trap cleanup EXIT
 
 # ── Step 1/8: start ──
 echo "[1/8] masc_start"
@@ -61,6 +69,12 @@ else
   echo "$r1"
   exit 1
 fi
+if [ -z "${MCP_SESSION_ID:-}" ]; then
+  step_fail "empty MCP_SESSION_ID after masc_start"
+  exit 1
+fi
+
+ensure_contract_goal
 
 # ── Step 2/8: add_task ──
 echo "[2/8] masc_add_task"
@@ -72,9 +86,8 @@ else
   echo "$r2"
   exit 1
 fi
-# Extract task_id from response
-task_text="$(printf "%s" "$r2" | extract_text)"
-task_id="$(printf "%s\n" "$task_text" | grep -oE 'task-[0-9]+(-[0-9]+)?' | head -n1 || true)"
+task_json="$(printf '%s' "$r2" | extract_result)"
+task_id="$(printf '%s' "$task_json" | jq -r '.task_id // .id // empty')"
 if [ -z "$task_id" ]; then
   step_fail "could not extract task_id from add_task response"
   echo "$r2"
@@ -137,6 +150,7 @@ fi
 echo "[8/8] masc_transition (done)"
 r8="$(call_tool 1008 "masc_transition" "{\"task_id\":\"$task_id\",\"agent_name\":\"$AGENT_NAME\",\"action\":\"done\",\"notes\":\"Completed GP1 contract flow: bound workspace, created and claimed task, set current task, sent heartbeat, broadcast progress, and verified masc_status returned success.\"}")"
 if require_ok "$r8"; then
+  CLEANUP_TASK_FINALIZED=1
   step_pass
 else
   step_fail "done transition failed"

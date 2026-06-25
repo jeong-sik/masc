@@ -3,12 +3,13 @@ rfc: "0265"
 title: "Capability-driven proactive runtime reroute (modality-gated)"
 status: Draft
 created: 2026-06-19
-updated: 2026-06-19
+updated: 2026-06-25
 author: jeong-sik
 supersedes: []
 superseded_by: null
 superseded_sections: []
 related: ["0207", "0181", "0126", "0145", "0037", "0260", "0211", "0206", "0001"]
+draft_amendments: ["RFC-keeper-vision-delegation-tool"]
 implementation_prs: []
 ---
 
@@ -19,6 +20,12 @@ implementation_prs: []
 - Builds on: RFC-0207 (per-keeper runtime routing), RFC-0181 (capability-intent
   runtime SSOT), RFC-0126/0145 (silent-fallback discipline), RFC-0037
   (board multimedia/vision).
+- Amended by (draft, 2026-06-25): `RFC-keeper-vision-delegation-tool` proposes to
+  partially supersede the **image/document** modality path with vision-as-a-tool
+  delegation (decouple "which model reads the image" from the conversation
+  runtime). Reciprocal of that draft's `supersedes-partial` claim so the
+  relationship is discoverable from both sides (avoids the one-sided-supersedes
+  blind spot in RFC tooling).
 
 ## 0. Summary
 

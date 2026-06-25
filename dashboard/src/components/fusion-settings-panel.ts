@@ -47,7 +47,11 @@ export function FusionSettingsPanel() {
     return html`<div class="set-hint" data-testid="fusion-settings-loading">설정을 불러오는 중…</div>`
   }
 
-  const patch = (next: Partial<FusionSettings>) => setValues({ ...values, ...next })
+  const patch = (next: Partial<FusionSettings>) => {
+    setValues({ ...values, ...next })
+    // Editing after a save dismisses the stale saved/error banner.
+    if (state === 'saved' || state === 'error') setState('idle')
+  }
 
   const onSave = async () => {
     if (source === null) return
@@ -90,13 +94,8 @@ export function FusionSettingsPanel() {
           onInput=${(e: Event) => patch({ maxConcurrentPanels: num(e) })} />
       </label>
       <label class="set-line">
-        <span>시간당 budget (per_hour_budget)</span>
-        <input type="number" min="1" max="100" value=${values.perHourBudget}
-          onInput=${(e: Event) => patch({ perHourBudget: num(e) })} />
-      </label>
-      <label class="set-line">
         <span>최소 응답 패널 (${values.defaultPreset || '프리셋'} min_answered)</span>
-        <input type="number" min="1" value=${values.minAnswered}
+        <input type="number" min="1" data-testid="fusion-min-answered" value=${values.minAnswered}
           onInput=${(e: Event) => patch({ minAnswered: num(e) })} />
       </label>
       <div class="set-line">

@@ -5,13 +5,31 @@
 // and untouched keys survive). The backend `Runtime.save_config_text` remains
 // the validation SSOT (e.g. min_answered range), so this layer only transforms
 // text; an invalid value is rejected on save, never silently coerced here.
+//
+// per_hour_budget is intentionally NOT exposed: RFC-0277 §3 removed the fusion
+// activation budget ([fusion.gate].per_hour_budget) from the backend, so editing
+// it would be a zombie surface (the key is no longer consumed).
+//
+// Limitation: get/setRuntimeTomlKey are line-oriented over `key = value` lines
+// inside a `[section]` (dotted section names like `fusion.presets.trio` are
+// matched as literal headers). Inline tables and multi-line string values are
+// out of scope — the fusion keys here are all scalar single-line values.
 import { getRuntimeTomlKey, setRuntimeTomlKey } from './runtime-toml-config'
+
+// TOML section/key names, kept in one place rather than inlined at each call
+// site (mirrors lib/fusion_core/fusion_config.ml — the OCaml parser is the SSOT
+// for the wire names).
+const SECTION_FUSION = 'fusion'
+const KEY_ENABLED = 'enabled'
+const KEY_DEFAULT_PRESET = 'default_preset'
+const KEY_MAX_CONCURRENT_PANELS = 'max_concurrent_panels'
+const KEY_MIN_ANSWERED = 'min_answered'
+const presetSection = (preset: string): string => `${SECTION_FUSION}.presets.${preset}`
 
 export interface FusionSettings {
   readonly enabled: boolean
   readonly defaultPreset: string
   readonly maxConcurrentPanels: number
-  readonly perHourBudget: number
   // min_answered for the default preset (RFC-0252 answered-panel quorum).
   readonly minAnswered: number
 }
@@ -23,7 +41,6 @@ export const FUSION_SETTINGS_DEFAULTS: FusionSettings = {
   enabled: false,
   defaultPreset: '',
   maxConcurrentPanels: 1,
-  perHourBudget: 0,
   minAnswered: 1,
 }
 
@@ -38,24 +55,18 @@ function unquote(token: string | undefined): string {
   return token.replace(/^"(.*)"$/, '$1')
 }
 
-const presetSection = (preset: string): string => `fusion.presets.${preset}`
-
 export function readFusionSettings(sourceText: string): FusionSettings {
-  const enabled = getRuntimeTomlKey(sourceText, 'fusion', 'enabled')
-  const preset = unquote(getRuntimeTomlKey(sourceText, 'fusion', 'default_preset'))
+  const enabled = getRuntimeTomlKey(sourceText, SECTION_FUSION, KEY_ENABLED)
+  const preset = unquote(getRuntimeTomlKey(sourceText, SECTION_FUSION, KEY_DEFAULT_PRESET))
   const minAnswered = preset
-    ? getRuntimeTomlKey(sourceText, presetSection(preset), 'min_answered')
+    ? getRuntimeTomlKey(sourceText, presetSection(preset), KEY_MIN_ANSWERED)
     : undefined
   return {
     enabled: enabled === undefined ? FUSION_SETTINGS_DEFAULTS.enabled : enabled === 'true',
     defaultPreset: preset,
     maxConcurrentPanels: asInt(
-      getRuntimeTomlKey(sourceText, 'fusion', 'max_concurrent_panels'),
+      getRuntimeTomlKey(sourceText, SECTION_FUSION, KEY_MAX_CONCURRENT_PANELS),
       FUSION_SETTINGS_DEFAULTS.maxConcurrentPanels,
-    ),
-    perHourBudget: asInt(
-      getRuntimeTomlKey(sourceText, 'fusion.gate', 'per_hour_budget'),
-      FUSION_SETTINGS_DEFAULTS.perHourBudget,
     ),
     minAnswered: asInt(minAnswered, FUSION_SETTINGS_DEFAULTS.minAnswered),
   }
@@ -66,12 +77,11 @@ export function readFusionSettings(sourceText: string): FusionSettings {
 // returned text is what gets POSTed to /api/v1/runtime/config/raw.
 export function applyFusionSettings(sourceText: string, s: FusionSettings): string {
   let text = sourceText
-  text = setRuntimeTomlKey(text, 'fusion', 'enabled', s.enabled)
-  text = setRuntimeTomlKey(text, 'fusion', 'default_preset', s.defaultPreset)
-  text = setRuntimeTomlKey(text, 'fusion', 'max_concurrent_panels', s.maxConcurrentPanels)
-  text = setRuntimeTomlKey(text, 'fusion.gate', 'per_hour_budget', s.perHourBudget)
+  text = setRuntimeTomlKey(text, SECTION_FUSION, KEY_ENABLED, s.enabled)
+  text = setRuntimeTomlKey(text, SECTION_FUSION, KEY_DEFAULT_PRESET, s.defaultPreset)
+  text = setRuntimeTomlKey(text, SECTION_FUSION, KEY_MAX_CONCURRENT_PANELS, s.maxConcurrentPanels)
   if (s.defaultPreset !== '') {
-    text = setRuntimeTomlKey(text, presetSection(s.defaultPreset), 'min_answered', s.minAnswered)
+    text = setRuntimeTomlKey(text, presetSection(s.defaultPreset), KEY_MIN_ANSWERED, s.minAnswered)
   }
   return text
 }

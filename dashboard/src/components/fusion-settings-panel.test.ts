@@ -54,7 +54,7 @@ describe('FusionSettingsPanel', () => {
   it('loads live config and renders the editor with the current min_answered', async () => {
     fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE }))
     await mount()
-    const minInput = container.querySelectorAll('input[type="number"]')[2] as HTMLInputElement
+    const minInput = q('[data-testid="fusion-min-answered"]') as HTMLInputElement
     expect(minInput.value).toBe('2')
   })
 

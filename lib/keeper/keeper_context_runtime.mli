@@ -73,6 +73,8 @@ val context_of_oas_checkpoint
 
 val save_oas_checkpoint
   :  max_checkpoint_messages:int
+  -> multimodal_policy:Keeper_types_profile.multimodal_policy
+  -> keeper_name:string
   -> session:session_context
   -> agent_name:string
   -> ctx:working_context

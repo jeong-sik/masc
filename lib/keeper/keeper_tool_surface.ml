@@ -613,6 +613,8 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                (match
                   Keeper_context_runtime.save_oas_checkpoint
                     ~max_checkpoint_messages
+                    ~multimodal_policy:meta.multimodal_policy
+                    ~keeper_name:meta.name
                     ~session
                     ~agent_name:meta.agent_name
                     ~ctx:cleared_ctx

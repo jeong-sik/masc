@@ -25,10 +25,29 @@ let path_of ~dir (h : handle) = Filename.concat dir h
 
 let store ~dir (raw : string) : (handle, string) result =
   let h = hash raw in
-  Fs_compat.mkdir_p dir;
-  match Fs_compat.save_file_atomic (path_of ~dir h) raw with
-  | Ok () -> Ok h
-  | Error msg -> Error (Printf.sprintf "Vision_artifact_store.store: %s" msg)
+  (* [Fs_compat.mkdir_p] returns unit and raises on failure (EACCES, ENOSPC, a
+     parent path component that is a regular file, test-isolation breach). Honor
+     the [.mli]'s "Error on I/O failure" contract by converting those to [Error]
+     — a total function. Eio cancellation is not an I/O error: re-raise it so the
+     fiber unwinds. *)
+  match
+    (try
+       Fs_compat.mkdir_p dir;
+       Ok ()
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "Vision_artifact_store.store: mkdir %s: %s"
+            dir
+            (Printexc.to_string exn)))
+  with
+  | Error _ as e -> e
+  | Ok () ->
+    (match Fs_compat.save_file_atomic (path_of ~dir h) raw with
+     | Ok () -> Ok h
+     | Error msg -> Error (Printf.sprintf "Vision_artifact_store.store: %s" msg))
 
 let load ~dir (h : handle) : (string, string) result =
   if not (is_canonical h) then

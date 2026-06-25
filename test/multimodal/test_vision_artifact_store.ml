@@ -20,6 +20,14 @@ let ok = function
   | Ok v -> v
   | Error e -> failwith e
 
+(* substring check (no extra deps) — pins error identity, not just Error/Ok. *)
+let mentions ~needle s =
+  let nl = String.length needle and sl = String.length s in
+  let rec go i =
+    i + nl <= sl && (String.equal (String.sub s i nl) needle || go (i + 1))
+  in
+  go 0
+
 (* store -> load round-trips arbitrary binary bytes losslessly. *)
 let test_round_trip () =
   let dir = temp_dir () in
@@ -72,13 +80,19 @@ let test_corruption_detected () =
   | Ok _ -> assert false
 
 (* a malformed handle (path-traversal, non-hex, wrong length, uppercase) is
-   rejected before any filesystem access — fail closed, no read outside [dir]. *)
+   rejected by the SHAPE guard before any filesystem access — fail closed, no
+   read outside [dir]. Asserting the error is specifically "malformed handle"
+   (not just any Error) pins the guard: with [is_canonical] removed, a traversal
+   handle falls through to a not-found / hash-mismatch error instead, and this
+   test goes red. The dir is seeded so a non-guarded load would actually reach
+   the filesystem. *)
 let test_malformed_handle_rejected () =
   let dir = temp_dir () in
+  ignore (ok (S.store ~dir "seed so dir exists"));
   List.iter
     (fun bad ->
       match S.load ~dir (S.of_string bad) with
-      | Error _ -> ()
+      | Error msg -> assert (mentions ~needle:"malformed handle" msg)
       | Ok _ -> assert false)
     [ "../../etc/passwd";
       "/etc/passwd";

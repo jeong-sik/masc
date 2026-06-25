@@ -188,7 +188,7 @@ let test_source_path_contract_resolves_valid_relative () =
      mangles or relativizes the resolved path. *)
   let resolved = Masc_test_deps.source_path "lib/keeper" in
   check bool "source_path returns an absolute path" true
-    (Filename.is_absolute resolved);
+    (not (Filename.is_relative resolved));
   check bool "source_path lands on a real keeper directory" true
     (Sys.is_directory resolved)
 ;;

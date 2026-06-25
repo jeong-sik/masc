@@ -156,6 +156,11 @@ let all_flags : flag list = [
     default = true; category = "dashboard";
     lifecycle = Active; since = "2.140.0" };
 
+  { env_name = "MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE";
+    description = "Serve stale operator snapshots while recomputing in the background";
+    default = true; category = "dashboard";
+    lifecycle = Active; since = "2.150.0" };
+
   (* ── Inference & Chain ────────────────────────────────────── *)
   { env_name = "MASC_INFERENCE_CACHE_ENABLED";
     description = "L1+L2 inference response caching";

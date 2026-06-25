@@ -117,6 +117,20 @@ module Operator = struct
 
   (** Operator snapshot cache TTL (seconds). Default: 30. *)
   let cache_ttl_sec = get_float ~default:30.0 "MASC_OPERATOR_CACHE_TTL"
+
+  (** Stale-while-revalidate grace factor. After the TTL expires, the
+      previous snapshot is still served for [ttl * factor] seconds while a
+      background fiber recomputes. Default: 3.0 (max 90 s stale at default TTL).
+      @category Timeouts
+      @ops_class operator *)
+  let cache_stale_grace_factor =
+    Float.max 0.0 (get_float ~default:3.0 "MASC_OPERATOR_CACHE_STALE_GRACE_FACTOR")
+
+  (** Enable background revalidation when serving stale snapshots.
+      Default: true. Disabling makes stale entries behave like the old
+      blocking TTL cache, which is useful for tests or strict-freshness mode. *)
+  let cache_background_revalidate =
+    Feature_flag_registry.get_bool "MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE"
 end
 
 (** {1 Dashboard Configuration} *)

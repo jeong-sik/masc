@@ -608,119 +608,7 @@ let snapshot_json
       include_summary_fields
       lightweight_summary
   in
-  (* Singleflight cache lookup: check for fresh hit, in-flight compute,
-     or start a new compute.  Uses Eio.Mutex for safe Hashtbl access.
-     Waiters await the owner's [Condition] broadcast (the [cond] stored in
-     the [Computing] slot, fired at compute finish), racing a short timer
-     via [Eio.Fiber.first] so they stay cancellable and re-check on a known
-     cadence as a lost-wakeup safety net.  The [Condition]+mutex machinery
-     was always present; the await replaces a prior blind poll-retry that
-     added up to [_poll_interval_s] latency per cache miss. *)
-  let _max_wait_s = 60.0 in
-  let _poll_interval_s = 0.25 in
-  let rec cache_lookup ~waited =
-    if not (Eio_guard.is_ready ())
-    then (
-      (* Pre-Eio: no concurrency, compute directly *)
-      let now = Time_compat.now () in
-      match Hashtbl.find_opt _snapshot_table cache_key with
-      | Some (Cached { value; expires_at }) when now < expires_at -> value
-      | _ ->
-        let result = compute_snapshot () in
-        let ts = Time_compat.now () in
-        _maybe_evict_snapshot ();
-        Hashtbl.replace
-          _snapshot_table
-          cache_key
-          (Cached { value = result; expires_at = ts +. _snapshot_ttl_s });
-        result)
-    else (
-      let action =
-        Eio.Mutex.use_rw ~protect:true _snapshot_mu (fun () ->
-          match Hashtbl.find_opt _snapshot_table cache_key with
-          | Some (Cached { value; expires_at }) when Time_compat.now () < expires_at ->
-            `Hit value
-          | Some (Computing { stale = Some value; _ }) -> `Hit value
-          | Some (Computing { cond; started_at; stuck_warned }) ->
-            if waited >= _max_wait_s && not !stuck_warned
-            then (
-              stuck_warned := true;
-              Log.Dashboard.warn
-                "[snapshot_json] Computing slot still running for %s \
-                 (waited=%.1fs elapsed=%.1fs); keeping singleflight owner"
-                cache_key
-                waited
-                (Time_compat.now () -. started_at));
-            `Wait cond
-          | Some (Cached { value; _ }) ->
-            let cond = Eio.Condition.create () in
-            _maybe_evict_snapshot ();
-            Hashtbl.replace
-              _snapshot_table
-              cache_key
-              (Computing
-                 { cond
-                 ; stale = Some value
-                 ; started_at = Time_compat.now ()
-                 ; stuck_warned = ref false
-                 });
-            `Compute cond
-          | _ ->
-            let cond = Eio.Condition.create () in
-            _maybe_evict_snapshot ();
-            Hashtbl.replace
-              _snapshot_table
-              cache_key
-              (Computing
-                 { cond
-                 ; stale = None
-                 ; started_at = Time_compat.now ()
-                 ; stuck_warned = ref false
-                 });
-            `Compute cond)
-      in
-      match action with
-      | `Hit value -> value
-      | `Wait _cond ->
-        (* Another fiber is computing this key.  We intentionally do NOT
-           [Eio.Condition.await] inside [Eio.Mutex.use_rw ~protect:true]:
-           [Condition.await] masks cancellation while blocked, so if the
-           short timer wins a [Fiber.first] race the waiter can remain stuck
-           until the original compute broadcasts.  A bounded poll-retry loop
-           keeps the waiter cancellable and preserves the retry cadence.
-           See [dashboard_cache.ml] and docs/spec/10-dashboard.md. *)
-        Eio.Time.sleep ctx.clock _poll_interval_s;
-        cache_lookup ~waited:(waited +. _poll_interval_s)
-      | `Compute cond ->
-        (match compute_snapshot () with
-         | result ->
-           let ts = Time_compat.now () in
-           Eio.Mutex.use_rw ~protect:true _snapshot_mu (fun () ->
-             (* Only write back if we still own the slot *)
-             match Hashtbl.find_opt _snapshot_table cache_key with
-             | Some (Computing { cond = c; _ }) when c == cond ->
-               _maybe_evict_snapshot ();
-               Hashtbl.replace
-                 _snapshot_table
-                 cache_key
-                 (Cached { value = result; expires_at = ts +. _snapshot_ttl_s })
-             | Some (Cached _) -> ()
-             | Some (Computing _) -> ()
-             | None -> ());
-           Eio.Condition.broadcast cond;
-           result
-         | exception exn ->
-           let bt = Printexc.get_raw_backtrace () in
-           Eio.Mutex.use_rw ~protect:true _snapshot_mu (fun () ->
-             match Hashtbl.find_opt _snapshot_table cache_key with
-             | Some (Computing { cond = c; _ }) when c == cond ->
-               Hashtbl.remove _snapshot_table cache_key
-             | Some (Cached _) -> ()
-             | Some (Computing _) -> ()
-             | None -> ());
-           Eio.Condition.broadcast cond;
-           Printexc.raise_with_backtrace exn bt))
-  and compute_snapshot () =
+  let compute_snapshot () =
     let t0 = Time_compat.now () in
     let timing_records = ref [] in
     let timed label f =
@@ -883,5 +771,6 @@ let snapshot_json
         (List.rev !timing_records));
     result
   in
-  cache_lookup ~waited:0.0
+  let ttl = Env_config_governance.Operator.cache_ttl_sec in
+  get_or_compute cache_key ~ttl compute_snapshot
 ;;

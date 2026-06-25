@@ -59,6 +59,9 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
 let find_project_root () =
   let marker = "config/tool_policy.toml" in
   let start_dir = Sys.getcwd () in
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when Sys.file_exists (Filename.concat root marker) -> root
+  | _ ->
   let rec walk dir =
     if Sys.file_exists (Filename.concat dir marker) then dir
     else

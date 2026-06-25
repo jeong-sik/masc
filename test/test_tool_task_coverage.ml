@@ -837,6 +837,71 @@ let () = test "handle_transition_force_release_by_admin_bypasses_nonowner_redire
        | None -> failwith "missing task-001 after forced release")
 )
 
+let () = test "handle_transition_valid_actions_respect_verification_disabled"
+    (fun () ->
+  let ctx = make_test_ctx_with_agent "owner-agent" in
+  let _ =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("title", `String "Verification disabled gate") ])
+  in
+  let _ =
+    Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("task_id", `String "task-001") ])
+  in
+  let result =
+    Task.Tool.handle_transition
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "submit_for_verification");
+          ( "notes"
+          , `String
+              "completion_notes: implementation completed with verification \
+               context. reviewable_evidence_ref: review evidence is attached."
+          );
+        ])
+  in
+  let message = Tool_result.message result in
+  assert (not (Tool_result.is_success result));
+  assert (str_contains message "Transition 'submit_for_verification'");
+  assert (str_contains message "Valid actions: claim, start, done, cancel, release");
+  assert (not (str_contains message "Valid actions: start, done, submit_for_verification"))
+)
+
+let () = test "handle_transition_expected_version_mismatch_does_not_retry_without_cas"
+    (fun () ->
+  let ctx = make_test_ctx () in
+  let _ =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("title", `String "CAS guarded task") ])
+  in
+  let result =
+    Task.Tool.handle_transition
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc
+         [
+           ("task_id", `String "task-001");
+           ("action", `String "claim");
+           ("expected_version", `Int 999);
+         ])
+  in
+  assert (not (Tool_result.is_success result));
+  match Workspace.get_tasks_raw ctx.Task.Tool.config with
+  | [ { Masc_domain.task_status = Masc_domain.Todo; _ } ] -> ()
+  | [ task ] ->
+    failwith
+      (Printf.sprintf
+         "expected stale expected_version to leave task todo, got %s"
+         (Masc_domain.task_status_to_string task.task_status))
+  | tasks ->
+    failwith (Printf.sprintf "expected one task, got %d" (List.length tasks))
+)
+
 let () = test "handle_transition_release_synthesizes_summary_from_notes" (fun () ->
   (* Field evidence (2026-04-17/18): 76/132 masc_transition failures were
      empty/missing handoff_context.summary while the caller still supplied a
@@ -1230,8 +1295,8 @@ let () = test "handle_transition_blocks_submitter_verdict_actions" (fun () ->
          assert (not (Tool_result.is_success result));
          assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
          assert (str_contains (Tool_result.message result) expected))
-      [ "approve", "Self-approval not allowed"
-      ; "reject", "Self-rejection not allowed"
+      [ "approve", "Transition 'approve'"
+      ; "reject", "Transition 'reject'"
       ];
     assert_task_awaiting_verification_by worker_ctx "worker"))
 
@@ -1434,7 +1499,7 @@ let () = test "keeper_shaped_non_keeper_claim_updates_planning_current_task" (fu
   assert (Tool_result.is_success result);
   assert (Planning_eio.get_current_task ctx.config = Some "task-002"))
 
-let () = test "handle_claim_auto_releases_previous_claimed_task" (fun () ->
+let () = test "handle_claim_rejects_when_agent_already_has_active_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
     Task.Tool.handle_add_task
@@ -1465,8 +1530,8 @@ let () = test "handle_claim_auto_releases_previous_claimed_task" (fun () ->
       ctx
       (`Assoc [ ("task_id", `String "task-002") ])
   in
-  if not (Tool_result.is_success second) then failwith (Tool_result.message second);
-  assert (str_contains (Tool_result.message second) "auto-released task-001");
+  assert (not (Tool_result.is_success second));
+  assert (str_contains (Tool_result.message second) "task(s) in progress: task-001");
   let task_001 =
     Workspace.get_tasks_raw ctx.config
     |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id "task-001")
@@ -1476,13 +1541,13 @@ let () = test "handle_claim_auto_releases_previous_claimed_task" (fun () ->
     |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id "task-002")
   in
   (match task_001 with
-  | Some { task_status = Masc_domain.Todo; _ } -> ()
-  | Some _ -> failwith "task-001 should be auto-released to todo"
-  | None -> failwith "task-001 missing");
-  match task_002 with
   | Some { task_status = Masc_domain.Claimed { assignee; _ }; _ } ->
     assert (String.equal assignee "test-agent")
-  | Some _ -> failwith "task-002 should be claimed"
+  | Some _ -> failwith "task-001 should remain claimed"
+  | None -> failwith "task-001 missing");
+  match task_002 with
+  | Some { task_status = Masc_domain.Todo; _ } -> ()
+  | Some _ -> failwith "task-002 should remain todo"
   | None -> failwith "task-002 missing"
 )
 

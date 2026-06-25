@@ -366,6 +366,14 @@ function decodeMemoryOsFactProvenance(raw: unknown): MemoryOsFactProvenance | nu
   return { trace_id, turn, tool_call_id: asNullableString(raw.tool_call_id) }
 }
 
+function warnLegacyMemoryOsExternalRef(raw: Record<string, unknown>): void {
+  if (!Object.prototype.hasOwnProperty.call(raw, 'external_ref')) return
+  if (typeof console === 'undefined' || typeof console.warn !== 'function') return
+  console.warn(
+    'Ignoring legacy memory_os.external_ref payload; dashboard memory facts no longer render external_ref status tags.',
+  )
+}
+
 function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
   if (!isRecord(raw)) return null
   const claim = asString(raw.claim)
@@ -389,6 +397,7 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
   }
   // claim_kind is omitted by the server when None.
   const claimKindToken = asString(raw.claim_kind)
+  warnLegacyMemoryOsExternalRef(raw)
   return {
     claim,
     category: parseMemoryOsFactCategory(categoryToken),

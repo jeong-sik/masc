@@ -582,6 +582,7 @@ describe('parseMemoryOsClaimKind (SSOT mirror of claim_kind_of_string)', () => {
 
 describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel-real-data §4a)', () => {
   it('decodes fact rows with typed category / provenance / TTL, absorbs Unknown, drops malformed and the deleted score model', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({
         keeper: 'keeper-alpha',
@@ -670,6 +671,7 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
     expect(first?.reference_time).toBe(1_789_500_000)
     expect(first?.claim_kind).toBe('durable_knowledge')
     expect(first).not.toHaveProperty('external_ref')
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Ignoring legacy memory_os.external_ref payload'))
 
     // out-of-vocabulary category → typed Unknown arm carrying the raw label
     expect(second?.category).toEqual({ tag: 'unknown', raw: 'Speculation' })
@@ -694,6 +696,8 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
     for (const key of deletedScoreKeys) {
       expect(first as Record<string, unknown>).not.toHaveProperty(key)
     }
+
+    warnSpy.mockRestore()
   })
 })
 

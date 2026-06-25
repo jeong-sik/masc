@@ -7,6 +7,10 @@ type invalid_bool_policy =
   | Default
   | Fail_closed
 
+val accepted_true_bool_tokens : string list
+val accepted_false_bool_tokens : string list
+val parse_bool_token : string -> bool option
+
 val env_opt : string -> string option
 val get_int_logged : string -> default:int -> int
 val get_float_positive_logged : string -> default:float -> float

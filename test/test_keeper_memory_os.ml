@@ -668,6 +668,16 @@ let test_memory_os_bool_env_accepts_enabled_disabled () =
       "disabled disables recall"
       false
       (Env_config.KeeperMemoryOs.recall_enabled ()));
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_RECALL" " TRUE " (fun () ->
+    Alcotest.(check bool)
+      "bool parser trims and lowercases true tokens"
+      true
+      (Env_config.KeeperMemoryOs.recall_enabled ()));
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_RECALL" "" (fun () ->
+    Alcotest.(check bool)
+      "blank bool token is treated as unset"
+      true
+      (Env_config.KeeperMemoryOs.recall_enabled ()));
   with_memory_os_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN" "disabled" (fun () ->
     Alcotest.(check bool)
       "disabled disables librarian"

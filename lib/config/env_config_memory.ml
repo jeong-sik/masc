@@ -4,6 +4,18 @@ type invalid_bool_policy =
   | Default
   | Fail_closed
 
+let accepted_true_bool_tokens = [ "1"; "true"; "yes"; "on"; "enabled" ]
+let accepted_false_bool_tokens = [ "0"; "false"; "no"; "off"; "disabled" ]
+
+let parse_bool_token raw =
+  let token = String.lowercase_ascii raw in
+  if List.exists (String.equal token) accepted_true_bool_tokens
+  then Some true
+  else if List.exists (String.equal token) accepted_false_bool_tokens
+  then Some false
+  else None
+;;
+
 let env_opt name =
   match Env_config_core.raw_value_opt name with
   | None -> None
@@ -38,19 +50,18 @@ let get_bool_logged ?(invalid = Default) name ~default =
   match env_opt name with
   | None -> default
   | Some raw ->
-      (match String.lowercase_ascii raw with
-       | "1" | "true" | "yes" | "on" | "enabled" -> true
-       | "0" | "false" | "no" | "off" | "disabled" -> false
-       | _ ->
-           (match invalid with
-            | Default ->
-                Log.Keeper.warn "invalid %s=%S; using default %b" name raw default;
-                default
-            | Fail_closed ->
-                Log.Keeper.warn
-                  "invalid %s=%S; using fail-closed false (default would be %b)"
-                  name
-                  raw
-                  default;
-                false))
+      (match parse_bool_token raw with
+       | Some value -> value
+       | None ->
+         (match invalid with
+          | Default ->
+              Log.Keeper.warn "invalid %s=%S; using default %b" name raw default;
+              default
+          | Fail_closed ->
+              Log.Keeper.warn
+                "invalid %s=%S; using fail-closed false (default would be %b)"
+                name
+                raw
+                default;
+              false))
 ;;

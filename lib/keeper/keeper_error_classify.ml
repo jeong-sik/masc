@@ -116,7 +116,9 @@ let server_parse_rejection_message_matches message =
    || string_contains_substring ~needle:"find end of" lower)
   || string_contains_substring ~needle:"unexpected character in json" lower
   || string_contains_substring ~needle:"unterminated" lower
-  || string_contains_substring ~needle:"parse error" lower
+  || (string_contains_substring ~needle:"parse error" lower
+      && (string_contains_substring ~needle:"json" lower
+          || string_contains_substring ~needle:"yyjson" lower))
 
 let is_provider_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with

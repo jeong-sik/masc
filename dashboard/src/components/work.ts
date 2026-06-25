@@ -934,6 +934,9 @@ function WorkAside({
 }
 
 function WorkSurfaceV2() {
+  // Read showGoalCreate at the top so this component re-renders when the
+  // side-panel toggle changes.
+  const goalCreateOpen = showGoalCreate.value
   const goalList = goals.value
   const allTasks = tasks.value
 
@@ -1136,7 +1139,7 @@ function WorkSurfaceV2() {
   }, [])
 
   return html`
-    <main class=${`ov ov-2col ${showGoalCreate.value ? 'ov-with-panel' : ''}`}>
+    <main class=${`ov ov-2col ${goalCreateOpen ? 'ov-with-panel' : ''}`}>
       <div class="ov-scroll">
         <header class="ov-head wk-head">
           <div>
@@ -1250,18 +1253,19 @@ function WorkSurfaceV2() {
 
           <div class="wk-foot mono">Goal → Task → keeper · 우선순위 순 정렬 · 완료는 게이트 증거 충족 후 done · 미배정 task 는 백로그에서 claim</div>
       </div>
-      ${showGoalCreate.value ? html`<${GoalCreateForm} />` : null}
-      <${WorkAside}
-        flagged=${wkaFlagged}
-        approvals=${wkaApprovals}
-        verifyTasks=${wkaVerifyTasks}
-        blockers=${wkaBlockers}
-        backlog=${wkaBacklog}
-        recent=${wkaRecent}
-        counts=${wkaCounts}
-        onJump=${jumpToGoal}
-        onOpenKeeper=${openKeeperWorkspace}
-      />
+      ${goalCreateOpen ? html`<${GoalCreateForm} />` : html`
+        <${WorkAside}
+          flagged=${wkaFlagged}
+          approvals=${wkaApprovals}
+          verifyTasks=${wkaVerifyTasks}
+          blockers=${wkaBlockers}
+          backlog=${wkaBacklog}
+          recent=${wkaRecent}
+          counts=${wkaCounts}
+          onJump=${jumpToGoal}
+          onOpenKeeper=${openKeeperWorkspace}
+        />
+      `}
     </main>
   `
 }

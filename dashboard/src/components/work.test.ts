@@ -59,6 +59,7 @@ vi.mock('./repository-management', () => ({
 
 import { goals, keepers, tasks } from '../store'
 import { selectedTask } from './goals/task-detail-selection'
+import { showGoalCreate } from './goals/goal-create-state'
 import { Work } from './work'
 
 describe('Work', () => {
@@ -66,12 +67,14 @@ describe('Work', () => {
     cleanup()
     navigateMock.mockClear()
     selectedTask.value = null
+    showGoalCreate.value = false
   })
 
   beforeEach(() => {
     goals.value = []
     tasks.value = []
     keepers.value = []
+    showGoalCreate.value = false
   })
 
   it('renders the SubBoard surface for the workspace sub-boards section', () => {
@@ -167,6 +170,8 @@ describe('Work', () => {
       expect(screen.getByTestId('kpi-wip').textContent).toBe('1')
       expect(screen.getByTestId('kpi-verify').textContent).toBe('1')
       expect(screen.getByTestId('kpi-backlog').textContent).toBe('2')
+      // Five elevated KPI cards
+      expect(screen.getByTestId('work-kpis').children.length).toBe(5)
       expect(screen.getByText(/백로그에서 claim/).textContent).toContain('claim')
       expect(screen.getByTestId('work-goal-list')).toBeTruthy()
     })
@@ -187,8 +192,9 @@ describe('Work', () => {
 
       fireEvent.click(button)
 
-      // Side panel appears after click
+      // Side panel appears after click and WorkAside is hidden
       expect(screen.getByTestId('goal-create-panel')).toBeTruthy()
+      expect(screen.queryByTestId('work-aside')).toBeNull()
     })
 
     it('renders a collapsed goal card per goal and expands on click', () => {

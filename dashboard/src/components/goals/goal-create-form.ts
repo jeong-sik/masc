@@ -178,8 +178,9 @@ export function GoalCreateForm() {
               class=${`wk-keeper-chip ${leadKeeperSignal.value === null ? 'on' : ''}`}
               onClick=${() => { leadKeeperSignal.value = null }}
               title="미지정"
+              aria-label="미지정"
             >
-              <span class="wk-keeper-avatar-none">?</span>
+              <span class="wk-keeper-avatar-none" aria-hidden="true">?</span>
               <span>미지정</span>
             </button>
             ${keepers.value.map(k => html`
@@ -189,6 +190,7 @@ export function GoalCreateForm() {
                 class=${`wk-keeper-chip ${leadKeeperSignal.value === k.name ? 'on' : ''}`}
                 onClick=${() => { leadKeeperSignal.value = k.name }}
                 title=${k.name}
+                aria-label=${k.name}
               >
                 <${KeeperBadge} id=${k.name} size="sm" variant="sigil" />
                 <span>${k.name}</span>

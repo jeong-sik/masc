@@ -52,7 +52,6 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
           : html`<span class="kmh-badge kmh-badge--ok">0</span>`}
       </td>
       <td>${entry.near_duplicate}</td>
-      <td>${entry.external_ref}</td>
     </tr>
   `
 }
@@ -171,7 +170,6 @@ export function KeeperMemoryHealth() {
                   <th>events:facts 비율</th>
                   <th>만료(디스크)</th>
                   <th>근접중복</th>
-                  <th>external_ref</th>
                 </tr>
               </thead>
               <tbody>

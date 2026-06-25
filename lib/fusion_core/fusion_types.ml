@@ -90,6 +90,20 @@ let answered_of outcomes =
     (function Answered a -> Some a | Failed _ -> None)
     outcomes
 
+let no_panel_answers_error = "all panels failed: no answered panel to synthesize"
+
+(* RFC-0252 left the all-panel-fail case unspecified. The judge prompt is built
+   from [answered_of] only, so when every panel [Failed] the judge is handed an
+   empty <panel_answers> block and fabricates a synthesis from no evidence — the
+   run then surfaces a confident result backed by zero panels (observed: a
+   0-success panel still produced a fusion result). This pure decision lets the
+   orchestrator skip the judge in that case: [Some reason] => complete with
+   [judge = Error reason]; [None] => >= 1 panel answered, run the judge. *)
+let judge_skip_reason outcomes =
+  match answered_of outcomes with
+  | [] -> Some no_panel_answers_error
+  | _ :: _ -> None
+
 type claim =
   { text : string
   ; supporting_models : string list

@@ -98,6 +98,16 @@ type panel_outcome =
 (** 성공한 답만 추출 (심판 입력 구성용). 입력 순서 보존. *)
 val answered_of : panel_outcome list -> panel_answer list
 
+val no_panel_answers_error : string
+(** Canonical error surfaced when the judge is skipped because no panel answered. *)
+
+val judge_skip_reason : panel_outcome list -> string option
+(** [Some reason] when no panel member answered (every outcome is [Failed]) — the
+    orchestrator then skips the judge and completes with [judge = Error reason]
+    instead of running it. [None] when >= 1 panel [Answered]. Guards against the
+    judge fabricating a synthesis from an empty [<panel_answers>] block when all
+    panels failed (RFC-0252 left all-panel-fail unspecified). *)
+
 (** {1 심판 구조화 출력}
 
     [Structured.extract]의 provider-native JSON schema로 강제 파싱되는 닫힌 타입.

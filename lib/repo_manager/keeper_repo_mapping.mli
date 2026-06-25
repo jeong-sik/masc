@@ -35,7 +35,8 @@ val repository_id_of_path :
   base_path:string -> path:string -> repository_id option
 (** [repository_id_of_path ~base_path ~path] returns the repository ID whose
     [local_path] contains [path], or [None] if the path is not under any
-    registered repository. *)
+    registered repository or the registered repository has an identity
+    mismatch. *)
 
 val validate_path_access :
   keeper_id:string -> base_path:string -> path:string -> (unit, string) result

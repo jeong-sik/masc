@@ -351,6 +351,70 @@ let test_validate_path_access_playground_repo_uses_url_basename () =
             ("expected playground repo path to resolve by repository URL basename, got: "
              ^ e))
 
+let test_validate_path_access_rejects_repo_identity_mismatch () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let bad_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          url = "https://github.com/jeong-sik/masc-mcp";
+          local_path = Filename.concat base_path ".masc/repos/masc";
+        }
+      in
+      write_repositories base_path [ root_repo; bad_repo ];
+      write_mapping base_path "executor" [ "masc" ];
+      let path =
+        Filename.concat base_path
+          ".masc/playground/docker/executor/repos/masc/lib"
+      in
+      ensure_dir path;
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () -> Alcotest.fail "expected repository identity mismatch"
+      | Error msg ->
+          Alcotest.(check bool)
+            "mentions identity mismatch" true
+            (contains_substring msg "Repository identity mismatch");
+          Alcotest.(check bool)
+            "mentions mismatched basename" true
+            (contains_substring msg "masc-mcp"))
+
+let test_validate_path_access_rejects_mismatched_url_basename_alias () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let bad_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          url = "https://github.com/jeong-sik/masc-mcp";
+          local_path = Filename.concat base_path ".masc/repos/masc";
+        }
+      in
+      write_repositories base_path [ root_repo; bad_repo ];
+      write_mapping base_path "executor" [ "masc" ];
+      let path =
+        Filename.concat base_path
+          ".masc/playground/docker/executor/repos/masc-mcp/lib"
+      in
+      ensure_dir path;
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () ->
+          Alcotest.fail
+            "expected URL basename not to authorize a mismatched repository"
+      | Error msg ->
+          Alcotest.(check bool)
+            "does not authorize as masc" true
+            (contains_substring msg
+               "Keeper executor is not allowed to access repository masc-mcp"))
+
 let test_validate_path_access_playground_unique_clone_uses_git_remote () =
   with_temp_base_path (fun base_path ->
       let root_repo =
@@ -753,6 +817,10 @@ let () =
             test_validate_path_access_playground_repo_uses_registered_name;
           Alcotest.test_case "playground repo resolves repository URL basename" `Quick
             test_validate_path_access_playground_repo_uses_url_basename;
+          Alcotest.test_case "repository identity mismatch blocks access" `Quick
+            test_validate_path_access_rejects_repo_identity_mismatch;
+          Alcotest.test_case "mismatched URL basename is not an alias" `Quick
+            test_validate_path_access_rejects_mismatched_url_basename_alias;
           Alcotest.test_case "playground unique clone resolves git remote" `Quick
             test_validate_path_access_playground_unique_clone_uses_git_remote;
           Alcotest.test_case "playground relative gitdir resolves git remote" `Quick

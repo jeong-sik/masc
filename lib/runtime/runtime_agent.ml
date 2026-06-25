@@ -478,7 +478,7 @@ let caps_admit_required_modalities
    blocks and proceeds on text. These helpers are the pure block/message
    filters: drop the top-level [Image]/[Document]/[Audio] blocks whose modality
    [caps] does not admit, keep everything else, and report a per-modality drop
-   count for the caller's operator-visible note. ToolResult-nested media is
+   count for the caller's non-silent degrade reporting. ToolResult-nested media is
    left intact (rare; the capability gate floor still applies), keeping the
    strip a total function over the leaf media blocks an operator attaches. *)
 let block_required_modality (block : Agent_sdk.Types.content_block) =
@@ -534,9 +534,9 @@ let strip_unsupported_modality_messages
   in
   (List.rev kept, dropped)
 
-(* Operator-visible note injected into a degraded turn so the omitted media is
-   non-silent (RFC-0126/0145): the model and the keeper-chat surface see that
-   input was dropped rather than vanishing. [None] when nothing was dropped. *)
+(* Notice text injected into a degraded turn so the model input records that media
+   was dropped rather than vanishing. The keeper dispatch path owns the
+   operator-visible runtime-manifest row. [None] when nothing was dropped. *)
 let media_degrade_note ~(runtime_id : string) (dropped : (string * int) list) :
     string option =
   match List.fold_left (fun acc (_, n) -> acc + n) 0 dropped with

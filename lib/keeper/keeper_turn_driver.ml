@@ -38,6 +38,38 @@ let provider_config_identity_key =
 
 let runtime_candidates_of_providers =
   Keeper_turn_driver_admission.runtime_candidates_of_providers
+
+let positive_modality_counts counts =
+  counts
+  |> List.filter (fun (_, n) -> n > 0)
+  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+
+let modality_counts_summary counts =
+  counts
+  |> positive_modality_counts
+  |> List.map (fun (modality, n) -> Printf.sprintf "%s=%d" modality n)
+  |> String.concat ","
+
+let modality_counts_total counts =
+  counts
+  |> positive_modality_counts
+  |> List.fold_left (fun acc (_, n) -> acc + n) 0
+
+let media_degrade_manifest_decision ~(runtime_id : string)
+    (dropped : (string * int) list) =
+  let summary = modality_counts_summary dropped in
+  Keeper_runtime_manifest.with_payload_role
+    ~payload_role:Keeper_runtime_manifest.Operator_evidence
+    (`Assoc
+      [
+        ("routing_action", `String "media_degraded_to_text");
+        ( "routing_reason",
+          `String "no_configured_runtime_accepts_required_media" );
+        ("degraded_runtime_id", `String runtime_id);
+        ("media_dropped_total", `Int (modality_counts_total dropped));
+        ("media_dropped_counts", `String summary);
+      ])
+
 let run_named
     ~runtime_id
     ?(keeper_name = "")
@@ -111,6 +143,43 @@ let run_named
      [?wait_timeout_sec] parameters only fed the deleted multi-candidate
      machinery and were silently ignored here; they are removed from the
      signature so callers cannot pass dead routing knobs. *)
+  let turn_start = Mtime_clock.now () in
+  let seq_ref = ref 0 in
+  let emit_runtime_manifest ?status ?decision event =
+    match runtime_manifest_context, runtime_manifest_append with
+    | Some manifest_ctx, Some append ->
+      let decision =
+        match decision with
+        | None -> Some (`Assoc [])
+        | Some (`Assoc _) as d -> d
+        | Some other -> Some (`Assoc [ ("decision", other) ])
+      in
+      seq_ref := !seq_ref + 1;
+      let elapsed_ms =
+        let ns =
+          Mtime.Span.to_uint64_ns
+            (Mtime.span turn_start (Mtime_clock.now ()))
+        in
+        Some (Int64.to_int (Int64.div ns 1_000_000L))
+      in
+      let decision =
+        let decision =
+          match decision with
+          | Some value -> value
+          | None -> `Assoc []
+        in
+        Some
+          (Keeper_runtime_manifest.with_clock_refs
+             ~clock_refs:
+               (Keeper_runtime_manifest.clock_refs_for_context manifest_ctx
+                  ~event ?elapsed_ms ~logical_seq:!seq_ref ())
+             decision)
+      in
+      Keeper_runtime_manifest.make_for_context manifest_ctx ~event
+        ~runtime_id ?logical_seq:(Some !seq_ref) ?status ?decision ()
+      |> append
+    | _ -> ()
+  in
   (* RFC-0207: dispatch to the *requested* runtime (a keeper's persona [model]
      selection or the global default, both produced by [runtime_id_of_meta])
      instead of unconditionally the default.  A requested id that does not
@@ -173,12 +242,13 @@ let run_named
   (* RFC-0265 follow-up — graceful media degrade floor. When no configured
      runtime can accept the turn's input modality ([No_capable_runtime]), strip
      the unsupported media blocks from the goal, prior [initial_messages], and
-     resumed checkpoint, then inject an operator-visible note so the turn runs
-     on text instead of the loud terminal reject in [Runtime_agent.run_blocks].
-     Modality-satisfied turns and reroutes are untouched. The drop is non-silent
-     (WARN log + injected note — RFC-0126/0145). The stripped checkpoint is the
-     dispatch view only; the persisted checkpoint is unchanged, so a later
-     vision-capable runtime still sees the original media. *)
+     resumed checkpoint, then append a degraded [Runtime_routed] manifest row
+     and inject a text notice so the turn runs on text instead of the loud
+     terminal reject in [Runtime_agent.run_blocks]. Modality-satisfied turns and
+     reroutes are untouched. The drop is non-silent (WARN log + runtime manifest
+     row + injected model-input notice — RFC-0126/0145). The stripped checkpoint
+     is the dispatch view only; the persisted checkpoint is unchanged, so a
+     later vision-capable runtime still sees the original media. *)
   let goal_blocks, initial_messages, oas_checkpoint =
     match reroute_decision with
     | Runtime_agent.No_capable_runtime _ ->
@@ -215,11 +285,11 @@ let run_named
            "%s: RFC-0265 media degrade on %s — dropped %s, continuing text-only"
            keeper_name
            runtime_id
-           (String.concat
-              ","
-              (List.map
-                 (fun (modality, n) -> Printf.sprintf "%s=%d" modality n)
-                 dropped));
+           (modality_counts_summary dropped);
+         emit_runtime_manifest
+           ~status:"degraded"
+           ~decision:(media_degrade_manifest_decision ~runtime_id dropped)
+           Keeper_runtime_manifest.Runtime_routed;
          let goal_with_note =
            stripped_goal @ [ Agent_sdk.Types.text_block note ]
          in
@@ -239,8 +309,6 @@ let run_named
     | Some t -> t
     | None -> Masc_grpc_transport.from_env ()
   in
-  let turn_start = Mtime_clock.now () in
-  let seq_ref = ref 0 in
   (* RFC-0206: execution_idle_timeout is intentionally not forwarded on the
      keeper path until OAS proves active tool execution is excluded from idle
      accounting. Passing [None] keeps the previous behavior without exposing a
@@ -321,6 +389,8 @@ module For_testing = struct
 
   let sdk_error_of_nonretryable_attempt_error =
     Keeper_turn_driver_try_runtime.sdk_error_of_nonretryable_attempt_error
+
+  let media_degrade_manifest_decision = media_degrade_manifest_decision
 
   let accept_no_progress_read_only_should_try_next =
     Keeper_turn_driver_try_runtime.For_testing

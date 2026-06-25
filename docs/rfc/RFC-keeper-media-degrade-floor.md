@@ -19,9 +19,10 @@ and a keeper that keeps re-attempting an image-bearing turn parks in
 
 This RFC changes only the **floor**: at `No_capable_runtime`, instead of letting
 the turn die, strip the unsupported media blocks from the dispatch view (current
-goal + prior `initial_messages` + resumed checkpoint), inject one operator-visible
-note, and proceed on text. Reroute and modality-satisfied turns are untouched.
-MASC-side only; no OAS change.
+goal + prior `initial_messages` + resumed checkpoint), emit a degraded
+`Runtime_routed` manifest row, inject one model-input notice, and proceed on
+text. Reroute and modality-satisfied turns are untouched. MASC-side only; no OAS
+change.
 
 ## 2. Problem
 
@@ -48,13 +49,15 @@ decision is computed once. When it is `No_capable_runtime`:
    drop the top-level `Image`/`Document`/`Audio` blocks the caps do not admit from
    the current goal, `initial_messages`, and the resumed `oas_checkpoint.messages`,
    keeping text/thinking/tool blocks and reporting a per-modality drop count.
-3. If anything was dropped, inject one `Text` note (`media_degrade_note`) into the
-   goal and emit a `WARN` log. The turn then dispatches on text and the capability
-   gate admits it (no media remains).
+3. If anything was dropped, append a `Runtime_routed` manifest row with
+   `status="degraded"` and redacted drop counts, inject one `Text` note
+   (`media_degrade_note`) into the goal, and emit a `WARN` log. The turn then
+   dispatches on text and the capability gate admits it (no media remains).
 
 The strip and note builders are pure functions in `runtime_agent` (unit-tested).
-The drop is **non-silent** (RFC-0126/0145): a structured WARN at the dispatch site
-plus the injected note the model and the keeper-chat surface both see.
+The drop is **non-silent** (RFC-0126/0145): a degraded runtime-manifest row for
+the dashboard trace, a structured WARN at the dispatch site, and the injected
+note in the model input.
 
 The stripped checkpoint is the **dispatch view only** — the persisted checkpoint is
 not rewritten, so if the keeper is later routed to a vision-capable runtime the
@@ -65,7 +68,7 @@ original media is still in history.
 | | RFC-0265 floor | This RFC |
 |--|----------------|----------|
 | No capable runtime | terminal reject (turn dies) | drop media + note, proceed on text |
-| Operator visibility | error surfaced to operator | WARN log + in-context note |
+| Operator visibility | error surfaced to operator | degraded runtime manifest + WARN log + in-context note |
 | Media fidelity | preserved (nothing dispatched) | image omitted this turn (recoverable from history) |
 | Keeper liveness | can park in `pause_human` | continues |
 
@@ -94,13 +97,15 @@ RFC-0265 would otherwise hard-reject.
 
 ## 6. Tests
 
-`test/test_runtime_modality_reroute.ml` adds a `media_degrade` group (5 cases):
+`test/test_runtime_modality_reroute.ml` adds a `media_degrade` group:
 strip drops an unsupported image, strip keeps a supported image on a vision
 runtime, message-level strip removes history media while retaining the message,
 and `media_degrade_note` returns `Some` with the count when media dropped and
-`None` when nothing dropped (including all-zero counts). The existing RFC-0265
-reroute suite and the `test_gate_keeper_backend` gate suite are unchanged and
-green.
+`None` when nothing dropped (including all-zero counts). It also pins the public
+runtime-manifest projection for the degraded row and a source-level wiring guard
+that the dispatch branch emits `Runtime_routed status=degraded`. The existing
+RFC-0265 reroute suite and the `test_gate_keeper_backend` gate suite are
+unchanged.
 
 ## 7. Migration
 

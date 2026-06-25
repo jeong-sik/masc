@@ -264,8 +264,8 @@ val merge_modality_counts :
 
 val media_degrade_note :
   runtime_id:string -> (string * int) list -> string option
-(** Operator-visible note injected into a degraded turn so the omitted media is
-    non-silent (RFC-0126/0145). [None] when nothing was dropped. *)
+(** Notice text injected into a degraded turn so model input records that media
+    was dropped rather than vanishing. [None] when nothing was dropped. *)
 
 module For_testing : sig
   val request_runtime_fields_on_base_config :

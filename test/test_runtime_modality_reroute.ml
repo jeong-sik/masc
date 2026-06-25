@@ -41,6 +41,12 @@ let string_contains haystack needle =
 let check_contains label ~needle haystack =
   check bool label true (string_contains haystack needle)
 
+let read_file path = In_channel.with_open_text path In_channel.input_all
+
+let assoc_field key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
 let message_with_blocks blocks =
   { Agent_sdk.Types.role = Agent_sdk.Types.User
   ; content = blocks
@@ -279,6 +285,51 @@ let test_degrade_note_none_when_empty () =
   check (option string) "no note when all counts zero" None
     (Runtime_agent.media_degrade_note ~runtime_id:"r" [ ("image", 0) ])
 
+let test_degrade_manifest_public_projection () =
+  let decision =
+    Keeper_turn_driver.For_testing.media_degrade_manifest_decision
+      ~runtime_id:"text-runtime"
+      [ ("image", 1); ("audio", 2) ]
+  in
+  let public = Keeper_runtime_manifest.public_projection_of_decision decision in
+  check (option string) "routing action"
+    (Some "media_degraded_to_text")
+    (match assoc_field "routing_action" public with
+     | Some (`String value) -> Some value
+     | _ -> None);
+  check (option string) "routing reason"
+    (Some "no_configured_runtime_accepts_required_media")
+    (match assoc_field "routing_reason" public with
+     | Some (`String value) -> Some value
+     | _ -> None);
+  check (option string) "runtime id"
+    (Some "text-runtime")
+    (match assoc_field "degraded_runtime_id" public with
+     | Some (`String value) -> Some value
+     | _ -> None);
+  check (option int) "drop total"
+    (Some 3)
+    (match assoc_field "media_dropped_total" public with
+     | Some (`Int value) -> Some value
+     | _ -> None);
+  check (option string) "deterministic count summary"
+    (Some "audio=2,image=1")
+    (match assoc_field "media_dropped_counts" public with
+     | Some (`String value) -> Some value
+     | _ -> None);
+  check (option string) "payload role remains internal" None
+    (match assoc_field "payload_role" public with
+     | Some (`String value) -> Some value
+     | _ -> None)
+
+let test_driver_degrade_branch_emits_manifest () =
+  let source = read_file "lib/keeper/keeper_turn_driver.ml" in
+  check bool "degrade branch emits manifest" true
+    (string_contains source "emit_runtime_manifest"
+     && string_contains source "~status:\"degraded\""
+     && string_contains source "media_degrade_manifest_decision"
+     && string_contains source "Keeper_runtime_manifest.Runtime_routed")
+
 let () =
   run "rfc0265_modality_reroute"
     [ ( "decide_modality_reroute"
@@ -312,5 +363,9 @@ let () =
             test_degrade_note_some_when_dropped
         ; test_case "degrade note none when empty" `Quick
             test_degrade_note_none_when_empty
+        ; test_case "degrade manifest public projection" `Quick
+            test_degrade_manifest_public_projection
+        ; test_case "driver degrade branch emits manifest" `Quick
+            test_driver_degrade_branch_emits_manifest
         ] )
     ]

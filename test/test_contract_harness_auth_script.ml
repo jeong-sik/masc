@@ -111,16 +111,21 @@ fi
 let test_run_all_mints_workspace_token_before_mcp_probe () =
   let source = read_source_file "scripts/harness/contract/run_all.sh" in
   require_contains "mints token" source "harness_mint_admin_token";
+  require_contains "assigns minted token to canonical env" source
+    "if ! MCP_TOKEN=\"$(";
   require_contains "exports mcp token" source
-    "export MCP_TOKEN";
+    "export MCP_TOKEN\nunset MCP_AUTH_TOKEN";
   require_contains "scrubs legacy mcp alias" source "unset MCP_AUTH_TOKEN";
   require_contains "scrubs legacy admin alias" source "unset MASC_ADMIN_TOKEN";
   require_contains "empty token is fatal" source
     "FAIL: contract harness admin token is empty";
   require_order "mint before start" source "harness_mint_admin_token"
     "harness_start_server";
+  require_order "mint assignment before canonical export" source
+    "if ! MCP_TOKEN=\"$("
+    "export MCP_TOKEN\nunset MCP_AUTH_TOKEN";
   require_order "export before initialize readiness" source
-    "export MCP_TOKEN"
+    "export MCP_TOKEN\nunset MCP_AUTH_TOKEN"
     "if ! wait_for_mcp_initialize_ready \"$MCP_URL\" 25; then";
   require_order "empty check before initialize readiness" source
     "FAIL: contract harness admin token is empty"

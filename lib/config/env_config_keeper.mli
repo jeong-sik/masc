@@ -95,6 +95,19 @@ module KeeperMemoryOs : sig
   val consolidation_runtime_id : unit -> string option
 end
 
+(** {1 Keeper vision tool} *)
+
+module KeeperVision : sig
+  (** Raw image-byte budget for [analyze_image], clamped to [1, 10 MiB]. *)
+  val max_image_bytes : unit -> int
+
+  (** Base inter-candidate backoff, clamped to [0, 5] seconds. *)
+  val candidate_backoff_base_sec : unit -> float
+
+  (** Max inter-candidate backoff, clamped to [base, 30] seconds. *)
+  val candidate_backoff_max_sec : unit -> float
+end
+
 (** {1 Keeper context reducer} *)
 
 module KeeperReducer : sig

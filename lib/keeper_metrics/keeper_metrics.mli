@@ -215,6 +215,8 @@ type t =
   | MemoryBankLoadHistorySwallowedExceptions
   | MemoryRecallReadErrors
   | RuntimeHttpProbeJsonParseFailures
+  | VisionAnalyze
+  | VisionCandidateAttempts
   | PromptSegmentBytes
   | PromptTemplateRenderOutcome
   | ToolCallParamCompleteness

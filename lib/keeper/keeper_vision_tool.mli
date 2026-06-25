@@ -2,10 +2,10 @@
     RFC-keeper-vision-delegation-tool §2.6.
 
     Loads an image artifact (raw bytes) from {!Multimodal.Vision_artifact_store},
-    base64-encodes it into a one-shot [text; image] message, sub-calls a
-    configured vision runtime ({!Runtime_agent.first_media_capable_runtime}
-    order), and classifies the reply via {!Multimodal.Vision_analyze}. The image
-    is read only inside this sub-call; it never enters the keeper's own
+    base64-encodes it into a one-shot [text; image] message, sub-calls
+    configured vision runtimes in media-failover order, and classifies the reply
+    via {!Multimodal.Vision_analyze}. The image is read only inside this sub-call;
+    it never enters the keeper's own
     conversation. Every failure path is a typed JSON error — never a silent empty
     success (the failure class the RFC targets).
 
@@ -21,6 +21,20 @@ type complete_fn =
   messages:Agent_sdk.Types.message list ->
   unit ->
   (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
+
+val vision_default_max_tokens : int
+(** Fallback output budget for the one-shot vision sub-call when the selected
+    runtime has not configured [max_tokens]. *)
+
+val max_image_bytes : unit -> int
+(** Maximum raw artifact bytes accepted by the tool before base64 provider-message
+    construction, from [MASC_KEEPER_VISION_MAX_IMAGE_BYTES] / runtime TOML boot
+    overrides with a 5 MiB default matching dashboard upload policy. Oversized
+    artifacts fail closed with [image_too_large]. *)
+
+val supported_image_media_types : string list
+(** MIME types admitted by [analyze_image]. The tool schema and runtime
+    validation share this list. *)
 
 val truncated_of_stop_reason : Agent_sdk.Types.stop_reason -> bool
 (** Collapse the provider's typed terminal reason to the single [truncated] bit
@@ -42,9 +56,18 @@ val provider_for_vision
     [response_format = Off], [tool_choice = None], [temperature = 0], and a
     fallback [max_tokens] only when the selected runtime has not configured one. *)
 
+val vision_runtime_ids : unit -> string list
+(** Ordered image-capable runtime ids: [\[runtime\].media_failover] order first,
+    then declaration order. The handler tries these candidates in order for
+    timeout/provider failures within one cumulative tool deadline. *)
+
 val first_vision_runtime_id : unit -> (string, string) result
-(** Runtime id of the first image-capable configured runtime, or [Error] when
-    none is configured. *)
+(** Compatibility helper returning the first entry of {!vision_runtime_ids}, or
+    [Error] when none is configured. *)
+
+val vision_store_dir : keeper_name:string -> string
+(** Per-keeper content-addressed image store directory. Exposed so tests and
+    ingestion paths do not duplicate the path layout. *)
 
 val handle
   :  ?complete:complete_fn
@@ -58,11 +81,12 @@ val handle
   -> string
 (** Tool entry. [args] = [{ "artifact": handle; "query": string;
     "media_type"?: string }]. [media_type], when provided, must be a supported
-    image MIME type; otherwise the stored bytes are sniffed. Returns a JSON
+    image MIME type; otherwise the stored bytes are sniffed fail-closed. Requires
+    [sw], [net], and [clock]; missing Eio context is [Runtime_failure]. Returns a JSON
     string: [{"ok":true,"text":...}] or
     [{"ok":false,"error":code,"failure_class":class[,"detail":...]}] with code
     one of [invalid_args | eio_context_unavailable | artifact_load_failed |
-    invalid_media_type | invalid_request | no_capable_runtime | timeout |
-    provider_error | empty_extraction | truncated_extraction]. [complete]
-    defaults to the live provider call (inject in tests). Never returns a raw
-    empty success. *)
+    invalid_timeout | image_too_large | invalid_media_type | invalid_request |
+    no_capable_runtime | timeout | provider_error | empty_extraction |
+    truncated_extraction]. [complete] defaults to the live provider call (inject
+    in tests). Never returns a raw empty success. *)

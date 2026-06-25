@@ -271,6 +271,55 @@ module KeeperMemoryOs = struct
   ;;
 end
 
+(** {1 Keeper Vision Tool Configuration} *)
+
+module KeeperVision = struct
+  let clamp_int ~min_value ~max_value value =
+    max min_value (min max_value value)
+  ;;
+
+  let clamp_float ~min_value ~max_value value =
+    Float.max min_value (Float.min max_value value)
+  ;;
+
+  let max_image_bytes_default = 5 * 1024 * 1024
+  let max_image_bytes_ceiling = 10 * 1024 * 1024
+  let candidate_backoff_base_sec_ceiling = 5.0
+  let candidate_backoff_max_sec_ceiling = 30.0
+
+  (** Maximum raw image bytes accepted by the one-shot vision tool before
+      provider-message construction. Default is 5 MiB to match dashboard upload
+      policy. Range: [1, 10 MiB], so base64 expansion still stays below the
+      default HTTP body cap with headroom.
+
+      @category Policies @ops_class operator *)
+  let max_image_bytes () =
+    get_int_nonneg ~default:max_image_bytes_default "MASC_KEEPER_VISION_MAX_IMAGE_BYTES"
+    |> clamp_int ~min_value:1 ~max_value:max_image_bytes_ceiling
+  ;;
+
+  (** Base delay before trying the next vision runtime after a failed provider
+      attempt. A small default avoids tight failover loops while keeping the tool
+      responsive. Range: [0, 5] seconds; 0 disables inter-candidate delay.
+
+      @category Timeouts @ops_class operator *)
+  let candidate_backoff_base_sec () =
+    get_float_nonneg ~default:0.05 "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC"
+    |> clamp_float ~min_value:0.0 ~max_value:candidate_backoff_base_sec_ceiling
+  ;;
+
+  (** Upper bound for the per-candidate vision failover delay. Range: [base, 30]
+      seconds, so a typo cannot exceed the tool's cumulative deadline policy.
+
+      @category Timeouts @ops_class operator *)
+  let candidate_backoff_max_sec () =
+    let base = candidate_backoff_base_sec () in
+    get_float_nonneg ~default:0.25 "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_MAX_SEC"
+    |> clamp_float ~min_value:0.0 ~max_value:candidate_backoff_max_sec_ceiling
+    |> Float.max base
+  ;;
+end
+
 (** {1 Keeper Context Reducer Configuration}
 
     Controls for the {!Agent_sdk.Context_reducer} stages applied to the

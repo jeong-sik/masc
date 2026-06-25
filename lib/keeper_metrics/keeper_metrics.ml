@@ -224,6 +224,8 @@ type t =
   | MemoryBankLoadHistorySwallowedExceptions
   | MemoryRecallReadErrors
   | RuntimeHttpProbeJsonParseFailures
+  | VisionAnalyze
+  | VisionCandidateAttempts
   (* Instruction monitoring metrics *)
   | PromptSegmentBytes          (* histogram: bytes per prompt segment *)
   | PromptTemplateRenderOutcome (* counter: template render ok/fallback/empty *)
@@ -473,6 +475,8 @@ let to_string = function
       "masc_keeper_memory_recall_read_errors_total"
   | RuntimeHttpProbeJsonParseFailures ->
       "masc_runtime_http_probe_json_parse_failures_total"
+  | VisionAnalyze -> "masc_keeper_vision_analyze_total"
+  | VisionCandidateAttempts -> "masc_keeper_vision_candidate_attempts_total"
   | PromptSegmentBytes -> "masc_keeper_prompt_segment_bytes"
   | PromptTemplateRenderOutcome -> "masc_keeper_prompt_template_render_outcome_total"
   | ToolCallParamCompleteness -> "masc_keeper_tool_call_param_completeness_total"
@@ -541,7 +545,7 @@ let all : t list =
     DockerRuntimeDiscarded; ProactiveSkip; NoProgressLoopDetected; NoProgressStreak; UsageTrust;
     UsageAnomalyReason; ConfigEnvParseFailures; PostTurnWireinFailures; RecurringFailures;
     TurnCleanupFailures; MemoryBankLoadHistorySwallowedExceptions; MemoryRecallReadErrors; RuntimeHttpProbeJsonParseFailures;
-    PromptSegmentBytes; PromptTemplateRenderOutcome; ToolCallParamCompleteness; KeeperTurnInstructionHash;
+    VisionAnalyze; VisionCandidateAttempts; PromptSegmentBytes; PromptTemplateRenderOutcome; ToolCallParamCompleteness; KeeperTurnInstructionHash;
     KeeperToolCallRetryLoop; AttemptWatchdogFired; ShellIrEffectTotal
   ]
 ;;

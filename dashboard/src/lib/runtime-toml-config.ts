@@ -338,6 +338,25 @@ export function setRuntimeTomlKey(
   return joinLines(lines)
 }
 
+// Read a scalar key from a section as its raw TOML token (inline comment
+// stripped, trimmed). Symmetric reader for setRuntimeTomlKey; callers parse the
+// token (e.g. Number/=== 'true'). Returns undefined when the section or key is
+// absent — never a fabricated default.
+export function getRuntimeTomlKey(
+  sourceText: string,
+  sectionName: string,
+  key: string,
+): string | undefined {
+  const document = parseDocument(sourceText)
+  const section = sectionOf(document, sectionName)
+  if (!section) return undefined
+  for (let index = section.start + 1; index < section.end; index += 1) {
+    const match = keyLineMatch(document.lines[index] ?? '')
+    if (match?.[2] === key) return stripInlineComment(match[4] ?? '').trim()
+  }
+  return undefined
+}
+
 export function deleteRuntimeTomlKey(sourceText: string, sectionName: string, key: string): string {
   const document = parseDocument(sourceText)
   const section = sectionOf(document, sectionName)

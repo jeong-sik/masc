@@ -436,7 +436,6 @@ export function KeeperConversationPanel({
   layout?: 'default' | 'primary' | 'workspace'
   onInspectTurn?: (entry: KeeperConversationEntry) => void
 }) {
-  const [draft, setDraft] = useState('')
   const [showMetadata, setShowMetadata] = useState(readKeeperChatMetadataVisible())
   const [showInternal, setShowInternal] = useState(readKeeperChatInternalVisible())
 
@@ -493,6 +492,16 @@ export function KeeperConversationPanel({
   const transcriptEntries = useMemo(
     () => filterConversationEntries(visibleThread, searchQuery),
     [visibleThread, searchQuery],
+  )
+  // Stable action object so the memoized ChatMessageBubble's shallow prop
+  // compare can skip unchanged messages — an inline `{ ...onClick }` literal
+  // would be a new reference each render and defeat the memo.
+  const inspectAction = useMemo(
+    () =>
+      onInspectTurn
+        ? { label: '턴 상세', title: '이 메시지 턴 상세 열기', onClick: onInspectTurn }
+        : undefined,
+    [onInspectTurn],
   )
   const transcriptEmptyText =
     hasQuery && visibleThread.length > 0
@@ -553,15 +562,14 @@ export function KeeperConversationPanel({
     }
   }
 
-  const submit = async ({ blocks, userBlocks, clientActionId }: ChatComposerSendPayload) => {
-    const prompt = draft.trim()
+  const submit = async ({ blocks, userBlocks, clientActionId, text }: ChatComposerSendPayload) => {
+    const prompt = text
     if (chatAccess.blocked) {
       showToast(chatAccess.message, 'error')
       return
     }
     if (!keeperName || (!prompt && blocks.length === 0)) return
     const attachments = blocksToAttachments(blocks)
-    setDraft('')
     if (keeperSending.value[keeperName]) {
       if (
         isKeeperThreadMessageSendInFlight(keeperName, clientActionId)
@@ -665,7 +673,7 @@ export function KeeperConversationPanel({
               showSourceBadge=${true}
               toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
               toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
-              action=${onInspectTurn ? { label: '턴 상세', title: '이 메시지 턴 상세 열기', onClick: onInspectTurn } : undefined}
+              action=${inspectAction}
             />
           </div>
         </div>
@@ -699,7 +707,8 @@ export function KeeperConversationPanel({
                 `
               : null}
             <${ChatComposer}
-              draft=${draft}
+              key=${keeperName}
+              draftPersistKey=${keeperName}
               placeholder=${chatAccess.blocked
                 ? '현재 actor는 direct keeper chat 권한이 없습니다'
                 : sending
@@ -711,7 +720,6 @@ export function KeeperConversationPanel({
               lastEventAt=${lastSignalAt}
               queueEnabled=${true}
               queueCount=${queueCount}
-              onDraftChange=${setDraft}
               onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
               onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
               layout="primary"
@@ -795,7 +803,7 @@ export function KeeperConversationPanel({
           groupToolCalls=${true}
           toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
           toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
-          action=${onInspectTurn ? { label: '턴 상세', title: '이 메시지 턴 상세 열기', onClick: onInspectTurn } : undefined}
+          action=${inspectAction}
         />
 
         ${!showInternal && hiddenCount > 0
@@ -816,7 +824,8 @@ export function KeeperConversationPanel({
               `
             : null}
           <${ChatComposer}
-            draft=${draft}
+            key=${keeperName}
+            draftPersistKey=${keeperName}
             placeholder=${chatAccess.blocked
               ? '현재 actor는 direct keeper chat 권한이 없습니다'
               : sending
@@ -828,7 +837,6 @@ export function KeeperConversationPanel({
             lastEventAt=${lastSignalAt}
             queueEnabled=${true}
             queueCount=${queueCount}
-            onDraftChange=${setDraft}
             onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
             onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
             layout="primary"
@@ -909,7 +917,7 @@ export function KeeperConversationPanel({
             groupToolCalls=${true}
             toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
             toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
-            action=${onInspectTurn ? { label: '턴 상세', title: '이 메시지 턴 상세 열기', onClick: onInspectTurn } : undefined}
+            action=${inspectAction}
           />
         </div>
 
@@ -931,7 +939,8 @@ export function KeeperConversationPanel({
               `
             : null}
           <${ChatComposer}
-            draft=${draft}
+            key=${keeperName}
+            draftPersistKey=${keeperName}
             placeholder=${chatAccess.blocked
               ? '현재 actor는 direct keeper chat 권한이 없습니다'
               : sending
@@ -943,7 +952,6 @@ export function KeeperConversationPanel({
             lastEventAt=${lastSignalAt}
             queueEnabled=${true}
             queueCount=${queueCount}
-            onDraftChange=${setDraft}
             onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
             onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
           />

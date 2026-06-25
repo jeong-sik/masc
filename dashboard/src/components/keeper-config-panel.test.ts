@@ -99,7 +99,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       bound_workspace_ids: ['default'],
       active_goal_ids: ['goal-runtime'],
       active_goals: [
-        { id: 'goal-runtime', title: 'Ship runtime clarity', horizon: 'mid' },
+        { id: 'goal-runtime', title: 'Ship runtime clarity' },
       ],
       active_goal_count: 1,
       missing_active_goal_ids: [],
@@ -440,7 +440,7 @@ describe('buildRuntimePayload — sandbox diffing', () => {
         mention_targets: [],
         bound_workspace_ids: [],
         active_goal_ids: ['goal-a'],
-        active_goals: [{ id: 'goal-a', title: 'Goal A', horizon: 'short' }],
+        active_goals: [{ id: 'goal-a', title: 'Goal A' }],
         active_goal_count: 1,
         missing_active_goal_ids: [],
       },
@@ -514,7 +514,6 @@ const mocks = vi.hoisted(() => ({
       {
         id: 'goal-runtime',
         title: 'Ship runtime clarity',
-        horizon: 'mid',
         status: 'active',
         status_color: '#4ade80',
         phase: 'executing',

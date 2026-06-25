@@ -13,5 +13,4 @@ val align_keeper_runtime_status :
   -> string
 
 val remote_client_type_of_context : 'a Operator_pending_confirm.context -> string
-val max_turns_override_source : int option -> string
 val operator_server_profile_json : Yojson.Safe.t

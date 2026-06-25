@@ -19,6 +19,8 @@ const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
 import { formatTimeHms } from '../../lib/format-time'
 import { formatCost, formatMsCompact } from '../../lib/format-number'
 import { isSubmitEnter } from '../../lib/keyboard'
+import { memo } from 'preact/compat'
+import { readKeeperDraft, writeKeeperDraft } from '../../keeper-chat-store'
 import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatChartBlock, ChatIssueBlock, ChatLinkBlock, ChatMermaidBlock, ChatShellBlock, ChatSuggestionsBlock, ChatTableBlock, ChatTraceStep, ChatVoiceBlock, KeeperUserInputBlock } from '../../types'
 import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, KeeperConversationSource, SurfaceRef } from '../../types'
 import type { ToolCallEntry, ToolCallOutputBlob } from '../../api/dashboard'
@@ -42,6 +44,9 @@ export interface ChatComposerSendPayload {
   blocks: ChatBlock[]
   userBlocks: KeeperUserInputBlock[]
   clientActionId: string
+  /** The trimmed text entered by the operator at send time. Added so hosts can
+      read the message without maintaining a mirrored controlled draft state. */
+  text: string
 }
 
 /** Status dot wrapper — maps keeper-v2 status strings to shared StatusDot tones. */
@@ -1778,7 +1783,22 @@ const CARD_BLOCK_TYPES: ReadonlySet<ChatBlock['t']> = new Set([
   'shell',
 ])
 
-function ChatMessageBubble({
+// Memoized message bubble. A streaming reply re-renders the conversation panel
+// on every SSE event; the transcript reconcile preserves the entry reference of
+// every settled message (keeper-state.ts), and KeeperConversationPanel hoists
+// the `action` object to a useMemo, so a settled bubble's props are all
+// referentially stable across a stream chunk and its body is skipped.
+//
+// The `action` stabilization is the load-bearing half: without it the inline
+// `{ ...onClick }` literal is a new reference each render and the bubble re-runs
+// regardless of memo (the test 're-renders the settled bubble when action is a
+// new object…' locks this).
+//
+// KNOWN GAP: tool/thinking turns render through the un-memoized TurnWorkBundle,
+// whose `tools` array is rebuilt every render (buildChatRenderUnits), so its
+// trace cards are NOT yet skipped on a stream chunk. Closing that needs the
+// unit arrays stabilized first — a separate follow-up.
+const ChatMessageBubble = memo(function ChatMessageBubble({
   entry,
   showMetadata = true,
   variant = 'default',
@@ -2128,7 +2148,7 @@ function ChatMessageBubble({
         : null}
     </article>
   `
-}
+})
 
 // Pretty-print a JSON-looking string; leave anything else untouched. Shared by
 // the argument and output renderers so both read consistently.
@@ -2862,7 +2882,7 @@ export function AttachDraftChip({
 }
 
 export function ChatComposer({
-  draft,
+  draft: draftProp,
   placeholder,
   disabled,
   streaming,
@@ -2874,8 +2894,9 @@ export function ChatComposer({
   onSend,
   onAbort,
   layout = 'default',
+  draftPersistKey,
 }: {
-  draft: string
+  draft?: string
   placeholder: string
   disabled: boolean
   streaming: boolean
@@ -2886,15 +2907,74 @@ export function ChatComposer({
    *  enqueues the message instead of dispatching it immediately. */
   queueEnabled?: boolean
   queueCount?: number
-  onDraftChange: (value: string) => void
+  /** Optional controlled draft handler. When omitted the composer keeps its
+   *  own draft state, which prevents the host from re-rendering on every
+   *  keystroke (see keeper-workspace chat performance). */
+  onDraftChange?: (value: string) => void
   onSend: (payload: ChatComposerSendPayload) => void | Promise<void>
   onAbort?: () => void
   layout?: 'default' | 'primary'
+  /** When set (and uncontrolled), the composer persists its unsent draft
+   *  per key across remounts via keeper-chat-store, so switching keepers
+   *  keeps each keeper's own half-typed message without leaking it to
+   *  another keeper. Ignored in controlled mode (the host owns the draft).
+   *
+   *  Callers pass `key=${draftPersistKey}` too, so a keeper switch remounts
+   *  the composer. The effect below additionally re-syncs the buffer if the
+   *  key changes in place, so the write key and the editing buffer can never
+   *  diverge into a cross-keeper leak even without the remount. */
+  draftPersistKey?: string
 }) {
   const [elapsed, setElapsed] = useState(0)
   const [focus, setFocus] = useState(false)
   const [drag, setDrag] = useState(false)
   const [attachments, setAttachments] = useState<KeeperConversationAttachment[]>([])
+  const isControlled = typeof draftProp === 'string'
+  const draftPersistStoreKey = draftPersistKey?.trim() ?? ''
+  // Lazy initializer: on (re)mount restore this keeper's persisted draft so a
+  // keeper switch (key=${keeperName} remount) does not drop a half-typed
+  // message. Controlled callers manage their own draft, so skip persistence.
+  const [internalDraftState, setInternalDraftState] = useState<{ key: string | null; value: string }>(() =>
+    isControlled
+      ? { key: null, value: '' }
+      : {
+          key: draftPersistStoreKey,
+          value: draftPersistStoreKey ? readKeeperDraft(draftPersistStoreKey) : '',
+        },
+  )
+  const internalDraft =
+    !isControlled && draftPersistStoreKey !== internalDraftState.key
+      ? draftPersistStoreKey
+        ? readKeeperDraft(draftPersistStoreKey)
+        : ''
+      : internalDraftState.value
+  const draft = isControlled ? draftProp : internalDraft
+  const setDraft = (value: string) => {
+    if (isControlled) {
+      onDraftChange?.(value)
+    } else {
+      setInternalDraftState({ key: draftPersistStoreKey, value })
+      if (draftPersistStoreKey) writeKeeperDraft(draftPersistStoreKey, value)
+    }
+  }
+  // External-store sync: a normal keeper switch remounts (key=${keeperName}) and
+  // the lazy initializer above already restored the draft. This layout effect
+  // covers the one case the initializer cannot — `draftPersistKey` changing
+  // without a remount. The render-time fallback above prevents a stale buffer
+  // from being shown for the new key; this effect aligns the internal state for
+  // the next edit.
+  useLayoutEffect(() => {
+    if (isControlled) {
+      if (internalDraftState.key !== null) setInternalDraftState({ key: null, value: '' })
+      return
+    }
+    if (draftPersistStoreKey !== internalDraftState.key) {
+      setInternalDraftState({
+        key: draftPersistStoreKey,
+        value: draftPersistStoreKey ? readKeeperDraft(draftPersistStoreKey) : '',
+      })
+    }
+  }, [draftPersistStoreKey, internalDraftState.key, isControlled])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
@@ -2903,7 +2983,7 @@ export function ChatComposer({
   // auto-send) so the operator can correct a transcription before it lands.
   const voice = useVoiceInput({
     onTranscribed: (text) => {
-      onDraftChange(draft.trim() === '' ? text : `${draft}\n${text}`)
+      setDraft(draft.trim() === '' ? text : `${draft}\n${text}`)
     },
   })
 
@@ -3000,15 +3080,16 @@ export function ChatComposer({
       blocks,
       userBlocks,
       clientActionId: nextComposerClientActionId(),
+      text,
     })
-    onDraftChange('')
+    setDraft('')
     setAttachments([])
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
   const grow = (event: Event) => {
     const target = event.target as HTMLTextAreaElement
-    onDraftChange(target.value)
+    setDraft(target.value)
     target.style.height = 'auto'
     target.style.height = `${Math.min(target.scrollHeight, 160)}px`
   }

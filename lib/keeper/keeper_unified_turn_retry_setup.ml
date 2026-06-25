@@ -5,9 +5,7 @@ type retry_setup =
   ; remaining_turn_budget_s : unit -> float
   ; elapsed_ms : float -> int
   ; current_turn_phase_elapsed_ms : float option -> int * int option
-  ; keeper_profile : Keeper_types_profile.keeper_profile_defaults
   ; max_idle_turns : int
-  ; max_turns : int
   }
 
 let build ~now ~keeper_name ~channel ~turn_affordances =
@@ -24,16 +22,13 @@ let build ~now ~keeper_name ~channel ~turn_affordances =
       ( elapsed_ms (retry_started_at -. turn_started_at)
       , Some (elapsed_ms (now_s -. retry_started_at)) )
   in
-  let keeper_profile = Keeper_types_profile.load_keeper_profile_defaults keeper_name in
-  let max_idle_turns, max_turns =
+  ignore keeper_name;
+  let max_idle_turns =
     match channel with
     | Keeper_world_observation.Reactive ->
-      ( Keeper_runtime_resolved.reactive_max_idle_turns ()
-      , Keeper_types_profile.effective_max_turns_per_call keeper_profile )
+      Keeper_runtime_resolved.reactive_max_idle_turns ()
     | Keeper_world_observation.Scheduled_autonomous ->
-      ( Keeper_runtime_resolved.autonomous_max_idle_turns ()
-      , Keeper_types_profile.effective_max_turns_per_call_scheduled_autonomous
-          keeper_profile )
+      Keeper_runtime_resolved.autonomous_max_idle_turns ()
   in
   ignore turn_affordances;
   { timeout_sec
@@ -42,7 +37,5 @@ let build ~now ~keeper_name ~channel ~turn_affordances =
   ; remaining_turn_budget_s
   ; elapsed_ms
   ; current_turn_phase_elapsed_ms
-  ; keeper_profile
   ; max_idle_turns
-  ; max_turns
   }

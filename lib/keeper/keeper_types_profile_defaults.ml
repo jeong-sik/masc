@@ -28,10 +28,6 @@ type keeper_profile_defaults = {
   per_provider_timeout_state : per_provider_timeout_state;
   per_provider_timeout : float option;
   always_approve : bool option;
-  (* Turn budget overrides. None = inherit env default
-     (MASC_KEEPER_OAS_MAX_TURNS_PER_CALL / ..._SCHEDULED_AUTONOMOUS). *)
-  max_turns_per_call : int option;
-  max_turns_per_call_scheduled_autonomous : int option;
   (* Per-keeper OAS CLI transport env vars (OAS 0.159+).
      Parsed from [[keeper.oas_env]] table.  Keys MUST match
      ^OAS_[A-Z]+_.+ — any other entries are dropped with
@@ -73,8 +69,6 @@ let empty_keeper_profile_defaults =
     per_provider_timeout_state = Per_provider_timeout_unset;
     per_provider_timeout = None;
     always_approve = None;
-    max_turns_per_call = None;
-    max_turns_per_call_scheduled_autonomous = None;
     unknown_toml_keys = [];
     oas_env = [];
   }

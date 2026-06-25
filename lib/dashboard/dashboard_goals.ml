@@ -201,7 +201,6 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
     [
       ("id", `String goal.id);
       ("title", `String goal.title);
-      ("horizon", Goal_store.horizon_to_yojson goal.horizon);
       ("status", Goal_store.goal_status_to_yojson goal.status);
       ("status_color", `String (goal_status_color goal.status));
       ("phase", Goal_phase.to_yojson goal.phase);

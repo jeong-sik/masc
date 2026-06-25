@@ -14,7 +14,15 @@ val decide_keepalive_scheduling :
   ?runtime_resilience_of_name:(string -> string option) ->
   ?keeper_resilience_of_name:(string -> string option) ->
   ?reactive_wake:bool ->
+  ?wake_tombstone_decide:
+    (origin:Keeper_wake_tombstone.wake_origin ->
+     keeper_name:string ->
+     Keeper_wake_tombstone.wake_decision) ->
   stop:bool Atomic.t ->
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_world_observation.world_observation ->
   keepalive_scheduling_decision
+(** RFC-0294 R2b: [wake_tombstone_decide] (default {!Keeper_wake_tombstone.decide})
+    gates a scheduled-autonomous (self-cadence) wake through the no-progress
+    tombstone, suppressing [should_run_turn] for a latched keeper while leaving
+    [requested_should_run_turn] intact. Injectable for tests. *)

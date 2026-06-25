@@ -95,7 +95,6 @@ val prepare_agent_setup
   -> context_injector:Agent_sdk.Hooks.context_injector
   -> start_turn_count:int
   -> generation:int
-  -> max_turns:int
   -> runtime_id:string
   -> is_retry:bool
   -> turn_affordances:string list

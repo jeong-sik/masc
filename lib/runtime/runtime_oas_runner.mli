@@ -28,6 +28,13 @@ val eio_context_error_to_sdk_error : string -> Agent_sdk.Error.sdk_error
 (** Lift a context-missing diagnostic string into an [Agent_sdk.Error.Config]
     error with field ["eio_context"]. *)
 
+val is_eio_context_error : Agent_sdk.Error.sdk_error -> bool
+(** [true] iff the error is the "Eio context unavailable" config error
+    produced by {!eio_context_error_to_sdk_error} (running outside a server
+    context).  Classifies on the typed [Config (InvalidConfig { field })] tag
+    rather than on the rendered message, so an Eio wording change cannot
+    silently break the heartbeat loop's fatal-environment promotion. *)
+
 val runtime_catalog_error_to_sdk_error : string -> Agent_sdk.Error.sdk_error
 (** Lift a runtime-catalog diagnostic into an [Agent_sdk.Error.Config]
     error with field ["runtime_id"]. *)

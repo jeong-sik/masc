@@ -3,7 +3,10 @@
 
 open Masc_domain
 
-let goal_horizon_enum = [ "short"; "mid"; "long" ]
+(* RFC-0294: goal_horizon_enum removed with the workspace-goal horizon.
+   masc_goal_list/upsert no longer advertise a horizon arg; with the schema's
+   "additionalProperties": false, an explicit horizon key is rejected as an
+   unknown property rather than silently ignored. *)
 (* RFC-0089: the phase/action enums advertised to MCP clients are derived from
    the Goal_phase ADT (the goal lifecycle SSOT), the same source the
    workspace_goals validator uses, so the schema can never advertise a value the
@@ -59,9 +62,9 @@ let schemas : tool_schema list =
     {
       name = "masc_goal_list";
       description =
-        "List shared planning goals from the Goal Store, optionally filtered by horizon or explicit phase. \
+        "List shared planning goals from the Goal Store, optionally filtered by explicit phase. \
 Valid phases: executing, awaiting_verification, awaiting_approval, blocked, paused, completed, dropped. \
-Use when a PM/planner agent needs current long/mid/short goals before creating tasks or reviews. \
+Use when a PM/planner agent needs current goals before creating tasks or reviews. \
 The dashboard Goal Tree reads the same store. Goal-task links are managed externally. \
 The response includes each goal's explicit lifecycle phase and verification policy.";
       input_schema =
@@ -71,7 +74,6 @@ The response includes each goal's explicit lifecycle phase and verification poli
             ( "properties",
               `Assoc
                 [
-                  ("horizon", enum_schema ~description:"Optional horizon filter" goal_horizon_enum);
                   ("phase", enum_schema ~description:"Optional explicit Goal FSM phase filter" goal_phase_enum);
                 ] );
             ("additionalProperties", `Bool false);
@@ -81,7 +83,7 @@ The response includes each goal's explicit lifecycle phase and verification poli
       name = "masc_goal_upsert";
       description =
         "Create or update a shared Goal Store entry used by Planning > Goal Tree. \
-For new goals, provide at least title; omitted horizon defaults to short. \
+For new goals, provide at least title. \
 After creation, goal-task links are registered separately by the keeper orchestrator. \
 Use this tool for goal metadata, parent linkage, and verifier-policy configuration. \
 Lifecycle status/phase fields are intentionally omitted here; use masc_goal_transition / masc_goal_verify for lifecycle moves.";
@@ -93,7 +95,6 @@ Lifecycle status/phase fields are intentionally omitted here; use masc_goal_tran
               `Assoc
                 [
                   ("id", `Assoc [ ("type", `String "string") ]);
-                  ("horizon", enum_schema goal_horizon_enum);
                   ("title", `Assoc [ ("type", `String "string") ]);
                   ("metric", `Assoc [ ("type", `String "string") ]);
                   ("target_value", `Assoc [ ("type", `String "string") ]);

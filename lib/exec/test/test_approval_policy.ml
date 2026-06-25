@@ -275,6 +275,26 @@ let test_mkfs_family_denied_under_autonomous () =
     assert (Exec_program.to_string bin = "mkfs.ext4")
   | _ -> assert false
 
+(* System-power control ([shutdown]/[reboot]/[halt]/[poweroff]) is
+   catastrophic-by-identity and path-independent — a keeper has no legitimate
+   argument form for halting/rebooting the host, so it is denied under every
+   overlay including autonomous, exactly like [mkfs]. All four are tested so a
+   future sparse-match (encoding only a subset) is caught. RFC
+   eliminate-substring-destructive-classifier §3-A (path-independent floor). *)
+let test_system_power_denied_under_autonomous () =
+  List.iter
+    (fun (name, args) ->
+       let s = simple (bin_ok name) ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps
+           ~simple:s
+       with
+       | Verdict.Deny { reason = Catastrophic_program bin; _ } ->
+         assert (Exec_program.to_string bin = name)
+       | _ -> assert false)
+    [ "shutdown", [ "-h"; "now" ]; "reboot", []; "halt", []; "poweroff", [] ]
+
 (* Floor completeness — [git clean] with a bundled force flag ([-fd], the
    common force-delete-untracked form) is destructive and hits the floor.
    Probe finding 2026-06-18: [git clean -fd] was graded as plain audited git
@@ -377,6 +397,7 @@ let () =
   test_destructive_git_floor_independent_of_trust ();
   test_mkfs_denied_under_autonomous ();
   test_mkfs_family_denied_under_autonomous ();
+  test_system_power_denied_under_autonomous ();
   test_git_clean_bundled_force_denied ();
   (* RFC-0255 §4.5 review response: no raw destructive-git demotion. *)
   test_reset_hard_floored_under_autonomous ();

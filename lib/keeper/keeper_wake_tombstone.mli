@@ -10,6 +10,9 @@ type wake_origin =
   | Board_reactive
   | Heartbeat
   | Operator_direct
+  | Self_cadence
+      (** RFC-0294 R2b: scheduled-autonomous self-cadence wake; an automatic
+          origin that does NOT bypass the tombstone. *)
 [@@deriving show, eq]
 
 type wake_suppression =

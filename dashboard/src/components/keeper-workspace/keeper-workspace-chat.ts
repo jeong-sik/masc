@@ -5,10 +5,11 @@
 
 import { html } from 'htm/preact'
 import { ChevronLeft } from 'lucide-preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useCallback, useEffect, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import type { Keeper, KeeperConversationEntry } from '../../types'
 import { KeeperConversationPanel } from '../keeper-shared'
+import { navigate } from '../../router'
 import { keeperMobilePane } from '../keeper-detail-state'
 import { TurnInspectorDrawer as SharedTurnInspectorDrawer } from '../keeper-turn-inspector-drawer'
 import { keeperDisplayStatus } from '../../lib/keeper-runtime-display'
@@ -328,6 +329,34 @@ function TurnInspectorDrawer({
   `
 }
 
+// RFC keeper-conversation-hitl-flow §4.1-A: a slim, non-interactive cue at the
+// top of the conversation so an operator who arrives via "대화에서 검토" sees the
+// keeper is awaiting a decision. Read-only display + a link back to the approvals
+// queue (the single act-point); no approve/reject action here by design.
+function PendingApprovalCue({ keeper }: { keeper: Keeper }): VNode | null {
+  const pending = keeper.trust?.approval_state?.pending_first
+  const id = pending?.id?.trim()
+  if (!id) return null
+  const tool = pending?.tool_name?.trim()
+  return html`
+    <div
+      class="kw-chat-pending-cue flex items-center gap-2 px-4 py-2 text-xs text-[var(--color-fg-secondary)]"
+      role="status"
+      data-testid="keeper-pending-approval-cue"
+    >
+      <${Pill} tone="warn" dot="warn">승인 대기</${Pill}>
+      <span>이 keeper는 결재 대기 중입니다${tool ? ` · ${tool}` : ''}</span>
+      <span class="flex-1"></span>
+      <button
+        type="button"
+        class="kw-act v2-monitoring-action"
+        onClick=${() => navigate('approvals')}
+        title="결재 큐에서 이 요청을 승인·거부합니다"
+      >결재 큐에서 처리 →</button>
+    </div>
+  `
+}
+
 export function KeeperWorkspaceChat({
   keeper,
   mobile = false,
@@ -345,10 +374,10 @@ export function KeeperWorkspaceChat({
 }): VNode {
   const [turnInspectorOpen, setTurnInspectorOpen] = useState(false)
   const [turnInspectorEntry, setTurnInspectorEntry] = useState<KeeperConversationEntry | null>(null)
-  const openTurnInspector = (entry?: KeeperConversationEntry) => {
+  const openTurnInspector = useCallback((entry?: KeeperConversationEntry) => {
     setTurnInspectorEntry(entry ?? null)
     setTurnInspectorOpen(true)
-  }
+  }, [])
 
   return html`
     <section class="kw-chat v2-monitoring-surface" role="region" aria-label=${`${keeper.name} 대화`}>
@@ -360,6 +389,7 @@ export function KeeperWorkspaceChat({
         onOpenConfig=${onOpenConfig}
         onOpenDetail=${onOpenDetail}
       />
+      <${PendingApprovalCue} keeper=${keeper} />
       <div class="kw-chat-body">
         <${KeeperConversationPanel}
           keeperName=${keeper.name}

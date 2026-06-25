@@ -123,6 +123,14 @@ type known =
   | Rm
   | Dd
   | Mkfs
+  (* System-power control: catastrophic-by-identity, path-independent. A keeper
+     has no legitimate argument form for halting/rebooting the host, so these
+     are floored beside [Mkfs] (see [Approval_policy.find_catastrophic_program]),
+     not merely classified [`Privileged]. *)
+  | Shutdown
+  | Reboot
+  | Halt
+  | Poweroff
 
 type known_metadata =
   { name : string
@@ -226,6 +234,10 @@ let known_metadata : known -> known_metadata = function
   | Rm -> { name = "rm"; risk = `Privileged; kind = `Privileged_program }
   | Dd -> { name = "dd"; risk = `Privileged; kind = `Privileged_program }
   | Mkfs -> { name = "mkfs"; risk = `Privileged; kind = `Privileged_program }
+  | Shutdown -> { name = "shutdown"; risk = `Privileged; kind = `Privileged_program }
+  | Reboot -> { name = "reboot"; risk = `Privileged; kind = `Privileged_program }
+  | Halt -> { name = "halt"; risk = `Privileged; kind = `Privileged_program }
+  | Poweroff -> { name = "poweroff"; risk = `Privileged; kind = `Privileged_program }
 ;;
 
 let all_known =
@@ -322,6 +334,10 @@ let all_known =
   ; Rm
   ; Dd
   ; Mkfs
+  ; Shutdown
+  ; Reboot
+  ; Halt
+  ; Poweroff
   ]
 ;;
 

@@ -60,8 +60,6 @@ let run (ctx : ctx)
       ~(timeout_sec : float)
       ~(remaining_turn_budget_s : unit -> float)
       ~(current_turn_phase_elapsed_ms : float option -> int * int option)
-      ~(keeper_profile : Keeper_types_profile.keeper_profile_defaults)
-      ~(max_turns : int)
       ~(max_idle_turns : int)
       ~(user_message : string)
       ~(registry_base_path : string)
@@ -117,7 +115,6 @@ let run (ctx : ctx)
           (Keeper_id.Trace_id.to_string run_meta.runtime.trace_id)
         ~generation:run_generation
         ~max_context:execution.max_context
-        ~max_turns
         ~max_idle_turns
         ~channel:(Keeper_world_observation.channel_to_string channel)
         ~is_retry
@@ -164,7 +161,6 @@ let run (ctx : ctx)
                  ~world_observation:observation
                  ~turn_affordances
                  ~generation:run_generation
-                 ~max_turns
                  ~max_idle_turns
                  ~history_user_source:"world_state_prompt"
                  ~history_assistant_source:"internal_assistant"
@@ -262,16 +258,6 @@ let run (ctx : ctx)
           ~attempted_runtimes
           err
     in
-    let max_turns =
-      match channel with
-      | Keeper_world_observation.Reactive ->
-        Keeper_types_profile.effective_max_turns_per_call
-          keeper_profile
-      | Keeper_world_observation.Scheduled_autonomous ->
-        Keeper_types_profile
-        .effective_max_turns_per_call_scheduled_autonomous
-          keeper_profile
-    in
     let attempt_result, turn_state =
       let allow_wall_clock_retry_budget =
         allow_wall_clock_retry_budget_for_attempt
@@ -285,7 +271,6 @@ let run (ctx : ctx)
         resolve_bounded_provider_timeout_budget_with_turn_budget
           ~allow_wall_clock_retry_budget
           ~is_retry
-          ~max_turns
           ~estimated_input_tokens:prompt_timeout_estimate_tokens
           ~remaining_turn_budget_s:(remaining_turn_budget_s ())
       in
@@ -423,7 +408,6 @@ let run (ctx : ctx)
             ~effective_runtime:execution_runtime_id
             ~attempted_runtimes
             ~estimated_input_tokens:prompt_timeout_estimate_tokens
-            ~max_turns
             ~time_spent_in_turn_s:
               (timeout_sec -. remaining_turn_budget_s ())
             ~remaining_turn_budget_s:(remaining_turn_budget_s ())

@@ -1060,7 +1060,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     ` : null}
   `
 
-  // prompt ¶ — edit toolbar + horizon goals + instructions + system prompt preview
+  // prompt ¶ — edit toolbar + active goals + instructions + system prompt preview
   const promptTab = html`
     ${toolbar}
     ${promptSection}
@@ -1299,7 +1299,6 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   `
 
   // goals ◎ — assigned goal-store bindings (active_goal_ids picker)
-  const horizonLabel = (h: string): string => (h === 'short' ? '단기' : h === 'long' ? '장기' : h === 'mid' ? '중기' : h)
   const goalsTab = html`
     <${KcfSec}
       title="배정 목표"
@@ -1328,7 +1327,6 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
                     <span class="kcf-goal-title">${goal.title}</span>
                     <span class="kcf-goal-id mono">${goal.id}</span>
                   </span>
-                  <span class=${`kcf-goal-hz hz-${goal.horizon}`}>${horizonLabel(goal.horizon)}</span>
                 </button>
               `
             })}

@@ -64,11 +64,6 @@ let load_from_path ~name path : keeper_profile_defaults =
               per_provider_timeout_state;
               per_provider_timeout;
               always_approve = Safe_ops.json_bool_opt "always_approve" keeper_json;
-              max_turns_per_call = Safe_ops.json_int_opt "max_turns_per_call" keeper_json;
-              max_turns_per_call_scheduled_autonomous =
-                Safe_ops.json_int_opt
-                  "max_turns_per_call_scheduled_autonomous"
-                  keeper_json;
               oas_env = [];
               unknown_toml_keys = [];
             }

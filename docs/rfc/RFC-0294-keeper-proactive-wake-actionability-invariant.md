@@ -15,7 +15,7 @@ implementation_prs: []
 
 - Status: Draft
 - Area: `lib/keeper/` (world observation, proactive scheduler, no-progress detector, wake tombstone), `lib/workspace/` (orphan surfacing)
-- Evidence: live incident — keeper `executor` livelocked 2026-06-21T08:09Z → 2026-06-24T07:44Z (619 autonomous turns, ~100s cadence, all terminating `success`), reconstructed from `~/.masc/keepers/executor.decisions.jsonl` (failed_task trigger on 400/400 recent turns, `claimable_task_count==0` on 327, `failed_task_count` 2–3 never 0) + `~/.masc/tasks/backlog.json` + `~/.masc/events/2026-06/` (GC `zombie_cleanup` absent 06-21/06-22). Design hardened against 5 independent adversarial critics (correctness, RFC-0246 alignment, workaround-bar, scope, test-harness).
+- Evidence: live incident — keeper `executor` livelocked 2026-06-21T08:09Z → 2026-06-24T07:44Z (619 autonomous turns, ~100s cadence, all terminating `success`), reconstructed from the runtime base path's `keepers/executor.decisions.jsonl` (failed_task trigger on 400/400 recent turns, `claimable_task_count==0` on 327, `failed_task_count` 2–3 never 0) + `tasks/backlog.json` + `events/2026-06/` (GC `zombie_cleanup` absent 06-21/06-22). Design hardened against 5 independent adversarial critics (correctness, RFC-0246 alignment, workaround-bar, scope, test-harness).
 
 ## 1. Summary
 

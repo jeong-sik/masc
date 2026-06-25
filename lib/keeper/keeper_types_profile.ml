@@ -535,30 +535,6 @@ let load_keeper_profile_defaults_for_base_path ~base_path name
       ~persona_dirs:(safe_persona_dirs ~base_path ())
       name
 
-(** Clamp a profile-provided max-turns override to [1, 100] — the same range
-    enforced by [Keeper_runtime_resolved.reactive_max_turns_per_call].
-    Values outside the range are rejected so a typo in TOML cannot silently
-    bypass the budget envelope. *)
-let clamp_max_turns_override : int option -> int option = function
-  | Some n
-    when n >= Keeper_runtime_resolved.max_turns_per_call_min
-      && n <= Keeper_runtime_resolved.max_turns_per_call_max ->
-    Some n
-  | _ -> None
-
-let effective_max_turns_per_call (profile : keeper_profile_defaults) : int =
-  match clamp_max_turns_override profile.max_turns_per_call with
-  | Some n -> n
-  | None -> Keeper_runtime_resolved.reactive_max_turns_per_call ()
-
-let effective_max_turns_per_call_scheduled_autonomous
-    (profile : keeper_profile_defaults) : int =
-  let global_cap = Keeper_runtime_resolved.reactive_max_turns_per_call () in
-  match clamp_max_turns_override profile.max_turns_per_call_scheduled_autonomous with
-  | Some n -> min n global_cap
-  | None ->
-    Keeper_runtime_resolved.autonomous_max_turns_per_call ()
-
 type keeper_default_source_snapshot = {
   source_kind : string option;
   defaults : keeper_profile_defaults;

@@ -425,8 +425,6 @@ export function KeeperWorkspaceRail({
       ? html`<${MemoryInspector}
           keeper=${memoryKeeper}
           keepers=${memoryKeepers}
-          memory=${{}}
-          compactions=${{}}
           onClose=${() => setOverlay(null)}
         />`
       : null}

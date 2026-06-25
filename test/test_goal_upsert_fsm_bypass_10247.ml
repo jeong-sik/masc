@@ -181,7 +181,7 @@ let test_no_lifecycle_field_still_round_trips () =
   let body =
     dispatch_upsert_must_succeed
       (workspace_ctx config)
-      [ "title", `String "Default goal"; "horizon", `String "mid"; "priority", `Int 2 ]
+      [ "title", `String "Default goal"; "priority", `Int 2 ]
   in
   check
     bool

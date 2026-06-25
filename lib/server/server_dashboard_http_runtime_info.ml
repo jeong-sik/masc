@@ -1931,6 +1931,9 @@ let dashboard_actor_name = function
 let dashboard_tools_warming_json ~actor =
   `Assoc
     [ "generated_at", `String (Masc_domain.now_iso ())
+    ; "status", `String "warming"
+    ; "is_warming", `Bool true
+    ; "stale_reason", `String "warming"
     ; "config_resolution", `Assoc [ "status", `String "warming" ]
     ; "runtime_resolution", `Assoc [ "status", `String "warming" ]
     ; ( "tool_inventory"

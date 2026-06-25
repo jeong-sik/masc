@@ -247,7 +247,20 @@ let read_runtime_manifest_scan ~config ~keeper_name ~trace_id ?turn_id ~limit ()
             match Yojson.Safe.from_string line |> Keeper_runtime_manifest.of_json with
             | Ok row when manifest_row_matches ?turn_id keeper_name trace_id row ->
                 update_runtime_manifest_scan scan row
-            | Ok _ | Error _ -> ()
+            | Ok _ -> ()
+            | Error msg ->
+                Log.warn
+                  ~ctx:"runtime_manifest_scan"
+                  "Runtime manifest row skipped (keeper=%s trace=%s): %s"
+                  keeper_name
+                  trace_id
+                  msg
           with
-          | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ());
+          | Yojson.Json_error msg | Yojson.Safe.Util.Type_error (msg, _) ->
+              Log.warn
+                ~ctx:"runtime_manifest_scan"
+                "Runtime manifest row JSON parse failed (keeper=%s trace=%s): %s"
+                keeper_name
+                trace_id
+                msg);
   scan

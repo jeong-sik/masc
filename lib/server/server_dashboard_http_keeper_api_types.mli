@@ -24,6 +24,13 @@ val keeper_suffix_directive : string
 
 (** {1 Dashboard cache keys} *)
 
+val cache_key_string_segment : string -> string
+(** Length-prefixed cache key segment so delimiter characters in the value
+    cannot create key collisions. *)
+
+val cache_key_string_opt_segment : string option -> string
+(** [None] and [Some ""] produce distinct segments. *)
+
 val keeper_config_cache_key : Workspace.config -> string -> string
 (** Cache key for [/api/v1/keepers/<name>/config]. Used by both read and
     invalidation paths. *)

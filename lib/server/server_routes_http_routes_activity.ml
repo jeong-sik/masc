@@ -11,6 +11,7 @@ module Common = Server_routes_http_common
 module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
+module Keeper_api_types = Server_dashboard_http_keeper_api_types
 
 let include_moderation_projection ~base_path request =
   match auth_token_from_request request with
@@ -340,10 +341,15 @@ let add_routes ~sw ~clock router =
        ) request reqd)
 
   |> Http.Router.get "/api/v1/board/hearths" (fun request reqd ->
-       with_public_read (fun _state _req reqd ->
+       with_public_read (fun state _req reqd ->
+         let config = Mcp_server.workspace_config state in
+         let cache_key =
+           Printf.sprintf "board:hearths:%s"
+             (Keeper_api_types.cache_key_string_segment config.base_path)
+         in
          let json =
            Dashboard_cache.get_or_compute
-             "board:hearths"
+             cache_key
              ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s
              (fun () ->
                 Domain_pool_ref.submit_io_or_inline (fun () ->

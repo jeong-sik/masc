@@ -12,10 +12,10 @@ let test_now = 1_700_000_000.0
    regression gate. *)
 let fresh_dir prefix = Filename.temp_dir prefix ""
 
-let fact ?(external_ref = None) ?(valid_until = None) ~now claim =
+let fact ?(valid_until = None) ~now claim =
   { Types.claim
   ; Types.category = Types.Fact
-  ; Types.external_ref
+  ; Types.external_ref = None
   ; Types.claim_kind = None
   ; Types.source = { Types.trace_id = "health-test"; Types.turn = 1; Types.tool_call_id = None }
   ; Types.observed_by = []
@@ -124,9 +124,7 @@ let test_uses_explicit_base_path_not_ambient_resolver () =
 (* The route computes [now] internally from the wall clock, so the dry-run GC
    TTL check runs against the real current time. Fact horizons are therefore
    pinned to the extremes — far past (always expired) or far future (always
-   live) — to stay deterministic without a clock seam. Claims avoid any external
-   reference marker ("PR #N", "issue #N", "PK-N") so [external_ref_of_claim] does
-   not re-derive a ref and perturb the [external_ref]/TTL counts. *)
+   live) — to stay deterministic without a clock seam. *)
 
 let test_reports_per_keeper_metric_values () =
   Eio_main.run
@@ -140,9 +138,8 @@ let test_reports_per_keeper_metric_values () =
     [ fact ~now "alpha durable note one"
     ; fact
         ~now
-        ~external_ref:(Some { Types.kind = Types.Pr; Types.id = "1" })
-          (* Far-future horizon: serialized [valid_until] is preserved on read,
-             so this stays live regardless of the wall clock. *)
+        (* Far-future horizon: serialized [valid_until] is preserved on read,
+           so this stays live regardless of the wall clock. *)
         ~valid_until:(Some (now +. 1e12))
         "beta tagged row two"
     ];
@@ -150,7 +147,6 @@ let test_reports_per_keeper_metric_values () =
   let k = keeper_obj "solo" json in
   Alcotest.(check int) "facts counted" 2 (int_field "facts" k);
   Alcotest.(check bool) "facts_bytes positive" true (int_field "facts_bytes" k > 0);
-  Alcotest.(check int) "external_ref counted" 1 (int_field "external_ref" k);
   Alcotest.(check int) "no events file: events 0" 0 (int_field "events" k);
   Alcotest.(check int) "no events file: events_bytes 0" 0 (int_field "events_bytes" k);
   Alcotest.(check (float 1e-9))

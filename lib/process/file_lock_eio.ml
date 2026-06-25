@@ -137,7 +137,7 @@ let run_blocking_lock_op f = Eio_guard.run_in_systhread f
     This is the blocking variant for callers that already run in a systhread
     (for example backend and Hebbian file I/O paths). On success, returns the
     open file descriptor with the lock held. On timeout, closes the fd and
-    raises [Failure]. *)
+    raises [Flock_timeout]. *)
 let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
     ?(max_attempts = 200) ?(sleep_sec = 0.01) ~caller () =
   let fd = Unix.openfile lock_path mode perm in

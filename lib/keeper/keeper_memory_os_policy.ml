@@ -21,15 +21,13 @@ let durable_retention_tier = 1.0e15
    most-recently-verified (else first-seen) fact is kept. It never ranks recall —
    recall ordering is structural + judgment, not a number.
 
-   RFC-0259 §3.2(b): a volatile (external-ref) claim is non-durable even when its
-   category is durable (e.g. a [Fact] naming a PR), so the cap drops it before
-   genuine durable knowledge. Keying off [category_valid_until] alone would keep
-   it durable; OR-in the external ref. The category check still covers legacy
-   Ephemeral rows whose [valid_until] was omitted on disk. *)
+   External refs no longer affect retention rank. Memory OS provides claim text as
+   context; it does not force PR/issue/task mentions into a lower-retention
+   machine status bucket. The category check still covers legacy Ephemeral rows
+   whose [valid_until] was omitted on disk. *)
 let retention_rank ~now (f : fact) =
   let tier =
-    if Option.is_some f.external_ref
-       || Option.is_some (category_valid_until ~now f.category)
+    if Option.is_some (category_valid_until ~now f.category)
     then 0.0
     else durable_retention_tier
   in
@@ -41,32 +39,25 @@ let retention_rank ~now (f : fact) =
    [existing] is the persisted row; [incoming] is the newly extracted claim with
    the same producer identity. Identity and first-seen provenance are preserved.
 
-   RFC-0259 §3.7 (P6/F): for a volatile (external-ref) claim the prior row is
-   inherited entirely — producer re-extraction is NOT re-verification. Only the
-   reconciler ([Stale_open], an external GitHub re-check) advances a volatile
-   claim's anchors. A non-volatile fact's [last_verified_at] still advances on
-   re-observe (it has no decay horizon to reset).
+   External refs no longer suppress re-observation refresh. They are context, not
+   a code-enforced grounding contract. Self-observation remains special: the
+   librarian re-extracting it is not proof that the self-state still holds.
 
    The prior merge also blended a confidence float and bumped an access counter;
    both fed the deleted composite score and are gone. There is no numeric
    strength to move — re-observation is a binary "seen again now". *)
 let reobserve_fact ~now ~existing ~incoming:(_ : fact) =
-  match existing.external_ref, existing.claim_kind with
-  | Some _, _ | _, Some Self_observation ->
-    (* RFC-0259 §3.7 (P6/F) + RFC-0285 §3.3: inherit the prior row entirely for a
-       volatile (external-ref) OR self-observation claim. The librarian re-extracting
-       it — possibly reworded — is NOT re-verification; it is the same self-narrative
-       re-emitted from memory. Inheriting avoids advancing [last_verified_at], which
-       would raise [retention_rank] and make the cap keep a self-observation as
-       "recently verified" — the opposite of the goal. The finite horizon set at first
-       mint (L3) still governs expiry; a re-mint cannot extend it past the anchor.
-       Only the reconciler ([Stale_open], an external re-check) advances a volatile
-       claim's [last_verified_at]. *)
+  match existing.claim_kind with
+  | Some Self_observation ->
+    (* RFC-0285 §3.3: inherit the prior row entirely for self-observation. The
+       librarian re-extracting it — possibly reworded — is NOT re-verification; it
+       is the same self-narrative re-emitted from memory. Inheriting avoids
+       advancing [last_verified_at], which would raise [retention_rank] and make
+       the cap keep a self-observation as "recently verified" — the opposite of the
+       goal. *)
     existing
-  | None, (Some External_state | Some Durable_knowledge | None) ->
-    (* Non-volatile, non-self-observation re-observe: the librarian re-asserting a
-       durable claim is fresh evidence it still holds, so advance the staleness
-       marker. There is no decay horizon to reset (durable [valid_until] is
-       unchanged), so F does not apply. *)
+  | Some External_state | Some Durable_knowledge | None ->
+    (* Non-self-observation re-observe: the librarian re-asserting a claim from
+       fresh context is enough to advance the staleness marker. *)
     { existing with last_verified_at = Some now }
 ;;

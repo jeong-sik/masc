@@ -69,9 +69,9 @@ let dedup_by_claim items =
 ;;
 
 (* RFC-0247 (purge): GC is now two structural passes only — hard-expire facts
-   past their [valid_until] horizon (a typed decision: the Ephemeral TTL, or the
-   RFC-0259 §3.2(b) volatile horizon for an external-ref claim), then
-   dedup duplicate claims keeping the most-recently-verified. The score-threshold
+   past their [valid_until] horizon (a typed decision: Ephemeral TTL or
+   self-observation TTL), then dedup duplicate claims keeping the most-recently-verified.
+   The score-threshold
    discard ([decide_retention] on [score_fact <= 0.02]) was removed: a fact's
    value is not a number GC can threshold. Forgetting is the librarian's
    delete-on-contradiction judgment plus this structural TTL, not a low score. *)

@@ -190,9 +190,9 @@ module KeeperMemoryOs = struct
   let get_int_logged = Env_config_memory.get_int_logged
   let get_float_positive_logged = Env_config_memory.get_float_positive_logged
 
-  let get_bool_logged name ~default =
+  let get_bool_logged ?(invalid = Env_config_memory.Default) name ~default =
     Env_config_memory.get_bool_logged
-      ~invalid:Env_config_memory.Fail_closed
+      ~invalid
       name
       ~default
   ;;
@@ -202,14 +202,16 @@ module KeeperMemoryOs = struct
     if String.equal value "" then None else Some value
   ;;
 
-  (** Memory OS recall prompt injection kill switch. Default: true.
+  (** Memory OS recall prompt injection kill switch. Default: true; invalid
+      values warn and preserve the default-on behavior.
       @category Policies
       @ops_class operator *)
   let recall_enabled () =
     get_bool_logged "MASC_KEEPER_MEMORY_OS_RECALL" ~default:true
   ;;
 
-  (** Memory OS librarian post-turn extraction kill switch. Default: true.
+  (** Memory OS librarian post-turn extraction kill switch. Default: true;
+      invalid values warn and preserve the default-on behavior.
       @category Policies
       @ops_class operator *)
   let librarian_enabled () =
@@ -262,19 +264,26 @@ module KeeperMemoryOs = struct
     max 0 (get_int_logged "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT" ~default:1)
   ;;
 
-  (** Per-keeper Memory OS GC maintenance fiber kill switch. Default: false.
+  (** Per-keeper Memory OS GC maintenance fiber kill switch. Default: false;
+      invalid values fail closed to false.
       @category Storage
       @ops_class operator *)
   let gc_enabled () =
-    get_bool_logged "MASC_KEEPER_MEMORY_OS_GC" ~default:false
+    get_bool_logged
+      ~invalid:Env_config_memory.Fail_closed
+      "MASC_KEEPER_MEMORY_OS_GC"
+      ~default:false
   ;;
 
   (** Per-keeper Memory OS consolidation maintenance fiber kill switch.
-      Default: false.
+      Default: false; invalid values fail closed to false.
       @category Policies
       @ops_class operator *)
   let consolidation_enabled () =
-    get_bool_logged "MASC_KEEPER_MEMORY_OS_CONSOLIDATION" ~default:false
+    get_bool_logged
+      ~invalid:Env_config_memory.Fail_closed
+      "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
+      ~default:false
   ;;
 
   (** Optional runtime id override for Memory OS consolidation.

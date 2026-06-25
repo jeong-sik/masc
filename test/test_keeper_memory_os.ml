@@ -688,13 +688,13 @@ let test_memory_os_bool_env_accepts_enabled_disabled () =
 let test_memory_os_env_invalid_values_fail_closed_or_default () =
   with_memory_os_env "MASC_KEEPER_MEMORY_OS_RECALL" "maybe" (fun () ->
     Alcotest.(check bool)
-      "invalid recall flag fail-closes"
-      false
+      "invalid default-on recall keeps default"
+      true
       (Env_config.KeeperMemoryOs.recall_enabled ()));
   with_memory_os_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN" "maybe" (fun () ->
     Alcotest.(check bool)
-      "invalid librarian flag fail-closes"
-      false
+      "invalid default-on librarian keeps default"
+      true
       (Env_config.KeeperMemoryOs.librarian_enabled ()));
   with_memory_os_env "MASC_KEEPER_MEMORY_OS_GC" "maybe" (fun () ->
     Alcotest.(check bool)

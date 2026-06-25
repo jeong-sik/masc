@@ -2,6 +2,7 @@ import { signal } from '@preact/signals'
 import { formatKeeperVisibleReply } from './keeper-message'
 import { parseTextToChatBlocks } from './lib/chat-blocks'
 import { isRecord, asString, asNumber, asBoolean, toIsoTimestamp } from './components/common/normalize'
+import { toolEntryIdFromCallId } from './tool-call-output-store'
 import type {
   KeeperConversationAttachment,
   KeeperConversationAudioClip,
@@ -268,6 +269,17 @@ function normalizeNumberArray(raw: unknown): number[] | null {
   return values as number[]
 }
 
+function normalizeTracePayload(raw: unknown): string | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (typeof raw === 'string') return raw
+  try {
+    const encoded = JSON.stringify(raw, null, 2)
+    return encoded === undefined ? String(raw) : encoded
+  } catch {
+    return String(raw)
+  }
+}
+
 function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
   if (!isRecord(raw)) return null
   const kind = asString(raw.kind)
@@ -293,8 +305,8 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
       toolCallId: asString(raw.toolCallId) ?? asString(raw.tool_call_id) ?? undefined,
       status: toolStatus,
       dur: asString(raw.dur) ?? undefined,
-      args: asString(raw.args) ?? undefined,
-      result: asString(raw.result) ?? undefined,
+      args: normalizeTracePayload(raw.args),
+      result: normalizeTracePayload(raw.result),
       ts: asString(raw.ts) ?? undefined,
     })
   }
@@ -796,6 +808,7 @@ export function insertThreadEntryBefore(
   entry: KeeperConversationEntry,
 ): void {
   const existing = keeperThreads.value[name] ?? []
+  if (existing.some(e => e.id === entry.id)) return
   const index = existing.findIndex(e => e.id === beforeId)
   const next =
     index === -1
@@ -876,9 +889,7 @@ function warnMissingToolTrace(
   entryId: string,
   toolCallId: string,
 ): void {
-  console.warn(
-    `[keeper-trace] ${op} ignored: missing tool trace step keeper=${keeperName} entry=${entryId} toolCallId=${toolCallId}`,
-  )
+  console.warn('[keeper-trace] missing tool trace step', { op, keeperName, entryId, toolCallId })
 }
 
 export function appendAssistantToolTraceStep(
@@ -889,9 +900,7 @@ export function appendAssistantToolTraceStep(
   const toolCallId = step.toolCallId.trim()
   const toolName = step.name.trim()
   if (!toolCallId || !toolName) {
-    console.warn(
-      `[keeper-trace] start ignored: invalid tool trace step keeper=${name} entry=${entryId}`,
-    )
+    console.warn('[keeper-trace] invalid tool trace step', { op: 'start', keeperName: name, entryId })
     return
   }
   updateThreadEntry(name, entryId, entry => {
@@ -909,7 +918,17 @@ export function appendAssistantToolTraceStep(
     const traceSteps =
       index === -1
         ? [...existing, nextStep]
-        : existing.map((trace, i) => i === index ? { ...trace, ...nextStep } : trace)
+        : existing.map((trace, i) =>
+            i === index && trace.kind === 'tool'
+              ? {
+                  ...trace,
+                  name: trace.name || toolName,
+                  toolCallId,
+                  status: trace.status ?? 'pending',
+                  ts: trace.ts ?? nextStep.ts,
+                }
+              : trace,
+          )
     return {
       ...entry,
       traceSteps,
@@ -959,7 +978,10 @@ export function markAssistantToolTraceEnded(
     const traceSteps = existing.map((trace) => {
       if (trace.kind !== 'tool' || trace.toolCallId !== id) return trace
       found = true
-      return trace
+      return {
+        ...trace,
+        status: trace.status === 'err' ? ('err' as const) : ('ok' as const),
+      }
     })
     return {
       ...entry,
@@ -1142,7 +1164,7 @@ interface RestChatHistoryMessage {
 function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEntry | null {
   if (!message.tool_call_id || !message.tool_call_name) return null
   return {
-    id: `tool-${message.tool_call_id}`,
+    id: toolEntryIdFromCallId(message.tool_call_id),
     role: 'tool',
     source: 'tool_result',
     label: message.tool_call_name,

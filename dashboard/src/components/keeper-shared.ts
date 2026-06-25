@@ -249,12 +249,21 @@ function queuedInputToConversationEntry(msg: QueuedMessage): KeeperConversationE
     label: 'You',
     text: hasText ? msg.content : attachmentText,
     rawText: msg.content,
-    timestamp: new Date(msg.timestamp).toISOString(),
+    timestamp: queuedTimestampIso(msg.timestamp),
     delivery: 'queued',
     streamState: undefined,
     attachments: msg.attachments,
     details: null,
     error: null,
+  }
+}
+
+function queuedTimestampIso(timestampMs: number): string | null {
+  if (!Number.isFinite(timestampMs)) return null
+  try {
+    return new Date(timestampMs).toISOString()
+  } catch {
+    return null
   }
 }
 
@@ -606,9 +615,13 @@ export function KeeperConversationPanel({
         markInputSent(keeperName)
         bumpQueue()
       } catch (err) {
+        if (isAbortError(err)) {
+          markInputSent(keeperName)
+          bumpQueue()
+          return
+        }
         requeueInputFront(keeperName, queued)
         bumpQueue()
-        if (isAbortError(err)) return
         const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
         showToast(message, 'error')
         return

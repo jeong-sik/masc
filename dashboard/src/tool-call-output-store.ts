@@ -16,7 +16,17 @@ import type { ToolCallEntry } from './api/dashboard'
 
 // Chat tool entries id their rows `tool-<tool_call_id>` on both the live
 // stream and history paths (keeper-stream.ts / keeper-state.ts).
-const TOOL_ENTRY_ID_PREFIX = 'tool-'
+export const TOOL_ENTRY_ID_PREFIX = 'tool-'
+
+export function toolEntryIdFromCallId(toolCallId: string): string {
+  return `${TOOL_ENTRY_ID_PREFIX}${toolCallId}`
+}
+
+export function toolCallIdFromToolEntryId(entryId: string): string | null {
+  return entryId.startsWith(TOOL_ENTRY_ID_PREFIX)
+    ? entryId.slice(TOOL_ENTRY_ID_PREFIX.length)
+    : null
+}
 
 // Global join table: tool_use_id → the tool-call IO entry (input + output).
 // Replaced (not mutated) on each merge so signal subscribers re-render.
@@ -137,9 +147,7 @@ export function recordToolCallOutputs(entries: readonly ToolCallEntry[]): void {
  *  or for rows whose call carried no provider id. Reads the signal value, so
  *  a component calling this during render subscribes to store updates. */
 export function lookupToolCallOutput(toolEntryId: string): ToolCallEntry | null {
-  const toolUseId = toolEntryId.startsWith(TOOL_ENTRY_ID_PREFIX)
-    ? toolEntryId.slice(TOOL_ENTRY_ID_PREFIX.length)
-    : toolEntryId
+  const toolUseId = toolCallIdFromToolEntryId(toolEntryId) ?? toolEntryId
   return toolCallOutputsById.value.get(toolUseId) ?? null
 }
 

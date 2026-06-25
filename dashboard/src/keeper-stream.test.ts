@@ -353,7 +353,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
         kind: 'tool',
         name: 'keeper_board_list',
         toolCallId: 'tc-ordered',
-        status: 'pending',
+        status: 'ok',
         args: '{"limit":1}',
         ts: expect.any(String),
       },
@@ -374,5 +374,35 @@ describe('applyKeeperStreamEvent tool calls', () => {
     const tool = keeperThreads.value.sangsu?.find(entry => entry.id === 'tool-tc-fallback')
     expect(tool?.text).toBe('{"post_id":"p-1"}')
     expect(tool?.delivery).toBe('delivered')
+  })
+
+  it('keeps duplicate TOOL_CALL_START events idempotent', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START',
+      toolCallId: 'tc-repeat',
+      toolCallName: 'keeper_board_post',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_ARGS', toolCallId: 'tc-repeat', delta: '{"post_id":"p-1"}' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_END', toolCallId: 'tc-repeat' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START',
+      toolCallId: 'tc-repeat',
+      toolCallName: 'keeper_board_post',
+    })
+
+    const thread = keeperThreads.value.sangsu ?? []
+    expect(thread.filter(entry => entry.id === 'tool-tc-repeat')).toHaveLength(1)
+    const reply = thread.find(entry => entry.id === 'reply-1')
+    expect(reply?.traceSteps).toEqual([
+      {
+        kind: 'tool',
+        name: 'keeper_board_post',
+        toolCallId: 'tc-repeat',
+        status: 'ok',
+        args: '{"post_id":"p-1"}',
+        ts: expect.any(String),
+      },
+    ])
   })
 })

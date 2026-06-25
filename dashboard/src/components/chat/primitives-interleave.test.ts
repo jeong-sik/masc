@@ -21,6 +21,7 @@ describe('interleaveTraceAndTools', () => {
   const labels = (items: ReturnType<typeof interleaveTraceAndTools>) =>
     items.map((i) => {
       if (i.kind === 'tool') return `tool:${i.entry?.id ?? i.step?.toolCallId ?? i.step?.name}`
+      if (i.kind === 'tool-entry') return `tool:${i.entry.id}`
       if (i.kind === 'chat') return `chat:${i.entry.id}`
       return `think:${i.step.text}`
     })
@@ -66,6 +67,14 @@ describe('interleaveTraceAndTools', () => {
       [],
     )
     expect(labels(out)).toEqual(['think:A', 'tool:X'])
+  })
+
+  it('prefers authoritative tool rows over unjoinable trace-only tool steps', () => {
+    const out = interleaveTraceAndTools(
+      [think('A'), { kind: 'tool', name: 'legacy-tool' }],
+      [tool('X')],
+    )
+    expect(labels(out)).toEqual(['think:A', 'tool:tool-X'])
   })
 
   it('handles empty inputs without error', () => {

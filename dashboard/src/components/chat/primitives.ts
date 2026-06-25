@@ -25,7 +25,7 @@ import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatChartBlock, C
 import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, KeeperConversationSource, SurfaceRef } from '../../types'
 import type { ToolCallEntry, ToolCallOutputBlob } from '../../api/dashboard'
 import { fetchBoardPost } from '../../api/board'
-import { lookupToolCallOutput, toolCallOutputsById } from '../../tool-call-output-store'
+import { lookupToolCallOutput, toolCallIdFromToolEntryId, toolCallOutputsById, toolEntryIdFromCallId } from '../../tool-call-output-store'
 import { Sigil } from '../common/sigil-chip'
 import { SuggestionChip } from '../common/suggestion-chip'
 import { StatusDot } from '../common/status-dot'
@@ -59,6 +59,18 @@ export interface ChatComposerCommand {
   disabled?: boolean
   disabledReason?: string
   run: () => void | Promise<void>
+}
+
+type TraceToolStatus = NonNullable<ChatTraceToolStep['status']>
+
+const TRACE_TOOL_STATUS_UI: Record<TraceToolStatus, { className: 'ok' | 'bad' | 'pending'; title: string }> = {
+  pending: { className: 'pending', title: '출력 대기 중' },
+  ok: { className: 'ok', title: '성공' },
+  err: { className: 'bad', title: '실패' },
+}
+
+function traceToolStatusUi(status: ChatTraceToolStep['status']): { className: 'ok' | 'bad' | 'pending'; title: string } {
+  return TRACE_TOOL_STATUS_UI[status ?? 'pending']
 }
 
 /** Status dot wrapper — maps keeper-v2 status strings to shared StatusDot tones. */
@@ -1187,18 +1199,7 @@ function ChatTraceStep({ step }: { step: ChatTraceStep }) {
     `
   }
 
-  const statusClass =
-    step.status === 'ok'
-      ? 'ok'
-      : step.status === 'err'
-        ? 'bad'
-        : 'pending'
-  const statusTitle =
-    step.status === 'ok'
-      ? '성공'
-      : step.status === 'err'
-        ? '실패'
-        : '출력 대기 중'
+  const statusUi = traceToolStatusUi(step.status)
 
   return html`
     <div class="chat-block-tstep tool ${open ? 'exp' : ''}" data-chat-trace-step="tool">
@@ -1208,9 +1209,9 @@ function ChatTraceStep({ step }: { step: ChatTraceStep }) {
           <span class="chat-block-tstep-kind">Tool</span>
           <span class="chat-block-tstep-name">${step.name}</span>
           <span
-            class="chat-block-tstep-status ${statusClass}"
-            title=${statusTitle}
-            aria-label=${statusTitle}
+            class="chat-block-tstep-status ${statusUi.className}"
+            title=${statusUi.title}
+            aria-label=${statusUi.title}
           ></span>
           <span class="chat-block-tstep-dur">${step.dur}</span>
           <span class="chat-block-tstep-chev">▶</span>
@@ -2366,7 +2367,7 @@ function isToolOutputCoveredByHydration(
 // still-null output is "missing" (unknown outcome).
 function toolEntryFromTraceStep(step: ChatTraceToolStep): KeeperConversationEntry {
   return {
-    id: step.toolCallId ? `${TOOL_ENTRY_PREFIX}${step.toolCallId}` : `trace-tool-${step.name}-${step.ts ?? 'unknown'}`,
+    id: step.toolCallId ? toolEntryIdFromCallId(step.toolCallId) : `trace-tool-${step.name}-${step.ts ?? 'unknown'}`,
     role: 'tool',
     source: 'tool_result',
     label: step.name,
@@ -2459,15 +2460,25 @@ function ToolTraceStep({
 
 type TraceOrderItem =
   | { kind: 'trace'; step: Exclude<ChatTraceStep, ChatTraceToolStep> }
-  | { kind: 'tool'; step?: ChatTraceToolStep; entry?: KeeperConversationEntry; output: ToolCallEntry | null }
+  | { kind: 'tool'; step: ChatTraceToolStep; entry: KeeperConversationEntry | null; output: ToolCallEntry | null }
+  | { kind: 'tool-entry'; entry: KeeperConversationEntry; output: ToolCallEntry | null }
   | { kind: 'chat'; entry: KeeperConversationEntry }
 
-const TOOL_ENTRY_PREFIX = 'tool-'
+function isToolOrderItem(item: TraceOrderItem): item is Extract<TraceOrderItem, { kind: 'tool' | 'tool-entry' }> {
+  return item.kind === 'tool' || item.kind === 'tool-entry'
+}
 
-function toolCallIdFromEntry(entry: KeeperConversationEntry): string | null {
-  return entry.id.startsWith(TOOL_ENTRY_PREFIX)
-    ? entry.id.slice(TOOL_ENTRY_PREFIX.length)
-    : null
+function traceStepDurationMs(dur: string | undefined): number {
+  const trimmed = dur?.trim()
+  if (!trimmed) return 0
+  const match = /^(\d+(?:\.\d+)?)\s*(ms|s|m)?$/i.exec(trimmed)
+  if (!match) return 0
+  const value = Number(match[1])
+  if (!Number.isFinite(value)) return 0
+  const unit = match[2]?.toLowerCase() ?? 'ms'
+  if (unit === 'm') return value * 60_000
+  if (unit === 's') return value * 1_000
+  return value
 }
 
 // Groups a turn's explicit progress/tool entries into one "작업 과정" trace
@@ -2483,7 +2494,7 @@ export function interleaveTraceAndTools(
 ): TraceOrderItem[] {
   const toolsByCallId = new Map<string, { entry: KeeperConversationEntry; output: ToolCallEntry | null }>()
   for (const item of toolSteps) {
-    const callId = toolCallIdFromEntry(item.entry)
+    const callId = toolCallIdFromToolEntryId(item.entry.id)
     if (callId) toolsByCallId.set(callId, item)
   }
   const usedToolIds = new Set<string>()
@@ -2494,19 +2505,20 @@ export function interleaveTraceAndTools(
       continue
     }
     const callId = step.toolCallId?.trim()
+    if (!callId && toolSteps.length > 0) continue
     const matched = callId ? toolsByCallId.get(callId) : undefined
     if (callId) usedToolIds.add(callId)
     ordered.push({
       kind: 'tool',
       step,
-      entry: matched?.entry,
+      entry: matched?.entry ?? null,
       output: matched?.output ?? null,
     })
   }
   for (const item of toolSteps) {
-    const callId = toolCallIdFromEntry(item.entry)
+    const callId = toolCallIdFromToolEntryId(item.entry.id)
     if (callId && usedToolIds.has(callId)) continue
-    ordered.push({ kind: 'tool', entry: item.entry, output: item.output })
+    ordered.push({ kind: 'tool-entry', entry: item.entry, output: item.output })
   }
   return ordered
 }
@@ -2556,19 +2568,22 @@ function ToolTraceCard({
   const ordered = assistant
     ? [...interleaveTraceAndTools(traceSteps, steps), { kind: 'chat' as const, entry: assistant }]
     : interleaveTraceAndTools(traceSteps, steps)
-  const orderedToolSteps = ordered.filter((item): item is Extract<TraceOrderItem, { kind: 'tool' }> => item.kind === 'tool')
+  const orderedToolSteps = ordered.filter(isToolOrderItem)
   const thinkN = traceSteps.filter((step) => step.kind === 'think' || step.kind === 'reason').length
   const failN = orderedToolSteps.filter(
     (s) =>
       (s.output !== null && (s.output.success === false || s.output.semantic_success === false))
-      || s.step?.status === 'err',
+      || (s.kind === 'tool' && s.step.status === 'err'),
   ).length
   // Surface unjoined outputs as "missing" only once the turn and output
   // hydration have both settled.
   const missingN = orderedToolSteps.filter(
-    (s) => s.output === null && s.entry !== undefined && canMarkMissingForEntry(s.entry),
+    (s) => s.output === null && s.entry !== null && canMarkMissingForEntry(s.entry),
   ).length
-  const totalMs = orderedToolSteps.reduce((sum, s) => sum + (s.output?.duration_ms ?? 0), 0)
+  const totalMs = orderedToolSteps.reduce(
+    (sum, s) => sum + (s.output?.duration_ms ?? (s.kind === 'tool' ? traceStepDurationMs(s.step.dur) : 0)),
+    0,
+  )
   const durLabel = totalMs > 0 ? formatMsCompact(totalMs) : null
   const chatN = assistant ? 1 : 0
   const stepN = ordered.length
@@ -2603,16 +2618,22 @@ function ToolTraceCard({
                   ? html`<${ChatTraceStep} key=${`trace-${index}`} step=${item.step} />`
                   : item.kind === 'tool'
                     ? (() => {
-                        const entry = item.entry ?? (item.step ? toolEntryFromTraceStep(item.step) : null)
-                        if (!entry) return null
+                        const entry = item.entry ?? toolEntryFromTraceStep(item.step)
                         return html`<${ToolTraceStep}
-                          key=${`tool-${item.entry?.id ?? item.step?.toolCallId ?? item.step?.name ?? index}`}
+                          key=${`tool-trace-${item.entry?.id ?? item.step.toolCallId ?? item.step.name}-${index}`}
                           entry=${entry}
                           output=${item.output}
-                          canMarkMissing=${item.entry !== undefined && canMarkMissingForEntry(item.entry)}
+                          canMarkMissing=${item.entry !== null && canMarkMissingForEntry(item.entry)}
                           traceStep=${item.step}
                         />`
                       })()
+                    : item.kind === 'tool-entry'
+                      ? html`<${ToolTraceStep}
+                          key=${`tool-entry-${item.entry.id}`}
+                          entry=${item.entry}
+                          output=${item.output}
+                          canMarkMissing=${canMarkMissingForEntry(item.entry)}
+                        />`
                     : html`<${ChatResponseTraceStep} key=${`chat-${item.entry.id}`} entry=${item.entry} />`)}
             </div>
           `

@@ -205,7 +205,6 @@ export interface KeeperMemoryHealthKeeperEntry {
   events_to_facts_ratio: number
   ttl_expired_on_disk: number
   near_duplicate: number
-  external_ref: number
 }
 
 export interface KeeperMemoryHealthResponse {

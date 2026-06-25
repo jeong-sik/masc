@@ -4,9 +4,9 @@
     Episodes group related facts with a short summary and metadata for
     downstream retention scoring. *)
 
-(* RFC-0259: bumped from "rfc0231-v2" when the volatile [external_ref] field and
-   the read-side re-derivation of [valid_until] for referenced claims landed. New
-   rows carry this; legacy rows keep their stored version and decode unchanged. *)
+(* Kept at the RFC-0259 schema label for on-disk compatibility. The forced
+   external-ref classifier from that rollout is retired: current decoders ignore
+   stored [external_ref] and never re-derive it from claim prose. *)
 let schema_version = "rfc0259-v1"
 
 (* RFC-0244 Tier 2: the shared semantic store reuses the per-keeper IO/codec
@@ -114,12 +114,10 @@ let is_promotable = function
   | Code_change | Preference | Blocker | Goal | Ephemeral | Unknown _ -> false
 ;;
 
-(* RFC-0259 §3.2(b): an external-state reference named by a claim. A claim that
-   names a PR/issue/task id is about *volatile* external state — true when
-   extracted, false once the world moves on — so [fact_valid_until] gives it a
-   finite horizon rather than letting it persist as a durable, immortal fact
-   (RFC-0259 §2.2 gap #4). [kind] is a closed sum so the future grounding
-   reconciler (RFC-0259 P2/P3) must classify every kind at compile time. *)
+(* RFC-0259 §3.2(b): an explicitly structured reference to verifiable external
+   state. This is deliberately NOT inferred from claim prose: a claim may mention
+   "PR #123" as history, context, or durable lesson text, and code cannot reliably
+   decide that it is asserting current external state. *)
 type external_ref_kind =
   | Pr
   | Issue
@@ -144,90 +142,6 @@ type external_ref =
   ; id : string
   }
 
-(* Parse-don't-validate, once, at the producer boundary. CONSERVATIVE: only an
-   explicit marker counts — "PR #123", "pull request #123", "pull/123",
-   "issue #123", "issues/123", "PK-1234". A bare "#123" with no keyword is prose
-   ("step #3"), not a reference, and yields [None] so the claim keeps its normal
-   durable path. Over-matching would wrongly give a durable fact a finite TTL, so
-   the bar is deliberately high; under-matching only leaves the pre-RFC status quo
-   for that one claim. Returns the earliest-positioned reference when a claim
-   names several. *)
-let external_ref_of_claim claim =
-  let lc = String.lowercase_ascii claim in
-  let n = String.length lc in
-  let is_digit c = c >= '0' && c <= '9' in
-  let is_alpha c = c >= 'a' && c <= 'z' in
-  let digit_run i =
-    let j = ref i in
-    while !j < n && is_digit lc.[!j] do
-      incr j
-    done;
-    String.sub lc i (!j - i)
-  in
-  (* The alphabetic word ending just before [i] (whitespace skipped), with its
-     start index, so a two-word keyword ("pull request") can be recognized. *)
-  let word_before i =
-    let j = ref (i - 1) in
-    while !j >= 0 && (lc.[!j] = ' ' || lc.[!j] = '\t') do
-      decr j
-    done;
-    let e = !j + 1 in
-    while !j >= 0 && is_alpha lc.[!j] do
-      decr j
-    done;
-    String.sub lc (!j + 1) (e - (!j + 1)), !j + 1
-  in
-  let at_word_start i = i = 0 || not (is_alpha lc.[i - 1]) in
-  let best = ref None in
-  let consider pos kind id =
-    if String.length id > 0
-    then (
-      match !best with
-      | Some (p, _, _) when p <= pos -> ()
-      | Some _ | None -> best := Some (pos, kind, id))
-  in
-  (* (1) "#<digits>" anchored on a recognized preceding keyword. *)
-  for i = 0 to n - 1 do
-    if lc.[i] = '#'
-    then (
-      let id = digit_run (i + 1) in
-      if String.length id > 0
-      then (
-        let w1, w1_start = word_before i in
-        match w1 with
-        | "pr" | "pull" -> consider w1_start Pr id
-        | "issue" | "issues" -> consider w1_start Issue id
-        | "request" ->
-          let w2, w2_start = word_before w1_start in
-          if String.equal w2 "pull" then consider w2_start Pr id
-        | _ -> ()))
-  done;
-  (* (2) slash form "pull/<digits>" / "issues/<digits>" and Jira "pk-<digits>". *)
-  let scan_prefix kw sep kind ~keep_key =
-    let klen = String.length kw in
-    for i = 0 to n - klen - 1 do
-      if at_word_start i && String.equal (String.sub lc i klen) kw && lc.[i + klen] = sep
-      then (
-        let id = digit_run (i + klen + 1) in
-        if String.length id > 0
-        then (
-          let id =
-            if keep_key
-            then String.uppercase_ascii kw ^ String.make 1 sep ^ id
-            else id
-          in
-          consider i kind id))
-    done
-  in
-  scan_prefix "pull" '/' Pr ~keep_key:false;
-  scan_prefix "issues" '/' Issue ~keep_key:false;
-  scan_prefix "issue" '/' Issue ~keep_key:false;
-  scan_prefix "pk" '-' Task ~keep_key:true;
-  match !best with
-  | Some (_, kind, id) -> Some { kind; id }
-  | None -> None
-;;
-
 (* RFC-0247 §2.3 (forgetting): retention is a property of the category. A
    coordination event ("checkpoint saved") is stale within a day and worthless in
    a later session, so it gets a short hard TTL; durable knowledge never
@@ -244,35 +158,23 @@ let category_valid_until ~now = function
   | Validated_approach | Lesson | Unknown _ -> None
 ;;
 
-(* RFC-0259 §3.2: a claim that names external state cannot be durable — its truth
-   is only as good as its last verification. Until the grounding reconciler (P2)
-   re-checks it against GitHub, a finite horizon bounds how long an un-re-observed
-   external-state claim survives. Same shape as [ephemeral_ttl_seconds] (a TIME,
-   not a score); 1 day matches the ephemeral horizon. *)
-let volatile_external_ttl_seconds = 86_400.0
-
 (* RFC-0285 §3.4: transient first-person self-state (idle/looping/tool-timeout) is
-   MORE volatile than external state — a PR's status changes slowly, "am I idle"
-   changes every turn — so it gets a horizon SHORTER than the external one to quiet
-   the self-observation echo faster. Not so short a legitimate short-lived self-state
+   short-lived and noisy, so it gets a tighter horizon than ordinary
+   coordination boilerplate. Not so short a legitimate short-lived self-state
    ("waiting on this block") vanishes within the same turn. A TIME, not a score;
    named, not magic; tune in cycles (RFC §7). *)
 let self_observation_ttl_seconds = 3_600.0
 
-(* RFC-0259 §3.2 / RFC-0285 §3.4: the write-side [valid_until] producer. Precedence:
-   a [Self_observation] claim_kind gets the shortest finite horizon regardless of
-   category or external_ref (it is keeper-local transient state); otherwise an
-   [external_ref] claim gets the volatile horizon (so a PR-status claim mislabeled
-   [Fact] still decays); otherwise the category decides (only [Ephemeral] is finite).
-   [External_state]/[Durable_knowledge] tags carry no horizon of their own — the
-   external_ref / category arms already cover them. *)
-let fact_valid_until ~now ~external_ref ~claim_kind category =
+(* RFC-0285 §3.4: the write-side [valid_until] producer. A [Self_observation]
+   claim_kind gets the shortest finite horizon regardless of category. Otherwise
+   the category decides (only [Ephemeral] is finite). [external_ref] is accepted for
+   call-site compatibility but does not affect retention; Memory OS provides refs
+   as context, not as a code-enforced status classifier. *)
+let fact_valid_until ~now ~external_ref:_ ~claim_kind category =
   match claim_kind with
   | Some Self_observation -> Some (now +. self_observation_ttl_seconds)
   | Some External_state | Some Durable_knowledge | None ->
-    (match external_ref with
-     | Some _ -> Some (now +. volatile_external_ttl_seconds)
-     | None -> category_valid_until ~now category)
+    category_valid_until ~now category
 ;;
 
 (* RFC-0247 (purge): the fact carries only structure — the claim, its typed
@@ -285,10 +187,9 @@ type fact =
   { claim : string
   ; category : category
   ; external_ref : external_ref option
-    (* RFC-0259 §3.2(b): set by the producer ([external_ref_of_claim]) when the
-       claim names a PR/issue/task id. Orthogonal to [category] (a [Constraint]
-       can reference a PR). Drives [fact_valid_until]: a referenced claim is
-       volatile, never durable. Omitted from JSON when [None]. *)
+    (* Historical RFC-0259 field retained for source compatibility. Current Memory
+       OS writes/reads/dashboard projection do not serialize it: claim text is
+       model context, not a machine-readable status assertion. *)
   ; claim_kind : claim_kind option
     (* RFC-0285 §3.1: producer ([librarian]) -emitted origin tag, parallel to
        [external_ref] and orthogonal to [category]. Drives [fact_valid_until]
@@ -335,10 +236,10 @@ let partition_expired ~now (facts : fact list) =
 
 (* The time a fact was last known good: [last_verified_at] if set, else
    [first_seen] (a never-re-verified fact is as old as its extraction). The SSOT
-   anchor for "how stale is this claim": the reconciler, recall, and dashboard
-   user-model ordering share this one definition rather than each inlining the
-   match, so a future change to the anchor rule (e.g. a [last_verified_at >=
-   first_seen] guard) cannot make those paths drift. *)
+   anchor for "how stale is this claim": recall and dashboard user-model ordering
+   share this one definition rather than each inlining the match, so a future
+   change to the anchor rule (e.g. a [last_verified_at >= first_seen] guard)
+   cannot make those paths drift. *)
 let reference_time (f : fact) =
   match f.last_verified_at with
   | Some t -> t
@@ -415,23 +316,6 @@ let json_string_list_field key (fields : (string * Yojson.Safe.t) list) =
     in
     if List.length strings = List.length items then Some strings else None
   | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _)
-  | None -> None
-;;
-
-let external_ref_to_json (r : external_ref) =
-  `Assoc
-    [ "kind", `String (external_ref_kind_to_string r.kind); "id", `String r.id ]
-;;
-
-let external_ref_of_json = function
-  | Some (`Assoc fields) ->
-    (match json_string_field "kind" fields, json_string_field "id" fields with
-     | Some kind_s, Some id ->
-       (match external_ref_kind_of_string kind_s with
-        | Some kind -> Some { kind; id }
-        | None -> None)
-     | (Some _, None) | (None, Some _) | (None, None) -> None)
-  | Some (`Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _)
   | None -> None
 ;;
 
@@ -552,12 +436,6 @@ let fact_to_json f =
     @ (match f.observed_by with
        | [] -> []
        | keepers -> [ "observed_by", `List (List.map (fun k -> `String k) keepers) ])
-    (* RFC-0259 §3.2(b): omitted when [None] so claims with no external ref stay
-       byte-identical to pre-RFC-0259 rows (no drift). Appended last to keep the
-       existing key order stable for the snapshot fingerprint. *)
-    @ (match f.external_ref with
-       | Some r -> [ "external_ref", external_ref_to_json r ]
-       | None -> [])
     (* RFC-0259 §3.7 (P6): the producer-emitted conclusion slug. Omitted when
        [None] so legacy / id-less rows stay byte-identical, and appended LAST to
        keep the prior key order stable for the snapshot fingerprint. *)
@@ -595,26 +473,11 @@ let fact_of_json (json : Yojson.Safe.t) =
           (* DET-OK: absent first_seen defaults to epoch for migration safety. *)
           let first_seen = Option.value (json_float_field "first_seen" fields) ~default:0.0 in
           let last_verified_at = json_float_field "last_verified_at" fields in
-          (* RFC-0259 §3.2(b): the external ref is stored once written, but legacy
-             rows carry none. Re-derive it from the claim on read (deterministic,
-             idempotent) so an already-persisted volatile claim (e.g. a stale
-             "PR #N is OPEN") is reclassified without waiting for a rewrite. *)
-          let external_ref =
-            match external_ref_of_json (List.assoc_opt "external_ref" fields) with
-            | Some _ as r -> r
-            | None -> external_ref_of_claim claim
-          in
-          (* When a re-derived volatile row also lacks a [valid_until], anchor the
-             horizon to [first_seen] (on disk) so a row extracted days ago is
-             already past horizon — the recall TTL filter and GC drop it on the
-             next pass, closing RFC-0259 §2.2 gap #4 for existing rows, not just
-             new ones. A row that already stores a [valid_until] keeps it. *)
-          let valid_until =
-            match json_float_field "valid_until" fields, external_ref with
-            | None, Some _ -> Some (first_seen +. volatile_external_ttl_seconds)
-            | None, None -> None
-            | (Some _ as v), _ -> v
-          in
+          (* Ignore persisted external_ref metadata. Older rows may carry refs that
+             were inferred from prose; preserving them would keep the old forced
+             classifier alive. The claim remains model context. *)
+          let external_ref = None in
+          let valid_until = json_float_field "valid_until" fields in
           (* DET-OK: absent observed_by defaults to empty (Tier-1 / legacy facts). *)
           let observed_by =
             Option.value (json_string_list_field "observed_by" fields) ~default:[]

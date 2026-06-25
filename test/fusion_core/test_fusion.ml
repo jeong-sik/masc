@@ -1055,6 +1055,22 @@ let test_judge_outcome_roundtrip () =
       | Error e -> Alcotest.failf "judge_outcome roundtrip failed: %s" e)
     nodes
 
+(* RFC-0252 all-panel-fail guard: 0 answered panels => judge skipped with the
+   canonical error; >= 1 answered => judge runs. Reverting [judge_skip_reason]
+   to always-[None] turns the first two checks red (non-vacuous). *)
+let test_judge_skip_reason () =
+  let answered m a : panel_outcome = Answered { model = m; answer = a; usage = zero_usage } in
+  let failed m : panel_outcome = Failed { failed_model = m; reason = Provider_error "x" } in
+  let opt = Alcotest.(option string) in
+  Alcotest.(check opt) "all failed => skip" (Some no_panel_answers_error)
+    (judge_skip_reason [ failed "a"; failed "b" ]);
+  Alcotest.(check opt) "empty panel => skip" (Some no_panel_answers_error)
+    (judge_skip_reason []);
+  Alcotest.(check opt) "one answered => run" None
+    (judge_skip_reason [ failed "a"; answered "b" "hi" ]);
+  Alcotest.(check opt) "all answered => run" None
+    (judge_skip_reason [ answered "a" "x"; answered "b" "y" ])
+
 let () =
   Alcotest.run "fusion_core"
     [ ( "gate"
@@ -1139,4 +1155,6 @@ let () =
         ] )
     ; ( "judge_outcome"
       , [ Alcotest.test_case "roundtrip" `Quick test_judge_outcome_roundtrip ] )
+    ; ( "panel_guard"
+      , [ Alcotest.test_case "judge_skip_reason" `Quick test_judge_skip_reason ] )
     ]

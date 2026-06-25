@@ -8,7 +8,6 @@ module Librarian = Masc.Keeper_librarian
 module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
-module Reconcile = Masc.Keeper_memory_os_reconcile
 module Consolidator = Masc.Keeper_memory_os_consolidator
 
 let contains substring s =
@@ -185,6 +184,59 @@ let wait_for_ref ~clock label r =
       done)
   with
   | Eio.Time.Timeout -> Alcotest.failf "timed out waiting for %s" label
+;;
+
+let lock_holder_child_arg = "--keeper-memory-os-hold-lock-file"
+
+let maybe_run_lock_holder_child () =
+  if Array.length Sys.argv = 4 && String.equal Sys.argv.(1) lock_holder_child_arg
+  then (
+    let lock_path = Sys.argv.(2) in
+    let hold_sec = float_of_string Sys.argv.(3) in
+    let fd = Unix.openfile lock_path [ Unix.O_CREAT; Unix.O_WRONLY ] 0o644 in
+    Fun.protect
+      ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
+      (fun () ->
+        Unix.lockf fd Unix.F_LOCK 0;
+        ignore (Unix.write_substring Unix.stdout "1" 0 1);
+        Unix.sleepf hold_sec);
+    exit 0)
+;;
+
+let with_process_holding_lock_file lock_path f =
+  let read_fd, write_fd = Unix.pipe () in
+  let stderr_fd = Unix.openfile Filename.null [ Unix.O_WRONLY ] 0o644 in
+  let exe = Sys.executable_name in
+  let argv = [| exe; lock_holder_child_arg; lock_path; "5.0" |] in
+  let pid =
+    try
+      Unix.create_process_env
+        exe
+        argv
+        (Unix.environment ())
+        Unix.stdin
+        write_fd
+        stderr_fd
+    with exn ->
+      Unix.close write_fd;
+      Unix.close read_fd;
+      Unix.close stderr_fd;
+      raise exn
+  in
+  Unix.close write_fd;
+  Unix.close stderr_fd;
+  let cleanup () =
+    (try Unix.kill pid Sys.sigterm with Unix.Unix_error _ -> ());
+    (try ignore (Unix.waitpid [] pid) with Unix.Unix_error _ -> ());
+    (try Unix.close read_fd with Unix.Unix_error _ -> ())
+  in
+  Fun.protect
+    ~finally:cleanup
+    (fun () ->
+      let ready = Bytes.create 1 in
+      match Unix.read read_fd ready 0 1 with
+      | 1 -> f ()
+      | _ -> Alcotest.fail "lock holder did not acquire flock")
 ;;
 
 let with_eio_guard f =
@@ -1303,6 +1355,60 @@ let test_append_episode_bundle_waits_for_fact_lock () =
           (List.length (Memory_io.read_episodes_tail ~keeper_id ~n:10)))))
 ;;
 
+let test_with_facts_lock_propagates_body_failure () =
+  with_eio (fun ~sw:_ ~net:_ ~clock ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let keeper_id = "facts-lock-body-failure" in
+      (match
+         Memory_io.with_facts_lock
+           ~clock
+           ~keeper_id
+           ~on_timeout:(fun msg ->
+             Alcotest.fail
+               ("body Failure was misclassified as a lock timeout: " ^ msg))
+           (fun () -> failwith "body exploded")
+       with
+       | _ -> Alcotest.fail "expected body Failure to propagate"
+       | exception Failure msg when String.equal msg "body exploded" -> ()
+       | exception exn ->
+         Alcotest.fail ("unexpected exception: " ^ Printexc.to_string exn));
+      let reacquired =
+        Memory_io.with_facts_lock
+          ~clock
+          ~keeper_id
+          ~on_timeout:(fun msg -> Alcotest.fail ("lock was not released: " ^ msg))
+          (fun () -> "reacquired")
+      in
+      Alcotest.(check string) "lock reacquired after body exception" "reacquired" reacquired))
+;;
+
+let test_with_facts_lock_timeout_uses_on_timeout () =
+  with_eio (fun ~sw:_ ~net:_ ~clock ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let keeper_id = "facts-lock-timeout" in
+      let lock_path = Memory_io.facts_path ~keeper_id ^ ".lock" in
+      with_process_holding_lock_file lock_path (fun () ->
+        let result =
+          Memory_io.with_facts_lock
+            ~clock
+            ~keeper_id
+            ~on_timeout:(fun msg -> msg)
+            (fun () -> "unexpected body result")
+        in
+        Alcotest.(check bool)
+          "timeout used on_timeout"
+          true
+          (contains "lock timeout:" result));
+      let reacquired =
+        Memory_io.with_facts_lock
+          ~clock
+          ~keeper_id
+          ~on_timeout:(fun msg -> Alcotest.fail ("lock was not released: " ^ msg))
+          (fun () -> "reacquired")
+      in
+      Alcotest.(check string) "lock reacquired after timeout" "reacquired" reacquired))
+;;
+
 (* RFC-0247 (purge): GC is two structural passes — hard-expire past-TTL facts and
    dedup duplicate claims keeping the most-recently-verified. There is no
    score-threshold discard, so this asserts only the structural outcomes. The
@@ -1398,237 +1504,6 @@ let test_gc_preserves_corrupt_store () =
       "valid fact still on disk"
       1
       (List.length (Memory_io.read_facts_all ~keeper_id))))
-;;
-
-(* RFC-0259 P3: [run_reconcile] is the only code that persists reconciler verdicts
-   to disk. The pure [reconcile_facts] core is covered in test_rfc0259_reconcile;
-   these pin the IO path that had zero coverage (the merge-blocker from the
-   adversarial review): the dry-run write gate, the advance rewrite, the
-   demote-not-delete invariant on terminal state, and the corrupt-store abort. Each
-   test also fails under a specific mutation noted in its body, so they guard
-   behaviour rather than merely exercising it. *)
-
-let reconcile_verify_const state : Reconcile.verify_fn = fun _ref -> state
-
-(* A volatile, past-horizon, ref-bearing fact — the only shape [classify] routes to
-   a non-Fresh verdict (and thus to advance/demote). *)
-let stale_ref_fact ~now ~id claim =
-  { (fact_fixture ~now ()) with
-    Types.claim
-  ; Types.external_ref = Some { Types.kind = Types.Pr; id }
-  ; Types.first_seen = now -. 100_000.0
-  ; Types.last_verified_at = Some (now -. 100_000.0)
-  }
-;;
-
-let test_run_reconcile_dry_run_does_not_write () =
-  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
-    with_temp_keepers_dir (fun _keepers_dir ->
-      let keeper_id = "reconcile-dryrun-keeper" in
-      let now = 1_000_000.0 in
-      let horizon = 3600.0 in
-      (* A still-open ref is the only verdict that writes (advances), so it is the
-         case where the dry-run gate actually has to suppress a write. *)
-      Memory_io.append_fact ~keeper_id (stale_ref_fact ~now ~id:"2" "PR #2 in review");
-      let path = Memory_io.facts_path ~keeper_id in
-      let read_raw () = In_channel.with_open_bin path In_channel.input_all in
-      let before = read_raw () in
-      let report =
-        Reconcile.run_reconcile
-          ~dry_run:true
-          ~keeper_id
-          ~now
-          ~horizon
-          ~verify:(reconcile_verify_const Reconcile.Still_open)
-          ()
-      in
-      (* The verdict is still computed — dry-run reports the advance it WOULD make ... *)
-      Alcotest.(check int) "dry-run still classifies the advance" 1 report.Reconcile.advanced;
-      (* ... but MUTATION: dropping [not dry_run] from the write guard would rewrite
-         the store here, and this byte-for-byte comparison would fail. This is the
-         default-OFF rollout's core promise (review logs before APPLY). *)
-      Alcotest.(check string)
-        "dry-run leaves the store byte-for-byte untouched"
-        before
-        (read_raw ())))
-;;
-
-let test_run_reconcile_apply_demotes_terminal_keeps_it () =
-  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
-    with_temp_keepers_dir (fun _keepers_dir ->
-      let keeper_id = "reconcile-demote-keeper" in
-      let now = 1_000_000.0 in
-      let horizon = 3600.0 in
-      (* A terminal ref alongside a still-open ref. The open ref's advance forces a
-         rewrite, so the terminal ref must SURVIVE that rewrite (demote-not-delete)
-         rather than being filtered out of the persisted survivors. A terminal-only
-         pass would not write at all (write guard is [advanced > 0]), so the
-         demote-vs-delete difference is only observable on disk when a rewrite
-         actually happens — hence the mix. *)
-      List.iter
-        (Memory_io.append_fact ~keeper_id)
-        [ stale_ref_fact ~now ~id:"21515" "PR #21515 merged"
-        ; stale_ref_fact ~now ~id:"2" "PR #2 in review"
-        ];
-      let verify : Reconcile.verify_fn =
-        fun r ->
-        if String.equal r.Types.id "21515" then Reconcile.Terminal else Reconcile.Still_open
-      in
-      let report =
-        Reconcile.run_reconcile ~dry_run:false ~keeper_id ~now ~horizon ~verify ()
-      in
-      Alcotest.(check int) "terminal ref demoted (counted)" 1 report.Reconcile.terminal_kept;
-      Alcotest.(check int) "open ref advanced (forces the rewrite)" 1 report.Reconcile.advanced;
-      (* Demote-not-delete (RFC-0259 §3.4): even though the store is rewritten for the
-         advance, the terminal-ref fact is persisted, not dropped — left for the
-         volatile TTL/GC to remove. MUTATION: reverting [Stale_terminal] to a drop
-         leaves only "PR #2 in review" on disk and this fails. *)
-      Alcotest.(check (list string))
-        "both refs still on disk (terminal demoted, not deleted)"
-        [ "PR #21515 merged"; "PR #2 in review" ]
-        (List.map (fun f -> f.Types.claim) (Memory_io.read_facts_all ~keeper_id))))
-;;
-
-let test_run_reconcile_apply_advance_persists () =
-  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
-    with_temp_keepers_dir (fun _keepers_dir ->
-      let keeper_id = "reconcile-advance-keeper" in
-      let now = 1_000_000.0 in
-      let horizon = 3600.0 in
-      Memory_io.append_fact ~keeper_id (stale_ref_fact ~now ~id:"2" "PR #2 in review");
-      let report =
-        Reconcile.run_reconcile
-          ~dry_run:false
-          ~keeper_id
-          ~now
-          ~horizon
-          ~verify:(reconcile_verify_const Reconcile.Still_open)
-          ()
-      in
-      Alcotest.(check int) "advanced the still-open fact" 1 report.Reconcile.advanced;
-      Alcotest.(check int) "nothing demoted" 0 report.Reconcile.terminal_kept;
-      (* No concurrent writer, so the CAS matches and the rewrite is persisted. *)
-      Alcotest.(check bool) "advance committed to disk" true report.Reconcile.committed;
-      (* MUTATION: dropping the [advanced > 0] write guard skips this write, so
-         last_verified_at on disk would still read the old value and the ref would be
-         re-verified every cycle. *)
-      match Memory_io.read_facts_all ~keeper_id with
-      | [ s ] ->
-        Alcotest.(check (option (float 0.001)))
-          "last_verified_at advanced to now on disk"
-          (Some now)
-          s.Types.last_verified_at
-      | _ -> Alcotest.fail "expected exactly one survivor"))
-;;
-
-let test_run_reconcile_preserves_corrupt_store () =
-  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
-    with_temp_keepers_dir (fun _keepers_dir ->
-      let keeper_id = "reconcile-corrupt-keeper" in
-      let now = 1_000_000.0 in
-      let horizon = 3600.0 in
-      Memory_io.append_fact ~keeper_id (stale_ref_fact ~now ~id:"2" "PR #2 in review");
-      let path = Memory_io.facts_path ~keeper_id in
-      let oc = open_out_gen [ Open_append; Open_creat ] 0o644 path in
-      output_string oc "{ broken json\n";
-      close_out oc;
-      let read_raw () = In_channel.with_open_bin path In_channel.input_all in
-      let before = read_raw () in
-      (* MUTATION: swapping read_facts_all_strict for the lossy read_facts_all would
-         drop the bad line then rewrite — this would NOT raise and the bytes would
-         change. Both assertions guard the preserve-over-delete invariant. *)
-      (match
-         Reconcile.run_reconcile
-           ~dry_run:false
-           ~keeper_id
-           ~now
-           ~horizon
-           ~verify:(reconcile_verify_const Reconcile.Still_open)
-           ()
-       with
-       | _report -> Alcotest.fail "expected run_reconcile to raise on a corrupt store"
-       | exception Reconcile.Fact_store_corrupt _ -> ());
-      Alcotest.(check string)
-        "corrupt store left byte-for-byte untouched (no silent drop + overwrite)"
-        before
-        (read_raw ())))
-;;
-
-let test_run_reconcile_cas_abandons_on_concurrent_write () =
-  with_eio (fun ~sw:_ ~net:_ ~clock ->
-    with_temp_keepers_dir (fun _keepers_dir ->
-      let keeper_id = "reconcile-cas-keeper" in
-      let now = 1_000_000.0 in
-      let horizon = 3600.0 in
-      (* One still-open ref: classify routes it to verify, and [Still_open] makes the
-         pass want to advance (advanced>0 -> it would rewrite). *)
-      Memory_io.append_fact ~keeper_id (stale_ref_fact ~now ~id:"2" "PR #2 in review");
-      (* A verify that, on its first call, commits a concurrent write through the
-         same facts-lock helper real writers use before returning. Because verify
-         now runs with the facts lock RELEASED, this write acquires the lock during
-         the verify window. The reconciler must then re-read under the lock, see the
-         snapshot changed, and abandon its stale rewrite rather than clobbering the
-         concurrent fact. *)
-      let injected = ref false in
-      let lock_honoring_writer_completed = ref false in
-      let verify : Reconcile.verify_fn =
-        fun _r ->
-        if not !injected
-        then (
-          injected := true;
-          Memory_io.with_facts_lock
-            ~clock
-            ~keeper_id
-            ~on_timeout:(fun msg ->
-              Alcotest.fail ("writer could not acquire facts lock during verify: " ^ msg))
-            (fun () ->
-              Memory_io.append_fact
-                ~keeper_id
-                (stale_ref_fact ~now ~id:"99" "PR #99 concurrent append");
-              lock_honoring_writer_completed := true));
-        Reconcile.Still_open
-      in
-      let report =
-        Reconcile.run_reconcile ~dry_run:false ~keeper_id ~now ~horizon ~verify ()
-      in
-      Alcotest.(check bool)
-        "lock-honoring writer acquired facts lock during verify"
-        true
-        !lock_honoring_writer_completed;
-      Alcotest.(check int)
-        "the still-open ref was classified as an advance"
-        1
-        report.Reconcile.advanced;
-      (* The advance was NOT persisted: a concurrent writer changed the store during
-         verify, so the snapshot CAS abandoned the rewrite this cycle (re-runs next
-         tick). [committed] makes that observable to the caller. *)
-      Alcotest.(check bool)
-        "advance not committed when snapshot changed under it"
-        false
-        report.Reconcile.committed;
-      let claims =
-        List.map (fun f -> f.Types.claim) (Memory_io.read_facts_all ~keeper_id)
-      in
-      (* MUTATION: replacing the [same_fact_snapshot] CAS with an unconditional rewrite
-         persists the stale survivors (just "PR #2"), dropping the concurrently-appended
-         "PR #99" — this membership check then fails. That is the lost-update teeth. The
-         explicit writer-completed assertion above proves the lock was released during
-         verify for a writer that also honors the facts lock. *)
-      Alcotest.(check bool)
-        "concurrently-appended fact survived (not clobbered by a stale rewrite)"
-        true
-        (List.mem "PR #99 concurrent append" claims);
-      match
-        List.find_opt
-          (fun f -> String.equal f.Types.claim "PR #2 in review")
-          (Memory_io.read_facts_all ~keeper_id)
-      with
-      | Some f ->
-        Alcotest.(check (option (float 0.001)))
-          "original ref left un-advanced on disk (rewrite abandoned)"
-          (Some (now -. 100_000.0))
-          f.Types.last_verified_at
-      | None -> Alcotest.fail "the original ref must still be on disk"))
 ;;
 
 let test_gc_waits_for_fact_writer_lock () =
@@ -1929,17 +1804,13 @@ let test_recall_omits_marker_for_fresh_fact () =
             (contains "ago — verify]" block))))
 ;;
 
-(* RFC-0259 §3.5 (P4): an unverified-volatile claim (external_ref set, past the
-   grounding horizon) gets the hard "[UNVERIFIED — re-check before acting]" prefix
-   instead of the soft trailing staleness note — the reader sees "re-check" before
-   the claim, closing gap #5. *)
-let test_recall_prefixes_unverified_volatile_fact () =
+let test_recall_treats_external_ref_as_context () =
   with_recall_env "true" (fun () ->
     with_prompt_registry (fun () ->
       with_temp_keepers_dir (fun keepers_dir ->
         let keeper_id = "volatile-stale-keeper" in
         let now = 1_000_000.0 in
-        let horizon = Reconcile.default_grounding_horizon_seconds in
+        let horizon = 43_200.0 in
         let fact =
           { (fact_fixture ~now ()) with
             Types.claim = "PR #21515 is blocked and needs a fix"
@@ -1951,23 +1822,24 @@ let test_recall_prefixes_unverified_volatile_fact () =
         in
         Memory_io.append_fact ~keeper_id fact;
         match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
-        | None -> Alcotest.fail "expected Some block for a persisted volatile fact"
+        | None -> Alcotest.fail "expected Some block for a persisted external-ref fact"
         | Some block ->
           Alcotest.(check bool)
-            "unverified-volatile fact carries the hard prefix"
+            "external-ref fact does not get a hard machine-generated prefix"
+            false
+            (contains "[UNVERIFIED — re-check before acting]" block);
+          Alcotest.(check bool)
+            "external-ref fact is still provided as context"
             true
-            (contains "[UNVERIFIED — re-check before acting]" block))))
+            (contains fact.Types.claim block))))
 ;;
 
-(* RFC-0259 §3.5: suppression is not only a prefix. An unverified-volatile
-   external fact is ranked after durable facts, so a small recall cap drops it
-   before it can crowd out older durable knowledge. *)
-let test_recall_demotes_unverified_volatile_below_durable_cap () =
+let test_recall_does_not_demote_external_ref_below_durable_cap () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
       let keeper_id = "volatile-demote-cap-keeper" in
       let now = 1_000_000.0 in
-      let horizon = Reconcile.default_grounding_horizon_seconds in
+      let horizon = 43_200.0 in
       let volatile_recent =
         { (fact_fixture ~now ()) with
           Types.claim = "PR #21515 is still open"
@@ -1990,13 +1862,13 @@ let test_recall_demotes_unverified_volatile_below_durable_cap () =
       Memory_io.append_fact ~keeper_id durable_older;
       let block = Recall.render_context ~keeper_id ~now ~max_facts:1 ~max_episodes:0 () in
       Alcotest.(check bool)
-        "durable fact survives max_facts cap"
+        "recent external-ref fact survives max_facts cap"
         true
-        (contains durable_older.Types.claim block);
+        (contains volatile_recent.Types.claim block);
       Alcotest.(check bool)
-        "unverified volatile fact is dropped before durable fact"
+        "older durable fact is dropped by normal recency ordering"
         false
-        (contains volatile_recent.Types.claim block)))
+        (contains durable_older.Types.claim block)))
 ;;
 
 (* RFC-0259 §3.5: a non-volatile (no external_ref) claim never gets the hard
@@ -2020,25 +1892,20 @@ let test_recall_no_prefix_for_non_volatile_fact () =
         | None -> Alcotest.fail "expected Some block for a persisted durable fact"
         | Some block ->
           Alcotest.(check bool)
-            "durable fact never carries the unverified-volatile prefix"
+            "durable fact never carries the hard external-status prefix"
             false
             (contains "[UNVERIFIED — re-check before acting]" block))))
 ;;
 
-(* RFC-0259 §3.5 + SSOT anchor: a volatile fact whose [last_verified_at] is recent
-   is NOT unverified-volatile even when [first_seen] is long past the horizon — a
-   re-grounded ref is fresh. This discriminates the staleness anchor: recall
-   measures age from the shared [reference_time] SSOT (last_verified_at when set,
-   else first_seen) rather than inlining its own match. Were the anchor
-   [first_seen], this old-but-re-verified fact would wrongly carry the hard
-   prefix; the false assertion below is the mutation guard for that drift. *)
-let test_recall_no_prefix_for_recently_verified_volatile_fact () =
+(* External refs are context only: they should not get a hard status prefix even
+   when old. *)
+let test_recall_no_prefix_for_external_ref_fact () =
   with_recall_env "true" (fun () ->
     with_prompt_registry (fun () ->
       with_temp_keepers_dir (fun keepers_dir ->
         let keeper_id = "volatile-fresh-keeper" in
         let now = 1_000_000.0 in
-        let horizon = Reconcile.default_grounding_horizon_seconds in
+        let horizon = 43_200.0 in
         let fact =
           { (fact_fixture ~now ()) with
             Types.claim = "PR #21515 is still open"
@@ -2050,221 +1917,16 @@ let test_recall_no_prefix_for_recently_verified_volatile_fact () =
         in
         Memory_io.append_fact ~keeper_id fact;
         match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
-        | None -> Alcotest.fail "expected Some block for a persisted volatile fact"
+        | None -> Alcotest.fail "expected Some block for a persisted external-ref fact"
         | Some block ->
           Alcotest.(check bool)
-            "recently re-verified volatile fact does not carry the hard prefix"
+            "external-ref fact does not carry the hard prefix"
             false
             (contains "[UNVERIFIED — re-check before acting]" block);
           Alcotest.(check bool)
-            "recently re-verified volatile fact is still recalled"
+            "external-ref fact is still recalled"
             true
             (contains "PR #21515 is still open" block))))
-;;
-
-(* RFC-0259 recall suppression validation harness ------------------------------
-   The P4 unit tests above pin the mechanism on single crafted facts. This
-   harness measures the end-to-end effect on a mixed, realistic population:
-   render the live recall block (P1 TTL filter + P4 demote/prefix) once and
-   classify every claim. It is a before/after measurement — the naive "before"
-   recall would assert every claim as unqualified-live; the assertions below fail
-   if either protection regresses (nothing filtered, or nothing qualified), so a
-   change that disables suppression turns the harness red. The counts are
-   evaluation only; no score is added to the product's recall ordering. *)
-
-type recall_treatment =
-  | Absent (* claim does not appear — P1 TTL filtered it out *)
-  | Qualified (* claim appears, its line led by the UNVERIFIED prefix — P4 *)
-  | Plain (* claim appears with no UNVERIFIED prefix — durable or fresh *)
-
-let treatment_to_string = function
-  | Absent -> "absent"
-  | Qualified -> "qualified"
-  | Plain -> "plain"
-;;
-
-let unverified_volatile_prefix_text = "[UNVERIFIED — re-check before acting]"
-
-(* Classify one claim by the (unique) rendered line that contains it. *)
-let treatment_of_claim ~block ~claim =
-  match
-    String.split_on_char '\n' block |> List.find_opt (fun l -> contains claim l)
-  with
-  | None -> Absent
-  | Some line ->
-    if contains unverified_volatile_prefix_text line then Qualified else Plain
-;;
-
-(* A mixed fact population spanning every recall class, each tagged with the
-   treatment a correct P1+P4 recall must produce. Expectations are reasoned from
-   the scenario (age vs the 12h horizon and 24h TTL), NOT computed from the code
-   under test, so the harness is non-circular. [valid_until] is set by the real
-   write-side producer [fact_valid_until]. *)
-let suppression_corpus ~now =
-  let horizon = Reconcile.default_grounding_horizon_seconds in
-  let ttl = Types.volatile_external_ttl_seconds in
-  let volatile ~claim ~kind ~id ~first_seen ~last_verified =
-    let external_ref = Some { Types.kind; Types.id } in
-    { (fact_fixture ~now ()) with
-      Types.claim
-    ; Types.category = Types.Blocker
-    ; Types.external_ref
-    ; Types.first_seen
-    ; Types.valid_until =
-        Types.fact_valid_until ~now:first_seen ~external_ref ~claim_kind:None Types.Blocker
-    ; Types.last_verified_at = last_verified
-    }
-  in
-  let durable ~claim ~age_days =
-    { (fact_fixture ~now ()) with
-      Types.claim
-    ; Types.category = Types.Fact
-    ; Types.external_ref = None
-    ; Types.first_seen = now -. days age_days
-    ; Types.valid_until = None
-    ; Types.last_verified_at = None
-    }
-  in
-  [ durable ~claim:"Deployment uses a blue-green rollout" ~age_days:90, Plain, "durable"
-  ; ( durable ~claim:"The repository builds with dune on OCaml 5.x" ~age_days:30
-    , Plain
-    , "durable" )
-  ; ( volatile
-        ~claim:"PR #100 just opened for review"
-        ~kind:Types.Pr
-        ~id:"100"
-        ~first_seen:(now -. (horizon /. 4.0))
-        ~last_verified:(Some (now -. (horizon /. 4.0)))
-    , Plain
-    , "volatile_fresh" )
-  ; ( volatile
-        ~claim:"PR #21515 is blocked and needs a fix"
-        ~kind:Types.Pr
-        ~id:"21515"
-        ~first_seen:(now -. (horizon *. 1.5))
-        ~last_verified:(Some (now -. (horizon *. 1.5)))
-    , Qualified
-    , "volatile_stale" )
-  ; ( volatile
-        ~claim:"Issue #4242 is still open"
-        ~kind:Types.Issue
-        ~id:"4242"
-        ~first_seen:(now -. (horizon *. 1.5))
-        ~last_verified:(Some (now -. (horizon *. 1.5)))
-    , Qualified
-    , "volatile_stale" )
-  ; ( volatile
-        ~claim:"PR #300 is open"
-        ~kind:Types.Pr
-        ~id:"300"
-        ~first_seen:(now -. (ttl *. 3.0))
-        ~last_verified:None
-    , Absent
-    , "volatile_expired" )
-  ]
-;;
-
-let test_rfc0259_suppression_harness () =
-  with_prompt_registry (fun () ->
-    with_temp_keepers_dir (fun _dir ->
-      let keeper_id = "rfc0259-suppression-harness" in
-      let now = 2_000_000.0 in
-      let corpus = suppression_corpus ~now in
-      List.iter (fun (f, _, _) -> Memory_io.append_fact ~keeper_id f) corpus;
-      let block = Recall.render_context ~keeper_id ~now ~max_facts:50 ~max_episodes:0 () in
-      let observed =
-        List.map
-          (fun (f, expected, klass) ->
-            klass, expected, treatment_of_claim ~block ~claim:f.Types.claim)
-          corpus
-      in
-      let count p = List.length (List.filter p observed) in
-      let is_stale k = String.equal k "volatile_stale" || String.equal k "volatile_expired" in
-      let stale_total = count (fun (k, _, _) -> is_stale k) in
-      let stale_neutralized =
-        count (fun (k, _, a) -> is_stale k && (a = Absent || a = Qualified))
-      in
-      let durable_total = count (fun (k, _, _) -> String.equal k "durable") in
-      let durable_preserved =
-        count (fun (k, _, a) -> String.equal k "durable" && a = Plain)
-      in
-      (* measured report — printed so a run emits the numbers (evaluation only) *)
-      Printf.printf "\n[RFC-0259 recall suppression harness] (horizon=12h, TTL=24h)\n";
-      Printf.printf
-        "  stale external claims neutralized (filtered|qualified): %d/%d\n"
-        stale_neutralized
-        stale_total;
-      Printf.printf
-        "  durable claims preserved (present, unqualified): %d/%d\n"
-        durable_preserved
-        durable_total;
-      List.iter
-        (fun (k, e, a) ->
-          Printf.printf
-            "    %-17s expect=%-9s actual=%s\n"
-            k
-            (treatment_to_string e)
-            (treatment_to_string a))
-        observed;
-      (* (1) every claim is treated exactly as its scenario requires *)
-      List.iter
-        (fun (k, expected, actual) ->
-          Alcotest.(check bool)
-            (Printf.sprintf "%s claim treated as %s" k (treatment_to_string expected))
-            true
-            (expected = actual))
-        observed;
-      (* (2) measured outcome: every stale claim neutralized, every durable kept *)
-      Alcotest.(check int)
-        "all stale external claims neutralized"
-        stale_total
-        stale_neutralized;
-      Alcotest.(check int)
-        "all durable claims preserved unqualified"
-        durable_total
-        durable_preserved;
-      (* (3) anti-theater sensitivity: the protections actually act on this corpus,
-         so the treated block differs from the naive "everything unqualified-live"
-         block. If P1 were removed nothing is Absent; if P4 were removed nothing is
-         Qualified — either regression fails one of these. *)
-      Alcotest.(check bool)
-        "P1 TTL filter removed at least one expired claim"
-        true
-        (count (fun (_, _, a) -> a = Absent) >= 1);
-      Alcotest.(check bool)
-        "P4 qualified at least one stale-but-current claim"
-        true
-        (count (fun (_, _, a) -> a = Qualified) >= 1)))
-;;
-
-(* RFC-0259 §3.5: demotion orders every durable claim ahead of every qualified
-   volatile claim, so under a tight recall cap durable knowledge is kept and the
-   possibly-stale external claim is dropped first. Measured as a strict ordering
-   over line positions in the rendered block. *)
-let test_rfc0259_suppression_demote_ordering () =
-  with_prompt_registry (fun () ->
-    with_temp_keepers_dir (fun _dir ->
-      let keeper_id = "rfc0259-demote-ordering" in
-      let now = 2_000_000.0 in
-      let corpus = suppression_corpus ~now in
-      List.iter (fun (f, _, _) -> Memory_io.append_fact ~keeper_id f) corpus;
-      let block = Recall.render_context ~keeper_id ~now ~max_facts:50 ~max_episodes:0 () in
-      let position claim =
-        match index_of claim block with
-        | Some i -> i
-        | None -> max_int (* filtered: never ahead of a durable claim *)
-      in
-      let positions klass =
-        corpus
-        |> List.filter (fun (_, _, k) -> String.equal k klass)
-        |> List.map (fun (f, _, _) -> position f.Types.claim)
-      in
-      let last_durable = List.fold_left max min_int (positions "durable") in
-      let first_qualified = List.fold_left min max_int (positions "volatile_stale") in
-      Alcotest.(check bool)
-        "every durable claim renders before every qualified volatile claim"
-        true
-        (last_durable < first_qualified)))
 ;;
 
 let test_recall_filters_expired_episodes () =
@@ -3344,51 +3006,14 @@ let test_librarian_provider_slot_gate_disabled_at_zero () =
         !first))
 ;;
 
-(* ---------- RFC-0259 P1: volatile-claim classification + decay ---------- *)
+(* ---------- External refs are context-only ---------- *)
 
-let kind_id_of_claim claim =
-  match Types.external_ref_of_claim claim with
-  | Some r -> Some (Types.external_ref_kind_to_string r.Types.kind, r.Types.id)
-  | None -> None
-;;
-
-let test_external_ref_of_claim_parses () =
-  Alcotest.(check (option (pair string string)))
-    "PR #21363"
-    (Some ("pr", "21363"))
-    (kind_id_of_claim "PR #21363 is OPEN, MERGEABLE");
-  Alcotest.(check (option (pair string string)))
-    "issue #5"
-    (Some ("issue", "5"))
-    (kind_id_of_claim "blocked by issue #5");
-  Alcotest.(check (option (pair string string)))
-    "pull request #6"
-    (Some ("pr", "6"))
-    (kind_id_of_claim "the pull request #6 was merged");
-  Alcotest.(check (option (pair string string)))
-    "pull/99 slash form"
-    (Some ("pr", "99"))
-    (kind_id_of_claim "see github.com/o/r/pull/99 for context");
-  Alcotest.(check (option (pair string string)))
-    "PK-1234 jira key"
-    (Some ("task", "PK-1234"))
-    (kind_id_of_claim "tracked in PK-1234")
-;;
-
-let test_external_ref_of_claim_ignores_prose () =
-  let has_ref claim = Option.is_some (Types.external_ref_of_claim claim) in
-  Alcotest.(check bool) "bare #3 is prose" false (has_ref "complete step #3 first");
-  Alcotest.(check bool) "no marker at all" false (has_ref "the build uses dune 3.x");
-  Alcotest.(check bool) "number near non-keyword word" false (has_ref "approach #2 failed");
-  Alcotest.(check bool) "keyword without digits" false (has_ref "the pr # was opened")
-;;
-
-let test_fact_valid_until_volatile () =
+let test_fact_valid_until_external_ref_is_context_only () =
   let now = 1_000_000.0 in
   let pr_ref = Some { Types.kind = Types.Pr; Types.id = "1" } in
   Alcotest.(check (option (float 0.001)))
-    "external-ref Fact gets the finite volatile horizon"
-    (Some (now +. Types.volatile_external_ttl_seconds))
+    "external-ref Fact stays on the category retention path"
+    None
     (Types.fact_valid_until ~now ~external_ref:pr_ref ~claim_kind:None Types.Fact);
   Alcotest.(check bool)
     "durable Fact with no ref stays durable (None)"
@@ -3399,7 +3024,7 @@ let test_fact_valid_until_volatile () =
     true
     (Option.is_some (Types.fact_valid_until ~now ~external_ref:None ~claim_kind:None Types.Ephemeral));
   (* RFC-0285 §3.4: a Self_observation gets the short finite horizon regardless of
-     category — even an otherwise-durable Fact — and shorter than the external one. *)
+     category — even an otherwise-durable Fact. *)
   Alcotest.(check (option (float 0.001)))
     "Self_observation Fact gets the short self-observation horizon"
     (Some (now +. Types.self_observation_ttl_seconds))
@@ -3409,9 +3034,11 @@ let test_fact_valid_until_volatile () =
        ~claim_kind:(Some Types.Self_observation)
        Types.Fact);
   Alcotest.(check bool)
-    "self-observation horizon is shorter than the external one"
+    "self-observation horizon is shorter than Ephemeral"
     true
-    (Types.self_observation_ttl_seconds < Types.volatile_external_ttl_seconds)
+    (match Types.fact_valid_until ~now ~external_ref:None ~claim_kind:None Types.Ephemeral with
+     | Some until -> Types.self_observation_ttl_seconds < until -. now
+     | None -> false)
 ;;
 
 (* RFC-0285 §4: claim_kind tokens round-trip, and an unrecognized token degrades to
@@ -3527,10 +3154,8 @@ let test_self_observation_not_promoted () =
        shared)
 ;;
 
-let test_fact_of_json_rederives_legacy_volatile () =
-  let now = 2_000_000.0 in
-  (* first_seen two horizons ago: a re-derived row must already be past horizon. *)
-  let first_seen = now -. (Types.volatile_external_ttl_seconds *. 2.0) in
+let test_fact_of_json_does_not_infer_external_ref_from_legacy_prose () =
+  let first_seen = 1_000_000.0 in
   let legacy =
     `Assoc
       [ "claim", `String "PR #21363 is OPEN, MERGEABLE, and BLOCKED"
@@ -3541,30 +3166,49 @@ let test_fact_of_json_rederives_legacy_volatile () =
       ]
   in
   match Types.fact_of_json legacy with
-  | None -> Alcotest.fail "legacy volatile row failed to decode"
+  | None -> Alcotest.fail "legacy row failed to decode"
   | Some f ->
     Alcotest.(check bool)
-      "external_ref re-derived from claim on read"
+      "PR prose is not re-derived into external_ref"
       true
-      (Option.is_some f.Types.external_ref);
-    (match f.Types.valid_until with
-     | None -> Alcotest.fail "re-derived volatile row should carry a valid_until"
-     | Some vu ->
-       Alcotest.(check (float 0.001))
-         "valid_until anchored to first_seen"
-         (first_seen +. Types.volatile_external_ttl_seconds)
-         vu;
-       Alcotest.(check bool) "stale row is already past horizon" true (vu < now))
+      (Option.is_none f.Types.external_ref);
+    Alcotest.(check (option (float 0.001)))
+      "no inferred volatile TTL"
+      None
+      f.Types.valid_until
 ;;
 
-let test_fact_to_json_omits_external_ref_when_none () =
+let test_fact_to_json_drops_external_ref_surface () =
   let now = 1_000_000.0 in
   let f = fact_fixture ~now () in
-  let json_str = Yojson.Safe.to_string (Types.fact_to_json f) in
+  let no_ref_json = Yojson.Safe.to_string (Types.fact_to_json f) in
   Alcotest.(check bool)
     "no external_ref key for a fact with no ref (byte-compat)"
     false
-    (contains "external_ref" json_str)
+    (contains "external_ref" no_ref_json);
+  let with_ref =
+    { f with Types.external_ref = Some { Types.kind = Types.Pr; Types.id = "42" } }
+  in
+  let with_ref_json = Yojson.Safe.to_string (Types.fact_to_json with_ref) in
+  Alcotest.(check bool)
+    "external_ref key omitted even when Some"
+    false
+    (contains "external_ref" with_ref_json);
+  let legacy_with_ref =
+    `Assoc
+      [ "claim", `String "PR #42 is open"
+      ; "category", `String "fact"
+      ; "source", `Assoc [ "trace_id", `String "t"; "turn", `Int 1 ]
+      ; "first_seen", `Float now
+      ; "external_ref", `Assoc [ "kind", `String "pr"; "id", `String "42" ]
+      ; "schema_version", `String "rfc0231-v2"
+      ]
+  in
+  let decoded = Option.get (Types.fact_of_json legacy_with_ref) in
+  Alcotest.(check bool)
+    "legacy external_ref is ignored on decode"
+    true
+    (Option.is_none decoded.Types.external_ref)
 ;;
 
 (* RFC-0259 §3.7 (P6): the [claim_id] codec — a [Some] id round-trips intact; a
@@ -3770,10 +3414,9 @@ let test_merge_and_cap_no_over_merge_distinct_conclusions () =
     Alcotest.(check int) "two rows survive (correction not dropped)" 2 (List.length rows))
 ;;
 
-(* RFC-0259 §3.7 (P6 regression): a durable (referent-free, [external_ref = None])
-   claim still advances its [last_verified_at] on re-observe — F applies only to
-   volatile claims; and the exact-text upsert behavior is unchanged: identical
-   non-ref claims merge to one row, distinct non-ref claims stay two. *)
+(* RFC-0259 §3.7 (P6 regression): a durable claim still advances its
+   [last_verified_at] on re-observe, and exact-text upsert behavior is unchanged:
+   identical claims merge to one row, distinct claims stay two. *)
 let test_reobserve_advances_durable_anchor () =
   let now = 5_000_000.0 in
   let existing =
@@ -3807,25 +3450,20 @@ let test_reobserve_advances_durable_anchor () =
     (String.equal (Types.claim_identity p) (Types.claim_identity distinct))
 ;;
 
-(* RFC-0259 §3.7 (P6/F): producer re-extraction of a volatile (external-ref) claim
-   is NOT re-verification. The reobserved row inherits the prior anchors entirely —
-   [first_seen], [valid_until], and [last_verified_at] are all carried over from
-   [existing], NOT advanced to [now]. Only the reconciler ([Stale_open]) advances a
-   volatile claim's anchors. This reverses the pre-P6 "re-observing IS
-   re-verification" rule, so a re-mint cannot reset the volatile TTL or grounding
-   horizon. *)
-let test_reobserve_inherits_volatile_anchors () =
+(* External refs are context, not a code-enforced grounding contract. A
+   re-observed external-ref fact refreshes like any other non-self-observation
+   fact. *)
+let test_reobserve_external_ref_refreshes_like_context () =
   let now = 5_000_000.0 in
   let older = now -. 100_000.0 in
-  let v0 = older +. Types.volatile_external_ttl_seconds in
-  let l0 = older +. 1_000.0 in
+  let v0 = older +. 12_345.0 in
   let existing =
     { (fact_fixture ~now:older ()) with
       Types.claim = "PR #42 is OPEN"
     ; Types.external_ref = Some { Types.kind = Types.Pr; Types.id = "42" }
     ; Types.first_seen = older
     ; Types.valid_until = Some v0
-    ; Types.last_verified_at = Some l0
+    ; Types.last_verified_at = Some (older +. 1_000.0)
     }
   in
   (* incoming is a reworded re-extraction of the same referent claim *)
@@ -3840,21 +3478,21 @@ let test_reobserve_inherits_volatile_anchors () =
     (Some v0)
     reobserved.Types.valid_until;
   Alcotest.(check (option (float 0.001)))
-    "last_verified_at inherited (producer re-extraction is not re-verification)"
-    (Some l0)
+    "last_verified_at advances on re-observe"
+    (Some now)
     reobserved.Types.last_verified_at
 ;;
 
-let test_retention_rank_demotes_volatile () =
+let test_retention_rank_keeps_external_ref_with_durable () =
   let now = 1_000_000.0 in
   let durable = { (fact_fixture ~now ()) with Types.category = Types.Fact } in
   let volatile =
     { durable with Types.external_ref = Some { Types.kind = Types.Pr; Types.id = "7" } }
   in
   Alcotest.(check bool)
-    "a volatile Fact ranks below a durable Fact (dropped first by the cap)"
+    "external_ref does not demote a durable Fact"
     true
-    (Policy.retention_rank ~now volatile < Policy.retention_rank ~now durable)
+    (Float.equal (Policy.retention_rank ~now volatile) (Policy.retention_rank ~now durable))
 ;;
 
 (* RFC-keeper-memory-panel-real-data §4a / §8: the dashboard fact projection serializes the real [fact]
@@ -3886,7 +3524,8 @@ let test_dashboard_fact_json_omits_score_keys () =
     (fun k -> Alcotest.(check bool) (Printf.sprintf "present: %s" k) true (has k))
     [ "claim"; "category"; "source"; "first_seen"; "first_seen_iso"
     ; "reference_time"; "valid_until"; "last_verified_at"; "current"
-    ; "external_ref"; "claim_kind" ];
+    ; "claim_kind" ];
+  Alcotest.(check bool) "external_ref not surfaced" false (has "external_ref");
   List.iter
     (fun k -> Alcotest.(check bool) (Printf.sprintf "deleted score key absent: %s" k) false (has k))
     [ "confidence"; "access_count"; "last_accessed"; "stale_factor"
@@ -3900,8 +3539,8 @@ let test_dashboard_fact_json_omits_score_keys () =
   | _ -> Alcotest.fail "current must be a bool"
 ;;
 
-(* Optional keys (external_ref / claim_kind) are omitted when [None]; the
-   staleness anchor [reference_time] uses last_verified_at when set. *)
+(* Optional [claim_kind] is omitted when [None]; the staleness anchor
+   [reference_time] uses last_verified_at when set. *)
 let test_dashboard_fact_json_omits_optional_when_none () =
   let now = 1_000_000.0 in
   let fields =
@@ -3958,6 +3597,7 @@ let test_dashboard_json_wires_one_fact_item_per_fact () =
 ;;
 
 let () =
+  maybe_run_lock_holder_child ();
   Alcotest.run
     "keeper_memory_os"
     [ ( "json"
@@ -4068,6 +3708,14 @@ let () =
             `Quick
             test_append_episode_bundle_waits_for_fact_lock
         ; Alcotest.test_case
+            "facts lock propagates body Failure"
+            `Quick
+            test_with_facts_lock_propagates_body_failure
+        ; Alcotest.test_case
+            "facts lock timeout uses on_timeout"
+            `Quick
+            test_with_facts_lock_timeout_uses_on_timeout
+        ; Alcotest.test_case
             "gc dry-run and rewrite"
             `Quick
             test_gc_dry_run_and_rewrite
@@ -4122,29 +3770,21 @@ let () =
             `Quick
             test_recall_omits_marker_for_fresh_fact
         ; Alcotest.test_case
-            "unverified-volatile fact gets the hard prefix"
+            "external-ref fact is rendered as context"
             `Quick
-            test_recall_prefixes_unverified_volatile_fact
+            test_recall_treats_external_ref_as_context
         ; Alcotest.test_case
-            "unverified-volatile fact is demoted below durable cap"
+            "external-ref fact is not demoted below durable cap"
             `Quick
-            test_recall_demotes_unverified_volatile_below_durable_cap
+            test_recall_does_not_demote_external_ref_below_durable_cap
         ; Alcotest.test_case
-            "non-volatile fact never gets the hard prefix"
+            "plain fact never gets the hard prefix"
             `Quick
             test_recall_no_prefix_for_non_volatile_fact
         ; Alcotest.test_case
-            "recently re-verified volatile fact gets no hard prefix (anchor = reference_time)"
+            "external-ref fact gets no hard prefix"
             `Quick
-            test_recall_no_prefix_for_recently_verified_volatile_fact
-        ; Alcotest.test_case
-            "RFC-0259 suppression harness: stale neutralized, durable preserved"
-            `Quick
-            test_rfc0259_suppression_harness
-        ; Alcotest.test_case
-            "RFC-0259 suppression harness: durable demoted ahead of stale volatile"
-            `Quick
-            test_rfc0259_suppression_demote_ordering
+            test_recall_no_prefix_for_external_ref_fact
         ; Alcotest.test_case
             "expired episodes are omitted"
             `Quick
@@ -4282,17 +3922,9 @@ let () =
         ] )
     ; ( "rfc-0259 volatile"
       , [ Alcotest.test_case
-            "external_ref_of_claim parses PR/issue/task markers"
+            "fact_valid_until: external_ref stays context-only"
             `Quick
-            test_external_ref_of_claim_parses
-        ; Alcotest.test_case
-            "external_ref_of_claim ignores bare # and prose"
-            `Quick
-            test_external_ref_of_claim_ignores_prose
-        ; Alcotest.test_case
-            "fact_valid_until: external ref -> finite, durable -> none"
-            `Quick
-            test_fact_valid_until_volatile
+            test_fact_valid_until_external_ref_is_context_only
         ; Alcotest.test_case
             "claim_kind round-trips; unknown -> None (RFC-0285 §4)"
             `Quick
@@ -4306,25 +3938,25 @@ let () =
             `Quick
             test_self_observation_not_promoted
         ; Alcotest.test_case
-            "fact_of_json re-derives a legacy volatile row past horizon"
+            "fact_of_json does not infer external_ref from legacy prose"
             `Quick
-            test_fact_of_json_rederives_legacy_volatile
+            test_fact_of_json_does_not_infer_external_ref_from_legacy_prose
         ; Alcotest.test_case
-            "fact_to_json omits external_ref when none (byte-compat)"
+            "fact_to_json drops external_ref surface"
             `Quick
-            test_fact_to_json_omits_external_ref_when_none
+            test_fact_to_json_drops_external_ref_surface
         ; Alcotest.test_case
             "claim_id codec round-trips Some and omits None (RFC-0259 §3.7 P6)"
             `Quick
             test_claim_id_codec_roundtrip
         ; Alcotest.test_case
-            "reobserve inherits a volatile claim's anchors (RFC-0259 §3.7 P6/F)"
+            "reobserve refreshes external-ref facts as context"
             `Quick
-            test_reobserve_inherits_volatile_anchors
+            test_reobserve_external_ref_refreshes_like_context
         ; Alcotest.test_case
-            "retention rank demotes a volatile fact below durable"
+            "retention rank keeps external-ref fact with durable"
             `Quick
-            test_retention_rank_demotes_volatile
+            test_retention_rank_keeps_external_ref_with_durable
         ; Alcotest.test_case
             "claim_identity: same claim_id shares a key, distinct claim_id stays distinct (RFC-0259 §3.7 P6/E)"
             `Quick
@@ -4341,28 +3973,6 @@ let () =
             "reobserve still advances a durable (non-ref) claim's anchor (P6 regression)"
             `Quick
             test_reobserve_advances_durable_anchor
-        ] )
-    ; ( "rfc-0259 reconcile-io"
-      , [ Alcotest.test_case
-            "dry-run classifies but does not write (P3)"
-            `Quick
-            test_run_reconcile_dry_run_does_not_write
-        ; Alcotest.test_case
-            "apply demotes terminal ref but keeps it on disk (P3)"
-            `Quick
-            test_run_reconcile_apply_demotes_terminal_keeps_it
-        ; Alcotest.test_case
-            "apply advance persists last_verified_at (P3)"
-            `Quick
-            test_run_reconcile_apply_advance_persists
-        ; Alcotest.test_case
-            "corrupt store aborts without overwrite (P3)"
-            `Quick
-            test_run_reconcile_preserves_corrupt_store
-        ; Alcotest.test_case
-            "concurrent write during verify abandons the rewrite (P3 lock offload)"
-            `Quick
-            test_run_reconcile_cas_abandons_on_concurrent_write
         ] )
     ]
 ;;

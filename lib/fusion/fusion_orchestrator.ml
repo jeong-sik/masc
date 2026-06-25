@@ -211,6 +211,14 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
              강제할 때까지 defer). 단일-심판 노드는 [Single], 1차 심판 실패는 단일-심판
              위상에선 그대로 전파(Simple과 동일 에러 의미)하고 실패 노드 한 건만 남긴다. *)
           let judge_full, judge_nodes =
+            match Fusion_types.judge_skip_reason panel with
+            | Some reason ->
+              (* 패널 전원 실패 — 종합할 답이 없다. judge를 빈 패널로 호출하면 빈
+                 <panel_answers>로 환각 종합을 만들어 0-패널 결과를 정상처럼 표출한다.
+                 judge 미실행 + 명시적 실패로 완료한다(기존 judge-error 표시 경로 재사용,
+                 JOJ all-fail과 동일 의미). judge_nodes=[] — 실행된 심판 없음(RFC-0284). *)
+              (Error (reason, Fusion_types.zero_usage), [])
+            | None ->
             match topology with
             | Fusion_types.Simple ->
               (match run_single_judge () with

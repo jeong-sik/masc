@@ -17,6 +17,116 @@ let handle_time_now ~args:_ =
     (`Assoc [ "now_iso", `String now_iso; "now_unix", `Float now_unix ])
 ;;
 
+(* ── analyze_image (RFC-keeper-vision-delegation Phase 1 §2.6) ─────────── *)
+
+(* Content-addressed vision-input artifact store directory, base_path-derived
+   (same masc_root SSOT as other keeper artifacts). First consumer of
+   [Vision_artifact_store] — establishes the dir convention Phase 2 ingestion
+   writes to. *)
+let vision_store_path config =
+  Filename.concat (Workspace.masc_root_dir config) "vision-artifacts"
+;;
+
+(* Detect the image media type from the leading bytes (magic number): the
+   content-addressed store keeps bytes only, and the keeper holds just a handle.
+   Closed set; an unrecognized signature fails closed (no permissive default). *)
+let image_media_type_of_bytes bytes : (string, string) result =
+  let starts pfx =
+    String.length bytes >= String.length pfx
+    && String.equal (String.sub bytes 0 (String.length pfx)) pfx
+  in
+  if starts "\x89PNG\r\n\x1a\n" then Ok "image/png"
+  else if starts "\xff\xd8\xff" then Ok "image/jpeg"
+  else if starts "GIF87a" || starts "GIF89a" then Ok "image/gif"
+  else if
+    String.length bytes >= 12
+    && String.equal (String.sub bytes 0 4) "RIFF"
+    && String.equal (String.sub bytes 8 4) "WEBP"
+  then Ok "image/webp"
+  else if starts "BM" then Ok "image/bmp"
+  else Error "unrecognized image format (magic number)"
+;;
+
+(* Walk the configured media-failover runtimes (runtime.toml SSOT), then all
+   runtimes, and pick the first whose effective input caps admit image input.
+   Config-driven — no model-id literal. *)
+let resolve_vision_provider_config () : (Llm_provider.Provider_config.t, string) result =
+  let capable rt =
+    (Runtime_agent.input_capabilities_of_runtime rt)
+      .Llm_provider.Capabilities.supports_image_input
+  in
+  let from_failover =
+    List.filter_map Runtime.get_runtime_by_id (Runtime.media_failover ())
+  in
+  match List.find_opt capable (from_failover @ Runtime.get_runtimes ()) with
+  | Some rt -> Ok rt.Runtime.provider_config
+  | None -> Error "no_vision_runtime"
+;;
+
+(* Phase-1 named bounds (not magic literals): [timeout_sec] < Ollama's 600s
+   connect timeout so the outer [with_timeout_exn] is the authoritative bound;
+   [max_tokens] gives post-thinking headroom (the 2026-06-25 gemma4 truncation
+   lesson). Tunable config keys are deferred to a later phase. *)
+let vision_subcall_timeout_sec = 90.0
+let vision_subcall_max_tokens = 2048
+
+let handle_analyze_image ?sw ?clock ?net ~config ~meta:(_ : keeper_meta) ~args () : string =
+  let err msg =
+    Yojson.Safe.to_string (`Assoc [ "ok", `Bool false; "error", `String msg ])
+  in
+  let handle_str = String.trim (Safe_ops.json_string ~default:"" "artifact" args) in
+  let query = String.trim (Safe_ops.json_string ~default:"" "query" args) in
+  match sw, clock, net with
+  | Some sw, Some clock, Some net ->
+    let dir = vision_store_path config in
+    (match
+       Multimodal.Vision_artifact_store.load
+         ~dir
+         (Multimodal.Vision_artifact_store.of_string handle_str)
+     with
+     | Error msg -> err ("missing_artifact: " ^ msg)
+     | Ok bytes ->
+       let media_type_r =
+         match Safe_ops.json_string_opt "media_type" args with
+         | Some m when not (String.equal (String.trim m) "") -> Ok (String.trim m)
+         | _ -> image_media_type_of_bytes bytes
+       in
+       (match media_type_r with
+        | Error msg -> err msg
+        | Ok image_media_type ->
+          (match
+             Multimodal.Vision_analyze.make_request
+               ~query
+               ~image_media_type
+               ~image_bytes:bytes
+           with
+           | Error msg -> err msg
+           | Ok req ->
+             (match resolve_vision_provider_config () with
+              | Error msg -> err msg
+              | Ok provider_config ->
+                let provider_config =
+                  { provider_config with
+                    Llm_provider.Provider_config.max_tokens =
+                      Some vision_subcall_max_tokens
+                  }
+                in
+                (match
+                   Keeper_vision_subcall.run
+                     ~sw
+                     ~net
+                     ~clock
+                     ~provider_config
+                     ~timeout_sec:vision_subcall_timeout_sec
+                     req
+                 with
+                 | Ok text ->
+                   Yojson.Safe.to_string
+                     (`Assoc [ "ok", `Bool true; "text", `String text ])
+                 | Error e -> err (Keeper_vision_subcall.string_of_error e))))))
+  | _ -> err "analyze_image requires Eio context (sw/clock/net unavailable)"
+;;
+
 let handle_tools_list ~(meta : keeper_meta) ~args:_ =
   Keeper_tool_shared_runtime.keeper_tools_list_json ~meta
 ;;

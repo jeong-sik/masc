@@ -59,6 +59,7 @@ type runtime_handler =
   | Tool_masc_surface_audit
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
+  | Tool_analyze_image
 
 type policy =
   { visibility : Tool_catalog.visibility
@@ -150,6 +151,7 @@ let runtime_handler_to_string = function
   | Tool_masc_surface_audit -> "tool_masc_surface_audit"
   | Tool_masc_fusion_dispatch -> "tool_masc_fusion_dispatch"
   | Tool_masc_fusion_status -> "tool_masc_fusion_status"
+  | Tool_analyze_image -> "tool_analyze_image"
 ;;
 
 let policy ?(visibility = Tool_catalog.Default) ?readonly ?readonly_of_input
@@ -671,6 +673,22 @@ let passthrough_object_schema =
     [ "type", `String "object"; "additionalProperties", `Bool true ]
 ;;
 
+let analyze_image_schema =
+  closed_object_schema
+    ~required:[ "artifact"; "query" ]
+    [ property
+        "artifact"
+        "string"
+        "Handle of an image artifact ingested into this turn (the content-hash \
+         string shown in an [image artifact:<handle>] placeholder)."
+    ; property
+        "query"
+        "string"
+        "What to read from the image, e.g. \"transcribe the text\", \"describe \
+         the chart\", \"what is in the top-left?\"."
+    ]
+;;
+
 let find_taskboard_schema_opt name =
   List.find_opt (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
     Tool_shard_types.taskboard_tools
@@ -1129,6 +1147,18 @@ let internal_descriptors : t list =
       ~input_schema:passthrough_object_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_memory_search
+    (* ── analyze_image (RFC-keeper-vision-delegation Phase 1) ─────── *)
+  ; in_process_descriptor
+      ~id:"multimodal.analyze_image"
+      ~name:"analyze_image"
+      ~description:
+        "Read an image artifact ingested into this turn: provide its handle \
+         (artifact) and a question (query); returns the vision model's text. \
+         The image is read by a vision runtime; this keeper's own runtime is \
+         unchanged."
+      ~input_schema:analyze_image_schema
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_analyze_image
   ; in_process_descriptor
       ~id:"keeper.memory.write"
       ~name:"keeper_memory_write"

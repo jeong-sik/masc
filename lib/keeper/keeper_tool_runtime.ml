@@ -76,7 +76,8 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit
   | Tool_masc_fusion_dispatch
-  | Tool_masc_fusion_status -> None
+  | Tool_masc_fusion_status
+  | Tool_analyze_image -> None
 ;;
 
 (* Shell IR mechanics live under Execute lowerers. Keeper_tool_command_runtime is
@@ -132,7 +133,8 @@ let handle_shell_ir ctx descriptor args =
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit
   | Tool_masc_fusion_dispatch
-  | Tool_masc_fusion_status -> None
+  | Tool_masc_fusion_status
+  | Tool_analyze_image -> None
 ;;
 
 let handle_in_process ctx descriptor args =
@@ -154,6 +156,19 @@ let handle_in_process ctx descriptor args =
          ~meta:ctx.meta
          ~ctx_work:ctx.ctx_work
          ~args)
+  | Tool_analyze_image ->
+    (* §2.6: thread the turn-scoped Eio context so the bounded vision sub-call
+       shares this turn's cancellation + timeout clock (not the server root
+       switch — the inverse of the fusion handler). *)
+    Some
+      (Keeper_tool_in_process_runtime.handle_analyze_image
+         ?sw:ctx.sw
+         ?clock:ctx.clock
+         ?net:ctx.net
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~args
+         ())
   | Tool_memory_search ->
     Some
       (Keeper_tool_in_process_runtime.handle_memory_search

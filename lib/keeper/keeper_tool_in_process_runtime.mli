@@ -16,6 +16,24 @@ open Keeper_types_profile
 
 val handle_time_now : args:Yojson.Safe.t -> string
 
+val handle_analyze_image
+  :  ?sw:Eio.Switch.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> config:Workspace.config
+  -> meta:keeper_meta
+  -> args:Yojson.Safe.t
+  -> unit
+  -> string
+(** RFC-keeper-vision-delegation Phase 1 §2.6: read an ingested image artifact
+    (by content-hash handle) and return a vision model's text answer to [query].
+    Loads bytes via {!Multimodal.Vision_artifact_store}, validates via
+    {!Multimodal.Vision_analyze}, and delegates one bounded sub-call through
+    {!Keeper_vision_subcall.run} (turn-scoped [sw]/[clock]/[net]). Returns an
+    [{ok:false, error}] JSON (never a silent success) on a missing artifact,
+    absent Eio context, no configured vision runtime, sub-call timeout/failure,
+    or an empty/truncated extraction; [{ok:true, text}] otherwise. *)
+
 val handle_tools_list : meta:keeper_meta -> args:Yojson.Safe.t -> string
 
 val handle_tool_search

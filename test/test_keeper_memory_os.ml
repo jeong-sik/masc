@@ -10,6 +10,13 @@ module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
 module Consolidator = Masc.Keeper_memory_os_consolidator
 
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
+let restore_env name = function
+  | Some value -> Unix.putenv name value
+  | None -> unsetenv name
+;;
+
 let contains substring s =
   let sub_len = String.length substring in
   let str_len = String.length s in
@@ -187,12 +194,19 @@ let wait_for_ref ~clock label r =
 ;;
 
 let lock_holder_child_arg = "--keeper-memory-os-hold-lock-file"
+let lock_holder_hold_sec = 5.0
 
 let maybe_run_lock_holder_child () =
   if Array.length Sys.argv = 4 && String.equal Sys.argv.(1) lock_holder_child_arg
   then (
     let lock_path = Sys.argv.(2) in
-    let hold_sec = float_of_string Sys.argv.(3) in
+    let hold_sec =
+      match float_of_string_opt Sys.argv.(3) with
+      | Some value when Float.is_finite value && value >= 0.0 -> value
+      | _ ->
+          Printf.eprintf "invalid %s hold_sec=%S\n%!" lock_holder_child_arg Sys.argv.(3);
+          exit 2
+    in
     let fd = Unix.openfile lock_path [ Unix.O_CREAT; Unix.O_WRONLY ] 0o644 in
     Fun.protect
       ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
@@ -207,7 +221,9 @@ let with_process_holding_lock_file lock_path f =
   let read_fd, write_fd = Unix.pipe () in
   let stderr_fd = Unix.openfile Filename.null [ Unix.O_WRONLY ] 0o644 in
   let exe = Sys.executable_name in
-  let argv = [| exe; lock_holder_child_arg; lock_path; "5.0" |] in
+  let argv =
+    [| exe; lock_holder_child_arg; lock_path; Printf.sprintf "%.1f" lock_holder_hold_sec |]
+  in
   let pid =
     try
       Unix.create_process_env
@@ -638,6 +654,78 @@ let test_librarian_runtime_override_env () =
          "override trims"
          "runpod_mtp.qwen36-35b-a3b-mtp"
          (Librarian_runtime.runtime_id_for_librarian ~runtime_id:"keeper-runtime"))
+;;
+
+let with_memory_os_env name value f =
+  let old = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect ~finally:(fun () -> restore_env name old) f
+;;
+
+let test_memory_os_bool_env_accepts_enabled_disabled () =
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_RECALL" "disabled" (fun () ->
+    Alcotest.(check bool)
+      "disabled disables recall"
+      false
+      (Env_config.KeeperMemoryOs.recall_enabled ()));
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_RECALL" " TRUE " (fun () ->
+    Alcotest.(check bool)
+      "bool parser trims and lowercases true tokens"
+      true
+      (Env_config.KeeperMemoryOs.recall_enabled ()));
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_RECALL" "" (fun () ->
+    Alcotest.(check bool)
+      "blank bool token is treated as unset"
+      true
+      (Env_config.KeeperMemoryOs.recall_enabled ()));
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN" "disabled" (fun () ->
+    Alcotest.(check bool)
+      "disabled disables librarian"
+      false
+      (Env_config.KeeperMemoryOs.librarian_enabled ()));
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_GC" "enabled" (fun () ->
+    Alcotest.(check bool)
+      "enabled enables GC"
+      true
+      (Env_config.KeeperMemoryOs.gc_enabled ()));
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_CONSOLIDATION" "enabled" (fun () ->
+    Alcotest.(check bool)
+      "enabled enables consolidation"
+      true
+      (Env_config.KeeperMemoryOs.consolidation_enabled ()))
+;;
+
+let test_memory_os_env_invalid_values_fail_closed_or_default () =
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_RECALL" "maybe" (fun () ->
+    Alcotest.(check bool)
+      "invalid default-on recall keeps default"
+      true
+      (Env_config.KeeperMemoryOs.recall_enabled ()));
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN" "maybe" (fun () ->
+    Alcotest.(check bool)
+      "invalid default-on librarian keeps default"
+      true
+      (Env_config.KeeperMemoryOs.librarian_enabled ()));
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_GC" "maybe" (fun () ->
+    Alcotest.(check bool)
+      "invalid GC flag fail-closes"
+      false
+      (Env_config.KeeperMemoryOs.gc_enabled ()));
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_CONSOLIDATION" "maybe" (fun () ->
+    Alcotest.(check bool)
+      "invalid consolidation flag fail-closes"
+      false
+      (Env_config.KeeperMemoryOs.consolidation_enabled ()));
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES" "bogus" (fun () ->
+    Alcotest.(check int)
+      "invalid max messages falls back"
+      24
+      (Env_config.KeeperMemoryOs.librarian_max_messages ()));
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC" "nan" (fun () ->
+    Alcotest.(check (float 0.001))
+      "invalid timeout falls back"
+      600.0
+      (Env_config.KeeperMemoryOs.librarian_timeout_sec ()))
 ;;
 
 let test_librarian_timeout_override_env () =
@@ -1606,8 +1694,9 @@ let test_recall_context_empty_without_memory () =
    Unix.getenv), so putenv steers the flag per test. *)
 let with_recall_env value f =
   let var = "MASC_KEEPER_MEMORY_OS_RECALL" in
+  let old = Sys.getenv_opt var in
   Unix.putenv var value;
-  Fun.protect ~finally:(fun () -> Unix.putenv var "") f
+  Fun.protect ~finally:(fun () -> restore_env var old) f
 ;;
 
 let test_render_if_enabled_default_is_on () =
@@ -2851,9 +2940,7 @@ let test_recall_scans_whole_shared_store () =
 let with_env name value f =
   let old = Sys.getenv_opt name in
   Unix.putenv name value;
-  (* Codebase convention: [Unix.putenv name ""] clears a var (no portable
-     [Unix.unsetenv]); the float env reader treats that as unset -> default. *)
-  Fun.protect ~finally:(fun () -> Unix.putenv name (Option.value old ~default:"")) f
+  Fun.protect ~finally:(fun () -> restore_env name old) f
 ;;
 
 let test_consolidator_rejects_corrupt_source_store () =
@@ -3729,6 +3816,14 @@ let () =
             "librarian runtime override env"
             `Quick
             test_librarian_runtime_override_env
+        ; Alcotest.test_case
+            "memory os bool env accepts enabled disabled"
+            `Quick
+            test_memory_os_bool_env_accepts_enabled_disabled
+        ; Alcotest.test_case
+            "memory os env invalid values fail closed or default"
+            `Quick
+            test_memory_os_env_invalid_values_fail_closed_or_default
         ; Alcotest.test_case
             "librarian timeout override env"
             `Quick

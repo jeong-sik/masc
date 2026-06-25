@@ -59,6 +59,7 @@ type runtime_handler =
   | Tool_masc_surface_audit
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
+  | Tool_analyze_image
 
 type policy =
   { visibility : Tool_catalog.visibility
@@ -150,6 +151,7 @@ let runtime_handler_to_string = function
   | Tool_masc_surface_audit -> "tool_masc_surface_audit"
   | Tool_masc_fusion_dispatch -> "tool_masc_fusion_dispatch"
   | Tool_masc_fusion_status -> "tool_masc_fusion_status"
+  | Tool_analyze_image -> "tool_analyze_image"
 ;;
 
 let policy ?(visibility = Tool_catalog.Default) ?readonly ?readonly_of_input
@@ -810,6 +812,28 @@ let masc_fusion_status_schema =
     ]
 ;;
 
+let analyze_image_schema =
+  object_schema
+    ~required:[ "artifact"; "query" ]
+    [ property
+        "artifact"
+        "string"
+        "Handle of a stored image artifact (the content-addressed id returned \
+         when the image was stored). The raw image is read in a vision sub-call \
+         and never enters this conversation."
+    ; property
+        "query"
+        "string"
+        "What to ask about the image, e.g. \"describe the chart\" or \
+         \"transcribe the text\"."
+    ; property
+        "media_type"
+        "string"
+        "Optional image MIME type override (e.g. image/png, image/jpeg). \
+         Sniffed from the bytes when omitted."
+    ]
+;;
+
 let read_only_in_process_policy ?(inline_safe = false) ?(maintenance_only = false)
       ?(visibility = Tool_catalog.Hidden) ()
   =
@@ -1237,6 +1261,22 @@ let internal_descriptors : t list =
          keeper could not see the tool. *)
       ~policy:(read_only_in_process_policy ~visibility:Tool_catalog.Default ())
       ~handler:Tool_masc_fusion_status
+    (* ── vision delegation (RFC-keeper-vision-delegation-tool §2.6) ─ *)
+  ; in_process_descriptor
+      ~id:"keeper.vision.analyze_image"
+      ~name:"analyze_image"
+      ~description:
+        "Read a stored image artifact and return a text description or answer. \
+         Delegates to a vision model in a sub-call; the image is never added to \
+         this conversation. Returns the extracted text, or a typed error \
+         (artifact_load_failed | no_capable_runtime | empty_extraction | \
+         truncated_extraction | timeout | provider_error)."
+      ~input_schema:analyze_image_schema
+      (* read-only (a sub-call, no side effects) but visibility=Default so the
+         keeper LLM can see and call it — read_only_in_process_policy defaults to
+         Hidden (same gotcha as masc_fusion_status above). *)
+      ~policy:(read_only_in_process_policy ~visibility:Tool_catalog.Default ())
+      ~handler:Tool_analyze_image
     (* ── voice cluster (RFC-0179 PR-3, 6 tools) ───────────────── *)
   ; voice_descriptor
       "keeper_voice_speak"

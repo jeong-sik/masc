@@ -245,6 +245,19 @@ val handle_masc_fusion_status
   -> unit
   -> string
 
+(** RFC-keeper-vision-delegation-tool §2.6 — [analyze_image]. Thin delegate to
+    [Keeper_vision_tool.handle]; needs the Eio [net]/[clock] for the vision
+    sub-call. Returns a typed JSON result/error string (never a raw empty
+    success). *)
+val handle_analyze_image
+  :  ?sw:Eio.Switch.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> args:Yojson.Safe.t
+  -> unit
+  -> string
+
 (** RFC-0182 §3.1 — [handle_masc_keeper] is the descriptor-projection
     cluster handler for the [masc_keeper_*] ctx-free tool surface.
     Dispatches via [Keeper_dispatch_ref] registered by [Keeper_tool_surface] at

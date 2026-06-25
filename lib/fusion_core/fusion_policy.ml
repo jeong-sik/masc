@@ -48,11 +48,8 @@ type preset =
 
 let min_panel = 1
 let max_panel = 8
-let min_answered_min = 1
-let default_min_answered = min_answered_min
-
-let max_min_answered_for_panel_total total =
-  if total <= min_answered_min then min_answered_min else total - 1
+let min_answered_floor = 1
+let default_min_answered = min_answered_floor
 
 (* 그룹 모델당 max_tool_calls 상한 (0..max). 0=무제한, 그 외 양수는 에이전트
    max_turns에 근사. SSOT 상수 (Magic Number 회피, RFC-0280에서 검증을 한 곳으로 모음). *)
@@ -188,13 +185,16 @@ module Validated_preset = struct
         (** 그룹 또는 JOJ 1차 심판 max_tool_calls가 0..max_tool_calls_ceiling 밖 *)
     | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0283) *)
     | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성(judge_id) (RFC-0283) *)
-    | Bad_min_answered of int
-        (** [min_answered]가 허용 범위 밖. 다중 패널 preset은 full-panel quorum 금지. *)
+    | Min_answered_below_min of int
+        (** [min_answered]가 하한 [min_answered_floor] 미만. *)
+    | Min_answered_above_max of int
+        (** [min_answered]가 패널 모델 총합을 초과. *)
 
   (* 검증 순서는 config 로드 시점과 동일(byte-identical config_error): size → 패널 prompt →
      judge model → 패널 정체성 중복 → 패널 max_tool_calls 범위 → (RFC-0283) 1차 심판 prompt
-     → 1차 심판 정체성 중복 → 1차 심판 max_tool_calls 범위. judges=[]면 마지막 셋은 통과
-     (simple/refine/conditional preset은 기존과 동일 결과 = byte-identity). *)
+     → 1차 심판 정체성 중복 → 1차 심판 max_tool_calls 범위 → min_answered.
+     judges=[]면 1차 심판 관련 셋은 통과(simple/refine/conditional preset은 기존과 동일
+     결과 = byte-identity). *)
   let of_preset (p : preset) : (t, invalid) result =
     if not (preset_size_ok p) then Error (Bad_size (List.length (preset_models p)))
     else if not (preset_prompts_present p) then Error Missing_prompt
@@ -226,11 +226,10 @@ module Validated_preset = struct
                 | Some j -> Error (Bad_max_tool_calls j.jmax_tool_calls)
                 | None ->
                   let total = List.length (preset_models p) in
-                  let max_min_answered = max_min_answered_for_panel_total total in
-                  if
-                    p.min_answered < min_answered_min
-                    || p.min_answered > max_min_answered
-                  then Error (Bad_min_answered p.min_answered)
+                  if p.min_answered < min_answered_floor
+                  then Error (Min_answered_below_min p.min_answered)
+                  else if p.min_answered > total
+                  then Error (Min_answered_above_max p.min_answered)
                   else Ok p)))
 
   let preset (t : t) : preset = t

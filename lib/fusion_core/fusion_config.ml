@@ -62,17 +62,16 @@ let parse_judge_spec (tbl : Otoml.t) : Fusion_policy.judge_spec =
         [ "timeout_s" ]
   }
 
-let parse_min_answered name tbl =
+let parse_min_answered _name tbl =
   match Otoml.find_opt tbl Otoml.get_integer [ "min_answered" ] with
   | None -> Ok Fusion_policy.default_min_answered
-  | Some v when v < Fusion_policy.min_answered_min ->
-    Error (Invalid_min_answered (name, v))
   | Some v -> Ok v
 
 (* 패널 그룹을 확정한 뒤 preset 완성 + 검증. judge_* 는 preset table에서 직접 읽는다
    (단일 심판 = simple/refine/conditional 심판이자 JOJ meta). [[...judges]] sub-table이
    있으면 JOJ 1차 심판 목록으로 파싱(없으면 []). 검증 순서: 크기(총합) → 패널 프롬프트 →
-   심판모델 → 패널 정체성 중복 → 패널 max_tool_calls → 1차 심판 prompt/정체성/max_tool_calls. *)
+   심판모델 → 패널 정체성 중복 → 패널 max_tool_calls → 1차 심판 prompt/정체성/max_tool_calls
+   → min_answered. *)
 let finish_preset name tbl (panels : Fusion_policy.panel_group list)
   : (Fusion_policy.Validated_preset.t, config_error) result =
   let judge = Otoml.find_or ~default:"" tbl Otoml.get_string [ "judge" ] in
@@ -91,8 +90,7 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
     | None -> []
   in
   (* 런타임 quorum. 미설정 시 [default_min_answered] = 기존 동작(>= 1 응답이면 심판 실행).
-     하한(<1)은 config parse boundary에서 즉시 거부하고, 상한(패널 총합 초과)은
-     Validated_preset.of_preset이 preset 전체를 보고 검증한다. *)
+     허용 범위는 1 이상 패널 모델 총합 이하; 검증 SSOT는 Validated_preset.of_preset. *)
   Result.bind (parse_min_answered name tbl) (fun min_answered ->
     let p : Fusion_policy.preset =
       { name; panels; judge; judge_system_prompt; judge_timeout_s; judges; min_answered }
@@ -117,7 +115,8 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
            Judge_panel_prompt_missing name
          | Fusion_policy.Validated_preset.Duplicate_judge id ->
            Duplicate_judge (name, id)
-         | Fusion_policy.Validated_preset.Bad_min_answered v ->
+         | Fusion_policy.Validated_preset.Min_answered_below_min v
+         | Fusion_policy.Validated_preset.Min_answered_above_max v ->
            Invalid_min_answered (name, v)))
 
 (* preset 한 명 파싱. 두 문법 분기:

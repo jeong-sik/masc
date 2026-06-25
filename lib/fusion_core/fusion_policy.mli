@@ -54,8 +54,8 @@ type preset =
       (** 심판을 돌리기 위해 응답해야 하는 패널 최소 수 (런타임 quorum). 기본 1.
           [answered_of] 수가 이 값 미만이면 orchestrator는 심판을 건너뛰고
           [judge = Error]로 완료한다 (빈 패널 종합 날조 방지).
-          다중 패널 preset은 [모델 총합 - 1]까지만 허용해 단일 keeper 실패가 전체
-          fusion을 abort하지 않게 한다. 단일 패널 preset은 호환성상 1을 허용한다. *)
+          허용 범위는 [1]부터 패널 모델 총합까지; full-panel quorum([총합])도
+          명시적으로 설정할 수 있다. *)
   }
 [@@deriving show, eq]
 
@@ -65,12 +65,9 @@ val min_panel : int
 val max_panel : int
 
 (** [min_answered] 하한과 기본값. 기본 1 = "응답 패널이 1개도 없을 때만 judge skip". *)
-val min_answered_min : int
+val min_answered_floor : int
 
 val default_min_answered : int
-
-(** [min_answered] 상한. 패널 총합이 2개 이상이면 [total - 1], 단일 패널이면 1. *)
-val max_min_answered_for_panel_total : int -> int
 
 (** 그룹 모델당 [max_tool_calls] 상한 (0..이 값). 0=무제한. named SSOT. *)
 val max_tool_calls_ceiling : int
@@ -147,12 +144,14 @@ module Validated_preset : sig
         (** 그룹 또는 JOJ 1차 심판 max_tool_calls가 0..[max_tool_calls_ceiling] 밖 *)
     | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0283) *)
     | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성 (RFC-0283) *)
-    | Bad_min_answered of int
-        (** [min_answered]가 허용 범위 밖. 다중 패널 preset은 full-panel quorum을
-            기본 경로에서 금지하기 위해 [모델 총합 - 1]까지만 허용한다. *)
+    | Min_answered_below_min of int
+        (** [min_answered]가 하한 [min_answered_floor] 미만. *)
+    | Min_answered_above_max of int
+        (** [min_answered]가 패널 모델 총합을 초과. *)
 
-  (** 검증 순서: size → prompt → judge → 정체성 중복 → max_tool_calls → min_answered. 통과 시
-      [Ok vp], 첫 위반에서 [Error invalid]. config 로드의 검증 순서와 동일. *)
+  (** 검증 순서: size → prompt → judge → 정체성 중복 → max_tool_calls → 1차 심판
+      prompt/정체성/max_tool_calls → min_answered. 통과 시 [Ok vp], 첫 위반에서
+      [Error invalid]. config 로드의 검증 순서와 동일. *)
   val of_preset : preset -> (t, invalid) result
 
   (** 검증된 preset을 raw [preset]으로 (read-only coercion). *)

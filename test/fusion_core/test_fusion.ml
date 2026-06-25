@@ -419,7 +419,7 @@ judge = "a"
          es)
   | Ok _ -> Alcotest.fail "expected Error Invalid_panel_size"
 
-let test_config_invalid_min_answered_floor () =
+let test_config_invalid_min_answered () =
   let check_invalid value =
     let s =
       Printf.sprintf
@@ -438,12 +438,14 @@ min_answered = %d
     in
     match Fusion_config.of_toml (parse s) with
     | Error es ->
-      Alcotest.(check bool) "Invalid_min_answered floor present" true
+      Alcotest.(check bool) "Invalid_min_answered present" true
         (List.mem (Fusion_config.Invalid_min_answered ("p", value)) es)
     | Ok _ -> Alcotest.fail "expected Error Invalid_min_answered"
   in
   check_invalid 0;
-  check_invalid (-1)
+  check_invalid (-1);
+  (* 2 panels -> max allowed is 2, so 3 is out of range *)
+  check_invalid 3
 
 let test_config_missing_default () =
   let s =
@@ -1113,29 +1115,30 @@ let test_judge_skip_reason () =
       (render_skip_reason reason)
   | None -> Alcotest.fail "expected skip when 1 < min_answered 2"
 
-(* min_answered must be in the policy range. base_group has 3 models, so 0, 3
-   (full-panel quorum), and 99 are all rejected. *)
+(* min_answered must be in the policy range 1..total panels (inclusive).
+   base_group has 3 models, so 0 and 4 are rejected; full-panel quorum (3) is allowed. *)
 let test_validated_bad_min_answered () =
   let check_bad mn label =
     match Fusion_policy.Validated_preset.of_preset (mk_preset ~min_answered:mn label) with
-    | Error (Fusion_policy.Validated_preset.Bad_min_answered got) ->
+    | Error (Fusion_policy.Validated_preset.Min_answered_below_min got)
+    | Error (Fusion_policy.Validated_preset.Min_answered_above_max got) ->
       Alcotest.(check int) (label ^ " reports value") mn got
-    | _ -> Alcotest.failf "%s: expected Bad_min_answered" label
+    | _ -> Alcotest.failf "%s: expected min_answered error" label
   in
   check_bad 0 "min_answered=0";
-  check_bad 3 "min_answered=all-panels";
-  check_bad 99 "min_answered>panels";
-  (* in-range stays Ok (3 models, require 2 = total - 1) *)
+  check_bad 4 "min_answered>panels";
+  (* full-panel quorum is now allowed (3 answered required for 3 panels). *)
+  (match Fusion_policy.Validated_preset.of_preset (mk_preset ~min_answered:3 "ok3") with
+   | Ok _ -> ()
+   | Error _ -> Alcotest.fail "min_answered=3 with 3 panels should be Ok");
+  (* in-range stays Ok (3 models, require 2) *)
   match Fusion_policy.Validated_preset.of_preset (mk_preset ~min_answered:2 "ok2") with
   | Ok _ -> ()
   | Error _ -> Alcotest.fail "min_answered=2 with 3 panels should be Ok"
 
 let test_min_answered_constants () =
   Alcotest.(check int) "default_min_answered" 1 Fusion_policy.default_min_answered;
-  Alcotest.(check int) "single panel max" 1
-    (Fusion_policy.max_min_answered_for_panel_total 1);
-  Alcotest.(check int) "trio max" 2
-    (Fusion_policy.max_min_answered_for_panel_total 3)
+  Alcotest.(check int) "min_answered_floor" 1 Fusion_policy.min_answered_floor
 
 let () =
   Alcotest.run "fusion_core"
@@ -1166,8 +1169,8 @@ let () =
             test_config_panelist_id_collision_fail_closed
         ; Alcotest.test_case "empty_presets" `Quick test_config_empty_presets
         ; Alcotest.test_case "invalid_size" `Quick test_config_invalid_size
-        ; Alcotest.test_case "invalid_min_answered_floor" `Quick
-            test_config_invalid_min_answered_floor
+        ; Alcotest.test_case "invalid_min_answered" `Quick
+            test_config_invalid_min_answered
         ; Alcotest.test_case "missing_default" `Quick test_config_missing_default
         ; Alcotest.test_case "missing_prompt" `Quick test_config_missing_prompt
         ; Alcotest.test_case "missing_judge_model" `Quick test_config_missing_judge_model

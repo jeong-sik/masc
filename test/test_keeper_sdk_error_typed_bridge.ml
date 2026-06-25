@@ -142,6 +142,28 @@ let test_server_parse_rejection_split () =
     ~model_:true
     ~server:true;
   check_parse_split
+    "provider_invalid_request_yyjson_parse_error"
+    (SdkE.Provider
+       (Llm_provider.Error.InvalidRequest
+          { provider = "ollama"
+          ; reason = "yyjson parse error: unexpected token at byte 9"
+          }))
+    ~provider:true
+    ~model_:false
+    ~server:true;
+  check_parse_split
+    "api_invalid_request_json_parse_error"
+    (SdkE.Api (Retry.InvalidRequest { message = "JSON parse error at byte 9" }))
+    ~provider:false
+    ~model_:true
+    ~server:true;
+  check_parse_split
+    "api_invalid_request_xml_parse_error"
+    (SdkE.Api (Retry.InvalidRequest { message = "XML parse error at line 3" }))
+    ~provider:false
+    ~model_:false
+    ~server:false;
+  check_parse_split
     "api_invalid_request_generic"
     (SdkE.Api (Retry.InvalidRequest { message = "missing required field: model" }))
     ~provider:false

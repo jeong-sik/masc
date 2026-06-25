@@ -103,7 +103,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0079 | Log row typed encoder + silent-drop removal | Implemented | 2eed0aa224 2026-06-21 | - |
 | 0080 | Tool registry SSOT — collapse multi-source membership into typed Keeper resol... | Implemented | 2eed0aa224 2026-06-21 | - |
 | 0081 | OAS Telemetry Envelope Context & Keeper/Goal Pivot Timeline | Implemented | 2eed0aa224 2026-06-21 | - |
-| 0082 | Keeper `last_blocker` auto-clear + runtime recovery escalation | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0082 | Keeper `last_blocker` auto-clear + runtime recovery escalation | Implemented | 9bd13686d3 2026-06-25 | - |
 | 0083 | Dashboard system-actor convention typed unification | Implemented | 2eed0aa224 2026-06-21 | - |
 | 0084 | Keeper→Tool Dispatch Unification + 100% Trace/Telemetry | Implemented | 2eed0aa224 2026-06-21 | - |
 | 0086 | Keeper namespace bulk promotion to sub-library | Implemented | 2eed0aa224 2026-06-21 | - |
@@ -222,9 +222,9 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0217 | Telemetry Backend Otel 단일화 (Retired Backend Purge) | Draft | 2eed0aa224 2026-06-21 | - |
 | 0218 | Keeper tool-surface coherence + web-tooling roadmap — phases and per-phase gates | Draft | 2eed0aa224 2026-06-21 | - |
 | 0219 | Remove Sandbox Repo Patrol Gates | Draft | 2eed0aa224 2026-06-21 | - |
-| 0220 | Decouple keeper liveness from verification state + guaranteed satisfier for e... | Draft | 2eed0aa224 2026-06-21 | - |
+| 0220 | Decouple keeper liveness from verification state + guaranteed satisfier for e... | Draft | 6c9029bcbf 2026-06-25 | - |
 | 0221 | Atomic verification submission — task_status as the sole outcome authority | Implemented (steps 1-3 merged #20613/#20617; steps 4-5 measured then dropped, §3.3/§3.4) | 2eed0aa224 2026-06-21 | - |
-| 0222 | Typed acceptance criterion + harness-driven completion for checkable tasks | Draft | 2eed0aa224 2026-06-21 | - |
+| 0222 | Typed acceptance criterion + harness-driven completion for checkable tasks | Draft | 6c9029bcbf 2026-06-25 | - |
 | 0223 | Typed connector surfaces: presence in world prompt, pull-based lane context, ... | Draft | 2eed0aa224 2026-06-21 | - |
 | 0224 | Structured completion report for free-text contract items | Draft | 2eed0aa224 2026-06-21 | - |
 | 0225 | Per-keeper turn single-flight admission | Draft | 2eed0aa224 2026-06-21 | - |
@@ -235,7 +235,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0230 | Keeper mention/scope reactivity: cursor-free salience to complement pull-base... | Draft | 2eed0aa224 2026-06-21 | - |
 | 0232 | Typed lane event model: parse at the write boundary, never re-derive by strin... | Draft | 2eed0aa224 2026-06-21 | - |
 | 0233 | Typed turn observability: TurnRecord prompt-block provenance + canonical tool... | Draft | addd7b3668 2026-06-22 | - |
-| 0234 | Scheduled internal automation with separate execution approval | Draft | 4e52542f29 2026-06-21 | - |
+| 0234 | Scheduled internal automation with separate execution approval | Draft | b179664d43 2026-06-25 | - |
 | 0235 | Voice output transport: browser-addressed audio delivery with device-routed p... | Draft | 2eed0aa224 2026-06-21 | - |
 | 0236 | Voice input transport: browser-captured speech-to-text for the dashboard comp... | Draft | 2eed0aa224 2026-06-21 | - |
 | 0237 | Eliminate the write_meta ~force escape hatch (route snapshot writes through C... | Draft | 2eed0aa224 2026-06-21 | - |
@@ -265,9 +265,9 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0262 | Completion authority typing — closing the force-bypass and framing completion... | Draft | 2eed0aa224 2026-06-21 | - |
 | 0263 | Owner-priority cooperative preemption of in-flight autonomous turns | Draft | 2eed0aa224 2026-06-21 | - |
 | 0264 | Memory OS recall outcome-anchored eval harness | Draft | 2eed0aa224 2026-06-21 | - |
-| 0265 | Capability-driven proactive runtime reroute (modality-gated) | Draft | 2eed0aa224 2026-06-21 | - |
+| 0265 | Capability-driven proactive runtime reroute (modality-gated) | Draft | 55bab0404b 2026-06-25 | - |
 | 0266 | Fusion async-completion wake + in-progress 가시성 | Draft | 2eed0aa224 2026-06-21 | - |
-| 0267 | Make task↔goal links visible and explicitly assignable | Draft | 2eed0aa224 2026-06-21 | - |
+| 0267 | Make task↔goal links visible and explicitly assignable | Draft | 6c9029bcbf 2026-06-25 | - |
 | 0268 | Prompt ↔ Closed-sum Variant Sync Gate | Draft | 2eed0aa224 2026-06-21 | - |
 | 0269 | Process Critic Loop for Keeper Work Traces | Draft | 2eed0aa224 2026-06-21 | - |
 | 0270 | CI Gate merge guard: block merges on a non-success CI Gate and trip on red main | Draft | 2eed0aa224 2026-06-21 | - |
@@ -284,7 +284,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0281 | WebSocket transport SSOT — separate upgrade-attachment from session-protocol,... | Draft | 7eaba002d2 2026-06-22 | - |
 | 0282 | De-structure keeper self_model (will/needs/desires) into general persona desc... | Draft | 0c540dd87d 2026-06-23 | - |
 | 0283 | Fusion: judge-of-judges 위상 (N개 1차 심판 + meta 심판) | Draft | 2579358d90 2026-06-23 | - |
-| 0284 | Keeper Guidance Visibility-Leg Drift Guard | Draft | fcf92d3386 2026-06-23 | - |
+| 0284 | Keeper Guidance Visibility-Leg Drift Guard | Draft | 6c9029bcbf 2026-06-25 | - |
 | 0285 | Memory OS — Self-Observation Claim Volatility (closing RFC-0259's internal-st... | Draft | d643c403bb 2026-06-23 | - |
 | 0286 | exec/keeper 스택: redirect & turn-termination 경계 소유권 | Draft | f765863658 2026-06-23 | - |
 | 0287 | ws-direct — a single masc-owned WebSocket stack for server and client | Draft | 78f1c2fcf4 2026-06-23 | - |
@@ -294,8 +294,18 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0291 | Closed SSE event-type sum + typed broadcast — RFC-0004 Phase A0 Wave 2 increment | Draft | db3cea7b4d 2026-06-24 | - |
 | 0292 | Complete lib/auth de-duplication — remove drifted Masc.Auth* test copies | Draft | 92f93e11de 2026-06-24 | - |
 | 0293 | Keeper execution-endpoint backend (host / ephemeral-docker / persistent-docke... | Draft | 0ba556bf42 2026-06-24 | - |
-| 0294 | Purge the workspace-goal horizon (short/mid/long) — dead cadence cohort + a s... | Draft | 75ac8623e6 2026-06-24 | - |
-| elim | Eliminate Substring Destructive Classifier in Favor of Typed Shell IR | Draft | (untracked) | - |
+| 0294 | Purge the workspace-goal horizon (short/mid/long) — dead cadence cohort + a s... | Draft | d7d30816c2 2026-06-24 | - |
+| elim | Eliminate Substring Destructive Classifier in Favor of Typed Shell IR | Draft | 664f8aafe3 2026-06-25 | - |
+| keep | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | 55bab0404b 2026-06-25 | - |
+| runt | Per-runtime note field & dashboard surfacing | Draft | 8e1998934b 2026-06-25 | - |
+
+
+
+
+
+
+
+
 
 
 

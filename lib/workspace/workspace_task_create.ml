@@ -364,10 +364,11 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
          let count = List.length added_tasks in
          let task_ids = List.map (fun (task : Masc_domain.task) -> task.id) added_tasks in
          let summary = Printf.sprintf "Added %d tasks: %s" count summary in
-         Ok { task_ids; summary; count }
+         Ok { task_ids; summary; count })
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
-       | e -> Error (Batch_unexpected_error (Printexc.to_string e))))
+       | e -> Error (Batch_unexpected_error (Printexc.to_string e)))
+  )
 ;;
 
 let batch_add_tasks_internal ?created_by config tasks =

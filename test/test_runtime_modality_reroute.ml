@@ -139,18 +139,18 @@ let test_liveness_skips_cooled_down_candidate () =
   let candidate_is_live ~runtime_id =
     not (String.equal runtime_id "vision_down")
   in
+  let decision =
+    decide
+      ~candidate_is_live
+      ~assigned:(caps ())
+      ~required:[ "image" ]
+      ~candidates:
+        [ ("vision_down", caps ~image:true ()); ("vision_up", caps ~image:true ()) ]
+      ()
+  in
   check string "cooled capable candidate skipped"
     "reroute:vision_up:assigned runtime lacks image input"
-    (decision_to_string
-       (decide
-          ~candidate_is_live
-          ~assigned:(caps ())
-          ~required:[ "image" ]
-          ~candidates:
-            [ ("vision_down", caps ~image:true ())
-            ; ("vision_up", caps ~image:true ())
-            ]
-          ()))
+    (decision_to_string decision)
 
 let test_liveness_no_live_capable_runtime_floor () =
   let candidate_is_live ~runtime_id =
@@ -158,19 +158,21 @@ let test_liveness_no_live_capable_runtime_floor () =
       (String.equal runtime_id "vision_down"
        || String.equal runtime_id "vision_also_down")
   in
+  let decision =
+    decide
+      ~candidate_is_live
+      ~assigned:(caps ())
+      ~required:[ "image" ]
+      ~candidates:
+        [ ("text_up", caps ())
+        ; ("vision_down", caps ~image:true ())
+        ; ("vision_also_down", caps ~image:true ())
+        ]
+      ()
+  in
   check string "no live capable runtime"
     "no_capable:image"
-    (decision_to_string
-       (decide
-          ~candidate_is_live
-          ~assigned:(caps ())
-          ~required:[ "image" ]
-          ~candidates:
-            [ ("text_up", caps ())
-            ; ("vision_down", caps ~image:true ())
-            ; ("vision_also_down", caps ~image:true ())
-            ]
-          ()))
+    (decision_to_string decision)
 
 (* No configured runtime admits the modality → floor: the assigned runtime stands
    and the loud capability gate rejects downstream. *)

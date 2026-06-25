@@ -4,7 +4,8 @@
     keeper board writes (0s gap between duplicates). *)
 
 open Masc
-module Board_core_status_rollup = Masc_board_handlers.Board_core_status_rollup
+
+let status_rollup_window_sec = 6. *. 60. *. 60.
 
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Random.self_init ()
@@ -298,13 +299,12 @@ let test_status_rollup_window_uses_created_at () =
     automation_status_post
       ~author_id
       ~body:"Task-370 claimed and worktree ready. Investigating codebase."
-      ~created_at:
-        (now -. Board_core_status_rollup.status_rollup_window_sec -. 1.)
+      ~created_at:(now -. status_rollup_window_sec -. 1.)
       ~updated_at:now
   in
   Hashtbl.add store.posts (Board.Post_id.to_string old_status.id) old_status;
   match
-    Board_core_status_rollup.find_status_rollup_target_unlocked
+    Board.find_status_rollup_target_unlocked
       store
       ~author_id
       ~hearth:None

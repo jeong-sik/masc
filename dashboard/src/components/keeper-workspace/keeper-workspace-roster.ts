@@ -113,6 +113,11 @@ function needsAttention(keeper: Keeper): boolean {
   return keeper.needs_attention === true || attentionCount(keeper) > 0
 }
 
+function keeperFleetTone(keeper: Keeper): DotTone {
+  if (needsAttention(keeper) || keeper.current_gate?.kind === 'approval_required') return 'bad'
+  return keeperStatusTone(keeper)
+}
+
 function keeperContextRatio(keeper: Keeper): number {
   if (typeof keeper.context_ratio === 'number' && Number.isFinite(keeper.context_ratio)) {
     return Math.max(0, Math.min(1, keeper.context_ratio))
@@ -262,7 +267,7 @@ function RosterRow({
   style?: string
 }) {
   const bucket = keeperBucket(keeper)
-  const tone = keeperStatusTone(keeper)
+  const tone = keeperFleetTone(keeper)
   const att = attentionCount(keeper)
   const scope = keeperScope(keeper)
   const basepath = keeperBasepath(keeper)

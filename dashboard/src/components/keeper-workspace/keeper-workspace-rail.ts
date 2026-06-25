@@ -132,6 +132,15 @@ function formatCtxK(n: number | null | undefined): string | null {
   return `${Math.round(n / 1000)}k ctx`
 }
 
+function keeperFleetTone(keeper: Keeper) {
+  if (
+    keeper.needs_attention === true
+    || (keeper.blocked_task_count ?? 0) > 0
+    || keeper.current_gate?.kind === 'approval_required'
+  ) return 'bad'
+  return keeperStatusTone(keeper)
+}
+
 const FLEET_ACTION_LABELS: Record<KeeperActionKey, string> = {
   pause: '일시정지',
   resume: '재개',
@@ -179,7 +188,7 @@ function FleetSelectedSection({ keeper }: { keeper: Keeper }): VNode {
   }
 
   return html`
-    <div class="kw-fleet-aside" data-tone=${keeperStatusTone(keeper)}>
+    <div class="kw-fleet-aside" data-tone=${keeperFleetTone(keeper)}>
       <div class="kw-fleet-aside-head">
         <${WorkspaceSigil} id=${keeper.name} size=${40} beat=${keeperBucket(keeper) === 'running'} />
         <div class="kw-fleet-aside-title">

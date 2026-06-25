@@ -238,7 +238,7 @@ let rec run_candidates
        let config = provider_for_vision rt.Runtime.provider_config in
        (match
           with_timeout ~clock ~timeout_sec (fun () ->
-            complete ~sw ~net ~clock ~config ~messages ())
+            complete ~sw ~net ?clock:(Some clock) ~config ~messages ())
         with
         | None ->
           run_candidates ~complete ~timeout_sec ~sw ~clock ~net ~messages

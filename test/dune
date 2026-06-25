@@ -1652,6 +1652,8 @@
 
 (include stanzas/test_continuity_forward_filter.inc)
 
+(include stanzas/test_destructive_floor_differential.inc)
+
 (include stanzas/test_otel_runtime_observables.inc)
 
 (include stanzas/test_otel_port_ssot.inc)

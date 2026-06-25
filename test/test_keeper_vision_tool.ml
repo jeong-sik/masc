@@ -129,7 +129,7 @@ let test_provider_for_vision_preserves_configured_max_tokens () =
   let fallback = Vt.provider_for_vision { base with max_tokens = None } in
   assert (fallback.max_tokens = Some 1024)
 
-let test_missing_eio_context_is_workflow_rejection () =
+let test_missing_eio_context_is_runtime_failure () =
   let raw =
     Vt.handle
       ~meta:(make_meta "vision-missing-eio")
@@ -142,9 +142,9 @@ let test_missing_eio_context_is_workflow_rejection () =
   in
   let json = json_of_output raw in
   assert (String.equal (assoc_string "error" json) "eio_context_unavailable");
-  assert (String.equal (assoc_string "failure_class" json) "workflow_rejection")
+  assert (String.equal (assoc_string "failure_class" json) "runtime_failure")
 
-let test_invalid_media_type_is_workflow_rejection () =
+let test_invalid_media_type_is_policy_rejection () =
   with_temp_base (fun _ ->
     let meta = make_meta "vision-media-type" in
     let bytes = "\x89PNG\r\n\x1a\nraw" in
@@ -175,13 +175,13 @@ let test_invalid_media_type_is_workflow_rejection () =
     in
     let json = json_of_output raw in
     assert (String.equal (assoc_string "error" json) "invalid_media_type");
-    assert (String.equal (assoc_string "failure_class" json) "workflow_rejection"))
+    assert (String.equal (assoc_string "failure_class" json) "policy_rejection"))
 
 let () =
   test_truncated_of_stop_reason ();
   test_message_of_request ();
   test_first_vision_runtime_id_total ();
   test_provider_for_vision_preserves_configured_max_tokens ();
-  test_missing_eio_context_is_workflow_rejection ();
-  test_invalid_media_type_is_workflow_rejection ();
+  test_missing_eio_context_is_runtime_failure ();
+  test_invalid_media_type_is_policy_rejection ();
   print_endline "test_keeper_vision_tool: all assertions passed"

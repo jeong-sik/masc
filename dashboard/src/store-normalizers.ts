@@ -1032,24 +1032,47 @@ export function messageSortKey(message: Message): number {
   return Number.isNaN(parsed) ? 0 : parsed
 }
 
+function messageIdentityKey(message: Message): string {
+  if (message.id) return JSON.stringify(['id', message.id])
+  if (typeof message.seq === 'number' && Number.isFinite(message.seq)) {
+    return JSON.stringify(['seq', message.seq])
+  }
+  return JSON.stringify([
+    'fallback',
+    message.timestamp ?? '',
+    message.from ?? '',
+    message.content,
+  ])
+}
+
+function messageEqual(left: Message, right: Message): boolean {
+  return left.id === right.id
+    && left.seq === right.seq
+    && left.from === right.from
+    && left.content === right.content
+    && left.timestamp === right.timestamp
+    && left.type === right.type
+    && left.workspace === right.workspace
+}
+
 export function mergeMessages(current: Message[], incoming: Message[]): Message[] {
   if (incoming.length === 0) return current
   const byKey = new Map<string, Message>()
   for (const message of current) {
-    const key = typeof message.seq === 'number'
-      ? `seq:${message.seq}`
-      : `ts:${message.timestamp ?? ''}|from:${message.from ?? ''}|content:${message.content}`
-    byKey.set(key, message)
+    byKey.set(messageIdentityKey(message), message)
   }
   for (const message of incoming) {
-    const key = typeof message.seq === 'number'
-      ? `seq:${message.seq}`
-      : `ts:${message.timestamp ?? ''}|from:${message.from ?? ''}|content:${message.content}`
-    byKey.set(key, message)
+    const key = messageIdentityKey(message)
+    const previous = byKey.get(key)
+    byKey.set(key, previous && messageEqual(previous, message) ? previous : message)
   }
-  return [...byKey.values()]
+  const merged = [...byKey.values()]
     .sort((a, b) => messageSortKey(a) - messageSortKey(b))
     .slice(-500)
+  if (merged.length === current.length && merged.every((message, index) => message === current[index])) {
+    return current
+  }
+  return merged
 }
 
 export function normalizeBuildIdentity(raw: unknown): ServerStatus['build'] | undefined {

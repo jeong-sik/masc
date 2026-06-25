@@ -6,10 +6,9 @@
    Loaded AFTER colors_and_type.css.
    ══════════════════════════════════════════════════════════════ */
 
-/* Fonts the v2 skin needs (Space Grotesk display + Noto Sans KR). The
-   canonical source assumes these are already loaded; the dashboard ships
-   them via this @import. Self-host later for offline fidelity. */
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Noto+Sans+KR:wght@300;400;500;600;700;900&display=swap');
+/* Fonts the v2 skin needs are loaded once from index.html. Keep font loading
+   out of CSS imports so inactive skin/theme files do not create duplicate
+   network requests. */
 
 /* NOTE: only the data-skin="v2" token block (palette + voltage + type +
    spacing) is brought in from the canonical source

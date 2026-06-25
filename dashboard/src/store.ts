@@ -1019,11 +1019,11 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
   const normalizedAgents = (Array.isArray(data.agents) ? data.agents : [])
     .map(normalizeAgent)
     .filter((row): row is Agent => row !== null)
-  setArrayByKeyIfChanged(agents, normalizedAgents, a => a.name)
+  setArrayByKeyIfChanged(agents, normalizedAgents, a => a.name, stableValueEqual)
   const normalizedTasks = (Array.isArray(data.tasks) ? data.tasks : [])
     .map(normalizeTask)
     .filter((row): row is Task => row !== null)
-  setArrayByKeyIfChanged(tasks, normalizedTasks, t => `${t.id}:${t.status ?? ''}`)
+  setArrayByKeyIfChanged(tasks, normalizedTasks, t => t.id, stableValueEqual)
   const executionMessages = (Array.isArray(data.messages) ? data.messages : [])
     .map(normalizeMessage)
     .filter((row): row is Message => row !== null)
@@ -1032,11 +1032,11 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
   const normalizedWorkerBriefs = (Array.isArray(data.worker_support_briefs) ? data.worker_support_briefs : Array.isArray(data.worker_briefs) ? data.worker_briefs : [])
     .map(normalizeExecutionWorkerSupportBrief)
     .filter((row): row is DashboardExecutionWorkerSupportBrief => row !== null)
-  setArrayByKeyIfChanged(executionWorkerSupportBriefs, normalizedWorkerBriefs, w => w.name)
+  setArrayByKeyIfChanged(executionWorkerSupportBriefs, normalizedWorkerBriefs, w => w.name, stableValueEqual)
   const normalizedContinuityBriefs = (Array.isArray(data.continuity_briefs) ? data.continuity_briefs : [])
     .map(normalizeExecutionContinuityBrief)
     .filter((row): row is DashboardExecutionContinuityBrief => row !== null)
-  setArrayByKeyIfChanged(executionContinuityBriefs, normalizedContinuityBriefs, c => c.name)
+  setArrayByKeyIfChanged(executionContinuityBriefs, normalizedContinuityBriefs, c => c.name, stableValueEqual)
   executionLoaded.value = true
 }
 

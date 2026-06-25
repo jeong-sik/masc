@@ -15,9 +15,8 @@ describe('keeper-v2 brand assets', () => {
     expect(css).toContain("url('/dashboard/assets/fonts/Cinzel-Regular.ttf')")
   })
 
-  it('declares the Noto Sans KR font family', () => {
-    expect(css).toContain("font-family: 'Noto Sans KR'")
-    expect(css).toContain("url('/dashboard/assets/fonts/NotoSansKR-Regular.ttf')")
+  it('does not declare the large local Noto Sans KR TTF on the hot path', () => {
+    expect(css).not.toContain('NotoSansKR-Regular.ttf')
   })
 
   it('lists all expected keeper portraits in the public directory', () => {

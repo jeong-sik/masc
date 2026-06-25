@@ -143,6 +143,26 @@ let execution_cache : cached_surface =
         ])
 ;;
 
+let execution_trust_cache_key = "execution-trust:default"
+
+let execution_trust_cache : cached_surface =
+  Server_dashboard_http_cache.create_cached_surface
+    (`Assoc
+        [ "source", `String Dashboard_http_keeper_types.execution_trust_source
+        ; "producer", `String Dashboard_http_keeper_types.execution_trust_producer
+        ; "dashboard_surface", `String Dashboard_http_keeper_types.execution_trust_dashboard_surface
+        ; "freshness_slo_s", `Float Dashboard_http_keeper_types.execution_trust_freshness_slo_s
+        ; "entry_count", `Int 0
+        ; "exists", `Bool false
+        ; "generated_at", `String (Masc_domain.now_iso ())
+        ; "keepers", `List []
+        ; "total", `Int 0
+        ; "coverage_gaps", `List []
+        ; "coverage_gap_count", `Int 0
+        ; "health", `String "initializing"
+        ])
+;;
+
 (** Invalidate the execution surface cache so the next
     [/api/v1/dashboard/execution] request recomputes fresh data.
     Called via [Workspace_hooks.on_task_mutation_fn] after task add,
@@ -749,6 +769,51 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
               ~timeout_s))
 ;;
 
+let compute_execution_trust_json ~state ~sw ~clock =
+  (* NDT-OK: wall-clock is projection timing telemetry only; execution-trust
+     content and routing do not branch on this value. *)
+  let started_at = Unix.gettimeofday () in
+  run_dashboard_compute
+    ~mode:Offloaded_readonly
+    ?net:state.Mcp_server.net
+    ?mono_clock:state.Mcp_server.mono_clock
+    ~sw
+    ~clock
+    ~config:(Mcp_server.workspace_config state)
+    (fun ~config ~sw:_ ->
+       Dashboard_http_keeper.execution_trust_dashboard_json config
+       |> with_projection_diagnostics
+            ~surface:"execution_trust"
+            ~started_at
+            ~extra:[])
+;;
+
+let start_execution_trust_refresh_loop ~state ~sw ~clock =
+  let compute () =
+    Server_dashboard_http_cache.mark_cached_surface_attempt execution_trust_cache;
+    try compute_execution_trust_json ~state ~sw ~clock with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Server_dashboard_http_cache.mark_cached_surface_error execution_trust_cache exn;
+      raise exn
+  in
+  Proactive_refresh.start
+    ~sw
+    ~clock
+    ~config:
+      { (Proactive_refresh.default_config
+           ~label:"execution_trust"
+           ~interval_s:Dashboard_http_keeper_types.execution_trust_refresh_interval_s)
+        with
+        timeout_s = Env_config_runtime.Dashboard.execution_trust_timeout_sec
+      ; on_error =
+          Some (Server_dashboard_http_cache.mark_cached_surface_error execution_trust_cache)
+      ; warm_delay_s = 0.0
+      }
+    ~compute
+    ~on_result:(Server_dashboard_http_cache.mark_cached_surface_success execution_trust_cache)
+;;
+
 let dashboard_execution_http_json ~state ~sw ~clock request =
   let config = (Mcp_server.workspace_config state) in
   let net = state.Mcp_server.net in
@@ -877,34 +942,19 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
 let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
   let attach_surface_envelope json =
     Server_dashboard_surface.attach
-      ~surface:"/api/v1/dashboard/execution-trust"
-      ~source:"execution_receipt"
-      ~cache_key:"execution-trust:default"
+      ~surface:Dashboard_http_keeper_types.execution_trust_dashboard_surface
+      ~source:Dashboard_http_keeper_types.execution_trust_source
+      ~cache_key:execution_trust_cache_key
       ~ttl_s:shell_surface_cache_ttl_s
       json
   in
-  let compute () =
-    let started_at = Unix.gettimeofday () in
-    run_dashboard_compute
-      ~mode:Offloaded_readonly
-      ?net:state.Mcp_server.net
-      ?mono_clock:state.Mcp_server.mono_clock
-      ~sw
-      ~clock
-      ~config:(Mcp_server.workspace_config state)
-      (fun ~config ~sw:_ ->
-         Dashboard_http_keeper.execution_trust_dashboard_json config
-         |> with_projection_diagnostics ~surface:"execution_trust" ~started_at ~extra:[])
-  in
-  (match state.Mcp_server.clock with
-  | Some clock ->
-    Dashboard_cache.get_or_compute_with_timeout
-      "execution-trust:default"
-      ~ttl:shell_surface_cache_ttl_s
-      ~clock
-      ~timeout_sec:Env_config_runtime.Dashboard.execution_trust_timeout_sec
-      compute
-  | None -> Dashboard_cache.get_or_compute "execution-trust:default" ~ttl:shell_surface_cache_ttl_s compute)
+  Server_dashboard_http_cache.cached_surface_or_first_success_json
+    execution_trust_cache
+    ~cache_key:execution_trust_cache_key
+    ~ttl:shell_surface_cache_ttl_s
+    ~clock
+    ~timeout_sec:Env_config_runtime.Dashboard.execution_trust_timeout_sec
+    (fun () -> compute_execution_trust_json ~state ~sw ~clock)
   |> attach_surface_envelope
 ;;
 

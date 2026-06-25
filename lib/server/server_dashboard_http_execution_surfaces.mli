@@ -16,7 +16,9 @@
     - {b cache cells} ({!execution_cache},
       {!broadcast_namespace_truth_ref}) reached by
       [server_dashboard_http_namespace_truth] for
-      readiness gating + truth-broadcast wiring.
+      readiness gating + truth-broadcast wiring, plus
+      {!execution_trust_cache} for the execution-receipt
+      trust read model.
     - {b shell prewarm} ({!warm_shell_cache}) — called
       at server bootstrap.
     - {b dashboard actor resolution}
@@ -26,7 +28,8 @@
       {!patch_keeper_dependent_caches}).
     - {b refresh fibers}
       ({!start_execution_refresh_loop},
-      {!start_transport_health_refresh_loop}).
+      {!start_transport_health_refresh_loop},
+      {!start_execution_trust_refresh_loop}).
     - {b snapshot accessors}
       ({!dashboard_execution_snapshot_json},
       {!dashboard_transport_health_snapshot_json}).
@@ -51,7 +54,7 @@
       test_patch_surface_json_for_running_keepers_tolerates_null_agent).
 
     Internal helpers stay private at this boundary
-    (~13 internal lets — [shell_prewarm_timeout_s],
+    ([shell_prewarm_timeout_s],
     [_last_broadcast_hash] /
     [_broadcast_hash_mu] / [broadcast_cached_surface],
     [_transport_health_cache],
@@ -73,6 +76,13 @@ val execution_cache : cached_surface
     the namespace-truth refresh skips the live execution
     fetch when this cache is still serving a successful
     snapshot. *)
+
+val execution_trust_cache : cached_surface
+(** Cached execution-trust surface JSON.  The default
+    [/api/v1/dashboard/execution-trust] route serves this last-good
+    surface after the first successful compute; the proactive refresh
+    loop keeps it current without making every dashboard poll pay the
+    receipt projection cost. *)
 
 val broadcast_namespace_truth_ref :
   (Mcp_server.server_state -> unit) ref
@@ -144,6 +154,16 @@ val start_transport_health_refresh_loop :
 (** Forks the transport-health cache refresh fiber.
     Cheap compared to the execution refresh — a single
     snapshot at the current clock instant. *)
+
+val start_execution_trust_refresh_loop :
+  state:Mcp_server.server_state ->
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  unit
+(** Forks the execution-trust cache refresh fiber.
+    Uses the existing dashboard execution-trust timeout and the shared
+    proactive-refresh circuit breaker; no additional operator env knob
+    is introduced for the interval. *)
 
 (** {1 Snapshot accessors} *)
 

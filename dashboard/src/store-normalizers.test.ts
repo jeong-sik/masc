@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  mergeMessages,
   normalizeDashboardRuntimeResolution,
   normalizeExecutionQueueItem,
   normalizeExecutionSessionBrief,
   normalizeMessage,
 } from './store-normalizers'
+import type { Message } from './types'
 
 const configItem = { path: '/tmp/masc', source: 'test', exists: true }
 const build = {
@@ -24,6 +26,19 @@ function runtimeResolutionRaw(overrides: Record<string, unknown> = {}): Record<s
     data_root: configItem,
     prompt_markdown_dir: configItem,
     build,
+    ...overrides,
+  }
+}
+
+function message(overrides: Partial<Message> = {}): Message {
+  return {
+    id: 'm-1',
+    seq: 1,
+    from: 'sangsu',
+    content: 'ready',
+    timestamp: '2026-05-17T00:00:00Z',
+    type: 'status',
+    workspace: 'default',
     ...overrides,
   }
 }
@@ -146,6 +161,47 @@ describe('normalizeMessage', () => {
       content: 'handoff ready',
       workspace: 'keeper-workspace',
     })
+  })
+})
+
+describe('mergeMessages', () => {
+  it('reuses the current array and message references for repeated snapshots', () => {
+    const current = [
+      message(),
+      message({
+        id: 'm-2',
+        seq: 2,
+        from: 'codex',
+        content: 'done',
+        timestamp: '2026-05-17T00:00:01Z',
+      }),
+    ]
+
+    const merged = mergeMessages(current, [
+      message(),
+      message({
+        id: 'm-2',
+        seq: 2,
+        from: 'codex',
+        content: 'done',
+        timestamp: '2026-05-17T00:00:01Z',
+      }),
+    ])
+
+    expect(merged).toBe(current)
+    expect(merged[0]).toBe(current[0])
+    expect(merged[1]).toBe(current[1])
+  })
+
+  it('updates a same-key message when any rendered field changes', () => {
+    const current = [message()]
+    const changed = message({ content: 'blocked' })
+
+    const merged = mergeMessages(current, [changed])
+
+    expect(merged).not.toBe(current)
+    expect(merged).toEqual([changed])
+    expect(merged[0]).toBe(changed)
   })
 })
 

@@ -820,6 +820,51 @@ let test_dashboard_execution_force_refresh_bypasses_default_cache () =
   check string "cache state" "fresh"
     (json |> member "cache" |> member "cache_state" |> to_string)
 
+let test_dashboard_execution_trust_default_route_uses_cached_surface () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let state =
+    Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:config.base_path ()
+  in
+  let seed =
+    `Assoc
+      [ "source", `String "execution_receipt"
+      ; "producer", `String "keeper_agent_run.execution_receipt"
+      ; "dashboard_surface", `String "/api/v1/dashboard/execution-trust"
+      ; "generated_at", `String "2026-05-15T00:00:03Z"
+      ; "freshness_slo_s", `Float 900.0
+      ; "entry_count", `Int 2
+      ; "exists", `Bool true
+      ; "keepers", `List []
+      ; "total", `Int 1
+      ; "coverage_gaps", `List []
+      ; "coverage_gap_count", `Int 0
+      ; "health", `String "ok"
+      ]
+  in
+  with_cached_surface_success
+    Server_dashboard_http_execution_surfaces.execution_trust_cache
+    seed
+  @@ fun () ->
+  let json =
+    Server_dashboard_http_execution_surfaces.dashboard_execution_trust_http_json
+      ~state
+      ~sw
+      ~clock:(Eio.Stdenv.clock env)
+      (request "/api/v1/dashboard/execution-trust")
+  in
+  let open Yojson.Safe.Util in
+  check int "cached entry count" 2 (json |> member "entry_count" |> to_int);
+  check string "surface" "/api/v1/dashboard/execution-trust"
+    (json |> member "dashboard_surface" |> to_string);
+  check string "projection cache state" "fresh"
+    (json |> member "projection_diagnostics" |> member "cache_state" |> to_string);
+  check string "envelope cache state" "fresh"
+    (json |> member "dashboard_surface_envelope" |> member "cache" |> member "state"
+     |> to_string);
+  check string "envelope cache key" "execution-trust:default"
+    (json |> member "dashboard_surface_envelope" |> member "cache" |> member "key"
+     |> to_string)
+
 let test_verifier_of_request_canonicalizes_token_owner () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let cfg =
@@ -1363,6 +1408,8 @@ let () =
             test_execution_actor_for_request_canonicalizes_token_owner;
           test_case "execution force refresh bypasses default cache" `Quick
             test_dashboard_execution_force_refresh_bypasses_default_cache;
+          test_case "execution trust default route uses cached surface" `Quick
+            test_dashboard_execution_trust_default_route_uses_cached_surface;
           test_case "verification verifier canonicalizes token owner" `Quick
             test_verifier_of_request_canonicalizes_token_owner;
           test_case "message JSON exposes temporal decay fields" `Quick

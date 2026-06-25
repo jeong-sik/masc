@@ -44,7 +44,7 @@ import {
   removeQueuedMessage,
   type QueuedMessage,
 } from '../keeper-chat-store'
-import { AttachDraftChip, ChatComposer, ChatTranscript, STREAM_STALL_THRESHOLD_S, formatAttachmentSize, type ChatComposerSendPayload } from './chat/primitives'
+import { AttachDraftChip, ChatComposer, ChatTranscript, STREAM_STALL_THRESHOLD_S, formatAttachmentSize, type ChatComposerCommand, type ChatComposerSendPayload } from './chat/primitives'
 import { showToast } from './common/toast'
 import { TextInput } from './common/input'
 import { shellAuthSummary } from '../store'
@@ -429,11 +429,13 @@ export function KeeperConversationPanel({
   keeperName,
   placeholder,
   layout = 'default',
+  composerCommands = [],
   onInspectTurn,
 }: {
   keeperName: string
   placeholder: string
   layout?: 'default' | 'primary' | 'workspace'
+  composerCommands?: ChatComposerCommand[]
   onInspectTurn?: (entry: KeeperConversationEntry) => void
 }) {
   const [showMetadata, setShowMetadata] = useState(readKeeperChatMetadataVisible())
@@ -720,6 +722,7 @@ export function KeeperConversationPanel({
               lastEventAt=${lastSignalAt}
               queueEnabled=${true}
               queueCount=${queueCount}
+              commands=${composerCommands}
               onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
               onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
               layout="primary"
@@ -837,6 +840,7 @@ export function KeeperConversationPanel({
             lastEventAt=${lastSignalAt}
             queueEnabled=${true}
             queueCount=${queueCount}
+            commands=${composerCommands}
             onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
             onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
             layout="primary"
@@ -952,6 +956,7 @@ export function KeeperConversationPanel({
             lastEventAt=${lastSignalAt}
             queueEnabled=${true}
             queueCount=${queueCount}
+            commands=${composerCommands}
             onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
             onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
           />

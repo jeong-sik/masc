@@ -160,10 +160,10 @@ export function KeeperDetailSectionRail() {
   const active = activeKeeperDetailSection.value
   return html`
     <nav
-      class="sm:sticky sm:top-[var(--header-h)] z-10 overflow-x-auto border-b border-[var(--color-border-default)] bg-[var(--color-bg-page)] py-1.5 v2-monitoring-toolbar"
+      class="kw-detail-section-rail sm:sticky sm:top-[var(--header-h)] z-10 overflow-x-auto border-b border-[var(--color-border-default)] bg-[var(--color-bg-page)] py-1.5 v2-monitoring-toolbar"
       aria-label="키퍼 상세 섹션"
     >
-      <div class="flex min-w-max items-center gap-1.5 px-1" role="tablist" aria-label="키퍼 상세 탭">
+      <div class="kw-detail-section-tabs flex min-w-max items-center gap-1.5 px-1" role="tablist" aria-label="키퍼 상세 탭">
         ${KEEPER_DETAIL_SECTIONS.map((section) => html`
           <button
             id=${`${section.id}-tab`}
@@ -172,8 +172,8 @@ export function KeeperDetailSectionRail() {
             aria-selected=${active === section.id}
             aria-controls=${section.id}
             class=${active === section.id
-              ? 'h-8 shrink-0 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-12)] px-3 text-2xs font-semibold text-[var(--color-accent-fg)] transition-colors'
-              : 'h-8 shrink-0 rounded-[var(--r-1)] border border-transparent px-3 text-2xs font-semibold text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-surface)] hover:text-[var(--color-fg-primary)]'}
+              ? 'kw-detail-section-tab h-8 shrink-0 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-12)] px-3 text-2xs font-semibold text-[var(--color-accent-fg)] transition-colors'
+              : 'kw-detail-section-tab h-8 shrink-0 rounded-[var(--r-1)] border border-transparent px-3 text-2xs font-semibold text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-surface)] hover:text-[var(--color-fg-primary)]'}
             onClick=${() => selectKeeperDetailSection(section.id)}
           >
             ${section.label}

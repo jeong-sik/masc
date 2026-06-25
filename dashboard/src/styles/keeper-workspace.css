@@ -334,12 +334,27 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   transition: background .14s, border-color .14s;
   position: relative;
 }
+.kw-kp-row[data-tone="ok"] { --kw-row-rail: var(--color-status-ok); }
+.kw-kp-row[data-tone="warn"] { --kw-row-rail: var(--color-status-warn); }
+.kw-kp-row[data-tone="bad"] { --kw-row-rail: var(--color-status-err); }
+.kw-kp-row[data-tone="info"] { --kw-row-rail: var(--color-accent-fg); }
+.kw-kp-row[data-tone="idle"] { --kw-row-rail: color-mix(in oklab, var(--color-fg-muted) 54%, transparent); }
+.kw-kp-row::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--kw-row-rail, var(--color-border-strong));
+  opacity: 0.52;
+}
 .kw-kp-row:focus-visible { outline: 2px solid var(--color-accent-fg-dim); outline-offset: 2px; }
 .kw-kp-row:hover { background: var(--color-bg-surface); border-color: var(--color-border-default); }
 .kw-kp-row[aria-current="true"] { background: var(--color-bg-surface); border-color: var(--color-accent-fg-dim); box-shadow: inset 0 0 0 1px var(--accent-10); }
 .kw-kp-row[aria-current="true"]::before {
-  content: ""; position: absolute; left: -8px; top: 9px; bottom: 9px; width: 3px;
-  background: var(--color-accent-fg); border-radius: 0 3px 3px 0;
+  opacity: 1;
   box-shadow: 0 0 10px rgb(var(--color-accent-glow) / 0.6);
 }
 .kw-kp-row:hover .kw-kp-right,
@@ -353,6 +368,65 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-kp-state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .kw-kp-handle { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .kw-kp-work { margin-top: 4px; font-size: var(--fs-12); color: var(--color-fg-secondary); line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kw-kp-context {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  margin-top: 5px;
+}
+.kw-kp-context-bar {
+  flex: 1;
+  height: 5px;
+  overflow: hidden;
+  border: 1px solid var(--color-border-divider);
+  border-radius: 9999px;
+  background: var(--color-bg-page);
+}
+.kw-kp-context-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--color-accent-fg-dim), var(--color-accent-fg));
+}
+.kw-kp-context-bar > span.hot {
+  background: linear-gradient(90deg, var(--color-status-warn), var(--color-status-err));
+}
+.kw-kp-context-val {
+  width: 34px;
+  flex: none;
+  color: var(--color-fg-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  text-align: right;
+}
+.kw-kp-context-val.hot {
+  color: var(--color-status-err);
+}
+.kw-kp-tool {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+}
+.kw-kp-tool-k {
+  flex: none;
+  color: var(--color-fg-muted);
+  font-size: var(--fs-10);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.kw-kp-tool-v {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-fg-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .kw-kp-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; padding-top: 2px; }
 .kw-kp-time { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--color-fg-muted); }
 .kw-kp-att {
@@ -451,6 +525,13 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   .kw-kp-row:focus-within .kw-kp-right {
     opacity: 1;
     pointer-events: auto;
+  }
+
+  .kw-kp-menu {
+    max-width: calc(100vw - 28px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+    max-height: min(70dvh, 420px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 }
 
@@ -604,17 +685,18 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   z-index: var(--z-drawer);
   display: flex;
   justify-content: flex-end;
-  background: rgb(0 0 0 / 0.38);
+  background: rgb(4 5 8 / 0.60);
 }
 .kw-mobile-rail-drawer {
   display: flex;
   flex-direction: column;
-  width: min(92vw, 340px);
+  width: min(330px, 88vw);
+  max-width: calc(100vw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
   height: 100%;
   min-height: 0;
   background: var(--color-bg-panel-alt);
   border-left: 1px solid var(--color-border-default);
-  box-shadow: -18px 0 46px rgb(0 0 0 / 0.32);
+  box-shadow: -8px 0 30px rgb(0 0 0 / 0.50);
 }
 .kw-mobile-rail-head {
   display: flex;
@@ -640,64 +722,6 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   border-left: 0;
 }
 
-.kw-config-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-overlay-keeper);
-  display: flex;
-  justify-content: flex-end;
-  background: var(--backdrop-modal);
-  isolation: isolate;
-}
-.kw-config-drawer {
-  display: flex;
-  flex-direction: column;
-  width: min(760px, 96vw);
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
-  border-left: 1px solid var(--color-border-strong);
-  background: var(--color-bg-surface);
-  box-shadow: var(--shadow-drawer-left);
-}
-.kw-config-head {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--color-border-strong);
-  background: var(--color-bg-elevated);
-}
-.kw-config-head h3 {
-  margin: 0;
-  color: var(--color-fg-primary);
-  font: var(--type-title);
-}
-.kw-config-head p {
-  margin: 3px 0 0;
-  overflow: hidden;
-  color: var(--color-fg-muted);
-  font-family: var(--font-mono);
-  font-size: var(--fs-11);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.kw-config-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 14px 16px 24px;
-  background: var(--color-bg-page);
-}
-
-@media (max-width: 860px) {
-  .kw-config-drawer {
-    width: 100vw;
-    border-left: 0;
-  }
-}
 
 .kw-rail-toggle {
   position: absolute;
@@ -989,7 +1013,8 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   [data-keeper-detail-mode="true"] .v2-header-brand { max-width: calc(100vw - 86px); }
 
   .kw-mobile-rail-drawer {
-    width: min(100vw, 380px);
+    width: min(330px, 88vw);
+    max-width: calc(100vw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
   }
   .kw-rail-scroll {
     gap: 20px;
@@ -998,7 +1023,12 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   .kw-detail-head {
     flex-wrap: wrap;
     gap: 8px;
-    padding: 10px 12px;
+    padding:
+      max(10px, env(safe-area-inset-top, 0px))
+      max(12px, env(safe-area-inset-right, 0px))
+      10px
+      max(12px, env(safe-area-inset-left, 0px));
+    z-index: 22;
   }
   .kw-detail-head .kw-act {
     min-height: 40px;
@@ -1007,7 +1037,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
     flex: 1 1 11rem;
   }
   .kw-detail-scroll {
-    padding: 10px;
+    padding: 0;
   }
 }
 
@@ -1035,7 +1065,412 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
     text-align: left;
   }
   .kw-detail-scroll {
-    padding: 8px;
+    padding: 0;
+  }
+}
+
+/* v2 (26) mobile fidelity pass.
+ *
+ * The standalone reference asserts `viewport-fit=cover` and treats the keeper
+ * conversation as a true one-pane phone surface: header + transcript + composer
+ * fill the visual viewport, while only the active pane owns scroll. Keep this
+ * as a CSS-only contract so the existing keeperMobilePane signal remains the
+ * single source of truth for roster/chat switching.
+ */
+@media (max-width: 900px) {
+  .v2-app[data-reading="true"] .v2-mobile-bottom-bar,
+  .v2-app[data-reading="true"] .dashboard-status-tray,
+  .v2-app[data-reading="true"] .dashboard-focus-mode-toggle,
+  .v2-app[data-reading="true"] .topbar-copilot,
+  .v2-app[data-reading="true"] .kw-chat-actions {
+    display: none;
+  }
+}
+
+@media (max-width: 860px) {
+  .v2-app[data-keeper-detail-mode="true"] {
+    height: 100dvh;
+    min-height: 100dvh;
+  }
+
+  [data-keeper-detail-mode="true"] .v2-shell-stage {
+    padding:
+      max(6px, env(safe-area-inset-top, 0px))
+      max(6px, env(safe-area-inset-right, 0px))
+      max(6px, env(safe-area-inset-bottom, 0px))
+      max(6px, env(safe-area-inset-left, 0px));
+  }
+
+  [data-keeper-detail-mode="true"] .v2-body,
+  [data-keeper-detail-mode="true"] .v2-body > .h-full,
+  [data-keeper-detail-mode="true"] .v2-surface,
+  [data-keeper-detail-mode="true"] .kw-grid {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .kw-grid {
+    overscroll-behavior: contain;
+  }
+
+  .kw-grid[data-mobile-pane="chat"] {
+    padding-bottom: 0;
+  }
+
+  .kw-grid[data-mobile-pane="roster"] .kw-roster,
+  .kw-grid[data-mobile-pane="chat"] .kw-chat,
+  .kw-grid[data-mobile-pane="chat"] .kw-detail {
+    overflow: hidden;
+  }
+
+  .kw-grid[data-detail="open"] .kw-detail {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .kw-grid[data-detail="open"] .kw-detail-scroll {
+    background: var(--color-bg-page);
+    scroll-padding-top: 0;
+  }
+
+  .kw-detail-content {
+    max-width: none;
+    gap: 0;
+    padding-bottom: 0;
+  }
+
+  .kw-detail-full-head {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    width: 100%;
+    max-width: none;
+    border-right: 0;
+    border-left: 0;
+    border-radius: 0;
+  }
+
+  .kw-detail-full-head > div {
+    padding:
+      10px
+      max(12px, env(safe-area-inset-right, 0px))
+      10px
+      max(12px, env(safe-area-inset-left, 0px));
+  }
+
+  .kw-detail-body {
+    display: grid;
+    grid-template-columns: 56px minmax(0, 1fr);
+    align-items: start;
+    max-width: none;
+    gap: 0;
+  }
+
+  .kw-detail-section-rail {
+    position: sticky;
+    top: 0;
+    grid-column: 1;
+    height: calc(100dvh - 58px - env(safe-area-inset-top, 0px));
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-right: 1px solid var(--color-border-default);
+    border-bottom: 0;
+    background: var(--color-bg-panel-alt);
+    padding: 8px 6px;
+  }
+
+  .kw-detail-section-tabs {
+    min-width: 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    padding: 0;
+  }
+
+  .kw-detail-section-tab {
+    display: inline-flex;
+    align-items: center;
+    width: 100%;
+    height: 40px;
+    justify-content: center;
+    overflow: hidden;
+    padding-right: 4px;
+    padding-left: 4px;
+    text-overflow: clip;
+    white-space: nowrap;
+  }
+
+  .kw-detail-body > section {
+    grid-column: 2;
+    min-width: 0;
+    border-top: 0;
+    border-right: 0;
+    border-radius: 0;
+  }
+
+  .kw-detail-body > section > .v2-monitoring-toolbar {
+    padding: 10px 12px;
+  }
+
+  .kw-detail-body > section > .v2-monitoring-panel {
+    gap: 12px;
+    padding:
+      12px
+      max(12px, env(safe-area-inset-right, 0px))
+      max(18px, env(safe-area-inset-bottom, 0px))
+      12px;
+  }
+
+  .kw-chat-head {
+    gap: 10px;
+    padding:
+      max(9px, env(safe-area-inset-top, 0px))
+      max(12px, env(safe-area-inset-right, 0px))
+      9px
+      max(12px, env(safe-area-inset-left, 0px));
+  }
+
+  .kw-chat-id {
+    min-width: 0;
+  }
+
+  .kw-chat-name-row {
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .kw-chat-name {
+    font-size: 17px;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .kw-state-pill {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .kw-chat-actions {
+    justify-content: flex-end;
+    gap: 8px;
+    padding-bottom: 2px;
+  }
+
+  .kw-chat-command-popover {
+    right: max(0px, env(safe-area-inset-right, 0px));
+    max-width: calc(100vw - 28px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+  }
+
+  .kw-thread-inner .chat-transcript {
+    gap: 18px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-top: 16px;
+    padding-bottom: 12px;
+  }
+
+  .kw-thread-inner .chat-bubble {
+    font-size: 16.5px;
+    line-height: 1.68;
+    padding: 14px 15px;
+  }
+
+  .kw-thread-inner .chat-bubble code {
+    font-size: 13.5px;
+  }
+
+  .kw-composer-wrap {
+    padding-top: 10px;
+    padding-bottom: max(14px, env(safe-area-inset-bottom, 0px));
+  }
+
+  .kw-composer-inner {
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
+  }
+
+  .kw-composer-inner .composer textarea {
+    font-size: 16px;
+  }
+
+  .kw-mobile-rail-overlay {
+    background: rgb(4 5 8 / 0.60);
+    padding-left: env(safe-area-inset-left, 0px);
+  }
+
+  .kw-mobile-rail-drawer {
+    height: 100dvh;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
+/* v2 (26) phone composer/drawer parity.
+ * The runtime workspace intentionally reuses ChatComposer instead of copying
+ * the standalone prototype composer. Keep the override on the keeper shell so
+ * multimodal attachments, voice input, queueing, abort, and send IDs stay in
+ * the shared runtime component while the phone geometry follows the reference
+ * surface. */
+@media (max-width: 860px) {
+  .kw-composer-inner .composer-inner {
+    padding: 0;
+  }
+
+  .kw-composer-inner .composer-box {
+    gap: 8px;
+    padding: 5px 5px 5px 12px;
+    border-radius: var(--radius-md);
+  }
+
+  .kw-composer-inner .slashmenu {
+    right: calc(-1 * env(safe-area-inset-right, 0px));
+    left: calc(-1 * env(safe-area-inset-left, 0px));
+    bottom: calc(100% + 6px);
+    max-height: min(46vh, 320px);
+    border-radius: var(--radius-md);
+  }
+
+  .kw-composer-inner .slashmenu-i {
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  .kw-composer-inner .slashmenu-cmd {
+    width: 72px;
+  }
+
+  .kw-composer-inner .slashmenu-grp {
+    display: none;
+  }
+
+  .kw-composer-inner .composer-textarea {
+    min-height: 24px;
+    padding: 9px 0;
+    font-size: 16px;
+    line-height: 1.45;
+  }
+
+  .kw-composer-inner .composer-tools {
+    gap: 5px;
+    padding-bottom: 1px;
+  }
+
+  .kw-composer-inner .ctool {
+    width: 32px;
+    height: 32px;
+  }
+
+  .kw-composer-inner .send {
+    height: 32px;
+    padding: 0 13px;
+  }
+
+  .kw-composer-inner .composer-foot {
+    gap: 8px;
+    min-width: 0;
+    margin-top: 6px;
+    font-size: 10.5px;
+  }
+
+  .kw-composer-inner .composer-foot .hint {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .kw-composer-inner .composer-foot .queue-badge {
+    flex: none;
+  }
+
+  .kw-composer-inner .composer-tray {
+    gap: 6px;
+    max-height: 92px;
+    margin-bottom: 8px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .kw-composer-inner .cdraft {
+    max-width: 100%;
+    gap: 8px;
+    padding: 7px 9px;
+  }
+
+  .kw-composer-inner .cdraft.att {
+    max-width: min(100%, 300px);
+    padding-right: 26px;
+  }
+
+  .kw-composer-inner .cdraft.voice {
+    max-width: 100%;
+  }
+
+  .kw-composer-inner .cdraft-name,
+  .kw-composer-inner .cdraft-tx-v {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .kw-mobile-rail-head {
+    padding:
+      max(12px, env(safe-area-inset-top, 0px))
+      max(14px, env(safe-area-inset-right, 0px))
+      12px
+      max(14px, env(safe-area-inset-left, 0px));
+  }
+
+  .kw-mobile-rail-drawer .kw-rail-scroll {
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .kw-mobile-rail-drawer .kw-sec h4 {
+    margin-bottom: 9px;
+    font-size: var(--fs-11);
+    letter-spacing: 0.18em;
+  }
+
+  .kw-mobile-rail-drawer .kw-card {
+    padding: 11px 12px;
+    border-radius: var(--r-1);
+  }
+
+  .kw-mobile-rail-drawer .kw-vitals {
+    gap: 1px;
+  }
+
+  .kw-mobile-rail-drawer .kw-vital {
+    padding: 9px 11px;
+  }
+
+  .kw-mobile-rail-drawer .kw-context-empty {
+    padding: 8px 0 2px;
+  }
+
+  .kw-mobile-rail-drawer .kw-ctx-meta {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .kw-mobile-rail-drawer .kw-cmp-readonly {
+    gap: 6px;
+  }
+
+  .kw-mobile-rail-drawer .kw-tasktag {
+    padding: 8px 10px;
+  }
+
+  .kw-mobile-rail-drawer .kw-detail-btn {
+    min-height: 44px;
+    padding: 10px 12px;
+  }
+
+  .kw-mobile-rail-drawer .kw-detail-scroll {
+    padding: 12px;
   }
 }
 

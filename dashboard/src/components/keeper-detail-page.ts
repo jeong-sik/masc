@@ -187,12 +187,14 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
   // <=1180px drops the rail column entirely (keeper-workspace.css), so the right
   // resizer must not render there even when railOpen is still toggled on.
   const isNarrow = useMatchMedia(KW_NARROW_QUERY)
-  const routeKeeperParam = route.value.tab === 'keepers'
-    ? route.value.params.keeper?.trim()
-    : route.value.tab === 'monitoring' && route.value.params.section === 'agents'
-      ? route.value.params.keeper?.trim()
-      : ''
-  const [mobileRailOpen, setMobileRailOpen] = useState(false)
+  const [mobileRailState, setMobileRailState] = useState<{ keeperName: string; open: boolean }>(() => ({
+    keeperName: keeper.name,
+    open: false,
+  }))
+  const mobileRailOpen = mobileRailState.keeperName === keeper.name && mobileRailState.open
+  const setMobileRailOpenForKeeper = (open: boolean) => {
+    setMobileRailState({ keeperName: keeper.name, open })
+  }
   // Latest transition's wall_clock_at_decision, in unix seconds.  Used by
   // the header KeeperPhaseAndStage to render "현재 phase에 머문 시간" without
   // requiring a new backend field — derivation is plan-approved trade-off.
@@ -221,12 +223,6 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
     setDetailOpen(false)
     setConfigOverlayKeeper(shouldOpenPendingConfig ? keeper.name : null)
   }
-  useEffect(() => {
-    setMobileRailOpen(false)
-    if (routeKeeperParam) {
-      keeperMobilePane.value = 'chat'
-    }
-  }, [keeper.name, routeKeeperParam])
   useEffect(() => {
     selectedKeeper.value = keeper
     selectKeeper(keeper.name)
@@ -330,8 +326,8 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
   // Full tabbed detail (FSM / 진단 / 정체성 / 설정 / 디버그) — the original
   // detail-page layout, preserved verbatim and surfaced behind "운영 상세".
   const detailContent = html`
-    <div class="mx-auto flex w-full max-w-[1380px] flex-col gap-5 pb-8 v2-monitoring-surface" data-route-focused-keeper=${keeper.name}>
-      <div class="sm:sticky sm:top-0 z-20 mx-auto w-full max-w-[1180px] overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] shadow-none backdrop-blur-xl v2-monitoring-toolbar">
+    <div class="kw-detail-content mx-auto flex w-full max-w-[1380px] flex-col gap-5 pb-8 v2-monitoring-surface" data-route-focused-keeper=${keeper.name}>
+      <div class="kw-detail-full-head sm:sticky sm:top-0 z-20 mx-auto w-full max-w-[1180px] overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] shadow-none backdrop-blur-xl v2-monitoring-toolbar">
         <div class="flex flex-col items-stretch justify-between gap-3 px-4 py-2.5 sm:flex-row sm:items-center sm:px-5">
           <${KeeperDetailHeaderInfo}
             keeper=${keeper}
@@ -390,7 +386,7 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
   `
   const openKeeperConfig = (name = keeper.name) => {
     activeKeeperDetailSection.value = 'keeper-config'
-    setMobileRailOpen(false)
+    setMobileRailOpenForKeeper(false)
     if (name !== keeper.name) {
       pendingConfigKeeperRef.current = name
     }
@@ -485,7 +481,7 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
               onBack=${() => {
                 keeperMobilePane.value = 'roster'
               }}
-              onOpenRail=${() => setMobileRailOpen(true)}
+              onOpenRail=${() => setMobileRailOpenForKeeper(true)}
               onOpenConfig=${() => {
                 openKeeperConfig()
               }}
@@ -512,7 +508,7 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
                     aria-modal="true"
                     aria-label="키퍼 컨텍스트"
                     data-testid="kw-mobile-rail-overlay"
-                    onClick=${() => setMobileRailOpen(false)}
+                    onClick=${() => setMobileRailOpenForKeeper(false)}
                   >
                     <div class="kw-mobile-rail-drawer v2-monitoring-surface" onClick=${(e: Event) => e.stopPropagation()}>
                       <div class="kw-mobile-rail-head v2-monitoring-toolbar">
@@ -520,7 +516,7 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
                         <button
                           type="button"
                           class="kw-act v2-monitoring-action"
-                          onClick=${() => setMobileRailOpen(false)}
+                          onClick=${() => setMobileRailOpenForKeeper(false)}
                         >닫기</button>
                       </div>
                       <${KeeperWorkspaceRail} keeper=${keeper} />

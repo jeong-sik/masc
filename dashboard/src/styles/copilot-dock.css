@@ -204,7 +204,12 @@
 @media (max-width: 1180px) {
   .dock.docked { width: 320px; }
 }
+
 @media (max-width: 900px) {
+  .topbar-copilot kbd {
+    display: none;
+  }
+
   .dock.docked {
     position: fixed;
     inset: 50px 0 0;
@@ -295,5 +300,11 @@
   .v2-app[data-mobile="true"] .dock-fab .spark {
     width: 20px;
     height: 20px;
+  }
+}
+
+@media (max-width: 420px) {
+  .topbar-copilot span:not(.spark) {
+    display: none;
   }
 }

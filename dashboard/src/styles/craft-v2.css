@@ -129,6 +129,7 @@
               border-color var(--dur) var(--ease-out),
               color var(--dur) var(--ease-out),
               box-shadow var(--dur) var(--ease-out),
+              filter var(--dur-fast) var(--ease-out),
               transform var(--dur-fast) var(--ease-out);
 }
 
@@ -144,6 +145,7 @@
               border-color var(--dur) var(--ease-out),
               color var(--dur) var(--ease-out),
               box-shadow var(--dur) var(--ease-out),
+              filter var(--dur-fast) var(--ease-out),
               transform var(--dur-fast) var(--ease-out);
 }
 

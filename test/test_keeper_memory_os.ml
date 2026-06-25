@@ -187,44 +187,55 @@ let wait_for_ref ~clock label r =
   | Eio.Time.Timeout -> Alcotest.failf "timed out waiting for %s" label
 ;;
 
-let with_child_holding_lock_file lock_path f =
+let with_process_holding_lock_file lock_path f =
   let read_fd, write_fd = Unix.pipe () in
-  match Unix.fork () with
-  | 0 ->
-    Unix.close read_fd;
-    let exit_child code =
-      (try Unix.close write_fd with Unix.Unix_error _ -> ());
-      exit code
-    in
-    let fd =
-      try Unix.openfile lock_path [ Unix.O_CREAT; Unix.O_WRONLY ] 0o644 with
-      | Unix.Unix_error _ -> exit_child 1
-    in
-    (try
-       Unix.lockf fd Unix.F_LOCK 0;
-       ignore (Unix.write write_fd (Bytes.of_string "1") 0 1);
-       Unix.sleep 30;
-       Unix.lockf fd Unix.F_ULOCK 0;
-       Unix.close fd;
-       exit_child 0
-     with
-     | _ ->
-       (try Unix.close fd with Unix.Unix_error _ -> ());
-       exit_child 1)
-  | pid ->
-    Unix.close write_fd;
-    let cleanup () =
-      (try Unix.kill pid Sys.sigterm with Unix.Unix_error _ -> ());
-      (try ignore (Unix.waitpid [] pid) with Unix.Unix_error _ -> ());
-      (try Unix.close read_fd with Unix.Unix_error _ -> ())
-    in
-    Fun.protect
-      ~finally:cleanup
-      (fun () ->
-        let ready = Bytes.create 1 in
-        match Unix.read read_fd ready 0 1 with
-        | 1 -> f ()
-        | _ -> Alcotest.fail "child did not acquire flock")
+  let stderr_fd = Unix.openfile Filename.null [ Unix.O_WRONLY ] 0o644 in
+  let script =
+    String.concat
+      "\n"
+      [ "import fcntl, os, signal, sys, time"
+      ; "path = sys.argv[1]"
+      ; "deadline = time.monotonic() + float(sys.argv[2])"
+      ; "fd = os.open(path, os.O_CREAT | os.O_WRONLY, 0o644)"
+      ; "fcntl.lockf(fd, fcntl.LOCK_EX)"
+      ; "os.write(1, b'1')"
+      ; "signal.signal(signal.SIGTERM, lambda _signum, _frame: sys.exit(0))"
+      ; "while time.monotonic() < deadline:"
+      ; "    time.sleep(0.05)"
+      ]
+  in
+  let argv =
+    [| "python3"; "-c"; script; lock_path; "5.0" |]
+  in
+  let pid =
+    try
+      Unix.create_process_env
+        "python3"
+        argv
+        (Unix.environment ())
+        Unix.stdin
+        write_fd
+        stderr_fd
+    with exn ->
+      Unix.close write_fd;
+      Unix.close read_fd;
+      Unix.close stderr_fd;
+      raise exn
+  in
+  Unix.close write_fd;
+  Unix.close stderr_fd;
+  let cleanup () =
+    (try Unix.kill pid Sys.sigterm with Unix.Unix_error _ -> ());
+    (try ignore (Unix.waitpid [] pid) with Unix.Unix_error _ -> ());
+    (try Unix.close read_fd with Unix.Unix_error _ -> ())
+  in
+  Fun.protect
+    ~finally:cleanup
+    (fun () ->
+      let ready = Bytes.create 1 in
+      match Unix.read read_fd ready 0 1 with
+      | 1 -> f ()
+      | _ -> Alcotest.fail "lock holder did not acquire flock")
 ;;
 
 let with_eio_guard f =
@@ -1375,7 +1386,7 @@ let test_with_facts_lock_timeout_uses_on_timeout () =
     with_temp_keepers_dir (fun _keepers_dir ->
       let keeper_id = "facts-lock-timeout" in
       let lock_path = Memory_io.facts_path ~keeper_id ^ ".lock" in
-      with_child_holding_lock_file lock_path (fun () ->
+      with_process_holding_lock_file lock_path (fun () ->
         let result =
           Memory_io.with_facts_lock
             ~clock

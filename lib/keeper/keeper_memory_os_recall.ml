@@ -391,9 +391,7 @@ let render_context
 let enabled () =
   (* Default on, mirroring the librarian (write side): persisted memory
      that never reaches a prompt is dead weight. Env var = kill switch. *)
-  Keeper_memory_bank_env.memory_env_bool_logged
-    "MASC_KEEPER_MEMORY_OS_RECALL"
-    ~default:true
+  Env_config.KeeperMemoryOs.recall_enabled ()
 ;;
 
 let render_if_enabled ~keeper_id ~now ~trace_id ~turn ~masc_root () =

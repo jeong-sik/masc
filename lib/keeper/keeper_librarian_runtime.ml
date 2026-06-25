@@ -29,10 +29,7 @@ let default_complete ~sw ~net ?clock ~config ~messages () =
    only caps simultaneous provider round-trips. Default 1 preserves the prior
    #21230 protection; 0 disables the gate. *)
 let global_slot_capacity () =
-  Keeper_memory_bank_env.memory_env_int_logged
-    "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
-    ~default:1
-  |> max 0
+  Env_config.KeeperMemoryOs.librarian_global_slot ()
 ;;
 
 let provider_slot_wait_sec = 0.25
@@ -96,9 +93,7 @@ let enabled () =
   (* Default on: a keeper without conversation ingestion is the pathology
      the Memory OS exists to fix (2026-06-12 diagnosis, issue #20909).
      The env var stays as the kill switch. *)
-  Keeper_memory_bank_env.memory_env_bool_logged
-    "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
-    ~default:true
+  Env_config.KeeperMemoryOs.librarian_enabled ()
 ;;
 
 (* Librarian extraction cadence (per keeper).
@@ -123,10 +118,7 @@ let enabled () =
    Set MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS=1 to restore per-turn
    extraction (the previous behavior). *)
 let cadence_turns () =
-  Keeper_memory_bank_env.memory_env_int_logged
-    "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS"
-    ~default:3
-  |> max 1
+  Env_config.KeeperMemoryOs.librarian_cadence_turns ()
 ;;
 
 (* Per-keeper "turns since last successful extraction" counter, paired with the
@@ -207,10 +199,7 @@ let cadence_counter_entries () =
 ;;
 
 let max_messages () =
-  Keeper_memory_bank_env.memory_env_int_logged
-    "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
-    ~default:24
-  |> max 1
+  Env_config.KeeperMemoryOs.librarian_max_messages ()
 ;;
 
 (* Scale the prompt window by the cadence so skipped turns stay visible until
@@ -220,15 +209,11 @@ let prompt_max_messages () = max_messages () * cadence_turns ()
 ;;
 
 let default_timeout_sec () =
-  Keeper_memory_bank_env.memory_env_float_logged
-    "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC"
-    ~default:librarian_default_timeout_sec
+  Env_config.KeeperMemoryOs.librarian_timeout_sec ()
 ;;
 
 let runtime_id_for_librarian ~runtime_id =
-  match
-    Keeper_memory_bank_env.memory_env_opt "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
-  with
+  match Env_config.KeeperMemoryOs.librarian_runtime_id () with
   | Some value -> value
   | None ->
     (* [runtime].librarian (runtime.toml) routes the librarian independently of

@@ -191,16 +191,19 @@ The env surface is broad but named and centralized enough to audit:
 - `MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS`: default 3.
 - `MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES`: default 24.
 - `MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC`: default 600.
+- `MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID`: optional runtime override.
 - `MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT`: default 1.
 - `MASC_KEEPER_MEMORY_OS_GC`: default false.
 - `MASC_KEEPER_MEMORY_OS_RECONCILE`: default false.
 - `MASC_KEEPER_MEMORY_OS_RECONCILE_APPLY`: default false.
 - `MASC_KEEPER_MEMORY_OS_CONSOLIDATION`: default false.
+- `MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID`: optional runtime override.
 
 The fixed-size constants are hardcoded operational policy, not hidden path
 state: recall 8 facts and 2 episodes, shared facts 4, episode tail scan 32,
-store caps 384. That is acceptable for safety but should be treated as product
-policy, not incidental implementation. SSOT cleanup is tracked as
+store caps 384. They are acceptable as code-owned safety defaults for this
+hardening PR, but should become explicit product policy if operators need to
+tune them without a code review. SSOT cleanup is tracked as
 [#22294](https://github.com/jeong-sik/masc/issues/22294).
 
 ## Heuristics And String Matching

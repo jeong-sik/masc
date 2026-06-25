@@ -1,7 +1,8 @@
 (** GitHub-backed external verifier for the grounding reconciler (RFC-0259 §3.3 P2).
 
-    See the .mli. Every failure path collapses to [Unverifiable] so the
-    reconciler never treats an unreachable/ambiguous ref as a contradiction. *)
+    See the .mli. Expected lookup failures collapse to [Unverifiable] so the
+    reconciler never treats an unreachable/ambiguous ref as a contradiction;
+    Eio cancellation still propagates. *)
 
 open Keeper_memory_os_types
 module R = Keeper_memory_os_reconcile
@@ -20,9 +21,12 @@ type github_node = {
   selection : string;
 }
 
+let github_pr_node = { response_field = "pullRequest"; selection = "state" }
+let github_issue_node = { response_field = "issue"; selection = "state" }
+
 let github_node_for_kind = function
-  | Pr -> Some { response_field = "pullRequest"; selection = "state" }
-  | Issue -> Some { response_field = "issue"; selection = "state" }
+  | Pr -> Some github_pr_node
+  | Issue -> Some github_issue_node
   | Task -> None
 ;;
 

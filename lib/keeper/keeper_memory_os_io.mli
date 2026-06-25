@@ -79,7 +79,9 @@ val same_fact_snapshot : fact list -> fact list -> bool
 (** [with_facts_lock ?clock ~keeper_id ~on_timeout f] runs [f] holding the
     per-keeper facts lock. On flock-acquisition timeout, [on_timeout msg] produces
     the result instead of raising {!File_lock_eio.Flock_timeout}, so callers can
-    return a typed skip/no-op for a contended cycle. *)
+    return a typed skip/no-op for a contended cycle. Non-timeout exceptions from
+    [f] propagate after the lock finalizer runs. Keep [on_timeout] total and
+    non-raising so timeout remains a typed result, not a second failure path. *)
 val with_facts_lock :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> keeper_id:string

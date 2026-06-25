@@ -179,6 +179,113 @@ module KeeperRuntime = struct
   let snapshot_sec = max 15 (min 3600 (get_int ~default:300 "MASC_KEEPER_SNAPSHOT_SEC"))
 end
 
+(** {1 Keeper Memory OS Configuration}
+
+    Memory OS readers use functions, not module-load constants, because tests and
+    long-running processes may steer these kill switches with live env updates.
+    Precedence still flows through {!Env_config_core.raw_value_opt}: process env,
+    then the boot override store, then the hardcoded defaults below. *)
+
+module KeeperMemoryOs = struct
+  let nonempty_string value =
+    let value = String.trim value in
+    if String.equal value "" then None else Some value
+  ;;
+
+  (** Memory OS recall prompt injection kill switch. Default: true.
+      @category Policies
+      @ops_class operator *)
+  let recall_enabled () =
+    get_bool ~default:true "MASC_KEEPER_MEMORY_OS_RECALL"
+  ;;
+
+  (** Memory OS librarian post-turn extraction kill switch. Default: true.
+      @category Policies
+      @ops_class operator *)
+  let librarian_enabled () =
+    get_bool ~default:true "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
+  ;;
+
+  (** Turns between librarian extraction attempts per keeper. Default: 3,
+      floored to 1.
+      @category Runtime
+      @ops_class operator *)
+  let librarian_cadence_turns () =
+    max 1 (get_int ~default:3 "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS")
+  ;;
+
+  (** Base recent-message window for librarian extraction. Default: 24,
+      floored to 1.
+      @category Runtime
+      @ops_class operator *)
+  let librarian_max_messages () =
+    max 1 (get_int ~default:24 "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES")
+  ;;
+
+  (** Provider timeout for librarian extraction. Default: 600 seconds; invalid,
+      non-positive, NaN, or infinite values fall back to the default.
+      @category Timeouts
+      @ops_class operator *)
+  let librarian_timeout_sec () =
+    let value = get_float ~default:600.0 "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC" in
+    if Float.is_finite value && value > 0.0 then value else 600.0
+  ;;
+
+  (** Optional runtime id override for librarian extraction.
+      @category Runtime
+      @ops_class operator *)
+  let librarian_runtime_id () =
+    get_string ~default:"" "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
+    |> nonempty_string
+  ;;
+
+  (** Fleet-wide concurrency gate for librarian provider calls. Default: 1; 0
+      disables the gate.
+      @category Concurrency
+      @ops_class operator *)
+  let librarian_global_slot () =
+    max 0 (get_int ~default:1 "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT")
+  ;;
+
+  (** Per-keeper Memory OS GC maintenance fiber kill switch. Default: false.
+      @category Storage
+      @ops_class operator *)
+  let gc_enabled () =
+    get_bool ~default:false "MASC_KEEPER_MEMORY_OS_GC"
+  ;;
+
+  (** External-ref grounding reconciliation maintenance fiber kill switch.
+      Default: false.
+      @category Policies
+      @ops_class operator *)
+  let reconcile_enabled () =
+    get_bool ~default:false "MASC_KEEPER_MEMORY_OS_RECONCILE"
+  ;;
+
+  (** Apply reconciler rewrites instead of dry-run logging. Default: false.
+      @category Policies
+      @ops_class operator *)
+  let reconcile_apply () =
+    get_bool ~default:false "MASC_KEEPER_MEMORY_OS_RECONCILE_APPLY"
+  ;;
+
+  (** Per-keeper Memory OS consolidation maintenance fiber kill switch.
+      Default: false.
+      @category Policies
+      @ops_class operator *)
+  let consolidation_enabled () =
+    get_bool ~default:false "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
+  ;;
+
+  (** Optional runtime id override for Memory OS consolidation.
+      @category Runtime
+      @ops_class operator *)
+  let consolidation_runtime_id () =
+    get_string ~default:"" "MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID"
+    |> nonempty_string
+  ;;
+end
+
 (** {1 Keeper Context Reducer Configuration}
 
     Controls for the {!Agent_sdk.Context_reducer} stages applied to the

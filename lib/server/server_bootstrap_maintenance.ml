@@ -17,7 +17,7 @@ let provider_cfg_for_memory_os_consolidation () =
     |> Option.map (fun rt -> rt.Runtime.provider_config)
   in
   let runtime_id =
-    match Keeper_memory_bank_env.memory_env_opt "MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID" with
+    match Env_config.KeeperMemoryOs.consolidation_runtime_id () with
     | Some id -> Some id
     | None -> Runtime.librarian_runtime_id ()
   in
@@ -227,11 +227,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      Default OFF (mirrors the consolidation gate): enable via the env once a live
      dry-run confirms what it would prune. Per-keeper failures are caught so one
      corrupt store cannot cancel siblings. *)
-  if
-    Keeper_memory_bank_env.memory_env_bool_logged
-      "MASC_KEEPER_MEMORY_OS_GC"
-      ~default:false
-  then
+  if Env_config.KeeperMemoryOs.gc_enabled () then
     fork_logged_fiber
       ~sw
       ~on_error:(log_server_fiber_crash "memory_os_gc")
@@ -286,17 +282,11 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      reviews the dry-run log before enabling APPLY. Skipped entirely when no alert
      repo is configured. *)
   if
-    Keeper_memory_bank_env.memory_env_bool_logged
-      "MASC_KEEPER_MEMORY_OS_RECONCILE"
-      ~default:false
+    Env_config.KeeperMemoryOs.reconcile_enabled ()
     && String.trim Env_config.KeeperAlert.github_repo <> ""
   then (
      let repo = String.trim Env_config.KeeperAlert.github_repo in
-     let apply =
-       Keeper_memory_bank_env.memory_env_bool_logged
-         "MASC_KEEPER_MEMORY_OS_RECONCILE_APPLY"
-         ~default:false
-     in
+     let apply = Env_config.KeeperMemoryOs.reconcile_apply () in
      fork_logged_fiber
        ~sw
        ~on_error:(log_server_fiber_crash "memory_os_reconcile")
@@ -371,11 +361,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      duplicate/superseded facts and rewrites the store atomically. Gated by
      [MASC_KEEPER_MEMORY_OS_CONSOLIDATION] (default false) until a live shadow
      run validates what the model would prune on the user's data. *)
-  if
-    Keeper_memory_bank_env.memory_env_bool_logged
-      "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
-      ~default:false
-  then
+  if Env_config.KeeperMemoryOs.consolidation_enabled () then
     fork_logged_fiber
       ~sw
       ~on_error:(log_server_fiber_crash "memory_os_keeper_consolidation")

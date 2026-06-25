@@ -80,6 +80,23 @@ module KeeperRuntime : sig
   val snapshot_sec : int
 end
 
+(** {1 Keeper Memory OS} *)
+
+module KeeperMemoryOs : sig
+  val recall_enabled : unit -> bool
+  val librarian_enabled : unit -> bool
+  val librarian_cadence_turns : unit -> int
+  val librarian_max_messages : unit -> int
+  val librarian_timeout_sec : unit -> float
+  val librarian_runtime_id : unit -> string option
+  val librarian_global_slot : unit -> int
+  val gc_enabled : unit -> bool
+  val reconcile_enabled : unit -> bool
+  val reconcile_apply : unit -> bool
+  val consolidation_enabled : unit -> bool
+  val consolidation_runtime_id : unit -> string option
+end
+
 (** {1 Keeper context reducer} *)
 
 module KeeperReducer : sig

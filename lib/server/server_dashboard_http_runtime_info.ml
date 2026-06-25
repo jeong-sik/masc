@@ -1928,6 +1928,35 @@ let dashboard_actor_name = function
   | Some _ | None -> "dashboard"
 ;;
 
+let dashboard_tools_warming_json ~actor =
+  `Assoc
+    [ "generated_at", `String (Masc_domain.now_iso ())
+    ; "config_resolution", `Assoc [ "status", `String "warming" ]
+    ; "runtime_resolution", `Assoc [ "status", `String "warming" ]
+    ; ( "tool_inventory"
+      , `Assoc
+          [ "count", `Int 0
+          ; "tools", `List []
+          ; "surface_summary", `Assoc []
+          ] )
+    ; ( "tool_usage"
+      , `Assoc
+          [ "total_calls", `Int 0
+          ; "distinct_tools_called", `Int 0
+          ; "top_20", `List []
+          ; "never_called_count", `Int 0
+          ; "dispatch_v2_enabled", `Bool false
+          ; "registered_count", `Int 0
+          ; "source", `String "dashboard_cache_warming"
+          ; "health", `String "warming"
+          ; "latest_age_s", `Null
+          ; "entry_count", `Int 0
+          ; "stale_reason", `String "warming"
+          ; "actor", `String actor
+          ] )
+    ]
+;;
+
 let schedule_projection_request_limit = 20
 
 let unix_iso_json ts = `String (Masc_domain.iso8601_of_unix_seconds ts)
@@ -2470,6 +2499,9 @@ let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojso
   let cache_key =
     dashboard_tools_cache_key ~base_path:config.base_path ~actor:actor_name
   in
+  Dashboard_cache.seed_stale_if_missing cache_key
+    ~stale_for:dashboard_tools_cache_ttl_sec
+    (dashboard_tools_warming_json ~actor:actor_name);
   let compute () =
     let config_resolution =
       run Projection_config_resolution (fun () ->

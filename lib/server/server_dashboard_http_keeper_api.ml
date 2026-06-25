@@ -8,8 +8,21 @@ include Server_dashboard_http_keeper_api_post
 let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 let freshness_slo_s = Server_dashboard_http_core_cache.freshness_slo_s
 
+let keeper_hot_path_cache_ttl_s = 30.0
+let keeper_composite_cache_ttl_s = 5.0
+
 (* Maximum number of trajectory/trace entries returned per query. *)
 let trajectory_max_limit = 500
+
+let cache_segment_of_string_opt = function
+  | Some value -> value
+  | None -> "-"
+;;
+
+let cache_segment_of_int_opt = function
+  | Some value -> string_of_int value
+  | None -> "-"
+;;
 
 let json_string_opt = function
   | Some value -> `String value
@@ -221,6 +234,179 @@ let memory_os_dashboard_json ~keeper_id =
     ]
 ;;
 
+let cached_keeper_runtime_trace_json config name ?trace_id ?turn_id ~limit () =
+  let cache_key =
+    Printf.sprintf
+      "keeper:runtime-trace:%s:%s:%s:%s:%d"
+      (Workspace.masc_root_dir config)
+      name
+      (cache_segment_of_string_opt trace_id)
+      (cache_segment_of_int_opt turn_id)
+      limit
+  in
+  let cached =
+    Dashboard_cache.get_or_compute cache_key ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
+      let status, body =
+        Domain_pool_ref.submit_io_or_inline (fun () ->
+          keeper_runtime_trace_json config name ?trace_id ?turn_id ~limit ())
+      in
+      `Assoc
+        [ ( "status"
+          , `String
+              (match status with
+               | `OK -> "ok"
+               | `Not_found -> "not_found") )
+        ; "body", body
+        ])
+  in
+  match cached with
+  | `Assoc fields ->
+    let status =
+      match List.assoc_opt "status" fields with
+      | Some (`String "not_found") -> `Not_found
+      | _ -> `OK
+    in
+    let body = Option.value ~default:cached (List.assoc_opt "body" fields) in
+    status, body
+  | other -> `OK, other
+;;
+
+let cached_keeper_config_json config name =
+  let cache_key =
+    Printf.sprintf
+      "keeper:config:%s:%s"
+      (Workspace.masc_root_dir config)
+      name
+  in
+  let cached =
+    Dashboard_cache.get_or_compute cache_key ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
+      let status, body =
+        Domain_pool_ref.submit_io_or_inline (fun () ->
+          Dashboard_http_keeper.keeper_config_json config name)
+      in
+      `Assoc
+        [ ( "status"
+          , `String
+              (match status with
+               | `OK -> "ok"
+               | `Not_found -> "not_found") )
+        ; "body", body
+        ])
+  in
+  match cached with
+  | `Assoc fields ->
+    let status =
+      match List.assoc_opt "status" fields with
+      | Some (`String "not_found") -> `Not_found
+      | _ -> `OK
+    in
+    let body = Option.value ~default:cached (List.assoc_opt "body" fields) in
+    status, body
+  | other -> `OK, other
+;;
+
+let offline_keeper_composite_json name (m : Keeper_meta_contract.keeper_meta) =
+  let now = Time_compat.now () in
+  let phase = if m.paused then "paused" else "offline" in
+  let reason =
+    if m.paused then "paused_without_registry_entry" else "registry_absent"
+  in
+  `Assoc
+    [ "keeper", `String name
+    ; "correlation_id", `String (Printf.sprintf "keeper:%s:offline" name)
+    ; "run_id", `String (Printf.sprintf "keeper:%s:offline" name)
+    ; "ts", `Float now
+    ; "phase", `String phase
+    ; "turn_phase", `String "idle"
+    ; "decision", `Assoc [ "stage", `String "idle" ]
+    ; "runtime", `Assoc [ "state", `String "offline" ]
+    ; "compaction", `Assoc [ "stage", `String "accumulating" ]
+    ; "measurement", `Assoc [ "captured", `Bool false ]
+    ; ( "invariants"
+      , `Assoc
+          [ "phase_turn_alignment", `Bool true
+          ; "no_runtime_before_measurement", `Bool true
+          ; "compaction_atomicity", `Bool true
+          ; "event_priority_monotone", `Bool true
+          ; "phase_derivation_agreement", `Bool true
+          ] )
+    ; "is_live", `Bool false
+    ; "live_turn", `Null
+    ; "last_outcome", `Null
+    ; "idle_seconds", `Int 0
+    ; "last_turn_ts", `Float m.runtime.usage.last_turn_ts
+    ; "fsm_guard_violations", `Int 0
+    ; "fsm_guard_violation_breakdown", `List []
+    ; ( "runtime_attention"
+      , `Assoc
+          [ "state", `String phase
+          ; "needs_attention", `Bool true
+          ; "blocked", `Bool false
+          ; "fiber_stop_requested", `Bool false
+          ; "reason", `String reason
+          ; "raw_phase", `String phase
+          ; "is_live", `Bool false
+          ; "source", `String "offline_composite_fallback"
+          ; "execution_current", `Bool false
+          ; "stale_execution_receipt", `Bool false
+          ; "live_turn_started_at", `Null
+          ; "live_turn_last_progress_at", `Null
+          ] )
+    ; "recommended_actions", `List []
+    ]
+;;
+
+let keeper_composite_status_to_string = function
+  | `OK -> "ok"
+  | `Not_found -> "not_found"
+  | `Internal_server_error -> "internal_server_error"
+;;
+
+let keeper_composite_status_of_string = function
+  | "not_found" -> `Not_found
+  | "internal_server_error" -> `Internal_server_error
+  | _ -> `OK
+;;
+
+let cached_keeper_composite_json config name =
+  let cache_key =
+    Printf.sprintf
+      "keeper:composite:%s:%s"
+      (Workspace.masc_root_dir config)
+      name
+  in
+  let cached =
+    Dashboard_cache.get_or_compute cache_key ~ttl:keeper_composite_cache_ttl_s (fun () ->
+      let status, body =
+        Domain_pool_ref.submit_io_or_inline (fun () ->
+          match Keeper_registry.get ~base_path:config.base_path name with
+          | Some entry ->
+            `OK, Server_dashboard_http.dashboard_keeper_composite_json ~config entry
+          | None ->
+            (match Keeper_meta_store.read_meta config name with
+             | Error e -> `Internal_server_error, error_json e
+             | Ok None ->
+               ( `Not_found
+               , error_json (Printf.sprintf "keeper %S not found" name) )
+             | Ok (Some m) -> `OK, offline_keeper_composite_json name m))
+      in
+      `Assoc
+        [ "status", `String (keeper_composite_status_to_string status)
+        ; "body", body
+        ])
+  in
+  match cached with
+  | `Assoc fields ->
+    let status =
+      match List.assoc_opt "status" fields with
+      | Some (`String value) -> keeper_composite_status_of_string value
+      | _ -> `OK
+    in
+    let body = Option.value ~default:cached (List.assoc_opt "body" fields) in
+    status, body
+  | other -> `OK, other
+;;
+
 let user_model_item_source_json = function
   | Keeper_user_model.Keeper_private -> "keeper", []
   | Keeper_user_model.Shared keepers -> "shared", keepers
@@ -364,7 +550,7 @@ let handle_keeper_get_subroutes state req request reqd =
         |> max 1 |> min trajectory_max_limit
       in
       let st, json =
-        keeper_runtime_trace_json (Mcp_server.workspace_config state) name
+        cached_keeper_runtime_trace_json (Mcp_server.workspace_config state) name
           ?trace_id ?turn_id ~limit ()
       in
       let status : Httpun.Status.t =
@@ -378,7 +564,7 @@ let handle_keeper_get_subroutes state req request reqd =
     else
       let config = (Mcp_server.workspace_config state) in
       let (st, json) =
-        Dashboard_http_keeper.keeper_config_json config name
+        cached_keeper_config_json config name
       in
       let status : Httpun.Status.t =
         match st with `OK -> `OK | `Not_found -> `Not_found
@@ -793,40 +979,63 @@ let handle_keeper_get_subroutes state req request reqd =
            Server_utils.bool_query_param req "include_thinking"
              ~default:false
          in
-         let masc_root = Workspace.masc_root_dir config in
-         let trajectory_lines =
-           Trajectory.read_all_lines ~masc_root ~keeper_name:m.name
-             ~trace_id
+         let tail_scan_lines =
+           let multiplier = if include_thinking then 3 else 8 in
+           max 500 (min 5000 (limit * multiplier))
          in
-         let all_lines =
-           if include_thinking then
-             merge_keeper_trace_lines ~config ~trace_id trajectory_lines
-           else
-             trajectory_lines
+         let cache_key =
+           Printf.sprintf
+             "keeper:trajectory:%s:%s:%s:%d:%d:%d:%b:%d"
+             (Workspace.masc_root_dir config)
+             name
+             trace_id
+             limit
+             result_max_len
+             content_max_len
+             include_thinking
+             tail_scan_lines
          in
-         (* Filter out thinking entries if not requested *)
-         let lines =
-           if include_thinking then all_lines
-           else List.filter (function
-             | Trajectory.Tool_call _ -> true
-             | Trajectory.Thinking _ -> false) all_lines
+         let json =
+           Dashboard_cache.get_or_compute cache_key ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               let masc_root = Workspace.masc_root_dir config in
+               let trajectory_lines =
+                 Trajectory.read_recent_lines ~masc_root ~keeper_name:m.name
+                   ~trace_id ~max_lines:tail_scan_lines
+               in
+               let all_lines =
+                 if include_thinking then
+                   merge_keeper_trace_lines ~config ~trace_id trajectory_lines
+                 else
+                   trajectory_lines
+               in
+               (* Filter out thinking entries if not requested *)
+               let lines =
+                 if include_thinking then all_lines
+                 else List.filter (function
+                   | Trajectory.Tool_call _ -> true
+                   | Trajectory.Thinking _ -> false) all_lines
+               in
+               let total = List.length lines in
+               let recent =
+                 if total <= limit then lines
+                 else
+                   let drop = total - limit in
+                   List.filteri (fun i _e -> i >= drop) lines
+               in
+               `Assoc [
+                 ("keeper", `String name);
+                 ("trace_id", `String trace_id);
+                 ("generation", `Int m.runtime.generation);
+                 ("total_entries", `Int total);
+                 ("total_entries_scope", `String "tail");
+                 ("total_entries_exact", `Bool false);
+                 ("tail_scan_lines", `Int tail_scan_lines);
+                 ("showing", `Int (List.length recent));
+                 ("entries", `List (List.map
+                   (Trajectory.trajectory_line_to_json ~result_max_len ~content_max_len) recent));
+               ]))
          in
-         let total = List.length lines in
-         let recent =
-           if total <= limit then lines
-           else
-             let drop = total - limit in
-             List.filteri (fun i _e -> i >= drop) lines
-         in
-         let json = `Assoc [
-           ("keeper", `String name);
-           ("trace_id", `String trace_id);
-           ("generation", `Int m.runtime.generation);
-           ("total_entries", `Int total);
-           ("showing", `Int (List.length recent));
-           ("entries", `List (List.map
-             (Trajectory.trajectory_line_to_json ~result_max_len ~content_max_len) recent));
-         ] in
          Http.Response.json_value ~compress:true ~request:req json reqd)
   else if ends_with "/transitions" then
     let name = extract_name "/transitions" in
@@ -1066,17 +1275,15 @@ let handle_keeper_get_subroutes state req request reqd =
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
-      let base_path = (Mcp_server.workspace_config state).base_path in
-      (match Keeper_registry.get ~base_path name with
-       | None ->
-         respond_error ~status:`Not_found reqd
-           (Printf.sprintf "keeper %S not registered" name)
-       | Some entry ->
-         let json =
-           Server_dashboard_http.dashboard_keeper_composite_json
-             ~config:(Mcp_server.workspace_config state) entry
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd)
+      let config = Mcp_server.workspace_config state in
+      let status, json = cached_keeper_composite_json config name in
+      let status : Httpun.Status.t =
+        match status with
+        | `OK -> `OK
+        | `Not_found -> `Not_found
+        | `Internal_server_error -> `Internal_server_error
+      in
+      Http.Response.json_value ~status ~compress:true ~request:req json reqd
   else if req_path = prefix ^ "regime" then
     (* 7th FSM axis MVP: fleet-wide behavioral-regime snapshot. Same
        purity contract as the composite route above, uses the

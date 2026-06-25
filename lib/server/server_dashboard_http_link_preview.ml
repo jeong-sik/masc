@@ -12,10 +12,14 @@ type cache_payload = {
   expires_at : float;
 }
 
+type preview_result =
+  | Preview of Yojson.Safe.t
+  | Preview_error of string
+
 let cache_ttl_sec = Masc_time_constants.hour
 let error_ttl_sec = 300.0
-let max_preview_urls = 8
-let preview_timeout_sec = 5.0
+let max_preview_urls = 4
+let preview_timeout_sec = 0.25
 let max_html_chars = 262_144
 
 let preview_cache_mu = Eio.Mutex.create ()
@@ -478,34 +482,41 @@ let dashboard_link_previews_http_json ~state ~(args : Yojson.Safe.t) :
   | _, None, _ -> Error "dashboard link preview net unavailable"
   | _, _, (Error _ as error) -> error
   | Some clock, Some net, Ok urls ->
-      let preview_fields = ref [] in
-      let error_fields = ref [] in
-      List.iter
-        (fun url ->
-          match cache_lookup url with
-          | Some cached ->
-              (match error_reason_of_json cached with
-               | Some reason ->
-                   error_fields := (url, `String reason) :: !error_fields
-               | None ->
-                preview_fields :=
-                  (url, with_cache_state cached "hit") :: !preview_fields)
-          | None -> (
-              match fetch_preview ~clock ~net url with
-              | Ok preview ->
-                  let persisted = with_cache_state preview "miss" in
-                  cache_store ~ttl:cache_ttl_sec url persisted;
-                  preview_fields := (url, persisted) :: !preview_fields
-              | Error reason ->
-                  let error_preview =
-                    error_json ~url ~reason ~cache_state:"miss" ()
-                  in
-                  cache_store ~ttl:error_ttl_sec url error_preview;
-                  error_fields := (url, `String reason) :: !error_fields))
-        urls;
+      let preview_for_url url =
+        match cache_lookup url with
+        | Some cached -> (
+          match error_reason_of_json cached with
+          | Some reason -> Preview_error reason
+          | None -> Preview (with_cache_state cached "hit"))
+        | None -> (
+          match fetch_preview ~clock ~net url with
+          | Ok preview ->
+            let persisted = with_cache_state preview "miss" in
+            cache_store ~ttl:cache_ttl_sec url persisted;
+            Preview persisted
+          | Error reason ->
+            let error_preview = error_json ~url ~reason ~cache_state:"miss" () in
+            cache_store ~ttl:error_ttl_sec url error_preview;
+            Preview_error reason)
+      in
+      let results =
+        Eio.Fiber.List.map
+          ~max_fibers:(min max_preview_urls (List.length urls))
+          (fun url -> url, preview_for_url url)
+          urls
+      in
+      let preview_fields, error_fields =
+        List.fold_left
+          (fun (previews, errors) (url, result) ->
+             match result with
+             | Preview preview -> (url, preview) :: previews, errors
+             | Preview_error reason -> previews, (url, `String reason) :: errors)
+          ([], [])
+          results
+      in
       Ok
         (`Assoc
           [
-            ("previews", `Assoc (List.rev !preview_fields));
-            ("errors", `Assoc (List.rev !error_fields));
+            ("previews", `Assoc (List.rev preview_fields));
+            ("errors", `Assoc (List.rev error_fields));
           ])

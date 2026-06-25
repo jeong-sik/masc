@@ -143,6 +143,12 @@ val read_all_lines :
   trajectory_line list
 (** Read all entries (tool calls + thinking) from JSONL. *)
 
+val read_recent_lines :
+  masc_root:string -> keeper_name:string -> trace_id:string -> max_lines:int ->
+  trajectory_line list
+(** Read a bounded tail of entries (tool calls + thinking) from JSONL.
+    Returns entries chronologically, oldest first. *)
+
 (** {1 Accumulator}
 
     Mutable session-scoped state for tracking tool calls in progress. *)

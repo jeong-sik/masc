@@ -743,6 +743,109 @@ let read_entries ~(masc_root : string) ~(keeper_name : string) ~(trace_id : stri
           | None -> None
         with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
 
+let trajectory_line_of_json json =
+  match Json_util.assoc_member_opt "type" json with
+  | Some (`String "trajectory_summary") -> None
+  | Some (`String "thinking") ->
+      Some
+        (Thinking
+           { ts =
+               (match Json_util.assoc_member_opt "ts" json with
+                | Some (`Float f) -> f
+                | Some (`Int n) -> Float.of_int n
+                | _ -> 0.0)
+           ; ts_iso =
+               (match Json_util.assoc_member_opt "ts_iso" json with
+                | Some (`String s) -> s
+                | _ -> "")
+           ; turn =
+               (match Json_util.assoc_member_opt "turn" json with
+                | Some (`Int n) -> n
+                | _ -> 0)
+           ; content =
+               (match Json_util.assoc_member_opt "content" json with
+                | Some (`String s) -> s
+                | _ -> "")
+           ; content_length =
+               (match Json_util.assoc_member_opt "content_length" json with
+                | Some (`Int n) -> n
+                | _ -> 0)
+           ; redacted =
+               (match Json_util.assoc_member_opt "redacted" json with
+                | Some (`Bool b) -> b
+                | _ -> false)
+           })
+  | _ ->
+      (match tool_call_entry_of_json json with
+       | Some (entry, _parsed_gate) -> Some (Tool_call entry)
+       | None -> None)
+;;
+
+let load_tail_lines path ~max_lines =
+  if max_lines <= 0 || not (Sys.file_exists path) then []
+  else
+    let ic = open_in_bin path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+         let file_len = in_channel_length ic in
+         if file_len = 0 then []
+         else
+           let chunk_size = 8192 in
+           let target_newlines = max_lines * 3 in
+           let chunks = ref [] in
+           let total_newlines = ref 0 in
+           let pos = ref file_len in
+           while !pos > 0 && !total_newlines <= target_newlines do
+             let read_start = max 0 (!pos - chunk_size) in
+             let read_len = !pos - read_start in
+             seek_in ic read_start;
+             let chunk = Bytes.create read_len in
+             really_input ic chunk 0 read_len;
+             chunks := chunk :: !chunks;
+             for i = 0 to read_len - 1 do
+               if Bytes.get chunk i = '\n' then incr total_newlines
+             done;
+             pos := read_start
+           done;
+           let total_bytes =
+             List.fold_left (fun acc chunk -> acc + Bytes.length chunk) 0 !chunks
+           in
+           let combined = Bytes.create total_bytes in
+           let _ =
+             List.fold_left
+               (fun offset chunk ->
+                  let len = Bytes.length chunk in
+                  Bytes.blit chunk 0 combined offset len;
+                  offset + len)
+               0
+               !chunks
+           in
+           let raw_lines = Bytes.to_string combined |> String.split_on_char '\n' in
+           let raw_lines =
+             if !pos > 0 then
+               match raw_lines with
+               | _partial :: rest -> rest
+               | [] -> []
+             else
+               raw_lines
+           in
+           let all_lines =
+             raw_lines |> List.filter (fun line -> String.trim line <> "")
+           in
+           let total = List.length all_lines in
+           if total <= max_lines then all_lines
+           else List.filteri (fun i _ -> i >= total - max_lines) all_lines)
+;;
+
+let trajectory_lines_of_jsonl_lines lines =
+  List.filter_map
+    (fun line ->
+       try Yojson.Safe.from_string line |> trajectory_line_of_json with
+       | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
+    lines
+;;
+
 (** Read all trajectory lines including thinking entries. *)
 let read_all_lines ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string)
     : trajectory_line list =
@@ -752,22 +855,14 @@ let read_all_lines ~(masc_root : string) ~(keeper_name : string) ~(trace_id : st
     let content = Fs_compat.load_file path in
     String.split_on_char '\n' content
     |> List.filter (fun line -> String.trim line <> "")
-    |> List.filter_map (fun line ->
-        try
-          let json = Yojson.Safe.from_string line in
-          match Json_util.assoc_member_opt "type" json with
-          | Some (`String "trajectory_summary") -> None
-          | Some (`String "thinking") ->
-              Some (Thinking {
-                ts = (match Json_util.assoc_member_opt "ts" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0);
-                ts_iso = (match Json_util.assoc_member_opt "ts_iso" json with Some (`String s) -> s | _ -> "");
-                turn = (match Json_util.assoc_member_opt "turn" json with Some (`Int n) -> n | _ -> 0);
-                content = (match Json_util.assoc_member_opt "content" json with Some (`String s) -> s | _ -> "");
-                content_length = (match Json_util.assoc_member_opt "content_length" json with Some (`Int n) -> n | _ -> 0);
-                redacted = (match Json_util.assoc_member_opt "redacted" json with Some (`Bool b) -> b | _ -> false);
-              })
-          | _ ->
-              (match tool_call_entry_of_json json with
-               | Some (entry, _parsed_gate) -> Some (Tool_call entry)
-               | None -> None)
-        with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
+    |> trajectory_lines_of_jsonl_lines
+
+let read_recent_lines
+      ~(masc_root : string)
+      ~(keeper_name : string)
+      ~(trace_id : string)
+      ~(max_lines : int)
+  : trajectory_line list
+  =
+  let path = trajectory_path masc_root keeper_name trace_id in
+  load_tail_lines path ~max_lines |> trajectory_lines_of_jsonl_lines

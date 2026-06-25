@@ -36,9 +36,24 @@ type runtime_manifest_scan =
   ; mutable latest_context_injected_row : Keeper_runtime_manifest.t option
   ; mutable latest_context_compacted_row : Keeper_runtime_manifest.t option
   ; mutable dag_edges : (string * string) list
+  ; mutable scanned_lines : int
+  ; scan_line_limit : int
+  ; scan_scope : string
   }
 
-let make_runtime_manifest_scan ~path ~limit =
+let runtime_manifest_tail_scan_min_lines = 1000
+let runtime_manifest_tail_scan_max_lines = 6000
+let runtime_manifest_tail_scan_multiplier = 24
+
+let runtime_manifest_tail_scan_line_limit ~limit =
+  max
+    runtime_manifest_tail_scan_min_lines
+    (min
+       runtime_manifest_tail_scan_max_lines
+       (limit * runtime_manifest_tail_scan_multiplier))
+;;
+
+let make_runtime_manifest_scan ~path ~limit ~scan_line_limit ~scan_scope =
   { path
   ; limit
   ; returned_rows = Queue.create ()
@@ -69,6 +84,9 @@ let make_runtime_manifest_scan ~path ~limit =
   ; latest_context_injected_row = None
   ; latest_context_compacted_row = None
   ; dag_edges = []
+  ; scanned_lines = 0
+  ; scan_line_limit
+  ; scan_scope
   }
 
 let push_bounded queue limit value =
@@ -209,18 +227,27 @@ let update_runtime_manifest_scan scan row =
      push_bounded scan.provider_attempt_rows scan.limit row
    | _ -> ())
 
-let read_runtime_manifest_scan ~config ~keeper_name ~trace_id ?turn_id ~limit ()
-  =
+let read_runtime_manifest_scan ~config ~keeper_name ~trace_id ?turn_id ~limit () =
   let path =
     Keeper_runtime_manifest.path_for_trace config ~keeper_name ~trace_id
   in
-  let scan = make_runtime_manifest_scan ~path ~limit in
-  Fs_compat.fold_jsonl_lines
-    ~init:()
-    ~f:(fun () ~line_no:_ json ->
-      match Keeper_runtime_manifest.of_json json with
-      | Ok row when manifest_row_matches ?turn_id keeper_name trace_id row ->
-          update_runtime_manifest_scan scan row
-      | Ok _ | Error _ -> ())
-    path;
+  let scan_line_limit = runtime_manifest_tail_scan_line_limit ~limit in
+  let scan =
+    make_runtime_manifest_scan
+      ~path
+      ~limit
+      ~scan_line_limit
+      ~scan_scope:"tail"
+  in
+  Dated_jsonl.load_tail_lines path ~max_lines:scan_line_limit
+  |> List.iter
+       (fun line ->
+          scan.scanned_lines <- scan.scanned_lines + 1;
+          try
+            match Yojson.Safe.from_string line |> Keeper_runtime_manifest.of_json with
+            | Ok row when manifest_row_matches ?turn_id keeper_name trace_id row ->
+                update_runtime_manifest_scan scan row
+            | Ok _ | Error _ -> ()
+          with
+          | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ());
   scan

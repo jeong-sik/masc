@@ -75,6 +75,9 @@ let is_env_var_shaped name =
   String.iter (fun c -> if c >= 'a' && c <= 'z' then has_lower := true) name;
   not !has_lower
 
+let is_wildcard_reference name =
+  String.contains name '*'
+
 (** Find all keeper_*/masc_* tokens in [text]. Each token is returned as
     [(kind, raw_name, start, end_excl)]. The scan is linear in the length of
     the input and is shared by both verification and sanitization so the two
@@ -118,9 +121,10 @@ let dedup_tokens tokens =
 (* ── Verification ─────────────────────────────────────────────────── *)
 
 let verify_token ~keeper_name ~source (kind, name) : string option =
-  if is_env_var_shaped name then None
-    (* all-uppercase masc_/keeper_ 토큰은 도구가 아니라 env 변수(MASC_BASE_PATH 등).
-       도구명은 소문자 관례이므로 flag/strip 대상에서 제외 — 접두 휴리스틱 오탐 방지. *)
+  (* All-uppercase masc_/keeper_ tokens are env vars (MASC_BASE_PATH, etc.),
+     not tool names. Names with wildcard suffixes describe a category in prose,
+     not a concrete callable tool. *)
+  if is_env_var_shaped name || is_wildcard_reference name then None
   else
     let normalized = String.lowercase_ascii name in
     match Keeper_tool_resolution.resolve normalized with
@@ -198,6 +202,7 @@ let strip_unresolved_tool_tokens ?keeper_name text : string =
        Buffer.add_substring buf text !pos (start - !pos);
        let keep =
          is_env_var_shaped name
+         || is_wildcard_reference name
          ||
          match Keeper_tool_resolution.resolve (String.lowercase_ascii name) with
          | Keeper_tool_resolution.Resolved _ | Keeper_tool_resolution.Alias_to _ ->

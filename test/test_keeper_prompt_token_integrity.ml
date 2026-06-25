@@ -61,6 +61,20 @@ let test_all_uppercase_token_is_env_var_not_reported () =
   Alcotest.(check (float 0.0001))
     "metric unchanged" before (total_unknown ())
 
+let test_wildcard_reference_is_documentation_not_tool () =
+  let prompt =
+    "Use WebSearch or WebFetch; do not call internal masc_web_* names or any \
+     keeper_* placeholder."
+  in
+  let before = total_unknown () in
+  let unknowns =
+    Scanner.scan_text ~keeper_name:keeper ~source:System_prompt prompt
+  in
+  Alcotest.(check (list string))
+    "wildcard references are not concrete tool tokens" [] unknowns;
+  Alcotest.(check (float 0.0001))
+    "metric unchanged" before (total_unknown ())
+
 let test_unknown_masc_token_reported () =
   let prompt = "Use masc_p0_3_unknown_gadget for diagnostics." in
   let before = total_unknown () in
@@ -152,6 +166,12 @@ let test_strip_keeps_env_var_shaped_token () =
     "env var preserved verbatim" text
     (Scanner.strip_unresolved_tool_tokens text)
 
+let test_strip_keeps_wildcard_reference () =
+  let text = "Do not call internal masc_web_* names or keeper_* placeholders." in
+  Alcotest.(check string)
+    "wildcard references preserved verbatim" text
+    (Scanner.strip_unresolved_tool_tokens text)
+
 let test_strip_is_identity_when_all_resolve () =
   let text = "Use keeper_board_post and masc_keeper_status only." in
   Alcotest.(check string)
@@ -181,6 +201,8 @@ let () =
             test_unknown_token_reported;
           Alcotest.test_case "all-uppercase token is env-var, not reported"
             `Quick test_all_uppercase_token_is_env_var_not_reported;
+          Alcotest.test_case "wildcard reference is documentation, not tool"
+            `Quick test_wildcard_reference_is_documentation_not_tool;
           Alcotest.test_case "unknown masc token reported" `Quick
             test_unknown_masc_token_reported;
           Alcotest.test_case "deduplicates within surface" `Quick
@@ -197,6 +219,8 @@ let () =
             test_strip_removes_unresolved_lowercase_token;
           Alcotest.test_case "strip keeps env-var-shaped token" `Quick
             test_strip_keeps_env_var_shaped_token;
+          Alcotest.test_case "strip keeps wildcard reference" `Quick
+            test_strip_keeps_wildcard_reference;
           Alcotest.test_case "strip is identity when all resolve" `Quick
             test_strip_is_identity_when_all_resolve;
           Alcotest.test_case "strip emits stripped metric" `Quick

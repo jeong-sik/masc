@@ -522,6 +522,7 @@ type keeper_meta =
   ; telemetry_feedback_enabled : bool option
   ; telemetry_feedback_window_hours : int option
   ; always_approve : bool option
+  ; multimodal_policy : Keeper_multimodal_policy.t option
   ; (* -- Agent runtime state (usage, tracing, autonomy metrics) -- *)
     runtime : agent_runtime_state
   ; (* -- Identity & concurrency -- *)
@@ -637,6 +638,9 @@ let effective_meta_of_profile_defaults
           always_approve =
             apply_profile_default_opt defaults.always_approve
               meta.always_approve;
+          multimodal_policy =
+            apply_profile_default_opt defaults.multimodal_policy
+              meta.multimodal_policy;
           oas_env =
             (match defaults.oas_env with
              | [] -> meta.oas_env

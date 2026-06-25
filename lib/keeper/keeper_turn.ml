@@ -457,6 +457,22 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
       let turn_tracker = Progress.start_tracking ~task_id:turn_task_id ~total_steps:5 () in
       Progress.Tracker.step turn_tracker ~message:"Preparing keeper turn configuration" ();
       let meta = meta0 in
+      (* RFC-keeper-vision-delegation-tool §2.3 (site 1): for a Delegate keeper,
+         store incoming images and replace them with placeholders before they
+         enter the turn, so the image is read via analyze_image rather than
+         carried in the conversation. No-op for Reroute/Inherit keepers. *)
+      let user_blocks =
+        match user_blocks with
+        | Some blocks
+          when Keeper_vision_ingest.should_delegate meta.multimodal_policy ->
+          let dir = Keeper_vision_ingest.store_dir ~keeper_name:meta.name in
+          let store bytes =
+            Multimodal.Vision_artifact_store.store ~dir bytes
+            |> Result.map Multimodal.Vision_artifact_store.to_string
+          in
+          Some (Keeper_vision_ingest.intercept_image_blocks ~store blocks)
+        | other -> other
+      in
       match resolve_turn_runtime_id meta with
       | Error e ->
         Progress.stop_tracking turn_task_id;

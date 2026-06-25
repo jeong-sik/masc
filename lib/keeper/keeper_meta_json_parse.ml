@@ -488,6 +488,10 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; handoff_threshold = policy.pp_handoff_threshold
                    ; handoff_cooldown_sec = policy.pp_handoff_cooldown_sec
                    ; always_approve = policy.pp_always_approve
+                   ; (* base value; effective_meta_of_profile_defaults overlays the
+                        persona/TOML multimodal_policy, so None here resolves to the
+                        default (Reroute) until the profile sets it. *)
+                     multimodal_policy = None
                    ; created_at =
                        (if state.ps_created_at_raw = ""
                         then now_iso ()

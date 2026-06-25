@@ -23,6 +23,8 @@
   keeper_types_profile_defaults
   keeper_types_profile
   keeper_meta_contract
+  keeper_multimodal_policy
+  keeper_vision_ingest
   keeper_personality_io
   keeper_meta_json_parse
   keeper_meta_json

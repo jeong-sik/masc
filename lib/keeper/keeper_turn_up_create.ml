@@ -354,6 +354,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         telemetry_feedback_enabled = p.profile_defaults.telemetry_feedback_enabled;
         telemetry_feedback_window_hours = p.profile_defaults.telemetry_feedback_window_hours;
         always_approve = p.profile_defaults.always_approve;
+        multimodal_policy = p.profile_defaults.multimodal_policy;
         runtime = {
           usage = {
             total_turns = 0;

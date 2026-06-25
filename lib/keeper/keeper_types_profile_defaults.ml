@@ -28,6 +28,7 @@ type keeper_profile_defaults = {
   per_provider_timeout_state : per_provider_timeout_state;
   per_provider_timeout : float option;
   always_approve : bool option;
+  multimodal_policy : Keeper_multimodal_policy.t option;
   (* Per-keeper OAS CLI transport env vars (OAS 0.159+).
      Parsed from [[keeper.oas_env]] table.  Keys MUST match
      ^OAS_[A-Z]+_.+ — any other entries are dropped with
@@ -69,6 +70,7 @@ let empty_keeper_profile_defaults =
     per_provider_timeout_state = Per_provider_timeout_unset;
     per_provider_timeout = None;
     always_approve = None;
+    multimodal_policy = None;
     unknown_toml_keys = [];
     oas_env = [];
   }

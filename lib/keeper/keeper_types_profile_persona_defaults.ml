@@ -64,6 +64,10 @@ let load_from_path ~name path : keeper_profile_defaults =
               per_provider_timeout_state;
               per_provider_timeout;
               always_approve = Safe_ops.json_bool_opt "always_approve" keeper_json;
+              multimodal_policy =
+                Option.bind
+                  (Safe_ops.json_string_opt "multimodal_policy" keeper_json)
+                  Keeper_multimodal_policy.of_string;
               oas_env = [];
               unknown_toml_keys = [];
             }

@@ -150,6 +150,7 @@ type keeper_profile_defaults =
   per_provider_timeout_state : per_provider_timeout_state;
   per_provider_timeout : float option;
   always_approve : bool option;
+  multimodal_policy : Keeper_multimodal_policy.t option;
   oas_env : (string * string) list;
   unknown_toml_keys : string list;
 }

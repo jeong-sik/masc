@@ -150,6 +150,8 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         per_provider_timeout_state;
         per_provider_timeout;
         always_approve = bool_ "always_approve";
+        multimodal_policy =
+          Option.bind (str "multimodal_policy") Keeper_multimodal_policy.of_string;
         oas_env = extract_oas_env_from_doc doc;
         unknown_toml_keys = [];
       })
@@ -180,6 +182,7 @@ let parsed_field_key_names =
   ; "telemetry_feedback_window_hours"
   ; "per_provider_timeout"
   ; "always_approve"
+  ; "multimodal_policy"
   ]
 
 (** Canonical TOML key names used by [detect_unknown_keeper_toml_keys].
@@ -213,6 +216,7 @@ let canonical_keeper_toml_key_names =
   ; "telemetry_feedback_window_hours"
   ; "per_provider_timeout"
   ; "always_approve"
+  ; "multimodal_policy"
   ]
 
 let loader_level_keeper_toml_key_names = [ "base" ]
@@ -344,6 +348,7 @@ let merge_keeper_profile_defaults
     per_provider_timeout_state;
     per_provider_timeout;
     always_approve = prefer overlay.always_approve base.always_approve;
+    multimodal_policy = prefer overlay.multimodal_policy base.multimodal_policy;
     oas_env =
       (let overlay_keys = List.map fst overlay.oas_env in
        let surviving_base =

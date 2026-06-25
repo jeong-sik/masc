@@ -2514,3 +2514,9 @@
  (name test_keeper_vision_tool)
  (modules test_keeper_vision_tool)
  (libraries masc_test_deps))
+
+; RFC-keeper-vision-delegation-tool §2.3 — image ingestion (site 1) transform
+(test
+ (name test_keeper_vision_ingest)
+ (modules test_keeper_vision_ingest)
+ (libraries masc_test_deps))

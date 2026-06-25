@@ -1227,13 +1227,14 @@
 
 /* roster row command menu */
 .kp-row { position: relative; }
-/* on hover the ⋯ takes the right slot — fade the time/att stack so they
+/* on hover the command menu button takes the right slot — fade the time/att stack so they
    don't collide with the absolutely-positioned button */
 .kp-row:hover .kp-right { opacity: 0; pointer-events: none; }
 .kp-more {
   position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
   width: 24px; height: 24px; border-radius: var(--radius-sm); border: 1px solid var(--border-main);
-  background: var(--bg-panel); color: var(--text-mid); cursor: pointer; font-size: 14px; line-height: 1;
+  background: var(--bg-panel); color: var(--text-mid); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; padding: 0;
   opacity: 0; transition: 0.14s; z-index: 2;
 }
 .kp-row:hover .kp-more { opacity: 1; }

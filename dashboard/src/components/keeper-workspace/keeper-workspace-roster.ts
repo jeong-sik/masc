@@ -7,7 +7,7 @@
 import { html } from 'htm/preact'
 import {
   MessageSquare,
-  MoreHorizontal,
+  MoreVertical,
   Pause,
   Play,
   RotateCcw,
@@ -390,7 +390,7 @@ function RosterRow({
         onClick=${(event: MouseEvent) => onMenu(keeper, event)}
         data-testid=${`kw-roster-menu-${keeper.name}`}
       >
-        <${MoreHorizontal} size=${15} aria-hidden="true" />
+        <${MoreVertical} size=${16} focusable="false" aria-hidden="true" />
       </button>
     </div>
   `

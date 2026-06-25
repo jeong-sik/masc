@@ -359,11 +359,11 @@ export function AgentDetailOverlay() {
             ${renderOwnedTasks(ownedTasks, visibleOwnedTasks, isFilteringTasks)}
           <//>
 
-          <${SectionCard} label="최근 활동">
-            ${lines.length === 0
-              ? html`<div class="h-full min-h-30"><${EmptyState} message="최근 활동 메시지가 없습니다" compact /></div>`
-              : html`<div role="log" aria-label="최근 활동 로그" class="max-h-60 overflow-y-auto flex flex-col gap-2 pr-1 custom-scrollbar">${lines.map((line: string, idx: number) => html`<div key=${idx} class="v2-monitoring-row border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2.5 font-mono text-xs text-[var(--color-fg-primary)] leading-relaxed rounded-[var(--r-1)] hover:bg-[var(--color-bg-hover)] hover:border-[var(--color-border-strong)] transition-colors">${line}</div>`)}</div>`}
-          <//>
+          ${lines.length > 0
+            ? html`<${SectionCard} label="최근 활동">
+              <div role="log" aria-label="최근 활동 로그" class="max-h-60 overflow-y-auto flex flex-col gap-2 pr-1 custom-scrollbar">${lines.map((line: string, idx: number) => html`<div key=${idx} class="v2-monitoring-row border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2.5 font-mono text-xs text-[var(--color-fg-primary)] leading-relaxed rounded-[var(--r-1)] hover:bg-[var(--color-bg-hover)] hover:border-[var(--color-border-strong)] transition-colors">${line}</div>`)}</div>
+            <//>`
+            : null}
         </div>
 
         <div class="flex flex-col gap-5">

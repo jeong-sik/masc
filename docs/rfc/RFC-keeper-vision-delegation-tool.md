@@ -39,6 +39,7 @@ RFC-0265 §1 itself frames the goal as "the image must reach a model that can re
 | Artifact handle lookup | deterministic | abstraction exists (`Multimodal.Workspace.find_by_id`, `workspace.ml:38`) but is **output-side and lossy** — see §2.5 |
 | Durable image bytes across turns | deterministic | **does NOT exist** — `Payload.of_json` rebuilds `Lazy_payload (fun () -> "")` (`payload.mli:35-42`); bytes are empty after any checkpoint/restart |
 | Tool dispatch that makes a provider sub-call | deterministic | **new shape** — no in-process handler threads `sw/net/clock` to `complete` today (§2.6) |
+| Decision to read an image placeholder | non-deterministic unless policy-gated | keeper planning may choose to call or skip `analyze_image`; Phase 2 must choose explicit auto-call / completion-gate / allowed-skip policy before making delegation default (§3, §7) |
 | The extraction text (what the image "says") | non-deterministic | the vision runtime sub-call |
 | Main conversation reasoning | as assigned | the keeper's own runtime |
 
@@ -49,6 +50,7 @@ The raw image bytes cross into the vision sub-call **only**. The main keeper con
 - Input: `{ artifact: <handle>, query: string }`. `query` lets the keeper ask a specific question ("what is in the top-left?", "transcribe the text", "describe the chart").
 - Behavior: load the artifact bytes (§2.5), build a one-shot message `[Text query; Image artifact]`, dispatch to a configured **vision runtime** (a sub-call, not a reroute of the main turn), return the assistant text as the tool result.
 - Failure is a **tool error** (typed `Result`), localized to the tool call — not a whole-turn `no textual reply`. The keeper can retry, ask differently, or proceed.
+- Empty or whitespace-only extraction text is **not** `Ok ""`. It must return a typed error such as `empty_extraction`, because the 2026-06-25 incident failed through an empty assistant reply; delegation must not reintroduce that silent-success class inside the tool.
 
 ### 2.3 Ingestion interception (write-time, not read-time) — ALL entry sites `[review: was N-of-M]`
 
@@ -88,7 +90,7 @@ The librarian (`keeper_librarian_runtime.ml:20-22`, routed by `runtime_id_for_li
 
 **Cons / limits**
 - **Lossy by default, and strictly more model calls for multi-turn-over-image** `[review-quantified]`. RFC-0265 reroute needs zero extra model calls to see pixels (the answering model always has them); delegation needs ≥1 sub-call on turn 1 and **another full provider round-trip per later turn that needs any uncaptured detail**, against a possibly single-slot vision runtime. The latency win holds **only** for the "one image, one question, then back to text" shape. Making delegation the Phase-3 default pushes the common multi-turn-over-image case onto the worse path; Phase 3 must justify that the one-shot shape dominates, or keep reroute as the default for image-heavy keepers.
-- **Affordance dependence**: the keeper must decide to call the tool. Needs prompt/affordance work and possibly an auto-call on first image.
+- **Affordance dependence**: the keeper must decide to call the tool. That read/no-read choice is non-deterministic unless the workflow adds an explicit policy. For image-critical turns (for example "analyze this screenshot"), Phase 2 must either auto-call before completion or block completion until the image is read or explicitly marked intentionally skipped.
 - **Two mechanisms coexist**: requires the persisted policy axis of §2.4. Without it the boundary is undecidable.
 - Extraction quality is bounded by the vision model and the `query`; a poor query yields a poor description the main model cannot recover from without re-query.
 
@@ -102,10 +104,10 @@ The librarian (`keeper_librarian_runtime.ml:20-22`, routed by `runtime_id_for_li
 
 ## 5. Verification
 
-- **Unit**: `analyze_image` returns `Ok text` on a valid artifact; `Error` on a missing artifact or vision sub-call failure. After ingestion, `required_modalities_of_messages (main history)` never contains `"image"` — asserted **after a checkpoint save+reload round-trip** (covers §2.3 site 2).
+- **Unit**: `analyze_image` returns `Ok text` only for non-empty extraction text; `Error` on a missing artifact, vision sub-call failure, or empty/whitespace-only extraction. After ingestion, `required_modalities_of_messages (main history)` never contains `"image"` — asserted **after a checkpoint save+reload round-trip** (covers §2.3 site 2).
 - **Durability**: store bytes, persist + reload a checkpoint, re-read the handle → bytes are non-empty and byte-identical (revert-red against the current lossy `Payload.of_json`).
 - **Reroute non-fire**: a keeper with `multimodal_policy = delegate` given an image (post Phase 2) → `decide_modality_reroute_for_runtime` returns `No_reroute_needed` for subsequent text turns (revert-red: before Phase 2 it returns `Reroute`).
-- **Integration**: image in → tool called → text result in history; a follow-up needing new detail triggers a second `analyze_image`.
+- **Integration**: image in → tool called → text result in history; a follow-up needing new detail triggers a second `analyze_image`. For image-critical prompts, a turn that never reads the placeholder must fail the configured auto-call/completion-gate policy rather than silently answering from text-only context.
 - **TLA+ (optional, per repo bug-model pattern)**: invariant `NoRawImageInMainHistoryAfterIngestion`; `BugAction`s that leave the image inline at *either* entry site must violate it.
 
 ## 6. Workaround self-check (CLAUDE.md gate)
@@ -118,7 +120,7 @@ The librarian (`keeper_librarian_runtime.ml:20-22`, routed by `runtime_id_for_li
 
 ## 7. Open questions
 
-- Auto-call on first image vs explicit keeper decision?
+- Auto-call on first image vs explicit keeper decision vs completion gate for image-critical prompts?
 - Should `document` (PDF) reuse the same tool or a sibling `analyze_document`?
 - Does any current keeper genuinely need whole-turn native vision (→ `multimodal_policy = reroute`)?
 - Blob store backend for §2.5 (content-addressed local files vs an existing store) and its eviction policy.

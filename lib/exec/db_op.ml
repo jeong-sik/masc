@@ -7,7 +7,7 @@ type mutating_verb =
   | `Other ]
 
 type destructive_verb =
-  [ `Drop | `Truncate | `Delete ]
+  [ `Drop | `Truncate | `Delete | `Copy_program ]
 
 type t =
   | Read of read_verb
@@ -128,6 +128,11 @@ let drop_target_keyword = function
 ;;
 
 let destructive_phrase stmt =
+  let rec has_copy_program = function
+    | [] -> false
+    | "FROM" :: "PROGRAM" :: _ | "TO" :: "PROGRAM" :: _ -> true
+    | _ :: rest -> has_copy_program rest
+  in
   let rec scan = function
     | [] -> None
     | "DROP" :: next :: _ when drop_target_keyword next -> Some (Destructive `Drop)
@@ -135,7 +140,10 @@ let destructive_phrase stmt =
     | "DELETE" :: _ -> Some (Destructive `Delete)
     | _ :: rest -> scan rest
   in
-  scan (sql_tokens stmt)
+  match sql_tokens stmt with
+  | "COPY" :: rest when has_copy_program rest ->
+    Some (Destructive `Copy_program)
+  | tokens -> scan tokens
 ;;
 
 (* One classified statement, or [Error] for an unrecognized leading keyword. *)
@@ -249,4 +257,5 @@ let pp fmt = function
   | Destructive `Drop -> Format.fprintf fmt "db:destructive(drop)"
   | Destructive `Truncate -> Format.fprintf fmt "db:destructive(truncate)"
   | Destructive `Delete -> Format.fprintf fmt "db:destructive(delete)"
+  | Destructive `Copy_program -> Format.fprintf fmt "db:destructive(copy_program)"
 ;;

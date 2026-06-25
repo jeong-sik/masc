@@ -313,9 +313,31 @@ let test_destructive_sql_denied_under_autonomous () =
     [ "psql", "-c", "drop table users"
     ; "psql", "-c", "DELETE FROM logs"
     ; "psql", "--command", "truncate table cache"
+    ; "psql", "-c", "COPY logs FROM PROGRAM 'cat /etc/passwd'"
     ; "mysql", "-e", "drop database prod"
     ; "mariadb", "-e", "delete from sessions"
     ; "cockroach", "-e", "drop table users"
+    ]
+
+(* A database CLI may accept multiple SQL command flags.  The floor must scan
+   every literal value so a harmless first query cannot mask a later
+   destructive query. *)
+let test_destructive_sql_later_flag_denied_under_autonomous () =
+  List.iter
+    (fun (bin, args) ->
+       let s = simple (bin_ok bin) ~args:(List.map lit args) in
+       let caps = Capability_check.of_simple s in
+       match
+         Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps
+           ~simple:s
+       with
+       | Verdict.Deny { reason = Destructive_db _; _ } -> ()
+       | _ -> Alcotest.failf "%s repeated SQL flags: expected Deny Destructive_db" bin)
+    [ "psql", [ "-c"; "select 1"; "-c"; "drop table users" ]
+    ; "psql", [ "-cselect 1"; "-cdrop table users" ]
+    ; "psql", [ "--command=select 1"; "--command=truncate table cache" ]
+    ; "mysql", [ "-e"; "select 1"; "-e"; "drop database prod" ]
+    ; "mariadb", [ "--execute=select 1"; "--execute=delete from sessions" ]
     ]
 
 (* A read query on a database CLI is NOT floored — database CLIs are audited, so
@@ -432,6 +454,7 @@ let () =
   test_mkfs_family_denied_under_autonomous ();
   test_system_power_denied_under_autonomous ();
   test_destructive_sql_denied_under_autonomous ();
+  test_destructive_sql_later_flag_denied_under_autonomous ();
   test_read_sql_allowed_under_autonomous ();
   test_git_clean_bundled_force_denied ();
   (* RFC-0255 §4.5 review response: no raw destructive-git demotion. *)

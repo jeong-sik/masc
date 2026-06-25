@@ -118,42 +118,79 @@ let db_command_flags (bin : Exec_program.t) : (string * string) option =
   | Some Exec_program.Psql -> Some ("-c", "--command")
   | Some (Exec_program.Mysql | Exec_program.Mariadb | Exec_program.Cockroach) ->
     Some ("-e", "--execute")
-  | Some _ | None -> None
-[@@warning "-4"]
+  | Some
+      ( Exec_program.Ls | Exec_program.Cat | Exec_program.Pwd | Exec_program.Echo
+      | Exec_program.Head | Exec_program.Tail | Exec_program.Rg | Exec_program.Grep
+      | Exec_program.Find | Exec_program.Which | Exec_program.Test
+      | Exec_program.Basename | Exec_program.Dirname | Exec_program.Stat
+      | Exec_program.Du | Exec_program.Df | Exec_program.Sort | Exec_program.Uniq
+      | Exec_program.Wc | Exec_program.Cut | Exec_program.Tr | Exec_program.File
+      | Exec_program.Printf | Exec_program.Date | Exec_program.Env
+      | Exec_program.Printenv | Exec_program.Hostname | Exec_program.Whoami
+      | Exec_program.Uname | Exec_program.Ps | Exec_program.Tty | Exec_program.Cp
+      | Exec_program.Mv | Exec_program.Ln | Exec_program.Touch | Exec_program.Tee
+      | Exec_program.Awk | Exec_program.Xargs | Exec_program.Git
+      | Exec_program.Docker | Exec_program.Curl | Exec_program.Wget | Exec_program.Ssh
+      | Exec_program.Scp | Exec_program.Tar | Exec_program.Rsync | Exec_program.Make
+      | Exec_program.Cmake | Exec_program.Dune_local_sh | Exec_program.Diff
+      | Exec_program.Patch | Exec_program.Mkdir | Exec_program.Npm | Exec_program.Node
+      | Exec_program.Npx | Exec_program.Yarn | Exec_program.Pnpm | Exec_program.Pip
+      | Exec_program.Python | Exec_program.Python3 | Exec_program.Pytest
+      | Exec_program.Pyright | Exec_program.Ruff | Exec_program.Opam
+      | Exec_program.Ocamlfind | Exec_program.Tsc | Exec_program.Cargo
+      | Exec_program.Rustc | Exec_program.Go | Exec_program.Gofmt | Exec_program.Gradle
+      | Exec_program.Java | Exec_program.Javac | Exec_program.Mvn | Exec_program.Ninja
+      | Exec_program.Sed | Exec_program.Uv | Exec_program.Gh | Exec_program.Glab
+      | Exec_program.Terminal_notifier | Exec_program.Osascript | Exec_program.Play
+      | Exec_program.Rec | Exec_program.Ffplay | Exec_program.Mpg123 | Exec_program.Open
+      | Exec_program.Sudo | Exec_program.Su | Exec_program.Chmod | Exec_program.Chown
+      | Exec_program.Rm | Exec_program.Dd | Exec_program.Mkfs | Exec_program.Shutdown
+      | Exec_program.Reboot | Exec_program.Halt | Exec_program.Poweroff ) ->
+    None
+  | None -> None
 
 let arg_lit : Shell_ir.arg -> string option = function
   | Shell_ir.Lit (s, _) -> Some s
   | Shell_ir.Var _ | Shell_ir.Concat _ -> None
 ;;
 
-(* Pull the SQL string out of a database CLI's argv: the token after a bare
-   [-c]/[--command] ([-e]/[--execute]), the value attached to the short flag
-   ([-cSELECT…]), or after [--command=] ([--execute=]).  Returns [None] when no
-   such flag is present or the value is not a literal (a [Var]/[Concat] value
-   cannot be classified syntactically — it is left to graded handling, exactly
-   as the substring layer could not see it either). *)
+(* Pull every literal SQL string out of a database CLI's argv: the token after a
+   bare [-c]/[--command] ([-e]/[--execute]), the value attached to the short
+   flag ([-cSELECT...]), or after [--command=] ([--execute=]).  Non-literal
+   values ([Var]/[Concat]) are omitted because they cannot be classified
+   syntactically — they are left to graded handling, exactly as the substring
+   layer could not see them either. *)
 let extract_db_sql ~(short : string) ~(long : string) (args : Shell_ir.arg list)
-  : string option
+  : string list
   =
   let long_eq = long ^ "=" in
-  let rec go = function
-    | [] -> None
+  let rec go acc = function
+    | [] -> List.rev acc
     | a :: rest ->
       (match arg_lit a with
        | Some tok when String.equal tok short || String.equal tok long ->
          (match rest with
-          | v :: _ -> arg_lit v
-          | [] -> None)
+          | v :: tail ->
+            (match arg_lit v with
+             | Some sql -> go (sql :: acc) tail
+             | None -> go acc tail)
+          | [] -> List.rev acc)
        | Some tok
          when String.length tok > String.length short
               && String.starts_with ~prefix:short tok
               && not (String.starts_with ~prefix:"--" tok) ->
-         Some (String.sub tok (String.length short) (String.length tok - String.length short))
+         let sql =
+           String.sub tok (String.length short) (String.length tok - String.length short)
+         in
+         go (sql :: acc) rest
        | Some tok when String.starts_with ~prefix:long_eq tok ->
-         Some (String.sub tok (String.length long_eq) (String.length tok - String.length long_eq))
-       | Some _ | None -> go rest)
+         let sql =
+           String.sub tok (String.length long_eq) (String.length tok - String.length long_eq)
+         in
+         go (sql :: acc) rest
+       | Some _ | None -> go acc rest)
   in
-  go args
+  go [] args
 ;;
 
 (* Scan for a database CLI ([psql]/[mysql]/[mariadb]/[cockroach]) whose
@@ -173,11 +210,15 @@ let find_destructive_db (caps : Capability.t list) : Db_op.t option =
     | Capability.Exec_program (bin, args) :: rest ->
       (match db_command_flags bin with
        | Some (short, long) ->
-         (match extract_db_sql ~short ~long args with
-          | Some sql ->
-            (match Db_op.of_command sql with
-             | Ok op when Db_op.is_destructive op -> Some op
-             | Ok _ | Error _ -> scan rest)
+         (match
+            List.find_map
+              (fun sql ->
+                 match Db_op.of_command sql with
+                 | Ok op when Db_op.is_destructive op -> Some op
+                 | Ok _ | Error _ -> None)
+              (extract_db_sql ~short ~long args)
+          with
+          | Some _ as found -> found
           | None -> scan rest)
        | None -> scan rest)
     | Capability.Pipeline_fold inner :: rest ->

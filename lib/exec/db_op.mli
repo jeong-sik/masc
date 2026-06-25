@@ -8,11 +8,12 @@
     [config/destructive_ops.toml] [sql_destructive] substring patterns
     (RFC eliminate-substring-destructive-classifier §3-A, §6). The classifier is
     intentionally MORE complete than the substring catalogue: it floors
-    destructive [DROP <object>], [TRUNCATE], and [DELETE] token phrases even when
-    they appear after a leading [WITH], not only the [drop table]/[drop
-    database]/[truncate table]/[delete from] string forms the catalogue listed.
-    Quoted strings, quoted identifiers, and SQL comments are skipped so ordinary
-    read queries containing those words as text are not floored. *)
+    destructive [DROP <object>], [TRUNCATE], [DELETE], and [COPY ... PROGRAM]
+    token phrases even when they appear after a leading [WITH], not only the
+    [drop table]/[drop database]/[truncate table]/[delete from] string forms the
+    catalogue listed. Quoted strings, quoted identifiers, and SQL comments are
+    skipped so ordinary read queries containing those words as text are not
+    floored. *)
 
 type read_verb =
   [ `Select | `Show | `Explain | `With | `Values | `Table ]
@@ -23,7 +24,7 @@ type mutating_verb =
   | `Other ]
 
 type destructive_verb =
-  [ `Drop | `Truncate | `Delete ]
+  [ `Drop | `Truncate | `Delete | `Copy_program ]
 
 type t =
   | Read of read_verb

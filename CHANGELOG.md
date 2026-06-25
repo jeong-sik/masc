@@ -4,10 +4,9 @@
 ## Unreleased
 
 ### Removed
-- `runtime`: removed the legacy `MASC_STORAGE_TYPE` selector. Storage is now
-  filesystem-only by construction; operator/test environments that still export
-  `MASC_STORAGE_TYPE=memory` or any other value must remove that override
-  instead of expecting an in-memory backend.
+- `runtime`: removed the legacy runtime storage selector. Storage is now
+  filesystem-only by construction; operator/test environments must remove old
+  backend overrides instead of expecting an in-memory backend.
 
 
 ## [0.19.48] - 2026-06-22

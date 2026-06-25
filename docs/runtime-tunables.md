@@ -164,7 +164,11 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_VISIBILITY_GATE` | feature_flag | n/a | n/a | 371 | Consumer-driven idle backoff: when true, keepers with no dashboard/SSE observer and no pending signal delay proactive... |
 | `MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC` | typed:float | Timeouts | operator | 302 | Base delay before trying the next vision runtime after a failed provider attempt. Range: [0, 5] seconds. |
 | `MASC_KEEPER_VISION_CANDIDATE_BACKOFF_MAX_SEC` | typed:float | Timeouts | operator | 311 | Upper bound for the per-candidate vision failover delay. Range: [base, 30] seconds. |
+| `MASC_KEEPER_VISION_EAGER_TIMEOUT_SEC` | typed:float | Timeouts | operator | 321 | Eager image-ingestion provider-call deadline. Range: [1, 120] seconds. Only used when eager reads are enabled. |
+| `MASC_KEEPER_VISION_EXTRACTION_QUERY` | typed:string | Runtime | operator | 349 | Prompt used for optional eager image reads. Empty values fall back to the default exhaustive extraction prompt. |
+| `MASC_KEEPER_VISION_MAX_EAGER_READS_PER_TURN` | typed:int | Concurrency | operator | 331 | Maximum eager analyze_image reads during one keeper turn. Default: 0 disables eager provider calls on ingestion. Range: [0, 8]. |
 | `MASC_KEEPER_VISION_MAX_IMAGE_BYTES` | typed:int | Policies | operator | 291 | Maximum raw image bytes accepted by the one-shot vision tool before provider-message construction. Range: [1, 10 MiB]. |
+| `MASC_KEEPER_VISION_MAX_READ_TEXT_CHARS` | typed:int | Policies | operator | 340 | Maximum characters copied from an eager vision read into the placeholder. Range: [256, 32000]. |
 | `MASC_KEEPER_WORK_AS_HEARTBEAT` | feature_flag | n/a | n/a | 348 | Master switch. When true, successful Workspace.heartbeat after a unified turn counts as presence proof, allowing the ... |
 | `MASC_PAYLOAD_TELEMETRY` | typed:bool | unclassified | unclassified | 717 | Master switch for wake-payload measurement. Default off so the hot path is untouched until a baseline sweep is explic... |
 | `MASC_RUNTIME_SATURATION_SIGNAL_ENABLED` | typed:bool | unclassified | unclassified | 731 | {1 Runtime Saturation Signal (RFC-0153 Phase A.2)} Feature flag for typed [Runtime_saturation_signal.t] emission from... |

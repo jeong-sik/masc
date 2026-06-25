@@ -7,6 +7,10 @@ type mode =
   | Eager
   | Store_only
 
+type image_source_type =
+  | Base64_source
+  | Unsupported_source of string
+
 (* SSOT placeholder formats. The handle always lets the keeper re-read the
    pixels via the analyze_image tool; the eager [read] text carries the meaning
    so most follow-up turns answer without any further vision call. *)
@@ -33,10 +37,6 @@ let image_store_failed_placeholder ~reason =
   Printf.sprintf "[image — could not store for delegation: %s]" reason
 ;;
 
-let eager_timeout_sec = 30.0
-let max_eager_reads_per_turn = 1
-let max_read_text_chars = 4000
-
 let string_of_mode = function
   | Eager -> "eager"
   | Store_only -> "store_only"
@@ -51,20 +51,21 @@ let record_eviction ~mode ~result ~reason =
 
 let truncate_read_text text =
   let length = String.length text in
+  let max_read_text_chars = Env_config_keeper.KeeperVision.max_read_text_chars () in
   if length <= max_read_text_chars
   then text
   else String.sub text 0 max_read_text_chars ^ "\n[truncated]"
 ;;
 
-(* Operator decision (2026-06-25, RFC §2.3-eager): exhaustive description, so a
-   later text-only turn rarely needs to re-read the pixels. *)
-let extraction_query =
-  "Describe everything in this image: transcribe all text verbatim, and list \
-   every UI element, the layout, colors, state, errors, and numbers. Be \
-   exhaustive — the reader cannot see the image, only your description."
-;;
+let extraction_query () = Env_config_keeper.KeeperVision.eager_extraction_query ()
 
 let store_dir ~keeper_name = Keeper_vision_tool.vision_store_dir ~keeper_name
+
+let parse_source_type raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "base64" -> Base64_source
+  | normalized -> Unsupported_source normalized
+;;
 
 (* An [Image] block's [data] is the base64 wire payload
    ([Keeper_multimodal_input.normalize_media_payload] guarantees base64); decode
@@ -88,8 +89,8 @@ let eager_read ~media_type ~bytes : (string, string) result option =
          ~sw
          ~clock
          ~net
-         ~timeout_sec:eager_timeout_sec
-         ~query:extraction_query
+         ~timeout_sec:(Env_config_keeper.KeeperVision.eager_timeout_sec ())
+         ~query:(extraction_query ())
          ~media_type
          ~bytes
          ()
@@ -110,75 +111,112 @@ let eager_read ~media_type ~bytes : (string, string) result option =
    else — including an already-evicted [Text] placeholder — passes through
    unchanged, so re-running on a rehydrated message is a no-op (idempotent: no
    double-store, no double-extract). *)
-let evict_block ~mode ~keeper_name ~eager_budget (block : Agent_sdk.Types.content_block) =
+let rec evict_block
+    ~mode
+    ~keeper_name
+    ~eager_budget
+    (block : Agent_sdk.Types.content_block) =
   match block with
   | Agent_sdk.Types.Image { media_type; data; source_type } ->
-    if not (String.equal (String.lowercase_ascii (String.trim source_type)) "base64")
-    then (
+    (match parse_source_type source_type with
+     | Unsupported_source _ ->
       record_eviction ~mode ~result:"error" ~reason:"invalid_source_type";
-      Agent_sdk.Types.Text
-        (image_store_failed_placeholder ~reason:"unsupported image source"))
-    else (
+      ( Agent_sdk.Types.Text
+          (image_store_failed_placeholder ~reason:"unsupported image source")
+      , eager_budget )
+     | Base64_source ->
       match raw_bytes_of_image_data data with
       | Error _ ->
         record_eviction ~mode ~result:"error" ~reason:"bad_base64";
-        Agent_sdk.Types.Text
-          (image_store_failed_placeholder ~reason:"invalid image payload")
+        ( Agent_sdk.Types.Text
+            (image_store_failed_placeholder ~reason:"invalid image payload")
+        , eager_budget )
       | Ok bytes ->
         (match Keeper_vision_tool.validate_image_size bytes with
          | Error _ ->
            record_eviction ~mode ~result:"error" ~reason:"image_too_large";
-           Agent_sdk.Types.Text
-             (image_store_failed_placeholder ~reason:"image too large")
+           ( Agent_sdk.Types.Text
+               (image_store_failed_placeholder ~reason:"image too large")
+           , eager_budget )
          | Ok () ->
            (match Keeper_vision_tool.validate_media_type media_type with
             | Error _ ->
               record_eviction ~mode ~result:"error" ~reason:"invalid_media_type";
-              Agent_sdk.Types.Text
-                (image_store_failed_placeholder ~reason:"unsupported image media type")
+              ( Agent_sdk.Types.Text
+                  (image_store_failed_placeholder
+                     ~reason:"unsupported image media type")
+              , eager_budget )
             | Ok media_type ->
               (match
                  Keeper_vision_tool.store_artifact ~dir:(store_dir ~keeper_name) bytes
                with
                | Error _ ->
                  record_eviction ~mode ~result:"error" ~reason:"store_failed";
-                 Agent_sdk.Types.Text
-                   (image_store_failed_placeholder ~reason:"artifact store failed")
+                 ( Agent_sdk.Types.Text
+                     (image_store_failed_placeholder ~reason:"artifact store failed")
+                 , eager_budget )
                | Ok handle ->
                  (match mode with
                   | Store_only ->
                     record_eviction ~mode ~result:"ok" ~reason:"stored";
-                    Agent_sdk.Types.Text
-                      (image_unread_placeholder ~handle ~media_type ~reason:"not read")
-                  | Eager when !eager_budget > 0 ->
-                    decr eager_budget;
+                    ( Agent_sdk.Types.Text
+                        (image_unread_placeholder
+                           ~handle
+                           ~media_type
+                           ~reason:"not read")
+                    , eager_budget )
+                  | Eager when eager_budget > 0 ->
+                    let eager_budget = eager_budget - 1 in
                     (match eager_read ~media_type ~bytes with
                      | Some (Ok read_text) ->
                        record_eviction ~mode ~result:"ok" ~reason:"eager_read";
-                       Agent_sdk.Types.Text
-                         (image_read_placeholder ~handle ~media_type ~read_text)
+                       ( Agent_sdk.Types.Text
+                           (image_read_placeholder ~handle ~media_type ~read_text)
+                       , eager_budget )
                      | Some (Error _reason) ->
                        record_eviction ~mode ~result:"error" ~reason:"eager_read_failed";
-                       Agent_sdk.Types.Text
-                         (image_unread_placeholder
-                            ~handle
-                            ~media_type
-                            ~reason:"vision read failed")
+                       ( Agent_sdk.Types.Text
+                           (image_unread_placeholder
+                              ~handle
+                              ~media_type
+                              ~reason:"vision read failed")
+                       , eager_budget )
                      | None ->
                        record_eviction ~mode ~result:"ok" ~reason:"stored_unread";
-                       Agent_sdk.Types.Text
-                         (image_unread_placeholder
-                            ~handle
-                            ~media_type
-                            ~reason:"not yet read"))
+                       ( Agent_sdk.Types.Text
+                           (image_unread_placeholder
+                              ~handle
+                              ~media_type
+                              ~reason:"not yet read")
+                       , eager_budget ))
                   | Eager ->
                     record_eviction ~mode ~result:"ok" ~reason:"eager_budget_exhausted";
-                    Agent_sdk.Types.Text
-                      (image_unread_placeholder
-                         ~handle
-                         ~media_type
-                         ~reason:"not read"))))))
-  | other -> other
+                    ( Agent_sdk.Types.Text
+                        (image_unread_placeholder
+                           ~handle
+                           ~media_type
+                           ~reason:"not read")
+                    , eager_budget ))))))
+  | Agent_sdk.Types.ToolResult
+      { tool_use_id; content; is_error; json; content_blocks = Some nested } ->
+    let nested, eager_budget =
+      evict_block_list ~mode ~keeper_name ~eager_budget nested
+    in
+    ( Agent_sdk.Types.ToolResult
+        { tool_use_id; content; is_error; json; content_blocks = Some nested }
+    , eager_budget )
+  | other -> other, eager_budget
+
+and evict_block_list ~mode ~keeper_name ~eager_budget blocks =
+  let blocks_rev, eager_budget =
+    List.fold_left
+      (fun (acc, eager_budget) block ->
+        let block, eager_budget = evict_block ~mode ~keeper_name ~eager_budget block in
+        block :: acc, eager_budget)
+      ([], eager_budget)
+      blocks
+  in
+  List.rev blocks_rev, eager_budget
 ;;
 
 let delegating = function
@@ -190,12 +228,11 @@ let evict_blocks ~mode ~policy ~keeper_name blocks =
   if delegating policy
   then (
     let eager_budget =
-      ref
-        (match mode with
-         | Eager -> max_eager_reads_per_turn
-         | Store_only -> 0)
+      match mode with
+      | Eager -> Env_config_keeper.KeeperVision.max_eager_reads_per_turn ()
+      | Store_only -> 0
     in
-    List.map (evict_block ~mode ~keeper_name ~eager_budget) blocks)
+    fst (evict_block_list ~mode ~keeper_name ~eager_budget blocks))
   else blocks
 ;;
 

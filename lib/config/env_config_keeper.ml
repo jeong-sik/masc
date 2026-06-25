@@ -286,6 +286,15 @@ module KeeperVision = struct
   let max_image_bytes_ceiling = 10 * 1024 * 1024
   let candidate_backoff_base_sec_ceiling = 5.0
   let candidate_backoff_max_sec_ceiling = 30.0
+  let eager_timeout_sec_ceiling = 120.0
+  let max_eager_reads_per_turn_ceiling = 8
+  let max_read_text_chars_ceiling = 32_000
+
+  let default_extraction_query =
+    "Describe everything in this image: transcribe all text verbatim, and list \
+     every UI element, the layout, colors, state, errors, and numbers. Be \
+     exhaustive; the reader cannot see the image, only your description."
+  ;;
 
   (** Maximum raw image bytes accepted by the one-shot vision tool before
       provider-message construction. Default is 5 MiB to match dashboard upload
@@ -317,6 +326,44 @@ module KeeperVision = struct
     get_float_nonneg ~default:0.25 "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_MAX_SEC"
     |> clamp_float ~min_value:0.0 ~max_value:candidate_backoff_max_sec_ceiling
     |> Float.max base
+  ;;
+
+  (** Eager image-ingestion provider-call deadline. Default is deliberately
+      short and the eager call budget defaults to zero; this only applies when
+      operators opt in to eager reads.
+
+      @category Timeouts @ops_class operator *)
+  let eager_timeout_sec () =
+    get_float_nonneg ~default:30.0 "MASC_KEEPER_VISION_EAGER_TIMEOUT_SEC"
+    |> clamp_float ~min_value:1.0 ~max_value:eager_timeout_sec_ceiling
+  ;;
+
+  (** Maximum eager analyze_image reads during one keeper turn. Default [0]
+      means ingestion always stores and emits handles, but never blocks the turn
+      fiber on a vision provider call unless the operator opts in.
+
+      @category Concurrency @ops_class operator *)
+  let max_eager_reads_per_turn () =
+    get_int_nonneg ~default:0 "MASC_KEEPER_VISION_MAX_EAGER_READS_PER_TURN"
+    |> clamp_int ~min_value:0 ~max_value:max_eager_reads_per_turn_ceiling
+  ;;
+
+  (** Maximum characters copied from an eager vision read into the placeholder.
+      @category Policies @ops_class operator *)
+  let max_read_text_chars () =
+    get_int_nonneg ~default:4000 "MASC_KEEPER_VISION_MAX_READ_TEXT_CHARS"
+    |> clamp_int ~min_value:256 ~max_value:max_read_text_chars_ceiling
+  ;;
+
+  (** Prompt used for optional eager image reads. Empty values fall back to the
+      default exhaustive extraction prompt.
+
+      @category Runtime @ops_class operator *)
+  let eager_extraction_query () =
+    get_string ~default:default_extraction_query "MASC_KEEPER_VISION_EXTRACTION_QUERY"
+    |> fun raw ->
+    let trimmed = String.trim raw in
+    if String.equal trimmed "" then default_extraction_query else raw
   ;;
 end
 

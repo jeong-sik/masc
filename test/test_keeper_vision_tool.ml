@@ -258,7 +258,20 @@ let test_vision_env_knobs_are_bounded () =
       assert_float_eq
         "max backoff is at least base"
         2.0
-        (Env_config_keeper.KeeperVision.candidate_backoff_max_sec ())))
+        (Env_config_keeper.KeeperVision.candidate_backoff_max_sec ())));
+  with_env "MASC_KEEPER_VISION_EAGER_TIMEOUT_SEC" "999" (fun () ->
+    assert_float_eq
+      "eager timeout ceiling"
+      120.0
+      (Env_config_keeper.KeeperVision.eager_timeout_sec ()));
+  with_env "MASC_KEEPER_VISION_MAX_EAGER_READS_PER_TURN" "999" (fun () ->
+    assert (Env_config_keeper.KeeperVision.max_eager_reads_per_turn () = 8));
+  with_env "MASC_KEEPER_VISION_MAX_READ_TEXT_CHARS" "999999" (fun () ->
+    assert (Env_config_keeper.KeeperVision.max_read_text_chars () = 32_000));
+  with_env "MASC_KEEPER_VISION_EXTRACTION_QUERY" "" (fun () ->
+    assert (not (String.equal (Vi.extraction_query ()) "")));
+  with_env "MASC_KEEPER_VISION_EXTRACTION_QUERY" "describe only text" (fun () ->
+    assert (String.equal (Vi.extraction_query ()) "describe only text"))
 
 let test_missing_eio_context_is_runtime_failure () =
   let raw =
@@ -719,11 +732,12 @@ let test_accept_rejected_is_policy_rejection_without_failover () =
       assert (String.equal (assoc_string "failure_class" json) "policy_rejection")))
 
 let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
-  with_temp_base (fun _ ->
+  with_env "MASC_KEEPER_VISION_MAX_EAGER_READS_PER_TURN" "0" (fun () ->
+    with_temp_base (fun _ ->
     let keeper_name = "vision-ingest-delegate" in
     let bytes = "\x89PNG\r\n\x1a\ninline-image" in
     let metric_labels =
-      [ "mode", "eager"; "result", "ok"; "reason", "stored_unread" ]
+      [ "mode", "eager"; "result", "ok"; "reason", "eager_budget_exhausted" ]
     in
     let before =
       metric_value Keeper_metrics.VisionIngestEvictions ~labels:metric_labels
@@ -751,7 +765,7 @@ let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
       ] ->
       assert (contains_substring placeholder "[image artifact:");
       assert (contains_substring placeholder "media_type:image/png");
-      assert (contains_substring placeholder "not yet read");
+      assert (contains_substring placeholder "not read");
       let handle = artifact_handle_of_placeholder placeholder in
       (match
          Store.load
@@ -761,10 +775,10 @@ let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
        | Ok stored -> assert (String.equal stored bytes)
        | Error msg -> failwith msg);
       assert_metric_increment
-        "vision_ingest stored_unread"
+        "vision_ingest eager_budget_exhausted"
         before
         (metric_value Keeper_metrics.VisionIngestEvictions ~labels:metric_labels)
-    | _ -> failwith "delegate eviction should replace the image with text")
+    | _ -> failwith "delegate eviction should replace the image with text"))
 
 let test_delegate_eviction_rejects_invalid_media_type_before_store () =
   with_temp_base (fun _ ->
@@ -853,6 +867,51 @@ let test_non_delegate_eviction_preserves_inline_image () =
   | [ Agent_sdk.Types.Image img ] ->
     assert (String.equal img.data (Base64.encode_string bytes))
   | _ -> failwith "non-delegate policy should preserve image blocks"
+
+let test_delegate_eviction_rewrites_tool_result_nested_images () =
+  with_temp_base (fun _ ->
+    let keeper_name = "vision-ingest-tool-result" in
+    let bytes = "\x89PNG\r\n\x1a\ntool-result-image" in
+    let blocks =
+      [ Agent_sdk.Types.ToolResult
+          { tool_use_id = "tool-1"
+          ; content = "tool output"
+          ; is_error = false
+          ; json = None
+          ; content_blocks =
+              Some
+                [ Agent_sdk.Types.Image
+                    { media_type = "image/png"
+                    ; data = Base64.encode_string bytes
+                    ; source_type = "base64"
+                    }
+                ]
+          }
+      ]
+    in
+    match
+      Vi.evict_blocks
+        ~mode:Vi.Store_only
+        ~policy:Masc.Keeper_types_profile.Mm_delegate
+        ~keeper_name
+        blocks
+    with
+    | [ Agent_sdk.Types.ToolResult { content; content_blocks = Some nested; _ } ] ->
+      assert (String.equal content "tool output");
+      (match nested with
+       | [ Agent_sdk.Types.Text placeholder ] ->
+         assert (contains_substring placeholder "[image artifact:");
+         assert (contains_substring placeholder "media_type:image/png");
+         let handle = artifact_handle_of_placeholder placeholder in
+         (match
+            Store.load
+              ~dir:(Vt.vision_store_dir ~keeper_name)
+              (Store.of_string handle)
+          with
+          | Ok stored -> assert (String.equal stored bytes)
+          | Error msg -> failwith msg)
+       | _ -> failwith "nested image should be replaced with text")
+    | _ -> failwith "tool result nested image should be evicted")
 
 let test_evicted_history_has_no_image_modality () =
   with_temp_base (fun _ ->
@@ -958,5 +1017,6 @@ let () =
   test_delegate_eviction_rejects_oversize_before_store ();
   test_delegate_eviction_bad_base64_surfaces_redacted_text_error ();
   test_non_delegate_eviction_preserves_inline_image ();
+  test_delegate_eviction_rewrites_tool_result_nested_images ();
   test_evicted_history_has_no_image_modality ();
   print_endline "test_keeper_vision_tool: all assertions passed"

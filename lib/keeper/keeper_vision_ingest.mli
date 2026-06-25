@@ -7,22 +7,26 @@
     cannot re-materialise an [Image]:
 
     - Site 1 (fresh input, [Eager]): the turn caller validates and stores every
-      image, then runs at most one bounded [analyze_image] vision sub-call for
-      the first valid image and embeds the reading in the placeholder.
+      image, then may run bounded [analyze_image] vision sub-calls up to the
+      operator-configured eager budget and embeds each reading in its
+      placeholder.
     - Site 2 (checkpoint write, [Store_only]): the persistence boundary evicts
       with a handle-only placeholder (no provider call on the turn fiber); also
       migrates images already persisted in pre-existing checkpoints.
 
     Gated by {!Keeper_types_profile.multimodal_policy}: only [Mm_delegate]
     evicts; [Mm_reroute]/[Mm_inherit] are a no-op (safe-by-default). Idempotent:
-    a [Text] placeholder is not an [Image], so re-running is a no-op. *)
+    a [Text] placeholder is not an [Image], so re-running is a no-op.
+    Structured images nested inside [ToolResult.content_blocks] are evicted by
+    the same transform so checkpoint writes cannot retain inline image blocks
+    through tool-result nesting. *)
 
 type mode =
-  | Eager  (** site 1: run the vision sub-call now, embed the reading *)
+  | Eager  (** site 1: optionally run bounded vision sub-calls, embed readings *)
   | Store_only  (** site 2: store + handle-only placeholder, no provider call *)
 
-val extraction_query : string
-(** The fixed exhaustive extraction query used by [Eager] (RFC §2.3-eager). *)
+val extraction_query : unit -> string
+(** Operator-configurable extraction query used by optional [Eager] reads. *)
 
 val evict_blocks
   :  mode:mode
@@ -33,8 +37,9 @@ val evict_blocks
 (** Site 1. Evict every [Image] in the list when [policy = Mm_delegate]; return
     the list unchanged otherwise. Images are fail-closed before store on
     source_type, base64 payload, size, and media type. [Eager] consults the
-    fiber-local Eio context for one bounded sub-call; with none present (tests)
-    it falls back to an unread placeholder, so eviction still holds. *)
+    fiber-local Eio context for bounded sub-calls only when its configured
+    budget is positive; with none present (tests) it falls back to an unread
+    placeholder, so eviction still holds. *)
 
 val evict_message
   :  mode:mode

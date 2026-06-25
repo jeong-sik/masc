@@ -106,6 +106,20 @@ module KeeperVision : sig
 
   (** Max inter-candidate backoff, clamped to [base, 30] seconds. *)
   val candidate_backoff_max_sec : unit -> float
+
+  (** Eager ingestion analyze_image timeout, clamped to [1, 120] seconds. *)
+  val eager_timeout_sec : unit -> float
+
+  (** Eager ingestion analyze_image calls allowed per turn, clamped to [0, 8].
+      Default is [0], so ingestion does not block on provider calls unless
+      explicitly enabled. *)
+  val max_eager_reads_per_turn : unit -> int
+
+  (** Eager read placeholder text budget, clamped to [256, 32000] chars. *)
+  val max_read_text_chars : unit -> int
+
+  (** Prompt used for optional eager image reads. *)
+  val eager_extraction_query : unit -> string
 end
 
 (** {1 Keeper context reducer} *)

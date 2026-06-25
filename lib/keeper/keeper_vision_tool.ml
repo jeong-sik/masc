@@ -18,6 +18,9 @@ let default_complete : complete_fn =
  fun ~sw ~net ?clock ~config ~messages () ->
   Llm_provider.Complete.complete ~sw ~net ?clock ~config ~messages ()
 
+(* Only [Eio.Time.Timeout] is caught here; [Eio.Cancel.Cancelled] and other
+   exceptions are intentionally propagated so caller cancellation is not
+   swallowed by the tool-level timeout handler. *)
 let with_timeout ?clock ~timeout_sec f =
   match clock with
   | None -> Some (f ())
@@ -85,7 +88,9 @@ let vision_store_dir ~keeper_name =
 let ok_json text =
   Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "text", `String text ])
 
-let err_json ?detail ?(failure_class = Tool_result.Workflow_rejection) code =
+(* Default to Runtime_failure: an unclassified error is treated as an internal
+   keeper-health fault, not a caller validation or workflow business rule. *)
+let err_json ?detail ?(failure_class = Tool_result.Runtime_failure) code =
   let fields =
     [ "ok", `Bool false
     ; "error", `String code
@@ -99,6 +104,12 @@ let err_json ?detail ?(failure_class = Tool_result.Workflow_rejection) code =
     | None -> fields
   in
   Yojson.Safe.to_string (`Assoc fields)
+
+let failure_class_of_http_error err =
+  if Runtime_attempt_fsm.should_try_next err
+  then Tool_result.Transient_error
+  else Tool_result.Policy_rejection
+;;
 
 let string_member key json =
   match Yojson.Safe.Util.member key json with
@@ -126,9 +137,14 @@ let sniff_media_type bytes =
 let normalize_media_type value =
   String.trim value |> String.lowercase_ascii
 
-let supported_image_media_type = function
-  | "image/png" | "image/jpeg" | "image/gif" | "image/webp" -> true
-  | _ -> false
+let supported_image_media_types =
+  [ "image/png"; "image/jpeg"; "image/gif"; "image/webp" ]
+
+let supported_image_media_type media_type =
+  List.mem media_type supported_image_media_types
+
+let supported_image_media_types_csv =
+  String.concat ", " supported_image_media_types
 
 let media_type_for_request ~bytes args =
   match string_member "media_type" args with
@@ -138,9 +154,9 @@ let media_type_for_request ~bytes args =
     else
       Error
         (Printf.sprintf
-           "unsupported image media_type %S; expected one of image/png, \
-            image/jpeg, image/gif, image/webp"
-           raw)
+           "unsupported image media_type %S; expected one of %s"
+           raw
+           supported_image_media_types_csv)
   | _ -> Ok (sniff_media_type bytes)
 
 let handle
@@ -154,30 +170,53 @@ let handle
     () =
   match string_member "artifact" args, string_member "query" args with
   | None, _ | _, None ->
-    err_json ~detail:"requires string fields: artifact, query" "invalid_args"
+    err_json
+      ~failure_class:Tool_result.Policy_rejection
+      ~detail:"requires string fields: artifact, query"
+      "invalid_args"
   | Some handle_str, Some query ->
     (match sw, net with
-     | None, _ | _, None -> err_json "eio_context_unavailable"
+     | None, _ | _, None ->
+       err_json
+         ~failure_class:Tool_result.Runtime_failure
+         "eio_context_unavailable"
      | Some sw, Some net ->
        let dir = vision_store_dir ~keeper_name:meta.name in
        (match Store.load ~dir (Store.of_string handle_str) with
-        | Error msg -> err_json ~detail:msg "artifact_load_failed"
+        | Error msg ->
+          err_json
+            ~failure_class:Tool_result.Runtime_failure
+            ~detail:msg
+            "artifact_load_failed"
         | Ok bytes ->
           (match media_type_for_request ~bytes args with
-           | Error msg -> err_json ~detail:msg "invalid_media_type"
+           | Error msg ->
+             err_json
+               ~failure_class:Tool_result.Policy_rejection
+               ~detail:msg
+               "invalid_media_type"
            | Ok media_type ->
              (match
                 Va.make_request ~query ~image_media_type:media_type
                   ~image_bytes:bytes
               with
-              | Error msg -> err_json ~detail:msg "invalid_request"
+              | Error msg ->
+                err_json
+                  ~failure_class:Tool_result.Policy_rejection
+                  ~detail:msg
+                  "invalid_request"
               | Ok req ->
                 (match first_vision_runtime_id () with
-                 | Error msg -> err_json ~detail:msg "no_capable_runtime"
+                 | Error msg ->
+                   err_json
+                     ~failure_class:Tool_result.Runtime_failure
+                     ~detail:msg
+                     "no_capable_runtime"
                  | Ok runtime_id ->
                    (match Runtime.get_runtime_by_id runtime_id with
                     | None ->
                       err_json
+                        ~failure_class:Tool_result.Runtime_failure
                         ~detail:(Printf.sprintf "runtime %S not found" runtime_id)
                         "no_capable_runtime"
                     | Some rt ->
@@ -192,7 +231,7 @@ let handle
                            "timeout"
                        | Some (Error err) ->
                          err_json
-                           ~failure_class:Tool_result.Transient_error
+                           ~failure_class:(failure_class_of_http_error err)
                            ~detail:(Provider_http_error.to_message err)
                            "provider_error"
                        | Some (Ok (response : Agent_sdk.Types.api_response)) ->
@@ -202,4 +241,11 @@ let handle
                          in
                          (match Va.classify ~truncated ~content:text with
                           | Ok t -> ok_json t
-                          | Error e -> err_json (Va.string_of_error e)))))))))
+                          | Error Va.Empty_extraction ->
+                            err_json
+                              ~failure_class:Tool_result.Workflow_rejection
+                              "empty_extraction"
+                          | Error Va.Truncated_extraction ->
+                            err_json
+                              ~failure_class:Tool_result.Runtime_failure
+                              "truncated_extraction"))))))))

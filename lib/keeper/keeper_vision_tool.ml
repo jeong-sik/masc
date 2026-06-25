@@ -136,11 +136,14 @@ let err_json ?detail ?(failure_class = Tool_result.Runtime_failure) code =
   in
   Yojson.Safe.to_string (`Assoc fields)
 
+let terminal_policy_http_error = function
+  | Llm_provider.Http_client.AcceptRejected _ -> true
+  | Llm_provider.Http_client.HttpError { code; _ } -> code = 400 || code = 422
+  | _ -> false
+
 let failure_class_of_http_error = function
+  | err when terminal_policy_http_error err -> Tool_result.Policy_rejection
   | err when Runtime_attempt_fsm.should_try_next err -> Tool_result.Transient_error
-  | Llm_provider.Http_client.AcceptRejected _ -> Tool_result.Policy_rejection
-  | Llm_provider.Http_client.HttpError { code; _ } when code = 400 || code = 422 ->
-    Tool_result.Policy_rejection
   | _ -> Tool_result.Runtime_failure
 
 let string_member key json =
@@ -312,7 +315,13 @@ let rec run_candidates
         with
         | None -> continue_with (`Timeout runtime_id)
         | Some (Error err) ->
-          if Runtime_attempt_fsm.should_try_next err
+          if terminal_policy_http_error err
+          then
+            err_json
+              ~failure_class:(failure_class_of_http_error err)
+              ~detail:(Provider_http_error.to_message err)
+              "provider_error"
+          else if Runtime_attempt_fsm.should_try_next err
           then continue_with (`Provider_error err)
           else
             err_json

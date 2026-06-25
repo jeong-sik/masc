@@ -102,8 +102,8 @@ The librarian (`keeper_librarian_runtime.ml:20-22`, routed by `runtime_id_for_li
 ## 4. Migration
 
 - **Phase 0a (done)**: config correctness — declare true `supports-image-input` + `media_failover` (`jeong-sik/me` PR #1223, MERGED). Resolves the live incident; reroute lands on a capable cloud model. **Phases 1–3 are not required for the incident.**
-- **Phase 0b (design prerequisite)**: durable blob-backed input-side artifact store (§2.5) and the persisted mechanism-selection axis (§2.4). Block Phase 1 until these are designed.
-- **Phase 1**: `analyze_image` tool (§2.2, §2.6) delegating to a vision runtime. Opt-in; no ingestion change.
+- **Phase 0b (in progress)**: durable blob-backed input-side artifact store (§2.5) — **implemented**: `Multimodal.Vision_artifact_store` (content-addressed SHA-256 file store, content-verified on read, path-traversal-hardened against forged handles), PR #22257. The persisted mechanism-selection axis (§2.4) is still design-pending.
+- **Phase 1 (started)**: `analyze_image` tool (§2.2, §2.6). The **pure contract is implemented** — `Multimodal.Vision_analyze.make_request`/`classify` (boundary input validation + empty/truncated failure typing that encodes the §2.2 contract and the §2.6 gemma4 measurement), PR #22257. The **impure shell remains**: the mid-turn provider sub-call (§2.6) and the tool registration/dispatch wiring. Opt-in; no ingestion change.
 - **Phase 2**: ingestion interception (§2.3) at **both** entry sites + persisted checkpoint placeholder; main history becomes text-only.
 - **Phase 3**: set `multimodal_policy` defaults; scope RFC-0265's image/document reroute to keepers whose policy selects it. Edit RFC-0265 front-matter reciprocally in the same PR.
 

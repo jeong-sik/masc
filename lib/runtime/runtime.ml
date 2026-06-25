@@ -288,6 +288,13 @@ let empty_loaded_state =
 
 let loaded_state_ref : loaded_state Atomic.t = Atomic.make empty_loaded_state
 
+module For_testing = struct
+  type snapshot = loaded_state
+
+  let snapshot () = Atomic.get loaded_state_ref
+  let restore snapshot = Atomic.set loaded_state_ref snapshot
+end
+
 let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
 
 let set_loaded

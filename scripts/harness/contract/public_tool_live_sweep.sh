@@ -196,7 +196,7 @@ r_goal_verify="$(
       '{goal_id:$goal_id,principal:{id:$principal},decision:"approve",note:"public tool sweep guard vote"}'
   )"
 )"
-expect_ok_or_guard "masc_goal_verify" "$r_goal_verify" 'no active verification request|active verification'
+expect_ok_or_guard "masc_goal_verify" "$r_goal_verify" 'goal has no active verification request'
 
 next_step "masc_batch_add_tasks"
 r_batch_add="$(call_tool 5013 "masc_batch_add_tasks" "$(jq -cn --arg goal_id "$GOAL_ID" '{tasks:[{title:"Public Sweep Batch A",goal_id:$goal_id,priority:3,description:"batch-a"},{title:"Public Sweep Batch B",goal_id:$goal_id,priority:4,description:"batch-b"}]}')")"

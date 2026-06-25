@@ -308,6 +308,72 @@ let repo_name_of_json = function
 let upsert_assoc key value fields =
   (key, value) :: List.remove_assoc key fields
 
+type playground_repo_policy =
+  | Policy_mapping_load_error of string
+  | Policy_missing_mapping
+  | Policy_found of Repo_manager_types.keeper_repo_mapping
+
+let playground_repo_policy ~(base_path : string) ~(keeper_name : string) =
+  match Keeper_repo_mapping.load_all ~base_path with
+  | Error msg -> Policy_mapping_load_error msg
+  | Ok mappings -> (
+      match
+        List.find_opt
+          (fun (mapping : Repo_manager_types.keeper_repo_mapping) ->
+            String.equal mapping.keeper_id keeper_name)
+          mappings
+      with
+      | Some mapping -> Policy_found mapping
+      | None -> Policy_missing_mapping)
+
+let playground_repo_policy_fields policy ~repo_name =
+  let field status allowed extra =
+    ("policy_source", `String "keeper_repo_mappings.toml")
+    :: ("policy_status", `String status)
+    :: ("policy_allowed", `Bool allowed)
+    :: extra
+  in
+  match policy with
+  | Policy_mapping_load_error msg ->
+      field "mapping_load_error" false
+        [
+          ("policy_error", `String msg);
+          ( "policy_reason",
+            `String
+              "keeper repository mapping could not be loaded; access is \
+               denied fail-closed" );
+        ]
+  | Policy_missing_mapping ->
+      field "denied_missing_mapping" false
+        [
+          ( "policy_reason",
+            `String
+              "keeper has no repository mapping; filesystem clone is not \
+               accessible" );
+        ]
+  | Policy_found mapping ->
+      if
+        List.exists
+          (fun id -> String.equal id repo_name || String.equal id "*")
+          mapping.repository_ids
+      then field "allowed" true []
+      else
+        field "denied_not_in_mapping" false
+          [
+            ( "policy_reason",
+              `String
+                "repository is not listed in the keeper repository mapping" );
+          ]
+
+let with_playground_repo_policy_fields policy ~repo_name = function
+  | `Assoc fields ->
+      playground_repo_policy_fields policy ~repo_name
+      |> List.fold_left
+           (fun fields (key, value) -> upsert_assoc key value fields)
+           fields
+      |> fun fields -> `Assoc fields
+  | json -> json
+
 let git_metadata_timeout_sec = 2.0
 let max_live_git_enrichment_repos = 20
 
@@ -422,6 +488,9 @@ let playground_repos_json ~(config : Workspace.config) ~(meta : keeper_meta) =
     |> normalize_path
   in
   let repos_dir = Filename.concat playground_abs "repos" in
+  let policy =
+    playground_repo_policy ~base_path:config.base_path ~keeper_name:meta.name
+  in
   let live_enriched_count = ref 0 in
   let cached =
     cached_playground_repo_entries playground_abs
@@ -435,8 +504,11 @@ let playground_repos_json ~(config : Workspace.config) ~(meta : keeper_meta) =
           then
             (incr live_enriched_count;
             enrich_playground_repo_from_git ~source:"git" ~repo_name:name
-              ~repo_path repo)
-          else playground_repo_entry_json ~source:"cache" ~repo_name:name repo
+              ~repo_path repo
+            |> with_playground_repo_policy_fields policy ~repo_name:name)
+          else
+            playground_repo_entry_json ~source:"cache" ~repo_name:name repo
+            |> with_playground_repo_policy_fields policy ~repo_name:name
       | None -> repo)
   in
   let cached_names = List.filter_map repo_name_of_json cached in
@@ -445,7 +517,8 @@ let playground_repos_json ~(config : Workspace.config) ~(meta : keeper_meta) =
     |> List.filter (fun name -> not (List.mem name cached_names))
     |> List.map (fun name ->
       playground_repo_entry_json ~source:"filesystem" ~repo_name:name
-        (`Assoc []))
+        (`Assoc [])
+      |> with_playground_repo_policy_fields policy ~repo_name:name)
   in
   `List (cached @ fs_entries)
 

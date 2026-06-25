@@ -9,8 +9,17 @@
    again. *)
 
 let compute_context_ratio (meta : Keeper_meta_contract.keeper_meta) : float option =
-  let _ = meta in
-  None
+  let tokens = meta.runtime.usage.last_input_tokens in
+  if tokens <= 0 then None
+  else
+    let max_tokens =
+      (* Provider-side budget is not yet plumbed through meta; use the
+         configured ceiling as a conservative fallback so the dashboard
+         still shows a usable ratio. *)
+      Keeper_types_profile_toml_normalizers.max_keeper_context_tokens
+    in
+    if max_tokens <= 0 then None
+    else Some (float_of_int tokens /. float_of_int max_tokens)
 ;;
 
 type keeper_context_snapshot =

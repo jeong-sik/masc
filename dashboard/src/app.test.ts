@@ -4,7 +4,7 @@ import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
 import { App, shouldShowCopilotFab, shouldSuppressFloatingChrome, shouldUseCompactDashboardChrome } from './app'
 import { route } from './router'
-import { keepers } from './store'
+import { executionLoaded, keepers, shellCounts, shellRuntimeResolution } from './store'
 import { activeKeeperName } from './keeper-state'
 import type { Keeper } from './types'
 
@@ -18,6 +18,9 @@ describe('App v2 header chrome', () => {
     window.location.hash = originalHash
     route.value = { tab: 'overview', params: {}, postId: null }
     keepers.value = []
+    executionLoaded.value = false
+    shellCounts.value = null
+    shellRuntimeResolution.value = null
     activeKeeperName.value = ''
   })
 
@@ -27,6 +30,9 @@ describe('App v2 header chrome', () => {
     window.location.hash = originalHash
     route.value = { tab: 'overview', params: {}, postId: null }
     keepers.value = []
+    executionLoaded.value = false
+    shellCounts.value = null
+    shellRuntimeResolution.value = null
     activeKeeperName.value = ''
   })
 
@@ -105,9 +111,9 @@ describe('App v2 header chrome', () => {
   it('renders keeper breadcrumb tail and the live running-count chip', () => {
     window.innerWidth = 1280
     route.value = { tab: 'keepers', params: { keeper: 'albini' }, postId: null }
-    // The live running-count chip counts running keepers from the `keepers` store
-    // (via phaseStatus), not from shellCounts. Seed 7 running keepers so the chip
-    // reads "7 실행 중".
+    // Before runtime health hydrates, the shared runtime-count resolver falls
+    // back to the execution rows. Seed 7 running keepers so the chip reads
+    // "7 실행 중".
     keepers.value = Array.from({ length: 7 }, (_, i): Keeper => ({
       name: `k${i}`,
       status: 'running',
@@ -131,6 +137,41 @@ describe('App v2 header chrome', () => {
     // Pulse is now carried by the StatusDot pip (`.dot2.pulse`), replacing the old
     // `motion-safe:animate-pulse` utility class on an inner span.
     expect(liveChip?.querySelector('.dot2.pulse')).not.toBeNull()
+  })
+
+  it('uses runtime health for the live running-count chip when rows are stale', () => {
+    window.innerWidth = 1280
+    route.value = { tab: 'keepers', params: { keeper: 'albini' }, postId: null }
+    keepers.value = Array.from({ length: 7 }, (_, i): Keeper => ({
+      name: `stale-${i}`,
+      status: 'running',
+      lifecycle_phase: 'Running',
+    }))
+    shellCounts.value = { agents: 0, tasks: 0, keepers: 7, total_runtimes: 7, configured_keepers: 13 }
+    shellRuntimeResolution.value = {
+      fleet_safety: {
+        keeper_fibers: 7,
+        paused_keepers: 3,
+        paused_keepers_health: { count: 3 },
+        keeper_fleet_no_fibers: false,
+        keeper_fd_pressure: null,
+        keeper_fleet_safety: {
+          running_keeper_fiber_count: 1,
+          paused_keeper_count: 3,
+        },
+        keeper_reaction_ledger: null,
+      },
+    } as any
+
+    renderApp()
+
+    const liveChip = container.querySelector('.v2-statchip.live') as HTMLElement | null
+    expect(liveChip).not.toBeNull()
+    expect(liveChip?.textContent).toContain('1 실행 중')
+    expect(liveChip?.title).toContain('runtime health')
+    expect(liveChip?.title).toContain('paused=3')
+    expect(liveChip?.title).toContain('offline=0 (not derived from execution rows)')
+    expect(liveChip?.title).toContain('configured=13 (shell)')
   })
 
   it('falls back to activeKeeperName for the breadcrumb tail when no route keeper param', () => {

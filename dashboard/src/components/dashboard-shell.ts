@@ -232,6 +232,7 @@ interface DashboardHealthInput {
   namespaceTruthConfiguredKeepers?: number
   keepers: Keeper[]
   runtimeResolution: DashboardRuntimeResolution | null
+  runtimeGeneratedAt?: string | null
   runtimeProviderProbe?: DashboardRuntimeProbePayload | null
   runtimeProviderProbeError?: string | null
   executionError: string | null
@@ -557,33 +558,42 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
     })
   }
 
-  const pausedKeepers = input.keepers.filter(isKeeperPaused).length
+  const rowPausedKeepers = input.keepers.filter(isKeeperPaused).length
   const fallbackRunningKeepers = input.keepers.filter(keeperRowLooksRunning).length
-  const fallbackOfflineKeepers = Math.max(0, input.keepers.length - fallbackRunningKeepers - pausedKeepers)
   const runtimeCounts = resolveRuntimeCounts({
-    executionLoaded: input.counts !== null || input.keepers.length > 0,
+    executionLoaded: input.keepers.length > 0,
     agentsCount: input.counts?.agents ?? 0,
     keepersCount: input.counts?.keepers ?? fallbackRunningKeepers,
-    pausedKeepersCount: pausedKeepers,
-    offlineKeepersCount: input.counts !== null ? 0 : fallbackOfflineKeepers,
+    pausedKeepersCount: rowPausedKeepers,
     keeperRowsCount: input.keepers.length,
     namespaceTruthCounts: input.namespaceTruthCounts,
     namespaceTruthConfiguredKeepers: input.namespaceTruthConfiguredKeepers,
     shellCounts: input.counts,
     shellConfiguredKeepers: input.counts?.configured_keepers,
+    runtimeFleetSafety: runtime?.fleet_safety ?? null,
+    runtimeHealthGeneratedAt: input.runtimeGeneratedAt ?? runtime?.generated_at ?? null,
   })
   const configured = runtimeCounts.configured.keepers
   const liveKeepers = runtimeCounts.live.keepers
+  const pausedKeepers = runtimeCounts.live.pausedKeepers
   // Scope note (#22110): the agent-roster surface dropped the count-source label
   // from its always-visible operational copy. Here the same label feeds the
   // keeper-count-basis chip's `detail` tooltip (hover-only, diagnostic) below —
   // an on-demand explanation of where the running count comes from, which is the
   // actionable detail that review kept. Retained intentionally, not an oversight.
-  const runningCountSource = input.counts !== null
+  const runningCountSource = runtimeCounts.source === 'runtime-health'
+    ? 'runtime health'
+    : input.counts !== null
     ? 'shell'
     : input.keepers.length > 0
       ? '상세 행'
       : runtimeCountSourceLabel(runtimeCounts.source)
+  const pausedCountSource = runtimeCounts.source === 'runtime-health'
+    ? 'runtime health'
+    : '재개 대기 lifecycle row'
+  const offlineCountSource = runtimeCounts.source === 'runtime-health'
+    ? 'runtime health only; execution offline rows not mixed'
+    : '프로세스/하트비트 없음으로 기동 필요 row'
   if (configured > 0 && (configured !== liveKeepers || pausedKeepers > 0 || runtimeCounts.live.offlineKeepers > 0)) {
     chips.push({
       key: 'keeper-count-basis',
@@ -593,7 +603,7 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
         offlineKeepers: runtimeCounts.live.offlineKeepers,
         configuredKeepers: configured,
       }),
-      detail: `런타임 가동=${runningCountSource}; 일시정지=재개 대기 lifecycle row; 오프라인=프로세스/하트비트 없음으로 기동 필요 row; 설정=${configuredCountSourceLabel(runtimeCounts.configured.source)} keeper 설정.`,
+      detail: `런타임 가동=${runningCountSource}; 일시정지=${pausedCountSource}; 오프라인=${offlineCountSource}; 설정=${configuredCountSourceLabel(runtimeCounts.configured.source)} keeper 설정.`,
       tone: 'muted',
     })
   }
@@ -632,7 +642,7 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
     chips.push(cdalChip)
   }
 
-  if (configured > 0 && liveKeepers === 0) {
+  if (configured > 0 && input.keepers.length === 0 && liveKeepers === 0 && pausedKeepers === 0) {
     chips.push({
       key: 'no-keeper-rows',
       label: 'No keeper rows',
@@ -746,6 +756,7 @@ export function DashboardHealthStrip() {
       namespaceTruthConfiguredKeepers: namespaceTruth.value?.root.configured_keepers,
       keepers: keepers.value,
       runtimeResolution: shellRuntimeResolution.value,
+      runtimeGeneratedAt: shellRuntimeResolution.value?.generated_at ?? null,
       runtimeProviderProbe: shellRuntimeProviderProbe.value,
       runtimeProviderProbeError: shellRuntimeProviderProbeError.value,
       executionError: executionError.value,

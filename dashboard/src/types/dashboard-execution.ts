@@ -113,6 +113,7 @@ export interface KeeperRuntimeResolved {
 }
 
 export interface DashboardRuntimeResolution {
+  generated_at?: string | null
   status: 'ready' | 'warn' | string
   warnings: string[]
   base_path: DashboardConfigResolutionItem

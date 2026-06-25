@@ -83,6 +83,15 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('oas·seoul-1')
   })
 
+  it('renders the selected runtime state from the canonical phase label', () => {
+    const k = mkKeeper({ status: 'offline', lifecycle_phase: 'Paused' })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    const state = container.querySelector('.kw-fleet-aside-state') as HTMLElement | null
+    expect(state).not.toBeNull()
+    expect(state?.textContent).toBe('일시정지')
+    expect(state?.getAttribute('title')).toBe('offline')
+  })
+
   it('shows the model line as missing when no model was reported', () => {
     const k = mkKeeper({ runtime_canonical: 'runpod_gemma' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)

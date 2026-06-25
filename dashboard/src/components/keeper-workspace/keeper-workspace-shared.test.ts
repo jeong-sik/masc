@@ -24,6 +24,10 @@ describe('keeperBucket', () => {
   it('classifies a paused keeper from the paused flag', () => {
     expect(keeperBucket(mk({ status: 'running', paused: true }))).toBe('paused')
   })
+  it('keeps an explicit pause state ahead of stale offline status', () => {
+    expect(keeperBucket(mk({ status: 'stopped', paused: true }))).toBe('paused')
+    expect(keeperBucket(mk({ status: 'offline', lifecycle_phase: 'Paused' }))).toBe('paused')
+  })
   it('classifies a stopped keeper as offline', () => {
     expect(keeperBucket(mk({ status: 'stopped' }))).toBe('offline')
   })

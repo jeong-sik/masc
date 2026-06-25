@@ -10,9 +10,10 @@ include Keeper_meta_json_scrub
 
 let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
   let rt = m.runtime in
-  (* Policy fields are TOML-only.  Identity/personality fields are persisted
-     as the effective runtime snapshot so dashboards and meta readers do not
-     show a blank keeper between TOML load and prompt render. *)
+  (* Most policy fields are TOML-only. Identity/personality fields plus
+     multimodal_policy are persisted as the effective runtime snapshot so
+     dashboards, checkpoint writers, and meta readers do not see a blank or
+     downgraded keeper between TOML load and prompt render. *)
   `Assoc
     [ "name", `String m.name
     ; "agent_name", `String m.agent_name
@@ -23,6 +24,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "instructions", `String m.instructions
     ; "trace_id", `String (Keeper_id.Trace_id.to_string rt.trace_id)
     ; "tool_access", Json_util.json_string_list m.tool_access
+    ; "multimodal_policy", `String (multimodal_policy_to_string m.multimodal_policy)
     ; "trace_history", `List (List.map (fun s -> `String s) rt.trace_history)
     ; "generation", `Int rt.generation
     ; "last_handoff_ts", `Float rt.last_handoff_ts
@@ -106,6 +108,7 @@ let fallback_canonical_keeper_meta_key_names =
   ; "instructions"
   ; "trace_id"
   ; "tool_access"
+  ; "multimodal_policy"
   ; "trace_history"
   ; "generation"
   ; "last_handoff_ts"

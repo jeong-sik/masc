@@ -4,6 +4,7 @@ import {
   enqueueInput,
   dequeueInput,
   markInputSent,
+  requeueInputFront,
   clearInputQueue,
   hasQueuedInputClientAction,
   getQueueLength,
@@ -66,6 +67,21 @@ describe('keeper-chat-store input queue', () => {
     markInputSent('keeper-q')
     const next = dequeueInput('keeper-q')
     expect(next!.content).toBe('b')
+  })
+
+  it('requeues a deferred sending item at the front', () => {
+    enqueueInput('keeper-q', 'first')
+    enqueueInput('keeper-q', 'second')
+    const msg = dequeueInput('keeper-q')
+    expect(msg!.content).toBe('first')
+
+    requeueInputFront('keeper-q', msg!)
+
+    const replay = dequeueInput('keeper-q')
+    expect(replay!.content).toBe('first')
+    markInputSent('keeper-q')
+    const next = dequeueInput('keeper-q')
+    expect(next!.content).toBe('second')
   })
 
   it('clearInputQueue removes all items', () => {

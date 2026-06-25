@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { beforeEach } from 'vitest'
 import {
   THREAD_ENTRY_CAP,
+  appendAssistantToolTraceArgsDelta,
+  appendAssistantToolTraceStep,
   appendAssistantThinkingDelta,
   appendThreadEntry,
   attachKeeperAudioClip,
@@ -12,13 +14,14 @@ import {
   isToolConversationEntry,
   isVisibleDirectConversationEntry,
   keeperThreads,
+  markAssistantToolTraceEnded,
   mergeServerHistoryEntries,
   normalizeAudioClip,
   normalizeStatusDetail,
   removeThreadEntries,
   setStatusDetail,
 } from './keeper-state'
-import type { KeeperConversationEntry } from './types'
+import type { ChatBlock, KeeperConversationEntry } from './types'
 
 describe('normalizeStatusDetail', () => {
   it('infers and hides internal keeper history from direct comms', () => {
@@ -334,6 +337,41 @@ describe('thread history merge & persistence', () => {
     expect(entries[1]?.timestamp).toBeTruthy()
   })
 
+  it('preserves object payloads in persisted tool trace blocks', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        content: 'done',
+        ts: 1_780_000_000,
+        blocks: [
+          {
+            t: 'trace',
+            trace: [
+              {
+                kind: 'tool',
+                name: 'lookup',
+                toolCallId: 'tc-object',
+                args: { query: 'masc', limit: 2 },
+                result: { ok: true },
+              },
+            ],
+          },
+        ] as unknown as ChatBlock[],
+      },
+    ])
+
+    const traceBlock = entries[0]?.blocks?.find((block): block is Extract<ChatBlock, { t: 'trace' }> => block.t === 'trace')
+    expect(traceBlock?.trace).toEqual([
+      {
+        kind: 'tool',
+        name: 'lookup',
+        toolCallId: 'tc-object',
+        args: '{\n  "query": "masc",\n  "limit": 2\n}',
+        result: '{\n  "ok": true\n}',
+      },
+    ])
+  })
+
   it('maps persisted tool rows to the live tool-entry convention', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       { role: 'user', content: 'run checks', ts: 1_780_000_000 },
@@ -631,6 +669,36 @@ describe('thread history merge & persistence', () => {
 
     const ids = (keeperThreads.value.echo ?? []).map(e => e.id)
     expect(ids).toEqual(['tool-1', 'reply-1', 'tail-1'])
+  })
+
+  it('does not duplicate an existing tool row when a start event repeats', () => {
+    appendThreadEntry('echo', entry({ id: 'reply-1', role: 'assistant', source: 'direct_assistant' }))
+    insertThreadEntryBefore('echo', 'reply-1', entry({ id: 'tool-1', role: 'tool', source: 'tool_result', text: '{"a":1}' }))
+    insertThreadEntryBefore('echo', 'reply-1', entry({ id: 'tool-1', role: 'tool', source: 'tool_result', text: '{"a":2}' }))
+
+    const tools = (keeperThreads.value.echo ?? []).filter(e => e.id === 'tool-1')
+    expect(tools).toHaveLength(1)
+    expect(tools[0]?.text).toBe('{"a":1}')
+  })
+
+  it('preserves accumulated tool trace state when TOOL_CALL_START repeats', () => {
+    appendThreadEntry('echo', entry({ id: 'reply-1', role: 'assistant', source: 'direct_assistant' }))
+    appendAssistantToolTraceStep('echo', 'reply-1', { toolCallId: 'tc-1', name: 'lookup', ts: '2026-06-25T00:00:00.000Z' })
+    appendAssistantToolTraceArgsDelta('echo', 'reply-1', 'tc-1', '{"a":1}')
+    markAssistantToolTraceEnded('echo', 'reply-1', 'tc-1')
+    appendAssistantToolTraceStep('echo', 'reply-1', { toolCallId: 'tc-1', name: 'lookup-again', ts: '2026-06-25T00:00:01.000Z' })
+
+    const reply = keeperThreads.value.echo?.find(e => e.id === 'reply-1')
+    expect(reply?.traceSteps).toEqual([
+      {
+        kind: 'tool',
+        name: 'lookup',
+        toolCallId: 'tc-1',
+        status: 'ok',
+        args: '{"a":1}',
+        ts: '2026-06-25T00:00:00.000Z',
+      },
+    ])
   })
 
   it('removes only the requested local thread entries', () => {

@@ -119,6 +119,25 @@ let complete_should_not_run
     () =
   failwith "vision provider complete should not run"
 
+let metric_value metric ~labels =
+  Masc.Otel_metric_store.metric_value_or_zero
+    Keeper_metrics.(to_string metric)
+    ~labels
+    ()
+;;
+
+let assert_metric_increment label before after =
+  let delta = after -. before in
+  if abs_float (delta -. 1.0) > 0.0001
+  then
+    failwith
+      (Printf.sprintf
+         "expected metric %s to increment by 1.0, before=%f after=%f"
+         label
+         before
+         after)
+;;
+
 (* Only MaxTokens -> true. Exhaustive over all 9 SDK variants so a new one forces
    a decision rather than silently bucketing to false. *)
 let test_truncated_of_stop_reason () =
@@ -200,6 +219,12 @@ let test_invalid_media_type_is_policy_rejection () =
     let meta = make_meta "vision-media-type" in
     let bytes = "\x89PNG\r\n\x1a\nraw" in
     let handle = store_image meta bytes in
+    let metric_labels =
+      [ "result", "error"; "reason", "invalid_media_type" ]
+    in
+    let before =
+      metric_value Keeper_metrics.VisionAnalyze ~labels:metric_labels
+    in
     let raw =
       Eio_main.run (fun env ->
         Eio.Switch.run (fun sw ->
@@ -213,7 +238,11 @@ let test_invalid_media_type_is_policy_rejection () =
     in
     let json = json_of_output raw in
     assert (String.equal (assoc_string "error" json) "invalid_media_type");
-    assert (String.equal (assoc_string "failure_class" json) "policy_rejection"))
+    assert (String.equal (assoc_string "failure_class" json) "policy_rejection");
+    assert_metric_increment
+      "vision_analyze invalid_media_type"
+      before
+      (metric_value Keeper_metrics.VisionAnalyze ~labels:metric_labels))
 
 let test_missing_clock_is_runtime_failure_without_provider_call () =
   with_temp_base (fun _ ->
@@ -402,6 +431,25 @@ let test_retryable_provider_error_tries_next_runtime () =
     with_temp_base (fun _ ->
       let meta = make_meta "vision-failover" in
       let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let transient_labels =
+        [ "runtime_id", "p1.vision-a"
+        ; "result", "error"
+        ; "reason", "transient_provider_error"
+        ]
+      in
+      let ok_labels =
+        [ "runtime_id", "p2.vision-b"
+        ; "result", "ok"
+        ; "reason", "provider_response"
+        ]
+      in
+      let before_transient =
+        metric_value Keeper_metrics.VisionCandidateAttempts
+          ~labels:transient_labels
+      in
+      let before_ok =
+        metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels
+      in
       let calls = ref 0 in
       let models = ref [] in
       let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ () =
@@ -426,7 +474,16 @@ let test_retryable_provider_error_tries_next_runtime () =
       let json = json_of_output raw in
       assert (!calls = 2);
       assert (!models = [ "vision-a"; "vision-b" ]);
-      assert (String.equal (assoc_string "text" json) "second runtime answered")))
+      assert (String.equal (assoc_string "text" json) "second runtime answered");
+      assert_metric_increment
+        "vision_candidate transient_provider_error"
+        before_transient
+        (metric_value Keeper_metrics.VisionCandidateAttempts
+           ~labels:transient_labels);
+      assert_metric_increment
+        "vision_candidate provider_response"
+        before_ok
+        (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels)))
 
 let test_deadline_exhaustion_preserves_provider_error () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->

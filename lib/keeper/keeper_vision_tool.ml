@@ -85,8 +85,7 @@ let vision_runtime_candidates () : (string * Runtime.t) list =
      here: the SSOT admits "image" on [supports_image_input] alone, and the
      modality reroute, the capability gate, and this vision pick must share one
      predicate or a vision pick can land on a runtime the gate then rejects. *)
-  let runtimes = Runtime.get_runtimes () in
-  let media_failover = Runtime.media_failover () in
+  let runtimes, media_failover = Runtime.runtimes_and_media_failover () in
   let by_id id =
     List.find_opt (fun (rt : Runtime.t) -> String.equal rt.Runtime.id id) runtimes
   in
@@ -116,12 +115,28 @@ let first_vision_runtime_id () : (string, string) result =
 let vision_store_dir ~keeper_name =
   Filename.concat (Config_dir_resolver.keepers_dir ()) (keeper_name ^ ".vision")
 
+let record_vision_analyze_result ~result ~reason =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string VisionAnalyze)
+    ~labels:[ "result", result; "reason", reason ]
+    ()
+;;
+
+let record_vision_candidate_attempt ~runtime_id ~result ~reason =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string VisionCandidateAttempts)
+    ~labels:[ "runtime_id", runtime_id; "result", result; "reason", reason ]
+    ()
+;;
+
 let ok_json text =
+  record_vision_analyze_result ~result:"ok" ~reason:"ok";
   Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "text", `String text ])
 
 (* Default to Runtime_failure: an unclassified error is treated as an internal
    keeper-health fault, not a caller validation or workflow business rule. *)
 let err_json ?detail ?(failure_class = Tool_result.Runtime_failure) code =
+  record_vision_analyze_result ~result:"error" ~reason:code;
   let fields =
     [ "ok", `Bool false
     ; "error", `String code
@@ -313,22 +328,45 @@ let rec run_candidates
           with_timeout ~clock ~timeout_sec (fun () ->
             complete ~sw ~net ?clock:(Some clock) ~config ~messages ())
         with
-        | None -> continue_with (`Timeout runtime_id)
+        | None ->
+          record_vision_candidate_attempt
+            ~runtime_id
+            ~result:"error"
+            ~reason:"timeout";
+          continue_with (`Timeout runtime_id)
         | Some (Error err) ->
           if terminal_policy_http_error err
-          then
+          then (
+            record_vision_candidate_attempt
+              ~runtime_id
+              ~result:"error"
+              ~reason:"terminal_provider_error";
             err_json
               ~failure_class:(failure_class_of_http_error err)
               ~detail:(Provider_http_error.to_message err)
-              "provider_error"
+              "provider_error")
           else if Runtime_attempt_fsm.should_try_next err
-          then continue_with (`Provider_error err)
-          else
+          then (
+            record_vision_candidate_attempt
+              ~runtime_id
+              ~result:"error"
+              ~reason:"transient_provider_error";
+            continue_with (`Provider_error err))
+          else (
+            record_vision_candidate_attempt
+              ~runtime_id
+              ~result:"error"
+              ~reason:"runtime_provider_error";
             err_json
               ~failure_class:(failure_class_of_http_error err)
               ~detail:(Provider_http_error.to_message err)
-              "provider_error"
-        | Some (Ok response) -> ok_or_classified_json response))
+              "provider_error")
+        | Some (Ok response) ->
+          record_vision_candidate_attempt
+            ~runtime_id
+            ~result:"ok"
+            ~reason:"provider_response";
+          ok_or_classified_json response))
 
 let handle
     ?(complete = default_complete)

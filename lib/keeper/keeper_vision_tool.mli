@@ -32,6 +32,10 @@ val max_image_bytes : unit -> int
     overrides with a 5 MiB default matching dashboard upload policy. Oversized
     artifacts fail closed with [image_too_large]. *)
 
+val supported_image_media_types : string list
+(** MIME types admitted by [analyze_image]. The tool schema and runtime
+    validation share this list. *)
+
 val truncated_of_stop_reason : Agent_sdk.Types.stop_reason -> bool
 (** Collapse the provider's typed terminal reason to the single [truncated] bit
     {!Multimodal.Vision_analyze.classify} consumes: [MaxTokens -> true], every

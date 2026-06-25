@@ -179,6 +179,15 @@ let property name typ description =
   name, `Assoc [ "type", `String typ; "description", `String description ]
 ;;
 
+let string_enum_property name values description =
+  ( name
+  , `Assoc
+      [ "type", `String "string"
+      ; "enum", `List (List.map (fun value -> `String value) values)
+      ; "description", `String description
+      ] )
+;;
+
 let object_schema ?(required = []) properties =
   `Assoc
     [ "type", `String "object"
@@ -826,9 +835,9 @@ let analyze_image_schema =
         "string"
         "What to ask about the image, e.g. \"describe the chart\" or \
          \"transcribe the text\"."
-    ; property
+    ; string_enum_property
         "media_type"
-        "string"
+        Keeper_vision_tool.supported_image_media_types
         "Optional image MIME type override (e.g. image/png, image/jpeg). \
          Sniffed from the bytes when omitted."
     ]

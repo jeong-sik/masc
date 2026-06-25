@@ -356,6 +356,8 @@ let decision_public_allowlist =
     ; "liveness_mode"; "liveness_budget_source"
     ; "context_compact_started_count"; "context_compacted_count"
     ; "last_compaction"; "active_open_loop_count"
+    ; "routing_action"; "routing_reason"; "degraded_runtime_id"
+    ; "media_dropped_total"; "media_dropped_counts"
     ; "clock_refs"
     ]
 

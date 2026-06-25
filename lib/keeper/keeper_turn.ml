@@ -438,6 +438,19 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
     with
     | Error e -> tool_result_error ("" ^ e)
     | Ok meta0 ->
+      (* RFC vision-delegation §2.3 site 1 (fresh input). For a Delegate keeper,
+         evict each image to the artifact store + an eager analyze_image reading
+         BEFORE it enters the turn, so the main history stays text-only and
+         RFC-0265 never recomputes required=['image'] from it. No-op for
+         Inherit/Reroute keepers (safe-by-default). *)
+      let user_blocks =
+        Option.map
+          (Keeper_vision_ingest.evict_blocks
+             ~mode:Keeper_vision_ingest.Eager
+             ~policy:meta0.multimodal_policy
+             ~keeper_name:meta0.name)
+          user_blocks
+      in
       let turn_task_id = Printf.sprintf "keeper_turn_%s_%d"
         name (int_of_float (Time_compat.now () *. 1000.0)) in
       let keeper_turn_id = meta0.runtime.usage.total_turns + 1 in

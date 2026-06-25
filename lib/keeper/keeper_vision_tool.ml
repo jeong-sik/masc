@@ -159,6 +159,66 @@ let media_type_for_request ~bytes args =
            supported_image_media_types_csv)
   | _ -> Ok (sniff_media_type bytes)
 
+(* Typed outcome of the one-shot vision sub-call core, shared by the tool
+   handler [handle] (renders it to JSON) and eager ingestion eviction
+   ([Keeper_vision_ingest], renders it to a placeholder). One SSOT for runtime
+   resolution + the bounded provider call + the §2.2 empty/truncated
+   classification — eager and lazy differ only in WHEN they call this. *)
+type vision_outcome =
+  | Vo_ok of string
+  | Vo_invalid_request of string
+  | Vo_no_runtime of string
+  | Vo_timeout
+  | Vo_provider of
+      { failure_class : Tool_result.tool_failure_class
+      ; detail : string
+      }
+  | Vo_empty
+  | Vo_truncated
+
+(* Resolve the first image-capable runtime, send one {query + image} message
+   under [with_timeout], classify the reply. [clock = None] runs unbounded only
+   on the no-Eio path (tests); prod threads the turn's clock. *)
+let run_vision
+    ?(complete = default_complete)
+    ?(timeout_sec = default_timeout_sec)
+    ~sw
+    ?clock
+    ~net
+    ~query
+    ~media_type
+    ~bytes
+    () : vision_outcome =
+  match Va.make_request ~query ~image_media_type:media_type ~image_bytes:bytes with
+  | Error msg -> Vo_invalid_request msg
+  | Ok req ->
+    (match first_vision_runtime_id () with
+     | Error msg -> Vo_no_runtime msg
+     | Ok runtime_id ->
+       (match Runtime.get_runtime_by_id runtime_id with
+        | None -> Vo_no_runtime (Printf.sprintf "runtime %S not found" runtime_id)
+        | Some rt ->
+          let config = provider_for_vision rt.Runtime.provider_config in
+          let messages = [ message_of_request req ] in
+          (match
+             with_timeout ?clock ~timeout_sec (fun () ->
+               complete ~sw ~net ?clock ~config ~messages ())
+           with
+           | None -> Vo_timeout
+           | Some (Error err) ->
+             Vo_provider
+               { failure_class = failure_class_of_http_error err
+               ; detail = Provider_http_error.to_message err
+               }
+           | Some (Ok (response : Agent_sdk.Types.api_response)) ->
+             let text = Agent_sdk_response.text_of_response response in
+             let truncated = truncated_of_stop_reason response.stop_reason in
+             (match Va.classify ~truncated ~content:text with
+              | Ok t -> Vo_ok t
+              | Error Va.Empty_extraction -> Vo_empty
+              | Error Va.Truncated_extraction -> Vo_truncated))))
+;;
+
 let handle
     ?(complete = default_complete)
     ?(timeout_sec = default_timeout_sec)
@@ -197,55 +257,29 @@ let handle
                "invalid_media_type"
            | Ok media_type ->
              (match
-                Va.make_request ~query ~image_media_type:media_type
-                  ~image_bytes:bytes
+                run_vision ~complete ~timeout_sec ~sw ?clock ~net ~query
+                  ~media_type ~bytes ()
               with
-              | Error msg ->
+              | Vo_ok t -> ok_json t
+              | Vo_invalid_request msg ->
                 err_json
                   ~failure_class:Tool_result.Policy_rejection
                   ~detail:msg
                   "invalid_request"
-              | Ok req ->
-                (match first_vision_runtime_id () with
-                 | Error msg ->
-                   err_json
-                     ~failure_class:Tool_result.Runtime_failure
-                     ~detail:msg
-                     "no_capable_runtime"
-                 | Ok runtime_id ->
-                   (match Runtime.get_runtime_by_id runtime_id with
-                    | None ->
-                      err_json
-                        ~failure_class:Tool_result.Runtime_failure
-                        ~detail:(Printf.sprintf "runtime %S not found" runtime_id)
-                        "no_capable_runtime"
-                    | Some rt ->
-                      let config = provider_for_vision rt.Runtime.provider_config in
-                      let messages = [ message_of_request req ] in
-                      (match
-                         with_timeout ?clock ~timeout_sec (fun () ->
-                           complete ~sw ~net ?clock ~config ~messages ())
-                       with
-                       | None ->
-                         err_json ~failure_class:Tool_result.Transient_error
-                           "timeout"
-                       | Some (Error err) ->
-                         err_json
-                           ~failure_class:(failure_class_of_http_error err)
-                           ~detail:(Provider_http_error.to_message err)
-                           "provider_error"
-                       | Some (Ok (response : Agent_sdk.Types.api_response)) ->
-                         let text = Agent_sdk_response.text_of_response response in
-                         let truncated =
-                           truncated_of_stop_reason response.stop_reason
-                         in
-                         (match Va.classify ~truncated ~content:text with
-                          | Ok t -> ok_json t
-                          | Error Va.Empty_extraction ->
-                            err_json
-                              ~failure_class:Tool_result.Workflow_rejection
-                              "empty_extraction"
-                          | Error Va.Truncated_extraction ->
-                            err_json
-                              ~failure_class:Tool_result.Runtime_failure
-                              "truncated_extraction"))))))))
+              | Vo_no_runtime msg ->
+                err_json
+                  ~failure_class:Tool_result.Runtime_failure
+                  ~detail:msg
+                  "no_capable_runtime"
+              | Vo_timeout ->
+                err_json ~failure_class:Tool_result.Transient_error "timeout"
+              | Vo_provider { failure_class; detail } ->
+                err_json ~failure_class ~detail "provider_error"
+              | Vo_empty ->
+                err_json
+                  ~failure_class:Tool_result.Workflow_rejection
+                  "empty_extraction"
+              | Vo_truncated ->
+                err_json
+                  ~failure_class:Tool_result.Runtime_failure
+                  "truncated_extraction"))))

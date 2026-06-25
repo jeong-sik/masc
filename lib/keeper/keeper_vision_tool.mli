@@ -46,6 +46,34 @@ val first_vision_runtime_id : unit -> (string, string) result
 (** Runtime id of the first image-capable configured runtime, or [Error] when
     none is configured. *)
 
+(** Typed outcome of {!run_vision}. SSOT shared by the tool handler (renders to
+    JSON) and eager ingestion eviction ({!Keeper_vision_ingest}, renders to a
+    placeholder). *)
+type vision_outcome =
+  | Vo_ok of string
+  | Vo_invalid_request of string
+  | Vo_no_runtime of string
+  | Vo_timeout
+  | Vo_provider of { failure_class : Tool_result.tool_failure_class; detail : string }
+  | Vo_empty
+  | Vo_truncated
+
+val run_vision
+  :  ?complete:complete_fn
+  -> ?timeout_sec:float
+  -> sw:Eio.Switch.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> query:string
+  -> media_type:string
+  -> bytes:string
+  -> unit
+  -> vision_outcome
+(** The bounded one-shot vision sub-call core (runtime resolution + provider
+    call under [with_timeout] + §2.2 classification). Used by {!handle} and by
+    eager ingestion. [clock] omitted runs unbounded only on the no-Eio test
+    path; prod always threads the turn's clock. *)
+
 val handle
   :  ?complete:complete_fn
   -> ?timeout_sec:float

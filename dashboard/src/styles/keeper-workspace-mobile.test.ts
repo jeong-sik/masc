@@ -101,6 +101,7 @@ describe('keeper workspace v2 (26) mobile contract', () => {
   })
 
   it('exposes the mobile keeper reading-mode state from the app shell', () => {
+    expect(appSource).toContain("import { keeperMobilePane } from './components/keeper-detail-state'")
     expect(appSource).toContain("const mobileKeeperReadingMode = mobileKeeperPane === 'chat'")
     expect(appSource).toContain('data-reading=${mobileKeeperReadingMode ?')
   })

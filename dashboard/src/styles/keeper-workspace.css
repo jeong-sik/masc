@@ -1015,6 +1015,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   .kw-mobile-rail-drawer {
     width: min(330px, 88vw);
     max-width: calc(100vw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+    box-shadow: -8px 0 30px rgb(0 0 0 / 0.50);
   }
   .kw-rail-scroll {
     gap: 20px;

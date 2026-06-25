@@ -21,5 +21,6 @@
   masc.masc_exec
   masc.masc_exec_command_gate
   masc.masc_exec_shell_words
+  masc.masc_tool_dispatch
   masc_core
   yojson))

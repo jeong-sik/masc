@@ -176,10 +176,10 @@ let make_tool_bundle
                        ~tool_name:public_name
                        ~input
                    with
-                   | Some result -> result
-                   | None -> Ok input)
+                 | Some result -> result
+                 | None -> Ok input)
                  ~translate_input:descriptor.translate
-                 ~validate_translated_input:false
+                 ~validate_translated_input:descriptor.validate_translated_input
                  ~failure_counts
                  ()
              in

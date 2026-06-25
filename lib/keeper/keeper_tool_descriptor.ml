@@ -86,6 +86,7 @@ type t =
   ; sandbox : sandbox
   ; runtime_handler : runtime_handler
   ; translate : Yojson.Safe.t -> Yojson.Safe.t
+  ; validate_translated_input : bool
   ; receipt_labels : (string * string) list
   ; eval_tags : string list
   }
@@ -419,6 +420,7 @@ let translate_search_files input =
 let search_files_readonly_of_input _input = Some true
 
 let descriptor_with_public_aliases
+      ?(validate_translated_input = true)
       ~public_aliases
       ~id
       ~public_name
@@ -454,12 +456,14 @@ let descriptor_with_public_aliases
   ; sandbox
   ; runtime_handler
   ; translate
+  ; validate_translated_input
   ; receipt_labels
   ; eval_tags = []
   }
 ;;
 
 let descriptor
+      ?validate_translated_input
       ~id
       ~public_name
       ~internal_name
@@ -473,6 +477,7 @@ let descriptor
       ~translate
   =
   descriptor_with_public_aliases
+    ?validate_translated_input
     ~public_aliases:[]
     ~id
     ~public_name
@@ -559,6 +564,7 @@ let public_descriptors =
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
       ~runtime_handler:Tool_read_file
+      ~validate_translated_input:false
       ~translate:translate_read_file
   ; descriptor
       ~id:"agent.edit_file"
@@ -576,6 +582,7 @@ let public_descriptors =
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
       ~runtime_handler:Tool_edit_file
+      ~validate_translated_input:false
       ~translate:translate_edit_file
   ; descriptor
       ~id:"agent.write_file"
@@ -593,6 +600,7 @@ let public_descriptors =
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
       ~runtime_handler:Tool_write_file
+      ~validate_translated_input:false
       ~translate:translate_write_file
   ; descriptor
       ~id:"agent.search_web"
@@ -691,13 +699,21 @@ let find_base_schema_opt name =
   find_schema_input_opt Tool_shard_types.base_tools name
 ;;
 
-let remove_required_fields removed schema =
+let remove_schema_fields removed schema =
   match schema with
   | `Assoc fields ->
       let fields =
-        List.map
+        List.filter_map
           (function
+            | ("properties", `Assoc properties) ->
+              Some
+                ( "properties",
+                  `Assoc
+                    (List.filter
+                       (fun (name, _) -> not (List.mem name removed))
+                       properties) )
             | ("required", `List required) ->
+              Some
                 ( "required",
                   `List
                     (List.filter
@@ -705,43 +721,38 @@ let remove_required_fields removed schema =
                          | `String name -> not (List.mem name removed)
                          | _ -> true)
                        required) )
-            | field -> field)
+            | field -> Some field)
           fields
       in
       `Assoc fields
   | _ -> schema
 
-let keeper_board_identity_fields =
-  [ "author"; "voter"; "submitted_by"; "owner"; "user_id" ]
-
 let find_board_schema_opt name =
-  let prefix = "keeper_board_" in
-  if not (String.starts_with ~prefix name) then None
-  else
-    let suffix =
-      String.sub name (String.length prefix)
-        (String.length name - String.length prefix)
-    in
-    let board_name = "masc_board_" ^ suffix in
-    Board_tool_registry.tools
-    |> List.find_opt (fun (s : Masc_domain.tool_schema) ->
-           String.equal s.name board_name)
+  match Keeper_tool_name.masc_board_name_of_keeper_name name with
+  | None -> None
+  | Some board_name ->
+    Board_tool_registry.schema_for_board_name board_name
     |> Option.map (fun (s : Masc_domain.tool_schema) ->
-           remove_required_fields keeper_board_identity_fields s.input_schema)
+         remove_schema_fields
+           (Board_tool_registry.identity_fields_for_board_name board_name)
+           s.input_schema)
 
 let find_masc_schema_opt name =
-  [
-    Task.Schemas.schemas;
-    Tool_schemas_misc.schemas;
-    Tool_schemas_run.schemas;
-    Tool_schemas_agent.schemas;
-    Tool_schemas_workspace.schemas;
-    Tool_agent_timeline.schemas;
-    Keeper_schema.schemas;
-  ]
-  |> List.find_map (fun schemas -> find_schema_input_opt schemas name)
+  match Tools.find_tool name with
+  | Some schema -> Some schema.input_schema
+  | None ->
+    (* [Tool_agent_timeline] is registered by the main composition root and is
+       intentionally absent from [Tools.all_schemas_extended] to avoid pulling
+       keeper/runtime dependencies into the neutral schema aggregate. *)
+    (match find_schema_input_opt Tool_agent_timeline.schemas name with
+     | Some _ as schema -> schema
+     | None -> find_schema_input_opt Keeper_schema.schemas name)
 
 let find_cluster_schema_opt name =
+  (* Priority preserves the historical hidden keeper namespace ownership:
+     keeper taskboard wrappers first, then typed board wrappers, voice,
+     then public masc_* aggregates. The namespaces are expected to be
+     disjoint; this order is not a conflict resolver. *)
   match find_taskboard_schema_opt name with
   | Some _ as schema -> schema
   | None ->
@@ -752,6 +763,11 @@ let find_cluster_schema_opt name =
         | Some _ as schema -> schema
         | None -> find_masc_schema_opt name))
 ;;
+
+let required_base_schema_input name =
+  match find_base_schema_opt name with
+  | Some schema -> schema
+  | None -> failwith ("missing base tool schema for " ^ name)
 
 
 let tool_search_schema =
@@ -837,37 +853,15 @@ let person_note_set_schema =
 ;;
 
 let memory_search_schema =
-  Option.value
-    (find_base_schema_opt "keeper_memory_search")
-    ~default:passthrough_object_schema
+  required_base_schema_input "keeper_memory_search"
 ;;
 
 let memory_write_schema =
-  Option.value
-    (find_base_schema_opt "keeper_memory_write")
-    ~default:passthrough_object_schema
+  required_base_schema_input "keeper_memory_write"
 ;;
 
 let ide_annotate_schema =
-  object_schema
-    ~required:[ "file_path"; "line_start"; "content" ]
-    [
-      property "file_path" "string" "File path to annotate.";
-      property "line_start" "integer" "One-based starting line.";
-      property "line_end" "integer" "Optional one-based ending line.";
-      property "kind" "string" "Annotation kind. Defaults to Comment.";
-      property "content" "string" "Annotation text.";
-      property "goal_id" "string" "Optional related goal ID.";
-      property "task_id" "string" "Optional related task ID.";
-      property "board_post_id" "string" "Optional related board post ID.";
-      property "comment_id" "string" "Optional related board comment ID.";
-      property "pr_id" "string" "Optional related pull request ID.";
-      property "git_ref" "string" "Optional related git ref.";
-      property "log_id" "string" "Optional related log ID.";
-      property "session_id" "string" "Optional related session ID.";
-      property "operation_id" "string" "Optional related operation ID.";
-      property "worker_run_id" "string" "Optional related worker run ID.";
-    ]
+  required_base_schema_input "keeper_ide_annotate"
 ;;
 
 let masc_fusion_schema =
@@ -1002,6 +996,10 @@ let cluster_descriptor ~id ~name ~description ~handler ~readonly
   let input_schema =
     match find_cluster_schema_opt name with
     | Some schema -> schema
+    | None
+      when Option.is_some
+             (Keeper_tool_name.masc_board_name_of_keeper_name name) ->
+      failwith ("missing board registry schema for " ^ name)
     | None -> passthrough_object_schema
   in
   in_process_descriptor

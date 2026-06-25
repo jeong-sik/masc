@@ -286,18 +286,14 @@ let handle_board ~(meta : keeper_meta) ~name ~args =
 
 let handle_masc_board ~(meta : keeper_meta) ~name ~args =
   let args =
-    match name with
-    | "masc_board_post" | "masc_board_comment" ->
-      Keeper_tool_shared_runtime.assoc_override_string "author" meta.name args
-    | "masc_board_vote" | "masc_board_comment_vote" ->
-      Keeper_tool_shared_runtime.assoc_override_string "voter" meta.name args
-    | "masc_board_reaction" ->
-      Keeper_tool_shared_runtime.assoc_override_string "user_id" meta.name args
-    | "masc_board_sub_board_create" ->
-      Keeper_tool_shared_runtime.assoc_override_string "owner" meta.name args
-    | "masc_board_curation_submit" ->
-      Keeper_tool_shared_runtime.assoc_override_string "submitted_by" meta.name args
-    | _ -> args
+    match Tool_name.Board_name.of_string name with
+    | None -> args
+    | Some board_name ->
+      List.fold_left
+        (fun args field ->
+           Keeper_tool_shared_runtime.assoc_override_string field meta.name args)
+        args
+        (Board_tool_registry.identity_fields_for_board_name board_name)
   in
   let result =
     Board_tool_dispatch.handle_tool name args

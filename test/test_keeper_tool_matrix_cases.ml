@@ -5,6 +5,8 @@ module KET = Masc.Keeper_tool_dispatch_runtime
 module KTO = Masc.Keeper_tools_oas_bundle
 module Tool = Agent_sdk.Tool
 
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
 type init_mode = Generic.init_mode =
   | Fresh
   | Init_only
@@ -33,6 +35,11 @@ and fixture = {
 let string_starts_with = Generic.string_starts_with
 let contains_any = Generic.contains_any
 let cleanup_dir = Generic.cleanup_dir
+
+let restore_env name = function
+  | Some raw -> Unix.putenv name raw
+  | None -> unsetenv name
+;;
 
 let keeper_matrix_guard_fragments =
   [
@@ -253,17 +260,6 @@ let ensure_sub_board fixture =
            ]));
   slug
 
-let ensure_image_artifact fixture =
-  let bytes = "\x89PNG\r\n\x1a\ntool-matrix-image" in
-  let dir =
-    Filename.concat
-      (Config_dir_resolver.keepers_dir ())
-      (fixture.meta.name ^ ".vision")
-  in
-  match Multimodal.Vision_artifact_store.store ~dir bytes with
-  | Ok handle -> Multimodal.Vision_artifact_store.to_string handle
-  | Error msg -> failwith ("failed to store analyze_image fixture: " ^ msg)
-
 let prepare_keeper_name fixture name =
   if
     List.mem name
@@ -315,12 +311,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   | "keeper_memory_write" ->
       `Assoc [ ("kind", `String "decision"); ("content", `String "tool matrix memory write content") ]
   | "analyze_image" ->
-      `Assoc
-        [
-          ("artifact", `String (ensure_image_artifact fixture));
-          ("query", `String "Describe this test image.");
-          ("media_type", `String "image/png");
-        ]
+      `Assoc [ ("artifact", `String "tool-matrix-missing-query") ]
   | "keeper_ide_annotate" ->
       `Assoc
         [
@@ -467,14 +458,11 @@ let keeper_expectation_for_name name =
           "Revise your completion notes";
         ]
   | "analyze_image" ->
-      Expect_success_or_guard
+      Expect_guard
         [
-          "eio_context_unavailable";
-          "no_capable_runtime";
-          "provider_error";
-          "timeout";
-          "empty_extraction";
-          "truncated_extraction";
+          "invalid_args";
+          "requires string fields: artifact, query";
+          "policy_rejection";
         ]
   | "keeper_ide_annotate" ->
       Expect_success_or_guard [ "annotation sink is not installed" ]
@@ -624,14 +612,9 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
     Fun.protect
       ~finally:(fun () ->
         List.iter
-          (fun (name, value) ->
-            match value with
-            | Some raw -> Unix.putenv name raw
-            | None -> Unix.putenv name "")
+          (fun (name, value) -> restore_env name value)
           saved_env;
-        match saved_home with
-        | Some home -> Unix.putenv "HOME" home
-        | None -> Unix.putenv "HOME" "")
+        restore_env "HOME" saved_home)
       (fun () ->
         Unix.putenv "HOME" base_path;
         try

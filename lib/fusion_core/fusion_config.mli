@@ -34,6 +34,8 @@ type config_error =
       (** preset 이름 — JOJ 1차 심판 system prompt 누락 (RFC-0283). *)
   | Duplicate_judge of string * string
       (** (preset 이름, 중복 judge 정체성) — 두 JOJ 1차 심판이 같은 정체성 (RFC-0283). *)
+  | Invalid_min_answered of string * int
+      (** (preset 이름, min_answered) — [min_answered]가 [1..모델 총합] 밖. *)
   | Toml_type_error of string  (** 필드 타입 불일치 (Otoml.Type_error) *)
 [@@deriving show, eq]
 

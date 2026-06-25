@@ -14,6 +14,7 @@ type config_error =
   | Missing_default_preset of string
   | Judge_panel_prompt_missing of string  (** preset 이름; JOJ 1차 심판 prompt 누락 (RFC-0283) *)
   | Duplicate_judge of string * string  (** (preset 이름, 중복 judge 정체성) (RFC-0283) *)
+  | Invalid_min_answered of string * int  (** (preset 이름, min_answered): 1..모델 총합 밖 *)
   | Toml_type_error of string
 [@@deriving show, eq]
 
@@ -81,8 +82,11 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
     | Some entries -> List.map parse_judge_spec entries
     | None -> []
   in
+  (* 런타임 quorum. 미설정 시 1 = 기존 동작(>= 1 응답이면 심판 실행). 범위 검증은
+     Validated_preset.of_preset이 SSOT로 수행(1..모델 총합). *)
+  let min_answered = Otoml.find_or ~default:1 tbl Otoml.get_integer [ "min_answered" ] in
   let p : Fusion_policy.preset =
-    { name; panels; judge; judge_system_prompt; judge_timeout_s; judges }
+    { name; panels; judge; judge_system_prompt; judge_timeout_s; judges; min_answered }
   in
   (* 검증 SSOT는 Validated_preset.of_preset (RFC-0280). config는 그 [invalid]에 preset
      이름을 붙여 자기 [config_error]로 매핑만 한다 (운영자에게 어느 preset인지 알림).
@@ -103,7 +107,9 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
        | Fusion_policy.Validated_preset.Judge_panel_prompt_missing ->
          Judge_panel_prompt_missing name
        | Fusion_policy.Validated_preset.Duplicate_judge id ->
-         Duplicate_judge (name, id))
+         Duplicate_judge (name, id)
+       | Fusion_policy.Validated_preset.Bad_min_answered v ->
+         Invalid_min_answered (name, v))
 
 (* preset 한 명 파싱. 두 문법 분기:
    - 새 문법 [[fusion.presets.NAME.panels]] (array-of-tables) → 그룹별 파싱.

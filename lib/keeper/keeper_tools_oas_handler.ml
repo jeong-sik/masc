@@ -24,6 +24,7 @@ let make_keeper_tool_handler
       ?clock
       ?(pre_validate_input = fun input -> Ok input)
       ?(translate_input = fun j -> j)
+      ?(validate_translated_input = true)
       ~(failure_counts : failure_counts)
       ()
   : Yojson.Safe.t -> Tool_result.result
@@ -97,7 +98,9 @@ let make_keeper_tool_handler
     | Ok pre_validated_input ->
       let input = translate_input pre_validated_input in
       (match
-         Tool_input_validation.validate_args ~schema:input_schema ~name ~args:input ()
+         if validate_translated_input
+         then Tool_input_validation.validate_args ~schema:input_schema ~name ~args:input ()
+         else Ok input
        with
        | Error validation_result -> handle_validation_error ~input validation_result
        | Ok input ->

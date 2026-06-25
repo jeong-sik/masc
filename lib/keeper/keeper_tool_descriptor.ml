@@ -86,6 +86,7 @@ type t =
   ; sandbox : sandbox
   ; runtime_handler : runtime_handler
   ; translate : Yojson.Safe.t -> Yojson.Safe.t
+  ; validate_translated_input : bool
   ; receipt_labels : (string * string) list
   ; eval_tags : string list
   }
@@ -200,6 +201,16 @@ let closed_object_schema ?(required = []) properties =
   match object_schema ~required properties with
   | `Assoc fields -> `Assoc (fields @ [ "additionalProperties", `Bool false ])
   | schema -> schema
+;;
+
+let unavailable_input_schema reason =
+  `Assoc
+    [ "type", `String "object"
+    ; "description", `String reason
+    ; "properties", `Assoc []
+    ; "required", `List [ `String "__masc_unavailable_schema" ]
+    ; "additionalProperties", `Bool false
+    ]
 ;;
 
 let execute_schema = Tool_shard_types.tool_execute_schema.input_schema
@@ -428,6 +439,7 @@ let translate_search_files input =
 let search_files_readonly_of_input _input = Some true
 
 let descriptor_with_public_aliases
+      ~validate_translated_input
       ~public_aliases
       ~id
       ~public_name
@@ -463,12 +475,14 @@ let descriptor_with_public_aliases
   ; sandbox
   ; runtime_handler
   ; translate
+  ; validate_translated_input
   ; receipt_labels
   ; eval_tags = []
   }
 ;;
 
 let descriptor
+      ~validate_translated_input
       ~id
       ~public_name
       ~internal_name
@@ -482,6 +496,7 @@ let descriptor
       ~translate
   =
   descriptor_with_public_aliases
+    ~validate_translated_input
     ~public_aliases:[]
     ~id
     ~public_name
@@ -493,7 +508,7 @@ let descriptor
     ~backend
     ~sandbox
     ~runtime_handler
-      ~translate
+    ~translate
 ;;
 
 let with_eval_tags eval_tags descriptor =
@@ -522,6 +537,7 @@ let public_descriptors =
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
       ~runtime_handler:Tool_execute
+      ~validate_translated_input:true
       ~translate:translate_identity
   ; descriptor_with_public_aliases
       ~id:"agent.search_files"
@@ -546,6 +562,7 @@ let public_descriptors =
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
       ~runtime_handler:Tool_search_files
+      ~validate_translated_input:true
       ~translate:translate_search_files
   ; descriptor
       ~id:"agent.read_file"
@@ -568,6 +585,7 @@ let public_descriptors =
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
       ~runtime_handler:Tool_read_file
+      ~validate_translated_input:false
       ~translate:translate_read_file
   ; descriptor
       ~id:"agent.edit_file"
@@ -585,6 +603,7 @@ let public_descriptors =
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
       ~runtime_handler:Tool_edit_file
+      ~validate_translated_input:false
       ~translate:translate_edit_file
   ; descriptor
       ~id:"agent.write_file"
@@ -602,6 +621,7 @@ let public_descriptors =
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
       ~runtime_handler:Tool_write_file
+      ~validate_translated_input:false
       ~translate:translate_write_file
   ; descriptor
       ~id:"agent.search_web"
@@ -625,6 +645,7 @@ let public_descriptors =
       ~backend:Ocaml_runtime
       ~sandbox:No_sandbox
       ~runtime_handler:Tool_masc_misc_dispatch
+      ~validate_translated_input:true
       ~translate:translate_identity
   ; descriptor
       ~id:"agent.fetch_web"
@@ -648,6 +669,7 @@ let public_descriptors =
       ~backend:Ocaml_runtime
       ~sandbox:No_sandbox
       ~runtime_handler:Tool_masc_misc_dispatch
+      ~validate_translated_input:true
       ~translate:translate_identity
   ]
 ;;
@@ -682,11 +704,95 @@ let passthrough_object_schema =
     [ "type", `String "object"; "additionalProperties", `Bool true ]
 ;;
 
-let find_taskboard_schema_opt name =
+let find_schema_input_opt schemas name =
   List.find_opt (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
-    Tool_shard_types.taskboard_tools
+    schemas
   |> Option.map (fun (s : Masc_domain.tool_schema) -> s.input_schema)
 ;;
+
+let find_taskboard_schema_opt name =
+  find_schema_input_opt Tool_shard_types.taskboard_tools name
+;;
+
+let find_voice_schema_opt name =
+  find_schema_input_opt Tool_shard_types.voice_tools name
+;;
+
+let find_base_schema_opt name =
+  match find_schema_input_opt Tool_shard_types.base_tools name with
+  | Some _ as schema -> schema
+  | None -> find_schema_input_opt Tool_shard_types.filesystem_tools name
+;;
+
+let remove_schema_fields removed schema =
+  match schema with
+  | `Assoc fields ->
+      let fields =
+        List.filter_map
+          (function
+            | ("properties", `Assoc properties) ->
+              Some
+                ( "properties",
+                  `Assoc
+                    (List.filter
+                       (fun (name, _) -> not (List.mem name removed))
+                       properties) )
+            | ("required", `List required) ->
+              Some
+                ( "required",
+                  `List
+                    (List.filter
+                       (function
+                         | `String name -> not (List.mem name removed)
+                         | _ -> true)
+                       required) )
+            | field -> Some field)
+          fields
+      in
+      `Assoc fields
+  | _ -> schema
+
+let find_board_schema_opt name =
+  match Keeper_tool_name.masc_board_name_of_keeper_name name with
+  | None -> None
+  | Some board_name ->
+    Board_tool_registry.schema_for_board_name board_name
+    |> Option.map (fun (s : Masc_domain.tool_schema) ->
+         remove_schema_fields
+           (Board_tool_registry.identity_fields_for_board_name board_name)
+           s.input_schema)
+
+let find_masc_schema_opt name =
+  match Tools.find_tool name with
+  | Some schema -> Some schema.input_schema
+  | None ->
+    (* [Tool_agent_timeline] is registered by the main composition root and is
+       intentionally absent from [Tools.all_schemas_extended] to avoid pulling
+       keeper/runtime dependencies into the neutral schema aggregate. *)
+    (match find_schema_input_opt Tool_agent_timeline.schemas name with
+     | Some _ as schema -> schema
+     | None -> find_schema_input_opt Keeper_schema.schemas name)
+
+let find_cluster_schema_opt name =
+  (* Priority preserves the historical hidden keeper namespace ownership:
+     keeper taskboard wrappers first, then typed board wrappers, voice,
+     then public masc_* aggregates. The namespaces are expected to be
+     disjoint; this order is not a conflict resolver. *)
+  match find_taskboard_schema_opt name with
+  | Some _ as schema -> schema
+  | None ->
+    (match find_board_schema_opt name with
+     | Some _ as schema -> schema
+     | None ->
+       (match find_voice_schema_opt name with
+        | Some _ as schema -> schema
+        | None -> find_masc_schema_opt name))
+;;
+
+let required_base_schema_input name =
+  match find_base_schema_opt name with
+  | Some schema -> schema
+  | None -> unavailable_input_schema ("missing base tool schema for " ^ name)
 
 
 let tool_search_schema =
@@ -769,6 +875,18 @@ let person_note_set_schema =
         "What to remember about this person. Blank clears the note \
          (tombstone)."
     ]
+;;
+
+let memory_search_schema =
+  required_base_schema_input "keeper_memory_search"
+;;
+
+let memory_write_schema =
+  required_base_schema_input "keeper_memory_write"
+;;
+
+let ide_annotate_schema =
+  required_base_schema_input "keeper_ide_annotate"
 ;;
 
 let masc_fusion_schema =
@@ -883,6 +1001,7 @@ let in_process_descriptor ~id ~name ~description ~input_schema ~policy ~handler 
     ~backend:Ocaml_runtime
     ~sandbox:No_sandbox
     ~runtime_handler:handler
+    ~validate_translated_input:true
     ~translate:translate_identity
 ;;
 
@@ -901,8 +1020,12 @@ let cluster_descriptor ~id ~name ~description ~handler ~readonly
     else write_in_process_policy ~inline_safe ~maintenance_only ()
   in
   let input_schema =
-    match find_taskboard_schema_opt name with
+    match find_cluster_schema_opt name with
     | Some schema -> schema
+    | None
+      when Option.is_some
+             (Keeper_tool_name.masc_board_name_of_keeper_name name) ->
+      unavailable_input_schema ("missing board registry schema for " ^ name)
     | None -> passthrough_object_schema
   in
   in_process_descriptor
@@ -1159,14 +1282,14 @@ let internal_descriptors : t list =
       ~name:"keeper_memory_search"
       ~description:
         "Search keeper memory (semantic + recency) for relevant prior context."
-      ~input_schema:passthrough_object_schema
+      ~input_schema:memory_search_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_memory_search
   ; in_process_descriptor
       ~id:"keeper.memory.write"
       ~name:"keeper_memory_write"
       ~description:"Persist a memory entry for this keeper."
-      ~input_schema:passthrough_object_schema
+      ~input_schema:memory_write_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_memory_write
     (* ── library (RFC-0179 PR-3) ──────────────────────────────── *)
@@ -1226,7 +1349,7 @@ let internal_descriptors : t list =
       ~id:"keeper.ide.annotate"
       ~name:"keeper_ide_annotate"
       ~description:"Emit an IDE annotation event for the current keeper."
-      ~input_schema:passthrough_object_schema
+      ~input_schema:ide_annotate_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_ide_annotate
     (* ── fusion deliberation (RFC-0252) ───────────────────────── *)

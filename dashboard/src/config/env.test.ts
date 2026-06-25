@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseEnvInt } from './env'
+import { parseEnvBool, parseEnvInt } from './env'
 
 describe('parseEnvInt', () => {
   it('returns fallback for nullish / empty values', () => {
@@ -33,5 +33,23 @@ describe('parseEnvInt', () => {
   it('ignores trailing garbage (parseInt lenient mode)', () => {
     expect(parseEnvInt('500abc', 100)).toBe(500)
     expect(parseEnvInt('1000 ', 0)).toBe(1000)
+  })
+})
+
+describe('parseEnvBool', () => {
+  it('returns fallback for nullish, empty, or unknown values', () => {
+    expect(parseEnvBool(undefined, false)).toBe(false)
+    expect(parseEnvBool(null, true)).toBe(true)
+    expect(parseEnvBool('', true)).toBe(true)
+    expect(parseEnvBool('maybe', false)).toBe(false)
+  })
+
+  it('parses explicit true and false tokens', () => {
+    expect(parseEnvBool('true', false)).toBe(true)
+    expect(parseEnvBool('1', false)).toBe(true)
+    expect(parseEnvBool('yes', false)).toBe(true)
+    expect(parseEnvBool('false', true)).toBe(false)
+    expect(parseEnvBool('0', true)).toBe(false)
+    expect(parseEnvBool('no', true)).toBe(false)
   })
 })

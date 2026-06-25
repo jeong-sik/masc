@@ -1,0 +1,3 @@
+# Approved lib/keeper module basenames that intentionally omit the keeper_
+# prefix. Format: <module-basename> | <reason>.
+surface_ref | Shared typed surface vocabulary used by keeper lanes, external attention, and gate recording.

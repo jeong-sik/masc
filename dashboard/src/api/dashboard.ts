@@ -251,6 +251,7 @@ export type {
   MemoryOsExternalRef,
   MemoryOsFactProvenance,
   MemoryOsFact,
+  MemoryOsSelectionPolicy,
   MemoryOsTurnRecordSnapshot,
   KeeperUserModelItem,
   KeeperUserModelSnapshot,
@@ -319,4 +320,3 @@ export {
   fetchTlcResults,
   fetchAuditLedger,
 } from './dashboard-misc'
-

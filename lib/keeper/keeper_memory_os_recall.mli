@@ -4,6 +4,15 @@
     and episodes, sanitizes them, and returns an advisory block suitable for
     OAS [extra_system_context]. *)
 
+val default_max_facts : int
+(** Default number of keeper-local facts injected into the recall prompt block. *)
+
+val default_max_shared_facts : int
+(** Default number of shared-tier facts appended after keeper-local recall facts. *)
+
+val default_max_episodes : int
+(** Default number of memory episodes injected into the recall prompt block. *)
+
 val render_context
   :  keeper_id:string
   -> now:float

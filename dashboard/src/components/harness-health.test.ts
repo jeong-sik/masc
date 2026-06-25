@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { KpiStrip } from './kpi-strip'
 import { KpiCell } from './kpi-cell'
 
+const RETIRED_BRIGHT_GREEN = '#4ade80'
+
 function sampleResponse() {
   return {
     generated_at: 1711440000,
@@ -208,7 +210,7 @@ describe('HarnessHealth', () => {
     expect(mermaidSource(container)).toContain('#c4a265') // hub / active — brass accent
     expect(mermaidSource(container)).not.toContain('#38bdf8') // retired cyan
     expect(mermaidSource(container)).not.toContain('#0f172a') // retired navy
-    expect(mermaidSource(container)).not.toContain('#4ade80') // retired bright green
+    expect(mermaidSource(container)).not.toContain(RETIRED_BRIGHT_GREEN)
 
     const markup = container.innerHTML
     // Shared theme tokens reach the markup. KpiCell (post-StatCard swap)

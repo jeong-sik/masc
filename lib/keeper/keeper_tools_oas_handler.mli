@@ -15,7 +15,9 @@
     internal tool schema used for pre-execution validation. Alias callers may
     pass [?pre_validate_input] to validate the raw public payload before
     [?translate_input] reshapes it to the internal payload (identity by
-    default). *)
+    default). When [?validate_translated_input] is [false], the translated
+    payload is dispatched after public validation; runtime handlers remain
+    responsible for their legacy internal argument checks. *)
 val make_keeper_tool_handler
   :  name:string
   -> input_schema:Yojson.Safe.t
@@ -30,6 +32,7 @@ val make_keeper_tool_handler
   -> ?pre_validate_input:
        (Yojson.Safe.t -> (Yojson.Safe.t, Tool_result.result) result)
   -> ?translate_input:(Yojson.Safe.t -> Yojson.Safe.t)
+  -> ?validate_translated_input:bool
   -> failure_counts:Keeper_tools_oas.failure_counts
   -> unit
   -> Yojson.Safe.t

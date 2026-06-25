@@ -3,6 +3,9 @@ set -euo pipefail
 
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 BASE_URL="${MCP_URL%/mcp}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/harness/lib/mcp_jsonrpc.sh
+source "${SCRIPT_DIR}/../lib/mcp_jsonrpc.sh"
 
 tmpdir="$(mktemp -d)"
 cleanup() {
@@ -54,11 +57,18 @@ post_with_accept() {
   local body="$2"
   local header_file="$3"
   local body_file="$4"
+  local auth_token
+  auth_token="$(mcp_default_auth_token)"
+  local -a extra_headers=()
+  if [ -n "$auth_token" ]; then
+    extra_headers+=( -H "Authorization: Bearer $auth_token" )
+  fi
 
   curl_with_retry -sS -D "$header_file" -o "$body_file" \
     -X POST "$MCP_URL" \
     -H 'Content-Type: application/json' \
     -H "Accept: $accept_header" \
+    "${extra_headers[@]}" \
     -d "$body"
 }
 
@@ -76,6 +86,11 @@ post_with_session() {
   )
   if [ -n "$protocol_version" ]; then
     extra_headers+=(-H "Mcp-Protocol-Version: $protocol_version")
+  fi
+  local auth_token
+  auth_token="$(mcp_default_auth_token)"
+  if [ -n "$auth_token" ]; then
+    extra_headers+=(-H "Authorization: Bearer $auth_token")
   fi
 
   curl_with_retry -sS -D "$header_file" -o "$body_file" \
@@ -97,6 +112,11 @@ get_with_session() {
   if [ -n "$protocol_version" ]; then
     extra_headers+=(-H "Mcp-Protocol-Version: $protocol_version")
   fi
+  local auth_token
+  auth_token="$(mcp_default_auth_token)"
+  if [ -n "$auth_token" ]; then
+    extra_headers+=(-H "Authorization: Bearer $auth_token")
+  fi
 
   curl_with_retry -sS -D "$header_file" -o "$body_file" --max-time 2 \
     "$MCP_URL" \
@@ -114,6 +134,11 @@ delete_with_session() {
   )
   if [ -n "$protocol_version" ]; then
     extra_headers+=(-H "Mcp-Protocol-Version: $protocol_version")
+  fi
+  local auth_token
+  auth_token="$(mcp_default_auth_token)"
+  if [ -n "$auth_token" ]; then
+    extra_headers+=(-H "Authorization: Bearer $auth_token")
   fi
 
   curl_with_retry -sS -D "$header_file" -o "$body_file" \

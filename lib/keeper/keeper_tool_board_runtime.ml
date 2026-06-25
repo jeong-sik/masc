@@ -212,7 +212,9 @@ let handle_keeper_board_tool
       Tool_name.Board_name.Board_curation_submit
       (assoc_override_string "submitted_by" meta.name args)
   | "keeper_board_sub_board_create" ->
-    dispatch_board Tool_name.Board_name.Board_sub_board_create args
+    dispatch_board
+      Tool_name.Board_name.Board_sub_board_create
+      (assoc_override_string "owner" meta.name args)
   | "keeper_board_sub_board_list" ->
     dispatch_board Tool_name.Board_name.Board_sub_board_list args
   | "keeper_board_sub_board_get" ->

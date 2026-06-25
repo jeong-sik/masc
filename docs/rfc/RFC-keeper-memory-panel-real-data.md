@@ -3,12 +3,12 @@ rfc: "keeper-memory-panel-real-data"
 title: "Keeper memory panel: real-data backing (no fabrication, no score resurrection)"
 status: Draft
 created: 2026-06-24
-updated: 2026-06-24
+updated: 2026-06-25
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0233", "0244", "0247", "0259", "0285"]
-implementation_prs: []
+implementation_prs: [22307]
 ---
 
 # RFC (keeper-memory-panel-real-data): Keeper memory panel — real-data backing
@@ -21,10 +21,10 @@ design's visual language to those fields, and adds only the extensions legitimat
 model. It **does not** revisit RFC-0247: the score-model deletion stands (operator-confirmed
 2026-06-24); `salience` / `uses` / `lastUsed` are not resurrected.
 
-**Surfaces (CLAUDE.md agent_delegation)**: dashboard memory components + a one-key addition to
-`lib/server/server_dashboard_http_keeper_api.ml` serialization. Not credential/operator/sandbox/hooks —
-outside the mandatory-RFC list, but authored as RFC because it amends a serialized data contract and
-rewires a live panel.
+**Surfaces (CLAUDE.md agent_delegation)**: dashboard memory components + bounded additions to
+`lib/server/server_dashboard_http_keeper_api.ml` serialization (`facts.items`, `selection_policy`).
+Not credential/operator/sandbox/hooks — outside the mandatory-RFC list, but authored as RFC because
+it amends a serialized data contract and rewires a live panel.
 
 ## 1. Problem
 
@@ -130,6 +130,37 @@ mirror of `category_of_string`, so the closed sum stays the boundary, not a free
 Bytes-identical safety: this only **adds** a key to an object; existing consumers
 (`server_dashboard_http_keeper_memory_health.ml`, the FE counts decode) ignore unknown keys. No
 removal, no reordering of the fact JSON on disk (the on-disk `fact_to_json` is untouched).
+
+### 4a.1 Backend — expose selection_policy lineage without hiding shared recall
+
+`selection_policy` is a dashboard contract field, not a classifier. It must describe what the
+panel is showing and what the prompt recall path can inject. The shape is serialized from an OCaml
+record (`memory_os_selection_policy`) so the JSON object is not an untyped inline literal:
+
+```json
+{
+  "keeper_scope": "masc-improver",
+  "shared_scope": "_shared",
+  "facts_source": "Keeper_memory_os_io.read_facts_tail",
+  "shared_facts_source": "Keeper_memory_os_io.read_facts_all",
+  "episodes_source": "Keeper_memory_os_io.read_episodes_tail",
+  "dashboard_fact_tail_limit": 384,
+  "dashboard_episode_tail_limit": 12,
+  "recall_private_fact_limit": 8,
+  "recall_shared_fact_limit": 4,
+  "recall_episode_limit": 2,
+  "category_source": "Keeper_memory_os_types.category_to_string",
+  "claim_kind_source": "Keeper_memory_os_types.claim_kind_to_string",
+  "recall_block": "Keeper_memory_os_recall.render_if_enabled",
+  "prompt_record": "Keeper_run_tools_hooks.record_block Prompt_block_id.Memory_os_recall"
+}
+```
+
+The `dashboard_*` bounds describe read-panel payload bounds. The `recall_*` bounds describe prompt
+injection defaults from `Keeper_memory_os_recall` and are intentionally separate: the dashboard scans
+more rows than the prompt injects. `persona_weighting` is not emitted because no such runtime feature
+exists. For non-`_shared` keepers, the policy must include the shared tier: actual recall reads the
+keeper-local bounded store and then appends private-precedence facts from `_shared`.
 
 ### 4b. Frontend — typed category + composition view model
 

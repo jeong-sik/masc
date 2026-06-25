@@ -404,16 +404,16 @@ let descriptor_model_tool_schemas () =
 (** Shared schema assembly: computes the full tool schema list once.
     [masc_schemas_fn] selects policy-filtered or universe-filtered MASC schemas
     depending on the caller's access scope. Descriptor-backed internal tools
-    are appended as a keeper-local schema source so descriptor-only tools such
-    as [masc_fusion] cannot appear in candidate names without a matching
-    Agent.run [Tool.t]. *)
+    are first so descriptor-owned schemas win dedupe over older shard entries,
+    and so descriptor-only tools such as [masc_fusion] cannot appear in
+    candidate names without a matching Agent.run [Tool.t]. *)
 let all_keeper_schemas ~(masc_schemas_fn : keeper_meta -> Masc_domain.tool_schema list)
     (meta : keeper_meta) : Masc_domain.tool_schema list =
-  keeper_model_tools
+  descriptor_model_tool_schemas ()
+  @ keeper_model_tools
   @ keeper_voice_tool_schemas
   @ [ keeper_tool_search_schema ]
   @ (masc_schemas_fn meta)
-  @ descriptor_model_tool_schemas ()
 
 (** Filter schemas by a set of allowed names.  Uses Hashtbl for O(1) lookup
     instead of List.mem (O(n) per schema). *)

@@ -23,7 +23,6 @@ type keeper_health =
   ; events_to_facts_ratio : float
   ; ttl_expired_on_disk : int
   ; near_duplicate : int
-  ; external_ref : int
   }
 
 let count_lines_in_file path =
@@ -53,22 +52,14 @@ let file_size_bytes path =
   if not (Sys.file_exists path) then 0 else (Unix.stat path).Unix.st_size
 ;;
 
-let count_external_ref_facts facts =
-  List.fold_left
-    (fun acc (f : Keeper_memory_os_types.fact) ->
-       if Option.is_some f.external_ref then acc + 1 else acc)
-    0
-    facts
-;;
-
 let keeper_health ~keepers_dir ~now keeper_id =
-  let facts_count, external_ref_count =
+  let facts_count =
     (* [read_facts_all] raises on malformed JSONL — treated as a read failure
        for this keeper; the caller catches and skips it. *)
     let fs =
       Keeper_memory_os_io.read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id
     in
-    List.length fs, count_external_ref_facts fs
+    List.length fs
   in
   let facts_bytes =
     file_size_bytes
@@ -97,7 +88,6 @@ let keeper_health ~keepers_dir ~now keeper_id =
       float_of_int events_bytes /. float_of_int (max 1 facts_bytes)
   ; ttl_expired_on_disk = gc_report.ttl_expired
   ; near_duplicate = gc_report.dedup_removed
-  ; external_ref = external_ref_count
   }
 ;;
 
@@ -111,7 +101,6 @@ let keeper_health_to_json h : Yojson.Safe.t =
     ; "events_to_facts_ratio", `Float h.events_to_facts_ratio
     ; "ttl_expired_on_disk", `Int h.ttl_expired_on_disk
     ; "near_duplicate", `Int h.near_duplicate
-    ; "external_ref", `Int h.external_ref
     ]
 ;;
 

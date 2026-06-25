@@ -354,8 +354,8 @@ function decodeMemoryOsExternalRef(raw: unknown): MemoryOsExternalRef | undefine
   const id = asString(raw.id)
   const kindToken = asString(raw.kind)?.trim().toLowerCase()
   if (!id || !kindToken) return undefined
-  // Mirror external_ref_of_json: both fields required and kind in the closed
-  // set, else the whole ref is dropped (the backend's None).
+  // Backward-compatible decode for older dashboard payloads: both fields are
+  // required and kind must be in the closed set.
   const kind = MEMORY_OS_EXTERNAL_REF_KINDS.find(k => k === kindToken)
   return kind ? { kind, id } : undefined
 }
@@ -389,8 +389,8 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
   ) {
     return null
   }
-  // external_ref / claim_kind are omitted by the server when None; an
-  // out-of-vocabulary value degrades to null, mirroring the backend contract.
+  // claim_kind is omitted by the server when None. external_ref is decoded only
+  // for older payloads; current backend projections no longer emit it.
   const claimKindToken = asString(raw.claim_kind)
   return {
     claim,

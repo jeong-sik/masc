@@ -294,7 +294,7 @@ let rewrite_facts_atomically ~keeper_id facts =
 
 (* Byte-level snapshot identity for the read-outside-lock, rewrite-under-lock
    pattern. [fact_to_json] has a stable key order (see Keeper_memory_os_types — the
-   optional external_ref and claim_id keys are appended last and omitted when None,
+   optional claim metadata keys are appended last and omitted when None,
    specifically to keep this fingerprint byte-identical for legacy rows), so a
    fact's canonical JSON is a sound content key. [same_fact_snapshot snapshot
    current] is true iff the two lists are positionally byte-identical: any

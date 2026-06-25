@@ -254,21 +254,6 @@ module KeeperMemoryOs = struct
     get_bool ~default:false "MASC_KEEPER_MEMORY_OS_GC"
   ;;
 
-  (** External-ref grounding reconciliation maintenance fiber kill switch.
-      Default: false.
-      @category Policies
-      @ops_class operator *)
-  let reconcile_enabled () =
-    get_bool ~default:false "MASC_KEEPER_MEMORY_OS_RECONCILE"
-  ;;
-
-  (** Apply reconciler rewrites instead of dry-run logging. Default: false.
-      @category Policies
-      @ops_class operator *)
-  let reconcile_apply () =
-    get_bool ~default:false "MASC_KEEPER_MEMORY_OS_RECONCILE_APPLY"
-  ;;
-
   (** Per-keeper Memory OS consolidation maintenance fiber kill switch.
       Default: false.
       @category Policies

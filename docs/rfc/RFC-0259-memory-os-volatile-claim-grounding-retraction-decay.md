@@ -2,6 +2,10 @@
 
 **Status**: Draft
 **Date**: 2026-06-19
+**Supersession note (2026-06-25)**: The deterministic external-ref parser,
+GitHub grounding fiber, retention/ranking effects, and recall suppression/prefix
+described here are no longer active policy. Memory OS now treats PR/issue/task
+mentions as model context, not as machine-enforced status facts.
 **Verified against base main**: `99d3716b72` (P1–P4; the 2026-06-21 amendment re-verified §3.6/§3.7 against `c68c7d6500`)
 **Builds on**: [RFC-0247](./RFC-0247-memory-os-associative-graph-forgetting-brain.md) (purge of the composite score; "a fact's value is the librarian's judgment, not a number"), [RFC-0244](./RFC-0244-memory-os-tiered-stores.md) (tiered fact stores)
 **Supersedes intent of**: PR #21363 `feat(memory-os): stale decay mechanism with TTL-based GC` — **CLOSED, not merged** (`gh pr view 21363` → `state: CLOSED, mergedAt: null`). The fleet currently runs with no decay/grounding/retraction at all; this RFC re-states that need with a typed boundary instead of a flat TTL.
@@ -60,29 +64,27 @@ PR #21363 (a flat TTL decay) tried to address #4 and was closed. This RFC narrow
 
 | Concern | Kind | Owner |
 |---|---|---|
-| Is a claim externally verifiable, and against what id? | deterministic (parse) | classifier at producer boundary |
-| Re-check PR/issue #X against truth | **external** (`gh`/GitHub API) | reconciler fiber |
-| Confirmed/contradicted decision from the diff | deterministic | reconciler |
+| Is a claim externally verifiable, and against what id? | structured producer output only | librarian / future typed producer |
+| Re-check PR/issue #X against truth | model/live context, not automatic code inference | keeper turn context |
+| Confirmed/contradicted decision from the diff | historical/superseded | no production verifier |
 | Time-bound claim with no external referent | deterministic (TTL) | `category_valid_until` |
 | Which claim a new observation supersedes | LLM judgment | librarian (shipped as the re-observe UPSERT, not a schema field; see §3.7) |
-| Recall suppression of unverified-volatile-past-horizon | deterministic | recall |
+| Recall suppression of unverified-volatile-past-horizon | historical/superseded | no production suppression path |
 
-The new boundary statement: **a claim that names verifiable external state must be grounded deterministically — the system can and must run the check itself.** Leaving it to the LLM (which only sees stale history) or to never-verify is what produced the bug.
+Current boundary statement: **a claim that mentions PR/issue/task text is not, by itself, machine-readable external state.** Memory OS provides context; the model and live task context decide how to use it. Code only treats a fact as externally referenced when a producer supplies structured `external_ref` data explicitly.
 
 ### 3.2 Classification (P1)
 
-Add a typed marker for volatility. Two candidate shapes (decision deferred to review):
+Historical proposal: add a typed marker for volatility. Two candidate shapes were considered:
 
 - **(a) New category arm** `Volatile_status` in the closed `category` sum — exhaustive `is_promotable`/`category_valid_until` force a compile-time decision (consistent with RFC-0247's "no `_` catch-all" lineage).
 - **(b) Orthogonal `external_ref : { kind : Pr | Issue | Task; id : string } option` field** on `fact`, set by the producer when the claim names an id, leaving `category` for topic.
 
-(b) is preferred: volatility and topic are orthogonal (a `Constraint` can reference a PR). `external_ref` is parsed once at the producer boundary (parse-don't-validate), `None` when no id is named.
-
-A claim with `external_ref = Some _` is **never durable**: it gets a finite `valid_until` (decay horizon) so #4 is closed even before the reconciler lands.
+(b) was initially preferred, but the implementation path was superseded on 2026-06-25. Current Memory OS does **not** infer, persist, display, rank, or ground `external_ref` from claim prose. A claim mentioning `PR #N` keeps the category/claim_kind retention path; live PR/issue status must come from live task context or a future explicitly structured producer.
 
 ### 3.3 Reconciler (P2)
 
-An off-hot-path fiber (mirrors the GC/consolidation fibers in `server_bootstrap_maintenance.ml`), default-OFF behind an env gate until a live dry-run validates it:
+Historical proposal, now superseded: an off-hot-path fiber (mirrors the GC/consolidation fibers in `server_bootstrap_maintenance.ml`), default-OFF behind an env gate until a live dry-run validates it:
 
 ```
 for each keeper, for each fact with external_ref = Some r and (now - last_verified_at) > grounding_horizon:
@@ -92,7 +94,8 @@ for each keeper, for each fact with external_ref = Some r and (now - last_verifi
   | Unknown     -> leave unchanged (network/transient) — never delete on uncertainty
 ```
 
-`verify_external` is the only external-IO surface and is injected (testable with a fake, like `Keeper_librarian_runtime`'s `complete_fn`). It batches and rate-limits GitHub calls (1 GraphQL query can cover many PRs — see `workflow-pr.md` GraphQL-first).
+This verifier design is historical. Active code now removes the pure reconciler,
+GitHub verifier, env gate, and prose-derived ref producer.
 
 ### 3.4 Retraction (P3)
 
@@ -100,18 +103,18 @@ for each keeper, for each fact with external_ref = Some r and (now - last_verifi
 
 A single-claim removal under the facts lock (P3 must use the lock that PR #21529 added to GC). Note the two removal callers key differently and both must be supported by the same removal primitive:
 
-- **Reconciler** retracts on `Contradicted`, keyed on the fact's `external_ref` identity (it already holds the specific fact it re-checked).
+- **Historical reconciler path** would retract on `Contradicted`, keyed on the fact's `external_ref` identity. This path is not active production policy.
 - **Librarian** gains an episode-schema `supersedes: string list` (normalized claims the new extraction invalidates), keyed on `normalize_claim`; the write path removes those rows in the same atomic rewrite as the upsert. This implements the long-promised "delete-on-contradiction" as real code (gap #3).
 
 ### 3.5 Recall suppression (P4)
 
-A volatile claim that is past its `grounding_horizon` and unconfirmed is **suppressed** from the recall block (not merely annotated), or at minimum demoted below durable claims and rendered with a hard "UNVERIFIED — do not act without re-checking" prefix. This closes gap #5: the prompt stops asserting stale volatile truths.
+Historical proposal, now superseded: a volatile claim past its `grounding_horizon` would be suppressed from the recall block, or demoted and rendered with a hard "UNVERIFIED" prefix. Current recall does not run this external-ref suppression because Memory OS no longer treats PR/issue prose as a machine status field.
 
 ### 3.6 GC activation + cap TTL-awareness (P5)
 
 **Scope: disk-hygiene + retention-path determinism — no prompt-behavior change.** Recall already filters expired rows at read time (P4 / `fact_is_current`), so this phase does not change what a keeper sees; it stops expired rows accumulating on disk and makes the cap and the GC agree on what `valid_until` means. P5 must not be cited later as license for a read-side or symptom-suppression cap.
 
-P1 closed gap #4 at the type level — an `external_ref` claim now carries a finite `valid_until`. But **expiry only takes effect on disk through one path that is off by default**, and the always-on hot-path cap ignores `valid_until` entirely. So in a store below the cap threshold, an expired volatile row persists on disk indefinitely.
+The original P1 attempted to close gap #4 by giving `external_ref` claims a finite `valid_until`. That policy is superseded. The remaining active GC concern is narrower: rows that already carry `valid_until` from category/claim_kind policy should be removed consistently by GC/cap paths.
 
 Verified on `c68c7d6500`:
 
@@ -139,23 +142,25 @@ Net: a < 384-row store with GC off keeps expired rows on disk indefinitely (audi
 - **Fix (producer identity, not post-hoc dedup):** give the librarian episode a **stable claim identity**, so an unchanged re-extraction UPSERTs the existing row instead of appending. This fixes *why the same claim is re-minted as a new row every cycle*.
 - **The identity must capture the *conclusion*, not just the referent (2026-06-21 amendment).** The first implementation approximated identity as `external_ref` + `category` and was found unsound in adversarial review: `category` (`Fact`/`Goal`/…) does not separate two *different conclusions* about one referent — "PR #N is open" and "PR #N was merged" are both `Fact`/`Pr`/N. Keying on the referent alone collapses a status transition into one row; `reobserve_fact` then keeps the older conclusion and **silently drops the librarian's own correction**. Nothing restores it: the reconciler (§3.3) never rewrites claim text (`Stale_terminal` demotes-not-deletes, `Stale_open` only advances `last_verified_at`) and gap #3 (`supersedes`) is unimplemented. That is strictly worse than P3, which kept both rows. A referent-only key is therefore **rejected**.
 - **Mechanism: a producer-emitted typed `claim_id`.** The librarian episode schema gains a `claim_id` per claim — a short stable slug for the *conclusion* (not the wording): a reworded re-statement of the same conclusion reuses the id, a changed conclusion uses a new id. The on-disk `fact` gains `claim_id : string option`, omitted-when-`None` (byte-stable for legacy rows). `claim_identity` keys on the `claim_id` when present, else falls back to `normalize_claim`. Letting the librarian assign the identity is consistent with RFC-0247's tenet that *the librarian's judgment* decides what facts exist — here the judgment "is this the same conclusion?" surfaced as a typed key, **not** a deterministic status/embedding classifier we author (which would be the string-classifier workaround a textual referent-kind discriminator slid toward).
-- **Degrade is conservative — it never over-merges.** A claim with no `claim_id` (legacy row, or the model omitting it) uses the exact-text `normalize_claim` key = pre-P6 append behavior. An inconsistent id (the model emitting *different* ids for the same conclusion) at worst misses a merge and appends (the E duplicate, the status quo). The only way to over-merge is the model emitting the *same* id for *distinct* conclusions; the prompt instructs one slug per conclusion, and a wrong merge is a same-keeper judgment error the reconciler still grounds — categorically less harmful than the referent-only key, which over-merged *by construction*.
+- **Degrade is conservative — it never over-merges.** A claim with no `claim_id` (legacy row, or the model omitting it) uses the exact-text `normalize_claim` key = pre-P6 append behavior. An inconsistent id (the model emitting *different* ids for the same conclusion) at worst misses a merge and appends (the E duplicate, the status quo). The only way to over-merge is the model emitting the *same* id for *distinct* conclusions; the prompt instructs one slug per conclusion, and a wrong merge is a same-keeper judgment error. That is categorically less harmful than the referent-only key, which over-merged *by construction*.
 - **Anti-workaround (the trap):** adding fuzzy / semantic / embedding dedup is a **double signature violation** (string-classifier + dedup) under the CLAUDE.md bar and is **rejected** — it suppresses the 15–23-copy symptom and trains the fleet to treat clustering as the fix. RFC-0247 §3 already rejects read-side dedup; the root is producer identity.
 
-**F — re-mint freshness reset (anchor mutability).** When E's exact-key miss appends, the new row lands with `first_seen = now` (every producer stamps it: `keeper_librarian.ml:231`, `keeper_librarian_runtime.ml:435`) and `fact_valid_until` recomputes the 24 h volatile TTL from write-time `now` (`keeper_memory_os_types.ml:235-239`, `volatile_external_ttl_seconds = 86_400` at `:228`). `is_unverified_volatile` anchors on `last_verified_at` else `first_seen` (`keeper_memory_os_recall.ml:109-118`), so a reworded stale status claim re-enters with both the 24 h TTL **and** the 12 h grounding horizon (`default_grounding_horizon_seconds = ttl / 2 = 43_200`, `keeper_memory_os_reconcile.ml:38`) reset — no `UNVERIFIED` prefix (audit: `sangsu` #21363, 3/5 rows < 12 h).
+**F — re-mint freshness reset (anchor mutability).** The rejected implementation treated PR/issue/task prose as volatile external state, then tried to manage freshness with `external_ref`, a volatile TTL, recall demotion, and a GitHub reconciliation fiber. That path was too strong for prose: "PR #N" can be history, context, or a durable lesson, not necessarily a live status assertion. A reworded claim could therefore get a new anchor and status treatment from a string match rather than from a typed producer decision.
 
-- **Fix (anchor immutability):** on re-observe of a stable-identity claim, **inherit** the prior row's `first_seen` (and `last_verified_at`) rather than stamping fresh — decay anchors to *first* observation, not latest mint. Depends on E's identity work.
-- **This amends the shipped P3, it is not additive.** The merged `reobserve_fact` (`keeper_memory_os_policy.ml:56-63`) currently does the opposite for the `external_ref` branch: on *every* producer re-observe it sets `valid_until = Some (now +. volatile_external_ttl_seconds)` and advances `last_verified_at = now`, with the comment asserting "re-observing IS re-verification." P6/F **reverses that rule for volatile claims**: the volatile-TTL / `last_verified_at` refresh moves off the producer merge path, and a stable-identity re-observe inherits the prior row's `first_seen`, `valid_until`, and `last_verified_at`. The producer no longer counts as re-verification.
-- **Edge that must be distinguished:** a legitimate reconciler re-verification (`Stale_open` verdict, `keeper_memory_os_reconcile.ml:128`) advances `last_verified_at` and *should* reset the horizon — the claim was actually re-checked against GitHub. A producer rewording must not. The rule: **only the reconciler (external re-verification) advances the anchor; producer re-extraction inherits it.** Conflating the two re-introduces F (and is precisely the live `reobserve_fact` rule this phase replaces).
+- **Current fix (remove the forced classifier):** Memory OS no longer infers `external_ref` from claim prose, no longer serializes it in fact/dashboard JSON, and no longer schedules GitHub grounding maintenance from that field. The claim text stays model context; live PR/issue truth belongs in live task context or a future structured producer.
+- **Stable identity remains the real dedup fix:** `claim_id` still prevents same-conclusion re-mints from appending endlessly. Missing/inconsistent ids degrade to exact-text behavior instead of a code-authored referent classifier.
+- **Reconcile code removed:** the pure core and GitHub verifier were both removed with the production surface. Reintroducing external grounding requires a future typed producer and a fresh RFC/update, not hidden string parsing.
 
 ## 4. Verification / harness
 
-Per the project's "good agents come from good harnesses" tenet:
+This section is historical. The active verification now pins the retraction instead:
 
-- **Unit**: classifier (id extraction), `category_valid_until` for volatile, retraction-by-claim under the lock, recall suppression past horizon. Fake `verify_external` drives Confirmed/Contradicted/Unknown.
-- **Property**: a false volatile claim is removed within K reconciler cycles; a still-true claim is preserved; `Unknown` never deletes; no durable judgment claim is ever dropped by this machinery.
-- **TLA+ (bug model)**: model `StaleVolatileClaim` + invariant `NoUnverifiedVolatileClaimSurvivesBeyondHorizon`; clean spec satisfies it, a `NeverReconcile` bug action violates it (mutation-testing pattern already used for `KeeperOASAdvanced.tla`).
-- **Live dry-run**: reconciler in dry-run logs what it *would* retract across the fleet before the gate is enabled (same rollout discipline as GC/consolidation).
+- **Unit**: claim prose such as `PR #N` is not parsed into `external_ref`; legacy JSON
+  with `external_ref` decodes to `None`; fact/dashboard JSON omits `external_ref`.
+- **Retention/recall**: `external_ref` does not change `valid_until`, retention rank,
+  re-observation, recall prefixing, or recall ordering.
+- **Runtime wiring**: the GitHub grounding adapter, scheduler env vars, and reconciler
+  tests are removed rather than left dormant.
 - **P5**: dry-run GC log fixture (mixed `valid_until` store → asserts `ttl_expired`/`written`); pure `partition_expired ~now` / cap-TTL helper test (durable `None` never dropped; expired dropped *before* ranking; expired not retained when fresh rows exist).
 - **P6**: reworded-variant test (two reworded episodes → one row once identity is stable); pure anchor test (same-identity re-observe preserves `first_seen`; reconciler-confirm advances `last_verified_at`; producer-rewording does not); TLA bug action `ReMintResetsAnchor` violates `NoUnverifiedVolatileClaimSurvivesBeyondHorizon`.
 
@@ -178,11 +183,11 @@ Per the project's "good agents come from good harnesses" tenet:
 
 | Phase | Deliverable | Gate |
 |---|---|---|
-| P1 | `external_ref` classification + volatile `valid_until` (decay even without reconciler) | typed, compile-time exhaustive |
-| P2 | reconciler fiber w/ injected `verify_external`, default-OFF + dry-run | live dry-run log reviewed |
-| P3 | retraction path (reconciler + librarian re-observe upsert — shipped as the `merge_and_cap_facts`/`reobserve_fact` UPSERT, not the `supersedes` field this RFC originally described; see §3.7) under the facts lock | property + TLA tests green |
-| P4 | recall suppression/demotion of unverified-volatile | recall tests pin suppression |
+| P1 | Superseded: `external_ref` classification + volatile `valid_until` | removed from active production policy |
+| P2 | Superseded: reconciler fiber w/ injected `verify_external` | no production GitHub verifier/env gate |
+| P3 | Superseded in part: retraction path via reconciler; producer re-observe UPSERT remains | no production external-ref retraction |
+| P4 | Superseded: recall suppression/demotion of unverified-volatile | no production external-ref suppression |
 | P5 | GC default flip (dry-run-gated) + hot-path cap drops `valid_until < now` before ranking (defect C) — **disk-hygiene + retention-path determinism only, no prompt-behavior change** | dry-run log reviewed; pure-helper unit + property: durable never dropped, expired ≤ horizon removed |
-| P6 | producer idempotency: stable-identity upsert (E) + anchor inheritance on re-mint, reconciler-only horizon advance (F) | reworded→1-row test; `first_seen`-preservation unit; TLA `ReMintResetsAnchor` violates invariant |
+| P6 | producer idempotency: stable-identity upsert (E); external-ref anchor/reconciler pieces superseded | reworded→1-row test |
 
 P1 alone closes root-cause gap #4 (immortal volatile facts) at the type level and is shippable independently. P5 is independent and shippable alone; within P6, the stable-identity work (E) precedes anchor inheritance (F).

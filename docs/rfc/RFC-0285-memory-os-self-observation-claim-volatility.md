@@ -2,6 +2,9 @@
 
 **Status**: Draft
 **Date**: 2026-06-23
+**Supersession note (2026-06-25)**: The external-ref side of RFC-0259 is no longer
+active policy. This RFC's self-observation `claim_kind` handling remains relevant,
+but comparisons to external-ref parsing/GitHub grounding are historical context.
 **Renumbered from 0283/0284**: 0283 taken by `RFC-0283-fusion-judge-of-judges.md` (#22093, merged); 0284 contended by `RFC-0284-keeper-guidance-visibility-drift-guard.md` (#22121, open). Moved to 0285 to separate at the filename level. See PR review thread.
 **Verified against base main**: `08c4ccd50d`
 **Builds on**: [RFC-0259](./RFC-0259-memory-os-volatile-claim-grounding-retraction-decay.md) (volatile external claim grounding/retraction/decay — this RFC is its internal-state symmetric pair), [RFC-0247](./RFC-0247-memory-os-associative-graph-forgetting-brain.md) ("a fact's value is the librarian's judgment, not a number"; exhaustive classification), [RFC-0244](./RFC-0244-memory-os-recall-turn-seeded-lexical-retrieval.md) (Tier-2 shared store / promotability)
@@ -43,7 +46,7 @@ The exact mechanism, traced to source:
 
 2. **Self-observation is classified durable.** `category_valid_until` gives a finite TTL **only to `Ephemeral`** (`keeper_memory_os_types.ml:209-221`); `Lesson | Blocker | Constraint | Validated_approach | Fact` → `None`. The librarian mints self-narrative into these (§2 table).
 
-3. **RFC-0259's volatilization misses it.** `fact_valid_until` (`keeper_memory_os_types.ml:235-239`) gives a volatile horizon only when `external_ref = Some`; `external_ref_of_claim` (`keeper_memory_os_types.ml:131`) matches **only** explicit PR/issue/task ids. Self-observation names no external id → `external_ref = None` → durable path.
+3. **External-ref volatility does not solve it.** Current production code does not infer operational volatility from PR/issue/task prose. Self-observation needs its own typed producer marker (`claim_kind = Self_observation`) and finite horizon; it cannot be rescued by an external-id path.
 
 4. **The librarian re-extracts the self-narrative every compaction.** Decaying one row is moot if the next compaction re-mints the same claim from the same source — the 117× re-injection above is this loop. Storage decay alone is a downstream symptom-suppressant; the root is at the producer.
 
@@ -82,11 +85,11 @@ In `reobserve_fact` (`keeper_memory_os_policy.ml:53-70`), route `claim_kind = So
 
 ### 3.4 L3 — storage decay (load-bearing: finite horizon at first mint)
 
-In `fact_valid_until` (`keeper_memory_os_types.ml:235`), add a `claim_kind` arm, checked before/alongside `external_ref`, same shape:
+In `fact_valid_until` (`keeper_memory_os_types.ml:235`), add a `claim_kind` arm:
 ```ocaml
 | Some Self_observation -> Some (now +. self_observation_ttl_seconds)
 ```
-`fact_is_current` / `partition_expired` then drop expired rows automatically. The horizon is a **separate constant** (`self_observation_ttl_seconds`), to be set **shorter** than the external TTL (`volatile_external_ttl_seconds = 86_400`): self-observation is more volatile than external state (a PR's status changes slowly; "am I idle" changes every turn), so a shorter horizon quiets the echo faster. Not so short that a legitimate short-lived self-state ("waiting on this block") vanishes within the same turn — tune in cycles.
+`fact_is_current` / `partition_expired` then drop expired rows automatically. The horizon is a **separate constant** (`self_observation_ttl_seconds`), intentionally shorter than the ordinary Ephemeral/category TTL so first-person self-state quiets faster. Not so short that a legitimate short-lived self-state ("waiting on this block") vanishes within the same turn — tune in cycles.
 
 ### 3.5 Promotability block
 

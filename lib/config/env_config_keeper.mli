@@ -91,8 +91,6 @@ module KeeperMemoryOs : sig
   val librarian_runtime_id : unit -> string option
   val librarian_global_slot : unit -> int
   val gc_enabled : unit -> bool
-  val reconcile_enabled : unit -> bool
-  val reconcile_apply : unit -> bool
   val consolidation_enabled : unit -> bool
   val consolidation_runtime_id : unit -> string option
 end

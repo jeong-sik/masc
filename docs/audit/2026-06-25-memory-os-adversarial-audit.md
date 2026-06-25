@@ -17,15 +17,18 @@ keeper prompts.
 The hard production caveat is quality control. The deterministic file layer is
 mostly bounded and conservative, but the LLM ingestion layer still accepts
 prose-wrapped JSON through substring recovery and stores parse failures as
-ephemeral `unstructured_note` facts. Live data already shows that debt: 54
-`unstructured_note:` facts, 181 typed expired facts on disk according to the
+ephemeral `unstructured_note` facts. A live snapshot already showed that debt:
+nonzero `unstructured_note:` facts, expired facts on disk according to the
 dashboard health endpoint, and legacy/schema-drift rows including
-`category="external_state"` and `schema_version="rfc0231-v2"`.
+`category="external_state"` and `schema_version="rfc0231-v2"`. Exact live counts
+are intentionally omitted from this committed audit because they drift quickly.
 
-This audit fixed two concrete code defects and one CI-radius defect:
+This audit fixed one concrete code defect, removed one overreaching heuristic
+path, and fixed one CI-radius defect:
 
-1. `keeper_memory_os_reconcile_gh.ml` no longer has an `assert false` path for
-   `Task` external references. Unsupported refs now return `Unverifiable`.
+1. Code no longer infers, persists, displays, ranks, or re-grounds `external_ref`
+   from claim prose. Memory text is context for the model, not a machine-enforced
+   status classifier.
 2. `keeper_memory_os_io.ml` no longer misclassifies arbitrary body
    `Failure` exceptions inside `with_facts_lock` as lock-acquisition timeouts.
    A regression test pins that behavior.
@@ -35,50 +38,50 @@ This audit fixed two concrete code defects and one CI-radius defect:
 
 ## Evidence
 
-[근거] Live runtime root:
+[Evidence] Live runtime root:
 `curl -fsS 'http://127.0.0.1:8935/health?full=1'`, checked
 2026-06-25 17:31 KST, confidence High. Result: `effective_base_path` was
 the configured `<base-path>`, `effective_masc_root` was `<base-path>/.masc`,
 runtime commit was `469a29a919`, status was `ok`.
 
-[근거] Live Memory OS sizes:
+[Evidence] Live Memory OS sizes:
 `du -sh <base-path>/.masc/config/keepers <base-path>/.masc/keepers <base-path>/.masc/recall_injections <base-path>/.masc/logs`,
-checked 2026-06-25 17:31 KST, confidence High. Result:
-`config/keepers=14M`, legacy `keepers=1.8G`, `recall_injections=47M`,
-`logs=232M`.
+checked 2026-06-25 17:31 KST, confidence High. Result: the current
+`config/keepers` store was much smaller than adjacent legacy keeper/log
+directories. Exact sizes are omitted because they are live-machine snapshots.
 
-[근거] Live Memory OS row counts:
+[Evidence] Live Memory OS row counts:
 `wc -l <base-path>/.masc/config/keepers/*.facts.jsonl`,
 `wc -l <base-path>/.masc/config/keepers/*.events.jsonl`, and
 `find .../episodes -name '*.json' | wc -l`, checked 2026-06-25 17:31 KST,
-confidence High. Result: 2603 facts, 2207 events, 2207 episode files. Per-keeper
-stores were under the 384-row/file cap.
+confidence High. Result: per-keeper stores were under the 384-row/file cap.
+Exact row counts are omitted because they are live-machine snapshots.
 
-[근거] Typed health surface:
+[Evidence] Typed health surface:
 `curl -fsS 'http://127.0.0.1:8935/api/v1/dashboard/keeper-memory-health'`,
-checked 2026-06-25 17:31 KST, confidence High. Result: 2601 non-shared facts,
-`facts_bytes=902597`, `events_bytes=3989307`, `ttl_expired_on_disk=181`,
-`near_duplicate=0`.
+checked 2026-06-25 17:31 KST, confidence High. Result: the typed surface reported
+bounded stores, no near-duplicate alarm, and nonzero expired rows on disk. Exact
+counts/bytes are omitted because they are live-machine snapshots.
 
-[근거] Current OCaml 5.4 guidance:
+[Evidence] Current OCaml 5.4 guidance:
 [OCaml 5.4 manual, Parallel programming](https://ocaml.org/manual/5.4/parallelism.html),
 checked 2026-06-25 17:41 KST, confidence High. The manual says immutable values
 can be shared freely, mutable refs/arrays/fields need synchronization to avoid
 data races, and data-race-free programs get sequentially consistent semantics.
 
-[근거] Current Eio guidance:
+[Evidence] Current Eio guidance:
 [Eio 1.3 docs](https://ocaml.org/p/eio/latest/doc/eio/Eio/index.html), checked
 2026-06-25 17:41 KST, confidence High. Eio is effect-based parallel IO for
 OCaml with fibers, domains, switches, cancellation, mutexes, semaphores, pools,
 and executor pools.
 
-[근거] CI failure triage before the CI-radius patch:
+[Evidence] CI failure triage before the CI-radius patch:
 `gh run view 28159412988 --repo jeong-sik/masc --job 83395999819 --log-failed`,
 checked 2026-06-25 18:59 KST, confidence High. Result: the focused operator
 control step called a non-existent `test_operator_control.exe`; SSE reconnect
 and contract harness failures remained CI-owned readiness blockers.
 
-[근거] Current memory-agent references:
+[Evidence] Current memory-agent references:
 [LangGraph memory docs](https://docs.langchain.com/oss/python/concepts/memory),
 [Letta stateful agents docs](https://docs.letta.com/guides/core-concepts/stateful-agents),
 [Mem0 docs](https://docs.mem0.ai/introduction),
@@ -105,17 +108,17 @@ cross-system comparison because the products evolve.
    lane, and a global provider slot. Defaults are conservative: librarian
    enabled, cadence 3 turns, max messages 24, timeout 600s, global slot 1.
 6. `Keeper_librarian` parses the model output into an episode plus claims.
-   Claims are converted once into typed categories, claim kinds, external refs,
-   and TTLs before hitting the JSONL store.
+   Claims are converted once into typed categories, claim kinds, and TTLs before
+   hitting the JSONL store. External refs are not inferred from claim prose and
+   are not persisted back into Memory OS rows.
 7. `Keeper_memory_os_io.merge_and_cap_facts` upserts by `claim_identity`, drops
    expired rows on the hot write path, and caps facts to 384. Events and episode
    files are also capped to 384.
 8. Cross-keeper consolidation periodically reconstructs `_shared.facts.jsonl`
    from corroborated promotable facts. It does not mutate keeper-private stores.
 9. Optional maintenance paths do deletion/cleanup: `MASC_KEEPER_MEMORY_OS_GC`
-   hard-expires and dedups private stores, `MASC_KEEPER_MEMORY_OS_RECONCILE`
-   verifies GitHub-backed volatile claims, and per-keeper LLM consolidation can
-   merge/drop rows. GC/reconcile/consolidation are default-off except the shared
+   hard-expires and dedups private stores, and per-keeper LLM consolidation can
+   merge/drop rows. GC/consolidation are default-off except the shared
    consolidator.
 10. Dashboard health and recall-injection ledgers expose size, TTL, and
    injection/outcome evidence.
@@ -125,7 +128,7 @@ cross-system comparison because the products evolve.
 Read in this order when debugging or extending Memory OS:
 
 1. `lib/keeper/keeper_memory_os_types.mli` and `.ml`: schema, taxonomy,
-   `claim_identity`, `external_ref_of_claim`, TTL derivation, JSON codecs.
+   `claim_identity`, TTL derivation, JSON codecs.
 2. `lib/keeper/keeper_memory_os_policy.ml`: retention and re-observation rules.
 3. `lib/keeper/keeper_memory_os_io.ml`: file paths, JSONL reads/writes, locks,
    caps, atomic rewrites.
@@ -136,7 +139,8 @@ Read in this order when debugging or extending Memory OS:
    bounded-lane runtime behavior.
 7. `lib/keeper/keeper_agent_run_post_turn_memory.ml`: post-turn orchestration.
 8. `lib/keeper/keeper_memory_os_gc.ml`: deterministic deletion path.
-9. `lib/keeper/keeper_memory_os_reconcile*.ml`: external-state verification.
+9. External-ref reconcile code: removed. There is no GitHub verifier, pure
+   reconcile core, or prose-derived external-ref producer scheduled in production.
 10. `lib/keeper/keeper_memory_os_consolidator*.ml` and
     `keeper_memory_os_consolidation*.ml`: shared tier and optional per-keeper
     LLM consolidation.
@@ -148,21 +152,19 @@ Read in this order when debugging or extending Memory OS:
 
 1. User preference: "Keep final answers short." Category `preference`, durable,
    recalled as a private fact.
-2. Active PR state: "PR #22231 is open." External ref `Pr`, finite TTL, eligible
-   for GitHub reconciliation. If closed/merged later, reconcile demotes or
-   refreshes it rather than treating it as timeless truth.
+2. Active PR state: "PR #22231 is open." In current code this is advisory claim
+   text unless a future producer supplies structured `external_ref` data.
 3. Task-board state: "No unclaimed tasks exist." This should be volatile. If it
    enters as durable prose, it can mislead future turns. Current safeguards rely
-   on claim kind/category and external-ref extraction, so producer quality
-   matters.
+   on claim kind/category rather than PR/issue/task substring extraction, so
+   producer quality matters.
 4. Repeated tool lesson: "Use `rg` before slower grep." Category `lesson` or
    `validated_approach`, promotable when corroborated across keepers.
 5. Sandbox blocker: "Network fetch failed because approval is needed." Category
    `blocker` or `constraint`, useful within a local horizon but dangerous if
    kept after env changes.
-6. Proven fix pattern: "Reconcile verifier must classify off-lock and commit
-   under CAS." Category `validated_approach`, durable and shareable after
-   corroboration.
+6. Proven fix pattern: "Classify off-lock and commit under CAS." Category
+   `validated_approach`, durable and shareable after corroboration.
 7. Ephemeral checkpoint: "Status dashboard was refreshed at 17:00." Category
    `ephemeral`, should expire and be dropped by write-time cap or GC.
 8. Self observation: "Keeper is idle/stuck." Claim kind `self_observation`,
@@ -194,8 +196,6 @@ The env surface is broad but named and centralized enough to audit:
 - `MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID`: optional runtime override.
 - `MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT`: default 1.
 - `MASC_KEEPER_MEMORY_OS_GC`: default false.
-- `MASC_KEEPER_MEMORY_OS_RECONCILE`: default false.
-- `MASC_KEEPER_MEMORY_OS_RECONCILE_APPLY`: default false.
 - `MASC_KEEPER_MEMORY_OS_CONSOLIDATION`: default false.
 - `MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID`: optional runtime override.
 
@@ -211,8 +211,8 @@ tune them without a code review. SSOT cleanup is tracked as
 Good boundary string parsing:
 
 - `category_of_string` parses LLM text once into a closed category variant.
-- `external_ref_of_claim` recognizes limited PR/issue/task patterns and then
-  stores typed refs.
+- Claim prose is no longer parsed into external refs. PR/issue/task mentions
+  stay as context for the model.
 
 Risky heuristic parsing:
 
@@ -231,8 +231,10 @@ structured-output contract or a reject-and-record path, not substring recovery.
 
 Fixed:
 
-- `keeper_memory_os_reconcile_gh.ml` used `assert false` for `Task` refs inside
-  GraphQL query construction. The current patch returns `Unverifiable`.
+- Code inferred PR/issue/task refs from claim prose and attached volatile
+  retention/GitHub grounding semantics. The current patch removes that parser,
+  legacy re-derivation, retention/ranking effects, dashboard surfacing, and GitHub
+  reconcile maintenance surface.
 - `keeper_memory_os_io.ml` caught broad `Failure` and labeled it a lock timeout.
   The current patch catches only `File_lock_eio.Flock_timeout`.
 - `.github/workflows/ci.yml` drifted from current Dune targets:
@@ -268,28 +270,23 @@ Growth controls active by default:
 Deletion controls default-off:
 
 - `MASC_KEEPER_MEMORY_OS_GC=false` means dormant keepers can retain expired rows.
-- `MASC_KEEPER_MEMORY_OS_RECONCILE=false` and `..._APPLY=false` mean volatile
-  external-state truth can age out by TTL/cap but is not proactively grounded.
 - Per-keeper LLM consolidation is default-off.
 
 Live result: the bounded Memory OS store is healthy in size, but expired rows are
-real. The live dashboard reports 181 expired facts on disk, concentrated mostly
-in `mad-improver`.
+real. Exact live counts are omitted from the committed audit because they drift.
 
-## Live Trash Data
+## Live Snapshot Findings
 
 Memory OS current store:
 
-- `config/keepers`: 14M.
-- 2603 facts, 2207 events, 2207 episode files.
-- Largest per-keeper fact count observed: 348, under the 384 cap.
+- `config/keepers` was bounded and much smaller than adjacent legacy runtime data.
+- Per-keeper fact/event/episode counts were under the 384 cap.
 - No `.atomic_*.tmp` files were found under `config/keepers` at depth 3.
 
 Adjacent `.masc` trash outside current Memory OS:
 
-- Legacy `<base-path>/.masc/keepers`: 1.8G.
-- `<base-path>/.masc/logs`: 232M.
-- `<base-path>/.masc/recall_injections`: 47M.
+- Legacy `<base-path>/.masc/keepers`, logs, and recall-injection ledgers dominated
+  disk usage relative to current `config/keepers`.
 - A targeted scan saw an atomic temp file under legacy `.masc/keepers` and a
   stray `PYEOF` path. Those are cleanup/backlog issues, not current Memory OS
   fact-store growth.
@@ -351,7 +348,7 @@ separates extraction quality from retrieval quality.
 ## Residual Issue Records
 
 Issue: permissive LLM JSON recovery stores noisy memory.
-Symptom: 54 live `unstructured_note:` facts and parser fallback from first
+Symptom: nonzero live `unstructured_note:` facts and parser fallback from first
 `{...}` substring.
 Repro: inspect `Keeper_librarian.json_of_output` and live facts category/counts.
 Likely cause: resilience was favored over strict structured output.
@@ -359,7 +356,7 @@ Tried: documented and isolated; not fixed in this patch because it changes
 ingestion policy.
 
 Issue: expired rows remain on disk when GC is disabled.
-Symptom: dashboard reports `ttl_expired_on_disk=181`.
+Symptom: dashboard reports nonzero `ttl_expired_on_disk`.
 Repro: dashboard health endpoint above.
 Likely cause: GC default-off and expired rows for dormant keepers are only
 removed on future writes/caps or explicit GC.
@@ -373,8 +370,8 @@ Tried: documented as residual; not fixed because changing prompt error surface
 requires product decision.
 
 Issue: legacy `.masc/keepers` and logs dominate disk usage.
-Symptom: live legacy `.masc/keepers=1.8G`, logs=232M, current
-`config/keepers=14M`.
+Symptom: live legacy keeper/log directories are much larger than current
+`config/keepers`.
 Repro: `du -sh` command above.
 Likely cause: historical keeper/runtime data outside current Memory OS caps.
 Tried: no deletion; requires dry-run cleanup tool and ownership review.
@@ -398,9 +395,9 @@ Memory OS-specific before this audit branch.
 
 Local:
 
-- `ocamlformat --check lib/keeper/keeper_memory_os_reconcile_gh.ml lib/keeper/keeper_memory_os_io.ml test/test_keeper_memory_os.ml`
+- `ocamlformat --check lib/keeper/keeper_memory_os_io.ml test/test_keeper_memory_os.ml`
   passed.
-- `rg -n "assert false|failwith|Failure msg -> on_timeout" lib/keeper/keeper_memory_os_reconcile_gh.ml lib/keeper/keeper_memory_os_io.ml`
+- `rg -n "assert false|failwith|Failure msg -> on_timeout" lib/keeper/keeper_memory_os_io.ml`
   returned no matches.
 
 Not run locally by design:

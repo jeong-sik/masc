@@ -266,10 +266,21 @@ val pending_board_event_of_fusion_completion :
   Keeper_event_queue.fusion_completion ->
   pending_board_event
 
+(** RFC-0290: build the actionable [pending_board_event] for a completed
+    background job. Mirrors {!pending_board_event_of_fusion_completion}: the
+    synthetic System_post event wakes the keeper with the job outcome, while
+    provenance keeps it in the observational-data envelope. [bg_board_post_id =
+    ""] falls back to a synthetic [bg-run:<id>] post id. *)
+val pending_board_event_of_bg_job_completion :
+  meta:Keeper_meta_contract.keeper_meta ->
+  arrived_at:float ->
+  Keeper_event_queue.bg_job_completion ->
+  pending_board_event
+
 (** Convert a queued Event Layer stimulus back into structured board activity
-    for the next keeper prompt. [Board_signal] and [Fusion_completed] (RFC-0266)
-    produce [Some]; [Bootstrap]/[No_progress_recovery] return [None] (no prompt
-    injection). *)
+    for the next keeper prompt. [Board_signal], [Fusion_completed] (RFC-0266),
+    and [Bg_completed] (RFC-0290) produce [Some];
+    [Bootstrap]/[No_progress_recovery] return [None] (no prompt injection). *)
 val pending_board_event_of_stimulus :
   continuity_summary:string ->
   meta:Keeper_meta_contract.keeper_meta ->

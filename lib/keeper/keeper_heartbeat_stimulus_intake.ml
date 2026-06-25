@@ -88,15 +88,18 @@ let consume_single_heartbeat_stimulus
       meta_after_triage.name;
     pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
   | Keeper_event_queue.Bg_completed c ->
-    (* RFC-0290 Phase 1: the variant exists for compile-time exhaustiveness; no
-       producer emits Bg_completed yet, so returning [] drops nothing today.
-       Surfacing the outcome as a pending_board_event (mirroring
-       Fusion_completed) lands with the executor in Phase 3. *)
+    (* RFC-0290: a background job finished and woke this keeper. Surface the
+       outcome as a pending_board_event so the turn acts on it. Returning []
+       would compile but silently drop the completed job result. *)
     Log.Keeper.info
-      "turn entry: bg_completed stimulus consumed (Phase 1 no-op) run_id=%s (keeper=%s)"
+      "turn entry: bg result delivered run_id=%s kind=%s ok=%b (keeper=%s)"
       c.bg_run_id
+      (Keeper_event_queue.bg_job_kind_to_string c.bg_kind)
+      (match c.bg_outcome with
+       | Keeper_event_queue.Bg_ok _ -> true
+       | Keeper_event_queue.Bg_failed _ -> false)
       meta_after_triage.name;
-    []
+    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
   | Keeper_event_queue.Bootstrap ->
     Log.Keeper.info
       "turn entry: bootstrap stimulus consumed (keeper=%s)"

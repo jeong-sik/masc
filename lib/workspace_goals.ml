@@ -945,10 +945,8 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                             [ "phase", Goal_phase.to_yojson updated_goal.phase
                             ; "actor", Goal_verification.goal_principal_to_yojson actor
                             ]);
-                    let () =
-                      (match resolved_approval_request with
-                      | None -> ()
-                      | Some request ->
+                    Option.iter
+                      (fun request ->
                         emit_goal_event
                           ctx
                           ~goal_id
@@ -966,7 +964,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                                 ; ( "approval_request"
                                   , Goal_approval.approval_request_to_yojson request )
                                 ]))
-                    in
+                      resolved_approval_request;
                     ok_result
                       ~tool_name
                       ~start_time
@@ -979,7 +977,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                           | None -> `Null )
                       ; ( "verification_summary"
                         , verification_summary_json updated_goal effective_policy None )
-                      ])))))))
+                      ]))))))
   | Ok _, Ok None, _ ->
     validation_error_result
       ~tool_name

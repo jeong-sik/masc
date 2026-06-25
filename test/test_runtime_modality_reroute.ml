@@ -41,14 +41,7 @@ let string_contains haystack needle =
 let check_contains label ~needle haystack =
   check bool label true (string_contains haystack needle)
 
-let source_path path =
-  if Filename.is_relative path then
-    match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | Some root -> Filename.concat root path
-    | None -> path
-  else path
-
-let read_file path = In_channel.with_open_text (source_path path) In_channel.input_all
+let read_file path = In_channel.with_open_text path In_channel.input_all
 
 let assoc_field key = function
   | `Assoc fields -> List.assoc_opt key fields

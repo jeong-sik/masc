@@ -19,13 +19,6 @@ let contains_substring haystack needle =
     loop 0
 
 let read_file path =
-  let path =
-    if Filename.is_relative path then
-      match Sys.getenv_opt "DUNE_SOURCEROOT" with
-      | Some root -> Filename.concat root path
-      | None -> path
-    else path
-  in
   let ic = open_in path in
   Fun.protect
     ~finally:(fun () -> close_in_noerr ic)

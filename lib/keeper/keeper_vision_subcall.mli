@@ -27,9 +27,10 @@ type error =
       (** No image-capable runtime is configured to delegate to. *)
 
 val string_of_error : error -> string
-(** Stable, keeper-facing tag, e.g. ["missing_artifact: <msg>"], ["timeout"],
-    ["truncated_extraction"]. Reuses {!Multimodal.Vision_analyze.string_of_error} for the
-    [Extraction] arm so the empty/truncated vocabulary has one owner. *)
+(** Stable, keeper-facing tag, e.g. ["missing_artifact: <msg>"],
+    ["timeout: vision sub-call exceeded <s>s"], ["truncated_extraction"]. Reuses
+    {!Multimodal.Vision_analyze.string_of_error} for the [Extraction] arm so the
+    empty/truncated vocabulary has one owner. *)
 
 type complete_fn =
   sw:Eio.Switch.t

@@ -86,12 +86,12 @@ let handle_analyze_image ?sw ?clock ?net ~config ~meta:(_ : keeper_meta) ~args (
      with
      | Error msg -> err ("missing_artifact: " ^ msg)
      | Ok bytes ->
-       let media_type_r =
-         match Safe_ops.json_string_opt "media_type" args with
-         | Some m when not (String.equal (String.trim m) "") -> Ok (String.trim m)
-         | _ -> image_media_type_of_bytes bytes
-       in
-       (match media_type_r with
+       (* Media type is detected from the bytes (the store is content-addressed,
+          bytes-only, and the keeper holds only a handle). No caller-supplied
+          override: the closed schema advertises only {artifact, query}, and an
+          unchecked override would be the Unknown->permissive anti-pattern the
+          autodetect path avoids by failing closed. *)
+       (match image_media_type_of_bytes bytes with
         | Error msg -> err msg
         | Ok image_media_type ->
           (match

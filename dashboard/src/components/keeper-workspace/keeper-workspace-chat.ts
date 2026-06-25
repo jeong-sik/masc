@@ -5,7 +5,7 @@
 
 import { html } from 'htm/preact'
 import { ChevronLeft } from 'lucide-preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useCallback, useEffect, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import type { Keeper, KeeperConversationEntry } from '../../types'
 import { KeeperConversationPanel } from '../keeper-shared'
@@ -374,10 +374,10 @@ export function KeeperWorkspaceChat({
 }): VNode {
   const [turnInspectorOpen, setTurnInspectorOpen] = useState(false)
   const [turnInspectorEntry, setTurnInspectorEntry] = useState<KeeperConversationEntry | null>(null)
-  const openTurnInspector = (entry?: KeeperConversationEntry) => {
+  const openTurnInspector = useCallback((entry?: KeeperConversationEntry) => {
     setTurnInspectorEntry(entry ?? null)
     setTurnInspectorOpen(true)
-  }
+  }, [])
 
   return html`
     <section class="kw-chat v2-monitoring-surface" role="region" aria-label=${`${keeper.name} 대화`}>

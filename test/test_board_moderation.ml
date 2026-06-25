@@ -471,7 +471,7 @@ let test_record_action_remove_deletes_post () =
   reset ();
   let post_id = create_public_post_id "remove me through moderation" in
   (match BM.flag ~target_kind:BM.Target_post ~target_id:post_id
-           ~reporter:"reporter" ~reason:BM.Policy_violation "remove" with
+           ~reporter:"reporter" ~reason:(BM.Policy_violation "remove") with
    | Ok _ -> ()
    | Error m -> fail ("flag failed: " ^ m));
   (match BM.record_action ~target_kind:BM.Target_post ~target_id:post_id

@@ -21,7 +21,7 @@ let decision_to_string : Runtime_agent.reroute_decision -> string = function
   | Runtime_agent.No_capable_runtime { required } ->
       Printf.sprintf "no_capable:%s" (String.concat "," required)
 
-let decide ?candidate_is_live ~assigned ~required ~candidates =
+let decide ?candidate_is_live ~assigned ~required ~candidates () =
   Runtime_agent.decide_modality_reroute
     ?candidate_is_live
     ~assigned_caps:assigned
@@ -69,7 +69,7 @@ let message_with_blocks blocks =
 let test_text_turn_no_reroute () =
   check string "text turn"
     "no_reroute"
-    (decision_to_string (decide ~assigned:(caps ()) ~required:[] ~candidates:[]))
+    (decision_to_string (decide ~assigned:(caps ()) ~required:[] ~candidates:[] ()))
 
 (* An image turn on a vision-capable assigned runtime stays put. *)
 let test_image_turn_on_capable_no_reroute () =
@@ -77,7 +77,7 @@ let test_image_turn_on_capable_no_reroute () =
     "no_reroute"
     (decision_to_string
        (decide ~assigned:(caps ~image:true ()) ~required:[ "image" ]
-          ~candidates:[]))
+          ~candidates:[] ()))
 
 (* Image turn on a text-only assigned runtime reroutes to the first capable
    candidate in the given order (text_b is skipped, vision_c wins over
@@ -91,7 +91,8 @@ let test_image_turn_reroutes_to_first_capable () =
   in
   check string "reroute to first capable in order"
     "reroute:vision_c:assigned runtime lacks image input"
-    (decision_to_string (decide ~assigned:(caps ()) ~required:[ "image" ] ~candidates))
+    (decision_to_string
+       (decide ~assigned:(caps ()) ~required:[ "image" ] ~candidates ()))
 
 (* Regression: media retained in initial history must drive the same reroute as
    media in the current turn. The dashboard image turn succeeds first; the next
@@ -115,7 +116,8 @@ let test_initial_message_media_drives_reroute () =
        (decide
           ~assigned:(caps ())
           ~required
-          ~candidates:[ ("text_b", caps ()); ("vision_c", caps ~image:true ()) ]))
+          ~candidates:[ ("text_b", caps ()); ("vision_c", caps ~image:true ()) ]
+          ()))
 
 (* Candidate ordering is the caller's contract: with the same capable set in a
    different order, the first listed wins. This pins media_failover precedence. *)
@@ -127,7 +129,8 @@ let test_candidate_order_is_honored () =
           ~candidates:
             [ ("vision_d", caps ~image:true ())
             ; ("vision_c", caps ~image:true ())
-            ]))
+            ]
+          ()))
 
 (* Liveness is an injected data predicate, not runtime I/O. A capable candidate
    under provider cooldown is skipped so reroute does not spend the turn on an
@@ -165,7 +168,8 @@ let test_liveness_no_live_capable_runtime_floor () =
             [ ("text_up", caps ())
             ; ("vision_down", caps ~image:true ())
             ; ("vision_also_down", caps ~image:true ())
-            ]))
+            ]
+          ()))
 
 (* No configured runtime admits the modality → floor: the assigned runtime stands
    and the loud capability gate rejects downstream. *)
@@ -174,7 +178,8 @@ let test_no_capable_runtime_floor () =
     "no_capable:image"
     (decision_to_string
        (decide ~assigned:(caps ()) ~required:[ "image" ]
-          ~candidates:[ ("text_b", caps ()); ("audio_c", caps ~audio:true ()) ]))
+          ~candidates:[ ("text_b", caps ()); ("audio_c", caps ~audio:true ()) ]
+          ()))
 
 (* Regression: when no configured runtime can accept media, the final floor gate
    must validate prior history too. Otherwise a text-only follow-up after a
@@ -249,8 +254,8 @@ let test_checkpoint_media_drives_reroute_and_floor () =
 (* The decision is a pure function: identical inputs yield identical output. *)
 let test_decision_is_deterministic () =
   let candidates = [ ("text_b", caps ()); ("vision_c", caps ~image:true ()) ] in
-  let d1 = decide ~assigned:(caps ()) ~required:[ "image" ] ~candidates in
-  let d2 = decide ~assigned:(caps ()) ~required:[ "image" ] ~candidates in
+  let d1 = decide ~assigned:(caps ()) ~required:[ "image" ] ~candidates () in
+  let d2 = decide ~assigned:(caps ()) ~required:[ "image" ] ~candidates () in
   check string "identical inputs → identical decision"
     (decision_to_string d1)
     (decision_to_string d2)

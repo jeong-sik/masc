@@ -12,11 +12,10 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 source "${SCRIPT_DIR}/../lib/test_framework.sh"
 
 STEP=0
-TOTAL=36
 
 next_step() {
   STEP=$((STEP + 1))
-  echo "[${STEP}/${TOTAL}] $1"
+  echo "[${STEP}] $1"
 }
 
 response_transport_ok() {
@@ -118,6 +117,19 @@ if [[ "$actual_public_tools" != "$expected_public_tools" ]]; then
   diff_json="$(jq -cn --argjson expected "$expected_public_tools" --argjson actual "$actual_public_tools" '{expected:$expected,actual:$actual}')"
   mcp_fail_with_context "public tools/list surface drift" "$diff_json"
 fi
+board_reaction_emoji="$(
+  printf '%s' "$tools_list_payload" \
+    | jq -r '
+      .result.tools[]
+      | select(.name == "masc_board_reaction")
+      | (.inputSchema // .input_schema)
+      | .properties.emoji.enum[0] // empty
+    ' \
+    | head -n1
+)"
+if [[ -z "$board_reaction_emoji" ]]; then
+  mcp_fail_with_context "masc_board_reaction schema missing emoji enum" "$tools_list_payload"
+fi
 echo "  PASS: tools/list public surface"
 
 next_step "masc_start"
@@ -136,42 +148,24 @@ next_step "masc_tool_help"
 r_tool_help="$(call_tool 5006 "masc_tool_help" '{"tool_name":"masc_status"}')"
 expect_ok "masc_tool_help" "$r_tool_help"
 
+next_step "masc_dashboard"
+r_dashboard="$(call_tool 5007 "masc_dashboard" '{"compact":true}')"
+expect_ok "masc_dashboard" "$r_dashboard"
+
 next_step "masc_goal_list"
-r_goal_list="$(call_tool 5007 "masc_goal_list" '{}')"
+r_goal_list="$(call_tool 5008 "masc_goal_list" '{}')"
 expect_ok "masc_goal_list" "$r_goal_list"
 
 next_step "masc_goal_upsert"
-GOAL_SEED_PAYLOAD="$(call_tool 5008 "masc_goal_upsert" '{"title":"Public Tool Sweep Goal","priority":1}')"
+GOAL_SEED_PAYLOAD="$(call_tool 5009 "masc_goal_upsert" '{"title":"Public Tool Sweep Goal","priority":1}')"
 GOAL_ID="$(printf '%s' "$GOAL_SEED_PAYLOAD" | extract_result | jq -r '.goal_id // empty')"
 if [ -z "$GOAL_ID" ]; then
   mcp_fail_with_context "could not create goal for public tool live sweep" "$GOAL_SEED_PAYLOAD"
 fi
 echo "  PASS: masc_goal_upsert"
 
-next_step "masc_goal_transition"
-r_goal_transition="$(
-  call_tool 5009 "masc_goal_transition" "$(
-    jq -cn \
-      --arg goal_id "$GOAL_ID" \
-      --arg actor "$AGENT_NAME" \
-      '{goal_id:$goal_id,action:"pause",actor:{id:$actor},note:"public tool sweep pause"}'
-  )"
-)"
-expect_ok "masc_goal_transition" "$r_goal_transition"
-
-next_step "masc_goal_verify"
-r_goal_verify="$(
-  call_tool 5010 "masc_goal_verify" "$(
-    jq -cn \
-      --arg goal_id "$GOAL_ID" \
-      --arg principal "$AGENT_NAME" \
-      '{goal_id:$goal_id,principal:{id:$principal},decision:"approve",note:"public tool sweep guard vote"}'
-  )"
-)"
-expect_ok_or_guard "masc_goal_verify" "$r_goal_verify" 'no active verification request|active verification'
-
 next_step "masc_add_task"
-r_add_task="$(call_tool 5011 "masc_add_task" "$(jq -cn --arg goal_id "$GOAL_ID" '{title:"Public Tool Sweep Task",goal_id:$goal_id,priority:2,description:"live public surface verification"}')")"
+r_add_task="$(call_tool 5010 "masc_add_task" "$(jq -cn --arg goal_id "$GOAL_ID" '{title:"Public Tool Sweep Task",goal_id:$goal_id,priority:2,description:"live public surface verification"}')")"
 expect_ok "masc_add_task" "$r_add_task"
 task_id="$(
   printf '%s' "$r_add_task" \
@@ -182,56 +176,78 @@ if [[ -z "$task_id" ]]; then
   mcp_fail_with_context "masc_add_task: could not extract task_id" "$r_add_task"
 fi
 
+next_step "masc_goal_transition"
+r_goal_transition="$(
+  call_tool 5011 "masc_goal_transition" "$(
+    jq -cn \
+      --arg goal_id "$GOAL_ID" \
+      --arg actor "$AGENT_NAME" \
+      '{goal_id:$goal_id,action:"pause",actor:{id:$actor},note:"public tool sweep pause"}'
+  )"
+)"
+expect_ok "masc_goal_transition" "$r_goal_transition"
+
+next_step "masc_goal_verify"
+r_goal_verify="$(
+  call_tool 5012 "masc_goal_verify" "$(
+    jq -cn \
+      --arg goal_id "$GOAL_ID" \
+      --arg principal "$AGENT_NAME" \
+      '{goal_id:$goal_id,principal:{id:$principal},decision:"approve",note:"public tool sweep guard vote"}'
+  )"
+)"
+expect_ok_or_guard "masc_goal_verify" "$r_goal_verify" 'no active verification request|active verification'
+
 next_step "masc_batch_add_tasks"
-r_batch_add="$(call_tool 5012 "masc_batch_add_tasks" "$(jq -cn --arg goal_id "$GOAL_ID" '{tasks:[{title:"Public Sweep Batch A",goal_id:$goal_id,priority:3,description:"batch-a"},{title:"Public Sweep Batch B",goal_id:$goal_id,priority:4,description:"batch-b"}]}')")"
+r_batch_add="$(call_tool 5013 "masc_batch_add_tasks" "$(jq -cn --arg goal_id "$GOAL_ID" '{tasks:[{title:"Public Sweep Batch A",goal_id:$goal_id,priority:3,description:"batch-a"},{title:"Public Sweep Batch B",goal_id:$goal_id,priority:4,description:"batch-b"}]}')")"
 expect_ok "masc_batch_add_tasks" "$r_batch_add"
 
 next_step "masc_tasks"
-r_tasks="$(call_tool 5013 "masc_tasks" '{}')"
+r_tasks="$(call_tool 5014 "masc_tasks" '{}')"
 expect_ok "masc_tasks" "$r_tasks"
 
 next_step "masc_transition claim"
-r_claim="$(call_tool 5014 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"claim",notes:"public tool sweep claim"}')")"
+r_claim="$(call_tool 5015 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"claim",notes:"public tool sweep claim"}')")"
 expect_ok_or_guard "masc_transition claim" "$r_claim" 'already claimed'
 
 next_step "masc_plan_init"
-r_plan_init="$(call_tool 5015 "masc_plan_init" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id}')")"
+r_plan_init="$(call_tool 5016 "masc_plan_init" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id}')")"
 expect_ok "masc_plan_init" "$r_plan_init"
 
 next_step "masc_plan_set_task"
-r_plan_set="$(call_tool 5016 "masc_plan_set_task" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id}')")"
+r_plan_set="$(call_tool 5017 "masc_plan_set_task" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id}')")"
 expect_ok "masc_plan_set_task" "$r_plan_set"
 
 next_step "masc_check"
-r_check="$(call_tool 5017 "masc_check" '{"assertions":["task_claimed","current_task_set"]}')"
+r_check="$(call_tool 5018 "masc_check" '{"assertions":["task_claimed","current_task_set"]}')"
 expect_ok "masc_check" "$r_check"
 
 next_step "masc_plan_update"
-r_plan_update="$(call_tool 5018 "masc_plan_update" "$(jq -cn --arg task_id "$task_id" --arg content "public tool sweep plan" '{task_id:$task_id,content:$content}')")"
+r_plan_update="$(call_tool 5019 "masc_plan_update" "$(jq -cn --arg task_id "$task_id" --arg content "public tool sweep plan" '{task_id:$task_id,content:$content}')")"
 expect_ok "masc_plan_update" "$r_plan_update"
 
 next_step "masc_plan_get"
-r_plan_get="$(call_tool 5019 "masc_plan_get" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id}')")"
+r_plan_get="$(call_tool 5020 "masc_plan_get" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id}')")"
 expect_ok "masc_plan_get" "$r_plan_get"
 
 next_step "masc_transition start"
-r_transition="$(call_tool 5020 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"start",notes:"public tool sweep start"}')")"
+r_transition="$(call_tool 5021 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"start",notes:"public tool sweep start"}')")"
 expect_ok "masc_transition start" "$r_transition"
 
 next_step "masc_heartbeat"
-r_heartbeat="$(call_tool 5021 "masc_heartbeat" '{}')"
+r_heartbeat="$(call_tool 5022 "masc_heartbeat" '{}')"
 expect_ok "masc_heartbeat" "$r_heartbeat"
 
 next_step "masc_broadcast"
-r_broadcast="$(call_tool 5022 "masc_broadcast" "$(jq -cn --arg agent_name "$AGENT_NAME" --arg message "public tool sweep broadcast" '{agent_name:$agent_name,message:$message}')")"
+r_broadcast="$(call_tool 5023 "masc_broadcast" "$(jq -cn --arg agent_name "$AGENT_NAME" --arg message "public tool sweep broadcast" '{agent_name:$agent_name,message:$message}')")"
 expect_ok "masc_broadcast" "$r_broadcast"
 
 next_step "masc_messages"
-r_messages="$(call_tool 5023 "masc_messages" '{}')"
+r_messages="$(call_tool 5024 "masc_messages" '{}')"
 expect_ok "masc_messages" "$r_messages"
 
 next_step "masc_board_post"
-r_board_post="$(call_tool 5024 "masc_board_post" "$(jq -cn --arg author "$AGENT_NAME" --arg title "Public Tool Sweep Post" --arg content "public tool sweep board post" '{author:$author,title:$title,content:$content,visibility:"internal"}')")"
+r_board_post="$(call_tool 5025 "masc_board_post" "$(jq -cn --arg author "$AGENT_NAME" --arg title "Public Tool Sweep Post" --arg content "public tool sweep board post" '{author:$author,title:$title,content:$content,visibility:"internal"}')")"
 expect_ok "masc_board_post" "$r_board_post"
 post_id="$(
   printf '%s' "$r_board_post" \
@@ -243,15 +259,15 @@ if [[ -z "$post_id" ]]; then
 fi
 
 next_step "masc_board_list"
-r_board_list="$(call_tool 5025 "masc_board_list" '{"limit":5}')"
+r_board_list="$(call_tool 5026 "masc_board_list" '{"limit":5}')"
 expect_ok "masc_board_list" "$r_board_list"
 
 next_step "masc_board_post_get"
-r_board_get="$(call_tool 5026 "masc_board_post_get" "$(jq -cn --arg post_id "$post_id" '{post_id:$post_id}')")"
+r_board_get="$(call_tool 5027 "masc_board_post_get" "$(jq -cn --arg post_id "$post_id" '{post_id:$post_id}')")"
 expect_ok "masc_board_post_get" "$r_board_get"
 
 next_step "masc_board_comment"
-r_board_comment="$(call_tool 5027 "masc_board_comment" "$(jq -cn --arg post_id "$post_id" --arg author "$AGENT_NAME" --arg content "public tool sweep comment" '{post_id:$post_id,author:$author,content:$content}')")"
+r_board_comment="$(call_tool 5028 "masc_board_comment" "$(jq -cn --arg post_id "$post_id" --arg author "$AGENT_NAME" --arg content "public tool sweep comment" '{post_id:$post_id,author:$author,content:$content}')")"
 expect_ok "masc_board_comment" "$r_board_comment"
 comment_id="$(
   printf '%s' "$r_board_comment" \
@@ -263,28 +279,28 @@ if [[ -z "$comment_id" ]]; then
 fi
 
 next_step "masc_board_vote"
-r_board_vote="$(call_tool 5028 "masc_board_vote" "$(jq -cn --arg post_id "$post_id" --arg voter "$AGENT_NAME" '{post_id:$post_id,voter:$voter}')")"
+r_board_vote="$(call_tool 5029 "masc_board_vote" "$(jq -cn --arg post_id "$post_id" --arg voter "$AGENT_NAME" '{post_id:$post_id,voter:$voter}')")"
 expect_ok "masc_board_vote" "$r_board_vote"
 
 next_step "masc_board_comment_vote"
 if [[ -n "$comment_id" ]]; then
-  r_comment_vote="$(call_tool 5029 "masc_board_comment_vote" "$(jq -cn --arg comment_id "$comment_id" --arg voter "$AGENT_NAME" '{comment_id:$comment_id,voter:$voter,direction:"up"}')")"
+  r_comment_vote="$(call_tool 5030 "masc_board_comment_vote" "$(jq -cn --arg comment_id "$comment_id" --arg voter "$AGENT_NAME" '{comment_id:$comment_id,voter:$voter,direction:"up"}')")"
   expect_ok "masc_board_comment_vote" "$r_comment_vote"
 else
   echo "  PASS: masc_board_comment_vote (skipped: comment id not present in comment response)"
 fi
 
 next_step "masc_board_reaction"
-r_reaction="$(call_tool 5030 "masc_board_reaction" "$(jq -cn --arg post_id "$post_id" --arg user_id "$AGENT_NAME" '{target_type:"post",target_id:$post_id,user_id:$user_id,emoji:"👍"}')")"
+r_reaction="$(call_tool 5031 "masc_board_reaction" "$(jq -cn --arg post_id "$post_id" --arg user_id "$AGENT_NAME" --arg emoji "$board_reaction_emoji" '{target_type:"post",target_id:$post_id,user_id:$user_id,emoji:$emoji}')")"
 expect_ok "masc_board_reaction" "$r_reaction"
 
 next_step "masc_board_curation_read"
-r_curation_read="$(call_tool 5031 "masc_board_curation_read" '{}')"
+r_curation_read="$(call_tool 5032 "masc_board_curation_read" '{}')"
 expect_ok "masc_board_curation_read" "$r_curation_read"
 
 next_step "masc_board_curation_submit"
 r_curation_submit="$(
-  call_tool 5032 "masc_board_curation_submit" "$(
+  call_tool 5033 "masc_board_curation_submit" "$(
     jq -cn \
       --arg submitted_by "$AGENT_NAME" \
       --arg post_id "$post_id" \
@@ -302,19 +318,19 @@ r_curation_submit="$(
 expect_ok "masc_board_curation_submit" "$r_curation_submit"
 
 next_step "masc_board_curation_read after submit"
-r_curation_read_after="$(call_tool 5033 "masc_board_curation_read" '{}')"
+r_curation_read_after="$(call_tool 5034 "masc_board_curation_read" '{}')"
 expect_ok "masc_board_curation_read after submit" "$r_curation_read_after"
 
 next_step "masc_persona_list"
-r_persona_list="$(call_tool 5034 "masc_persona_list" '{}')"
+r_persona_list="$(call_tool 5035 "masc_persona_list" '{}')"
 expect_ok "masc_persona_list" "$r_persona_list"
 
 next_step "masc_agent_timeline"
-r_agent_timeline="$(call_tool 5035 "masc_agent_timeline" "$(jq -cn --arg agent_name "$AGENT_NAME" '{agent_name:$agent_name,limit:5}')")"
+r_agent_timeline="$(call_tool 5036 "masc_agent_timeline" "$(jq -cn --arg agent_name "$AGENT_NAME" '{agent_name:$agent_name,limit:5}')")"
 expect_ok "masc_agent_timeline" "$r_agent_timeline"
 
 next_step "masc_transition done"
-r_done="$(call_tool 5036 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:"public tool sweep completed"}')")"
+r_done="$(call_tool 5037 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:"public tool sweep completed"}')")"
 expect_ok "masc_transition done" "$r_done"
 CLEANUP_TASK_FINALIZED=1
 

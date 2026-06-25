@@ -221,6 +221,10 @@ let run_dune_local base bin_dir ?(env = []) ?(unset_env = []) subcommand =
   let path = Printf.sprintf "%s:%s" bin_dir system_path in
   let lock_path = Filename.concat base "dune-local.lock" in
   let opam_lock_path = Filename.concat base "opam-switch.lock" in
+  (* Most tests exercise fake Dune behavior inside an isolated temp repo. The
+     production bare-Dune guard scans the host process table, so unrelated
+     developer Dune processes would otherwise make these hermetic tests flaky.
+     Tests that target the guard pass [~unset_env] for this variable. *)
   let allow_bare_dune_env =
     if List.exists (String.equal "MASC_DUNE_ALLOW_BARE_DUNE") unset_env
     then []
@@ -413,7 +417,9 @@ exec "$@"
            (quote lockf_log) (quote lockf_log) (quote opam_lock_path));
       (* Use a minimal PATH (no opam install directories) so that
          'command -v opam' fails and the guard is skipped.
-         opam is typically in ~/.opam/SWITCH/bin/, not in /usr/bin or /bin. *)
+         opam is typically in ~/.opam/SWITCH/bin/, not in /usr/bin or /bin.
+         The bare-Dune guard is not under test here, so keep the isolated fake
+         repo independent of host Dune processes. *)
       let minimal_path = Printf.sprintf "%s:/usr/bin:/bin" bin_dir in
       let lock_path = Filename.concat dir "dune-local.lock" in
       let script = Filename.concat scripts_dir "dune-local.sh" in

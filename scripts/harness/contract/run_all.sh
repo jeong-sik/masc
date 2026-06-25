@@ -17,7 +17,7 @@ KEEP_LOG_FILE="${KEEP_LOG_FILE:-0}"
 STOP_WAIT_SEC="${STOP_WAIT_SEC:-10}"
 
 export MCP_URL="${MCP_URL:-http://127.0.0.1:${PORT}/mcp}"
-export MCP_TOKEN="${MCP_TOKEN:-${MASC_TOKEN:-}}"
+export MCP_TOKEN="${MCP_TOKEN:-}"
 export MCP_AGENT_NAME="${MCP_AGENT_NAME:-contract-harness-admin-${RANDOM:-0}-$$}"
 export CURL_RETRY_COUNT="${CURL_RETRY_COUNT:-12}"
 export CURL_RETRY_DELAY_SEC="${CURL_RETRY_DELAY_SEC:-1}"
@@ -130,8 +130,6 @@ run_contract() {
     cd "$ROOT_DIR"
     MCP_URL="$MCP_URL" \
       MCP_TOKEN="${MCP_TOKEN:-}" \
-      MCP_AUTH_TOKEN="${MCP_AUTH_TOKEN:-}" \
-      MASC_ADMIN_TOKEN="${MASC_ADMIN_TOKEN:-}" \
       MCP_AGENT_NAME="$MCP_AGENT_NAME" \
       BASE_PATH="$BASE_PATH" \
       bash "scripts/harness/contract/${script_name}"
@@ -154,20 +152,20 @@ fi
 echo "[bootstrap] server_exe=${SERVER_EXE}"
 harness_seed_server_config "$ROOT_DIR" "$BASE_PATH"
 
-if ! HARNESS_AUTH_TOKEN="$(
+if ! MCP_TOKEN="$(
   harness_mint_admin_token "$SERVER_EXE" "$PORT" "$BASE_PATH" \
     "${MASC_HARNESS_ADMIN_AGENT:-contract-harness-admin}"
 )"; then
   echo "FAIL: failed to mint contract harness admin token" >&2
   exit 1
 fi
-if [[ -z "$HARNESS_AUTH_TOKEN" ]]; then
+if [[ -z "$MCP_TOKEN" ]]; then
   echo "FAIL: contract harness admin token is empty" >&2
   exit 1
 fi
-export MCP_AUTH_TOKEN="$HARNESS_AUTH_TOKEN"
-export MASC_ADMIN_TOKEN="$HARNESS_AUTH_TOKEN"
-export MCP_TOKEN="$HARNESS_AUTH_TOKEN"
+export MCP_TOKEN
+unset MCP_AUTH_TOKEN
+unset MASC_ADMIN_TOKEN
 echo "[bootstrap] auth_token=workspace-local admin token minted"
 
 SERVER_PID="$(harness_start_server "$SERVER_EXE" "$PORT" "$BASE_PATH" "$LOG_FILE")"

@@ -189,14 +189,14 @@ harness_mint_admin_token() {
   fi
 
   if ! token_json="$(
-    env -u MCP_AUTH_TOKEN -u MASC_ADMIN_TOKEN -u MASC_TOKEN \
+    env -u MCP_TOKEN -u MCP_AUTH_TOKEN -u MASC_ADMIN_TOKEN -u MASC_TOKEN \
       "$server_exe" login \
       --base-path "$base_path" \
       --host 127.0.0.1 \
       --port "$port" \
       --agent "$agent" \
       --role admin \
-      --client-env MCP_AUTH_TOKEN \
+      --client-env MCP_TOKEN \
       --no-expiry \
       --json
   )"; then
@@ -229,6 +229,8 @@ harness_start_server() {
     export MASC_BASE_PATH="$base_path"
     export MASC_BASE_PATH_INPUT="$base_path"
     export MASC_STORAGE_TYPE="filesystem"
+    unset MCP_TOKEN
+    unset MCP_AUTH_TOKEN
     unset MASC_ADMIN_TOKEN
     unset MASC_TOKEN
     export MASC_AUTONOMY_ENABLED="0"

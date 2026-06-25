@@ -1294,8 +1294,8 @@ let () = test "handle_transition_blocks_submitter_verdict_actions" (fun () ->
          assert (not (Tool_result.is_success result));
          assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
          assert (str_contains (Tool_result.message result) expected))
-      [ "approve", "Self-approval not allowed"
-      ; "reject", "Self-rejection not allowed"
+      [ "approve", "Transition 'approve'"
+      ; "reject", "Transition 'reject'"
       ];
     assert_task_awaiting_verification_by worker_ctx "worker"))
 

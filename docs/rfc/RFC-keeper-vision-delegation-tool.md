@@ -74,7 +74,11 @@ The existing `Multimodal.Workspace` / `Workspace_holder` is **not reusable as-is
 - **Off by default**: gated behind `MASC_MULTIMODAL` (`wirein_helpers.ml:3-6`, `keeper_post_turn.ml:341`).
 - **Not durable**: `Payload.of_json` is lossy by construction (`payload.mli:35-42`), so a handle that survives checkpoint/compaction/restart returns empty bytes — fatal for multi-turn re-query.
 
-Required: a handle-keyed store on the **input** path, backing bytes with a durable `Blob_ref` (blob store / content-addressed file), surviving the checkpoint round-trip. This is a Phase-0 *design* prerequisite (resolve before Phase 1), not an Open Question.
+Required: a handle-keyed store on the **input** path, backing bytes with a durable content-addressed file (the handle is the content hash, not inline base64), surviving the checkpoint round-trip.
+
+**New but precedented, not greenfield** `[grounded]`. `lib/review_artifact_store.ml` already implements the exact pattern: `Digestif.SHA256` content hashing (`:3-5`), atomic file write `Fs_compat.save_file_atomic` (`:24-29`), and a JSONL index (`:31-38`). A vision-input store mirrors it — write the image bytes to a content-addressed file under the keeper's artifact/checkpoint dir, put the hash handle (a plain string, JSON-round-trip-safe) into the placeholder. Because the bytes live in a file and the checkpoint JSON carries only the handle, the lossy `Payload.of_json` path is **bypassed by construction** (the problem is relocated across the boundary, not patched). Checkpoints already persist as JSONL (`keeper_context_core.mli` §"JSONL persistence"), so the handle rides the existing persistence with no new serialization format.
+
+This is a Phase-0b *design* prerequisite (resolve before Phase 1), not an Open Question.
 
 ### 2.6 Mid-turn provider sub-call — new tool-execution shape `[review]`
 
@@ -124,4 +128,4 @@ The librarian (`keeper_librarian_runtime.ml:20-22`, routed by `runtime_id_for_li
 - Auto-call on first image vs explicit keeper decision vs completion gate for image-critical prompts?
 - Should `document` (PDF) reuse the same tool or a sibling `analyze_document`?
 - Does any current keeper genuinely need whole-turn native vision (→ `multimodal_policy = reroute`)?
-- Blob store backend for §2.5 (content-addressed local files vs an existing store) and its eviction policy.
+- Blob store backend for §2.5: reuse `review_artifact_store.ml`'s helpers directly vs a sibling module; and the eviction/retention policy (when is a stored image garbage-collected — keeper end, TTL, or LRU on dir size?).

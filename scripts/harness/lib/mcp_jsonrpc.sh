@@ -231,6 +231,7 @@ mcp_jsonrpc_call() {
     body_file="$(mcp_mktemp_file "masc-jsonrpc-body" ".json")"
     stderr_file="$(mcp_mktemp_file "masc-jsonrpc-stderr" ".log")"
     resp_file="$(mcp_mktemp_file "masc-jsonrpc-resp" ".json")"
+    trap 'rm -f "$body_file" "$stderr_file" "$resp_file"' RETURN
     printf '%s' "$request_body" >"$body_file"
 
     local -a cmd=(

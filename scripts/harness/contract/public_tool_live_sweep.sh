@@ -130,9 +130,9 @@ r_goal_list="$(call_tool 5013 "masc_goal_list" '{}')"
 expect_ok "masc_goal_list" "$r_goal_list"
 
 echo "[11/36] masc_add_task"
-r_add_task="$(call_tool 5014 "masc_add_task" "$(jq -cn --arg goal_id "$GOAL_ID" '{title:"Public Tool Sweep Task",goal_id:$goal_id,priority:2,description:"live public surface verification"}')")"
+r_add_task="$(call_tool 5015 "masc_add_task" "$(jq -cn --arg goal_id "$GOAL_ID" '{title:"Public Tool Sweep Task",goal_id:$goal_id,priority:2,description:"live public surface verification"}')")"
 expect_ok "masc_add_task" "$r_add_task"
-task_id="$(
+task_id="$( 
   printf '%s' "$r_add_task" \
     | jq -r 'try (.result.structuredContent.task_id // .result.structuredContent.id) catch empty | strings' \
     | head -n1
@@ -142,11 +142,11 @@ if [[ -z "$task_id" ]]; then
 fi
 
 echo "[12/36] masc_batch_add_tasks"
-r_batch_add="$(call_tool 5015 "masc_batch_add_tasks" "$(jq -cn --arg goal_id "$GOAL_ID" '{tasks:[{title:"Public Sweep Batch A",goal_id:$goal_id,priority:3,description:"batch-a"},{title:"Public Sweep Batch B",goal_id:$goal_id,priority:4,description:"batch-b"}]}')")"
+r_batch_add="$(call_tool 5016 "masc_batch_add_tasks" "$(jq -cn --arg goal_id "$GOAL_ID" '{tasks:[{title:"Public Sweep Batch A",goal_id:$goal_id,priority:3,description:"batch-a"},{title:"Public Sweep Batch B",goal_id:$goal_id,priority:4,description:"batch-b"}]}')")"
 expect_ok "masc_batch_add_tasks" "$r_batch_add"
 
 echo "[13/36] masc_tasks"
-r_tasks="$(call_tool 5016 "masc_tasks" '{}')"
+r_tasks="$(call_tool 5017 "masc_tasks" '{}')"
 expect_ok "masc_tasks" "$r_tasks"
 
 echo "[14/36] masc_plan_init"

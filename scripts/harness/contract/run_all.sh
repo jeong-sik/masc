@@ -81,7 +81,7 @@ wait_for_mcp_initialize_ready() {
 
   while [[ "$(date +%s)" -lt "$deadline" ]]; do
     local status body_file raw normalized
-    body_file="$(mcp_mktemp_file "masc-contract-init-ready" ".json")"
+    body_file="$(mcp_mktemp_file "masc-contract-init-ready-${RANDOM:-0}-$$" ".json")"
     status="$(
       curl -sS -o "$body_file" -w '%{http_code}' --max-time 2 \
         -X POST "$mcp_url" \
@@ -114,7 +114,15 @@ run_contract() {
   local total="$2"
   local script_name="$3"
   echo "[${step}/${total}] ${script_name}"
-  if ! (cd "$ROOT_DIR" && MCP_URL="$MCP_URL" BASE_PATH="$BASE_PATH" bash "scripts/harness/contract/${script_name}"); then
+  if ! (
+    cd "$ROOT_DIR"
+    MCP_URL="$MCP_URL" \
+      BASE_PATH="$BASE_PATH" \
+      MCP_TOKEN="$MCP_TOKEN" \
+      MCP_AUTH_TOKEN="$MCP_AUTH_TOKEN" \
+      MASC_ADMIN_TOKEN="$MASC_ADMIN_TOKEN" \
+      bash "scripts/harness/contract/${script_name}"
+  ); then
     echo "FAIL: ${script_name}" >&2
     harness_print_log_tail "$LOG_FILE"
     exit 1

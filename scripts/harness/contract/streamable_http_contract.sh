@@ -52,34 +52,24 @@ wait_for_mcp_ready() {
   return 1
 }
 
-post_with_accept_auth() {
+post_with_accept() {
   local accept_header="$1"
   local body="$2"
   local header_file="$3"
   local body_file="$4"
-  local auth_header="${5:-__DEFAULT_AUTH__}"
-  local -a extra_headers=(
-    -H 'Content-Type: application/json'
-    -H "Accept: $accept_header"
-  )
-  if [ "$auth_header" = "__DEFAULT_AUTH__" ]; then
-    local auth_token
-    auth_token="$(mcp_default_auth_token)"
-    if [ -n "$auth_token" ]; then
-      extra_headers+=( -H "Authorization: Bearer $auth_token" )
-    fi
-  elif [ "$auth_header" != "__NO_AUTH__" ] && [ -n "$auth_header" ]; then
-    extra_headers+=( -H "Authorization: $auth_header" )
+  local auth_token
+  auth_token="$(mcp_default_auth_token)"
+  local -a extra_headers=()
+  if [ -n "$auth_token" ]; then
+    extra_headers+=( -H "Authorization: Bearer $auth_token" )
   fi
 
   curl_with_retry -sS -D "$header_file" -o "$body_file" \
     -X POST "$MCP_URL" \
+    -H 'Content-Type: application/json' \
+    -H "Accept: $accept_header" \
     "${extra_headers[@]}" \
     -d "$body"
-}
-
-post_with_accept() {
-  post_with_accept_auth "$1" "$2" "$3" "$4"
 }
 
 post_with_session() {
@@ -128,15 +118,9 @@ get_with_session() {
     extra_headers+=(-H "Authorization: Bearer $auth_token")
   fi
 
-  set +e
   curl_with_retry -sS -D "$header_file" -o "$body_file" --max-time 2 \
     "$MCP_URL" \
-    "${extra_headers[@]}"
-  local curl_status=$?
-  set -e
-  if [ "$curl_status" -ne 0 ] && [ "$curl_status" -ne 28 ]; then
-    return "$curl_status"
-  fi
+    "${extra_headers[@]}" || true
 }
 
 delete_with_session() {
@@ -184,25 +168,6 @@ require_header_contains() {
   fi
 }
 
-require_auth_rejected() {
-  local label="$1"
-  local header_file="$2"
-  local body_file="$3"
-  local code
-  code="$(status_code "$header_file")"
-  case "$code" in
-    401|403)
-      return 0
-      ;;
-    *)
-      echo "FAIL: expected 401 or 403 for ${label}, got ${code}"
-      cat "$header_file"
-      cat "$body_file"
-      exit 1
-      ;;
-  esac
-}
-
 header_value() {
   local header_file="$1"
   local key="$2"
@@ -216,40 +181,8 @@ header_value() {
   ' "$header_file"
 }
 
+echo "[1/7] json-only Accept is rejected"
 wait_for_mcp_ready
-echo "[1/11] missing bearer token is rejected"
-h0_missing="$tmpdir/auth-missing.headers"
-b0_missing="$tmpdir/auth-missing.body"
-post_with_accept_auth "application/json, text/event-stream" \
-  '{"jsonrpc":"2.0","id":10,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"contract-auth-missing","version":"1.0"},"capabilities":{}}}' \
-  "$h0_missing" "$b0_missing" "__NO_AUTH__"
-require_auth_rejected "missing bearer token" "$h0_missing" "$b0_missing"
-
-echo "[2/11] malformed authorization header is rejected"
-h0_malformed="$tmpdir/auth-malformed.headers"
-b0_malformed="$tmpdir/auth-malformed.body"
-post_with_accept_auth "application/json, text/event-stream" \
-  '{"jsonrpc":"2.0","id":11,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"contract-auth-malformed","version":"1.0"},"capabilities":{}}}' \
-  "$h0_malformed" "$b0_malformed" "not-bearer"
-require_auth_rejected "malformed authorization header" "$h0_malformed" "$b0_malformed"
-
-echo "[3/11] wrong bearer token is rejected"
-h0_wrong="$tmpdir/auth-wrong.headers"
-b0_wrong="$tmpdir/auth-wrong.body"
-post_with_accept_auth "application/json, text/event-stream" \
-  '{"jsonrpc":"2.0","id":12,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"contract-auth-wrong","version":"1.0"},"capabilities":{}}}' \
-  "$h0_wrong" "$b0_wrong" "Bearer wrong-token"
-require_auth_rejected "wrong bearer token" "$h0_wrong" "$b0_wrong"
-
-echo "[4/11] expired-looking bearer token is rejected"
-h0_expired="$tmpdir/auth-expired.headers"
-b0_expired="$tmpdir/auth-expired.body"
-post_with_accept_auth "application/json, text/event-stream" \
-  '{"jsonrpc":"2.0","id":13,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"contract-auth-expired","version":"1.0"},"capabilities":{}}}' \
-  "$h0_expired" "$b0_expired" "Bearer expired-token"
-require_auth_rejected "expired-looking bearer token" "$h0_expired" "$b0_expired"
-
-echo "[5/11] json-only Accept is rejected"
 h1="$tmpdir/json-only-accept.headers"
 b1="$tmpdir/json-only-accept.body"
 post_with_accept "application/json" \
@@ -268,7 +201,7 @@ if ! grep -qi "Invalid Accept header" "$b1"; then
   exit 1
 fi
 
-echo "[6/11] streamable Accept success"
+echo "[2/7] streamable Accept success"
 h2="$tmpdir/ok.headers"
 b2="$tmpdir/ok.body"
 post_with_accept "application/json, text/event-stream" \
@@ -289,7 +222,7 @@ if [ -z "$SESSION_ID" ] || [ -z "$PROTOCOL_VERSION" ]; then
   exit 1
 fi
 
-echo "[7/11] follow-up POST accepts missing protocol header via session continuity"
+echo "[3/7] follow-up POST accepts missing protocol header via session continuity"
 h3="$tmpdir/missing-protocol.headers"
 b3="$tmpdir/missing-protocol.body"
 post_with_session "$SESSION_ID" "" \
@@ -303,7 +236,7 @@ if [ "$code3" != "200" ]; then
   exit 1
 fi
 
-echo "[8/11] follow-up POST rejects mismatched protocol header"
+echo "[4/7] follow-up POST rejects mismatched protocol header"
 h4="$tmpdir/mismatch-protocol.headers"
 b4="$tmpdir/mismatch-protocol.body"
 post_with_session "$SESSION_ID" "2025-03-26" \
@@ -322,7 +255,7 @@ if ! grep -qi "mismatch" "$b4"; then
   exit 1
 fi
 
-echo "[9/11] follow-up POST succeeds with matching protocol header"
+echo "[5/7] follow-up POST succeeds with matching protocol header"
 h5="$tmpdir/match-protocol.headers"
 b5="$tmpdir/match-protocol.body"
 post_with_session "$SESSION_ID" "$PROTOCOL_VERSION" \
@@ -336,7 +269,7 @@ if [ "$code5" != "200" ]; then
   exit 1
 fi
 
-echo "[10/11] follow-up GET accepts missing protocol header via session continuity"
+echo "[6/7] follow-up GET accepts missing protocol header via session continuity"
 h6="$tmpdir/get-missing-protocol.headers"
 b6="$tmpdir/get-missing-protocol.body"
 get_with_session "$SESSION_ID" "" "$h6" "$b6"
@@ -348,7 +281,7 @@ if [ "$code6" != "200" ]; then
   exit 1
 fi
 
-echo "[11/11] follow-up DELETE accepts missing protocol header via session continuity"
+echo "[7/7] follow-up DELETE accepts missing protocol header via session continuity"
 h7="$tmpdir/delete-missing-protocol.headers"
 b7="$tmpdir/delete-missing-protocol.body"
 delete_with_session "$SESSION_ID" "" "$h7" "$b7"

@@ -25,7 +25,6 @@ let prepare_agent_setup
       ~(context_injector : Agent_sdk.Hooks.context_injector)
       ~(start_turn_count : int)
       ~(generation : int)
-      ~(max_turns : int)
       ~(runtime_id : string)
       ~(is_retry : bool)
       ~(turn_affordances : string list)
@@ -86,7 +85,6 @@ let prepare_agent_setup
     ; extra_system_context_size = None
     }
   in
-  let agent_ref : Agent_sdk.Agent.t option ref = ref None in
   let local_search_fn_ref : (query:string -> max_results:int -> Yojson.Safe.t) ref =
     ref (fun ~query:_ ~max_results:_ -> `Assoc [ "results", `List [] ])
   in
@@ -127,8 +125,7 @@ let prepare_agent_setup
         Keeper_discovered_tools.mark_used acc.discovered ~turn:acc.current_turn ~name)
       ()
   in
-  let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
-  let tools = extend_turns_tool :: keeper_tools in
+  let tools = keeper_tools in
   let tool_index_config =
     { Agent_sdk.Tool_index.default_config with
       top_k = Keeper_config.keeper_tool_search_top_k ()
@@ -321,7 +318,7 @@ let prepare_agent_setup
       (List.length keeper_tools)
       (List.length tool_entries);
   let all_tool_names =
-    "extend_turns" :: List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
+    List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
   in
   let universe_set = Keeper_tool_policy.tool_name_set all_tool_names in
   let policy_allowed_tool_names =

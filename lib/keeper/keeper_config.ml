@@ -391,7 +391,8 @@ let keeper_tool_search_top_k_rp =
 let keeper_tool_search_top_k () : int =
   Runtime_params.get keeper_tool_search_top_k_rp
 
-(* max_turns is set in keeper_agent_run.ml from keeper runtime config.
+(* max_turns is owned by the OAS SDK default; MASC no longer sets it from
+   keeper runtime config.
    Known constraints (retain for future tuning):
    - 1000 turns caused 787s+ latency per turn
    - 20 turns caused 6.7GB RSS in 2 minutes with 3 concurrent keepers

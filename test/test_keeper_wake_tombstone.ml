@@ -66,6 +66,33 @@ let test_per_keeper_isolation () =
   Alcotest.(check bool) "different keeper not affected"
     false (is_suppressed T.Board_reactive "tombstone-f")
 
+(* RFC-0294 R2b: the keeper's own self-cadence (scheduled-autonomous) clock is an
+   automatic origin and must NOT bypass the tombstone — this is the gap RFC-0246
+   left open (only Heartbeat/Board_reactive were gated, never the self-clock). A
+   latched keeper kept re-waking itself indefinitely. *)
+let test_self_cadence_suppressed_when_latched () =
+  D.reset_all_for_test ();
+  latch "tombstone-self-cadence";
+  Alcotest.(check bool)
+    "self-cadence does NOT bypass tombstone when latched"
+    true (is_suppressed T.Self_cadence "tombstone-self-cadence")
+
+(* RFC-0294 R2b false-positive guard (read-heavy-then-write): a keeper that does
+   threshold-1 no-progress turns then makes progress is NOT latched, so its
+   self-cadence wake stays allowed — the gate must not pause a keeper that is
+   still recovering on its own. *)
+let test_self_cadence_not_paused_when_not_latched () =
+  D.reset_all_for_test ();
+  let threshold = D.threshold () in
+  for _ = 1 to threshold - 1 do
+    D.record_turn ~keeper_name:"tombstone-recover" ~made_progress:false ()
+    |> ignore
+  done;
+  D.record_turn ~keeper_name:"tombstone-recover" ~made_progress:true () |> ignore;
+  Alcotest.(check bool)
+    "self-cadence wake allowed for non-latched (recovered) keeper"
+    false (is_suppressed T.Self_cadence "tombstone-recover")
+
 let () =
   Alcotest.run "keeper_wake_tombstone"
     [
@@ -86,5 +113,11 @@ let () =
           ( "per-keeper isolation",
             `Quick,
             with_eio test_per_keeper_isolation );
+          ( "R2b self-cadence suppressed when latched",
+            `Quick,
+            with_eio test_self_cadence_suppressed_when_latched );
+          ( "R2b self-cadence allowed when not latched (recovered)",
+            `Quick,
+            with_eio test_self_cadence_not_paused_when_not_latched );
         ] );
     ]

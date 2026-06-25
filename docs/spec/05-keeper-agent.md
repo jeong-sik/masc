@@ -72,7 +72,7 @@ graph LR
 | Context | `keeper_context_core.ml`, `keeper_context_runtime.ml`, `keeper_checkpoint_store.ml` | 3 |
 | Memory | `keeper_memory*.ml` (bank, policy, recall) | 4 |
 | Prompt / Skill | `keeper_prompt.ml`, `keeper_unified_prompt.ml`, `keeper_skill_routing.ml` | 3 |
-| Turn Execution | `keeper_agent_run.ml`, `keeper_unified_turn.ml`, `keeper_tools_oas.ml`, `keeper_hooks_oas.ml`, `keeper_extend_turns.ml` | 5 |
+| Turn Execution | `keeper_agent_run.ml`, `keeper_unified_turn.ml`, `keeper_tools_oas.ml`, `keeper_hooks_oas.ml` | 4 |
 | Decision | `keeper_deliberation.ml` | 1 |
 | Supervision | `keeper_supervisor.ml`, `keeper_keepalive.ml`, `keeper_world_observation.ml` | 3 |
 | MCP Surface | `keeper_turn.ml`, `keeper_status.ml`, `keeper_persona.ml`, `keeper_schema.ml` | 4 |
@@ -287,7 +287,7 @@ Triage -> BudgetCheck -> (ModelDeliberation | DeterministicBaseline) -> Execute 
 
 ### 5.3 OAS 통합 구성
 
-`run_turn`이 OAS에 전달: `runtime_id`(모델 선택), `tools`(keeper_tools_oas + extend_turns), `hooks`(cost/destructive guard), `context_reducer`(keep_last 30 + Prune_tool_outputs + Merge_contiguous), `memory`(institution + procedures + bank + episodes), `initial_messages`(checkpoint 복원).
+`run_turn`이 OAS에 전달: `runtime_id`(모델 선택), `tools`(keeper_tools_oas), `hooks`(cost/destructive guard), `context_reducer`(keep_last 30 + Prune_tool_outputs + Merge_contiguous), `memory`(institution + procedures + bank + episodes), `initial_messages`(checkpoint 복원).
 
 ---
 

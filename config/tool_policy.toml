@@ -67,7 +67,6 @@ tools = [
   "keeper_board_comment",
   "keeper_board_curation_submit",
   "keeper_context_status",
-  "extend_turns",
   "keeper_time_now",
   "keeper_tool_search",
   "keeper_broadcast",

@@ -358,7 +358,6 @@ export interface TimeoutBudgetTelemetry {
   keeper_turn_timeout_sec: number | null
   remaining_turn_budget_sec: number | null
   estimated_input_tokens: number | null
-  max_turns: number | null
   source: string | null
 }
 

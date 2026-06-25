@@ -103,8 +103,6 @@ export interface KeeperRuntimeField<T> {
 
 export interface KeeperRuntimeResolved {
   bootstrap_max_active_keepers: KeeperRuntimeField<number>
-  reactive_max_turns_per_call: KeeperRuntimeField<number>
-  autonomous_max_turns_per_call: KeeperRuntimeField<number>
   reactive_max_idle_turns: KeeperRuntimeField<number>
   autonomous_max_idle_turns: KeeperRuntimeField<number>
   turn_timeout_sec: KeeperRuntimeField<number>

@@ -30,7 +30,8 @@ val decide :
        - any [Destructive] git op → [Deny Destructive_git];
        - a redirect [Write_path] whose scope is [Outside_workspace] or
          [Absolute_unknown] → [Deny Path_escape];
-       - a catastrophic-by-identity binary ([mkfs]) → [Deny
+       - a catastrophic-by-identity binary (filesystem-format [mkfs], or
+         system-power [shutdown]/[reboot]/[halt]/[poweroff]) → [Deny
          Catastrophic_program].
     2. Otherwise the highest program risk class is graded by the matching
        [overlay.*_trust] level:
@@ -46,7 +47,8 @@ val decide :
 val catastrophic_floor : Capability.t list -> Verdict.deny_reason option
 (** Stage 1 of [decide] on its own: [Some reason] for a [Destructive] git op, a
     redirect [Write_path] escaping the workspace, or a catastrophic-by-identity
-    binary ([mkfs]); [None] otherwise.
+    binary (filesystem-format [mkfs] or system-power
+    [shutdown]/[reboot]/[halt]/[poweroff]); [None] otherwise.
 
     Exposed so the always-run dispatch core
     ([Keeper_tool_execute_shell_ir.dispatch_classified]) can enforce the floor

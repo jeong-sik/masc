@@ -1652,6 +1652,8 @@
 
 (include stanzas/test_continuity_forward_filter.inc)
 
+(include stanzas/test_destructive_floor_differential.inc)
+
 (include stanzas/test_otel_runtime_observables.inc)
 
 (include stanzas/test_otel_port_ssot.inc)
@@ -1917,6 +1919,8 @@
 (include stanzas/test_masc_error_dashboard_auth_code.inc)
 
 (include stanzas/test_masc_error_is_retryable.inc)
+
+(include stanzas/test_runtime_oas_eio_context_classify.inc)
 
 (include stanzas/test_keeper_response_feedback.inc)
 

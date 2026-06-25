@@ -32,7 +32,6 @@ type provider_timeout_budget = {
   keeper_turn_timeout_sec : float;
   remaining_turn_budget_sec : float;
   estimated_input_tokens : int;
-  max_turns : int;
   source : string;
 }
 
@@ -45,14 +44,13 @@ let provider_timeout_budget_to_yojson
       ("keeper_turn_timeout_sec", `Float budget.keeper_turn_timeout_sec);
       ("remaining_turn_budget_sec", `Float budget.remaining_turn_budget_sec);
       ("estimated_input_tokens", `Int budget.estimated_input_tokens);
-      ("max_turns", `Int budget.max_turns);
       ("source", `String budget.source);
     ]
 
 let resolve_bounded_provider_timeout_budget_with_turn_budget
     ~(allow_wall_clock_retry_budget : bool)
     ~(is_retry : bool)
-    ~(estimated_input_tokens : int) ~(max_turns : int)
+    ~(estimated_input_tokens : int)
     ~(remaining_turn_budget_s : float) : provider_timeout_budget =
   let runtime = Keeper_runtime_resolved.current () in
   let adaptive_timeout_sec = Keeper_runtime_resolved.oas_call_timeout_sec () in
@@ -63,23 +61,11 @@ let resolve_bounded_provider_timeout_budget_with_turn_budget
     keeper_turn_timeout_sec = runtime.turn_timeout_sec.value;
     remaining_turn_budget_sec = remaining_turn_budget_s;
     estimated_input_tokens = max 0 estimated_input_tokens;
-    max_turns;
     source =
       (if is_retry
        then "retry_adaptive_timeout"
        else "first_attempt_adaptive_timeout");
   }
-
-let bounded_provider_timeout_for_turn_budget_with_turn_budget
-    ~(estimated_input_tokens : int) ~(max_turns : int)
-    ~(remaining_turn_budget_s : float) : float option =
-  let budget =
-    resolve_bounded_provider_timeout_budget_with_turn_budget
-      ~allow_wall_clock_retry_budget:false
-      ~is_retry:false
-      ~estimated_input_tokens ~max_turns ~remaining_turn_budget_s
-  in
-  Some budget.effective_timeout_sec
 
 let allow_wall_clock_retry_budget_for_attempt
     ~(is_retry : bool)
@@ -90,9 +76,3 @@ let allow_wall_clock_retry_budget_for_attempt
   && degraded_rotation_first_attempt
   && attempt = 1
   && List.length attempted_runtimes > 1
-
-let bounded_provider_timeout_for_turn_budget ~(estimated_input_tokens : int)
-    ~(remaining_turn_budget_s : float) : float option =
-  bounded_provider_timeout_for_turn_budget_with_turn_budget ~estimated_input_tokens
-    ~max_turns:(Keeper_runtime_resolved.reactive_max_turns_per_call ())
-    ~remaining_turn_budget_s

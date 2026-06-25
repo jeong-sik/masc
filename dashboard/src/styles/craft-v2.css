@@ -21,7 +21,9 @@
   --dur: 170ms;
   --dur-slow: 260ms;
   --lift: -2px;
-  --press: 1px;
+  /* --press: 1px; removed 2026-06-25 — press feedback은 button:active / @utility
+     pressable 에서 filter:brightness(0.9) 로 전환. translateY(var(--press)) 는
+     클릭 중 hit-target을 이동시켜 가장자리 클릭이 빗나간다(근본 수정). */
 }
 
 /* ── Font scale ───────────────────────────────────────────────── */
@@ -127,6 +129,7 @@
               border-color var(--dur) var(--ease-out),
               color var(--dur) var(--ease-out),
               box-shadow var(--dur) var(--ease-out),
+              filter var(--dur-fast) var(--ease-out),
               transform var(--dur-fast) var(--ease-out);
 }
 
@@ -142,13 +145,14 @@
               border-color var(--dur) var(--ease-out),
               color var(--dur) var(--ease-out),
               box-shadow var(--dur) var(--ease-out),
+              filter var(--dur-fast) var(--ease-out),
               transform var(--dur-fast) var(--ease-out);
 }
 
 /* Press sink on active controls. */
 .v2-app[data-motion]:not([data-motion="off"]) button:active,
 .v2-app[data-motion]:not([data-motion="off"]) [role="button"]:active {
-  transform: translateY(var(--press));
+  filter: brightness(0.9);
 }
 
 /* Specific v2 controls — press sink (v2 source). */
@@ -171,7 +175,7 @@
 .v2-app[data-motion]:not([data-motion="off"]) .cn-config:active,
 .v2-app[data-motion]:not([data-motion="off"]) .topbar-copilot:active,
 .v2-app[data-motion]:not([data-motion="off"]) .set-nav-item:active {
-  transform: translateY(var(--press));
+  filter: brightness(0.9);
 }
 
 /* Hover lift on genuine cards. */

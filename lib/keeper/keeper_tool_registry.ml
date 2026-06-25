@@ -34,8 +34,7 @@ let keeper_voice_tool_schemas =
 (* ── Layer 0: Core tools (always executable, always visible) ───── *)
 
 (** Tools that bypass policy restrictions.  Survival-critical only:
-    session control (extend_turns), token budget awareness
-    (context_status), and tool discovery (tool_search).
+    token budget awareness (context_status) and tool discovery (tool_search).
     keeper_tools_list moved to BM25-discoverable: it is a debugging
     aid, not survival-critical, and occupied a slot that small models
     wasted on meta-introspection instead of productive action.
@@ -44,7 +43,6 @@ let core_always_tools =
   List.map
     Keeper_tool_name.to_string
     Keeper_tool_name.[ Context_status; Tool_search ]
-  @ [ "extend_turns" ]
 ;;
 
 (* OAS SDK-provided, not in Tool_name *)

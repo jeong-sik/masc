@@ -94,7 +94,6 @@ let next_fail_open_runtime_for_turn_with_budget
     ~(effective_runtime : string)
     ~(attempted_runtimes : string list)
     ~(estimated_input_tokens : int)
-    ~(max_turns : int)
     ?time_spent_in_turn_s
     ~(remaining_turn_budget_s : float)
     (err : Agent_sdk.Error.sdk_error) : degraded_retry_budget_decision =
@@ -116,7 +115,6 @@ let next_fail_open_runtime_for_turn_with_budget
       then Degraded_retry_slot_phase_exhausted retry
       else (
         let _ = estimated_input_tokens in
-        let _ = max_turns in
         let _ = remaining_turn_budget_s in
         Degraded_retry_allowed retry)
 

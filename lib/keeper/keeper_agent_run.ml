@@ -66,7 +66,6 @@ end
      @param user_message The user's message to the keeper
     @param runtime_id Runtime profile name for model selection
      @param generation Current generation counter
-     @param max_turns Maximum agent turns (default from keeper runtime config)
      @param guardrails Optional OAS guardrails for tool safety gates
     @param temperature MODEL temperature override; when omitted, resolved
            from [Runtime_inference] with a 0.3 fallback
@@ -89,8 +88,6 @@ let run_turn
       ?world_observation
       ?(turn_affordances = [])
       ~(generation : int)
-      ?(max_turns : int = Keeper_runtime_resolved.reactive_max_turns_per_call ())
-      (* Per-call turn budget. Keeper resumes via checkpoint if exhausted. *)
       ~(max_idle_turns : int)
       (* Required, no default: the OAS loop guard kills the run at this
          count, so the caller must pick the channel-appropriate threshold
@@ -382,7 +379,6 @@ let run_turn
       ~trajectory_acc
       ~tool_overlay
       ~runtime_manifest_context
-      ~max_turns
       ()
   in
   (* Section 2: prepare runtime tools and hooks. *)
@@ -511,7 +507,6 @@ let run_turn
               to re-emit. Runaway is bounded by max_idle_turns + token budget,
               not a retry count that halts the turn. *)
                     ~max_idle_turns
-                    ~max_turns
                     ?stream_idle_timeout_s
                     ~body_timeout_s:timeout_s
                     ~temperature
@@ -538,7 +533,7 @@ let run_turn
                          ())
                     ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
                       (* exit_condition removed with mutation_boundary — OAS runs to
-             natural completion (max_turns or model end_turn). *)
+             natural completion (model end_turn). *)
                     ?oas_checkpoint:resume_oas_checkpoint
                     ?event_bus
                     ?trace_link

@@ -20,8 +20,6 @@ type 'a field = {
 
 type t = {
   bootstrap_max_active_keepers : int field;
-  reactive_max_turns_per_call : int field;
-  autonomous_max_turns_per_call : int field;
   reactive_max_idle_turns : int field;
   autonomous_max_idle_turns : int field;
   turn_timeout_sec : float field;
@@ -34,9 +32,6 @@ type t = {
   oas_timeout_per_turn : float field;
 }
 
-val max_turns_per_call_min : int
-val max_turns_per_call_max : int
-
 val init : unit -> unit
 val reset_for_tests : unit -> unit
 val current : unit -> t
@@ -45,8 +40,6 @@ val source_to_string : source -> string
 val to_yojson : t -> Yojson.Safe.t
 
 val bootstrap_max_active_keepers : unit -> int
-val reactive_max_turns_per_call : unit -> int
-val autonomous_max_turns_per_call : unit -> int
 val reactive_max_idle_turns : unit -> int
 val autonomous_max_idle_turns : unit -> int
 val turn_timeout_sec : unit -> float

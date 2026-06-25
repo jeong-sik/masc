@@ -255,10 +255,21 @@ let test_no_progress_board_post_accrues_streak () =
 let delivery_label = function
   | Success.Peer_only -> "peer_only"
   | Success.User_facing -> "user_facing"
+  | Success.Autonomous_prose -> "autonomous_prose"
   | Success.Task_claim -> "task_claim"
 
+(* [classify] is the reactive cycle (external prompt present): a prose-only reply
+   classifies as [User_facing] (exempt), matching the pre-RFC-0294 mapping. The
+   autonomous (self-cadence, no external prompt) cycle is [classify_auto], which
+   routes a prose-only reply to [Autonomous_prose] (requires evidence). The
+   tool-precedence cases (peer/claim dominate text) are autonomy-independent. *)
 let classify ~tools ~has_visible_text =
-  delivery_label (Success.classify_delivery ~tools ~has_visible_text)
+  delivery_label
+    (Success.classify_delivery ~is_autonomous:false ~tools ~has_visible_text)
+
+let classify_auto ~tools ~has_visible_text =
+  delivery_label
+    (Success.classify_delivery ~is_autonomous:true ~tools ~has_visible_text)
 
 let test_classify_delivery_mapping () =
   let claim_tool = List.hd Cap.claim_task_tool_names in
@@ -316,9 +327,20 @@ let test_classify_delivery_mapping () =
   Alcotest.(check string) "claim + text -> task_claim (claim dominates text)"
     "task_claim"
     (classify ~tools:[ claim_tool ] ~has_visible_text:true);
-  (* No peer/claim tool + visible text -> user-facing reply (exempt). *)
-  Alcotest.(check string) "no tool + text -> user_facing" "user_facing"
+  (* No peer/claim tool + visible text, REACTIVE cycle -> user-facing reply
+     (exempt): replying to an external prompt is the work. *)
+  Alcotest.(check string) "no tool + text (reactive) -> user_facing" "user_facing"
     (classify ~tools:[] ~has_visible_text:true);
+  (* RFC-0294 R2a: same surface facts on an AUTONOMOUS cycle (no external prompt)
+     -> autonomous_prose (requires evidence). The autonomy bit is the only
+     difference, so it is the sole discriminator of the split. *)
+  Alcotest.(check string) "no tool + text (autonomous) -> autonomous_prose"
+    "autonomous_prose"
+    (classify_auto ~tools:[] ~has_visible_text:true);
+  (* Tool precedence is autonomy-independent: a peer/claim tool still dominates
+     text even on an autonomous cycle (the split only affects prose-only turns). *)
+  Alcotest.(check string) "peer tool + text (autonomous) -> peer_only" "peer_only"
+    (classify_auto ~tools:[ "keeper_board_post" ] ~has_visible_text:true);
   (* No peer/claim tool + no text = silent turn -> Peer_only (requires
      evidence). This is the parse-don't-validate replacement for the old
      DELIVERY_SURFACE: silent header self-declaration. *)
@@ -336,6 +358,8 @@ let test_delivery_requires_evidence_mapping () =
     (Success.delivery_requires_evidence Success.Peer_only);
   Alcotest.(check bool) "user_facing exempt" false
     (Success.delivery_requires_evidence Success.User_facing);
+  Alcotest.(check bool) "autonomous_prose requires evidence" true
+    (Success.delivery_requires_evidence Success.Autonomous_prose);
   Alcotest.(check bool) "task_claim exempt" false
     (Success.delivery_requires_evidence Success.Task_claim)
 
@@ -347,7 +371,8 @@ let test_silent_turns_accrue_streak () =
   for _ = 1 to 4 do
     let surface_requires_evidence =
       Success.delivery_requires_evidence
-        (Success.classify_delivery ~tools:[] ~has_visible_text:false)
+        (Success.classify_delivery ~is_autonomous:false ~tools:[]
+           ~has_visible_text:false)
     in
     record_turn ~keeper_name:k
       ~made_progress:
@@ -355,6 +380,48 @@ let test_silent_turns_accrue_streak () =
     |> ignore_outcome
   done;
   Alcotest.(check int) "silent no-evidence turns accrue streak" 4
+    (D.current_streak ~keeper_name:k)
+
+(* RFC-0294 R2a: an autonomous (self-cadence, no external prompt) turn that emits
+   only prose and no durable evidence accrues the no-progress streak. This is the
+   residual blind spot after R1g: R1g stops failed_task from *driving* the wake,
+   but a keeper that still wakes (e.g. real cooldown elapse) and only says
+   "nothing to do" previously reset the streak via the [User_facing] exemption.
+   With the [Autonomous_prose] split it now requires evidence. *)
+let test_autonomous_textonly_noop_accrues_streak () =
+  let k = "r2a_autonomous_prose_thrash" in
+  for _ = 1 to 4 do
+    let surface_requires_evidence =
+      Success.delivery_requires_evidence
+        (Success.classify_delivery ~is_autonomous:true ~tools:[]
+           ~has_visible_text:true)
+    in
+    record_turn ~keeper_name:k
+      ~made_progress:
+        (D.turn_made_progress ~strong_evidence:false ~surface_requires_evidence)
+    |> ignore_outcome
+  done;
+  Alcotest.(check int) "autonomous prose-only no-evidence turns accrue streak" 4
+    (D.current_streak ~keeper_name:k)
+
+(* RFC-0294 R2a false-positive guard: a REACTIVE turn (external prompt present)
+   that replies to an operator/peer with prose and no tool is legitimate work and
+   stays exempt — it must NOT accrue the streak. Distinguishes the split from a
+   blanket "no-tool prose is no-progress" cap. *)
+let test_operator_mention_textonly_reply_exempt () =
+  let k = "r2a_reactive_reply_exempt" in
+  for _ = 1 to 4 do
+    let surface_requires_evidence =
+      Success.delivery_requires_evidence
+        (Success.classify_delivery ~is_autonomous:false ~tools:[]
+           ~has_visible_text:true)
+    in
+    record_turn ~keeper_name:k
+      ~made_progress:
+        (D.turn_made_progress ~strong_evidence:false ~surface_requires_evidence)
+    |> ignore_outcome
+  done;
+  Alcotest.(check int) "reactive prose reply does not accrue streak" 0
     (D.current_streak ~keeper_name:k)
 
 (* RFC-0239 / audit D1·D3: the no-progress detector reads the typed outcome
@@ -475,6 +542,12 @@ let () =
             `Quick test_delivery_requires_evidence_mapping;
           Alcotest.test_case "silent no-evidence turns accrue streak"
             `Quick (with_eio test_silent_turns_accrue_streak);
+          Alcotest.test_case
+            "R2a autonomous prose-only turns accrue streak"
+            `Quick (with_eio test_autonomous_textonly_noop_accrues_streak);
+          Alcotest.test_case
+            "R2a reactive prose reply stays exempt (false-positive guard)"
+            `Quick (with_eio test_operator_mention_textonly_reply_exempt);
           Alcotest.test_case "claim exemption is outcome-aware (D3)"
             `Quick test_claim_outcome_aware_exemption;
           Alcotest.test_case "strong evidence drops typed-failure completions (D1)"

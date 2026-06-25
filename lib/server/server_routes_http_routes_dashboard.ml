@@ -328,10 +328,37 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/dashboard/runtime-probe" (fun request reqd ->
        let force = Server_utils.bool_query_param request "force" ~default:false in
        let handle _state req reqd =
-         let json = dashboard_runtime_probe_http_json ~force () in
+         let cache = Server_dashboard_read_model_cache.global () in
+         let cache_key = Server_dashboard_read_model_cache.Runtime_probe { force } in
+         let json =
+           Server_dashboard_read_model_cache.get_or_compute
+             cache
+             cache_key
+             ~ttl_s:Server_dashboard_http_core_cache.live_cache_ttl_s
+             ~compute:(fun () -> dashboard_runtime_probe_http_json ~force ())
+         in
          Http.Response.json_value ~compress:true ~request:req json reqd
        in
        with_tool_auth ~tool_name:"masc_runtime_ollama_probe" handle request reqd)
+  |> Http.Router.get "/api/v1/dashboard/composite" (fun request reqd ->
+       (* Alias for the fleet-wide composite snapshot. The canonical keeper API
+          route lives at [/api/v1/keepers/composite]; this alias matches the
+          dashboard's [/api/v1/dashboard/*] mental model and eliminates the 404s
+          observed when the frontend hits the dashboard prefix. *)
+       with_public_read (fun state req reqd ->
+         let cache = Server_dashboard_read_model_cache.global () in
+         let cache_key = Server_dashboard_read_model_cache.Fleet_composite in
+         let json =
+           Server_dashboard_read_model_cache.get_or_compute
+             cache
+             cache_key
+             ~ttl_s:Server_dashboard_http_core_cache.standard_cache_ttl_s
+             ~compute:(fun () ->
+                dashboard_fleet_composite_json
+                  ~config:(Mcp_server.workspace_config state) ())
+         in
+         Http.Response.json_value ~compress:true ~request:req json reqd)
+         request reqd)
   |> Http.Router.get "/api/v1/dashboard/runtime-defaults" (fun request reqd ->
        (* Structured, already-resolved runtime defaults / model routing for the
           Settings surface. Read-only projection of the runtime.toml SSOT
@@ -634,7 +661,22 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/execution" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = dashboard_execution_http_json ~state ~sw ~clock request in
+         let actor = Server_utils.query_param request "actor" in
+         let fixture = Server_utils.query_param request "fixture" in
+         let full = Server_utils.bool_query_param request "full" ~default:false in
+         let force = Server_utils.bool_query_param request "force" ~default:false in
+         let cache = Server_dashboard_read_model_cache.global () in
+         let cache_key =
+           Server_dashboard_read_model_cache.Execution
+             { actor; fixture; full; force }
+         in
+         let json =
+           Server_dashboard_read_model_cache.get_or_compute
+             cache
+             cache_key
+             ~ttl_s:Server_dashboard_http_core_cache.standard_cache_ttl_s
+             ~compute:(fun () -> dashboard_execution_http_json ~state ~sw ~clock request)
+         in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/execution-trust" (fun request reqd ->

@@ -118,9 +118,6 @@ let memory_os_fact_json ~now (f : Keeper_memory_os_types.fact) =
      ; "last_verified_at", json_float_opt f.last_verified_at
      ; "current", `Bool (memory_os_fact_is_current ~now f)
      ]
-     @ (match f.external_ref with
-        | Some r -> [ "external_ref", Keeper_memory_os_types.external_ref_to_json r ]
-        | None -> [])
      @ (match f.claim_kind with
         | Some k -> [ "claim_kind", `String (Keeper_memory_os_types.claim_kind_to_string k) ]
         | None -> []))

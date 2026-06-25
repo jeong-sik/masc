@@ -81,8 +81,8 @@ val claim_kind_of_string : string -> claim_kind option
     compile time. *)
 val is_promotable : category -> bool
 
-(** RFC-0259 §3.2(b): the kind of external state a claim references. Closed sum so
-    the grounding reconciler (P2/P3) must handle every kind at compile time. *)
+(** Historical RFC-0259 external-ref kind. Kept as a closed sum for source
+    compatibility; current Memory OS code does not infer or act on it. *)
 type external_ref_kind =
   | Pr
   | Issue
@@ -103,13 +103,6 @@ type external_ref =
   ; id : string
   }
 
-(** RFC-0259 §3.2(b): parse an external-state reference out of a claim, once, at
-    the producer boundary. CONSERVATIVE — only an explicit marker counts
-    ("PR #123", "pull request #123", "pull/123", "issue #123", "issues/123",
-    "PK-1234"); a bare "#123" with no keyword yields [None] (it is prose, not a
-    reference). Returns the earliest-positioned reference when several are named. *)
-val external_ref_of_claim : string -> external_ref option
-
 (** RFC-0247 §2.3 (forgetting): the hard-expiry timestamp a newly written fact of
     this category should carry, given [now]. Exhaustive over {!category}. Only
     [Ephemeral] (coordination boilerplate) gets a finite TTL — the brain's
@@ -120,22 +113,15 @@ val external_ref_of_claim : string -> external_ref option
     pass) reachable. *)
 val category_valid_until : now:float -> category -> float option
 
-(** RFC-0259 §3.2: the volatile-claim decay horizon (a TIME, not a score). Bounds
-    how long an un-re-observed external-state claim survives before the grounding
-    reconciler (P2) lands. *)
-val volatile_external_ttl_seconds : float
-
-(** RFC-0285 §3.4: the self-observation decay horizon (a TIME, not a score). Shorter
-    than [volatile_external_ttl_seconds] — transient first-person self-state changes
-    every turn, so a tighter horizon quiets the echo faster. Tune in cycles. *)
+(** RFC-0285 §3.4: the self-observation decay horizon (a TIME, not a score).
+    Transient first-person self-state changes every turn, so a tighter horizon
+    quiets the echo faster. Tune in cycles. *)
 val self_observation_ttl_seconds : float
 
-(** RFC-0259 §3.2 / RFC-0285 §3.4: the write-side [valid_until] producer. Precedence:
-    [Self_observation] claim_kind gets the shortest finite horizon
-    ([self_observation_ttl_seconds]) regardless of category/external_ref; otherwise an
-    [external_ref] claim gets [volatile_external_ttl_seconds] (so a PR-status claim
-    mislabeled [Fact]/[Unknown] still decays); otherwise the category decides (only
-    [Ephemeral] is finite). *)
+(** RFC-0285 §3.4: the write-side [valid_until] producer. [Self_observation]
+    claim_kind gets the shortest finite horizon ([self_observation_ttl_seconds])
+    regardless of category/external_ref. Otherwise the category decides;
+    [external_ref] is accepted for compatibility but does not alter retention. *)
 val fact_valid_until
   :  now:float
   -> external_ref:external_ref option
@@ -154,9 +140,9 @@ type fact =
   { claim : string
   ; category : category
   ; external_ref : external_ref option
-    (** RFC-0259 §3.2(b): set by the producer when the claim names a PR/issue/task
-        id. Orthogonal to [category]. Drives [fact_valid_until] (a referenced
-        claim is volatile, never durable). Omitted from JSON when [None]. *)
+    (** Historical RFC-0259 field retained for source compatibility. Current Memory
+        OS writes/reads/dashboard projection do not serialize it; claim text remains
+        model context, not a machine-readable status assertion. *)
   ; claim_kind : claim_kind option
     (** RFC-0285 §3.1: producer-emitted origin tag, parallel to [external_ref] and
         orthogonal to [category]. Drives [fact_valid_until] ([Self_observation] gets a
@@ -190,9 +176,8 @@ val fact_is_current : now:float -> fact -> bool
 val partition_expired : now:float -> fact list -> fact list * fact list
 
 (** The time a fact was last known good: [last_verified_at] if set, else
-    [first_seen]. The SSOT staleness anchor shared by the reconciler, recall,
-    and dashboard user-model ordering so those paths cannot drift on the anchor
-    rule. *)
+    [first_seen]. The SSOT staleness anchor shared by recall and dashboard
+    user-model ordering so those paths cannot drift on the anchor rule. *)
 val reference_time : fact -> float
 
 (** Whether the fact belongs to the operator/user-model projection. *)
@@ -242,12 +227,6 @@ val claim_identity : fact -> string
 
 val provenance_event_to_json : provenance_event -> Yojson.Safe.t
 val provenance_event_of_json : Yojson.Safe.t -> provenance_event option
-
-val external_ref_to_json : external_ref -> Yojson.Safe.t
-(** RFC-keeper-memory-panel-real-data: the on-disk external-ref JSON shape ([{ kind; id }]). Exported so
-    the dashboard fact projection ([Server_dashboard_http_keeper_api.memory_os_fact_json])
-    surfaces an external_ref byte-identical to storage, instead of re-inlining the
-    shape in the server (SSOT). *)
 
 val fact_to_json : fact -> Yojson.Safe.t
 val fact_of_json : Yojson.Safe.t -> fact option

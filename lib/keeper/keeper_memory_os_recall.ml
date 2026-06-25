@@ -92,85 +92,36 @@ let staleness_marker ~now (fact : fact) =
     | None -> Printf.sprintf " [stale: unverified, seen %s ago — verify]" age_text)
 ;;
 
-(* RFC-0259 §3.5 (P4): a claim that names external state (P1's [external_ref])
-   and has not been re-grounded within the grounding horizon is *unverified
-   volatile* — its truth may have moved on (the closed-PR-still-asserted-open
-   class). Such a claim still passes [fact_is_current] until its (longer) volatile
-   TTL expires, so the gap between horizon and TTL is exactly where recall would
-   otherwise assert a possibly-stale external fact as live. The horizon is the P2
-   reconciler's, so "would be re-grounded by now" and "render as unverified" use
-   the same boundary. A non-volatile fact ([external_ref = None]) is never
-   unverified-volatile, however old — durable knowledge does not decay. *)
-let is_unverified_volatile ~now (fact : fact) =
-  match fact.external_ref with
-  | None -> false
-  | Some _ ->
-    (* A fact is unverified volatile exactly when the P2 reconciler would consider
-       it past due for re-grounding: same anchor ([reference_time], the type-level
-       SSOT) and same horizon as [classify], so suppression and re-grounding can
-       never disagree on staleness. *)
-    let anchor = reference_time fact in
-    now -. anchor > Keeper_memory_os_reconcile.default_grounding_horizon_seconds
-;;
-
-(* RFC-0259 §3.5: the hard, non-cosmetic prefix for an unverified-volatile claim.
-   Unlike [staleness_marker] (a trailing " [stale: … verify]" note that still reads
-   as an assertion), this leads the line so the reader sees "re-check" before the
-   claim text — closing gap #5 (the marker that annotated but did not suppress). *)
-let unverified_volatile_prefix = "[UNVERIFIED — re-check before acting] "
-
 (* RFC-0247 (purge): the recall line carries the fact's *structure* — category
    (a typed decision), provenance turn, and the worded staleness marker — but no
    number. The prior line printed [confidence=%.2f score=%.3f]; both were score
    machinery. The reader (an LLM) judges relevance and freshness from the claim
-   text and the staleness marker, not from a rank the producer can't justify.
-   RFC-0259 §3.5: an unverified-volatile claim leads with the hard prefix instead
-   of the soft trailing staleness note. *)
+   text and the staleness marker, not from a rank the producer can't justify. *)
 let render_fact ~now fact =
   let source = fact.source in
-  if is_unverified_volatile ~now fact
-  then
-    Printf.sprintf
-      "- %s[category=%s turn=%d] %s"
-      unverified_volatile_prefix
-      (sanitize_atom (category_to_string fact.category))
-      source.turn
-      (sanitize_text ~max_len:max_fact_text_len fact.claim)
-  else
-    Printf.sprintf
-      "- [category=%s turn=%d]%s %s"
-      (sanitize_atom (category_to_string fact.category))
-      source.turn
-      (staleness_marker ~now fact)
-      (sanitize_text ~max_len:max_fact_text_len fact.claim)
+  Printf.sprintf
+    "- [category=%s turn=%d]%s %s"
+    (sanitize_atom (category_to_string fact.category))
+    source.turn
+    (staleness_marker ~now fact)
+    (sanitize_text ~max_len:max_fact_text_len fact.claim)
 ;;
 
 (* RFC-0244 Tier 2: a shared fact is rendered with its provenance (the distinct
    keepers that corroborated it) so it is never silently merged into the keeper's
-   own knowledge — the reader can see it is cross-keeper consensus.
-   RFC-0259 §3.5: cross-keeper agreement is not external-truth verification, so an
-   unverified-volatile shared fact gets the same hard prefix as a private one. *)
+   own knowledge — the reader can see it is cross-keeper consensus. *)
 let render_shared_fact ~now fact =
   let provenance =
     match fact.observed_by with
     | [] -> "shared"
     | keepers -> "shared via " ^ String.concat "," (List.map sanitize_atom keepers)
   in
-  if is_unverified_volatile ~now fact
-  then
-    Printf.sprintf
-      "- %s[%s category=%s] %s"
-      unverified_volatile_prefix
-      provenance
-      (sanitize_atom (category_to_string fact.category))
-      (sanitize_text ~max_len:max_fact_text_len fact.claim)
-  else
-    Printf.sprintf
-      "- [%s category=%s]%s %s"
-      provenance
-      (sanitize_atom (category_to_string fact.category))
-      (staleness_marker ~now fact)
-      (sanitize_text ~max_len:max_fact_text_len fact.claim)
+  Printf.sprintf
+    "- [%s category=%s]%s %s"
+    provenance
+    (sanitize_atom (category_to_string fact.category))
+    (staleness_marker ~now fact)
+    (sanitize_text ~max_len:max_fact_text_len fact.claim)
 ;;
 
 let render_episode episode =
@@ -256,14 +207,6 @@ let facts_recency_ranked ~now facts =
   |> List.filter (fact_is_current ~now)
   |> List.sort (fun a b -> compare (truth_anchor b) (truth_anchor a))
   |> dedup_by_claim
-  (* RFC-0259 §3.5 (P4): demote unverified-volatile claims below durable ones.
-     [List.partition] is stable, so each group keeps its recency order; durable
-     knowledge therefore leads the recall block and a possibly-stale external claim
-     follows (and is the first to be dropped if [take max_facts] cannot fit them
-     all). Demotion + the hard render prefix together replace the cosmetic marker. *)
-  |> fun ranked ->
-  let durable, volatile = List.partition (fun f -> not (is_unverified_volatile ~now f)) ranked in
-  durable @ volatile
 ;;
 
 (* RFC-0264 P2: render_context_exn returns the rendered block alongside the
@@ -391,9 +334,7 @@ let render_context
 let enabled () =
   (* Default on, mirroring the librarian (write side): persisted memory
      that never reaches a prompt is dead weight. Env var = kill switch. *)
-  Keeper_memory_bank_env.memory_env_bool_logged
-    "MASC_KEEPER_MEMORY_OS_RECALL"
-    ~default:true
+  Env_config.KeeperMemoryOs.recall_enabled ()
 ;;
 
 let render_if_enabled ~keeper_id ~now ~trace_id ~turn ~masc_root () =

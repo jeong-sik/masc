@@ -31,8 +31,6 @@ type keeper_profile_defaults = {
   always_approve : bool option;
   (* No per-keeper [model]/[runtime_id] field: keeper→runtime assignment lives
      solely in runtime.toml [[runtime.assignments]] (persona⊥{model,runtime}). *)
-  max_turns_per_call : int option;
-  max_turns_per_call_scheduled_autonomous : int option;
   oas_env : (string * string) list;
   unknown_toml_keys : string list;
 }

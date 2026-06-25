@@ -89,8 +89,8 @@ check "V7-masc-hook-gates" 4 \
   "lib/keeper/keeper_hooks_oas.ml"
 
 # V8: Direct OAS Agent.state mutation from keeper code
-# Allowed: keeper_extend_turns.ml (2 occurrences)
-check "V8-agent-state-mutation" 1 \
+# Baseline 0: legacy keeper_extend_turns.ml was removed.
+check "V8-agent-state-mutation" 0 \
   'Agent\.set_state\|Agent_sdk\.Agent\.state[^_]' \
   "lib/keeper/"
 

@@ -21,76 +21,17 @@ let goal_status_of_yojson = function
   | `String "dropped" -> Ok Dropped
   | j -> Error ("goal_status_of_yojson: " ^ Yojson.Safe.to_string j)
 
-type horizon =
-  | Short
-  | Mid
-  | Long
-
-let horizon_to_yojson = function
-  | Short -> `String "short"
-  | Mid -> `String "mid"
-  | Long -> `String "long"
-
-let horizon_of_yojson = function
-  | `String "short" -> Ok Short
-  | `String "mid" -> Ok Mid
-  | `String "long" -> Ok Long
-  | j -> Error ("horizon_of_yojson: " ^ Yojson.Safe.to_string j)
-
-type refresh_mode =
-  | Daily
-  | Weekly
-  | Monthly
-
-let refresh_mode_to_yojson = function
-  | Daily -> `String "daily"
-  | Weekly -> `String "weekly"
-  | Monthly -> `String "monthly"
-
-let refresh_mode_of_yojson = function
-  | `String "daily" -> Ok Daily
-  | `String "weekly" -> Ok Weekly
-  | `String "monthly" -> Ok Monthly
-  | j -> Error ("refresh_mode_of_yojson: " ^ Yojson.Safe.to_string j)
-
-type snapshot_mode =
-  | SnapDaily
-  | SnapWeekly
-  | SnapMonthly
-  | SnapManual
-
-let snapshot_mode_to_yojson = function
-  | SnapDaily -> `String "daily"
-  | SnapWeekly -> `String "weekly"
-  | SnapMonthly -> `String "monthly"
-  | SnapManual -> `String "manual"
-
-let snapshot_mode_of_yojson = function
-  | `String "daily" -> Ok SnapDaily
-  | `String "weekly" -> Ok SnapWeekly
-  | `String "monthly" -> Ok SnapMonthly
-  | `String "manual" -> Ok SnapManual
-  | j -> Error ("snapshot_mode_of_yojson: " ^ Yojson.Safe.to_string j)
-
-let snapshot_mode_of_refresh_mode = function
-  | Daily -> SnapDaily
-  | Weekly -> SnapWeekly
-  | Monthly -> SnapMonthly
-
-let parse_snapshot_mode s =
-  match String.trim s |> String.lowercase_ascii with
-  | "daily" -> Some SnapDaily
-  | "weekly" -> Some SnapWeekly
-  | "monthly" -> Some SnapMonthly
-  | "manual" -> Some SnapManual
-  | _ -> None
+(* RFC-0294: the workspace-goal [horizon] (short/mid/long) and its dead
+   refresh/snapshot scheduler ([refresh_mode], [snapshot_mode], and their
+   yojson codecs) were removed. The cadence had no live caller; the only
+   surviving horizon consumer (dashboard stagnation threshold) was re-based
+   onto a single policy constant. *)
 
 let clamp_priority p =
   max 1 (min 5 p)
 
 type goal = {
   id : string;
-  horizon : horizon;
   title : string;
   metric : string option;
   target_value : string option;
@@ -126,7 +67,6 @@ and goal_to_yojson (goal : goal) =
   `Assoc
     [
       ("id", `String goal.id);
-      ("horizon", horizon_to_yojson goal.horizon);
       ("title", `String goal.title);
       ("metric", Json_util.string_opt_to_json goal.metric);
       ("target_value", Json_util.string_opt_to_json goal.target_value);
@@ -170,8 +110,12 @@ and state_of_yojson = function
 and goal_of_yojson = function
   | `Assoc _ as json ->
       begin
-        match Json_util.assoc_member_opt "id" json, horizon_of_yojson (Option.value ~default:`Null (Json_util.assoc_member_opt "horizon" json)), Json_util.assoc_member_opt "title" json with
-        | Some (`String id), Ok horizon, Some (`String title) ->
+        (* RFC-0294: a legacy [horizon] key may still be present on disk; it is
+           intentionally not read here. Goal_to_yojson no longer emits it, so it
+           evaporates on the next write (standard schema evolution, not a drop
+           that needs logging). *)
+        match Json_util.assoc_member_opt "id" json, Json_util.assoc_member_opt "title" json with
+        | Some (`String id), Some (`String title) ->
             let legacy_status =
               match Json_util.assoc_member_opt "status" json with
               | None | Some `Null -> Ok Active
@@ -210,7 +154,6 @@ and goal_of_yojson = function
                     (normalize_goal
                        {
                          id;
-                         horizon;
                          title;
                          metric = Json_util.get_string json "metric" ;
                          target_value = Json_util.get_string json "target_value" ;
@@ -283,9 +226,6 @@ and phase_of_goal_status = function
   | Dropped -> Goal_phase.Dropped
 
 type rollup = {
-  short_count : int;
-  mid_count : int;
-  long_count : int;
   active_count : int;
   paused_count : int;
   done_count : int;
@@ -293,36 +233,10 @@ type rollup = {
 }
 [@@deriving yojson]
 
-type snapshot = {
-  snapshot_id : string;
-  created_at : string;
-  mode : snapshot_mode;
-  goals : goal list;
-  rollup : rollup;
-}
-[@@deriving yojson]
-
 type upsert_kind = [ `created | `updated ]
-
-type refresh_result = {
-  mode : refresh_mode;
-  scanned : int;
-  updated : int;
-  snapshot_id : string;
-}
-[@@deriving yojson]
 
 let normalize_lower s =
   String.trim s |> String.lowercase_ascii
-
-let parse_horizon = function
-  | Some s -> (
-      match normalize_lower s with
-      | "short" -> Some Short
-      | "mid" -> Some Mid
-      | "long" -> Some Long
-      | _ -> None)
-  | None -> None
 
 let parse_goal_status = function
   | Some s -> (
@@ -338,28 +252,14 @@ let parse_goal_phase = function
   | Some s -> Goal_phase.parse s
   | None -> None
 
-let parse_refresh_mode s =
-  match normalize_lower s with
-  | "daily" -> Some Daily
-  | "weekly" -> Some Weekly
-  | "monthly" -> Some Monthly
-  | _ -> None
-
 let goals_path config =
   Filename.concat (Workspace_utils.masc_dir config) "goals.json"
 
 let goals_recovery_path config =
   goals_path config ^ ".last-good"
 
-let snapshots_dir config =
-  Filename.concat (Workspace_utils.masc_dir config) "goals_snapshots"
-
-let scheduler_state_path config =
-  Filename.concat (Workspace_utils.masc_dir config) "goals_scheduler_state.json"
-
 let ensure_dirs config =
-  Workspace_utils.mkdir_p (Workspace_utils.masc_dir config);
-  Workspace_utils.mkdir_p (snapshots_dir config)
+  Workspace_utils.mkdir_p (Workspace_utils.masc_dir config)
 
 let default_state () =
   { version = 1; updated_at = Masc_domain.now_iso (); goals = [] }
@@ -528,33 +428,20 @@ let delete_goal config ~goal_id =
        Ok (Deleted_with_orphaned_links warning))
 
 let sort_goals goals =
-  let horizon_rank = function
-    | Short -> 0
-    | Mid -> 1
-    | Long -> 2
-  in
+  (* RFC-0294: sort key was [(horizon, priority, updated_at desc)]; with horizon
+     removed it collapses to [(priority asc, updated_at desc)]. *)
   List.sort
     (fun left right ->
-      let by_horizon =
-        compare (horizon_rank left.horizon) (horizon_rank right.horizon)
-      in
-      if by_horizon <> 0 then
-        by_horizon
+      let by_priority = compare left.priority right.priority in
+      if by_priority <> 0 then
+        by_priority
       else
-        let by_priority = compare left.priority right.priority in
-        if by_priority <> 0 then
-          by_priority
-        else
-          String.compare right.updated_at left.updated_at)
+        String.compare right.updated_at left.updated_at)
     goals
 
-let list_goals config ?horizon ?status ?phase () =
+let list_goals config ?status ?phase () =
   read_state config
   |> fun state -> state.goals
-  |> List.filter (fun goal ->
-         match horizon with
-         | None -> true
-         | Some horizon -> goal.horizon = horizon)
   |> List.filter (fun goal ->
          match status with
          | None -> true
@@ -595,7 +482,7 @@ let validate_parent_goal_id goals ~goal_id ~parent_goal_id =
       else
         Ok ()
 
-let upsert_goal config ?id ?horizon ?title ?metric ?target_value ?due_date
+let upsert_goal config ?id ?title ?metric ?target_value ?due_date
     ?priority ?status ?phase ?parent_goal_id ?verifier_policy
     ?require_completion_approval () =
   let is_new_goal = id = None in
@@ -658,7 +545,6 @@ let upsert_goal config ?id ?horizon ?title ?metric ?target_value ?due_date
                     normalize_goal
                       {
                         existing with
-                        horizon = Option.value horizon ~default:existing.horizon;
                         title = Option.value title ~default:existing.title;
                         metric = (match metric with Some _ -> metric | None -> existing.metric);
                         target_value =
@@ -701,7 +587,6 @@ let upsert_goal config ?id ?horizon ?title ?metric ?target_value ?due_date
                     normalize_goal
                       {
                         id = resolved_id;
-                        horizon = Option.value horizon ~default:Short;
                         title = Option.value title ~default:"Untitled goal";
                         metric;
                         target_value;
@@ -738,122 +623,16 @@ let compute_rollup goals =
     List_util.count_if predicate goals
   in
   {
-    short_count = count (fun goal -> goal.horizon = Short);
-    mid_count = count (fun goal -> goal.horizon = Mid);
-    long_count = count (fun goal -> goal.horizon = Long);
     active_count = count (fun goal -> goal.status = Active);
     paused_count = count (fun goal -> goal.status = Paused);
     done_count = count (fun goal -> goal.status = Done);
     dropped_count = count (fun goal -> goal.status = Dropped);
   }
 
-let snapshot config ~mode =
-  ensure_dirs config;
-  let state = read_state config in
-  let snapshot_id = Printf.sprintf "gsnap-%d" (now_ms ()) in
-  let snapshot =
-    {
-      snapshot_id;
-      created_at = Masc_domain.now_iso ();
-      mode;
-      goals = state.goals;
-      rollup = compute_rollup state.goals;
-    }
-  in
-  let path =
-    Filename.concat (snapshots_dir config) (snapshot_id ^ ".json")
-  in
-  Workspace_utils.write_json config path (snapshot_to_yojson snapshot);
-  snapshot
-
-let parse_yyyy_mm_dd s =
-  try
-    Scanf.sscanf s "%d-%d-%d" (fun year month day ->
-        let tm =
-          {
-            Unix.tm_sec = 0;
-            tm_min = 0;
-            tm_hour = 0;
-            tm_mday = day;
-            tm_mon = month - 1;
-            tm_year = year - 1900;
-            tm_wday = 0;
-            tm_yday = 0;
-            tm_isdst = false;
-          }
-        in
-        let local_epoch, _ = Unix.mktime tm in
-        let utc_as_local, _ = Unix.mktime (Unix.gmtime local_epoch) in
-        let tz_offset = local_epoch -. utc_as_local in
-        Some (local_epoch +. tz_offset))
-  with Eio.Cancel.Cancelled _ as exn ->
-    raise exn
-  | exn ->
-      Log.Misc.warn "goal_store: parse_yyyy_mm_dd failed: %s"
-        (Printexc.to_string exn);
-      None
-
-let days_until due_date =
-  match due_date with
-  | None -> None
-  | Some due_date -> (
-      match parse_yyyy_mm_dd due_date with
-      | None -> None
-      | Some ts ->
-          let diff = ts -. Unix.time () in
-          Some (int_of_float (diff /. Masc_time_constants.day)))
-
-let should_refresh_goal mode goal =
-  match mode with
-  | Daily -> goal.horizon = Short && goal.phase = Goal_phase.Executing
-  | Weekly -> goal.horizon = Mid && goal.phase = Goal_phase.Executing
-  | Monthly -> goal.horizon = Long && goal.phase = Goal_phase.Executing
-
-let reprioritize mode goal =
-  let next_priority =
-    match days_until goal.due_date with
-    | Some days when days < 0 -> 1
-    | Some days when mode = Daily && days <= 3 -> max 1 (goal.priority - 1)
-    | Some days when mode = Weekly && days <= 14 -> max 1 (goal.priority - 1)
-    | Some days when mode = Monthly && days <= 45 -> max 1 (goal.priority - 1)
-    | _ -> goal.priority
-  in
-  if next_priority = goal.priority then
-    (goal, false)
-  else
-    ( { goal with priority = next_priority; updated_at = Masc_domain.now_iso () }
-      |> normalize_goal,
-      true )
-
-let refresh config ~mode =
-  let scanned = ref 0 in
-  let updated = ref 0 in
-  ignore
-    (update_state config (fun state ->
-         let goals =
-           List.map
-             (fun goal ->
-               if should_refresh_goal mode goal then begin
-                 incr scanned;
-                 let goal, changed = reprioritize mode goal in
-                 if changed then incr updated;
-                 goal
-               end else
-                 goal)
-             state.goals
-         in
-         { version = state.version + 1; updated_at = Masc_domain.now_iso (); goals }))
-  ;
-  let snapshot = snapshot config ~mode:(snapshot_mode_of_refresh_mode mode) in
-  {
-    mode;
-    scanned = !scanned;
-    updated = !updated;
-    snapshot_id = snapshot.snapshot_id;
-  }
+(* RFC-0294: the horizon-driven refresh/snapshot scheduler ([snapshot],
+   [parse_yyyy_mm_dd], [days_until], [should_refresh_goal], [reprioritize],
+   [refresh], [has_scheduler_state]) was removed. It had no live caller and its
+   cohort selector keyed on the now-deleted [horizon]. *)
 
 let active_goals config =
   list_goals config ~status:Active ()
-
-let has_scheduler_state config =
-  Workspace_utils.path_exists config (scheduler_state_path config)

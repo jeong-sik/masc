@@ -129,12 +129,18 @@ export function toggleKeeperInFilter(name: string): void {
 export type OptimisticKeeperDirective = 'pause' | 'resume' | 'wakeup'
 
 function patchForDirective(action: OptimisticKeeperDirective): Partial<Keeper> {
+  // `lifecycle_phase` is the field the roster status dot renders
+  // (keeper-workspace-roster.ts → phaseTone/phasePulse(keeper.lifecycle_phase),
+  // phaseText → lifecycle_phase ?? phase). Patching only `phase` left the
+  // left-list dot stale until the server snapshot arrived, which read as
+  // "status reflects very late" after resume/pause. Patch both so the dot
+  // flips with the same click that flips the action buttons.
   switch (action) {
     case 'pause':
-      return { paused: true, phase: 'Paused', pipeline_stage: 'paused', status: 'paused' }
+      return { paused: true, phase: 'Paused', lifecycle_phase: 'Paused', pipeline_stage: 'paused', status: 'paused' }
     case 'resume':
     case 'wakeup':
-      return { paused: false, phase: 'Running', pipeline_stage: 'idle', status: 'idle' }
+      return { paused: false, phase: 'Running', lifecycle_phase: 'Running', pipeline_stage: 'idle', status: 'idle' }
   }
 }
 
@@ -881,15 +887,13 @@ function applyPlanningEnvelope(data: DashboardPlanningResponse): void {
       if (!isRecord(row)) return null
       const id = asString(row.id)
       const title = asString(row.title)
-      const horizon = asString(row.horizon)
       const status = asString(row.status)
       const phase = asString(row.phase)
       const createdAt = asString(row.created_at)
       const updatedAt = asString(row.updated_at)
-      if (!id || !title || !horizon || !status || !phase || !createdAt || !updatedAt) return null
+      if (!id || !title || !status || !phase || !createdAt || !updatedAt) return null
       return {
         id,
-        horizon: horizon as Goal['horizon'],
         title,
         metric: asString(row.metric) ?? null,
         target_value: asString(row.target_value) ?? null,

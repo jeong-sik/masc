@@ -129,7 +129,6 @@ let test_goal_upsert_and_list () =
       ~args:
         (`Assoc
             [ "title", `String "Ship Goal Surface"
-            ; "horizon", `String "mid"
             ; "priority", `Int 2
             ])
   in
@@ -159,7 +158,7 @@ let test_goal_upsert_and_list () =
     Tool_workspace.dispatch
       (workspace_ctx config)
       ~name:"masc_goal_list"
-      ~args:(`Assoc [ "horizon", `String "mid" ])
+      ~args:(`Assoc [])
   in
   let listed_json =
     match listed with
@@ -222,7 +221,7 @@ let test_goal_list_ignores_blank_optional_filters () =
     Tool_workspace.dispatch
       (workspace_ctx config)
       ~name:"masc_goal_list"
-      ~args:(`Assoc [ "horizon", `String ""; "phase", `String "" ])
+      ~args:(`Assoc [ "phase", `String "" ])
   in
   let listed_json =
     match listed with

@@ -280,6 +280,75 @@ describe('ApprovalsSurface', () => {
     expect(container.querySelector('[data-testid="approvals-queue"]')).toBeNull()
   })
 
+  it('shows a loading state on first load, not the empty state, before data arrives', async () => {
+    // governanceResource is stale-while-revalidate, so governanceData is null
+    // ONLY before the first fetch resolves. Hold the fetch pending and assert the
+    // surface shows the loading state — not "열린 승인이 없습니다", which would
+    // assert an empty queue we have not actually loaded yet.
+    vi.resetModules()
+    let resolveFetch: (value: DashboardGovernanceResponse) => void = () => {}
+    const fetchDashboardGovernance = vi.fn(
+      () => new Promise<DashboardGovernanceResponse>(resolve => { resolveFetch = resolve }),
+    )
+    vi.doMock('../../api', () => ({
+      decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
+      fetchDashboardGovernance,
+      fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(null),
+      resolveGovernanceApproval: vi.fn().mockResolvedValue({ ok: true }),
+      deleteGovernanceApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
+      submitGovernanceCaseBrief: vi.fn().mockResolvedValue(null),
+      submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'x' } }),
+    }))
+    vi.doMock('../../sse-store', () => ({ registerGovernanceRefresh: vi.fn() }))
+    const { ApprovalsSurface } = await import('./approvals-surface')
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    // fetch still pending → first load → loading state, NOT empty state
+    expect(container.querySelector('.loading-state')).not.toBeNull()
+    expect(container.textContent).toContain('승인 큐 불러오는 중')
+    expect(container.querySelector('[data-testid="approvals-empty"]')).toBeNull()
+    expect(container.querySelector('[data-testid="approvals-kpi-irreversible"]')).toBeNull()
+
+    // resolve so the surface transitions out of loading (and no pending promise leaks)
+    resolveFetch(responseWithQueue([]))
+    await flushUi()
+    expect(container.querySelector('.loading-state')).toBeNull()
+    expect(container.querySelector('[data-testid="approvals-empty"]')).not.toBeNull()
+  })
+
+  it('shows the error banner without the all-clear empty state when the first fetch fails', async () => {
+    // On a failed first fetch the managed resource sets loading=false with null
+    // data, so items=[] and governanceError is set. The "✓ 큐가 비어 있습니다 —
+    // keeper들이 진행 중" panel is a success claim and must NOT render under the
+    // error banner (it would contradict the failure).
+    vi.resetModules()
+    const fetchDashboardGovernance = vi.fn().mockRejectedValue(new Error('승인 큐 로드 실패'))
+    vi.doMock('../../api', () => ({
+      decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
+      fetchDashboardGovernance,
+      fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(null),
+      resolveGovernanceApproval: vi.fn().mockResolvedValue({ ok: true }),
+      deleteGovernanceApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
+      submitGovernanceCaseBrief: vi.fn().mockResolvedValue(null),
+      submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'x' } }),
+    }))
+    vi.doMock('../../sse-store', () => ({ registerGovernanceRefresh: vi.fn() }))
+    const { ApprovalsSurface } = await import('./approvals-surface')
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const errorBanner = container.querySelector('[data-testid="approvals-error"]')
+    expect(errorBanner).not.toBeNull()
+    expect(errorBanner?.textContent).toContain('승인 큐 로드 실패')
+    expect(container.querySelector('[data-testid="approvals-empty"]')).toBeNull()
+    // the error must be announced to assistive tech — a HITL decision failure that
+    // a screen reader never reads out is a silent failure for AT users.
+    expect(errorBanner?.getAttribute('role')).toBe('alert')
+  })
+
   it('labels the surface with the shared data-screen-label convention', async () => {
     // Every v2 surface (fusion/schedule/settings/connector/copilot) tags its
     // <main> with data-screen-label; the prototype names this screen 승인 큐.
@@ -379,5 +448,29 @@ describe('ApprovalsSurface', () => {
       view: 'keepers',
       keeper: 'masc-improver',
     })
+  })
+
+  it('renders sandbox metadata as a non-interactive span, not a clickable goal link', async () => {
+    const { ApprovalsSurface } = await loadSurface([
+      queueItem({ id: 'appr-sb', keeper_name: 'masc-improver', sandbox_target: 'project-root', task_id: 'T-1' }),
+    ])
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const card = container.querySelector('[data-approval-id="appr-sb"]')
+    // sandbox text is a static .ap-req-meta span (no click affordance)
+    const meta = card?.querySelector('.ap-req-meta')
+    expect(meta).not.toBeNull()
+    expect(meta?.tagName).toBe('SPAN')
+    expect(meta?.textContent).toContain('sandbox')
+    expect(meta?.textContent).toContain('project-root')
+    // the clickable .ap-req-goal is the task/goal button only — never the sandbox
+    const goalEls = Array.from(card?.querySelectorAll('.ap-req-goal') ?? [])
+    expect(goalEls.length).toBeGreaterThan(0)
+    for (const el of goalEls) {
+      expect(el.tagName).toBe('BUTTON')
+      expect(el.textContent).not.toContain('sandbox')
+    }
   })
 })

@@ -107,7 +107,6 @@ These may still be parsed today, but they are **not** the preferred place to enc
 | `runtime_id`, `model`, `runtime_ref` | Removed | `runtime.toml [[runtime.assignments]]` |
 | `persona_ref` | Removed | `keeper.persona_name` |
 | `telemetry_feedback_*` | Compatibility-only | `keeper.toml` or runtime policy |
-| `max_turns_per_call*` | Compatibility-only | `keeper.toml` |
 
 ## 2. Keeper Declaration
 
@@ -159,7 +158,6 @@ These are still accepted by the loader, but for consistency they should be used 
 | `active_goal_ids` | string array | Declarative goal scope for task claim eligibility |
 | `telemetry_feedback_enabled` | bool | Surface recent telemetry in the keeper prompt |
 | `telemetry_feedback_window_hours` | int | Window size for telemetry summarization |
-| `max_turns_per_call`, `max_turns_per_call_scheduled_autonomous` | int | Per-keeper turn budget override |
 | `shards` | string array | Tool shard override |
 
 ### Allowed value sets

@@ -62,7 +62,6 @@ val per_provider_timeout_for_turn
             advisory execution-progress checks. When omitted, the progress check
             does not infer world state from prompt text.
     @param generation Current generation counter
-    @param max_turns Maximum agent turns (default from env config)
     @param max_idle_turns Maximum consecutive idle turns before stop
     @param history_user_source Source label for user messages in history
     @param history_assistant_source Source label for assistant messages in history
@@ -90,7 +89,6 @@ val run_turn
   -> ?world_observation:Keeper_world_observation.world_observation
   -> ?turn_affordances:string list
   -> generation:int
-  -> ?max_turns:int
   -> max_idle_turns:int
        (* Required, no default: the OAS loop guard kills the run at this
           count, so every caller must pick the channel-appropriate threshold

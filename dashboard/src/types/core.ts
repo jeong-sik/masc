@@ -358,7 +358,6 @@ export interface TimeoutBudgetTelemetry {
   keeper_turn_timeout_sec: number | null
   remaining_turn_budget_sec: number | null
   estimated_input_tokens: number | null
-  max_turns: number | null
   source: string | null
 }
 
@@ -602,7 +601,6 @@ export type KeeperLifecycleState =
 
 export interface Goal {
   id: string
-  horizon: 'short' | 'mid' | 'long'
   title: string
   metric?: string | null
   target_value?: string | null
@@ -1427,7 +1425,6 @@ interface KeeperConfigHandoff {
 export interface KeeperConfigActiveGoal {
   id: string
   title: string
-  horizon: string
 }
 
 export interface KeeperConfigRuntimeTrust {

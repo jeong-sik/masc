@@ -31,6 +31,7 @@
  (names
   test_keeper_memory_os_io_fd
   test_rfc0259_reconcile
+  test_keeper_bank_longterm_inject_flag
   test_keeper_memory_lane
   test_keeper_reactive_wake_backlog_gate
   test_keeper_no_signal_silence
@@ -101,6 +102,7 @@
   test_keeper_user_model
   test_keeper_memory_os_consolidation
   test_keeper_memory_os_consolidation_runtime
+  test_server_bootstrap_maintenance_memory_os
   eval_memory_os_value
   test_keeper_reconcile_state
   test_attempt_state
@@ -342,6 +344,7 @@
  (modules
   test_keeper_memory_os_io_fd
   test_rfc0259_reconcile
+  test_keeper_bank_longterm_inject_flag
   test_keeper_memory_lane
   test_env_keeper_scrub
   test_keeper_reactive_wake_backlog_gate
@@ -414,6 +417,7 @@
   test_keeper_user_model
   test_keeper_memory_os_consolidation
   test_keeper_memory_os_consolidation_runtime
+  test_server_bootstrap_maintenance_memory_os
   eval_memory_os_value
   test_keeper_reconcile_state
   test_attempt_state
@@ -2223,13 +2227,15 @@
  (modules test_rfc_0085_pr6_host_config_from_env)
  (libraries alcotest masc.host_config unix))
 
-; RFC-0085 PR-4 — tool_library + cdal proof_store /tmp fallback purge.
+; RFC-0085 PR-4 — tool_library /tmp fallback purge. The cdal proof_store guard
+; was dropped: proof_store.ml was purged in #19469, so depending on it here made
+; dune fail with "No rule found".
 
 (test
  (name test_rfc_0085_pr4_tool_library_proof_store)
  (modules test_rfc_0085_pr4_tool_library_proof_store)
  (libraries alcotest ast_grep)
- (deps ../lib/tool_library.ml ../lib/cdal_runtime/proof_store.ml))
+ (deps ../lib/tool_library.ml))
 
 ; Verify the shared MCP dispatch finalizer fires typed observers and applies
 ; the result transformer before observers run.

@@ -14,8 +14,8 @@ vi.mock('../api/keeper', () => ({
 }))
 vi.mock('../store', () => ({
   keepers: { value: [] },
-  invalidateDashboardCache: vi.fn(),
-  refreshDashboard: vi.fn(async () => undefined),
+  applyOptimisticKeeperDirective: vi.fn(() => () => {}),
+  refreshExecution: vi.fn(async () => undefined),
 }))
 
 import { keeperActionVisibility } from '../lib/keeper-predicates'

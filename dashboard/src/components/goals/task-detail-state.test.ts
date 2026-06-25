@@ -103,7 +103,6 @@ describe('filterTaskEvents', () => {
 function makeGoal(overrides: Partial<Goal> = {}): Goal {
   return {
     id: 'g-1',
-    horizon: 'short',
     title: 'default title',
     metric: null,
     target_value: null,

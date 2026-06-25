@@ -121,13 +121,13 @@ Legacy compatibility names are not TOML preemption keys. For example,
 only the canonical `MASC_KEEPER_AUTOBOOT_MAX` boot override unless that exact
 canonical process env var is already set.
 
-**Sections** (75 knobs total):
+**Sections** (73 knobs total):
 
 | Section | Count | Key examples |
 | --- | --- | --- |
 | `[bootstrap]` | 5 | `enabled`, `max_active_keepers`, `autoboot_max` |
-| `[autonomous]` | 3 | `max_turns_per_call`, `fairness_cooldown_sec`, `max_idle_turns` |
-| `[reactive]` | 2 | `max_turns_per_call`, `max_idle_turns` |
+| `[autonomous]` | 2 | `fairness_cooldown_sec`, `max_idle_turns` |
+| `[reactive]` | 1 | `max_idle_turns` |
 | `[heartbeat]` | 10 | `interval_sec`, `max_silence_sec`, `smart_heartbeat`, `board_generic_wakeup_limit` |
 | `[turn]` | 19 | `timeout_sec`, `stream_idle_timeout_sec`, `execution_idle_timeout_sec`, `tool_cost_max_usd`, `temperature` |
 | `[proactive]` | 1 | `min_interval_sec` |
@@ -143,10 +143,8 @@ canonical process env var is already set.
 
 ```toml
 [autonomous]
-max_turns_per_call = 7           # default: 2
 
 [reactive]
-max_turns_per_call = 15
 
 [heartbeat]
 board_generic_wakeup_limit = 3 # caps non-explicit board_activity fanout; explicit mentions bypass this cap

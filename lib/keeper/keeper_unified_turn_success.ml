@@ -88,7 +88,16 @@ type turn_delivery =
   | Peer_only
     (* peer-surface tool (board/comment/broadcast/keeper-msg), or silent:
        no peer/claim tool and no visible text *)
-  | User_facing (* non-empty visible reply, no peer/claim tool *)
+  | User_facing
+    (* RFC-0294 R2a [Reply_to_external] concept: non-empty visible reply on a
+       REACTIVE turn — an external prompt is present (pending mention /
+       board-event / scope-message). Exempt from evidence: replying to an
+       external prompt is itself the work. *)
+  | Autonomous_prose
+    (* RFC-0294 R2a: non-empty visible reply on an AUTONOMOUS (self-cadence, no
+       external prompt) turn. Requires evidence — a keeper that wakes on its own
+       clock and only emits prose ("nothing to do") is not progress, and was the
+       residual no-progress blind spot after R1g. *)
   | Task_claim (* task-claim tool *)
 
 (* Classify from observable facts. Order is significant: a turn that calls a
@@ -107,30 +116,33 @@ type turn_delivery =
    exactly the "posts to peers without evidence" case RFC-0239 targets. The set
    is pinned in test_no_progress_loop_detector so any axis change forces a
    conscious no-progress review. *)
-let classify_delivery ~tools ~has_visible_text =
+let classify_delivery ~is_autonomous ~tools ~has_visible_text =
   if Keeper_tool_capability_axis.(supports_any Board_activity tools)
   then Peer_only
   else if Keeper_tool_capability_axis.(supports_any Claim_task tools)
   then Task_claim
   else if has_visible_text
-  then User_facing
+  then if is_autonomous then Autonomous_prose else User_facing
   else Peer_only
 ;;
 
-let classify_turn_delivery result =
+let classify_turn_delivery ~is_autonomous result =
   classify_delivery
+    ~is_autonomous
     ~tools:(Keeper_agent_result.tool_names result)
     ~has_visible_text:(String.trim result.Keeper_agent_run.response_text <> "")
 ;;
 
-(* A peer-only or silent turn must show durable evidence to count as progress; a
-   user-facing reply or a task claim is exempt. Preserves the pre-RFC-0276
-   surface mapping (peer/broadcast/silent -> true; visible reply/task claim
-   -> false). Exhaustive, no [_ ->] catch-all
-   (CLAUDE.md anti-pattern #4): a new [turn_delivery] variant must be classified
-   here at compile time. *)
+(* A peer-only/silent turn, or an autonomous prose-only turn, must show durable
+   evidence to count as progress; a reactive user-facing reply or a task claim is
+   exempt. Preserves the pre-RFC-0276 surface mapping (peer/broadcast/silent ->
+   true; reactive visible reply/task claim -> false) and adds the RFC-0294 R2a
+   split: an [Autonomous_prose] turn (self-cadence, no external prompt, prose
+   only) now requires evidence. Exhaustive, no [_ ->] catch-all (CLAUDE.md
+   anti-pattern #4): a new [turn_delivery] variant must be classified here at
+   compile time. *)
 let delivery_requires_evidence = function
-  | Peer_only -> true
+  | Peer_only | Autonomous_prose -> true
   | User_facing | Task_claim -> false
 ;;
 
@@ -196,11 +208,20 @@ let apply_loop_detectors ~config ~observation updated_meta result =
   in
   (* [Task_claim] is exempt only when a claim bound work; a claim that typed
      [No_progress] (e.g. No_eligible_tasks) now requires evidence and so accrues
-     the streak. Other surfaces keep the exhaustive name-based mapping. *)
+     the streak. Other surfaces keep the exhaustive name-based mapping.
+     RFC-0294 R2a: the autonomy of the cycle (external prompt absent) splits a
+     prose-only reply into [Autonomous_prose] (requires evidence) vs the reactive
+     [User_facing] reply (exempt). Derived from the same observation channel the
+     budget override already reads. *)
+  let is_autonomous =
+    Keeper_unified_metrics_support.is_scheduled_autonomous_cycle_of_observation
+      observation
+  in
   let surface_requires_evidence =
-    match classify_turn_delivery result with
+    match classify_turn_delivery ~is_autonomous result with
     | Task_claim -> not (claim_bound_work calls_with_outcomes)
-    | (Peer_only | User_facing) as delivery -> delivery_requires_evidence delivery
+    | (Peer_only | User_facing | Autonomous_prose) as delivery ->
+      delivery_requires_evidence delivery
   in
   let made_progress =
     Keeper_no_progress_loop_detector.turn_made_progress
@@ -244,6 +265,7 @@ module For_testing = struct
   type nonrec turn_delivery = turn_delivery =
     | Peer_only
     | User_facing
+    | Autonomous_prose
     | Task_claim
 
   let classify_delivery = classify_delivery

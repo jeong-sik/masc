@@ -230,6 +230,12 @@ val media_reroute_candidates :
     order first, then remaining configured runtimes in declaration order, excluding
     [exclude]. Reads the runtime cache; deterministic (no provider liveness). *)
 
+val caps_admit_required_modalities :
+  Llm_provider.Capabilities.capabilities -> string list -> bool
+(** Shared RFC-0265 modality-admission predicate. Callers that need to preselect
+    media-capable runtimes must use this instead of re-deriving checks from
+    individual capability booleans. *)
+
 val first_media_capable_runtime : modality:string -> string option
 (** Runtime id of the first configured runtime that admits [modality] (e.g.
     ["image"]) as input, in [media_reroute_candidates] order (media_failover then

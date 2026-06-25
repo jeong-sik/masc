@@ -264,46 +264,50 @@ let load_list ~(config_path : string)
 
 (* ---- Lazy default runtime singleton ---- *)
 
-(** The runtime singletons are read from arbitrary call sites, including worker
-    domains spawned by the executor pool.  On OCaml 5 a plain [ref] write is not
-    guaranteed to be visible to another domain immediately; [Atomic.t] provides
-    the required memory barrier.  All writes go through [Atomic.set] and all
-    reads through [Atomic.get]. *)
-let default_runtime_ref : t option Atomic.t = Atomic.make None
-let runtimes_ref : t list Atomic.t = Atomic.make []
+(** The loaded runtime cache is read from arbitrary call sites, including worker
+    domains spawned by the executor pool. Keep all derived runtime.toml values in
+    one immutable record behind one [Atomic.t] so readers never observe a torn
+    refresh or test restore. *)
+type loaded_state =
+  { default_runtime : t option
+  ; runtimes : t list
+  ; keeper_assignments : (string * string) list
+  ; librarian_runtime_id : string option
+  ; cross_verifier_runtime_id : string option
+  ; media_failover : string list
+  }
 
-(* keeper name → runtime id ["provider.model"], from [[runtime.assignments]].
-   Populated by [init_default]; read by [runtime_id_for_keeper]. Validated at
-   load (every target resolves to a runtime), so a hit here is always a
-   configured runtime. *)
-let keeper_assignments_ref : (string * string) list Atomic.t = Atomic.make []
+let empty_loaded_state =
+  { default_runtime = None
+  ; runtimes = []
+  ; keeper_assignments = []
+  ; librarian_runtime_id = None
+  ; cross_verifier_runtime_id = None
+  ; media_failover = []
+  }
 
-(* [runtime].librarian — runtime id for the memory-os librarian, or [None] to
-   inherit the keeper's own runtime. Populated by [init_default], read by
-   [librarian_runtime_id]; validated at load so a [Some] always resolves. *)
-let librarian_runtime_id_ref : string option Atomic.t = Atomic.make None
+let loaded_state_ref : loaded_state Atomic.t = Atomic.make empty_loaded_state
 
-(* [runtime].cross_verifier — runtime id for the anti-rationalization evaluator,
-   or [None] to inherit [runtime].default. Populated by [init_default], read by
-   [cross_verifier_runtime_id]; validated at load so a [Some] always resolves. *)
-let cross_verifier_runtime_id_ref : string option Atomic.t = Atomic.make None
+module For_testing = struct
+  type snapshot = loaded_state
 
-(* [runtime].media_failover (RFC-0265) — ordered runtime ids for modality-gated
-   reroute, or [[]] to derive capable runtimes from declared capabilities.
-   Populated by [init_default], read by [media_failover]; every id is validated at
-   load so each resolves to a configured runtime. *)
-let media_failover_ref : string list Atomic.t = Atomic.make []
+  let snapshot () = Atomic.get loaded_state_ref
+
+  let restore snapshot = Atomic.set loaded_state_ref snapshot
+end
 
 let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
 
 let set_loaded
     (runtimes, rt, assignments, librarian_id, cross_verifier_id, media_failover) =
-  Atomic.set runtimes_ref runtimes;
-  Atomic.set default_runtime_ref (Some rt);
-  Atomic.set keeper_assignments_ref assignments;
-  Atomic.set librarian_runtime_id_ref librarian_id;
-  Atomic.set cross_verifier_runtime_id_ref cross_verifier_id;
-  Atomic.set media_failover_ref media_failover
+  Atomic.set loaded_state_ref
+    { default_runtime = Some rt
+    ; runtimes
+    ; keeper_assignments = assignments
+    ; librarian_runtime_id = librarian_id
+    ; cross_verifier_runtime_id = cross_verifier_id
+    ; media_failover
+    }
 
 let init_default ~config_path =
   let* loaded = load_list ~config_path in
@@ -325,9 +329,14 @@ let init_default_strict ~config_path =
        set_loaded loaded;
        Ok ())
 
-let get_default_runtime () = Atomic.get default_runtime_ref
-let get_runtimes () = Atomic.get runtimes_ref
-let get_runtime_ids () = runtime_ids (Atomic.get runtimes_ref)
+let runtime_state () = Atomic.get loaded_state_ref
+let get_default_runtime () = (runtime_state ()).default_runtime
+let get_runtimes () = (runtime_state ()).runtimes
+let get_runtime_ids () = runtime_ids (runtime_state ()).runtimes
+let runtimes_and_media_failover () =
+  let state = runtime_state () in
+  state.runtimes, state.media_failover
+;;
 
 (* RFC persona⊥{model,runtime}: keeper→runtime assignment is sourced from
    [[runtime.assignments]] (runtime.toml SSOT), NOT from persona JSON or keeper
@@ -336,25 +345,25 @@ let get_runtime_ids () = runtime_ids (Atomic.get runtimes_ref)
    only the OAS adapter resolves it to provider/model/spec). Reads
    [keeper_assignments_ref], never a module-level eager binding. *)
 let runtime_id_for_keeper (keeper_name : string) : string option =
-  List.assoc_opt keeper_name (Atomic.get keeper_assignments_ref)
+  List.assoc_opt keeper_name (runtime_state ()).keeper_assignments
 ;;
 
-let keeper_assignments () = Atomic.get keeper_assignments_ref
+let keeper_assignments () = (runtime_state ()).keeper_assignments
 
 (* [runtime].librarian routing for the memory-os librarian. [None] = the
    librarian inherits each keeper's runtime (legacy). Reads the Atomic ref set by
    [init_default]; the env override lives in keeper_librarian_runtime. *)
-let librarian_runtime_id () = Atomic.get librarian_runtime_id_ref
+let librarian_runtime_id () = (runtime_state ()).librarian_runtime_id
 
 (* [runtime].cross_verifier routing for the anti-rationalization evaluator.
    [None] = the evaluator inherits [runtime].default. Reads the Atomic ref set by
    [init_default]. *)
-let cross_verifier_runtime_id () = Atomic.get cross_verifier_runtime_id_ref
+let cross_verifier_runtime_id () = (runtime_state ()).cross_verifier_runtime_id
 
 (* [runtime].media_failover ordered runtime ids for RFC-0265 modality-gated
    reroute. [[]] = derive capable runtimes from declared capabilities. Reads the
    Atomic ref set by [init_default]. *)
-let media_failover () = Atomic.get media_failover_ref
+let media_failover () = (runtime_state ()).media_failover
 
 (* RFC-0207: resolve a runtime by its binding-key id ["provider.model"].  The
    keeper turn driver dispatches to the *requested* runtime (a keeper's persona
@@ -362,7 +371,7 @@ let media_failover () = Atomic.get media_failover_ref
    unknown id returns [None] so the driver fails fast (no silent substitution —
    RFC-0206 §2.1).  Reads [runtimes_ref], never a module-level eager binding. *)
 let get_runtime_by_id (id : string) : t option =
-  List.find_opt (fun (rt : t) -> String.equal rt.id id) (Atomic.get runtimes_ref)
+  List.find_opt (fun (rt : t) -> String.equal rt.id id) (runtime_state ()).runtimes
 ;;
 
 let max_context_of_runtime_id (id : string) : int option =
@@ -406,7 +415,7 @@ let pricing_of_runtime_id (id : string) : float option * float option =
    NB(R2): 함수 호출 시점에만 raise 하므로 호출자는 이 값을 모듈 top-level
    [let] 로 eager 바인딩하면 안 된다(config-less 테스트 바이너리 load crash). *)
 let get_default_runtime_id () =
-  match Atomic.get default_runtime_ref with
+  match (runtime_state ()).default_runtime with
   | Some rt -> rt.id
   | None ->
     failwith

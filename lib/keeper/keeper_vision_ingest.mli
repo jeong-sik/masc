@@ -6,8 +6,9 @@
     so the persisted checkpoint never holds inline base64 and rehydration
     cannot re-materialise an [Image]:
 
-    - Site 1 (fresh input, [Eager]): the turn caller runs the [analyze_image]
-      vision sub-call once and embeds the reading in the placeholder.
+    - Site 1 (fresh input, [Eager]): the turn caller validates and stores every
+      image, then runs at most one bounded [analyze_image] vision sub-call for
+      the first valid image and embeds the reading in the placeholder.
     - Site 2 (checkpoint write, [Store_only]): the persistence boundary evicts
       with a handle-only placeholder (no provider call on the turn fiber); also
       migrates images already persisted in pre-existing checkpoints.
@@ -30,9 +31,10 @@ val evict_blocks
   -> Agent_sdk.Types.content_block list
   -> Agent_sdk.Types.content_block list
 (** Site 1. Evict every [Image] in the list when [policy = Mm_delegate]; return
-    the list unchanged otherwise. [Eager] consults the fiber-local Eio context
-    for the sub-call; with none present (tests) it falls back to an unread
-    placeholder, so eviction still holds. *)
+    the list unchanged otherwise. Images are fail-closed before store on
+    source_type, base64 payload, size, and media type. [Eager] consults the
+    fiber-local Eio context for one bounded sub-call; with none present (tests)
+    it falls back to an unread placeholder, so eviction still holds. *)
 
 val evict_message
   :  mode:mode

@@ -68,9 +68,21 @@ val init_default_strict : config_path:string -> (unit, string) result
     gate ({!decide_capability_gate}). Rejects ([Error]) a runtime whose model is
     absent from the catalog before boot. Used by server boot and fusion run. *)
 
+module For_testing : sig
+  type snapshot
+
+  val snapshot : unit -> snapshot
+  val restore : snapshot -> unit
+end
+
 val get_default_runtime : unit -> t option
 val get_runtimes : unit -> t list
 val get_runtime_ids : unit -> string list
+val runtimes_and_media_failover : unit -> t list * string list
+(** Atomically consistent snapshot of configured runtimes plus
+    [\[runtime\].media_failover]. Use when both values drive one routing
+    decision, so a runtime config refresh cannot interleave between two
+    separate reads. *)
 
 val runtime_id_for_keeper : string -> string option
 (** [runtime_id_for_keeper keeper_name] is the runtime id assigned to

@@ -271,6 +271,35 @@ module KeeperMemoryOs = struct
   ;;
 end
 
+(** {1 Keeper Vision Tool Configuration} *)
+
+module KeeperVision = struct
+  (** Maximum raw image bytes accepted by the one-shot vision tool before
+      provider-message construction. Default is 5 MiB to match dashboard upload
+      policy; operators may raise it when the HTTP body cap is raised too.
+
+      @category Policies @ops_class operator *)
+  let max_image_bytes () =
+    get_int_nonneg ~default:(5 * 1024 * 1024) "MASC_KEEPER_VISION_MAX_IMAGE_BYTES"
+  ;;
+
+  (** Base delay before trying the next vision runtime after a failed provider
+      attempt. A small default avoids tight failover loops while keeping the tool
+      responsive.
+
+      @category Timeouts @ops_class operator *)
+  let candidate_backoff_base_sec () =
+    get_float_nonneg ~default:0.05 "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC"
+  ;;
+
+  (** Upper bound for the per-candidate vision failover delay.
+
+      @category Timeouts @ops_class operator *)
+  let candidate_backoff_max_sec () =
+    get_float_nonneg ~default:0.25 "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_MAX_SEC"
+  ;;
+end
+
 (** {1 Keeper Context Reducer Configuration}
 
     Controls for the {!Agent_sdk.Context_reducer} stages applied to the

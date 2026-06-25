@@ -179,6 +179,15 @@ let property name typ description =
   name, `Assoc [ "type", `String typ; "description", `String description ]
 ;;
 
+let string_enum_property name values description =
+  ( name
+  , `Assoc
+      [ "type", `String "string"
+      ; "enum", `List (List.map (fun value -> `String value) values)
+      ; "description", `String description
+      ] )
+;;
+
 let object_schema ?(required = []) properties =
   `Assoc
     [ "type", `String "object"
@@ -826,9 +835,9 @@ let analyze_image_schema =
         "string"
         "What to ask about the image, e.g. \"describe the chart\" or \
          \"transcribe the text\"."
-    ; property
+    ; string_enum_property
         "media_type"
-        "string"
+        Keeper_vision_tool.supported_image_media_types
         "Optional image MIME type override (e.g. image/png, image/jpeg). \
          Sniffed from the bytes when omitted."
     ]
@@ -1266,10 +1275,12 @@ let internal_descriptors : t list =
       ~id:"keeper.vision.analyze_image"
       ~name:"analyze_image"
       ~description:
-        "Read a stored image artifact and return a text description or answer. \
+         "Read a stored image artifact and return a text description or answer. \
          Delegates to a vision model in a sub-call; the image is never added to \
          this conversation. Returns the extracted text, or a typed error \
-         (artifact_load_failed | no_capable_runtime | empty_extraction | \
+         (invalid_args | eio_context_unavailable | artifact_load_failed | \
+         invalid_timeout | image_too_large | invalid_media_type | \
+         invalid_request | no_capable_runtime | empty_extraction | \
          truncated_extraction | timeout | provider_error)."
       ~input_schema:analyze_image_schema
       (* read-only (a sub-call, no side effects) but visibility=Default so the

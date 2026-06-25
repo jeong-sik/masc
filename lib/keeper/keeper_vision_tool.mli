@@ -26,9 +26,11 @@ val vision_default_max_tokens : int
 (** Fallback output budget for the one-shot vision sub-call when the selected
     runtime has not configured [max_tokens]. *)
 
-val max_image_bytes : int
+val max_image_bytes : unit -> int
 (** Maximum raw artifact bytes accepted by the tool before base64 provider-message
-    construction. Oversized artifacts fail closed with [image_too_large]. *)
+    construction, from [MASC_KEEPER_VISION_MAX_IMAGE_BYTES] / runtime TOML boot
+    overrides with a 5 MiB default matching dashboard upload policy. Oversized
+    artifacts fail closed with [image_too_large]. *)
 
 val truncated_of_stop_reason : Agent_sdk.Types.stop_reason -> bool
 (** Collapse the provider's typed terminal reason to the single [truncated] bit
@@ -53,7 +55,7 @@ val provider_for_vision
 val vision_runtime_ids : unit -> string list
 (** Ordered image-capable runtime ids: [\[runtime\].media_failover] order first,
     then declaration order. The handler tries these candidates in order for
-    timeout/retryable provider failures. *)
+    timeout/provider failures within one cumulative tool deadline. *)
 
 val first_vision_runtime_id : unit -> (string, string) result
 (** Compatibility helper returning the first entry of {!vision_runtime_ids}, or
@@ -80,7 +82,7 @@ val handle
     string: [{"ok":true,"text":...}] or
     [{"ok":false,"error":code,"failure_class":class[,"detail":...]}] with code
     one of [invalid_args | eio_context_unavailable | artifact_load_failed |
-    image_too_large | invalid_media_type | invalid_request | no_capable_runtime |
-    timeout | provider_error | empty_extraction | truncated_extraction]. [complete]
-    defaults to the live provider call (inject in tests). Never returns a raw
-    empty success. *)
+    invalid_timeout | image_too_large | invalid_media_type | invalid_request |
+    no_capable_runtime | timeout | provider_error | empty_extraction |
+    truncated_extraction]. [complete] defaults to the live provider call (inject
+    in tests). Never returns a raw empty success. *)

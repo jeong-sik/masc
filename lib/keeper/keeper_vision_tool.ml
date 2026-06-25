@@ -25,6 +25,9 @@ let with_timeout ~clock ~timeout_sec f =
   try Some (Eio.Time.with_timeout_exn clock timeout_sec f) with
   | Eio.Time.Timeout -> None
 
+let valid_timeout_sec timeout_sec =
+  Float.is_finite timeout_sec && timeout_sec > 0.0
+
 (* One-shot vision read: shorter than a full keeper turn. *)
 let default_timeout_sec = 120.0
 
@@ -33,10 +36,7 @@ let default_timeout_sec = 120.0
    truncated entirely into the thinking phase. *)
 let vision_default_max_tokens = 1024
 
-(* Tool policy SSOT for raw artifact size. The provider request base64-encodes
-   this payload, so 10 MiB raw stays below the default 20 MiB HTTP body cap even
-   after ~33% expansion. *)
-let max_image_bytes = 10 * 1024 * 1024
+let max_image_bytes () = Env_config_keeper.KeeperVision.max_image_bytes ()
 
 let truncated_of_stop_reason : Agent_sdk.Types.stop_reason -> bool = function
   | Agent_sdk.Types.MaxTokens -> true
@@ -77,7 +77,7 @@ let message_of_request (req : Va.request) : Agent_sdk.Types.message =
         ()
     ]
 
-let vision_runtime_ids () : string list =
+let vision_runtime_candidates () : (string * Runtime.t) list =
   (* Delegate image-capability admission to the RFC-0265 SSOT
      [Runtime_agent.caps_admit_required_modalities] so a runtime surfaced to the
      vision tool is exactly one the dispatch capability gate would admit. Do NOT
@@ -85,11 +85,26 @@ let vision_runtime_ids () : string list =
      here: the SSOT admits "image" on [supports_image_input] alone, and the
      modality reroute, the capability gate, and this vision pick must share one
      predicate or a vision pick can land on a runtime the gate then rejects. *)
-  Runtime_agent.media_reroute_candidates ~exclude:""
-  |> List.filter_map (fun (runtime_id, caps) ->
+  let runtimes = Runtime.get_runtimes () in
+  let media_failover = Runtime.media_failover () in
+  let by_id id =
+    List.find_opt (fun (rt : Runtime.t) -> String.equal rt.Runtime.id id) runtimes
+  in
+  let from_failover = List.filter_map by_id media_failover in
+  let rest =
+    List.filter
+      (fun (rt : Runtime.t) -> not (List.mem rt.Runtime.id media_failover))
+      runtimes
+  in
+  from_failover @ rest
+  |> List.filter_map (fun (rt : Runtime.t) ->
+       let caps = Runtime_agent.input_capabilities_of_runtime rt in
        if Runtime_agent.caps_admit_required_modalities caps [ "image" ]
-       then Some runtime_id
+       then Some (rt.Runtime.id, rt)
        else None)
+
+let vision_runtime_ids () : string list =
+  List.map fst (vision_runtime_candidates ())
 
 let first_vision_runtime_id () : (string, string) result =
   match vision_runtime_ids () with
@@ -121,11 +136,12 @@ let err_json ?detail ?(failure_class = Tool_result.Runtime_failure) code =
   in
   Yojson.Safe.to_string (`Assoc fields)
 
-let failure_class_of_http_error err =
-  if Runtime_attempt_fsm.should_try_next err
-  then Tool_result.Transient_error
-  else Tool_result.Policy_rejection
-;;
+let failure_class_of_http_error = function
+  | err when Runtime_attempt_fsm.should_try_next err -> Tool_result.Transient_error
+  | Llm_provider.Http_client.AcceptRejected _ -> Tool_result.Policy_rejection
+  | Llm_provider.Http_client.HttpError { code; _ } when code = 400 || code = 422 ->
+    Tool_result.Policy_rejection
+  | _ -> Tool_result.Runtime_failure
 
 let string_member key json =
   match Yojson.Safe.Util.member key json with
@@ -146,6 +162,7 @@ let supported_image_media_types_csv =
 
 let validate_image_size bytes =
   let size = String.length bytes in
+  let max_image_bytes = max_image_bytes () in
   if size <= max_image_bytes then Ok ()
   else
     Error
@@ -202,14 +219,38 @@ let ok_or_classified_json (response : Agent_sdk.Types.api_response) =
   | Error Va.Truncated_extraction ->
     err_json ~failure_class:Tool_result.Runtime_failure "truncated_extraction"
 
+let remaining_timeout_sec ~clock ~deadline =
+  let remaining = deadline -. Eio.Time.now clock in
+  if remaining <= 0.0 then None else Some remaining
+
+let candidate_backoff_sec ~attempt_index ~runtime_id =
+  let base = Env_config_keeper.KeeperVision.candidate_backoff_base_sec () in
+  let max_backoff = Env_config_keeper.KeeperVision.candidate_backoff_max_sec () in
+  if base <= 0.0 || max_backoff <= 0.0
+  then 0.0
+  else (
+    let jitter_bucket = Hashtbl.hash runtime_id land 0x0f in
+    let jitter = float_of_int jitter_bucket *. 0.001 in
+    Float.min max_backoff ((base *. (2. ** float_of_int attempt_index)) +. jitter))
+;;
+
+let sleep_before_next_candidate ~clock ~deadline ~runtime_id ~attempt_index =
+  let delay = candidate_backoff_sec ~attempt_index ~runtime_id in
+  match remaining_timeout_sec ~clock ~deadline with
+  | Some remaining when delay > 0.0 ->
+    Eio.Time.sleep clock (Float.min delay remaining)
+  | Some _ | None -> ()
+;;
+
 let rec run_candidates
     ~complete
-    ~timeout_sec
+    ~deadline
     ~sw
     ~clock
     ~net
     ~messages
     ~last_error
+    ~attempt_index
     = function
   | [] ->
     (match last_error with
@@ -228,36 +269,44 @@ let rec run_candidates
          ~failure_class:(failure_class_of_http_error err)
          ~detail:(Provider_http_error.to_message err)
          "provider_error"
-     | Some (`Runtime_missing runtime_id) ->
-       err_json
-         ~failure_class:Tool_result.Runtime_failure
-         ~detail:(Printf.sprintf "runtime %S not found" runtime_id)
-         "no_capable_runtime")
-  | runtime_id :: rest ->
-    (match Runtime.get_runtime_by_id runtime_id with
+    )
+  | (runtime_id, rt) :: rest ->
+    let continue_with last_error =
+      if not (List.is_empty rest)
+      then
+        sleep_before_next_candidate ~clock ~deadline ~runtime_id
+          ~attempt_index;
+      run_candidates
+        ~complete
+        ~deadline
+        ~sw
+        ~clock
+        ~net
+        ~messages
+        ~last_error:(Some last_error)
+        ~attempt_index:(attempt_index + 1)
+        rest
+    in
+    (match remaining_timeout_sec ~clock ~deadline with
      | None ->
-       run_candidates ~complete ~timeout_sec ~sw ~clock ~net ~messages
-         ~last_error:(Some (`Runtime_missing runtime_id))
-         rest
-     | Some rt ->
+       run_candidates
+         ~complete
+         ~deadline
+         ~sw
+         ~clock
+         ~net
+         ~messages
+         ~last_error:(Some (`Timeout runtime_id))
+         ~attempt_index
+         []
+     | Some timeout_sec ->
        let config = provider_for_vision rt.Runtime.provider_config in
        (match
           with_timeout ~clock ~timeout_sec (fun () ->
             complete ~sw ~net ?clock:(Some clock) ~config ~messages ())
         with
-        | None ->
-          run_candidates ~complete ~timeout_sec ~sw ~clock ~net ~messages
-            ~last_error:(Some (`Timeout runtime_id))
-            rest
-        | Some (Error err) when Runtime_attempt_fsm.should_try_next err ->
-          run_candidates ~complete ~timeout_sec ~sw ~clock ~net ~messages
-            ~last_error:(Some (`Provider_error err))
-            rest
-        | Some (Error err) ->
-          err_json
-            ~failure_class:(failure_class_of_http_error err)
-            ~detail:(Provider_http_error.to_message err)
-            "provider_error"
+        | None -> continue_with (`Timeout runtime_id)
+        | Some (Error err) -> continue_with (`Provider_error err)
         | Some (Ok response) -> ok_or_classified_json response))
 
 let handle
@@ -282,8 +331,15 @@ let handle
          ~failure_class:Tool_result.Runtime_failure
          "eio_context_unavailable"
      | Some sw, Some net, Some clock ->
-       let dir = vision_store_dir ~keeper_name:meta.name in
-       (match Store.load ~dir (Store.of_string handle_str) with
+       if not (valid_timeout_sec timeout_sec)
+       then
+         err_json
+           ~failure_class:Tool_result.Runtime_failure
+           ~detail:"timeout_sec must be finite and > 0"
+           "invalid_timeout"
+       else
+         let dir = vision_store_dir ~keeper_name:meta.name in
+         (match Store.load ~dir (Store.of_string handle_str) with
         | Error msg ->
           err_json
             ~failure_class:Tool_result.Runtime_failure
@@ -293,7 +349,7 @@ let handle
           (match validate_image_size bytes with
            | Error msg ->
              err_json
-               ~failure_class:Tool_result.Policy_rejection
+               ~failure_class:Tool_result.Runtime_failure
                ~detail:msg
                "image_too_large"
            | Ok () ->
@@ -316,10 +372,11 @@ let handle
                  | Ok req ->
                    run_candidates
                      ~complete
-                     ~timeout_sec
+                     ~deadline:(Eio.Time.now clock +. timeout_sec)
                      ~sw
                      ~clock
                      ~net
                      ~messages:[ message_of_request req ]
                      ~last_error:None
-                     (vision_runtime_ids ()))))))
+                     ~attempt_index:0
+                     (vision_runtime_candidates ()))))))

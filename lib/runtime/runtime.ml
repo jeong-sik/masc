@@ -294,6 +294,36 @@ let cross_verifier_runtime_id_ref : string option Atomic.t = Atomic.make None
    load so each resolves to a configured runtime. *)
 let media_failover_ref : string list Atomic.t = Atomic.make []
 
+module For_testing = struct
+  type snapshot =
+    { default_runtime : t option
+    ; runtimes : t list
+    ; keeper_assignments : (string * string) list
+    ; librarian_runtime_id : string option
+    ; cross_verifier_runtime_id : string option
+    ; media_failover : string list
+    }
+
+  let snapshot () =
+    { default_runtime = Atomic.get default_runtime_ref
+    ; runtimes = Atomic.get runtimes_ref
+    ; keeper_assignments = Atomic.get keeper_assignments_ref
+    ; librarian_runtime_id = Atomic.get librarian_runtime_id_ref
+    ; cross_verifier_runtime_id = Atomic.get cross_verifier_runtime_id_ref
+    ; media_failover = Atomic.get media_failover_ref
+    }
+  ;;
+
+  let restore snapshot =
+    Atomic.set default_runtime_ref snapshot.default_runtime;
+    Atomic.set runtimes_ref snapshot.runtimes;
+    Atomic.set keeper_assignments_ref snapshot.keeper_assignments;
+    Atomic.set librarian_runtime_id_ref snapshot.librarian_runtime_id;
+    Atomic.set cross_verifier_runtime_id_ref snapshot.cross_verifier_runtime_id;
+    Atomic.set media_failover_ref snapshot.media_failover
+  ;;
+end
+
 let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
 
 let set_loaded

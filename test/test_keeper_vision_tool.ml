@@ -17,6 +17,17 @@ module Store = Multimodal.Vision_artifact_store
 
 external unsetenv : string -> unit = "masc_test_unsetenv"
 
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some previous -> Unix.putenv key previous
+      | None -> unsetenv key)
+    (fun () ->
+      Unix.putenv key value;
+      f ())
+
 let json_of_output raw =
   try Yojson.Safe.from_string raw with
   | Yojson.Json_error msg -> failwith ("invalid json output: " ^ msg ^ ": " ^ raw)
@@ -165,6 +176,10 @@ let test_provider_for_vision_preserves_configured_max_tokens () =
   let fallback = Vt.provider_for_vision { base with max_tokens = None } in
   assert (fallback.max_tokens = Some Vt.vision_default_max_tokens)
 
+let test_max_image_bytes_reads_env_config () =
+  with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "128" (fun () ->
+    assert (Vt.max_image_bytes () = 128))
+
 let test_missing_eio_context_is_runtime_failure () =
   let raw =
     Vt.handle
@@ -218,6 +233,27 @@ let test_missing_clock_is_runtime_failure_without_provider_call () =
     assert (String.equal (assoc_string "error" json) "eio_context_unavailable");
     assert (String.equal (assoc_string "failure_class" json) "runtime_failure"))
 
+let test_invalid_timeout_is_runtime_failure_without_provider_call () =
+  with_temp_base (fun _ ->
+    let meta = make_meta "vision-invalid-timeout" in
+    let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+    let raw =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.handle
+            ~complete:complete_should_not_run
+            ~timeout_sec:0.0
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env)
+            ~meta
+            ~args:(artifact_args handle)
+            ()))
+    in
+    let json = json_of_output raw in
+    assert (String.equal (assoc_string "error" json) "invalid_timeout");
+    assert (String.equal (assoc_string "failure_class" json) "runtime_failure"))
+
 let test_non_string_media_type_is_policy_rejection () =
   with_temp_base (fun _ ->
     let meta = make_meta "vision-media-type-non-string" in
@@ -258,10 +294,10 @@ let test_unknown_magic_bytes_are_policy_rejection () =
     assert (String.equal (assoc_string "error" json) "invalid_media_type");
     assert (String.equal (assoc_string "failure_class" json) "policy_rejection"))
 
-let test_oversize_image_is_policy_rejection_before_provider_call () =
+let test_oversize_image_is_runtime_failure_before_provider_call () =
   with_temp_base (fun _ ->
     let meta = make_meta "vision-oversize" in
-    let handle = store_image meta (String.make (Vt.max_image_bytes + 1) '\000') in
+    let handle = store_image meta (String.make (Vt.max_image_bytes () + 1) '\000') in
     let raw =
       Eio_main.run (fun env ->
         Eio.Switch.run (fun sw ->
@@ -276,7 +312,7 @@ let test_oversize_image_is_policy_rejection_before_provider_call () =
     in
     let json = json_of_output raw in
     assert (String.equal (assoc_string "error" json) "image_too_large");
-    assert (String.equal (assoc_string "failure_class" json) "policy_rejection"))
+    assert (String.equal (assoc_string "failure_class" json) "runtime_failure"))
 
 let write_file path content =
   let oc = open_out path in
@@ -287,8 +323,10 @@ let write_file path content =
 let with_temp_runtime_toml content f =
   let path = Filename.temp_file "masc-vision-runtime-" ".toml" in
   write_file path content;
+  let snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
       try Sys.remove path with
       | _ -> ())
     (fun () ->
@@ -331,14 +369,44 @@ supports-multimodal-inputs = true
 [p2.vision-b]
 |}
 
+let single_vision_runtime_toml =
+  {|
+[runtime]
+default = "p3.vision-c"
+media_failover = ["p3.vision-c"]
+
+[providers.p3]
+protocol = "openai-compatible-http"
+endpoint = "https://p3.example/v1"
+
+[models.vision-c]
+api-name = "vision-c"
+max-context = 4096
+
+[models.vision-c.capabilities]
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[p3.vision-c]
+|}
+
+let test_temp_runtime_toml_restores_runtime_cache () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    let before = Runtime.get_runtime_ids () in
+    with_temp_runtime_toml single_vision_runtime_toml (fun () ->
+      assert (Runtime.get_runtime_ids () = [ "p3.vision-c" ]));
+    assert (Runtime.get_runtime_ids () = before))
+
 let test_retryable_provider_error_tries_next_runtime () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     with_temp_base (fun _ ->
       let meta = make_meta "vision-failover" in
       let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
       let calls = ref 0 in
-      let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+      let models = ref [] in
+      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ () =
         incr calls;
+        models := !models @ [ config.Llm_provider.Provider_config.model_id ];
         if !calls = 1 then
           Error (Llm_provider.Http_client.HttpError { code = 500; body = "down" })
         else Ok (ok_response "second runtime answered")
@@ -357,18 +425,93 @@ let test_retryable_provider_error_tries_next_runtime () =
       in
       let json = json_of_output raw in
       assert (!calls = 2);
+      assert (!models = [ "vision-a"; "vision-b" ]);
       assert (String.equal (assoc_string "text" json) "second runtime answered")))
+
+let test_non_retryable_provider_error_tries_next_runtime () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-nonretryable-failover" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let calls = ref 0 in
+      let models = ref [] in
+      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ () =
+        incr calls;
+        models := !models @ [ config.Llm_provider.Provider_config.model_id ];
+        if !calls = 1
+        then
+          Error
+            (Llm_provider.Http_client.HttpError
+               { code = 401; body = "bad credentials" })
+        else Ok (ok_response "second runtime answered after 401")
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (!calls = 2);
+      assert (!models = [ "vision-a"; "vision-b" ]);
+      assert (
+        String.equal
+          (assoc_string "text" json)
+          "second runtime answered after 401")))
+
+let test_non_retryable_provider_errors_exhaust_as_runtime_failure () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-nonretryable-exhaust" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let calls = ref 0 in
+      let models = ref [] in
+      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ () =
+        incr calls;
+        models := !models @ [ config.Llm_provider.Provider_config.model_id ];
+        Error
+          (Llm_provider.Http_client.HttpError
+             { code = 401; body = "bad credentials" })
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (!calls = 2);
+      assert (!models = [ "vision-a"; "vision-b" ]);
+      assert (String.equal (assoc_string "error" json) "provider_error");
+      assert (String.equal (assoc_string "failure_class" json) "runtime_failure")))
 
 let () =
   test_truncated_of_stop_reason ();
   test_message_of_request ();
   test_first_vision_runtime_id_total ();
   test_provider_for_vision_preserves_configured_max_tokens ();
+  test_max_image_bytes_reads_env_config ();
   test_missing_eio_context_is_runtime_failure ();
   test_invalid_media_type_is_policy_rejection ();
   test_missing_clock_is_runtime_failure_without_provider_call ();
+  test_invalid_timeout_is_runtime_failure_without_provider_call ();
   test_non_string_media_type_is_policy_rejection ();
   test_unknown_magic_bytes_are_policy_rejection ();
-  test_oversize_image_is_policy_rejection_before_provider_call ();
+  test_oversize_image_is_runtime_failure_before_provider_call ();
+  test_temp_runtime_toml_restores_runtime_cache ();
   test_retryable_provider_error_tries_next_runtime ();
+  test_non_retryable_provider_error_tries_next_runtime ();
+  test_non_retryable_provider_errors_exhaust_as_runtime_failure ();
   print_endline "test_keeper_vision_tool: all assertions passed"

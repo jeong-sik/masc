@@ -1269,9 +1269,10 @@ let internal_descriptors : t list =
          "Read a stored image artifact and return a text description or answer. \
          Delegates to a vision model in a sub-call; the image is never added to \
          this conversation. Returns the extracted text, or a typed error \
-         (artifact_load_failed | image_too_large | invalid_media_type | \
-         no_capable_runtime | empty_extraction | truncated_extraction | timeout \
-         | provider_error)."
+         (invalid_args | eio_context_unavailable | artifact_load_failed | \
+         invalid_timeout | image_too_large | invalid_media_type | \
+         invalid_request | no_capable_runtime | empty_extraction | \
+         truncated_extraction | timeout | provider_error)."
       ~input_schema:analyze_image_schema
       (* read-only (a sub-call, no side effects) but visibility=Default so the
          keeper LLM can see and call it — read_only_in_process_policy defaults to

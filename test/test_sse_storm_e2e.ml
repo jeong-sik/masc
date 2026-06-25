@@ -423,6 +423,8 @@ let test_mcp_reconnect_stays_accepted () =
 let test_ag_ui_rejects_reconnect_then_recovers () =
   with_server @@ fun ~port ~auth_token ->
   let sid = Printf.sprintf "storm-agui-%06d" (Random.int 1_000_000) in
+  (* /ag-ui/events uses the observer SSE auth path; mirror /mcp by passing the
+     dashboard dev token explicitly. *)
   let headers =
     [
       ("Accept", "text/event-stream");

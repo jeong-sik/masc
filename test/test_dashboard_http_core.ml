@@ -1236,6 +1236,28 @@ let test_project_snapshot_wire_returns_snapshot_when_populated () =
      Re.execp re header);
   Dashboard_snapshot.reset_for_test ()
 
+let assoc_has key = function
+  | `Assoc fields -> List.mem_assoc key fields
+  | _ -> false
+
+let test_dashboard_bootstrap_omits_eager_goal_tree () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let state = Lib.Mcp_server.create_state ~base_path:config.base_path in
+  let clock = Eio.Stdenv.clock env in
+  let req = request "/api/v1/dashboard/bootstrap" in
+  let json = Server_dashboard_http.dashboard_bootstrap_http_json ~state ~sw ~clock req in
+  Alcotest.(check bool) "bootstrap includes shell" true (assoc_has "shell" json);
+  Alcotest.(check bool) "bootstrap includes execution" true
+    (assoc_has "execution" json);
+  Alcotest.(check bool) "bootstrap includes planning" true
+    (assoc_has "planning" json);
+  Alcotest.(check bool) "bootstrap includes namespace truth" true
+    (assoc_has "namespace_truth" json);
+  Alcotest.(check bool) "bootstrap includes goal-loop status" true
+    (assoc_has "goal_loop_status" json);
+  Alcotest.(check bool) "bootstrap omits eager goal tree" false
+    (assoc_has "goals" json)
+
 (* Freeze guard: /api/v1/dashboard/telemetry must never default to an
    unbounded read. Observatory polls with since_ms/until_ms and no [n];
    before this fix the windowed default was n=0 (unbounded), letting one
@@ -1400,6 +1422,8 @@ let () =
             test_dashboard_proof_http_json_surfaces_verification_index;
           test_case "proof route registered in HTTP routers" `Quick
             test_dashboard_proof_route_registered_in_http_routers;
+          test_case "bootstrap omits eager goal tree" `Quick
+            test_dashboard_bootstrap_omits_eager_goal_tree;
           test_case "planning payload keeps UTF-8 valid after truncation" `Quick
             test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation;
           test_case "shell auth canonicalizes token owner" `Quick

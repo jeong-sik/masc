@@ -82,6 +82,24 @@ let test_tally_dedup_last_wins () =
   check "dedup net=-1" (t.F.net = -1);
   check "dedup last_at=2.0" (t.F.last_at = Some 2.0)
 
+let test_tally_dedup_by_recorded_at_not_list_order () =
+  (* Review CR: out-of-order input pins [recorded_at] as the dedup authority.
+     The same turn's NEWER vote (recorded_at 2.0) appears FIRST in the list and
+     the OLDER (1.0) LAST. Dedup must pick the 2.0 record (max recorded_at), not
+     the list-last 1.0 — a list-position dedup would pick Not_helpful(1.0) and
+     fail here, so this is non-vacuous (unlike the happy-path test above where
+     list order and recorded_at coincide). *)
+  let t =
+    F.tally_of_records
+      [ mk ~turn_id:"t1" ~signal:F.Helpful ~recorded_at:2.0 ()
+      ; mk ~turn_id:"t1" ~signal:F.Not_helpful ~recorded_at:1.0 ()
+      ]
+  in
+  check "out-of-order dedup: helpful=1 (recorded_at 2.0 wins)" (t.F.helpful = 1);
+  check "out-of-order dedup: not_helpful=0" (t.F.not_helpful = 0);
+  check "out-of-order dedup: net=1" (t.F.net = 1);
+  check "out-of-order last_at=2.0" (t.F.last_at = Some 2.0)
+
 let test_tally_cleared_excluded_from_net () =
   let t =
     F.tally_of_records
@@ -213,6 +231,7 @@ let () =
   test_json_strict ();
   test_tally_basic ();
   test_tally_dedup_last_wins ();
+  test_tally_dedup_by_recorded_at_not_list_order ();
   test_tally_cleared_excluded_from_net ();
   test_tally_retraction_supersedes ();
   test_tally_deterministic ();

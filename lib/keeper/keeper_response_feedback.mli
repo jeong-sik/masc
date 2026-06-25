@@ -70,14 +70,13 @@ val empty_tally : tally
 
 val tally_of_records : record list -> tally
 (** Pure, deterministic: same record list ⇒ same tally. Votes are deduplicated
-    by [turn_id] with last-occurrence-wins (the log is append-only and
-    chronological, so the last record for a turn is the current vote — a
-    re-vote or a [Cleared] supersedes earlier ones). [Cleared] is counted but
-    excluded from [net] (a retraction is "no opinion", not a negative). No
-    magic multipliers, no time-decay, no fabricated 0..1 score.
-
-    NB: the input list must be in append/chronological order (oldest first) for
-    last-wins to mean most-recent; {!read_tally} guarantees this. *)
+    by [turn_id], keeping the record with the greatest [recorded_at] — a re-vote
+    or a [Cleared] supersedes an earlier vote for the same turn. [recorded_at]
+    is the single authority for "latest" (the same one [last_at] uses), so the
+    tally is independent of the input list order: a non-append read, a merge, or
+    out-of-order input cannot change the winner. [Cleared] is counted but
+    excluded from [net] (a retraction is "no opinion", not a negative). No magic
+    multipliers, no time-decay, no fabricated 0..1 score. *)
 
 (** {2 Durable sink + log aggregation — Stdlib I/O via the sibling-log family} *)
 

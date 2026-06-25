@@ -132,6 +132,8 @@ let test_delete_nonexistent_does_not_bump () =
   let v_before = (Goal_store.read_state config).version in
   (match Goal_store.delete_goal config ~goal_id:"ghost" with
    | Error (Goal_store.Unknown_goal _) -> ()
+   | Error (Goal_store.Store_unreadable msg) ->
+     fail ("unexpected store unreadable error: " ^ msg)
    | Ok _ -> fail "expected error for missing goal");
   let v_after = (Goal_store.read_state config).version in
   check int "version unchanged on error" v_before v_after

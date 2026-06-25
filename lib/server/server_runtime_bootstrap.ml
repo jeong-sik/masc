@@ -1129,6 +1129,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          (execution, transport_health) start immediately. *)
       Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock;
       Server_dashboard_http.start_transport_health_refresh_loop ~state ~sw ~clock;
+      Server_dashboard_http.start_execution_trust_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock;

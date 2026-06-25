@@ -211,10 +211,28 @@
   }
 
   .v2-overview-attention-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
     align-items: flex-start;
   }
 
+  .v2-overview-attention-row .ov-attn-meta,
+  .v2-overview-attention-row .ov-attn-reason,
+  .v2-overview-attention-row .ov-attn-reason > span:last-child {
+    min-width: 0;
+  }
+
+  .v2-overview-attention-row .ov-attn-reason {
+    align-items: flex-start;
+  }
+
+  .v2-overview-attention-row .ov-attn-reason > span:last-child {
+    overflow-wrap: anywhere;
+  }
+
   .v2-overview-attention-row .ov-attn-act {
+    grid-column: 2;
+    justify-self: end;
     padding-inline: 8px;
   }
 

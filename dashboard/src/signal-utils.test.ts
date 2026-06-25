@@ -82,7 +82,8 @@ describe('setArrayByKeyIfChanged', () => {
     const s = signal(original)
     const next = [{ id: 'c' }, { id: 'b' }]
     setArrayByKeyIfChanged(s, next, keyFn)
-    expect(s.value).toBe(next)
+    expect(s.value).not.toBe(original)
+    expect(s.value).toEqual(next)
   })
 
   it('updates when last key differs', () => {
@@ -90,15 +91,54 @@ describe('setArrayByKeyIfChanged', () => {
     const s = signal(original)
     const next = [{ id: 'a' }, { id: 'c' }]
     setArrayByKeyIfChanged(s, next, keyFn)
-    expect(s.value).toBe(next)
+    expect(s.value).not.toBe(original)
+    expect(s.value).toEqual(next)
   })
 
-  it('skips when keys at boundaries match', () => {
+  it('updates when a middle key differs', () => {
+    const original = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
+    const s = signal(original)
+    const next = [{ id: 'a' }, { id: 'x' }, { id: 'c' }]
+    setArrayByKeyIfChanged(s, next, keyFn)
+    expect(s.value).not.toBe(original)
+    expect(s.value).toEqual(next)
+  })
+
+  it('skips by default when same-key fresh objects are structurally equal', () => {
     const original = [{ id: 'a' }, { id: 'b' }]
     const s = signal(original)
-    // Different object references but same keys
-    setArrayByKeyIfChanged(s, [{ id: 'a' }, { id: 'b' }], keyFn)
+    const next = [{ id: 'a' }, { id: 'b' }]
+    setArrayByKeyIfChanged(s, next, keyFn)
     expect(s.value).toBe(original)
+  })
+
+  it('skips when keys and values match with a structural equality predicate', () => {
+    const original = [{ id: 'a', title: 'A' }, { id: 'b', title: 'B' }]
+    const s = signal(original)
+    setArrayByKeyIfChanged(
+      s,
+      [{ id: 'a', title: 'A' }, { id: 'b', title: 'B' }],
+      item => item.id,
+      (previous, next) => previous.title === next.title,
+    )
+    expect(s.value).toBe(original)
+  })
+
+  it('preserves unchanged item references while replacing changed items', () => {
+    const first = { id: 'a', title: 'A' }
+    const second = { id: 'b', title: 'B' }
+    const original = [first, second]
+    const changedSecond = { id: 'b', title: 'B2' }
+    const s = signal(original)
+    setArrayByKeyIfChanged(
+      s,
+      [{ id: 'a', title: 'A' }, changedSecond],
+      item => item.id,
+      (previous, next) => previous.title === next.title,
+    )
+    expect(s.value).not.toBe(original)
+    expect(s.value[0]).toBe(first)
+    expect(s.value[1]).toBe(changedSecond)
   })
 
   it('skips empty arrays', () => {
@@ -106,5 +146,19 @@ describe('setArrayByKeyIfChanged', () => {
     const s = signal(empty)
     setArrayByKeyIfChanged(s, [], keyFn)
     expect(s.value).toBe(empty)
+  })
+
+  it('does not call keyFn for nullish array entries', () => {
+    const original = [{ id: 'a' }, null]
+    const s = signal(original)
+    setArrayByKeyIfChanged(
+      s,
+      [{ id: 'a' }, null],
+      item => {
+        if (item == null) throw new Error('keyFn should not receive nullish entries')
+        return item.id
+      },
+    )
+    expect(s.value).toBe(original)
   })
 })

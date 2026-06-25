@@ -1,8 +1,8 @@
 /* Keeper-v2 brand fonts
  *
- * Self-hosted copies of the design-system typefaces so the dashboard works
- * offline and does not depend on external font CDNs. These families back the
- * generated --font-display token stack (Cinzel + Noto Sans KR).
+ * Keep only the small local display face on the hot dashboard path. Noto Sans
+ * KR is loaded from the single index.html Google Fonts request as subsetted
+ * WOFF2; the local TTF is 9.9MB and must not be pulled into the first screen.
  */
 
 @font-face {
@@ -11,12 +11,4 @@
   font-weight: 400;
   font-display: swap;
   src: url('/dashboard/assets/fonts/Cinzel-Regular.ttf') format('truetype');
-}
-
-@font-face {
-  font-family: 'Noto Sans KR';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/dashboard/assets/fonts/NotoSansKR-Regular.ttf') format('truetype');
 }

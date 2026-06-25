@@ -88,10 +88,10 @@ describe('ds-theme-tokens.css', () => {
     expect(theme['--brick']).toBe('#8B3A3A')
   })
 
-  it('contains local @font-face rules pointing to public/assets/fonts under the Vite base', () => {
-    // URLs carry the /dashboard/ Vite base prefix so the @font-face resolves
-    // at runtime (a bare /assets/... path 404s under the deployed base).
+  it('contains only the small local display @font-face on the hot path', () => {
+    // The 9.9MB local Noto Sans KR TTF is intentionally not declared here;
+    // index.html loads subsetted WOFF2 via the single Google Fonts request.
     expect(css).toContain("src: url('/dashboard/assets/fonts/Cinzel-Regular.ttf') format('truetype')")
-    expect(css).toContain("src: url('/dashboard/assets/fonts/NotoSansKR-Regular.ttf') format('truetype')")
+    expect(css).not.toContain('NotoSansKR-Regular.ttf')
   })
 })

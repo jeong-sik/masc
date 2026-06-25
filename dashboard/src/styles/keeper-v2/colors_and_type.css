@@ -7,13 +7,9 @@
    Paper/Ink dashboard inversion (used as the docs/light surface).
    ══════════════════════════════════════════════════════════════ */
 
-/* Fonts — all families fetched from Google Fonts (woff2, subset).
-   The prototype shipped a local 9.9MB NotoSansKR ttf + Cinzel ttf; those are
-   not vendored into the dashboard bundle (binary-in-git + bundle bloat). The
-   default v2 skin uses Space Grotesk (display) + Noto Sans KR (ui/body) +
-   JetBrains Mono; Cinzel/EB Garamond/Share Tech Mono back the non-default
-   dark-fantasy/terminal themes. index.html also <link>s these for early load. */
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Noto+Sans+KR:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Cinzel:wght@400;500;600;700&family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Share+Tech+Mono&display=swap');
+/* Fonts are loaded once from index.html. This prototype stylesheet must not
+   fetch Google Fonts itself; otherwise inactive theme imports multiply network
+   requests on the default dashboard route. */
 
 /* ── Dark Fantasy (default) — Visceral · decay-forward ── */
 :root,

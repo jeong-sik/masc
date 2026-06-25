@@ -13,26 +13,13 @@
    bridge aliases in variables.css.
    ══════════════════════════════════════════════════════════════ */
 
-/* Webfonts used by the v2 type stacks. Loaded first so local @font-face
-   rules below can layer on top. */
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+KR:wght@300;400;500;600;700;900&family=Share+Tech+Mono&display=swap');
-
-/* Local fonts — served from dashboard/public/assets/fonts via Vite.
-   Both Cinzel-Regular.ttf and NotoSansKR-Regular.ttf are present. The URL
-   carries the Vite base prefix (/dashboard/) so the @font-face resolves at
-   runtime; without it the request 404s under the deployed base. Matches the
-   tested declaration in fonts.css. */
+/* Local display font — served from dashboard/public/assets/fonts via Vite.
+   Noto Sans KR is loaded from the single index.html Google Fonts request as
+   subsetted WOFF2; do not declare the 9.9MB local TTF on the hot path. */
 @font-face {
   font-family: 'Cinzel';
   src: url('/dashboard/assets/fonts/Cinzel-Regular.ttf') format('truetype');
   font-weight: 400 700;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Noto Sans KR';
-  src: url('/dashboard/assets/fonts/NotoSansKR-Regular.ttf') format('truetype');
-  font-weight: 300 700;
   font-display: swap;
 }
 

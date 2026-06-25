@@ -1266,11 +1266,12 @@ let internal_descriptors : t list =
       ~id:"keeper.vision.analyze_image"
       ~name:"analyze_image"
       ~description:
-        "Read a stored image artifact and return a text description or answer. \
+         "Read a stored image artifact and return a text description or answer. \
          Delegates to a vision model in a sub-call; the image is never added to \
          this conversation. Returns the extracted text, or a typed error \
-         (artifact_load_failed | no_capable_runtime | empty_extraction | \
-         truncated_extraction | timeout | provider_error)."
+         (artifact_load_failed | image_too_large | invalid_media_type | \
+         no_capable_runtime | empty_extraction | truncated_extraction | timeout \
+         | provider_error)."
       ~input_schema:analyze_image_schema
       (* read-only (a sub-call, no side effects) but visibility=Default so the
          keeper LLM can see and call it — read_only_in_process_policy defaults to

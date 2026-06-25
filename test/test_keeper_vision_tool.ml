@@ -49,6 +49,15 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
   | Ok meta -> meta
   | Error e -> failwith e
 
+let ok_response text : Agent_sdk.Types.api_response =
+  { id = "vision-test"
+  ; model = "vision-test-model"
+  ; stop_reason = Agent_sdk.Types.EndTurn
+  ; content = [ Agent_sdk.Types.Text text ]
+  ; usage = None
+  ; telemetry = None
+  }
+
 let with_temp_base f =
   let path = Filename.temp_file "masc-vision-tool-test-" "" in
   Unix.unlink path;
@@ -71,6 +80,33 @@ let with_temp_base f =
       in
       rm path)
     (fun () -> f path)
+
+let store_image meta bytes =
+  let store_dir =
+    Vt.vision_store_dir ~keeper_name:meta.Masc.Keeper_meta_contract.name
+  in
+  match Store.store ~dir:store_dir bytes with
+  | Ok handle -> Store.to_string handle
+  | Error msg -> failwith msg
+
+let artifact_args ?media_type artifact =
+  let fields =
+    [ "artifact", `String artifact; "query", `String "describe" ]
+    @
+    match media_type with
+    | None -> []
+    | Some value -> [ "media_type", value ]
+  in
+  `Assoc fields
+
+let complete_should_not_run
+    ~sw:_
+    ~net:_
+    ?clock:_
+    ~config:_
+    ~messages:_
+    () =
+  failwith "vision provider complete should not run"
 
 (* Only MaxTokens -> true. Exhaustive over all 9 SDK variants so a new one forces
    a decision rather than silently bucketing to false. *)
@@ -127,7 +163,7 @@ let test_provider_for_vision_preserves_configured_max_tokens () =
   let configured = Vt.provider_for_vision { base with max_tokens = Some 4096 } in
   assert (configured.max_tokens = Some 4096);
   let fallback = Vt.provider_for_vision { base with max_tokens = None } in
-  assert (fallback.max_tokens = Some 1024)
+  assert (fallback.max_tokens = Some Vt.vision_default_max_tokens)
 
 let test_missing_eio_context_is_runtime_failure () =
   let raw =
@@ -148,34 +184,180 @@ let test_invalid_media_type_is_policy_rejection () =
   with_temp_base (fun _ ->
     let meta = make_meta "vision-media-type" in
     let bytes = "\x89PNG\r\n\x1a\nraw" in
-    let store_dir =
-      Filename.concat
-        (Config_dir_resolver.keepers_dir ())
-        (meta.Masc.Keeper_meta_contract.name ^ ".vision")
-    in
-    let handle =
-      match Store.store ~dir:store_dir bytes with
-      | Ok handle -> Store.to_string handle
-      | Error msg -> failwith msg
-    in
+    let handle = store_image meta bytes in
     let raw =
       Eio_main.run (fun env ->
         Eio.Switch.run (fun sw ->
           Vt.handle
             ~sw
+            ~clock:(Eio.Stdenv.clock env)
             ~net:(Eio.Stdenv.net env)
             ~meta
-            ~args:
-              (`Assoc
-                [ "artifact", `String handle
-                ; "query", `String "describe"
-                ; "media_type", `String "text/plain"
-                ])
+            ~args:(artifact_args ~media_type:(`String "text/plain") handle)
             ()))
     in
     let json = json_of_output raw in
     assert (String.equal (assoc_string "error" json) "invalid_media_type");
     assert (String.equal (assoc_string "failure_class" json) "policy_rejection"))
+
+let test_missing_clock_is_runtime_failure_without_provider_call () =
+  with_temp_base (fun _ ->
+    let meta = make_meta "vision-missing-clock" in
+    let raw =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.handle
+            ~complete:complete_should_not_run
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~meta
+            ~args:(artifact_args (String.make 64 'a'))
+            ()))
+    in
+    let json = json_of_output raw in
+    assert (String.equal (assoc_string "error" json) "eio_context_unavailable");
+    assert (String.equal (assoc_string "failure_class" json) "runtime_failure"))
+
+let test_non_string_media_type_is_policy_rejection () =
+  with_temp_base (fun _ ->
+    let meta = make_meta "vision-media-type-non-string" in
+    let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+    let raw =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.handle
+            ~complete:complete_should_not_run
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env)
+            ~meta
+            ~args:(artifact_args ~media_type:(`Int 123) handle)
+            ()))
+    in
+    let json = json_of_output raw in
+    assert (String.equal (assoc_string "error" json) "invalid_media_type");
+    assert (String.equal (assoc_string "failure_class" json) "policy_rejection"))
+
+let test_unknown_magic_bytes_are_policy_rejection () =
+  with_temp_base (fun _ ->
+    let meta = make_meta "vision-unknown-magic" in
+    let handle = store_image meta "definitely not an image" in
+    let raw =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.handle
+            ~complete:complete_should_not_run
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env)
+            ~meta
+            ~args:(artifact_args handle)
+            ()))
+    in
+    let json = json_of_output raw in
+    assert (String.equal (assoc_string "error" json) "invalid_media_type");
+    assert (String.equal (assoc_string "failure_class" json) "policy_rejection"))
+
+let test_oversize_image_is_policy_rejection_before_provider_call () =
+  with_temp_base (fun _ ->
+    let meta = make_meta "vision-oversize" in
+    let handle = store_image meta (String.make (Vt.max_image_bytes + 1) '\000') in
+    let raw =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.handle
+            ~complete:complete_should_not_run
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env)
+            ~meta
+            ~args:(artifact_args handle)
+            ()))
+    in
+    let json = json_of_output raw in
+    assert (String.equal (assoc_string "error" json) "image_too_large");
+    assert (String.equal (assoc_string "failure_class" json) "policy_rejection"))
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let with_temp_runtime_toml content f =
+  let path = Filename.temp_file "masc-vision-runtime-" ".toml" in
+  write_file path content;
+  Fun.protect
+    ~finally:(fun () ->
+      try Sys.remove path with
+      | _ -> ())
+    (fun () ->
+      match Runtime.init_default ~config_path:path with
+      | Ok () -> f ()
+      | Error msg -> failwith ("Runtime.init_default failed: " ^ msg))
+
+let vision_failover_runtime_toml =
+  {|
+[runtime]
+default = "p1.vision-a"
+media_failover = ["p1.vision-a", "p2.vision-b"]
+
+[providers.p1]
+protocol = "openai-compatible-http"
+endpoint = "https://p1.example/v1"
+
+[providers.p2]
+protocol = "openai-compatible-http"
+endpoint = "https://p2.example/v1"
+
+[models.vision-a]
+api-name = "vision-a"
+max-context = 4096
+
+[models.vision-a.capabilities]
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[models.vision-b]
+api-name = "vision-b"
+max-context = 4096
+
+[models.vision-b.capabilities]
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[p1.vision-a]
+
+[p2.vision-b]
+|}
+
+let test_retryable_provider_error_tries_next_runtime () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-failover" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let calls = ref 0 in
+      let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+        incr calls;
+        if !calls = 1 then
+          Error (Llm_provider.Http_client.HttpError { code = 500; body = "down" })
+        else Ok (ok_response "second runtime answered")
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (!calls = 2);
+      assert (String.equal (assoc_string "text" json) "second runtime answered")))
 
 let () =
   test_truncated_of_stop_reason ();
@@ -184,4 +366,9 @@ let () =
   test_provider_for_vision_preserves_configured_max_tokens ();
   test_missing_eio_context_is_runtime_failure ();
   test_invalid_media_type_is_policy_rejection ();
+  test_missing_clock_is_runtime_failure_without_provider_call ();
+  test_non_string_media_type_is_policy_rejection ();
+  test_unknown_magic_bytes_are_policy_rejection ();
+  test_oversize_image_is_policy_rejection_before_provider_call ();
+  test_retryable_provider_error_tries_next_runtime ();
   print_endline "test_keeper_vision_tool: all assertions passed"

@@ -46,10 +46,15 @@ let decide_keepalive_scheduling
      scheduled-autonomous wake through the same tombstone here. This is an
      admission gate (like runtime backpressure), so it suppresses [should_run_turn]
      while leaving [requested_should_run_turn] ("the world wanted a turn") intact.
+     Only consult the tombstone when a self-cadence turn was actually requested;
+     idle/stop cycles should keep their original skip reason and must not be
+     reported as tombstone suppressions.
      Reactive turns are gated upstream in the registry, so only the autonomous
      channel is gated here. *)
   let self_cadence_wake : Keeper_wake_tombstone.wake_decision =
-    if Keeper_world_observation.is_autonomous turn_decision.channel
+    if
+      requested_should_run_turn
+      && Keeper_world_observation.is_autonomous turn_decision.channel
     then
       wake_tombstone_decide ~origin:Keeper_wake_tombstone.Self_cadence
         ~keeper_name:meta.name

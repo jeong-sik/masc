@@ -939,6 +939,30 @@ let test_self_cadence_tombstone_suppresses_autonomous_turn () =
   check bool "verdict reasons include the tombstone label" true
     (List.mem "tombstone_no_progress_loop" decision.verdict_reasons)
 
+(* RFC-0294 R2b observability guard: the tombstone is an admission gate for a
+   requested self-cadence turn, not a replacement for ordinary idle/stop skip
+   reasons. If the world did not request a turn, do not consult/report the
+   tombstone — otherwise idle cycles look tombstoned in metrics. *)
+let test_self_cadence_tombstone_not_reported_when_no_turn_requested () =
+  let meta = make_meta "r2b-self-cadence-idle" in
+  let suppress_everything ~origin:_ ~keeper_name:_ =
+    Masc.Keeper_wake_tombstone.Suppressed
+      Masc.Keeper_wake_tombstone.Tombstoned_no_progress_loop
+  in
+  let decision =
+    KHL.decide_keepalive_scheduling
+      ~runtime_id_of_meta:(fun _ -> "runtime-test")
+      ~wake_tombstone_decide:suppress_everything
+      ~stop:(Atomic.make false)
+      ~meta
+      base_observation
+  in
+  check bool "idle world did not request a turn" false
+    decision.requested_should_run_turn;
+  check bool "idle world still skips" false decision.should_run_turn;
+  check bool "verdict reasons do not include tombstone label" false
+    (List.mem "tombstone_no_progress_loop" decision.verdict_reasons)
+
 (* RFC-0294 R2b false-positive guard: the self-cadence gate applies only to the
    autonomous channel. A reactive turn (external mention) is gated upstream in
    the registry, so even a suppressor that would reject every origin must not
@@ -1046,6 +1070,8 @@ let () =
         test_keeper_health_backpressure_uses_keeper_name;
       test_case "R2b self-cadence tombstone suppresses autonomous turn" `Quick
         test_self_cadence_tombstone_suppresses_autonomous_turn;
+      test_case "R2b self-cadence tombstone is not reported without requested turn" `Quick
+        test_self_cadence_tombstone_not_reported_when_no_turn_requested;
       test_case "R2b self-cadence tombstone does not gate reactive turn" `Quick
         test_self_cadence_tombstone_does_not_gate_reactive_turn;
       test_case "crashed cycles feed agent health breaker" `Quick

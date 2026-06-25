@@ -82,5 +82,5 @@ let board_list_cache_key args =
     (`Assoc
        [
          ("args", args);
-         ("board_mutation_version", `Int (Board_dispatch.mutation_version ()));
+         ("board_mutation_version", `Int (Masc_board_handlers.Board_dispatch.mutation_version ()));
        ])

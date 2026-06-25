@@ -770,7 +770,7 @@ let cancel_open_requests_for_goal_except config ~(goal_id : string) ~active_requ
       in
       let requests =
         List.map
-          (fun request ->
+          (fun (request : goal_verification_request) ->
              if
                String.equal request.goal_id goal_id
                && request.status = Open

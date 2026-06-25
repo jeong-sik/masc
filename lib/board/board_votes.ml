@@ -774,7 +774,7 @@ let set_pinned store ~post_id ~pinned : (unit, board_error) Result.t =
               Hashtbl.replace store.posts post_key updated;
               mark_dirty_post store post_key;
               invalidate_post_caches store;
-              let posts_jsonl = posts_jsonl_unlocked store in
+              let posts_jsonl = Board_core_persist.posts_jsonl_unlocked store in
               store.dirty_posts <- false;
               Hashtbl.clear store.dirty_post_ids;
               store.last_flush <- Time_compat.now ();
@@ -804,7 +804,7 @@ let set_visibility store ~post_id ~visibility : (unit, board_error) Result.t =
               Hashtbl.replace store.posts post_key updated;
               mark_dirty_post store post_key;
               invalidate_post_caches store;
-              let posts_jsonl = posts_jsonl_unlocked store in
+              let posts_jsonl = Board_core_persist.posts_jsonl_unlocked store in
               store.dirty_posts <- false;
               Hashtbl.clear store.dirty_post_ids;
               store.last_flush <- Time_compat.now ();

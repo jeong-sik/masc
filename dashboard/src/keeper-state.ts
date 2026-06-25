@@ -1147,6 +1147,16 @@ export function clearActiveStreamRequestId(name: string): void {
   }
 }
 
+/** Release a specific request id from live-send ownership. Returns true if
+ *  the id was owned. Use this for race-free cleanup after a confirmed server
+ *  cancel so a stale cleanup cannot wipe a newer request id claimed for the
+ *  same keeper. */
+export function releaseActiveStreamRequestId(requestId: string): boolean {
+  const id = requestId.trim()
+  if (!id) return false
+  return liveSendRequestOwners.delete(id)
+}
+
 // --- Live send ownership (in-session, requestId-keyed) ---
 
 export function claimLiveSendRequest(requestId: string, name: string): void {

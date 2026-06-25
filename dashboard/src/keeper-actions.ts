@@ -46,6 +46,7 @@ import {
   clearActiveStream,
   clearActiveStreamRequestId,
   finalizeAssistantEntry,
+  releaseActiveStreamRequestId,
   mergeServerHistoryEntries,
   normalizeKeeperProbeResult,
   normalizeKeeperRecoverResult,
@@ -74,6 +75,7 @@ type KeeperInterjectActionKind = 'send' | 'approve' | 'pause' | 'drain'
 
 const TOOL_ONLY_EMPTY_REPLY_TEXT = 'Tool-only turn ended without a final reply.'
 const pendingKeeperThreadCancels = new Map<string, Promise<boolean>>()
+const KEEPER_THREAD_CANCEL_TIMEOUT_MS = 5_000
 
 interface KeeperInterjectCommand {
   readonly kind: KeeperInterjectActionKind
@@ -102,6 +104,10 @@ export function _resetCancelledKeeperThreadRequestsForTests(): void {
   pendingKeeperThreadCancels.clear()
 }
 
+function keeperThreadCancelSignal(): AbortSignal {
+  return AbortSignal.timeout(KEEPER_THREAD_CANCEL_TIMEOUT_MS)
+}
+
 function releaseKeeperThreadCancelTracking(requestId: string): void {
   pendingKeeperThreadCancels.delete(requestId)
 }
@@ -121,7 +127,7 @@ export function cancelKeeperThreadRequest(
     : cancelQueuedKeeperMessage(id))
     .then(() => {
       removePendingKeeperChatRequest(id)
-      clearActiveStreamRequestId(name)
+      releaseActiveStreamRequestId(id)
       setRecordValue(keeperActionErrors, name, null)
       return true
     })
@@ -144,20 +150,25 @@ export async function cancelActiveKeeperThreadMessage(name: string): Promise<boo
   const requestIdBeforeAbort = activeStreamRequestId(keeperName)
   let serverCancelSucceeded = true
   if (requestIdBeforeAbort) {
-    serverCancelSucceeded = await cancelKeeperThreadRequest(keeperName, requestIdBeforeAbort)
+    serverCancelSucceeded = await cancelKeeperThreadRequest(keeperName, requestIdBeforeAbort, {
+      signal: keeperThreadCancelSignal(),
+    })
   }
   const abortResult = abortKeeperThreadMessage(keeperName)
   const requestId = requestIdBeforeAbort ?? abortResult?.requestId ?? null
   if (requestId && requestId !== requestIdBeforeAbort) {
-    serverCancelSucceeded = await cancelKeeperThreadRequest(keeperName, requestId)
+    serverCancelSucceeded = await cancelKeeperThreadRequest(keeperName, requestId, {
+      signal: keeperThreadCancelSignal(),
+    })
   }
   const locallyAborted = Boolean(abortResult?.controllerAborted || abortResult?.entryId)
-  if (!serverCancelSucceeded) {
-    // The backend may still finish and surface via pending request recovery, but
-    // the operator must not be trapped behind an un-abortable local stream.
-    return locallyAborted || Boolean(requestId)
+  if (!requestIdBeforeAbort && !requestId && !locallyAborted) {
+    // Nothing was in flight; treat as a successful no-op.
+    return true
   }
-  return locallyAborted || Boolean(requestId)
+  // Fail-closed: do not report success unless the server confirmed the cancel
+  // and the local stream was actually torn down.
+  return serverCancelSucceeded && locallyAborted
 }
 
 export function selectKeeper(name: string): void {
@@ -787,7 +798,9 @@ export async function sendKeeperThreadMessage(
             setRecordValue(keeperActionErrors, keeperName, message)
           } else if (controller.signal.aborted) {
             requestId = nextRequestId
-            void cancelKeeperThreadRequest(keeperName, nextRequestId)
+            void cancelKeeperThreadRequest(keeperName, nextRequestId, {
+              signal: keeperThreadCancelSignal(),
+            })
           } else {
             requestId = nextRequestId
             // This live send now owns the request; resume must defer to it
@@ -885,10 +898,16 @@ export async function sendKeeperThreadMessage(
     }
   } catch (err) {
     if (isAbortError(err)) {
-      let cancelSucceeded = requestId ? false : true
-      if (requestId && !controller.signal.aborted) {
+      const shouldAttemptServerCancel = Boolean(requestId && liveSendOwnsRequest(requestId))
+      const serverCancelAlreadyFinalized = Boolean(
+        requestId
+        && !liveSendOwnsRequest(requestId)
+        && !pendingKeeperChatRequestsForKeeper(keeperName).some(r => r.requestId === requestId),
+      )
+      let cancelSucceeded = serverCancelAlreadyFinalized
+      if (shouldAttemptServerCancel && requestId) {
         cancelSucceeded = await cancelKeeperThreadRequest(keeperName, requestId, {
-          signal: controller.signal,
+          signal: keeperThreadCancelSignal(),
         })
       }
       finalizeAssistantEntry(keeperName, localId, {

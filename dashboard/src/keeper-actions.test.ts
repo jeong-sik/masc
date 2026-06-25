@@ -471,14 +471,17 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     await cancelActiveKeeperThreadMessage('echo')
 
     expect(cancelQueuedKeeperMessage).toHaveBeenCalledTimes(1)
-    expect(cancelQueuedKeeperMessage).toHaveBeenCalledWith('kmsg_echo_1')
+    expect(cancelQueuedKeeperMessage).toHaveBeenCalledWith(
+      'kmsg_echo_1',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
     const err = await sendPromise
     expect(err).toBeInstanceOf(Error)
     expect(err.name).toBe('AbortError')
     expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
   })
 
-  it('aborts locally and surfaces an error when server cancel fails', async () => {
+  it('reports failure and keeps the pending request when server cancel fails', async () => {
     cancelQueuedKeeperMessage.mockRejectedValue(new Error('network down'))
     streamKeeperMessage.mockImplementation(async (
       _name: string,
@@ -501,7 +504,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     const sendPromise = sendKeeperThreadMessage('echo', 'stuck turn').catch(err => err)
     await Promise.resolve()
 
-    await expect(cancelActiveKeeperThreadMessage('echo')).resolves.toBe(true)
+    await expect(cancelActiveKeeperThreadMessage('echo')).resolves.toBe(false)
     expect(cancelQueuedKeeperMessage).toHaveBeenCalledTimes(1)
     expect(keeperActionErrors.value.echo).toContain('network down')
     expect(pendingKeeperChatRequestsForKeeper('echo')).toHaveLength(1)
@@ -560,13 +563,16 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     controls.emitQueueRequest?.()
     await Promise.resolve()
 
-    expect(cancelQueuedKeeperMessage).toHaveBeenCalledWith('kmsg_echo_late')
+    expect(cancelQueuedKeeperMessage).toHaveBeenCalledWith(
+      'kmsg_echo_late',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
     const err = await sendPromise
     expect(err).toBeInstanceOf(Error)
     expect(err.name).toBe('AbortError')
   })
 
-  it('passes the active stream signal when cancelling after an abort error', async () => {
+  it('uses a fresh timeout signal when cancelling after an abort error', async () => {
     streamKeeperMessage.mockImplementation(async (
       _name: string,
       _message: string,

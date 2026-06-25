@@ -525,8 +525,6 @@ function normalizeKeeperRuntimeResolved(raw: unknown): KeeperRuntimeResolved | n
     v => v === null || v === undefined ? null : toNumber(v) === _MISSING ? _MISSING : (toNumber(v) as number),
   )
   const bootstrap = intField('bootstrap_max_active_keepers')
-  const reactiveMaxTurns = intField('reactive_max_turns_per_call')
-  const autonomousMaxTurns = intField('autonomous_max_turns_per_call')
   const reactiveMaxIdle = intField('reactive_max_idle_turns')
   const autonomousMaxIdle = intField('autonomous_max_idle_turns')
   const turnTimeout = floatField('turn_timeout_sec')
@@ -534,13 +532,10 @@ function normalizeKeeperRuntimeResolved(raw: unknown): KeeperRuntimeResolved | n
   const oasTimeoutOverride = optFloatField('oas_timeout_override_sec')
   const oasTimeoutPer1k = floatField('oas_timeout_per_1k')
   const oasTimeoutPerTurn = floatField('oas_timeout_per_turn')
-  if (!bootstrap || !reactiveMaxTurns || !autonomousMaxTurns || !reactiveMaxIdle
-    || !autonomousMaxIdle || !turnTimeout || !admissionWait || !oasTimeoutPer1k
-    || !oasTimeoutPerTurn) return null
+  if (!bootstrap || !reactiveMaxIdle || !autonomousMaxIdle || !turnTimeout
+    || !admissionWait || !oasTimeoutPer1k || !oasTimeoutPerTurn) return null
   return {
     bootstrap_max_active_keepers: bootstrap,
-    reactive_max_turns_per_call: reactiveMaxTurns,
-    autonomous_max_turns_per_call: autonomousMaxTurns,
     reactive_max_idle_turns: reactiveMaxIdle,
     autonomous_max_idle_turns: autonomousMaxIdle,
     turn_timeout_sec: turnTimeout,

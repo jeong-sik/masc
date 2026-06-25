@@ -62,15 +62,6 @@ let test_descriptor_registry_admits_masc_keeper_cluster () =
                   name (TR.string_of_tried tried)))
     [ "masc_keeper_msg"; "masc_keeper_msg_result"; "masc_keeper_msg_cancel"; "masc_keeper_msg_queue"; "masc_keeper_list"; "masc_keeper_status" ]
 
-let test_extend_turns_resolved () =
-  (* extend_turns is in core_always_tools (Registry_core_tools). *)
-  match TR.resolve "extend_turns" with
-  | TR.Resolved _ -> ()
-  | TR.Alias_to _ -> ()
-  | TR.Unknown { name; tried } ->
-      fail (Printf.sprintf "extend_turns should resolve, got Unknown (tried: %s)"
-              (TR.string_of_tried tried))
-
 let test_keeper_report_state_core_always () =
   check bool
     "keeper_report_state is core always"
@@ -124,7 +115,6 @@ let policy_validation_tool_names =
   ; "keeper_time_now"
   ; "masc_status"
   ; "mcp__masc__masc_status"
-  ; "extend_turns"
   ; "masc_transition"
   ]
 
@@ -167,7 +157,6 @@ let test_retired_public_names_miss () =
 let policy_tool_names =
   List.sort_uniq String.compare
     [
-      "extend_turns";
       "keeper_board_comment";
       "keeper_board_curation_read";
       "keeper_board_curation_submit";
@@ -332,7 +321,6 @@ let () =
         test_case "keeper_board_post resolves via registry" `Quick test_registry_admits_keeper_board_post;
         test_case "mcp prefix stripped and resolved" `Quick test_mcp_prefix_stripped;
         test_case "unknown returns tried list" `Quick test_unknown_returns_tried_list;
-        test_case "extend_turns resolves" `Quick test_extend_turns_resolved;
         test_case "keeper_report_state is core-always structured state tool" `Quick test_keeper_report_state_core_always;
         test_case "tool_execute resolves" `Quick test_tool_execute_resolves;
         test_case "masc_keeper_* cluster resolves via descriptor registry (boot guard)" `Quick test_descriptor_registry_admits_masc_keeper_cluster;

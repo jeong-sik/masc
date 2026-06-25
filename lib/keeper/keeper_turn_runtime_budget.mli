@@ -41,7 +41,6 @@ type provider_timeout_budget = {
   keeper_turn_timeout_sec : float;
   remaining_turn_budget_sec : float;
   estimated_input_tokens : int;
-  max_turns : int;
   source : string;
 }
 
@@ -52,12 +51,11 @@ val resolve_bounded_provider_timeout_budget_with_turn_budget :
   allow_wall_clock_retry_budget:bool ->
   is_retry:bool ->
   estimated_input_tokens:int ->
-  max_turns:int ->
   remaining_turn_budget_s:float ->
   provider_timeout_budget
 (** Resolves the per-provider timeout plan. The outer keeper turn budget is
     telemetry here, not an admission gate; provider liveness, stream idle, and
-    max-turn limits own attempt termination. *)
+    idle-turn limits own attempt termination. *)
 
 val allow_wall_clock_retry_budget_for_attempt :
   is_retry:bool ->
@@ -65,17 +63,6 @@ val allow_wall_clock_retry_budget_for_attempt :
   attempt:int ->
   attempted_runtimes:string list ->
   bool
-
-val bounded_provider_timeout_for_turn_budget_with_turn_budget :
-  estimated_input_tokens:int ->
-  max_turns:int ->
-  remaining_turn_budget_s:float ->
-  float option
-
-val bounded_provider_timeout_for_turn_budget :
-  estimated_input_tokens:int ->
-  remaining_turn_budget_s:float ->
-  float option
 
 val degraded_retry_slot_phase_budget_sec : float
 (** Maximum outer-slot hold time before degraded runtime rotation is
@@ -100,7 +87,6 @@ val next_fail_open_runtime_for_turn_with_budget :
   effective_runtime:string ->
   attempted_runtimes:string list ->
   estimated_input_tokens:int ->
-  max_turns:int ->
   ?time_spent_in_turn_s:float ->
   remaining_turn_budget_s:float ->
   Agent_sdk.Error.sdk_error ->

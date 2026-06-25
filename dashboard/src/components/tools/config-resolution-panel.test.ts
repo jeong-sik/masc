@@ -123,8 +123,6 @@ describe('ConfigResolutionPanel', () => {
           },
           keeper_runtime: {
             bootstrap_max_active_keepers: { value: 9, source: 'toml' },
-            reactive_max_turns_per_call: { value: 15, source: 'toml' },
-            autonomous_max_turns_per_call: { value: 6, source: 'derived' },
             reactive_max_idle_turns: { value: 15, source: 'toml' },
             autonomous_max_idle_turns: { value: 3, source: 'derived' },
             turn_timeout_sec: { value: 90, source: 'toml' },

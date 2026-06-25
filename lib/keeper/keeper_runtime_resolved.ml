@@ -11,8 +11,6 @@ type 'a field = {
 
 type t = {
   bootstrap_max_active_keepers : int field;
-  reactive_max_turns_per_call : int field;
-  autonomous_max_turns_per_call : int field;
   reactive_max_idle_turns : int field;
   autonomous_max_idle_turns : int field;
   turn_timeout_sec : float field;
@@ -46,26 +44,9 @@ let source_to_string = function
 let get_int = Env_config_core.get_int
 let get_float = Env_config_core.get_float
 
-let max_turns_per_call_min = 1
-let max_turns_per_call_max = 100
-
 let bootstrap_max_active_keepers_live () =
   get_int ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
   |> Keeper_fd_pressure.cap_active_keepers_for_nofile
-
-let reactive_max_turns_per_call_live () =
-  max max_turns_per_call_min
-    (min max_turns_per_call_max
-       (get_int ~default:30 "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"))
-
-let autonomous_max_turns_per_call_live () =
-  let global_cap = reactive_max_turns_per_call_live () in
-  let default = min global_cap 10 in
-  max 1
-    (min global_cap
-       (min max_turns_per_call_max
-          (get_int ~default
-             "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS")))
 
 (* The idle loop guard must sit strictly above the graduated idle hook's
    skip threshold ([Env_config_keeper.KeeperKeepalive.idle_skip_threshold],
@@ -170,22 +151,6 @@ let freeze_from_current () =
       "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
       (bootstrap_max_active_keepers_live ())
   in
-  let reactive_max_turns_per_call =
-    source_field
-      "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"
-      (reactive_max_turns_per_call_live ())
-  in
-  let autonomous_max_turns_per_call =
-    let source =
-      match source_of_env_name "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS" with
-      | None | Some Default -> Derived
-      | Some other -> other
-    in
-    {
-      value = autonomous_max_turns_per_call_live ();
-      source;
-    }
-  in
   let reactive_max_idle_turns =
     source_field
       "MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE"
@@ -248,8 +213,6 @@ let freeze_from_current () =
   in
   {
     bootstrap_max_active_keepers;
-    reactive_max_turns_per_call;
-    autonomous_max_turns_per_call;
     reactive_max_idle_turns;
     autonomous_max_idle_turns;
     turn_timeout_sec;
@@ -292,8 +255,6 @@ let to_yojson (runtime : t) =
   `Assoc
     [
       ("bootstrap_max_active_keepers", field_to_yojson (fun value -> `Int value) runtime.bootstrap_max_active_keepers);
-      ("reactive_max_turns_per_call", field_to_yojson (fun value -> `Int value) runtime.reactive_max_turns_per_call);
-      ("autonomous_max_turns_per_call", field_to_yojson (fun value -> `Int value) runtime.autonomous_max_turns_per_call);
       ("reactive_max_idle_turns", field_to_yojson (fun value -> `Int value) runtime.reactive_max_idle_turns);
       ("autonomous_max_idle_turns", field_to_yojson (fun value -> `Int value) runtime.autonomous_max_idle_turns);
       ("turn_timeout_sec", field_to_yojson (fun value -> `Float value) runtime.turn_timeout_sec);
@@ -308,12 +269,6 @@ let to_yojson (runtime : t) =
 
 let bootstrap_max_active_keepers () =
   (current ()).bootstrap_max_active_keepers.value
-
-let reactive_max_turns_per_call () =
-  (current ()).reactive_max_turns_per_call.value
-
-let autonomous_max_turns_per_call () =
-  (current ()).autonomous_max_turns_per_call.value
 
 let reactive_max_idle_turns () =
   (current ()).reactive_max_idle_turns.value

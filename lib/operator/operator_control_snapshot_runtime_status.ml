@@ -67,14 +67,6 @@ let remote_client_type_of_context (ctx : 'a context) =
   | None -> "local_api"
 ;;
 
-let max_turns_override_source = function
-  | Some n
-    when n >= Keeper_runtime_resolved.max_turns_per_call_min
-         && n <= Keeper_runtime_resolved.max_turns_per_call_max -> "override"
-  | Some _ -> "override_invalid"
-  | None -> "env"
-;;
-
 let operator_server_profile_json =
   `Assoc
     [ "name", `String "operator_remote_v1"

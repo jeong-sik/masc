@@ -61,11 +61,9 @@ val resolve_overrides :
 
     {[
       [autonomous]
-      max_turns_per_call          = 7
       concurrency                 = 3
 
       [reactive]
-      max_turns_per_call          = 15
       concurrency                 = 4
 
       [heartbeat]

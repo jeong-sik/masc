@@ -84,7 +84,6 @@ module Attr_key = struct
   let keeper_trace_id = register Legacy "keeper.trace_id"
   let keeper_generation = register Legacy "keeper.generation"
   let keeper_max_context = register Legacy "keeper.max_context"
-  let keeper_max_turns = register Legacy "keeper.max_turns"
   let keeper_max_idle_turns = register Legacy "keeper.max_idle_turns"
   let keeper_channel = register Legacy "keeper.channel"
   let keeper_is_retry = register Legacy "keeper.is_retry"
@@ -164,7 +163,6 @@ let keeper_turn_attrs
       ~trace_id
       ~generation
       ~max_context
-      ~max_turns
       ~max_idle_turns
       ~channel
       ~is_retry
@@ -181,7 +179,6 @@ let keeper_turn_attrs
   ; Attr_key.keeper_trace_id, `String trace_id
   ; Attr_key.keeper_generation, `Int generation
   ; Attr_key.keeper_max_context, `Int max_context
-  ; Attr_key.keeper_max_turns, `Int max_turns
   ; Attr_key.keeper_max_idle_turns, `Int max_idle_turns
   ; Attr_key.keeper_channel, `String channel
   ; Attr_key.keeper_is_retry, `Bool is_retry
@@ -210,7 +207,6 @@ let with_keeper_turn_span
       ~trace_id
       ~generation
       ~max_context
-      ~max_turns
       ~max_idle_turns
       ~channel
       ~is_retry
@@ -228,7 +224,6 @@ let with_keeper_turn_span
         ~trace_id
         ~generation
         ~max_context
-        ~max_turns
         ~max_idle_turns
         ~channel
         ~is_retry

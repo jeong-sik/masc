@@ -182,7 +182,6 @@ let test_retry_timeout_budget_ignores_expired_outer_turn_budget () =
       ~allow_wall_clock_retry_budget:false
       ~is_retry:true
       ~estimated_input_tokens:10_000
-      ~max_turns:6
       ~remaining_turn_budget_s:0.0
   in
   Alcotest.(check string)
@@ -204,7 +203,6 @@ let test_first_attempt_timeout_ignores_expired_outer_turn_budget () =
       ~allow_wall_clock_retry_budget:false
       ~is_retry:false
       ~estimated_input_tokens:10_000
-      ~max_turns:6
       ~remaining_turn_budget_s:0.0
   in
   Alcotest.(check string)

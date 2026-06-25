@@ -353,8 +353,6 @@ const KEEPER_RUNTIME_ROWS: Array<{
   fmt: 'int' | 'float' | 'duration'
 }> = [
   { key: 'bootstrap_max_active_keepers', label: 'bootstrap max active keepers', fmt: 'int' },
-  { key: 'reactive_max_turns_per_call', label: 'reactive max turns/call', fmt: 'int' },
-  { key: 'autonomous_max_turns_per_call', label: 'autonomous max turns/call', fmt: 'int' },
   { key: 'reactive_max_idle_turns', label: 'reactive max idle turns', fmt: 'int' },
   { key: 'autonomous_max_idle_turns', label: 'autonomous max idle turns', fmt: 'int' },
   { key: 'turn_timeout_sec', label: 'turn timeout', fmt: 'duration' },

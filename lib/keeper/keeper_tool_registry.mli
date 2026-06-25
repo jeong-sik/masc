@@ -16,8 +16,8 @@ val keeper_internal_candidate_tool_names : string list
     shard is not registered. *)
 val keeper_voice_tool_schemas : Masc_domain.tool_schema list
 
-(** Tools that bypass policy restrictions: extend_turns,
-    keeper_context_status, keeper_tool_search. *)
+(** Tools that bypass policy restrictions:
+    keeper_context_status and keeper_tool_search. *)
 val core_always_tools : string list
 
 (** Core tools always visible to the LLM — superset of

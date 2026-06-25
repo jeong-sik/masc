@@ -462,7 +462,6 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
               keeper_turn_timeout_sec: asNumber(rawProviderTimeoutPlan.keeper_turn_timeout_sec) ?? null,
               remaining_turn_budget_sec: asNumber(rawProviderTimeoutPlan.remaining_turn_budget_sec) ?? null,
               estimated_input_tokens: asNumber(rawProviderTimeoutPlan.estimated_input_tokens) ?? null,
-              max_turns: asNumber(rawProviderTimeoutPlan.max_turns) ?? null,
               source: typeof rawProviderTimeoutPlan.source === 'string' ? rawProviderTimeoutPlan.source : null,
             }
           : null

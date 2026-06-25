@@ -137,9 +137,48 @@ let write_goal_task_links config links =
 ;;
 
 let write_goal_task_links_result config ~operation links =
+  let expected = normalize_link_set links in
+  let equal_links left right =
+    List.equal
+      (fun (left_goal_id, left_task_ids) (right_goal_id, right_task_ids) ->
+         String.equal left_goal_id right_goal_id
+         && List.equal String.equal left_task_ids right_task_ids)
+      left
+      right
+  in
+  let verify_written ~label path =
+    match read_json_result config path with
+    | Error msg ->
+      Error
+        (Printf.sprintf
+           "%s: failed to verify %s goal_task_links write at %s: %s"
+           operation
+           label
+           path
+           msg)
+    | Ok json ->
+      let actual = links_of_yojson json in
+      if equal_links expected actual
+      then Ok ()
+      else
+        Error
+          (Printf.sprintf
+             "%s: verified %s goal_task_links write mismatch at %s"
+             operation
+             label
+             path)
+  in
   try
-    write_goal_task_links config links;
-    Ok ()
+    write_goal_task_links config expected;
+    (match
+       ( verify_written ~label:"primary" (goal_task_links_path config)
+       , verify_written ~label:"recovery" (goal_task_links_recovery_path config)
+       )
+     with
+     | Ok (), Ok () -> Ok ()
+     | Error msg, _ | _, Error msg ->
+       Log.Misc.warn "%s" msg;
+       Error msg)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e ->

@@ -210,8 +210,8 @@ and normalize_goal (goal : goal) =
          active verification request_id; all other phases clear it as part
          of [normalize_goal]. A future phase added to [Goal_phase.t] (e.g.
          a hypothetical [Awaiting_review]) that should also retain the
-         request_id would silently inherit "clear" under the previous
-         [_, _ -> None] catch-all. *)
+         request_id would silently inherit "clear" under the previous wildcard
+         catch-all. *)
       (match goal.phase, goal.active_verification_request_id with
       | Goal_phase.Awaiting_verification, request_id -> request_id
       | ( Goal_phase.Executing | Goal_phase.Awaiting_approval

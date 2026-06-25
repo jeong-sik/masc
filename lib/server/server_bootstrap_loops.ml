@@ -41,6 +41,58 @@ let autoboot_proactive_warmup_sec ~base_warmup ~stagger_window_sec ~keeper_name 
   else base_warmup + (stable_keeper_name_hash keeper_name mod (stagger_window_sec + 1))
 ;;
 
+let keeper_agent_status_of_phase = function
+  | Keeper_state_machine.Running -> Masc_domain.Active
+  | Keeper_state_machine.Paused -> Masc_domain.Listening
+  | Keeper_state_machine.Failing
+  | Keeper_state_machine.Overflowed
+  | Keeper_state_machine.Compacting
+  | Keeper_state_machine.HandingOff
+  | Keeper_state_machine.Draining
+  | Keeper_state_machine.Restarting -> Masc_domain.Busy
+  | Keeper_state_machine.Offline
+  | Keeper_state_machine.Stopped
+  | Keeper_state_machine.Crashed
+  | Keeper_state_machine.Dead
+  | Keeper_state_machine.Zombie -> Masc_domain.Inactive
+;;
+
+let keeper_registry_agent ~now (entry : Keeper_registry.registry_entry) : Masc_domain.agent =
+  let meta = entry.meta in
+  let agent_name =
+    match String.trim meta.agent_name with
+    | "" -> Keeper_identity.keeper_agent_name entry.name
+    | name -> name
+  in
+  let agent_meta : Masc_domain.agent_meta =
+    { session_id = "keeper-registry:" ^ entry.name
+    ; agent_type = "keeper"
+    ; pid = None
+    ; hostname = None
+    ; tty = None
+    ; parent_task = None
+    ; keeper_name = Some entry.name
+    ; keeper_id = None
+    }
+  in
+  { Masc_domain.id = None
+  ; name = agent_name
+  ; agent_type = "keeper"
+  ; status = keeper_agent_status_of_phase entry.phase
+  ; capabilities = []
+  ; current_task = None
+  ; session_bound_at = now
+  ; last_seen = now
+  ; meta = Some agent_meta
+  }
+;;
+
+let keeper_registry_runtime_agents (config : Workspace_utils_backend_setup.config) =
+  let now = Masc_domain.now_iso () in
+  Keeper_registry.all ~base_path:config.base_path ()
+  |> List.map (keeper_registry_agent ~now)
+;;
+
 let board_sse_event_params event =
   match event with
   | Board_dispatch.Post_created { post_id; author; title; content; post_kind; hearth } ->
@@ -208,6 +260,7 @@ let start_keeper_loops
   Progress.set_sse_callback Sse.broadcast;
   (* Wire stop_keeper hook so zombie GC can terminate keeper fibers *)
   Atomic.set Workspace_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
+  Atomic.set Workspace_hooks.runtime_agents_fn keeper_registry_runtime_agents;
   (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems.
      Configuration is sourced from [Masc_event_bus_policy.oas_runtime] so the
      buffer-size/policy choice is auditable in source rather than implicit in

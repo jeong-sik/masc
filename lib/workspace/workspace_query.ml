@@ -87,6 +87,71 @@ let load_agents_from_dir config dir ~include_inactive =
              Some agent
          | Ok _ | Error _ -> None)
 
+let agent_type_of_state_agent_name name =
+  if Workspace_resilience.Zombie.is_keeper_name name
+  then "keeper"
+  else (
+    match Nickname.extract_agent_type name with
+    | Some agent_type -> agent_type
+    | None -> name)
+
+let state_backed_agent state (name : string) : Masc_domain.agent =
+  let agent_type = agent_type_of_state_agent_name name in
+  let timestamp = state.started_at in
+  let meta : Masc_domain.agent_meta =
+    { session_id = "workspace-state:" ^ name
+    ; agent_type
+    ; pid = None
+    ; hostname = None
+    ; tty = None
+    ; parent_task = None
+    ; keeper_name = None
+    ; keeper_id = None
+    }
+  in
+  { id = None
+  ; name
+  ; agent_type
+  ; status = Masc_domain.Active
+  ; capabilities = []
+  ; current_task = None
+  ; session_bound_at = timestamp
+  ; last_seen = timestamp
+  ; meta = Some meta
+  }
+
+let state_backed_active_agents config =
+  let state = read_state config in
+  state.active_agents |> normalized_string_list |> List.map (state_backed_agent state)
+
+let runtime_agents config =
+  try (Atomic.get Workspace_hooks.runtime_agents_fn) config with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Log.Workspace.warn
+      "runtime_agents_fn failed while reading active agents: %s"
+      (Printexc.to_string exn);
+    []
+
+let agent_status_is_active = function
+  | Masc_domain.Active | Busy | Listening -> true
+  | Inactive -> false
+
+let active_runtime_agents config =
+  runtime_agents config
+  |> List.filter (fun (agent : Masc_domain.agent) ->
+         agent_status_is_active agent.status)
+
+let merge_agents primary secondary =
+  let seen = Hashtbl.create (List.length primary + List.length secondary) in
+  let add_if_new acc (agent : Masc_domain.agent) =
+    if Hashtbl.mem seen agent.name then acc
+    else (
+      Hashtbl.add seen agent.name ();
+      agent :: acc)
+  in
+  List.rev (List.fold_left add_if_new (List.fold_left add_if_new [] primary) secondary)
+
 (** Get raw agent list (for orchestrator).
     Includes inactive agents. Requires initialization. *)
 let get_agents_raw config =
@@ -101,7 +166,9 @@ let get_active_agents config =
   if not (root_is_initialized config) then []
   else
     let agents_path = agents_dir config in
-    load_agents_from_dir config agents_path ~include_inactive:false
+    let workspace_agents = load_agents_from_dir config agents_path ~include_inactive:false in
+    let state_agents = state_backed_active_agents config in
+    merge_agents (merge_agents workspace_agents state_agents) (active_runtime_agents config)
 
 (** Like [get_agents_raw] but returns [[]] when not initialized
     instead of raising.  Includes inactive agents.

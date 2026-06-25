@@ -1615,6 +1615,132 @@ let test_get_agents_raw () =
     Alcotest.(check bool) "at least 2 agents" true (List.length agents >= 2))
 ;;
 
+let remove_agent_files config =
+  let dir = Workspace.agents_dir config in
+  if Sys.file_exists dir
+  then
+    Sys.readdir dir
+    |> Array.iter (fun name ->
+      if Filename.check_suffix name ".json" then Sys.remove (Filename.concat dir name))
+;;
+
+let runtime_agent ?(status = Masc_domain.Active) name : Masc_domain.agent =
+  let now = Masc_domain.now_iso () in
+  let meta : Masc_domain.agent_meta =
+    { session_id = "runtime-hook:" ^ name
+    ; agent_type = "keeper"
+    ; pid = None
+    ; hostname = None
+    ; tty = None
+    ; parent_task = None
+    ; keeper_name = Some name
+    ; keeper_id = None
+    }
+  in
+  { id = None
+  ; name
+  ; agent_type = "keeper"
+  ; status
+  ; capabilities = []
+  ; current_task = None
+  ; session_bound_at = now
+  ; last_seen = now
+  ; meta = Some meta
+  }
+;;
+
+let test_get_active_agents_falls_back_to_state_when_agent_files_missing () =
+  with_test_env (fun config ->
+    let state = Workspace.read_state config in
+    Workspace.write_state
+      config
+      { state with active_agents = [ "keeper-albini-agent"; ""; "keeper-albini-agent" ] };
+    remove_agent_files config;
+    let agents = Workspace.get_active_agents config in
+    match agents with
+    | [ agent ] ->
+      Alcotest.(check string) "agent name" "keeper-albini-agent" agent.name;
+      Alcotest.(check string) "agent type" "keeper" agent.agent_type;
+      Alcotest.(check string)
+        "agent status"
+        "active"
+        (Masc_domain.agent_status_to_string agent.status);
+      (match agent.meta with
+       | Some meta ->
+         Alcotest.(check string)
+           "synthetic session id"
+           "workspace-state:keeper-albini-agent"
+           meta.session_id
+       | None -> Alcotest.fail "expected synthetic agent meta")
+    | _ -> Alcotest.failf "expected one state-backed agent, got %d" (List.length agents))
+;;
+
+let test_get_active_agents_merges_state_with_file_backed_agents () =
+  with_test_env (fun config ->
+    let file_agent =
+      match Workspace.get_active_agents config with
+      | [ agent ] -> agent
+      | agents -> Alcotest.failf "expected one file-backed agent, got %d" (List.length agents)
+    in
+    let state = Workspace.read_state config in
+    Workspace.write_state
+      config
+      { state with
+        active_agents =
+          [ file_agent.name
+          ; "keeper-state-only-agent"
+          ; ""
+          ; "keeper-state-only-agent"
+          ]
+      };
+    let agents = Workspace.get_active_agents config in
+    let names = List.map (fun (agent : Masc_domain.agent) -> agent.name) agents in
+    Alcotest.(check bool)
+      "keeps file-backed agent"
+      true
+      (List.exists (String.equal file_agent.name) names);
+    Alcotest.(check bool)
+      "adds state-only agent"
+      true
+      (List.exists (String.equal "keeper-state-only-agent") names);
+    Alcotest.(check int) "deduped active agents" 2 (List.length agents);
+    let output = Workspace.status config in
+    Alcotest.(check bool)
+      "direct status includes state-only agent"
+      true
+      (str_contains output "keeper-state-only-agent → idle"))
+;;
+
+let test_get_active_agents_filters_inactive_runtime_agents () =
+  with_test_env (fun config ->
+    let previous = Atomic.get Workspace_hooks.runtime_agents_fn in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set Workspace_hooks.runtime_agents_fn previous)
+      (fun () ->
+        Atomic.set Workspace_hooks.runtime_agents_fn (fun hook_config ->
+          if String.equal hook_config.base_path config.base_path
+          then
+            [ runtime_agent "keeper-runtime-active-agent"
+            ; runtime_agent ~status:Masc_domain.Inactive "keeper-runtime-inactive-agent"
+            ]
+          else []);
+        let agents = Workspace.get_active_agents config in
+        let names = List.map (fun (agent : Masc_domain.agent) -> agent.name) agents in
+        Alcotest.(check bool)
+          "keeps active runtime agent"
+          true
+          (List.exists (String.equal "keeper-runtime-active-agent") names);
+        Alcotest.(check bool)
+          "filters inactive runtime agent"
+          false
+          (List.exists (String.equal "keeper-runtime-inactive-agent") names);
+        let output = Workspace.status config in
+        Alcotest.(check bool)
+          "direct status hides inactive runtime agent"
+          false
+          (str_contains output "keeper-runtime-inactive-agent")))
+;;
+
 let test_get_messages_raw () =
   with_test_env (fun config ->
     let _ = Workspace.broadcast config ~from_agent:"claude" ~content:"Message 1" in
@@ -1984,6 +2110,18 @@ let () =
       , [ Alcotest.test_case "get tasks raw" `Quick test_get_tasks_raw
         ; Alcotest.test_case "get tasks raw empty" `Quick test_get_tasks_raw_empty
         ; Alcotest.test_case "get agents raw" `Quick test_get_agents_raw
+        ; Alcotest.test_case
+            "get active agents falls back to state"
+            `Quick
+            test_get_active_agents_falls_back_to_state_when_agent_files_missing
+        ; Alcotest.test_case
+            "get active agents merges state and file-backed"
+            `Quick
+            test_get_active_agents_merges_state_with_file_backed_agents
+        ; Alcotest.test_case
+            "get active agents filters inactive runtime agents"
+            `Quick
+            test_get_active_agents_filters_inactive_runtime_agents
         ; Alcotest.test_case "get messages raw" `Quick test_get_messages_raw
         ; Alcotest.test_case "is agent joined" `Quick test_is_agent_session_bound
         ] )

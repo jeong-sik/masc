@@ -190,10 +190,10 @@ let safe_current_task (ctx : context) ~session_bound =
 ;;
 
 let safe_get_agents (ctx : context) =
-  try Workspace.get_agents_raw ctx.config with
+  try Workspace.get_active_agents ctx.config with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Log.Workspace.warn "get_agents_raw failed: %s" (Stdlib.Printexc.to_string exn);
+    Log.Workspace.warn "get_active_agents failed: %s" (Stdlib.Printexc.to_string exn);
     []
 ;;
 

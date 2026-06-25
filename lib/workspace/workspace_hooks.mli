@@ -27,6 +27,8 @@ val activity_emit_fn : (Workspace_utils_backend_setup.config ->
 val agent_economy_earn_fn : (base_path:string -> agent_name:string -> reason:string -> unit)
            Atomic.t
 val stop_keeper_fn : (string -> unit) Atomic.t
+val runtime_agents_fn :
+  (Workspace_utils_backend_setup.config -> Masc_domain.agent list) Atomic.t
 val relation_on_leave_fn : (leaving_agent:string -> active_agents:string list -> unit)
            Atomic.t
 val relation_on_task_done_fn : (assignee:string -> active_agents:string list -> unit) Atomic.t

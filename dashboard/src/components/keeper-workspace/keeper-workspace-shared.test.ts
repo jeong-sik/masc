@@ -2,6 +2,7 @@ import { render } from 'preact'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   keeperBucket,
+  keeperFleetTone,
   keeperStatusTone,
   statePillTone,
   keeperModelLabel,
@@ -104,5 +105,18 @@ describe('WorkspaceSigil', () => {
     expect(el.textContent).toBe('MS') // canonical sigil for masc-improver
     expect(el.style.background).toContain('--color-keeper-6') // canonical slot 6
     expect(el.style.width).toBe('46px')
+  })
+})
+
+describe('keeperFleetTone', () => {
+  it('surfaces attention and approval gates as bad even when the keeper is running', () => {
+    expect(keeperFleetTone(mk({ needs_attention: true }))).toBe('bad')
+    expect(keeperFleetTone(mk({ blocked_task_count: 2 }))).toBe('bad')
+    expect(keeperFleetTone(mk({ current_gate: { kind: 'approval_required', tool: 'shell', risk: 'high' } }))).toBe('bad')
+  })
+
+  it('falls back to the canonical status tone when no fleet attention is present', () => {
+    expect(keeperFleetTone(mk({ status: 'running', lifecycle_phase: 'Running' }))).toBe('ok')
+    expect(keeperFleetTone(mk({ status: 'running', lifecycle_phase: 'Paused', paused: true }))).toBe('warn')
   })
 })

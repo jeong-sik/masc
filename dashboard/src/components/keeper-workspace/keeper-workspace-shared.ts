@@ -125,6 +125,19 @@ export function keeperStatusTone(keeper: Keeper): DotTone {
   return 'idle'
 }
 
+/** Fleet surfaces are attention-first: a keeper with blocked work or an
+ *  approval gate should not look healthy just because its runtime is still
+ *  technically running. Kept here so roster rows and the selected-runtime rail
+ *  cannot silently diverge. */
+export function keeperFleetTone(keeper: Keeper): DotTone {
+  if (
+    keeper.needs_attention === true
+    || (keeper.blocked_task_count ?? 0) > 0
+    || keeper.current_gate?.kind === 'approval_required'
+  ) return 'bad'
+  return keeperStatusTone(keeper)
+}
+
 /** The state-pill modifier class for the chat header, derived from the health
  *  tone so error phases get the `bad` pill rather than collapsing to `off`. */
 export function statePillTone(tone: DotTone): 'run' | 'warn' | 'bad' | 'off' {

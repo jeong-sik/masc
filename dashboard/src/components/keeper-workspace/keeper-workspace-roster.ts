@@ -30,6 +30,7 @@ import {
   WorkspaceSigil,
   StatusDot,
   keeperBucket,
+  keeperFleetTone,
   keeperStatusTone,
   keeperPhaseLabel,
   type KeeperBucket,
@@ -117,11 +118,6 @@ function attentionCount(keeper: Keeper): number {
 }
 function needsAttention(keeper: Keeper): boolean {
   return keeper.needs_attention === true || attentionCount(keeper) > 0
-}
-
-function keeperFleetTone(keeper: Keeper): DotTone {
-  if (needsAttention(keeper) || keeper.current_gate?.kind === 'approval_required') return 'bad'
-  return keeperStatusTone(keeper)
 }
 
 function keeperContextRatio(keeper: Keeper): number {

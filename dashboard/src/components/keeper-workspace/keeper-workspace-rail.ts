@@ -19,11 +19,11 @@ import { keeperActionVisibility } from '../../lib/keeper-predicates'
 import {
   WorkspaceSigil,
   keeperBucket,
+  keeperFleetTone,
   keeperModelLabel,
   keeperPhaseLabel,
   keeperPhaseToken,
   keeperRuntimeLabel,
-  keeperStatusTone,
 } from './keeper-workspace-shared'
 import { runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
 import { CountBadge } from '../v2/primitives-v2'
@@ -132,15 +132,6 @@ function formatCtxK(n: number | null | undefined): string | null {
   return `${Math.round(n / 1000)}k ctx`
 }
 
-function keeperFleetTone(keeper: Keeper) {
-  if (
-    keeper.needs_attention === true
-    || (keeper.blocked_task_count ?? 0) > 0
-    || keeper.current_gate?.kind === 'approval_required'
-  ) return 'bad'
-  return keeperStatusTone(keeper)
-}
-
 const FLEET_ACTION_LABELS: Record<KeeperActionKey, string> = {
   pause: '일시정지',
   resume: '재개',
@@ -176,7 +167,7 @@ function keeperRecentTools(keeper: Keeper): string[] {
 }
 
 function FleetSelectedSection({ keeper }: { keeper: Keeper }): VNode {
-  const pressure = contextPercent(keeper) ?? 0
+  const pressure = contextPercent(keeper)
   const tools = keeperRecentTools(keeper)
   const taskCount = ownedTasks(keeper).length
   const latestTps = keeper.metrics_series?.at(-1)?.wall_tokens_per_second
@@ -212,9 +203,9 @@ function FleetSelectedSection({ keeper }: { keeper: Keeper }): VNode {
       <div class="kw-fleet-pressure">
         <div>
           <span>Context pressure</span>
-          <strong>${pressure}%</strong>
+          <strong>${pressure === null ? '—' : `${pressure}%`}</strong>
         </div>
-        <div class="kw-fleet-pressure-bar" aria-hidden="true"><i style=${{ width: `${pressure}%` }}></i></div>
+        <div class="kw-fleet-pressure-bar" aria-hidden="true"><i style=${{ width: `${pressure ?? 0}%` }}></i></div>
       </div>
       <div class="kw-fleet-vitals">
         <div><span>model</span><b title=${model ?? ''}>${model ?? '—'}</b></div>

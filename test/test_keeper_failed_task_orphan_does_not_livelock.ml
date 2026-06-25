@@ -1,4 +1,4 @@
-(** RFC-0294 T3 — a static orphan does not produce a self-cadence livelock.
+(** RFC-keeper-proactive-wake-actionability-invariant T3 — a static orphan does not produce a self-cadence livelock.
 
     Reproduces the executor incident shape (2026-06-21..24): a static
     [failed_task_count > 0] with nothing claimable, re-evaluated on the keeper's

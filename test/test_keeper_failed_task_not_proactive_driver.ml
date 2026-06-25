@@ -1,4 +1,4 @@
-(** RFC-0294 T1 — failed_task must not drive a proactive turn.
+(** RFC-keeper-proactive-wake-actionability-invariant T1 — failed_task must not drive a proactive turn.
 
     The [failed_task] signal grants only the read-only [Task_audit] affordance
     (tools keeper_tasks_audit / keeper_tasks_list / masc_tasks), so a keeper

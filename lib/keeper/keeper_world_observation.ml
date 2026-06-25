@@ -806,7 +806,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   }
 ;;
 
-(* RFC-0294: a task-backlog signal drives a proactive turn only if the
+(* RFC-keeper-proactive-wake-actionability-invariant: a task-backlog signal drives a proactive turn only if the
    affordance it grants can mutate task state (and thus clear the signal that
    surfaced it).  [failed_task] grants only [Task_audit], whose tools are
    read-only, so [failed_drives_wake] is structurally [false]: a keeper cannot
@@ -1034,7 +1034,7 @@ let keeper_cycle_decision
         let task_reactive_cooldown =
           max task_cooldown_floor (effective_cooldown / max 1 task_cooldown_divisor)
         in
-        (* RFC-0294: failed_task no longer contributes — Task_audit is
+        (* RFC-keeper-proactive-wake-actionability-invariant: failed_task no longer contributes — Task_audit is
            advisory-only, so an orphan this keeper cannot clear must not drive
            the backlog cadence.  claimable (Task_claim) remains actionable. *)
         let has_actionable_tasks =

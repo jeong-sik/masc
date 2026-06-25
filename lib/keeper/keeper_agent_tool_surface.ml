@@ -82,7 +82,7 @@ let tools_for_affordance = function
     [ "keeper_tasks_list"; "keeper_tasks_audit";
       "keeper_task_done"; "masc_transition" ]
 
-(* RFC-0294: does this affordance grant the keeper a tool that can change
+(* RFC-keeper-proactive-wake-actionability-invariant: does this affordance grant the keeper a tool that can change
    task/world state (and thus clear the signal that surfaced it)?  Exhaustive
    match over the closed [turn_affordance] sum, so adding a new affordance
    forces a decision here at compile time.  [Task_audit] is the sole

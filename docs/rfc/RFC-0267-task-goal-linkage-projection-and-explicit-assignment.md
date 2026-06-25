@@ -26,7 +26,7 @@ Two gaps follow from that refactor, and both are observable in the live
 deployment (base-path `/Users/dancer/me`, server `:8935`, 2026-06-20):
 
 **Gap A — links exist but no surface shows them (display path severed).**
-The registry is *not* empty: `~/.masc/tasks/goal_task_links.json` holds real
+The registry is *not* empty: `<base-path>/.masc/tasks/goal_task_links.json` holds real
 entries — e.g. `goal-1779348737104-9783 → [task-984..988]`,
 `goal-1781235828597-bc8b → [task-954, task-955, task-959, task-1057]` (≥3
 goals, ≥9 task links). Yet:

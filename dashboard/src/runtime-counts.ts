@@ -1,7 +1,8 @@
-import type { DashboardNamespaceTruthResponse, DashboardShellResponse } from './types'
+import type { DashboardFleetSafetyHealth, DashboardNamespaceTruthResponse, DashboardShellResponse } from './types'
 
 export type RuntimeCountSource =
   | 'execution'
+  | 'runtime-health'
   | 'project-snapshot'
   | 'shell'
   | 'partial'
@@ -53,12 +54,18 @@ interface ResolveRuntimeCountsOptions {
   namespaceTruthConfiguredKeepers?: number
   shellCounts?: DashboardShellResponse['counts'] | null
   shellConfiguredKeepers?: number
+  runtimeFleetSafety?: DashboardFleetSafetyHealth | null
+  runtimeHealthGeneratedAt?: string | null
+  nowMs?: number
+}
+
+function finiteCount(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  return Math.max(0, Math.floor(value))
 }
 
 function normalizeCount(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0
-    ? Math.floor(value)
-    : 0
+  return finiteCount(value) ?? 0
 }
 
 function normalizeRuntimeToken(value: unknown): string {
@@ -103,6 +110,53 @@ export function keeperRowLooksRunning(row: KeeperRuntimeCountRow | null | undefi
     || RUNNING_KEEPER_RUNTIME_TOKENS.has(phase)
     || RUNNING_KEEPER_RUNTIME_TOKENS.has(stage)
   )
+}
+
+export interface RuntimeFleetSafetyCounts {
+  runningKeepers: number
+  pausedKeepers: number
+  hasRunningKeepers: boolean
+  hasPausedKeepers: boolean
+}
+
+export const RUNTIME_HEALTH_FRESH_MS = 120_000
+
+function firstFiniteCount(...values: unknown[]): number | null {
+  for (const value of values) {
+    const count = finiteCount(value)
+    if (count !== null) return count
+  }
+  return null
+}
+
+export function resolveRuntimeFleetSafetyCounts(
+  fleetSafety: DashboardFleetSafetyHealth | null | undefined,
+): RuntimeFleetSafetyCounts | null {
+  if (!fleetSafety) return null
+  const fleet = fleetSafety.keeper_fleet_safety
+  const runningKeepers = firstFiniteCount(fleet?.running_keeper_fiber_count)
+  const pausedKeepers = firstFiniteCount(
+    fleetSafety.paused_keepers_health?.count,
+    fleet?.paused_keeper_count,
+    fleetSafety.paused_keepers,
+  )
+  if (runningKeepers === null && pausedKeepers === null) return null
+  return {
+    runningKeepers: runningKeepers ?? 0,
+    pausedKeepers: pausedKeepers ?? 0,
+    hasRunningKeepers: runningKeepers !== null,
+    hasPausedKeepers: pausedKeepers !== null,
+  }
+}
+
+export function runtimeHealthIsFresh(
+  generatedAt: string | null | undefined,
+  nowMs = Date.now(),
+): boolean {
+  if (!generatedAt) return true
+  const timestampMs = Date.parse(generatedAt)
+  if (!Number.isFinite(timestampMs)) return false
+  return Math.max(0, nowMs - timestampMs) <= RUNTIME_HEALTH_FRESH_MS
 }
 
 function normalizeCounts(
@@ -163,12 +217,15 @@ function deriveStatusSource({
   executionLoaded,
   live,
   configured,
+  runtimeHealthAvailable,
 }: {
   executionLoaded: boolean
   live: LiveRuntimeView
   configured: ConfiguredRuntimeView
+  runtimeHealthAvailable: boolean
 }): RuntimeCountSource {
   const liveDetailRows = live.agents + live.keeperRows
+  if (runtimeHealthAvailable) return 'runtime-health'
   if (executionLoaded && (liveDetailRows > 0 || configured.totalRuntimes === 0)) {
     return 'execution'
   }
@@ -190,25 +247,40 @@ export function resolveRuntimeCounts({
   namespaceTruthConfiguredKeepers,
   shellCounts,
   shellConfiguredKeepers,
+  runtimeFleetSafety,
+  runtimeHealthGeneratedAt,
+  nowMs,
 }: ResolveRuntimeCountsOptions): RuntimeCounts {
+  const runtimeHealthCounts = runtimeHealthIsFresh(runtimeHealthGeneratedAt, nowMs)
+    ? resolveRuntimeFleetSafetyCounts(runtimeFleetSafety)
+    : null
   const liveAgents = normalizeCount(agentsCount)
-  const liveKeepers = normalizeCount(keepersCount)
-  const livePausedKeepers = normalizeCount(pausedKeepersCount)
-  const liveOfflineKeepers = normalizeCount(offlineKeepersCount)
-  const liveKeeperRows = Math.max(
-    normalizeCount(keeperRowsCount),
-    liveKeepers + livePausedKeepers + liveOfflineKeepers,
-  )
+  const runtimeHealthAvailable = runtimeHealthCounts !== null
+  const liveKeepers = runtimeHealthAvailable
+    ? runtimeHealthCounts.runningKeepers
+    : normalizeCount(keepersCount)
+  const livePausedKeepers = runtimeHealthAvailable
+    ? runtimeHealthCounts.pausedKeepers
+    : normalizeCount(pausedKeepersCount)
+  const liveOfflineKeepers = runtimeHealthAvailable ? 0 : normalizeCount(offlineKeepersCount)
+  const liveKeeperRows = runtimeHealthAvailable
+    ? liveKeepers + livePausedKeepers
+    : Math.max(
+        normalizeCount(keeperRowsCount),
+        liveKeepers + livePausedKeepers + liveOfflineKeepers,
+      )
   const liveTasks = normalizeCount(tasksCount)
   const live: LiveRuntimeView = {
     agents: liveAgents,
     keepers: liveKeepers,
     pausedKeepers: livePausedKeepers,
-    offlineKeepers: Math.max(0, liveKeeperRows - liveKeepers - livePausedKeepers),
+    offlineKeepers: runtimeHealthAvailable
+      ? 0
+      : Math.max(0, liveKeeperRows - liveKeepers - livePausedKeepers),
     keeperRows: liveKeeperRows,
     tasks: liveTasks,
     totalRuntimes: liveAgents + liveKeepers,
-    available: executionLoaded,
+    available: executionLoaded || runtimeHealthAvailable,
   }
 
   const namespace = normalizeCounts(namespaceTruthCounts)
@@ -227,7 +299,12 @@ export function resolveRuntimeCounts({
     shellConfiguredKeepers: shellConfiguredKeeperCount,
   })
 
-  const source = deriveStatusSource({ executionLoaded, live, configured })
+  const source = deriveStatusSource({
+    executionLoaded,
+    live,
+    configured,
+    runtimeHealthAvailable,
+  })
   return { live, configured, source }
 }
 
@@ -235,6 +312,8 @@ export function runtimeCountSourceLabel(source: RuntimeCountSource): string {
   switch (source) {
     case 'execution':
       return 'execution 상세'
+    case 'runtime-health':
+      return 'runtime health'
     case 'project-snapshot':
       return 'project snapshot'
     case 'shell':

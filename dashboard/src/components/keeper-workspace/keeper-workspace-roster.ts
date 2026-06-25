@@ -27,7 +27,6 @@ import type { KeeperActivityDisplay } from '../../lib/keeper-runtime-display'
 import { keeperActionVisibility } from '../../lib/keeper-predicates'
 import type { Keeper } from '../../types'
 import { runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
-import { refreshAfterRuntimeAction } from '../keeper-detail-helpers'
 import { VirtualList } from '../common/virtual-list'
 import {
   WorkspaceSigil,
@@ -415,7 +414,6 @@ function lifecycleActions(keeper: Keeper): KeeperActionKey[] {
 
 async function runRosterKeeperAction(name: string, action: KeeperActionKey): Promise<void> {
   await runKeeperAction(name, action)
-  await refreshAfterRuntimeAction()
 }
 
 function rosterActivityText(activity: KeeperActivityDisplay): string | null {

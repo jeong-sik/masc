@@ -277,3 +277,65 @@ describe('refreshDashboard bootstrap', () => {
     expect(store.executionLoaded.value).toBe(true)
   })
 })
+
+describe('refreshKeeperRuntimeStatus', () => {
+  it('refreshes execution and light shell runtime status without full bootstrap', async () => {
+    apiMocks.fetchDashboardShell.mockResolvedValue({
+      generated_at: '2026-06-25T12:00:00Z',
+      status: { project: 'me' },
+      counts: { agents: 0, tasks: 7, keepers: 1, total_runtimes: 1 },
+      configured_keepers: 13,
+      auth: null,
+      config_resolution: null,
+      runtime_resolution: {
+        status: 'ready',
+        warnings: [],
+        base_path: { path: '/tmp/me', exists: true, source: 'input' },
+        workspace_path: { path: '/tmp/me', exists: true, source: 'workspace' },
+        resolved_base_path: { path: '/tmp/me', exists: true, source: 'resolved_base' },
+        data_root: { path: '/tmp/me/.masc', exists: true, source: 'runtime_data' },
+        prompt_markdown_dir: { path: '/tmp/me/.masc/config/prompts', exists: true, source: 'prompt_registry' },
+        build: {
+          release_version: '0.19.48',
+          commit: 'abcdef1',
+          started_at: '2026-06-25T11:59:00Z',
+          uptime_seconds: 60,
+        },
+        keeper_fibers: 1,
+        paused_keepers: 3,
+        paused_keepers_health: { count: 3, names: ['a', 'b', 'c'] },
+        keeper_fleet_safety: { running_keeper_fiber_count: 1, paused_keeper_count: 3 },
+      },
+    })
+    apiMocks.fetchDashboardExecution.mockResolvedValue({
+      generated_at: '2026-06-25T12:00:00Z',
+      status: { project: 'me' },
+      agents: [],
+      tasks: [],
+      messages: [],
+      keepers: [{ name: 'verifier', status: 'running' }],
+      execution_queue: [],
+      worker_support_briefs: [],
+      continuity_briefs: [],
+    })
+
+    const store = await import('./store')
+
+    await store.refreshKeeperRuntimeStatus({ force: true })
+
+    expect(apiMocks.fetchDashboardBootstrap).not.toHaveBeenCalled()
+    expect(apiMocks.fetchDashboardExecution).toHaveBeenCalledWith({ force: true })
+    expect(apiMocks.fetchDashboardShell).toHaveBeenCalledWith({ light: true })
+    expect(apiMocks.fetchDashboardShell.mock.invocationCallOrder[0]!)
+      .toBeLessThan(apiMocks.fetchDashboardExecution.mock.invocationCallOrder[0]!)
+    expect(store.shellCounts.value).toEqual({
+      agents: 0,
+      tasks: 7,
+      keepers: 1,
+      total_runtimes: 1,
+      configured_keepers: 13,
+    })
+    expect(store.shellRuntimeResolution.value?.fleet_safety?.paused_keepers).toBe(3)
+    expect(store.keepers.value).toHaveLength(1)
+  })
+})

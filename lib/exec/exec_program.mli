@@ -131,6 +131,11 @@ type known =
   | Ffplay
   | Mpg123
   | Open
+  (* Database CLIs (network clients); destructiveness lives in the SQL verb. *)
+  | Psql
+  | Mysql
+  | Mariadb
+  | Cockroach
   | Sudo
   | Su
   | Chmod

@@ -35,7 +35,8 @@ let classify_flags : Masc_exec.Exec_program.known -> cap_flags = function
       { read_fs = true; write_fs = true; network = false; spawn = false }
 
   (* Write + Network operations (no spawn) *)
-  | Git | Gh | Glab | Curl | Wget | Ssh | Scp | Rsync ->
+  | Git | Gh | Glab | Curl | Wget | Ssh | Scp | Rsync
+  | Psql | Mysql | Mariadb | Cockroach ->
       { read_fs = true; write_fs = true; network = true; spawn = false }
 
   (* Write + Network + Spawn operations (highest capability required) *)

@@ -43,9 +43,17 @@
 
       - path-INDEPENDENT: the command has no path argument, so the path jail can
         NEVER constrain it (kill, pkill, shutdown, reboot, SQL passed as a
-        psql/-c string). This is the genuine command-shape work-list: each must
-        be lifted into a typed risk arm / the catastrophic floor, or explicitly
-        decided, before the substring layer is deleted.
+        psql/-c string). This was the genuine command-shape work-list. It is now
+        resolved: shutdown/reboot lifted into the catastrophic floor (#22234);
+        destructive SQL lifted into the typed DB-capability floor ([Db_op] +
+        [Approval_policy.find_destructive_db], inside catastrophic_floor); and
+        kill/pkill DELIBERATELY ALLOWED (a keeper legitimately signals processes
+        it spawned, with no safe ownership boundary at the syntax layer — user
+        decision). The residual path-independent gap is therefore only the
+        deliberately-allowed set (kill/pkill). Literal destructive SQL on
+        psql/mysql/mariadb/cockroach is covered by the typed DB floor; non-literal
+        SQL ([Var]/[Concat]) is documented in the RFC because this all-literal
+        corpus cannot express it.
       - path-BEARING: the command targets a path. The PERMANENT path jail covers
         an OUT-OF-WORKSPACE target. The IN-WORKSPACE representative used here
         (e.g. [rm -r ./build], [chmod 777 ./script.sh]) is a LEGITIMATE keeper
@@ -142,6 +150,9 @@ let destructive_corpus =
   ; mk "device_write" "dd" [ "if=/dev/zero"; "of=./out.img" ]
   ; mk "process_signal" "kill" [ "-9"; "1234" ] ~path_independent:true
   ; mk "process_signal" "pkill" [ "-f"; "node" ] ~path_independent:true
+    (* Cockroach is included so the DB floor proves coverage for the common
+       [cockroach sql -e ...] producer shape, not just psql/mysql/mariadb. *)
+  ; mk "sql_destructive" "cockroach" [ "sql"; "-e"; "drop table users" ] ~path_independent:true
   ; mk "system_control" "shutdown" [ "-h"; "now" ] ~path_independent:true
   ; mk "system_control" "reboot" [] ~path_independent:true
   ]
@@ -160,27 +171,32 @@ let gap () = List.filter (fun e -> substring_blocks e && not (typed_blocks e)) d
 let independent_gap () = List.filter (fun e -> e.path_independent) (gap ())
 let bearing_gap () = List.filter (fun e -> not e.path_independent) (gap ())
 
-(* Baseline ratchet 1 — the path-INDEPENDENT command-shape gap. No path
-   argument, so the permanent path jail can never cover these: each is genuine
-   command-shape work that must be lifted into a typed risk arm / the
-   catastrophic floor, or explicitly decided, before retirement. Shrinks as
-   Phase 2 lifts a class.
+(* Baseline ratchet 1 — the path-INDEPENDENT residual. No path argument, so the
+   permanent path jail can never cover these. Two RFC §6 decisions emptied the
+   command-shape WORK-LIST here, leaving only the deliberately-allowed set:
 
-   Phase 2 lift (system-power): [shutdown]/[reboot] moved OUT of this gap into
-   [Approval_policy.find_catastrophic_program] (catastrophic-by-identity, beside
-   the format-class binary), so the baseline dropped from 8 to 6. Remaining are
-   the two undecided classes (process_signal, sql_destructive) — see RFC §6.
+   - system_control (shutdown/reboot): lifted into
+     [Approval_policy.find_catastrophic_program] — now COVERED (Phase 2,
+     #22234).
+   - sql_destructive (DROP/TRUNCATE/DELETE on psql/mysql/mariadb/cockroach):
+     lifted into the typed DB-capability floor ([Db_op] +
+     [Approval_policy.find_destructive_db]) — now COVERED (this PR). It is
+     therefore NOT in the gap anymore.
+   - process_signal (kill/pkill): DELIBERATELY ALLOWED. A keeper legitimately
+     signals processes it spawned, and there is no safe ownership boundary at
+     the syntax layer; flooring it would be a constraint with no principled cut
+     (user decision: "no bizarre constraints"). So it stays substring-blocked
+     until Phase 3, then drops as over-broad — like the path-bearing set, it is
+     resolved by deliberate allowance, NOT by a floor lift.
 
-   Already covered by the command-shape classifiers (NOT in the gap): rm -rf,
-   git push --force, git push -f, git reset --hard, git clean -f, filesystem
-   format, shutdown, reboot. *)
+   The remaining entries are deliberately allowed, not must-floor work. A NEW
+   path-independent destructive pattern appearing here is a red that demands a
+   classify-or-decide — the ratchet's purpose. Already covered (NOT in the gap):
+   rm -rf, git push --force/-f, git reset --hard, git clean -f, filesystem
+   format, shutdown, reboot, destructive SQL on psql/mysql/mariadb/cockroach. *)
 let expected_independent_gap =
   [ "[process_signal] kill -9 1234"
   ; "[process_signal] pkill -f node"
-  ; "[sql_destructive] psql -c delete from users"
-  ; "[sql_destructive] psql -c drop database prod"
-  ; "[sql_destructive] psql -c drop table users"
-  ; "[sql_destructive] psql -c truncate table users"
   ]
 ;;
 
@@ -232,7 +248,7 @@ let test_report () =
       entries
   in
   print_group
-    "  path-INDEPENDENT (work-list — path jail can never cover; must lift or decide)"
+    "  path-INDEPENDENT residual (deliberately-allowed; work-list now empty — see header)"
     independent;
   print_group
     "  path-BEARING (in-workspace legit; out-of-workspace covered by the PERMANENT path jail)"

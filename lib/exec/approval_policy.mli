@@ -32,7 +32,9 @@ val decide :
          [Absolute_unknown] → [Deny Path_escape];
        - a catastrophic-by-identity binary (filesystem-format [mkfs], or
          system-power [shutdown]/[reboot]/[halt]/[poweroff]) → [Deny
-         Catastrophic_program].
+         Catastrophic_program];
+       - a destructive SQL statement ([DROP]/[TRUNCATE]/[DELETE]) handed to a
+         database CLI ([psql -c], [mysql -e]) → [Deny Destructive_db].
     2. Otherwise the highest program risk class is graded by the matching
        [overlay.*_trust] level:
        [Enforced] → [Ask], [Auto_safe]/[Observe] → [Allow],
@@ -46,9 +48,10 @@ val decide :
 
 val catastrophic_floor : Capability.t list -> Verdict.deny_reason option
 (** Stage 1 of [decide] on its own: [Some reason] for a [Destructive] git op, a
-    redirect [Write_path] escaping the workspace, or a catastrophic-by-identity
+    redirect [Write_path] escaping the workspace, a catastrophic-by-identity
     binary (filesystem-format [mkfs] or system-power
-    [shutdown]/[reboot]/[halt]/[poweroff]); [None] otherwise.
+    [shutdown]/[reboot]/[halt]/[poweroff]), or a destructive SQL statement on a
+    database CLI ([psql -c "drop …"]); [None] otherwise.
 
     Exposed so the always-run dispatch core
     ([Keeper_tool_execute_shell_ir.dispatch_classified]) can enforce the floor

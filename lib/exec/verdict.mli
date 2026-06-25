@@ -42,9 +42,16 @@ type deny_reason =
   | Unknown_bin of string
   | Path_escape of Path_scope.t
   | Destructive_git of Git_op.t
+  | Destructive_db of Db_op.t
+      (** A destructive SQL statement ([DROP]/[TRUNCATE]/[DELETE]) handed to a
+          database CLI ([psql -c], [mysql -e]).  Part of the trust-independent
+          catastrophic floor — the typed replacement for the legacy
+          [sql_destructive] substring patterns (RFC
+          eliminate-substring-destructive-classifier §3-A). *)
   | Catastrophic_program of Exec_program.t
       (** A binary that is never legitimate for a keeper regardless of its
-          arguments (e.g. [mkfs]).  Part of the trust-independent
+          arguments (e.g. the filesystem-format binary, or system-power
+          [shutdown]/[reboot]/[halt]/[poweroff]).  Part of the trust-independent
           catastrophic floor — RFC-0254 §5.4. *)
   | Policy_deny of { rule : string }
   | Parse_too_complex of Parsed.reason_too_complex

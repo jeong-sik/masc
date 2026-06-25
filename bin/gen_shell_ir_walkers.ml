@@ -5949,6 +5949,7 @@ let emit_of_simple buf spec =
     ; "Rustc"; "Go"; "Gofmt"; "Gradle"; "Java"; "Javac"; "Mvn"; "Ninja"
     ; "Sed"; "Uv"; "Gh"; "Glab"; "Terminal_notifier"; "Osascript"
     ; "Play"; "Rec"; "Ffplay"; "Mpg123"; "Open"
+    ; "Psql"; "Mysql"; "Mariadb"; "Cockroach"
     ; "Sudo"; "Su"; "Chmod"; "Chown"; "Rm"; "Dd"; "Mkfs"
     ; "Shutdown"; "Reboot"; "Halt"; "Poweroff"
     ]

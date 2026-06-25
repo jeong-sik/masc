@@ -52,3 +52,22 @@
   letter-spacing: 0.04em;
   white-space: nowrap;
 }
+
+/* The re-mounted operational cluster is wider than the prototype mobile shell.
+   Keep phone/tablet topbars to the prototype-owned status chips so the page does
+   not start with off-canvas actions before the primary surface content. */
+@media (max-width: 900px) {
+  .v2-app[data-mobile="1"] .v2-top-ops,
+  .v2-app[data-mobile="1"] .v2-top > .v2-shell-panel,
+  .v2-app[data-mobile="1"] .v2-top > [data-testid="tweaks-panel-toggle"] {
+    display: none;
+  }
+}
+
+@media (min-width: 901px) and (max-width: 1120px) {
+  .v2-app[data-keeper-detail-mode="true"] .v2-top-ops,
+  .v2-app[data-keeper-detail-mode="true"] .v2-top > .v2-shell-panel,
+  .v2-app[data-keeper-detail-mode="true"] .v2-top > [data-testid="tweaks-panel-toggle"] {
+    display: none;
+  }
+}

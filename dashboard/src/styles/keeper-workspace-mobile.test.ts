@@ -9,6 +9,7 @@ const copilotCss = readFileSync(resolve(__dirname, 'copilot-dock.css'), 'utf-8')
 const turnInspectorCss = readFileSync(resolve(__dirname, 'keeper-turn-inspector.css'), 'utf-8')
 const configCss = readFileSync(resolve(__dirname, 'keeper-v2/keeper-config.css'), 'utf-8')
 const keeperV2CraftCss = readFileSync(resolve(__dirname, 'keeper-v2/craft.css'), 'utf-8')
+const opsClusterCss = readFileSync(resolve(__dirname, 'keeper-v2/ops-cluster.css'), 'utf-8')
 const appSource = readFileSync(resolve(__dirname, '../app.ts'), 'utf-8')
 const chatPrimitivesSource = readFileSync(resolve(__dirname, '../components/chat/primitives.ts'), 'utf-8')
 const copilotDockSource = readFileSync(resolve(__dirname, '../components/copilot-dock.ts'), 'utf-8')
@@ -53,6 +54,7 @@ const implementationSources = [
 ].join('\n')
 
 const SHELL_MOBILE_CHROME_BREAKPOINT = '900px'
+const SHELL_TABLET_EDGE_BREAKPOINT = '1120px'
 const KEEPER_MOBILE_PANE_BREAKPOINT = '860px'
 const PHONE_NARROW_BREAKPOINT = '420px'
 
@@ -92,6 +94,7 @@ function mediaRuleDeclsIn(source: string, selector: string, maxWidth: string): R
 const mediaRuleDecls = (selector: string, maxWidth: string) => mediaRuleDeclsIn(css, selector, maxWidth)
 const mobileRuleDecls = (selector: string) => mediaRuleDecls(selector, KEEPER_MOBILE_PANE_BREAKPOINT)
 const copilotRuleDecls = (selector: string, maxWidth: string) => mediaRuleDeclsIn(copilotCss, selector, maxWidth)
+const opsClusterRuleDecls = (selector: string, maxWidth: string) => mediaRuleDeclsIn(opsClusterCss, selector, maxWidth)
 const keeperV2CraftMobileRuleDecls = (selector: string) =>
   mediaRuleDeclsIn(keeperV2CraftCss, selector, KEEPER_MOBILE_PANE_BREAKPOINT)
 const shellMobileTurnInspectorRuleDecls = (selector: string) =>
@@ -164,6 +167,39 @@ describe('keeper workspace v2 (26) mobile contract', () => {
     expect(copilotDockSource).toContain('<kbd>⌘J</kbd>')
     expect(copilotRuleDecls('.topbar-copilot kbd', SHELL_MOBILE_CHROME_BREAKPOINT).display).toBe('none')
     expect(copilotRuleDecls('.topbar-copilot span:not(.spark)', PHONE_NARROW_BREAKPOINT).display).toBe('none')
+  })
+
+  it('keeps remounted operational topbar chrome out of mobile and keeper tablet edges', () => {
+    expect(opsClusterRuleDecls('.v2-app[data-mobile="1"] .v2-top-ops', SHELL_MOBILE_CHROME_BREAKPOINT).display)
+      .toBe('none')
+    expect(
+      opsClusterRuleDecls('.v2-app[data-mobile="1"] .v2-top > .v2-shell-panel', SHELL_MOBILE_CHROME_BREAKPOINT)
+        .display,
+    ).toBe('none')
+    expect(
+      opsClusterRuleDecls(
+        '.v2-app[data-mobile="1"] .v2-top > [data-testid="tweaks-panel-toggle"]',
+        SHELL_MOBILE_CHROME_BREAKPOINT,
+      ).display,
+    ).toBe('none')
+    expect(
+      opsClusterRuleDecls(
+        '.v2-app[data-keeper-detail-mode="true"] .v2-top-ops',
+        SHELL_TABLET_EDGE_BREAKPOINT,
+      ).display,
+    ).toBe('none')
+    expect(
+      opsClusterRuleDecls(
+        '.v2-app[data-keeper-detail-mode="true"] .v2-top > .v2-shell-panel',
+        SHELL_TABLET_EDGE_BREAKPOINT,
+      ).display,
+    ).toBe('none')
+    expect(
+      opsClusterRuleDecls(
+        '.v2-app[data-keeper-detail-mode="true"] .v2-top > [data-testid="tweaks-panel-toggle"]',
+        SHELL_TABLET_EDGE_BREAKPOINT,
+      ).display,
+    ).toBe('none')
   })
 
   it('uses dynamic viewport height for the focused keeper mobile surface and context drawer', () => {

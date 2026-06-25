@@ -464,13 +464,13 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
       let user_blocks =
         match user_blocks with
         | Some blocks
-          when Keeper_vision_ingest.should_delegate meta.multimodal_policy ->
-          let dir = Keeper_vision_ingest.store_dir ~keeper_name:meta.name in
+          when Keeper_vision_tool.should_delegate meta.multimodal_policy ->
+          let dir = Keeper_vision_tool.vision_store_dir ~keeper_name:meta.name in
           let store bytes =
             Multimodal.Vision_artifact_store.store ~dir bytes
             |> Result.map Multimodal.Vision_artifact_store.to_string
           in
-          Some (Keeper_vision_ingest.intercept_image_blocks ~store blocks)
+          Some (Keeper_vision_tool.intercept_image_blocks ~store blocks)
         | other -> other
       in
       match resolve_turn_runtime_id meta with

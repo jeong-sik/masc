@@ -29,7 +29,7 @@ type keeper_profile_defaults = {
   per_provider_timeout_state : per_provider_timeout_state;
   per_provider_timeout : float option;
   always_approve : bool option;
-  multimodal_policy : Keeper_multimodal_policy.t option;
+  multimodal_policy : Multimodal.Multimodal_policy.t option;
   (* No per-keeper [model]/[runtime_id] field: keeper→runtime assignment lives
      solely in runtime.toml [[runtime.assignments]] (persona⊥{model,runtime}). *)
   oas_env : (string * string) list;

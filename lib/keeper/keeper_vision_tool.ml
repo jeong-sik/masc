@@ -80,10 +80,48 @@ let first_vision_runtime_id () : (string, string) result =
   | Some id -> Ok id
   | None -> Error "no image-capable runtime configured"
 
-(* Per-keeper content-addressed store dir. Phase 2 ingestion (§2.3) will write
-   incoming images here under the same path. *)
+(* Per-keeper content-addressed store dir, shared by the tool's load path
+   ([handle]) and the §2.3 fresh-input ingestion below, so a stored handle
+   resolves on the next analyze_image call. *)
 let vision_store_dir ~keeper_name =
   Filename.concat (Config_dir_resolver.keepers_dir ()) (keeper_name ^ ".vision")
+
+(* RFC-keeper-vision-delegation-tool §2.3 (site 1): fresh-input image ingestion
+   for Delegate keepers. Instead of carrying a user image through the conversation
+   (which RFC-0265 then reroutes the whole turn for), the image is stored and
+   replaced with a text placeholder so the keeper reads it on demand via this same
+   tool. Co-located with the tool so both sides share [vision_store_dir]. *)
+let should_delegate policy_opt =
+  Multimodal.Multimodal_policy.delegates
+    (Multimodal.Multimodal_policy.resolve_optional policy_opt)
+
+let intercept_image_blocks ~store blocks =
+  List.map
+    (fun (block : Agent_sdk.Types.content_block) ->
+       match block with
+       | Agent_sdk.Types.Image { media_type = _; data; source_type = _ } ->
+         (match Base64.decode data with
+          | Error _ ->
+            Log.Keeper.warn
+              "vision ingest: base64 decode failed; leaving image inline";
+            block
+          | Ok bytes ->
+            (match store bytes with
+             | Ok handle ->
+               Agent_sdk.Types.text_block
+                 (Printf.sprintf
+                    "[image artifact:%s — call analyze_image with this artifact \
+                     to read it]"
+                    handle)
+             | Error e ->
+               Log.Keeper.warn
+                 "vision ingest: store failed (%s); leaving image inline"
+                 e;
+               block))
+       (* Only Image is intercepted; every other block (incl. any future variant)
+          passes through — this is a filter, not an exhaustive FSM transition. *)
+       | _ -> block)
+    blocks
 
 let ok_json text =
   Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "text", `String text ])

@@ -67,7 +67,7 @@ let load_from_path ~name path : keeper_profile_defaults =
               multimodal_policy =
                 Option.bind
                   (Safe_ops.json_string_opt "multimodal_policy" keeper_json)
-                  (Keeper_multimodal_policy.of_string_or_log
+                  (Multimodal.Multimodal_policy.of_string_or_log
                      ~source:"persona defaults multimodal_policy");
               oas_env = [];
               unknown_toml_keys = [];

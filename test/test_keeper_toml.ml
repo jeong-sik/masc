@@ -481,7 +481,7 @@ multimodal_policy = "Delegate"
         d.active_goal_ids;
       check bool "multimodal_policy delegate" true
         (match d.multimodal_policy with
-         | Some Masc.Keeper_multimodal_policy.Delegate -> true
+         | Some Multimodal.Multimodal_policy.Delegate -> true
          | _ -> false)
 
 let test_profile_rejects_invalid_multimodal_policy () =

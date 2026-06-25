@@ -1,11 +1,11 @@
-(* Keeper_vision_ingest tests — RFC-keeper-vision-delegation-tool §2.3 site-1
-   transform contract. Locks: Delegate-path Image -> Text placeholder (carrying
-   the store handle); fail-open (store error / bad base64 -> image kept inline);
-   non-image pass-through; should_delegate gating. The store fn is injected, so
-   no filesystem I/O. *)
+(* Vision ingestion tests (Keeper_vision_tool, §2.3 site-1) —
+   RFC-keeper-vision-delegation-tool transform contract. Locks: Delegate-path
+   Image -> Text placeholder (carrying the store handle); fail-open (store error /
+   bad base64 -> image kept inline); non-image pass-through; should_delegate
+   gating. The store fn is injected, so no filesystem I/O. *)
 
-module I = Masc.Keeper_vision_ingest
-module P = Masc.Keeper_multimodal_policy
+module I = Masc.Keeper_vision_tool
+module P = Multimodal.Multimodal_policy
 
 let ok_store bytes = Ok (Printf.sprintf "H_%d" (String.length bytes))
 let fail_store _ = Error "store boom"

@@ -46,6 +46,28 @@ val first_vision_runtime_id : unit -> (string, string) result
 (** Runtime id of the first image-capable configured runtime, or [Error] when
     none is configured. *)
 
+val vision_store_dir : keeper_name:string -> string
+(** Per-keeper content-addressed vision store directory, shared by [handle]'s
+    load path and {!intercept_image_blocks}, so a handle stored at ingestion
+    resolves on a later analyze_image call. *)
+
+val should_delegate : Multimodal.Multimodal_policy.t option -> bool
+(** [true] iff the (optional, default-resolved via {!Multimodal.Multimodal_policy})
+    policy delegates images. [None] resolves to the system default (Reroute ->
+    [false]), so a keeper with no configured policy is unaffected. *)
+
+val intercept_image_blocks
+  :  store:(string -> (string, string) result)
+  -> Agent_sdk.Types.content_block list
+  -> Agent_sdk.Types.content_block list
+(** RFC-keeper-vision-delegation-tool §2.3 (site 1). Replace each [Image] block
+    with a [Text] placeholder referencing the handle [store] returns for the
+    decoded raw bytes. Fail-open: on a base64-decode or [store] error the original
+    [Image] is kept (and a WARN logged), degrading to RFC-0265 reroute rather than
+    dropping the user's image. All non-image blocks (including any future block
+    variant) pass through unchanged. [store] is injectable so the transform is
+    unit-testable without filesystem I/O. *)
+
 val handle
   :  ?complete:complete_fn
   -> ?timeout_sec:float

@@ -332,7 +332,7 @@ type keeper_meta = {
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
   always_approve : bool option;
-  multimodal_policy : Keeper_multimodal_policy.t option;
+  multimodal_policy : Multimodal.Multimodal_policy.t option;
   (* Agent runtime state *)
   runtime : agent_runtime_state;
   (* Identity & concurrency *)

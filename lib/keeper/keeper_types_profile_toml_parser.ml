@@ -22,7 +22,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   in
   let multimodal_policy_result =
     match str "multimodal_policy" with
-    | Some raw -> Keeper_multimodal_policy.of_string_result raw |> Result.map Option.some
+    | Some raw -> Multimodal.Multimodal_policy.of_string_result raw |> Result.map Option.some
     | None -> Ok None
   in
   let per_provider_timeout_state, per_provider_timeout =

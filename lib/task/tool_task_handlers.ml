@@ -107,6 +107,16 @@ let result_to_response ~tool_name ~start_time = function
         ~tool_name ~start_time
         (Masc_domain.masc_error_to_string e)
 
+let task_id_of_add_task_summary summary =
+  let prefix = "Added " in
+  if not (String.starts_with ~prefix summary)
+  then None
+  else
+    let start = String.length prefix in
+    match String.index_from_opt summary start ':' with
+    | Some stop when stop > start -> Some (String.sub summary start (stop - start))
+    | _ -> None
+
 let log_task_transition_failed ~agent_name err =
   let message = Masc_domain.masc_error_to_string err in
   match err with
@@ -309,15 +319,38 @@ let handle_add_task ~tool_name ~start_time ctx args =
           ~failure_class:(Some Tool_result.Workflow_rejection)
           ~tool_name ~start_time error
     | Ok contract ->
-        Tool_result.ok ~tool_name ~start_time
-          (Workspace.add_task ?contract
+        let summary =
+          Workspace.add_task ?contract
             ?goal_id
             ~reject_if:
               (Workspace_task_capacity.rejection_for_add_task_for_config
                  ctx.config
                  ?goal_id)
             ~created_by:ctx.agent_name ctx.config ~title:trimmed_title
-            ~priority ~description)
+            ~priority ~description
+        in
+        (match task_id_of_add_task_summary summary with
+         | Some task_id ->
+           Tool_result.make_ok
+             ~tool_name
+             ~start_time
+             ~data:
+               (`Assoc
+                  [ "ok", `Bool true
+                  ; "task_id", `String task_id
+                  ; "summary", `String summary
+                  ; "title", `String trimmed_title
+                  ; "priority", `Int priority
+                  ; "description", `String description
+                  ; "goal_id", Json_util.string_opt_to_json goal_id
+                  ])
+             ()
+         | None ->
+           Tool_result.error
+             ~failure_class:(Some Tool_result.Workflow_rejection)
+             ~tool_name
+             ~start_time
+             summary)
 
 (* RFC-0267 Phase 2: assign an existing goalless task to a goal. Thin adapter
    over [Task_goal_assignment.set_task_goal] — the single validated backend

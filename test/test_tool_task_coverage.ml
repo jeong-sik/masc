@@ -244,6 +244,26 @@ let () = test "dispatch_add_task" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
+let () = test "handle_add_task_returns_structured_task_id" (fun () ->
+  let ctx = make_test_ctx () in
+  let result =
+    Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:0.0 ctx
+      (`Assoc
+        [ ("title", `String "Structured task")
+        ; ("priority", `Int 2)
+        ; ("description", `String "structured add-task regression")
+        ])
+  in
+  assert (Tool_result.is_success result);
+  let data = Tool_result.data result in
+  assert (Json_util.get_bool data "ok" = Some true);
+  assert (Json_util.get_string data "task_id" = Some "task-001");
+  assert (Json_util.get_string data "title" = Some "Structured task");
+  assert (Json_util.assoc_member_opt "result" data = None);
+  match Json_util.get_string data "summary" with
+  | Some summary -> assert (str_contains summary "Added task-001")
+  | None -> failwith "missing summary")
+
 (* Test dispatch tasks *)
 let () = test "dispatch_tasks" (fun () ->
   let ctx = make_test_ctx () in

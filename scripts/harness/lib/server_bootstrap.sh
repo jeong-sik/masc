@@ -189,7 +189,8 @@ harness_mint_admin_token() {
   fi
 
   if ! token_json="$(
-    "$server_exe" login \
+    env -u MCP_AUTH_TOKEN -u MASC_ADMIN_TOKEN -u MASC_TOKEN \
+      "$server_exe" login \
       --base-path "$base_path" \
       --host 127.0.0.1 \
       --port "$port" \
@@ -228,6 +229,8 @@ harness_start_server() {
     export MASC_BASE_PATH="$base_path"
     export MASC_BASE_PATH_INPUT="$base_path"
     export MASC_STORAGE_TYPE="filesystem"
+    unset MASC_ADMIN_TOKEN
+    unset MASC_TOKEN
     export MASC_AUTONOMY_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"
     export MASC_OTEL_ENABLED="0"

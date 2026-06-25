@@ -9,6 +9,7 @@
   env_config_core
   env_config_governance
   env_config_keeper
+  env_config_memory
   env_config_keeper_retry_backoff
   env_config_keeper_supervisor
   env_config_oas_bridge

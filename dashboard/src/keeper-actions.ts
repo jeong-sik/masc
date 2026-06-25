@@ -76,6 +76,7 @@ type KeeperInterjectActionKind = 'send' | 'approve' | 'pause' | 'drain'
 const TOOL_ONLY_EMPTY_REPLY_TEXT = 'Tool-only turn ended without a final reply.'
 const pendingKeeperThreadCancels = new Map<string, Promise<boolean>>()
 const KEEPER_THREAD_CANCEL_TIMEOUT_MS = 5_000
+const KEEPER_THREAD_CANCEL_SETTLE_GRACE_MS = 500
 
 interface KeeperInterjectCommand {
   readonly kind: KeeperInterjectActionKind
@@ -112,6 +113,20 @@ function releaseKeeperThreadCancelTracking(requestId: string): void {
   pendingKeeperThreadCancels.delete(requestId)
 }
 
+function cancelTrackingTimeoutMs(): number {
+  return KEEPER_THREAD_CANCEL_TIMEOUT_MS + KEEPER_THREAD_CANCEL_SETTLE_GRACE_MS
+}
+
+function withCancelTrackingTimeout<T>(requestId: string, promise: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(`cancel request ${requestId} did not settle within ${cancelTrackingTimeoutMs()}ms`))
+    }, cancelTrackingTimeoutMs()) as ReturnType<typeof setTimeout> & { unref?: () => void }
+    timeout.unref?.()
+    promise.then(resolve, reject).finally(() => clearTimeout(timeout))
+  })
+}
+
 export function cancelKeeperThreadRequest(
   keeperName: string,
   requestId: string,
@@ -122,9 +137,12 @@ export function cancelKeeperThreadRequest(
   if (!name || !id) return Promise.resolve(false)
   const existing = pendingKeeperThreadCancels.get(id)
   if (existing) return existing
-  const promise = (opts.signal
-    ? cancelQueuedKeeperMessage(id, { signal: opts.signal })
-    : cancelQueuedKeeperMessage(id))
+  const promise = withCancelTrackingTimeout(
+    id,
+    opts.signal
+      ? cancelQueuedKeeperMessage(id, { signal: opts.signal })
+      : cancelQueuedKeeperMessage(id),
+  )
     .then(() => {
       removePendingKeeperChatRequest(id)
       releaseActiveStreamRequestId(id)
@@ -148,27 +166,19 @@ export async function cancelActiveKeeperThreadMessage(name: string): Promise<boo
   const keeperName = name.trim()
   if (!keeperName) return false
   const requestIdBeforeAbort = activeStreamRequestId(keeperName)
-  let serverCancelSucceeded = true
-  if (requestIdBeforeAbort) {
-    serverCancelSucceeded = await cancelKeeperThreadRequest(keeperName, requestIdBeforeAbort, {
-      signal: keeperThreadCancelSignal(),
-    })
-  }
   const abortResult = abortKeeperThreadMessage(keeperName)
   const requestId = requestIdBeforeAbort ?? abortResult?.requestId ?? null
-  if (requestId && requestId !== requestIdBeforeAbort) {
-    serverCancelSucceeded = await cancelKeeperThreadRequest(keeperName, requestId, {
+  const locallyAborted = Boolean(abortResult?.controllerAborted || abortResult?.entryId)
+  if (requestId) {
+    void cancelKeeperThreadRequest(keeperName, requestId, {
       signal: keeperThreadCancelSignal(),
     })
   }
-  const locallyAborted = Boolean(abortResult?.controllerAborted || abortResult?.entryId)
   if (!requestIdBeforeAbort && !requestId && !locallyAborted) {
     // Nothing was in flight; treat as a successful no-op.
     return true
   }
-  // Fail-closed: do not report success unless the server confirmed the cancel
-  // and the local stream was actually torn down.
-  return serverCancelSucceeded && locallyAborted
+  return locallyAborted
 }
 
 export function selectKeeper(name: string): void {
@@ -740,7 +750,13 @@ export async function sendKeeperThreadMessage(
   sendKeys.forEach(key => sendingKeeperThreadMessages.add(key))
   const hadActiveStream =
     activeStreamEntryId(keeperName) !== null || activeStreamRequestId(keeperName) !== null
-  const previousCancelled = await cancelActiveKeeperThreadMessage(keeperName)
+  let previousCancelled = false
+  try {
+    previousCancelled = await cancelActiveKeeperThreadMessage(keeperName)
+  } catch (err) {
+    sendKeys.forEach(key => sendingKeeperThreadMessages.delete(key))
+    throw err
+  }
   if (hadActiveStream && !previousCancelled) {
     sendKeys.forEach(key => sendingKeeperThreadMessages.delete(key))
     return
@@ -846,7 +862,7 @@ export async function sendKeeperThreadMessage(
         // Hand off to resume: release ownership FIRST so our own resume
         // call below is not blocked by the guard we just set.
         releaseLiveSendRequest(requestId)
-        clearActiveStreamRequestId(keeperName)
+        releaseActiveStreamRequestId(requestId)
         await resumePendingKeeperChatRequest({
           requestId,
           keeperName,
@@ -894,7 +910,7 @@ export async function sendKeeperThreadMessage(
     if (toolCallEnded) void hydrateKeeperToolOutputs(keeperName)
     if (requestId) {
       removePendingKeeperChatRequest(requestId)
-      clearActiveStreamRequestId(keeperName)
+      releaseActiveStreamRequestId(requestId)
     }
   } catch (err) {
     if (isAbortError(err)) {
@@ -940,7 +956,7 @@ export async function sendKeeperThreadMessage(
     })
     if (requestTerminalSeen && requestId) {
       removePendingKeeperChatRequest(requestId)
-      clearActiveStreamRequestId(keeperName)
+      releaseActiveStreamRequestId(requestId)
     }
     try {
       const reconciled = await reconcileStreamFailureFromServerHistory(

@@ -10,6 +10,7 @@ import {
   finalizeAssistantEntry,
   clearActiveStream,
   clearActiveStreamRequestId,
+  releaseActiveStreamRequestId,
   activeStreamEntryId,
   activeStreamRequestId,
   getStreamController,
@@ -177,7 +178,8 @@ export function applyKeeperStreamEvent(
         if (!TERMINAL_REQUEST_STATUSES.has(status)) {
           return null
         }
-        clearActiveStreamRequestId(keeperName)
+        if (terminalRequestId) releaseActiveStreamRequestId(terminalRequestId)
+        else clearActiveStreamRequestId(keeperName)
         const ok = terminal?.ok === true
         if (status === 'cancelled') {
           const message =

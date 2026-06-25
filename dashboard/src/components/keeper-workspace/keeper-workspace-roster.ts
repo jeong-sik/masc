@@ -103,7 +103,7 @@ type RosterItem =
  *  weight matters. Below this we keep the identical grouped DOM structure and
  *  rely on content-visibility:auto for cheap off-screen skipping. */
 const WINDOW_AT = 60
-const ROSTER_ROW_ESTIMATED_HEIGHT = 92
+const ROSTER_ROW_ESTIMATED_HEIGHT = 108
 
 /** Blocked tasks + explicit attention flag → the roster attention badge. */
 function attentionCount(keeper: Keeper): number {

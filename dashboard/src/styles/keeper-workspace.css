@@ -2039,3 +2039,44 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.kw-kp-row {
+  position: relative;
+}
+
+.kw-fleet-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  min-width: 0;
+}
+
+.kw-fleet-action {
+  min-width: 0;
+  min-height: 32px;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.68);
+  color: rgba(226, 232, 240, 0.86);
+  font-size: 11px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kw-fleet-action:hover {
+  border-color: rgba(96, 165, 250, 0.48);
+  color: #eff6ff;
+}
+
+.kw-fleet-action.danger {
+  border-color: rgba(248, 113, 113, 0.28);
+  color: #fecaca;
+}
+
+@media (max-width: 760px) {
+  .kw-fleet-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -13,6 +13,7 @@ import { shellAuthSummary, tasks } from '../../store'
 import type { Keeper, Task } from '../../types'
 import { navigate } from '../../router'
 import { keeperActivityDisplay } from '../../lib/keeper-runtime-display'
+import { keeperActionVisibility } from '../../lib/keeper-predicates'
 import {
   WorkspaceSigil,
   keeperBucket,
@@ -22,6 +23,7 @@ import {
   keeperRuntimeLabel,
   keeperStatusTone,
 } from './keeper-workspace-shared'
+import { runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
 import { CountBadge } from '../v2/primitives-v2'
 import { callMcpTool } from '../../api/mcp'
 import { showToast } from '../common/toast'
@@ -128,6 +130,25 @@ function formatCtxK(n: number | null | undefined): string | null {
   return `${Math.round(n / 1000)}k ctx`
 }
 
+const FLEET_ACTION_LABELS: Record<KeeperActionKey, string> = {
+  pause: '일시정지',
+  resume: '재개',
+  wakeup: '깨우기',
+  boot: '기동',
+  shutdown: '종료',
+}
+
+function fleetLifecycleActions(keeper: Keeper): KeeperActionKey[] {
+  const visibility = keeperActionVisibility(keeper)
+  const actions: KeeperActionKey[] = []
+  if (visibility.canBoot) actions.push('boot')
+  if (visibility.canResume) actions.push('resume')
+  if (visibility.canWake && !visibility.canBoot) actions.push('wakeup')
+  if (visibility.canPause) actions.push('pause')
+  if (visibility.canShutdown) actions.push('shutdown')
+  return actions
+}
+
 function keeperRecentTools(keeper: Keeper): string[] {
   const names = [
     ...(keeper.latest_tool_names ?? []),
@@ -148,6 +169,7 @@ function FleetSelectedSection({ keeper }: { keeper: Keeper }): VNode {
   const model = keeperModelLabel(keeper)
   const runtime = keeperRuntimeLabel(keeper)
   const lifecycle = keeper.phase || keeper.lifecycle_phase || keeper.status
+  const actions = fleetLifecycleActions(keeper).slice(0, 3)
   const openChat = () => {
     navigate('monitoring', { section: 'agents', keeper: keeper.name })
   }
@@ -185,6 +207,20 @@ function FleetSelectedSection({ keeper }: { keeper: Keeper }): VNode {
       </div>
       ${tools.length > 0
         ? html`<div class="kw-fleet-tools">${tools.map(tool => html`<span key=${tool} title=${tool}>${tool}</span>`)}</div>`
+        : null}
+      ${actions.length > 0
+        ? html`
+            <div class="kw-fleet-actions">
+              ${actions.map(action => html`
+                <button
+                  key=${action}
+                  type="button"
+                  class=${`kw-fleet-action${action === 'shutdown' ? ' danger' : ''}`}
+                  onClick=${() => void runKeeperAction(keeper.name, action)}
+                >${FLEET_ACTION_LABELS[action]}</button>
+              `)}
+            </div>
+          `
         : null}
     </div>
   `

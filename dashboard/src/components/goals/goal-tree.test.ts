@@ -79,7 +79,6 @@ function makeGoal(id: string, title: string, children: GoalTreeNode[] = []): Goa
     goal_fsm: {
       state: 'executing',
       source: 'goal.phase',
-      state_kind: 'active',
       next_actions: [],
       activity_observation: 'goal_metadata',
       stagnation_status: 'recent',

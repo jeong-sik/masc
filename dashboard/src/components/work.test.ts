@@ -64,6 +64,8 @@ import { showGoalCreate } from './goals/goal-create-state'
 import { Work } from './work'
 import type { GoalTreeNode, GoalTreeTask, GoalTreeSummary } from '../types'
 
+const GOAL_FIXTURE_OK_COLOR = '#4ade80'
+
 function emptyGoalTreeSummary(overrides: Partial<GoalTreeSummary> = {}): GoalTreeSummary {
   return {
     total_goals: 0,
@@ -88,7 +90,7 @@ function goalTreeTask(overrides: Partial<GoalTreeTask> = {}): GoalTreeTask {
     id: 'task-tree',
     title: 'Tree task',
     status: 'completed',
-    status_color: '#4ade80',
+    status_color: GOAL_FIXTURE_OK_COLOR,
     priority: 2,
     assignee: null,
     goal_id: 'G-1',
@@ -106,19 +108,18 @@ function goalTreeNode(overrides: Partial<GoalTreeNode> = {}): GoalTreeNode {
     id: 'G-1',
     title: 'Goal One',
     status: 'active',
-    status_color: '#4ade80',
+    status_color: GOAL_FIXTURE_OK_COLOR,
     phase,
-    phase_color: '#4ade80',
+    phase_color: GOAL_FIXTURE_OK_COLOR,
     goal_fsm: {
       state: phase,
       source: 'goal.phase',
-      state_kind: phase,
       next_actions: [],
       activity_observation: 'goal_metadata',
       stagnation_status: 'recent',
     },
     health: 'on_track',
-    health_color: '#4ade80',
+    health_color: GOAL_FIXTURE_OK_COLOR,
     badges: [],
     status_reason: '',
     priority: 1,

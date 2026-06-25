@@ -313,8 +313,8 @@ function blockerSourceClass(source: GoalTreeNode['blocking_source']): string {
   }
 }
 
-function goalFsmStateKindLabel(kind: GoalFsmProjection['state_kind']): string {
-  switch (kind) {
+function goalFsmStateLabel(state: GoalFsmProjection['state']): string {
+  switch (state) {
     case 'executing': return '실행'
     case 'verification_gate': return '검증 게이트'
     case 'approval_gate': return '승인 게이트'
@@ -322,7 +322,7 @@ function goalFsmStateKindLabel(kind: GoalFsmProjection['state_kind']): string {
     case 'paused': return '일시정지'
     case 'completed': return '완료'
     case 'dropped': return '중단'
-    default: return kind
+    default: return state
   }
 }
 
@@ -354,9 +354,9 @@ function GoalFsmBadge({ fsm }: { fsm: GoalFsmProjection }) {
   const toneClass =
     fsm.stagnation_status === 'stalled'
       ? 'border-warn/30 bg-warn/10 text-warn'
-      : fsm.state_kind === 'blocked'
+      : fsm.state === 'blocked'
         ? 'border-bad/35 bg-bad/10 text-bad'
-        : fsm.state_kind === 'verification_gate' || fsm.state_kind === 'approval_gate'
+        : fsm.state === 'verification_gate' || fsm.state === 'approval_gate'
           ? 'border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] text-[var(--color-warn-fg)]'
           : 'border-card-border/60 bg-[var(--color-bg-elevated)] text-text-body'
   return html`
@@ -364,7 +364,7 @@ function GoalFsmBadge({ fsm }: { fsm: GoalFsmProjection }) {
       class="inline-flex items-center rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-semibold uppercase ${toneClass}"
       title=${`source=${fsm.source}; activity=${goalFsmObservationLabel(fsm.activity_observation)}; stagnation=${goalFsmStagnationLabel(fsm.stagnation_status)}`}
     >
-      Goal FSM · ${goalFsmStateKindLabel(fsm.state_kind)}
+      Goal FSM · ${goalFsmStateLabel(fsm.state)}
     </span>
   `
 }
@@ -1459,10 +1459,6 @@ function GoalDetailPanel({
             <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2">
               <div class="text-3xs uppercase text-text-muted">state</div>
               <div class="mt-1 font-semibold text-text-strong">${goalPhaseLabel(selectedNode.goal_fsm.state)}</div>
-            </div>
-            <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2">
-              <div class="text-3xs uppercase text-text-muted">kind</div>
-              <div class="mt-1 font-semibold text-text-strong">${goalFsmStateKindLabel(selectedNode.goal_fsm.state_kind)}</div>
             </div>
             <div class="rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-2">
               <div class="text-3xs uppercase text-text-muted">activity</div>

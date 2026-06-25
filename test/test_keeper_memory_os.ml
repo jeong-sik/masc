@@ -3596,6 +3596,100 @@ let test_dashboard_json_wires_one_fact_item_per_fact () =
       (List.length items))
 ;;
 
+let test_dashboard_json_selection_policy_contract () =
+  let assoc_field label fields key =
+    match List.assoc_opt key fields with
+    | Some (`Assoc v) -> v
+    | Some _ -> Alcotest.failf "%s.%s must be an object" label key
+    | None -> Alcotest.failf "%s.%s missing" label key
+  in
+  let string_field label fields key =
+    match List.assoc_opt key fields with
+    | Some (`String v) -> v
+    | Some _ -> Alcotest.failf "%s.%s must be a string" label key
+    | None -> Alcotest.failf "%s.%s missing" label key
+  in
+  let int_field label fields key =
+    match List.assoc_opt key fields with
+    | Some (`Int v) -> v
+    | Some _ -> Alcotest.failf "%s.%s must be an int" label key
+    | None -> Alcotest.failf "%s.%s missing" label key
+  in
+  with_temp_keepers_dir (fun _dir ->
+    let keeper_id = "memory-panel-test" in
+    let top =
+      match Server_dashboard_http_keeper_api.memory_os_dashboard_json ~keeper_id with
+      | `Assoc top -> top
+      | _ -> Alcotest.fail "memory_os_dashboard_json must be a JSON object"
+    in
+    let policy = assoc_field "memory_os" top "selection_policy" in
+    Alcotest.(check string) "keeper_scope" keeper_id (string_field "policy" policy "keeper_scope");
+    Alcotest.(check string)
+      "shared_scope"
+      Types.shared_store_id
+      (string_field "policy" policy "shared_scope");
+    Alcotest.(check string)
+      "private facts source"
+      "Keeper_memory_os_io.read_facts_tail"
+      (string_field "policy" policy "facts_source");
+    Alcotest.(check string)
+      "shared facts source"
+      "Keeper_memory_os_io.read_facts_all"
+      (string_field "policy" policy "shared_facts_source");
+    Alcotest.(check string)
+      "episodes source"
+      "Keeper_memory_os_io.read_episodes_tail"
+      (string_field "policy" policy "episodes_source");
+    Alcotest.(check int)
+      "dashboard fact bound"
+      Memory_io.fact_store_max
+      (int_field "policy" policy "dashboard_fact_tail_limit");
+    Alcotest.(check int)
+      "dashboard episode bound"
+      12
+      (int_field "policy" policy "dashboard_episode_tail_limit");
+    Alcotest.(check int)
+      "prompt private fact bound"
+      Recall.default_max_facts
+      (int_field "policy" policy "recall_private_fact_limit");
+    Alcotest.(check int)
+      "prompt shared fact bound"
+      Recall.default_max_shared_facts
+      (int_field "policy" policy "recall_shared_fact_limit");
+    Alcotest.(check int)
+      "prompt episode bound"
+      Recall.default_max_episodes
+      (int_field "policy" policy "recall_episode_limit");
+    Alcotest.(check string)
+      "category source"
+      "Keeper_memory_os_types.category_to_string"
+      (string_field "policy" policy "category_source");
+    Alcotest.(check string)
+      "claim-kind source"
+      "Keeper_memory_os_types.claim_kind_to_string"
+      (string_field "policy" policy "claim_kind_source");
+    Alcotest.(check string)
+      "recall block source"
+      "Keeper_memory_os_recall.render_if_enabled"
+      (string_field "policy" policy "recall_block");
+    Alcotest.(check string)
+      "prompt record source"
+      "Keeper_run_tools_hooks.record_block Prompt_block_id.Memory_os_recall"
+      (string_field "policy" policy "prompt_record");
+    Alcotest.(check bool)
+      "persona_weighting is not emitted without a real feature"
+      false
+      (List.mem_assoc "persona_weighting" policy);
+    Alcotest.(check bool)
+      "old misleading fact_tail_limit key absent"
+      false
+      (List.mem_assoc "fact_tail_limit" policy);
+    Alcotest.(check bool)
+      "old misleading episode_tail_limit key absent"
+      false
+      (List.mem_assoc "episode_tail_limit" policy))
+;;
+
 let () =
   maybe_run_lock_holder_child ();
   Alcotest.run
@@ -3671,6 +3765,10 @@ let () =
             "dashboard json wires one facts.items row per persisted fact"
             `Quick
             test_dashboard_json_wires_one_fact_item_per_fact
+        ; Alcotest.test_case
+            "dashboard json selection_policy pins recall lineage"
+            `Quick
+            test_dashboard_json_selection_policy_contract
         ] )
     ; ( "policy"
       , [ Alcotest.test_case

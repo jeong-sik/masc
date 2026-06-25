@@ -6,12 +6,14 @@ import {
   DEFAULT_MEMORY_KEEPERS,
   MemoryInspector,
   factCategoryMeta,
+  factSelectionReason,
   factTtlLabel,
   latestEntryWithBlocks,
   memCompositionFromBlocks,
   memFmtBytes,
   memFmtTok,
   promptBlockMeta,
+  sortMemoryFactsForReview,
   type MemoryKeeper,
 } from './memory-inspector'
 import type { MemoryOsFact, TurnRecordRow } from '../api/dashboard'
@@ -34,6 +36,22 @@ function turnRecordsPayload() {
       keeper: 'masc-improver',
       source: 'memory_os_files',
       producer: 'keeper_librarian',
+      selection_policy: {
+        keeper_scope: 'masc-improver',
+        shared_scope: '_shared',
+        facts_source: 'Keeper_memory_os_io.read_facts_tail',
+        shared_facts_source: 'Keeper_memory_os_io.read_facts_all',
+        episodes_source: 'Keeper_memory_os_io.read_episodes_tail',
+        dashboard_fact_tail_limit: 384,
+        dashboard_episode_tail_limit: 12,
+        recall_private_fact_limit: 8,
+        recall_shared_fact_limit: 4,
+        recall_episode_limit: 2,
+        category_source: 'Keeper_memory_os_types.category_to_string',
+        claim_kind_source: 'Keeper_memory_os_types.claim_kind_to_string',
+        recall_block: 'Keeper_memory_os_recall.render_if_enabled',
+        prompt_record: 'Keeper_run_tools_hooks.record_block Prompt_block_id.Memory_os_recall',
+      },
       facts_store: '.masc/config/keepers/masc-improver.facts.jsonl',
       episodes_store: '.masc/config/keepers/masc-improver/episodes',
       recall_enabled: true,
@@ -62,7 +80,7 @@ function turnRecordsPayload() {
         ],
       },
       facts: {
-        tail_limit: 256,
+        tail_limit: 384,
         shown: 2,
         current: 1,
         expired: 1,
@@ -166,19 +184,51 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(container.textContent).toContain('동적 컨텍스트')
   })
 
-  it('renders one store row per real fact with typed category chips and Unknown absorption', async () => {
+  it('renders active/latest facts first, with stored time and selection reason', async () => {
     stubFetch()
     const { container } = renderInspector()
     await waitFor(() => expect(container.querySelectorAll('.mem-store-row').length).toBeGreaterThan(0))
-    // 2 fact items + 1 episode row all use .mem-store-row; assert facts by claim text.
+    // Default view is active/current only so expired rows do not dominate the drawer.
     expect(container.textContent).toContain('retention D0 = 가입일, 첫 세션 기준')
     expect(container.textContent).toContain('제약') // constraint chip label
+    expect(container.textContent).toContain('저장')
+    expect(container.textContent).toContain('검증')
+    expect(container.textContent).toContain('active recall candidate')
+    expect(container.textContent).not.toContain('amplitude 캐시는 만료됨')
+  })
+
+  it('can expand to all rows and still surfaces unknown taxonomy explicitly', async () => {
+    stubFetch()
+    const { container } = renderInspector()
+    await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
+    const allBtn = [...container.querySelectorAll('.mem-filter')].find(b => b.textContent === '전체 2')
+    expect(allBtn).toBeTruthy()
+    fireEvent.click(allBtn!)
     // out-of-vocabulary category surfaces its raw label, not a fabricated kind.
     expect(container.textContent).toContain('Speculation')
+    expect(container.textContent).toContain('expired evidence row')
     // external_ref rendered
     expect(container.textContent).toContain('pr 22198')
     // NO salience meter — the deleted score model must not reappear.
     expect(container.querySelector('.mem-sal')).toBeFalsy()
+  })
+
+  it('surfaces selection policy and prompt digest lineage without claiming raw full-prompt storage', async () => {
+    stubFetch()
+    const { container } = renderInspector()
+    await waitFor(() => expect(container.querySelector('.mem-trust')).toBeTruthy())
+    expect(container.textContent).toContain('masc-improver + _shared')
+    expect(container.textContent).toContain('private + shared recall tiers')
+    expect(container.textContent).toContain('800B memory_os_recall')
+    expect(container.textContent).toContain('Keeper_memory_os_io.read_facts_tail')
+    expect(container.textContent).toContain('Keeper_memory_os_io.read_facts_all')
+    expect(container.textContent).toContain('dashboard 384 · prompt 8')
+    expect(container.textContent).toContain('_shared · prompt 4')
+    expect(container.textContent).toContain('dashboard 12 · prompt 2')
+    expect(container.textContent).toContain('Keeper_memory_os_recall.render_if_enabled')
+    expect(container.textContent).toContain('Full Prompt')
+    expect(container.textContent).toContain('raw text not persisted here')
+    expect(container.textContent).toContain('cccc2222dddd')
   })
 
   it('surfaces read_errors and renders honest disclosures for the unbacked sections', async () => {
@@ -358,5 +408,45 @@ describe('memory view-model helpers', () => {
     // an already-expired fact keeps the past form
     const dead = factTtlLabel(makeFact({ valid_until: nowSec - 2 * 3600, current: false }))
     expect(dead).toContain('전')
+  })
+
+  it('sortMemoryFactsForReview puts current, most-recent evidence first', () => {
+    const mkFact = (claim: string, current: boolean, reference_time: number): MemoryOsFact => ({
+      claim,
+      category: { tag: 'fact' },
+      source: { trace_id: 't', turn: 1, tool_call_id: null },
+      first_seen: reference_time,
+      first_seen_iso: null,
+      reference_time,
+      valid_until: null,
+      valid_until_iso: null,
+      last_verified_at: null,
+      current,
+      external_ref: null,
+      claim_kind: null,
+    })
+    expect(sortMemoryFactsForReview([
+      mkFact('expired-new', false, 30),
+      mkFact('current-old', true, 10),
+      mkFact('current-new', true, 20),
+    ]).map(f => f.claim)).toEqual(['current-new', 'current-old', 'expired-new'])
+  })
+
+  it('factSelectionReason explains currentness, category, and claim kind', () => {
+    const fact: MemoryOsFact = {
+      claim: 'x',
+      category: { tag: 'constraint' },
+      source: { trace_id: 't', turn: 1, tool_call_id: null },
+      first_seen: 0,
+      first_seen_iso: null,
+      reference_time: 0,
+      valid_until: null,
+      valid_until_iso: null,
+      last_verified_at: null,
+      current: true,
+      external_ref: null,
+      claim_kind: 'durable_knowledge',
+    }
+    expect(factSelectionReason(fact)).toBe('active recall candidate · 제약 · durable')
   })
 })

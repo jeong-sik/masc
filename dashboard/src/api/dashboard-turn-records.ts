@@ -180,11 +180,29 @@ export type MemoryOsFact = {
   readonly claim_kind: MemoryOsClaimKind | null
 }
 
+export type MemoryOsSelectionPolicy = {
+  readonly keeper_scope: string
+  readonly shared_scope: string | null
+  readonly facts_source: string
+  readonly shared_facts_source: string | null
+  readonly episodes_source: string
+  readonly dashboard_fact_tail_limit: number
+  readonly dashboard_episode_tail_limit: number
+  readonly recall_private_fact_limit: number
+  readonly recall_shared_fact_limit: number
+  readonly recall_episode_limit: number
+  readonly category_source: string
+  readonly claim_kind_source: string
+  readonly recall_block: string
+  readonly prompt_record: string
+}
+
 export type MemoryOsTurnRecordSnapshot = {
   schema: string
   keeper: string
   source: string
   producer: string
+  selection_policy: MemoryOsSelectionPolicy | null
   facts_store: string
   episodes_store: string
   recall_enabled: boolean
@@ -408,6 +426,60 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
   }
 }
 
+function decodeMemoryOsSelectionPolicy(raw: unknown): MemoryOsSelectionPolicy | null {
+  if (!isRecord(raw)) return null
+  const keeper_scope = asString(raw.keeper_scope)
+  const shared_scope = raw.shared_scope == null ? null : (asString(raw.shared_scope) ?? null)
+  const facts_source = asString(raw.facts_source)
+  const shared_facts_source = raw.shared_facts_source == null
+    ? null
+    : (asString(raw.shared_facts_source) ?? null)
+  const episodes_source = asString(raw.episodes_source)
+  const dashboard_fact_tail_limit = asNumber(raw.dashboard_fact_tail_limit)
+  const dashboard_episode_tail_limit = asNumber(raw.dashboard_episode_tail_limit)
+  const recall_private_fact_limit = asNumber(raw.recall_private_fact_limit)
+  const recall_shared_fact_limit = asNumber(raw.recall_shared_fact_limit)
+  const recall_episode_limit = asNumber(raw.recall_episode_limit)
+  const category_source = asString(raw.category_source)
+  const claim_kind_source = asString(raw.claim_kind_source)
+  const recall_block = asString(raw.recall_block)
+  const prompt_record = asString(raw.prompt_record)
+  if (
+    !keeper_scope
+    || (raw.shared_scope != null && !shared_scope)
+    || !facts_source
+    || (raw.shared_facts_source != null && !shared_facts_source)
+    || !episodes_source
+    || dashboard_fact_tail_limit == null
+    || dashboard_episode_tail_limit == null
+    || recall_private_fact_limit == null
+    || recall_shared_fact_limit == null
+    || recall_episode_limit == null
+    || !category_source
+    || !claim_kind_source
+    || !recall_block
+    || !prompt_record
+  ) {
+    return null
+  }
+  return {
+    keeper_scope,
+    shared_scope,
+    facts_source,
+    shared_facts_source,
+    episodes_source,
+    dashboard_fact_tail_limit,
+    dashboard_episode_tail_limit,
+    recall_private_fact_limit,
+    recall_shared_fact_limit,
+    recall_episode_limit,
+    category_source,
+    claim_kind_source,
+    recall_block,
+    prompt_record,
+  }
+}
+
 function decodeMemoryOsCounts(raw: unknown): {
   tail_limit: number
   shown: number
@@ -444,6 +516,7 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
     keeper,
     source,
     producer,
+    selection_policy: decodeMemoryOsSelectionPolicy(raw.selection_policy),
     facts_store,
     episodes_store,
     recall_enabled: asBoolean(raw.recall_enabled, true) ?? true,

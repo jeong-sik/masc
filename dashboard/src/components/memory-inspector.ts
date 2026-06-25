@@ -20,7 +20,7 @@ import { Fragment } from 'preact'
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
-import { formatTimeAgo, formatTimeUntil } from '../lib/format-time'
+import { formatDateTimeKo, formatTimeAgo, formatTimeUntil } from '../lib/format-time'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import {
   fetchKeeperTurnRecords,
@@ -29,6 +29,7 @@ import {
   type MemoryOsEpisodeSummary,
   type MemoryOsFact,
   type MemoryOsFactCategory,
+  type MemoryOsSelectionPolicy,
   type TurnBlock,
   type TurnRecordRow,
 } from '../api/dashboard'
@@ -183,6 +184,47 @@ export function factTtlLabel(fact: MemoryOsFact): string {
     : `만료됨 ${formatTimeAgo(fact.valid_until)}`
 }
 
+const DEFAULT_FACT_ROW_LIMIT = 12
+type FactVisibilityFilter = 'current' | 'all'
+
+export function sortMemoryFactsForReview(facts: readonly MemoryOsFact[]): MemoryOsFact[] {
+  return [...facts].sort((a, b) => {
+    if (a.current !== b.current) return a.current ? -1 : 1
+    return b.reference_time - a.reference_time
+  })
+}
+
+function formatFactInstant(ts: number, iso: string | null): string {
+  return formatDateTimeKo(iso ?? ts)
+}
+
+function factClaimKindLabel(fact: MemoryOsFact): string {
+  switch (fact.claim_kind) {
+    case 'durable_knowledge':
+      return 'durable'
+    case 'external_state':
+      return 'external'
+    case 'self_observation':
+      return 'self'
+    case null:
+      return 'untyped'
+    default: {
+      const _exhaustive: never = fact.claim_kind
+      return _exhaustive
+    }
+  }
+}
+
+export function factSelectionReason(fact: MemoryOsFact): string {
+  const meta = factCategoryMeta(fact.category)
+  const state = fact.current ? 'active recall candidate' : 'expired evidence row'
+  return `${state} · ${meta.lbl} · ${factClaimKindLabel(fact)}`
+}
+
+function latestMemoryRecallBlock(row: TurnRecordRow | null): TurnBlock | null {
+  return row?.record.blocks.find(block => block.block === 'memory_os_recall') ?? null
+}
+
 // ── rendering ──
 
 function MemBar({ parts, total }: { parts: readonly CompositionPart[]; total: number }) {
@@ -225,6 +267,94 @@ function MemCompoReal({ row }: { row: TurnRecordRow | null }) {
     </div>`
 }
 
+function MemoryTrustStrip({
+  snapshot,
+  latestPromptRow,
+}: {
+  snapshot: MemoryOsTurnRecordSnapshot
+  latestPromptRow: TurnRecordRow | null
+}) {
+  const policy = snapshot.selection_policy
+  const memoryBlock = latestMemoryRecallBlock(latestPromptRow)
+  const promptTurn = latestPromptRow
+    ? `${latestPromptRow.record.trace_id}#${latestPromptRow.record.absolute_turn}`
+    : 'none'
+  const scopeLabel = policy?.shared_scope
+    ? `${policy.keeper_scope} + ${policy.shared_scope}`
+    : (policy?.keeper_scope ?? snapshot.keeper)
+  return html`
+    <div class="mem-trust">
+      <div class="mem-trust-card">
+        <span class="mem-trust-k">store</span>
+        <span class="mem-trust-v mono">${snapshot.facts.current}/${snapshot.facts.shown} current</span>
+        <span class="mem-trust-sub mono">${snapshot.source}</span>
+      </div>
+      <div class="mem-trust-card">
+        <span class="mem-trust-k">scope</span>
+        <span class="mem-trust-v mono">${scopeLabel}</span>
+        <span class="mem-trust-sub">${policy?.shared_scope ? 'private + shared recall tiers' : 'keeper-local recall tier'}</span>
+      </div>
+      <div class="mem-trust-card">
+        <span class="mem-trust-k">prompt link</span>
+        <span class="mem-trust-v mono">${memoryBlock ? `${memFmtBytes(memoryBlock.bytes)} memory_os_recall` : 'no memory block'}</span>
+        <span class="mem-trust-sub mono">${promptTurn}</span>
+      </div>
+    </div>
+  `
+}
+
+function MemoryPolicyDisclosure({ policy }: { policy: MemoryOsSelectionPolicy | null }) {
+  if (!policy) {
+    return html`<${DisclosureNote} text="selection_policy 없음 — 대시보드는 fact timestamps/provenance만 표시." />`
+  }
+  return html`
+    <div class="mem-policy">
+      <div class="mem-policy-row"><span>private facts</span><code>${policy.facts_source}</code><b>dashboard ${policy.dashboard_fact_tail_limit} · prompt ${policy.recall_private_fact_limit}</b></div>
+      ${policy.shared_scope && policy.shared_facts_source
+        ? html`<div class="mem-policy-row"><span>shared facts</span><code>${policy.shared_facts_source}</code><b>${policy.shared_scope} · prompt ${policy.recall_shared_fact_limit}</b></div>`
+        : null}
+      <div class="mem-policy-row"><span>episodes</span><code>${policy.episodes_source}</code><b>dashboard ${policy.dashboard_episode_tail_limit} · prompt ${policy.recall_episode_limit}</b></div>
+      <div class="mem-policy-row"><span>librarian</span><code>${policy.category_source} + ${policy.claim_kind_source}</code><b>typed labels</b></div>
+      <div class="mem-policy-row"><span>prompt</span><code>${policy.recall_block}</code><b>${policy.prompt_record}</b></div>
+    </div>
+  `
+}
+
+function MemoryPromptEvidence({
+  snapshot,
+  row,
+}: {
+  snapshot: MemoryOsTurnRecordSnapshot
+  row: TurnRecordRow | null
+}) {
+  const memoryBlock = latestMemoryRecallBlock(row)
+  return html`
+    <div class="mem-prompt-evidence">
+      <div class="mem-prompt-step">
+        <span class="mem-prompt-n">1</span>
+        <div><b>librarian</b><span>${snapshot.producer}</span></div>
+      </div>
+      <div class="mem-prompt-step">
+        <span class="mem-prompt-n">2</span>
+        <div><b>store</b><span class="mono">${snapshot.facts_store}</span></div>
+      </div>
+      <div class="mem-prompt-step">
+        <span class="mem-prompt-n">3</span>
+        <div><b>recall block</b><span class="mono">${memoryBlock ? `${memoryBlock.digest.slice(0, 12)} · ${memFmtBytes(memoryBlock.bytes)}` : 'not present in latest prompt record'}</span></div>
+      </div>
+      <div class="mem-prompt-step">
+        <span class="mem-prompt-n">4</span>
+        <div><b>Full Prompt</b><span>raw text not persisted here; turn-record keeps ordered block digests and byte sizes.</span></div>
+      </div>
+      ${row ? html`
+        <div class="mem-prompt-foot mono">
+          latest assembly ${row.record.trace_id}#${row.record.absolute_turn} · ${formatFactInstant(row.record.ts, null)}
+        </div>
+      ` : null}
+    </div>
+  `
+}
+
 function FactRow({ fact }: { fact: MemoryOsFact }) {
   const meta = factCategoryMeta(fact.category)
   const provenance = `${fact.source.trace_id}#${fact.source.turn}`
@@ -234,13 +364,18 @@ function FactRow({ fact }: { fact: MemoryOsFact }) {
       <div class="mem-store-main">
         <div class="mem-store-text">${fact.claim}</div>
         <div class="mem-store-meta">
-          <span class="mono">${factAgeLabel(fact)}</span>
+          <span class="mono">저장 ${formatFactInstant(fact.first_seen, fact.first_seen_iso)}</span>
+          <span class="mono">기준 ${factAgeLabel(fact)}</span>
+          ${fact.last_verified_at != null
+            ? html`<span class="mono">검증 ${formatFactInstant(fact.last_verified_at, null)}</span>`
+            : null}
           <span class=${`mono ${fact.current ? '' : 'mem-expired'}`}>${factTtlLabel(fact)}</span>
           ${fact.external_ref
             ? html`<span class="mem-tag">${fact.external_ref.kind} ${fact.external_ref.id}</span>`
             : null}
           <span class="mem-src mono">${provenance}</span>
         </div>
+        <div class="mem-store-why">${factSelectionReason(fact)}</div>
       </div>
     </div>`
 }
@@ -295,7 +430,10 @@ function OneKeeperMemoryReal({
   rows: readonly TurnRecordRow[]
 }) {
   const kindFilter = useSignal<string>('all')
-  const facts = snapshot.facts.items
+  const visibilityFilter = useSignal<FactVisibilityFilter>('current')
+  const factRowLimit = useSignal(DEFAULT_FACT_ROW_LIMIT)
+  const latestPromptRow = latestEntryWithBlocks(rows)
+  const facts = sortMemoryFactsForReview(snapshot.facts.items)
   const episodes = [...snapshot.episodes.items].reverse().slice(0, 5)
   // distinct categories present, in first-seen order, deduped by tag
   const seen = new Set<string>()
@@ -308,15 +446,31 @@ function OneKeeperMemoryReal({
     }
   }
   const filter = kindFilter.value
-  const storeRows = filter === 'all' ? facts : facts.filter(f => factTag(f) === filter)
+  const visibilityRows =
+    visibilityFilter.value === 'current' ? facts.filter(f => f.current) : facts
+  const storeRows =
+    filter === 'all' ? visibilityRows : visibilityRows.filter(f => factTag(f) === filter)
+  const visibleStoreRows = storeRows.slice(0, factRowLimit.value)
+  const hiddenStoreRows = Math.max(0, storeRows.length - visibleStoreRows.length)
 
   return html`
     <${Fragment}>
       <${ReadErrors} snapshot=${snapshot} />
+      <${MemoryTrustStrip} snapshot=${snapshot} latestPromptRow=${latestPromptRow} />
 
       <div class="turn-sec">
         <h4>컨텍스트 구성</h4>
-        <${MemCompoReal} row=${latestEntryWithBlocks(rows)} />
+        <${MemCompoReal} row=${latestPromptRow} />
+      </div>
+
+      <div class="turn-sec">
+        <h4>회상 연결 · Full Prompt</h4>
+        <${MemoryPromptEvidence} snapshot=${snapshot} row=${latestPromptRow} />
+      </div>
+
+      <div class="turn-sec">
+        <h4>수집 기준 · librarian</h4>
+        <${MemoryPolicyDisclosure} policy=${snapshot.selection_policy} />
       </div>
 
       <div class="turn-sec">
@@ -332,8 +486,29 @@ function OneKeeperMemoryReal({
         ${facts.length
           ? html`
             <${Fragment}>
+              <div class="mem-filters">
+                <button
+                  class=${`mem-filter ${visibilityFilter.value === 'current' ? 'on' : ''}`}
+                  onClick=${() => { visibilityFilter.value = 'current'; factRowLimit.value = DEFAULT_FACT_ROW_LIMIT }}
+                >활성 ${snapshot.facts.current}</button>
+                <button
+                  class=${`mem-filter ${visibilityFilter.value === 'all' ? 'on' : ''}`}
+                  onClick=${() => { visibilityFilter.value = 'all'; factRowLimit.value = DEFAULT_FACT_ROW_LIMIT }}
+                >전체 ${facts.length}</button>
+              </div>
               <${CategoryFilters} cats=${cats} active=${filter} onPick=${(t: string) => { kindFilter.value = t }} />
-              <div class="mem-store">${storeRows.map(f => html`<${FactRow} key=${factTag(f) + f.source.trace_id + f.source.turn + f.claim} fact=${f} />`)}</div>
+              <div class="mem-store">${visibleStoreRows.map(f => html`<${FactRow} key=${factTag(f) + f.source.trace_id + f.source.turn + f.claim} fact=${f} />`)}</div>
+              ${hiddenStoreRows > 0
+                ? html`
+                  <button
+                    type="button"
+                    class="mem-more"
+                    onClick=${() => { factRowLimit.value += DEFAULT_FACT_ROW_LIMIT }}
+                  >
+                    ${hiddenStoreRows}개 더 보기
+                  </button>
+                `
+                : null}
             </>`
           : html`<div class="mem-empty">장기 메모리 항목 없음.</div>`}
       </div>

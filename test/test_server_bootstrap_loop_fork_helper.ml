@@ -7,10 +7,6 @@ open Alcotest
    cancellation propagation and crash logging in one place while preserving
    loop-specific iteration error handling. *)
 
-let read_file path =
-  In_channel.with_open_text (Masc_test_deps.source_path path) In_channel.input_all
-;;
-
 let count_substring ~haystack ~needle =
   let rec loop i acc =
     let next = String.index_from_opt haystack i needle.[0] in
@@ -27,7 +23,9 @@ let count_substring ~haystack ~needle =
 ;;
 
 let test_raw_fork_is_owned_by_helper () =
-  let content = read_file "lib/server/server_bootstrap_loops_fiber.ml" in
+  let content =
+    Masc_test_deps.read_source_file "lib/server/server_bootstrap_loops_fiber.ml"
+  in
   check int
     "only fork_logged_fiber owns direct Eio.Fiber.fork in server_bootstrap_loops_fiber"
     1
@@ -35,7 +33,9 @@ let test_raw_fork_is_owned_by_helper () =
 ;;
 
 let test_bootstrap_sites_use_logged_helper () =
-  let content = read_file "lib/server/server_bootstrap_loops.ml" in
+  let content =
+    Masc_test_deps.read_source_file "lib/server/server_bootstrap_loops.ml"
+  in
   check bool
     "bootstrap/background fibers route through fork_logged_fiber"
     true
@@ -50,7 +50,9 @@ let test_bootstrap_sites_use_logged_helper () =
    loops module spawns no raw fork either; every site routes through
    [fork_logged_fiber]. *)
 let test_loops_has_no_raw_fork () =
-  let content = read_file "lib/server/server_bootstrap_loops.ml" in
+  let content =
+    Masc_test_deps.read_source_file "lib/server/server_bootstrap_loops.ml"
+  in
   check int
     "no raw Eio.Fiber.fork in server_bootstrap_loops; sites route through \
      fork_logged_fiber"
@@ -59,7 +61,9 @@ let test_loops_has_no_raw_fork () =
 ;;
 
 let test_crash_log_names_remain_specific () =
-  let content = read_file "lib/server/server_bootstrap_loops.ml" in
+  let content =
+    Masc_test_deps.read_source_file "lib/server/server_bootstrap_loops.ml"
+  in
   List.iter
     (fun needle ->
        check bool

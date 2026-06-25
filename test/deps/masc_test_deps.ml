@@ -73,15 +73,46 @@ let find_project_root () =
   in
   walk start_dir
 
-let source_path rel = Filename.concat (find_project_root ()) rel
+let validate_source_relpath rel =
+  let fail reason =
+    failwith
+      (Printf.sprintf
+         "Masc_test_deps.source_path requires a clean repo-relative path: %S (%s)"
+         rel
+         reason)
+  in
+  if String.equal rel "" then fail "empty path";
+  if not (Filename.is_relative rel) then fail "absolute path";
+  if String.starts_with ~prefix:"./" rel then fail "leading ./";
+  let parts = String.split_on_char '/' rel in
+  List.iter
+    (function
+      | "" -> fail "empty path segment"
+      | "." -> fail "current-directory path segment"
+      | ".." -> fail "parent-directory path segment"
+      | _ -> ())
+    parts
+
+let source_path rel =
+  validate_source_relpath rel;
+  Filename.concat (find_project_root ()) rel
 
 let read_file path =
-  let ic = open_in path in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () ->
-      let n = in_channel_length ic in
-      really_input_string ic n)
+  try
+    let ic = open_in path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        let n = in_channel_length ic in
+        really_input_string ic n)
+  with exn ->
+    failwith
+      (Printf.sprintf
+         "Masc_test_deps.read_file failed for %S: %s"
+         path
+         (Printexc.to_string exn))
+
+let read_source_file rel = read_file (source_path rel)
 
 let tla_quoted_strings content =
   let re = Str.regexp "\"\\([^\"]*\\)\"" in

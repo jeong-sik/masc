@@ -421,7 +421,6 @@ describe('memory view-model helpers', () => {
       valid_until_iso: null,
       last_verified_at: null,
       current,
-      external_ref: null,
       claim_kind: null,
     })
     expect(sortMemoryFactsForReview([
@@ -443,7 +442,6 @@ describe('memory view-model helpers', () => {
       valid_until_iso: null,
       last_verified_at: null,
       current: true,
-      external_ref: null,
       claim_kind: 'durable_knowledge',
     }
     expect(factSelectionReason(fact)).toBe('active recall candidate · 제약 · durable')

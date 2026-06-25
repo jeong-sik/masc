@@ -4,10 +4,13 @@ import type { KeeperChatStreamEvent } from './api'
 import {
   appendAssistantDelta,
   appendAssistantThinkingDelta,
+  appendAssistantToolTraceArgsDelta,
+  appendAssistantToolTraceStep,
   setAssistantStreamState,
   updateThreadEntry,
   insertThreadEntryBefore,
   finalizeAssistantEntry,
+  markAssistantToolTraceEnded,
   clearActiveStream,
   clearActiveStreamRequestId,
   releaseActiveStreamRequestId,
@@ -19,6 +22,7 @@ import {
   setRecordValue,
 } from './keeper-state'
 import { isRecord, asString } from './components/common/normalize'
+import { toolEntryIdFromCallId } from './tool-call-output-store'
 
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 export const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'lost', 'cancelled'])
@@ -26,10 +30,6 @@ export const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'lost', 'canc
 // Most recent TOOL_CALL_START id per keeper — fallback target for
 // TOOL_CALL_ARGS / TOOL_CALL_END events that omit toolCallId.
 const lastToolCallIds = new Map<string, string>()
-
-function toolEntryId(toolCallId: string): string {
-  return `tool-${toolCallId}`
-}
 
 export interface KeeperThreadAbortResult {
   readonly keeperName: string
@@ -94,13 +94,18 @@ export function applyKeeperStreamEvent(
     case 'TOOL_CALL_START': {
       const toolCallId = event.toolCallId ?? `tc-${keeperName}-${Date.now()}`
       lastToolCallIds.set(keeperName, toolCallId)
+      const toolName = event.toolCallName ?? event.name ?? 'tool'
+      appendAssistantToolTraceStep(keeperName, assistantEntryId, {
+        toolCallId,
+        name: toolName,
+      })
       // Insert above the live assistant bubble so the final reply text
       // stays the last entry in the transcript.
       insertThreadEntryBefore(keeperName, assistantEntryId, {
-        id: toolEntryId(toolCallId),
+        id: toolEntryIdFromCallId(toolCallId),
         role: 'tool',
         source: 'tool_result',
-        label: event.toolCallName ?? event.name ?? 'tool',
+        label: toolName,
         text: '',
         rawText: '',
         timestamp: new Date().toISOString(),
@@ -113,7 +118,8 @@ export function applyKeeperStreamEvent(
     case 'TOOL_CALL_ARGS': {
       const toolCallId = event.toolCallId ?? lastToolCallIds.get(keeperName)
       if (toolCallId && typeof event.delta === 'string' && event.delta) {
-        updateThreadEntry(keeperName, toolEntryId(toolCallId), entry => ({
+        appendAssistantToolTraceArgsDelta(keeperName, assistantEntryId, toolCallId, event.delta)
+        updateThreadEntry(keeperName, toolEntryIdFromCallId(toolCallId), entry => ({
           ...entry,
           text: `${entry.text}${event.delta}`,
           rawText: `${entry.rawText ?? entry.text}${event.delta}`,
@@ -124,7 +130,8 @@ export function applyKeeperStreamEvent(
     case 'TOOL_CALL_END': {
       const toolCallId = event.toolCallId ?? lastToolCallIds.get(keeperName)
       if (toolCallId) {
-        updateThreadEntry(keeperName, toolEntryId(toolCallId), entry => ({
+        markAssistantToolTraceEnded(keeperName, assistantEntryId, toolCallId)
+        updateThreadEntry(keeperName, toolEntryIdFromCallId(toolCallId), entry => ({
           ...entry,
           delivery: 'delivered',
           streamState: null,

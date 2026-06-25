@@ -64,7 +64,7 @@ import {
   isKeeperThreadMessageSendInFlight,
   sendKeeperThreadMessage,
 } from '../keeper-runtime'
-import { _resetChatStoreForTests, enqueueInput, getQueueLength } from '../keeper-chat-store'
+import { _resetChatStoreForTests, enqueueInput, getQueuedMessages, getQueueLength } from '../keeper-chat-store'
 import { shellAuthSummary } from '../store'
 import type { KeeperConversationEntry } from '../types'
 import {
@@ -412,7 +412,36 @@ describe('KeeperConversationPanel', () => {
     expect(getQueueLength('sangsu')).toBe(2)
   })
 
-  it('keeps queued client action ids attached when draining the queue', async () => {
+  it('renders queued drafts inside the transcript while the keeper is busy', async () => {
+    keeperSending.value = { sangsu: true }
+    enqueueInput('sangsu', 'queued transcript draft', undefined, 'queued-action-1')
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
+      container,
+    )
+    await Promise.resolve()
+
+    expect(container.textContent).toContain('queued transcript draft')
+    expect(container.querySelector('[data-chat-delivery="queued"]')).not.toBeNull()
+  })
+
+  it('renders queued drafts with invalid timestamps without throwing', async () => {
+    keeperSending.value = { sangsu: true }
+    const msg = enqueueInput('sangsu', 'queued invalid timestamp', undefined, 'queued-action-1')
+    msg.timestamp = Number.NaN
+
+    expect(() => render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
+      container,
+    )).not.toThrow()
+    await Promise.resolve()
+
+    expect(container.textContent).toContain('queued invalid timestamp')
+    expect(container.querySelector('[data-chat-delivery="queued"]')).not.toBeNull()
+  })
+
+  it('keeps queued client action ids attached when draining the queue as independent turns', async () => {
     enqueueInput('sangsu', 'queued one', undefined, 'queued-click-1')
     enqueueInput('sangsu', 'queued two', undefined, 'queued-click-2')
 
@@ -429,10 +458,14 @@ describe('KeeperConversationPanel', () => {
     const sendButton = container.querySelector('.send') as HTMLButtonElement
     fireEvent.click(sendButton)
 
-    await waitFor(() => expect(sendKeeperThreadMessage).toHaveBeenCalledTimes(2))
-    expect(vi.mocked(sendKeeperThreadMessage).mock.calls[1]?.[1]).toBe('queued one\n\n---\n\nqueued two')
+    await waitFor(() => expect(sendKeeperThreadMessage).toHaveBeenCalledTimes(3))
+    expect(vi.mocked(sendKeeperThreadMessage).mock.calls[1]?.[1]).toBe('queued one')
     expect(vi.mocked(sendKeeperThreadMessage).mock.calls[1]?.[2]).toEqual(expect.objectContaining({
-      clientActionIds: ['queued-click-1', 'queued-click-2'],
+      clientActionId: 'queued-click-1',
+    }))
+    expect(vi.mocked(sendKeeperThreadMessage).mock.calls[2]?.[1]).toBe('queued two')
+    expect(vi.mocked(sendKeeperThreadMessage).mock.calls[2]?.[2]).toEqual(expect.objectContaining({
+      clientActionId: 'queued-click-2',
     }))
   })
 
@@ -461,9 +494,34 @@ describe('KeeperConversationPanel', () => {
     expect(vi.mocked(sendKeeperThreadMessage).mock.calls[1]?.[1]).toBe('queued one')
     expect(vi.mocked(sendKeeperThreadMessage).mock.calls[2]?.[1]).toBe('queued during drain')
     expect(vi.mocked(sendKeeperThreadMessage).mock.calls[2]?.[2]).toEqual(expect.objectContaining({
-      clientActionIds: ['queued-click-3'],
+      clientActionId: 'queued-click-3',
     }))
     expect(getQueueLength('sangsu')).toBe(0)
+  })
+
+  it('drops an aborted queued send instead of requeueing it', async () => {
+    vi.mocked(sendKeeperThreadMessage).mockImplementation(async (_keeperName, message) => {
+      if (message === 'queued one') throw new DOMException('cancelled', 'AbortError')
+    })
+    enqueueInput('sangsu', 'queued one', undefined, 'queued-click-1')
+    enqueueInput('sangsu', 'queued two', undefined, 'queued-click-2')
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
+      container,
+    )
+    await Promise.resolve()
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    fireEvent.input(textarea, { target: { value: 'trigger drain' } })
+    await Promise.resolve()
+
+    const sendButton = container.querySelector('.send') as HTMLButtonElement
+    fireEvent.click(sendButton)
+
+    await waitFor(() => expect(sendKeeperThreadMessage).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(sendKeeperThreadMessage).mock.calls[1]?.[1]).toBe('queued one')
+    expect(getQueuedMessages('sangsu').map(msg => msg.content)).toEqual(['queued two'])
   })
 
   it('forwards the message-level turn inspector action to the transcript', async () => {

@@ -557,8 +557,11 @@ and handle_transition ~tool_name ~start_time ctx args =
       if is_version_mismatch r && attempt < max_cas_retries then begin
         task_log_info ~task_id "CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms"
           task_id (attempt + 1) max_cas_retries (cas_retry_delay_s *. 1000.0);
-        Time_compat.sleep cas_retry_delay_s;
-        try_transition (attempt + 1)
+        try
+          Time_compat.sleep cas_retry_delay_s;
+          try_transition (attempt + 1)
+        with Failure msg when String.starts_with ~prefix:"Time_compat.sleep:" msg ->
+          r
       end else
         r
   in

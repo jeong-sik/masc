@@ -322,6 +322,14 @@ let init_default_strict ~config_path =
        Ok ())
 
 let runtime_state () = Atomic.get loaded_state_ref
+
+module For_testing = struct
+  type snapshot = loaded_state
+
+  let snapshot () = runtime_state ()
+  let restore snapshot = Atomic.set loaded_state_ref snapshot
+end
+
 let get_default_runtime () = (runtime_state ()).default_runtime
 let get_runtimes () = (runtime_state ()).runtimes
 let get_runtime_ids () = runtime_ids (runtime_state ()).runtimes

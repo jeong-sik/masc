@@ -264,10 +264,64 @@ let is_keeper_board_tool = function
   | Voice_speak -> false
 ;;
 
+let masc_board_name_of_keeper_tool = function
+  | Board_comment -> Some Tool_name.Board_name.Board_comment
+  | Board_comment_vote -> Some Tool_name.Board_name.Board_comment_vote
+  | Board_curation_read -> Some Tool_name.Board_name.Board_curation_read
+  | Board_curation_submit -> Some Tool_name.Board_name.Board_curation_submit
+  | Board_post_get -> Some Tool_name.Board_name.Board_post_get
+  | Board_list -> Some Tool_name.Board_name.Board_list
+  | Board_post -> Some Tool_name.Board_name.Board_post
+  | Board_search -> Some Tool_name.Board_name.Board_search
+  | Board_stats -> Some Tool_name.Board_name.Board_stats
+  | Board_sub_board_create -> Some Tool_name.Board_name.Board_sub_board_create
+  | Board_sub_board_delete -> Some Tool_name.Board_name.Board_sub_board_delete
+  | Board_sub_board_get -> Some Tool_name.Board_name.Board_sub_board_get
+  | Board_sub_board_list -> Some Tool_name.Board_name.Board_sub_board_list
+  | Board_sub_board_update -> Some Tool_name.Board_name.Board_sub_board_update
+  | Board_vote -> Some Tool_name.Board_name.Board_vote
+  | Execute
+  | Broadcast
+  | Context_status
+  | Fs_edit
+  | Fs_write
+  | Fs_read
+  | Ide_annotate
+  | Handoff
+  | Library_read
+  | Library_search
+  | Memory_search
+  | Memory_write
+  | Search_files
+  | Surface_read
+  | Surface_post
+  | Person_note_set
+  | Task_claim
+  | Task_create
+  | Task_done
+  | Tasks_audit
+  | Tasks_list
+  | Time_now
+  | Tool_search
+  | Tools_list
+  | Voice_agent
+  | Voice_listen
+  | Voice_session_end
+  | Voice_session_start
+  | Voice_sessions
+  | Voice_speak -> None
+;;
+
+let masc_board_name_of_keeper_name name =
+  match of_string name with
+  | Some tool -> masc_board_name_of_keeper_tool tool
+  | None -> None
+;;
+
 let is_board_surface_name name =
   match of_string name with
   | Some tool -> is_keeper_board_tool tool
-  | None -> String.starts_with ~prefix:"masc_board_" name
+  | None -> Option.is_some (Tool_name.Board_name.of_string name)
 ;;
 
 let strip_mcp_masc_prefix name =
@@ -276,19 +330,35 @@ let strip_mcp_masc_prefix name =
   else name
 ;;
 
+let is_board_write_name = function
+  | Tool_name.Board_name.Board_comment
+  | Tool_name.Board_name.Board_curation_submit
+  | Tool_name.Board_name.Board_post
+  | Tool_name.Board_name.Board_vote -> true
+  | Tool_name.Board_name.Board_cleanup
+  | Tool_name.Board_name.Board_comment_vote
+  | Tool_name.Board_name.Board_curation_read
+  | Tool_name.Board_name.Board_delete
+  | Tool_name.Board_name.Board_post_get
+  | Tool_name.Board_name.Board_hearths
+  | Tool_name.Board_name.Board_list
+  | Tool_name.Board_name.Board_profile
+  | Tool_name.Board_name.Board_reaction
+  | Tool_name.Board_name.Board_search
+  | Tool_name.Board_name.Board_stats
+  | Tool_name.Board_name.Board_sub_board_create
+  | Tool_name.Board_name.Board_sub_board_delete
+  | Tool_name.Board_name.Board_sub_board_get
+  | Tool_name.Board_name.Board_sub_board_list
+  | Tool_name.Board_name.Board_sub_board_update -> false
+;;
+
 let is_board_write_surface_name name =
   let name = strip_mcp_masc_prefix name in
-  match of_string name with
-  | Some Board_comment
-  | Some Board_curation_submit
-  | Some Board_post
-  | Some Board_vote -> true
-  | Some _ | None ->
-    List.mem
-      name
-      [ "masc_board_comment"
-      ; "masc_board_curation_submit"
-      ; "masc_board_post"
-      ; "masc_board_vote"
-      ]
+  match masc_board_name_of_keeper_name name with
+  | Some board_name -> is_board_write_name board_name
+  | None ->
+    (match Tool_name.Board_name.of_string name with
+     | Some board_name -> is_board_write_name board_name
+     | None -> false)
 ;;

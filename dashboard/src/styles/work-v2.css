@@ -43,20 +43,32 @@
 /* ── KPI strip ────────────────────────────────────────────────────────────── */
 .wk-kpis {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 1px;
-  background: var(--border-soft);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, var(--bg-panel) 70%, transparent);
   overflow: hidden;
 }
 
 .wk-kpi {
-  background: var(--bg-panel);
-  padding: 14px 16px;
+  min-width: 0;
+  background: transparent;
+  padding: 10px 14px;
+  border-right: 1px solid var(--border-soft);
+}
+
+.wk-kpi:last-child {
+  border-right: 0;
+}
+
+.wk-kpi.primary {
+  background: color-mix(in oklab, var(--color-accent-fg) 8%, transparent);
 }
 
 .wk-kpi-k {
   font-size: 9.5px;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-dim);
 }
@@ -64,9 +76,9 @@
 .wk-kpi-v {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 23px;
+  font-size: 20px;
   color: var(--text-bright);
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
 .wk-kpi-v.ok { color: var(--status-ok); }
@@ -658,11 +670,23 @@
   .wk-kpis {
     grid-template-columns: repeat(3, 1fr);
   }
+
+  .wk-kpi:nth-child(3n) {
+    border-right: 0;
+  }
 }
 
 @media (max-width: 700px) {
   .wk-kpis {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .wk-kpi:nth-child(3n) {
+    border-right: 1px solid var(--border-soft);
+  }
+
+  .wk-kpi:nth-child(2n) {
+    border-right: 0;
   }
 
   .ov-head.wk-head,
@@ -1254,48 +1278,6 @@
 .wk-viewseg button.on {
   background: var(--color-accent-fg);
   color: var(--color-bg-page);
-}
-
-/* ── KPI cards ───────────────────────────────────────────────────────────── */
-
-.wk-kpis {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 0.75rem;
-}
-
-.wk-kpi {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  padding: 0.875rem 1rem;
-  border-radius: var(--r-1);
-  border: 1px solid var(--color-border-default);
-  background: var(--color-bg-surface);
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
-}
-
-.wk-kpi-k {
-  font-size: var(--text-2xs);
-  color: var(--color-fg-muted);
-}
-
-.wk-kpi-v {
-  margin-top: 0.5rem;
-  font-size: var(--text-2xl);
-  font-weight: 700;
-  color: var(--color-fg-primary);
-  line-height: 1;
-}
-
-.wk-kpi-v.brass { color: var(--color-accent-fg); }
-.wk-kpi-v.volt { color: var(--color-status-volt); }
-.wk-kpi-v.warn { color: var(--color-status-warn); }
-
-@media (max-width: 700px) {
-  .wk-kpis {
-    grid-template-columns: repeat(2, 1fr);
-  }
 }
 
 /* ── Goal create side panel ──────────────────────────────────────────────── */

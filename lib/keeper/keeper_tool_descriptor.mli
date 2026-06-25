@@ -91,6 +91,11 @@ type t =
   ; sandbox : sandbox
   ; runtime_handler : runtime_handler
   ; translate : Yojson.Safe.t -> Yojson.Safe.t
+  ; validate_translated_input : bool
+  (** Whether alias dispatch should validate [translate input] against the
+      internal handler schema. Defaults to true; false is reserved for
+      descriptor-owned public aliases whose runtime schema still differs from
+      the public schema. *)
   ; receipt_labels : (string * string) list
   (** Evaluation-only semantic tags emitted in route evidence. These tags
       support replay/harness scoring and are not runtime selection policy. *)

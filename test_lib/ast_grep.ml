@@ -2,8 +2,21 @@
    tests.  Skips comments and docstrings (which trapped RFC-0084
    PR-E / PR-F / PR-A / PR-I-3 source-grep regressions). *)
 
+let resolve_module_path path =
+  if Filename.is_relative path then
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root ->
+      let candidate = Filename.concat root path in
+      if Sys.file_exists candidate then candidate else path
+    | None -> path
+  else path
+;;
+
 let parse_implementation path =
-  let ic = open_in path in
+  let path = resolve_module_path path in
+  match open_in path with
+  | exception Sys_error msg -> Error msg
+  | ic ->
   let lexbuf = Lexing.from_channel ic in
   Lexing.set_filename lexbuf path;
   let result =

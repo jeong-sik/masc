@@ -87,6 +87,10 @@ let metric_dashboard_execution_render_phase_sec =
 
 let metric_dashboard_snapshot_latency_seconds = "masc_dashboard_snapshot_latency_seconds"
 
+let metric_operator_snapshot_stale_served_total =
+  Otel_metric_store_core.declare_counter "masc_operator_snapshot_stale_served_total"
+;;
+
 let metric_dashboard_snapshot_latency_seconds_bucket =
   "masc_dashboard_snapshot_latency_seconds_bucket"
 ;;

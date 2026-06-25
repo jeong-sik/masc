@@ -112,6 +112,16 @@ module Operator : sig
   val cache_ttl_sec : float
   (** [MASC_OPERATOR_CACHE_TTL] (default [30.0]).  Operator
       snapshot cache TTL. *)
+
+  val cache_stale_grace_factor : float
+  (** [MASC_OPERATOR_CACHE_STALE_GRACE_FACTOR] (default [3.0]).
+      Multiplier applied to [cache_ttl_sec] to determine how long a
+      stale snapshot is served while recomputing in the background. *)
+
+  val cache_background_revalidate : bool
+  (** [MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE] feature flag
+      (default [true]). When [false], stale entries block on recompute
+      like the original TTL cache. *)
 end
 
 (** {1 Dashboard} *)

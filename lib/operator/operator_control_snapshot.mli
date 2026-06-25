@@ -26,9 +26,9 @@
 
     Internal helpers stay private at this boundary
     (everything else — see body of the .ml.  Notably:
-    [_snapshot_mu] / [_snapshot_table] / [_snapshot_ttl_s]
-    cache state, [Cached] / [Computing] cache states, the
-    keeper-context snapshot helpers,
+    the operator snapshot cache implementation in
+    {!Operator_control_snapshot_cache}, the keeper-context
+    snapshot helpers,
     [compute_context_ratio],
     [keeper_context_snapshot] type +
     [keeper_context_snapshot_is_empty] /
@@ -190,22 +190,15 @@ val remote_client_type_of_context : 'a context -> string
     of this module.  ['a context] comes from
     {!Operator_pending_confirm}. *)
 
-(** {1 Snapshot cache internals (test access)} *)
+(** {1 Snapshot cache access} *)
 
-type snapshot_slot =
-  | Cached of { value : Yojson.Safe.t; expires_at : float }
-  | Computing of
-      { cond : Eio.Condition.t
-      ; stale : Yojson.Safe.t option
-      ; started_at : float
-      ; stuck_warned : bool ref
-      }
-
-val _snapshot_mu : Eio.Mutex.t
-val _snapshot_table : (string, snapshot_slot) Hashtbl.t
-val _snapshot_ttl_s : float
-(** Pinned for [test/test_operator_control_snapshot.ml]
-    which exercises the cache directly via Hashtbl ops. *)
+include module type of struct
+  include Operator_control_snapshot_cache
+end
+(** Re-exports {!Operator_control_snapshot_cache.get_or_compute},
+    {!Operator_control_snapshot_cache.peek},
+    {!Operator_control_snapshot_cache.invalidate_snapshot_cache}, and
+    {!Operator_control_snapshot_cache.stats} at the operator snapshot boundary. *)
 
 (** {1 Snapshot + recent actions JSON} *)
 

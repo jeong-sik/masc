@@ -665,6 +665,13 @@
   test_keeper_behavior_trace)
  (libraries masc_test_deps multimodal))
 
+; Operator snapshot cache: stale-while-revalidate + background refresh.
+
+(test
+ (name test_operator_control_snapshot_cache)
+ (modules test_operator_control_snapshot_cache)
+ (libraries alcotest yojson masc_test_deps eio_main))
+
 ; Focused CI gate for runtime TOML validity.
 
 (test

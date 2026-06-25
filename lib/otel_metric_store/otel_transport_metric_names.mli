@@ -94,6 +94,10 @@ val metric_dashboard_execution_render_phase_sec : string
 (** Dashboard snapshot phase latency in seconds. *)
 val metric_dashboard_snapshot_latency_seconds : string
 
+(** Counter of operator snapshots served from stale cache while a
+    background recompute was running. Labels: [cache = "operator"]. *)
+val metric_operator_snapshot_stale_served_total : string
+
 (** Cumulative bucket counter for dashboard snapshot phase latency.
     Labels: [le]. *)
 val metric_dashboard_snapshot_latency_seconds_bucket : string

@@ -46,6 +46,10 @@ val first_vision_runtime_id : unit -> (string, string) result
 (** Runtime id of the first image-capable configured runtime, or [Error] when
     none is configured. *)
 
+val vision_store_dir : keeper_name:string -> string
+(** Per-keeper artifact store directory used by [analyze_image] and eager image
+    eviction. *)
+
 (** Typed outcome of {!run_vision}. SSOT shared by the tool handler (renders to
     JSON) and eager ingestion eviction ({!Keeper_vision_ingest}, renders to a
     placeholder). *)

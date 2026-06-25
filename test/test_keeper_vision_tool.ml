@@ -12,6 +12,7 @@
    covered below. *)
 
 module Vt = Masc.Keeper_vision_tool
+module Vi = Masc.Keeper_vision_ingest
 module Va = Multimodal.Vision_analyze
 module Store = Multimodal.Vision_artifact_store
 
@@ -48,6 +49,39 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
   | Error e -> failwith e
+
+let contains_substring s needle =
+  let s_len = String.length s in
+  let n_len = String.length needle in
+  let rec loop i =
+    if i + n_len > s_len then false
+    else if String.sub s i n_len = needle then true
+    else loop (i + 1)
+  in
+  if n_len = 0 then true else loop 0
+
+let substring_index s needle =
+  let s_len = String.length s in
+  let n_len = String.length needle in
+  let rec loop i =
+    if i + n_len > s_len then None
+    else if String.sub s i n_len = needle then Some i
+    else loop (i + 1)
+  in
+  if n_len = 0 then Some 0 else loop 0
+
+let artifact_handle_of_placeholder text =
+  let marker = "artifact:" in
+  match substring_index text marker with
+  | None -> failwith ("missing artifact marker: " ^ text)
+  | Some marker_pos ->
+    let start = marker_pos + String.length marker in
+    let rec stop i =
+      if i >= String.length text || text.[i] = ' ' || text.[i] = ']'
+      then i
+      else stop (i + 1)
+    in
+    String.sub text start (stop start - start)
 
 let with_temp_base f =
   let path = Filename.temp_file "masc-vision-tool-test-" "" in
@@ -177,6 +211,76 @@ let test_invalid_media_type_is_policy_rejection () =
     assert (String.equal (assoc_string "error" json) "invalid_media_type");
     assert (String.equal (assoc_string "failure_class" json) "policy_rejection"))
 
+let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
+  with_temp_base (fun _ ->
+    let keeper_name = "vision-ingest-delegate" in
+    let bytes = "\x89PNG\r\n\x1a\ninline-image" in
+    let blocks =
+      [ Agent_sdk.Types.Text "before"
+      ; Agent_sdk.Types.Image
+          { media_type = "image/png"
+          ; data = Base64.encode_string bytes
+          ; source_type = "base64"
+          }
+      ; Agent_sdk.Types.Text "after"
+      ]
+    in
+    match
+      Vi.evict_blocks
+        ~mode:Vi.Eager
+        ~policy:Masc.Keeper_types_profile.Mm_delegate
+        ~keeper_name
+        blocks
+    with
+    | [ Agent_sdk.Types.Text "before"; Agent_sdk.Types.Text placeholder; Agent_sdk.Types.Text "after" ] ->
+      assert (contains_substring placeholder "[image artifact:");
+      assert (contains_substring placeholder "not yet read");
+      let handle = artifact_handle_of_placeholder placeholder in
+      (match
+         Store.load
+           ~dir:(Vt.vision_store_dir ~keeper_name)
+           (Store.of_string handle)
+       with
+       | Ok stored -> assert (String.equal stored bytes)
+       | Error msg -> failwith msg)
+    | _ -> failwith "delegate eviction should replace the image with text")
+
+let test_non_delegate_eviction_preserves_inline_image () =
+  let bytes = "raw-image" in
+  let blocks =
+    [ Agent_sdk.Types.Image
+        { media_type = "image/png"
+        ; data = Base64.encode_string bytes
+        ; source_type = "base64"
+        }
+    ]
+  in
+  match
+    Vi.evict_blocks
+      ~mode:Vi.Eager
+      ~policy:Masc.Keeper_types_profile.Mm_inherit
+      ~keeper_name:"vision-ingest-inherit"
+      blocks
+  with
+  | [ Agent_sdk.Types.Image img ] ->
+    assert (String.equal img.data (Base64.encode_string bytes))
+  | _ -> failwith "non-delegate policy should preserve image blocks"
+
+let test_delegate_eviction_bad_base64_surfaces_text_error () =
+  match
+    Vi.evict_blocks
+      ~mode:Vi.Store_only
+      ~policy:Masc.Keeper_types_profile.Mm_delegate
+      ~keeper_name:"vision-ingest-bad-base64"
+      [ Agent_sdk.Types.Image
+          { media_type = "image/png"; data = "not base64"; source_type = "base64" }
+      ]
+  with
+  | [ Agent_sdk.Types.Text placeholder ] ->
+    assert (contains_substring placeholder "could not store");
+    assert (contains_substring placeholder "bad base64")
+  | _ -> failwith "bad base64 must surface as a text placeholder")
+
 let () =
   test_truncated_of_stop_reason ();
   test_message_of_request ();
@@ -184,4 +288,7 @@ let () =
   test_provider_for_vision_preserves_configured_max_tokens ();
   test_missing_eio_context_is_runtime_failure ();
   test_invalid_media_type_is_policy_rejection ();
+  test_delegate_eager_eviction_stores_image_and_removes_inline_block ();
+  test_non_delegate_eviction_preserves_inline_image ();
+  test_delegate_eviction_bad_base64_surfaces_text_error ();
   print_endline "test_keeper_vision_tool: all assertions passed"

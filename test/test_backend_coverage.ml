@@ -72,20 +72,8 @@ let test_validate_ttl_boundary () =
   check int "TTL at min boundary" 1 (Backend_types.validate_ttl 1)
 
 (* ============================================================ *)
-(* Backend_types - Config and Status                         *)
+(* Backend_types - Config constants                          *)
 (* ============================================================ *)
-
-let test_get_status_all_backends () =
-  let cfg_mem = { Backend_types.default_config with backend_type = Backend_types.Memory } in
-  let cfg_fs = { Backend_types.default_config with backend_type = Backend_types.FileSystem } in
-
-  let open Yojson.Safe.Util in
-
-  let s1 = Backend_types.get_status cfg_mem in
-  check string "memory status" "memory" (s1 |> member "backend_type" |> to_string);
-
-  let s2 = Backend_types.get_status cfg_fs in
-  check string "fs status" "filesystem" (s2 |> member "backend_type" |> to_string)
 
 let test_pubsub_max_messages_constant () =
   (* Test the fixed default value. *)
@@ -517,8 +505,7 @@ let () =
       test_case "large TTL" `Quick test_validate_ttl_large;
       test_case "boundary TTL" `Quick test_validate_ttl_boundary;
     ];
-    "config_status", [
-      test_case "get_status all backends" `Quick test_get_status_all_backends;
+    "config_constants", [
       test_case "pubsub_max_messages" `Quick test_pubsub_max_messages_constant;
     ];
     "eio_compression", [

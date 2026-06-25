@@ -6,28 +6,6 @@ module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 module Config_root_bootstrap = Server_runtime_config_root_bootstrap
 
-let force_jsonl_fallback_env () =
-  Unix.putenv Env_config_core.storage_type_env_key "filesystem"
-
-let requested_backend_mode () =
-  Env_config_core.storage_type ()
-
-let storage_enforcement_fallback_reason ~requested ~effective =
-  let requested = requested |> String.trim |> String.lowercase_ascii in
-  let effective = effective |> String.trim |> String.lowercase_ascii in
-  if requested = "" || String.equal requested effective then
-    None
-  else
-    Some
-      (Printf.sprintf
-         "MASC_STORAGE_TYPE=%s requested; filesystem-only bootstrap enforced as %s"
-         requested effective)
-
-let note_storage_enforcement_fallback ~requested ~effective =
-  match storage_enforcement_fallback_reason ~requested ~effective with
-  | Some reason -> Server_startup_state.note_fallback reason
-  | None -> ()
-
 let config_bootstrap_mode = Config_root_bootstrap.config_bootstrap_mode
 let bootstrap_base_path_config_root = Config_root_bootstrap.bootstrap_base_path_config_root
 let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
@@ -255,7 +233,6 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
      callers may omit [env], in which case Pool falls back to a
      stub (request returns Error). *)
   Option.iter Eio_context.set_env env;
-  force_jsonl_fallback_env ();
   Process_eio.init ~cwd_default:Eio.Path.(fs / base_path) ~proc_mgr ~clock;
   Exec_tap.install_from_env ();
   Unix.putenv
@@ -563,15 +540,10 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     | Env_config.Transport.Unknown_h2_mode _ -> `Auto
   in
   let socket = Server_bootstrap_http.listen_socket ~sw ~net config in
-  let requested_backend_mode_before_enforcement = requested_backend_mode () in
-  force_jsonl_fallback_env ();
-  let initial_backend_mode = requested_backend_mode () in
+  let initial_backend_mode = "filesystem" in
   Transport_metrics.set_ws_same_origin_runtime_ready false;
   server_state := None;
   Server_startup_state.reset ~backend_mode:initial_backend_mode ();
-  note_storage_enforcement_fallback
-    ~requested:requested_backend_mode_before_enforcement
-    ~effective:initial_backend_mode;
 
   (* 2. All init in background fiber — isolated on its own switch so a
      failure in any init-time subsystem (keepers, maintenance, dashboard

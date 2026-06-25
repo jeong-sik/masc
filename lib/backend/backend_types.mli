@@ -17,13 +17,6 @@ type error =
 (** Result alias pinned to [error]. *)
 type 'a result = ('a, error) Stdlib.result
 
-(** {1 Backend selection} *)
-
-type backend_type =
-  | Memory
-  | FileSystem
-[@@deriving show, eq]
-
 (** {1 Health} *)
 
 type health_result = {
@@ -34,7 +27,6 @@ type health_result = {
 (** {1 Config} *)
 
 type config = {
-  backend_type : backend_type;
   base_path : string;
   node_id : string;
   cluster_name : string;
@@ -49,15 +41,9 @@ val pubsub_max_messages : int
     single-instance disambiguation in logs. *)
 val generate_node_id : unit -> string
 
-(** Default config: [FileSystem] backend rooted at [".masc"], cluster
-    ["default"], and [pubsub_max_messages]. *)
+(** Default config rooted at [".masc"], cluster ["default"], and
+    [pubsub_max_messages]. *)
 val default_config : config
-
-(** {1 Status reporting} *)
-
-(** Serialise [config] as a JSON object — [backend_type] is rendered
-    as ["memory"] or ["filesystem"]; [pubsub_max_messages] is omitted. *)
-val get_status : config -> Yojson.Safe.t
 
 (** {1 Safety utilities} *)
 

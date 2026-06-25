@@ -120,7 +120,7 @@ path, never home-anchored — SSOT-R6).
    boot`.
 3. **The keeper TOML must set `sandbox_profile = "local"`** (or `"docker"`) — boot rejects without it.
 4. Boot env: `MASC_KEEPER_BOOTSTRAP_ENABLED=true`, `MASC_ORCHESTRATOR_ENABLED=1`,
-   `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC=<n>`, `MASC_STORAGE_TYPE=filesystem`. Boot the exe directly —
+   `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC=<n>`. Boot the exe directly —
    **not** via `harness_start_server`, which hardcodes the bootstrap off. (`MASC_AUTONOMY_ENABLED`
    does not exist in the code; the lib sets it as a harmless no-op.)
 5. A persona directory must exist under `$BASE/.masc/config/personas/<persona_name>/`; the gate

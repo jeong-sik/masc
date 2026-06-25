@@ -43,7 +43,6 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_PERSONAS_DIR` | string_literal | n/a | n/a | 425 | SSOT for MASC_CONFIG_DIR / MASC_PERSONAS_DIR env-var names (issue 8352). Shared by snapshot catalog and docker worker... |
 | `MASC_PUBSUB_MAX_MESSAGES` | typed:int | unclassified | unclassified | 516 | PubSub max messages per read. Default: 1000. |
 | `MASC_RELAY_CALIBRATION_ENABLED` | typed:bool | unclassified | unclassified | 447 | Whether relay token calibration is enabled. Default: true. |
-| `MASC_STORAGE_TYPE` | string_literal | n/a | n/a | 404 | SSOT for the MASC_STORAGE_TYPE env-var name (issue 8352). |
 | `MASC_TELEMETRY_ENABLED` | typed:bool | unclassified | unclassified | 488 | Whether telemetry tracking is enabled. Default: true. |
 | `MASC_TEST_ALLOW_HOME_BASE_PATH` | string_literal | n/a | n/a | 343 | #9903: production base-path safeguard for test executables. Without this, a test whose [MASC_BASE_PATH] override fail... |
 | `MASC_URL` | string_literal | n/a | n/a | 244 | SSOT for the MASC_HTTP_BASE_URL env-var name (issue 8352). Defined here (above [masc_http_base_url]) so the constant ... |

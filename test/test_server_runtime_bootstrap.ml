@@ -667,32 +667,6 @@ let json_bool_field name json =
   | Some _ -> Alcotest.failf "field %s is not a bool" name
   | None -> Alcotest.failf "missing field %s" name
 
-let test_force_jsonl_fallback_env () =
-  with_env "MASC_STORAGE_TYPE" (Some "memory") @@ fun () ->
-  Server_runtime_bootstrap.force_jsonl_fallback_env ();
-  Alcotest.(check string) "storage type forced to filesystem" "filesystem"
-    (Sys.getenv "MASC_STORAGE_TYPE")
-
-let test_storage_enforcement_fallback_reason () =
-  Alcotest.(check (option string))
-    "filesystem request needs no fallback reason" None
-    (Server_runtime_bootstrap.storage_enforcement_fallback_reason
-       ~requested:"filesystem" ~effective:"filesystem");
-  Alcotest.(check (option string))
-    "memory request records filesystem enforcement"
-    (Some
-       "MASC_STORAGE_TYPE=memory requested; filesystem-only bootstrap enforced as filesystem")
-    (Server_runtime_bootstrap.storage_enforcement_fallback_reason
-       ~requested:"memory" ~effective:"filesystem");
-  Server_startup_state.reset ~backend_mode:"filesystem" ();
-  Server_runtime_bootstrap.note_storage_enforcement_fallback
-    ~requested:"memory" ~effective:"filesystem";
-  let json = Server_startup_state.to_yojson () in
-  Alcotest.(check string)
-    "startup fallback reason is operator visible"
-    "MASC_STORAGE_TYPE=memory requested; filesystem-only bootstrap enforced as filesystem"
-    (Yojson.Safe.Util.(json |> member "fallback_reason" |> to_string))
-
 let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
   with_temp_dir "startup-config-bootstrap" (fun dir ->
       let repo = Filename.concat dir "repo" in
@@ -2210,7 +2184,6 @@ let test_create_server_state_records_runtime_resolution () =
       let repo = Filename.concat dir "repo" in
       mkdir_p repo;
       ignore (make_config_root repo);
-      with_env "MASC_STORAGE_TYPE" (Some "filesystem") @@ fun () ->
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd repo @@ fun () ->
       Eio_main.run @@ fun env ->
@@ -2241,7 +2214,6 @@ let test_create_server_state_preserves_raw_input_base_path () =
       mkdir_p repo;
       mkdir_p raw_input;
       ignore (make_config_root repo);
-      with_env "MASC_STORAGE_TYPE" (Some "filesystem") @@ fun () ->
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_env "MASC_BASE_PATH" None @@ fun () ->
       with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
@@ -2368,7 +2340,6 @@ let test_main_eio_serves_health_before_lazy_startup () =
         merge_env_overrides
           [
             ("MASC_BASE_PATH", dir);
-            ("MASC_STORAGE_TYPE", "filesystem");
             ("GRAPHQL_API_KEY", "");
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_AUTONOMY_ENABLED", "0");
@@ -2421,7 +2392,6 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
         merge_env_overrides
           [
             ("MASC_BASE_PATH", dir);
-            ("MASC_STORAGE_TYPE", "filesystem");
             ("GRAPHQL_API_KEY", "");
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_AUTONOMY_ENABLED", "0");
@@ -2586,7 +2556,6 @@ let test_main_eio_self_heals_cli_agent_mcp_token_file () =
         merge_env_overrides
           [
             ("MASC_BASE_PATH", dir);
-            ("MASC_STORAGE_TYPE", "filesystem");
             ("GRAPHQL_API_KEY", "");
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_AUTONOMY_ENABLED", "0");
@@ -2809,7 +2778,6 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
         merge_env_overrides
           [
             ("MASC_BASE_PATH", dir);
-            ("MASC_STORAGE_TYPE", "filesystem");
             ("GRAPHQL_API_KEY", "");
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_AUTONOMY_ENABLED", "0");
@@ -2895,7 +2863,6 @@ let test_main_eio_invalid_runtime_stays_degraded_but_serves_dashboard () =
         merge_env_overrides
           [
             ("MASC_BASE_PATH", dir);
-            ("MASC_STORAGE_TYPE", "filesystem");
             ("GRAPHQL_API_KEY", "");
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_AUTONOMY_ENABLED", "0");
@@ -2969,7 +2936,6 @@ let test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections () =
         merge_env_overrides
           [
             ("MASC_BASE_PATH", dir);
-            ("MASC_STORAGE_TYPE", "filesystem");
             ("GRAPHQL_API_KEY", "");
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_AUTONOMY_ENABLED", "0");
@@ -3042,7 +3008,6 @@ let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
         merge_env_overrides
           [
             ("MASC_BASE_PATH", dir);
-            ("MASC_STORAGE_TYPE", "filesystem");
             ("GRAPHQL_API_KEY", "");
             ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_AUTONOMY_ENABLED", "0");
@@ -3119,11 +3084,6 @@ let () =
     [
       ( "bootstrap",
         [
-          Alcotest.test_case "force_jsonl_fallback_env forces filesystem" `Quick
-            test_force_jsonl_fallback_env;
-          Alcotest.test_case
-            "storage enforcement fallback reason is visible"
-            `Quick test_storage_enforcement_fallback_reason;
           Alcotest.test_case
             "model catalog resolution prefers explicit env"
             `Quick test_model_catalog_resolution_prefers_explicit_env;

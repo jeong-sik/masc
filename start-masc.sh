@@ -24,9 +24,6 @@ if command -v opam >/dev/null 2>&1; then
     eval "$(opam env 2>/dev/null)" >/dev/null 2>/dev/null || true
 fi
 
-# Storage backend: filesystem only.
-export MASC_STORAGE_TYPE="filesystem"
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
@@ -512,7 +509,6 @@ clear_repo_local_config_for_explicit_base_path() {
 
 # Caller-provided env must win over repo-local .env/.env.local files.
 for env_name in \
-    MASC_STORAGE_TYPE \
     MASC_KEEPER_BOOTSTRAP_ENABLED \
     MASC_PORT \
     MASC_HOST \
@@ -541,7 +537,6 @@ if [ "$REPO_ENV_ROOT" != "$SCRIPT_DIR" ]; then
 fi
 
 for env_name in \
-    MASC_STORAGE_TYPE \
     MASC_KEEPER_BOOTSTRAP_ENABLED \
     MASC_PORT \
     MASC_HOST \
@@ -554,10 +549,6 @@ for env_name in \
 do
     restore_env_override "$env_name"
 done
-
-# ~/.zshenv and repo-local env files may change boot-time environment after the
-# initial top-of-script setup. Re-assert filesystem-only startup here.
-export MASC_STORAGE_TYPE="filesystem"
 
 # Did caller provide --base-path explicitly on CLI?
 BASE_PATH_EXPLICIT=0

@@ -262,7 +262,6 @@ Test는 production config와 격리되어야 한다.
 **현재 test/dune:**
 ```lisp
 (env
-  (MASC_STORAGE_TYPE filesystem)
   (GRAPHQL_API_KEY "")
   (ZAI_API_KEY ""))
 ```

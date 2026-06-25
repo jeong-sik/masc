@@ -36,7 +36,6 @@ Scope:
 | `MASC_BASE_PATH` | Runtime base path once the server is running. This is the workspace root, not the `.masc` directory itself. | `Env_config_core`, `Workspace_utils`, keeper/board/control-plane/logging paths |
 | `MASC_CONFIG_DIR` | Explicit config root override. Highest-precedence config selector. | `Config_dir_resolver`, bootstrap, keeper/persona config resolution |
 | `MASC_PERSONAS_DIR` | Explicit personas root override. | `Config_dir_resolver`, keeper/persona loading |
-| `MASC_STORAGE_TYPE` | Runtime backend selector. Only `filesystem` is active; PostgreSQL backend was removed. | bootstrap and backend setup |
 | `HOME` | Shell/user-home context for external tools and non-config artifact stores. | Host process environment |
 | `MASC_WORKSPACE_ROOT`, `ME_ROOT`, `DUNE_SOURCEROOT` | Workspace discovery, knowledge paths, `scripts/sb` resolution. | `Env_config_core`, workspace paths |
 | `MASC_HOST`, `MASC_HTTP_PORT`, `MASC_HTTP_BASE_URL` | Bind address and derived HTTP endpoint identity. | HTTP/bootstrap/provider routing |
@@ -480,7 +479,6 @@ MASC_PARSE_WARN
 MASC_PERSONAS_DIR
 MASC_PUBSUB_MAX_MESSAGES
 MASC_RELAY_CALIBRATION_ENABLED
-MASC_STORAGE_TYPE
 MASC_TELEMETRY_ENABLED
 MASC_WORKSPACE_ROOT
 ```

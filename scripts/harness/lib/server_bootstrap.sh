@@ -228,7 +228,6 @@ harness_start_server() {
   (
     export MASC_BASE_PATH="$base_path"
     export MASC_BASE_PATH_INPUT="$base_path"
-    export MASC_STORAGE_TYPE="filesystem"
     unset MASC_ADMIN_TOKEN
     unset MASC_TOKEN
     export MASC_AUTONOMY_ENABLED="0"

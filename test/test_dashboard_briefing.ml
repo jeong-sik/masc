@@ -1,13 +1,10 @@
 module Types = Masc_domain
 
-(** Dashboard Mission read-model regression tests. *)
-
 module Lib = Masc
 
 open Alcotest
 
-(* Force filesystem backend so tests run without PG/Eio context. *)
-let () = Unix.putenv "MASC_STORAGE_TYPE" "filesystem"
+(** Dashboard Mission read-model regression tests. *)
 
 let test_dir () =
   let tmp = Filename.temp_file "masc_dashboard_briefing" "" in

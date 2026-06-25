@@ -7,7 +7,7 @@
 MASC v2는 Git Worktree를 활용한 에이전트 격리와 `gh` CLI 기반 PR 워크플로우를 통해
 다중 AI 에이전트가 동일 코드베이스에서 충돌 없이 협업할 수 있게 합니다.
 
-**Current runtime status (2026-05):** mainline server bootstrap is filesystem-only. `MASC_STORAGE_TYPE` is forced to `filesystem`, and retired PostgreSQL envs are ignored by runtime bootstrap. Redis/PostgreSQL storage modes are not operator targets.
+**Current runtime status (2026-05):** mainline server bootstrap is filesystem-only by construction. There is no runtime storage selector; retired Redis/PostgreSQL storage modes are not operator targets.
 
 ### Design Principles (MAGI 삼두 합의)
 
@@ -64,7 +64,6 @@ Machine A:
 |----------|---------|
 | `MASC_BASE_PATH` | Base path (determines `.masc/` location) |
 | `MASC_CLUSTER_NAME` | Cluster name override |
-| `MASC_STORAGE_TYPE` | Active value: `filesystem`; non-filesystem requests fall back to filesystem during bootstrap |
 
 **Use Cases**:
 - **Filesystem Mode**: CLI-Tool-A + terminal Provider-F/Agent-Code on the same machine. This is the only supported runtime storage lane.

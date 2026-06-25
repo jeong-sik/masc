@@ -14,7 +14,7 @@ import type {
   KeeperDiagnostic,
 } from '../types'
 import {
-  abortKeeperThreadMessage,
+  cancelActiveKeeperThreadMessage,
   hydrateKeeperStatus,
   hydrateKeeperChatHistory,
   loadFullKeeperHistory,
@@ -177,6 +177,21 @@ function formatEligible(seconds?: number | null): string | null {
   if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) return null
   if (seconds < 60) return `${Math.round(seconds)}s`
   return `${Math.ceil(seconds / 60)}m`
+}
+
+function cancelKeeperThreadFromUi(keeperName: string): void {
+  void cancelActiveKeeperThreadMessage(keeperName)
+    .then(cancelled => {
+      if (!cancelled) {
+        console.warn(`[keeper] no active keeper stream to cancel for ${keeperName}`)
+      }
+    })
+    .catch(err => {
+      console.error(
+        `[keeper] failed to cancel active keeper stream for ${keeperName}`,
+        err instanceof Error ? err.message : err,
+      )
+    })
 }
 
 function conversationStateLabel(sending: boolean, hydrating: boolean, stalled: boolean): string {
@@ -724,7 +739,7 @@ export function KeeperConversationPanel({
               queueCount=${queueCount}
               commands=${composerCommands}
               onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
-              onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
+              onAbort=${() => { cancelKeeperThreadFromUi(keeperName) }}
               layout="primary"
             />
             ${error ? html`<div class="mt-2 text-xs text-[var(--bad-light)] leading-relaxed v2-monitoring-panel">${error}</div>` : null}
@@ -842,7 +857,7 @@ export function KeeperConversationPanel({
             queueCount=${queueCount}
             commands=${composerCommands}
             onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
-            onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
+            onAbort=${() => { cancelKeeperThreadFromUi(keeperName) }}
             layout="primary"
           />
         </div>
@@ -958,7 +973,7 @@ export function KeeperConversationPanel({
             queueCount=${queueCount}
             commands=${composerCommands}
             onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
-            onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
+            onAbort=${() => { cancelKeeperThreadFromUi(keeperName) }}
           />
         </div>
       </div>

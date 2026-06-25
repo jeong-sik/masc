@@ -61,10 +61,13 @@ import {
   keeperStatusDetails,
   keeperStreamStartedAt,
   keeperThreads,
+  activeStreamRequestId,
 } from './keeper-state'
 import {
+  _resetCancelledKeeperThreadRequestsForTests,
   _resetKeeperThreadMessageSendGuardsForTests,
   _resetChatHydrationForTests,
+  cancelActiveKeeperThreadMessage,
   dispatchKeeperInterjectAction,
   hydrateKeeperChatHistory,
   hydrateKeeperStatus,
@@ -248,7 +251,10 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     _clearPendingKeeperChatRequestsForTests()
     _resetKeeperThreadMessageSendGuardsForTests()
     _resetLiveSendRequestOwnersForTests()
+    _resetCancelledKeeperThreadRequestsForTests()
     streamKeeperMessage.mockReset()
+    cancelQueuedKeeperMessage.mockReset()
+    cancelQueuedKeeperMessage.mockResolvedValue(undefined)
     fetchKeeperChatHistory.mockReset()
     fetchQueuedKeeperMessageResult.mockReset()
     isTerminalQueuedKeeperMessage.mockClear()
@@ -438,6 +444,200 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     await secondSend
     expect(keeperSending.value.echo).toBe(false)
     expect(activeStreamEntryId('echo')).toBeNull()
+  })
+
+  it('cancels the server keeper request immediately when the operator aborts an active stream', async () => {
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        signal?: AbortSignal
+        onEvent: (event: KeeperChatStreamEvent) => void
+      },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_QUEUE_REQUEST',
+        value: { request_id: 'kmsg_echo_1', status: 'queued' },
+      })
+      return new Promise<{ terminal: boolean }>((_resolve, reject) => {
+        opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
+      })
+    })
+
+    const sendPromise = sendKeeperThreadMessage('echo', 'stuck turn').catch(err => err)
+    await Promise.resolve()
+
+    await cancelActiveKeeperThreadMessage('echo')
+
+    expect(cancelQueuedKeeperMessage).toHaveBeenCalledTimes(1)
+    expect(cancelQueuedKeeperMessage).toHaveBeenCalledWith(
+      'kmsg_echo_1',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+    const err = await sendPromise
+    expect(err).toBeInstanceOf(Error)
+    expect(err.name).toBe('AbortError')
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+  })
+
+  it('reports failure and keeps the pending request when server cancel fails', async () => {
+    cancelQueuedKeeperMessage.mockRejectedValue(new Error('network down'))
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        signal?: AbortSignal
+        onEvent: (event: KeeperChatStreamEvent) => void
+      },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_QUEUE_REQUEST',
+        value: { request_id: 'kmsg_echo_retry', status: 'queued' },
+      })
+      return new Promise<{ terminal: boolean }>((_resolve, reject) => {
+        opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
+      })
+    })
+
+    const sendPromise = sendKeeperThreadMessage('echo', 'stuck turn').catch(err => err)
+    await Promise.resolve()
+
+    await expect(cancelActiveKeeperThreadMessage('echo')).resolves.toBe(true)
+    expect(cancelQueuedKeeperMessage).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(keeperActionErrors.value.echo).toContain('network down'))
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toHaveLength(1)
+    expect(keeperSending.value.echo).toBe(false)
+    expect(activeStreamEntryId('echo')).toBeNull()
+
+    const err = await sendPromise
+    expect(err).toBeInstanceOf(Error)
+    expect(err.name).toBe('AbortError')
+    expect(activeStreamRequestId('echo')).toBeNull()
+  })
+
+  it('aborts the local stream before backend cancel settles', async () => {
+    cancelQueuedKeeperMessage.mockImplementation(() => new Promise(() => {}))
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        signal?: AbortSignal
+        onEvent: (event: KeeperChatStreamEvent) => void
+      },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_QUEUE_REQUEST',
+        value: { request_id: 'kmsg_echo_hung_cancel', status: 'queued' },
+      })
+      return new Promise<{ terminal: boolean }>((_resolve, reject) => {
+        opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
+      })
+    })
+
+    const sendPromise = sendKeeperThreadMessage('echo', 'stuck turn').catch(err => err)
+    await Promise.resolve()
+
+    await expect(cancelActiveKeeperThreadMessage('echo')).resolves.toBe(true)
+
+    expect(cancelQueuedKeeperMessage).toHaveBeenCalledWith(
+      'kmsg_echo_hung_cancel',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+    expect(keeperSending.value.echo).toBe(false)
+    expect(activeStreamEntryId('echo')).toBeNull()
+    const reply = (keeperThreads.value.echo ?? []).find(entry => entry.role === 'assistant')
+    expect(reply?.delivery).toBe('cancelled')
+
+    const err = await sendPromise
+    expect(err).toBeInstanceOf(Error)
+    expect(err.name).toBe('AbortError')
+  })
+
+  it('aborts locally without server cancel when no request id has arrived yet', async () => {
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: { signal?: AbortSignal },
+    ) => new Promise<{ terminal: boolean }>((_resolve, reject) => {
+      opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
+    }))
+
+    const sendPromise = sendKeeperThreadMessage('echo', 'still opening').catch(err => err)
+    await Promise.resolve()
+
+    await expect(cancelActiveKeeperThreadMessage('echo')).resolves.toBe(true)
+    expect(cancelQueuedKeeperMessage).not.toHaveBeenCalled()
+    const err = await sendPromise
+    expect(err).toBeInstanceOf(Error)
+    expect(err.name).toBe('AbortError')
+  })
+
+  it('cancels the backend request if queue id arrives after local abort', async () => {
+    const controls: { emitQueueRequest?: () => void } = {}
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        signal?: AbortSignal
+        onEvent: (event: KeeperChatStreamEvent) => void
+      },
+    ) => new Promise<{ terminal: boolean }>((_resolve, reject) => {
+      controls.emitQueueRequest = () => {
+        opts.onEvent({
+          type: 'CUSTOM',
+          name: 'KEEPER_QUEUE_REQUEST',
+          value: { request_id: 'kmsg_echo_late', status: 'queued' },
+        })
+      }
+      opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
+    }))
+
+    const sendPromise = sendKeeperThreadMessage('echo', 'still opening').catch(err => err)
+    await Promise.resolve()
+
+    await expect(cancelActiveKeeperThreadMessage('echo')).resolves.toBe(true)
+    controls.emitQueueRequest?.()
+    await Promise.resolve()
+
+    expect(cancelQueuedKeeperMessage).toHaveBeenCalledWith(
+      'kmsg_echo_late',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+    const err = await sendPromise
+    expect(err).toBeInstanceOf(Error)
+    expect(err.name).toBe('AbortError')
+  })
+
+  it('uses a fresh timeout signal when cancelling after an abort error', async () => {
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        onEvent: (event: KeeperChatStreamEvent) => void
+      },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_QUEUE_REQUEST',
+        value: { request_id: 'kmsg_echo_signal', status: 'running' },
+      })
+      throw abortError()
+    })
+
+    const err = await sendKeeperThreadMessage('echo', 'stream abort').catch(error => error)
+
+    expect(err).toBeInstanceOf(Error)
+    expect(err.name).toBe('AbortError')
+    expect(cancelQueuedKeeperMessage).toHaveBeenCalledTimes(1)
+    const [requestId, opts] =
+      cancelQueuedKeeperMessage.mock.calls[0] as unknown as [string, { signal?: AbortSignal }]
+    expect(requestId).toBe('kmsg_echo_signal')
+    const signal = opts.signal
+    expect(signal).toBeInstanceOf(AbortSignal)
+    expect(signal?.aborted).toBe(false)
   })
 
   it('does not duplicate the pending assistant when a live send is still streaming and the panel remounts', async () => {

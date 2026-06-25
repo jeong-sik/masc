@@ -55,9 +55,13 @@ val log_task_transition_failed :
   agent_name:string -> Masc_domain.masc_error -> unit
 
 val client_side_transition_gate_error :
+  config:Workspace.config ->
+  agent_name:string ->
   task_opt:Masc_domain.task option ->
   action:Masc_domain.task_action ->
   action_s:string ->
+  authority:Masc_domain.completion_authority ->
+  verification_enabled:bool ->
   Masc_domain.Task_error.t option
 
 val sync_planning_current_task_with_owned_task : context -> unit

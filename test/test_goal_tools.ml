@@ -1639,7 +1639,7 @@ let test_goal_verify_rejects_cross_goal_request_id () =
   in
   let goal_one = create_goal "Cross goal one" "Cross goal one task" in
   let goal_two = create_goal "Cross goal two" "Cross goal two task" in
-  let open_request goal =
+  let open_request (goal : Goal_store.goal) =
     let transitioned =
       Tool_workspace.dispatch
         (workspace_ctx config)

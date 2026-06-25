@@ -508,8 +508,6 @@ let keeper_keepalive_entries =
       "Max idle turns for reactive (board/mention) turns (clamped 2-50)";
     entry ~default:"120.0" "MASC_KEEPER_MAX_SILENCE_SEC"
       "Max seconds since last heartbeat before presence sync required";
-    entry ~default:"30" "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"
-      "Max turns per single OAS Agent.run call (clamped 1-100)";
     entry ~default:"(none)" "MASC_KEEPER_OAS_TIMEOUT_SEC"
       "Legacy optional override for OAS call timeout. When set, clamped to [30, turn_timeout_sec].";
     entry ~default:"2.0" "MASC_KEEPER_SLEEP_CHUNK_SEC"

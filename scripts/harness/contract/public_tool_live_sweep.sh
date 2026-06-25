@@ -118,7 +118,7 @@ r_tool_help="$(call_tool 5012 "masc_tool_help" '{"tool_name":"masc_status"}')"
 expect_ok "masc_tool_help" "$r_tool_help"
 
 echo "[9/36] masc_goal_upsert"
-GOAL_SEED_PAYLOAD="$(call_tool 5014 "masc_goal_upsert" "$(jq -cn --arg verifier "$AGENT_NAME" '{title:"Public Tool Sweep Goal",priority:1,verifier_policy:{inherit_mode:"replace",principals:[{id:$verifier}],required_verdicts:1}}')")"
+GOAL_SEED_PAYLOAD="$(call_tool 5014 "masc_goal_upsert" "$(jq -cn --arg verifier "${AGENT_NAME}-verifier" '{title:"Public Tool Sweep Goal",priority:1,verifier_policy:{inherit_mode:"replace",principals:[{id:$verifier}],required_verdicts:1}}')")"
 GOAL_ID="$(printf '%s' "$GOAL_SEED_PAYLOAD" | extract_result | jq -r '.goal_id // empty')"
 if [ -z "$GOAL_ID" ]; then
   mcp_fail_with_context "could not create goal for public tool live sweep" "$GOAL_SEED_PAYLOAD"
@@ -250,7 +250,7 @@ r_goal_transition="$(call_tool 5038 "masc_goal_transition" "$(jq -cn --arg goal_
 expect_ok "masc_goal_transition" "$r_goal_transition"
 
 echo "[35/36] masc_goal_verify"
-r_goal_verify="$(call_tool 5039 "masc_goal_verify" "$(jq -cn --arg goal_id "$GOAL_ID" --arg principal "$AGENT_NAME" '{goal_id:$goal_id,principal:{id:$principal},decision:"approve",note:"public sweep verifier guard"}')")"
+r_goal_verify="$(call_tool 5039 "masc_goal_verify" "$(jq -cn --arg goal_id "$GOAL_ID" --arg principal "${AGENT_NAME}-verifier" '{goal_id:$goal_id,principal:{id:$principal},decision:"approve",note:"public sweep verifier approval"}')")"
 expect_ok "masc_goal_verify" "$r_goal_verify"
 
 echo "[36/36] masc_transition (done)"

@@ -73,13 +73,48 @@ let find_project_root () =
   in
   walk start_dir
 
+let validate_source_relpath rel =
+  let fail reason =
+    failwith
+      (Printf.sprintf
+         "Masc_test_deps.source_path requires a clean repo-relative path: %S (%s)"
+         rel
+         reason)
+  in
+  if String.equal rel "" then fail "empty path";
+  if not (Filename.is_relative rel) then fail "absolute path";
+  if String.starts_with ~prefix:"./" rel then fail "leading ./";
+  let parts = String.split_on_char '/' rel in
+  List.iter
+    (function
+      | "" -> fail "empty path segment"
+      | "." -> fail "current-directory path segment"
+      | ".." -> fail "parent-directory path segment"
+      | _ -> ())
+    parts
+
+let source_path rel =
+  validate_source_relpath rel;
+  Filename.concat (find_project_root ()) rel
+
 let read_file path =
-  let ic = open_in path in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () ->
-      let n = in_channel_length ic in
-      really_input_string ic n)
+  try
+    let ic = open_in path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        let n = in_channel_length ic in
+        really_input_string ic n)
+  (* Catch only [Sys_error] so OOM/Stack_overflow/Sys.Break and other fatal or
+     async exceptions propagate instead of being folded into a [Failure]. *)
+  with Sys_error msg ->
+    failwith
+      (Printf.sprintf
+         "Masc_test_deps.read_file failed for %S: %s"
+         path
+         msg)
+
+let read_source_file rel = read_file (source_path rel)
 
 let tla_quoted_strings content =
   let re = Str.regexp "\"\\([^\"]*\\)\"" in
@@ -140,7 +175,7 @@ let tla_quoted_set_exn ?(source = "<tla>") ~symbol content =
            symbol source)
 
 let tla_quoted_set_from_repo_file_exn ~relpath ~symbol =
-  let path = Filename.concat (find_project_root ()) relpath in
+  let path = source_path relpath in
   tla_quoted_set_exn ~source:relpath ~symbol (read_file path)
 
 let sorted_strings = List.sort String.compare

@@ -2219,7 +2219,7 @@
 (test
  (name test_server_bootstrap_loop_fork_helper)
  (modules test_server_bootstrap_loop_fork_helper)
- (libraries alcotest))
+ (libraries alcotest masc_test_deps))
 
 ; RFC-0085 PR-3 — server runtime PID lock absorbed into Host_config.run_dir,
 ; and server bootstrap kept free of provider-specific OAS policy wiring.
@@ -2308,7 +2308,7 @@
 (test
  (name test_rfc_0086_keeper_namespace_invariant)
  (modules test_rfc_0086_keeper_namespace_invariant)
- (libraries alcotest))
+ (libraries alcotest masc_test_deps))
 
 ; Eval_tool_selector is an observational harness/benchmark matcher.  It
 ; must not become a live keeper/runtime routing gate or tool policy surface.

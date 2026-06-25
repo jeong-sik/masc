@@ -166,7 +166,7 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     ownershipStore.reset(filePath)
 
     const keeperParam = keeper || undefined
-    const opts = { keeper: keeperParam, repoId, signal }
+    const opts = { keeper: keeperParam, repoId, signal, includeDiff: true }
 
     // Load file tree (independent of active file — needed to suggest first file)
     fetchWorkspaceTree(2, opts).then(({ nodes, source, basePath }) => {

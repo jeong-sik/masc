@@ -314,7 +314,14 @@ let test_concurrent_bumps_do_not_lose_updates () =
       (workers * bumps_per_worker)
       (KK.peek_budget_exhaustion_for_test ~keeper_name:keeper))
 
-let read_file path = In_channel.with_open_text path In_channel.input_all
+let source_path path =
+  if Filename.is_relative path then
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> Filename.concat root path
+    | None -> path
+  else path
+
+let read_file path = In_channel.with_open_text (source_path path) In_channel.input_all
 
 let contains_substring haystack needle =
   let haystack_len = String.length haystack in

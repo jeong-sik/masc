@@ -380,6 +380,12 @@ export function queuedKeeperMessageToReply(result: QueuedKeeperMessageResult): K
   const payload = isRecord(result.result) ? result.result : null
   const rawReply = asString(payload?.reply, '').trim()
   const details = normalizeKeeperConversationDetails(payload ?? result.result)
+  if (result.status === 'done' && details?.turnOutcome === 'continuation_checkpoint') {
+    return {
+      text: '',
+      details,
+    }
+  }
   const fallback = rawReply || queuedKeeperMessageError(result)
   return {
     text: formatKeeperVisibleReply(fallback || '(empty reply)'),

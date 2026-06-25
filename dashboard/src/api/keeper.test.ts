@@ -199,6 +199,27 @@ describe('fetchQueuedKeeperMessageResult', () => {
     expect(queuedKeeperMessageError(result)).toBe('요청이 취소되었습니다.')
     expect(queuedKeeperMessageToReply(result).text).toBe('요청이 취소되었습니다.')
   })
+
+  it('suppresses queued continuation checkpoints as non-visible replies', () => {
+    const result = {
+      requestId: 'kmsg_sangsu_3',
+      keeperName: 'sangsu',
+      status: 'done' as const,
+      ok: true,
+      result: {
+        reply: 'Continuation checkpoint saved; keeper remains scheduled for the next cycle.',
+        turn_outcome: 'continuation_checkpoint',
+      },
+    }
+
+    const reply = queuedKeeperMessageToReply(result)
+
+    expect(reply.text).toBe('')
+    expect(reply.details?.turnOutcome).toBe('continuation_checkpoint')
+    expect(reply.details?.replyText).toBe(
+      'Continuation checkpoint saved; keeper remains scheduled for the next cycle.',
+    )
+  })
 })
 
 describe('streamKeeperMessage', () => {

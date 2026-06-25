@@ -70,6 +70,8 @@ import {
 
 type KeeperInterjectActionKind = 'send' | 'approve' | 'pause' | 'drain'
 
+const TOOL_ONLY_EMPTY_REPLY_TEXT = 'Tool-only turn ended without a final reply.'
+
 interface KeeperInterjectCommand {
   readonly kind: KeeperInterjectActionKind
   readonly keeperName: string
@@ -769,9 +771,15 @@ export async function sendKeeperThreadMessage(
       !finalText && finalEntry?.delivery === 'queued'
         ? 'queued' as KeeperConversationDelivery
         : 'delivered' as KeeperConversationDelivery
+    let emptyTerminalText = '(empty reply)'
+    if (finalDelivery === 'queued') {
+      emptyTerminalText = ''
+    } else if (toolCallEnded) {
+      emptyTerminalText = TOOL_ONLY_EMPTY_REPLY_TEXT
+    }
 
     finalizeAssistantEntry(keeperName, assistantId, {
-      text: finalText || (finalDelivery === 'queued' ? '' : '(empty reply)'),
+      text: finalText || emptyTerminalText,
       delivery: finalDelivery,
       streamState: null,
       timestamp: new Date().toISOString(),

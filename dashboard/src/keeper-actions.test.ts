@@ -537,6 +537,22 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     expect(fetchKeeperToolCalls).toHaveBeenCalledWith('echo', 200)
   })
 
+  it('does not render generic empty-reply text after a tool-only terminal turn', async () => {
+    streamKeeperMessage.mockImplementation(emitting([
+      { type: 'RUN_STARTED' },
+      { type: 'TOOL_CALL_START', toolCallId: 'tc-1', toolCallName: 'keeper_board_list' },
+      { type: 'TOOL_CALL_END', toolCallId: 'tc-1' },
+      { type: 'RUN_FINISHED' },
+    ], true))
+
+    await sendKeeperThreadMessage('echo', '진행 상황?')
+
+    const reply = (keeperThreads.value.echo ?? []).find(entry => entry.role === 'assistant')
+    expect(reply?.delivery).toBe('delivered')
+    expect(reply?.text).toBe('Tool-only turn ended without a final reply.')
+    expect(fetchKeeperToolCalls).toHaveBeenCalledWith('echo', 200)
+  })
+
   it('derives text and media user blocks when only attachments are supplied', async () => {
     streamKeeperMessage.mockImplementation(emitting([
       { type: 'RUN_STARTED' },

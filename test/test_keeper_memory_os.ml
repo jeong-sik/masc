@@ -1317,7 +1317,7 @@ let test_with_facts_lock_propagates_body_failure () =
           (fun () -> failwith "body exploded")
       with
       | _ -> Alcotest.fail "expected body Failure to propagate"
-      | exception Failure "body exploded" -> ()
+      | exception Failure msg when String.equal msg "body exploded" -> ()
       | exception exn ->
         Alcotest.fail ("unexpected exception: " ^ Printexc.to_string exn)))
 ;;

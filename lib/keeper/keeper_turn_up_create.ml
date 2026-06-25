@@ -74,8 +74,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   (* RFC vision-delegation §2.4: take the profile's policy if set, else the
      safe default (Inherit). *)
   let multimodal_policy =
-    Option.value ~default:Keeper_types_profile.default_multimodal_policy
-      p.profile_defaults.multimodal_policy
+    match p.profile_defaults.multimodal_policy with
+    | Some policy -> policy
+    | None -> Keeper_types_profile.default_multimodal_policy
   in
   let mention_targets =
     resolve_mention_targets

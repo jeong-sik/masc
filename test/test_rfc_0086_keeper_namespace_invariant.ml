@@ -49,6 +49,11 @@ let string_contains ~needle haystack =
   String.equal needle "" || loop 0
 ;;
 
+let is_absolute_path path =
+  (not (String.equal path ""))
+  && Char.equal path.[0] Filename.dir_sep.[0]
+;;
+
 let boundary_modules_path =
   "docs/rfc/RFC-0086-keeper-namespace-boundary-modules.txt"
 
@@ -188,7 +193,7 @@ let test_source_path_contract_resolves_valid_relative () =
      mangles or relativizes the resolved path. *)
   let resolved = Masc_test_deps.source_path "lib/keeper" in
   check bool "source_path returns an absolute path" true
-    (Filename.is_absolute resolved);
+    (is_absolute_path resolved);
   check bool "source_path lands on a real keeper directory" true
     (Sys.is_directory resolved)
 ;;

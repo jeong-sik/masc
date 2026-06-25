@@ -27,6 +27,7 @@ let decide ?candidate_is_live ~assigned ~required ~candidates =
     ~assigned_caps:assigned
     ~required_modalities:required
     ~candidates
+    ()
 
 let string_contains haystack needle =
   let haystack_len = String.length haystack in

@@ -646,6 +646,7 @@ let input_capabilities_of_runtime (rt : Runtime.t) =
 let media_reroute_candidates
     ?(candidate_is_live = fun ~runtime_id:_ -> true)
     ~(exclude : string)
+    ()
   :
     (string * Llm_provider.Capabilities.capabilities) list =
   let all = Runtime.get_runtimes () in
@@ -672,8 +673,9 @@ let media_reroute_candidates
 let first_media_capable_runtime
     ?candidate_is_live
     ~(modality : string)
+    ()
   : string option =
-  media_reroute_candidates ?candidate_is_live ~exclude:""
+  media_reroute_candidates ?candidate_is_live ~exclude:"" ()
   |> List.find_opt (fun (_id, caps) ->
        caps_admit_required_modalities caps [ modality ])
   |> Option.map fst
@@ -705,7 +707,9 @@ let decide_modality_reroute
     ?(candidate_is_live = fun ~runtime_id:_ -> true)
     ~(assigned_caps : Llm_provider.Capabilities.capabilities)
     ~(required_modalities : string list)
-    ~(candidates : (string * Llm_provider.Capabilities.capabilities) list) :
+    ~(candidates : (string * Llm_provider.Capabilities.capabilities) list)
+    ()
+  :
     reroute_decision =
   if caps_admit_required_modalities assigned_caps required_modalities then
     No_reroute_needed
@@ -743,7 +747,8 @@ let decide_modality_reroute_for_runtime ~(assigned : Runtime.t)
       (required_modalities_for_run_with_checkpoint ~checkpoint_messages ~initial_messages
          ~goal_blocks:blocks)
     ~candidates:
-      (media_reroute_candidates ?candidate_is_live ~exclude:assigned.Runtime.id)
+      (media_reroute_candidates ?candidate_is_live ~exclude:assigned.Runtime.id ())
+    ()
 
 module For_testing = struct
   let request_runtime_fields_on_base_config =

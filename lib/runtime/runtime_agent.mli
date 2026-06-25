@@ -202,6 +202,7 @@ val decide_modality_reroute :
   assigned_caps:Llm_provider.Capabilities.capabilities ->
   required_modalities:string list ->
   candidates:(string * Llm_provider.Capabilities.capabilities) list ->
+  unit ->
   reroute_decision
 (** Pure pre-dispatch reroute decision. [No_reroute_needed] when [assigned_caps]
     already admit [required_modalities]; [Reroute] to the first [candidates] entry
@@ -228,7 +229,9 @@ val input_capabilities_of_runtime :
 
 val media_reroute_candidates :
   ?candidate_is_live:(runtime_id:string -> bool) ->
-  exclude:string -> (string * Llm_provider.Capabilities.capabilities) list
+  exclude:string ->
+  unit ->
+  (string * Llm_provider.Capabilities.capabilities) list
 (** Ordered [(runtime_id, input_caps)] reroute candidates: [\[runtime\].media_failover]
     order first, then remaining configured runtimes in declaration order, excluding
     [exclude]. Reads the runtime cache; [candidate_is_live] filters unavailable
@@ -241,7 +244,10 @@ val caps_admit_required_modalities :
     individual capability booleans. *)
 
 val first_media_capable_runtime :
-  ?candidate_is_live:(runtime_id:string -> bool) -> modality:string -> string option
+  ?candidate_is_live:(runtime_id:string -> bool) ->
+  modality:string ->
+  unit ->
+  string option
 (** Runtime id of the first configured runtime that admits [modality] (e.g.
     ["image"]) as input, in [media_reroute_candidates] order (media_failover then
     declaration). [None] when none qualifies. Uses the same admit predicate as the

@@ -63,17 +63,32 @@ let resolve_vision_provider_config () : (Llm_provider.Provider_config.t, string)
   | None -> Error "no_vision_runtime"
 ;;
 
-(* Phase-1 named bounds (not magic literals): [timeout_sec] < Ollama's 600s
-   connect timeout so the outer [with_timeout_exn] is the authoritative bound;
-   [max_tokens] gives post-thinking headroom (the 2026-06-25 gemma4 truncation
-   lesson). Tunable config keys are deferred to a later phase. *)
+(* Phase-1 named bounds: [timeout_sec] < Ollama's 600s connect timeout so the
+   outer [with_timeout_exn] is the authoritative bound. [default_max_tokens]
+   gives post-thinking headroom when the selected vision runtime has no explicit
+   token setting; a runtime.toml value remains the SSOT when configured. *)
 let vision_subcall_timeout_sec = 90.0
-let vision_subcall_max_tokens = 2048
+let vision_subcall_default_max_tokens = 2048
+
+let analyze_image_error_json ?(failure_class = Tool_result.Workflow_rejection) msg =
+  Yojson.Safe.to_string
+    (`Assoc
+       [ "ok", `Bool false
+       ; "error", `String msg
+       ; "failure_class", `String (Tool_result.tool_failure_class_to_string failure_class)
+       ])
+;;
+
+let analyze_image_failure_class = function
+  | Keeper_vision_subcall.Timed_out _
+  | Keeper_vision_subcall.Subcall_failed _ -> Tool_result.Transient_error
+  | Keeper_vision_subcall.Missing_artifact _
+  | Keeper_vision_subcall.No_vision_runtime
+  | Keeper_vision_subcall.Extraction _ -> Tool_result.Workflow_rejection
+;;
 
 let handle_analyze_image ?sw ?clock ?net ~config ~meta:(_ : keeper_meta) ~args () : string =
-  let err msg =
-    Yojson.Safe.to_string (`Assoc [ "ok", `Bool false; "error", `String msg ])
-  in
+  let err = analyze_image_error_json in
   let handle_str = String.trim (Safe_ops.json_string ~default:"" "artifact" args) in
   let query = String.trim (Safe_ops.json_string ~default:"" "query" args) in
   match sw, clock, net with
@@ -108,7 +123,9 @@ let handle_analyze_image ?sw ?clock ?net ~config ~meta:(_ : keeper_meta) ~args (
                 let provider_config =
                   { provider_config with
                     Llm_provider.Provider_config.max_tokens =
-                      Some vision_subcall_max_tokens
+                      (match provider_config.Llm_provider.Provider_config.max_tokens with
+                       | Some _ as configured -> configured
+                       | None -> Some vision_subcall_default_max_tokens)
                   }
                 in
                 (match
@@ -123,7 +140,10 @@ let handle_analyze_image ?sw ?clock ?net ~config ~meta:(_ : keeper_meta) ~args (
                  | Ok text ->
                    Yojson.Safe.to_string
                      (`Assoc [ "ok", `Bool true; "text", `String text ])
-                 | Error e -> err (Keeper_vision_subcall.string_of_error e))))))
+                 | Error e ->
+                   err
+                     ~failure_class:(analyze_image_failure_class e)
+                     (Keeper_vision_subcall.string_of_error e))))))
   | _ -> err "analyze_image requires Eio context (sw/clock/net unavailable)"
 ;;
 

@@ -80,7 +80,7 @@ let test_empty_endturn ~clock ~net () =
 ;;
 
 (* Empty reply with MaxTokens -> Truncated_extraction (the gemma4 case). Revert-red
-   if stop_reason is hardcoded to Stop instead of read via stop_reason_string. *)
+   if stop_reason is hardcoded to Stop instead of read as the typed SDK variant. *)
 let test_empty_maxtokens ~clock ~net () =
   match
     run_with ~clock ~net ~timeout_sec:5.0
@@ -88,6 +88,16 @@ let test_empty_maxtokens ~clock ~net () =
   with
   | Error (V.Extraction VA.Truncated_extraction) -> ()
   | r -> Alcotest.failf "expected Truncated_extraction, got %s" (err_str r)
+;;
+
+let test_unknown_maxtokens_string_is_not_truncated ~clock ~net () =
+  match
+    run_with ~clock ~net ~timeout_sec:5.0
+      (complete_ok
+         (mk_response ~content:"" ~stop_reason:(Agent_sdk.Types.Unknown "max_tokens")))
+  with
+  | Error (V.Extraction VA.Empty_extraction) -> ()
+  | r -> Alcotest.failf "expected Empty_extraction, got %s" (err_str r)
 ;;
 
 let test_http_error ~clock ~net () =
@@ -108,6 +118,41 @@ let test_ok ~clock ~net () =
   | r -> Alcotest.failf "expected Ok \"a tabby cat\", got %s" (err_str r)
 ;;
 
+let make_meta () =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+         [ "name", `String "vision-subcall-test"
+         ; "agent_name", `String "vision-subcall-test"
+         ; "trace_id", `String "vision-subcall-test-trace"
+         ])
+  with
+  | Ok meta -> meta
+  | Error e -> failwith ("make_meta: " ^ e)
+;;
+
+let test_missing_context_is_workflow_rejection () =
+  let config = Masc.Workspace.default_config "/tmp/masc-vision-subcall-test" in
+  let payload =
+    Masc.Keeper_tool_in_process_runtime.handle_analyze_image
+      ~config
+      ~meta:(make_meta ())
+      ~args:(`Assoc [ "artifact", `String ""; "query", `String "what is this?" ])
+      ()
+  in
+  let cls = Masc.Keeper_tool_dispatch_runtime.failure_class_of_tool_result_payload payload in
+  match cls with
+  | Some Tool_result.Workflow_rejection ->
+    if
+      Masc.Keeper_tool_dispatch_runtime.should_apply_circuit_breaker_to_failure_payload cls
+    then Alcotest.fail "workflow rejection must not apply the circuit breaker"
+  | Some other ->
+    Alcotest.failf
+      "expected workflow_rejection, got %s"
+      (Tool_result.tool_failure_class_to_string other)
+  | None -> Alcotest.fail "expected failure_class"
+;;
+
 let () =
   Eio_main.run (fun env ->
     let clock = Eio.Stdenv.clock env in
@@ -120,9 +165,17 @@ let () =
               (test_empty_endturn ~clock ~net)
           ; Alcotest.test_case "empty+maxtokens -> Truncated_extraction" `Quick
               (test_empty_maxtokens ~clock ~net)
+          ; Alcotest.test_case
+              "unknown max_tokens string is not parsed as MaxTokens"
+              `Quick
+              (test_unknown_maxtokens_string_is_not_truncated ~clock ~net)
           ; Alcotest.test_case "http error -> Subcall_failed" `Quick
               (test_http_error ~clock ~net)
           ; Alcotest.test_case "ok -> Ok text" `Quick (test_ok ~clock ~net)
+          ; Alcotest.test_case
+              "missing Eio context is workflow rejection"
+              `Quick
+              test_missing_context_is_workflow_rejection
           ] )
       ])
 ;;

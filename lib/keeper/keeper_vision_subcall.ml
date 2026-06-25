@@ -36,6 +36,19 @@ let render_http_error (err : Llm_provider.Http_client.http_error) =
   Provider_http_error.to_message err
 ;;
 
+let done_reason_of_stop_reason : Agent_sdk.Types.stop_reason -> Multimodal.Vision_analyze.done_reason =
+  function
+  | Agent_sdk.Types.EndTurn -> Stop
+  | Agent_sdk.Types.MaxTokens -> Length
+  | Agent_sdk.Types.StopToolUse -> Other "tool_use"
+  | Agent_sdk.Types.StopSequence -> Other "stop_sequence"
+  | Agent_sdk.Types.Refusal -> Other "refusal"
+  | Agent_sdk.Types.PauseTurn -> Other "pause_turn"
+  | Agent_sdk.Types.Compaction -> Other "compaction"
+  | Agent_sdk.Types.ContextWindowExceeded -> Other "model_context_window_exceeded"
+  | Agent_sdk.Types.Unknown s -> Other s
+;;
+
 let run
     ?(complete = default_complete)
     ~sw
@@ -83,9 +96,7 @@ let run
   | Some (Error http_err) -> Error (Subcall_failed (render_http_error http_err))
   | Some (Ok resp) ->
     let content = Agent_sdk_response.text_of_response resp in
-    let done_reason =
-      Multimodal.Vision_analyze.done_reason_of_string (Agent_sdk_response.stop_reason_string resp)
-    in
+    let done_reason = done_reason_of_stop_reason resp.stop_reason in
     (match Multimodal.Vision_analyze.classify ~done_reason ~content with
      | Ok text -> Ok text
      | Error e -> Error (Extraction e))

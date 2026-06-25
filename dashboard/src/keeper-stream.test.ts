@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { appendThreadEntry, setActiveStreamRequestId } from './keeper-state'
+import {
+  _resetLiveSendRequestOwnersForTests,
+  appendThreadEntry,
+  setActiveStreamRequestId,
+} from './keeper-state'
 import { keeperThreads } from './keeper-state'
 import { applyKeeperStreamEvent } from './keeper-stream'
 
@@ -21,6 +25,7 @@ function assistantEntry(): void {
 describe('applyKeeperStreamEvent', () => {
   beforeEach(() => {
     keeperThreads.value = {}
+    _resetLiveSendRequestOwnersForTests()
   })
 
   it('appends content for TEXT_MESSAGE_CONTENT', () => {
@@ -251,6 +256,7 @@ describe('applyKeeperStreamEvent', () => {
 describe('applyKeeperStreamEvent tool calls', () => {
   beforeEach(() => {
     keeperThreads.value = {}
+    _resetLiveSendRequestOwnersForTests()
   })
 
   it('streams a live tool-call entry above the assistant bubble', () => {

@@ -51,7 +51,6 @@ import {
   normalizeKeeperRecoverResult,
   normalizeStatusDetail,
   removeThreadEntries,
-  claimLiveSendRequest,
   liveSendOwnsRequest,
   releaseLiveSendRequest,
   setActiveStream,
@@ -794,7 +793,6 @@ export async function sendKeeperThreadMessage(
             requestId = nextRequestId
             // This live send now owns the request; resume must defer to it
             // (and not mint a duplicate pending entry) until handoff/finally.
-            claimLiveSendRequest(requestId, keeperName)
             setActiveStreamRequestId(keeperName, requestId)
             upsertPendingKeeperChatRequest({
               requestId,

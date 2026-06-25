@@ -45,10 +45,11 @@ export const THREAD_ENTRY_CAP = 200
 
 const keeperStreamControllers = new Map<string, AbortController>()
 const keeperStreamEntryIds = new Map<string, string>()
-const keeperStreamRequestIds = new Map<string, string>()
 // requestId -> keeperName: which queued requests a live in-session send
 // stream currently owns. Resume defers to this so an SPA remount does not
 // spin up a second handler/entry for a request the live send already drives.
+// Active stream request lookup is derived from this map to avoid maintaining
+// a second inverse keeperName -> requestId structure in lockstep.
 // Module state, so it survives unmount/remount exactly like the controller
 // maps above; a full page reload resets it, leaving cold-start resume intact.
 const liveSendRequestOwners = new Map<string, string>()
@@ -1114,7 +1115,7 @@ export function setActiveStream(name: string, entryId: string, controller: Abort
 export function clearActiveStream(name: string): void {
   keeperStreamEntryIds.delete(name)
   keeperStreamControllers.delete(name)
-  keeperStreamRequestIds.delete(name)
+  clearActiveStreamRequestId(name)
 }
 
 export function activeStreamEntryId(name: string): string | null {
@@ -1126,32 +1127,42 @@ export function getStreamController(name: string): AbortController | undefined {
 }
 
 export function setActiveStreamRequestId(name: string, requestId: string): void {
-  const keeperName = name.trim()
-  const id = requestId.trim()
-  if (!keeperName || !id) return
-  keeperStreamRequestIds.set(keeperName, id)
+  claimLiveSendRequest(requestId, name)
 }
 
 export function activeStreamRequestId(name: string): string | null {
-  return keeperStreamRequestIds.get(name.trim()) ?? null
+  const keeperName = name.trim()
+  if (!keeperName) return null
+  for (const [requestId, owner] of liveSendRequestOwners) {
+    if (owner === keeperName) return requestId
+  }
+  return null
 }
 
 export function clearActiveStreamRequestId(name: string): void {
-  keeperStreamRequestIds.delete(name.trim())
+  const keeperName = name.trim()
+  if (!keeperName) return
+  for (const [requestId, owner] of liveSendRequestOwners) {
+    if (owner === keeperName) liveSendRequestOwners.delete(requestId)
+  }
 }
 
 // --- Live send ownership (in-session, requestId-keyed) ---
 
 export function claimLiveSendRequest(requestId: string, name: string): void {
-  liveSendRequestOwners.set(requestId, name)
+  const id = requestId.trim()
+  const keeperName = name.trim()
+  if (!id || !keeperName) return
+  clearActiveStreamRequestId(keeperName)
+  liveSendRequestOwners.set(id, keeperName)
 }
 
 export function releaseLiveSendRequest(requestId: string): void {
-  liveSendRequestOwners.delete(requestId)
+  liveSendRequestOwners.delete(requestId.trim())
 }
 
 export function liveSendOwnsRequest(requestId: string): boolean {
-  return liveSendRequestOwners.has(requestId)
+  return liveSendRequestOwners.has(requestId.trim())
 }
 
 export function _resetLiveSendRequestOwnersForTests(): void {

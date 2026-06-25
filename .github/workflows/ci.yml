@@ -782,7 +782,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune exec --root . ./test/test_operator_control_snapshot_state.exe && opam exec -- dune exec --root . ./test/test_operator_control_snapshot.exe && opam exec -- dune exec --root . ./test/test_operator_control_snapshot_cache.exe"
+          scripts/ci-run-tests.sh "opam exec -- dune exec ./test/test_operator_control.exe"
 
       - name: Run SSE reconnect e2e
         id: sse_reconnect_e2e
@@ -796,7 +796,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune exec --root . ./test/test_sse_storm_e2e.exe"
+          scripts/ci-run-tests.sh "opam exec -- dune exec ./test/test_sse_storm_e2e.exe"
 
       - name: Run transport harness suite
         id: transport_harness_suite

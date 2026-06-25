@@ -269,8 +269,7 @@ agent_sdk_interface_mismatch_detected() {
 
 disk_full_detected() {
   [[ -f "${TEST_LOG_FILE}" ]] || return 1
-  # Test output can legitimately mention ENOSPC as a classified error fixture.
-  grep -Eiq 'No space left on device|dune_trace_write[(][)]' \
+  grep -Eiq 'No space left on device|dune_trace_write[(][)]|ENOSPC' \
     "${TEST_LOG_FILE}"
 }
 

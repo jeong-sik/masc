@@ -18,7 +18,6 @@ import {
   configuredCountSourceLabel,
   formatKeeperCountBreakdown,
   keeperRowLooksRunning,
-  resolveRuntimeFleetSafetyCounts,
   resolveRuntimeCounts,
   runtimeCountSourceLabel,
 } from '../runtime-counts'
@@ -233,6 +232,7 @@ interface DashboardHealthInput {
   namespaceTruthConfiguredKeepers?: number
   keepers: Keeper[]
   runtimeResolution: DashboardRuntimeResolution | null
+  runtimeGeneratedAt?: string | null
   runtimeProviderProbe?: DashboardRuntimeProbePayload | null
   runtimeProviderProbeError?: string | null
   executionError: string | null
@@ -560,7 +560,6 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
 
   const rowPausedKeepers = input.keepers.filter(isKeeperPaused).length
   const fallbackRunningKeepers = input.keepers.filter(keeperRowLooksRunning).length
-  const runtimeHealthCounts = resolveRuntimeFleetSafetyCounts(runtime?.fleet_safety ?? null)
   const runtimeCounts = resolveRuntimeCounts({
     executionLoaded: input.keepers.length > 0,
     agentsCount: input.counts?.agents ?? 0,
@@ -572,6 +571,7 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
     shellCounts: input.counts,
     shellConfiguredKeepers: input.counts?.configured_keepers,
     runtimeFleetSafety: runtime?.fleet_safety ?? null,
+    runtimeHealthGeneratedAt: input.runtimeGeneratedAt,
   })
   const configured = runtimeCounts.configured.keepers
   const liveKeepers = runtimeCounts.live.keepers
@@ -581,13 +581,19 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
   // keeper-count-basis chip's `detail` tooltip (hover-only, diagnostic) below —
   // an on-demand explanation of where the running count comes from, which is the
   // actionable detail that review kept. Retained intentionally, not an oversight.
-  const runningCountSource = runtimeHealthCounts?.hasRunningKeepers === true
+  const runningCountSource = runtimeCounts.source === 'runtime-health'
     ? 'runtime health'
     : input.counts !== null
     ? 'shell'
     : input.keepers.length > 0
       ? '상세 행'
       : runtimeCountSourceLabel(runtimeCounts.source)
+  const pausedCountSource = runtimeCounts.source === 'runtime-health'
+    ? 'runtime health'
+    : '재개 대기 lifecycle row'
+  const offlineCountSource = runtimeCounts.source === 'runtime-health'
+    ? 'runtime health only; execution offline rows not mixed'
+    : '프로세스/하트비트 없음으로 기동 필요 row'
   if (configured > 0 && (configured !== liveKeepers || pausedKeepers > 0 || runtimeCounts.live.offlineKeepers > 0)) {
     chips.push({
       key: 'keeper-count-basis',
@@ -597,7 +603,7 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
         offlineKeepers: runtimeCounts.live.offlineKeepers,
         configuredKeepers: configured,
       }),
-      detail: `런타임 가동=${runningCountSource}; 일시정지=재개 대기 lifecycle row; 오프라인=프로세스/하트비트 없음으로 기동 필요 row; 설정=${configuredCountSourceLabel(runtimeCounts.configured.source)} keeper 설정.`,
+      detail: `런타임 가동=${runningCountSource}; 일시정지=${pausedCountSource}; 오프라인=${offlineCountSource}; 설정=${configuredCountSourceLabel(runtimeCounts.configured.source)} keeper 설정.`,
       tone: 'muted',
     })
   }
@@ -750,6 +756,7 @@ export function DashboardHealthStrip() {
       namespaceTruthConfiguredKeepers: namespaceTruth.value?.root.configured_keepers,
       keepers: keepers.value,
       runtimeResolution: shellRuntimeResolution.value,
+      runtimeGeneratedAt: serverStatus.value?.generated_at ?? null,
       runtimeProviderProbe: shellRuntimeProviderProbe.value,
       runtimeProviderProbeError: shellRuntimeProviderProbeError.value,
       executionError: executionError.value,

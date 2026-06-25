@@ -35,7 +35,7 @@ describe('refreshAfterRuntimeAction', () => {
     // helper fires-and-forgets so the lifecycle button is never blocked.
     await expect(refreshAfterRuntimeAction()).resolves.toBeUndefined()
 
-    expect(refreshKeeperRuntimeStatus).toHaveBeenCalledWith({ force: true })
+    expect(refreshKeeperRuntimeStatus).toHaveBeenCalledWith()
     // The full-bootstrap path is no longer taken for keeper actions.
     expect(refreshDashboard).not.toHaveBeenCalled()
 

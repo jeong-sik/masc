@@ -11,6 +11,7 @@ import {
   formatRuntimeRosterCount,
   keeperRowLooksRunning,
   keeperDetailRows,
+  runtimeHealthIsFresh,
   resolveRuntimeFleetSafetyCounts,
   resolveRuntimeCounts,
   runtimeDetailRows,
@@ -225,6 +226,133 @@ describe('resolveRuntimeCounts', () => {
       configured: { keepers: 13, totalRuntimes: 13, source: 'shell' },
       source: 'runtime-health',
     })
+  })
+
+  it('does not fall back to keeper_fibers when running_keeper_fiber_count is absent', () => {
+    const runtimeFleetSafety = {
+      keeper_fibers: 9,
+      keeper_fleet_safety: {},
+    } as any
+
+    expect(resolveRuntimeFleetSafetyCounts(runtimeFleetSafety)).toBeNull()
+  })
+
+  it('does not derive offline keepers from execution rows when runtime health is authoritative', () => {
+    const runtimeFleetSafety = {
+      keeper_fleet_safety: {
+        running_keeper_fiber_count: 2,
+        paused_keeper_count: 1,
+      },
+    } as any
+
+    expect(resolveRuntimeCounts({
+      executionLoaded: true,
+      agentsCount: 0,
+      keepersCount: 2,
+      pausedKeepersCount: 1,
+      offlineKeepersCount: 5,
+      keeperRowsCount: 8,
+      namespaceTruthCounts: { agents: 0, keepers: 8, tasks: 0 },
+      namespaceTruthConfiguredKeepers: 8,
+      runtimeFleetSafety,
+    })).toEqual({
+      live: { agents: 0, keepers: 2, pausedKeepers: 1, offlineKeepers: 0, keeperRows: 3, tasks: 0, totalRuntimes: 2, available: true },
+      configured: { keepers: 8, totalRuntimes: 8, source: 'namespace-truth' },
+      source: 'runtime-health',
+    })
+  })
+
+  it('does not treat total keeper_fibers as the running runtime count', () => {
+    const runtimeFleetSafety = {
+      keeper_fibers: 9,
+      paused_keepers: 2,
+      paused_keepers_health: null,
+      keeper_fleet_safety: {},
+    } as any
+
+    expect(resolveRuntimeFleetSafetyCounts(runtimeFleetSafety)).toEqual({
+      runningKeepers: 0,
+      pausedKeepers: 2,
+      hasRunningKeepers: false,
+      hasPausedKeepers: true,
+    })
+
+    expect(resolveRuntimeCounts({
+      executionLoaded: true,
+      agentsCount: 0,
+      keepersCount: 9,
+      pausedKeepersCount: 0,
+      offlineKeepersCount: 6,
+      keeperRowsCount: 9,
+      shellCounts: { agents: 0, keepers: 9, tasks: 0, total_runtimes: 9 },
+      shellConfiguredKeepers: 13,
+      runtimeFleetSafety,
+    })).toEqual({
+      live: { agents: 0, keepers: 0, pausedKeepers: 2, offlineKeepers: 0, keeperRows: 2, tasks: 0, totalRuntimes: 0, available: true },
+      configured: { keepers: 13, totalRuntimes: 9, source: 'shell' },
+      source: 'runtime-health',
+    })
+  })
+
+  it('does not synthesize runtime-health offline counts from execution rows', () => {
+    expect(resolveRuntimeCounts({
+      executionLoaded: true,
+      agentsCount: 0,
+      keepersCount: 9,
+      pausedKeepersCount: 1,
+      offlineKeepersCount: 6,
+      keeperRowsCount: 9,
+      namespaceTruthCounts: { agents: 0, keepers: 13, tasks: 0, total_runtimes: 13 },
+      runtimeFleetSafety: {
+        keeper_fibers: 9,
+        paused_keepers: 1,
+        paused_keepers_health: { count: 1 },
+        keeper_fleet_safety: {
+          running_keeper_fiber_count: 2,
+          paused_keeper_count: 1,
+        },
+      } as any,
+    })).toEqual({
+      live: { agents: 0, keepers: 2, pausedKeepers: 1, offlineKeepers: 0, keeperRows: 3, tasks: 0, totalRuntimes: 2, available: true },
+      configured: { keepers: 13, totalRuntimes: 13, source: 'namespace-truth' },
+      source: 'runtime-health',
+    })
+  })
+
+  it('ignores stale runtime health and falls back to execution row counts', () => {
+    expect(resolveRuntimeCounts({
+      executionLoaded: true,
+      agentsCount: 0,
+      keepersCount: 4,
+      pausedKeepersCount: 1,
+      offlineKeepersCount: 2,
+      keeperRowsCount: 7,
+      runtimeHealthGeneratedAt: '2026-06-25T12:00:00Z',
+      nowMs: Date.parse('2026-06-25T12:02:01Z'),
+      runtimeFleetSafety: {
+        keeper_fibers: 9,
+        paused_keepers: 3,
+        paused_keepers_health: { count: 3 },
+        keeper_fleet_safety: {
+          running_keeper_fiber_count: 0,
+          paused_keeper_count: 3,
+        },
+      } as any,
+    })).toEqual({
+      live: { agents: 0, keepers: 4, pausedKeepers: 1, offlineKeepers: 2, keeperRows: 7, tasks: 0, totalRuntimes: 4, available: true },
+      configured: { keepers: 0, totalRuntimes: 0, source: 'none' },
+      source: 'execution',
+    })
+  })
+})
+
+describe('runtimeHealthIsFresh', () => {
+  it('rejects malformed or stale runtime health timestamps', () => {
+    const now = Date.parse('2026-06-25T12:02:00Z')
+    expect(runtimeHealthIsFresh(null, now)).toBe(true)
+    expect(runtimeHealthIsFresh('not-a-date', now)).toBe(false)
+    expect(runtimeHealthIsFresh('2026-06-25T12:00:00Z', now)).toBe(true)
+    expect(runtimeHealthIsFresh('2026-06-25T11:59:59Z', now)).toBe(false)
   })
 })
 

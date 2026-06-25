@@ -7,7 +7,7 @@ import { useMemo, useState } from 'preact/hooks'
 import { computed } from '@preact/signals'
 import { FilterChips } from './common/filter-chips'
 import { navigate, route } from '../router'
-import { agents, keepers, executionLoaded, shellCounts, shellRuntimeResolution } from '../store'
+import { agents, keepers, serverStatus, executionLoaded, shellCounts, shellRuntimeResolution } from '../store'
 import { AgentRoster, countRuntimeKinds } from './agent-roster'
 import { AgentProfile } from './agent-profile'
 import { KeeperDetailPage } from './keeper-detail-page'
@@ -82,6 +82,7 @@ export function AgentsUnified() {
     shellCounts: shellCounts.value,
     shellConfiguredKeepers: shellCounts.value?.configured_keepers,
     runtimeFleetSafety: shellRuntimeResolution.value?.fleet_safety ?? null,
+    runtimeHealthGeneratedAt: serverStatus.value?.generated_at ?? null,
   })
   function chipCount(id: AgentsView): number | string | null {
     if (id === 'all') return formatRuntimeRosterCount(runtimeCounts)

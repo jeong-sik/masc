@@ -326,6 +326,8 @@ describe('refreshKeeperRuntimeStatus', () => {
     expect(apiMocks.fetchDashboardBootstrap).not.toHaveBeenCalled()
     expect(apiMocks.fetchDashboardExecution).toHaveBeenCalledWith({ force: true })
     expect(apiMocks.fetchDashboardShell).toHaveBeenCalledWith({ light: true })
+    expect(apiMocks.fetchDashboardShell.mock.invocationCallOrder[0]!)
+      .toBeLessThan(apiMocks.fetchDashboardExecution.mock.invocationCallOrder[0]!)
     expect(store.shellCounts.value).toEqual({
       agents: 0,
       tasks: 7,

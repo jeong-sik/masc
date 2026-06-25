@@ -548,6 +548,7 @@ function normalizeKeeperRuntimeResolved(raw: unknown): KeeperRuntimeResolved | n
 
 export function normalizeDashboardRuntimeResolution(
   raw: unknown,
+  generatedAt?: string,
 ): DashboardRuntimeResolution | null {
   if (!isRecord(raw)) return null
   const status = asString(raw.status)
@@ -561,6 +562,7 @@ export function normalizeDashboardRuntimeResolution(
     return null
   }
   return {
+    generated_at: generatedAt ?? toIsoTimestamp(raw.generated_at) ?? null,
     status,
     warnings: asStringArray(raw.warnings),
     base_path: basePath,

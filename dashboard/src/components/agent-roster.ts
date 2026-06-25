@@ -794,6 +794,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     shellCounts: shellCounts.value,
     shellConfiguredKeepers: shellCounts.value?.configured_keepers,
     runtimeFleetSafety: shellRuntimeResolution.value?.fleet_safety ?? null,
+    runtimeHealthGeneratedAt: serverStatus.value?.generated_at ?? null,
   })
   const expectedScopedCount = expectedCountForKeeperFilter(keeperFilter, runtimeCounts)
   const namespaceStatus = namespaceTruth.value?.root.status ?? serverStatus.value

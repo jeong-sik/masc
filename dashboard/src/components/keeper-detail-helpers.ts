@@ -29,10 +29,10 @@ export async function refreshAfterRuntimeAction(): Promise<void> {
   // The previous `refreshDashboard({ force: true })` re-hydrated shell,
   // planning, namespace, goals and goal_loop and flipped dashboardLoading,
   // re-rendering every panel ("the whole screen refreshes when I resume a
-  // keeper"). `force: true` keeps the immediate refetch boot/shutdown need,
-  // while the shell light refresh updates the global runtime-health chips that
-  // now share the same status source as the roster counts.
-  void refreshKeeperRuntimeStatus({ force: true }).catch(err => {
+  // keeper"). The shared refresh stays on the store scheduler so rapid
+  // post-action clicks coalesce while shell runtime-health updates before the
+  // execution projection is read.
+  void refreshKeeperRuntimeStatus().catch(err => {
     const message = err instanceof Error ? err.message : '대시보드 새로고침 실패'
     showToast(message, 'warning')
   })

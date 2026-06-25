@@ -355,7 +355,7 @@ describe('dashboardHealthChips', () => {
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.label)
       .toBe('키퍼 런타임 가동 0 / 일시정지 3 / 설정 13')
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.detail)
-      .toBe('런타임 가동=runtime health; 일시정지=재개 대기 lifecycle row; 오프라인=프로세스/하트비트 없음으로 기동 필요 row; 설정=shell keeper 설정.')
+      .toBe('런타임 가동=runtime health; 일시정지=runtime health; 오프라인=runtime health only; execution offline rows not mixed; 설정=shell keeper 설정.')
     expect(chips.find(chip => chip.key === 'paused-keepers')?.label)
       .toBe('일시정지 keeper 3')
     expect(chips.find(chip => chip.key === 'no-keeper-rows')).toBeUndefined()

@@ -55,6 +55,8 @@ interface ResolveRuntimeCountsOptions {
   shellCounts?: DashboardShellResponse['counts'] | null
   shellConfiguredKeepers?: number
   runtimeFleetSafety?: DashboardFleetSafetyHealth | null
+  runtimeHealthGeneratedAt?: string | null
+  nowMs?: number
 }
 
 function finiteCount(value: unknown): number | null {
@@ -117,6 +119,8 @@ export interface RuntimeFleetSafetyCounts {
   hasPausedKeepers: boolean
 }
 
+export const RUNTIME_HEALTH_FRESH_MS = 120_000
+
 function firstFiniteCount(...values: unknown[]): number | null {
   for (const value of values) {
     const count = finiteCount(value)
@@ -130,10 +134,7 @@ export function resolveRuntimeFleetSafetyCounts(
 ): RuntimeFleetSafetyCounts | null {
   if (!fleetSafety) return null
   const fleet = fleetSafety.keeper_fleet_safety
-  const runningKeepers = firstFiniteCount(
-    fleet?.running_keeper_fiber_count,
-    fleetSafety.keeper_fibers,
-  )
+  const runningKeepers = firstFiniteCount(fleet?.running_keeper_fiber_count)
   const pausedKeepers = firstFiniteCount(
     fleetSafety.paused_keepers_health?.count,
     fleet?.paused_keeper_count,
@@ -146,6 +147,16 @@ export function resolveRuntimeFleetSafetyCounts(
     hasRunningKeepers: runningKeepers !== null,
     hasPausedKeepers: pausedKeepers !== null,
   }
+}
+
+export function runtimeHealthIsFresh(
+  generatedAt: string | null | undefined,
+  nowMs = Date.now(),
+): boolean {
+  if (!generatedAt) return true
+  const timestampMs = Date.parse(generatedAt)
+  if (!Number.isFinite(timestampMs)) return false
+  return Math.max(0, nowMs - timestampMs) <= RUNTIME_HEALTH_FRESH_MS
 }
 
 function normalizeCounts(
@@ -237,30 +248,39 @@ export function resolveRuntimeCounts({
   shellCounts,
   shellConfiguredKeepers,
   runtimeFleetSafety,
+  runtimeHealthGeneratedAt,
+  nowMs,
 }: ResolveRuntimeCountsOptions): RuntimeCounts {
-  const runtimeHealthCounts = resolveRuntimeFleetSafetyCounts(runtimeFleetSafety)
+  const runtimeHealthCounts = runtimeHealthIsFresh(runtimeHealthGeneratedAt, nowMs)
+    ? resolveRuntimeFleetSafetyCounts(runtimeFleetSafety)
+    : null
   const liveAgents = normalizeCount(agentsCount)
-  const liveKeepers = runtimeHealthCounts?.hasRunningKeepers === true
+  const runtimeHealthAvailable = runtimeHealthCounts !== null
+  const liveKeepers = runtimeHealthAvailable
     ? runtimeHealthCounts.runningKeepers
     : normalizeCount(keepersCount)
-  const livePausedKeepers = runtimeHealthCounts?.hasPausedKeepers === true
+  const livePausedKeepers = runtimeHealthAvailable
     ? runtimeHealthCounts.pausedKeepers
     : normalizeCount(pausedKeepersCount)
-  const liveOfflineKeepers = normalizeCount(offlineKeepersCount)
-  const liveKeeperRows = Math.max(
-    normalizeCount(keeperRowsCount),
-    liveKeepers + livePausedKeepers + liveOfflineKeepers,
-  )
+  const liveOfflineKeepers = runtimeHealthAvailable ? 0 : normalizeCount(offlineKeepersCount)
+  const liveKeeperRows = runtimeHealthAvailable
+    ? liveKeepers + livePausedKeepers
+    : Math.max(
+        normalizeCount(keeperRowsCount),
+        liveKeepers + livePausedKeepers + liveOfflineKeepers,
+      )
   const liveTasks = normalizeCount(tasksCount)
   const live: LiveRuntimeView = {
     agents: liveAgents,
     keepers: liveKeepers,
     pausedKeepers: livePausedKeepers,
-    offlineKeepers: Math.max(0, liveKeeperRows - liveKeepers - livePausedKeepers),
+    offlineKeepers: runtimeHealthAvailable
+      ? 0
+      : Math.max(0, liveKeeperRows - liveKeepers - livePausedKeepers),
     keeperRows: liveKeeperRows,
     tasks: liveTasks,
     totalRuntimes: liveAgents + liveKeepers,
-    available: executionLoaded || runtimeHealthCounts !== null,
+    available: executionLoaded || runtimeHealthAvailable,
   }
 
   const namespace = normalizeCounts(namespaceTruthCounts)
@@ -283,7 +303,7 @@ export function resolveRuntimeCounts({
     executionLoaded,
     live,
     configured,
-    runtimeHealthAvailable: runtimeHealthCounts !== null,
+    runtimeHealthAvailable,
   })
   return { live, configured, source }
 }

@@ -151,6 +151,6 @@ describe('runKeeperAction', () => {
     await runKeeperAction('rondo', 'pause')
 
     expect(applyOptimisticKeeperDirective).toHaveBeenCalledWith('rondo', 'pause')
-    expect(refreshKeeperRuntimeStatus).toHaveBeenCalledWith({ force: true })
+    expect(refreshKeeperRuntimeStatus).toHaveBeenCalledWith()
   })
 })

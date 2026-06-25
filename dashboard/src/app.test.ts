@@ -169,6 +169,9 @@ describe('App v2 header chrome', () => {
     expect(liveChip).not.toBeNull()
     expect(liveChip?.textContent).toContain('1 실행 중')
     expect(liveChip?.title).toContain('runtime health')
+    expect(liveChip?.title).toContain('paused=3')
+    expect(liveChip?.title).toContain('offline=0 (not derived from execution rows)')
+    expect(liveChip?.title).toContain('configured=13 (shell)')
   })
 
   it('falls back to activeKeeperName for the breadcrumb tail when no route keeper param', () => {

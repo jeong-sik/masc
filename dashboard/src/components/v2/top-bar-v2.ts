@@ -7,14 +7,14 @@
 import { html } from 'htm/preact'
 import { useState, useEffect } from 'preact/hooks'
 import { navigate, route } from '../../router'
-import { executionLoaded, keepers, shellCounts, shellRuntimeResolution, staleKeepers } from '../../store'
+import { executionLoaded, keepers, serverStatus, shellCounts, shellRuntimeResolution, staleKeepers } from '../../store'
 import { activeKeeperName } from '../../keeper-state'
 import { governanceData } from '../governance-signals'
 import { CopilotDockTopBarButton, type CopilotDockApi } from '../copilot-dock'
 import { TweaksPanelToggle } from '../tweaks-panel'
 import { StatusDot } from './primitives-v2'
 import { surfaceLabel } from './nav-rail-v2'
-import { keeperRowLooksRunning, resolveRuntimeCounts, runtimeCountSourceLabel } from '../../runtime-counts'
+import { configuredCountSourceLabel, keeperRowLooksRunning, resolveRuntimeCounts, runtimeCountSourceLabel } from '../../runtime-counts'
 // Operational/safety chrome the v2 prototype omits but operators rely on
 // (connection state, transport telemetry, emergency stop, error inbox, auth,
 // build identity). Re-mounted into the v2 top bar so the reskin does not drop
@@ -106,8 +106,18 @@ export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
     shellCounts: shellCounts.value,
     shellConfiguredKeepers: shellCounts.value?.configured_keepers,
     runtimeFleetSafety: shellRuntimeResolution.value?.fleet_safety ?? null,
+    runtimeHealthGeneratedAt: serverStatus.value?.generated_at ?? null,
   })
   const running = runtimeCounts.live.keepers
+  const countTitle = [
+    `runtime count: ${runtimeCountSourceLabel(runtimeCounts.source)}`,
+    `running=${runtimeCounts.live.keepers}`,
+    `paused=${runtimeCounts.live.pausedKeepers}`,
+    runtimeCounts.source === 'runtime-health'
+      ? 'offline=0 (not derived from execution rows)'
+      : `offline=${runtimeCounts.live.offlineKeepers}`,
+    `configured=${runtimeCounts.configured.keepers} (${configuredCountSourceLabel(runtimeCounts.configured.source)})`,
+  ].join('; ')
   const crumbKeeper = tab === 'keepers' ? route.value.params.keeper?.trim() || activeKeeperName.value || '' : ''
   return html`
     <div class="v2-top">
@@ -118,7 +128,7 @@ export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
           : null}
       </div>
       <div class="v2-top-spacer"></div>
-      <span class="v2-statchip live" title=${`runtime count: ${runtimeCountSourceLabel(runtimeCounts.source)}`}>
+      <span class="v2-statchip live" title=${countTitle}>
         <${StatusDot} status="run" pulse=${true} />${running} 실행 중
       </span>
       <${AttentionIndicatorV2} />

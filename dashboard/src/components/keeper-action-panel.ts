@@ -38,7 +38,7 @@ function afterAction(): void {
   // shell runtime-health for top-strip / roster aggregate counts. This avoids
   // the old full `refreshDashboard()` bootstrap while keeping every status
   // surface on the same post-action truth source.
-  void refreshKeeperRuntimeStatus({ force: true }).catch(err => {
+  void refreshKeeperRuntimeStatus().catch(err => {
     const message = err instanceof Error ? err.message : 'dashboard refresh failed'
     showToast(message, 'warning')
   })

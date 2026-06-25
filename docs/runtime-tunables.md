@@ -14,9 +14,9 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 352 unique knobs across 9 modules.
+**Total**: 350 unique knobs across 9 modules.
 
-**Typed getter classification**: 23/205 tagged (`operator`: 23, `algorithm`: 0, `unclassified`: 182).
+**Typed getter classification**: 22/204 tagged (`operator`: 22, `algorithm`: 0, `unclassified`: 182).
 
 ## Env_config_core (25 knobs; typed classification 1/8)
 
@@ -48,26 +48,26 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_TEST_ALLOW_HOME_BASE_PATH` | string_literal | n/a | n/a | 343 | #9903: production base-path safeguard for test executables. Without this, a test whose [MASC_BASE_PATH] override fail... |
 | `MASC_URL` | string_literal | n/a | n/a | 244 | SSOT for the MASC_HTTP_BASE_URL env-var name (issue 8352). Defined here (above [masc_http_base_url]) so the constant ... |
 
-## Env_config_governance (33 knobs; typed classification 2/23)
+## Env_config_governance (31 knobs; typed classification 1/22)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_ANTI_RATIONALIZATION_FAIL_MODE` | typed:string | unclassified | unclassified | 200 |  |
-| `MASC_ANTI_RATIONALIZATION_GATE2_FAIL_CLOSED` | typed:bool | unclassified | unclassified | 222 |  |
+| `MASC_ANTI_RATIONALIZATION_FAIL_MODE` | typed:string | unclassified | unclassified | 186 |  |
+| `MASC_ANTI_RATIONALIZATION_GATE2_FAIL_CLOSED` | typed:bool | unclassified | unclassified | 208 |  |
 | `MASC_AUTONOMY_MAX_STARVATION_TICKS` | typed:int | unclassified | unclassified | 79 | {1 Thompson Sampling / Agent Selection Configuration} Primary env vars: MASC_AUTONOMY_*. |
 | `MASC_AUTONOMY_QUIET_END` | typed:int | unclassified | unclassified | 71 | Quiet hours end (0-23). |
 | `MASC_AUTONOMY_QUIET_START` | typed:int | unclassified | unclassified | 67 | Quiet hours start (0-23). Keeper suppresses actions in this window. |
 | `MASC_AUTONOMY_STARVATION_BONUS_COEF` | typed:float | unclassified | unclassified | 82 |  |
 | `MASC_AUTONOMY_THOMPSON_WEIGHT` | typed:float | unclassified | unclassified | 85 |  |
 | `MASC_AUTONOMY_VOTE_DECAY_FACTOR` | typed:float | unclassified | unclassified | 88 |  |
-| `MASC_DASHBOARD_FIXTURE` | string_literal | n/a | n/a | 146 | Dashboard fixture name override. |
-| `MASC_DASHBOARD_FIXTURES_ENABLED` | feature_flag | n/a | n/a | 142 | Whether dashboard fixtures are enabled. Default: false. Re-readable within the process; this does not imply shell-lev... |
-| `MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED` | feature_flag | n/a | n/a | 153 | Whether governance judge is enabled. Default: true. |
-| `MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC` | typed:int | unclassified | unclassified | 150 | Governance judge interval, clamped to >= 15s. Default: 60. |
-| `MASC_DEFAULT_MODEL` | string_literal | n/a | n/a | 169 | Default model id. |
-| `MASC_DEFAULT_PROVIDER` | string_literal | n/a | n/a | 165 | Default provider name. |
-| `MASC_DEFAULT_RUNTIME` | string_literal | n/a | n/a | 161 | Default runtime label (e.g. "glm:pro,openai:gpt-4.1"). |
-| `MASC_GOAL_MODELS` | string_literal | n/a | n/a | 173 | Goal models (comma-separated). |
+| `MASC_DASHBOARD_FIXTURE` | string_literal | n/a | n/a | 132 | Dashboard fixture name override. |
+| `MASC_DASHBOARD_FIXTURES_ENABLED` | feature_flag | n/a | n/a | 128 | Whether dashboard fixtures are enabled. Default: false. Re-readable within the process; this does not imply shell-lev... |
+| `MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED` | feature_flag | n/a | n/a | 139 | Whether governance judge is enabled. Default: true. |
+| `MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC` | typed:int | unclassified | unclassified | 136 | Governance judge interval, clamped to >= 15s. Default: 60. |
+| `MASC_DEFAULT_MODEL` | string_literal | n/a | n/a | 155 | Default model id. |
+| `MASC_DEFAULT_PROVIDER` | string_literal | n/a | n/a | 151 | Default provider name. |
+| `MASC_DEFAULT_RUNTIME` | string_literal | n/a | n/a | 147 | Default runtime label (e.g. "glm:pro,openai:gpt-4.1"). |
+| `MASC_GOAL_MODELS` | string_literal | n/a | n/a | 159 | Goal models (comma-separated). |
 | `MASC_INFERENCE_CACHE_ENABLED` | feature_flag | n/a | n/a | 20 | Enable inference response cache (L1+L2). |
 | `MASC_INFERENCE_CACHE_L1_MAX_ENTRIES` | typed:int | unclassified | unclassified | 38 | L1 in-memory entry cap. BUG-015: Reduced from 2048 to 512 — unbounded growth with 2048 default caused excessive mem... |
 | `MASC_INFERENCE_CACHE_MAX_PROMPT_CHARS` | typed:int | unclassified | unclassified | 28 | Skip caching for oversized prompts (character count). |
@@ -75,8 +75,6 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_INFERENCE_CACHE_TTL_SEC` | typed:int | unclassified | unclassified | 24 | Default TTL for inference response cache (seconds). |
 | `MASC_INFERENCE_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 8 | Timeout for model API calls (seconds) |
 | `MASC_NEO4J_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 98 | Neo4j / zombie-cleanup interval (seconds). Controls the zero-zombie Pulse rhythm in the orchestrator. Clamped to >= 1... |
-| `MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE` | feature_flag | n/a | n/a | 133 | Enable background revalidation when serving stale snapshots. Default: true. Disabling makes stale entries behave like... |
-| `MASC_OPERATOR_CACHE_STALE_GRACE_FACTOR` | typed:float | Timeouts | operator | 127 | Stale-while-revalidate grace factor. After the TTL expires, the previous snapshot is still served for [ttl * factor] ... |
 | `MASC_OPERATOR_CACHE_TTL` | typed:float | unclassified | unclassified | 119 | Operator snapshot cache TTL (seconds). Default: 30. |
 | `MASC_OPERATOR_JUDGE_ENABLED` | feature_flag | n/a | n/a | 105 | Whether operator judge background loop is enabled. Default: true. |
 | `MASC_OPERATOR_JUDGE_INTERVAL_SEC` | typed:int | unclassified | unclassified | 108 | Operator judge interval, clamped to >= 15s. Default: 60. |

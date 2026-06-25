@@ -55,6 +55,11 @@ import { normalizeNamespaceTruth } from './namespace-truth-normalizers'
 import { goalTreeError, hydrateGoalTreeSnapshot } from './goal-tree-state'
 import { hydrateGoalLoopSnapshot } from './goal-loop-state'
 import {
+  WORK_GOAL_LOAD_ERROR,
+  WORK_GOAL_LOAD_PARTIAL_ERROR,
+  WORK_GOAL_TOAST_DURATION_MS,
+} from './lib/work-copy'
+import {
   normalizeAgent, normalizeTask, normalizeMessage,
   normalizeExecutionWorkerSupportBrief,
   normalizeExecutionContinuityBrief,
@@ -1266,13 +1271,13 @@ export async function refreshGoals(): Promise<void> {
       errors.push(message)
     }
     if (errors.length > 0) {
-      showToast('목표 데이터를 일부 불러오지 못했습니다', 'error', 5000)
+      showToast(WORK_GOAL_LOAD_PARTIAL_ERROR, 'error', WORK_GOAL_TOAST_DURATION_MS)
     }
   } catch (err) {
     console.warn('[Planning] fetch error:', err)
     const message = errorMessageOr(err, 'Goal refresh failed')
     goalTreeError.value = message
-    showToast('목표 데이터를 불러오지 못했습니다', 'error', 5000)
+    showToast(WORK_GOAL_LOAD_ERROR, 'error', WORK_GOAL_TOAST_DURATION_MS)
   } finally {
     goalsLoading.value = false
   }

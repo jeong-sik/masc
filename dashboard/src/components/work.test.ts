@@ -1050,6 +1050,10 @@ describe('Work', () => {
         const doneCol = screen.getByTestId('kanban-col-done')
         expect(doneCol.textContent).toContain('Root completed task')
         expect(doneCol.textContent).toContain('Child completed task')
+        const rootCard = doneCol.querySelector('[data-kanban-task-id="T-root"]') as HTMLElement
+        fireEvent.click(rootCard)
+        expect(selectedTask.value?.status).toBe('done')
+        expect(selectedTask.value?.completed_at).toBeUndefined()
       })
 
       it('keeps unscoped execution tasks visible in kanban instead of requiring a goal_id', () => {
@@ -1073,7 +1077,7 @@ describe('Work', () => {
 
         render(html`<${Work} />`)
 
-        expect(screen.getByTestId('kpi-tasks')).toHaveTextContent('1')
+        expect(screen.getByTestId('kpi-tasks')).toHaveTextContent('2')
         fireEvent.click(screen.getByTestId('work-view-kanban'))
 
         const wipCol = screen.getByTestId('kanban-col-in_progress')

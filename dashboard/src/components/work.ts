@@ -9,6 +9,7 @@ import { route, navigate } from '../router'
 import { goals, tasks, keepers } from '../store'
 import { goalTreeData } from '../goal-tree-state'
 import { normalizeTask } from '../store-normalizers'
+import { WORK_UNLINKED_GOAL_TITLE } from '../lib/work-copy'
 import { BoardModerationSurface } from './board/board-moderation-surface'
 import { BoardSurface } from './board/board-surface'
 import { SubBoardSurface } from './board/sub-board-surface'
@@ -23,7 +24,6 @@ import { showGoalCreate, GOAL_PRIORITY_MAX } from './goals/goal-create-state'
 import type { Goal, GoalTreeNode, GoalTreeTask, Task, Keeper } from '../types'
 
 type WorkSection = 'work' | 'board' | 'sub-boards' | 'moderation' | 'planning' | 'repositories' | 'verification'
-const UNLINKED_GOAL_TITLE = '미연결 목표'
 
 const LazyRepositoryManagement = lazy(async () => ({
   default: (await import('./repository-management')).RepositoryManagement,
@@ -199,6 +199,23 @@ function isClaimableBacklogTask(task: Task): boolean {
   return (task.status ?? 'todo') === 'todo' && !hasTaskAssignee(task)
 }
 
+const GOAL_STORE_TASK_STATUS: Readonly<Record<string, NonNullable<Task['status']>>> = {
+  pending: 'todo',
+  todo: 'todo',
+  claimed: 'claimed',
+  in_progress: 'in_progress',
+  inprogress: 'in_progress',
+  awaiting_verification: 'awaiting_verification',
+  completed: 'done',
+  done: 'done',
+  cancelled: 'cancelled',
+}
+
+function normalizeGoalStoreTaskStatus(value: unknown): Task['status'] {
+  const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  return GOAL_STORE_TASK_STATUS[raw]
+}
+
 function goalProgressCounts(goalTasks: Task[]): GoalProgressCounts {
   const counts: GoalProgressCounts = { done: 0, wip: 0, verify: 0, blocked: 0, total: goalTasks.length }
   for (const t of goalTasks) {
@@ -213,14 +230,19 @@ function goalProgressCounts(goalTasks: Task[]): GoalProgressCounts {
 }
 
 function taskFromGoalTreeTask(task: GoalTreeTask): Task | null {
+  const status = normalizeGoalStoreTaskStatus(task.status)
+  if (!status) {
+    console.warn('[Work] dropped Goal Store task with invalid status', {
+      id: task.id,
+      status: task.status,
+    })
+    return null
+  }
   const normalized = normalizeTask({
     ...task,
-    completed_at:
-      task.status === 'done' || task.status === 'cancelled'
-        ? task.updated_at
-        : undefined,
+    status,
   })
-  if (!normalized?.status) {
+  if (!normalized) {
     console.warn('[Work] dropped Goal Store task with invalid status', {
       id: task.id,
       status: task.status,
@@ -239,20 +261,28 @@ function collectGoalTreeTasks(nodes: ReadonlyArray<GoalTreeNode>): Task[] {
   ])
 }
 
-function mergeTaskRecord(previous: Task, task: Task): Task {
-  const merged: Task = { ...previous, ...task }
-  for (const key of Object.keys(task) as Array<keyof Task>) {
-    const nextValue = task[key]
-    const previousValue = previous[key]
-    if (
-      (nextValue === null || nextValue === undefined) &&
-      previousValue !== null &&
-      previousValue !== undefined
-    ) {
-      ;(merged as Record<keyof Task, unknown>)[key] = previousValue
-    }
+function preferExecutionField<T>(goalStoreValue: T, executionValue: T): T {
+  return executionValue ?? goalStoreValue
+}
+
+function mergeTaskRecord(goalStoreTask: Task, executionTask: Task): Task {
+  return {
+    ...goalStoreTask,
+    ...executionTask,
+    goal_id: preferExecutionField(goalStoreTask.goal_id, executionTask.goal_id),
+    status: preferExecutionField(goalStoreTask.status, executionTask.status),
+    priority: preferExecutionField(goalStoreTask.priority, executionTask.priority),
+    assignee: preferExecutionField(goalStoreTask.assignee, executionTask.assignee),
+    assignee_kind: preferExecutionField(goalStoreTask.assignee_kind, executionTask.assignee_kind),
+    description: preferExecutionField(goalStoreTask.description, executionTask.description),
+    created_at: preferExecutionField(goalStoreTask.created_at, executionTask.created_at),
+    updated_at: preferExecutionField(goalStoreTask.updated_at, executionTask.updated_at),
+    completed_at: preferExecutionField(goalStoreTask.completed_at, executionTask.completed_at),
+    contract: preferExecutionField(goalStoreTask.contract, executionTask.contract),
+    handoff_context: preferExecutionField(goalStoreTask.handoff_context, executionTask.handoff_context),
+    gate: preferExecutionField(goalStoreTask.gate, executionTask.gate),
+    execution_links: preferExecutionField(goalStoreTask.execution_links, executionTask.execution_links),
   }
-  return merged
 }
 
 function mergeTaskSnapshot(goalStoreTasks: ReadonlyArray<Task>, executionTasks: ReadonlyArray<Task>): Task[] {
@@ -1052,7 +1082,7 @@ function WorkSurfaceV2() {
   const liveTasks = claimedTasks.filter(t => t.status !== 'cancelled')
   const totals = useMemo(() => ({
     goals: goalTreeSnapshot?.summary.active_goals ?? goalList.length,
-    tasks: goalTreeSnapshot?.summary.total_tasks ?? liveTasks.length,
+    tasks: liveTasks.length,
     wip: liveTasks.filter(t => t.status === 'in_progress' || t.status === 'claimed').length,
     verify: liveTasks.filter(t => t.status === 'awaiting_verification').length,
     backlog: claimedTasks.filter(t => isClaimableBacklogTask(t)).length,
@@ -1206,7 +1236,7 @@ function WorkSurfaceV2() {
       .map(t => ({
         ...t,
         _goalId: t.goal_id ?? '',
-        _goalTitle: t.goal_id ? (goalTitleById.get(t.goal_id) ?? UNLINKED_GOAL_TITLE) : UNLINKED_GOAL_TITLE,
+        _goalTitle: t.goal_id ? (goalTitleById.get(t.goal_id) ?? WORK_UNLINKED_GOAL_TITLE) : WORK_UNLINKED_GOAL_TITLE,
       })),
   [claimedTasks, goalTitleById])
 

@@ -151,16 +151,16 @@ describe('normalizeExecutionQueueItem', () => {
 })
 
 describe('normalizeTaskStatus', () => {
-  it('folds goal-store task vocabulary into the dashboard task status union', () => {
-    expect(normalizeTaskStatus('completed')).toBe('done')
-    expect(normalizeTaskStatus('pending')).toBe('todo')
+  it('keeps Goal Store vocabulary out of the generic execution-task normalizer', () => {
+    expect(normalizeTaskStatus('completed')).toBeUndefined()
+    expect(normalizeTaskStatus('pending')).toBeUndefined()
   })
 
-  it('normalizes completed task payloads from the goal tree as done tasks', () => {
+  it('normalizes canonical execution task statuses', () => {
     expect(normalizeTask({
       id: 'task-1',
-      title: 'Goal-store task',
-      status: 'completed',
+      title: 'Execution task',
+      status: 'done',
     })).toMatchObject({
       id: 'task-1',
       status: 'done',

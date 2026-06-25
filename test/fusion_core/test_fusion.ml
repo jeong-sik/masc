@@ -44,7 +44,7 @@ let base_policy : Fusion_policy.t =
           ; judge_system_prompt = "judge"
           ; judge_timeout_s = 300.0
           ; judges = []
-          ; min_answered = 1
+          ; min_answered = Fusion_policy.default_min_answered
           }
       ]
   }
@@ -609,7 +609,8 @@ let test_config_disabled_with_preset () =
    목표 결함 하나만 두고 나머지는 유효하게 해, 검증 순서(size→prompt→judge→dup→mtc)에서
    그 변형이 발화하는지 확인한다. private 타입이라 외부는 of_preset로만 t를 만든다. *)
 let mk_preset ?(panels = [ base_group ]) ?(judge = "j") ?(judge_prompt = "synthesize")
-    ?(judges = []) ?(min_answered = 1) (name : string) : Fusion_policy.preset =
+    ?(judges = []) ?(min_answered = Fusion_policy.default_min_answered)
+    (name : string) : Fusion_policy.preset =
   { Fusion_policy.name
   ; panels
   ; judge
@@ -1083,8 +1084,8 @@ let test_judge_outcome_roundtrip () =
       | Error e -> Alcotest.failf "judge_outcome roundtrip failed: %s" e)
     nodes
 
-(* RFC-0252 all-panel-fail guard: 0 answered panels => judge skipped with the
-   canonical error; >= 1 answered => judge runs. Reverting [judge_skip_reason]
+(* RFC-0252 all-panel-fail guard: 0 answered panels => judge skipped with a
+   typed quorum reason; >= 1 answered => judge runs. Reverting [judge_skip_reason]
    to always-[None] turns the first two checks red (non-vacuous). *)
 let test_judge_skip_reason () =
   let answered m a : panel_outcome = Answered { model = m; answer = a; usage = zero_usage } in
@@ -1101,15 +1102,19 @@ let test_judge_skip_reason () =
     (skips ~min_answered:2 [ answered "a" "x"; failed "b"; failed "c" ]);
   Alcotest.(check bool) "min2 two answered => run" false
     (skips ~min_answered:2 [ answered "a" "x"; answered "b" "y"; failed "c" ]);
-  (* skip message reports the required quorum *)
+  (* skip reason reports structured quorum counts; rendering is boundary-only. *)
   match judge_skip_reason ~min_answered:2 [ answered "a" "x"; failed "b" ] with
-  | Some msg ->
-    Alcotest.(check bool) "msg mentions required count" true
-      (Option.is_some (String.index_opt msg '2') && String.length msg > 0)
+  | Some (Quorum_not_met { answered; total; required } as reason) ->
+    Alcotest.(check int) "answered count" 1 answered;
+    Alcotest.(check int) "total count" 2 total;
+    Alcotest.(check int) "required count" 2 required;
+    Alcotest.(check string) "rendered reason"
+      "fusion aborted: 1 of 2 panels answered, preset requires at least 2"
+      (render_skip_reason reason)
   | None -> Alcotest.fail "expected skip when 1 < min_answered 2"
 
-(* min_answered must be in 1..(panel model total). base_group has 3 models, so 0
-   and 99 are both out of range and must be rejected by of_preset. *)
+(* min_answered must be in the policy range. base_group has 3 models, so 0, 3
+   (full-panel quorum), and 99 are all rejected. *)
 let test_validated_bad_min_answered () =
   let check_bad mn label =
     match Fusion_policy.Validated_preset.of_preset (mk_preset ~min_answered:mn label) with
@@ -1118,11 +1123,19 @@ let test_validated_bad_min_answered () =
     | _ -> Alcotest.failf "%s: expected Bad_min_answered" label
   in
   check_bad 0 "min_answered=0";
+  check_bad 3 "min_answered=all-panels";
   check_bad 99 "min_answered>panels";
-  (* in-range stays Ok (3 models, require 3) *)
-  match Fusion_policy.Validated_preset.of_preset (mk_preset ~min_answered:3 "ok3") with
+  (* in-range stays Ok (3 models, require 2 = total - 1) *)
+  match Fusion_policy.Validated_preset.of_preset (mk_preset ~min_answered:2 "ok2") with
   | Ok _ -> ()
-  | Error _ -> Alcotest.fail "min_answered=3 with 3 panels should be Ok"
+  | Error _ -> Alcotest.fail "min_answered=2 with 3 panels should be Ok"
+
+let test_min_answered_constants () =
+  Alcotest.(check int) "default_min_answered" 1 Fusion_policy.default_min_answered;
+  Alcotest.(check int) "single panel max" 1
+    (Fusion_policy.max_min_answered_for_panel_total 1);
+  Alcotest.(check int) "trio max" 2
+    (Fusion_policy.max_min_answered_for_panel_total 3)
 
 let () =
   Alcotest.run "fusion_core"
@@ -1213,5 +1226,6 @@ let () =
     ; ( "panel_guard"
       , [ Alcotest.test_case "judge_skip_reason" `Quick test_judge_skip_reason
         ; Alcotest.test_case "min_answered_range" `Quick test_validated_bad_min_answered
+        ; Alcotest.test_case "min_answered_constants" `Quick test_min_answered_constants
         ] )
     ]

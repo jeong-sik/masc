@@ -90,6 +90,25 @@ let answered_of outcomes =
     (function Answered a -> Some a | Failed _ -> None)
     outcomes
 
+type skip_reason =
+  | Quorum_not_met of
+      { answered : int
+      ; total : int
+      ; required : int
+      }
+[@@deriving yojson, show, eq]
+
+let render_skip_reason = function
+  | Quorum_not_met { answered; total; required } ->
+    Printf.sprintf
+      "fusion aborted: %d of %d panels answered, preset requires at least %d"
+      answered
+      total
+      required
+
+let no_panel_answers_error =
+  "all panels failed: no answered panel to synthesize"
+
 (* RFC-0252 left the panel-quorum case unspecified. The judge prompt is built
    from [answered_of] only, so when fewer than [min_answered] panels [Answered]
    the judge is handed a thin (or empty) <panel_answers> block and fabricates a
@@ -102,11 +121,7 @@ let answered_of outcomes =
 let judge_skip_reason ~min_answered outcomes =
   let answered = List.length (answered_of outcomes) in
   if answered < min_answered
-  then
-    Some
-      (Printf.sprintf
-         "fusion aborted: %d of %d panels answered, preset requires at least %d"
-         answered (List.length outcomes) min_answered)
+  then Some (Quorum_not_met { answered; total = List.length outcomes; required = min_answered })
   else None
 
 type claim =

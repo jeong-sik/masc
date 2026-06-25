@@ -48,6 +48,11 @@ type preset =
 
 let min_panel = 1
 let max_panel = 8
+let min_answered_min = 1
+let default_min_answered = min_answered_min
+
+let max_min_answered_for_panel_total total =
+  if total <= min_answered_min then min_answered_min else total - 1
 
 (* 그룹 모델당 max_tool_calls 상한 (0..max). 0=무제한, 그 외 양수는 에이전트
    max_turns에 근사. SSOT 상수 (Magic Number 회피, RFC-0280에서 검증을 한 곳으로 모음). *)
@@ -184,7 +189,7 @@ module Validated_preset = struct
     | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0283) *)
     | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성(judge_id) (RFC-0283) *)
     | Bad_min_answered of int
-        (** [min_answered]가 [1..모델 총합] 밖 (요구 응답 수 > 패널 수면 항상 실패) *)
+        (** [min_answered]가 허용 범위 밖. 다중 패널 preset은 full-panel quorum 금지. *)
 
   (* 검증 순서는 config 로드 시점과 동일(byte-identical config_error): size → 패널 prompt →
      judge model → 패널 정체성 중복 → 패널 max_tool_calls 범위 → (RFC-0283) 1차 심판 prompt
@@ -220,10 +225,11 @@ module Validated_preset = struct
                 with
                 | Some j -> Error (Bad_max_tool_calls j.jmax_tool_calls)
                 | None ->
-                  (* min_answered는 1..모델 총합. size_ok가 이미 총합 >= 1을 보장하므로
-                     상한은 의미가 있다(요구 응답 수가 패널 수보다 크면 항상 실패). *)
                   let total = List.length (preset_models p) in
-                  if p.min_answered < 1 || p.min_answered > total
+                  let max_min_answered = max_min_answered_for_panel_total total in
+                  if
+                    p.min_answered < min_answered_min
+                    || p.min_answered > max_min_answered
                   then Error (Bad_min_answered p.min_answered)
                   else Ok p)))
 

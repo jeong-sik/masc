@@ -14,7 +14,8 @@ type config_error =
   | Missing_default_preset of string
   | Judge_panel_prompt_missing of string  (** preset 이름; JOJ 1차 심판 prompt 누락 (RFC-0283) *)
   | Duplicate_judge of string * string  (** (preset 이름, 중복 judge 정체성) (RFC-0283) *)
-  | Invalid_min_answered of string * int  (** (preset 이름, min_answered): 1..모델 총합 밖 *)
+  | Invalid_min_answered of string * int
+      (** (preset 이름, min_answered): policy 허용 범위 밖 *)
   | Toml_type_error of string
 [@@deriving show, eq]
 
@@ -63,8 +64,9 @@ let parse_judge_spec (tbl : Otoml.t) : Fusion_policy.judge_spec =
 
 let parse_min_answered name tbl =
   match Otoml.find_opt tbl Otoml.get_integer [ "min_answered" ] with
-  | None -> Ok 1
-  | Some v when v < 1 -> Error (Invalid_min_answered (name, v))
+  | None -> Ok Fusion_policy.default_min_answered
+  | Some v when v < Fusion_policy.min_answered_min ->
+    Error (Invalid_min_answered (name, v))
   | Some v -> Ok v
 
 (* 패널 그룹을 확정한 뒤 preset 완성 + 검증. judge_* 는 preset table에서 직접 읽는다
@@ -88,7 +90,7 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
     | Some entries -> List.map parse_judge_spec entries
     | None -> []
   in
-  (* 런타임 quorum. 미설정 시 1 = 기존 동작(>= 1 응답이면 심판 실행).
+  (* 런타임 quorum. 미설정 시 [default_min_answered] = 기존 동작(>= 1 응답이면 심판 실행).
      하한(<1)은 config parse boundary에서 즉시 거부하고, 상한(패널 총합 초과)은
      Validated_preset.of_preset이 preset 전체를 보고 검증한다. *)
   Result.bind (parse_min_answered name tbl) (fun min_answered ->

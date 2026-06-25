@@ -216,10 +216,11 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                 ~min_answered:preset.Fusion_policy.min_answered panel
             with
             | Some reason ->
-              (* 패널 전원 실패 — 종합할 답이 없다. judge를 빈 패널로 호출하면 빈
-                 <panel_answers>로 환각 종합을 만들어 0-패널 결과를 정상처럼 표출한다.
-                 judge 미실행 + 명시적 실패로 완료한다(기존 judge-error 표시 경로 재사용,
-                 JOJ all-fail과 동일 의미). judge_nodes=[] — 실행된 심판 없음(RFC-0284). *)
+              (* Quorum-not-met — 종합할 답이 preset 기준보다 적다. judge를 얇거나 빈
+                 <panel_answers>로 호출하면 근거 부족 종합을 정상처럼 표출한다. judge
+                 미실행 + 명시적 실패로 완료한다(기존 judge-error 표시 경로 재사용).
+                 judge_nodes=[] — 실행된 심판 없음(RFC-0284). *)
+              let reason = Fusion_types.render_skip_reason reason in
               (Error (reason, Fusion_types.zero_usage), [])
             | None ->
             match topology with

@@ -306,7 +306,14 @@ let rec run_candidates
             complete ~sw ~net ?clock:(Some clock) ~config ~messages ())
         with
         | None -> continue_with (`Timeout runtime_id)
-        | Some (Error err) -> continue_with (`Provider_error err)
+        | Some (Error err) ->
+          if Runtime_attempt_fsm.should_try_next err
+          then continue_with (`Provider_error err)
+          else
+            err_json
+              ~failure_class:(failure_class_of_http_error err)
+              ~detail:(Provider_http_error.to_message err)
+              "provider_error"
         | Some (Ok response) -> ok_or_classified_json response))
 
 let handle
@@ -349,7 +356,7 @@ let handle
           (match validate_image_size bytes with
            | Error msg ->
              err_json
-               ~failure_class:Tool_result.Runtime_failure
+               ~failure_class:Tool_result.Policy_rejection
                ~detail:msg
                "image_too_large"
            | Ok () ->

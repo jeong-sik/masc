@@ -294,7 +294,7 @@ let test_unknown_magic_bytes_are_policy_rejection () =
     assert (String.equal (assoc_string "error" json) "invalid_media_type");
     assert (String.equal (assoc_string "failure_class" json) "policy_rejection"))
 
-let test_oversize_image_is_runtime_failure_before_provider_call () =
+let test_oversize_image_is_policy_rejection_before_provider_call () =
   with_temp_base (fun _ ->
     let meta = make_meta "vision-oversize" in
     let handle = store_image meta (String.make (Vt.max_image_bytes () + 1) '\000') in
@@ -312,7 +312,7 @@ let test_oversize_image_is_runtime_failure_before_provider_call () =
     in
     let json = json_of_output raw in
     assert (String.equal (assoc_string "error" json) "image_too_large");
-    assert (String.equal (assoc_string "failure_class" json) "runtime_failure"))
+    assert (String.equal (assoc_string "failure_class" json) "policy_rejection"))
 
 let write_file path content =
   let oc = open_out path in
@@ -428,47 +428,10 @@ let test_retryable_provider_error_tries_next_runtime () =
       assert (!models = [ "vision-a"; "vision-b" ]);
       assert (String.equal (assoc_string "text" json) "second runtime answered")))
 
-let test_non_retryable_provider_error_tries_next_runtime () =
+let test_non_retryable_provider_error_stops_without_trying_next_runtime () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     with_temp_base (fun _ ->
-      let meta = make_meta "vision-nonretryable-failover" in
-      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
-      let calls = ref 0 in
-      let models = ref [] in
-      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ () =
-        incr calls;
-        models := !models @ [ config.Llm_provider.Provider_config.model_id ];
-        if !calls = 1
-        then
-          Error
-            (Llm_provider.Http_client.HttpError
-               { code = 401; body = "bad credentials" })
-        else Ok (ok_response "second runtime answered after 401")
-      in
-      let raw =
-        Eio_main.run (fun env ->
-          Eio.Switch.run (fun sw ->
-            Vt.handle
-              ~complete
-              ~sw
-              ~clock:(Eio.Stdenv.clock env)
-              ~net:(Eio.Stdenv.net env)
-              ~meta
-              ~args:(artifact_args handle)
-              ()))
-      in
-      let json = json_of_output raw in
-      assert (!calls = 2);
-      assert (!models = [ "vision-a"; "vision-b" ]);
-      assert (
-        String.equal
-          (assoc_string "text" json)
-          "second runtime answered after 401")))
-
-let test_non_retryable_provider_errors_exhaust_as_runtime_failure () =
-  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
-    with_temp_base (fun _ ->
-      let meta = make_meta "vision-nonretryable-exhaust" in
+      let meta = make_meta "vision-nonretryable-stop" in
       let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
       let calls = ref 0 in
       let models = ref [] in
@@ -492,10 +455,42 @@ let test_non_retryable_provider_errors_exhaust_as_runtime_failure () =
               ()))
       in
       let json = json_of_output raw in
-      assert (!calls = 2);
-      assert (!models = [ "vision-a"; "vision-b" ]);
+      assert (!calls = 1);
+      assert (!models = [ "vision-a" ]);
       assert (String.equal (assoc_string "error" json) "provider_error");
       assert (String.equal (assoc_string "failure_class" json) "runtime_failure")))
+
+let test_accept_rejected_is_policy_rejection_without_failover () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-accept-rejected" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let calls = ref 0 in
+      let models = ref [] in
+      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ () =
+        incr calls;
+        models := !models @ [ config.Llm_provider.Provider_config.model_id ];
+        Error
+          (Llm_provider.Http_client.AcceptRejected
+             { reason = "provider rejected the image" })
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (!calls = 1);
+      assert (!models = [ "vision-a" ]);
+      assert (String.equal (assoc_string "error" json) "provider_error");
+      assert (String.equal (assoc_string "failure_class" json) "policy_rejection")))
 
 let () =
   test_truncated_of_stop_reason ();
@@ -509,9 +504,9 @@ let () =
   test_invalid_timeout_is_runtime_failure_without_provider_call ();
   test_non_string_media_type_is_policy_rejection ();
   test_unknown_magic_bytes_are_policy_rejection ();
-  test_oversize_image_is_runtime_failure_before_provider_call ();
+  test_oversize_image_is_policy_rejection_before_provider_call ();
   test_temp_runtime_toml_restores_runtime_cache ();
   test_retryable_provider_error_tries_next_runtime ();
-  test_non_retryable_provider_error_tries_next_runtime ();
-  test_non_retryable_provider_errors_exhaust_as_runtime_failure ();
+  test_non_retryable_provider_error_stops_without_trying_next_runtime ();
+  test_accept_rejected_is_policy_rejection_without_failover ();
   print_endline "test_keeper_vision_tool: all assertions passed"

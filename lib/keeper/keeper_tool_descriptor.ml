@@ -499,7 +499,7 @@ let descriptor
     ~backend
     ~sandbox
     ~runtime_handler
-      ~translate
+    ~translate
 ;;
 
 let with_eval_tags eval_tags descriptor =
@@ -710,7 +710,9 @@ let find_voice_schema_opt name =
 ;;
 
 let find_base_schema_opt name =
-  find_schema_input_opt Tool_shard_types.base_tools name
+  match find_schema_input_opt Tool_shard_types.base_tools name with
+  | Some _ as schema -> schema
+  | None -> find_schema_input_opt Tool_shard_types.filesystem_tools name
 ;;
 
 let remove_schema_fields removed schema =

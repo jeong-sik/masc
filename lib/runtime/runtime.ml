@@ -289,33 +289,11 @@ let empty_loaded_state =
 let loaded_state_ref : loaded_state Atomic.t = Atomic.make empty_loaded_state
 
 module For_testing = struct
-  type snapshot =
-    { default_runtime : t option
-    ; runtimes : t list
-    ; keeper_assignments : (string * string) list
-    ; librarian_runtime_id : string option
-    ; cross_verifier_runtime_id : string option
-    ; media_failover : string list
-    }
+  type snapshot = loaded_state
 
-  let snapshot () =
-    { default_runtime = Atomic.get default_runtime_ref
-    ; runtimes = Atomic.get runtimes_ref
-    ; keeper_assignments = Atomic.get keeper_assignments_ref
-    ; librarian_runtime_id = Atomic.get librarian_runtime_id_ref
-    ; cross_verifier_runtime_id = Atomic.get cross_verifier_runtime_id_ref
-    ; media_failover = Atomic.get media_failover_ref
-    }
-  ;;
+  let snapshot () = Atomic.get loaded_state_ref
 
-  let restore snapshot =
-    Atomic.set default_runtime_ref snapshot.default_runtime;
-    Atomic.set runtimes_ref snapshot.runtimes;
-    Atomic.set keeper_assignments_ref snapshot.keeper_assignments;
-    Atomic.set librarian_runtime_id_ref snapshot.librarian_runtime_id;
-    Atomic.set cross_verifier_runtime_id_ref snapshot.cross_verifier_runtime_id;
-    Atomic.set media_failover_ref snapshot.media_failover
-  ;;
+  let restore snapshot = Atomic.set loaded_state_ref snapshot
 end
 
 let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes

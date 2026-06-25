@@ -67,6 +67,7 @@
   /* --color-fg-primary maps to --text-bright under [data-skin=v2]
      (skin-v2.css:247), matching the prototype heading's --text-bright. */
   color: var(--color-fg-primary);
+  flex: none;
   white-space: nowrap;
 }
 
@@ -119,12 +120,11 @@
 .kti-sub {
   display: flex;
   align-items: center;
-  /* prototype .ti-sub (keeper-v2/styles/inspector.css:14): gap 8px, padding
-     0 16px 12px. --sp-2/--sp-4 are 6px/10px on the 2px-base v2 scale and would
-     shrink the subline gutters; pin the prototype literals. */
+  /* Keep the integrated drawer gutters on the dashboard v2 spacing token while
+     preserving the prototype row gap and bottom pad. */
   gap: 8px;
   flex-wrap: wrap;
-  padding: 0 16px 12px;
+  padding: 0 var(--sp-4) 12px;
   border-bottom: 1px solid var(--color-border-subtle);
 }
 
@@ -208,10 +208,9 @@
 
 /* ── Token economics bar ── */
 .kti-tok {
-  /* prototype .ti-tok (keeper-v2/styles/inspector.css:29): literal 13px 16px,
-     no border. --sp-3/--sp-4 are 8px/10px on the 2px-base v2 scale and would
-     shrink the token-economics band; pin the prototype literals. */
-  padding: 13px 16px;
+  /* Dashboard v2 uses the shared horizontal spacing token here while preserving
+     the prototype's 13px vertical pad and no-border economics band. */
+  padding: 13px var(--sp-4);
 }
 
 .kti-tok-top {
@@ -302,7 +301,7 @@
 .kti-tok-legend b {
   font-family: var(--font-mono);
   color: var(--color-fg-primary);
-  font-weight: var(--fw-semi);
+  font-weight: 600;
 }
 
 /* ── Tabs — pill rail (prototype .turn-tabs / .turn-tab, keeper-v2/styles/v2.css:701-704) ── */
@@ -432,7 +431,7 @@
   /* prototype .ti-wf-lbl (inspector.css:48): 12.5px. --fs-12 is bumped to 14px
      at desktop :root (variables.css:723); pin the literal. */
   font-size: 12.5px;
-  color: var(--color-fg-secondary);
+  color: var(--color-fg-primary);
 }
 
 .kti-wf-lbl .nm {
@@ -515,7 +514,7 @@
 .kti-wf-foot b {
   font-family: var(--font-mono);
   color: var(--color-fg-primary);
-  font-weight: var(--fw-semi);
+  font-weight: 600;
 }
 
 .kti-wf-legend {
@@ -792,7 +791,7 @@
   font-family: var(--font-body);
   font-size: 12.5px;
   line-height: 1.62;
-  color: var(--color-fg-secondary);
+  color: var(--color-fg-primary);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -889,7 +888,7 @@
 
 .kti-param b {
   color: var(--color-fg-primary);
-  font-weight: var(--fw-semi);
+  font-weight: 600;
   margin-left: 6px;
 }
 
@@ -937,6 +936,31 @@
 
 .kti-turn-summary:hover .open-hint {
   opacity: 1;
+}
+
+@media (max-width: 900px) {
+  .kti-drawer {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100dvh;
+    border-left: 0;
+  }
+
+  .kti-head {
+    padding-top: max(14px, env(safe-area-inset-top, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+  }
+
+  .kti-sub {
+    padding-right: max(var(--sp-4), env(safe-area-inset-right, 0px));
+    padding-left: max(var(--sp-4), env(safe-area-inset-left, 0px));
+  }
+
+  .kti-tok {
+    padding-right: max(var(--sp-4), env(safe-area-inset-right, 0px));
+    padding-left: max(var(--sp-4), env(safe-area-inset-left, 0px));
+  }
 }
 
 /* Responsive summary strip */

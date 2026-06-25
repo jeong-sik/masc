@@ -2661,4 +2661,33 @@ describe('ChatComposer v2 prototype surface', () => {
     send.click()
     expect(onSend).toHaveBeenCalledTimes(1)
   })
+
+  it('runs the active slash command from the strict-index-safe menu selection', () => {
+    const run = vi.fn()
+    render(
+      html`<${ChatComposer}
+        draft="/res"
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        commands=${[
+          {
+            id: 'restart',
+            group: 'lifecycle',
+            label: 'Restart keeper',
+            run,
+          },
+        ]}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+
+    expect(container.querySelector('.slashmenu')).not.toBeNull()
+    const textarea = container.querySelector('.composer-box textarea') as HTMLTextAreaElement
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+
+    expect(run).toHaveBeenCalledTimes(1)
+  })
 })

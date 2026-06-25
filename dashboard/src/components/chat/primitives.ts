@@ -3053,19 +3053,21 @@ export function ChatComposer({
   const hasContent = draft.trim() !== '' || attachments.length > 0
   const sendDisabled = disabled || !hasContent || (streaming && !queueEnabled)
   const slashMatch = /^\/([^\s]*)$/.exec(draft)
-  const slashQuery = slashMatch ? slashMatch[1].toLowerCase() : null
+  const slashQuery = slashMatch?.[1]?.toLowerCase() ?? null
   const slashMatches = useMemo(
-    () => slashQuery === null
-      ? []
-      : commands.filter(command => {
-        const id = command.id.toLowerCase()
-        const label = command.label.toLowerCase()
-        return id.startsWith(slashQuery) || label.startsWith(slashQuery)
-      }),
+    () =>
+      slashQuery === null
+        ? []
+        : commands.filter((command) => {
+            const id = command.id.toLowerCase()
+            const label = command.label.toLowerCase()
+            return id.startsWith(slashQuery) || label.startsWith(slashQuery)
+          }),
     [commands, slashQuery],
   )
   const slashOpen = voice.state === 'idle' && slashMatches.length > 0
   const activeSlashIdx = slashOpen ? Math.min(slashIdx, slashMatches.length - 1) : 0
+  const activeSlashCommand = slashOpen ? slashMatches[activeSlashIdx] : undefined
 
   const isPrimary = layout === 'primary'
 
@@ -3173,7 +3175,7 @@ export function ChatComposer({
       }
       if (event.key === 'Enter' || event.key === 'Tab') {
         event.preventDefault()
-        runSlashCommand(slashMatches[activeSlashIdx])
+        runSlashCommand(activeSlashCommand)
         return
       }
       if (event.key === 'Escape') {

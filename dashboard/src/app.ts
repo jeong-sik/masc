@@ -47,6 +47,7 @@ import { globalShortcutManager } from './lib/global-shortcut-manager'
 import { useKeeperPinShortcuts } from './components/ide/use-keeper-pin-shortcuts'
 import { useIsMobile } from './hooks/use-is-mobile'
 import { isWidgetSoloRoute } from './components/widget-solo'
+import { keeperMobilePane } from './components/keeper-detail-state'
 import {
   CopilotDock,
   CopilotDockFab,

@@ -9,7 +9,10 @@ import {
   insertThreadEntryBefore,
   finalizeAssistantEntry,
   clearActiveStream,
+  clearActiveStreamRequestId,
+  releaseActiveStreamRequestId,
   activeStreamEntryId,
+  activeStreamRequestId,
   getStreamController,
   keeperSending,
   keeperStreamStartedAt,
@@ -18,6 +21,7 @@ import {
 import { isRecord, asString } from './components/common/normalize'
 
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
+export const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'lost', 'cancelled'])
 
 // Most recent TOOL_CALL_START id per keeper — fallback target for
 // TOOL_CALL_ARGS / TOOL_CALL_END events that omit toolCallId.
@@ -27,12 +31,20 @@ function toolEntryId(toolCallId: string): string {
   return `tool-${toolCallId}`
 }
 
-export function abortKeeperThreadMessage(name: string): void {
+export interface KeeperThreadAbortResult {
+  readonly keeperName: string
+  readonly entryId: string | null
+  readonly requestId: string | null
+  readonly controllerAborted: boolean
+}
+
+export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult | null {
   const keeperName = name.trim()
-  if (!keeperName) return
+  if (!keeperName) return null
   const controller = getStreamController(keeperName)
   const entryId = activeStreamEntryId(keeperName)
-  console.debug(`[keeper-stream] aborting stream for ${keeperName}${entryId ? ` (entry=${entryId})` : ''}`)
+  const requestId = activeStreamRequestId(keeperName)
+  console.debug(`[keeper-stream] aborting stream for ${keeperName}${entryId ? ` (entry=${entryId})` : ''}${requestId ? ` request=${requestId}` : ''}`)
   if (controller) controller.abort()
   if (entryId) {
     finalizeAssistantEntry(keeperName, entryId, {
@@ -47,6 +59,12 @@ export function abortKeeperThreadMessage(name: string): void {
   clearActiveStream(keeperName)
   setRecordValue(keeperSending, keeperName, false)
   setRecordValue(keeperStreamStartedAt, keeperName, null)
+  return {
+    keeperName,
+    entryId,
+    requestId,
+    controllerAborted: Boolean(controller),
+  }
 }
 
 export function applyKeeperStreamEvent(
@@ -151,7 +169,17 @@ export function applyKeeperStreamEvent(
       }
       if (event.name === 'KEEPER_REQUEST_TERMINAL') {
         const terminal = isRecord(event.value) ? event.value : null
+        const terminalRequestId = asString(terminal?.request_id, '').trim()
+        const currentRequestId = activeStreamRequestId(keeperName)
         const status = asString(terminal?.status, '').trim()
+        if (currentRequestId && terminalRequestId !== currentRequestId) {
+          return null
+        }
+        if (!TERMINAL_REQUEST_STATUSES.has(status)) {
+          return null
+        }
+        if (terminalRequestId) releaseActiveStreamRequestId(terminalRequestId)
+        else clearActiveStreamRequestId(keeperName)
         const ok = terminal?.ok === true
         if (status === 'cancelled') {
           const message =

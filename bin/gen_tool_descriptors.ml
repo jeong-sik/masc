@@ -85,6 +85,23 @@ let masc_tool_help_spec : tool_spec =
 
 let dashboard_scope_enum_strings = [ "all"; "current" ]
 
+let masc_dashboard_spec : tool_spec =
+  { name = "masc_dashboard"
+  ; description =
+      "Return a concise workspace dashboard summary for the current project. Use scope \
+       to choose the current task-focused view or the full workspace view."
+  ; parameters =
+      [ { p_name = "scope"
+        ; p_type = T_string { enum = Some dashboard_scope_enum_strings; default = Some "current" }
+        ; p_description = "Dashboard scope: current or all"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  ; behavior_contract = []
+  }
+;;
+
 let masc_gc_spec : tool_spec =
   { name = "masc_gc"
   ; description =
@@ -361,6 +378,7 @@ let masc_messages_spec : tool_spec =
 let phase6_specs : tool_spec list =
   [ masc_config_spec
   ; masc_tool_help_spec
+  ; masc_dashboard_spec
   ; masc_gc_spec
   ; masc_tool_stats_spec
   ; masc_cleanup_zombies_spec

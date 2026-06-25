@@ -27,6 +27,8 @@ else
 fi
 export HARNESS_LOG_FILE="${HARNESS_LOG_FILE:-$LOG_FILE}"
 export MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS="${MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS:-32}"
+# shellcheck source=scripts/harness/lib/mcp_jsonrpc.sh
+source "${ROOT_DIR}/scripts/harness/lib/mcp_jsonrpc.sh"
 
 SERVER_PID=""
 
@@ -68,6 +70,12 @@ wait_for_mcp_initialize_ready() {
   local timeout_sec="${2:-25}"
   local deadline=$(( $(date +%s) + timeout_sec ))
   local body='{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"contract-bootstrap","version":"1.0"},"capabilities":{}}}'
+  local auth_token
+  auth_token="$(mcp_default_auth_token)"
+  local -a extra_headers=()
+  if [[ -n "$auth_token" ]]; then
+    extra_headers+=( -H "Authorization: Bearer $auth_token" )
+  fi
 
   while [[ "$(date +%s)" -lt "$deadline" ]]; do
     local status
@@ -76,6 +84,7 @@ wait_for_mcp_initialize_ready() {
         -X POST "$mcp_url" \
         -H 'Content-Type: application/json' \
         -H 'Accept: application/json, text/event-stream' \
+        "${extra_headers[@]}" \
         -d "$body" 2>/dev/null || true
     )"
     if [[ "$status" == "200" ]]; then

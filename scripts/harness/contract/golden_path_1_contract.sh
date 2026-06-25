@@ -12,11 +12,13 @@
 #   MCP_URL=http://127.0.0.1:9935/mcp ./golden_path_1_contract.sh  # dev instance
 set -euo pipefail
 
-AGENT_NAME="${AGENT_NAME:-golden-path-1-harness}"
-MCP_SESSION_ID="${MCP_SESSION_ID:-gp1-$(date +%s)-$RANDOM}"
+AGENT_NAME="${AGENT_NAME:-admin}"
+MCP_SESSION_ID="${MCP_SESSION_ID:-}"
 export MCP_SESSION_ID
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+START_PATH="${BASE_PATH:-$ROOT_DIR}"
 source "${SCRIPT_DIR}/../lib/test_framework.sh"
 
 extract_text() {
@@ -25,14 +27,13 @@ extract_text() {
 
 PASS=0
 FAIL=0
-JOINED=0
 GOAL_ID=""
 
 ensure_contract_goal() {
   local goal_payload
   local goal_json
 
-  goal_payload="$(call_tool 1000 "masc_goal_upsert" '{"title":"GP1 contract goal","description":"Golden path contract harness goal","priority":1}')"
+  goal_payload="$(call_tool 1000 "masc_goal_upsert" '{"title":"GP1 contract goal","priority":1}')"
   goal_json="$(printf '%s' "$goal_payload" | extract_result)"
   GOAL_ID="$(printf '%s' "$goal_json" | jq -r '.goal_id // empty')"
   if [ -z "$GOAL_ID" ]; then
@@ -46,20 +47,17 @@ step_pass() { PASS=$((PASS + 1)); echo "  PASS"; }
 step_fail() { FAIL=$((FAIL + 1)); echo "  FAIL: $1"; }
 
 cleanup() {
-  if [ "$JOINED" -eq 1 ]; then
-    call_tool 1099 "masc_unbind" "{\"agent_name\":\"$AGENT_NAME\"}" >/dev/null 2>&1 || true
-  fi
+  :
 }
 trap cleanup EXIT
 
-# ── Step 1/8: join ──
-echo "[1/8] masc_bind"
-r1="$(call_tool 1001 "masc_bind" "{\"agent_name\":\"$AGENT_NAME\",\"capabilities\":[\"test\",\"contract\"]}")"
+# ── Step 1/8: start ──
+echo "[1/8] masc_start"
+r1="$(call_tool 1001 "masc_start" "$(jq -cn --arg path "$START_PATH" '{path:$path}')")"
 if require_ok "$r1"; then
-  JOINED=1
   step_pass
 else
-  step_fail "join rejected"
+  step_fail "start rejected"
   echo "$r1"
   exit 1
 fi
@@ -107,7 +105,7 @@ fi
 
 # ── Step 5/8: heartbeat ──
 echo "[5/8] masc_heartbeat"
-r5="$(call_tool 1005 "masc_heartbeat" "{\"agent_name\":\"$AGENT_NAME\",\"status\":\"working\",\"progress\":\"GP1 contract step 5/8\"}")"
+r5="$(call_tool 1005 "masc_heartbeat" "{}")"
 if require_ok "$r5"; then
   step_pass
 else

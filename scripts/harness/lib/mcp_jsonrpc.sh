@@ -16,6 +16,19 @@ _HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=scripts/harness/jsonrpc_sse.sh
 source "${_HARNESS_DIR}/jsonrpc_sse.sh"
 
+mcp_default_auth_token() {
+  # Contract harnesses boot an isolated workspace. Prefer the harness/admin
+  # token minted for that workspace; an inherited MASC_TOKEN can belong to a
+  # different base path and fail auth resolution.
+  if [[ -n "${MCP_AUTH_TOKEN:-}" ]]; then
+    printf '%s' "$MCP_AUTH_TOKEN"
+  elif [[ -n "${MASC_ADMIN_TOKEN:-}" ]]; then
+    printf '%s' "$MASC_ADMIN_TOKEN"
+  elif [[ -n "${MASC_TOKEN:-}" ]]; then
+    printf '%s' "$MASC_TOKEN"
+  fi
+}
+
 mcp_mktemp_file() {
   local prefix="$1"
   local suffix="${2:-}"
@@ -197,6 +210,9 @@ mcp_jsonrpc_call() {
       "invalid id or params JSON" \
       "$timeout_sec"
     return 0
+  fi
+  if [[ -z "$token" ]]; then
+    token="$(mcp_default_auth_token)"
   fi
 
   local attempt=1

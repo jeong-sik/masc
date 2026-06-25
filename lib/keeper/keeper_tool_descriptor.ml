@@ -420,7 +420,7 @@ let translate_search_files input =
 let search_files_readonly_of_input _input = Some true
 
 let descriptor_with_public_aliases
-      ?(validate_translated_input = true)
+      ~validate_translated_input
       ~public_aliases
       ~id
       ~public_name
@@ -463,7 +463,7 @@ let descriptor_with_public_aliases
 ;;
 
 let descriptor
-      ?validate_translated_input
+      ~validate_translated_input
       ~id
       ~public_name
       ~internal_name
@@ -477,7 +477,7 @@ let descriptor
       ~translate
   =
   descriptor_with_public_aliases
-    ?validate_translated_input
+    ~validate_translated_input
     ~public_aliases:[]
     ~id
     ~public_name
@@ -518,6 +518,7 @@ let public_descriptors =
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
       ~runtime_handler:Tool_execute
+      ~validate_translated_input:true
       ~translate:translate_identity
   ; descriptor_with_public_aliases
       ~id:"agent.search_files"
@@ -542,6 +543,7 @@ let public_descriptors =
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
       ~runtime_handler:Tool_search_files
+      ~validate_translated_input:true
       ~translate:translate_search_files
   ; descriptor
       ~id:"agent.read_file"
@@ -624,6 +626,7 @@ let public_descriptors =
       ~backend:Ocaml_runtime
       ~sandbox:No_sandbox
       ~runtime_handler:Tool_masc_misc_dispatch
+      ~validate_translated_input:true
       ~translate:translate_identity
   ; descriptor
       ~id:"agent.fetch_web"
@@ -647,6 +650,7 @@ let public_descriptors =
       ~backend:Ocaml_runtime
       ~sandbox:No_sandbox
       ~runtime_handler:Tool_masc_misc_dispatch
+      ~validate_translated_input:true
       ~translate:translate_identity
   ]
 ;;
@@ -976,6 +980,7 @@ let in_process_descriptor ~id ~name ~description ~input_schema ~policy ~handler 
     ~backend:Ocaml_runtime
     ~sandbox:No_sandbox
     ~runtime_handler:handler
+    ~validate_translated_input:true
     ~translate:translate_identity
 ;;
 

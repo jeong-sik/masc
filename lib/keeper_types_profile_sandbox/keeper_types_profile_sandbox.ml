@@ -84,3 +84,49 @@ let default_network_mode_for_profile = function
      visible here because it's a per-command decision, not a profile
      default. *)
 ;;
+
+(* RFC vision-delegation §2.4 — persisted mechanism-selection axis. Decides how a
+   keeper handles image input, resolved independently of the live runtime
+   assignment so two identical turns resolve identically (RFC-0265 §3.4
+   determinism). Lives here (not keeper_meta_contract) so [keeper_profile_defaults]
+   can reference it without a dependency cycle — same layering as [network_mode].
+   Mirrors [network_mode]: closed variant, [_of_string] returns [option]
+   (unknown -> [None], fail-closed), SSOT lists. *)
+(* No [@@deriving tla]: unlike [network_mode]/[sandbox_profile] this policy is
+   not referenced by any TLA+ spec, and a second module-level [to_tla_symbol]
+   deriver would collide with [network_mode]'s. *)
+type multimodal_policy =
+  | Mm_delegate
+    (* §2.3: evict images to the artifact store at ingestion and read them via
+       the analyze_image tool; main history stays text-only. *)
+  | Mm_reroute (* RFC-0265: reroute the whole turn to a vision-capable runtime. *)
+  | Mm_inherit
+    (* follow the workspace default (currently Reroute). Safe-by-default for
+       keepers that predate this field — a missing TOML/JSON key parses here. *)
+
+let multimodal_policy_to_string = function
+  | Mm_delegate -> "delegate"
+  | Mm_reroute -> "reroute"
+  | Mm_inherit -> "inherit"
+;;
+
+let multimodal_policy_of_string raw =
+  match String.trim (String.lowercase_ascii raw) with
+  | "delegate" -> Some Mm_delegate
+  | "reroute" -> Some Mm_reroute
+  | "inherit" -> Some Mm_inherit
+  | _ -> None
+;;
+
+(* Variant SSOT: adding a constructor forces [multimodal_policy_to_string]
+   exhaustiveness and extends [valid_multimodal_policy_strings] that schema and
+   parsers mirror. *)
+let all_multimodal_policies = [ Mm_delegate; Mm_reroute; Mm_inherit ]
+
+let valid_multimodal_policy_strings =
+  List.map multimodal_policy_to_string all_multimodal_policies
+;;
+
+(* Safe-by-default: a keeper with no explicit policy inherits today's behaviour
+   (RFC-0265 reroute), so Phase 2 is a no-op until an operator opts in. *)
+let default_multimodal_policy = Mm_inherit

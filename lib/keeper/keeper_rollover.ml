@@ -316,6 +316,8 @@ let maybe_rollover_oas_handoff
           in
           match save_oas_checkpoint
                   ~max_checkpoint_messages:base_meta.compaction.max_checkpoint_messages
+                  ~multimodal_policy:base_meta.multimodal_policy
+                  ~keeper_name:base_meta.name
                   ~session:new_session
                   ~agent_name:base_meta.agent_name
                   ~ctx:save_ctx ~generation:next_generation with

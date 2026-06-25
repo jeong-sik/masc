@@ -484,6 +484,18 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; mention_targets = policy.pp_mention_targets
                    ; proactive = policy.pp_proactive
                    ; compaction = policy.pp_compaction
+                   ; (* RFC vision-delegation §2.4. Parsed inline (mirrors the
+                        telemetry fields below): unknown/missing -> default
+                        Inherit (fail-closed, safe-by-default). This round-trips
+                        through the checkpoint JSON so a Delegate keeper stays
+                        Delegate across reload. *)
+                     multimodal_policy =
+                       (match Safe_ops.json_string_opt "multimodal_policy" json with
+                        | Some raw ->
+                          (match multimodal_policy_of_string raw with
+                           | Some p -> p
+                           | None -> default_multimodal_policy)
+                        | None -> default_multimodal_policy)
                    ; auto_handoff = policy.pp_auto_handoff
                    ; handoff_threshold = policy.pp_handoff_threshold
                    ; handoff_cooldown_sec = policy.pp_handoff_cooldown_sec

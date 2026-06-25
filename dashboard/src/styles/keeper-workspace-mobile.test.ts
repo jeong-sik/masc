@@ -8,6 +8,7 @@ const chatCss = readFileSync(resolve(__dirname, 'chat.css'), 'utf-8')
 const copilotCss = readFileSync(resolve(__dirname, 'copilot-dock.css'), 'utf-8')
 const turnInspectorCss = readFileSync(resolve(__dirname, 'keeper-turn-inspector.css'), 'utf-8')
 const configCss = readFileSync(resolve(__dirname, 'keeper-v2/keeper-config.css'), 'utf-8')
+const keeperV2CraftCss = readFileSync(resolve(__dirname, 'keeper-v2/craft.css'), 'utf-8')
 const appSource = readFileSync(resolve(__dirname, '../app.ts'), 'utf-8')
 const chatPrimitivesSource = readFileSync(resolve(__dirname, '../components/chat/primitives.ts'), 'utf-8')
 const copilotDockSource = readFileSync(resolve(__dirname, '../components/copilot-dock.ts'), 'utf-8')
@@ -91,6 +92,8 @@ function mediaRuleDeclsIn(source: string, selector: string, maxWidth: string): R
 const mediaRuleDecls = (selector: string, maxWidth: string) => mediaRuleDeclsIn(css, selector, maxWidth)
 const mobileRuleDecls = (selector: string) => mediaRuleDecls(selector, KEEPER_MOBILE_PANE_BREAKPOINT)
 const copilotRuleDecls = (selector: string, maxWidth: string) => mediaRuleDeclsIn(copilotCss, selector, maxWidth)
+const keeperV2CraftMobileRuleDecls = (selector: string) =>
+  mediaRuleDeclsIn(keeperV2CraftCss, selector, KEEPER_MOBILE_PANE_BREAKPOINT)
 const shellMobileTurnInspectorRuleDecls = (selector: string) =>
   mediaRuleDeclsIn(turnInspectorCss, selector, SHELL_MOBILE_CHROME_BREAKPOINT)
 
@@ -193,7 +196,53 @@ describe('keeper workspace v2 (26) mobile contract', () => {
     expect(mobileRuleDecls('.kw-composer-inner .composer textarea')['font-size']).toBe('16px')
   })
 
+  it('uses full-width mobile chat columns instead of desktop reading-width insets', () => {
+    expect(mobileRuleDecls('.kw-chat-body > [data-keeper-chat-layout="workspace"]').width).toBe('100%')
+    expect(mobileRuleDecls('.kw-chat-body > [data-keeper-chat-layout="workspace"]')['max-width']).toBe('100%')
+    expect(mobileRuleDecls('.kw-chat-body > [data-keeper-chat-layout="workspace"]')['min-width']).toBe('0')
+
+    expect(mobileRuleDecls('.v2-app[data-keeper-detail-mode="true"] .kw-rail-toggle').display).toBe('none')
+    expect(mobileRuleDecls('.v2-app[data-keeper-detail-mode="true"] .kw-pane-resizer').display).toBe('none')
+
+    expect(mobileRuleDecls('.kw-chat-toolbar').padding).toContain('max(12px, env(safe-area-inset-right, 0px))')
+    expect(mobileRuleDecls('.kw-chat-toolbar').padding).toContain('max(12px, env(safe-area-inset-left, 0px))')
+    expect(mobileRuleDecls('.kw-chat-toolbar').gap).toBe('8px')
+    expect(mobileRuleDecls('.kw-chat-toolbar [name="keeper_chat_search"]').flex).toBe('1 1 180px')
+    expect(mobileRuleDecls('.kw-chat-toolbar [name="keeper_chat_search"]')['max-width']).toBe('none')
+
+    expect(mobileRuleDecls('[data-keeper-chat-layout="workspace"] .kw-thread-inner').width).toBe('100%')
+    expect(mobileRuleDecls('[data-keeper-chat-layout="workspace"] .kw-thread-inner')['max-width']).toBe('none')
+    expect(mobileRuleDecls('[data-keeper-chat-layout="workspace"] .kw-composer-inner').width).toBe('100%')
+    expect(mobileRuleDecls('[data-keeper-chat-layout="workspace"] .kw-composer-inner')['max-width']).toBe('none')
+    expect(mobileRuleDecls('[data-keeper-chat-layout="workspace"] .composer-inner').width).toBe('100%')
+    expect(mobileRuleDecls('[data-keeper-chat-layout="workspace"] .composer-box').width).toBe('100%')
+  })
+
+  it('overrides the last-loaded v2 craft density gutters for mobile keeper chat', () => {
+    const scope = '.v2-app[data-keeper-detail-mode="true"] [data-keeper-chat-layout="workspace"]'
+
+    expect(keeperV2CraftMobileRuleDecls(`${scope} .chat-transcript`).padding).toContain(
+      'max(16px, env(safe-area-inset-left, 0px))',
+    )
+    expect(keeperV2CraftMobileRuleDecls(`${scope} .chat-turn-bundle`).width).toBe('100%')
+    expect(keeperV2CraftMobileRuleDecls(`${scope} .chat-turn-bundle`)['max-width']).toBe('100%')
+    expect(keeperV2CraftMobileRuleDecls(`${scope} .chat-bubble`).width).toBe('100%')
+    expect(keeperV2CraftMobileRuleDecls(`${scope} .chat-bubble`)['max-width']).toBe('100%')
+    expect(keeperV2CraftMobileRuleDecls(`${scope} .chat-bubble`).padding).toBe('14px 15px')
+    expect(keeperV2CraftMobileRuleDecls(`${scope} .kw-composer-wrap`).padding).toContain(
+      'max(12px, env(safe-area-inset-left, 0px))',
+    )
+    expect(keeperV2CraftMobileRuleDecls(`${scope} .kw-composer-inner`).padding).toBe('0')
+    expect(keeperV2CraftMobileRuleDecls(`${scope} .composer.primary`).padding).toBe('0')
+    expect(keeperV2CraftMobileRuleDecls(`${scope} .composer-inner`).padding).toBe('0')
+    expect(keeperV2CraftMobileRuleDecls(`${scope} .composer-box`).width).toBe('100%')
+  })
+
   it('keeps mobile conversation bubbles at the v2 reading scale', () => {
+    expect(mobileRuleDecls('.kw-thread-inner .chat-turn-bundle').width).toBe('100%')
+    expect(mobileRuleDecls('.kw-thread-inner .chat-turn-bundle')['max-width']).toBe('100%')
+    expect(mobileRuleDecls('.kw-thread-inner .chat-bubble').width).toBe('100%')
+    expect(mobileRuleDecls('.kw-thread-inner .chat-bubble')['max-width']).toBe('100%')
     expect(mobileRuleDecls('.kw-thread-inner .chat-bubble')['font-size']).toBe('16.5px')
     expect(mobileRuleDecls('.kw-thread-inner .chat-bubble')['line-height']).toBe('1.68')
     expect(mobileRuleDecls('.kw-thread-inner .chat-bubble').padding).toBe('14px 15px')

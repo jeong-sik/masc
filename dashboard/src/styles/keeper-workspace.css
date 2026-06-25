@@ -1275,6 +1275,43 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
     max-width: calc(100vw - 28px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
   }
 
+  .v2-app[data-keeper-detail-mode="true"] .kw-rail-toggle,
+  .v2-app[data-keeper-detail-mode="true"] .kw-pane-resizer {
+    display: none;
+  }
+
+  .kw-chat-body > [data-keeper-chat-layout="workspace"] {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .kw-chat-toolbar {
+    gap: 8px;
+    padding:
+      8px
+      max(12px, env(safe-area-inset-right, 0px))
+      8px
+      max(12px, env(safe-area-inset-left, 0px));
+  }
+
+  .kw-chat-toolbar [name="keeper_chat_search"] {
+    flex: 1 1 180px;
+    min-width: 0;
+    max-width: none;
+  }
+
+  [data-keeper-chat-layout="workspace"] .kw-thread,
+  [data-keeper-chat-layout="workspace"] .kw-thread-inner,
+  [data-keeper-chat-layout="workspace"] .kw-composer-wrap,
+  [data-keeper-chat-layout="workspace"] .kw-composer-inner,
+  [data-keeper-chat-layout="workspace"] .composer-inner,
+  [data-keeper-chat-layout="workspace"] .composer-box {
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
+  }
+
   .kw-thread-inner .chat-transcript {
     gap: 18px;
     padding-left: max(16px, env(safe-area-inset-left, 0px));
@@ -1283,7 +1320,14 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
     padding-bottom: 12px;
   }
 
+  .kw-thread-inner .chat-turn-bundle {
+    width: 100%;
+    max-width: 100%;
+  }
+
   .kw-thread-inner .chat-bubble {
+    width: 100%;
+    max-width: 100%;
     font-size: 16.5px;
     line-height: 1.68;
     padding: 14px 15px;

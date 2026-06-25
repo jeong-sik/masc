@@ -4,6 +4,7 @@ set -euo pipefail
 : "${MCP_URL:=http://127.0.0.1:8935/mcp}"
 : "${BASE_PATH:?BASE_PATH must be set by run_all.sh}"
 : "${AGENT_NAME:=${MCP_AGENT_NAME:-public-tool-sweep-harness}}"
+: "${GOAL_ACTOR_NAME:=${MASC_HARNESS_ADMIN_AGENT:-$AGENT_NAME}}"
 : "${MCP_SESSION_ID:=}"
 export MCP_SESSION_ID
 
@@ -181,7 +182,7 @@ r_goal_transition="$(
   call_tool 5011 "masc_goal_transition" "$(
     jq -cn \
       --arg goal_id "$GOAL_ID" \
-      --arg actor "$AGENT_NAME" \
+      --arg actor "$GOAL_ACTOR_NAME" \
       '{goal_id:$goal_id,action:"pause",actor:{id:$actor},note:"public tool sweep pause"}'
   )"
 )"
@@ -192,7 +193,7 @@ r_goal_verify="$(
   call_tool 5012 "masc_goal_verify" "$(
     jq -cn \
       --arg goal_id "$GOAL_ID" \
-      --arg principal "$AGENT_NAME" \
+      --arg principal "$GOAL_ACTOR_NAME" \
       '{goal_id:$goal_id,principal:{id:$principal},decision:"approve",note:"public tool sweep guard vote"}'
   )"
 )"

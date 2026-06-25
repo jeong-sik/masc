@@ -46,13 +46,15 @@ function parseDraftPositiveInt(label: string, raw: string): number | string {
 }
 
 function settingsFromDraft(draft: FusionSettingsDraft): FusionSettings | string {
+  const defaultPreset = draft.defaultPreset
+  if (defaultPreset !== '' && defaultPreset.trim() === '') return 'default_preset은 공백만 입력할 수 없습니다.'
   const maxConcurrentPanels = parseDraftPositiveInt('max_concurrent_panels', draft.maxConcurrentPanels)
   if (typeof maxConcurrentPanels === 'string') return maxConcurrentPanels
   const minAnswered = parseDraftPositiveInt('min_answered', draft.minAnswered)
   if (typeof minAnswered === 'string') return minAnswered
   return {
     enabled: draft.enabled,
-    defaultPreset: draft.defaultPreset,
+    defaultPreset,
     maxConcurrentPanels,
     minAnswered,
   }

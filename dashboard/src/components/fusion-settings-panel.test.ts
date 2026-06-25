@@ -124,6 +124,18 @@ describe('FusionSettingsPanel', () => {
     expect(q('[data-testid="fusion-settings-saved"]')?.textContent).toBe('저장됨')
   })
 
+  it('does not POST whitespace-only default_preset values', async () => {
+    fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE }))
+    await mount()
+    const presetInput = q('input[type="text"]') as HTMLInputElement
+    presetInput.value = '   '
+    await fireEvent.input(presetInput)
+
+    ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
+    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('default_preset'))
+    expect(saveMock).not.toHaveBeenCalled()
+  })
+
   it('surfaces malformed live TOML instead of rendering fallback values', async () => {
     fetchMock.mockResolvedValue(cfg({ source_text: '[fusion]\nenabled = maybe\nmax_concurrent_panels = 1.5\n' }))
     const { FusionSettingsPanel } = await import('./fusion-settings-panel')

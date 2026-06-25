@@ -55,9 +55,42 @@ describe('readFusionSettings', () => {
     expect(() => readFusionSettings(src)).toThrow(/Invalid fusion settings/)
   })
 
+  it('parses TOML string escapes and rejects JSON-only escapes', () => {
+    expect(readFusionSettings(SAMPLE.replace('default_preset = "trio"', 'default_preset = "tri\\u006F"')).defaultPreset)
+      .toBe('trio')
+
+    const rocket = String.fromCodePoint(0x1f680)
+    expect(readFusionSettings(`[fusion]
+enabled = false
+default_preset = "rocket\\U0001F680"
+max_concurrent_panels = 1
+`).defaultPreset).toBe(`rocket${rocket}`)
+
+    const invalid = readFusionSettingsResult(SAMPLE.replace('default_preset = "trio"', 'default_preset = "tri\\/o"'))
+    expect(invalid.ok).toBe(false)
+    if (!invalid.ok) {
+      expect(invalid.issues[0]).toMatchObject({
+        key: 'fusion.default_preset',
+        message: 'unsupported TOML string escape',
+      })
+    }
+  })
+
+  it('rejects negative integer tokens with the same positive-integer contract used by the editor draft', () => {
+    const result = readFusionSettingsResult('[fusion]\nmax_concurrent_panels = -1\n')
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.issues[0]).toMatchObject({
+        key: 'fusion.max_concurrent_panels',
+        message: 'expected an integer >= 1',
+      })
+    }
+  })
+
   it('parses single-quoted default_preset and rejects unknown preset sections only when enabled', () => {
     const singleQuoted = SAMPLE.replace('default_preset = "trio"', "default_preset = 'trio'")
     expect(readFusionSettings(singleQuoted).defaultPreset).toBe('trio')
+    expect(readFusionSettings('[fusion]\nenabled = false\ndefault_preset = \'tri#o\'\n').defaultPreset).toBe('tri#o')
 
     const unknownPreset = SAMPLE.replace('default_preset = "trio"', 'default_preset = "missing"')
     const result = readFusionSettingsResult(unknownPreset)

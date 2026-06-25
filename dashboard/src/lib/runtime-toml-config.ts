@@ -92,7 +92,7 @@ function keyLineMatch(line: string): RegExpMatchArray | null {
 }
 
 function stripInlineComment(raw: string): string {
-  let inString = false
+  let quote: '"' | "'" | null = null
   let escaped = false
   for (let index = 0; index < raw.length; index += 1) {
     const char = raw[index]
@@ -100,15 +100,19 @@ function stripInlineComment(raw: string): string {
       escaped = false
       continue
     }
-    if (char === '\\' && inString) {
+    if (char === '\\' && quote === '"') {
       escaped = true
       continue
     }
-    if (char === '"') {
-      inString = !inString
+    if (char === '"' && quote !== "'") {
+      quote = quote === '"' ? null : '"'
       continue
     }
-    if (char === '#' && !inString) return raw.slice(0, index).trim()
+    if (char === "'" && quote !== '"') {
+      quote = quote === "'" ? null : "'"
+      continue
+    }
+    if (char === '#' && quote === null) return raw.slice(0, index).trim()
   }
   return raw.trim()
 }

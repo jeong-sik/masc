@@ -17,6 +17,7 @@ vi.mock('../keeper-runtime', async () => {
   const { signal } = await import('@preact/signals')
   return {
     abortKeeperThreadMessage: vi.fn(),
+    cancelActiveKeeperThreadMessage: vi.fn(async () => true),
     hydrateKeeperStatus: vi.fn(async () => null),
     hydrateKeeperChatHistory: vi.fn(async () => undefined),
     loadFullKeeperHistory: vi.fn(async () => null),

@@ -63,8 +63,10 @@ import {
   keeperThreads,
 } from './keeper-state'
 import {
+  _resetCancelledKeeperThreadRequestsForTests,
   _resetKeeperThreadMessageSendGuardsForTests,
   _resetChatHydrationForTests,
+  cancelActiveKeeperThreadMessage,
   dispatchKeeperInterjectAction,
   hydrateKeeperChatHistory,
   hydrateKeeperStatus,
@@ -82,10 +84,6 @@ import {
   pendingKeeperChatRequestsForKeeper,
   upsertPendingKeeperChatRequest,
 } from './keeper-chat-pending'
-import {
-  _resetCancelledKeeperThreadRequestsForTests,
-  abortKeeperThreadMessage,
-} from './keeper-stream'
 import { KEEPER_HISTORY_TAIL_MESSAGES } from './config/constants'
 import {
   resetToolCallOutputs,
@@ -255,6 +253,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     _resetCancelledKeeperThreadRequestsForTests()
     streamKeeperMessage.mockReset()
     cancelQueuedKeeperMessage.mockReset()
+    cancelQueuedKeeperMessage.mockResolvedValue(undefined)
     fetchKeeperChatHistory.mockReset()
     fetchQueuedKeeperMessageResult.mockReset()
     isTerminalQueuedKeeperMessage.mockClear()
@@ -468,7 +467,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     const sendPromise = sendKeeperThreadMessage('echo', 'stuck turn').catch(err => err)
     await Promise.resolve()
 
-    abortKeeperThreadMessage('echo')
+    await cancelActiveKeeperThreadMessage('echo')
 
     expect(cancelQueuedKeeperMessage).toHaveBeenCalledTimes(1)
     expect(cancelQueuedKeeperMessage).toHaveBeenCalledWith('kmsg_echo_1')
@@ -476,6 +475,64 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     expect(err).toBeInstanceOf(Error)
     expect(err.name).toBe('AbortError')
     expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+  })
+
+  it('keeps the stream active and allows retry when server cancel fails', async () => {
+    cancelQueuedKeeperMessage
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValueOnce(undefined)
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        signal?: AbortSignal
+        onEvent: (event: KeeperChatStreamEvent) => void
+      },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_QUEUE_REQUEST',
+        value: { request_id: 'kmsg_echo_retry', status: 'queued' },
+      })
+      return new Promise<{ terminal: boolean }>((_resolve, reject) => {
+        opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
+      })
+    })
+
+    const sendPromise = sendKeeperThreadMessage('echo', 'stuck turn').catch(err => err)
+    await Promise.resolve()
+
+    await expect(cancelActiveKeeperThreadMessage('echo')).resolves.toBe(false)
+    expect(cancelQueuedKeeperMessage).toHaveBeenCalledTimes(1)
+    expect(keeperActionErrors.value.echo).toContain('network down')
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toHaveLength(1)
+    expect(keeperSending.value.echo).toBe(true)
+
+    await expect(cancelActiveKeeperThreadMessage('echo')).resolves.toBe(true)
+    expect(cancelQueuedKeeperMessage).toHaveBeenCalledTimes(2)
+    const err = await sendPromise
+    expect(err).toBeInstanceOf(Error)
+    expect(err.name).toBe('AbortError')
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+  })
+
+  it('aborts locally without server cancel when no request id has arrived yet', async () => {
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: { signal?: AbortSignal },
+    ) => new Promise<{ terminal: boolean }>((_resolve, reject) => {
+      opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
+    }))
+
+    const sendPromise = sendKeeperThreadMessage('echo', 'still opening').catch(err => err)
+    await Promise.resolve()
+
+    await expect(cancelActiveKeeperThreadMessage('echo')).resolves.toBe(true)
+    expect(cancelQueuedKeeperMessage).not.toHaveBeenCalled()
+    const err = await sendPromise
+    expect(err).toBeInstanceOf(Error)
+    expect(err.name).toBe('AbortError')
   })
 
   it('does not duplicate the pending assistant when a live send is still streaming and the panel remounts', async () => {

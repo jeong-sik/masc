@@ -1,6 +1,5 @@
 import { normalizeKeeperConversationDetails, formatKeeperVisibleReply } from './keeper-message'
 import { parseTextToChatBlocks } from './lib/chat-blocks'
-import { cancelQueuedKeeperMessage } from './api/keeper'
 import type { KeeperChatStreamEvent } from './api'
 import {
   appendAssistantDelta,
@@ -10,6 +9,7 @@ import {
   insertThreadEntryBefore,
   finalizeAssistantEntry,
   clearActiveStream,
+  clearActiveStreamRequestId,
   activeStreamEntryId,
   activeStreamRequestId,
   getStreamController,
@@ -24,37 +24,25 @@ const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 // Most recent TOOL_CALL_START id per keeper — fallback target for
 // TOOL_CALL_ARGS / TOOL_CALL_END events that omit toolCallId.
 const lastToolCallIds = new Map<string, string>()
-const cancelledRequestIds = new Set<string>()
 
 function toolEntryId(toolCallId: string): string {
   return `tool-${toolCallId}`
 }
 
-export function cancelKeeperThreadRequest(keeperName: string, requestId: string): void {
-  const name = keeperName.trim()
-  const id = requestId.trim()
-  if (!name || !id || cancelledRequestIds.has(id)) return
-  cancelledRequestIds.add(id)
-  void cancelQueuedKeeperMessage(id).catch((err) => {
-    console.warn(
-      `[keeper-stream] server cancel failed for ${name} request=${id}`,
-      err instanceof Error ? err.message : err,
-    )
-  })
+export interface KeeperThreadAbortResult {
+  readonly keeperName: string
+  readonly entryId: string | null
+  readonly requestId: string | null
+  readonly controllerAborted: boolean
 }
 
-export function _resetCancelledKeeperThreadRequestsForTests(): void {
-  cancelledRequestIds.clear()
-}
-
-export function abortKeeperThreadMessage(name: string): void {
+export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult | null {
   const keeperName = name.trim()
-  if (!keeperName) return
+  if (!keeperName) return null
   const controller = getStreamController(keeperName)
   const entryId = activeStreamEntryId(keeperName)
   const requestId = activeStreamRequestId(keeperName)
   console.debug(`[keeper-stream] aborting stream for ${keeperName}${entryId ? ` (entry=${entryId})` : ''}${requestId ? ` request=${requestId}` : ''}`)
-  if (requestId) cancelKeeperThreadRequest(keeperName, requestId)
   if (controller) controller.abort()
   if (entryId) {
     finalizeAssistantEntry(keeperName, entryId, {
@@ -69,6 +57,12 @@ export function abortKeeperThreadMessage(name: string): void {
   clearActiveStream(keeperName)
   setRecordValue(keeperSending, keeperName, false)
   setRecordValue(keeperStreamStartedAt, keeperName, null)
+  return {
+    keeperName,
+    entryId,
+    requestId,
+    controllerAborted: Boolean(controller),
+  }
 }
 
 export function applyKeeperStreamEvent(
@@ -172,6 +166,7 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_REQUEST_TERMINAL') {
+        clearActiveStreamRequestId(keeperName)
         const terminal = isRecord(event.value) ? event.value : null
         const status = asString(terminal?.status, '').trim()
         const ok = terminal?.ok === true

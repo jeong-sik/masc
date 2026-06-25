@@ -1129,12 +1129,15 @@ export function setActiveStreamRequestId(name: string, requestId: string): void 
   const keeperName = name.trim()
   const id = requestId.trim()
   if (!keeperName || !id) return
-  if (!keeperStreamControllers.has(keeperName)) return
   keeperStreamRequestIds.set(keeperName, id)
 }
 
 export function activeStreamRequestId(name: string): string | null {
   return keeperStreamRequestIds.get(name.trim()) ?? null
+}
+
+export function clearActiveStreamRequestId(name: string): void {
+  keeperStreamRequestIds.delete(name.trim())
 }
 
 // --- Live send ownership (in-session, requestId-keyed) ---

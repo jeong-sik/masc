@@ -14,7 +14,7 @@ import type {
   KeeperDiagnostic,
 } from '../types'
 import {
-  abortKeeperThreadMessage,
+  cancelActiveKeeperThreadMessage,
   hydrateKeeperStatus,
   hydrateKeeperChatHistory,
   loadFullKeeperHistory,
@@ -724,7 +724,7 @@ export function KeeperConversationPanel({
               queueCount=${queueCount}
               commands=${composerCommands}
               onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
-              onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
+              onAbort=${() => { void cancelActiveKeeperThreadMessage(keeperName) }}
               layout="primary"
             />
             ${error ? html`<div class="mt-2 text-xs text-[var(--bad-light)] leading-relaxed v2-monitoring-panel">${error}</div>` : null}
@@ -842,7 +842,7 @@ export function KeeperConversationPanel({
             queueCount=${queueCount}
             commands=${composerCommands}
             onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
-            onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
+            onAbort=${() => { void cancelActiveKeeperThreadMessage(keeperName) }}
             layout="primary"
           />
         </div>
@@ -958,7 +958,7 @@ export function KeeperConversationPanel({
             queueCount=${queueCount}
             commands=${composerCommands}
             onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
-            onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
+            onAbort=${() => { void cancelActiveKeeperThreadMessage(keeperName) }}
           />
         </div>
       </div>

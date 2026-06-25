@@ -590,11 +590,8 @@ let test_backlog_of_yojson_with_task () =
 let test_backlog_of_yojson_error () =
   let json = `String "not an object" in
   match Masc_domain.backlog_of_yojson json with
-  | Ok b ->
-    check int "tasks empty" 0 (List.length b.tasks);
-    check string "last_updated defaults to empty" "" b.last_updated;
-    check int "version defaults to 1" 1 b.version
-  | Error e -> fail ("expected tolerant default, got: " ^ e)
+  | Error _ -> ()
+  | Ok _ -> fail "expected Error"
 
 let test_backlog_of_yojson_version_0_sentinel () =
   (* version=0 is a sentinel value indicating an uninitialised backlog.
@@ -680,15 +677,12 @@ let test_backlog_of_yojson_truncated_tasks () =
   | Error e -> fail ("expected Ok for missing tasks key, got: " ^ e)
 
 let test_backlog_of_yojson_wrong_type () =
-  (* Non-object input is treated like an empty object. Readers prefer a
-     conservative empty backlog over failing back to a separate fallback path. *)
+  (* Backlog decoder wraps all exceptions. Passing an int should raise,
+     which is caught and returned as Error. *)
   let json = `Int 42 in
   match Masc_domain.backlog_of_yojson json with
-  | Ok b ->
-    check int "tasks empty" 0 (List.length b.tasks);
-    check string "last_updated defaults to empty" "" b.last_updated;
-    check int "version defaults to 1" 1 b.version
-  | Error e -> fail ("expected tolerant default, got: " ^ e)
+  | Error _ -> ()
+  | Ok _ -> fail "expected Error for non-object input"
 
 let test_backlog_of_yojson_nested_list () =
   (* Degenerate input: tasks is a non-list value. The decoder's
@@ -852,11 +846,8 @@ let test_agent_credential_of_yojson_ok () =
 let test_agent_credential_of_yojson_error () =
   let json = `String "not an object" in
   match Masc_domain.agent_credential_of_yojson json with
-  | Ok cred ->
-    check string "agent_name defaults empty" "" cred.agent_name;
-    check string "token defaults empty" "" cred.token;
-    check bool "role defaults worker" true (cred.role = Masc_domain.Worker)
-  | Error e -> fail ("expected tolerant default, got: " ^ e)
+  | Error _ -> ()
+  | Ok _ -> fail "expected Error"
 
 (* Regression: live fleet credential files stored role as a string field
    (["role": "admin"|"worker"]) while the original parser only inspected
@@ -980,11 +971,8 @@ let test_auth_config_of_yojson_ok () =
 let test_auth_config_of_yojson_error () =
   let json = `Int 42 in
   match Masc_domain.auth_config_of_yojson json with
-  | Ok config ->
-    check bool "enabled defaults true" true config.enabled;
-    check bool "require_token defaults false" false config.require_token;
-    check int "expiry defaults 24" 24 config.token_expiry_hours
-  | Error e -> fail ("expected tolerant default, got: " ^ e)
+  | Error _ -> ()
+  | Ok _ -> fail "expected Error"
 
 (* ============================================================
    permissions Tests

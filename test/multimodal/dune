@@ -12,5 +12,6 @@
   test_tool_emission
   test_payload
   test_provenance_stub
-  test_vision_artifact_store)
+  test_vision_artifact_store
+  test_vision_analyze)
  (libraries multimodal shared_types astring yojson str unix))

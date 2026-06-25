@@ -78,11 +78,16 @@ let message_of_request (req : Va.request) : Agent_sdk.Types.message =
     ]
 
 let vision_runtime_ids () : string list =
+  (* Delegate image-capability admission to the RFC-0265 SSOT
+     [Runtime_agent.caps_admit_required_modalities] so a runtime surfaced to the
+     vision tool is exactly one the dispatch capability gate would admit. Do NOT
+     re-derive this from [supports_image_input] / [supports_multimodal_inputs]
+     here: the SSOT admits "image" on [supports_image_input] alone, and the
+     modality reroute, the capability gate, and this vision pick must share one
+     predicate or a vision pick can land on a runtime the gate then rejects. *)
   Runtime_agent.media_reroute_candidates ~exclude:""
   |> List.filter_map (fun (runtime_id, caps) ->
-       if
-         caps.Llm_provider.Capabilities.supports_image_input
-         || caps.supports_multimodal_inputs
+       if Runtime_agent.caps_admit_required_modalities caps [ "image" ]
        then Some runtime_id
        else None)
 

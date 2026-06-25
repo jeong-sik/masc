@@ -55,6 +55,13 @@ let stop_keeper_fn
   : (string -> unit) Atomic.t
   = Atomic.make (fun _name -> ())
 
+(** Runtime-visible agents supplied by upper layers such as the keeper
+    registry.  Workspace code consumes [Masc_domain.agent] rows without
+    depending on the keeper implementation. *)
+let runtime_agents_fn
+  : (Workspace_utils_backend_setup.config -> Masc_domain.agent list) Atomic.t
+  = Atomic.make (fun _config -> [])
+
 (** Relation materializer: agent session end — wraps Relation_materializer.on_agent_session_ended. *)
 let relation_on_leave_fn
   : (leaving_agent:string -> active_agents:string list -> unit) Atomic.t

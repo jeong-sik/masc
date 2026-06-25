@@ -34,70 +34,62 @@ let status config =
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
   Buffer.add_string buf "Players:\n";
 
-  (* List agents (bounded for responsiveness) *)
-  let agents_path = agents_dir config in
-  if Sys.file_exists agents_path then begin
-    let agents =
-      Sys.readdir agents_path
-      |> Array.to_list
-      |> List.filter (fun name -> Filename.check_suffix name ".json")
-      |> List.filter_map (fun name ->
-          let path = Filename.concat agents_path name in
-          let json = read_json config path in
-          match agent_of_yojson json with
-          | Ok agent ->
-              let is_zombie =
-                is_zombie_agent
-                  ~agent_type:agent.agent_type
-                  ?agent_meta:agent.meta
-                  ~agent_name:agent.name
-                  agent.last_seen
-              in
-              let stale_current_task =
-                match agent.current_task with
-                | Some task_id ->
-                    not
-                      (Workspace_task_schedule.agent_current_task_matches_assignments
-                         active_task_assignees ~agent_name:agent.name task_id)
-                | None -> false
-              in
-              let display_status =
-                if stale_current_task then
-                  match agent.status with
-                  | Inactive -> Inactive
-                  | Active | Busy | Listening -> Active
-                else
-                  agent.status
-              in
-              let icon =
-                if is_zombie then "💀"
-                else
-                  match display_status with
-                  | Busy -> "🔴"
-                  | Active -> "🟢"
-                  | Listening -> "🎧"
-                  | Inactive -> "⚫"
-              in
-              let task =
-                if is_zombie then "zombie"
-                else if stale_current_task then "idle"
-                else Option.value agent.current_task ~default:"idle"
-              in
-              Some (agent.name, icon, task)
-          | Error _ -> None)
-      |> List.sort (fun (a, _, _) (b, _, _) -> String.compare a b)
-    in
-    let total_agents = List.length agents in
-    let shown_agents = take max_agents_display agents in
-    List.iter (fun (name, icon, task) ->
-      Printf.bprintf buf "  %s %s → %s\n" icon name task
-    ) shown_agents;
-    if total_agents > max_agents_display then
-      Buffer.add_string buf
-        (Printf.sprintf
-           "  … and %d more agents\n"
-           (total_agents - max_agents_display))
-  end;
+  let agents =
+    Workspace_query.get_active_agents config
+    |> List.filter_map (fun (agent : Masc_domain.agent) ->
+           let is_zombie =
+             is_zombie_agent
+               ~agent_type:agent.agent_type
+               ?agent_meta:agent.meta
+               ~agent_name:agent.name
+               agent.last_seen
+           in
+           let stale_current_task =
+             match agent.current_task with
+             | Some task_id ->
+                 not
+                   (Workspace_task_schedule.agent_current_task_matches_assignments
+                      active_task_assignees ~agent_name:agent.name task_id)
+             | None -> false
+           in
+           let display_status =
+             if stale_current_task then
+               match agent.status with
+               | Inactive -> Inactive
+               | Active | Busy | Listening -> Active
+             else
+               agent.status
+           in
+           let icon =
+             if is_zombie then "💀"
+             else
+               match display_status with
+               | Busy -> "🔴"
+               | Active -> "🟢"
+               | Listening -> "🎧"
+               | Inactive -> "⚫"
+           in
+           let task =
+             if is_zombie then "zombie"
+             else if stale_current_task then "idle"
+             else
+               match agent.current_task with
+               | Some task_id -> task_id
+               | None -> "idle"
+           in
+           Some (agent.name, icon, task))
+    |> List.sort (fun (a, _, _) (b, _, _) -> String.compare a b)
+  in
+  let total_agents = List.length agents in
+  let shown_agents = take max_agents_display agents in
+  List.iter (fun (name, icon, task) ->
+    Printf.bprintf buf "  %s %s → %s\n" icon name task
+  ) shown_agents;
+  if total_agents > max_agents_display then
+    Buffer.add_string buf
+      (Printf.sprintf
+         "  … and %d more agents\n"
+         (total_agents - max_agents_display));
 
   Buffer.add_string buf "\nQuest Board:\n";
 

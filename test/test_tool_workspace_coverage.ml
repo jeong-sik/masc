@@ -7,6 +7,7 @@ open Workspace_types
 module Planning_eio = Masc.Task.Planning_eio
 
 let () = Random.self_init ()
+let () = Mirage_crypto_rng_unix.use_default ()
 
 let str_contains s sub =
   let len_s = String.length s in
@@ -128,6 +129,31 @@ let seed_stale_current_task ctx =
   old_last_seen
 ;;
 
+let runtime_agent name : Masc_domain.agent =
+  let now = Masc_domain.now_iso () in
+  let meta : Masc_domain.agent_meta =
+    { session_id = "runtime-hook:" ^ name
+    ; agent_type = "keeper"
+    ; pid = None
+    ; hostname = None
+    ; tty = None
+    ; parent_task = None
+    ; keeper_name = Some name
+    ; keeper_id = None
+    }
+  in
+  { id = None
+  ; name
+  ; agent_type = "keeper"
+  ; status = Masc_domain.Active
+  ; capabilities = []
+  ; current_task = None
+  ; session_bound_at = now
+  ; last_seen = now
+  ; meta = Some meta
+  }
+;;
+
 let write_agent_state config agent_name f =
   let agent_file =
     Filename.concat (Workspace.agents_dir config) (Workspace.safe_filename agent_name ^ ".json")
@@ -218,6 +244,33 @@ let () =
     let agent = read_agent ctx in
     assert (agent.current_task = Some "task-missing");
     assert (agent.last_seen = old_last_seen))
+;;
+
+let () =
+  test "dispatch_status_includes_runtime_agents_without_workspace_files" (fun () ->
+    let ctx = make_test_ctx () in
+    let _ = Workspace.init ctx.config ~agent_name:(Some ctx.agent_name) in
+    let previous = Atomic.get Workspace_hooks.runtime_agents_fn in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set Workspace_hooks.runtime_agents_fn previous)
+      (fun () ->
+        Atomic.set Workspace_hooks.runtime_agents_fn (fun config ->
+          if String.equal config.base_path ctx.config.base_path
+          then [ runtime_agent "keeper-runtime-visible-agent" ]
+          else []);
+        let agent_file =
+          Filename.concat
+            (Workspace.agents_dir ctx.config)
+            (Workspace.safe_filename "keeper-runtime-visible-agent" ^ ".json")
+        in
+        assert (not (Sys.file_exists agent_file));
+        match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+        | Some result ->
+          assert (Tool_result.is_success result);
+          let message = Tool_result.message result in
+          assert_contains message "Snapshot: agents=2 zombies=0";
+          assert_contains message "keeper-runtime-visible-agent -> active"
+        | None -> failwith "dispatch returned None"))
 ;;
 
 (* Test status summary and active task cap *)

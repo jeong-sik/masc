@@ -428,6 +428,37 @@ let test_retryable_provider_error_tries_next_runtime () =
       assert (!models = [ "vision-a"; "vision-b" ]);
       assert (String.equal (assoc_string "text" json) "second runtime answered")))
 
+let test_deadline_exhaustion_preserves_provider_error () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-deadline-provider-error" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let calls = ref 0 in
+      let models = ref [] in
+      let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ () =
+        incr calls;
+        models := !models @ [ config.Llm_provider.Provider_config.model_id ];
+        Error (Llm_provider.Http_client.HttpError { code = 500; body = "down" })
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~timeout_sec:0.001
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (!calls = 1);
+      assert (!models = [ "vision-a" ]);
+      assert (String.equal (assoc_string "error" json) "provider_error");
+      assert (String.equal (assoc_string "failure_class" json) "transient_error")))
+
 let test_non_retryable_provider_error_stops_without_trying_next_runtime () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     with_temp_base (fun _ ->
@@ -507,6 +538,7 @@ let () =
   test_oversize_image_is_policy_rejection_before_provider_call ();
   test_temp_runtime_toml_restores_runtime_cache ();
   test_retryable_provider_error_tries_next_runtime ();
+  test_deadline_exhaustion_preserves_provider_error ();
   test_non_retryable_provider_error_stops_without_trying_next_runtime ();
   test_accept_rejected_is_policy_rejection_without_failover ();
   print_endline "test_keeper_vision_tool: all assertions passed"

@@ -289,6 +289,11 @@ let rec run_candidates
     in
     (match remaining_timeout_sec ~clock ~deadline with
      | None ->
+       let last_error =
+         match last_error with
+         | Some _ as existing -> existing
+         | None -> Some (`Timeout runtime_id)
+       in
        run_candidates
          ~complete
          ~deadline
@@ -296,7 +301,7 @@ let rec run_candidates
          ~clock
          ~net
          ~messages
-         ~last_error:(Some (`Timeout runtime_id))
+         ~last_error
          ~attempt_index
          []
      | Some timeout_sec ->

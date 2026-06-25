@@ -420,8 +420,10 @@ judge = "a"
   | Ok _ -> Alcotest.fail "expected Error Invalid_panel_size"
 
 let test_config_invalid_min_answered_floor () =
-  let s =
-    {|
+  let check_invalid value =
+    let s =
+      Printf.sprintf
+        {|
 [fusion]
 enabled = true
 default_preset = "p"
@@ -430,14 +432,18 @@ panel = ["a", "b"]
 panel_system_prompt = "y"
 judge = "j"
 judge_system_prompt = "x"
-min_answered = 0
+min_answered = %d
 |}
+        value
+    in
+    match Fusion_config.of_toml (parse s) with
+    | Error es ->
+      Alcotest.(check bool) "Invalid_min_answered floor present" true
+        (List.mem (Fusion_config.Invalid_min_answered ("p", value)) es)
+    | Ok _ -> Alcotest.fail "expected Error Invalid_min_answered"
   in
-  match Fusion_config.of_toml (parse s) with
-  | Error es ->
-    Alcotest.(check bool) "Invalid_min_answered floor present" true
-      (List.mem (Fusion_config.Invalid_min_answered ("p", 0)) es)
-  | Ok _ -> Alcotest.fail "expected Error Invalid_min_answered"
+  check_invalid 0;
+  check_invalid (-1)
 
 let test_config_missing_default () =
   let s =

@@ -48,13 +48,18 @@ let timeout_command () =
   | Some _ as found -> found
   | None -> find_in_path "gtimeout"
 
+(* Each case launches the full OAS handler path in a fresh process and may pay
+   sandbox/config cold-start cost. Keep the default conservative while allowing
+   local tightening through KEEPER_TOOL_MATRIX_CASE_TIMEOUT_SEC. *)
+let default_tool_case_timeout_sec = 60
+
 let tool_case_timeout_sec () =
   match Sys.getenv_opt "KEEPER_TOOL_MATRIX_CASE_TIMEOUT_SEC" with
   | Some raw -> (
       match int_of_string_opt (String.trim raw) with
       | Some value when value > 0 -> value
-      | _ -> 25)
-  | None -> 25
+      | _ -> default_tool_case_timeout_sec)
+  | None -> default_tool_case_timeout_sec
 
 let runner_path () =
   let exe_dir = Filename.dirname Sys.executable_name in
@@ -136,17 +141,19 @@ let parse_case_result ~tool_name output =
                    tool_name raw);
           })
 
-let env_array overrides =
+let env_array ?(unset = []) overrides =
   let env = Hashtbl.create 64 in
   Unix.environment ()
   |> Array.iter (fun binding ->
          match String.index_opt binding '=' with
          | Some index ->
-             Hashtbl.replace env
-               (String.sub binding 0 index)
-               (String.sub binding (index + 1)
-                  (String.length binding - index - 1))
+             let key = String.sub binding 0 index in
+             if not (List.mem key unset) then
+               Hashtbl.replace env key
+                 (String.sub binding (index + 1)
+                    (String.length binding - index - 1))
          | None -> ());
+  List.iter (fun key -> Hashtbl.remove env key) unset;
   List.iter (fun (key, value) -> Hashtbl.replace env key value) overrides;
   Hashtbl.fold
     (fun key value acc -> Printf.sprintf "%s=%s" key value :: acc)
@@ -178,6 +185,26 @@ let run_capture_process ~env ~out_file ~err_file prog argv =
           let _, status = Unix.waitpid [] pid in
           process_exit_code status))
 
+let isolated_child_env_unset =
+  [ "MASC_BASE_PATH"
+  ; "MASC_BASE_PATH_INPUT"
+  ; "MASC_CONFIG_DIR"
+  ; "MASC_STORAGE_TYPE"
+  ; "MASC_TOKEN"
+  ; "MASC_INTERNAL_MCP_TOKEN"
+  ; "MASC_ADMIN_TOKEN"
+  ; "MCP_SESSION_ID"
+  ; "OPENAI_API_KEY"
+  ; "ANTHROPIC_API_KEY"
+  ; "GEMINI_API_KEY"
+  ; "GOOGLE_API_KEY"
+  ; "MISTRAL_API_KEY"
+  ; "OPENROUTER_API_KEY"
+  ; "ZAI_API_KEY"
+  ; "DASHSCOPE_API_KEY"
+  ; "OLLAMA_HOST"
+  ]
+
 let run_tool_case_process tool_name =
   let tmp_root = Filename.temp_file "keeper-tool-matrix-base" "" in
   Sys.remove tmp_root;
@@ -191,7 +218,16 @@ let run_tool_case_process tool_name =
     if Sys.file_exists path then Cases.cleanup_dir path
   in
   let env =
-    env_array [ ("TMPDIR", tmp_root); ("TEMP", tmp_root); ("TMP", tmp_root) ]
+    env_array
+      ~unset:isolated_child_env_unset
+      [
+        ("TMPDIR", tmp_root);
+        ("TEMP", tmp_root);
+        ("TMP", tmp_root);
+        ("HOME", tmp_root);
+        ("XDG_CONFIG_HOME", Filename.concat tmp_root "xdg-config");
+        ("XDG_CACHE_HOME", Filename.concat tmp_root "xdg-cache");
+      ]
   in
   let prog, argv =
     match timeout_command () with

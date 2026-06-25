@@ -1655,6 +1655,8 @@
 
 (include stanzas/test_ci_run_tests_script.inc)
 
+(include stanzas/test_contract_harness_auth_script.inc)
+
 (include stanzas/test_context_max_observed_9953.inc)
 
 (include stanzas/test_continuity_forward_filter.inc)

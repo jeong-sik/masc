@@ -284,7 +284,17 @@ let handle_board ~(meta : keeper_meta) ~name ~args =
   Keeper_tool_board_runtime.handle_keeper_board_tool ~meta ~name ~args
 ;;
 
-let handle_masc_board ~name ~args =
+let handle_masc_board ~(meta : keeper_meta) ~name ~args =
+  let args =
+    match Tool_name.Board_name.of_string name with
+    | None -> args
+    | Some board_name ->
+      List.fold_left
+        (fun args field ->
+           Keeper_tool_shared_runtime.assoc_override_string field meta.name args)
+        args
+        (Board_tool_registry.identity_fields_for_board_name board_name)
+  in
   let result =
     Board_tool_dispatch.handle_tool name args
   in

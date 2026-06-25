@@ -27,6 +27,8 @@ else
 fi
 export HARNESS_LOG_FILE="${HARNESS_LOG_FILE:-$LOG_FILE}"
 export MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS="${MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS:-32}"
+# shellcheck source=scripts/harness/lib/mcp_jsonrpc.sh
+source "${ROOT_DIR}/scripts/harness/lib/mcp_jsonrpc.sh"
 
 SERVER_PID=""
 
@@ -68,6 +70,13 @@ wait_for_mcp_initialize_ready() {
   local timeout_sec="${2:-25}"
   local deadline=$(( $(date +%s) + timeout_sec ))
   local body='{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"contract-bootstrap","version":"1.0"},"capabilities":{}}}'
+  local auth_token
+  auth_token="$(mcp_default_auth_token)"
+  if [[ -z "$auth_token" ]]; then
+    echo "FAIL: MCP initialize readiness requires a workspace-local auth token" >&2
+    return 1
+  fi
+  local -a extra_headers=( -H "Authorization: Bearer $auth_token" )
 
   while [[ "$(date +%s)" -lt "$deadline" ]]; do
     local status
@@ -76,6 +85,7 @@ wait_for_mcp_initialize_ready() {
         -X POST "$mcp_url" \
         -H 'Content-Type: application/json' \
         -H 'Accept: application/json, text/event-stream' \
+        "${extra_headers[@]}" \
         -d "$body" 2>/dev/null || true
     )"
     if [[ "$status" == "200" ]]; then
@@ -109,6 +119,21 @@ if ! build_server_exe; then
   exit 1
 fi
 echo "[bootstrap] server_exe=${SERVER_EXE}"
+
+if ! HARNESS_AUTH_TOKEN="$(
+  harness_mint_admin_token "$SERVER_EXE" "$PORT" "$BASE_PATH" \
+    "${MASC_HARNESS_ADMIN_AGENT:-contract-harness-admin}"
+)"; then
+  echo "FAIL: failed to mint contract harness admin token" >&2
+  exit 1
+fi
+if [[ -z "$HARNESS_AUTH_TOKEN" ]]; then
+  echo "FAIL: contract harness admin token is empty" >&2
+  exit 1
+fi
+export MCP_AUTH_TOKEN="$HARNESS_AUTH_TOKEN"
+export MASC_ADMIN_TOKEN="$HARNESS_AUTH_TOKEN"
+echo "[bootstrap] auth_token=workspace-local admin token minted"
 
 SERVER_PID="$(harness_start_server "$SERVER_EXE" "$PORT" "$BASE_PATH" "$LOG_FILE")"
 if ! harness_wait_for_health "$PORT" 25; then

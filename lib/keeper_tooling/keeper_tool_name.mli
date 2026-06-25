@@ -59,6 +59,15 @@ val to_string : t -> string
 val of_string : string -> t option
 val pp : Format.formatter -> t -> unit
 
+val masc_board_name_of_keeper_tool : t -> Tool_name.Board_name.t option
+(** Typed mapping from keeper-owned board wrapper names to the public
+    [masc_board_*] board tool vocabulary. Non-board keeper names return
+    [None]. *)
+
+val masc_board_name_of_keeper_name : string -> Tool_name.Board_name.t option
+(** Parse a [keeper_board_*] string and return the corresponding typed
+    public board tool name. *)
+
 (** Public MCP names intentionally served outside the keeper descriptor spine.
     Keep this exact allowlist on the keeper side so prefix canonicalisation
     does not depend on the MCP catalog hand-list. *)

@@ -218,7 +218,11 @@ let handle_in_process ctx descriptor args =
     Some
       (Keeper_tool_in_process_runtime.handle_board ~meta:ctx.meta ~name ~args)
   | Tool_masc_board_dispatch ->
-    Some (Keeper_tool_in_process_runtime.handle_masc_board ~name ~args)
+    Some
+      (Keeper_tool_in_process_runtime.handle_masc_board
+         ~meta:ctx.meta
+         ~name
+         ~args)
   | Tool_masc_task_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_masc_task

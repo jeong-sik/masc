@@ -370,10 +370,22 @@ let repository_identity_tokens (repo : repository) =
   |> List.map String.trim
   |> List.filter (fun token -> not (String.equal token ""))
 
+(** [token_matches_url_basename ~basename token] is a case-insensitive
+    comparison between a repository identity token and the basename extracted
+    from a URL. Identity drift in the wild (e.g. [masc] vs [Masc]) should not
+    cause a fail-closed rejection. *)
+let token_matches_url_basename ~basename token =
+  String.equal (String.lowercase_ascii basename) (String.lowercase_ascii token)
+
+(** [repository_url_basename_matches_identity repo] returns [true] when the
+    repository's URL basename can be matched against one of the repository's
+    declared identity tokens. An empty basename (missing/empty URL or
+    unparseable URL) is treated as [false]: fail-closed, not "matches by
+    default". *)
 let repository_url_basename_matches_identity repo =
   let basename = repository_url_basename repo.url in
-  String.equal basename ""
-  || List.exists (String.equal basename) (repository_identity_tokens repo)
+  (not (String.equal basename ""))
+  && List.exists (token_matches_url_basename ~basename) (repository_identity_tokens repo)
 
 type repository_identity_mismatch = {
   repository_id : string;
@@ -388,7 +400,7 @@ let repository_identity_mismatch ?repo_root ~segment repo =
   let url_basename = repository_url_basename repo.url in
   if
     String.equal url_basename ""
-    || List.exists (String.equal url_basename) (repository_identity_tokens repo)
+    || List.exists (token_matches_url_basename ~basename:url_basename) (repository_identity_tokens repo)
   then None
   else
     Some
@@ -419,21 +431,28 @@ let repository_matches_token ~base_path token (repo : repository) =
   || String.equal repo.name token
   || List.exists (String.equal token) repo.aliases
   || (repository_url_basename_matches_identity repo
-      && String.equal (repository_url_basename repo.url) token)
+      && token_matches_url_basename ~basename:(repository_url_basename repo.url) token)
   || String.equal
        (basename_of_path (Repo_store.local_path ~base_path repo))
        token
 
 let repository_matches_remote_url ~remote_url (repo : repository) =
-  let remote_basename = repository_url_basename remote_url in
-  remote_url <> ""
-  && repository_url_basename_matches_identity repo
-  && (String.equal repo.url remote_url
-      || (remote_basename <> ""
-          && (String.equal repo.id remote_basename
-              || String.equal repo.name remote_basename
-              || List.exists (String.equal remote_basename) repo.aliases
-              || String.equal (repository_url_basename repo.url) remote_basename)))
+  if String.equal remote_url "" then false
+  else if String.equal repo.url remote_url then
+    (* Exact remote URL match is authoritative: a declared repository whose URL
+       exactly equals the git remote is the same repository even if the URL
+       basename diverges from the identity token (e.g. case or alias drift). *)
+    true
+  else
+    let remote_basename = repository_url_basename remote_url in
+    repository_url_basename_matches_identity repo
+    && remote_basename <> ""
+    && (String.equal (String.lowercase_ascii repo.id) (String.lowercase_ascii remote_basename)
+        || String.equal (String.lowercase_ascii repo.name) (String.lowercase_ascii remote_basename)
+        || List.exists (fun alias ->
+             String.equal (String.lowercase_ascii alias) (String.lowercase_ascii remote_basename))
+             repo.aliases
+        || token_matches_url_basename ~basename:(repository_url_basename repo.url) remote_basename)
 
 type repository_resolution =
   | No_repository
@@ -465,9 +484,12 @@ let resolve_repository_id_segment ~base_path ?repo_root segment =
           match Option.bind repo_root remote_origin_url_of_repo_root with
           | None -> Repository segment
           | Some remote_url -> (
+              match List.find_opt (fun repo -> String.equal repo.url remote_url) repos with
+              | Some repo -> Repository repo.id
+              | None -> (
               match List.find_opt (repository_matches_remote_url ~remote_url) repos with
               | Some repo -> repository_resolution_of_repo ?repo_root ~segment repo
-              | None -> Repository segment)))
+              | None -> Repository segment))))
 
 (** [path_under_repo ~base_path repo path] returns [true] when [path]
     is equal to or strictly under [repo]'s resolved local_path. *)

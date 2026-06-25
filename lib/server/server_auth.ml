@@ -334,6 +334,11 @@ let stale_token_warn_log_entry_count () =
   Eio.Mutex.use_ro stale_token_warn_mu @@ fun () ->
   Hashtbl.length stale_token_warn_log
 
+let dashboard_actor_hint_after_token_fallback request =
+  if Env_config.Transport.dashboard_actor_fallback_fail_closed ()
+  then None
+  else request_actor_hint request
+
 let dashboard_actor_for_request ~base_path request =
   match auth_token_from_request request with
   | Some token -> (
@@ -368,7 +373,7 @@ let dashboard_actor_for_request ~base_path request =
             { outcome = Auth_error_kind.Outcome_none; token_hash_prefix }
           in
           record_dashboard_actor_fallback fb;
-          request_actor_hint request
+          dashboard_actor_hint_after_token_fallback request
       | Error err ->
           (* The previous warn line elided the actual error string and the
              request actor hint, leaving operators with a counter that only
@@ -390,7 +395,7 @@ let dashboard_actor_for_request ~base_path request =
             }
           in
           record_dashboard_actor_fallback fb;
-          request_actor_hint request)
+          dashboard_actor_hint_after_token_fallback request)
   | None -> request_actor_hint request
 
 let is_verified_internal_keeper_request ~base_path request =

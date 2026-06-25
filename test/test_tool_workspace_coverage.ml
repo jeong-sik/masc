@@ -890,49 +890,89 @@ let () =
 ;;
 
 let () =
-  test "next_hint_claimed lists start, done, release, cancel" (fun () ->
+  test "next_hint_claimed lists accepted owner actions" (fun () ->
     let h = next_hint (Masc_domain.Claimed { assignee = "a"; claimed_at = "t" }) in
+    assert (str_contains h "claim");
+    assert (str_contains h "start");
+    assert (str_contains h "done");
+    assert (str_contains h "cancel");
+    assert (str_contains h "release");
+    assert (str_contains h "submit_for_verification"))
+;;
+
+let () =
+  test "next_hint_in_progress lists accepted owner actions" (fun () ->
+    let h = next_hint (Masc_domain.InProgress { assignee = "a"; started_at = "t" }) in
+    assert (str_contains h "claim");
+    assert (str_contains h "start");
+    assert (str_contains h "done");
+    assert (str_contains h "cancel");
+    assert (str_contains h "release");
+    assert (str_contains h "submit_for_verification"))
+;;
+
+let () =
+  test "next_hint_claimed_by_other_assignee_is_empty" (fun () ->
+    let h =
+      next_hint
+        ~same_agent:false
+        (Masc_domain.Claimed { assignee = "other"; claimed_at = "t" })
+    in
+    assert (h = ""))
+;;
+
+let () =
+  test "next_hint_claimed_by_other_operator_lists_override_actions" (fun () ->
+    let h =
+      next_hint
+        ~same_agent:false
+        ~authority:Masc_domain.Operator
+        (Masc_domain.Claimed { assignee = "other"; claimed_at = "t" })
+    in
     assert (str_contains h "start");
     assert (str_contains h "done");
     assert (str_contains h "release");
-    assert (str_contains h "cancel"))
+    assert (not (str_contains h "claim")))
 ;;
 
 let () =
-  test "next_hint_in_progress lists done and release" (fun () ->
-    let h = next_hint (Masc_domain.InProgress { assignee = "a"; started_at = "t" }) in
+  test "next_hint_verification_disabled_omits_submit" (fun () ->
+    let h =
+      next_hint
+        ~verification_enabled:false
+        (Masc_domain.InProgress { assignee = "a"; started_at = "t" })
+    in
     assert (str_contains h "done");
-    assert (str_contains h "release");
-    assert (not (str_contains h "claim"))
-    (* Claim is not legal from InProgress *))
+    assert (not (str_contains h "submit_for_verification")))
 ;;
 
 let () =
-  test "next_hint_awaiting_verification lists approve and reject" (fun () ->
+  test "next_hint_awaiting_verification lists claim, approve, and reject" (fun () ->
     let h =
       next_hint
         (Masc_domain.AwaitingVerification
            { assignee = "a"; submitted_at = "t"; verification_id = "v"; phase = Masc_domain.Awaiting_verifier })
     in
+    assert (str_contains h "claim");
     assert (str_contains h "approve");
     assert (str_contains h "reject"))
 ;;
 
 let () =
-  test "next_hint_done is empty (terminal)" (fun () ->
+  test "next_hint_done lists idempotent done" (fun () ->
     let h =
       next_hint (Masc_domain.Done { assignee = "a"; completed_at = "t"; notes = None })
     in
-    assert (h = ""))
+    assert (str_contains h "done"))
 ;;
 
 let () =
-  test "next_hint_cancelled is empty (terminal)" (fun () ->
+  test "next_hint_cancelled lists idempotent cancel" (fun () ->
     let h =
       next_hint
         (Masc_domain.Cancelled { cancelled_by = "a"; cancelled_at = "t"; reason = None })
     in
-    assert (h = ""))
+    assert (str_contains h "cancel"))
 ;;
 
 let () =

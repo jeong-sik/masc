@@ -61,6 +61,19 @@ let check_bool label expected actual =
   Alcotest.(check bool) label expected actual
 ;;
 
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+;;
+
+let corrupt_goal_task_links config =
+  let path = Workspace_goal_index.goal_task_links_path config in
+  write_file path "{not-json";
+  write_file (path ^ ".last-good") "{not-json"
+;;
+
 let check_list_len label expected tasks =
   check_int label expected (List.length tasks)
 ;;
@@ -218,6 +231,49 @@ let test_prune_goal_links_preserves_other_goals () =
          links))
 ;;
 
+let test_add_task_rolls_back_when_goal_registry_unreadable () =
+  with_test_env (fun config ->
+    corrupt_goal_task_links config;
+    let result =
+      Workspace.add_task
+        ~goal_id:"goal-a"
+        config
+        ~title:"rollback linked task"
+        ~priority:1
+        ~description:""
+    in
+    check_bool
+      "add_task fails closed on unreadable registry"
+      true
+      (String.starts_with
+         ~prefix:
+           "Error: goal_task_links update failed after task create; rolled back \
+            task-001"
+         result);
+    let backlog = Workspace.read_backlog config in
+    check_int "task create rolled back backlog" 0 (List.length backlog.tasks))
+;;
+
+let test_batch_add_tasks_rolls_back_when_goal_registry_unreadable () =
+  with_test_env (fun config ->
+    corrupt_goal_task_links config;
+    let result =
+      Workspace.batch_add_tasks
+        config
+        [ "batch linked task", 1, "", Some "goal-a"; "batch orphan task", 2, "", None ]
+    in
+    check_bool
+      "batch add fails closed on unreadable registry"
+      true
+      (String.starts_with
+         ~prefix:
+           "Error adding batch tasks: goal_task_links update failed after task \
+            create; rolled back batch"
+         result);
+    let backlog = Workspace.read_backlog config in
+    check_int "batch create rolled back backlog" 0 (List.length backlog.tasks))
+;;
+
 (* ── test suite ─────────────────────────────────────────────────────── *)
 
 let () =
@@ -244,6 +300,14 @@ let () =
               "prune removes only deleted goal links"
               `Quick
               test_prune_goal_links_preserves_other_goals
+          ; test_case
+              "add_task rolls back when registry unreadable"
+              `Quick
+              test_add_task_rolls_back_when_goal_registry_unreadable
+          ; test_case
+              "batch_add_tasks rolls back when registry unreadable"
+              `Quick
+              test_batch_add_tasks_rolls_back_when_goal_registry_unreadable
           ] )
     ]
 ;;

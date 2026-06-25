@@ -15,9 +15,3 @@ val completion_state_error :
   agent_name:string ->
   task_opt:Masc_domain.task option ->
   Masc_domain.masc_error option
-
-val persisted_contract_rejection :
-  agent_name:string ->
-  task_opt:Masc_domain.task option ->
-  notes:string ->
-  string option

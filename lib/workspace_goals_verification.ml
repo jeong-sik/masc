@@ -68,6 +68,7 @@ let update_goal_phase
       ?note
       ?active_verification_request_id
       ?(clear_active_verification_request = false)
+      ?precondition
       ()
   =
   let last_review_note, last_review_at =
@@ -75,20 +76,41 @@ let update_goal_phase
     | Some note -> Some note, Some (Masc_domain.now_iso ())
     | None -> goal.last_review_note, goal.last_review_at
   in
-  Goal_store.update_goal ctx.config ~goal_id:goal.id (fun current ->
-    { current with
-      phase
-    ; status = Goal_store.goal_status_of_phase phase
-    ; active_verification_request_id =
-        (if clear_active_verification_request
-         then None
-         else (
-           match active_verification_request_id with
-           | Some value -> Some value
-           | None -> current.active_verification_request_id))
-    ; last_review_note
-    ; last_review_at
-    })
+  Goal_store.update_goal_checked ctx.config ~goal_id:goal.id (fun current ->
+    match precondition with
+    | Some guard ->
+      (match guard current with
+       | Error msg -> Error msg
+       | Ok () ->
+         Ok
+           { current with
+             phase
+           ; status = Goal_store.goal_status_of_phase phase
+           ; active_verification_request_id =
+               (if clear_active_verification_request
+                then None
+                else (
+                  match active_verification_request_id with
+                  | Some value -> Some value
+                  | None -> current.active_verification_request_id))
+           ; last_review_note
+           ; last_review_at
+           })
+    | None ->
+      Ok
+        { current with
+          phase
+        ; status = Goal_store.goal_status_of_phase phase
+        ; active_verification_request_id =
+            (if clear_active_verification_request
+             then None
+             else (
+               match active_verification_request_id with
+               | Some value -> Some value
+               | None -> current.active_verification_request_id))
+        ; last_review_note
+        ; last_review_at
+        })
 ;;
 
 let actor_must_be_operator action =

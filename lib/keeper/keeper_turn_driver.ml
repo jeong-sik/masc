@@ -55,6 +55,30 @@ let modality_counts_total counts =
   |> positive_modality_counts
   |> List.fold_left (fun acc (_, n) -> acc + n) 0
 
+let scoped_provider_key ~keeper_name provider_key =
+  let keeper_name = String.trim keeper_name in
+  if String.equal keeper_name "" then provider_key else keeper_name ^ "@" ^ provider_key
+
+let runtime_available_for_modality_reroute ~keeper_name ~runtime_id =
+  match Runtime.get_runtime_by_id runtime_id with
+  | None -> false
+  | Some runtime ->
+    let candidate =
+      Runtime_candidate.of_provider_config
+        ~max_concurrent:runtime.Runtime.binding.max_concurrent
+        runtime.Runtime.provider_config
+    in
+    (match Runtime_candidate.health_keys candidate with
+     | [] -> true
+     | provider_keys ->
+       provider_keys
+       |> List.exists (fun provider_key ->
+            let provider_key = scoped_provider_key ~keeper_name provider_key in
+            not
+              (Keeper_binding_health.is_in_cooldown
+                 Keeper_binding_health.global
+                 ~provider_key)))
+
 let media_degrade_manifest_decision ~(runtime_id : string)
     (dropped : (string * int) list) =
   let summary = modality_counts_summary dropped in
@@ -219,6 +243,7 @@ let run_named
   let reroute_decision =
     Runtime_agent.decide_modality_reroute_for_runtime
       ~assigned:assigned_runtime
+      ~candidate_is_live:(runtime_available_for_modality_reroute ~keeper_name)
       ~checkpoint_messages
       ~initial_messages
       current_goal_blocks

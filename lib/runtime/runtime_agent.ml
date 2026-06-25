@@ -640,8 +640,13 @@ let input_capabilities_of_runtime (rt : Runtime.t) =
 (* Ordered (runtime_id, input_caps) reroute candidates: [\[runtime\].media_failover]
    order first (validated at load to resolve), then the remaining configured
    runtimes in declaration order, excluding [exclude] (the assigned runtime).
-   Deterministic — no provider liveness (RFC-0260 deferred). *)
-let media_reroute_candidates ~(exclude : string) :
+   The optional [candidate_is_live] predicate is a pure caller-supplied health
+   view: runtime owns capability ordering, while keeper dispatch can inject its
+   provider-cooldown state without creating a runtime -> keeper dependency. *)
+let media_reroute_candidates
+    ?(candidate_is_live = fun ~runtime_id:_ -> true)
+    ~(exclude : string)
+  :
     (string * Llm_provider.Capabilities.capabilities) list =
   let all = Runtime.get_runtimes () in
   let failover = Runtime.media_failover () in
@@ -653,7 +658,9 @@ let media_reroute_candidates ~(exclude : string) :
     List.filter (fun (r : Runtime.t) -> not (List.mem r.Runtime.id failover)) all
   in
   from_failover @ rest
-  |> List.filter (fun (r : Runtime.t) -> not (String.equal r.Runtime.id exclude))
+  |> List.filter (fun (r : Runtime.t) ->
+       not (String.equal r.Runtime.id exclude)
+       && candidate_is_live ~runtime_id:r.Runtime.id)
   |> List.map (fun (r : Runtime.t) ->
        (r.Runtime.id, input_capabilities_of_runtime r))
 
@@ -662,8 +669,11 @@ let media_reroute_candidates ~(exclude : string) :
    single admit predicate ([caps_admit_required_modalities]), so the pick is
    exactly a runtime the dispatch capability gate would accept (the SSOT
    invariant above). [exclude:""] = consider every configured runtime. *)
-let first_media_capable_runtime ~(modality : string) : string option =
-  media_reroute_candidates ~exclude:""
+let first_media_capable_runtime
+    ?candidate_is_live
+    ~(modality : string)
+  : string option =
+  media_reroute_candidates ?candidate_is_live ~exclude:""
   |> List.find_opt (fun (_id, caps) ->
        caps_admit_required_modalities caps [ modality ])
   |> Option.map fst
@@ -681,17 +691,18 @@ let validate_content_blocks_for_config
 
 (* RFC-0265: capability-driven proactive runtime reroute. A pure decision from
    the turn's required input modalities and the candidate runtimes' declared
-   capabilities — no I/O, no provider liveness (liveness-aware skipping is
-   deferred to RFC-0260), so two identical turns reroute identically. The caller
-   gathers [candidates] from the configured runtimes (media_failover order, then
-   declaration order) and resolves [assigned_caps]/[candidate caps] via
-   [input_capabilities_for_config]. *)
+   capabilities plus an injected liveness predicate. The caller gathers
+   [candidates] from the configured runtimes (media_failover order, then
+   declaration order), resolves [assigned_caps]/[candidate caps] via
+   [input_capabilities_for_config], and supplies any current provider-health
+   state as data. *)
 type reroute_decision =
   | No_reroute_needed
   | Reroute of { to_runtime_id : string; reason : string }
   | No_capable_runtime of { required : string list }
 
 let decide_modality_reroute
+    ?(candidate_is_live = fun ~runtime_id:_ -> true)
     ~(assigned_caps : Llm_provider.Capabilities.capabilities)
     ~(required_modalities : string list)
     ~(candidates : (string * Llm_provider.Capabilities.capabilities) list) :
@@ -701,8 +712,9 @@ let decide_modality_reroute
   else
     match
       List.find_opt
-        (fun (_id, caps) ->
-          caps_admit_required_modalities caps required_modalities)
+        (fun (runtime_id, caps) ->
+          candidate_is_live ~runtime_id
+          && caps_admit_required_modalities caps required_modalities)
         candidates
     with
     | Some (to_runtime_id, _caps) ->
@@ -720,15 +732,18 @@ let decide_modality_reroute
    [initial_messages] plus current [blocks]). Pure [decide_modality_reroute] over
    impure candidate gathering. *)
 let decide_modality_reroute_for_runtime ~(assigned : Runtime.t)
+    ?candidate_is_live
     ?(checkpoint_messages = [])
     ?(initial_messages = [])
     (blocks : Agent_sdk.Types.content_block list) : reroute_decision =
   decide_modality_reroute
+    ?candidate_is_live
     ~assigned_caps:(input_capabilities_of_runtime assigned)
     ~required_modalities:
       (required_modalities_for_run_with_checkpoint ~checkpoint_messages ~initial_messages
          ~goal_blocks:blocks)
-    ~candidates:(media_reroute_candidates ~exclude:assigned.Runtime.id)
+    ~candidates:
+      (media_reroute_candidates ?candidate_is_live ~exclude:assigned.Runtime.id)
 
 module For_testing = struct
   let request_runtime_fields_on_base_config =

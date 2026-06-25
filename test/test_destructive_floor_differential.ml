@@ -7,7 +7,7 @@
 
     {1 What this harness measures — and what it deliberately excludes}
 
-    An autonomous keeper has THREE unconditional block gates on an executed
+    An autonomous keeper has FOUR unconditional block gates on an executed
     command:
 
       1. [Shell_ir_risk.is_destructive] (risk = [Destructive_protected]) —
@@ -15,12 +15,15 @@
       2. [Approval_policy.catastrophic_floor] (destructive-git / redirect
          write-escape / catastrophic-by-identity program, e.g. mkfs) —
          approval_policy.ml:107; and
-      3. the path jail [Exec_policy.validate_shell_ir_paths]
+      3. privileged/unknown executable fail-closed in
+         [Keeper_tool_execute_shell_ir.dispatch_classified] while no Shell IR
+         approval resolver exists; and
+      4. the path jail [Exec_policy.validate_shell_ir_paths]
          (keeper_tool_execute_shell_ir.ml:82) — jails command ARGUMENT paths
          to the workspace whitelist.
 
-    This harness models (1) and (2): the COMMAND-SHAPE classifiers (command
-    identity / git op / redirect). It deliberately EXCLUDES the path jail (3),
+    This harness models (1), (2), and (3): the COMMAND-SHAPE classifiers (command
+    identity / git op / redirect). It deliberately EXCLUDES the path jail (4),
     because the path jail is a SEPARATE, PERMANENT policy axis — not because it
     is temporary:
 
@@ -47,33 +50,25 @@
         resolved: shutdown/reboot lifted into the catastrophic floor (#22234);
         destructive SQL lifted into the typed DB-capability floor ([Db_op] +
         [Approval_policy.find_destructive_db], inside catastrophic_floor); and
-        kill/pkill DELIBERATELY ALLOWED (a keeper legitimately signals processes
-        it spawned, with no safe ownership boundary at the syntax layer — user
-        decision). The residual path-independent gap is therefore only the
-        deliberately-allowed set (kill/pkill). Literal destructive SQL on
-        psql/mysql/mariadb/cockroach is covered by the typed DB floor; non-literal
-        SQL ([Var]/[Concat]) is documented in the RFC because this all-literal
-        corpus cannot express it.
+        kill/pkill are unknown executables, therefore privileged and
+        fail-closed until a Shell IR approval resolver exists. Literal
+        destructive SQL on psql/mysql/mariadb/cockroach is covered by the typed
+        DB floor; non-literal SQL ([Var]/[Concat]) is documented in the RFC
+        because this all-literal corpus cannot express it.
       - path-BEARING: the command targets a path. The PERMANENT path jail covers
-        an OUT-OF-WORKSPACE target. The IN-WORKSPACE representative used here
-        (e.g. [rm -r ./build], [chmod 777 ./script.sh]) is a LEGITIMATE keeper
-        operation that the path jail allows by design — see
-        [test_rm_root_allowed_at_policy_layer_jailed_downstream] in
-        lib/exec/test/test_approval_policy.ml, which pins that argv paths stay
-        OUT of the command-shape floor. The substring catalogue blocks these
-        in-workspace forms over-broadly; Phase 3 deletion deliberately drops
-        that over-broad block. So path-bearing entries are resolved by the
-        permanent jail (out-of-workspace) + a documented policy refinement
-        (in-workspace), NOT by lifting them into the command-shape floor.
+        an OUT-OF-WORKSPACE target. In-workspace privileged examples (e.g.
+        [rm -r ./build], [chmod 777 ./script.sh], [dd of=./out.img]) are now
+        blocked by the privileged-program floor until a Shell IR approval
+        resolver exists. Non-privileged path-bearing coverage remains the path
+        jail's job.
 
     Retirement (Phase 3) safety invariant: deleting the substring layer must not
     newly ALLOW anything dangerous. For each substring-blocked command the typed
     system must then either (a) command-shape-block it [path-independent
-    catastrophic], (b) permanent-path-jail-block it [path-bearing,
-    out-of-workspace], or (c) deliberately allow it because substring was
-    over-broad [path-bearing in-workspace, or a path-independent op explicitly
-    decided to allow]. The two baselines below pin (a)'s remaining work-list and
-    (b)'s stable set so neither grows silently. *)
+    catastrophic or privileged-without-resolver], (b) permanent-path-jail-block
+    it [path-bearing, out-of-workspace], or (c) deliberately allow it because
+    substring was over-broad. The baselines below are now empty and pin that no
+    substring-blocked corpus entry escapes the typed command-shape floors. *)
 
 open Masc
 module Exec = Masc_exec
@@ -100,7 +95,8 @@ let simple_ir bin_str args =
 (* An entry binds the substring view (the command string) to the typed view
    (the IR) from one (bin, args) pair, so both verdicts see identical tokens.
    [path_independent] marks commands with no path argument: the permanent path
-   jail can NEVER cover them, so they are the irreducible command-shape gap. *)
+   jail can NEVER cover them, so any gap there must be closed or explicitly
+   accepted by command-shape policy. *)
 type entry =
   { cls : string
   ; bin_ : string
@@ -115,24 +111,33 @@ let label e = Printf.sprintf "[%s] %s" e.cls (cmd_string e)
 let substring_blocks e = Option.is_some (Eval_gate.detect_destructive policy (cmd_string e))
 let classify e = Risk.classify (Risk.undecided (ir_of e))
 
-(* Command-shape typed verdict: the two UNCONDITIONAL command-shape blocks an
-   autonomous keeper applies (path jail excluded by design — see header). Under
-   the autonomous overlay every non-catastrophic risk class is Observe => Allow,
-   so these two are the whole command-shape block set. *)
+(* Command-shape typed verdict: the UNCONDITIONAL command-shape blocks an
+   autonomous keeper applies before path jail: destructive risk, catastrophic
+   floor, and privileged/unknown executable fail-closed while no Shell IR
+   approval resolver exists. *)
+let rec has_privileged_program = function
+  | [] -> false
+  | Exec.Capability.Exec_program (bin, _) :: _
+    when Exec.Exec_program.risk_class bin = `Privileged -> true
+  | Exec.Capability.Pipeline_fold inner :: rest ->
+    has_privileged_program inner || has_privileged_program rest
+  | _ :: rest -> has_privileged_program rest
+;;
+
 let typed_blocks e =
+  let caps = Exec.Capability_check.of_ir (ir_of e) in
   Risk.is_destructive (classify e)
-  || Option.is_some
-       (Exec.Approval_policy.catastrophic_floor (Exec.Capability_check.of_ir (ir_of e)))
+  || Option.is_some (Exec.Approval_policy.catastrophic_floor caps)
+  || has_privileged_program caps
 ;;
 
 (* One representative command per pattern in config/destructive_ops.toml.
    Path-bearing patterns target an IN-WORKSPACE relative path (./…): that is the
-   case the permanent path jail allows (a legitimate keeper op), so a gap here
-   is a genuine command-shape observation, not an artifact of omitting the path
-   jail. The redirect-shaped device_write pattern "> /dev/" is not represented
-   (it needs a Redirect_scope value and is covered by catastrophic_floor
-   write-escape on a separate path); [dd] represents the device_write class.
-   Logged in the report (no silent cap). *)
+   case where path jail alone would not help, so the privileged floor must catch
+   privileged binaries and unknown executables. The redirect-shaped device_write
+   pattern "> /dev/" is not represented (it needs a Redirect_scope value and is
+   covered by catastrophic_floor write-escape on a separate path); [dd]
+   represents the device_write class. Logged in the report (no silent cap). *)
 let destructive_corpus =
   [ mk "recursive_delete" "rm" [ "-rf"; "./build" ]
   ; mk "recursive_delete" "rm" [ "-r"; "./build" ]
@@ -173,7 +178,8 @@ let bearing_gap () = List.filter (fun e -> not e.path_independent) (gap ())
 
 (* Baseline ratchet 1 — the path-INDEPENDENT residual. No path argument, so the
    permanent path jail can never cover these. Two RFC §6 decisions emptied the
-   command-shape WORK-LIST here, leaving only the deliberately-allowed set:
+   command-shape WORK-LIST here, and the privileged fail-closed floor covers the
+   remaining unknown/privileged executables:
 
    - system_control (shutdown/reboot): lifted into
      [Approval_policy.find_catastrophic_program] — now COVERED (Phase 2,
@@ -182,39 +188,23 @@ let bearing_gap () = List.filter (fun e -> not e.path_independent) (gap ())
      lifted into the typed DB-capability floor ([Db_op] +
      [Approval_policy.find_destructive_db]) — now COVERED (this PR). It is
      therefore NOT in the gap anymore.
-   - process_signal (kill/pkill): DELIBERATELY ALLOWED. A keeper legitimately
-     signals processes it spawned, and there is no safe ownership boundary at
-     the syntax layer; flooring it would be a constraint with no principled cut
-     (user decision: "no bizarre constraints"). So it stays substring-blocked
-     until Phase 3, then drops as over-broad — like the path-bearing set, it is
-     resolved by deliberate allowance, NOT by a floor lift.
+   - process_signal (kill/pkill): unknown binaries are privileged per
+     [Exec_program.of_string], therefore they now hit the privileged fail-closed
+     floor until a Shell IR approval resolver exists.
 
-   The remaining entries are deliberately allowed, not must-floor work. A NEW
-   path-independent destructive pattern appearing here is a red that demands a
-   classify-or-decide — the ratchet's purpose. Already covered (NOT in the gap):
-   rm -rf, git push --force/-f, git reset --hard, git clean -f, filesystem
-   format, shutdown, reboot, destructive SQL on psql/mysql/mariadb/cockroach. *)
-let expected_independent_gap =
-  [ "[process_signal] kill -9 1234"
-  ; "[process_signal] pkill -f node"
-  ]
-;;
+   A NEW path-independent destructive pattern appearing here is a red that
+   demands a classify-or-decide — the ratchet's purpose. Already covered (NOT in
+   the gap): rm -rf, git push --force/-f, git reset --hard, git clean -f,
+   filesystem format, shutdown, reboot, destructive SQL on
+   psql/mysql/mariadb/cockroach, and unknown privileged process-signal tools. *)
+let expected_independent_gap = []
 
 (* Baseline ratchet 2 — the path-BEARING gap. Each targets an in-workspace path.
    The PERMANENT path jail (validate_shell_ir_paths, default-on, graduated to
-   the only path at RFC-0255 P5) covers the out-of-workspace variant; the
-   in-workspace form shown is a legitimate keeper operation that the design
-   keeps OUT of the command-shape floor
-   ([test_rm_root_allowed_at_policy_layer_jailed_downstream]). These are
-   resolved by the permanent jail + a documented drop of substring
-   over-broadness, NOT lifted into the floor. Pinned so the set cannot grow. *)
-let expected_bearing_gap =
-  [ "[device_write] dd if=/dev/zero of=./out.img"
-  ; "[privilege_escalation] chmod 777 ./script.sh"
-  ; "[recursive_delete] rm -r ./build"
-  ; "[recursive_delete] rmdir ./build"
-  ]
-;;
+   the only path at RFC-0255 P5) covers the out-of-workspace variant. The
+   in-workspace privileged forms shown here now hit the privileged fail-closed
+   floor before path validation. Pinned so the set cannot grow. *)
+let expected_bearing_gap = []
 
 let test_safe_controls_not_blocked () =
   List.iter
@@ -248,10 +238,10 @@ let test_report () =
       entries
   in
   print_group
-    "  path-INDEPENDENT residual (deliberately-allowed; work-list now empty — see header)"
+    "  path-INDEPENDENT residual (should stay empty — see header)"
     independent;
   print_group
-    "  path-BEARING (in-workspace legit; out-of-workspace covered by the PERMANENT path jail)"
+    "  path-BEARING residual (should stay empty; path jail remains separate)"
     bearing;
   Printf.printf
     "NOTE: path jail (validate_shell_ir_paths, default-on, graduated to the only \
@@ -261,8 +251,7 @@ let test_report () =
 ;;
 
 (* Ratchet: each partition of the gap must equal its recorded baseline. Fails on
-   growth (new uncovered pattern = regression) or unrecorded shrink (Phase-2
-   progress to capture). *)
+   growth (new uncovered pattern = regression). *)
 let test_gap_baseline () =
   let actual_independent = List.sort compare (List.map label (independent_gap ())) in
   let actual_bearing = List.sort compare (List.map label (bearing_gap ())) in
@@ -271,7 +260,7 @@ let test_gap_baseline () =
     (List.sort compare expected_independent_gap)
     actual_independent;
   Alcotest.(check (list string))
-    "path-bearing gap matches jail-covered baseline"
+    "path-bearing gap matches command-shape baseline"
     (List.sort compare expected_bearing_gap)
     actual_bearing
 ;;

@@ -115,12 +115,32 @@ let log_task_transition_failed ~agent_name err =
   | _ -> task_agent_log_error ~agent_name "task transition failed: %s" message
 
 (** Client-side FSM gate: reject impossible transitions before server dispatch.
-    Uses [Workspace_task_classify.valid_next_actions_for_status] as SSOT. *)
-let client_side_transition_gate_error ~task_opt ~action ~action_s =
+    Uses [Workspace_task_lifecycle.valid_next_actions] as SSOT so hints match
+    verification flag, caller ownership, and operator/system authority. *)
+let client_side_transition_gate_error
+      ~config
+      ~agent_name
+      ~task_opt
+      ~action
+      ~action_s
+      ~authority
+      ~verification_enabled
+  =
   match task_opt with
   | None -> None
   | Some (task : Masc_domain.task) ->
-    let valid_actions = Workspace_task_classify.valid_next_actions_for_status task.task_status in
+    let same_agent =
+      match Workspace.task_assignee_of_status task.task_status with
+      | Some assignee -> Workspace.same_task_actor config assignee agent_name
+      | None -> false
+    in
+    let valid_actions =
+      Workspace_task_lifecycle.valid_next_actions
+        ~verification_enabled
+        ~same_agent
+        ~authority
+        ~task_status:task.task_status
+    in
     if List.mem action valid_actions
     then None
     else
@@ -238,15 +258,6 @@ include Tool_task_completion_review
 include Tool_task_args
 
 include Tool_task_contract_gate
-
-(* [persisted_contract_rejection] takes [~agent_name] as a plain label so
-   that {!Tool_task_contract_gate} stays free of the {!Tool_task} context
-   record. The facade re-exports a context-bound shim so existing
-   downstream code shape ([~ctx]) is preserved. *)
-let persisted_contract_rejection ~(ctx : context)
-    ~(task_opt : Masc_domain.task option) ~(notes : string) =
-  Tool_task_contract_gate.persisted_contract_rejection
-    ~agent_name:ctx.agent_name ~task_opt ~notes
 
 (* Handlers *)
 

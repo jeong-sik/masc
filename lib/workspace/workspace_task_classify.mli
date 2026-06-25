@@ -139,18 +139,32 @@ val merge_envelope_into_payload
 val task_status_to_string : Masc_domain.task_status -> string
 val task_assignee_of_status : Masc_domain.task_status -> string option
 
-(** Issue #7646: actions that [transition_task_r] accepts from the given
-    [task_status]. Used to enrich "Invalid transition" error messages so
-    LLM keepers see what they SHOULD have called, not just what failed.
-    Empty list for terminal states ([Done], [Cancelled]). *)
+(** Issue #7646: actions that the lifecycle FSM accepts from the given
+    [task_status]. Used to enrich "Invalid transition" error messages so LLM
+    keepers see what they SHOULD have called, not just what failed. This
+    includes lifecycle idempotency such as [done] from [Done] and [cancel] from
+    [Cancelled]. Defaults preserve the legacy status-only projection:
+    verification enabled, assignee authority, and [same_agent = true] except
+    [AwaitingVerification], where a non-submitter verifier is the useful hint.
+    Callers with actor/authority context should pass it so ownership and
+    override semantics are not guessed. *)
 val valid_next_actions_for_status
-  :  Masc_domain.task_status
+  :  ?verification_enabled:bool
+  -> ?same_agent:bool
+  -> ?authority:Masc_domain.completion_authority
+  -> Masc_domain.task_status
   -> Masc_domain.task_action list
 
 (** Issue #7646: rendered hint string suitable for embedding in error
     messages, e.g. [", valid_next_actions=[claim;cancel]"]. Returns the
-    empty string for terminal states. *)
-val next_actions_hint : Masc_domain.task_status -> string
+    empty string only when the lifecycle accepts no next action under the
+    supplied context. *)
+val next_actions_hint
+  :  ?verification_enabled:bool
+  -> ?same_agent:bool
+  -> ?authority:Masc_domain.completion_authority
+  -> Masc_domain.task_status
+  -> string
 
 val task_started_at_unix : Masc_domain.task_status -> float
 

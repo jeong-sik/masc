@@ -107,10 +107,14 @@ type board_sse_event =
     }
 
 let backend_state : backend_state Atomic.t = Atomic.make Uninitialized
+let board_mutation_version : int Atomic.t = Atomic.make 0
 let flusher_start_cas_retries = 3
 let flusher_start_backoff_base_s = 0.001
 let flusher_start_backoff_cap_s = 0.02
 let forced_flusher_start_cas_conflicts_for_test : int Atomic.t = Atomic.make 0
+
+let record_board_mutation () = Atomic.incr board_mutation_version
+let mutation_version () = Atomic.get board_mutation_version
 
 let flusher_start_backoff_delay_s ~attempt =
   let rec pow2 acc n =
@@ -273,7 +277,8 @@ let reset_for_test () =
   Atomic.set backend_state Uninitialized;
   Atomic.set forced_flusher_start_cas_conflicts_for_test 0;
   Atomic.set board_signal_hook None;
-  Atomic.set board_sse_hook None
+  Atomic.set board_sse_hook None;
+  record_board_mutation ()
 
 let jsonl_forced () =
   match Env_config.Board.backend_opt () with
@@ -363,6 +368,7 @@ let create_post ~author ~content ?title ?body ~post_kind ?meta_json
            ?origin ()
        with
       | Ok (Board.Fresh_post post) ->
+          record_board_mutation ();
           let pid = Board.Post_id.to_string post.id in
           let auth = Board.Agent_id.to_string post.author in
           emit_board_signal
@@ -381,7 +387,10 @@ let create_post ~author ~content ?title ?body ~post_kind ?meta_json
                  content = post.content; post_kind = post.post_kind;
                  hearth = post.hearth });
           Ok post
-      | Ok (Board.Dedup_hit post) | Ok (Board.Rolled_up_post post) -> Ok post
+      | Ok (Board.Rolled_up_post post) ->
+          record_board_mutation ();
+          Ok post
+      | Ok (Board.Dedup_hit post) -> Ok post
       | Error _ as err -> err)
 
 let get_post ~post_id =
@@ -489,6 +498,7 @@ let add_comment ~post_id ~author ~content ?parent_id
            ~ttl_hours ()
        with
       | Ok (comment, `Fresh) ->
+          record_board_mutation ();
           let cid = Board.Comment_id.to_string comment.id in
           let auth = Board.Agent_id.to_string comment.author in
           (match Board.get_post store ~post_id with
@@ -523,6 +533,7 @@ let vote ~voter ~post_id ~direction =
   in
   (match result with
    | Ok _score ->
+       record_board_mutation ();
        emit_board_sse_event
          (Post_voted { post_id; voter; direction })
    | Error e ->
@@ -547,6 +558,7 @@ let vote_comment ~voter ~comment_id ~direction =
   in
   (match result with
    | Ok _score ->
+       record_board_mutation ();
        emit_board_sse_event
          (Comment_voted { comment_id; voter; direction })
    | Error e ->
@@ -568,6 +580,7 @@ let toggle_reaction ~target_type ~target_id ~user_id ~emoji =
   in
   (match result with
    | Ok toggled ->
+       record_board_mutation ();
        emit_board_sse_event
          (Reaction_changed
             {
@@ -608,16 +621,36 @@ let list_hearths () =
   | Jsonl store -> Board.list_hearths store
 
 let set_thread_id ~post_id ~thread_id =
-  match backend () with
-  | Jsonl store -> Board.set_thread_id store ~post_id ~thread_id
+  let result =
+    match backend () with
+    | Jsonl store -> Board.set_thread_id store ~post_id ~thread_id
+  in
+  (match result with Ok () -> record_board_mutation () | Error _ -> ());
+  result
 
 let set_pinned ~post_id ~pinned =
-  match backend () with
-  | Jsonl store -> Board.set_pinned store ~post_id ~pinned
+  let result =
+    match backend () with
+    | Jsonl store -> Board.set_pinned store ~post_id ~pinned
+  in
+  (match result with Ok () -> record_board_mutation () | Error _ -> ());
+  result
+
+let set_visibility ~post_id ~visibility =
+  let result =
+    match backend () with
+    | Jsonl store -> Board.set_visibility store ~post_id ~visibility
+  in
+  (match result with Ok () -> record_board_mutation () | Error _ -> ());
+  result
 
 let delete_post ~post_id =
-  match backend () with
-  | Jsonl store -> Board.delete_post store ~post_id
+  let result =
+    match backend () with
+    | Jsonl store -> Board.delete_post store ~post_id
+  in
+  (match result with Ok () -> record_board_mutation () | Error _ -> ());
+  result
 
 let search ~query ~limit =
   match backend () with
@@ -670,8 +703,12 @@ let post_to_yojson_with_karma (p : Board.post) ~author_karma =
   Board.post_to_yojson_with_karma p ~author_karma
 
 let reclassify_posts ?(limit = 5200) ?(dry_run = true) () =
-  match backend () with
-  | Jsonl store -> Board.reclassify_posts store ~limit ~dry_run ()
+  let report =
+    match backend () with
+    | Jsonl store -> Board.reclassify_posts store ~limit ~dry_run ()
+  in
+  if (not dry_run) && report.changed > 0 then record_board_mutation ();
+  report
 
 let backend_name () =
   match Atomic.get backend_state with

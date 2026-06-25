@@ -21,7 +21,17 @@ let task_state_hint ~(config : Workspace.config) ~(meta : Keeper_meta_contract.k
         | None -> Printf.sprintf "Current task: %s (not found in backlog)" task_id
         | Some task ->
           let status = Masc_domain.task_status_to_string task.task_status in
-          let hint = Workspace_task_classify.next_actions_hint task.task_status in
+          let same_agent =
+            match Workspace_task_classify.task_assignee_of_status task.task_status with
+            | None -> false
+            | Some assignee ->
+              Workspace_task_classify.same_task_actor config assignee meta.agent_name
+          in
+          let hint =
+            Workspace_task_classify.next_actions_hint
+              ~same_agent
+              task.task_status
+          in
           Printf.sprintf "Current task: %s, status=%s%s" task_id status hint))
 ;;
 

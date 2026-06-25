@@ -1,8 +1,9 @@
 (** Board_tool_cache — TTL cache for [masc_board_list] payloads.
 
     Reduces redundant JSONL reads when multiple keepers poll
-    board_list in the same analysis window. Invalidated on any board
-    mutation (post, comment, vote, delete, cleanup).
+    board_list in the same analysis window. The key includes the
+    dispatch-level board mutation version, so mutations outside the
+    board-tool path cannot keep serving a stale list payload.
 
     Stage 10 split of lib/board_tool.ml. *)
 
@@ -76,4 +77,10 @@ let cached_board_list ~key ~tool_name ~start_time compute : Tool_result.result =
 
 (** Deterministic cache key from board_list args. Serializes the
     normalized JSON so identical parameter sets hit the same entry. *)
-let board_list_cache_key args = Yojson.Safe.to_string args
+let board_list_cache_key args =
+  Yojson.Safe.to_string
+    (`Assoc
+       [
+         ("args", args);
+         ("board_mutation_version", `Int (Board_dispatch.mutation_version ()));
+       ])

@@ -149,6 +149,11 @@ val rotate_if_needed : string -> unit
 (** Appends one post snapshot to {!persist_path}. *)
 val append_post : post -> unit
 
+(** Atomically rewrites {!persist_path} with caller-provided JSONL content and
+    returns persistence failures instead of only incrementing the error
+    counter. *)
+val save_posts_jsonl_result : string -> (unit, string) result
+
 (** RFC-0233 §7: maintain the origin secondary indexes ([posts_by_turn_ref] /
     [posts_by_run_id]) from a post's [origin].  Used by the load path to
     rebuild the indexes that {!find_post_by_turn_ref} / {!find_post_by_run_id}

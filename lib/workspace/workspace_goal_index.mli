@@ -52,6 +52,15 @@ val read_goal_task_links_r :
   Workspace_utils_backend_setup.config ->
   ((string * string list) list, string) result
 
+(** Build the goal-task index from a single locked snapshot of the backlog and
+    goal-task-link registry.  The lock order is backlog -> goal-task-links,
+    matching task creation paths that write the backlog before adding links.
+    Completion gates use this fail-closed variant instead of the fail-soft
+    projection below. *)
+val build_goal_task_index_for_config_checked :
+  Workspace_utils_backend_setup.config ->
+  ((string, Masc_domain.task list) Hashtbl.t, string) result
+
 (** Persist the goal-task link registry. *)
 val write_goal_task_links :
   Workspace_utils_backend_setup.config -> (string * string list) list -> unit
@@ -64,18 +73,56 @@ val prune_links_for_goal :
 val link_task_to_goal :
   Workspace_utils_backend_setup.config -> goal_id:string -> task_id:string -> unit
 
+type link_goalless_task_checked_error =
+  | Link_unknown_task
+  | Link_unknown_goal
+  | Link_registry_unreadable of string
+  | Link_already_assigned of string list
+
+(** Add one task-to-goal link and report registry failures.  Use this variant
+    when the caller has just committed related task state and must compensate
+    if the link registry cannot be updated. *)
+val link_task_to_goal_result :
+  Workspace_utils_backend_setup.config ->
+  goal_id:string ->
+  task_id:string ->
+  (unit, link_goalless_task_checked_error) result
+
 (** Add one task-to-goal link only when [task_id] has no existing goal link.
     The read/check/write sequence runs under the goal-task-links file lock.
-    Returns [Error existing_goal_ids] when the task is already linked. *)
+    Returns [Error (Link_already_assigned existing_goal_ids)] when the task is
+    already linked, or [Error (Link_registry_unreadable _)] when the registry
+    cannot be read safely. *)
 val link_goalless_task_to_goal :
   Workspace_utils_backend_setup.config ->
   goal_id:string ->
   task_id:string ->
-  (unit, string list) result
+  (unit, link_goalless_task_checked_error) result
+
+(** Validate and add one task-to-goal link under the goal-task-links file lock.
+    [task_exists] and [goal_exists] are callbacks so the workspace index stays
+    independent from task/goal stores while callers can avoid a caller-side
+    validate-then-write race around the registry update.  Registry read errors
+    fail closed with [Link_registry_unreadable _] before any write. *)
+val link_goalless_task_to_goal_checked :
+  Workspace_utils_backend_setup.config ->
+  goal_id:string ->
+  task_id:string ->
+  task_exists:(task_id:string -> bool) ->
+  goal_exists:(goal_id:string -> bool) ->
+  (unit, link_goalless_task_checked_error) result
 
 (** Add multiple task-to-goal links to the persistent registry. *)
 val link_tasks_to_goals :
   Workspace_utils_backend_setup.config -> (string * string option) list -> unit
+
+(** Add multiple task-to-goal links under one registry lock and report registry
+    failures.  The registry is written at most once; if it cannot be read, no
+    link write is attempted. *)
+val link_tasks_to_goals_result :
+  Workspace_utils_backend_setup.config ->
+  (string * string option) list ->
+  (unit, link_goalless_task_checked_error) result
 
 (** Build indexes using the persistent link registry for [config]. *)
 val build_goal_task_index_for_config :

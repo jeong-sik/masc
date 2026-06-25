@@ -380,20 +380,35 @@ let request_path base_path req_id =
    compose, but each cache miss still pays N+1 disk reads.
 
    This storage-level cache keeps the most-recent parsed list addressed by
-   [(base_path, dir mtime)].  When the directory has not changed since the
-   last scan, the cache returns the previously-parsed list — a single
-   [Unix.stat] syscall — and skips the readdir + per-file open chain.
+   [(base_path, directory signature)].  The signature includes the directory
+   mtime plus each JSON entry's name, inode, size, mtime, and ctime, so an
+   external same-tick rewrite cannot keep serving the previously-parsed list
+   just because the directory mtime did not advance.  When the signature has
+   not changed since the last scan, the cache skips the per-file JSON parse
+   chain.
 
    Single-entry [Atomic.t] is sufficient because production deployments run
    a single [base_path] per MASC server instance.  Multi-tenant workloads
-   would alternate cache misses but never serve stale data — the mtime guard
-   detects directory churn from any source (file create/update/delete all
-   bump [st_mtime]).  Write paths below ([save_request]) additionally
-   invalidate the cache explicitly to close the sub-second mtime resolution
-   race on fast filesystems. *)
+   would alternate cache misses but never serve stale data.  Write paths below
+   ([save_request], [delete_request]) additionally invalidate the cache
+   explicitly; the signature protects against out-of-band file writes that do
+   not pass through those helpers. *)
+type request_file_fingerprint = {
+  fingerprint_name : string;
+  fingerprint_inode : int;
+  fingerprint_size : int;
+  fingerprint_mtime : float;
+  fingerprint_ctime : float;
+}
+
+type list_requests_cache_signature = {
+  signature_dir_mtime : float;
+  signature_files : request_file_fingerprint list;
+}
+
 type list_requests_cache_entry = {
   cache_base_path : string;
-  dir_mtime : float;
+  signature : list_requests_cache_signature;
   results : verification_request list;
 }
 
@@ -403,8 +418,48 @@ let list_requests_cache : list_requests_cache_entry option Atomic.t =
 let invalidate_list_requests_cache () =
   Atomic.set list_requests_cache None
 
-let dir_mtime_opt dir =
-  try Some (Unix.stat dir).Unix.st_mtime with
+let request_file_fingerprints dir =
+  match Safe_ops.list_dir_safe dir with
+  | Error _ -> None
+  | Ok files ->
+      let json_files =
+        files
+        |> List.filter (fun f -> Filename.check_suffix f ".json")
+        |> List.sort String.compare
+      in
+      let rec collect acc = function
+        | [] -> Some (List.rev acc)
+        | name :: rest ->
+            let path = Filename.concat dir name in
+            (try
+               let stat = Unix.stat path in
+               if stat.Unix.st_kind = Unix.S_REG then
+                 collect
+                   ({
+                      fingerprint_name = name;
+                      fingerprint_inode = stat.Unix.st_ino;
+                      fingerprint_size = stat.Unix.st_size;
+                      fingerprint_mtime = stat.Unix.st_mtime;
+                      fingerprint_ctime = stat.Unix.st_ctime;
+                    }
+                     :: acc)
+                   rest
+               else
+                 collect acc rest
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | Unix.Unix_error _ | Sys_error _ -> None)
+      in
+      collect [] json_files
+
+let list_requests_signature_opt dir =
+  try
+    let signature_dir_mtime = (Unix.stat dir).Unix.st_mtime in
+    match request_file_fingerprints dir with
+    | None -> None
+    | Some signature_files -> Some { signature_dir_mtime; signature_files }
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
   | Unix.Unix_error _ | Sys_error _ -> None
 
 let save_request base_path req =
@@ -502,27 +557,29 @@ let list_requests_uncached base_path =
             ~path:(Filename.concat dir f)
             (load_request base_path id))
 
-(* Public entry: check the mtime-keyed cache before the readdir + N+1 open
-   chain.  A cache hit returns the previously-parsed list after a single
-   [Unix.stat] syscall; cache miss falls through to [list_requests_uncached]
-   and refreshes the entry.  See [list_requests_cache] above for the design. *)
+(* Public entry: check the directory signature cache before the full per-file
+   parse chain.  Cache miss falls through to [list_requests_uncached] and
+   refreshes the entry.  See [list_requests_cache] above for the design. *)
 let list_requests base_path =
   let dir = verifications_dir base_path in
-  match dir_mtime_opt dir with
+  if Keeper_fd_pressure.active () then
+    list_requests_uncached base_path
+  else
+  match list_requests_signature_opt dir with
   | None ->
       (* Directory missing or stat failed — defer to the uncached path so
          the existing dir_exists / fd_pressure / log paths run unchanged. *)
       list_requests_uncached base_path
-  | Some mtime -> (
+  | Some signature -> (
       match Atomic.get list_requests_cache with
       | Some entry
         when String.equal entry.cache_base_path base_path
-             && Float.equal entry.dir_mtime mtime ->
+             && entry.signature = signature ->
           entry.results
       | _ ->
           let results = list_requests_uncached base_path in
           Atomic.set list_requests_cache
-            (Some { cache_base_path = base_path; dir_mtime = mtime; results });
+            (Some { cache_base_path = base_path; signature; results });
           results)
 
 (** High-level API *)

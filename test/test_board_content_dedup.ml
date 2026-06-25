@@ -224,6 +224,32 @@ let test_comment_parent_is_part_of_dedup_key () =
 
 let keeper_board_meta = `Assoc [ "source", `String "keeper_board_post" ]
 
+let agent_id_or_fail value =
+  match Board.Agent_id.of_string value with
+  | Ok id -> id
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+
+let automation_status_post ~author_id ~body ~created_at ~updated_at : Board.post =
+  { id = Board.Post_id.generate ()
+  ; author = author_id
+  ; title = body
+  ; body
+  ; content = body
+  ; post_kind = Board.Automation_post
+  ; meta_json = Some keeper_board_meta
+  ; visibility = Board.Public
+  ; created_at
+  ; updated_at
+  ; expires_at = updated_at +. 86_400.
+  ; votes_up = 0
+  ; votes_down = 0
+  ; reply_count = 0
+  ; pinned = false
+  ; hearth = None
+  ; thread_id = None
+  ; origin = None
+  }
+
 let test_status_only_automation_posts_roll_up_by_task () =
   let first =
     create_automation_post_or_fail
@@ -262,6 +288,57 @@ let test_status_only_automation_posts_roll_up_by_task () =
            (Board.Agent_id.to_string post.author))
   in
   Alcotest.(check int) "only one status post remains" 1 (List.length same_author_posts)
+
+let test_status_rollup_window_uses_created_at () =
+  let store = Board.create_store () in
+  let now = 1_000_000. in
+  let author_id = agent_id_or_fail "lifecycle-worker-4" in
+  let old_status =
+    automation_status_post
+      ~author_id
+      ~body:"Task-370 claimed and worktree ready. Investigating codebase."
+      ~created_at:
+        (now -. Board_core_status_rollup.status_rollup_window_sec -. 1.)
+      ~updated_at:now
+  in
+  Hashtbl.add store.posts (Board.Post_id.to_string old_status.id) old_status;
+  match
+    Board_core_status_rollup.find_status_rollup_target_unlocked
+      store
+      ~author_id
+      ~hearth:None
+      ~visibility:Board.Public
+      ~task_id:"task-370"
+      ~now
+  with
+  | None -> ()
+  | Some _ ->
+      Alcotest.fail
+        "status rollup window must not be extended by updated_at refreshes"
+
+let test_status_rollup_proof_terms_use_token_boundaries () =
+  let status_body =
+    "Task-370 claimed and worktree ready. Checking the errorless parser fixture."
+  in
+  let proof_body =
+    "Task-370 checking status. Error: verifier command failed."
+  in
+  Alcotest.(check bool)
+    "substring inside a larger token is not proof evidence"
+    true
+    (Board_core_status_rollup.is_status_rollup_candidate
+       ~post_kind:Board.Automation_post
+       ~title:status_body
+       ~body:status_body
+       ~meta_json:(Some keeper_board_meta));
+  Alcotest.(check bool)
+    "standalone proof term still blocks rollup"
+    false
+    (Board_core_status_rollup.is_status_rollup_candidate
+       ~post_kind:Board.Automation_post
+       ~title:proof_body
+       ~body:proof_body
+       ~meta_json:(Some keeper_board_meta))
 
 let test_status_rollup_preserves_proof_posts () =
   let first =
@@ -330,6 +407,10 @@ let () =
     ; ( "status rollup",
         [ Alcotest.test_case "automation status posts roll up by task" `Quick
             (with_eio test_status_only_automation_posts_roll_up_by_task)
+        ; Alcotest.test_case "rollup window uses created_at" `Quick
+            (with_eio test_status_rollup_window_uses_created_at)
+        ; Alcotest.test_case "proof terms use token boundaries" `Quick
+            (with_eio test_status_rollup_proof_terms_use_token_boundaries)
         ; Alcotest.test_case "proof posts stay separate" `Quick
             (with_eio test_status_rollup_preserves_proof_posts)
         ] )

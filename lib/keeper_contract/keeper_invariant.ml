@@ -9,11 +9,12 @@ let normalize_path path =
   let rec collapse acc = function
     | [] -> List.rev acc
     | ".." :: rest ->
-      (* Preserve fall-through behaviour: when acc is empty (we are at
-         the path root), [".."] is treated as a literal segment and
-         pushed onto acc.  When acc has at least one element, pop it. *)
+      (* Clamp attempts to traverse above the absolute root.  Treating a
+         root-level [".."] as a literal segment makes "/../sandbox" differ from
+         its canonical "/sandbox" spelling and can make sandbox-root checks
+         depend on caller spelling instead of filesystem semantics. *)
       (match acc with
-       | [] -> collapse (".." :: acc) rest
+       | [] -> collapse acc rest
        | _ :: tl -> collapse tl rest)
     | "." :: rest -> collapse acc rest
     | "" :: rest -> collapse acc rest

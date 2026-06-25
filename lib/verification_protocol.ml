@@ -48,8 +48,14 @@ let deliverable_claims_completion ~task_id deliverable =
         normalized
       || String.starts_with ~prefix:"completed" normalized)
 
+let nonblank_list values =
+  values
+  |> List.map String.trim
+  |> List.filter (fun value -> not (String.equal value ""))
+
 let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
     ~assignee ~evidence_refs =
+  let evidence_refs = nonblank_list evidence_refs in
   let request_kind, request_summary, next_action, board_type, board_title, board_content =
     match Masc_task_handlers.Planning_eio.load config ~task_id:task.id with
     | Ok plan_ctx
@@ -73,7 +79,7 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
   in
   let criteria = List.map (fun s -> Verification.Custom s)
     (match task.contract with
-     | Some c -> c.completion_contract
+     | Some c -> nonblank_list c.completion_contract
      | None -> []) in
   let output =
     `Assoc [
@@ -94,46 +100,61 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
   ; board_content
   }
 
-let warn_contract_gap (task : Masc_domain.task) =
-  (* Observability for #8272: tasks submitted without a contract land in
-     storage with empty completion_contract + empty evidence, which the
-     dashboard renders as "—". Surface this as a warn so operators can
-     trace the gap back to the task creation site instead of only
-     noticing it in the UI. No behavior change. *)
-  (match task.contract with
-   | None ->
-     Log.Task.warn
-       ~keeper_name:task.id
-       "[verification-submit] task=%s has no contract — completion_contract \
-        and evidence will be empty in the verification record"
-       task.id
-   | Some c
-     when c.completion_contract = []
-          && c.required_evidence = []
-          && c.verify_gate_evidence = [] ->
-     Log.Task.warn
-       ~keeper_name:task.id
-       "[verification-submit] task=%s has a contract but both \
-       completion_contract and verification evidence are empty"
-       task.id
-   | Some _ -> ())
+let validate_submit_contract (task : Masc_domain.task) ~evidence_refs =
+  match task.contract with
+  | None ->
+    Error
+      (Printf.sprintf
+         "verification submit rejected for task %s: task has no completion \
+          contract"
+         task.id)
+  | Some contract ->
+    let completion_contract = nonblank_list contract.completion_contract in
+    let evidence_refs = nonblank_list evidence_refs in
+    if completion_contract = []
+    then
+      Error
+        (Printf.sprintf
+           "verification submit rejected for task %s: completion_contract is \
+            empty"
+           task.id)
+    else if evidence_refs = []
+    then
+      Error
+        (Printf.sprintf
+           "verification submit rejected for task %s: verification evidence refs \
+            are empty"
+           task.id)
+    else Ok ()
 
 let create_submit_request ~(config : Workspace.config)
     ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs =
   let base_path = config.Workspace.base_path in
-  warn_contract_gap task;
-  let spec = submit_request_spec ~config ~task ~assignee ~evidence_refs in
-  match
-    Verification.create_request ~base_path ~task_id:task.id ~request_id:verification_id
-      ~output:spec.output ~criteria:spec.criteria ~worker:assignee ()
-  with
-  | Ok _ -> Ok ()
+  match validate_submit_contract task ~evidence_refs with
   | Error e ->
-    Log.Task.error
-      ~keeper_name:task.id
-      "verification create_request failed (task=%s vrf=%s): %s"
-      task.id verification_id e;
+    Log.Task.error ~keeper_name:task.id "%s" e;
     Error e
+  | Ok () ->
+    let spec = submit_request_spec ~config ~task ~assignee ~evidence_refs in
+    (match
+       Verification.create_request
+         ~base_path
+         ~task_id:task.id
+         ~request_id:verification_id
+         ~output:spec.output
+         ~criteria:spec.criteria
+         ~worker:assignee
+         ()
+     with
+     | Ok _ -> Ok ()
+     | Error e ->
+       Log.Task.error
+         ~keeper_name:task.id
+         "verification create_request failed (task=%s vrf=%s): %s"
+         task.id
+         verification_id
+         e;
+       Error e)
 
 (* RFC-0221 §3.1: compensation for atomic submit. Remove the verification record
    for [verification_id] when the task_status commit it was written for did not

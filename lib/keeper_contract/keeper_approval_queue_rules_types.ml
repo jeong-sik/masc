@@ -150,53 +150,52 @@ let approval_rule_to_yojson (rule : approval_rule) =
 ;;
 
 let approval_rule_of_yojson json =
-  try
-    let id = (match Json_util.assoc_member_opt "id" json with Some (`String s) -> s | _ -> "") in
-    let keeper_name = (match Json_util.assoc_member_opt "keeper_name" json with Some (`String s) -> s | _ -> "") in
-    let tool_name = (match Json_util.assoc_member_opt "tool_name" json with Some (`String s) -> s | _ -> "") in
-    let sandbox_profile = Json_util.get_string json "sandbox_profile" in
-    let backend = Json_util.get_string json "backend" in
-    let request_fingerprint = (match Json_util.assoc_member_opt "request_fingerprint" json with Some (`String s) -> s | _ -> "") in
-    let request_fingerprint_preview =
-      Json_util.get_string json "request_fingerprint_preview"
-      |> Option.value
-           ~default:
-             (String.sub
-                request_fingerprint
-                0
-                (min 12 (String.length request_fingerprint)))
-    in
-    let max_risk =
-      (match Json_util.assoc_member_opt "max_risk" json with Some (`String s) -> s | _ -> "")
-      |> risk_level_of_string
-      |> Option.value ~default:High
-    in
-    let created_at =
-      Json_util.get_float json "created_at"
-      |> Option.value ~default:(Unix.gettimeofday ())
-    in
-    let created_by = Json_util.get_string json "created_by" in
-    let last_matched_at = Json_util.get_float json "last_matched_at" in
-    let match_count =
-      Json_util.get_int json "match_count" |> Option.value ~default:0
-    in
-    let source_approval_id = Json_util.get_string json "source_approval_id" in
-    Some
-      { id
-      ; keeper_name
-      ; tool_name
-      ; sandbox_profile
-      ; backend
-      ; request_fingerprint
-      ; request_fingerprint_preview
-      ; max_risk
-      ; created_at
-      ; created_by
-      ; last_matched_at
-      ; match_count
-      ; source_approval_id
-      }
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ -> None
+  let ( let* ) = Option.bind in
+  let required_string field =
+    match Json_util.assoc_member_opt field json with
+    | Some (`String value) ->
+      let value = String.trim value in
+      if String.equal value "" then None else Some value
+    | _ -> None
+  in
+  let* id = required_string "id" in
+  let* keeper_name = required_string "keeper_name" in
+  let* tool_name = required_string "tool_name" in
+  let sandbox_profile = Json_util.get_string json "sandbox_profile" in
+  let backend = Json_util.get_string json "backend" in
+  let* request_fingerprint = required_string "request_fingerprint" in
+  let request_fingerprint_preview =
+    Json_util.get_string json "request_fingerprint_preview"
+    |> Option.value
+         ~default:
+           (String.sub
+              request_fingerprint
+              0
+              (min 12 (String.length request_fingerprint)))
+  in
+  let* max_risk =
+    match Json_util.assoc_member_opt "max_risk" json with
+    | Some (`String value) -> risk_level_of_string value
+    | _ -> None
+  in
+  let* created_at = Json_util.get_float json "created_at" in
+  let created_by = Json_util.get_string json "created_by" in
+  let last_matched_at = Json_util.get_float json "last_matched_at" in
+  let* match_count = Json_util.get_int json "match_count" in
+  let source_approval_id = Json_util.get_string json "source_approval_id" in
+  Some
+    { id
+    ; keeper_name
+    ; tool_name
+    ; sandbox_profile
+    ; backend
+    ; request_fingerprint
+    ; request_fingerprint_preview
+    ; max_risk
+    ; created_at
+    ; created_by
+    ; last_matched_at
+    ; match_count
+    ; source_approval_id
+    }
 ;;

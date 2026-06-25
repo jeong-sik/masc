@@ -102,6 +102,15 @@ let test_upvote_produces_one_event () =
   Alcotest.(check string) "target_id matches post" pid ev.target_id;
   Alcotest.(check int) "delta is +1" 1 ev.delta
 
+let test_namespaced_voter_is_preserved_in_karma_event () =
+  let post = create_post_exn ~author:"alice" ~content:"namespaced voter" in
+  let pid = Board.Post_id.to_string post.id in
+  vote_exn ~voter:"team:bob" ~post_id:pid ~direction:Board.Up;
+  let events = Board_dispatch.get_karma_ledger () in
+  Alcotest.(check int) "namespaced upvote -> one event" 1 (List.length events);
+  let (ev : Board.karma_event) = List.hd events in
+  Alcotest.(check string) "voter namespace preserved" "team:bob" ev.voter
+
 (** {1 Downvote does NOT produce a karma event} *)
 
 let test_downvote_no_event () =
@@ -269,6 +278,58 @@ let file_contains path needle =
         in
         loop ())
 
+let read_file path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+
+let rec find_substring_from haystack needle start =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then Some start
+  else if start + needle_len > haystack_len then None
+  else if String.sub haystack start needle_len = needle then Some start
+  else find_substring_from haystack needle (start + 1)
+
+let source_root () =
+  let anchor = Filename.concat "lib" (Filename.concat "board" "board_votes.ml") in
+  let rec climb dir hops =
+    if Sys.file_exists (Filename.concat dir anchor) then dir
+    else if hops >= 8 then Alcotest.fail "could not locate repository source root"
+    else
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then Alcotest.fail "could not locate repository source root"
+      else climb parent (hops + 1)
+  in
+  climb (Sys.getcwd ()) 0
+
+let read_source_file rel = read_file (Filename.concat (source_root ()) rel)
+
+let slice_between source ~start_marker ~end_marker =
+  match find_substring_from source start_marker 0 with
+  | None -> Alcotest.fail ("missing start marker: " ^ start_marker)
+  | Some start ->
+    (match find_substring_from source end_marker start with
+     | None -> Alcotest.fail ("missing end marker: " ^ end_marker)
+     | Some finish -> String.sub source start (finish - start))
+
+let assert_state_lock_before_persist_lock ~label source =
+  let state_lock =
+    match find_substring_from source "with_lock store" 0 with
+    | Some idx -> idx
+    | None -> Alcotest.fail (label ^ ": missing with_lock store")
+  in
+  let persist_lock =
+    match find_substring_from source "with_persist_lock store" 0 with
+    | Some idx -> idx
+    | None -> Alcotest.fail (label ^ ": missing with_persist_lock store")
+  in
+  Alcotest.(check bool)
+    (label ^ " takes state lock before persist lock")
+    true
+    (state_lock < persist_lock)
+
 let test_delete_post_rewrites_persisted_snapshots () =
   let post = create_post_exn ~author:"alice" ~content:"delete me" in
   let pid = Board.Post_id.to_string post.id in
@@ -335,6 +396,35 @@ let test_karma_event_json_fields () =
   (* Minimal ISO-8601 UTC sanity check *)
   Alcotest.(check bool) "ts_iso ends with Z" true
     (String.length ts_iso > 0 && ts_iso.[String.length ts_iso - 1] = 'Z')
+
+let test_vote_log_flush_preserves_namespaced_voter_field () =
+  let post =
+    create_post_exn ~author:"alice" ~content:"namespaced voter flush"
+  in
+  let pid = Board.Post_id.to_string post.id in
+  vote_exn ~voter:"team:bob" ~post_id:pid ~direction:Board.Up;
+  Board_dispatch.flush ();
+  let rows = Fs_compat.load_jsonl (Board_votes.vote_log_path ()) in
+  let row =
+    match rows with
+    | [ row ] -> row
+    | rows ->
+      Alcotest.failf "expected one vote-log row after flush, got %d"
+        (List.length rows)
+  in
+  let string_field key =
+    match row with
+    | `Assoc pairs ->
+      (match List.assoc_opt key pairs with
+       | Some (`String value) -> value
+       | _ -> Alcotest.failf "missing string key %s" key)
+    | _ -> Alcotest.fail "expected vote-log row object"
+  in
+  Alcotest.(check string) "target keeps namespaced voter"
+    ("post:" ^ pid ^ ":team:bob")
+    (string_field "target");
+  Alcotest.(check string) "voter field keeps namespace" "team:bob"
+    (string_field "voter")
 
 (** {1 Events sorted oldest-first} *)
 
@@ -410,6 +500,262 @@ let test_concurrent_get_all_karma_returns_same_value env =
   Alcotest.(check int) "concurrent reads see the upvote" 1
     (List.assoc_opt "alice" !r1 |> Option.value ~default:0)
 
+let test_delete_mutations_take_state_lock_before_persist_lock () =
+  let votes_source = read_source_file "lib/board/board_votes.ml" in
+  let delete_post_source =
+    slice_between
+      votes_source
+      ~start_marker:"let delete_post store ~post_id"
+      ~end_marker:"(** {1 Global Store}"
+  in
+  assert_state_lock_before_persist_lock
+    ~label:"delete_post"
+    delete_post_source;
+  let core_source = read_source_file "lib/board/board_core.ml" in
+  let delete_sub_board_source =
+    slice_between
+      core_source
+      ~start_marker:"let delete_sub_board store ~sub_board_id"
+      ~end_marker:"(** {1 Voting - Deduplicated}"
+  in
+  assert_state_lock_before_persist_lock
+    ~label:"delete_sub_board"
+    delete_sub_board_source
+
+let test_delete_mutations_surface_persistence_failure () =
+  let votes_source = read_source_file "lib/board/board_votes.ml" in
+  let delete_post_source =
+    slice_between
+      votes_source
+      ~start_marker:"let delete_post store ~post_id"
+      ~end_marker:"(** {1 Global Store}"
+  in
+  let contains section needle =
+    Option.is_some (find_substring_from section needle 0)
+  in
+  Alcotest.(check bool)
+    "delete_post uses result-aware post/comment snapshot writes"
+    true
+    (contains delete_post_source "save_jsonl_snapshot_result");
+  Alcotest.(check bool)
+    "delete_post uses result-aware vote-log rewrite"
+    true
+    (contains delete_post_source "save_vote_log_jsonl_result");
+  Alcotest.(check bool)
+    "delete_post reports persistence failure"
+    true
+    (contains delete_post_source "Error (Io_error msg)");
+  Alcotest.(check bool)
+    "delete_post restores dirty posts on persistence failure"
+    true
+    (contains delete_post_source "store.dirty_posts <- true");
+  Alcotest.(check bool)
+    "delete_post restores dirty comments on persistence failure"
+    true
+    (contains delete_post_source "store.dirty_comments <- true");
+  let core_source = read_source_file "lib/board/board_core.ml" in
+  let delete_sub_board_source =
+    slice_between
+      core_source
+      ~start_marker:"let delete_sub_board store ~sub_board_id"
+      ~end_marker:"(** {1 Voting - Deduplicated}"
+  in
+  Alcotest.(check bool)
+    "delete_sub_board uses result-aware snapshot rewrite"
+    true
+    (contains delete_sub_board_source "save_sub_boards_jsonl_result");
+  Alcotest.(check bool)
+    "delete_sub_board reports persistence failure"
+    true
+    (contains delete_sub_board_source "Error (Io_error msg)")
+
+let test_curated_post_mutations_surface_persistence_failure () =
+  let source = read_source_file "lib/board/board_votes.ml" in
+  let assert_mutation label start_marker end_marker =
+    let section = slice_between source ~start_marker ~end_marker in
+    let contains needle = Option.is_some (find_substring_from section needle 0) in
+    Alcotest.(check bool)
+      (label ^ " uses result-aware post snapshot rewrite")
+      true
+      (contains "save_posts_jsonl_result");
+    Alcotest.(check bool)
+      (label ^ " reports persistence failure")
+      true
+      (contains "Error (Io_error msg)");
+    Alcotest.(check bool)
+      (label ^ " restores dirty posts on persistence failure")
+      true
+      (contains "store.dirty_posts <- true");
+    Alcotest.(check bool)
+      (label ^ " no longer fire-and-forgets append_post")
+      false
+      (contains "append_post updated")
+  in
+  assert_mutation
+    "set_pinned"
+    "let set_pinned store ~post_id ~pinned"
+    "let set_visibility store ~post_id ~visibility";
+  assert_mutation
+    "set_visibility"
+    "let set_visibility store ~post_id ~visibility"
+    "let posts_jsonl_snapshot store"
+
+let test_maybe_sweep_updates_timestamps_under_state_lock () =
+  let source = read_source_file "lib/board/board_core_persist.ml" in
+  let maybe_sweep_source =
+    slice_between
+      source
+      ~start_marker:"let maybe_sweep store"
+      ~end_marker:"(** {1 Persistence Paths}"
+  in
+  let find label needle =
+    match find_substring_from maybe_sweep_source needle 0 with
+    | Some idx -> idx
+    | None -> Alcotest.fail (label ^ ": missing " ^ needle)
+  in
+  let lock_idx = find "maybe_sweep" "with_lock store" in
+  let last_sweep_idx = find "maybe_sweep" "store.last_sweep <- now" in
+  let last_flush_idx = find "maybe_sweep" "store.last_flush <- now" in
+  Alcotest.(check bool)
+    "maybe_sweep updates last_sweep under state lock"
+    true
+    (lock_idx < last_sweep_idx);
+  Alcotest.(check bool)
+    "maybe_sweep updates last_flush under state lock"
+    true
+    (lock_idx < last_flush_idx);
+  let action_list_done_idx = find "maybe_sweep" "List.rev !actions)" in
+  let stream_add_idx = find "maybe_sweep" "Eio.Stream.add store.flusher_inbox" in
+  Alcotest.(check bool)
+    "maybe_sweep enqueues after releasing state-lock action calculation"
+    true
+    (action_list_done_idx < stream_add_idx)
+
+let test_flush_dirty_materializes_one_locked_snapshot_before_persist () =
+  let source = read_source_file "lib/board/board_votes.ml" in
+  let flush_source =
+    slice_between
+      source
+      ~start_marker:"let flush_dirty store"
+      ~end_marker:"(** {1 Karma & Flair - Reddit-style}"
+  in
+  let find label needle =
+    match find_substring_from flush_source needle 0 with
+    | Some idx -> idx
+    | None -> Alcotest.fail (label ^ ": missing " ^ needle)
+  in
+  let state_lock_idx = find "flush_dirty" "with_lock store" in
+  let posts_snapshot_idx = find "flush_dirty" "posts_jsonl_snapshot store" in
+  let comments_snapshot_idx = find "flush_dirty" "comments_jsonl_snapshot store" in
+  let vote_snapshot_idx = find "flush_dirty" "vote_log_jsonl store" in
+  let reactions_snapshot_idx = find "flush_dirty" "reactions_jsonl_snapshot store" in
+  let persist_lock_idx = find "flush_dirty" "with_persist_lock store" in
+  Alcotest.(check bool)
+    "flush_dirty materializes posts before persist lock"
+    true
+    (state_lock_idx < posts_snapshot_idx && posts_snapshot_idx < persist_lock_idx);
+  Alcotest.(check bool)
+    "flush_dirty materializes comments before persist lock"
+    true
+    (state_lock_idx < comments_snapshot_idx && comments_snapshot_idx < persist_lock_idx);
+  Alcotest.(check bool)
+    "flush_dirty materializes votes before persist lock"
+    true
+    (state_lock_idx < vote_snapshot_idx && vote_snapshot_idx < persist_lock_idx);
+  Alcotest.(check bool)
+    "flush_dirty materializes reactions before persist lock"
+    true
+    (state_lock_idx < reactions_snapshot_idx
+     && reactions_snapshot_idx < persist_lock_idx);
+  let persist_section =
+    String.sub
+      flush_source
+      persist_lock_idx
+      (String.length flush_source - persist_lock_idx)
+  in
+  Alcotest.(check bool)
+    "flush_dirty does not re-enter state lock while persisting"
+    true
+    (Option.is_none (find_substring_from persist_section "with_lock store" 0));
+  Alcotest.(check bool)
+    "flush_dirty uses result-aware snapshot writes"
+    true
+    (Option.is_some
+       (find_substring_from flush_source "save_jsonl_snapshot_result" 0)
+     && Option.is_some
+          (find_substring_from flush_source "save_vote_log_jsonl_result" 0));
+  Alcotest.(check bool)
+    "flush_dirty rewrites reactions with dirty snapshots"
+    true
+    (Option.is_some (find_substring_from flush_source "flush_reactions" 0));
+  Alcotest.(check bool)
+    "flush_dirty restores dirty flags on persistence failure"
+    true
+    (Option.is_some (find_substring_from flush_source "if failed" 0)
+     && Option.is_some
+          (find_substring_from flush_source "store.dirty_posts <- true" 0)
+     && Option.is_some
+          (find_substring_from flush_source "store.dirty_comments <- true" 0))
+
+let test_vote_commit_requires_persisted_vote_log_before_feedback () =
+  let source = read_source_file "lib/board/board_votes.ml" in
+  let contains needle =
+    Option.is_some (find_substring_from source needle 0)
+  in
+  Alcotest.(check bool)
+    "append_vote_log_result reports persistence failure"
+    true
+    (contains "let append_vote_log_result");
+  Alcotest.(check bool)
+    "post vote rolls back on append failure"
+    true
+    (contains "rollback_post_vote store");
+  Alcotest.(check bool)
+    "comment vote rolls back on append failure"
+    true
+    (contains "rollback_comment_vote");
+  Alcotest.(check bool)
+    "vote append failure returns Io_error"
+    true
+    (contains "Error (Io_error msg)");
+  Alcotest.(check bool)
+    "old fire-and-forget vote side effect removed"
+    false
+    (contains "record_vote_side_effect");
+  let post_vote_source =
+    slice_between
+      source
+      ~start_marker:"let vote store ~voter ~post_id ~direction"
+      ~end_marker:"let current_vote_for_comment"
+  in
+  let comment_vote_source =
+    slice_between
+      source
+      ~start_marker:"let vote_comment store ~voter ~comment_id ~direction"
+      ~end_marker:"(** {1 Stats}"
+  in
+  let find section label needle =
+    match find_substring_from section needle 0 with
+    | Some idx -> idx
+    | None -> Alcotest.fail (label ^ ": missing " ^ needle)
+  in
+  let post_commit_idx = find post_vote_source "post vote" "commit_post_vote" in
+  let post_feedback_idx = find post_vote_source "post vote" "record_vote_feedback" in
+  Alcotest.(check bool)
+    "post vote feedback runs after persisted commit"
+    true
+    (post_commit_idx < post_feedback_idx);
+  let comment_commit_idx =
+    find comment_vote_source "comment vote" "commit_comment_vote"
+  in
+  let comment_feedback_idx =
+    find comment_vote_source "comment vote" "record_vote_feedback"
+  in
+  Alcotest.(check bool)
+    "comment vote feedback runs after persisted commit"
+    true
+    (comment_commit_idx < comment_feedback_idx)
+
 (** {1 Test runner} *)
 
 let () =
@@ -422,6 +768,8 @@ let () =
       Alcotest.test_case "empty ledger" `Quick (with_eio test_empty_ledger);
       Alcotest.test_case "upvote produces event" `Quick
         (with_eio test_upvote_produces_one_event);
+      Alcotest.test_case "namespaced voter preserved" `Quick
+        (with_eio test_namespaced_voter_is_preserved_in_karma_event);
       Alcotest.test_case "downvote no event" `Quick
         (with_eio test_downvote_no_event);
       Alcotest.test_case "self post upvote no karma" `Quick
@@ -450,11 +798,25 @@ let () =
     "serialisation", [
       Alcotest.test_case "json fields" `Quick
         (with_eio test_karma_event_json_fields);
+      Alcotest.test_case "vote-log flush keeps namespaced voter" `Quick
+        (with_eio test_vote_log_flush_preserves_namespaced_voter_field);
     ];
     "cache_lock_discipline", [
       Alcotest.test_case "invalidation propagates to next read" `Quick
         (with_eio test_invalidate_propagates_to_next_read);
       Alcotest.test_case "concurrent reads return same value" `Quick
         (with_eio_env test_concurrent_get_all_karma_returns_same_value);
+      Alcotest.test_case "delete mutations lock state before persist" `Quick
+        test_delete_mutations_take_state_lock_before_persist_lock;
+      Alcotest.test_case "delete mutations surface persistence failure" `Quick
+        test_delete_mutations_surface_persistence_failure;
+      Alcotest.test_case "curated post mutations surface persistence failure" `Quick
+        test_curated_post_mutations_surface_persistence_failure;
+      Alcotest.test_case "maybe_sweep timestamps under state lock" `Quick
+        test_maybe_sweep_updates_timestamps_under_state_lock;
+      Alcotest.test_case "flush_dirty snapshots once before persist" `Quick
+        test_flush_dirty_materializes_one_locked_snapshot_before_persist;
+      Alcotest.test_case "vote commit persists before feedback" `Quick
+        test_vote_commit_requires_persisted_vote_log_before_feedback;
     ];
   ]

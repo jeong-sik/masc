@@ -126,6 +126,12 @@ val jsonl_forced : unit -> bool
 (** [true] iff [MASC_BOARD_BACKEND] forces the JSONL backend.
     Exposed so the dispatch test can pin the env-driven default. *)
 
+val mutation_version : unit -> int
+(** Monotonic in-process board mutation version.  Incremented after successful
+    dispatch-level mutations and test resets so read caches outside the board
+    store can include it in their cache key without installing a competing
+    hook. *)
+
 (** {1 Posts} *)
 
 val create_post :
@@ -171,6 +177,12 @@ val set_pinned :
   (unit, Board.board_error) Result.t
 (** Sets the [pinned] flag on a post (operator pin). Owner-gated at the
     HTTP boundary; persists across restart. *)
+
+val set_visibility :
+  post_id:string ->
+  visibility:Board.visibility ->
+  (unit, Board.board_error) Result.t
+(** Sets a post's visibility and persists the updated snapshot. *)
 
 val search :
   query:string ->

@@ -143,6 +143,18 @@ let str_contains s substring =
     in
     loop 0
 
+let read_source_file rel =
+  let source_root =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> root
+    | None -> Sys.getcwd ()
+  in
+  let path = Filename.concat source_root rel in
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> In_channel.input_all ic)
+
 let str_starts_with ~prefix s =
   let len_s = String.length s in
   let len_prefix = String.length prefix in
@@ -486,7 +498,7 @@ let () = test "handle_done_records_approved_calibration_verdict" (fun () ->
 )
 
 let () = test "handle_transition_respects_completion_contract_and_records_custom_evaluator" (fun () ->
-  (* Legacy substring gate (Gate 2.5). When
+  (* Legacy local contract gate (Gate 2.5). When
      MASC_VERIFICATION_FSM_ENABLED=true, the persisted contract is passed to
      the LLM completion reviewer prompt. Pin the flag to [false] here to
      exercise the legacy local fallback this test asserts. *)
@@ -837,7 +849,7 @@ let () = test "handle_transition_force_release_by_admin_bypasses_nonowner_redire
        | None -> failwith "missing task-001 after forced release")
 )
 
-let () = test "handle_transition_rejects_submit_when_verification_disabled"
+let () = test "handle_transition_valid_actions_respect_verification_disabled"
     (fun () ->
   let ctx = make_test_ctx_with_agent "owner-agent" in
   let _ =
@@ -866,7 +878,8 @@ let () = test "handle_transition_rejects_submit_when_verification_disabled"
   in
   let message = Tool_result.message result in
   assert (not (Tool_result.is_success result));
-  assert (str_contains message "Verification FSM not enabled");
+  assert (str_contains message "Transition 'submit_for_verification'");
+  assert (str_contains message "Valid actions: start, done, cancel, release");
   assert (not (str_contains message "Valid actions: start, done, submit_for_verification"))
 )
 
@@ -1708,6 +1721,26 @@ let () = test "transition_claim_sets_planning_current_task" (fun () ->
    the typed CDAL verdict consultation in
    [test/test_cdal_evidence_gate.ml] (10 cases).  See issue #18830
    Cluster A.1 for the triage record. *)
+
+let () = test "retired_persisted_contract_rejection_noop_absent" (fun () ->
+  let sources =
+    [ "lib/task/tool_task.ml"
+    ; "lib/task/tool_task_handlers.ml"
+    ; "lib/task/tool_task_handlers.mli"
+    ; "lib/task/tool_task_contract_gate.ml"
+    ; "lib/task/tool_task_contract_gate.mli"
+    ]
+    |> List.map read_source_file
+    |> String.concat "\n"
+  in
+  assert (not (str_contains sources "persisted_contract_rejection"));
+  assert (str_contains sources "cdal_evidence_gate_decide_fn"))
+
+let () = test "workspace_task_transitions_keeps_fragile_match_warnings_enabled"
+    (fun () ->
+  let source = read_source_file "lib/workspace/workspace_task_transitions.ml" in
+  assert (not (str_contains source "[@warning \"-4\"]"));
+  assert (not (str_contains source "let[@warning \"-4\"]")))
 
 let task_submit_evidence_notes =
   "completion_notes: implementation completed with verification context. \

@@ -108,7 +108,7 @@ let decide
   | ( Masc_domain.Claim
     , (Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ }) ) ->
     if same_agent assignee then ok task_status else Error Invalid_transition
-  | Masc_domain.Claim, Masc_domain.Done _ -> ok task_status
+  | Masc_domain.Claim, Masc_domain.Done _ -> Error Invalid_transition
   | ( Masc_domain.Claim
     , Masc_domain.AwaitingVerification { assignee; submitted_at; verification_id; _ } ) ->
     (* Cross-agent verification dispatch (#19314): a verifier — not the
@@ -137,7 +137,7 @@ let decide
     else Error Invalid_transition
   | Masc_domain.Start, Masc_domain.InProgress { assignee; _ } ->
     if same_agent assignee then ok task_status else Error Invalid_transition
-  | Masc_domain.Start, Masc_domain.Done _ -> ok task_status
+  | Masc_domain.Start, Masc_domain.Done _ -> Error Invalid_transition
   | ( Masc_domain.Start
     , (Masc_domain.Todo | Masc_domain.AwaitingVerification _ | Masc_domain.Cancelled _) )
     -> Error Invalid_transition

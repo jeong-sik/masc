@@ -96,22 +96,30 @@ let read_goal_task_links_r config =
   | Ok json -> Ok (links_of_yojson json)
   | Error primary_msg ->
     let recovery_path = goal_task_links_recovery_path config in
-    (match read_json_result config recovery_path with
-     | Ok json ->
-       Log.Misc.warn
-         "read_goal_task_links: primary unreadable, recovered from %s (%s)"
-         recovery_path
-         primary_msg;
-       Ok (links_of_yojson json)
-     | Error recovery_msg ->
-       if not (path_exists config primary_path) then Ok []
-       else
-         Error
-           (Printf.sprintf
-              "%s; recovery read failed for %s: %s"
-              primary_msg
-              recovery_path
-              recovery_msg))
+    if path_exists config recovery_path
+    then
+      match read_json_result config recovery_path with
+      | Ok json ->
+        Log.Misc.warn
+          "read_goal_task_links: primary unreadable, recovered from %s (%s)"
+          recovery_path
+          primary_msg;
+        Ok (links_of_yojson json)
+      | Error recovery_msg ->
+        Error
+          (Printf.sprintf
+             "%s; recovery read failed for %s: %s"
+             primary_msg
+             recovery_path
+             recovery_msg)
+    else if not (path_exists config primary_path)
+    then Ok []
+    else
+      Error
+        (Printf.sprintf
+           "%s; recovery missing for %s"
+           primary_msg
+           recovery_path)
 ;;
 
 let read_goal_task_links config =
@@ -128,8 +136,43 @@ let write_goal_task_links config links =
   write_json config (goal_task_links_recovery_path config) json
 ;;
 
+let write_goal_task_links_result config ~operation links =
+  try
+    write_goal_task_links config links;
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
+    let msg =
+      Printf.sprintf
+        "%s: failed to write goal_task_links; caller must compensate: %s"
+        operation
+        (Printexc.to_string e)
+    in
+    Log.Misc.warn "%s" msg;
+    Error msg
+;;
+
+let read_goal_task_links_for_mutation config ~operation =
+  match read_goal_task_links_r config with
+  | Ok links -> Ok links
+  | Error msg ->
+    let msg =
+      Printf.sprintf
+        "%s: failed to read goal_task_links; refusing to overwrite registry: %s"
+        operation
+        msg
+    in
+    Log.Misc.warn "%s" msg;
+    Error msg
+;;
+
 let goal_task_links_lock_path config =
   Filename.concat (tasks_dir config) ".goal-task-links"
+;;
+
+let backlog_lock_path config =
+  Filename.concat (tasks_dir config) ".backlog"
 ;;
 
 let goal_ids_for_task links ~task_id =
@@ -156,25 +199,51 @@ let add_link_to_links links ~goal_id ~task_id =
   if !updated then links else links @ [ goal_id, [ task_id ] ]
 ;;
 
+type link_goalless_task_checked_error =
+  | Link_unknown_task
+  | Link_unknown_goal
+  | Link_registry_unreadable of string
+  | Link_already_assigned of string list
+
 let prune_links_for_goal config ~goal_id =
   let goal_id = String.trim goal_id in
   if String.equal goal_id "" then ()
   else
     with_file_lock config (goal_task_links_lock_path config) (fun () ->
-      let links = read_goal_task_links config in
-      let links = List.filter (fun (gid, _) -> not (String.equal gid goal_id)) links in
-      write_goal_task_links config links)
+      match read_goal_task_links_for_mutation config ~operation:"prune_links_for_goal" with
+      | Error _ -> ()
+      | Ok links ->
+        let links = List.filter (fun (gid, _) -> not (String.equal gid goal_id)) links in
+        ignore (write_goal_task_links_result config ~operation:"prune_links_for_goal" links))
+;;
+
+let link_task_to_goal_result config ~goal_id ~task_id =
+  let goal_id = String.trim goal_id in
+  let task_id = String.trim task_id in
+  if String.equal goal_id "" || String.equal task_id ""
+  then Ok ()
+  else
+    with_file_lock config (goal_task_links_lock_path config) (fun () ->
+      match
+        read_goal_task_links_for_mutation
+          config
+          ~operation:"link_task_to_goal_result"
+      with
+      | Error msg -> Error (Link_registry_unreadable msg)
+      | Ok links ->
+        (match
+           write_goal_task_links_result
+             config
+             ~operation:"link_task_to_goal_result"
+             (add_link_to_links links ~goal_id ~task_id)
+         with
+         | Ok () -> Ok ()
+         | Error msg -> Error (Link_registry_unreadable msg)))
 ;;
 
 let link_task_to_goal config ~goal_id ~task_id =
-  let goal_id = String.trim goal_id in
-  let task_id = String.trim task_id in
-  if String.equal goal_id "" || String.equal task_id "" then ()
-  else
-    with_file_lock config (goal_task_links_lock_path config) (fun () ->
-      let links = read_goal_task_links config in
-      let links = add_link_to_links links ~goal_id ~task_id in
-      write_goal_task_links config links)
+  match link_task_to_goal_result config ~goal_id ~task_id with
+  | Ok () | Error _ -> ()
 ;;
 
 let link_goalless_task_to_goal config ~goal_id ~task_id =
@@ -183,21 +252,105 @@ let link_goalless_task_to_goal config ~goal_id ~task_id =
   if String.equal goal_id "" || String.equal task_id "" then Ok ()
   else
     with_file_lock config (goal_task_links_lock_path config) (fun () ->
-      let links = read_goal_task_links config in
-      match goal_ids_for_task links ~task_id with
-      | [] ->
-        write_goal_task_links config (add_link_to_links links ~goal_id ~task_id);
-        Ok ()
-      | existing_goal_ids -> Error existing_goal_ids)
+      match
+        read_goal_task_links_for_mutation
+          config
+          ~operation:"link_goalless_task_to_goal"
+      with
+      | Error msg -> Error (Link_registry_unreadable msg)
+      | Ok links ->
+        (match goal_ids_for_task links ~task_id with
+         | [] ->
+           (match
+              write_goal_task_links_result
+                config
+                ~operation:"link_goalless_task_to_goal"
+                (add_link_to_links links ~goal_id ~task_id)
+            with
+            | Ok () -> Ok ()
+            | Error msg -> Error (Link_registry_unreadable msg))
+         | existing_goal_ids -> Error (Link_already_assigned existing_goal_ids)))
+;;
+
+let link_goalless_task_to_goal_checked
+      config
+      ~goal_id
+      ~task_id
+      ~task_exists
+      ~goal_exists
+  =
+  let goal_id = String.trim goal_id in
+  let task_id = String.trim task_id in
+  with_file_lock config (goal_task_links_lock_path config) (fun () ->
+    if (not (task_exists ~task_id)) || String.equal task_id ""
+    then Error Link_unknown_task
+    else if (not (goal_exists ~goal_id)) || String.equal goal_id ""
+    then Error Link_unknown_goal
+    else
+      match
+        read_goal_task_links_for_mutation
+          config
+          ~operation:"link_goalless_task_to_goal_checked"
+      with
+      | Error msg -> Error (Link_registry_unreadable msg)
+      | Ok links ->
+        (match goal_ids_for_task links ~task_id with
+         | [] ->
+           (match
+              write_goal_task_links_result
+                config
+                ~operation:"link_goalless_task_to_goal_checked"
+                (add_link_to_links links ~goal_id ~task_id)
+            with
+            | Ok () -> Ok ()
+            | Error msg -> Error (Link_registry_unreadable msg))
+         | existing_goal_ids -> Error (Link_already_assigned existing_goal_ids)))
+;;
+
+let link_tasks_to_goals_result config task_goal_links =
+  let normalized =
+    task_goal_links
+    |> List.filter_map (fun (task_id, goal_id_opt) ->
+      match goal_id_opt with
+      | None -> None
+      | Some goal_id ->
+        let task_id = String.trim task_id in
+        let goal_id = String.trim goal_id in
+        if String.equal task_id "" || String.equal goal_id ""
+        then None
+        else Some (task_id, goal_id))
+  in
+  match normalized with
+  | [] -> Ok ()
+  | _ ->
+    with_file_lock config (goal_task_links_lock_path config) (fun () ->
+      match
+        read_goal_task_links_for_mutation
+          config
+          ~operation:"link_tasks_to_goals_result"
+      with
+      | Error msg -> Error (Link_registry_unreadable msg)
+      | Ok links ->
+        let links =
+          List.fold_left
+            (fun acc (task_id, goal_id) ->
+               add_link_to_links acc ~goal_id ~task_id)
+            links
+            normalized
+        in
+        (match
+           write_goal_task_links_result
+             config
+             ~operation:"link_tasks_to_goals_result"
+             links
+         with
+         | Ok () -> Ok ()
+         | Error msg -> Error (Link_registry_unreadable msg)))
 ;;
 
 let link_tasks_to_goals config links =
-  List.iter
-    (fun (task_id, goal_id_opt) ->
-       match goal_id_opt with
-       | None -> ()
-       | Some goal_id -> link_task_to_goal config ~goal_id ~task_id)
-    links
+  match link_tasks_to_goals_result config links with
+  | Ok () | Error _ -> ()
 ;;
 
 (** Build a reverse index from goal_id to its linked tasks.
@@ -228,6 +381,23 @@ let build_goal_task_index
        Hashtbl.replace tbl goal_id linked_tasks)
     goal_task_links;
   tbl
+;;
+
+let build_goal_task_index_for_config_checked config =
+  with_file_lock config (backlog_lock_path config) (fun () ->
+    match Workspace_backlog.read_backlog_r config with
+    | Error msg ->
+      Error ("build_goal_task_index_for_config_checked: backlog unreadable: " ^ msg)
+    | Ok backlog ->
+      with_file_lock config (goal_task_links_lock_path config) (fun () ->
+        match
+          read_goal_task_links_for_mutation
+            config
+            ~operation:"build_goal_task_index_for_config_checked"
+        with
+        | Error msg -> Error msg
+        | Ok goal_task_links ->
+          Ok (build_goal_task_index backlog.tasks ~goal_task_links)))
 ;;
 
 (** Find all tasks linked to a specific goal.

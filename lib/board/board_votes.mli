@@ -23,13 +23,13 @@
       [rewrite_vote_log].
     - {b Internal vote outcome}: the [vote_outcome] record
       carries the score delta, optional fresh peer-upvote economy
-      credit, and post-lock vote log / feedback side effects.
+      credit, committed vote log facts, and post-lock feedback inputs.
     - {b Persistence loaders}: [load_persisted_posts],
       [load_persisted_comments], [load_persisted_votes],
       [recalculate_reply_counts].
     - {b Quarantine helpers}: [classify_voter_target],
       [quarantine_enabled].
-    - {b Global store}: [global_lazy] ref.
+    - {b Global store}: atomic [global_lazy] slot.
     - {b Flair extractor internals}: [flair_tag_re],
       [extract_flair]. *)
 
@@ -165,6 +165,14 @@ val set_pinned :
     Marks the post dirty so the change persists to
     posts.jsonl and survives restart. *)
 
+val set_visibility :
+  store ->
+  post_id:string ->
+  visibility:visibility ->
+  (unit, board_error) Result.t
+(** Sets a post's visibility and persists the updated snapshot. Used by
+    moderation [Hide] to move content out of public feeds without deleting it. *)
+
 val delete_post :
   store -> post_id:string -> (unit, board_error) Result.t
 (** Removes the post and every comment under it from the
@@ -174,24 +182,33 @@ val delete_post :
 
 (** {1 Global store + lifecycle} *)
 
+exception Persistence_load_failed of string
+(** Raised by {!global} when one of the persisted board files exists but cannot
+    be read or parsed.  Startup is fail-closed so a partially loaded in-memory
+    store cannot later flush over the canonical JSONL snapshots. *)
+
 val global : unit -> store
 (** Lazy singleton.  First call constructs the store via
     {!create_store}, then runs the four loaders
     ([load_persisted_posts] / [_comments] / [_votes] +
     [recalculate_reply_counts]) under
     [Eio.Lazy.from_fun ~cancel:`Protect] so a cancelled
-    fiber cannot leave the singleton half-initialised. *)
+    fiber cannot leave the singleton half-initialised.  Raises
+    {!Persistence_load_failed} instead of returning a best-effort partial store
+    when any persistence file fails to load. *)
 
 val reset_global_for_test : unit -> unit
-(** Reinstalls a fresh lazy singleton.  Safe to call only
-    from test setup before concurrent fibers exist. *)
+(** Reinstalls a fresh lazy singleton via an atomic slot swap.  Intended for
+    test setup/teardown; concurrent callers never observe an unsynchronised
+    mutable-ref update. *)
 
 val flush_dirty : store -> unit
 (** Flushes dirty post/comment snapshots to the JSONL files
-    with a short in-memory snapshot lock and append-only disk
-    writes.  When dirty vote targets exist, compacts the vote
-    log from the same timestamp-preserving in-memory snapshot.
-    Stamps [last_flush] with the wall clock. *)
+    with a short in-memory snapshot lock and atomic disk rewrites.
+    When dirty vote targets exist, compacts the vote log from the
+    same timestamp-preserving in-memory snapshot.  If any rewrite
+    fails, restores the relevant dirty flag so the next flush retries.
+    Stamps [last_flush] with the wall clock when the snapshot is taken. *)
 
 (** {1 Karma} *)
 
@@ -278,10 +295,10 @@ type voter_kind =
 val classify_voter_target : string -> voter_kind
 (** [classify_voter_target target] derives the typed {!voter_kind}
     from a vote-log target key ([workspace:agent] tuple or bare agent
-    name).  Extracts the voter segment after the rightmost [':']
-    then dispatches on the [hot-voter-] / [synthetic-voter-] /
-    [test-voter-] prefixes (matching the legacy
-    [is_fixture_voter_target] semantics exactly).
+    name).  Extracts the voter segment by splitting only the first two
+    [':'] separators, preserving namespaced voters such as
+    ["workspace:agent"], then dispatches on the [hot-voter-] /
+    [synthetic-voter-] / [test-voter-] prefixes.
 
     Returns [Production_voter] for every target that does not
     match a fixture prefix.  Pinned for behaviour-tests under

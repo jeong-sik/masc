@@ -171,6 +171,9 @@ and handle_transition ~tool_name ~start_time ctx args =
       )
     else false
   in
+  let authority =
+    if force then Masc_domain.Operator else Masc_domain.Assignee
+  in
   let tasks = Workspace.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
   let release_owner_mismatch_rejection =
@@ -300,7 +303,16 @@ and handle_transition ~tool_name ~start_time ctx args =
          ~alternatives
          message)
   | None ->
-  match client_side_transition_gate_error ~task_opt ~action ~action_s with
+  match
+    client_side_transition_gate_error
+      ~config:ctx.config
+      ~agent_name:ctx.agent_name
+      ~task_opt
+      ~action
+      ~action_s
+      ~authority
+      ~verification_enabled:(Env_config_runtime.Verification.fsm_enabled ())
+  with
   | Some err ->
     log_task_transition_failed ~agent_name:ctx.agent_name (Masc_domain.Task err);
     result_to_response ~tool_name ~start_time (Error (Masc_domain.Task err))
@@ -325,26 +337,6 @@ and handle_transition ~tool_name ~start_time ctx args =
   let completion_owned_by_caller =
     force || can_review_completion ~task_opt ~agent_name:ctx.agent_name
   in
-  let persisted_gate_rejection =
-    if (=) action Masc_domain.Done_action && not force then
-      if not completion_owned_by_caller then
-        None
-      else if task_has_persisted_contract task_opt then
-        persisted_contract_rejection ~ctx ~task_opt ~notes
-      else
-        None
-    else
-      None
-  in
-  match persisted_gate_rejection with
-  | Some reason ->
-    (* RFC-0189: persisted-contract gate rejected the completion
-       attempt — operator-supplied notes don't satisfy the
-       contract. [Workflow_rejection]. *)
-    Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
-      ~tool_name ~start_time reason
-  | None ->
   let review_gate_rejection =
     if (=) action Masc_domain.Done_action && not force then
       if not completion_owned_by_caller then
@@ -526,35 +518,20 @@ and handle_transition ~tool_name ~start_time ctx args =
     | Masc_domain.Submit_for_verification ->
       None
   in
-  let verifier_approve_gate_rejection =
-    if (=) action Masc_domain.Approve_verification
-       && task_has_strict_persisted_contract task_opt
-    then
-      persisted_contract_rejection ~ctx ~task_opt ~notes
-    else
-      None
-  in
-  match verifier_approve_gate_rejection with
-  | Some reason ->
-    (* RFC-0189: verifier-approval gate rejected the transition —
-       caller (verifier) tried to approve without satisfying the
-       persisted contract. [Workflow_rejection]. *)
-    Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
-      ~tool_name ~start_time reason
-  | None ->
   let rec try_transition attempt =
-      let ev = if attempt = 0 then expected_version else None in
       let r = Workspace.transition_task_r ctx.config ~agent_name:ctx.agent_name
-                ~task_id ~action ?expected_version:ev ~notes ~reason
-                (* RFC-0262: the admin-gated [force] bool (l.164, already
-                   verified against initial_admin) maps to Operator authority;
-                   a non-admin or no-force caller acts as Assignee. *)
-                ~authority:(if force then Masc_domain.Operator else Masc_domain.Assignee)
+                ~task_id ~action ?expected_version ~notes ~reason
+                (* RFC-0262: the admin-gated [force] bool maps to Operator
+                   authority; a non-admin or no-force caller acts as Assignee. *)
+                ~authority
                 ?handoff_context ?prepare_verification_request
                 ?compensate_verification_request
                 ?prepare_verification_verdict () in
-      if is_version_mismatch r && attempt < max_cas_retries then begin
+      if
+        is_version_mismatch r
+        && Option.is_none expected_version
+        && attempt < max_cas_retries
+      then begin
         task_log_info ~task_id "CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms"
           task_id (attempt + 1) max_cas_retries (cas_retry_delay_s *. 1000.0);
         try

@@ -97,6 +97,17 @@ let test_sandbox_isolation_path_traversal_rejected () =
   require_error "path traversal rejected"
     (Inv.sandbox_isolation ~sandbox_roots:roots ~sandbox_paths:paths)
 
+(* Root-level [..] in an absolute path is a no-op in filesystem semantics.  The
+   invariant must compare canonical spellings, not preserve [".."] as a literal
+   segment that can make equivalent sandbox roots/paths disagree. *)
+let test_sandbox_isolation_root_parent_clamped () =
+  let roots = ["/../srv/masc/keepers/alice"] in
+  let paths =
+    ["/srv/masc/keepers/alice/file.txt"; "/../srv/masc/keepers/alice/log.txt"]
+  in
+  require_ok "root parent clamped"
+    (Inv.sandbox_isolation ~sandbox_roots:roots ~sandbox_paths:paths)
+
 let test_check_all_first_error () =
   let roots = ["/tmp/masc_sandbox_turn_1"] in
   let paths = ["/etc/passwd"] in
@@ -125,6 +136,8 @@ let () =
             test_sandbox_isolation_sibling_prefix_rejected;
           test_case "path_traversal_rejected" `Quick
             test_sandbox_isolation_path_traversal_rejected;
+          test_case "root_parent_clamped" `Quick
+            test_sandbox_isolation_root_parent_clamped;
           test_case "root_slash" `Quick test_sandbox_isolation_root_slash;
         ] );
       ( "tool_surface_monotonicity",

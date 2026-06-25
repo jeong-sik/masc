@@ -38,10 +38,18 @@ let with_workspace f =
     (fun () ->
        let config = Workspace.default_config dir in
        ignore (Workspace.init config ~agent_name:(Some "planner"));
-       f config)
+       let previous_is_admin = Atomic.get Workspace_hooks.is_admin_agent_fn in
+       Fun.protect
+         ~finally:(fun () -> Atomic.set Workspace_hooks.is_admin_agent_fn previous_is_admin)
+         (fun () ->
+            Atomic.set Workspace_hooks.is_admin_agent_fn
+              (fun ~base_path:_ ~agent_name -> String.equal agent_name "planner");
+            f config))
 ;;
 
-let workspace_ctx config : Tool_workspace.context = { Tool_workspace.config; agent_name = "planner" }
+let workspace_ctx ?(agent_name = "planner") config : Tool_workspace.context =
+  { Tool_workspace.config; agent_name }
+;;
 
 let parse_json_result (result : Tool_result.result) =
   if (Tool_result.is_success result)
@@ -63,6 +71,12 @@ let get_string_list_field json field =
   |> List.map Yojson.Safe.Util.to_string
 ;;
 
+let get_payload json =
+  match Yojson.Safe.Util.member "payload" json with
+  | `Assoc _ as payload -> payload
+  | _ -> fail "payload missing"
+;;
+
 let json_is_null = function
   | `Null -> true
   | _ -> false
@@ -81,6 +95,78 @@ let contains_substring s needle =
     else loop (i + 1)
   in
   loop 0
+;;
+
+let count_substring s needle =
+  let s_len = String.length s in
+  let n_len = String.length needle in
+  let rec loop i count =
+    if n_len = 0 || i + n_len > s_len
+    then count
+    else if String.sub s i n_len = needle
+    then loop (i + n_len) (count + 1)
+    else loop (i + 1) count
+  in
+  loop 0 0
+;;
+
+let find_substring_from source needle start =
+  let source_len = String.length source in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if idx + needle_len > source_len
+    then None
+    else if String.sub source idx needle_len = needle
+    then Some idx
+    else loop (idx + 1)
+  in
+  loop start
+;;
+
+let find_substring source needle = find_substring_from source needle 0
+
+let read_source_file rel =
+  let source_root =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> root
+    | None -> Sys.getcwd ()
+  in
+  let path = Filename.concat source_root rel in
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> In_channel.input_all ic)
+;;
+
+let read_file path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> In_channel.input_all ic)
+;;
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> Out_channel.output_string oc content)
+;;
+
+let goal_events_by_type config event_type =
+  Fs_compat.load_jsonl (Goal_verification.events_path config)
+  |> List.filter (fun json ->
+    match Yojson.Safe.Util.member "event_type" json with
+    | `String value -> String.equal value event_type
+    | _ -> false)
+;;
+
+let approval_request_by_id config request_id =
+  Goal_approval.read_state config
+  |> fun state ->
+  List.find_opt
+    (fun (request : Goal_approval.approval_request) ->
+      String.equal request.id request_id)
+    state.requests
 ;;
 
 let create_done_task config ~goal_id ~title =
@@ -366,6 +452,124 @@ let test_goal_upsert_rejects_malformed_verifier_policy_shape () =
     (contains_substring (Yojson.Safe.to_string error) "accepted verifier_policy shapes")
 ;;
 
+let test_goal_verification_phase_failure_source_guard () =
+  let source = read_source_file "lib/workspace_goals.ml" in
+  check
+    int
+    "verification request compensation helper is defined and used"
+    2
+    (count_substring source "cancel_verification_request_after_phase_failure");
+  check
+    bool
+    "verification cancellation records a durable reason"
+    true
+    (contains_substring source "failed_to_persist_awaiting_verification_phase");
+  check
+    bool
+    "sealed vote phase write failure is observable"
+    true
+    (contains_substring source "goal_verification_phase_update_failed");
+  check
+    bool
+    "sealed vote phase write failure names request status"
+    true
+    (contains_substring source "sealed as %s but failed to")
+  ;
+  check
+    bool
+    "sealed vote phase write failure rolls verification request back"
+    true
+    (contains_substring source "rollback_verification_vote_after_phase_failure")
+  ;
+  let verification_source = read_source_file "lib/goal/goal_verification.ml" in
+  check
+    bool
+    "verification rollback refuses changed current request"
+    true
+    (contains_substring
+       verification_source
+       "refusing to rollback")
+  ;
+  check
+    bool
+    "verification votes require the goal active request binding"
+    true
+    (contains_substring source "validate_goal_active_verification_request");
+  check
+    bool
+    "inactive goals cannot accept stale verification votes"
+    true
+    (contains_substring source "is not awaiting verification; refusing vote")
+;;
+
+let test_goal_completion_phase_update_rechecks_ready_source_guard () =
+  let store_source = read_source_file "lib/goal/goal_store.ml" in
+  check
+    bool
+    "checked goal update can fail before write"
+    true
+    (contains_substring store_source "let update_goal_checked");
+  let verification_source = read_source_file "lib/workspace_goals_verification.ml" in
+  check
+    bool
+    "phase update uses checked goal update"
+    true
+    (contains_substring verification_source "Goal_store.update_goal_checked");
+  check
+    bool
+    "phase update accepts precondition"
+    true
+    (contains_substring verification_source "?precondition");
+  let goals_source = read_source_file "lib/workspace_goals.ml" in
+  check
+    bool
+    "completion precondition helper is wired"
+    true
+    (count_substring goals_source "completion_ready_precondition" >= 3);
+  check
+    bool
+    "completion readiness uses locked fail-closed goal-task snapshot"
+    true
+    (contains_substring
+       goals_source
+       "build_goal_task_index_for_config_checked");
+  let index_source = read_source_file "lib/workspace/workspace_goal_index.ml" in
+  let snapshot_source =
+    let start_marker = "let build_goal_task_index_for_config_checked" in
+    match find_substring index_source start_marker with
+    | None -> fail "missing checked goal-task snapshot helper"
+    | Some start ->
+      let rest =
+        String.sub index_source start (String.length index_source - start)
+      in
+      match find_substring rest "let tasks_for_goal" with
+      | None -> rest
+      | Some stop -> String.sub rest 0 stop
+  in
+  let backlog_lock_idx =
+    match find_substring snapshot_source "backlog_lock_path config" with
+    | Some idx -> idx
+    | None -> fail "checked snapshot missing backlog lock"
+  in
+  let link_lock_idx =
+    match find_substring snapshot_source "goal_task_links_lock_path config" with
+    | Some idx -> idx
+    | None -> fail "checked snapshot missing goal-task-links lock"
+  in
+  check bool "checked snapshot lock order is backlog before links" true
+    (backlog_lock_idx < link_lock_idx);
+  check
+    bool
+    "request_complete phase writes recheck completion readiness"
+    true
+    (contains_substring goals_source "?precondition:request_completion_precondition");
+  check
+    bool
+    "verification approval finalization rechecks completion readiness"
+    true
+    (contains_substring goals_source "?precondition:approval_precondition")
+;;
+
 let test_goal_transition_verification_to_completion () =
   with_workspace
   @@ fun config ->
@@ -418,7 +622,7 @@ let test_goal_transition_verification_to_completion () =
      |> fun json -> get_string_field json "id");
   let verified =
     Tool_workspace.dispatch
-      (workspace_ctx config)
+      (workspace_ctx ~agent_name:"agent-alpha" config)
       ~name:"masc_goal_verify"
       ~args:
         (`Assoc
@@ -527,7 +731,7 @@ let test_goal_transition_rejected_verification_retains_evidence () =
   in
   let rejected =
     Tool_workspace.dispatch
-      (workspace_ctx config)
+      (workspace_ctx ~agent_name:"agent-alpha" config)
       ~name:"masc_goal_verify"
       ~args:
         (`Assoc
@@ -715,7 +919,7 @@ let test_goal_transition_approval_gate () =
   in
   let verified =
     Tool_workspace.dispatch
-      (workspace_ctx config)
+      (workspace_ctx ~agent_name:"agent-alpha" config)
       ~name:"masc_goal_verify"
       ~args:
         (`Assoc
@@ -737,6 +941,45 @@ let test_goal_transition_approval_gate () =
     (verified_json
      |> Yojson.Safe.Util.member "goal"
      |> fun json -> get_string_field json "phase");
+  let approval_request =
+    match Goal_approval.find_open_request config ~goal_id:goal.id with
+    | Some request -> request
+    | None -> fail "approval request was not persisted"
+  in
+  check bool "approval request id prefix" true
+    (String.starts_with ~prefix:"approval-" approval_request.id);
+  check int "approval request id length" 41 (String.length approval_request.id);
+  check string "approval request goal_id" goal.id approval_request.goal_id;
+  check
+    string
+    "approval request links verification request"
+    request_id
+    (match approval_request.verification_request_id with
+     | Some value -> value
+     | None -> fail "approval request missing verification_request_id");
+  check string "approval opened by final verifier" "agent-alpha" approval_request.opened_by.id;
+  check
+    string
+    "approval request is open"
+    "open"
+    (Goal_approval.approval_status_to_string approval_request.status);
+  let opened_event =
+    goal_events_by_type config "goal_approval_opened"
+    |> List.find_opt (fun event ->
+      let payload = get_payload event in
+      let event_request =
+        Yojson.Safe.Util.member "approval_request" payload
+      in
+      (match Yojson.Safe.Util.member "id" event_request with
+       | `String id -> String.equal id approval_request.id
+       | _ -> false))
+  in
+  (match opened_event with
+   | None -> fail "goal_approval_opened event missing durable approval_request"
+   | Some event ->
+     let payload = get_payload event in
+     let actor = Yojson.Safe.Util.member "actor" payload in
+     check string "opened event actor" "agent-alpha" (get_string_field actor "id"));
   let approved =
     Tool_workspace.dispatch
       (workspace_ctx config)
@@ -760,6 +1003,114 @@ let test_goal_transition_approval_gate () =
     (approved_json
      |> Yojson.Safe.Util.member "goal"
      |> fun json -> get_string_field json "phase")
+  ;
+  check
+    bool
+    "approval request no longer open"
+    true
+    (Option.is_none (Goal_approval.find_open_request config ~goal_id:goal.id));
+  let saved_approval_request =
+    match approval_request_by_id config approval_request.id with
+    | Some request -> request
+    | None -> fail "approval request missing after resolution"
+  in
+  check
+    string
+    "approval request approved"
+    "approved"
+    (Goal_approval.approval_status_to_string saved_approval_request.status);
+  check
+    string
+    "approval resolved by operator"
+    "planner"
+    (match saved_approval_request.resolved_by with
+     | Some principal -> principal.id
+     | None -> fail "approval request missing resolved_by");
+  let resolved_event =
+    goal_events_by_type config "goal_approval_resolved"
+    |> List.find_opt (fun event ->
+      let payload = get_payload event in
+      let event_request =
+        Yojson.Safe.Util.member "approval_request" payload
+      in
+      (match Yojson.Safe.Util.member "id" event_request with
+       | `String id -> String.equal id approval_request.id
+       | _ -> false))
+  in
+  match resolved_event with
+  | None -> fail "goal_approval_resolved event missing approval_request"
+  | Some event ->
+    let payload = get_payload event in
+    check string "resolved decision" "approve" (get_string_field payload "decision");
+    let actor = Yojson.Safe.Util.member "actor" payload in
+    check string "resolved event actor" "planner" (get_string_field actor "id")
+;;
+
+let test_goal_approval_semantic_errors_do_not_rewrite_ledger () =
+  with_workspace
+  @@ fun config ->
+  let principal : Goal_verification.goal_principal =
+    { id = "planner"; display_name = None }
+  in
+  let request =
+    match
+      Goal_approval.open_request
+        config
+        ~goal_id:"goal-semantic-error"
+        ~opened_by:principal
+        ()
+    with
+    | Ok request -> request
+    | Error msg -> fail msg
+  in
+  let path = Goal_approval.requests_path config in
+  let after_open = read_file path in
+  (match
+     Goal_approval.open_request
+       config
+       ~goal_id:request.goal_id
+       ~opened_by:principal
+       ()
+   with
+   | Ok _ -> fail "duplicate approval open must reject"
+   | Error msg ->
+     check
+       bool
+       "duplicate open names existing request"
+       true
+       (contains_substring msg "already has an open approval request"));
+  check string "duplicate open does not rewrite ledger" after_open (read_file path);
+  let resolved =
+    match
+      Goal_approval.resolve_open_request
+        config
+        ~goal_id:request.goal_id
+        ~status:Goal_approval.Approved
+        ~resolved_by:principal
+        ()
+    with
+    | Ok request -> request
+    | Error msg -> fail msg
+  in
+  check string "request resolved" "approved"
+    (Goal_approval.approval_status_to_string resolved.status);
+  let after_resolve = read_file path in
+  (match
+     Goal_approval.resolve_open_request
+       config
+       ~goal_id:request.goal_id
+       ~status:Goal_approval.Rejected
+       ~resolved_by:principal
+       ()
+   with
+   | Ok _ -> fail "already resolved approval must reject"
+   | Error msg ->
+     check
+       bool
+       "second resolve names missing open request"
+       true
+       (contains_substring msg "no open approval request"));
+  check string "second resolve does not rewrite ledger" after_resolve (read_file path)
 ;;
 
 let test_goal_review_removed_from_dispatch () =
@@ -840,6 +1191,155 @@ let test_goal_completion_blocks_open_tasks () =
     (get_string_field error_json "error_code")
 ;;
 
+let test_goal_completion_fails_closed_on_corrupt_goal_task_registry () =
+  with_workspace
+  @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Completion corrupt links" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Corrupt links done task";
+  let links_path = Workspace_goal_index.goal_task_links_path config in
+  let recovery_path = links_path ^ ".last-good" in
+  let corrupt_primary = "{goal-links-corrupt" in
+  let corrupt_recovery = "{goal-links-recovery-corrupt" in
+  write_file links_path corrupt_primary;
+  write_file recovery_path corrupt_recovery;
+  let completed =
+    Tool_workspace.dispatch
+      (workspace_ctx config)
+      ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "action", `String "request_complete"
+            ; "actor", principal_json ~id:"planner"
+            ])
+  in
+  let error_json = expect_error completed in
+  check string "corrupt registry blocks completion" "conflict"
+    (get_string_field error_json "error_code");
+  check
+    bool
+    "error names readiness snapshot"
+    true
+    (contains_substring
+       (Yojson.Safe.to_string error_json)
+       "goal completion readiness unavailable");
+  check string "primary corrupt file preserved" corrupt_primary (read_file links_path);
+  check
+    string
+    "recovery corrupt file preserved"
+    corrupt_recovery
+    (read_file recovery_path);
+  let saved_goal =
+    match Goal_store.get_goal config ~goal_id:goal.id with
+    | Some goal -> goal
+    | None -> fail "goal missing after corrupt registry rejection"
+  in
+  check string "phase unchanged" "executing" (Goal_phase.to_string saved_goal.phase)
+;;
+
+let test_goal_verify_rolls_back_sealed_request_on_phase_failure () =
+  with_workspace
+  @@ fun config ->
+  let verifier_policy =
+    { Goal_verification.inherit_mode = Goal_verification.Extend
+    ; principals =
+        [ { id = "agent-alpha"; display_name = Some "agent-alpha" } ]
+    ; required_verdicts = Some 1
+    }
+  in
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal
+        config
+        ~title:"Verify rollback on phase failure"
+        ~verifier_policy
+        ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Rollback vote done task";
+  let opened =
+    Tool_workspace.dispatch
+      (workspace_ctx config)
+      ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "action", `String "request_complete"
+            ; "actor", principal_json ~id:"planner"
+            ])
+  in
+  let opened_json =
+    match opened with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_transition not handled"
+  in
+  let request_id =
+    opened_json
+    |> Yojson.Safe.Util.member "verification_request"
+    |> fun json -> get_string_field json "id"
+  in
+  let links_path = Workspace_goal_index.goal_task_links_path config in
+  let recovery_path = links_path ^ ".last-good" in
+  write_file links_path "{goal-links-corrupt-before-verify";
+  write_file recovery_path "{goal-links-recovery-corrupt-before-verify";
+  let verified =
+    Tool_workspace.dispatch
+      (workspace_ctx ~agent_name:"agent-alpha" config)
+      ~name:"masc_goal_verify"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "request_id", `String request_id
+            ; "principal", principal_json ~id:"agent-alpha"
+            ; "decision", `String "approve"
+            ; "note", `String "checked receipt and tests"
+            ; "evidence_refs", `List [ `String "receipt:agent-alpha:rollback" ]
+            ])
+  in
+  let error_json = expect_error verified in
+  check
+    bool
+    "error reports request rollback"
+    true
+    (contains_substring
+       (Yojson.Safe.to_string error_json)
+       "restored to open after failed goal phase write");
+  let saved_request =
+    match Goal_verification.find_request config ~request_id with
+    | Some request -> request
+    | None -> fail "verification request missing after rollback"
+  in
+  check
+    bool
+    "request restored to open"
+    true
+    (saved_request.status = Goal_verification.Open);
+  check int "vote was rolled back" 0 (List.length saved_request.votes);
+  let saved_goal =
+    match Goal_store.get_goal config ~goal_id:goal.id with
+    | Some goal -> goal
+    | None -> fail "goal missing after rollback"
+  in
+  check
+    string
+    "goal remains awaiting verification"
+    "awaiting_verification"
+    (Goal_phase.to_string saved_goal.phase);
+  check
+    string
+    "active verification request preserved"
+    request_id
+    (match saved_goal.active_verification_request_id with
+     | Some id -> id
+     | None -> fail "active verification request cleared")
+;;
+
 let test_goal_completion_override_allows_empty_goal () =
   with_workspace
   @@ fun config ->
@@ -874,7 +1374,7 @@ let test_goal_completion_override_allows_empty_goal () =
      |> fun json -> get_string_field json "phase")
 ;;
 
-let test_operator_actions_accept_id_only_actor () =
+let test_operator_actions_reject_spoofed_actor () =
   with_workspace
   @@ fun config ->
   let goal, _kind =
@@ -882,7 +1382,7 @@ let test_operator_actions_accept_id_only_actor () =
     | Ok payload -> payload
     | Error msg -> fail msg
   in
-  let blocked =
+  let rejected =
     Tool_workspace.dispatch
       (workspace_ctx config)
       ~name:"masc_goal_transition"
@@ -893,27 +1393,17 @@ let test_operator_actions_accept_id_only_actor () =
             ; "actor", principal_json ~id:"agent-alpha"
             ])
   in
-  let blocked_json =
-    match blocked with
-    | Some result -> parse_json_result result
-    | None -> fail "masc_goal_transition not handled"
-  in
-  check
-    string
-    "actor id-only transition blocks goal"
-    "blocked"
-    (blocked_json
-     |> Yojson.Safe.Util.member "goal"
-     |> fun json -> get_string_field json "phase");
+  let error_json = expect_error rejected in
+  check string "spoofed actor rejected" "validation_error" (get_string_field error_json "error_code");
   let saved_goal =
     match Goal_store.get_goal config ~goal_id:goal.id with
     | Some goal -> goal
-    | None -> fail "goal missing after operator_block"
+    | None -> fail "goal missing after rejected operator_block"
   in
-  check string "phase changed" "blocked" (Goal_phase.to_string saved_goal.phase)
+  check string "phase unchanged" "executing" (Goal_phase.to_string saved_goal.phase)
 ;;
 
-let test_completion_approval_accepts_id_only_actor () =
+let test_completion_approval_rejects_spoofed_actor () =
   with_workspace
   @@ fun config ->
   let goal, _kind =
@@ -927,7 +1417,7 @@ let test_completion_approval_accepts_id_only_actor () =
     | Ok payload -> payload
     | Error msg -> fail msg
   in
-  let approved =
+  let rejected =
     Tool_workspace.dispatch
       (workspace_ctx config)
       ~name:"masc_goal_transition"
@@ -938,28 +1428,449 @@ let test_completion_approval_accepts_id_only_actor () =
             ; "actor", principal_json ~id:"agent-alpha"
             ])
   in
-  let approved_json =
-    match approved with
-    | Some result -> parse_json_result result
-    | None -> fail "masc_goal_transition not handled"
-  in
-  check
-    string
-    "id-only actor approval completes goal"
-    "completed"
-    (approved_json
-     |> Yojson.Safe.Util.member "goal"
-     |> fun json -> get_string_field json "phase");
+  let error_json = expect_error rejected in
+  check string "spoofed approval rejected" "validation_error" (get_string_field error_json "error_code");
   let saved_goal =
     match Goal_store.get_goal config ~goal_id:goal.id with
     | Some goal -> goal
-    | None -> fail "goal missing after approve_completion"
+    | None -> fail "goal missing after rejected approve_completion"
   in
   check
     string
-    "phase changed"
-    "completed"
+    "phase unchanged"
+    "awaiting_approval"
     (Goal_phase.to_string saved_goal.phase)
+;;
+
+let test_completion_approval_requires_open_request () =
+  with_workspace
+  @@ fun config ->
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal
+        config
+        ~title:"Approval without ledger"
+        ~phase:Goal_phase.Awaiting_approval
+        ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let rejected =
+    Tool_workspace.dispatch
+      (workspace_ctx config)
+      ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "action", `String "approve_completion"
+            ; "actor", principal_json ~id:"planner"
+            ])
+  in
+  let error_json = expect_error rejected in
+  check string "missing approval request rejected" "conflict" (get_string_field error_json "error_code");
+  let saved_goal =
+    match Goal_store.get_goal config ~goal_id:goal.id with
+    | Some goal -> goal
+    | None -> fail "goal missing after rejected approve_completion"
+  in
+  check
+    string
+    "phase unchanged"
+    "awaiting_approval"
+    (Goal_phase.to_string saved_goal.phase)
+;;
+
+let test_goal_approval_open_fails_closed_on_corrupt_state () =
+  with_workspace
+  @@ fun config ->
+  let path = Goal_approval.requests_path config in
+  let recovery = path ^ ".last-good" in
+  let primary_content = "{not valid json" in
+  let recovery_content = {|{"version":"not-an-int","updated_at":false,"requests":[]} |} in
+  write_file path primary_content;
+  write_file recovery recovery_content;
+  let opened_by : Goal_verification.goal_principal =
+    { id = "planner"; display_name = None }
+  in
+  let result =
+    Goal_approval.open_request
+      config
+      ~goal_id:"goal-corrupt"
+      ~opened_by
+      ()
+  in
+  (match result with
+   | Ok _ -> fail "corrupt approval ledger unexpectedly accepted open_request"
+   | Error msg ->
+     check
+       bool
+       "open_request read failure is explicit"
+       true
+       (contains_substring msg "failed to read goal approval state"));
+  check string "primary ledger preserved" primary_content (read_file path);
+  check string "recovery ledger preserved" recovery_content (read_file recovery)
+;;
+
+let test_goal_approval_resolve_fails_closed_on_corrupt_state () =
+  with_workspace
+  @@ fun config ->
+  let opened_by : Goal_verification.goal_principal =
+    { id = "planner"; display_name = None }
+  in
+  let request =
+    match
+      Goal_approval.open_request
+        config
+        ~goal_id:"goal-corrupt-resolve"
+        ~opened_by
+        ()
+    with
+    | Ok request -> request
+    | Error msg -> fail msg
+  in
+  let path = Goal_approval.requests_path config in
+  let recovery = path ^ ".last-good" in
+  let primary_content = "{not valid json" in
+  let recovery_content = {|{"version":"not-an-int","updated_at":false,"requests":[]} |} in
+  write_file path primary_content;
+  write_file recovery recovery_content;
+  let result =
+    Goal_approval.resolve_open_request
+      config
+      ~goal_id:request.goal_id
+      ~status:Goal_approval.Approved
+      ~resolved_by:opened_by
+      ()
+  in
+  (match result with
+   | Ok _ -> fail "corrupt approval ledger unexpectedly accepted resolve_open_request"
+   | Error msg ->
+     check
+       bool
+       "resolve_open_request read failure is explicit"
+       true
+       (contains_substring msg "failed to read goal approval state"));
+  check string "primary ledger preserved" primary_content (read_file path);
+  check string "recovery ledger preserved" recovery_content (read_file recovery)
+;;
+
+let test_goal_verify_rejects_spoofed_principal () =
+  with_workspace
+  @@ fun config ->
+  let verifier_policy =
+    { Goal_verification.inherit_mode = Goal_verification.Extend
+    ; principals =
+        [ { id = "agent-alpha"; display_name = Some "agent-alpha" } ]
+    ; required_verdicts = Some 1
+    }
+  in
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"No forged votes" ~verifier_policy () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"No forged votes done task";
+  let transitioned =
+    Tool_workspace.dispatch
+      (workspace_ctx config)
+      ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "action", `String "request_complete"
+            ; "actor", principal_json ~id:"planner"
+            ])
+  in
+  let transitioned_json =
+    match transitioned with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_transition not handled"
+  in
+  let request_id =
+    transitioned_json
+    |> Yojson.Safe.Util.member "verification_request"
+    |> fun json -> get_string_field json "id"
+  in
+  let rejected =
+    Tool_workspace.dispatch
+      (workspace_ctx config)
+      ~name:"masc_goal_verify"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "request_id", `String request_id
+            ; "principal", principal_json ~id:"agent-alpha"
+            ; "decision", `String "approve"
+            ])
+  in
+  let error_json = expect_error rejected in
+  check
+    string
+    "spoofed principal rejected"
+    "validation_error"
+    (get_string_field error_json "error_code");
+  let saved_request =
+    match Goal_verification.find_request config ~request_id with
+    | Some request -> request
+    | None -> fail "verification request missing after spoofed vote"
+  in
+  check int "no forged vote written" 0 (List.length saved_request.votes)
+;;
+
+let test_goal_verify_rejects_cross_goal_request_id () =
+  with_workspace
+  @@ fun config ->
+  let verifier_policy =
+    { Goal_verification.inherit_mode = Goal_verification.Extend
+    ; principals =
+        [ { id = "agent-alpha"; display_name = Some "agent-alpha" } ]
+    ; required_verdicts = Some 1
+    }
+  in
+  let create_goal title task_title =
+    let goal, _kind =
+      match Goal_store.upsert_goal config ~title ~verifier_policy () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    create_done_task config ~goal_id:goal.id ~title:task_title;
+    goal
+  in
+  let goal_one = create_goal "Cross goal one" "Cross goal one task" in
+  let goal_two = create_goal "Cross goal two" "Cross goal two task" in
+  let open_request goal =
+    let transitioned =
+      Tool_workspace.dispatch
+        (workspace_ctx config)
+        ~name:"masc_goal_transition"
+        ~args:
+          (`Assoc
+              [ "goal_id", `String goal.id
+              ; "action", `String "request_complete"
+              ; "actor", principal_json ~id:"planner"
+              ])
+    in
+    let transitioned_json =
+      match transitioned with
+      | Some result -> parse_json_result result
+      | None -> fail "masc_goal_transition not handled"
+    in
+    transitioned_json
+    |> Yojson.Safe.Util.member "verification_request"
+    |> fun json -> get_string_field json "id"
+  in
+  let request_one = open_request goal_one in
+  let rejected =
+    Tool_workspace.dispatch
+      (workspace_ctx ~agent_name:"agent-alpha" config)
+      ~name:"masc_goal_verify"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal_two.id
+            ; "request_id", `String request_one
+            ; "principal", principal_json ~id:"agent-alpha"
+            ; "decision", `String "approve"
+            ])
+  in
+  let error_json = expect_error rejected in
+  check string "cross-goal request rejected" "conflict" (get_string_field error_json "error_code");
+  let saved_request =
+    match Goal_verification.find_request config ~request_id:request_one with
+    | Some request -> request
+    | None -> fail "verification request missing after cross-goal vote"
+  in
+  check int "no cross-goal vote written" 0 (List.length saved_request.votes)
+;;
+
+let test_goal_verify_rejects_orphan_request_not_active_on_goal () =
+  with_workspace
+  @@ fun config ->
+  let verifier_policy =
+    { Goal_verification.inherit_mode = Goal_verification.Extend
+    ; principals =
+        [ { id = "agent-alpha"; display_name = Some "agent-alpha" } ]
+    ; required_verdicts = Some 1
+    }
+  in
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal
+        config
+        ~title:"Orphan verification request"
+        ~verifier_policy
+        ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let requested_by : Goal_verification.goal_principal =
+    { id = "planner"; display_name = None }
+  in
+  let policy_snapshot : Goal_verification.policy_snapshot =
+    { principals = verifier_policy.principals
+    ; eligible_principals = verifier_policy.principals
+    ; required_verdicts = 1
+    }
+  in
+  let request =
+    match
+      Goal_verification.create_request
+        config
+        ~goal_id:goal.id
+        ~requested_by
+        ~policy_snapshot
+    with
+    | Ok request -> request
+    | Error msg -> fail msg
+  in
+  let rejected =
+    Tool_workspace.dispatch
+      (workspace_ctx ~agent_name:"agent-alpha" config)
+      ~name:"masc_goal_verify"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "request_id", `String request.id
+            ; "principal", principal_json ~id:"agent-alpha"
+            ; "decision", `String "approve"
+            ])
+  in
+  let error_json = expect_error rejected in
+  check string "orphan request rejected" "conflict"
+    (get_string_field error_json "error_code");
+  check
+    bool
+    "error names inactive goal verification"
+    true
+    (contains_substring
+       (Yojson.Safe.to_string error_json)
+       "is not awaiting verification");
+  let saved_request =
+    match Goal_verification.find_request config ~request_id:request.id with
+    | Some request -> request
+    | None -> fail "verification request missing after orphan rejection"
+  in
+  check int "no orphan vote written" 0 (List.length saved_request.votes);
+  let saved_goal =
+    match Goal_store.get_goal config ~goal_id:goal.id with
+    | Some goal -> goal
+    | None -> fail "goal missing after orphan request rejection"
+  in
+  check string "goal phase unchanged" "executing" (Goal_phase.to_string saved_goal.phase)
+;;
+
+let test_goal_transition_cancels_stale_open_request_before_new_request () =
+  with_workspace
+  @@ fun config ->
+  let verifier_policy =
+    { Goal_verification.inherit_mode = Goal_verification.Extend
+    ; principals =
+        [ { id = "agent-alpha"; display_name = Some "agent-alpha" } ]
+    ; required_verdicts = Some 1
+    }
+  in
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal
+        config
+        ~title:"Cancel stale verification request"
+        ~verifier_policy
+        ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Cancel stale request done task";
+  let requested_by : Goal_verification.goal_principal =
+    { id = "planner"; display_name = None }
+  in
+  let policy_snapshot : Goal_verification.policy_snapshot =
+    { principals = verifier_policy.principals
+    ; eligible_principals = verifier_policy.principals
+    ; required_verdicts = 1
+    }
+  in
+  let stale_request =
+    match
+      Goal_verification.create_request
+        config
+        ~goal_id:goal.id
+        ~requested_by
+        ~policy_snapshot
+    with
+    | Ok request -> request
+    | Error msg -> fail msg
+  in
+  let opened =
+    Tool_workspace.dispatch
+      (workspace_ctx config)
+      ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "action", `String "request_complete"
+            ; "actor", principal_json ~id:"planner"
+            ])
+  in
+  let opened_json =
+    match opened with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_transition not handled"
+  in
+  let active_request_id =
+    opened_json
+    |> Yojson.Safe.Util.member "verification_request"
+    |> fun json -> get_string_field json "id"
+  in
+  check
+    bool
+    "new request differs from stale orphan"
+    true
+    (not (String.equal active_request_id stale_request.id));
+  let saved_stale =
+    match Goal_verification.find_request config ~request_id:stale_request.id with
+    | Some request -> request
+    | None -> fail "stale request missing after compensation sweep"
+  in
+  check
+    bool
+    "stale request cancelled"
+    true
+    (saved_stale.status = Goal_verification.Cancelled);
+  let saved_active =
+    match Goal_verification.find_request config ~request_id:active_request_id with
+    | Some request -> request
+    | None -> fail "new active request missing"
+  in
+  check
+    bool
+    "new request remains open"
+    true
+    (saved_active.status = Goal_verification.Open);
+  let saved_goal =
+    match Goal_store.get_goal config ~goal_id:goal.id with
+    | Some goal -> goal
+    | None -> fail "goal missing after opening verification"
+  in
+  check
+    string
+    "goal binds new active request"
+    active_request_id
+    (match saved_goal.active_verification_request_id with
+     | Some request_id -> request_id
+     | None -> fail "active request missing on goal");
+  let resolved_events = goal_events_by_type config "goal_verification_resolved" in
+  check
+    bool
+    "stale cancellation event emitted"
+    true
+    (List.exists
+       (fun json ->
+          contains_substring
+            (Yojson.Safe.to_string json)
+            "stale_open_request_before_new_verification")
+       resolved_events)
 ;;
 
 let () =
@@ -989,6 +1900,14 @@ let () =
             `Quick
             test_goal_upsert_rejects_malformed_verifier_policy_shape
         ; test_case
+            "verification phase failure source guard"
+            `Quick
+            test_goal_verification_phase_failure_source_guard
+        ; test_case
+            "completion phase update rechecks ready source guard"
+            `Quick
+            test_goal_completion_phase_update_rechecks_ready_source_guard
+        ; test_case
             "transition verify complete"
             `Quick
             test_goal_transition_verification_to_completion
@@ -1006,6 +1925,10 @@ let () =
             test_goal_transition_manual_reject_blocks_and_cancels_request
         ; test_case "approval gate" `Quick test_goal_transition_approval_gate
         ; test_case
+            "approval semantic errors do not rewrite ledger"
+            `Quick
+            test_goal_approval_semantic_errors_do_not_rewrite_ledger
+        ; test_case
             "completion requires linked task"
             `Quick
             test_goal_completion_requires_linked_task
@@ -1014,17 +1937,53 @@ let () =
             `Quick
             test_goal_completion_blocks_open_tasks
         ; test_case
+            "completion fails closed on corrupt goal-task registry"
+            `Quick
+            test_goal_completion_fails_closed_on_corrupt_goal_task_registry
+        ; test_case
+            "goal verify rolls back sealed request on phase failure"
+            `Quick
+            test_goal_verify_rolls_back_sealed_request_on_phase_failure
+        ; test_case
             "completion override allows empty goal"
             `Quick
             test_goal_completion_override_allows_empty_goal
         ; test_case
-            "operator actions accept id-only actor"
+            "operator actions reject spoofed actor"
             `Quick
-            test_operator_actions_accept_id_only_actor
+            test_operator_actions_reject_spoofed_actor
         ; test_case
-            "approval accepts id-only actor"
+            "approval rejects spoofed actor"
             `Quick
-            test_completion_approval_accepts_id_only_actor
+            test_completion_approval_rejects_spoofed_actor
+        ; test_case
+            "approval requires open request"
+            `Quick
+            test_completion_approval_requires_open_request
+        ; test_case
+            "approval open fails closed on corrupt state"
+            `Quick
+            test_goal_approval_open_fails_closed_on_corrupt_state
+        ; test_case
+            "approval resolve fails closed on corrupt state"
+            `Quick
+            test_goal_approval_resolve_fails_closed_on_corrupt_state
+        ; test_case
+            "goal verify rejects spoofed principal"
+            `Quick
+            test_goal_verify_rejects_spoofed_principal
+        ; test_case
+            "goal verify rejects cross-goal request id"
+            `Quick
+            test_goal_verify_rejects_cross_goal_request_id
+        ; test_case
+            "goal verify rejects orphan inactive request"
+            `Quick
+            test_goal_verify_rejects_orphan_request_not_active_on_goal
+        ; test_case
+            "transition cancels stale open request before new request"
+            `Quick
+            test_goal_transition_cancels_stale_open_request_before_new_request
         ] )
     ]
 ;;

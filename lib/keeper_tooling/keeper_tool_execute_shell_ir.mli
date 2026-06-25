@@ -71,8 +71,11 @@ val dispatch_classified :
 (** Run the canonical keeper Shell IR pipeline for an already-classified IR:
     typed gate -> path validation -> dispatch_decided. [redirect_allowed]
     defaults to [true] for the historical tool execute path; legacy code-shell
-    callers pass [false].  [?on_output_chunk] is forwarded to the host
-    dispatch path for live output streaming. *)
+    callers pass [false].  Catastrophic operations are policy-denied, and
+    privileged programs are [Approval_required] until a Shell IR approval
+    resolver is wired; this also applies to the approval-gate kill-switch path.
+    [?on_output_chunk] is forwarded to the host dispatch path for live output
+    streaming. *)
 
 val dispatch_classified_with_approval :
   ?allow_pipes:bool ->
@@ -92,7 +95,8 @@ val dispatch_classified_with_approval :
     [Ask] produces [Approval_required] carrying the blocked binary (the
     summary notes the audited/privileged risk class); [Deny] produces
     [Policy_denied] carrying the rendered typed [Verdict.deny_reason].
-    [Allow] and [Suggest_confirm] proceed to dispatch.
+    [Allow] and [Suggest_confirm] proceed to {!dispatch_classified}, which
+    still applies the privileged fail-closed floor before process dispatch.
     A nested pipeline whose last stage is itself a pipeline yields
     [Too_complex], matching {!dispatch_classified}. *)
 

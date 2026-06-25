@@ -49,6 +49,22 @@ let is_agent name =
   | None -> false
 ;;
 
+let is_keeper_agent_shape author_lc =
+  let prefix = "keeper-" in
+  let suffix = "-agent" in
+  let len = String.length author_lc in
+  len > String.length prefix + String.length suffix
+  && String.starts_with ~prefix author_lc
+  && String.ends_with ~suffix author_lc
+;;
+
+let is_bootstrap_agent_author author_lc =
+  is_keeper_agent_shape author_lc
+  || List.exists
+       (String.equal author_lc)
+       [ "claude-agent"; "codex-agent"; "gemini-agent" ]
+;;
+
 let resolve_board_post_kind ~author (raw_kind : string option)
   : (Board.post_kind, string) Stdlib.result
   =
@@ -69,6 +85,7 @@ let resolve_board_post_kind ~author (raw_kind : string option)
     else (
       match Atomic.get agent_lookup_hook with
       | Some _ when is_agent author_lc -> Ok Board.Automation_post
+      | None when is_bootstrap_agent_author author_lc -> Ok Board.Automation_post
       | _ -> Ok Board.Human_post)
 ;;
 

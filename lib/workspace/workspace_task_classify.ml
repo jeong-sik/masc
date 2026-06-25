@@ -323,41 +323,48 @@ let task_status_to_string = Masc_domain.task_status_to_string
 let task_assignee_of_status = Masc_domain.task_assignee_of_status
 
 (** Issue #7646: symmetric to [task_assignee_of_status]. When a transition
-    fails for a reason other than ownership mismatch, surface what
-    actions ARE legal from the current state so the LLM stops
-    guess-retrying.
+    fails for a reason other than ownership mismatch, surface what actions ARE
+    legal from the current state so the LLM stops guess-retrying.
 
-    Exhaustive [match] over [Masc_domain.task_status]: adding a 7th constructor
-    will fail to compile. Each branch lists actions that
-    [transition_task_r]'s match-arms accept for that status — keep this
-    in sync if you add new transitions there. Verifier-FSM transitions
-    require [MASC_VERIFICATION_FSM_ENABLED=true] but are listed
-    unconditionally so the hint stays accurate when the flag is on; the
-    flag-off case still rejects them and produces a more specific error. *)
-let valid_next_actions_for_status
-  : Masc_domain.task_status -> Masc_domain.task_action list
-  = function
-  | Masc_domain.Todo -> [ Masc_domain.Claim; Masc_domain.Release; Masc_domain.Cancel ]
-  | Masc_domain.Claimed _ ->
-    [ Masc_domain.Start
-    ; Masc_domain.Done_action
-    ; Masc_domain.Submit_for_verification
-    ; Masc_domain.Release
-    ; Masc_domain.Cancel
-    ]
-  | Masc_domain.InProgress _ ->
-    [ Masc_domain.Done_action
-    ; Masc_domain.Submit_for_verification
-    ; Masc_domain.Release
-    ; Masc_domain.Cancel
-    ]
-  | Masc_domain.AwaitingVerification _ ->
-    [ Masc_domain.Approve_verification; Masc_domain.Reject_verification ]
-  | Masc_domain.Done _ | Masc_domain.Cancelled _ -> [] (* terminal *)
+    This module used to duplicate the FSM table by hand, which drifted from
+    ownership, verification-flag, and operator-authority semantics. Keep the
+    legacy status-only API, but delegate to [Workspace_task_lifecycle] so this
+    projection changes only when the real transition table changes. *)
+let default_same_agent_for_hint = function
+  | Masc_domain.AwaitingVerification _ -> false
+  | Masc_domain.Todo
+  | Masc_domain.Claimed _
+  | Masc_domain.InProgress _
+  | Masc_domain.Done _
+  | Masc_domain.Cancelled _ -> true
 ;;
 
-let next_actions_hint status =
-  match valid_next_actions_for_status status with
+let valid_next_actions_for_status
+      ?(verification_enabled = true)
+      ?same_agent
+      ?(authority = Masc_domain.Assignee)
+      task_status
+  =
+  let same_agent =
+    match same_agent with
+    | Some value -> value
+    | None -> default_same_agent_for_hint task_status
+  in
+  Workspace_task_lifecycle.valid_next_actions
+    ~verification_enabled
+    ~same_agent
+    ~authority
+    ~task_status
+;;
+
+let next_actions_hint ?verification_enabled ?same_agent ?authority status =
+  match
+    valid_next_actions_for_status
+      ?verification_enabled
+      ?same_agent
+      ?authority
+      status
+  with
   | [] -> ""
   | xs ->
     Printf.sprintf

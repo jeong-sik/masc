@@ -205,6 +205,40 @@ let test_list_requests () =
     let reqs = V.list_requests base_path in
     Alcotest.(check int) "two requests" 2 (List.length reqs))
 
+let test_list_requests_cache_detects_same_dir_mtime_rewrite () =
+  with_temp_dir (fun base_path ->
+    match
+      V.create_request ~base_path ~task_id:"t1" ~output:(`String "old")
+        ~criteria:[] ~worker:"a" ()
+    with
+    | Error e -> Alcotest.fail e
+    | Ok req ->
+        let dir = active_verifications_dir base_path in
+        let path = VS.request_path base_path req.id in
+        let dir_stat = Unix.stat dir in
+        let file_stat = Unix.stat path in
+        let primed = V.list_requests base_path in
+        Alcotest.(check int) "primed cache" 1 (List.length primed);
+        let updated =
+          {
+            req with
+            task_id = "task-id-after-direct-rewrite";
+            output = `String "new output written out of band";
+          }
+        in
+        Fs_compat.save_file path
+          (Yojson.Safe.pretty_to_string (V.request_to_yojson updated));
+        Unix.utimes path file_stat.Unix.st_atime file_stat.Unix.st_mtime;
+        Unix.utimes dir dir_stat.Unix.st_atime dir_stat.Unix.st_mtime;
+        match V.list_requests base_path with
+        | [loaded] ->
+            Alcotest.(check string)
+              "direct rewrite is visible despite unchanged dir mtime"
+              "task-id-after-direct-rewrite" loaded.task_id
+        | reqs ->
+            Alcotest.failf "expected one request after rewrite, got %d"
+              (List.length reqs))
+
 let test_list_requests_missing_dir_stays_quiet () =
   with_temp_dir (fun base_path ->
     let before =
@@ -499,6 +533,8 @@ let () =
       Alcotest.test_case "create and load" `Quick test_create_and_load;
       Alcotest.test_case "delete request (idempotent)" `Quick test_delete_request;
       Alcotest.test_case "list requests" `Quick test_list_requests;
+      Alcotest.test_case "list requests cache detects same-dir-mtime rewrite" `Quick
+        test_list_requests_cache_detects_same_dir_mtime_rewrite;
       Alcotest.test_case "list requests missing dir stays quiet" `Quick
         test_list_requests_missing_dir_stays_quiet;
       Alcotest.test_case "verifications dir resolves active store" `Quick

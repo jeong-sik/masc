@@ -229,19 +229,25 @@ let sweep store =
 
 (** Auto-sweep if needed, delegates to flusher actor inbox *)
 let maybe_sweep store =
-  let now = Time_compat.now () in
-  if
-    Stdlib.Float.compare
-      (now -. store.last_sweep)
-      (Stdlib.Float.of_int Limits.sweeper_interval_sec)
-    > 0
-  then (
-    store.last_sweep <- now;
-    Eio.Stream.add store.flusher_inbox Sweep);
-  if Stdlib.Float.compare (now -. store.last_flush) flush_interval_sec > 0
-  then (
-    store.last_flush <- now;
-    Eio.Stream.add store.flusher_inbox Flush)
+  let actions =
+    with_lock store (fun () ->
+      let now = Time_compat.now () in
+      let actions = ref [] in
+      if
+        Stdlib.Float.compare
+          (now -. store.last_sweep)
+          (Stdlib.Float.of_int Limits.sweeper_interval_sec)
+        > 0
+      then (
+        store.last_sweep <- now;
+        actions := Sweep :: !actions);
+      if Stdlib.Float.compare (now -. store.last_flush) flush_interval_sec > 0
+      then (
+        store.last_flush <- now;
+        actions := Flush :: !actions);
+      List.rev !actions)
+  in
+  List.iter (Eio.Stream.add store.flusher_inbox) actions
 ;;
 
 (** {1 Persistence Paths} *)
@@ -267,16 +273,21 @@ let posts_jsonl_unlocked store =
     store.posts;
   Buffer.contents buf
 ;;
-let save_posts_jsonl content =
+let save_posts_jsonl_result content =
   try
     ensure_masc_dir ();
     let path = persist_path () in
     match Fs_compat.save_file_atomic path content with
-    | Ok () -> ()
-    | Error msg -> record_persist_error ~where:"rewrite_posts" msg
+    | Ok () -> Ok ()
+    | Error msg ->
+      record_persist_error ~where:"rewrite_posts" msg;
+      Error msg
   with
-  | Sys_error msg -> record_persist_error ~where:"rewrite_posts" msg
+  | Sys_error msg ->
+    record_persist_error ~where:"rewrite_posts" msg;
+    Error msg
 ;;
+let save_posts_jsonl content = ignore (save_posts_jsonl_result content)
 let rewrite_posts store =
   let content = with_lock store (fun () -> posts_jsonl_unlocked store) in
   with_persist_lock store (fun () -> save_posts_jsonl content)

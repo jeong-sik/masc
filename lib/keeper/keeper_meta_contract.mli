@@ -361,8 +361,10 @@ val missing_required_sandbox_profile_error :
     declarative keeper profile omits the required [sandbox_profile]. *)
 
 val runtime_id_of_meta : keeper_meta -> string
-(** Runtime id selected for keeper dispatch. Uses the keeper profile [model]
-    when present; otherwise falls back to the configured default runtime id. *)
+(** Runtime id selected for keeper dispatch. Uses the keeper-name assignment
+    from [runtime.toml] ([[runtime.assignments]]) when present and non-empty;
+    otherwise falls back to the configured default runtime id. The keeper
+    profile [model] field is not a runtime-selection input. *)
 
 (** {1 Outcome <-> string} *)
 
@@ -438,5 +440,5 @@ val removed_keeper_model_arg_names : string list
 val reject_removed_model_args :
   tool_name:string -> Yojson.Safe.t -> (unit, string) result
 (** Reject retired keeper model-selection input fields at tool/API boundaries.
-    Model and provider identity is resolved from the default Runtime binding,
-    not per-call keeper arguments. *)
+    Model and provider identity is resolved from the assigned/default Runtime
+    binding, not per-call keeper arguments. *)

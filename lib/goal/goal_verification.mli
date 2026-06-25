@@ -193,6 +193,15 @@ type quorum_result =
       [Passed] / [Failed] mean the request can be sealed
       ([status] flipped to [Approved] / [Rejected]). *)
 
+type vote_submission =
+  { previous_request : goal_verification_request
+  ; request : goal_verification_request
+  ; quorum_result : quorum_result
+  }
+(** Result of a vote mutation with the exact pre-vote snapshot.  The workspace
+    adapter uses this to compensate if the follow-up goal phase write fails
+    after the request has been sealed. *)
+
 (** {1 Persistence paths} *)
 
 val requests_path : Workspace_utils.config -> string
@@ -207,10 +216,17 @@ val events_path : Workspace_utils.config -> string
 (** {1 State I/O} *)
 
 val read_state : Workspace_utils.config -> state
-(** Reads {!requests_path}; returns the empty default state
-    if the file does not exist or fails to parse.  Parse
-    errors are silently absorbed — the JSONL events file is
-    the durable history if recovery is needed. *)
+(** Reads {!requests_path}; returns the empty default state if the file does not
+    exist and no [requests_path ^ ".last-good"] exists.  Missing, parse, or
+    read failures try the last-good recovery file before falling back to the
+    default state for read-only projections, and log the recovery path taken.
+    Mutating operations use an internal fail-closed reader and do not overwrite
+    an unrecoverable corrupt state with the empty default. *)
+
+val read_state_result : Workspace_utils.config -> (state, string) result
+(** Fail-closed state reader for read-only surfaces that must distinguish
+    "no verification requests" from "verification ledger unreadable".  Missing
+    primary + missing recovery still returns the empty default state. *)
 
 (** {1 Effective policy resolution} *)
 
@@ -224,9 +240,11 @@ val effective_policy_for_nodes :
     & set), and projecting the result into a snapshot.
     Returns [Ok None] when no ancestor contributes any
     principal (verification not required).  Errors when the
-    [goal_id] is missing from the node list, when the
-    effective [required_verdicts] is unset, < 1, or exceeds
-    the principal count. *)
+    [goal_id] is missing from the node list, when any parent
+    link in the lineage is missing from the node list, when a
+    parent cycle is detected, when the effective
+    [required_verdicts] is unset, < 1, or exceeds the principal
+    count. *)
 
 val exclude_requester :
   policy_snapshot:policy_snapshot ->
@@ -266,14 +284,29 @@ val find_request :
     as a snapshot; for mutation use {!submit_vote} or
     {!cancel_request}. *)
 
+val find_request_result :
+  Workspace_utils.config ->
+  request_id:string ->
+  (goal_verification_request option, string) result
+(** Result-returning lookup for read-only surfaces that must expose
+    verification-ledger read failures instead of projecting them as a missing
+    request. *)
+
+val list_requests_for_goal_result :
+  Workspace_utils.config ->
+  goal_id:string ->
+  (goal_verification_request list, string) result
+(** Result-returning per-goal request lookup. *)
+
 val count_votes :
   decision:vote_decision -> goal_verification_request -> int
 (** Number of votes whose [decision] matches the argument. *)
 
 val remaining_possible_votes : goal_verification_request -> int
 (** [List.length policy_snapshot.eligible_principals - List.length votes].
-    Used by {!evaluate_quorum} to decide whether more
-    [Approve]s are reachable. *)
+    Used by {!evaluate_quorum} to decide whether enough future [Approve]s are
+    still reachable.  A [Reject] vote consumes one possible future [Approve],
+    but does not seal the request while quorum remains reachable. *)
 
 val cancel_request :
   Workspace_utils.config ->
@@ -284,8 +317,20 @@ val cancel_request :
     requests (returns [Ok request] without mutation).
     Errors when [request_id] is unknown. *)
 
+val cancel_open_requests_for_goal_except :
+  Workspace_utils.config ->
+  goal_id:string ->
+  active_request_id:string option ->
+  (goal_verification_request list, string) result
+(** Cancels every [Open] request for [goal_id] except [active_request_id].
+    Used as a compensation sweep before opening a new request, so a prior
+    crash between [goal_verifications.json] and [goals.json] cannot leave a
+    stale open request competing with the next active verification.  Returns
+    the requests that were changed to [Cancelled]. *)
+
 val submit_vote :
   Workspace_utils.config ->
+  goal_id:string ->
   request_id:string ->
   principal:goal_principal ->
   decision:vote_decision ->
@@ -295,15 +340,39 @@ val submit_vote :
   (goal_verification_request * quorum_result, string) result
 (** Appends a vote, runs {!evaluate_quorum}, and seals the
     request as needed (Passed → [Approved], Failed →
-    [Rejected]).  Returns the updated request paired with the
-    quorum verdict so the caller can branch on the outcome
-    without re-deriving it.  Holds the file lock for the
-    duration.
+    [Rejected]).  [Failed] means the remaining uncast votes can
+    no longer satisfy [required_verdicts], not merely that a
+    [Reject] was cast.  Returns the updated request paired with
+    the quorum verdict so the caller can branch on the outcome
+    without re-deriving it.  Holds the file lock for the duration.
 
     Errors on any of:
     - [request_id] unknown,
+    - request belongs to a different [goal_id],
     - request is not [Open],
     - [principal] is the original requester,
     - [principal] is not in
       [policy_snapshot.eligible_principals],
     - [principal] has already voted. *)
+
+val submit_vote_with_snapshot :
+  Workspace_utils.config ->
+  goal_id:string ->
+  request_id:string ->
+  principal:goal_principal ->
+  decision:vote_decision ->
+  ?note:string ->
+  ?evidence_refs:string list ->
+  unit ->
+  (vote_submission, string) result
+(** Same mutation as {!submit_vote}, but returns the pre-vote request snapshot
+    alongside the updated request and quorum result. *)
+
+val restore_request_snapshot :
+  Workspace_utils.config ->
+  expected_current:goal_verification_request ->
+  snapshot:goal_verification_request ->
+  (goal_verification_request, string) result
+(** Replaces [expected_current.id] with [snapshot] only if the on-disk request
+    still equals [expected_current].  This is a conservative compensation path:
+    concurrent changes are never overwritten. *)

@@ -13,6 +13,7 @@
 type set_task_goal_error =
   | Unknown_task of string
   | Unknown_goal of string
+  | Registry_unreadable of string
   | Already_assigned of
       { task_id : string
       ; existing_goal_ids : string list
@@ -30,11 +31,14 @@ val set_task_goal :
 
     - [Error (Unknown_task _)] — no task with [task_id] in the backlog.
     - [Error (Unknown_goal _)] — no goal with [goal_id] in the goal store.
+    - [Error (Registry_unreadable _)] — the goal-task link registry or its
+      recovery file could not be read; no link write was attempted.
     - [Error (Already_assigned _)] — the task already carries one or more
       goal links; reassignment/unlink is out of scope (RFC-0267 §4, which
       keeps Phase 2 strictly additive for goalless tasks).
-    - [Ok ()] — the link was written after confirming under the registry file
-      lock that the task still has no goal link.
+    - [Ok ()] — the link was written after confirming task existence, goal
+      existence, and goalless status under the registry file lock immediately
+      before the write.
 
     Neither an unknown task nor an unknown goal is silently tolerated: both
     are returned as typed errors rather than mapped to a permissive default. *)

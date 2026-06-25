@@ -29,8 +29,44 @@ include Board_types
 let status_rollup_window_sec = 6. *. 60. *. 60.
 let max_status_rollup_body_length = 600
 
-let contains_any_substring text needles =
-  List.exists (String_util.contains_substring_ci text) needles
+let is_term_token_char = function
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> true
+  | _ -> false
+;;
+
+let contains_term_ci text term =
+  let text_len = String.length text in
+  let term_len = String.length term in
+  if term_len = 0 || term_len > text_len
+  then false
+  else (
+    let starts_with_token = is_term_token_char term.[0] in
+    let ends_with_token = is_term_token_char term.[term_len - 1] in
+    let left_boundary idx =
+      (not starts_with_token) || idx = 0 || not (is_term_token_char text.[idx - 1])
+    in
+    let right_boundary idx =
+      let stop = idx + term_len in
+      (not ends_with_token) || stop = text_len || not (is_term_token_char text.[stop])
+    in
+    let rec match_at idx term_idx =
+      if term_idx = term_len
+      then true
+      else (
+        let text_char = Char.lowercase_ascii text.[idx + term_idx] in
+        let term_char = Char.lowercase_ascii term.[term_idx] in
+        Char.equal text_char term_char && match_at idx (term_idx + 1))
+    in
+    let last = text_len - term_len in
+    let rec loop idx =
+      idx <= last
+      && ((left_boundary idx && right_boundary idx && match_at idx 0)
+          || loop (idx + 1))
+    in
+    loop 0)
+;;
+
+let contains_any_term text terms = List.exists (contains_term_ci text) terms
 ;;
 
 let is_task_id_char = function
@@ -117,7 +153,7 @@ let proof_or_handoff_terms =
   ; "gh pr"
   ; "pr #"
   ; "pull request"
-  ; "commit "
+  ; "commit"
   ; "changed files"
   ; "repro"
   ; "reproduction"
@@ -137,8 +173,8 @@ let is_status_rollup_candidate ~post_kind ~title ~body ~meta_json =
   | Automation_post ->
     String.length body <= max_status_rollup_body_length
     && Option.is_some (status_rollup_task_id ~title ~body ~meta_json)
-    && contains_any_substring body status_only_terms
-    && not (contains_any_substring body proof_or_handoff_terms)
+    && contains_any_term body status_only_terms
+    && not (contains_any_term body proof_or_handoff_terms)
 ;;
 
 let find_status_rollup_target_unlocked
@@ -166,7 +202,7 @@ let find_status_rollup_target_unlocked
          | None -> false
        in
        let recent =
-         Stdlib.Float.compare (now -. post.updated_at) status_rollup_window_sec <= 0
+         Stdlib.Float.compare (now -. post.created_at) status_rollup_window_sec <= 0
        in
        if
          same_author

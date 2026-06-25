@@ -50,7 +50,7 @@ let vote_log_path () =
    given (target, voter) pair — otherwise analytics keyed on vote
    recency (hot ranking, vote-velocity windows) see fabricated
    timestamps advancing on every flush cycle. *)
-let append_vote_log ~target ~voter ~direction ~ts =
+let append_vote_log_result ~target ~voter ~direction ~ts =
   try
     ensure_masc_dir ();
     let path = vote_log_path () in
@@ -61,18 +61,47 @@ let append_vote_log ~target ~voter ~direction ~ts =
       ("ts", `Float ts);
     ] in
     Fs_compat.append_file path (Yojson.Safe.to_string json ^ "\n");
-    rotate_if_needed path
-  with Sys_error msg -> Log.BoardLog.error "persist error (append_vote_log): %s" msg
+    rotate_if_needed path;
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Sys_error msg ->
+    record_persist_error ~where:"append_vote_log" msg;
+    Error msg
+
+let append_vote_log ~target ~voter ~direction ~ts =
+  ignore (append_vote_log_result ~target ~voter ~direction ~ts)
+
+(** Parse a vote-log key into [(target_kind, target_id, voter)].
+
+    Key format: ["post:<id>:<voter>"] or ["comment:<id>:<voter>"].
+    Both [<id>] and [<voter>] are safe for the ID character set but
+    voter may contain a colon in namespace:agent form, so split only on
+    the first two colons and keep the remainder as voter. *)
+let parse_vote_key key =
+  match String.index_opt key ':' with
+  | None -> None
+  | Some i1 ->
+      let kind = String.sub key 0 i1 in
+      let rest1 = String.sub key (i1 + 1) (String.length key - i1 - 1) in
+      (match String.index_opt rest1 ':' with
+      | None -> None
+      | Some i2 ->
+          let target_id = String.sub rest1 0 i2 in
+          let voter =
+            String.sub rest1 (i2 + 1) (String.length rest1 - i2 - 1)
+          in
+          if kind = "" || target_id = "" || voter = "" then None
+          else Some (kind, target_id, voter))
 
 let vote_log_jsonl store =
   let buf = Buffer.create 4096 in
   Hashtbl.iter
     (fun target (direction, ts) ->
       let voter =
-        match String.rindex_opt target ':' with
-        | Some idx when idx + 1 < String.length target ->
-            String.sub target (idx + 1) (String.length target - idx - 1)
-        | _ -> ""
+        match parse_vote_key target with
+        | Some (_, _, voter) -> voter
+        | None -> ""
       in
       let json =
         `Assoc
@@ -93,22 +122,30 @@ let vote_log_jsonl store =
     store.vote_log;
   Buffer.contents buf
 
-let save_vote_log_jsonl content =
+let save_vote_log_jsonl_result content =
   try
     ensure_masc_dir ();
     let path = vote_log_path () in
     (match Fs_compat.save_file_atomic path content with
-     | Ok () -> ()
-     | Error msg -> Log.BoardLog.error "persist error (rewrite_vote_log): %s" msg)
-  with Sys_error msg -> Log.BoardLog.error "persist error (rewrite_vote_log): %s" msg
+     | Ok () -> Ok ()
+     | Error msg ->
+       record_persist_error ~where:"rewrite_vote_log" msg;
+       Error msg)
+  with
+  | Sys_error msg ->
+    record_persist_error ~where:"rewrite_vote_log" msg;
+    Error msg
+
+let save_vote_log_jsonl content = ignore (save_vote_log_jsonl_result content)
 
 let rewrite_vote_log store =
   save_vote_log_jsonl (vote_log_jsonl store)
 
-(* [vote_outcome] carries the information needed to run post-lock vote hooks.
-   [earn_upvote_for] is [Some author] only on the fresh peer-upvote path — a
-   self-upvote is not reputation, a vote flip does not earn credits (prevents
-   down/up alternation abuse), and a downvote does not earn at all. *)
+(* [vote_outcome] carries the committed vote facts.  The JSONL append is part of
+   the commit and must succeed before this escapes the store lock; feedback and
+   economy hooks consume the outcome afterwards.  [earn_upvote_for] is [Some
+   author] only on the fresh peer-upvote path — a self-upvote is not reputation,
+   a vote flip does not earn credits, and a downvote does not earn at all. *)
 type vote_outcome = {
   delta : int;
   earn_upvote_for : string option;
@@ -119,13 +156,15 @@ type vote_outcome = {
   vote_author_name : string;
 }
 
-let record_vote_side_effect store outcome =
+let persist_vote_log_result store outcome =
   with_persist_lock store (fun () ->
-      append_vote_log
-        ~target:outcome.vote_target
-        ~voter:outcome.vote_voter
-        ~direction:outcome.vote_direction
-        ~ts:outcome.vote_ts);
+    append_vote_log_result
+      ~target:outcome.vote_target
+      ~voter:outcome.vote_voter
+      ~direction:outcome.vote_direction
+      ~ts:outcome.vote_ts)
+
+let record_vote_feedback outcome =
   let vote_dir =
     match outcome.vote_direction with
     | Up -> Board_effect_hooks.Up
@@ -134,6 +173,98 @@ let record_vote_side_effect store outcome =
   Board_effect_hooks.record_vote
     ~agent_name:outcome.vote_author_name
     ~direction:vote_dir
+
+type dirty_post_snapshot =
+  { dirty_posts_before : bool
+  ; dirty_post_marked_before : bool
+  }
+
+type dirty_comment_snapshot =
+  { dirty_comments_before : bool
+  ; dirty_comment_marked_before : bool
+  }
+
+let dirty_post_snapshot store post_key =
+  { dirty_posts_before = store.dirty_posts
+  ; dirty_post_marked_before = Hashtbl.mem store.dirty_post_ids post_key
+  }
+
+let dirty_comment_snapshot store comment_key =
+  { dirty_comments_before = store.dirty_comments
+  ; dirty_comment_marked_before = Hashtbl.mem store.dirty_comment_ids comment_key
+  }
+
+let restore_dirty_post store post_key snapshot =
+  store.dirty_posts <- snapshot.dirty_posts_before;
+  if snapshot.dirty_post_marked_before
+  then Hashtbl.replace store.dirty_post_ids post_key ()
+  else Hashtbl.remove store.dirty_post_ids post_key
+
+let restore_dirty_comment store comment_key snapshot =
+  store.dirty_comments <- snapshot.dirty_comments_before;
+  if snapshot.dirty_comment_marked_before
+  then Hashtbl.replace store.dirty_comment_ids comment_key ()
+  else Hashtbl.remove store.dirty_comment_ids comment_key
+
+let restore_vote_log store vote_key previous_vote =
+  match previous_vote with
+  | Some previous -> Hashtbl.replace store.vote_log vote_key previous
+  | None -> Hashtbl.remove store.vote_log vote_key
+
+let rollback_post_vote store ~post_key ~previous_post ~vote_key ~previous_vote ~dirty =
+  Hashtbl.replace store.posts post_key previous_post;
+  restore_vote_log store vote_key previous_vote;
+  restore_dirty_post store post_key dirty;
+  invalidate_post_caches store
+
+let rollback_comment_vote
+      store
+      ~comment_key
+      ~previous_comment
+      ~vote_key
+      ~previous_vote
+      ~dirty
+  =
+  Hashtbl.replace store.comments comment_key previous_comment;
+  restore_vote_log store vote_key previous_vote;
+  restore_dirty_comment store comment_key dirty;
+  invalidate_comment_caches store
+
+let commit_post_vote
+      store
+      ~post_key
+      ~previous_post
+      ~vote_key
+      ~previous_vote
+      ~dirty
+      outcome
+  =
+  match persist_vote_log_result store outcome with
+  | Ok () -> Ok outcome
+  | Error msg ->
+    rollback_post_vote store ~post_key ~previous_post ~vote_key ~previous_vote ~dirty;
+    Error (Io_error msg)
+
+let commit_comment_vote
+      store
+      ~comment_key
+      ~previous_comment
+      ~vote_key
+      ~previous_vote
+      ~dirty
+      outcome
+  =
+  match persist_vote_log_result store outcome with
+  | Ok () -> Ok outcome
+  | Error msg ->
+    rollback_comment_vote
+      store
+      ~comment_key
+      ~previous_comment
+      ~vote_key
+      ~previous_vote
+      ~dirty;
+    Error (Io_error msg)
 
 let current_vote_for_post store ~voter ~post_id
     : (vote_direction option, board_error) Result.t =
@@ -160,16 +291,19 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
   | Ok pid ->
       let board_result : (vote_outcome, board_error) Result.t =
         with_lock store (fun () ->
-          match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+          let post_key = Post_id.to_string pid in
+          match Hashtbl.find_opt store.posts post_key with
           | None -> Error (Post_not_found post_id)
           | Some post ->
-              let vote_key = "post:" ^ Post_id.to_string pid ^ ":" ^ voter in
+              let vote_key = "post:" ^ post_key ^ ":" ^ voter in
               let now = Time_compat.now () in
-              match Hashtbl.find_opt store.vote_log vote_key with
+              let previous_vote = Hashtbl.find_opt store.vote_log vote_key in
+              match previous_vote with
               | Some (prev, _prev_ts) when (=) prev direction ->
                   Error (Already_voted (Printf.sprintf "%s already voted %s on %s"
                     voter (vote_direction_to_string direction) post_id))
               | Some (_opposite, _prev_ts) ->
+                  let dirty = dirty_post_snapshot store post_key in
                   let flipped = match direction with
                     | Up -> { post with votes_up = post.votes_up + 1;
                                         votes_down = max 0 (post.votes_down - 1);
@@ -178,27 +312,39 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
                                           votes_up = max 0 (post.votes_up - 1);
                                           updated_at = now }
                   in
-                  Hashtbl.replace store.posts (Post_id.to_string pid) flipped;
+                  Hashtbl.replace store.posts post_key flipped;
                   Hashtbl.replace store.vote_log vote_key (direction, now);
-                  mark_dirty_post store (Post_id.to_string pid);
+                  mark_dirty_post store post_key;
                   invalidate_post_caches store;
                   let author_name = Agent_id.to_string post.author in
                   (* No economy earn on flip: prevents down/up alternation abuse *)
-                  Ok { delta = flipped.votes_up - flipped.votes_down;
-                       earn_upvote_for = None;
-                       vote_target = vote_key;
-                       vote_voter = voter;
-                       vote_direction = direction;
-                       vote_ts = now;
-                       vote_author_name = author_name }
+                  let outcome =
+                    { delta = flipped.votes_up - flipped.votes_down;
+                      earn_upvote_for = None;
+                      vote_target = vote_key;
+                      vote_voter = voter;
+                      vote_direction = direction;
+                      vote_ts = now;
+                      vote_author_name = author_name;
+                    }
+                  in
+                  commit_post_vote
+                    store
+                    ~post_key
+                    ~previous_post:post
+                    ~vote_key
+                    ~previous_vote
+                    ~dirty
+                    outcome
               | None ->
+                  let dirty = dirty_post_snapshot store post_key in
                   let updated = match direction with
                     | Up -> { post with votes_up = post.votes_up + 1; updated_at = now }
                     | Down -> { post with votes_down = post.votes_down + 1; updated_at = now }
                   in
-                  Hashtbl.replace store.posts (Post_id.to_string pid) updated;
+                  Hashtbl.replace store.posts post_key updated;
                   Hashtbl.replace store.vote_log vote_key (direction, now);
-                  mark_dirty_post store (Post_id.to_string pid);
+                  mark_dirty_post store post_key;
                   invalidate_post_caches store;
                   let author_name = Agent_id.to_string post.author in
                   let earn =
@@ -206,13 +352,24 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
                     then Some author_name
                     else None
                   in
-                  Ok { delta = updated.votes_up - updated.votes_down;
-                       earn_upvote_for = earn;
-                       vote_target = vote_key;
-                       vote_voter = voter;
-                       vote_direction = direction;
-                       vote_ts = now;
-                       vote_author_name = author_name })
+                  let outcome =
+                    { delta = updated.votes_up - updated.votes_down;
+                      earn_upvote_for = earn;
+                      vote_target = vote_key;
+                      vote_voter = voter;
+                      vote_direction = direction;
+                      vote_ts = now;
+                      vote_author_name = author_name;
+                    }
+                  in
+                  commit_post_vote
+                    store
+                    ~post_key
+                    ~previous_post:post
+                    ~vote_key
+                    ~previous_vote
+                    ~dirty
+                    outcome)
       in
       (* Side-effect hooks run outside the store lock. Credit and selection
          observers write their own state on unrelated paths and modify no board
@@ -220,7 +377,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
          contention with every other reader/writer. *)
       (match board_result with
        | Ok ({ delta; earn_upvote_for = Some author_name } as outcome) ->
-           record_vote_side_effect store outcome;
+           record_vote_feedback outcome;
            (match Board_effect_hooks.earn
               ~base_path:(board_base_path ()) ~agent_name:author_name
               ~kind:Upvote ~reason:"upvote on post" () with
@@ -229,7 +386,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
                 Log.BoardLog.warn "board_votes: economy earn failed for %s: %s" author_name e);
            Ok delta
        | Ok ({ delta; earn_upvote_for = None } as outcome) ->
-           record_vote_side_effect store outcome;
+           record_vote_feedback outcome;
            Ok delta
        | Error _ as e -> e)
 
@@ -261,58 +418,80 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
   | Error e -> Error e
   | Ok cid ->
       with_lock store (fun () ->
-        match Hashtbl.find_opt store.comments (Comment_id.to_string cid) with
+        let comment_key = Comment_id.to_string cid in
+        match Hashtbl.find_opt store.comments comment_key with
         | None -> Error (Comment_not_found comment_id)
         | Some cmt ->
-            let vote_key = "comment:" ^ Comment_id.to_string cid ^ ":" ^ voter in
+            let vote_key = "comment:" ^ comment_key ^ ":" ^ voter in
             let now = Time_compat.now () in
-            match Hashtbl.find_opt store.vote_log vote_key with
+            let previous_vote = Hashtbl.find_opt store.vote_log vote_key in
+            match previous_vote with
             | Some (prev, _prev_ts) when (=) prev direction ->
                 Error (Already_voted (Printf.sprintf "%s already voted %s on comment %s"
                   voter (vote_direction_to_string direction) comment_id))
             | Some (_opposite, _prev_ts) ->
+                let dirty = dirty_comment_snapshot store comment_key in
                 let flipped = match direction with
                   | Up -> { cmt with votes_up = cmt.votes_up + 1;
                                      votes_down = max 0 (cmt.votes_down - 1) }
                   | Down -> { cmt with votes_down = cmt.votes_down + 1;
                                        votes_up = max 0 (cmt.votes_up - 1) }
                 in
-                Hashtbl.replace store.comments (Comment_id.to_string cid) flipped;
+                Hashtbl.replace store.comments comment_key flipped;
                 Hashtbl.replace store.vote_log vote_key (direction, now);
-                mark_dirty_comment store (Comment_id.to_string cid);
+                mark_dirty_comment store comment_key;
                 invalidate_comment_caches store;
                 let author_name = Agent_id.to_string cmt.author in
-                Ok {
-                  delta = flipped.votes_up - flipped.votes_down;
-                  earn_upvote_for = None;
-                  vote_target = vote_key;
-                  vote_voter = voter;
-                  vote_direction = direction;
-                  vote_ts = now;
-                  vote_author_name = author_name;
-                }
+                let outcome =
+                  { delta = flipped.votes_up - flipped.votes_down;
+                    earn_upvote_for = None;
+                    vote_target = vote_key;
+                    vote_voter = voter;
+                    vote_direction = direction;
+                    vote_ts = now;
+                    vote_author_name = author_name;
+                  }
+                in
+                commit_comment_vote
+                  store
+                  ~comment_key
+                  ~previous_comment:cmt
+                  ~vote_key
+                  ~previous_vote
+                  ~dirty
+                  outcome
             | None ->
+                let dirty = dirty_comment_snapshot store comment_key in
                 let updated = match direction with
                   | Up -> { cmt with votes_up = cmt.votes_up + 1 }
                   | Down -> { cmt with votes_down = cmt.votes_down + 1 }
                 in
-                Hashtbl.replace store.comments (Comment_id.to_string cid) updated;
+                Hashtbl.replace store.comments comment_key updated;
                 Hashtbl.replace store.vote_log vote_key (direction, now);
-                mark_dirty_comment store (Comment_id.to_string cid);
+                mark_dirty_comment store comment_key;
                 invalidate_comment_caches store;
                 let author_name = Agent_id.to_string cmt.author in
-                Ok {
-                  delta = updated.votes_up - updated.votes_down;
-                  earn_upvote_for = None;
-                  vote_target = vote_key;
-                  vote_voter = voter;
-                  vote_direction = direction;
-                  vote_ts = now;
-                  vote_author_name = author_name;
-                }
+                let outcome =
+                  { delta = updated.votes_up - updated.votes_down;
+                    earn_upvote_for = None;
+                    vote_target = vote_key;
+                    vote_voter = voter;
+                    vote_direction = direction;
+                    vote_ts = now;
+                    vote_author_name = author_name;
+                  }
+                in
+                commit_comment_vote
+                  store
+                  ~comment_key
+                  ~previous_comment:cmt
+                  ~vote_key
+                  ~previous_vote
+                  ~dirty
+                  outcome
       )
       |> Result.map (fun outcome ->
-             record_vote_side_effect store outcome;
+             record_vote_feedback outcome;
              outcome.delta)
 
 (** {1 Stats} *)
@@ -394,10 +573,9 @@ type voter_kind =
   | Fixture_voter of fixture_voter_kind
 
 let extract_voter_segment target =
-  match String.rindex_opt target ':' with
-  | Some idx when idx + 1 < String.length target ->
-      String.sub target (idx + 1) (String.length target - idx - 1)
-  | _ -> target
+  match parse_vote_key target with
+  | Some (_, _, voter) -> voter
+  | None -> target
 
 let classify_voter_target (target : string) : voter_kind =
   let voter = extract_voter_segment target in
@@ -586,20 +764,59 @@ let set_pinned store ~post_id ~pinned : (unit, board_error) Result.t =
   | Ok pid ->
       let result =
         with_lock store (fun () ->
-          match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+          let post_key = Post_id.to_string pid in
+          match Hashtbl.find_opt store.posts post_key with
           | None -> Error (Post_not_found post_id)
           | Some post ->
               let now = Time_compat.now () in
               let updated = { post with pinned; updated_at = now } in
-              Hashtbl.replace store.posts (Post_id.to_string pid) updated;
+              Hashtbl.replace store.posts post_key updated;
+              mark_dirty_post store post_key;
               invalidate_post_caches store;
-              Ok updated)
+              let posts_jsonl = posts_jsonl_unlocked store in
+              store.dirty_posts <- false;
+              Hashtbl.clear store.dirty_post_ids;
+              store.last_flush <- Time_compat.now ();
+              Ok posts_jsonl)
       in
       match result with
       | Error e -> Error e
-      | Ok updated ->
-          with_persist_lock store (fun () -> append_post updated);
-          Ok ()
+      | Ok posts_jsonl ->
+          (match with_persist_lock store (fun () -> save_posts_jsonl_result posts_jsonl) with
+           | Ok () -> Ok ()
+           | Error msg ->
+               with_lock store (fun () -> store.dirty_posts <- true);
+               Error (Io_error msg))
+
+let set_visibility store ~post_id ~visibility : (unit, board_error) Result.t =
+  match Post_id.of_string post_id with
+  | Error e -> Error e
+  | Ok pid ->
+      let result =
+        with_lock store (fun () ->
+          let post_key = Post_id.to_string pid in
+          match Hashtbl.find_opt store.posts post_key with
+          | None -> Error (Post_not_found post_id)
+          | Some post ->
+              let now = Time_compat.now () in
+              let updated = { post with visibility; updated_at = now } in
+              Hashtbl.replace store.posts post_key updated;
+              mark_dirty_post store post_key;
+              invalidate_post_caches store;
+              let posts_jsonl = posts_jsonl_unlocked store in
+              store.dirty_posts <- false;
+              Hashtbl.clear store.dirty_post_ids;
+              store.last_flush <- Time_compat.now ();
+              Ok posts_jsonl)
+      in
+      match result with
+      | Error e -> Error e
+      | Ok posts_jsonl ->
+          (match with_persist_lock store (fun () -> save_posts_jsonl_result posts_jsonl) with
+           | Ok () -> Ok ()
+           | Error msg ->
+               with_lock store (fun () -> store.dirty_posts <- true);
+               Error (Io_error msg))
 
 let posts_jsonl_snapshot store =
   let buf = Buffer.create 4096 in
@@ -626,83 +843,120 @@ let reactions_jsonl_snapshot store =
     store.reactions;
   Buffer.contents buf
 
-let save_jsonl_snapshot ~where ~path content =
+let save_jsonl_snapshot_result ~where ~path content =
   try
     ensure_masc_dir ();
     match Fs_compat.save_file_atomic path content with
-    | Ok () -> ()
-    | Error msg -> record_persist_error ~where msg
-  with Sys_error msg -> record_persist_error ~where msg
+    | Ok () -> Ok ()
+    | Error msg ->
+      record_persist_error ~where msg;
+      Error msg
+  with
+  | Sys_error msg ->
+    record_persist_error ~where msg;
+    Error msg
+
+let save_jsonl_snapshot ~where ~path content =
+  ignore (save_jsonl_snapshot_result ~where ~path content)
 
 let delete_post store ~post_id : (unit, board_error) Result.t =
   match Post_id.of_string post_id with
   | Error e -> Error e
   | Ok pid ->
-      with_persist_lock store (fun () ->
-        let snapshot =
-          with_lock store (fun () ->
-            let post_key = Post_id.to_string pid in
-            match Hashtbl.find_opt store.posts post_key with
-            | None -> Error (Post_not_found post_id)
-            | Some _ ->
-                let comment_ids =
-                  Hashtbl.fold
-                    (fun key (c : comment) acc ->
-                      if String.equal (Post_id.to_string c.post_id) post_key then key :: acc else acc)
-                    store.comments []
-                in
-                Hashtbl.remove store.posts post_key;
-                Hashtbl.remove store.comments_by_post post_key;
-                List.iter (fun comment_key -> Hashtbl.remove store.comments comment_key) comment_ids;
-                let vote_keys =
-                  Hashtbl.fold
-                    (fun key _ acc ->
-                      if String.starts_with ~prefix:("post:" ^ post_key ^ ":") key
-                         || List.exists
-                              (fun comment_key ->
-                                String.starts_with ~prefix:("comment:" ^ comment_key ^ ":") key)
-                              comment_ids
-                      then key :: acc
-                      else acc)
-                    store.vote_log []
-                in
-                let reaction_keys =
-                  Hashtbl.fold
-                    (fun key (reaction : reaction) acc ->
-                      if
-                        ((=) reaction.target_type Reaction_post
-                         && String.equal reaction.target_id post_key)
-                        || ((=) reaction.target_type Reaction_comment
-                            && List.exists (String.equal reaction.target_id)
-                                 comment_ids)
-                      then key :: acc
-                      else acc)
-                    store.reactions []
-                in
-                List.iter (fun key -> Hashtbl.remove store.vote_log key) vote_keys;
-                List.iter (fun key -> Hashtbl.remove store.reactions key) reaction_keys;
-                store.post_count := max 0 (!(store.post_count) - 1);
-                invalidate_post_caches store;
-                invalidate_comment_caches store;
-                store.dirty_posts <- false;
-                store.dirty_comments <- false;
-                Hashtbl.clear store.dirty_post_ids;
-                Hashtbl.clear store.dirty_comment_ids;
-                store.last_flush <- Time_compat.now ();
-                Ok
-                  ( posts_jsonl_snapshot store
-                  , comments_jsonl_snapshot store
-                  , vote_log_jsonl store
-                  , reactions_jsonl_snapshot store ))
-        in
-        match snapshot with
-        | Error _ as e -> e
-        | Ok (posts_jsonl, comments_jsonl, votes_jsonl, reactions_jsonl) ->
-            save_jsonl_snapshot ~where:"rewrite_posts" ~path:(persist_path ()) posts_jsonl;
-            save_jsonl_snapshot ~where:"rewrite_comments" ~path:(comments_path ()) comments_jsonl;
-            save_vote_log_jsonl votes_jsonl;
-            save_jsonl_snapshot ~where:"rewrite_reactions" ~path:(reactions_path ()) reactions_jsonl;
-            Ok ())
+      let snapshot =
+        with_lock store (fun () ->
+          let post_key = Post_id.to_string pid in
+          match Hashtbl.find_opt store.posts post_key with
+          | None -> Error (Post_not_found post_id)
+          | Some _ ->
+              let comment_ids =
+                Hashtbl.fold
+                  (fun key (c : comment) acc ->
+                    if String.equal (Post_id.to_string c.post_id) post_key then key :: acc else acc)
+                  store.comments []
+              in
+              Hashtbl.remove store.posts post_key;
+              Hashtbl.remove store.comments_by_post post_key;
+              List.iter (fun comment_key -> Hashtbl.remove store.comments comment_key) comment_ids;
+              let vote_keys =
+                Hashtbl.fold
+                  (fun key _ acc ->
+                    if String.starts_with ~prefix:("post:" ^ post_key ^ ":") key
+                       || List.exists
+                            (fun comment_key ->
+                              String.starts_with ~prefix:("comment:" ^ comment_key ^ ":") key)
+                            comment_ids
+                    then key :: acc
+                    else acc)
+                  store.vote_log []
+              in
+              let reaction_keys =
+                Hashtbl.fold
+                  (fun key (reaction : reaction) acc ->
+                    if
+                      ((=) reaction.target_type Reaction_post
+                       && String.equal reaction.target_id post_key)
+                      || ((=) reaction.target_type Reaction_comment
+                          && List.exists (String.equal reaction.target_id)
+                               comment_ids)
+                    then key :: acc
+                    else acc)
+                  store.reactions []
+              in
+              List.iter (fun key -> Hashtbl.remove store.vote_log key) vote_keys;
+              List.iter (fun key -> Hashtbl.remove store.reactions key) reaction_keys;
+              store.post_count := max 0 (!(store.post_count) - 1);
+              invalidate_post_caches store;
+              invalidate_comment_caches store;
+              store.dirty_posts <- false;
+              store.dirty_comments <- false;
+              Hashtbl.clear store.dirty_post_ids;
+              Hashtbl.clear store.dirty_comment_ids;
+              store.last_flush <- Time_compat.now ();
+              Ok
+                ( posts_jsonl_snapshot store
+                , comments_jsonl_snapshot store
+                , vote_log_jsonl store
+                , reactions_jsonl_snapshot store ))
+      in
+      (match snapshot with
+       | Error _ as e -> e
+       | Ok (posts_jsonl, comments_jsonl, votes_jsonl, reactions_jsonl) ->
+         let persist_result =
+           with_persist_lock store (fun () ->
+             let results =
+               [ save_jsonl_snapshot_result
+                   ~where:"rewrite_posts"
+                   ~path:(persist_path ())
+                   posts_jsonl
+               ; save_jsonl_snapshot_result
+                   ~where:"rewrite_comments"
+                   ~path:(comments_path ())
+                   comments_jsonl
+               ; save_vote_log_jsonl_result votes_jsonl
+               ; save_jsonl_snapshot_result
+                   ~where:"rewrite_reactions"
+                   ~path:(reactions_path ())
+                   reactions_jsonl
+               ]
+             in
+             match
+               List.find_map
+                 (function
+                   | Ok () -> None
+                   | Error msg -> Some msg)
+                 results
+             with
+             | None -> Ok ()
+             | Some msg -> Error msg)
+         in
+         (match persist_result with
+          | Ok () -> Ok ()
+          | Error msg ->
+            with_lock store (fun () ->
+              store.dirty_posts <- true;
+              store.dirty_comments <- true);
+            Error (Io_error msg)))
 
 (** {1 Global Store}
 
@@ -710,40 +964,57 @@ let delete_post store ~post_id : (unit, board_error) Result.t =
     [cancel:`Protect] ensures store creation completes even if the
     forcing fiber is cancelled. *)
 
+exception Persistence_load_failed of string
+
 (* Loaders return [(int, string * exn) result] so the caller is forced to
-   acknowledge persistence-load failures.  Best-effort semantics live here
-   at the call site, not hidden inside the loader bodies. *)
-let log_persistence_result ~kind = function
-  | Ok _ -> ()
+   acknowledge persistence-load failures. Singleton startup is fail-closed:
+   returning a partially loaded store can turn the next flush into data loss. *)
+let require_persistence_result ~kind = function
+  | Ok _ -> Ok ()
   | Error (path, e) ->
+    let msg =
+      Printf.sprintf
+        "load %s failed: path=%s reason=%s"
+        kind
+        path
+        (Printexc.to_string e)
+    in
     Log.BoardLog.error
-      "load %s failed: path=%s reason=%s (continuing with best-effort partial state)"
-      kind path (Printexc.to_string e)
+      "%s (aborting board store startup to avoid best-effort partial state)"
+      msg;
+    Error msg
+
+let ( let* ) = Result.bind
 
 let load_all_persisted store =
-  log_persistence_result ~kind:"posts" (load_persisted_posts store);
-  log_persistence_result ~kind:"comments" (load_persisted_comments store);
+  let* () = require_persistence_result ~kind:"posts" (load_persisted_posts store) in
+  let* () =
+    require_persistence_result ~kind:"comments" (load_persisted_comments store)
+  in
   recalculate_reply_counts store;
-  log_persistence_result ~kind:"votes" (load_persisted_votes store);
-  log_persistence_result ~kind:"reactions" (load_persisted_reactions store);
-  log_persistence_result ~kind:"sub-boards" (load_persisted_sub_boards store)
+  let* () = require_persistence_result ~kind:"votes" (load_persisted_votes store) in
+  let* () =
+    require_persistence_result ~kind:"reactions" (load_persisted_reactions store)
+  in
+  require_persistence_result ~kind:"sub-boards" (load_persisted_sub_boards store)
 
-let global_lazy : store Eio.Lazy.t ref =
-  ref (Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
+let make_global_lazy () =
+  Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
     let store = create_store () in
-    load_all_persisted store;
-    store))
+    match load_all_persisted store with
+    | Ok () -> store
+    | Error msg -> raise (Persistence_load_failed msg))
+;;
 
-let global () = Eio.Lazy.force !global_lazy
+let global_lazy : store Eio.Lazy.t Atomic.t = Atomic.make (make_global_lazy ())
+
+let global () = Eio.Lazy.force (Atomic.get global_lazy)
 
 (** Reset global store for test isolation. Next [global ()] call creates fresh store.
-    Safe: only called from test setup before concurrent fibers exist. *)
+    Atomic swap avoids unsynchronised ref mutation when tests reset the singleton. *)
 let reset_global_for_test () =
   reset_comment_rate_tracker ();
-  global_lazy := Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
-    let store = create_store () in
-    load_all_persisted store;
-    store)
+  Atomic.set global_lazy (make_global_lazy ())
 
 (** Flush any dirty state to disk. Call on shutdown to prevent data loss.
 
@@ -757,31 +1028,68 @@ let reset_global_for_test () =
     flush-write path makes [board_posts.jsonl] a true snapshot file with
     one line per id and atomic rewrite semantics. *)
 let flush_dirty store =
-  let had_dirty, vote_log =
+  let snapshot =
     with_lock store (fun () ->
-      let had_dirty = store.dirty_posts || store.dirty_comments in
-      Hashtbl.clear store.dirty_post_ids;
-      Hashtbl.clear store.dirty_comment_ids;
-      store.dirty_posts <- false;
-      store.dirty_comments <- false;
-      store.last_flush <- Time_compat.now ();
-      let vote_log =
-        if had_dirty then Some (vote_log_jsonl store) else None
-      in
-      (had_dirty, vote_log))
+      let had_dirty_posts = store.dirty_posts in
+      let had_dirty_comments = store.dirty_comments in
+      if not (had_dirty_posts || had_dirty_comments)
+      then None
+      else (
+        let posts_jsonl = posts_jsonl_snapshot store in
+        let comments_jsonl = comments_jsonl_snapshot store in
+        let vote_log = vote_log_jsonl store in
+        let reactions_jsonl = reactions_jsonl_snapshot store in
+        Hashtbl.clear store.dirty_post_ids;
+        Hashtbl.clear store.dirty_comment_ids;
+        store.dirty_posts <- false;
+        store.dirty_comments <- false;
+        store.last_flush <- Time_compat.now ();
+        Some
+          ( had_dirty_posts
+          , had_dirty_comments
+          , posts_jsonl
+          , comments_jsonl
+          , vote_log
+          , reactions_jsonl )))
   in
-  with_persist_lock store (fun () ->
-      if had_dirty then begin
-        let posts_jsonl = with_lock store (fun () -> posts_jsonl_snapshot store) in
-        let comments_jsonl =
-          with_lock store (fun () -> comments_jsonl_snapshot store)
+  match snapshot with
+  | None -> ()
+  | Some
+      ( had_dirty_posts
+      , had_dirty_comments
+      , posts_jsonl
+      , comments_jsonl
+      , vote_log
+      , reactions_jsonl ) ->
+    let failed =
+      with_persist_lock store (fun () ->
+        let results =
+          [ save_jsonl_snapshot_result
+              ~where:"flush_posts"
+              ~path:(persist_path ())
+              posts_jsonl
+          ; save_jsonl_snapshot_result
+              ~where:"flush_comments"
+              ~path:(comments_path ())
+              comments_jsonl
+          ; save_vote_log_jsonl_result vote_log
+          ; save_jsonl_snapshot_result
+              ~where:"flush_reactions"
+              ~path:(reactions_path ())
+              reactions_jsonl
+          ]
         in
-        save_jsonl_snapshot ~where:"flush_posts"
-          ~path:(persist_path ()) posts_jsonl;
-        save_jsonl_snapshot ~where:"flush_comments"
-          ~path:(comments_path ()) comments_jsonl
-      end;
-      Option.iter save_vote_log_jsonl vote_log)
+        List.exists
+          (function
+            | Ok () -> false
+            | Error _ -> true)
+          results)
+    in
+    if failed
+    then
+      with_lock store (fun () ->
+        if had_dirty_posts then store.dirty_posts <- true;
+        if had_dirty_comments then store.dirty_comments <- true)
 
 
 (** {1 Karma & Flair - Reddit-style} *)
@@ -793,28 +1101,6 @@ let flush_dirty store =
 let karma_score_for_direction = function
   | Up -> 1
   | Down -> 0
-
-(** Parse a vote-log key into [(target_kind, target_id, voter)].
-
-    Key format: ["post:<id>:<voter>"] or ["comment:<id>:<voter>"].
-    Both [<id>] and [<voter>] are safe for the ID character set but
-    voter may contain a colon in namespace:agent form, so we split
-    only on the first two colons and keep the remainder as voter. *)
-let parse_vote_key key =
-  match String.index_opt key ':' with
-  | None -> None
-  | Some i1 ->
-      let kind = String.sub key 0 i1 in
-      let rest1 = String.sub key (i1 + 1) (String.length key - i1 - 1) in
-      (match String.index_opt rest1 ':' with
-      | None -> None
-      | Some i2 ->
-          let target_id = String.sub rest1 0 i2 in
-          let voter =
-            String.sub rest1 (i2 + 1) (String.length rest1 - i2 - 1)
-          in
-          if kind = "" || target_id = "" || voter = "" then None
-          else Some (kind, target_id, voter))
 
 let canonical_vote_voter voter =
   match Agent_id.of_string voter with

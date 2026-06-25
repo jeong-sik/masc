@@ -17,6 +17,33 @@ open Alcotest
 module Aek = Masc.Auth_error_kind
 module Sda = Masc.Silent_dashboard_actor_outcome
 
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some value -> Unix.putenv key value
+      | None -> Unix.putenv key "")
+    f
+
+let dashboard_request ?token ?actor_hint () =
+  let headers =
+    []
+    @
+    match token with
+    | Some token -> [ "authorization", "Bearer " ^ token ]
+    | None -> []
+  in
+  let headers =
+    headers
+    @
+    match actor_hint with
+    | Some actor_hint -> [ "x-masc-agent-name", actor_hint ]
+    | None -> []
+  in
+  Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/"
+
 (* ----- Outcome_none: byte-equivalent log message --------------------- *)
 
 let test_outcome_none_log_message_byte_equivalent () =
@@ -301,6 +328,32 @@ let test_outcome_error_increments_counter_with_err_kind () =
     (before +. 1.0)
     after
 
+let test_dashboard_actor_invalid_token_fallback_default_preserved () =
+  with_env "MASC_DASHBOARD_ACTOR_FALLBACK_FAIL_CLOSED" "" (fun () ->
+    let request =
+      dashboard_request
+        ~token:"definitely-not-a-valid-token"
+        ~actor_hint:"dashboard-admin"
+        ()
+    in
+    Alcotest.(check (option string))
+      "invalid token falls back to actor hint by default"
+      (Some "dashboard-admin")
+      (Server_auth.dashboard_actor_for_request ~base_path:"/tmp/nonexistent-masc-auth" request))
+
+let test_dashboard_actor_invalid_token_fail_closed_env () =
+  with_env "MASC_DASHBOARD_ACTOR_FALLBACK_FAIL_CLOSED" "true" (fun () ->
+    let request =
+      dashboard_request
+        ~token:"definitely-not-a-valid-token"
+        ~actor_hint:"dashboard-admin"
+        ()
+    in
+    Alcotest.(check (option string))
+      "invalid token does not fall back when fail-closed is enabled"
+      None
+      (Server_auth.dashboard_actor_for_request ~base_path:"/tmp/nonexistent-masc-auth" request))
+
 let suite =
   [ test_case "Outcome_none: byte-equivalent log message" `Quick
       test_outcome_none_log_message_byte_equivalent
@@ -324,6 +377,10 @@ let suite =
       test_outcome_none_increments_counter
   ; test_case "Outcome_error: counter increments with err_kind label" `Quick
       test_outcome_error_increments_counter_with_err_kind
+  ; test_case "Dashboard actor fallback default preserved" `Quick
+      test_dashboard_actor_invalid_token_fallback_default_preserved
+  ; test_case "Dashboard actor fallback fail-closed env" `Quick
+      test_dashboard_actor_invalid_token_fail_closed_env
   ]
 
 let () =

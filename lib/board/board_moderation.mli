@@ -44,7 +44,8 @@ type action_kind =
   | Remove
       (** Content removed from the board.  Triggers {!Board_dispatch.delete_post}. *)
   | Hide
-      (** Content hidden from public listing but not deleted. *)
+      (** Content hidden from public listing but not deleted.  For posts this
+          persists visibility [Unlisted]. *)
   | Warn
       (** Author warned; content stays visible. *)
 [@@deriving show]
@@ -147,8 +148,10 @@ val record_action :
   unit ->
   (audit_entry, string) result
 (** Record an operator moderation action.  Automatically resolves any
-    open queue entry for [target_id].  The [note] is trimmed and capped
-    at 500 characters. *)
+    open queue entry for [target_id].  [Remove] and [Hide] are fail-closed:
+    the board mutation must succeed before the audit entry is recorded or the
+    queue entry is resolved.  The [note] is trimmed and capped at 500
+    characters. *)
 
 val get_audit_trail :
   ?target_id:string ->

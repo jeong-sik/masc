@@ -242,8 +242,42 @@ let resolve_entry ~entry_id =
 
 (** {1 Audit trail} *)
 
+let board_error_to_string e =
+  Board_types.show_board_error e
+
+let enforce_action_effect ~target_kind ~target_id ~action =
+  match action, target_kind with
+  | Remove, Target_post ->
+      (match Board_dispatch.delete_post ~post_id:target_id with
+       | Ok () -> Ok ()
+       | Error e ->
+           Error
+             (Printf.sprintf
+                "remove failed for post %s: %s"
+                target_id
+                (board_error_to_string e)))
+  | Hide, Target_post ->
+      (match
+         Board_dispatch.set_visibility
+           ~post_id:target_id
+           ~visibility:Board_types.Unlisted
+       with
+       | Ok () -> Ok ()
+       | Error e ->
+           Error
+             (Printf.sprintf
+                "hide failed for post %s: %s"
+                target_id
+                (board_error_to_string e)))
+  | Remove, Target_comment ->
+      Error "remove failed for comment: comment removal is not implemented"
+  | Hide, Target_comment ->
+      Error "hide failed for comment: comment visibility is not implemented"
+  | Approve, _ | Warn, _ -> Ok ()
+
 let record_action ~target_kind ~target_id ~actor ~action ?reason ?note () =
   let s = store () in
+  let actor = String.trim actor in
   let note_trimmed =
     Option.map
       (fun n ->
@@ -253,31 +287,36 @@ let record_action ~target_kind ~target_id ~actor ~action ?reason ?note () =
          else t)
       note
   in
-  let audit_id = Random_id.prefixed ~prefix:"ma-" ~bytes:16 in
-  let acted_at = Time_compat.now () in
-  let entry = {
-    audit_id;
-    target_kind;
-    target_id;
-    actor;
-    action;
-    reason;
-    note = note_trimmed;
-    acted_at;
-  } in
-  let target_key = target_key target_kind target_id in
-  with_lock s (fun () ->
-    (match Hashtbl.find_opt s.unresolved_by_target target_key with
-     | None -> ()
-     | Some entry_id ->
-         Hashtbl.remove s.unresolved_by_target target_key;
-         (match Hashtbl.find_opt s.queue entry_id with
-          | Some qe when not qe.resolved ->
-              Hashtbl.replace s.queue entry_id { qe with resolved = true }
-          | _ -> ()));
-    update_latest_action s target_key action acted_at;
-    s.audit := entry :: !(s.audit);
-    Ok entry)
+  if String.equal actor "" then Error "actor is required for moderation action"
+  else
+    let audit_id = Random_id.prefixed ~prefix:"ma-" ~bytes:16 in
+    let acted_at = Time_compat.now () in
+    let entry = {
+      audit_id;
+      target_kind;
+      target_id;
+      actor;
+      action;
+      reason;
+      note = note_trimmed;
+      acted_at;
+    } in
+    let target_key = target_key target_kind target_id in
+    match enforce_action_effect ~target_kind ~target_id ~action with
+    | Error _ as error -> error
+    | Ok () ->
+      with_lock s (fun () ->
+        (match Hashtbl.find_opt s.unresolved_by_target target_key with
+         | None -> ()
+         | Some entry_id ->
+             Hashtbl.remove s.unresolved_by_target target_key;
+             (match Hashtbl.find_opt s.queue entry_id with
+              | Some qe when not qe.resolved ->
+                  Hashtbl.replace s.queue entry_id { qe with resolved = true }
+              | _ -> ()));
+        update_latest_action s target_key action acted_at;
+        s.audit := entry :: !(s.audit);
+        Ok entry)
 
 let get_audit_trail ?target_id ?actor ?(limit = 100) () =
   let cap = min limit 500 in

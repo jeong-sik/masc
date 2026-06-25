@@ -406,23 +406,30 @@ let read_event_lines config ~limit =
     List.rev !collected
 
 (** Issue #8474: FSM transition matrix.  Each entry mirrors a match-arm
-    in [task transition] (lib/workspace/task_state.ml ~line
-    831).  Verifier-FSM rows ([submit_for_verification],
-    [approve_verification], [reject_verification]) are gated at runtime
-    by [MASC_VERIFICATION_FSM_ENABLED] but listed unconditionally so
-    the published schema matches the action enum
+    in [Workspace_task_lifecycle.decide].  Verification decision rows
+    ([submit_for_verification], [approve_verification], [reject_verification])
+    are gated at runtime by [MASC_VERIFICATION_FSM_ENABLED] but listed
+    unconditionally so the published schema matches the action enum
     ([Masc_domain.valid_task_action_strings] via #8354).  The regression test
-    [test_types.ml :: fsm_transition_matrix] asserts every action
+    [test_mcp_server_eio_coverage.ml :: task FSM advertisement] asserts every action
     listed by [Workspace_task.valid_next_actions_for_status] for any
     reachable status appears here, so adding a 4th verifier action
     fails the test before it ships with a stale schema. *)
 let task_fsm_transitions : (string * string list * string * string option) list =
   [
     ("claim",                   ["todo"],                                  "claimed",                None);
+    ("claim",                   ["claimed"],                               "claimed",                Some "same assignee");
+    ("claim",                   ["in_progress"],                           "in_progress",            Some "same assignee");
+    ("claim",                   ["awaiting_verification"],                 "awaiting_verification",  Some "verifier != assignee");
     ("start",                   ["claimed"],                               "in_progress",            None);
+    ("start",                   ["in_progress"],                           "in_progress",            Some "same assignee");
     ("done",                    ["claimed"; "in_progress"],                "done",                   None);
+    ("done",                    ["done"],                                  "done",                   Some "idempotent retry");
     ("cancel",                  ["todo"; "claimed"; "in_progress"],        "cancelled",              None);
+    ("cancel",                  ["awaiting_verification"],                 "cancelled",              Some "operator/system authority");
+    ("cancel",                  ["cancelled"],                             "cancelled",              Some "idempotent retry");
     ("release",                 ["claimed"; "in_progress"],                "todo",                   None);
+    ("release",                 ["todo"],                                  "todo",                   Some "idempotent retry");
     (* Action names match [Masc_domain.task_action_to_string] (SSOT):
        Approve_verification -> "approve", Reject_verification -> "reject". *)
     ("submit_for_verification", ["claimed"; "in_progress"],                "awaiting_verification",  Some "MASC_VERIFICATION_FSM_ENABLED + verifier-FSM only");
@@ -464,10 +471,18 @@ let schema_markdown =
     "# Task FSM";
     "";
     "- claim: todo -> claimed";
+    "- claim: claimed(by you) -> claimed";
+    "- claim: in_progress(by you) -> in_progress";
+    "- claim: awaiting_verification -> awaiting_verification (verifier != assignee)";
     "- start: claimed(by you) -> in_progress";
+    "- start: in_progress(by you) -> in_progress";
     "- done: claimed/in_progress(by you) -> done";
+    "- done: done -> done";
     "- cancel: todo/claimed/in_progress(by you) -> cancelled";
+    "- cancel: awaiting_verification -> cancelled (operator/system authority)";
+    "- cancel: cancelled -> cancelled";
     "- release: claimed/in_progress(by you) -> todo";
+    "- release: todo -> todo";
     "- submit_for_verification: claimed/in_progress(by you) -> awaiting_verification (MASC_VERIFICATION_FSM_ENABLED)";
     "- approve: awaiting_verification -> done (verifier != assignee, MASC_VERIFICATION_FSM_ENABLED)";
     "- reject: awaiting_verification -> in_progress (verifier != assignee, MASC_VERIFICATION_FSM_ENABLED)";

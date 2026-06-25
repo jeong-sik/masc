@@ -8,6 +8,22 @@ open Alcotest
 module Mcp_server_eio = Masc.Mcp_server_eio
 module Mcp_server = Masc.Mcp_server
 module Mcp_server_eio_protocol = Masc.Mcp_server_eio_protocol
+
+let str_contains s sub =
+  let len_s = String.length s in
+  let len_sub = String.length sub in
+  if len_sub > len_s
+  then false
+  else (
+    let rec loop i =
+      if i > len_s - len_sub
+      then false
+      else if String.sub s i len_sub = sub
+      then true
+      else loop (i + 1)
+    in
+    loop 0)
+
 (* ============================================================
    is_jsonrpc_v2 Tests
    ============================================================ *)
@@ -455,6 +471,51 @@ let test_mcp_session_roundtrip () =
   | None -> fail "roundtrip failed"
 
 (* ============================================================
+   Task FSM advertisement Tests
+   ============================================================ *)
+
+let has_transition ~action ~from_ ~to_ =
+  List.exists
+    (fun (candidate_action, froms, candidate_to, _) ->
+       String.equal candidate_action action
+       && List.exists (String.equal from_) froms
+       && String.equal candidate_to to_)
+    Mcp_server.task_fsm_transitions
+
+let check_transition ~action ~from_ ~to_ =
+  check
+    bool
+    (Printf.sprintf "%s: %s -> %s advertised" action from_ to_)
+    true
+    (has_transition ~action ~from_ ~to_)
+
+let test_task_fsm_transitions_include_verifier_claim () =
+  check_transition
+    ~action:"claim"
+    ~from_:"awaiting_verification"
+    ~to_:"awaiting_verification"
+
+let test_task_fsm_transitions_include_lifecycle_idempotency () =
+  check_transition ~action:"claim" ~from_:"claimed" ~to_:"claimed";
+  check_transition ~action:"claim" ~from_:"in_progress" ~to_:"in_progress";
+  check_transition ~action:"start" ~from_:"in_progress" ~to_:"in_progress";
+  check_transition ~action:"done" ~from_:"done" ~to_:"done";
+  check_transition ~action:"cancel" ~from_:"cancelled" ~to_:"cancelled";
+  check_transition ~action:"release" ~from_:"todo" ~to_:"todo"
+
+let test_task_fsm_transitions_include_operator_cancel_awaiting () =
+  check_transition ~action:"cancel" ~from_:"awaiting_verification" ~to_:"cancelled"
+
+let test_task_fsm_markdown_includes_verifier_claim () =
+  check
+    bool
+    "verifier claim markdown"
+    true
+    (str_contains
+       Mcp_server.schema_markdown
+       "claim: awaiting_verification -> awaiting_verification")
+
+(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -549,5 +610,11 @@ let () =
       test_case "missing id" `Quick test_mcp_session_of_json_invalid_missing_id;
       test_case "not assoc" `Quick test_mcp_session_of_json_not_assoc;
       test_case "roundtrip" `Quick test_mcp_session_roundtrip;
+    ];
+    "task FSM advertisement", [
+      test_case "verifier claim transition" `Quick test_task_fsm_transitions_include_verifier_claim;
+      test_case "lifecycle idempotency transitions" `Quick test_task_fsm_transitions_include_lifecycle_idempotency;
+      test_case "operator cancel awaiting transition" `Quick test_task_fsm_transitions_include_operator_cancel_awaiting;
+      test_case "verifier claim markdown" `Quick test_task_fsm_markdown_includes_verifier_claim;
     ];
   ]

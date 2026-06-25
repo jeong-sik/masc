@@ -252,9 +252,10 @@ let test_done () =
     L.valid_next_actions
       ~verification_enabled:true ~same_agent:true ~authority:D.Assignee ~task_status
   in
-  (* Done is terminal except for idempotent Claim / Start / Done_action which
-     return the same status (decide returns Ok without state change). *)
-  let expected = [ D.Claim; D.Start; D.Done_action ] in
+  (* Done is terminal except for idempotent Done_action retries, which return
+     the same status without state change. Claim/Start must stay rejected so a
+     stale worker cannot silently reacquire terminal work. *)
+  let expected = [ D.Done_action ] in
   assert_actions ~ctx:"done" ~expected ~actual;
   assert_consistent_with_decide
     ~ctx:"done/consistency" ~verification_enabled:true

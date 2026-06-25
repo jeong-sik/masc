@@ -184,7 +184,7 @@ let all_flags : flag list = [
     lifecycle = Active; since = "2.200.0" };
 
   { env_name = "MASC_SHELL_IR_APPROVAL_GATE_ENABLED";
-    description = "Route Execute tool calls through the capability-based Shell IR approval policy gate";
+    description = "Route Execute tool calls through the capability-based Shell IR approval policy gate; privileged programs remain fail-closed without an approval resolver";
     default = true; category = "runtime";
     lifecycle = Active; since = "2.234.0" };
 

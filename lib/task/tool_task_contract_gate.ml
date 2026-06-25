@@ -1,11 +1,10 @@
-(** Tool_task_contract_gate — task-contract predicates and CDAL gate
-    evaluation for task tools.
+(** Tool_task_contract_gate — task-contract predicates and completion-state
+    helpers for task tools.
 
-    Contract predicates ([task_has_persisted_contract] etc.) are pure
-    and [context]-free. [persisted_contract_rejection] performs a
-    side-effecting gate lookup ({!Cdal_verdict_gate.gate_check}) plus
-    structured logging; it takes [~agent_name] explicitly so it does
-    not depend on the {!Tool_task} [context] type.
+    Contract predicates ([task_has_persisted_contract] etc.) are pure and
+    [context]-free. Contract enforcement is owned by the caller-specific review
+    and CDAL evidence gates in {!Tool_task}; this module must not expose a
+    second advisory/no-op gate.
 
     @since God file decomposition — extracted from tool_task.ml *)
 
@@ -62,15 +61,3 @@ let completion_state_error ~(task_id : string) ~(agent_name : string)
            (Printf.sprintf
               "task %s is awaiting verification by %s; approve or reject before marking done"
               task_id assignee)))
-
-(* Verification is owned solely by [Cdal_evidence_gate], applied upstream in
-   [Tool_task.handle_transition]. This per-action layer formerly ran a second
-   gate against the CDAL verdict ledger; that ledger no longer exists, so this
-   layer never rejects. Kept as a typed seam so the transition control flow is
-   unchanged. *)
-let persisted_contract_rejection ~(agent_name : string)
-    ~(task_opt : Masc_domain.task option) ~(notes : string) : string option =
-  ignore agent_name;
-  ignore task_opt;
-  ignore notes;
-  None

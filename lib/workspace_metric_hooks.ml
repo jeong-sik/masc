@@ -26,6 +26,21 @@ let warn_telemetry_drop ~(event : Workspace_telemetry_drop_event.t) exn =
       ())
 ;;
 
+let credential_not_expired (cred : Masc_domain.agent_credential) =
+  match cred.expires_at with
+  | None -> true
+  | Some expires_at -> String.compare (Masc_domain.now_iso ()) expires_at <= 0
+;;
+
+let is_admin_agent ~base_path ~agent_name =
+  match Auth.read_initial_admin base_path with
+  | Some admin when String.equal agent_name admin -> true
+  | Some _ | None ->
+    (match Auth.load_credential base_path agent_name with
+     | Some ({ role = Masc_domain.Admin; _ } as cred) -> credential_not_expired cred
+     | Some { role = Masc_domain.Worker; _ } | None -> false)
+;;
+
 let task_action_of_transition : Masc_domain.task_action -> Audit_log.action = function
   | Masc_domain.Claim -> Audit_log.ClaimTask
   | Masc_domain.Start -> Audit_log.StartTask
@@ -595,10 +610,7 @@ let install () =
            ~verification_id
            ~reason);
 
-  Atomic.set Workspace_hooks.is_admin_agent_fn (fun ~base_path ~agent_name ->
-    match Auth.read_initial_admin base_path with
-    | Some admin when String.equal agent_name admin -> true
-    | _ -> false);
+  Atomic.set Workspace_hooks.is_admin_agent_fn is_admin_agent;
 
   (* Wrapper for cache desync cleared *)
   let original_cache_desync = Atomic.get Workspace_hooks.cache_desync_cleared_fn in

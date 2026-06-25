@@ -388,6 +388,12 @@ type quorum_result =
   | Passed
   | Failed
 
+type vote_submission =
+  { previous_request : goal_verification_request
+  ; request : goal_verification_request
+  ; quorum_result : quorum_result
+  }
+
 let requests_path config =
   Filename.concat (Workspace_utils.masc_dir config) "goal_verifications.json"
 
@@ -400,67 +406,94 @@ let events_path config =
 let default_state () =
   { version = 1; updated_at = Masc_domain.now_iso (); requests = [] }
 
-let read_state config =
-  let path = requests_path config in
-  if Workspace_utils.path_exists config path then
-    match Workspace_utils.read_json_result config path with
-    | Ok json -> (
-        match state_of_yojson json with
-        | Ok state -> state
-        | Error primary_msg ->
-            let recovery = requests_recovery_path config in
-            if Workspace_utils.path_exists config recovery then
-              match Workspace_utils.read_json_result config recovery with
-              | Ok recovery_json -> (
-                  match state_of_yojson recovery_json with
-                  | Ok state ->
-                      Log.Misc.warn
-                        "goal_verification: primary goal_verifications.json corrupt (%s), recovered from %s"
-                        primary_msg recovery;
-                      state
-                  | Error recovery_msg ->
-                      Log.Misc.error
-                        "goal_verification: both primary and recovery corrupt (primary: %s, recovery: %s)"
-                        primary_msg recovery_msg;
-                      default_state ())
-              | Error recovery_read_msg ->
-                  Log.Misc.warn
-                    "goal_verification: primary corrupt (%s), recovery read failed: %s"
-                    primary_msg recovery_read_msg;
-                  default_state ()
-            else
-              (Log.Misc.warn
-                 "goal_verification: goal_verifications.json corrupt (%s), no .last-good available"
-                 primary_msg;
-               default_state ()))
-    | Error primary_msg ->
-        let recovery = requests_recovery_path config in
-        if Workspace_utils.path_exists config recovery then
-          match Workspace_utils.read_json_result config recovery with
-          | Ok recovery_json -> (
-              match state_of_yojson recovery_json with
-              | Ok state ->
-                  Log.Misc.warn
-                    "goal_verification: primary unreadable (%s), recovered from %s"
-                    primary_msg recovery;
-                  state
-              | Error recovery_msg ->
-                  Log.Misc.error
-                    "goal_verification: primary unreadable (%s), recovery corrupt (%s)"
-                    primary_msg recovery_msg;
-                  default_state ())
-          | Error recovery_msg ->
-              Log.Misc.error
-                "goal_verification: primary unreadable (%s), recovery unreadable (%s)"
-                primary_msg recovery_msg;
-              default_state ()
-        else
-          (Log.Misc.warn
-             "goal_verification: goal_verifications.json unreadable (%s), no .last-good available"
-             primary_msg;
-           default_state ())
+let read_recovery_state config ~primary_msg ~primary_context =
+  let recovery = requests_recovery_path config in
+  if Workspace_utils.path_exists config recovery
+  then
+    match Workspace_utils.read_json_result config recovery with
+    | Ok recovery_json ->
+      (match state_of_yojson recovery_json with
+       | Ok state ->
+         Log.Misc.warn
+           "goal_verification: primary %s (%s), recovered from %s"
+           primary_context
+           primary_msg
+           recovery;
+         Ok state
+       | Error recovery_msg ->
+         let msg =
+           Printf.sprintf
+             "primary %s (%s), recovery corrupt (%s)"
+             primary_context
+             primary_msg
+             recovery_msg
+         in
+         Log.Misc.error "goal_verification: %s" msg;
+         Error msg)
+    | Error recovery_msg ->
+      let msg =
+        Printf.sprintf
+          "primary %s (%s), recovery read failed for %s: %s"
+          primary_context
+          primary_msg
+          recovery
+          recovery_msg
+      in
+      Log.Misc.error "goal_verification: %s" msg;
+      Error msg
   else
+    let msg =
+      Printf.sprintf
+        "primary %s (%s), no .last-good available"
+        primary_context
+        primary_msg
+    in
+    Log.Misc.warn "goal_verification: %s" msg;
+    Error msg
+;;
+
+let read_state_r config =
+  let path = requests_path config in
+  if Workspace_utils.path_exists config path
+  then
+    match Workspace_utils.read_json_result config path with
+    | Ok json ->
+      (match state_of_yojson json with
+       | Ok state -> Ok state
+       | Error primary_msg ->
+         read_recovery_state
+           config
+           ~primary_msg
+           ~primary_context:"goal_verifications.json corrupt")
+    | Error primary_msg ->
+      read_recovery_state
+        config
+        ~primary_msg
+        ~primary_context:"goal_verifications.json unreadable"
+  else if Workspace_utils.path_exists config (requests_recovery_path config)
+  then
+    read_recovery_state
+      config
+      ~primary_msg:"missing"
+      ~primary_context:"goal_verifications.json missing"
+  else
+    Ok (default_state ())
+;;
+
+let read_state config =
+  match read_state_r config with
+  | Ok state -> state
+  | Error msg ->
+    Log.Misc.warn
+      "goal_verification: using empty default state for read-only projection \
+       after unrecoverable read failure: %s"
+      msg;
     default_state ()
+
+let read_state_result config =
+  match read_state_r config with
+  | Ok _ as ok -> ok
+  | Error msg -> Error ("failed to read goal verification state: " ^ msg)
 
 let write_state config (state : state) =
   let json = state_to_yojson state in
@@ -490,18 +523,40 @@ let effective_policy_for_nodes ~(goals : goal_policy_node list)
     ~(goal_id : string) =
   let by_id = Hashtbl.create (max 16 (List.length goals)) in
   List.iter (fun (g : goal_policy_node) -> Hashtbl.replace by_id g.goal_id g) goals;
-  let rec lineage acc current =
-    match current.parent_goal_id with
-    | None -> current :: acc
+  let rec lineage visited acc current =
+    if List.mem current.goal_id visited
+    then
+      Error
+        (Printf.sprintf
+           "goal verifier policy parent cycle detected at %s"
+           current.goal_id)
+    else
+      let visited = current.goal_id :: visited in
+      match current.parent_goal_id with
+    | None -> Ok (current :: acc)
     | Some parent_id -> (
+      if List.mem parent_id visited
+      then
+        Error
+          (Printf.sprintf
+             "goal verifier policy parent cycle detected: %s -> %s"
+             current.goal_id
+             parent_id)
+      else
         match Hashtbl.find_opt by_id parent_id with
-        | Some parent -> lineage (current :: acc) parent
-        | None -> current :: acc)
+        | Some parent -> lineage visited (current :: acc) parent
+        | None ->
+            Error
+              (Printf.sprintf
+                 "goal verifier policy parent %s referenced by %s was not found"
+                 parent_id current.goal_id))
   in
   match Hashtbl.find_opt by_id goal_id with
   | None -> Error "goal not found while resolving verifier policy"
-  | Some goal ->
-      let nodes = lineage [] goal in
+  | Some goal -> (
+      match lineage [] [] goal with
+      | Error _ as error -> error
+      | Ok nodes ->
       let principals = ref [] in
       let required_verdicts = ref None in
       List.iter
@@ -535,7 +590,7 @@ let effective_policy_for_nodes ~(goals : goal_policy_node list)
                    principals = !principals;
                    eligible_principals = !principals;
                    required_verdicts;
-                 })
+                 }))
 
 let exclude_requester ~(policy_snapshot : policy_snapshot)
     ~(requested_by : goal_principal) =
@@ -566,15 +621,15 @@ let emit_event config ~(goal_id : string) ~(event_type : string)
 let update_state config f =
   let lock_path = requests_path config in
   Workspace_utils.with_file_lock config lock_path (fun () ->
-      let state = read_state config in
+    match read_state_r config with
+    | Error _ as error -> error
+    | Ok state ->
       let next_state = f state in
       write_state config next_state;
-      next_state)
+      Ok next_state)
 
 let gen_request_id () =
-  Printf.sprintf "gvr-%d-%04x"
-    (int_of_float (Time_compat.now () *. 1000.0))
-    (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFF)
+  Random_id.prefixed ~prefix:"gvr-" ~bytes:16
 
 let create_request config ~(goal_id : string) ~(requested_by : goal_principal)
     ~(policy_snapshot : policy_snapshot) =
@@ -592,7 +647,7 @@ let create_request config ~(goal_id : string) ~(requested_by : goal_principal)
       resolved_at = None;
     }
   in
-  let state =
+  let saved =
     update_state config (fun state ->
         {
           version = state.version + 1;
@@ -600,27 +655,55 @@ let create_request config ~(goal_id : string) ~(requested_by : goal_principal)
           requests = state.requests @ [ request ];
         })
   in
-  let saved =
-    List.find_opt (fun row -> String.equal row.id request.id) state.requests
-  in
   match saved with
-  | Some saved -> Ok saved
-  | None -> Error "failed to persist goal verification request"
+  | Error msg -> Error ("failed to read goal verification state: " ^ msg)
+  | Ok state ->
+    let saved =
+      List.find_opt (fun row -> String.equal row.id request.id) state.requests
+    in
+    (match saved with
+     | Some saved -> Ok saved
+     | None -> Error "failed to persist goal verification request")
+
+let list_requests_for_goal_result config ~(goal_id : string) =
+  match read_state_result config with
+  | Error _ as error -> error
+  | Ok state ->
+    Ok
+      (List.filter
+         (fun (request : goal_verification_request) ->
+            String.equal request.goal_id goal_id)
+         state.requests)
 
 let list_requests_for_goal config ~(goal_id : string) =
-  read_state config
-  |> fun (state : state) ->
-  List.filter
-    (fun (request : goal_verification_request) ->
-      String.equal request.goal_id goal_id)
-    state.requests
+  match list_requests_for_goal_result config ~goal_id with
+  | Ok requests -> requests
+  | Error msg ->
+    Log.Misc.warn
+      "goal_verification: using empty request list for read-only projection \
+       after read failure: %s"
+      msg;
+    []
+
+let find_request_result config ~(request_id : string) =
+  match read_state_result config with
+  | Error _ as error -> error
+  | Ok state ->
+    Ok
+      (List.find_opt
+         (fun (request : goal_verification_request) ->
+            String.equal request.id request_id)
+         state.requests)
 
 let find_request config ~(request_id : string) =
-  read_state config |> fun (state : state) ->
-  List.find_opt
-    (fun (request : goal_verification_request) ->
-      String.equal request.id request_id)
-    state.requests
+  match find_request_result config ~request_id with
+  | Error msg ->
+    Log.Misc.warn
+      "goal_verification: using missing request for read-only projection after \
+       read failure: %s"
+      msg;
+    None
+  | Ok request -> request
 
 let count_votes ~(decision : vote_decision) request =
   List.length
@@ -639,10 +722,17 @@ let evaluate_quorum request =
   else
     Pending
 
+let request_json_equal left right =
+  String.equal
+    (Yojson.Safe.to_string (goal_verification_request_to_yojson left))
+    (Yojson.Safe.to_string (goal_verification_request_to_yojson right))
+
 let cancel_request config ~(request_id : string) =
   let lock_path = requests_path config in
   Workspace_utils.with_file_lock config lock_path (fun () ->
-      let state = read_state config in
+    match read_state_r config with
+    | Error msg -> Error ("failed to read goal verification state: " ^ msg)
+    | Ok state ->
       match List.find_opt (fun request -> String.equal request.id request_id) state.requests with
       | None -> Error "goal verification request not found"
       | Some request when request.status <> Open -> Ok request
@@ -665,13 +755,54 @@ let cancel_request config ~(request_id : string) =
             { version = state.version + 1; updated_at = resolved_at; requests };
           Ok updated_request)
 
-let submit_vote config ~(request_id : string) ~(principal : goal_principal)
+let cancel_open_requests_for_goal_except config ~(goal_id : string) ~active_request_id =
+  let lock_path = requests_path config in
+  Workspace_utils.with_file_lock config lock_path (fun () ->
+    match read_state_r config with
+    | Error msg -> Error ("failed to read goal verification state: " ^ msg)
+    | Ok state ->
+      let resolved_at = Masc_domain.now_iso () in
+      let cancelled = ref [] in
+      let should_keep request =
+        match active_request_id with
+        | Some active_id -> String.equal request.id active_id
+        | None -> false
+      in
+      let requests =
+        List.map
+          (fun request ->
+             if
+               String.equal request.goal_id goal_id
+               && request.status = Open
+               && not (should_keep request)
+             then (
+               let updated =
+                 { request with status = Cancelled; resolved_at = Some resolved_at }
+               in
+               cancelled := updated :: !cancelled;
+               updated)
+             else request)
+          state.requests
+      in
+      match !cancelled with
+      | [] -> Ok []
+      | cancelled_requests ->
+        write_state
+          config
+          { version = state.version + 1; updated_at = resolved_at; requests };
+        Ok (List.rev cancelled_requests))
+
+let submit_vote_with_snapshot config ~(goal_id : string) ~(request_id : string) ~(principal : goal_principal)
     ~(decision : vote_decision) ?note ?(evidence_refs = []) () =
   let lock_path = requests_path config in
   Workspace_utils.with_file_lock config lock_path (fun () ->
-      let state = read_state config in
+    match read_state_r config with
+    | Error msg -> Error ("failed to read goal verification state: " ^ msg)
+    | Ok state ->
       match List.find_opt (fun request -> String.equal request.id request_id) state.requests with
       | None -> Error "goal verification request not found"
+      | Some request when not (String.equal request.goal_id goal_id) ->
+          Error "goal verification request does not belong to this goal"
       | Some request when request.status <> Open ->
           Error "goal verification request is not open"
       | Some request when principal_equal principal request.requested_by ->
@@ -688,6 +819,7 @@ let submit_vote config ~(request_id : string) ~(principal : goal_principal)
                request.votes ->
           Error "principal has already voted on this request"
       | Some request ->
+          let previous_request = request in
           let submitted_at = Masc_domain.now_iso () in
           let votes =
             request.votes
@@ -720,4 +852,50 @@ let submit_vote config ~(request_id : string) ~(principal : goal_principal)
           in
           write_state config
             { version = state.version + 1; updated_at = submitted_at; requests };
-          Ok (next_request, outcome))
+          Ok { previous_request; request = next_request; quorum_result = outcome })
+
+let submit_vote config ~(goal_id : string) ~(request_id : string) ~(principal : goal_principal)
+    ~(decision : vote_decision) ?note ?(evidence_refs = []) () =
+  match
+    submit_vote_with_snapshot
+      config
+      ~goal_id
+      ~request_id
+      ~principal
+      ~decision
+      ?note
+      ~evidence_refs
+      ()
+  with
+  | Error _ as error -> error
+  | Ok submission -> Ok (submission.request, submission.quorum_result)
+
+let restore_request_snapshot config ~expected_current ~snapshot =
+  if not (String.equal expected_current.id snapshot.id)
+  then Error "cannot restore verification request snapshot for a different request id"
+  else
+    let lock_path = requests_path config in
+    Workspace_utils.with_file_lock config lock_path (fun () ->
+      match read_state_r config with
+      | Error msg -> Error ("failed to read goal verification state: " ^ msg)
+      | Ok state ->
+        (match
+           List.find_opt
+             (fun request -> String.equal request.id expected_current.id)
+             state.requests
+         with
+         | None -> Error "goal verification request not found"
+         | Some current when not (request_json_equal current expected_current) ->
+           Error
+             "goal verification request changed after failed phase update; \
+              refusing to rollback"
+         | Some _ ->
+           let restored_at = Masc_domain.now_iso () in
+           let requests =
+             List.map
+               (fun row -> if String.equal row.id snapshot.id then snapshot else row)
+               state.requests
+           in
+           write_state config
+             { version = state.version + 1; updated_at = restored_at; requests };
+           Ok snapshot))

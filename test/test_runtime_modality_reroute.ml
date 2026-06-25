@@ -21,8 +21,9 @@ let decision_to_string : Runtime_agent.reroute_decision -> string = function
   | Runtime_agent.No_capable_runtime { required } ->
       Printf.sprintf "no_capable:%s" (String.concat "," required)
 
-let decide ~assigned ~required ~candidates =
+let decide ?candidate_is_live ~assigned ~required ~candidates =
   Runtime_agent.decide_modality_reroute
+    ?candidate_is_live
     ~assigned_caps:assigned
     ~required_modalities:required
     ~candidates
@@ -125,6 +126,44 @@ let test_candidate_order_is_honored () =
           ~candidates:
             [ ("vision_d", caps ~image:true ())
             ; ("vision_c", caps ~image:true ())
+            ]))
+
+(* Liveness is an injected data predicate, not runtime I/O. A capable candidate
+   under provider cooldown is skipped so reroute does not spend the turn on an
+   already circuit-broken provider. *)
+let test_liveness_skips_cooled_down_candidate () =
+  let candidate_is_live ~runtime_id =
+    not (String.equal runtime_id "vision_down")
+  in
+  check string "cooled capable candidate skipped"
+    "reroute:vision_up:assigned runtime lacks image input"
+    (decision_to_string
+       (decide
+          ~candidate_is_live
+          ~assigned:(caps ())
+          ~required:[ "image" ]
+          ~candidates:
+            [ ("vision_down", caps ~image:true ())
+            ; ("vision_up", caps ~image:true ())
+            ]))
+
+let test_liveness_no_live_capable_runtime_floor () =
+  let candidate_is_live ~runtime_id =
+    not
+      (String.equal runtime_id "vision_down"
+       || String.equal runtime_id "vision_also_down")
+  in
+  check string "no live capable runtime"
+    "no_capable:image"
+    (decision_to_string
+       (decide
+          ~candidate_is_live
+          ~assigned:(caps ())
+          ~required:[ "image" ]
+          ~candidates:
+            [ ("text_up", caps ())
+            ; ("vision_down", caps ~image:true ())
+            ; ("vision_also_down", caps ~image:true ())
             ]))
 
 (* No configured runtime admits the modality → floor: the assigned runtime stands
@@ -337,6 +376,14 @@ let test_driver_degrade_branch_emits_manifest () =
      && string_contains source "media_degrade_manifest_decision"
      && string_contains source "Keeper_runtime_manifest.Runtime_routed")
 
+let test_driver_reroute_uses_provider_cooldown_liveness () =
+  let source = read_file "lib/keeper/keeper_turn_driver.ml" in
+  check bool "driver injects cooldown liveness" true
+    (string_contains source "runtime_available_for_modality_reroute"
+     && string_contains source "Keeper_binding_health.is_in_cooldown"
+     && string_contains source
+          "~candidate_is_live:(runtime_available_for_modality_reroute ~keeper_name)")
+
 let () =
   run "rfc0265_modality_reroute"
     [ ( "decide_modality_reroute"
@@ -348,6 +395,10 @@ let () =
         ; test_case "initial message media drives reroute" `Quick
             test_initial_message_media_drives_reroute
         ; test_case "candidate order honored" `Quick test_candidate_order_is_honored
+        ; test_case "liveness skips cooled-down candidate" `Quick
+            test_liveness_skips_cooled_down_candidate
+        ; test_case "liveness floor when all capable are cooled down" `Quick
+            test_liveness_no_live_capable_runtime_floor
         ; test_case "no capable floor" `Quick test_no_capable_runtime_floor
         ; test_case "history media floor rejects before provider" `Quick
             test_history_media_floor_rejects_before_provider
@@ -374,5 +425,7 @@ let () =
             test_degrade_manifest_public_projection
         ; test_case "driver degrade branch emits manifest" `Quick
             test_driver_degrade_branch_emits_manifest
+        ; test_case "driver reroute uses provider cooldown liveness" `Quick
+            test_driver_reroute_uses_provider_cooldown_liveness
         ] )
     ]

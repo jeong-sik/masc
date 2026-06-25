@@ -235,6 +235,32 @@ let test_verify_token () =
   | Error _, _ ->
       fail "create_token should succeed"
 
+let test_workspace_metric_admin_predicate_includes_admin_role () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      (match Auth.create_token dir ~agent_name:"role-admin" ~role:Types.Admin with
+       | Ok _ -> ()
+       | Error e -> fail (Types.masc_error_to_string e));
+      (match Auth.create_token dir ~agent_name:"role-worker" ~role:Types.Worker with
+       | Ok _ -> ()
+       | Error e -> fail (Types.masc_error_to_string e));
+      check
+        bool
+        "admin role credential is admin"
+        true
+        (Masc.Workspace_metric_hooks.is_admin_agent
+           ~base_path:dir
+           ~agent_name:"role-admin");
+      check
+        bool
+        "worker role credential is not admin"
+        false
+        (Masc.Workspace_metric_hooks.is_admin_agent
+           ~base_path:dir
+           ~agent_name:"role-worker"))
+
 let test_verify_wrong_token () =
   let dir = setup_test_workspace () in
   let create_result = Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Worker in
@@ -993,6 +1019,10 @@ let () =
       test_case "credential saved private" `Quick
         test_credential_saved_private;
       test_case "verify token" `Quick test_verify_token;
+      test_case
+        "workspace metric admin predicate includes admin role"
+        `Quick
+        test_workspace_metric_admin_predicate_includes_admin_role;
       test_case "verify wrong token" `Quick test_verify_wrong_token;
       test_case "verify token reports token owner on agent mismatch" `Quick
         test_verify_token_reports_token_owner_on_agent_mismatch;

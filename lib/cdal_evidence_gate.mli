@@ -6,9 +6,11 @@
 
     Explicit verification submission is checked for the presence of evidence
     the reviewer can inspect downstream — substantive
-    notes plus the contract's [required_evidence] entries, or a handoff
-    reference (file path, PR number, commit hash, trace id, or any
-    reference URL). There is no internal proof/verdict pipeline.
+    notes plus the contract's [required_evidence] entries mentioned as
+    standalone reference tokens, or a concrete handoff reference (file path,
+    PR number, commit hash, trace id, or any reference URL). Blank required
+    evidence entries are treated as unsatisfied. There is no internal
+    proof/verdict pipeline.
 
     Decision matrix:
 

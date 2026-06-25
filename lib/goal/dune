@@ -16,6 +16,7 @@
   masc_core
   masc_config
   masc_log
+  masc_random_id
   masc_workspace
   shared_audit
   time_compat

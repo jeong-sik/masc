@@ -322,6 +322,15 @@ module Transport = struct
     | Some ("1" | "true" | "yes" | "y" | "on") -> true
     | _ -> false
 
+  (** Disable dashboard actor-hint fallback when a bearer token is present but
+      cannot be resolved. Default: false, preserving the token-churn safety net. *)
+  let dashboard_actor_fallback_fail_closed () =
+    match
+      Sys.getenv_opt "MASC_DASHBOARD_ACTOR_FALLBACK_FAIL_CLOSED" |> trim_opt
+    with
+    | Some ("1" | "true" | "yes" | "y" | "on") -> true
+    | _ -> false
+
   (** Startup watchdog timeout, clamped to [30, 600]. Default: 240.
       Re-readable within the process, but operationally a boot-time input. *)
   let startup_watchdog_sec () =
@@ -942,8 +951,9 @@ end
     Capability-based approval policy gate for Execute tool calls.
     When enabled, the keeper runtime routes Shell IR dispatches through
     [Keeper_tool_execute_shell_ir.dispatch_classified_with_approval]
-    so risk-class trust levels can auto-allow safe commands while
-    requiring explicit approval for audited/privileged operations. *)
+    so risk-class trust levels can produce explicit allow/ask/deny verdicts.
+    Privileged programs are fail-closed in the dispatch chokepoint until a
+    Shell IR approval resolver is wired, even if this gate is disabled. *)
 module Shell_ir_approval_gate = struct
   (** Enable the Shell IR approval policy gate. Default: true (RFC-0254 — the
       autonomous policy is a strict safety improvement over the no-gate path).

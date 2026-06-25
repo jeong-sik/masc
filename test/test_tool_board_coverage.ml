@@ -2005,7 +2005,7 @@ let () =
         ] );
       ( "post_kind_registry",
         [
-          Alcotest.test_case "no hook: defaults to direct" `Quick (fun () ->
+          Alcotest.test_case "no hook: known agent author defaults to automation" `Quick (fun () ->
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
@@ -2013,6 +2013,32 @@ let () =
             let (ok, msg) = dispatch "masc_board_post" (make_args [
               ("title", `String "test"); ("content", `String "hello");
               ("author", `String "claude-agent")
+            ]) in
+            Alcotest.(check bool) "post created" true ok;
+            Alcotest.(check string) "classified as automation" "automation"
+              Yojson.Safe.Util.(
+                parse_create_response_json msg |> member "post_kind" |> to_string));
+          Alcotest.test_case "no hook: keeper agent author defaults to automation" `Quick (fun () ->
+            Eio_main.run @@ fun env ->
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            cleanup ();
+            Board_tool.set_agent_lookup_none ();
+            let (ok, msg) = dispatch "masc_board_post" (make_args [
+              ("title", `String "test"); ("content", `String "hello");
+              ("author", `String "keeper-sangsu-agent")
+            ]) in
+            Alcotest.(check bool) "post created" true ok;
+            Alcotest.(check string) "classified as automation" "automation"
+              Yojson.Safe.Util.(
+                parse_create_response_json msg |> member "post_kind" |> to_string));
+          Alcotest.test_case "no hook: human author stays direct" `Quick (fun () ->
+            Eio_main.run @@ fun env ->
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            cleanup ();
+            Board_tool.set_agent_lookup_none ();
+            let (ok, msg) = dispatch "masc_board_post" (make_args [
+              ("title", `String "test"); ("content", `String "hello");
+              ("author", `String "sangsu")
             ]) in
             Alcotest.(check bool) "post created" true ok;
             Alcotest.(check string) "classified as direct" "direct"
@@ -2099,6 +2125,34 @@ let () =
             (* body2 should include the new post, so it differs from body1 *)
             Alcotest.(check bool) "cache invalidated — different result"
               true (body1 <> body2));
+          Alcotest.test_case "dispatch mutation outside tool invalidates cache" `Quick (fun () ->
+            Eio_main.run @@ fun env ->
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            cleanup ();
+            Board_tool.invalidate_board_list_cache ();
+            let (_ok, _msg) = dispatch "masc_board_post" (make_args [
+              ("title", `String "first"); ("content", `String "hello");
+              ("author", `String "tester")
+            ]) in
+            let args = make_args [("limit", `Int 50)] in
+            let (_ok1, body1) = dispatch "masc_board_list" args in
+            (match
+               Board_dispatch.create_post
+                 ~author:"external-writer"
+                 ~title:"external"
+                 ~content:"external mutation body"
+                 ~post_kind:Board.Human_post
+                 ()
+             with
+             | Ok _ -> ()
+             | Error e -> Alcotest.fail (Board.show_board_error e));
+            let (_ok2, body2) = dispatch "masc_board_list" args in
+            Alcotest.(check bool)
+              "external dispatch mutation changes cached list"
+              true (body1 <> body2);
+            Alcotest.(check bool)
+              "fresh list includes external post"
+              true (contains_substring body2 "external mutation body"));
           Alcotest.test_case "different args produce independent entries" `Quick (fun () ->
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);

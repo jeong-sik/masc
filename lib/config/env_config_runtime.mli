@@ -157,6 +157,7 @@ module Transport : sig
   val use_h2 : unit -> h2_mode
   val agent_transport_opt : unit -> agent_transport option
   val http_auth_strict_env_enabled : unit -> bool
+  val dashboard_actor_fallback_fail_closed : unit -> bool
   val startup_watchdog_sec : unit -> float
 end
 
@@ -362,9 +363,10 @@ module Shell_ir_approval_gate : sig
   val enabled : unit -> bool
   (** [enabled ()] is true when [MASC_SHELL_IR_APPROVAL_GATE_ENABLED] is set.
       Routes Execute tool calls through the capability-based approval policy
-      gate so safe commands can be auto-allowed while audited/privileged
-      operations require explicit approval. Default: [true] (the autonomous
-      policy is a strict safety improvement over the no-gate path). *)
+      gate so risk-class trust levels can produce explicit allow/ask/deny
+      verdicts.  Privileged programs are fail-closed in the dispatch
+      chokepoint until a Shell IR approval resolver is wired, even if this
+      gate is disabled.  Default: [true]. *)
 end
 
 module Shell_ir_path_jail : sig

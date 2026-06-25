@@ -1,21 +1,27 @@
 ---- MODULE RFC0061CacheInvalidationBroadcast ----
 \* Boundary spec for RFC-0061: Cache-invalidation broadcast envelope.
 \*
-\* Runtime truth being modelled (lib/workspace/workspace_broadcast.ml:79-130):
+\* Runtime truth being modelled (lib/workspace/workspace_broadcast.ml):
 \*   - When a broadcasting agent's current_task is terminal,
 \*     the original broadcast content is rewritten to a
 \*     "[cache_invalidated] ... stale broadcast suppressed" notice.
 \*   - Mention tokens are extracted from the *original* content
 \*     (via Mention.extract) to drive downstream wake decisions.
-\*   - In the buggy code, rewrite happens at lines 95-101 *before*
-\*     pre_extract_mention at line 130.  The rewritten content
-\*     contains no @mention tokens, so wake decisions downstream
-\*     see mention=None even when the original message had one.
+\*   - Current code extracts [pre_extract_mention] before any rewrite and uses
+\*     the same original-content view for mention dedup.  A dedup skip is a
+\*     terminal skip (no message/callback), not a successful delivery with empty
+\*     mention tokens.
+\*   - SpecBuggy is retained as the historical counterexample: rewrite happens
+\*     before mention extraction, the rewritten content contains no @mention
+\*     tokens, and downstream wake decisions see mention=None even when the
+\*     original message had one.
 \*
 \* What this spec deliberately abstracts away:
 \*   - The actual filesystem / JSON serialization of messages.
-\*   - The dedup gate (RFC-0040) — modelled as a non-deterministic
-\*     skip to keep the state space small.
+\*   - The dedup gate (RFC-0040) — modelled as a non-deterministic terminal
+\*     skip.  Safety properties below deliberately exclude [dedup_skipped]
+\*     from delivered-message obligations so dedup cannot mask a rewritten
+\*     delivery with empty mention tokens.
 \*   - The exact regex for Mention.extract — modelled as a boolean
 \*     "original_has_mention".
 \*
@@ -152,11 +158,13 @@ Spec == Init /\ [][Next]_vars
 
 (* ── Safety invariants ──────────────────────────────────── *)
 
-\* I1: If the original content had a mention, the extracted tokens
-\* must be non-empty.  This is the property that the buggy code
-\* violates when rewrite happens before extraction.
+\* I1: If the original content had a mention and the broadcast proceeded past
+\* the sender-side dedup gate, the extracted tokens must be non-empty.  Dedup
+\* skip is terminal and intentionally creates no delivered message; every other
+\* post-building phase must preserve the original mention before rewrite.
 MentionTokensExtractedBeforeRewrite ==
-    original_has_mention => Len(mention_tokens) > 0
+    (phase \in {"extracted", "rewritten", "delivered"} /\ original_has_mention)
+        => Len(mention_tokens) > 0
 
 \* I2: Once delivered, the mention tokens are consistent with the
 \* original content (not the rewritten content).
@@ -178,10 +186,9 @@ Safety ==
 (* ── Bug Model ──────────────────────────────────────────── *)
 
 \* Bug action: rewrite happens *before* mention extraction.
-\* This models the current buggy code where cache_invalidated
-\* rewrite at workspace_broadcast.ml:95-101 runs before
-\* pre_extract_mention at line 130.  The rewritten content
-\* ("cache_notice") has no mention, so extraction yields empty.
+\* This models the historical buggy shape where cache_invalidated rewrite ran
+\* before [pre_extract_mention].  The rewritten content ("cache_notice") has no
+\* mention, so extraction yields empty.
 BroadcastRewriteSwallowsMention ==
     /\ phase = "building"
     /\ phase' = "extracted"

@@ -73,12 +73,6 @@ val review_completion_notes :
   notes:string ->
   string option
 
-val persisted_contract_rejection :
-  ctx:context ->
-  task_opt:Masc_domain.task option ->
-  notes:string ->
-  string option
-
 val handle_add_task :
   tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 

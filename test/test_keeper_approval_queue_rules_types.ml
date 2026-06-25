@@ -43,6 +43,50 @@ let test_blank_string_json_is_none () =
   check (option string) "blank" None (Q.string_opt_of_json (`String "  "))
 ;;
 
+let test_approval_rule_rejects_malformed_required_fields () =
+  let malformed =
+    `Assoc
+      [ "id", `String "rule-bad"
+      ; "keeper_name", `String "keeper"
+      ; "tool_name", `String "tool_execute"
+      ; "request_fingerprint", `String "abcdef1234567890"
+      ; "max_risk", `String "high"
+      ; "created_at", `String "not-a-timestamp"
+      ; "match_count", `Int 0
+      ]
+  in
+  check
+    bool
+    "bad created_at rejected"
+    true
+    (Option.is_none (Q.approval_rule_of_yojson malformed))
+;;
+
+let test_approval_rule_rejects_unknown_risk () =
+  let json =
+    `Assoc
+      [ "id", `String "rule-unknown-risk"
+      ; "keeper_name", `String sample_rule.keeper_name
+      ; "tool_name", `String sample_rule.tool_name
+      ; "sandbox_profile", `String "local"
+      ; "backend", `String "sandbox"
+      ; "request_fingerprint", `String sample_rule.request_fingerprint
+      ; "request_fingerprint_preview", `String sample_rule.request_fingerprint_preview
+      ; "max_risk", `String "supercritical"
+      ; "created_at", `Float sample_rule.created_at
+      ; "created_by", `String "operator"
+      ; "last_matched_at", `Float 1780587700.0
+      ; "match_count", `Int sample_rule.match_count
+      ; "source_approval_id", `String "approval-1"
+      ]
+  in
+  check
+    bool
+    "unknown risk rejected"
+    true
+    (Option.is_none (Q.approval_rule_of_yojson json))
+;;
+
 let () =
   run
     "Keeper_approval_queue_rules_types"
@@ -51,6 +95,14 @@ let () =
     ; ( "json"
       , [ test_case "approval rule round trip" `Quick test_approval_rule_json_round_trip
         ; test_case "blank string is none" `Quick test_blank_string_json_is_none
+        ; test_case
+            "approval rule rejects malformed required fields"
+            `Quick
+            test_approval_rule_rejects_malformed_required_fields
+        ; test_case
+            "approval rule rejects unknown risk"
+            `Quick
+            test_approval_rule_rejects_unknown_risk
         ] )
     ]
 ;;

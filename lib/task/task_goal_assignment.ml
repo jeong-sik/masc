@@ -17,6 +17,7 @@
 type set_task_goal_error =
   | Unknown_task of string
   | Unknown_goal of string
+  | Registry_unreadable of string
   | Already_assigned of
       { task_id : string
       ; existing_goal_ids : string list
@@ -25,6 +26,7 @@ type set_task_goal_error =
 let set_task_goal_error_to_string = function
   | Unknown_task task_id -> Printf.sprintf "unknown task '%s'" task_id
   | Unknown_goal goal_id -> Printf.sprintf "unknown goal '%s'" goal_id
+  | Registry_unreadable msg -> "goal-task registry unreadable: " ^ msg
   | Already_assigned { task_id; existing_goal_ids } ->
     Printf.sprintf
       "task '%s' is already assigned to goal(s) [%s]; reassignment is out of \
@@ -34,22 +36,29 @@ let set_task_goal_error_to_string = function
 ;;
 
 let set_task_goal config ~task_id ~goal_id : (unit, set_task_goal_error) result =
-  let task_exists =
+  let task_exists ~task_id =
     Workspace_query.get_tasks_raw config
     |> List.exists (fun (t : Masc_domain.task) -> String.equal t.id task_id)
   in
-  if not task_exists then Error (Unknown_task task_id)
-  else (
-    match Goal_store.get_goal config ~goal_id with
-    | None -> Error (Unknown_goal goal_id)
-    | Some _ ->
-      (* Reassignment/unlink is a deliberate Non-Goal (RFC-0267 §4). Enforce the
-         single-goal invariant at the registry write boundary, not as a
-         caller-side check-then-write: concurrent assign requests must be
-         serialized by the goal-task-links file lock before observing whether
-         the task is still goalless. *)
-      (match Workspace_goal_index.link_goalless_task_to_goal config ~goal_id ~task_id with
-       | Ok () -> Ok ()
-       | Error existing_goal_ids ->
-         Error (Already_assigned { task_id; existing_goal_ids })))
+  let goal_exists ~goal_id = Option.is_some (Goal_store.get_goal config ~goal_id) in
+  (* Reassignment/unlink is a deliberate Non-Goal (RFC-0267 §4). Validate task
+     existence, goal existence, and the single-goal registry invariant under the
+     goal-task-links file lock immediately before writing the link. This keeps
+     the task/goal domain dependency here while avoiding a caller-side
+     validate-then-write window around the registry mutation. *)
+  match
+    Workspace_goal_index.link_goalless_task_to_goal_checked
+      config
+      ~goal_id
+      ~task_id
+      ~task_exists
+      ~goal_exists
+  with
+  | Ok () -> Ok ()
+  | Error Workspace_goal_index.Link_unknown_task -> Error (Unknown_task task_id)
+  | Error Workspace_goal_index.Link_unknown_goal -> Error (Unknown_goal goal_id)
+  | Error (Workspace_goal_index.Link_registry_unreadable msg) ->
+    Error (Registry_unreadable msg)
+  | Error (Workspace_goal_index.Link_already_assigned existing_goal_ids) ->
+    Error (Already_assigned { task_id; existing_goal_ids })
 ;;

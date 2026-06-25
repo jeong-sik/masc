@@ -93,9 +93,17 @@ let build_forest ~(config : Workspace.config) ~goals ~tasks =
 
 
 let build_goal_verification_projection ~(config : Workspace.config) goals =
-  let requests =
-    Goal_verification.read_state config |> fun (state : Goal_verification.state) ->
-    state.requests
+  let requests, diagnostics =
+    match Goal_verification.read_state_result config with
+    | Ok (state : Goal_verification.state) -> state.requests, []
+    | Error msg ->
+      ( []
+      , [ `Assoc
+            [ "kind", `String "goal_verification_state_unreadable"
+            ; "severity", `String "error"
+            ; "message", `String msg
+            ]
+        ] )
   in
   let effective_policy_table = Hashtbl.create (max 16 (List.length goals)) in
   let request_table = Hashtbl.create (max 16 (List.length requests)) in
@@ -149,7 +157,8 @@ let build_goal_verification_projection ~(config : Workspace.config) goals =
     (fun goal_id -> Hashtbl.find_opt request_table goal_id),
     (fun goal_id -> Hashtbl.find_opt latest_request_table goal_id),
     (fun goal_id ->
-      Option.value (Hashtbl.find_opt events_table goal_id) ~default:[]) )
+      Option.value (Hashtbl.find_opt events_table goal_id) ~default:[]),
+    diagnostics )
 
 let emit_all_goal_attainment_metrics ~(config : Workspace.config) =
   let goals = Goal_store.list_goals config () in
@@ -157,7 +166,8 @@ let emit_all_goal_attainment_metrics ~(config : Workspace.config) =
   let ( _effective_policy_for_goal,
         _open_request_for_goal,
         _latest_request_for_goal,
-        _events_for_goal ) =
+        _events_for_goal,
+        _verification_diagnostics ) =
     build_goal_verification_projection ~config goals
   in
   let forest = build_forest ~config ~goals ~tasks in
@@ -298,7 +308,8 @@ let goal_detail_json ~(config : Workspace.config) ~goal_id :
   let ( effective_policy_for_goal,
         open_request_for_goal,
         latest_request_for_goal,
-        events_for_goal ) =
+        events_for_goal,
+        verification_diagnostics ) =
     build_goal_verification_projection ~config goals
   in
   let forest = build_forest ~config ~goals ~tasks in
@@ -359,6 +370,7 @@ let goal_detail_json ~(config : Workspace.config) ~goal_id :
             ("linked_keepers", `List (List.map goal_detail_keeper_json keeper_details));
             ("approvals", `List approvals);
             ("execution_receipts", `List latest_receipts);
+            ("verification_diagnostics", `List verification_diagnostics);
             ( "timeline",
               `List
                 (build_goal_timeline node keeper_details approvals goal_events) );
@@ -370,7 +382,8 @@ let dashboard_goals_tree_json ~(config : Workspace.config) : Yojson.Safe.t =
   let ( effective_policy_for_goal,
         open_request_for_goal,
         latest_request_for_goal,
-        events_for_goal ) =
+        events_for_goal,
+        verification_diagnostics ) =
     build_goal_verification_projection ~config goals
   in
   let forest = build_forest ~config ~goals ~tasks in
@@ -437,6 +450,7 @@ let dashboard_goals_tree_json ~(config : Workspace.config) : Yojson.Safe.t =
             ("total_tasks", `Int total_tasks);
             ("done_tasks", `Int done_tasks);
             ("pending_approvals", `Int pending_approval_total);
+            ("verification_diagnostics", `List verification_diagnostics);
             ( "infra_risk_count",
               `Int
                 (List.fold_left

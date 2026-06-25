@@ -2,17 +2,21 @@
 \* Boundary spec for RFC-0082: Keeper last_blocker auto-clear + recovery escalation.
 \*
 \* Runtime truth being modelled
-\* (lib/keeper/keeper_supervisor.ml:1485 stamps the blocker,
-\*  lib/keeper/keeper_execution_receipt.ml:475 derives the disposition,
-\*  no code path clears the blocker after recovery — that's the bug):
+\* (lib/keeper/keeper_supervisor_pause_policy.ml stamps blocker-backed pauses,
+\*  lib/keeper/keeper_unified_turn_failure.ml stamps runtime-exhausted blockers,
+\*  lib/keeper/keeper_unified_turn_no_progress.ml clears no-progress blockers on
+\*  a progress turn, and supervisor resume paths clear runtime.last_blocker when
+\*  the keeper is auto/manual resumed):
 \*
 \*   - runtime_exhausted stamps keeper_meta.runtime.last_blocker.
 \*   - runtime providers may later recover (network, credentials, restart).
-\*   - In the buggy code, last_blocker is never assigned None from a
-\*     non-None state.  runtime_health can flip back to Healthy
-\*     and a subsequent successful turn can run — but the latch field
-\*     stays SET, which is what the dashboard reads to show
-\*     "일시정지 / 런타임 차단", perpetuating the appearance of stuck.
+\*   - Current code has explicit clear paths: progress-turn recovery clears
+\*     No_progress_loop, auto-resume/reconcile resume clears paused blockers,
+\*     and operator resume clears the latch.  This clean spec models those
+\*     implementation paths as [ClearOnSuccess] / [OperatorClears].
+\*   - SpecBuggy is retained only as a historical residual bug model: if those
+\*     clear paths disappear, runtime_health can flip back to Healthy while
+\*     last_blocker stays SET forever, which is the dashboard-stuck failure.
 \*
 \* What this spec deliberately abstracts away:
 \*   - Probe interval, budget mechanics, fleet stale batch counting.
@@ -88,10 +92,11 @@ ProviderRecovers ==
     /\ UNCHANGED last_blocker
     /\ step_count' = step_count + 1
 
-\* The proposed fix: when runtime is healthy and a successful
-\* call happens (modelled here as a non-deterministic firing
-\* gated on health), clear the latch.  This is the action that
-\* SpecBuggy removes to prove the invariant violation.
+\* Current implementation clear paths: when runtime is healthy and a progress
+\* turn or resume reconciliation succeeds (modelled here as a non-deterministic
+\* firing gated on health), clear the latch.  SpecBuggy removes this action to
+\* prove the historical invariant violation would come back if the OCaml clear
+\* paths were lost.
 ClearOnSuccess ==
     /\ step_count < MaxSteps
     /\ runtime_health = "HEALTHY"
@@ -134,10 +139,10 @@ Spec ==
     /\ WF_vars(ProviderRecovers)
 
 (* ── SpecBuggy ──────────────────────────────────────────── *)
-\* Buggy variant: ClearOnSuccess action removed.  Only operator
-\* manual intervention can clear the blocker.  Without that, the
-\* system can stutter in (runtime_health = HEALTHY, last_blocker = SET)
-\* forever — exactly the production behaviour we observed.
+\* Buggy variant: ClearOnSuccess action removed.  Only operator manual
+\* intervention can clear the blocker.  Without that, the system can stutter in
+\* (runtime_health = HEALTHY, last_blocker = SET) forever — the historical
+\* production behaviour this spec keeps as a regression model.
 
 NextBuggy ==
     \/ Fail

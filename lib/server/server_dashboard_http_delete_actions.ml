@@ -409,6 +409,9 @@ let add_delete_action_routes router =
                   (Task.Goal_assignment.set_task_goal_error_to_string err)
               | Error (Task.Goal_assignment.Already_assigned _ as err) ->
                 respond_error ~status:`Conflict ~request:req reqd
+                  (Task.Goal_assignment.set_task_goal_error_to_string err)
+              | Error (Task.Goal_assignment.Registry_unreadable _ as err) ->
+                respond_error ~status:`Internal_server_error ~request:req reqd
                   (Task.Goal_assignment.set_task_goal_error_to_string err))
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "task_id")
@@ -502,7 +505,7 @@ let add_delete_action_routes router =
 
   |> Http.Router.post "/api/v1/dashboard/board/moderation/flag" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state _agent_name req reqd ->
+         (fun _state agent_name req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
@@ -526,10 +529,7 @@ let add_delete_action_routes router =
              | None ->
                   respond_error ~request:req reqd (invalid_request "target_id")
              | Some target_id ->
-                  let reporter =
-                    Safe_ops.json_string_opt "reporter" json
-                    |> Option.value ~default:"operator"
-                  in
+                  let reporter = agent_name in
                    (match Board_moderation.flag ~target_kind ~target_id ~reporter ~reason with
                     | Error msg ->
                        Http.Response.json_value ~status:`Conflict ~request:req
@@ -607,11 +607,7 @@ let add_delete_action_routes router =
                            Board_moderation.flag_reason_of_string
                        in
                        let note = Safe_ops.json_string_opt "note" json in
-                       let actor =
-                         match Safe_ops.json_string_opt "actor" json with
-                         | Some a -> (match String_util.trim_to_option a with Some trimmed -> trimmed | None -> agent_name)
-                         | _ -> agent_name
-                       in
+                       let actor = agent_name in
                        (match Board_moderation.record_action ~target_kind ~target_id
                                 ~actor ~action ?reason ?note () with
                         | Error msg ->
@@ -621,34 +617,13 @@ let add_delete_action_routes router =
                                  [("ok", `Bool false); ("error", `String msg)])
                               reqd
                         | Ok entry ->
-                            (* If the action is Remove, also delete from board *)
-                            let delete_result =
-                              if action = Board_moderation.Remove then
-                                (match target_kind with
-                                 | Board_moderation.Target_post ->
-                                     (match Board_dispatch.delete_post ~post_id:target_id with
-                                      | Ok () -> None
-                                      | Error e ->
-                                          Some (Board_tool.board_error_to_string e))
-                                 | Board_moderation.Target_comment ->
-                                     (* Comment removal not yet backed by dispatch; note only *)
-                                     None)
-                              else
-                                None
-                            in
-                            let extra =
-                              match delete_result with
-                              | None      -> []
-                              | Some warn -> [("delete_warning", `String warn)]
-                            in
                             Http.Response.json_value ~compress:true ~request:req
                               (`Assoc
-                                 ([ ("ok", `Bool true);
-                                    ( "entry",
-                                      Board_moderation.audit_entry_to_json entry
-                                    );
-                                  ]
-                                  @ extra))
+                                 [ ("ok", `Bool true);
+                                   ( "entry",
+                                     Board_moderation.audit_entry_to_json entry
+                                   );
+                                 ])
                               reqd)))
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd "invalid JSON body"

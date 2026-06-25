@@ -6,8 +6,8 @@
     stamp.  Each goal carries:
 
     - a {!Goal_phase.t} (canonical lifecycle: [Executing] /
-      [Awaiting_verification] / [Blocked] / [Completed] /
-      [Paused] / [Dropped]),
+      [Awaiting_verification] / [Awaiting_approval] /
+      [Blocked] / [Completed] / [Paused] / [Dropped]),
     - a legacy {!goal_status} kept for backward-compat with
       consumers that have not migrated to phases yet
       (derived from phase on write, inferred on read for
@@ -68,7 +68,8 @@ val parse_goal_phase : string option -> Goal_phase.t option
 val goal_status_of_phase : Goal_phase.t -> goal_status
 (** Forward derivation used on write.  Maps every phase to
     its canonical legacy status:
-    - [Executing] / [Awaiting_verification] → [Active]
+    - [Executing] / [Awaiting_verification] /
+      [Awaiting_approval] → [Active]
     - [Paused] → [Paused]
     - [Completed] → [Done]
     - [Blocked] / [Dropped] → [Dropped] *)
@@ -145,10 +146,17 @@ val goals_path : Workspace_utils.config -> string
 (** {1 State I/O} *)
 
 val read_state : Workspace_utils.config -> state
-(** Reads {!goals_path}; returns an empty default state on
-    missing file or parse failure.  Goals loaded from disk
-    are passed through the internal normaliser ([priority]
-    clamp + phase/status reconciliation). *)
+(** Reads {!goals_path}; returns an empty default state when no primary or
+    recovery file exists.  Missing, parse, or read failures try
+    [goals_path ^ ".last-good"] before falling back to the default state for
+    legacy read-only projections.  Goals loaded from disk are passed through
+    the internal normaliser ([priority] clamp + phase/status reconciliation).
+    Read-modify-write operations use {!read_state_result} and fail closed on an
+    unrecoverable corrupt state. *)
+
+val read_state_result : Workspace_utils.config -> (state, string) result
+(** Fail-closed state reader for mutating goal-store operations and read-only
+    surfaces that must distinguish "no goals" from "goal ledger unreadable". *)
 
 val write_state : Workspace_utils.config -> state -> unit
 (** Direct overwrite of {!goals_path} with the supplied state.
@@ -162,7 +170,13 @@ val update_state : Workspace_utils.config -> (state -> state) -> state
 (** Atomic read-modify-write under the goals file lock.
     [f] receives the current state and returns the next state.
     The file lock protects against concurrent truncation races
-    (#17229). *)
+    (#17229). Raises [Invalid_argument] when the current goal ledger is
+    unreadable without recovery, before calling [f] or writing a new state. *)
+
+val update_state_result :
+  Workspace_utils.config -> (state -> (state, string) result) -> (state, string) result
+(** Result-returning form of {!update_state}. On [Error _], including an
+    unreadable current ledger, no write is committed. *)
 
 (** {1 Single-goal operations} *)
 
@@ -177,12 +191,22 @@ val update_goal :
     (with [updated_at] pre-stamped), normalises the result,
     and writes back.  Errors when the [goal_id] is unknown. *)
 
+val update_goal_checked :
+  Workspace_utils.config ->
+  goal_id:string ->
+  (goal -> (goal, string) result) ->
+  (goal, string) result
+(** Same lock/write contract as {!update_goal}, but [f] can fail after reading
+    the current goal and before writing the next state. On [Error _], the state
+    file is left untouched and its version is not bumped. *)
+
 type delete_goal_outcome =
   | Deleted
   | Deleted_with_orphaned_links of string
 
 type delete_goal_error =
   | Unknown_goal of string
+  | Store_unreadable of string
 
 val delete_goal_error_to_string : delete_goal_error -> string
 
@@ -193,9 +217,11 @@ val delete_goal :
 (** Removes the goal whose [.id] matches.
 
     Returns [Error (Unknown_goal _)] when the id is unknown and no delete was
-    committed. Goal-task link cleanup is best-effort across separate files; a
-    cleanup failure returns [Ok (Deleted_with_orphaned_links _)] after the goal
-    delete has already been committed. *)
+    committed. Returns [Error (Store_unreadable _)] when the goal ledger cannot
+    be read without falling back to an empty default. Goal-task link cleanup is
+    best-effort across separate files; a cleanup failure returns
+    [Ok (Deleted_with_orphaned_links _)] after the goal delete has already been
+    committed. *)
 
 (** {1 List + upsert} *)
 
@@ -224,7 +250,7 @@ val upsert_goal :
   unit ->
   (goal * [ `created | `updated ], string) result
 (** Creates a new goal when [id] is omitted (mints
-    [goal-<ms>-<4 hex digits>] internally), updates the
+    [goal-<128-bit-random-hex>] internally), updates the
     matched row otherwise.  Returns the resolved goal
     paired with [`created] / [`updated] so callers can
     branch on the outcome.
@@ -233,5 +259,5 @@ val upsert_goal :
     - [title] required for new goals (omit / empty string
       on a new goal id).
     - [phase] and legacy [status] disagree (when both are
-      supplied and {!phase_of_goal_status} of [status] does
-      not equal [phase]). *)
+      supplied and {!goal_status_of_phase} of [phase] does
+      not equal [status]). *)

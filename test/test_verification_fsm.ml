@@ -107,6 +107,39 @@ let add_required_evidence_only_task config =
   | Some t -> t.id
   | None -> Alcotest.fail "new task not found after add_task"
 
+let add_completion_contract_only_task config =
+  let existing_ids =
+    Workspace.read_backlog config
+    |> fun backlog -> List.map (fun (t : Masc_domain.task) -> t.id) backlog.tasks
+  in
+  let contract : Masc_domain.task_contract =
+    { strict = true
+    ; completion_contract = [ "tests pass" ]
+    ; required_evidence = []
+    ; inspect_gate_evidence = []
+    ; verify_gate_evidence = []
+    ; evidence_claims = []
+    ; stale_claim_timeout_sec = 0
+    ; links = { operation_id = None; session_id = None }
+    }
+  in
+  let _msg =
+    Workspace.add_task
+      ~contract
+      config
+      ~title:"completion contract only"
+      ~priority:3
+      ~description:"has criteria but no verifier evidence"
+  in
+  let backlog = Workspace.read_backlog config in
+  match
+    List.find_opt
+      (fun (t : Masc_domain.task) -> not (List.mem t.id existing_ids))
+      backlog.tasks
+  with
+  | Some t -> t.id
+  | None -> Alcotest.fail "new task not found after add_task"
+
 let add_placeholder_evidence_task config =
   let existing_ids =
     Workspace.read_backlog config
@@ -472,6 +505,62 @@ let test_submit_uses_required_evidence_when_verify_refs_empty () =
       ["artifact://coverage.json"; "implementation complete"]
       (Option.value ~default:[] !captured_refs))
 
+let test_submit_protocol_rejects_empty_completion_contract () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let task_id = add_required_evidence_only_task config in
+    let task =
+      match get_task config task_id with
+      | Some task -> task
+      | None -> Alcotest.fail "fixture task not retrievable"
+    in
+    let result =
+      Verification_protocol.on_submit_for_verification
+        ~config
+        ~task
+        ~assignee:"worker"
+        ~verification_id:"vrf-empty-contract"
+        ~evidence_refs:[ "artifact://coverage.json" ]
+    in
+    (match result with
+     | Error msg ->
+       Alcotest.(check bool)
+         "empty completion contract rejected"
+         true
+         (Astring.String.is_infix ~affix:"completion_contract is empty" msg)
+     | Ok () -> Alcotest.fail "empty completion contract should be rejected");
+    Alcotest.(check int)
+      "no request persisted"
+      0
+      (List.length (Verification.list_requests config.Workspace.base_path)))
+
+let test_submit_protocol_rejects_empty_verifier_evidence () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let task_id = add_completion_contract_only_task config in
+    let task =
+      match get_task config task_id with
+      | Some task -> task
+      | None -> Alcotest.fail "fixture task not retrievable"
+    in
+    let result =
+      Verification_protocol.on_submit_for_verification
+        ~config
+        ~task
+        ~assignee:"worker"
+        ~verification_id:"vrf-empty-evidence"
+        ~evidence_refs:[]
+    in
+    (match result with
+     | Error msg ->
+       Alcotest.(check bool)
+         "empty evidence rejected"
+         true
+         (Astring.String.is_infix ~affix:"verification evidence refs are empty" msg)
+     | Ok () -> Alcotest.fail "empty verifier evidence should be rejected");
+    Alcotest.(check int)
+      "no request persisted"
+      0
+      (List.length (Verification.list_requests config.Workspace.base_path)))
+
 let test_submit_marks_conflict_triage_when_deliverable_claims_completion () =
   with_temp_config ~fsm_enabled:true (fun config ->
     let task_id = add_strict_task config in
@@ -656,6 +745,46 @@ let test_reject_verdict_failure_still_transitions () =
        | Ok updated ->
          Alcotest.(check bool) "record left pending (audit write tolerated)" true
          (match updated.status with Pending -> true | _ -> false)))
+
+let test_post_commit_observe_failure_keeps_committed_transition () =
+  with_temp_config ~fsm_enabled:false (fun config ->
+    let task_id = add_strict_task config in
+    claim_and_start config "worker" task_id;
+    let previous_observe = Atomic.get Workspace_hooks.observe_task_transition_fn in
+    let previous_failure = Atomic.get Workspace_hooks.telemetry_observe_failure_fn in
+    let observed_failures = ref [] in
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set Workspace_hooks.observe_task_transition_fn previous_observe;
+        Atomic.set Workspace_hooks.telemetry_observe_failure_fn previous_failure)
+      (fun () ->
+         Atomic.set Workspace_hooks.observe_task_transition_fn
+           (fun _config ~agent_name:_ ~task_id:_ ~transition:_ ~details:_ ->
+              failwith "simulated transition observe failure");
+         Atomic.set Workspace_hooks.telemetry_observe_failure_fn
+           (fun kind -> observed_failures := kind :: !observed_failures);
+         match
+           Workspace.transition_task_r
+             config
+             ~agent_name:"worker"
+             ~task_id
+             ~action:Masc_domain.Done_action
+             ~notes:"implemented and verified"
+             ()
+         with
+         | Error e ->
+           Alcotest.fail
+             ("post-commit observe failure must not fail committed transition: "
+              ^ Masc_domain.show_masc_error e)
+         | Ok _ ->
+           Alcotest.(check string) "status moves to done" "done"
+             (status_string config task_id);
+           Alcotest.(check bool)
+             "telemetry failure kind recorded"
+             true
+             (List.mem
+                "task_transition_post_commit_transition_observe"
+                !observed_failures)))
 
 let test_approve_retry_recovers_completed_verdict_orphan () =
   with_temp_config ~fsm_enabled:true (fun config ->
@@ -945,6 +1074,10 @@ let () =
         `Quick test_submit_populates_criteria_from_completion_contract;
       Alcotest.test_case "submit carries required_evidence into verifier refs"
         `Quick test_submit_uses_required_evidence_when_verify_refs_empty;
+      Alcotest.test_case "submit protocol rejects empty completion contract"
+        `Quick test_submit_protocol_rejects_empty_completion_contract;
+      Alcotest.test_case "submit protocol rejects empty verifier evidence"
+        `Quick test_submit_protocol_rejects_empty_verifier_evidence;
       Alcotest.test_case "submit marks conflict triage from completed deliverable"
         `Quick test_submit_marks_conflict_triage_when_deliverable_claims_completion;
       Alcotest.test_case "cross-agent approve moves to done" `Quick
@@ -955,6 +1088,10 @@ let () =
         test_approve_verdict_failure_still_completes;
       Alcotest.test_case "reject transitions despite verdict-store failure" `Quick
         test_reject_verdict_failure_still_transitions;
+      Alcotest.test_case
+        "post-commit observe failure keeps committed transition"
+        `Quick
+        test_post_commit_observe_failure_keeps_committed_transition;
       Alcotest.test_case
         "approve retry recovers completed verdict orphan"
         `Quick

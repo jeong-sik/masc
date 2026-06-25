@@ -16,6 +16,7 @@ val update_goal_phase
   -> ?note:string
   -> ?active_verification_request_id:string
   -> ?clear_active_verification_request:bool
+  -> ?precondition:(Goal_store.goal -> (unit, string) result)
   -> unit
   -> (Goal_store.goal, string) result
 

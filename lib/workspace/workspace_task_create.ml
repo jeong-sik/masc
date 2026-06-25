@@ -151,10 +151,43 @@ let add_task_with_result
              }
            in
            write_backlog config new_backlog;
-           Option.iter
-             (fun goal_id ->
-                Workspace_goal_index.link_task_to_goal config ~goal_id ~task_id)
-             goal_id;
+           let link_result =
+             match goal_id with
+             | None -> Ok ()
+             | Some goal_id ->
+               Workspace_goal_index.link_task_to_goal_result
+                 config
+                 ~goal_id
+                 ~task_id
+           in
+           (match link_result with
+            | Error (Workspace_goal_index.Link_registry_unreadable msg) ->
+              write_backlog config backlog;
+              Printf.sprintf
+                "Error: goal_task_links update failed after task create; rolled \
+                 back %s: %s"
+                task_id
+                msg
+            | Error (Workspace_goal_index.Link_already_assigned existing_goal_ids) ->
+              write_backlog config backlog;
+              Printf.sprintf
+                "Error: goal_task_links update failed after task create; rolled \
+                 back %s because it is already linked to [%s]"
+                task_id
+                (String.concat ", " existing_goal_ids)
+            | Error Workspace_goal_index.Link_unknown_task ->
+              write_backlog config backlog;
+              Printf.sprintf
+                "Error: goal_task_links update failed after task create; rolled \
+                 back %s because the task was unknown"
+                task_id
+            | Error Workspace_goal_index.Link_unknown_goal ->
+              write_backlog config backlog;
+              Printf.sprintf
+                "Error: goal_task_links update failed after task create; rolled \
+                 back %s because the goal was unknown"
+                task_id
+            | Ok () ->
            let created_by_json = Json_util.string_opt_to_json created_by in
            Workspace_task_classify.emit_task_activity
              config
@@ -256,11 +289,36 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
            }
          in
          write_backlog config new_backlog;
-         Workspace_goal_index.link_tasks_to_goals
-           config
-           (List.map
-              (fun ((task : Masc_domain.task), goal_id) -> task.id, goal_id)
-              added_tasks_with_goal_ids);
+         let link_result =
+           Workspace_goal_index.link_tasks_to_goals_result
+             config
+             (List.map
+                (fun ((task : Masc_domain.task), goal_id) -> task.id, goal_id)
+                added_tasks_with_goal_ids)
+         in
+         (match link_result with
+          | Error (Workspace_goal_index.Link_registry_unreadable msg) ->
+            write_backlog config backlog;
+            Printf.sprintf
+              "Error adding batch tasks: goal_task_links update failed after \
+               task create; rolled back batch: %s"
+              msg
+          | Error (Workspace_goal_index.Link_already_assigned existing_goal_ids) ->
+            write_backlog config backlog;
+            Printf.sprintf
+              "Error adding batch tasks: goal_task_links update failed after \
+               task create; rolled back batch because a task is already linked \
+               to [%s]"
+              (String.concat ", " existing_goal_ids)
+          | Error Workspace_goal_index.Link_unknown_task ->
+            write_backlog config backlog;
+            "Error adding batch tasks: goal_task_links update failed after task \
+             create; rolled back batch because a task was unknown"
+          | Error Workspace_goal_index.Link_unknown_goal ->
+            write_backlog config backlog;
+            "Error adding batch tasks: goal_task_links update failed after task \
+             create; rolled back batch because a goal was unknown"
+          | Ok () ->
          List.iter
            (fun ((task : Masc_domain.task), goal_id) ->
               let created_by_json = Json_util.string_opt_to_json task.created_by in

@@ -516,6 +516,27 @@ let handle_keeper_get_subroutes state req request reqd =
         ("entries", `List entries);
       ] in
       Http.Response.json_value ~compress:true ~request:req json reqd
+  else if ends_with "/feedback" then
+    (* keeper-v2 #9: aggregated response-feedback tally (read API).
+       GET /api/v1/keepers/:name/feedback. The per-keeper feedback log is the
+       SSOT; the view renders this tally (no view-side derivation). A read IO
+       fault surfaces as 500, never a silently-empty success. *)
+    let name = extract_name "/feedback" in
+    if String.length name = 0 then respond_error reqd "keeper name is required"
+    else if not (Keeper_config.validate_name name) then
+      Http.Response.json_value ~status:`Bad_request
+        (`Assoc
+           [ ("error", `String (Printf.sprintf "invalid keeper name: %s" name)) ])
+        reqd
+    else
+      let config = Mcp_server.workspace_config state in
+      (match Keeper_response_feedback.read_tally ~config ~keeper_id:name with
+       | Ok tally ->
+         Http.Response.json_value ~compress:true ~request:req
+           (Keeper_response_feedback.tally_to_json tally) reqd
+       | Error (`Io msg) ->
+         Http.Response.json_value ~status:`Internal_server_error
+           (`Assoc [ ("error", `String msg) ]) reqd)
   else if ends_with "/turn-records" then
     (* RFC-0233 §2.3 PR-4: serve TurnRecords with server-side
        consecutive-pair block diffs so the dashboard stays a renderer

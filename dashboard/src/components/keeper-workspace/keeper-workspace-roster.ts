@@ -287,6 +287,7 @@ function RosterRow({
   const recentTool = keeperRecentTool(keeper)
   const gloss = keeperAttentionGloss(keeper)
   const inlineActions = lifecycleActions(keeper).filter(action => action !== 'shutdown').slice(0, 2)
+  const [pendingAction, setPendingAction] = useState<KeeperActionKey | null>(null)
   const select = () => onSelect(keeper.name)
   return html`
     <div
@@ -359,17 +360,21 @@ function RosterRow({
                   <button
                     key=${action}
                     type="button"
-                    class="kw-kp-inline-action v2-monitoring-action"
+                    class=${`kw-kp-inline-action v2-monitoring-action${pendingAction === action ? ' busy' : ''}`}
                     title=${copy.title}
                     aria-label=${`${keeper.name} ${copy.label}`}
+                    aria-busy=${pendingAction === action ? 'true' : 'false'}
+                    disabled=${pendingAction !== null}
                     onClick=${(event: MouseEvent) => {
                       event.preventDefault()
                       event.stopPropagation()
-                      void runRosterKeeperAction(keeper.name, action)
+                      if (pendingAction !== null) return
+                      setPendingAction(action)
+                      void runRosterKeeperAction(keeper.name, action).finally(() => setPendingAction(null))
                     }}
                   >
                     <${Icon} size=${13} aria-hidden="true" />
-                    <span>${copy.label}</span>
+                    <span>${pendingAction === action ? '실행중' : copy.label}</span>
                   </button>
                 `
               })}

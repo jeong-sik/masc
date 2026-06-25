@@ -2136,3 +2136,15 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
     display: none;
   }
 }
+
+.kw-kp-inline-action:disabled,
+.kw-fleet-action:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.kw-kp-inline-action.busy,
+.kw-fleet-action.busy {
+  border-color: rgba(34, 211, 238, 0.42);
+  color: #cffafe;
+}

@@ -41,7 +41,31 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
     let add_if_missing key v fs =
       if has key then fs else fs @ [ (key, v) ]
     in
+    let sanitize_trace_fragment s =
+      let buf = Buffer.create (String.length s) in
+      String.iter
+        (fun c ->
+          match c with
+          | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' ->
+              Buffer.add_char buf c
+          | _ -> Buffer.add_char buf '-')
+        s;
+      match String.trim (Buffer.contents buf) with
+      | "" -> "fixture"
+      | fragment -> fragment
+    in
+    let trace_id =
+      let name =
+        match List.assoc_opt "name" fields with
+        | Some (`String s) -> s
+        | _ -> "fixture"
+      in
+      let candidate = "trace-" ^ sanitize_trace_fragment name in
+      if String.length candidate <= 64 then candidate
+      else String.sub candidate 0 64
+    in
     fields
+    |> add_if_missing "trace_id" (`String trace_id)
     |> add_if_missing "tool_access"
          (Json_util.json_string_list [])
   in
@@ -59,6 +83,9 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
 let find_project_root () =
   let marker = "config/tool_policy.toml" in
   let start_dir = Sys.getcwd () in
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when Sys.file_exists (Filename.concat root marker) -> root
+  | _ ->
   let rec walk dir =
     if Sys.file_exists (Filename.concat dir marker) then dir
     else

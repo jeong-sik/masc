@@ -27,19 +27,21 @@ curl_post_mcp() {
   local body="$1"
   local attempt=1
   local output=""
+  local auth_token
+  auth_token="$(mcp_default_auth_token)"
+  local -a headers=(
+    -H 'Content-Type: application/json'
+    -H 'Accept: application/json, text/event-stream'
+  )
+  if [ -n "$MCP_SESSION_ID" ]; then
+    headers+=( -H "mcp-session-id: $MCP_SESSION_ID" )
+  fi
+  if [ -n "$auth_token" ]; then
+    headers+=( -H "Authorization: Bearer $auth_token" )
+  fi
   while [ "$attempt" -le "$CURL_RETRY_COUNT" ]; do
-    if [ -n "$MCP_SESSION_ID" ]; then
-      output="$(curl -sS -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
-        -H 'Content-Type: application/json' \
-        -H 'Accept: application/json, text/event-stream' \
-        -H "mcp-session-id: $MCP_SESSION_ID" \
-        -d "$body" 2>/dev/null)" && {
-          printf "%s" "$output"
-          return 0
-        }
-    elif output="$(curl -sS -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
-      -H 'Content-Type: application/json' \
-      -H 'Accept: application/json, text/event-stream' \
+    if output="$(curl -sS -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
+      "${headers[@]}" \
       -d "$body" 2>/dev/null)"; then
       printf "%s" "$output"
       return 0
@@ -56,10 +58,18 @@ initialize_mcp_session() {
   local headers_file body_file
   headers_file="$(mcp_mktemp_file "masc-init-headers")"
   body_file="$(mcp_mktemp_file "masc-init-body")"
+  local auth_token
+  auth_token="$(mcp_default_auth_token)"
+  local -a init_headers=(
+    -H 'Content-Type: application/json'
+    -H 'Accept: application/json, text/event-stream'
+  )
+  if [ -n "$auth_token" ]; then
+    init_headers+=( -H "Authorization: Bearer $auth_token" )
+  fi
 
   if curl -sS -m "$CURL_TIMEOUT_SEC" -D "$headers_file" -o "$body_file" -X POST "$MCP_URL" \
-    -H 'Content-Type: application/json' \
-    -H 'Accept: application/json, text/event-stream' \
+    "${init_headers[@]}" \
     -d '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"contract-harness","version":"1.0"},"capabilities":{}}}' \
     >/dev/null 2>&1; then
     MCP_SESSION_ID="$(
@@ -74,10 +84,16 @@ initialize_mcp_session() {
     )"
     export MCP_SESSION_ID
     if [ -n "$MCP_SESSION_ID" ]; then
+      local -a initialized_headers=(
+        -H 'Content-Type: application/json'
+        -H 'Accept: application/json, text/event-stream'
+        -H "mcp-session-id: $MCP_SESSION_ID"
+      )
+      if [ -n "$auth_token" ]; then
+        initialized_headers+=( -H "Authorization: Bearer $auth_token" )
+      fi
       curl -sS -m "$CURL_TIMEOUT_SEC" -X POST "$MCP_URL" \
-        -H 'Content-Type: application/json' \
-        -H 'Accept: application/json, text/event-stream' \
-        -H "mcp-session-id: $MCP_SESSION_ID" \
+        "${initialized_headers[@]}" \
         -d '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' \
         >/dev/null 2>&1 || true
     fi

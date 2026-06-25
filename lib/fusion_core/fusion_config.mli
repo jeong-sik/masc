@@ -34,6 +34,9 @@ type config_error =
       (** preset 이름 — JOJ 1차 심판 system prompt 누락 (RFC-0283). *)
   | Duplicate_judge of string * string
       (** (preset 이름, 중복 judge 정체성) — 두 JOJ 1차 심판이 같은 정체성 (RFC-0283). *)
+  | Invalid_min_answered of string * int
+      (** (preset 이름, min_answered) — [min_answered]가 policy 허용 범위(1..패널
+          모델 총합) 밖. full-panel quorum([총합])도 명시적으로 설정할 수 있다. *)
   | Toml_type_error of string  (** 필드 타입 불일치 (Otoml.Type_error) *)
 [@@deriving show, eq]
 
@@ -53,6 +56,7 @@ val disabled : Fusion_policy.t
     - judge 모델 id 누락 → [Error [Missing_judge_model _]].
     - max_concurrent_panels < 1 → [Error [Invalid_max_concurrent_panels _]].
     - max_tool_calls_per_panel이 0..16 범위 밖 → [Error [Invalid_max_tool_calls _]].
+    - min_answered가 1..패널 모델 총합 범위 밖 → [Error [Invalid_min_answered _]].
     - default_preset가 presets에 없음 → [Error [Missing_default_preset _]].
     - 필드 타입 불일치 → [Error [Toml_type_error _]].
     여러 에러는 누적되어 한 번에 반환된다. *)

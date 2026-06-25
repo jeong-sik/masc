@@ -92,7 +92,7 @@ function keyLineMatch(line: string): RegExpMatchArray | null {
 }
 
 function stripInlineComment(raw: string): string {
-  let inString = false
+  let quote: '"' | "'" | null = null
   let escaped = false
   for (let index = 0; index < raw.length; index += 1) {
     const char = raw[index]
@@ -100,15 +100,19 @@ function stripInlineComment(raw: string): string {
       escaped = false
       continue
     }
-    if (char === '\\' && inString) {
+    if (char === '\\' && quote === '"') {
       escaped = true
       continue
     }
-    if (char === '"') {
-      inString = !inString
+    if (char === '"' && quote !== "'") {
+      quote = quote === '"' ? null : '"'
       continue
     }
-    if (char === '#' && !inString) return raw.slice(0, index).trim()
+    if (char === "'" && quote !== '"') {
+      quote = quote === "'" ? null : "'"
+      continue
+    }
+    if (char === '#' && quote === null) return raw.slice(0, index).trim()
   }
   return raw.trim()
 }
@@ -336,6 +340,25 @@ export function setRuntimeTomlKey(
   }
   lines.splice(section.end, 0, `${key} = ${serialized}`)
   return joinLines(lines)
+}
+
+// Read a scalar key from a section as its raw TOML token (inline comment
+// stripped, trimmed). Symmetric reader for setRuntimeTomlKey; callers parse the
+// token (e.g. Number/=== 'true'). Returns undefined when the section or key is
+// absent — never a fabricated default.
+export function getRuntimeTomlKey(
+  sourceText: string,
+  sectionName: string,
+  key: string,
+): string | undefined {
+  const document = parseDocument(sourceText)
+  const section = sectionOf(document, sectionName)
+  if (!section) return undefined
+  for (let index = section.start + 1; index < section.end; index += 1) {
+    const match = keyLineMatch(document.lines[index] ?? '')
+    if (match?.[2] === key) return stripInlineComment(match[4] ?? '').trim()
+  }
+  return undefined
 }
 
 export function deleteRuntimeTomlKey(sourceText: string, sectionName: string, key: string): string {

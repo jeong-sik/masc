@@ -553,7 +553,9 @@ let test_bare_dune_bypass_aborts_before_dune () =
       in
       write_bare_dune_ps bin_dir;
       let code, _stdout, stderr =
-        run_dune_local dir bin_dir ~unset_env:[ "GITHUB_ACTIONS" ] "build"
+        run_dune_local dir bin_dir
+          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_DUNE_ALLOW_BARE_DUNE" ]
+          "build"
       in
       check int "exits tempfail on bare dune bypass" 75 code;
       check bool "reports unwrapped Dune" true

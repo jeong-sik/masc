@@ -49,6 +49,8 @@ import {
 import { fetchDashboardShell as fetchDashboardShellHot } from './dashboard-hot'
 import { keeperRuntimeBlockerLabel } from '../lib/keeper-runtime-display'
 
+const GOAL_FIXTURE_OK_COLOR = '#4ade80'
+
 afterEach(() => {
   vi.unstubAllGlobals()
   devTokenMock.ensureDevToken.mockClear()
@@ -64,7 +66,7 @@ function makeRawGoalNode(overrides: Record<string, unknown> = {}) {
     phase: 'executing',
     phase_color: '#0ea5e9',
     health: 'on_track',
-    health_color: '#4ade80',
+    health_color: GOAL_FIXTURE_OK_COLOR,
     badges: [],
     status_reason: 'working',
     priority: 1,

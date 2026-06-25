@@ -99,9 +99,9 @@ val handle_board
   -> string
 
 (** [handle_masc_board] dispatches public MCP [masc_board_*] tools through
-    the existing board dispatcher while allowing descriptor route evidence
-    and receipt summaries to resolve the tool. *)
-val handle_masc_board : name:string -> args:Yojson.Safe.t -> string
+    the existing board dispatcher while binding board write identity to
+    [meta.name]. *)
+val handle_masc_board : meta:keeper_meta -> name:string -> args:Yojson.Safe.t -> string
 
 (** RFC-0182 §3.1 — [handle_masc_task] is the descriptor-projection
     cluster handler for [masc_task_*] tools (add_task / batch_add_tasks /

@@ -58,9 +58,123 @@ vi.mock('./repository-management', () => ({
 }))
 
 import { goals, keepers, tasks } from '../store'
+import { goalTreeData } from '../goal-tree-state'
 import { selectedTask } from './goals/task-detail-selection'
 import { showGoalCreate } from './goals/goal-create-state'
 import { Work } from './work'
+import type { GoalTreeNode, GoalTreeTask, GoalTreeSummary } from '../types'
+
+const GOAL_FIXTURE_OK_COLOR = '#4ade80'
+
+function emptyGoalTreeSummary(overrides: Partial<GoalTreeSummary> = {}): GoalTreeSummary {
+  return {
+    total_goals: 0,
+    active_goals: 0,
+    on_track_goals: 0,
+    done_goals: 0,
+    paused_goals: 0,
+    at_risk_goals: 0,
+    blocked_goals: 0,
+    total_tasks: 0,
+    done_tasks: 0,
+    pending_approvals: 0,
+    infra_risk_count: 0,
+    overall_convergence: 0,
+    overall_convergence_pct: 0,
+    ...overrides,
+  }
+}
+
+function goalTreeTask(overrides: Partial<GoalTreeTask> = {}): GoalTreeTask {
+  return {
+    id: 'task-tree',
+    title: 'Tree task',
+    status: 'completed',
+    status_color: GOAL_FIXTURE_OK_COLOR,
+    priority: 2,
+    assignee: null,
+    goal_id: 'G-1',
+    linkage_source: 'explicit',
+    is_terminal: true,
+    created_at: '2026-01-01',
+    updated_at: '2026-01-02',
+    ...overrides,
+  }
+}
+
+function goalTreeNode(overrides: Partial<GoalTreeNode> = {}): GoalTreeNode {
+  const phase = overrides.phase ?? 'executing'
+  return {
+    id: 'G-1',
+    title: 'Goal One',
+    status: 'active',
+    status_color: GOAL_FIXTURE_OK_COLOR,
+    phase,
+    phase_color: GOAL_FIXTURE_OK_COLOR,
+    goal_fsm: {
+      state: phase,
+      source: 'goal.phase',
+      next_actions: [],
+      activity_observation: 'goal_metadata',
+      stagnation_status: 'recent',
+    },
+    health: 'on_track',
+    health_color: GOAL_FIXTURE_OK_COLOR,
+    badges: [],
+    status_reason: '',
+    priority: 1,
+    metric: null,
+    target_value: null,
+    require_completion_approval: false,
+    due_date: null,
+    parent_goal_id: null,
+    convergence: 0,
+    convergence_pct: 0,
+    attainment: {
+      state: 'unmeasured',
+      basis: 'unmeasured',
+      metric: null,
+      target_value: null,
+      target_parse_status: 'absent',
+      unit: 'unknown',
+      observed_value: null,
+      target_numeric: null,
+      attainment_pct: null,
+      task_done_count: 0,
+      task_count: 0,
+      note: '',
+    },
+    tasks: [],
+    task_count: 0,
+    task_done_count: 0,
+    verification_summary: {
+      effective_policy: null,
+      open_request: null,
+      latest_request: null,
+      approve_count: 0,
+      reject_count: 0,
+      remaining_possible: 0,
+    },
+    pending_verification_count: 0,
+    timeline_events: [],
+    children: [],
+    child_count: 0,
+    last_activity_at: '2026-01-02',
+    stagnation_seconds: 0,
+    activity_observation: 'goal_metadata',
+    stagnation_status: 'recent',
+    linked_keeper_names: [],
+    pending_approval_count: 0,
+    infra_risk_count: 0,
+    linkage_source: 'explicit',
+    linkage_warning_count: 0,
+    blocking_source: 'none',
+    blocking_reason: '',
+    created_at: '2026-01-01',
+    updated_at: '2026-01-02',
+    ...overrides,
+  }
+}
 
 describe('Work', () => {
   afterEach(() => {
@@ -68,12 +182,14 @@ describe('Work', () => {
     navigateMock.mockClear()
     selectedTask.value = null
     showGoalCreate.value = false
+    goalTreeData.value = null
   })
 
   beforeEach(() => {
     goals.value = []
     tasks.value = []
     keepers.value = []
+    goalTreeData.value = null
     showGoalCreate.value = false
   })
 
@@ -170,9 +286,9 @@ describe('Work', () => {
       expect(screen.getByTestId('kpi-wip').textContent).toBe('1')
       expect(screen.getByTestId('kpi-verify').textContent).toBe('1')
       expect(screen.getByTestId('kpi-backlog').textContent).toBe('2')
-      // Five elevated KPI cards
+      // Five KPI summary cells
       expect(screen.getByTestId('work-kpis').children.length).toBe(5)
-      expect(screen.getByText(/백로그에서 claim/).textContent).toContain('claim')
+      expect(screen.getByText(/미배정 task 는 claim/).textContent).toContain('claim')
       expect(screen.getByTestId('work-goal-list')).toBeTruthy()
     })
 
@@ -292,7 +408,7 @@ describe('Work', () => {
 
       const backlog = screen.getByTestId('work-backlog')
       expect(backlog).toBeTruthy()
-      expect(backlog.textContent).toContain('클\uB808\uC784 가능 백로그')
+      expect(backlog.textContent).toContain('클\uB808\uC784 가능 미배정')
       expect(backlog.textContent).toContain('2')
       expect(backlog.querySelectorAll('.wk-task-claim').length).toBe(2)
       expect(screen.getByText('Orphan job')).toBeTruthy()
@@ -899,6 +1015,106 @@ describe('Work', () => {
         expect(colFor('done')?.querySelector('[data-kanban-task-id="T-done"]')).toBeTruthy()
       })
 
+      it('includes recursive goal tree tasks in KPIs and kanban, normalizing completed to done', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-child', title: 'Child Goal', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              tasks: [
+                goalTreeTask({ id: 'T-root', title: 'Root completed task', goal_id: 'G-1', status: 'completed' }),
+              ],
+              children: [
+                goalTreeNode({
+                  id: 'G-child',
+                  title: 'Child Goal',
+                  tasks: [
+                    goalTreeTask({ id: 'T-child', title: 'Child completed task', goal_id: 'G-child', status: 'completed' }),
+                  ],
+                }),
+              ],
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 2, total_tasks: 2, done_tasks: 2 }),
+        }
+
+        render(html`<${Work} />`)
+
+        expect(screen.getByTestId('kpi-tasks')).toHaveTextContent('2')
+        fireEvent.click(screen.getByTestId('work-view-kanban'))
+
+        const doneCol = screen.getByTestId('kanban-col-done')
+        expect(doneCol.textContent).toContain('Root completed task')
+        expect(doneCol.textContent).toContain('Child completed task')
+        const rootCard = doneCol.querySelector('[data-kanban-task-id="T-root"]') as HTMLElement
+        fireEvent.click(rootCard)
+        expect(selectedTask.value?.status).toBe('done')
+        expect(selectedTask.value?.completed_at).toBe('2026-01-02')
+      })
+
+      it('keeps unscoped execution tasks visible in kanban instead of requiring a goal_id', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              tasks: [
+                goalTreeTask({ id: 'T-goal', title: 'Goal store task', goal_id: 'G-1', status: 'completed' }),
+              ],
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, total_tasks: 1, done_tasks: 1 }),
+        }
+        tasks.value = [
+          { id: 'T-live', title: 'Live unscoped task', goal_id: null, status: 'in_progress', assignee: 'keeper-a' },
+        ]
+
+        render(html`<${Work} />`)
+
+        expect(screen.getByTestId('kpi-tasks')).toHaveTextContent('2')
+        fireEvent.click(screen.getByTestId('work-view-kanban'))
+
+        const wipCol = screen.getByTestId('kanban-col-in_progress')
+        expect(wipCol.querySelector('[data-kanban-task-id="T-live"]')).toBeTruthy()
+        expect(wipCol.textContent).toContain('Live unscoped task')
+      })
+
+      it('uses Goal Store fields as nullable fallback when merging execution tasks', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              tasks: [
+                goalTreeTask({ id: 'T-shared', title: 'Goal store title', goal_id: 'G-1', status: 'todo' }),
+              ],
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1, total_tasks: 1 }),
+        }
+        tasks.value = [
+          { id: 'T-shared', title: 'Live shared task', goal_id: null, status: 'in_progress', assignee: 'keeper-a' },
+        ]
+
+        render(html`<${Work} />`)
+
+        const goalCard = screen.getByTestId('goal-card')
+        if (!goalCard.querySelector('[data-job-id="T-shared"]')) {
+          fireEvent.click(within(goalCard).getByRole('button'))
+        }
+        const row = goalCard.querySelector('[data-job-id="T-shared"]')
+        expect(row).toBeTruthy()
+        expect(row?.textContent).toContain('Live shared task')
+      })
+
       it('shows task titles on kanban cards and hides the backlog strip in kanban view', () => {
         goals.value = [
           { id: 'G-1', title: 'Target Goal', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
@@ -940,6 +1156,102 @@ describe('Work', () => {
         // openTaskDetail() set the shared selection signal (TaskDetailOverlay is
         // mounted globally in app.ts and renders off this signal).
         expect(selectedTask.value?.id).toBe('T-todo')
+      })
+    })
+
+    describe('Goal Store tree edge cases', () => {
+      it('guards against cyclic goal tree references when collecting tasks', () => {
+        goals.value = []
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              tasks: [goalTreeTask({ id: 'T-1', goal_id: 'G-1', status: 'completed' })],
+              children: [
+                goalTreeNode({
+                  id: 'G-1',
+                  tasks: [goalTreeTask({ id: 'T-2', goal_id: 'G-1', status: 'completed' })],
+                }),
+              ],
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, total_tasks: 1, done_tasks: 1 }),
+        }
+
+        render(html`<${Work} />`)
+
+        expect(screen.getByTestId('kpi-tasks')).toHaveTextContent('1')
+      })
+
+      it('uses Goal Store tree titles for tasks linked to tree-only goals', () => {
+        goals.value = []
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-tree',
+              title: 'Tree Only Goal',
+              tasks: [goalTreeTask({ id: 'T-tree', goal_id: 'G-tree', status: 'todo' })],
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, total_tasks: 1 }),
+        }
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('work-view-list'))
+
+        expect(screen.getByTestId('work-backlog').textContent).toContain('Tree Only Goal')
+      })
+
+      it('maps unknown Goal Store task statuses to a fallback instead of dropping them', () => {
+        goals.value = []
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              tasks: [
+                goalTreeTask({ id: 'T-blocked', goal_id: 'G-1', status: 'blocked' }),
+                goalTreeTask({ id: 'T-unknown', goal_id: 'G-1', status: 'weird_status' }),
+              ],
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, total_tasks: 2 }),
+        }
+
+        render(html`<${Work} />`)
+
+        expect(screen.getByTestId('kpi-wip')).toHaveTextContent('1')
+        expect(screen.getByTestId('kpi-backlog')).toHaveTextContent('1')
+      })
+
+      it('falls back to Goal Store fields when execution fields are empty strings', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              tasks: [goalTreeTask({ id: 'T-shared', goal_id: 'G-1', status: 'todo', title: 'Goal store title' })],
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1, total_tasks: 1 }),
+        }
+        tasks.value = [
+          { id: 'T-shared', title: '', goal_id: null, status: 'in_progress', assignee: '' },
+        ]
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('work-view-list'))
+
+        const goalCard = screen.getByTestId('goal-card')
+        if (!goalCard.querySelector('[data-job-id="T-shared"]')) {
+          fireEvent.click(within(goalCard).getByRole('button'))
+        }
+        const row = goalCard.querySelector('[data-job-id="T-shared"]')
+        expect(row?.textContent).toContain('Goal store title')
       })
     })
   })

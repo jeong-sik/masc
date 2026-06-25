@@ -841,7 +841,6 @@ export interface GoalVerificationSummary {
 export interface GoalFsmProjection {
   state: string
   source: 'goal.phase' | string
-  state_kind: string
   next_actions: string[]
   activity_observation: 'runtime' | 'approval' | 'task' | 'child' | 'goal_metadata' | string
   stagnation_status: 'recent' | 'stalled' | 'unobserved' | string
@@ -913,9 +912,7 @@ export interface GoalKeeperTrustSummary {
   latest_causal_event?: GoalKeeperTrustLatestEvent | null
 }
 
-export interface GoalTreeNode {
-  id: string
-  title: string
+export interface GoalTreeStatusProjection {
   status: string
   status_color: string
   phase: string
@@ -926,6 +923,9 @@ export interface GoalTreeNode {
   badges: string[]
   status_reason: string
   priority: number
+}
+
+export interface GoalTreeMetricProjection {
   metric: string | null
   target_value: string | null
   require_completion_approval: boolean
@@ -934,18 +934,25 @@ export interface GoalTreeNode {
   convergence: number
   convergence_pct: number
   attainment: GoalAttainmentProjection
+}
+
+export interface GoalTreeTaskProjection {
   tasks: GoalTreeTask[]
   task_count: number
   task_done_count: number
   task_summary?: GoalTaskSummary
   completion_summary?: GoalCompletionSummary
+}
+
+export interface GoalTreeVerificationProjection {
   verification_summary: GoalVerificationSummary
   effective_verifier_policy?: GoalVerificationRequest['policy_snapshot'] | null
   active_verification_request?: GoalVerificationRequest | null
   pending_verification_count: number
+}
+
+export interface GoalTreeActivityProjection {
   timeline_events: unknown[]
-  children: GoalTreeNode[]
-  child_count: number
   last_activity_at: string
   stagnation_seconds: number
   activity_observation: GoalFsmProjection['activity_observation']
@@ -953,6 +960,9 @@ export interface GoalTreeNode {
   linked_keeper_names: string[]
   pending_approval_count: number
   infra_risk_count: number
+}
+
+export interface GoalTreeLinkageProjection {
   linkage_source: 'explicit' | 'title_tag' | 'mixed' | 'none' | string
   linkage_warning_count: number
   blocking_source: 'goal_phase' | 'child_goal' | 'approval' | 'keeper_runtime' | 'task_fsm' | 'goal_linkage' | 'stalled' | 'none' | string
@@ -960,8 +970,25 @@ export interface GoalTreeNode {
   latest_keeper_ref?: string | null
   latest_turn_ref?: number | null
   stalled_since?: string | null
+}
+
+export interface GoalTreeTimestamps {
   created_at: string
   updated_at: string
+}
+
+export interface GoalTreeNode extends
+  GoalTreeStatusProjection,
+  GoalTreeMetricProjection,
+  GoalTreeTaskProjection,
+  GoalTreeVerificationProjection,
+  GoalTreeActivityProjection,
+  GoalTreeLinkageProjection,
+  GoalTreeTimestamps {
+  id: string
+  title: string
+  children: GoalTreeNode[]
+  child_count: number
 }
 
 export interface GoalAttainmentProjection {

@@ -12,7 +12,9 @@ import {
 import { navigate, route } from '../router'
 import { fetchDashboardTools, fetchLogs, fetchRuntimeDefaults } from '../api/dashboard.js'
 import type { DashboardToolInventoryItem, LogEntry, RuntimeDefaultsResponse } from '../api/dashboard.js'
+import { envBool } from '../config/env'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
+import { FusionSettingsPanel } from './fusion-settings-panel'
 import { ThemeSwitch } from './theme-switch'
 import type { ComponentChildren } from 'preact'
 
@@ -82,7 +84,6 @@ type FusionConfig = {
   readonly enabled: boolean
   readonly defaultPreset: string
   readonly maxConcurrentPanels: number
-  readonly perHourBudget: number
   readonly webTools: boolean
   readonly panel: readonly string[]
   readonly judge: string
@@ -94,7 +95,6 @@ const FUSION: FusionConfig = {
   enabled: true,
   defaultPreset: 'trio',
   maxConcurrentPanels: 2,
-  perHourBudget: 20,
   webTools: false,
   panel: [
     'ollama_cloud.deepseek-v4-flash',
@@ -506,10 +506,10 @@ export function SettingsSurface() {
   )
 
   // fusion (config/runtime.toml [fusion]) — keeper-v2 settings.jsx:178-182
+  const fusionSettingsWritable = envBool('VITE_FUSION_SETTINGS_WRITABLE', false)
   const [fusionOn, setFusionOn] = useState(FUSION.enabled)
   const [fusionPreset, setFusionPreset] = useState(FUSION.defaultPreset)
   const [fusionPanels, setFusionPanels] = useState(FUSION.maxConcurrentPanels)
-  const [fusionBudget, setFusionBudget] = useState(FUSION.perHourBudget)
   const [fusionWeb, setFusionWeb] = useState(FUSION.webTools)
 
   // discord trigger policy (gate section) — keeper-v2 settings.jsx:183
@@ -586,6 +586,7 @@ export function SettingsSurface() {
   const [clock24, setClock24] = useState(true)
 
   const cur = SET_SECTIONS.find(s => s[0] === sec) ?? SET_SECTIONS[0]!
+  const isLiveBackedSection = sec === 'runtimes' || (sec === 'fusion' && fusionSettingsWritable)
 
   // Resolved runtime options (de-duplicated, derived from the live registry).
   const runtimeEntries = runtimeDefaults?.runtimes ?? []
@@ -635,16 +636,16 @@ export function SettingsSurface() {
           <header class="set-content-h">
             <h1 data-testid="settings-section-title">${cur[2]}</h1>
             <span
-              class=${`set-section-state ${sec === 'runtimes' ? 'live' : 'preview'}`}
+              class=${`set-section-state ${isLiveBackedSection ? 'live' : 'preview'}`}
               data-testid="settings-section-state"
             >
-              ${sec === 'runtimes' ? 'runtime.toml live-backed' : 'preview only'}
+              ${isLiveBackedSection ? 'runtime.toml live-backed' : 'preview only'}
             </span>
           </header>
 
           <div
             class=${`set-card-b mx-6 my-6 ${sec === 'runtimes' ? 'set-card-b-wide' : 'ss-card'}`}
-            data-preview-locked=${sec === 'runtimes' ? 'false' : 'true'}
+            data-preview-locked=${isLiveBackedSection ? 'false' : 'true'}
           >
             ${sec === 'account' && html`
               <${SetRow} label="Operator" hint="Currently logged-in operator">
@@ -799,36 +800,37 @@ export function SettingsSurface() {
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
                 <span class="mono">masc_fusion</span> 의 out-of-band 심의 루프 (RFC-0252). 서로 다른 모델 패밀리로 패널을 구성해 관점 다양성을 확보하고, 심판이 종합합니다. fusion이 발화 가치 있는지는 keeper가 판단하고 게이트는 남용만 막습니다.
               </div>
-              <${SetRow} label="Fusion 심의" hint="끄면 masc_fusion 호출이 게이트에서 Deny 반환">
-                <${SetToggle} on=${fusionOn} onChange=${setFusionOn} />
-              <//>
-              ${fusionOn && html`
-                <${SetRow} label="기본 프리셋" hint="default_preset">
-                  <${SetSeg} value=${fusionPreset} options=${['trio']} onChange=${setFusionPreset} />
+              ${fusionSettingsWritable
+                ? html`<${FusionSettingsPanel} />`
+                : html`
+                <${SetRow} label="Fusion 심의" hint="끄면 masc_fusion 호출이 게이트에서 Deny 반환">
+                  <${SetToggle} on=${fusionOn} onChange=${setFusionOn} />
                 <//>
-                <${SetRow} label="동시 패널 수" hint="max_concurrent_panels · Async_agent.all 상한">
-                  <${SetStepper} v=${fusionPanels} set=${setFusionPanels} min=${1} max=${8} />
-                <//>
-                <${SetRow} label="시간당 발화 budget" hint="[fusion.gate].per_hour_budget · UTC hour bucket">
-                  <${SetStepper} v=${fusionBudget} set=${setFusionBudget} min=${1} max=${100} />
-                <//>
-                <${SetRow} label="패널·심판 웹 도구" hint="web_search / web_fetch 주입 여부">
-                  <${SetToggle} on=${fusionWeb} onChange=${setFusionWeb} />
-                <//>
-                <div class="set-sub-h">trio 프리셋</div>
-                <div class="set-fus-preset">
-                  <div class="set-fus-lane">
-                    <div class="set-fus-lane-h">panel · ${FUSION.panel.length}</div>
-                    ${FUSION.panel.map(id => html`<div key=${id} class="set-fus-model mono">${id}</div>`)}
+                ${fusionOn && html`
+                  <${SetRow} label="기본 프리셋" hint="default_preset">
+                    <${SetSeg} value=${fusionPreset} options=${['trio']} onChange=${setFusionPreset} />
+                  <//>
+                  <${SetRow} label="동시 패널 수" hint="max_concurrent_panels · Async_agent.all 상한">
+                    <${SetStepper} v=${fusionPanels} set=${setFusionPanels} min=${1} max=${8} />
+                  <//>
+                  <${SetRow} label="패널·심판 웹 도구" hint="web_search / web_fetch 주입 여부">
+                    <${SetToggle} on=${fusionWeb} onChange=${setFusionWeb} />
+                  <//>
+                  <div class="set-sub-h">trio 프리셋</div>
+                  <div class="set-fus-preset">
+                    <div class="set-fus-lane">
+                      <div class="set-fus-lane-h">panel · ${FUSION.panel.length}</div>
+                      ${FUSION.panel.map(id => html`<div key=${id} class="set-fus-model mono">${id}</div>`)}
+                    </div>
+                    <div class="set-fus-lane">
+                      <div class="set-fus-lane-h">judge</div>
+                      <div class="set-fus-model judge mono">${FUSION.judge}</div>
+                    </div>
                   </div>
-                  <div class="set-fus-lane">
-                    <div class="set-fus-lane-h">judge</div>
-                    <div class="set-fus-model judge mono">${FUSION.judge}</div>
+                  <div class="set-mcp-detail mono" style=${{ marginTop: '10px' }}>
+                    panel_timeout ${FUSION.panelTimeoutS}s · judge_timeout ${FUSION.judgeTimeoutS}s · max_tool_calls_per_panel ${FUSION.maxToolCallsPerPanel} (0 = 무제한)
                   </div>
-                </div>
-                <div class="set-mcp-detail mono" style=${{ marginTop: '10px' }}>
-                  panel_timeout ${FUSION.panelTimeoutS}s · judge_timeout ${FUSION.judgeTimeoutS}s · max_tool_calls_per_panel ${FUSION.maxToolCallsPerPanel} (0 = 무제한)
-                </div>
+                `}
               `}
             `}
 

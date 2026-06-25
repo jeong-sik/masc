@@ -27,6 +27,8 @@ TEST_TIMEOUT_SEC="${CI_TEST_TIMEOUT_SEC:-1200}"
 HEARTBEAT_SEC="${CI_TEST_HEARTBEAT_SEC:-30}"
 START_EPOCH="$(date +%s)"
 TEST_LOG_FILE="${CI_TEST_LOG_FILE:-$(mktemp_ci_log)}"
+DUNE_SOURCEROOT="${DUNE_SOURCEROOT:-$(pwd -P)}"
+export DUNE_SOURCEROOT
 CI_TEST_ALLOW_CLEAN_RETRY="${CI_TEST_ALLOW_CLEAN_RETRY:-1}"
 CI_TEST_CLEAN_RETRY_DONE=0
 CI_TEST_ALLOW_RPC_RETRY="${CI_TEST_ALLOW_RPC_RETRY:-1}"
@@ -269,8 +271,8 @@ agent_sdk_interface_mismatch_detected() {
 
 disk_full_detected() {
   [[ -f "${TEST_LOG_FILE}" ]] || return 1
-  grep -Eiq 'No space left on device|dune_trace_write[(][)]|ENOSPC' \
-    "${TEST_LOG_FILE}"
+  grep -Ev '(^|[[:space:]])\[OK\][[:space:]]' "${TEST_LOG_FILE}" \
+    | grep -Eiq 'No space left on device|dune_trace_write[(][)]|ENOSPC'
 }
 
 log_disk_full_guidance() {
@@ -392,6 +394,7 @@ fi
 log_line "[ci-run] timeout_sec=${TEST_TIMEOUT_SEC} heartbeat_sec=${HEARTBEAT_SEC}"
 log_line "[ci-run] started_at=$(iso_now)"
 log_line "[ci-run] log_file=${TEST_LOG_FILE}"
+log_line "[ci-run] source_root=${DUNE_SOURCEROOT}"
 
 heartbeat &
 hb_pid="$!"

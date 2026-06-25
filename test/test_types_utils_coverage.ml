@@ -481,7 +481,8 @@ let test_agent_credential_no_expiry () =
 
 let test_default_auth_config () =
   let cfg = Masc_domain.default_auth_config in
-  check bool "not enabled" false cfg.enabled;
+  check bool "enabled" true cfg.enabled;
+  check bool "requires token" true cfg.require_token;
   check int "token_expiry_hours" 24 cfg.token_expiry_hours
 
 let test_auth_config_roundtrip () =

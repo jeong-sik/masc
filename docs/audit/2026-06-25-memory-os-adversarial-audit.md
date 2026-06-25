@@ -39,11 +39,18 @@ path, and fixed one CI-radius defect:
 
 ## Evidence
 
+Private local paths, live loopback host/port values, volatile row counts, and
+local runtime commit hashes are redacted. Public GitHub run/job IDs and exact
+endpoint paths are retained so the checks can be re-run.
+
 [근거] Live runtime root:
-`curl -fsS '<local MASC health endpoint>/health?full=1'`, checked on
-2026-06-25, confidence High. Result: `effective_base_path` was the configured
-`<base-path>`, `effective_masc_root` was `<base-path>/.masc`, and status was
-`ok`. Exact host, port, timestamp, and runtime commit are omitted.
+`curl -fsS "$MASC_HEALTH_BASE_URL/health?full=1"`, where
+`$MASC_HEALTH_BASE_URL` is the operator's local MASC HTTP base URL, checked on
+2026-06-25, confidence High. Result: JSON fields `effective_base_path`,
+`effective_masc_root`, and `status` were inspected; status was `ok`, and
+`effective_masc_root` resolved to `<base-path>/.masc`. Exact host, port,
+timestamp, and local runtime commit hash are redacted; re-run the same endpoint
+to inspect the current runtime build id.
 
 [근거] Live Memory OS sizes:
 `du -sh <base-path>/.masc/config/keepers <base-path>/.masc/keepers <base-path>/.masc/recall_injections <base-path>/.masc/logs`,
@@ -59,11 +66,11 @@ High. Result: per-keeper stores were under the 384-row/file cap.
 Exact row counts are omitted because they are live-machine snapshots.
 
 [근거] Typed health surface:
-`curl -fsS '<local MASC health endpoint>/api/v1/dashboard/keeper-memory-health'`,
+`curl -fsS "$MASC_HEALTH_BASE_URL/api/v1/dashboard/keeper-memory-health"`,
 checked on 2026-06-25, confidence High. Result: the typed surface reported
 bounded stores, no near-duplicate alarm, and nonzero expired rows on disk. Exact
 host, port, counts, and byte totals are omitted because they are live-machine
-snapshots.
+snapshots; the endpoint path and response fields are stable evidence handles.
 
 [근거] Current OCaml 5.4 guidance:
 [OCaml 5.4 manual, Parallel programming](https://ocaml.org/manual/5.4/parallelism.html),
@@ -78,7 +85,7 @@ OCaml with fibers, domains, switches, cancellation, mutexes, semaphores, pools,
 and executor pools.
 
 [근거] CI failure triage before the CI-radius patch:
-`gh run view <ci-run-id> --repo jeong-sik/masc --job <job-id> --log-failed`,
+`gh run view 28159412988 --repo jeong-sik/masc --job 83395999819 --log-failed`,
 checked on 2026-06-25, confidence High. Result: the focused operator control
 step called a non-existent `test_operator_control.exe`; SSE reconnect and
 contract harness failures remained CI-owned readiness blockers.

@@ -316,6 +316,7 @@ module Dashboard : sig
   val shell_prewarm_outer_timeout_sec : float
   val execution_timeout_sec : float
   val execution_trust_timeout_sec : float
+  val execution_trust_refresh_interval_sec : float
   val briefing_timeout_sec : float
   val shell_timeout_sec : float
   val shell_light_timeout_sec : float

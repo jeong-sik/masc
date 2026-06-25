@@ -163,6 +163,12 @@ let execution_trust_cache : cached_surface =
         ])
 ;;
 
+let execution_trust_cache_mu = Eio.Mutex.create ()
+
+let with_execution_trust_cache f =
+  Eio.Mutex.use_rw ~protect:true execution_trust_cache_mu f
+;;
+
 (** Invalidate the execution surface cache so the next
     [/api/v1/dashboard/execution] request recomputes fresh data.
     Called via [Workspace_hooks.on_task_mutation_fn] after task add,
@@ -790,12 +796,9 @@ let compute_execution_trust_json ~state ~sw ~clock =
 
 let start_execution_trust_refresh_loop ~state ~sw ~clock =
   let compute () =
-    Server_dashboard_http_cache.mark_cached_surface_attempt execution_trust_cache;
-    try compute_execution_trust_json ~state ~sw ~clock with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Server_dashboard_http_cache.mark_cached_surface_error execution_trust_cache exn;
-      raise exn
+    with_execution_trust_cache (fun () ->
+      Server_dashboard_http_cache.mark_cached_surface_attempt execution_trust_cache);
+    compute_execution_trust_json ~state ~sw ~clock
   in
   Proactive_refresh.start
     ~sw
@@ -803,15 +806,26 @@ let start_execution_trust_refresh_loop ~state ~sw ~clock =
     ~config:
       { (Proactive_refresh.default_config
            ~label:"execution_trust"
-           ~interval_s:Dashboard_http_keeper_types.execution_trust_refresh_interval_s)
+           ~interval_s:
+             Env_config_runtime.Dashboard.execution_trust_refresh_interval_sec)
         with
         timeout_s = Env_config_runtime.Dashboard.execution_trust_timeout_sec
       ; on_error =
-          Some (Server_dashboard_http_cache.mark_cached_surface_error execution_trust_cache)
+          Some
+            (fun exn ->
+              with_execution_trust_cache (fun () ->
+                Server_dashboard_http_cache.mark_cached_surface_error
+                  execution_trust_cache
+                  exn))
       ; warm_delay_s = 0.0
       }
     ~compute
-    ~on_result:(Server_dashboard_http_cache.mark_cached_surface_success execution_trust_cache)
+    ~on_result:
+      (fun json ->
+        with_execution_trust_cache (fun () ->
+          Server_dashboard_http_cache.mark_cached_surface_success
+            execution_trust_cache
+            json))
 ;;
 
 let dashboard_execution_http_json ~state ~sw ~clock request =
@@ -948,13 +962,14 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
       ~ttl_s:shell_surface_cache_ttl_s
       json
   in
-  Server_dashboard_http_cache.cached_surface_or_first_success_json
-    execution_trust_cache
-    ~cache_key:execution_trust_cache_key
-    ~ttl:shell_surface_cache_ttl_s
-    ~clock
-    ~timeout_sec:Env_config_runtime.Dashboard.execution_trust_timeout_sec
-    (fun () -> compute_execution_trust_json ~state ~sw ~clock)
+  with_execution_trust_cache (fun () ->
+    Server_dashboard_http_cache.cached_surface_or_first_success_json
+      execution_trust_cache
+      ~cache_key:execution_trust_cache_key
+      ~ttl:shell_surface_cache_ttl_s
+      ~clock
+      ~timeout_sec:Env_config_runtime.Dashboard.execution_trust_timeout_sec
+      (fun () -> compute_execution_trust_json ~state ~sw ~clock))
   |> attach_surface_envelope
 ;;
 

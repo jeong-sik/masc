@@ -104,13 +104,12 @@ describe('setArrayByKeyIfChanged', () => {
     expect(s.value).toEqual(next)
   })
 
-  it('updates by default when same-key items are fresh references', () => {
+  it('skips by default when same-key fresh objects are structurally equal', () => {
     const original = [{ id: 'a' }, { id: 'b' }]
     const s = signal(original)
     const next = [{ id: 'a' }, { id: 'b' }]
     setArrayByKeyIfChanged(s, next, keyFn)
-    expect(s.value).not.toBe(original)
-    expect(s.value).toEqual(next)
+    expect(s.value).toBe(original)
   })
 
   it('skips when keys and values match with a structural equality predicate', () => {
@@ -147,5 +146,19 @@ describe('setArrayByKeyIfChanged', () => {
     const s = signal(empty)
     setArrayByKeyIfChanged(s, [], keyFn)
     expect(s.value).toBe(empty)
+  })
+
+  it('does not call keyFn for nullish array entries', () => {
+    const original = [{ id: 'a' }, null]
+    const s = signal(original)
+    setArrayByKeyIfChanged(
+      s,
+      [{ id: 'a' }, null],
+      item => {
+        if (item == null) throw new Error('keyFn should not receive nullish entries')
+        return item.id
+      },
+    )
+    expect(s.value).toBe(original)
   })
 })

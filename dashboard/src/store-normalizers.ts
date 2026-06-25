@@ -1033,26 +1033,40 @@ export function messageSortKey(message: Message): number {
 }
 
 function messageIdentityKey(message: Message): string {
-  if (message.id) return JSON.stringify(['id', message.id])
   if (typeof message.seq === 'number' && Number.isFinite(message.seq)) {
     return JSON.stringify(['seq', message.seq])
   }
+  if (message.id) return JSON.stringify(['id', message.id])
   return JSON.stringify([
     'fallback',
     message.timestamp ?? '',
     message.from ?? '',
     message.content,
+    message.type ?? '',
+    message.workspace ?? '',
   ])
 }
 
+function stableValueEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right)) return false
+    if (left.length !== right.length) return false
+    return left.every((value, index) => stableValueEqual(value, right[index]))
+  }
+  if (isRecord(left) || isRecord(right)) {
+    if (!isRecord(left) || !isRecord(right)) return false
+    const keys = new Set([...Object.keys(left), ...Object.keys(right)])
+    for (const key of keys) {
+      if (!stableValueEqual(left[key], right[key])) return false
+    }
+    return true
+  }
+  return false
+}
+
 function messageEqual(left: Message, right: Message): boolean {
-  return left.id === right.id
-    && left.seq === right.seq
-    && left.from === right.from
-    && left.content === right.content
-    && left.timestamp === right.timestamp
-    && left.type === right.type
-    && left.workspace === right.workspace
+  return stableValueEqual(left, right)
 }
 
 export function mergeMessages(current: Message[], incoming: Message[]): Message[] {

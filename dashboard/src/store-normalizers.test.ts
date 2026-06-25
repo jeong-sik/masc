@@ -203,6 +203,34 @@ describe('mergeMessages', () => {
     expect(merged).toEqual([changed])
     expect(merged[0]).toBe(changed)
   })
+
+  it('replaces a seq-only message when the next snapshot adds an id', () => {
+    const current = [message({ id: undefined, seq: 7 })]
+    const incoming = message({ id: 'm-7', seq: 7 })
+
+    const merged = mergeMessages(current, [incoming])
+
+    expect(merged).toEqual([incoming])
+    expect(merged[0]).toBe(incoming)
+  })
+
+  it('keeps fallback messages distinct when type or workspace differs', () => {
+    const current = [
+      message({ id: undefined, seq: undefined, type: 'status', workspace: 'main' }),
+    ]
+    const incoming = message({
+      id: undefined,
+      seq: undefined,
+      type: 'event',
+      workspace: 'sidecar',
+    })
+
+    const merged = mergeMessages(current, [incoming])
+
+    expect(merged).toHaveLength(2)
+    expect(merged).toContain(current[0])
+    expect(merged).toContain(incoming)
+  })
 })
 
 describe('normalizeDashboardRuntimeResolution fleet safety', () => {

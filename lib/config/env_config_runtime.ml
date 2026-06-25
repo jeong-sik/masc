@@ -717,6 +717,17 @@ module Dashboard = struct
       (get_float ~default:30.0
          "MASC_DASHBOARD_EXECUTION_TRUST_TIMEOUT_SEC")
 
+  (** Execution-trust proactive refresh cadence.
+
+      Default 60s preserves the original proactive refresh interval. Floor 5s
+      prevents a misconfigured dashboard from tight-looping receipt scans while
+      still giving operators a live knob when trust scoring load or freshness
+      SLOs change. *)
+  let execution_trust_refresh_interval_sec =
+    Float.max 5.0
+      (get_float ~default:60.0
+         "MASC_DASHBOARD_EXECUTION_TRUST_REFRESH_INTERVAL_SEC")
+
   (** Mission card compute timeout.
 
       Wraps three [Dashboard_cache.get_or_compute_with_timeout] sites at

@@ -246,6 +246,8 @@ let dashboard_entries =
       "Execution surface compute timeout (floor 5)";
     entry ~default:"30" "MASC_DASHBOARD_EXECUTION_TRUST_TIMEOUT_SEC"
       "Execution-trust surface compute timeout (floor 1)";
+    entry ~default:"60" "MASC_DASHBOARD_EXECUTION_TRUST_REFRESH_INTERVAL_SEC"
+      "Execution-trust proactive refresh interval (floor 5)";
     entry ~default:"(none)" "MASC_DASHBOARD_FIXTURE"
       "Dashboard fixture name override";
     entry ~default:"false" "MASC_DASHBOARD_FIXTURES_ENABLED"

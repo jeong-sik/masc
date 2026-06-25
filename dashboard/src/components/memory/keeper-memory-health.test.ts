@@ -34,7 +34,6 @@ function makeEntry(
     events_to_facts_ratio: 2,
     ttl_expired_on_disk: 0,
     near_duplicate: 0,
-    external_ref: 0,
     ...overrides,
   }
 }

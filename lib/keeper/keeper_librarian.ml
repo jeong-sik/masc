@@ -229,10 +229,10 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
          with a short TTL, durable knowledge with none. RFC-0247 also stopped
          parsing the LLM's [confidence] number: the score it fed is gone. *)
       let category = category_of_string category_str in
-      (* RFC-0259 §3.2(b): a claim naming a PR/issue/task id is volatile — route
-         its [valid_until] through [fact_valid_until] so it gets a finite horizon
-         instead of a durable [None]. *)
-      let external_ref = external_ref_of_claim claim in
+      (* No code-side external-ref inference from claim prose. The claim text is
+         context for the model; it may mention a PR/issue/task as history or a
+         durable lesson, so retention must not be changed by a string matcher. *)
+      let external_ref = None in
       Some
         { claim
         ; category

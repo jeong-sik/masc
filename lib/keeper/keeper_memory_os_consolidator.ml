@@ -51,16 +51,10 @@ type contribution =
 (* RFC-0247 (purge): eligibility is purely structural — a promotable category.
    The prior confidence floor (only claims above 0.5 count as corroboration) was
    a score gate and is gone. *)
-(* RFC-0259 §3.2(b): a volatile (external-ref) claim is per-keeper status, not
-   durable cross-keeper knowledge — exclude it from promotion so it cannot be
-   resurrected as an immortal shared fact (the #21363 shape). *)
 (* RFC-0285 §3.5: a [Self_observation] is transient keeper-local self-state, never
    cross-keeper knowledge — gate it here (the single promotion SSOT) rather than
    widening [is_promotable]'s exhaustive category signature. *)
-let eligible fact =
-  is_promotable fact.category
-  && Option.is_none fact.external_ref
-  && fact.claim_kind <> Some Self_observation
+let eligible fact = is_promotable fact.category && fact.claim_kind <> Some Self_observation
 
 (* Pick the representative fact for a claim group by a structural total order:
    earliest first_seen, then lexically smallest claim, then keeper id — so
@@ -100,23 +94,21 @@ let consolidate_into_shared ~now ~min_keepers contribs =
       Some
         { claim = rep.fact.claim
         ; category = rep.fact.category
-        ; external_ref = rep.fact.external_ref
-          (* RFC-0285 §3.5: carry the representative's tag (parallel to [claim_id]).
-             [eligible] already drops [Self_observation], so a promoted shared fact is
-             never self-observation; this preserves [External_state]/[None] verbatim. *)
+        ; external_ref = None
+          (* External refs are context-only, not shared-store identity or retention
+             policy. Keep promoted shared facts free of legacy ref metadata. *)
         ; claim_kind = rep.fact.claim_kind
         ; source = rep.fact.source
         ; observed_by = keepers
         ; first_seen =
             List.fold_left (fun acc c -> Float.min acc c.fact.first_seen) rep.fact.first_seen contribs
-          (* RFC-0259 §3.2(b): route through [fact_valid_until] as a structural
-             backstop — [eligible] already excludes external-ref claims, so this is
-             [None] for promotable facts, but a volatile claim could never become an
-             immortal shared fact even if that filter regressed. *)
+          (* Route through [fact_valid_until] so self-observation/category TTL policy
+             stays centralized. External refs are context-only and do not affect
+             retention. *)
         ; valid_until =
             fact_valid_until
               ~now
-              ~external_ref:rep.fact.external_ref
+              ~external_ref:None
               ~claim_kind:rep.fact.claim_kind
               rep.fact.category
           (* The consolidation IS the verification of the shared fact. *)

@@ -76,9 +76,9 @@ let memory_os_episode_json ~now (episode : Keeper_memory_os_types.episode) =
    RFC-0247): they are absent from the [fact] record, so the type system makes
    re-emitting them unrepresentable. [reference_time] is the shared staleness
    anchor (last_verified_at else first_seen), reused rather than re-inlined.
-   [external_ref] / [claim_kind] are omitted when [None] so a claim without them
-   stays a minimal row. The on-disk [fact_to_json] is untouched — this is a
-   read-only dashboard projection, not a storage change. *)
+   [claim_kind] is omitted when [None] so a claim without optional metadata stays a
+   minimal row. [external_ref] is intentionally not surfaced; PR/issue text remains
+   claim context rather than a machine status field. *)
 let memory_os_fact_json ~now (fact : Keeper_memory_os_types.fact) =
   `Assoc
     ([ "claim", `String fact.claim
@@ -92,9 +92,6 @@ let memory_os_fact_json ~now (fact : Keeper_memory_os_types.fact) =
      ; "last_verified_at", json_float_opt fact.last_verified_at
      ; "current", `Bool (memory_os_fact_is_current ~now fact)
      ]
-    @ (match fact.external_ref with
-       | Some r -> [ "external_ref", Keeper_memory_os_types.external_ref_to_json r ]
-       | None -> [])
     @ (match fact.claim_kind with
        | Some k -> [ "claim_kind", `String (Keeper_memory_os_types.claim_kind_to_string k) ]
        | None -> []))

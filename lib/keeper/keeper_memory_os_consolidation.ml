@@ -238,7 +238,7 @@ let max_optional_float values =
     values
 ;;
 
-let valid_until_for_group ~now ~external_ref ~claim_kind ~members category =
+let valid_until_for_group ~now ~external_ref:_ ~claim_kind ~members category =
   match claim_kind with
   (* RFC-0285 §3.3/§4 re-mint property: a self-observation group inherits the
      earliest member's horizon so a reworded re-mint does NOT extend it past the
@@ -248,17 +248,13 @@ let valid_until_for_group ~now ~external_ref ~claim_kind ~members category =
      | Some _ as valid_until -> valid_until
      | None -> Some (now +. self_observation_ttl_seconds))
   | Some External_state | Some Durable_knowledge | None ->
-    (match external_ref with
-     (* RFC-0259 §3.2(b): a referenced claim is volatile regardless of category. *)
-     | Some _ -> Some (now +. volatile_external_ttl_seconds)
-     | None ->
-       (match category with
-        | Ephemeral ->
-          (match min_optional_float (List.map (fun (m : fact) -> m.valid_until) members) with
-           | Some _ as valid_until -> valid_until
-           | None -> category_valid_until ~now category)
-        | Fact | Constraint | Preference | Blocker | Goal | Code_change
-        | Validated_approach | Lesson | Unknown _ -> category_valid_until ~now category))
+    (match category with
+     | Ephemeral ->
+       (match min_optional_float (List.map (fun (m : fact) -> m.valid_until) members) with
+        | Some _ as valid_until -> valid_until
+        | None -> category_valid_until ~now category)
+     | Fact | Constraint | Preference | Blocker | Goal | Code_change
+     | Validated_approach | Lesson | Unknown _ -> category_valid_until ~now category)
 ;;
 
 let last_verified_for_members members =
@@ -297,9 +293,10 @@ let consolidated_fact ~now ~members (group : merge_group) =
   let observed_by =
     List.concat_map (fun m -> m.observed_by) members |> List.sort_uniq String.compare
   in
-  (* RFC-0259 §3.2(b): the consolidated claim text differs from any member's, so
-     re-parse the external ref from it rather than trusting a member's. *)
-  let external_ref = external_ref_of_claim group.consolidated_claim in
+  (* No code-side external-ref inference from consolidated prose. The model gets
+     the text as context; retention policy should not be changed by a string
+     matcher over the rewritten claim. *)
+  let external_ref = None in
   { claim = group.consolidated_claim
   ; category = group.category
   ; external_ref

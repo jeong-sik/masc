@@ -47,24 +47,22 @@ afterEach(() => {
 describe('KeeperWorkspaceRoster', () => {
   it('renders status groups with keeper rows', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
-    // Prototype group headers (`.roster-group`) carry the SHORT label as text
-    // and the full label in the `title` attribute (rails.jsx groupLabel).
-    const titles = Array.from(host.querySelectorAll('.roster-group')).map(g => g.getAttribute('title'))
-    expect(titles).toContain('실행 중')
-    expect(titles).toContain('대기 · 일시정지')
-    expect(titles).toContain('중지 · 종료됨')
-    expect(host.querySelectorAll('.kp-row').length).toBe(3)
+    const labels = Array.from(host.querySelectorAll('.kw-roster-group-label')).map(g => g.textContent)
+    expect(labels).toContain('실행 중')
+    expect(labels).toContain('대기 · 일시정지')
+    expect(labels).toContain('중지 · 종료됨')
+    expect(host.querySelectorAll('.kw-kp-row').length).toBe(3)
   })
 
   it('marks the active keeper row', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
-    const active = host.querySelector('.kp-row[aria-current="true"]') as HTMLElement
+    const active = host.querySelector('.kw-kp-row[aria-current="true"]') as HTMLElement
     expect(active?.textContent).toContain('masc-improver')
   })
 
   it('shows filter chip counts (all / running / attention)', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
-    const chips = Array.from(host.querySelectorAll('.rfilter')).map(c => c.textContent)
+    const chips = Array.from(host.querySelectorAll('.kw-rfilter')).map(c => c.textContent)
     // 전체 3, 실행 1 (only masc-improver), 주의 1 (rama)
     expect(chips.some(c => c?.includes('전체') && c?.includes('3'))).toBe(true)
     expect(chips.some(c => c?.includes('실행') && c?.includes('1'))).toBe(true)
@@ -74,8 +72,8 @@ describe('KeeperWorkspaceRoster', () => {
   it('shows the total keeper count on the 전체 filter chip', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
     // v2 dropped the standalone "Keepers" title; the total count now lives on
-    // the 전체 filter chip in the .roster-filters band.
-    const allChip = Array.from(host.querySelectorAll('.rfilter')).find(c => c.textContent?.includes('전체'))
+    // the 전체 filter chip in the .kw-roster-filters band.
+    const allChip = Array.from(host.querySelectorAll('.kw-rfilter')).find(c => c.textContent?.includes('전체'))
     expect(allChip).not.toBeUndefined()
     expect(allChip?.textContent).toContain('3')
   })
@@ -117,7 +115,7 @@ describe('KeeperWorkspaceRoster', () => {
     // switch the single-pane mobile layout over to that keeper's chat.
     keeperMobilePane.value = 'roster'
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" onSelect=${onSelect} />`, host)
-    const rows = Array.from(host.querySelectorAll('.kp-row')) as HTMLElement[]
+    const rows = Array.from(host.querySelectorAll('.kw-kp-row')) as HTMLElement[]
     const sangsuRow = rows.find(r => r.textContent?.includes('sangsu'))
     sangsuRow?.click()
     expect(navigate).toHaveBeenCalledWith('monitoring', { section: 'agents', keeper: 'sangsu' })
@@ -181,7 +179,7 @@ describe('KeeperWorkspaceRoster', () => {
   it('opens the command menu on right-click (contextmenu) without selecting the row', () => {
     const onSelect = vi.fn()
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" onSelect=${onSelect} />`, host)
-    const rows = Array.from(host.querySelectorAll('.kp-row')) as HTMLElement[]
+    const rows = Array.from(host.querySelectorAll('.kw-kp-row')) as HTMLElement[]
     const sangsuRow = rows.find(r => r.textContent?.includes('sangsu')) as HTMLElement
 
     // fireEvent returns false when the (cancelable) event had preventDefault
@@ -198,7 +196,7 @@ describe('KeeperWorkspaceRoster', () => {
 
   it('opens the command menu on right-click of a mini-roster sigil', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" mini=${true} />`, host)
-    const minis = Array.from(host.querySelectorAll('.kp-row.mini')) as HTMLElement[]
+    const minis = Array.from(host.querySelectorAll('.kw-kp-mini')) as HTMLElement[]
     const ramaMini = minis.find(b => (b.getAttribute('aria-label') ?? '').includes('rama')) as HTMLElement
 
     fireEvent.contextMenu(ramaMini, { clientX: 60, clientY: 200 })
@@ -209,48 +207,42 @@ describe('KeeperWorkspaceRoster', () => {
 
   it('renders a status-toned dot in each group header (rg-dot)', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
-    // The prototype header (`.roster-group`) carries the status tone via its
-    // own bucket class (run/pause/off) and renders an untoned `.rg-dot` pip;
-    // the full status label is in the `title` attribute. Headers are keyed by
-    // the full label.
+    // The workspace header renders the shared StatusDot, so the group tone
+    // follows the shared .kw-dot ok/warn/idle vocabulary.
     const groupTone = (label: string): { hasDot: boolean; cls: string | undefined } => {
-      const header = Array.from(host.querySelectorAll('.roster-group')).find(
-        g => g.getAttribute('title') === label,
+      const header = Array.from(host.querySelectorAll('.kw-roster-group')).find(
+        g => g.querySelector('.kw-roster-group-label')?.textContent === label,
       )
-      return { hasDot: !!header?.querySelector('.rg-dot'), cls: header?.className }
+      const dot = header?.querySelector('.kw-dot')
+      return { hasDot: !!dot, cls: dot?.className }
     }
-    // running → run, paused → pause, offline → off (the 3 prototype buckets,
-    // 1:1 with the old ok/warn/idle tones).
     const running = groupTone('실행 중')
     expect(running.hasDot).toBe(true)
-    expect(running.cls).toContain('run')
+    expect(running.cls).toContain('ok')
     const paused = groupTone('대기 · 일시정지')
     expect(paused.hasDot).toBe(true)
-    expect(paused.cls).toContain('pause')
+    expect(paused.cls).toContain('warn')
     const offline = groupTone('중지 · 종료됨')
     expect(offline.hasDot).toBe(true)
-    expect(offline.cls).toContain('off')
-    expect(offline.cls).not.toContain('run')
-    expect(offline.cls).not.toContain('pause')
+    expect(offline.cls).not.toContain('ok')
+    expect(offline.cls).not.toContain('warn')
   })
 
   it('filters by search query', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
-    // Prototype gates the search box behind the `.rfilter-icon` toggle.
-    fireEvent.click(host.querySelector('.rfilter-icon') as HTMLButtonElement)
-    const search = host.querySelector('.roster-search') as HTMLInputElement
+    const search = host.querySelector('.kw-roster-search') as HTMLInputElement
     fireEvent.input(search, { target: { value: 'rama' } })
-    const rows = host.querySelectorAll('.kp-row')
+    const rows = host.querySelectorAll('.kw-kp-row')
     expect(rows.length).toBe(1)
     expect(rows[0]?.textContent).toContain('rama')
   })
 
   it('sorts the roster by name and attention count', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
-    const sort = host.querySelector('.roster-sort') as HTMLSelectElement
+    const sort = host.querySelector('.kw-roster-sort') as HTMLSelectElement
 
     fireEvent.change(sort, { target: { value: 'name' } })
-    let rows = Array.from(host.querySelectorAll('.kp-row')) as HTMLElement[]
+    let rows = Array.from(host.querySelectorAll('.kw-kp-row')) as HTMLElement[]
     expect(rows.map(r => r.textContent ?? '')).toEqual([
       expect.stringContaining('masc-improver'),
       expect.stringContaining('rama'),
@@ -258,16 +250,16 @@ describe('KeeperWorkspaceRoster', () => {
     ])
 
     fireEvent.change(sort, { target: { value: 'att' } })
-    rows = Array.from(host.querySelectorAll('.kp-row')) as HTMLElement[]
+    rows = Array.from(host.querySelectorAll('.kw-kp-row')) as HTMLElement[]
     expect(rows[0]?.textContent).toContain('rama')
   })
 
   it('renders a compact sigil-only roster in mini mode', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" mini=${true} />`, host)
-    expect(host.querySelector('.roster-search')).toBeNull()
-    expect(host.querySelector('.roster-sort')).toBeNull()
-    expect(host.querySelectorAll('.kp-row.mini').length).toBe(3)
-    expect(host.querySelector('.kp-row.mini[aria-current="true"]')).not.toBeNull()
+    expect(host.querySelector('.kw-roster-search')).toBeNull()
+    expect(host.querySelector('.kw-roster-sort')).toBeNull()
+    expect(host.querySelectorAll('.kw-kp-mini').length).toBe(3)
+    expect(host.querySelector('.kw-kp-mini[aria-current="true"]')).not.toBeNull()
   })
 
   // The per-row work-preview line (.kw-kp-work — recent_output >
@@ -282,7 +274,7 @@ describe('KeeperWorkspaceRoster', () => {
   it('uses content-visibility:auto on plain-list rows below the virtualization threshold', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
     expect(host.querySelector('.virtual-list-spacer')).toBeNull()
-    const rows = Array.from(host.querySelectorAll('.kp-row')) as HTMLElement[]
+    const rows = Array.from(host.querySelectorAll('.kw-kp-row')) as HTMLElement[]
     expect(rows.length).toBeGreaterThan(0)
     expect(rows.every(r => r.style.contentVisibility === 'auto')).toBe(true)
   })
@@ -294,31 +286,31 @@ describe('KeeperWorkspaceRoster', () => {
     )
     render(html`<${KeeperWorkspaceRoster} activeName="keeper-0" />`, host)
     expect(host.querySelector('.virtual-list-spacer')).not.toBeNull()
-    expect(host.querySelector('.roster-list')).not.toBeNull()
+    expect(host.querySelector('.kw-roster-list')).not.toBeNull()
     // The windowed path renders the group header through the same renderHeader(),
     // so the toned header must appear here too (all 60 keepers are running → the
-    // `.roster-group.run` bucket with its `.rg-dot` pip).
-    expect(host.querySelector('.roster-group.run .rg-dot')).not.toBeNull()
+    // shared ok-toned StatusDot).
+    expect(host.querySelector('.kw-roster-group .kw-dot.ok')).not.toBeNull()
   })
 
   it('renders the sort select defaulting to status order', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
-    const sortSel = host.querySelector('.roster-sort') as HTMLSelectElement
+    const sortSel = host.querySelector('.kw-roster-sort') as HTMLSelectElement
     expect(sortSel).not.toBeNull()
     expect(sortSel.value).toBe('status')
     expect(Array.from(sortSel.options).map(o => o.value)).toEqual(['status', 'name', 'att'])
     // status mode keeps the bucket group headers
-    expect(host.querySelectorAll('.roster-group').length).toBeGreaterThan(0)
+    expect(host.querySelectorAll('.kw-roster-group').length).toBeGreaterThan(0)
   })
 
   it('sorts by name into a flat alphabetical list with no group headers', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
-    fireEvent.change(host.querySelector('.roster-sort') as HTMLSelectElement, {
+    fireEvent.change(host.querySelector('.kw-roster-sort') as HTMLSelectElement, {
       target: { value: 'name' },
     })
     // flat list → status group headers disappear
-    expect(host.querySelectorAll('.roster-group').length).toBe(0)
-    const order = Array.from(host.querySelectorAll('.kp-row')).map(r =>
+    expect(host.querySelectorAll('.kw-roster-group').length).toBe(0)
+    const order = Array.from(host.querySelectorAll('.kw-kp-row')).map(r =>
       r.textContent?.includes('masc-improver') ? 'masc-improver' : r.textContent?.includes('rama') ? 'rama' : 'sangsu',
     )
     expect(order).toEqual(['masc-improver', 'rama', 'sangsu'])
@@ -331,10 +323,10 @@ describe('KeeperWorkspaceRoster', () => {
       mk({ name: 'flagged', status: 'running', needs_attention: true }),
     ]
     render(html`<${KeeperWorkspaceRoster} activeName="calm" />`, host)
-    fireEvent.change(host.querySelector('.roster-sort') as HTMLSelectElement, {
+    fireEvent.change(host.querySelector('.kw-roster-sort') as HTMLSelectElement, {
       target: { value: 'att' },
     })
-    const order = Array.from(host.querySelectorAll('.kp-row')).map(r =>
+    const order = Array.from(host.querySelectorAll('.kw-kp-row')).map(r =>
       r.textContent?.includes('blocked-3') ? 'blocked-3' : r.textContent?.includes('flagged') ? 'flagged' : 'calm',
     )
     // blocked-3 (score 3) > flagged (flag → score 1) > calm (score 0)
@@ -344,7 +336,7 @@ describe('KeeperWorkspaceRoster', () => {
   it('shows the keeper basepath (sandbox_target) as the row sub-line, shortened with a full-path title', () => {
     keepers.value = [mk({ name: 'miso', status: 'running', sandbox_target: '/workspace/keepers/keeper-miso' })]
     render(html`<${KeeperWorkspaceRoster} activeName="miso" />`, host)
-    const handle = host.querySelector('.kp-handle') as HTMLElement
+    const handle = host.querySelector('.kw-kp-handle') as HTMLElement
     expect(handle?.textContent).toBe('…/keepers/keeper-miso')
     expect(handle?.getAttribute('title')).toBe('/workspace/keepers/keeper-miso')
   })
@@ -352,7 +344,7 @@ describe('KeeperWorkspaceRoster', () => {
   it('falls back to the scope proxy when a keeper has no sandbox_target', () => {
     keepers.value = [mk({ name: 'nobase', status: 'running', model: 'anthropic/claude-x' })]
     render(html`<${KeeperWorkspaceRoster} activeName="nobase" />`, host)
-    const handle = host.querySelector('.kp-handle') as HTMLElement
+    const handle = host.querySelector('.kw-kp-handle') as HTMLElement
     expect(handle?.textContent).toBe('anthropic/claude-x')
   })
 
@@ -362,17 +354,15 @@ describe('KeeperWorkspaceRoster', () => {
       mk({ name: 'beta', status: 'running', sandbox_target: '/srv/worktrees/beta-tree' }),
     ]
     render(html`<${KeeperWorkspaceRoster} activeName="alpha" />`, host)
-    // Prototype gates the search box behind the `.rfilter-icon` toggle.
-    fireEvent.click(host.querySelector('.rfilter-icon') as HTMLButtonElement)
-    fireEvent.input(host.querySelector('.roster-search') as HTMLInputElement, { target: { value: 'beta-tree' } })
-    const rows = host.querySelectorAll('.kp-row')
+    fireEvent.input(host.querySelector('.kw-roster-search') as HTMLInputElement, { target: { value: 'beta-tree' } })
+    const rows = host.querySelectorAll('.kw-kp-row')
     expect(rows.length).toBe(1)
     expect(rows[0]?.textContent).toContain('beta')
   })
 
   it('renders a per-group keeper count in the status group header', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
-    const counts = Array.from(host.querySelectorAll('.rg-n')).map(n => n.textContent)
+    const counts = Array.from(host.querySelectorAll('.kw-roster-group-n')).map(n => n.textContent)
     // FIXTURE: 1 running, 1 paused, 1 stopped
     expect(counts).toEqual(['1', '1', '1'])
   })

@@ -1,6 +1,5 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
-import { fireEvent } from '@testing-library/preact'
 import { afterEach, describe, expect, it } from 'vitest'
 import { keepers, tasks } from '../store'
 import type { Keeper, Task } from '../types'
@@ -59,18 +58,11 @@ describe('KeeperWorkspaceRoster', () => {
     // v2 filter chips carry the SHORT label + count ('실행' + '1'), not the old
     // combined '실행중1' chip label (rails.jsx filter chips).
     expect(container.textContent).toContain('실행1')
-    // v2 status group headers render the SHORT label + count in the body and the
-    // FULL label in the .roster-group title attribute; query the title to keep the
-    // exact full-label checks.
-    const groupTitles = Array.from(container.querySelectorAll('.roster-group')).map(g => g.getAttribute('title'))
-    expect(groupTitles).toContain('실행 중')
-    expect(groupTitles).toContain('대기 · 일시정지')
-    expect(groupTitles).toContain('중지 · 종료됨')
-    // v2 mounts the search input only after toggling the '⌕' .rfilter-icon
-    // (searchOpen defaults false); the class is now .roster-search.
-    expect(container.querySelector('.roster-search')).toBeNull()
-    fireEvent.click(container.querySelector('.rfilter-icon') as HTMLButtonElement)
-    expect(container.querySelector('.roster-search')).not.toBeNull()
+    const groupLabels = Array.from(container.querySelectorAll('.kw-roster-group-label')).map(g => g.textContent)
+    expect(groupLabels).toContain('실행 중')
+    expect(groupLabels).toContain('대기 · 일시정지')
+    expect(groupLabels).toContain('중지 · 종료됨')
+    expect(container.querySelector('.kw-roster-search')).not.toBeNull()
     expect(container.querySelector('[aria-current="true"]')?.textContent).toContain('sangsu')
   })
 })

@@ -41,7 +41,7 @@ type RosterSort = 'status' | 'name' | 'att'
 type KeeperWorkspaceRouteSurface = 'monitoring' | 'keepers'
 type RosterMenuState = { keeper: Keeper; x: number; y: number } | null
 type IconComponent = typeof Play
-type RosterHeaderBucket = KeeperBucket | 'attention' | 'normal'
+type RosterHeaderBucket = KeeperBucket | 'attention'
 type RosterFleetSummary = {
   total: number
   running: number
@@ -84,12 +84,17 @@ const MENU_WIDTH = 190
 const MENU_ESTIMATED_HEIGHT = 246
 const MENU_VIEWPORT_MARGIN = 8
 
+const GROUP_ORDER: { bucket: KeeperBucket; label: string }[] = [
+  { bucket: 'running', label: '실행 중' },
+  { bucket: 'paused', label: '대기 · 일시정지' },
+  { bucket: 'offline', label: '중지 · 종료됨' },
+]
+
 /** Group-header status dot tone (design rails.jsx `.rg-dot` colored by groupCls).
  *  Reuses the shared StatusDot vocabulary instead of a bespoke dot so the header
  *  marker matches the per-row dots: running→ok, paused→warn, offline→idle. */
 const GROUP_BUCKET_TONE: Record<RosterHeaderBucket, DotTone> = {
   attention: 'bad',
-  normal: 'ok',
   running: 'ok',
   paused: 'warn',
   offline: 'idle',
@@ -664,14 +669,17 @@ export function KeeperWorkspaceRoster({
       || keeperContextRatio(b) - keeperContextRatio(a)
       || a.name.localeCompare(b.name),
     )
-    const normalRows = visible.filter(k => !needsAttention(k)).sort(compareFleetRows)
     if (attentionRows.length > 0) {
       items.push({ type: 'header', bucket: 'attention', label: '주의 필요', count: attentionRows.length })
       for (const keeper of attentionRows) items.push({ type: 'row', keeper })
     }
-    if (normalRows.length > 0) {
-      items.push({ type: 'header', bucket: 'normal', label: '정상', count: normalRows.length })
-      for (const keeper of normalRows) items.push({ type: 'row', keeper })
+    for (const group of GROUP_ORDER) {
+      const rows = visible
+        .filter(k => !needsAttention(k) && keeperBucket(k) === group.bucket)
+        .sort(compareFleetRows)
+      if (rows.length === 0) continue
+      items.push({ type: 'header', bucket: group.bucket, label: group.label, count: rows.length })
+      for (const keeper of rows) items.push({ type: 'row', keeper })
     }
   } else {
     for (const keeper of sortRows(visible)) {

@@ -185,7 +185,9 @@ describe('KeeperWorkspaceChat', () => {
 
     const slug = container.querySelector('.chat-head .sub .sub-ns') as HTMLElement | null
     expect(slug).toBeNull()
-    expect(container.querySelector('.kw-chat-name')?.textContent).toContain('sangsu')
+    expect(container.querySelector('.kw-chat-name')?.textContent).toContain('상수')
+    expect(container.querySelector('.kw-chat-name')?.textContent).not.toContain('~/wt/sangsu')
+    expect(container.querySelector('.kw-chat-name')?.textContent).not.toContain('skill-primary')
   })
 
   it('switches the mobile pane to roster when the back button is clicked', async () => {

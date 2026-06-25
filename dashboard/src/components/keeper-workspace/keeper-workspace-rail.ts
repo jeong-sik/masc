@@ -185,7 +185,7 @@ function FleetSelectedSection({ keeper }: { keeper: Keeper }): VNode {
   const model = keeperModelLabel(keeper)
   const runtime = keeperRuntimeLabel(keeper)
   const lifecycle = keeper.phase || keeper.lifecycle_phase || keeper.status
-  const actions = fleetLifecycleActions(keeper).slice(0, 3)
+  const actions = fleetLifecycleActions(keeper).filter(action => action !== 'shutdown').slice(0, 3)
   const [pendingAction, setPendingAction] = useState<KeeperActionKey | null>(null)
   const openChat = () => {
     selectKeeper(keeper.name)
@@ -234,7 +234,7 @@ function FleetSelectedSection({ keeper }: { keeper: Keeper }): VNode {
                 <button
                   key=${action}
                   type="button"
-                  class=${`kw-fleet-action${action === 'shutdown' ? ' danger' : ''}${pendingAction === action ? ' busy' : ''}`}
+                  class=${`kw-fleet-action${pendingAction === action ? ' busy' : ''}`}
                   title=${`${keeper.name} ${FLEET_ACTION_LABELS[action]}`}
                   aria-label=${`${keeper.name} ${FLEET_ACTION_LABELS[action]}`}
                   aria-busy=${pendingAction === action ? 'true' : 'false'}

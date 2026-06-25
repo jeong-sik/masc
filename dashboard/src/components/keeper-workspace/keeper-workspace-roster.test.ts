@@ -48,10 +48,10 @@ afterEach(() => {
 })
 
 describe('KeeperWorkspaceRoster', () => {
-  it('renders attention-first groups with keeper rows', () => {
+  it('renders attention first while preserving status groups', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
     const labels = Array.from(host.querySelectorAll('.kw-roster-group-label')).map(g => g.textContent)
-    expect(labels).toEqual(['주의 필요', '정상'])
+    expect(labels).toEqual(['주의 필요', '실행 중', '대기 · 일시정지'])
     expect(host.querySelectorAll('.kw-kp-row').length).toBe(3)
   })
 
@@ -211,9 +211,10 @@ describe('KeeperWorkspaceRoster', () => {
     const headers = Array.from(host.querySelectorAll('.kw-roster-group'))
     expect(headers.map(h => h.textContent)).toEqual([
       expect.stringContaining('주의 필요'),
-      expect.stringContaining('정상'),
+      expect.stringContaining('실행 중'),
+      expect.stringContaining('대기 · 일시정지'),
     ])
-    expect(Array.from(host.querySelectorAll('.kw-roster-group-n')).map(n => n.textContent)).toEqual(['1', '2'])
+    expect(Array.from(host.querySelectorAll('.kw-roster-group-n')).map(n => n.textContent)).toEqual(['1', '1', '1'])
   })
 
   it('filters by search query', () => {
@@ -276,7 +277,7 @@ describe('KeeperWorkspaceRoster', () => {
     expect(host.querySelector('.virtual-list-spacer')).not.toBeNull()
     expect(host.querySelector('.kw-roster-list')).not.toBeNull()
     // The windowed path renders the group header through the same renderHeader().
-    expect(host.querySelector('.kw-roster-group .kw-roster-group-label')?.textContent).toBe('정상')
+    expect(host.querySelector('.kw-roster-group .kw-roster-group-label')?.textContent).toBe('실행 중')
   })
 
   it('renders the sort select defaulting to status order', () => {
@@ -349,8 +350,19 @@ describe('KeeperWorkspaceRoster', () => {
   it('renders a per-group keeper count in the status group header', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
     const counts = Array.from(host.querySelectorAll('.kw-roster-group-n')).map(n => n.textContent)
-    // FIXTURE: 1 attention row (rama), 2 calm rows (masc-improver, sangsu)
-    expect(counts).toEqual(['1', '2'])
+    // FIXTURE: 1 attention row (rama), then running and paused status buckets.
+    expect(counts).toEqual(['1', '1', '1'])
+  })
+
+  it('does not label calm offline keepers as normal', () => {
+    keepers.value = [
+      mk({ name: 'run', status: 'running', lifecycle_phase: 'Running' }),
+      mk({ name: 'off', status: 'stopped', lifecycle_phase: 'Stopped' }),
+    ]
+    render(html`<${KeeperWorkspaceRoster} activeName="run" />`, host)
+
+    const labels = Array.from(host.querySelectorAll('.kw-roster-group-label')).map(g => g.textContent)
+    expect(labels).toEqual(['실행 중', '중지 · 종료됨'])
   })
 
   it('closes the row command menu on Escape only (not on any keypress) and on scroll', () => {

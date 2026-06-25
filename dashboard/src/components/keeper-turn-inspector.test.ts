@@ -94,6 +94,7 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
       keeper: 'albini',
       source: 'memory_os',
       producer: 'keeper_memory_os.recall',
+      selection_policy: null,
       facts_store: '.masc/config/keepers/albini.facts.jsonl',
       episodes_store: '.masc/config/keepers/albini/episodes',
       recall_enabled: true,

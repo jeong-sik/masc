@@ -86,6 +86,24 @@
 .mem-sec-head h4 { margin: 0; }
 .mem-n { font-size: 11px; color: var(--text-dim); }
 .mem-hint { font-family: var(--font-ui); font-size: 9.5px; letter-spacing: 0.02em; text-transform: none; color: var(--text-dim); margin-left: 6px; }
+.mem-trust { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.mem-trust-card { min-width: 0; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 9px 10px; background: var(--bg-card); }
+.mem-trust-k { display: block; font-family: var(--font-ui); font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim); }
+.mem-trust-v { display: block; margin-top: 4px; font-size: 12px; color: var(--text-bright); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mem-trust-sub { display: block; margin-top: 3px; font-size: 10.5px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mem-policy { border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--bg-card); overflow: hidden; }
+.mem-policy-row { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 8px 10px; border-top: 1px solid var(--border-soft); font-size: 11px; color: var(--text-mid); }
+.mem-policy-row:first-child { border-top: 0; }
+.mem-policy-row span { font-family: var(--font-ui); font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); }
+.mem-policy-row code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; color: var(--text-mid); }
+.mem-policy-row b { font-weight: 500; font-size: 10px; color: var(--text-dim); white-space: nowrap; }
+.mem-prompt-evidence { border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--bg-card); padding: 3px 10px 9px; }
+.mem-prompt-step { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 8px; align-items: start; padding: 8px 0; border-top: 1px solid var(--border-soft); }
+.mem-prompt-step:first-child { border-top: 0; }
+.mem-prompt-n { width: 20px; height: 20px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); display: inline-flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 10px; font-family: var(--font-mono); }
+.mem-prompt-step b { display: block; color: var(--text-bright); font-size: 11.5px; font-weight: 600; }
+.mem-prompt-step span:last-child { display: block; margin-top: 2px; color: var(--text-dim); font-size: 10.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.mem-prompt-foot { margin-top: 3px; padding-top: 8px; border-top: 1px solid var(--border-soft); color: var(--text-dim); font-size: 10px; }
 
 /* ── context composition — keeper-v2/styles/memory.css:23-33 ── */
 .mem-compo { border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 11px 12px; background: var(--bg-card); }
@@ -128,8 +146,11 @@
 .mem-kind.entity { color: var(--status-warn); border-color: color-mix(in oklab, var(--status-warn) 35%, transparent); }
 .mem-store-main { min-width: 0; flex: 1; }
 .mem-store-text { font-size: 12.5px; line-height: 1.5; color: var(--text-primary); text-wrap: pretty; }
-.mem-store-meta { display: flex; align-items: center; gap: 12px; margin-top: 6px; font-size: 10.5px; color: var(--text-dim); }
+.mem-store-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-top: 6px; font-size: 10.5px; color: var(--text-dim); }
 .mem-src { color: var(--text-dim); }
+.mem-store-why { margin-top: 5px; font-size: 10.5px; color: var(--text-dim); line-height: 1.4; }
+.mem-more { margin-top: 9px; width: 100%; border: 1px solid var(--border-main); border-radius: var(--radius-sm); background: var(--bg-sunken); color: var(--text-mid); font-family: var(--font-ui); font-size: 11px; padding: 7px 10px; cursor: pointer; transition: 0.14s; }
+.mem-more:hover { border-color: var(--volt-dim); color: var(--volt); }
 .mem-sal { position: relative; width: 54px; height: 5px; border-radius: 3px; background: var(--bg-sunken); overflow: hidden; flex: none; }
 .mem-sal > span { position: absolute; left: 0; top: 0; bottom: 0; background: var(--volt); border-radius: 3px; }
 
@@ -185,6 +206,7 @@
 /* keeper-v2/styles/memory.css:106-111 */
 @media (max-width: 560px) {
   .mem-legend { grid-template-columns: 1fr; }
+  .mem-trust { grid-template-columns: 1fr; }
   .mem-stats { grid-template-columns: repeat(2, 1fr); }
   .mem-tl-row { grid-template-columns: 38px 56px 1fr; }
   .mem-tl-tok { display: none; }

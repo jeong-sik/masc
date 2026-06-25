@@ -180,11 +180,25 @@ export type MemoryOsFact = {
   readonly claim_kind: MemoryOsClaimKind | null
 }
 
+export type MemoryOsSelectionPolicy = {
+  readonly keeper_scope: string
+  readonly facts_source: string
+  readonly episodes_source: string
+  readonly fact_tail_limit: number
+  readonly episode_tail_limit: number
+  readonly category_source: string
+  readonly claim_kind_source: string
+  readonly recall_block: string
+  readonly prompt_record: string
+  readonly persona_weighting: boolean
+}
+
 export type MemoryOsTurnRecordSnapshot = {
   schema: string
   keeper: string
   source: string
   producer: string
+  selection_policy: MemoryOsSelectionPolicy | null
   facts_store: string
   episodes_store: string
   recall_enabled: boolean
@@ -408,6 +422,46 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
   }
 }
 
+function decodeMemoryOsSelectionPolicy(raw: unknown): MemoryOsSelectionPolicy | null {
+  if (!isRecord(raw)) return null
+  const keeper_scope = asString(raw.keeper_scope)
+  const facts_source = asString(raw.facts_source)
+  const episodes_source = asString(raw.episodes_source)
+  const fact_tail_limit = asNumber(raw.fact_tail_limit)
+  const episode_tail_limit = asNumber(raw.episode_tail_limit)
+  const category_source = asString(raw.category_source)
+  const claim_kind_source = asString(raw.claim_kind_source)
+  const recall_block = asString(raw.recall_block)
+  const prompt_record = asString(raw.prompt_record)
+  const persona_weighting = asBoolean(raw.persona_weighting)
+  if (
+    !keeper_scope
+    || !facts_source
+    || !episodes_source
+    || fact_tail_limit == null
+    || episode_tail_limit == null
+    || !category_source
+    || !claim_kind_source
+    || !recall_block
+    || !prompt_record
+    || persona_weighting == null
+  ) {
+    return null
+  }
+  return {
+    keeper_scope,
+    facts_source,
+    episodes_source,
+    fact_tail_limit,
+    episode_tail_limit,
+    category_source,
+    claim_kind_source,
+    recall_block,
+    prompt_record,
+    persona_weighting,
+  }
+}
+
 function decodeMemoryOsCounts(raw: unknown): {
   tail_limit: number
   shown: number
@@ -444,6 +498,7 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
     keeper,
     source,
     producer,
+    selection_policy: decodeMemoryOsSelectionPolicy(raw.selection_policy),
     facts_store,
     episodes_store,
     recall_enabled: asBoolean(raw.recall_enabled, true) ?? true,

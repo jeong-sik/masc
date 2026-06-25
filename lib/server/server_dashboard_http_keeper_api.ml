@@ -121,6 +121,19 @@ let memory_os_dashboard_json ~keeper_id =
     ; "keeper", `String keeper_id
     ; "source", `String "memory_os_files"
     ; "producer", `String "keeper_librarian|keeper_memory_os_recall"
+    ; ( "selection_policy"
+      , `Assoc
+          [ "keeper_scope", `String keeper_id
+          ; "facts_source", `String "Keeper_memory_os_io.read_facts_tail"
+          ; "episodes_source", `String "Keeper_memory_os_io.read_episodes_tail"
+          ; "fact_tail_limit", `Int fact_tail_limit
+          ; "episode_tail_limit", `Int recent_episode_limit
+          ; "category_source", `String "keeper_librarian.category"
+          ; "claim_kind_source", `String "keeper_librarian.claim_kind"
+          ; "recall_block", `String "keeper_memory_os_recall.render_if_enabled"
+          ; "prompt_record", `String "turn_record.blocks_digest_only"
+          ; "persona_weighting", `Bool false
+          ] )
     ; "facts_store", `String facts_path
     ; "episodes_store", `String episodes_store
     ; "recall_enabled", `Bool (Keeper_memory_os_recall.enabled ())

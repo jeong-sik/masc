@@ -131,11 +131,12 @@ function decodeGoalTreeTask(raw: unknown): GoalTreeTask | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id)
   const title = asString(raw.title)
-  if (!id || !title) return null
+  const status = asString(raw.status)
+  if (!id || !title || !status) return null
   return {
     id,
     title,
-    status: asString(raw.status, 'unknown'),
+    status,
     status_color: asString(raw.status_color, ''),
     priority: asInt(raw.priority) ?? 0,
     assignee: asNullableString(raw.assignee),
@@ -152,16 +153,15 @@ function decodeGoalFsmProjection(raw: unknown, phase: string) {
     return {
       state: phase,
       source: 'goal.phase',
-      state_kind: phase,
       next_actions: [],
       activity_observation: 'goal_metadata',
       stagnation_status: 'recent',
     }
   }
+  const state = asString(raw.state, phase)
   return {
-    state: asString(raw.state, phase),
+    state,
     source: asString(raw.source, 'goal.phase'),
-    state_kind: asString(raw.state_kind, phase),
     next_actions: asStringArray(raw.next_actions),
     activity_observation: asString(raw.activity_observation, 'goal_metadata'),
     stagnation_status: asString(raw.stagnation_status, 'recent'),
@@ -347,7 +347,8 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id)
   const title = asString(raw.title)
-  if (!id || !title) return null
+  const status = asString(raw.status)
+  if (!id || !title || !status) return null
   const tasks = asRecordArray(raw.tasks)
     .map(decodeGoalTreeTask)
     .filter((task): task is GoalTreeTask => task !== null)
@@ -368,7 +369,7 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
   return {
     id,
     title,
-    status: asString(raw.status, 'unknown'),
+    status,
     status_color: asString(raw.status_color, ''),
     phase: asString(raw.phase, 'unknown'),
     phase_color: asString(raw.phase_color, ''),

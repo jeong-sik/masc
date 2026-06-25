@@ -6,6 +6,8 @@ import {
   normalizeExecutionQueueItem,
   normalizeExecutionSessionBrief,
   normalizeMessage,
+  normalizeTask,
+  normalizeTaskStatus,
 } from './store-normalizers'
 import type { Message } from './types'
 
@@ -144,6 +146,24 @@ describe('normalizeExecutionQueueItem', () => {
         source: 'runtime_blocker_class',
         summary: 'no provider can satisfy tool surface',
       },
+    })
+  })
+})
+
+describe('normalizeTaskStatus', () => {
+  it('keeps Goal Store vocabulary out of the generic execution-task normalizer', () => {
+    expect(normalizeTaskStatus('completed')).toBeUndefined()
+    expect(normalizeTaskStatus('pending')).toBeUndefined()
+  })
+
+  it('normalizes canonical execution task statuses', () => {
+    expect(normalizeTask({
+      id: 'task-1',
+      title: 'Execution task',
+      status: 'done',
+    })).toMatchObject({
+      id: 'task-1',
+      status: 'done',
     })
   })
 })

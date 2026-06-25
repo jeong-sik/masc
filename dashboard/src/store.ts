@@ -52,8 +52,13 @@ import { setCanonicalDashboardActor } from './lib/dashboard-session-actor'
 import { timeBoardRequest } from './board-metrics'
 import { namespaceTruth, namespaceTruthError, namespaceTruthInitializing } from './namespace-truth-signals'
 import { normalizeNamespaceTruth } from './namespace-truth-normalizers'
-import { hydrateGoalTreeSnapshot } from './goal-tree-state'
+import { goalTreeData, goalTreeError, goalTreeLoading, hydrateGoalTreeSnapshot } from './goal-tree-state'
 import { hydrateGoalLoopSnapshot } from './goal-loop-state'
+import {
+  WORK_GOAL_LOAD_ERROR,
+  WORK_GOAL_LOAD_PARTIAL_ERROR,
+  WORK_GOAL_TOAST_DURATION_MS,
+} from './lib/work-copy'
 import {
   normalizeAgent, normalizeTask, normalizeMessage,
   normalizeExecutionWorkerSupportBrief,
@@ -914,9 +919,14 @@ function applyPlanningEnvelope(data: DashboardPlanningResponse): void {
     .filter((row): row is Goal => row !== null)
 }
 
-export function hydratePlanningSnapshot(data: DashboardPlanningResponse): void {
+export function hydratePlanningSnapshot(
+  data: DashboardPlanningResponse,
+  opts?: { markRefreshAt?: boolean },
+): void {
   applyPlanningEnvelope(data)
-  lastGoalsRefreshAt.value = data.generated_at ?? new Date().toISOString()
+  if (opts?.markRefreshAt !== false) {
+    lastGoalsRefreshAt.value = data.generated_at ?? new Date().toISOString()
+  }
 }
 
 function normalizeShellAuthSummary(raw: unknown): DashboardShellAuthSummary | null {
@@ -1239,14 +1249,58 @@ export async function loadMoreBoardPosts(): Promise<void> {
 
 export async function refreshGoals(): Promise<void> {
   goalsLoading.value = true
+  goalTreeLoading.value = true
+  goalTreeError.value = null
   try {
-    const { fetchDashboardPlanning } = await import('./api/dashboard')
-    const data = await fetchDashboardPlanning()
-    hydratePlanningSnapshot(data)
+    const { fetchDashboardPlanning, fetchDashboardGoalsTree } = await import('./api/dashboard')
+    const [planning, tree] = await Promise.allSettled([
+      fetchDashboardPlanning(),
+      fetchDashboardGoalsTree(),
+    ])
+    const errors: string[] = []
+    let generatedAt: string | undefined
+    if (planning.status === 'fulfilled') {
+      hydratePlanningSnapshot(planning.value, { markRefreshAt: false })
+      generatedAt = planning.value.generated_at
+    } else {
+      console.warn('[Planning] fetch error:', planning.reason)
+      errors.push(errorMessageOr(planning.reason, 'Planning data failed to load'))
+    }
+    if (tree.status === 'fulfilled') {
+      const hydrated = hydrateGoalTreeSnapshot(tree.value)
+      if (hydrated) {
+        generatedAt ??= tree.value.generated_at
+      } else {
+        const message = 'Goal Store tree payload was malformed'
+        goalTreeError.value = message
+        errors.push(message)
+      }
+    } else {
+      console.warn('[Goals] tree fetch error:', tree.reason)
+      const message = errorMessageOr(tree.reason, 'Goal Store tree failed to load')
+      goalTreeError.value = message
+      errors.push(message)
+    }
+    if (errors.length > 0) {
+      // Any failure invalidates the combined goal/tree snapshot so consumers
+      // do not act on stale or partially-hydrated data.
+      goalTreeData.value = null
+      lastGoalsRefreshAt.value = null
+      goalTreeError.value = errors.join('; ')
+      showToast(WORK_GOAL_LOAD_PARTIAL_ERROR, 'error', WORK_GOAL_TOAST_DURATION_MS)
+    } else {
+      lastGoalsRefreshAt.value = generatedAt ?? new Date().toISOString()
+    }
   } catch (err) {
     console.warn('[Planning] fetch error:', err)
+    const message = errorMessageOr(err, 'Goal refresh failed')
+    goalTreeError.value = message
+    goalTreeData.value = null
+    lastGoalsRefreshAt.value = null
+    showToast(WORK_GOAL_LOAD_ERROR, 'error', WORK_GOAL_TOAST_DURATION_MS)
   } finally {
     goalsLoading.value = false
+    goalTreeLoading.value = false
   }
 }
 

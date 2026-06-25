@@ -71,6 +71,12 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       ~sandbox_profile
       ~fallback:p.profile_defaults.network_mode
   in
+  (* RFC vision-delegation §2.4: take the profile's policy if set, else the
+     safe default (Inherit). *)
+  let multimodal_policy =
+    Option.value ~default:Keeper_types_profile.default_multimodal_policy
+      p.profile_defaults.multimodal_policy
+  in
   let mention_targets =
     resolve_mention_targets
       ~mention_targets_opt:p.mention_targets_opt
@@ -313,6 +319,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         sandbox_profile;
         sandbox_image = None;
         network_mode;
+        multimodal_policy;
         allowed_paths;
         tool_access;
         tool_denylist;

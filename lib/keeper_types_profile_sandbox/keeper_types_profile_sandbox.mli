@@ -24,3 +24,22 @@ val all_network_modes : network_mode list
 val valid_network_mode_strings : string list
 val default_sandbox_profile : sandbox_profile
 val default_network_mode_for_profile : sandbox_profile -> network_mode
+
+(** RFC vision-delegation §2.4 — persisted image-handling mechanism axis,
+    resolved independently of the live runtime assignment. Same layering as
+    {!network_mode} so {!Keeper_types_profile_defaults} can reference it. *)
+type multimodal_policy =
+  | Mm_delegate  (** evict images at ingestion; read via the analyze_image tool *)
+  | Mm_reroute  (** RFC-0265: reroute the whole turn to a vision-capable runtime *)
+  | Mm_inherit  (** follow the workspace default (currently reroute); safe default *)
+[@@deriving tla]
+
+val multimodal_policy_to_string : multimodal_policy -> string
+
+(** [None] on an unrecognised value (fail-closed); callers default to
+    {!default_multimodal_policy}. *)
+val multimodal_policy_of_string : string -> multimodal_policy option
+
+val all_multimodal_policies : multimodal_policy list
+val valid_multimodal_policy_strings : string list
+val default_multimodal_policy : multimodal_policy

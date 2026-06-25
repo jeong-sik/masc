@@ -239,15 +239,19 @@ let test_escape_applescript_mixed () =
    ============================================================ *)
 
 let test_agent_emoji_llm_a () =
+  Notify.register_agent_emoji "claude" "🟣";
   check string "claude" "🟣" (Notify.agent_emoji "claude")
 
 let test_agent_emoji_f () =
+  Notify.register_agent_emoji "gemini" "🔵";
   check string "gemini" "🔵" (Notify.agent_emoji "gemini")
 
 let test_agent_emoji_a () =
+  Notify.register_agent_emoji "codex" "🟢";
   check string "codex" "🟢" (Notify.agent_emoji "codex")
 
 let test_agent_emoji_llama () =
+  Notify.register_agent_emoji "llama" "🦙";
   check string "llama" "🦙" (Notify.agent_emoji "llama")
 
 let test_agent_emoji_system () =

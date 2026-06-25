@@ -207,8 +207,8 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     // out-of-vocabulary category surfaces its raw label, not a fabricated kind.
     expect(container.textContent).toContain('Speculation')
     expect(container.textContent).toContain('expired evidence row')
-    // external_ref rendered
-    expect(container.textContent).toContain('pr 22198')
+    // legacy external_ref payloads are no longer rendered as status tags.
+    expect(container.textContent).not.toContain('pr 22198')
     // NO salience meter — the deleted score model must not reappear.
     expect(container.querySelector('.mem-sal')).toBeFalsy()
   })
@@ -393,7 +393,6 @@ describe('memory view-model helpers', () => {
       valid_until_iso: null,
       last_verified_at: null,
       current: true,
-      external_ref: null,
       claim_kind: null,
       ...over,
     })

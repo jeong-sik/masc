@@ -187,6 +187,48 @@ end
     then the boot override store, then the hardcoded defaults below. *)
 
 module KeeperMemoryOs = struct
+  let memory_env_opt name =
+    match raw_value_opt name with
+    | None -> None
+    | Some raw ->
+        let value = String.trim raw in
+        if String.equal value "" then None else Some value
+  ;;
+
+  let get_int_logged name ~default =
+    match memory_env_opt name with
+    | None -> default
+    | Some raw ->
+        (match int_of_string_opt raw with
+         | Some value -> value
+         | None ->
+             Log.Keeper.warn "invalid %s=%S; using default %d" name raw default;
+             default)
+  ;;
+
+  let get_float_positive_logged name ~default =
+    match memory_env_opt name with
+    | None -> default
+    | Some raw ->
+        (match float_of_string_opt raw with
+         | Some value when Float.is_finite value && value > 0.0 -> value
+         | _ ->
+             Log.Keeper.warn "invalid %s=%S; using default %.3f" name raw default;
+             default)
+  ;;
+
+  let get_bool_logged name ~default =
+    match memory_env_opt name with
+    | None -> default
+    | Some raw ->
+        (match String.lowercase_ascii raw with
+         | "1" | "true" | "yes" | "on" | "enabled" -> true
+         | "0" | "false" | "no" | "off" | "disabled" -> false
+         | _ ->
+             Log.Keeper.warn "invalid %s=%S; using default %b" name raw default;
+             default)
+  ;;
+
   let nonempty_string value =
     let value = String.trim value in
     if String.equal value "" then None else Some value
@@ -196,14 +238,14 @@ module KeeperMemoryOs = struct
       @category Policies
       @ops_class operator *)
   let recall_enabled () =
-    get_bool ~default:true "MASC_KEEPER_MEMORY_OS_RECALL"
+    get_bool_logged "MASC_KEEPER_MEMORY_OS_RECALL" ~default:true
   ;;
 
   (** Memory OS librarian post-turn extraction kill switch. Default: true.
       @category Policies
       @ops_class operator *)
   let librarian_enabled () =
-    get_bool ~default:true "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
+    get_bool_logged "MASC_KEEPER_MEMORY_OS_LIBRARIAN" ~default:true
   ;;
 
   (** Turns between librarian extraction attempts per keeper. Default: 3,
@@ -211,7 +253,9 @@ module KeeperMemoryOs = struct
       @category Runtime
       @ops_class operator *)
   let librarian_cadence_turns () =
-    max 1 (get_int ~default:3 "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS")
+    max
+      1
+      (get_int_logged "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS" ~default:3)
   ;;
 
   (** Base recent-message window for librarian extraction. Default: 24,
@@ -219,7 +263,9 @@ module KeeperMemoryOs = struct
       @category Runtime
       @ops_class operator *)
   let librarian_max_messages () =
-    max 1 (get_int ~default:24 "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES")
+    max
+      1
+      (get_int_logged "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES" ~default:24)
   ;;
 
   (** Provider timeout for librarian extraction. Default: 600 seconds; invalid,
@@ -227,8 +273,9 @@ module KeeperMemoryOs = struct
       @category Timeouts
       @ops_class operator *)
   let librarian_timeout_sec () =
-    let value = get_float ~default:600.0 "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC" in
-    if Float.is_finite value && value > 0.0 then value else 600.0
+    get_float_positive_logged
+      "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC"
+      ~default:600.0
   ;;
 
   (** Optional runtime id override for librarian extraction.
@@ -244,14 +291,14 @@ module KeeperMemoryOs = struct
       @category Concurrency
       @ops_class operator *)
   let librarian_global_slot () =
-    max 0 (get_int ~default:1 "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT")
+    max 0 (get_int_logged "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT" ~default:1)
   ;;
 
   (** Per-keeper Memory OS GC maintenance fiber kill switch. Default: false.
       @category Storage
       @ops_class operator *)
   let gc_enabled () =
-    get_bool ~default:false "MASC_KEEPER_MEMORY_OS_GC"
+    get_bool_logged "MASC_KEEPER_MEMORY_OS_GC" ~default:false
   ;;
 
   (** Per-keeper Memory OS consolidation maintenance fiber kill switch.
@@ -259,7 +306,7 @@ module KeeperMemoryOs = struct
       @category Policies
       @ops_class operator *)
   let consolidation_enabled () =
-    get_bool ~default:false "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
+    get_bool_logged "MASC_KEEPER_MEMORY_OS_CONSOLIDATION" ~default:false
   ;;
 
   (** Optional runtime id override for Memory OS consolidation.

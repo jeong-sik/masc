@@ -187,12 +187,19 @@ let wait_for_ref ~clock label r =
 ;;
 
 let lock_holder_child_arg = "--keeper-memory-os-hold-lock-file"
+let lock_holder_hold_sec = 5.0
 
 let maybe_run_lock_holder_child () =
   if Array.length Sys.argv = 4 && String.equal Sys.argv.(1) lock_holder_child_arg
   then (
     let lock_path = Sys.argv.(2) in
-    let hold_sec = float_of_string Sys.argv.(3) in
+    let hold_sec =
+      match float_of_string_opt Sys.argv.(3) with
+      | Some value when Float.is_finite value && value >= 0.0 -> value
+      | _ ->
+          Printf.eprintf "invalid %s hold_sec=%S\n%!" lock_holder_child_arg Sys.argv.(3);
+          exit 2
+    in
     let fd = Unix.openfile lock_path [ Unix.O_CREAT; Unix.O_WRONLY ] 0o644 in
     Fun.protect
       ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
@@ -207,7 +214,9 @@ let with_process_holding_lock_file lock_path f =
   let read_fd, write_fd = Unix.pipe () in
   let stderr_fd = Unix.openfile Filename.null [ Unix.O_WRONLY ] 0o644 in
   let exe = Sys.executable_name in
-  let argv = [| exe; lock_holder_child_arg; lock_path; "5.0" |] in
+  let argv =
+    [| exe; lock_holder_child_arg; lock_path; Printf.sprintf "%.1f" lock_holder_hold_sec |]
+  in
   let pid =
     try
       Unix.create_process_env
@@ -638,6 +647,58 @@ let test_librarian_runtime_override_env () =
          "override trims"
          "runpod_mtp.qwen36-35b-a3b-mtp"
          (Librarian_runtime.runtime_id_for_librarian ~runtime_id:"keeper-runtime"))
+;;
+
+let with_memory_os_env name value f =
+  let old = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect ~finally:(fun () -> Unix.putenv name (Option.value old ~default:"")) f
+;;
+
+let test_memory_os_bool_env_accepts_enabled_disabled () =
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_RECALL" "disabled" (fun () ->
+    Alcotest.(check bool)
+      "disabled disables recall"
+      false
+      (Env_config.KeeperMemoryOs.recall_enabled ()));
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN" "disabled" (fun () ->
+    Alcotest.(check bool)
+      "disabled disables librarian"
+      false
+      (Env_config.KeeperMemoryOs.librarian_enabled ()));
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_GC" "enabled" (fun () ->
+    Alcotest.(check bool)
+      "enabled enables GC"
+      true
+      (Env_config.KeeperMemoryOs.gc_enabled ()));
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_CONSOLIDATION" "enabled" (fun () ->
+    Alcotest.(check bool)
+      "enabled enables consolidation"
+      true
+      (Env_config.KeeperMemoryOs.consolidation_enabled ()))
+;;
+
+let test_memory_os_env_invalid_values_fall_back () =
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_RECALL" "maybe" (fun () ->
+    Alcotest.(check bool)
+      "invalid recall flag falls back to default-on"
+      true
+      (Env_config.KeeperMemoryOs.recall_enabled ()));
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_GC" "maybe" (fun () ->
+    Alcotest.(check bool)
+      "invalid GC flag falls back to default-off"
+      false
+      (Env_config.KeeperMemoryOs.gc_enabled ()));
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES" "bogus" (fun () ->
+    Alcotest.(check int)
+      "invalid max messages falls back"
+      24
+      (Env_config.KeeperMemoryOs.librarian_max_messages ()));
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC" "nan" (fun () ->
+    Alcotest.(check (float 0.001))
+      "invalid timeout falls back"
+      600.0
+      (Env_config.KeeperMemoryOs.librarian_timeout_sec ()))
 ;;
 
 let test_librarian_timeout_override_env () =
@@ -3729,6 +3790,14 @@ let () =
             "librarian runtime override env"
             `Quick
             test_librarian_runtime_override_env
+        ; Alcotest.test_case
+            "memory os bool env accepts enabled disabled"
+            `Quick
+            test_memory_os_bool_env_accepts_enabled_disabled
+        ; Alcotest.test_case
+            "memory os env invalid values fall back"
+            `Quick
+            test_memory_os_env_invalid_values_fall_back
         ; Alcotest.test_case
             "librarian timeout override env"
             `Quick

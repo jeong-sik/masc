@@ -1,10 +1,11 @@
 # Memory OS Adversarial Audit
 
-Date: 2026-06-25 17:41 KST
+Date: 2026-06-25
 
-Scope: code review branch rebased onto `origin/main` at `6072c5b874`,
-dedicated worktree `codex/memory-os-audit-20260625`, and live runtime rooted at
-`<base-path>/.masc` with runtime commit `469a29a919`.
+Scope: code review branch rebased onto `origin/main`, dedicated worktree
+`codex/memory-os-audit-20260625`, and live runtime rooted at
+`<base-path>/.masc`. Exact commit hashes are intentionally omitted from this
+committed audit because they drift with local runtime rebuilds.
 
 ## Verdict
 
@@ -38,59 +39,60 @@ path, and fixed one CI-radius defect:
 
 ## Evidence
 
-[Evidence] Live runtime root:
-`curl -fsS 'http://127.0.0.1:8935/health?full=1'`, checked
-2026-06-25 17:31 KST, confidence High. Result: `effective_base_path` was
-the configured `<base-path>`, `effective_masc_root` was `<base-path>/.masc`,
-runtime commit was `469a29a919`, status was `ok`.
+[근거] Live runtime root:
+`curl -fsS '<local MASC health endpoint>/health?full=1'`, checked on
+2026-06-25, confidence High. Result: `effective_base_path` was the configured
+`<base-path>`, `effective_masc_root` was `<base-path>/.masc`, and status was
+`ok`. Exact host, port, timestamp, and runtime commit are omitted.
 
-[Evidence] Live Memory OS sizes:
+[근거] Live Memory OS sizes:
 `du -sh <base-path>/.masc/config/keepers <base-path>/.masc/keepers <base-path>/.masc/recall_injections <base-path>/.masc/logs`,
-checked 2026-06-25 17:31 KST, confidence High. Result: the current
-`config/keepers` store was much smaller than adjacent legacy keeper/log
-directories. Exact sizes are omitted because they are live-machine snapshots.
+checked on 2026-06-25, confidence High. Result: the current `config/keepers`
+store was much smaller than adjacent legacy keeper/log directories. Exact sizes
+are omitted because they are live-machine snapshots.
 
-[Evidence] Live Memory OS row counts:
+[근거] Live Memory OS row counts:
 `wc -l <base-path>/.masc/config/keepers/*.facts.jsonl`,
 `wc -l <base-path>/.masc/config/keepers/*.events.jsonl`, and
-`find .../episodes -name '*.json' | wc -l`, checked 2026-06-25 17:31 KST,
-confidence High. Result: per-keeper stores were under the 384-row/file cap.
+`find .../episodes -name '*.json' | wc -l`, checked on 2026-06-25, confidence
+High. Result: per-keeper stores were under the 384-row/file cap.
 Exact row counts are omitted because they are live-machine snapshots.
 
-[Evidence] Typed health surface:
-`curl -fsS 'http://127.0.0.1:8935/api/v1/dashboard/keeper-memory-health'`,
-checked 2026-06-25 17:31 KST, confidence High. Result: the typed surface reported
+[근거] Typed health surface:
+`curl -fsS '<local MASC health endpoint>/api/v1/dashboard/keeper-memory-health'`,
+checked on 2026-06-25, confidence High. Result: the typed surface reported
 bounded stores, no near-duplicate alarm, and nonzero expired rows on disk. Exact
-counts/bytes are omitted because they are live-machine snapshots.
+host, port, counts, and byte totals are omitted because they are live-machine
+snapshots.
 
-[Evidence] Current OCaml 5.4 guidance:
+[근거] Current OCaml 5.4 guidance:
 [OCaml 5.4 manual, Parallel programming](https://ocaml.org/manual/5.4/parallelism.html),
-checked 2026-06-25 17:41 KST, confidence High. The manual says immutable values
+checked on 2026-06-25, confidence High. The manual says immutable values
 can be shared freely, mutable refs/arrays/fields need synchronization to avoid
 data races, and data-race-free programs get sequentially consistent semantics.
 
-[Evidence] Current Eio guidance:
+[근거] Current Eio guidance:
 [Eio 1.3 docs](https://ocaml.org/p/eio/latest/doc/eio/Eio/index.html), checked
-2026-06-25 17:41 KST, confidence High. Eio is effect-based parallel IO for
+on 2026-06-25, confidence High. Eio is effect-based parallel IO for
 OCaml with fibers, domains, switches, cancellation, mutexes, semaphores, pools,
 and executor pools.
 
-[Evidence] CI failure triage before the CI-radius patch:
-`gh run view 28159412988 --repo jeong-sik/masc --job 83395999819 --log-failed`,
-checked 2026-06-25 18:59 KST, confidence High. Result: the focused operator
-control step called a non-existent `test_operator_control.exe`; SSE reconnect
-and contract harness failures remained CI-owned readiness blockers.
+[근거] CI failure triage before the CI-radius patch:
+`gh run view <ci-run-id> --repo jeong-sik/masc --job <job-id> --log-failed`,
+checked on 2026-06-25, confidence High. Result: the focused operator control
+step called a non-existent `test_operator_control.exe`; SSE reconnect and
+contract harness failures remained CI-owned readiness blockers.
 
-[Evidence] Current memory-agent references:
+[근거] Current memory-agent references:
 [LangGraph memory docs](https://docs.langchain.com/oss/python/concepts/memory),
 [Letta stateful agents docs](https://docs.letta.com/guides/core-concepts/stateful-agents),
 [Mem0 docs](https://docs.mem0.ai/introduction),
 [Zep docs](https://help.getzep.com/overview),
 [MemGPT paper](https://arxiv.org/abs/2310.08560),
 [Generative Agents paper](https://arxiv.org/abs/2304.03442), and
-[Reflexion paper](https://arxiv.org/abs/2303.11366), checked
-2026-06-25 17:41 KST, confidence High for source identity and Medium for
-cross-system comparison because the products evolve.
+[Reflexion paper](https://arxiv.org/abs/2303.11366), checked on 2026-06-25,
+confidence High for source identity and Medium for cross-system comparison
+because the products evolve.
 
 ## Execution Flow
 
@@ -165,8 +167,8 @@ Read in this order when debugging or extending Memory OS:
    kept after env changes.
 6. Proven fix pattern: "Classify off-lock and commit under CAS." Category
    `validated_approach`, durable and shareable after corroboration.
-7. Ephemeral checkpoint: "Status dashboard was refreshed at 17:00." Category
-   `ephemeral`, should expire and be dropped by write-time cap or GC.
+7. Ephemeral checkpoint: "Status dashboard was refreshed during a prior run."
+   Category `ephemeral`, should expire and be dropped by write-time cap or GC.
 8. Self observation: "Keeper is idle/stuck." Claim kind `self_observation`,
    gets a one-hour horizon and is not promoted to `_shared`.
 9. Cross-keeper invariant: "Do not mutate `<workspace-root>` root checkout for
@@ -174,7 +176,7 @@ Read in this order when debugging or extending Memory OS:
    tier can surface it to others.
 10. Malformed librarian output: prose around a JSON object can currently be
     recovered or converted into `unstructured_note`. This preserves signal, but
-    also creates noisy debt; live data already contains 54 such facts.
+    also creates noisy debt; live data already contains multiple such facts.
 
 ## Hardcoding, Env, And SSOT
 
@@ -350,7 +352,7 @@ separates extraction quality from retrieval quality.
 Issue: permissive LLM JSON recovery stores noisy memory.
 Symptom: nonzero live `unstructured_note:` facts and parser fallback from first
 `{...}` substring.
-Repro: inspect `Keeper_librarian.json_of_output` and live facts category/counts.
+Repro: inspect `Keeper_librarian.json_of_output` and live fact categories.
 Likely cause: resilience was favored over strict structured output.
 Tried: documented and isolated; not fixed in this patch because it changes
 ingestion policy.
@@ -378,18 +380,17 @@ Tried: no deletion; requires dry-run cleanup tool and ownership review.
 
 ## PR Radius
 
-Recent merged Memory OS-related commits:
+Recent merged Memory OS-related PRs:
 
-- `4e412212a2` / #22231: per-keeper Memory OS consolidation and Hebbian view.
-- `094fee3cb5` / #22213: dashboard real-data Memory OS panel.
-- `74e846429e` / #22150: self-observation claim kind and finite horizon.
-- `6a96a5ef38` / #21899: bounded episode log.
-- `d1904ba0d2` / #21895: cap honors `valid_until`.
-- `5d8c789573` / #21865: producer `claim_id` idempotency and volatile anchor
-  inheritance.
+- #22231: per-keeper Memory OS consolidation and Hebbian view.
+- #22213: dashboard real-data Memory OS panel.
+- #22150: self-observation claim kind and finite horizon.
+- #21899: bounded episode log.
+- #21895: cap honors `valid_until`.
+- #21865: producer `claim_id` idempotency and volatile anchor inheritance.
 
-Live open PR list checked 2026-06-25 17:41 KST. No open PR title/head branch was
-Memory OS-specific before this audit branch.
+Live open PR list checked on 2026-06-25. No open PR title/head branch was Memory
+OS-specific before this audit branch.
 
 ## Validation
 

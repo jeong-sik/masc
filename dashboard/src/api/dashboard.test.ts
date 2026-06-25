@@ -621,6 +621,8 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
                 external_ref: { kind: 'pr', id: '22198' },
                 // RFC-0247-deleted score fields: present on the wire here as a
                 // poison payload; the decoder must never copy them through.
+                // external_ref is also ignored: current backend projections no
+                // longer surface forced external-state references.
                 salience: 0.92,
                 uses: 14,
                 confidence: 0.8,
@@ -636,7 +638,7 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
                 valid_until_iso: '2026-09-10T...Z',
                 last_verified_at: null,
                 current: false,
-                // claim_kind + external_ref omitted entirely → null
+                // claim_kind omitted entirely → null
               },
               {
                 // malformed: missing required `claim` → dropped, never fabricated
@@ -667,14 +669,14 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
     expect(first?.valid_until).toBeNull()
     expect(first?.reference_time).toBe(1_789_500_000)
     expect(first?.claim_kind).toBe('durable_knowledge')
-    expect(first?.external_ref).toEqual({ kind: 'pr', id: '22198' })
+    expect(first).not.toHaveProperty('external_ref')
 
     // out-of-vocabulary category → typed Unknown arm carrying the raw label
     expect(second?.category).toEqual({ tag: 'unknown', raw: 'Speculation' })
     // omitted optionals are null, not fabricated
     expect(second?.source.tool_call_id).toBeNull()
     expect(second?.claim_kind).toBeNull()
-    expect(second?.external_ref).toBeNull()
+    expect(second).not.toHaveProperty('external_ref')
     expect(second?.current).toBe(false)
 
     // RFC-0247 drift guard: the deleted composite-score fields never reappear,

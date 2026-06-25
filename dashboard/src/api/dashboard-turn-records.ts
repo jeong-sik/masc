@@ -147,14 +147,6 @@ export function parseMemoryOsClaimKind(raw: string): MemoryOsClaimKind | undefin
   return MEMORY_OS_CLAIM_KINDS.find(kind => kind === token)
 }
 
-// RFC-0259 §3.2(b) external_ref — closed kind set; mirrors external_ref_kind_of_string.
-export type MemoryOsExternalRefKind = 'pr' | 'issue' | 'task'
-const MEMORY_OS_EXTERNAL_REF_KINDS: readonly MemoryOsExternalRefKind[] = ['pr', 'issue', 'task']
-export type MemoryOsExternalRef = {
-  readonly kind: MemoryOsExternalRefKind
-  readonly id: string
-}
-
 export type MemoryOsFactProvenance = {
   readonly trace_id: string
   readonly turn: number
@@ -176,7 +168,6 @@ export type MemoryOsFact = {
   readonly valid_until_iso: string | null
   readonly last_verified_at: number | null
   readonly current: boolean
-  readonly external_ref: MemoryOsExternalRef | null
   readonly claim_kind: MemoryOsClaimKind | null
 }
 
@@ -367,17 +358,6 @@ function decodeMemoryOsEpisode(raw: unknown): MemoryOsEpisodeSummary | null {
   }
 }
 
-function decodeMemoryOsExternalRef(raw: unknown): MemoryOsExternalRef | undefined {
-  if (!isRecord(raw)) return undefined
-  const id = asString(raw.id)
-  const kindToken = asString(raw.kind)?.trim().toLowerCase()
-  if (!id || !kindToken) return undefined
-  // Backward-compatible decode for older dashboard payloads: both fields are
-  // required and kind must be in the closed set.
-  const kind = MEMORY_OS_EXTERNAL_REF_KINDS.find(k => k === kindToken)
-  return kind ? { kind, id } : undefined
-}
-
 function decodeMemoryOsFactProvenance(raw: unknown): MemoryOsFactProvenance | null {
   if (!isRecord(raw)) return null
   const trace_id = asString(raw.trace_id)
@@ -407,8 +387,7 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
   ) {
     return null
   }
-  // claim_kind is omitted by the server when None. external_ref is decoded only
-  // for older payloads; current backend projections no longer emit it.
+  // claim_kind is omitted by the server when None.
   const claimKindToken = asString(raw.claim_kind)
   return {
     claim,
@@ -421,7 +400,6 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
     valid_until_iso: asNullableString(raw.valid_until_iso),
     last_verified_at: asNumber(raw.last_verified_at) ?? null,
     current,
-    external_ref: decodeMemoryOsExternalRef(raw.external_ref) ?? null,
     claim_kind: claimKindToken ? (parseMemoryOsClaimKind(claimKindToken) ?? null) : null,
   }
 }

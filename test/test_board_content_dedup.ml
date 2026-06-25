@@ -4,6 +4,7 @@
     keeper board writes (0s gap between duplicates). *)
 
 open Masc
+module Board_core_status_rollup = Masc_board_handlers.Board_core_status_rollup
 
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Random.self_init ()

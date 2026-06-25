@@ -977,7 +977,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                           | None -> `Null )
                       ; ( "verification_summary"
                         , verification_summary_json updated_goal effective_policy None )
-                      ]))))))
+                      ])))))))
   | Ok _, Ok None, _ ->
     validation_error_result
       ~tool_name

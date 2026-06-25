@@ -205,17 +205,29 @@ type link_goalless_task_checked_error =
   | Link_registry_unreadable of string
   | Link_already_assigned of string list
 
-let prune_links_for_goal config ~goal_id =
+let prune_links_for_goal_result config ~goal_id =
   let goal_id = String.trim goal_id in
-  if String.equal goal_id "" then ()
+  if String.equal goal_id ""
+  then Ok ()
   else
     with_file_lock config (goal_task_links_lock_path config) (fun () ->
-      match read_goal_task_links_for_mutation config ~operation:"prune_links_for_goal" with
-      | Error _ -> ()
+      match
+        read_goal_task_links_for_mutation
+          config
+          ~operation:"prune_links_for_goal_result"
+      with
+      | Error msg -> Error msg
       | Ok links ->
         let links = List.filter (fun (gid, _) -> not (String.equal gid goal_id)) links in
-        (* fire-and-forget: pruning is best-effort cleanup; later reads repair stale goal links. *)
-        ignore (write_goal_task_links_result config ~operation:"prune_links_for_goal" links))
+        write_goal_task_links_result
+          config
+          ~operation:"prune_links_for_goal_result"
+          links)
+;;
+
+let prune_links_for_goal config ~goal_id =
+  (* fire-and-forget: pruning is best-effort cleanup; later reads repair stale goal links. *)
+  ignore (prune_links_for_goal_result config ~goal_id)
 ;;
 
 let link_task_to_goal_result config ~goal_id ~task_id =

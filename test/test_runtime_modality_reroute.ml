@@ -149,7 +149,8 @@ let test_liveness_skips_cooled_down_candidate () =
           ~candidates:
             [ ("vision_down", caps ~image:true ())
             ; ("vision_up", caps ~image:true ())
-            ]))
+            ]
+          ()))
 
 let test_liveness_no_live_capable_runtime_floor () =
   let candidate_is_live ~runtime_id =

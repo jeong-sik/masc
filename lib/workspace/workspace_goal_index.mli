@@ -69,6 +69,11 @@ val write_goal_task_links :
 val prune_links_for_goal :
   Workspace_utils_backend_setup.config -> goal_id:string -> unit
 
+(** Remove all links for [goal_id] and report registry read/write failures.
+    Missing/blank [goal_id] is a no-op [Ok ()]. *)
+val prune_links_for_goal_result :
+  Workspace_utils_backend_setup.config -> goal_id:string -> (unit, string) result
+
 (** Add one task-to-goal link to the persistent registry. *)
 val link_task_to_goal :
   Workspace_utils_backend_setup.config -> goal_id:string -> task_id:string -> unit

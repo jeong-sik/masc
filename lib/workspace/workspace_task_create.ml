@@ -220,7 +220,7 @@ let add_task_with_result
                       ~content:(Printf.sprintf "New quest: %s" title)
                   in
                   let summary = Printf.sprintf "Added %s: %s" task_id title in
-                  Ok { task_id; summary; title; priority; description; goal_id })))
+                  Ok { task_id; summary; title; priority; description; goal_id }))))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Unexpected_error (Printexc.to_string e))

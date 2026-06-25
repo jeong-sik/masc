@@ -470,24 +470,26 @@ let delete_goal config ~goal_id =
        cross-file transaction. A structural fix would either co-locate
        goal-task links with goals or add a higher-level transaction lock that
        covers every goal/link mutation path. *)
+    let orphaned_links detail =
+      Log.Misc.warn
+        "goal_store.delete_goal: goal %s removed but goal_task_links prune failed: %s"
+        goal_id
+        detail;
+      let warning =
+        Printf.sprintf
+          "goal deleted but failed to prune goal_task_links for %s: %s"
+          goal_id
+          detail
+      in
+      Ok (Deleted_with_orphaned_links warning)
+    in
     (try
-       Workspace_goal_index.prune_links_for_goal config ~goal_id;
-       Ok Deleted
+       match Workspace_goal_index.prune_links_for_goal_result config ~goal_id with
+       | Ok () -> Ok Deleted
+       | Error detail -> orphaned_links detail
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       let detail = Printexc.to_string exn in
-       Log.Misc.warn
-         "goal_store.delete_goal: goal %s removed but goal_task_links prune failed: %s"
-         goal_id
-         detail;
-       let warning =
-         Printf.sprintf
-           "goal deleted but failed to prune goal_task_links for %s: %s"
-           goal_id
-           detail
-       in
-       Ok (Deleted_with_orphaned_links warning))
+     | exn -> orphaned_links (Printexc.to_string exn))
 
 let sort_goals goals =
   (* RFC-0294: sort key was [(horizon, priority, updated_at desc)]; with horizon

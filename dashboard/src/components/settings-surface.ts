@@ -12,6 +12,7 @@ import {
 import { navigate, route } from '../router'
 import { fetchDashboardTools, fetchLogs, fetchRuntimeDefaults } from '../api/dashboard.js'
 import type { DashboardToolInventoryItem, LogEntry, RuntimeDefaultsResponse } from '../api/dashboard.js'
+import { envBool } from '../config/env'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { FusionSettingsPanel } from './fusion-settings-panel'
 import { ThemeSwitch } from './theme-switch'
@@ -83,7 +84,6 @@ type FusionConfig = {
   readonly enabled: boolean
   readonly defaultPreset: string
   readonly maxConcurrentPanels: number
-  readonly perHourBudget: number
   readonly webTools: boolean
   readonly panel: readonly string[]
   readonly judge: string
@@ -95,7 +95,6 @@ const FUSION: FusionConfig = {
   enabled: true,
   defaultPreset: 'trio',
   maxConcurrentPanels: 2,
-  perHourBudget: 20,
   webTools: false,
   panel: [
     'ollama_cloud.deepseek-v4-flash',
@@ -507,10 +506,10 @@ export function SettingsSurface() {
   )
 
   // fusion (config/runtime.toml [fusion]) — keeper-v2 settings.jsx:178-182
+  const fusionSettingsWritable = envBool('VITE_FUSION_SETTINGS_WRITABLE', false)
   const [fusionOn, setFusionOn] = useState(FUSION.enabled)
   const [fusionPreset, setFusionPreset] = useState(FUSION.defaultPreset)
   const [fusionPanels, setFusionPanels] = useState(FUSION.maxConcurrentPanels)
-  const [fusionBudget, setFusionBudget] = useState(FUSION.perHourBudget)
   const [fusionWeb, setFusionWeb] = useState(FUSION.webTools)
 
   // discord trigger policy (gate section) — keeper-v2 settings.jsx:183
@@ -800,7 +799,7 @@ export function SettingsSurface() {
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
                 <span class="mono">masc_fusion</span> 의 out-of-band 심의 루프 (RFC-0252). 서로 다른 모델 패밀리로 패널을 구성해 관점 다양성을 확보하고, 심판이 종합합니다. fusion이 발화 가치 있는지는 keeper가 판단하고 게이트는 남용만 막습니다.
               </div>
-              <${FusionSettingsPanel} />
+              ${fusionSettingsWritable ? html`<${FusionSettingsPanel} />` : null}
               <${SetRow} label="Fusion 심의" hint="끄면 masc_fusion 호출이 게이트에서 Deny 반환">
                 <${SetToggle} on=${fusionOn} onChange=${setFusionOn} />
               <//>
@@ -810,9 +809,6 @@ export function SettingsSurface() {
                 <//>
                 <${SetRow} label="동시 패널 수" hint="max_concurrent_panels · Async_agent.all 상한">
                   <${SetStepper} v=${fusionPanels} set=${setFusionPanels} min=${1} max=${8} />
-                <//>
-                <${SetRow} label="시간당 발화 budget" hint="[fusion.gate].per_hour_budget · UTC hour bucket">
-                  <${SetStepper} v=${fusionBudget} set=${setFusionBudget} min=${1} max=${100} />
                 <//>
                 <${SetRow} label="패널·심판 웹 도구" hint="web_search / web_fetch 주입 여부">
                   <${SetToggle} on=${fusionWeb} onChange=${setFusionWeb} />

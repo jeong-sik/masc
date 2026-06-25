@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { readFusionSettings, applyFusionSettings, FUSION_SETTINGS_DEFAULTS } from './fusion-settings'
+import {
+  readFusionSettings,
+  readFusionSettingsResult,
+  applyFusionSettings,
+  FUSION_SETTINGS_DEFAULTS,
+} from './fusion-settings'
 
 // SAMPLE still carries a [fusion.gate] per_hour_budget line: RFC-0277 removed the
 // key from the backend, so the editor must IGNORE it (never read/write it) while
@@ -36,11 +41,29 @@ describe('readFusionSettings', () => {
     expect(readFusionSettings('[runtime]\ndefault = "x.y"\n')).toEqual(FUSION_SETTINGS_DEFAULTS)
   })
 
-  it('malformed scalars fall back to the conservative default (read-side; backend validates on save)', () => {
-    const src = '[fusion]\nenabled = maybe\nmax_concurrent_panels = abc\n'
-    const s = readFusionSettings(src)
-    expect(s.enabled).toBe(false) // any non-"true" token
-    expect(s.maxConcurrentPanels).toBe(FUSION_SETTINGS_DEFAULTS.maxConcurrentPanels)
+  it('surfaces malformed scalars instead of coercing them into plausible values', () => {
+    const src = '[fusion]\nenabled = maybe\nmax_concurrent_panels = 1.5\n'
+    const result = readFusionSettingsResult(src)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.issues.map(issue => issue.key)).toEqual([
+        'fusion.enabled',
+        'fusion.max_concurrent_panels',
+      ])
+    }
+    expect(() => readFusionSettings(src)).toThrow(/Invalid fusion settings/)
+  })
+
+  it('parses single-quoted default_preset and rejects unknown preset sections', () => {
+    const singleQuoted = SAMPLE.replace('default_preset = "trio"', "default_preset = 'trio'")
+    expect(readFusionSettings(singleQuoted).defaultPreset).toBe('trio')
+
+    const unknownPreset = SAMPLE.replace('default_preset = "trio"', 'default_preset = "missing"')
+    const result = readFusionSettingsResult(unknownPreset)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.issues[0]?.key).toBe('fusion.presets.missing.min_answered')
+    }
   })
 })
 
@@ -71,6 +94,40 @@ describe('applyFusionSettings', () => {
     const next = applyFusionSettings(SAMPLE, { ...readFusionSettings(SAMPLE), maxConcurrentPanels: 5 })
     // unchanged verbatim — the editor neither reads nor writes it
     expect(next).toContain('per_hour_budget = 20')
+  })
+
+  it('removes stale min_answered from the previous default preset on preset switch or clear', () => {
+    const withDuo = `${SAMPLE}
+[fusion.presets.duo]
+panel = ["a", "b"]
+judge = "j"
+min_answered = 1
+`
+    const switched = applyFusionSettings(withDuo, {
+      enabled: true,
+      defaultPreset: 'duo',
+      maxConcurrentPanels: 2,
+      minAnswered: 1,
+    })
+    expect(switched.split('[fusion.presets.trio]')[1]?.split('[runtime]')[0]).not.toContain('min_answered')
+    expect(switched.split('[fusion.presets.duo]')[1]).toContain('min_answered = 1')
+
+    const cleared = applyFusionSettings(SAMPLE, {
+      enabled: true,
+      defaultPreset: '',
+      maxConcurrentPanels: 2,
+      minAnswered: 1,
+    })
+    expect(cleared.split('[fusion.presets.trio]')[1]?.split('[runtime]')[0]).not.toContain('min_answered')
+  })
+
+  it('rejects invalid local editor values before writing', () => {
+    expect(() => applyFusionSettings(SAMPLE, {
+      enabled: true,
+      defaultPreset: 'trio',
+      maxConcurrentPanels: 0,
+      minAnswered: 1,
+    })).toThrow(/max_concurrent_panels/)
   })
 
   it('preserves comments and untouched sections/keys', () => {

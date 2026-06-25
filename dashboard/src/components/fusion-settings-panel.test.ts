@@ -1,4 +1,5 @@
 import { h, render } from 'preact'
+import { fireEvent } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const SAMPLE = `[fusion]
@@ -75,5 +76,33 @@ describe('FusionSettingsPanel', () => {
     ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
     await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')).not.toBeNull())
     expect(q('[data-testid="fusion-settings-saved"]')).toBeNull()
+  })
+
+  it('surfaces malformed live TOML instead of rendering fallback values', async () => {
+    fetchMock.mockResolvedValue(cfg({ source_text: '[fusion]\nenabled = maybe\nmax_concurrent_panels = 1.5\n' }))
+    const { FusionSettingsPanel } = await import('./fusion-settings-panel')
+    render(h(FusionSettingsPanel, {}), container)
+
+    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')).not.toBeNull())
+    expect(q('[data-testid="fusion-settings-editor"]')).toBeNull()
+    expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('fusion.enabled')
+  })
+
+  it('does not POST empty or fractional number inputs', async () => {
+    fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE }))
+    await mount()
+    const maxInput = q('[data-testid="fusion-max-concurrent-panels"]') as HTMLInputElement
+    maxInput.value = ''
+    await fireEvent.input(maxInput)
+
+    ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
+    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')).not.toBeNull())
+    expect(saveMock).not.toHaveBeenCalled()
+
+    maxInput.value = '1.5'
+    await fireEvent.input(maxInput)
+    ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
+    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('정수'))
+    expect(saveMock).not.toHaveBeenCalled()
   })
 })

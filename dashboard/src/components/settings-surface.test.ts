@@ -34,6 +34,16 @@ vi.mock('../api/dashboard.js', async () => {
   }
 })
 
+vi.mock('../api/dashboard', async () => {
+  const actual = await vi.importActual<typeof import('../api/dashboard')>('../api/dashboard')
+  return {
+    ...actual,
+    fetchLogs: apiMock.fetchLogs,
+    fetchDashboardTools: apiMock.fetchDashboardTools,
+    fetchRuntimeDefaults: apiMock.fetchRuntimeDefaults,
+  }
+})
+
 function makeLogEntry(overrides: Partial<LogEntry> = {}): LogEntry {
   return {
     seq: 1,
@@ -137,6 +147,7 @@ describe('SettingsSurface', () => {
     resetDevTokenBootstrap()
     sessionStorage.clear()
     vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
   })
 
   it('renders the surface and category navigation', () => {
@@ -409,6 +420,38 @@ describe('SettingsSurface', () => {
     expect(models).toContain('ollama_cloud.minimax-m3')
     expect(container.querySelector('.set-fus-model.judge')?.textContent).toBe('deepseek.deepseek-v4-pro')
     expect(container.querySelector('[data-testid="set-toggle"]')?.getAttribute('aria-disabled')).toBe('true')
+    expect(container.querySelector('[data-testid="fusion-settings-editor"]')).toBeNull()
+    expect(container.textContent).not.toContain('per_hour_budget')
+  })
+
+  it('renders the live fusion settings writer only behind VITE_FUSION_SETTINGS_WRITABLE', async () => {
+    vi.stubEnv('VITE_FUSION_SETTINGS_WRITABLE', 'true')
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      const path = String(url)
+      if (path === '/api/v1/runtime/config/raw') {
+        return new Response(JSON.stringify({
+          ok: true,
+          path: '/tmp/.masc/config/runtime.toml',
+          file_name: 'runtime.toml',
+          source_text: '[fusion]\nenabled = true\ndefault_preset = "trio"\nmax_concurrent_panels = 2\n\n[fusion.presets.trio]\nmin_answered = 2\n',
+          reloaded: false,
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({ message: `unexpected ${path}` }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-fusion"]') as HTMLElement)
+
+    await waitFor(() => expect(container.querySelector('[data-testid="fusion-settings-editor"]')).not.toBeNull())
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/runtime/config/raw', expect.any(Object))
   })
 
   it('renders the tool-group policy with exec-guard and last_turn_safe', async () => {

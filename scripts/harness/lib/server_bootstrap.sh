@@ -191,6 +191,7 @@ harness_start_server() {
     export MASC_STORAGE_TYPE="filesystem"
     export MASC_AUTONOMY_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"
+    export MASC_OTEL_ENABLED="0"
     export MASC_TOOL_TIMEOUT_DEFAULT_SEC="${MASC_TOOL_TIMEOUT_DEFAULT_SEC:-90}"
     export GRAPHQL_API_KEY=""
     export GRAPHQL_URL="http://127.0.0.1:9/graphql"

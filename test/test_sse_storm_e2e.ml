@@ -306,7 +306,9 @@ protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:9/v1"
 
 [models.smoke]
-api-name = "smoke"
+# The SSE storm harness never reaches this provider endpoint, but strict
+# runtime bootstrap still requires catalog-backed capability metadata.
+api-name = "deepseek-v4-flash"
 max-context = 32768
 tools-support = true
 streaming = true

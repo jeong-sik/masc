@@ -54,7 +54,7 @@ describe('readFusionSettings', () => {
     expect(() => readFusionSettings(src)).toThrow(/Invalid fusion settings/)
   })
 
-  it('parses single-quoted default_preset and rejects unknown preset sections', () => {
+  it('parses single-quoted default_preset and rejects unknown preset sections only when enabled', () => {
     const singleQuoted = SAMPLE.replace('default_preset = "trio"', "default_preset = 'trio'")
     expect(readFusionSettings(singleQuoted).defaultPreset).toBe('trio')
 
@@ -64,6 +64,18 @@ describe('readFusionSettings', () => {
     if (!result.ok) {
       expect(result.issues[0]?.key).toBe('fusion.presets.missing.min_answered')
     }
+
+    const disabledUnknownPreset = `[fusion]
+enabled = false
+default_preset = "old"
+max_concurrent_panels = 1
+`
+    expect(readFusionSettings(disabledUnknownPreset)).toEqual({
+      enabled: false,
+      defaultPreset: 'old',
+      maxConcurrentPanels: 1,
+      minAnswered: 1,
+    })
   })
 })
 

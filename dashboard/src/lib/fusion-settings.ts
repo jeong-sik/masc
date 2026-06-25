@@ -124,10 +124,11 @@ export function readFusionSettingsResult(sourceText: string): FusionSettingsRead
   const defaultPreset = defaultPresetParsed as string
   const maxConcurrentPanels = maxConcurrentPanelsParsed as number
   const preset = defaultPreset
-  if (preset !== '' && !sectionExists(sourceText, presetSection(preset))) {
+  const presetExists = preset !== '' && sectionExists(sourceText, presetSection(preset))
+  if (enabled && preset !== '' && !presetExists) {
     issues.push(issue(`${presetSection(preset)}.${KEY_MIN_ANSWERED}`, undefined, 'default_preset references a missing preset section'))
   }
-  const minAnsweredToken = preset
+  const minAnsweredToken = preset && presetExists
     ? getRuntimeTomlKey(sourceText, presetSection(preset), KEY_MIN_ANSWERED)
     : undefined
   const minAnsweredParsed = parsePositiveInt(

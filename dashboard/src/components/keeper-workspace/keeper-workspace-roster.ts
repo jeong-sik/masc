@@ -285,6 +285,7 @@ function RosterRow({
   const work = keeperWorkPreview(keeper)
   const recentTool = keeperRecentTool(keeper)
   const gloss = keeperAttentionGloss(keeper)
+  const inlineActions = lifecycleActions(keeper).filter(action => action !== 'shutdown').slice(0, 2)
   const select = () => onSelect(keeper.name)
   return html`
     <div
@@ -347,6 +348,33 @@ function RosterRow({
       >
         <${MessageSquare} size=${14} aria-hidden="true" />
       </button>
+      ${inlineActions.length > 0
+        ? html`
+            <div class="kw-kp-inline-actions">
+              ${inlineActions.map(action => {
+                const copy = LIFECYCLE_COPY[action]
+                const Icon = copy.icon
+                return html`
+                  <button
+                    key=${action}
+                    type="button"
+                    class="kw-kp-inline-action v2-monitoring-action"
+                    title=${copy.title}
+                    aria-label=${`${keeper.name} ${copy.label}`}
+                    onClick=${(event: MouseEvent) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      void runKeeperAction(keeper.name, action)
+                    }}
+                  >
+                    <${Icon} size=${13} aria-hidden="true" />
+                    <span>${copy.label}</span>
+                  </button>
+                `
+              })}
+            </div>
+          `
+        : null}
       <button
         type="button"
         class="kw-kp-more v2-monitoring-action"

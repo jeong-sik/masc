@@ -5,8 +5,6 @@
 
 open Masc
 
-module Board_core_status_rollup = Masc_board_handlers.Board_core_status_rollup
-
 let status_rollup_window_sec = 6. *. 60. *. 60.
 
 let () = Mirage_crypto_rng_unix.use_default ()
@@ -228,6 +226,19 @@ let test_comment_parent_is_part_of_dedup_key () =
 
 let keeper_board_meta = `Assoc [ "source", `String "keeper_board_post" ]
 
+let create_keeper_status_outcome_or_fail store ~author ~content =
+  match
+    Board.create_post_with_outcome
+      store
+      ~author
+      ~content
+      ~post_kind:Board.Automation_post
+      ~meta_json:keeper_board_meta
+      ()
+  with
+  | Ok outcome -> outcome
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+
 let agent_id_or_fail value =
   match Board.Agent_id.of_string value with
   | Ok id -> id
@@ -295,53 +306,66 @@ let test_status_only_automation_posts_roll_up_by_task () =
 
 let test_status_rollup_window_uses_created_at () =
   let store = Board.create_store () in
-  let now = 1_000_000. in
+  let now = Time_compat.now () in
   let author_id = agent_id_or_fail "lifecycle-worker-4" in
   let old_status =
     automation_status_post
       ~author_id
       ~body:"Task-370 claimed and worktree ready. Investigating codebase."
-      ~created_at:(now -. status_rollup_window_sec -. 1.)
+      ~created_at:(now -. status_rollup_window_sec -. 60.)
       ~updated_at:now
   in
   Hashtbl.add store.posts (Board.Post_id.to_string old_status.id) old_status;
+  Stdlib.incr store.post_count;
   match
-    Board_core_status_rollup.find_status_rollup_target_unlocked
+    create_keeper_status_outcome_or_fail
       store
-      ~author_id
-      ~hearth:None
-      ~visibility:Board.Public
-      ~task_id:"task-370"
-      ~now
+      ~author:"lifecycle-worker-4"
+      ~content:"Task-370 still investigating current failure."
   with
-  | None -> ()
-  | Some _ ->
+  | Board.Fresh_post _ -> ()
+  | Board.Dedup_hit _ ->
+    Alcotest.fail "status rollup window test unexpectedly hit exact dedup"
+  | Board.Rolled_up_post _ ->
       Alcotest.fail
         "status rollup window must not be extended by updated_at refreshes"
 
 let test_status_rollup_proof_terms_use_token_boundaries () =
+  let store = Board.create_store () in
   let status_body =
     "Task-370 claimed and worktree ready. Checking the errorless parser fixture."
   in
   let proof_body =
     "Task-370 checking status. Error: verifier command failed."
   in
-  Alcotest.(check bool)
-    "substring inside a larger token is not proof evidence"
-    true
-    (Board.is_status_rollup_candidate
-       ~post_kind:Board.Automation_post
-       ~title:status_body
-       ~body:status_body
-       ~meta_json:(Some keeper_board_meta));
-  Alcotest.(check bool)
-    "standalone proof term still blocks rollup"
-    false
-    (Board.is_status_rollup_candidate
-       ~post_kind:Board.Automation_post
-       ~title:proof_body
-       ~body:proof_body
-       ~meta_json:(Some keeper_board_meta))
+  let (_ : Board.create_post_outcome) =
+    create_keeper_status_outcome_or_fail
+      store
+      ~author:"lifecycle-worker-4"
+      ~content:"Task-370 claimed and worktree ready. Investigating codebase."
+  in
+  (match
+     create_keeper_status_outcome_or_fail
+       store
+       ~author:"lifecycle-worker-4"
+       ~content:status_body
+   with
+   | Board.Rolled_up_post _ -> ()
+   | Board.Fresh_post _ ->
+     Alcotest.fail "substring inside a larger token must not block rollup"
+   | Board.Dedup_hit _ ->
+     Alcotest.fail "status rollup token-boundary test unexpectedly hit dedup");
+  match
+    create_keeper_status_outcome_or_fail
+      store
+      ~author:"lifecycle-worker-4"
+      ~content:proof_body
+  with
+  | Board.Fresh_post _ -> ()
+  | Board.Dedup_hit _ ->
+    Alcotest.fail "proof token-boundary test unexpectedly hit exact dedup"
+  | Board.Rolled_up_post _ ->
+    Alcotest.fail "standalone proof term must block status rollup"
 
 let test_status_rollup_preserves_proof_posts () =
   let first =

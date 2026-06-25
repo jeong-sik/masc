@@ -945,26 +945,28 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                             [ "phase", Goal_phase.to_yojson updated_goal.phase
                             ; "actor", Goal_verification.goal_principal_to_yojson actor
                             ]);
-                    (match resolved_approval_request with
-                     | None -> ()
-                     | Some request ->
-                      emit_goal_event
-                        ctx
-                        ~goal_id
-                        ~event_type:"goal_approval_resolved"
-                        ~payload:
-                          (`Assoc
-                              [ ( "decision"
-                                , `String
-                                    (if action = Goal_phase.Approve_completion
-                                     then "approve"
-                                     else "reject") )
-                              ; ( "actor"
-                                , Goal_verification.goal_principal_to_yojson actor
-                                )
-                              ; ( "approval_request"
-                                , Goal_approval.approval_request_to_yojson request )
-                              ]));
+                    let () =
+                      match resolved_approval_request with
+                      | None -> ()
+                      | Some request ->
+                        emit_goal_event
+                          ctx
+                          ~goal_id
+                          ~event_type:"goal_approval_resolved"
+                          ~payload:
+                            (`Assoc
+                                [ ( "decision"
+                                  , `String
+                                      (if action = Goal_phase.Approve_completion
+                                       then "approve"
+                                       else "reject") )
+                                ; ( "actor"
+                                  , Goal_verification.goal_principal_to_yojson actor
+                                  )
+                                ; ( "approval_request"
+                                  , Goal_approval.approval_request_to_yojson request )
+                                ])
+                    in
                     ok_result
                       ~tool_name
                       ~start_time

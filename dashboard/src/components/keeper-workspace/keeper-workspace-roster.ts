@@ -24,6 +24,7 @@ import { keeperActivityDisplay, keeperWorkPreview } from '../../lib/keeper-runti
 import { keeperActionVisibility } from '../../lib/keeper-predicates'
 import type { Keeper } from '../../types'
 import { runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
+import { refreshAfterRuntimeAction } from '../keeper-detail-helpers'
 import { VirtualList } from '../common/virtual-list'
 import {
   WorkspaceSigil,
@@ -364,7 +365,7 @@ function RosterRow({
                     onClick=${(event: MouseEvent) => {
                       event.preventDefault()
                       event.stopPropagation()
-                      void runKeeperAction(keeper.name, action)
+                      void runRosterKeeperAction(keeper.name, action)
                     }}
                   >
                     <${Icon} size=${13} aria-hidden="true" />
@@ -428,6 +429,11 @@ function lifecycleActions(keeper: Keeper): KeeperActionKey[] {
   if (visibility.canPause) actions.push('pause')
   if (visibility.canShutdown) actions.push('shutdown')
   return actions
+}
+
+async function runRosterKeeperAction(name: string, action: KeeperActionKey): Promise<void> {
+  await runKeeperAction(name, action)
+  await refreshAfterRuntimeAction()
 }
 
 function pct(count: number, total: number): string {
@@ -510,7 +516,7 @@ function KeeperRosterMenu({
             class=${`kw-kp-menu-item${copy.danger ? ' danger' : ''}`}
             title=${copy.title}
             onClick=${() => {
-              void runKeeperAction(keeper.name, action)
+              void runRosterKeeperAction(keeper.name, action)
               onClose()
             }}
             data-testid=${`kw-roster-menu-${action}`}

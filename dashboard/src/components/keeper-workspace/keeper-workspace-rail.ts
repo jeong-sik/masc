@@ -160,6 +160,11 @@ function fleetLifecycleActions(keeper: Keeper): KeeperActionKey[] {
   return actions
 }
 
+async function runFleetKeeperAction(name: string, action: KeeperActionKey): Promise<void> {
+  await runKeeperAction(name, action)
+  await refreshAfterRuntimeAction()
+}
+
 function keeperRecentTools(keeper: Keeper): string[] {
   const names = [
     ...(keeper.latest_tool_names ?? []),
@@ -229,7 +234,7 @@ function FleetSelectedSection({ keeper }: { keeper: Keeper }): VNode {
                   key=${action}
                   type="button"
                   class=${`kw-fleet-action${action === 'shutdown' ? ' danger' : ''}`}
-                  onClick=${() => void runKeeperAction(keeper.name, action)}
+                  onClick=${() => void runFleetKeeperAction(keeper.name, action)}
                 >${FLEET_ACTION_LABELS[action]}</button>
               `)}
             </div>

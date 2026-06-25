@@ -12,6 +12,8 @@ import type { VNode } from 'preact'
 import { shellAuthSummary, tasks } from '../../store'
 import type { Keeper, Task } from '../../types'
 import { navigate } from '../../router'
+import { selectKeeper } from '../../keeper-runtime'
+import { keeperMobilePane } from '../keeper-detail-state'
 import { keeperActivityDisplay } from '../../lib/keeper-runtime-display'
 import { keeperActionVisibility } from '../../lib/keeper-predicates'
 import {
@@ -171,6 +173,8 @@ function FleetSelectedSection({ keeper }: { keeper: Keeper }): VNode {
   const lifecycle = keeper.phase || keeper.lifecycle_phase || keeper.status
   const actions = fleetLifecycleActions(keeper).slice(0, 3)
   const openChat = () => {
+    selectKeeper(keeper.name)
+    keeperMobilePane.value = 'chat'
     navigate('monitoring', { section: 'agents', keeper: keeper.name })
   }
 

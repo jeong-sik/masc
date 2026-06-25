@@ -141,6 +141,30 @@ let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~workspac
         Error msg
   end)
 
+(** RFC-0294 PR-4: single-owner orphan-task surfacer.
+
+    R1g (RFC-0294) removed [audit_orphan_tasks] from the keeper wake-driver, so an
+    orphaned task — in particular an [AwaitingVerification] one, which
+    [cleanup_zombies] Phase 3 does not release (RFC-0220 §5) and so never returns
+    to 0 — would become silently invisible (broken-but-visible regression). This
+    refreshes [masc_orphan_tasks] (gauge, labeled by status_class) each pulse beat
+    from the same audit, independent of the keeper actor. It is an alertable
+    metric, not an actor wake: if the reaper/pulse itself stalls (the 2026-06-21/22
+    reaper-not-running incident) the gauge goes stale, which is itself alertable.
+    Every class in [Workspace.orphan_status_classes] is emitted (0 when empty) so a
+    cleared class resets rather than leaving a stale value. *)
+let surface_orphan_tasks_gauge workspace_config =
+  let counts =
+    Workspace.orphan_counts_by_status_class
+      (Workspace.audit_orphan_tasks workspace_config)
+  in
+  List.iter
+    (fun (status_class, count) ->
+       Otel_metric_store.set_gauge Otel_metric_store.metric_orphan_tasks
+         ~labels:[ "status_class", status_class ]
+         (Float.of_int count))
+    counts
+
 (** Build the zero-zombie cleanup consumer.
     Runs Workspace.cleanup_zombies and logs if zombies were found. *)
 let make_zero_zombie_consumer ~sw ~workspace_config
@@ -234,7 +258,11 @@ let make_zero_zombie_consumer ~sw ~workspace_config
                         demote of repeated lines. *)
                      Log.Orchestrator.error
                        "[stale-claims] non-benign failure: %s"
-                       reason)
+                       reason);
+                (* RFC-0294 PR-4: refresh the orphan-task gauge each beat, after
+                   cleanup + stale-claim release so it reflects post-GC state. The
+                   surrounding catch (benign filter) covers a surfacer fault. *)
+                surface_orphan_tasks_gauge workspace_config
               with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                 if not (Workspace_resilience.ZeroZombie.is_benign_error exn) then
                   Log.Orchestrator.warn "[zombie] error: %s" (Printexc.to_string exn)));

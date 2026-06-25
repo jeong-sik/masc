@@ -40,6 +40,25 @@ val get_all_agents : config -> Masc_domain.agent list
     Returns [(task, assignee)] pairs for orphaned tasks. *)
 val audit_orphan_tasks : config -> (Masc_domain.task * string) list
 
+(** RFC-0294 PR-4: typed source of truth for orphan-status classification.
+    [Some label] for an orphan-eligible status (Claimed / InProgress /
+    AwaitingVerification), [None] otherwise. Exhaustive over [task_status] so a
+    new constructor is a compile error here rather than a silent gauge drop. *)
+val orphan_status_class_of_status : Masc_domain.task_status -> string option
+
+(** RFC-0294 PR-4: the fixed set of orphan status classes (claimed /
+    in_progress / awaiting_verification) — exactly the [Some]-range of
+    {!orphan_status_class_of_status}. The orphan gauge reports every class
+    so a cleared class resets to 0 instead of going stale. *)
+val orphan_status_classes : string list
+
+(** RFC-0294 PR-4: count orphan-audit results per status class over
+    {!orphan_status_classes}. Pure (no I/O); the metric emitter is the
+    single-owner orchestrator pulse. Always returns one entry per class. *)
+val orphan_counts_by_status_class
+  :  (Masc_domain.task * string) list
+  -> (string * int) list
+
 (** {1 Agent Membership} *)
 
 (** Check if an agent has an active session the current workspace. *)

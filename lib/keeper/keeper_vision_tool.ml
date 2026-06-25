@@ -85,6 +85,12 @@ let first_vision_runtime_id () : (string, string) result =
 let vision_store_dir ~keeper_name =
   Filename.concat (Config_dir_resolver.keepers_dir ()) (keeper_name ^ ".vision")
 
+let store_artifact ~dir bytes =
+  Eio_guard.run_in_systhread (fun () -> Store.store ~dir bytes)
+
+let load_artifact ~dir handle =
+  Eio_guard.run_in_systhread (fun () -> Store.load ~dir handle)
+
 let ok_json text =
   Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "text", `String text ])
 
@@ -179,7 +185,7 @@ type vision_outcome =
 (* Resolve the first image-capable runtime, send one {query + image} message
    under [with_timeout], classify the reply. [clock = None] runs unbounded only
    on the no-Eio path (tests); prod threads the turn's clock. *)
-let run_vision
+let run_vision_inner
     ?(complete = default_complete)
     ?(timeout_sec = default_timeout_sec)
     ~sw
@@ -216,7 +222,18 @@ let run_vision
              (match Va.classify ~truncated ~content:text with
               | Ok t -> Vo_ok t
               | Error Va.Empty_extraction -> Vo_empty
-              | Error Va.Truncated_extraction -> Vo_truncated))))
+             | Error Va.Truncated_extraction -> Vo_truncated))))
+;;
+
+let run_vision ?complete ?timeout_sec ~sw ?clock ~net ~query ~media_type ~bytes () =
+  try run_vision_inner ?complete ?timeout_sec ~sw ?clock ~net ~query ~media_type ~bytes ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Vo_provider
+      { failure_class = Tool_result.Runtime_failure
+      ; detail = "vision sub-call raised: " ^ Printexc.to_string exn
+      }
 ;;
 
 let handle
@@ -242,7 +259,7 @@ let handle
          "eio_context_unavailable"
      | Some sw, Some net ->
        let dir = vision_store_dir ~keeper_name:meta.name in
-       (match Store.load ~dir (Store.of_string handle_str) with
+       (match load_artifact ~dir (Store.of_string handle_str) with
         | Error msg ->
           err_json
             ~failure_class:Tool_result.Runtime_failure

@@ -87,7 +87,7 @@ let evict_block ~mode ~keeper_name (block : Agent_sdk.Types.content_block) =
      | Error m ->
        Agent_sdk.Types.Text (image_store_failed_placeholder ~reason:("bad base64: " ^ m))
      | Ok bytes ->
-       (match Store.store ~dir:(store_dir ~keeper_name) bytes with
+       (match Keeper_vision_tool.store_artifact ~dir:(store_dir ~keeper_name) bytes with
         | Error m -> Agent_sdk.Types.Text (image_store_failed_placeholder ~reason:m)
         | Ok handle ->
           (match mode with

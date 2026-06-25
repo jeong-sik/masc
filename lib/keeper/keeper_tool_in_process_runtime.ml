@@ -284,7 +284,21 @@ let handle_board ~(meta : keeper_meta) ~name ~args =
   Keeper_tool_board_runtime.handle_keeper_board_tool ~meta ~name ~args
 ;;
 
-let handle_masc_board ~name ~args =
+let handle_masc_board ~(meta : keeper_meta) ~name ~args =
+  let args =
+    match name with
+    | "masc_board_post" | "masc_board_comment" ->
+      Keeper_tool_shared_runtime.assoc_override_string "author" meta.name args
+    | "masc_board_vote" | "masc_board_comment_vote" ->
+      Keeper_tool_shared_runtime.assoc_override_string "voter" meta.name args
+    | "masc_board_reaction" ->
+      Keeper_tool_shared_runtime.assoc_override_string "user_id" meta.name args
+    | "masc_board_sub_board_create" ->
+      Keeper_tool_shared_runtime.assoc_override_string "owner" meta.name args
+    | "masc_board_curation_submit" ->
+      Keeper_tool_shared_runtime.assoc_override_string "submitted_by" meta.name args
+    | _ -> args
+  in
   let result =
     Board_tool_dispatch.handle_tool name args
   in

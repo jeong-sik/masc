@@ -673,10 +673,84 @@ let passthrough_object_schema =
     [ "type", `String "object"; "additionalProperties", `Bool true ]
 ;;
 
-let find_taskboard_schema_opt name =
+let find_schema_input_opt schemas name =
   List.find_opt (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
-    Tool_shard_types.taskboard_tools
+    schemas
   |> Option.map (fun (s : Masc_domain.tool_schema) -> s.input_schema)
+;;
+
+let find_taskboard_schema_opt name =
+  find_schema_input_opt Tool_shard_types.taskboard_tools name
+;;
+
+let find_voice_schema_opt name =
+  find_schema_input_opt Tool_shard_types.voice_tools name
+;;
+
+let find_base_schema_opt name =
+  find_schema_input_opt Tool_shard_types.base_tools name
+;;
+
+let remove_required_fields removed schema =
+  match schema with
+  | `Assoc fields ->
+      let fields =
+        List.map
+          (function
+            | ("required", `List required) ->
+                ( "required",
+                  `List
+                    (List.filter
+                       (function
+                         | `String name -> not (List.mem name removed)
+                         | _ -> true)
+                       required) )
+            | field -> field)
+          fields
+      in
+      `Assoc fields
+  | _ -> schema
+
+let keeper_board_identity_fields =
+  [ "author"; "voter"; "submitted_by"; "owner"; "user_id" ]
+
+let find_board_schema_opt name =
+  let prefix = "keeper_board_" in
+  if not (String.starts_with ~prefix name) then None
+  else
+    let suffix =
+      String.sub name (String.length prefix)
+        (String.length name - String.length prefix)
+    in
+    let board_name = "masc_board_" ^ suffix in
+    Board_tool_registry.tools
+    |> List.find_opt (fun (s : Masc_domain.tool_schema) ->
+           String.equal s.name board_name)
+    |> Option.map (fun (s : Masc_domain.tool_schema) ->
+           remove_required_fields keeper_board_identity_fields s.input_schema)
+
+let find_masc_schema_opt name =
+  [
+    Task.Schemas.schemas;
+    Tool_schemas_misc.schemas;
+    Tool_schemas_run.schemas;
+    Tool_schemas_agent.schemas;
+    Tool_schemas_workspace.schemas;
+    Tool_agent_timeline.schemas;
+    Keeper_schema.schemas;
+  ]
+  |> List.find_map (fun schemas -> find_schema_input_opt schemas name)
+
+let find_cluster_schema_opt name =
+  match find_taskboard_schema_opt name with
+  | Some _ as schema -> schema
+  | None ->
+    (match find_board_schema_opt name with
+     | Some _ as schema -> schema
+     | None ->
+       (match find_voice_schema_opt name with
+        | Some _ as schema -> schema
+        | None -> find_masc_schema_opt name))
 ;;
 
 
@@ -759,6 +833,40 @@ let person_note_set_schema =
         "string"
         "What to remember about this person. Blank clears the note \
          (tombstone)."
+    ]
+;;
+
+let memory_search_schema =
+  Option.value
+    (find_base_schema_opt "keeper_memory_search")
+    ~default:passthrough_object_schema
+;;
+
+let memory_write_schema =
+  Option.value
+    (find_base_schema_opt "keeper_memory_write")
+    ~default:passthrough_object_schema
+;;
+
+let ide_annotate_schema =
+  object_schema
+    ~required:[ "file_path"; "line_start"; "content" ]
+    [
+      property "file_path" "string" "File path to annotate.";
+      property "line_start" "integer" "One-based starting line.";
+      property "line_end" "integer" "Optional one-based ending line.";
+      property "kind" "string" "Annotation kind. Defaults to Comment.";
+      property "content" "string" "Annotation text.";
+      property "goal_id" "string" "Optional related goal ID.";
+      property "task_id" "string" "Optional related task ID.";
+      property "board_post_id" "string" "Optional related board post ID.";
+      property "comment_id" "string" "Optional related board comment ID.";
+      property "pr_id" "string" "Optional related pull request ID.";
+      property "git_ref" "string" "Optional related git ref.";
+      property "log_id" "string" "Optional related log ID.";
+      property "session_id" "string" "Optional related session ID.";
+      property "operation_id" "string" "Optional related operation ID.";
+      property "worker_run_id" "string" "Optional related worker run ID.";
     ]
 ;;
 
@@ -892,7 +1000,7 @@ let cluster_descriptor ~id ~name ~description ~handler ~readonly
     else write_in_process_policy ~inline_safe ~maintenance_only ()
   in
   let input_schema =
-    match find_taskboard_schema_opt name with
+    match find_cluster_schema_opt name with
     | Some schema -> schema
     | None -> passthrough_object_schema
   in
@@ -1150,14 +1258,14 @@ let internal_descriptors : t list =
       ~name:"keeper_memory_search"
       ~description:
         "Search keeper memory (semantic + recency) for relevant prior context."
-      ~input_schema:passthrough_object_schema
+      ~input_schema:memory_search_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_memory_search
   ; in_process_descriptor
       ~id:"keeper.memory.write"
       ~name:"keeper_memory_write"
       ~description:"Persist a memory entry for this keeper."
-      ~input_schema:passthrough_object_schema
+      ~input_schema:memory_write_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_memory_write
     (* ── library (RFC-0179 PR-3) ──────────────────────────────── *)
@@ -1217,7 +1325,7 @@ let internal_descriptors : t list =
       ~id:"keeper.ide.annotate"
       ~name:"keeper_ide_annotate"
       ~description:"Emit an IDE annotation event for the current keeper."
-      ~input_schema:passthrough_object_schema
+      ~input_schema:ide_annotate_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_ide_annotate
     (* ── fusion deliberation (RFC-0252) ───────────────────────── *)

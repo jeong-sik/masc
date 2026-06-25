@@ -179,6 +179,7 @@ let make_tool_bundle
                    | Some result -> result
                    | None -> Ok input)
                  ~translate_input:descriptor.translate
+                 ~validate_translated_input:false
                  ~failure_counts
                  ()
              in

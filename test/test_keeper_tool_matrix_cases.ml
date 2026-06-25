@@ -218,11 +218,62 @@ let ensure_voice_session fixture =
     (Masc.Voice_session_manager.start_session mgr ~agent_id:fixture.meta.name
        ~voice:"tool-matrix" ())
 
+let ensure_board_comment fixture =
+  let body =
+    Generic.execute_tool_ok fixture.generic ~name:"masc_board_comment"
+      ~arguments:
+        (`Assoc
+          [
+            ("post_id", `String (Generic.ensure_board_post fixture.generic));
+            ("author", `String fixture.meta.name);
+            ("content", `String "tool-matrix-comment");
+          ])
+  in
+  match
+    Generic.extract_id body ~fields:[ "id"; "comment_id" ]
+      ~prefixes:[ "comment-" ]
+  with
+  | Some value -> value
+  | None -> failwith ("failed to parse comment id from: " ^ body)
+
+let sub_board_slug fixture =
+  "tool-matrix-" ^ Filename.basename fixture.generic.base_path
+
+let ensure_sub_board fixture =
+  let slug = sub_board_slug fixture in
+  ignore
+    (Generic.execute_tool_ok fixture.generic ~name:"masc_board_sub_board_create"
+       ~arguments:
+         (`Assoc
+           [
+             ("slug", `String slug);
+             ("name", `String "Tool Matrix SubBoard");
+             ("description", `String "Sub-board fixture for keeper matrix");
+             ("access", `String "open");
+           ]));
+  slug
+
+let ensure_image_artifact fixture =
+  let bytes = "\x89PNG\r\n\x1a\ntool-matrix-image" in
+  let dir =
+    Filename.concat
+      (Config_dir_resolver.keepers_dir ())
+      (fixture.meta.name ^ ".vision")
+  in
+  match Multimodal.Vision_artifact_store.store ~dir bytes with
+  | Ok handle -> Multimodal.Vision_artifact_store.to_string handle
+  | Error msg -> failwith ("failed to store analyze_image fixture: " ^ msg)
+
 let prepare_keeper_name fixture name =
   if
     List.mem name
-      [ "keeper_board_get"; "keeper_board_comment"; "keeper_board_vote";
-        "keeper_board_search" ]
+      [
+        "keeper_board_post_get";
+        "keeper_board_comment";
+        "keeper_board_vote";
+        "keeper_board_comment_vote";
+        "keeper_board_search";
+      ]
   then
     ignore (Generic.ensure_board_post fixture.generic);
   if
@@ -263,6 +314,13 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       `Assoc [ ("query", `String "memory needle"); ("limit", `Int 2) ]
   | "keeper_memory_write" ->
       `Assoc [ ("kind", `String "decision"); ("content", `String "tool matrix memory write content") ]
+  | "analyze_image" ->
+      `Assoc
+        [
+          ("artifact", `String (ensure_image_artifact fixture));
+          ("query", `String "Describe this test image.");
+          ("media_type", `String "image/png");
+        ]
   | "keeper_ide_annotate" ->
       `Assoc
         [
@@ -277,7 +335,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ("content", `String "tool-matrix-post");
           ("visibility", `String "internal");
         ]
-  | "keeper_board_get" ->
+  | "keeper_board_post_get" ->
       `Assoc [ ("post_id", `String (Generic.ensure_board_post fixture.generic)) ]
   | "keeper_board_list" -> `Assoc [ ("limit", `Int 5) ]
   | "keeper_board_curation_read" -> `Assoc []
@@ -295,17 +353,42 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ("post_id", `String (Generic.ensure_board_post fixture.generic));
           ("direction", `String "up");
         ]
+  | "keeper_board_comment_vote" ->
+      `Assoc
+        [
+          ("comment_id", `String (ensure_board_comment fixture));
+          ("direction", `String "up");
+        ]
   | "keeper_board_stats" -> `Assoc []
   | "keeper_board_search" ->
       `Assoc [ ("query", `String "tool-matrix"); ("limit", `Int 5) ]
+  | "keeper_board_sub_board_create" ->
+      `Assoc
+        [
+          ("slug", `String (sub_board_slug fixture));
+          ("name", `String "Tool Matrix SubBoard");
+          ("description", `String "Sub-board fixture for keeper matrix");
+          ("access", `String "open");
+        ]
+  | "keeper_board_sub_board_list" -> `Assoc []
+  | "keeper_board_sub_board_get" ->
+      `Assoc [ ("sub_board_id", `String (ensure_sub_board fixture)) ]
+  | "keeper_board_sub_board_update" ->
+      `Assoc
+        [
+          ("sub_board_id", `String (ensure_sub_board fixture));
+          ("name", `String "Tool Matrix SubBoard Updated");
+        ]
+  | "keeper_board_sub_board_delete" ->
+      `Assoc [ ("sub_board_id", `String (ensure_sub_board fixture)) ]
   | "tool_read_file" ->
-      `Assoc [ ("path", `String (ensure_sample_file fixture)) ]
+      `Assoc [ ("file_path", `String (ensure_sample_file fixture)) ]
   | "tool_edit_file" ->
       `Assoc
         [
-          ("path", `String "keeper-matrix-write.txt");
-          ("content", `String "matrix write\n");
-          ("mode", `String "overwrite");
+          ("file_path", `String (ensure_sample_file fixture));
+          ("old_string", `String "needle");
+          ("new_string", `String "edited needle");
         ]
   | "tool_search_files" ->
       `Assoc
@@ -316,7 +399,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   | "tool_write_file" ->
       `Assoc
         [
-          ("path", `String "keeper-matrix-write.txt");
+          ("file_path", `String "keeper-matrix-write.txt");
           ("content", `String "matrix write\n");
           ("mode", `String "overwrite");
         ]
@@ -383,6 +466,18 @@ let keeper_expectation_for_name name =
           "review format unrecognized";
           "Revise your completion notes";
         ]
+  | "analyze_image" ->
+      Expect_success_or_guard
+        [
+          "eio_context_unavailable";
+          "no_capable_runtime";
+          "provider_error";
+          "timeout";
+          "empty_extraction";
+          "truncated_extraction";
+        ]
+  | "keeper_ide_annotate" ->
+      Expect_success_or_guard [ "annotation sink is not installed" ]
   | "tool_read_file" ->
       (* Playground resolves paths under .masc/playground/<agent>/ but
          the sample file is written at base_path. File-not-found in
@@ -400,6 +495,7 @@ let extra_guard_fragments_for_name = function
         "no credential found" ]
   | "masc_auth_revoke" -> [ "no credential found" ]
   | "masc_board_migrate" -> [ "requires postgresql backend" ]
+  | "masc_dashboard" -> [ "Dashboard handler not registered" ]
   | "masc_get_metrics" -> [ "no metrics found" ]
   | "masc_fusion" ->
       [
@@ -408,12 +504,18 @@ let extra_guard_fragments_for_name = function
       ]
   | "masc_library_promote" -> [ "no candidate matching" ]
   | "masc_keeper_msg" ->
-      [ "keeper management tool"; "use MCP client"; "requires Eio context" ]
+      [
+        "keeper management tool";
+        "use MCP client";
+        "requires Eio context";
+        "keeper not found";
+      ]
   | "masc_keeper_sandbox_start" | "masc_keeper_sandbox_stop" ->
       [ "descriptor projection: cluster dispatcher did not recognise" ]
   | "masc_keeper_list" | "masc_keeper_msg_result"
   | "masc_keeper_msg_cancel" | "masc_keeper_msg_queue" | "masc_keeper_status" ->
       [ "keeper management tool"; "use MCP client" ]
+  | "masc_keeper_up" -> [ "server_initializing" ]
   | "tool_execute" -> [ "worktree not found" ]
   | _ -> []
 
@@ -455,6 +557,7 @@ let case_for_name name =
   else if
     string_starts_with ~prefix:"keeper_" name
     || string_starts_with ~prefix:"tool_" name
+    || String.equal name "analyze_image"
   then
     {
       init_mode = Init_joined;

@@ -53,8 +53,8 @@ let tool_case_timeout_sec () =
   | Some raw -> (
       match int_of_string_opt (String.trim raw) with
       | Some value when value > 0 -> value
-      | _ -> 25)
-  | None -> 25
+      | _ -> 60)
+  | None -> 60
 
 let runner_path () =
   let exe_dir = Filename.dirname Sys.executable_name in
@@ -191,7 +191,22 @@ let run_tool_case_process tool_name =
     if Sys.file_exists path then Cases.cleanup_dir path
   in
   let env =
-    env_array [ ("TMPDIR", tmp_root); ("TEMP", tmp_root); ("TMP", tmp_root) ]
+    env_array
+      [
+        ("TMPDIR", tmp_root);
+        ("TEMP", tmp_root);
+        ("TMP", tmp_root);
+        (* Inventory checks may initialize runtime/auth helpers in the parent
+           process. Keep child case runners isolated so they create their own
+           temp-base auth state instead of inheriting parent runtime tokens. *)
+        ("MASC_BASE_PATH", "");
+        ("MASC_BASE_PATH_INPUT", "");
+        ("MASC_CONFIG_DIR", "");
+        ("MASC_TOKEN", "");
+        ("MASC_INTERNAL_MCP_TOKEN", "");
+        ("MASC_ADMIN_TOKEN", "");
+        ("MCP_SESSION_ID", "");
+      ]
   in
   let prog, argv =
     match timeout_command () with

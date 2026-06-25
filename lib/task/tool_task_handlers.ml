@@ -346,11 +346,7 @@ let handle_add_task ~tool_name ~start_time ctx args =
                   ])
              ()
          | None ->
-           Tool_result.error
-             ~failure_class:(Some Tool_result.Workflow_rejection)
-             ~tool_name
-             ~start_time
-             summary)
+           Tool_result.ok ~tool_name ~start_time summary)
 
 (* RFC-0267 Phase 2: assign an existing goalless task to a goal. Thin adapter
    over [Task_goal_assignment.set_task_goal] — the single validated backend

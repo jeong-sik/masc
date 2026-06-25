@@ -113,6 +113,8 @@ let tally_of_records (records : record list) : tally =
         let last_at =
           match acc.last_at with
           | Some t when t >= r.recorded_at -> Some t
+          (* DET-OK: [recorded_at] is parsed input; the max fold is deterministic
+             for a fixed append-order record list. *)
           | _ -> Some r.recorded_at
         in
         { acc with last_at })

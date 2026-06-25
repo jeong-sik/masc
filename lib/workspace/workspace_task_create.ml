@@ -114,108 +114,113 @@ let add_task_with_result
         |> (function
           | Some msg -> Error (Rejected msg)
           | None ->
-        (* Dedup guard: reject if an active task with the same normalized title exists *)
-        (match find_duplicate_task backlog ~title with
-         | Some existing_id ->
-           Error (Duplicate { title; existing_id })
-         | None ->
-           let task_id = Printf.sprintf "task-%03d" (next_task_number config backlog) in
-           let contract =
-             Some
-               (Workspace_task_classify.ensure_task_contract_for_verification
-                  ?contract
-                  ~title
-                  ~description
-                  ())
-           in
-           let new_task =
-             { id = task_id
-             ; title
-             ; description
-             ; task_status = Todo
-             ; priority
-             ; files = []
-             ; created_at = now_iso ()
-             ; created_by
-             ; contract
-             ; handoff_context = None
-             ; cycle_count = 0
-             ; reclaim_policy = None
-             ; do_not_reclaim_reason = None
-             }
-           in
-           let new_backlog =
-             { tasks = backlog.tasks @ [ new_task ]
-             ; last_updated = now_iso ()
-             ; version = backlog.version + 1
-             }
-           in
-           write_backlog config new_backlog;
-           let link_result =
-             match goal_id with
-             | None -> Ok ()
-             | Some goal_id ->
-               Workspace_goal_index.link_task_to_goal_result
-                 config
-                 ~goal_id
-                 ~task_id
-           in
-           (match link_result with
-            | Error (Workspace_goal_index.Link_registry_unreadable msg) ->
-              write_backlog config backlog;
-              Printf.sprintf
-                "Error: goal_task_links update failed after task create; rolled \
-                 back %s: %s"
-                task_id
-                msg
-            | Error (Workspace_goal_index.Link_already_assigned existing_goal_ids) ->
-              write_backlog config backlog;
-              Printf.sprintf
-                "Error: goal_task_links update failed after task create; rolled \
-                 back %s because it is already linked to [%s]"
-                task_id
-                (String.concat ", " existing_goal_ids)
-            | Error Workspace_goal_index.Link_unknown_task ->
-              write_backlog config backlog;
-              Printf.sprintf
-                "Error: goal_task_links update failed after task create; rolled \
-                 back %s because the task was unknown"
-                task_id
-            | Error Workspace_goal_index.Link_unknown_goal ->
-              write_backlog config backlog;
-              Printf.sprintf
-                "Error: goal_task_links update failed after task create; rolled \
-                 back %s because the goal was unknown"
-                task_id
-            | Ok () ->
-           let created_by_json = Json_util.string_opt_to_json created_by in
-           Workspace_task_classify.emit_task_activity
-             config
-             ~agent_name:actor
-             ~task_id
-             ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
-             ~payload:
-               (`Assoc
-                   [ "task_id", `String task_id
-                   ; "title", `String title
-                   ; "goal_id", Json_util.string_opt_to_json goal_id
-                   ; "priority", `Int priority
-                   ; "created_by", created_by_json
-                   ; ( "strict_contract"
-                     , `Bool
-                         (match contract with
-                          | Some contract -> contract.strict
-                          | None -> false) )
-                   ]);
-           (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
-           let _ =
-             broadcast
-               config
-               ~from_agent:actor
-               ~content:(Printf.sprintf "New quest: %s" title)
-           in
-           let summary = Printf.sprintf "Added %s: %s" task_id title in
-           Ok { task_id; summary; title; priority; description; goal_id })))
+            (* Dedup guard: reject if an active task with the same normalized title exists *)
+            (match find_duplicate_task backlog ~title with
+             | Some existing_id -> Error (Duplicate { title; existing_id })
+             | None ->
+               let task_id =
+                 Printf.sprintf "task-%03d" (next_task_number config backlog)
+               in
+               let contract =
+                 Some
+                   (Workspace_task_classify.ensure_task_contract_for_verification
+                      ?contract
+                      ~title
+                      ~description
+                      ())
+               in
+               let new_task =
+                 { id = task_id
+                 ; title
+                 ; description
+                 ; task_status = Todo
+                 ; priority
+                 ; files = []
+                 ; created_at = now_iso ()
+                 ; created_by
+                 ; contract
+                 ; handoff_context = None
+                 ; cycle_count = 0
+                 ; reclaim_policy = None
+                 ; do_not_reclaim_reason = None
+                 }
+               in
+               let new_backlog =
+                 { tasks = backlog.tasks @ [ new_task ]
+                 ; last_updated = now_iso ()
+                 ; version = backlog.version + 1
+                 }
+               in
+               write_backlog config new_backlog;
+               let link_result =
+                 match goal_id with
+                 | None -> Ok ()
+                 | Some goal_id ->
+                   Workspace_goal_index.link_task_to_goal_result
+                     config
+                     ~goal_id
+                     ~task_id
+               in
+               let rollback_link_error msg =
+                 write_backlog config backlog;
+                 Error (Unexpected_error msg)
+               in
+               (match link_result with
+                | Error (Workspace_goal_index.Link_registry_unreadable msg) ->
+                  rollback_link_error
+                    (Printf.sprintf
+                       "Error: goal_task_links update failed after task create; \
+                        rolled back %s: %s"
+                       task_id
+                       msg)
+                | Error (Workspace_goal_index.Link_already_assigned existing_goal_ids) ->
+                  rollback_link_error
+                    (Printf.sprintf
+                       "Error: goal_task_links update failed after task create; \
+                        rolled back %s because it is already linked to [%s]"
+                       task_id
+                       (String.concat ", " existing_goal_ids))
+                | Error Workspace_goal_index.Link_unknown_task ->
+                  rollback_link_error
+                    (Printf.sprintf
+                       "Error: goal_task_links update failed after task create; \
+                        rolled back %s because the task was unknown"
+                       task_id)
+                | Error Workspace_goal_index.Link_unknown_goal ->
+                  rollback_link_error
+                    (Printf.sprintf
+                       "Error: goal_task_links update failed after task create; \
+                        rolled back %s because the goal was unknown"
+                       task_id)
+                | Ok () ->
+                  let created_by_json = Json_util.string_opt_to_json created_by in
+                  Workspace_task_classify.emit_task_activity
+                    config
+                    ~agent_name:actor
+                    ~task_id
+                    ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
+                    ~payload:
+                      (`Assoc
+                          [ "task_id", `String task_id
+                          ; "title", `String title
+                          ; "goal_id", Json_util.string_opt_to_json goal_id
+                          ; "priority", `Int priority
+                          ; "created_by", created_by_json
+                          ; ( "strict_contract"
+                            , `Bool
+                                (match contract with
+                                 | Some contract -> contract.strict
+                                 | None -> false) )
+                          ]);
+                  (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
+                  let _ =
+                    broadcast
+                      config
+                      ~from_agent:actor
+                      ~content:(Printf.sprintf "New quest: %s" title)
+                  in
+                  let summary = Printf.sprintf "Added %s: %s" task_id title in
+                  Ok { task_id; summary; title; priority; description; goal_id })))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Unexpected_error (Printexc.to_string e))
@@ -296,28 +301,32 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
                 (fun ((task : Masc_domain.task), goal_id) -> task.id, goal_id)
                 added_tasks_with_goal_ids)
          in
+         let rollback_link_error msg =
+           write_backlog config backlog;
+           Error (Batch_unexpected_error msg)
+         in
          (match link_result with
           | Error (Workspace_goal_index.Link_registry_unreadable msg) ->
-            write_backlog config backlog;
-            Printf.sprintf
-              "Error adding batch tasks: goal_task_links update failed after \
-               task create; rolled back batch: %s"
-              msg
+            rollback_link_error
+              (Printf.sprintf
+                 "Error adding batch tasks: goal_task_links update failed after \
+                  task create; rolled back batch: %s"
+                 msg)
           | Error (Workspace_goal_index.Link_already_assigned existing_goal_ids) ->
-            write_backlog config backlog;
-            Printf.sprintf
-              "Error adding batch tasks: goal_task_links update failed after \
-               task create; rolled back batch because a task is already linked \
-               to [%s]"
-              (String.concat ", " existing_goal_ids)
+            rollback_link_error
+              (Printf.sprintf
+                 "Error adding batch tasks: goal_task_links update failed after \
+                  task create; rolled back batch because a task is already linked \
+                  to [%s]"
+                 (String.concat ", " existing_goal_ids))
           | Error Workspace_goal_index.Link_unknown_task ->
-            write_backlog config backlog;
-            "Error adding batch tasks: goal_task_links update failed after task \
-             create; rolled back batch because a task was unknown"
+            rollback_link_error
+              "Error adding batch tasks: goal_task_links update failed after task \
+               create; rolled back batch because a task was unknown"
           | Error Workspace_goal_index.Link_unknown_goal ->
-            write_backlog config backlog;
-            "Error adding batch tasks: goal_task_links update failed after task \
-             create; rolled back batch because a goal was unknown"
+            rollback_link_error
+              "Error adding batch tasks: goal_task_links update failed after task \
+               create; rolled back batch because a goal was unknown"
           | Ok () ->
          List.iter
            (fun ((task : Masc_domain.task), goal_id) ->

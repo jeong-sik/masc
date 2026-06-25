@@ -6,32 +6,43 @@ let fork_logged_fiber = Server_bootstrap_loops_fiber.fork_logged_fiber
 let log_server_fiber_crash =
   Server_bootstrap_loops_fiber.log_server_fiber_crash
 
+(* Per-keeper Memory OS consolidation cadence. Coarser than the Tier-2 cross-
+   keeper consolidator (300s) because this pass calls the LLM, so a 10-minute
+   interval bounds cost while still shrinking keeper Tier-1 stores. *)
+let memory_os_keeper_consolidation_interval_s = 600.0
+
 (* Resolve the provider config for the Memory OS per-keeper consolidation pass.
-   Env var takes precedence; otherwise inherit the librarian runtime so the
-   consolidation LLM uses the same JSON-capable model the librarian uses.
-   An explicit but unknown runtime ID is logged and falls back to the default
-   so typos in operator config are not silently masked. *)
+   - If [MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID] is set explicitly, it
+     must resolve to a known runtime; otherwise the tick is skipped (fail-fast)
+     rather than silently substituting the default model. Consolidation rewrites
+     keeper memory, so running the wrong model is worse than skipping.
+   - If the env var is unset, inherit the librarian runtime, then the default
+     runtime, which are load-time validated and therefore safe fallbacks. *)
 let provider_cfg_for_memory_os_consolidation () =
-  let default_cfg () =
-    Runtime.get_default_runtime ()
+  let cfg_of_id id =
+    Runtime.get_runtime_by_id id
     |> Option.map (fun rt -> rt.Runtime.provider_config)
   in
-  let runtime_id =
-    match Keeper_memory_bank_env.memory_env_opt "MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID" with
-    | Some id -> Some id
-    | None -> Runtime.librarian_runtime_id ()
-  in
-  match runtime_id with
-  | None -> default_cfg ()
+  match Keeper_memory_bank_env.memory_env_opt "MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID" with
   | Some id ->
-    (match Runtime.get_runtime_by_id id with
-     | Some rt -> Some rt.Runtime.provider_config
+    (match cfg_of_id id with
+     | Some cfg -> Some cfg
      | None ->
        Log.Server.warn
-         "memory_os_keeper_consolidation: requested runtime %s not found; \
-          falling back to default"
+         "memory_os_keeper_consolidation: explicit runtime %s not found; \
+          skipping tick"
          id;
-       default_cfg ())
+       None)
+  | None ->
+    let id =
+      match Runtime.librarian_runtime_id () with
+      | Some id -> id
+      | None ->
+        (match Runtime.get_default_runtime () with
+         | Some rt -> rt.Runtime.id
+         | None -> "")
+    in
+    if String.equal id "" then None else cfg_of_id id
 ;;
 
 (* Run one consolidation pass over every keeper that currently has a fact store.
@@ -380,9 +391,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       ~sw
       ~on_error:(log_server_fiber_crash "memory_os_keeper_consolidation")
       (fun () ->
-        (* Coarser than Tier-2 consolidation (300s): this pass calls the LLM,
-           so a 10-minute cadence bounds cost while still shrinking stores. *)
-        let interval = 600.0 in
+        let interval = memory_os_keeper_consolidation_interval_s in
         let rec loop () =
           (match provider_cfg_for_memory_os_consolidation () with
            | None ->

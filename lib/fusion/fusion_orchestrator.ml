@@ -211,7 +211,10 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
              강제할 때까지 defer). 단일-심판 노드는 [Single], 1차 심판 실패는 단일-심판
              위상에선 그대로 전파(Simple과 동일 에러 의미)하고 실패 노드 한 건만 남긴다. *)
           let judge_full, judge_nodes =
-            match Fusion_types.judge_skip_reason panel with
+            match
+              Fusion_types.judge_skip_reason
+                ~min_answered:preset.Fusion_policy.min_answered panel
+            with
             | Some reason ->
               (* 패널 전원 실패 — 종합할 답이 없다. judge를 빈 패널로 호출하면 빈
                  <panel_answers>로 환각 종합을 만들어 0-패널 결과를 정상처럼 표출한다.

@@ -44,6 +44,7 @@ let base_policy : Fusion_policy.t =
           ; judge_system_prompt = "judge"
           ; judge_timeout_s = 300.0
           ; judges = []
+          ; min_answered = 1
           }
       ]
   }
@@ -582,13 +583,14 @@ let test_config_disabled_with_preset () =
    목표 결함 하나만 두고 나머지는 유효하게 해, 검증 순서(size→prompt→judge→dup→mtc)에서
    그 변형이 발화하는지 확인한다. private 타입이라 외부는 of_preset로만 t를 만든다. *)
 let mk_preset ?(panels = [ base_group ]) ?(judge = "j") ?(judge_prompt = "synthesize")
-    ?(judges = []) (name : string) : Fusion_policy.preset =
+    ?(judges = []) ?(min_answered = 1) (name : string) : Fusion_policy.preset =
   { Fusion_policy.name
   ; panels
   ; judge
   ; judge_system_prompt = judge_prompt
   ; judge_timeout_s = 300.0
   ; judges
+  ; min_answered
   }
 
 let test_validated_ok () =
@@ -1061,15 +1063,40 @@ let test_judge_outcome_roundtrip () =
 let test_judge_skip_reason () =
   let answered m a : panel_outcome = Answered { model = m; answer = a; usage = zero_usage } in
   let failed m : panel_outcome = Failed { failed_model = m; reason = Provider_error "x" } in
-  let opt = Alcotest.(option string) in
-  Alcotest.(check opt) "all failed => skip" (Some no_panel_answers_error)
-    (judge_skip_reason [ failed "a"; failed "b" ]);
-  Alcotest.(check opt) "empty panel => skip" (Some no_panel_answers_error)
-    (judge_skip_reason []);
-  Alcotest.(check opt) "one answered => run" None
-    (judge_skip_reason [ failed "a"; answered "b" "hi" ]);
-  Alcotest.(check opt) "all answered => run" None
-    (judge_skip_reason [ answered "a" "x"; answered "b" "y" ])
+  let skips ~min_answered os = Option.is_some (judge_skip_reason ~min_answered os) in
+  (* default floor 1: all-failed/empty => skip; >= 1 answered => run *)
+  Alcotest.(check bool) "min1 all failed => skip" true
+    (skips ~min_answered:1 [ failed "a"; failed "b" ]);
+  Alcotest.(check bool) "min1 empty => skip" true (skips ~min_answered:1 []);
+  Alcotest.(check bool) "min1 one answered => run" false
+    (skips ~min_answered:1 [ failed "a"; answered "b" "hi" ]);
+  (* quorum 2 (e.g. trio min_answered=2): 1 answered => skip, 2 answered => run *)
+  Alcotest.(check bool) "min2 one answered => skip" true
+    (skips ~min_answered:2 [ answered "a" "x"; failed "b"; failed "c" ]);
+  Alcotest.(check bool) "min2 two answered => run" false
+    (skips ~min_answered:2 [ answered "a" "x"; answered "b" "y"; failed "c" ]);
+  (* skip message reports the required quorum *)
+  match judge_skip_reason ~min_answered:2 [ answered "a" "x"; failed "b" ] with
+  | Some msg ->
+    Alcotest.(check bool) "msg mentions required count" true
+      (Option.is_some (String.index_opt msg '2') && String.length msg > 0)
+  | None -> Alcotest.fail "expected skip when 1 < min_answered 2"
+
+(* min_answered must be in 1..(panel model total). base_group has 3 models, so 0
+   and 99 are both out of range and must be rejected by of_preset. *)
+let test_validated_bad_min_answered () =
+  let check_bad mn label =
+    match Fusion_policy.Validated_preset.of_preset (mk_preset ~min_answered:mn label) with
+    | Error (Fusion_policy.Validated_preset.Bad_min_answered got) ->
+      Alcotest.(check int) (label ^ " reports value") mn got
+    | _ -> Alcotest.failf "%s: expected Bad_min_answered" label
+  in
+  check_bad 0 "min_answered=0";
+  check_bad 99 "min_answered>panels";
+  (* in-range stays Ok (3 models, require 3) *)
+  match Fusion_policy.Validated_preset.of_preset (mk_preset ~min_answered:3 "ok3") with
+  | Ok _ -> ()
+  | Error _ -> Alcotest.fail "min_answered=3 with 3 panels should be Ok"
 
 let () =
   Alcotest.run "fusion_core"
@@ -1156,5 +1183,7 @@ let () =
     ; ( "judge_outcome"
       , [ Alcotest.test_case "roundtrip" `Quick test_judge_outcome_roundtrip ] )
     ; ( "panel_guard"
-      , [ Alcotest.test_case "judge_skip_reason" `Quick test_judge_skip_reason ] )
+      , [ Alcotest.test_case "judge_skip_reason" `Quick test_judge_skip_reason
+        ; Alcotest.test_case "min_answered_range" `Quick test_validated_bad_min_answered
+        ] )
     ]

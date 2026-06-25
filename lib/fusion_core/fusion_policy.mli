@@ -50,6 +50,10 @@ type preset =
   ; judges : judge_spec list
       (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
+  ; min_answered : int
+      (** 심판을 돌리기 위해 응답해야 하는 패널 최소 수 (런타임 quorum). 기본 1.
+          [answered_of] 수가 이 값 미만이면 orchestrator는 심판을 건너뛰고
+          [judge = Error]로 완료한다 (빈 패널 종합 날조 방지). [1..모델 총합] 범위. *)
   }
 [@@deriving show, eq]
 
@@ -133,8 +137,10 @@ module Validated_preset : sig
         (** 그룹 또는 JOJ 1차 심판 max_tool_calls가 0..[max_tool_calls_ceiling] 밖 *)
     | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0283) *)
     | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성 (RFC-0283) *)
+    | Bad_min_answered of int
+        (** [min_answered]가 [1..모델 총합] 밖 (요구 응답 수 > 패널 수면 항상 실패) *)
 
-  (** 검증 순서: size → prompt → judge → 정체성 중복 → max_tool_calls. 통과 시
+  (** 검증 순서: size → prompt → judge → 정체성 중복 → max_tool_calls → min_answered. 통과 시
       [Ok vp], 첫 위반에서 [Error invalid]. config 로드의 검증 순서와 동일. *)
   val of_preset : preset -> (t, invalid) result
 

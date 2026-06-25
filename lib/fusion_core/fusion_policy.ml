@@ -41,6 +41,8 @@ type preset =
   ; judges : judge_spec list
       (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
+  ; min_answered : int
+      (** 심판 실행에 필요한 응답 패널 최소 수 (런타임 quorum). 기본 1. *)
   }
 [@@deriving show, eq]
 
@@ -181,6 +183,8 @@ module Validated_preset = struct
         (** 그룹 또는 JOJ 1차 심판 max_tool_calls가 0..max_tool_calls_ceiling 밖 *)
     | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0283) *)
     | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성(judge_id) (RFC-0283) *)
+    | Bad_min_answered of int
+        (** [min_answered]가 [1..모델 총합] 밖 (요구 응답 수 > 패널 수면 항상 실패) *)
 
   (* 검증 순서는 config 로드 시점과 동일(byte-identical config_error): size → 패널 prompt →
      judge model → 패널 정체성 중복 → 패널 max_tool_calls 범위 → (RFC-0283) 1차 심판 prompt
@@ -215,7 +219,13 @@ module Validated_preset = struct
                     p.judges
                 with
                 | Some j -> Error (Bad_max_tool_calls j.jmax_tool_calls)
-                | None -> Ok p)))
+                | None ->
+                  (* min_answered는 1..모델 총합. size_ok가 이미 총합 >= 1을 보장하므로
+                     상한은 의미가 있다(요구 응답 수가 패널 수보다 크면 항상 실패). *)
+                  let total = List.length (preset_models p) in
+                  if p.min_answered < 1 || p.min_answered > total
+                  then Error (Bad_min_answered p.min_answered)
+                  else Ok p)))
 
   let preset (t : t) : preset = t
 

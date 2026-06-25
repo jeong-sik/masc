@@ -75,7 +75,7 @@ type KeeperInterjectActionKind = 'send' | 'approve' | 'pause' | 'drain'
 
 const TOOL_ONLY_EMPTY_REPLY_TEXT = 'Tool-only turn ended without a final reply.'
 const pendingKeeperThreadCancels = new Map<string, Promise<boolean>>()
-const confirmedKeeperThreadCancels = new Set<string>()
+const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'lost', 'cancelled'])
 
 interface KeeperInterjectCommand {
   readonly kind: KeeperInterjectActionKind
@@ -102,24 +102,26 @@ function keeperThreadCancelFailureMessage(keeperName: string, requestId: string,
 
 export function _resetCancelledKeeperThreadRequestsForTests(): void {
   pendingKeeperThreadCancels.clear()
-  confirmedKeeperThreadCancels.clear()
 }
 
 function releaseKeeperThreadCancelTracking(requestId: string): void {
   pendingKeeperThreadCancels.delete(requestId)
-  confirmedKeeperThreadCancels.delete(requestId)
 }
 
-export function cancelKeeperThreadRequest(keeperName: string, requestId: string): Promise<boolean> {
+export function cancelKeeperThreadRequest(
+  keeperName: string,
+  requestId: string,
+  opts: { signal?: AbortSignal } = {},
+): Promise<boolean> {
   const name = keeperName.trim()
   const id = requestId.trim()
   if (!name || !id) return Promise.resolve(false)
-  if (confirmedKeeperThreadCancels.has(id)) return Promise.resolve(true)
   const existing = pendingKeeperThreadCancels.get(id)
   if (existing) return existing
-  const promise = cancelQueuedKeeperMessage(id)
+  const promise = (opts.signal
+    ? cancelQueuedKeeperMessage(id, { signal: opts.signal })
+    : cancelQueuedKeeperMessage(id))
     .then(() => {
-      confirmedKeeperThreadCancels.add(id)
       removePendingKeeperChatRequest(id)
       clearActiveStreamRequestId(name)
       setRecordValue(keeperActionErrors, name, null)
@@ -142,15 +144,22 @@ export async function cancelActiveKeeperThreadMessage(name: string): Promise<boo
   const keeperName = name.trim()
   if (!keeperName) return false
   const requestIdBeforeAbort = activeStreamRequestId(keeperName)
+  let serverCancelSucceeded = true
   if (requestIdBeforeAbort) {
-    const cancelSucceeded = await cancelKeeperThreadRequest(keeperName, requestIdBeforeAbort)
-    if (!cancelSucceeded) return false
+    serverCancelSucceeded = await cancelKeeperThreadRequest(keeperName, requestIdBeforeAbort)
   }
   const abortResult = abortKeeperThreadMessage(keeperName)
   const requestId = requestIdBeforeAbort ?? abortResult?.requestId ?? null
-  if (!requestId) return Boolean(abortResult?.controllerAborted || abortResult?.entryId)
-  if (requestId === requestIdBeforeAbort) return true
-  return cancelKeeperThreadRequest(keeperName, requestId)
+  if (requestId && requestId !== requestIdBeforeAbort) {
+    serverCancelSucceeded = await cancelKeeperThreadRequest(keeperName, requestId)
+  }
+  const locallyAborted = Boolean(abortResult?.controllerAborted || abortResult?.entryId)
+  if (!serverCancelSucceeded) {
+    // The backend may still finish and surface via pending request recovery, but
+    // the operator must not be trapped behind an un-abortable local stream.
+    return locallyAborted || Boolean(requestId)
+  }
+  return locallyAborted || Boolean(requestId)
 }
 
 export function selectKeeper(name: string): void {
@@ -778,6 +787,9 @@ export async function sendKeeperThreadMessage(
             const message = 'Keeper queue request event missing request_id; server cancel unavailable.'
             console.warn(`[keeper] ${message}`)
             setRecordValue(keeperActionErrors, keeperName, message)
+          } else if (controller.signal.aborted) {
+            requestId = nextRequestId
+            void cancelKeeperThreadRequest(keeperName, nextRequestId)
           } else {
             requestId = nextRequestId
             // This live send now owns the request; resume must defer to it
@@ -794,9 +806,14 @@ export async function sendKeeperThreadMessage(
           }
         }
         if (event.type === 'CUSTOM' && event.name === 'KEEPER_REQUEST_TERMINAL' && isRecord(event.value)) {
-          requestTerminalSeen = true
           const terminalRequestId = asString(event.value.request_id, '').trim()
-          if (terminalRequestId) removePendingKeeperChatRequest(terminalRequestId)
+          const status = asString(event.value.status, '').trim()
+          const matchesActiveRequest =
+            Boolean(terminalRequestId) && requestId !== null && terminalRequestId === requestId
+          if (matchesActiveRequest && TERMINAL_REQUEST_STATUSES.has(status)) {
+            requestTerminalSeen = true
+            removePendingKeeperChatRequest(terminalRequestId)
+          }
         }
         const error = applyKeeperStreamEvent(keeperName, assistantId, event)
         if (error) {
@@ -871,9 +888,11 @@ export async function sendKeeperThreadMessage(
     }
   } catch (err) {
     if (isAbortError(err)) {
-      let cancelSucceeded = true
-      if (requestId) {
-        cancelSucceeded = await cancelKeeperThreadRequest(keeperName, requestId)
+      let cancelSucceeded = requestId ? false : true
+      if (requestId && !controller.signal.aborted) {
+        cancelSucceeded = await cancelKeeperThreadRequest(keeperName, requestId, {
+          signal: controller.signal,
+        })
       }
       finalizeAssistantEntry(keeperName, localId, {
         delivery: 'cancelled',

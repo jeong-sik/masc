@@ -179,6 +179,21 @@ function formatEligible(seconds?: number | null): string | null {
   return `${Math.ceil(seconds / 60)}m`
 }
 
+function cancelKeeperThreadFromUi(keeperName: string): void {
+  void cancelActiveKeeperThreadMessage(keeperName)
+    .then(cancelled => {
+      if (!cancelled) {
+        console.warn(`[keeper] no active keeper stream to cancel for ${keeperName}`)
+      }
+    })
+    .catch(err => {
+      console.error(
+        `[keeper] failed to cancel active keeper stream for ${keeperName}`,
+        err instanceof Error ? err.message : err,
+      )
+    })
+}
+
 function conversationStateLabel(sending: boolean, hydrating: boolean, stalled: boolean): string {
   if (sending) return stalled ? '응답 지연' : '답변 중...'
   if (hydrating) return '불러오는 중...'
@@ -724,7 +739,7 @@ export function KeeperConversationPanel({
               queueCount=${queueCount}
               commands=${composerCommands}
               onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
-              onAbort=${() => { void cancelActiveKeeperThreadMessage(keeperName) }}
+              onAbort=${() => { cancelKeeperThreadFromUi(keeperName) }}
               layout="primary"
             />
             ${error ? html`<div class="mt-2 text-xs text-[var(--bad-light)] leading-relaxed v2-monitoring-panel">${error}</div>` : null}
@@ -842,7 +857,7 @@ export function KeeperConversationPanel({
             queueCount=${queueCount}
             commands=${composerCommands}
             onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
-            onAbort=${() => { void cancelActiveKeeperThreadMessage(keeperName) }}
+            onAbort=${() => { cancelKeeperThreadFromUi(keeperName) }}
             layout="primary"
           />
         </div>
@@ -958,7 +973,7 @@ export function KeeperConversationPanel({
             queueCount=${queueCount}
             commands=${composerCommands}
             onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
-            onAbort=${() => { void cancelActiveKeeperThreadMessage(keeperName) }}
+            onAbort=${() => { cancelKeeperThreadFromUi(keeperName) }}
           />
         </div>
       </div>

@@ -20,6 +20,7 @@ import {
 import { isRecord, asString } from './components/common/normalize'
 
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
+const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'lost', 'cancelled'])
 
 // Most recent TOOL_CALL_START id per keeper — fallback target for
 // TOOL_CALL_ARGS / TOOL_CALL_END events that omit toolCallId.
@@ -166,9 +167,17 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_REQUEST_TERMINAL') {
-        clearActiveStreamRequestId(keeperName)
         const terminal = isRecord(event.value) ? event.value : null
+        const terminalRequestId = asString(terminal?.request_id, '').trim()
+        const currentRequestId = activeStreamRequestId(keeperName)
         const status = asString(terminal?.status, '').trim()
+        if (terminalRequestId && currentRequestId && terminalRequestId !== currentRequestId) {
+          return null
+        }
+        if (!TERMINAL_REQUEST_STATUSES.has(status)) {
+          return null
+        }
+        clearActiveStreamRequestId(keeperName)
         const ok = terminal?.ok === true
         if (status === 'cancelled') {
           const message =

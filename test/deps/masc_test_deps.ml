@@ -105,12 +105,14 @@ let read_file path =
       (fun () ->
         let n = in_channel_length ic in
         really_input_string ic n)
-  with exn ->
+  (* Catch only [Sys_error] so OOM/Stack_overflow/Sys.Break and other fatal or
+     async exceptions propagate instead of being folded into a [Failure]. *)
+  with Sys_error msg ->
     failwith
       (Printf.sprintf
          "Masc_test_deps.read_file failed for %S: %s"
          path
-         (Printexc.to_string exn))
+         msg)
 
 let read_source_file rel = read_file (source_path rel)
 

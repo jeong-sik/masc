@@ -163,6 +163,49 @@ let test_malformed_counted_not_fatal () =
     check "malformed: not_helpful=1" (t.F.not_helpful = 1);
     check "malformed: count=2 (non-json + non-record)" (t.F.malformed = 2))
 
+(* ── HTTP wire helpers (tally_to_json / record_of_request_body) ───────── *)
+
+let member k = function `Assoc fs -> List.assoc_opt k fs | _ -> None
+
+let test_tally_to_json () =
+  let t =
+    F.tally_of_records
+      [ mk ~turn_id:"t1" ~signal:F.Helpful ~recorded_at:1.0 ()
+      ; mk ~turn_id:"t2" ~signal:F.Not_helpful ~recorded_at:2.0 ()
+      ]
+  in
+  let j = F.tally_to_json t in
+  check "json helpful" (member "helpful" j = Some (`Int 1));
+  check "json not_helpful" (member "not_helpful" j = Some (`Int 1));
+  check "json net" (member "net" j = Some (`Int 0));
+  check "json malformed" (member "malformed" j = Some (`Int 0));
+  check "json last_at" (member "last_at" j = Some (`Float 2.0));
+  (* empty tally -> last_at null *)
+  check "empty last_at null" (member "last_at" (F.tally_to_json F.empty_tally) = Some `Null)
+
+let body signal source turn_id =
+  `Assoc
+    [ ("signal", `String signal); ("source", `String source); ("turn_id", `String turn_id) ]
+
+let test_record_of_request_body () =
+  (match F.record_of_request_body ~keeper_id:"k1" ~recorded_at:7.0 (body "up" "dashboard" "t9") with
+   | Ok r ->
+     check "parsed keeper_id from path" (r.F.keeper_id = "k1");
+     check "parsed recorded_at from clock" (r.F.recorded_at = 7.0);
+     check "parsed signal" (r.F.signal = F.Helpful);
+     check "parsed turn_id" (r.F.turn_id = "t9")
+   | Error e -> failwith ("expected Ok, got: " ^ e));
+  check "unknown signal -> Error"
+    (Result.is_error (F.record_of_request_body ~keeper_id:"k" ~recorded_at:0. (body "love" "dashboard" "t")));
+  check "unknown source -> Error"
+    (Result.is_error (F.record_of_request_body ~keeper_id:"k" ~recorded_at:0. (body "up" "discord" "t")));
+  check "blank turn_id -> Error"
+    (Result.is_error (F.record_of_request_body ~keeper_id:"k" ~recorded_at:0. (body "up" "dashboard" "  ")));
+  check "missing field -> Error"
+    (Result.is_error (F.record_of_request_body ~keeper_id:"k" ~recorded_at:0. (`Assoc [ ("signal", `String "up") ])));
+  check "non-object -> Error"
+    (Result.is_error (F.record_of_request_body ~keeper_id:"k" ~recorded_at:0. (`String "x")))
+
 let () =
   test_signal_wire_roundtrip ();
   test_signal_unknown_is_error ();
@@ -176,4 +219,6 @@ let () =
   test_sink_roundtrip ();
   test_read_missing_log_is_empty ();
   test_malformed_counted_not_fatal ();
+  test_tally_to_json ();
+  test_record_of_request_body ();
   print_endline "test_keeper_response_feedback: OK"

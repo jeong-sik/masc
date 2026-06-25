@@ -100,3 +100,18 @@ val read_tally :
     vote is counted and visible — never silently skipped to zero, never fatally
     zeroing the whole tally. A missing log (no votes yet) reads as
     {!empty_tally}; a read IO fault on an existing log surfaces as [`Io]. *)
+
+(** {2 HTTP wire helpers — consumed by the GET/POST feedback route} *)
+
+val tally_to_json : tally -> Yojson.Safe.t
+(** Wire form of a {!tally} for the read API
+    (GET [/api/v1/keepers/:name/feedback]). [last_at] serializes as a JSON
+    number or [null]. *)
+
+val record_of_request_body :
+  keeper_id:string -> recorded_at:float -> Yojson.Safe.t -> (record, string) result
+(** Parse a vote POST body [{ "signal", "source", "turn_id" }] into a
+    {!record}. [keeper_id] comes from the route path and [recorded_at] from the
+    server clock — neither is taken from (or trusted in) the body. Strict: an
+    unknown signal/source token, or a missing/blank turn_id, returns [Error]
+    rather than a default. *)

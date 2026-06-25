@@ -153,3 +153,35 @@ let read_tally ~(config : Workspace.config) ~keeper_id : (tally, [ `Io of string
     in
     let base = tally_of_records (List.rev records) in
     Ok { base with malformed = json_malformed + semantic_malformed }
+
+(* ── HTTP wire helpers (GET/POST feedback route) ─────────────────────── *)
+
+let tally_to_json (t : tally) : Yojson.Safe.t =
+  let last_at = match t.last_at with Some f -> `Float f | None -> `Null in
+  `Assoc
+    [ ("helpful", `Int t.helpful)
+    ; ("not_helpful", `Int t.not_helpful)
+    ; ("cleared", `Int t.cleared)
+    ; ("net", `Int t.net)
+    ; ("malformed", `Int t.malformed)
+    ; ("last_at", last_at)
+    ]
+
+let record_of_request_body ~keeper_id ~recorded_at (body : Yojson.Safe.t) :
+    (record, string) result =
+  match body with
+  | `Assoc fields ->
+    let get k = List.assoc_opt k fields in
+    (match get "signal", get "source", get "turn_id" with
+     | Some (`String sig_s), Some (`String src_s), Some (`String turn_id) ->
+       (match signal_of_wire sig_s, source_of_wire src_s with
+        | Ok signal, Ok source ->
+          if String.length (String.trim turn_id) = 0 then
+            Error "keeper_response_feedback: turn_id is required"
+          else Ok { keeper_id; turn_id; signal; source; recorded_at }
+        | Error e, _ -> Error e
+        | _, Error e -> Error e)
+     | _ ->
+       Error
+         "keeper_response_feedback: body needs string signal/source/turn_id")
+  | _ -> Error "keeper_response_feedback: expected JSON object"

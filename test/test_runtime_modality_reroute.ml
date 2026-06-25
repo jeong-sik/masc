@@ -291,7 +291,7 @@ let test_degrade_manifest_public_projection () =
       ~runtime_id:"text-runtime"
       [ ("image", 1); ("audio", 2) ]
   in
-  let public = Keeper_runtime_manifest.public_projection_of_decision decision in
+  let public = Masc.Keeper_runtime_manifest.public_projection_of_decision decision in
   check (option string) "routing action"
     (Some "media_degraded_to_text")
     (match assoc_field "routing_action" public with

@@ -270,8 +270,17 @@ let validate_known_payload_request ~payload ~risk_class =
          | None ->
            Error
              "masc.board_post payload requires object body with non-empty content; use board_content for board schedules")
-     | _ -> Ok ())
-  | _ -> Ok ()
+     | Some kind when Schedule_domain.is_side_effecting risk_class ->
+       (* Only side-effecting work needs a consumer adapter that can dispatch
+          it. Reject kinds the consumer cannot run so the queue is not filled
+          with work that dies at dispatch. Read-only/reminder kinds carry no
+          side effect, so their kind stays opaque to the schedule domain — a
+          consumer that does not recognize one records a visible failed
+          execution (fail_due_candidate), not a silent accept-then-die. *)
+       Error (Schedule_supported_kinds.unsupported_error kind)
+     | Some _ -> Ok ()
+     | None -> Error "payload.kind is required")
+  | _ -> Error "payload must be a JSON object"
 ;;
 
 let schedule_request_json ?last_execution (request : Schedule_domain.schedule_request) =

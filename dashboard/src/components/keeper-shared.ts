@@ -436,7 +436,6 @@ export function KeeperConversationPanel({
   layout?: 'default' | 'primary' | 'workspace'
   onInspectTurn?: (entry: KeeperConversationEntry) => void
 }) {
-  const [draft, setDraft] = useState('')
   const [showMetadata, setShowMetadata] = useState(readKeeperChatMetadataVisible())
   const [showInternal, setShowInternal] = useState(readKeeperChatInternalVisible())
 
@@ -553,15 +552,14 @@ export function KeeperConversationPanel({
     }
   }
 
-  const submit = async ({ blocks, userBlocks, clientActionId }: ChatComposerSendPayload) => {
-    const prompt = draft.trim()
+  const submit = async ({ blocks, userBlocks, clientActionId, text }: ChatComposerSendPayload) => {
+    const prompt = text
     if (chatAccess.blocked) {
       showToast(chatAccess.message, 'error')
       return
     }
     if (!keeperName || (!prompt && blocks.length === 0)) return
     const attachments = blocksToAttachments(blocks)
-    setDraft('')
     if (keeperSending.value[keeperName]) {
       if (
         isKeeperThreadMessageSendInFlight(keeperName, clientActionId)
@@ -699,7 +697,7 @@ export function KeeperConversationPanel({
                 `
               : null}
             <${ChatComposer}
-              draft=${draft}
+              key=${keeperName}
               placeholder=${chatAccess.blocked
                 ? '현재 actor는 direct keeper chat 권한이 없습니다'
                 : sending
@@ -711,7 +709,6 @@ export function KeeperConversationPanel({
               lastEventAt=${lastSignalAt}
               queueEnabled=${true}
               queueCount=${queueCount}
-              onDraftChange=${setDraft}
               onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
               onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
               layout="primary"
@@ -816,7 +813,7 @@ export function KeeperConversationPanel({
               `
             : null}
           <${ChatComposer}
-            draft=${draft}
+            key=${keeperName}
             placeholder=${chatAccess.blocked
               ? '현재 actor는 direct keeper chat 권한이 없습니다'
               : sending
@@ -828,7 +825,6 @@ export function KeeperConversationPanel({
             lastEventAt=${lastSignalAt}
             queueEnabled=${true}
             queueCount=${queueCount}
-            onDraftChange=${setDraft}
             onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
             onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
             layout="primary"
@@ -931,7 +927,7 @@ export function KeeperConversationPanel({
               `
             : null}
           <${ChatComposer}
-            draft=${draft}
+            key=${keeperName}
             placeholder=${chatAccess.blocked
               ? '현재 actor는 direct keeper chat 권한이 없습니다'
               : sending
@@ -943,7 +939,6 @@ export function KeeperConversationPanel({
             lastEventAt=${lastSignalAt}
             queueEnabled=${true}
             queueCount=${queueCount}
-            onDraftChange=${setDraft}
             onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
             onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
           />

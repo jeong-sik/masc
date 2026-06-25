@@ -236,7 +236,8 @@ let test_checkpoint_media_drives_reroute_and_floor () =
        (decide
           ~assigned:(caps ())
           ~required
-          ~candidates:[ ("text_b", caps ()); ("vision_c", caps ~image:true ()) ]));
+          ~candidates:[ ("text_b", caps ()); ("vision_c", caps ~image:true ()) ]
+          ()));
   match
     Runtime_agent.For_testing
     .validate_content_blocks_for_run_against_capabilities_with_checkpoint

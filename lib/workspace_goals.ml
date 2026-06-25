@@ -964,7 +964,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                                 )
                               ; ( "approval_request"
                                 , Goal_approval.approval_request_to_yojson request )
-                              ]);
+                              ]));
                     ok_result
                       ~tool_name
                       ~start_time

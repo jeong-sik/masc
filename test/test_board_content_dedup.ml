@@ -5,6 +5,8 @@
 
 open Masc
 
+module Board_core_status_rollup = Masc_board_handlers.Board_core_status_rollup
+
 let status_rollup_window_sec = 6. *. 60. *. 60.
 
 let () = Mirage_crypto_rng_unix.use_default ()
@@ -304,7 +306,7 @@ let test_status_rollup_window_uses_created_at () =
   in
   Hashtbl.add store.posts (Board.Post_id.to_string old_status.id) old_status;
   match
-    Board.find_status_rollup_target_unlocked
+    Board_core_status_rollup.find_status_rollup_target_unlocked
       store
       ~author_id
       ~hearth:None
@@ -327,7 +329,7 @@ let test_status_rollup_proof_terms_use_token_boundaries () =
   Alcotest.(check bool)
     "substring inside a larger token is not proof evidence"
     true
-    (Board_core_status_rollup.is_status_rollup_candidate
+    (Board.is_status_rollup_candidate
        ~post_kind:Board.Automation_post
        ~title:status_body
        ~body:status_body
@@ -335,7 +337,7 @@ let test_status_rollup_proof_terms_use_token_boundaries () =
   Alcotest.(check bool)
     "standalone proof term still blocks rollup"
     false
-    (Board_core_status_rollup.is_status_rollup_candidate
+    (Board.is_status_rollup_candidate
        ~post_kind:Board.Automation_post
        ~title:proof_body
        ~body:proof_body

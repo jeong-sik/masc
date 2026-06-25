@@ -933,6 +933,24 @@ describe('ChatComposer draft persistence (uncontrolled, per-keeper)', () => {
     expect(textarea.value).toBe('소주에 갑오징어')
   })
 
+  it('resyncs immediately when the draft key changes without a remount', () => {
+    let textarea = mountComposer('rondo')
+    fireEvent.input(textarea, { target: { value: 'rondo draft' } })
+
+    // Defensive path for future callers: even without key=${keeperName}
+    // remounting the composer, the new keeper must not briefly inherit the old
+    // keeper's visible buffer or write subsequent input under the wrong key.
+    textarea = mountComposer('qa-king')
+    expect(textarea.value).toBe('')
+
+    fireEvent.input(textarea, { target: { value: 'qa draft' } })
+    expect(readKeeperDraft('rondo')).toBe('rondo draft')
+    expect(readKeeperDraft('qa-king')).toBe('qa draft')
+
+    textarea = mountComposer('rondo')
+    expect(textarea.value).toBe('rondo draft')
+  })
+
   it('clears the persisted draft after a send', () => {
     const onSend = vi.fn()
     const textarea = mountComposer('rondo', onSend)

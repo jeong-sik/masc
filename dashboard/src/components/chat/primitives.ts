@@ -2930,29 +2930,51 @@ export function ChatComposer({
   const [drag, setDrag] = useState(false)
   const [attachments, setAttachments] = useState<KeeperConversationAttachment[]>([])
   const isControlled = typeof draftProp === 'string'
+  const draftPersistStoreKey = draftPersistKey?.trim() ?? ''
   // Lazy initializer: on (re)mount restore this keeper's persisted draft so a
   // keeper switch (key=${keeperName} remount) does not drop a half-typed
   // message. Controlled callers manage their own draft, so skip persistence.
-  const [internalDraft, setInternalDraft] = useState(
-    () => (!isControlled && draftPersistKey ? readKeeperDraft(draftPersistKey) : ''),
+  const [internalDraftState, setInternalDraftState] = useState<{ key: string | null; value: string }>(() =>
+    isControlled
+      ? { key: null, value: '' }
+      : {
+          key: draftPersistStoreKey,
+          value: draftPersistStoreKey ? readKeeperDraft(draftPersistStoreKey) : '',
+        },
   )
+  const internalDraft =
+    !isControlled && draftPersistStoreKey !== internalDraftState.key
+      ? draftPersistStoreKey
+        ? readKeeperDraft(draftPersistStoreKey)
+        : ''
+      : internalDraftState.value
   const draft = isControlled ? draftProp : internalDraft
   const setDraft = (value: string) => {
     if (isControlled) {
       onDraftChange?.(value)
     } else {
-      setInternalDraft(value)
-      if (draftPersistKey) writeKeeperDraft(draftPersistKey, value)
+      setInternalDraftState({ key: draftPersistStoreKey, value })
+      if (draftPersistStoreKey) writeKeeperDraft(draftPersistStoreKey, value)
     }
   }
   // External-store sync: a normal keeper switch remounts (key=${keeperName}) and
-  // the lazy initializer above already restored the draft. This effect covers
-  // the one case the initializer cannot — `draftPersistKey` changing without a
-  // remount — by reloading that key's draft, so the write key and the buffer
-  // never diverge into the cross-keeper leak this feature exists to prevent.
-  useEffect(() => {
-    if (!isControlled && draftPersistKey) setInternalDraft(readKeeperDraft(draftPersistKey))
-  }, [draftPersistKey, isControlled])
+  // the lazy initializer above already restored the draft. This layout effect
+  // covers the one case the initializer cannot — `draftPersistKey` changing
+  // without a remount. The render-time fallback above prevents a stale buffer
+  // from being shown for the new key; this effect aligns the internal state for
+  // the next edit.
+  useLayoutEffect(() => {
+    if (isControlled) {
+      if (internalDraftState.key !== null) setInternalDraftState({ key: null, value: '' })
+      return
+    }
+    if (draftPersistStoreKey !== internalDraftState.key) {
+      setInternalDraftState({
+        key: draftPersistStoreKey,
+        value: draftPersistStoreKey ? readKeeperDraft(draftPersistStoreKey) : '',
+      })
+    }
+  }, [draftPersistStoreKey, internalDraftState.key, isControlled])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 

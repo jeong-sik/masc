@@ -1227,7 +1227,7 @@
 
 /* roster row command menu */
 .kp-row { position: relative; }
-/* on hover the ⋯ takes the right slot — fade the time/att stack so they
+/* on hover the command menu button takes the right slot — fade the time/att stack so they
    don't collide with the absolutely-positioned button */
 .kp-row:hover .kp-right { opacity: 0; pointer-events: none; }
 .kp-more {

@@ -1763,6 +1763,35 @@ let test_render_if_enabled_empty_store_yields_none () =
       | Some block -> Alcotest.failf "expected None for empty store, got %S" block))
 ;;
 
+let test_render_if_enabled_surfaces_prompt_render_failure () =
+  with_recall_env "true" (fun () ->
+    with_temp_keepers_dir (fun keepers_dir ->
+      Fun.protect
+        ~finally:Prompt_registry.clear
+        (fun () ->
+          let keeper_id = "virtual-memory-keeper" in
+          let now = 1_000_000.0 in
+          Memory_io.append_fact
+            ~keeper_id
+            { (fact_fixture ~now ()) with Types.claim = "Hidden fact should not leak" };
+          Prompt_registry.clear ();
+          match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
+          | None -> Alcotest.fail "expected sanitized recall-unavailable block"
+          | Some block ->
+            Alcotest.(check bool)
+              "surfaces unavailable advisory"
+              true
+              (contains "Historical memory recall is unavailable" block);
+            Alcotest.(check bool)
+              "classifies prompt failure without raw template error"
+              true
+              (contains "reason=prompt_render_error" block);
+            Alcotest.(check bool)
+              "does not render fact text after prompt failure"
+              false
+              (contains "Hidden fact should not leak" block))))
+;;
+
 let test_render_if_enabled_renders_persisted_memory () =
   with_recall_env "true" (fun () ->
     with_prompt_registry (fun () ->
@@ -3977,6 +4006,10 @@ let () =
             "render_if_enabled empty store yields none"
             `Quick
             test_render_if_enabled_empty_store_yields_none
+        ; Alcotest.test_case
+            "render_if_enabled surfaces prompt render failure"
+            `Quick
+            test_render_if_enabled_surfaces_prompt_render_failure
         ; Alcotest.test_case
             "render_if_enabled renders persisted memory"
             `Quick

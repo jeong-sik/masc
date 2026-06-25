@@ -144,6 +144,25 @@ let render_prompt_template key variables =
   | Error msg -> Error (Printf.sprintf "%s: %s" key msg)
 ;;
 
+let render_unavailable_context ~reason =
+  let reason = sanitize_atom reason in
+  let reason = if String.equal reason "" then "unknown" else reason in
+  match
+    render_prompt_template
+      Keeper_prompt_names.memory_os_recall_unavailable
+      [ "reason", reason ]
+  with
+  | Ok text -> text
+  | Error msg ->
+    Log.Keeper.warn "memory os recall unavailable prompt unavailable: %s" msg;
+    Printf.sprintf
+      "--- Memory OS Recall ---\n\
+       Historical memory recall is unavailable for this turn (reason=%s).\n\
+       Continue using current live context only; do not infer missing facts from memory \
+       absence."
+      reason
+;;
+
 let render_nonempty_section key variable lines =
   match lines with
   | [] -> Ok ""
@@ -296,9 +315,9 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
       (fun (e : episode) -> Printf.sprintf "%s:g%d" e.trace_id e.generation)
       episodes
   in
-  let block =
+  let block, injected_fact_keys, injected_episode_keys =
     match facts, shared_facts, episodes with
-    | [], [], [] -> ""
+    | [], [], [] -> "", [], []
     | _ ->
       let fact_lines =
         List.map (render_fact ~now) facts
@@ -306,10 +325,10 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
       in
       let episode_lines = List.map render_episode episodes in
       (match render_recall_context ~fact_lines ~episode_lines with
-       | Ok context -> context
+       | Ok context -> context, injected_fact_keys, injected_episode_keys
        | Error msg ->
          Log.Keeper.warn "memory os recall prompt unavailable keeper=%s: %s" keeper_id msg;
-         "")
+         render_unavailable_context ~reason:"prompt_render_error", [], [])
   in
   { block; injected_fact_keys; injected_episode_keys; n_facts_in_store }
 ;;
@@ -328,7 +347,7 @@ let render_context
       "memory os recall unavailable keeper=%s: %s"
       keeper_id
       (Printexc.to_string exn);
-    ""
+    render_unavailable_context ~reason:"read_error"
 ;;
 
 let enabled () =
@@ -360,7 +379,7 @@ let render_if_enabled ~keeper_id ~now ~trace_id ~turn ~masc_root () =
           "memory os recall unavailable keeper=%s: %s"
           keeper_id
           (Printexc.to_string exn);
-        { block = ""
+        { block = render_unavailable_context ~reason:"read_error"
         ; injected_fact_keys = []
         ; injected_episode_keys = []
         ; n_facts_in_store = 0

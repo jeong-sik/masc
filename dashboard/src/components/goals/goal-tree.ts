@@ -1749,6 +1749,10 @@ export function GoalTree() {
 
         ${error ? html`<${ErrorState} message=${error} />` : null}
 
+        ${loading && data ? html`
+          <div class="text-3xs text-text-dim" data-testid="goal-tree-loading">목표 트리 갱신 중...</div>
+        ` : null}
+
         ${data ? html`
           <${TreeSummary}
             summary=${data.summary}

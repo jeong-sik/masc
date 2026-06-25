@@ -132,9 +132,34 @@ describe('refreshDashboard bootstrap', () => {
     expect(apiMocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(1)
     expect(store.lastGoalsRefreshAt.value).toBe('2026-06-25T00:00:00Z')
     expect(goalTreeState.goalTreeData.value?.summary.total_tasks).toBe(124)
+    expect(goalTreeState.goalTreeLoading.value).toBe(false)
   })
 
-  it('surfaces a partial error when the Goal Store tree fetch fails', async () => {
+  it('drives goalTreeLoading while refreshGoals is in flight', async () => {
+    apiMocks.fetchDashboardPlanning.mockResolvedValue({
+      generated_at: '2026-06-25T00:00:00Z',
+      goals: [],
+      rollup: {},
+      workspace_fsm: null,
+    })
+    const treePayload = { generated_at: '2026-06-25T00:00:01Z', tree: [], summary: { total_goals: 1 } }
+    let resolveTree: (value: unknown) => void = () => {}
+    apiMocks.fetchDashboardGoalsTree.mockImplementation(() => new Promise(resolve => {
+      resolveTree = resolve
+    }))
+
+    const store = await import('./store')
+    const goalTreeState = await import('./goal-tree-state')
+
+    const refreshPromise = store.refreshGoals()
+    await new Promise(r => setTimeout(r, 0))
+    expect(goalTreeState.goalTreeLoading.value).toBe(true)
+    resolveTree(treePayload)
+    await refreshPromise
+    expect(goalTreeState.goalTreeLoading.value).toBe(false)
+  })
+
+  it('surfaces a partial error when the Goal Store tree fetch fails and clears stale tree data', async () => {
     apiMocks.fetchDashboardPlanning.mockResolvedValue({
       generated_at: '2026-06-25T00:00:00Z',
       goals: [],
@@ -148,8 +173,10 @@ describe('refreshDashboard bootstrap', () => {
 
     await store.refreshGoals()
 
-    expect(store.lastGoalsRefreshAt.value).toBe('2026-06-25T00:00:00Z')
+    expect(goalTreeState.goalTreeData.value).toBeNull()
+    expect(store.lastGoalsRefreshAt.value).toBeNull()
     expect(goalTreeState.goalTreeError.value).toContain('tree offline')
+    expect(goalTreeState.goalTreeLoading.value).toBe(false)
     expect(toastMocks.showToast).toHaveBeenCalledWith(
       '목표 데이터를 일부 불러오지 못했습니다',
       'error',
@@ -157,7 +184,7 @@ describe('refreshDashboard bootstrap', () => {
     )
   })
 
-  it('surfaces a partial error when the planning fetch fails but Goal Store succeeds', async () => {
+  it('clears goal tree data when the planning fetch fails even if Goal Store succeeds', async () => {
     apiMocks.fetchDashboardPlanning.mockRejectedValue(new Error('planning offline'))
     apiMocks.fetchDashboardGoalsTree.mockResolvedValue({
       generated_at: '2026-06-25T00:00:01Z',
@@ -170,7 +197,10 @@ describe('refreshDashboard bootstrap', () => {
 
     await store.refreshGoals()
 
-    expect(goalTreeState.goalTreeData.value?.summary.total_tasks).toBe(2)
+    expect(goalTreeState.goalTreeData.value).toBeNull()
+    expect(store.lastGoalsRefreshAt.value).toBeNull()
+    expect(goalTreeState.goalTreeError.value).toContain('planning offline')
+    expect(goalTreeState.goalTreeLoading.value).toBe(false)
     expect(toastMocks.showToast).toHaveBeenCalledWith(
       '목표 데이터를 일부 불러오지 못했습니다',
       'error',
@@ -178,7 +208,7 @@ describe('refreshDashboard bootstrap', () => {
     )
   })
 
-  it('sets goalTreeError when the tree payload is malformed', async () => {
+  it('sets goalTreeError and clears stale data when the tree payload is malformed', async () => {
     apiMocks.fetchDashboardPlanning.mockResolvedValue({
       generated_at: '2026-06-25T00:00:00Z',
       goals: [],
@@ -196,7 +226,10 @@ describe('refreshDashboard bootstrap', () => {
 
     await store.refreshGoals()
 
+    expect(goalTreeState.goalTreeData.value).toBeNull()
+    expect(store.lastGoalsRefreshAt.value).toBeNull()
     expect(goalTreeState.goalTreeError.value).toBe('Goal Store tree payload was malformed')
+    expect(goalTreeState.goalTreeLoading.value).toBe(false)
     expect(toastMocks.showToast).toHaveBeenCalledWith(
       '목표 데이터를 일부 불러오지 못했습니다',
       'error',

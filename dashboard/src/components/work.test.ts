@@ -1053,7 +1053,7 @@ describe('Work', () => {
         const rootCard = doneCol.querySelector('[data-kanban-task-id="T-root"]') as HTMLElement
         fireEvent.click(rootCard)
         expect(selectedTask.value?.status).toBe('done')
-        expect(selectedTask.value?.completed_at).toBeUndefined()
+        expect(selectedTask.value?.completed_at).toBe('2026-01-02')
       })
 
       it('keeps unscoped execution tasks visible in kanban instead of requiring a goal_id', () => {
@@ -1156,6 +1156,102 @@ describe('Work', () => {
         // openTaskDetail() set the shared selection signal (TaskDetailOverlay is
         // mounted globally in app.ts and renders off this signal).
         expect(selectedTask.value?.id).toBe('T-todo')
+      })
+    })
+
+    describe('Goal Store tree edge cases', () => {
+      it('guards against cyclic goal tree references when collecting tasks', () => {
+        goals.value = []
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              tasks: [goalTreeTask({ id: 'T-1', goal_id: 'G-1', status: 'completed' })],
+              children: [
+                goalTreeNode({
+                  id: 'G-1',
+                  tasks: [goalTreeTask({ id: 'T-2', goal_id: 'G-1', status: 'completed' })],
+                }),
+              ],
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, total_tasks: 1, done_tasks: 1 }),
+        }
+
+        render(html`<${Work} />`)
+
+        expect(screen.getByTestId('kpi-tasks')).toHaveTextContent('1')
+      })
+
+      it('uses Goal Store tree titles for tasks linked to tree-only goals', () => {
+        goals.value = []
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-tree',
+              title: 'Tree Only Goal',
+              tasks: [goalTreeTask({ id: 'T-tree', goal_id: 'G-tree', status: 'todo' })],
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, total_tasks: 1 }),
+        }
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('work-view-list'))
+
+        expect(screen.getByTestId('work-backlog').textContent).toContain('Tree Only Goal')
+      })
+
+      it('maps unknown Goal Store task statuses to a fallback instead of dropping them', () => {
+        goals.value = []
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              tasks: [
+                goalTreeTask({ id: 'T-blocked', goal_id: 'G-1', status: 'blocked' }),
+                goalTreeTask({ id: 'T-unknown', goal_id: 'G-1', status: 'weird_status' }),
+              ],
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, total_tasks: 2 }),
+        }
+
+        render(html`<${Work} />`)
+
+        expect(screen.getByTestId('kpi-wip')).toHaveTextContent('1')
+        expect(screen.getByTestId('kpi-backlog')).toHaveTextContent('1')
+      })
+
+      it('falls back to Goal Store fields when execution fields are empty strings', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              tasks: [goalTreeTask({ id: 'T-shared', goal_id: 'G-1', status: 'todo', title: 'Goal store title' })],
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1, total_tasks: 1 }),
+        }
+        tasks.value = [
+          { id: 'T-shared', title: '', goal_id: null, status: 'in_progress', assignee: '' },
+        ]
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('work-view-list'))
+
+        const goalCard = screen.getByTestId('goal-card')
+        if (!goalCard.querySelector('[data-job-id="T-shared"]')) {
+          fireEvent.click(within(goalCard).getByRole('button'))
+        }
+        const row = goalCard.querySelector('[data-job-id="T-shared"]')
+        expect(row?.textContent).toContain('Goal store title')
       })
     })
   })

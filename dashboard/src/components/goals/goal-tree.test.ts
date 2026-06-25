@@ -262,4 +262,31 @@ describe('GoalTree', () => {
     expect(screen.getByTestId('goal-lifecycle-action-status').textContent)
       .toContain('requested completion')
   })
+
+  it('renders a loading indicator while the goal tree is refreshing', async () => {
+    const goal = makeGoal('goal-loading', 'Loading goal')
+    const treePayload: DashboardGoalsTreeResponse = {
+      tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
+    }
+    const detailPayload: DashboardGoalDetailResponse = {
+      goal,
+      linked_tasks: [],
+      linked_keepers: [],
+      approvals: [],
+      execution_receipts: [],
+      timeline: [],
+    }
+    let resolveTree: (value: unknown) => void = () => {}
+    mocks.fetchDashboardGoalsTree.mockImplementation(() => new Promise(resolve => { resolveTree = resolve }))
+    mocks.fetchDashboardGoalDetail.mockResolvedValue(detailPayload)
+
+    render(html`<${GoalTree} />`)
+
+    expect(screen.getByTestId('goal-tree-loading')).toBeTruthy()
+    resolveTree(treePayload)
+    await waitFor(() => {
+      expect(screen.queryByTestId('goal-tree-loading')).toBeNull()
+    })
+  })
 })

@@ -22,9 +22,8 @@ type cache_key =
       { actor : string option
       ; fixture : string option
       ; full : bool
-      ; force : bool
       }
-  | Runtime_probe of { force : bool }
+  | Runtime_probe
   | Runtime_trace of
       { keeper_name : string
       ; trace_id : string option
@@ -39,8 +38,9 @@ type t
 (** Create an empty cache. *)
 val create : unit -> t
 
-(** Global per-process cache. The server runs against one [base_path] for the
-    lifetime of the process, so a single cache is sufficient. *)
+(** Global per-process cache. Initialized eagerly instead of through
+    [Lazy.force], so concurrent first HTTP requests cannot race lazy
+    initialization. The server process owns one active [base_path]. *)
 val global : unit -> t
 
 (** Look up an entry regardless of age. *)
@@ -60,9 +60,16 @@ val put : t -> cache_key -> entry -> unit
 
 (** Look up a fresh entry; on miss compute synchronously, store it, and return
     it. This is the simplest request-path pattern for surfaces that do not yet
-    have a dedicated background proactive refresh fiber. *)
+    have a dedicated background proactive refresh fiber. [force] bypasses the
+    current value and refreshes the canonical key rather than creating a
+    separate force-keyed entry. *)
 val get_or_compute :
-  t -> cache_key -> ttl_s:float -> compute:(unit -> Yojson.Safe.t) -> Yojson.Safe.t
+  ?force:bool ->
+  t ->
+  cache_key ->
+  ttl_s:float ->
+  compute:(unit -> Yojson.Safe.t) ->
+  Yojson.Safe.t
 
 (** Remove a single key. *)
 val invalidate : t -> cache_key -> unit

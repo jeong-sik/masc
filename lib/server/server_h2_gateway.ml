@@ -692,10 +692,11 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             let cache = Server_dashboard_read_model_cache.global () in
             let cache_key =
               Server_dashboard_read_model_cache.Execution
-                { actor; fixture; full; force }
+                { actor; fixture; full }
             in
             let json =
               Server_dashboard_read_model_cache.get_or_compute
+                ~force
                 cache
                 cache_key
                 ~ttl_s:Server_dashboard_http_core_cache.standard_cache_ttl_s

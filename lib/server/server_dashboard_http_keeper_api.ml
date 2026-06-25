@@ -92,9 +92,69 @@ let memory_os_fact_json ~now (fact : Keeper_memory_os_types.fact) =
      ; "last_verified_at", json_float_opt fact.last_verified_at
      ; "current", `Bool (memory_os_fact_is_current ~now fact)
      ]
-    @ (match fact.claim_kind with
-       | Some k -> [ "claim_kind", `String (Keeper_memory_os_types.claim_kind_to_string k) ]
-       | None -> []))
+     @ (match fact.claim_kind with
+        | Some k -> [ "claim_kind", `String (Keeper_memory_os_types.claim_kind_to_string k) ]
+        | None -> []))
+;;
+
+type memory_os_selection_policy =
+  { keeper_scope : string
+  ; shared_scope : string option
+  ; facts_source : string
+  ; shared_facts_source : string option
+  ; episodes_source : string
+  ; dashboard_fact_tail_limit : int
+  ; dashboard_episode_tail_limit : int
+  ; recall_private_fact_limit : int
+  ; recall_shared_fact_limit : int
+  ; recall_episode_limit : int
+  ; category_source : string
+  ; claim_kind_source : string
+  ; recall_block : string
+  ; prompt_record : string
+  }
+
+let memory_os_selection_policy_json (policy : memory_os_selection_policy) =
+  `Assoc
+    [ "keeper_scope", `String policy.keeper_scope
+    ; "shared_scope", json_string_opt policy.shared_scope
+    ; "facts_source", `String policy.facts_source
+    ; "shared_facts_source", json_string_opt policy.shared_facts_source
+    ; "episodes_source", `String policy.episodes_source
+    ; "dashboard_fact_tail_limit", `Int policy.dashboard_fact_tail_limit
+    ; "dashboard_episode_tail_limit", `Int policy.dashboard_episode_tail_limit
+    ; "recall_private_fact_limit", `Int policy.recall_private_fact_limit
+    ; "recall_shared_fact_limit", `Int policy.recall_shared_fact_limit
+    ; "recall_episode_limit", `Int policy.recall_episode_limit
+    ; "category_source", `String policy.category_source
+    ; "claim_kind_source", `String policy.claim_kind_source
+    ; "recall_block", `String policy.recall_block
+    ; "prompt_record", `String policy.prompt_record
+    ]
+;;
+
+let memory_os_selection_policy ~keeper_id ~fact_tail_limit ~recent_episode_limit =
+  let has_shared_tier =
+    not (String.equal keeper_id Keeper_memory_os_types.shared_store_id)
+  in
+  { keeper_scope = keeper_id
+  ; shared_scope =
+      (if has_shared_tier then Some Keeper_memory_os_types.shared_store_id else None)
+  ; facts_source = "Keeper_memory_os_io.read_facts_tail"
+  ; shared_facts_source =
+      (if has_shared_tier then Some "Keeper_memory_os_io.read_facts_all" else None)
+  ; episodes_source = "Keeper_memory_os_io.read_episodes_tail"
+  ; dashboard_fact_tail_limit = fact_tail_limit
+  ; dashboard_episode_tail_limit = recent_episode_limit
+  ; recall_private_fact_limit = Keeper_memory_os_recall.default_max_facts
+  ; recall_shared_fact_limit =
+      (if has_shared_tier then Keeper_memory_os_recall.default_max_shared_facts else 0)
+  ; recall_episode_limit = Keeper_memory_os_recall.default_max_episodes
+  ; category_source = "Keeper_memory_os_types.category_to_string"
+  ; claim_kind_source = "Keeper_memory_os_types.claim_kind_to_string"
+  ; recall_block = "Keeper_memory_os_recall.render_if_enabled"
+  ; prompt_record = "Keeper_run_tools_hooks.record_block Prompt_block_id.Memory_os_recall"
+  }
 ;;
 
 let memory_os_dashboard_json ~keeper_id =
@@ -122,18 +182,11 @@ let memory_os_dashboard_json ~keeper_id =
     ; "source", `String "memory_os_files"
     ; "producer", `String "keeper_librarian|keeper_memory_os_recall"
     ; ( "selection_policy"
-      , `Assoc
-          [ "keeper_scope", `String keeper_id
-          ; "facts_source", `String "Keeper_memory_os_io.read_facts_tail"
-          ; "episodes_source", `String "Keeper_memory_os_io.read_episodes_tail"
-          ; "fact_tail_limit", `Int fact_tail_limit
-          ; "episode_tail_limit", `Int recent_episode_limit
-          ; "category_source", `String "keeper_librarian.category"
-          ; "claim_kind_source", `String "keeper_librarian.claim_kind"
-          ; "recall_block", `String "keeper_memory_os_recall.render_if_enabled"
-          ; "prompt_record", `String "turn_record.blocks_digest_only"
-          ; "persona_weighting", `Bool false
-          ] )
+      , memory_os_selection_policy
+          ~keeper_id
+          ~fact_tail_limit
+          ~recent_episode_limit
+        |> memory_os_selection_policy_json )
     ; "facts_store", `String facts_path
     ; "episodes_store", `String episodes_store
     ; "recall_enabled", `Bool (Keeper_memory_os_recall.enabled ())

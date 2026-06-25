@@ -182,15 +182,19 @@ export type MemoryOsFact = {
 
 export type MemoryOsSelectionPolicy = {
   readonly keeper_scope: string
+  readonly shared_scope: string | null
   readonly facts_source: string
+  readonly shared_facts_source: string | null
   readonly episodes_source: string
-  readonly fact_tail_limit: number
-  readonly episode_tail_limit: number
+  readonly dashboard_fact_tail_limit: number
+  readonly dashboard_episode_tail_limit: number
+  readonly recall_private_fact_limit: number
+  readonly recall_shared_fact_limit: number
+  readonly recall_episode_limit: number
   readonly category_source: string
   readonly claim_kind_source: string
   readonly recall_block: string
   readonly prompt_record: string
-  readonly persona_weighting: boolean
 }
 
 export type MemoryOsTurnRecordSnapshot = {
@@ -425,40 +429,54 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
 function decodeMemoryOsSelectionPolicy(raw: unknown): MemoryOsSelectionPolicy | null {
   if (!isRecord(raw)) return null
   const keeper_scope = asString(raw.keeper_scope)
+  const shared_scope = raw.shared_scope == null ? null : (asString(raw.shared_scope) ?? null)
   const facts_source = asString(raw.facts_source)
+  const shared_facts_source = raw.shared_facts_source == null
+    ? null
+    : (asString(raw.shared_facts_source) ?? null)
   const episodes_source = asString(raw.episodes_source)
-  const fact_tail_limit = asNumber(raw.fact_tail_limit)
-  const episode_tail_limit = asNumber(raw.episode_tail_limit)
+  const dashboard_fact_tail_limit = asNumber(raw.dashboard_fact_tail_limit)
+  const dashboard_episode_tail_limit = asNumber(raw.dashboard_episode_tail_limit)
+  const recall_private_fact_limit = asNumber(raw.recall_private_fact_limit)
+  const recall_shared_fact_limit = asNumber(raw.recall_shared_fact_limit)
+  const recall_episode_limit = asNumber(raw.recall_episode_limit)
   const category_source = asString(raw.category_source)
   const claim_kind_source = asString(raw.claim_kind_source)
   const recall_block = asString(raw.recall_block)
   const prompt_record = asString(raw.prompt_record)
-  const persona_weighting = asBoolean(raw.persona_weighting)
   if (
     !keeper_scope
+    || (raw.shared_scope != null && !shared_scope)
     || !facts_source
+    || (raw.shared_facts_source != null && !shared_facts_source)
     || !episodes_source
-    || fact_tail_limit == null
-    || episode_tail_limit == null
+    || dashboard_fact_tail_limit == null
+    || dashboard_episode_tail_limit == null
+    || recall_private_fact_limit == null
+    || recall_shared_fact_limit == null
+    || recall_episode_limit == null
     || !category_source
     || !claim_kind_source
     || !recall_block
     || !prompt_record
-    || persona_weighting == null
   ) {
     return null
   }
   return {
     keeper_scope,
+    shared_scope,
     facts_source,
+    shared_facts_source,
     episodes_source,
-    fact_tail_limit,
-    episode_tail_limit,
+    dashboard_fact_tail_limit,
+    dashboard_episode_tail_limit,
+    recall_private_fact_limit,
+    recall_shared_fact_limit,
+    recall_episode_limit,
     category_source,
     claim_kind_source,
     recall_block,
     prompt_record,
-    persona_weighting,
   }
 }
 

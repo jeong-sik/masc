@@ -38,15 +38,19 @@ function turnRecordsPayload() {
       producer: 'keeper_librarian',
       selection_policy: {
         keeper_scope: 'masc-improver',
+        shared_scope: '_shared',
         facts_source: 'Keeper_memory_os_io.read_facts_tail',
+        shared_facts_source: 'Keeper_memory_os_io.read_facts_all',
         episodes_source: 'Keeper_memory_os_io.read_episodes_tail',
-        fact_tail_limit: 256,
-        episode_tail_limit: 12,
-        category_source: 'keeper_librarian.category',
-        claim_kind_source: 'keeper_librarian.claim_kind',
-        recall_block: 'keeper_memory_os_recall.render_if_enabled',
-        prompt_record: 'turn_record.blocks_digest_only',
-        persona_weighting: false,
+        dashboard_fact_tail_limit: 384,
+        dashboard_episode_tail_limit: 12,
+        recall_private_fact_limit: 8,
+        recall_shared_fact_limit: 4,
+        recall_episode_limit: 2,
+        category_source: 'Keeper_memory_os_types.category_to_string',
+        claim_kind_source: 'Keeper_memory_os_types.claim_kind_to_string',
+        recall_block: 'Keeper_memory_os_recall.render_if_enabled',
+        prompt_record: 'Keeper_run_tools_hooks.record_block Prompt_block_id.Memory_os_recall',
       },
       facts_store: '.masc/config/keepers/masc-improver.facts.jsonl',
       episodes_store: '.masc/config/keepers/masc-improver/episodes',
@@ -76,7 +80,7 @@ function turnRecordsPayload() {
         ],
       },
       facts: {
-        tail_limit: 256,
+        tail_limit: 384,
         shown: 2,
         current: 1,
         expired: 1,
@@ -213,10 +217,15 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     stubFetch()
     const { container } = renderInspector()
     await waitFor(() => expect(container.querySelector('.mem-trust')).toBeTruthy())
-    expect(container.textContent).toContain('keeper-local, no persona weight')
+    expect(container.textContent).toContain('masc-improver + _shared')
+    expect(container.textContent).toContain('private + shared recall tiers')
     expect(container.textContent).toContain('800B memory_os_recall')
     expect(container.textContent).toContain('Keeper_memory_os_io.read_facts_tail')
-    expect(container.textContent).toContain('keeper_memory_os_recall.render_if_enabled')
+    expect(container.textContent).toContain('Keeper_memory_os_io.read_facts_all')
+    expect(container.textContent).toContain('dashboard 384 · prompt 8')
+    expect(container.textContent).toContain('_shared · prompt 4')
+    expect(container.textContent).toContain('dashboard 12 · prompt 2')
+    expect(container.textContent).toContain('Keeper_memory_os_recall.render_if_enabled')
     expect(container.textContent).toContain('Full Prompt')
     expect(container.textContent).toContain('raw text not persisted here')
     expect(container.textContent).toContain('cccc2222dddd')

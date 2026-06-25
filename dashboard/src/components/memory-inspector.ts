@@ -279,6 +279,9 @@ function MemoryTrustStrip({
   const promptTurn = latestPromptRow
     ? `${latestPromptRow.record.trace_id}#${latestPromptRow.record.absolute_turn}`
     : 'none'
+  const scopeLabel = policy?.shared_scope
+    ? `${policy.keeper_scope} + ${policy.shared_scope}`
+    : (policy?.keeper_scope ?? snapshot.keeper)
   return html`
     <div class="mem-trust">
       <div class="mem-trust-card">
@@ -288,8 +291,8 @@ function MemoryTrustStrip({
       </div>
       <div class="mem-trust-card">
         <span class="mem-trust-k">scope</span>
-        <span class="mem-trust-v mono">${policy?.keeper_scope ?? snapshot.keeper}</span>
-        <span class="mem-trust-sub">${policy?.persona_weighting === true ? 'persona weighted' : 'keeper-local, no persona weight'}</span>
+        <span class="mem-trust-v mono">${scopeLabel}</span>
+        <span class="mem-trust-sub">${policy?.shared_scope ? 'private + shared recall tiers' : 'keeper-local recall tier'}</span>
       </div>
       <div class="mem-trust-card">
         <span class="mem-trust-k">prompt link</span>
@@ -306,9 +309,12 @@ function MemoryPolicyDisclosure({ policy }: { policy: MemoryOsSelectionPolicy | 
   }
   return html`
     <div class="mem-policy">
-      <div class="mem-policy-row"><span>facts</span><code>${policy.facts_source}</code><b>${policy.fact_tail_limit}</b></div>
-      <div class="mem-policy-row"><span>episodes</span><code>${policy.episodes_source}</code><b>${policy.episode_tail_limit}</b></div>
-      <div class="mem-policy-row"><span>librarian</span><code>${policy.category_source} + ${policy.claim_kind_source}</code><b>${policy.persona_weighting ? 'persona' : 'no persona'}</b></div>
+      <div class="mem-policy-row"><span>private facts</span><code>${policy.facts_source}</code><b>dashboard ${policy.dashboard_fact_tail_limit} · prompt ${policy.recall_private_fact_limit}</b></div>
+      ${policy.shared_scope && policy.shared_facts_source
+        ? html`<div class="mem-policy-row"><span>shared facts</span><code>${policy.shared_facts_source}</code><b>${policy.shared_scope} · prompt ${policy.recall_shared_fact_limit}</b></div>`
+        : null}
+      <div class="mem-policy-row"><span>episodes</span><code>${policy.episodes_source}</code><b>dashboard ${policy.dashboard_episode_tail_limit} · prompt ${policy.recall_episode_limit}</b></div>
+      <div class="mem-policy-row"><span>librarian</span><code>${policy.category_source} + ${policy.claim_kind_source}</code><b>typed labels</b></div>
       <div class="mem-policy-row"><span>prompt</span><code>${policy.recall_block}</code><b>${policy.prompt_record}</b></div>
     </div>
   `

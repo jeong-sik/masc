@@ -11,6 +11,7 @@ module Common = Server_routes_http_common
 module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
+module Keeper_api_types = Server_dashboard_http_keeper_api_types
 
 let include_moderation_projection ~base_path request =
   match auth_token_from_request request with
@@ -247,17 +248,20 @@ let add_routes ~sw ~clock router =
 
   |> Http.Router.get "/api/v1/board" (fun request reqd ->
        with_public_read (fun state req reqd ->
+         let config = Mcp_server.workspace_config state in
          let hearth = query_param req "hearth" in
          let sort_by = board_sort_order_of_request req in
          let exclude_system = bool_query_param req "exclude_system" ~default:false in
          let exclude_automation =
            bool_query_param req "exclude_automation" ~default:false
          in
-         let author_filter =
+         let author_query =
            query_param req "author"
            |> Option.map String.trim
-           |> Fun.flip Option.bind (fun s ->
-                if s = "" then None else Some (board_actor_author_for_write s))
+           |> Fun.flip Option.bind (fun s -> if s = "" then None else Some s)
+         in
+         let author_filter =
+           Option.map board_actor_author_for_write author_query
          in
          let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
          let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
@@ -266,64 +270,96 @@ let add_routes ~sw ~clock router =
          let blind_votes = bool_query_param req "blind_votes" ~default:false in
          let include_moderation =
            include_moderation_projection
-             ~base_path:(Mcp_server.workspace_config state).base_path
+             ~base_path:config.base_path
              req
          in
-         let posts =
-           Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
-             ~exclude_automation ?author_filter ~limit:base_fetch ()
+         let cache_key =
+           let cache_part = function
+             | Some value -> value
+             | None -> ""
+           in
+           Printf.sprintf "board:list:%s:%s:%s:%b:%b:%s:%d:%d:%s:%b:%b"
+             config.base_path
+             (cache_part hearth)
+             (board_sort_label sort_by)
+             exclude_system exclude_automation
+             (cache_part author_query)
+             limit offset (cache_part voter) blind_votes include_moderation
          in
-         let karma_map = Board_dispatch.get_all_karma () in
-         let get_karma author =
-           List.assoc_opt author karma_map |> Option.value ~default:0
+         let json =
+           Dashboard_cache.get_or_compute cache_key
+             ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+             (fun () ->
+                Domain_pool_ref.submit_io_or_inline (fun () ->
+                  let posts =
+                    Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
+                      ~exclude_automation ?author_filter ~limit:base_fetch ()
+                  in
+                  let karma_map = Board_dispatch.get_all_karma () in
+                  let get_karma author =
+                    match List.assoc_opt author karma_map with
+                    | Some karma -> karma
+                    | None -> 0
+                  in
+                  let paged = posts |> drop offset |> take limit in
+                  let reaction_rows =
+                    board_reactions_batch
+                      ~targets:
+                        (List.map
+                           (fun (p : Board.post) ->
+                              (Board.Reaction_post, Board.Post_id.to_string p.id))
+                           paged)
+                      ~voter
+                  in
+                  let reactions_for = board_reactions_lookup reaction_rows in
+                  let contributor_quality_for =
+                    board_contributor_quality_lookup ~config ()
+                  in
+                  let posts_json =
+                    List.map
+                      (fun (p : Board.post) ->
+                         let author = Board.Agent_id.to_string p.author in
+                         let post_id = Board.Post_id.to_string p.id in
+                         let current_vote = board_current_vote_for_post ~voter ~post_id in
+                         let reactions = reactions_for (Board.Reaction_post, post_id) in
+                         let contributor_quality = contributor_quality_for author in
+                         board_post_dashboard_json ~include_moderation ~blind_votes
+                           ?contributor_quality ~reactions
+                           ?current_vote
+                           ~author_karma:(get_karma author) p)
+                      paged
+                  in
+                  `Assoc [
+                    ("posts", `List posts_json);
+                    ("count", `Int (List.length posts_json));
+                    ("limit", `Int limit);
+                    ("offset", `Int offset);
+                    ("sort_by", `String (board_sort_label sort_by));
+                  ]))
          in
-         let paged = posts |> drop offset |> take limit in
-         let reaction_rows =
-           board_reactions_batch
-             ~targets:
-               (List.map
-                  (fun (p : Board.post) ->
-                     (Board.Reaction_post, Board.Post_id.to_string p.id))
-                  paged)
-             ~voter
-         in
-         let reactions_for = board_reactions_lookup reaction_rows in
-         let contributor_quality_for =
-           board_contributor_quality_lookup
-             ~config:(Mcp_server.workspace_config state) ()
-         in
-         let posts_json =
-           List.map
-             (fun (p : Board.post) ->
-               let author = Board.Agent_id.to_string p.author in
-               let post_id = Board.Post_id.to_string p.id in
-               let current_vote = board_current_vote_for_post ~voter ~post_id in
-               let reactions = reactions_for (Board.Reaction_post, post_id) in
-               let contributor_quality = contributor_quality_for author in
-               board_post_dashboard_json ~include_moderation ~blind_votes
-                 ?contributor_quality ~reactions
-                 ?current_vote
-                 ~author_karma:(get_karma author) p)
-             paged
-         in
-         let json = `Assoc [
-           ("posts", `List posts_json);
-           ("count", `Int (List.length posts_json));
-           ("limit", `Int limit);
-           ("offset", `Int offset);
-           ("sort_by", `String (board_sort_label sort_by));
-         ] in
          Http.Response.json_value json reqd
        ) request reqd)
 
   |> Http.Router.get "/api/v1/board/hearths" (fun request reqd ->
-       with_public_read (fun _state _req reqd ->
-         let hearths = Board_dispatch.list_hearths () in
-         let json = `Assoc [
-           ("hearths", `List (List.map (fun (name, count) ->
-             `Assoc [("name", `String name); ("count", `Int count)]
-           ) hearths));
-         ] in
+       with_public_read (fun state _req reqd ->
+         let config = Mcp_server.workspace_config state in
+         let cache_key =
+           Printf.sprintf "board:hearths:%s"
+             (Keeper_api_types.cache_key_string_segment config.base_path)
+         in
+         let json =
+           Dashboard_cache.get_or_compute
+             cache_key
+             ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s
+             (fun () ->
+                Domain_pool_ref.submit_io_or_inline (fun () ->
+                  let hearths = Board_dispatch.list_hearths () in
+                  `Assoc [
+                    ("hearths", `List (List.map (fun (name, count) ->
+                      `Assoc [("name", `String name); ("count", `Int count)]
+                    ) hearths));
+                  ]))
+         in
          Http.Response.json_value json reqd
        ) request reqd)
 

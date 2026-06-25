@@ -743,6 +743,52 @@ let read_entries ~(masc_root : string) ~(keeper_name : string) ~(trace_id : stri
           | None -> None
         with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
 
+let trajectory_line_of_json json =
+  match Json_util.assoc_member_opt "type" json with
+  | Some (`String "trajectory_summary") -> None
+  | Some (`String "thinking") ->
+      Some
+        (Thinking
+           { ts =
+               (match Json_util.assoc_member_opt "ts" json with
+                | Some (`Float f) -> f
+                | Some (`Int n) -> Float.of_int n
+                | _ -> 0.0)
+           ; ts_iso =
+               (match Json_util.assoc_member_opt "ts_iso" json with
+                | Some (`String s) -> s
+                | _ -> "")
+           ; turn =
+               (match Json_util.assoc_member_opt "turn" json with
+                | Some (`Int n) -> n
+                | _ -> 0)
+           ; content =
+               (match Json_util.assoc_member_opt "content" json with
+                | Some (`String s) -> s
+                | _ -> "")
+           ; content_length =
+               (match Json_util.assoc_member_opt "content_length" json with
+                | Some (`Int n) -> n
+                | _ -> 0)
+           ; redacted =
+               (match Json_util.assoc_member_opt "redacted" json with
+                | Some (`Bool b) -> b
+                | _ -> false)
+           })
+  | _ ->
+      (match tool_call_entry_of_json json with
+       | Some (entry, _parsed_gate) -> Some (Tool_call entry)
+       | None -> None)
+;;
+
+let trajectory_lines_of_jsonl_lines lines =
+  List.filter_map
+    (fun line ->
+       try Yojson.Safe.from_string line |> trajectory_line_of_json with
+       | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
+    lines
+;;
+
 (** Read all trajectory lines including thinking entries. *)
 let read_all_lines ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string)
     : trajectory_line list =
@@ -752,22 +798,14 @@ let read_all_lines ~(masc_root : string) ~(keeper_name : string) ~(trace_id : st
     let content = Fs_compat.load_file path in
     String.split_on_char '\n' content
     |> List.filter (fun line -> String.trim line <> "")
-    |> List.filter_map (fun line ->
-        try
-          let json = Yojson.Safe.from_string line in
-          match Json_util.assoc_member_opt "type" json with
-          | Some (`String "trajectory_summary") -> None
-          | Some (`String "thinking") ->
-              Some (Thinking {
-                ts = (match Json_util.assoc_member_opt "ts" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0);
-                ts_iso = (match Json_util.assoc_member_opt "ts_iso" json with Some (`String s) -> s | _ -> "");
-                turn = (match Json_util.assoc_member_opt "turn" json with Some (`Int n) -> n | _ -> 0);
-                content = (match Json_util.assoc_member_opt "content" json with Some (`String s) -> s | _ -> "");
-                content_length = (match Json_util.assoc_member_opt "content_length" json with Some (`Int n) -> n | _ -> 0);
-                redacted = (match Json_util.assoc_member_opt "redacted" json with Some (`Bool b) -> b | _ -> false);
-              })
-          | _ ->
-              (match tool_call_entry_of_json json with
-               | Some (entry, _parsed_gate) -> Some (Tool_call entry)
-               | None -> None)
-        with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
+    |> trajectory_lines_of_jsonl_lines
+
+let read_recent_lines
+      ~(masc_root : string)
+      ~(keeper_name : string)
+      ~(trace_id : string)
+      ~(max_lines : int)
+  : trajectory_line list
+  =
+  let path = trajectory_path masc_root keeper_name trace_id in
+  Dated_jsonl.load_tail_lines path ~max_lines |> trajectory_lines_of_jsonl_lines

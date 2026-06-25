@@ -9,20 +9,36 @@ export const SECONDS_PER_DAY = 86400
 const rtf = new Intl.RelativeTimeFormat('ko', { numeric: 'auto' })
 const UNIX_MS_THRESHOLD = 1_000_000_000_000
 
+/**
+ * Marker string returned when a time-related helper has no input to format.
+ *
+ * Exposed so call sites that compare against it (e.g. unwrapping the
+ * fallback back to `null` in keeper-shared.formatTime) don't have to
+ * duplicate the literal — changing the displayed marker here updates
+ * every comparison automatically. Tests in `format-time.test.ts`
+ * deliberately keep the literal so the assertion documents the
+ * user-visible string.
+ */
+export const NO_TIME_INFO = '정보 없음'
+
 export function formatRelativeSec(deltaSec: number): string {
-  if (deltaSec < SECONDS_PER_MINUTE) return rtf.format(-deltaSec, 'second')
-  if (deltaSec < SECONDS_PER_HOUR) return rtf.format(-Math.round(deltaSec / SECONDS_PER_MINUTE), 'minute')
-  if (deltaSec < SECONDS_PER_DAY) return rtf.format(-Math.round(deltaSec / SECONDS_PER_HOUR), 'hour')
-  return rtf.format(-Math.round(deltaSec / SECONDS_PER_DAY), 'day')
+  if (!Number.isFinite(deltaSec)) return NO_TIME_INFO
+  const safeDeltaSec = Math.max(0, deltaSec)
+  if (safeDeltaSec < SECONDS_PER_MINUTE) return rtf.format(-safeDeltaSec, 'second')
+  if (safeDeltaSec < SECONDS_PER_HOUR) return rtf.format(-Math.round(safeDeltaSec / SECONDS_PER_MINUTE), 'minute')
+  if (safeDeltaSec < SECONDS_PER_DAY) return rtf.format(-Math.round(safeDeltaSec / SECONDS_PER_HOUR), 'hour')
+  return rtf.format(-Math.round(safeDeltaSec / SECONDS_PER_DAY), 'day')
 }
 
 /** Mirror of {@link formatRelativeSec} for a FUTURE instant: a non-negative
  *  "seconds until" delta formatted with a positive sign — "1시간 후", "3분 후". */
 export function formatRelativeUntilSec(deltaSec: number): string {
-  if (deltaSec < SECONDS_PER_MINUTE) return rtf.format(deltaSec, 'second')
-  if (deltaSec < SECONDS_PER_HOUR) return rtf.format(Math.round(deltaSec / SECONDS_PER_MINUTE), 'minute')
-  if (deltaSec < SECONDS_PER_DAY) return rtf.format(Math.round(deltaSec / SECONDS_PER_HOUR), 'hour')
-  return rtf.format(Math.round(deltaSec / SECONDS_PER_DAY), 'day')
+  if (!Number.isFinite(deltaSec)) return NO_TIME_INFO
+  const safeDeltaSec = Math.max(0, deltaSec)
+  if (safeDeltaSec < SECONDS_PER_MINUTE) return rtf.format(safeDeltaSec, 'second')
+  if (safeDeltaSec < SECONDS_PER_HOUR) return rtf.format(Math.round(safeDeltaSec / SECONDS_PER_MINUTE), 'minute')
+  if (safeDeltaSec < SECONDS_PER_DAY) return rtf.format(Math.round(safeDeltaSec / SECONDS_PER_HOUR), 'hour')
+  return rtf.format(Math.round(safeDeltaSec / SECONDS_PER_DAY), 'day')
 }
 
 export function normalizeTimestampMs(ts: number): number {
@@ -37,18 +53,6 @@ export function unixSecondsToDate(ts: number): Date {
 export function formatRelativeAgeMs(ageMs: number): string {
   return formatRelativeSec(Math.max(0, Math.round(ageMs / 1000)))
 }
-
-/**
- * Marker string returned when a time-related helper has no input to format.
- *
- * Exposed so call sites that compare against it (e.g. unwrapping the
- * fallback back to `null` in keeper-shared.formatTime) don't have to
- * duplicate the literal — changing the displayed marker here updates
- * every comparison automatically. Tests in `format-time.test.ts`
- * deliberately keep the literal so the assertion documents the
- * user-visible string.
- */
-export const NO_TIME_INFO = '정보 없음'
 
 /** Relative time from ISO string — "3분 전", "2시간 전" etc. Uses Intl.RelativeTimeFormat. */
 export function relativeTime(iso?: string | null, fallback: string = NO_TIME_INFO): string {
@@ -123,6 +127,7 @@ export function formatTimeAgo(ts: string | number): string {
     typeof ts === 'number'
       ? normalizeTimestampMs(ts)
       : new Date(ts).getTime()
+  if (!Number.isFinite(then)) return NO_TIME_INFO
   return formatRelativeSec(Math.max(0, Math.floor((now - then) / 1000)))
 }
 

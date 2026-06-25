@@ -138,6 +138,8 @@ let handle_keeper_tools_post state req reqd =
                       config meta'
                   with
                   | Ok () ->
+                      Dashboard_cache.invalidate
+                        (keeper_config_cache_key config name);
                       Http.Response.json_value ~compress:true ~request:req
                         (keeper_tools_response_json meta') reqd
                   | Error e ->
@@ -276,6 +278,11 @@ let keeper_runtime_trace_json (config : Workspace.config) (name : string)
               ("manifest_path", `String manifest_scan.path);
               ("manifest_path_present", `Bool (Fs_compat.file_exists manifest_scan.path));
               ("manifest_total_rows", `Int manifest_scan.total_rows);
+              ("manifest_total_rows_scope", `String manifest_scan.scan_scope);
+              ( "manifest_total_rows_exact",
+                `Bool (manifest_scan.scanned_lines < manifest_scan.scan_line_limit) );
+              ("manifest_scan_line_limit", `Int manifest_scan.scan_line_limit);
+              ("manifest_scanned_lines", `Int manifest_scan.scanned_lines);
               ("manifest_returned_rows", `Int (List.length manifest_rows));
               ("receipt_returned_rows", `Int (List.length receipts));
               ( "turn_identity",
@@ -443,11 +450,14 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                      in
                      if not (Keeper_types_profile.tool_result_success result) then
                        respond_error reqd (Keeper_types_profile.tool_result_body result)
-                     else
+                     else (
+                       Dashboard_cache.invalidate
+                         (keeper_config_cache_key config name);
                        let (_st, json) =
                          Dashboard_http_keeper.keeper_config_json config name
                        in
                        Http.Response.json_value ~compress:true ~request:req json reqd)
+                    )
            | None ->
                respond_error reqd "request body must be a JSON object"
          with Yojson.Json_error e ->

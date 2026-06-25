@@ -59,6 +59,7 @@ import {
   keeperRecovering,
   keeperSending,
   keeperStatusDetails,
+  keeperStreamStartedAt,
   keeperThreads,
 } from './keeper-state'
 import {
@@ -837,6 +838,32 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       ['assistant', '', 'error'],
     ])
     expect(keeperActionErrors.value.echo).toContain('서버 재시작')
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
+  })
+
+  it('finalizes the pending message as error when the poll request times out', async () => {
+    upsertPendingKeeperChatRequest({
+      requestId: 'kmsg_echo_1',
+      keeperName: 'echo',
+      message: '어디까지 했어?',
+      submittedAt: Date.UTC(2026, 5, 15, 9, 0, 0),
+    })
+    fetchQueuedKeeperMessageResult.mockRejectedValue(
+      new Error('GET /api/v1/gate/message/requests/kmsg_echo_1: timeout after 35000ms'),
+    )
+    fetchKeeperChatHistory.mockResolvedValue([])
+
+    await resumePendingKeeperChatRequests('echo')
+
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+    expect(keeperSending.value.echo).toBe(false)
+    expect(keeperStreamStartedAt.value.echo).toBeNull()
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.map(entry => [entry.role, entry.text, entry.delivery])).toEqual([
+      ['user', '어디까지 했어?', 'error'],
+      ['assistant', '', 'error'],
+    ])
+    expect(keeperActionErrors.value.echo).toContain('timeout after 35000ms')
     expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
   })
 

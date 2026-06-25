@@ -235,6 +235,8 @@ const CHAT_APPENDED_REFRESH_DELAY_MS = 400
 const PENDING_KEEPER_CHAT_POLL_MS = 2_000
 const QUEUED_KEEPER_REQUEST_LOST_MESSAGE =
   '서버 재시작으로 대기 중이던 요청을 찾을 수 없습니다. 메시지를 다시 보내주세요.'
+const PENDING_KEEPER_CHAT_RESUME_FAILED_MESSAGE =
+  '응답을 확인할 수 없어 메시지 복구를 중단했습니다. 다시 보내주세요.'
 const STREAM_FAILURE_HISTORY_SKEW_MS = 30_000
 
 function sleep(ms: number): Promise<void> {
@@ -472,8 +474,23 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
       await hydrateKeeperChatHistory(request.keeperName, { force: true })
       return
     }
-    const message = err instanceof Error ? err.message : `Failed to resume ${request.keeperName} chat request`
-    setRecordValue(keeperActionErrors, request.keeperName, `대기 중 메시지 복구 실패: ${message}`)
+    const detail = err instanceof Error ? err.message : `Failed to resume ${request.keeperName} chat request`
+    const message = `${PENDING_KEEPER_CHAT_RESUME_FAILED_MESSAGE} (${detail})`
+    removePendingKeeperChatRequest(request.requestId)
+    finalizeAssistantEntry(request.keeperName, pendingUserEntryId(request.requestId), {
+      delivery: 'error',
+      error: message,
+    })
+    finalizeAssistantEntry(request.keeperName, assistantId, {
+      text: '',
+      rawText: '',
+      delivery: 'error',
+      streamState: null,
+      timestamp: new Date().toISOString(),
+      error: message,
+    })
+    setRecordValue(keeperActionErrors, request.keeperName, message)
+    await hydrateKeeperChatHistory(request.keeperName, { force: true })
   } finally {
     resumingKeeperChatRequests.delete(key)
     if (!hasPendingKeeperChatRequest(request.keeperName)) {

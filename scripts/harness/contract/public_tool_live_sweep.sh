@@ -149,7 +149,7 @@ r_tool_help="$(call_tool 5006 "masc_tool_help" '{"tool_name":"masc_status"}')"
 expect_ok "masc_tool_help" "$r_tool_help"
 
 next_step "masc_dashboard"
-r_dashboard="$(call_tool 5007 "masc_dashboard" '{}')"
+r_dashboard="$(call_tool 5007 "masc_dashboard" '{"compact":true}')"
 expect_ok "masc_dashboard" "$r_dashboard"
 
 next_step "masc_goal_list"

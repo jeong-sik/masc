@@ -41,7 +41,7 @@ let test_default_config_host () =
 ;;
 
 let test_default_config_max_connections () =
-  check int "default max_connections" 512 Http_server_eio.default_config.max_connections
+  check int "default max_connections" 128 Http_server_eio.default_config.max_connections
 ;;
 
 let test_default_config_valid () =

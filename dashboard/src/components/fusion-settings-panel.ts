@@ -13,7 +13,13 @@ import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { fetchRuntimeTomlConfig, saveRuntimeTomlConfig } from '../api/dashboard'
 import { errorToString } from '../lib/format-string'
-import { applyFusionSettings, readFusionSettingsResult, type FusionSettings } from '../lib/fusion-settings'
+import {
+  applyFusionSettings,
+  readFusionPresetMinAnswered,
+  readFusionSettingsResult,
+  type FusionSettings,
+  type FusionSettingsParseIssue,
+} from '../lib/fusion-settings'
 
 type EditorState = 'loading' | 'idle' | 'saving' | 'saved' | 'error'
 type FusionSettingsDraft = {
@@ -56,11 +62,46 @@ function parseIssueMessage(issues: readonly { key: string; message: string; toke
   return issues.map(issue => `${issue.key}: ${issue.message}${issue.token === undefined ? '' : ` (${issue.token})`}`).join('; ')
 }
 
+function isFusionSettingsParseIssue(value: unknown): value is FusionSettingsParseIssue {
+  return typeof value === 'object' && value !== null && 'key' in value && 'message' in value
+}
+
+function issueArrayMessage(value: unknown): string {
+  if (!Array.isArray(value)) return ''
+  const rendered = value
+    .map(issue => {
+      if (isFusionSettingsParseIssue(issue)) {
+        return `${issue.key}: ${issue.message}${issue.token === undefined ? '' : ` (${issue.token})`}`
+      }
+      if (typeof issue === 'string') return issue
+      if (typeof issue === 'object' && issue !== null) {
+        const record = issue as Record<string, unknown>
+        const key = typeof record.key === 'string' ? record.key : undefined
+        const message = typeof record.message === 'string' ? record.message : undefined
+        const reason = typeof record.reason === 'string' ? record.reason : undefined
+        return [key, message ?? reason].filter(Boolean).join(': ')
+      }
+      return ''
+    })
+    .filter(Boolean)
+  return rendered.join('; ')
+}
+
+function backendValidationMessage(cfg: { message?: string | null; reason?: string | null; issues?: unknown }): string {
+  return (
+    issueArrayMessage(cfg.issues)
+    || cfg.message?.trim()
+    || cfg.reason?.trim()
+    || '백엔드 검증 거부. 변경이 저장되지 않았습니다.'
+  )
+}
+
 export function FusionSettingsPanel() {
   const [source, setSource] = useState<string | null>(null)
   const [draft, setDraft] = useState<FusionSettingsDraft | null>(null)
   const [state, setState] = useState<EditorState>('loading')
   const [error, setError] = useState('')
+  const [savedMessage, setSavedMessage] = useState('')
   const mountedRef = useRef(true)
 
   useEffect(() => {
@@ -104,7 +145,24 @@ export function FusionSettingsPanel() {
   const patch = (next: Partial<FusionSettingsDraft>) => {
     setDraft({ ...draft, ...next })
     // Editing after a save dismisses the stale saved/error banner.
-    if (state === 'saved' || state === 'error') setState('idle')
+    if (state === 'saved' || state === 'error') {
+      setSavedMessage('')
+      setState('idle')
+    }
+  }
+
+  const patchDefaultPreset = (defaultPreset: string) => {
+    const next: { defaultPreset: string; minAnswered?: string } = { defaultPreset }
+    if (source !== null) {
+      const minAnswered = readFusionPresetMinAnswered(source, defaultPreset)
+      if (typeof minAnswered === 'number') {
+        next.minAnswered = String(minAnswered)
+      } else {
+        setError(parseIssueMessage([minAnswered]))
+        setState('error')
+      }
+    }
+    patch(next)
   }
 
   const onSave = async () => {
@@ -121,8 +179,7 @@ export function FusionSettingsPanel() {
       const cfg = await saveRuntimeTomlConfig(applyFusionSettings(source, settings))
       if (!mountedRef.current) return
       if (!cfg.ok) {
-        // Backend validation rejected the write (e.g. min_answered out of range).
-        setError('백엔드 검증 거부 (예: min_answered 범위). 변경이 저장되지 않았습니다.')
+        setError(backendValidationMessage(cfg))
         setState('error')
         return
       }
@@ -134,6 +191,7 @@ export function FusionSettingsPanel() {
       }
       setSource(cfg.source_text)
       setDraft(draftFromSettings(parsed.settings))
+      setSavedMessage(cfg.reloaded ? '저장됨 (reload 완료)' : '저장됨')
       setState('saved')
     } catch (err) {
       if (!mountedRef.current) return
@@ -153,7 +211,7 @@ export function FusionSettingsPanel() {
       </label>
       <label class="set-line">
         <span>기본 프리셋 (default_preset)</span>
-        <input type="text" value=${draft.defaultPreset} onInput=${(e: Event) => patch({ defaultPreset: str(e) })} />
+        <input type="text" value=${draft.defaultPreset} onInput=${(e: Event) => patchDefaultPreset(str(e))} />
       </label>
       <label class="set-line">
         <span>동시 패널 수 (max_concurrent_panels)</span>
@@ -169,7 +227,7 @@ export function FusionSettingsPanel() {
         <button type="button" data-testid="fusion-settings-save" onClick=${onSave} disabled=${state === 'saving'}>
           ${state === 'saving' ? '저장 중…' : '저장'}
         </button>
-        ${state === 'saved' && html`<span class="set-ok" data-testid="fusion-settings-saved">저장됨 (reload 완료)</span>`}
+        ${state === 'saved' && html`<span class="set-ok" data-testid="fusion-settings-saved">${savedMessage}</span>`}
         ${state === 'error' && html`<span class="set-err" data-testid="fusion-settings-error">${error}</span>`}
       </div>
     </div>

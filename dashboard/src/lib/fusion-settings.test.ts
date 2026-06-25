@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   readFusionSettings,
   readFusionSettingsResult,
+  readFusionPresetMinAnswered,
   applyFusionSettings,
   FUSION_SETTINGS_DEFAULTS,
 } from './fusion-settings'
@@ -76,6 +77,18 @@ max_concurrent_panels = 1
       maxConcurrentPanels: 1,
       minAnswered: 1,
     })
+  })
+
+  it('reads min_answered for a specific preset without changing default_preset', () => {
+    const withDuo = `${SAMPLE}
+[fusion.presets.duo]
+panel = ["a", "b"]
+judge = "j"
+min_answered = 1
+`
+    expect(readFusionSettings(withDuo).defaultPreset).toBe('trio')
+    expect(readFusionPresetMinAnswered(withDuo, 'duo')).toBe(1)
+    expect(readFusionPresetMinAnswered(withDuo, 'missing')).toBe(1)
   })
 })
 

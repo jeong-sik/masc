@@ -16,6 +16,13 @@ judge = "j"
 min_answered = 2
 `
 
+const SAMPLE_WITH_DUO = `${SAMPLE}
+[fusion.presets.duo]
+panel = ["a", "b"]
+judge = "j"
+min_answered = 1
+`
+
 const cfg = (over: { ok?: boolean; source_text?: string; reloaded?: boolean }) => ({
   ok: over.ok ?? true,
   path: null,
@@ -71,11 +78,50 @@ describe('FusionSettingsPanel', () => {
 
   it('surfaces a backend validation rejection (ok=false) instead of claiming success', async () => {
     fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE }))
-    saveMock.mockResolvedValue(cfg({ ok: false }))
+    saveMock.mockResolvedValue({
+      ...cfg({ ok: false }),
+      message: 'Runtime config validation failed',
+      reason: 'min_answered exceeds preset panel count',
+      issues: [{ key: 'fusion.presets.trio.min_answered', message: 'must be <= 2' }],
+    })
     await mount()
     ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
     await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')).not.toBeNull())
+    expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('fusion.presets.trio.min_answered')
+    expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('must be <= 2')
     expect(q('[data-testid="fusion-settings-saved"]')).toBeNull()
+  })
+
+  it('uses the selected preset existing min_answered when default_preset changes', async () => {
+    fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE_WITH_DUO }))
+    saveMock.mockResolvedValue(cfg({
+      ok: true,
+      reloaded: false,
+      source_text: SAMPLE_WITH_DUO.replace('default_preset = "trio"', 'default_preset = "duo"'),
+    }))
+    await mount()
+    const presetInput = q('input[type="text"]') as HTMLInputElement
+    const minInput = q('[data-testid="fusion-min-answered"]') as HTMLInputElement
+    expect(minInput.value).toBe('2')
+
+    presetInput.value = 'duo'
+    await fireEvent.input(presetInput)
+
+    expect(minInput.value).toBe('1')
+    ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
+    await vi.waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
+    const posted = saveMock.mock.calls[0]?.[0] as string
+    expect(posted).toContain('default_preset = "duo"')
+    expect(posted.split('[fusion.presets.duo]')[1]).toContain('min_answered = 1')
+  })
+
+  it('does not claim reload when backend saved without reload', async () => {
+    fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE }))
+    saveMock.mockResolvedValue(cfg({ ok: true, reloaded: false }))
+    await mount()
+    ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
+    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-saved"]')).not.toBeNull())
+    expect(q('[data-testid="fusion-settings-saved"]')?.textContent).toBe('저장됨')
   })
 
   it('surfaces malformed live TOML instead of rendering fallback values', async () => {

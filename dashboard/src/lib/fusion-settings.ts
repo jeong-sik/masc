@@ -157,6 +157,18 @@ export function readFusionSettings(sourceText: string): FusionSettings {
   throw new Error(`Invalid fusion settings: ${result.issues.map(i => `${i.key}: ${i.message}`).join('; ')}`)
 }
 
+export function readFusionPresetMinAnswered(sourceText: string, preset: string): number | FusionSettingsParseIssue {
+  const trimmed = preset.trim()
+  if (trimmed === '') return FUSION_SETTINGS_DEFAULTS.minAnswered
+  const section = presetSection(trimmed)
+  if (!sectionExists(sourceText, section)) return FUSION_SETTINGS_DEFAULTS.minAnswered
+  return parsePositiveInt(
+    getRuntimeTomlKey(sourceText, section, KEY_MIN_ANSWERED),
+    FUSION_SETTINGS_DEFAULTS.minAnswered,
+    `${section}.${KEY_MIN_ANSWERED}`,
+  )
+}
+
 export function validateFusionSettings(s: FusionSettings): string[] {
   const errors: string[] = []
   if (!Number.isSafeInteger(s.maxConcurrentPanels) || s.maxConcurrentPanels < 1) {

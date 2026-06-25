@@ -435,6 +435,9 @@ export interface RuntimeTomlConfig {
   file_name: string
   source_text: string
   reloaded: boolean
+  message?: string | null
+  reason?: string | null
+  issues?: unknown
 }
 
 function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
@@ -445,6 +448,9 @@ function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
     file_name: asString(record.file_name) ?? 'runtime.toml',
     source_text: asString(record.source_text, ''),
     reloaded: asBoolean(record.reloaded) ?? false,
+    message: asNullableString(record.message),
+    reason: asNullableString(record.reason),
+    issues: record.issues,
   }
 }
 

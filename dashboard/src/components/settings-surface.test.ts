@@ -34,16 +34,6 @@ vi.mock('../api/dashboard.js', async () => {
   }
 })
 
-vi.mock('../api/dashboard', async () => {
-  const actual = await vi.importActual<typeof import('../api/dashboard')>('../api/dashboard')
-  return {
-    ...actual,
-    fetchLogs: apiMock.fetchLogs,
-    fetchDashboardTools: apiMock.fetchDashboardTools,
-    fetchRuntimeDefaults: apiMock.fetchRuntimeDefaults,
-  }
-})
-
 function makeLogEntry(overrides: Partial<LogEntry> = {}): LogEntry {
   return {
     seq: 1,
@@ -452,6 +442,10 @@ describe('SettingsSurface', () => {
 
     await waitFor(() => expect(container.querySelector('[data-testid="fusion-settings-editor"]')).not.toBeNull())
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/runtime/config/raw', expect.any(Object))
+    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('runtime.toml live-backed')
+    expect(container.querySelector('.set-card-b')?.getAttribute('data-preview-locked')).toBe('false')
+    expect(container.querySelectorAll('.set-fus-lane').length).toBe(0)
+    expect(container.textContent).not.toContain('ollama_cloud.deepseek-v4-flash')
   })
 
   it('renders the tool-group policy with exec-guard and last_turn_safe', async () => {

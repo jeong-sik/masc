@@ -318,7 +318,9 @@ let rec same_fact_snapshot left right =
    writer holds the flock past the retry budget) [on_timeout msg] decides the
    caller's result rather than letting [Flock_timeout] escape — callers that want a
    typed skip/no-op outcome pass it here instead of catching the exception
-   themselves. *)
+   themselves. Non-timeout body exceptions propagate after the lock finalizer runs.
+   Keep [on_timeout] total and non-raising so timeout remains a typed outcome, not
+   a second failure path. *)
 let with_facts_lock ?clock ~keeper_id ~on_timeout f =
   try File_lock_eio.with_lock ?clock (facts_path ~keeper_id) f with
   | File_lock_eio.Flock_timeout { path; attempts; _ } ->

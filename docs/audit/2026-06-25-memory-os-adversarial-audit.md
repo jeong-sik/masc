@@ -72,11 +72,11 @@ data races, and data-race-free programs get sequentially consistent semantics.
 OCaml with fibers, domains, switches, cancellation, mutexes, semaphores, pools,
 and executor pools.
 
-[근거] Focused local target verification after rebase:
-`env MASC_E2E_TESTS=true scripts/dune-local.sh build --cache=disabled test/test_keeper_memory_os.exe @test/runtest-test_operator_control_snapshot_state @test/runtest-test_operator_control_snapshot @test/runtest-test_operator_control_snapshot_cache test/test_sse_storm_e2e.exe`,
-checked 2026-06-25 18:54 KST, confidence Medium. The wrapper used the worktree
-`_build`, built the touched Memory OS and SSE targets, and the visible
-operator-control state/cache tests passed. CI remains the merge authority.
+[근거] CI failure triage before the CI-radius patch:
+`gh run view 28159412988 --repo jeong-sik/masc --job 83395999819 --log-failed`,
+checked 2026-06-25 18:59 KST, confidence High. Result: the focused operator
+control step called a non-existent `test_operator_control.exe`; SSE reconnect
+and contract harness failures remained CI-owned readiness blockers.
 
 [근거] Current memory-agent references:
 [LangGraph memory docs](https://docs.langchain.com/oss/python/concepts/memory),
@@ -200,7 +200,8 @@ The env surface is broad but named and centralized enough to audit:
 The fixed-size constants are hardcoded operational policy, not hidden path
 state: recall 8 facts and 2 episodes, shared facts 4, episode tail scan 32,
 store caps 384. That is acceptable for safety but should be treated as product
-policy, not incidental implementation.
+policy, not incidental implementation. SSOT cleanup is tracked as
+[#22294](https://github.com/jeong-sik/masc/issues/22294).
 
 ## Heuristics And String Matching
 

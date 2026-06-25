@@ -15,14 +15,24 @@ let external_state_of_token = function
   | _ -> R.Unverifiable
 ;;
 
-let node_field = function
-  | Pr -> Some "pullRequest"
-  | Issue -> Some "issue"
+type github_node = {
+  response_field : string;
+  selection : string;
+}
+
+let github_node_for_kind = function
+  | Pr -> Some { response_field = "pullRequest"; selection = "state" }
+  | Issue -> Some { response_field = "issue"; selection = "state" }
   | Task -> None
+;;
+
+let node_field kind =
+  github_node_for_kind kind |> Option.map (fun node -> node.response_field)
 ;;
 
 let parse_state_response ~(kind : external_ref_kind) (body : string) : R.external_state =
   match Yojson.Safe.from_string body with
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception _ -> R.Unverifiable
   | json ->
     (try
@@ -42,6 +52,7 @@ let parse_state_response ~(kind : external_ref_kind) (body : string) : R.externa
                   external_state_of_token (String.uppercase_ascii (String.trim state))
                 | _ -> R.Unverifiable)))
      with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
      | _ -> R.Unverifiable)
 ;;
 
@@ -53,10 +64,9 @@ let repo_owner_name repo =
 ;;
 
 let graphql_node_query ~(kind : external_ref_kind) ~(number : int) =
-  match kind with
-  | Pr -> Some (Printf.sprintf "pullRequest(number:%d){state}" number)
-  | Issue -> Some (Printf.sprintf "issue(number:%d){state}" number)
-  | Task -> None
+  github_node_for_kind kind
+  |> Option.map (fun node ->
+    Printf.sprintf "%s(number:%d){%s}" node.response_field number node.selection)
 ;;
 
 let graphql_query ~(owner : string) ~(name : string) ~(kind : external_ref_kind) ~(number : int) =

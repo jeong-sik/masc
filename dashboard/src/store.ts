@@ -1240,9 +1240,21 @@ export async function loadMoreBoardPosts(): Promise<void> {
 export async function refreshGoals(): Promise<void> {
   goalsLoading.value = true
   try {
-    const { fetchDashboardPlanning } = await import('./api/dashboard')
-    const data = await fetchDashboardPlanning()
-    hydratePlanningSnapshot(data)
+    const { fetchDashboardPlanning, fetchDashboardGoalsTree } = await import('./api/dashboard')
+    const [planning, tree] = await Promise.allSettled([
+      fetchDashboardPlanning(),
+      fetchDashboardGoalsTree(),
+    ])
+    if (planning.status === 'fulfilled') {
+      hydratePlanningSnapshot(planning.value)
+    } else {
+      console.warn('[Planning] fetch error:', planning.reason)
+    }
+    if (tree.status === 'fulfilled') {
+      hydrateGoalTreeSnapshot(tree.value)
+    } else {
+      console.warn('[Goals] tree fetch error:', tree.reason)
+    }
   } catch (err) {
     console.warn('[Planning] fetch error:', err)
   } finally {

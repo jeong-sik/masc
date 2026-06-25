@@ -5,6 +5,7 @@ const apiMocks = vi.hoisted(() => ({
   fetchDashboardShell: vi.fn(),
   fetchDashboardExecution: vi.fn(),
   fetchDashboardPlanning: vi.fn(),
+  fetchDashboardGoalsTree: vi.fn(),
 }))
 
 const toastMocks = vi.hoisted(() => ({
@@ -19,6 +20,7 @@ vi.mock('./api/dashboard-hot', () => ({
 vi.mock('./api/dashboard', () => ({
   fetchDashboardExecution: apiMocks.fetchDashboardExecution,
   fetchDashboardPlanning: apiMocks.fetchDashboardPlanning,
+  fetchDashboardGoalsTree: apiMocks.fetchDashboardGoalsTree,
 }))
 
 vi.mock('./sse', () => ({
@@ -106,6 +108,30 @@ describe('refreshDashboard bootstrap', () => {
     expect(namespaceStore.namespaceTruth.value?.root.provenance).toBe('bootstrap')
     expect(store.serverStatus.value?.version).toBe('2.200.0')
     expect(goalTreeState.goalTreeData.value?.summary.total_goals).toBe(0)
+  })
+
+  it('hydrates the Goal Store tree when refreshing goals', async () => {
+    apiMocks.fetchDashboardPlanning.mockResolvedValue({
+      generated_at: '2026-06-25T00:00:00Z',
+      goals: [],
+      rollup: {},
+      workspace_fsm: null,
+    })
+    apiMocks.fetchDashboardGoalsTree.mockResolvedValue({
+      generated_at: '2026-06-25T00:00:01Z',
+      tree: [],
+      summary: { total_goals: 7, total_tasks: 124 },
+    })
+
+    const store = await import('./store')
+    const goalTreeState = await import('./goal-tree-state')
+
+    await store.refreshGoals()
+
+    expect(apiMocks.fetchDashboardPlanning).toHaveBeenCalledTimes(1)
+    expect(apiMocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(1)
+    expect(store.lastGoalsRefreshAt.value).toBe('2026-06-25T00:00:00Z')
+    expect(goalTreeState.goalTreeData.value?.summary.total_tasks).toBe(124)
   })
 
   it('falls back to legacy shell and execution fetches when a required bootstrap slice is unavailable', async () => {

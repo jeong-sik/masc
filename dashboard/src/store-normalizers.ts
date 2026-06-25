@@ -48,6 +48,8 @@ export function normalizeAgentStatus(value: unknown): Agent['status'] {
 
 export function normalizeTaskStatus(value: unknown): Task['status'] {
   const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  if (raw === 'completed') return 'done'
+  if (raw === 'pending') return 'todo'
   if (
     raw === 'todo'
     || raw === 'in_progress'

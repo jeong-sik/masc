@@ -6,6 +6,8 @@ import {
   normalizeExecutionQueueItem,
   normalizeExecutionSessionBrief,
   normalizeMessage,
+  normalizeTask,
+  normalizeTaskStatus,
 } from './store-normalizers'
 import type { Message } from './types'
 
@@ -144,6 +146,24 @@ describe('normalizeExecutionQueueItem', () => {
         source: 'runtime_blocker_class',
         summary: 'no provider can satisfy tool surface',
       },
+    })
+  })
+})
+
+describe('normalizeTaskStatus', () => {
+  it('folds goal-store task vocabulary into the dashboard task status union', () => {
+    expect(normalizeTaskStatus('completed')).toBe('done')
+    expect(normalizeTaskStatus('pending')).toBe('todo')
+  })
+
+  it('normalizes completed task payloads from the goal tree as done tasks', () => {
+    expect(normalizeTask({
+      id: 'task-1',
+      title: 'Goal-store task',
+      status: 'completed',
+    })).toMatchObject({
+      id: 'task-1',
+      status: 'done',
     })
   })
 })

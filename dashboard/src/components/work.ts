@@ -7,6 +7,8 @@ import { lazy, Suspense } from 'preact/compat'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { route, navigate } from '../router'
 import { goals, tasks, keepers } from '../store'
+import { goalTreeData } from '../goal-tree-state'
+import { normalizeTaskStatus } from '../store-normalizers'
 import { BoardModerationSurface } from './board/board-moderation-surface'
 import { BoardSurface } from './board/board-surface'
 import { SubBoardSurface } from './board/sub-board-surface'
@@ -18,7 +20,7 @@ import { KeeperBadge } from './keeper-badge'
 import { openTaskDetail } from './goals/task-detail-state'
 import { GoalCreateForm } from './goals/goal-create-form'
 import { showGoalCreate, GOAL_PRIORITY_MAX } from './goals/goal-create-state'
-import type { Goal, Task, Keeper } from '../types'
+import type { Goal, GoalTreeNode, GoalTreeTask, Task, Keeper } from '../types'
 
 type WorkSection = 'work' | 'board' | 'sub-boards' | 'moderation' | 'planning' | 'repositories' | 'verification'
 
@@ -51,7 +53,7 @@ type KanbanStatus = 'todo' | 'claimed' | 'in_progress' | 'awaiting_verification'
 type KanbanColumn = readonly [status: KanbanStatus, label: string, cls: JobStateCls]
 
 const KANBAN_COLUMNS: ReadonlyArray<KanbanColumn> = [
-  ['todo',                  '백로그', 'todo'],
+  ['todo',                  '미배정', 'todo'],
   ['claimed',               '클레임', 'claimed'],
   ['in_progress',           '진행',   'wip'],
   ['awaiting_verification', '검증',   'verify'],
@@ -209,6 +211,61 @@ function goalProgressCounts(goalTasks: Task[]): GoalProgressCounts {
   return counts
 }
 
+function taskFromGoalTreeTask(task: GoalTreeTask): Task | null {
+  const status = normalizeTaskStatus(task.status)
+  if (!status) return null
+  return {
+    id: task.id,
+    title: task.title,
+    goal_id: task.goal_id,
+    status,
+    priority: task.priority,
+    assignee: task.assignee ?? undefined,
+    created_at: task.created_at,
+    updated_at: task.updated_at,
+    completed_at: status === 'done' || status === 'cancelled' ? task.updated_at : undefined,
+  }
+}
+
+function collectGoalTreeTasks(nodes: ReadonlyArray<GoalTreeNode>): Task[] {
+  const result: Task[] = []
+  const visit = (node: GoalTreeNode) => {
+    for (const task of node.tasks) {
+      const normalized = taskFromGoalTreeTask(task)
+      if (normalized) result.push(normalized)
+    }
+    for (const child of node.children) visit(child)
+  }
+  for (const node of nodes) visit(node)
+  return result
+}
+
+function mergeTaskSnapshot(goalStoreTasks: ReadonlyArray<Task>, executionTasks: ReadonlyArray<Task>): Task[] {
+  const byId = new Map<string, Task>()
+  for (const task of goalStoreTasks) byId.set(task.id, task)
+  for (const task of executionTasks) {
+    const previous = byId.get(task.id)
+    byId.set(task.id, previous
+      ? {
+          ...previous,
+          ...task,
+          goal_id: task.goal_id ?? previous.goal_id,
+          status: task.status ?? previous.status,
+          priority: task.priority ?? previous.priority,
+          assignee: task.assignee ?? previous.assignee,
+          created_at: task.created_at ?? previous.created_at,
+          updated_at: task.updated_at ?? previous.updated_at,
+          completed_at: task.completed_at ?? previous.completed_at,
+          contract: task.contract ?? previous.contract,
+          handoff_context: task.handoff_context ?? previous.handoff_context,
+          gate: task.gate ?? previous.gate,
+          execution_links: task.execution_links ?? previous.execution_links,
+        }
+      : task)
+  }
+  return Array.from(byId.values())
+}
+
 // ── Sub-components ──────────────────────────────────────────────────────────
 
 function GoalProgressBar({ counts }: { counts: GoalProgressCounts }) {
@@ -292,7 +349,7 @@ function TaskRow({ task, onClaim }: { task: Task; onClaim: (id: string) => void 
                 class="wk-task-claim"
                 data-testid="job-claim"
                 onClick=${(e: Event) => { e.stopPropagation(); onClaim(task.id) }}
-                title="keeper_task_claim — 백로그에서 클레임"
+                title="keeper_task_claim — 미배정 task claim"
               >
                 ＋ claim
               </button>
@@ -804,7 +861,7 @@ function WorkAside({
           <span class=${`wka-hud-v ${counts.verify ? 'volt' : ''}`}>${counts.verify}</span>
         </div>
         <div class="wka-hud-c">
-          <span class="wka-hud-k">백로그</span>
+          <span class="wka-hud-k">미배정</span>
           <span class=${`wka-hud-v ${counts.backlog ? 'warn' : ''}`}>${counts.backlog}</span>
         </div>
         <div class="wka-hud-c">
@@ -944,7 +1001,16 @@ function WorkSurfaceV2() {
   // side-panel toggle changes.
   const goalCreateOpen = showGoalCreate.value
   const goalList = goals.value
-  const allTasks = tasks.value
+  const executionTasks = tasks.value
+  const goalTreeSnapshot = goalTreeData.value
+  const goalStoreTasks = useMemo(
+    () => collectGoalTreeTasks(goalTreeSnapshot?.tree ?? []),
+    [goalTreeSnapshot],
+  )
+  const allTasks = useMemo(
+    () => mergeTaskSnapshot(goalStoreTasks, executionTasks),
+    [goalStoreTasks, executionTasks],
+  )
 
   const [view, setView] = useState<WorkView>(readStoredWorkView)
   const [openSet, setOpenSet] = useState<Set<string>>(new Set())
@@ -986,12 +1052,12 @@ function WorkSurfaceV2() {
 
   const liveTasks = claimedTasks.filter(t => t.status !== 'cancelled')
   const totals = useMemo(() => ({
-    goals: goalList.length,
-    tasks: liveTasks.length,
+    goals: goalTreeSnapshot?.summary.total_goals ?? goalList.length,
+    tasks: goalTreeSnapshot?.summary.total_tasks ?? liveTasks.length,
     wip: liveTasks.filter(t => t.status === 'in_progress' || t.status === 'claimed').length,
     verify: liveTasks.filter(t => t.status === 'awaiting_verification').length,
     backlog: claimedTasks.filter(t => isClaimableBacklogTask(t)).length,
-  }), [goalList, liveTasks, claimedTasks])
+  }), [goalTreeSnapshot, goalList, liveTasks, claimedTasks])
 
   const backlogTasks = useMemo(() => {
     return claimedTasks
@@ -1130,14 +1196,20 @@ function WorkSurfaceV2() {
 
   // Flat list of all non-cancelled tasks with goal context injected.
   // Used by KanbanView to group by status column.
+  const goalTitleById = useMemo(
+    () => new Map(goalList.map(g => [g.id, g.title])),
+    [goalList],
+  )
+
   const kanbanTasks = useMemo((): ReadonlyArray<KanbanTask> =>
-    goalList.flatMap(g => {
-      const gTasks = tasksByGoalId.get(g.id) ?? []
-      return gTasks
-        .filter(t => t.status !== 'cancelled')
-        .map(t => ({ ...t, _goalId: g.id, _goalTitle: g.title }))
-    }),
-  [goalList, tasksByGoalId])
+    claimedTasks
+      .filter(t => t.status !== 'cancelled')
+      .map(t => ({
+        ...t,
+        _goalId: t.goal_id ?? '',
+        _goalTitle: t.goal_id ? (goalTitleById.get(t.goal_id) ?? '미연결 목표') : '미연결 목표',
+      })),
+  [claimedTasks, goalTitleById])
 
   const switchView = useCallback((next: WorkView) => {
     setView(next)
@@ -1185,12 +1257,12 @@ function WorkSurfaceV2() {
         </header>
 
           <section class="wk-kpis" data-testid="work-kpis">
-            <div class="wk-kpi">
+            <div class="wk-kpi primary">
               <div class="wk-kpi-k">활성 목표</div>
               <div class="wk-kpi-v brass" data-testid="kpi-goals">${totals.goals}</div>
             </div>
             <div class="wk-kpi">
-              <div class="wk-kpi-k">전체 TASK</div>
+              <div class="wk-kpi-k">목표 TASK</div>
               <div class="wk-kpi-v" data-testid="kpi-tasks">${totals.tasks}</div>
             </div>
             <div class="wk-kpi">
@@ -1202,7 +1274,7 @@ function WorkSurfaceV2() {
               <div class=${`wk-kpi-v ${totals.verify > 0 ? 'volt' : ''}`} data-testid="kpi-verify">${totals.verify}</div>
             </div>
             <div class="wk-kpi">
-              <div class="wk-kpi-k">백로그</div>
+              <div class="wk-kpi-k">미배정</div>
               <div class=${`wk-kpi-v ${totals.backlog > 0 ? 'warn' : ''}`} data-testid="kpi-backlog">${totals.backlog}</div>
             </div>
           </section>
@@ -1211,7 +1283,7 @@ function WorkSurfaceV2() {
             <section class="wk-backlog" data-testid="work-backlog">
               <div class="wk-backlog-h">
                 <span class="wk-backlog-glyph" aria-hidden="true">⊕</span>
-                클레임 가능 백로그
+                클레임 가능 미배정
                 <span class="n">${backlogTasks.length}</span>
                 <span class="wk-backlog-sub mono">keeper_task_claim — 미배정 task</span>
               </div>
@@ -1257,7 +1329,7 @@ function WorkSurfaceV2() {
               />
             `}
 
-          <div class="wk-foot mono">Goal → Task → keeper · 우선순위 순 정렬 · 완료는 게이트 증거 충족 후 done · 미배정 task 는 백로그에서 claim</div>
+          <div class="wk-foot mono">Goal → Task → keeper · 우선순위 순 정렬 · 완료는 게이트 증거 충족 후 done · 미배정 task 는 claim</div>
       </div>
       ${goalCreateOpen ? html`<${GoalCreateForm} />` : html`
         <${WorkAside}

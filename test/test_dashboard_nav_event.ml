@@ -37,6 +37,22 @@ let test_parse_lab_memory_subsystems () =
   check (option string) "redirected_from" None event.redirected_from
 ;;
 
+let test_parse_settings_runtime_section () =
+  let event = parse_ok {|{"surface":"settings","section":"runtime"}|} in
+  check string "surface" "settings" event.surface;
+  check (option string) "section" (Some "runtime") event.section;
+  check (option string) "redirected_from" None event.redirected_from
+;;
+
+let test_reject_settings_account_section () =
+  let msg = parse_err {|{"surface":"settings","section":"account"}|} in
+  check
+    bool
+    "mentions section"
+    true
+    (Astring.String.is_infix ~affix:"unknown section" msg)
+;;
+
 let test_parse_full_event () =
   let event =
     parse_ok {|{"surface":"monitoring","section":"agents","redirected_from":"none"}|}
@@ -185,6 +201,11 @@ let () =
       , [ test_case "minimal surface only" `Quick test_parse_minimal_surface_only
         ; test_case "schedule surface only" `Quick test_parse_schedule_surface_only
         ; test_case "lab memory-subsystems section" `Quick test_parse_lab_memory_subsystems
+        ; test_case "settings runtime section" `Quick test_parse_settings_runtime_section
+        ; test_case
+            "rejects settings account section"
+            `Quick
+            test_reject_settings_account_section
         ; test_case "full event" `Quick test_parse_full_event
         ; test_case "redirected_from accepted" `Quick test_parse_redirected
         ; test_case "rejects unknown surface" `Quick test_reject_unknown_surface

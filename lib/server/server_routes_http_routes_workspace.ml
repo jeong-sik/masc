@@ -598,13 +598,47 @@ let add_routes router =
            let max_nodes =
              tree_node_limit_of_query (Uri.get_query_param uri "limit")
            in
-           let nodes =
-             if not (Sys.file_exists base) then []
-             else
-               let diff_by_path = git_diff_badges ~base in
-               scan_dir ~diff_by_path ~base ~depth:0 ~max_depth:depth ~max_nodes [] base
+           let include_diff = bool_query_param request "diff" ~default:false in
+           let effective_depth, effective_max_nodes =
+             match source with
+             | `Project
+             | `RepositoryMissing _
+             | `RepositoryUnknown _
+             | `PlaygroundMissing _
+             | `KeeperUnknown _ -> (0, min max_nodes 200)
+             | `Repository _ | `Playground _ -> (depth, max_nodes)
            in
-           let json = `List (List.rev nodes) in
+           let cache_key =
+             Printf.sprintf "workspace:tree:%s:%s:%d:%d:%b"
+               base
+               (match source with
+                | `Project -> "project"
+                | `Repository repo_id -> "repository:" ^ repo_id
+                | `RepositoryMissing repo_id -> "repository_missing:" ^ repo_id
+                | `RepositoryUnknown repo_id -> "repository_unknown:" ^ repo_id
+                | `Playground name -> "playground:" ^ name
+                | `PlaygroundMissing name -> "playground_missing:" ^ name
+                | `KeeperUnknown name -> "keeper_unknown:" ^ name)
+               effective_depth effective_max_nodes include_diff
+           in
+           let json =
+             Dashboard_cache.get_or_compute cache_key
+               ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+               (fun () ->
+                  Domain_pool_ref.submit_io_or_inline (fun () ->
+                    let nodes =
+                      if not (Sys.file_exists base) then []
+                      else
+                        let diff_by_path =
+                          if include_diff then Some (git_diff_badges ~base)
+                          else None
+                        in
+                        scan_dir ?diff_by_path ~base ~depth:0
+                          ~max_depth:effective_depth
+                          ~max_nodes:effective_max_nodes [] base
+                    in
+                    `List (List.rev nodes)))
+           in
            json_response_with_source_and_base
              ~status:`OK ~source ~base_path:base request reqd json)
          request reqd)

@@ -58,6 +58,13 @@ describe('workspace API', () => {
     expect(result.source).toEqual({ kind: 'repository', repoId: 'masc' })
   })
 
+  it('fetchWorkspaceTree can request changed-file diff badges', async () => {
+    stubFetch([])
+
+    await fetchWorkspaceTree(2, { includeDiff: true })
+    expect(mockFetch.mock.calls[0]![0]).toContain('diff=true')
+  })
+
   it('fetchWorkspaceTree decodes X-Workspace-Source playground header', async () => {
     stubFetch([], true, { 'X-Workspace-Source': 'playground:alpha' })
 

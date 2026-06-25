@@ -34,10 +34,17 @@ type runtime_manifest_scan =
   ; mutable latest_context_injected_row : Keeper_runtime_manifest.t option
   ; mutable latest_context_compacted_row : Keeper_runtime_manifest.t option
   ; mutable dag_edges : (string * string) list
+  ; mutable scanned_lines : int
+  ; scan_line_limit : int
+  ; scan_scope : string
   }
 
 val make_runtime_manifest_scan :
-  path:string -> limit:int -> runtime_manifest_scan
+  path:string ->
+  limit:int ->
+  scan_line_limit:int ->
+  scan_scope:string ->
+  runtime_manifest_scan
 
 val push_bounded : 'a Queue.t -> int -> 'a -> unit
 val queue_to_list : 'a Queue.t -> 'a list

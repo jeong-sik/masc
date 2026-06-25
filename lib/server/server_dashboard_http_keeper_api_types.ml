@@ -14,6 +14,46 @@ let keeper_suffix_checkpoints = "/checkpoints"
 let keeper_suffix_runtime_trace = "/runtime-trace"
 let keeper_suffix_directive = "/directive"
 
+let cache_key_string_segment value =
+  Printf.sprintf "s%d:%s" (String.length value) value
+;;
+
+let cache_key_string_opt_segment = function
+  | Some value -> "some:" ^ cache_key_string_segment value
+  | None -> "none"
+;;
+
+let cache_key_int_opt_segment = function
+  | Some value -> "some:i:" ^ string_of_int value
+  | None -> "none"
+;;
+
+let keeper_config_cache_key (config : Workspace.config) name =
+  Printf.sprintf
+    "keeper:config:%s:%s"
+    (cache_key_string_segment (Workspace.masc_root_dir config))
+    (cache_key_string_segment name)
+;;
+
+let keeper_composite_cache_key (config : Workspace.config) name =
+  Printf.sprintf
+    "keeper:composite:%s:%s"
+    (cache_key_string_segment (Workspace.masc_root_dir config))
+    (cache_key_string_segment name)
+;;
+
+let keeper_runtime_trace_cache_key (config : Workspace.config) name ?trace_id
+      ?turn_id ~limit ()
+  =
+  Printf.sprintf
+    "keeper:runtime-trace:%s:%s:%s:%s:%d"
+    (cache_key_string_segment (Workspace.masc_root_dir config))
+    (cache_key_string_segment name)
+    (cache_key_string_opt_segment trace_id)
+    (cache_key_int_opt_segment turn_id)
+    limit
+;;
+
 type keeper_post_route_kind =
   | Keeper_post_tools
   | Keeper_post_config

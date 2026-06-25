@@ -45,6 +45,7 @@ export interface WorkspaceFileResponse {
 export interface WorkspaceApiOptions extends GetOptions {
   readonly keeper?: string
   readonly repoId?: string | null
+  readonly includeDiff?: boolean
 }
 
 function appendWorkspaceParams(params: URLSearchParams, opts: WorkspaceApiOptions): void {
@@ -58,6 +59,7 @@ export async function fetchWorkspaceTree(
 ): Promise<WorkspaceTreeResult> {
   const params = new URLSearchParams()
   params.set('depth', String(depth))
+  if (opts.includeDiff) params.set('diff', 'true')
   appendWorkspaceParams(params, opts)
   const { data, headers } = await getWithResponse<ReadonlyArray<FileTreeNode>>(
     `/api/v1/workspace/tree?${params.toString()}`,

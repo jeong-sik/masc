@@ -426,8 +426,8 @@ let test_execute_descriptor_spells_out_argv_basis () =
 ;;
 
 let test_board_descriptions_disambiguate_post_id_flow () =
-  let get_descriptor = required_internal_descriptor "keeper_board_get" in
-  let get_schema = required_board_schema "keeper_board_get" in
+  let get_descriptor = required_internal_descriptor "keeper_board_post_get" in
+  let get_schema = required_board_schema "keeper_board_post_get" in
   let list_schema = required_board_schema "keeper_board_list" in
   let search_schema = required_board_schema "keeper_board_search" in
   let comment_schema = required_board_schema "keeper_board_comment" in
@@ -437,15 +437,15 @@ let test_board_descriptions_disambiguate_post_id_flow () =
     |> Option.value ~default:""
   in
   check_contains
-    "board_get descriptor points to list/search first"
+    "board_post_get descriptor points to list/search first"
     ~sub:"Use keeper_board_list or keeper_board_search first"
     get_descriptor.description;
   check_contains
-    "board_get schema forbids empty args"
+    "board_post_get schema forbids empty args"
     ~sub:"never call this tool with empty arguments"
     get_schema.description;
   check_contains
-    "board_get post_id field says exact ID is required"
+    "board_post_get post_id field says exact ID is required"
     ~sub:"Required exact board post ID"
     get_post_id_description;
   check_contains
@@ -478,7 +478,7 @@ let test_board_descriptions_disambiguate_post_id_flow () =
 ;;
 
 let test_masc_board_descriptions_disambiguate_post_id_flow () =
-  let get_schema = required_masc_board_schema "masc_board_get" in
+  let get_schema = required_masc_board_schema "masc_board_post_get" in
   let list_schema = required_masc_board_schema "masc_board_list" in
   let search_schema = required_masc_board_schema "masc_board_search" in
   let comment_schema = required_masc_board_schema "masc_board_comment" in
@@ -488,15 +488,15 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
     |> Option.value ~default:""
   in
   check_contains
-    "masc_board_get schema points to list/search first"
+    "masc_board_post_get schema points to list/search first"
     ~sub:"masc_board_list or masc_board_search first"
     get_schema.description;
   check_contains
-    "masc_board_get schema forbids empty args"
+    "masc_board_post_get schema forbids empty args"
     ~sub:"never call this tool with empty arguments"
     get_schema.description;
   check_contains
-    "masc_board_get post_id field says exact ID is required"
+    "masc_board_post_get post_id field says exact ID is required"
     ~sub:"Required exact board post ID"
     get_post_id_description;
   check_contains
@@ -599,8 +599,8 @@ let test_readonly_policy_is_descriptor_input_aware () =
     (Some true)
     (Descriptor.readonly_static_hint descriptor);
   Alcotest.(check (option bool))
-    "raw public-shaped input is not an internal readonly decision"
-    None
+    "raw public-shaped search input remains read-only"
+    (Some true)
     (Descriptor.readonly_for_input descriptor ~input:public_input);
   Alcotest.(check (option bool))
     "public input is translated before readonly policy evaluation"
@@ -718,7 +718,7 @@ let test_public_name_projection_uses_descriptor_resolution () =
     (Resolution.public_names_for_internal "tool_execute");
   Alcotest.(check (list string))
     "tool_search_files public projections"
-    [ "Grep"; "Search" ]
+    [ "Grep"; "Search"; "search_files" ]
     (Resolution.public_names_for_internal "tool_search_files");
   Alcotest.(check (option string))
     "tool_search_files preferred public projection"
@@ -730,7 +730,7 @@ let test_public_name_projection_uses_descriptor_resolution () =
     (Resolution.public_name_for_internal "tool_write_file");
   Alcotest.(check (list string))
     "allowed internal routes project to public names"
-    [ "Execute"; "Grep"; "Search" ]
+    [ "Execute"; "Grep"; "Search"; "search_files" ]
     (Resolution.public_names_for_allowed_internal_names
        [ "tool_execute"; "tool_search_files" ])
 ;;

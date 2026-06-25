@@ -47,6 +47,23 @@ let valid_sections =
     , [ "tools"; "harness"; "performance"; "memory-subsystems"; "keeper-memory-health" ]
     )
   ; "code", [ "ide-shell" ]
+  ; ( "settings"
+    , [ "mcp"
+      ; "runtime"
+      ; "runtimes"
+      ; "routing"
+      ; "prompts"
+      ; "fusion"
+      ; "policy"
+      ; "lifecycle"
+      ; "sandbox"
+      ; "ide"
+      ; "gate"
+      ; "paths"
+      ; "logs"
+      ; "notify"
+      ; "display"
+      ] )
   ]
 ;;
 

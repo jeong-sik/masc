@@ -82,9 +82,9 @@ let public_mcp_surface_tools =
   ; "masc_board_reaction"
   ; (* Agent discovery *)
     "masc_agent_card"
-  ; "masc_dashboard"
   ; (* Utility *)
     "masc_tool_help"
+  ; "masc_dashboard"
   ; "masc_check"
   ; (* Board extended *)
     "masc_board_comment_vote"

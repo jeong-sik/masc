@@ -179,6 +179,9 @@ export interface DashboardScheduledAutomation {
 
 export interface DashboardToolsResponse {
   generated_at?: string
+  status?: string
+  is_warming?: boolean
+  stale_reason?: string | null
   config_resolution?: DashboardConfigResolution
   runtime_resolution?: DashboardRuntimeResolution
   tool_inventory: DashboardToolInventoryResponse

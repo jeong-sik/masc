@@ -189,14 +189,14 @@ harness_mint_admin_token() {
   fi
 
   if ! token_json="$(
-    env -u MCP_AUTH_TOKEN -u MASC_ADMIN_TOKEN -u MASC_TOKEN \
+    env -u MCP_TOKEN -u MCP_AUTH_TOKEN -u MASC_ADMIN_TOKEN -u MASC_TOKEN \
       "$server_exe" login \
       --base-path "$base_path" \
       --host 127.0.0.1 \
       --port "$port" \
       --agent "$agent" \
       --role admin \
-      --client-env MCP_AUTH_TOKEN \
+      --client-env MCP_TOKEN \
       --no-expiry \
       --json
   )"; then

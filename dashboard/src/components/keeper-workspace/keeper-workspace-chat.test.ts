@@ -166,13 +166,12 @@ describe('KeeperWorkspaceChat', () => {
     expect(container.querySelector('[data-testid="kw-sigil"]')?.textContent).toBe('sangsu')
     expect(container.querySelector('[data-testid="kw-conversation-panel"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="kw-chat-command-icons"]')).not.toBeNull()
-    // Prototype desktop header: only FSM glyphs + settings (⚙).
-    expect(container.querySelector('[data-testid="kw-chat-command-turn"]')).toBeNull()
-    expect(container.querySelector('[data-testid="kw-chat-command-artifacts"]')).toBeNull()
+    expect(container.querySelector('[data-testid="kw-chat-command-turn"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="kw-chat-command-artifacts"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="kw-chat-command-config"]')).not.toBeNull()
   })
 
-  it('renders the keeper scope/path slug under the chat name', async () => {
+  it('keeps runtime scope/path out of the slim chat header', async () => {
     const { KeeperWorkspaceChat } = await loadChat()
     const keeperWithSlug = { ...mockKeeper, sandbox_target: '~/wt/sangsu', skill_primary: 'skill-primary' }
 
@@ -185,8 +184,10 @@ describe('KeeperWorkspaceChat', () => {
     })
 
     const slug = container.querySelector('.chat-head .sub .sub-ns') as HTMLElement | null
-    expect(slug).not.toBeNull()
-    expect(slug?.textContent).toContain('~/wt/sangsu')
+    expect(slug).toBeNull()
+    expect(container.querySelector('.kw-chat-name')?.textContent).toContain('상수')
+    expect(container.querySelector('.kw-chat-name')?.textContent).not.toContain('~/wt/sangsu')
+    expect(container.querySelector('.kw-chat-name')?.textContent).not.toContain('skill-primary')
   })
 
   it('switches the mobile pane to roster when the back button is clicked', async () => {

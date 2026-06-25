@@ -235,6 +235,8 @@ function FleetSelectedSection({ keeper }: { keeper: Keeper }): VNode {
                   key=${action}
                   type="button"
                   class=${`kw-fleet-action${action === 'shutdown' ? ' danger' : ''}${pendingAction === action ? ' busy' : ''}`}
+                  title=${`${keeper.name} ${FLEET_ACTION_LABELS[action]}`}
+                  aria-label=${`${keeper.name} ${FLEET_ACTION_LABELS[action]}`}
                   aria-busy=${pendingAction === action ? 'true' : 'false'}
                   disabled=${pendingAction !== null}
                   onClick=${() => {

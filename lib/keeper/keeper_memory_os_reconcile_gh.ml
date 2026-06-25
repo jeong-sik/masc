@@ -52,14 +52,17 @@ let repo_owner_name repo =
   | _ -> None
 ;;
 
+let graphql_node_query ~(kind : external_ref_kind) ~(number : int) =
+  match kind with
+  | Pr -> Some (Printf.sprintf "pullRequest(number:%d){state}" number)
+  | Issue -> Some (Printf.sprintf "issue(number:%d){state}" number)
+  | Task -> None
+;;
+
 let graphql_query ~(owner : string) ~(name : string) ~(kind : external_ref_kind) ~(number : int) =
-  let node =
-    match kind with
-    | Pr -> Printf.sprintf "pullRequest(number:%d){state}" number
-    | Issue -> Printf.sprintf "issue(number:%d){state}" number
-    | Task -> assert false
-  in
-  Printf.sprintf "query{repository(owner:%S,name:%S){%s}}" owner name node
+  graphql_node_query ~kind ~number
+  |> Option.map (fun node ->
+    Printf.sprintf "query{repository(owner:%S,name:%S){%s}}" owner name node)
 ;;
 
 let no_token_verify (_ : external_ref) : R.external_state = R.Unverifiable
@@ -77,25 +80,27 @@ let verify_external
   | (Pr | Issue), None, _ -> R.Unverifiable
   | (Pr | Issue), _, None -> R.Unverifiable
   | (Pr | Issue), Some (owner, name), Some number ->
-    let query = graphql_query ~owner ~name ~kind:r.kind ~number in
-    let body = `Assoc [ "query", `String query ] |> Yojson.Safe.to_string in
-    (match
-       Masc_http_client.post_sync
-         ~clock
-         ~timeout_sec
-         ~url:"https://api.github.com/graphql"
-         ~headers:
-           [ "Authorization", "bearer " ^ String.trim token
-           ; "Accept", "application/vnd.github+json"
-           ; "User-Agent", "masc-memory-os-reconcile"
-           ; "Content-Type", "application/json"
-           ]
-         ~body
-         ()
-     with
-     | Error _ -> R.Unverifiable
-     | Ok (status, response_body) ->
-       if status < 200 || status >= 300
-       then R.Unverifiable
-       else parse_state_response ~kind:r.kind response_body)
+    (match graphql_query ~owner ~name ~kind:r.kind ~number with
+     | None -> R.Unverifiable
+     | Some query ->
+       let body = `Assoc [ "query", `String query ] |> Yojson.Safe.to_string in
+       (match
+          Masc_http_client.post_sync
+            ~clock
+            ~timeout_sec
+            ~url:"https://api.github.com/graphql"
+            ~headers:
+              [ "Authorization", "bearer " ^ String.trim token
+              ; "Accept", "application/vnd.github+json"
+              ; "User-Agent", "masc-memory-os-reconcile"
+              ; "Content-Type", "application/json"
+              ]
+            ~body
+            ()
+        with
+        | Error _ -> R.Unverifiable
+        | Ok (status, response_body) ->
+          if status < 200 || status >= 300
+          then R.Unverifiable
+          else parse_state_response ~kind:r.kind response_body))
 ;;

@@ -1303,6 +1303,25 @@ let test_append_episode_bundle_waits_for_fact_lock () =
           (List.length (Memory_io.read_episodes_tail ~keeper_id ~n:10)))))
 ;;
 
+let test_with_facts_lock_propagates_body_failure () =
+  with_eio (fun ~sw:_ ~net:_ ~clock ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let keeper_id = "facts-lock-body-failure" in
+      match
+        Memory_io.with_facts_lock
+          ~clock
+          ~keeper_id
+          ~on_timeout:(fun msg ->
+            Alcotest.fail
+              ("body Failure was misclassified as a lock timeout: " ^ msg))
+          (fun () -> failwith "body exploded")
+      with
+      | _ -> Alcotest.fail "expected body Failure to propagate"
+      | exception Failure "body exploded" -> ()
+      | exception exn ->
+        Alcotest.fail ("unexpected exception: " ^ Printexc.to_string exn)))
+;;
+
 (* RFC-0247 (purge): GC is two structural passes — hard-expire past-TTL facts and
    dedup duplicate claims keeping the most-recently-verified. There is no
    score-threshold discard, so this asserts only the structural outcomes. The
@@ -4067,6 +4086,10 @@ let () =
             "episode bundle waits for fact lock"
             `Quick
             test_append_episode_bundle_waits_for_fact_lock
+        ; Alcotest.test_case
+            "facts lock propagates body Failure"
+            `Quick
+            test_with_facts_lock_propagates_body_failure
         ; Alcotest.test_case
             "gc dry-run and rewrite"
             `Quick

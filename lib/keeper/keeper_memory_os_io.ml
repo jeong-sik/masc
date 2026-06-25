@@ -323,7 +323,6 @@ let with_facts_lock ?clock ~keeper_id ~on_timeout f =
   try File_lock_eio.with_lock ?clock (facts_path ~keeper_id) f with
   | File_lock_eio.Flock_timeout { path; attempts; _ } ->
     on_timeout (Printf.sprintf "lock timeout: %s after %d attempts" path attempts)
-  | Failure msg -> on_timeout ("lock timeout: " ^ msg)
 ;;
 
 let save_tool_result ~keeper_id ~tool_call_id json =

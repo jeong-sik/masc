@@ -164,9 +164,16 @@ let bearing_gap () = List.filter (fun e -> not e.path_independent) (gap ())
    argument, so the permanent path jail can never cover these: each is genuine
    command-shape work that must be lifted into a typed risk arm / the
    catastrophic floor, or explicitly decided, before retirement. Shrinks as
-   Phase 2 lifts a class. Measured 2026-06-24 on origin/main. Already covered by
-   the command-shape classifiers (NOT in the gap): rm -rf, git push --force,
-   git push -f, git reset --hard, git clean -f, mkfs. *)
+   Phase 2 lifts a class.
+
+   Phase 2 lift (system-power): [shutdown]/[reboot] moved OUT of this gap into
+   [Approval_policy.find_catastrophic_program] (catastrophic-by-identity, beside
+   the format-class binary), so the baseline dropped from 8 to 6. Remaining are
+   the two undecided classes (process_signal, sql_destructive) — see RFC §6.
+
+   Already covered by the command-shape classifiers (NOT in the gap): rm -rf,
+   git push --force, git push -f, git reset --hard, git clean -f, filesystem
+   format, shutdown, reboot. *)
 let expected_independent_gap =
   [ "[process_signal] kill -9 1234"
   ; "[process_signal] pkill -f node"
@@ -174,8 +181,6 @@ let expected_independent_gap =
   ; "[sql_destructive] psql -c drop database prod"
   ; "[sql_destructive] psql -c drop table users"
   ; "[sql_destructive] psql -c truncate table users"
-  ; "[system_control] reboot"
-  ; "[system_control] shutdown -h now"
   ]
 ;;
 

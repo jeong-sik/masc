@@ -5950,6 +5950,7 @@ let emit_of_simple buf spec =
     ; "Sed"; "Uv"; "Gh"; "Glab"; "Terminal_notifier"; "Osascript"
     ; "Play"; "Rec"; "Ffplay"; "Mpg123"; "Open"
     ; "Sudo"; "Su"; "Chmod"; "Chown"; "Rm"; "Dd"; "Mkfs"
+    ; "Shutdown"; "Reboot"; "Halt"; "Poweroff"
     ]
   in
   let unhandled =

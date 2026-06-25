@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   formatElapsed, formatDuration, formatDurationMs,
   formatElapsedCompact, formatDelta,
+  formatRelativeSec, formatRelativeUntilSec, formatTimeAgo,
 } from './format-time'
 
 describe('formatElapsed', () => {
@@ -44,4 +45,15 @@ describe('formatDelta', () => {
   it('formats negative without plus', () => { expect(formatDelta(-0.3)).toBe('-0.3000') })
   it('formats zero with plus', () => { expect(formatDelta(0)).toBe('+0.0000') })
   it('uses custom decimals', () => { expect(formatDelta(1.234, 2)).toBe('+1.23') })
+})
+
+describe('relative time finite guards', () => {
+  it('returns 정보 없음 for non-finite relative deltas', () => {
+    expect(formatRelativeSec(Infinity)).toBe('정보 없음')
+    expect(formatRelativeUntilSec(Number.NaN)).toBe('정보 없음')
+  })
+
+  it('returns 정보 없음 for invalid timestamps instead of throwing', () => {
+    expect(formatTimeAgo('not-a-date')).toBe('정보 없음')
+  })
 })

@@ -157,6 +157,14 @@ export function dequeueInput(keeperName: string): QueuedMessage | null {
   return msg
 }
 
+/** Put an unsent/deferred message back at the front of the queue. */
+export function requeueInputFront(keeperName: string, msg: QueuedMessage): void {
+  const q = _ensureQueue(keeperName)
+  q.sending = false
+  if (q.items.some(item => item.id === msg.id)) return
+  q.items.unshift({ ...msg, sent: false })
+}
+
 /** Mark the current sending item as done and clear the sending flag. */
 export function markInputSent(keeperName: string): void {
   const q = _queues.get(keeperName)

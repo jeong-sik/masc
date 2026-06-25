@@ -285,15 +285,17 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
     const name = asString(raw.name)
     if (name === undefined) return null
     const status = asString(raw.status)
-    const toolStatus: 'ok' | 'err' | undefined =
-      status === 'ok' || status === 'err' ? status : undefined
+    const toolStatus: 'pending' | 'ok' | 'err' | undefined =
+      status === 'pending' || status === 'ok' || status === 'err' ? status : undefined
     return withoutUndefined({
       kind: 'tool',
       name,
+      toolCallId: asString(raw.toolCallId) ?? asString(raw.tool_call_id) ?? undefined,
       status: toolStatus,
       dur: asString(raw.dur) ?? undefined,
-      args: raw.args,
+      args: asString(raw.args) ?? undefined,
       result: asString(raw.result) ?? undefined,
+      ts: asString(raw.ts) ?? undefined,
     })
   }
   return null
@@ -866,6 +868,105 @@ export function appendAssistantThinkingDelta(name: string, entryId: string, delt
       delivery: 'streaming',
     }
   })
+}
+
+function warnMissingToolTrace(
+  op: string,
+  keeperName: string,
+  entryId: string,
+  toolCallId: string,
+): void {
+  console.warn(
+    `[keeper-trace] ${op} ignored: missing tool trace step keeper=${keeperName} entry=${entryId} toolCallId=${toolCallId}`,
+  )
+}
+
+export function appendAssistantToolTraceStep(
+  name: string,
+  entryId: string,
+  step: { toolCallId: string; name: string; ts?: string },
+): void {
+  const toolCallId = step.toolCallId.trim()
+  const toolName = step.name.trim()
+  if (!toolCallId || !toolName) {
+    console.warn(
+      `[keeper-trace] start ignored: invalid tool trace step keeper=${name} entry=${entryId}`,
+    )
+    return
+  }
+  updateThreadEntry(name, entryId, entry => {
+    const existing = entry.traceSteps ?? []
+    const index = existing.findIndex(
+      trace => trace.kind === 'tool' && trace.toolCallId === toolCallId,
+    )
+    const nextStep: ChatTraceStep = {
+      kind: 'tool',
+      toolCallId,
+      name: toolName,
+      status: 'pending',
+      ts: step.ts ?? new Date().toISOString(),
+    }
+    const traceSteps =
+      index === -1
+        ? [...existing, nextStep]
+        : existing.map((trace, i) => i === index ? { ...trace, ...nextStep } : trace)
+    return {
+      ...entry,
+      traceSteps,
+      streamState: 'streaming',
+      delivery: 'streaming',
+    }
+  })
+}
+
+export function appendAssistantToolTraceArgsDelta(
+  name: string,
+  entryId: string,
+  toolCallId: string,
+  delta: string,
+): void {
+  const id = toolCallId.trim()
+  if (!id || !delta) return
+  let found = false
+  updateThreadEntry(name, entryId, entry => {
+    const existing = entry.traceSteps ?? []
+    const traceSteps = existing.map((trace) => {
+      if (trace.kind !== 'tool' || trace.toolCallId !== id) return trace
+      found = true
+      return {
+        ...trace,
+        args: `${trace.args ?? ''}${delta}`,
+      }
+    })
+    return {
+      ...entry,
+      traceSteps,
+    }
+  })
+  if (!found) warnMissingToolTrace('args patch', name, entryId, id)
+}
+
+export function markAssistantToolTraceEnded(
+  name: string,
+  entryId: string,
+  toolCallId: string,
+): void {
+  const id = toolCallId.trim()
+  if (!id) return
+  let found = false
+  updateThreadEntry(name, entryId, entry => {
+    const existing = entry.traceSteps ?? []
+    const traceSteps = existing.map((trace) => {
+      if (trace.kind !== 'tool' || trace.toolCallId !== id) return trace
+      found = true
+      return trace
+    })
+    return {
+      ...entry,
+      traceSteps,
+    }
+  })
+  if (!found) warnMissingToolTrace('end patch', name, entryId, id)
 }
 
 export function finalizeAssistantEntry(

@@ -37,8 +37,10 @@ import { isDefaultVisibleConversationEntry } from '../keeper-state'
 import {
   enqueueInput,
   clearInputQueue,
-  getQueueLength,
   getQueuedMessages,
+  dequeueInput,
+  markInputSent,
+  requeueInputFront,
   hasQueuedInputClientAction,
   updateQueuedMessage,
   removeQueuedMessage,
@@ -231,6 +233,26 @@ function liveAssistantPlaceholder(keeperName: string): KeeperConversationEntry {
     timestamp: null,
     delivery: 'streaming',
     streamState: 'streaming',
+    details: null,
+    error: null,
+  }
+}
+
+function queuedInputToConversationEntry(msg: QueuedMessage): KeeperConversationEntry {
+  const hasText = msg.content.trim().length > 0
+  const attachmentCount = msg.attachments?.length ?? 0
+  const attachmentText = attachmentCount > 0 ? `첨부 ${attachmentCount}개 대기 중` : ''
+  return {
+    id: `queued-user-${msg.id}`,
+    role: 'user',
+    source: 'direct_user',
+    label: 'You',
+    text: hasText ? msg.content : attachmentText,
+    rawText: msg.content,
+    timestamp: new Date(msg.timestamp).toISOString(),
+    delivery: 'queued',
+    streamState: undefined,
+    attachments: msg.attachments,
     details: null,
     error: null,
   }
@@ -475,7 +497,7 @@ export function KeeperConversationPanel({
   const [searchQuery, setSearchQuery] = useState('')
   // Bumped whenever the input queue mutates — the queue lives outside
   // the signal graph (keeper-chat-store), so re-renders must be forced.
-  const [, setQueueVersion] = useState(0)
+  const [queueVersion, setQueueVersion] = useState(0)
   const bumpQueue = () => setQueueVersion(v => v + 1)
 
   // External-system sync: merge the server-persisted transcript
@@ -505,10 +527,22 @@ export function KeeperConversationPanel({
         : thread,
     [thread, sending, keeperName],
   )
+  const queuedMessages = useMemo(
+    () => getQueuedMessages(keeperName),
+    [keeperName, queueVersion],
+  )
+  const queueCount = queuedMessages.length
+  const visibleThreadWithQueue = useMemo(
+    () =>
+      queuedMessages.length > 0
+        ? [...visibleThread, ...queuedMessages.map(queuedInputToConversationEntry)]
+        : visibleThread,
+    [visibleThread, queuedMessages],
+  )
   const hasQuery = searchQuery.trim().length > 0
   const transcriptEntries = useMemo(
-    () => filterConversationEntries(visibleThread, searchQuery),
-    [visibleThread, searchQuery],
+    () => filterConversationEntries(visibleThreadWithQueue, searchQuery),
+    [visibleThreadWithQueue, searchQuery],
   )
   // Stable action object so the memoized ChatMessageBubble's shallow prop
   // compare can skip unchanged messages — an inline `{ ...onClick }` literal
@@ -521,14 +555,13 @@ export function KeeperConversationPanel({
     [onInspectTurn],
   )
   const transcriptEmptyText =
-    hasQuery && visibleThread.length > 0
+    hasQuery && visibleThreadWithQueue.length > 0
       ? '검색어와 일치하는 메시지가 없습니다.'
       : '아직 표시할 대화가 없습니다. 내부 메시지는 토글로 볼 수 있습니다.'
   const hydrating = keeperHydrating.value[keeperName] ?? false
   const error = keeperActionErrors.value[keeperName]
   const chatAccess = keeperDirectChatAccess(shellAuthSummary.value)
   const composerDisabled = !keeperName || chatAccess.blocked
-  const queueCount = getQueueLength(keeperName)
 
   // 1 s ticker while a stream is active so the stall badge can compare
   // against wall-clock time. External-system sync (timer), not data init.
@@ -553,24 +586,28 @@ export function KeeperConversationPanel({
 
   const drainQueue = async () => {
     for (;;) {
-      const queued = getQueuedMessages(keeperName)
-      if (queued.length === 0) return
-      clearInputQueue(keeperName)
+      const queued = dequeueInput(keeperName)
+      if (!queued) return
       bumpQueue()
 
-      const batchedContent = queued.map(q => q.content.trim()).filter(Boolean).join('\n\n---\n\n')
-      const batchedAttachments = queued.flatMap(q => q.attachments ?? [])
-      const batchedClientActionIds = queued
-        .map(q => q.clientActionId?.trim())
-        .filter((clientActionId): clientActionId is string => Boolean(clientActionId))
-      if (!batchedContent && batchedAttachments.length === 0) continue
+      const content = queued.content.trim()
+      const attachments = queued.attachments && queued.attachments.length > 0 ? queued.attachments : undefined
+      if (!content && !attachments) {
+        markInputSent(keeperName)
+        bumpQueue()
+        continue
+      }
 
       try {
-        await sendKeeperThreadMessage(keeperName, batchedContent, {
-          attachments: batchedAttachments.length > 0 ? batchedAttachments : undefined,
-          clientActionIds: batchedClientActionIds,
+        await sendKeeperThreadMessage(keeperName, content, {
+          attachments,
+          clientActionId: queued.clientActionId,
         })
+        markInputSent(keeperName)
+        bumpQueue()
       } catch (err) {
+        requeueInputFront(keeperName, queued)
+        bumpQueue()
         if (isAbortError(err)) return
         const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
         showToast(message, 'error')
@@ -642,7 +679,7 @@ export function KeeperConversationPanel({
           />
           ${hasQuery
             ? html`<span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs font-medium text-[var(--color-fg-secondary)] v2-monitoring-row" data-chat-search-count>
-                ${transcriptEntries.length} / ${visibleThread.length}
+                ${transcriptEntries.length} / ${visibleThreadWithQueue.length}
               </span>`
             : null}
           <span class="spacer"></span>
@@ -712,7 +749,7 @@ export function KeeperConversationPanel({
                       <span>${queueCount}개 메시지 대기 중</span>
                       <button type="button" class="underline hover:text-[var(--color-fg-secondary)]" onClick=${cancelQueue}>모두 취소</button>
                     </div>
-                    ${getQueuedMessages(keeperName).map(msg => html`
+                    ${queuedMessages.map(msg => html`
                       <${QueueItemCard}
                         key=${msg.id}
                         keeperName=${keeperName}
@@ -777,7 +814,7 @@ export function KeeperConversationPanel({
             />
             ${hasQuery
               ? html`<span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]" data-chat-search-count>
-                  ${transcriptEntries.length} / ${visibleThread.length}
+                  ${transcriptEntries.length} / ${visibleThreadWithQueue.length}
                 </span>`
               : null}
             <${GhostButton} onClick=${toggleMetadata} ariaExpanded=${showMetadata}>
@@ -892,7 +929,7 @@ export function KeeperConversationPanel({
             />
             ${hasQuery
               ? html`<span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]" data-chat-search-count>
-                  ${transcriptEntries.length} / ${visibleThread.length}
+                  ${transcriptEntries.length} / ${visibleThreadWithQueue.length}
                 </span>`
               : null}
             <${GhostButton} onClick=${toggleMetadata} ariaExpanded=${showMetadata}>

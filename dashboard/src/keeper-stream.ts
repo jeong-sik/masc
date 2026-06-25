@@ -4,10 +4,13 @@ import type { KeeperChatStreamEvent } from './api'
 import {
   appendAssistantDelta,
   appendAssistantThinkingDelta,
+  appendAssistantToolTraceArgsDelta,
+  appendAssistantToolTraceStep,
   setAssistantStreamState,
   updateThreadEntry,
   insertThreadEntryBefore,
   finalizeAssistantEntry,
+  markAssistantToolTraceEnded,
   clearActiveStream,
   clearActiveStreamRequestId,
   releaseActiveStreamRequestId,
@@ -94,13 +97,18 @@ export function applyKeeperStreamEvent(
     case 'TOOL_CALL_START': {
       const toolCallId = event.toolCallId ?? `tc-${keeperName}-${Date.now()}`
       lastToolCallIds.set(keeperName, toolCallId)
+      const toolName = event.toolCallName ?? event.name ?? 'tool'
+      appendAssistantToolTraceStep(keeperName, assistantEntryId, {
+        toolCallId,
+        name: toolName,
+      })
       // Insert above the live assistant bubble so the final reply text
       // stays the last entry in the transcript.
       insertThreadEntryBefore(keeperName, assistantEntryId, {
         id: toolEntryId(toolCallId),
         role: 'tool',
         source: 'tool_result',
-        label: event.toolCallName ?? event.name ?? 'tool',
+        label: toolName,
         text: '',
         rawText: '',
         timestamp: new Date().toISOString(),
@@ -113,6 +121,7 @@ export function applyKeeperStreamEvent(
     case 'TOOL_CALL_ARGS': {
       const toolCallId = event.toolCallId ?? lastToolCallIds.get(keeperName)
       if (toolCallId && typeof event.delta === 'string' && event.delta) {
+        appendAssistantToolTraceArgsDelta(keeperName, assistantEntryId, toolCallId, event.delta)
         updateThreadEntry(keeperName, toolEntryId(toolCallId), entry => ({
           ...entry,
           text: `${entry.text}${event.delta}`,
@@ -124,6 +133,7 @@ export function applyKeeperStreamEvent(
     case 'TOOL_CALL_END': {
       const toolCallId = event.toolCallId ?? lastToolCallIds.get(keeperName)
       if (toolCallId) {
+        markAssistantToolTraceEnded(keeperName, assistantEntryId, toolCallId)
         updateThreadEntry(keeperName, toolEntryId(toolCallId), entry => ({
           ...entry,
           delivery: 'delivered',

@@ -301,11 +301,64 @@ describe('applyKeeperStreamEvent tool calls', () => {
     expect(tool.label).toBe('masc_status')
     expect(tool.text).toBe('{"fast":true}')
     expect(tool.delivery).toBe('streaming')
+    const reply = thread[replyIndex]!
+    expect(reply.traceSteps).toEqual([
+      {
+        kind: 'tool',
+        name: 'masc_status',
+        toolCallId: 'tc-1',
+        status: 'pending',
+        args: '{"fast":true}',
+        ts: expect.any(String),
+      },
+    ])
 
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_END', toolCallId: 'tc-1' })
     const finished = keeperThreads.value.sangsu?.find(entry => entry.id === 'tool-tc-1')
     expect(finished?.delivery).toBe('delivered')
     expect(finished?.streamState).toBeNull()
+  })
+
+  it('records tool calls in the assistant trace between thinking deltas', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { delta: 'think A' },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START',
+      toolCallId: 'tc-ordered',
+      toolCallName: 'keeper_board_list',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_ARGS',
+      toolCallId: 'tc-ordered',
+      delta: '{"limit":1}',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_END',
+      toolCallId: 'tc-ordered',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { delta: 'think B' },
+    })
+
+    const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(reply?.traceSteps).toEqual([
+      { kind: 'think', text: 'think A', ts: expect.any(String) },
+      {
+        kind: 'tool',
+        name: 'keeper_board_list',
+        toolCallId: 'tc-ordered',
+        status: 'pending',
+        args: '{"limit":1}',
+        ts: expect.any(String),
+      },
+      { kind: 'think', text: 'think B', ts: expect.any(String) },
+    ])
   })
 
   it('routes args to the last started tool call when toolCallId is missing', () => {

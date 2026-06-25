@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { render } from 'preact'
+import { h, render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BoardPost } from '../../types'
 import { route } from '../../router'
@@ -22,6 +22,15 @@ vi.mock('../../store', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../store')>()
   return { ...actual, refreshFusionBoard: vi.fn(), refreshFusionRuns: vi.fn() }
 })
+
+// The Markdown renderer is lazy-loaded, which makes synchronous assertions
+// flaky inside the Fusion surface tests. Mock it to a synchronous renderer so
+// we can assert that RichContent is used without waiting for the async chunk.
+vi.mock('../common/markdown', () => ({
+  Markdown: function Markdown(props: { text: string; class?: string }) {
+    return h('div', { className: `markdown-content ${props.class ?? ''}`.trim() }, props.text)
+  },
+}))
 
 function boardPost(overrides: Partial<BoardPost> & { id: string; meta: BoardPost['meta'] }): BoardPost {
   const { id, meta, ...rest } = overrides
@@ -354,6 +363,37 @@ describe('FusionSurface', () => {
     expect(container.textContent).not.toContain('No fusion runs found')
   })
 
+  it('renders preset from registry when board meta does not carry it', () => {
+    fusionRuns.value = [
+      {
+        runId: 'fus-1',
+        keeper: 'sangsu',
+        preset: 'balanced',
+        startedAt: 1_780_000_000,
+        status: 'running',
+      },
+    ]
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-fus-1',
+        title: 'Fusion deliberation (run fus-1): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-1',
+          question: 'Which path?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'Canary.' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Ship canary.' },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const detail = container.querySelector('[data-testid="fusion-detail"]')
+    expect(detail?.textContent).toContain('preset · balanced')
+    expect(detail?.textContent).not.toContain('preset · n/a')
+  })
+
   it('manual Refresh fans out to both the board-meta detail and the run-status registry', () => {
     render(html`<${FusionSurface} />`, container)
     const refresh = container.querySelector<HTMLButtonElement>('.fus-refresh')
@@ -404,6 +444,171 @@ describe('FusionSurface', () => {
     expect(cards[0]?.classList.contains('answered')).toBe(true)
     expect(cards[0]?.classList.contains('failed')).toBe(false)
     expect(cards[1]?.classList.contains('failed')).toBe(true)
+  })
+
+  it('renders generation parameters when present in board meta', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-params',
+        title: 'Fusion deliberation (run fus-params): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-params',
+          question: 'Which path?',
+          temperature: 0.7,
+          top_p: 0.95,
+          top_k: 40,
+          max_tokens: 2048,
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'Canary.' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Ship canary.' },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const detail = container.querySelector('[data-testid="fusion-detail"]')
+    expect(detail?.textContent).toContain('temperature')
+    expect(detail?.textContent).toContain('0.7')
+    expect(detail?.textContent).toContain('top_p')
+    expect(detail?.textContent).toContain('0.95')
+    expect(detail?.textContent).toContain('top_k')
+    expect(detail?.textContent).toContain('40')
+    expect(detail?.textContent).toContain('max_tokens')
+    expect(detail?.textContent).toContain('2048')
+  })
+
+  it('hides the generation parameters block when no params are present', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-no-params',
+        title: 'Fusion deliberation (run fus-no-params): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-no-params',
+          question: 'Which path?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'Canary.' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Ship canary.' },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const detail = container.querySelector('[data-testid="fusion-detail"]')
+    expect(detail?.textContent).not.toContain('생성 파라미터')
+  })
+
+  it('renders the deliberation prompt as rich content', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-rich-prompt',
+        title: 'Fusion deliberation (run fus-rich-prompt): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-rich-prompt',
+          question: 'Check **this** [link](https://example.com).',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'OK.' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Done.' },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const prompt = container.querySelector('[data-testid="fusion-detail"] .fus-prompt')
+    expect(prompt?.querySelector('.markdown-content')).not.toBeNull()
+    expect(prompt?.textContent).toContain('this')
+    expect(prompt?.textContent).toContain('link')
+  })
+
+  it('renders panel answers as rich content', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-rich-panel',
+        title: 'Fusion deliberation (run fus-rich-panel): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-rich-panel',
+          question: 'Which path?',
+          panel: [
+            {
+              model: 'gpt-5',
+              status: 'answered',
+              answer: 'Use **canary** first.',
+            },
+          ],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Ship canary.' },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const panel = container.querySelector('.fus-panel-card')
+    expect(panel?.querySelector('.markdown-content')).not.toBeNull()
+    expect(panel?.textContent).toContain('canary')
+  })
+
+  it('renders judge evidence text as rich content', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-rich-judge',
+        title: 'Fusion deliberation (run fus-rich-judge): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-rich-judge',
+          question: 'Which path?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'Canary.' }],
+          judge: {
+            status: 'synthesized',
+            decision: 'answer',
+            resolved_answer: 'Ship canary.',
+            consensus: [{ text: '**Canary** is safer.', models: ['gpt-5'] }],
+          },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const evidence = container.querySelector('[data-testid="fusion-judge-evidence"]')
+    expect(evidence?.querySelector('.markdown-content')).not.toBeNull()
+    expect(evidence?.textContent).toContain('Canary')
+  })
+
+  it('renders resolved answer and recommendation rationale as rich content', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-rich-resolved',
+        title: 'Fusion deliberation (run fus-rich-resolved): recommend',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-rich-resolved',
+          question: 'Which path?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'Canary.' }],
+          judge: {
+            status: 'synthesized',
+            decision: 'recommend',
+            resolved_answer: 'Ship **canary**.',
+            recommend: {
+              action: 'publish note',
+              rationale: 'Because **rollback** is covered.',
+            },
+          },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const resolved = container.querySelector('.fus-resolved-body')
+    expect(resolved?.querySelector('.markdown-content')).not.toBeNull()
+    expect(resolved?.textContent).toContain('canary')
+
+    const rationale = container.querySelector('.fus-rec-rationale')
+    expect(rationale?.querySelector('.markdown-content')).not.toBeNull()
+    expect(rationale?.textContent).toContain('rollback')
   })
 })
 

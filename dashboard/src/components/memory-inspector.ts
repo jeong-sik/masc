@@ -370,9 +370,6 @@ function FactRow({ fact }: { fact: MemoryOsFact }) {
             ? html`<span class="mono">검증 ${formatFactInstant(fact.last_verified_at, null)}</span>`
             : null}
           <span class=${`mono ${fact.current ? '' : 'mem-expired'}`}>${factTtlLabel(fact)}</span>
-          ${fact.external_ref
-            ? html`<span class="mem-tag">${fact.external_ref.kind} ${fact.external_ref.id}</span>`
-            : null}
           <span class="mem-src mono">${provenance}</span>
         </div>
         <div class="mem-store-why">${factSelectionReason(fact)}</div>

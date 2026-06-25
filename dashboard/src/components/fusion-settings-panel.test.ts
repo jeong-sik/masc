@@ -88,6 +88,16 @@ describe('FusionSettingsPanel', () => {
     expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('fusion.enabled')
   })
 
+  it('surfaces fetch failures instead of staying on the loading guard', async () => {
+    fetchMock.mockRejectedValue(new Error('network down'))
+    const { FusionSettingsPanel } = await import('./fusion-settings-panel')
+    render(h(FusionSettingsPanel, {}), container)
+
+    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')).not.toBeNull())
+    expect(q('[data-testid="fusion-settings-loading"]')).toBeNull()
+    expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('network down')
+  })
+
   it('does not POST empty or fractional number inputs', async () => {
     fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE }))
     await mount()

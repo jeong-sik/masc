@@ -10,7 +10,7 @@
 // The panel also blocks malformed local form state before POST so invalid UI
 // input is not sent as a fabricated numeric value.
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { fetchRuntimeTomlConfig, saveRuntimeTomlConfig } from '../api/dashboard'
 import { errorToString } from '../lib/format-string'
 import { applyFusionSettings, readFusionSettingsResult, type FusionSettings } from '../lib/fusion-settings'
@@ -61,9 +61,11 @@ export function FusionSettingsPanel() {
   const [draft, setDraft] = useState<FusionSettingsDraft | null>(null)
   const [state, setState] = useState<EditorState>('loading')
   const [error, setError] = useState('')
+  const mountedRef = useRef(true)
 
   useEffect(() => {
     let active = true
+    mountedRef.current = true
     const load = async () => {
       try {
         const cfg = await fetchRuntimeTomlConfig()
@@ -88,6 +90,7 @@ export function FusionSettingsPanel() {
     void load()
     return () => {
       active = false
+      mountedRef.current = false
     }
   }, [])
 
@@ -116,6 +119,7 @@ export function FusionSettingsPanel() {
     setError('')
     try {
       const cfg = await saveRuntimeTomlConfig(applyFusionSettings(source, settings))
+      if (!mountedRef.current) return
       if (!cfg.ok) {
         // Backend validation rejected the write (e.g. min_answered out of range).
         setError('백엔드 검증 거부 (예: min_answered 범위). 변경이 저장되지 않았습니다.')
@@ -132,6 +136,7 @@ export function FusionSettingsPanel() {
       setDraft(draftFromSettings(parsed.settings))
       setState('saved')
     } catch (err) {
+      if (!mountedRef.current) return
       setError(errorToString(err))
       setState('error')
     }
@@ -152,12 +157,12 @@ export function FusionSettingsPanel() {
       </label>
       <label class="set-line">
         <span>동시 패널 수 (max_concurrent_panels)</span>
-        <input type="number" min="1" step="1" data-testid="fusion-max-concurrent-panels" value=${draft.maxConcurrentPanels}
+        <input type="number" step="1" data-testid="fusion-max-concurrent-panels" value=${draft.maxConcurrentPanels}
           onInput=${(e: Event) => patch({ maxConcurrentPanels: str(e) })} />
       </label>
       <label class="set-line">
         <span>최소 응답 패널 (${draft.defaultPreset || '프리셋'} min_answered)</span>
-        <input type="number" min="1" step="1" data-testid="fusion-min-answered" value=${draft.minAnswered}
+        <input type="number" step="1" data-testid="fusion-min-answered" value=${draft.minAnswered}
           onInput=${(e: Event) => patch({ minAnswered: str(e) })} />
       </label>
       <div class="set-line">

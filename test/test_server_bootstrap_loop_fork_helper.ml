@@ -4,26 +4,11 @@ open Alcotest
 
     The module used to repeat raw [Eio.Fiber.fork] + cancellation-safe
     exception handling at each bootstrap/background loop site. The helper keeps
-    cancellation propagation and crash logging in one place while preserving
-    loop-specific iteration error handling. *)
-
-let rec find_up dir rel =
-  let candidate = Filename.concat dir rel in
-  if Sys.file_exists candidate then Some candidate
-  else (
-    let parent = Filename.dirname dir in
-    if String.equal parent dir then None else find_up parent rel)
-;;
-
-let source_path rel =
-  match find_up (Sys.getcwd ()) rel with
-  | Some path -> path
-  | None ->
-    failf "could not locate source path %S from cwd %S" rel (Sys.getcwd ())
-;;
+   cancellation propagation and crash logging in one place while preserving
+   loop-specific iteration error handling. *)
 
 let read_file path =
-  In_channel.with_open_text (source_path path) In_channel.input_all
+  In_channel.with_open_text (Masc_test_deps.source_path path) In_channel.input_all
 ;;
 
 let count_substring ~haystack ~needle =

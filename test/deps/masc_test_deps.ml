@@ -73,6 +73,8 @@ let find_project_root () =
   in
   walk start_dir
 
+let source_path rel = Filename.concat (find_project_root ()) rel
+
 let read_file path =
   let ic = open_in path in
   Fun.protect
@@ -140,7 +142,7 @@ let tla_quoted_set_exn ?(source = "<tla>") ~symbol content =
            symbol source)
 
 let tla_quoted_set_from_repo_file_exn ~relpath ~symbol =
-  let path = Filename.concat (find_project_root ()) relpath in
+  let path = source_path relpath in
   tla_quoted_set_exn ~source:relpath ~symbol (read_file path)
 
 let sorted_strings = List.sort String.compare

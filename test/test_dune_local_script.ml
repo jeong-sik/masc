@@ -221,6 +221,11 @@ let run_dune_local base bin_dir ?(env = []) ?(unset_env = []) subcommand =
   let path = Printf.sprintf "%s:%s" bin_dir system_path in
   let lock_path = Filename.concat base "dune-local.lock" in
   let opam_lock_path = Filename.concat base "opam-switch.lock" in
+  let allow_bare_dune_env =
+    if List.exists (String.equal "MASC_DUNE_ALLOW_BARE_DUNE") unset_env
+    then []
+    else [ ("MASC_DUNE_ALLOW_BARE_DUNE", "1") ]
+  in
   let full_env =
     [
       ("PATH", path);
@@ -231,6 +236,7 @@ let run_dune_local base bin_dir ?(env = []) ?(unset_env = []) subcommand =
       ("MASC_DUNE_LOCK_HELD", "0");
       ("MASC_OPAM_LOCK_HELD", "0");
     ]
+    @ allow_bare_dune_env
     @ List.filter
         (fun (k, _) ->
           k <> "PATH" && k <> "GIT_CEILING_DIRECTORIES" && k <> "DUNE_LOCAL_LOCK")
@@ -419,6 +425,7 @@ exec "$@"
               ("GIT_CEILING_DIRECTORIES", dir);
               ("DUNE_LOCAL_LOCK", lock_path);
               ("MASC_OPAM_LOCK_PATH", opam_lock_path);
+              ("MASC_DUNE_ALLOW_BARE_DUNE", "1");
             ]
           ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
           [| "/bin/bash"; script; "build" |]
@@ -858,6 +865,7 @@ exit 1
               ("MASC_SKIP_PIN_CHECK", "1");
               ("MASC_SKIP_DEPS_CHECK", "1");
               ("MASC_SKIP_OCAML_VERSION_CHECK", "1");
+              ("MASC_DUNE_ALLOW_BARE_DUNE", "1");
             ]
           ~unset_env:[ "GITHUB_ACTIONS"; "MASC_DUNE_LOCK_HELD" ]
           [| "/bin/bash"; script; "build" |]
@@ -927,6 +935,7 @@ exec "$@"
               ("MASC_OPAM_LOCK_PATH", opam_lock_path);
               ("MASC_SKIP_DEPS_CHECK", "1");
               ("MASC_SKIP_OCAML_VERSION_CHECK", "1");
+              ("MASC_DUNE_ALLOW_BARE_DUNE", "1");
             ]
           ~unset_env:[ "GITHUB_ACTIONS"; "MASC_OPAM_LOCK_HELD" ]
           [| "/bin/bash"; script; "build" |]
@@ -1000,6 +1009,7 @@ exec "$@"
               ("MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT", "2");
               ("MASC_SKIP_DEPS_CHECK", "1");
               ("MASC_SKIP_OCAML_VERSION_CHECK", "1");
+              ("MASC_DUNE_ALLOW_BARE_DUNE", "1");
             ]
           ~unset_env:[ "GITHUB_ACTIONS"; "MASC_OPAM_LOCK_HELD" ]
           [| "/bin/bash"; script; "build" |]

@@ -206,7 +206,7 @@ mcp_jsonrpc_call() {
   local method="$2"
   local params_json="$3"
   local session_id="${4:-${MCP_SESSION_ID:-}}"
-  local token="${5:-}"
+  local token="${5:-${MCP_TOKEN:-}}"
   local endpoint="${6:-${MCP_URL:-}}"
   local timeout_sec="${HTTP_TIMEOUT_SEC:-${CURL_TIMEOUT_SEC:-25}}"
 
@@ -331,7 +331,7 @@ mcp_call_tool() {
   local tool_name="$2"
   local args_json="$3"
   local session_id="${4:-${MCP_SESSION_ID:-}}"
-  local token="${5:-}"
+  local token="${5:-${MCP_TOKEN:-}}"
   local endpoint="${6:-${MCP_URL:-}}"
 
   local params_json

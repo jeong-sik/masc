@@ -162,9 +162,9 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 529 | Idle-gap timeout for streaming OAS provider responses. This bounds time between streamed lines, not total turn durati... |
 | `MASC_KEEPER_TURN_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 467 | Retry/admission budget in seconds for a single unified turn (including all retries and runtime fallbacks). This value... |
 | `MASC_KEEPER_VISIBILITY_GATE` | feature_flag | n/a | n/a | 371 | Consumer-driven idle backoff: when true, keepers with no dashboard/SSE observer and no pending signal delay proactive... |
-| `MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC` | typed:float | Timeouts | operator | 292 | Base delay before trying the next vision runtime after a failed provider attempt. A small default avoids tight failov... |
-| `MASC_KEEPER_VISION_CANDIDATE_BACKOFF_MAX_SEC` | typed:float | Timeouts | operator | 299 | Upper bound for the per-candidate vision failover delay. @category Timeouts @ops_class operator |
-| `MASC_KEEPER_VISION_MAX_IMAGE_BYTES` | typed:int | Policies | operator | 283 | Maximum raw image bytes accepted by the one-shot vision tool before provider-message construction. Default is 5 MiB t... |
+| `MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC` | typed:float | Timeouts | operator | 302 | Base delay before trying the next vision runtime after a failed provider attempt. Range: [0, 5] seconds. |
+| `MASC_KEEPER_VISION_CANDIDATE_BACKOFF_MAX_SEC` | typed:float | Timeouts | operator | 311 | Upper bound for the per-candidate vision failover delay. Range: [base, 30] seconds. |
+| `MASC_KEEPER_VISION_MAX_IMAGE_BYTES` | typed:int | Policies | operator | 291 | Maximum raw image bytes accepted by the one-shot vision tool before provider-message construction. Range: [1, 10 MiB]. |
 | `MASC_KEEPER_WORK_AS_HEARTBEAT` | feature_flag | n/a | n/a | 348 | Master switch. When true, successful Workspace.heartbeat after a unified turn counts as presence proof, allowing the ... |
 | `MASC_PAYLOAD_TELEMETRY` | typed:bool | unclassified | unclassified | 717 | Master switch for wake-payload measurement. Default off so the hot path is untouched until a baseline sweep is explic... |
 | `MASC_RUNTIME_SATURATION_SIGNAL_ENABLED` | typed:bool | unclassified | unclassified | 731 | {1 Runtime Saturation Signal (RFC-0153 Phase A.2)} Feature flag for typed [Runtime_saturation_signal.t] emission from... |

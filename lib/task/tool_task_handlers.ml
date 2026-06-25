@@ -309,15 +309,38 @@ let handle_add_task ~tool_name ~start_time ctx args =
           ~failure_class:(Some Tool_result.Workflow_rejection)
           ~tool_name ~start_time error
     | Ok contract ->
-        Tool_result.ok ~tool_name ~start_time
-          (Workspace.add_task ?contract
+        let add_result =
+          Workspace.add_task_with_result ?contract
             ?goal_id
             ~reject_if:
               (Workspace_task_capacity.rejection_for_add_task_for_config
                  ctx.config
                  ?goal_id)
             ~created_by:ctx.agent_name ctx.config ~title:trimmed_title
-            ~priority ~description)
+            ~priority ~description
+        in
+        (match add_result with
+         | Ok created ->
+           Tool_result.make_ok
+             ~tool_name
+             ~start_time
+             ~data:
+               (`Assoc
+                  [ "ok", `Bool true
+                  ; "task_id", `String created.task_id
+                  ; "summary", `String created.summary
+                  ; "title", `String trimmed_title
+                  ; "priority", `Int priority
+                  ; "description", `String description
+                  ; "goal_id", Json_util.string_opt_to_json goal_id
+                  ])
+             ()
+         | Error err ->
+           Tool_result.error
+             ~failure_class:(Some Tool_result.Workflow_rejection)
+             ~tool_name
+             ~start_time
+             (Workspace.add_task_error_to_string err))
 
 (* RFC-0267 Phase 2: assign an existing goalless task to a goal. Thin adapter
    over [Task_goal_assignment.set_task_goal] — the single validated backend
@@ -432,8 +455,29 @@ let handle_batch_add_tasks ~tool_name ~start_time ctx args =
     let tasks =
       List.filter_map (function Ok t -> Some t | Error _ -> None) validated
     in
-    Tool_result.ok ~tool_name ~start_time (Workspace.batch_add_tasks_with_contracts
-      ~created_by:ctx.agent_name ctx.config tasks)
+    let batch_result =
+      Workspace.batch_add_tasks_with_contracts_result
+        ~created_by:ctx.agent_name ctx.config tasks
+    in
+    (match batch_result with
+     | Ok created ->
+       Tool_result.make_ok
+         ~tool_name
+         ~start_time
+         ~data:
+           (`Assoc
+              [ "ok", `Bool true
+              ; "task_ids", `List (List.map (fun task_id -> `String task_id) created.task_ids)
+              ; "summary", `String created.summary
+              ; "count", `Int created.count
+              ])
+         ()
+     | Error err ->
+       Tool_result.error
+         ~failure_class:(Some Tool_result.Workflow_rejection)
+         ~tool_name
+         ~start_time
+         (Workspace.batch_add_tasks_error_to_string err))
 
 let handle_claim ~tool_name ~start_time ctx args =
   (* #18965 — removed [is_agent_session_bound] hard gate.  Agent-internal tag

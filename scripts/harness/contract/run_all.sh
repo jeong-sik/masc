@@ -70,30 +70,52 @@ wait_for_mcp_initialize_ready() {
   local timeout_sec="${2:-25}"
   local deadline=$(( $(date +%s) + timeout_sec ))
   local body='{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"contract-bootstrap","version":"1.0"},"capabilities":{}}}'
+  local last_status="000"
   local auth_token
   auth_token="$(mcp_default_auth_token)"
   if [[ -z "$auth_token" ]]; then
     echo "FAIL: MCP initialize readiness requires a workspace-local auth token" >&2
     return 1
   fi
-  local -a extra_headers=( -H "Authorization: Bearer $auth_token" )
+  local auth_header_file=""
+  if [[ -n "$auth_token" ]]; then
+    auth_header_file="$(_mcp_auth_header_file "$auth_token")" || auth_header_file=""
+  fi
 
   while [[ "$(date +%s)" -lt "$deadline" ]]; do
-    local status
+    local status body_file raw normalized
+    body_file="$(mcp_mktemp_file "masc-contract-init-ready-${RANDOM:-0}-$$" ".json")"
+    local -a headers=(
+      -H 'Content-Type: application/json'
+      -H 'Accept: application/json, text/event-stream'
+    )
+    if [[ -n "$auth_header_file" ]]; then
+      headers+=( -H "@$auth_header_file" )
+    fi
     status="$(
-      curl -sS -o /dev/null -w '%{http_code}' --max-time 2 \
+      curl -sS -o "$body_file" -w '%{http_code}' --max-time 2 \
         -X POST "$mcp_url" \
-        -H 'Content-Type: application/json' \
-        -H 'Accept: application/json, text/event-stream' \
-        "${extra_headers[@]}" \
+        "${headers[@]}" \
         -d "$body" 2>/dev/null || true
     )"
+    last_status="$status"
     if [[ "$status" == "200" ]]; then
-      return 0
+      raw="$(cat "$body_file" 2>/dev/null || true)"
+      rm -f "$body_file"
+      normalized="$(jsonrpc_normalize_response "$raw" 0 2>/dev/null || true)"
+      if printf '%s' "$normalized" | jq -e '._harness_error? == null and .error == null' >/dev/null 2>&1; then
+        rm -f "$auth_header_file"
+        return 0
+      fi
+      last_status="200-jsonrpc-error"
+    else
+      rm -f "$body_file"
     fi
     sleep 1
   done
 
+  rm -f "$auth_header_file"
+  echo "MCP initialize readiness did not reach 200; last_http_status=${last_status}" >&2
   return 1
 }
 
@@ -102,7 +124,14 @@ run_contract() {
   local total="$2"
   local script_name="$3"
   echo "[${step}/${total}] ${script_name}"
-  if ! (cd "$ROOT_DIR" && MCP_URL="$MCP_URL" BASE_PATH="$BASE_PATH" bash "scripts/harness/contract/${script_name}"); then
+  if ! (
+    cd "$ROOT_DIR"
+    MCP_URL="$MCP_URL" \
+      BASE_PATH="$BASE_PATH" \
+      MCP_AUTH_TOKEN="$MCP_AUTH_TOKEN" \
+      MASC_ADMIN_TOKEN="$MASC_ADMIN_TOKEN" \
+      bash "scripts/harness/contract/${script_name}"
+  ); then
     echo "FAIL: ${script_name}" >&2
     harness_print_log_tail "$LOG_FILE"
     exit 1
@@ -119,6 +148,7 @@ if ! build_server_exe; then
   exit 1
 fi
 echo "[bootstrap] server_exe=${SERVER_EXE}"
+harness_seed_server_config "$ROOT_DIR" "$BASE_PATH"
 
 if ! HARNESS_AUTH_TOKEN="$(
   harness_mint_admin_token "$SERVER_EXE" "$PORT" "$BASE_PATH" \

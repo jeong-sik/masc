@@ -269,26 +269,34 @@ let remaining_timeout_sec ~clock ~deadline =
   let remaining = deadline -. Eio.Time.now clock in
   if remaining <= 0.0 then None else Some remaining
 
-let candidate_backoff_sec ~attempt_index ~runtime_id =
+let bounded_exponential_backoff ~base ~max_backoff ~attempt_index =
+  let rec loop remaining delay =
+    if remaining <= 0 || delay >= max_backoff
+    then Float.min delay max_backoff
+    else if delay >= max_backoff /. 2.0
+    then max_backoff
+    else loop (remaining - 1) (delay *. 2.0)
+  in
+  loop attempt_index base
+;;
+
+let candidate_backoff_sec ~attempt_index =
   let base = Env_config_keeper.KeeperVision.candidate_backoff_base_sec () in
   let max_backoff = Env_config_keeper.KeeperVision.candidate_backoff_max_sec () in
   if base <= 0.0 || max_backoff <= 0.0
   then 0.0
-  else (
-    let jitter_bucket = Hashtbl.hash runtime_id land 0x0f in
-    let jitter = float_of_int jitter_bucket *. 0.001 in
-    Float.min max_backoff ((base *. (2. ** float_of_int attempt_index)) +. jitter))
+  else bounded_exponential_backoff ~base ~max_backoff ~attempt_index
 ;;
 
-let sleep_before_next_candidate ~clock ~deadline ~runtime_id ~attempt_index =
-  let delay = candidate_backoff_sec ~attempt_index ~runtime_id in
+let sleep_before_next_candidate ~clock ~deadline ~attempt_index =
+  let delay = candidate_backoff_sec ~attempt_index in
   match remaining_timeout_sec ~clock ~deadline with
   | Some remaining when delay > 0.0 ->
     Eio.Time.sleep clock (Float.min delay remaining)
   | Some _ | None -> ()
 ;;
 
-let rec run_candidates
+let run_candidates
     ~complete
     ~deadline
     ~sw
@@ -297,106 +305,92 @@ let rec run_candidates
     ~messages
     ~last_error
     ~attempt_index
-    = function
-  | [] ->
-    (match last_error with
-     | None ->
-       err_json
-         ~failure_class:Tool_result.Runtime_failure
-         ~detail:"no image-capable runtime configured"
-         "no_capable_runtime"
-     | Some (`Timeout runtime_id) ->
-       err_json
-         ~failure_class:Tool_result.Transient_error
-         ~detail:(Printf.sprintf "runtime %S timed out" runtime_id)
-         "timeout"
-     | Some (`Provider_error err) ->
-       err_json
-         ~failure_class:(failure_class_of_http_error err)
-         ~detail:(Provider_http_error.to_message err)
-         "provider_error"
-    )
-  | (runtime_id, rt) :: rest ->
-    let continue_with last_error =
-      if not (List.is_empty rest)
-      then
-        sleep_before_next_candidate ~clock ~deadline ~runtime_id
-          ~attempt_index;
-      run_candidates
-        ~complete
-        ~deadline
-        ~sw
-        ~clock
-        ~net
-        ~messages
-        ~last_error:(Some last_error)
-        ~attempt_index:(attempt_index + 1)
-        rest
-    in
-    (match remaining_timeout_sec ~clock ~deadline with
-     | None ->
-       let last_error =
-         match last_error with
-         | Some _ as existing -> existing
-         | None -> Some (`Timeout runtime_id)
-       in
-       run_candidates
-         ~complete
-         ~deadline
-         ~sw
-         ~clock
-         ~net
-         ~messages
-         ~last_error
-         ~attempt_index
-         []
-     | Some timeout_sec ->
-       let config = provider_for_vision rt.Runtime.provider_config in
-       (match
-          with_timeout ~clock ~timeout_sec (fun () ->
-            complete ~sw ~net ?clock:(Some clock) ~config ~messages ())
-        with
-        | None ->
-          record_vision_candidate_attempt
-            ~runtime_id
-            ~result:"error"
-            ~reason:"timeout";
-          continue_with (`Timeout runtime_id)
-        | Some (Error err) ->
-          if terminal_policy_http_error err
-          then (
+    candidates
+  =
+  let rec loop ~last_error ~attempt_index = function
+    | [] ->
+      (match last_error with
+       | None ->
+         err_json
+           ~failure_class:Tool_result.Runtime_failure
+           ~detail:"no image-capable runtime configured"
+           "no_capable_runtime"
+       | Some (`Timeout runtime_id) ->
+         err_json
+           ~failure_class:Tool_result.Transient_error
+           ~detail:(Printf.sprintf "runtime %S timed out" runtime_id)
+           "timeout"
+       | Some (`Provider_error err) ->
+         err_json
+           ~failure_class:(failure_class_of_http_error err)
+           ~detail:(Provider_http_error.to_message err)
+           "provider_error")
+    | (runtime_id, rt) :: rest ->
+      let continue_with last_error =
+        (if not (List.is_empty rest)
+         then sleep_before_next_candidate ~clock ~deadline ~attempt_index);
+        loop
+          ~last_error:(Some last_error)
+          ~attempt_index:(attempt_index + 1)
+          rest
+      in
+      (match remaining_timeout_sec ~clock ~deadline with
+       | None ->
+         let last_error =
+           match last_error with
+           | Some _ as existing -> existing
+           | None -> Some (`Timeout runtime_id)
+         in
+         loop ~last_error ~attempt_index []
+       | Some timeout_sec ->
+         let config = provider_for_vision rt.Runtime.provider_config in
+         (match
+            with_timeout ~clock ~timeout_sec (fun () ->
+              complete ~sw ~net ?clock:(Some clock) ~config ~messages ())
+          with
+          | None ->
             record_vision_candidate_attempt
               ~runtime_id
               ~result:"error"
-              ~reason:"terminal_provider_error";
-            err_json
-              ~failure_class:(failure_class_of_http_error err)
-              ~detail:(Provider_http_error.to_message err)
-              "provider_error")
-          else if Runtime_attempt_fsm.should_try_next err
-          then (
+              ~reason:"timeout";
+            continue_with (`Timeout runtime_id)
+          | Some (Error err) ->
+            if terminal_policy_http_error err
+            then (
+              record_vision_candidate_attempt
+                ~runtime_id
+                ~result:"error"
+                ~reason:"terminal_provider_error";
+              err_json
+                ~failure_class:(failure_class_of_http_error err)
+                ~detail:(Provider_http_error.to_message err)
+                "provider_error")
+            else if Runtime_attempt_fsm.should_try_next err
+            then (
+              record_vision_candidate_attempt
+                ~runtime_id
+                ~result:"error"
+                ~reason:"transient_provider_error";
+              continue_with (`Provider_error err))
+            else (
+              record_vision_candidate_attempt
+                ~runtime_id
+                ~result:"error"
+                ~reason:"runtime_provider_error";
+              err_json
+                ~failure_class:(failure_class_of_http_error err)
+                ~detail:(Provider_http_error.to_message err)
+                "provider_error")
+          | Some (Ok response) ->
             record_vision_candidate_attempt
               ~runtime_id
-              ~result:"error"
-              ~reason:"transient_provider_error";
-            continue_with (`Provider_error err))
-          else (
-            record_vision_candidate_attempt
-              ~runtime_id
-              ~result:"error"
-              ~reason:"runtime_provider_error";
-            err_json
-              ~failure_class:(failure_class_of_http_error err)
-              ~detail:(Provider_http_error.to_message err)
-              "provider_error")
-        | Some (Ok response) ->
-          record_vision_candidate_attempt
-            ~runtime_id
-            ~result:"ok"
-            ~reason:"provider_response";
-          ok_or_classified_json response))
+              ~result:"ok"
+              ~reason:"provider_response";
+            ok_or_classified_json response))
+  in
+  loop ~last_error ~attempt_index candidates
 
-let rec run_candidates_outcome
+let run_candidates_outcome
     ~complete
     ~deadline
     ~sw
@@ -405,95 +399,82 @@ let rec run_candidates_outcome
     ~messages
     ~last_error
     ~attempt_index
-    = function
-  | [] ->
-    (match last_error with
-     | None -> Vo_no_runtime "no image-capable runtime configured"
-     | Some (`Timeout _runtime_id) -> Vo_timeout
-     | Some (`Provider_error err) ->
-       Vo_provider
-         { failure_class = failure_class_of_http_error err
-         ; detail = Provider_http_error.to_message err
-         })
-  | (runtime_id, rt) :: rest ->
-    let continue_with last_error =
-      if not (List.is_empty rest)
-      then
-        sleep_before_next_candidate ~clock ~deadline ~runtime_id
-          ~attempt_index;
-      run_candidates_outcome
-        ~complete
-        ~deadline
-        ~sw
-        ~clock
-        ~net
-        ~messages
-        ~last_error:(Some last_error)
-        ~attempt_index:(attempt_index + 1)
-        rest
-    in
-    (match remaining_timeout_sec ~clock ~deadline with
-     | None ->
-       let last_error =
-         match last_error with
-         | Some _ as existing -> existing
-         | None -> Some (`Timeout runtime_id)
-       in
-       run_candidates_outcome
-         ~complete
-         ~deadline
-         ~sw
-         ~clock
-         ~net
-         ~messages
-         ~last_error
-         ~attempt_index
-         []
-     | Some timeout_sec ->
-       let config = provider_for_vision rt.Runtime.provider_config in
-       (match
-          with_timeout ~clock ~timeout_sec (fun () ->
-            complete ~sw ~net ?clock:(Some clock) ~config ~messages ())
-        with
-        | None ->
-          record_vision_candidate_attempt
-            ~runtime_id
-            ~result:"error"
-            ~reason:"timeout";
-          continue_with (`Timeout runtime_id)
-        | Some (Error err) ->
-          if terminal_policy_http_error err
-          then (
+    candidates
+  =
+  let rec loop ~last_error ~attempt_index = function
+    | [] ->
+      (match last_error with
+       | None -> Vo_no_runtime "no image-capable runtime configured"
+       | Some (`Timeout _runtime_id) -> Vo_timeout
+       | Some (`Provider_error err) ->
+         Vo_provider
+           { failure_class = failure_class_of_http_error err
+           ; detail = Provider_http_error.to_message err
+           })
+    | (runtime_id, rt) :: rest ->
+      let continue_with last_error =
+        (if not (List.is_empty rest)
+         then sleep_before_next_candidate ~clock ~deadline ~attempt_index);
+        loop
+          ~last_error:(Some last_error)
+          ~attempt_index:(attempt_index + 1)
+          rest
+      in
+      (match remaining_timeout_sec ~clock ~deadline with
+       | None ->
+         let last_error =
+           match last_error with
+           | Some _ as existing -> existing
+           | None -> Some (`Timeout runtime_id)
+         in
+         loop ~last_error ~attempt_index []
+       | Some timeout_sec ->
+         let config = provider_for_vision rt.Runtime.provider_config in
+         (match
+            with_timeout ~clock ~timeout_sec (fun () ->
+              complete ~sw ~net ?clock:(Some clock) ~config ~messages ())
+          with
+          | None ->
             record_vision_candidate_attempt
               ~runtime_id
               ~result:"error"
-              ~reason:"terminal_provider_error";
-            Vo_provider
-              { failure_class = failure_class_of_http_error err
-              ; detail = Provider_http_error.to_message err
-              })
-          else if Runtime_attempt_fsm.should_try_next err
-          then (
+              ~reason:"timeout";
+            continue_with (`Timeout runtime_id)
+          | Some (Error err) ->
+            if terminal_policy_http_error err
+            then (
+              record_vision_candidate_attempt
+                ~runtime_id
+                ~result:"error"
+                ~reason:"terminal_provider_error";
+              Vo_provider
+                { failure_class = failure_class_of_http_error err
+                ; detail = Provider_http_error.to_message err
+                })
+            else if Runtime_attempt_fsm.should_try_next err
+            then (
+              record_vision_candidate_attempt
+                ~runtime_id
+                ~result:"error"
+                ~reason:"transient_provider_error";
+              continue_with (`Provider_error err))
+            else (
+              record_vision_candidate_attempt
+                ~runtime_id
+                ~result:"error"
+                ~reason:"runtime_provider_error";
+              Vo_provider
+                { failure_class = failure_class_of_http_error err
+                ; detail = Provider_http_error.to_message err
+                })
+          | Some (Ok response) ->
             record_vision_candidate_attempt
               ~runtime_id
-              ~result:"error"
-              ~reason:"transient_provider_error";
-            continue_with (`Provider_error err))
-          else (
-            record_vision_candidate_attempt
-              ~runtime_id
-              ~result:"error"
-              ~reason:"runtime_provider_error";
-            Vo_provider
-              { failure_class = failure_class_of_http_error err
-              ; detail = Provider_http_error.to_message err
-              })
-        | Some (Ok response) ->
-          record_vision_candidate_attempt
-            ~runtime_id
-            ~result:"ok"
-            ~reason:"provider_response";
-          outcome_of_response response))
+              ~result:"ok"
+              ~reason:"provider_response";
+            outcome_of_response response))
+  in
+  loop ~last_error ~attempt_index candidates
 
 let run_vision
     ?(complete = default_complete)
@@ -581,11 +562,11 @@ let handle
             "artifact_load_failed"
         | Ok bytes ->
           (match validate_image_size bytes with
-           | Error msg ->
-             err_json
-               ~failure_class:Tool_result.Policy_rejection
-               ~detail:msg
-               "image_too_large"
+             | Error msg ->
+               err_json
+                 ~failure_class:Tool_result.Runtime_failure
+                 ~detail:msg
+                 "image_too_large"
            | Ok () ->
              (match media_type_for_request ~bytes args with
               | Error msg ->

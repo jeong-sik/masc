@@ -57,9 +57,9 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
       ; "sandbox_profile", `String "none"
       ]
   in
-  match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta -> meta
-  | Error e -> failwith e
+match Masc_test_deps.meta_of_json_fixture json with
+| Ok meta -> meta
+| Error e -> failwith e
 
 let contains_substring s needle =
   let s_len = String.length s in
@@ -233,6 +233,33 @@ let test_max_image_bytes_reads_env_config () =
   with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "128" (fun () ->
     assert (Vt.max_image_bytes () = 128))
 
+let assert_float_eq label expected actual =
+  if abs_float (expected -. actual) > 0.000001
+  then
+    failwith
+      (Printf.sprintf "%s: expected %f, got %f" label expected actual)
+;;
+
+let test_vision_env_knobs_are_bounded () =
+  with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "999999999" (fun () ->
+    assert (Vt.max_image_bytes () = 10 * 1024 * 1024));
+  with_env "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC" "999" (fun () ->
+    assert_float_eq
+      "base backoff ceiling"
+      5.0
+      (Env_config_keeper.KeeperVision.candidate_backoff_base_sec ()));
+  with_env "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_MAX_SEC" "999" (fun () ->
+    assert_float_eq
+      "max backoff ceiling"
+      30.0
+      (Env_config_keeper.KeeperVision.candidate_backoff_max_sec ()));
+  with_env "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC" "2.0" (fun () ->
+    with_env "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_MAX_SEC" "1.0" (fun () ->
+      assert_float_eq
+        "max backoff is at least base"
+        2.0
+        (Env_config_keeper.KeeperVision.candidate_backoff_max_sec ())))
+
 let test_missing_eio_context_is_runtime_failure () =
   let raw =
     Vt.handle
@@ -357,7 +384,7 @@ let test_unknown_magic_bytes_are_policy_rejection () =
     assert (String.equal (assoc_string "error" json) "invalid_media_type");
     assert (String.equal (assoc_string "failure_class" json) "policy_rejection"))
 
-let test_oversize_image_is_policy_rejection_before_provider_call () =
+let test_oversize_image_is_runtime_failure_before_provider_call () =
   with_temp_base (fun _ ->
     let meta = make_meta "vision-oversize" in
     let handle = store_image meta (String.make (Vt.max_image_bytes () + 1) '\000') in
@@ -375,7 +402,7 @@ let test_oversize_image_is_policy_rejection_before_provider_call () =
     in
     let json = json_of_output raw in
     assert (String.equal (assoc_string "error" json) "image_too_large");
-    assert (String.equal (assoc_string "failure_class" json) "policy_rejection"))
+    assert (String.equal (assoc_string "failure_class" json) "runtime_failure"))
 
 let write_file path content =
   let oc = open_out path in
@@ -383,19 +410,64 @@ let write_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
+let no_image_runtime_toml =
+  {|
+[runtime]
+default = "p0.text"
+media_failover = ["p0.text"]
+
+[providers.p0]
+protocol = "openai-compatible-http"
+endpoint = "https://p0.example/v1"
+
+[models.text]
+api-name = "text"
+max-context = 4096
+
+[models.text.capabilities]
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[p0.text]
+|}
+
+let init_runtime_or_fail path =
+  match Runtime.init_default ~config_path:path with
+  | Ok () -> ()
+  | Error msg -> failwith ("Runtime.init_default failed: " ^ msg)
+;;
+
+let reset_runtime_to_no_image_fixture () =
+  let path = Filename.temp_file "masc-vision-runtime-reset-" ".toml" in
+  write_file path no_image_runtime_toml;
+  Fun.protect
+    ~finally:(fun () ->
+      try Sys.remove path with
+      | _ -> ())
+    (fun () -> init_runtime_or_fail path)
+;;
+
+let runtime_config_stack = ref []
+
 let with_temp_runtime_toml content f =
   let path = Filename.temp_file "masc-vision-runtime-" ".toml" in
   write_file path content;
-  let snapshot = Runtime.For_testing.snapshot () in
+  let previous_stack = !runtime_config_stack in
+  runtime_config_stack := path :: previous_stack;
   Fun.protect
     ~finally:(fun () ->
-      Runtime.For_testing.restore snapshot;
-      try Sys.remove path with
-      | _ -> ())
+      Fun.protect
+        ~finally:(fun () ->
+          try Sys.remove path with
+          | _ -> ())
+        (fun () ->
+          runtime_config_stack := previous_stack;
+          match previous_stack with
+          | previous_path :: _ -> init_runtime_or_fail previous_path
+          | [] -> reset_runtime_to_no_image_fixture ()))
     (fun () ->
-      match Runtime.init_default ~config_path:path with
-      | Ok () -> f ()
-      | Error msg -> failwith ("Runtime.init_default failed: " ^ msg))
+      init_runtime_or_fail path;
+      f ())
 
 let vision_failover_runtime_toml =
   {|
@@ -458,7 +530,8 @@ let test_temp_runtime_toml_restores_runtime_cache () =
     let before = Runtime.get_runtime_ids () in
     with_temp_runtime_toml single_vision_runtime_toml (fun () ->
       assert (Runtime.get_runtime_ids () = [ "p3.vision-c" ]));
-    assert (Runtime.get_runtime_ids () = before))
+    assert (Runtime.get_runtime_ids () = before));
+  assert (Vt.vision_runtime_ids () = [])
 
 let test_retryable_provider_error_tries_next_runtime () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
@@ -488,7 +561,7 @@ let test_retryable_provider_error_tries_next_runtime () =
       let models = ref [] in
       let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ () =
         incr calls;
-        models := !models @ [ config.Llm_provider.Provider_config.model_id ];
+        models := config.Llm_provider.Provider_config.model_id :: !models;
         if !calls = 1 then
           Error (Llm_provider.Http_client.HttpError { code = 500; body = "down" })
         else Ok (ok_response "second runtime answered")
@@ -507,7 +580,7 @@ let test_retryable_provider_error_tries_next_runtime () =
       in
       let json = json_of_output raw in
       assert (!calls = 2);
-      assert (!models = [ "vision-a"; "vision-b" ]);
+      assert (List.rev !models = [ "vision-a"; "vision-b" ]);
       assert (String.equal (assoc_string "text" json) "second runtime answered");
       assert_metric_increment
         "vision_candidate transient_provider_error"
@@ -528,7 +601,7 @@ let test_deadline_exhaustion_preserves_provider_error () =
       let models = ref [] in
       let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ () =
         incr calls;
-        models := !models @ [ config.Llm_provider.Provider_config.model_id ];
+        models := config.Llm_provider.Provider_config.model_id :: !models;
         Error (Llm_provider.Http_client.HttpError { code = 500; body = "down" })
       in
       let raw =
@@ -546,7 +619,7 @@ let test_deadline_exhaustion_preserves_provider_error () =
       in
       let json = json_of_output raw in
       assert (!calls = 1);
-      assert (!models = [ "vision-a" ]);
+      assert (List.rev !models = [ "vision-a" ]);
       assert (String.equal (assoc_string "error" json) "provider_error");
       assert (String.equal (assoc_string "failure_class" json) "transient_error")))
 
@@ -559,7 +632,7 @@ let test_non_retryable_provider_error_stops_without_trying_next_runtime () =
       let models = ref [] in
       let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ () =
         incr calls;
-        models := !models @ [ config.Llm_provider.Provider_config.model_id ];
+        models := config.Llm_provider.Provider_config.model_id :: !models;
         Error
           (Llm_provider.Http_client.HttpError
              { code = 401; body = "bad credentials" })
@@ -578,7 +651,7 @@ let test_non_retryable_provider_error_stops_without_trying_next_runtime () =
       in
       let json = json_of_output raw in
       assert (!calls = 1);
-      assert (!models = [ "vision-a" ]);
+      assert (List.rev !models = [ "vision-a" ]);
       assert (String.equal (assoc_string "error" json) "provider_error");
       assert (String.equal (assoc_string "failure_class" json) "runtime_failure")))
 
@@ -591,7 +664,7 @@ let test_accept_rejected_is_policy_rejection_without_failover () =
       let models = ref [] in
       let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ () =
         incr calls;
-        models := !models @ [ config.Llm_provider.Provider_config.model_id ];
+        models := config.Llm_provider.Provider_config.model_id :: !models;
         Error
           (Llm_provider.Http_client.AcceptRejected
              { reason = "provider rejected the image" })
@@ -610,7 +683,7 @@ let test_accept_rejected_is_policy_rejection_without_failover () =
       in
       let json = json_of_output raw in
       assert (!calls = 1);
-      assert (!models = [ "vision-a" ]);
+      assert (List.rev !models = [ "vision-a" ]);
       assert (String.equal (assoc_string "error" json) "provider_error");
       assert (String.equal (assoc_string "failure_class" json) "policy_rejection")))
 
@@ -765,7 +838,9 @@ let test_evicted_history_has_no_image_modality () =
             }
         ]
     in
-    let modalities ms = Runtime_agent.For_testing.required_modalities_of_messages ms in
+    let modalities ms =
+      Runtime_agent.For_testing.required_modalities_of_messages ms
+    in
     assert (List.mem "image" (modalities [ msg ]));
     let evicted =
       Vi.evict_message
@@ -790,13 +865,14 @@ let () =
   test_first_vision_runtime_id_total ();
   test_provider_for_vision_preserves_configured_max_tokens ();
   test_max_image_bytes_reads_env_config ();
+  test_vision_env_knobs_are_bounded ();
   test_missing_eio_context_is_runtime_failure ();
   test_invalid_media_type_is_policy_rejection ();
   test_missing_clock_is_runtime_failure_without_provider_call ();
   test_invalid_timeout_is_runtime_failure_without_provider_call ();
   test_non_string_media_type_is_policy_rejection ();
   test_unknown_magic_bytes_are_policy_rejection ();
-  test_oversize_image_is_policy_rejection_before_provider_call ();
+  test_oversize_image_is_runtime_failure_before_provider_call ();
   test_temp_runtime_toml_restores_runtime_cache ();
   test_retryable_provider_error_tries_next_runtime ();
   test_deadline_exhaustion_preserves_provider_error ();

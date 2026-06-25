@@ -193,9 +193,13 @@ init_mcp_session() {
     return 0
   fi
 
-  local headers_file body_file init_body session_id protocol_version
+  local headers_file body_file auth_header_file init_body session_id protocol_version
   headers_file="$(mcp_mktemp_file "keeper-continuity-init" ".headers")"
   body_file="$(mcp_mktemp_file "keeper-continuity-init" ".body")"
+  auth_header_file=""
+  if [[ -n "${MCP_TOKEN:-}" ]]; then
+    auth_header_file="$(_mcp_auth_header_file)" || auth_header_file=""
+  fi
   init_body="$(
     jq -cn '{
       jsonrpc:"2.0",
@@ -217,14 +221,14 @@ init_mcp_session() {
     -H "Content-Type: application/json"
     -H "Accept: application/json, text/event-stream"
   )
-  if [[ -n "$MCP_TOKEN" ]]; then
-    cmd+=( -H "Authorization: Bearer $MCP_TOKEN" )
+  if [[ -n "$auth_header_file" ]]; then
+    cmd+=( -H "@$auth_header_file" )
   fi
   cmd+=( --data-binary "$init_body" )
 
   if ! "${cmd[@]}" >/dev/null 2>"$RAW_DIR/mcp-initialize.stderr"; then
     LAST_TOOL_ERROR="MCP initialize transport failed"
-    rm -f "$headers_file" "$body_file"
+    rm -f "$headers_file" "$body_file" "$auth_header_file"
     return 1
   fi
 
@@ -250,7 +254,7 @@ init_mcp_session() {
   if [[ -z "$session_id" ]]; then
     LAST_TOOL_ERROR="MCP initialize did not return Mcp-Session-Id"
     cp "$body_file" "$RAW_DIR/mcp-initialize.body" 2>/dev/null || true
-    rm -f "$headers_file" "$body_file"
+    rm -f "$headers_file" "$body_file" "$auth_header_file"
     return 1
   fi
 
@@ -260,7 +264,7 @@ init_mcp_session() {
     MCP_PROTOCOL_VERSION="$protocol_version"
     export MCP_PROTOCOL_VERSION
   fi
-  rm -f "$headers_file" "$body_file"
+  rm -f "$headers_file" "$body_file" "$auth_header_file"
 }
 
 tool_text() {

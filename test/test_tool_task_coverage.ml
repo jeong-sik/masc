@@ -244,6 +244,88 @@ let () = test "dispatch_add_task" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
+let () = test "handle_add_task_returns_structured_task_id" (fun () ->
+  let ctx = make_test_ctx () in
+  let result =
+    Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:0.0 ctx
+      (`Assoc
+        [ ("title", `String "Structured task")
+        ; ("priority", `Int 2)
+        ; ("description", `String "structured add-task regression")
+        ])
+  in
+  assert (Tool_result.is_success result);
+  let data = Tool_result.data result in
+  assert (Json_util.get_bool data "ok" = Some true);
+  assert (Json_util.get_string data "task_id" = Some "task-001");
+  assert (Json_util.get_string data "title" = Some "Structured task");
+  assert (Json_util.assoc_member_opt "result" data = None);
+  match Json_util.get_string data "summary" with
+  | Some summary -> assert (str_contains summary "Added task-001")
+  | None -> failwith "missing summary")
+
+let () = test "handle_add_task_duplicate_returns_workflow_rejection" (fun () ->
+  let ctx = make_test_ctx () in
+  let first =
+    Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:0.0 ctx
+      (`Assoc [ ("title", `String "Duplicate contract task") ])
+  in
+  if not (Tool_result.is_success first) then failwith (Tool_result.message first);
+  let duplicate =
+    Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:0.0 ctx
+      (`Assoc [ ("title", `String "Duplicate contract task") ])
+  in
+  assert (not (Tool_result.is_success duplicate));
+  assert ((Tool_result.failure_class duplicate) = Some Tool_result.Workflow_rejection);
+  assert (str_contains (Tool_result.message duplicate) "Duplicate rejected");
+  assert (str_contains (Tool_result.message duplicate) "task-001"))
+
+let () = test "workspace_add_task_with_result_returns_typed_task_id" (fun () ->
+  let ctx = make_test_ctx () in
+  match
+    Workspace.add_task_with_result
+      ctx.config
+      ~title:"Structured task: title punctuation is display-only"
+      ~priority:2
+      ~description:"structured workspace add-task regression"
+  with
+  | Ok created ->
+    assert (created.task_id = "task-001");
+    assert (created.title = "Structured task: title punctuation is display-only");
+    assert (created.priority = 2);
+    assert (created.goal_id = None)
+  | Error err ->
+    failwith
+      (Printf.sprintf
+         "expected typed add_task success, got %s"
+         (Workspace.add_task_error_to_string err)))
+
+let () = test "handle_batch_add_tasks_returns_structured_task_ids" (fun () ->
+  let ctx = make_test_ctx () in
+  let result =
+    Task.Tool.handle_batch_add_tasks ~tool_name:"masc_batch_add_tasks" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ( "tasks",
+            `List
+              [
+                `Assoc [ ("title", `String "Structured batch A") ];
+                `Assoc [ ("title", `String "Structured batch B") ];
+              ] );
+        ])
+  in
+  assert (Tool_result.is_success result);
+  let data = Tool_result.data result in
+  assert (Json_util.get_bool data "ok" = Some true);
+  assert (Json_util.get_int data "count" = Some 2);
+  assert (Json_util.assoc_member_opt "result" data = None);
+  (match Json_util.assoc_member_opt "task_ids" data with
+   | Some (`List [ `String "task-001"; `String "task-002" ]) -> ()
+   | _ -> failwith "missing structured batch task_ids");
+  match Json_util.get_string data "summary" with
+  | Some summary -> assert (str_contains summary "Added 2 tasks")
+  | None -> failwith "missing summary")
+
 (* Test dispatch tasks *)
 let () = test "dispatch_tasks" (fun () ->
   let ctx = make_test_ctx () in
@@ -2255,11 +2337,16 @@ let () = test "rfc_0034_v2_masc_add_task_caps_per_goal" (fun () ->
           ("goal_id", `String goal.id);
         ])
   in
-  (* [Workspace_task_create.add_task] returns the rejection as an
-     ["Error: <msg>"] string, mirroring the existing dedup-rejection
-     surface, so [handle_add_task] still returns [(true, "Error: ...")].
-     The cap is enforced at persistence time — pin both the message
-     content and the persisted backlog size. *)
+  (* The cap is enforced at persistence time. It must surface as a typed tool
+     failure, not as a successful result carrying an ["Error: ..."] string. *)
+  if Tool_result.is_success message_result
+  then
+    failwith
+      (Printf.sprintf
+         "expected fourth task to be rejected as workflow failure, got success: %s"
+         (Tool_result.message message_result));
+  if (Tool_result.failure_class message_result) <> Some Tool_result.Workflow_rejection
+  then failwith "expected workflow_rejection failure_class";
   if not (str_starts_with ~prefix:"Error:" (Tool_result.message message_result))
   then
     failwith

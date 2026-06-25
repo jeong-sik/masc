@@ -7,10 +7,23 @@ open Alcotest
     cancellation propagation and crash logging in one place while preserving
     loop-specific iteration error handling. *)
 
+let rec find_up dir rel =
+  let candidate = Filename.concat dir rel in
+  if Sys.file_exists candidate then Some candidate
+  else (
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None else find_up parent rel)
+;;
+
+let source_path rel =
+  match find_up (Sys.getcwd ()) rel with
+  | Some path -> path
+  | None ->
+    failf "could not locate source path %S from cwd %S" rel (Sys.getcwd ())
+;;
+
 let read_file path =
-  match In_channel.with_open_text path In_channel.input_all with
-  | exception _ -> ""
-  | content -> content
+  In_channel.with_open_text (source_path path) In_channel.input_all
 ;;
 
 let count_substring ~haystack ~needle =

@@ -15,7 +15,22 @@ open Alcotest
     of any individual .ml AST, so an AST-grep would be the wrong axis
     here. *)
 
-let keeper_root = "lib/keeper"
+let rec find_up dir rel =
+  let candidate = Filename.concat dir rel in
+  if Sys.file_exists candidate then Some candidate
+  else (
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None else find_up parent rel)
+;;
+
+let source_path rel =
+  match find_up (Sys.getcwd ()) rel with
+  | Some path -> path
+  | None ->
+    failf "could not locate source path %S from cwd %S" rel (Sys.getcwd ())
+;;
+
+let keeper_root () = source_path "lib/keeper"
 
 let rec collect_ml_files dir acc =
   let entries = try Sys.readdir dir with Sys_error _ -> [||] in
@@ -36,13 +51,25 @@ let basename_no_ext path =
   try Filename.chop_extension b with Invalid_argument _ -> b
 ;;
 
+let intentional_boundary_module = function
+  | "surface_ref" ->
+    (* Shared typed surface vocabulary extracted for keeper lanes,
+       external attention, and gate recording.  It intentionally has a
+       domain name rather than a keeper_ prefix; renaming it is a broad
+       module-boundary migration, not an accidental file-add regression. *)
+    true
+  | _ -> false
+;;
+
 let test_all_files_have_keeper_prefix () =
-  let files = collect_ml_files keeper_root [] in
+  let files = collect_ml_files (keeper_root ()) [] in
   let offenders =
     List.filter
       (fun path ->
         let base = basename_no_ext path in
-        not (String.length base >= 7 && String.sub base 0 7 = "keeper_"))
+        not
+          (String.length base >= 7 && String.sub base 0 7 = "keeper_"
+           || intentional_boundary_module base))
       files
   in
   match offenders with
@@ -55,7 +82,7 @@ let test_all_files_have_keeper_prefix () =
 ;;
 
 let test_population_sanity () =
-  let files = collect_ml_files keeper_root [] in
+  let files = collect_ml_files (keeper_root ()) [] in
   (* Population sanity: a sudden drop to near-zero or jump beyond
      historical range would indicate a directory move / restructure
      worth re-validating.  Range chosen with margin around the

@@ -16,6 +16,7 @@ vi.mock('./core', async (importOriginal) => {
 
 import {
   bootKeeper,
+  bulkKeeperDirective,
   clearKeeper,
   deleteKeeperHistorySnapshots,
   fetchKeeperCheckpoints,
@@ -26,12 +27,29 @@ import {
   queuedKeeperMessageError,
   queuedKeeperMessageToReply,
   resumeKeeper,
+  resetKeeper,
   sendKeeperMessageDetailed,
   shutdownKeeper,
   streamKeeperMessage,
   submitQueuedKeeperMessage,
   wakeKeeper,
 } from './keeper'
+import {
+  bootKeeper as bootKeeperFromLifecycle,
+  bulkKeeperDirective as bulkKeeperDirectiveFromLifecycle,
+  clearKeeper as clearKeeperFromLifecycle,
+  deleteKeeperHistorySnapshots as deleteKeeperHistorySnapshotsFromLifecycle,
+  fetchKeeperCheckpoints as fetchKeeperCheckpointsFromLifecycle,
+  pauseKeeper as pauseKeeperFromLifecycle,
+  resetKeeper as resetKeeperFromLifecycle,
+  resumeKeeper as resumeKeeperFromLifecycle,
+  shutdownKeeper as shutdownKeeperFromLifecycle,
+  wakeKeeper as wakeKeeperFromLifecycle,
+} from './keeper-lifecycle'
+import {
+  fetchKeeperRuntimeTrace as fetchKeeperRuntimeTraceFromRuntimeTrace,
+  parseKeeperRuntimeTrace as parseKeeperRuntimeTraceFromRuntimeTrace,
+} from './keeper-runtime-trace'
 import { resetDevTokenBootstrap } from './dev-token'
 
 afterEach(() => {
@@ -48,6 +66,26 @@ afterEach(() => {
     // Ignore storage cleanup failures in the test environment.
   }
   resetDevTokenBootstrap()
+})
+
+describe('keeper API module split compatibility', () => {
+  it('keeps runtime-trace helpers re-exported from the keeper barrel', () => {
+    expect(parseKeeperRuntimeTrace).toBe(parseKeeperRuntimeTraceFromRuntimeTrace)
+    expect(fetchKeeperRuntimeTrace).toBe(fetchKeeperRuntimeTraceFromRuntimeTrace)
+  })
+
+  it('keeps lifecycle helpers re-exported from the keeper barrel', () => {
+    expect(bootKeeper).toBe(bootKeeperFromLifecycle)
+    expect(shutdownKeeper).toBe(shutdownKeeperFromLifecycle)
+    expect(resetKeeper).toBe(resetKeeperFromLifecycle)
+    expect(clearKeeper).toBe(clearKeeperFromLifecycle)
+    expect(pauseKeeper).toBe(pauseKeeperFromLifecycle)
+    expect(resumeKeeper).toBe(resumeKeeperFromLifecycle)
+    expect(wakeKeeper).toBe(wakeKeeperFromLifecycle)
+    expect(fetchKeeperCheckpoints).toBe(fetchKeeperCheckpointsFromLifecycle)
+    expect(deleteKeeperHistorySnapshots).toBe(deleteKeeperHistorySnapshotsFromLifecycle)
+    expect(bulkKeeperDirective).toBe(bulkKeeperDirectiveFromLifecycle)
+  })
 })
 
 describe('sendKeeperMessageDetailed', () => {

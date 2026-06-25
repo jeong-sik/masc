@@ -18,7 +18,6 @@ interface KeeperLifecycleResponse {
   detail?: unknown
   error?: string
 }
-
 async function safeJsonResponse<T>(resp: Response, fallbackError: string): Promise<T> {
   try {
     const body = await resp.text()
@@ -304,4 +303,3 @@ export async function bulkKeeperDirective(
     }
   }
 }
-

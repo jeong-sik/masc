@@ -80,9 +80,10 @@ wait_for_mcp_initialize_ready() {
   local -a extra_headers=( -H "Authorization: Bearer $auth_token" )
 
   while [[ "$(date +%s)" -lt "$deadline" ]]; do
-    local status
+    local status body_file raw normalized
+    body_file="$(mcp_mktemp_file "masc-contract-init-ready" ".json")"
     status="$(
-      curl -sS -o /dev/null -w '%{http_code}' --max-time 2 \
+      curl -sS -o "$body_file" -w '%{http_code}' --max-time 2 \
         -X POST "$mcp_url" \
         -H 'Content-Type: application/json' \
         -H 'Accept: application/json, text/event-stream' \
@@ -91,7 +92,15 @@ wait_for_mcp_initialize_ready() {
     )"
     last_status="$status"
     if [[ "$status" == "200" ]]; then
-      return 0
+      raw="$(cat "$body_file" 2>/dev/null || true)"
+      rm -f "$body_file"
+      normalized="$(jsonrpc_normalize_response "$raw" 0 2>/dev/null || true)"
+      if printf '%s' "$normalized" | jq -e '._harness_error? == null and .error == null' >/dev/null 2>&1; then
+        return 0
+      fi
+      last_status="200-jsonrpc-error"
+    else
+      rm -f "$body_file"
     fi
     sleep 1
   done

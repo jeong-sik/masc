@@ -70,7 +70,9 @@ let all =
    [lib/server/server_auth.ml:340-344] (Outcome_error). The
    token_mismatch remediation tail is reproduced verbatim because
    operators key alerts on the literal "Remediation:" substring
-   (server_auth.ml:332-339 inline rationale). *)
+   (server_auth.ml:332-339 inline rationale). These messages are only emitted
+   when the server policy actually permits the legacy request actor-hint
+   fallback. *)
 
 type dashboard_actor_fallback_outcome =
   | Outcome_none

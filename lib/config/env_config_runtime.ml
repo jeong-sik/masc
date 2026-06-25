@@ -323,13 +323,18 @@ module Transport = struct
     | _ -> false
 
   (** Disable dashboard actor-hint fallback when a bearer token is present but
-      cannot be resolved. Default: false, preserving the token-churn safety net. *)
+      cannot be resolved. Default: true. Set to false only as a legacy
+      token-churn safety valve for trusted loopback dashboards. *)
   let dashboard_actor_fallback_fail_closed () =
     match
       Sys.getenv_opt "MASC_DASHBOARD_ACTOR_FALLBACK_FAIL_CLOSED" |> trim_opt
     with
-    | Some ("1" | "true" | "yes" | "y" | "on") -> true
-    | _ -> false
+    | Some raw -> (
+        match String.lowercase_ascii raw with
+        | "0" | "false" | "no" | "n" | "off" -> false
+        | "1" | "true" | "yes" | "y" | "on" -> true
+        | _ -> true)
+    | None -> true
 
   (** Startup watchdog timeout, clamped to [30, 600]. Default: 240.
       Re-readable within the process, but operationally a boot-time input. *)

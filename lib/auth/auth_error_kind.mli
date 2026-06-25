@@ -46,10 +46,9 @@ val all : t list
     sites with hardcoded format strings, so callers had no typed handle
     on *why* the fallback fired — a counter is not a fix
     (see CLAUDE.md §Workaround Rejection Bar §1 Counter-as-Fix). The
-    fallback path itself is preserved as a production safety net
-    (dashboard cannot go dark on token churn); this surface adds the
-    typed kind that downstream reducers need without removing the
-    safety net.
+    fallback path is now an explicit legacy opt-out for trusted dashboard
+    token churn; this surface adds the typed kind that downstream reducers
+    need when that fallback is actually permitted.
 
     Reference: ~/Downloads/MASC Reverse Engineering Design Map.html
     §Gap "Auth identity is spread across several layers" + §개선 #2

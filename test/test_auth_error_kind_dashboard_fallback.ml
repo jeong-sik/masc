@@ -328,7 +328,7 @@ let test_outcome_error_increments_counter_with_err_kind () =
     (before +. 1.0)
     after
 
-let test_dashboard_actor_invalid_token_fallback_default_preserved () =
+let test_dashboard_actor_invalid_token_fail_closed_by_default () =
   with_env "MASC_DASHBOARD_ACTOR_FALLBACK_FAIL_CLOSED" "" (fun () ->
     let request =
       dashboard_request
@@ -337,7 +337,20 @@ let test_dashboard_actor_invalid_token_fallback_default_preserved () =
         ()
     in
     Alcotest.(check (option string))
-      "invalid token falls back to actor hint by default"
+      "invalid token does not fall back to actor hint by default"
+      None
+      (Server_auth.dashboard_actor_for_request ~base_path:"/tmp/nonexistent-masc-auth" request))
+
+let test_dashboard_actor_invalid_token_fallback_false_env () =
+  with_env "MASC_DASHBOARD_ACTOR_FALLBACK_FAIL_CLOSED" "false" (fun () ->
+    let request =
+      dashboard_request
+        ~token:"definitely-not-a-valid-token"
+        ~actor_hint:"dashboard-admin"
+        ()
+    in
+    Alcotest.(check (option string))
+      "invalid token fallback requires explicit opt-out"
       (Some "dashboard-admin")
       (Server_auth.dashboard_actor_for_request ~base_path:"/tmp/nonexistent-masc-auth" request))
 
@@ -377,8 +390,10 @@ let suite =
       test_outcome_none_increments_counter
   ; test_case "Outcome_error: counter increments with err_kind label" `Quick
       test_outcome_error_increments_counter_with_err_kind
-  ; test_case "Dashboard actor fallback default preserved" `Quick
-      test_dashboard_actor_invalid_token_fallback_default_preserved
+  ; test_case "Dashboard actor fallback fails closed by default" `Quick
+      test_dashboard_actor_invalid_token_fail_closed_by_default
+  ; test_case "Dashboard actor fallback false env opt-out" `Quick
+      test_dashboard_actor_invalid_token_fallback_false_env
   ; test_case "Dashboard actor fallback fail-closed env" `Quick
       test_dashboard_actor_invalid_token_fail_closed_env
   ]

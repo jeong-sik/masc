@@ -137,10 +137,10 @@ val stale_token_warn_log_entry_count : unit -> int
 val dashboard_actor_for_request :
   base_path:string -> Httpun.Request.t -> string option
 (** Resolve the dashboard actor name from the request.  When a bearer token is
-    present but cannot be resolved, the historical dashboard-safety fallback
-    returns the request actor hint by default.  Set
-    [MASC_DASHBOARD_ACTOR_FALLBACK_FAIL_CLOSED=true] to fail closed and return
-    [None] for that token-mismatch path. *)
+    present but cannot be resolved, the token-mismatch path fails closed by
+    default and returns [None].  Set
+    [MASC_DASHBOARD_ACTOR_FALLBACK_FAIL_CLOSED=false] only as a legacy
+    token-churn safety valve to permit request actor-hint fallback. *)
 
 val is_verified_internal_keeper_request :
   base_path:string -> Httpun.Request.t -> bool

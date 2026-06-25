@@ -1088,7 +1088,7 @@ export async function refreshExecution(opts?: RefreshOptions): Promise<void> {
 }
 
 export async function refreshKeeperRuntimeStatus(opts?: RefreshOptions): Promise<void> {
-  const force = opts?.force ?? false
+  const force = opts?.force ?? true
   await refreshShell({ light: true, force })
   await refreshExecution({ force })
 }

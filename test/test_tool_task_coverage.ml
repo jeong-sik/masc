@@ -264,6 +264,22 @@ let () = test "handle_add_task_returns_structured_task_id" (fun () ->
   | Some summary -> assert (str_contains summary "Added task-001")
   | None -> failwith "missing summary")
 
+let () = test "handle_add_task_duplicate_returns_workflow_rejection" (fun () ->
+  let ctx = make_test_ctx () in
+  let first =
+    Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:0.0 ctx
+      (`Assoc [ ("title", `String "Duplicate contract task") ])
+  in
+  if not (Tool_result.is_success first) then failwith (Tool_result.message first);
+  let duplicate =
+    Task.Tool.handle_add_task ~tool_name:"masc_add_task" ~start_time:0.0 ctx
+      (`Assoc [ ("title", `String "Duplicate contract task") ])
+  in
+  assert (not (Tool_result.is_success duplicate));
+  assert ((Tool_result.failure_class duplicate) = Some Tool_result.Workflow_rejection);
+  assert (str_contains (Tool_result.message duplicate) "Duplicate rejected");
+  assert (str_contains (Tool_result.message duplicate) "task-001"))
+
 let () = test "workspace_add_task_with_result_returns_typed_task_id" (fun () ->
   let ctx = make_test_ctx () in
   match
@@ -2321,11 +2337,16 @@ let () = test "rfc_0034_v2_masc_add_task_caps_per_goal" (fun () ->
           ("goal_id", `String goal.id);
         ])
   in
-  (* [Workspace_task_create.add_task] returns the rejection as an
-     ["Error: <msg>"] string, mirroring the existing dedup-rejection
-     surface, so [handle_add_task] still returns [(true, "Error: ...")].
-     The cap is enforced at persistence time — pin both the message
-     content and the persisted backlog size. *)
+  (* The cap is enforced at persistence time. It must surface as a typed tool
+     failure, not as a successful result carrying an ["Error: ..."] string. *)
+  if Tool_result.is_success message_result
+  then
+    failwith
+      (Printf.sprintf
+         "expected fourth task to be rejected as workflow failure, got success: %s"
+         (Tool_result.message message_result));
+  if (Tool_result.failure_class message_result) <> Some Tool_result.Workflow_rejection
+  then failwith "expected workflow_rejection failure_class";
   if not (str_starts_with ~prefix:"Error:" (Tool_result.message message_result))
   then
     failwith

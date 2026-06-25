@@ -336,7 +336,8 @@ let handle_add_task ~tool_name ~start_time ctx args =
                   ])
              ()
          | Error err ->
-           Tool_result.ok
+           Tool_result.error
+             ~failure_class:(Some Tool_result.Workflow_rejection)
              ~tool_name
              ~start_time
              (Workspace.add_task_error_to_string err))
@@ -472,7 +473,8 @@ let handle_batch_add_tasks ~tool_name ~start_time ctx args =
               ])
          ()
      | Error err ->
-       Tool_result.ok
+       Tool_result.error
+         ~failure_class:(Some Tool_result.Workflow_rejection)
          ~tool_name
          ~start_time
          (Workspace.batch_add_tasks_error_to_string err))

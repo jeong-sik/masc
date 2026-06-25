@@ -135,6 +135,7 @@ type known =
   | Psql
   | Mysql
   | Mariadb
+  | Cockroach
   | Sudo
   | Su
   | Chmod

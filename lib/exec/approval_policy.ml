@@ -111,12 +111,13 @@ let find_catastrophic_program (caps : Capability.t list) : Exec_program.t option
 [@@warning "-4"]
 
 (* The SQL-carrying flag pair (short, long) for a database CLI, or [None] for
-   any other binary.  psql executes [-c]/[--command]; mysql/mariadb execute
-   [-e]/[--execute]. *)
+   any other binary.  psql executes [-c]/[--command]; mysql/mariadb/cockroach
+   execute [-e]/[--execute]. *)
 let db_command_flags (bin : Exec_program.t) : (string * string) option =
   match Exec_program.known bin with
   | Some Exec_program.Psql -> Some ("-c", "--command")
-  | Some (Exec_program.Mysql | Exec_program.Mariadb) -> Some ("-e", "--execute")
+  | Some (Exec_program.Mysql | Exec_program.Mariadb | Exec_program.Cockroach) ->
+    Some ("-e", "--execute")
   | Some _ | None -> None
 [@@warning "-4"]
 
@@ -155,13 +156,13 @@ let extract_db_sql ~(short : string) ~(long : string) (args : Shell_ir.arg list)
   go args
 ;;
 
-(* Scan for a database CLI ([psql]/[mysql]/[mariadb]) whose [-c]/[-e] SQL leads
-   with a destructive verb ([DROP]/[TRUNCATE]/[DELETE], classified by
-   {!Db_op}).  Part of the trust-independent floor — the typed replacement for
-   the [sql_destructive] substring catalogue (RFC eliminate-substring-
-   destructive-classifier §3-A).  Non-destructive SQL ([SELECT], [INSERT], …),
-   an unrecognized verb, or a non-literal [-c] value floor nothing here and are
-   graded normally (psql/mysql are [`Audited]).
+(* Scan for a database CLI ([psql]/[mysql]/[mariadb]/[cockroach]) whose
+   [-c]/[-e] SQL contains a destructive statement ([DROP]/[TRUNCATE]/[DELETE],
+   classified by {!Db_op}).  Part of the trust-independent floor — the typed
+   replacement for the [sql_destructive] substring catalogue (RFC
+   eliminate-substring-destructive-classifier §3-A).  Non-destructive SQL
+   ([SELECT], [INSERT], …), an unrecognized verb, or a non-literal [-c] value
+   floor nothing here and are graded normally (database CLIs are [`Audited]).
 
    [@@warning "-4"]: the [_ :: rest] arm is a find-first scan that intentionally
    skips every non-matching capability — same rationale as

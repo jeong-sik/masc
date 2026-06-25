@@ -1,8 +1,7 @@
 (** Db_op — typed SQL verb classifier tests (RFC eliminate-substring-
     destructive-classifier §3-A). Asserts the four [sql_destructive] catalogue
     patterns classify Destructive, that reads/mutations do not, and the
-    documented edge cases (comments, multi-statement, quoted ';', CTE
-    limitation). *)
+    documented edge cases (comments, multi-statement, quoted literals, CTEs). *)
 
 open Masc_exec
 
@@ -58,6 +57,13 @@ let test_semicolon_in_string_literal () =
   destructive "literal then drop" "INSERT INTO t VALUES ('x;y'); DROP TABLE t"
 ;;
 
+let test_destructive_words_inside_literals_or_comments_do_not_floor () =
+  not_destructive "string literal" "SELECT 'drop table users; delete from logs'";
+  not_destructive "quoted identifier" {|SELECT "delete from" FROM metrics|};
+  not_destructive "comment only then select" "-- drop table users\nSELECT 1";
+  not_destructive "block comment only then select" "/* delete from logs */ SELECT 1"
+;;
+
 let test_reads_and_mutations_not_destructive () =
   not_destructive "select" "select * from users";
   not_destructive "explain" "EXPLAIN ANALYZE SELECT 1";
@@ -67,14 +73,13 @@ let test_reads_and_mutations_not_destructive () =
   not_destructive "show" "SHOW TABLES"
 ;;
 
-(* Documented limitation: a destructive op nested in a leading non-destructive
-   statement (CTE) is NOT detected by the leading-verb classifier. This test
-   PINS the known gap so a future full-parser upgrade is a visible change, not a
-   silent one. *)
-let test_cte_nested_destructive_is_known_gap () =
-  not_destructive
-    "WITH ... DELETE (known leading-verb limitation)"
-    "WITH doomed AS (SELECT id FROM t WHERE old) DELETE FROM t USING doomed"
+let test_cte_destructive_is_detected () =
+  destructive
+    "WITH ... DELETE"
+    "WITH doomed AS (SELECT id FROM t WHERE old) DELETE FROM t USING doomed";
+  destructive
+    "data-modifying CTE"
+    "WITH moved AS (DELETE FROM t WHERE old RETURNING id) SELECT * FROM moved"
 ;;
 
 let test_unknown_and_empty () =
@@ -96,8 +101,12 @@ let () =
         ; Alcotest.test_case "leading comments skipped" `Quick test_leading_comments_skipped
         ; Alcotest.test_case "multi-statement strictest wins" `Quick test_multi_statement_strictest_wins
         ; Alcotest.test_case "semicolon in string literal" `Quick test_semicolon_in_string_literal
+        ; Alcotest.test_case
+            "destructive words inside literals/comments do not floor"
+            `Quick
+            test_destructive_words_inside_literals_or_comments_do_not_floor
         ; Alcotest.test_case "reads/mutations not destructive" `Quick test_reads_and_mutations_not_destructive
-        ; Alcotest.test_case "CTE nested destructive is known gap" `Quick test_cte_nested_destructive_is_known_gap
+        ; Alcotest.test_case "CTE destructive is detected" `Quick test_cte_destructive_is_detected
         ; Alcotest.test_case "unknown and empty" `Quick test_unknown_and_empty
         ] )
     ]

@@ -121,6 +121,7 @@ type known =
   | Psql
   | Mysql
   | Mariadb
+  | Cockroach
   (* Privileged *)
   | Sudo
   | Su
@@ -236,6 +237,7 @@ let known_metadata : known -> known_metadata = function
   | Psql -> { name = "psql"; risk = `Audited; kind = `Other_audited }
   | Mysql -> { name = "mysql"; risk = `Audited; kind = `Other_audited }
   | Mariadb -> { name = "mariadb"; risk = `Audited; kind = `Other_audited }
+  | Cockroach -> { name = "cockroach"; risk = `Audited; kind = `Other_audited }
   | Sudo -> { name = "sudo"; risk = `Privileged; kind = `Privileged_program }
   | Su -> { name = "su"; risk = `Privileged; kind = `Privileged_program }
   | Chmod -> { name = "chmod"; risk = `Privileged; kind = `Privileged_program }
@@ -339,6 +341,7 @@ let all_known =
   ; Psql
   ; Mysql
   ; Mariadb
+  ; Cockroach
   ; Sudo
   ; Su
   ; Chmod

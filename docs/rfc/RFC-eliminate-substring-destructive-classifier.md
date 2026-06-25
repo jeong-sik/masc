@@ -124,9 +124,10 @@ worker command 는 keeper typed 게이트(Gate 2)를 반드시 통과(§2.1). ga
 - **floor-target (catastrophic floor 로 흡수)**:
   - `shutdown`/`reboot`(+`halt`/`poweroff`): catastrophic-by-identity → `find_catastrophic_program` (`mkfs` 와 동일).
     SHIPPED #22234.
-  - SQL `drop`/`truncate`/`delete`: **typed DB-capability** 신설(§6 결정). `psql -c`/`mysql -e` 의 SQL verb 를
-    `Db_op` 가 파싱 → destructive verb 면 `find_destructive_db`(catastrophic_floor 내부) Deny. substring 보다 더
-    완전(drop index/view 도 잡음). SHIPPED 본 PR.
+  - SQL `drop`/`truncate`/`delete`: **typed DB-capability** 신설(§6 결정). `psql -c`,
+    `mysql`/`mariadb`/`cockroach -e` 의 SQL token phrase 를 `Db_op` 가 파싱 → destructive phrase 면
+    `find_destructive_db`(catastrophic_floor 내부) Deny. substring 보다 더 완전(drop index/view/CTE delete 도 잡음).
+    SHIPPED 본 PR.
 - **deliberately-allow (floor 아님, Phase 3 에서 과잉성 드롭)**:
   - `kill`/`pkill`: **차단 안 함**(§6 결정 — "괴상한 제약 안 함"). keeper 가 자기 spawn 프로세스에 시그널 보내는 건
     정당하고, 구문 레벨에 안전한 ownership 경계가 없다. substring 차단은 과잉 → Phase 3 에서 드롭.
@@ -134,12 +135,8 @@ worker command 는 keeper typed 게이트(Gate 2)를 반드시 통과(§2.1). ga
     막고, in-workspace 형은 정당 작업. `test_rm_root_allowed_at_policy_layer_jailed_downstream` 가 경계(argv 경로는
     floor 밖)를 pin.
 
-→ command-shape must-floor work-list 은 **거의 비었으나 0 은 아니다**(자가 측정 정정). 남은 path-independent gap 은
-(1) 의도적 허용 kill/pkill, (2) **typed DB floor 의 fail-open**: `find_destructive_db` 는 psql/mysql/mariadb 만
-인식하므로 비열거 DB CLI(예: `cockroach sql -e "drop table …"`)의 destructive SQL 을 substring 은 막지만 typed 는
-허용한다(harness corpus 에 측정 케이스로 pin). 또 비-literal `-c` 값(`psql -c "$SQL"`, Concat/Var)도 fail-open
-(§8). 따라서 Phase 3 는 SQL substring 을 *비열거 bin·비literal 인자에 한해 유지*하거나 이 narrowing 을 명시적 scope
-cut 으로 수용해야 한다. 나머지(literal psql/mysql/mariadb)는 typed 가 커버.
+→ command-shape must-floor work-list 은 비었다. 남은 path-independent gap 은 의도적 허용 kill/pkill 뿐이다.
+literal destructive SQL 은 `psql`/`mysql`/`mariadb`/`cockroach` typed DB floor 가 커버한다.
 
 ### D4. gh 등 string-borne 위험은 RFC-0208 §4(B1)대로 word-list floor 가 영구 소유
 "전멸"의 스코프는 *eval_gate substring 계층* 제거이지 B1 floor 폐지가 아니다.
@@ -159,20 +156,19 @@ silent 하게 늘면 red.
 - **2a (SHIPPED #22234)**: `shutdown`/`reboot`(+`halt`/`poweroff`)을 `find_catastrophic_program` 에 흡수 →
   independent baseline 8→6.
 - **2b (SHIPPED 본 PR)**: SQL `drop`/`truncate`/`delete` 를 typed DB-capability(`Db_op` + `find_destructive_db`)로
-  흡수 → **literal psql/mysql/mariadb** SQL 이 covered 로 이동. `kill`/`pkill` 은 deliberately-allow 결정(차단 안 함).
-  단 비열거 DB CLI(`cockroach`)·비-literal `-c` 값은 fail-open 으로 잔존(harness `cockroach` 케이스로 측정). independent
-  baseline = {kill, pkill, cockroach-fail-open}, **must-floor work-list 은 거의 비었으나 0 은 아니다**(§6 정정).
+  흡수 → **literal psql/mysql/mariadb/cockroach** SQL 이 covered 로 이동. `kill`/`pkill` 은 deliberately-allow
+  결정(차단 안 함). independent baseline = {kill, pkill}; must-floor work-list 은 비었다.
 
 ### Phase 3 — substring 삭제 + drift-guard
-SQL substring 을 *비열거 bin·비literal 인자에 한해 유지*하거나 그 narrowing 을 명시적 scope cut 으로 수용한 뒤 진행한다
-(나머지는 typed 가 커버). `detect_destructive`/`detect_evasion`/dead
-`pre_check`·`guarded_execute` 제거, worker/keeper_guards/eval_gate pre-hook 제거. 이때 deliberately-allow 집합
+`detect_destructive`/`detect_evasion`/dead `pre_check`·`guarded_execute` 제거,
+worker/keeper_guards/eval_gate pre-hook 제거. 이때 deliberately-allow 집합
 (kill/pkill + path-BEARING in-workspace)의 과잉 차단이 의도적으로 드롭됨(영구 path jail 이 workspace 밖을 계속 보호).
 drift-guard 로 substring 분류기 재등장 차단.
 
 ## 6. 정책 질문 (결정 완료)
-- **SQL** (`drop table` 등): **(a) typed DB-capability 신설** 채택. `Db_op` 가 `psql -c`/`mysql -e` 의 SQL verb 를
-  파싱, destructive verb(drop/truncate/delete)면 floor Deny. substring 완전 대체이며 더 완전(drop index/view 포함).
+- **SQL** (`drop table` 등): **(a) typed DB-capability 신설** 채택. `Db_op` 가
+  `psql -c`/`mysql`/`mariadb`/`cockroach -e` 의 SQL token phrase 를 파싱, destructive phrase(drop/truncate/delete)면
+  floor Deny. substring 완전 대체이며 더 완전(drop index/view/CTE delete 포함).
 - **`kill`/`pkill`**: **차단 안 함**(deliberately-allow). 근거 — keeper 가 자기 spawn 프로세스에 시그널 보내는 건
   정당하고, 구문 레벨에 ownership 경계가 없어 무조건 차단은 근거 없는 제약("괴상한 제약 안 함"). 향후 PID-ownership
   추적 인프라가 생기면 typed ownership guard 로 좁힐 수 있으나 별도 RFC.
@@ -195,13 +191,9 @@ drift-guard 로 substring 분류기 재등장 차단.
   command-shape 로 닫고, path-BEARING 은 영구 jail 에 위임"이다.
 - device_write `> /dev/` (redirect 형)은 harness corpus 에서 제외(Redirect_scope 구성 필요); catastrophic_floor
   write-escape 가 별도 커버. `dd if=` 가 class 대표.
-- **typed DB-capability(`Db_op`)의 알려진 한계 2가지** (정직하게 기록):
-  1. *leading-verb 분류*: `;`-분리 각 statement 의 선두 verb 로 판정. CTE 에 중첩된 destructive(`WITH t AS (…) DELETE
-     FROM …`)는 선두가 `WITH`라 **못 잡는다**. substring 의 flat match 는 잡았던 케이스 → 좁아진 부분. keeper 에 드문
-     형태이고 근본 fix(full SQL parser)는 over-engineering 이라 보류. `test_db_op` 가 이 gap 을 통과 테스트로 **pin**해
-     향후 full-parser 업그레이드가 silent change 가 아니게 한다.
-  2. *DB-bin 열거*: `psql`/`mysql`/`mariadb` 만 인식. substring 은 bin 무관(명령 문자열에 `drop table` 있으면 차단)
-     이었으므로, 다른 DB CLI(`cockroach`/`mongosh`/커스텀 래퍼)는 안 잡힌다. typed 의 producer-열거 비용. 새 DB CLI 는
-     `Exec_program.known` + `db_command_flags` 한 줄씩 추가로 확장(컴파일러가 누락 강제).
-  반대로 typed 는 substring 보다 **더 완전**한 부분도 있다: `drop index`/`drop view`/`drop schema` 등 substring
-  카탈로그에 없던 destructive 형태도 leading verb `DROP` 로 모두 floor 한다.
+- **typed DB-capability(`Db_op`) 범위**: `psql`/`mysql`/`mariadb`/`cockroach` 의 literal SQL command flag 를 인식한다.
+  새 DB CLI 는 `Exec_program.known` + `db_command_flags` 에 명시적으로 추가한다(컴파일러가 typed registry 누락을 드러냄).
+  `Db_op` 는 SQL comments/string literals/quoted identifiers 를 건너뛴 token phrase 로 판정하므로
+  `SELECT 'drop table'` 같은 false positive 를 피하면서, `WITH ... DELETE` 및 data-modifying CTE 도 floor 한다.
+  typed 는 substring 보다 **더 완전**한 부분도 있다: `drop index`/`drop view`/`drop schema` 등 substring
+  카탈로그에 없던 destructive 형태도 `DROP <object>` token phrase 로 floor 한다.

@@ -297,7 +297,7 @@ let test_system_power_denied_under_autonomous () =
 
 (* Destructive SQL on a database CLI is the typed replacement for the
    sql_destructive substring catalogue: floored under every overlay including
-   autonomous. psql executes [-c], mysql/mariadb execute [-e]. RFC
+   autonomous. psql executes [-c], mysql/mariadb/cockroach execute [-e]. RFC
    eliminate-substring-destructive-classifier §3-A. *)
 let test_destructive_sql_denied_under_autonomous () =
   List.iter
@@ -315,9 +315,10 @@ let test_destructive_sql_denied_under_autonomous () =
     ; "psql", "--command", "truncate table cache"
     ; "mysql", "-e", "drop database prod"
     ; "mariadb", "-e", "delete from sessions"
+    ; "cockroach", "-e", "drop table users"
     ]
 
-(* A read query on a database CLI is NOT floored — psql/mysql are audited, so
+(* A read query on a database CLI is NOT floored — database CLIs are audited, so
    under the autonomous overlay it is Allow (a keeper may query). This pins that
    the DB floor keys on the SQL verb, not the binary identity. *)
 let test_read_sql_allowed_under_autonomous () =

@@ -61,15 +61,95 @@ let leading_keyword stmt =
     if stop = start then None else Some (String.uppercase_ascii (String.sub stmt start (stop - start))))
 ;;
 
+let sql_tokens s =
+  let n = String.length s in
+  let out = ref [] in
+  let buf = Buffer.create 16 in
+  let flush () =
+    if Buffer.length buf > 0
+    then (
+      out := String.uppercase_ascii (Buffer.contents buf) :: !out;
+      Buffer.clear buf)
+  in
+  let rec skip_single_quote i =
+    if i >= n
+    then i
+    else if s.[i] = '\''
+    then
+      if i + 1 < n && s.[i + 1] = '\''
+      then skip_single_quote (i + 2)
+      else i + 1
+    else skip_single_quote (i + 1)
+  in
+  let rec skip_double_quote i =
+    if i >= n
+    then i
+    else if s.[i] = '"'
+    then
+      if i + 1 < n && s.[i + 1] = '"'
+      then skip_double_quote (i + 2)
+      else i + 1
+    else skip_double_quote (i + 1)
+  in
+  let rec skip_line_comment i = if i >= n || s.[i] = '\n' then i else skip_line_comment (i + 1) in
+  let rec skip_block_comment i =
+    if i + 1 >= n
+    then n
+    else if s.[i] = '*' && s.[i + 1] = '/'
+    then i + 2
+    else skip_block_comment (i + 1)
+  in
+  let i = ref 0 in
+  while !i < n do
+    let c = s.[!i] in
+    if is_word_char c
+    then (
+      Buffer.add_char buf c;
+      incr i)
+    else (
+      flush ();
+      match c with
+      | '\'' -> i := skip_single_quote (!i + 1)
+      | '"' -> i := skip_double_quote (!i + 1)
+      | '-' when !i + 1 < n && s.[!i + 1] = '-' -> i := skip_line_comment (!i + 2)
+      | '/' when !i + 1 < n && s.[!i + 1] = '*' -> i := skip_block_comment (!i + 2)
+      | _ -> incr i)
+  done;
+  flush ();
+  List.rev !out
+;;
+
+let drop_target_keyword = function
+  | "DATABASE" | "SCHEMA" | "TABLE" | "VIEW" | "INDEX" | "MATERIALIZED"
+  | "SEQUENCE" | "TYPE" | "DOMAIN" | "FUNCTION" | "PROCEDURE" | "TRIGGER"
+  | "EXTENSION" | "POLICY" | "ROLE" | "USER" | "OWNED" | "SERVER" | "FOREIGN" ->
+    true
+  | _ -> false
+;;
+
+let destructive_phrase stmt =
+  let rec scan = function
+    | [] -> None
+    | "DROP" :: next :: _ when drop_target_keyword next -> Some (Destructive `Drop)
+    | "TRUNCATE" :: _ -> Some (Destructive `Truncate)
+    | "DELETE" :: _ -> Some (Destructive `Delete)
+    | _ :: rest -> scan rest
+  in
+  scan (sql_tokens stmt)
+;;
+
 (* One classified statement, or [Error] for an unrecognized leading keyword. *)
 let classify_statement stmt : (t, [ `Empty | `Unknown_verb of string ]) result =
-  match leading_keyword stmt with
-  | None -> Error `Empty
-  | Some kw ->
-    (match kw with
-     | "DROP" -> Ok (Destructive `Drop)
-     | "TRUNCATE" -> Ok (Destructive `Truncate)
-     | "DELETE" -> Ok (Destructive `Delete)
+  match destructive_phrase stmt with
+  | Some op -> Ok op
+  | None ->
+    (match leading_keyword stmt with
+     | None -> Error `Empty
+     | Some kw ->
+       (match kw with
+        | "DROP" -> Ok (Destructive `Drop)
+        | "TRUNCATE" -> Ok (Destructive `Truncate)
+        | "DELETE" -> Ok (Destructive `Delete)
      | "SELECT" -> Ok (Read `Select)
      | "SHOW" -> Ok (Read `Show)
      | "EXPLAIN" -> Ok (Read `Explain)
@@ -90,12 +170,12 @@ let classify_statement stmt : (t, [ `Empty | `Unknown_verb of string ]) result =
      | "COPY" -> Ok (Mutating `Copy)
      | "VACUUM" -> Ok (Mutating `Vacuum)
      | "ANALYZE" -> Ok (Mutating `Analyze)
-     | other -> Error (`Unknown_verb (String.lowercase_ascii other)))
+        | other -> Error (`Unknown_verb (String.lowercase_ascii other))))
 ;;
 
 (* Split on top-level [;].  Quote-aware so a ';' inside a string literal does
    not split a statement (e.g. INSERT … VALUES ('a;b')).  Good enough for the
-   leading-verb classifier; it does not need full lexing. *)
+   syntactic SQL floor; it does not need full SQL parsing. *)
 let split_statements sql =
   let n = String.length sql in
   let buf = Buffer.create 32 in

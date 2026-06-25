@@ -71,6 +71,26 @@ let test_corruption_detected () =
   | Error _ -> ()
   | Ok _ -> assert false
 
+(* a malformed handle (path-traversal, non-hex, wrong length, uppercase) is
+   rejected before any filesystem access — fail closed, no read outside [dir]. *)
+let test_malformed_handle_rejected () =
+  let dir = temp_dir () in
+  List.iter
+    (fun bad ->
+      match S.load ~dir (S.of_string bad) with
+      | Error _ -> ()
+      | Ok _ -> assert false)
+    [ "../../etc/passwd";
+      "/etc/passwd";
+      "a/b";
+      "not-hex-string";
+      "";
+      String.make 63 'a';
+      (* one short *)
+      String.make 65 'a';
+      (* one long *)
+      String.make 64 'A' (* uppercase: not canonical *) ]
+
 let () =
   test_round_trip ();
   test_content_addressed ();
@@ -78,4 +98,5 @@ let () =
   test_persisted_handle_reload ();
   test_missing_is_error ();
   test_corruption_detected ();
+  test_malformed_handle_rejected ();
   print_endline "test_vision_artifact_store: all assertions passed"

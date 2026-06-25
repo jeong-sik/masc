@@ -8,6 +8,19 @@ let of_string s = s
    full digest is kept here because this is an identity, not a display label. *)
 let hash (raw : string) : handle = Digestif.SHA256.(digest_string raw |> to_hex)
 
+(* A handle is the lowercase-hex SHA-256 of stored bytes: exactly 64 hex chars.
+   [store] only ever produces such strings, but [of_string] re-wraps arbitrary
+   persisted strings, so a corrupted/forged checkpoint could carry a handle like
+   "../../etc/passwd". Validate the shape before using a handle as a path segment
+   so [load] cannot read outside [dir] (path-traversal fail-closed). *)
+let is_canonical (h : handle) : bool =
+  String.length h = 64
+  && String.for_all
+       (function
+         | '0' .. '9' | 'a' .. 'f' -> true
+         | _ -> false)
+       h
+
 let path_of ~dir (h : handle) = Filename.concat dir h
 
 let store ~dir (raw : string) : (handle, string) result =
@@ -18,6 +31,13 @@ let store ~dir (raw : string) : (handle, string) result =
   | Error msg -> Error (Printf.sprintf "Vision_artifact_store.store: %s" msg)
 
 let load ~dir (h : handle) : (string, string) result =
+  if not (is_canonical h) then
+    Error
+      (Printf.sprintf
+         "Vision_artifact_store.load: malformed handle (expected 64-char \
+          lowercase hex): %S"
+         h)
+  else
   let path = path_of ~dir h in
   match Fs_compat.load_file_opt path with
   | None -> Error (Printf.sprintf "Vision_artifact_store.load: not found: %s" path)

@@ -26,6 +26,7 @@ val store : dir:string -> string -> (handle, string) result
     file, so a re-store overwrites identical content. [Error msg] on I/O failure. *)
 
 val load : dir:string -> handle -> (string, string) result
-(** [load ~dir h] reads the bytes for [h]. [Error] if the file is absent, or if
-    the stored bytes do not hash back to [h] (corruption or a forged handle) —
-    never a silent empty success. *)
+(** [load ~dir h] reads the bytes for [h]. [Error] (never a silent empty success)
+    if: [h] is not a canonical 64-char lowercase-hex handle (rejected before any
+    filesystem access, so a forged "../" handle cannot read outside [dir]); the
+    file is absent; or the stored bytes do not hash back to [h] (corruption). *)

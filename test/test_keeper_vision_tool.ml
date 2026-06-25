@@ -13,6 +13,64 @@
 
 module Vt = Masc.Keeper_vision_tool
 module Va = Multimodal.Vision_analyze
+module Store = Multimodal.Vision_artifact_store
+
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
+let json_of_output raw =
+  try Yojson.Safe.from_string raw with
+  | Yojson.Json_error msg -> failwith ("invalid json output: " ^ msg ^ ": " ^ raw)
+
+let assoc_string key = function
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some (`String s) -> s
+     | Some other ->
+       failwith
+         (Printf.sprintf
+            "field %s was not a string: %s"
+            key
+            (Yojson.Safe.to_string other))
+     | None -> failwith ("missing field: " ^ key))
+  | other -> failwith ("expected object: " ^ Yojson.Safe.to_string other)
+
+let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
+  let json =
+    `Assoc
+      [ "name", `String name
+      ; "agent_name", `String (name ^ "-agent")
+      ; "trace_id", `String (name ^ "-trace")
+      ; "goal", `String "vision tool test"
+      ; "allowed_paths", `List [ `String "*" ]
+      ; "sandbox_profile", `String "none"
+      ]
+  in
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Ok meta -> meta
+  | Error e -> failwith e
+
+let with_temp_base f =
+  let path = Filename.temp_file "masc-vision-tool-test-" "" in
+  Unix.unlink path;
+  Unix.mkdir path 0o755;
+  Unix.putenv "MASC_BASE_PATH" path;
+  Config_dir_resolver.reset ();
+  Fun.protect
+    ~finally:(fun () ->
+      unsetenv "MASC_BASE_PATH";
+      Config_dir_resolver.reset ();
+      let rec rm p =
+        match Unix.lstat p with
+        | { Unix.st_kind = Unix.S_DIR; _ } ->
+          Array.iter
+            (fun name -> rm (Filename.concat p name))
+            (Sys.readdir p);
+          Unix.rmdir p
+        | _ -> Unix.unlink p
+        | exception Unix.Unix_error _ -> ()
+      in
+      rm path)
+    (fun () -> f path)
 
 (* Only MaxTokens -> true. Exhaustive over all 9 SDK variants so a new one forces
    a decision rather than silently bucketing to false. *)
@@ -58,8 +116,72 @@ let test_first_vision_runtime_id_total () =
   match Vt.first_vision_runtime_id () with
   | Ok _ | Error _ -> ()
 
+let test_provider_for_vision_preserves_configured_max_tokens () =
+  let base =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"vision-model"
+      ~base_url:"http://example.invalid"
+      ()
+  in
+  let configured = Vt.provider_for_vision { base with max_tokens = Some 4096 } in
+  assert (configured.max_tokens = Some 4096);
+  let fallback = Vt.provider_for_vision { base with max_tokens = None } in
+  assert (fallback.max_tokens = Some 1024)
+
+let test_missing_eio_context_is_runtime_failure () =
+  let raw =
+    Vt.handle
+      ~meta:(make_meta "vision-missing-eio")
+      ~args:
+        (`Assoc
+          [ "artifact", `String (String.make 64 'a')
+          ; "query", `String "describe"
+          ])
+      ()
+  in
+  let json = json_of_output raw in
+  assert (String.equal (assoc_string "error" json) "eio_context_unavailable");
+  assert (String.equal (assoc_string "failure_class" json) "runtime_failure")
+
+let test_invalid_media_type_is_policy_rejection () =
+  with_temp_base (fun _ ->
+    let meta = make_meta "vision-media-type" in
+    let bytes = "\x89PNG\r\n\x1a\nraw" in
+    let store_dir =
+      Filename.concat
+        (Config_dir_resolver.keepers_dir ())
+        (meta.Masc.Keeper_meta_contract.name ^ ".vision")
+    in
+    let handle =
+      match Store.store ~dir:store_dir bytes with
+      | Ok handle -> Store.to_string handle
+      | Error msg -> failwith msg
+    in
+    let raw =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.handle
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~meta
+            ~args:
+              (`Assoc
+                [ "artifact", `String handle
+                ; "query", `String "describe"
+                ; "media_type", `String "text/plain"
+                ])
+            ()))
+    in
+    let json = json_of_output raw in
+    assert (String.equal (assoc_string "error" json) "invalid_media_type");
+    assert (String.equal (assoc_string "failure_class" json) "policy_rejection"))
+
 let () =
   test_truncated_of_stop_reason ();
   test_message_of_request ();
   test_first_vision_runtime_id_total ();
+  test_provider_for_vision_preserves_configured_max_tokens ();
+  test_missing_eio_context_is_runtime_failure ();
+  test_invalid_media_type_is_policy_rejection ();
   print_endline "test_keeper_vision_tool: all assertions passed"

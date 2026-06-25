@@ -39,8 +39,8 @@ val provider_for_vision
   -> Llm_provider.Provider_config.t
 (** A one-shot, non-thinking, plain-text vision config: thinking off (avoids the
     2026-06-25 gemma4 thinking-budget exhaustion that produced empty replies),
-    [response_format = Off], [tool_choice = None], [temperature = 0], and
-    [max_tokens] room for the answer. *)
+    [response_format = Off], [tool_choice = None], [temperature = 0], and a
+    fallback [max_tokens] only when the selected runtime has not configured one. *)
 
 val first_vision_runtime_id : unit -> (string, string) result
 (** Runtime id of the first image-capable configured runtime, or [Error] when
@@ -57,9 +57,12 @@ val handle
   -> unit
   -> string
 (** Tool entry. [args] = [{ "artifact": handle; "query": string;
-    "media_type"?: string }]. Returns a JSON string: [{"ok":true,"text":...}] or
-    [{"ok":false,"error":code[,"detail":...]}] with code one of [invalid_args |
-    eio_context_unavailable | artifact_load_failed | invalid_request |
-    no_capable_runtime | timeout | provider_error | empty_extraction |
-    truncated_extraction]. [complete] defaults to the live provider call (inject
-    in tests). Never returns a raw empty success. *)
+    "media_type"?: string }]. [media_type], when provided, must be a supported
+    image MIME type; otherwise the stored bytes are sniffed. Returns a JSON
+    string: [{"ok":true,"text":...}] or
+    [{"ok":false,"error":code,"failure_class":class[,"detail":...]}] with code
+    one of [invalid_args | eio_context_unavailable | artifact_load_failed |
+    invalid_media_type | invalid_request | no_capable_runtime | timeout |
+    provider_error | empty_extraction | truncated_extraction]. [complete]
+    defaults to the live provider call (inject in tests). Never returns a raw
+    empty success. *)

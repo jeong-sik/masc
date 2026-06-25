@@ -297,9 +297,32 @@ let handle_keeper_get_subroutes state req request reqd =
         Server_utils.int_query_param req "limit" ~default:200
         |> max 1 |> min trajectory_max_limit
       in
+      let cache = Server_dashboard_read_model_cache.global () in
+      let cache_key =
+        Server_dashboard_read_model_cache.Runtime_trace
+          { keeper_name = name; trace_id; turn_id; limit }
+      in
       let st, json =
-        keeper_runtime_trace_json (Mcp_server.workspace_config state) name
-          ?trace_id ?turn_id ~limit ()
+        match
+          Server_dashboard_read_model_cache.get_fresh
+            cache
+            cache_key
+            ~ttl_s:Server_dashboard_http_core_cache.live_cache_ttl_s
+        with
+        | Some entry -> `OK, entry.json
+        | None ->
+          let result =
+            keeper_runtime_trace_json (Mcp_server.workspace_config state) name
+              ?trace_id ?turn_id ~limit ()
+          in
+          (match result with
+           | `OK, json ->
+             Server_dashboard_read_model_cache.put
+               cache
+               cache_key
+               { generated_at = Time_compat.now (); json; source = `On_demand }
+           | `Not_found, _ -> ());
+          result
       in
       let status : Httpun.Status.t =
         match st with `OK -> `OK | `Not_found -> `Not_found
@@ -987,9 +1010,16 @@ let handle_keeper_get_subroutes state req request reqd =
 
        Consumed by [dashboard/src/components/fleet-fsm-matrix.ts]
        (LT-16b, upcoming). *)
+    let cache = Server_dashboard_read_model_cache.global () in
+    let cache_key = Server_dashboard_read_model_cache.Fleet_composite in
     let json =
-      Server_dashboard_http.dashboard_fleet_composite_json
-        ~config:(Mcp_server.workspace_config state) ()
+      Server_dashboard_read_model_cache.get_or_compute
+        cache
+        cache_key
+        ~ttl_s:Server_dashboard_http_core_cache.standard_cache_ttl_s
+        ~compute:(fun () ->
+           Server_dashboard_http.dashboard_fleet_composite_json
+             ~config:(Mcp_server.workspace_config state) ())
     in
     Http.Response.json_value ~compress:true ~request:req json reqd
   else if ends_with "/composite" then
@@ -1006,9 +1036,16 @@ let handle_keeper_get_subroutes state req request reqd =
          respond_error ~status:`Not_found reqd
            (Printf.sprintf "keeper %S not registered" name)
        | Some entry ->
+         let cache = Server_dashboard_read_model_cache.global () in
+         let cache_key = Server_dashboard_read_model_cache.Keeper_composite { keeper_name = name } in
          let json =
-           Server_dashboard_http.dashboard_keeper_composite_json
-             ~config:(Mcp_server.workspace_config state) entry
+           Server_dashboard_read_model_cache.get_or_compute
+             cache
+             cache_key
+             ~ttl_s:Server_dashboard_http_core_cache.standard_cache_ttl_s
+             ~compute:(fun () ->
+                Server_dashboard_http.dashboard_keeper_composite_json
+                  ~config:(Mcp_server.workspace_config state) entry)
          in
          Http.Response.json_value ~compress:true ~request:req json reqd)
   else if req_path = prefix ^ "regime" then

@@ -685,7 +685,40 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `GET, "/api/v1/dashboard/execution" ->
           with_h2_public_read h2_reqd (fun state ->
-            let json = dashboard_execution_http_json ~state ~sw ~clock httpun_request in
+            let actor = Server_utils.query_param httpun_request "actor" in
+            let fixture = Server_utils.query_param httpun_request "fixture" in
+            let full = Server_utils.bool_query_param httpun_request "full" ~default:false in
+            let force = Server_utils.bool_query_param httpun_request "force" ~default:false in
+            let cache = Server_dashboard_read_model_cache.global () in
+            let cache_key =
+              Server_dashboard_read_model_cache.Execution
+                { actor; fixture; full; force }
+            in
+            let json =
+              Server_dashboard_read_model_cache.get_or_compute
+                cache
+                cache_key
+                ~ttl_s:Server_dashboard_http_core_cache.standard_cache_ttl_s
+                ~compute:(fun () ->
+                   dashboard_execution_http_json ~state ~sw ~clock httpun_request)
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/composite" ->
+          (* H2 parity alias for the fleet-wide composite snapshot. The canonical
+             keeper API route is [/api/v1/keepers/composite]. *)
+          with_h2_public_read h2_reqd (fun state ->
+            let cache = Server_dashboard_read_model_cache.global () in
+            let cache_key = Server_dashboard_read_model_cache.Fleet_composite in
+            let json =
+              Server_dashboard_read_model_cache.get_or_compute
+                cache
+                cache_key
+                ~ttl_s:Server_dashboard_http_core_cache.standard_cache_ttl_s
+                ~compute:(fun () ->
+                   dashboard_fleet_composite_json
+                     ~config:(Mcp_server.workspace_config state) ())
+            in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/execution-trust" ->

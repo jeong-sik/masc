@@ -1244,6 +1244,13 @@
  (modules test_server_dashboard_composite_attention)
  (libraries masc_test_deps))
 
+; Dashboard read-model cache unit tests.
+
+(test
+ (name test_server_dashboard_read_model_cache)
+ (modules test_server_dashboard_read_model_cache)
+ (libraries alcotest masc masc_server masc_test_deps))
+
 ; Typed JSON field extraction helper (RFC-0142 Phase 1).
 
 ; Memory-OS "brain" end-to-end organ-composition harness. Runs the real

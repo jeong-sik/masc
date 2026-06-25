@@ -7,7 +7,7 @@ let cache_tests =
       `Quick,
       fun () ->
         let cache = Server_dashboard_read_model_cache.create () in
-        let key = Server_dashboard_read_model_cache.Runtime_probe { force = false } in
+        let key = Server_dashboard_read_model_cache.Runtime_probe in
         let entry =
           { Server_dashboard_read_model_cache.generated_at = Time_compat.now ()
           ; json = dummy_json "probe"
@@ -23,7 +23,7 @@ let cache_tests =
       fun () ->
         let cache = Server_dashboard_read_model_cache.create () in
         let key = Server_dashboard_read_model_cache.Execution
-                    { actor = None; fixture = None; full = false; force = false }
+                    { actor = None; fixture = None; full = false }
         in
         let entry =
           { Server_dashboard_read_model_cache.generated_at = Time_compat.now ()
@@ -70,6 +70,31 @@ let cache_tests =
         let json2 = Server_dashboard_read_model_cache.get_or_compute cache key ~ttl_s:60.0 ~compute in
         check bool "same result" true (json1 = json2);
         check int "compute called once" 1 !calls )
+  ; ( "force refreshes canonical key",
+      `Quick,
+      fun () ->
+        let cache = Server_dashboard_read_model_cache.create () in
+        let key = Server_dashboard_read_model_cache.Fleet_composite in
+        let calls = ref 0 in
+        let compute () =
+          incr calls;
+          dummy_json (Printf.sprintf "fleet-%d" !calls)
+        in
+        let json1 =
+          Server_dashboard_read_model_cache.get_or_compute cache key ~ttl_s:60.0
+            ~compute
+        in
+        let json2 =
+          Server_dashboard_read_model_cache.get_or_compute ~force:true cache key
+            ~ttl_s:60.0 ~compute
+        in
+        let json3 =
+          Server_dashboard_read_model_cache.get_or_compute cache key ~ttl_s:60.0
+            ~compute
+        in
+        check bool "force produced new result" false (json1 = json2);
+        check bool "canonical key holds forced result" true (json2 = json3);
+        check int "compute called twice" 2 !calls )
   ; ( "invalidate_by_keeper removes keeper-specific entries",
       `Quick,
       fun () ->
@@ -104,7 +129,7 @@ let cache_tests =
       `Quick,
       fun () ->
         let cache = Server_dashboard_read_model_cache.create () in
-        let key = Server_dashboard_read_model_cache.Runtime_probe { force = false } in
+        let key = Server_dashboard_read_model_cache.Runtime_probe in
         Server_dashboard_read_model_cache.put cache key
           { generated_at = Time_compat.now (); json = dummy_json "x"; source = `On_demand };
         Server_dashboard_read_model_cache.clear cache;

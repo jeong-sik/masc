@@ -329,9 +329,10 @@ let add_routes ~sw ~clock router =
        let force = Server_utils.bool_query_param request "force" ~default:false in
        let handle _state req reqd =
          let cache = Server_dashboard_read_model_cache.global () in
-         let cache_key = Server_dashboard_read_model_cache.Runtime_probe { force } in
+         let cache_key = Server_dashboard_read_model_cache.Runtime_probe in
          let json =
            Server_dashboard_read_model_cache.get_or_compute
+             ~force
              cache
              cache_key
              ~ttl_s:Server_dashboard_http_core_cache.live_cache_ttl_s
@@ -668,10 +669,11 @@ let add_routes ~sw ~clock router =
          let cache = Server_dashboard_read_model_cache.global () in
          let cache_key =
            Server_dashboard_read_model_cache.Execution
-             { actor; fixture; full; force }
+             { actor; fixture; full }
          in
          let json =
            Server_dashboard_read_model_cache.get_or_compute
+             ~force
              cache
              cache_key
              ~ttl_s:Server_dashboard_http_core_cache.standard_cache_ttl_s

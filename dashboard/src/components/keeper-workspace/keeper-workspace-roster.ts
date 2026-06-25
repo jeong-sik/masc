@@ -110,7 +110,7 @@ type RosterItem =
  *  weight matters. Below this we keep the identical grouped DOM structure and
  *  rely on content-visibility:auto for cheap off-screen skipping. */
 const WINDOW_AT = 60
-const ROSTER_ROW_ESTIMATED_HEIGHT = 108
+const ROSTER_ROW_ESTIMATED_HEIGHT = 92
 
 /** Blocked tasks + explicit attention flag → the roster attention badge. */
 function attentionCount(keeper: Keeper): number {
@@ -558,6 +558,7 @@ export function KeeperWorkspaceRoster({
   mini?: boolean
 }): VNode {
   const [query, setQuery] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
   const [filter, setFilter] = useState<RosterFilter>('all')
   const [sort, setSort] = useState<RosterSort>('status')
   const [menu, setMenu] = useState<RosterMenuState>(null)
@@ -690,7 +691,7 @@ export function KeeperWorkspaceRoster({
   // Single source for the group header so the windowed and non-windowed render
   // paths can't drift (they previously inlined the header markup separately).
   function renderHeader(item: Extract<RosterItem, { type: 'header' }>): VNode {
-    return html`<div class="kw-roster-group v2-monitoring-row" key=${`h:${item.bucket}`}><${StatusDot} tone=${GROUP_BUCKET_TONE[item.bucket]} /><span class="kw-roster-group-label">${item.label}</span><span class="kw-roster-group-n">${item.count}</span></div>`
+    return html`<div class="kw-roster-group roster-group v2-monitoring-row" title=${item.label} key=${`h:${item.bucket}`}><${StatusDot} tone=${GROUP_BUCKET_TONE[item.bucket]} /><span class="kw-roster-group-label">${item.label}</span><span class="kw-roster-group-n">${item.count}</span></div>`
   }
 
   function renderItem(item: RosterItem): VNode {
@@ -705,15 +706,24 @@ export function KeeperWorkspaceRoster({
   }
 
   return html`
-    <aside class=${`kw-roster${mini ? ' mini' : ''} v2-monitoring-surface`} aria-label="키퍼 로스터">
+    <aside class=${`kw-roster roster${mini ? ' mini' : ''} v2-monitoring-surface`} aria-label="키퍼 로스터">
       ${mini
         ? html`<div class="kw-roster-mini-list">
             ${miniRows.map(k => html`<${MiniRosterRow} key=${k.name} keeper=${k} active=${k.name === activeName} onSelect=${select} onMenu=${openMenu} />`)}
           </div>`
         : html`
           <div class="kw-roster-head v2-monitoring-toolbar">
+            <button
+              type="button"
+              class="rfilter-icon v2-monitoring-action"
+              aria-label="키퍼 검색"
+              aria-expanded=${searchOpen ? 'true' : 'false'}
+              onClick=${() => setSearchOpen(open => !open)}
+            >
+              ⌕
+            </button>
             <input
-              class="kw-roster-search"
+              class=${`kw-roster-search${searchOpen ? ' roster-search' : ''}`}
               type="text"
               placeholder="이름 · 스코프 검색…"
               aria-label="키퍼 검색"

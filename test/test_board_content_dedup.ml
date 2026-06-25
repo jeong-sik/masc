@@ -226,6 +226,8 @@ let test_comment_parent_is_part_of_dedup_key () =
 
 let keeper_board_meta = `Assoc [ "source", `String "keeper_board_post" ]
 
+(* Exercise the public create path so status-rollup classification stays tied to
+   persisted board outcomes, not a private classifier shortcut. *)
 let create_keeper_status_outcome_or_fail store ~author ~content =
   match
     Board.create_post_with_outcome

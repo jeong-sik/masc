@@ -149,6 +149,10 @@ let compute_hebbian ~base_path ~now () =
         ~keeper_id:Keeper_memory_os_types.shared_store_id
       |> List.filter (Keeper_memory_os_types.fact_is_current ~now)
     in
+    (* [last_consolidation] is the most recent [last_verified_at] of any
+       current shared fact, not the timestamp of the last consolidator run.
+       The name matches the dashboard schema; the value is fact-derived because
+       the shared store is the SSOT for cross-keeper corroboration. *)
     let last_consolidation =
       shared_facts
       |> List.filter_map (fun (f : Keeper_memory_os_types.fact) -> f.last_verified_at)
@@ -157,12 +161,18 @@ let compute_hebbian ~base_path ~now () =
     let synapse_counts : ((string * string), int) Hashtbl.t = Hashtbl.create 16 in
     shared_facts
     |> List.iter (fun (fact : Keeper_memory_os_types.fact) ->
-      let keepers = fact.observed_by in
-      let n = List.length keepers in
+      (* Dedupe within a single fact so a duplicate observer cannot inflate the
+         synapse count, and convert to an array for O(1) pairwise indexing. *)
+      let keepers =
+        fact.observed_by
+        |> List.sort_uniq String.compare
+        |> Array.of_list
+      in
+      let n = Array.length keepers in
       for i = 0 to n - 1 do
         for j = i + 1 to n - 1 do
-          let a = List.nth keepers i in
-          let b = List.nth keepers j in
+          let a = keepers.(i) in
+          let b = keepers.(j) in
           let key = if String.compare a b <= 0 then a, b else b, a in
           let prev = Option.value (Hashtbl.find_opt synapse_counts key) ~default:0 in
           Hashtbl.replace synapse_counts key (prev + 1)

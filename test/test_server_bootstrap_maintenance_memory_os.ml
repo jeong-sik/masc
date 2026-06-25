@@ -127,6 +127,27 @@ let test_accumulate_consolidate_recall () =
             (String_util.contains_substring block "deploys via blue-green")))))
 ;;
 
+let test_skips_when_too_few () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      with_prompts (fun () ->
+        with_temp_keepers (fun () ->
+          let keeper_id = "keeper-1" in
+          (* A single fact is below the consolidation threshold. *)
+          Io.append_fact ~keeper_id (fact "only one fact");
+          let before_count = List.length (Io.read_facts_all ~keeper_id) in
+          Alcotest.(check int) "single fact accumulated" 1 before_count;
+          Server_bootstrap_maintenance.run_memory_os_consolidation_tick
+            ~complete:(fake_complete "{\"groups\":[],\"drop_indices\":[]}")
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~provider_cfg:(provider_cfg ())
+            ~now
+            ();
+          let after_count = List.length (Io.read_facts_all ~keeper_id) in
+          Alcotest.(check int) "store unchanged when too few facts" 1 after_count))))
+;;
+
 let () =
   Alcotest.run
     "server_bootstrap_maintenance_memory_os"
@@ -135,6 +156,10 @@ let () =
             "accumulate then consolidate then recall"
             `Quick
             test_accumulate_consolidate_recall
+        ; Alcotest.test_case
+            "skips when too few facts"
+            `Quick
+            test_skips_when_too_few
         ] )
     ]
 ;;

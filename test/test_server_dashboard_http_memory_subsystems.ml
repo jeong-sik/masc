@@ -334,6 +334,54 @@ let test_http_json_hebbian_derives_from_shared_facts () =
          check bool "weight is positive" true (Json.(synapse |> member "weight" |> to_number) > 0.0)))
 ;;
 
+let test_http_json_hebbian_empty_without_shared_facts () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+       let config = Workspace_utils.default_config dir in
+       let json =
+         Memory_subsystems.dashboard_memory_subsystems_http_json
+           ~config
+           ~include_memory_entries:false
+           (request "/dashboard/memory-subsystems?limit=100")
+       in
+       let hebbian = Json.(json |> member "hebbian") in
+       check int "empty synapses" 0 Json.(hebbian |> member "synapses" |> to_list |> List.length);
+       check
+         (float 0.0001)
+         "last_consolidation zero when no shared facts"
+         0.0
+         Json.(hebbian |> member "last_consolidation" |> to_number))
+;;
+
+let test_http_json_hebbian_dedupes_duplicate_observers () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+       let config = Workspace_utils.default_config dir in
+       let keepers_dir =
+         Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+       in
+       Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
+         (* A duplicate observer in a single fact must not inflate the edge. *)
+         Memory_io.append_fact
+           ~keeper_id:Types.shared_store_id
+           (shared_fact
+              ~observed_by:[ "keeper-a"; "keeper-a"; "keeper-b" ]
+              ~last_verified_at:10.0
+              "Shared operational fact");
+         let json =
+           Memory_subsystems.dashboard_memory_subsystems_http_json
+             ~config
+             ~include_memory_entries:false
+             (request "/dashboard/memory-subsystems?limit=100")
+         in
+         let synapses = Json.(json |> member "hebbian" |> member "synapses" |> to_list) in
+         check int "one synapse after dedupe" 1 (List.length synapses)))
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   Alcotest.run
@@ -365,6 +413,14 @@ let () =
             "hebbian derives from shared facts"
             `Quick
             test_http_json_hebbian_derives_from_shared_facts
+        ; test_case
+            "hebbian empty without shared facts"
+            `Quick
+            test_http_json_hebbian_empty_without_shared_facts
+        ; test_case
+            "hebbian dedupes duplicate observers"
+            `Quick
+            test_http_json_hebbian_dedupes_duplicate_observers
         ; test_case
             "surfaces draft skill candidates"
             `Quick

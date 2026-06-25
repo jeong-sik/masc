@@ -8,28 +8,30 @@ let log_server_fiber_crash =
 
 (* Resolve the provider config for the Memory OS per-keeper consolidation pass.
    Env var takes precedence; otherwise inherit the librarian runtime so the
-   consolidation LLM uses the same JSON-capable model the librarian uses. *)
+   consolidation LLM uses the same JSON-capable model the librarian uses.
+   An explicit but unknown runtime ID is logged and falls back to the default
+   so typos in operator config are not silently masked. *)
 let provider_cfg_for_memory_os_consolidation () =
+  let default_cfg () =
+    Runtime.get_default_runtime ()
+    |> Option.map (fun rt -> rt.Runtime.provider_config)
+  in
   let runtime_id =
     match Keeper_memory_bank_env.memory_env_opt "MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID" with
-    | Some id -> id
-    | None ->
-      (match Runtime.librarian_runtime_id () with
-       | Some id -> id
-       | None ->
-         (match Runtime.get_default_runtime () with
-          | Some rt -> rt.Runtime.id
-          | None -> ""))
+    | Some id -> Some id
+    | None -> Runtime.librarian_runtime_id ()
   in
-  if String.equal runtime_id ""
-  then None
-  else
-    (match Runtime.get_runtime_by_id runtime_id with
+  match runtime_id with
+  | None -> default_cfg ()
+  | Some id ->
+    (match Runtime.get_runtime_by_id id with
      | Some rt -> Some rt.Runtime.provider_config
      | None ->
-       (match Runtime.get_default_runtime () with
-        | Some rt -> Some rt.Runtime.provider_config
-        | None -> None))
+       Log.Server.warn
+         "memory_os_keeper_consolidation: requested runtime %s not found; \
+          falling back to default"
+         id;
+       default_cfg ())
 ;;
 
 (* Run one consolidation pass over every keeper that currently has a fact store.
@@ -59,28 +61,28 @@ let run_memory_os_consolidation_tick
          with
          | Keeper_memory_os_consolidation_runtime.Consolidated { before; after } ->
            Log.Server.info
-             "memory_os_consolidation: keeper=%s before=%d after=%d"
+             "memory_os_keeper_consolidation: keeper=%s before=%d after=%d"
              keeper_id
              before
              after
          | Skipped_too_few n ->
            Log.Server.info
-             "memory_os_consolidation: keeper=%s skipped_too_few=%d"
+             "memory_os_keeper_consolidation: keeper=%s skipped_too_few=%d"
              keeper_id
              n
          | Transport_failed msg ->
            Log.Server.warn
-             "memory_os_consolidation: keeper=%s transport_failed: %s"
+             "memory_os_keeper_consolidation: keeper=%s transport_failed: %s"
              keeper_id
              msg
          | Unparseable msg ->
            Log.Server.warn
-             "memory_os_consolidation: keeper=%s unparseable: %s"
+             "memory_os_keeper_consolidation: keeper=%s unparseable: %s"
              keeper_id
              msg
          | Snapshot_changed { before; current } ->
            Log.Server.info
-             "memory_os_consolidation: keeper=%s snapshot_changed before=%d current=%d"
+             "memory_os_keeper_consolidation: keeper=%s snapshot_changed before=%d current=%d"
              keeper_id
              before
              current
@@ -88,7 +90,7 @@ let run_memory_os_consolidation_tick
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
          Log.Server.warn
-           "memory_os_consolidation: keeper=%s tick crashed: %s"
+           "memory_os_keeper_consolidation: keeper=%s tick crashed: %s"
            keeper_id
            (Printexc.to_string exn))
     (Keeper_memory_os_io.list_fact_store_keeper_ids ())
@@ -376,7 +378,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   then
     fork_logged_fiber
       ~sw
-      ~on_error:(log_server_fiber_crash "memory_os_consolidation")
+      ~on_error:(log_server_fiber_crash "memory_os_keeper_consolidation")
       (fun () ->
         (* Coarser than Tier-2 consolidation (300s): this pass calls the LLM,
            so a 10-minute cadence bounds cost while still shrinking stores. *)
@@ -385,7 +387,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
           (match provider_cfg_for_memory_os_consolidation () with
            | None ->
              Log.Server.warn
-               "memory_os_consolidation: no runtime configured; skipping tick"
+               "memory_os_keeper_consolidation: no runtime configured; skipping tick"
            | Some provider_cfg ->
              run_memory_os_consolidation_tick
                ~sw

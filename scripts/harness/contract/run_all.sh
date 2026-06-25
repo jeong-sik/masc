@@ -92,7 +92,7 @@ run_contract() {
   local total="$2"
   local script_name="$3"
   echo "[${step}/${total}] ${script_name}"
-  if ! (cd "$ROOT_DIR" && MCP_SESSION_ID="" MCP_URL="$MCP_URL" BASE_PATH="$BASE_PATH" bash "scripts/harness/contract/${script_name}"); then
+  if ! (cd "$ROOT_DIR" && MCP_URL="$MCP_URL" BASE_PATH="$BASE_PATH" bash "scripts/harness/contract/${script_name}"); then
     echo "FAIL: ${script_name}" >&2
     harness_print_log_tail "$LOG_FILE"
     exit 1

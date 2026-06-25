@@ -122,7 +122,6 @@ harness_seed_server_config() {
     "$config_dir/keepers" \
     "$config_dir/personas" \
     "$config_dir/prompts"
-  mkdir -p "${base_path%/}/.masc/auth"
 
   if [[ ! -f "$config_dir/tool_policy.toml" ]]; then
     if [[ -f "$repo_root/config/tool_policy.toml" ]]; then
@@ -156,14 +155,6 @@ streaming = true
 [transport_harness.smoke]
 is-default = true
 max-concurrent = 1
-EOF
-  fi
-
-  if [[ ! -f "${base_path%/}/.masc/auth/config.json" ]]; then
-    # Contract harnesses exercise public loopback MCP semantics. Fresh bases
-    # otherwise inherit default_auth_config (enabled + require_token).
-    cat >"${base_path%/}/.masc/auth/config.json" <<'EOF'
-{"enabled": false, "workspace_secret_hash": null, "require_token": false, "token_expiry_hours": 24}
 EOF
   fi
 }

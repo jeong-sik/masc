@@ -116,7 +116,7 @@
 (executable
  (name public_tool_manifest)
  (modules public_tool_manifest)
- (libraries masc masc.masc_types masc.masc_tool_dispatch yojson))
+ (libraries masc masc.masc_tool_dispatch yojson))
 
 ;; runtime_materialize (RFC-0058 §9 Phase 9.3): retired. The CLI's only
 ;; purpose was to pre-write the old derived JSON artifact.

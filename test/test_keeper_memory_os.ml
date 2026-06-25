@@ -662,6 +662,13 @@ let with_memory_os_env name value f =
   Fun.protect ~finally:(fun () -> restore_env name old) f
 ;;
 
+let with_captured_console_lines f =
+  Console_sink.For_testing.reset ();
+  let lines = ref [] in
+  Console_sink.For_testing.set_writer (Some (fun l -> lines := l :: !lines));
+  Fun.protect ~finally:Console_sink.For_testing.reset (fun () -> f lines)
+;;
+
 let test_memory_os_bool_env_accepts_enabled_disabled () =
   with_memory_os_env "MASC_KEEPER_MEMORY_OS_RECALL" "disabled" (fun () ->
     Alcotest.(check bool)
@@ -696,36 +703,60 @@ let test_memory_os_bool_env_accepts_enabled_disabled () =
 ;;
 
 let test_memory_os_env_invalid_values_fail_closed_or_default () =
-  with_memory_os_env "MASC_KEEPER_MEMORY_OS_RECALL" "maybe" (fun () ->
+  let check_log_contains lines substring =
     Alcotest.(check bool)
-      "invalid default-on recall keeps default"
+      (Printf.sprintf "log warns about %S" substring)
       true
-      (Env_config.KeeperMemoryOs.recall_enabled ()));
-  with_memory_os_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN" "maybe" (fun () ->
-    Alcotest.(check bool)
-      "invalid default-on librarian keeps default"
-      true
-      (Env_config.KeeperMemoryOs.librarian_enabled ()));
-  with_memory_os_env "MASC_KEEPER_MEMORY_OS_GC" "maybe" (fun () ->
-    Alcotest.(check bool)
-      "invalid GC flag fail-closes"
-      false
-      (Env_config.KeeperMemoryOs.gc_enabled ()));
-  with_memory_os_env "MASC_KEEPER_MEMORY_OS_CONSOLIDATION" "maybe" (fun () ->
-    Alcotest.(check bool)
-      "invalid consolidation flag fail-closes"
-      false
-      (Env_config.KeeperMemoryOs.consolidation_enabled ()));
-  with_memory_os_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES" "bogus" (fun () ->
-    Alcotest.(check int)
-      "invalid max messages falls back"
-      24
-      (Env_config.KeeperMemoryOs.librarian_max_messages ()));
-  with_memory_os_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC" "nan" (fun () ->
-    Alcotest.(check (float 0.001))
-      "invalid timeout falls back"
-      600.0
-      (Env_config.KeeperMemoryOs.librarian_timeout_sec ()))
+      (List.exists (contains substring) !lines)
+  in
+  with_captured_console_lines (fun lines ->
+    with_memory_os_env "MASC_KEEPER_MEMORY_OS_RECALL" "maybe" (fun () ->
+      Alcotest.(check bool)
+        "invalid default-on recall fail-closes to false"
+        false
+        (Env_config.KeeperMemoryOs.recall_enabled ()));
+    check_log_contains lines "MASC_KEEPER_MEMORY_OS_RECALL";
+    check_log_contains lines "fail-closed false");
+  with_captured_console_lines (fun lines ->
+    with_memory_os_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN" "maybe" (fun () ->
+      Alcotest.(check bool)
+        "invalid default-on librarian fail-closes to false"
+        false
+        (Env_config.KeeperMemoryOs.librarian_enabled ()));
+    check_log_contains lines "MASC_KEEPER_MEMORY_OS_LIBRARIAN";
+    check_log_contains lines "fail-closed false");
+  with_captured_console_lines (fun lines ->
+    with_memory_os_env "MASC_KEEPER_MEMORY_OS_GC" "maybe" (fun () ->
+      Alcotest.(check bool)
+        "invalid GC flag fail-closes"
+        false
+        (Env_config.KeeperMemoryOs.gc_enabled ()));
+    check_log_contains lines "MASC_KEEPER_MEMORY_OS_GC";
+    check_log_contains lines "fail-closed false");
+  with_captured_console_lines (fun lines ->
+    with_memory_os_env "MASC_KEEPER_MEMORY_OS_CONSOLIDATION" "maybe" (fun () ->
+      Alcotest.(check bool)
+        "invalid consolidation flag fail-closes"
+        false
+        (Env_config.KeeperMemoryOs.consolidation_enabled ()));
+    check_log_contains lines "MASC_KEEPER_MEMORY_OS_CONSOLIDATION";
+    check_log_contains lines "fail-closed false");
+  with_captured_console_lines (fun lines ->
+    with_memory_os_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES" "bogus" (fun () ->
+      Alcotest.(check int)
+        "invalid max messages falls back"
+        24
+        (Env_config.KeeperMemoryOs.librarian_max_messages ()));
+    check_log_contains lines "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES";
+    check_log_contains lines "using default");
+  with_captured_console_lines (fun lines ->
+    with_memory_os_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC" "nan" (fun () ->
+      Alcotest.(check (float 0.001))
+        "invalid timeout falls back"
+        600.0
+        (Env_config.KeeperMemoryOs.librarian_timeout_sec ()));
+    check_log_contains lines "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC";
+    check_log_contains lines "using default")
 ;;
 
 let test_librarian_timeout_override_env () =

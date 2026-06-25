@@ -202,24 +202,28 @@ module KeeperMemoryOs = struct
     if String.equal value "" then None else Some value
   ;;
 
-  (** Memory OS recall prompt injection kill switch. Default: true. Disable
-      with an explicit false token ([0], [false], [no], [off], [disabled]);
-      invalid values warn and preserve the default-on behavior so a typo does
-      not silently remove model recall context.
+  (** Memory OS recall prompt injection kill switch. Default: true; invalid
+      values fail closed to false so malformed operator input cannot leave the
+      kill switch accidentally enabled.
       @category Policies
       @ops_class operator *)
   let recall_enabled () =
-    get_bool_logged "MASC_KEEPER_MEMORY_OS_RECALL" ~default:true
+    get_bool_logged
+      ~invalid:Env_config_memory.Fail_closed
+      "MASC_KEEPER_MEMORY_OS_RECALL"
+      ~default:true
   ;;
 
-  (** Memory OS librarian post-turn extraction kill switch. Default: true.
-      Disable with an explicit false token ([0], [false], [no], [off],
-      [disabled]); invalid values warn and preserve the default-on behavior so
-      a typo does not silently stop post-turn memory extraction.
+  (** Memory OS librarian post-turn extraction kill switch. Default: true;
+      invalid values fail closed to false so malformed operator input cannot
+      leave the kill switch accidentally enabled.
       @category Policies
       @ops_class operator *)
   let librarian_enabled () =
-    get_bool_logged "MASC_KEEPER_MEMORY_OS_LIBRARIAN" ~default:true
+    get_bool_logged
+      ~invalid:Env_config_memory.Fail_closed
+      "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
+      ~default:true
   ;;
 
   (** Turns between librarian extraction attempts per keeper. Default: 3,

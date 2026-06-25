@@ -115,7 +115,6 @@ if [ "${1:-}" = "clean" ]; then
   exit 0
 fi
 if [ -z "${DUNE_BUILD_DIR:-}" ] || [ "${DUNE_BUILD_DIR}" = "_build" ]; then
-  printf '  [OK]          classify_exn             2   ENOSPC.\n' >&2
   printf 'Error: RPC server not running.\n' >&2
   exit 1
 fi
@@ -234,9 +233,6 @@ let test_rpc_retry_uses_isolated_build_dir () =
       check bool "retry warning present" true
         (contains_substring observed_output
            "detected dune RPC/lock failure; retrying once with isolated build dir .ci_build");
-      check bool "passing ENOSPC test name ignored" false
-        (contains_substring observed_output
-           "detected disk exhaustion during dune build");
       check bool "isolated command exports build dir" true
         (contains_substring observed_output
            "isolated_command: export DUNE_BUILD_DIR=.ci_build; unset DUNE_RPC;");

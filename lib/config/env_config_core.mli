@@ -151,9 +151,7 @@ val base_path : unit -> string
 val sb_path_opt : unit -> string option
 val sb_path_result : unit -> (string, string) result
 val sb_path : unit -> string
-val storage_type_env_key : string
 val orchestrator_enabled_env_key : string
-val storage_type : unit -> string
 
 (** {1 Config / personas / data dir} *)
 

@@ -274,7 +274,6 @@ harness_seed_server_config "$REPO_ROOT" "$BASE_PATH" >/dev/null 2>&1 || true
 (
   export MASC_BASE_PATH="$BASE_PATH"
   export MASC_BASE_PATH_INPUT="$BASE_PATH"
-  export MASC_STORAGE_TYPE="filesystem"
   export MASC_KEEPER_BOOTSTRAP_ENABLED="true"
   export MASC_ORCHESTRATOR_ENABLED="1"
   export MASC_KEEPER_HEARTBEAT_INTERVAL_SEC="$HEARTBEAT_SEC"

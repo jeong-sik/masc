@@ -328,21 +328,13 @@ let test_grpc_default_on_enablement () =
 ;;
 
 let test_grpc_server_registers_health_service () =
-  let was_storage = Sys.getenv_opt "MASC_STORAGE_TYPE" in
-  Unix.putenv "MASC_STORAGE_TYPE" "filesystem";
-  Fun.protect
-    ~finally:(fun () ->
-      match was_storage with
-      | Some value -> Unix.putenv "MASC_STORAGE_TYPE" value
-      | None -> Unix.putenv "MASC_STORAGE_TYPE" "")
-    (fun () ->
-       Eio_main.run
-       @@ fun env ->
-       Fs_compat.set_fs (Eio.Stdenv.fs env);
-       with_temp_dir "masc-grpc-health" (fun dir ->
-         let workspace_config = Workspace_utils.default_config dir in
-         let server =
-           Masc_grpc_server.create_server
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_temp_dir "masc-grpc-health" (fun dir ->
+      let workspace_config = Workspace_utils.default_config dir in
+      let server =
+        Masc_grpc_server.create_server
              ~port:Masc_grpc_server.default_port
              ~workspace_config
              ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
@@ -365,7 +357,7 @@ let test_grpc_server_registers_health_service () =
          Alcotest.(check bool)
            "health service registered"
            true
-           (List.mem "grpc.health.v1.Health" services)))
+           (List.mem "grpc.health.v1.Health" services))
 ;;
 
 let test_get_status_projects_backlog_tasks () =

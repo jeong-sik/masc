@@ -20,15 +20,6 @@ type error =
 type 'a result = ('a, error) Stdlib.result
 
 (* ============================================ *)
-(* Backend Type                                 *)
-(* ============================================ *)
-
-type backend_type =
-  | Memory
-  | FileSystem
-[@@deriving show, eq]
-
-(* ============================================ *)
 (* Health Result                                *)
 (* ============================================ *)
 
@@ -42,7 +33,6 @@ type health_result = {
 (* ============================================ *)
 
 type config = {
-  backend_type: backend_type;
   base_path: string;
   node_id: string;
   cluster_name: string;
@@ -58,28 +48,11 @@ let generate_node_id () =
   Printf.sprintf "%s-%d-%04x" hostname pid hash
 
 let default_config = {
-  backend_type = FileSystem;
   base_path = Common.masc_dirname;
   node_id = generate_node_id ();
   cluster_name = "default";
   pubsub_max_messages = pubsub_max_messages;
 }
-
-(* ============================================ *)
-(* Status                                        *)
-(* ============================================ *)
-
-let get_status config : Yojson.Safe.t =
-  let backend_str = match config.backend_type with
-    | Memory -> "memory"
-    | FileSystem -> "filesystem"
-  in
-  `Assoc [
-    ("backend_type", `String backend_str);
-    ("base_path", `String config.base_path);
-    ("node_id", `String config.node_id);
-    ("cluster_name", `String config.cluster_name);
-  ]
 
 (* ============================================ *)
 (* Safety Utilities                             *)

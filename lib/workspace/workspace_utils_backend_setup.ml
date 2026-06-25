@@ -222,37 +222,6 @@ let env_opt name =
         Some value
   | _ -> None
 
-(** Auto-detect best backend based on environment variables.
-    MASC defaults to the local filesystem unless the caller explicitly
-    selects another backend via MASC_STORAGE_TYPE. *)
-let auto_detect_backend () =
-  Log.Backend.info
-    "Auto-detect disabled: defaulting to FileSystem backend \
-     unless MASC_STORAGE_TYPE is set";
-  "filesystem"
-
-(** Storage type from environment variable.
-    Defaults to filesystem when MASC_STORAGE_TYPE is not set.
-
-    Unknown / typo'd values (e.g. "postgres", "redis", "memoryy") used to
-    silently pass through and the downstream wildcard in [backend_config_for]
-    collapsed them into [FileSystem] with no log trace. Now an unknown value
-    is warned and explicitly normalised to "filesystem", so the operator sees
-    the drift. See #8737 / #8605. *)
-let storage_type_from_env () =
-  match env_opt Env_config_core.storage_type_env_key with
-  | Some raw ->
-      let value = String.lowercase_ascii (String.trim raw) in
-      (match value with
-       | "filesystem" | "file" | "jsonl" | "auto" -> "filesystem"
-       | "memory" -> "memory"
-       | other ->
-           Log.Backend.warn
-             "MASC_STORAGE_TYPE=%S not recognised (known: filesystem|file|jsonl|auto|memory) -> using filesystem; see #8737"
-             other;
-           "filesystem")
-  | None -> auto_detect_backend ()
-
 (* ============================================ *)
 (* Backend creation                             *)
 (* ============================================ *)
@@ -274,24 +243,10 @@ let sanitize_namespace_segment name =
   if sanitized = "" then "default" else sanitized
 
 let backend_config_for base_path =
-  let storage_type = storage_type_from_env () in
   let cluster_name =
     match env_opt "MASC_CLUSTER_NAME" with
     | Some name -> name
     | None -> "default"
-  in
-  (* Exhaustive over the values that [storage_type_from_env] now produces
-     ("memory" | "filesystem"). The wildcard branch is defensive; if it ever
-     fires the upstream sanitiser regressed and we want to know. *)
-  let backend_type =
-    match storage_type with
-    | "memory" -> Backend_types.Memory
-    | "filesystem" -> Backend_types.FileSystem
-    | other ->
-        Log.Backend.warn
-          "backend_config_for: storage_type=%S bypassed sanitiser -> defaulting to FileSystem; see #8737"
-          other;
-        Backend_types.FileSystem
   in
   let masc_root = Common.masc_dir_from_base_path ~base_path in
   let cluster_segment =
@@ -305,7 +260,6 @@ let backend_config_for base_path =
     | Some seg -> Filename.concat (Filename.concat masc_root "clusters") seg
   in
   {
-    Backend_types.backend_type;
     Backend_types.base_path = backend_base_path;
     Backend_types.cluster_name;
     Backend_types.node_id = Backend_types.generate_node_id ();
@@ -324,27 +278,23 @@ let create_backend cfg =
     with
     | Stdlib.Effect.Unhandled _ -> false
   in
-  match cfg.Backend_types.backend_type with
-  | Backend_types.Memory ->
-      (* Backend.Memory now has Effect.Unhandled/Poisoned fallback
-         built in, so it works in both Eio and non-Eio contexts.
-         get_or_create shares state across configs for the same path. *)
-      Ok (Memory (Backend.Memory.get_or_create ~base_path:cfg.cluster_name))
-  | Backend_types.FileSystem ->
-      (match Fs_compat.get_fs_opt () with
-       | Some fs when fs_usable fs ->
-           Ok (FileSystem (Backend.FileSystem.create ~fs cfg))
-       | Some _fs ->
-           (* Tests sometimes inherit a stale Fs_compat handle from a previous
-              Eio_main.run. Using it outside an active Eio scheduler explodes
-              with Effect.Unhandled, so prefer the shared Memory fallback. *)
-           filesystem_fallback
-             "Stale Eio fs context for FileSystem backend;"
-       | None ->
-           (* No Eio fs context available (e.g., test without Fs_compat.set_fs).
-              Fall back to shared Memory backend for the same base path. *)
-           filesystem_fallback
-             "No Eio fs context for FileSystem backend;")
+  match Fs_compat.get_fs_opt () with
+  | Some fs when fs_usable fs ->
+      Ok (FileSystem (Backend.FileSystem.create ~fs cfg))
+  | Some _fs ->
+      (* Tests sometimes inherit a stale Fs_compat handle from a previous
+         Eio_main.run. Using it outside an active Eio scheduler explodes
+         with Effect.Unhandled, so prefer the shared Memory fallback. *)
+      filesystem_fallback "Stale Eio fs context for FileSystem backend;"
+  | None ->
+      (* No Eio fs context available (e.g., test without Fs_compat.set_fs).
+         Fall back to shared Memory backend for the same base path. *)
+      filesystem_fallback "No Eio fs context for FileSystem backend;"
+
+let backend_name_of_storage = function
+  | Memory _ -> "Memory"
+  | FileSystem _ -> "FileSystem"
+
 (* #10919: per-call Backend init was producing 1745 inits / 2 days
    (~83 inits per server lifetime against an expected 1) plus 3490
    INFO log lines.  Hot callers — [Workspace.default_config] from every
@@ -395,27 +345,16 @@ let build_default_config base_path =
      per-base_path memoization patch (root fix for the per-call
      factory pattern itself) is left for a follow-up since it needs
      concurrency-safe state and broader test coverage. *)
-  Log.Backend.debug "MASC Backend: type=%s"
-    (Backend_types.show_backend_type backend_config.backend_type);
+  Log.Backend.debug "MASC Backend: filesystem";
   let backend =
     match create_backend backend_config with
     | Ok backend ->
-        Log.Backend.debug "Backend initialized: %s"
-          (match backend with
-           | Memory _ -> "Memory"
-           | FileSystem _ -> "FileSystem");
+        Log.Backend.debug "Backend initialized: %s" (backend_name_of_storage backend);
         backend
     | Error e ->
-        Log.Backend.warn "Backend init failed (%s). Falling back to filesystem."
+        Log.Backend.warn "Backend init failed (%s). Falling back to Memory."
           (Backend_types.show_error e);
-        let fallback_cfg =
-          { backend_config with Backend_types.backend_type = Backend_types.FileSystem }
-        in
-        (match create_backend fallback_cfg with
-         | Ok fb -> fb
-         | Error _ ->
-             (* Final fallback: shared in-memory to keep server alive *)
-             Memory (Backend.Memory.get_or_create ~base_path:backend_config.cluster_name))
+        Memory (Backend.Memory.get_or_create ~base_path:backend_config.cluster_name)
   in
   {
     base_path = resolved_path;  (* Use resolved path (git root for worktrees) *)
@@ -444,28 +383,17 @@ let default_config_eio ~sw ?(on_backend_ready = fun _backend -> ()) base_path =
   let backend_config = backend_config_for resolved_path in
   (* #10919: same noise pattern as [default_config]; demote success
      path to DEBUG.  Failure / fallback paths below stay at WARN. *)
-  Log.Backend.debug "MASC Backend: type=%s"
-    (Backend_types.show_backend_type backend_config.backend_type);
+  Log.Backend.debug "MASC Backend: filesystem";
   let backend =
     match create_backend backend_config with
     | Ok backend ->
-        Log.Backend.debug "Backend initialized: %s"
-          (match backend with
-           | Memory _ -> "Memory"
-           | FileSystem _ -> "FileSystem");
+        Log.Backend.debug "Backend initialized: %s" (backend_name_of_storage backend);
         on_backend_ready backend;
         backend
     | Error e ->
-        Log.Backend.warn "Backend init failed (%s). Falling back to filesystem."
+        Log.Backend.warn "Backend init failed (%s). Falling back to Memory."
           (Backend_types.show_error e);
-        let fallback_cfg =
-          { backend_config with Backend_types.backend_type = Backend_types.FileSystem }
-        in
-        (match create_backend fallback_cfg with
-         | Ok fb -> fb
-         | Error _ ->
-             (* Final fallback: shared in-memory to keep server alive *)
-             Memory (Backend.Memory.get_or_create ~base_path:backend_config.cluster_name))
+        Memory (Backend.Memory.get_or_create ~base_path:backend_config.cluster_name)
   in
   {
     base_path = resolved_path;

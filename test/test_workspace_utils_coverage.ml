@@ -5,7 +5,7 @@
     - config record type
     - parse_gitdir_to_main_root: gitdir line parsing for worktrees
     - env_opt: environment variable helper
-    - storage_type_from_env: storage type detection
+    - backend_config_for: filesystem backend config
 *)
 
 open Alcotest
@@ -26,9 +26,6 @@ let with_env name value f =
 
 let with_envs bindings f =
   List.fold_right (fun (name, value) acc -> fun () -> with_env name value acc) bindings f ()
-
-let storage_env_bindings ?masc_storage_type () =
-  [ ("MASC_STORAGE_TYPE", masc_storage_type) ]
 
 (* ============================================================
    parse_gitdir_to_main_root Tests
@@ -275,15 +272,6 @@ let test_env_opt_home () =
   | None -> ()  (* Some systems might not have HOME *)
 
 (* ============================================================
-   storage_type_from_env Tests
-   ============================================================ *)
-
-let test_storage_type_default () =
-  with_envs (storage_env_bindings ()) (fun () ->
-    let storage_type = Workspace_utils.storage_type_from_env () in
-    check string "defaults to filesystem" "filesystem" storage_type)
-
-(* ============================================================
    storage_backend Type Tests
    ============================================================ *)
 
@@ -432,42 +420,6 @@ let test_sanitize_message_html () =
   check string "html stripped" "&lt;b&gt;bold&lt;/b&gt;" (Workspace_utils.sanitize_message "<b>bold</b>")
 
 (* ============================================================
-   storage_type_from_env Tests (replaces auto_detect_backend)
-   ============================================================ *)
-
-let test_storage_type_defaults_to_filesystem () =
-  with_envs
-    (storage_env_bindings ())
-    (fun () ->
-      check string "defaults to filesystem" "filesystem"
-        (Workspace_utils.storage_type_from_env ()))
-
-let test_storage_type_auto_is_deprecated () =
-  with_envs
-    (storage_env_bindings ~masc_storage_type:"auto" ())
-    (fun () ->
-      check string "auto falls back to filesystem" "filesystem"
-        (Workspace_utils.storage_type_from_env ()))
-
-(* #8737: unknown / typo'd MASC_STORAGE_TYPE values used to silently pass
-   through and then collapse into FileSystem in [backend_config_for] with no
-   log. The sanitiser now normalises any unknown value to "filesystem" (with
-   a Log.Backend.warn surfaced separately) so downstream is exhaustive. *)
-let test_storage_type_unknown_normalised_to_filesystem () =
-  with_envs
-    (storage_env_bindings ~masc_storage_type:"postgres" ())
-    (fun () ->
-      check string "unknown postgres normalised to filesystem" "filesystem"
-        (Workspace_utils.storage_type_from_env ()))
-
-let test_storage_type_typo_normalised_to_filesystem () =
-  with_envs
-    (storage_env_bindings ~masc_storage_type:"memoryy" ())
-    (fun () ->
-      check string "typo memoryy normalised to filesystem" "filesystem"
-        (Workspace_utils.storage_type_from_env ()))
-
-(* ============================================================
    safe_filename Tests
    ============================================================ *)
 
@@ -547,7 +499,6 @@ let test_validate_file_path_angle_bracket_gt () =
 
 let make_test_config ~base_path ~cluster_name : Workspace_utils.config =
   let backend_config : Backend_types.config = {
-    backend_type = Backend_types.Memory;
     base_path;
     node_id = "test-node";
     cluster_name;
@@ -638,9 +589,6 @@ let () =
       test_case "nonexistent" `Quick test_env_opt_nonexistent;
       test_case "home" `Quick test_env_opt_home;
     ];
-    "storage_type_from_env", [
-      test_case "default" `Quick test_storage_type_default;
-    ];
     "storage_backend", [
       test_case "memory variant" `Quick test_storage_backend_memory_variant;
       test_case "filesystem variant" `Quick test_storage_backend_filesystem_variant;
@@ -688,12 +636,6 @@ let () =
     "sanitize_message", [
       test_case "normal" `Quick test_sanitize_message_normal;
       test_case "html" `Quick test_sanitize_message_html;
-    ];
-    "storage_backend_selection", [
-      test_case "defaults to filesystem" `Quick test_storage_type_defaults_to_filesystem;
-      test_case "auto is deprecated" `Quick test_storage_type_auto_is_deprecated;
-      test_case "unknown normalised to filesystem (#8737)" `Quick test_storage_type_unknown_normalised_to_filesystem;
-      test_case "typo normalised to filesystem (#8737)" `Quick test_storage_type_typo_normalised_to_filesystem;
     ];
     "safe_filename", [
       test_case "normal" `Quick test_safe_filename_normal;

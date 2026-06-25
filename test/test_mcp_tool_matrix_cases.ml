@@ -991,15 +991,13 @@ let call_tool_json fixture (schema : Masc_domain.tool_schema) arguments =
 let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
     (schema : Masc_domain.tool_schema) =
   let saved_home = Sys.getenv_opt "HOME" in
-  let saved_env =
-    [
-      ("MASC_BASE_PATH", Sys.getenv_opt "MASC_BASE_PATH");
-      ("MASC_STORAGE_TYPE", Sys.getenv_opt "MASC_STORAGE_TYPE");
-      ("MASC_PERSONAS_DIR", Sys.getenv_opt "MASC_PERSONAS_DIR");
-    ]
-  in
-  Unix.putenv "MASC_STORAGE_TYPE" "filesystem";
-  let base_path = temp_dir "mcp-tool-matrix-" in
+	  let saved_env =
+	    [
+	      ("MASC_BASE_PATH", Sys.getenv_opt "MASC_BASE_PATH");
+	      ("MASC_PERSONAS_DIR", Sys.getenv_opt "MASC_PERSONAS_DIR");
+	    ]
+	  in
+	  let base_path = temp_dir "mcp-tool-matrix-" in
   Unix.putenv "MASC_BASE_PATH" base_path;
   let result =
     Fun.protect

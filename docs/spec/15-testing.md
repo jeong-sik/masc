@@ -40,7 +40,6 @@ MASC MCP의 검증 전략을 정의한다. 테스트는 3개 계층(Hermetic Req
 `test/dune`의 `(env)` 섹션이 테스트 환경을 강제 격리한다:
 
 ```
-MASC_STORAGE_TYPE=filesystem     (파일시스템 백엔드 강제)
 GRAPHQL_API_KEY=""               (GraphQL API 비활성화)
 ZAI_API_KEY=""                   (ZAI API 비활성화)
 ```

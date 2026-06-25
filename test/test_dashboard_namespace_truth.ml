@@ -6,9 +6,6 @@ module Lib = Masc
 
 open Alcotest
 
-(* Force filesystem backend so tests run without PG auto-detect dependency. *)
-let () = Unix.putenv "MASC_STORAGE_TYPE" "filesystem"
-
 (* Bypass the proactive execution cache warm-up guard so tests get the full
    namespace-truth response instead of the "initializing" short-circuit. *)
 let () = Server_dashboard_http.seed_execution_cache_for_test ()

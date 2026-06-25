@@ -95,9 +95,8 @@ let with_env name value_opt f =
 let with_isolated_runtime_env f =
   with_env "MASC_BASE_PATH" None (fun () ->
     with_env "MASC_BASE_PATH_INPUT" None (fun () ->
-      with_env "MASC_STORAGE_TYPE" None (fun () ->
-        with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "false") (fun () ->
-          with_env "MASC_CDAL_GATE_ENABLED" (Some "false") f))))
+      with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "false") (fun () ->
+        with_env "MASC_CDAL_GATE_ENABLED" (Some "false") f)))
 
 (* Test registry — collect via [test] then dispatch with Alcotest.run.
    Eio scope set up per-test inside the registered thunk. *)

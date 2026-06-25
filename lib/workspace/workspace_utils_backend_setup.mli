@@ -32,8 +32,6 @@ val resolve_masc_base_path : string -> string
 val resolve_server_default_base_path : string -> string
 val is_unresolved_template : string -> bool
 val env_opt : string -> string option
-val auto_detect_backend : unit -> string
-val storage_type_from_env : unit -> string
 val sanitize_namespace_segment : string -> string
 val backend_config_for : string -> Backend_types.config
 val create_backend : Backend_types.config -> (storage_backend, Backend_types.error) result

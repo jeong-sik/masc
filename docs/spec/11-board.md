@@ -126,11 +126,11 @@ Silent failure 없음. 모든 연산은 `(T, board_error) result` 반환.
 
 ### 4.1 Board_dispatch
 
-`Board_dispatch` 모듈이 Board write/read path의 단일 진입점을 담당한다. 현재 `server_runtime_bootstrap`은 `MASC_STORAGE_TYPE`을 `filesystem`으로 강제하고 retired PostgreSQL env를 무시한다.
+`Board_dispatch` 모듈이 Board write/read path의 단일 진입점을 담당한다. 현재 production runtime은 `.masc` 아래의 filesystem/JSONL store를 직접 구성하며 retired PostgreSQL storage selector는 런타임 입력이 아니다.
 
 ```
-server_runtime_bootstrap.force_jsonl_fallback_env
-  -> MASC_STORAGE_TYPE=filesystem
+server_runtime_bootstrap
+  -> filesystem backend config
   -> JSONL (Board.store)
 ```
 

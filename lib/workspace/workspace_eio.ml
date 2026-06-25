@@ -96,7 +96,6 @@ let json_decode f =
 (** Create Eio-native workspace configuration *)
 let create_config ~fs ?clock base_path =
   let backend_config = Backend.{
-    backend_type = FileSystem;
     base_path = Common.masc_dir_from_base_path ~base_path;
     node_id = Printf.sprintf "node_%d" (Unix.getpid ());
     cluster_name = "default";
@@ -116,7 +115,6 @@ let create_config ~fs ?clock base_path =
 (** Create test configuration (isolated) *)
 let test_config ~fs base_path =
   let backend_config = Backend.{
-    backend_type = FileSystem;
     base_path = Common.masc_dir_from_base_path ~base_path;
     node_id = Printf.sprintf "test_node_%04x" (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFF);
     cluster_name = "test";

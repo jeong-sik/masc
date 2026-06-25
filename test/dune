@@ -1,10 +1,7 @@
 ; Test Environment Configuration
-; Force filesystem backend to avoid external DB connection timeouts
-
 (env
  (_
   (env-vars
-   (MASC_STORAGE_TYPE filesystem)
    ; Ignore shell-level workspace overrides so tests stay isolated in temp dirs.
    ; Prevent inherited shell MASC_BASE_PATH from binding tests to real
    ; workspace state. Tests that need a base path pass it explicitly.

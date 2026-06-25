@@ -599,14 +599,12 @@ let evaluate_expectation ~name expectation = function
 let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
     (schema : Masc_domain.tool_schema) =
   let saved_home = Sys.getenv_opt "HOME" in
-  let saved_env =
-    [
-      ("MASC_BASE_PATH", Sys.getenv_opt "MASC_BASE_PATH");
-      ("MASC_STORAGE_TYPE", Sys.getenv_opt "MASC_STORAGE_TYPE");
-    ]
-  in
-  Unix.putenv "MASC_STORAGE_TYPE" "filesystem";
-  let base_path = Generic.temp_dir "keeper-tool-matrix-" in
+	  let saved_env =
+	    [
+	      ("MASC_BASE_PATH", Sys.getenv_opt "MASC_BASE_PATH");
+	    ]
+	  in
+	  let base_path = Generic.temp_dir "keeper-tool-matrix-" in
   Unix.putenv "MASC_BASE_PATH" base_path;
   let result =
     Fun.protect

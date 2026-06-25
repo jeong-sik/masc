@@ -400,24 +400,10 @@ let sb_path () =
   | Ok path -> path
   | Error msg -> raise (Config_error msg)
 
-(** SSOT for the MASC_STORAGE_TYPE env-var name (issue 8352). *)
-let storage_type_env_key = "MASC_STORAGE_TYPE"
-
 (** SSOT for the MASC_ORCHESTRATOR_ENABLED env-var name (issue 8352).
     Referenced by feature_flag_registry catalog, env_config_runtime reader,
     env_config_snapshot entry, and orchestrator bootstrap. *)
 let orchestrator_enabled_env_key = "MASC_ORCHESTRATOR_ENABLED"
-
-(** Storage backend type. Set at runtime by server_runtime_bootstrap.
-    Valid: "filesystem", "memory". *)
-let storage_type () =
-  match raw_value_opt storage_type_env_key |> trim_opt with
-  | Some raw -> (
-      match String.lowercase_ascii (String.trim raw) with
-      | "filesystem" | "file" | "jsonl" | "auto" -> "filesystem"
-      | "memory" -> "memory"
-      | other -> other)
-  | None -> "filesystem"
 
 (** SSOT for MASC_CONFIG_DIR / MASC_PERSONAS_DIR env-var names (issue 8352).
     Shared by snapshot catalog and docker worker inheritance list. *)

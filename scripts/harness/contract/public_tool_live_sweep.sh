@@ -91,7 +91,7 @@ cleanup_contract_task() {
 trap 'cleanup_contract_task' EXIT
 
 manifest_json="$(
-  env -u DUNE_RPC MASC_STORAGE_TYPE=filesystem \
+  env -u DUNE_RPC \
     opam exec -- dune exec --root "$ROOT_DIR" bin/public_tool_manifest.exe \
     | awk 'BEGIN { printing = 0 } /^\{/ { printing = 1 } printing { print }'
 )"

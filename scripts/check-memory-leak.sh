@@ -197,7 +197,6 @@ echo "[memory-leak] base_path=${BASE_PATH}" >&2
 
 (
   export MASC_BASE_PATH="${BASE_PATH}"
-  export MASC_STORAGE_TYPE="filesystem"
   export MASC_AUTONOMY_ENABLED="0"
   export MASC_ORCHESTRATOR_ENABLED="0"
   export MASC_KEEPER_BOOTSTRAP_ENABLED="false"

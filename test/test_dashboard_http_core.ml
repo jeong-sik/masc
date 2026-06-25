@@ -135,11 +135,10 @@ let request_with_headers target headers =
 
 let with_test_env f =
   let dir = test_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
-    (fun () ->
-      with_env "MASC_STORAGE_TYPE" "filesystem" @@ fun () ->
-      Eio_main.run @@ fun env ->
+	Fun.protect
+	  ~finally:(fun () -> cleanup_dir dir)
+	  (fun () ->
+	    Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Workspace_utils.default_config dir in
       Eio.Switch.run @@ fun sw ->

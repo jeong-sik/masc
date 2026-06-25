@@ -189,7 +189,6 @@ let isolated_child_env_unset =
   [ "MASC_BASE_PATH"
   ; "MASC_BASE_PATH_INPUT"
   ; "MASC_CONFIG_DIR"
-  ; "MASC_STORAGE_TYPE"
   ; "MASC_TOKEN"
   ; "MASC_INTERNAL_MCP_TOKEN"
   ; "MASC_ADMIN_TOKEN"

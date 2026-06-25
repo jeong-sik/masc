@@ -77,22 +77,16 @@ let iso_of_unix ts =
 let test_briefing_cold_call_returns_pending () =
   (* After #2094, cold calls (no cache) return "pending" and trigger async refresh.
      This avoids blocking the dashboard on cold-start computation. *)
-  (* Force filesystem backend to prevent PG auto-detection in hermetic tests *)
-  let saved_storage = Sys.getenv_opt "MASC_STORAGE_TYPE" in
-  Unix.putenv "MASC_STORAGE_TYPE" "filesystem";
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Briefing.reset_cache ();
-      cleanup_dir base_path;
-      (match saved_storage with
-       | Some v -> Unix.putenv "MASC_STORAGE_TYPE" v
-       | None -> Unix.putenv "MASC_STORAGE_TYPE" ""))
-    (fun () ->
+	Fun.protect
+	  ~finally:(fun () ->
+	    Briefing.reset_cache ();
+	    cleanup_dir base_path)
+	  (fun () ->
       Briefing.reset_cache ();
       let config = Workspace.default_config base_path in
       ignore (Workspace.init config ~agent_name:None);

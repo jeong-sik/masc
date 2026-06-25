@@ -383,7 +383,6 @@ let with_memory_test_env f =
     (Printf.sprintf "masc_mem_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
   let backend_config : Backend_types.config = {
-    backend_type = Backend_types.Memory;
     base_path = Filename.concat tmp_dir Common.masc_dirname;
     node_id = "test-node";
     cluster_name = "default";

@@ -60,8 +60,7 @@ let with_env name value_opt f =
 
 let with_isolated_runtime_env f =
   with_env "MASC_BASE_PATH" None (fun () ->
-    with_env "MASC_BASE_PATH_INPUT" None (fun () ->
-      with_env "MASC_STORAGE_TYPE" None f))
+    with_env "MASC_BASE_PATH_INPUT" None f)
 ;;
 
 (* Test registry — each [test] call appends to this list; the final

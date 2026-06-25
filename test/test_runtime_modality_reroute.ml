@@ -287,7 +287,7 @@ let test_degrade_note_none_when_empty () =
 
 let test_degrade_manifest_public_projection () =
   let decision =
-    Keeper_turn_driver.For_testing.media_degrade_manifest_decision
+    Masc.Keeper_turn_driver.For_testing.media_degrade_manifest_decision
       ~runtime_id:"text-runtime"
       [ ("image", 1); ("audio", 2) ]
   in

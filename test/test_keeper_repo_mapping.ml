@@ -255,6 +255,45 @@ let test_validate_path_access_no_repo () =
       | Ok () -> ()
       | Error e -> Alcotest.fail ("expected Ok for no-repo path, got: " ^ e))
 
+let test_validate_path_access_rejects_repo_store_load_error () =
+  with_temp_base_path (fun base_path ->
+      write_mapping base_path "keeper-1" [ "repo-a" ];
+      write_file
+        (Filename.concat base_path ".masc/config/repositories.toml")
+        "[repository.repo-a]\nurl = 42\n";
+      let path = Filename.concat base_path "repos/repo-a/file.txt" in
+      ensure_dir (Filename.dirname path);
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"keeper-1"
+          ~base_path ~path
+      with
+      | Ok () -> Alcotest.fail "expected repository store load failure to deny access"
+      | Error msg ->
+          Alcotest.(check bool)
+            "mentions store load failure" true
+            (contains_substring msg "Repository store load failed"))
+
+let test_validate_path_access_playground_rejects_repo_store_load_error () =
+  with_temp_base_path (fun base_path ->
+      write_mapping base_path "executor" [ "masc" ];
+      write_file
+        (Filename.concat base_path ".masc/config/repositories.toml")
+        "[repository.masc]\nurl = 42\n";
+      let path =
+        Filename.concat base_path
+          ".masc/playground/docker/executor/repos/masc/lib"
+      in
+      ensure_dir path;
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () -> Alcotest.fail "expected playground load failure to deny access"
+      | Error msg ->
+          Alcotest.(check bool)
+            "mentions store load failure" true
+            (contains_substring msg "Repository store load failed"))
+
 let test_validate_path_access_playground_repos_root_ignores_base_repo () =
   with_temp_base_path (fun base_path ->
       let root_repo =
@@ -351,6 +390,164 @@ let test_validate_path_access_playground_repo_uses_url_basename () =
             ("expected playground repo path to resolve by repository URL basename, got: "
              ^ e))
 
+let test_validate_path_access_url_basename_case_only_drift_allowed () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let repo =
+        { (sample_repo "bmad-method") with
+          name = "bmad-method";
+          url = "https://github.com/bmad-code-org/BMAD-METHOD";
+          local_path = Filename.concat base_path ".masc/repos/bmad-method";
+        }
+      in
+      write_repositories base_path [ root_repo; repo ];
+      write_mapping base_path "executor" [ "bmad-method" ];
+      let path =
+        Filename.concat base_path
+          ".masc/playground/docker/executor/repos/bmad-method/lib"
+      in
+      ensure_dir path;
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () -> ()
+      | Error e ->
+          Alcotest.fail
+            ("expected case-only URL basename drift to match repository identity, got: "
+             ^ e))
+
+let test_validate_path_access_rejects_repo_identity_mismatch () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let bad_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          url = "https://github.com/jeong-sik/masc-mcp";
+          local_path = Filename.concat base_path ".masc/repos/masc";
+        }
+      in
+      write_repositories base_path [ root_repo; bad_repo ];
+      write_mapping base_path "executor" [ "masc" ];
+      let path =
+        Filename.concat base_path
+          ".masc/playground/docker/executor/repos/masc/lib"
+      in
+      ensure_dir path;
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () -> Alcotest.fail "expected repository identity mismatch"
+      | Error msg ->
+          Alcotest.(check bool)
+            "mentions identity mismatch" true
+            (contains_substring msg "Repository identity mismatch");
+          Alcotest.(check bool)
+            "mentions mismatched basename" true
+            (contains_substring msg "masc-mcp"))
+
+let test_validate_path_access_rejects_mismatched_url_basename_alias () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let bad_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          url = "https://github.com/jeong-sik/masc-mcp";
+          local_path = Filename.concat base_path ".masc/repos/masc";
+        }
+      in
+      write_repositories base_path [ root_repo; bad_repo ];
+      write_mapping base_path "executor" [ "masc" ];
+      let path =
+        Filename.concat base_path
+          ".masc/playground/docker/executor/repos/masc-mcp/lib"
+      in
+      ensure_dir path;
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () ->
+          Alcotest.fail
+            "expected URL basename not to authorize a mismatched repository"
+      | Error msg ->
+          Alcotest.(check bool)
+            "mentions identity mismatch" true
+            (contains_substring msg "Repository identity mismatch");
+          Alcotest.(check bool)
+            "mentions mismatched basename" true
+            (contains_substring msg "masc-mcp"))
+
+let test_validate_path_access_wildcard_rejects_mismatched_url_basename () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let bad_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          url = "https://github.com/jeong-sik/masc-mcp";
+          local_path = Filename.concat base_path ".masc/repos/masc";
+        }
+      in
+      write_repositories base_path [ root_repo; bad_repo ];
+      write_mapping base_path "executor" [ "*" ];
+      let path =
+        Filename.concat base_path
+          ".masc/playground/docker/executor/repos/masc-mcp/lib"
+      in
+      ensure_dir path;
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () ->
+          Alcotest.fail
+            "expected wildcard mapping not to authorize mismatched URL basename"
+      | Error msg ->
+          Alcotest.(check bool)
+            "mentions identity mismatch" true
+            (contains_substring msg "Repository identity mismatch");
+          Alcotest.(check bool)
+            "mentions mismatched basename" true
+            (contains_substring msg "masc-mcp"))
+
+let test_validate_path_access_rejects_empty_url_basename () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let bad_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          url = "";
+          local_path = Filename.concat base_path ".masc/repos/masc";
+        }
+      in
+      write_repositories base_path [ root_repo; bad_repo ];
+      write_mapping base_path "executor" [ "masc" ];
+      let path =
+        Filename.concat base_path
+          ".masc/playground/docker/executor/repos/masc/lib"
+      in
+      ensure_dir path;
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () -> Alcotest.fail "expected empty URL basename to be denied"
+      | Error msg ->
+          Alcotest.(check bool)
+            "mentions identity mismatch" true
+            (contains_substring msg "Repository identity mismatch"))
+
 let test_validate_path_access_playground_unique_clone_uses_git_remote () =
   with_temp_base_path (fun base_path ->
       let root_repo =
@@ -380,6 +577,37 @@ let test_validate_path_access_playground_unique_clone_uses_git_remote () =
       | Error e ->
           Alcotest.fail
             ("expected unique playground clone to resolve by git remote, got: "
+             ^ e))
+
+let test_validate_path_access_playground_exact_remote_url_is_authoritative () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          url = "https://github.com/jeong-sik/masc-mcp";
+          local_path = Filename.concat base_path ".masc/repos/masc";
+        }
+      in
+      write_repositories base_path [ root_repo; repo ];
+      write_mapping base_path "executor" [ "masc" ];
+      let repo_root =
+        Filename.concat base_path
+          ".masc/playground/docker/executor/repos/keeper-direct-clone-proof-0506"
+      in
+      let path = Filename.concat repo_root "docs/proof.md" in
+      ensure_dir (Filename.dirname path);
+      write_git_origin repo_root "https://github.com/jeong-sik/masc-mcp";
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () -> ()
+      | Error e ->
+          Alcotest.fail
+            ("expected exact git remote URL to resolve registered repository, got: "
              ^ e))
 
 let test_validate_path_access_playground_gitdir_relative_uses_git_remote () =
@@ -747,14 +975,30 @@ let () =
           Alcotest.test_case "allowed" `Quick test_validate_path_access_allowed;
           Alcotest.test_case "denied" `Quick test_validate_path_access_denied;
           Alcotest.test_case "no repo" `Quick test_validate_path_access_no_repo;
+          Alcotest.test_case "repo store load error denies" `Quick
+            test_validate_path_access_rejects_repo_store_load_error;
+          Alcotest.test_case "playground repo store load error denies" `Quick
+            test_validate_path_access_playground_rejects_repo_store_load_error;
           Alcotest.test_case "playground repos root ignores base repo" `Quick
             test_validate_path_access_playground_repos_root_ignores_base_repo;
           Alcotest.test_case "playground repo resolves registered name" `Quick
             test_validate_path_access_playground_repo_uses_registered_name;
           Alcotest.test_case "playground repo resolves repository URL basename" `Quick
             test_validate_path_access_playground_repo_uses_url_basename;
+          Alcotest.test_case "case-only URL basename drift is allowed" `Quick
+            test_validate_path_access_url_basename_case_only_drift_allowed;
+          Alcotest.test_case "repository identity mismatch blocks access" `Quick
+            test_validate_path_access_rejects_repo_identity_mismatch;
+          Alcotest.test_case "mismatched URL basename is not an alias" `Quick
+            test_validate_path_access_rejects_mismatched_url_basename_alias;
+          Alcotest.test_case "wildcard does not allow mismatched URL basename" `Quick
+            test_validate_path_access_wildcard_rejects_mismatched_url_basename;
+          Alcotest.test_case "empty URL basename is identity mismatch" `Quick
+            test_validate_path_access_rejects_empty_url_basename;
           Alcotest.test_case "playground unique clone resolves git remote" `Quick
             test_validate_path_access_playground_unique_clone_uses_git_remote;
+          Alcotest.test_case "playground exact remote URL is authoritative" `Quick
+            test_validate_path_access_playground_exact_remote_url_is_authoritative;
           Alcotest.test_case "playground relative gitdir resolves git remote" `Quick
             test_validate_path_access_playground_gitdir_relative_uses_git_remote;
           Alcotest.test_case "playground absolute in-sandbox gitdir resolves git remote" `Quick

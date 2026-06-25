@@ -365,45 +365,174 @@ let remote_origin_url_of_repo_root repo_root =
           in
           loop false (String.split_on_char '\n' content))
 
+let repository_identity_tokens (repo : repository) =
+  repo.id :: repo.name :: repo.aliases
+  |> List.map String.trim
+  |> List.filter (fun token -> not (String.equal token ""))
+
+(** [token_matches_url_basename ~basename token] is a case-insensitive
+    comparison between a repository identity token and the basename extracted
+    from a URL. Identity drift in the wild (e.g. [masc] vs [Masc]) should not
+    cause a fail-closed rejection. *)
+let token_matches_url_basename ~basename token =
+  String.equal (String.lowercase_ascii basename) (String.lowercase_ascii token)
+
+(** [repository_url_basename_matches_identity repo] returns [true] when the
+    repository's URL basename can be matched against one of the repository's
+    declared identity tokens. An empty basename (missing/empty URL or
+    unparseable URL) is treated as [false]: fail-closed, not "matches by
+    default". *)
+let repository_url_basename_matches_identity repo =
+  let basename = repository_url_basename repo.url in
+  (not (String.equal basename ""))
+  && List.exists (token_matches_url_basename ~basename) (repository_identity_tokens repo)
+
+type repository_identity_mismatch = {
+  repository_id : string;
+  repository_name : string;
+  repository_url : string;
+  url_basename : string;
+  segment : string;
+  repo_root : string option;
+}
+
+let repository_identity_mismatch ?repo_root ~segment repo =
+  let url_basename = repository_url_basename repo.url in
+  if String.equal url_basename "" then
+    (* Empty URL basename means a missing or unparseable repository URL. Treat
+       it as an identity mismatch so the fail-closed path denies access rather
+       than silently authorizing an unvalidated repository. *)
+    Some
+      {
+        repository_id = repo.id;
+        repository_name = repo.name;
+        repository_url = repo.url;
+        url_basename;
+        segment;
+        repo_root;
+      }
+  else if
+    List.exists (token_matches_url_basename ~basename:url_basename) (repository_identity_tokens repo)
+  then None
+  else
+    Some
+      {
+        repository_id = repo.id;
+        repository_name = repo.name;
+        repository_url = repo.url;
+        url_basename;
+        segment;
+        repo_root;
+      }
+
+let repository_identity_mismatch_message
+    { repository_id; repository_name; repository_url; url_basename; segment; repo_root } =
+  let repo_root =
+    match repo_root with
+    | Some repo_root -> repo_root
+    | None -> "unknown"
+  in
+  Printf.sprintf
+    "Repository identity mismatch for repos/%s: repository id=%S name=%S \
+     url_basename=%S url=%S repo_root=%S. Add the URL basename as an explicit \
+     alias, or fix repositories.toml before keeper repository access."
+    segment repository_id repository_name url_basename repository_url repo_root
+
 let repository_matches_token ~base_path token (repo : repository) =
   String.equal repo.id token
   || String.equal repo.name token
-  || String.equal (repository_url_basename repo.url) token
+  || List.exists (String.equal token) repo.aliases
+  || (repository_url_basename_matches_identity repo
+      && token_matches_url_basename ~basename:(repository_url_basename repo.url) token)
   || String.equal
        (basename_of_path (Repo_store.local_path ~base_path repo))
        token
 
 let repository_matches_remote_url ~remote_url (repo : repository) =
-  let remote_basename = repository_url_basename remote_url in
-  remote_url <> ""
-  && (String.equal repo.url remote_url
-      || (remote_basename <> ""
-          && (String.equal repo.id remote_basename
-              || String.equal repo.name remote_basename
-              || String.equal (repository_url_basename repo.url) remote_basename)))
+  if String.equal remote_url "" then false
+  else if String.equal repo.url remote_url then
+    (* Exact remote URL match is authoritative: a declared repository whose URL
+       exactly equals the git remote is the same repository even if the URL
+       basename diverges from the identity token (e.g. case or alias drift). *)
+    true
+  else
+    let remote_basename = repository_url_basename remote_url in
+    repository_url_basename_matches_identity repo
+    && remote_basename <> ""
+    && (String.equal (String.lowercase_ascii repo.id) (String.lowercase_ascii remote_basename)
+        || String.equal (String.lowercase_ascii repo.name) (String.lowercase_ascii remote_basename)
+        || List.exists (fun alias ->
+             String.equal (String.lowercase_ascii alias) (String.lowercase_ascii remote_basename))
+             repo.aliases
+        || token_matches_url_basename ~basename:(repository_url_basename repo.url) remote_basename)
+
+type repository_resolution =
+  | No_repository
+  | Repository of repository_id
+  | Repository_identity_mismatch of repository_identity_mismatch
+  | Repository_store_error of string
+
+let repository_resolution_of_repo ?repo_root ~segment repo =
+  match repository_identity_mismatch ?repo_root ~segment repo with
+  | Some mismatch -> Repository_identity_mismatch mismatch
+  | None -> Repository repo.id
+
+let repository_identity_mismatch_for_url_basename_token ?repo_root ~segment
+    token repos =
+  if String.equal token "" then None
+  else
+    List.find_map
+      (fun repo ->
+        let url_basename = repository_url_basename repo.url in
+        if
+          String.equal url_basename ""
+          || not (token_matches_url_basename ~basename:url_basename token)
+        then None
+        else repository_identity_mismatch ?repo_root ~segment repo)
+      repos
+
+let unresolved_repository_segment_resolution ?repo_root ~segment repos =
+  match
+    repository_identity_mismatch_for_url_basename_token ?repo_root ~segment
+      segment repos
+  with
+  | Some mismatch -> Repository_identity_mismatch mismatch
+  | None -> Repository segment
 
 let resolve_repository_id_segment ~base_path ?repo_root segment =
   match Repo_store.load_all ~base_path with
   | Error msg ->
       Log.Misc.warn
         "[KeeperRepoMapping] resolve_repository_id_segment: repo store load \
-         failed for segment %s (error: %s)"
+         failed for segment %s — access denied fail-closed (error: %s)"
         segment msg;
-      segment
+      Repository_store_error msg
   | Ok repos -> (
       match
         List.find_opt
           (repository_matches_token ~base_path segment)
           repos
       with
-      | Some repo -> repo.id
+      | Some repo -> repository_resolution_of_repo ?repo_root ~segment repo
       | None -> (
           match Option.bind repo_root remote_origin_url_of_repo_root with
-          | None -> segment
+          | None -> unresolved_repository_segment_resolution ?repo_root ~segment repos
           | Some remote_url -> (
+              match List.find_opt (fun repo -> String.equal repo.url remote_url) repos with
+              | Some repo -> Repository repo.id
+              | None -> (
               match List.find_opt (repository_matches_remote_url ~remote_url) repos with
-              | Some repo -> repo.id
-              | None -> segment)))
+              | Some repo -> repository_resolution_of_repo ?repo_root ~segment repo
+              | None -> (
+                  let remote_basename = repository_url_basename remote_url in
+                  match
+                    repository_identity_mismatch_for_url_basename_token
+                      ?repo_root ~segment remote_basename repos
+                  with
+                  | Some mismatch -> Repository_identity_mismatch mismatch
+                  | None ->
+                      unresolved_repository_segment_resolution ?repo_root
+                        ~segment repos)))))
 
 (** [path_under_repo ~base_path repo path] returns [true] when [path]
     is equal to or strictly under [repo]'s resolved local_path. *)
@@ -414,28 +543,38 @@ let path_under_repo ~base_path repo path =
   String.equal path_norm repo_norm
   || String.starts_with ~prefix:(repo_norm ^ "/") path_norm
 
-(** [repository_id_of_path ~base_path ~path] returns the ID of the
-    registered repository whose [local_path] contains [path], or [None]
-    if the path is not under any registered repository. *)
-let repository_id_of_path ~base_path ~path =
+(** [repository_resolution_of_path ~base_path ~path] returns the registered
+    repository for [path], or an identity mismatch when the path points at a
+    declared repository whose URL basename contradicts its declared identity.
+    Repository store load failures remain explicit so access callers can deny
+    instead of treating an unknown repository catalog as "not a repository". *)
+let repository_resolution_of_path ~base_path ~path =
   match playground_path_of_path ~base_path ~path with
-  | Some Playground_internal | Some Playground_repos_root -> None
+  | Some Playground_internal | Some Playground_repos_root -> No_repository
   | Some (Playground_repo { segment; repo_root }) ->
-      Some (resolve_repository_id_segment ~base_path ~repo_root segment)
+      resolve_repository_id_segment ~base_path ~repo_root segment
   | None -> (
   match Repo_store.load_all ~base_path with
   | Error msg ->
       Log.Misc.warn
-        "[KeeperRepoMapping] repository_id_of_path: repo store load failed \
-         for path %s (error: %s)"
+        "[KeeperRepoMapping] repository_resolution_of_path: repo store load \
+         failed for path %s — access denied fail-closed (error: %s)"
         path msg;
-      None
+      Repository_store_error msg
   | Ok repos -> (
       match
         List.find_opt (fun repo -> path_under_repo ~base_path repo path) repos
       with
-      | Some repo -> Some repo.id
-      | None -> None))
+      | Some repo -> repository_resolution_of_repo ~segment:repo.id repo
+      | None -> No_repository))
+
+(** [repository_id_of_path ~base_path ~path] returns the ID of the
+    registered repository whose [local_path] contains [path], or [None]
+    if the path is not under any registered repository. *)
+let repository_id_of_path ~base_path ~path =
+  match repository_resolution_of_path ~base_path ~path with
+  | Repository repo_id -> Some repo_id
+  | No_repository | Repository_identity_mismatch _ | Repository_store_error _ -> None
 
 (** [validate_path_access ~keeper_id ~base_path ~path] checks whether
     [keeper_id] is allowed to access the repository that contains [path].
@@ -443,6 +582,13 @@ let repository_id_of_path ~base_path ~path =
     This is the integration point for keeper execution paths that operate
     on filesystem paths rather than explicit repository IDs. *)
 let validate_path_access ~keeper_id ~base_path ~path =
-  match repository_id_of_path ~base_path ~path with
-  | None -> Ok ()
-  | Some repo_id -> validate_access ~keeper_id ~repository_id:repo_id ~base_path
+  match repository_resolution_of_path ~base_path ~path with
+  | No_repository -> Ok ()
+  | Repository repo_id -> validate_access ~keeper_id ~repository_id:repo_id ~base_path
+  | Repository_identity_mismatch mismatch ->
+      Error (repository_identity_mismatch_message mismatch)
+  | Repository_store_error msg ->
+      Error
+        (Printf.sprintf
+           "Repository store load failed while validating keeper %s path %s: %s"
+           keeper_id path msg)

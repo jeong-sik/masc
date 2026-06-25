@@ -31,14 +31,32 @@ val apply_mapping :
     When no mapping exists for the keeper, or mapping loading fails, no
     repositories are returned. *)
 
+type repository_identity_mismatch
+
+type repository_resolution =
+  | No_repository
+  | Repository of repository_id
+  | Repository_identity_mismatch of repository_identity_mismatch
+  | Repository_store_error of string
+
+val repository_resolution_of_path :
+  base_path:string -> path:string -> repository_resolution
+(** [repository_resolution_of_path ~base_path ~path] returns the repository
+    resolution for [path]. Use this for access decisions so identity mismatches
+    and repository-store load failures stay explicit and fail closed. *)
+
 val repository_id_of_path :
   base_path:string -> path:string -> repository_id option
 (** [repository_id_of_path ~base_path ~path] returns the repository ID whose
     [local_path] contains [path], or [None] if the path is not under any
-    registered repository. *)
+    registered repository or the registered repository has an identity
+    mismatch. Compatibility wrapper only; do not use for access decisions
+    because [None] collapses [No_repository], [Repository_identity_mismatch],
+    and [Repository_store_error]. *)
 
 val validate_path_access :
   keeper_id:string -> base_path:string -> path:string -> (unit, string) result
 (** [validate_path_access ~keeper_id ~base_path ~path] returns [Ok ()] if
     [keeper_id] may access the repository containing [path], or if [path] is
-    not under any registered repository. Returns [Error msg] otherwise. *)
+    not under any registered repository. Returns [Error msg] for denied
+    repositories, identity mismatches, and repository-store load failures. *)

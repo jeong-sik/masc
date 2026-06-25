@@ -85,6 +85,55 @@
 .v2-app[data-density="compact"] .bd-list       { padding: 11px 14px; gap: 8px; }
 .v2-app[data-density="compact"] .set-row       { padding: 10px 0; }
 
+/* Mobile keeper workspace: the live chat reuses `.composer` / `.chat-bubble`
+   names from the standalone v2 skin, so this last-loaded craft layer must
+   release desktop density padding on phones. Without this, the 390px chat body
+   loses 40px transcript gutters plus nested 30px composer gutters. */
+@media (max-width: 860px) {
+  .v2-app[data-keeper-detail-mode="true"] [data-keeper-chat-layout="workspace"] .chat-transcript {
+    padding:
+      16px
+      max(16px, env(safe-area-inset-right, 0px))
+      12px
+      max(16px, env(safe-area-inset-left, 0px));
+  }
+
+  .v2-app[data-keeper-detail-mode="true"] [data-keeper-chat-layout="workspace"] .chat-turn-bundle {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .v2-app[data-keeper-detail-mode="true"] [data-keeper-chat-layout="workspace"] .chat-bubble {
+    width: 100%;
+    max-width: 100%;
+    padding: 14px 15px;
+    line-height: 1.68;
+  }
+
+  .v2-app[data-keeper-detail-mode="true"] [data-keeper-chat-layout="workspace"] .kw-composer-wrap {
+    padding:
+      10px
+      max(12px, env(safe-area-inset-right, 0px))
+      max(14px, env(safe-area-inset-bottom, 0px))
+      max(12px, env(safe-area-inset-left, 0px));
+  }
+
+  .v2-app[data-keeper-detail-mode="true"] [data-keeper-chat-layout="workspace"] .kw-composer-inner,
+  .v2-app[data-keeper-detail-mode="true"] [data-keeper-chat-layout="workspace"] .composer.primary,
+  .v2-app[data-keeper-detail-mode="true"] [data-keeper-chat-layout="workspace"] .composer-inner,
+  .v2-app[data-keeper-detail-mode="true"] [data-keeper-chat-layout="workspace"] .composer-box {
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
+  }
+
+  .v2-app[data-keeper-detail-mode="true"] [data-keeper-chat-layout="workspace"] .kw-composer-inner,
+  .v2-app[data-keeper-detail-mode="true"] [data-keeper-chat-layout="workspace"] .composer.primary,
+  .v2-app[data-keeper-detail-mode="true"] [data-keeper-chat-layout="workspace"] .composer-inner {
+    padding: 0;
+  }
+}
+
 /* ══════════════════════════════════════════════════════════════
    2 · MOTION — press, hover lift, focus ring, entrance
    Base rules below are the "subtle" tier. [data-motion="lively"]

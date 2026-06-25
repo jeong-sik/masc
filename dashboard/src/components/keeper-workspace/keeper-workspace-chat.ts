@@ -4,66 +4,94 @@
 // header; the panel reuses the full chat engine unchanged.
 
 import { html } from 'htm/preact'
-import { ChevronLeft } from 'lucide-preact'
-import { useCallback, useEffect, useState } from 'preact/hooks'
+import {
+  Archive,
+  ChevronLeft,
+  Info,
+  MoreHorizontal,
+  Pause,
+  Play,
+  RotateCcw,
+  Search,
+  Settings,
+  Square,
+} from 'lucide-preact'
+import { useEffect, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import type { Keeper, KeeperConversationEntry } from '../../types'
 import { KeeperConversationPanel } from '../keeper-shared'
 import { navigate } from '../../router'
+import type { ChatComposerCommand } from '../chat/primitives'
 import { keeperMobilePane } from '../keeper-detail-state'
 import { TurnInspectorDrawer as SharedTurnInspectorDrawer } from '../keeper-turn-inspector-drawer'
+import { ChatArtifactPanel } from '../chat/artifact-panel'
+import { keeperThreads } from '../../keeper-state'
 import { keeperDisplayStatus } from '../../lib/keeper-runtime-display'
 import { keeperActionVisibility } from '../../lib/keeper-predicates'
 import { runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
-import { Pill, type PillTone } from '../v2/primitives-v2'
-import { phaseTone, phasePulse } from '../v2/keeper-fsm'
+import { Pill } from '../v2/primitives-v2'
 import {
   WorkspaceSigil,
+  StatusDot,
   keeperBucket,
+  keeperStatusTone,
   keeperPhaseLabel,
+  statePillTone,
 } from './keeper-workspace-shared'
 
-type WorkspaceCommandId = KeeperActionKey | 'config'
+type WorkspaceUtilityAction = 'turn' | 'artifacts' | 'detail' | 'config'
+type WorkspaceCommandId = KeeperActionKey | WorkspaceUtilityAction
+type IconComponent = typeof Play
 
 interface WorkspaceCommand {
   id: WorkspaceCommandId
   label: string
   title: string
-  glyph: string
+  icon: IconComponent
   danger?: boolean
+  active?: boolean
   onClick: () => void | Promise<void>
 }
 
-const LIFECYCLE_COPY: Record<
-  KeeperActionKey,
-  { label: string; title: string; glyph: string; danger?: boolean }
-> = {
+const LIFECYCLE_COPY: Record<KeeperActionKey, { label: string; title: string; icon: IconComponent; danger?: boolean }> = {
   pause: {
     label: '일시정지',
     title: '일시정지: 실행 중인 keeper 를 일시 멈춥니다',
-    glyph: '\u23F8\uFE0E',
+    icon: Pause,
   },
   resume: {
     label: '재개',
     title: '재개: 일시정지된 keeper 를 다시 실행합니다',
-    glyph: '\u25B6\uFE0E',
+    icon: Play,
   },
   wakeup: {
     label: '깨우기',
     title: '깨우기: 다음 turn 을 즉시 시도합니다',
-    glyph: '\u25C9',
+    icon: RotateCcw,
   },
   boot: {
     label: '기동',
     title: '기동: offline keeper 를 다시 시작합니다',
-    glyph: '\u25B6\uFE0E',
+    icon: Play,
   },
   shutdown: {
     label: '종료',
     title: '종료: keeper 를 완전 종료합니다',
-    glyph: '\u25A0',
+    icon: Square,
     danger: true,
   },
+}
+
+const COMMAND_GLYPHS: Partial<Record<WorkspaceCommandId, string>> = {
+  pause: 'Ⅱ',
+  resume: '▶',
+  wakeup: '↻',
+  boot: '▶',
+  shutdown: '■',
+  turn: '⌕',
+  artifacts: '▣',
+  detail: 'ⓘ',
+  config: '⚙',
 }
 
 function lifecycleCommands(keeper: Keeper): WorkspaceCommand[] {
@@ -81,27 +109,87 @@ function lifecycleCommands(keeper: Keeper): WorkspaceCommand[] {
       id: key,
       label: copy.label,
       title: copy.title,
-      glyph: copy.glyph,
+      icon: copy.icon,
       danger: copy.danger,
       onClick: () => runKeeperAction(keeper.name, key),
     }
   })
 }
 
+function workspaceUtilityCommands({
+  detailOpen,
+  artifactsOpen,
+  onOpenTurnInspector,
+  onToggleArtifacts,
+  onToggleDetail,
+  onOpenConfig,
+}: {
+  detailOpen: boolean
+  artifactsOpen: boolean
+  onOpenTurnInspector: () => void
+  onToggleArtifacts: () => void
+  onToggleDetail: () => void
+  onOpenConfig?: () => void
+}): WorkspaceCommand[] {
+  return [
+    {
+      id: 'turn',
+      label: '턴 검사',
+      title: '턴 검사',
+      icon: Search,
+      onClick: onOpenTurnInspector,
+    },
+    {
+      id: 'artifacts',
+      label: artifactsOpen ? '아티팩트 숨김' : '아티팩트',
+      title: '대화 아티팩트',
+      icon: Archive,
+      active: artifactsOpen,
+      onClick: onToggleArtifacts,
+    },
+    {
+      id: 'detail',
+      label: detailOpen ? '대화로' : '상세',
+      title: '상세 (상태 · 진단 · 정체성 · 설정 · 디버그)',
+      icon: Info,
+      active: detailOpen,
+      onClick: onToggleDetail,
+    },
+    {
+      id: 'config',
+      label: 'keeper 설정',
+      title: 'keeper 설정',
+      icon: Settings,
+      onClick: onOpenConfig ?? onToggleDetail,
+    },
+  ]
+}
+
+function workspaceCommandGroup(command: WorkspaceCommand): string {
+  return command.id in LIFECYCLE_COPY ? '명령' : '이동'
+}
+
 function WorkspaceCommandButtons({
   keeper,
   mobile,
+  detailOpen,
+  artifactsOpen,
+  onOpenTurnInspector,
+  onToggleArtifacts,
+  onToggleDetail,
   onOpenConfig,
 }: {
   keeper: Keeper
   mobile: boolean
+  detailOpen: boolean
+  artifactsOpen: boolean
+  onOpenTurnInspector: () => void
+  onToggleArtifacts: () => void
+  onToggleDetail: () => void
   onOpenConfig?: () => void
 }): VNode {
   const [menuOpen, setMenuOpen] = useState(false)
   const [busyAction, setBusyAction] = useState<WorkspaceCommandId | null>(null)
-  useEffect(() => {
-    setMenuOpen(false)
-  }, [keeper.name])
   useEffect(() => {
     if (!menuOpen) return
     const close = () => setMenuOpen(false)
@@ -109,15 +197,15 @@ function WorkspaceCommandButtons({
     return () => window.removeEventListener('click', close)
   }, [menuOpen])
 
-  const config: WorkspaceCommand = {
-    id: 'config',
-    label: 'keeper 설정',
-    title: 'keeper 설정',
-    glyph: '\u2699\uFE0E',
-    onClick: onOpenConfig ?? (() => {}),
-  }
-  const lifecycle = lifecycleCommands(keeper)
-  const commands: WorkspaceCommand[] = [...lifecycle, config]
+  const utilities = workspaceUtilityCommands({
+    detailOpen,
+    artifactsOpen,
+    onOpenTurnInspector,
+      onToggleArtifacts,
+    onToggleDetail,
+    onOpenConfig,
+  })
+  const commands = [...lifecycleCommands(keeper), ...utilities]
 
   async function run(command: WorkspaceCommand) {
     if (busyAction) return
@@ -147,25 +235,28 @@ function WorkspaceCommandButtons({
             }}
             data-testid="kw-chat-command-menu-toggle"
           >
-            <span aria-hidden="true">⋯</span>
+            <${MoreHorizontal} size=${17} aria-hidden="true" />
           </button>
           ${menuOpen
             ? html`
                 <div class="kw-chat-command-popover v2-monitoring-surface" role="menu" onClick=${(event: Event) => event.stopPropagation()}>
-                  ${commands.map(command => html`
-                    <button
-                      key=${command.id}
-                      type="button"
-                      role="menuitem"
-                      class=${`kw-chat-command-item${command.danger ? ' danger' : ''}`}
-                      disabled=${busyAction !== null}
-                      onClick=${() => { void run(command) }}
-                      data-testid=${`kw-chat-command-${command.id}`}
-                    >
-                      <span aria-hidden="true">${command.glyph}</span>
-                      <span>${command.label}</span>
-                    </button>
-                  `)}
+                  ${commands.map(command => {
+                    const Icon = command.icon
+                    return html`
+                      <button
+                        key=${command.id}
+                        type="button"
+                        role="menuitem"
+                        class=${`kw-chat-command-item${command.danger ? ' danger' : ''}`}
+                        disabled=${busyAction !== null}
+                        onClick=${() => { void run(command) }}
+                        data-testid=${`kw-chat-command-${command.id}`}
+                      >
+                        <${Icon} size=${14} aria-hidden="true" />
+                        <span>${command.label}</span>
+                      </button>
+                    `
+                  })}
                 </div>
               `
             : null}
@@ -175,110 +266,97 @@ function WorkspaceCommandButtons({
   }
 
   return html`
-    <div class="chat-actions" data-testid="kw-chat-command-icons">
-      ${lifecycle.length === 0
-        ? html`<span class="act-quiet" title=${keeperDisplayStatus(keeper)}>전이 중…</span>`
-        : lifecycle.map(command => html`
-            <button
-              key=${command.id}
-              type="button"
-              class=${`act icon${command.danger ? ' danger' : ''}`}
-              aria-label=${command.label}
-              title=${command.title}
-              disabled=${busyAction !== null}
-              onClick=${() => { void run(command) }}
-              data-testid=${`kw-chat-command-${command.id}`}
-            >
-              <span aria-hidden="true">${command.glyph}</span>
-            </button>
-          `)}
-      <button
-        type="button"
-        class="act icon"
-        aria-label="keeper 설정"
-        title="keeper 설정"
-        disabled=${busyAction !== null}
-        onClick=${() => { void run(config) }}
-        data-testid="kw-chat-command-config"
-      >
-        <span aria-hidden="true">${'\u2699\uFE0E'}</span>
-      </button>
+    <div class="kw-chat-command-icons" data-testid="kw-chat-command-icons">
+      ${commands.map(command => {
+        const Icon = command.icon
+        return html`
+          <button
+            key=${command.id}
+            type="button"
+            class=${`kw-chat-command-icon${command.danger ? ' danger' : ''}${command.active ? ' active' : ''} v2-monitoring-action`}
+            aria-label=${command.label}
+            aria-pressed=${command.active ? 'true' : undefined}
+            title=${command.title}
+            disabled=${busyAction !== null}
+            onClick=${() => { void run(command) }}
+            data-testid=${`kw-chat-command-${command.id}`}
+          >
+            <${Icon} size=${14} aria-hidden="true" />
+          </button>
+        `
+      })}
     </div>
   `
 }
 
 function ChatHeader({
   keeper,
+  detailOpen,
+  onToggleDetail,
+  onOpenTurnInspector,
+  artifactsOpen,
+  onToggleArtifacts,
   mobile = false,
   onBack,
   onOpenRail,
   onOpenConfig,
-  onOpenDetail,
 }: {
   keeper: Keeper
+  detailOpen: boolean
+  onToggleDetail: () => void
+  onOpenTurnInspector: () => void
+  artifactsOpen: boolean
+  onToggleArtifacts: () => void
   mobile?: boolean
   onBack?: () => void
   onOpenRail?: () => void
   onOpenConfig?: () => void
-  onOpenDetail?: () => void
 }): VNode {
   const bucket = keeperBucket(keeper)
+  const tone = keeperStatusTone(keeper)
+  const pill = statePillTone(tone)
   const live = bucket === 'running'
-  const tone = phaseTone(keeper.lifecycle_phase)
-  const pillTone: PillTone = tone === 'idle' ? 'neutral' : tone === 'busy' ? 'warn' : tone
-  const pulse = phasePulse(keeper.lifecycle_phase)
-  const phase = keeper.lifecycle_phase ?? keeper.phase ?? keeperPhaseLabel(keeper)
-  // Prototype ChatHeader sub-line shows the keeper's sandbox basepath only.
-  const basepath = keeper.sandbox_target ?? ''
 
-  // Prototype ChatHeader (shell.jsx): avatar + identity (name + phase pill) +
-  // basepath sub + action icons. The back button is mobile-only (desktop keeps
-  // the roster visible). Runtime/model/throughput live in the context rail.
+  // Single-row header: identity + status + actions only. Runtime / model /
+  // throughput / scope live in the context rail (ThroughputSection) — the
+  // canonical home — so the header stays slim and the conversation gets the
+  // vertical space instead of a redundant metadata sub-row.
   return html`
-    <div class=${`chat-head${mobile ? ' is-mobile' : ''}`}>
-      ${mobile
-        ? html`<button
-            type="button"
-            class="chat-back"
-            title="키퍼 로스터"
-            aria-label="키퍼 로스터로 돌아가기"
-            onClick=${() => {
-              keeperMobilePane.value = 'roster'
-              onBack?.()
-            }}
-            data-testid="kw-chat-back-to-roster"
-          ><${ChevronLeft} size=${16} aria-hidden="true" /></button>`
-        : null}
+    <div class="kw-chat-head v2-monitoring-toolbar">
+      <button
+        type="button"
+        class="kw-chat-back kw-act v2-monitoring-action"
+        title="키퍼 로스터"
+        aria-label="키퍼 로스터로 돌아가기"
+        onClick=${() => {
+          keeperMobilePane.value = 'roster'
+          onBack?.()
+        }}
+        data-testid="kw-chat-back-to-roster"
+      >
+        <${ChevronLeft} size=${16} aria-hidden="true" />
+      </button>
       <${WorkspaceSigil} id=${keeper.name} size=${40} beat=${live} />
-      <div class="chat-id">
-        <div class="name-row">
-          <h2>${keeper.name}</h2>
-          <${Pill} tone=${pillTone} dot=${pillTone === 'neutral' ? 'idle' : pillTone} dotPulse=${pulse} title=${keeperDisplayStatus(keeper)}>${phase}</${Pill}>
-        </div>
-        <div class="sub">
-          <span class="sub-ns" title="basepath — 이 keeper의 격리된 worktree 루트"><span class="mono">${basepath || '—'}</span></span>
+      <div class="kw-chat-id">
+        <div class="kw-chat-name-row">
+          <h2 class="kw-chat-name">${keeper.koreanName ?? keeper.name}</h2>
+          <span class=${`kw-state-pill ${pill}`} title=${keeperDisplayStatus(keeper)}>
+            <${StatusDot} tone=${tone} pulse=${live} />${keeperPhaseLabel(keeper)}
+          </span>
         </div>
       </div>
-      <div class="chat-actions">
+      <div class="kw-chat-actions">
         <${WorkspaceCommandButtons}
+          key=${keeper.name}
           keeper=${keeper}
           mobile=${mobile}
+          detailOpen=${detailOpen}
+          artifactsOpen=${artifactsOpen}
+          onOpenTurnInspector=${onOpenTurnInspector}
+            onToggleArtifacts=${onToggleArtifacts}
+          onToggleDetail=${onToggleDetail}
           onOpenConfig=${onOpenConfig}
         />
-        ${onOpenDetail
-          ? html`
-              <button
-                type="button"
-                class="act icon"
-                aria-label="상세"
-                title="운영 상세"
-                onClick=${onOpenDetail}
-                data-testid="kw-chat-detail"
-              >
-                <span aria-hidden="true">ℹ</span>
-              </button>
-            `
-          : null}
         ${mobile
           ? html`
               <button
@@ -288,7 +366,7 @@ function ChatHeader({
                 onClick=${onOpenRail}
                 data-testid="kw-chat-mobile-context"
               >
-                <span aria-hidden="true">ⓘ</span>
+                <${Info} size=${14} aria-hidden="true" />
                 <span>컨텍스트</span>
               </button>
             `
@@ -328,6 +406,7 @@ function TurnInspectorDrawer({
     />
   `
 }
+
 
 // RFC keeper-conversation-hitl-flow §4.1-A: a slim, non-interactive cue at the
 // top of the conversation so an operator who arrives via "대화에서 검토" sees the
@@ -374,20 +453,59 @@ export function KeeperWorkspaceChat({
 }): VNode {
   const [turnInspectorOpen, setTurnInspectorOpen] = useState(false)
   const [turnInspectorEntry, setTurnInspectorEntry] = useState<KeeperConversationEntry | null>(null)
-  const openTurnInspector = useCallback((entry?: KeeperConversationEntry) => {
+  const [artifactsOpen, setArtifactsOpen] = useState(false)
+  const [composerBusyAction, setComposerBusyAction] = useState<WorkspaceCommandId | null>(null)
+  const entries = keeperThreads.value[keeper.name] ?? []
+  const detailOpen = false
+  const onToggleDetail = onOpenDetail ?? (() => {})
+  const openTurnInspector = (entry?: KeeperConversationEntry) => {
     setTurnInspectorEntry(entry ?? null)
     setTurnInspectorOpen(true)
-  }, [])
+  }
+  const workspaceCommands = [
+    ...lifecycleCommands(keeper),
+    ...workspaceUtilityCommands({
+      detailOpen,
+      artifactsOpen,
+      onOpenTurnInspector: () => openTurnInspector(),
+          onToggleArtifacts: () => setArtifactsOpen((o) => !o),
+      onToggleDetail,
+      onOpenConfig,
+    }),
+  ]
+  const composerCommands: ChatComposerCommand[] = workspaceCommands.map(command => ({
+    id: String(command.id),
+    group: workspaceCommandGroup(command),
+    label: command.label,
+    hint: command.title,
+    glyph: COMMAND_GLYPHS[command.id],
+    danger: command.danger,
+    disabled: composerBusyAction !== null,
+    disabledReason: composerBusyAction !== null ? '다른 keeper 명령 실행 중' : undefined,
+    run: async () => {
+      if (composerBusyAction !== null) return
+      setComposerBusyAction(command.id)
+      try {
+        await command.onClick()
+      } finally {
+        setComposerBusyAction(null)
+      }
+    },
+  }))
 
   return html`
     <section class="kw-chat v2-monitoring-surface" role="region" aria-label=${`${keeper.name} 대화`}>
       <${ChatHeader}
         keeper=${keeper}
+        detailOpen=${detailOpen}
+        onToggleDetail=${onToggleDetail}
+        onOpenTurnInspector=${() => openTurnInspector()}
+        artifactsOpen=${artifactsOpen}
+        onToggleArtifacts=${() => setArtifactsOpen((o) => !o)}
         mobile=${mobile}
         onBack=${onBack}
         onOpenRail=${onOpenRail}
         onOpenConfig=${onOpenConfig}
-        onOpenDetail=${onOpenDetail}
       />
       <${PendingApprovalCue} keeper=${keeper} />
       <div class="kw-chat-body">
@@ -395,8 +513,12 @@ export function KeeperWorkspaceChat({
           keeperName=${keeper.name}
           placeholder=${`${keeper.name} 에게 메시지…  (⌘+Enter 전송)`}
           layout="workspace"
+          composerCommands=${composerCommands}
           onInspectTurn=${openTurnInspector}
         />
+        ${artifactsOpen
+          ? html`<${ChatArtifactPanel} entries=${entries} />`
+          : null}
       </div>
       <${TurnInspectorDrawer}
         keeperName=${keeper.name}

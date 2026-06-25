@@ -330,8 +330,8 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
   // Full tabbed detail (FSM / 진단 / 정체성 / 설정 / 디버그) — the original
   // detail-page layout, preserved verbatim and surfaced behind "운영 상세".
   const detailContent = html`
-    <div class="mx-auto flex w-full max-w-[1380px] flex-col gap-5 pb-8 v2-monitoring-surface" data-route-focused-keeper=${keeper.name}>
-      <div class="sm:sticky sm:top-0 z-20 mx-auto w-full max-w-[1180px] overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] shadow-none backdrop-blur-xl v2-monitoring-toolbar">
+    <div class="kw-detail-content mx-auto flex w-full max-w-[1380px] flex-col gap-5 pb-8 v2-monitoring-surface" data-route-focused-keeper=${keeper.name}>
+      <div class="kw-detail-full-head sm:sticky sm:top-0 z-20 mx-auto w-full max-w-[1180px] overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] shadow-none backdrop-blur-xl v2-monitoring-toolbar">
         <div class="flex flex-col items-stretch justify-between gap-3 px-4 py-2.5 sm:flex-row sm:items-center sm:px-5">
           <${KeeperDetailHeaderInfo}
             keeper=${keeper}

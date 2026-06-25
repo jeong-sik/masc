@@ -49,6 +49,18 @@ export interface ChatComposerSendPayload {
   text: string
 }
 
+export interface ChatComposerCommand {
+  id: string
+  group: string
+  label: string
+  hint?: string
+  glyph?: string
+  danger?: boolean
+  disabled?: boolean
+  disabledReason?: string
+  run: () => void | Promise<void>
+}
+
 /** Status dot wrapper — maps keeper-v2 status strings to shared StatusDot tones. */
 export function ChatStatusDot({ status, pulse }: { status: string; pulse?: boolean }): VNode {
   const state = status === 'run' ? 'ok' : status === 'pause' ? 'warn' : status === 'off' ? 'idle' : status
@@ -324,6 +336,15 @@ let composerActionSeq = 0
 function nextComposerClientActionId(): string {
   composerActionSeq += 1
   return `composer-send-${Date.now()}-${composerActionSeq}`
+}
+
+const VOICE_WAVE_BARS = [0.32, 0.58, 0.44, 0.82, 0.38, 0.66, 0.92, 0.5, 0.72, 0.4, 0.86, 0.56, 0.7, 0.46, 0.78, 0.36]
+
+function formatVoiceClock(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds))
+  const minutes = Math.floor(whole / 60)
+  const secs = whole % 60
+  return `${minutes}:${String(secs).padStart(2, '0')}`
 }
 
 function dataUriToText(data: string): string | null {
@@ -2890,6 +2911,7 @@ export function ChatComposer({
   lastEventAt,
   queueEnabled = false,
   queueCount = 0,
+  commands = [],
   onDraftChange,
   onSend,
   onAbort,
@@ -2907,6 +2929,7 @@ export function ChatComposer({
    *  enqueues the message instead of dispatching it immediately. */
   queueEnabled?: boolean
   queueCount?: number
+  commands?: ChatComposerCommand[]
   /** Optional controlled draft handler. When omitted the composer keeps its
    *  own draft state, which prevents the host from re-rendering on every
    *  keystroke (see keeper-workspace chat performance). */
@@ -2926,8 +2949,10 @@ export function ChatComposer({
   draftPersistKey?: string
 }) {
   const [elapsed, setElapsed] = useState(0)
+  const [voiceElapsed, setVoiceElapsed] = useState(0)
   const [focus, setFocus] = useState(false)
   const [drag, setDrag] = useState(false)
+  const [slashIdx, setSlashIdx] = useState(0)
   const [attachments, setAttachments] = useState<KeeperConversationAttachment[]>([])
   const isControlled = typeof draftProp === 'string'
   const draftPersistStoreKey = draftPersistKey?.trim() ?? ''
@@ -2985,7 +3010,20 @@ export function ChatComposer({
     onTranscribed: (text) => {
       setDraft(draft.trim() === '' ? text : `${draft}\n${text}`)
     },
+    onError: (message) => showToast(message, 'error'),
   })
+
+  useEffect(() => {
+    if (voice.state !== 'recording') {
+      setVoiceElapsed(0)
+      return
+    }
+    const startedAt = Date.now()
+    const tick = () => setVoiceElapsed(Math.round((Date.now() - startedAt) / 1000))
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [voice.state])
 
   useEffect(() => {
     if (!streaming || !streamStartedAt) {
@@ -3014,6 +3052,20 @@ export function ChatComposer({
   const isStreamWarning = streaming && elapsed > 60
   const hasContent = draft.trim() !== '' || attachments.length > 0
   const sendDisabled = disabled || !hasContent || (streaming && !queueEnabled)
+  const slashMatch = /^\/([^\s]*)$/.exec(draft)
+  const slashQuery = slashMatch ? slashMatch[1].toLowerCase() : null
+  const slashMatches = useMemo(
+    () => slashQuery === null
+      ? []
+      : commands.filter(command => {
+        const id = command.id.toLowerCase()
+        const label = command.label.toLowerCase()
+        return id.startsWith(slashQuery) || label.startsWith(slashQuery)
+      }),
+    [commands, slashQuery],
+  )
+  const slashOpen = voice.state === 'idle' && slashMatches.length > 0
+  const activeSlashIdx = slashOpen ? Math.min(slashIdx, slashMatches.length - 1) : 0
 
   const isPrimary = layout === 'primary'
 
@@ -3083,18 +3135,54 @@ export function ChatComposer({
       text,
     })
     setDraft('')
+    setSlashIdx(0)
     setAttachments([])
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
+  }
+
+  const runSlashCommand = (command?: ChatComposerCommand) => {
+    if (!command || command.disabled) return
+    setDraft('')
+    setSlashIdx(0)
+    if (textareaRef.current) textareaRef.current.style.height = 'auto'
+    void Promise.resolve(command.run()).catch((err) => {
+      const message = err instanceof Error ? err.message : `${command.label} 실행 실패`
+      showToast(message, 'error')
+    })
   }
 
   const grow = (event: Event) => {
     const target = event.target as HTMLTextAreaElement
     setDraft(target.value)
+    setSlashIdx(0)
     target.style.height = 'auto'
     target.style.height = `${Math.min(target.scrollHeight, 160)}px`
   }
 
   const onKeyDown = (event: KeyboardEvent) => {
+    if (slashOpen) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        setSlashIdx((activeSlashIdx + 1) % slashMatches.length)
+        return
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        setSlashIdx((activeSlashIdx - 1 + slashMatches.length) % slashMatches.length)
+        return
+      }
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault()
+        runSlashCommand(slashMatches[activeSlashIdx])
+        return
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setDraft('')
+        setSlashIdx(0)
+        return
+      }
+    }
     if (isSubmitEnter(event) && !event.shiftKey) {
       event.preventDefault()
       if (!sendDisabled) {
@@ -3150,84 +3238,137 @@ export function ChatComposer({
             `
           : null}
         <div class=${boxClass}>
+          ${slashOpen
+            ? html`
+                <div class="slashmenu" role="listbox" aria-label="keeper slash commands">
+                  <div class="slashmenu-h">keeper · 명령</div>
+                  ${slashMatches.map((command, index) => html`
+                    <button
+                      key=${`${command.group}:${command.id}`}
+                      type="button"
+                      role="option"
+                      aria-selected=${index === activeSlashIdx ? 'true' : 'false'}
+                      class=${`slashmenu-i ${index === activeSlashIdx ? 'on' : ''}${command.danger ? ' danger' : ''}`}
+                      disabled=${command.disabled}
+                      title=${command.disabledReason ?? command.hint ?? command.label}
+                      onMouseEnter=${() => setSlashIdx(index)}
+                      onMouseDown=${(event: MouseEvent) => event.preventDefault()}
+                      onClick=${() => runSlashCommand(command)}
+                    >
+                      <span class="slashmenu-gl">${command.glyph ?? '⌁'}</span>
+                      <span class="slashmenu-cmd mono">/${command.id}</span>
+                      <span class="slashmenu-lbl">${command.label}</span>
+                      <span class="slashmenu-hint">${command.disabledReason ?? command.hint ?? ''}</span>
+                      <span class="slashmenu-grp">${command.group}</span>
+                    </button>
+                  `)}
+                </div>
+              `
+            : null}
           <!-- Flush borderless textarea: prototype composer.jsx <textarea> has
                no inline styling; all box styling (border:0, outline:0,
                transparent bg, padding:9px 0) comes from .composer textarea in
                chat.css (mirrors styles/v2.css:932-936). Removing the prior
                inline Tailwind (control-textarea + border + rounded + px/py +
                bg + focus ring) drops the nested box the prototype lacks. -->
-          <textarea
-            ref=${textareaRef}
-            class="composer-textarea"
-            placeholder=${placeholder}
-            aria-label="메시지 입력"
-            value=${draft}
-            onInput=${grow}
-            onKeyDown=${onKeyDown}
-            onFocus=${() => setFocus(true)}
-            onBlur=${() => setFocus(false)}
-            disabled=${disabled}
-          ></textarea>
-          <div class="composer-tools">
-            <input
-              ref=${fileInputRef}
-              type="file"
-              accept="image/png,image/jpeg,image/gif,image/webp,audio/mpeg,audio/mp4,audio/wav,audio/webm,audio/ogg,text/plain,text/markdown,application/json,text/csv"
-              multiple
-              class="hidden"
-              aria-label="파일 첨부"
-              onChange=${(event: Event) => {
-                const target = event.target as HTMLInputElement
-                void ingestFiles(target.files)
-                target.value = ''
-              }}
-            />
-            <button
-              type="button"
-              class="ctool"
-              title="이미지·파일 첨부"
-              aria-label="이미지·파일 첨부"
-              disabled=${disabled}
-              onClick=${() => fileInputRef.current?.click()}
-            >
-              ⊕
-            </button>
-            ${voice.supported ? html`
-              <button
-                type="button"
-                class="ctool ${voice.state === 'recording' ? 'recording' : ''}"
-                title=${voice.state === 'recording' ? '녹음 중지' : voice.state === 'transcribing' ? '음성 인식 중' : '음성으로 입력'}
-                aria-label=${voice.state === 'recording' ? '녹음 중지' : '음성으로 입력'}
-                disabled=${voice.state === 'transcribing' || disabled}
-                onClick=${() => (voice.state === 'recording' ? voice.stop() : voice.start())}
-              >
-                ${voice.state === 'recording'
-                  ? html`<${Square} size=${15} aria-hidden="true" />`
-                  : html`<${Mic} size=${15} aria-hidden="true" />`}
-              </button>
-            ` : null}
-            <button
-              type="button"
-              class="send ${isStreamWarning && !canQueue ? 'warn' : ''}"
-              disabled=${sendDisabled}
-              onClick=${handleSend}
-            >
-              ${streamLabel}
-            </button>
-            ${streaming && onAbort
-              ? html`
+          ${voice.state === 'recording' || voice.state === 'transcribing'
+            ? html`
+                <div class=${`rec-bar ${voice.state === 'transcribing' ? 'transcribing' : ''}`}>
+                  <span class="rec-dot"></span>
+                  <span class="rec-lbl">${voice.state === 'recording' ? '녹음 중' : '전사 중'}</span>
+                  <span class="rec-clock mono">${formatVoiceClock(voiceElapsed)}</span>
+                  <div class="rec-wave" aria-hidden="true">
+                    ${VOICE_WAVE_BARS.map((height, index) => html`
+                      <span
+                        key=${index}
+                        class="rbar"
+                        style=${`height: ${Math.round(4 + height * 18)}px; animation-delay: ${index * 34}ms`}
+                      ></span>
+                    `)}
+                  </div>
                   <button
                     type="button"
-                    class="ctool abort"
-                    title="응답 중지"
-                    aria-label="응답 중지"
-                    onClick=${onAbort}
+                    class="rec-btn stop"
+                    title=${voice.state === 'recording' ? '녹음 종료 — 받아쓰기' : '음성 전사 중'}
+                    disabled=${voice.state !== 'recording'}
+                    onClick=${voice.stop}
                   >
-                    중지${elapsed > 0 ? ` (${elapsed}s)` : ''}
+                    <${Square} size=${13} aria-hidden="true" /> 완료
                   </button>
-                `
-              : null}
-          </div>
+                </div>
+              `
+            : html`
+                <textarea
+                  ref=${textareaRef}
+                  class="composer-textarea"
+                  placeholder=${placeholder}
+                  aria-label="메시지 입력"
+                  value=${draft}
+                  onInput=${grow}
+                  onKeyDown=${onKeyDown}
+                  onFocus=${() => setFocus(true)}
+                  onBlur=${() => setFocus(false)}
+                  disabled=${disabled}
+                ></textarea>
+                <div class="composer-tools">
+                  <input
+                    ref=${fileInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/gif,image/webp,audio/mpeg,audio/mp4,audio/wav,audio/webm,audio/ogg,text/plain,text/markdown,application/json,text/csv"
+                    multiple
+                    class="hidden"
+                    aria-label="파일 첨부"
+                    onChange=${(event: Event) => {
+                      const target = event.target as HTMLInputElement
+                      void ingestFiles(target.files)
+                      target.value = ''
+                    }}
+                  />
+                  <button
+                    type="button"
+                    class="ctool"
+                    title="이미지·파일 첨부"
+                    aria-label="이미지·파일 첨부"
+                    disabled=${disabled}
+                    onClick=${() => fileInputRef.current?.click()}
+                  >
+                    ⊕
+                  </button>
+                  ${voice.supported ? html`
+                    <button
+                      type="button"
+                      class="ctool"
+                      title="음성으로 입력"
+                      aria-label="음성으로 입력"
+                      disabled=${disabled}
+                      onClick=${() => { void voice.start() }}
+                    >
+                      <${Mic} size=${15} aria-hidden="true" />
+                    </button>
+                  ` : null}
+                  <button
+                    type="button"
+                    class="send ${isStreamWarning && !canQueue ? 'warn' : ''}"
+                    disabled=${sendDisabled}
+                    onClick=${handleSend}
+                  >
+                    ${streamLabel}
+                  </button>
+                  ${streaming && onAbort
+                    ? html`
+                        <button
+                          type="button"
+                          class="ctool abort"
+                          title="응답 중지"
+                          aria-label="응답 중지"
+                          onClick=${onAbort}
+                        >
+                          중지${elapsed > 0 ? ` (${elapsed}s)` : ''}
+                        </button>
+                      `
+                    : null}
+                </div>
+              `}
         </div>
         <div class="composer-foot">
           <span class="hint">

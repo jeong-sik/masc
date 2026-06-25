@@ -249,6 +249,8 @@ export function App() {
   const isCodeSurface = currentTab === 'code'
   const widgetSoloMode = isWidgetSoloRoute(route.value)
   const keeperDetailMode = isKeeperDetailDashboardRoute(route.value)
+  const mobileKeeperPane = isMobile && keeperDetailMode ? keeperMobilePane.value : null
+  const mobileKeeperReadingMode = mobileKeeperPane === 'chat'
   const focusMode = dashboardFocusMode.value
   const mobileDrawerOpen = isMobile && mobileMenuOpen.value
   const suppressFloatingChrome = shouldSuppressFloatingChrome({
@@ -288,6 +290,7 @@ export function App() {
       data-volt=${tweaksVolt.value}
       data-focus-mode=${focusMode ? 'true' : 'false'}
       data-keeper-detail-mode=${keeperDetailMode ? 'true' : 'false'}
+      data-reading=${mobileKeeperReadingMode ? 'true' : 'false'}
       data-widget-solo=${widgetSoloMode ? 'true' : 'false'}
       style=${{
         // tweaksFontScale.value is a percentage integer (80..140, default 100).
@@ -296,6 +299,7 @@ export function App() {
         // in #21998) double-applies the percentage: 100 -> `1 * 1%` -> 0.16px,
         // collapsing every inherited-font-size glyph (emoji, icon chars) to ~0px.
         '--twk-font-scale': String(tweaksFontScale.value),
+        '--kw-thread-w': `${tweaksThreadW.value}px`,
         '--thread-w': `${tweaksThreadW.value}px`,
       }}
     >

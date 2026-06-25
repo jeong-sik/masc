@@ -1324,3 +1324,1351 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   bootstrap, and one Vite WebSocket timeout; `agent-browser network requests
   --filter 401` and `--filter 500` did not retain matching captured requests
   after the smoke.
+
+## v2 (26) Mobile Follow-up - 2026-06-25
+
+Source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2`, `/Users/dancer/Downloads/v2 (26)/fleet.jsx`, `/Users/dancer/Downloads/v2 (26)/scraps`, and selected `/Users/dancer/Downloads/v2 (26)/uploads` images.
+
+### Implemented In Current Worktree
+
+- Dashboard HTML now matches the v2 (26) standalone mobile viewport contract by using `viewport-fit=cover`, so safe-area layout rules can align with real phone viewports instead of defaulting to non-cover iOS behavior.
+- Keeper detail mobile chat now has a CSS-only dynamic viewport/safe-area contract: the focused keeper detail shell, active chat pane, transcript, composer, and mobile context drawer use `100dvh`, safe-area padding, and contained overscroll without changing the keeper runtime state model.
+- The app shell now exposes and uses `data-reading="true"` when the mobile keeper detail pane is in chat mode, matching the v2 (26) reference's explicit reading-mode state and suppressing mobile bottom/status/focus chrome across the shell's mobile band while keeping the keeper master-detail geometry at its narrower breakpoint.
+- Breakpoint ownership is explicit in the source guard: shell chrome suppression follows the mobile shell band, while keeper roster/chat master-detail layout follows the narrower keeper pane band. This prevents a future single-breakpoint cleanup from regressing tablet-width reading mode.
+- The existing `대화 본문 폭` tweak now writes the actual `--kw-thread-w` variable consumed by keeper workspace/chat CSS, while preserving the older `--thread-w` alias. This reconnects the tweak-panel SSOT to the rendered keeper conversation width.
+- `dashboard/src/styles/keeper-workspace-mobile.test.ts` now guards the source contracts for `viewport-fit=cover`, mobile reading-mode exposure/suppression, `--kw-thread-w`, `100dvh`, safe-area composer padding, and absence of local path/env defaults or downloaded artifact path dependencies in the implementation files for this visual slice. This is source-level proof only; it does not replace rendered mobile screenshot parity.
+
+### Still Missing Vs v2 (26)
+
+- Mobile pixel parity is not yet visually proven against a rendered dashboard screenshot at phone width. The current pass is source-aligned but still requires browser evidence before claiming pixel-perfect completion.
+- Composer parity is still incomplete for exact v2 (26) multimodal affordance grouping: the live dashboard uses backed chat transport and existing attachment paths, while the prototype has a richer local tray/voice/slash-command presentation.
+- The mobile context drawer now has viewport/safe-area parity, but its exact rail card density and spacing still need a screenshot comparison against the v2 (26) reference.
+- Upload screenshots under `/Users/dancer/Downloads/v2 (26)/uploads` include non-MASC external-product captures; those should not be treated as MASC layout SSOT unless a future pass links a specific image to a MASC screen.
+
+### Should Stay Out Of Scope
+
+- No OAS/provider/model transport logic should be added to the dashboard for visual parity. OAS remains the provider/model/transport boundary; this pass only changes MASC dashboard layout state and CSS.
+- No local-only prototype state should be copied into runtime-backed keeper surfaces. If a v2 (26) control has no durable MASC API, keep it read-only, hidden, or explicitly marked as unsupported rather than stubbing it.
+- No local absolute path default such as `/Users/dancer/me` should be introduced in frontend or OCaml runtime code for this visual work.
+
+## v2 (26) Composer/Drawer Source Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/composer.jsx`, `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/v2.css`, `dashboard/src/components/chat/primitives.ts`, `dashboard/src/components/keeper-shared.ts`, and `dashboard/src/styles/chat.css`.
+
+### Implemented In Current Worktree
+
+- Kept the runtime-backed `ChatComposer` as the single owner of attachments, voice input, queueing, abort, and send client action IDs instead of copying standalone prototype state.
+- Scoped phone composer parity to `.kw-composer-inner` CSS: tighter box geometry, 16px mobile textarea font, denser tools, compact send button, truncated hint line, bounded attachment tray, and mobile-safe draft chip overflow.
+- Tightened mobile context drawer spacing in `.kw-mobile-rail-drawer` without changing keeper/OAS runtime boundaries.
+
+### Still Missing Vs v2 (26)
+
+- Slash-command palette visual parity remains incomplete because the runtime composer currently does not expose the standalone `slashmenu` command surface.
+- Voice recording does not render the standalone waveform `rec-bar`; runtime voice input currently transcribes through the shared `useVoiceInput` path.
+- Composer/drawer parity is still source-level only until a rendered mobile screenshot is compared against the v2 (26) reference.
+
+## v2 (26) Runtime Slash Composer Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/composer.jsx`, `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/v2.css`, `dashboard/src/components/chat/primitives.ts`, `dashboard/src/components/keeper-shared.ts`, and `dashboard/src/components/keeper-workspace/keeper-workspace-chat.ts`.
+
+### Implemented In Current Worktree
+
+- Added an optional `ChatComposerCommand` contract to the shared runtime `ChatComposer` instead of copying the prototype's local `window.FSM_ACTIONS` command source.
+- Added a v2-style `slashmenu` composer palette for exact `/command` prefix input, keyboard navigation, disabled command display, and error surfacing through existing dashboard toasts.
+- Wired workspace keeper chat composer commands to the same real command sources already used by the header: `keeperActionVisibility`, `runKeeperAction`, turn inspector, artifacts, context clear, detail toggle, and keeper config.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so the v2 (26) mobile contract now checks slash-command shell CSS and runtime-backed command wiring.
+
+### Still Missing Vs v2 (26)
+
+- Slash-command rendered spacing, z-index, and keyboard focus behavior are not visually proven on a phone viewport until browser validation is run.
+- Voice recording waveform `rec-bar` parity remains incomplete; the runtime still uses shared speech-to-text state instead of the standalone waveform tray.
+- Exact pixel parity for command palette, composer tray, and mobile drawer remains unverified without a rendered screenshot comparison.
+
+## v2 (26) Runtime Voice Composer Follow-up - 2026-06-25
+
+Additional source reviewed: `dashboard/src/components/chat/voice-input.ts`, `dashboard/src/components/chat/primitives.ts`, and `dashboard/src/styles/chat.css`.
+
+### Implemented In Current Worktree
+
+- Kept real voice ownership in `useVoiceInput`: `MediaRecorder`, stream teardown, upload to `/api/v1/voice/transcribe`, and transcript insertion remain in the existing runtime hook.
+- Added a v2-style composer `rec-bar` for `recording` and `transcribing` states instead of leaving voice input as only a mic icon state change.
+- Added deterministic animated waveform bars, elapsed recording clock, stop/complete action, and transcribing visual state without introducing fake audio payloads or prototype-local voice draft state.
+- Hid slash-command suggestions while voice capture/transcription is active so stale `/` drafts do not compete with the recording surface.
+- Tightened the recording/transcribing CSS state so disabled stop controls do not render active hover treatment and the transcribing label uses the accent state color.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so voice composer presentation must stay backed by `useVoiceInput` and the shared `rec-bar` styling.
+
+### Still Missing Vs v2 (26)
+
+- The waveform is a visual activity indicator, not sampled microphone amplitude; real amplitude visualization would need an `AudioContext` analyser decision and rendered QA.
+- Voice bar mobile spacing and composer replacement behavior are still unverified in browser.
+- Full pixel-perfect completion remains unproven until rendered mobile screenshots are compared to the v2 (26) reference.
+
+## v2 (26) Fleet/Roster Source Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/fleet.jsx`, `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/fleet.css`, `dashboard/src/components/keeper-workspace/keeper-workspace-roster.ts`, and `dashboard/src/styles/keeper-workspace.css`.
+
+### Implemented In Current Worktree
+
+- Added the v2 fleet row tone-rail treatment to live keeper roster rows via `data-tone=${tone}` and scoped `.kw-kp-row::before` CSS.
+- Added a compact per-row context pressure bar derived from existing `keeper.context_ratio`, including hot-state styling at the same `0.8` threshold already used by the backed fleet summary.
+- Added a compact recent-tool signal derived from existing live keeper snapshot fields: `latest_tool_names`, `recent_tool_names`, and `latest_tool_call_count`. This closes the reference fleet's `fl-tool` gap without copying the prototype `lastTool` seed or adding N per-row tool-call fetches.
+- Updated the roster row sizing contract to `ROSTER_ROW_ESTIMATED_HEIGHT = 92` so `content-visibility` and the shared `VirtualList` estimate account for the added context pressure + recent-tool lines instead of preserving the old 58px two-line row assumption.
+- Kept the roster backed by the existing `keepers` store, `keeperActionVisibility`, and `runKeeperAction`; no local fleet seed state or prototype FSM data was copied.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so fleet roster pressure/tone indicators must remain backed by live keeper fields.
+
+### Still Missing Vs v2 (26)
+
+- The current dashboard roster renders recent tool as a compact row signal inside the narrow keeper list, not as a separate wide-table column like `/fleet.jsx`.
+- Mobile row density, context bar spacing, tone-rail visibility, and recent-tool truncation are not browser/screenshot verified.
+- Full pixel-perfect fleet/roster parity remains unproven without rendered mobile comparison.
+
+## v2 (26) Source Guard Scope Follow-up - 2026-06-25
+
+### Implemented In Current Worktree
+
+- Narrowed the visual-parity source guard to the objective's concrete risks: local absolute paths, downloaded artifact paths, `default_base`, and direct frontend env reads.
+- Removed the over-broad raw `MASC_` / `OAS_` substring ban from the guard. Legitimate MASC identifiers and boundary documentation strings should not fail a visual parity guard; OAS coupling remains governed by code ownership and explicit provider/transport changes, not by a raw substring heuristic.
+
+### Still Missing Vs v2 (26)
+
+- Guard scope has not been executed in this turn.
+- Rendered mobile parity remains unverified.
+
+## v2 (26) Mobile Slash Menu Geometry Follow-up - 2026-06-25
+
+### Implemented In Current Worktree
+
+- Added keeper-scoped mobile slash menu geometry: safe-area-aware horizontal edges, tighter phone item spacing, compact command column width, hidden group chip, and bounded `min(46vh, 320px)` menu height.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so the mobile slash menu remains bounded and safe-area-aware.
+
+### Still Missing Vs v2 (26)
+
+- Slash menu visual placement, focus state, and scroll behavior remain unverified in a rendered mobile viewport.
+- Full pixel-perfect completion still requires browser screenshot comparison against the v2 (26) reference.
+
+## v2 (26) Mobile Roster Menu Geometry Follow-up - 2026-06-25
+
+### Implemented In Current Worktree
+
+- Added mobile bounds for the roster row command menu: safe-area-aware `max-width`, bounded `min(70dvh, 420px)` height, contained overscroll, and menu-local vertical scrolling.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so roster menus remain phone-bounded.
+
+### Still Missing Vs v2 (26)
+
+- Roster menu placement and clipping behavior are not browser-verified on mobile.
+- Full pixel-perfect roster/menu parity remains unproven without rendered screenshot comparison.
+
+## v2 (26) Mobile Context Rail Density Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/rails.jsx`, `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/v2.css`, and `dashboard/src/components/keeper-workspace/keeper-workspace-rail.ts`.
+
+### Implemented In Current Worktree
+
+- Matched the mobile context drawer closer to the v2 reference geometry: darker overlay, `min(330px, 88vw)` drawer width, safe-area max-width, and tighter right-side shadow.
+- Tightened rail-card density inside the mobile drawer: v2-like section heading scale, compact card/vital/task padding, single-column context metadata, denser readonly compaction metadata, and 44px minimum detail action height.
+- Kept the runtime rail backed by live keeper/task/tool data and the existing `masc_keeper_compact` action path; no standalone prototype memory, task, or compaction state was copied.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so the mobile context drawer geometry and live-source rail wiring remain explicit.
+
+### Still Missing Vs v2 (26)
+
+- The reference rail has additional prototype affordances such as memory inspector and compaction snapshot buttons; the runtime dashboard only exposes controls backed by current MASC APIs.
+- Mobile context drawer placement, close affordance spacing, scroll behavior, and card density are not browser/screenshot verified.
+- Full pixel-perfect context rail parity remains unproven without rendered mobile comparison.
+
+## v2 (26) Mobile Detail Surface Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/keeper-config.jsx`, `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css`, `dashboard/src/components/keeper-detail-page.ts`, `dashboard/src/components/keeper-detail-body.ts`, and `dashboard/src/components/keeper-detail-shell.ts`.
+
+### Implemented In Current Worktree
+
+- Added explicit runtime detail shell hooks: `kw-detail-content`, `kw-detail-full-head`, `kw-detail-body`, `kw-detail-section-rail`, `kw-detail-section-tabs`, and `kw-detail-section-tab`.
+- Moved the mobile “운영 상세” surface closer to the v2 full-detail pattern: full-height content, sticky top identity/action bar, a narrow 56px section rail, content-only scrolling, safe-area padding, and denser active section cards.
+- Closed the follow-up CSS affordance gap on the 56px mobile section rail: `kw-detail-section-tab` is now explicitly `inline-flex` and center-aligned, so the narrow rail does not depend on browser defaults or inherited flex behavior.
+- Matched the mobile keeper config overlay to the v2 full-screen treatment: no phone-side drawer chrome, `100dvh` height, safe-area header/content padding, contained scroll, dark overlay, and 16px form controls to avoid mobile zoom.
+- Kept all detail/config content backed by existing `KeeperDetailBody`, `KeeperDetailSectionRail`, and `KeeperConfigPanel`; no prototype-local config state, fake keeper data, or OAS/provider logic was copied.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so the mobile detail/config surface remains explicit and runtime-owned.
+
+### Still Missing Vs v2 (26)
+
+- The v2 config reference has icon tabs and richer section-local visual primitives; the runtime detail rail currently uses existing text labels and runtime sections.
+- Mobile detail section scroll behavior, sticky rail height, and config overlay form density are not browser/screenshot verified.
+- Full pixel-perfect keeper detail parity remains unproven without rendered mobile comparison.
+
+## v2 (26) Mobile Bubble Typography Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/v2.css` mobile reading uplift and `dashboard/src/components/chat/primitives.ts` chat bubble markup.
+
+### Implemented In Current Worktree
+
+- Added a keeper-scoped phone override for conversation bubbles matching the v2 mobile reading scale: `16.5px` text, `1.68` line-height, `14px 15px` bubble padding, and `13.5px` inline code.
+- Kept the override scoped to `.kw-thread-inner .chat-bubble` so shared chat surfaces outside the keeper workspace do not inherit the phone-specific v2 conversation density.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so future mobile CSS changes keep the v2 bubble reading scale explicit.
+
+### Still Missing Vs v2 (26)
+
+- Rendered mobile bubble wrapping, vertical rhythm, and code-token density are not browser/screenshot verified.
+- Full pixel-perfect conversation parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Mobile Turn Inspector Drawer Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/turn-inspector.jsx`, `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/inspector.css`, `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/v2.css`, `dashboard/src/components/keeper-turn-inspector.ts`, and `dashboard/src/styles/keeper-turn-inspector.css`.
+
+### Implemented In Current Worktree
+
+- Matched the v2 phone drawer contract for the runtime turn inspector: the mobile `.kti-drawer` is now `100vw`, capped at `100vw`, uses `100dvh`, and drops side-panel border/shadow chrome so it behaves as a full-screen phone surface.
+- Added safe-area top padding to the turn inspector header on phones, preserving the existing runtime `KeeperTurnInspector` component and its live turn/tool/transcript data flow.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards to read the turn inspector CSS/component and require the phone-fullscreen drawer contract from the real runtime inspector.
+
+### Still Missing Vs v2 (26)
+
+- Turn inspector mobile header wrapping, summary stat density, transcript scrolling, and close/copy hit targets are not browser/screenshot verified.
+- Full pixel-perfect turn inspector parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Mobile Topbar Copilot Trim Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/v2.css`, `dashboard/src/components/copilot-dock.ts`, and `dashboard/src/styles/copilot-dock.css`.
+
+### Implemented In Current Worktree
+
+- Matched the v2 phone shell trim for the topbar Chat control: the keyboard shortcut is hidden at the mobile shell breakpoint and the text label collapses at `420px`, leaving the icon-only affordance on very narrow phones.
+- Kept the backed `CopilotDockTopBarButton` and dock state unchanged; this is only a shell chrome density adjustment, not a new dock interaction path.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards to cover the topbar copilot markup and the two responsive trim rules.
+
+### Still Missing Vs v2 (26)
+
+- Very-narrow topbar spacing with attention/emergency/auth/status controls is not browser/screenshot verified.
+- Full pixel-perfect phone shell parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Mobile Reading Copilot Suppression Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/v2.css`, `dashboard/src/styles/keeper-workspace.css`, and `dashboard/src/styles/keeper-workspace-mobile.test.ts`.
+
+### Implemented In Current Worktree
+
+- Matched the v2 reading-mode phone shell rule that hides the topbar Chat/copilot trigger while the keeper conversation is already the active 1:1 reading surface.
+- Kept suppression as keeper reading-mode shell CSS, preserving `CopilotDockTopBarButton` ownership and avoiding any new dock/runtime state path.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so `data-reading="true"` now suppresses bottom nav, status tray, focus toggle, and the topbar copilot trigger together.
+
+### Still Missing Vs v2 (26)
+
+- Reading-mode topbar spacing after hiding copilot is not browser/screenshot verified.
+- Full pixel-perfect keeper conversation chrome parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Mobile Thread Rhythm Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/v2.css` mobile thread density rule and `dashboard/src/styles/keeper-workspace.css` keeper transcript overrides.
+
+### Implemented In Current Worktree
+
+- Matched the v2 phone conversation rhythm by setting the keeper mobile transcript gap to `18px`, scoped to `.kw-thread-inner .chat-transcript`.
+- Kept the existing safe-area transcript padding and shared `ChatTranscript` runtime owner unchanged; this only adjusts mobile message vertical rhythm inside the keeper workspace.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so the mobile transcript gap remains explicit alongside the safe-area padding contract.
+
+### Still Missing Vs v2 (26)
+
+- Rendered message stacking, scroll position behavior, and composer overlap with the tighter `18px` rhythm are not browser/screenshot verified.
+- Full pixel-perfect keeper conversation rhythm remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Mobile Thread Top Inset Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/v2.css` mobile `.thread { padding-top: 16px; }` rule and the runtime keeper transcript mobile overrides.
+
+### Implemented In Current Worktree
+
+- Matched the v2 phone conversation top breathing room by setting `.kw-thread-inner .chat-transcript` mobile `padding-top` to `16px`.
+- Kept the override scoped to the keeper workspace transcript and preserved existing safe-area side padding plus the shared `ChatTranscript` runtime owner.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so the mobile top inset is explicit alongside the `18px` message rhythm.
+
+### Still Missing Vs v2 (26)
+
+- Rendered first-message position below the chat header is not browser/screenshot verified.
+- Full pixel-perfect keeper conversation top rhythm remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Mobile Composer Bottom Padding Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/v2.css` mobile `.composer { padding: 10px 12px 14px; }` rule and the runtime keeper composer wrapper overrides.
+
+### Implemented In Current Worktree
+
+- Matched the v2 phone composer bottom breathing room by raising `.kw-composer-wrap` mobile bottom padding from `12px` to `14px`.
+- Preserved safe-area behavior with `max(14px, env(safe-area-inset-bottom, 0px))` instead of copying a fixed prototype padding that could collide with device insets.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so composer bottom padding remains aligned with the v2 mobile contract.
+
+### Still Missing Vs v2 (26)
+
+- Rendered composer/input position relative to the visual viewport and keyboard-safe area is not browser/screenshot verified.
+- Full pixel-perfect composer bottom rhythm remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Mobile Composer Side Padding Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/v2.css` mobile `.composer { padding: 10px 12px 14px; }` rule and the runtime keeper composer wrapper overrides.
+
+### Implemented In Current Worktree
+
+- Matched the v2 phone composer horizontal rhythm by lowering `.kw-composer-inner` mobile left/right padding minimum from `14px` to `12px`.
+- Preserved device inset safety with `max(12px, env(safe-area-inset-left/right, 0px))` instead of copying fixed prototype padding.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so mobile composer side padding remains explicit alongside bottom padding and transcript rhythm.
+
+### Still Missing Vs v2 (26)
+
+- Rendered composer edge alignment against the transcript and slash menu is not browser/screenshot verified.
+- Full pixel-perfect composer horizontal rhythm remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Mobile Composer Textarea Size Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/v2.css` mobile `.composer textarea, .composer-input { font-size: 16px; }` rule and the runtime keeper composer wrapper overrides.
+
+### Implemented In Current Worktree
+
+- Added a keeper-scoped mobile rule setting `.kw-composer-inner .composer textarea` to `16px`, matching the v2 phone composer input scale and preventing mobile browser focus zoom.
+- Kept the rule scoped to the keeper workspace composer so other shared chat surfaces do not inherit this phone-specific density unless they opt into the keeper shell.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so mobile textarea size remains explicit alongside composer side/bottom padding.
+
+### Still Missing Vs v2 (26)
+
+- Rendered textarea height, wrapping, and keyboard-focus behavior are not browser/screenshot verified.
+- Full pixel-perfect composer input parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Mobile Chat Header Actions Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/v2.css` mobile `.chat-head .chat-actions { display: none; }` rule and the runtime keeper workspace command wiring.
+
+### Implemented In Current Worktree
+
+- Hid `.kw-chat-actions` while `data-reading="true"` on the mobile shell, matching the v2 phone conversation header that removes duplicated action chrome.
+- Preserved backed command access through the runtime `ChatComposerCommand` slash menu already wired to lifecycle actions, turn inspector, artifacts, context clear, detail toggle, and config.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so mobile reading mode now suppresses the duplicate header action strip together with bottom/status/focus/copilot chrome.
+
+### Still Missing Vs v2 (26)
+
+- Rendered header height, command discoverability via slash menu, and first-message position after removing the action strip are not browser/screenshot verified.
+- Full pixel-perfect mobile chat header parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Turn Inspector Header Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/inspector.css` header title/trace-id rules and `dashboard/src/styles/keeper-turn-inspector.css`.
+
+### Implemented In Current Worktree
+
+- Matched the v2 turn-inspector header behavior by making `.kti-head h3` `flex: none`, so the title stays stable while the trace id owns truncation.
+- Kept the existing runtime trace-id ellipsis rules on `.kti-head .tid` and extended the source guard to assert both title non-flexing and id truncation behavior.
+- Preserved the current `KeeperTurnInspector` component and live turn/tool/transcript data flow; this is only a drawer-header layout correction.
+
+### Still Missing Vs v2 (26)
+
+- Rendered turn-inspector header wrapping, trace-id truncation, and close/copy hit targets are not browser/screenshot verified.
+- Full pixel-perfect turn-inspector header parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Turn Inspector Header Safe-Area Follow-up - 2026-06-25
+
+Additional source reviewed: runtime `dashboard/src/styles/keeper-turn-inspector.css` mobile drawer rules and the v2 phone drawer/fullscreen convention.
+
+### Implemented In Current Worktree
+
+- Added mobile safe-area left/right padding to `.kti-head`, complementing the existing safe-area top padding for the phone-fullscreen turn inspector drawer.
+- Kept the runtime `KeeperTurnInspector` owner unchanged; this is only a phone drawer header layout correction for title, trace id, copy, and close controls.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so the mobile turn inspector header must include top/left/right safe-area insets.
+
+### Still Missing Vs v2 (26)
+
+- Rendered notch/rounded-corner clearance for the turn inspector header is not browser/screenshot verified.
+- Full pixel-perfect turn-inspector safe-area parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Turn Inspector Metadata Safe-Area Follow-up - 2026-06-25
+
+Additional source reviewed: runtime `dashboard/src/styles/keeper-turn-inspector.css` mobile drawer rules and the v2 phone-fullscreen drawer convention.
+
+### Implemented In Current Worktree
+
+- Added mobile safe-area left/right padding to `.kti-sub`, so the keeper/model/finish/runtime metadata chips align with the safe header edges in the phone-fullscreen turn inspector.
+- Preserved the runtime `KeeperTurnInspector` owner and live turn metadata; this is only a drawer metadata-row layout correction.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so the turn inspector metadata row must include left/right safe-area insets.
+
+### Still Missing Vs v2 (26)
+
+- Rendered chip wrapping, horizontal overflow, and notch/rounded-corner clearance for the metadata row are not browser/screenshot verified.
+- Full pixel-perfect turn-inspector metadata-row parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Turn Inspector Token Strip Safe-Area Follow-up - 2026-06-25
+
+Additional source reviewed: runtime `dashboard/src/styles/keeper-turn-inspector.css` token-economics strip and the v2 phone-fullscreen drawer convention.
+
+### Implemented In Current Worktree
+
+- Added mobile safe-area left/right padding to `.kti-tok`, so the token-economics strip aligns with the safe header and metadata-chip edges in the phone-fullscreen turn inspector.
+- Preserved the runtime `KeeperTurnInspector` owner and live token accounting; this is only a drawer token-strip layout correction.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so the turn inspector token strip must include left/right safe-area insets.
+
+### Still Missing Vs v2 (26)
+
+- Rendered token bar wrapping, progress sizing, and notch/rounded-corner clearance are not browser/screenshot verified.
+- Full pixel-perfect turn-inspector token-strip parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Turn Inspector Close Control Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/v2.css` `.turn-close` dimensions and runtime `dashboard/src/styles/keeper-turn-inspector.css`.
+
+### Implemented In Current Worktree
+
+- Matched the v2 drawer close-control size by changing `.kti-close` from `24px` to `26px` square.
+- Preserved the existing runtime close handler and `KeeperTurnInspector` ownership; this is only a visual/control-size parity correction.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so the runtime inspector close control keeps the v2 drawer dimensions.
+
+### Still Missing Vs v2 (26)
+
+- Rendered close-button alignment, tap target comfort, and interaction state are not browser/screenshot verified.
+- Full pixel-perfect turn-inspector close-control parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Mobile Chat Header Padding Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/v2.css` mobile `.chat-head { padding: 9px 12px; }` rule and the runtime keeper chat header safe-area override.
+
+### Implemented In Current Worktree
+
+- Matched the v2 phone chat-header rhythm by lowering `.kw-chat-head` mobile padding minimums to `9px` vertical and `12px` horizontal.
+- Preserved notch/edge safety with `max(..., env(safe-area-inset-* , 0px))` on top/left/right rather than copying fixed prototype padding.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so mobile chat-header padding remains explicit alongside transcript and composer rhythm.
+
+### Still Missing Vs v2 (26)
+
+- Rendered header height, keeper name/state pill wrapping, and back-button alignment are not browser/screenshot verified.
+- Full pixel-perfect mobile chat-header padding parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Mobile Chat Title Size Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/v2.css` mobile `.chat-id h2 { font-size: 17px; }` rule and the runtime keeper chat title override.
+
+### Implemented In Current Worktree
+
+- Matched the v2 phone chat-title scale by setting `.kw-chat-name` mobile `font-size` to `17px`.
+- Kept the existing runtime keeper identity source and title truncation behavior unchanged; this is only a phone header typography adjustment.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so the mobile keeper title size stays explicit.
+
+### Still Missing Vs v2 (26)
+
+- Rendered keeper-title wrapping, status-pill alignment, and CJK truncation are not browser/screenshot verified.
+- Full pixel-perfect mobile chat-title parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Turn Inspector Summary Stat Density Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/inspector.css` summary stat strip and runtime `dashboard/src/styles/keeper-turn-inspector.css`.
+
+### Implemented In Current Worktree
+
+- Matched the v2 turn-inspector summary stat density by changing `.kti-stat` padding to `11px 14px`.
+- Matched the v2 value spacing by lowering `.kti-stat .v` `margin-top` from `6px` to `5px`.
+- Preserved the existing runtime five-stat data model and responsive `3-column` fallback; this is only visual density alignment.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so the runtime inspector stat density remains tied to the v2 reference.
+
+### Still Missing Vs v2 (26)
+
+- Rendered stat wrapping, numeric alignment, and mobile `3-column` fallback are not browser/screenshot verified.
+- Full pixel-perfect turn-inspector summary-stat parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Turn Inspector Token Strip Density Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/inspector.css` `.ti-tok { padding: 13px 16px; }` rule and runtime `dashboard/src/styles/keeper-turn-inspector.css`.
+
+### Implemented In Current Worktree
+
+- Matched the v2 token-economics strip vertical density by setting `.kti-tok` base padding to `13px var(--sp-4)`.
+- Preserved the mobile safe-area left/right overrides already applied to `.kti-tok`; this change only aligns the vertical rhythm and keeps semantic horizontal spacing.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so the runtime inspector token strip density remains tied to the v2 reference.
+
+### Still Missing Vs v2 (26)
+
+- Rendered token bar height, label/value alignment, and mobile safe-area edge behavior are not browser/screenshot verified.
+- Full pixel-perfect turn-inspector token-strip density parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Mobile Chat Header Gap Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/v2.css` mobile `.chat-head { gap: 10px; }` rule and runtime `dashboard/src/styles/keeper-workspace.css`.
+
+### Implemented In Current Worktree
+
+- Matched the v2 phone chat header spacing by setting mobile `.kw-chat-head` to `gap: 10px`.
+- Preserved the existing safe-area-aware header padding, back affordance, title-size, and hidden mobile actions from the runtime implementation.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so the mobile chat header gap remains tied to the v2 reference.
+
+### Still Missing Vs v2 (26)
+
+- Rendered header alignment, title truncation, and notch/edge clearance are not browser/screenshot verified.
+- Full pixel-perfect chat-header parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Turn Inspector Metadata Strip Density Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/inspector.css` metadata-strip rhythm and runtime `dashboard/src/styles/keeper-turn-inspector.css`.
+
+### Implemented In Current Worktree
+
+- Matched the v2 inspector metadata strip density by setting `.kti-sub` padding to `0 var(--sp-4) 12px`.
+- Preserved the runtime chip layout, wrapping, border, and existing mobile safe-area left/right overrides.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so the inspector metadata-strip density remains covered with the other drawer/header/stat/token checks.
+
+### Still Missing Vs v2 (26)
+
+- Rendered metadata chip wrapping, text truncation, and phone-fullscreen drawer alignment are not browser/screenshot verified.
+- Full pixel-perfect inspector metadata-strip parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Turn Inspector Metadata Chip Density Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/inspector.css` `.ti-chip` and `.ti-chip .sub-k` rules plus runtime `dashboard/src/components/keeper-turn-inspector.ts` chip labels.
+
+### Implemented In Current Worktree
+
+- Matched v2 inspector chip text density by setting `.kti-chip` to `font-size: 10.5px`.
+- Matched v2 chip horizontal rhythm by changing `.kti-chip` padding from `3px 10px` to `3px 9px`.
+- Removed the runtime-only forced uppercase/letter-spacing from `.kti-chip .sub-k`; labels now keep the lower-case source text used by the inspector component and v2 reference styling.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for chip font size, padding, sub-key margin, and absence of forced uppercase styling.
+
+### Still Missing Vs v2 (26)
+
+- Rendered chip width, wrap points, and metadata row height are not browser/screenshot verified.
+- Full pixel-perfect inspector metadata-chip parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Turn Inspector Summary/Token Typography Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/inspector.css` summary stat and token-economics typography rules plus runtime `dashboard/src/styles/keeper-turn-inspector.css`.
+
+### Implemented In Current Worktree
+
+- Matched v2 summary label density by setting `.kti-stat .k` to `font-size: 8.5px`.
+- Matched v2 summary sub-value density by setting `.kti-stat .v small` to `font-size: 10px`.
+- Matched v2 token header density by setting `.kti-tok-top .lbl` to `font-size: 9.5px` and `.kti-tok-top .ctxpct` to `font-size: 11px`.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the summary/token typography contract.
+
+### Still Missing Vs v2 (26)
+
+- Rendered label legibility, numeric wrapping, and token header alignment are not browser/screenshot verified.
+- Full pixel-perfect inspector typography parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Turn Inspector Token Legend Density Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/inspector.css` `.ti-tok-legend` rules and runtime `dashboard/src/styles/keeper-turn-inspector.css`.
+
+### Implemented In Current Worktree
+
+- Matched v2 token legend spacing by setting `.kti-tok-legend` to `gap: 18px` and `margin-top: 9px`.
+- Matched v2 token legend text density by setting `.kti-tok-legend` to `font-size: 11.5px`.
+- Matched v2 token legend numeric emphasis by setting `.kti-tok-legend b` to `font-weight: 600`.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the token legend density contract.
+
+### Still Missing Vs v2 (26)
+
+- Rendered legend wrapping, marker alignment, and available width on narrow phones are not browser/screenshot verified.
+- Full pixel-perfect token legend parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Turn Inspector Waterfall Density Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/inspector.css` waterfall timeline rules and runtime `dashboard/src/styles/keeper-turn-inspector.css`.
+
+### Implemented In Current Worktree
+
+- Matched v2 waterfall row spacing by setting `.kti-wf-row` to `gap: 12px`.
+- Matched v2 waterfall label density by setting `.kti-wf-lbl` to `font-size: 12.5px`, primary foreground, and mono label text to `11.5px`.
+- Matched v2 duration/summary density by setting `.kti-wf-dur` to `11px`, `.kti-wf-foot` to `margin-top: 12px`, `padding-top: 11px`, `font-size: 11.5px`, and `.kti-wf-foot b` to `font-weight: 600`.
+- Matched v2 waterfall legend density by setting `.kti-wf-legend` to `gap: 14px` and legend items to `gap: 5px` with `font-size: 10.5px`.
+- Preserved the runtime-only unmeasured phase hatch/placeholder styling so missing durations still cannot be mistaken for measured spans.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the waterfall density contract.
+
+### Still Missing Vs v2 (26)
+
+- Rendered waterfall row clipping, legend wrapping, and measured/unmeasured visual distinction are not browser/screenshot verified.
+- Full pixel-perfect waterfall parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Turn Inspector Code Card Density Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/inspector.css` copyable code-card rules and runtime `dashboard/src/styles/keeper-turn-inspector.css`.
+
+### Implemented In Current Worktree
+
+- Matched v2 copy button density by setting `.kti-copy` to `gap: 5px`, `font-size: 10px`, and `padding: 3px 9px`.
+- Matched v2 code header density by setting `.kti-code-h .cap` and `.kti-code-h .sz` to `font-size: 9.5px`.
+- Matched v2 code body density by setting `.kti-code pre` to `font-size: 11.5px` and `line-height: 1.62`.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the copy/code-card density contract.
+
+### Still Missing Vs v2 (26)
+
+- Rendered code-card wrapping, horizontal scroll behavior, and copy-button hit target on narrow phones are not browser/screenshot verified.
+- Full pixel-perfect code-card parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Turn Inspector Tool Card Density Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/inspector.css` structured tool-card rules and runtime `dashboard/src/styles/keeper-turn-inspector.css`.
+
+### Implemented In Current Worktree
+
+- Matched v2 tool-card header spacing by setting `.kti-tool-h` to `gap: 9px` and `padding: 9px 12px`.
+- Matched v2 tool-card typography by setting `.kti-tool-h .seq` to `9.5px`, `.kti-tool-h .tnm` to `12.5px`, `.kti-tool-h .pill` to `9px`, and `.kti-tool-h .lat` to `11px`.
+- Matched v2 status-pill rhythm by changing `.kti-tool-h .pill` padding to `2px 7px`.
+- Preserved the runtime tool payload spacing and status coloring; this slice only changes visible density.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the structured tool-card density contract.
+
+### Still Missing Vs v2 (26)
+
+- Rendered tool-card wrapping, latency alignment, and status-pill hit/legibility on narrow phones are not browser/screenshot verified.
+- Full pixel-perfect structured tool-card parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Turn Inspector Message Card Density Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/inspector.css` role-tinted transcript message rules and runtime `dashboard/src/styles/keeper-turn-inspector.css`.
+
+### Implemented In Current Worktree
+
+- Matched v2 transcript message header density by setting `.kti-msg-h` padding to `7px 11px`.
+- Matched v2 role/header typography by setting `.kti-msg-role` to `9.5px`, `.kti-msg-h .who` to `10.5px`, and `.kti-msg-h .seq` to `9.5px`.
+- Matched v2 message body density by setting `.kti-msg-b` to `font-size: 12.5px`, `line-height: 1.62`, and primary foreground color.
+- Matched v2 mono message body density by setting `.kti-msg-b.mono` to `font-size: 11.5px`.
+- Preserved the runtime role coloring and transcript semantics; this slice only changes visible density.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the transcript message-card density contract.
+
+### Still Missing Vs v2 (26)
+
+- Rendered transcript wrapping, role-pill width, and mixed mono/prose legibility on narrow phones are not browser/screenshot verified.
+- Full pixel-perfect transcript message-card parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Turn Inspector Context/Param Density Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/inspector.css` context-card and parameter-chip rules plus runtime `dashboard/src/styles/keeper-turn-inspector.css`.
+
+### Implemented In Current Worktree
+
+- Matched v2 context-card header density by setting `.kti-ctx-h .t` and `.kti-ctx-h .tok` to `font-size: 10px`.
+- Matched v2 context-card body density by setting `.kti-ctx-card pre` to `padding: 11px 13px`, `font-size: 11.5px`, and `line-height: 1.62`.
+- Matched v2 parameter-chip rhythm by setting `.kti-params` to `gap: 7px`, `.kti-param` to `font-size: 11px` with `padding: 4px 11px`, and `.kti-param b` to `font-weight: 600`.
+- Left `.kti-kv` unchanged because the read v2 reference established explicit param/context-card values, not a key/value-row delta.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the context/parameter density contract.
+
+### Still Missing Vs v2 (26)
+
+- Rendered context-card scroll behavior, long-token wrapping, and parameter-chip wrap points are not browser/screenshot verified.
+- Full pixel-perfect context/parameter section parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Turn Inspector Section Header Density Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/inspector.css` section-title rules and runtime `dashboard/src/styles/keeper-turn-inspector.css`.
+
+### Implemented In Current Worktree
+
+- Matched v2 section header spacing by setting `.kti-sec-h` to `gap: 10px` and `margin: 0 0 9px`.
+- Matched v2 section count density by setting `.kti-sec-h .n` to `font-size: 10px`.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the section-header density contract.
+
+### Still Missing Vs v2 (26)
+
+- Rendered section-title alignment and count-chip wrapping are not browser/screenshot verified.
+- Full pixel-perfect section-header parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Mobile Surface Spacing Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-top`, `.kcf-main`, and mobile `.kcf` fullscreen rules plus runtime `dashboard/src/styles/keeper-workspace.css`.
+
+### Implemented In Current Worktree
+
+- Matched v2 config top-bar rhythm by setting `.kw-config-head` to `gap: 13px` and `padding: 14px 20px`.
+- Matched v2 phone-fullscreen config header spacing with safe-area-aware mobile padding using `14px` vertical and `20px` horizontal minimums.
+- Matched v2 config content spacing by setting mobile `.kw-config-scroll` to `24px` top and `30px` side/bottom minimums while preserving safe-area guards.
+- Preserved the existing runtime `KeeperConfigPanel` owner and mobile full-screen drawer behavior; this slice only aligns surface spacing.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the config header/content spacing contract.
+
+### Still Missing Vs v2 (26)
+
+- Rendered config header alignment, content density, and narrow-phone overflow are not browser/screenshot verified.
+- Full pixel-perfect keeper-config parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Header Typography Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-top-name` and `.kcf-top-sub` rules plus runtime `dashboard/src/components/keeper-detail-page.ts` config overlay header markup.
+
+### Implemented In Current Worktree
+
+- Matched v2 config title typography by setting `.kw-config-head h3` to display-font `17px`, weight `600`, `letter-spacing: -0.005em`, and baseline flex alignment with `gap: 9px`.
+- Matched v2 config subtitle rhythm by setting `.kw-config-head p` to `margin: 2px 0 0`, UI font, and `font-size: 11px`.
+- Preserved the existing runtime overlay header markup, close action, and `KeeperConfigPanel` ownership; this slice only aligns visible header typography.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the config header typography contract.
+
+### Still Missing Vs v2 (26)
+
+- Rendered title/subtitle truncation and close-button alignment are not browser/screenshot verified.
+- Full pixel-perfect keeper-config header parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Fact Row Density Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-fact`, `.kcf-fact-k`, and `.kcf-fact-v` rules plus runtime `dashboard/src/components/keeper-config-panel.ts` row helpers.
+
+### Implemented In Current Worktree
+
+- Added semantic `kw-config-fact`, `kw-config-fact-k`, and `kw-config-fact-v` classes to the live `ConfigRow` and `BoolRow` helpers.
+- Matched v2 mobile fact-card rhythm by setting config rows inside `.kw-config-scroll` to vertical flex, `gap: 4px`, and `padding: 11px 14px`.
+- Matched v2 fact label density with `font-size: 9.5px`, `letter-spacing: 0.12em`, and uppercase text.
+- Matched v2 fact value density with `font-size: 13px`, primary foreground color, and long-value `word-break: break-word`.
+- Scoped the visual override to the mobile config drawer so desktop utility layout remains unchanged.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the live config row density contract.
+
+### Still Missing Vs v2 (26)
+
+- Rendered config row wrapping, bool badge alignment, and long-path readability are not browser/screenshot verified.
+- Full pixel-perfect keeper-config fact-row parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Text Field Density Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-textfield`, `.kcf-tf-h`, and `.kcf-text` rules plus runtime `dashboard/src/components/keeper-config-panel.ts` editable prompt helper.
+
+### Implemented In Current Worktree
+
+- Added semantic `kw-config-textfield`, `kw-config-textfield-head`, `kw-config-textfield-label`, and `kw-config-textfield-hint` hooks to the live editable prompt textarea helper.
+- Matched v2 text-field spacing inside the mobile config drawer with vertical flex layout, `gap: 6px`, and `margin-bottom: 12px`.
+- Matched v2 text-field header rhythm with baseline alignment, `gap: 10px`, `12px` label text, and `11px` dirty-state hint text.
+- Matched v2 inline textarea density with `padding: 10px 12px`, UI font, `font-size: 13px`, and `line-height: 1.6`.
+- Scoped the visual override to `.kw-config-scroll` and the inline textarea only; the shared fullscreen `ExpandableTextarea` modal remains unchanged.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the live config text-field density contract.
+
+### Still Missing Vs v2 (26)
+
+- Rendered textarea height, fullscreen edit button overlap, dirty marker alignment, and mobile keyboard behavior are not browser/screenshot verified.
+- Full pixel-perfect keeper-config text-field parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Runtime Chain Chip Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-chain` and `.kcf-chain-item` rules plus runtime `dashboard/src/components/keeper-config-panel.ts` model/runtime list helpers.
+
+### Implemented In Current Worktree
+
+- Added semantic `kw-config-chain` and `kw-config-chain-item` hooks to the live model/runtime list helpers.
+- Matched v2 runtime-chain chip spacing inside the mobile config drawer with flex-wrap layout, `gap: 8px`, and centered alignment.
+- Matched v2 runtime-chain chip density with `font-size: 11.5px`, `padding: 5px 11px`, pill radius, elevated card background, and normal font weight.
+- Scoped the visual override to `.kw-config-scroll` so existing desktop utility styling remains unchanged.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the live config chain-chip density contract.
+
+### Still Missing Vs v2 (26)
+
+- Rendered chip wrapping, long model-name truncation, and arrow/sequence affordance parity are not browser/screenshot verified.
+- Full pixel-perfect keeper-config runtime-chain parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Section Header Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-sec-h` and `.kcf-sec-h h3` rules plus runtime `dashboard/src/components/keeper-config-panel.ts` major section helper.
+
+### Implemented In Current Worktree
+
+- Added semantic `kw-config-section-head` and `kw-config-section-title` hooks to the live major section header helper.
+- Matched v2 config section header spacing inside the mobile drawer with flex alignment, `gap: 12px`, and `margin: 0 0 14px`.
+- Matched v2 section title typography with display font, `font-size: 13px`, weight `600`, `letter-spacing: 0.06em`, and uppercase text.
+- Removed the mobile-only card treatment from section headers so the config drawer reads closer to the v2 flat section hierarchy while desktop utility styling remains unchanged.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the live config section-header contract.
+
+### Still Missing Vs v2 (26)
+
+- Rendered section rhythm, following-body spacing, and scroll-position behavior are not browser/screenshot verified.
+- Full pixel-perfect keeper-config section-header parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Inline Control Row Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/surfaces.css` `.set-row`, `.set-label`, `.set-toggle`, and `.set-seg-b` rules plus `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/craft.css` compact `.set-row` density override.
+
+### Implemented In Current Worktree
+
+- Added semantic `kw-config-set-row`, `kw-config-set-label`, `kw-config-set-control`, `kw-config-toggle`, `kw-config-toggle-knob`, `kw-config-number-input`, and `kw-config-select` hooks to the live inline runtime edit helpers.
+- Matched v2 compact settings-row density inside the mobile config drawer with `padding: 10px 0`, `gap: 14px`, and top-divider row structure.
+- Matched v2 label density with `font-size: 13px` and primary foreground color.
+- Matched v2 toggle geometry with a `38px` by `22px` pill and `16px` knob while preserving the existing `aria-pressed` and click behavior.
+- Matched v2 segmented-control input/select density with mono `11px` text and `padding: 5px 11px`.
+- Scoped the visual overrides to `.kw-config-scroll` so desktop utility styling and runtime draft/save behavior remain unchanged.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the live inline-control row contract.
+
+### Still Missing Vs v2 (26)
+
+- Rendered inline-control wrapping, dirty-state left rail, number/select hit targets, and toggle knob transform alignment are not browser/screenshot verified.
+- Full pixel-perfect keeper-config inline-control parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Goal List Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-goals-list`, `.kcf-goal`, `.kcf-goal-body`, `.kcf-goal-title`, `.kcf-goal-id`, and `.kcf-goal-hz` rules plus runtime `dashboard/src/components/keeper-config-panel.ts` active-goal picker.
+
+### Implemented In Current Worktree
+
+- Added semantic `kw-config-goals-list`, `kw-config-goal`, `kw-config-goal-check`, `kw-config-goal-body`, `kw-config-goal-title`, `kw-config-goal-id`, and `kw-config-goal-hz` hooks to the live active-goal picker.
+- Reorganized each live goal row around the same checkbox state into v2-style check/body/horizon columns without changing selection behavior.
+- Matched v2 goal-list container density with flex-column rows, `gap: 1px`, bordered muted background, `max-height: 460px`, and contained vertical scroll.
+- Matched v2 goal-row geometry with `grid-template-columns: 22px 1fr auto`, `gap: 12px`, and `padding: 10px 14px`.
+- Matched v2 goal title/id/horizon typography with `13px`, `10.5px`, and `10px` text respectively plus horizon pill padding `2px 8px`.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the live config goal-list contract.
+
+### Still Missing Vs v2 (26)
+
+- Rendered goal-row checkbox alignment, long title truncation, horizon wrapping, and selected-state treatment are not browser/screenshot verified.
+- Full pixel-perfect keeper-config goal-list parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Hook Table Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-hooks`, `.kcf-hook-hd`, `.kcf-hook`, `.kcf-hook-slot`, `.kcf-hook-src`, and `.kcf-hook-gate` rules plus runtime `dashboard/src/components/keeper-config-panel.ts` global hook slot section.
+
+### Implemented In Current Worktree
+
+- Added semantic `kw-config-hooks`, `kw-config-hook-hd`, `kw-config-hook`, `kw-config-hook-slot`, `kw-config-hook-src`, and `kw-config-hook-gate` hooks to the live global hook slot section.
+- Wrapped the existing filtered hook rows in a v2-style hooks table shell without changing the expanded/filter state or hook data source.
+- Matched v2 hooks container density with flex-column rows, `gap: 1px`, muted bordered background, rounded corners, and hidden overflow.
+- Matched v2 hook row geometry with grid layout, `gap: 14px`, `padding: 9px 14px`, and flat row backgrounds.
+- Matched v2 hook header/slot/source/gate typography with `9.5px`, `12px`, `11.5px`, and `11px` text respectively.
+- Preserved inactive hook dimming and existing gate chips; this slice only changes table structure and density.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the live config hook-table contract.
+
+### Still Missing Vs v2 (26)
+
+- Rendered hook table column widths, long slot/source truncation, and gate-chip wrapping are not browser/screenshot verified.
+- Full pixel-perfect keeper-config hook-table parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Footer Action Strip Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-foot`, `.kcf-foot-note`, `.kcf-foot-spacer`, `.kcf-btn`, `.kcf-btn.ghost`, and `.kcf-btn.save` rules plus runtime `dashboard/src/components/keeper-config-panel.ts` dirty-state save/reset and tool-denylist save/reset action rows.
+
+### Implemented In Current Worktree
+
+- Added semantic `kw-config-foot`, `kw-config-foot-note`, `kw-config-foot-spacer`, `kw-config-btn save`, and `kw-config-btn ghost` hooks to the live dirty-state runtime footer and tool denylist action row.
+- Matched v2 footer action-strip density inside the mobile config drawer with `padding: 13px 20px`, `gap: 10px`, a top divider, panel background, and no card shadow.
+- Matched v2 footer note typography with `font-size: 11px` and muted foreground.
+- Matched v2 action button density with UI font, `font-size: 13px`, `padding: 9px 18px`, ghost border styling, and emphasized save-button weight.
+- Preserved the existing runtime save/reset handlers, denylist save/reset handlers, dirty-state conditional rendering, and disabled-state bindings.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the live config footer/action-strip contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- The dirty-state footer is conditional, so visual parity still needs a mobile screenshot with changed runtime draft values.
+- The denylist action row reuses footer styling for consistency; it may need narrower mobile tuning if rendered section density looks heavier than the standalone reference.
+
+## v2 (26) Keeper Config Runtime Chain Sequence Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-chain-item + .kcf-chain-item` and `.kcf-chain-item + .kcf-chain-item::before` rules plus live `dashboard/src/components/keeper-config-panel.ts` runtime/model chain helpers.
+
+### Implemented In Current Worktree
+
+- Added the v2 directional sequence affordance to live config chain chips in `dashboard/src/styles/keeper-workspace.css`.
+- Matched the standalone runtime-chain arrow geometry with relative positioning on subsequent chips, `left: -16px`, vertical centering, muted color, and `11px` arrow type.
+- Kept the chain data source unchanged: the runtime still renders the live model/runtime arrays, with no static fallback data or fixture values copied from the standalone reference.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the chain sequence rule.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Wrapped multi-line chains may need rendered tuning because the pseudo-arrow is optimized for horizontal chip flow.
+- Full pixel-perfect runtime-chain parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Goal Selection Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-goal.on`, `.kcf-goal-check`, and `.kcf-goal.on .kcf-goal-check` rules plus live `dashboard/src/components/keeper-config-panel.ts` active-goal checkbox rows.
+
+### Implemented In Current Worktree
+
+- Added selected-row visual treatment for live active-goal rows via `.kw-config-goal:has(.kw-config-goal-check:checked)` in `dashboard/src/styles/keeper-workspace.css`.
+- Matched the v2 checkbox geometry with an `18px` checkbox target and accent-colored checked state while preserving the real checkbox input and existing goal assignment behavior.
+- Kept goal data runtime-backed from the existing goal store response; no standalone fixture goals or fake horizon data were introduced.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the goal selected-state and checkbox geometry contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Native checkbox rendering may still differ from the standalone custom check glyph until rendered mobile QA decides whether to replace it.
+- Full pixel-perfect goal selection parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Allowed Paths Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-paths`, `.kcf-text.mono`, and `.kcf-path-eff` rules plus live `dashboard/src/components/keeper-config-panel.ts` `allowed_paths` runtime draft surface.
+
+### Implemented In Current Worktree
+
+- Added semantic `kw-config-paths`, `kw-config-path-text`, and `kw-config-path-eff` hooks to the live allowed-paths editor and effective-path readout in `dashboard/src/components/keeper-config-panel.ts`.
+- Matched v2 paths-surface spacing with a vertical `6px` path stack and `margin-top: 10px` in `dashboard/src/styles/keeper-workspace.css`.
+- Matched v2 monospace path textarea density with `12px` mono text, `line-height: 1.6`, panel background, and default border.
+- Preserved the live `effective_allowed_paths` readout below the editable allowlist using the v2 `effective:` treatment, without adding any local default path or fixture path.
+- Preserved the existing runtime draft update behavior, dirty-state marker, save/reset lifecycle, and relative-path placeholder.
+- Restored the mobile dirty-state accent rail with a semantic `.kw-config-paths.dirty` hook so the path editor keeps an explicit runtime-draft signal after the v2 surface flattening.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the path editor contract and the no-local-path-default invariant.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- The dirty-state left border remains from the live runtime editor; rendered mobile QA should decide whether to keep it as a useful runtime signal or flatten it fully to the standalone path block.
+- Full pixel-perfect allowed-paths parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Tool Policy Editor Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-tools`, `.kcf-tool`, `.kcf-tool-desc`, and `.kcf-text.mono` rules plus live `dashboard/src/components/keeper-config-panel.ts` tool denylist editor and `set_policy` save path.
+
+### Implemented In Current Worktree
+
+- Added semantic `kw-config-tool-policy-note`, `kw-config-tool-policy`, and `kw-config-tool-policy-text` hooks to the live tool denylist editor in `dashboard/src/components/keeper-config-panel.ts`.
+- Matched the v2 tools-surface density with a compact bordered panel, `9px 13px` editor padding, `8px` internal gap, and `11.5px` explanatory note text in `dashboard/src/styles/keeper-workspace.css`.
+- Matched the v2 monospace policy textarea treatment with `12px` mono text, `line-height: 1.6`, panel background, and default border.
+- Preserved the current production behavior: `saveToolDenylist` still calls `set_policy`, preserves existing `tool_access`, and only edits the live `tool_denylist` draft.
+- Kept the editor runtime-backed instead of copying the standalone fixture tool catalog; a future real tool table should come from an authoritative runtime API, not hardcoded v2 sample rows.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the tool policy editor contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- The standalone reference has per-tool risk rows; the live dashboard still lacks an authoritative per-tool risk/description catalog in this component.
+- Full pixel-perfect tool policy parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Textarea Focus Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-text:focus` rule plus the live path and tool-policy textarea hooks already present in `dashboard/src/components/keeper-config-panel.ts`.
+
+### Implemented In Current Worktree
+
+- Added v2-style focus treatment to `.kw-config-path-text:focus` and `.kw-config-tool-policy-text:focus` in `dashboard/src/styles/keeper-workspace.css`.
+- Matched the standalone focus contract by removing the browser outline and switching the textarea border to the dashboard accent token on focus.
+- Preserved all runtime bindings and save behavior; this slice only changes the focused visual state of the existing live textareas.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the mobile textarea focus contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Focus color uses the dashboard accent token instead of the standalone `--volt-dim`; rendered QA should confirm it matches the active dashboard palette.
+- Full pixel-perfect focused-textarea parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Footer Button Hover Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-btn.ghost:hover` and `.kcf-btn.save:hover` rules plus the existing live `kw-config-btn ghost/save` hooks in `dashboard/src/components/keeper-config-panel.ts`.
+
+### Implemented In Current Worktree
+
+- Added v2-style hover treatment to `.kw-config-btn.ghost:hover:not(:disabled)` and `.kw-config-btn.save:hover:not(:disabled)` in `dashboard/src/styles/keeper-workspace.css`.
+- Matched the standalone intent: ghost buttons lift border/text emphasis on hover, and save buttons gain an accent glow.
+- Preserved disabled-state behavior by scoping hover styles with `:not(:disabled)`.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the footer button hover contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Touch devices will not always expose hover; rendered QA should still confirm pressed/focus states separately.
+- Full pixel-perfect footer button interaction parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Callout Description Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-sec-desc` and `.kasm-seg-src` typography rules plus the centralized live `Callout` helper in `dashboard/src/components/keeper-config-panel.ts`.
+
+### Implemented In Current Worktree
+
+- Added semantic `kw-config-callout`, `kw-config-callout-title`, and `kw-config-callout-body` hooks to the live `Callout` helper.
+- Matched v2 description density inside the mobile config drawer with `margin: 7px 0 14px`, `max-width: 680px`, `12.5px` body text, and `line-height: 1.55`.
+- Flattened mobile callout panels into lightweight description blocks while preserving the existing warning/neutral tone classes for desktop and non-mobile contexts.
+- Kept all callout copy runtime-authored from the existing config panel; no standalone fixture descriptions were copied into live behavior.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the callout description contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Warning callouts are visually flattened on mobile, so rendered QA should confirm important warnings remain noticeable enough.
+- Full pixel-perfect config description parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Warning Callout Follow-up - 2026-06-25
+
+Additional source reviewed: live `Callout` tone handling in `dashboard/src/components/keeper-config-panel.ts` plus the v2 description-density treatment already mapped in the previous callout slice.
+
+### Implemented In Current Worktree
+
+- Added semantic `warn` / `neutral` modifiers to the live `kw-config-callout` helper.
+- Preserved the v2-flat mobile description treatment for neutral callouts while restoring warning salience with a compact left warning rail and warning-colored title.
+- Kept all warning copy and tone selection owned by the existing runtime config panel; no new warnings or fixture content were introduced.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the warning callout contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm the warning rail is visible enough without making mobile config sections feel heavier than the v2 reference.
+- Full pixel-perfect warning-callout parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Prompt Source Badge Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-plan` token styling plus the live `PromptSourceBadge` helper in `dashboard/src/components/keeper-config-panel.ts`.
+
+### Implemented In Current Worktree
+
+- Added semantic `kw-config-source-badge` plus source-name modifiers to the live prompt source badge helper.
+- Matched v2 compact provenance-chip density with inline-flex layout, `2px 7px` padding, `9.5px` type, `0.06em` letter spacing, and no shadow inside the mobile config drawer.
+- Preserved the existing runtime source-derived tone logic for `override`, `file`, and neutral prompt sources.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the prompt source badge contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- The standalone `kcf-plan` token semantically marks planned/unimplemented fields; the live source badge instead marks real prompt provenance, so rendered parity should be judged by density and tone rather than exact text semantics.
+- Full pixel-perfect prompt provenance parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Readonly Long Text Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-ro`, `.kcf-text`, and `.kasm-seg-text` density rules plus the live `LongText` helper in `dashboard/src/components/keeper-config-panel.ts`.
+
+### Implemented In Current Worktree
+
+- Added semantic `kw-config-longtext` to the live `LongText` helper so real prompt/config text blocks can be styled consistently in the mobile config drawer.
+- Matched v2 read-only text density with `10px 12px` padding, muted panel border, elevated background, `12.5px` text, and `line-height: 1.55`.
+- Preserved the existing truncation behavior, scroll containment, and runtime-rendered content; no prompt fixture text or local defaults were introduced.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the long-text contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm long prompt blocks remain readable and do not create nested scroll traps on narrow mobile screens.
+- Full pixel-perfect readonly text parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Empty Readonly Token Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-ro` readonly token rule plus the live model/runtime/long-text empty fallbacks in `dashboard/src/components/keeper-config-panel.ts`.
+
+### Implemented In Current Worktree
+
+- Added semantic `kw-config-empty` to the existing empty model list, runtime list, and long-text fallbacks.
+- Matched v2 readonly token density with mono `12px` muted text inside the mobile config drawer.
+- Preserved existing runtime fallback values (`none` / `--`) and did not introduce fixture data or local defaults.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the empty readonly token contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm the empty tokens are visible enough when surrounded by muted config rows.
+- Full pixel-perfect empty-token parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Button Disabled State Follow-up - 2026-06-25
+
+Additional source reviewed: existing live `kw-config-btn` save/reset hooks and disabled bindings in `dashboard/src/components/keeper-config-panel.ts`.
+
+### Implemented In Current Worktree
+
+- Added scoped disabled-state styling to `.kw-config-btn:disabled` in `dashboard/src/styles/keeper-workspace.css`.
+- Preserved runtime behavior and handlers while making disabled save/reset buttons visually non-interactive with `cursor: not-allowed`, reduced opacity, and no hover glow.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the disabled button contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm disabled contrast remains readable in dirty and denylist-saving states.
+- Full pixel-perfect disabled button parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Goal Row Hover Follow-up - 2026-06-25
+
+Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/styles/keeper-config.css` `.kcf-goal:hover` rule plus the existing live `kw-config-goal` active-goal rows.
+
+### Implemented In Current Worktree
+
+- Added v2-style hover treatment to `.kw-config-goal:hover` in `dashboard/src/styles/keeper-workspace.css`.
+- Preserved the existing checked-row selected state and live goal assignment behavior.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the goal-row hover contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Touch devices may not expose hover; rendered QA should still confirm tap/selected states are clear.
+- Full pixel-perfect goal-row interaction parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Goal Row Focus Follow-up - 2026-06-25
+
+Additional source reviewed: existing live `kw-config-goal` active-goal rows and the v2 button-like goal row interaction model.
+
+### Implemented In Current Worktree
+
+- Added scoped `:focus-within` treatment to `.kw-config-goal` in `dashboard/src/styles/keeper-workspace.css`.
+- Preserved the live checkbox and goal assignment behavior while making keyboard focus visible across the whole row.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the goal-row focus contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm the focus ring does not visually conflict with selected-row background on narrow mobile screens.
+- Full pixel-perfect goal-row focus parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Hook Active Row Follow-up - 2026-06-25
+
+Additional source reviewed: existing live `kw-config-hook` / `off` row classes and the v2 enabled-row treatment used in comparable config tables.
+
+### Implemented In Current Worktree
+
+- Added subtle active-row treatment to `.kw-config-hook:not(.off)` in `dashboard/src/styles/keeper-workspace.css`.
+- Preserved the existing inactive opacity behavior and runtime hook slot source/gate data.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the active hook-row contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm active hook rows remain readable when source and gate text wrap on narrow mobile screens.
+- Full pixel-perfect hook active-row parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Hook Gate Chip Follow-up - 2026-06-25
+
+Additional source reviewed: existing live `kw-config-hook-gate` gate chip rendering and the v2 compact chip density used across config tables.
+
+### Implemented In Current Worktree
+
+- Added scoped mobile density for `.kw-config-hook-gate span` in `dashboard/src/styles/keeper-workspace.css`.
+- Matched v2 compact chip treatment with `10px` text, `2px 7px` padding, and small-radius pills while preserving existing runtime gate labels and enabled/off tone classes.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the hook gate-chip contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm multiple gate chips wrap cleanly inside the three-column hook table on narrow mobile screens.
+- Full pixel-perfect hook gate-chip parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Hook Gate Chip Wrap Follow-up - 2026-06-25
+
+Additional source reviewed: existing live `kw-config-hook-gate` gate chip rendering and the compact v2 chip treatment already mapped in the previous hook gate-chip slice.
+
+### Implemented In Current Worktree
+
+- Added `white-space: nowrap` to `.kw-config-hook-gate span` in `dashboard/src/styles/keeper-workspace.css`.
+- Preserved multi-chip wrapping at the container level while preventing individual runtime gate labels from splitting mid-token.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the hook gate-chip nowrap contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm long gate labels do not overflow the three-column hook table on very narrow mobile widths.
+- Full pixel-perfect hook gate-chip wrapping parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Prompt Source Badge Wrap Follow-up - 2026-06-25
+
+Additional source reviewed: existing live `kw-config-source-badge` prompt provenance chip styling and the compact v2 token treatment already mapped in the prompt source badge slice.
+
+### Implemented In Current Worktree
+
+- Added `white-space: nowrap` to `.kw-config-source-badge` in `dashboard/src/styles/keeper-workspace.css`.
+- Preserved the existing runtime prompt provenance text and tone logic while preventing compact source badges from splitting mid-label.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the prompt source badge wrapping contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm multiple prompt provenance badges do not crowd narrow mobile prompt rows.
+- Full pixel-perfect prompt source badge wrapping parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Goal ID Typography Follow-up - 2026-06-25
+
+Additional source reviewed: existing live `kw-config-goal-id` active-goal row metadata and the v2 goal picker mono ID treatment.
+
+### Implemented In Current Worktree
+
+- Added explicit mono typography to `.kw-config-goal-id` in `dashboard/src/styles/keeper-workspace.css`.
+- Preserved existing live goal ID values, truncation behavior, selected state, and assignment handlers.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the goal ID typography contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm long goal IDs truncate cleanly next to horizon chips on narrow mobile screens.
+- Full pixel-perfect goal ID typography parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Readonly Long Text Overflow Follow-up - 2026-06-25
+
+Additional source reviewed: existing live `kw-config-longtext` hook and the v2 read-only/preformatted text density already mapped in the readonly long-text slice.
+
+### Implemented In Current Worktree
+
+- Added explicit `overflow-y: auto` and `white-space: pre-wrap` to `.kw-config-longtext` in `dashboard/src/styles/keeper-workspace.css`.
+- Preserved runtime-rendered prompt/config content, truncation behavior, and the existing helper markup while making the semantic hook own the mobile wrapping/scroll contract.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the long-text overflow contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm long prompt/config blocks do not create nested scroll traps inside the mobile config drawer.
+- Full pixel-perfect readonly long-text overflow parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Goal Horizon Typography Follow-up - 2026-06-25
+
+Additional source reviewed: existing live `kw-config-goal-hz` active-goal horizon chip styling and the v2 goal picker compact horizon metadata treatment.
+
+### Implemented In Current Worktree
+
+- Added explicit mono typography to `.kw-config-goal-hz` in `dashboard/src/styles/keeper-workspace.css`.
+- Preserved existing live horizon values, chip geometry, selected state, and goal assignment behavior.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the goal horizon typography contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm horizon chips remain readable next to long titles and IDs on narrow mobile screens.
+- Full pixel-perfect goal horizon typography parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Empty Readonly Token Italic Cleanup - 2026-06-25
+
+Additional source reviewed: existing `kw-config-empty` empty model/runtime/long-text fallback styling.
+
+### Implemented In Current Worktree
+
+- Made `.kw-config-empty` explicitly non-italic in `dashboard/src/styles/keeper-workspace.css`.
+- Preserved the existing runtime fallback text while preventing legacy `italic` utility classes from leaking into the mobile v2 readonly token treatment.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the empty-token font-style contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm empty readonly tokens remain visually distinct from ordinary muted metadata.
+- Full pixel-perfect empty-token parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Input Focus Follow-up - 2026-06-25
+
+Additional source reviewed: existing live `kw-config-*` runtime-control hooks and the v2 compact config drawer control treatment already mapped in the config slices.
+
+### Implemented In Current Worktree
+
+- Added visible focus rings for `.kw-config-number-input:focus-visible`, `.kw-config-select:focus-visible`, and `.kw-config-goal-check:focus-visible` in `dashboard/src/styles/keeper-workspace.css`.
+- Moved vertical resize ownership for `.kw-config-path-text` and `.kw-config-tool-policy-text` into the semantic config CSS hooks.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards for the focus-visible and textarea resize contracts.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered keyboard traversal should confirm the focus rings are visible without crowding the narrow mobile drawer.
+- Full pixel-perfect runtime-control focus parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Toggle Active-State Follow-up - 2026-06-25
+
+Additional source reviewed: existing live `kw-config-toggle` / `kw-config-toggle-knob` hooks and the v2 compact boolean setting control treatment already mapped from `surfaces.css`.
+
+### Implemented In Current Worktree
+
+- Added visible keyboard focus treatment for `.kw-config-toggle:focus-visible` in `dashboard/src/styles/keeper-workspace.css`.
+- Updated `.kw-config-toggle.on` to use semantic active border/background colors instead of the looser accent-token fallback.
+- Added deterministic off/on knob transforms through `.kw-config-toggle-knob` and `.kw-config-toggle.on .kw-config-toggle-knob`.
+- Split config number/select focus-visible CSS into concrete selector blocks so source-level guards can address each runtime control directly.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` guards for the toggle active, knob-position, and focus contracts.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm all runtime boolean controls show the expected on/off state in the mobile config drawer.
+- Full pixel-perfect toggle parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Toggle Track Layout Follow-up - 2026-06-25
+
+Additional source reviewed: existing live `kw-config-toggle` layout hooks after the active-state slice.
+
+### Implemented In Current Worktree
+
+- Made `.kw-config-toggle` own `inline-flex` track layout and vertical centering in `dashboard/src/styles/keeper-workspace.css`.
+- Added pointer and disabled cursor/opacity semantics for compact runtime boolean controls.
+- Made `.kw-config-toggle-knob` a block-level, non-shrinking control part so the off/on transform does not depend on default inline span behavior.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` guards for toggle track layout, disabled state, and knob display ownership.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm the knob movement stays centered within the 38px track across mobile browsers.
+- Full pixel-perfect toggle track parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Long Text Height Follow-up - 2026-06-25
+
+Additional source reviewed: existing live `.kw-config-longtext` hook and component markup still carrying the legacy `max-h-35 overflow-y-auto` utility classes.
+
+### Implemented In Current Worktree
+
+- Moved the readonly long-text height cap into `.kw-config-longtext` with `max-height: 8.75rem` in `dashboard/src/styles/keeper-workspace.css`.
+- Added semantic horizontal overflow protection and word breaking for long prompt/config strings inside the mobile config drawer.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` guards for long-text max height, overflow-x, and word-break ownership.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm long prompt/config blocks scroll internally without widening the mobile drawer.
+- Full pixel-perfect readonly long-text height parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Long Text Utility Cleanup - 2026-06-25
+
+Additional source reviewed: existing `LongText` component markup after `.kw-config-longtext` gained semantic height, wrapping, and overflow ownership.
+
+### Implemented In Current Worktree
+
+- Removed duplicated `whitespace-pre-wrap max-h-35 overflow-y-auto` utility ownership from the `LongText` markup in `dashboard/src/components/keeper-config-panel.ts`.
+- Preserved existing visual utility classes that may still affect non-mobile styling while leaving the mobile config drawer behavior owned by `.kw-config-longtext`.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` guards to prevent reintroducing the old combined long-text utility contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm desktop config rendering is not unintentionally affected by the utility cleanup.
+- Full pixel-perfect readonly long-text parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Source Badge Utility Cleanup - 2026-06-25
+
+Additional source reviewed: existing `PromptSourceBadge` markup and `.kw-config-source-badge` mobile styling.
+
+### Implemented In Current Worktree
+
+- Removed duplicated prompt-source badge font, padding, radius, and shadow utility ownership from `dashboard/src/components/keeper-config-panel.ts`.
+- Made `.kw-config-source-badge` own its mobile border and uppercase token treatment in `dashboard/src/styles/keeper-workspace.css`.
+- Made `.kw-config-source-badge.override` and `.kw-config-source-badge.file` own their mobile status text colors alongside the existing status backgrounds and borders.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` guards to prevent reintroducing the old combined source-badge utility contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm prompt source badges remain legible and non-wrapping in narrow mobile prompt headers.
+- Full pixel-perfect prompt-source badge parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Toggle Utility Cleanup - 2026-06-25
+
+Additional source reviewed: existing `InlineToggleRow` markup after `.kw-config-toggle` gained semantic track layout and active-state ownership.
+
+### Implemented In Current Worktree
+
+- Removed the legacy toggle track utility stack from `dashboard/src/components/keeper-config-panel.ts`, leaving the runtime value to select only the semantic `on` state.
+- Added track transition ownership to `.kw-config-toggle` in `dashboard/src/styles/keeper-workspace.css`.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` guards to prevent reintroducing the old toggle track utility contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm desktop and mobile runtime toggles still show off/on states correctly after utility cleanup.
+- Full pixel-perfect toggle parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Toggle Knob Utility Cleanup - 2026-06-25
+
+Additional source reviewed: existing `InlineToggleRow` knob markup after `.kw-config-toggle-knob` gained semantic size, display, transform, and active-color ownership.
+
+### Implemented In Current Worktree
+
+- Removed the legacy toggle knob utility stack from `dashboard/src/components/keeper-config-panel.ts`.
+- Made `.kw-config-toggle-knob` explicitly own the mobile no-shadow treatment in `dashboard/src/styles/keeper-workspace.css`.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` guards to prevent reintroducing the old knob utility contract.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm off/on knob positions still align within the compact mobile track.
+- Full pixel-perfect toggle knob parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Number Select Utility Cleanup - 2026-06-25
+
+Additional source reviewed: existing `InlineNumberRow` and `InlineSelectRow` runtime-control markup plus the scoped `.kw-config-number-input`, `.kw-config-select`, and `.kw-config-set-control` mobile hooks.
+
+### Implemented In Current Worktree
+
+- Removed legacy width, alignment, background, border, typography, and transition utility ownership from runtime number inputs in `dashboard/src/components/keeper-config-panel.ts`.
+- Preserved number validation through a semantic `.kw-config-number-input.invalid` class instead of border utility branching.
+- Removed legacy select styling utilities from runtime selects and left sizing/geometry to `.kw-config-select`.
+- Added `.kw-config-number-suffix` so numeric suffix width and typography are owned by config CSS.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` guards for number/select markup cleanup, invalid state, suffix styling, and control alignment.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm numeric suffixes and selects remain aligned inside narrow mobile config rows.
+- Full pixel-perfect number/select runtime-control parity remains unproven without rendered mobile comparison against the v2 (26) reference.
+
+## v2 (26) Keeper Config Textarea Utility Cleanup - 2026-06-25
+
+Additional source reviewed: existing allowed-paths and tool-policy textarea markup plus scoped `.kw-config-path-text` and `.kw-config-tool-policy-text` mobile hooks.
+
+### Implemented In Current Worktree
+
+- Removed legacy width, font, border, background, radius, padding, color, and resize utility ownership from allowed-paths and tool-policy textareas in `dashboard/src/components/keeper-config-panel.ts`.
+- Kept dirty state semantic by using only `.dirty` on `.kw-config-paths` and `.kw-config-tool-policy`.
+- Made `.kw-config-path-text` and `.kw-config-tool-policy-text` explicitly own mobile width and minimum height in `dashboard/src/styles/keeper-workspace.css`.
+- Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` guards for textarea utility cleanup and semantic textarea sizing.
+
+### Still Missing Vs v2 (26)
+
+- Browser/screenshot validation is still not run in this pass.
+- Rendered QA should confirm both textareas retain expected height, resize behavior, and dirty-state treatment in the mobile config drawer.
+- Full pixel-perfect textarea parity remains unproven without rendered mobile comparison against the v2 (26) reference.

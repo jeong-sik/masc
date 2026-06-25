@@ -12,6 +12,7 @@ import {
 } from '../../store'
 import { TimeAgo } from '../common/time-ago'
 import { ringFocusClasses } from '../common/ring'
+import { RichContent } from '../common/rich-content'
 import { AgentAvatar } from '../overview/agent-avatar'
 import { FusionRunsPanel } from './fusion-runs-panel'
 import { asRecord, asString, asStringArray } from '../common/normalize'
@@ -94,6 +95,13 @@ interface FusionUsage {
   costUsd: number | null
 }
 
+interface FusionRunParams {
+  temperature: number | null
+  topP: number | null
+  topK: number | null
+  maxTokens: number | null
+}
+
 interface FusionRunView {
   runId: string
   boardPostId: string
@@ -106,6 +114,8 @@ interface FusionRunView {
   judge: FusionJudge
   judges: FusionJudgeNode[]
   usage: FusionUsage
+  preset: string | null
+  params: FusionRunParams
   createdAt: string
   updatedAt: string
 }
@@ -244,6 +254,15 @@ function normalizeUsage(meta: Record<string, unknown>, panel: FusionPanelEntry[]
   }
 }
 
+function normalizeParams(meta: Record<string, unknown>): FusionRunParams {
+  return {
+    temperature: firstNumber(meta, ['temperature']),
+    topP: firstNumber(meta, ['top_p', 'topP']),
+    topK: firstNumber(meta, ['top_k', 'topK']),
+    maxTokens: firstNumber(meta, ['max_tokens', 'maxTokens']),
+  }
+}
+
 function statusFor(judge: FusionJudge, panel: FusionPanelEntry[]): FusionRunStatus {
   const status = judge.status?.toLowerCase() ?? ''
   if (status.includes('fail')) return 'failed'
@@ -304,6 +323,7 @@ function fusionRunFromPost(post: BoardPost): FusionRunView | null {
   const judge = normalizeJudge(meta.judge)
   const judges = normalizeFusionJudgeNodes(meta.judges)
   const usage = normalizeUsage(meta, panel)
+  const params = normalizeParams(meta)
   const runId = firstString(meta, ['run_id', 'runId', 'id']) ?? post.id
   const question = firstString(meta, ['question', 'prompt']) ?? post.body ?? post.content ?? post.title
   const status = statusFor(judge, panel)
@@ -321,6 +341,8 @@ function fusionRunFromPost(post: BoardPost): FusionRunView | null {
     judge,
     judges,
     usage,
+    preset: null,
+    params,
     createdAt: post.created_at,
     updatedAt: post.updated_at || post.created_at,
   }
@@ -514,7 +536,7 @@ function FusionPanelCard({ entry }: { entry: FusionPanelEntry }) {
             : null}
       </div>
       ${failed
-        ? null
+        ? html`<div class="fus-pans failed">${body}</div>`
         : html`
             <div
               class=${`fus-pans ${open ? 'open' : ''}`}
@@ -528,7 +550,7 @@ function FusionPanelCard({ entry }: { entry: FusionPanelEntry }) {
                   setOpen(prev => !prev)
                 }
               }}
-            >${body}</div>
+            ><${RichContent} text=${body} previewLimit=${0} /></div>
           `}
     </article>
   `
@@ -570,7 +592,7 @@ function FusionJudgeEvidence({ judge }: { judge: FusionJudge }) {
           </h5>
           ${judge.consensus.map((claim, index) => html`
             <div class="fus-claim" key=${`consensus-${index}`}>
-              <p>${claim.text}</p>
+              <p><${RichContent} text=${claim.text} previewLimit=${0} /></p>
               <${FusionModelChips} models=${claim.models} />
             </div>
           `)}
@@ -586,7 +608,7 @@ function FusionJudgeEvidence({ judge }: { judge: FusionJudge }) {
                     ${contradiction.positions.map(position => html`
                       <div class="fus-pos" key=${`${contradiction.topic}:${position.model}`}>
                         <span class="fus-pos-m mono">${position.model}</span>
-                        <span class="fus-pos-s">${position.stance}</span>
+                        <span class="fus-pos-s"><${RichContent} text=${position.stance} previewLimit=${0} /></span>
                       </div>
                     `)}
                   </div>
@@ -608,7 +630,7 @@ function FusionJudgeEvidence({ judge }: { judge: FusionJudge }) {
                     </div>
                     <div class="fus-gap-row">
                       <span class="k">누락</span>
-                      <span class="fus-gap-miss">${gap.missing}</span>
+                      <span class="fus-gap-miss"><${RichContent} text=${gap.missing} previewLimit=${0} /></span>
                     </div>
                   </div>
                 `)}
@@ -622,7 +644,7 @@ function FusionJudgeEvidence({ judge }: { judge: FusionJudge }) {
                 <h5><span class="fus-jglyph">✦</span>고유 통찰 <span class="n">${judge.uniqueInsights.length}</span></h5>
                 ${judge.uniqueInsights.map((insight, index) => html`
                   <div class="fus-insight" key=${`insight-${index}`}>
-                    <p>${insight.text}</p>
+                    <p><${RichContent} text=${insight.text} previewLimit=${0} /></p>
                     ${insight.model ? html`<span class="fus-mchip mono">${insight.model}</span>` : null}
                   </div>
                 `)}
@@ -634,7 +656,7 @@ function FusionJudgeEvidence({ judge }: { judge: FusionJudge }) {
           ? html`
               <section class="fus-jsec blind">
                 <h5><span class="fus-jglyph">⚠</span>사각지대 <span class="n">${judge.blindSpots.length}</span></h5>
-                <ul class="fus-blind">${judge.blindSpots.map(item => html`<li key=${item}>${item}</li>`)}</ul>
+                <ul class="fus-blind">${judge.blindSpots.map(item => html`<li key=${item}><${RichContent} text=${item} previewLimit=${0} /></li>`)}</ul>
               </section>
             `
           : null}
@@ -643,7 +665,7 @@ function FusionJudgeEvidence({ judge }: { judge: FusionJudge }) {
           ? html`
               <section class="fus-jsec blind">
                 <h5><span class="fus-jglyph">⚠</span>부족한 입력 <span class="n">${judge.missingInputs.length}</span></h5>
-                <ul class="fus-blind">${judge.missingInputs.map(item => html`<li key=${item}>${item}</li>`)}</ul>
+                <ul class="fus-blind">${judge.missingInputs.map(item => html`<li key=${item}><${RichContent} text=${item} previewLimit=${0} /></li>`)}</ul>
               </section>
             `
           : null}
@@ -685,6 +707,22 @@ function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) 
   `
 }
 
+function findPreset(runId: string): string | null {
+  return fusionRuns.value.find(run => run.runId === runId)?.preset ?? null
+}
+
+function paramChip(label: string, value: number | null): ReturnType<typeof html> | null {
+  if (value === null) return null
+  return html`<span class="fus-param"><span class="k">${label}</span><span class="v">${value}</span></span>`
+}
+
+function hasParams(params: FusionRunParams): boolean {
+  return params.temperature !== null
+    || params.topP !== null
+    || params.topK !== null
+    || params.maxTokens !== null
+}
+
 function FusionRunDetail({ run }: { run: FusionRunView }) {
   const answered = run.panel.filter(entry => !isPanelFailure(entry.status)).length
   const failed = run.panel.length - answered
@@ -692,6 +730,7 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
   const dec = decisionSpecFor(run.judge.decision)
   const decClass = dec && dec.cls ? `dec-${dec.cls}` : ''
   const tokenLabel = combinedTokenLabel(run.usage)
+  const preset = run.preset ?? findPreset(run.runId)
 
   return html`
     <div class="fus-run-scroll" data-testid="fusion-detail">
@@ -699,7 +738,7 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
         <div class="fus-run-id-row">
           <${FusionStatusGlyph} status=${run.status} />
           <h1 class="mono">${run.runId}</h1>
-          <span class="fus-preset" title="runtime.toml [fusion.presets.*]" data-stub="preset not joined into board-derived run view (registry-only field)">preset · n/a</span>
+          ${preset ? html`<span class="fus-preset" title="runtime.toml [fusion.presets.*]">preset · ${preset}</span>` : null}
           <span class=${`fus-status tone-${run.tone}`}>${statusLabel(run.status)}</span>
         </div>
         <div class="fus-run-by">
@@ -721,6 +760,20 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
 
       <${FusionPipelineStrip} run=${run} />
 
+      ${hasParams(run.params)
+        ? html`
+            <div class="fus-block">
+              <div class="fus-block-lbl">생성 파라미터</div>
+              <div class="fus-params">
+                ${paramChip('temperature', run.params.temperature)}
+                ${paramChip('top_p', run.params.topP)}
+                ${paramChip('top_k', run.params.topK)}
+                ${paramChip('max_tokens', run.params.maxTokens)}
+              </div>
+            </div>
+          `
+        : null}
+
       <div class="fus-kpis" aria-label="Fusion run metrics">
         <${FusionMetric}
           label="패널"
@@ -739,7 +792,7 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
 
       <div class="fus-block">
         <div class="fus-block-lbl">심의 프롬프트</div>
-        <div class="fus-prompt">${run.question}</div>
+        <div class="fus-prompt"><${RichContent} text=${run.question} previewLimit=${0} /></div>
       </div>
 
       <div class="fus-block">
@@ -786,9 +839,9 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
             : null}
         </div>
         <div class="fus-resolved-lbl">resolved_answer</div>
-        <p class="fus-resolved-body">${resolved}</p>
+        <p class="fus-resolved-body"><${RichContent} text=${resolved} previewLimit=${0} /></p>
         ${run.judge.recommendation?.rationale
-          ? html`<p class="fus-rec-rationale"><span class="k">근거</span>${run.judge.recommendation.rationale}</p>`
+          ? html`<p class="fus-rec-rationale"><span class="k">근거</span><${RichContent} text=${run.judge.recommendation.rationale} previewLimit=${0} /></p>`
           : null}
         ${run.judge.missingInputs.length > 0
           ? html`

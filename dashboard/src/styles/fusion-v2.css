@@ -79,6 +79,7 @@
   font-weight: 760;
   line-height: 1.05;
   overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
 
 .v2-fusion-surface .fus-kpi.tone-ok .fus-kpi-v {
@@ -1007,4 +1008,55 @@ button.fus-reconcile-row:hover {
   .v2-fusion-surface .fus-runs-pipe-node:not(:last-child)::after {
     display: none;
   }
+}
+
+.v2-fusion-surface .fus-params {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.v2-fusion-surface .fus-param {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--fus-line);
+  border-radius: var(--r-1);
+  background: var(--fus-panel-strong);
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.v2-fusion-surface .fus-param .k {
+  color: var(--fus-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-transform: uppercase;
+  font-size: 9.5px;
+}
+
+.v2-fusion-surface .fus-param .v {
+  color: var(--fus-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.v2-fusion-surface .fus-pans.failed {
+  color: var(--bad-light);
+  cursor: default;
+}
+
+/* Unified long-text wrapping for the standalone Fusion surface.
+   Keep CJK readability while allowing arbitrary identifiers/URLs to break. */
+.v2-fusion-surface .fus-prompt,
+.v2-fusion-surface .fus-resolved-body,
+.v2-fusion-surface .fus-panel-body,
+.v2-fusion-surface .fus-jrow,
+.v2-fusion-surface .fus-gap-miss,
+.v2-fusion-surface .fus-pos-s,
+.v2-fusion-surface .fus-claim p,
+.v2-fusion-surface .fus-insight p,
+.v2-fusion-surface .fus-blind li,
+.v2-fusion-surface .fus-missing li,
+.v2-fusion-surface .fus-rec-rationale .markdown-content {
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
 }

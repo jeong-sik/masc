@@ -1784,7 +1784,7 @@ describe('ChatTranscript — workspace day dividers (C1)', () => {
   })
 })
 
-describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
+describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
   let container: HTMLDivElement
   beforeEach(() => {
     container = document.createElement('div')
@@ -1796,7 +1796,7 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
     resetToolCallOutputs()
   })
 
-  it('folds consecutive tool calls into one 작업 과정 card when grouping is on', () => {
+  it('folds consecutive tool calls into one turn timeline card when grouping is on', () => {
     recordToolCallOutputs([
       toolCallOutput({ tool_use_id: 't1', output: 'r1' }),
       toolCallOutput({ tool_use_id: 't2', output: 'r2' }),
@@ -1815,11 +1815,13 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
     )
     const cards = container.querySelectorAll('[data-chat-tool-trace]')
     expect(cards.length).toBe(1)
-    expect(cards[0]?.textContent).toContain('작업 과정')
-    expect(cards[0]?.textContent).toContain('2단계')
+    expect(cards[0]?.textContent).toContain('턴 타임라인')
+    expect(cards[0]?.textContent).toContain('3단계')
     expect(cards[0]?.textContent).toContain('도구 2')
+    expect(cards[0]?.textContent).toContain('Chat 1')
     expect(cards[0]?.textContent).toContain('keeper_board_list')
     expect(cards[0]?.textContent).toContain('keeper_tasks_list')
+    expect(cards[0]?.querySelector('[data-chat-trace-step="chat"]')?.textContent).toContain('답변')
     // Grouped surface keeps no standalone per-row tool bubbles.
     expect(container.querySelectorAll('[data-chat-variant="tool-call"]').length).toBe(0)
   })
@@ -1881,7 +1883,7 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
     expect(trace?.textContent).not.toContain('다른 턴 답변')
   })
 
-  it('renders assistant thinking as 작업 과정 even without tool calls', () => {
+  it('renders assistant thinking as a turn timeline even without tool calls', () => {
     render(
       html`<${ChatTranscript}
         entries=${[
@@ -1902,11 +1904,14 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
 
     const bundle = container.querySelector('[data-chat-turn-bundle]')
     expect(bundle).not.toBeNull()
-    expect(bundle?.textContent).toContain('작업 과정')
-    expect(bundle?.textContent).toContain('1단계')
+    expect(bundle?.textContent).toContain('턴 타임라인')
+    expect(bundle?.textContent).toContain('2단계')
+    expect(bundle?.textContent).toContain('Think 1')
+    expect(bundle?.textContent).toContain('Chat 1')
     expect(bundle?.textContent).toContain('Thinking')
     expect(bundle?.textContent).toContain('checking context')
     expect(bundle?.textContent).toContain('곧 답합니다')
+    expect(bundle?.querySelector('[data-chat-trace-step="chat"]')?.textContent).toContain('곧 답합니다')
   })
 
   it('renders thinking text as sanitized markdown with newlines preserved', () => {

@@ -25,6 +25,10 @@ export interface KeeperActivityDisplay {
   ageSeconds: number | null
 }
 
+interface KeeperActivityDisplayOptions {
+  includeCreated?: boolean
+}
+
 interface KeeperModelDisplay {
   label: string
   value: string
@@ -138,7 +142,9 @@ function activityDisplaySource(source: Keeper['last_activity_source'] | null | u
 export function keeperActivityDisplay(
   keeper: KeeperActivityDisplaySource | null | undefined,
   fallbackAgentLastSeen?: string | null,
+  options: KeeperActivityDisplayOptions = {},
 ): KeeperActivityDisplay {
+  const includeCreated = options.includeCreated !== false
   const candidates = [
     timestampCandidate(
       activityDisplaySource(keeper?.last_activity_source),
@@ -158,8 +164,10 @@ export function keeperActivityDisplay(
   const agentSeen = timestampCandidate('agent_seen', '에이전트 신호', fallbackAgentLastSeen)
   if (agentSeen) return agentSeen
 
-  const created = timestampCandidate('created', '생성', keeper?.created_at)
-  if (created) return created
+  if (includeCreated) {
+    const created = timestampCandidate('created', '생성', keeper?.created_at)
+    if (created) return created
+  }
 
   return {
     source: 'none',

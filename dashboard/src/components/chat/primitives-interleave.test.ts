@@ -21,6 +21,7 @@ describe('interleaveTraceAndTools', () => {
   const labels = (items: ReturnType<typeof interleaveTraceAndTools>) =>
     items.map((i) => {
       if (i.kind === 'tool') return `tool:${i.entry.id}`
+      if (i.kind === 'chat') return `chat:${i.entry.id}`
       // think/reason carry `text`; the tool variant of ChatTraceStep does not.
       return `think:${'text' in i.step ? i.step.text : i.step.name}`
     })

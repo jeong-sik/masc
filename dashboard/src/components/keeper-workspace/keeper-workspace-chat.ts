@@ -201,7 +201,7 @@ function WorkspaceCommandButtons({
     detailOpen,
     artifactsOpen,
     onOpenTurnInspector,
-      onToggleArtifacts,
+    onToggleArtifacts,
     onToggleDetail,
     onOpenConfig,
   })
@@ -322,7 +322,7 @@ function ChatHeader({
   // canonical home — so the header stays slim and the conversation gets the
   // vertical space instead of a redundant metadata sub-row.
   return html`
-    <div class="kw-chat-head v2-monitoring-toolbar">
+    <div class="kw-chat-head chat-head v2-monitoring-toolbar">
       <button
         type="button"
         class="kw-chat-back kw-act v2-monitoring-action"
@@ -353,7 +353,7 @@ function ChatHeader({
           detailOpen=${detailOpen}
           artifactsOpen=${artifactsOpen}
           onOpenTurnInspector=${onOpenTurnInspector}
-            onToggleArtifacts=${onToggleArtifacts}
+          onToggleArtifacts=${onToggleArtifacts}
           onToggleDetail=${onToggleDetail}
           onOpenConfig=${onOpenConfig}
         />

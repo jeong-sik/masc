@@ -177,7 +177,13 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   border-right: 1px solid var(--color-border-default);
   background: var(--color-bg-panel-alt);
 }
-.kw-roster-head { padding: 14px; border-bottom: 1px solid var(--color-border-divider); }
+.kw-roster-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border-divider);
+}
 .kw-roster-title {
   display: flex; align-items: center; gap: 8px;
   font-family: var(--font-display); font-size: var(--fs-14); text-transform: uppercase; letter-spacing: 0.12em;
@@ -201,75 +207,13 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-roster-search:focus { border-color: var(--color-accent-fg-dim); box-shadow: 0 0 0 2px var(--accent-10); }
 .kw-roster-search::placeholder { color: var(--color-fg-muted); }
 
-.kw-roster-summary {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 14px 12px;
-  border-bottom: 1px solid var(--color-border-divider);
-  background: color-mix(in oklab, var(--color-bg-surface) 38%, transparent);
-}
-.kw-roster-meter {
-  display: flex;
-  height: 4px;
-  overflow: hidden;
-  border-radius: 9999px;
-  background: var(--color-bg-page);
-}
-.kw-roster-meter span { min-width: 0; height: 100%; }
-.kw-roster-meter .run { background: var(--color-status-ok); }
-.kw-roster-meter .pause { background: var(--color-status-warn); }
-.kw-roster-meter .off { background: var(--color-fg-muted); }
-.kw-roster-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6px;
-}
-.kw-roster-stat {
-  min-width: 0;
-  padding: 6px 8px;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--r-1);
-  background: var(--color-bg-page);
-}
-.kw-roster-stat b {
-  display: block;
-  color: var(--color-fg-primary);
-  font-family: var(--font-mono);
-  font-size: var(--fs-14);
-  line-height: 1.1;
-}
-.kw-roster-stat span {
-  display: block;
-  margin-top: 2px;
-  color: var(--color-fg-muted);
-  font-size: var(--fs-10);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.kw-roster-stat.ok { border-color: rgb(var(--color-status-ok-glow) / 0.36); }
-.kw-roster-stat.warn { border-color: rgb(var(--color-status-warn-glow) / 0.36); }
-.kw-roster-stat.idle { border-color: color-mix(in oklab, var(--color-fg-muted) 32%, var(--color-border-default)); }
-.kw-roster-flags {
+.kw-roster-filters {
   display: flex;
   min-width: 0;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
+  flex-wrap: nowrap;
 }
-.kw-roster-flags span {
-  color: var(--color-fg-muted);
-  border: 1px solid var(--color-border-default);
-  border-radius: 9999px;
-  padding: 2px 8px;
-  font-family: var(--font-mono);
-  font-size: var(--fs-10);
-  white-space: nowrap;
-}
-.kw-roster-flags .hot { color: var(--color-status-err); border-color: rgb(var(--color-status-err-glow) / 0.4); background: rgb(var(--color-status-err-glow) / 0.10); }
-.kw-roster-flags .gate { color: var(--color-status-warn); border-color: rgb(var(--color-status-warn-glow) / 0.38); background: rgb(var(--color-status-warn-glow) / 0.09); }
-.kw-roster-flags .ctx { color: var(--color-accent-fg); border-color: var(--color-accent-fg-dim); background: var(--accent-10); }
-
-.kw-roster-filters { display: flex; gap: 6px; padding: 10px 14px; flex-wrap: wrap; border-bottom: 1px solid var(--color-border-divider); }
 .kw-rfilter {
   font-size: var(--fs-11); letter-spacing: 0.06em; text-transform: uppercase;
   padding: 4px 10px; border-radius: 9999px; cursor: pointer;
@@ -280,6 +224,27 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-rfilter:hover { color: var(--color-fg-primary); border-color: var(--color-border-strong); }
 .kw-rfilter[aria-pressed="true"] { background: var(--color-accent-fg); border-color: var(--color-accent-fg); color: var(--bg-deep); font-weight: var(--fw-semi); }
 .kw-rfilter .n { opacity: 0.8; }
+.kw-rfilter-icon {
+  display: inline-flex;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--color-fg-secondary);
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.kw-rfilter-icon:hover,
+.kw-rfilter-icon[aria-pressed="true"] {
+  color: var(--color-accent-fg);
+  border-color: var(--color-accent-fg-dim);
+  background: var(--accent-10);
+}
 /* Roster sort <select> — ported from keeper-v2 v2.css .roster-sort. Pushed to
    the right of the filter chips; pill control with the same resting/hover/focus
    treatment as the search field and filter chips. */
@@ -302,6 +267,17 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   font-size: var(--fs-9-5); font-weight: var(--fw-bold); letter-spacing: 0.18em; text-transform: uppercase; color: var(--color-fg-secondary);
   padding: 12px 8px 6px;
 }
+.kw-roster-group .rg-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--color-fg-muted);
+}
+.kw-roster-group.att .rg-dot { background: var(--color-status-err); }
+.kw-roster-group.run .rg-dot { background: var(--color-status-ok); }
+.kw-roster-group.pause .rg-dot { background: var(--color-status-warn); }
+.kw-roster-group.off .rg-dot { background: var(--color-fg-muted); }
 /* Per-group keeper count, right-aligned — mirrors the design roster's rg-n. */
 .kw-roster-group-n { margin-left: auto; letter-spacing: 0; color: var(--color-fg-muted); font-variant-numeric: tabular-nums; }
 .kw-roster-empty { padding: 30px 12px; text-align: center; color: var(--color-fg-secondary); font-size: var(--fs-13); }
@@ -323,12 +299,11 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-kp-mini .kw-dot { position: absolute; right: 5px; bottom: 5px; }
 
 .kw-kp-row {
-  display: grid; grid-template-columns: 40px 1fr auto; gap: 10px; align-items: start;
+  display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 10px; align-items: start;
   width: 100%; text-align: left;
   /* B5: tighter vertical rhythm (standalone roster density) — row padding 11→8
-     so more keepers fit on screen. align-items stays `start` (not the
-     standalone's `center`) because the live row carries a 3rd work-preview
-     line the standalone's 2-line row does not. */
+     so more keepers fit on screen while the live context/tool signals still
+     have room to wrap cleanly. */
   padding: 8px 10px; border-radius: var(--r-2); cursor: pointer;
   border: 1px solid transparent; background: transparent;
   transition: background .14s, border-color .14s;
@@ -367,7 +342,6 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-kp-sub { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--color-fg-secondary); margin-top: 3px; min-width: 0; }
 .kw-kp-state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .kw-kp-handle { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.kw-kp-work { margin-top: 4px; font-size: var(--fs-12); color: var(--color-fg-secondary); line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kw-kp-context {
   display: flex;
   min-width: 0;
@@ -428,13 +402,21 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   white-space: nowrap;
 }
 .kw-kp-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; padding-top: 2px; }
-.kw-kp-time { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--color-fg-muted); }
+.kw-kp-time {
+  max-width: 96px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  line-height: 1.25;
+  color: var(--color-fg-muted);
+  text-align: right;
+}
 .kw-kp-att {
   font-family: var(--font-mono); font-size: var(--fs-10); font-weight: var(--fw-semi);
-  min-width: 16px; text-align: center; padding: 2px 6px; border-radius: 9999px;
+  min-width: 0; text-align: center; padding: 2px 7px; border-radius: 9999px;
   color: var(--color-status-err);
   background: rgb(var(--color-status-err-glow) / 0.16);
   border: 1px solid rgb(var(--color-status-err-glow) / 0.35);
+  white-space: nowrap;
 }
 .kw-kp-more {
   position: absolute;
@@ -577,7 +559,20 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
  * actions wrap to their own row instead (see .kw-chat-head flex-wrap). */
 .kw-chat-id { min-width: 9rem; flex: 1; }
 .kw-chat-name-row { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; }
-.kw-chat-slug { font-size: var(--fs-12); color: var(--color-fg-muted); margin-top: 2px; }
+.kw-chat-sub {
+  min-width: 0;
+  margin-top: 3px;
+  color: var(--color-fg-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  line-height: 1.25;
+}
+.kw-chat-sub .sub-ns {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* Back-to-roster affordance: only meaningful on the single-pane mobile layout
  * (shown at ≤860px in the conversation media block). On desktop the roster is
  * always visible, so the button is hidden. */

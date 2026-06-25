@@ -2065,8 +2065,7 @@ let test_lazy_startup_plan_groups_independent_tasks () =
       check_lazy_group tool_state ~name:"tool_state" ~execution:"serial"
         ~tasks:[ "telemetry_warmup"; "tool_metrics_restore" ];
       check_lazy_group cleanup ~name:"cleanup" ~execution:"serial"
-        ~tasks:
-          [ "jsonl_prune"; "auth_archive_prune" ];
+        ~tasks:[ "jsonl_prune" ];
       Alcotest.(check (list string))
         "flattened task order"
         [
@@ -2077,7 +2076,6 @@ let test_lazy_startup_plan_groups_independent_tasks () =
           "telemetry_warmup";
           "tool_metrics_restore";
           "jsonl_prune";
-          "auth_archive_prune";
         ]
         (Server_runtime_bootstrap.lazy_startup_task_names ())
   | _ -> Alcotest.fail "unexpected lazy startup group shape"

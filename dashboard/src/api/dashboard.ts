@@ -244,6 +244,13 @@ export type {
   TurnBlockDiff,
   TurnRecordRow,
   MemoryOsEpisodeSummary,
+  MemoryOsFactCategoryTag,
+  MemoryOsFactCategory,
+  MemoryOsClaimKind,
+  MemoryOsExternalRefKind,
+  MemoryOsExternalRef,
+  MemoryOsFactProvenance,
+  MemoryOsFact,
   MemoryOsTurnRecordSnapshot,
   KeeperUserModelItem,
   KeeperUserModelSnapshot,
@@ -254,6 +261,8 @@ export type {
 export {
   fetchKeeperTurnRecords,
   fetchKeeperTurnTranscript,
+  parseMemoryOsFactCategory,
+  parseMemoryOsClaimKind,
 } from './dashboard-turn-records'
 
 export type {

@@ -15,6 +15,7 @@ function normalizeStringList(value: unknown): string[] {
   return single ? [single] : []
 }
 
+
 export type TurnBlock = {
   block: string
   bytes: number
@@ -89,6 +90,96 @@ export type MemoryOsEpisodeSummary = {
   summary: string
 }
 
+// RFC-keeper-memory-panel-real-data §4a: the librarian taxonomy as a closed TS union mirroring the OCaml
+// `category` sum (keeper_memory_os_types.ml — category_to_string is the wire SSOT).
+// The wire carries a string token; it is parsed once at this decode boundary into
+// a tagged value. An out-of-vocabulary token becomes { tag: 'unknown', raw } — the
+// same drift-absorbing arm the backend's `Unknown of string` defines — so a
+// renamed/typo'd category surfaces as a typed unknown the panel can flag, never a
+// silent miscategorization. This is exact-membership parse-don't-validate, not a
+// substring/prefix classifier.
+export type MemoryOsFactCategoryTag =
+  | 'code_change'
+  | 'fact'
+  | 'preference'
+  | 'blocker'
+  | 'goal'
+  | 'constraint'
+  | 'ephemeral'
+  | 'validated_approach'
+  | 'lesson'
+export type MemoryOsFactCategory =
+  | { readonly tag: MemoryOsFactCategoryTag }
+  | { readonly tag: 'unknown'; readonly raw: string }
+
+// SSOT token list — must stay byte-identical to the known arms of
+// category_of_string/category_to_string. A drift-guard test pins this set.
+const MEMORY_OS_FACT_CATEGORY_TAGS: readonly MemoryOsFactCategoryTag[] = [
+  'code_change',
+  'fact',
+  'preference',
+  'blocker',
+  'goal',
+  'constraint',
+  'ephemeral',
+  'validated_approach',
+  'lesson',
+]
+
+export function parseMemoryOsFactCategory(raw: string): MemoryOsFactCategory {
+  // Mirror category_of_string: trim + lowercase, then exact membership.
+  const token = raw.trim().toLowerCase()
+  const known = MEMORY_OS_FACT_CATEGORY_TAGS.find(tag => tag === token)
+  return known ? { tag: known } : { tag: 'unknown', raw }
+}
+
+// RFC-0285 §3.1 claim_kind — closed vocabulary, no Unknown arm on the backend.
+// Mirrors claim_kind_of_string: an unrecognized/absent token yields undefined,
+// the backend's own None degrade to the durable path.
+export type MemoryOsClaimKind = 'self_observation' | 'external_state' | 'durable_knowledge'
+const MEMORY_OS_CLAIM_KINDS: readonly MemoryOsClaimKind[] = [
+  'self_observation',
+  'external_state',
+  'durable_knowledge',
+]
+export function parseMemoryOsClaimKind(raw: string): MemoryOsClaimKind | undefined {
+  const token = raw.trim().toLowerCase()
+  return MEMORY_OS_CLAIM_KINDS.find(kind => kind === token)
+}
+
+// RFC-0259 §3.2(b) external_ref — closed kind set; mirrors external_ref_kind_of_string.
+export type MemoryOsExternalRefKind = 'pr' | 'issue' | 'task'
+const MEMORY_OS_EXTERNAL_REF_KINDS: readonly MemoryOsExternalRefKind[] = ['pr', 'issue', 'task']
+export type MemoryOsExternalRef = {
+  readonly kind: MemoryOsExternalRefKind
+  readonly id: string
+}
+
+export type MemoryOsFactProvenance = {
+  readonly trace_id: string
+  readonly turn: number
+  readonly tool_call_id: string | null
+}
+
+// One fact row as projected by memory_os_fact_json (server_dashboard_http_keeper_api.ml).
+// Carries only the structure RFC-0247 left on the record — there is no salience /
+// uses / confidence field to decode because the backend has none to emit.
+export type MemoryOsFact = {
+  readonly claim: string
+  readonly category: MemoryOsFactCategory
+  readonly source: MemoryOsFactProvenance
+  readonly first_seen: number
+  readonly first_seen_iso: string | null
+  // last_verified_at else first_seen — the shared staleness anchor (reference_time).
+  readonly reference_time: number
+  readonly valid_until: number | null
+  readonly valid_until_iso: string | null
+  readonly last_verified_at: number | null
+  readonly current: boolean
+  readonly external_ref: MemoryOsExternalRef | null
+  readonly claim_kind: MemoryOsClaimKind | null
+}
+
 export type MemoryOsTurnRecordSnapshot = {
   schema: string
   keeper: string
@@ -113,6 +204,9 @@ export type MemoryOsTurnRecordSnapshot = {
     shown: number
     current: number
     expired: number
+    // RFC-keeper-memory-panel-real-data §4a: the individual fact rows (bounded by tail_limit; `shown`
+    // documents the bound so a truncated tail is visible, not silent).
+    items: MemoryOsFact[]
   }
 }
 
@@ -255,6 +349,65 @@ function decodeMemoryOsEpisode(raw: unknown): MemoryOsEpisodeSummary | null {
   }
 }
 
+function decodeMemoryOsExternalRef(raw: unknown): MemoryOsExternalRef | undefined {
+  if (!isRecord(raw)) return undefined
+  const id = asString(raw.id)
+  const kindToken = asString(raw.kind)?.trim().toLowerCase()
+  if (!id || !kindToken) return undefined
+  // Mirror external_ref_of_json: both fields required and kind in the closed
+  // set, else the whole ref is dropped (the backend's None).
+  const kind = MEMORY_OS_EXTERNAL_REF_KINDS.find(k => k === kindToken)
+  return kind ? { kind, id } : undefined
+}
+
+function decodeMemoryOsFactProvenance(raw: unknown): MemoryOsFactProvenance | null {
+  if (!isRecord(raw)) return null
+  const trace_id = asString(raw.trace_id)
+  const turn = asNumber(raw.turn)
+  if (!trace_id || turn == null) return null
+  return { trace_id, turn, tool_call_id: asNullableString(raw.tool_call_id) }
+}
+
+function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
+  if (!isRecord(raw)) return null
+  const claim = asString(raw.claim)
+  const categoryToken = asString(raw.category)
+  const source = decodeMemoryOsFactProvenance(raw.source)
+  const first_seen = asNumber(raw.first_seen)
+  const reference_time = asNumber(raw.reference_time)
+  const current = asBoolean(raw.current)
+  // Required keys are exactly the always-present ones in memory_os_fact_json.
+  // A row missing any of them is a contract violation — dropped here rather
+  // than rendered with a guessed default (no silent fabrication).
+  if (
+    !claim
+    || !categoryToken
+    || !source
+    || first_seen == null
+    || reference_time == null
+    || current == null
+  ) {
+    return null
+  }
+  // external_ref / claim_kind are omitted by the server when None; an
+  // out-of-vocabulary value degrades to null, mirroring the backend contract.
+  const claimKindToken = asString(raw.claim_kind)
+  return {
+    claim,
+    category: parseMemoryOsFactCategory(categoryToken),
+    source,
+    first_seen,
+    first_seen_iso: asNullableString(raw.first_seen_iso),
+    reference_time,
+    valid_until: asNumber(raw.valid_until) ?? null,
+    valid_until_iso: asNullableString(raw.valid_until_iso),
+    last_verified_at: asNumber(raw.last_verified_at) ?? null,
+    current,
+    external_ref: decodeMemoryOsExternalRef(raw.external_ref) ?? null,
+    claim_kind: claimKindToken ? (parseMemoryOsClaimKind(claimKindToken) ?? null) : null,
+  }
+}
+
 function decodeMemoryOsCounts(raw: unknown): {
   tail_limit: number
   shown: number
@@ -279,8 +432,9 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
   const facts_store = asString(raw.facts_store)
   const episodes_store = asString(raw.episodes_store)
   const episodesRaw = isRecord(raw.episodes) ? raw.episodes : null
+  const factsRaw = isRecord(raw.facts) ? raw.facts : null
   const facts = decodeMemoryOsCounts(raw.facts)
-  if (!schema || !keeper || !source || !producer || !facts_store || !episodes_store || !episodesRaw || !facts) {
+  if (!schema || !keeper || !source || !producer || !facts_store || !episodes_store || !episodesRaw || !factsRaw || !facts) {
     return null
   }
   const episodesCounts = decodeMemoryOsCounts(episodesRaw)
@@ -309,7 +463,12 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
         .map(decodeMemoryOsEpisode)
         .filter((item): item is MemoryOsEpisodeSummary => item !== null),
     },
-    facts,
+    facts: {
+      ...facts,
+      items: asRecordArray(factsRaw.items)
+        .map(decodeMemoryOsFact)
+        .filter((item): item is MemoryOsFact => item !== null),
+    },
   }
 }
 

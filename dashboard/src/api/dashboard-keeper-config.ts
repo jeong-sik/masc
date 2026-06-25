@@ -83,9 +83,8 @@ function normalizeKeeperConfigActiveGoals(raw: unknown): KeeperConfig['workspace
     .map((item) => {
       const id = asNullableString(item.id)
       const title = asNullableString(item.title)
-      const horizon = asNullableString(item.horizon)
-      if (!id || !title || !horizon) return null
-      return { id, title, horizon }
+      if (!id || !title) return null
+      return { id, title }
     })
     .filter((item): item is KeeperConfig['workspace']['active_goals'][number] => item !== null)
 }

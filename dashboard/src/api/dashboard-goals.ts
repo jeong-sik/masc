@@ -368,7 +368,6 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
   return {
     id,
     title,
-    horizon: asString(raw.horizon, 'unknown'),
     status: asString(raw.status, 'unknown'),
     status_color: asString(raw.status_color, ''),
     phase: asString(raw.phase, 'unknown'),

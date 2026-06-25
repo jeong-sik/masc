@@ -252,7 +252,7 @@ let add_routes ~sw router =
          let config = (Mcp_server.workspace_config state) in
          let key = cache_key [ config.base_path; string_of_int limit ] in
          let json =
-           cached_dashboard_json ~sw ~sync_first:false
+           cached_dashboard_json ~sw ~sync_first:true
              ~cache:dashboard_keeper_decisions_cache ~key
              ~placeholder:
                (Dashboard_http_keeper.keeper_decisions_json ~config

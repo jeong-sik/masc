@@ -187,23 +187,39 @@ end
     then the boot override store, then the hardcoded defaults below. *)
 
 module KeeperMemoryOs = struct
+  let get_int_logged = Env_config_memory.get_int_logged
+  let get_float_positive_logged = Env_config_memory.get_float_positive_logged
+
+  let get_bool_logged ?(invalid = Env_config_memory.Default) name ~default =
+    Env_config_memory.get_bool_logged
+      ~invalid
+      name
+      ~default
+  ;;
+
   let nonempty_string value =
     let value = String.trim value in
     if String.equal value "" then None else Some value
   ;;
 
-  (** Memory OS recall prompt injection kill switch. Default: true.
+  (** Memory OS recall prompt injection kill switch. Default: true. Disable
+      with an explicit false token ([0], [false], [no], [off], [disabled]);
+      invalid values warn and preserve the default-on behavior so a typo does
+      not silently remove model recall context.
       @category Policies
       @ops_class operator *)
   let recall_enabled () =
-    get_bool ~default:true "MASC_KEEPER_MEMORY_OS_RECALL"
+    get_bool_logged "MASC_KEEPER_MEMORY_OS_RECALL" ~default:true
   ;;
 
   (** Memory OS librarian post-turn extraction kill switch. Default: true.
+      Disable with an explicit false token ([0], [false], [no], [off],
+      [disabled]); invalid values warn and preserve the default-on behavior so
+      a typo does not silently stop post-turn memory extraction.
       @category Policies
       @ops_class operator *)
   let librarian_enabled () =
-    get_bool ~default:true "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
+    get_bool_logged "MASC_KEEPER_MEMORY_OS_LIBRARIAN" ~default:true
   ;;
 
   (** Turns between librarian extraction attempts per keeper. Default: 3,
@@ -211,7 +227,9 @@ module KeeperMemoryOs = struct
       @category Runtime
       @ops_class operator *)
   let librarian_cadence_turns () =
-    max 1 (get_int ~default:3 "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS")
+    max
+      1
+      (get_int_logged "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS" ~default:3)
   ;;
 
   (** Base recent-message window for librarian extraction. Default: 24,
@@ -219,7 +237,9 @@ module KeeperMemoryOs = struct
       @category Runtime
       @ops_class operator *)
   let librarian_max_messages () =
-    max 1 (get_int ~default:24 "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES")
+    max
+      1
+      (get_int_logged "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES" ~default:24)
   ;;
 
   (** Provider timeout for librarian extraction. Default: 600 seconds; invalid,
@@ -227,8 +247,9 @@ module KeeperMemoryOs = struct
       @category Timeouts
       @ops_class operator *)
   let librarian_timeout_sec () =
-    let value = get_float ~default:600.0 "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC" in
-    if Float.is_finite value && value > 0.0 then value else 600.0
+    get_float_positive_logged
+      "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC"
+      ~default:600.0
   ;;
 
   (** Optional runtime id override for librarian extraction.
@@ -244,22 +265,29 @@ module KeeperMemoryOs = struct
       @category Concurrency
       @ops_class operator *)
   let librarian_global_slot () =
-    max 0 (get_int ~default:1 "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT")
+    max 0 (get_int_logged "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT" ~default:1)
   ;;
 
-  (** Per-keeper Memory OS GC maintenance fiber kill switch. Default: false.
+  (** Per-keeper Memory OS GC maintenance fiber kill switch. Default: false;
+      invalid values fail closed to false.
       @category Storage
       @ops_class operator *)
   let gc_enabled () =
-    get_bool ~default:false "MASC_KEEPER_MEMORY_OS_GC"
+    get_bool_logged
+      ~invalid:Env_config_memory.Fail_closed
+      "MASC_KEEPER_MEMORY_OS_GC"
+      ~default:false
   ;;
 
   (** Per-keeper Memory OS consolidation maintenance fiber kill switch.
-      Default: false.
+      Default: false; invalid values fail closed to false.
       @category Policies
       @ops_class operator *)
   let consolidation_enabled () =
-    get_bool ~default:false "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
+    get_bool_logged
+      ~invalid:Env_config_memory.Fail_closed
+      "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
+      ~default:false
   ;;
 
   (** Optional runtime id override for Memory OS consolidation.

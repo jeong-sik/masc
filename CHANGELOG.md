@@ -3,11 +3,20 @@
 
 ## Unreleased
 
+### Changed
+- `dashboard`: Memory OS fact decoding now emits a development-console warning
+  when a legacy wire payload still carries `external_ref`. The field remains
+  intentionally absent from dashboard fact types/rendering; PR/issue text is
+  context for the model, not a machine-readable external-state status tag.
+
 ### Removed
+- `dashboard`: documented the Memory OS `external_ref` dashboard API removal.
+  Legacy payloads are ignored rather than re-rendered as status tags; producers
+  must use future structured origin fields instead of relying on the retired
+  dashboard `external_ref` surface.
 - `runtime`: removed the legacy runtime storage selector. Storage is now
   filesystem-only by construction; operator/test environments must remove old
   backend overrides instead of expecting an in-memory backend.
-
 
 ## [0.19.48] - 2026-06-22
 

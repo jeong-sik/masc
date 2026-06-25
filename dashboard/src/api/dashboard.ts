@@ -247,8 +247,6 @@ export type {
   MemoryOsFactCategoryTag,
   MemoryOsFactCategory,
   MemoryOsClaimKind,
-  MemoryOsExternalRefKind,
-  MemoryOsExternalRef,
   MemoryOsFactProvenance,
   MemoryOsFact,
   MemoryOsSelectionPolicy,

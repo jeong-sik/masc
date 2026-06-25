@@ -17,6 +17,7 @@ vi.mock('../keeper-runtime', async () => {
   const { signal } = await import('@preact/signals')
   return {
     abortKeeperThreadMessage: vi.fn(),
+    cancelActiveKeeperThreadMessage: vi.fn(async () => true),
     hydrateKeeperStatus: vi.fn(async () => null),
     hydrateKeeperChatHistory: vi.fn(async () => undefined),
     loadFullKeeperHistory: vi.fn(async () => null),
@@ -57,7 +58,12 @@ vi.mock('./common/toast', () => ({
 
 import { keeperActionErrors, keeperHydrating, keeperSending, keeperStreamStartedAt, keeperThreads } from '../keeper-runtime'
 import { keeperStatusDetails } from '../keeper-runtime'
-import { hydrateKeeperStatus, isKeeperThreadMessageSendInFlight, sendKeeperThreadMessage } from '../keeper-runtime'
+import {
+  cancelActiveKeeperThreadMessage,
+  hydrateKeeperStatus,
+  isKeeperThreadMessageSendInFlight,
+  sendKeeperThreadMessage,
+} from '../keeper-runtime'
 import { _resetChatStoreForTests, enqueueInput, getQueueLength } from '../keeper-chat-store'
 import { shellAuthSummary } from '../store'
 import type { KeeperConversationEntry } from '../types'
@@ -143,6 +149,8 @@ describe('KeeperConversationPanel', () => {
     _resetChatStoreForTests()
     vi.mocked(sendKeeperThreadMessage).mockReset()
     vi.mocked(sendKeeperThreadMessage).mockResolvedValue(undefined)
+    vi.mocked(cancelActiveKeeperThreadMessage).mockReset()
+    vi.mocked(cancelActiveKeeperThreadMessage).mockResolvedValue(true)
     vi.mocked(isKeeperThreadMessageSendInFlight).mockReset()
     vi.mocked(isKeeperThreadMessageSendInFlight).mockReturnValue(false)
   })
@@ -253,6 +261,51 @@ describe('KeeperConversationPanel', () => {
     expect(container.querySelector('.composer-textarea')).not.toBeNull()
     expect(container.textContent).toContain('@sangsu')
     expect(container.textContent).not.toContain('Enter로 전송')
+  })
+
+  it('logs abort failures from the conversation stop button', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    vi.mocked(cancelActiveKeeperThreadMessage).mockRejectedValueOnce(new Error('network down'))
+    keeperSending.value = { sangsu: true }
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
+      container,
+    )
+    await Promise.resolve()
+
+    fireEvent.click(container.querySelector('button[aria-label="응답 중지"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      expect(cancelActiveKeeperThreadMessage).toHaveBeenCalledWith('sangsu')
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining('failed to cancel active keeper stream for sangsu'),
+        'network down',
+      )
+    })
+    consoleError.mockRestore()
+  })
+
+  it('logs when the conversation stop button has no stream to cancel', async () => {
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    vi.mocked(cancelActiveKeeperThreadMessage).mockResolvedValueOnce(false)
+    keeperSending.value = { sangsu: true }
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
+      container,
+    )
+    await Promise.resolve()
+
+    fireEvent.click(container.querySelector('button[aria-label="응답 중지"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      expect(cancelActiveKeeperThreadMessage).toHaveBeenCalledWith('sangsu')
+      expect(consoleWarn).toHaveBeenCalledWith(
+        expect.stringContaining('no active keeper stream to cancel for sangsu'),
+      )
+    })
+    consoleWarn.mockRestore()
   })
 
   it('shows a live assistant placeholder while streaming without a reply entry', async () => {

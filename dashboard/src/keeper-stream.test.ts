@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { appendThreadEntry } from './keeper-state'
+import {
+  _resetLiveSendRequestOwnersForTests,
+  activeStreamRequestId,
+  appendThreadEntry,
+  setActiveStreamRequestId,
+} from './keeper-state'
 import { keeperThreads } from './keeper-state'
 import { applyKeeperStreamEvent } from './keeper-stream'
 
@@ -21,6 +26,7 @@ function assistantEntry(): void {
 describe('applyKeeperStreamEvent', () => {
   beforeEach(() => {
     keeperThreads.value = {}
+    _resetLiveSendRequestOwnersForTests()
   })
 
   it('appends content for TEXT_MESSAGE_CONTENT', () => {
@@ -112,6 +118,66 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.streamState).toBeNull()
     expect(entry?.error).toBeNull()
     expect(entry?.text).toBe('요청이 취소되었습니다.')
+  })
+
+  it('ignores terminal events for a different active request id', () => {
+    assistantEntry()
+    setActiveStreamRequestId('sangsu', 'kmsg_current')
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REQUEST_TERMINAL',
+      value: {
+        request_id: 'kmsg_stale',
+        status: 'cancelled',
+        ok: false,
+        message: 'stale terminal',
+      },
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.delivery).toBe('sending')
+    expect(entry?.streamState).toBe('opening')
+  })
+
+  it('ignores no-id terminal events while a request id is active', () => {
+    assistantEntry()
+    setActiveStreamRequestId('sangsu', 'kmsg_current')
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REQUEST_TERMINAL',
+      value: {
+        status: 'cancelled',
+        ok: false,
+        message: 'legacy terminal without request id',
+      },
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.delivery).toBe('sending')
+    expect(entry?.streamState).toBe('opening')
+    expect(activeStreamRequestId('sangsu')).toBe('kmsg_current')
+  })
+
+  it('ignores non-terminal request status events', () => {
+    assistantEntry()
+    setActiveStreamRequestId('sangsu', 'kmsg_current')
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REQUEST_TERMINAL',
+      value: {
+        request_id: 'kmsg_current',
+        status: 'running',
+        ok: false,
+        message: 'not terminal yet',
+      },
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.delivery).toBe('sending')
+    expect(entry?.streamState).toBe('opening')
   })
 
   // RFC-0232 P2: the checkpoint distinction rides the producer-typed
@@ -211,6 +277,7 @@ describe('applyKeeperStreamEvent', () => {
 describe('applyKeeperStreamEvent tool calls', () => {
   beforeEach(() => {
     keeperThreads.value = {}
+    _resetLiveSendRequestOwnersForTests()
   })
 
   it('streams a live tool-call entry above the assistant bubble', () => {

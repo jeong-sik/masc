@@ -54,11 +54,17 @@ post_with_accept() {
   local body="$2"
   local header_file="$3"
   local body_file="$4"
+  local -a extra_headers=(
+    -H 'Content-Type: application/json'
+    -H "Accept: $accept_header"
+  )
+  if [ -n "${MCP_TOKEN:-}" ]; then
+    extra_headers+=(-H "Authorization: Bearer $MCP_TOKEN")
+  fi
 
   curl_with_retry -sS -D "$header_file" -o "$body_file" \
     -X POST "$MCP_URL" \
-    -H 'Content-Type: application/json' \
-    -H "Accept: $accept_header" \
+    "${extra_headers[@]}" \
     -d "$body"
 }
 
@@ -74,6 +80,9 @@ post_with_session() {
     -H 'Accept: application/json, text/event-stream'
     -H "Mcp-Session-Id: $session_id"
   )
+  if [ -n "${MCP_TOKEN:-}" ]; then
+    extra_headers+=(-H "Authorization: Bearer $MCP_TOKEN")
+  fi
   if [ -n "$protocol_version" ]; then
     extra_headers+=(-H "Mcp-Protocol-Version: $protocol_version")
   fi
@@ -94,6 +103,9 @@ get_with_session() {
     -H 'Accept: text/event-stream'
     -H "Mcp-Session-Id: $session_id"
   )
+  if [ -n "${MCP_TOKEN:-}" ]; then
+    extra_headers+=(-H "Authorization: Bearer $MCP_TOKEN")
+  fi
   if [ -n "$protocol_version" ]; then
     extra_headers+=(-H "Mcp-Protocol-Version: $protocol_version")
   fi
@@ -112,6 +124,9 @@ delete_with_session() {
   local -a extra_headers=(
     -H "Mcp-Session-Id: $session_id"
   )
+  if [ -n "${MCP_TOKEN:-}" ]; then
+    extra_headers+=(-H "Authorization: Bearer $MCP_TOKEN")
+  fi
   if [ -n "$protocol_version" ]; then
     extra_headers+=(-H "Mcp-Protocol-Version: $protocol_version")
   fi

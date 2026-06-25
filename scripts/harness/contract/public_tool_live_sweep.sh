@@ -3,8 +3,8 @@ set -euo pipefail
 
 : "${MCP_URL:=http://127.0.0.1:8935/mcp}"
 : "${BASE_PATH:?BASE_PATH must be set by run_all.sh}"
-: "${AGENT_NAME:=public-tool-sweep-harness}"
-: "${MCP_SESSION_ID:=public-tool-sweep-$(date +%s)-$RANDOM}"
+: "${AGENT_NAME:=${MCP_AGENT_NAME:-public-tool-sweep-harness}}"
+: "${MCP_SESSION_ID:=}"
 export MCP_SESSION_ID
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -86,13 +86,13 @@ manifest_json="$(
 )"
 expected_public_tools="$(printf '%s\n' "$manifest_json" | jq -c '.public_tool_names | sort')"
 
-echo "[1/36] initialize MCP session"
+echo "[1/27] initialize MCP session"
 initialize_mcp_session || {
   echo "FAIL: failed to initialize MCP session" >&2
   exit 1
 }
 
-echo "[2/36] tools/list matches expected public surface"
+echo "[2/27] tools/list matches expected public surface"
 tools_list_payload="$(call_method 5001 "tools/list" '{}')"
 if ! response_transport_ok "$tools_list_payload"; then
   mcp_fail_with_context "tools/list failed" "$tools_list_payload"
@@ -104,49 +104,35 @@ if [[ "$actual_public_tools" != "$expected_public_tools" ]]; then
 fi
 echo "  PASS: tools/list public surface"
 
-echo "[3/36] masc_start"
-r_start="$(call_tool 5003 "masc_start" "$(jq -cn --arg path "$BASE_PATH" --arg task_title "Public Tool Sweep Seed" '{path:$path,task_title:$task_title}')")"
+echo "[3/27] masc_start"
+r_start="$(call_tool 5003 "masc_start" "$(jq -cn --arg path "$BASE_PATH" '{path:$path}')")"
 expect_ok "masc_start" "$r_start"
 
-echo "[4/36] masc_bind"
-r_join="$(call_tool 5004 "masc_bind" "$(jq -cn --arg agent_name "$AGENT_NAME" '{agent_name:$agent_name,capabilities:["contract","public-sweep"]}')")"
-expect_ok_or_guard "masc_bind" "$r_join" 'already joined'
-
-echo "[5/36] masc_status"
+echo "[4/27] masc_status"
 r_status="$(call_tool 5005 "masc_status" '{}')"
 expect_ok "masc_status" "$r_status"
 
-echo "[6/36] masc_agents"
-r_who="$(call_tool 5006 "masc_agents" '{}')"
-expect_ok "masc_agents" "$r_who"
-
-echo "[7/36] masc_agents"
-r_agents="$(call_tool 5007 "masc_agents" '{}')"
-expect_ok "masc_agents" "$r_agents"
-
-echo "[8/36] masc_dashboard"
-r_dashboard="$(call_tool 5008 "masc_dashboard" '{}')"
-expect_ok "masc_dashboard" "$r_dashboard"
-
-echo "[9/36] masc_agent_card"
+echo "[5/27] masc_agent_card"
 r_agent_card="$(call_tool 5009 "masc_agent_card" '{}')"
 expect_ok "masc_agent_card" "$r_agent_card"
 
-echo "[10/36] masc_tool_help"
+echo "[6/27] masc_tool_help"
 r_tool_help="$(call_tool 5012 "masc_tool_help" '{"tool_name":"masc_status"}')"
 expect_ok "masc_tool_help" "$r_tool_help"
 
-echo "[11/36] masc_check"
-r_check="$(call_tool 5013 "masc_check" '{"assertions":["joined"]}')"
-expect_ok "masc_check" "$r_check"
-
-GOAL_SEED_PAYLOAD="$(call_tool 5014 "masc_goal_upsert" '{"title":"Public Tool Sweep Goal","description":"Goal for public tool sweep contract harness","priority":1}')"
+echo "[7/27] masc_goal_upsert"
+GOAL_SEED_PAYLOAD="$(call_tool 5014 "masc_goal_upsert" '{"title":"Public Tool Sweep Goal","priority":1}')"
 GOAL_ID="$(printf '%s' "$GOAL_SEED_PAYLOAD" | extract_result | jq -r '.goal_id // empty')"
 if [ -z "$GOAL_ID" ]; then
   mcp_fail_with_context "could not create goal for public tool live sweep" "$GOAL_SEED_PAYLOAD"
 fi
+echo "  PASS: masc_goal_upsert"
 
-echo "[12/36] masc_add_task"
+echo "[8/27] masc_goal_list"
+r_goal_list="$(call_tool 5013 "masc_goal_list" '{}')"
+expect_ok "masc_goal_list" "$r_goal_list"
+
+echo "[9/27] masc_add_task"
 r_add_task="$(call_tool 5014 "masc_add_task" "$(jq -cn --arg goal_id "$GOAL_ID" '{title:"Public Tool Sweep Task",goal_id:$goal_id,priority:2,description:"live public surface verification"}')")"
 expect_ok "masc_add_task" "$r_add_task"
 task_id="$(
@@ -161,51 +147,55 @@ if [[ -z "$task_id" ]]; then
   mcp_fail_with_context "masc_add_task: could not extract task_id" "$r_add_task"
 fi
 
-echo "[13/36] masc_batch_add_tasks"
+echo "[10/27] masc_batch_add_tasks"
 r_batch_add="$(call_tool 5015 "masc_batch_add_tasks" "$(jq -cn --arg goal_id "$GOAL_ID" '{tasks:[{title:"Public Sweep Batch A",goal_id:$goal_id,priority:3,description:"batch-a"},{title:"Public Sweep Batch B",goal_id:$goal_id,priority:4,description:"batch-b"}]}')")"
 expect_ok "masc_batch_add_tasks" "$r_batch_add"
 
-echo "[14/36] masc_tasks"
+echo "[11/27] masc_tasks"
 r_tasks="$(call_tool 5016 "masc_tasks" '{}')"
 expect_ok "masc_tasks" "$r_tasks"
 
-echo "[15/36] masc_claim_next"
-r_claim_next="$(call_tool 5017 "masc_claim_next" "$(jq -cn --arg agent_name "$AGENT_NAME" '{agent_name:$agent_name}')")"
-expect_ok "masc_claim_next" "$r_claim_next"
+echo "[12/27] masc_transition claim"
+r_claim="$(call_tool 5017 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"claim",notes:"public tool sweep claim"}')")"
+expect_ok "masc_transition claim" "$r_claim"
 
-echo "[16/36] masc_plan_init"
+echo "[13/27] masc_plan_init"
 r_plan_init="$(call_tool 5018 "masc_plan_init" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id}')")"
 expect_ok "masc_plan_init" "$r_plan_init"
 
-echo "[17/36] masc_plan_set_task"
+echo "[14/27] masc_plan_set_task"
 r_plan_set="$(call_tool 5019 "masc_plan_set_task" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id}')")"
 expect_ok "masc_plan_set_task" "$r_plan_set"
 
-echo "[18/36] masc_plan_update"
+echo "[15/27] masc_check"
+r_check="$(call_tool 5020 "masc_check" '{"assertions":["task_claimed","current_task_set"]}')"
+expect_ok "masc_check" "$r_check"
+
+echo "[16/27] masc_plan_update"
 r_plan_update="$(call_tool 5020 "masc_plan_update" "$(jq -cn --arg task_id "$task_id" --arg content "public tool sweep plan" '{task_id:$task_id,content:$content}')")"
 expect_ok "masc_plan_update" "$r_plan_update"
 
-echo "[19/36] masc_plan_get"
+echo "[17/27] masc_plan_get"
 r_plan_get="$(call_tool 5021 "masc_plan_get" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id}')")"
 expect_ok "masc_plan_get" "$r_plan_get"
 
-echo "[20/36] masc_transition"
+echo "[18/27] masc_transition start"
 r_transition="$(call_tool 5022 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"start",notes:"public tool sweep start"}')")"
-expect_ok "masc_transition" "$r_transition"
+expect_ok "masc_transition start" "$r_transition"
 
-echo "[21/36] masc_heartbeat"
-r_heartbeat="$(call_tool 5023 "masc_heartbeat" "$(jq -cn --arg agent_name "$AGENT_NAME" '{agent_name:$agent_name,status:"working",progress:"public tool sweep"}')")"
+echo "[19/27] masc_heartbeat"
+r_heartbeat="$(call_tool 5023 "masc_heartbeat" '{}')"
 expect_ok "masc_heartbeat" "$r_heartbeat"
 
-echo "[22/36] masc_broadcast"
+echo "[20/27] masc_broadcast"
 r_broadcast="$(call_tool 5024 "masc_broadcast" "$(jq -cn --arg agent_name "$AGENT_NAME" --arg message "public tool sweep broadcast" '{agent_name:$agent_name,message:$message}')")"
 expect_ok "masc_broadcast" "$r_broadcast"
 
-echo "[23/36] masc_messages"
+echo "[21/27] masc_messages"
 r_messages="$(call_tool 5025 "masc_messages" '{}')"
 expect_ok "masc_messages" "$r_messages"
 
-echo "[24/36] masc_board_post"
+echo "[22/27] masc_board_post"
 r_board_post="$(call_tool 5026 "masc_board_post" "$(jq -cn --arg author "$AGENT_NAME" --arg title "Public Tool Sweep Post" --arg content "public tool sweep board post" '{author:$author,title:$title,content:$content,visibility:"internal"}')")"
 expect_ok "masc_board_post" "$r_board_post"
 post_id="$(
@@ -220,63 +210,24 @@ if [[ -z "$post_id" ]]; then
   mcp_fail_with_context "masc_board_post: could not extract post_id" "$r_board_post"
 fi
 
-echo "[25/36] masc_board_list"
+echo "[23/27] masc_board_list"
 r_board_list="$(call_tool 5027 "masc_board_list" '{"limit":5}')"
 expect_ok "masc_board_list" "$r_board_list"
 
-echo "[26/36] masc_board_get"
-r_board_get="$(call_tool 5028 "masc_board_get" "$(jq -cn --arg post_id "$post_id" '{post_id:$post_id}')")"
-expect_ok "masc_board_get" "$r_board_get"
+echo "[24/27] masc_board_post_get"
+r_board_get="$(call_tool 5028 "masc_board_post_get" "$(jq -cn --arg post_id "$post_id" '{post_id:$post_id}')")"
+expect_ok "masc_board_post_get" "$r_board_get"
 
-echo "[27/36] masc_board_comment"
+echo "[25/27] masc_board_comment"
 r_board_comment="$(call_tool 5029 "masc_board_comment" "$(jq -cn --arg post_id "$post_id" --arg author "$AGENT_NAME" --arg content "public tool sweep comment" '{post_id:$post_id,author:$author,content:$content}')")"
 expect_ok "masc_board_comment" "$r_board_comment"
 
-echo "[28/36] masc_board_vote"
+echo "[26/27] masc_board_vote"
 r_board_vote="$(call_tool 5030 "masc_board_vote" "$(jq -cn --arg post_id "$post_id" '{post_id:$post_id}')")"
 expect_ok "masc_board_vote" "$r_board_vote"
 
-echo "[29/36] masc_keeper_up"
-r_keeper_up="$(call_tool 5031 'masc_keeper_up' '{"name":"public-sweep-keeper","goal":"Handle public tool sweep"}')"
-expect_ok "masc_keeper_up" "$r_keeper_up"
-
-echo "[30/36] masc_keeper_list"
-r_keeper_list="$(call_tool 5032 "masc_keeper_list" '{}')"
-expect_ok "masc_keeper_list" "$r_keeper_list"
-
-echo "[31/36] masc_keeper_status"
-r_keeper_status="$(call_tool 5033 'masc_keeper_status' '{"name":"public-sweep-keeper","fast":true}')"
-expect_ok_or_guard "masc_keeper_status" "$r_keeper_status" 'Tool timed out after|no_tool_capable_provider'
-
-echo "[32/36] masc_keeper_msg"
-r_keeper_msg="$(call_tool 5034 'masc_keeper_msg' '{"name":"missing-keeper","message":"ping"}')"
-expect_ok_or_guard "masc_keeper_msg" "$r_keeper_msg" 'keeper not found'
-
-echo "[33/36] masc_keeper_down"
-r_keeper_down="$(call_tool 5035 'masc_keeper_down' '{"name":"public-sweep-keeper"}')"
-expect_ok "masc_keeper_down" "$r_keeper_down"
-
-echo "[34/36] masc_webrtc_offer"
-r_webrtc_offer="$(call_tool 5036 "masc_webrtc_offer" "$(jq -cn --arg agent_name "$AGENT_NAME" '{agent_name:$agent_name,ice_candidates:["candidate:public-sweep"]}')")"
-expect_ok "masc_webrtc_offer" "$r_webrtc_offer"
-offer_id="$(
-  printf '%s' "$r_webrtc_offer" \
-    | jq -r 'try (.result.structuredContent.offer_id // .result.structuredContent.id) catch empty | strings' \
-    | head -n1
-)"
-if [[ -z "$offer_id" ]]; then
-  offer_id="$(response_text_or_error "$r_webrtc_offer" | grep -oE 'offer-[A-Za-z0-9_-]+' | head -n1 || true)"
-fi
-if [[ -z "$offer_id" ]]; then
-  mcp_fail_with_context "masc_webrtc_offer: could not extract offer_id" "$r_webrtc_offer"
-fi
-
-echo "[35/36] masc_webrtc_answer"
-r_webrtc_answer="$(call_tool 5037 "masc_webrtc_answer" "$(jq -cn --arg offer_id "$offer_id" --arg agent_name "$AGENT_NAME" '{offer_id:$offer_id,agent_name:$agent_name,ice_candidates:["candidate:answer"]}')")"
-expect_ok "masc_webrtc_answer" "$r_webrtc_answer"
-
-echo "[36/36] masc_unbind"
-r_leave="$(call_tool 5038 "masc_unbind" "$(jq -cn --arg agent_name "$AGENT_NAME" '{agent_name:$agent_name}')")"
-expect_ok "masc_unbind" "$r_leave"
+echo "[27/27] masc_transition done"
+r_done="$(call_tool 5031 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:"public tool sweep completed"}')")"
+expect_ok "masc_transition done" "$r_done"
 
 echo "PASS: public MCP tool live sweep"

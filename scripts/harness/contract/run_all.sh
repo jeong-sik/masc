@@ -17,6 +17,8 @@ KEEP_LOG_FILE="${KEEP_LOG_FILE:-0}"
 STOP_WAIT_SEC="${STOP_WAIT_SEC:-10}"
 
 export MCP_URL="${MCP_URL:-http://127.0.0.1:${PORT}/mcp}"
+export MCP_TOKEN="${MCP_TOKEN:-${MASC_TOKEN:-}}"
+export MCP_AGENT_NAME="${MCP_AGENT_NAME:-contract-harness-admin-${RANDOM:-0}-$$}"
 export CURL_RETRY_COUNT="${CURL_RETRY_COUNT:-12}"
 export CURL_RETRY_DELAY_SEC="${CURL_RETRY_DELAY_SEC:-1}"
 export CURL_TIMEOUT_SEC="${CURL_TIMEOUT_SEC:-80}"
@@ -27,6 +29,8 @@ else
 fi
 export HARNESS_LOG_FILE="${HARNESS_LOG_FILE:-$LOG_FILE}"
 export MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS="${MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS:-32}"
+
+source "${ROOT_DIR}/scripts/harness/lib/mcp_jsonrpc.sh"
 
 SERVER_PID=""
 
@@ -68,22 +72,40 @@ wait_for_mcp_initialize_ready() {
   local timeout_sec="${2:-25}"
   local deadline=$(( $(date +%s) + timeout_sec ))
   local body='{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"contract-bootstrap","version":"1.0"},"capabilities":{}}}'
+  local last_http_status=""
 
   while [[ "$(date +%s)" -lt "$deadline" ]]; do
-    local status
-    status="$(
-      curl -sS -o /dev/null -w '%{http_code}' --max-time 2 \
-        -X POST "$mcp_url" \
-        -H 'Content-Type: application/json' \
-        -H 'Accept: application/json, text/event-stream' \
-        -d "$body" 2>/dev/null || true
-    )"
-    if [[ "$status" == "200" ]]; then
-      return 0
+    local status raw normalized
+    local body_file stderr_file
+    body_file="$(mcp_mktemp_file "masc-contract-ready-body" ".json")"
+    stderr_file="$(mcp_mktemp_file "masc-contract-ready-stderr" ".log")"
+    local -a cmd=(
+      curl -sS -o "$body_file" -w '%{http_code}' --max-time 2
+      -X POST "$mcp_url"
+      -H 'Content-Type: application/json'
+      -H 'Accept: application/json, text/event-stream'
+    )
+    if [[ -n "${MCP_TOKEN:-}" ]]; then
+      cmd+=( -H "Authorization: Bearer ${MCP_TOKEN}" )
     fi
+    cmd+=( -d "$body" )
+    status="$(
+      "${cmd[@]}" 2>"$stderr_file" || true
+    )"
+    last_http_status="$status"
+    if [[ "$status" == "200" ]]; then
+      raw="$(cat "$body_file" 2>/dev/null || true)"
+      normalized="$(jsonrpc_normalize_response "$raw" 0)"
+      if printf '%s' "$normalized" | jq -e '.result != null and .error == null' >/dev/null 2>&1; then
+        rm -f "$body_file" "$stderr_file"
+        return 0
+      fi
+    fi
+    rm -f "$body_file" "$stderr_file"
     sleep 1
   done
 
+  echo "MCP initialize readiness failed; last_http_status=${last_http_status:-unknown}" >&2
   return 1
 }
 
@@ -92,7 +114,7 @@ run_contract() {
   local total="$2"
   local script_name="$3"
   echo "[${step}/${total}] ${script_name}"
-  if ! (cd "$ROOT_DIR" && MCP_URL="$MCP_URL" BASE_PATH="$BASE_PATH" bash "scripts/harness/contract/${script_name}"); then
+  if ! (cd "$ROOT_DIR" && MCP_URL="$MCP_URL" MCP_TOKEN="${MCP_TOKEN:-}" MCP_AGENT_NAME="$MCP_AGENT_NAME" BASE_PATH="$BASE_PATH" bash "scripts/harness/contract/${script_name}"); then
     echo "FAIL: ${script_name}" >&2
     harness_print_log_tail "$LOG_FILE"
     exit 1
@@ -114,6 +136,17 @@ SERVER_PID="$(harness_start_server "$SERVER_EXE" "$PORT" "$BASE_PATH" "$LOG_FILE
 if ! harness_wait_for_health "$PORT" 25; then
   echo "FAIL: server did not become healthy on port ${PORT}" >&2
   harness_print_log_tail "$LOG_FILE"
+  exit 1
+fi
+if [[ -z "${MCP_TOKEN:-}" ]]; then
+  if ! MCP_TOKEN="$(harness_mint_mcp_token "$SERVER_EXE" "127.0.0.1" "$PORT" "$BASE_PATH")"; then
+    echo "FAIL: could not mint MCP harness token; aborting before an unauthenticated contract run" >&2
+    exit 1
+  fi
+fi
+export MCP_TOKEN
+if [[ -z "${MCP_TOKEN:-}" ]]; then
+  echo "FAIL: MCP_TOKEN is empty; refusing to run contract probes unauthenticated" >&2
   exit 1
 fi
 if ! wait_for_mcp_initialize_ready "$MCP_URL" 25; then

@@ -159,6 +159,39 @@ EOF
   fi
 }
 
+harness_mint_mcp_token() {
+  local server_exe="$1"
+  local host="$2"
+  local port="$3"
+  local base_path="$4"
+  local agent="${MCP_AGENT_NAME:-contract-harness-admin-${RANDOM:-0}-$$}"
+  local token_env="${MCP_TOKEN_ENV_VAR:-MCP_TOKEN}"
+  local login_json token
+
+  login_json="$(
+    MASC_BASE_PATH="$base_path" \
+    MASC_BASE_PATH_INPUT="$base_path" \
+    MASC_STORAGE_TYPE="${MASC_STORAGE_TYPE:-filesystem}" \
+    "$server_exe" login \
+      --base-path "$base_path" \
+      --host "$host" \
+      --port "$port" \
+      --agent "$agent" \
+      --role admin \
+      --client-env "$token_env" \
+      --json
+  )"
+  if ! token="$(printf '%s' "$login_json" | jq -er '.bearer_token // .result.bearer_token // empty' 2>/dev/null)"; then
+    echo "failed to mint MCP harness token; login JSON omitted because it contains bearer credentials" >&2
+    return 1
+  fi
+  if [[ -z "$token" || "$token" == "null" ]]; then
+    echo "failed to mint MCP harness token; login JSON omitted because it contains bearer credentials" >&2
+    return 1
+  fi
+  printf '%s\n' "$token"
+}
+
 harness_wait_for_health() {
   local port="$1"
   local timeout_sec="${2:-20}"

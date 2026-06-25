@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 
-const { refreshDashboard, invalidateDashboardCache, refreshExecution } = vi.hoisted(() => ({
+const { refreshDashboard, invalidateDashboardCache, refreshKeeperRuntimeStatus } = vi.hoisted(() => ({
   refreshDashboard: vi.fn<() => Promise<void>>(),
   invalidateDashboardCache: vi.fn(),
-  refreshExecution: vi.fn<() => Promise<void>>(),
+  refreshKeeperRuntimeStatus: vi.fn<() => Promise<void>>(),
 }))
 
 vi.mock('../api', () => ({
@@ -14,7 +14,7 @@ vi.mock('../api', () => ({
 vi.mock('../store', () => ({
   invalidateDashboardCache,
   refreshDashboard,
-  refreshExecution,
+  refreshKeeperRuntimeStatus,
 }))
 
 vi.mock('./common/toast', () => ({
@@ -22,11 +22,11 @@ vi.mock('./common/toast', () => ({
 }))
 
 describe('refreshAfterRuntimeAction', () => {
-  it('schedules a scoped execution refresh without blocking lifecycle buttons', async () => {
-    // Keeper runtime actions reconcile against the execution slice (the
-    // roster), not a full dashboard bootstrap — see refreshAfterRuntimeAction.
+  it('schedules scoped execution + light shell refresh without blocking lifecycle buttons', async () => {
+    // Keeper runtime actions reconcile against execution rows plus shell
+    // runtime-health, not a full dashboard bootstrap — see refreshAfterRuntimeAction.
     let releaseRefresh: () => void = () => {}
-    refreshExecution.mockReturnValueOnce(new Promise<void>(resolve => {
+    refreshKeeperRuntimeStatus.mockReturnValueOnce(new Promise<void>(resolve => {
       releaseRefresh = resolve
     }))
 
@@ -35,7 +35,7 @@ describe('refreshAfterRuntimeAction', () => {
     // helper fires-and-forgets so the lifecycle button is never blocked.
     await expect(refreshAfterRuntimeAction()).resolves.toBeUndefined()
 
-    expect(refreshExecution).toHaveBeenCalledWith({ force: true })
+    expect(refreshKeeperRuntimeStatus).toHaveBeenCalledWith({ force: true })
     // The full-bootstrap path is no longer taken for keeper actions.
     expect(refreshDashboard).not.toHaveBeenCalled()
 

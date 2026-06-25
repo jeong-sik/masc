@@ -13,8 +13,8 @@ import type { Keeper } from '../../types'
 export type KeeperBucket = 'running' | 'paused' | 'offline'
 
 export function keeperBucket(keeper: Keeper): KeeperBucket {
-  if (isKeeperOffline(keeper)) return 'offline'
   if (isKeeperPaused(keeper)) return 'paused'
+  if (isKeeperOffline(keeper)) return 'offline'
   return 'running'
 }
 

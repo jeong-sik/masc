@@ -11,6 +11,7 @@ import {
   formatRuntimeRosterCount,
   keeperRowLooksRunning,
   keeperDetailRows,
+  resolveRuntimeFleetSafetyCounts,
   resolveRuntimeCounts,
   runtimeDetailRows,
   runtimeCountSourceLabel,
@@ -192,11 +193,45 @@ describe('resolveRuntimeCounts', () => {
       source: 'execution',
     })
   })
+
+  it('uses structured runtime health as the live keeper count source', () => {
+    const runtimeFleetSafety = {
+      keeper_fibers: 9,
+      paused_keepers: 2,
+      paused_keepers_health: { count: 3 },
+      keeper_fleet_safety: {
+        running_keeper_fiber_count: 0,
+        paused_keeper_count: 4,
+      },
+    } as any
+
+    expect(resolveRuntimeFleetSafetyCounts(runtimeFleetSafety)).toEqual({
+      runningKeepers: 0,
+      pausedKeepers: 3,
+      hasRunningKeepers: true,
+      hasPausedKeepers: true,
+    })
+
+    expect(resolveRuntimeCounts({
+      executionLoaded: false,
+      agentsCount: 0,
+      keepersCount: 9,
+      pausedKeepersCount: 0,
+      shellCounts: { agents: 0, keepers: 9, tasks: 0, total_runtimes: 13 },
+      shellConfiguredKeepers: 13,
+      runtimeFleetSafety,
+    })).toEqual({
+      live: { agents: 0, keepers: 0, pausedKeepers: 3, offlineKeepers: 0, keeperRows: 3, tasks: 0, totalRuntimes: 0, available: true },
+      configured: { keepers: 13, totalRuntimes: 13, source: 'shell' },
+      source: 'runtime-health',
+    })
+  })
 })
 
 describe('runtimeCountSourceLabel', () => {
   it('maps count source ids to user-facing labels', () => {
     expect(runtimeCountSourceLabel('execution')).toBe('execution 상세')
+    expect(runtimeCountSourceLabel('runtime-health')).toBe('runtime health')
     expect(runtimeCountSourceLabel('project-snapshot')).toBe('project snapshot')
     expect(runtimeCountSourceLabel('shell')).toBe('shell')
     expect(runtimeCountSourceLabel('partial')).toBe('부분 hydrate')

@@ -13,6 +13,7 @@ import {
   executionLoading,
   executionError,
   shellCounts,
+  shellRuntimeResolution,
 } from '../store'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
@@ -792,6 +793,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     namespaceTruthConfiguredKeepers: namespaceTruth.value?.root.configured_keepers,
     shellCounts: shellCounts.value,
     shellConfiguredKeepers: shellCounts.value?.configured_keepers,
+    runtimeFleetSafety: shellRuntimeResolution.value?.fleet_safety ?? null,
   })
   const expectedScopedCount = expectedCountForKeeperFilter(keeperFilter, runtimeCounts)
   const namespaceStatus = namespaceTruth.value?.root.status ?? serverStatus.value

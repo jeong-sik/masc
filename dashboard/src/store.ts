@@ -1087,6 +1087,14 @@ export async function refreshExecution(opts?: RefreshOptions): Promise<void> {
   }
 }
 
+export async function refreshKeeperRuntimeStatus(opts?: RefreshOptions): Promise<void> {
+  const force = opts?.force ?? true
+  await Promise.all([
+    refreshExecution({ force }),
+    refreshShell({ light: true, force }),
+  ])
+}
+
 /** Reconcile board posts by id+updated_at so unchanged items keep
  *  the same object reference.  Preact skips re-rendering subtrees
  *  whose props haven't changed, preserving scroll position. */

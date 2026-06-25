@@ -1,5 +1,5 @@
 import { currentDashboardActor, runOperatorAction } from '../api'
-import { invalidateDashboardCache, refreshDashboard, refreshExecution } from '../store'
+import { invalidateDashboardCache, refreshDashboard, refreshKeeperRuntimeStatus } from '../store'
 import { showToast } from './common/toast'
 import { keeperRuntimeBlockerHint } from '../lib/keeper-runtime-display'
 import type { Keeper } from '../types'
@@ -24,14 +24,15 @@ export async function runSocialSweep(): Promise<void> {
 export async function refreshAfterRuntimeAction(): Promise<void> {
   // Keeper runtime actions (boot/shutdown/resume/wakeup/pause from the rail,
   // alert strip, detail page and lifecycle buttons) reconcile against the
-  // execution slice — the keeper roster — not the full dashboard bootstrap.
+  // execution slice and the light shell runtime-health slice — not the full
+  // dashboard bootstrap.
   // The previous `refreshDashboard({ force: true })` re-hydrated shell,
   // planning, namespace, goals and goal_loop and flipped dashboardLoading,
   // re-rendering every panel ("the whole screen refreshes when I resume a
-  // keeper"). `force: true` keeps the immediate refetch boot/shutdown need
-  // (those have no optimistic patch); the scope now matches the SSE
-  // keeper_phase_changed route (sse-store.ts).
-  void refreshExecution({ force: true }).catch(err => {
+  // keeper"). `force: true` keeps the immediate refetch boot/shutdown need,
+  // while the shell light refresh updates the global runtime-health chips that
+  // now share the same status source as the roster counts.
+  void refreshKeeperRuntimeStatus({ force: true }).catch(err => {
     const message = err instanceof Error ? err.message : '대시보드 새로고침 실패'
     showToast(message, 'warning')
   })

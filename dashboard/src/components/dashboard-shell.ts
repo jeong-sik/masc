@@ -18,6 +18,7 @@ import {
   configuredCountSourceLabel,
   formatKeeperCountBreakdown,
   keeperRowLooksRunning,
+  resolveRuntimeFleetSafetyCounts,
   resolveRuntimeCounts,
   runtimeCountSourceLabel,
 } from '../runtime-counts'
@@ -557,29 +558,32 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
     })
   }
 
-  const pausedKeepers = input.keepers.filter(isKeeperPaused).length
+  const rowPausedKeepers = input.keepers.filter(isKeeperPaused).length
   const fallbackRunningKeepers = input.keepers.filter(keeperRowLooksRunning).length
-  const fallbackOfflineKeepers = Math.max(0, input.keepers.length - fallbackRunningKeepers - pausedKeepers)
+  const runtimeHealthCounts = resolveRuntimeFleetSafetyCounts(runtime?.fleet_safety ?? null)
   const runtimeCounts = resolveRuntimeCounts({
-    executionLoaded: input.counts !== null || input.keepers.length > 0,
+    executionLoaded: input.keepers.length > 0,
     agentsCount: input.counts?.agents ?? 0,
     keepersCount: input.counts?.keepers ?? fallbackRunningKeepers,
-    pausedKeepersCount: pausedKeepers,
-    offlineKeepersCount: input.counts !== null ? 0 : fallbackOfflineKeepers,
+    pausedKeepersCount: rowPausedKeepers,
     keeperRowsCount: input.keepers.length,
     namespaceTruthCounts: input.namespaceTruthCounts,
     namespaceTruthConfiguredKeepers: input.namespaceTruthConfiguredKeepers,
     shellCounts: input.counts,
     shellConfiguredKeepers: input.counts?.configured_keepers,
+    runtimeFleetSafety: runtime?.fleet_safety ?? null,
   })
   const configured = runtimeCounts.configured.keepers
   const liveKeepers = runtimeCounts.live.keepers
+  const pausedKeepers = runtimeCounts.live.pausedKeepers
   // Scope note (#22110): the agent-roster surface dropped the count-source label
   // from its always-visible operational copy. Here the same label feeds the
   // keeper-count-basis chip's `detail` tooltip (hover-only, diagnostic) below —
   // an on-demand explanation of where the running count comes from, which is the
   // actionable detail that review kept. Retained intentionally, not an oversight.
-  const runningCountSource = input.counts !== null
+  const runningCountSource = runtimeHealthCounts?.hasRunningKeepers === true
+    ? 'runtime health'
+    : input.counts !== null
     ? 'shell'
     : input.keepers.length > 0
       ? '상세 행'
@@ -632,7 +636,7 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
     chips.push(cdalChip)
   }
 
-  if (configured > 0 && liveKeepers === 0) {
+  if (configured > 0 && input.keepers.length === 0 && liveKeepers === 0 && pausedKeepers === 0) {
     chips.push({
       key: 'no-keeper-rows',
       label: 'No keeper rows',

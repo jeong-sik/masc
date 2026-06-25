@@ -588,18 +588,26 @@ jobs:
           install-flags: --with-test
           os-packages: jq ripgrep
 
-      - name: Setup Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.22'
-          # This workflow only uses Go to install grpcurl and does not
-          # carry a repo go.mod/go.sum for module cache restoration.
-          cache: false
-
       - name: Install grpcurl
+        env:
+          GRPCURL_VERSION: "1.9.3"
+          GRPCURL_SHA256: "a926b62a85787ccf73ef8736b3ae554f1242e39d92bb8767a79d6dd23b11d1d5"
         run: |
-          GOBIN="$HOME/go/bin" go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
-          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          set -euo pipefail
+
+          asset="grpcurl_${GRPCURL_VERSION}_linux_x86_64.tar.gz"
+          url="https://github.com/fullstorydev/grpcurl/releases/download/v${GRPCURL_VERSION}/${asset}"
+          archive="${RUNNER_TEMP}/${asset}"
+          bin_dir="${RUNNER_TEMP}/grpcurl-bin"
+
+          curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "${url}" -o "${archive}"
+          (cd "${RUNNER_TEMP}" && printf '%s  %s\n' "${GRPCURL_SHA256}" "${asset}" | sha256sum -c -)
+
+          mkdir -p "${bin_dir}"
+          tar -xzf "${archive}" -C "${bin_dir}" grpcurl
+          chmod +x "${bin_dir}/grpcurl"
+          echo "${bin_dir}" >> "$GITHUB_PATH"
+          "${bin_dir}/grpcurl" -version
 
       - name: Build
         id: build_step

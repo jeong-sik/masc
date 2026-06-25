@@ -98,15 +98,32 @@ type panel_outcome =
 (** 성공한 답만 추출 (심판 입력 구성용). 입력 순서 보존. *)
 val answered_of : panel_outcome list -> panel_answer list
 
-val no_panel_answers_error : string
-(** Canonical error surfaced when the judge is skipped because no panel answered. *)
+(** 심판을 실행하지 않는 typed 사유. *)
+type skip_reason =
+  | Quorum_not_met of
+      { answered : int
+      ; total : int
+      ; required : int
+      }
+[@@deriving yojson, show, eq]
 
-val judge_skip_reason : panel_outcome list -> string option
-(** [Some reason] when no panel member answered (every outcome is [Failed]) — the
-    orchestrator then skips the judge and completes with [judge = Error reason]
-    instead of running it. [None] when >= 1 panel [Answered]. Guards against the
-    judge fabricating a synthesis from an empty [<panel_answers>] block when all
-    panels failed (RFC-0252 left all-panel-fail unspecified). *)
+val render_skip_reason : skip_reason -> string
+(** Operator/log boundary renderer for {!skip_reason}. *)
+
+val no_panel_answers_error : string
+[@@deprecated
+  "Use render_skip_reason (Quorum_not_met { answered = 0; total = 0; required = 1 })"]
+(** Legacy canonical string for callers that still need the pre-quorum
+    all-panel-failed message. New code should use {!skip_reason}. *)
+
+val judge_skip_reason : min_answered:int -> panel_outcome list -> skip_reason option
+(** [Some reason] when fewer than [min_answered] panel members [Answered].
+    The orchestrator renders the typed reason at the [judge = Error] boundary
+    and skips the judge instead of running it on a thin/empty
+    [<panel_answers>] block. [None] when the quorum is met.
+    [min_answered] defaults to 1 at the config layer, so the default behaviour
+    is "skip only when all panels failed" (RFC-0252 left panel-quorum
+    unspecified). *)
 
 (** {1 심판 구조화 출력}
 

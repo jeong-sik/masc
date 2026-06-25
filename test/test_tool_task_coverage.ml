@@ -849,7 +849,7 @@ let () = test "handle_transition_force_release_by_admin_bypasses_nonowner_redire
        | None -> failwith "missing task-001 after forced release")
 )
 
-let () = test "handle_transition_valid_actions_respect_verification_disabled"
+let () = test "handle_transition_rejects_submit_when_verification_disabled"
     (fun () ->
   let ctx = make_test_ctx_with_agent "owner-agent" in
   let _ =
@@ -878,8 +878,7 @@ let () = test "handle_transition_valid_actions_respect_verification_disabled"
   in
   let message = Tool_result.message result in
   assert (not (Tool_result.is_success result));
-  assert (str_contains message "Transition 'submit_for_verification'");
-  assert (str_contains message "Valid actions: start, done, cancel, release");
+  assert (str_contains message "Verification FSM not enabled");
   assert (not (str_contains message "Valid actions: start, done, submit_for_verification"))
 )
 
@@ -1511,7 +1510,7 @@ let () = test "keeper_shaped_non_keeper_claim_updates_planning_current_task" (fu
   assert (Tool_result.is_success result);
   assert (Planning_eio.get_current_task ctx.config = Some "task-002"))
 
-let () = test "handle_claim_auto_releases_previous_claimed_task" (fun () ->
+let () = test "handle_claim_rejects_when_agent_already_has_active_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
     Task.Tool.handle_add_task
@@ -1542,8 +1541,8 @@ let () = test "handle_claim_auto_releases_previous_claimed_task" (fun () ->
       ctx
       (`Assoc [ ("task_id", `String "task-002") ])
   in
-  if not (Tool_result.is_success second) then failwith (Tool_result.message second);
-  assert (str_contains (Tool_result.message second) "auto-released task-001");
+  assert (not (Tool_result.is_success second));
+  assert (str_contains (Tool_result.message second) "task(s) in progress: task-001");
   let task_001 =
     Workspace.get_tasks_raw ctx.config
     |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id "task-001")
@@ -1553,13 +1552,13 @@ let () = test "handle_claim_auto_releases_previous_claimed_task" (fun () ->
     |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id "task-002")
   in
   (match task_001 with
-  | Some { task_status = Masc_domain.Todo; _ } -> ()
-  | Some _ -> failwith "task-001 should be auto-released to todo"
-  | None -> failwith "task-001 missing");
-  match task_002 with
   | Some { task_status = Masc_domain.Claimed { assignee; _ }; _ } ->
     assert (String.equal assignee "test-agent")
-  | Some _ -> failwith "task-002 should be claimed"
+  | Some _ -> failwith "task-001 should remain claimed"
+  | None -> failwith "task-001 missing");
+  match task_002 with
+  | Some { task_status = Masc_domain.Todo; _ } -> ()
+  | Some _ -> failwith "task-002 should remain todo"
   | None -> failwith "task-002 missing"
 )
 

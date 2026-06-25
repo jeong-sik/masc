@@ -27,6 +27,13 @@ let pinned_literal_count = 0
 let pinned_host_config_invocations = 1
 
 let read_file path =
+  let path =
+    if Filename.is_relative path then
+      match Sys.getenv_opt "DUNE_SOURCEROOT" with
+      | Some root -> Filename.concat root path
+      | None -> path
+    else path
+  in
   match In_channel.with_open_text path In_channel.input_all with
   | exception _ -> ""
   | content -> content

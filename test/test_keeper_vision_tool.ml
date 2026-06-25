@@ -859,6 +859,50 @@ let test_evicted_history_has_no_image_modality () =
     in
     assert (evicted2 = evicted))
 
+(* RFC §2.3 acceptance #1/#3 + §6 N-of-M proof. After site-2 (Store_only)
+   eviction the persisted history carries no "image" modality, so RFC-0265's
+   gate admits a text-only runtime and the reroute cannot fire. Revert-red:
+   delete the [Image] arm of [evict_block] and the pre/post asserts diverge.
+   The modality assertion IS the reroute-non-fire proof — reroute fires iff a
+   required modality is not admitted, and a text-only runtime admits []. *)
+let test_evicted_history_has_no_image_modality () =
+  with_temp_base (fun _ ->
+    let keeper_name = "vision-ingest-modality" in
+    let bytes = "\x89PNG\r\n\x1a\nmodality-test" in
+    let msg =
+      Agent_sdk.Types.make_message
+        ~role:Agent_sdk.Types.User
+        [ Agent_sdk.Types.Text "look at this"
+        ; Agent_sdk.Types.Image
+            { media_type = "image/png"
+            ; data = Base64.encode_string bytes
+            ; source_type = "base64"
+            }
+        ]
+    in
+    let modalities ms = Masc.Runtime_agent.required_modalities_of_messages ms in
+    (* Pre: the inline image makes "image" a required modality (reroute trigger). *)
+    assert (List.mem "image" (modalities [ msg ]));
+    let evicted =
+      Vi.evict_message
+        ~mode:Vi.Store_only
+        ~policy:Masc.Keeper_types_profile.Mm_delegate
+        ~keeper_name
+        msg
+    in
+    (* Post: no "image" modality -> the persisted history is text-only. *)
+    assert (not (List.mem "image" (modalities [ evicted ])));
+    (* Idempotent: re-evicting the placeholder message is a structural no-op
+       (no double-store, no re-introduced image). *)
+    let evicted2 =
+      Vi.evict_message
+        ~mode:Vi.Store_only
+        ~policy:Masc.Keeper_types_profile.Mm_delegate
+        ~keeper_name
+        evicted
+    in
+    assert (evicted2 = evicted))
+
 let () =
   test_truncated_of_stop_reason ();
   test_message_of_request ();

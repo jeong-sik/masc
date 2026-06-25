@@ -40,6 +40,7 @@ type RosterSort = 'status' | 'name' | 'att'
 type KeeperWorkspaceRouteSurface = 'monitoring' | 'keepers'
 type RosterMenuState = { keeper: Keeper; x: number; y: number } | null
 type IconComponent = typeof Play
+type RosterHeaderBucket = KeeperBucket | 'attention' | 'normal'
 type RosterFleetSummary = {
   total: number
   running: number
@@ -82,16 +83,12 @@ const MENU_WIDTH = 190
 const MENU_ESTIMATED_HEIGHT = 246
 const MENU_VIEWPORT_MARGIN = 8
 
-const GROUP_ORDER: { bucket: KeeperBucket; label: string }[] = [
-  { bucket: 'running', label: '실행 중' },
-  { bucket: 'paused', label: '대기 · 일시정지' },
-  { bucket: 'offline', label: '중지 · 종료됨' },
-]
-
 /** Group-header status dot tone (design rails.jsx `.rg-dot` colored by groupCls).
  *  Reuses the shared StatusDot vocabulary instead of a bespoke dot so the header
  *  marker matches the per-row dots: running→ok, paused→warn, offline→idle. */
-const GROUP_BUCKET_TONE: Record<KeeperBucket, DotTone> = {
+const GROUP_BUCKET_TONE: Record<RosterHeaderBucket, DotTone> = {
+  attention: 'bad',
+  normal: 'ok',
   running: 'ok',
   paused: 'warn',
   offline: 'idle',
@@ -99,7 +96,7 @@ const GROUP_BUCKET_TONE: Record<KeeperBucket, DotTone> = {
 
 /** Flattened roster item used by the virtualized render path. */
 type RosterItem =
-  | { type: 'header'; bucket: KeeperBucket; label: string; count: number }
+  | { type: 'header'; bucket: RosterHeaderBucket; label: string; count: number }
   | { type: 'row'; keeper: Keeper }
 
 /** Switch to the shared VirtualList once the roster is long enough that DOM
@@ -114,6 +111,43 @@ function attentionCount(keeper: Keeper): number {
 }
 function needsAttention(keeper: Keeper): boolean {
   return keeper.needs_attention === true || attentionCount(keeper) > 0
+}
+
+function keeperContextRatio(keeper: Keeper): number {
+  if (typeof keeper.context_ratio === 'number' && Number.isFinite(keeper.context_ratio)) {
+    return Math.max(0, Math.min(1, keeper.context_ratio))
+  }
+  const current = keeper.context_tokens ?? keeper.context?.context_tokens ?? 0
+  const max = keeper.context_max ?? keeper.context?.context_max ?? 0
+  return max > 0 ? Math.max(0, Math.min(1, current / max)) : 0
+}
+
+function keeperAttentionGloss(keeper: Keeper): string {
+  const bits: string[] = []
+  const blocked = keeper.blocked_task_count ?? 0
+  if (blocked > 0) bits.push(`차단 ${blocked}건`)
+  if (keeper.current_gate?.kind === 'approval_required') bits.push('승인 대기')
+  const blocker = keeper.runtime_blocker_summary?.trim()
+  const reason = keeper.attention_reason?.trim()
+  const action = keeper.next_human_action?.trim()
+  if (blocker) bits.push(blocker)
+  if (reason) bits.push(reason)
+  if (action) bits.push(action)
+  if (bits.length > 0) return bits.slice(0, 2).join(' · ')
+  return keeperPhaseLabel(keeper) || keeperWorkPreview(keeper) || '최근 상태 미수신'
+}
+
+function keeperStatusRank(keeper: Keeper): number {
+  const bucket = keeperBucket(keeper)
+  if (bucket === 'running') return 0
+  if (bucket === 'paused') return 1
+  return 2
+}
+
+function compareFleetRows(a: Keeper, b: Keeper): number {
+  return keeperStatusRank(a) - keeperStatusRank(b)
+    || keeperContextRatio(b) - keeperContextRatio(a)
+    || a.name.localeCompare(b.name)
 }
 
 export function rosterFleetSummary(rows: readonly Keeper[]): RosterFleetSummary {
@@ -134,7 +168,7 @@ export function rosterFleetSummary(rows: readonly Keeper[]): RosterFleetSummary 
     if (bucket === 'offline') summary.offline += 1
     if (needsAttention(keeper)) summary.attention += 1
     if (keeper.current_gate?.kind === 'approval_required') summary.approvalGate += 1
-    if (typeof keeper.context_ratio === 'number' && Number.isFinite(keeper.context_ratio) && keeper.context_ratio >= 0.8) {
+    if (keeperContextRatio(keeper) >= 0.8) {
       summary.highContext += 1
     }
   }
@@ -155,7 +189,7 @@ function attentionScore(keeper: Keeper): number {
  *  the order is stable. */
 function compareKeepers(a: Keeper, b: Keeper, sort: Exclude<RosterSort, 'status'>): number {
   if (sort === 'name') return a.name.localeCompare(b.name)
-  return attentionScore(b) - attentionScore(a) || a.name.localeCompare(b.name)
+  return attentionScore(b) - attentionScore(a) || keeperContextRatio(b) - keeperContextRatio(a) || a.name.localeCompare(b.name)
 }
 
 /** ns proxy: keepers have no namespace field; the skill path is the closest
@@ -245,6 +279,7 @@ function RosterRow({
   const activity = keeperActivityDisplay(keeper)
   const work = keeperWorkPreview(keeper)
   const recentTool = keeperRecentTool(keeper)
+  const gloss = keeperAttentionGloss(keeper)
   const select = () => onSelect(keeper.name)
   return html`
     <div
@@ -269,6 +304,7 @@ function RosterRow({
           <span class="kw-kp-state"><${StatusDot} tone=${tone} pulse=${bucket === 'running'} />${keeperPhaseLabel(keeper)}</span>
           ${handle ? html`<span aria-hidden="true">·</span><span class="kw-kp-handle" title=${handleTitle}>${handle}</span>` : null}
         </div>
+        <div class="kw-kp-gloss" title=${gloss}>${gloss}</div>
         <div class="kw-kp-work" title=${work ?? ''}>${work ?? '최근 작업 요약 없음'}</div>
         ${contextPct !== null
           ? html`
@@ -293,6 +329,19 @@ function RosterRow({
         ${activity.source !== 'none' ? html`<span class="kw-kp-time">${activity.label}</span>` : null}
         ${att > 0 ? html`<span class="kw-kp-att" title=${`주의 ${att}건`}>${att}</span>` : null}
       </div>
+      <button
+        type="button"
+        class="kw-kp-chat v2-monitoring-action"
+        aria-label=${`${keeper.name} 대화 열기`}
+        title="대화 열기"
+        onClick=${(event: MouseEvent) => {
+          event.preventDefault()
+          event.stopPropagation()
+          select()
+        }}
+      >
+        <${MessageSquare} size=${14} aria-hidden="true" />
+      </button>
       <button
         type="button"
         class="kw-kp-more v2-monitoring-action"
@@ -566,13 +615,19 @@ export function KeeperWorkspaceRoster({
   // headers, mirroring the v2 roster sort modes (rails.jsx Roster).
   const items: RosterItem[] = []
   if (sort === 'status') {
-    for (const group of GROUP_ORDER) {
-      const rows = visible.filter(k => keeperBucket(k) === group.bucket)
-      if (rows.length === 0) continue
-      items.push({ type: 'header', bucket: group.bucket, label: group.label, count: rows.length })
-      for (const keeper of rows) {
-        items.push({ type: 'row', keeper })
-      }
+    const attentionRows = visible.filter(needsAttention).sort((a, b) =>
+      attentionScore(b) - attentionScore(a)
+      || keeperContextRatio(b) - keeperContextRatio(a)
+      || a.name.localeCompare(b.name),
+    )
+    const normalRows = visible.filter(k => !needsAttention(k)).sort(compareFleetRows)
+    if (attentionRows.length > 0) {
+      items.push({ type: 'header', bucket: 'attention', label: '주의 필요', count: attentionRows.length })
+      for (const keeper of attentionRows) items.push({ type: 'row', keeper })
+    }
+    if (normalRows.length > 0) {
+      items.push({ type: 'header', bucket: 'normal', label: '정상', count: normalRows.length })
+      for (const keeper of normalRows) items.push({ type: 'row', keeper })
     }
   } else {
     for (const keeper of sortRows(visible)) {

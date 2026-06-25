@@ -12,7 +12,16 @@ import type { VNode } from 'preact'
 import { shellAuthSummary, tasks } from '../../store'
 import type { Keeper, Task } from '../../types'
 import { navigate } from '../../router'
-import { keeperBucket, keeperModelLabel, keeperPhaseToken, keeperRuntimeLabel } from './keeper-workspace-shared'
+import { keeperActivityDisplay } from '../../lib/keeper-runtime-display'
+import {
+  WorkspaceSigil,
+  keeperBucket,
+  keeperModelLabel,
+  keeperPhaseLabel,
+  keeperPhaseToken,
+  keeperRuntimeLabel,
+  keeperStatusTone,
+} from './keeper-workspace-shared'
 import { CountBadge } from '../v2/primitives-v2'
 import { callMcpTool } from '../../api/mcp'
 import { showToast } from '../common/toast'
@@ -117,6 +126,68 @@ function AttentionSection({ keeper }: { keeper: Keeper }): VNode | null {
 function formatCtxK(n: number | null | undefined): string | null {
   if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) return null
   return `${Math.round(n / 1000)}k ctx`
+}
+
+function keeperRecentTools(keeper: Keeper): string[] {
+  const names = [
+    ...(keeper.latest_tool_names ?? []),
+    ...(keeper.recent_tool_names ?? []),
+  ].map(name => name.trim()).filter(Boolean)
+  if (names.length > 0) return Array.from(new Set(names)).slice(0, 4)
+  const count = keeper.latest_tool_call_count
+  return typeof count === 'number' && Number.isFinite(count) && count > 0 ? [`${count} tool calls`] : []
+}
+
+function FleetSelectedSection({ keeper }: { keeper: Keeper }): VNode {
+  const pressure = contextPercent(keeper) ?? 0
+  const tools = keeperRecentTools(keeper)
+  const taskCount = ownedTasks(keeper).length
+  const latestTps = keeper.metrics_series?.at(-1)?.wall_tokens_per_second
+  const activity = keeperActivityDisplay(keeper)
+  const phase = keeperPhaseLabel(keeper)
+  const model = keeperModelLabel(keeper)
+  const runtime = keeperRuntimeLabel(keeper)
+  const lifecycle = keeper.phase || keeper.lifecycle_phase || keeper.status
+  const openChat = () => {
+    navigate('monitoring', { section: 'agents', keeper: keeper.name })
+  }
+
+  return html`
+    <div class="kw-fleet-aside" data-tone=${keeperStatusTone(keeper)}>
+      <div class="kw-fleet-aside-head">
+        <${WorkspaceSigil} id=${keeper.name} size=${40} beat=${keeperBucket(keeper) === 'running'} />
+        <div class="kw-fleet-aside-title">
+          <span class="kw-fleet-aside-kicker">Selected runtime</span>
+          <strong title=${keeper.agent_name || keeper.name}>${keeper.koreanName || keeper.agent_name || keeper.name}</strong>
+          <span title=${keeper.name}>${keeper.name}</span>
+        </div>
+        <span class="kw-fleet-aside-state">${keeper.status}</span>
+      </div>
+      <button type="button" class="kw-fleet-chat" onClick=${openChat}>대화 콘솔 열기</button>
+      <div class="kw-fleet-phase" title=${activity.source !== 'none' ? activity.label : phase}>
+        <b>${phase}</b>
+        <span>${activity.source !== 'none' ? activity.label : '최근 활동 미수신'}</span>
+      </div>
+      <div class="kw-fleet-pressure">
+        <div>
+          <span>Context pressure</span>
+          <strong>${pressure}%</strong>
+        </div>
+        <div class="kw-fleet-pressure-bar" aria-hidden="true"><i style=${{ width: `${pressure}%` }}></i></div>
+      </div>
+      <div class="kw-fleet-vitals">
+        <div><span>model</span><b title=${model ?? ''}>${model ?? '—'}</b></div>
+        <div><span>runtime</span><b title=${runtime ?? ''}>${runtime ?? '—'}</b></div>
+        <div><span>phase</span><b title=${lifecycle}>${lifecycle}</b></div>
+        <div><span>tps</span><b>${typeof latestTps === 'number' ? latestTps.toFixed(1) : '—'}</b></div>
+        <div><span>tools</span><b>${keeper.latest_tool_call_count ?? tools.length}</b></div>
+        <div><span>tasks</span><b>${taskCount}</b></div>
+      </div>
+      ${tools.length > 0
+        ? html`<div class="kw-fleet-tools">${tools.map(tool => html`<span key=${tool} title=${tool}>${tool}</span>`)}</div>`
+        : null}
+    </div>
+  `
 }
 
 function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
@@ -406,6 +477,7 @@ export function KeeperWorkspaceRail({
   return html`
     <aside class="ctx" aria-label="키퍼 컨텍스트">
       <div class="ctx-scroll">
+        <${FleetSelectedSection} keeper=${keeper} />
         <${AttentionSection} keeper=${keeper} />
         <${ThroughputSection} keeper=${keeper} />
         <${RuntimeSection} keeper=${keeper} />

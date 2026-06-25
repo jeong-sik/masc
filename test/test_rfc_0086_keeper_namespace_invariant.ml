@@ -181,6 +181,18 @@ let test_source_path_contract_rejects_unsafe_relatives () =
     unsafe_relatives
 ;;
 
+let test_source_path_contract_resolves_valid_relative () =
+  (* Positive counterpart to the rejection test: a clean repo-relative
+     path resolves to an absolute filesystem path that lands on the real
+     keeper directory.  Guards against a future change that quietly
+     mangles or relativizes the resolved path. *)
+  let resolved = Masc_test_deps.source_path "lib/keeper" in
+  check bool "source_path returns an absolute path" true
+    (Filename.is_absolute resolved);
+  check bool "source_path lands on a real keeper directory" true
+    (Sys.is_directory resolved)
+;;
+
 let test_population_sanity () =
   let files = collect_ml_files (keeper_root ()) [] in
   (* Population sanity: a sudden drop to near-zero or jump beyond
@@ -212,6 +224,10 @@ let () =
             "source_path rejects unsafe repo-relative paths"
             `Quick
             test_source_path_contract_rejects_unsafe_relatives
+        ; test_case
+            "source_path resolves valid repo-relative paths"
+            `Quick
+            test_source_path_contract_resolves_valid_relative
         ] )
     ]
 ;;

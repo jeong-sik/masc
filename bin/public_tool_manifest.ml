@@ -6,7 +6,10 @@ let json_list values =
 
 let () =
   let public_tool_names =
-    Tool_catalog.public_mcp_tools
+    Masc.Config.visible_tool_schemas ()
+    |> List.filter (fun (schema : Masc_domain.tool_schema) ->
+      Tool_catalog.is_public_mcp schema.name)
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
     |> sorted_unique
   in
   `Assoc [ ("public_tool_names", json_list public_tool_names) ]

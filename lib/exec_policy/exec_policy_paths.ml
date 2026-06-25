@@ -89,9 +89,11 @@ let worktree_repo_root_of_workdir workdir =
 let keeper_registered_repo_path_allowed ?keeper_id ?base_path path =
   match (keeper_id, base_path) with
   | Some keeper_id, Some base_path -> (
-      match Keeper_repo_mapping.repository_id_of_path ~base_path ~path with
-      | None -> false
-      | Some repository_id -> (
+      match Keeper_repo_mapping.repository_resolution_of_path ~base_path ~path with
+      | Keeper_repo_mapping.No_repository
+      | Keeper_repo_mapping.Repository_identity_mismatch _ ->
+          false
+      | Keeper_repo_mapping.Repository repository_id -> (
           match
             Keeper_repo_mapping.validate_access ~keeper_id ~repository_id
               ~base_path

@@ -141,10 +141,18 @@ button.monitor-row {
 @utility agent-event-badge--default { background: var(--color-border-default); color: var(--color-fg-secondary); font-weight: var(--fw-semi); letter-spacing: .02em; }
 
 /* ── Micro-Interactions (Task 289) ── */
+/* pressable — hit-target을 이동시키지 않는 press (2026-06-25 근본 수정).
+   AS-IS `transform: scale(0.97)` 은 요소의 기존 transform을 통째로 덮어쓴다
+   (CSS transform은 단일 속성이라 translate/scale 함수가 합성되지 않는다).
+   예: .kp-more 는 `top:50%; transform:translateY(-50%)` 로 행 중앙에 배치되어
+   있는데, scale(0.97) 이 활성화되면 translateY(-50%) 가 사라져 12px 낙차 +
+   축소로 hit이 도망간다. filter:brightness 는 transform을 건드리지 않아
+   기존 transform이 보존되고 hit-target이 고정된다. craft-v2.css의 press
+   규칙과 동일한 원리로 통일. */
 @utility pressable {
-  transition: transform var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease-out);
+  transition: filter var(--t-fast) var(--ease-out), opacity var(--t-fast) var(--ease-out);
   &:active:not(:disabled) {
-    transform: scale(0.97);
+    filter: brightness(0.9);
     opacity: 0.9;
   }
 }

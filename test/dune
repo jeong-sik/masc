@@ -31,6 +31,7 @@
  (names
   test_keeper_memory_os_io_fd
   test_rfc0259_reconcile
+  test_keeper_bank_longterm_inject_flag
   test_keeper_memory_lane
   test_keeper_reactive_wake_backlog_gate
   test_keeper_no_signal_silence
@@ -343,6 +344,7 @@
  (modules
   test_keeper_memory_os_io_fd
   test_rfc0259_reconcile
+  test_keeper_bank_longterm_inject_flag
   test_keeper_memory_lane
   test_env_keeper_scrub
   test_keeper_reactive_wake_backlog_gate

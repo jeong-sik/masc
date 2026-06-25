@@ -119,6 +119,7 @@ if ! build_server_exe; then
   exit 1
 fi
 echo "[bootstrap] server_exe=${SERVER_EXE}"
+harness_seed_server_config "$ROOT_DIR" "$BASE_PATH"
 
 if ! HARNESS_AUTH_TOKEN="$(
   harness_mint_admin_token "$SERVER_EXE" "$PORT" "$BASE_PATH" \

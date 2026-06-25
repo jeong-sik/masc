@@ -47,7 +47,7 @@ end
 
 val start_background_maintenance :
   sw:Eio.Switch.t ->
-  clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->
+  clock:float Eio.Time.clock_ty Eio.Time.clock ->
   env:Eio_unix.Stdenv.base ->
   Mcp_server.server_state -> string * string
 (** Spawn the periodic maintenance fibers (institution episode capping,

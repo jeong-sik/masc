@@ -7,6 +7,9 @@
 
 type complete_fn = Keeper_memory_llm_summary.complete_fn
 
+(** Default completion function: routes to [Llm_provider.Complete.complete]. *)
+val default_complete : complete_fn
+
 type outcome =
   | Skipped_too_few of int
   | Transport_failed of string

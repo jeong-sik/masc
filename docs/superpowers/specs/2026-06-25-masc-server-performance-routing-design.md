@@ -1,8 +1,8 @@
 # MASC Server Performance & Routing Improvement Design
 
-**Date:** 2026-06-25  
-**Scope:** `~/me/workspace/yousleepwhen/masc` server (`lib/server`), dashboard read API, WebSocket/WSS delivery  
-**Approach:** B — Cache/Stream Architecture Redesign (with incremental quick wins folded into Phase 1)  
+**Date:** 2026-06-25
+**Scope:** `~/me/workspace/yousleepwhen/masc` server (`lib/server`), dashboard read API, WebSocket/WSS delivery
+**Approach:** B — Cache/Stream Architecture Redesign (with incremental quick wins folded into Phase 1)
 **Status:** Draft pending review
 
 ---

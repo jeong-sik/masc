@@ -461,6 +461,7 @@ proactive_idle_sec = 300
 proactive_cooldown_sec = 60
 autoboot_enabled = false
 active_goal_ids = ["goal-runtime", "goal-masc"]
+multimodal_policy = "Delegate"
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -477,7 +478,27 @@ active_goal_ids = ["goal-runtime", "goal-masc"]
       check (option bool) "autoboot_enabled" (Some false) d.autoboot_enabled;
       check (option (list string)) "active_goal_ids"
         (Some [ "goal-runtime"; "goal-masc" ])
-        d.active_goal_ids
+        d.active_goal_ids;
+      check bool "multimodal_policy delegate" true
+        (match d.multimodal_policy with
+         | Some Masc.Keeper_multimodal_policy.Delegate -> true
+         | _ -> false)
+
+let test_profile_rejects_invalid_multimodal_policy () =
+  let input = {|
+[keeper]
+goal = "test"
+multimodal_policy = "delegat"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc -> (
+      match KTP.profile_defaults_of_toml doc with
+      | Ok _ -> fail "expected invalid multimodal_policy error"
+      | Error msg ->
+          check bool "mentions invalid policy" true
+            (contains_substring msg "invalid multimodal_policy");
+          check bool "mentions value" true (contains_substring msg "delegat"))
 
 let test_profile_rejects_partial_proactive_interval_pair () =
   let input = {|
@@ -1611,6 +1632,8 @@ let () =
         [
           test_case "minimal" `Quick test_profile_minimal;
           test_case "full" `Quick test_profile_full;
+          test_case "rejects invalid multimodal_policy" `Quick
+            test_profile_rejects_invalid_multimodal_policy;
           test_case "rejects partial proactive interval pair" `Quick
             test_profile_rejects_partial_proactive_interval_pair;
           test_case "rejects removed model keys" `Quick

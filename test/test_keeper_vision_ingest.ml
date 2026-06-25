@@ -10,6 +10,16 @@ module P = Masc.Keeper_multimodal_policy
 let ok_store bytes = Ok (Printf.sprintf "H_%d" (String.length bytes))
 let fail_store _ = Error "store boom"
 
+let contains ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  let rec loop index =
+    index + needle_len <= haystack_len
+    && (String.equal (String.sub haystack index needle_len) needle
+        || loop (index + 1))
+  in
+  needle_len = 0 || loop 0
+
 let img ~data =
   Agent_sdk.Types.image_block ~source_type:"base64" ~media_type:"image/png" ~data ()
 
@@ -64,9 +74,16 @@ let test_policy_of_string () =
   assert (P.of_string "  REROUTE " = Some P.Reroute);
   assert (P.of_string "inherit" = Some P.Inherit);
   assert (P.of_string "nonsense" = None);
+  (match P.of_string_result "nonsense" with
+   | Ok _ -> assert false
+   | Error msg ->
+     assert (contains ~needle:"invalid multimodal_policy" msg);
+     assert (contains ~needle:"delegate" msg));
   assert (P.of_string "" = None);
   assert (String.equal (P.to_string P.Delegate) "delegate");
-  assert (P.default = P.Reroute)
+  assert (P.default = P.Reroute);
+  assert (P.resolve_optional None = P.Reroute);
+  assert (P.resolve_optional (Some P.Inherit) = P.Reroute)
 
 let () =
   test_policy_of_string ();

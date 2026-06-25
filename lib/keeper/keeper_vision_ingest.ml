@@ -5,7 +5,7 @@ let store_dir ~keeper_name =
 
 let should_delegate policy_opt =
   Keeper_multimodal_policy.delegates
-    (Option.value policy_opt ~default:Keeper_multimodal_policy.default)
+    (Keeper_multimodal_policy.resolve_optional policy_opt)
 
 let intercept_image_blocks ~store blocks =
   List.map

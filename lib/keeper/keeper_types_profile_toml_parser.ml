@@ -20,6 +20,11 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
       Ok (Some (normalize_name_list tools))
     else Ok None
   in
+  let multimodal_policy_result =
+    match str "multimodal_policy" with
+    | Some raw -> Keeper_multimodal_policy.of_string_result raw |> Result.map Option.some
+    | None -> Ok None
+  in
   let per_provider_timeout_state, per_provider_timeout =
     per_provider_timeout_of_toml
       ~source:"keeper TOML"
@@ -112,50 +117,53 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     Result.bind result (fun () -> runtime_assignment_result)
   in
   let result =
-    Result.bind result (fun () -> tool_access_defaults_result)
+    Result.bind result (fun () -> Result.map (fun _ -> ()) tool_access_defaults_result)
   in
-  Result.map
-    (fun tool_access ->
-      {
-        id = None;
-        manifest_path = None;
-        persona_name = str "persona_name";
-        goal = str "goal";
-        instructions = str "instructions";
-        autoboot_enabled = bool_ "autoboot_enabled";
-        mention_targets = strs "mention_targets";
-        proactive_enabled = bool_ "proactive_enabled";
-        proactive_idle_sec = int_ "proactive_idle_sec";
-        proactive_cooldown_sec = int_ "proactive_cooldown_sec";
-        shards =
-          (match strs "shards" with
-           | [] -> None
-           | xs -> Some xs);
-        allowed_paths =
-          if has "allowed_paths" then Some (strs "allowed_paths")
-          else None;
-        sandbox_profile =
-          Option.bind (str "sandbox_profile") sandbox_profile_of_string;
-        sandbox_image = str "sandbox_image";
-        network_mode =
-          Option.bind (str "network_mode") network_mode_of_string;
-        tool_access;
-        tool_denylist = normalize_name_list_opt (strs "tool_denylist");
-        active_goal_ids =
-          if has "active_goal_ids" then
-            Some (normalize_name_list (strs "active_goal_ids"))
-          else None;
-        telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
-        telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
-        per_provider_timeout_state;
-        per_provider_timeout;
-        always_approve = bool_ "always_approve";
-        multimodal_policy =
-          Option.bind (str "multimodal_policy") Keeper_multimodal_policy.of_string;
-        oas_env = extract_oas_env_from_doc doc;
-        unknown_toml_keys = [];
-      })
-    result
+  let result =
+    Result.bind result (fun () -> Result.map (fun _ -> ()) multimodal_policy_result)
+  in
+  Result.bind result (fun () ->
+    Result.bind tool_access_defaults_result (fun tool_access ->
+      Result.map
+        (fun multimodal_policy ->
+          {
+            id = None;
+            manifest_path = None;
+            persona_name = str "persona_name";
+            goal = str "goal";
+            instructions = str "instructions";
+            autoboot_enabled = bool_ "autoboot_enabled";
+            mention_targets = strs "mention_targets";
+            proactive_enabled = bool_ "proactive_enabled";
+            proactive_idle_sec = int_ "proactive_idle_sec";
+            proactive_cooldown_sec = int_ "proactive_cooldown_sec";
+            shards =
+              (match strs "shards" with
+               | [] -> None
+               | xs -> Some xs);
+            allowed_paths =
+              if has "allowed_paths" then Some (strs "allowed_paths") else None;
+            sandbox_profile =
+              Option.bind (str "sandbox_profile") sandbox_profile_of_string;
+            sandbox_image = str "sandbox_image";
+            network_mode =
+              Option.bind (str "network_mode") network_mode_of_string;
+            tool_access;
+            tool_denylist = normalize_name_list_opt (strs "tool_denylist");
+            active_goal_ids =
+              if has "active_goal_ids" then
+                Some (normalize_name_list (strs "active_goal_ids"))
+              else None;
+            telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
+            telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
+            per_provider_timeout_state;
+            per_provider_timeout;
+            always_approve = bool_ "always_approve";
+            multimodal_policy;
+            oas_env = extract_oas_env_from_doc doc;
+            unknown_toml_keys = [];
+          })
+        multimodal_policy_result))
 
 (** Fields actually read by [profile_defaults_of_toml] from the [[keeper]]
     TOML table.  Keep this in sync with the record construction above — the

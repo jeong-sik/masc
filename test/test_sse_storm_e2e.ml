@@ -421,9 +421,15 @@ let test_mcp_reconnect_stays_accepted () =
   check_status "follow-up /mcp reconnect accepted" 200 second
 
 let test_ag_ui_rejects_reconnect_then_recovers () =
-  with_server @@ fun ~port ~auth_token:_ ->
+  with_server @@ fun ~port ~auth_token ->
   let sid = Printf.sprintf "storm-agui-%06d" (Random.int 1_000_000) in
-  let headers = [("Accept", "text/event-stream"); ("Mcp-Session-Id", sid)] in
+  let headers =
+    [
+      ("Accept", "text/event-stream");
+      ("Authorization", "Bearer " ^ auth_token);
+      ("Mcp-Session-Id", sid);
+    ]
+  in
 
   (* Stay well inside the 1s reconnect guard so the next request is truly immediate. *)
   let first = run_curl ~headers ~max_time:0.2 ~port ~path:"/ag-ui/events?workspace=default" () in

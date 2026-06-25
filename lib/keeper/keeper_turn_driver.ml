@@ -147,14 +147,15 @@ let run_named
     | None -> []
     | Some (checkpoint : Agent_sdk.Checkpoint.t) -> checkpoint.messages
   in
+  let reroute_decision =
+    Runtime_agent.decide_modality_reroute_for_runtime
+      ~assigned:assigned_runtime
+      ~checkpoint_messages
+      ~initial_messages
+      current_goal_blocks
+  in
   let runtime_id, runtime =
-    match
-      Runtime_agent.decide_modality_reroute_for_runtime
-        ~assigned:assigned_runtime
-        ~checkpoint_messages
-        ~initial_messages
-        current_goal_blocks
-    with
+    match reroute_decision with
     | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ ->
       runtime_id, assigned_runtime
     | Runtime_agent.Reroute { to_runtime_id; reason } ->
@@ -168,6 +169,63 @@ let run_named
            to_runtime_id
            reason;
          to_runtime_id, rerouted)
+  in
+  (* RFC-0265 follow-up — graceful media degrade floor. When no configured
+     runtime can accept the turn's input modality ([No_capable_runtime]), strip
+     the unsupported media blocks from the goal, prior [initial_messages], and
+     resumed checkpoint, then inject an operator-visible note so the turn runs
+     on text instead of the loud terminal reject in [Runtime_agent.run_blocks].
+     Modality-satisfied turns and reroutes are untouched. The drop is non-silent
+     (WARN log + injected note — RFC-0126/0145). The stripped checkpoint is the
+     dispatch view only; the persisted checkpoint is unchanged, so a later
+     vision-capable runtime still sees the original media. *)
+  let goal_blocks, initial_messages, oas_checkpoint =
+    match reroute_decision with
+    | Runtime_agent.No_capable_runtime _ ->
+      let caps = Runtime_agent.input_capabilities_of_runtime runtime in
+      let stripped_goal, goal_dropped =
+        Runtime_agent.strip_unsupported_modality_blocks caps current_goal_blocks
+      in
+      let stripped_initial, initial_dropped =
+        Runtime_agent.strip_unsupported_modality_messages caps initial_messages
+      in
+      let stripped_checkpoint, checkpoint_dropped =
+        match oas_checkpoint with
+        | None -> None, []
+        | Some (checkpoint : Agent_sdk.Checkpoint.t) ->
+          let messages, dropped =
+            Runtime_agent.strip_unsupported_modality_messages
+              caps
+              checkpoint.messages
+          in
+          Some { checkpoint with messages }, dropped
+      in
+      let dropped =
+        Runtime_agent.merge_modality_counts
+          (Runtime_agent.merge_modality_counts goal_dropped initial_dropped)
+          checkpoint_dropped
+      in
+      (match Runtime_agent.media_degrade_note ~runtime_id dropped with
+       | None ->
+         (* Nothing strippable (e.g. only ToolResult-nested media): keep the
+            inputs unchanged so the loud capability floor still applies. *)
+         goal_blocks, initial_messages, oas_checkpoint
+       | Some note ->
+         Log.Keeper.warn
+           "%s: RFC-0265 media degrade on %s — dropped %s, continuing text-only"
+           keeper_name
+           runtime_id
+           (String.concat
+              ","
+              (List.map
+                 (fun (modality, n) -> Printf.sprintf "%s=%d" modality n)
+                 dropped));
+         let goal_with_note =
+           stripped_goal @ [ Agent_sdk.Types.text_block note ]
+         in
+         Some goal_with_note, stripped_initial, stripped_checkpoint)
+    | Runtime_agent.No_reroute_needed | Runtime_agent.Reroute _ ->
+      goal_blocks, initial_messages, oas_checkpoint
   in
   let error_runtime_id = runtime_id in
   let candidate =

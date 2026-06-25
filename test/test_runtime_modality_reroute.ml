@@ -216,6 +216,69 @@ let test_caps_admit_required_modalities () =
   check bool "empty required is always admitted" true
     (Runtime_agent.For_testing.caps_admit_required_modalities (caps ()) [])
 
+(* RFC-0265 follow-up — graceful media degrade. [strip_unsupported_modality_blocks]
+   drops the top-level image/audio/document blocks a text-only runtime cannot
+   accept and reports the per-modality drop count; text/tool blocks are retained. *)
+let dropped_count modality dropped =
+  match List.assoc_opt modality dropped with Some n -> n | None -> 0
+
+let test_strip_drops_unsupported_image () =
+  let blocks =
+    [ Agent_sdk.Types.Text "hello"
+    ; Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+    ]
+  in
+  let kept, dropped =
+    Runtime_agent.strip_unsupported_modality_blocks (caps ()) blocks
+  in
+  check int "only the text block is kept" 1 (List.length kept);
+  check int "one image dropped" 1 (dropped_count "image" dropped)
+
+let test_strip_keeps_supported_image () =
+  let blocks =
+    [ Agent_sdk.Types.Text "hi"
+    ; Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+    ]
+  in
+  let kept, dropped =
+    Runtime_agent.strip_unsupported_modality_blocks (caps ~image:true ()) blocks
+  in
+  check int "both blocks kept on a vision runtime" 2 (List.length kept);
+  check int "nothing dropped" 0 (List.length dropped)
+
+let test_strip_messages_drops_history_image () =
+  let messages =
+    [ message_with_blocks
+        [ Agent_sdk.Types.Text "prev"
+        ; Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"x" ()
+        ]
+    ]
+  in
+  let kept, dropped =
+    Runtime_agent.strip_unsupported_modality_messages (caps ()) messages
+  in
+  check int "the message is retained" 1 (List.length kept);
+  let msg : Agent_sdk.Types.message = List.hd kept in
+  check int "image stripped from message content" 1 (List.length msg.content);
+  check int "one image dropped" 1 (dropped_count "image" dropped)
+
+let test_degrade_note_some_when_dropped () =
+  match
+    Runtime_agent.media_degrade_note
+      ~runtime_id:"glm-coding.glm-5-turbo"
+      [ ("image", 2) ]
+  with
+  | None -> fail "expected a note when media was dropped"
+  | Some note ->
+      check_contains "names the runtime" ~needle:"glm-coding.glm-5-turbo" note;
+      check_contains "states the omission count" ~needle:"2" note
+
+let test_degrade_note_none_when_empty () =
+  check (option string) "no note when nothing dropped" None
+    (Runtime_agent.media_degrade_note ~runtime_id:"r" []);
+  check (option string) "no note when all counts zero" None
+    (Runtime_agent.media_degrade_note ~runtime_id:"r" [ ("image", 0) ])
+
 let () =
   run "rfc0265_modality_reroute"
     [ ( "decide_modality_reroute"
@@ -237,5 +300,17 @@ let () =
     ; ( "caps_admit_required_modalities"
       , [ test_case "multi-modality predicate" `Quick
             test_caps_admit_required_modalities
+        ] )
+    ; ( "media_degrade"
+      , [ test_case "strip drops unsupported image" `Quick
+            test_strip_drops_unsupported_image
+        ; test_case "strip keeps supported image" `Quick
+            test_strip_keeps_supported_image
+        ; test_case "strip messages drops history image" `Quick
+            test_strip_messages_drops_history_image
+        ; test_case "degrade note when dropped" `Quick
+            test_degrade_note_some_when_dropped
+        ; test_case "degrade note none when empty" `Quick
+            test_degrade_note_none_when_empty
         ] )
     ]

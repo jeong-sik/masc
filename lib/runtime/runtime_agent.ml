@@ -472,6 +472,83 @@ let caps_admit_required_modalities
   List.for_all (supports_required_modality caps) required
   && (List.length required <= 1 || supports_multimodal_bundle caps)
 
+(* RFC-0265 follow-up — graceful media degrade. When no configured runtime can
+   accept a turn's input modality (the reroute floor [No_capable_runtime]),
+   instead of the loud terminal reject the caller strips the unsupported media
+   blocks and proceeds on text. These helpers are the pure block/message
+   filters: drop the top-level [Image]/[Document]/[Audio] blocks whose modality
+   [caps] does not admit, keep everything else, and report a per-modality drop
+   count for the caller's operator-visible note. ToolResult-nested media is
+   left intact (rare; the capability gate floor still applies), keeping the
+   strip a total function over the leaf media blocks an operator attaches. *)
+let block_required_modality (block : Agent_sdk.Types.content_block) =
+  match block with
+  | Agent_sdk.Types.Image _ -> Some "image"
+  | Agent_sdk.Types.Document _ -> Some "document"
+  | Agent_sdk.Types.Audio _ -> Some "audio"
+  | _ -> None
+
+let bump_modality_count modality counts =
+  let prev = match List.assoc_opt modality counts with Some n -> n | None -> 0 in
+  (modality, prev + 1) :: List.remove_assoc modality counts
+
+let merge_modality_counts a b =
+  List.fold_left
+    (fun acc (modality, n) ->
+       let prev =
+         match List.assoc_opt modality acc with Some x -> x | None -> 0
+       in
+       (modality, prev + n) :: List.remove_assoc modality acc)
+    a
+    b
+
+let strip_unsupported_modality_blocks
+    (caps : Llm_provider.Capabilities.capabilities)
+    (blocks : Agent_sdk.Types.content_block list) :
+    Agent_sdk.Types.content_block list * (string * int) list =
+  let kept, dropped =
+    List.fold_left
+      (fun (kept, dropped) block ->
+         match block_required_modality block with
+         | Some modality when not (supports_required_modality caps modality) ->
+             (kept, bump_modality_count modality dropped)
+         | _ -> (block :: kept, dropped))
+      ([], [])
+      blocks
+  in
+  (List.rev kept, dropped)
+
+let strip_unsupported_modality_messages
+    (caps : Llm_provider.Capabilities.capabilities)
+    (messages : Agent_sdk.Types.message list) :
+    Agent_sdk.Types.message list * (string * int) list =
+  let kept, dropped =
+    List.fold_left
+      (fun (acc, dropped) (message : Agent_sdk.Types.message) ->
+         let content, d =
+           strip_unsupported_modality_blocks caps message.content
+         in
+         ({ message with content } :: acc, merge_modality_counts dropped d))
+      ([], [])
+      messages
+  in
+  (List.rev kept, dropped)
+
+(* Operator-visible note injected into a degraded turn so the omitted media is
+   non-silent (RFC-0126/0145): the model and the keeper-chat surface see that
+   input was dropped rather than vanishing. [None] when nothing was dropped. *)
+let media_degrade_note ~(runtime_id : string) (dropped : (string * int) list) :
+    string option =
+  match List.fold_left (fun acc (_, n) -> acc + n) 0 dropped with
+  | 0 -> None
+  | total ->
+      Some
+        (Printf.sprintf
+           "[첨부된 미디어 입력 %d건이 생략되었습니다: 현재 런타임(%s)이 이미지/문서/오디오 \
+            입력을 지원하지 않아 텍스트만 전달합니다.]"
+           total
+           runtime_id)
+
 let validate_content_blocks_against_capabilities
     ~(provider_label : string)
     (caps : Llm_provider.Capabilities.capabilities)

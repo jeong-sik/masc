@@ -242,6 +242,31 @@ val decide_modality_reroute_for_runtime :
     content blocks. Composes [input_capabilities_of_runtime] /
     [media_reroute_candidates] / [decide_modality_reroute]. *)
 
+val strip_unsupported_modality_blocks :
+  Llm_provider.Capabilities.capabilities ->
+  Agent_sdk.Types.content_block list ->
+  Agent_sdk.Types.content_block list * (string * int) list
+(** RFC-0265 follow-up media degrade. Drop the top-level [Image]/[Document]/[Audio]
+    blocks whose modality [caps] does not admit; keep text/thinking/tool blocks.
+    Returns the kept blocks and a per-modality drop count. ToolResult-nested media
+    is left intact (the capability gate floor still applies to it). *)
+
+val strip_unsupported_modality_messages :
+  Llm_provider.Capabilities.capabilities ->
+  Agent_sdk.Types.message list ->
+  Agent_sdk.Types.message list * (string * int) list
+(** [strip_unsupported_modality_blocks] mapped over each message's content,
+    accumulating the per-modality drop count across the message list. *)
+
+val merge_modality_counts :
+  (string * int) list -> (string * int) list -> (string * int) list
+(** Sum two per-modality drop-count assoc lists. *)
+
+val media_degrade_note :
+  runtime_id:string -> (string * int) list -> string option
+(** Operator-visible note injected into a degraded turn so the omitted media is
+    non-silent (RFC-0126/0145). [None] when nothing was dropped. *)
+
 module For_testing : sig
   val request_runtime_fields_on_base_config :
     base:Llm_provider.Provider_config.t ->

@@ -24,6 +24,12 @@ let cache_segment_of_int_opt = function
   | None -> "-"
 ;;
 
+let cached_assoc_body_or_self cached fields =
+  match List.assoc_opt "body" fields with
+  | Some body -> body
+  | None -> cached
+;;
+
 let json_string_opt = function
   | Some value -> `String value
   | None -> `Null
@@ -266,7 +272,7 @@ let cached_keeper_runtime_trace_json config name ?trace_id ?turn_id ~limit () =
       | Some (`String "not_found") -> `Not_found
       | _ -> `OK
     in
-    let body = Option.value ~default:cached (List.assoc_opt "body" fields) in
+    let body = cached_assoc_body_or_self cached fields in
     status, body
   | other -> `OK, other
 ;;
@@ -300,7 +306,7 @@ let cached_keeper_config_json config name =
       | Some (`String "not_found") -> `Not_found
       | _ -> `OK
     in
-    let body = Option.value ~default:cached (List.assoc_opt "body" fields) in
+    let body = cached_assoc_body_or_self cached fields in
     status, body
   | other -> `OK, other
 ;;
@@ -402,7 +408,7 @@ let cached_keeper_composite_json config name =
       | Some (`String value) -> keeper_composite_status_of_string value
       | _ -> `OK
     in
-    let body = Option.value ~default:cached (List.assoc_opt "body" fields) in
+    let body = cached_assoc_body_or_self cached fields in
     status, body
   | other -> `OK, other
 ;;

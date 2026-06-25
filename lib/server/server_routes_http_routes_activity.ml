@@ -273,13 +273,17 @@ let add_routes ~sw ~clock router =
              req
          in
          let cache_key =
+           let cache_part = function
+             | Some value -> value
+             | None -> ""
+           in
            Printf.sprintf "board:list:%s:%s:%s:%b:%b:%s:%d:%d:%s:%b:%b"
              config.base_path
-             (Option.value hearth ~default:"")
+             (cache_part hearth)
              (board_sort_label sort_by)
              exclude_system exclude_automation
-             (Option.value author_query ~default:"")
-             limit offset (Option.value voter ~default:"") blind_votes include_moderation
+             (cache_part author_query)
+             limit offset (cache_part voter) blind_votes include_moderation
          in
          let json =
            Dashboard_cache.get_or_compute cache_key
@@ -292,7 +296,9 @@ let add_routes ~sw ~clock router =
                   in
                   let karma_map = Board_dispatch.get_all_karma () in
                   let get_karma author =
-                    List.assoc_opt author karma_map |> Option.value ~default:0
+                    match List.assoc_opt author karma_map with
+                    | Some karma -> karma
+                    | None -> 0
                   in
                   let paged = posts |> drop offset |> take limit in
                   let reaction_rows =

@@ -946,7 +946,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                             ; "actor", Goal_verification.goal_principal_to_yojson actor
                             ]);
                     let () =
-                      match resolved_approval_request with
+                      (match resolved_approval_request with
                       | None -> ()
                       | Some request ->
                         emit_goal_event
@@ -965,7 +965,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                                   )
                                 ; ( "approval_request"
                                   , Goal_approval.approval_request_to_yojson request )
-                                ])
+                                ]))
                     in
                     ok_result
                       ~tool_name

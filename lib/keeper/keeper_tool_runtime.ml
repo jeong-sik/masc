@@ -76,7 +76,8 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit
   | Tool_masc_fusion_dispatch
-  | Tool_masc_fusion_status -> None
+  | Tool_masc_fusion_status
+  | Tool_analyze_image -> None
 ;;
 
 (* Shell IR mechanics live under Execute lowerers. Keeper_tool_command_runtime is
@@ -132,7 +133,8 @@ let handle_shell_ir ctx descriptor args =
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit
   | Tool_masc_fusion_dispatch
-  | Tool_masc_fusion_status -> None
+  | Tool_masc_fusion_status
+  | Tool_analyze_image -> None
 ;;
 
 let handle_in_process ctx descriptor args =
@@ -307,6 +309,17 @@ let handle_in_process ctx descriptor args =
     (* read-only: reads the in-memory run registry, no server context needed. *)
     Some
       (Keeper_tool_in_process_runtime.handle_masc_fusion_status
+         ~meta:ctx.meta
+         ~args
+         ())
+  | Tool_analyze_image ->
+    (* read-only vision sub-call; needs [net] (like masc_fusion), threaded from
+       the turn-scoped dispatch context. *)
+    Some
+      (Keeper_tool_in_process_runtime.handle_analyze_image
+         ?sw:ctx.sw
+         ?clock:ctx.clock
+         ?net:ctx.net
          ~meta:ctx.meta
          ~args
          ())

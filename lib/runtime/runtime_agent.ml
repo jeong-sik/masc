@@ -657,6 +657,17 @@ let media_reroute_candidates ~(exclude : string) :
   |> List.map (fun (r : Runtime.t) ->
        (r.Runtime.id, input_capabilities_of_runtime r))
 
+(* First configured runtime that admits [modality] as input, in media_failover
+   order then declaration order. Reuses the RFC-0265 candidate ordering and the
+   single admit predicate ([caps_admit_required_modalities]), so the pick is
+   exactly a runtime the dispatch capability gate would accept (the SSOT
+   invariant above). [exclude:""] = consider every configured runtime. *)
+let first_media_capable_runtime ~(modality : string) : string option =
+  media_reroute_candidates ~exclude:""
+  |> List.find_opt (fun (_id, caps) ->
+       caps_admit_required_modalities caps [ modality ])
+  |> Option.map fst
+
 let validate_content_blocks_for_config
     ?oas_checkpoint
     ~(config : config)

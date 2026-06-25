@@ -27,30 +27,24 @@ type extraction_error =
   | Empty_extraction
       (** A normal stop with no usable text — the model produced nothing. *)
   | Truncated_extraction
-      (** The reply hit the token budget ([done_reason = length]) before emitting
-          post-thinking text. The measured cause of the 2026-06-25 gemma4 empty
-          reply (thinking consumed the whole budget). Retry with a larger budget
-          or a runtime that is not thinking-token-starved. *)
+      (** The reply was truncated (hit the token budget) before emitting usable
+          text. The measured cause of the 2026-06-25 gemma4 empty reply (thinking
+          consumed the whole budget). Retry with a larger budget or a runtime
+          that is not thinking-token-starved. *)
 
 val string_of_error : extraction_error -> string
 
-type done_reason =
-  | Stop
-  | Length
-  | Other of string
-      (** Unknown terminal reason, kept verbatim (no Unknown->Permissive
-          collapse). *)
-
-val done_reason_of_string : string -> done_reason
-(** Normalize a provider's terminal-reason string. "stop"/"end_turn" -> [Stop];
-    "length"/"max_tokens" -> [Length]; anything else -> [Other raw]. Case- and
-    surrounding-whitespace-insensitive. *)
-
 val classify
-  :  done_reason:done_reason
+  :  truncated:bool
   -> content:string
   -> (string, extraction_error) result
 (** The analyze_image result contract:
-    - trimmed-non-empty [content] -> [Ok trimmed] (usable even if truncated);
-    - empty [content] with [Length] -> [Error Truncated_extraction];
-    - empty [content] otherwise -> [Error Empty_extraction]. *)
+    - trimmed-non-empty [content] -> [Ok trimmed] (usable even if [truncated]);
+    - empty [content] with [truncated] -> [Error Truncated_extraction];
+    - empty [content] otherwise -> [Error Empty_extraction].
+
+    [truncated] is the provider's terminal-reason collapsed to a single bit. This
+    module stays free of any provider/SDK type: the caller (keeper layer, which
+    has the typed {!Agent_sdk.Types.stop_reason}) maps [MaxTokens -> true] and
+    every other reason to [false] before calling. Keeping the typed [stop_reason]
+    out of here avoids a string-classifier duplicate of an existing closed sum. *)

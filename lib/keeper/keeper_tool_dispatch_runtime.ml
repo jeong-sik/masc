@@ -430,7 +430,8 @@ let tool_tutor_for_validation ~tool_name ~input =
      | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
      | Keeper_tool_descriptor.Tool_masc_surface_audit
      | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
-     | Keeper_tool_descriptor.Tool_masc_fusion_status -> None)
+     | Keeper_tool_descriptor.Tool_masc_fusion_status
+     | Keeper_tool_descriptor.Tool_analyze_image -> None)
 ;;
 
 let append_assoc_fields json extra_fields =

@@ -33,55 +33,42 @@ let test_make_request_rejects_empty_bytes () =
 let test_make_request_rejects_blank_media_type () =
   assert (is_error (V.make_request ~query:"q" ~image_media_type:"" ~image_bytes:"x"))
 
-(* ── done_reason normalization ── *)
-
-let test_done_reason_of_string () =
-  assert (V.done_reason_of_string "stop" = V.Stop);
-  assert (V.done_reason_of_string "end_turn" = V.Stop);
-  assert (V.done_reason_of_string "  STOP " = V.Stop);
-  assert (V.done_reason_of_string "length" = V.Length);
-  assert (V.done_reason_of_string "max_tokens" = V.Length);
-  match V.done_reason_of_string "content_filter" with
-  | V.Other s -> assert (String.equal s "content_filter")
-  | _ -> assert false
-
-(* ── classify: the contract ── *)
+(* ── classify: the contract (~truncated:bool; the typed stop_reason -> bool
+   collapse lives in the keeper layer, Keeper_vision_tool) ── *)
 
 let test_classify_non_empty_is_ok () =
-  match V.classify ~done_reason:V.Stop ~content:"  Crimson  " with
+  match V.classify ~truncated:false ~content:"  Crimson  " with
   | Ok t -> assert (String.equal t "Crimson")
   | Error _ -> assert false
 
-(* partial-but-present text under a length cap is still usable -> Ok, not error. *)
-let test_classify_non_empty_under_length_is_ok () =
-  match V.classify ~done_reason:V.Length ~content:"a red square, partially" with
+(* partial-but-present text under truncation is still usable -> Ok, not error. *)
+let test_classify_non_empty_under_truncation_is_ok () =
+  match V.classify ~truncated:true ~content:"a red square, partially" with
   | Ok t -> assert (String.equal t "a red square, partially")
   | Error _ -> assert false
 
-(* the gemma4 case: empty content + length -> truncated, not empty. *)
-let test_classify_empty_length_is_truncated () =
-  assert (V.classify ~done_reason:V.Length ~content:"" = Error V.Truncated_extraction)
+(* the gemma4 case: empty content + truncated -> truncated, not empty. *)
+let test_classify_empty_truncated_is_truncated () =
+  assert (V.classify ~truncated:true ~content:"" = Error V.Truncated_extraction)
 
-let test_classify_whitespace_length_is_truncated () =
-  assert (V.classify ~done_reason:V.Length ~content:"  \n " = Error V.Truncated_extraction)
+let test_classify_whitespace_truncated_is_truncated () =
+  assert (V.classify ~truncated:true ~content:"  \n " = Error V.Truncated_extraction)
 
-(* empty content with a normal stop -> empty_extraction (model produced nothing). *)
-let test_classify_empty_stop_is_empty () =
-  assert (V.classify ~done_reason:V.Stop ~content:"" = Error V.Empty_extraction)
+(* empty content, not truncated -> empty_extraction (model produced nothing). *)
+let test_classify_empty_not_truncated_is_empty () =
+  assert (V.classify ~truncated:false ~content:"" = Error V.Empty_extraction)
 
-let test_classify_empty_other_is_empty () =
-  assert (
-    V.classify ~done_reason:(V.Other "content_filter") ~content:""
-    = Error V.Empty_extraction)
+let test_classify_whitespace_not_truncated_is_empty () =
+  assert (V.classify ~truncated:false ~content:" \t " = Error V.Empty_extraction)
 
 (* never Ok "" — the failure class this RFC targets. *)
 let test_classify_never_ok_empty () =
   List.iter
-    (fun dr ->
-      match V.classify ~done_reason:dr ~content:"" with
+    (fun truncated ->
+      match V.classify ~truncated ~content:"" with
       | Ok s -> assert (String.length s > 0)
       | Error _ -> ())
-    [ V.Stop; V.Length; V.Other "x" ]
+    [ true; false ]
 
 let test_string_of_error () =
   assert (String.equal (V.string_of_error V.Empty_extraction) "empty_extraction");
@@ -92,13 +79,12 @@ let () =
   test_make_request_rejects_blank_query ();
   test_make_request_rejects_empty_bytes ();
   test_make_request_rejects_blank_media_type ();
-  test_done_reason_of_string ();
   test_classify_non_empty_is_ok ();
-  test_classify_non_empty_under_length_is_ok ();
-  test_classify_empty_length_is_truncated ();
-  test_classify_whitespace_length_is_truncated ();
-  test_classify_empty_stop_is_empty ();
-  test_classify_empty_other_is_empty ();
+  test_classify_non_empty_under_truncation_is_ok ();
+  test_classify_empty_truncated_is_truncated ();
+  test_classify_whitespace_truncated_is_truncated ();
+  test_classify_empty_not_truncated_is_empty ();
+  test_classify_whitespace_not_truncated_is_empty ();
   test_classify_never_ok_empty ();
   test_string_of_error ();
   print_endline "test_vision_analyze: all assertions passed"

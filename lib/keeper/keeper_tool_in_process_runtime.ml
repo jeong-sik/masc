@@ -474,6 +474,13 @@ let handle_masc_fusion_status ~(meta : keeper_meta) ~args () =
   fusion_status_json ~registry:Fusion_run_registry.global ~keeper:meta.name ~run_id
 ;;
 
+(* RFC-keeper-vision-delegation-tool §2.6 — analyze_image. Thin delegate to the
+   vision sub-call shell in [Keeper_vision_tool], which threads the Eio net/clock
+   it receives (the read-only sub-call needs net like masc_fusion needs it). *)
+let handle_analyze_image ?sw ?clock ?net ~(meta : keeper_meta) ~args () =
+  Keeper_vision_tool.handle ?sw ?clock ?net ~meta ~args ()
+;;
+
 (* RFC-0182 §3.1 — masc_tool_shard cluster.  [Tool_shard.execute]
    returns the older [(bool * Yojson.Safe.t)] tuple (predates RFC-0189
    typed-result migration), same shape as Tool_local_runtime.  Tool_shard

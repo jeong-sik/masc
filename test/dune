@@ -2510,3 +2510,9 @@
  (name test_keeper_tool_access_validation)
  (modules test_keeper_tool_access_validation)
  (libraries masc_test_deps))
+
+; RFC-keeper-vision-delegation-tool §2.6 — analyze_image pure core
+(test
+ (name test_keeper_vision_tool)
+ (modules test_keeper_vision_tool)
+ (libraries masc_test_deps))

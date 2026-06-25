@@ -230,6 +230,12 @@ val media_reroute_candidates :
     order first, then remaining configured runtimes in declaration order, excluding
     [exclude]. Reads the runtime cache; deterministic (no provider liveness). *)
 
+val first_media_capable_runtime : modality:string -> string option
+(** Runtime id of the first configured runtime that admits [modality] (e.g.
+    ["image"]) as input, in [media_reroute_candidates] order (media_failover then
+    declaration). [None] when none qualifies. Uses the same admit predicate as the
+    RFC-0265 reroute, so the pick matches the dispatch capability gate. *)
+
 val decide_modality_reroute_for_runtime :
   assigned:Runtime.t ->
   ?checkpoint_messages:Agent_sdk.Types.message list ->

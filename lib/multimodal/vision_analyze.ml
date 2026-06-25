@@ -20,21 +20,8 @@ let string_of_error = function
   | Empty_extraction -> "empty_extraction"
   | Truncated_extraction -> "truncated_extraction"
 
-type done_reason =
-  | Stop
-  | Length
-  | Other of string
-
-let done_reason_of_string raw =
-  match String.lowercase_ascii (String.trim raw) with
-  | "stop" | "end_turn" -> Stop
-  | "length" | "max_tokens" -> Length
-  | other -> Other other
-
-let classify ~done_reason ~content =
+let classify ~truncated ~content =
   let trimmed = String.trim content in
   if String.length trimmed > 0 then Ok trimmed
-  else (
-    match done_reason with
-    | Length -> Error Truncated_extraction
-    | Stop | Other _ -> Error Empty_extraction)
+  else if truncated then Error Truncated_extraction
+  else Error Empty_extraction

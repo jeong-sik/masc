@@ -146,16 +146,16 @@ let stream_post_sse_start ~deps ~origin ~session_id ~protocol_version
 let spawn_post_sse_keepalive ~sw ~clock info =
   Eio.Fiber.fork ~sw (fun () ->
       let rec loop () =
-        if not !(info.stop) then (
+        if not (Atomic.get info.stop) then (
           (try
              Eio.Time.sleep clock post_sse_keepalive_interval_s
            with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn -> Log.Server.warn "SSE keepalive sleep failed for session %s: %s"
                     info.session_id (Printexc.to_string exn));
-          if info.closed then
+          if Atomic.get info.closed then
             close_sse_conn info
-          else if not !(info.stop) then
+          else if not (Atomic.get info.stop) then
             if not (send_raw info ": keepalive\n\n") then
               Log.Server.debug "SSE keepalive send failed for session %s"
                 info.session_id;
@@ -663,7 +663,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                   let rec drain () =
                     let event = Eio.Stream.take event_stream in
                     (try
-                      if not (info.closed || !(info.stop)) then
+                      if not (Atomic.get info.closed || (Atomic.get info.stop)) then
                         if not (send_raw info event) then
                           Log.Server.debug "SSE drain send failed for session %s"
                             info.session_id
@@ -671,7 +671,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                       Log.Server.error "drain write error: %s"
                         (Printexc.to_string exn);
                       stop_sse_session info.session_id);
-                    if not !(info.stop) then drain ()
+                    if not (Atomic.get info.stop) then drain ()
                   in
                   try drain ()
                   with Eio.Cancel.Cancelled _ as e -> raise e
@@ -685,16 +685,16 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                     | _ -> false
                   in
                   let rec loop () =
-                    if not !(info.stop) then (
+                    if not (Atomic.get info.stop) then (
                       (try Eio.Time.sleep clock sse_ping_interval_s
                        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                          if is_cancelled exn then raise exn;
                          Log.Server.error "ping sleep error: %s"
                            (Printexc.to_string exn));
                       (try
-                         if info.closed then
+                         if Atomic.get info.closed then
                            stop_sse_session info.session_id
-                         else if not !(info.stop) then
+                         else if not (Atomic.get info.stop) then
                            if not (send_raw info ": ping\n\n") then
                              Log.Server.debug "SSE ping send failed for session %s"
                                info.session_id

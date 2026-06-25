@@ -9,10 +9,6 @@
 
 open Sessions_types
 
-(** {1 Participant lookup} *)
-
-val participant_by_name : Runtime.session -> string -> Runtime.participant option
-
 (** Resolve the effective provider for a participant,
     falling back to the session provider. *)
 val resolved_provider_of_participant

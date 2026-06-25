@@ -199,6 +199,22 @@
   background: var(--bg-deep);
 }
 
+/* Two-column layout: main scroll column + WorkAside right rail.
+   Ported from keeper-v2/styles/v2.css:809-810.
+   .ov-2col switches flex-direction to row so the aside sits as a right column.
+   .ov-scroll inside .ov-2col takes remaining width; the aside has its own
+   fixed/draggable width. Hidden below 1180px (aside sets display:none via
+   its own media query in work-v2.css). */
+.ov.ov-2col {
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.ov-2col .ov-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .ov-scroll {
   flex: 1;
   overflow-y: auto;

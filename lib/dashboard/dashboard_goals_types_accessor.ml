@@ -212,10 +212,11 @@ let latest_iso ?fallback values =
   | first :: rest ->
       Some (List.fold_left iso_max first rest)
 
-let stagnation_threshold_seconds = function
-  | Goal_store.Short -> 6 * Masc_time_constants.hour_int
-  | Goal_store.Mid -> Masc_time_constants.day_int
-  | Goal_store.Long -> 3 * Masc_time_constants.day_int
+(* RFC-0294: stagnation threshold was per-horizon (Short 6h / Mid 1d / Long 3d).
+   With the workspace-goal horizon removed it collapses to a single policy
+   constant — the former Mid bucket (1 day) — chosen to preserve the median of
+   the old table. *)
+let stagnation_threshold_seconds = Masc_time_constants.day_int
 
 let human_duration seconds =
   if seconds < Masc_time_constants.hour_int

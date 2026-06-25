@@ -4,8 +4,8 @@
 
 ## 정책
 
-- **번호 할당**: `bash scripts/rfc-allocate-next.sh` 호출. 이 명령은 ledger `docs/rfc/.next-number` 에서 다음 번호를 stdout 으로 출력하고 ledger 를 +1 로 갱신한다. 같은 commit 에 RFC 파일과 ledger 갱신을 함께 넣는다. CI workflow `rfc-number-collision-check` 가 PR 단계에서 origin/main 의 기존 RFC 번호와 충돌을 차단한다. Multi-phase RFC (같은 NNNN 의 추가 phase 문서) 는 PR body `RFC-EXTEND: NNNN` 라인 또는 frontmatter `extends: "NNNN"` 로 명시적 opt-in 한다. 상세는 [RFC-0078](RFC-0078-rfc-number-reservation-ledger.md). 누락 번호 (0010/0011/0014/0015/0016/0021/0060) 는 재사용 금지 — ledger 가 모노토닉.
-- **파일명**: `RFC-NNNN-kebab-case-title.md`. NNNN 은 zero-pad 4자리.
+- **번호 (발급 안 함)**: 번호 할당 메커니즘(`.next-number` ledger / `rfc-allocate-next.sh` allocator / number-collision guard)은 제거됐다. 전역 monotonic 카운터가 stale-base 동시 PR 간 TOCTOU 충돌원이었다(두 PR 이 같은 번호를 claim 후 둘 다 머지 — 시즌 5회). 신규 RFC 는 번호를 발급받지 않고 의미 있는 slug 파일명을 쓴다. slug 는 공유 가변 할당이 없어 충돌 클래스 자체가 사라진다. **기존 번호 RFC (`RFC-NNNN-*.md`) 는 그대로 유지** (rename 없음); 본 README 의 번호 인덱스 표와 cross-reference 도 유지된다.
+- **파일명**: 신규 RFC 는 `RFC-<slug>.md` (예: `RFC-keeper-background-wait-tool.md`). slug 는 소문자/숫자/하이픈. 기존 번호 RFC 는 `RFC-NNNN-kebab-case-title.md` 유지.
 - **Multi-phase RFC**: 한 RFC 가 phase 별 sub-document 를 가질 수 있다 (예: `RFC-NNNN-main-topic.md` + `RFC-NNNN-phase-5-followup.md`). 같은 번호를 공유하는 것은 *번호 충돌이 아니다* — 본문에서 main spec 을 cross-reference 하면 된다.
 - **상태 이행**: Draft → (구현 중 작업 PR) → Implemented (Phase 별 closeout PR 머지 후) 또는 Withdrawn / Superseded. Status 갱신은 본문 frontmatter + (선택) 별도 closeout commit 으로 한다.
 - **Superseded RFC**: 본문 상단에 `superseded_by: NNNN` 명시 + main spec 본문 §1 ~ §2 에 supersede 이유 1 단락 이상.
@@ -46,232 +46,231 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 
 | # | Title | Status | Last activity | Sub-docs |
 |---|---|---|---|---|
-| 0001 | Det/NonDet Boundary Hardening, Emotional Recovery Loop, and Adversarial Harness | Draft | af16b7fdce 2026-06-17 | - |
-| 0002 | Keeper 11-State Machine + Det/NonDet Boundary Formalization | reference | c6b012e721 2026-06-06 | - |
-| 0003 | Keeper Composite Lifecycle Observer | reference | 0ee897eca1 2026-06-03 | - |
-| 0004 | OCaml ↔ TypeScript shared contract — SSE + gRPC-web | Active | 0ee897eca1 2026-06-03 | - |
-| 0005 | Typed Capability Substrate for Local Exec Core | Draft | 23dcea3303 2026-06-04 | - |
-| 0006 | Keeper Surface And Sandbox | Draft | 6ce9619607 2026-05-27 | - |
-| 0008 | Keeper Credential Provider | Draft | 478c943e39 2026-06-02 | - |
-| 0009 | Runtime Trust Phase 2: Operator Recommendations + Opt-in Persist | Draft | 70ac2a7930 2026-06-03 | - |
-| 0010 | ocamlformat config reconciliation | Implemented | a7b9f1f8d0 2026-05-31 | - |
-| 0012 | Mid-Turn Progress Probe | Draft | 00a9aa0dd1 2026-06-06 | - |
-| 0019 | Keeper Credential Unification | Draft | 478c943e39 2026-06-02 | - |
-| 0020 | Keeper heartbeat — Event Layer / Policy Layer separation | Active | 17345c0c29 2026-05-26 | - |
-| 0022 | Runtime Attempt Liveness Contract | Draft | 00a9aa0dd1 2026-06-06 | - |
-| 0024 | Ollama Runtime Integration + KV Cache Optimization | Draft | 0ee897eca1 2026-06-03 | - |
-| 0025 | Tiered Small-Model Runtime (4B → 9B → 70B+) | Draft | 70ac2a7930 2026-06-03 | - |
-| 0027 | Tension Type Safety and Configurable Severity | Draft | a7296801a7 2026-06-01 | - |
-| 0029 | Dashboard Fiber-Batched Aggregation | Active | a7b9f1f8d0 2026-05-31 | - |
-| 0032 | Environment Knob Unification | Draft | a7296801a7 2026-06-01 | - |
-| 0034 | d — release_stale_claims agent-side sync | Draft | 00a9aa0dd1 2026-06-06 | - |
-| 0035 | Cognitive IDE Master Plan Integration | Draft | 0ee897eca1 2026-06-03 | - |
-| 0036 | oas Cognitive Mapping (companion to RFC-0035) | Draft | 0ee897eca1 2026-06-03 | - |
-| 0037 | Local-first Keeper Enablement: Harness/User Boundary | Draft | 0ee897eca1 2026-06-03 | - |
-| 0038 | Runtime Routing Intent Preservation | Draft | 23dcea3303 2026-06-04 | RFC-0038-phase-2-keeper-identity-canonical.md |
-| 0041 | Runtime Routing Architecture — Group/Item Hierarchy with Health-Aware Fallback | Draft | f943d6a95e 2026-06-09 | - |
-| 0042 | Closed sum type for keeper turn terminal code | Active | 00a9aa0dd1 2026-06-06 | - |
-| 0043 | Distribute legacy metrics backend metric ownership to domain modules | Active | d498dd810a 2026-06-06 | - |
-| 0044 | Typed persistence read-drop reason + Result-based reads | Active | 00a9aa0dd1 2026-06-06 | - |
-| 0045 | SDK turn boundary alignment with MASC keeper FSM | Draft | 00a9aa0dd1 2026-06-06 | - |
-| 0046 | Keeper Detail FSM Hub as SSOT | Active | a7b9f1f8d0 2026-05-31 | - |
-| 0047 | `oas_*` adapter family decomposition (consumer-only OAS boundary) | Draft | 00a9aa0dd1 2026-06-06 | - |
-| 0049 | Dashboard Surface Telemetry Foundation | Draft | d498dd810a 2026-06-06 | - |
-| 0050 | Dashboard Component Ownership Decomposition | Active | 00a9aa0dd1 2026-06-06 | - |
-| 0051 | run_named closure decomposition | Active | 9d7d80804a 2026-06-06 | - |
-| 0052 | Boot-time Required Invariants (typed) | Implemented | 00a9aa0dd1 2026-06-06 | - |
-| 0053 | Tool Dispatch Session-Local Handles | Implemented | 0ee897eca1 2026-06-03 | - |
-| 0054 | PPX for Typed Capability Substrate Phase 2 (codegen track) | Active | f1176b4fa5 2026-05-26 | - |
-| 0056 | Incremental Sub-Library Extraction from Flat masc Library | Active | 00a9aa0dd1 2026-06-06 | - |
-| 0057 | Tool Descriptor Codegen — `[@@deriving tool]` via Build-Time Generation | Draft | 0ee897eca1 2026-06-03 | - |
-| 0058 | Terminal Fallback Capability Exemption | Draft | 00a9aa0dd1 2026-06-06 | RFC-0058-phase-5-erase-provider-variant.md |
-| 0062 | Typed `Tool_result.t` + Typed `Sdk_*` Blocker Class (Reverse-Engineered Initi... | Draft | 00a9aa0dd1 2026-06-06 | - |
-| 0063 | Telemetry Feedback Loop & Cooperative Scheduling Safety | Draft | 00a9aa0dd1 2026-06-06 | - |
-| 0064 | Descriptor-Owned Tool Surface | Superseded | 6ce9619607 2026-05-27 | - |
-| 0065 | Keeper Tool Selection Lifecycle - TLA+ Coverage Extension | Active | f634f8bc46 2026-06-05 | - |
-| 0067 | Goal-Scope Observation→Claim Atomicity | Draft | 00a9aa0dd1 2026-06-06 | - |
-| 0068 | Typed `Keeper_turn_disposition` (operator-facing closed sum) | Draft | 00a9aa0dd1 2026-06-06 | - |
-| 0069 | Awareness Channel Split | Active | 00a9aa0dd1 2026-06-06 | - |
-| 0070 | Keeper Sandbox Runtime — Pure/Edge Separation | Active | 00a9aa0dd1 2026-06-06 | - |
-| 0071 | Exhaustive Match Sweep Codemod — Eliminate N-of-M `_ -> false/None` Anti-Pattern | Implemented | a7b9f1f8d0 2026-05-31 | - |
-| 0072 | Type-encoded keeper sub-FSM transitions (runtime + turn_phase) | Implemented | a7b9f1f8d0 2026-05-31 | - |
-| 0073 | Tool Readiness Probe — Typed Precondition + Runtime Gap Disclosure | Implemented | f634f8bc46 2026-06-05 | - |
-| 0074 | Sandbox Credential Auto-provision | Retired | 478c943e39 2026-06-02 | - |
-| 0075 | Keeper Tools Smoke — Exhaustive Dispatch Coverage Regression Gate | Implemented | 0ee897eca1 2026-06-03 | - |
-| 0076 | Tool Readiness Notification Channel | Retired | 478c943e39 2026-06-02 | - |
-| 0077 | Write-side silent failure — typed propagation | Implemented | 00a9aa0dd1 2026-06-06 | - |
-| 0078 | RFC Number Reservation Ledger + CI Collision Guard | Implemented | 7abc844904 2026-06-01 | - |
-| 0079 | Log row typed encoder + silent-drop removal | Implemented | a7296801a7 2026-06-01 | - |
-| 0080 | Tool registry SSOT — collapse multi-source membership into typed Keeper resol... | Implemented | 965a627b25 2026-06-05 | - |
-| 0081 | OAS Telemetry Envelope Context & Keeper/Goal Pivot Timeline | Implemented | 1f2a526520 2026-06-09 | - |
-| 0082 | Keeper `last_blocker` auto-clear + runtime recovery escalation | Implemented | 0ee897eca1 2026-06-03 | - |
-| 0083 | Dashboard system-actor convention typed unification | Implemented | dac9946522 2026-05-23 | - |
-| 0084 | Keeper→Tool Dispatch Unification + 100% Trace/Telemetry | Implemented | 9d7d80804a 2026-06-06 | - |
-| 0086 | Keeper namespace bulk promotion to sub-library | Implemented | 9d7d80804a 2026-06-06 | - |
-| 0087 | Tool Dispatch Path Unification + Legacy Purge | Implemented | 00a9aa0dd1 2026-06-06 | - |
-| 0088 | Counter-as-Fix → Result Propagation (umbrella scoping) | Active | 00a9aa0dd1 2026-06-06 | - |
-| 0089 | String Classifier to Typed Variant — direct replacement, no lint | Implemented | 23dcea3303 2026-06-04 | - |
-| 0090 | Write-side success-model attribution — finish N-of-M migration | Implemented | d498dd810a 2026-06-06 | - |
-| 0091 | Execute tool: cmd string → typed Argv schema (lexer/validator 박멸) | Implemented | 23dcea3303 2026-06-04 | - |
-| 0093 | Board persistence — path unification (snapshot vs append) | Implemented | 5d40169f17 2026-05-24 | - |
-| 0094 | Compact cooldown semantics split — typed write anchor vs check anchor | Implemented | 00a9aa0dd1 2026-06-06 | - |
-| 0095 | Provider-D-compat provider streaming wire-up | Implemented | d498dd810a 2026-06-06 | - |
-| 0096 | Keeper Turn Contract — multi-turn reasoning + runtime SPOF root-fix | Withdrawn | 6c5095e528 2026-06-03 | - |
-| 0097 | Keeper sandbox container reuse (long-running sandbox per keeper) | Active | 0ee897eca1 2026-06-03 | - |
-| 0098 | Typed JSON-RPC error envelope & production-code silent-failure lint | Implemented | 00a9aa0dd1 2026-06-06 | - |
-| 0099 | Session lifecycle — typed events, explicit eviction, resume backpressure | Active | 0ee897eca1 2026-06-03 | - |
-| 0100 | Streamable HTTP as default transport (MCP 2025-03-26) | Active | 0ee897eca1 2026-06-03 | - |
-| 0101 | FD accountant — generic Eio.Pool extension to cover all spawn classes | Active | d498dd810a 2026-06-06 | - |
-| 0102 | Pre-turn runtime availability gate — reuse, not new surface | Implemented | 7abc844904 2026-06-01 | - |
-| 0103 | Log retention opt-in + JSONL volume root reduction | Draft | a7b9f1f8d0 2026-05-31 | - |
-| 0104 | Keeper task → default repo binding (sandbox cwd disambiguation) | Draft | 0ee897eca1 2026-06-03 | - |
-| 0105 | OpenAI-compat boundary: Agent_sdk.Error.t → HTTP status + typed envelope | Implemented | 0ee897eca1 2026-06-03 | - |
-| 0106 | Cancel-safe try-with discipline (Eio.Cancel.Cancelled propagation) | Active | 0ee897eca1 2026-06-03 | - |
-| 0107 | Outbound HTTP stack consolidation — pooled keep-alive, scoped Switch, Docker ... | Active | 0ee897eca1 2026-06-03 | - |
-| 0108 | PR / Worktree Operation Safety Gates | Implemented | 0ee897eca1 2026-06-03 | - |
-| 0109 | Cdal_evidence_gate — typed verdict consultation | Active | 00a9aa0dd1 2026-06-06 | - |
-| 0110 | Tool-pair atomicity at write boundary — sunset compaction repair fabrication | Implemented | fed12810ef 2026-06-13 | - |
-| 0111 | Goal mint atomicity — auto-goal uniqueness invariant at write boundary | Implemented | e0eb8c0d8b 2026-06-03 | - |
-| 0112 | Typed JSON parse boundary — eliminate silent-drop fallback across read sites | Implemented | a7b9f1f8d0 2026-05-31 | - |
-| 0113 | KeeperReactionLiveness L1–L5 runtime — phased OCaml mirror of TLA+ design ground | Implemented | 5d40169f17 2026-05-24 | - |
-| 0114 | KSM event precondition enforcement at apply_event boundary | Implemented | 00a9aa0dd1 2026-06-06 | - |
-| 0116 | KCR fallback cap mechanism parity — explicit counter at spec ↔ visited-list a... | Implemented | 0e03bdd30b 2026-06-01 | - |
-| 0117 | KCR item-health representation parity — typed Degraded variant + spec cooldow... | Implemented | a7b9f1f8d0 2026-05-31 | - |
-| 0118 | KCT NoTerminalRuntime S1 — typed Result at select_runtime boundary + Zombie m... | Implemented | a7b9f1f8d0 2026-05-31 | - |
-| 0119 | Observer spec mapping table drift lint — guard-marker validator for OCaml↔TLA... | Implemented | 41c572a1ef 2026-06-04 | - |
-| 0120 | Cross-spec set-name divergence — 3-class classification framework (STALE / DE... | Implemented | a7b9f1f8d0 2026-05-31 | - |
-| 0121 | Config-dir resolution — single active root, no implicit fallback | Active | a7296801a7 2026-06-01 | - |
-| 0122 | Keeper disk pressure — process-local fleet failure mode beyond FD | Implemented | 7abc844904 2026-06-01 | - |
-| 0123 | Briefing last_event fabrication — option-typed write boundary | Implemented | 00a9aa0dd1 2026-06-06 | - |
-| 0124 | Keeper Admission Denial Boundary | Draft | 00a9aa0dd1 2026-06-06 | - |
+| 0001 | Det/NonDet Boundary Hardening, Emotional Recovery Loop, and Adversarial Harness | Draft | 2eed0aa224 2026-06-21 | - |
+| 0002 | Keeper 11-State Machine + Det/NonDet Boundary Formalization | reference | 2eed0aa224 2026-06-21 | - |
+| 0003 | Keeper Composite Lifecycle Observer | reference | 2eed0aa224 2026-06-21 | - |
+| 0004 | OCaml ↔ TypeScript shared contract — SSE + gRPC-web | Active | 2eed0aa224 2026-06-21 | - |
+| 0005 | Typed Capability Substrate for Local Exec Core | Draft | 2eed0aa224 2026-06-21 | - |
+| 0006 | Keeper Surface And Sandbox | Draft | 2eed0aa224 2026-06-21 | - |
+| 0008 | Keeper Credential Provider | Draft | 2eed0aa224 2026-06-21 | - |
+| 0009 | Runtime Trust Phase 2: Operator Recommendations + Opt-in Persist | Draft | 2eed0aa224 2026-06-21 | - |
+| 0010 | ocamlformat config reconciliation | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0012 | Mid-Turn Progress Probe | Draft | 2eed0aa224 2026-06-21 | - |
+| 0019 | Keeper Credential Unification | Draft | 2eed0aa224 2026-06-21 | - |
+| 0020 | Keeper heartbeat — Event Layer / Policy Layer separation | Active | 2eed0aa224 2026-06-21 | - |
+| 0022 | Runtime Attempt Liveness Contract | Draft | 2eed0aa224 2026-06-21 | - |
+| 0024 | Ollama Runtime Integration + KV Cache Optimization | Draft | 2eed0aa224 2026-06-21 | - |
+| 0025 | Tiered Small-Model Runtime (4B → 9B → 70B+) | Draft | 2eed0aa224 2026-06-21 | - |
+| 0027 | Tension Type Safety and Configurable Severity | Draft | 2eed0aa224 2026-06-21 | - |
+| 0029 | Dashboard Fiber-Batched Aggregation | Active | 2eed0aa224 2026-06-21 | - |
+| 0032 | Environment Knob Unification | Draft | 2eed0aa224 2026-06-21 | - |
+| 0034 | d — release_stale_claims agent-side sync | Draft | 2eed0aa224 2026-06-21 | - |
+| 0035 | Cognitive IDE Master Plan Integration | Draft | 2eed0aa224 2026-06-21 | - |
+| 0036 | oas Cognitive Mapping (companion to RFC-0035) | Draft | 2eed0aa224 2026-06-21 | - |
+| 0037 | Local-first Keeper Enablement: Harness/User Boundary | Draft | 2eed0aa224 2026-06-21 | - |
+| 0038 | Runtime Routing Intent Preservation | Draft | 2eed0aa224 2026-06-21 | RFC-0038-phase-2-keeper-identity-canonical.md |
+| 0041 | Runtime Routing Architecture — Group/Item Hierarchy with Health-Aware Fallback | Draft | 2eed0aa224 2026-06-21 | - |
+| 0042 | Closed sum type for keeper turn terminal code | Active | 2eed0aa224 2026-06-21 | - |
+| 0043 | Distribute legacy metrics backend metric ownership to domain modules | Active | 2eed0aa224 2026-06-21 | - |
+| 0044 | Typed persistence read-drop reason + Result-based reads | Active | 2eed0aa224 2026-06-21 | - |
+| 0045 | SDK turn boundary alignment with MASC keeper FSM | Draft | 2eed0aa224 2026-06-21 | - |
+| 0046 | Keeper Detail FSM Hub as SSOT | Active | 2eed0aa224 2026-06-21 | - |
+| 0047 | `oas_*` adapter family decomposition (consumer-only OAS boundary) | Draft | 2eed0aa224 2026-06-21 | - |
+| 0049 | Dashboard Surface Telemetry Foundation | Draft | 2eed0aa224 2026-06-21 | - |
+| 0050 | Dashboard Component Ownership Decomposition | Active | 2eed0aa224 2026-06-21 | - |
+| 0051 | run_named closure decomposition | Active | 2eed0aa224 2026-06-21 | - |
+| 0052 | Boot-time Required Invariants (typed) | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0053 | Tool Dispatch Session-Local Handles | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0054 | PPX for Typed Capability Substrate Phase 2 (codegen track) | Active | 2eed0aa224 2026-06-21 | - |
+| 0056 | Incremental Sub-Library Extraction from Flat masc Library | Active | 2eed0aa224 2026-06-21 | - |
+| 0057 | Tool Descriptor Codegen — `[@@deriving tool]` via Build-Time Generation | Draft | 2eed0aa224 2026-06-21 | - |
+| 0058 | Terminal Fallback Capability Exemption | Draft | 2eed0aa224 2026-06-21 | RFC-0058-phase-5-erase-provider-variant.md |
+| 0062 | Typed `Tool_result.t` + Typed `Sdk_*` Blocker Class (Reverse-Engineered Initi... | Draft | 2eed0aa224 2026-06-21 | - |
+| 0063 | Telemetry Feedback Loop & Cooperative Scheduling Safety | Draft | 2eed0aa224 2026-06-21 | - |
+| 0064 | Descriptor-Owned Tool Surface | Superseded | 2eed0aa224 2026-06-21 | - |
+| 0065 | Keeper Tool Selection Lifecycle - TLA+ Coverage Extension | Active | 2eed0aa224 2026-06-21 | - |
+| 0067 | Goal-Scope Observation→Claim Atomicity | Draft | 2eed0aa224 2026-06-21 | - |
+| 0068 | Typed `Keeper_turn_disposition` (operator-facing closed sum) | Draft | 2eed0aa224 2026-06-21 | - |
+| 0069 | Awareness Channel Split | Active | 2eed0aa224 2026-06-21 | - |
+| 0070 | Keeper Sandbox Runtime — Pure/Edge Separation | Active | 2eed0aa224 2026-06-21 | - |
+| 0071 | Exhaustive Match Sweep Codemod — Eliminate N-of-M `_ -> false/None` Anti-Pattern | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0072 | Type-encoded keeper sub-FSM transitions (runtime + turn_phase) | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0073 | Tool Readiness Probe — Typed Precondition + Runtime Gap Disclosure | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0074 | Sandbox Credential Auto-provision | Retired | 2eed0aa224 2026-06-21 | - |
+| 0075 | Keeper Tools Smoke — Exhaustive Dispatch Coverage Regression Gate | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0076 | Tool Readiness Notification Channel | Retired | 2eed0aa224 2026-06-21 | - |
+| 0077 | Write-side silent failure — typed propagation | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0079 | Log row typed encoder + silent-drop removal | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0080 | Tool registry SSOT — collapse multi-source membership into typed Keeper resol... | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0081 | OAS Telemetry Envelope Context & Keeper/Goal Pivot Timeline | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0082 | Keeper `last_blocker` auto-clear + runtime recovery escalation | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0083 | Dashboard system-actor convention typed unification | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0084 | Keeper→Tool Dispatch Unification + 100% Trace/Telemetry | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0086 | Keeper namespace bulk promotion to sub-library | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0087 | Tool Dispatch Path Unification + Legacy Purge | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0088 | Counter-as-Fix → Result Propagation (umbrella scoping) | Active | 2eed0aa224 2026-06-21 | - |
+| 0089 | String Classifier to Typed Variant — direct replacement, no lint | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0090 | Write-side success-model attribution — finish N-of-M migration | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0091 | Execute tool: cmd string → typed Argv schema (lexer/validator 박멸) | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0093 | Board persistence — path unification (snapshot vs append) | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0094 | Compact cooldown semantics split — typed write anchor vs check anchor | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0095 | Provider-D-compat provider streaming wire-up | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0096 | Keeper Turn Contract — multi-turn reasoning + runtime SPOF root-fix | Withdrawn | 2eed0aa224 2026-06-21 | - |
+| 0097 | Keeper sandbox container reuse (long-running sandbox per keeper) | Active | 2eed0aa224 2026-06-21 | - |
+| 0098 | Typed JSON-RPC error envelope & production-code silent-failure lint | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0099 | Session lifecycle — typed events, explicit eviction, resume backpressure | Active | 2eed0aa224 2026-06-21 | - |
+| 0100 | Streamable HTTP as default transport (MCP 2025-03-26) | Active | 2eed0aa224 2026-06-21 | - |
+| 0101 | FD accountant — generic Eio.Pool extension to cover all spawn classes | Active | 2eed0aa224 2026-06-21 | - |
+| 0102 | Pre-turn runtime availability gate — reuse, not new surface | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0103 | Log retention opt-in + JSONL volume root reduction | Draft | 2eed0aa224 2026-06-21 | - |
+| 0104 | Keeper task → default repo binding (sandbox cwd disambiguation) | Draft | 2eed0aa224 2026-06-21 | - |
+| 0105 | OpenAI-compat boundary: Agent_sdk.Error.t → HTTP status + typed envelope | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0106 | Cancel-safe try-with discipline (Eio.Cancel.Cancelled propagation) | Active | 2eed0aa224 2026-06-21 | - |
+| 0107 | Outbound HTTP stack consolidation — pooled keep-alive, scoped Switch, Docker ... | Active | 2eed0aa224 2026-06-21 | - |
+| 0108 | PR / Worktree Operation Safety Gates | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0109 | Cdal_evidence_gate — typed verdict consultation | Active | 2eed0aa224 2026-06-21 | - |
+| 0110 | Tool-pair atomicity at write boundary — sunset compaction repair fabrication | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0111 | Goal mint atomicity — auto-goal uniqueness invariant at write boundary | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0112 | Typed JSON parse boundary — eliminate silent-drop fallback across read sites | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0113 | KeeperReactionLiveness L1–L5 runtime — phased OCaml mirror of TLA+ design ground | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0114 | KSM event precondition enforcement at apply_event boundary | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0116 | KCR fallback cap mechanism parity — explicit counter at spec ↔ visited-list a... | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0117 | KCR item-health representation parity — typed Degraded variant + spec cooldow... | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0118 | KCT NoTerminalRuntime S1 — typed Result at select_runtime boundary + Zombie m... | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0119 | Observer spec mapping table drift lint — guard-marker validator for OCaml↔TLA... | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0120 | Cross-spec set-name divergence — 3-class classification framework (STALE / DE... | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0121 | Config-dir resolution — single active root, no implicit fallback | Active | 2eed0aa224 2026-06-21 | - |
+| 0122 | Keeper disk pressure — process-local fleet failure mode beyond FD | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0123 | Briefing last_event fabrication — option-typed write boundary | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0124 | Keeper Admission Denial Boundary | Draft | 2eed0aa224 2026-06-21 | - |
 | 0125 | Bounded subprocess discipline: per-call Switch scope + Fiber.first timeout race | Active | c755bb7034 2026-06-22 | - |
-| 0126 | Silent fallback discipline (typed split for option/result wildcard arms) | Implemented | 0ee897eca1 2026-06-03 | - |
-| 0127 | Runtime Fast-Fail (Provider Health Phase 3) + Fiber Termination Provenance | Active | 00a9aa0dd1 2026-06-06 | - |
-| 0129 | Runtime attempt idle-cap: kill the reserve_fraction band-aid | Implemented | a41c953ae8 2026-06-06 | - |
-| 0131 | Shell Command Gate facade — multi-caller IR-first validation | Implemented | 23dcea3303 2026-06-04 | - |
-| 0132 | Redaction SSOT — `runtime` boundary-label private type | Implemented | 3c3500661c 2026-06-05 | - |
-| 0134 | Persistence read-drop root fix (recovery story for RFC-0044) | Active | 00a9aa0dd1 2026-06-06 | - |
-| 0135 | Dashboard Keeper Operational Surface — Typed SSOT | Implemented | 41c572a1ef 2026-06-04 | - |
-| 0136 | Keeper Unified Turn — Stage Decomposition of run_keeper_cycle | Implemented | 0418bdc838 2026-06-15 | - |
-| 0137 | Host FD pressure → Keeper pause (safety-net for Docker VM FD accumulation) | Active | 00a9aa0dd1 2026-06-06 | - |
-| 0138 | Dashboard Snapshot Lock-Free Immutable Architecture | Implemented | 0ee897eca1 2026-06-03 | - |
-| 0139 | Agent Status Vocabulary SSOT | Active | b82c7c0510 2026-05-21 | - |
-| 0140 | Dashboard Wire-Format Codec Layer | Implemented | c038399d2b 2026-06-04 | - |
-| 0141 | TOML Field Resolution Typed Variant for repo_manager | Implemented | 478c943e39 2026-06-02 | - |
-| 0142 | runtime_error_classify Decomposition + Typed JSON-Extraction Variant | Active | 0ee897eca1 2026-06-03 | - |
-| 0143 | keeper_runtime_profile Typed Catalog Query Result | Active | d943a4f3b8 2026-06-05 | - |
-| 0144 | Workaround Sunset Tracking for Keeper Dedup Carryovers | Active | 00a9aa0dd1 2026-06-06 | - |
-| 0145 | Permissive-Silent-Fallback Elimination | Active | 00a9aa0dd1 2026-06-06 | - |
-| 0147 | Keeper Agent Run — Stage Decomposition of run_turn Step 8 | Draft | df55a5280a 2026-06-04 | - |
-| 0148 | Typed `tool_error` Variant for LLM-Facing Tool Failure Surface | Implemented | 799c1a7331 2026-06-05 | - |
-| 0149 | Audit-Driven Telemetry-as-Fix Sunset | Implemented | 00a9aa0dd1 2026-06-06 | - |
-| 0150 | Keeper Attention Signal — backend 단일 typed wire envelope | Implemented | c4df7c44d1 2026-06-05 | - |
-| 0151 | 4-metric monotone-decrease ratchet for code-smell metrics | Withdrawn | 9d7d80804a 2026-06-06 | - |
-| 0152 | Keeper Auto-Resume for All Pause Paths | Active | a7b9f1f8d0 2026-05-31 | - |
-| 0153 | Runtime Backpressure & Tier Admission | Implemented | 0ee897eca1 2026-06-03 | - |
-| 0154 | System_error_class typed SSOT — close substring-classifier loop across backen... | Implemented | 0ee897eca1 2026-06-03 | - |
-| 0155 | System_log_category Typed SSOT — emit-side closed sum for ops log taxonomy | Active | e75a4f38c8 2026-06-04 | - |
-| 0156 | OAS total timeout 제거 — turn timeout + stream idle 두 layer로 단순화 | Implemented | a7b9f1f8d0 2026-05-31 | - |
-| 0157 | Runtime pre-turn required-tool filter — provider capability boundary | Active | 00a9aa0dd1 2026-06-06 | - |
-| 0158 | OAS retry-admission typed error — split server timeout from didn't-try | Draft | 00a9aa0dd1 2026-06-06 | - |
-| 0159 | Reason_internal_error typed split — close string-classifier catch-all | Draft | 00a9aa0dd1 2026-06-06 | - |
-| 0160 | Shell IR 1급 승격 — single-source decision substrate across producer/classifier/... | Implemented | 23dcea3303 2026-06-04 | - |
-| 0161 | Tool Error Hint Symmetry Enforcement | Draft | da3eb7d5c3 2026-05-26 | - |
-| 0162 | JSONL Write-Path FD Pressure Root-Fix | Draft | 0ee897eca1 2026-06-03 | - |
-| 0163 | Tier-group capability profile route canonicalization — typed dedup and bypass... | Withdrawn | 00a9aa0dd1 2026-06-06 | - |
-| 0164 | Voice tool abstraction integrity — keeper voice-flag deletion + runtime bound... | Draft | d943a4f3b8 2026-06-05 | - |
-| 0167 | CLI-Tool-B omission-dedup + Llama endpoint-discovery feature-path purge | Draft | 00a9aa0dd1 2026-06-06 | - |
-| 0168 | Dashboard upstream-LLM-provider color palette purge | Draft | 685aa5fbb7 2026-06-12 | - |
-| 0169 | Dashboard common/* MCP-client attribution header purge | Draft | 0ee897eca1 2026-06-03 | - |
-| 0170 | Dashboard provider-b palette closure (RFC-0168 N-of-M follow-up) | Draft | 05c74824a2 2026-06-12 | - |
-| 0171 | Design-canvas + ui_kits mock data vendor purge | Draft | 05c74824a2 2026-06-12 | - |
-| 0172 | Big-bang vendor purge across docs, audits, RFCs, design-system, tests | Draft | 6a489efe99 2026-06-16 | - |
-| 0173 | OCaml lib/bin/test vendor purge (identifier + string literal) | Draft | 05c74824a2 2026-06-12 | - |
-| 0174 | Dashboard substring classifier to typed — TypeScript | Draft | e7924e8cdf 2026-05-24 | - |
-| 0175 | Godfile decomposition Wave D — keeper core 5-file split | Draft | a7b9f1f8d0 2026-05-31 | - |
-| 0176 | OAS vendor-purge migration — consume agent_sdk 0.198.0 | Implemented | 0ee897eca1 2026-06-03 | - |
-| 0177 | Phonebook internal vendor-coupled enum purge | Draft | 05c74824a2 2026-06-12 | - |
-| 0178 | Types Sub-library Extraction with `_intf.ml` mli-only Surface (typed-SSOT) | Draft | 0ee897eca1 2026-06-03 | - |
-| 0179 | ToolDescriptor Ecosystem Coverage Extension to Workspace Tools | Draft | d45f4b8b02 2026-06-03 | - |
-| 0180 | 24h Runtime ERROR 7-Pattern Sweep Roadmap | Draft | 0ee897eca1 2026-06-03 | - |
-| 0181 | Capability/intent-based runtime SSOT | Draft | 0ee897eca1 2026-06-03 | - |
-| 0182 | masc_* Workspace Tool Descriptor Projection + Tool_spec SSOT Consolidation | Draft | d0441d6e4d 2026-06-09 | - |
-| 0184 | Runtime phonebook typed roundtrip for protocol/flavor/provider identifiers | Draft (Deferred) | 05c74824a2 2026-06-12 | - |
-| 0189 | Typed Tool_result.result variant — eliminating boolean blindness in tool disp... | Draft | 799c1a7331 2026-06-05 | - |
-| 0190 | Descriptor as Visibility/Metadata SSOT — Surface Projection from descriptor.p... | Draft | e6b16cb275 2026-06-05 | - |
-| 0191 | Descriptor as Policy SSOT — Consolidate keeper_tool_policy axes onto descript... | Draft | 799c1a7331 2026-06-05 | - |
-| 0192 | Runtime Deadline Propagation — Cumulative budget invariant for runtime tier-wait | Draft | 0e03bdd30b 2026-06-01 | - |
-| 0194 | Tool Surface Semantic SSOT — Guiding Principles | Draft | 965a627b25 2026-06-05 | - |
-| 0197 | Runtime Attempt Watchdog — Per-Candidate Wrap + Shared Deadline | Draft | b86ce216d5 2026-06-12 | - |
-| 0198 | Execute Typed Redirection (Shell IR Syntax Leakage Closure) | Draft | 16c76fc31e 2026-06-06 | - |
-| 0199 | Evidence-Driven Auto-Approval for Deterministic Verification Tasks | Draft | 23dcea3303 2026-06-04 | - |
-| 0200 | Time constants 를 leaf library 로 분리 | Draft | 0ee897eca1 2026-06-03 | - |
-| 0201 | Activity Events Wait-Free Snapshot | Draft | a7296801a7 2026-06-01 | - |
-| 0203 | In-process Discord connector | Implemented (Phase 3 cutover landed 2026-05-29) | a7296801a7 2026-06-01 | - |
-| 0204 | Dashboard Read Serving Isolation from Fleet Compute | Draft | a7296801a7 2026-06-01 | - |
-| 0205 | Keeper Module Consolidation — Eliminate Facade Anti-Pattern | Draft | 4f4794bee2 2026-06-06 | - |
-| 0206 | Runtime 개념 — runtime→Runtime 재탄생 | Draft | 025cf22621 2026-06-18 | - |
-| 0207 | Per-keeper LLM runtime routing | Draft | 70ac2a7930 2026-06-03 | - |
-| 0208 | Typed Domain Classification — String Convention → Variant | Draft | 0ee897eca1 2026-06-03 | - |
-| 0210 | Keeper Playground Repo Currency (fetch + fast-forward, work-preserving) | Draft | 679471d525 2026-06-04 | - |
-| 0211 | Persona ⊥ {model, runtime}, opaque runtime id, runtime.toml keeper-assignment... | Draft | bf66513f1b 2026-06-02 | - |
-| 0212 | Separate keeper-exposure policy from the Tool-dispatch routing tag (module_ta... | Draft | 00a9aa0dd1 2026-06-06 | - |
-| 0213 | Keeper sandbox/playground isolation model (fix sandbox_repo_not_ready + macOS... | Draft | 679471d525 2026-06-04 | - |
-| 0214 | OTel GenAI Semantic Convention Migration | Draft | b8c26aa41a 2026-06-06 | - |
-| 0215 | Keeper sub-library extraction campaign — sequence and per-PR gates | Draft | 00a9aa0dd1 2026-06-06 | - |
-| 0216 | Per-Keeper Decline Memory (orphan-task churn root fix) | Draft | e968cc3b92 2026-06-05 | - |
-| 0217 | Telemetry Backend Otel 단일화 (Retired Backend Purge) | Draft | d498dd810a 2026-06-06 | - |
-| 0218 | Keeper tool-surface coherence + web-tooling roadmap — phases and per-phase gates | Draft | ec5d329844 2026-06-06 | - |
-| 0219 | Remove Sandbox Repo Patrol Gates | Draft | 7e800d1231 2026-06-06 | - |
-| 0220 | Decouple keeper liveness from verification state + guaranteed satisfier for e... | Draft | 72b84639dd 2026-06-09 | - |
-| 0221 | Atomic verification submission — task_status as the sole outcome authority | Implemented (steps 1-3 merged #20613/#20617; steps 4-5 measured then dropped, §3.3/§3.4) | 310e140640 2026-06-09 | - |
-| 0222 | Typed acceptance criterion + harness-driven completion for checkable tasks | Draft | 5965dc8dae 2026-06-09 | - |
-| 0223 | Typed connector surfaces: presence in world prompt, pull-based lane context, ... | Draft | c8eb1078d2 2026-06-10 | - |
-| 0224 | Structured completion report for free-text contract items | Draft | c8eb1078d2 2026-06-10 | - |
-| 0225 | Per-keeper turn single-flight admission | Draft | 534e9549ed 2026-06-10 | - |
-| 0226 | Ambient lane recording: record-vs-trigger decouple for connector surfaces | Draft | 759814d603 2026-06-11 | - |
-| 0227 | Keeper benchmark canary: wire verify -> gated promote -> rollback for per-kee... | Draft | d6f3fd2e6f 2026-06-11 | - |
-| 0228 | Paged lane pull + fact-retention harness: digest without a summarizer | Draft | 18706b0500 2026-06-11 | - |
-| 0229 | Keeper person notes: deliberate per-speaker memory beyond the log window | Draft | 18706b0500 2026-06-11 | - |
-| 0230 | Keeper mention/scope reactivity: cursor-free salience to complement pull-base... | Draft | c8790d6aaf 2026-06-11 | - |
-| 0232 | Typed lane event model: parse at the write boundary, never re-derive by strin... | Draft | f8ee031835 2026-06-12 | - |
+| 0126 | Silent fallback discipline (typed split for option/result wildcard arms) | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0127 | Runtime Fast-Fail (Provider Health Phase 3) + Fiber Termination Provenance | Active | 2eed0aa224 2026-06-21 | - |
+| 0129 | Runtime attempt idle-cap: kill the reserve_fraction band-aid | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0131 | Shell Command Gate facade — multi-caller IR-first validation | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0132 | Redaction SSOT — `runtime` boundary-label private type | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0134 | Persistence read-drop root fix (recovery story for RFC-0044) | Active | 2eed0aa224 2026-06-21 | - |
+| 0135 | Dashboard Keeper Operational Surface — Typed SSOT | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0136 | Keeper Unified Turn — Stage Decomposition of run_keeper_cycle | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0137 | Host FD pressure → Keeper pause (safety-net for Docker VM FD accumulation) | Active | 2eed0aa224 2026-06-21 | - |
+| 0138 | Dashboard Snapshot Lock-Free Immutable Architecture | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0139 | Agent Status Vocabulary SSOT | Active | 2eed0aa224 2026-06-21 | - |
+| 0140 | Dashboard Wire-Format Codec Layer | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0141 | TOML Field Resolution Typed Variant for repo_manager | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0142 | runtime_error_classify Decomposition + Typed JSON-Extraction Variant | Active | 2eed0aa224 2026-06-21 | - |
+| 0143 | keeper_runtime_profile Typed Catalog Query Result | Active | 2eed0aa224 2026-06-21 | - |
+| 0144 | Workaround Sunset Tracking for Keeper Dedup Carryovers | Active | 2eed0aa224 2026-06-21 | - |
+| 0145 | Permissive-Silent-Fallback Elimination | Active | 2eed0aa224 2026-06-21 | - |
+| 0147 | Keeper Agent Run — Stage Decomposition of run_turn Step 8 | Draft | 2eed0aa224 2026-06-21 | - |
+| 0148 | Typed `tool_error` Variant for LLM-Facing Tool Failure Surface | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0149 | Audit-Driven Telemetry-as-Fix Sunset | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0150 | Keeper Attention Signal — backend 단일 typed wire envelope | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0151 | 4-metric monotone-decrease ratchet for code-smell metrics | Withdrawn | 2eed0aa224 2026-06-21 | - |
+| 0152 | Keeper Auto-Resume for All Pause Paths | Active | 2eed0aa224 2026-06-21 | - |
+| 0153 | Runtime Backpressure & Tier Admission | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0154 | System_error_class typed SSOT — close substring-classifier loop across backen... | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0155 | System_log_category Typed SSOT — emit-side closed sum for ops log taxonomy | Active | 2eed0aa224 2026-06-21 | - |
+| 0156 | OAS total timeout 제거 — turn timeout + stream idle 두 layer로 단순화 | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0157 | Runtime pre-turn required-tool filter — provider capability boundary | Active | 2eed0aa224 2026-06-21 | - |
+| 0158 | OAS retry-admission typed error — split server timeout from didn't-try | Draft | 2eed0aa224 2026-06-21 | - |
+| 0159 | Reason_internal_error typed split — close string-classifier catch-all | Draft | 2eed0aa224 2026-06-21 | - |
+| 0160 | Shell IR 1급 승격 — single-source decision substrate across producer/classifier/... | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0161 | Tool Error Hint Symmetry Enforcement | Draft | 2eed0aa224 2026-06-21 | - |
+| 0162 | JSONL Write-Path FD Pressure Root-Fix | Draft | 2eed0aa224 2026-06-21 | - |
+| 0163 | Tier-group capability profile route canonicalization — typed dedup and bypass... | Withdrawn | 2eed0aa224 2026-06-21 | - |
+| 0164 | Voice tool abstraction integrity — keeper voice-flag deletion + runtime bound... | Draft | 2eed0aa224 2026-06-21 | - |
+| 0167 | CLI-Tool-B omission-dedup + Llama endpoint-discovery feature-path purge | Draft | 2eed0aa224 2026-06-21 | - |
+| 0168 | Dashboard upstream-LLM-provider color palette purge | Draft | 2eed0aa224 2026-06-21 | - |
+| 0169 | Dashboard common/* MCP-client attribution header purge | Draft | 2eed0aa224 2026-06-21 | - |
+| 0170 | Dashboard provider-b palette closure (RFC-0168 N-of-M follow-up) | Draft | 2eed0aa224 2026-06-21 | - |
+| 0171 | Design-canvas + ui_kits mock data vendor purge | Draft | 2eed0aa224 2026-06-21 | - |
+| 0172 | Big-bang vendor purge across docs, audits, RFCs, design-system, tests | Draft | 2eed0aa224 2026-06-21 | - |
+| 0173 | OCaml lib/bin/test vendor purge (identifier + string literal) | Draft | 2eed0aa224 2026-06-21 | - |
+| 0174 | Dashboard substring classifier to typed — TypeScript | Draft | 2eed0aa224 2026-06-21 | - |
+| 0175 | Godfile decomposition Wave D — keeper core 5-file split | Draft | 2eed0aa224 2026-06-21 | - |
+| 0176 | OAS vendor-purge migration — consume agent_sdk 0.198.0 | Implemented | 2eed0aa224 2026-06-21 | - |
+| 0177 | Phonebook internal vendor-coupled enum purge | Draft | 2eed0aa224 2026-06-21 | - |
+| 0178 | Types Sub-library Extraction with `_intf.ml` mli-only Surface (typed-SSOT) | Draft | 2eed0aa224 2026-06-21 | - |
+| 0179 | ToolDescriptor Ecosystem Coverage Extension to Workspace Tools | Draft | 2eed0aa224 2026-06-21 | - |
+| 0180 | 24h Runtime ERROR 7-Pattern Sweep Roadmap | Draft | 2eed0aa224 2026-06-21 | - |
+| 0181 | Capability/intent-based runtime SSOT | Draft | 2eed0aa224 2026-06-21 | - |
+| 0182 | masc_* Workspace Tool Descriptor Projection + Tool_spec SSOT Consolidation | Draft | 2eed0aa224 2026-06-21 | - |
+| 0184 | Runtime phonebook typed roundtrip for protocol/flavor/provider identifiers | Draft (Deferred) | 2eed0aa224 2026-06-21 | - |
+| 0189 | Typed Tool_result.result variant — eliminating boolean blindness in tool disp... | Draft | 2eed0aa224 2026-06-21 | - |
+| 0190 | Descriptor as Visibility/Metadata SSOT — Surface Projection from descriptor.p... | Draft | 2eed0aa224 2026-06-21 | - |
+| 0191 | Descriptor as Policy SSOT — Consolidate keeper_tool_policy axes onto descript... | Draft | 2eed0aa224 2026-06-21 | - |
+| 0192 | Runtime Deadline Propagation — Cumulative budget invariant for runtime tier-wait | Draft | 2eed0aa224 2026-06-21 | - |
+| 0194 | Tool Surface Semantic SSOT — Guiding Principles | Draft | 2eed0aa224 2026-06-21 | - |
+| 0197 | Runtime Attempt Watchdog — Per-Candidate Wrap + Shared Deadline | Draft | 2eed0aa224 2026-06-21 | - |
+| 0198 | Execute Typed Redirection (Shell IR Syntax Leakage Closure) | Draft | 2eed0aa224 2026-06-21 | - |
+| 0199 | Evidence-Driven Auto-Approval for Deterministic Verification Tasks | Draft | 2eed0aa224 2026-06-21 | - |
+| 0200 | Time constants 를 leaf library 로 분리 | Draft | 2eed0aa224 2026-06-21 | - |
+| 0201 | Activity Events Wait-Free Snapshot | Draft | 2eed0aa224 2026-06-21 | - |
+| 0203 | In-process Discord connector | Implemented (Phase 3 cutover landed 2026-05-29) | 78f1c2fcf4 2026-06-23 | - |
+| 0204 | Dashboard Read Serving Isolation from Fleet Compute | Draft | 281482c80a 2026-06-24 | - |
+| 0205 | Keeper Module Consolidation — Eliminate Facade Anti-Pattern | Draft | 2eed0aa224 2026-06-21 | - |
+| 0206 | Runtime 개념 — runtime→Runtime 재탄생 | Draft | 2eed0aa224 2026-06-21 | - |
+| 0207 | Per-keeper LLM runtime routing | Draft | 2eed0aa224 2026-06-21 | - |
+| 0208 | Typed Domain Classification — String Convention → Variant | Draft | 2eed0aa224 2026-06-21 | - |
+| 0210 | Keeper Playground Repo Currency (fetch + fast-forward, work-preserving) | Draft | 2eed0aa224 2026-06-21 | - |
+| 0211 | Persona ⊥ {model, runtime}, opaque runtime id, runtime.toml keeper-assignment... | Draft | 2eed0aa224 2026-06-21 | - |
+| 0212 | Separate keeper-exposure policy from the Tool-dispatch routing tag (module_ta... | Draft | 2eed0aa224 2026-06-21 | - |
+| 0213 | Keeper sandbox/playground isolation model (fix sandbox_repo_not_ready + macOS... | Draft | 2eed0aa224 2026-06-21 | - |
+| 0214 | OTel GenAI Semantic Convention Migration | Draft | 2eed0aa224 2026-06-21 | - |
+| 0215 | Keeper sub-library extraction campaign — sequence and per-PR gates | Draft | 2eed0aa224 2026-06-21 | - |
+| 0216 | Per-Keeper Decline Memory (orphan-task churn root fix) | Draft | f765863658 2026-06-23 | - |
+| 0217 | Telemetry Backend Otel 단일화 (Retired Backend Purge) | Draft | 2eed0aa224 2026-06-21 | - |
+| 0218 | Keeper tool-surface coherence + web-tooling roadmap — phases and per-phase gates | Draft | 2eed0aa224 2026-06-21 | - |
+| 0219 | Remove Sandbox Repo Patrol Gates | Draft | 2eed0aa224 2026-06-21 | - |
+| 0220 | Decouple keeper liveness from verification state + guaranteed satisfier for e... | Draft | 2eed0aa224 2026-06-21 | - |
+| 0221 | Atomic verification submission — task_status as the sole outcome authority | Implemented (steps 1-3 merged #20613/#20617; steps 4-5 measured then dropped, §3.3/§3.4) | 2eed0aa224 2026-06-21 | - |
+| 0222 | Typed acceptance criterion + harness-driven completion for checkable tasks | Draft | 2eed0aa224 2026-06-21 | - |
+| 0223 | Typed connector surfaces: presence in world prompt, pull-based lane context, ... | Draft | 2eed0aa224 2026-06-21 | - |
+| 0224 | Structured completion report for free-text contract items | Draft | 2eed0aa224 2026-06-21 | - |
+| 0225 | Per-keeper turn single-flight admission | Draft | 2eed0aa224 2026-06-21 | - |
+| 0226 | Ambient lane recording: record-vs-trigger decouple for connector surfaces | Draft | 2eed0aa224 2026-06-21 | - |
+| 0227 | Keeper benchmark canary: wire verify -> gated promote -> rollback for per-kee... | Draft | 2eed0aa224 2026-06-21 | - |
+| 0228 | Paged lane pull + fact-retention harness: digest without a summarizer | Draft | 2eed0aa224 2026-06-21 | - |
+| 0229 | Keeper person notes: deliberate per-speaker memory beyond the log window | Draft | 2eed0aa224 2026-06-21 | - |
+| 0230 | Keeper mention/scope reactivity: cursor-free salience to complement pull-base... | Draft | 2eed0aa224 2026-06-21 | - |
+| 0232 | Typed lane event model: parse at the write boundary, never re-derive by strin... | Draft | 2eed0aa224 2026-06-21 | - |
 | 0233 | Typed turn observability: TurnRecord prompt-block provenance + canonical tool... | Draft | addd7b3668 2026-06-22 | - |
 | 0234 | Scheduled internal automation with separate execution approval | Draft | 4e52542f29 2026-06-21 | - |
-| 0235 | Voice output transport: browser-addressed audio delivery with device-routed p... | Draft | 29e585aec9 2026-06-14 | - |
-| 0236 | Voice input transport: browser-captured speech-to-text for the dashboard comp... | Draft | 12435886d0 2026-06-14 | - |
-| 0237 | Eliminate the write_meta ~force escape hatch (route snapshot writes through C... | Draft | 371e7e5a47 2026-06-14 | - |
-| 0239 | Semantic-identity guards for keeper memory and anti-thrash | Draft | 0418bdc838 2026-06-15 | - |
-| 0240 | Tool-pair invariant enforced at write-time (eliminate repair-on-read) | Draft | dee099a0dd 2026-06-15 | - |
-| 0241 | external-attention store lifecycle: read-side bound, retention, and typed tai... | Draft | db70697a12 2026-06-15 | - |
-| 0242 | Continuity state as system-of-record (retire the prose summary filter) | Draft | 0418bdc838 2026-06-15 | - |
-| 0243 | Memory OS confidence mutability via write-side fact upsert | Draft | 22bdf658c7 2026-06-15 | - |
-| 0244 | Memory OS recall: turn-seeded deterministic lexical retrieval, with provenanc... | Draft | 0cbd738d42 2026-06-15 | - |
-| 0245 | Exempt goalless tasks from the per-goal WIP claim cap | Draft | a844b8b052 2026-06-15 | - |
-| 0246 | Wake-cascade Recovery Tombstone | Draft | 5791e72465 2026-06-16 | - |
-| 0247 | Memory OS purge + LLM-judgment rebuild — implementation plan (phase of RFC-0247) | Draft | 6cd5b7600d 2026-06-18 | - |
-| 0248 | Announce-as-data — typed observation provenance for board activity | Draft | e0e35cab4b 2026-06-16 | - |
-| 0249 | Remove the dead `stale_factor` field (execute RFC-0239/0243/0244/0247) | Draft | 6ac33d752e 2026-06-16 | - |
-| 0250 | Stale-run window — give the closed `Idle_turn` variant its first producer | Draft | b7d19cd482 2026-06-16 | - |
-| 0251 | Memory OS: record well, do not value — remove the scoring layer | Draft | 36bebccdfe 2026-06-17 | - |
-| 0252 | Fusion: 패널+심판(panel+judge) 심의 루프 (MASC 내장) | Draft | a008c46c49 2026-06-17 | - |
-| 0253 | Dashboard keeper-v2 surfaces: canonical spacing/radius token scale + off-scal... | Draft | ae523ba6d1 2026-06-17 | - |
-| 0254 | Shell IR Approval Gate — Autonomous Production Policy | Draft | 6a05c3c34e 2026-06-18 | - |
-| 0255 | Shell-IR Path Policy — Typed Path-Scope, Read/Write Asymmetry, and Catastroph... | Draft | d2cfa01646 2026-06-18 | - |
-| 0256 | Migrate hand-rolled Mutex lock/protect/unlock to Mutex.protect | Draft | cdd26febd2 2026-06-19 | - |
-| 0257 | Per-keeper memory execution lane | Draft | f9635d5b87 2026-06-18 | - |
-| 0258 | Adversarial Review — Grounded Verdict & Unified Verdict→Action Routing | Draft | adbf1bedea 2026-06-18 | - |
+| 0235 | Voice output transport: browser-addressed audio delivery with device-routed p... | Draft | 2eed0aa224 2026-06-21 | - |
+| 0236 | Voice input transport: browser-captured speech-to-text for the dashboard comp... | Draft | 2eed0aa224 2026-06-21 | - |
+| 0237 | Eliminate the write_meta ~force escape hatch (route snapshot writes through C... | Draft | 2eed0aa224 2026-06-21 | - |
+| 0239 | Semantic-identity guards for keeper memory and anti-thrash | Draft | 2eed0aa224 2026-06-21 | - |
+| 0240 | Tool-pair invariant enforced at write-time (eliminate repair-on-read) | Draft | 2eed0aa224 2026-06-21 | - |
+| 0241 | external-attention store lifecycle: read-side bound, retention, and typed tai... | Draft | 2eed0aa224 2026-06-21 | - |
+| 0242 | Continuity state as system-of-record (retire the prose summary filter) | Draft | 2eed0aa224 2026-06-21 | - |
+| 0243 | Memory OS confidence mutability via write-side fact upsert | Draft | 2eed0aa224 2026-06-21 | - |
+| 0244 | Memory OS recall: turn-seeded deterministic lexical retrieval, with provenanc... | Draft | 2eed0aa224 2026-06-21 | - |
+| 0245 | Exempt goalless tasks from the per-goal WIP claim cap | Draft | 2eed0aa224 2026-06-21 | - |
+| 0246 | Wake-cascade Recovery Tombstone | Draft | 2eed0aa224 2026-06-21 | - |
+| 0247 | Memory OS purge + LLM-judgment rebuild — implementation plan (phase of RFC-0247) | Draft | 2eed0aa224 2026-06-21 | - |
+| 0248 | Announce-as-data — typed observation provenance for board activity | Draft | 2eed0aa224 2026-06-21 | - |
+| 0249 | Remove the dead `stale_factor` field (execute RFC-0239/0243/0244/0247) | Draft | 2eed0aa224 2026-06-21 | - |
+| 0250 | Stale-run window — give the closed `Idle_turn` variant its first producer | Draft | 2eed0aa224 2026-06-21 | - |
+| 0251 | Memory OS: record well, do not value — remove the scoring layer | Draft | 2eed0aa224 2026-06-21 | - |
+| 0252 | Fusion: 패널+심판(panel+judge) 심의 루프 (MASC 내장) | Draft | 2eed0aa224 2026-06-21 | - |
+| 0253 | Dashboard keeper-v2 surfaces: canonical spacing/radius token scale + off-scal... | Draft | 2eed0aa224 2026-06-21 | - |
+| 0254 | Shell IR Approval Gate — Autonomous Production Policy | Draft | 2eed0aa224 2026-06-21 | - |
+| 0255 | Shell-IR Path Policy — Typed Path-Scope, Read/Write Asymmetry, and Catastroph... | Draft | 2eed0aa224 2026-06-21 | - |
+| 0256 | Migrate hand-rolled Mutex lock/protect/unlock to Mutex.protect | Draft | 2eed0aa224 2026-06-21 | - |
+| 0257 | Per-keeper memory execution lane | Draft | 2eed0aa224 2026-06-21 | - |
+| 0258 | Adversarial Review — Grounded Verdict & Unified Verdict→Action Routing | Draft | 2eed0aa224 2026-06-21 | - |
 | 0259 | Memory OS — Volatile Claim Grounding, Retraction & Decay | Draft | 5d8c789573 2026-06-21 | - |
-| 0260 | Provider health gate and audited failover | Draft | f15d59b72e 2026-06-19 | - |
-| 0261 | gRPC LSP failed-initialize FD/process teardown | Draft | f126d7751e 2026-06-19 | - |
-| 0262 | Completion authority typing — closing the force-bypass and framing completion... | Draft | 536eb50dfd 2026-06-19 | - |
-| 0263 | Owner-priority cooperative preemption of in-flight autonomous turns | Draft | 420e489235 2026-06-19 | - |
-| 0264 | Memory OS recall outcome-anchored eval harness | Draft | a616cd9947 2026-06-19 | - |
-| 0265 | Capability-driven proactive runtime reroute (modality-gated) | Draft | b1eef4b541 2026-06-20 | - |
-| 0266 | Fusion async-completion wake + in-progress 가시성 | Draft | 217be11d24 2026-06-20 | - |
-| 0267 | Make task↔goal links visible and explicitly assignable | Draft | 3877ed7947 2026-06-20 | - |
-| 0268 | Prompt ↔ Closed-sum Variant Sync Gate | Draft | c2f5f0f3b5 2026-06-20 | - |
-| 0269 | Process Critic Loop for Keeper Work Traces | Draft | fae5c47f35 2026-06-20 | - |
-| 0270 | CI Gate merge guard: block merges on a non-success CI Gate and trip on red main | Draft | 61cb9cfe8f 2026-06-20 | - |
+| 0260 | Provider health gate and audited failover | Draft | 2eed0aa224 2026-06-21 | - |
+| 0261 | gRPC LSP failed-initialize FD/process teardown | Draft | 2eed0aa224 2026-06-21 | - |
+| 0262 | Completion authority typing — closing the force-bypass and framing completion... | Draft | 2eed0aa224 2026-06-21 | - |
+| 0263 | Owner-priority cooperative preemption of in-flight autonomous turns | Draft | 2eed0aa224 2026-06-21 | - |
+| 0264 | Memory OS recall outcome-anchored eval harness | Draft | 2eed0aa224 2026-06-21 | - |
+| 0265 | Capability-driven proactive runtime reroute (modality-gated) | Draft | 2eed0aa224 2026-06-21 | - |
+| 0266 | Fusion async-completion wake + in-progress 가시성 | Draft | 2eed0aa224 2026-06-21 | - |
+| 0267 | Make task↔goal links visible and explicitly assignable | Draft | 2eed0aa224 2026-06-21 | - |
+| 0268 | Prompt ↔ Closed-sum Variant Sync Gate | Draft | 2eed0aa224 2026-06-21 | - |
+| 0269 | Process Critic Loop for Keeper Work Traces | Draft | 2eed0aa224 2026-06-21 | - |
+| 0270 | CI Gate merge guard: block merges on a non-success CI Gate and trip on red main | Draft | 2eed0aa224 2026-06-21 | - |
 | 0271 | accept-rejected (No_usable_progress) 키퍼 턴의 in-turn recovery arm + thinking-bu... | Draft | 2ece5a2b66 2026-06-21 | - |
 | 0272 | Memory OS — Episode Log Retention (bounded append for events.jsonl / episodes) | Draft | f09d3015ed 2026-06-21 | - |
 | 0273 | Dashboard-driven keeper config & runtime persistence | Draft | 6a5e1ab7ff 2026-06-21 | - |
@@ -285,9 +284,18 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0281 | WebSocket transport SSOT — separate upgrade-attachment from session-protocol,... | Draft | 7eaba002d2 2026-06-22 | - |
 | 0282 | De-structure keeper self_model (will/needs/desires) into general persona desc... | Draft | 0c540dd87d 2026-06-23 | - |
 | 0283 | Fusion: judge-of-judges 위상 (N개 1차 심판 + meta 심판) | Draft | 2579358d90 2026-06-23 | - |
-| 0284 | Goal-loop status SSE liveness — server-side change detection extends the goal... | Draft | e1e9975065 2026-06-23 | - |
+| 0284 | Keeper Guidance Visibility-Leg Drift Guard | Draft | fcf92d3386 2026-06-23 | - |
 | 0285 | Memory OS — Self-Observation Claim Volatility (closing RFC-0259's internal-st... | Draft | d643c403bb 2026-06-23 | - |
-| 0286 | ws-direct — a single masc-owned WebSocket stack for server and client | Draft | c28ea75e0e 2026-06-23 | - |
+| 0286 | exec/keeper 스택: redirect & turn-termination 경계 소유권 | Draft | f765863658 2026-06-23 | - |
+| 0287 | ws-direct — a single masc-owned WebSocket stack for server and client | Draft | 78f1c2fcf4 2026-06-23 | - |
+| 0288 | Purge keeper goal-horizon fields (short_goal / mid_goal / long_goal) | Draft | ed085ab5c2 2026-06-24 | - |
+| 0289 | Extract progress-classification into its own library for a single substantive... | Draft | 88996d4d8b 2026-06-24 | - |
+| 0290 | Generic keeper background-work tool (spawn → wake-on-completion) | Draft | a9dc2a8293 2026-06-24 | - |
+| 0291 | Closed SSE event-type sum + typed broadcast — RFC-0004 Phase A0 Wave 2 increment | Draft | db3cea7b4d 2026-06-24 | - |
+| 0292 | Complete lib/auth de-duplication — remove drifted Masc.Auth* test copies | Draft | 92f93e11de 2026-06-24 | - |
+| 0293 | Keeper execution-endpoint backend (host / ephemeral-docker / persistent-docke... | Draft | 0ba556bf42 2026-06-24 | - |
+| 0294 | Purge the workspace-goal horizon (short/mid/long) — dead cadence cohort + a s... | Draft | 75ac8623e6 2026-06-24 | - |
+| elim | Eliminate Substring Destructive Classifier in Favor of Typed Shell IR | Draft | (untracked) | - |
 
 
 
@@ -323,9 +331,11 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 
 
 
-### 다음 번호
 
-진실의 출처는 `docs/rfc/.next-number` 파일. 작성자는 `bash scripts/rfc-allocate-next.sh` 로 할당받고 같은 commit 에 ledger 갱신을 묶는다. 본 표는 사람이 직접 갱신하므로 ledger 와 일시 불일치 가능 — 충돌 검사는 CI 가 한다.
+
+### 신규 RFC
+
+신규 RFC 는 번호를 발급받지 않는다 (번호 allocator 제거됨 — 전역 카운터 TOCTOU 회피). 의미 있는 slug 파일명 `RFC-<slug>.md` 로 작성한다. 본 표의 번호 인덱스는 기존 번호 RFC 만 추적한다.
 
 ## 검색 / 발견
 
@@ -390,7 +400,6 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 - [RFC-0072 — Type-encoded keeper sub-FSM transitions (runtime + turn_phase)](RFC-0072-keeper-sub-fsm-transitions-typed.md)
 - [RFC-0073 — Tool Readiness Probe — Typed Precondition + Runtime Gap Disclosure](RFC-0073-tool-readiness-probe.md)
 - [RFC-0077 — Write-side silent failure — typed propagation](RFC-0077-write-side-silent-failure-typed.md)
-- [RFC-0078 — RFC Number Reservation Ledger + CI Collision Guard](RFC-0078-rfc-number-reservation-ledger.md)
 - [RFC-0079 — Log row typed encoder + silent-drop removal](RFC-0079-log-row-typed-encoder.md)
 - [RFC-0080 — Tool registry SSOT — collapse 15-fold OR membership into typed Tool_name boundary](RFC-0080-tool-registry-ssot.md)
 - [RFC-0081 — OAS Telemetry Envelope Context & Keeper/Goal Pivot Timeline](RFC-0081-telemetry-envelope-and-pivot-timeline.md)

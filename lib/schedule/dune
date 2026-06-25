@@ -8,5 +8,10 @@
  (name masc_schedule)
  (public_name masc.masc_schedule)
  (wrapped false)
- (modules schedule_domain schedule_store schedule_service schedule_runner)
+ (modules
+  schedule_domain
+  schedule_supported_kinds
+  schedule_store
+  schedule_service
+  schedule_runner)
  (libraries digestif masc_workspace dated_jsonl unix yojson))

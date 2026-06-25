@@ -179,7 +179,10 @@ let build_session ~sw ~env ~url =
       ~on_eof:(fun () -> Eio.Stream.add events Ev_eof)
       ()
   in
-  let wsd = Ws_direct_eio.Client.connect ~sw ~host ~resource flow builder in
+  let wsd =
+    Ws_direct_eio.Client.connect ~sw ~clock:(Eio.Stdenv.clock env) ~host
+      ~resource flow builder
+  in
   wsd, events
 ;;
 

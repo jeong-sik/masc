@@ -40,6 +40,7 @@ let classify_flags : Masc_exec.Exec_program.known -> cap_flags = function
 
   (* Write + Network + Spawn operations (highest capability required) *)
   | Sudo | Su | Chmod | Chown | Rm | Dd | Mkfs
+  | Shutdown | Reboot | Halt | Poweroff
   | Docker | Npm | Node | Npx | Yarn | Pnpm | Pip | Python | Python3
   | Pytest | Pyright | Ruff | Opam | Ocamlfind | Tsc | Cargo | Rustc
   | Go | Gofmt | Gradle | Java | Javac | Mvn | Ninja | Uv | Make | Cmake

@@ -782,7 +782,6 @@ describe('Overview StyleSeed surfaces', () => {
 function makeGoal(partial: Partial<Goal>): Goal {
   return {
     id: 'g-1',
-    horizon: 'mid',
     title: 'goal',
     priority: 5,
     status: 'active',

@@ -74,6 +74,14 @@
 
 /* keeper-v2/styles/memory.css:16-20 */
 .mem-empty { font-size: 12px; color: var(--text-dim); padding: 10px 2px; }
+/* RFC-keeper-memory-panel-real-data: honest disclosure for a section whose backend source lands in a
+   later phase — visually distinct from a plain empty state (left accent), but
+   not styled as data. */
+.mem-disclosure { border-left: 2px solid var(--border-main); padding-left: 10px; color: var(--text-dim); }
+/* read errors surfaced (no silent failure) */
+.mem-read-error { font-size: 11.5px; color: var(--status-bad); padding: 8px 10px; margin-bottom: 8px; border: 1px solid color-mix(in oklab, var(--status-bad) 35%, transparent); border-radius: var(--radius-sm); background: color-mix(in oklab, var(--status-bad) 8%, transparent); }
+/* expired-TTL annotation on a fact / episode row */
+.mem-expired { color: var(--status-warn); }
 .mem-sec-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .mem-sec-head h4 { margin: 0; }
 .mem-n { font-size: 11px; color: var(--text-dim); }

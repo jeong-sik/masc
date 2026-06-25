@@ -161,6 +161,50 @@ let audit_orphan_tasks config : (Masc_domain.task * string) list =
       | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
     ) backlog.tasks
 
+(* RFC-0294 PR-4: the single typed source of truth for "is this status
+   orphan-eligible, and under which gauge class". EXHAUSTIVE over [task_status]
+   ([@warning "-4"] absent on purpose): adding a new constructor forces a
+   classification decision here at compile time, so a future orphan-eligible
+   status can never be silently dropped from the gauge — the exact failure the
+   old [String.equal (task_status_to_string …)] round-trip allowed. The label
+   strings are the [Masc_domain.task_status_to_string] values for the active
+   statuses, kept here so the metric vocabulary has one owner. Must stay aligned
+   with the orphan-eligibility match in [audit_orphan_tasks] above (both select
+   Claimed / InProgress / AwaitingVerification); the surfacer test pins both the
+   Some-labels and the None-set so a divergence fails the test. *)
+let orphan_status_class_of_status : Masc_domain.task_status -> string option = function
+  | Masc_domain.Claimed _ -> Some "claimed"
+  | Masc_domain.InProgress _ -> Some "in_progress"
+  | Masc_domain.AwaitingVerification _ -> Some "awaiting_verification"
+  | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
+
+(* The fixed class set the gauge reports (0 when a class is empty, so a cleared
+   class resets rather than going stale). Exactly the Some-range of
+   [orphan_status_class_of_status]; the drift-guard test pins that equality. *)
+let orphan_status_classes = [ "claimed"; "in_progress"; "awaiting_verification" ]
+
+(* Pure: count orphan-audit results per status class over the fixed class set.
+   Membership is decided by the typed [orphan_status_class_of_status], not a
+   string round-trip, so the grouping shares one exhaustive classifier with the
+   gauge vocabulary. Separated from the metric I/O (the gauge emitter lives in
+   the orchestrator pulse, which owns the Otel dependency) so the grouping is
+   unit-testable without workspace or metric-store side effects. *)
+let orphan_counts_by_status_class (orphans : (Masc_domain.task * string) list)
+  : (string * int) list =
+  List.map
+    (fun status_class ->
+       let count =
+         List.length
+           (List.filter
+              (fun ((task : Masc_domain.task), _assignee) ->
+                 match orphan_status_class_of_status task.task_status with
+                 | Some c -> String.equal c status_class
+                 | None -> false)
+              orphans)
+       in
+       status_class, count)
+    orphan_status_classes
+
 let is_agent_active_at_path config path =
   match read_json_opt config path with
   | None -> false

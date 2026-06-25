@@ -18,16 +18,17 @@ import type { KeeperApprovalQueueItem } from '../../types'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../../config/constants'
 import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 import {
-  isHighOrCriticalKeeperApprovalRisk,
   keeperApprovalRiskLabel,
   keeperApprovalRiskVisualBand,
   type KeeperApprovalRiskVisualBand,
 } from '../../lib/governance-risk-level'
 import { navigate } from '../../router'
 import { AgentAvatar } from '../overview/agent-avatar'
+import { LoadingState } from '../common/feedback-state'
 import {
   governanceData,
   governanceError,
+  governanceLoading,
   governanceApprovalActing,
   refreshGovernance,
   respondToKeeperApproval,
@@ -193,7 +194,7 @@ function ApprovalCard({
                     .filter(Boolean)
                     .join(' · ')}</button>`
                 : null}
-              ${sandbox ? html`<span class="ap-req-goal mono">sandbox ${sandbox}</span>` : null}
+              ${sandbox ? html`<span class="ap-req-meta mono">sandbox ${sandbox}</span>` : null}
             </div>
             <div class="ap-req-quote">
               ${item.input_preview?.trim() ? `“${item.input_preview.trim()}”` : '입력 미리보기 없음'}
@@ -280,18 +281,27 @@ export function ApprovalsSurface() {
 
   const items = governanceData.value?.approval_queue ?? []
   const error = governanceError.value
+  // First load only: governanceResource is stale-while-revalidate, so a refetch
+  // keeps the previous data — governanceData is null ONLY before the first load
+  // resolves. Show a loading state then, instead of asserting the empty queue.
+  const firstLoad = governanceLoading.value && governanceData.value === null
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const selectedItem = items.find(item => item.id === selectedId) ?? items[0] ?? null
 
   const stats = useMemo(() => {
-    const risky = items.filter(i => isHighOrCriticalKeeperApprovalRisk(i.risk_level)).length
+    // "비가역 · 위험" counts the bad visual band only (critical), matching the red
+    // sev-bad card rail and the prototype's `sev === 'bad'` KPI. The broader
+    // high+critical predicate over-counts: a `high` item renders the warn (amber)
+    // band, so including it made the red-styled KPI claim irreversible items that
+    // no card flags red.
+    const irreversible = items.filter(i => keeperApprovalRiskVisualBand(i.risk_level) === 'bad').length
     const longest = items.reduce((max, i) => Math.max(max, i.waiting_s ?? 0), 0)
     const keepers = new Set(items.map(i => i.keeper_name)).size
-    return { risky, longest, keepers }
+    return { irreversible, longest, keepers }
   }, [items])
 
   return html`
-    <main class="ov ss-surface bg-surface-page text-text-primary" data-testid="approvals-surface">
+    <main class="ov ss-surface bg-surface-page text-text-primary" data-screen-label="승인 큐" data-testid="approvals-surface">
       <div class="ov-scroll">
         <header class="ov-head">
           <div>
@@ -307,8 +317,11 @@ export function ApprovalsSurface() {
             : null}
         </header>
 
-        ${error ? html`<div class="ap-error" data-testid="approvals-error">${error}</div>` : null}
+        ${error ? html`<div class="ap-error" role="alert" data-testid="approvals-error">${error}</div>` : null}
 
+        ${firstLoad
+          ? html`<${LoadingState}>승인 큐 불러오는 중...<//>`
+          : html`
         <section class="ov-kpis" style=${{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
           <div class="ov-kpi">
             <div class="ov-kpi-k">열린 승인</div>
@@ -316,7 +329,7 @@ export function ApprovalsSurface() {
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">비가역 · 위험</div>
-            <div class=${`ov-kpi-v ${stats.risky ? 'bad' : ''}`}>${stats.risky}</div>
+            <div class=${`ov-kpi-v ${stats.irreversible ? 'bad' : ''}`} data-testid="approvals-kpi-irreversible">${stats.irreversible}</div>
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">최장 대기</div>
@@ -328,15 +341,8 @@ export function ApprovalsSurface() {
           </div>
         </section>
 
-        ${items.length === 0
+        ${items.length > 0
           ? html`
-              <div class="ap-clear" data-testid="approvals-empty">
-                <div class="ico">${'✓'}</div>
-                <h3>열린 승인이 없습니다</h3>
-                <div class="ap-clear-sub">HITL 큐가 비어 있습니다 — keeper들이 결재 대기 없이 진행 중입니다.</div>
-              </div>
-            `
-          : html`
               <div class="ap-workspace" data-testid="approvals-workspace">
                 <div class="ap-queue" data-testid="approvals-queue">
                   ${items.map(item => html`
@@ -354,7 +360,18 @@ export function ApprovalsSurface() {
                 </div>
                 <${ApprovalDetailPanel} item=${selectedItem} variant="rail" />
               </div>
-            `}
+            `
+          : null}
+        ${items.length === 0 && !error
+          ? html`
+              <div class="ap-clear" data-testid="approvals-empty">
+                <div class="ico">${'✓'}</div>
+                <h3>열린 승인이 없습니다</h3>
+                <div class="ap-clear-sub">HITL 큐가 비어 있습니다 — keeper들이 결재 대기 없이 진행 중입니다.</div>
+              </div>
+            `
+          : null}
+      `}
       </div>
     </main>
   `

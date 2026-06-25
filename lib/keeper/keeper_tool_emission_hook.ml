@@ -73,7 +73,7 @@ let make_post_tool_use_hook (acc : accumulator) : Agent_sdk.Hooks.hook =
        match event with
        | Agent_sdk.Hooks.PostToolUse { output; _ } -> (
            match output with
-           | Ok { content } -> (
+           | Ok { content; _ } -> (
                match try_parse content with
                | Some json -> push acc json
                | None -> ())

@@ -447,9 +447,7 @@ let run_keeper_cycle
                            ; remaining_turn_budget_s
                            ; elapsed_ms
                            ; current_turn_phase_elapsed_ms
-                           ; keeper_profile
                            ; max_idle_turns
-                           ; max_turns
                            }
                          =
                          Keeper_unified_turn_retry_setup.build
@@ -486,8 +484,6 @@ let run_keeper_cycle
                            ~timeout_sec
                            ~remaining_turn_budget_s
                            ~current_turn_phase_elapsed_ms
-                           ~keeper_profile
-                           ~max_turns
                            ~max_idle_turns
                            ~user_message
                            ~registry_base_path

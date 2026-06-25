@@ -45,13 +45,12 @@ class AxisRisk:
         )
 
 
-# --- RFC number cross-open-PR collision detection ---------------------------
-# rfc_enforcer.py (--check-numbering) only compares a PR against origin/main and
-# the PR's own diff, so two *open* PRs that each add the same new RFC-NNNN both
-# pass that gate; they only conflict after one side merges (the RFC-0078 ledger
-# race). When stale-green PRs auto-merge without re-validating against the other,
-# a duplicate number can land on main. This sideways check scans concurrent open
-# PRs for the same newly-added RFC number, before either merges.
+# --- RFC number cross-open-PR collision detection (legacy numbered RFCs) -----
+# The RFC number allocator was removed (forward slug-only); new RFCs carry no
+# number and never match _RFC_CLAIM_RE, so this detector is inert for them. It
+# still guards the legacy numbered RFCs that remain on main: two open PRs that
+# each add the same RFC-NNNN file would only conflict after one side merges.
+# Slug-named RFCs share no monotonic allocation, so they cannot collide here.
 _RFC_CLAIM_RE = re.compile(r"(?:^|/)docs/rfc/RFC-(\d{4})-[A-Za-z0-9._-]+\.md$")
 
 
@@ -531,9 +530,9 @@ def main() -> int:
             for collision in collisions:
                 print(f"  - {collision.describe()}")
             print(
-                "\nTwo open PRs cannot both claim the same RFC number. One must "
-                "renumber via scripts/rfc-allocate-next.sh (rewrites the file, "
-                "title, references, and docs/rfc/.next-number). See RFC-0078."
+                "\nTwo open PRs cannot both claim the same RFC number. The number "
+                "allocator was removed; rename one RFC file to a free number, or "
+                "give new RFCs a slug-only filename so they share no number."
             )
             return 1
         print("No RFC number collisions among open PRs.")

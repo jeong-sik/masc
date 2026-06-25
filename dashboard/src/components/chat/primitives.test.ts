@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 
 import { html } from 'htm/preact'
-import { render } from 'preact'
+import { render, options } from 'preact'
 import { fireEvent } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatBlock, KeeperConversationAttachment, KeeperConversationEntry } from '../../types'
 import type { ToolCallEntry } from '../../api/dashboard'
 import { ChatComposer, ChatTranscript, type ChatComposerSendPayload } from './primitives'
+import { _resetChatStoreForTests, readKeeperDraft } from '../../keeper-chat-store'
 import { collectAttachments } from './attachments'
 import { recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
 import { fetchBoardPost } from '../../api/board'
@@ -859,6 +860,161 @@ describe('ChatComposer IME composition guard', () => {
       new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true }),
     )
     expect(sent).toBe(0)
+  })
+
+  it('keeps its own draft when uncontrolled and surfaces the typed text on send', () => {
+    // The keeper-workspace chat omits onDraftChange so a keystroke updates the
+    // composer's internal draft instead of the host panel — that is what stops
+    // the transcript from re-rendering on every character. The composer must
+    // still capture the text and carry it on the send payload (`text`).
+    const onSend = vi.fn()
+    render(
+      html`<${ChatComposer}
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        onSend=${onSend}
+      />`,
+      container,
+    )
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    expect(textarea).not.toBeNull()
+
+    fireEvent.input(textarea, { target: { value: '소주에 갑오징어' } })
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+
+    expect(onSend).toHaveBeenCalledTimes(1)
+    const sent = onSend.mock.calls[0]?.[0] as ChatComposerSendPayload | undefined
+    expect(sent?.text).toBe('소주에 갑오징어')
+  })
+})
+
+describe('ChatComposer draft persistence (uncontrolled, per-keeper)', () => {
+  let container: HTMLDivElement
+  beforeEach(() => {
+    _resetChatStoreForTests()
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    _resetChatStoreForTests()
+  })
+
+  function mountComposer(draftPersistKey: string, onSend: () => void = () => {}) {
+    render(
+      html`<${ChatComposer}
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        draftPersistKey=${draftPersistKey}
+        onSend=${onSend}
+      />`,
+      container,
+    )
+    return container.querySelector('textarea') as HTMLTextAreaElement
+  }
+
+  it('restores a keeper draft across remount and never leaks across keepers', () => {
+    // Type for keeper 'rondo', then switch away (unmount — the key=keeperName
+    // remount in the app).
+    let textarea = mountComposer('rondo')
+    fireEvent.input(textarea, { target: { value: '소주에 갑오징어' } })
+    render(null, container)
+
+    // Switch to a different keeper → fresh, empty composer (no cross-keeper leak).
+    textarea = mountComposer('qa-king')
+    expect(textarea.value).toBe('')
+
+    // Switch back to 'rondo' → the half-typed draft is restored.
+    render(null, container)
+    textarea = mountComposer('rondo')
+    expect(textarea.value).toBe('소주에 갑오징어')
+  })
+
+  it('resyncs immediately when the draft key changes without a remount', () => {
+    let textarea = mountComposer('rondo')
+    fireEvent.input(textarea, { target: { value: 'rondo draft' } })
+
+    // Defensive path for future callers: even without key=${keeperName}
+    // remounting the composer, the new keeper must not briefly inherit the old
+    // keeper's visible buffer or write subsequent input under the wrong key.
+    textarea = mountComposer('qa-king')
+    expect(textarea.value).toBe('')
+
+    fireEvent.input(textarea, { target: { value: 'qa draft' } })
+    expect(readKeeperDraft('rondo')).toBe('rondo draft')
+    expect(readKeeperDraft('qa-king')).toBe('qa draft')
+
+    textarea = mountComposer('rondo')
+    expect(textarea.value).toBe('rondo draft')
+  })
+
+  it('clears the persisted draft after a send', () => {
+    const onSend = vi.fn()
+    const textarea = mountComposer('rondo', onSend)
+    fireEvent.input(textarea, { target: { value: 'send me' } })
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+
+    expect(onSend).toHaveBeenCalledTimes(1)
+    expect(readKeeperDraft('rondo')).toBe('')
+  })
+})
+
+describe('ChatMessageBubble memoization', () => {
+  let container: HTMLDivElement
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  // Simulates a stream chunk: render a 2-message transcript, then re-render with
+  // the SAME settled entry reference but a fresh streaming entry (new array), the
+  // way a reconcile preserves settled refs. Returns how many message-bubble
+  // bodies re-ran on the second render. `action` reference stability is the
+  // variable under test (the inline `{ ...onClick }` literal in
+  // KeeperConversationPanel is hoisted to a useMemo so it stays referentially
+  // stable across stream re-renders).
+  function bubbleRerendersOnStream(actionFor: () => unknown): number {
+    type RenderHook = { __r?: (v: unknown) => void }
+    let renders = 0
+    const prev = (options as unknown as RenderHook).__r
+    ;(options as unknown as RenderHook).__r = (vnode) => {
+      const t = (vnode as { type?: { displayName?: string; name?: string } })?.type
+      const label = t?.displayName ?? t?.name ?? ''
+      // Count the inner component body, not the memo wrapper ('Memo(...)').
+      if (label.includes('ChatMessageBubble') && !label.startsWith('Memo(')) renders++
+      prev?.(vnode)
+    }
+    try {
+      const settled = entry({ id: 'a', role: 'assistant', source: 'direct_assistant', text: 'settled reply' })
+      const s1 = entry({ id: 'b', role: 'assistant', source: 'direct_assistant', text: 'partial' })
+      render(html`<${ChatTranscript} entries=${[settled, s1]} emptyText="x" action=${actionFor()} />`, container)
+      const initial = renders
+      expect(initial).toBe(2) // both bubbles paint on first render
+      const s2 = entry({ id: 'b', role: 'assistant', source: 'direct_assistant', text: 'partial reply' })
+      render(html`<${ChatTranscript} entries=${[settled, s2]} emptyText="x" action=${actionFor()} />`, container)
+      return renders - initial
+    } finally {
+      ;(options as unknown as RenderHook).__r = prev
+    }
+  }
+
+  it('skips the settled bubble on a stream update when the action prop is referentially stable', () => {
+    const stable = { label: '턴 상세', title: 't', onClick: () => {} }
+    // Only the streaming bubble re-runs; the settled one is skipped.
+    expect(bubbleRerendersOnStream(() => stable)).toBe(1)
+  })
+
+  it('re-renders the settled bubble when action is a new object each render (why the useMemo matters)', () => {
+    // A fresh action object every render — the pre-fix behaviour — defeats the
+    // shallow-equal skip, so the settled bubble re-runs on every stream chunk.
+    expect(bubbleRerendersOnStream(() => ({ label: '턴 상세', title: 't', onClick: () => {} }))).toBe(2)
   })
 })
 

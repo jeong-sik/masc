@@ -83,8 +83,6 @@ This rules out the "generation never advances → budget never resets" hypothesi
 
 #### Axis B — Turn budget reset (PARTIALLY THE CAUSE)
 
-Default budget `10` defined in `lib/keeper/keeper_runtime_resolved.ml:58-66` (`autonomous_max_turns_per_call_live`). Runtime runner enforces it per-call at `lib/runtime/runtime_runner.ml:585-595` and *resets* per-call — there is no inter-call budget state on the runner side.
-
 The display string `"[turn budget exhausted: 10/10 turns used]"` lives in `keeper_meta.last_proactive_preview`. Update is conditional in `lib/keeper/keeper_unified_metrics.ml:1316-1323` — *only when the next cycle produces new text*. If subsequent cycles fail at runtime selection (no provider dispatched, no response text), the field stays frozen on the first exhausted message — a **display latch**, not the actual block.
 
 The dashboard "예약 자율 10 OVERRIDE" button has no runtime endpoint: `rg -n "override.*budget\|set.*proactive" lib/dashboard/` → 0 hits. Operator cannot unblock via UI.
@@ -157,7 +155,7 @@ Caller obligations: `Runtime_runner.run` *must* call `clear ~reason:(Runtime_rec
 The supervisor periodically (default: 5 min, env `MASC_KEEPER_DIAGNOSTIC_PROBE_INTERVAL_SEC`) issues a *probe turn* for any keeper with a non-empty `last_blocker.klass = Runtime_exhausted`:
 
 - Probe bypasses `last_blocker` gate (single-shot, gated on `is_diagnostic_probe`).
-- Probe does *not* count against `autonomous_max_turns_per_call_*` or any visible budget — it is a separate counter `diagnostic_probe_count` with its own ceiling (default 12/hour).
+- Probe does *not* count against any visible turn budget — it is a separate counter `diagnostic_probe_count` with its own ceiling (default 12/hour).
 - Probe payload is a no-op tool call (`keeper_time_now`) — minimal latency, no side effect.
 - Outcome:
   - Success → `Keeper_blocker_lifecycle.clear ~reason:Diagnostic_probe_success`.

@@ -8,7 +8,6 @@ import {
   formatProgressPct,
   goalPhaseLabel,
   goalProgressFor,
-  horizonLabel,
   type GoalProgress,
 } from '../goals/goal-helpers'
 import {
@@ -196,7 +195,7 @@ function GoalProgressCard(
     <div class="ide-keeper-work-goal v2-ide-card" role="status" aria-label=${`Goal ${goal.id} progress ${pctLabel}`}>
       <div class="ide-keeper-work-card-top">
         <span>GOAL PROGRESS</span>
-        <span>${horizonLabel(goal.horizon)} · ${goalPhaseLabel(goal.phase)}</span>
+        <span>${goalPhaseLabel(goal.phase)}</span>
       </div>
       <strong title=${goal.title}>${goal.title}</strong>
       <div class="ide-keeper-work-goal-bar" aria-hidden="true">

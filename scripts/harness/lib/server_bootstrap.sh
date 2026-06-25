@@ -143,7 +143,11 @@ protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:9/v1"
 
 [models.smoke]
-api-name = "smoke"
+# Borrow a real repo catalog id for strict capability lookup. The transport
+# harness never reaches the provider endpoint, but Runtime.init_default_strict
+# must still see model capability metadata instead of falling back to provider
+# defaults.
+api-name = "deepseek-v4-flash"
 max-context = 32768
 tools-support = true
 streaming = true
@@ -187,6 +191,7 @@ harness_start_server() {
     export MASC_STORAGE_TYPE="filesystem"
     export MASC_AUTONOMY_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"
+    export MASC_OTEL_ENABLED="0"
     export MASC_TOOL_TIMEOUT_DEFAULT_SEC="${MASC_TOOL_TIMEOUT_DEFAULT_SEC:-90}"
     export GRAPHQL_API_KEY=""
     export GRAPHQL_URL="http://127.0.0.1:9/graphql"

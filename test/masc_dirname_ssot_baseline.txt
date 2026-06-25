@@ -1,31 +1,30 @@
-lib/auth.ml:24
-lib/board_votes.ml:26
-lib/config/playground_paths.ml:17
-lib/config_dir_resolver.ml:211
-lib/config_dir_resolver.ml:228
-lib/workspace/workspace_worktree.ml:178
-lib/discovery_cache/discovery_history.ml:17
-lib/exec_core.ml:513
-lib/gate/channel_gate_discord_names.ml:24
-lib/gate/channel_gate_discord_state.ml:37
-lib/gate/channel_gate_discord_state.ml:38
-lib/gate/channel_gate_discord_state.ml:39
-lib/gate/channel_gate_imessage_state.ml:29
-lib/gate/channel_gate_imessage_state.ml:30
-lib/gate/channel_gate_imessage_state.ml:31
-lib/handover_eio.ml:139
-lib/institution_eio.ml:629
-lib/keeper/keeper_alerting_path.ml:264
-lib/keeper/keeper_approval_queue.ml:403
-lib/keeper/keeper_tool_shared_runtime.ml:252
-lib/keeper/keeper_tool_command_runtime.ml:548
-lib/keeper/keeper_status_detail.ml:1238
-lib/mcp_server_eio_resource.ml:150
-lib/mcp_server_eio_resource.ml:163
-lib/oas_worker_runtime.ml:435
-lib/repo_synthesis_benchmark.ml:73
-lib/server/server_routes_http_routes_sidecar.ml:135
-lib/server/server_routes_http_routes_sidecar.ml:288
-lib/server/server_routes_http_routes_sidecar.ml:297
-lib/tool_blob_store/tool_blob_store.ml:21
-retired file-read tool module:279
+bin/main_eio.ml	let target_root = Filename.concat (Filename.concat base_path ".masc") "config" in
+bin/masc_completion_trust_audit.ml	| Some p when String.trim p <> "" -> Some (Filename.concat (Filename.concat p ".masc") "events")
+bin/masc_trace.ml	List.fold_left Filename.concat base_path [ ".masc"; "logs" ]
+bin/masc_trace.ml	List.fold_left Filename.concat base_path [ ".masc"; "tool_calls" ]
+bin/masc_trace.ml	[ ".masc"; "keepers"; keeper; "execution-receipts" ]
+bin/masc_trace.ml	[ ".masc"; "keepers"; keeper; "runtime-manifests" ]
+lib/config/playground_paths.ml	literal ["".masc""] lives in a single place
+lib/config/playground_paths.ml	nested ".masc/playground" directories.
+lib/config/playground_paths.ml	| ".masc" :: "playground" :: rest -> (
+lib/config/playground_paths.mli	[".masc"] lives in a single place; this module remains the SSOT
+lib/config/playground_paths.mli	literal [".masc/playground"] and the sanitization rules live in
+lib/dashboard/dashboard_http_keeper_types.ml	("durable_store", `String ".masc/keepers/:name.decisions.jsonl");
+lib/exec/command_gate/shell_command_gate.ml	(String.starts_with ~prefix:".masc/" p)
+lib/exec/command_gate/shell_command_gate.ml	|| (String.equal p ".masc")
+lib/exec_core.ml	; ".masc/state/backlog.json"
+lib/exec_core.ml	[ ".masc/backlog.json"
+lib/keeper/keeper_alerting_path.ml	(String.starts_with ~prefix:".masc/" raw)
+lib/keeper/keeper_alerting_path.ml	the literal ".masc/playground" layout here — edit [Playground_paths]
+lib/keeper/keeper_alerting_path.ml	|| (String.equal raw ".masc")
+lib/repo_manager/keeper_repo_mapping.ml	Filename.concat (Filename.concat base_path ".masc") "playground"
+lib/repo_manager/repo_store.ml	let default_local_path id = Filename.concat ".masc/repos" id
+lib/server/server_dashboard_http_runtime_info.ml	a preserved ".masc" suffix when both env vars are set.
+lib/server/server_mcp_transport_http_session.ml	Filename.concat (Filename.concat base ".masc") "mcp_transport_sessions.json"
+lib/server/server_routes_http_routes_repositories.ml	Option.value ~default:(Filename.concat ".masc/repos" id)
+lib/server/server_routes_http_routes_workspace.ml	".masc"; ".masc-ide"; ".worktrees"; ".cache"; ".tmp"; "dist"; "build" ]
+lib/tool_agent_timeline.ml	".masc/agents/*.json + .masc/tasks/*.json + \
+lib/tool_agent_timeline.ml	`String ".masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl";
+lib/tool_agent_timeline.ml	`String ".masc/agents/*.json";
+lib/tool_agent_timeline.ml	`String ".masc/messages/*.json";
+lib/tool_agent_timeline.ml	`String ".masc/tasks/*.json";

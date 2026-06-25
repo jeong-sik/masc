@@ -150,9 +150,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         per_provider_timeout_state;
         per_provider_timeout;
         always_approve = bool_ "always_approve";
-        max_turns_per_call = int_ "max_turns_per_call";
-        max_turns_per_call_scheduled_autonomous =
-          int_ "max_turns_per_call_scheduled_autonomous";
         oas_env = extract_oas_env_from_doc doc;
         unknown_toml_keys = [];
       })
@@ -183,8 +180,6 @@ let parsed_field_key_names =
   ; "telemetry_feedback_window_hours"
   ; "per_provider_timeout"
   ; "always_approve"
-  ; "max_turns_per_call"
-  ; "max_turns_per_call_scheduled_autonomous"
   ]
 
 (** Canonical TOML key names used by [detect_unknown_keeper_toml_keys].
@@ -218,8 +213,6 @@ let canonical_keeper_toml_key_names =
   ; "telemetry_feedback_window_hours"
   ; "per_provider_timeout"
   ; "always_approve"
-  ; "max_turns_per_call"
-  ; "max_turns_per_call_scheduled_autonomous"
   ]
 
 let loader_level_keeper_toml_key_names = [ "base" ]
@@ -351,10 +344,6 @@ let merge_keeper_profile_defaults
     per_provider_timeout_state;
     per_provider_timeout;
     always_approve = prefer overlay.always_approve base.always_approve;
-    max_turns_per_call = prefer overlay.max_turns_per_call base.max_turns_per_call;
-    max_turns_per_call_scheduled_autonomous =
-      prefer overlay.max_turns_per_call_scheduled_autonomous
-        base.max_turns_per_call_scheduled_autonomous;
     oas_env =
       (let overlay_keys = List.map fst overlay.oas_env in
        let surviving_base =

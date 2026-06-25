@@ -105,7 +105,7 @@ let test_to_oas_typed_small_inlined () =
   Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
   let small = "small ok" in
   match B.to_oas_typed_result (tool_ok ~tool_name:"test" small) with
-  | Ok { content } ->
+  | Ok { content; _ } ->
       Alcotest.(check string) "inlined verbatim" small content;
       Alcotest.(check bool) "no marker" false (O.is_marker content)
   | Error _ -> Alcotest.fail "expected Ok"
@@ -182,7 +182,7 @@ let test_round_trip_through_oas () =
   Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
   let payload = String.make 5000 'p' in
   match B.to_oas_typed_result (tool_ok ~tool_name:"test" payload) with
-  | Ok { content } ->
+  | Ok { content; _ } ->
       let decoded = O.decode_from_oas content in
       (match decoded with
        | O.Inline s -> Alcotest.(check string) "inline preserved" payload s

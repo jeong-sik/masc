@@ -138,6 +138,12 @@ type known =
   | Rm
   | Dd
   | Mkfs
+  (* System-power control: catastrophic-by-identity, path-independent —
+     floored beside [Mkfs] in [Approval_policy.find_catastrophic_program]. *)
+  | Shutdown
+  | Reboot
+  | Halt
+  | Poweroff
 
 (** Closed registry used for reverse lookup and golden checks. *)
 val all_known : known list

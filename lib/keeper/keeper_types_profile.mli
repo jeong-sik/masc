@@ -150,9 +150,6 @@ val keeper_toml_config_error_for_name : string -> keeper_toml_config_error optio
 val load_keeper_profile_defaults_for_base_path :
   base_path:string -> string -> keeper_profile_defaults
 val load_keeper_profile_defaults : string -> keeper_profile_defaults
-val clamp_max_turns_override : int option -> int option
-val effective_max_turns_per_call : keeper_profile_defaults -> int
-val effective_max_turns_per_call_scheduled_autonomous : keeper_profile_defaults -> int
 
 type keeper_default_source_snapshot =
   { source_kind : string option

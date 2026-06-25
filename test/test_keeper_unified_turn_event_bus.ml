@@ -34,7 +34,7 @@ let tool_completed name =
        { agent_name = "a"
        ; tool_name = name
        ; tool_use_id = name
-       ; output = Ok { Agent_sdk.Types.content = "done" }
+       ; output = Ok { Agent_sdk.Types.content = "done"; _meta = None }
        ; turn = 0
        })
 ;;

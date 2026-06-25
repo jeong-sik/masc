@@ -566,6 +566,15 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
                    collapsing into an empty block indistinguishable from
                    "no long-term notes recorded". *)
                 let durable_text =
+                  (* RFC keeper-memory-consolidation Stage 1: memory_bank long-term
+                     inject를 kill-switch 뒤로 둔다. off 시 Memory OS facts
+                     (keeper_run_tools_hooks.render_if_enabled, default-ON) 단독
+                     주입이 되어 durable 기억의 double-coverage를 제거한다.
+                     continuity 복구는 .memory.jsonl이 아니라 snapshot cache
+                     (read_progress_snapshot_cache, :533-553) 경유라 무영향. *)
+                  if not (Keeper_memory_bank_env.bank_longterm_inject_enabled ())
+                  then ""
+                  else
                   match
                     read_recent_memory_texts_result ctx.config
                       ~name:meta.name

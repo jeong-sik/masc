@@ -572,7 +572,6 @@ describe('IdeActivityPanel', () => {
   it('renders active run goal progress from activity goal and task links', async () => {
     goals.value = [{
       id: 'goal-runtime',
-      horizon: 'short',
       title: 'Runtime goal',
       metric: 'green CI',
       target_value: 'merged',
@@ -846,7 +845,6 @@ describe('IdeActivityPanel', () => {
       'lib/runtime.ml',
       [{
         id: 'goal-runtime',
-        horizon: 'short',
         title: 'Runtime goal',
         priority: 1,
         status: 'active',

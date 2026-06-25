@@ -14,7 +14,6 @@ type provider_timeout_budget =
   ; keeper_turn_timeout_sec : float
   ; remaining_turn_budget_sec : float
   ; estimated_input_tokens : int
-  ; max_turns : int
   ; source : string
   }
 
@@ -22,7 +21,6 @@ val resolve_bounded_provider_timeout_budget_with_turn_budget
   :  allow_wall_clock_retry_budget:bool
   -> is_retry:bool
   -> estimated_input_tokens:int
-  -> max_turns:int
   -> remaining_turn_budget_s:float
   -> provider_timeout_budget
 (** See [Keeper_turn_runtime_budget] for provider timeout planning semantics. *)
@@ -47,7 +45,6 @@ val next_fail_open_runtime_for_turn_with_budget
   -> effective_runtime:string
   -> attempted_runtimes:string list
   -> estimated_input_tokens:int
-  -> max_turns:int
   -> ?time_spent_in_turn_s:float
   -> remaining_turn_budget_s:float
   -> Agent_sdk.Error.sdk_error
@@ -216,14 +213,3 @@ val run_keeper_cycle
     @param meta Current keeper metadata
     @param observation World state snapshot
     @param generation Current generation counter *)
-
-val bounded_provider_timeout_for_turn_budget
-  :  estimated_input_tokens:int
-  -> remaining_turn_budget_s:float
-  -> float option
-
-val bounded_provider_timeout_for_turn_budget_with_turn_budget
-  :  estimated_input_tokens:int
-  -> max_turns:int
-  -> remaining_turn_budget_s:float
-  -> float option

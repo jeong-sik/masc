@@ -18,6 +18,11 @@ type wake_origin =
   | Board_reactive
   | Heartbeat
   | Operator_direct
+  | Self_cadence
+    (* RFC-0294 R2b: the keeper's own self-cadence (scheduled-autonomous) clock.
+       An automatic wake like [Heartbeat]/[Board_reactive], so it must NOT bypass
+       the tombstone — a latched keeper kept re-waking on its self-clock was the
+       gap RFC-0246 left open. *)
 [@@deriving show, eq]
 
 (** Why an automatic wake was suppressed. Only the tombstone class today; the
@@ -36,7 +41,7 @@ type wake_decision =
 let bypasses_tombstone (origin : wake_origin) =
   match origin with
   | Operator_direct | Mention -> true
-  | Board_reactive | Heartbeat -> false
+  | Board_reactive | Heartbeat | Self_cadence -> false
 
 (** Gate decision for an automatic wake of [keeper_name]. Reads the
     no-progress loop detector's latched state — the single source of truth —

@@ -802,12 +802,8 @@
 .wk-blk-n { color: var(--status-bad); }
 .wk-foot { margin: 16px 2px 4px; font-size: 11px; color: var(--text-dim); }
 
-/* ── work v2: horizon groups, real task lifecycle, gate contract, backlog ── */
-.wk-horizon { margin-top: 18px; }
-.wk-hz-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 9px; }
-.wk-hz-lbl { font-family: var(--font-display); font-weight: 600; font-size: 14px; color: var(--text-bright); }
-.wk-hz-sub { font-size: 11px; color: var(--text-dim); }
-.wk-hz-n { margin-left: auto; font-size: 11px; color: var(--text-dim); }
+/* ── work v2: goal list (priority-sorted), task lifecycle, gate contract, backlog ── */
+
 
 .wk-goal.st-warn { border-color: color-mix(in oklab, var(--status-warn) 30%, var(--border-main)); }
 .wk-goal.st-bad { border-color: color-mix(in oklab, var(--status-bad) 32%, var(--border-main)); }

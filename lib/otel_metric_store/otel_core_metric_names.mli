@@ -33,6 +33,9 @@ val metric_workspace_route_failures : string
 val metric_active_agents : string
 val metric_pending_tasks : string
 
+(** RFC-0294 PR-4: gauge of orphaned tasks, labeled by status_class. *)
+val metric_orphan_tasks : string
+
 (** Goal attainment percentage by [goal_id]. Companion
     {!metric_goal_attainment_measured} distinguishes real 0% from
     unmeasured goals. *)

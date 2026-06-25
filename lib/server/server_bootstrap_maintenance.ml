@@ -6,6 +6,96 @@ let fork_logged_fiber = Server_bootstrap_loops_fiber.fork_logged_fiber
 let log_server_fiber_crash =
   Server_bootstrap_loops_fiber.log_server_fiber_crash
 
+(* Resolve the provider config for the Memory OS per-keeper consolidation pass.
+   Env var takes precedence; otherwise inherit the librarian runtime so the
+   consolidation LLM uses the same JSON-capable model the librarian uses.
+   An explicit but unknown runtime ID is logged and falls back to the default
+   so typos in operator config are not silently masked. *)
+let provider_cfg_for_memory_os_consolidation () =
+  let default_cfg () =
+    Runtime.get_default_runtime ()
+    |> Option.map (fun rt -> rt.Runtime.provider_config)
+  in
+  let runtime_id =
+    match Keeper_memory_bank_env.memory_env_opt "MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID" with
+    | Some id -> Some id
+    | None -> Runtime.librarian_runtime_id ()
+  in
+  match runtime_id with
+  | None -> default_cfg ()
+  | Some id ->
+    (match Runtime.get_runtime_by_id id with
+     | Some rt -> Some rt.Runtime.provider_config
+     | None ->
+       Log.Server.warn
+         "memory_os_keeper_consolidation: requested runtime %s not found; \
+          falling back to default"
+         id;
+       default_cfg ())
+;;
+
+(* Run one consolidation pass over every keeper that currently has a fact store.
+   The optional [complete] injection lets tests drive the loop with a fake model. *)
+let run_memory_os_consolidation_tick
+      ?(complete = Keeper_memory_os_consolidation_runtime.default_complete)
+      ~sw
+      ~net
+      ?clock
+      ~provider_cfg
+      ~now
+      ()
+  =
+  List.iter
+    (fun keeper_id ->
+       try
+         match
+           Keeper_memory_os_consolidation_runtime.consolidate_keeper
+             ~complete
+             ~sw
+             ~net
+             ?clock
+             ~provider_cfg
+             ~now
+             ~keeper_id
+             ()
+         with
+         | Keeper_memory_os_consolidation_runtime.Consolidated { before; after } ->
+           Log.Server.info
+             "memory_os_keeper_consolidation: keeper=%s before=%d after=%d"
+             keeper_id
+             before
+             after
+         | Skipped_too_few n ->
+           Log.Server.info
+             "memory_os_keeper_consolidation: keeper=%s skipped_too_few=%d"
+             keeper_id
+             n
+         | Transport_failed msg ->
+           Log.Server.warn
+             "memory_os_keeper_consolidation: keeper=%s transport_failed: %s"
+             keeper_id
+             msg
+         | Unparseable msg ->
+           Log.Server.warn
+             "memory_os_keeper_consolidation: keeper=%s unparseable: %s"
+             keeper_id
+             msg
+         | Snapshot_changed { before; current } ->
+           Log.Server.info
+             "memory_os_keeper_consolidation: keeper=%s snapshot_changed before=%d current=%d"
+             keeper_id
+             before
+             current
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Server.warn
+           "memory_os_keeper_consolidation: keeper=%s tick crashed: %s"
+           keeper_id
+           (Printexc.to_string exn))
+    (Keeper_memory_os_io.list_fact_store_keeper_ids ())
+;;
+
 let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_state) =
   (* Metrics flush fiber: drains write queue every 500ms, batches file appends.
      Replaces the old mutex + synchronous file I/O pattern. *)
@@ -275,11 +365,41 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          loop ()
        in
        loop ()));
-  (* #9876: Hebbian consolidation fiber. Prior to this, the graph was
-     write-only — strengthen/weaken populated synapses but decay +
-     pruning never ran (zero production callers of [consolidate]).
-     last_consolidation=0.0 on live graphs confirmed the gap in
-     production. *)
+  (* RFC-0247 §2.3: per-keeper Memory OS consolidation. The librarian writes
+     facts every cadence turn; without this pass a keeper's Tier-1 store only
+     grows. Off the hot path: every [interval]s it asks the model to merge
+     duplicate/superseded facts and rewrites the store atomically. Gated by
+     [MASC_KEEPER_MEMORY_OS_CONSOLIDATION] (default false) until a live shadow
+     run validates what the model would prune on the user's data. *)
+  if
+    Keeper_memory_bank_env.memory_env_bool_logged
+      "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
+      ~default:false
+  then
+    fork_logged_fiber
+      ~sw
+      ~on_error:(log_server_fiber_crash "memory_os_keeper_consolidation")
+      (fun () ->
+        (* Coarser than Tier-2 consolidation (300s): this pass calls the LLM,
+           so a 10-minute cadence bounds cost while still shrinking stores. *)
+        let interval = 600.0 in
+        let rec loop () =
+          (match provider_cfg_for_memory_os_consolidation () with
+           | None ->
+             Log.Server.warn
+               "memory_os_keeper_consolidation: no runtime configured; skipping tick"
+           | Some provider_cfg ->
+             run_memory_os_consolidation_tick
+               ~sw
+               ~net:env#net
+               ~clock
+               ~provider_cfg
+               ~now:(Time_compat.now ())
+               ());
+          Eio.Time.sleep clock interval;
+          loop ()
+        in
+        loop ());
   (* System_internal tool usage log: durable JSONL for pruning evidence (#5120) *)
   Tool_usage_log.init
     ~base_path:(Mcp_server.workspace_config state).base_path

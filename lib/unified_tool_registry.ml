@@ -113,7 +113,6 @@ let tag_of_name name : TD.module_tag option =
       ; "tool_search_files"
       ]
   then Some Mod_external
-  else if String.equal name "extend_turns" then Some Mod_external
   else None
 
 (** Register a tag + schema only if the name is not already in the tag
@@ -134,8 +133,8 @@ let register_visible_raw_schemas () =
          | None -> register_name_if_missing schema.name TD.Mod_external)
 
 (** 2. Register the mandatory core-always tools. Most already have schemas
-    in [raw_all_tool_schemas]; [extend_turns] gets a placeholder schema so
-    the tag/schema registries stay in lockstep. *)
+    in [raw_all_tool_schemas]; any missing core-always name gets a placeholder
+    schema so the tag/schema registries stay in lockstep. *)
 let register_core_always_tools () =
   Keeper_tool_registry.core_always_tools
   |> List.iter (fun name ->

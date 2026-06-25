@@ -8,8 +8,20 @@ type sse_conn_info = {
   client_id : int;
   writer : Httpun.Body.Writer.t;
   mutex : Eio.Mutex.t;
-  stop : bool ref;
-  mutable closed : bool;
+  (* [stop] and [closed] are touched from more than one domain once serving
+     runs off the main domain (a disconnect close racing keeper-driven eviction
+     / shutdown), so they are [Atomic.t], not a plain [ref] / [mutable].
+     [closed] is the single-close guard: [claim_close] flips it false->true with
+     [compare_and_set] so exactly one caller resolves the one-shot stop promise.
+
+     Readers treat either [stop=true] or [closed=true] as terminal (e.g.
+     [send_raw] short-circuits when either flag is set), so the intermediate
+     state where one flag is set before the other is benign. The safety
+     invariant is not that a particular transient is unobservable, but that
+     every reader branches to the closed/stop path as soon as it sees either
+     flag. *)
+  stop : bool Atomic.t;
+  closed : bool Atomic.t;
   (* Resolved exactly once by [close_sse_conn]. [run_sse_pumps] forks the
      drain/ping pumps under a per-connection switch and awaits this promise;
      resolving it releases that switch, cancelling both pumps — including a
@@ -28,8 +40,8 @@ let make_sse_conn ~session_id ~client_id ~writer ~mutex () =
     client_id;
     writer;
     mutex;
-    stop = ref false;
-    closed = false;
+    stop = Atomic.make false;
+    closed = Atomic.make false;
     stop_promise;
     resolve_stop;
   }
@@ -98,15 +110,32 @@ let guard_expired ~now ~session_id state =
 let register_sse_conn ~session_id ~info =
   atomic_update sse_conn_by_session (fun map -> SMap.add session_id info map)
 
+(* Claim the single close of [info]: returns [true] for exactly one caller even
+   under concurrent close paths (a disconnect on one domain racing eviction or
+   shutdown on another).  The close body below — including
+   [Eio.Promise.resolve info.resolve_stop] — must run at most once; a second
+   resolve of a one-shot promise raises [Invalid_argument]. *)
+let claim_close info = Atomic.compare_and_set info.closed false true
+
+let __test_claim_close = claim_close
+
 let close_sse_conn info =
-  if not info.closed then (
-    info.closed <- true;
-    info.stop := true;
-    (* Release the per-connection pump switch (run_sse_pumps). This body runs
-       once per info (guarded by [closed]), so the promise is resolved exactly
-       once. *)
+  if claim_close info then (
+    Atomic.set info.stop true;
+    (* Release the per-connection pump switch (run_sse_pumps). [claim_close]
+       admits exactly one caller, so the promise is resolved exactly once. *)
     Eio.Promise.resolve info.resolve_stop ();
-    (try Httpun.Body.Writer.close info.writer
+    (* Close the writer under [info.mutex] so it cannot run concurrently with a
+       [send_raw] / evict write on another domain — httpun's writer is not
+       domain-safe, and every write path already serializes on [info.mutex].
+       Mirrors [close_stream] in server_activity_http.ml.  [close_sse_conn] is
+       never called while [info.mutex] is held (every call site is outside the
+       mutex or in an exception handler after [use_rw] has returned), so this is
+       deadlock-free even though [Eio.Mutex] is not reentrant.  Requires an Eio
+       context, which every production close path already runs within. *)
+    (try
+       Eio.Mutex.use_rw ~protect:true info.mutex (fun () ->
+           Httpun.Body.Writer.close info.writer)
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
@@ -166,7 +195,7 @@ let stop_sse_session_evict session_id
        let frame = Sse.format_event ~event_type:"evicted" frame_data in
        (try
           Eio.Mutex.use_rw ~protect:true info.mutex (fun () ->
-            if (not info.closed) && not !(info.stop) then
+            if (not (Atomic.get info.closed)) && not (Atomic.get info.stop) then
               Httpun.Body.Writer.write_string info.writer frame)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
@@ -216,7 +245,7 @@ let close_all_sse_connections () =
     (List.length infos)
 
 let send_raw info data =
-  if info.closed || !(info.stop) || Httpun.Body.Writer.is_closed info.writer then (
+  if Atomic.get info.closed || Atomic.get info.stop || Httpun.Body.Writer.is_closed info.writer then (
     close_sse_conn info;
     false)
   else

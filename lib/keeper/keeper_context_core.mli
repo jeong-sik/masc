@@ -157,11 +157,16 @@ val total_tokens : Agent_sdk.Types.api_usage -> int
     checkpoint (truncated, sanitized, repaired). *)
 val save_oas_checkpoint :
   max_checkpoint_messages:int ->
+  multimodal_policy:Keeper_types_profile.multimodal_policy ->
+  keeper_name:string ->
   session:session_context ->
   agent_name:string ->
   ctx:working_context ->
   generation:int ->
   (Agent_sdk.Checkpoint.t, string) result
+(** [multimodal_policy]/[keeper_name] gate RFC §2.3 site-2 image eviction at the
+    checkpoint write boundary (Store_only); required so every write path is
+    compiler-forced to declare its policy (N-of-M closure). *)
 
 (** {1 OAS checkpoint inspection} *)
 

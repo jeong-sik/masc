@@ -217,6 +217,7 @@ type t =
   | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze
   | VisionCandidateAttempts
+  | VisionIngestEvictions
   | PromptSegmentBytes
   | PromptTemplateRenderOutcome
   | ToolCallParamCompleteness

@@ -74,6 +74,22 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                      raw))
         | None -> Ok ())
   in
+  let result =
+    Result.bind result (fun () ->
+        match str "multimodal_policy" with
+        | Some raw -> (
+            (* RFC vision-delegation §2.4. Fail loud on an unrecognised value
+               rather than silently defaulting (no silent failure). *)
+            match multimodal_policy_of_string raw with
+            | Some _ -> Ok ()
+            | None ->
+                Error
+                  (Printf.sprintf
+                     "invalid multimodal_policy '%s' (allowed: %s)"
+                     raw
+                     (String.concat ", " valid_multimodal_policy_strings)))
+        | None -> Ok ())
+  in
   (* persona⊥{model,runtime}: keeper TOML no longer carries a runtime/model
      selection.  keeper→runtime assignment is the sole responsibility of
      runtime.toml [[runtime.assignments]] (keyed by keeper name), resolved via
@@ -139,6 +155,8 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         sandbox_image = str "sandbox_image";
         network_mode =
           Option.bind (str "network_mode") network_mode_of_string;
+        multimodal_policy =
+          Option.bind (str "multimodal_policy") multimodal_policy_of_string;
         tool_access;
         tool_denylist = normalize_name_list_opt (strs "tool_denylist");
         active_goal_ids =
@@ -173,6 +191,7 @@ let parsed_field_key_names =
   ; "sandbox_profile"
   ; "sandbox_image"
   ; "network_mode"
+  ; "multimodal_policy"
   ; "tool_access"
   ; "tool_denylist"
   ; "active_goal_ids"
@@ -206,6 +225,7 @@ let canonical_keeper_toml_key_names =
   ; "sandbox_profile"
   ; "sandbox_image"
   ; "network_mode"
+  ; "multimodal_policy"
   ; "tool_access"
   ; "tool_denylist"
   ; "active_goal_ids"
@@ -333,6 +353,7 @@ let merge_keeper_profile_defaults
     sandbox_profile = prefer overlay.sandbox_profile base.sandbox_profile;
     sandbox_image = prefer overlay.sandbox_image base.sandbox_image;
     network_mode = prefer overlay.network_mode base.network_mode;
+    multimodal_policy = prefer overlay.multimodal_policy base.multimodal_policy;
     tool_access = prefer overlay.tool_access base.tool_access;
     tool_denylist = prefer overlay.tool_denylist base.tool_denylist;
     active_goal_ids = prefer overlay.active_goal_ids base.active_goal_ids;

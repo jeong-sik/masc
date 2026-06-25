@@ -15,10 +15,13 @@ vi.mock('../api/keeper', () => ({
 vi.mock('../store', () => ({
   keepers: { value: [] },
   applyOptimisticKeeperDirective: vi.fn(() => () => {}),
-  refreshExecution: vi.fn(async () => undefined),
+  refreshKeeperRuntimeStatus: vi.fn(async () => undefined),
 }))
 
+import { pauseKeeper } from '../api/keeper'
 import { keeperActionVisibility } from '../lib/keeper-predicates'
+import { applyOptimisticKeeperDirective, refreshKeeperRuntimeStatus } from '../store'
+import { runKeeperAction } from './keeper-action-panel'
 import type { Keeper } from '../types'
 
 function makeKeeper(overrides: Partial<Keeper>): Keeper {
@@ -138,5 +141,16 @@ describe('keeperActionVisibility', () => {
       const v = keeperActionVisibility(k)
       expect(v.canWake).toBe(true)
     })
+  })
+})
+
+describe('runKeeperAction', () => {
+  it('refreshes the shared runtime status source after a successful directive', async () => {
+    vi.mocked(pauseKeeper).mockResolvedValueOnce({ ok: true })
+
+    await runKeeperAction('rondo', 'pause')
+
+    expect(applyOptimisticKeeperDirective).toHaveBeenCalledWith('rondo', 'pause')
+    expect(refreshKeeperRuntimeStatus).toHaveBeenCalledWith()
   })
 })

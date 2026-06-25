@@ -494,6 +494,7 @@ type keeper_meta =
   ; mention_targets : string list
   ; proactive : proactive_policy
   ; compaction : compaction_policy
+  ; multimodal_policy : Keeper_types_profile.multimodal_policy
   ; auto_handoff : bool
   ; handoff_threshold : float
   ; handoff_cooldown_sec : int
@@ -625,6 +626,10 @@ let effective_meta_of_profile_defaults
           sandbox_image =
             apply_profile_default_opt defaults.sandbox_image meta.sandbox_image;
           network_mode;
+          (* RFC vision-delegation §2.4: TOML profile overrides the carried
+             value; absent -> keep [meta]'s (defaults to Inherit). *)
+          multimodal_policy =
+            apply_profile_default defaults.multimodal_policy meta.multimodal_policy;
           allowed_paths =
             apply_profile_default defaults.allowed_paths
               (if has_profile_source then [] else meta.allowed_paths);

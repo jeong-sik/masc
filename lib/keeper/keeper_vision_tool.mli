@@ -11,7 +11,10 @@
 
     Mirrors the provider-sub-call shape of [Keeper_librarian_runtime]; the small
     [complete_fn] / [with_timeout] helpers are replicated here rather than shared,
-    until a third sub-call consumer justifies extracting a common module. *)
+    until a third sub-call consumer justifies extracting a common module.
+    Artifact filesystem I/O is offloaded through {!Eio_guard.run_in_systhread}
+    when the Eio runtime is active, so durable fsync/rename work does not block
+    the shared Eio domain. *)
 
 type complete_fn =
   sw:Eio.Switch.t ->
@@ -35,6 +38,13 @@ val max_image_bytes : unit -> int
 val supported_image_media_types : string list
 (** MIME types admitted by [analyze_image]. The tool schema and runtime
     validation share this list. *)
+
+val validate_media_type : string -> (string, string) result
+(** Normalize and validate an image MIME type against
+    {!supported_image_media_types}. *)
+
+val validate_image_size : string -> (unit, string) result
+(** Validate raw image bytes against {!max_image_bytes}. *)
 
 val truncated_of_stop_reason : Agent_sdk.Types.stop_reason -> bool
 (** Collapse the provider's typed terminal reason to the single [truncated] bit
@@ -66,8 +76,52 @@ val first_vision_runtime_id : unit -> (string, string) result
     [Error] when none is configured. *)
 
 val vision_store_dir : keeper_name:string -> string
-(** Per-keeper content-addressed image store directory. Exposed so tests and
-    ingestion paths do not duplicate the path layout. *)
+(** Per-keeper artifact store directory used by [analyze_image] and eager image
+    eviction. *)
+
+val store_artifact
+  :  dir:string
+  -> string
+  -> (Multimodal.Vision_artifact_store.handle, string) result
+(** Store image bytes in the content-addressed artifact store. Blocking
+    filesystem work is offloaded when the Eio runtime is active. *)
+
+val load_artifact
+  :  dir:string
+  -> Multimodal.Vision_artifact_store.handle
+  -> (string, string) result
+(** Load image bytes from the content-addressed artifact store. Blocking
+    filesystem work is offloaded when the Eio runtime is active. *)
+
+(** Typed outcome of {!run_vision}. SSOT shared by the tool handler (renders to
+    JSON) and eager ingestion eviction ({!Keeper_vision_ingest}, renders to a
+    placeholder). *)
+type vision_outcome =
+  | Vo_ok of string
+  | Vo_invalid_request of string
+  | Vo_no_runtime of string
+  | Vo_timeout
+  | Vo_provider of { failure_class : Tool_result.tool_failure_class; detail : string }
+  | Vo_empty
+  | Vo_truncated
+
+val run_vision
+  :  ?complete:complete_fn
+  -> ?timeout_sec:float
+  -> sw:Eio.Switch.t
+  -> clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> query:string
+  -> media_type:string
+  -> bytes:string
+  -> unit
+  -> vision_outcome
+(** The bounded one-shot vision sub-call core (runtime resolution + provider
+    call under [with_timeout] + §2.2 classification). Used by {!handle} and by
+    eager ingestion. Requires the turn clock, so eager ingestion cannot run an
+    unbounded provider call. Non-cancellation exceptions are converted to
+    [Vo_provider] so eager ingestion can keep the turn alive with a typed unread
+    placeholder. *)
 
 val handle
   :  ?complete:complete_fn

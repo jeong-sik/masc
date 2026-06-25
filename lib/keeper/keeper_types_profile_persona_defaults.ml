@@ -52,6 +52,7 @@ let load_from_path ~name path : keeper_profile_defaults =
               sandbox_profile = None;
               sandbox_image = None;
               network_mode = None;
+              multimodal_policy = None;
               tool_access = None;
               tool_denylist =
                 Normalizers.normalize_name_list_opt

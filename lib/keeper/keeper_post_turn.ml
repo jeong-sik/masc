@@ -648,6 +648,8 @@ let apply_post_turn_lifecycle_with_resilience_handles
           in
           (match save_oas_checkpoint
                ~max_checkpoint_messages:base_meta.compaction.max_checkpoint_messages
+               ~multimodal_policy:base_meta.multimodal_policy
+               ~keeper_name:base_meta.name
                ~session
                ~agent_name:base_meta.agent_name
                ~ctx:compacted_ctx ~generation:current_generation
@@ -926,6 +928,8 @@ let recover_latest_checkpoint_for_overflow_retry
         try
           (match save_oas_checkpoint
               ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
+              ~multimodal_policy:meta.multimodal_policy
+              ~keeper_name:meta.name
               ~session
               ~agent_name:retry_meta.agent_name
               ~ctx:compacted_ctx ~generation:turn_generation

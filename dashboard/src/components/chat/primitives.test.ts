@@ -1276,7 +1276,7 @@ describe('Keeper v2 chat blocks', () => {
         t: 'trace',
         trace: [
           { kind: 'think', text: 'planning' },
-          { kind: 'tool', name: 'keeper_context_status', status: 'ok', dur: '0.2s', args: { path: 'a' }, result: '{"ok":true}' },
+          { kind: 'tool', name: 'keeper_context_status', status: 'ok', dur: '0.2s', args: '{"path":"a"}', result: '{"ok":true}' },
         ],
       },
     ])

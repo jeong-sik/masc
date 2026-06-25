@@ -979,7 +979,7 @@ export function hydrateShellSnapshot(
     shellAuthSummary.value = normalizedAuth
   }
   const normalizedConfigResolution = normalizeDashboardConfigResolution(data.config_resolution)
-  const normalizedRuntimeResolution = normalizeDashboardRuntimeResolution(data.runtime_resolution)
+  const normalizedRuntimeResolution = normalizeDashboardRuntimeResolution(data.runtime_resolution, data.generated_at)
   if (!wantsLight || normalizedConfigResolution) {
     shellConfigResolution.value = normalizedConfigResolution
   }
@@ -1085,6 +1085,12 @@ export async function refreshExecution(opts?: RefreshOptions): Promise<void> {
   if (executionScheduler.inflightPromise) {
     await executionScheduler.inflightPromise
   }
+}
+
+export async function refreshKeeperRuntimeStatus(opts?: RefreshOptions): Promise<void> {
+  const force = opts?.force ?? false
+  await refreshShell({ light: true, force })
+  await refreshExecution({ force })
 }
 
 /** Reconcile board posts by id+updated_at so unchanged items keep

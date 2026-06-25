@@ -25,7 +25,7 @@ import {
 } from '../api/keeper'
 import {
   applyOptimisticKeeperDirective,
-  refreshExecution,
+  refreshKeeperRuntimeStatus,
 } from '../store'
 import type { Keeper } from '../types'
 import { keeperActionVisibility } from '../lib/keeper-predicates'
@@ -34,15 +34,11 @@ import { keeperActionVisibility } from '../lib/keeper-predicates'
 
 function afterAction(): void {
   // Reconcile the optimistic patch against the authoritative server
-  // snapshot. Scoped to the execution slice (the keeper roster) instead of
-  // a full `refreshDashboard()` bootstrap: the bootstrap re-hydrated shell,
-  // planning, namespace, goals and goal_loop and flipped dashboardLoading,
-  // which re-rendered every panel — the "the whole screen refreshes on
-  // every keeper action" complaint. `refreshExecution` is the same scope
-  // the SSE keeper_phase_changed route already uses (sse-store.ts), and it
-  // coalesces through the execution scheduler so concurrent actions don't
-  // stack refetches.
-  void refreshExecution().catch(err => {
+  // snapshots that drive status UI: execution rows for the roster and light
+  // shell runtime-health for top-strip / roster aggregate counts. This avoids
+  // the old full `refreshDashboard()` bootstrap while keeping every status
+  // surface on the same post-action truth source.
+  void refreshKeeperRuntimeStatus().catch(err => {
     const message = err instanceof Error ? err.message : 'dashboard refresh failed'
     showToast(message, 'warning')
   })
@@ -225,4 +221,3 @@ export function KeeperActionButtons({
     </div>
   `
 }
-

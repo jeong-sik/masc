@@ -594,6 +594,8 @@ let context_of_oas_checkpoint
 
 let save_oas_checkpoint
     ~(max_checkpoint_messages : int)
+    ~(multimodal_policy : Keeper_types_profile.multimodal_policy)
+    ~(keeper_name : string)
     ~(session : session_context)
     ~(agent_name : string)
     ~(ctx : working_context)
@@ -604,6 +606,23 @@ let save_oas_checkpoint
     checkpoint_generation_key (`Int generation);
   let checkpoint_messages, checkpoint_stats =
     capped_checkpoint_messages_of_context_with_stats ~max_checkpoint_messages ctx
+  in
+  (* RFC vision-delegation §2.3 site 2 (checkpoint write boundary). For a
+     Delegate keeper, evict any inline image to a handle-only placeholder BEFORE
+     it is persisted, so a reloaded checkpoint can never re-materialise an
+     [Image] and re-trigger the RFC-0265 reroute. Store-only here — checkpoint
+     writes must not block the turn fiber on a vision provider call (eager
+     extraction is site 1's job). Also the migration path for images persisted
+     by pre-existing checkpoints. No-op for Inherit/Reroute (safe-by-default).
+     [multimodal_policy]/[keeper_name] are required so every checkpoint write
+     path is compiler-forced to declare its policy (N-of-M closure). *)
+  let checkpoint_messages =
+    List.map
+      (Keeper_vision_ingest.evict_message
+         ~mode:Keeper_vision_ingest.Store_only
+         ~policy:multimodal_policy
+         ~keeper_name)
+      checkpoint_messages
   in
   let checkpoint =
     {

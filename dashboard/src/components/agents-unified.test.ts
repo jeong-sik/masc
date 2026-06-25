@@ -66,6 +66,7 @@ vi.mock('../store', () => ({
   keepers: { value: [] },
   executionLoaded: { value: false },
   shellCounts: { value: null },
+  shellRuntimeResolution: { value: null },
 }))
 vi.mock('../namespace-truth-store', () => ({
   namespaceTruth: { value: null },

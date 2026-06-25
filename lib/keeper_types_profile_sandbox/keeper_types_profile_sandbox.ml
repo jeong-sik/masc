@@ -92,16 +92,17 @@ let default_network_mode_for_profile = function
    can reference it without a dependency cycle — same layering as [network_mode].
    Mirrors [network_mode]: closed variant, [_of_string] returns [option]
    (unknown -> [None], fail-closed), SSOT lists. *)
+(* No [@@deriving tla]: unlike [network_mode]/[sandbox_profile] this policy is
+   not referenced by any TLA+ spec, and a second module-level [to_tla_symbol]
+   deriver would collide with [network_mode]'s. *)
 type multimodal_policy =
-  | Mm_delegate [@tla.symbol "Mm_delegate"]
+  | Mm_delegate
     (* §2.3: evict images to the artifact store at ingestion and read them via
        the analyze_image tool; main history stays text-only. *)
-  | Mm_reroute [@tla.symbol "Mm_reroute"]
-    (* RFC-0265: reroute the whole turn to a vision-capable runtime. *)
-  | Mm_inherit [@tla.symbol "Mm_inherit"]
+  | Mm_reroute (* RFC-0265: reroute the whole turn to a vision-capable runtime. *)
+  | Mm_inherit
     (* follow the workspace default (currently Reroute). Safe-by-default for
        keepers that predate this field — a missing TOML/JSON key parses here. *)
-[@@deriving tla]
 
 let multimodal_policy_to_string = function
   | Mm_delegate -> "delegate"

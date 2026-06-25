@@ -32,7 +32,6 @@ type multimodal_policy =
   | Mm_delegate  (** evict images at ingestion; read via the analyze_image tool *)
   | Mm_reroute  (** RFC-0265: reroute the whole turn to a vision-capable runtime *)
   | Mm_inherit  (** follow the workspace default (currently reroute); safe default *)
-[@@deriving tla]
 
 val multimodal_policy_to_string : multimodal_policy -> string
 

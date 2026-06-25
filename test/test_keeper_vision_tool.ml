@@ -279,7 +279,7 @@ let test_delegate_eviction_bad_base64_surfaces_text_error () =
   | [ Agent_sdk.Types.Text placeholder ] ->
     assert (contains_substring placeholder "could not store");
     assert (contains_substring placeholder "bad base64")
-  | _ -> failwith "bad base64 must surface as a text placeholder")
+  | _ -> failwith "bad base64 must surface as a text placeholder"
 
 (* RFC §2.3 acceptance #1/#3 + §6 N-of-M proof. After site-2 (Store_only)
    eviction the persisted history carries no "image" modality, so RFC-0265's

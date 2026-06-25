@@ -190,6 +190,8 @@ harness_mint_admin_token() {
 
   if ! token_json="$(
     env -u MCP_TOKEN -u MCP_AUTH_TOKEN -u MASC_ADMIN_TOKEN -u MASC_TOKEN \
+      MASC_BASE_PATH="$base_path" \
+      MASC_BASE_PATH_INPUT="$base_path" \
       "$server_exe" login \
       --base-path "$base_path" \
       --host 127.0.0.1 \

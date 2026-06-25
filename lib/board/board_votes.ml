@@ -70,6 +70,7 @@ let append_vote_log_result ~target ~voter ~direction ~ts =
     Error msg
 
 let append_vote_log ~target ~voter ~direction ~ts =
+  (* fire-and-forget: callers keep vote updates in memory; persistence errors are recorded above. *)
   ignore (append_vote_log_result ~target ~voter ~direction ~ts)
 
 (** Parse a vote-log key into [(target_kind, target_id, voter)].
@@ -857,6 +858,7 @@ let save_jsonl_snapshot_result ~where ~path content =
     Error msg
 
 let save_jsonl_snapshot ~where ~path content =
+  (* fire-and-forget: snapshot callers preserve the in-memory store; persistence errors are recorded above. *)
   ignore (save_jsonl_snapshot_result ~where ~path content)
 
 let delete_post store ~post_id : (unit, board_error) Result.t =

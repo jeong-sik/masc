@@ -214,6 +214,7 @@ let prune_links_for_goal config ~goal_id =
       | Error _ -> ()
       | Ok links ->
         let links = List.filter (fun (gid, _) -> not (String.equal gid goal_id)) links in
+        (* fire-and-forget: pruning is best-effort cleanup; later reads repair stale goal links. *)
         ignore (write_goal_task_links_result config ~operation:"prune_links_for_goal" links))
 ;;
 

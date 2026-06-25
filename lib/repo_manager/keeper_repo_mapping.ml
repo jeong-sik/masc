@@ -398,9 +398,21 @@ type repository_identity_mismatch = {
 
 let repository_identity_mismatch ?repo_root ~segment repo =
   let url_basename = repository_url_basename repo.url in
-  if
-    String.equal url_basename ""
-    || List.exists (token_matches_url_basename ~basename:url_basename) (repository_identity_tokens repo)
+  if String.equal url_basename "" then
+    (* Empty URL basename means a missing or unparseable repository URL. Treat
+       it as an identity mismatch so the fail-closed path denies access rather
+       than silently authorizing an unvalidated repository. *)
+    Some
+      {
+        repository_id = repo.id;
+        repository_name = repo.name;
+        repository_url = repo.url;
+        url_basename;
+        segment;
+        repo_root;
+      }
+  else if
+    List.exists (token_matches_url_basename ~basename:url_basename) (repository_identity_tokens repo)
   then None
   else
     Some

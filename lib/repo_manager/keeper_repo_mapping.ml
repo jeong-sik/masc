@@ -439,6 +439,7 @@ type repository_resolution =
   | No_repository
   | Repository of repository_id
   | Repository_identity_mismatch of repository_identity_mismatch
+  | Repository_store_error of string
 
 let repository_resolution_of_repo ?repo_root ~segment repo =
   match repository_identity_mismatch ?repo_root ~segment repo with
@@ -450,9 +451,9 @@ let resolve_repository_id_segment ~base_path ?repo_root segment =
   | Error msg ->
       Log.Misc.warn
         "[KeeperRepoMapping] resolve_repository_id_segment: repo store load \
-         failed for segment %s (error: %s)"
+         failed for segment %s — access denied fail-closed (error: %s)"
         segment msg;
-      Repository segment
+      Repository_store_error msg
   | Ok repos -> (
       match
         List.find_opt
@@ -479,7 +480,9 @@ let path_under_repo ~base_path repo path =
 
 (** [repository_resolution_of_path ~base_path ~path] returns the registered
     repository for [path], or an identity mismatch when the path points at a
-    declared repository whose URL basename contradicts its declared identity. *)
+    declared repository whose URL basename contradicts its declared identity.
+    Repository store load failures remain explicit so access callers can deny
+    instead of treating an unknown repository catalog as "not a repository". *)
 let repository_resolution_of_path ~base_path ~path =
   match playground_path_of_path ~base_path ~path with
   | Some Playground_internal | Some Playground_repos_root -> No_repository
@@ -489,10 +492,10 @@ let repository_resolution_of_path ~base_path ~path =
   match Repo_store.load_all ~base_path with
   | Error msg ->
       Log.Misc.warn
-        "[KeeperRepoMapping] repository_id_of_path: repo store load failed \
-         for path %s (error: %s)"
+        "[KeeperRepoMapping] repository_resolution_of_path: repo store load \
+         failed for path %s — access denied fail-closed (error: %s)"
         path msg;
-      No_repository
+      Repository_store_error msg
   | Ok repos -> (
       match
         List.find_opt (fun repo -> path_under_repo ~base_path repo path) repos
@@ -506,7 +509,7 @@ let repository_resolution_of_path ~base_path ~path =
 let repository_id_of_path ~base_path ~path =
   match repository_resolution_of_path ~base_path ~path with
   | Repository repo_id -> Some repo_id
-  | No_repository | Repository_identity_mismatch _ -> None
+  | No_repository | Repository_identity_mismatch _ | Repository_store_error _ -> None
 
 (** [validate_path_access ~keeper_id ~base_path ~path] checks whether
     [keeper_id] is allowed to access the repository that contains [path].
@@ -519,3 +522,8 @@ let validate_path_access ~keeper_id ~base_path ~path =
   | Repository repo_id -> validate_access ~keeper_id ~repository_id:repo_id ~base_path
   | Repository_identity_mismatch mismatch ->
       Error (repository_identity_mismatch_message mismatch)
+  | Repository_store_error msg ->
+      Error
+        (Printf.sprintf
+           "Repository store load failed while validating keeper %s path %s: %s"
+           keeper_id path msg)

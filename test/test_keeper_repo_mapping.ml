@@ -255,6 +255,45 @@ let test_validate_path_access_no_repo () =
       | Ok () -> ()
       | Error e -> Alcotest.fail ("expected Ok for no-repo path, got: " ^ e))
 
+let test_validate_path_access_rejects_repo_store_load_error () =
+  with_temp_base_path (fun base_path ->
+      write_mapping base_path "keeper-1" [ "repo-a" ];
+      write_file
+        (Filename.concat base_path ".masc/config/repositories.toml")
+        "[repository.repo-a]\nurl = 42\n";
+      let path = Filename.concat base_path "repos/repo-a/file.txt" in
+      ensure_dir (Filename.dirname path);
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"keeper-1"
+          ~base_path ~path
+      with
+      | Ok () -> Alcotest.fail "expected repository store load failure to deny access"
+      | Error msg ->
+          Alcotest.(check bool)
+            "mentions store load failure" true
+            (contains_substring msg "Repository store load failed"))
+
+let test_validate_path_access_playground_rejects_repo_store_load_error () =
+  with_temp_base_path (fun base_path ->
+      write_mapping base_path "executor" [ "masc" ];
+      write_file
+        (Filename.concat base_path ".masc/config/repositories.toml")
+        "[repository.masc]\nurl = 42\n";
+      let path =
+        Filename.concat base_path
+          ".masc/playground/docker/executor/repos/masc/lib"
+      in
+      ensure_dir path;
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () -> Alcotest.fail "expected playground load failure to deny access"
+      | Error msg ->
+          Alcotest.(check bool)
+            "mentions store load failure" true
+            (contains_substring msg "Repository store load failed"))
+
 let test_validate_path_access_playground_repos_root_ignores_base_repo () =
   with_temp_base_path (fun base_path ->
       let root_repo =
@@ -811,6 +850,10 @@ let () =
           Alcotest.test_case "allowed" `Quick test_validate_path_access_allowed;
           Alcotest.test_case "denied" `Quick test_validate_path_access_denied;
           Alcotest.test_case "no repo" `Quick test_validate_path_access_no_repo;
+          Alcotest.test_case "repo store load error denies" `Quick
+            test_validate_path_access_rejects_repo_store_load_error;
+          Alcotest.test_case "playground repo store load error denies" `Quick
+            test_validate_path_access_playground_rejects_repo_store_load_error;
           Alcotest.test_case "playground repos root ignores base repo" `Quick
             test_validate_path_access_playground_repos_root_ignores_base_repo;
           Alcotest.test_case "playground repo resolves registered name" `Quick

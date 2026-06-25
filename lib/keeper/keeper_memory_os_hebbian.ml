@@ -14,6 +14,24 @@
 let max_synapse_weight = 1.0
 let synapse_saturation_facts = 10.0
 
+let empty_graph ?error () =
+  let fields =
+    [ "synapses", `List []; "last_consolidation", `Float 0.0 ]
+  in
+  match error with
+  | None -> `Assoc fields
+  | Some message ->
+      `Assoc
+        (fields
+         @ [
+             ( "error",
+               `Assoc
+                 [
+                   "kind", `String "memory_os_hebbian_derivation_failed";
+                   "message", `String message;
+                 ] );
+           ])
+
 (* RFC-0244 Tier 2: derive the Hebbian synapse view from cross-keeper
    corroboration. Each shared fact that was observed by multiple keepers
    becomes one or more synapses; [last_consolidation] is the most recent
@@ -79,12 +97,12 @@ let compute ~base_path ~now () =
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    (* Log rather than silently swallow: a persistent fact-store read failure
-       must be distinguishable from a genuinely empty graph, otherwise it
-       presents as the same last_consolidation=0.0 "unviewable" state this
-       function was added to fix. *)
-    Log.Server.warn
-      "compute_hebbian: synapse view derivation failed, returning empty graph: %s"
-      (Printexc.to_string exn);
-    `Assoc [ "synapses", `List []; "last_consolidation", `Float 0.0 ]
+      let message = Printexc.to_string exn in
+      (* Keep the dashboard endpoint total, but make the degraded response
+         distinguishable from a genuinely empty graph. *)
+      Log.Server.warn
+        "compute_hebbian: synapse view derivation failed, returning degraded \
+         graph: %s"
+        message;
+      empty_graph ~error:message ()
 ;;

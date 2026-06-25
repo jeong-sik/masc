@@ -662,7 +662,12 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/execution" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let actor = Server_utils.query_param request "actor" in
+         let config = (Mcp_server.workspace_config state) in
+         let actor =
+           Server_dashboard_http_execution_surfaces.execution_actor_for_request
+             ~base_path:config.base_path
+             request
+         in
          let fixture = Server_utils.query_param request "fixture" in
          let full = Server_utils.bool_query_param request "full" ~default:false in
          let force = Server_utils.bool_query_param request "force" ~default:false in

@@ -42,6 +42,17 @@ mcp_mktemp_file() {
   printf '%s\n' "$path"
 }
 
+# Write the bearer token to a temp file so curl can read the Authorization
+# header via -H @file instead of exposing the token in argv. Caller must remove
+# the file when done.
+_mcp_auth_header_file() {
+  local token="${1:-}"
+  local f
+  f="$(mktemp "${TMPDIR:-/tmp}/mcp-auth-header.XXXXXX")" || return 1
+  printf 'Authorization: Bearer %s\n' "$token" > "$f"
+  printf '%s\n' "$f"
+}
+
 mcp_print_log_tail() {
   local log_file="${1:-${HARNESS_LOG_FILE:-}}"
   local lines="${2:-${HARNESS_LOG_TAIL_LINES:-120}}"
@@ -226,12 +237,17 @@ mcp_jsonrpc_call() {
     read -r -a extra_args <<< "${MCP_CURL_EXTRA_ARGS}"
   fi
 
+  local auth_header_file=""
+  if [[ -n "$token" ]]; then
+    auth_header_file="$(_mcp_auth_header_file "$token")" || auth_header_file=""
+  fi
+
   while :; do
     local body_file stderr_file resp_file
     body_file="$(mcp_mktemp_file "masc-jsonrpc-body" ".json")"
     stderr_file="$(mcp_mktemp_file "masc-jsonrpc-stderr" ".log")"
     resp_file="$(mcp_mktemp_file "masc-jsonrpc-resp" ".json")"
-    trap 'rm -f "$body_file" "$stderr_file" "$resp_file"' RETURN
+    trap 'rm -f "$body_file" "$stderr_file" "$resp_file" "$auth_header_file"' RETURN
     printf '%s' "$request_body" >"$body_file"
 
     local -a cmd=(
@@ -248,8 +264,8 @@ mcp_jsonrpc_call() {
     if [[ -n "${MCP_PROTOCOL_VERSION:-}" ]]; then
       cmd+=( -H "Mcp-Protocol-Version: $MCP_PROTOCOL_VERSION" )
     fi
-    if [[ -n "$token" ]]; then
-      cmd+=( -H "Authorization: Bearer $token" )
+    if [[ -n "$auth_header_file" ]]; then
+      cmd+=( -H "@$auth_header_file" )
     fi
     if [[ "${#extra_args[@]}" -gt 0 ]]; then
       cmd+=( "${extra_args[@]}" )
@@ -266,7 +282,7 @@ mcp_jsonrpc_call() {
     MCP_LAST_TIME_TOTAL="$cumulative_time"
     stderr_text="$(cat "$stderr_file" 2>/dev/null || true)"
     raw="$(cat "$resp_file" 2>/dev/null || true)"
-    rm -f "$body_file" "$stderr_file" "$resp_file"
+    rm -f "$body_file" "$stderr_file" "$resp_file" "$auth_header_file"
 
     if [[ "$status" -eq 0 ]]; then
       local normalized

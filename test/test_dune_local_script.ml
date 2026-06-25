@@ -221,6 +221,15 @@ let run_dune_local base bin_dir ?(env = []) ?(unset_env = []) subcommand =
   let path = Printf.sprintf "%s:%s" bin_dir system_path in
   let lock_path = Filename.concat base "dune-local.lock" in
   let opam_lock_path = Filename.concat base "opam-switch.lock" in
+  (* Most tests exercise fake Dune behavior inside an isolated temp repo. The
+     production bare-Dune guard scans the host process table, so unrelated
+     developer Dune processes would otherwise make these hermetic tests flaky.
+     Tests that target the guard pass [~unset_env] for this variable. *)
+  let allow_bare_dune_env =
+    if List.exists (String.equal "MASC_DUNE_ALLOW_BARE_DUNE") unset_env
+    then []
+    else [ ("MASC_DUNE_ALLOW_BARE_DUNE", "1") ]
+  in
   let full_env =
     [
       ("PATH", path);
@@ -231,6 +240,7 @@ let run_dune_local base bin_dir ?(env = []) ?(unset_env = []) subcommand =
       ("MASC_DUNE_LOCK_HELD", "0");
       ("MASC_OPAM_LOCK_HELD", "0");
     ]
+    @ allow_bare_dune_env
     @ List.filter
         (fun (k, _) ->
           k <> "PATH" && k <> "GIT_CEILING_DIRECTORIES" && k <> "DUNE_LOCAL_LOCK")
@@ -407,7 +417,9 @@ exec "$@"
            (quote lockf_log) (quote lockf_log) (quote opam_lock_path));
       (* Use a minimal PATH (no opam install directories) so that
          'command -v opam' fails and the guard is skipped.
-         opam is typically in ~/.opam/SWITCH/bin/, not in /usr/bin or /bin. *)
+         opam is typically in ~/.opam/SWITCH/bin/, not in /usr/bin or /bin.
+         The bare-Dune guard is not under test here, so keep the isolated fake
+         repo independent of host Dune processes. *)
       let minimal_path = Printf.sprintf "%s:/usr/bin:/bin" bin_dir in
       let lock_path = Filename.concat dir "dune-local.lock" in
       let script = Filename.concat scripts_dir "dune-local.sh" in
@@ -419,6 +431,7 @@ exec "$@"
               ("GIT_CEILING_DIRECTORIES", dir);
               ("DUNE_LOCAL_LOCK", lock_path);
               ("MASC_OPAM_LOCK_PATH", opam_lock_path);
+              ("MASC_DUNE_ALLOW_BARE_DUNE", "1");
             ]
           ~unset_env:[ "GITHUB_ACTIONS"; "MASC_SKIP_PIN_CHECK" ]
           [| "/bin/bash"; script; "build" |]
@@ -858,6 +871,7 @@ exit 1
               ("MASC_SKIP_PIN_CHECK", "1");
               ("MASC_SKIP_DEPS_CHECK", "1");
               ("MASC_SKIP_OCAML_VERSION_CHECK", "1");
+              ("MASC_DUNE_ALLOW_BARE_DUNE", "1");
             ]
           ~unset_env:[ "GITHUB_ACTIONS"; "MASC_DUNE_LOCK_HELD" ]
           [| "/bin/bash"; script; "build" |]
@@ -927,6 +941,7 @@ exec "$@"
               ("MASC_OPAM_LOCK_PATH", opam_lock_path);
               ("MASC_SKIP_DEPS_CHECK", "1");
               ("MASC_SKIP_OCAML_VERSION_CHECK", "1");
+              ("MASC_DUNE_ALLOW_BARE_DUNE", "1");
             ]
           ~unset_env:[ "GITHUB_ACTIONS"; "MASC_OPAM_LOCK_HELD" ]
           [| "/bin/bash"; script; "build" |]
@@ -1000,6 +1015,7 @@ exec "$@"
               ("MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT", "2");
               ("MASC_SKIP_DEPS_CHECK", "1");
               ("MASC_SKIP_OCAML_VERSION_CHECK", "1");
+              ("MASC_DUNE_ALLOW_BARE_DUNE", "1");
             ]
           ~unset_env:[ "GITHUB_ACTIONS"; "MASC_OPAM_LOCK_HELD" ]
           [| "/bin/bash"; script; "build" |]

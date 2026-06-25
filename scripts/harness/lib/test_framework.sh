@@ -9,6 +9,7 @@
 : "${CURL_RETRY_DELAY_SEC:=1}"
 : "${CURL_TIMEOUT_SEC:=25}"
 : "${MCP_SESSION_ID:=}"
+: "${MCP_TOKEN:=}"
 export MCP_SESSION_ID
 
 _HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

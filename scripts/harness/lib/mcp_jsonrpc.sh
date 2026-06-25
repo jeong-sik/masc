@@ -17,11 +17,13 @@ _HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${_HARNESS_DIR}/jsonrpc_sse.sh"
 
 mcp_default_auth_token() {
-  # Contract harnesses boot an isolated workspace. Prefer the harness/admin
-  # token minted for that workspace. Do not fall back to an inherited
-  # MASC_TOKEN: it can belong to a different base path and mask a broken
-  # bootstrap path.
-  if [[ -n "${MCP_AUTH_TOKEN:-}" ]]; then
+  # Contract harnesses use MCP_TOKEN as the canonical workspace-local token.
+  # MCP_AUTH_TOKEN and MASC_ADMIN_TOKEN are legacy aliases accepted only for
+  # older callers. Do not fall back to MASC_TOKEN: it can belong to a different
+  # base path and mask a broken bootstrap path.
+  if [[ -n "${MCP_TOKEN:-}" ]]; then
+    printf '%s' "$MCP_TOKEN"
+  elif [[ -n "${MCP_AUTH_TOKEN:-}" ]]; then
     printf '%s' "$MCP_AUTH_TOKEN"
   elif [[ -n "${MASC_ADMIN_TOKEN:-}" ]]; then
     printf '%s' "$MASC_ADMIN_TOKEN"
@@ -206,7 +208,7 @@ mcp_jsonrpc_call() {
   local method="$2"
   local params_json="$3"
   local session_id="${4:-${MCP_SESSION_ID:-}}"
-  local token="${5:-}"
+  local token="${5:-${MCP_TOKEN:-}}"
   local endpoint="${6:-${MCP_URL:-}}"
   local timeout_sec="${HTTP_TIMEOUT_SEC:-${CURL_TIMEOUT_SEC:-25}}"
 
@@ -331,7 +333,7 @@ mcp_call_tool() {
   local tool_name="$2"
   local args_json="$3"
   local session_id="${4:-${MCP_SESSION_ID:-}}"
-  local token="${5:-}"
+  local token="${5:-${MCP_TOKEN:-}}"
   local endpoint="${6:-${MCP_URL:-}}"
 
   local params_json

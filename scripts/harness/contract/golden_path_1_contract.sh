@@ -12,7 +12,7 @@
 #   MCP_URL=http://127.0.0.1:9935/mcp ./golden_path_1_contract.sh  # dev instance
 set -euo pipefail
 
-AGENT_NAME="${AGENT_NAME:-golden-path-1-harness}"
+AGENT_NAME="${AGENT_NAME:-${MCP_AGENT_NAME:-golden-path-1-harness}}"
 MCP_SESSION_ID="${MCP_SESSION_ID:-}"
 export MCP_SESSION_ID
 
@@ -59,13 +59,13 @@ ensure_contract_goal() {
 step_pass() { PASS=$((PASS + 1)); echo "  PASS"; }
 step_fail() { FAIL=$((FAIL + 1)); echo "  FAIL: $1"; }
 
-# ── Step 1/8: start ──
+# ── Step 1/8: start / bind session ──
 echo "[1/8] masc_start"
 r1="$(call_tool 1001 "masc_start" "$(jq -cn --arg path "$START_PATH" '{path:$path}')")"
 if require_ok "$r1"; then
   step_pass
 else
-  step_fail "start rejected"
+  step_fail "masc_start rejected"
   echo "$r1"
   exit 1
 fi
@@ -128,7 +128,7 @@ fi
 
 # ── Step 6/8: broadcast ──
 echo "[6/8] masc_broadcast"
-r6="$(call_tool 1006 "masc_broadcast" "{\"agent_name\":\"$AGENT_NAME\",\"message\":\"GP1 contract verification in progress\"}")"
+r6="$(call_tool 1006 "masc_broadcast" "$(jq -cn --arg agent_name "$AGENT_NAME" --arg message "GP1 contract verification in progress" '{agent_name:$agent_name,message:$message}')")"
 if require_ok "$r6"; then
   step_pass
 else

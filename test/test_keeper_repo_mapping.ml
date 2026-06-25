@@ -479,9 +479,45 @@ let test_validate_path_access_rejects_mismatched_url_basename_alias () =
             "expected URL basename not to authorize a mismatched repository"
       | Error msg ->
           Alcotest.(check bool)
-            "does not authorize as masc" true
-            (contains_substring msg
-               "Keeper executor is not allowed to access repository masc-mcp"))
+            "mentions identity mismatch" true
+            (contains_substring msg "Repository identity mismatch");
+          Alcotest.(check bool)
+            "mentions mismatched basename" true
+            (contains_substring msg "masc-mcp"))
+
+let test_validate_path_access_wildcard_rejects_mismatched_url_basename () =
+  with_temp_base_path (fun base_path ->
+      let root_repo =
+        { (sample_repo "me") with name = "me"; local_path = base_path }
+      in
+      let bad_repo =
+        { (sample_repo "masc") with
+          name = "masc";
+          url = "https://github.com/jeong-sik/masc-mcp";
+          local_path = Filename.concat base_path ".masc/repos/masc";
+        }
+      in
+      write_repositories base_path [ root_repo; bad_repo ];
+      write_mapping base_path "executor" [ "*" ];
+      let path =
+        Filename.concat base_path
+          ".masc/playground/docker/executor/repos/masc-mcp/lib"
+      in
+      ensure_dir path;
+      match
+        Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
+          ~base_path ~path
+      with
+      | Ok () ->
+          Alcotest.fail
+            "expected wildcard mapping not to authorize mismatched URL basename"
+      | Error msg ->
+          Alcotest.(check bool)
+            "mentions identity mismatch" true
+            (contains_substring msg "Repository identity mismatch");
+          Alcotest.(check bool)
+            "mentions mismatched basename" true
+            (contains_substring msg "masc-mcp"))
 
 let test_validate_path_access_playground_unique_clone_uses_git_remote () =
   with_temp_base_path (fun base_path ->
@@ -926,6 +962,8 @@ let () =
             test_validate_path_access_rejects_repo_identity_mismatch;
           Alcotest.test_case "mismatched URL basename is not an alias" `Quick
             test_validate_path_access_rejects_mismatched_url_basename_alias;
+          Alcotest.test_case "wildcard does not allow mismatched URL basename" `Quick
+            test_validate_path_access_wildcard_rejects_mismatched_url_basename;
           Alcotest.test_case "playground unique clone resolves git remote" `Quick
             test_validate_path_access_playground_unique_clone_uses_git_remote;
           Alcotest.test_case "playground exact remote URL is authoritative" `Quick

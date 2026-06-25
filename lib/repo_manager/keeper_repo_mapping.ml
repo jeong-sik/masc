@@ -465,6 +465,28 @@ let repository_resolution_of_repo ?repo_root ~segment repo =
   | Some mismatch -> Repository_identity_mismatch mismatch
   | None -> Repository repo.id
 
+let repository_identity_mismatch_for_url_basename_token ?repo_root ~segment
+    token repos =
+  if String.equal token "" then None
+  else
+    List.find_map
+      (fun repo ->
+        let url_basename = repository_url_basename repo.url in
+        if
+          String.equal url_basename ""
+          || not (token_matches_url_basename ~basename:url_basename token)
+        then None
+        else repository_identity_mismatch ?repo_root ~segment repo)
+      repos
+
+let unresolved_repository_segment_resolution ?repo_root ~segment repos =
+  match
+    repository_identity_mismatch_for_url_basename_token ?repo_root ~segment
+      segment repos
+  with
+  | Some mismatch -> Repository_identity_mismatch mismatch
+  | None -> Repository segment
+
 let resolve_repository_id_segment ~base_path ?repo_root segment =
   match Repo_store.load_all ~base_path with
   | Error msg ->
@@ -482,14 +504,23 @@ let resolve_repository_id_segment ~base_path ?repo_root segment =
       | Some repo -> repository_resolution_of_repo ?repo_root ~segment repo
       | None -> (
           match Option.bind repo_root remote_origin_url_of_repo_root with
-          | None -> Repository segment
+          | None -> unresolved_repository_segment_resolution ?repo_root ~segment repos
           | Some remote_url -> (
               match List.find_opt (fun repo -> String.equal repo.url remote_url) repos with
               | Some repo -> Repository repo.id
               | None -> (
               match List.find_opt (repository_matches_remote_url ~remote_url) repos with
               | Some repo -> repository_resolution_of_repo ?repo_root ~segment repo
-              | None -> Repository segment))))
+              | None -> (
+                  let remote_basename = repository_url_basename remote_url in
+                  match
+                    repository_identity_mismatch_for_url_basename_token
+                      ?repo_root ~segment remote_basename repos
+                  with
+                  | Some mismatch -> Repository_identity_mismatch mismatch
+                  | None ->
+                      unresolved_repository_segment_resolution ?repo_root
+                        ~segment repos)))))
 
 (** [path_under_repo ~base_path repo path] returns [true] when [path]
     is equal to or strictly under [repo]'s resolved local_path. *)

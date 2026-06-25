@@ -4,7 +4,7 @@ Date: 2026-06-25 17:41 KST
 
 Scope: current `main` at `469a29a919`, dedicated worktree
 `codex/memory-os-audit-20260625`, live runtime rooted at
-`/Users/dancer/me/.masc`.
+`<base-path>/.masc`.
 
 ## Verdict
 
@@ -35,18 +35,18 @@ This audit fixed two concrete code defects:
 [근거] Live runtime root:
 `curl -fsS 'http://127.0.0.1:8935/health?full=1'`, checked
 2026-06-25 17:31 KST, confidence High. Result: `effective_base_path` was
-`/Users/dancer/me`, `effective_masc_root` was `/Users/dancer/me/.masc`,
+the configured `<base-path>`, `effective_masc_root` was `<base-path>/.masc`,
 runtime commit was `469a29a919`, status was `ok`.
 
 [근거] Live Memory OS sizes:
-`du -sh /Users/dancer/me/.masc/config/keepers /Users/dancer/me/.masc/keepers /Users/dancer/me/.masc/recall_injections /Users/dancer/me/.masc/logs`,
+`du -sh <base-path>/.masc/config/keepers <base-path>/.masc/keepers <base-path>/.masc/recall_injections <base-path>/.masc/logs`,
 checked 2026-06-25 17:31 KST, confidence High. Result:
 `config/keepers=14M`, legacy `keepers=1.8G`, `recall_injections=47M`,
 `logs=232M`.
 
 [근거] Live Memory OS row counts:
-`wc -l /Users/dancer/me/.masc/config/keepers/*.facts.jsonl`,
-`wc -l /Users/dancer/me/.masc/config/keepers/*.events.jsonl`, and
+`wc -l <base-path>/.masc/config/keepers/*.facts.jsonl`,
+`wc -l <base-path>/.masc/config/keepers/*.events.jsonl`, and
 `find .../episodes -name '*.json' | wc -l`, checked 2026-06-25 17:31 KST,
 confidence High. Result: 2603 facts, 2207 events, 2207 episode files. Per-keeper
 stores were under the 384-row/file cap.
@@ -158,7 +158,7 @@ Read in this order when debugging or extending Memory OS:
    `ephemeral`, should expire and be dropped by write-time cap or GC.
 8. Self observation: "Keeper is idle/stuck." Claim kind `self_observation`,
    gets a one-hour horizon and is not promoted to `_shared`.
-9. Cross-keeper invariant: "Do not mutate `/Users/dancer/me` root checkout for
+9. Cross-keeper invariant: "Do not mutate `<workspace-root>` root checkout for
    feature work." Category `constraint`; if multiple keepers learn it, shared
    tier can surface it to others.
 10. Malformed librarian output: prose around a JSON object can currently be
@@ -167,11 +167,13 @@ Read in this order when debugging or extending Memory OS:
 
 ## Hardcoding, Env, And SSOT
 
-No hardcoded `/Users/dancer/me` path was found in the Memory OS implementation.
+No hardcoded local absolute workspace path was found in the Memory OS
+implementation code. This statement is scoped to implementation files, while the
+audit evidence above uses `<base-path>` placeholders for live-machine paths.
 Path ownership goes through `Config_dir_resolver`, `Env_config_core`, and the
-active runtime root. This respects the MASC local-persistence boundary:
-MASC owns file-backed keeper memory under `.masc`; OAS/model-provider code is
-not the owner.
+active runtime root. This respects the MASC local-persistence boundary: MASC owns
+file-backed keeper memory under `.masc`; OAS/model-provider code is not the
+owner.
 
 The env surface is broad but named and centralized enough to audit:
 
@@ -225,7 +227,7 @@ Residual:
 
 - Recall catches non-cancel exceptions, logs a warning, and returns an empty
   block. That is safe for turn progress, but the model does not see that recall
-  failed.
+  failed. Tracked as [#22293](https://github.com/jeong-sik/masc/issues/22293).
 - Librarian runtime is best-effort. Provider saturation, cadence, parse failure,
   or lane saturation can skip extraction. It logs metrics, but skipped turns are
   not equivalent to guaranteed memory preservation.
@@ -268,9 +270,9 @@ Memory OS current store:
 
 Adjacent `.masc` trash outside current Memory OS:
 
-- Legacy `/Users/dancer/me/.masc/keepers`: 1.8G.
-- `/Users/dancer/me/.masc/logs`: 232M.
-- `/Users/dancer/me/.masc/recall_injections`: 47M.
+- Legacy `<base-path>/.masc/keepers`: 1.8G.
+- `<base-path>/.masc/logs`: 232M.
+- `<base-path>/.masc/recall_injections`: 47M.
 - A targeted scan saw an atomic temp file under legacy `.masc/keepers` and a
   stray `PYEOF` path. Those are cleanup/backlog issues, not current Memory OS
   fact-store growth.

@@ -279,6 +279,35 @@ describe('refreshDashboard bootstrap', () => {
 })
 
 describe('refreshKeeperRuntimeStatus', () => {
+  it('force-refreshes post-action runtime status by default', async () => {
+    apiMocks.fetchDashboardShell.mockResolvedValue({
+      generated_at: '2026-06-25T12:00:00Z',
+      status: { project: 'me' },
+      counts: { agents: 0, tasks: 0, keepers: 1, total_runtimes: 1 },
+      configured_keepers: 1,
+      auth: null,
+      config_resolution: null,
+      runtime_resolution: null,
+    })
+    apiMocks.fetchDashboardExecution.mockResolvedValue({
+      generated_at: '2026-06-25T12:00:00Z',
+      status: { project: 'me' },
+      agents: [],
+      tasks: [],
+      messages: [],
+      keepers: [],
+      execution_queue: [],
+      worker_support_briefs: [],
+      continuity_briefs: [],
+    })
+
+    const store = await import('./store')
+
+    await store.refreshKeeperRuntimeStatus()
+
+    expect(apiMocks.fetchDashboardExecution).toHaveBeenCalledWith({ force: true })
+  })
+
   it('refreshes execution and light shell runtime status without full bootstrap', async () => {
     apiMocks.fetchDashboardShell.mockResolvedValue({
       generated_at: '2026-06-25T12:00:00Z',

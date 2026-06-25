@@ -880,7 +880,7 @@ let test_evicted_history_has_no_image_modality () =
             }
         ]
     in
-    let modalities ms = Masc.Runtime_agent.required_modalities_of_messages ms in
+    let modalities ms = Runtime_agent.For_testing.required_modalities_of_messages ms in
     (* Pre: the inline image makes "image" a required modality (reroute trigger). *)
     assert (List.mem "image" (modalities [ msg ]));
     let evicted =

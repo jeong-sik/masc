@@ -15,12 +15,6 @@ import type { DashboardToolInventoryItem, LogEntry, RuntimeDefaultsResponse } fr
 import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { FusionSettingsPanel } from './fusion-settings-panel'
 import { ThemeSwitch } from './theme-switch'
-
-// RFC-0273 §3.2 rollout flag. OFF: the fusion section is a read-only preview
-// (unchanged). ON: a live-backed writable editor (FusionSettingsPanel) renders
-// above the preview. Tier B writes global routing config (highest-risk surface),
-// so this stays opt-in until the write path has soaked.
-const FUSION_SETTINGS_WRITABLE: boolean = false
 import type { ComponentChildren } from 'preact'
 
 type SectionId = SettingsRouteSectionId
@@ -806,7 +800,7 @@ export function SettingsSurface() {
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
                 <span class="mono">masc_fusion</span> 의 out-of-band 심의 루프 (RFC-0252). 서로 다른 모델 패밀리로 패널을 구성해 관점 다양성을 확보하고, 심판이 종합합니다. fusion이 발화 가치 있는지는 keeper가 판단하고 게이트는 남용만 막습니다.
               </div>
-              ${FUSION_SETTINGS_WRITABLE && html`<${FusionSettingsPanel} />`}
+              <${FusionSettingsPanel} />
               <${SetRow} label="Fusion 심의" hint="끄면 masc_fusion 호출이 게이트에서 Deny 반환">
                 <${SetToggle} on=${fusionOn} onChange=${setFusionOn} />
               <//>

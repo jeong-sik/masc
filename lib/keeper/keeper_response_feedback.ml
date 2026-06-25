@@ -94,12 +94,26 @@ let empty_tally =
   { helpful = 0; not_helpful = 0; cleared = 0; net = 0; malformed = 0; last_at = None }
 
 let tally_of_records (records : record list) : tally =
-  (* Deduplicate by turn_id, last-occurrence-wins. The log is append-only and
-     chronological, so a re-vote or [Cleared] appended later supersedes the
-     earlier record for the same turn. [Turn_map.add] overwrites, so folding
-     left keeps the last occurrence. *)
+  (* Deduplicate by turn_id, keeping the record with the greatest [recorded_at]
+     — the latest vote for that turn (a re-vote or [Cleared] supersedes an
+     earlier one). [recorded_at] is the SINGLE authority for "latest", the same
+     one [last_at] uses below, so the winner is independent of the input list
+     order: a non-append read, a merge, or out-of-order input cannot change it.
+     (Earlier this dedup used [Turn_map.add] = list-position-last, which
+     disagreed with the [recorded_at]-based [last_at] — review CR.) On an exact
+     [recorded_at] tie the later list element wins, deterministic for a fixed
+     list. *)
   let latest =
-    List.fold_left (fun m (r : record) -> Turn_map.add r.turn_id r m) Turn_map.empty records
+    List.fold_left
+      (fun m (r : record) ->
+        Turn_map.update r.turn_id
+          (function
+            | None -> Some r
+            | Some existing ->
+              Some (if r.recorded_at >= existing.recorded_at then r else existing))
+          m)
+      Turn_map.empty
+      records
   in
   let counted =
     Turn_map.fold
@@ -112,10 +126,8 @@ let tally_of_records (records : record list) : tally =
         in
         let last_at =
           match acc.last_at with
-          | Some t when t >= r.recorded_at -> Some t
-          (* DET-OK: [recorded_at] is parsed input; the max fold is deterministic
-             for a fixed append-order record list. *)
-          | _ -> Some r.recorded_at
+          | None -> Some r.recorded_at
+          | Some t -> Some (Float.max t r.recorded_at)
         in
         { acc with last_at })
       latest

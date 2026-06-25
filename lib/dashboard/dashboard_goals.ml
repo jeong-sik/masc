@@ -157,6 +157,8 @@ let build_goal_verification_projection ~(config : Workspace.config) goals =
     (fun goal_id -> Hashtbl.find_opt request_table goal_id),
     (fun goal_id -> Hashtbl.find_opt latest_request_table goal_id),
     (fun goal_id ->
+      (* DET-OK: missing event bucket means the goal has no verification
+         events yet; the projection remains a total read model. *)
       Option.value (Hashtbl.find_opt events_table goal_id) ~default:[]),
     diagnostics )
 

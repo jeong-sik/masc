@@ -194,6 +194,16 @@ let closed_object_schema ?(required = []) properties =
   | schema -> schema
 ;;
 
+let unavailable_input_schema reason =
+  `Assoc
+    [ "type", `String "object"
+    ; "description", `String reason
+    ; "properties", `Assoc []
+    ; "required", `List [ `String "__masc_unavailable_schema" ]
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
 let execute_schema = Tool_shard_types.tool_execute_schema.input_schema
 
 let read_file_schema =
@@ -771,7 +781,7 @@ let find_cluster_schema_opt name =
 let required_base_schema_input name =
   match find_base_schema_opt name with
   | Some schema -> schema
-  | None -> failwith ("missing base tool schema for " ^ name)
+  | None -> unavailable_input_schema ("missing base tool schema for " ^ name)
 
 
 let tool_search_schema =
@@ -1004,7 +1014,7 @@ let cluster_descriptor ~id ~name ~description ~handler ~readonly
     | None
       when Option.is_some
              (Keeper_tool_name.masc_board_name_of_keeper_name name) ->
-      failwith ("missing board registry schema for " ^ name)
+      unavailable_input_schema ("missing board registry schema for " ^ name)
     | None -> passthrough_object_schema
   in
   in_process_descriptor

@@ -55,6 +55,23 @@ describe('KeeperWorkspaceRoster', () => {
     expect(host.querySelectorAll('.kw-kp-row').length).toBe(3)
   })
 
+  it('preserves legacy roster selector aliases used by detail shells', () => {
+    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
+
+    expect(host.querySelector('.kw-roster.roster')).not.toBeNull()
+    const firstHeader = host.querySelector('.kw-roster-group.roster-group') as HTMLElement
+    expect(firstHeader?.getAttribute('title')).toBe('주의 필요')
+
+    const toggle = host.querySelector('.rfilter-icon') as HTMLButtonElement
+    expect(toggle).not.toBeNull()
+    expect(host.querySelector('.roster-search')).toBeNull()
+
+    fireEvent.click(toggle)
+
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(host.querySelector('.kw-roster-search.roster-search')).not.toBeNull()
+  })
+
   it('marks the active keeper row', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
     const active = host.querySelector('.kw-kp-row[aria-current="true"]') as HTMLElement

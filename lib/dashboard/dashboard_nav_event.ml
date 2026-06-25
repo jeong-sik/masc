@@ -48,8 +48,7 @@ let valid_sections =
     )
   ; "code", [ "ide-shell" ]
   ; ( "settings"
-    , [ "account"
-      ; "mcp"
+    , [ "mcp"
       ; "runtime"
       ; "runtimes"
       ; "routing"

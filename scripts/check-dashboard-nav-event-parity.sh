@@ -5,7 +5,8 @@
 # `lib/dashboard/dashboard_nav_event.ml` (the POST /api/v1/dashboard/nav-event
 # validator) matches the TypeScript client's surface + section inventory in:
 #   - dashboard/src/types/sse.ts          (VALID_TABS — 9 surfaces)
-#   - dashboard/src/config/navigation.ts  (DASHBOARD_SECTION_ITEMS)
+#   - dashboard/src/config/navigation.ts  (DASHBOARD_SECTION_ITEMS and
+#     SETTINGS_ROUTE_SECTION_IDS)
 #
 # When the two drift, the server silently returns 400 for the unknown
 # (surface, section) pair, the client drops the event in its catch(), and
@@ -136,7 +137,28 @@ def parse_section_items() -> dict[str, list[str]]:
         ]
         out[tab] = ids
         pos = arr_end
+    settings_ids = parse_settings_route_section_ids(text)
+    if settings_ids:
+        out["settings"] = settings_ids
     return out
+
+
+def parse_settings_route_section_ids(text: str) -> list[str]:
+    """Extract routeable settings section IDs.
+
+    Settings is intentionally a sectionless sidebar surface, but the router
+    preserves non-default settings hashes such as `#settings?section=runtimes`.
+    The default account section normalizes to no `section` param, so it is not
+    a resolved nav-event target.
+    """
+    m = re.search(
+        r"export\s+const\s+SETTINGS_ROUTE_SECTION_IDS\s*=\s*\[([^\]]*)\]\s+as\s+const",
+        text,
+        re.MULTILINE | re.DOTALL,
+    )
+    if not m:
+        return []
+    return [section_id for section_id in re.findall(r"'([^']+)'", m.group(1)) if section_id != "account"]
 
 
 def parse_section_redirect_keys(text: str) -> set[tuple[str, str]]:

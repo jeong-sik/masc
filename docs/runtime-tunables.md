@@ -14,9 +14,9 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 362 unique knobs across 9 modules.
+**Total**: 365 unique knobs across 9 modules.
 
-**Typed getter classification**: 33/215 tagged (`operator`: 33, `algorithm`: 0, `unclassified`: 182).
+**Typed getter classification**: 36/218 tagged (`operator`: 36, `algorithm`: 0, `unclassified`: 182).
 
 ## Env_config_core (25 knobs; typed classification 1/8)
 
@@ -86,7 +86,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 58 | Max age for rate limit entries before cleanup (seconds) |
 | `MASC_SPAWN_CACHE_POLICY` | typed:string | unclassified | unclassified | 44 | Spawn cache policy: - off - safe_only (GLM direct HTTP only, no MCP-tool side effects) |
 
-## Env_config_keeper (75 knobs; typed classification 12/63)
+## Env_config_keeper (78 knobs; typed classification 15/66)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
@@ -162,6 +162,9 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 500 | Idle-gap timeout for streaming OAS provider responses. This bounds time between streamed lines, not total turn durati... |
 | `MASC_KEEPER_TURN_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 438 | Retry/admission budget in seconds for a single unified turn (including all retries and runtime fallbacks). This value... |
 | `MASC_KEEPER_VISIBILITY_GATE` | feature_flag | n/a | n/a | 342 | Consumer-driven idle backoff: when true, keepers with no dashboard/SSE observer and no pending signal delay proactive... |
+| `MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC` | typed:float | Timeouts | operator | 292 | Base delay before trying the next vision runtime after a failed provider attempt. A small default avoids tight failov... |
+| `MASC_KEEPER_VISION_CANDIDATE_BACKOFF_MAX_SEC` | typed:float | Timeouts | operator | 299 | Upper bound for the per-candidate vision failover delay. @category Timeouts @ops_class operator |
+| `MASC_KEEPER_VISION_MAX_IMAGE_BYTES` | typed:int | Policies | operator | 283 | Maximum raw image bytes accepted by the one-shot vision tool before provider-message construction. Default is 5 MiB t... |
 | `MASC_KEEPER_WORK_AS_HEARTBEAT` | feature_flag | n/a | n/a | 319 | Master switch. When true, successful Workspace.heartbeat after a unified turn counts as presence proof, allowing the ... |
 | `MASC_PAYLOAD_TELEMETRY` | typed:bool | unclassified | unclassified | 688 | Master switch for wake-payload measurement. Default off so the hot path is untouched until a baseline sweep is explic... |
 | `MASC_RUNTIME_SATURATION_SIGNAL_ENABLED` | typed:bool | unclassified | unclassified | 702 | {1 Runtime Saturation Signal (RFC-0153 Phase A.2)} Feature flag for typed [Runtime_saturation_signal.t] emission from... |

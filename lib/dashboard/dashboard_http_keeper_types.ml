@@ -79,7 +79,12 @@ let execution_trust_source = "execution_receipt"
 let execution_trust_producer = "keeper_agent_run.execution_receipt"
 let execution_trust_dashboard_surface = "/api/v1/dashboard/execution-trust"
 let execution_trust_freshness_slo_s = 900.0
-let execution_trust_refresh_interval_default_s = 60.0
+
+(* Fixed cadence, not an env knob: the compute timeout remains operator-tunable
+   via MASC_DASHBOARD_EXECUTION_TRUST_TIMEOUT_SEC. Keep the default timeout
+   below this interval so Proactive_refresh can finish or fail one attempt
+   before scheduling the next, while staying far inside the 900s freshness SLO. *)
+let execution_trust_refresh_interval_s = 60.0
 
 let max_ts_opt current candidate =
   match current with

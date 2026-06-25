@@ -806,8 +806,7 @@ let start_execution_trust_refresh_loop ~state ~sw ~clock =
     ~config:
       { (Proactive_refresh.default_config
            ~label:"execution_trust"
-           ~interval_s:
-             Env_config_runtime.Dashboard.execution_trust_refresh_interval_sec)
+           ~interval_s:Dashboard_http_keeper_types.execution_trust_refresh_interval_s)
         with
         timeout_s = Env_config_runtime.Dashboard.execution_trust_timeout_sec
       ; on_error =

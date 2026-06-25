@@ -37,11 +37,6 @@ let test_default_execution_trust () =
     "execution_trust_timeout_sec default (was inline 30.0)"
     30.0 D.execution_trust_timeout_sec
 
-let test_default_execution_trust_refresh_interval () =
-  check approx
-    "execution_trust_refresh_interval_sec default (was inline 60.0)"
-    60.0 D.execution_trust_refresh_interval_sec
-
 let test_trust_strictly_less_than_execution () =
   check bool
     "execution_trust_timeout_sec must be < execution_timeout_sec \
@@ -53,7 +48,6 @@ let test_trust_strictly_less_than_execution () =
 let test_smoke_call_sites_compile () =
   let _ = D.execution_timeout_sec in
   let _ = D.execution_trust_timeout_sec in
-  let _ = D.execution_trust_refresh_interval_sec in
   check bool "both accessors are reachable" true true
 
 let () =
@@ -64,8 +58,6 @@ let () =
           test_case "execution = 120.0" `Quick test_default_execution;
           test_case "execution_trust = 30.0" `Quick
             test_default_execution_trust;
-          test_case "execution_trust refresh = 60.0" `Quick
-            test_default_execution_trust_refresh_interval;
         ] );
       ( "trust < execution ordering",
         [

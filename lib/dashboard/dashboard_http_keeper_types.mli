@@ -65,7 +65,7 @@ val execution_trust_source : string
 val execution_trust_producer : string
 val execution_trust_dashboard_surface : string
 val execution_trust_freshness_slo_s : float
-val execution_trust_refresh_interval_default_s : float
+val execution_trust_refresh_interval_s : float
 
 val max_ts_opt : float option -> float -> float option
 

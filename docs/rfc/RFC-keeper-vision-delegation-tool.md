@@ -113,6 +113,7 @@ The librarian (`keeper_librarian_runtime.ml:20-22`, routed by `runtime_id_for_li
 ## 6. Workaround self-check (CLAUDE.md gate)
 
 - Not telemetry-as-fix (no counter; it removes the failure path).
+- **No in-tool silent success**: per §2.2, empty/whitespace extraction returns a typed `empty_extraction` error, not `Ok ""`. The tool cannot reproduce the 2026-06-25 empty-reply failure class one layer inward — the bug this RFC targets is not re-admitted by the fix.
 - Not a string/substring classifier (uses the typed capability predicate + typed artifact handle).
 - **N-of-M risk is real and must be closed, not asserted away** `[review: prior draft falsely claimed "no per-site patching"]`. Image entry has two sites (§2.3); the design avoids signature #3 **only if** the placeholder is enforced at ingestion *and* persisted into the checkpoint so rehydration cannot reproduce it. Phase 2 acceptance = both sites covered, proven by the save+reload unit test.
 - The §2.3 transform is **write-time protocol-boundary enforcement**, deliberately not sanitize-on-read.

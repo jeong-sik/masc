@@ -419,6 +419,26 @@ judge = "a"
          es)
   | Ok _ -> Alcotest.fail "expected Error Invalid_panel_size"
 
+let test_config_invalid_min_answered_floor () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p"
+[fusion.presets.p]
+panel = ["a", "b"]
+panel_system_prompt = "y"
+judge = "j"
+judge_system_prompt = "x"
+min_answered = 0
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Invalid_min_answered floor present" true
+      (List.mem (Fusion_config.Invalid_min_answered ("p", 0)) es)
+  | Ok _ -> Alcotest.fail "expected Error Invalid_min_answered"
+
 let test_config_missing_default () =
   let s =
     {|
@@ -1127,6 +1147,8 @@ let () =
             test_config_panelist_id_collision_fail_closed
         ; Alcotest.test_case "empty_presets" `Quick test_config_empty_presets
         ; Alcotest.test_case "invalid_size" `Quick test_config_invalid_size
+        ; Alcotest.test_case "invalid_min_answered_floor" `Quick
+            test_config_invalid_min_answered_floor
         ; Alcotest.test_case "missing_default" `Quick test_config_missing_default
         ; Alcotest.test_case "missing_prompt" `Quick test_config_missing_prompt
         ; Alcotest.test_case "missing_judge_model" `Quick test_config_missing_judge_model

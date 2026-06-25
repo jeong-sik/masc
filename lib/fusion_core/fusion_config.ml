@@ -61,6 +61,12 @@ let parse_judge_spec (tbl : Otoml.t) : Fusion_policy.judge_spec =
         [ "timeout_s" ]
   }
 
+let parse_min_answered name tbl =
+  match Otoml.find_opt tbl Otoml.get_integer [ "min_answered" ] with
+  | None -> Ok 1
+  | Some v when v < 1 -> Error (Invalid_min_answered (name, v))
+  | Some v -> Ok v
+
 (* 패널 그룹을 확정한 뒤 preset 완성 + 검증. judge_* 는 preset table에서 직접 읽는다
    (단일 심판 = simple/refine/conditional 심판이자 JOJ meta). [[...judges]] sub-table이
    있으면 JOJ 1차 심판 목록으로 파싱(없으면 []). 검증 순서: 크기(총합) → 패널 프롬프트 →
@@ -82,34 +88,35 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
     | Some entries -> List.map parse_judge_spec entries
     | None -> []
   in
-  (* 런타임 quorum. 미설정 시 1 = 기존 동작(>= 1 응답이면 심판 실행). 범위 검증은
-     Validated_preset.of_preset이 SSOT로 수행(1..모델 총합). *)
-  let min_answered = Otoml.find_or ~default:1 tbl Otoml.get_integer [ "min_answered" ] in
-  let p : Fusion_policy.preset =
-    { name; panels; judge; judge_system_prompt; judge_timeout_s; judges; min_answered }
-  in
-  (* 검증 SSOT는 Validated_preset.of_preset (RFC-0280). config는 그 [invalid]에 preset
+  (* 런타임 quorum. 미설정 시 1 = 기존 동작(>= 1 응답이면 심판 실행).
+     하한(<1)은 config parse boundary에서 즉시 거부하고, 상한(패널 총합 초과)은
+     Validated_preset.of_preset이 preset 전체를 보고 검증한다. *)
+  Result.bind (parse_min_answered name tbl) (fun min_answered ->
+    let p : Fusion_policy.preset =
+      { name; panels; judge; judge_system_prompt; judge_timeout_s; judges; min_answered }
+    in
+    (* 검증 SSOT는 Validated_preset.of_preset (RFC-0280). config는 그 [invalid]에 preset
      이름을 붙여 자기 [config_error]로 매핑만 한다 (운영자에게 어느 preset인지 알림).
      [open] 안 함 — invalid와 config_error가 Missing_prompt 등 동명 변형을 가져 LHS만
      full-qualify해 shadow를 피한다. *)
-  match Fusion_policy.Validated_preset.of_preset p with
-  | Ok vp -> Ok vp
-  | Error invalid ->
-    Error
-      (match invalid with
-       | Fusion_policy.Validated_preset.Bad_size n -> Invalid_panel_size (name, n)
-       | Fusion_policy.Validated_preset.Missing_prompt -> Missing_prompt name
-       | Fusion_policy.Validated_preset.Missing_judge_model -> Missing_judge_model name
-       | Fusion_policy.Validated_preset.Duplicate_panelist id ->
-         Duplicate_panelist (name, id)
-       | Fusion_policy.Validated_preset.Bad_max_tool_calls v ->
-         Invalid_max_tool_calls (name, v)
-       | Fusion_policy.Validated_preset.Judge_panel_prompt_missing ->
-         Judge_panel_prompt_missing name
-       | Fusion_policy.Validated_preset.Duplicate_judge id ->
-         Duplicate_judge (name, id)
-       | Fusion_policy.Validated_preset.Bad_min_answered v ->
-         Invalid_min_answered (name, v))
+    match Fusion_policy.Validated_preset.of_preset p with
+    | Ok vp -> Ok vp
+    | Error invalid ->
+      Error
+        (match invalid with
+         | Fusion_policy.Validated_preset.Bad_size n -> Invalid_panel_size (name, n)
+         | Fusion_policy.Validated_preset.Missing_prompt -> Missing_prompt name
+         | Fusion_policy.Validated_preset.Missing_judge_model -> Missing_judge_model name
+         | Fusion_policy.Validated_preset.Duplicate_panelist id ->
+           Duplicate_panelist (name, id)
+         | Fusion_policy.Validated_preset.Bad_max_tool_calls v ->
+           Invalid_max_tool_calls (name, v)
+         | Fusion_policy.Validated_preset.Judge_panel_prompt_missing ->
+           Judge_panel_prompt_missing name
+         | Fusion_policy.Validated_preset.Duplicate_judge id ->
+           Duplicate_judge (name, id)
+         | Fusion_policy.Validated_preset.Bad_min_answered v ->
+           Invalid_min_answered (name, v)))
 
 (* preset 한 명 파싱. 두 문법 분기:
    - 새 문법 [[fusion.presets.NAME.panels]] (array-of-tables) → 그룹별 파싱.

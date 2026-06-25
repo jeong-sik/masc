@@ -17,7 +17,7 @@ import { LoadingState } from './common/feedback-state'
 import { KeeperBadge } from './keeper-badge'
 import { openTaskDetail } from './goals/task-detail-state'
 import { GoalCreateForm } from './goals/goal-create-form'
-import { showGoalCreate } from './goals/goal-create-state'
+import { showGoalCreate, GOAL_PRIORITY_MAX } from './goals/goal-create-state'
 import type { Goal, Task, Keeper } from '../types'
 
 type WorkSection = 'work' | 'board' | 'sub-boards' | 'moderation' | 'planning' | 'repositories' | 'verification'
@@ -568,22 +568,29 @@ interface KanbanTask extends Task {
   readonly _goalTitle: string
 }
 
+// Task priorities share the goal 1–5 scale (1 = highest). The prototype only
+// accents P1–P3 in the kanban card chip; P4+ render with the muted base style.
+const TASK_PRIORITY_DEFAULT = GOAL_PRIORITY_MAX
+const KANBAN_ACCENT_PRIORITY_MAX = 3
+const KANBAN_MUTED_PRIORITY_BUCKET = 4
+
 function KanbanCard({
   task,
   onClaim,
-  onJumpGoal,
 }: {
   task: KanbanTask
   onClaim: (id: string) => void
-  onJumpGoal: (goalId: string) => void
 }) {
   const state = jobStateForTask(task)
   const keeper = keeperByName(task.assignee)
   const blocker = blockerNoteForTask(task)
-  const hasHandoff = !!(task.handoff_context?.summary || task.handoff_context?.next_step)
+  const p = task.priority ?? TASK_PRIORITY_DEFAULT
+  const normalizedPrio = p <= KANBAN_ACCENT_PRIORITY_MAX ? p : KANBAN_MUTED_PRIORITY_BUCKET
+  const description = task.description ?? ''
+  const hasDescription = description.length > 0
 
   return html`
-    <div
+    <article
       class=${`wk-kcard ${state.cls}`}
       role="button"
       tabIndex=${0}
@@ -603,19 +610,12 @@ function KanbanCard({
     >
       <div class="wk-kcard-top">
         <span class="wk-kcard-id mono">${task.id}</span>
-        <span class="wk-kcard-prio mono">P${task.priority ?? 0}</span>
+        <span class=${`wk-kcard-prio prio-${normalizedPrio}`}>P${p}</span>
       </div>
       <div class="wk-kcard-title">${task.title}</div>
       ${blocker ? html`<div class="wk-kcard-block">⚠ ${blocker}</div>` : null}
-      <button
-        class="wk-kcard-goal"
-        type="button"
-        title=${`소속 목표로 이동 · ${task._goalTitle}`}
-        onClick=${(e: Event) => { e.stopPropagation(); onJumpGoal(task._goalId) }}
-      >↳ ${task._goalTitle}</button>
+      ${hasDescription ? html`<p class="wk-kcard-desc">${description}</p>` : null}
       <div class="wk-kcard-foot">
-        ${hasHandoff ? html`<span class="wk-kcard-ho" title="핸드오프 이력">⇄</span>` : null}
-        <span class="wk-spacer"></span>
         ${keeper
           ? html`
             <button
@@ -636,20 +636,18 @@ function KanbanCard({
                 onClick=${(e: Event) => { e.stopPropagation(); onClaim(task.id) }}
               >＋</button>
             `
-            : html`<span class="wk-kcard-kp none mono">·</span>`}
+            : html`<span class="wk-kcard-kp none mono">미배정</span>`}
       </div>
-    </div>
+    </article>
   `
 }
 
 function KanbanView({
   kanbanTasks,
   onClaim,
-  onJumpGoal,
 }: {
   kanbanTasks: ReadonlyArray<KanbanTask>
   onClaim: (id: string) => void
-  onJumpGoal: (goalId: string) => void
 }) {
   return html`
     <div class="wk-kanban" data-testid="work-kanban">
@@ -658,9 +656,8 @@ function KanbanView({
         return html`
           <div key=${status} class=${`wk-kcol ${cls}`} data-testid=${`kanban-col-${status}`}>
             <div class="wk-kcol-h">
-              <span class=${`wk-kcol-dot ${cls}`} aria-hidden="true"></span>
-              ${label}
-              <span class="wk-kcol-n mono">${col.length}</span>
+              <span class="wk-kcol-title">${label}</span>
+              <span class="wk-kcol-count">${col.length}</span>
             </div>
             <div class="wk-kcol-body">
               ${col.length === 0
@@ -670,7 +667,6 @@ function KanbanView({
                     key=${t.id}
                     task=${t}
                     onClaim=${onClaim}
-                    onJumpGoal=${onJumpGoal}
                   />
                 `)}
             </div>
@@ -944,6 +940,9 @@ function WorkAside({
 }
 
 function WorkSurfaceV2() {
+  // Read showGoalCreate at the top so this component re-renders when the
+  // side-panel toggle changes.
+  const goalCreateOpen = showGoalCreate.value
   const goalList = goals.value
   const allTasks = tasks.value
 
@@ -1146,65 +1145,65 @@ function WorkSurfaceV2() {
   }, [])
 
   return html`
-    <main class="ov ov-2col">
+    <main class=${`ov ov-2col ${goalCreateOpen ? 'ov-with-panel' : ''}`}>
       <div class="ov-scroll">
-        <header class="ov-head">
-            <div>
-              <span class="ov-eyebrow">Goal Store</span>
-              <h1>작업 · 목표</h1>
-              <p class="ov-sub">Goal → Task → keeper · 우선순위 순으로 정렬 · 게이트 증거로 검증</p>
-            </div>
-            <div class="wk-head-r">
-              <div class="wk-viewseg" role="tablist" data-testid="work-viewseg">
-                <button
-                  type="button"
-                  class=${view === 'list' ? 'on' : ''}
-                  role="tab"
-                  aria-selected=${view === 'list'}
-                  data-testid="work-view-list"
-                  onClick=${() => switchView('list')}
-                >리스트</button>
-                <button
-                  type="button"
-                  class=${view === 'kanban' ? 'on' : ''}
-                  role="tab"
-                  aria-selected=${view === 'kanban'}
-                  data-testid="work-view-kanban"
-                  onClick=${() => switchView('kanban')}
-                >칸반</button>
-              </div>
+        <header class="ov-head wk-head">
+          <div>
+            <span class="ov-eyebrow">GOAL STORE</span>
+            <h1>작업 · 목표</h1>
+            <p class="ov-sub">Goal → Task → keeper · 우선순위 순 정렬과 게이트 증거로 검증</p>
+          </div>
+          <div class="wk-head-r">
+            <div class="wk-viewseg" role="tablist" data-testid="work-viewseg">
               <button
                 type="button"
-                class="set-add wk-newgoal"
-                data-testid="work-new-goal"
-                title="새 목표 생성"
-                onClick=${() => { showGoalCreate.value = true }}
-              >
-                ＋ 새 목표
-              </button>
+                class=${view === 'list' ? 'on' : ''}
+                role="tab"
+                aria-selected=${view === 'list'}
+                data-testid="work-view-list"
+                onClick=${() => switchView('list')}
+              >리스트</button>
+              <button
+                type="button"
+                class=${view === 'kanban' ? 'on' : ''}
+                role="tab"
+                aria-selected=${view === 'kanban'}
+                data-testid="work-view-kanban"
+                onClick=${() => switchView('kanban')}
+              >칸반</button>
             </div>
-          </header>
+            <button
+              type="button"
+              class="wk-newgoal"
+              data-testid="work-new-goal"
+              title="새 목표 생성"
+              onClick=${() => { showGoalCreate.value = true }}
+            >
+              ＋ 새 목표
+            </button>
+          </div>
+        </header>
 
-          <section class="ov-kpis" data-testid="work-kpis" style=${{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
-            <div class="ov-kpi">
-              <div class="ov-kpi-k">활성 목표</div>
-              <div class="ov-kpi-v volt" data-testid="kpi-goals">${totals.goals}</div>
+          <section class="wk-kpis" data-testid="work-kpis">
+            <div class="wk-kpi">
+              <div class="wk-kpi-k">활성 목표</div>
+              <div class="wk-kpi-v brass" data-testid="kpi-goals">${totals.goals}</div>
             </div>
-            <div class="ov-kpi">
-              <div class="ov-kpi-k">전체 Task</div>
-              <div class="ov-kpi-v" data-testid="kpi-tasks">${totals.tasks}</div>
+            <div class="wk-kpi">
+              <div class="wk-kpi-k">전체 TASK</div>
+              <div class="wk-kpi-v" data-testid="kpi-tasks">${totals.tasks}</div>
             </div>
-            <div class="ov-kpi">
-              <div class="ov-kpi-k">진행 중</div>
-              <div class=${`ov-kpi-v ${totals.wip > 0 ? 'volt' : ''}`} data-testid="kpi-wip">${totals.wip}</div>
+            <div class="wk-kpi">
+              <div class="wk-kpi-k">진행 중</div>
+              <div class=${`wk-kpi-v ${totals.wip > 0 ? 'volt' : ''}`} data-testid="kpi-wip">${totals.wip}</div>
             </div>
-            <div class="ov-kpi">
-              <div class="ov-kpi-k">검증 대기</div>
-              <div class=${`ov-kpi-v ${totals.verify > 0 ? 'volt' : ''}`} data-testid="kpi-verify">${totals.verify}</div>
+            <div class="wk-kpi">
+              <div class="wk-kpi-k">검증 대기</div>
+              <div class=${`wk-kpi-v ${totals.verify > 0 ? 'volt' : ''}`} data-testid="kpi-verify">${totals.verify}</div>
             </div>
-            <div class="ov-kpi">
-              <div class="ov-kpi-k">백로그</div>
-              <div class=${`ov-kpi-v ${totals.backlog > 0 ? 'warn' : ''}`} data-testid="kpi-backlog">${totals.backlog}</div>
+            <div class="wk-kpi">
+              <div class="wk-kpi-k">백로그</div>
+              <div class=${`wk-kpi-v ${totals.backlog > 0 ? 'warn' : ''}`} data-testid="kpi-backlog">${totals.backlog}</div>
             </div>
           </section>
 
@@ -1238,7 +1237,7 @@ function WorkSurfaceV2() {
               goalList.length > 0 ? html`
                 <div class="wk-list" data-testid="work-goal-list">
                   ${[...goalList]
-                    .sort((a, b) => (a.priority ?? 4) - (b.priority ?? 4) || (b.updated_at ?? b.created_at ?? '').localeCompare(a.updated_at ?? a.created_at ?? ''))
+                    .sort((a, b) => (a.priority ?? GOAL_PRIORITY_MAX) - (b.priority ?? GOAL_PRIORITY_MAX) || (b.updated_at ?? b.created_at ?? '').localeCompare(a.updated_at ?? a.created_at ?? ''))
                     .map(g => html`
                     <${GoalCard}
                       key=${g.id}
@@ -1255,23 +1254,24 @@ function WorkSurfaceV2() {
               <${KanbanView}
                 kanbanTasks=${kanbanTasks}
                 onClaim=${claimTask}
-                onJumpGoal=${jumpToGoal}
               />
             `}
 
           <div class="wk-foot mono">Goal → Task → keeper · 우선순위 순 정렬 · 완료는 게이트 증거 충족 후 done · 미배정 task 는 백로그에서 claim</div>
       </div>
-      <${WorkAside}
-        flagged=${wkaFlagged}
-        approvals=${wkaApprovals}
-        verifyTasks=${wkaVerifyTasks}
-        blockers=${wkaBlockers}
-        backlog=${wkaBacklog}
-        recent=${wkaRecent}
-        counts=${wkaCounts}
-        onJump=${jumpToGoal}
-        onOpenKeeper=${openKeeperWorkspace}
-      />
+      ${goalCreateOpen ? html`<${GoalCreateForm} />` : html`
+        <${WorkAside}
+          flagged=${wkaFlagged}
+          approvals=${wkaApprovals}
+          verifyTasks=${wkaVerifyTasks}
+          blockers=${wkaBlockers}
+          backlog=${wkaBacklog}
+          recent=${wkaRecent}
+          counts=${wkaCounts}
+          onJump=${jumpToGoal}
+          onOpenKeeper=${openKeeperWorkspace}
+        />
+      `}
     </main>
   `
 }
@@ -1283,23 +1283,20 @@ export function Work() {
 
   return html`
     <div class="v2-workspace-surface flex min-w-0 flex-col gap-3">
-      <div class="min-w-0 transition-opacity duration-[var(--t-slow)]">
-        <${ErrorBoundary} label=${current}>
-          ${current === 'work' ? html`<${WorkSurfaceV2} />`
-            : current === 'board' ? html`<${BoardSurface} />`
-            : current === 'sub-boards' ? html`<${SubBoardSurface} />`
-            : current === 'moderation' ? html`<${BoardModerationSurface} />`
-            : current === 'planning' ? html`<${PlanningPanel} />`
-            : current === 'repositories' ? html`
-              <${Suspense} fallback=${html`<${LoadingState}>저장소 화면 불러오는 중...<//>`}>
-                <${LazyRepositoryManagement} />
-              <//>
-            `
-            : html`<${VerificationRequestsPanel} />`
-          }
-        <//>
-      </div>
-      <${GoalCreateForm} />
+      <${ErrorBoundary} label=${current}>
+        ${current === 'work' ? html`<${WorkSurfaceV2} />`
+          : current === 'board' ? html`<${BoardSurface} />`
+          : current === 'sub-boards' ? html`<${SubBoardSurface} />`
+          : current === 'moderation' ? html`<${BoardModerationSurface} />`
+          : current === 'planning' ? html`<${PlanningPanel} />`
+          : current === 'repositories' ? html`
+            <${Suspense} fallback=${html`<${LoadingState}>저장소 화면 불러오는 중...<//>`}>
+              <${LazyRepositoryManagement} />
+            <//>
+          `
+          : html`<${VerificationRequestsPanel} />`
+        }
+      <//>
     </div>
   `
 }

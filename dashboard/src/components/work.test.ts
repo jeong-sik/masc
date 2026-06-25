@@ -59,6 +59,7 @@ vi.mock('./repository-management', () => ({
 
 import { goals, keepers, tasks } from '../store'
 import { selectedTask } from './goals/task-detail-selection'
+import { showGoalCreate } from './goals/goal-create-state'
 import { Work } from './work'
 
 describe('Work', () => {
@@ -66,12 +67,14 @@ describe('Work', () => {
     cleanup()
     navigateMock.mockClear()
     selectedTask.value = null
+    showGoalCreate.value = false
   })
 
   beforeEach(() => {
     goals.value = []
     tasks.value = []
     keepers.value = []
+    showGoalCreate.value = false
   })
 
   it('renders the SubBoard surface for the workspace sub-boards section', () => {
@@ -167,6 +170,8 @@ describe('Work', () => {
       expect(screen.getByTestId('kpi-wip').textContent).toBe('1')
       expect(screen.getByTestId('kpi-verify').textContent).toBe('1')
       expect(screen.getByTestId('kpi-backlog').textContent).toBe('2')
+      // Five elevated KPI cards
+      expect(screen.getByTestId('work-kpis').children.length).toBe(5)
       expect(screen.getByText(/백로그에서 claim/).textContent).toContain('claim')
       expect(screen.getByTestId('work-goal-list')).toBeTruthy()
     })
@@ -183,12 +188,13 @@ describe('Work', () => {
       expect(button).not.toBeDisabled()
 
       // Form is hidden initially
-      expect(screen.queryByTestId('goal-create-form')).toBeNull()
+      expect(screen.queryByTestId('goal-create-panel')).toBeNull()
 
       fireEvent.click(button)
 
-      // Form appears after click
-      expect(screen.getByTestId('goal-create-form')).toBeTruthy()
+      // Side panel appears after click and WorkAside is hidden
+      expect(screen.getByTestId('goal-create-panel')).toBeTruthy()
+      expect(screen.queryByTestId('work-aside')).toBeNull()
     })
 
     it('renders a collapsed goal card per goal and expands on click', () => {
@@ -490,7 +496,7 @@ describe('Work', () => {
 
         // Open the form
         fireEvent.click(screen.getByTestId('work-new-goal'))
-        expect(screen.getByTestId('goal-create-form')).toBeTruthy()
+        expect(screen.getByTestId('goal-create-panel')).toBeTruthy()
 
         // Fill in the title
         const titleInput = screen.getByTestId('goal-create-title-input')
@@ -510,6 +516,7 @@ describe('Work', () => {
         const rawCalls = callMcpToolMock.mock.calls as unknown as [string, Record<string, unknown>][]
         const callArgs = rawCalls[0]?.[1] ?? {}
         expect(callArgs).not.toHaveProperty('horizon')
+        expect(callArgs).not.toHaveProperty('lead_keeper')
         expect(callArgs).not.toHaveProperty('status')
         expect(callArgs).not.toHaveProperty('phase')
       })
@@ -892,7 +899,7 @@ describe('Work', () => {
         expect(colFor('done')?.querySelector('[data-kanban-task-id="T-done"]')).toBeTruthy()
       })
 
-      it('shows the goal title on each kanban card and hides the backlog strip in kanban view', () => {
+      it('shows task titles on kanban cards and hides the backlog strip in kanban view', () => {
         goals.value = [
           { id: 'G-1', title: 'Target Goal', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
@@ -905,9 +912,10 @@ describe('Work', () => {
         render(html`<${Work} />`)
         fireEvent.click(screen.getByTestId('work-view-kanban'))
 
-        // Goal title appears in card goal link
+        // Task titles appear on cards
         const board = screen.getByTestId('work-kanban')
-        expect(board.textContent).toContain('Target Goal')
+        expect(board.textContent).toContain('Some task')
+        expect(board.textContent).toContain('Claimable')
 
         // Backlog strip (.wk-backlog) must NOT be present in kanban view
         expect(screen.queryByTestId('work-backlog')).toBeNull()

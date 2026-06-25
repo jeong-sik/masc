@@ -576,22 +576,29 @@ let handle
                   "invalid_media_type"
               | Ok media_type ->
                 (match
-                   Va.make_request ~query ~image_media_type:media_type
-                     ~image_bytes:bytes
+                   run_vision ~complete ~timeout_sec ~sw ~clock ~net ~query
+                     ~media_type ~bytes ()
                  with
-                 | Error msg ->
+                 | Vo_ok t -> ok_json t
+                 | Vo_invalid_request msg ->
                    err_json
                      ~failure_class:Tool_result.Policy_rejection
                      ~detail:msg
                      "invalid_request"
-                 | Ok req ->
-                   run_candidates
-                     ~complete
-                     ~deadline:(Eio.Time.now clock +. timeout_sec)
-                     ~sw
-                     ~clock
-                     ~net
-                     ~messages:[ message_of_request req ]
-                     ~last_error:None
-                     ~attempt_index:0
-                     (vision_runtime_candidates ()))))))
+                 | Vo_no_runtime msg ->
+                   err_json
+                     ~failure_class:Tool_result.Runtime_failure
+                     ~detail:msg
+                     "no_capable_runtime"
+                 | Vo_timeout ->
+                   err_json ~failure_class:Tool_result.Transient_error "timeout"
+                 | Vo_provider { failure_class; detail } ->
+                   err_json ~failure_class ~detail "provider_error"
+                 | Vo_empty ->
+                   err_json
+                     ~failure_class:Tool_result.Workflow_rejection
+                     "empty_extraction"
+                 | Vo_truncated ->
+                   err_json
+                     ~failure_class:Tool_result.Runtime_failure
+                     "truncated_extraction")))

@@ -782,7 +782,8 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune exec ./test/test_operator_control.exe"
+          operator_targets="@test/runtest-test_operator_control_snapshot_state @test/runtest-test_operator_control_snapshot @test/runtest-test_operator_control_snapshot_cache"
+          scripts/ci-run-tests.sh "opam exec -- dune build ${operator_targets}"
 
       - name: Run SSE reconnect e2e
         id: sse_reconnect_e2e
@@ -793,6 +794,7 @@ jobs:
           CI_TEST_HEARTBEAT_SEC: 15
           CI_TEST_ALLOW_FLAKY_RETRY: "1"
           DUNE_JOBS: 1
+          MASC_E2E_TESTS: "true"
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh

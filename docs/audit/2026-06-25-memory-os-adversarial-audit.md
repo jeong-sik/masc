@@ -2,9 +2,9 @@
 
 Date: 2026-06-25 17:41 KST
 
-Scope: current `main` at `469a29a919`, dedicated worktree
-`codex/memory-os-audit-20260625`, live runtime rooted at
-`<base-path>/.masc`.
+Scope: code review branch rebased onto `origin/main` at `6072c5b874`,
+dedicated worktree `codex/memory-os-audit-20260625`, and live runtime rooted at
+`<base-path>/.masc` with runtime commit `469a29a919`.
 
 ## Verdict
 
@@ -22,13 +22,16 @@ ephemeral `unstructured_note` facts. Live data already shows that debt: 54
 dashboard health endpoint, and legacy/schema-drift rows including
 `category="external_state"` and `schema_version="rfc0231-v2"`.
 
-This audit fixed two concrete code defects:
+This audit fixed two concrete code defects and one CI-radius defect:
 
 1. `keeper_memory_os_reconcile_gh.ml` no longer has an `assert false` path for
    `Task` external references. Unsupported refs now return `Unverifiable`.
 2. `keeper_memory_os_io.ml` no longer misclassifies arbitrary body
    `Failure` exceptions inside `with_facts_lock` as lock-acquisition timeouts.
    A regression test pins that behavior.
+3. `.github/workflows/ci.yml` no longer points the focused operator-control
+   gate at a non-existent aggregate executable, and the SSE e2e gate now sets
+   `MASC_E2E_TESTS=true` so its existing Dune stanza is enabled.
 
 ## Evidence
 
@@ -68,6 +71,12 @@ data races, and data-race-free programs get sequentially consistent semantics.
 2026-06-25 17:41 KST, confidence High. Eio is effect-based parallel IO for
 OCaml with fibers, domains, switches, cancellation, mutexes, semaphores, pools,
 and executor pools.
+
+[근거] Focused local target verification after rebase:
+`env MASC_E2E_TESTS=true scripts/dune-local.sh build --cache=disabled test/test_keeper_memory_os.exe @test/runtest-test_operator_control_snapshot_state @test/runtest-test_operator_control_snapshot @test/runtest-test_operator_control_snapshot_cache test/test_sse_storm_e2e.exe`,
+checked 2026-06-25 18:54 KST, confidence Medium. The wrapper used the worktree
+`_build`, built the touched Memory OS and SSE targets, and the visible
+operator-control state/cache tests passed. CI remains the merge authority.
 
 [근거] Current memory-agent references:
 [LangGraph memory docs](https://docs.langchain.com/oss/python/concepts/memory),
@@ -222,6 +231,10 @@ Fixed:
   GraphQL query construction. The current patch returns `Unverifiable`.
 - `keeper_memory_os_io.ml` caught broad `Failure` and labeled it a lock timeout.
   The current patch catches only `File_lock_eio.Flock_timeout`.
+- `.github/workflows/ci.yml` drifted from current Dune targets:
+  `test_operator_control.exe` no longer exists, and `test_sse_storm_e2e` is
+  disabled unless `MASC_E2E_TESTS=true`. The current patch points CI at the
+  existing focused operator-control aliases and enables the SSE stanza.
 
 Residual:
 

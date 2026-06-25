@@ -70,6 +70,7 @@ wait_for_mcp_initialize_ready() {
   local timeout_sec="${2:-25}"
   local deadline=$(( $(date +%s) + timeout_sec ))
   local body='{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"contract-bootstrap","version":"1.0"},"capabilities":{}}}'
+  local last_status="000"
   local auth_token
   auth_token="$(mcp_default_auth_token)"
   if [[ -z "$auth_token" ]]; then
@@ -88,12 +89,14 @@ wait_for_mcp_initialize_ready() {
         "${extra_headers[@]}" \
         -d "$body" 2>/dev/null || true
     )"
+    last_status="$status"
     if [[ "$status" == "200" ]]; then
       return 0
     fi
     sleep 1
   done
 
+  echo "MCP initialize readiness did not reach 200; last_http_status=${last_status}" >&2
   return 1
 }
 

@@ -61,6 +61,10 @@ else
   echo "$r1"
   exit 1
 fi
+if [ -z "${MCP_SESSION_ID:-}" ]; then
+  step_fail "empty MCP_SESSION_ID after masc_start"
+  exit 1
+fi
 
 # ── Step 2/8: add_task ──
 echo "[2/8] masc_add_task"

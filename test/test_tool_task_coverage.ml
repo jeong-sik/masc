@@ -879,7 +879,7 @@ let () = test "handle_transition_valid_actions_respect_verification_disabled"
   let message = Tool_result.message result in
   assert (not (Tool_result.is_success result));
   assert (str_contains message "Transition 'submit_for_verification'");
-  assert (str_contains message "Valid actions: start, done, cancel, release");
+  assert (str_contains message "Valid actions: claim, start, done, cancel, release");
   assert (not (str_contains message "Valid actions: start, done, submit_for_verification"))
 )
 
@@ -1307,8 +1307,8 @@ let () = test "handle_transition_blocks_submitter_verdict_actions" (fun () ->
          assert (not (Tool_result.is_success result));
          assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
          assert (str_contains (Tool_result.message result) expected))
-      [ "approve", "Self-approval not allowed"
-      ; "reject", "Self-rejection not allowed"
+      [ "approve", "Transition 'approve'"
+      ; "reject", "Transition 'reject'"
       ];
     assert_task_awaiting_verification_by worker_ctx "worker"))
 

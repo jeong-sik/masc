@@ -153,7 +153,6 @@ function fleetLifecycleActions(keeper: Keeper): KeeperActionKey[] {
 
 async function runFleetKeeperAction(name: string, action: KeeperActionKey): Promise<void> {
   await runKeeperAction(name, action)
-  await refreshAfterRuntimeAction()
 }
 
 function keeperRecentTools(keeper: Keeper): string[] {
@@ -175,6 +174,8 @@ function FleetSelectedSection({ keeper }: { keeper: Keeper }): VNode {
   const phase = keeperPhaseLabel(keeper)
   const model = keeperModelLabel(keeper)
   const runtime = keeperRuntimeLabel(keeper)
+  const bucket = keeperBucket(keeper)
+  const tone = keeperFleetTone(keeper)
   const lifecycle = keeper.phase || keeper.lifecycle_phase || keeper.status
   const actions = fleetLifecycleActions(keeper).filter(action => action !== 'shutdown').slice(0, 3)
   const [pendingAction, setPendingAction] = useState<KeeperActionKey | null>(null)
@@ -185,15 +186,15 @@ function FleetSelectedSection({ keeper }: { keeper: Keeper }): VNode {
   }
 
   return html`
-    <div class="kw-fleet-aside" data-tone=${keeperFleetTone(keeper)}>
+    <div class="kw-fleet-aside" data-tone=${tone}>
       <div class="kw-fleet-aside-head">
-        <${WorkspaceSigil} id=${keeper.name} size=${40} beat=${keeperBucket(keeper) === 'running'} />
+        <${WorkspaceSigil} id=${keeper.name} size=${40} beat=${bucket === 'running'} />
         <div class="kw-fleet-aside-title">
           <span class="kw-fleet-aside-kicker">Selected runtime</span>
           <strong title=${keeper.agent_name || keeper.name}>${keeper.koreanName || keeper.agent_name || keeper.name}</strong>
           <span title=${keeper.name}>${keeper.name}</span>
         </div>
-        <span class="kw-fleet-aside-state">${keeper.status}</span>
+        <span class="kw-fleet-aside-state" title=${keeper.status}>${phase}</span>
       </div>
       <button type="button" class="kw-fleet-chat" onClick=${openChat}>대화 콘솔 열기</button>
       <div class="kw-fleet-phase" title=${activity.source !== 'none' ? activity.label : phase}>
@@ -304,7 +305,7 @@ function ThroughputSection({ keeper }: { keeper: Keeper }): VNode {
   const peak = Math.max(1, ...series)
   const latest = allSeries.at(-1) ?? 0
   const avg = series.length ? Math.round(series.reduce((a, b) => a + b, 0) / series.length) : 0
-  const live = keeper.status.toLowerCase() === 'running' || keeper.status.toLowerCase() === 'active'
+  const live = keeperBucket(keeper) === 'running'
   return html`
     <div class="ctx-sec">
       <h4

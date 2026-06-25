@@ -115,6 +115,12 @@ let first_vision_runtime_id () : (string, string) result =
 let vision_store_dir ~keeper_name =
   Filename.concat (Config_dir_resolver.keepers_dir ()) (keeper_name ^ ".vision")
 
+let store_artifact ~dir bytes =
+  Eio_guard.run_in_systhread (fun () -> Store.store ~dir bytes)
+
+let load_artifact ~dir handle =
+  Eio_guard.run_in_systhread (fun () -> Store.load ~dir handle)
+
 let record_vision_analyze_result ~result ~reason =
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string VisionAnalyze)
@@ -178,6 +184,17 @@ let supported_image_media_type media_type =
 let supported_image_media_types_csv =
   String.concat ", " supported_image_media_types
 
+let validate_media_type raw =
+  let media_type = normalize_media_type raw in
+  if String.equal media_type "" then Error "media_type must be non-empty"
+  else if supported_image_media_type media_type then Ok media_type
+  else
+    Error
+      (Printf.sprintf
+         "unsupported image media_type %S; expected one of %s"
+         raw
+         supported_image_media_types_csv)
+
 let validate_image_size bytes =
   let size = String.length bytes in
   let max_image_bytes = max_image_bytes () in
@@ -215,17 +232,20 @@ let media_type_for_request ~bytes args =
   in
   match json_member_opt "media_type" args with
   | None -> sniff_media_type bytes
-  | Some (`String raw) ->
-    let media_type = normalize_media_type raw in
-    if String.equal media_type "" then Error "media_type must be non-empty"
-    else if supported_image_media_type media_type then Ok media_type
-    else
-      Error
-        (Printf.sprintf
-           "unsupported image media_type %S; expected one of %s"
-           raw
-           supported_image_media_types_csv)
+  | Some (`String raw) -> validate_media_type raw
   | Some _ -> Error "media_type must be a string"
+
+type vision_outcome =
+  | Vo_ok of string
+  | Vo_invalid_request of string
+  | Vo_no_runtime of string
+  | Vo_timeout
+  | Vo_provider of
+      { failure_class : Tool_result.tool_failure_class
+      ; detail : string
+      }
+  | Vo_empty
+  | Vo_truncated
 
 let ok_or_classified_json (response : Agent_sdk.Types.api_response) =
   let text = Agent_sdk_response.text_of_response response in
@@ -236,6 +256,14 @@ let ok_or_classified_json (response : Agent_sdk.Types.api_response) =
     err_json ~failure_class:Tool_result.Workflow_rejection "empty_extraction"
   | Error Va.Truncated_extraction ->
     err_json ~failure_class:Tool_result.Runtime_failure "truncated_extraction"
+
+let outcome_of_response (response : Agent_sdk.Types.api_response) =
+  let text = Agent_sdk_response.text_of_response response in
+  let truncated = truncated_of_stop_reason response.stop_reason in
+  match Va.classify ~truncated ~content:text with
+  | Ok t -> Vo_ok t
+  | Error Va.Empty_extraction -> Vo_empty
+  | Error Va.Truncated_extraction -> Vo_truncated
 
 let remaining_timeout_sec ~clock ~deadline =
   let remaining = deadline -. Eio.Time.now clock in
@@ -362,6 +390,140 @@ let run_candidates
   in
   loop ~last_error ~attempt_index candidates
 
+let run_candidates_outcome
+    ~complete
+    ~deadline
+    ~sw
+    ~clock
+    ~net
+    ~messages
+    ~last_error
+    ~attempt_index
+    candidates
+  =
+  let rec loop ~last_error ~attempt_index = function
+    | [] ->
+      (match last_error with
+       | None -> Vo_no_runtime "no image-capable runtime configured"
+       | Some (`Timeout _runtime_id) -> Vo_timeout
+       | Some (`Provider_error err) ->
+         Vo_provider
+           { failure_class = failure_class_of_http_error err
+           ; detail = Provider_http_error.to_message err
+           })
+    | (runtime_id, rt) :: rest ->
+      let continue_with last_error =
+        (if not (List.is_empty rest)
+         then sleep_before_next_candidate ~clock ~deadline ~attempt_index);
+        loop
+          ~last_error:(Some last_error)
+          ~attempt_index:(attempt_index + 1)
+          rest
+      in
+      (match remaining_timeout_sec ~clock ~deadline with
+       | None ->
+         let last_error =
+           match last_error with
+           | Some _ as existing -> existing
+           | None -> Some (`Timeout runtime_id)
+         in
+         loop ~last_error ~attempt_index []
+       | Some timeout_sec ->
+         let config = provider_for_vision rt.Runtime.provider_config in
+         (match
+            with_timeout ~clock ~timeout_sec (fun () ->
+              complete ~sw ~net ?clock:(Some clock) ~config ~messages ())
+          with
+          | None ->
+            record_vision_candidate_attempt
+              ~runtime_id
+              ~result:"error"
+              ~reason:"timeout";
+            continue_with (`Timeout runtime_id)
+          | Some (Error err) ->
+            if terminal_policy_http_error err
+            then (
+              record_vision_candidate_attempt
+                ~runtime_id
+                ~result:"error"
+                ~reason:"terminal_provider_error";
+              Vo_provider
+                { failure_class = failure_class_of_http_error err
+                ; detail = Provider_http_error.to_message err
+                })
+            else if Runtime_attempt_fsm.should_try_next err
+            then (
+              record_vision_candidate_attempt
+                ~runtime_id
+                ~result:"error"
+                ~reason:"transient_provider_error";
+              continue_with (`Provider_error err))
+            else (
+              record_vision_candidate_attempt
+                ~runtime_id
+                ~result:"error"
+                ~reason:"runtime_provider_error";
+              Vo_provider
+                { failure_class = failure_class_of_http_error err
+                ; detail = Provider_http_error.to_message err
+                })
+          | Some (Ok response) ->
+            record_vision_candidate_attempt
+              ~runtime_id
+              ~result:"ok"
+              ~reason:"provider_response";
+            outcome_of_response response))
+  in
+  loop ~last_error ~attempt_index candidates
+
+let run_vision
+    ?(complete = default_complete)
+    ?(timeout_sec = default_timeout_sec)
+    ~sw
+    ~clock
+    ~net
+    ~query
+    ~media_type
+    ~bytes
+    () =
+  try
+    if not (valid_timeout_sec timeout_sec)
+    then
+      Vo_provider
+        { failure_class = Tool_result.Runtime_failure
+        ; detail = "timeout_sec must be finite and > 0"
+        }
+    else (
+      match validate_image_size bytes with
+      | Error msg -> Vo_invalid_request msg
+      | Ok () ->
+        (match validate_media_type media_type with
+         | Error msg -> Vo_invalid_request msg
+         | Ok media_type ->
+           (match
+              Va.make_request ~query ~image_media_type:media_type
+                ~image_bytes:bytes
+            with
+            | Error msg -> Vo_invalid_request msg
+            | Ok req ->
+              run_candidates_outcome
+                ~complete
+                ~deadline:(Eio.Time.now clock +. timeout_sec)
+                ~sw
+                ~clock
+                ~net
+                ~messages:[ message_of_request req ]
+                ~last_error:None
+                ~attempt_index:0
+                (vision_runtime_candidates ()))))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | _exn ->
+    Vo_provider
+      { failure_class = Tool_result.Runtime_failure
+      ; detail = "vision sub-call raised"
+      }
+
 let handle
     ?(complete = default_complete)
     ?(timeout_sec = default_timeout_sec)
@@ -392,7 +554,7 @@ let handle
            "invalid_timeout"
        else
          let dir = vision_store_dir ~keeper_name:meta.name in
-         (match Store.load ~dir (Store.of_string handle_str) with
+         (match load_artifact ~dir (Store.of_string handle_str) with
         | Error msg ->
           err_json
             ~failure_class:Tool_result.Runtime_failure

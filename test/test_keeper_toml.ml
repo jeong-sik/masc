@@ -479,6 +479,38 @@ active_goal_ids = ["goal-runtime", "goal-masc"]
         (Some [ "goal-runtime"; "goal-masc" ])
         d.active_goal_ids
 
+let test_profile_parses_multimodal_policy () =
+  let input = {|
+[keeper]
+goal = "vision delegation"
+multimodal_policy = "delegate"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    match KTP.profile_defaults_of_toml doc with
+    | Error e -> fail e
+    | Ok d ->
+      check (option string) "multimodal_policy" (Some "delegate")
+        (Option.map KTP.multimodal_policy_to_string d.multimodal_policy)
+
+let test_profile_rejects_invalid_multimodal_policy () =
+  let input = {|
+[keeper]
+goal = "vision delegation"
+multimodal_policy = "silent_default"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "expected invalid multimodal_policy error"
+     | Error msg ->
+       check bool "mentions multimodal_policy" true
+         (contains_substring msg "invalid multimodal_policy");
+       check bool "mentions allowed values" true
+         (contains_substring msg "delegate"))
+
 let test_profile_rejects_partial_proactive_interval_pair () =
   let input = {|
 [keeper]
@@ -1611,6 +1643,10 @@ let () =
         [
           test_case "minimal" `Quick test_profile_minimal;
           test_case "full" `Quick test_profile_full;
+          test_case "parses multimodal_policy" `Quick
+            test_profile_parses_multimodal_policy;
+          test_case "rejects invalid multimodal_policy" `Quick
+            test_profile_rejects_invalid_multimodal_policy;
           test_case "rejects partial proactive interval pair" `Quick
             test_profile_rejects_partial_proactive_interval_pair;
           test_case "rejects removed model keys" `Quick

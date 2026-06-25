@@ -2,9 +2,9 @@
 
 // Unit tests for the render-time think<->tool interleaving in ToolTraceCard.
 // Pure-function level so the ordering contract is asserted without the jsdom
-// render harness: the merge must preserve occurrence order (think -> tool ->
-// think -> tool) and fall back to the legacy two-section order when a step has
-// no timestamp.
+// render harness: live streams carry tool calls in traceSteps, so the merge
+// must preserve that structural order and use sibling tool entries only for
+// details/result hydration.
 import { describe, expect, it } from 'vitest'
 import type { ChatTraceStep, KeeperConversationEntry } from '../../types'
 import { interleaveTraceAndTools } from './primitives'
@@ -12,59 +12,69 @@ import { interleaveTraceAndTools } from './primitives'
 describe('interleaveTraceAndTools', () => {
   const think = (text: string, ts?: string): ChatTraceStep =>
     ts === undefined ? { kind: 'think', text } : { kind: 'think', text, ts }
-  // Tool entries only need `id` and `timestamp` for ordering; interleave reads
-  // nothing else off them.
-  const tool = (id: string, ts: string) => ({
-    entry: { id, role: 'tool', timestamp: ts } as unknown as KeeperConversationEntry,
+  const traceTool = (name: string, toolCallId: string, ts?: string): ChatTraceStep =>
+    ts === undefined ? { kind: 'tool', name, toolCallId } : { kind: 'tool', name, toolCallId, ts }
+  const tool = (toolCallId: string) => ({
+    entry: { id: `tool-${toolCallId}`, role: 'tool' } as unknown as KeeperConversationEntry,
     output: null,
   })
   const labels = (items: ReturnType<typeof interleaveTraceAndTools>) =>
     items.map((i) => {
-      if (i.kind === 'tool') return `tool:${i.entry.id}`
+      if (i.kind === 'tool') return `tool:${i.entry?.id ?? i.step?.toolCallId ?? i.step?.name}`
+      if (i.kind === 'tool-entry') return `tool:${i.entry.id}`
       if (i.kind === 'chat') return `chat:${i.entry.id}`
-      // think/reason carry `text`; the tool variant of ChatTraceStep does not.
-      return `think:${'text' in i.step ? i.step.text : i.step.name}`
+      return `think:${i.step.text}`
     })
 
-  it('interleaves think and tool by occurrence time (think -> tool -> think -> tool)', () => {
+  it('preserves structural trace order for think -> tool -> think -> tool', () => {
     const out = interleaveTraceAndTools(
       [
         think('A', '2026-06-21T00:00:01.000Z'),
+        traceTool('status', 'X', '2026-06-21T00:00:04.000Z'),
         think('B', '2026-06-21T00:00:03.000Z'),
+        traceTool('board', 'Y', '2026-06-21T00:00:02.000Z'),
       ],
       [
-        tool('X', '2026-06-21T00:00:02.000Z'),
-        tool('Y', '2026-06-21T00:00:04.000Z'),
+        tool('X'),
+        tool('Y'),
       ],
     )
-    expect(labels(out)).toEqual(['think:A', 'tool:X', 'think:B', 'tool:Y'])
+    expect(labels(out)).toEqual(['think:A', 'tool:tool-X', 'think:B', 'tool:tool-Y'])
   })
 
-  it('keeps the legacy two-section order when think steps carry no timestamp', () => {
-    // Absent ts (backend-normalized steps) sorts as '' and precedes any tool,
-    // so thinks stay grouped above tools — matching the pre-change render.
+  it('keeps the legacy two-section order when trace carries no tool steps', () => {
     const out = interleaveTraceAndTools(
       [think('A'), think('B')],
-      [tool('X', '2026-06-21T00:00:02.000Z')],
+      [tool('X')],
     )
-    expect(labels(out)).toEqual(['think:A', 'think:B', 'tool:X'])
+    expect(labels(out)).toEqual(['think:A', 'think:B', 'tool:tool-X'])
   })
 
-  it('places an earlier tool before a later think', () => {
+  it('uses trace order even when timestamps would imply a different order', () => {
     const out = interleaveTraceAndTools(
-      [think('A', '2026-06-21T00:00:05.000Z')],
-      [tool('X', '2026-06-21T00:00:01.000Z')],
+      [
+        think('A', '2026-06-21T00:00:05.000Z'),
+        traceTool('status', 'X', '2026-06-21T00:00:01.000Z'),
+      ],
+      [tool('X')],
     )
-    expect(labels(out)).toEqual(['tool:X', 'think:A'])
+    expect(labels(out)).toEqual(['think:A', 'tool:tool-X'])
   })
 
-  it('preserves stable trace-then-tool order on equal timestamps', () => {
-    // Stable sort keeps the input order (trace before tool) when timestamps tie.
+  it('can render a trace-only tool step before the sibling entry exists', () => {
     const out = interleaveTraceAndTools(
-      [think('A', '2026-06-21T00:00:01.000Z')],
-      [tool('X', '2026-06-21T00:00:01.000Z')],
+      [think('A'), traceTool('status', 'X')],
+      [],
     )
     expect(labels(out)).toEqual(['think:A', 'tool:X'])
+  })
+
+  it('prefers authoritative tool rows over unjoinable trace-only tool steps', () => {
+    const out = interleaveTraceAndTools(
+      [think('A'), { kind: 'tool', name: 'legacy-tool' }],
+      [tool('X')],
+    )
+    expect(labels(out)).toEqual(['think:A', 'tool:tool-X'])
   })
 
   it('handles empty inputs without error', () => {
@@ -73,7 +83,7 @@ describe('interleaveTraceAndTools', () => {
       labels(interleaveTraceAndTools([think('A', '2026-06-21T00:00:01.000Z')], [])),
     ).toEqual(['think:A'])
     expect(
-      labels(interleaveTraceAndTools([], [tool('X', '2026-06-21T00:00:01.000Z')])),
-    ).toEqual(['tool:X'])
+      labels(interleaveTraceAndTools([], [tool('X')])),
+    ).toEqual(['tool:tool-X'])
   })
 })

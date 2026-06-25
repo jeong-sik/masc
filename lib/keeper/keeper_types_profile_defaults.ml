@@ -19,6 +19,7 @@ type keeper_profile_defaults = {
   sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile option;
   sandbox_image : string option;
   network_mode : Keeper_types_profile_sandbox.network_mode option;
+  multimodal_policy : Keeper_types_profile_sandbox.multimodal_policy option;
   tool_access : string list option;
   tool_denylist : string list option;
   active_goal_ids : string list option;
@@ -61,6 +62,7 @@ let empty_keeper_profile_defaults =
     sandbox_profile = None;
     sandbox_image = None;
     network_mode = None;
+    multimodal_policy = None;
     tool_access = None;
     tool_denylist = None;
     active_goal_ids = None;

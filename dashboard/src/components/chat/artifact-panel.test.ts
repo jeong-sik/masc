@@ -53,7 +53,7 @@ describe('extractArtifactGroups', () => {
             t: 'trace',
             trace: [
               { kind: 'think', text: 'plan' },
-              { kind: 'tool', name: 'keeper_context_status', status: 'ok', dur: '0.2s', args: { path: 'a' }, result: '{"ok":true}' },
+              { kind: 'tool', name: 'keeper_context_status', status: 'ok', dur: '0.2s', args: '{"path":"a"}', result: '{"ok":true}' },
             ],
           },
           { t: 'link', url: 'https://example.com', title: 'Example', meta: 'example.com' },

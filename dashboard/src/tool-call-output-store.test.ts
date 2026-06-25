@@ -6,9 +6,11 @@ import {
   markToolCallOutputsHydrating,
   recordToolCallOutputs,
   resetToolCallOutputs,
+  toolCallIdFromToolEntryId,
   toolCallOutputsById,
   toolCallOutputsCoveredSinceMs,
   toolCallOutputsCoveredThroughMs,
+  toolEntryIdFromCallId,
 } from './tool-call-output-store'
 
 function toolCall(overrides: Partial<ToolCallEntry> = {}): ToolCallEntry {
@@ -37,6 +39,12 @@ describe('tool-call-output-store', () => {
   it('looks up by the chat entry id, stripping the tool- prefix', () => {
     recordToolCallOutputs([toolCall({ tool_use_id: 'toolu_abc', output: 'hello' })])
     expect(lookupToolCallOutput('tool-toolu_abc')?.output).toBe('hello')
+  })
+
+  it('exports the shared chat-entry id convention', () => {
+    expect(toolEntryIdFromCallId('toolu_abc')).toBe('tool-toolu_abc')
+    expect(toolCallIdFromToolEntryId('tool-toolu_abc')).toBe('toolu_abc')
+    expect(toolCallIdFromToolEntryId('chat-toolu_abc')).toBeNull()
   })
 
   it('looks up by a bare tool_use_id (no prefix) as well', () => {

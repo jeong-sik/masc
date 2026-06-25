@@ -68,6 +68,13 @@ val init_default_strict : config_path:string -> (unit, string) result
     gate ({!decide_capability_gate}). Rejects ([Error]) a runtime whose model is
     absent from the catalog before boot. Used by server boot and fusion run. *)
 
+module For_testing : sig
+  type snapshot
+
+  val snapshot : unit -> snapshot
+  val restore : snapshot -> unit
+end
+
 val get_default_runtime : unit -> t option
 val get_runtimes : unit -> t list
 val get_runtime_ids : unit -> string list

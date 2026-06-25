@@ -826,12 +826,21 @@ export type ChatImageBlock = { t: 'image'; src?: string; ph?: string; cap?: stri
 export type ChatSvgBlock = { t: 'svg'; svg: string; cap?: string }
 export type ChatMermaidBlock = { t: 'mermaid'; source: string; caption?: string }
 
-// `ts` (ISO-8601) lets ToolTraceCard interleave think/reason steps with tool
-// entries by occurrence time. Absent on backend-normalized steps (no timestamp
-// surfaced from the wire), which then sort first as a legacy fallback.
+// `ts` (ISO-8601) records when the trace event arrived. Live streams preserve
+// think/tool order structurally in this array; persisted legacy rows may omit
+// timestamps and still render in stored order.
 export type ChatTraceThinkStep = { kind: 'think'; text: string; ts?: string }
 export type ChatTraceReasonStep = { kind: 'reason'; text: string; detail?: string; ts?: string }
-export type ChatTraceToolStep = { kind: 'tool'; name: string; status?: 'ok' | 'err'; dur?: string; args?: unknown; result?: string }
+export type ChatTraceToolStep = {
+  kind: 'tool'
+  name: string
+  toolCallId?: string
+  status?: 'pending' | 'ok' | 'err'
+  dur?: string
+  args?: string
+  result?: string
+  ts?: string
+}
 export type ChatTraceStep = ChatTraceThinkStep | ChatTraceReasonStep | ChatTraceToolStep
 export type ChatTraceBlock = { t: 'trace'; trace: ChatTraceStep[] }
 

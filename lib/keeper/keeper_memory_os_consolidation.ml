@@ -144,9 +144,10 @@ let merge_group_of_json json =
   | _ -> None
 ;;
 
-(* Parse the LLM's consolidation output. Unknown/garbled groups are dropped
-   individually (defensive degrade), never aborting the whole plan. A plan that
-   fails to parse at all yields [empty_plan] = a no-op consolidation. *)
+(* Parse the LLM's consolidation plan. Unknown/garbled groups inside a valid
+   object are dropped individually (defensive degrade), never aborting the whole
+   plan. The provider output itself must be an exact JSON object; prose,
+   markdown fences, and substring salvage are rejected at [plan_of_string]. *)
 let plan_of_json (json : Yojson.Safe.t) =
   match json with
   | `Assoc _ ->
@@ -167,43 +168,10 @@ let plan_of_json (json : Yojson.Safe.t) =
 
 let json_of_output raw =
   let raw = String.trim raw in
-  let raw =
-    if String.starts_with ~prefix:"```" raw
-    then (
-      match String.split_on_char '\n' raw with
-      | first :: rest when String.starts_with ~prefix:"```" first ->
-        rest
-        |> List.rev
-        |> (function
-          | last :: rest when String.starts_with ~prefix:"```" (String.trim last) ->
-            List.rev rest
-          | lines -> List.rev lines)
-        |> String.concat "\n"
-        |> String.trim
-      | _ -> raw)
-    else raw
-  in
   match Yojson.Safe.from_string raw with
-  | json -> Some json
-  | exception Yojson.Json_error _ ->
-    let len = String.length raw in
-    let rec find_from i ch =
-      if i >= len then None else if Char.equal raw.[i] ch then Some i else find_from (i + 1) ch
-    in
-    let rec find_from_right i ch =
-      if i < 0
-      then None
-      else if Char.equal raw.[i] ch
-      then Some i
-      else find_from_right (i - 1) ch
-    in
-    (match find_from 0 '{', find_from_right (len - 1) '}' with
-     | Some start, Some stop when start < stop ->
-       let candidate = String.sub raw start (stop - start + 1) in
-       (match Yojson.Safe.from_string candidate with
-        | json -> Some json
-        | exception Yojson.Json_error _ -> None)
-     | _ -> None)
+  | `Assoc _ as json -> Some json
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+  | exception Yojson.Json_error _ -> None
 ;;
 
 let plan_of_string raw =

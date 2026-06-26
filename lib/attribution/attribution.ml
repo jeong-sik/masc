@@ -21,6 +21,13 @@ type t = {
   outcome : outcome;
 }
 
+let string_of_outcome_kind = function
+  | Passed -> "passed"
+  | Policy_failed _ -> "policy_failed"
+  | Transition_blocked _ -> "transition_blocked"
+  | Partial_pass _ -> "partial_pass"
+;;
+
 (* --- Serialization --- *)
 
 let outcome_to_yojson : outcome -> Yojson.Safe.t = function
@@ -81,21 +88,26 @@ let outcome_of_yojson (json : Yojson.Safe.t) : (outcome, string) result =
           | Some (`Int score), Some (`String rationale) ->
               Ok (Partial_pass { score = float_of_int score; rationale })
           | _ -> Error "Partial_pass: missing fields")
+      | Some (`String kind) -> Error ("outcome: invalid kind: " ^ kind)
       | _ -> Error "outcome: missing or invalid kind")
   | _ -> Error "outcome: expected object"
 
 let of_yojson (json : Yojson.Safe.t) : (t, string) result =
   match json with
   | `Assoc fields -> (
+      let evidence =
+        Option.value (List.assoc_opt "evidence" fields) ~default:`Null
+        (* DET-OK: legacy attribution rows may omit evidence; defaulting to
+           explicit JSON null preserves the wire shape without changing parse
+           acceptance for origin/gate/outcome. *)
+      in
       match
         ( List.assoc_opt "origin" fields,
           List.assoc_opt "gate" fields,
-          List.assoc_opt "evidence" fields,
           List.assoc_opt "outcome" fields )
       with
       | ( Some (`String origin_str),
           Some (`String gate),
-          Some evidence,
           Some outcome_json ) -> (
           match origin_str with
           | "det" -> (
@@ -116,11 +128,7 @@ let show (t : t) : string =
   Printf.sprintf "Attribution{origin=%s; gate=%s; outcome=%s}"
     (string_of_origin t.origin)
     t.gate
-    (match t.outcome with
-     | Passed -> "Passed"
-     | Policy_failed _ -> "Policy_failed{...}"
-     | Transition_blocked _ -> "Transition_blocked{...}"
-     | Partial_pass _ -> "Partial_pass{...}")
+    (string_of_outcome_kind t.outcome)
 
 (* --- Smart constructors --- *)
 

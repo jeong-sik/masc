@@ -32,7 +32,7 @@ let test_email_not_matched () =
   check bool "email@alice.com is one token" false (lm "send to email@alice.com")
 ;;
 
-let test_case_insensitive () = check bool "@DREAMER" true (lm "PING @DREAMER NOW")
+let test_case_insensitive () = check bool "@ALICE" true (lm "PING @ALICE NOW")
 let test_trailing_punct () = check bool "@alice, comma" true (lm "ok @alice, thanks")
 let test_no_mention () = check bool "no @target" false (lm "just chatting here")
 

@@ -76,7 +76,7 @@ let keeper_agent_status = `Assoc [ ("exists", `Bool false) ]
 let external_live_agent_status ~last_seen =
   `Assoc
     [ ("exists", `Bool true)
-    ; ("status", `String "idle")
+    ; ("status", `String "active")
     ; ("last_seen_ago_s", `Float 5.0)
     ; ("last_seen", `String last_seen)
     ]

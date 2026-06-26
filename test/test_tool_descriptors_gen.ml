@@ -35,6 +35,12 @@ let has_schema name schemas =
   List.exists (fun (s : tool_schema) -> String.equal s.name name) schemas
 ;;
 
+let schema_property schema name =
+  match Yojson.Safe.Util.(schema |> member "properties" |> member name) with
+  | `Null -> Alcotest.failf "schema property %S missing" name
+  | json -> json
+;;
+
 let descriptor_internal_schema name : tool_schema =
   match
     List.find_opt
@@ -124,6 +130,15 @@ let test_masc_dashboard_input_schema_matches () =
     "masc_dashboard input_schema (Yojson.Safe.equal)"
     hand.input_schema
     gen.input_schema
+;;
+
+let test_masc_dashboard_accepts_compact_flag () =
+  let gen = find_by_name "masc_dashboard" Tool_descriptors_gen.schemas in
+  let compact = schema_property gen.input_schema "compact" in
+  Alcotest.check yojson_testable "compact type" (`String "boolean")
+    Yojson.Safe.Util.(compact |> member "type");
+  Alcotest.check yojson_testable "compact default" (`Bool false)
+    Yojson.Safe.Util.(compact |> member "default")
 ;;
 
 let test_masc_gc_name_matches () =
@@ -313,6 +328,10 @@ let () =
             "input_schema"
             `Quick
             test_masc_dashboard_input_schema_matches
+        ; Alcotest.test_case
+            "compact compatibility flag"
+            `Quick
+            test_masc_dashboard_accepts_compact_flag
         ] )
     ; ( "masc_gc field-by-field"
       , [ Alcotest.test_case "name" `Quick test_masc_gc_name_matches

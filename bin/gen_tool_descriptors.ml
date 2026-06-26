@@ -97,6 +97,12 @@ let masc_dashboard_spec : tool_spec =
         ; p_description = "Dashboard scope: current or all"
         ; p_required = false
         }
+      ; { p_name = "compact"
+        ; p_type = T_bool { default = Some false }
+        ; p_description =
+            "Return a compact summary payload. Kept for public contract compatibility."
+        ; p_required = false
+        }
       ]
   ; additional_properties = false
   ; behavior_contract = []

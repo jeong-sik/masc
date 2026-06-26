@@ -70,6 +70,56 @@ let default_base_path = Server_mcp_transport_http.default_base_path
 
 let implicit_base_path_resolution_source () = "implicit_base_path"
 
+type resolved_cli_base_path = {
+  raw_input : string;
+  normalized : string;
+  resolution_source : string;
+}
+
+let explicit_env_base_path_opt () =
+  let trim_env name =
+    match Sys.getenv_opt name with
+    | Some value ->
+        let trimmed = String.trim value in
+        if trimmed = "" then None else Some trimmed
+    | None -> None
+  in
+  match trim_env Env_config_core.base_path_input_env_key with
+  | Some value -> Some (Env_config.normalize_masc_base_path_input value)
+  | None -> (
+      match trim_env Env_config_core.base_path_env_key with
+      | Some value -> Some (Env_config.normalize_masc_base_path_input value)
+      | None -> None)
+
+let resolve_cli_base_path_arg raw =
+  let trimmed = String.trim raw in
+  if trimmed <> "" then
+    let normalized = Env_config.normalize_masc_base_path_input trimmed in
+    let resolution_source =
+      match explicit_env_base_path_opt () with
+      | Some existing when String.equal existing normalized -> "explicit_env"
+      | _ -> "explicit_cli"
+    in
+    { raw_input = trimmed; normalized; resolution_source }
+  else
+    match explicit_env_base_path_opt () with
+    | Some normalized ->
+        { raw_input = normalized; normalized; resolution_source = "explicit_env" }
+    | None ->
+        let raw_input = Sys.getcwd () in
+        let normalized = Env_config.normalize_masc_base_path_input raw_input in
+        {
+          raw_input;
+          normalized;
+          resolution_source = implicit_base_path_resolution_source ();
+        }
+
+let install_resolved_base_path_env resolved =
+  Unix.putenv Env_config_core.base_path_input_env_key resolved.raw_input;
+  Unix.putenv Env_config_core.base_path_env_key resolved.normalized;
+  Unix.putenv "MASC_BASE_PATH_RESOLUTION_SOURCE" resolved.resolution_source;
+  Workspace_utils_backend_setup.cache_resolved_base_path resolved.normalized
+
 let is_valid_protocol_version =
   Server_mcp_transport_http.is_valid_protocol_version
 
@@ -486,7 +536,7 @@ let base_path =
   let doc =
     "Workspace root for MASC data. Runtime state lives under <base-path>/.masc; do not pass the .masc directory itself."
   in
-  Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
+  Arg.(value & opt string "" & info ["base-path"] ~docv:"PATH" ~doc)
 
 let login_json =
   let doc = "Emit machine-readable JSON instead of text output" in
@@ -597,35 +647,12 @@ let guard_self_repo_base_path base_path =
 
 let run_cmd host port base_path =
   Printexc.record_backtrace true;
-  let raw_base_path = String.trim base_path in
-  let normalized_base_path =
-    Env_config.normalize_masc_base_path_input base_path
-  in
-  let resolution_source =
-    match Sys.getenv_opt "MASC_BASE_PATH_RESOLUTION_SOURCE" with
-    | Some source when String.trim source <> "" -> String.trim source
-    | _ ->
-        let inherited_env_matches =
-          match Sys.getenv_opt "MASC_BASE_PATH" with
-          | Some existing ->
-              String.equal
-                (Env_config.normalize_masc_base_path_input existing)
-                normalized_base_path
-          | None -> false
-        in
-        if inherited_env_matches then
-          "explicit_env"
-        else
-          let default_path =
-            Env_config.normalize_masc_base_path_input (default_base_path ())
-          in
-          if String.equal default_path normalized_base_path then
-            implicit_base_path_resolution_source ()
-          else
-            "explicit_cli"
-  in
+  let resolved = resolve_cli_base_path_arg base_path in
+  let raw_base_path = resolved.raw_input in
+  let normalized_base_path = resolved.normalized in
+  let resolution_source = resolved.resolution_source in
   let stripped_base_path =
-    Env_config.strip_path_trailing_slashes (String.trim base_path)
+    Env_config.strip_path_trailing_slashes raw_base_path
   in
   guard_self_repo_base_path normalized_base_path;
   if String.equal resolution_source "implicit_base_path" then begin
@@ -655,11 +682,8 @@ let run_cmd host port base_path =
   then
     Log.Server.warn
       "Normalizing --base-path from %s to %s because runtime base paths must point at the workspace root, not the .masc directory."
-      base_path normalized_base_path;
-  Unix.putenv "MASC_BASE_PATH_INPUT" raw_base_path;
-  Unix.putenv "MASC_BASE_PATH" normalized_base_path;
-  Workspace_utils_backend_setup.cache_resolved_base_path normalized_base_path;
-  Unix.putenv "MASC_BASE_PATH_RESOLUTION_SOURCE" resolution_source;
+      raw_base_path normalized_base_path;
+  install_resolved_base_path_env resolved;
   (* Persist logs inside .masc/logs/ — colocated with state, not a sibling.
      Previous code wrote to base_path/logs/ which diverged from .masc/ when
      base_path differed from the repo checkout directory. *)
@@ -871,24 +895,35 @@ let login_cmd_exit base_path host port agent role client_env no_expiry
   let token_lifetime : Auth_login.token_lifetime =
     if no_expiry then Long_lived else With_expiry
   in
-  match
-    Auth_login.mint ~base_path ~host ~port ~agent_name:agent ~role
-      ~token_env_var:client_env ~token_lifetime ()
-  with
-  | Error err ->
-      Printf.eprintf "login failed: %s\n" (Masc_domain.masc_error_to_string err);
-      1
-  | Ok report ->
-      let output =
-        if as_shell then
-          Auth_login.render_shell report
-        else if as_json then
-          Auth_login.to_yojson report |> Yojson.Safe.pretty_to_string
-        else
-          Auth_login.render_text report
-      in
-      print_endline output;
-      0
+  let resolved = resolve_cli_base_path_arg base_path in
+  if String.equal resolved.resolution_source (implicit_base_path_resolution_source ())
+  then begin
+    Printf.eprintf
+      "login failed: set MASC_BASE_PATH or pass --base-path explicitly\n";
+    1
+  end
+  else begin
+    install_resolved_base_path_env resolved;
+    match
+      Auth_login.mint ~base_path:resolved.normalized ~host ~port
+        ~agent_name:agent ~role ~token_env_var:client_env ~token_lifetime ()
+    with
+    | Error err ->
+        Printf.eprintf "login failed: %s\n"
+          (Masc_domain.masc_error_to_string err);
+        1
+    | Ok report ->
+        let output =
+          if as_shell then
+            Auth_login.render_shell report
+          else if as_json then
+            Auth_login.to_yojson report |> Yojson.Safe.pretty_to_string
+          else
+            Auth_login.render_text report
+        in
+        print_endline output;
+        0
+  end
 
 let login_cmd =
   let doc =

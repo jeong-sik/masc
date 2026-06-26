@@ -83,7 +83,14 @@ val to_yojson : t -> Yojson.Safe.t
                                "score":0.85,"rationale":"..."}] *)
 
 val of_yojson : Yojson.Safe.t -> (t, string) result
-(** Deserialize from JSON. Inverse of {!to_yojson}. *)
+(** Deserialize a current attribution envelope from JSON. Inverse of
+    {!to_yojson}; rejects envelopes that omit required fields, including
+    [evidence]. *)
+
+val of_legacy_yojson : Yojson.Safe.t -> (t, string) result
+(** Explicit compatibility decoder for historical attribution rows that
+    predate the required [evidence] field. Missing [evidence] is decoded as
+    JSON null only through this legacy entry point. *)
 
 val show : t -> string
 (** Concise debug representation. Long fields (evidence, reason,

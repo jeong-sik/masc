@@ -92,35 +92,42 @@ let outcome_of_yojson (json : Yojson.Safe.t) : (outcome, string) result =
       | _ -> Error "outcome: missing or invalid kind")
   | _ -> Error "outcome: expected object"
 
-let of_yojson (json : Yojson.Safe.t) : (t, string) result =
+let evidence_of_fields ~allow_missing_evidence fields =
+  match List.assoc_opt "evidence" fields with
+  | Some evidence -> Ok evidence
+  | None when allow_missing_evidence -> Ok `Null
+  | None -> Error "missing required field: evidence"
+
+let of_yojson_internal ~allow_missing_evidence (json : Yojson.Safe.t)
+  : (t, string) result =
   match json with
   | `Assoc fields -> (
-      let evidence =
-        Option.value (List.assoc_opt "evidence" fields) ~default:`Null
-        (* DET-OK: legacy attribution rows may omit evidence; defaulting to
-           explicit JSON null preserves the wire shape without changing parse
-           acceptance for origin/gate/outcome. *)
-      in
-      match
-        ( List.assoc_opt "origin" fields,
-          List.assoc_opt "gate" fields,
-          List.assoc_opt "outcome" fields )
-      with
-      | ( Some (`String origin_str),
-          Some (`String gate),
-          Some outcome_json ) -> (
+      match evidence_of_fields ~allow_missing_evidence fields with
+      | Error _ as error -> error
+      | Ok evidence -> (
+        match
+          ( List.assoc_opt "origin" fields
+          , List.assoc_opt "gate" fields
+          , List.assoc_opt "outcome" fields )
+        with
+        | Some (`String origin_str), Some (`String gate), Some outcome_json -> (
           match origin_str with
           | "det" -> (
-              match outcome_of_yojson outcome_json with
-              | Ok outcome -> Ok { origin = Det; gate; evidence; outcome }
-              | Error e -> Error e)
+            match outcome_of_yojson outcome_json with
+            | Ok outcome -> Ok { origin = Det; gate; evidence; outcome }
+            | Error e -> Error e)
           | "nondet" -> (
-              match outcome_of_yojson outcome_json with
-              | Ok outcome -> Ok { origin = NonDet; gate; evidence; outcome }
-              | Error e -> Error e)
+            match outcome_of_yojson outcome_json with
+            | Ok outcome -> Ok { origin = NonDet; gate; evidence; outcome }
+            | Error e -> Error e)
           | s -> Error ("invalid origin: " ^ s))
-      | _ -> Error "missing required fields")
+        | _ -> Error "missing required fields"))
   | _ -> Error "expected JSON object"
+
+let of_yojson json = of_yojson_internal ~allow_missing_evidence:false json
+
+let of_legacy_yojson json =
+  of_yojson_internal ~allow_missing_evidence:true json
 
 (* --- Debug representation --- *)
 

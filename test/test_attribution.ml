@@ -238,19 +238,24 @@ let test_parse_partial_pass_wrong_type () =
              ] );
        ])
 
-let test_parse_missing_evidence_defaults_null () =
-  match
-    A.of_yojson
-      (`Assoc
-         [
-           ("origin", `String "det");
-           ("gate", `String "x");
-           ("outcome", `Assoc [ ("kind", `String "passed") ]);
-         ])
-  with
-  | Ok t ->
-    Alcotest.(check bool) "evidence=Null" true (t.evidence = `Null)
-  | Error msg -> Alcotest.fail ("should tolerate missing evidence: " ^ msg)
+let missing_evidence_json =
+  `Assoc
+    [
+      ("origin", `String "det");
+      ("gate", `String "x");
+      ("outcome", `Assoc [ ("kind", `String "passed") ]);
+    ]
+
+let test_parse_missing_evidence_rejects () =
+  match A.of_yojson missing_evidence_json with
+  | Ok _ -> Alcotest.fail "current decoder must reject missing evidence"
+  | Error msg ->
+    Alcotest.(check string) "error" "missing required field: evidence" msg
+
+let test_parse_legacy_missing_evidence_defaults_null () =
+  match A.of_legacy_yojson missing_evidence_json with
+  | Ok t -> Alcotest.(check bool) "evidence=Null" true (t.evidence = `Null)
+  | Error msg -> Alcotest.fail ("legacy decoder should tolerate missing evidence: " ^ msg)
 
 let test_parse_non_object () =
   expect_error "non-object" (`String "nope")
@@ -311,8 +316,10 @@ let () =
             test_parse_transition_blocked_missing_field;
           Alcotest.test_case "partial_pass wrong type" `Quick
             test_parse_partial_pass_wrong_type;
-          Alcotest.test_case "missing evidence defaults to null" `Quick
-            test_parse_missing_evidence_defaults_null;
+          Alcotest.test_case "missing evidence rejects" `Quick
+            test_parse_missing_evidence_rejects;
+          Alcotest.test_case "legacy missing evidence defaults to null" `Quick
+            test_parse_legacy_missing_evidence_defaults_null;
           Alcotest.test_case "non-object input" `Quick test_parse_non_object;
         ] );
       ( "show",

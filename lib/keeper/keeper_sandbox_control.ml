@@ -308,62 +308,59 @@ let repo_name_of_json = function
 let upsert_assoc key value fields =
   (key, value) :: List.remove_assoc key fields
 
-type playground_repo_policy =
-  | Policy_mapping_load_error of string
-  | Policy_missing_mapping
-  | Policy_found of Repo_manager_types.keeper_repo_mapping
+type playground_policy_status =
+  | Policy_allowed
+  | Policy_denied_missing_mapping
+  | Policy_denied_not_in_mapping
+  | Policy_mapping_load_error
+
+let playground_policy_status_to_string = function
+  | Policy_allowed -> "allowed"
+  | Policy_denied_missing_mapping -> "denied_missing_mapping"
+  | Policy_denied_not_in_mapping -> "denied_not_in_mapping"
+  | Policy_mapping_load_error -> "mapping_load_error"
+
+let playground_policy_reason = function
+  | Policy_allowed -> None
+  | Policy_denied_missing_mapping ->
+      Some "keeper has no repository mapping; filesystem clone is not accessible"
+  | Policy_denied_not_in_mapping ->
+      Some "repository is not listed in the keeper repository mapping"
+  | Policy_mapping_load_error ->
+      Some
+        "keeper repository mapping could not be loaded; access is denied \
+         fail-closed"
 
 let playground_repo_policy ~(base_path : string) ~(keeper_name : string) =
-  match Keeper_repo_mapping.load_all ~base_path with
-  | Error msg -> Policy_mapping_load_error msg
-  | Ok mappings -> (
-      match
-        List.find_opt
-          (fun (mapping : Repo_manager_types.keeper_repo_mapping) ->
-            String.equal mapping.keeper_id keeper_name)
-          mappings
-      with
-      | Some mapping -> Policy_found mapping
-      | None -> Policy_missing_mapping)
+  Keeper_repo_mapping.lookup_mapping ~base_path ~keeper_id:keeper_name
 
 let playground_repo_policy_fields policy ~repo_name =
-  let field status allowed extra =
+  let field status allowed ?error () =
+    let status_text = playground_policy_status_to_string status in
+    let reason_fields =
+      match playground_policy_reason status with
+      | None -> []
+      | Some reason -> [ ("policy_reason", `String reason) ]
+    in
+    let error_fields =
+      match error with
+      | None -> []
+      | Some msg -> [ ("policy_error", `String msg) ]
+    in
     ("policy_source", `String "keeper_repo_mappings.toml")
-    :: ("policy_status", `String status)
+    :: ("policy_status", `String status_text)
     :: ("policy_allowed", `Bool allowed)
-    :: extra
+    :: (reason_fields @ error_fields)
   in
   match policy with
-  | Policy_mapping_load_error msg ->
-      field "mapping_load_error" false
-        [
-          ("policy_error", `String msg);
-          ( "policy_reason",
-            `String
-              "keeper repository mapping could not be loaded; access is \
-               denied fail-closed" );
-        ]
-  | Policy_missing_mapping ->
-      field "denied_missing_mapping" false
-        [
-          ( "policy_reason",
-            `String
-              "keeper has no repository mapping; filesystem clone is not \
-               accessible" );
-        ]
-  | Policy_found mapping ->
-      if
-        List.exists
-          (fun id -> String.equal id repo_name || String.equal id "*")
-          mapping.repository_ids
-      then field "allowed" true []
-      else
-        field "denied_not_in_mapping" false
-          [
-            ( "policy_reason",
-              `String
-                "repository is not listed in the keeper repository mapping" );
-          ]
+  | Keeper_repo_mapping.Mapping_load_error msg ->
+      field Policy_mapping_load_error false ~error:msg ()
+  | Keeper_repo_mapping.Mapping_missing _ ->
+      field Policy_denied_missing_mapping false ()
+  | Keeper_repo_mapping.Mapping_found mapping ->
+      if Keeper_repo_mapping.mapping_allows_repository mapping ~repository_id:repo_name
+      then field Policy_allowed true ()
+      else field Policy_denied_not_in_mapping false ()
 
 let with_playground_repo_policy_fields policy ~repo_name = function
   | `Assoc fields ->
@@ -372,7 +369,11 @@ let with_playground_repo_policy_fields policy ~repo_name = function
            (fun fields (key, value) -> upsert_assoc key value fields)
            fields
       |> fun fields -> `Assoc fields
-  | json -> json
+  | json ->
+      invalid_arg
+        (Printf.sprintf
+           "playground repo entry must be a JSON object before policy fields: %s"
+           (Yojson.Safe.to_string json))
 
 let git_metadata_timeout_sec = 2.0
 let max_live_git_enrichment_repos = 20

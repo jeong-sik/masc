@@ -60,7 +60,7 @@ type mapping_lookup =
   | Mapping_missing of string
   | Mapping_load_error of string
 
-let lookup_mapping ~base_path keeper_id =
+let lookup_mapping ~base_path ~keeper_id =
   match load_all ~base_path with
   | Error msg -> Mapping_load_error msg
   | Ok mappings -> (
@@ -73,7 +73,7 @@ let lookup_mapping ~base_path keeper_id =
       | None -> Mapping_missing keeper_id)
 
 let find_mapping ~base_path keeper_id =
-  match lookup_mapping ~base_path keeper_id with
+  match lookup_mapping ~base_path ~keeper_id with
   | Mapping_found mapping -> Ok mapping
   | Mapping_missing keeper_id ->
       Error (Printf.sprintf "No mapping found for keeper: %s" keeper_id)
@@ -85,6 +85,22 @@ let allowed_repositories ~keeper_id ~base_path =
 
 let is_wildcard s = s = "*"
 
+type repository_scope =
+  | All_repositories
+  | Selected_repositories of repository_id list
+
+let repository_scope_of_mapping (mapping : keeper_repo_mapping) =
+  if List.exists is_wildcard mapping.repository_ids then
+    All_repositories
+  else
+    Selected_repositories mapping.repository_ids
+
+let mapping_allows_repository (mapping : keeper_repo_mapping) ~repository_id =
+  match repository_scope_of_mapping mapping with
+  | All_repositories -> true
+  | Selected_repositories repository_ids ->
+      List.exists (String.equal repository_id) repository_ids
+
 (* Filter [repos] down to those whose id appears in [mapping.repository_ids],
    with ["*"] as a wildcard that bypasses filtering entirely.
    The Hashtbl materialisation is skipped when a wildcard short-circuits
@@ -94,12 +110,12 @@ let is_wildcard s = s = "*"
    would partially apply). *)
 let filter_repos_by_mapping (mapping : keeper_repo_mapping)
     (repos : repository list) : repository list =
-  if List.exists is_wildcard mapping.repository_ids then
-    repos
-  else
+  match repository_scope_of_mapping mapping with
+  | All_repositories -> repos
+  | Selected_repositories repository_ids ->
     let mapping_id_set =
-      let tbl = Hashtbl.create (List.length mapping.repository_ids) in
-      List.iter (fun id -> Hashtbl.replace tbl id ()) mapping.repository_ids;
+      let tbl = Hashtbl.create (List.length repository_ids) in
+      List.iter (fun id -> Hashtbl.replace tbl id ()) repository_ids;
       tbl
     in
     List.filter
@@ -107,7 +123,7 @@ let filter_repos_by_mapping (mapping : keeper_repo_mapping)
       repos
 
 let is_allowed ~keeper_id ~repository_id ~base_path =
-  match lookup_mapping ~base_path keeper_id with
+  match lookup_mapping ~base_path ~keeper_id with
   | Mapping_missing _ -> false
   | Mapping_load_error msg ->
       if not (Hashtbl.mem logged_mapping_errors keeper_id) then begin
@@ -119,9 +135,7 @@ let is_allowed ~keeper_id ~repository_id ~base_path =
       end;
       false
   | Mapping_found mapping ->
-      List.exists
-        (fun id -> String.equal id repository_id || String.equal id "*")
-        mapping.repository_ids
+      mapping_allows_repository mapping ~repository_id
 
 let validate_access ~keeper_id ~repository_id ~base_path =
   if is_allowed ~keeper_id ~repository_id ~base_path then Ok ()
@@ -160,7 +174,7 @@ let save_mapping ~base_path mapping =
   save_all ~base_path (mapping :: filtered)
 
 let apply_mapping ~keeper_id ~base_path ~repositories =
-  match lookup_mapping ~base_path keeper_id with
+  match lookup_mapping ~base_path ~keeper_id with
   | Mapping_missing _ -> []
   | Mapping_load_error msg ->
       Log.Misc.warn

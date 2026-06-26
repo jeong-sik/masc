@@ -4,6 +4,28 @@ val load_all : base_path:string -> (keeper_repo_mapping list, string) result
 (** [load_all ~base_path] loads all keeper-repository mappings from
     [.masc/config/keeper_repo_mappings.toml]. *)
 
+type mapping_lookup =
+  | Mapping_found of keeper_repo_mapping
+  | Mapping_missing of string
+  | Mapping_load_error of string
+
+val lookup_mapping : base_path:string -> keeper_id:string -> mapping_lookup
+(** [lookup_mapping ~base_path ~keeper_id] loads the keeper mapping while
+    preserving the missing/load-error distinction for fail-closed callers. *)
+
+val mapping_allows_repository :
+  keeper_repo_mapping -> repository_id:repository_id -> bool
+(** [mapping_allows_repository mapping ~repository_id] applies the
+    repository-id matching rules, including wildcard mappings. *)
+
+type repository_scope =
+  | All_repositories
+  | Selected_repositories of repository_id list
+
+val repository_scope_of_mapping : keeper_repo_mapping -> repository_scope
+(** [repository_scope_of_mapping mapping] parses raw TOML repository IDs into
+    the closed repository-scope representation used for policy decisions. *)
+
 val allowed_repositories :
   keeper_id:string -> base_path:string -> (repository_id list, string) result
 (** [allowed_repositories ~keeper_id ~base_path] returns the list of

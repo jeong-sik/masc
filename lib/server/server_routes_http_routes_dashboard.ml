@@ -19,6 +19,16 @@ let live_cache_ttl_s = Server_dashboard_http_core_cache.live_cache_ttl_s
 let realtime_cache_ttl_s = Server_dashboard_http_core_cache.realtime_cache_ttl_s
 let feature_health_cache_ttl_s = Server_dashboard_http_core_cache.feature_health_cache_ttl_s
 
+let dashboard_actor_cache_segment state req =
+  match
+    dashboard_actor_for_request
+      ~base_path:(Mcp_server.workspace_config state).base_path
+      req
+  with
+  | Some actor -> Some actor
+  | None -> Some "default"
+;;
+
 let dashboard_error_json ?ok message =
   let fields = [ ("error", `String message) ] in
   let fields =
@@ -887,7 +897,10 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/dashboard/briefing" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let cache_key =
-           Printf.sprintf "briefing:%s" (Mcp_server.workspace_config state).base_path
+           Server_dashboard_http_core_cache.dashboard_query_cache_key
+             (Mcp_server.workspace_config state)
+             "briefing"
+             [ ("actor", dashboard_actor_cache_segment state req) ]
          in
          let json =
            Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
@@ -899,7 +912,12 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/dashboard/session" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let cache_key =
-           Printf.sprintf "session:%s" (Mcp_server.workspace_config state).base_path
+           Server_dashboard_http_core_cache.dashboard_query_cache_key
+             (Mcp_server.workspace_config state)
+             "session"
+             [ ("actor", dashboard_actor_cache_segment state req)
+             ; ("session", Server_utils.query_param req "session_id")
+             ]
          in
          let json =
            Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
@@ -928,14 +946,20 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/briefing/sections" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let cache_key =
-           Printf.sprintf "mission_briefing:%s"
-             (Mcp_server.workspace_config state).base_path
-         in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
+           if Server_utils.bool_query_param req "force" ~default:false then
              Domain_pool_ref.submit_io_or_inline (fun () ->
-               dashboard_briefing_sections_http_json ~state ~sw ~clock req))
+               dashboard_briefing_sections_http_json ~state ~sw ~clock req)
+           else
+             let cache_key =
+               Server_dashboard_http_core_cache.dashboard_query_cache_key
+                 (Mcp_server.workspace_config state)
+                 "mission_briefing"
+                 [ ("actor", dashboard_actor_cache_segment state req) ]
+             in
+             Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
+               Domain_pool_ref.submit_io_or_inline (fun () ->
+                 dashboard_briefing_sections_http_json ~state ~sw ~clock req))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

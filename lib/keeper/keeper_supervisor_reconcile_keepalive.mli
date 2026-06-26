@@ -18,4 +18,6 @@ val reconcile_keepalive_keepers :
      (Keeper_meta_contract.keeper_meta option, string) result) ->
   'a Keeper_types_profile.context ->
   unit
-(** Re-launch durable keepalive keepers not dominated by the supervisor sweep. *)
+(** Re-launch durable keepalive keepers not dominated by the supervisor sweep.
+    Missing configured keepers are materialized through the required callback;
+    per-keeper failures are logged/metriced without aborting the whole pass. *)

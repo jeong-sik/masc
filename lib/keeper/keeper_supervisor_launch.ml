@@ -597,9 +597,7 @@ let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =
 (* Phase 4 reconciliation extracted to
    [Keeper_supervisor_reconcile_keepalive] (godfile decomp).
    publish_lifecycle + supervise_keepalive injected to avoid cycle. *)
-let reconcile_keepalive_keepers
-      ?(load_or_materialize_keeper_meta = fun (_ctx : _ context) _name -> Ok None)
-      (ctx : _ context)
+let reconcile_keepalive_keepers ~load_or_materialize_keeper_meta (ctx : _ context)
   =
   Keeper_supervisor_reconcile_keepalive.reconcile_keepalive_keepers
     ~publish_lifecycle

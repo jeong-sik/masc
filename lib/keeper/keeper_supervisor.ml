@@ -110,7 +110,7 @@ let empty_sweep_acc =
   }
 ;;
 
-let sweep_and_recover ?load_or_materialize_keeper_meta (ctx : _ context) =
+let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
   let now = Time_compat.now () in
   let max_restarts =
     Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
@@ -756,5 +756,5 @@ let sweep_and_recover ?load_or_materialize_keeper_meta (ctx : _ context) =
       | _ -> ());
     Eio_guard.yield_step sweep_names_ym);
   (* Phase 4: reconcile LAST — only orphaned durable keepers *)
-  reconcile_keepalive_keepers ?load_or_materialize_keeper_meta ctx
+  reconcile_keepalive_keepers ~load_or_materialize_keeper_meta ctx
 ;;

@@ -25,14 +25,15 @@ val supervise_keepalive :
 (** {1 Sweep and Recovery} *)
 
 val sweep_and_recover :
-     ?load_or_materialize_keeper_meta:
+     load_or_materialize_keeper_meta:
        ('a context -> string -> (keeper_meta option, string) result)
   -> 'a context
   -> unit
 (** Scan all supervised keepers in [Keeper_registry]. Detect zombies
     (resolved Promise), restart with exponential backoff if within
-    budget, mark dead otherwise. Called periodically by the keeper
-    supervisor loop. *)
+    budget, mark dead otherwise, and materialize configured keepalive
+    keepers through the required callback. Called periodically by the
+    keeper supervisor loop. *)
 
 (** {1 Pure Helpers (exposed for testing)} *)
 

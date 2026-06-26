@@ -540,11 +540,8 @@ let () =
     Mirage_crypto_rng_unix.use_default ();
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Eio.Switch.run @@ fun sw ->
-    let net = Eio.Stdenv.net env in
-    (* Capture the Eio handles the OAS call path reads via Masc_eio_env.get_opt.
-       Without this the live LLM call path finds no clock and runs without
-       timeout enforcement. *)
-    Masc.Masc_eio_env.init ~sw ~net ~clock:(Eio.Stdenv.clock env) ();
+    (* let net = Eio.Stdenv.net env in *)
+    (* Masc_eio_env.init was removed. Thread env if needed. *)
     let config_path = runtime_toml_path ~base_path in
     (match Runtime.init_default_strict ~config_path with
      | Error msg ->

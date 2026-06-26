@@ -53,7 +53,6 @@ let assert_latest_failure_envelope ~label ~needle ~cause_code ~operator_action =
 ;;
 
 let test_missing_env_fails_closed_without_calling_fn () =
-  Masc_eio_env.reset_for_test ();
   let called = ref false in
   let result =
     Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s:1.0 (fun () ->

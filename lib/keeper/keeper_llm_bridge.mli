@@ -27,9 +27,9 @@ type cancel_classification =
       [Eio.Cancel.Cancelled] so the caller exits immediately without retrying.
 
     @raises Eio.Cancel.Cancelled when the parent fiber/switch is cancelled. *)
-val run_with_timeout_and_fallback
-  :  ?cancel_classification:cancel_classification
-  -> timeout_s:float
+val run_with_timeout_and_fallback :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?cancel_classification:cancel_classification -> timeout_s:float
   -> (unit -> ('a, Agent_sdk.Error.sdk_error) result)
   -> ('a, Agent_sdk.Error.sdk_error) result
 

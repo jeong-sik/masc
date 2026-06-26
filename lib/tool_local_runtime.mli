@@ -34,6 +34,7 @@ val runtime_status_json :
 (** Re-export of {!Tool_local_runtime_status.runtime_status_json}. *)
 
 val runtime_verify_json :
+  ?env:Masc_eio_env.t ->
   ?runtime_pool:string ->
   ?expected_slots:int ->
   ?expected_ctx:int ->
@@ -65,6 +66,7 @@ val runtime_ollama_probe_json :
     owns hang protection; callers do not observe these timeouts. *)
 
 val run_bench :
+  ?env:Masc_eio_env.t ->
   ?model_id:string ->
   ?runtime_pool:string ->
   parallelism:int ->

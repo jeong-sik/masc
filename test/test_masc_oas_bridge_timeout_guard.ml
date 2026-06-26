@@ -30,19 +30,13 @@ let test_rejects_non_finite_timeout () =
 ;;
 
 let test_accepts_positive_timeout_without_eio_env () =
-  match Masc_eio_env.get_opt () with
-  | Some _ ->
-    failwith
-      "test_accepts_positive_timeout_without_eio_env requires Masc_eio_env.get_opt () = \
-       None before calling run_safe"
-  | None ->
-    let called = ref false in
-    (match
-       Masc_oas_bridge.run_safe ~caller:"test_timeout_guard" ~timeout_s:0.1 (fun () ->
-         called := true;
-         Ok "ok")
-     with
-     | Ok "ok" -> Alcotest.(check bool) "fn was called" true !called
+  let called = ref false in
+  (match
+     Masc_oas_bridge.run_safe ~caller:"test_timeout_guard" ~timeout_s:0.1 (fun () ->
+       called := true;
+       Ok "ok")
+   with
+   | Ok "ok" -> Alcotest.(check bool) "fn was called" true !called
      | Ok other -> failwith ("unexpected result: " ^ other)
      | Error err -> failwith (Agent_sdk.Error.to_string err))
 ;;

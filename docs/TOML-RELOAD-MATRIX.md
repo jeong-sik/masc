@@ -1,9 +1,10 @@
 ---
 status: reference
-last_verified: 2026-04-21
+last_verified: 2026-06-26
 code_refs:
   - scripts/check-doc-truth.sh
   - config/
+  - lib/fusion/
 ---
 
 # TOML Reload Matrix
@@ -33,7 +34,7 @@ The key distinction is:
 | `<base_path>/.masc/config/runtime.toml` | startup env seeding for `MASC_KEEPER_*` and WebSearch knobs | server bootstrap before env-backed consumers initialize | none | `boot_static` | values are recorded in a process-local boot override store; edits require restart |
 | ~~`<resolved-config-root>/tool_policy.toml`~~ | ~~keeper tool group policy~~ | ~~deleted~~ | — | — | Loader (`keeper_tool_policy_config.ml`) removed. Tool access is descriptor/registry-driven. |
 | `<resolved-config-root>/keepers/*.toml` | declarative keeper profile defaults | keeper create/up, explicit keeper operations, supervisor reconcile | next supervisor sweep or next keeper create/up | `sweep_dynamic` | running keepers re-sync declarative fields; no standalone file watcher |
-| `<resolved-config-root>/runtime.toml` | runtime catalog source | model resolve path in OAS/MASC (rendered in memory) | next resolve / next turn | `request_dynamic` | invalid TOML blocks runtime load; `runtime.json` is retired |
+| `<resolved-config-root>/runtime.toml` | runtime catalog source + optional `[fusion]` policy | model resolve path in OAS/MASC; `masc_fusion` handler reloads `[fusion]` per request | next resolve / next turn / next `masc_fusion` request | `request_dynamic` | invalid TOML blocks runtime or fusion policy load; `runtime.json` is retired |
 
 ## Current Behavior by File
 
@@ -91,6 +92,9 @@ Operational meaning:
 - Path selection is still tied to cached config-root resolution.
 - Content changes are observed on the next resolve/turn, not by a dedicated
   watcher.
+- `[fusion]` is also read from this file by `Fusion_config_loader.load` at
+  `masc_fusion` handler time. Fusion edits therefore take effect on the next
+  `masc_fusion` request, and invalid `[fusion]` config fails that request closed.
 
 ## Rules for New TOML Files
 

@@ -900,10 +900,12 @@ trigger_policy = "mention_or_thread"
 [fusion]
 enabled = true
 default_preset = "trio"
-# 동시에 띄울 수 있는 패널 수 (Async_agent.all max_fibers 상한).
+# 동시성 knob은 의도적으로 분리한다.
+# - max_concurrent_panels: 패널 답변 fan-out 상한.
+# - max_concurrent_judges: judge_of_judges 1차 심판 fan-out 상한.
+# 패널 cap은 답변 모델/provider backpressure 보호용이고, 심판 cap은 느린 심판
+# 하나가 나머지 독립 심판 lens를 직렬화하지 않게 하는 용도다.
 max_concurrent_panels = 2
-# Judge-of-judges 1차 심판 동시성. 패널 backpressure와 분리해 한 느린
-# 심판이 다른 심판 실행을 직렬로 막지 않게 한다.
 max_concurrent_judges = 3
 
 # 패널 프리셋. 서로 다른 모델 패밀리로 구성해 관점 다양성을 확보한다.

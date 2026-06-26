@@ -23,7 +23,7 @@ import {
   parseKeeperCompositeSnapshot,
   CompositeSchemaDriftError,
   type KeeperCompositeSnapshot,
-} from '../api/keeper'
+} from '../api/schemas/keeper-composite'
 import type { GateKeepersData } from '../api/gate'
 import { normalizeKeepers } from '../keeper-store-normalize'
 import {

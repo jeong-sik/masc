@@ -21,20 +21,14 @@ import {
   DEFAULT_POST_TIMEOUT_MS,
 } from './core'
 import { ensureDevToken, resetDevTokenBootstrap } from './dev-token'
-import {
-  parseKeeperCompositeSnapshot,
-  parseFleetCompositeSnapshot,
-  type KeeperCompositeSnapshot,
-  type FleetCompositeSnapshot,
+import type {
+  KeeperCompositeSnapshot,
+  FleetCompositeSnapshot,
 } from './schemas/keeper-composite'
-import {
-  safeParseKeeperChatHistoryMessage,
-  type KeeperChatHistoryMessage,
-} from './schemas/keeper-chat-history'
-import {
-  parseKeeperTransitionsResponse,
-  type KeeperTransition,
-  type KeeperTransitionsResponse,
+import type { KeeperChatHistoryMessage } from './schemas/keeper-chat-history'
+import type {
+  KeeperTransition,
+  KeeperTransitionsResponse,
 } from './schemas/keeper-transitions'
 
 export type {
@@ -55,20 +49,8 @@ export type {
   KeeperCompositeCompactionStage,
   FleetCompositeSnapshot,
 } from './schemas/keeper-composite'
-export {
-  KeeperCompositeSnapshotSchema,
-  FleetCompositeSnapshotSchema,
-  parseKeeperCompositeSnapshot,
-  parseFleetCompositeSnapshot,
-  CompositeSchemaDriftError,
-} from './schemas/keeper-composite'
 export type { KeeperChatHistoryMessage } from './schemas/keeper-chat-history'
-export {
-  KeeperChatHistoryMessageSchema,
-  safeParseKeeperChatHistoryMessage,
-} from './schemas/keeper-chat-history'
 export type { KeeperTransition, KeeperTransitionsResponse }
-export { KeeperTransitionsSchemaDriftError } from './schemas/keeper-transitions'
 
 // --- Runtime trace evidence (split to keeper-runtime-trace.ts) ---
 export type {
@@ -690,6 +672,7 @@ export async function fetchKeeperChatHistory(
   if (!Array.isArray(data)) {
     throw new Error('fetchKeeperChatHistory: response is not an array')
   }
+  const { safeParseKeeperChatHistoryMessage } = await import('./schemas/keeper-chat-history')
   return data
     .map(safeParseKeeperChatHistoryMessage)
     .filter((m): m is KeeperChatHistoryMessage => m !== null)
@@ -738,6 +721,7 @@ export async function fetchKeeperTransitions(
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!resp.ok) throw new Error(`transitions fetch failed: ${resp.status}`)
+  const { parseKeeperTransitionsResponse } = await import('./schemas/keeper-transitions')
   return parseKeeperTransitionsResponse(await resp.json())
 }
 
@@ -813,6 +797,7 @@ export async function fetchKeeperComposite(
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!resp.ok) throw new Error(`composite fetch failed: ${resp.status}`)
+  const { parseKeeperCompositeSnapshot } = await import('./schemas/keeper-composite')
   return parseKeeperCompositeSnapshot(await resp.json())
 }
 
@@ -831,6 +816,7 @@ export async function fetchKeepersComposite(
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!resp.ok) throw new Error(`fleet composite fetch failed: ${resp.status}`)
+  const { parseFleetCompositeSnapshot } = await import('./schemas/keeper-composite')
   return parseFleetCompositeSnapshot(await resp.json())
 }
 

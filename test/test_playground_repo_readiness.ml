@@ -4,6 +4,12 @@ open Alcotest
 
 module Keeper_types = Keeper_types
 
+(* [Keeper_sandbox_control] lives inside the wrapped [masc] library.  The
+   alias lets call sites keep the existing qualified form, and the open
+   brings the status constructors into scope for pattern/expression use. *)
+module Keeper_sandbox_control = Masc.Keeper_sandbox_control
+open Keeper_sandbox_control
+
 let make_meta ?(sandbox = Keeper_types_profile_sandbox.Docker) name =
   let json =
     `Assoc

@@ -92,6 +92,9 @@ let rec first_privileged_program = function
      | None -> first_privileged_program rest)
 ;;
 
+(* Public seam shared by direct Shell IR dispatch and Docker sandbox host-path
+   validation, where container paths are first rewritten for the host policy
+   check.  Keeping the facade here ensures both routes use the same jail. *)
 let validate_paths ?keeper_id ?base_path ~workdir ir =
   Exec_policy.validate_shell_ir_paths ?keeper_id ?base_path ~workdir ir
 ;;

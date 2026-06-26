@@ -82,6 +82,44 @@ let contains_substring haystack needle =
     true
   with Not_found -> false
 
+let source_text rel = Masc_test_deps.read_file (Masc_test_deps.source_path rel)
+
+let slice_between text ~start_marker ~end_marker =
+  try
+    let start = Str.search_forward (Str.regexp_string start_marker) text 0 in
+    let stop = Str.search_forward (Str.regexp_string end_marker) text start in
+    String.sub text start (stop - start)
+  with Not_found ->
+    Alcotest.failf "missing source marker between %S and %S" start_marker end_marker
+
+let slice_from text ~start_marker =
+  try
+    let start = Str.search_forward (Str.regexp_string start_marker) text 0 in
+    String.sub text start (String.length text - start)
+  with Not_found -> Alcotest.failf "missing source marker %S" start_marker
+
+let test_moderation_http_identity_bound_to_auth_source () =
+  let src = source_text "lib/server/server_dashboard_http_delete_actions.ml" in
+  let flag_route =
+    slice_between src
+      ~start_marker:{|Http.Router.post "/api/v1/dashboard/board/moderation/flag"|}
+      ~end_marker:{|Http.Router.get "/api/v1/dashboard/board/moderation/queue"|}
+  in
+  let action_route =
+    slice_from src
+      ~start_marker:{|Http.Router.post "/api/v1/dashboard/board/moderation/action"|}
+  in
+  Alcotest.(check bool) "flag route binds authenticated agent" true
+    (contains_substring flag_route "(fun _state agent_name req reqd ->");
+  Alcotest.(check bool) "flag reporter uses authenticated agent" true
+    (contains_substring flag_route "let reporter = agent_name");
+  Alcotest.(check bool) "flag route ignores body reporter" false
+    (contains_substring flag_route {|json_string_opt "reporter"|});
+  Alcotest.(check bool) "action actor uses authenticated agent" true
+    (contains_substring action_route "let actor = agent_name");
+  Alcotest.(check bool) "action route ignores body actor" false
+    (contains_substring action_route {|json_string_opt "actor"|})
+
 (** {2 Group 1: Helper / Formatting Functions} *)
 
 let test_visibility_of_string () =
@@ -1885,6 +1923,8 @@ let () =
             `Quick test_inline_board_post_author_rewrites_caller_claim;
           Alcotest.test_case "MCP runtime board post author accepts matching alias"
             `Quick test_inline_board_post_author_accepts_matching_alias;
+          Alcotest.test_case "moderation http identity binds to auth source"
+            `Quick test_moderation_http_identity_bound_to_auth_source;
         ] );
       ( "json_helpers",
         [

@@ -201,6 +201,11 @@ module KeeperMemoryOs = struct
   let consolidation_enabled_default = false
   let consolidation_runtime_id_default = None
 
+  let optional_string_default = function
+    | Some value -> value
+    | None -> ""
+  ;;
+
   let get_bool_logged ?(invalid = Env_config_memory.Default) name ~default =
     Env_config_memory.get_bool_logged
       ~invalid
@@ -276,7 +281,7 @@ module KeeperMemoryOs = struct
       @ops_class operator *)
   let librarian_runtime_id () =
     get_string
-      ~default:(Option.value librarian_runtime_id_default ~default:"")
+      ~default:(optional_string_default librarian_runtime_id_default)
       "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
     |> nonempty_string
   ;;
@@ -320,7 +325,7 @@ module KeeperMemoryOs = struct
       @ops_class operator *)
   let consolidation_runtime_id () =
     get_string
-      ~default:(Option.value consolidation_runtime_id_default ~default:"")
+      ~default:(optional_string_default consolidation_runtime_id_default)
       "MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID"
     |> nonempty_string
   ;;

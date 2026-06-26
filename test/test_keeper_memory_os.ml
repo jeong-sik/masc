@@ -1135,6 +1135,10 @@ let test_librarian_runtime_preserves_unstructured_fallback () =
                 "fallback is ephemeral"
                 true
                 (fact.Types.category = Types.Ephemeral);
+              Alcotest.(check (option string))
+                "fallback diagnostic does not author claim_id"
+                None
+                fact.Types.claim_id;
               Alcotest.(check (float 0.001))
                 "fallback fact first_seen uses episode timestamp"
                 episode.Types.created_at
@@ -1177,22 +1181,24 @@ let test_librarian_runtime_preserves_unstructured_fallback () =
         | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts))))
 ;;
 
-let test_librarian_unstructured_fallback_upserts_by_claim_id () =
+let test_librarian_unstructured_fallback_uses_exact_text_identity () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
       with_eio (fun ~sw ~net ~clock ->
         let keeper_id = "runtime-librarian-fallback-upsert-keeper" in
-        let response_text = ref "first invalid librarian payload" in
-        let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
-          Ok (fake_response !response_text)
-        in
         let inp : Librarian.input =
           { Librarian.trace_id = "trace-runtime-fallback-upsert"
           ; generation = 12
           ; messages = [ text_message "Please remember repeated fallback shape." ]
           }
         in
-        let run_once () =
+        let first_complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+          Ok (fake_response "first invalid librarian payload")
+        in
+        let second_complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+          Ok (fake_response "second invalid librarian payload with different text")
+        in
+        let run_once complete =
           match
             Librarian_runtime.extract_and_append_with_provider
               ~complete
@@ -1207,41 +1213,45 @@ let test_librarian_unstructured_fallback_upserts_by_claim_id () =
           | Error msg -> Alcotest.fail msg
           | Ok episode -> episode
         in
-        let first = run_once () in
-        Eio.Time.sleep clock 0.01;
-        response_text := "second invalid librarian payload with different text";
-        let second = run_once () in
+        let first = run_once first_complete in
+        let second = run_once second_complete in
         Alcotest.(check int)
           "both fallback episodes are still evented"
           2
           (List.length (Memory_io.read_events_tail ~keeper_id ~n:10));
-        match Memory_io.read_facts_all ~keeper_id with
-        | [ fact ] ->
+        let facts = Memory_io.read_facts_all ~keeper_id in
+        Alcotest.(check int) "distinct diagnostics remain distinct facts" 2 (List.length facts);
+        Alcotest.(check bool)
+          "fallback diagnostics do not author claim_id"
+          true
+          (List.for_all (fun fact -> Option.is_none fact.Types.claim_id) facts);
+        Alcotest.(check bool)
+          "first raw note is preserved"
+          true
+          (List.exists
+             (fun fact -> contains "first invalid librarian payload" fact.Types.claim)
+             facts);
+        Alcotest.(check bool)
+          "second raw note is preserved"
+          true
+          (List.exists
+             (fun fact -> contains "second invalid librarian payload" fact.Types.claim)
+             facts);
+        (match first.Types.claims, second.Types.claims with
+         | [ first_fact ], [ second_fact ] ->
           Alcotest.(check bool)
-            "fallback claim_id is producer-stable"
+            "first result has no claim_id"
             true
-            (match fact.Types.claim_id with
-             | Some id ->
-               contains "librarian-unstructured-fallback" id
-               && contains "trace-runtime-fallback-upsert" id
-             | None -> false);
+            (Option.is_none first_fact.Types.claim_id);
           Alcotest.(check bool)
-            "first raw note is preserved on merge"
+            "second result has no claim_id"
             true
-            (contains "first invalid librarian payload" fact.Types.claim);
-          Alcotest.(check bool)
-            "second raw note did not append a fresh fact"
-            false
-            (contains "second invalid librarian payload" fact.Types.claim);
-          Alcotest.(check (float 0.001))
-            "first_seen anchor is inherited"
-            first.Types.created_at
-            fact.Types.first_seen;
-          Alcotest.(check (option (float 0.001)))
-            "last_verified_at advances on reobserve"
-            (Some second.Types.created_at)
-            fact.Types.last_verified_at
-        | facts -> Alcotest.failf "expected one upserted fact, got %d" (List.length facts))))
+            (Option.is_none second_fact.Types.claim_id)
+         | first_claims, second_claims ->
+           Alcotest.failf
+             "expected one fallback fact in each result, got %d/%d"
+             (List.length first_claims)
+             (List.length second_claims)))))
 ;;
 
 let test_librarian_runtime_reports_fact_upsert_failure () =
@@ -4203,9 +4213,9 @@ let () =
             `Quick
             test_librarian_runtime_preserves_unstructured_fallback
         ; Alcotest.test_case
-            "unstructured fallback upserts by producer claim_id"
+            "unstructured fallback uses exact-text identity"
             `Quick
-            test_librarian_unstructured_fallback_upserts_by_claim_id
+            test_librarian_unstructured_fallback_uses_exact_text_identity
         ; Alcotest.test_case
             "provider slot gate caps concurrency at capacity (#21376/#21230)"
             `Quick

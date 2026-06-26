@@ -378,10 +378,6 @@ let collapse_for_unstructured_note raw =
     raw;
   Buffer.contents buf |> String.trim
 
-let unstructured_fallback_claim_id ~trace_id ~reason =
-  Keeper_memory_os_types.normalize_claim_id
-    (Printf.sprintf "librarian-unstructured-fallback-%s-%s" trace_id reason)
-
 let unstructured_episode ~now ~generation (inp : Keeper_librarian.input) ~reason ~raw =
   let raw_excerpt, _ =
     Keeper_text_processing.truncate_utf8_prefix
@@ -416,11 +412,10 @@ let unstructured_episode ~now ~generation (inp : Keeper_librarian.input) ~reason
           Keeper_memory_os_types.Ephemeral
     ; last_verified_at = Some now
     ; schema_version = Keeper_memory_os_types.schema_version
-    ; (* MASC authors this diagnostic fallback, not the LLM librarian. Use a
-         stable producer id so repeated unparseable responses for the same trace
-         and parse-failure class upsert instead of accumulating fresh raw-note
-         claims. The trace scope prevents cross-trace over-merge. *)
-      claim_id = unstructured_fallback_claim_id ~trace_id:inp.trace_id ~reason
+    ; (* MASC authors this diagnostic fallback, not the LLM librarian. Do not
+         overload the librarian [claim_id] producer-identity field; diagnostic
+         fallback rows degrade to exact-text identity via [claim_id = None]. *)
+      claim_id = None
     }
   in
   { Keeper_memory_os_types.trace_id = inp.trace_id

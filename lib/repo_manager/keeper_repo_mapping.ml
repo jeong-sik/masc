@@ -6,24 +6,6 @@ let logged_mapping_errors : (string, unit) Hashtbl.t = Hashtbl.create 4
 
 let mappings_toml_basename = "keeper_repo_mappings.toml"
 
-(** Cache for [load_all] results keyed by [base_path]. Invalidated on every
-    write so the in-memory view does not diverge from disk after mapping
-    mutations. *)
-let load_all_cache : (string, (keeper_repo_mapping list, string) result) Hashtbl.t =
-  Hashtbl.create 4
-;;
-
-let invalidate_load_all_cache ~base_path = Hashtbl.remove load_all_cache base_path
-
-let load_all_cached ~base_path =
-  match Hashtbl.find_opt load_all_cache base_path with
-  | Some result -> result
-  | None ->
-    let result = load_all ~base_path in
-    Hashtbl.replace load_all_cache base_path result;
-    result
-;;
-
 let mappings_toml_path base_path =
   (* RFC-0121: layout SSOT via [Config_dir_resolver]. *)
   Config_dir_resolver.keeper_repo_mappings_toml_path ~base_path
@@ -74,6 +56,24 @@ let load_all ~base_path =
              | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
              | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _) ->
             Ok [])
+
+(** Cache for [load_all] results keyed by [base_path]. Invalidated on every
+    write so the in-memory view does not diverge from disk after mapping
+    mutations. *)
+let load_all_cache : (string, (keeper_repo_mapping list, string) result) Hashtbl.t =
+  Hashtbl.create 4
+;;
+
+let invalidate_load_all_cache ~base_path = Hashtbl.remove load_all_cache base_path
+
+let load_all_cached ~base_path =
+  match Hashtbl.find_opt load_all_cache base_path with
+  | Some result -> result
+  | None ->
+    let result = load_all ~base_path in
+    Hashtbl.replace load_all_cache base_path result;
+    result
+;;
 
 type mapping_lookup =
   | Mapping_found of keeper_repo_mapping

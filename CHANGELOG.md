@@ -1,15 +1,7 @@
 # Changelog
 
 
-## [0.19.50] - 2026-06-26
-
-### Changed
-- Bump OAS agent_sdk pin to latest main and bump masc version to 0.19.50.
-
-### Deprecated
-- TBD
-
-## Unreleased
+## [0.19.49] - 2026-06-26
 
 ### Fixed
 - `gate`: Discord inbound messages now resolve `<@snowflake>` / `<@!snowflake>`
@@ -23,6 +15,13 @@
   when a legacy wire payload still carries `external_ref`. The field remains
   intentionally absent from dashboard fact types/rendering; PR/issue text is
   context for the model, not a machine-readable external-state status tag.
+- `agent_sdk`: bumped the OAS runtime pin to latest `main` (`ecd509f4`) and
+  regenerated `masc.opam` / `masc.opam.locked` / `KEEPER-USER-MANUAL.md`.
+
+### Fixed
+- `keeper`: playground repo policy visibility now reuses the keeper-repository
+  mapping decision and reports `policy_source` consistently as
+  `keeper_repo_mappings.toml` (#22329).
 
 ### Removed
 - `runtime`: removed the temporary `MASC_SHELL_IR_PATH_JAIL_ENABLED`
@@ -41,15 +40,6 @@
 - `runtime`: removed the legacy runtime storage selector. Storage is now
   filesystem-only by construction; operator/test environments must remove old
   backend overrides instead of expecting an in-memory backend.
-
-## [0.19.49] - 2026-06-26
-
-### Changed
-- `agent_sdk`: bumped the OAS runtime pin from `v0.207.7` (`b84af27e`) to
-  `v0.207.8` (`ecd509f4`, OAS `main` HEAD) and raised the dependency floor to
-  `>= 0.207.8` in `dune-project` / `masc.opam`. Pin metadata in
-  `scripts/oas-agent-sdk-pin.sh`, locked opam metadata, and the keeper user
-  manual pin block were refreshed by #22359.
 
 ## [0.19.48] - 2026-06-22
 

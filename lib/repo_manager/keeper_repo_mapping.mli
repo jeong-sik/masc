@@ -5,6 +5,12 @@ val mappings_toml_basename : string
     source label in playground-repo responses so the JSON field stays in
     sync with the actual file name. *)
 
+val mappings_toml_path : string -> string
+(** [mappings_toml_path base_path] returns the absolute path to the
+    keeper-repository mapping file for [base_path].  Exposed so tests and
+    callers that need to write raw TOML use the same layout SSOT as the
+    library. *)
+
 val load_all : base_path:string -> (keeper_repo_mapping list, string) result
 (** [load_all ~base_path] loads all keeper-repository mappings from
     [.masc/config/keeper_repo_mappings.toml]. *)

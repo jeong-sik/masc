@@ -29,11 +29,11 @@ let test_rejects_non_finite_timeout () =
   check_rejects_timeout ~name:"nan timeout rejected" Float.nan
 ;;
 
-let test_accepts_positive_timeout_without_eio_env () =
+let test_rejects_positive_timeout_without_eio_env () =
   match Masc_eio_env.get_opt () with
   | Some _ ->
     failwith
-      "test_accepts_positive_timeout_without_eio_env requires Masc_eio_env.get_opt () = \
+      "test_rejects_positive_timeout_without_eio_env requires Masc_eio_env.get_opt () = \
        None before calling run_safe"
   | None ->
     let called = ref false in
@@ -42,9 +42,8 @@ let test_accepts_positive_timeout_without_eio_env () =
          called := true;
          Ok "ok")
      with
-     | Ok "ok" -> Alcotest.(check bool) "fn was called" true !called
-     | Ok other -> failwith ("unexpected result: " ^ other)
-     | Error err -> failwith (Agent_sdk.Error.to_string err))
+     | Error _ -> Alcotest.(check bool) "fn was not called" false !called
+     | Ok _ -> failwith "expected run_safe to fail when no Eio clock is available")
 ;;
 
 let with_env name value f =
@@ -95,9 +94,9 @@ let () =
             `Quick
             test_rejects_non_finite_timeout
         ; Alcotest.test_case
-            "accepts positive timeout without eio env"
+            "rejects positive timeout without eio env"
             `Quick
-            test_accepts_positive_timeout_without_eio_env
+            test_rejects_positive_timeout_without_eio_env
         ; Alcotest.test_case
             "run_with_caller falls back for invalid env timeouts"
             `Quick

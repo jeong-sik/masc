@@ -30,6 +30,7 @@ let config_field_names =
   ; "tool_heavy_msg_threshold"; "tool_heavy_ratio_floor"
   ; "auto_handoff"; "handoff_threshold"; "handoff_cooldown_sec"
   ; "per_provider_timeout_s"; "always_approve"
+  ; "multimodal_policy"
   ; "autoboot_enabled"; "max_context_override"
   ; "telemetry_feedback_enabled"; "telemetry_feedback_window_hours"
   ]

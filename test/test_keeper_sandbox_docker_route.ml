@@ -555,10 +555,12 @@ let test_unknown_workspace_op_is_unsupported_before_docker () =
    | Some true -> Alcotest.failf "unknown op unexpectedly succeeded: %s" raw
    | Some false | None -> ());
   Alcotest.(check bool)
-    "rg-only handler requires a search pattern"
+    "non-rg op fails closed with unsupported-op error"
     true
-    (response_mentions raw "error" "pattern is required for rg");
-  Alcotest.(check (option string)) "handler op is rg-only" (Some "rg")
+    (response_mentions raw "error" "does not support op");
+  Alcotest.(check (option string))
+    "handler preserves requested op, not rewritten to rg"
+    (Some "future_repo_op")
     (parse_string_field raw "op")
 
 let test_turn_sandbox_file_write_uses_host_bind_mount () =
@@ -1188,10 +1190,12 @@ let test_tool_search_files_repo_review_is_unsupported () =
    | Some true -> Alcotest.failf "repo action unexpectedly succeeded: %s" raw
    | Some false | None -> ());
   Alcotest.(check bool)
-    "repo action payload cannot bypass rg pattern contract"
+    "repo action op fails closed with unsupported-op error"
     true
-    (response_mentions raw "error" "pattern is required for rg");
-  Alcotest.(check (option string)) "handler op is rg-only" (Some "rg")
+    (response_mentions raw "error" "does not support op");
+  Alcotest.(check (option string))
+    "handler preserves requested op, not rewritten to rg"
+    (Some "gh")
     (parse_string_field raw "op")
 
 let docker_run_line log_path =

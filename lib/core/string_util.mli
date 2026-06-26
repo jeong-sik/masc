@@ -25,6 +25,20 @@ val query_tokens : string -> string list
     (space, tab, CR, LF) into non-empty tokens. UTF-8 bytes pass
     through opaquely. *)
 
+val ascii_punctuation_tokens : string -> string list
+(** [ascii_punctuation_tokens text] splits on ASCII punctuation and whitespace,
+    lowercases ASCII token bytes, and keeps UTF-8 bytes inside tokens. It is the
+    shared tokenizer for legacy contract/reference text that treats punctuation
+    as token boundaries. *)
+
+val contains_contiguous_token_sequence
+  :  haystack:string list
+  -> needle:string list
+  -> bool
+(** [contains_contiguous_token_sequence ~haystack ~needle] is true when [needle]
+    appears as a contiguous token sequence inside [haystack]. Empty [needle]
+    returns [false]. *)
+
 val contains_all_tokens_ci : string -> string -> bool
 (** [contains_all_tokens_ci haystack query] — token-AND containment:
     every token of [query_tokens query] appears in [haystack] as a

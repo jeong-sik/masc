@@ -599,45 +599,10 @@ let default_evaluator_runtime () =
     ASCII punctuation separates tokens; UTF-8 bytes remain token
     characters so non-English contract items still compare literally
     across ASCII whitespace/punctuation. *)
-let contract_tokens text =
-  let buf = Buffer.create 16 in
-  let out = ref [] in
-  let is_token_char = function
-    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> true
-    | c -> Char.code c >= 128
-  in
-  let flush () =
-    if Buffer.length buf > 0
-    then (
-      out := Buffer.contents buf :: !out;
-      Buffer.clear buf)
-  in
-  String.iter
-    (fun c ->
-       if is_token_char c
-       then Buffer.add_char buf (Char.lowercase_ascii c)
-       else flush ())
-    text;
-  flush ();
-  List.rev !out
+let contract_tokens = String_util.ascii_punctuation_tokens
 ;;
 
-let contains_token_sequence ~haystack ~needle =
-  let rec starts_with needle haystack =
-    match needle, haystack with
-    | [], _ -> true
-    | n :: ns, h :: hs when String.equal n h -> starts_with ns hs
-    | _ -> false
-  in
-  match needle with
-  | [] -> false
-  | _ ->
-    let rec loop = function
-      | [] -> false
-      | _ :: rest as tokens -> starts_with needle tokens || loop rest
-    in
-    loop haystack
-;;
+let contains_token_sequence = String_util.contains_contiguous_token_sequence ;;
 
 (** Check completion notes against a pre-declared contract.
     Returns unmet contract items. A contract item is "met" if its

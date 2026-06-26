@@ -125,10 +125,6 @@ val completion_contract_result_of_string : string -> completion_contract_result 
 
 val completion_contract_result_requires_attention : completion_contract_result -> bool
 
-val completion_contract_result_of_contract_status
-  :  Keeper_contract_classifier.contract_status
-  -> completion_contract_result
-
 (** {2 Structured contract-violation encoding} *)
 
 (** Encode a tool list into the wire bracket format.

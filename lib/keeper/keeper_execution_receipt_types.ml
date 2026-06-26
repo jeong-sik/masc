@@ -175,21 +175,6 @@ let completion_contract_result_requires_attention result =
   |> Completion_contract_label.requires_attention
 ;;
 
-(* Lift the typed [Keeper_contract_classifier.contract_status] into the
-   receipt-level [completion_contract_result].  Bridges the six classifier
-   outcomes; the four boundary states are emitted only by producer sites
-   that already know they hold one of those states. *)
-let completion_contract_result_of_contract_status
-  : Keeper_contract_classifier.contract_status -> completion_contract_result
-  = function
-  | Surface_mismatch _ -> Contract_surface_mismatch
-  | Claim_only_after_owned_task -> Contract_claim_only_after_owned_task
-  | Needs_execution_progress -> Contract_needs_execution_progress
-  | Passive_only -> Contract_passive_only
-  | Satisfied_completion -> Contract_satisfied_completion
-  | Satisfied_execution -> Contract_satisfied_execution
-;;
-
 (* Structured contract-violation terminal_reason_code encoding.
    The legacy wire format is:
      completion_contract_violation:<contract_id>

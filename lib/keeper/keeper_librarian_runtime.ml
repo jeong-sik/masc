@@ -300,6 +300,20 @@ type parse_retry_error =
   | Retry_exhausted_unparseable of string
   | Retry_transport_failed of string
 
+type extraction_kind =
+  | Structured_episode
+  | Unstructured_fallback
+
+type extraction_result =
+  { episode : Keeper_memory_os_types.episode
+  ; kind : extraction_kind
+  }
+
+let should_record_cadence_success = function
+  | Structured_episode -> true
+  | Unstructured_fallback -> false
+;;
+
 let rec run_with_parse_retries ~max_retries ~attempt messages =
   match attempt messages with
   | Parsed episode -> Ok episode
@@ -435,7 +449,7 @@ let unstructured_episode ~now ~generation (inp : Keeper_librarian.input) ~reason
   ; schema_version = Keeper_memory_os_types.schema_version
   }
 
-let extract_with_provider
+let extract_with_provider_classified
     ?(complete = default_complete)
     ?clock
     ?(timeout_sec = librarian_default_timeout_sec)
@@ -476,7 +490,7 @@ let extract_with_provider
          ~attempt
          messages
      with
-     | Ok episode -> Ok episode
+     | Ok episode -> Ok { episode; kind = Structured_episode }
      | Error (Retry_transport_failed msg) -> Error msg
      | Error (Retry_exhausted_unparseable msg) ->
        let raw =
@@ -490,10 +504,29 @@ let extract_with_provider
          inp.trace_id
          generation
          msg;
-       Ok (unstructured_episode ~now ~generation inp ~reason:msg ~raw))
+       Ok
+         { episode = unstructured_episode ~now ~generation inp ~reason:msg ~raw
+         ; kind = Unstructured_fallback
+         })
 ;;
 
-let extract_and_append_with_provider
+let extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~provider_cfg ~generation inp =
+  match
+    extract_with_provider_classified
+      ?complete
+      ?clock
+      ?timeout_sec
+      ~sw
+      ~net
+      ~provider_cfg
+      ~generation
+      inp
+  with
+  | Error _ as e -> e
+  | Ok { episode; kind = _ } -> Ok episode
+;;
+
+let extract_and_append_with_provider_classified
     ?complete
     ?clock
     ?timeout_sec
@@ -509,9 +542,19 @@ let extract_and_append_with_provider
       ~keeper_id
       ~trace_id:inp.Keeper_librarian.trace_id
   in
-  match extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~provider_cfg ~generation inp with
+  match
+    extract_with_provider_classified
+      ?complete
+      ?clock
+      ?timeout_sec
+      ~sw
+      ~net
+      ~provider_cfg
+      ~generation
+      inp
+  with
   | Error _ as e -> e
-  | Ok episode ->
+  | Ok ({ episode; kind = _ } as extraction) ->
     let now = episode.Keeper_memory_os_types.created_at in
     (* RFC-0243: UPSERT claims into the fact store instead of blind-appending. A claim
        re-extracted across turns is folded into the existing row
@@ -566,8 +609,33 @@ let extract_and_append_with_provider
         (* RFC-0251: the co-occurrence edge / spreading-activation organ was removed
            (dark-by-default, no recall consumer), so the fact upsert above is the only
            post-merge work. *)
-        Ok episode
+        Ok extraction
       | Error message -> Error ("memory os fact upsert failed: " ^ message))
+;;
+
+let extract_and_append_with_provider
+    ?complete
+    ?clock
+    ?timeout_sec
+    ~sw
+    ~net
+    ~keeper_id
+    ~provider_cfg
+    inp
+  =
+  match
+    extract_and_append_with_provider_classified
+      ?complete
+      ?clock
+      ?timeout_sec
+      ~sw
+      ~net
+      ~keeper_id
+      ~provider_cfg
+      inp
+  with
+  | Error _ as e -> e
+  | Ok { episode; kind = _ } -> Ok episode
 ;;
 
 let provider_for_runtime ~runtime_id =
@@ -611,7 +679,7 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
              in
              match
                with_provider_slot ?clock (fun () ->
-                 extract_and_append_with_provider
+                 extract_and_append_with_provider_classified
                    ?complete
                    ?clock
                    ~timeout_sec
@@ -631,15 +699,24 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
                  "memory os librarian skipped runtime=%s: global provider slot busy (capacity=%d)"
                  runtime_id
                  (global_slot_capacity ())
-             | Some (Ok episode) ->
-               (* Only a successful write resets the cadence. Skipped or failed
-                  attempts leave the keeper due on the next turn. *)
-               cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
-               Log.Keeper.info ~keeper_name:keeper_id
-                 "memory os librarian wrote episode trace_id=%s generation=%d claims=%d"
-                 episode.Keeper_memory_os_types.trace_id
-                 episode.generation
-                 (List.length episode.claims)
+             | Some (Ok { episode; kind }) ->
+               if should_record_cadence_success kind
+               then (
+                 (* Only structured extraction resets the cadence. Skipped,
+                    failed, or unstructured fallback attempts leave the keeper
+                    due on the next turn. *)
+                 cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
+                 Log.Keeper.info ~keeper_name:keeper_id
+                   "memory os librarian wrote episode trace_id=%s generation=%d claims=%d"
+                   episode.Keeper_memory_os_types.trace_id
+                   episode.generation
+                   (List.length episode.claims))
+               else
+                 Log.Keeper.warn ~keeper_name:keeper_id
+                   "memory os librarian wrote unstructured fallback trace_id=%s generation=%d claims=%d; cadence remains due"
+                   episode.Keeper_memory_os_types.trace_id
+                   episode.generation
+                   (List.length episode.claims)
              | Some (Error err) ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string EpisodeCreateFailures)

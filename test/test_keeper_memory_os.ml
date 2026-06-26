@@ -1111,7 +1111,7 @@ let test_librarian_runtime_preserves_unstructured_fallback () =
         in
         let fallback_started_at = Eio.Time.now clock in
         let fallback_result =
-          Librarian_runtime.extract_and_append_with_provider
+          Librarian_runtime.extract_and_append_with_provider_classified
             ~complete
             ~clock
             ~timeout_sec:1.0
@@ -1131,7 +1131,17 @@ let test_librarian_runtime_preserves_unstructured_fallback () =
         in
         (match fallback_result with
          | Error msg -> Alcotest.fail msg
-         | Ok episode ->
+         | Ok extraction ->
+           let episode = extraction.Librarian_runtime.episode in
+           let kind = extraction.Librarian_runtime.kind in
+           (match kind with
+            | Librarian_runtime.Unstructured_fallback -> ()
+            | Librarian_runtime.Structured_episode ->
+              Alcotest.fail "expected unstructured fallback extraction");
+           Alcotest.(check bool)
+             "fallback does not count as cadence success"
+             false
+             (Librarian_runtime.should_record_cadence_success kind);
            fallback_created_at := Some episode.Types.created_at;
            check_in_clock_window
              "fallback created_at derives from injected clock"

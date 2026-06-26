@@ -51,10 +51,10 @@ val cadence_due : keeper_id:string -> trace_id:string -> bool
     unseen keeper, or the first call after a rollover, is due immediately. *)
 
 val cadence_record_success : keeper_id:string -> trace_id:string -> unit
-(** Record a successful extraction for [keeper_id] on [trace_id] so the cadence
-    counter resets and the next cycle can begin. Must only be called after a
-    due turn actually produced an episode; skipped or failed attempts must not
-    call this. *)
+(** Record a successful structured extraction for [keeper_id] on [trace_id] so
+    the cadence counter resets and the next cycle can begin. Must only be called
+    after a due turn actually produced a structured episode; skipped, failed, or
+    unstructured-fallback attempts must not call this. *)
 
 val cadence_counter_entries : unit -> int
 (** Number of live per-keeper cadence rows. Bounded by the number of keepers
@@ -105,6 +105,20 @@ type parse_retry_error =
   | Retry_exhausted_unparseable of string
   | Retry_transport_failed of string
 
+type extraction_kind =
+  | Structured_episode
+  | Unstructured_fallback
+
+type extraction_result =
+  { episode : Keeper_memory_os_types.episode
+  ; kind : extraction_kind
+  }
+
+val should_record_cadence_success : extraction_kind -> bool
+(** Whether this extraction kind is allowed to reset the librarian cadence.
+    Unstructured fallback episodes are durable diagnostics, but they mean the
+    provider still failed to produce structured memory. *)
+
 val run_with_parse_retries
   :  max_retries:int
   -> attempt:(Agent_sdk.Types.message list -> attempt_outcome)
@@ -144,6 +158,17 @@ val extract_with_provider
   -> Keeper_librarian.input
   -> (Keeper_memory_os_types.episode, string) result
 
+val extract_with_provider_classified
+  :  ?complete:complete_fn
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?timeout_sec:float
+  -> sw:Eio.Switch.t
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> provider_cfg:Llm_provider.Provider_config.t
+  -> generation:int
+  -> Keeper_librarian.input
+  -> (extraction_result, string) result
+
 val extract_and_append_with_provider
   :  ?complete:complete_fn
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -154,6 +179,17 @@ val extract_and_append_with_provider
   -> provider_cfg:Llm_provider.Provider_config.t
   -> Keeper_librarian.input
   -> (Keeper_memory_os_types.episode, string) result
+
+val extract_and_append_with_provider_classified
+  :  ?complete:complete_fn
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?timeout_sec:float
+  -> sw:Eio.Switch.t
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> keeper_id:string
+  -> provider_cfg:Llm_provider.Provider_config.t
+  -> Keeper_librarian.input
+  -> (extraction_result, string) result
 
 val run_best_effort
   :  ?complete:complete_fn

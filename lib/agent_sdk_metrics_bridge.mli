@@ -1,8 +1,8 @@
 (** Compatibility wrapper around [Agent_sdk.Event_bus].
 
-    Otel_metric_store instrumentation was retired from this module.  The wrapper
-    remains because keeper/runtime code uses it as the local Event_bus
-    boundary. *)
+    Keeper/runtime code uses this module as the local Event_bus boundary.  The
+    wrapper keeps lightweight MASC-side observability for publish counts and
+    per-purpose subscriber depth while the SDK bus owns queueing semantics. *)
 
 type handle
 

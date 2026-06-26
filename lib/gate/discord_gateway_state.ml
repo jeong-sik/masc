@@ -354,10 +354,10 @@ let discord_mention_re =
   Re.Pcre.re {|<(@!?|@&|#)([0-9]+)>|} |> Re.compile
 
 let mention_kind_of_prefix = function
-  | "@" | "@!" -> User_mention
-  | "@&" -> Role_mention
-  | "#" -> Channel_mention
-  | _ -> User_mention
+  | "@" | "@!" -> Some User_mention
+  | "@&" -> Some Role_mention
+  | "#" -> Some Channel_mention
+  | _ -> None
 
 let resolve_mentions ~mentions content =
   let resolved = ref [] in
@@ -366,22 +366,24 @@ let resolve_mentions ~mentions content =
       let raw = Re.Group.get group 0 in
       let prefix = Re.Group.get group 1 in
       let id = Re.Group.get group 2 in
-      let kind = mention_kind_of_prefix prefix in
-      let name_opt =
-        match kind with
-        | User_mention -> List.assoc_opt id mentions
-        | Role_mention | Channel_mention -> None
-      in
-      resolved :=
-        { mention_id = id
-        ; mention_name = name_opt
-        ; mention_kind = kind
-        ; raw_mention = raw
-        }
-        :: !resolved;
-      match name_opt with
-      | Some name -> "@" ^ name
-      | None -> raw)
+      match mention_kind_of_prefix prefix with
+      | None -> raw
+      | Some kind ->
+          let name_opt =
+            match kind with
+            | User_mention -> List.assoc_opt id mentions
+            | Role_mention | Channel_mention -> None
+          in
+          resolved :=
+            { mention_id = id
+            ; mention_name = name_opt
+            ; mention_kind = kind
+            ; raw_mention = raw
+            }
+            :: !resolved;
+          match name_opt with
+          | Some name -> "@" ^ name
+          | None -> raw)
   in
   (content, List.rev !resolved)
 

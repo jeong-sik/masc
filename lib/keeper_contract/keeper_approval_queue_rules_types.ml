@@ -117,6 +117,12 @@ let bool_member key json ~default =
   | _ -> default
 ;;
 
+let non_negative_int_member key json =
+  match Json_util.get_int json key with
+  | Some value when value >= 0 -> Some value
+  | _ -> None
+;;
+
 let rule_match_to_yojson (matched : rule_match) =
   `Assoc [ "rule_id", `String matched.rule_id; "matched_by", `String matched.matched_by ]
 ;;
@@ -147,14 +153,15 @@ let approval_rule_to_yojson (rule : approval_rule) =
 let approval_rule_of_yojson json =
   match json with
   | `Assoc _ ->
-    let id = (match Json_util.assoc_member_opt "id" json with Some (`String s) -> s | _ -> "") in
-    let keeper_name = (match Json_util.assoc_member_opt "keeper_name" json with Some (`String s) -> s | _ -> "") in
-    let tool_name = (match Json_util.assoc_member_opt "tool_name" json with Some (`String s) -> s | _ -> "") in
+    let ( let* ) = Option.bind in
+    let* id = string_opt_member "id" json in
+    let* keeper_name = string_opt_member "keeper_name" json in
+    let* tool_name = string_opt_member "tool_name" json in
     let sandbox_profile = Json_util.get_string json "sandbox_profile" in
     let backend = Json_util.get_string json "backend" in
-    let request_fingerprint = (match Json_util.assoc_member_opt "request_fingerprint" json with Some (`String s) -> s | _ -> "") in
+    let* request_fingerprint = string_opt_member "request_fingerprint" json in
     let request_fingerprint_preview =
-      Json_util.get_string json "request_fingerprint_preview"
+      string_opt_member "request_fingerprint_preview" json
       |> Option.value
            ~default:
              (String.sub
@@ -162,20 +169,12 @@ let approval_rule_of_yojson json =
                 0
                 (min 12 (String.length request_fingerprint)))
     in
-    let max_risk =
-      (match Json_util.assoc_member_opt "max_risk" json with Some (`String s) -> s | _ -> "")
-      |> risk_level_of_string
-      |> Option.value ~default:High
-    in
-    let created_at =
-      Json_util.get_float json "created_at"
-      |> Option.value ~default:(Unix.gettimeofday ())
-    in
+    let* max_risk_raw = string_opt_member "max_risk" json in
+    let* max_risk = risk_level_of_string max_risk_raw in
+    let* created_at = Json_util.get_float json "created_at" in
     let created_by = Json_util.get_string json "created_by" in
     let last_matched_at = Json_util.get_float json "last_matched_at" in
-    let match_count =
-      Json_util.get_int json "match_count" |> Option.value ~default:0
-    in
+    let* match_count = non_negative_int_member "match_count" json in
     let source_approval_id = Json_util.get_string json "source_approval_id" in
     Some
       { id

@@ -1432,13 +1432,257 @@ let test_health_json_reports_dormant_task_owner_as_advisory () =
         in
         Alcotest.(check int) "health exposes no dormant owner task row" 0
           (List.length dormant_tasks);
-        Alcotest.(check string) "health documents advisory semantics"
-          "advisory: reports task owners without executable keeper fibers; does not set \
-           fleet status, blocker, or operator_action_required"
+        Alcotest.(check string) "health documents active owner scan semantics"
+          Server_routes_http_runtime_fleet_scan.active_task_owner_fiber_scan_semantics
           (fleet_safety |> member "active_task_owner_fiber_scan_semantics" |> to_string);
         Alcotest.(check int) "health has no scan errors" 0
           (fleet_safety |> member "active_task_owner_scan_error_count" |> to_int);
         Alcotest.(check bool) "health does not ask fleet operator action" false
+          (fleet_safety |> member "operator_action_required" |> to_bool)))
+
+let test_health_json_ignores_stale_active_task_alias_when_agent_executable () =
+  with_temp_dir "health-active-task-owner-executable-alias" (fun dir ->
+    let config_root = make_config_root dir in
+    Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
+    List.iter (write_config_root_keeper_toml config_root) [ "executor"; "executor-stale" ];
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = Mcp_server.workspace_config state in
+        let executor =
+          make_keeper_meta ~name:"executor" ~trace_id:"trace-executor" ()
+        in
+        let stale_executor =
+          {
+            (make_keeper_meta
+               ~name:"executor-stale"
+               ~trace_id:"trace-executor-stale"
+               ())
+            with
+            Keeper_meta_contract.agent_name = executor.agent_name;
+          }
+        in
+        write_keeper_meta_exn config executor;
+        write_keeper_meta_exn config stale_executor;
+        let task =
+          make_task
+            ~id:"task-active-owner"
+            ~title:"Active keeper task"
+            ~status:
+              (Types.InProgress
+                 {
+                   assignee = executor.Keeper_meta_contract.agent_name;
+                   started_at = "2026-06-26T00:00:01Z";
+                 })
+            ()
+        in
+        Workspace.write_backlog config
+          { Types.tasks = [ task ]; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+        let phase_counts :
+            Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
+          { running = 1; failing = 0; recovering = 0; executable = 1 }
+        in
+        let phase_snapshot :
+            Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot =
+          {
+            counts = phase_counts;
+            running_names = [ executor.name ];
+            recovering_names = [];
+            executable_names = [ executor.name ];
+            phase_names = [ (executor.name, "running") ];
+          }
+        in
+        let fleet_safety =
+          Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+            ~bootable_names:[]
+            ~autoboot_scan:
+              Server_routes_http_runtime_fleet_scan.empty_autoboot_keeper_scan
+            ~phase_snapshot
+            ~phase_counts
+            ~paused_keepers_json:(`Assoc [ ("count", `Int 0) ])
+            ()
+        in
+        let open Yojson.Safe.Util in
+        Alcotest.(check string) "health remains ok" "ok"
+          (fleet_safety |> member "status" |> to_string);
+        Alcotest.(check bool) "health does not flag stale alias" false
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber"
+           |> to_bool);
+        Alcotest.(check int) "health reports no active owner rows" 0
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber_count"
+           |> to_int);
+        Alcotest.(check bool) "health does not require operator action" false
+          (fleet_safety |> member "operator_action_required" |> to_bool)))
+
+let test_health_json_degrades_on_active_task_owner_without_keeper_binding () =
+  with_temp_dir "health-active-task-owner-without-binding" (fun dir ->
+    let config_root = make_config_root dir in
+    Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = Mcp_server.workspace_config state in
+        let assignee = "missing-keeper-agent" in
+        let task =
+          make_task
+            ~id:"task-active-owner-without-binding"
+            ~title:"Active keeper task without binding"
+            ~status:
+              (Types.InProgress
+                 { assignee; started_at = "2026-06-26T00:00:01Z" })
+            ()
+        in
+        Workspace.write_backlog config
+          { Types.tasks = [ task ]; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+        let request = Httpun.Request.create `GET "/health" in
+        let json = Server_routes_http_runtime.make_health_json request in
+        let open Yojson.Safe.Util in
+        let fleet_safety = json |> member "keeper_fleet_safety" in
+        Alcotest.(check string) "health marks missing binding degraded"
+          "degraded"
+          (fleet_safety |> member "status" |> to_string);
+        Alcotest.(check string) "health marks missing binding blocker"
+          "active_task_owner_without_executable_fiber"
+          (fleet_safety |> member "blocker" |> to_string);
+        Alcotest.(check bool) "health exposes missing binding flag" true
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber"
+           |> to_bool);
+        Alcotest.(check int) "health exposes missing binding row count" 1
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber_count"
+           |> to_int);
+        Alcotest.(check (list string)) "health has no keeper names"
+          []
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber_names"
+           |> to_list
+           |> List.map to_string);
+        let active_owner_tasks =
+          fleet_safety
+          |> member "active_task_owner_without_executable_fiber_tasks"
+          |> to_list
+        in
+        Alcotest.(check int) "health exposes missing binding task row" 1
+          (List.length active_owner_tasks);
+        let active_owner_task = List.hd active_owner_tasks in
+        Alcotest.(check bool) "missing binding row keeper null" true
+          (active_owner_task |> member "keeper" = `Null);
+        Alcotest.(check bool) "missing binding row name null" true
+          (active_owner_task |> member "name" = `Null);
+        Alcotest.(check string) "missing binding row agent" assignee
+          (active_owner_task |> member "agent_name" |> to_string);
+        Alcotest.(check string) "missing binding row task id"
+          "task-active-owner-without-binding"
+          (active_owner_task |> member "task_id" |> to_string);
+        Alcotest.(check string) "missing binding action"
+          "create_keeper_or_reassign_task"
+          (active_owner_task |> member "action" |> to_string);
+        Alcotest.(check (list string)) "health names missing binding assignee"
+          [ assignee ]
+          (fleet_safety |> member "blocked_keeper_names" |> to_list
+           |> List.map to_string);
+        Alcotest.(check (list (pair string string)))
+          "health explains missing binding blocker"
+          [ (assignee, "no_keeper_binding") ]
+          (fleet_safety |> member "blocked_keeper_reasons" |> to_list
+           |> List.map (fun row ->
+                ( row |> member "agent_name" |> to_string
+                , row |> member "reason" |> to_string )));
+        Alcotest.(check bool) "health asks operator action" true
+          (fleet_safety |> member "operator_action_required" |> to_bool)))
+
+let test_health_json_preserves_active_task_owner_meta_read_error () =
+  with_temp_dir "health-active-task-owner-meta-read-error" (fun dir ->
+    let config_root = make_config_root dir in
+    Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
+    write_config_root_keeper_toml config_root "broken";
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = Mcp_server.workspace_config state in
+        write_file (Keeper_types_profile.keeper_meta_path config "broken")
+          "{ invalid keeper meta";
+        let assignee = "keeper-broken-agent" in
+        let task =
+          make_task
+            ~id:"task-active-owner-corrupt-meta"
+            ~title:"Active keeper task with unreadable keeper meta"
+            ~status:
+              (Types.InProgress
+                 { assignee; started_at = "2026-06-26T00:00:01Z" })
+            ()
+        in
+        Workspace.write_backlog config
+          { Types.tasks = [ task ]; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+        let phase_counts :
+            Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
+          { running = 0; failing = 0; recovering = 0; executable = 0 }
+        in
+        let phase_snapshot :
+            Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot =
+          {
+            counts = phase_counts;
+            running_names = [];
+            recovering_names = [];
+            executable_names = [];
+            phase_names = [];
+          }
+        in
+        let fleet_safety =
+          Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+            ~bootable_names:[]
+            ~autoboot_scan:
+              Server_routes_http_runtime_fleet_scan.empty_autoboot_keeper_scan
+            ~phase_snapshot
+            ~phase_counts
+            ~paused_keepers_json:(`Assoc [ ("count", `Int 0) ])
+            ()
+        in
+        let open Yojson.Safe.Util in
+        Alcotest.(check string) "health leaves incomplete owner scan non-degraded"
+          "ok"
+          (fleet_safety |> member "status" |> to_string);
+        Alcotest.(check bool) "health does not reinterpret read error as owner gap"
+          false
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber"
+           |> to_bool);
+        Alcotest.(check int) "health has no active owner task rows" 0
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber_count"
+           |> to_int);
+        Alcotest.(check int) "health preserves active owner scan error" 1
+          (fleet_safety |> member "active_task_owner_scan_error_count" |> to_int);
+        Alcotest.(check (list string)) "health records broken keeper scan error"
+          [ "broken" ]
+          (fleet_safety |> member "active_task_owner_scan_errors" |> to_list
+           |> List.map (fun row -> row |> member "source" |> to_string));
+        Alcotest.(check bool) "health does not ask action for incomplete scan"
+          false
           (fleet_safety |> member "operator_action_required" |> to_bool)))
 
 let test_health_json_degrades_when_reaction_capacity_below_target () =
@@ -3253,6 +3497,18 @@ let () =
             "health json reports dormant task owner as advisory"
             `Quick
             test_health_json_reports_dormant_task_owner_as_advisory;
+          Alcotest.test_case
+            "health json ignores stale active task alias when agent executable"
+            `Quick
+            test_health_json_ignores_stale_active_task_alias_when_agent_executable;
+          Alcotest.test_case
+            "health json degrades on active task owner without keeper binding"
+            `Quick
+            test_health_json_degrades_on_active_task_owner_without_keeper_binding;
+          Alcotest.test_case
+            "health json preserves active task owner meta read error"
+            `Quick
+            test_health_json_preserves_active_task_owner_meta_read_error;
           Alcotest.test_case
             "health json degrades when reaction capacity is below target"
             `Quick test_health_json_degrades_when_reaction_capacity_below_target;

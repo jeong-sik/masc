@@ -87,6 +87,7 @@ type keeper_phase_snapshot = {
 }
 val keeper_phase_snapshot : ?base_path:string -> unit -> keeper_phase_snapshot
 val keeper_phase_counts : ?base_path:string -> unit -> keeper_phase_counts
+val active_task_owner_fiber_scan_semantics : string
 val keeper_fleet_safety_health_json :
   ?bootable_names:string list ->
   ?autoboot_scan:autoboot_keeper_scan ->

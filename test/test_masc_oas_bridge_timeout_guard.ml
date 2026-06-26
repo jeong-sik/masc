@@ -3,7 +3,7 @@ open Masc
 let expected_invalid_timeout timeout_s =
   Invalid_argument
     (Printf.sprintf
-       "Masc_oas_bridge.run_safe: timeout_s must be positive and finite (got %.6g)"
+       "Masc_oas_bridge.run_safe: timeout_s must be positive or infinite (got %.6g)"
        timeout_s)
 ;;
 
@@ -24,8 +24,7 @@ let test_rejects_non_positive_timeout () =
   check_rejects_timeout ~name:"negative timeout rejected" (-0.5)
 ;;
 
-let test_rejects_non_finite_timeout () =
-  check_rejects_timeout ~name:"infinite timeout rejected" Float.infinity;
+let test_rejects_nan_timeout () =
   check_rejects_timeout ~name:"nan timeout rejected" Float.nan
 ;;
 
@@ -100,9 +99,9 @@ let () =
             `Quick
             test_rejects_non_positive_timeout
         ; Alcotest.test_case
-            "rejects non-finite timeout"
+            "rejects nan timeout"
             `Quick
-            test_rejects_non_finite_timeout
+            test_rejects_nan_timeout
         ; Alcotest.test_case
             "rejects positive timeout without eio env"
             `Quick

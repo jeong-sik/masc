@@ -4,10 +4,15 @@
     Enforces strict structural timeouts, cancellation safety, and type isolation. *)
 
 (** Safe execution of a generic OAS operation with a mandatory timeout.
+    Requires an initialized {!Masc_eio_env} carrying an Eio clock.
+    If the environment is missing or has no clock, returns
+    [Agent_sdk.Error.Internal (Internal_contract_rejected ...)] instead of
+    executing the wrapped function.
+
     Catches [Eio.Time.Timeout] and [Eio.Cancel.Cancelled] to perform functional rollback.
     [caller] (#10094) labels the Otel_metric_store timeout counter so the
     operator can attribute timeouts to specific call sites.
-    Raises [Invalid_argument] when [timeout_s] is not positive and finite. *)
+    Raises [Invalid_argument] when [timeout_s] is not positive or infinite. *)
 val run_safe
   :  caller:string
   -> timeout_s:float
@@ -21,13 +26,10 @@ val run_safe
     env-overridable per-caller budget.  See [Env_config_oas_bridge]
     for the per-caller default table, env-var layout, and invalid-env fallback.
 
-    Inherits the [Invalid_argument] contract from [run_safe]: if
-    [Env_config_oas_bridge.timeout_sec] returns a non-positive or
-    non-finite value (e.g. an env override of ["0"], ["-1"], ["nan"], or
-    ["inf"]), the resulting [run_safe] call raises [Invalid_argument].
-    The env parser already clamps in the documented range, so this only
-    surfaces when an operator pins a misconfiguration that bypasses the
-    parser. *)
+    Inherits the [Invalid_argument] contract from [run_safe].
+    [Env_config_oas_bridge.timeout_sec] clamps non-positive and [nan]
+    env overrides to the default and accepts ["infinity"] as no-fire,
+    so [run_safe]'s validation is satisfied under normal use. *)
 val run_with_caller
   :  caller:Env_config_oas_bridge.caller
   -> (unit -> ('a, Agent_sdk.Error.sdk_error) result)

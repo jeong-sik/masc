@@ -36,13 +36,11 @@ let require_clock () =
 ;;
 
 let run_safe ~caller ~timeout_s fn =
-  if Float.classify_float timeout_s = FP_nan
-     || Float.classify_float timeout_s = FP_infinite
-     || Float.compare timeout_s 0.0 <= 0
+  if Float.classify_float timeout_s = FP_nan || Float.compare timeout_s 0.0 <= 0
   then
     invalid_arg
       (Printf.sprintf
-         "Masc_oas_bridge.run_safe: timeout_s must be positive and finite \
+         "Masc_oas_bridge.run_safe: timeout_s must be positive or infinite \
           (got %.6g)"
          timeout_s);
   match require_clock () with

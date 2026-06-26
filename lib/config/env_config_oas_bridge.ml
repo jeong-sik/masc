@@ -46,14 +46,14 @@ let dashboard_judge_default_sec = 45.0
     bridge's own per-call timeout (or no-timeout) inside the wrapped
     computation, plus the typed in-flight invariant in
     [Dashboard_governance_judge.mark_compute_start]. Therefore both
-    judge callers resolve to [governance_judge_no_timeout], a very
-    large finite value: the bridge applies no practical wrapper
-    timeout while still satisfying [run_safe]'s finite-budget
-    contract.  Per-caller env overrides
+    judge callers resolve to [governance_judge_no_timeout], which is
+    [Float.infinity]: the bridge applies no practical wrapper timeout
+    while still satisfying [run_safe]'s positive-or-infinite contract.
+    Per-caller env overrides
     [MASC_OAS_BRIDGE_TIMEOUT_GOVERNANCE_JUDGE_SEC] /
     [MASC_OAS_BRIDGE_TIMEOUT_OPERATOR_JUDGE_SEC] still win — operators
     can re-bind a finite budget if they explicitly want one. *)
-let governance_judge_no_timeout = Float.max_float
+let governance_judge_no_timeout = Float.infinity
 
 let caller_key = function
   | Anti_rationalization -> "anti_rationalization"
@@ -109,14 +109,14 @@ let trimmed_value_opt name =
   | None -> None
 ;;
 
-(** Accept positive finite floats.  Non-finite values ([infinity],
-    [nan]) and non-positive values fall back to [default] so the OAS
-    bridge receives a timeout it can actually enforce.  The
-    dashboard-judge no-timeout pin is represented by
-    [governance_judge_no_timeout] (a very large finite value) rather
-    than [Float.infinity]. *)
+(** Accept positive floats including [Float.infinity]. The [is_finite]
+    guard below used to reject [infinity] silently, which would have
+    collapsed the dashboard-judge no-timeout pin back to
+    [global_default_sec] (300s) the moment any env override went
+    through this function.  The OAS bridge treats [infinity] as
+    no-fire, so we let it pass. *)
 let positive_finite_or_default ~default value =
-  if Float.compare value 0.0 > 0 && Float.is_finite value then value else default
+  if Float.compare value 0.0 > 0 then value else default
 ;;
 
 let timeout_env_value ~default raw =
@@ -129,14 +129,14 @@ let timeout_env_value ~default raw =
 
       1. Per-caller env [MASC_OAS_BRIDGE_TIMEOUT_<CALLER>_SEC]
          — wins unconditionally.  Lets the operator tune one
-         caller without touching others.  Non-finite values fall
-         back to the default so the OAS bridge receives an
-         enforceable budget.
+         caller without touching others.  Non-positive and [nan]
+         values fall back to the default so the OAS bridge receives
+         an enforceable budget; [infinity] is accepted as no-fire.
       2. Per-caller checked-in default ([known_default_sec]).
          Preserves intentional 180s budgets for compute-heavy
          callers; dashboard judge callers resolve to
-         [governance_judge_no_timeout] (a very large finite value)
-         so the bridge never wraps their cycle in a timer.
+         [governance_judge_no_timeout] ([Float.infinity]) so the
+         bridge never wraps their cycle in a timer.
       3. Global env [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC] — only
          consulted for UNKNOWN callers (typo, future caller
          without a default entry).  Treating it as an override

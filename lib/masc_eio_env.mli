@@ -1,16 +1,17 @@
-(** Masc_eio_env — module-level Eio environment for OAS HTTP
+(** Masc_eio_env — per-domain Eio environment for OAS HTTP
     calls.
 
     The OAS provider completions use [cohttp-eio] for HTTP
     transport, which needs an Eio switch and net handle.
-    {!init} is called once at server startup (in
-    [server_runtime_bootstrap]); every consumer that needs to
-    issue an HTTP call later reaches the captured handles via
-    {!get} or {!get_opt}.
+    {!init} is called once per OCaml domain (in
+    [server_runtime_bootstrap] and in each standalone executable);
+    every consumer that needs to issue an HTTP call later reaches
+    the captured handles via {!get} or {!get_opt}.
 
-    Internal storage (the [Atomic.t t option] slot) is hidden —
-    callers consume only the {!type-t} record and the three
-    accessors. *)
+    Internal storage (the [Domain.DLS] slot) is hidden — callers
+    consume only the {!type-t} record and the accessors.  Using
+    domain-local storage removes the previous module-level Atomic
+    global and matches the domain-local nature of [Eio.Switch]. *)
 
 type t = {
   sw : Eio.Switch.t;
@@ -29,10 +30,10 @@ val init :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   unit ->
   unit
-(** Capture the runtime handles. Last-writer-wins on
-    [Atomic.set]; intended to be called exactly once at server
-    startup but a re-init is permitted (used by the harness
-    test suite). *)
+(** Capture the runtime handles for the current OCaml domain.
+    Last-writer-wins on [Domain.DLS.set]; intended to be called
+    exactly once per domain at startup but a re-init is permitted
+    (used by the harness test suite). *)
 
 val reset_for_test : unit -> unit
 (** Clear the captured environment for direct test executable runs. *)

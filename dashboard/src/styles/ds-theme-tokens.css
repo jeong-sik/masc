@@ -14,8 +14,8 @@
    ══════════════════════════════════════════════════════════════ */
 
 /* Local display font — served from dashboard/public/assets/fonts via Vite.
-   Noto Sans KR is loaded from the single index.html Google Fonts request as
-   subsetted WOFF2; do not declare the 9.9MB local TTF on the hot path. */
+   Body text uses system/Pretendard/Noto fallback stacks; do not declare the
+   9.9MB local Noto Sans KR TTF on the hot path. */
 @font-face {
   font-family: 'Cinzel';
   src: url('/dashboard/assets/fonts/Cinzel-Regular.ttf') format('truetype');

@@ -85,8 +85,8 @@ import.meta.glob('./styles/*-v2.css', { eager: true })
 // names. Load order is the prototype's <link> order (notes/css-map.md): tokens
 // → v2 (shell+chat) → surfaces → per-surface overrides; craft.css after v2 so
 // density rules win. As surfaces migrate to prototype DOM, the legacy CSS above
-// is removed (final cleanup PR). Fonts are loaded once from index.html; CSS
-// theme files must not add their own external font requests.
+// is removed (final cleanup PR). Hot-path font loading is local/system only;
+// CSS theme files must not add their own external font requests.
 import './styles/keeper-v2/colors_and_type.css'
 import './styles/keeper-v2/v2.css'
 import './styles/keeper-v2/surfaces.css'

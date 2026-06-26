@@ -16,6 +16,11 @@ interface CommandPaletteAction {
 
 interface NinjaKeysElement extends HTMLElement {
   data: CommandPaletteAction[]
+  open: (options?: { parent?: string }) => void
+}
+
+interface CommandPaletteProps {
+  openOnMount?: boolean
 }
 
 const LIT_DEV_MODE_WARNING =
@@ -28,7 +33,7 @@ function suppressKnownLitDevWarning() {
   globalScope.litIssuedWarnings = issuedWarnings
 }
 
-export function CommandPalette() {
+export function CommandPalette({ openOnMount = false }: CommandPaletteProps = {}) {
   const ref = useRef<NinjaKeysElement | null>(null)
   const [ready, setReady] = useState(false)
 
@@ -180,6 +185,14 @@ export function CommandPalette() {
     ref.current.data = [...baseActions, ...agentActions, ...keeperActions, ...sessionActions]
 
   }, [ready, route.value, missionSnapshot.value, missionAgentBriefs.value, missionKeeperBriefs.value])
+
+  useEffect(() => {
+    if (!ready || !openOnMount) return
+    const handle = window.setTimeout(() => {
+      ref.current?.open()
+    }, 0)
+    return () => window.clearTimeout(handle)
+  }, [ready, openOnMount])
 
   if (!ready) return null
 

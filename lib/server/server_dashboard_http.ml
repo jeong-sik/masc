@@ -692,6 +692,11 @@ let operator_error_json message =
    stack-derived strings).  The full exception text still goes to the
    server warn log for ops debugging.
 
+   The full goals tree is intentionally omitted from this startup payload:
+   [/api/v1/dashboard/goals] owns that heavier route-specific read.  The
+   overview already gets the flat planning goals here, and planning/work
+   routes call [refreshGoals] when they need the tree.
+
    Both the HTTP/1.1 router (server_routes_http_routes_dashboard) and
    the HTTP/2 gateway (server_h2_gateway) call this single SSOT so the
    payload shape, slice list, and error contract cannot drift between
@@ -749,17 +754,6 @@ let dashboard_bootstrap_http_json
       Server_dashboard_snapshot_select.select_project_snapshot_json
         ~state ~sw ~clock request)
   in
-  let goals =
-    (* Share the standalone /api/v1/dashboard/goals cache (same key + ttl). *)
-    slice "goals" (fun () ->
-      let cache_key =
-        Printf.sprintf "goals_tree:%s" (Mcp_server.workspace_config state).base_path
-      in
-      Dashboard_cache.get_or_compute cache_key
-        ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (fun () ->
-          Domain_pool_ref.submit_io_or_inline (fun () ->
-            dashboard_goals_tree_http_json ~config:(Mcp_server.workspace_config state))))
-  in
   let goal_loop_status =
     slice "goal_loop_status" (fun () ->
       Dashboard_goal_loop.status_json ~base_path:(Mcp_server.workspace_config state).base_path ())
@@ -771,7 +765,6 @@ let dashboard_bootstrap_http_json
     ; execution
     ; planning
     ; namespace_truth
-    ; goals
     ; goal_loop_status
     ]
 ;;

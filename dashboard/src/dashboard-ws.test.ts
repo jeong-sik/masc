@@ -83,6 +83,55 @@ class MockWebSocket {
   }
 }
 
+class MockParseWorker {
+  static holdResponses = false
+  static instances: MockParseWorker[] = []
+
+  onmessage: ((event: MessageEvent) => void) | null = null
+  onerror: ((event: ErrorEvent) => void) | null = null
+  onmessageerror: ((event: MessageEvent) => void) | null = null
+  terminated = false
+  heldMessages: Array<{ id: number; data: string }> = []
+
+  constructor(readonly url: URL) {
+    MockParseWorker.instances.push(this)
+  }
+
+  postMessage(message: { id: number; data: string }): void {
+    if (MockParseWorker.holdResponses) {
+      this.heldMessages.push(message)
+      return
+    }
+    this.onmessage?.({
+      data: {
+        id: message.id,
+        payloads: [JSON.parse(message.data) as unknown],
+      },
+    } as MessageEvent)
+  }
+
+  releaseHeldResponses(): void {
+    const messages = this.heldMessages.splice(0)
+    for (const message of messages) {
+      this.onmessage?.({
+        data: {
+          id: message.id,
+          payloads: [JSON.parse(message.data) as unknown],
+        },
+      } as MessageEvent)
+    }
+  }
+
+  terminate(): void {
+    this.terminated = true
+  }
+
+  static reset(): void {
+    MockParseWorker.holdResponses = false
+    MockParseWorker.instances = []
+  }
+}
+
 function installWebSocketMocks(): void {
   mockSockets.length = 0
   vi.stubGlobal('WebSocket', MockWebSocket)
@@ -163,6 +212,7 @@ beforeEach(() => {
 
 afterEach(() => {
   disconnectDashboardWS()
+  MockParseWorker.reset()
   clearDashboardWsDiscoveryCacheForTests()
   dashboardWsConnected.value = false
   dashboardWsLastError.value = null
@@ -623,7 +673,7 @@ describe('dashboard websocket route subscriptions', () => {
     expect(mockSockets).toHaveLength(1)
   })
 
-  it('reconnects after a transient 1011 server error close', async () => {
+  it('stops reconnecting after a fatal 1011 server error close', async () => {
     vi.useFakeTimers()
     installWebSocketMocks()
 
@@ -643,8 +693,53 @@ describe('dashboard websocket route subscriptions', () => {
 
     expect(dashboardWsConnected.value).toBe(false)
     expect(dashboardWsReady.value).toBe(false)
-    expect(mockSockets).toHaveLength(2)
-    expect(mockSockets[1]!.readyState).toBe(MockWebSocket.CONNECTING)
+    expect(mockSockets).toHaveLength(1)
+  })
+
+  it('stops reconnecting after a fatal 1002 protocol error close', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    const subscribe = parseRpc(socket, 1)
+    socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: { snapshot: { seq: 1, slices: {} } } })
+    await flushPromises()
+    expect(dashboardWsReady.value).toBe(true)
+
+    socket.close({ code: 1002, reason: 'protocol error', wasClean: false })
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+
+    expect(dashboardWsConnected.value).toBe(false)
+    expect(dashboardWsReady.value).toBe(false)
+    expect(mockSockets).toHaveLength(1)
+  })
+
+  it('stops reconnecting after a fatal 1003 unsupported data close', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    const subscribe = parseRpc(socket, 1)
+    socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: { snapshot: { seq: 1, slices: {} } } })
+    await flushPromises()
+    expect(dashboardWsReady.value).toBe(true)
+
+    socket.close({ code: 1003, reason: 'unsupported data', wasClean: false })
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+
+    expect(dashboardWsConnected.value).toBe(false)
+    expect(dashboardWsReady.value).toBe(false)
+    expect(mockSockets).toHaveLength(1)
   })
 
   it('stops reconnecting after an abnormal close after hello is rejected', async () => {
@@ -734,7 +829,7 @@ describe('dashboard websocket route subscriptions', () => {
     await flushPromises()
     expect(dashboardWsReady.value).toBe(true)
 
-    freshSocket.close({ code: 1011, reason: 'server restart', wasClean: false })
+    freshSocket.close({ code: 1006, reason: 'abnormal', wasClean: false })
     await vi.advanceTimersByTimeAsync(60_000)
     await flushPromises()
 
@@ -972,6 +1067,163 @@ describe('dashboard websocket route subscriptions', () => {
       { agents: [] },
       undefined,
     )
+  })
+
+  it('offloads inbound frame parsing to a Web Worker when available', async () => {
+    installWebSocketMocks()
+    vi.stubGlobal('Worker', MockParseWorker)
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
+
+    const subscribe = parseRpc(socket, 1)
+    socket.receive({
+      jsonrpc: '2.0',
+      id: subscribe.id,
+      result: { snapshot: { seq: 1, slices: {} } },
+    })
+    await flushPromises()
+    sseStoreMocks.hydrateDashboardSlice.mockClear()
+
+    socket.receive({
+      jsonrpc: '2.0',
+      method: 'dashboard/delta',
+      params: { seq: 43, slice: 'execution', payload: { agents: [] } },
+    })
+
+    expect(dashboardWsLastSeq.value).toBe(43)
+    expect(sseStoreMocks.hydrateDashboardSlice).toHaveBeenCalledWith(
+      'execution',
+      { agents: [] },
+      undefined,
+    )
+  })
+
+  it('falls back to main-thread parsing when the parse worker stops responding', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+    vi.stubGlobal('Worker', MockParseWorker)
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
+
+    const subscribe = parseRpc(socket, 1)
+    socket.receive({
+      jsonrpc: '2.0',
+      id: subscribe.id,
+      result: { snapshot: { seq: 1, slices: {} } },
+    })
+    await flushPromises()
+    sseStoreMocks.hydrateDashboardSlice.mockClear()
+
+    MockParseWorker.holdResponses = true
+    socket.receive({
+      jsonrpc: '2.0',
+      method: 'dashboard/delta',
+      params: { seq: 43, slice: 'execution', payload: { agents: [] } },
+    })
+    expect(sseStoreMocks.hydrateDashboardSlice).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(5_000)
+    flushPendingInbound()
+
+    expect(dashboardWsLastSeq.value).toBe(43)
+    expect(sseStoreMocks.hydrateDashboardSlice).toHaveBeenCalledWith(
+      'execution',
+      { agents: [] },
+      undefined,
+    )
+  })
+
+  it('drops held parse worker replies after socket teardown', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+    vi.stubGlobal('Worker', MockParseWorker)
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
+
+    const subscribe = parseRpc(socket, 1)
+    socket.receive({
+      jsonrpc: '2.0',
+      id: subscribe.id,
+      result: { snapshot: { seq: 1, slices: {} } },
+    })
+    await flushPromises()
+    dashboardWsLastSeq.value = 0
+    sseStoreMocks.hydrateDashboardSlice.mockClear()
+
+    MockParseWorker.holdResponses = true
+    socket.receive({
+      jsonrpc: '2.0',
+      method: 'dashboard/delta',
+      params: { seq: 43, slice: 'execution', payload: { agents: [] } },
+    })
+    expect(sseStoreMocks.hydrateDashboardSlice).not.toHaveBeenCalled()
+    const sentBeforeTeardown = socket.sent.length
+    const worker = MockParseWorker.instances[0]!
+
+    disconnectDashboardWS()
+    worker.releaseHeldResponses()
+    await vi.advanceTimersByTimeAsync(5_000)
+    flushPendingInbound()
+
+    expect(worker.terminated).toBe(true)
+    expect(dashboardWsLastSeq.value).toBe(0)
+    expect(sseStoreMocks.hydrateDashboardSlice).not.toHaveBeenCalled()
+    expect(socket.sent).toHaveLength(sentBeforeTeardown)
+  })
+
+  it('reconnects when sending a delta ack notification throws', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
+
+    const subscribe = parseRpc(socket, 1)
+    socket.receive({
+      jsonrpc: '2.0',
+      id: subscribe.id,
+      result: { snapshot: { seq: 1, slices: {} } },
+    })
+    await flushPromises()
+
+    socket.send = () => {
+      throw new Error('send exploded')
+    }
+
+    socket.receive({
+      jsonrpc: '2.0',
+      method: 'dashboard/delta',
+      params: { seq: 44, slice: 'execution', payload: { agents: [] } },
+    })
+
+    expect(dashboardWsConnected.value).toBe(false)
+    expect(dashboardWsReady.value).toBe(false)
+    expect(dashboardWsLastError.value).toContain('send exploded')
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await flushPromises()
+
+    expect(mockSockets).toHaveLength(2)
+    expect(mockSockets[1]!.readyState).toBe(MockWebSocket.CONNECTING)
   })
 
   it('ignores stale subscribe snapshots that arrive after a newer route subscription', async () => {

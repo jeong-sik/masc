@@ -35,6 +35,7 @@ import { selectedAgentName } from './components/agent-detail-selection'
 import { selectedTask } from './components/goals/task-detail-selection'
 import { ToastContainer } from './components/common/toast'
 import { ConfirmDialogOverlay } from './components/common/confirm-dialog'
+import { commandPaletteRequested, requestCommandPaletteOpen } from './components/common/command-palette-state'
 import { BundleStalenessBanner, installBundleStalenessWatch } from './components/bundle-staleness-banner'
 import { startErrorCleanup, stopErrorCleanup } from './components/common/error-notification-state'
 import { DashboardStatusTray } from './components/status-tray'
@@ -97,6 +98,16 @@ const LazyTaskDetailOverlay = lazy(async () => ({
 const LazyCommandPalette = lazy(async () => ({
   default: (await import('./components/common/command-palette')).CommandPalette,
 }))
+
+export function shouldBootstrapCommandPaletteShortcut(
+  event: Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'key' | 'metaKey'>,
+  mounted: boolean,
+): boolean {
+  return !mounted
+    && !event.altKey
+    && (event.ctrlKey || event.metaKey)
+    && event.key.toLowerCase() === 'k'
+}
 
 function refreshCurrentRoute(options?: { recordVisit?: boolean }): void {
   const routeState = route.value
@@ -234,6 +245,16 @@ export function App() {
   }, [])
 
   useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!shouldBootstrapCommandPaletteShortcut(event, commandPaletteRequested.value)) return
+      event.preventDefault()
+      requestCommandPaletteOpen()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  useEffect(() => {
     cancelPendingSSERefreshes()
     subscribeDashboardRoute(route.value).catch(err => {
       console.warn('[dashboard] subscribeDashboardRoute failed', err)
@@ -352,9 +373,13 @@ export function App() {
       <${ConfirmDialogOverlay} />
       <${BundleStalenessBanner} />
       <${TweaksPanel} />
-      <${Suspense} fallback=${null}>
-        <${LazyCommandPalette} />
-      <//>
+      ${commandPaletteRequested.value
+        ? html`
+          <${Suspense} fallback=${null}>
+            <${LazyCommandPalette} openOnMount=${true} />
+          <//>
+        `
+        : null}
     </div>
   `
 }

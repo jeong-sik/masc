@@ -6,9 +6,8 @@
    Loaded AFTER colors_and_type.css.
    ══════════════════════════════════════════════════════════════ */
 
-/* Fonts the v2 skin needs are loaded once from index.html. Keep font loading
-   out of CSS imports so inactive skin/theme files do not create duplicate
-   network requests. */
+/* Keep font loading local/system-only so inactive skin/theme files do not
+   create duplicate network requests. */
 
 /* NOTE: only the data-skin="v2" token block (palette + voltage + type +
    spacing) is brought in from the canonical source

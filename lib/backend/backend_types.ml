@@ -47,7 +47,7 @@ let generate_node_id () =
   let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFF in
   Printf.sprintf "%s-%d-%04x" hostname pid hash
 
-let default_config = {
+let default_config () = {
   base_path = Common.masc_dirname;
   node_id = generate_node_id ();
   cluster_name = "default";

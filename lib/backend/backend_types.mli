@@ -42,8 +42,8 @@ val pubsub_max_messages : int
 val generate_node_id : unit -> string
 
 (** Default config rooted at [".masc"], cluster ["default"], and
-    [pubsub_max_messages]. *)
-val default_config : config
+    [pubsub_max_messages]. Node id is generated fresh on each call. *)
+val default_config : unit -> config
 
 (** {1 Safety utilities} *)
 

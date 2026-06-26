@@ -157,21 +157,11 @@ module Response = struct
   let content_headers ?(before_headers = []) ?(after_headers = [])
       ?(tail_headers = []) ~content_type body =
     let content_length = string_of_int (String.length body) in
-    let base_headers_rev = [
-      ("content-length", content_length);
-      ("content-type", content_type);
-    ] in
-    match before_headers, after_headers, tail_headers with
-    | [], [], [] -> Httpun.Headers.of_rev_list base_headers_rev
-    | _ ->
-        let rev_headers = List.rev before_headers in
-        let rev_headers =
-          List.rev_append
-            [("content-type", content_type); ("content-length", content_length)]
-            rev_headers
-        in
-        let rev_headers = List.rev_append after_headers rev_headers in
-        Httpun.Headers.of_rev_list (List.rev_append tail_headers rev_headers)
+    Httpun.Headers.of_list
+      (before_headers
+       @ [("content-type", content_type); ("content-length", content_length)]
+       @ after_headers
+       @ tail_headers)
 
   let response ?before_headers ?after_headers ?tail_headers ~content_type status body =
     Httpun.Response.create

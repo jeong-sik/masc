@@ -53,7 +53,8 @@ let html () =
 let etag () =
   try
     let st = Unix.stat (index_path ()) in
-    let hash = Digest.string (string_of_float st.Unix.st_mtime) |> Digest.to_hex in
+    let mtime_ns = Int64.of_float (st.Unix.st_mtime *. 1_000_000_000.) in
+    let hash = Digest.string (Int64.to_string mtime_ns) |> Digest.to_hex in
     String.sub hash 0 12
   with Unix.Unix_error _ -> "none"
 

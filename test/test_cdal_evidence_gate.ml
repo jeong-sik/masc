@@ -174,6 +174,53 @@ let test_placeholder_handoff_reference_rejects () =
          check string "rule_id" Gate.rule_id_evidence_incomplete rule_id)
     [ "http://"; "https://"; "file://"; "trace:"; "turn:"; "receipt:"; "/"; "//"; "./" ]
 
+let test_unvalidated_file_handoff_reference_rejects () =
+  let task = make_task ~contract:(Some (make_contract ())) () in
+  List.iter
+    (fun ref_ ->
+       match
+         Gate.decide
+           ~task_id:"task-file-handoff"
+           ~task_opt:(Some task)
+           ~notes:""
+           ~handoff_context:(Some (handoff_with_refs [ ref_ ]))
+           ()
+       with
+       | Gate.Pass ->
+         failf
+           "unvalidated file-shaped handoff ref %S must not count as trusted evidence"
+           ref_
+       | Gate.Reject { rule_id; _ } ->
+         check string "rule_id" Gate.rule_id_evidence_incomplete rule_id)
+    [ "logs/output.json"; "a/b"; "x.txt"; "file://logs/output.json"; "file:///tmp/proof.log" ]
+
+let test_unvalidated_file_required_evidence_rejects () =
+  List.iter
+    (fun ref_ ->
+       let contract = make_contract ~required_evidence:[ ref_ ] () in
+       let task = make_task ~contract:(Some contract) () in
+       match
+         Gate.decide
+           ~task_id:"task-file-required"
+           ~task_opt:(Some task)
+           ~notes:"substantive completion notes without the file-shaped reference"
+           ~handoff_context:(Some (handoff_with_refs [ ref_ ]))
+           ()
+       with
+       | Gate.Pass ->
+         failf
+           "unvalidated file-shaped handoff ref %S must not satisfy required_evidence"
+           ref_
+       | Gate.Reject { rule_id; payload_json; _ } ->
+         check string "rule_id" Gate.rule_id_evidence_incomplete rule_id;
+         (match payload_json with
+          | `Assoc fields ->
+            (match List.assoc_opt "required_evidence_unsatisfied" fields with
+             | Some (`List [ `String actual ]) -> check string "unsatisfied" ref_ actual
+             | _ -> fail "payload did not preserve unsatisfied file evidence")
+          | _ -> fail "payload is not Assoc"))
+    [ "logs/output.json"; "a/b"; "x.txt"; "file://logs/output.json" ]
+
 let test_placeholder_required_evidence_reference_rejects () =
   let contract = make_contract ~required_evidence:[ "trace:" ] () in
   let task = make_task ~contract:(Some contract) () in
@@ -410,6 +457,10 @@ let () =
             test_plain_handoff_reference_rejects
         ; test_case "placeholder handoff ref → Reject" `Quick
             test_placeholder_handoff_reference_rejects
+        ; test_case "unvalidated file handoff ref → Reject" `Quick
+            test_unvalidated_file_handoff_reference_rejects
+        ; test_case "unvalidated file required ref → Reject" `Quick
+            test_unvalidated_file_required_evidence_rejects
         ; test_case "placeholder required ref → Reject" `Quick
             test_placeholder_required_evidence_reference_rejects
         ; test_case "evidence ref parser SSOT" `Quick test_evidence_ref_parser_ssot

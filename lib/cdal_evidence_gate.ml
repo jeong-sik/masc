@@ -12,8 +12,8 @@ let rule_id_evidence_incomplete = "cdal_evidence_incomplete"
 let hint_evidence_incomplete =
   "Supply task-completion evidence: notes >= 20 chars summarising what \
    changed AND every contract.required_evidence entry mentioned verbatim, \
-   OR at least one handoff_context.evidence_refs reference (file path, PR \
-   number, commit hash, trace id, or any reference URL). Pure-placeholder \
+   OR at least one handoff_context.evidence_refs reference (PR number, commit \
+   hash, trace id, or reviewer-inspectable URL). Pure-placeholder \
    notes ('done', 'ok', etc.) with no required_evidence mention and no \
    handoff evidence_refs keep this gate closed."
 
@@ -24,15 +24,15 @@ let reason_evidence_incomplete ~required_evidence =
      reference supplied"
     (List.length required_evidence)
 
-let evidence_ref_is_concrete ref_ =
+let evidence_ref_is_gate_trusted ref_ =
   match Evidence_ref.of_string ref_ with
-  | Some
-      ( Evidence_ref.Url _
-      | Evidence_ref.File_uri _
-      | Evidence_ref.Pr _
-      | Evidence_ref.Commit _
-      | Evidence_ref.Trace_ref _
-      | Evidence_ref.File_path _ ) -> true
+  | Some (Evidence_ref.Url _ | Evidence_ref.Pr _ | Evidence_ref.Commit _ | Evidence_ref.Trace_ref _) -> true
+  | Some (Evidence_ref.File_uri _ | Evidence_ref.File_path _) ->
+    (* File-shaped refs are only shape-recognized by [Evidence_ref]. Without a
+       base-path/artifact-store resolution step they are candidates, not proof a
+       reviewer can inspect. Fail closed until a validated file evidence type is
+       available. *)
+    false
   | None -> false
 
 let notes_mention_required_entry ~notes entry =
@@ -73,7 +73,7 @@ let evidence_entry_satisfied
         List.exists
           (fun ref_ ->
             let r = String.lowercase_ascii (String.trim ref_) in
-            evidence_ref_is_concrete ref_ && r = entry_lower)
+            evidence_ref_is_gate_trusted ref_ && r = entry_lower)
           hc.evidence_refs
     in
     in_notes || in_handoff
@@ -125,7 +125,7 @@ let handoff_supplies_evidence
   | None -> false
   | Some hc ->
     List.exists
-      evidence_ref_is_concrete
+      evidence_ref_is_gate_trusted
       hc.evidence_refs
 
 (* Evidence-substantiveness gate for explicit verification submissions. Normal
@@ -134,7 +134,7 @@ let handoff_supplies_evidence
    evidence a reviewer can inspect downstream. A contracted task passes when
    *every* required_evidence entry is mentioned in notes/handoff AND the caller
    supplied at least one of: substantive notes, or a handoff evidence reference
-   (file path, PR number, commit hash, trace id, or any reference URL). Empty
+   (PR number, commit hash, trace id, or reviewer-inspectable URL). Empty
    notes with empty required_evidence still rejects, since that carries no
    evidence at all. *)
 let evidence_is_substantive

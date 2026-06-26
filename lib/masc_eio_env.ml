@@ -3,9 +3,9 @@
 
     The switch and net handle are needed by OAS provider completions
     which use cohttp-eio for HTTP transport.  They are stored in
-    [Domain.DLS] so each domain holds its own handles; this removes the
-    module-level Atomic global and avoids cross-domain [Eio.Switch]
-    access errors.
+    [Domain.DLS] so each domain can hold its own handles, with a process-wide
+    compatibility fallback for domains that have not been explicitly
+    initialized yet.
 
     @since 2.130.0 *)
 
@@ -16,14 +16,23 @@ type t = {
 }
 
 let env_key : t option Domain.DLS.key = Domain.DLS.new_key (fun () -> None)
+let process_env : t option Atomic.t = Atomic.make None
 
-let init ~sw ~net ?clock () = Domain.DLS.set env_key (Some { sw; net; clock })
+let init ~sw ~net ?clock () =
+  let env = { sw; net; clock } in
+  Domain.DLS.set env_key (Some env);
+  Atomic.set process_env (Some env)
 
-let reset_for_test () = Domain.DLS.set env_key None
+let reset_for_test () =
+  Domain.DLS.set env_key None;
+  Atomic.set process_env None
+
+let get_opt () =
+  match Domain.DLS.get env_key with
+  | Some _ as env -> env
+  | None -> Atomic.get process_env
 
 let get () =
-  match Domain.DLS.get env_key with
+  match get_opt () with
   | Some e -> e
   | None -> invalid_arg "Masc_eio_env.get: not initialized. Call init at server startup."
-
-let get_opt () = Domain.DLS.get env_key

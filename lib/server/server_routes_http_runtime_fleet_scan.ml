@@ -768,6 +768,12 @@ let keeper_agent_bindings config =
          | Error err -> (bindings, (name, err) :: read_errors))
        ([], [])
 
+let keeper_names_for_agent agent_bindings assignee =
+  agent_bindings
+  |> List.filter_map (fun (agent_name, keeper_name) ->
+       if String.equal agent_name assignee then Some keeper_name else None)
+  |> sorted_unique_strings
+
 let active_task_owner_fiber_scan config ~executable_names =
   let executable_set = string_set_of_list executable_names in
   let agent_bindings, meta_read_errors = keeper_agent_bindings config in
@@ -785,20 +791,25 @@ let active_task_owner_fiber_scan config ~executable_names =
              match active_task_assignment task with
              | None -> []
              | Some (assignee, task_status) ->
-                 agent_bindings
-                 |> List.filter_map (fun (agent_name, keeper_name) ->
-                      if
-                        String.equal agent_name assignee
-                        && not (String_set.mem keeper_name executable_set)
-                      then
-                        Some
-                          {
-                            keeper_name;
-                            agent_name;
-                            task_id = task.id;
-                            task_status;
-                          }
-                      else None))
+                 let keeper_names =
+                   keeper_names_for_agent agent_bindings assignee
+                 in
+                 if
+                   keeper_names = []
+                   || List.exists
+                        (fun keeper_name ->
+                          String_set.mem keeper_name executable_set)
+                        keeper_names
+                 then []
+                 else
+                   keeper_names
+                   |> List.map (fun keeper_name ->
+                        {
+                          keeper_name;
+                          agent_name = assignee;
+                          task_id = task.id;
+                          task_status;
+                        }))
         |> List.concat
         |> List.sort_uniq compare_active_task_owner_without_executable_fiber
       in

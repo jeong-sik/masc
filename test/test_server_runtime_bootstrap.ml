@@ -1448,6 +1448,91 @@ let test_health_json_degrades_on_active_task_owner_without_executable_fiber () =
         Alcotest.(check bool) "health asks operator action" true
           (fleet_safety |> member "operator_action_required" |> to_bool)))
 
+let test_health_json_ignores_stale_active_task_alias_when_agent_executable () =
+  with_temp_dir "health-active-task-owner-executable-alias" (fun dir ->
+    let config_root = make_config_root dir in
+    Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
+    write_file
+      (Filename.concat (Filename.concat config_root "keepers") "executor.toml")
+      "[keeper]\ngoal = \"goal-executor\"\nautoboot_enabled = false\n";
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = Mcp_server.workspace_config state in
+        let executor =
+          make_keeper_meta ~name:"executor" ~trace_id:"trace-executor" ()
+        in
+        let stale_executor =
+          {
+            (make_keeper_meta
+               ~name:"executor-stale"
+               ~trace_id:"trace-executor-stale"
+               ())
+            with
+            Keeper_meta_contract.agent_name = executor.agent_name;
+          }
+        in
+        write_keeper_meta_exn config executor;
+        write_keeper_meta_exn config stale_executor;
+        let task =
+          make_task
+            ~id:"task-active-owner"
+            ~title:"Active keeper task"
+            ~status:
+              (Types.InProgress
+                 {
+                   assignee = executor.Keeper_meta_contract.agent_name;
+                   started_at = "2026-06-26T00:00:01Z";
+                 })
+            ()
+        in
+        Workspace.write_backlog config
+          { Types.tasks = [ task ]; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+        let phase_counts :
+            Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
+          { running = 1; failing = 0; recovering = 0; executable = 1 }
+        in
+        let phase_snapshot :
+            Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot =
+          {
+            counts = phase_counts;
+            running_names = [ executor.name ];
+            recovering_names = [];
+            executable_names = [ executor.name ];
+            phase_names = [ (executor.name, "running") ];
+          }
+        in
+        let fleet_safety =
+          Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+            ~bootable_names:[]
+            ~autoboot_scan:
+              Server_routes_http_runtime_fleet_scan.empty_autoboot_keeper_scan
+            ~phase_snapshot
+            ~phase_counts
+            ~paused_keepers_json:(`Assoc [ ("count", `Int 0) ])
+            ()
+        in
+        let open Yojson.Safe.Util in
+        Alcotest.(check string) "health remains ok" "ok"
+          (fleet_safety |> member "status" |> to_string);
+        Alcotest.(check bool) "health does not flag stale alias" false
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber"
+           |> to_bool);
+        Alcotest.(check int) "health reports no dormant owner rows" 0
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber_count"
+           |> to_int);
+        Alcotest.(check bool) "health does not require operator action" false
+          (fleet_safety |> member "operator_action_required" |> to_bool)))
+
 let test_health_json_degrades_when_reaction_capacity_below_target () =
   with_temp_dir "health-reaction-capacity-below-target" (fun dir ->
     let config_root = make_config_root dir in
@@ -3260,6 +3345,10 @@ let () =
             "health json degrades on active task owner without executable fiber"
             `Quick
             test_health_json_degrades_on_active_task_owner_without_executable_fiber;
+          Alcotest.test_case
+            "health json ignores stale active task alias when agent executable"
+            `Quick
+            test_health_json_ignores_stale_active_task_alias_when_agent_executable;
           Alcotest.test_case
             "health json degrades when reaction capacity is below target"
             `Quick test_health_json_degrades_when_reaction_capacity_below_target;

@@ -1,7 +1,8 @@
 (** Keeper meta JSON scrub helpers.
 
-    Lives below the codec/parser facade so persisted runtime JSON can
-    be normalized before [keeper_meta] decoding. *)
+    Lives below the codec/parser facade so persisted runtime JSON cleanup code
+    can share the same TOML-owned field names without introducing a module
+    cycle. *)
 
 (** Config field names owned by TOML only — never written to JSON.
     Defined here to avoid module cycles; re-exported by

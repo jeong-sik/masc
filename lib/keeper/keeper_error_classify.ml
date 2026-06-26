@@ -257,13 +257,6 @@ let is_accept_no_usable_progress_error (err : Agent_sdk.Error.sdk_error) : bool 
   | None ->
     false
 
-let is_recoverable_no_progress_accept_rejection
-    (err : Agent_sdk.Error.sdk_error) : bool =
-  match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some err ->
-    Keeper_turn_driver.accept_rejection_has_no_progress_retry_hint err
-  | None -> false
-
 (* Classification of why a degraded retry is being attempted.  Closed set
    covering both producer paths: [phase_recovery_retry] (7 narrow reasons)
    and [recoverable_runtime_failure_reason] (broader set including raw
@@ -301,36 +294,18 @@ let degraded_retry_reason_to_string = function
 
 let accept_rejection_degraded_retry_reason err =
   match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some
-      (Keeper_turn_driver.Accept_rejected
-         {
-           reason_kind = Some Keeper_turn_driver.Accept_no_usable_progress;
-           response_shape = Some Keeper_turn_driver.Accept_response_empty;
-           last_tool_effect = None;
-           any_mutating_tool = None;
-           tool_effects_seen = [];
-           _;
-         }) ->
-    Some Empty_no_progress
-  | Some (Keeper_turn_driver.Accept_rejected _)
-    when is_recoverable_no_progress_accept_rejection err ->
-    Some Read_only_no_progress
-  | Some
-      ( Keeper_turn_driver.Accept_rejected _
-      | Keeper_turn_driver.Runtime_exhausted _
-      | Keeper_turn_driver.Capacity_backpressure _
-      | Keeper_turn_driver.Resumable_cli_session _
-      | Keeper_turn_driver.Admission_queue_timeout _
-      | Keeper_turn_driver.Admission_queue_rejected _
-      | Keeper_turn_driver.Turn_timeout _
-      | Keeper_turn_driver.Provider_timeout _
-      | Keeper_turn_driver.Max_tokens_ceiling_violation _
-      | Keeper_turn_driver.Ambiguous_post_commit _
-      | Keeper_turn_driver.Internal_unhandled_exception _
-      | Keeper_turn_driver.Internal_bridge_exception _
-      | Keeper_turn_driver.Internal_contract_rejected _ )
-  | None ->
-    None
+  | Some internal_error ->
+    (match Keeper_turn_driver.accept_no_progress_retry_kind internal_error with
+     | Some `Empty_no_progress -> Some Empty_no_progress
+     | Some `Read_only_no_progress -> Some Read_only_no_progress
+     | None -> None)
+  | None -> None
+
+let is_recoverable_no_progress_accept_rejection
+    (err : Agent_sdk.Error.sdk_error) : bool =
+  match accept_rejection_degraded_retry_reason err with
+  | Some (Empty_no_progress | Read_only_no_progress) -> true
+  | Some _ | None -> false
 
 type degraded_retry =
   { next_runtime : string

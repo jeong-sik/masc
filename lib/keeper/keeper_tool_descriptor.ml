@@ -468,6 +468,7 @@ let descriptor_with_public_aliases
       ~sandbox
       ~runtime_handler
       ~translate
+      ()
   =
   let receipt_labels =
     [ "descriptor_id", id
@@ -512,6 +513,7 @@ let descriptor
       ~sandbox
       ~runtime_handler
       ~translate
+      ()
   =
   descriptor_with_public_aliases
     ~examples
@@ -528,6 +530,7 @@ let descriptor
     ~sandbox
     ~runtime_handler
     ~translate
+    ()
 ;;
 
 let with_eval_tags eval_tags descriptor =
@@ -584,6 +587,7 @@ let public_descriptors =
         ]
       ~validate_translated_input:true
       ~translate:translate_identity
+      ()
   ; descriptor_with_public_aliases
       ~id:"agent.search_files"
       ~public_name:"Grep"
@@ -609,6 +613,7 @@ let public_descriptors =
       ~runtime_handler:Tool_search_files
       ~validate_translated_input:true
       ~translate:translate_search_files
+      ()
   ; descriptor
       ~id:"agent.read_file"
       ~public_name:"Read"
@@ -632,6 +637,7 @@ let public_descriptors =
       ~runtime_handler:Tool_read_file
       ~validate_translated_input:false
       ~translate:translate_read_file
+      ()
   ; descriptor
       ~id:"agent.edit_file"
       ~public_name:"Edit"
@@ -650,6 +656,7 @@ let public_descriptors =
       ~runtime_handler:Tool_edit_file
       ~validate_translated_input:false
       ~translate:translate_edit_file
+      ()
   ; descriptor
       ~id:"agent.write_file"
       ~public_name:"Write"
@@ -668,6 +675,7 @@ let public_descriptors =
       ~runtime_handler:Tool_write_file
       ~validate_translated_input:false
       ~translate:translate_write_file
+      ()
   ; descriptor
       ~id:"agent.search_web"
       ~public_name:"WebSearch"
@@ -692,6 +700,7 @@ let public_descriptors =
       ~runtime_handler:Tool_masc_misc_dispatch
       ~validate_translated_input:true
       ~translate:translate_identity
+      ()
   ; descriptor
       ~id:"agent.fetch_web"
       ~public_name:"WebFetch"
@@ -716,6 +725,7 @@ let public_descriptors =
       ~runtime_handler:Tool_masc_misc_dispatch
       ~validate_translated_input:true
       ~translate:translate_identity
+      ()
   ]
 ;;
 
@@ -1052,6 +1062,7 @@ let in_process_descriptor ~id ~name ~description ~input_schema ~policy ~handler 
     ~runtime_handler:handler
     ~validate_translated_input:true
     ~translate:translate_identity
+    ()
 ;;
 
 (* Cluster-dispatched tools (board / voice / task) share a single

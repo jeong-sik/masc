@@ -11,6 +11,8 @@
 open Masc_domain
 open Workspace_utils
 
+exception Goal_task_links_write_failed of string
+
 let goal_task_links_path config =
   Filename.concat (tasks_dir config) "goal_task_links.json"
 ;;
@@ -130,16 +132,18 @@ let write_goal_task_links config links =
   (match read_json_result config primary_path with
    | Ok written when links_of_yojson written = expected_links -> ()
    | Ok _ ->
-     failwith
+     raise
+       (Goal_task_links_write_failed
        (Printf.sprintf
           "write_goal_task_links: primary readback mismatch for %s"
-          primary_path)
+          primary_path))
    | Error msg ->
-     failwith
+     raise
+       (Goal_task_links_write_failed
        (Printf.sprintf
           "write_goal_task_links: primary write/readback failed for %s: %s"
           primary_path
-          msg));
+          msg)));
   write_json config (goal_task_links_recovery_path config) json
 ;;
 

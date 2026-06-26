@@ -34,6 +34,7 @@ function makeEntry(
     events_to_facts_ratio: 2,
     ttl_expired_on_disk: 0,
     near_duplicate: 0,
+    provider_slot_busy: 0,
     alerts: [],
     ...overrides,
   }
@@ -53,6 +54,7 @@ function makeResponse(
       events_bytes: 0,
       ttl_expired_on_disk: 0,
       near_duplicate: 0,
+      provider_slot_busy: 0,
       ...totalsOverrides,
     },
     alert_summary: {
@@ -62,10 +64,12 @@ function makeResponse(
       ttl_expired_keepers: 0,
       near_duplicate_keepers: 0,
       high_event_ratio_keepers: 0,
+      provider_slot_busy_keepers: 0,
       thresholds: {
         ttl_expired_on_disk: 0,
         near_duplicate: 0,
         events_to_facts_ratio: 2,
+        provider_slot_busy: 0,
       },
     },
   }
@@ -189,10 +193,12 @@ describe('KeeperMemoryHealth', () => {
           ttl_expired_keepers: 1,
           near_duplicate_keepers: 0,
           high_event_ratio_keepers: 0,
+          provider_slot_busy_keepers: 0,
           thresholds: {
             ttl_expired_on_disk: 0,
             near_duplicate: 0,
             events_to_facts_ratio: 2,
+            provider_slot_busy: 0,
           },
         },
       })
@@ -203,6 +209,47 @@ describe('KeeperMemoryHealth', () => {
         .find((stat) => stat.textContent === '경보1')
       expect(alertStat).not.toBeUndefined()
       expect(alertStat!.querySelector('.kmh-stat-value')?.textContent).toBe('1')
+    })
+
+    it('surfaces provider slot busy alerts per keeper', async () => {
+      mockFetch.mockResolvedValue({
+        ...makeResponse([
+          makeEntry({
+            keeper_id: 'slot-busy',
+            provider_slot_busy: 3,
+            alerts: [{
+              code: 'provider_slot_busy',
+              severity: 'warn',
+              message: 'Memory OS librarian provider slot was busy',
+              value: 3,
+              threshold: 0,
+            }],
+          }),
+        ], { provider_slot_busy: 3 }),
+        alert_summary: {
+          total_alerts: 1,
+          warn_alerts: 1,
+          keepers_with_alerts: 1,
+          ttl_expired_keepers: 0,
+          near_duplicate_keepers: 0,
+          high_event_ratio_keepers: 0,
+          provider_slot_busy_keepers: 1,
+          thresholds: {
+            ttl_expired_on_disk: 0,
+            near_duplicate: 0,
+            events_to_facts_ratio: 2,
+            provider_slot_busy: 0,
+          },
+        },
+      })
+      const { container } = render(html`<${KeeperMemoryHealth} />`)
+      await waitFor(() => expect(screen.getByText('slot-busy')).not.toBeNull())
+
+      expect(screen.getByText('슬롯')).not.toBeNull()
+      const slotStat = Array.from(container.querySelectorAll('.kmh-totals-strip .kmh-stat'))
+        .find((stat) => stat.textContent === '슬롯 실패3')
+      expect(slotStat).not.toBeUndefined()
+      expect(slotStat!.querySelector('.kmh-stat-value')?.textContent).toBe('3')
     })
   })
 

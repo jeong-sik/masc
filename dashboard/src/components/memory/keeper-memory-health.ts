@@ -30,6 +30,10 @@ function entryAlerts(entry: KeeperMemoryHealthKeeperEntry): KeeperMemoryHealthAl
   return entry.alerts ?? []
 }
 
+function providerSlotBusy(entry: KeeperMemoryHealthKeeperEntry): number {
+  return entry.provider_slot_busy ?? 0
+}
+
 function isRowWarning(entry: KeeperMemoryHealthKeeperEntry): boolean {
   if (entryAlerts(entry).length > 0) return true
   return (
@@ -46,6 +50,8 @@ function alertLabel(code: string): string {
       return '중복'
     case 'events_to_facts_ratio_high':
       return '비율'
+    case 'provider_slot_busy':
+      return '슬롯'
     default:
       return code
   }
@@ -55,6 +61,7 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
   const warn = isRowWarning(entry)
   const ratioStr = entry.events_to_facts_ratio.toFixed(2)
   const alerts = entryAlerts(entry)
+  const providerSlotBusyCount = providerSlotBusy(entry)
 
   return html`
     <tr class=${warn ? 'kmh-row--warn' : ''}>
@@ -73,6 +80,11 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
           : html`<span class="kmh-badge kmh-badge--ok">0</span>`}
       </td>
       <td>${entry.near_duplicate}</td>
+      <td>
+        ${providerSlotBusyCount > 0
+          ? html`<span class="kmh-badge kmh-badge--warn">${providerSlotBusyCount}</span>`
+          : html`<span class="kmh-badge kmh-badge--ok">0</span>`}
+      </td>
       <td>
         ${alerts.length > 0
           ? alerts.map(alert => html`
@@ -149,6 +161,7 @@ export function KeeperMemoryHealth() {
     return total + (isRowWarning(entry) ? 1 : 0)
   }, 0)
   const totalAlerts = data.alert_summary?.total_alerts ?? derivedAlertCount
+  const totalProviderSlotBusy = data.totals.provider_slot_busy ?? 0
 
   return html`
     <div class="kmh-panel">
@@ -176,6 +189,12 @@ export function KeeperMemoryHealth() {
           <div class="kmh-stat">
             <span class="kmh-stat-label">근접중복</span>
             <span class="kmh-stat-value">${data.totals.near_duplicate}</span>
+          </div>
+          <div class="kmh-stat">
+            <span class="kmh-stat-label">슬롯 실패</span>
+            <span class=${`kmh-stat-value${totalProviderSlotBusy > 0 ? ' kmh-stat-value--warn' : ''}`}>
+              ${totalProviderSlotBusy}
+            </span>
           </div>
           <div class="kmh-stat">
             <span class="kmh-stat-label">경보</span>
@@ -210,6 +229,7 @@ export function KeeperMemoryHealth() {
                   <th>events:facts 비율</th>
                   <th>만료(디스크)</th>
                   <th>근접중복</th>
+                  <th>슬롯 실패</th>
                   <th>경보</th>
                 </tr>
               </thead>

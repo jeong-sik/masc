@@ -571,10 +571,11 @@ describe('parseMemoryOsFactCategory (SSOT mirror of category_of_string)', () => 
 })
 
 describe('parseMemoryOsClaimKind (SSOT mirror of claim_kind_of_string)', () => {
-  it('maps the three kinds and yields undefined for anything else', () => {
+  it('maps the known kinds and yields undefined for anything else', () => {
     expect(parseMemoryOsClaimKind('self_observation')).toBe('self_observation')
     expect(parseMemoryOsClaimKind('external_state')).toBe('external_state')
     expect(parseMemoryOsClaimKind('durable_knowledge')).toBe('durable_knowledge')
+    expect(parseMemoryOsClaimKind('diagnostic')).toBe('diagnostic')
     expect(parseMemoryOsClaimKind(' DURABLE_KNOWLEDGE ')).toBe('durable_knowledge')
     expect(parseMemoryOsClaimKind('nonsense')).toBeUndefined()
   })
@@ -618,6 +619,7 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
                 valid_until_iso: null,
                 last_verified_at: 1_789_500_000,
                 current: true,
+                prompt_recallable: true,
                 claim_kind: 'durable_knowledge',
                 external_ref: { kind: 'pr', id: '22198' },
                 // RFC-0247-deleted score fields: present on the wire here as a
@@ -639,6 +641,7 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
                 valid_until_iso: '2026-09-10T...Z',
                 last_verified_at: null,
                 current: false,
+                prompt_recallable: true,
                 // claim_kind omitted entirely → null
               },
               {
@@ -648,6 +651,7 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
                 first_seen: 1,
                 reference_time: 1,
                 current: true,
+                prompt_recallable: true,
               },
             ],
           },

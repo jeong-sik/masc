@@ -206,6 +206,8 @@ function factClaimKindLabel(fact: MemoryOsFact): string {
       return 'external'
     case 'self_observation':
       return 'self'
+    case 'diagnostic':
+      return 'diagnostic'
     case null:
       return 'untyped'
     default: {
@@ -217,7 +219,9 @@ function factClaimKindLabel(fact: MemoryOsFact): string {
 
 export function factSelectionReason(fact: MemoryOsFact): string {
   const meta = factCategoryMeta(fact.category)
-  const state = fact.current ? 'active recall candidate' : 'expired evidence row'
+  const state = !fact.prompt_recallable
+    ? 'diagnostic evidence row'
+    : fact.current ? 'active recall candidate' : 'expired evidence row'
   return `${state} · ${meta.lbl} · ${factClaimKindLabel(fact)}`
 }
 

@@ -85,6 +85,8 @@ let memory_os_episode_json ~now (episode : Keeper_memory_os_types.episode) =
    RFC-0247): they are absent from the [fact] record, so the type system makes
    re-emitting them unrepresentable. [reference_time] is the shared staleness
    anchor (last_verified_at else first_seen), reused rather than re-inlined.
+   [prompt_recallable] is projected from [fact_prompt_recallable], the same typed
+   SSOT recall uses, so the UI does not infer prompt eligibility from labels.
    [claim_kind] is omitted when [None] so a claim without optional metadata stays a
    minimal row. [external_ref] is intentionally not surfaced; PR/issue text remains
    claim context rather than a machine status field. *)
@@ -97,10 +99,11 @@ let memory_os_fact_json ~now (fact : Keeper_memory_os_types.fact) =
      ; "first_seen_iso", `String (Masc_domain.iso8601_of_unix_seconds fact.first_seen)
      ; "reference_time", `Float (Keeper_memory_os_types.reference_time fact)
      ; "valid_until", json_float_opt fact.valid_until
-     ; "valid_until_iso", json_time_iso_opt fact.valid_until
-     ; "last_verified_at", json_float_opt fact.last_verified_at
-     ; "current", `Bool (memory_os_fact_is_current ~now fact)
-     ]
+	     ; "valid_until_iso", json_time_iso_opt fact.valid_until
+	     ; "last_verified_at", json_float_opt fact.last_verified_at
+	     ; "current", `Bool (memory_os_fact_is_current ~now fact)
+	     ; "prompt_recallable", `Bool (Keeper_memory_os_types.fact_prompt_recallable fact)
+	     ]
      @ (match fact.claim_kind with
         | Some k -> [ "claim_kind", `String (Keeper_memory_os_types.claim_kind_to_string k) ]
         | None -> []))

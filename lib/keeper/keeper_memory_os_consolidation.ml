@@ -247,7 +247,7 @@ let valid_until_for_group ~now ~external_ref:_ ~claim_kind ~members category =
     (match min_optional_float (List.map (fun (m : fact) -> m.valid_until) members) with
      | Some _ as valid_until -> valid_until
      | None -> Some (now +. self_observation_ttl_seconds))
-  | Some External_state | Some Durable_knowledge | None ->
+  | Some External_state | Some Durable_knowledge | Some Diagnostic | None ->
     (match category with
      | Ephemeral ->
        (match min_optional_float (List.map (fun (m : fact) -> m.valid_until) members) with

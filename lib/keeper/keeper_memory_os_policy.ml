@@ -56,7 +56,7 @@ let reobserve_fact ~now ~existing ~incoming:(_ : fact) =
        the cap keep a self-observation as "recently verified" — the opposite of the
        goal. *)
     existing
-  | Some External_state | Some Durable_knowledge | None ->
+  | Some External_state | Some Durable_knowledge | Some Diagnostic | None ->
     (* Non-self-observation re-observe: the librarian re-asserting a claim from
        fresh context is enough to advance the staleness marker. *)
     { existing with last_verified_at = Some now }

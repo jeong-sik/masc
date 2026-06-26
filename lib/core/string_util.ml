@@ -123,7 +123,9 @@ let query_tokens query =
 
 let is_ascii_alnum_or_utf8_byte = function
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> true
-  | c -> Char.code c >= 128
+  | c ->
+    (* Non-ASCII UTF-8 bytes have the high bit set; keep them in tokens. *)
+    Char.code c land 0x80 <> 0
 
 let ascii_punctuation_tokens text =
   let len = String.length text in

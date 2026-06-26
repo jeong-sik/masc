@@ -600,9 +600,8 @@ let default_evaluator_runtime () =
     characters so non-English contract items still compare literally
     across ASCII whitespace/punctuation. *)
 let contract_tokens = String_util.ascii_punctuation_tokens
-;;
 
-let contains_token_sequence = String_util.contains_contiguous_token_sequence ;;
+let contains_token_sequence = String_util.contains_contiguous_token_sequence
 
 (** Check completion notes against a pre-declared contract.
     Returns unmet contract items. A contract item is "met" if its

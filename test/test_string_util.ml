@@ -251,7 +251,26 @@ let test_contains_contiguous_token_sequence () =
        ~haystack:tokens
        ~needle:[ "src"; "tests" ]);
   check bool "empty needle rejects" false
-    (SU.contains_contiguous_token_sequence ~haystack:tokens ~needle:[])
+    (SU.contains_contiguous_token_sequence ~haystack:tokens ~needle:[]);
+  check bool "empty haystack rejects" false
+    (SU.contains_contiguous_token_sequence ~haystack:[] ~needle:[ "src" ]);
+  check bool "single token needle matches" true
+    (SU.contains_contiguous_token_sequence ~haystack:tokens ~needle:[ "checked" ]);
+  check bool "needle longer than haystack rejects" false
+    (SU.contains_contiguous_token_sequence ~haystack:[ "src" ]
+       ~needle:[ "src"; "main" ]);
+  check bool "non-ASCII case is byte literal" false
+    (SU.contains_contiguous_token_sequence
+       ~haystack:(SU.ascii_punctuation_tokens "ΔΟΚΙΜΗ")
+       ~needle:(SU.ascii_punctuation_tokens "δοκιμη"));
+  let long_haystack =
+    List.init 20_000 (fun i ->
+      if i = 19_998 then "needle" else "tok" ^ string_of_int i)
+  in
+  check bool "long input remains stack safe" true
+    (SU.contains_contiguous_token_sequence
+       ~haystack:long_haystack
+       ~needle:[ "needle"; "tok19999" ])
 
 let test_contains_all_tokens_ci_order_independent () =
   check bool "tokens match in any order with gaps" true

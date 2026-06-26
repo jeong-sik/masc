@@ -404,7 +404,7 @@ let reaction_receipt_field name row =
 let summary_schema = "keeper.reaction_ledger.summary.v1"
 let fleet_summary_schema = "keeper.reaction_ledger.fleet_summary.v1"
 
-module Receipt_result = Keeper_execution_receipt_types
+module Receipt_result = Keeper_completion_contract_result_label
 
 let cap_list limit values =
   let rec loop remaining acc = function
@@ -422,16 +422,14 @@ let unknown_receipt_contract_result_label raw =
 
 type contract_result_attention =
   | Contract_attention of
-      { result : Receipt_result.completion_contract_result
+      { result : Receipt_result.t
       ; label : string
       }
   | Contract_no_attention
 
 let contract_result_attention_of_typed result =
-  if Receipt_result.completion_contract_result_requires_attention result
-  then
-    Contract_attention
-      { result; label = Receipt_result.completion_contract_result_to_string result }
+  if Receipt_result.requires_attention result
+  then Contract_attention { result; label = Receipt_result.to_string result }
   else
     Contract_no_attention
 ;;
@@ -574,17 +572,17 @@ let summarize_rows ~keeper_name ~limit rows =
   let note_contract_attention_label ~result ~label =
     incr completion_contract_attention_count;
     (match result with
-     | Receipt_result.Contract_passive_only ->
+     | Receipt_result.Passive_only ->
        incr completion_contract_passive_only_count
-     | Receipt_result.Contract_violated
-     | Receipt_result.Contract_surface_mismatch
-     | Receipt_result.Contract_no_capable_provider
-     | Receipt_result.Contract_claim_only_after_owned_task
-     | Receipt_result.Contract_needs_execution_progress
-     | Receipt_result.Contract_unknown
-     | Receipt_result.Contract_not_dispatched
-     | Receipt_result.Contract_satisfied_completion
-     | Receipt_result.Contract_satisfied_execution ->
+     | Receipt_result.Violated
+     | Receipt_result.Surface_mismatch
+     | Receipt_result.No_capable_provider
+     | Receipt_result.Claim_only_after_owned_task
+     | Receipt_result.Needs_execution_progress
+     | Receipt_result.Unknown
+     | Receipt_result.Not_dispatched
+     | Receipt_result.Satisfied_completion
+     | Receipt_result.Satisfied_execution ->
        ());
     increment_count completion_contract_result_counts label;
     latest_completion_contract_attention := Some label
@@ -592,7 +590,7 @@ let summarize_rows ~keeper_name ~limit rows =
   let note_completion_contract_attention row =
     match reaction_receipt_field "completion_contract_result" row with
     | Some result ->
-      (match Receipt_result.completion_contract_result_of_string result with
+      (match Receipt_result.of_string result with
        | Some typed ->
          (match contract_result_attention_of_typed typed with
           | Contract_attention { result; label } ->

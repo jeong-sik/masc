@@ -123,46 +123,54 @@ type completion_contract_result =
   | Contract_satisfied_completion
   | Contract_satisfied_execution
 
-let completion_contract_result_to_string = function
-  | Contract_unknown -> "unknown"
-  | Contract_not_dispatched -> "not_dispatched"
-  | Contract_violated -> "violated"
-  | Contract_surface_mismatch -> "surface_mismatch"
-  | Contract_no_capable_provider -> "no_capable_provider"
-  | Contract_claim_only_after_owned_task -> "claim_only_after_owned_task"
-  | Contract_needs_execution_progress -> "needs_execution_progress"
-  | Contract_passive_only -> "passive_only"
-  | Contract_satisfied_completion -> "satisfied_completion"
-  | Contract_satisfied_execution -> "satisfied_execution"
+module Completion_contract_label = Keeper_completion_contract_result_label
+
+let completion_contract_result_to_label = function
+  | Contract_unknown -> Completion_contract_label.Unknown
+  | Contract_not_dispatched -> Completion_contract_label.Not_dispatched
+  | Contract_violated -> Completion_contract_label.Violated
+  | Contract_surface_mismatch -> Completion_contract_label.Surface_mismatch
+  | Contract_no_capable_provider -> Completion_contract_label.No_capable_provider
+  | Contract_claim_only_after_owned_task ->
+    Completion_contract_label.Claim_only_after_owned_task
+  | Contract_needs_execution_progress ->
+    Completion_contract_label.Needs_execution_progress
+  | Contract_passive_only -> Completion_contract_label.Passive_only
+  | Contract_satisfied_completion -> Completion_contract_label.Satisfied_completion
+  | Contract_satisfied_execution -> Completion_contract_label.Satisfied_execution
 ;;
 
-let completion_contract_result_of_string = function
-  | "unknown" -> Some Contract_unknown
-  | "not_dispatched" -> Some Contract_not_dispatched
-  | "violated" -> Some Contract_violated
-  | "surface_mismatch" -> Some Contract_surface_mismatch
-  | "no_capable_provider" -> Some Contract_no_capable_provider
-  | "claim_only_after_owned_task" -> Some Contract_claim_only_after_owned_task
-  | "needs_execution_progress" -> Some Contract_needs_execution_progress
-  | "passive_only" -> Some Contract_passive_only
-  | "satisfied_completion" -> Some Contract_satisfied_completion
-  | "satisfied_execution" -> Some Contract_satisfied_execution
-  | _ -> None
+let completion_contract_result_to_string result =
+  result
+  |> completion_contract_result_to_label
+  |> Completion_contract_label.to_string
 ;;
 
-let completion_contract_result_requires_attention = function
-  | Contract_violated
-  | Contract_surface_mismatch
-  | Contract_no_capable_provider
-  | Contract_claim_only_after_owned_task
-  | Contract_needs_execution_progress
-  | Contract_passive_only ->
-    true
-  | Contract_unknown
-  | Contract_not_dispatched
-  | Contract_satisfied_completion
-  | Contract_satisfied_execution ->
-    false
+let completion_contract_result_of_label = function
+  | Completion_contract_label.Unknown -> Contract_unknown
+  | Completion_contract_label.Not_dispatched -> Contract_not_dispatched
+  | Completion_contract_label.Violated -> Contract_violated
+  | Completion_contract_label.Surface_mismatch -> Contract_surface_mismatch
+  | Completion_contract_label.No_capable_provider -> Contract_no_capable_provider
+  | Completion_contract_label.Claim_only_after_owned_task ->
+    Contract_claim_only_after_owned_task
+  | Completion_contract_label.Needs_execution_progress ->
+    Contract_needs_execution_progress
+  | Completion_contract_label.Passive_only -> Contract_passive_only
+  | Completion_contract_label.Satisfied_completion -> Contract_satisfied_completion
+  | Completion_contract_label.Satisfied_execution -> Contract_satisfied_execution
+;;
+
+let completion_contract_result_of_string raw =
+  raw
+  |> Completion_contract_label.of_string
+  |> Option.map completion_contract_result_of_label
+;;
+
+let completion_contract_result_requires_attention result =
+  result
+  |> completion_contract_result_to_label
+  |> Completion_contract_label.requires_attention
 ;;
 
 (* Lift the typed [Keeper_contract_classifier.contract_status] into the

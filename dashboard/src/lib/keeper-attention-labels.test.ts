@@ -18,6 +18,13 @@ describe('keeper attention labels', () => {
     expect(warn).not.toHaveBeenCalled()
   })
 
+  it('labels known bare completion-contract tokens without warning', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(completionContractAttentionReasonLabel('passive_only')).toBe('수동 응답만 있음')
+    expect(attentionReasonLabel('passive_only', false)).toBe('수동 응답만 있음')
+    expect(warn).not.toHaveBeenCalled()
+  })
+
   it('keeps unknown completion-contract composite reasons visible and warned', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 

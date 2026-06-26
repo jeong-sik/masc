@@ -169,7 +169,7 @@ let api_error_message_for_quota_scan (api_err : Llm_provider.Retry.api_error)
   | Llm_provider.Retry.NetworkError { message; _ } -> Some message
   | Llm_provider.Retry.Overloaded { message } -> Some message
   | Llm_provider.Retry.ServerError { message; _ } -> Some message
-  | Llm_provider.Retry.InvalidRequest { message } -> Some message
+  | Llm_provider.Retry.InvalidRequest { message; _ } -> Some message
   | Llm_provider.Retry.AuthError _
   | Llm_provider.Retry.NotFound _
   | Llm_provider.Retry.ContextOverflow _
@@ -267,7 +267,7 @@ let sdk_error_is_terminal_provider_runtime_failure
         (Llm_provider.Retry.NetworkError { message; _ }
         | Llm_provider.Retry.Overloaded { message }
         | Llm_provider.Retry.ServerError { message; _ }
-        | Llm_provider.Retry.InvalidRequest { message }
+        | Llm_provider.Retry.InvalidRequest { message; _ }
         | Llm_provider.Retry.RateLimited { message; _ }
         | Llm_provider.Retry.AuthError { message }
         | Llm_provider.Retry.NotFound { message }

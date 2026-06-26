@@ -114,7 +114,7 @@ let sdk_error_to_runtime_outcome err =
      | Agent_sdk.Error.Api api_err ->
        let http_err =
          match api_err with
-         | Llm_provider.Retry.InvalidRequest { message } ->
+         | Llm_provider.Retry.InvalidRequest { message; _ } ->
            if retry_message_looks_like_model_access_denied message
            then
              Llm_provider.Http_client.ProviderFailure
@@ -221,7 +221,7 @@ let enrich_sdk_error ~runtime_id ~(provider_cfg : Llm_provider.Provider_config.t
     Agent_sdk.Error.Api
       (Llm_provider.Retry.AuthError
          { message = append_hint message provider_auth_hint_marker detail })
-  | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message })
+  | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message; reason })
     when retry_message_looks_like_not_found message ->
     Agent_sdk.Error.Api
       (Llm_provider.Retry.InvalidRequest
@@ -230,6 +230,7 @@ let enrich_sdk_error ~runtime_id ~(provider_cfg : Llm_provider.Provider_config.t
                message
                openai_compat_not_found_hint_marker
                (openai_compat_not_found_detail ())
+         ; reason
          })
   | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound { message }) ->
     Agent_sdk.Error.Api
@@ -304,7 +305,7 @@ let sdk_error_is_terminal_provider_runtime_failure = function
   | Agent_sdk.Error.Provider (Llm_provider.Error.NotFound _) -> true
   | Agent_sdk.Error.Internal message
   | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError { message; _ })
-  | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message }) ->
+  | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message; _ }) ->
     message_looks_like_terminal_provider_runtime_failure message
   | _ -> false
 

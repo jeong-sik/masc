@@ -54,6 +54,11 @@ let network_error_kind_to_wire = function
   | Llm_provider.Http_client.Unknown -> "unknown"
 ;;
 
+let invalid_request_reason_to_wire = function
+  | Agent_sdk.Retry.Json_parse_error -> "json_parse_error"
+  | Agent_sdk.Retry.Unknown_invalid_request -> "unknown_invalid_request"
+;;
+
 let sdk_api_error_fields = function
   | Agent_sdk.Retry.RateLimited { retry_after; message } ->
     [ "variant", `String "rate_limited"
@@ -69,8 +74,11 @@ let sdk_api_error_fields = function
     ]
   | Agent_sdk.Retry.AuthError { message } ->
     [ "variant", `String "auth_error"; "message", `String message ]
-  | Agent_sdk.Retry.InvalidRequest { message } ->
-    [ "variant", `String "invalid_request"; "message", `String message ]
+  | Agent_sdk.Retry.InvalidRequest { message; reason } ->
+    [ "variant", `String "invalid_request"
+    ; "message", `String message
+    ; "reason", `String (invalid_request_reason_to_wire reason)
+    ]
   | Agent_sdk.Retry.NotFound { message } ->
     [ "variant", `String "not_found"; "message", `String message ]
   | Agent_sdk.Retry.ContextOverflow { message; limit } ->

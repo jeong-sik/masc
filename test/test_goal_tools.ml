@@ -716,6 +716,7 @@ let test_goal_transition_approval_gate () =
     | Ok payload -> payload
     | Error msg -> fail msg
   in
+  seed_goal_operator config ~agent_name:"operator";
   create_done_task config ~goal_id:goal.id ~title:"Approval done task";
   let transitioned =
     Tool_workspace.dispatch
@@ -762,7 +763,24 @@ let test_goal_transition_approval_gate () =
     (verified_json
      |> Yojson.Safe.Util.member "goal"
      |> fun json -> get_string_field json "phase");
-  seed_goal_operator config ~agent_name:"operator";
+  let pending_confirms = Operator_pending_confirm.read_pending_confirms config in
+  check int "approval request persisted" 1 (List.length pending_confirms);
+  let pending_confirm =
+    match pending_confirms with
+    | [ entry ] -> entry
+    | _ -> fail "expected one persisted goal approval request"
+  in
+  check string "approval action type" "goal_completion_decision"
+    pending_confirm.action_type;
+  check string "approval target type" "goal" pending_confirm.target_type;
+  check (option string) "approval target id" (Some goal.id) pending_confirm.target_id;
+  check string "approval delegated tool" "masc_goal_transition"
+    pending_confirm.delegated_tool;
+  check string "approval actor" "operator" pending_confirm.actor;
+  check string "approval request id in payload" request_id
+    (pending_confirm.payload
+     |> Yojson.Safe.Util.member "request_id"
+     |> Yojson.Safe.Util.to_string);
   let approved =
     Tool_workspace.dispatch
       (workspace_ctx ~agent_name:"operator" config)
@@ -785,7 +803,12 @@ let test_goal_transition_approval_gate () =
     "completed"
     (approved_json
      |> Yojson.Safe.Util.member "goal"
-     |> fun json -> get_string_field json "phase")
+     |> fun json -> get_string_field json "phase");
+  check
+    int
+    "approval request cleared"
+    0
+    (List.length (Operator_pending_confirm.read_pending_confirms config))
 ;;
 
 let test_goal_principal_display_name_canonicalized () =
@@ -1427,6 +1450,25 @@ let test_completion_approval_requires_operator_caller () =
     (Goal_phase.to_string saved_goal.phase)
 ;;
 
+let test_goal_approval_operator_action_registered () =
+  check bool "allowed action" true
+    (Operator_approval.is_allowed "goal_completion_decision");
+  check bool "confirm required" true
+    (Operator_approval.confirm_required "goal_completion_decision");
+  let action =
+    List.find_opt
+      (fun (action : Operator_pending_confirm.available_action) ->
+         String.equal action.action_type "goal_completion_decision")
+      Operator_pending_confirm.available_actions
+  in
+  match action with
+  | None -> fail "goal_completion_decision missing from available actions"
+  | Some action ->
+    check string "tool" "masc_goal_transition" action.tool_name;
+    check string "target type" "goal" action.target_type;
+    check bool "registry confirm required" true action.confirm_required
+;;
+
 let () =
   run
     "goal_tools"
@@ -1518,6 +1560,10 @@ let () =
             "approval requires operator caller"
             `Quick
             test_completion_approval_requires_operator_caller
+        ; test_case
+            "approval operator action registered"
+            `Quick
+            test_goal_approval_operator_action_registered
         ] )
     ]
 ;;

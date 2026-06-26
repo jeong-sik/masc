@@ -141,6 +141,55 @@ let execute_workspace_action (ctx : 'a context) (request : action_request) =
    "team session actions removed: ..." error instead of the cleaner
    "unsupported action_type" path. *)
 
+let goal_decision_payload decision payload =
+  let fields =
+    match payload with
+    | `Assoc fields -> List.remove_assoc "decision" fields
+    | _ -> []
+  in
+  `Assoc (("decision", `String decision) :: fields)
+
+let execute_goal_action (_ctx : 'a context) (request : action_request) =
+  match request.action_type with
+  | "goal_completion_decision" ->
+    let* () = validate_target_type "goal" request in
+    let* goal_id = require_target_id request in
+    let decision =
+      get_string request.payload "decision" "approve"
+      |> String.trim
+      |> String.lowercase_ascii
+    in
+    let* action =
+      match decision with
+      | "" | "approve" | "confirm" -> Ok "approve_completion"
+      | "reject" | "deny" -> Ok "reject_completion"
+      | other -> Error (Printf.sprintf "unsupported goal decision: %s" other)
+    in
+    let note_fields =
+      match get_string_opt request.payload "note" with
+      | Some note when String.trim note <> "" -> [ "note", `String note ]
+      | _ -> []
+    in
+    let goal_ctx : Workspace_types.context =
+      { config = _ctx.config; agent_name = request.actor }
+    in
+    let result =
+      Workspace_goals.handle_goal_transition
+        ~tool_name:"masc_goal_transition"
+        ~start_time:(Unix.gettimeofday ())
+        goal_ctx
+        (`Assoc
+            ([ "goal_id", `String goal_id
+             ; "action", `String action
+             ; "actor", `Assoc [ "id", `String request.actor ]
+             ]
+             @ note_fields))
+    in
+    if Tool_result.is_success result
+    then workspace_action_result request (json_of_dispatch_output (Tool_result.message result))
+    else Error (Tool_result.message result)
+  | _ -> Error (Printf.sprintf "not a goal action: %s" request.action_type)
+
 let execute_keeper_action (ctx : 'a context) (request : action_request) =
   match request.action_type with
   | "keeper_probe" ->
@@ -286,6 +335,7 @@ let execute_action (ctx : 'a context) (request : action_request) :
   | "broadcast" | "namespace_pause" | "namespace_resume" | "social_sweep"
   | "task_inject" ->
       execute_workspace_action ctx request
+  | "goal_completion_decision" -> execute_goal_action ctx request
   | "keeper_probe" | "keeper_recover" | "keeper_message" ->
       execute_keeper_action ctx request
   | "" -> Error "action_type is required"
@@ -453,6 +503,21 @@ let confirm_json ?actor_hint (ctx : _ context) args :
           Error "actor is not allowed to confirm this action"
       | Some entry ->
           if String.equal decision "deny" then (
+            let goal_denial_result =
+              if String.equal entry.action_type "goal_completion_decision" then
+                let request =
+                  {
+                    actor = entry.actor;
+                    action_type = entry.action_type;
+                    target_type = entry.target_type;
+                    target_id = entry.target_id;
+                    payload = goal_decision_payload "reject" entry.payload;
+                  }
+                in
+                execute_action ctx request |> Result.map Option.some
+              else Ok None
+            in
+            let* goal_denial_result = goal_denial_result in
             remove_pending_confirm ctx.config confirm_token;
             append_action_log ctx.config
               {
@@ -479,6 +544,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
                    ("trace_id", `String entry.trace_id);
                    ("decision", `String "deny");
                    ("tool_name", `String entry.delegated_tool);
+                   ("result", Option.value goal_denial_result ~default:`Null);
                    ("executed_action", pending_confirm_to_yojson entry);
                  ]))
           else

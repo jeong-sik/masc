@@ -9,6 +9,66 @@ let answer_text (resp : Agent_sdk.Types.api_response) : string =
   |> List.filter_map (function Agent_sdk.Types.Text s -> Some s | _ -> None)
   |> String.concat "\n"
 
+let stop_reason_label : Agent_sdk.Types.stop_reason -> string = function
+  | EndTurn -> "end_turn"
+  | StopToolUse -> "tool_use"
+  | MaxTokens -> "max_tokens"
+  | StopSequence -> "stop_sequence"
+  | Refusal -> "refusal"
+  | PauseTurn -> "pause_turn"
+  | Compaction -> "compaction"
+  | ContextWindowExceeded -> "context_window_exceeded"
+  | Unknown s ->
+    let s = String.trim s in
+    if String.equal s "" then "unknown" else "unknown:" ^ s
+
+let empty_response_detail (resp : Agent_sdk.Types.api_response) : string =
+  let text_blocks = ref 0 in
+  let text_chars = ref 0 in
+  let thinking_blocks = ref 0 in
+  let redacted_thinking_blocks = ref 0 in
+  let tool_use_count = ref 0 in
+  let tool_result_count = ref 0 in
+  let image_count = ref 0 in
+  let document_count = ref 0 in
+  let audio_count = ref 0 in
+  List.iter
+    (function
+      | Agent_sdk.Types.Text s ->
+        incr text_blocks;
+        text_chars := !text_chars + String.length s
+      | Thinking _ -> incr thinking_blocks
+      | RedactedThinking _ -> incr redacted_thinking_blocks
+      | ToolUse _ -> incr tool_use_count
+      | ToolResult _ -> incr tool_result_count
+      | Image _ -> incr image_count
+      | Document _ -> incr document_count
+      | Audio _ -> incr audio_count)
+    resp.content;
+  let input_tokens, output_tokens =
+    match resp.usage with
+    | Some u -> string_of_int u.input_tokens, string_of_int u.output_tokens
+    | None -> "unknown", "unknown"
+  in
+  Printf.sprintf
+    "empty response (stop_reason=%s content_blocks=%d text_blocks=%d \
+     text_chars=%d thinking_blocks=%d redacted_thinking_blocks=%d \
+     tool_use_count=%d tool_result_count=%d image_count=%d document_count=%d \
+     audio_count=%d input_tokens=%s output_tokens=%s)"
+    (stop_reason_label resp.stop_reason)
+    (List.length resp.content)
+    !text_blocks
+    !text_chars
+    !thinking_blocks
+    !redacted_thinking_blocks
+    !tool_use_count
+    !tool_result_count
+    !image_count
+    !document_count
+    !audio_count
+    input_tokens
+    output_tokens
+
 let usage_of (resp : Agent_sdk.Types.api_response) : Fusion_types.usage =
   match resp.usage with
   | Some u ->
@@ -37,12 +97,12 @@ let provider_error_detail ~runtime_id detail =
 let panel_failure_code = function
   | Fusion_types.Timeout -> "timeout"
   | Fusion_types.Provider_error _ -> "provider_error"
-  | Fusion_types.Empty_response -> "empty_response"
+  | Fusion_types.Empty_response _ -> "empty_response"
 
 let panel_failure_detail ~runtime_id = function
   | Fusion_types.Timeout -> "timeout"
   | Fusion_types.Provider_error detail -> provider_error_detail ~runtime_id detail
-  | Fusion_types.Empty_response -> "empty response"
+  | Fusion_types.Empty_response detail -> detail
 
 (* 이미 attribution된 실패를 재-attribution 없이 렌더한다. Provider_error의 detail은
    실패 시점(panel outcome_of_result / build_agent)에 provider_error_detail
@@ -53,7 +113,7 @@ let panel_failure_detail ~runtime_id = function
 let panel_failure_text = function
   | Fusion_types.Timeout -> "timeout"
   | Fusion_types.Provider_error detail -> detail
-  | Fusion_types.Empty_response -> "empty response"
+  | Fusion_types.Empty_response detail -> detail
 
 let timeout_budget_opt timeout_s =
   if Float.is_finite timeout_s && timeout_s > 0.0 then Some timeout_s else None
@@ -103,7 +163,7 @@ let web_tool_bundle () : Agent_sdk.Tool.t list =
   |> List.filter_map oas_tool_of_descriptor
 
 let build_agent ~sw ~net ~system_prompt ?(tools = []) ?(max_tool_calls = 0)
-    ?timeout_s ?name (model : string)
+    ?timeout_s ?max_tokens ?name (model : string)
   : (Agent_sdk.Agent.t, Fusion_types.panel_failure) result
   =
   (* 카드명(Async_agent.all이 결과 키로 반환)은 패널 정체성([name], 예 "skeptic (claude)").
@@ -121,6 +181,16 @@ let build_agent ~sw ~net ~system_prompt ?(tools = []) ?(max_tool_calls = 0)
       Runtime_agent.default_config ~name:card_name ~provider_cfg ~system_prompt ~tools
     in
     let base_config = apply_timeout_budget ?timeout_s base_config in
+    let base_config =
+      match max_tokens with
+      | None -> Ok base_config
+      | Some n when n > 0 -> Ok { base_config with max_tokens = n }
+      | Some n ->
+        Error
+          (Fusion_types.Provider_error
+             (Printf.sprintf "%s: invalid max_tokens %d" model n))
+    in
+    Result.bind base_config (fun base_config ->
     (* max_tool_calls는 OpenRouter Fusion의 per-panel tool budget에 대응.
        Runtime_agent의 max_turns로 근사: tool 호출 횟수 + 최종 답변 1턴. *)
     let config =
@@ -132,8 +202,9 @@ let build_agent ~sw ~net ~system_prompt ?(tools = []) ?(max_tool_calls = 0)
      | Error e ->
        Error
          (Fusion_types.Provider_error
-            (provider_error_detail ~runtime_id:model (Agent_sdk.Error.to_string e))))
+            (provider_error_detail ~runtime_id:model (Agent_sdk.Error.to_string e)))))
 
 module For_testing = struct
   let apply_timeout_budget = apply_timeout_budget
+  let empty_response_detail = empty_response_detail
 end

@@ -257,10 +257,13 @@ panel_system_prompt = "..."           # 행동 정의 — 코드 default 없음,
 judge_system_prompt = "..."
 panel_timeout_s = 120.0               # 생략 시 default_timeout_s
 judge_timeout_s = 120.0
+max_output_tokens_per_panel = 4096    # 생략 시 Runtime_agent 기본 출력 예산
+judge_max_output_tokens = 4096        # 생략 시 Runtime_agent 기본 출력 예산
 ```
 
 - panel/judge 모델 식별자는 기존 `provider.model` opaque 문자열(runtime.toml bindings와 동일 컨벤션). 미존재 모델 → parse/resolve 에러(fail-fast).
 - 패널 1–8 모델 제한 검증. 알 수 없는 preset/모델은 silent default로 압축하지 않는다(CLAUDE.md §Unknown→Permissive 회피).
+- `max_output_tokens_per_panel`, `judge_max_output_tokens`, `[[...judges]].max_output_tokens`는 optional positive int다. 생략하면 기존 Runtime_agent 기본값을 보존하고, 0 이하 값은 config load에서 fail-fast한다.
 - `Runtime_toml` 파서 확장(또는 별도 `Fusion_config` 파서)로 `[fusion.*]` 로드 → `Fusion_policy.t`.
 
 ---

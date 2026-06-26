@@ -67,7 +67,9 @@ end
 type panel_failure =
   | Timeout  (** 구조적 타임아웃 (Masc_oas_bridge) *)
   | Provider_error of string  (** provider/transport 에러, 메시지 보존 *)
-  | Empty_response  (** 모델이 빈 응답 (keeper_librarian 빈응답 전례) *)
+  | Empty_response of string
+      (** 모델이 빈 응답. detail에는 stop_reason/usage/content shape만 보존하고,
+          reasoning/thinking 본문은 노출하지 않는다. *)
 [@@deriving yojson, show, eq]
 
 (** 성공한 패널 한 명의 답. (variant inline record는 ppx_deriving_yojson 비호환이라

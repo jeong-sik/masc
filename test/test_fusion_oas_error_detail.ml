@@ -1,5 +1,15 @@
 open Masc
 
+let contains ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  let rec loop i =
+    i + needle_len <= haystack_len
+    && (String.equal (String.sub haystack i needle_len) needle || loop (i + 1))
+  in
+  String.equal needle "" || loop 0
+;;
+
 let provider_cfg () =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.Anthropic
@@ -80,8 +90,38 @@ let test_panel_failure_text_no_reattribution () =
     (Fusion_oas.panel_failure_text Fusion_types.Timeout);
   Alcotest.(check string)
     "empty response"
-    "empty response"
-    (Fusion_oas.panel_failure_text Fusion_types.Empty_response)
+    "empty response (stop_reason=max_tokens)"
+    (Fusion_oas.panel_failure_text
+       (Fusion_types.Empty_response "empty response (stop_reason=max_tokens)"))
+;;
+
+let test_empty_response_detail_summarizes_shape () =
+  let response : Agent_sdk.Types.api_response =
+    { id = "r"
+    ; model = "m"
+    ; stop_reason = Agent_sdk.Types.MaxTokens
+    ; content =
+        [ Agent_sdk.Types.Thinking { thinking_type = "reasoning"; content = "secret chain" } ]
+    ; usage =
+        Some
+          { input_tokens = 21
+          ; output_tokens = 32
+          ; cache_creation_input_tokens = 0
+          ; cache_read_input_tokens = 0
+          ; cost_usd = None
+          }
+    ; telemetry = None
+    }
+  in
+  let detail = Fusion_oas.For_testing.empty_response_detail response in
+  Alcotest.(check bool) "stop reason included" true
+    (contains ~needle:"stop_reason=max_tokens" detail);
+  Alcotest.(check bool) "thinking block counted" true
+    (contains ~needle:"thinking_blocks=1" detail);
+  Alcotest.(check bool) "output tokens included" true
+    (contains ~needle:"output_tokens=32" detail);
+  Alcotest.(check bool) "reasoning body not leaked" false
+    (contains ~needle:"secret chain" detail)
 ;;
 
 let test_timeout_budget_does_not_set_total_execution_ceiling () =
@@ -128,6 +168,10 @@ let () =
             "panel failure text does not re-attribute"
             `Quick
             test_panel_failure_text_no_reattribution
+        ; Alcotest.test_case
+            "empty response detail summarizes shape"
+            `Quick
+            test_empty_response_detail_summarizes_shape
         ; Alcotest.test_case
             "timeout budget does not arm OAS total execution ceiling"
             `Quick

@@ -96,6 +96,34 @@ let batch_add_tasks_error_to_string = function
   | Batch_unexpected_error msg -> Printf.sprintf "Error adding batch tasks: %s" msg
 ;;
 
+let append_goal_link_rollback_failures msg rollback_failures =
+  match rollback_failures with
+  | [] -> msg
+  | failures ->
+    Printf.sprintf
+      "%s; goal link rollback failed: %s"
+      msg
+      (String.concat "; " failures)
+;;
+
+let rollback_goal_links config task_goal_ids =
+  List.filter_map
+    (fun (task_id, goal_id_opt) ->
+       match goal_id_opt with
+       | None -> None
+       | Some goal_id ->
+         (match
+            Workspace_goal_index.unlink_task_from_goal_result
+              config
+              ~goal_id
+              ~task_id
+          with
+          | Ok () -> None
+          | Error msg ->
+            Some (Printf.sprintf "%s/%s: %s" goal_id task_id msg)))
+    task_goal_ids
+;;
+
 (** Add task — file-locked to prevent task ID collision under concurrency.
     Rejects tasks with duplicate titles (exact match after normalization)
     to prevent the same work from being created multiple times. *)
@@ -169,23 +197,22 @@ let add_task_with_result
                   ~goal_id
                   ~task_id
             with
-            | Error msg -> Error (Goal_link_write_failed msg)
+            | Error msg ->
+              Error
+                (Goal_link_write_failed
+                   (append_goal_link_rollback_failures
+                      msg
+                      (rollback_goal_links config [ task_id, goal_id ])))
             | Ok () -> (
               match write_backlog_result config new_backlog with
               | Error msg ->
                   (* Rollback the goal link we just wrote so the registry does
                      not reference a task that was not durably published. *)
-                  (match goal_id with
-                   | Some goal_id ->
-                       let _ =
-                         Workspace_goal_index.unlink_task_from_goal_result
-                           config
-                           ~goal_id
-                           ~task_id
-                       in
-                       ()
-                   | None -> ());
-                  Error (Backlog_write_failed msg)
+                  Error
+                    (Backlog_write_failed
+                       (append_goal_link_rollback_failures
+                          msg
+                          (rollback_goal_links config [ task_id, goal_id ])))
               | Ok () ->
                   let created_by_json = Json_util.string_opt_to_json created_by in
                   Workspace_task_classify.emit_task_activity
@@ -294,26 +321,30 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
                  (fun ((task : Masc_domain.task), goal_id) -> task.id, goal_id)
                  added_tasks_with_goal_ids)
           with
-          | Error msg -> Error (Batch_goal_link_write_failed msg)
+          | Error msg ->
+            Error
+              (Batch_goal_link_write_failed
+                 (append_goal_link_rollback_failures
+                    msg
+                    (rollback_goal_links
+                       config
+                       (List.map
+                          (fun ((task : Masc_domain.task), goal_id) -> task.id, goal_id)
+                          added_tasks_with_goal_ids))))
           | Ok () -> (
             match write_backlog_result config new_backlog with
             | Error msg ->
                 (* Rollback goal links for the tasks that were just linked so
                    the registry does not reference unpublished tasks. *)
-                List.iter
-                  (fun ((task : Masc_domain.task), goal_id) ->
-                     match goal_id with
-                     | Some goal_id ->
-                         let _ =
-                           Workspace_goal_index.unlink_task_from_goal_result
-                             config
-                             ~goal_id
-                             ~task_id:task.id
-                         in
-                         ()
-                     | None -> ())
-                  added_tasks_with_goal_ids;
-                Error (Batch_backlog_write_failed msg)
+                Error
+                  (Batch_backlog_write_failed
+                     (append_goal_link_rollback_failures
+                        msg
+                        (rollback_goal_links
+                           config
+                           (List.map
+                              (fun ((task : Masc_domain.task), goal_id) -> task.id, goal_id)
+                              added_tasks_with_goal_ids))))
             | Ok () ->
                 List.iter
                   (fun ((task : Masc_domain.task), goal_id) ->

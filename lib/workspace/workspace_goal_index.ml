@@ -165,27 +165,70 @@ let verify_goal_task_links_write config ~path ~json ~expected_links ~label =
          (Printexc.to_string exn))
 ;;
 
-let write_goal_task_links_result config links =
+let write_goal_task_links_result ?previous_links config links =
   let json = links_to_yojson links in
   let primary_path = goal_task_links_path config in
   let recovery_path = goal_task_links_recovery_path config in
   let expected_links = normalize_link_set links in
-  match
-    verify_goal_task_links_write
-      config
-      ~path:recovery_path
-      ~json
-      ~expected_links
-      ~label:"recovery"
-  with
-  | Error _ as error -> error
-  | Ok () ->
+  let write_primary () =
     verify_goal_task_links_write
       config
       ~path:primary_path
       ~json
       ~expected_links
       ~label:"primary"
+  in
+  let write_recovery () =
+    verify_goal_task_links_write
+      config
+      ~path:recovery_path
+      ~json
+      ~expected_links
+      ~label:"recovery"
+  in
+  let rollback () =
+    match previous_links with
+    | None -> ()
+    | Some previous_links ->
+      let previous_json = links_to_yojson previous_links in
+      let previous_expected = normalize_link_set previous_links in
+      (match
+         verify_goal_task_links_write
+           config
+           ~path:primary_path
+           ~json:previous_json
+           ~expected_links:previous_expected
+           ~label:"primary-rollback"
+       with
+       | Ok () -> ()
+       | Error rollback_msg ->
+         Log.Misc.warn
+           "write_goal_task_links_result: primary rollback failed after write failure: %s"
+           rollback_msg);
+      (match
+         verify_goal_task_links_write
+           config
+           ~path:recovery_path
+           ~json:previous_json
+           ~expected_links:previous_expected
+           ~label:"recovery-rollback"
+       with
+       | Ok () -> ()
+       | Error rollback_msg ->
+         Log.Misc.warn
+           "write_goal_task_links_result: recovery rollback failed after write failure: %s"
+           rollback_msg)
+  in
+  match write_primary () with
+  | Error _ as error ->
+    rollback ();
+    error
+  | Ok () ->
+    (match write_recovery () with
+     | Ok () -> Ok ()
+     | Error _ as error ->
+       rollback ();
+       error)
 ;;
 
 let write_goal_task_links config links =
@@ -247,8 +290,8 @@ let prune_links_for_goal_result config ~goal_id =
       match read_goal_task_links_for_mutation config with
       | Error _ as error -> error
       | Ok links ->
-        let links = List.filter (fun (gid, _) -> not (String.equal gid goal_id)) links in
-        write_goal_task_links_result config links)
+        let new_links = List.filter (fun (gid, _) -> not (String.equal gid goal_id)) links in
+        write_goal_task_links_result config ~previous_links:links new_links)
 ;;
 
 let prune_links_for_goal config ~goal_id =
@@ -266,8 +309,8 @@ let link_task_to_goal_result config ~goal_id ~task_id =
       match read_goal_task_links_for_mutation config with
       | Error _ as error -> error
       | Ok links ->
-        let links = add_link_to_links links ~goal_id ~task_id in
-        write_goal_task_links_result config links)
+        let new_links = add_link_to_links links ~goal_id ~task_id in
+        write_goal_task_links_result config ~previous_links:links new_links)
 ;;
 
 let link_task_to_goal config ~goal_id ~task_id =
@@ -276,7 +319,9 @@ let link_task_to_goal config ~goal_id ~task_id =
   | Error msg -> Log.Misc.warn "%s" msg
 ;;
 
-let unlink_task_from_goal_result config ~goal_id ~task_id =
+let before_unlink_task_from_goal_for_testing = Atomic.make None
+
+let unlink_task_from_goal_result_impl config ~goal_id ~task_id =
   let goal_id = String.trim goal_id in
   let task_id = String.trim task_id in
   if String.equal goal_id "" || String.equal task_id "" then Ok ()
@@ -285,9 +330,27 @@ let unlink_task_from_goal_result config ~goal_id ~task_id =
       match read_goal_task_links_for_mutation config with
       | Error _ as error -> error
       | Ok links ->
-        let links = remove_link_from_links links ~goal_id ~task_id in
-        write_goal_task_links_result config links)
+        let new_links = remove_link_from_links links ~goal_id ~task_id in
+        write_goal_task_links_result config ~previous_links:links new_links)
 ;;
+
+let unlink_task_from_goal_result config ~goal_id ~task_id =
+  (match Atomic.get before_unlink_task_from_goal_for_testing with
+   | None -> ()
+   | Some before_unlink -> before_unlink config ~goal_id ~task_id);
+  unlink_task_from_goal_result_impl config ~goal_id ~task_id
+;;
+
+module For_testing = struct
+  let with_before_unlink_task_from_goal before_unlink f =
+    let previous = Atomic.get before_unlink_task_from_goal_for_testing in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set before_unlink_task_from_goal_for_testing previous)
+      (fun () ->
+         Atomic.set before_unlink_task_from_goal_for_testing (Some before_unlink);
+         f ())
+  ;;
+end
 
 let link_goalless_task_to_goal config ~goal_id ~task_id =
   let goal_id = String.trim goal_id in
@@ -303,6 +366,7 @@ let link_goalless_task_to_goal config ~goal_id ~task_id =
            (match
               write_goal_task_links_result
                 config
+                ~previous_links:links
                 (add_link_to_links links ~goal_id ~task_id)
             with
             | Ok () -> Ok ()
@@ -336,7 +400,7 @@ let link_tasks_to_goals_result config links =
             existing_links
             trimmed_links
         in
-        write_goal_task_links_result config updated_links)
+        write_goal_task_links_result config ~previous_links:existing_links updated_links)
 ;;
 
 let link_tasks_to_goals config links =

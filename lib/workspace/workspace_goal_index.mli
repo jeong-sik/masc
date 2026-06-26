@@ -68,6 +68,7 @@ val write_goal_task_links :
   Workspace_utils_backend_setup.config -> (string * string list) list -> unit
 
 val write_goal_task_links_result :
+  ?previous_links:(string * string list) list ->
   Workspace_utils_backend_setup.config ->
   (string * string list) list ->
   (unit, goal_task_links_write_error) result
@@ -97,6 +98,16 @@ val unlink_task_from_goal_result :
   goal_id:string ->
   task_id:string ->
   (unit, goal_task_links_write_error) result
+
+module For_testing : sig
+  val with_before_unlink_task_from_goal :
+    (Workspace_utils_backend_setup.config ->
+     goal_id:string ->
+     task_id:string ->
+     unit) ->
+    (unit -> 'a) ->
+    'a
+end
 
 (** Add one task-to-goal link only when [task_id] has no existing goal link.
     The read/check/write sequence runs under the goal-task-links file lock.

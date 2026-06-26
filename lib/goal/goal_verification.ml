@@ -665,13 +665,15 @@ let cancel_request config ~(request_id : string) =
             { version = state.version + 1; updated_at = resolved_at; requests };
           Ok updated_request)
 
-let submit_vote config ~(request_id : string) ~(principal : goal_principal)
+let submit_vote config ~(goal_id : string) ~(request_id : string) ~(principal : goal_principal)
     ~(decision : vote_decision) ?note ?(evidence_refs = []) () =
   let lock_path = requests_path config in
   Workspace_utils.with_file_lock config lock_path (fun () ->
       let state = read_state config in
       match List.find_opt (fun request -> String.equal request.id request_id) state.requests with
       | None -> Error "goal verification request not found"
+      | Some request when not (String.equal request.goal_id goal_id) ->
+          Error "goal verification request does not belong to this goal"
       | Some request when request.status <> Open ->
           Error "goal verification request is not open"
       | Some request when principal_equal principal request.requested_by ->

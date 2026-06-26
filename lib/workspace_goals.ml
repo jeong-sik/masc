@@ -54,6 +54,40 @@ let validation_error_result
     (validation_error_response errors)
 ;;
 
+let principal_matches_authenticated_caller
+      (ctx : context)
+      (principal : Goal_verification.goal_principal)
+  =
+  String.equal principal.id ctx.agent_name
+;;
+
+let canonical_principal_for_authenticated_caller (ctx : context)
+  : Goal_verification.goal_principal
+  =
+  { id = ctx.agent_name; display_name = None }
+;;
+
+let caller_is_goal_operator (ctx : context) =
+  (Atomic.get Workspace_hooks.is_admin_agent_fn)
+    ~base_path:ctx.config.base_path
+    ~agent_name:ctx.agent_name
+  ||
+  match Auth.read_initial_admin ctx.config.base_path with
+  | Some admin -> String.equal admin ctx.agent_name
+  | None -> false
+;;
+
+let principal_binding_error ~field ctx _principal =
+  ignore ctx;
+  Printf.sprintf "%s id must match authenticated caller" field
+;;
+
+let operator_action_error action =
+  Printf.sprintf
+    "goal transition action %s requires an operator caller"
+    (Goal_phase.action_to_string action)
+;;
+
 let goal_status_strings = [ "active"; "paused"; "done"; "dropped" ]
 
 (* RFC-0089: derive the accepted-value sets from the Goal_phase ADT (the goal
@@ -455,6 +489,24 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
   | Error err, _, _ | _, Error err, _ | _, _, Error err ->
     validation_error_result ~tool_name ~start_time [ err ]
   | Ok goal_id, Ok (Some action), Ok (Some actor) ->
+    if not (principal_matches_authenticated_caller ctx actor)
+    then
+      error_result_typed
+        ~tool_name
+        ~start_time
+        ~code:Validation_error
+        (principal_binding_error ~field:"actor" ctx actor)
+    else if
+      Workspace_goals_verification.actor_must_be_operator action
+      && not (caller_is_goal_operator ctx)
+    then
+      error_result_typed
+        ~tool_name
+        ~start_time
+        ~code:Conflict
+        (operator_action_error action)
+    else
+    let actor = canonical_principal_for_authenticated_caller ctx in
     let note = get_string_opt args "note" in
     let override_note = get_string_opt args "override_note" in
     (match Goal_store.get_goal ctx.config ~goal_id with
@@ -753,6 +805,15 @@ let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result
   | Error err, _, _, _ | _, Error err, _, _ | _, _, Error err, _ | _, _, _, Error err ->
     validation_error_result ~tool_name ~start_time [ err ]
   | Ok goal_id, Ok (Some principal), Ok (Some decision), Ok evidence_refs ->
+    if not (principal_matches_authenticated_caller ctx principal)
+    then
+      error_result_typed
+        ~tool_name
+        ~start_time
+        ~code:Validation_error
+        (principal_binding_error ~field:"principal" ctx principal)
+    else
+    let principal = canonical_principal_for_authenticated_caller ctx in
     let note = get_string_opt args "note" in
     let evidence_refs = Option.value evidence_refs ~default:[] in
     let request_id = get_string_opt args "request_id" in
@@ -775,6 +836,7 @@ let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result
           (match
              Goal_verification.submit_vote
                ctx.config
+               ~goal_id
                ~request_id
                ~principal
                ~decision

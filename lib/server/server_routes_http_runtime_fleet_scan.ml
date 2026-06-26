@@ -1073,13 +1073,6 @@ let keeper_fleet_safety_health_json
     else if active_task_owner_without_executable_fiber then "degraded"
     else "ok"
   in
-  let blocked_count =
-    if no_executable_keeper_fibers then executable_reaction_capacity_shortfall_count
-    else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target
-    then reaction_capacity_shortfall_count
-    else if active_task_owner_is_selected_blocker then active_task_owner_without_executable_fiber_count
-    else 0
-  in
   let blocked_keeper_names =
     if no_executable_keeper_fibers then names_not_in executable_names
     else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target
@@ -1087,6 +1080,7 @@ let keeper_fleet_safety_health_json
     else if active_task_owner_is_selected_blocker then active_task_owner_blocked_names
     else []
   in
+  let blocked_count = List.length blocked_keeper_names in
   let active_capacity_names =
     if no_executable_keeper_fibers then executable_names
     else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target

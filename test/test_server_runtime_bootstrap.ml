@@ -1777,6 +1777,57 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
             (fleet_safety |> member "operator_action_required" |> to_bool);
           ())))
 
+let test_health_json_blocked_count_matches_blocked_names_with_non_target_capacity () =
+  with_temp_dir "health-blocked-count-non-target-capacity" (fun dir ->
+    let config_root = make_config_root dir in
+    List.iter
+      (write_config_root_keeper_toml config_root)
+      [ "target-missing"; "target-running" ];
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = Mcp_server.workspace_config state in
+        let target_running =
+          make_keeper_meta ~name:"target-running" ~trace_id:"trace-target-running" ()
+        in
+        let target_missing =
+          make_keeper_meta ~name:"target-missing" ~trace_id:"trace-target-missing" ()
+        in
+        let non_target_running =
+          make_keeper_meta
+            ~name:"non-target-running"
+            ~trace_id:"trace-non-target-running"
+            ()
+        in
+        List.iter
+          (write_keeper_meta_exn config)
+          [ target_running; target_missing; non_target_running ];
+        with_running_keeper_metas config [ target_running; non_target_running ]
+          (fun () ->
+            let request = Httpun.Request.create `GET "/health" in
+            let json = Server_routes_http_runtime.make_health_json request in
+            let open Yojson.Safe.Util in
+            let fleet_safety = json |> member "keeper_fleet_safety" in
+            Alcotest.(check int) "health counts all running capacity" 2
+              (fleet_safety |> member "effective_reaction_capacity_count" |> to_int);
+            Alcotest.(check int) "capacity shortfall remains numeric capacity" 1
+              (fleet_safety |> member "reaction_capacity_shortfall_count" |> to_int);
+            Alcotest.(check (list string)) "health names blocked target keepers"
+              [ "example"; "target-missing" ]
+              (fleet_safety |> member "blocked_keeper_names" |> to_list
+               |> List.map to_string);
+            Alcotest.(check int) "blocked count matches blocked keeper names" 2
+              (fleet_safety |> member "blocked_count" |> to_int);
+            Alcotest.(check int) "blocked_keepers alias matches names" 2
+              (fleet_safety |> member "blocked_keepers" |> to_int))))
+
 let test_health_json_ignores_persisted_only_keeper_for_capacity_target () =
   with_temp_dir "health-persisted-only-keeper-target" (fun dir ->
     let config_root = make_config_root dir in
@@ -3564,6 +3615,10 @@ let () =
           Alcotest.test_case
             "health json degrades when reaction capacity is below target"
             `Quick test_health_json_degrades_when_reaction_capacity_below_target;
+          Alcotest.test_case
+            "health json blocked count matches named target blockers"
+            `Quick
+            test_health_json_blocked_count_matches_blocked_names_with_non_target_capacity;
           Alcotest.test_case
             "health json ignores persisted-only keeper for capacity target"
             `Quick

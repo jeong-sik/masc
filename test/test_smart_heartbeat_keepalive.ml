@@ -217,7 +217,7 @@ let test_current_task_id_for_agent_reconciles_from_empty_registry_task () =
         let current_from_registry =
           match Keeper_registry.get ~base_path:config.Workspace.base_path keeper_name with
           | Some entry ->
-            Option.map Keeper_id.Task_id.to_string entry.meta.current_task_id
+            Option.map Masc_domain.Task_id.to_string entry.meta.current_task_id
           | None -> None
         in
         check (option string) "registry current task reconciled" (Some task_id)
@@ -225,7 +225,7 @@ let test_current_task_id_for_agent_reconciles_from_empty_registry_task () =
         let current_from_disk =
           match Keeper_meta_store.read_meta config keeper_name with
           | Ok (Some persisted) ->
-            Option.map Keeper_id.Task_id.to_string persisted.current_task_id
+            Option.map Masc_domain.Task_id.to_string persisted.current_task_id
           | Ok None -> None
           | Error err -> fail ("read_meta failed: " ^ err)
         in

@@ -11,6 +11,8 @@
 open Masc_domain
 open Workspace_utils
 
+exception Goal_task_links_write_failed of string
+
 let goal_task_links_path config =
   Filename.concat (tasks_dir config) "goal_task_links.json"
 ;;
@@ -193,7 +195,7 @@ let prune_links_for_goal config ~goal_id =
       let links = List.filter (fun (gid, _) -> not (String.equal gid goal_id)) links in
       match write_goal_task_links_r config links with
       | Ok () -> ()
-      | Error msg -> failwith msg)
+      | Error msg -> raise (Goal_task_links_write_failed msg))
 ;;
 
 let link_task_to_goal config ~goal_id ~task_id =

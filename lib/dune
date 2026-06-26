@@ -178,11 +178,11 @@
   mcp_tool_runtime_types
   mcp_tool_runtime_workspace
   mcp_tool_runtime_comm
+  tool_agent_agents
   workspace_goals_verification
   tool_misc_introspection
   keeper_tool_persona_audit
-  tool_misc_web_search
-  tool_misc_web_fetch
+  tool_misc_web_search tool_misc_web_fetch
   tool_misc_web_enrichment
   meta_cognition_types
   meta_cognition_rules

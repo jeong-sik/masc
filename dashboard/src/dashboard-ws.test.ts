@@ -673,7 +673,7 @@ describe('dashboard websocket route subscriptions', () => {
     expect(mockSockets).toHaveLength(1)
   })
 
-  it('stops reconnecting after a fatal 1011 server error close', async () => {
+  it('reconnects after a transient 1011 server error close', async () => {
     vi.useFakeTimers()
     installWebSocketMocks()
 
@@ -693,7 +693,8 @@ describe('dashboard websocket route subscriptions', () => {
 
     expect(dashboardWsConnected.value).toBe(false)
     expect(dashboardWsReady.value).toBe(false)
-    expect(mockSockets).toHaveLength(1)
+    expect(mockSockets).toHaveLength(2)
+    expect(mockSockets[1]!.url).toBe('ws://localhost:3000/ws')
   })
 
   it('stops reconnecting after a fatal 1002 protocol error close', async () => {

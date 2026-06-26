@@ -361,18 +361,9 @@ let messages_for_librarian (inp : Keeper_librarian.input) =
 (* http_error_message moved to Provider_http_error.to_message (SSOT,
    2026-06-24): four byte-for-output-identical copies unified. *)
 
-let with_timeout ?clock ~timeout_sec f =
-  match clock with
-  | None -> Some (f ())
-  | Some clock ->
-    (try Some (Eio.Time.with_timeout_exn clock timeout_sec f) with
-     | Eio.Time.Timeout -> None)
-;;
-
-let now_from_clock ?clock () =
-  match clock with
-  | Some clock -> Eio.Time.now clock
-  | None -> Time_compat.now ()
+let with_timeout ~clock ~timeout_sec f =
+  try Some (Eio.Time.with_timeout_exn clock timeout_sec f) with
+  | Eio.Time.Timeout -> None
 ;;
 
 let unstructured_note_max_chars = 900
@@ -461,6 +452,9 @@ let extract_with_provider_classified
     ~generation
     (inp : Keeper_librarian.input)
   =
+  match clock with
+  | None -> Error "memory os librarian provider clock unavailable"
+  | Some clock -> (
   match messages_for_librarian inp with
   | Error _ as e -> e
   | Ok messages ->
@@ -468,8 +462,8 @@ let extract_with_provider_classified
     let last_unparseable_raw = ref None in
     let attempt messages =
       match
-        with_timeout ?clock ~timeout_sec (fun () ->
-          complete ~sw ~net ?clock ~config:provider_cfg ~messages ())
+        with_timeout ~clock ~timeout_sec (fun () ->
+          complete ~sw ~net ~clock ~config:provider_cfg ~messages ())
       with
       | None -> Transport_failed "librarian provider timed out"
       | Some (Error err) -> Transport_failed (Provider_http_error.to_message err)
@@ -500,7 +494,7 @@ let extract_with_provider_classified
          | Some raw -> raw
          | None -> ""
        in
-       let now = now_from_clock ?clock () in
+       let now = Eio.Time.now clock in
        Log.Keeper.warn
          "memory os librarian preserving unstructured fallback trace_id=%s generation=%d reason=%s"
          inp.trace_id
@@ -509,7 +503,7 @@ let extract_with_provider_classified
        Ok
          { episode = unstructured_episode ~now ~generation inp ~reason:msg ~raw
          ; kind = Unstructured_fallback
-         })
+         }))
 ;;
 
 let extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~provider_cfg ~generation inp =

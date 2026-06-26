@@ -168,6 +168,9 @@ val extract_with_provider_classified
   -> generation:int
   -> Keeper_librarian.input
   -> (extraction_result, string) result
+(** Provider-backed librarian extraction. A missing [clock] is an explicit
+    [Error] so production calls cannot silently run without timeout
+    enforcement. *)
 
 val extract_and_append_with_provider
   :  ?complete:complete_fn

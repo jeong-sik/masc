@@ -7,7 +7,7 @@
    Paper/Ink dashboard inversion (used as the docs/light surface).
    ══════════════════════════════════════════════════════════════ */
 
-/* Fonts are loaded once from index.html. This prototype stylesheet must not
+/* Font loading stays local/system-only. This prototype stylesheet must not
    fetch Google Fonts itself; otherwise inactive theme imports multiply network
    requests on the default dashboard route. */
 

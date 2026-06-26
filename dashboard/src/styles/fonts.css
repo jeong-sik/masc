@@ -1,8 +1,8 @@
 /* Keeper-v2 brand fonts
  *
- * Keep only the small local display face on the hot dashboard path. Noto Sans
- * KR is loaded from the single index.html Google Fonts request as subsetted
- * WOFF2; the local TTF is 9.9MB and must not be pulled into the first screen.
+ * Keep only the small local display face on the hot dashboard path. Body text
+ * uses system/Pretendard/Noto fallback stacks; the local Noto Sans KR TTF is
+ * 9.9MB and must not be pulled into the first screen.
  */
 
 @font-face {

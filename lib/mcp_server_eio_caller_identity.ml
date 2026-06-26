@@ -86,8 +86,9 @@ let resolve_owner_keeper_identity config owner_name =
       a [`System_fallback] identity, or a cached ephemeral name).
     - [Resolved_external] — a name that did not originate in this
       process as a fallback (caller-supplied tool-domain [agent_name],
-      or a cached non-ephemeral name). Its transience is still decided
-      per the old [is_transient] rule. *)
+      or a cached non-ephemeral name). It must not be reclassified by
+      string shape, because that rewrites explicit generated aliases to
+      the bearer-token owner. *)
 type minted_name =
   | Stable of string
   | Ephemeral of string
@@ -139,20 +140,15 @@ let resolve_initial_agent_name ~identity ~cached_resolved_agent ~explicit_agent_
       reached these with [has_explicit = false] and they always matched
       [starts_with "agent-"] (the generated fallback) or were the
       laundered ephemeral origin. → [true].
-    - [Resolved_external s] — caller-supplied tool-domain [agent_name]
-      or a cached non-ephemeral name, reached with [has_explicit =
-      false]. The old transience test still applies: dictionary
-      nickname, OR the reserved ["agent-"] prefix. The
-      [String.starts_with] here is one arm of a total match over a
-      typed value (it guards the reserved-prefix edge — a tool-domain
-      [agent_name] argument that spells ["agent-…"]), not a standalone
-      classifier, so it cannot accrete new prefixes elsewhere. *)
+    - [Resolved_external _] — caller-supplied tool-domain [agent_name]
+      or a cached non-ephemeral name. Do not re-run the old string
+      classifier here; explicit generated aliases are still explicit
+      external identities and must not be silently rewritten by a bearer
+      token. *)
 let minted_name_is_transient = function
-  | Stable _ -> false
-  | Ephemeral _ -> true
-  | Resolved_external s ->
-      String.starts_with s ~prefix:"agent-"
-      || Nickname.is_dictionary_generated_nickname s
+| Stable _ -> false
+| Ephemeral _ -> true
+| Resolved_external _ -> false
 
 (** Apply the silent auth-token fallback, returning a re-tagged
     [minted_name].

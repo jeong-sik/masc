@@ -348,7 +348,7 @@ let test_calibration_stats_cross_model_mix () =
   let same_runtime =
     make_result ~runtime:"verifier" ~gen_runtime:"verifier" () in
   let cross_a =
-    make_result ~runtime:"verifier" ~gen_runtime:"generator-default" () in
+    make_result ~runtime:"verifier" ~gen_runtime:"default-runtime-fixture" () in
   let cross_b =
     make_result ~runtime:"cross_verifier" ~gen_runtime:"local_only" () in
   let no_generator = make_result ~runtime:"verifier" () in

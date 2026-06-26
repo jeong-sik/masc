@@ -302,58 +302,42 @@ let should_dual_write_local (config : config) =
   | FileSystem _ -> false
   | Memory _ -> true
 
-let write_json config path json =
-  match key_of_path config path with
-  | Some key ->
-      let content = json_to_pretty_utf8 json in
-      backend_set config ~key ~value:content
-      |> Result.iter_error (fun e ->
-           Log.Misc.warn "write_json backend_set failed for %s: %s" key (Backend_types.show_error e));
-      if should_dual_write_local config then
-        (* Keep a plaintext mirror for non-filesystem backends so local fallback reads stay fresh. *)
-        write_json_local path json
-        |> Result.iter_error (fun msg ->
-             Log.Misc.warn "write_json: local mirror write failed for %s: %s" path msg)
-  | None ->
-      write_json_local path json
-      |> Result.iter_error (fun msg ->
-           Log.Misc.warn "write_json: local write failed for %s: %s" path msg)
-
 let write_json_result config path json =
   match key_of_path config path with
   | Some key ->
       let content = json_to_pretty_utf8 json in
-      (match backend_set config ~key ~value:content with
-       | Error e ->
-           let msg =
-             Printf.sprintf
-               "write_json backend_set failed for %s: %s"
-               key
-               (Backend_types.show_error e)
-           in
-           Log.Misc.warn "%s" msg;
-           Error msg
-       | Ok () ->
-           if should_dual_write_local config then
-             match write_json_local path json with
-             | Ok () -> Ok ()
-             | Error msg ->
-                 let full =
-                   Printf.sprintf
-                     "write_json: local mirror write failed for %s: %s"
-                     path
-                     msg
-                 in
-                 Log.Misc.warn "%s" full;
-                 Error full
-           else Ok ())
-  | None -> (
-      match write_json_local path json with
-      | Ok () -> Ok ()
-      | Error msg ->
-          let full = Printf.sprintf "write_json: local write failed for %s: %s" path msg in
-          Log.Misc.warn "%s" full;
-          Error full)
+      let backend_result =
+        backend_set config ~key ~value:content
+        |> Result.map_error (fun e ->
+             Printf.sprintf "backend_set failed for %s: %s" key
+               (Backend_types.show_error e))
+      in
+      let mirror_result =
+        if should_dual_write_local config then
+          write_json_local path json
+          |> Result.map_error (fun msg ->
+               Printf.sprintf "local mirror write failed for %s: %s" path msg)
+        else Ok ()
+      in
+      (match backend_result, mirror_result with
+       | Ok (), Ok () -> Ok ()
+       | Error msg, Ok () | Ok (), Error msg -> Error msg
+       | Error backend_msg, Error mirror_msg ->
+           Error (backend_msg ^ "; " ^ mirror_msg))
+  | None ->
+      write_json_local path json
+      |> Result.map_error (fun msg ->
+           Printf.sprintf "local write failed for %s: %s" path msg)
+
+let write_json config path json =
+  match write_json_result config path json with
+  | Ok () -> ()
+  | Error msg ->
+      Log.Misc.warn "write_json failed for %s: %s"
+        (match key_of_path config path with
+         | Some key -> key
+         | None -> path)
+        msg
 
 let write_text_local path content =
   mkdir_p (Filename.dirname path);

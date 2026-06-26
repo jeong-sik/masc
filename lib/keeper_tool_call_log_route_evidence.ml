@@ -66,6 +66,37 @@ let descriptor_evidence_fields tool_name =
   | Some descriptor -> Keeper_tool_descriptor.route_evidence_json descriptor |> assoc_fields
 ;;
 
+let assoc_string_list_opt name json =
+  match Json_util.assoc_member_opt name json with
+  | None -> Some []
+  | Some (`List items) ->
+      let rec collect acc = function
+        | [] -> Some (List.rev acc)
+        | `String value :: rest -> collect (value :: acc) rest
+        | _ -> None
+      in
+      collect [] items
+  | Some _ -> None
+;;
+
+let redact_git_push_argv executable argv =
+  match executable, argv with
+  | "git", "push" :: "-u" :: "origin" :: _ref :: rest ->
+      "push" :: "-u" :: "origin" :: "[REDACTED]" :: rest
+  | _, _ -> argv
+;;
+
+let typed_exec_command input =
+  match Json_util.assoc_string_opt "executable" input with
+  | Some executable ->
+      (match assoc_string_list_opt "argv" input with
+       | Some argv ->
+           let argv = redact_git_push_argv executable argv in
+           Some (String.concat " " (executable :: argv))
+       | None -> None)
+  | None -> None
+;;
+
 let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_text =
   let route_text = route_text_for_evidence output_text in
   let parsed_output =
@@ -81,7 +112,10 @@ let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_tex
   let command =
     match Json_util.assoc_string_opt "cmd" input with
     | Some cmd -> Some cmd
-    | None -> Json_util.assoc_string_opt "op" input
+    | None -> (
+        match typed_exec_command input with
+        | Some _ as command -> command
+        | None -> Json_util.assoc_string_opt "op" input)
   in
   let add_string name value fields =
     match value with

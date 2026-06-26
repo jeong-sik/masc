@@ -467,6 +467,52 @@ let pending_board_event_of_fusion_completion
   }
 ;;
 
+let bg_job_completion_message = function
+  | Keeper_event_queue.Bg_ok output -> output
+  | Keeper_event_queue.Bg_failed reason -> reason
+;;
+
+(* RFC-0290: mirror the async-fusion delivery contract for generic background
+   jobs. A [Bg_completed] stimulus already means the background producer has
+   decided the job is finished; converting it here keeps the queue consumer from
+   silently dropping the result while still classifying the synthesized event as
+   observational data, not operator direction. *)
+let pending_board_event_of_bg_job_completion
+      ~(meta : keeper_meta)
+      ~(arrived_at : float)
+      (c : Keeper_event_queue.bg_job_completion)
+  : pending_board_event
+  =
+  let self_ids = self_ids meta in
+  let post_id = Keeper_event_queue.bg_job_completion_post_id c in
+  let kind = Keeper_event_queue.bg_job_kind_to_string c.bg_kind in
+  let title =
+    match c.bg_outcome with
+    | Keeper_event_queue.Bg_ok _ ->
+      Printf.sprintf "Background %s complete (run %s)" kind c.bg_run_id
+    | Keeper_event_queue.Bg_failed _ ->
+      Printf.sprintf "Background %s failed (run %s)" kind c.bg_run_id
+  in
+  { post_id
+  ; author = meta.name
+  ; title
+  ; preview =
+      short_preview
+        ~max_len:fusion_result_preview_max_len
+        (bg_job_completion_message c.bg_outcome)
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 0
+  ; latest_external_author = None
+  ; latest_external_preview = None
+  ; provenance = provenance_of ~self_ids Board.System_post ~author:meta.name
+  }
+;;
+
 let pending_board_event_of_stimulus
       ~continuity_summary
       ~(meta : keeper_meta)
@@ -483,11 +529,10 @@ let pending_board_event_of_stimulus
          (Board_signal.board_signal_of_board_stimulus ~post_id:stimulus.post_id bs))
   | Keeper_event_queue.Fusion_completed fc ->
     Some (pending_board_event_of_fusion_completion ~meta ~arrived_at:stimulus.arrived_at fc)
+  | Keeper_event_queue.Bg_completed c ->
+    Some
+      (pending_board_event_of_bg_job_completion ~meta ~arrived_at:stimulus.arrived_at c)
   | Keeper_event_queue.Bootstrap | Keeper_event_queue.No_progress_recovery -> None
-  | Keeper_event_queue.Bg_completed _ ->
-    (* RFC-0290 Phase 1: no producer emits Bg_completed yet; surfacing the bg
-       outcome as a pending_board_event lands with the executor in Phase 3. *)
-    None
 ;;
 
 (** Collect recent board activity using cursor-based tracking.

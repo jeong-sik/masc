@@ -8,18 +8,15 @@ type owner_keeper_identity = string * string option
 type minted_name =
   | Stable of string             (** Caller supplied [_agent_name]; stable identity. *)
   | Ephemeral of string          (** System-minted (own fallback / [`System_fallback] identity / cached ephemeral). *)
-  | Resolved_external of string  (** Tool-domain [agent_name] or cached non-ephemeral name; transience still per [is_transient]. *)
+  | Resolved_external of string  (** Tool-domain [agent_name] or cached non-ephemeral name; never token-rewritten by string shape. *)
 
 val minted_name_to_string : minted_name -> string
 
 val minted_name_is_transient : minted_name -> bool
 (** Total match deciding whether the silent auth-token fallback should
     fire (and, after re-tagging, the ephemerality cached for a session).
-    Reproduces the old
-    [String.starts_with name ~prefix:"agent-"
-     || Nickname.is_dictionary_generated_nickname name] with no
-    standalone classifier: [Stable -> false], [Ephemeral -> true],
-    [Resolved_external s -> starts_with "agent-" s || is_dict s]. *)
+    This is origin-based, not shape-based: [Stable -> false],
+    [Ephemeral -> true], [Resolved_external _ -> false]. *)
 
 type t = {
   agent_name : string;

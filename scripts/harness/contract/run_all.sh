@@ -18,7 +18,8 @@ STOP_WAIT_SEC="${STOP_WAIT_SEC:-10}"
 
 export MCP_URL="${MCP_URL:-http://127.0.0.1:${PORT}/mcp}"
 export MCP_TOKEN="${MCP_TOKEN:-}"
-export MCP_AGENT_NAME="${MCP_AGENT_NAME:-contract-harness-admin-${RANDOM:-0}-$$}"
+HARNESS_ADMIN_AGENT="${MASC_HARNESS_ADMIN_AGENT:-contract-harness-admin}"
+export MCP_AGENT_NAME="${MCP_AGENT_NAME:-$HARNESS_ADMIN_AGENT}"
 export CURL_RETRY_COUNT="${CURL_RETRY_COUNT:-12}"
 export CURL_RETRY_DELAY_SEC="${CURL_RETRY_DELAY_SEC:-1}"
 export CURL_TIMEOUT_SEC="${CURL_TIMEOUT_SEC:-80}"
@@ -154,7 +155,7 @@ harness_seed_server_config "$ROOT_DIR" "$BASE_PATH"
 
 if ! MCP_TOKEN="$(
   harness_mint_admin_token "$SERVER_EXE" "$PORT" "$BASE_PATH" \
-    "${MASC_HARNESS_ADMIN_AGENT:-contract-harness-admin}"
+    "$HARNESS_ADMIN_AGENT"
 )"; then
   echo "FAIL: failed to mint contract harness admin token" >&2
   exit 1

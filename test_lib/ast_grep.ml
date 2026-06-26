@@ -22,16 +22,16 @@ let parse_implementation path =
   match open_in path with
   | exception Sys_error msg -> Error msg
   | ic ->
-  let lexbuf = Lexing.from_channel ic in
-  Lexing.set_filename lexbuf path;
-  let result =
-    try Ok (Parse.implementation lexbuf) with
-    | Syntaxerr.Error _ as e ->
-      close_in ic;
-      Error (Printexc.to_string e)
-  in
-  close_in ic;
-  result
+    let lexbuf = Lexing.from_channel ic in
+    Lexing.set_filename lexbuf path;
+    let result =
+      try Ok (Parse.implementation lexbuf) with
+      | Syntaxerr.Error _ as e ->
+        close_in ic;
+        Error (Printexc.to_string e)
+    in
+    close_in ic;
+    result
 ;;
 
 (* Flatten Longident.t into "M.N.field" / "name". *)

@@ -165,6 +165,14 @@ let claim_task_tool = actor_bound_masc_workspace_tool
 let complete_task_tool = actor_bound_masc_workspace_tool
 let reset_tool = destructive_tool
 
+let hidden_runtime_tool reason meta =
+  {
+    meta with
+    visibility = Hidden;
+    allow_direct_call_when_hidden = true;
+    reason = Some reason;
+  }
+
 let static_mcp_context_tool_names =
   [ "masc_start"
   ; "masc_broadcast"
@@ -278,6 +286,18 @@ let explicit_metadata : (string * metadata) list =
     ("masc_run_list", read_state_tool);
     ("masc_run_init", broadcast_tool);
     ("masc_run_plan", broadcast_tool);
+    ( "keeper_tasks_list",
+      hidden_runtime_tool
+        "Keeper task-list runtime tool; callable but hidden from the public MCP schema surface."
+        read_state_tool );
+    ( "keeper_task_claim",
+      hidden_runtime_tool
+        "Keeper task-claim runtime tool; callable but hidden from the public MCP schema surface."
+        claim_task_tool );
+    ( "keeper_task_done",
+      hidden_runtime_tool
+        "Keeper task-completion runtime tool; callable but hidden from the public MCP schema surface."
+        complete_task_tool );
     ( "sidecar",
       {
         destructive_tool with

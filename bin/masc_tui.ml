@@ -309,68 +309,99 @@ let start_http_refresh state ~host ~port ~refresh_inflight =
         refresh_inflight := false
   end
 
+let board_detail_still_current state post_id =
+  match state.view, state.board_mode with
+  | Board, Board_read current -> String.equal current post_id
+  | _ -> false
+
 let apply_board_post_load state ~post_id = function
-  | Ok (post, comments) ->
-      state.board_mode <- Board_read post_id;
+  | Ok (post, comments) when board_detail_still_current state post_id ->
       state.board_error <- None;
       state.board_comments <- comments;
       state.board_posts <-
         post :: List.filter (fun p -> p.bp_id <> post_id) state.board_posts
+  | Ok _ -> ()
   | Error err ->
-      remember_surface_error state ~surface:"board"
-        ~current_error:state.board_error
-        ~set_error:(fun value -> state.board_error <- value)
-        err
+      if board_detail_still_current state post_id then
+        remember_surface_error state ~surface:"board"
+          ~current_error:state.board_error
+          ~set_error:(fun value -> state.board_error <- value)
+          err
+
+let same_inflight_post inflight post_id =
+  match inflight with
+  | Some current -> String.equal current post_id
+  | None -> false
 
 let start_board_post_refresh state ~host ~port ~post_id ~refresh_inflight =
-  if not !refresh_inflight then begin
-    refresh_inflight := true;
+  if not (same_inflight_post !refresh_inflight post_id) then begin
+    refresh_inflight := Some post_id;
+    let clear_inflight () =
+      if same_inflight_post !refresh_inflight post_id then refresh_inflight := None
+    in
     let run_refresh () =
       try
         apply_board_post_load state ~post_id
           (load_board_post ~host ~port ~post_id)
       with exn ->
-        remember_surface_error state ~surface:"board"
-          ~current_error:state.board_error
-          ~set_error:(fun value -> state.board_error <- value)
-          (Printf.sprintf "board post refresh failed: %s"
-             (Printexc.to_string exn))
+        if board_detail_still_current state post_id then
+          remember_surface_error state ~surface:"board"
+            ~current_error:state.board_error
+            ~set_error:(fun value -> state.board_error <- value)
+            (Printf.sprintf "board post refresh failed: %s"
+               (Printexc.to_string exn))
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
         Eio.Fiber.fork ~sw (fun () ->
-            run_refresh ();
-            refresh_inflight := false)
+            Fun.protect ~finally:clear_inflight run_refresh)
     | None ->
-        run_refresh ();
-        refresh_inflight := false
+        Fun.protect ~finally:clear_inflight run_refresh
   end
 
-let execute_approval_decision state approval decision =
-  let host = Env_config_core.masc_host () in
-  let port = state.port in
-  let decision_wire = approval_decision_wire decision in
-  match
-    Masc_tui_http.post_operator_confirm ~host ~port ~token:approval.ap_token
-      ~decision:decision_wire
-  with
+let apply_approval_decision_result state approval decision ~host ~port = function
   | Ok _ ->
-      state.pending_approval_action <- None;
       add_event state "system"
         (Printf.sprintf "%s: %s" (approval_decision_done decision)
            approval.ap_summary);
       apply_overview_load state (load_overview ~host ~port);
       state.approval_cursor <- 0
   | Error err ->
-      state.pending_approval_action <- None;
       add_event state "error"
         (Printf.sprintf "%s: %s" (approval_decision_failed decision) err)
 
+let start_approval_decision state approval decision ~action_inflight =
+  if !action_inflight then
+    add_event state "system" "Approval action already in progress"
+  else
+    let () = action_inflight := true in
+    let () = state.pending_approval_action <- None in
+    let host = Env_config_core.masc_host () in
+    let port = state.port in
+    let decision_wire = approval_decision_wire decision in
+    let clear_inflight () = action_inflight := false in
+    let run_action () =
+      try
+        Masc_tui_http.post_operator_confirm ~host ~port ~token:approval.ap_token
+          ~decision:decision_wire
+        |> apply_approval_decision_result state approval decision ~host ~port
+      with exn ->
+        add_event state "error"
+          (Printf.sprintf "%s: %s" (approval_decision_failed decision)
+             (Printexc.to_string exn))
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork ~sw (fun () ->
+            Fun.protect ~finally:clear_inflight run_action)
+    | None ->
+        Fun.protect ~finally:clear_inflight run_action
+
 (* TEL-OK: TUI-local confirmation gate emits user-visible events here; the
    operator confirmation endpoint owns durable approval telemetry. *)
-let handle_approval_decision state approval decision =
+let handle_approval_decision state approval decision ~action_inflight =
   if pending_approval_matches state.pending_approval_action approval decision then
-    execute_approval_decision state approval decision
+    start_approval_decision state approval decision ~action_inflight
   else begin
     state.pending_approval_action <-
       Some { paa_token = approval.ap_token; paa_decision = decision };
@@ -406,7 +437,8 @@ let main () =
   let host = Env_config_core.masc_host () in
   let port = state.port in
   let http_refresh_inflight = ref false in
-  let board_post_refresh_inflight = ref false in
+  let board_post_refresh_inflight = ref None in
+  let approval_action_inflight = ref false in
   start_http_refresh state ~host ~port ~refresh_inflight:http_refresh_inflight;
   add_event state "system" "TUI started";
 
@@ -428,7 +460,9 @@ let main () =
                  | None -> ()
                  | Some o ->
                      (match List.nth_opt o.ov_pending_confirms state.approval_cursor with
-                      | Some a -> handle_approval_decision state a Confirm
+                      | Some a ->
+                          handle_approval_decision state a Confirm
+                            ~action_inflight:approval_action_inflight
                       | None -> ()))
             | _ -> ())
        | Some "n" | Some "N" ->
@@ -438,7 +472,9 @@ let main () =
                  | None -> ()
                  | Some o ->
                      (match List.nth_opt o.ov_pending_confirms state.approval_cursor with
-                      | Some a -> handle_approval_decision state a Deny
+                      | Some a ->
+                          handle_approval_decision state a Deny
+                            ~action_inflight:approval_action_inflight
                       | None -> ()))
             | _ -> ())
        | Some "r" | Some "R" ->

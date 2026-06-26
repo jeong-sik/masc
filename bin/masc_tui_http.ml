@@ -40,6 +40,19 @@ let host_for_url host =
 let url_of ~(host : string) ~(port : int) ~(path : string) =
   Printf.sprintf "http://%s:%d%s" (host_for_url host) port path
 
+let is_unreserved_path_char = function
+  | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '-' | '.' | '_' | '~' -> true
+  | _ -> false
+
+let percent_encode_path_segment value =
+  let buf = Buffer.create (String.length value) in
+  String.iter
+    (fun c ->
+      if is_unreserved_path_char c then Buffer.add_char buf c
+      else Buffer.add_string buf (Printf.sprintf "%%%02X" (Char.code c)))
+    value;
+  Buffer.contents buf
+
 let raw_response ~status ~body = Printf.sprintf "HTTP/1.1 %d\r\n\r\n%s" status body
 
 let request_clock () = Eio_context.get_clock_opt ()
@@ -115,7 +128,10 @@ let fetch_board ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result 
 
 (** Fetch /api/v1/board/<postId> (post detail + comments). *)
 let fetch_board_post ~(host : string) ~(port : int) ~(post_id : string) : (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:(Printf.sprintf "/api/v1/board/%s?format=flat" (String.escaped post_id))
+  get_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/board/%s?format=flat"
+         (percent_encode_path_segment post_id))
 
 (** Fetch /api/v1/dashboard/planning (goals + rollup + task backlog). *)
 let fetch_dashboard_planning ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =

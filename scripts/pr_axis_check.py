@@ -110,7 +110,7 @@ def _combined_output(result: subprocess.CompletedProcess) -> str:
     return combined if combined else "<no output>"
 
 
-def _require_gh_auth_identity() -> None:
+def _require_gh_auth() -> None:
     _require_gh_cli()
     status = subprocess.run(
         ["gh", "auth", "status", "--hostname", "github.com"],
@@ -125,23 +125,9 @@ def _require_gh_auth_identity() -> None:
         )
         sys.exit(2)
 
-    user = subprocess.run(
-        ["gh", "api", "user", "--jq", ".login"],
-        capture_output=True,
-        text=True,
-    )
-    if user.returncode != 0:
-        print(
-            "gh credentials did not resolve a GitHub identity; refresh "
-            "token/login before running PR axis checks. Details: "
-            f"{_combined_output(user)}",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-
 
 def _require_gh_repo_read(owner: str, repo: str) -> None:
-    _require_gh_auth_identity()
+    _require_gh_auth()
     repo_slug = f"{owner}/{repo}"
     repo_check = subprocess.run(
         ["gh", "api", f"repos/{repo_slug}", "--jq", ".full_name"],

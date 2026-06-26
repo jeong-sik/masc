@@ -14,9 +14,8 @@ gh_preflight_require_cli() {
   command -v gh >/dev/null 2>&1 || gh_preflight_die "GitHub CLI 'gh' is required"
 }
 
-gh_preflight_check_auth_identity() {
+gh_preflight_check_auth() {
   local status_output
-  local user_output
 
   if ! command -v gh >/dev/null 2>&1; then
     echo "GitHub CLI 'gh' is required" >&2
@@ -27,15 +26,10 @@ gh_preflight_check_auth_identity() {
     echo "gh auth is not usable for github.com; refresh credentials before running PR audit. Details: ${status_output}" >&2
     return 2
   fi
-
-  if ! user_output="$(gh api user --jq .login 2>&1)"; then
-    echo "gh credentials did not resolve a GitHub identity; refresh token/login before running PR audit. Details: ${user_output}" >&2
-    return 2
-  fi
 }
 
-gh_preflight_require_auth_identity() {
-  gh_preflight_check_auth_identity || exit 2
+gh_preflight_require_auth() {
+  gh_preflight_check_auth || exit 2
 }
 
 gh_preflight_check_repo_read() {
@@ -47,7 +41,7 @@ gh_preflight_check_repo_read() {
     return 2
   fi
 
-  gh_preflight_check_auth_identity || return 2
+  gh_preflight_check_auth || return 2
 
   if ! repo_output="$(gh api "repos/$repo" --jq .full_name 2>&1)"; then
     echo "gh credentials are authenticated but cannot read repo ${repo}; check token repository permissions before PR audit. Details: ${repo_output}" >&2

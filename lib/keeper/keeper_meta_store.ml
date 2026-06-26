@@ -30,7 +30,7 @@ let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string)
     match Safe_ops.read_json_file_safe path with
     | Error e -> Error e
     | Ok json ->
-      let json, (_scrubbed : bool) = scrub_persisted_keeper_meta_json ~path json in
+      let json = drop_assoc_keys config_field_names json in
       warn_unknown_keeper_meta_keys ~path json;
       (match meta_of_json json with
        | Ok meta -> Ok (Some meta)

@@ -74,7 +74,7 @@ let test_counter_ticks_on_genuine_unknown_key () =
     true
     (after > before)
 
-let test_legacy_toml_owned_meta_keys_are_scrubbed_before_warn () =
+let test_legacy_toml_owned_meta_keys_are_ignored_before_warn () =
   let path = Filename.temp_file "masc-legacy-keeper-meta-" ".json" in
   Fun.protect
     ~finally:(fun () ->
@@ -102,13 +102,13 @@ let test_legacy_toml_owned_meta_keys_are_scrubbed_before_warn () =
         before
         after;
       match Safe_ops.read_json_file_safe path with
-      | Error err -> Alcotest.fail ("failed to reload scrubbed meta: " ^ err)
+      | Error err -> Alcotest.fail ("failed to reload keeper meta: " ^ err)
       | Ok (`Assoc fields) ->
         Alcotest.(check bool)
-          "legacy multimodal_policy removed from persisted meta"
-          false
+          "read path does not rewrite persisted legacy meta"
+          true
           (List.mem_assoc "multimodal_policy" fields)
-      | Ok _ -> Alcotest.fail "scrubbed keeper meta must remain a JSON object")
+      | Ok _ -> Alcotest.fail "keeper meta must remain a JSON object")
 
 let fresh_tmpdir () =
   let path = Filename.temp_file "masc-progress-refresh-" ".tmp" in
@@ -159,9 +159,9 @@ let () =
             `Quick
             test_counter_ticks_on_genuine_unknown_key
         ; Alcotest.test_case
-            "legacy TOML-owned keys are scrubbed before warning"
+            "legacy TOML-owned keys are ignored before warning"
             `Quick
-            test_legacy_toml_owned_meta_keys_are_scrubbed_before_warn
+            test_legacy_toml_owned_meta_keys_are_ignored_before_warn
         ; Alcotest.test_case
             "progress Updated-line refresh failure is observable"
             `Quick

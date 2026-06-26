@@ -95,7 +95,7 @@ let repository_fixture ~id ~name ~url ~local_path : Repo_manager_types.repositor
   ; updated_at = 0L
   }
 
-let playground_repo_path ~config ~(meta : Keeper_meta_contract.keeper_meta)
+let playground_repo_path ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta)
       repo_name =
   let playground = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
   Filename.concat playground (Filename.concat "repos" repo_name)

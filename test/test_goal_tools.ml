@@ -51,15 +51,10 @@ let parse_json_result (result : Tool_result.result) =
   else Alcotest.fail ((Tool_result.message result))
 ;;
 
-let principal_json ?display_name ~id =
-  let fields =
-    ("id", `String id)
-    ::
-    (match display_name with
-     | None -> []
-     | Some display_name -> [ "display_name", `String display_name ])
-  in
-  `Assoc fields
+let principal_json ~id = `Assoc [ "id", `String id ]
+
+let principal_json_with_display_name ~id ~display_name =
+  `Assoc [ "id", `String id; "display_name", `String display_name ]
 ;;
 
 let get_string_field json field =
@@ -820,7 +815,9 @@ let test_goal_principal_display_name_canonicalized () =
             [ "goal_id", `String goal.id
             ; "action", `String "request_complete"
             ; ( "actor"
-              , principal_json ~id:"planner" ~display_name:forged_actor_label )
+              , principal_json_with_display_name
+                  ~id:"planner"
+                  ~display_name:forged_actor_label )
             ])
   in
   let transitioned_json =
@@ -857,7 +854,9 @@ let test_goal_principal_display_name_canonicalized () =
             [ "goal_id", `String goal.id
             ; "request_id", `String request_id
             ; ( "principal"
-              , principal_json ~id:"agent-alpha" ~display_name:forged_vote_label )
+              , principal_json_with_display_name
+                  ~id:"agent-alpha"
+                  ~display_name:forged_vote_label )
             ; "decision", `String "approve"
             ])
   in

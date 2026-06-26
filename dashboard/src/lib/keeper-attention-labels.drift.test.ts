@@ -73,6 +73,29 @@ function dispositionActions(): string[] {
     .filter((token): token is string => token !== undefined)
 }
 
+function executionReceiptAttentionReasons(): string[] {
+  const src = read('lib/keeper/keeper_execution_receipt.ml')
+  const start = src.indexOf('let operator_disposition_reason_to_string = function')
+  expect(
+    start,
+    'operator_disposition_reason_to_string present in keeper_execution_receipt.ml',
+  ).toBeGreaterThan(-1)
+  const body = src.slice(start, src.indexOf(';;', start))
+  return [...body.matchAll(/-> "([a-z_]+)"/g)]
+    .map((m) => m[1])
+    .filter((token): token is string => token !== undefined)
+}
+
+// keeper_runtime_trust_snapshot.ml only promotes receipt disposition reasons to
+// `attention_reason` when the derived display disposition needs attention.
+// These receipt reasons are tied to pass/skipped dispositions and should stay
+// out of the attention label union unless the backend changes that contract.
+const EXECUTION_RECEIPT_PASS_ONLY_REASONS: ReadonlySet<string> = new Set([
+  'healthy',
+  'runtime_fallback',
+  'phase_skipped',
+])
+
 describe('keeper attention vocabulary drift guard', () => {
   it('extracts a non-empty backend vocabulary (guard self-check)', () => {
     // If extraction silently returns nothing, the coverage assertions below
@@ -80,6 +103,7 @@ describe('keeper attention vocabulary drift guard', () => {
     expect(statusBridgePairs().length).toBeGreaterThan(4)
     expect(statusBridgeStandaloneActions().length).toBeGreaterThan(0)
     expect(dispositionActions().length).toBeGreaterThan(2)
+    expect(executionReceiptAttentionReasons().length).toBeGreaterThan(4)
   })
 
   it('every keeper_status_bridge attention_reason has a frontend label', () => {
@@ -111,5 +135,16 @@ describe('keeper attention vocabulary drift guard', () => {
       (action) => !isNextHumanAction(action),
     )
     expect(missing, `next_action codes emitted by the backend with no union arm: ${missing.join(', ')}`).toEqual([])
+  })
+
+  it('every dashboard attention-worthy execution receipt reason has a frontend label', () => {
+    const attentionWorthy = executionReceiptAttentionReasons().filter(
+      (reason) => !EXECUTION_RECEIPT_PASS_ONLY_REASONS.has(reason),
+    )
+    const missing = [...new Set(attentionWorthy)].filter((reason) => !isAttentionReason(reason))
+    expect(
+      missing,
+      `execution receipt attention_reason codes with no union arm: ${missing.join(', ')}`,
+    ).toEqual([])
   })
 })

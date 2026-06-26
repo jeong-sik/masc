@@ -66,7 +66,6 @@ describe('KeeperRuntimeAlertStrip', () => {
   it.each([
     'completion_contract_violation',
     'fsm_invariant',
-    'runtime_exhausted',
   ])('folds trust runtime-failure token %s to the coarse runtime_blocked copy', (reason) => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
       keeper: keeper({
@@ -77,6 +76,26 @@ describe('KeeperRuntimeAlertStrip', () => {
 
     const text = container.textContent ?? ''
     expect(text).toContain('런타임 근거 확인 필요')
+    expect(text).not.toContain(reason)
+  })
+
+  it.each([
+    ['runtime_exhausted', '런타임 후보 소진'],
+    ['completion_contract_unsatisfied', '완료 계약 미충족'],
+    ['tool_route_recoverable_failure', '도구 라우팅 복구 가능 실패'],
+    ['turn_livelock_blocked', '턴 livelock 차단'],
+    ['unmapped_runtime_state', '매핑되지 않은 runtime 상태'],
+    ['transient_runtime_retry', '일시적 런타임 재시도'],
+  ])('labels receipt-derived attention reason %s distinctly', (reason, label) => {
+    const { container } = render(h(KeeperRuntimeAlertStrip, {
+      keeper: keeper({
+        needs_attention: true,
+        attention_reason: reason,
+      }),
+    }))
+
+    const text = container.textContent ?? ''
+    expect(text).toContain(label)
     expect(text).not.toContain(reason)
   })
 

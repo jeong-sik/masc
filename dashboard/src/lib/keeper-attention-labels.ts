@@ -44,6 +44,8 @@ function warnUnknownAttentionToken(kind: 'attention_reason' | 'next_human_action
 //      fiber_unresolved, runtime_blocked)
 //   - lib/keeper_runtime/keeper_fd_pressure.ml ('fd_pressure')
 //   - lib/dashboard/dashboard_goals.ml ('runtime_trust_snapshot_unavailable')
+//   - lib/keeper/keeper_execution_receipt.ml operator disposition reasons that
+//     can become trust attention_reason via keeper_runtime_trust_snapshot.ml
 export const ATTENTION_REASONS = [
   'approval_pending',
   'continue_gate_required',
@@ -55,6 +57,17 @@ export const ATTENTION_REASONS = [
   'runtime_blocked',
   'runtime_trust_snapshot_unavailable',
   'fd_pressure',
+  'runtime_exhausted',
+  'preflight_config_error',
+  'degraded_retry',
+  'transient_runtime_retry',
+  'internal_error',
+  'tool_route_recoverable_failure',
+  'completion_contract_unsatisfied',
+  'turn_budget_exhausted',
+  'turn_livelock_blocked',
+  'cancelled',
+  'unmapped_runtime_state',
 ] as const
 export type AttentionReason = typeof ATTENTION_REASONS[number]
 
@@ -69,23 +82,31 @@ const ATTENTION_REASON_LABELS: Record<AttentionReason, string> = {
   runtime_blocked: '런타임 근거 확인 필요',
   runtime_trust_snapshot_unavailable: '런타임 신뢰 스냅샷 없음',
   fd_pressure: 'FD 임계치 초과',
+  runtime_exhausted: '런타임 후보 소진',
+  preflight_config_error: '실행 전 설정 오류',
+  degraded_retry: '저하 상태 재시도',
+  transient_runtime_retry: '일시적 런타임 재시도',
+  internal_error: '내부 오류',
+  tool_route_recoverable_failure: '도구 라우팅 복구 가능 실패',
+  completion_contract_unsatisfied: '완료 계약 미충족',
+  turn_budget_exhausted: '턴 예산 소진',
+  turn_livelock_blocked: '턴 livelock 차단',
+  cancelled: '취소됨',
+  unmapped_runtime_state: '매핑되지 않은 runtime 상태',
 }
 
 // keeper_runtime_trust_snapshot.ml emits a SEPARATE, larger attention_reason
-// vocabulary on the trust path (fsm_invariant, runtime_exhausted,
-// sandbox_violation, completion_contract_violation, the composite
+// vocabulary on the trust path (fsm_invariant, sandbox_violation,
+// completion_contract_violation, the composite
 // `completion_contract_result:<reason>`, …) than the keeper_status_bridge
-// needs_attention set this union mirrors. The known non-composite trust
+// needs_attention set this union started from. The known non-receipt trust
 // runtime-failure tokens fold to the coarse `runtime_blocked` bucket so the
 // detail strip shows a label instead of a raw token. This fold is deliberately
 // scoped to that enumerated trust set — the first-class status_bridge reasons
-// (runtime_attempts_exhausted, fiber_unresolved, stale_turn_timeout) are NOT
-// folded and keep their own labels.
+// and receipt-derived reasons above keep their own labels.
 const TRUST_RUNTIME_FAILURE_ALIASES: ReadonlySet<string> = new Set([
   'completion_contract_violation',
-  'completion_contract_unsatisfied',
   'fsm_invariant',
-  'runtime_exhausted',
   'no_capable_provider',
   'sandbox_violation',
   'critical_block',

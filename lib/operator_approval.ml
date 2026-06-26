@@ -6,12 +6,19 @@
     @since OAS integration Phase F *)
 
 let high_risk_actions =
-  [ "namespace_pause"; "keeper_recover" ]
+  [ "namespace_pause"; "keeper_recover"; Operator_action_constants.goal_completion_decision ]
 
 let allowed_actions =
-  [ "broadcast"; "namespace_pause"; "namespace_resume"; "social_sweep";
-    "keeper_message"; "keeper_probe"; "keeper_recover";
-    "task_inject" ]
+  [ "broadcast"
+  ; "namespace_pause"
+  ; "namespace_resume"
+  ; "social_sweep"
+  ; "keeper_message"
+  ; "keeper_probe"
+  ; "keeper_recover"
+  ; "task_inject"
+  ; Operator_action_constants.goal_completion_decision
+  ]
 
 let risk_of_action action_type : Agent_sdk.Approval.risk_level =
   if List.mem action_type high_risk_actions then High

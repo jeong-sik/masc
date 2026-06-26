@@ -17,6 +17,19 @@ open Masc_domain
     to avoid dependency on Activity_graph from workspace sub-modules. *)
 type activity_entity = { kind: string; id: string }
 
+type operator_pending_confirm_request =
+  { token : string
+  ; trace_id : string
+  ; actor : string
+  ; action_type : string
+  ; target_type : string
+  ; target_id : string option
+  ; payload : Yojson.Safe.t
+  ; delegated_tool : string
+  ; created_at : string
+  ; expires_at : string option
+  }
+
 (* ============================================ *)
 (* Callback refs (migrated from workspace_gc.ml)     *)
 (* ============================================ *)
@@ -140,6 +153,26 @@ let cleanup_board_artifacts_fn
 let on_task_mutation_fn
   : (unit -> unit) Atomic.t
   = Atomic.make (fun () -> ())
+
+let operator_pending_confirm_trace_id_fn
+  : (string -> string) Atomic.t
+  =
+  Atomic.make (fun prefix -> prefix ^ "_unwired")
+
+let operator_pending_confirm_upsert_fn
+  : (Workspace_utils_backend_setup.config ->
+     operator_pending_confirm_request ->
+     (unit, string) result)
+      Atomic.t
+  =
+  Atomic.make
+    (fun _config _entry ->
+      Error "operator pending-confirm callback is not connected")
+
+let operator_pending_confirm_remove_fn
+  : (Workspace_utils_backend_setup.config -> string -> unit) Atomic.t
+  =
+  Atomic.make (fun _config _token -> ())
 
 
 (** Auto-subscribe agent to messages on session binding — wraps Subscriptions.SubscriptionStore. *)

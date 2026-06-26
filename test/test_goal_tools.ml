@@ -45,6 +45,56 @@ let workspace_ctx ?(agent_name = "planner") config : Tool_workspace.context =
   { Tool_workspace.config; agent_name }
 ;;
 
+let operator_ctx env sw config agent_name : _ Operator_control.context =
+  { config
+  ; agent_name
+  ; sw
+  ; clock = Eio.Stdenv.clock env
+  ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+  ; net = Some (Eio.Stdenv.net env)
+  ; mcp_session_id = None
+  }
+;;
+
+let with_operator_pending_confirm_hooks f =
+  let previous_trace = Atomic.get Workspace_hooks.operator_pending_confirm_trace_id_fn in
+  let previous_upsert = Atomic.get Workspace_hooks.operator_pending_confirm_upsert_fn in
+  let previous_remove =
+    Atomic.get Workspace_hooks.operator_pending_confirm_remove_fn
+  in
+  Atomic.set
+    Workspace_hooks.operator_pending_confirm_trace_id_fn
+    Operator_pending_confirm.trace_id;
+  Atomic.set
+    Workspace_hooks.operator_pending_confirm_upsert_fn
+    (fun config (entry : Workspace_hooks.operator_pending_confirm_request) ->
+       Operator_pending_confirm.upsert_pending_confirm
+         config
+         { token = entry.token
+         ; trace_id = entry.trace_id
+         ; actor = entry.actor
+         ; action_type = entry.action_type
+         ; target_type = entry.target_type
+         ; target_id = entry.target_id
+         ; payload = entry.payload
+         ; delegated_tool = entry.delegated_tool
+         ; created_at = entry.created_at
+         ; expires_at = entry.expires_at
+         };
+       Ok ());
+  Atomic.set
+    Workspace_hooks.operator_pending_confirm_remove_fn
+    Operator_pending_confirm.remove_pending_confirm;
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.operator_pending_confirm_trace_id_fn previous_trace;
+      Atomic.set Workspace_hooks.operator_pending_confirm_upsert_fn previous_upsert;
+      Atomic.set
+        Workspace_hooks.operator_pending_confirm_remove_fn
+        previous_remove)
+    f
+;;
+
 let parse_json_result (result : Tool_result.result) =
   if (Tool_result.is_success result)
   then Yojson.Safe.from_string ((Tool_result.message result))
@@ -695,6 +745,8 @@ let test_goal_transition_manual_reject_blocks_and_cancels_request () =
 ;;
 
 let test_goal_transition_approval_gate () =
+  with_operator_pending_confirm_hooks
+  @@ fun () ->
   with_workspace
   @@ fun config ->
   let verifier_policy =
@@ -716,6 +768,7 @@ let test_goal_transition_approval_gate () =
     | Ok payload -> payload
     | Error msg -> fail msg
   in
+  seed_goal_operator config ~agent_name:"operator";
   create_done_task config ~goal_id:goal.id ~title:"Approval done task";
   let transitioned =
     Tool_workspace.dispatch
@@ -762,7 +815,25 @@ let test_goal_transition_approval_gate () =
     (verified_json
      |> Yojson.Safe.Util.member "goal"
      |> fun json -> get_string_field json "phase");
-  seed_goal_operator config ~agent_name:"operator";
+  let pending_confirms = Operator_pending_confirm.read_pending_confirms config in
+  check int "approval request persisted" 1 (List.length pending_confirms);
+  let pending_confirm =
+    match pending_confirms with
+    | [ entry ] -> entry
+    | _ -> fail "expected one persisted goal approval request"
+  in
+  check string "approval action type" Operator_action_constants.goal_completion_decision
+    pending_confirm.action_type;
+  check string "approval target type" Operator_action_constants.goal_target_type
+    pending_confirm.target_type;
+  check (option string) "approval target id" (Some goal.id) pending_confirm.target_id;
+  check string "approval delegated tool" Operator_action_constants.goal_transition_tool
+    pending_confirm.delegated_tool;
+  check string "approval actor" "operator" pending_confirm.actor;
+  check string "approval request id in payload" request_id
+    (pending_confirm.payload
+     |> Yojson.Safe.Util.member "request_id"
+     |> Yojson.Safe.Util.to_string);
   let approved =
     Tool_workspace.dispatch
       (workspace_ctx ~agent_name:"operator" config)
@@ -785,7 +856,159 @@ let test_goal_transition_approval_gate () =
     "completed"
     (approved_json
      |> Yojson.Safe.Util.member "goal"
-     |> fun json -> get_string_field json "phase")
+     |> fun json -> get_string_field json "phase");
+  check
+    int
+    "approval request cleared"
+    0
+    (List.length (Operator_pending_confirm.read_pending_confirms config))
+;;
+
+let with_goal_awaiting_completion_approval ~title f =
+  with_operator_pending_confirm_hooks
+  @@ fun () ->
+  with_workspace
+  @@ fun config ->
+  let verifier_policy =
+    { Goal_verification.inherit_mode = Goal_verification.Extend
+    ; principals =
+        [ { id = "agent-alpha"; display_name = Some "agent-alpha" } ]
+    ; required_verdicts = Some 1
+    }
+  in
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal
+        config
+        ~title
+        ~verifier_policy
+        ~require_completion_approval:true
+        ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  seed_goal_operator config ~agent_name:"operator";
+  create_done_task config ~goal_id:goal.id ~title:(title ^ " done task");
+  let transitioned =
+    Tool_workspace.dispatch
+      (workspace_ctx config)
+      ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "action", `String "request_complete"
+            ; "actor", principal_json ~id:"planner"
+            ])
+  in
+  let transitioned_json =
+    match transitioned with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_transition not handled"
+  in
+  let request_id =
+    transitioned_json
+    |> Yojson.Safe.Util.member "verification_request"
+    |> fun json -> get_string_field json "id"
+  in
+  let verified =
+    Tool_workspace.dispatch
+      (workspace_ctx ~agent_name:"agent-alpha" config)
+      ~name:"masc_goal_verify"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "request_id", `String request_id
+            ; "principal", principal_json ~id:"agent-alpha"
+            ; "decision", `String "approve"
+            ])
+  in
+  let verified_json =
+    match verified with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_verify not handled"
+  in
+  check
+    string
+    "fixture phase moved to awaiting_approval"
+    "awaiting_approval"
+    (verified_json
+     |> Yojson.Safe.Util.member "goal"
+     |> fun json -> get_string_field json "phase");
+  check
+    int
+    "fixture approval request persisted"
+    1
+    (List.length (Operator_pending_confirm.read_pending_confirms config));
+  f config goal
+;;
+
+let test_goal_approval_reject_clears_pending_confirm () =
+  with_goal_awaiting_completion_approval
+    ~title:"Reject approval cleanup"
+    (fun config goal ->
+       let rejected =
+         Tool_workspace.dispatch
+           (workspace_ctx ~agent_name:"operator" config)
+           ~name:"masc_goal_transition"
+           ~args:
+             (`Assoc
+                 [ "goal_id", `String goal.id
+                 ; "action", `String "reject_completion"
+                 ; "actor", principal_json ~id:"operator"
+                 ])
+       in
+       let rejected_json =
+         match rejected with
+         | Some result -> parse_json_result result
+         | None -> fail "masc_goal_transition not handled"
+       in
+       check
+         string
+         "reject_completion moves to blocked"
+         "blocked"
+         (rejected_json
+          |> Yojson.Safe.Util.member "goal"
+          |> fun json -> get_string_field json "phase");
+       check
+         int
+         "reject_completion clears approval request"
+         0
+         (List.length (Operator_pending_confirm.read_pending_confirms config)))
+;;
+
+let test_goal_approval_drop_clears_pending_confirm () =
+  with_goal_awaiting_completion_approval
+    ~title:"Drop approval cleanup"
+    (fun config goal ->
+       let dropped =
+         Tool_workspace.dispatch
+           (workspace_ctx ~agent_name:"operator" config)
+           ~name:"masc_goal_transition"
+           ~args:
+             (`Assoc
+                 [ "goal_id", `String goal.id
+                 ; "action", `String "drop"
+                 ; "actor", principal_json ~id:"operator"
+                 ])
+       in
+       let dropped_json =
+         match dropped with
+         | Some result -> parse_json_result result
+         | None -> fail "masc_goal_transition not handled"
+       in
+       check
+         string
+         "drop moves to dropped"
+         "dropped"
+         (dropped_json
+          |> Yojson.Safe.Util.member "goal"
+          |> fun json -> get_string_field json "phase");
+       check
+         int
+         "drop clears approval request"
+         0
+         (List.length (Operator_pending_confirm.read_pending_confirms config)))
 ;;
 
 let test_goal_principal_display_name_canonicalized () =
@@ -1427,6 +1650,72 @@ let test_completion_approval_requires_operator_caller () =
     (Goal_phase.to_string saved_goal.phase)
 ;;
 
+let test_goal_approval_operator_action_registered () =
+  check bool "allowed action" true
+    (Operator_approval.is_allowed Operator_action_constants.goal_completion_decision);
+  check bool "confirm required" true
+    (Operator_approval.confirm_required Operator_action_constants.goal_completion_decision);
+  let action =
+    List.find_opt
+      (fun (action : Operator_pending_confirm.available_action) ->
+         String.equal
+           action.action_type
+           Operator_action_constants.goal_completion_decision)
+      Operator_pending_confirm.available_actions
+  in
+  match action with
+  | None ->
+    fail
+      (Operator_action_constants.goal_completion_decision
+       ^ " missing from available actions")
+  | Some action ->
+    check string "tool" Operator_action_constants.goal_transition_tool action.tool_name;
+    check string "target type" Operator_action_constants.goal_target_type action.target_type;
+    check bool "registry confirm required" true action.confirm_required
+;;
+
+let test_operator_goal_decision_requires_explicit_decision () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run
+  @@ fun sw ->
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+       let config = Workspace.default_config dir in
+       ignore (Workspace.init config ~agent_name:(Some "operator"));
+       let ctx = operator_ctx env sw config "operator" in
+       let assert_rejected ~token payload =
+         Operator_pending_confirm.upsert_pending_confirm
+           config
+           { token
+           ; trace_id = "goal_missing_decision"
+           ; actor = "operator"
+           ; action_type = Operator_action_constants.goal_completion_decision
+           ; target_type = Operator_action_constants.goal_target_type
+           ; target_id = Some "goal-1"
+           ; payload
+           ; delegated_tool = Operator_action_constants.goal_transition_tool
+           ; created_at = Masc_domain.now_iso ()
+           ; expires_at = None
+           };
+         match
+           Operator_control.confirm_json
+             ctx
+             (`Assoc
+                 [ "actor", `String "operator"; "confirm_token", `String token ])
+         with
+         | Ok _ -> fail "goal decision without explicit decision should reject"
+         | Error msg -> check string "decision rejection" "payload.decision is required" msg
+       in
+       assert_rejected ~token:"missing-decision" (`Assoc []);
+       assert_rejected
+         ~token:"blank-decision"
+         (`Assoc [ "decision", `String "  " ]))
+;;
+
 let () =
   run
     "goal_tools"
@@ -1470,6 +1759,14 @@ let () =
             `Quick
             test_goal_transition_manual_reject_blocks_and_cancels_request
         ; test_case "approval gate" `Quick test_goal_transition_approval_gate
+        ; test_case
+            "approval reject clears pending confirm"
+            `Quick
+            test_goal_approval_reject_clears_pending_confirm
+        ; test_case
+            "approval drop clears pending confirm"
+            `Quick
+            test_goal_approval_drop_clears_pending_confirm
         ; test_case
             "principal display labels are canonicalized"
             `Quick
@@ -1518,6 +1815,14 @@ let () =
             "approval requires operator caller"
             `Quick
             test_completion_approval_requires_operator_caller
+        ; test_case
+            "approval operator action registered"
+            `Quick
+            test_goal_approval_operator_action_registered
+        ; test_case
+            "operator goal decision requires explicit decision"
+            `Quick
+            test_operator_goal_decision_requires_explicit_decision
         ] )
     ]
 ;;

@@ -396,6 +396,29 @@ let () =
           ~disagreement_with_truth ~generated_at ~generated_at_unix ~fresh_until
           ~fresh_until_unix ~keeper_name ()
       ));
+  Atomic.set
+    Workspace_hooks.operator_pending_confirm_trace_id_fn
+    Operator_pending_confirm.trace_id;
+  Atomic.set
+    Workspace_hooks.operator_pending_confirm_upsert_fn
+    (fun config (entry : Workspace_hooks.operator_pending_confirm_request) ->
+       Operator_pending_confirm.upsert_pending_confirm
+         config
+         { token = entry.token
+         ; trace_id = entry.trace_id
+         ; actor = entry.actor
+         ; action_type = entry.action_type
+         ; target_type = entry.target_type
+         ; target_id = entry.target_id
+         ; payload = entry.payload
+         ; delegated_tool = entry.delegated_tool
+         ; created_at = entry.created_at
+         ; expires_at = entry.expires_at
+         };
+       Ok ());
+  Atomic.set
+    Workspace_hooks.operator_pending_confirm_remove_fn
+    Operator_pending_confirm.remove_pending_confirm;
   Keeper_turn_lifecycle.register_remove_pending_confirms_by_target
     Operator_pending_confirm.remove_pending_confirms_by_target
 ;;

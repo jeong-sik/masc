@@ -110,14 +110,17 @@ let normalize_action_target_type target_type =
   let normalized = String.trim target_type |> String.lowercase_ascii in
   if Operator_digest_types.is_root_target_type normalized then Ok "workspace"
   else match normalized with
-  | "keeper" as value -> Ok value
+  | "keeper" -> Ok "keeper"
+  | value when String.equal value Operator_action_constants.goal_target_type -> Ok value
   | "" -> Ok ""
-  | _ -> Error "target_type must be root or keeper"
+  | _ -> Error "target_type must be root, keeper, or goal"
 
 let default_target_type_for action_type =
   match action_type with
   | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" | "social_sweep"
     -> "workspace"
+  | action when String.equal action Operator_action_constants.goal_completion_decision ->
+    Operator_action_constants.goal_target_type
   | "keeper_message" | "keeper_probe" | "keeper_recover" -> "keeper"
   | _ -> ""
 

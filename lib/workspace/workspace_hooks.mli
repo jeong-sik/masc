@@ -9,6 +9,20 @@
 open Masc_domain
 
 type activity_entity = { kind: string; id: string }
+
+type operator_pending_confirm_request = {
+  token : string;
+  trace_id : string;
+  actor : string;
+  action_type : string;
+  target_type : string;
+  target_id : string option;
+  payload : Yojson.Safe.t;
+  delegated_tool : string;
+  created_at : string;
+  expires_at : string option;
+}
+
 type agent_lifecycle_event =
   | Session_bound
   | Session_rebound
@@ -51,6 +65,18 @@ val observe_task_transition_fn : (Workspace_utils_backend_setup.config ->
            Atomic.t
 val cleanup_board_artifacts_fn : (unit -> int) Atomic.t
 val on_task_mutation_fn : (unit -> unit) Atomic.t
+
+val operator_pending_confirm_trace_id_fn : (string -> string) Atomic.t
+
+val operator_pending_confirm_upsert_fn :
+  (Workspace_utils_backend_setup.config ->
+   operator_pending_confirm_request ->
+   (unit, string) result)
+    Atomic.t
+
+val operator_pending_confirm_remove_fn :
+  (Workspace_utils_backend_setup.config -> string -> unit) Atomic.t
+
 val subscribe_messages_fn : (subscriber:string -> unit) Atomic.t
 val fsm_drift_observer_fn : (variant:string -> force:bool -> agent_name:string -> unit)
            Atomic.t

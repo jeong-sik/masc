@@ -243,6 +243,11 @@ let available_actions : available_action list =
     make_available_action ~action_type:"task_inject" ~tool_name:"masc_add_task"
       ~target_type:"workspace"
       ~description:"Inject a backlog task into the namespace.";
+    make_available_action
+      ~action_type:Operator_action_constants.goal_completion_decision
+      ~tool_name:Operator_action_constants.goal_transition_tool
+      ~target_type:Operator_action_constants.goal_target_type
+      ~description:"Approve or reject a goal completion approval gate.";
     make_available_action ~action_type:"keeper_message" ~tool_name:"masc_keeper_msg"
       ~target_type:"keeper"
       ~description:"Send a direct operator message to a keeper.";

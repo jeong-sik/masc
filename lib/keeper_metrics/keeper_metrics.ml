@@ -167,6 +167,7 @@ type t =
   | ChatStoreFailures
   | ChatTransportFailures
   | PersonNoteStoreFailures
+  | KeeperMaterializationFailures
   | ObservationQueryFailures
   | OasOnStop
   | OasOnIdleEscalated
@@ -412,6 +413,7 @@ let to_string = function
   | ChatStoreFailures -> "masc_keeper_chat_store_failures_total"
   | ChatTransportFailures -> "masc_keeper_chat_transport_failures_total"
   | PersonNoteStoreFailures -> "masc_keeper_person_note_store_failures_total"
+  | KeeperMaterializationFailures -> "masc_keeper_materialization_failures_total"
   | ObservationQueryFailures -> "masc_keeper_observation_query_failures_total"
   | OasOnStop -> "masc_keeper_oas_on_stop_total"
   | OasOnIdleEscalated -> "masc_keeper_oas_on_idle_escalated_total"
@@ -533,7 +535,7 @@ let all : t list =
     SummarizerStateScrubs; SummarizerStateBlocksRemoved; OasEnvKeyRejections; ContinuityTsRecovered;
     MemoryWriteFailures; MemoryLaneUnitFailures; MemoryConsolidations; MemoryLaneSubmitted; MemoryLaneRanInline; MemoryLaneDropped;
     MemoryLanePending; MemoryLaneInFlight; MemoryLaneProviderSlotBusy; WriteMetaCycleFailures; AlertPersistFailures;
-    MetricsSseFailures; ChatStoreFailures; ChatTransportFailures; PersonNoteStoreFailures; ObservationQueryFailures; OasOnStop;
+    MetricsSseFailures; ChatStoreFailures; ChatTransportFailures; PersonNoteStoreFailures; KeeperMaterializationFailures; ObservationQueryFailures; OasOnStop;
     OasOnIdleEscalated; InvariantViolations; FsmEdgeTransitions; TurnFsmTransitions;
     TurnPhaseDuration; LifecycleTransitions; LifecycleCallbackFailures; CompactionCallbackRecoveries;
     EventBusDrain; SupervisorCleanupFailures; SpawnSlotDenied; RegistryUpdateDropped;

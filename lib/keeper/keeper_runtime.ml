@@ -728,12 +728,20 @@ let start_supervisor_sweep ctx =
   let base_path = ctx.config.base_path in
   if supervisor_sweep_running base_path then ()
   else begin
+    let load_or_materialize_keeper_meta ctx name =
+      match load_or_materialize_boot_meta ctx name with
+      | Ok { meta; _ } -> Ok (Some meta)
+      | Error err -> Error err
+    in
     let consumer : (module Pulse.Consumer) =
       (module struct
         let name = "keeper-supervisor-sweep"
         let should_act _beat = true
         let on_beat _beat =
-          (try Keeper_supervisor.sweep_and_recover ctx
+          (try
+             Keeper_supervisor.sweep_and_recover
+               ~load_or_materialize_keeper_meta
+               ctx
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Otel_metric_store.inc_counter
                Keeper_metrics.(to_string SupervisorSweepFailures)

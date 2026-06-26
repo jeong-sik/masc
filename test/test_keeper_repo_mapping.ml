@@ -194,6 +194,26 @@ let test_is_allowed_mapping_parse_error () =
         "mapping parse error denies access" false
         (Keeper_repo_mapping.is_allowed ~keeper_id:"keeper-1" ~repository_id:"repo-a" ~base_path))
 
+let test_is_allowed_reloads_after_external_revocation () =
+  with_temp_base_path (fun base_path ->
+      write_mapping base_path "keeper-1" [ "repo-a" ];
+      Alcotest.(check bool)
+        "initial repo allowed"
+        true
+        (Keeper_repo_mapping.is_allowed ~keeper_id:"keeper-1" ~repository_id:"repo-a" ~base_path);
+      write_mapping base_path "keeper-1" [ "repo-revoked-target" ];
+      Alcotest.(check bool)
+        "externally revoked repo denied"
+        false
+        (Keeper_repo_mapping.is_allowed ~keeper_id:"keeper-1" ~repository_id:"repo-a" ~base_path);
+      Alcotest.(check bool)
+        "new external mapping allowed"
+        true
+        (Keeper_repo_mapping.is_allowed
+           ~keeper_id:"keeper-1"
+           ~repository_id:"repo-revoked-target"
+           ~base_path))
+
 let test_validate_access_allowed () =
   with_temp_base_path (fun base_path ->
       write_mapping base_path "keeper-1" [ "repo-a" ];
@@ -963,6 +983,8 @@ let () =
           Alcotest.test_case "no mapping" `Quick test_is_allowed_no_mapping;
           Alcotest.test_case "mapping parse error" `Quick
             test_is_allowed_mapping_parse_error;
+          Alcotest.test_case "external revocation reloads cache" `Quick
+            test_is_allowed_reloads_after_external_revocation;
         ] );
       ( "validate_access",
         [

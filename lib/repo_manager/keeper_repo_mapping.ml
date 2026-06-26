@@ -63,11 +63,39 @@ let load_all ~base_path =
              | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _) ->
             Ok [])
 
-(** Cache for [load_all] results keyed by [base_path]. Invalidated on every
-    write so the in-memory view does not diverge from disk after mapping
-    mutations. The immutable [Map] + [Atomic] design is fiber-safe without
-    requiring an Eio mutex to be threaded through every caller. *)
-let load_all_cache : (keeper_repo_mapping list, string) result String_map.t Atomic.t =
+(** Cache for [load_all] results keyed by [base_path]. Each entry carries the
+    mapping file stamp so out-of-process TOML edits invalidate the cache before
+    access-control decisions reuse it. Writes through this module still remove
+    the entry explicitly. The immutable [Map] + [Atomic] design is fiber-safe
+    without requiring an Eio mutex to be threaded through every caller. *)
+type mapping_file_stamp =
+  { mtime : float
+  ; size : int
+  }
+
+type load_all_cache_entry =
+  { stamp : mapping_file_stamp option
+  ; result : (keeper_repo_mapping list, string) result
+  }
+
+let mapping_file_stamp ~base_path =
+  let path = mappings_toml_path base_path in
+  match Unix.stat path with
+  | stat -> Some { mtime = stat.Unix.st_mtime; size = stat.Unix.st_size }
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> None
+  | exception Sys_error _ -> None
+;;
+
+let same_stamp left right =
+  match left, right with
+  | None, None -> true
+  | ( Some { mtime = left_mtime; size = left_size }
+    , Some { mtime = right_mtime; size = right_size } ) ->
+    Float.equal left_mtime right_mtime && Int.equal left_size right_size
+  | _ -> false
+;;
+
+let load_all_cache : load_all_cache_entry String_map.t Atomic.t =
   Atomic.make String_map.empty
 ;;
 
@@ -81,20 +109,36 @@ let invalidate_load_all_cache ~base_path =
 ;;
 
 let load_all_cached ~base_path =
+  let current_stamp = mapping_file_stamp ~base_path in
   match String_map.find_opt base_path (Atomic.get load_all_cache) with
-  | Some result -> result
+  | Some { stamp; result } when same_stamp stamp current_stamp -> result
   | None ->
     let result = load_all ~base_path in
+    let entry = { stamp = mapping_file_stamp ~base_path; result } in
     let rec insert () =
       let current = Atomic.get load_all_cache in
       match String_map.find_opt base_path current with
-      | Some existing -> existing
+      | Some { stamp; result } when same_stamp stamp entry.stamp -> result
       | None ->
-        let next = String_map.add base_path result current in
-        if Atomic.compare_and_set load_all_cache current next then result
+        let next = String_map.add base_path entry current in
+        if Atomic.compare_and_set load_all_cache current next then entry.result
+        else insert ()
+      | Some _ ->
+        let next = String_map.add base_path entry current in
+        if Atomic.compare_and_set load_all_cache current next then entry.result
         else insert ()
     in
     insert ()
+  | Some _ ->
+    let result = load_all ~base_path in
+    let entry = { stamp = mapping_file_stamp ~base_path; result } in
+    let rec replace () =
+      let current = Atomic.get load_all_cache in
+      let next = String_map.add base_path entry current in
+      if Atomic.compare_and_set load_all_cache current next then entry.result
+      else replace ()
+    in
+    replace ()
 ;;
 
 type mapping_lookup =

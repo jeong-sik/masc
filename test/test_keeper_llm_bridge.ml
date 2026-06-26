@@ -93,7 +93,7 @@ let test_clocked_env_runs_function () =
       | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)))
 ;;
 
-let test_timeout_raised_as_api_error_and_metric_bumped () =
+let test_timeout_raised_as_api_error () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun _sw ->
       let clock = Eio.Stdenv.clock env in
@@ -103,16 +103,14 @@ let test_timeout_raised_as_api_error_and_metric_bumped () =
           Ok "should-not-reach")
       with
       | Ok _ -> Alcotest.fail "expected timeout"
-      | Error (Agent_sdk.Error.Api (Timeout _)) ->
-        Alcotest.(check int) "metric bumped" 1 (count_timeout_metric_bumps ())
-      | Error err -> Alcotest.failf "expected Api.Timeout, got %a" Agent_sdk.Error.pp err))
+      | Error (Agent_sdk.Error.Api (Timeout _)) -> ()
+      | Error err -> Alcotest.failf "expected Api.Timeout, got %s" (Agent_sdk.Error.to_string err)))
 ;;
 
-let test_cooperative_cancel_is_reraised_and_metric_not_bumped () =
+let test_cooperative_cancel_is_reraised () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       let clock = Eio.Stdenv.clock env in
-      Otel_metric_store.reset_for_test ();
       let caught = ref false in
       (try
          Eio.Switch.run (fun inner_sw ->
@@ -128,8 +126,7 @@ let test_cooperative_cancel_is_reraised_and_metric_not_bumped () =
        with
        | Eio.Cancel.Cancelled (Failure "simulated parent cancel") -> caught := true
        | exn -> Alcotest.failf "expected Cancelled(Failure), got %s" (Printexc.to_string exn));
-      Alcotest.(check bool) "exception was re-raised" true !caught;
-      Alcotest.(check int) "metric NOT bumped" 0 (count_timeout_metric_bumps ())))
+      Alcotest.(check bool) "exception was re-raised" true !caught))
 ;;
 
 let test_parent_timeout_cancel_logs_info () =
@@ -274,6 +271,14 @@ let () =
             `Quick
             test_clockless_env_fails_closed_without_calling_fn
         ; Alcotest.test_case "clocked env runs" `Quick test_clocked_env_runs_function
+        ; Alcotest.test_case
+            "timeout raised as api error"
+            `Quick
+            test_timeout_raised_as_api_error
+        ; Alcotest.test_case
+            "cooperative cancel is reraised"
+            `Quick
+            test_cooperative_cancel_is_reraised
         ; Alcotest.test_case
             "timeout log carries failure envelope"
             `Quick

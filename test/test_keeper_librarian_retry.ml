@@ -12,11 +12,66 @@ module R = Masc.Keeper_librarian_runtime
 module Lib = Masc.Keeper_librarian
 module Types = Agent_sdk.Types
 
+let field_episode_summary = "episode_summary"
+let field_claims = "claims"
+let field_claim = "claim"
+let field_confidence = "confidence"
+let field_category = "category"
+let field_source_turn = "source_turn"
+let field_source_tool_call_id = "source_tool_call_id"
+let field_open_items = "open_items"
+let field_constraints = "constraints"
+let field_preserved_tool_refs = "preserved_tool_refs"
+
+let claim_json ?confidence ?(claim = "c") ?(source_turn = `Int 0) () =
+  let fields =
+    [ field_claim, `String claim
+    ; field_category, `String "fact"
+    ; field_source_turn, source_turn
+    ]
+  in
+  let fields =
+    match confidence with
+    | None -> fields
+    | Some confidence -> (field_confidence, confidence) :: fields
+  in
+  `Assoc fields
+;;
+
+let string_list_json values = `List (List.map (fun value -> `String value) values)
+
+let episode_json
+      ?(episode_summary = "s")
+      ?(claims = [ claim_json () ])
+      ?(open_items = [])
+      ?(constraints = [])
+      ?(preserved_tool_refs = [])
+      ()
+  =
+  `Assoc
+    [ field_episode_summary, `String episode_summary
+    ; field_claims, `List claims
+    ; field_open_items, string_list_json open_items
+    ; field_constraints, string_list_json constraints
+    ; field_preserved_tool_refs, string_list_json preserved_tool_refs
+    ]
+;;
+
+let episode_json_string ?episode_summary ?claims ?open_items ?constraints
+      ?preserved_tool_refs () =
+  episode_json ?episode_summary ?claims ?open_items ?constraints ?preserved_tool_refs ()
+  |> Yojson.Safe.to_string
+;;
+
+let minimal_episode_json ?(claim = "c") () =
+  episode_json_string ~claims:[ claim_json ~claim () ] ()
+;;
+
 (* A minimal valid episode, parsed from known-good JSON, reused as the [Parsed]
    payload so the stub does not have to fabricate the record by hand. *)
 let sample_episode () =
   let raw =
-    {|{"episode_summary":"s","claims":[{"claim":"c","confidence":0.9,"category":"fact","source_turn":0}],"open_items":[],"constraints":[],"preserved_tool_refs":[]}|}
+    episode_json_string ~claims:[ claim_json ~confidence:(`Float 0.9) () ] ()
   in
   let inp = { Lib.trace_id = "t"; generation = 0; messages = [] } in
   match Lib.episode_of_output ~now:1_000_000.0 ~generation:inp.generation inp raw with
@@ -263,29 +318,8 @@ let parse_ep raw =
   Lib.episode_of_output ~now:1_000_000.0 ~generation:inp.generation inp raw
 ;;
 
-let minimal_episode_json ?(claim = "c") () =
-  `Assoc
-    [ "episode_summary", `String "s"
-    ; ( "claims"
-      , `List
-          [ `Assoc
-              [ "claim", `String claim
-              ; "category", `String "fact"
-              ; "source_turn", `Int 0
-              ]
-          ] )
-    ; "open_items", `List []
-    ; "constraints", `List []
-    ; "preserved_tool_refs", `List []
-    ]
-  |> Yojson.Safe.to_string
-
 let test_rejects_markdown_wrapped () =
-  let raw =
-    "```json\n\
-     {\"episode_summary\":\"s\",\"claims\":[],\"open_items\":[],\"constraints\":[],\"preserved_tool_refs\":[]}\n\
-     ```"
-  in
+  let raw = "```json\n" ^ episode_json_string ~claims:[] () ^ "\n```" in
   check bool "markdown-wrapped JSON rejected" true (Option.is_none (parse_ep raw))
 ;;
 
@@ -305,7 +339,7 @@ let test_rejects_prose_wrapped_json () =
 
 let test_parses_json_string_wrapping () =
   let raw =
-    "\"{\\\"episode_summary\\\":\\\"s\\\",\\\"claims\\\":[],\\\"open_items\\\":[],\\\"constraints\\\":[],\\\"preserved_tool_refs\\\":[]}\""
+    `String (episode_json_string ~claims:[] ()) |> Yojson.Safe.to_string
   in
   match parse_ep raw with
   | Some ep ->
@@ -316,7 +350,7 @@ let test_parses_json_string_wrapping () =
 
 let test_rejects_string_source_turn () =
   let raw =
-    {|{"episode_summary":"s","claims":[{"claim":"c","category":"fact","source_turn":"3"}],"open_items":[],"constraints":[],"preserved_tool_refs":[]}|}
+    episode_json_string ~claims:[ claim_json ~source_turn:(`String "3") () ] ()
   in
   check bool "string source_turn rejected" true (Option.is_none (parse_ep raw))
 ;;
@@ -362,7 +396,11 @@ let test_parses_nested_braces_inside_string () =
 
 let test_missing_lists_default_to_empty () =
   let raw =
-    {|{"episode_summary":"s","claims":[{"claim":"c","category":"fact","source_turn":0}]}|}
+    `Assoc
+      [ field_episode_summary, `String "s"
+      ; field_claims, `List [ claim_json () ]
+      ]
+    |> Yojson.Safe.to_string
   in
   match parse_ep raw with
   | Some ep ->
@@ -374,32 +412,26 @@ let test_missing_lists_default_to_empty () =
 
 let test_invalid_source_turn_string_rejected () =
   let raw =
-    {|{"episode_summary":"s","claims":[{"claim":"c","category":"fact","source_turn":"not-a-number"}],"open_items":[],"constraints":[],"preserved_tool_refs":[]}|}
+    episode_json_string
+      ~claims:[ claim_json ~source_turn:(`String "not-a-number") () ]
+      ()
   in
   check bool "invalid source_turn rejected" true (Option.is_none (parse_ep raw))
-;;
-
-let contains_sub sub s =
-  let sub_len = String.length sub in
-  let s_len = String.length s in
-  let rec aux i =
-    if i + sub_len > s_len
-    then false
-    else if String.equal (String.sub s i sub_len) sub
-    then true
-    else aux (i + 1)
-  in
-  aux 0
 ;;
 
 let test_retry_nudge_matches_schema () =
   (* The old nudge listed "confidence" as a claim field; the parser dropped
      confidence in RFC-0247, so the nudge must no longer ask for it. *)
-  check bool "nudge does not list confidence as a field" false
-    (contains_sub "claim, confidence" R.parse_retry_nudge);
-  check bool "nudge mentions source_turn" true (contains_sub "source_turn" R.parse_retry_nudge);
-  check bool "nudge mentions source_tool_call_id" true
-    (contains_sub "source_tool_call_id" R.parse_retry_nudge)
+  check bool "nudge episode field list includes claims" true
+    (List.mem field_claims R.parse_retry_episode_fields);
+  check bool "nudge episode field list includes preserved refs" true
+    (List.mem field_preserved_tool_refs R.parse_retry_episode_fields);
+  check bool "nudge field list excludes confidence" false
+    (List.mem field_confidence R.parse_retry_claim_fields);
+  check bool "nudge field list includes source_turn" true
+    (List.mem field_source_turn R.parse_retry_claim_fields);
+  check bool "nudge field list includes source_tool_call_id" true
+    (List.mem field_source_tool_call_id R.parse_retry_claim_fields)
 ;;
 
 let () =

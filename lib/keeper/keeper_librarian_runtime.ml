@@ -277,17 +277,94 @@ let message role text =
    problem, not the model-output problem this bound addresses. *)
 let librarian_max_parse_retries = 2
 
+let retry_field_episode_summary = "episode_summary"
+let retry_field_claims = "claims"
+let retry_field_open_items = "open_items"
+let retry_field_constraints = "constraints"
+let retry_field_preserved_tool_refs = "preserved_tool_refs"
+
+let parse_retry_episode_fields =
+  [ retry_field_episode_summary
+  ; retry_field_claims
+  ; retry_field_open_items
+  ; retry_field_constraints
+  ; retry_field_preserved_tool_refs
+  ]
+;;
+
+let retry_field_claim = "claim"
+let retry_field_category = "category"
+let retry_field_source_turn = "source_turn"
+let retry_field_source_tool_call_id = "source_tool_call_id"
+let retry_field_claim_kind = "claim_kind"
+
+let parse_retry_claim_fields =
+  [ retry_field_claim
+  ; retry_field_category
+  ; retry_field_source_turn
+  ; retry_field_source_tool_call_id
+  ; retry_field_claim_kind
+  ]
+;;
+
+let parse_retry_claim_categories =
+  [ "fact"
+  ; "preference"
+  ; "blocker"
+  ; "goal"
+  ; "constraint"
+  ; "ephemeral"
+  ; "validated_approach"
+  ; "lesson"
+  ; "code_change"
+  ]
+;;
+
+let parse_retry_claim_kinds =
+  [ "self_observation"; "external_state"; "durable_knowledge" ]
+;;
+
+let parse_retry_claim_shape =
+  let field_shapes =
+    [ "\"string\""
+    ; Printf.sprintf "\"%s\"" (String.concat "|" parse_retry_claim_categories)
+    ; "0"
+    ; "\"optional-string\""
+    ; Printf.sprintf "\"%s\"" (String.concat "|" parse_retry_claim_kinds)
+    ]
+  in
+  List.map2
+    (fun field shape -> Printf.sprintf "\"%s\": %s" field shape)
+    parse_retry_claim_fields
+    field_shapes
+  |> String.concat ", "
+  |> Printf.sprintf "{%s}"
+;;
+
+let parse_retry_episode_shape =
+  let field_shape field =
+    if String.equal field retry_field_episode_summary
+    then Printf.sprintf "\"%s\": \"string\"" field
+    else if String.equal field retry_field_claims
+    then Printf.sprintf "\"%s\": [%s]" field parse_retry_claim_shape
+    else Printf.sprintf "\"%s\": [\"string\"]" field
+  in
+  parse_retry_episode_fields
+  |> List.map field_shape
+  |> String.concat ",\n"
+  |> Printf.sprintf "{%s}"
+;;
+
 let parse_retry_nudge =
-  "Your previous response could not be parsed as the required JSON episode \
-   object. Respond with ONLY a single JSON object — no markdown fences, no \
-   prose. Required shape:\n\
-   {\"episode_summary\": \"string\",\n\
-   \"claims\": [{\"claim\": \"string\", \"category\": \"fact|preference|blocker|goal|constraint|ephemeral|validated_approach|lesson|code_change\", \"source_turn\": 0, \"source_tool_call_id\": \"optional-string\", \"claim_kind\": \"self_observation|external_state|durable_knowledge\"}],\n\
-   \"open_items\": [\"string\"],\n\
-   \"constraints\": [\"string\"],\n\
-   \"preserved_tool_refs\": [\"string\"]}\n\
-   source_turn must be an integer. Do not include a confidence field and do not \
-   add any fields not shown above."
+  Printf.sprintf
+    "Your previous response could not be parsed as the required JSON episode \
+     object. Respond with ONLY a single JSON object — no markdown fences, no \
+     prose. Required shape:\n\
+     %s\n\
+     %s must be an integer. Do not include a confidence field and do not add \
+     any fields not shown above."
+    parse_retry_episode_shape
+    retry_field_source_turn
 
 type attempt_outcome =
   | Parsed of Keeper_memory_os_types.episode

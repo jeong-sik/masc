@@ -98,6 +98,12 @@ val librarian_max_parse_retries : int
 (** Additional provider attempts after an initial unparseable response before
     [extract_with_provider] gives up (the initial attempt is not counted). *)
 
+val parse_retry_episode_fields : string list
+(** Episode object fields included in the corrective parse-retry shape. *)
+
+val parse_retry_claim_fields : string list
+(** Claim object fields included in the corrective parse-retry shape. *)
+
 val parse_retry_nudge : string
 (** Corrective instruction appended to the message list on each parse-retry. *)
 

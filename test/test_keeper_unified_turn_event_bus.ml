@@ -153,6 +153,17 @@ let test_state_pending_count_integrity_under_concurrent_updates () =
   check int "concurrent pure computation leaves count at zero" 0 state.pending_tool_count
 ;;
 
+let test_keeper_event_bus_process_fallback_visible_from_uninitialized_domain () =
+  let bus = Agent_sdk.Event_bus.create () in
+  Keeper_event_bus.set bus;
+  let worker = Domain.spawn (fun () -> Option.is_some (Keeper_event_bus.get ())) in
+  check
+    bool
+    "process fallback is visible from another domain"
+    true
+    (Domain.join worker)
+;;
+
 let test_take_drain_cancel_clears_active_without_spin () =
   let open EB.For_testing in
   let t = EB.create ~keeper_name:"k" ~turn_id:1 () in
@@ -226,6 +237,8 @@ let () =
     ; ( "concurrency"
       , [ test_case "pure transitions under concurrent domains" `Quick
             test_state_pending_count_integrity_under_concurrent_updates
+        ; test_case "event bus fallback is visible cross-domain" `Quick
+            test_keeper_event_bus_process_fallback_visible_from_uninitialized_domain
         ] )
     ; ( "background-drain"
       , [ test_case "continues after first poll" `Quick

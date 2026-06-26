@@ -1,9 +1,11 @@
 # Approval Rules
 
-Keeper approval rules are persisted allow rules in `.masc/approval-rules.json`.
-They are only loaded when each rule entry parses as a complete rule. Malformed
-entries are ignored, which means they cannot match a future request and cannot
-auto-approve a tool call.
+Keeper approval rules are persisted allow rules. The authoritative path is
+`Keeper_approval_queue_rules.rules_path`, which resolves beneath
+`Workspace_utils.masc_dir_from_base_path`. They are only loaded when each rule
+entry parses as a complete rule. Malformed entries are ignored, reported as
+persistence read drops, and cannot match a future request or auto-approve a tool
+call.
 
 ## Fail-Closed Parse Policy
 
@@ -33,10 +35,12 @@ tool, and request fingerprint would otherwise match a low-risk request, but whos
 
 - `list_rules` skips the malformed rule during load
 - `find_matching_rule` returns `None` for the matching request
+- the skipped malformed entry increments the `keeper_approval_rules`
+  `invalid_payload` persistence-read-drop counter
 - rewriting the same persisted shape with a valid `max_risk` loads and matches
 
 This pins the operational behavior: malformed persisted approval rules are not
-silently allowed.
+silently allowed or silently erased.
 
 ## Error Variant Boundary
 

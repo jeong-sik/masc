@@ -35,6 +35,7 @@ type PendingRpc = {
 }
 type ParseWorkerJob = {
   data: string
+  generation: number
   timeout: ReturnType<typeof setTimeout>
 }
 type DashboardRouteState = Pick<RouteState, 'tab' | 'params'>
@@ -322,6 +323,7 @@ function fallbackParseWorkerJob(id: number): void {
   if (!job) return
   workerJobs.delete(id)
   clearTimeout(job.timeout)
+  if (job.generation !== connectGeneration || !socket) return
   pendingInbound.push(job.data)
   scheduleFlush()
 }
@@ -330,6 +332,15 @@ function fallbackAllParseWorkerJobs(): void {
   for (const id of Array.from(workerJobs.keys())) {
     fallbackParseWorkerJob(id)
   }
+  parseWorker?.terminate()
+  parseWorker = null
+}
+
+function cancelParseWorkerJobs(): void {
+  for (const job of workerJobs.values()) {
+    clearTimeout(job.timeout)
+  }
+  workerJobs.clear()
   parseWorker?.terminate()
   parseWorker = null
 }
@@ -350,6 +361,7 @@ function initParseWorker(): Worker | null {
       if (!job) return
       workerJobs.delete(id)
       clearTimeout(job.timeout)
+      if (job.generation !== connectGeneration || !socket) return
       deliverParsedPayloads(Array.isArray(payloads) ? payloads : [])
     }
     parseWorker.onerror = fallbackAllParseWorkerJobs
@@ -508,6 +520,7 @@ function closeSocket(): void {
     socket = null
   }
   clearPendingInbound()
+  cancelParseWorkerJobs()
   rejectPendingRpcs(new Error('dashboard websocket closed'))
 }
 
@@ -721,6 +734,7 @@ function handleMessage(data: unknown): void {
     const id = ++workerJobId
     workerJobs.set(id, {
       data,
+      generation: connectGeneration,
       timeout: setTimeout(() => {
         fallbackParseWorkerJob(id)
       }, DASHBOARD_WS_PARSE_TIMEOUT_MS),
@@ -925,6 +939,7 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     }
     lastSubscribeKey = ''
     socket = null
+    cancelParseWorkerJobs()
     rejectPendingRpcs(closeError)
     if (fatal) {
       shouldReconnect = false

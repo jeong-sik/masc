@@ -104,6 +104,25 @@ let rules_path ~base_path () =
   Filename.concat (Workspace_utils.masc_dir_from_base_path ~base_path) "approval-rules.json"
 ;;
 
+let approval_rules_persistence_surface = "keeper_approval_rules"
+
+let report_rules_read_drop ~reason ~path ~detail =
+  Safe_ops.report_persistence_read_drop
+    ~on_drop:(fun () ->
+      Otel_metric_store.inc_counter
+        Otel_metric_store.metric_persistence_read_drops
+        ~labels:[ "surface", approval_rules_persistence_surface; "reason", reason ]
+        ())
+    ~surface:approval_rules_persistence_surface
+    ~reason
+    ~path
+    ~detail
+;;
+
+let rule_json_preview json =
+  Yojson.Safe.to_string json |> String_util.utf8_prefix ~max_bytes:240
+;;
+
 let stable_request_key_blocklist =
   [ "id"
   ; "turn_id"
@@ -168,9 +187,43 @@ let backend_of_runtime_context ?backend runtime_contract =
 ;;
 
 let load_rules_unlocked ~base_path () =
-  match Safe_ops.read_json_file_safe (rules_path ~base_path ()) with
-  | Ok (`List entries) -> entries |> List.filter_map approval_rule_of_yojson
-  | _ -> []
+  let path = rules_path ~base_path () in
+  let rec parse_entries index acc = function
+    | [] -> List.rev acc
+    | entry :: rest ->
+      (match approval_rule_of_yojson entry with
+       | Some rule -> parse_entries (index + 1) (rule :: acc) rest
+       | None ->
+         report_rules_read_drop
+           ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+           ~path
+           ~detail:
+             (Printf.sprintf
+                "approval rule entry %d rejected: %s"
+                index
+                (rule_json_preview entry));
+         parse_entries (index + 1) acc rest)
+  in
+  if not (Sys.file_exists path)
+  then []
+  else (
+    match Safe_ops.read_json_file_safe path with
+    | Ok (`List entries) -> parse_entries 0 [] entries
+    | Ok json ->
+      report_rules_read_drop
+        ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+        ~path
+        ~detail:
+          (Printf.sprintf
+             "approval rules file must be a JSON list, got: %s"
+             (rule_json_preview json));
+      []
+    | Error detail ->
+      report_rules_read_drop
+        ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+        ~path
+        ~detail;
+      [])
 ;;
 
 let save_rules_unlocked ~base_path rules : (unit, string) result =

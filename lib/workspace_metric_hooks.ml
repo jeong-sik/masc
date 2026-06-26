@@ -319,6 +319,13 @@ let record_process_timeout ~program ~timeout_sec ~origin =
     ()
 ;;
 
+let record_discovery_history_failure ~site =
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_discovery_history_failures
+    ~labels:[ "site", site ]
+    ()
+;;
+
 let distributed_lock_acquire_failed_metric =
   Otel_metric_store.metric_distributed_lock_acquire_failed
 ;;
@@ -447,6 +454,7 @@ let install () =
   Atomic.set File_lock_eio.on_lock_attempt_fn record_file_lock_attempt;
   Atomic.set File_lock_eio.on_cas_retry_fn record_file_lock_table_cas_retry;
   Atomic.set Process_eio.process_timeout_observer_fn record_process_timeout;
+  Atomic.set Discovery_history.failure_observer_fn record_discovery_history_failure;
   Atomic.set Workspace_hooks.distributed_lock_acquire_failed_fn record_distributed_lock_acquire_failed;
   Atomic.set Workspace_hooks.active_agents_change_fn record_active_agents_change;
   Atomic.set Workspace_hooks.workspace_telemetry_drop_fn record_workspace_telemetry_drop;

@@ -6,7 +6,9 @@
 
 open Alcotest
 module DH = Discovery_history
-module P = Otel_metric_store
+module P = Masc.Otel_metric_store
+
+let () = Masc.Workspace_metric_hooks.install ()
 
 let make ~models : DH.probe_record = {
   ts = 1777129200.0;

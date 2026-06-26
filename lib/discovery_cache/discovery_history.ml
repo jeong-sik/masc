@@ -91,11 +91,19 @@ let failure_site_label = function
   | "prune" as site -> site
   | _ -> "unknown"
 
+let failure_observer_fn : (site:string -> unit) Atomic.t =
+  Atomic.make (fun ~site:_ -> ())
+
 let observe_failure ~site ~base_path exn =
   match exn with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       let site = failure_site_label site in
+      (try (Atomic.get failure_observer_fn) ~site with observer_exn ->
+        Log.Discovery.warn
+          "discovery_history failure observer failed site=%s: %s"
+          site
+          (Printexc.to_string observer_exn));
       Log.Discovery.error "discovery_history: %s failed base_path=%s: %s"
         site base_path (Printexc.to_string exn)
 

@@ -334,33 +334,12 @@ let keeper_meta_persistent_drift_categories
   List.filter_map Fun.id
     [
       drift_if "persona" (current.persona <> target.persona);
-      drift_if "proactive" (current.proactive <> target.proactive);
       drift_if "tool_access" (current.tool_access <> target.tool_access);
-      drift_if "tool_denylist" (current.tool_denylist <> target.tool_denylist);
-      drift_if "goal" (not (goal_horizon_text_equal current.goal target.goal));
       drift_if "instructions"
         (not (personality_text_equal current.instructions target.instructions));
-      drift_if "autoboot_enabled"
-        (current.autoboot_enabled <> target.autoboot_enabled);
-      drift_if "mention_targets"
-        (current.mention_targets <> target.mention_targets);
       drift_if "active_goal_ids"
         (Option.is_some defaults.active_goal_ids
          && current.active_goal_ids <> target.active_goal_ids);
-      drift_if "sandbox_profile"
-        (current.sandbox_profile <> target.sandbox_profile);
-      drift_if "sandbox_image" (current.sandbox_image <> target.sandbox_image);
-      drift_if "network_mode" (current.network_mode <> target.network_mode);
-      drift_if "allowed_paths"
-        (Option.is_some defaults.allowed_paths
-         && current.allowed_paths <> target.allowed_paths);
-      drift_if "telemetry_feedback_enabled"
-        (current.telemetry_feedback_enabled <> target.telemetry_feedback_enabled);
-      drift_if "telemetry_feedback_window_hours"
-        (current.telemetry_feedback_window_hours
-         <> target.telemetry_feedback_window_hours);
-      drift_if "always_approve"
-        (current.always_approve <> target.always_approve);
       drift_if "oas_env" (current.oas_env <> target.oas_env);
     ]
 
@@ -487,13 +466,11 @@ let ensure_keeper_meta_with_cause config name =
         oas_env = target_oas_env;
       }
     in
-    (* Keep the runtime snapshot honest as well as the live overlay.  The
-       previous overlay-only path made operators see stale JSON forever
-       (for example persona=analyst while TOML declared masc-improver),
-       which hid prompt/tool/autonomy drift from health and bootstrap
-       checks.  Runtime-owned list fields are only persisted when TOML
-       explicitly owns them, avoiding accidental allowed_paths or
-       active_goal_ids erasure. *)
+    (* Keep the runtime snapshot honest as well as the live overlay for fields
+       that are actually emitted by [meta_to_json].  TOML-only config fields
+       (goal, sandbox policy, denylist, cadence, etc.) remain overlay-only; if
+       they triggered writes here, [meta_to_json]/scrub would drop them from disk
+       and the next reconcile tick would see the same drift again. *)
     let cats =
       keeper_meta_persistent_drift_categories
         ~defaults

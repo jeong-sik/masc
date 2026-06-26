@@ -634,6 +634,7 @@ let keeper_msg_body
       Turn.keeper_msg_timeout_override resolved_args
       |> Result.value ~default:None
     in
+    let event_bus = Keeper_event_bus.get () in
     let request_id =
       Keeper_msg_async.submit
         ?timeout_sec
@@ -642,7 +643,7 @@ let keeper_msg_body
         ~base_path:config.base_path
         ~keeper_name:name
         ~f:(fun () ->
-          let result = Turn.handle_keeper_msg keeper_ctx resolved_args in
+          let result = Turn.handle_keeper_msg ?event_bus keeper_ctx resolved_args in
           if tool_result_success result
           then begin
             append_direct_chat_pair_if_reply
@@ -681,6 +682,7 @@ let handle_keeper_msg ctx args : tool_result =
       Turn.keeper_msg_timeout_override resolved_args
       |> Result.value ~default:None
     in
+    let event_bus = Keeper_event_bus.get () in
     let request_id =
       Keeper_msg_async.submit
         ?timeout_sec
@@ -689,7 +691,7 @@ let handle_keeper_msg ctx args : tool_result =
         ~base_path:ctx.config.base_path
         ~keeper_name:name
         ~f:(fun () ->
-          let result = Turn.handle_keeper_msg ctx resolved_args in
+          let result = Turn.handle_keeper_msg ?event_bus ctx resolved_args in
           if tool_result_success result
           then begin
             append_direct_chat_pair_if_reply
@@ -784,8 +786,9 @@ let handle_keeper_msg_stream ?on_text_delta ?on_event ctx args : tool_result =
   match
     let* name = resolve_keeper_name ctx args in
     let resolved_args = with_keeper_name args name in
+    let event_bus = Keeper_event_bus.get () in
     let result =
-      Turn.handle_keeper_msg ?on_text_delta ?on_event ctx resolved_args
+      Turn.handle_keeper_msg ?on_text_delta ?on_event ?event_bus ctx resolved_args
     in
     if not (tool_result_success result) then
       Ok result

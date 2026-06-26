@@ -164,6 +164,78 @@ let test_keeper_event_bus_is_intentionally_process_wide () =
     (Domain.join worker)
 ;;
 
+let read_source_file rel =
+  let root = Sys.getenv_opt "DUNE_SOURCEROOT" |> Option.value ~default:"." in
+  let path = Filename.concat root rel in
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+       let rec loop acc =
+         match input_line ic with
+         | line -> loop (line :: acc)
+         | exception End_of_file -> String.concat "\n" (List.rev acc)
+       in
+       loop [])
+;;
+
+let contains_substr haystack needle =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  let rec loop offset =
+    if needle_len = 0
+    then true
+    else if offset + needle_len > haystack_len
+    then false
+    else if String.sub haystack offset needle_len = needle
+    then true
+    else loop (offset + 1)
+  in
+  loop 0
+;;
+
+let substring_between source ~start_marker ~end_marker =
+  match String.index_from_opt source 0 (String.get start_marker 0) with
+  | None -> None
+  | Some first ->
+      let rec find_marker marker offset =
+        if offset + String.length marker > String.length source
+        then None
+        else if String.sub source offset (String.length marker) = marker
+        then Some offset
+        else find_marker marker (offset + 1)
+      in
+      (match find_marker start_marker first with
+       | None -> None
+       | Some start_at ->
+           let body_start = start_at + String.length start_marker in
+           (match find_marker end_marker body_start with
+            | None -> None
+            | Some end_at -> Some (String.sub source body_start (end_at - body_start))))
+;;
+
+let test_keeper_msg_turn_uses_captured_event_bus () =
+  let turn_source = read_source_file "lib/keeper/keeper_turn.ml" in
+  let admitted_body =
+    substring_between
+      turn_source
+      ~start_marker:"let run_keeper_msg_turn_admitted"
+      ~end_marker:"let handle_keeper_msg"
+  in
+  check bool "admitted body found" true (Option.is_some admitted_body);
+  let admitted_body = Option.get admitted_body in
+  check
+    bool
+    "admitted turn body must not perform fallback Event_bus lookup"
+    false
+    (contains_substr admitted_body "Keeper_event_bus.get ()");
+  check bool "admitted body threads captured event_bus" true
+    (contains_substr admitted_body "?event_bus");
+  let surface_source = read_source_file "lib/keeper/keeper_tool_surface_ops.ml" in
+  check bool "async wrapper captures Event_bus before submit" true
+    (contains_substr surface_source "let event_bus = Keeper_event_bus.get ()")
+;;
+
 let test_take_drain_cancel_clears_active_without_spin () =
   let open EB.For_testing in
   let t = EB.create ~keeper_name:"k" ~turn_id:1 () in
@@ -239,6 +311,8 @@ let () =
             test_state_pending_count_integrity_under_concurrent_updates
         ; test_case "event bus is intentionally process-wide" `Quick
             test_keeper_event_bus_is_intentionally_process_wide
+        ; test_case "keeper msg uses captured event bus" `Quick
+            test_keeper_msg_turn_uses_captured_event_bus
         ] )
     ; ( "background-drain"
       , [ test_case "continues after first poll" `Quick

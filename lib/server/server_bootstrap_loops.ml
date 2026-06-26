@@ -804,7 +804,10 @@ let start_keeper_loops
         let rendered =
           exclusions
           |> List.map (fun Keeper_runtime.{ keeper_name; reason } ->
-            Printf.sprintf "%s=%s" keeper_name reason)
+            Printf.sprintf
+              "%s=%s"
+              keeper_name
+              (Keeper_runtime.autoboot_exclusion_reason_to_string reason))
           |> String.concat ", "
         in
         Log.Keeper.info

@@ -46,6 +46,7 @@ import {
 } from '../lib/monitoring-runtime'
 import { KeeperPhaseBadge } from './keeper-phase-indicator'
 import { KeeperActionButtons } from './keeper-action-panel'
+import { keeperExclusionLabel } from './keeper-exclusion-label'
 import {
   expectedKeeperDetailRows,
   expectedRuntimeDetailRows,
@@ -1103,6 +1104,11 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     // hint (재개 대기 / 기동 필요 / 감시 중 / 연결 없음) renders as a second
     // muted line. All fall back to honest copy, never faked.
     const chipLabel = row.band.label
+    // autoboot exclusion (declarative_autoboot_disabled / autoboot_disabled):
+    // why this keeper is not booting. null when bootable; paused has its own
+    // 일시정지 UI so it is filtered out in keeperExclusionLabel. Surfaced on
+    // execution keepers via enrich_keeper_with_diagnostic.
+    const exclusionLabel = keeperExclusionLabel(row.keeperRuntime?.exclusion_reason)
     const glossText = row.stateNote
       ? blockerDisplay.cell
       : (stageLabel ?? '실행 중')
@@ -1166,6 +1172,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           </span>
           <span class="fl-gloss" title=${glossTitle}>${glossText}</span>
           <span class="fl-gloss">${row.bandActionHint}</span>
+          ${exclusionLabel
+            ? html`<span class="fl-gloss" data-exclusion title="자동 부팅에서 제외됨 — 서버 시작 시 기동하지 않습니다. 기동 버튼으로 직접 켜세요.">${exclusionLabel}</span>`
+            : null}
         </div>
 
         <div class="fl-ctx">

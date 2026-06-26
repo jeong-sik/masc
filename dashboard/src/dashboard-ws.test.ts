@@ -85,16 +85,23 @@ class MockWebSocket {
 
 class MockParseWorker {
   static holdResponses = false
+  static instances: MockParseWorker[] = []
 
   onmessage: ((event: MessageEvent) => void) | null = null
   onerror: ((event: ErrorEvent) => void) | null = null
   onmessageerror: ((event: MessageEvent) => void) | null = null
   terminated = false
+  heldMessages: Array<{ id: number; data: string }> = []
 
-  constructor(readonly url: URL) {}
+  constructor(readonly url: URL) {
+    MockParseWorker.instances.push(this)
+  }
 
   postMessage(message: { id: number; data: string }): void {
-    if (MockParseWorker.holdResponses) return
+    if (MockParseWorker.holdResponses) {
+      this.heldMessages.push(message)
+      return
+    }
     this.onmessage?.({
       data: {
         id: message.id,
@@ -103,8 +110,25 @@ class MockParseWorker {
     } as MessageEvent)
   }
 
+  releaseHeldResponses(): void {
+    const messages = this.heldMessages.splice(0)
+    for (const message of messages) {
+      this.onmessage?.({
+        data: {
+          id: message.id,
+          payloads: [JSON.parse(message.data) as unknown],
+        },
+      } as MessageEvent)
+    }
+  }
+
   terminate(): void {
     this.terminated = true
+  }
+
+  static reset(): void {
+    MockParseWorker.holdResponses = false
+    MockParseWorker.instances = []
   }
 }
 
@@ -188,7 +212,7 @@ beforeEach(() => {
 
 afterEach(() => {
   disconnectDashboardWS()
-  MockParseWorker.holdResponses = false
+  MockParseWorker.reset()
   clearDashboardWsDiscoveryCacheForTests()
   dashboardWsConnected.value = false
   dashboardWsLastError.value = null
@@ -1072,6 +1096,49 @@ describe('dashboard websocket route subscriptions', () => {
       { agents: [] },
       undefined,
     )
+  })
+
+  it('drops held parse worker replies after socket teardown', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+    vi.stubGlobal('Worker', MockParseWorker)
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
+
+    const subscribe = parseRpc(socket, 1)
+    socket.receive({
+      jsonrpc: '2.0',
+      id: subscribe.id,
+      result: { snapshot: { seq: 1, slices: {} } },
+    })
+    await flushPromises()
+    dashboardWsLastSeq.value = 0
+    sseStoreMocks.hydrateDashboardSlice.mockClear()
+
+    MockParseWorker.holdResponses = true
+    socket.receive({
+      jsonrpc: '2.0',
+      method: 'dashboard/delta',
+      params: { seq: 43, slice: 'execution', payload: { agents: [] } },
+    })
+    expect(sseStoreMocks.hydrateDashboardSlice).not.toHaveBeenCalled()
+    const sentBeforeTeardown = socket.sent.length
+    const worker = MockParseWorker.instances[0]!
+
+    disconnectDashboardWS()
+    worker.releaseHeldResponses()
+    await vi.advanceTimersByTimeAsync(5_000)
+    flushPendingInbound()
+
+    expect(worker.terminated).toBe(true)
+    expect(dashboardWsLastSeq.value).toBe(0)
+    expect(sseStoreMocks.hydrateDashboardSlice).not.toHaveBeenCalled()
+    expect(socket.sent).toHaveLength(sentBeforeTeardown)
   })
 
   it('reconnects when sending a delta ack notification throws', async () => {

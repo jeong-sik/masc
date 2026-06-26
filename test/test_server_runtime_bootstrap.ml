@@ -1362,7 +1362,7 @@ let test_health_json_keeps_timeout_pause_without_policy_manual () =
         Alcotest.(check string) "last blocker class" "turn_timeout"
           (detail |> member "last_blocker" |> member "klass" |> to_string)))
 
-let test_health_json_degrades_on_active_task_owner_without_executable_fiber () =
+let test_health_json_reports_dormant_task_owner_as_advisory () =
   with_temp_dir "health-active-task-owner-without-fiber" (fun dir ->
     let config_root = make_config_root dir in
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
@@ -1406,22 +1406,21 @@ let test_health_json_degrades_on_active_task_owner_without_executable_fiber () =
           (fleet_safety |> member "target_reaction_capacity_count" |> to_int);
         Alcotest.(check bool) "health does not report target no-executable" false
           (fleet_safety |> member "no_executable_keeper_fibers" |> to_bool);
-        Alcotest.(check string) "health marks dormant task owner degraded"
-          "degraded"
+        Alcotest.(check string) "health keeps dormant task owner advisory"
+          "ok"
           (fleet_safety |> member "status" |> to_string);
-        Alcotest.(check string) "health marks dormant task owner blocker"
-          "active_task_owner_without_executable_fiber"
-          (fleet_safety |> member "blocker" |> to_string);
-        Alcotest.(check bool) "health exposes dormant task owner flag" true
+        Alcotest.(check (option string)) "health keeps blocker empty" None
+          (fleet_safety |> member "blocker" |> to_string_option);
+        Alcotest.(check bool) "health excludes non-target dormant owner" false
           (fleet_safety
            |> member "active_task_owner_without_executable_fiber"
            |> to_bool);
-        Alcotest.(check int) "health exposes dormant owner count" 1
+        Alcotest.(check int) "health exposes no non-target owner rows" 0
           (fleet_safety
            |> member "active_task_owner_without_executable_fiber_count"
            |> to_int);
-        Alcotest.(check (list string)) "health exposes dormant owner name"
-          [ "executor" ]
+        Alcotest.(check (list string)) "health exposes no dormant owner names"
+          []
           (fleet_safety
            |> member "active_task_owner_without_executable_fiber_names"
            |> to_list
@@ -1431,21 +1430,15 @@ let test_health_json_degrades_on_active_task_owner_without_executable_fiber () =
           |> member "active_task_owner_without_executable_fiber_tasks"
           |> to_list
         in
-        Alcotest.(check int) "health exposes dormant owner task row" 1
+        Alcotest.(check int) "health exposes no dormant owner task row" 0
           (List.length dormant_tasks);
-        let dormant_task = List.hd dormant_tasks in
-        Alcotest.(check string) "dormant row keeper" "executor"
-          (dormant_task |> member "keeper" |> to_string);
-        Alcotest.(check string) "dormant row agent"
-          executor.Keeper_meta_contract.agent_name
-          (dormant_task |> member "agent_name" |> to_string);
-        Alcotest.(check string) "dormant row task id" "task-active-owner"
-          (dormant_task |> member "task_id" |> to_string);
-        Alcotest.(check string) "dormant row status" "in_progress"
-          (dormant_task |> member "task_status" |> to_string);
+        Alcotest.(check string) "health documents advisory semantics"
+          "advisory: reports task owners without executable keeper fibers; does not set \
+           fleet status, blocker, or operator_action_required"
+          (fleet_safety |> member "active_task_owner_fiber_scan_semantics" |> to_string);
         Alcotest.(check int) "health has no scan errors" 0
           (fleet_safety |> member "active_task_owner_scan_error_count" |> to_int);
-        Alcotest.(check bool) "health asks operator action" true
+        Alcotest.(check bool) "health does not ask fleet operator action" false
           (fleet_safety |> member "operator_action_required" |> to_bool)))
 
 let test_health_json_degrades_when_reaction_capacity_below_target () =
@@ -3257,9 +3250,9 @@ let () =
             "health json keeps timeout pause without policy manual"
             `Quick test_health_json_keeps_timeout_pause_without_policy_manual;
           Alcotest.test_case
-            "health json degrades on active task owner without executable fiber"
+            "health json reports dormant task owner as advisory"
             `Quick
-            test_health_json_degrades_on_active_task_owner_without_executable_fiber;
+            test_health_json_reports_dormant_task_owner_as_advisory;
           Alcotest.test_case
             "health json degrades when reaction capacity is below target"
             `Quick test_health_json_degrades_when_reaction_capacity_below_target;

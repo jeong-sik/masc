@@ -108,10 +108,18 @@ let goal_approval_pending_confirm_payload ~goal ~opened_by ?request_id () =
     ]
 ;;
 
+let goal_approval_pending_confirm_goal goal =
+  { goal with
+    Goal_store.phase = Goal_phase.Awaiting_approval
+  ; status = Goal_store.goal_status_of_phase Goal_phase.Awaiting_approval
+  ; active_verification_request_id = None
+  }
+;;
+
 let persist_goal_approval_pending_confirm ctx ~goal ~opened_by ?request_id () =
-  let entry : Operator_pending_confirm.pending_confirm =
+  let entry : Workspace_hooks.operator_pending_confirm_request =
     { token = goal_approval_pending_confirm_token goal.Goal_store.id
-    ; trace_id = Operator_pending_confirm.trace_id "goal"
+    ; trace_id = (Atomic.get Workspace_hooks.operator_pending_confirm_trace_id_fn) "goal"
     ; actor = goal_approval_operator_actor ctx
     ; action_type = "goal_completion_decision"
     ; target_type = "goal"
@@ -122,12 +130,12 @@ let persist_goal_approval_pending_confirm ctx ~goal ~opened_by ?request_id () =
     ; expires_at = None
     }
   in
-  Operator_pending_confirm.upsert_pending_confirm ctx.config entry
+  (Atomic.get Workspace_hooks.operator_pending_confirm_upsert_fn) ctx.config entry
 ;;
 
 let clear_goal_approval_pending_confirm ctx ~goal_id =
   ignore
-    (Operator_pending_confirm.remove_pending_confirms_by_target
+    ((Atomic.get Workspace_hooks.operator_pending_confirms_remove_by_target_fn)
        ctx.config
        ~target_type:"goal"
        ~target_id:(Some goal_id))
@@ -732,15 +740,26 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                                ]))))
                | Ok Goal_phase.Open_approval ->
                  (match
-                    update_goal_phase
+                    persist_goal_approval_pending_confirm
                       ctx
-                      goal
-                      ~phase:Goal_phase.Awaiting_approval
-                      ?note
-                      ~clear_active_verification_request:true
+                      ~goal:(goal_approval_pending_confirm_goal goal)
+                      ~opened_by:actor
                       ()
                   with
                   | Error msg ->
+                    error_result_typed ~tool_name ~start_time ~code:Internal_error msg
+                  | Ok () ->
+                    (match
+                       update_goal_phase
+                         ctx
+                         goal
+                         ~phase:Goal_phase.Awaiting_approval
+                         ?note
+                         ~clear_active_verification_request:true
+                         ()
+                     with
+                  | Error msg ->
+                    clear_goal_approval_pending_confirm ctx ~goal_id;
                     error_result_typed ~tool_name ~start_time ~code:Internal_error msg
                   | Ok updated_goal ->
                     emit_goal_event
@@ -759,11 +778,6 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                       ~payload:
                         (`Assoc
                             [ "actor", Goal_verification.goal_principal_to_yojson actor ]);
-                    persist_goal_approval_pending_confirm
-                      ctx
-                      ~goal:updated_goal
-                      ~opened_by:actor
-                      ();
                     ok_result
                       ~tool_name
                       ~start_time
@@ -772,7 +786,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                       ; "goal", Goal_store.goal_to_yojson updated_goal
                       ; ( "verification_summary"
                         , verification_summary_json updated_goal effective_policy None )
-                      ])
+                      ]))
                | Ok Goal_phase.Complete ->
                  (match
                     update_goal_phase
@@ -998,7 +1012,7 @@ let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result
                            Goal_verification.goal_verification_vote_to_yojson last_vote
                          | [] -> `Null )
                      ]);
-             let finalize ?after_update ~phase ~event_status =
+             let finalize ~phase ~event_status =
                match
                  update_goal_phase
                    ctx
@@ -1011,7 +1025,6 @@ let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result
                  | Error msg ->
                    error_result_typed ~tool_name ~start_time ~code:Internal_error msg
                  | Ok updated_goal ->
-                   Option.iter (fun f -> f updated_goal) after_update;
                    emit_goal_event
                      ctx
                      ~goal_id
@@ -1029,8 +1042,8 @@ let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result
                  ok_result
                    ~tool_name
                    ~start_time
-                   [ "goal_id", `String goal_id
-                   ; "goal", Goal_store.goal_to_yojson updated_goal
+                 [ "goal_id", `String goal_id
+                 ; "goal", Goal_store.goal_to_yojson updated_goal
                    ; ( "verification_request"
                      , Goal_verification.goal_verification_request_to_yojson request )
                    ; ( "verification_summary"
@@ -1055,25 +1068,34 @@ let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result
                   ; ( "verification_summary"
                     , verification_summary_json goal effective_policy (Some request) )
                   ]
-              | Goal_verification.Passed ->
+             | Goal_verification.Passed ->
                if goal.require_completion_approval
                then (
-                  emit_goal_event
-                    ctx
-                    ~goal_id
-                    ~event_type:"goal_approval_opened"
-                    ~payload:(`Assoc [ "request_id", `String request.id ]);
-                  finalize
-                    ~after_update:
-                      (fun updated_goal ->
-                        persist_goal_approval_pending_confirm
-                          ctx
-                          ~goal:updated_goal
-                          ~opened_by:principal
-                          ~request_id:request.id
-                          ())
-                    ~phase:Goal_phase.Awaiting_approval
-                    ~event_status:"approved")
+                 match
+                   persist_goal_approval_pending_confirm
+                     ctx
+                     ~goal:(goal_approval_pending_confirm_goal goal)
+                     ~opened_by:principal
+                     ~request_id:request.id
+                     ()
+                 with
+                 | Error msg ->
+                   error_result_typed ~tool_name ~start_time ~code:Internal_error msg
+                 | Ok () ->
+                   let result =
+                     finalize
+                       ~phase:Goal_phase.Awaiting_approval
+                       ~event_status:"approved"
+                   in
+                   if Tool_result.is_success result
+                   then
+                     emit_goal_event
+                       ctx
+                       ~goal_id
+                       ~event_type:"goal_approval_opened"
+                       ~payload:(`Assoc [ "request_id", `String request.id ])
+                   else clear_goal_approval_pending_confirm ctx ~goal_id;
+                   result)
                 else finalize ~phase:Goal_phase.Completed ~event_status:"approved"
               | Goal_verification.Failed ->
                 finalize ~phase:Goal_phase.Executing ~event_status:"rejected"))))

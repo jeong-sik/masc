@@ -45,6 +45,45 @@ let workspace_ctx ?(agent_name = "planner") config : Tool_workspace.context =
   { Tool_workspace.config; agent_name }
 ;;
 
+let with_operator_pending_confirm_hooks f =
+  let previous_trace = Atomic.get Workspace_hooks.operator_pending_confirm_trace_id_fn in
+  let previous_upsert = Atomic.get Workspace_hooks.operator_pending_confirm_upsert_fn in
+  let previous_remove =
+    Atomic.get Workspace_hooks.operator_pending_confirms_remove_by_target_fn
+  in
+  Atomic.set
+    Workspace_hooks.operator_pending_confirm_trace_id_fn
+    Operator_pending_confirm.trace_id;
+  Atomic.set
+    Workspace_hooks.operator_pending_confirm_upsert_fn
+    (fun config (entry : Workspace_hooks.operator_pending_confirm_request) ->
+       Operator_pending_confirm.upsert_pending_confirm
+         config
+         { token = entry.token
+         ; trace_id = entry.trace_id
+         ; actor = entry.actor
+         ; action_type = entry.action_type
+         ; target_type = entry.target_type
+         ; target_id = entry.target_id
+         ; payload = entry.payload
+         ; delegated_tool = entry.delegated_tool
+         ; created_at = entry.created_at
+         ; expires_at = entry.expires_at
+         };
+       Ok ());
+  Atomic.set
+    Workspace_hooks.operator_pending_confirms_remove_by_target_fn
+    Operator_pending_confirm.remove_pending_confirms_by_target;
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.operator_pending_confirm_trace_id_fn previous_trace;
+      Atomic.set Workspace_hooks.operator_pending_confirm_upsert_fn previous_upsert;
+      Atomic.set
+        Workspace_hooks.operator_pending_confirms_remove_by_target_fn
+        previous_remove)
+    f
+;;
+
 let parse_json_result (result : Tool_result.result) =
   if (Tool_result.is_success result)
   then Yojson.Safe.from_string ((Tool_result.message result))
@@ -695,6 +734,8 @@ let test_goal_transition_manual_reject_blocks_and_cancels_request () =
 ;;
 
 let test_goal_transition_approval_gate () =
+  with_operator_pending_confirm_hooks
+  @@ fun () ->
   with_workspace
   @@ fun config ->
   let verifier_policy =

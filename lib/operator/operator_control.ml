@@ -176,6 +176,8 @@ let execute_goal_action (_ctx : 'a context) (request : action_request) =
     let result =
       Workspace_goals.handle_goal_transition
         ~tool_name:"masc_goal_transition"
+        (* NDT-OK: remote operator confirmation executes at the wall-clock boundary;
+           replay uses the emitted Tool_result timestamp rather than this call site. *)
         ~start_time:(Unix.gettimeofday ())
         goal_ctx
         (`Assoc
@@ -544,6 +546,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
                    ("trace_id", `String entry.trace_id);
                    ("decision", `String "deny");
                    ("tool_name", `String entry.delegated_tool);
+                   (* DET-OK: absent non-goal denial output is encoded as explicit JSON null. *)
                    ("result", Option.value goal_denial_result ~default:`Null);
                    ("executed_action", pending_confirm_to_yojson entry);
                  ]))

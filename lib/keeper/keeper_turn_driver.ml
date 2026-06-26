@@ -392,6 +392,9 @@ module For_testing = struct
 
   let media_degrade_manifest_decision = media_degrade_manifest_decision
 
+  let accept_no_progress_should_try_next =
+    Keeper_turn_driver_try_runtime.For_testing.accept_no_progress_should_try_next
+
   let accept_no_progress_read_only_should_try_next =
     Keeper_turn_driver_try_runtime.For_testing
     .accept_no_progress_read_only_should_try_next

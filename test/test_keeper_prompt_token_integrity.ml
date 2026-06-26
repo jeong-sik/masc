@@ -14,6 +14,12 @@ let keeper = "test-keeper-p0-3"
 let total_unknown () = Metrics.metric_total metric_name
 let total_stripped () = Metrics.metric_total stripped_metric_name
 
+let read_file path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+
 let test_known_tokens_are_not_reported () =
   let prompt =
     String.concat " "
@@ -146,6 +152,16 @@ let test_case_insensitive_resolution () =
   Alcotest.(check (list string))
     "mixed-case known tokens resolve" [] unknowns
 
+let test_unified_system_prompt_has_no_unresolved_tokens () =
+  let path = "config/prompts/keeper.unified.system.md" in
+  let prompt = read_file path in
+  let unknowns =
+    Scanner.scan_text ~keeper_name:keeper ~source:System_prompt prompt
+  in
+  Alcotest.(check (list string))
+    "unified system prompt has no unresolved keeper/masc tokens"
+    [] unknowns
+
 (* ── strip_unresolved_tool_tokens (registry-driven sanitization) ── *)
 
 let test_strip_removes_unresolved_lowercase_token () =
@@ -212,6 +228,8 @@ let () =
             test_rendered_prompt_scans_all_surfaces;
           Alcotest.test_case "case insensitive resolution" `Quick
             test_case_insensitive_resolution;
+          Alcotest.test_case "unified system prompt has no unresolved tokens"
+            `Quick test_unified_system_prompt_has_no_unresolved_tokens;
         ] );
       ( "sanitization",
         [

@@ -153,14 +153,14 @@ let test_state_pending_count_integrity_under_concurrent_updates () =
   check int "concurrent pure computation leaves count at zero" 0 state.pending_tool_count
 ;;
 
-let test_keeper_event_bus_process_fallback_visible_from_uninitialized_domain () =
+let test_keeper_event_bus_is_intentionally_process_wide () =
   let bus = Agent_sdk.Event_bus.create () in
   Keeper_event_bus.set bus;
-  let worker = Domain.spawn (fun () -> Option.is_some (Keeper_event_bus.get ())) in
+  let worker = Domain.spawn (fun () -> Keeper_event_bus.get ()) in
   check
-    bool
-    "process fallback is visible from another domain"
-    true
+    (option pass)
+    "event bus is intentionally process-wide and visible from another domain"
+    (Some bus)
     (Domain.join worker)
 ;;
 
@@ -237,8 +237,8 @@ let () =
     ; ( "concurrency"
       , [ test_case "pure transitions under concurrent domains" `Quick
             test_state_pending_count_integrity_under_concurrent_updates
-        ; test_case "event bus fallback is visible cross-domain" `Quick
-            test_keeper_event_bus_process_fallback_visible_from_uninitialized_domain
+        ; test_case "event bus is intentionally process-wide" `Quick
+            test_keeper_event_bus_is_intentionally_process_wide
         ] )
     ; ( "background-drain"
       , [ test_case "continues after first poll" `Quick

@@ -9,6 +9,7 @@ module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
 module Consolidator = Masc.Keeper_memory_os_consolidator
+module Metrics = Masc.Otel_metric_store
 
 external unsetenv : string -> unit = "masc_test_unsetenv"
 
@@ -90,6 +91,28 @@ let render_if_enabled_for_test ~keeper_id ~now ~masc_root () =
     ~turn:1
     ~masc_root
     ()
+;;
+
+let memory_os_recall_unavailable_metric =
+  Keeper_metrics.(to_string MemoryOsRecallUnavailable)
+;;
+
+let recall_unavailable_metric_value reason =
+  Metrics.metric_value_or_zero memory_os_recall_unavailable_metric ~labels:[ "reason", reason ] ()
+;;
+
+let recent_recall_injection_failure_reason masc_root =
+  let store =
+    Dated_jsonl.create
+      ~base_dir:(Filename.concat masc_root "recall_injections")
+      ()
+  in
+  match Dated_jsonl.read_recent store 1 with
+  | [ json ] ->
+    (match Yojson.Safe.Util.(json |> member "failure_reason") with
+     | `String reason -> Some reason
+     | _ -> None)
+  | _ -> None
 ;;
 
 let has_memory_os_prompt_root path =
@@ -1135,6 +1158,10 @@ let test_librarian_runtime_preserves_unstructured_fallback () =
                 "fallback is ephemeral"
                 true
                 (fact.Types.category = Types.Ephemeral);
+              Alcotest.(check (option string))
+                "fallback diagnostic does not author claim_id"
+                None
+                fact.Types.claim_id;
               Alcotest.(check (float 0.001))
                 "fallback fact first_seen uses episode timestamp"
                 episode.Types.created_at
@@ -1172,9 +1199,82 @@ let test_librarian_runtime_preserves_unstructured_fallback () =
             (contains "unstructured_note" fact.Types.claim);
           Alcotest.(check (float 0.001))
             "persisted fact first_seen uses injected clock"
-            fallback_created_at
-            fact.Types.first_seen
+          fallback_created_at
+          fact.Types.first_seen
         | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts))))
+;;
+
+let test_librarian_unstructured_fallback_uses_exact_text_identity () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      with_eio (fun ~sw ~net ~clock ->
+        let keeper_id = "runtime-librarian-fallback-upsert-keeper" in
+        let inp : Librarian.input =
+          { Librarian.trace_id = "trace-runtime-fallback-upsert"
+          ; generation = 12
+          ; messages = [ text_message "Please remember repeated fallback shape." ]
+          }
+        in
+        let first_complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+          Ok (fake_response "first invalid librarian payload")
+        in
+        let second_complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+          Ok (fake_response "second invalid librarian payload with different text")
+        in
+        let run_once complete =
+          match
+            Librarian_runtime.extract_and_append_with_provider
+              ~complete
+              ~clock
+              ~timeout_sec:1.0
+              ~sw
+              ~net
+              ~keeper_id
+              ~provider_cfg:(test_provider_cfg ())
+              inp
+          with
+          | Error msg -> Alcotest.fail msg
+          | Ok episode -> episode
+        in
+        let first = run_once first_complete in
+        let second = run_once second_complete in
+        Alcotest.(check int)
+          "both fallback episodes are still evented"
+          2
+          (List.length (Memory_io.read_events_tail ~keeper_id ~n:10));
+        let facts = Memory_io.read_facts_all ~keeper_id in
+        Alcotest.(check int) "distinct diagnostics remain distinct facts" 2 (List.length facts);
+        Alcotest.(check bool)
+          "fallback diagnostics do not author claim_id"
+          true
+          (List.for_all (fun fact -> Option.is_none fact.Types.claim_id) facts);
+        Alcotest.(check bool)
+          "first raw note is preserved"
+          true
+          (List.exists
+             (fun fact -> contains "first invalid librarian payload" fact.Types.claim)
+             facts);
+        Alcotest.(check bool)
+          "second raw note is preserved"
+          true
+          (List.exists
+             (fun fact -> contains "second invalid librarian payload" fact.Types.claim)
+             facts);
+        (match first.Types.claims, second.Types.claims with
+         | [ first_fact ], [ second_fact ] ->
+          Alcotest.(check bool)
+            "first result has no claim_id"
+            true
+            (Option.is_none first_fact.Types.claim_id);
+          Alcotest.(check bool)
+            "second result has no claim_id"
+            true
+            (Option.is_none second_fact.Types.claim_id)
+         | first_claims, second_claims ->
+           Alcotest.failf
+             "expected one fallback fact in each result, got %d/%d"
+             (List.length first_claims)
+             (List.length second_claims)))))
 ;;
 
 let test_librarian_runtime_reports_fact_upsert_failure () =
@@ -1762,6 +1862,45 @@ let test_render_if_enabled_empty_store_yields_none () =
       | None -> ()
       | Some block -> Alcotest.failf "expected None for empty store, got %S" block))
 ;;
+
+let test_render_if_enabled_surfaces_prompt_render_failure () =
+  with_recall_env "true" (fun () ->
+    with_temp_keepers_dir (fun keepers_dir ->
+      Fun.protect
+        ~finally:Prompt_registry.clear
+        (fun () ->
+          let keeper_id = "virtual-memory-keeper" in
+          let now = 1_000_000.0 in
+          let reason = "prompt_render_error" in
+          let metric_before = recall_unavailable_metric_value reason in
+          Memory_io.append_fact
+            ~keeper_id
+            { (fact_fixture ~now ()) with Types.claim = "Hidden fact should not leak" };
+          Prompt_registry.clear ();
+          match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
+          | None -> Alcotest.fail "expected sanitized recall-unavailable block"
+          | Some block ->
+            Alcotest.(check bool)
+              "surfaces unavailable advisory"
+              true
+              (contains "Memory recall unavailable" block);
+            Alcotest.(check bool)
+              "classifies prompt failure without raw template error"
+              true
+              (contains "reason=prompt_render_error" block);
+            Alcotest.(check bool)
+              "does not render fact text after prompt failure"
+              false
+              (contains "Hidden fact should not leak" block);
+            Alcotest.(check (float 0.001))
+              "increments recall-unavailable metric"
+              (metric_before +. 1.0)
+              (recall_unavailable_metric_value reason);
+            Alcotest.(check (option string))
+              "ledger records failure reason"
+              (Some reason)
+              (recent_recall_injection_failure_reason keepers_dir))))
+  ;;
 
 let test_render_if_enabled_renders_persisted_memory () =
   with_recall_env "true" (fun () ->
@@ -3978,6 +4117,10 @@ let () =
             `Quick
             test_render_if_enabled_empty_store_yields_none
         ; Alcotest.test_case
+            "render_if_enabled surfaces prompt render failure"
+            `Quick
+            test_render_if_enabled_surfaces_prompt_render_failure
+        ; Alcotest.test_case
             "render_if_enabled renders persisted memory"
             `Quick
             test_render_if_enabled_renders_persisted_memory
@@ -4135,6 +4278,10 @@ let () =
             "unparseable output is preserved as unstructured fallback"
             `Quick
             test_librarian_runtime_preserves_unstructured_fallback
+        ; Alcotest.test_case
+            "unstructured fallback uses exact-text identity"
+            `Quick
+            test_librarian_unstructured_fallback_uses_exact_text_identity
         ; Alcotest.test_case
             "provider slot gate caps concurrency at capacity (#21376/#21230)"
             `Quick

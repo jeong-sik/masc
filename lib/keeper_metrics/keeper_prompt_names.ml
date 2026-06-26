@@ -22,6 +22,7 @@ let librarian_memory_consolidation = "keeper.librarian.memory_consolidation"
 let memory_os_recall_context = "keeper.memory_os_recall.context"
 let memory_os_recall_facts_section = "keeper.memory_os_recall.facts_section"
 let memory_os_recall_episodes_section = "keeper.memory_os_recall.episodes_section"
+let memory_os_recall_unavailable = "keeper.memory_os_recall.unavailable"
 
 (** Turn-intent substitution prose files. Each holds a single bullet (or
     short block) that the OCaml side injects into [turn_intent] when the

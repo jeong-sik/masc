@@ -22,6 +22,7 @@ val librarian_memory_consolidation : string
 val memory_os_recall_context : string
 val memory_os_recall_facts_section : string
 val memory_os_recall_episodes_section : string
+val memory_os_recall_unavailable : string
 
 (** Turn-intent substitution prose template keys. *)
 val turn_intent_claim_guidance_a : string

@@ -593,7 +593,17 @@ let runtime_id_of_masc_internal_error = function
   | Internal_bridge_exception _
   | Internal_contract_rejected _ -> "unknown"
 
-let accept_rejection_has_read_only_no_progress_retry_hint = function
+let accept_no_progress_retry_kind = function
+  | Accept_rejected
+      {
+        reason_kind = Some Accept_no_usable_progress;
+        response_shape = Some Accept_response_empty;
+        last_tool_effect = None;
+        any_mutating_tool = None;
+        tool_effects_seen = [];
+        _;
+      } ->
+    Some `Empty_no_progress
   | Accept_rejected
       {
         reason_kind = Some Accept_no_usable_progress;
@@ -603,7 +613,7 @@ let accept_rejection_has_read_only_no_progress_retry_hint = function
         tool_effects_seen;
         _;
       } ->
-    tool_effects_seen <> []
+    if tool_effects_seen = [] then None else Some `Read_only_no_progress
   | Accept_rejected _
   | Runtime_exhausted _
   | Capacity_backpressure _
@@ -617,7 +627,20 @@ let accept_rejection_has_read_only_no_progress_retry_hint = function
   | Internal_unhandled_exception _
   | Internal_bridge_exception _
   | Internal_contract_rejected _ ->
+    None
+
+let accept_rejection_has_read_only_no_progress_retry_hint err =
+  match accept_no_progress_retry_kind err with
+  | Some `Read_only_no_progress -> true
+  | Some `Empty_no_progress
+  | None ->
     false
+
+let accept_rejection_has_no_progress_retry_hint err =
+  match accept_no_progress_retry_kind err with
+  | Some (`Empty_no_progress | `Read_only_no_progress) ->
+    true
+  | None -> false
 
 let sdk_error_of_masc_internal_error err =
   Agent_sdk.Error.Internal

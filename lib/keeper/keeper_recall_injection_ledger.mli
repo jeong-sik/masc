@@ -15,21 +15,13 @@
       registry as the cost / receipt appenders.
     - Deterministic: keys are [claim_identity] outputs (the identity SSOT — the
       producer [claim_id] when present, else [normalize_claim]) and [trace_id:gN]
-      episode keys, so the same trace renders a byte-identical record. *)
+      episode keys, so the same trace renders a byte-identical record.
+    - Failure-visible: when recall returns an unavailable advisory, the optional
+      [failure_reason] records the bounded reason label instead of making the
+      side-effect record look like an empty successful injection. *)
 
 val to_json
-  :  keeper_id:string
-  -> trace_id:string
-  -> turn:int
-  -> injected_fact_keys:string list
-  -> injected_episode_keys:string list
-  -> n_facts_in_store:int
-  -> now:float
-  -> Yojson.Safe.t
-(** Pure record serialiser. Exposed for round-trip tests. *)
-
-val append
-  :  masc_root:string
+  :  ?failure_reason:string
   -> keeper_id:string
   -> trace_id:string
   -> turn:int
@@ -37,6 +29,22 @@ val append
   -> injected_episode_keys:string list
   -> n_facts_in_store:int
   -> now:float
+  -> unit
+  -> Yojson.Safe.t
+(** Pure record serialiser. Exposed for round-trip tests. [failure_reason],
+    when present, is a bounded reason label from the recall renderer. *)
+
+val append
+  :  ?failure_reason:string
+  -> masc_root:string
+  -> keeper_id:string
+  -> trace_id:string
+  -> turn:int
+  -> injected_fact_keys:string list
+  -> injected_episode_keys:string list
+  -> n_facts_in_store:int
+  -> now:float
+  -> unit
   -> unit
 (** Append one injection record. Best-effort: never raises except to re-raise
     [Eio.Cancel.Cancelled]. *)

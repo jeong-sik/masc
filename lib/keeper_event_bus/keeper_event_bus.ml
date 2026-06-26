@@ -1,13 +1,14 @@
-(** Keeper_event_bus — OAS Event_bus reference with domain-local override.
+(** Keeper_event_bus — shared OAS Event_bus reference.
 
     Holds the shared Event_bus instance set at server bootstrap. Separate
     module to avoid dependency cycles:
     Keeper_keepalive and Keeper_agent_run both depend on keeper
     modules that form cycles if they reference each other.
 
-    [Domain.DLS] stores a per-domain override. A process-wide fallback
-    preserves the previous lookup contract for domains that have not been
-    explicitly initialized.
+    The event bus itself is a process-safe message channel and is stored
+    in a process-wide [Atomic.t] intentionally.  This is NOT a precedent for
+    Eio resources ([Eio.Switch.t], [Eio.Net.t], clocks); those remain
+    per-domain via {!Masc_eio_env}.
 
     @since 2.255.0 *)
 

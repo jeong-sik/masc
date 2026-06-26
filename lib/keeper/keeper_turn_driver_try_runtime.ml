@@ -66,6 +66,12 @@ let is_accept_rejected_sdk_error err =
   | None ->
     false
 
+let accept_no_progress_should_try_next err =
+  match Keeper_internal_error.classify_masc_internal_error err with
+  | Some err ->
+    Keeper_internal_error.accept_rejection_has_no_progress_retry_hint err
+  | None -> false
+
 let accept_no_progress_read_only_should_try_next err =
   match Keeper_internal_error.classify_masc_internal_error err with
   | Some err ->
@@ -237,7 +243,7 @@ let run
          | Some http_err
            when (not is_last)
                 && (Runtime_attempt_fsm.should_try_next http_err
-                    || accept_no_progress_read_only_should_try_next original_error)
+                    || accept_no_progress_should_try_next original_error)
            ->
            loop checkpoint_after (Some http_err) rest
          | Some http_err ->
@@ -249,6 +255,8 @@ let run
   loop resume_checkpoint last_err candidates
 
 module For_testing = struct
+  let accept_no_progress_should_try_next = accept_no_progress_should_try_next
+
   let accept_no_progress_read_only_should_try_next =
     accept_no_progress_read_only_should_try_next
 end

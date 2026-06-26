@@ -41,7 +41,7 @@ let workspace_ctx ?(agent_name = "planner") config : Tool_workspace.context =
   { Tool_workspace.config; agent_name }
 ;;
 
-let seed_goal_operator config ~agent_name =
+let seed_goal_operator (config : Workspace.config) ~agent_name =
   Auth_credential_base.write_initial_admin config.base_path agent_name
 ;;
 
@@ -107,7 +107,7 @@ let create_goal_id config ~title =
   string_field body "goal_id"
 ;;
 
-let dispatch_transition_must_succeed ctx ~goal_id ~action =
+let dispatch_transition_must_succeed (ctx : Tool_workspace.context) ~goal_id ~action =
   match
     Tool_workspace.dispatch
       ctx

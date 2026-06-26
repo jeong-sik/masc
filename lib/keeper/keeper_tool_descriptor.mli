@@ -100,6 +100,9 @@ type t =
   (** Evaluation-only semantic tags emitted in route evidence. These tags
       support replay/harness scoring and are not runtime selection policy. *)
   ; eval_tags : string list
+  ; examples : Yojson.Safe.t list
+  (** Descriptor-owned discovery examples. Empty means the discovery projection
+      omits the [examples] field. *)
   }
 
 val executor_to_string : executor -> string

@@ -89,6 +89,7 @@ type t =
   ; validate_translated_input : bool
   ; receipt_labels : (string * string) list
   ; eval_tags : string list
+  ; examples : Yojson.Safe.t list
   }
 
 let executor_to_string = function
@@ -153,6 +154,20 @@ let runtime_handler_to_string = function
   | Tool_masc_fusion_dispatch -> "tool_masc_fusion_dispatch"
   | Tool_masc_fusion_status -> "tool_masc_fusion_status"
   | Tool_analyze_image -> "tool_analyze_image"
+;;
+
+let discovery_example ~label ?cwd ~executable ~argv () =
+  let input =
+    `Assoc
+      ([ "executable", `String executable
+       ; "argv", Json_util.json_string_list argv
+       ]
+       @
+       match cwd with
+       | Some cwd -> [ "cwd", `String cwd ]
+       | None -> [])
+  in
+  `Assoc [ "label", `String label; "input", input ]
 ;;
 
 let policy ?(visibility = Tool_catalog.Default) ?readonly ?readonly_of_input
@@ -439,6 +454,7 @@ let translate_search_files input =
 let search_files_readonly_of_input _input = Some true
 
 let descriptor_with_public_aliases
+      ?(examples = [])
       ~validate_translated_input
       ~public_aliases
       ~id
@@ -478,10 +494,12 @@ let descriptor_with_public_aliases
   ; validate_translated_input
   ; receipt_labels
   ; eval_tags = []
+  ; examples
   }
 ;;
 
 let descriptor
+      ?(examples = [])
       ~validate_translated_input
       ~id
       ~public_name
@@ -496,6 +514,7 @@ let descriptor
       ~translate
   =
   descriptor_with_public_aliases
+    ~examples
     ~validate_translated_input
     ~public_aliases:[]
     ~id
@@ -537,6 +556,32 @@ let public_descriptors =
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
       ~runtime_handler:Tool_execute
+      ~examples:
+        [ discovery_example
+            ~label:"Inspect pull request metadata"
+            ~cwd:"<repository-root>"
+            ~executable:"gh"
+            ~argv:
+              [ "pr"
+              ; "view"
+              ; "<pull-request-number>"
+              ; "--json"
+              ; "number,state,headRefOid"
+              ]
+            ()
+        ; discovery_example
+            ~label:"Read repository status"
+            ~cwd:"<repository-root>"
+            ~executable:"git"
+            ~argv:[ "status"; "--short" ]
+            ()
+        ; discovery_example
+            ~label:"Search source text"
+            ~cwd:"<repository-root>"
+            ~executable:"rg"
+            ~argv:[ "--line-number"; "<pattern>"; "<path>" ]
+            ()
+        ]
       ~validate_translated_input:true
       ~translate:translate_identity
   ; descriptor_with_public_aliases
@@ -1801,45 +1846,22 @@ let route_evidence_json d =
      @ policy_fields)
 ;;
 
-let assoc_member name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
-;;
-
-let string_list_json values =
-  `List (List.map (fun value -> `String value) values)
-;;
-
-let string_list_of_json = function
-  | `List values ->
-    List.filter_map
-      (function
-        | `String value -> Some value
-        | _ -> None)
-      values
-  | _ -> []
-;;
-
 let schema_property_names schema =
-  match assoc_member "properties" schema with
+  match Json_util.assoc_member_opt "properties" schema with
   | Some (`Assoc properties) -> List.map fst properties
   | _ -> []
 ;;
 
-let schema_required_names schema =
-  match assoc_member "required" schema with
-  | Some required -> string_list_of_json required
-  | None -> []
-;;
+let schema_required_names schema = Json_util.json_string_list_member "required" schema
 
 let schema_one_of_required_names schema =
-  match assoc_member "oneOf" schema with
+  match Json_util.assoc_member_opt "oneOf" schema with
   | Some (`List cases) ->
     List.filter_map
       (fun case ->
          match schema_required_names case with
          | [] -> None
-         | required -> Some (string_list_json required))
+         | required -> Some (Json_util.json_string_list required))
       cases
   | _ -> []
 ;;
@@ -1847,8 +1869,8 @@ let schema_one_of_required_names schema =
 let schema_shape_json schema =
   let one_of_required = schema_one_of_required_names schema in
   let base =
-    [ "properties", string_list_json (schema_property_names schema)
-    ; "required", string_list_json (schema_required_names schema)
+    [ "properties", Json_util.json_string_list (schema_property_names schema)
+    ; "required", Json_util.json_string_list (schema_required_names schema)
     ]
   in
   let fields =
@@ -1857,50 +1879,6 @@ let schema_shape_json schema =
     else ("one_of_required", `List one_of_required) :: base
   in
   `Assoc fields
-;;
-
-let execute_example ~label ?cwd ~executable ~argv () =
-  let input =
-    `Assoc
-      ([ "executable", `String executable
-       ; "argv", string_list_json argv
-       ]
-       @
-       match cwd with
-       | Some cwd -> [ "cwd", `String cwd ]
-       | None -> [])
-  in
-  `Assoc [ "label", `String label; "input", input ]
-;;
-
-let discovery_examples d =
-  match d.internal_name with
-  | "tool_execute" ->
-    [ execute_example
-        ~label:"GitHub PR metadata"
-        ~cwd:"repos/masc"
-        ~executable:"gh"
-        ~argv:[ "pr"; "view"; "123"; "--json"; "number,state,headRefOid" ]
-        ()
-    ; execute_example
-        ~label:"Git status"
-        ~cwd:"repos/masc"
-        ~executable:"git"
-        ~argv:[ "status"; "--short" ]
-        ()
-    ; execute_example
-        ~label:"Focused OCaml test target"
-        ~cwd:"repos/masc"
-        ~executable:"scripts/dune-local.sh"
-        ~argv:[ "build"; "test/test_keeper_tool_dispatch_runtime.exe" ]
-        ()
-    ]
-  | _ -> []
-;;
-
-let policy_group_of_effect_domain = function
-  | Some effect_domain -> Tool_catalog.effect_domain_to_string effect_domain
-  | None -> "unspecified"
 ;;
 
 let discovery_policy_json policy =
@@ -1913,7 +1891,9 @@ let discovery_policy_json policy =
          | Some effect_domain ->
            `String (Tool_catalog.effect_domain_to_string effect_domain)
          | None -> `Null) )
-    ; "policy_group", `String (policy_group_of_effect_domain policy.effect_domain)
+    ; ( "policy_group"
+      , Json_util.string_opt_to_json
+          (Option.map Tool_catalog.effect_domain_to_string policy.effect_domain) )
     ; "approval", `String (approval_to_string policy.approval)
     ; "retryable", `Bool policy.retryable
     ; "cwd_scope", Json_util.string_opt_to_json policy.cwd_scope
@@ -1923,18 +1903,23 @@ let discovery_policy_json policy =
 ;;
 
 let discovery_json d =
+  let examples_field =
+    match d.examples with
+    | [] -> []
+    | examples -> [ "examples", `List examples ]
+  in
   `Assoc
-    [ "id", `String d.id
-    ; "public_name", `String d.public_name
-    ; "public_aliases", string_list_json d.public_aliases
-    ; "internal_name", `String d.internal_name
-    ; "description", `String d.description
-    ; "executor", `String (executor_to_string d.executor)
-    ; "backend", `String (backend_to_string d.backend)
-    ; "sandbox", `String (sandbox_to_string d.sandbox)
-    ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
-    ; "policy", discovery_policy_json d.policy
-    ; "schema_shape", schema_shape_json d.input_schema
-    ; "examples", `List (discovery_examples d)
-    ]
+    ([ "id", `String d.id
+     ; "public_name", `String d.public_name
+     ; "public_aliases", Json_util.json_string_list d.public_aliases
+     ; "internal_name", `String d.internal_name
+     ; "description", `String d.description
+     ; "executor", `String (executor_to_string d.executor)
+     ; "backend", `String (backend_to_string d.backend)
+     ; "sandbox", `String (sandbox_to_string d.sandbox)
+     ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
+     ; "policy", discovery_policy_json d.policy
+     ; "schema_shape", schema_shape_json d.input_schema
+     ]
+     @ examples_field)
 ;;

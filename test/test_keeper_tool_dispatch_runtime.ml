@@ -514,8 +514,18 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (example_with_executable "gh");
   check bool "Execute examples include typed git argv" true
     (example_with_executable "git");
-  check bool "Execute examples include focused test wrapper" true
-    (example_with_executable "scripts/dune-local.sh")
+  check bool "Execute examples include search argv" true
+    (example_with_executable "rg");
+  check bool "Execute examples use neutral cwd placeholders" true
+    (List.for_all
+       (fun example ->
+          String.equal
+            "<repository-root>"
+            Yojson.Safe.Util.(member "input" example |> member "cwd" |> to_string))
+       examples);
+  let grep = find_descriptor "tool_search_files" in
+  check bool "non-execute descriptor omits examples field" true
+    (Yojson.Safe.Util.member "examples" grep = `Null)
 
 let test_execute_with_outcome_missing_file_is_failure () =
   with_exec_fixture "keeper_tool_dispatch_runtime_missing_file"

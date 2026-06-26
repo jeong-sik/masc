@@ -79,20 +79,22 @@ let assoc_string_list_opt name json =
   | Some _ -> None
 ;;
 
+let redact_git_push_argv executable argv =
+  match executable, argv with
+  | "git", "push" :: "-u" :: "origin" :: _ref :: rest ->
+      "push" :: "-u" :: "origin" :: "[REDACTED]" :: rest
+  | _, _ -> argv
+;;
+
 let typed_exec_command input =
   match Json_util.assoc_string_opt "executable" input with
   | Some executable ->
       (match assoc_string_list_opt "argv" input with
-       | Some argv -> Some (String.concat " " (executable :: argv))
+       | Some argv ->
+           let argv = redact_git_push_argv executable argv in
+           Some (String.concat " " (executable :: argv))
        | None -> None)
   | None -> None
-;;
-
-let redact_git_push_ref command =
-  match String.split_on_char ' ' command with
-  | "git" :: "push" :: "-u" :: "origin" :: _ref :: rest ->
-      String.concat " " (["git"; "push"; "-u"; "origin"; "[REDACTED]"] @ rest)
-  | _ -> command
 ;;
 
 let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_text =
@@ -108,13 +110,12 @@ let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_tex
     | None -> None
   in
   let command =
-    (match Json_util.assoc_string_opt "cmd" input with
-     | Some cmd -> Some cmd
-     | None -> (
-         match typed_exec_command input with
-         | Some _ as command -> command
-         | None -> Json_util.assoc_string_opt "op" input))
-    |> Option.map redact_git_push_ref
+    match Json_util.assoc_string_opt "cmd" input with
+    | Some cmd -> Some cmd
+    | None -> (
+        match typed_exec_command input with
+        | Some _ as command -> command
+        | None -> Json_util.assoc_string_opt "op" input)
   in
   let add_string name value fields =
     match value with

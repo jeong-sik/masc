@@ -237,25 +237,6 @@ let write_goal_task_links config links =
   | Error msg -> Log.Misc.warn "%s" msg
 ;;
 
-let write_goal_task_links_r config links =
-  let json = links_to_yojson links in
-  let primary_path = goal_task_links_path config in
-  let recovery_path = goal_task_links_recovery_path config in
-  match
-    write_json_result config primary_path json,
-    write_json_result config recovery_path json
-  with
-  | Ok (), Ok () -> Ok ()
-  | Error msg, Ok () ->
-      Error (Printf.sprintf "%s write failed: %s" primary_path msg)
-  | Ok (), Error msg ->
-      Error (Printf.sprintf "%s write failed: %s" recovery_path msg)
-  | Error primary_msg, Error recovery_msg ->
-      Error
-        (Printf.sprintf "%s write failed: %s; %s write failed: %s"
-           primary_path primary_msg recovery_path recovery_msg)
-;;
-
 let goal_task_links_lock_path config =
   Filename.concat (tasks_dir config) ".goal-task-links"
 ;;

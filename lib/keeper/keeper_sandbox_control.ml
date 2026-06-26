@@ -332,7 +332,11 @@ let playground_policy_reason = function
          fail-closed"
 
 let playground_repo_policy ~(base_path : string) ~(keeper_name : string) =
-  Keeper_repo_mapping.lookup_mapping ~base_path ~keeper_id:keeper_name
+  match Keeper_repo_mapping.lookup_mapping ~base_path ~keeper_id:keeper_name with
+  | Keeper_repo_mapping.Mapping_load_error msg as r ->
+    Keeper_repo_mapping.log_mapping_load_error_if_new ~keeper_id:keeper_name msg;
+    r
+  | r -> r
 
 let playground_repo_policy_fields policy ~repo_name =
   let field status allowed ?error () =
@@ -347,7 +351,8 @@ let playground_repo_policy_fields policy ~repo_name =
       | None -> []
       | Some msg -> [ ("policy_error", `String msg) ]
     in
-    ("policy_source", `String "keeper_repo_mappings.toml")
+    ( "policy_source"
+    , `String Keeper_repo_mapping.mappings_toml_basename )
     :: ("policy_status", `String status_text)
     :: ("policy_allowed", `Bool allowed)
     :: (reason_fields @ error_fields)

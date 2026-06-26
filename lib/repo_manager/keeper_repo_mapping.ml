@@ -4,6 +4,26 @@ let ( let* ) = Result.bind
 
 let logged_mapping_errors : (string, unit) Hashtbl.t = Hashtbl.create 4
 
+let mappings_toml_basename = "keeper_repo_mappings.toml"
+
+(** Cache for [load_all] results keyed by [base_path]. Invalidated on every
+    write so the in-memory view does not diverge from disk after mapping
+    mutations. *)
+let load_all_cache : (string, (keeper_repo_mapping list, string) result) Hashtbl.t =
+  Hashtbl.create 4
+;;
+
+let invalidate_load_all_cache ~base_path = Hashtbl.remove load_all_cache base_path
+
+let load_all_cached ~base_path =
+  match Hashtbl.find_opt load_all_cache base_path with
+  | Some result -> result
+  | None ->
+    let result = load_all ~base_path in
+    Hashtbl.replace load_all_cache base_path result;
+    result
+;;
+
 let mappings_toml_path base_path =
   (* RFC-0121: layout SSOT via [Config_dir_resolver]. *)
   Config_dir_resolver.keeper_repo_mappings_toml_path ~base_path
@@ -61,7 +81,7 @@ type mapping_lookup =
   | Mapping_load_error of string
 
 let lookup_mapping ~base_path ~keeper_id =
-  match load_all ~base_path with
+  match load_all_cached ~base_path with
   | Error msg -> Mapping_load_error msg
   | Ok mappings -> (
       match
@@ -72,7 +92,7 @@ let lookup_mapping ~base_path ~keeper_id =
       | Some mapping -> Mapping_found mapping
       | None -> Mapping_missing keeper_id)
 
-let find_mapping ~base_path keeper_id =
+let find_mapping ~base_path ~keeper_id =
   match lookup_mapping ~base_path ~keeper_id with
   | Mapping_found mapping -> Ok mapping
   | Mapping_missing keeper_id ->
@@ -80,7 +100,7 @@ let find_mapping ~base_path keeper_id =
   | Mapping_load_error msg -> Error msg
 
 let allowed_repositories ~keeper_id ~base_path =
-  let* mapping = find_mapping ~base_path keeper_id in
+  let* mapping = find_mapping ~base_path ~keeper_id in
   Ok mapping.repository_ids
 
 let is_wildcard s = s = "*"
@@ -122,17 +142,21 @@ let filter_repos_by_mapping (mapping : keeper_repo_mapping)
       (fun (r : repository) -> Hashtbl.mem mapping_id_set r.id)
       repos
 
+let log_mapping_load_error_if_new ~keeper_id msg =
+  if not (Hashtbl.mem logged_mapping_errors keeper_id) then begin
+    Hashtbl.add logged_mapping_errors keeper_id ();
+    Log.Misc.warn
+      "[KeeperRepoMapping] mapping load error for keeper %s \
+       — access denied fail-closed (error: %s)"
+      keeper_id msg
+  end
+;;
+
 let is_allowed ~keeper_id ~repository_id ~base_path =
   match lookup_mapping ~base_path ~keeper_id with
   | Mapping_missing _ -> false
   | Mapping_load_error msg ->
-      if not (Hashtbl.mem logged_mapping_errors keeper_id) then begin
-        Hashtbl.add logged_mapping_errors keeper_id ();
-        Log.Misc.warn
-          "[KeeperRepoMapping] is_allowed: mapping load error for keeper %s \
-           — access denied fail-closed (error: %s)"
-          keeper_id msg
-      end;
+      log_mapping_load_error_if_new ~keeper_id msg;
       false
   | Mapping_found mapping ->
       mapping_allows_repository mapping ~repository_id
@@ -160,11 +184,12 @@ let save_all ~base_path mappings =
     Fun.protect
       ~finally:(fun () -> close_out_noerr oc)
       (fun () -> output_string oc content);
+    invalidate_load_all_cache ~base_path;
     Ok ()
   with Sys_error msg -> Error msg
 
 let save_mapping ~base_path mapping =
-  let* mappings = load_all ~base_path in
+  let* mappings = load_all_cached ~base_path in
   let filtered =
     List.filter
       (fun (m : keeper_repo_mapping) ->

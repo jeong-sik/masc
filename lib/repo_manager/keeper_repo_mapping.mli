@@ -1,5 +1,10 @@
 open Repo_manager_types
 
+val mappings_toml_basename : string
+(** Basename of the keeper-repository mapping file.  Used as the policy
+    source label in playground-repo responses so the JSON field stays in
+    sync with the actual file name. *)
+
 val load_all : base_path:string -> (keeper_repo_mapping list, string) result
 (** [load_all ~base_path] loads all keeper-repository mappings from
     [.masc/config/keeper_repo_mappings.toml]. *)
@@ -26,10 +31,20 @@ val repository_scope_of_mapping : keeper_repo_mapping -> repository_scope
 (** [repository_scope_of_mapping mapping] parses raw TOML repository IDs into
     the closed repository-scope representation used for policy decisions. *)
 
+val find_mapping :
+  base_path:string -> keeper_id:string -> (keeper_repo_mapping, string) result
+(** [find_mapping ~base_path ~keeper_id] returns the mapping for [keeper_id]
+    or an error if it is missing or the file cannot be loaded. *)
+
 val allowed_repositories :
   keeper_id:string -> base_path:string -> (repository_id list, string) result
 (** [allowed_repositories ~keeper_id ~base_path] returns the list of
     repository IDs that [keeper_id] is allowed to access. *)
+
+val log_mapping_load_error_if_new : keeper_id:string -> string -> unit
+(** Log a mapping load error once per keeper so operators notice file
+    corruption/misconfiguration even on display-only paths that do not call
+    {!is_allowed}. *)
 
 val is_allowed :
   keeper_id:string -> repository_id:repository_id -> base_path:string -> bool

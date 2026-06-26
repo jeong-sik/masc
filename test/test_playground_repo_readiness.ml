@@ -58,26 +58,21 @@ let json_string key json =
 let json_string_opt key json =
   Yojson.Safe.Util.(json |> member key |> to_string_option)
 
-let keeper_mapping_path base_path =
-  Filename.concat base_path ".masc/config/keeper_repo_mappings.toml"
-
 let write_mapping_raw base_path contents =
-  let path = keeper_mapping_path base_path in
+  let path = Keeper_repo_mapping.mappings_toml_path base_path in
   mkdir_p (Filename.dirname path);
   write_file path contents
 
 let write_mapping base_path keeper_id repo_ids =
-  let entries =
-    String.concat ", " (List.map (Printf.sprintf "%S") repo_ids)
-  in
-  write_mapping_raw base_path
-    (Printf.sprintf "[mapping.%s]\nrepositories = [%s]\n" keeper_id entries)
+  let mapping = { Repo_manager_types.keeper_id; repository_ids = repo_ids } in
+  match Keeper_repo_mapping.save_mapping ~base_path mapping with
+  | Ok () -> ()
+  | Error msg -> fail ("write_mapping failed: " ^ msg)
 
 let create_playground_repo_marker ~config ~meta repo_name =
   let playground = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let repo_path = Filename.concat playground (Filename.concat "repos" repo_name) in
-  mkdir_p (Filename.concat repo_path ".git");
-  repo_path
+  mkdir_p (Filename.concat repo_path ".git")
 
 let playground_repo_entry ~config ~meta ~repo_name =
   let repos =
@@ -149,13 +144,16 @@ let test_playground_repos_mark_missing_mapping_denied () =
   let base_path = temp_dir "masc-playground-repo-policy" in
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
-  ignore (create_playground_repo_marker ~config ~meta "masc-mcp" : string);
+  create_playground_repo_marker ~config ~meta "masc-mcp";
   let json = playground_repo_entry ~config ~meta ~repo_name:"masc-mcp" in
   check bool "policy denies missing mapping" false
     (json_bool "policy_allowed" json);
-  check string "policy status" "denied_missing_mapping"
+  check string "policy status"
+    (Keeper_sandbox_control.playground_policy_status_to_string
+       Policy_denied_missing_mapping)
     (json_string "policy_status" json);
-  check string "policy source" "keeper_repo_mappings.toml"
+  check string "policy source"
+    Keeper_repo_mapping.mappings_toml_basename
     (json_string "policy_source" json)
 
 let test_playground_repos_mark_repo_not_in_mapping_denied () =
@@ -163,11 +161,13 @@ let test_playground_repos_mark_repo_not_in_mapping_denied () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   write_mapping base_path meta.name [ "oas" ];
-  ignore (create_playground_repo_marker ~config ~meta "masc" : string);
+  create_playground_repo_marker ~config ~meta "masc";
   let json = playground_repo_entry ~config ~meta ~repo_name:"masc" in
   check bool "policy denies unlisted repo" false
     (json_bool "policy_allowed" json);
-  check string "policy status" "denied_not_in_mapping"
+  check string "policy status"
+    (Keeper_sandbox_control.playground_policy_status_to_string
+       Policy_denied_not_in_mapping)
     (json_string "policy_status" json)
 
 let test_playground_repos_mark_wildcard_mapping_allowed () =
@@ -175,11 +175,13 @@ let test_playground_repos_mark_wildcard_mapping_allowed () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   write_mapping base_path meta.name [ "*" ];
-  ignore (create_playground_repo_marker ~config ~meta "masc" : string);
+  create_playground_repo_marker ~config ~meta "masc";
   let json = playground_repo_entry ~config ~meta ~repo_name:"masc" in
   check bool "policy allows wildcard mapping" true
     (json_bool "policy_allowed" json);
-  check string "policy status" "allowed" (json_string "policy_status" json)
+  check string "policy status"
+    (Keeper_sandbox_control.playground_policy_status_to_string Policy_allowed)
+    (json_string "policy_status" json)
 
 let test_playground_repos_mark_mapping_load_error_denied () =
   let base_path = temp_dir "masc-playground-repo-policy" in
@@ -187,11 +189,13 @@ let test_playground_repos_mark_mapping_load_error_denied () =
   let meta = make_meta "keeper-one" in
   write_mapping_raw base_path
     (Printf.sprintf "[mapping.%s]\nrepositories = 42\n" meta.name);
-  ignore (create_playground_repo_marker ~config ~meta "masc" : string);
+  create_playground_repo_marker ~config ~meta "masc";
   let json = playground_repo_entry ~config ~meta ~repo_name:"masc" in
   check bool "policy denies load error" false
     (json_bool "policy_allowed" json);
-  check string "policy status" "mapping_load_error"
+  check string "policy status"
+    (Keeper_sandbox_control.playground_policy_status_to_string
+       Policy_mapping_load_error)
     (json_string "policy_status" json);
   check bool "policy error is surfaced" true
     (String.length (json_string "policy_error" json) > 0)

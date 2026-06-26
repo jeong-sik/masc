@@ -16,18 +16,14 @@
     [Env_config_oas_bridge]. *)
 let min_timeout_s = 0.0
 
-let run_safe ~caller ~timeout_s fn =
+let run_safe ?clock ~caller ~timeout_s fn =
   if Float.classify_float timeout_s = FP_nan || Float.compare timeout_s 0.0 <= 0 then
     invalid_arg
       (Printf.sprintf
          "Masc_oas_bridge.run_safe: timeout_s must be positive or infinite \
           (got %.6g)"
          timeout_s);
-  let clock_opt =
-    match Masc_eio_env.get_opt () with
-    | Some { clock; _ } -> clock
-    | None -> None
-  in
+  let clock_opt = clock in
   let t0 =
     match clock_opt with
     | Some clock -> Eio.Time.now clock
@@ -135,6 +131,6 @@ let run_safe ~caller ~timeout_s fn =
     callers are evaluator/advisory flows with caller-specific defaults
     owned by [Env_config_oas_bridge]; removed runtime-invocation
     surfaces must not reappear as hidden timeout configuration. *)
-let run_with_caller ~caller fn =
+let run_with_caller ?clock ~caller fn =
   let timeout_s = Env_config_oas_bridge.timeout_sec ~caller () in
-  run_safe ~caller:(Env_config_oas_bridge.caller_key caller) ~timeout_s fn
+  run_safe ?clock ~caller:(Env_config_oas_bridge.caller_key caller) ~timeout_s fn

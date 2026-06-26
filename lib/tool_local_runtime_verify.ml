@@ -84,9 +84,10 @@ let error_message_of_http_error = Provider_http_error.to_message
     [Llm_provider.Complete.complete] because the goal is to verify the
     endpoint's wire protocol, not to run a full agent turn. *)
 let probe_chat_completion_compatible
+    ?(env : Masc_eio_env.t option)
     ?(timeout_sec = 5)
     (endpoint : Discovery_cache.endpoint_info) =
-  match Masc_eio_env.get_opt (), endpoint_model_id endpoint with
+  match env, endpoint_model_id endpoint with
   | None, _ -> (None, None)
   | _, None ->
       Log.Runtime_verify.warn "chat-completions probe skipped caller_surface=runtime_verify endpoint=%s reason=missing_model_id"
@@ -114,11 +115,11 @@ let probe_chat_completion_compatible
         ]
       in
       let run_completion () =
-        Llm_provider.Complete.complete ~sw:env.sw ~net:env.net
+        Llm_provider.Complete.complete ~sw:env.Masc_eio_env.sw ~net:env.Masc_eio_env.net
           ~config:provider_config ~messages ()
       in
       let outcome =
-        match env.clock with
+        match env.Masc_eio_env.clock with
         | Some clock -> (
             try Ok (Eio.Time.with_timeout_exn clock (Stdlib.Float.of_int timeout_sec) run_completion)
             with Eio.Time.Timeout -> Error "timeout")
@@ -179,7 +180,7 @@ let classify_runtime_blocker ~provider_reachable ~slot_reachable
   else
     (None, None)
 
-let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_ctx
+let runtime_verify_json_from_discovery ?(env : Masc_eio_env.t option) ?runtime_pool ?expected_slots ?expected_ctx
     ?expected_model endpoints () =
   let configured_capacity =
     endpoints
@@ -210,7 +211,7 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
         let actual_model = endpoint_model_id endpoint in
         let current_active = endpoint_busy_slots endpoint in
         let chat_probe_ok, chat_probe_error =
-          probe_chat_completion_compatible endpoint
+          probe_chat_completion_compatible ?env endpoint
         in
         let row =
           `Assoc
@@ -335,10 +336,10 @@ let runtime_verify_json_missing_discovery ?runtime_pool ?expected_slots
       ("runtimes", `List []);
     ]
 
-let runtime_verify_json ?runtime_pool ?expected_slots ?expected_ctx ?expected_model () =
+let runtime_verify_json ?(env : Masc_eio_env.t option) ?runtime_pool ?expected_slots ?expected_ctx ?expected_model () =
   match discovery_endpoints_for_pool runtime_pool with
   | Some endpoints ->
-      runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_ctx
+      runtime_verify_json_from_discovery ?env ?runtime_pool ?expected_slots ?expected_ctx
         ?expected_model endpoints ()
   | None ->
       runtime_verify_json_missing_discovery ?runtime_pool ?expected_slots ?expected_ctx

@@ -138,6 +138,7 @@ let classify_cancel ~cancel_classification inner_exn =
 ;;
 
 let run_with_timeout_and_fallback
+    ?clock
     ?(cancel_classification = Unknown_cancel)
     ~timeout_s
     fn
@@ -183,11 +184,9 @@ let run_with_timeout_and_fallback
       message;
     Error (Agent_sdk.Error.Internal message)
   in
-  match Masc_eio_env.get_opt () with
+  match clock with
   | None -> fail_without_clock ~site:"env_not_initialized"
-  | Some { Masc_eio_env.clock = None; _ } ->
-    fail_without_clock ~site:"clock_not_initialized"
-  | Some { Masc_eio_env.clock = Some clock; _ } ->
+  | Some clock ->
     let t0 = Eio.Time.now clock in
     let elapsed () = Eio.Time.now clock -. t0 in
     let timeout_error ~wall =

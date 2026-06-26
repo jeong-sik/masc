@@ -485,7 +485,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   in
 
   (* Initialize Eio environment for MODEL HTTP calls (cohttp-eio via OAS Provider) *)
-  Masc_eio_env.init ~sw ~net ~clock ();
   Discovery_cache.set_env ~sw ~net;
   Discovery_cache.set_base_path base_path;
   (* Start global rate-limit bucket cleanup loop to prevent unbounded growth of

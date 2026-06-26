@@ -8,9 +8,9 @@
     [caller] (#10094) labels the Otel_metric_store timeout counter so the
     operator can attribute timeouts to specific call sites.
     Raises [Invalid_argument] when [timeout_s] is not positive and finite. *)
-val run_safe
-  :  caller:string
-  -> timeout_s:float
+val run_safe :
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  caller:string -> timeout_s:float
   -> (unit -> ('a, Agent_sdk.Error.sdk_error) result)
   -> ('a, Agent_sdk.Error.sdk_error) result
 
@@ -28,7 +28,7 @@ val run_safe
     The env parser already clamps in the documented range, so this only
     surfaces when an operator pins a misconfiguration that bypasses the
     parser. *)
-val run_with_caller
-  :  caller:Env_config_oas_bridge.caller
-  -> (unit -> ('a, Agent_sdk.Error.sdk_error) result)
+val run_with_caller :
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  caller:Env_config_oas_bridge.caller -> (unit -> ('a, Agent_sdk.Error.sdk_error) result)
   -> ('a, Agent_sdk.Error.sdk_error) result

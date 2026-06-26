@@ -177,9 +177,9 @@ let ensure_runtime_reachable ?runtime_pool ~timeout_sec () =
   | Error err ->
       Error (Printf.sprintf "runtime unavailable: %s" err)
 
-let oas_completion_at ?runtime_pool ~model_id ~prompt ~max_tokens ~timeout_sec ()
+let oas_completion_at ?(env : Masc_eio_env.t option) ?runtime_pool ~model_id ~prompt ~max_tokens ~timeout_sec ()
     =
-  match Masc_eio_env.get_opt () with
+  match env with
   | None ->
       (* MASC-OAS boundary: raw curl fallback removed.
          Bench must run inside an Eio-managed context. *)
@@ -211,11 +211,11 @@ let oas_completion_at ?runtime_pool ~model_id ~prompt ~max_tokens ~timeout_sec (
             ]
           in
           let run_completion () =
-            Llm_provider.Complete.complete ~sw:env.sw ~net:env.net
+            Llm_provider.Complete.complete ~sw:env.Masc_eio_env.sw ~net:env.Masc_eio_env.net
               ~config:provider_config ~messages ()
           in
           let outcome =
-            match env.clock with
+            match env.Masc_eio_env.clock with
             | Some clock -> (
                 try Ok (Eio.Time.with_timeout_exn clock (Stdlib.Float.of_int timeout_sec) run_completion)
                 with Eio.Time.Timeout -> Error "timeout")
@@ -237,7 +237,7 @@ let oas_completion_at ?runtime_pool ~model_id ~prompt ~max_tokens ~timeout_sec (
           in
           (sample, runtime_id))
 
-let run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt ~max_tokens
+let run_bench ?(env : Masc_eio_env.t option) ?model_id ?runtime_pool ~parallelism ~rounds ~prompt ~max_tokens
     ~timeout_sec () =
   match ensure_runtime_reachable ?runtime_pool ~timeout_sec () with
   | Error _ as err -> err
@@ -256,7 +256,7 @@ let run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt ~max_tokens
                    | _ -> default_local_model_id ()
                  in
                  let sample, runtime_id =
-                   oas_completion_at ?runtime_pool ~model_id:resolved_model_id
+                   oas_completion_at ?env ?runtime_pool ~model_id:resolved_model_id
                      ~prompt ~max_tokens ~timeout_sec ()
                  in
                  update_runtime_breakdown runtime_breakdown ~runtime_id ~sample;

@@ -20,6 +20,7 @@ export interface RuntimeTomlModel {
   maxContext: number | null
   toolsSupport: boolean
   thinkingSupport: boolean
+  jsonSupport: boolean | null
   streaming: boolean
 }
 
@@ -217,6 +218,7 @@ function modelFromDocument(document: TomlDocument, id: string): RuntimeTomlModel
     maxContext: asNumber(values['max-context']),
     toolsSupport: asBoolean(values['tools-support']),
     thinkingSupport: asBoolean(values['thinking-support']),
+    jsonSupport: typeof values['json-support'] === 'boolean' ? values['json-support'] : null,
     streaming: asBoolean(values.streaming, true),
   }
 }
@@ -382,6 +384,47 @@ export function deleteRuntimeTomlSection(sourceText: string, sectionName: string
   return joinLines(lines)
 }
 
+export function cascadeDeleteProvider(sourceText: string, providerId: string): string {
+  const document = parseDocument(sourceText)
+  const env = parseRuntimeTomlEnvironment(sourceText)
+  const prefix = `providers.${providerId}`
+  const prefixDot = `providers.${providerId}.`
+  const bindingPrefixDot = `${providerId}.`
+  const sectionsToDelete = document.sections
+    .map(s => s.name)
+    .filter(name => name === prefix || name.startsWith(prefixDot) || name.startsWith(bindingPrefixDot))
+  
+  let next = sourceText
+  for (const sec of sectionsToDelete) {
+    next = deleteRuntimeTomlSection(next, sec)
+  }
+
+  // Also remove from runtime defaults/assignments if they reference this provider
+  const nextDocument = parseDocument(next)
+  const runtimeValues = sectionValues(nextDocument, 'runtime')
+  const toDeleteBindings = new Set(env.bindings.filter(b => b.providerId === providerId).map(b => b.id))
+  
+  if (typeof runtimeValues.default === 'string' && toDeleteBindings.has(runtimeValues.default)) {
+    next = deleteRuntimeTomlKey(next, 'runtime', 'default')
+  }
+  if (typeof runtimeValues.librarian === 'string' && toDeleteBindings.has(runtimeValues.librarian)) {
+    next = deleteRuntimeTomlKey(next, 'runtime', 'librarian')
+  }
+  if (typeof runtimeValues.cross_verifier === 'string' && toDeleteBindings.has(runtimeValues.cross_verifier)) {
+    next = deleteRuntimeTomlKey(next, 'runtime', 'cross_verifier')
+  }
+  
+  // Clean up assignments
+  const assignments = sectionValues(nextDocument, 'runtime.assignments')
+  for (const [key, value] of Object.entries(assignments)) {
+    if (typeof value === 'string' && toDeleteBindings.has(value)) {
+      next = deleteRuntimeTomlKey(next, 'runtime.assignments', key)
+    }
+  }
+  
+  return next
+}
+
 export function setRuntimeTomlDefault(sourceText: string, runtimeId: string): string {
   return setRuntimeTomlKey(sourceText, 'runtime', 'default', runtimeId)
 }
@@ -433,9 +476,10 @@ export function setRuntimeTomlProviderCredential(
 export function setRuntimeTomlModelField(
   sourceText: string,
   modelId: string,
-  field: 'api-name' | 'max-context' | 'tools-support' | 'thinking-support' | 'streaming',
-  value: string | number | boolean,
+  field: 'api-name' | 'max-context' | 'tools-support' | 'thinking-support' | 'json-support' | 'streaming',
+  value: string | number | boolean | null,
 ): string {
+  if (value === null) return deleteRuntimeTomlKey(sourceText, `models.${modelId}`, field)
   return setRuntimeTomlKey(sourceText, `models.${modelId}`, field, value)
 }
 

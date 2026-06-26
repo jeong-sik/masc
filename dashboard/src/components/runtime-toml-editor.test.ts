@@ -15,9 +15,11 @@ vi.mock('../api/dashboard', () => ({
 
 import { RuntimeTomlEditor } from './runtime-toml-editor'
 
+const MOCK_RUNTIME_PATH = '/tmp/.masc/config/runtime.toml'
+
 const baseConfig = {
   ok: true,
-  path: '/tmp/.masc/config/runtime.toml',
+  path: MOCK_RUNTIME_PATH,
   file_name: 'runtime.toml',
   source_text: '[runtime]\ndefault = "runpod_mtp.qwen"\n',
   reloaded: false,
@@ -115,7 +117,7 @@ describe('RuntimeTomlEditor', () => {
 
     await waitFor(() => {
       expect(apiMocks.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1)
-      expect(container.textContent).toContain('/tmp/.masc/config/runtime.toml')
+      expect(container.textContent).toContain(MOCK_RUNTIME_PATH)
     })
 
     const textarea = container.querySelector('textarea') as HTMLTextAreaElement
@@ -313,13 +315,13 @@ describe('RuntimeTomlEditor', () => {
     render(html`<${RuntimeTomlEditor} />`, container)
 
     await waitFor(() => {
-      expect(container.textContent).toContain('/tmp/.masc/config/runtime.toml')
+      expect(container.textContent).toContain(MOCK_RUNTIME_PATH)
     })
 
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-copy-path"]') as HTMLButtonElement)
 
     await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith('/tmp/.masc/config/runtime.toml')
+      expect(writeText).toHaveBeenCalledWith(MOCK_RUNTIME_PATH)
       expect(container.textContent).toContain('경로 복사됨')
     })
   })

@@ -508,9 +508,7 @@ html[data-skin="v2"] .rt-toml code {
    Settings surface card without the overlay wrapper. Drop the outer
    box-shadow since the host card provides its own chrome. */
 html[data-skin="v2"] .set-card-b-wide .rt-shell {
-  box-shadow: none;
   border-radius: var(--radius-md);
-  min-height: 36rem;
 }
 
 /* responsive — runtime.css:137 */

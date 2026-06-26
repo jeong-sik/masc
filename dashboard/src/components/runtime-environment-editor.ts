@@ -11,6 +11,7 @@ import {
   setRuntimeTomlModelField,
   setRuntimeTomlProviderCredential,
   setRuntimeTomlProviderField,
+  cascadeDeleteProvider,
   type RuntimeTomlBinding,
   type RuntimeTomlCredentialType,
   type RuntimeTomlEnvironment,
@@ -45,8 +46,9 @@ function firstId<T extends { id: string }>(items: T[]): string {
 }
 
 function parsePositiveInt(value: string): number | null {
-  const parsed = Number.parseInt(value, 10)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+  const trimmed = value.trim()
+  const parsed = Number.parseInt(trimmed, 10)
+  return Number.isFinite(parsed) && parsed > 0 && String(parsed) === trimmed ? parsed : null
 }
 
 function runtimeOptions(environment: RuntimeTomlEnvironment): string[] {
@@ -208,12 +210,14 @@ export function RuntimeEnvironmentEditor({
   ) {
     const binding = environment.bindings.find(b => b.id === value)
     const model = binding ? environment.models.find(m => m.id === binding.modelId) : null
-    const hasJsonCap = model ? (model.toolsSupport || model.thinkingSupport) : false
-    const capWarning = needsJson && !hasJsonCap && model
+    const hasJsonCap = model ? (typeof model.jsonSupport === 'boolean' ? model.jsonSupport : null) : false
+    const capWarning = needsJson && hasJsonCap === false && model
       ? html`<span class="rt-warn">JSON 모드 필요 · ${model.apiName} 미지원</span>`
-      : needsJson && !model
+      : needsJson && hasJsonCap === null && model
         ? html`<span class="rt-ok">JSON 모드 필요 · 모델 capability 미확인</span>`
-        : null
+        : needsJson && !model
+          ? html`<span class="rt-ok">JSON 모드 필요 · 모델 capability 미확인</span>`
+          : null
 
     return html`
       <div class="rt-lane">
@@ -352,8 +356,9 @@ export function RuntimeEnvironmentEditor({
                   style=${{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '11px' }}
                   disabled=${isDisabled}
                   onClick=${() => {
-                    if (typeof window !== 'undefined' && !window.confirm(`프로바이더 '${provider.id}'를 삭제할까요?`)) return
-                    onDraftChange(deleteRuntimeTomlSection(sourceText, `providers.${provider.id}`))
+                    const msg = `프로바이더 '${provider.id}'를 삭제할까요? 관련 모델 바인딩 및 런타임 할당이 모두 삭제됩니다.`
+                    if (typeof window !== 'undefined' && !window.confirm(msg)) return
+                    onDraftChange(cascadeDeleteProvider(sourceText, provider.id))
                   }}
                   data-testid=${`runtime-provider-delete-${provider.id}`}
                 >프로바이더 삭제</button>
@@ -405,8 +410,8 @@ export function RuntimeEnvironmentEditor({
                   aria-label=${`${model.id} max-context`}
                   onInput=${(event: Event) => {
                     const raw = (event.currentTarget as HTMLInputElement).value
-                    const parsed = raw.trim() === '' ? 0 : Number.parseInt(raw, 10)
-                    if (Number.isFinite(parsed)) {
+                    const parsed = raw.trim() === '' ? null : parsePositiveInt(raw)
+                    if (parsed !== undefined) {
                       onDraftChange(setRuntimeTomlModelField(sourceText, model.id, 'max-context', parsed))
                     }
                   }}

@@ -185,7 +185,7 @@ let run_with_timeout_and_fallback
     Error (Agent_sdk.Error.Internal message)
   in
   match clock with
-  | None -> fail_without_clock ~site:"env_not_initialized"
+  | None -> fail_without_clock ~site:"clock_not_provided"
   | Some clock ->
     let t0 = Eio.Time.now clock in
     let elapsed () = Eio.Time.now clock -. t0 in

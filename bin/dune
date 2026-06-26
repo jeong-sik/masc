@@ -249,7 +249,8 @@
   masc_tui_types
   masc_tui_ansi
   masc_tui_render
-  masc_tui_loader)
+  masc_tui_loader
+  masc_tui_http)
  (public_name masc-tui)
  (package masc)
  (libraries

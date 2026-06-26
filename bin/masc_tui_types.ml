@@ -29,13 +29,150 @@ type msg_entry = {
   me_timestamp: string;
 }
 
-(** TUI view mode *)
-type view_mode =
-  | Dashboard
+(** Attention item for the Overview surface *)
+type attention_item = {
+  ai_kind: string;
+  ai_severity: string;
+  ai_summary: string;
+  ai_target_type: string;
+  ai_target_id: string option;
+}
+
+(** Board post (light projection for list view) *)
+type board_post = {
+  bp_id: string;
+  bp_author: string;
+  bp_title: string;
+  bp_body: string;
+  bp_votes: int;
+  bp_comment_count: int;
+  bp_created_at: string;
+}
+
+(** Board comment *)
+type board_comment = {
+  bc_id: string;
+  bc_author: string;
+  bc_content: string;
+  bc_created_at: string;
+}
+
+(** Board surface sub-mode *)
+type board_mode =
+  | Board_list
+  | Board_read of string
+
+(** Planning surface sub-mode *)
+type planning_mode =
+  | Planning_list
+  | Planning_detail of string
+
+(** Approval / pending confirmation item *)
+type approval_item = {
+  ap_token: string;
+  ap_actor: string;
+  ap_action_type: string;
+  ap_target_type: string;
+  ap_target_id: string option;
+  ap_delegated_tool: string;
+  ap_summary: string;
+}
+
+(** Overview snapshot from /api/v1/dashboard/briefing *)
+type overview_snapshot = {
+  ov_workspace_health: string;
+  ov_cluster: string;
+  ov_project: string;
+  ov_active_agents: int;
+  ov_pending_approvals: int;
+  ov_incident_count: int;
+  ov_attention_items: attention_item list;
+  ov_top_attention: attention_item option;
+  ov_pending_confirms: approval_item list;
+  ov_generated_at: string;
+}
+
+(** Planning goal from /api/v1/dashboard/planning *)
+type planning_goal = {
+  pg_id: string;
+  pg_title: string;
+  pg_status: string;
+  pg_phase: string;
+  pg_priority: int;
+  pg_due_date: string option;
+  pg_parent_goal_id: string option;
+  pg_metric: string option;
+  pg_target_value: string option;
+}
+
+(** Planning rollup from /api/v1/dashboard/planning *)
+type planning_rollup = {
+  pr_active: int;
+  pr_paused: int;
+  pr_done: int;
+  pr_dropped: int;
+}
+
+(** Planning task backlog summary *)
+type planning_backlog = {
+  pb_todo: int;
+  pb_claimed: int;
+  pb_running: int;
+  pb_done: int;
+  pb_cancelled: int;
+}
+
+(** Planning snapshot from /api/v1/dashboard/planning *)
+type planning_snapshot = {
+  pl_goals: planning_goal list;
+  pl_rollup: planning_rollup;
+  pl_backlog: planning_backlog;
+  pl_generated_at: string;
+}
+
+(** Sub-mode inside the Keepers surface *)
+type keeper_mode =
   | Keeper_list
   | Keeper_detail
   | Keeper_logs
   | Keeper_message
+
+(** Monitoring sub-sections *)
+type monitoring_section =
+  | Agents
+  | Fleet_health
+  | Runtime
+  | Observatory
+  | Transport_health
+
+(** Workspace sub-sections *)
+type workspace_section =
+  | Work
+  | Planning
+  | Repositories
+  | Verification
+
+(** Lab sub-sections *)
+type lab_section =
+  | Tools
+  | Harness
+  | Keeper_memory_health
+
+(** Top-level TUI surface — aligned with Dashboard V2 navigation. *)
+type surface =
+  | Overview
+  | Monitoring of monitoring_section
+  | Keepers of keeper_mode
+  | Board
+  | Approvals
+  | Planning
+  | Command
+  | Workspace of workspace_section
+  | Lab of lab_section
+  | Logs
+
+(** Backward-compatible alias. *)
+type view_mode = surface
 
 (** Dashboard state *)
 type state = {
@@ -53,6 +190,17 @@ type state = {
   mutable live_context_tokens: int;
   mutable live_context_max: int;
   mutable live_message_count: int;
+  mutable overview: overview_snapshot option;
+  mutable approval_cursor: int;
+  mutable board_posts: board_post list;
+  mutable board_comments: board_comment list;
+  mutable board_cursor: int;
+  mutable board_scroll: int;
+  mutable board_mode: board_mode;
+  mutable planning: planning_snapshot option;
+  mutable planning_cursor: int;
+  mutable planning_scroll: int;
+  mutable planning_mode: planning_mode;
   mutable msg_input: Buffer.t;
   mutable msg_history: msg_entry list;
   mutable msg_sending: bool;
@@ -70,7 +218,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   keepers = [];
   connection_status = "disconnected";
   last_refresh = 0.0;
-  view = Dashboard;
+  view = Overview;
   keeper_cursor = 0;
   log_entries = [];
   log_scroll = 0;
@@ -78,6 +226,17 @@ let create_state ~workspace ~port ~refresh_interval = {
   live_context_tokens = 0;
   live_context_max = 0;
   live_message_count = 0;
+  overview = None;
+  approval_cursor = 0;
+  board_posts = [];
+  board_comments = [];
+  board_cursor = 0;
+  board_scroll = 0;
+  board_mode = Board_list;
+  planning = None;
+  planning_cursor = 0;
+  planning_scroll = 0;
+  planning_mode = Planning_list;
   msg_input = Buffer.create 256;
   msg_history = [];
   msg_sending = false;

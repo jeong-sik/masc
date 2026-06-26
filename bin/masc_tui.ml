@@ -1,4 +1,3 @@
-[@@@warning "-32-69"]
 open Masc_tui_types
 open Masc_tui_ansi
 open Masc_tui_render
@@ -134,7 +133,7 @@ let parse_args () =
 let handle_message_key (state : state) (base_path : string) (key : string) : bool =
   match key with
   | "esc" ->
-    state.view <- Keeper_detail;
+    state.view <- Keepers Keeper_detail;
     state.detail_scroll <- 0;
     true
   | "\r" | "\n" ->
@@ -207,6 +206,7 @@ let handle_message_key (state : state) (base_path : string) (key : string) : boo
 let main () =
   let (base_path, workspace, port, refresh) = parse_args () in
   let state = create_state ~workspace ~port ~refresh_interval:refresh in
+  state.view <- Overview;
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
@@ -225,6 +225,11 @@ let main () =
 
   (* Initial load *)
   load_from_masc_dir state base_path;
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  state.overview <- load_overview ~host ~port;
+  state.board_posts <- load_board_list ~host ~port;
+  state.planning <- load_planning ~host ~port;
   add_event state "system" "TUI started";
   state.connection_status <- "connected";
 
@@ -235,121 +240,294 @@ let main () =
       (* Check for input *)
       let key = read_key () in
       (match key with
-       | Some k when state.view = Keeper_message ->
+       | Some k when state.view = Keepers Keeper_message ->
            let _handled = handle_message_key state base_path k in
            ()
        | Some "q" | Some "Q" -> raise Break
+       | Some "y" | Some "Y" ->
+           (match state.view with
+            | Approvals ->
+                (match state.overview with
+                 | None -> ()
+                 | Some o ->
+                     (match List.nth_opt o.ov_pending_confirms state.approval_cursor with
+                      | Some a ->
+                          let host = Env_config_core.masc_host () in
+                          let port = state.port in
+                          (match Masc_tui_http.post_operator_confirm ~host ~port ~token:a.ap_token ~decision:"confirm" with
+                           | Ok _ ->
+                               add_event state "system" (Printf.sprintf "Confirmed: %s" a.ap_summary);
+                               state.overview <- load_overview ~host ~port;
+                               state.approval_cursor <- 0
+                           | Error err ->
+                               add_event state "error" (Printf.sprintf "Confirm failed: %s" err))
+                      | None -> ()))
+            | _ -> ())
+       | Some "n" | Some "N" ->
+           (match state.view with
+            | Approvals ->
+                (match state.overview with
+                 | None -> ()
+                 | Some o ->
+                     (match List.nth_opt o.ov_pending_confirms state.approval_cursor with
+                      | Some a ->
+                          let host = Env_config_core.masc_host () in
+                          let port = state.port in
+                          (match Masc_tui_http.post_operator_confirm ~host ~port ~token:a.ap_token ~decision:"deny" with
+                           | Ok _ ->
+                               add_event state "system" (Printf.sprintf "Denied: %s" a.ap_summary);
+                               state.overview <- load_overview ~host ~port;
+                               state.approval_cursor <- 0
+                           | Error err ->
+                               add_event state "error" (Printf.sprintf "Deny failed: %s" err))
+                      | None -> ()))
+            | _ -> ())
        | Some "r" | Some "R" ->
            load_from_masc_dir state base_path;
-           (* Also reload logs if in log view *)
+           let host = Env_config_core.masc_host () in
+           let port = state.port in
+           state.overview <- load_overview ~host ~port;
+           state.board_posts <- load_board_list ~host ~port;
+           state.planning <- load_planning ~host ~port;
+           (* Also reload logs / board / planning detail if viewing them *)
            (match state.view with
-            | Keeper_logs ->
+            | Keepers Keeper_logs ->
                 (match List.nth_opt state.keepers state.keeper_cursor with
                  | Some k ->
                      state.log_entries <- load_keeper_logs base_path k.k_name 200
                  | None -> ())
-            | Dashboard | Keeper_list | Keeper_detail | Keeper_message -> ());
+            | Board ->
+                (match state.board_mode with
+                 | Board_read post_id ->
+                     (match load_board_post ~host ~port ~post_id with
+                      | Some (post, comments) ->
+                          state.board_mode <- Board_read post_id;
+                          state.board_comments <- comments;
+                          (* Refresh post metadata in list *)
+                          state.board_posts <-
+                            post :: List.filter (fun p -> p.bp_id <> post_id) state.board_posts
+                      | None -> state.board_mode <- Board_list)
+                 | Board_list -> ())
+            | Planning ->
+                (match state.planning_mode with
+                 | Planning_detail goal_id ->
+                     (match state.planning with
+                      | Some p ->
+                          (match List.find_opt (fun g -> g.pg_id = goal_id) p.pl_goals with
+                           | Some _ -> ()
+                           | None -> state.planning_mode <- Planning_list)
+                      | None -> state.planning_mode <- Planning_list)
+                 | Planning_list -> ())
+            | Overview | Keepers Keeper_list | Keepers Keeper_detail | Keepers Keeper_message
+            | Approvals | Command | Workspace _ | Lab _ | Logs | Monitoring _ -> ());
            add_event state "system" "Manual refresh"
        | Some "\t" ->
-           (* Tab toggles between Dashboard and Keeper_list *)
+           (* Tab cycles through primary surfaces *)
            (match state.view with
-            | Dashboard -> state.view <- Keeper_list
-            | Keeper_list -> state.view <- Dashboard
-            | Keeper_detail ->
-                state.view <- Dashboard;
-                state.detail_scroll <- 0
-            | Keeper_logs ->
-                state.view <- Dashboard;
-                state.log_scroll <- 0
-            | Keeper_message ->
-                state.view <- Dashboard)
+            | Overview -> state.view <- Keepers Keeper_list
+            | Keepers _ -> state.view <- Approvals
+            | Approvals -> state.view <- Board
+            | Board -> state.view <- Planning
+            | Planning -> state.view <- Command
+            | Command -> state.view <- Workspace Work
+            | Workspace _ -> state.view <- Lab Tools
+            | Lab _ -> state.view <- Logs
+            | Logs -> state.view <- Overview
+            | Monitoring _ -> state.view <- Overview)
        | Some "esc" ->
            (* Esc goes back *)
            (match state.view with
-            | Keeper_detail ->
-                state.view <- Keeper_list;
+            | Keepers Keeper_detail ->
+                state.view <- Keepers Keeper_list;
                 state.detail_scroll <- 0
-            | Keeper_logs ->
-                state.view <- Keeper_detail;
+            | Keepers Keeper_logs ->
+                state.view <- Keepers Keeper_detail;
                 state.log_scroll <- 0;
                 state.detail_scroll <- 0
-            | Keeper_message ->
-                state.view <- Keeper_detail;
+            | Keepers Keeper_message ->
+                state.view <- Keepers Keeper_detail;
                 state.detail_scroll <- 0
-            | Dashboard | Keeper_list -> ())
+            | Board ->
+                (match state.board_mode with
+                 | Board_read _ ->
+                     state.board_mode <- Board_list;
+                     state.board_scroll <- 0
+                 | Board_list -> ())
+            | Planning ->
+                (match state.planning_mode with
+                 | Planning_detail _ ->
+                     state.planning_mode <- Planning_list;
+                     state.planning_scroll <- 0
+                 | Planning_list -> ())
+            | Overview | Keepers Keeper_list | Approvals | Command | Workspace _ | Lab _ | Logs | Monitoring _ -> ())
        | Some "j" | Some "down" ->
            (match state.view with
-            | Keeper_list ->
+            | Keepers Keeper_list ->
                 if state.keeper_cursor < List.length state.keepers - 1 then begin
                   state.keeper_cursor <- state.keeper_cursor + 1;
                   (match List.nth_opt state.keepers state.keeper_cursor with
                    | Some k -> load_live_context state base_path k.k_name
                    | None -> ())
                 end
-            | Keeper_detail ->
+            | Keepers Keeper_detail ->
                 state.detail_scroll <- state.detail_scroll + 1
-            | Keeper_logs ->
+            | Keepers Keeper_logs ->
                 state.log_scroll <- state.log_scroll + 1
-            | Dashboard | Keeper_message -> ())
+            | Approvals ->
+                let count = match state.overview with None -> 0 | Some o -> List.length o.ov_pending_confirms in
+                if state.approval_cursor < count - 1 then
+                  state.approval_cursor <- state.approval_cursor + 1
+            | Board ->
+                (match state.board_mode with
+                 | Board_list ->
+                     if state.board_cursor < List.length state.board_posts - 1 then
+                       state.board_cursor <- state.board_cursor + 1
+                 | Board_read _ ->
+                     state.board_scroll <- state.board_scroll + 1)
+            | Planning ->
+                (match state.planning_mode with
+                 | Planning_list ->
+                     let goals = match state.planning with None -> [] | Some p -> p.pl_goals in
+                     if state.planning_cursor < List.length goals - 1 then
+                       state.planning_cursor <- state.planning_cursor + 1
+                 | Planning_detail _ ->
+                     state.planning_scroll <- state.planning_scroll + 1)
+            | Overview | Keepers Keeper_message | Command | Workspace _ | Lab _ | Logs | Monitoring _ -> ())
        | Some "k" | Some "up" ->
            (match state.view with
-            | Keeper_list ->
+            | Keepers Keeper_list ->
                 if state.keeper_cursor > 0 then begin
                   state.keeper_cursor <- state.keeper_cursor - 1;
                   (match List.nth_opt state.keepers state.keeper_cursor with
                    | Some k -> load_live_context state base_path k.k_name
                    | None -> ())
                 end
-            | Keeper_detail ->
+            | Keepers Keeper_detail ->
                 if state.detail_scroll > 0 then
                   state.detail_scroll <- state.detail_scroll - 1
-            | Keeper_logs ->
+            | Keepers Keeper_logs ->
                 if state.log_scroll > 0 then
                   state.log_scroll <- state.log_scroll - 1
-            | Dashboard | Keeper_message -> ())
+            | Approvals ->
+                if state.approval_cursor > 0 then
+                  state.approval_cursor <- state.approval_cursor - 1
+            | Board ->
+                (match state.board_mode with
+                 | Board_list ->
+                     if state.board_cursor > 0 then
+                       state.board_cursor <- state.board_cursor - 1
+                 | Board_read _ ->
+                     if state.board_scroll > 0 then
+                       state.board_scroll <- state.board_scroll - 1)
+            | Planning ->
+                (match state.planning_mode with
+                 | Planning_list ->
+                     if state.planning_cursor > 0 then
+                       state.planning_cursor <- state.planning_cursor - 1
+                 | Planning_detail _ ->
+                     if state.planning_scroll > 0 then
+                       state.planning_scroll <- state.planning_scroll - 1)
+            | Overview | Keepers Keeper_message | Command | Workspace _ | Lab _ | Logs | Monitoring _ -> ())
        | Some "\r" | Some "\n" ->
            (* Enter opens detail from list *)
            (match state.view with
-            | Keeper_list ->
+            | Keepers Keeper_list ->
                 (match List.nth_opt state.keepers state.keeper_cursor with
                  | Some k ->
-                     state.view <- Keeper_detail;
+                     state.view <- Keepers Keeper_detail;
                      state.detail_scroll <- 0;
                      load_live_context state base_path k.k_name
                  | None -> ())
-            | Dashboard | Keeper_detail | Keeper_logs | Keeper_message -> ())
+            | Board ->
+                (match state.board_mode with
+                 | Board_list ->
+                     (match List.nth_opt state.board_posts state.board_cursor with
+                      | Some p ->
+                          let host = Env_config_core.masc_host () in
+                          let port = state.port in
+                          (match load_board_post ~host ~port ~post_id:p.bp_id with
+                           | Some (post, comments) ->
+                               state.board_mode <- Board_read p.bp_id;
+                               state.board_scroll <- 0;
+                               state.board_comments <- comments;
+                               (* Refresh post metadata in list *)
+                               state.board_posts <-
+                                 post :: List.filter (fun x -> x.bp_id <> p.bp_id) state.board_posts
+                           | None -> add_event state "error" (Printf.sprintf "Failed to load board post %s" p.bp_id))
+                      | None -> ())
+                 | Board_read _ -> ())
+            | Planning ->
+                (match state.planning_mode with
+                 | Planning_list ->
+                     let goals = match state.planning with None -> [] | Some p -> p.pl_goals in
+                     (match List.nth_opt goals state.planning_cursor with
+                      | Some g ->
+                          state.planning_mode <- Planning_detail g.pg_id;
+                          state.planning_scroll <- 0
+                      | None -> ())
+                 | Planning_detail _ -> ())
+            | Overview | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_message
+            | Approvals | Command | Workspace _ | Lab _ | Logs | Monitoring _ -> ())
        | Some "l" | Some "L" ->
            (* L opens log view from detail *)
            (match state.view with
-            | Keeper_detail ->
+            | Keepers Keeper_detail ->
                 (match List.nth_opt state.keepers state.keeper_cursor with
                  | Some k ->
                      state.log_entries <- load_keeper_logs base_path k.k_name 200;
                      state.log_scroll <- max 0 (List.length state.log_entries - 1);
-                     state.view <- Keeper_logs
+                     state.view <- Keepers Keeper_logs
                  | None -> ())
-            | Dashboard | Keeper_list | Keeper_logs | Keeper_message -> ())
+            | Overview | Keepers Keeper_list | Keepers Keeper_logs | Keepers Keeper_message
+            | Board | Approvals | Planning | Command | Workspace _ | Lab _ | Logs | Monitoring _ -> ())
        | Some "m" | Some "M" ->
            (* M opens message view from detail *)
            (match state.view with
-            | Keeper_detail when state.keeper_cursor < List.length state.keepers ->
+            | Keepers Keeper_detail when state.keeper_cursor < List.length state.keepers ->
                 Buffer.clear state.msg_input;
-                state.view <- Keeper_message
-            | Keeper_detail | Dashboard | Keeper_list | Keeper_logs | Keeper_message -> ())
+                state.view <- Keepers Keeper_message
+            | Keepers Keeper_detail | Overview | Keepers Keeper_list | Keepers Keeper_logs | Keepers Keeper_message
+            | Board | Approvals | Planning | Command | Workspace _ | Lab _ | Logs | Monitoring _ -> ())
        | _ -> ());
 
       (* Periodic refresh *)
       let now = Unix.gettimeofday () in
       if now -. !last_check >= refresh then begin
         load_from_masc_dir state base_path;
-        (* Also refresh logs if viewing them *)
+        let host = Env_config_core.masc_host () in
+        let port = state.port in
+        state.overview <- load_overview ~host ~port;
+        state.board_posts <- load_board_list ~host ~port;
+        state.planning <- load_planning ~host ~port;
+        (* Also refresh logs / board / planning detail if viewing them *)
         (match state.view with
-         | Keeper_logs ->
+         | Keepers Keeper_logs ->
              (match List.nth_opt state.keepers state.keeper_cursor with
               | Some k ->
                   state.log_entries <- load_keeper_logs base_path k.k_name 200
               | None -> ())
-         | Dashboard | Keeper_list | Keeper_detail | Keeper_message -> ());
+         | Board ->
+             (match state.board_mode with
+              | Board_read post_id ->
+                  (match load_board_post ~host ~port ~post_id with
+                   | Some (post, comments) ->
+                       state.board_comments <- comments;
+                       state.board_posts <-
+                         post :: List.filter (fun p -> p.bp_id <> post_id) state.board_posts
+                   | None -> state.board_mode <- Board_list)
+              | Board_list -> ())
+         | Planning ->
+             (match state.planning_mode with
+              | Planning_detail goal_id ->
+                  (match state.planning with
+                   | Some p ->
+                       (match List.find_opt (fun g -> g.pg_id = goal_id) p.pl_goals with
+                        | Some _ -> ()
+                        | None -> state.planning_mode <- Planning_list)
+                   | None -> state.planning_mode <- Planning_list)
+              | Planning_list -> ())
+         | Overview | Keepers Keeper_list | Keepers Keeper_detail | Keepers Keeper_message
+         | Approvals | Command | Workspace _ | Lab _ | Logs | Monitoring _ -> ());
         last_check := now
       end;
 

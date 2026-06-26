@@ -2,6 +2,7 @@
 
 open Masc_tui_types
 open Tui_decode
+open Masc_tui_http
 
 let report path err =
   Printf.eprintf "[masc-tui] decode failed for %s: %s\n%!" path err
@@ -226,3 +227,239 @@ let add_event (state : state) event_type content =
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let ev = { timestamp; event_type; content } in
   state.events <- ev :: (List.filteri (fun i _ -> i < 10) state.events)
+
+(** Overview JSON decoding helpers *)
+let string_field_default json key default =
+  try Yojson.Safe.Util.to_string (Yojson.Safe.Util.member key json) with _ -> default
+
+let int_field_default json key default =
+  try Yojson.Safe.Util.to_int (Yojson.Safe.Util.member key json) with _ -> default
+
+let decode_attention_item json =
+  try
+    Some {
+      ai_kind = string_field_default json "kind" "-";
+      ai_severity = string_field_default json "severity" "info";
+      ai_summary = string_field_default json "summary" "-";
+      ai_target_type = string_field_default json "target_type" "-";
+      ai_target_id =
+        (try Some (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "target_id" json))
+         with _ -> None);
+    }
+  with _ -> None
+
+let decode_attention_items json_list =
+  List.filter_map decode_attention_item json_list
+
+let decode_approval_item json =
+  try
+    let token =
+      try Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "confirm_token" json)
+      with _ ->
+        Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "token" json)
+    in
+    Some {
+      ap_token = token;
+      ap_actor = string_field_default json "actor" "-";
+      ap_action_type = string_field_default json "action_type" "-";
+      ap_target_type = string_field_default json "target_type" "-";
+      ap_target_id =
+        (try Some (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "target_id" json))
+         with _ -> None);
+      ap_delegated_tool = string_field_default json "delegated_tool" "-";
+      ap_summary =
+        let action = string_field_default json "action_type" "-" in
+        let target = string_field_default json "target_type" "-" in
+        let tool = string_field_default json "delegated_tool" "-" in
+        Printf.sprintf "%s on %s (%s)" action target tool;
+    }
+  with _ -> None
+
+let decode_approval_items json_list =
+  List.filter_map decode_approval_item json_list
+
+let decode_board_post json =
+  try
+    let id = Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "id" json) in
+    let author = string_field_default json "author" "-" in
+    let title = string_field_default json "title" "-" in
+    let body =
+      try Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "body" json)
+      with _ ->
+        (try Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "content" json)
+         with _ -> "")
+    in
+    Some {
+      bp_id = id;
+      bp_author = author;
+      bp_title = title;
+      bp_body = body;
+      bp_votes = int_field_default json "votes" 0;
+      bp_comment_count = int_field_default json "comment_count" 0;
+      bp_created_at = string_field_default json "created_at" "-";
+    }
+  with _ -> None
+
+let decode_board_posts json_list =
+  List.filter_map decode_board_post json_list
+
+let decode_board_comment json =
+  try
+    let id = Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "id" json) in
+    let author = string_field_default json "author" "-" in
+    let content = string_field_default json "content" "" in
+    Some {
+      bc_id = id;
+      bc_author = author;
+      bc_content = content;
+      bc_created_at = string_field_default json "created_at" "-";
+    }
+  with _ -> None
+
+let decode_board_comments json_list =
+  List.filter_map decode_board_comment json_list
+
+(** Load board post list from /api/v1/board *)
+let load_board_list ~(host : string) ~(port : int) : board_post list =
+  match fetch_board ~host ~port with
+  | Error err ->
+      Printf.eprintf "[masc-tui] board load failed: %s\n%!" err;
+      []
+  | Ok json ->
+      try decode_board_posts (Yojson.Safe.Util.to_list (Yojson.Safe.Util.member "posts" json))
+      with exn ->
+        Printf.eprintf "[masc-tui] board decode failed: %s\n%!" (Printexc.to_string exn);
+        []
+
+(** Load board post detail from /api/v1/board/<postId> *)
+let load_board_post ~(host : string) ~(port : int) ~(post_id : string) : (board_post * board_comment list) option =
+  match fetch_board_post ~host ~port ~post_id with
+  | Error err ->
+      Printf.eprintf "[masc-tui] board post load failed: %s\n%!" err;
+      None
+  | Ok json ->
+      try
+        let post = decode_board_post (Yojson.Safe.Util.member "post" json) in
+        let comments = decode_board_comments (Yojson.Safe.Util.to_list (Yojson.Safe.Util.member "comments" json)) in
+        match post with
+        | None -> None
+        | Some p -> Some (p, comments)
+      with exn ->
+        Printf.eprintf "[masc-tui] board post decode failed: %s\n%!" (Printexc.to_string exn);
+        None
+
+(** Load overview snapshot from /api/v1/dashboard/briefing *)
+let load_overview ~(host : string) ~(port : int) : overview_snapshot option =
+  match fetch_dashboard_briefing ~host ~port with
+  | Error err ->
+      Printf.eprintf "[masc-tui] overview load failed: %s\n%!" err;
+      None
+  | Ok json ->
+      try
+        let summary = Yojson.Safe.Util.member "summary" json in
+        let top_attention =
+          match decode_attention_item (Yojson.Safe.Util.member "top_attention" summary) with
+          | Some x -> Some x
+          | None -> None
+        in
+        let incidents =
+          try decode_attention_items (Yojson.Safe.Util.to_list (Yojson.Safe.Util.member "incidents" json))
+          with _ -> []
+        in
+        let attention_queue =
+          try decode_attention_items (Yojson.Safe.Util.to_list (Yojson.Safe.Util.member "attention_queue" json))
+          with _ -> []
+        in
+        let attention_items =
+          try decode_attention_items (Yojson.Safe.Util.to_list (Yojson.Safe.Util.member "attention_items" json))
+          with _ -> []
+        in
+        let pending_confirms =
+          try
+            let operator_targets = Yojson.Safe.Util.member "operator_targets" json in
+            decode_approval_items (Yojson.Safe.Util.to_list (Yojson.Safe.Util.member "pending_confirms" operator_targets))
+          with _ -> []
+        in
+        Some {
+          ov_workspace_health = string_field_default summary "workspace_health" "-";
+          ov_cluster = string_field_default summary "cluster" "-";
+          ov_project = string_field_default summary "project" "-";
+          ov_active_agents = int_field_default summary "active_agents" 0;
+          ov_pending_approvals = int_field_default summary "pending_approvals" 0;
+          ov_incident_count = int_field_default summary "incident_count" 0;
+          ov_attention_items = incidents @ attention_queue @ attention_items;
+          ov_top_attention = top_attention;
+          ov_pending_confirms = pending_confirms;
+          ov_generated_at = string_field_default json "generated_at" "-";
+        }
+      with exn ->
+        Printf.eprintf "[masc-tui] overview decode failed: %s\n%!" (Printexc.to_string exn);
+        None
+
+let decode_planning_goal json =
+  try
+    let id = Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "id" json) in
+    Some {
+      pg_id = id;
+      pg_title = string_field_default json "title" "-";
+      pg_status = string_field_default json "status" "active";
+      pg_phase = string_field_default json "phase" "executing";
+      pg_priority = int_field_default json "priority" 3;
+      pg_due_date =
+        (try Some (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "due_date" json))
+         with _ -> None);
+      pg_parent_goal_id =
+        (try Some (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "parent_goal_id" json))
+         with _ -> None);
+      pg_metric =
+        (try Some (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "metric" json))
+         with _ -> None);
+      pg_target_value =
+        (try Some (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "target_value" json))
+         with _ -> None);
+    }
+  with _ -> None
+
+let decode_planning_goals json_list =
+  List.filter_map decode_planning_goal json_list
+
+let decode_planning_rollup json =
+  {
+    pr_active = int_field_default json "active_count" 0;
+    pr_paused = int_field_default json "paused_count" 0;
+    pr_done = int_field_default json "done_count" 0;
+    pr_dropped = int_field_default json "dropped_count" 0;
+  }
+
+let decode_planning_backlog json =
+  {
+    pb_todo = int_field_default json "todo" 0;
+    pb_claimed = int_field_default json "claimed" 0;
+    pb_running = int_field_default json "running" 0;
+    pb_done = int_field_default json "done" 0;
+    pb_cancelled = int_field_default json "cancelled" 0;
+  }
+
+(** Load planning snapshot from /api/v1/dashboard/planning *)
+let load_planning ~(host : string) ~(port : int) : planning_snapshot option =
+  match fetch_dashboard_planning ~host ~port with
+  | Error err ->
+      Printf.eprintf "[masc-tui] planning load failed: %s\n%!" err;
+      None
+  | Ok json ->
+      try
+        let goals =
+          try decode_planning_goals (Yojson.Safe.Util.to_list (Yojson.Safe.Util.member "goals" json))
+          with _ -> []
+        in
+        let rollup = decode_planning_rollup (Yojson.Safe.Util.member "rollup" json) in
+        let backlog = decode_planning_backlog (Yojson.Safe.Util.member "task_backlog" json) in
+        Some {
+          pl_goals = goals;
+          pl_rollup = rollup;
+          pl_backlog = backlog;
+          pl_generated_at = string_field_default json "generated_at" "-";
+        }
+      with exn ->
+        Printf.eprintf "[masc-tui] planning decode failed: %s\n%!" (Printexc.to_string exn);
+        None

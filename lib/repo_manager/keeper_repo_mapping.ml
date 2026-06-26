@@ -118,28 +118,35 @@ let read_mapping_file ~base_path : (file_snapshot option, string) result =
             Ok (Some { stamp; content })))
 ;;
 
+let toml_table_fields t =
+  try Some (Otoml.get_table t) with
+  | Otoml.Type_error _ -> None
+;;
+
 let parse_mapping_content content : (keeper_repo_mapping list, string) result =
   match Otoml.Parser.from_string_result content with
   | Error msg -> Error msg
   | Ok toml -> (
-      match Otoml.find_result toml Fun.id ["mapping"] with
-      | Error _ -> Ok []
-      | Ok (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->
-          let rec loop acc = function
-            | [] -> Ok (List.rev acc)
-            | (keeper_id, value) :: rest ->
-                if is_toml_table value then
-                  let mapping_toml =
-                    Otoml.TomlTable [("mapping", Otoml.TomlTable [(keeper_id, value)])]
-                  in
-                  (match mapping_of_toml mapping_toml keeper_id with
-                   | Ok mapping -> loop (mapping :: acc) rest
-                   | Error msg -> Error msg)
-                else
-                  Error (Printf.sprintf "mapping.%s must be a table" keeper_id)
-          in
-          loop [] fields
-      | Ok _ -> Error "mapping field must be a table")
+      match Otoml.find_opt toml Fun.id ["mapping"] with
+      | None -> Ok []
+      | Some mapping -> (
+          match toml_table_fields mapping with
+          | Some fields ->
+              let rec loop acc = function
+                | [] -> Ok (List.rev acc)
+                | (keeper_id, value) :: rest ->
+                    if is_toml_table value then
+                      let mapping_toml =
+                        Otoml.TomlTable [("mapping", Otoml.TomlTable [(keeper_id, value)])]
+                      in
+                      (match mapping_of_toml mapping_toml keeper_id with
+                       | Ok mapping -> loop (mapping :: acc) rest
+                       | Error msg -> Error msg)
+                    else
+                      Error (Printf.sprintf "mapping.%s must be a table" keeper_id)
+              in
+              loop [] fields
+          | None -> Error "mapping field must be a table"))
 
 let load_all ~base_path : (keeper_repo_mapping list, string) result =
   let* snapshot = read_mapping_file ~base_path in
@@ -334,7 +341,7 @@ let record_policy_decision ~keeper_id ?repository_id decision =
     | Policy_decision_load_error ->
       (Keeper_metrics.KeeperRepoMappingLoadError, [])
   in
-  Otel_metric_store.inc_counter
+  Otel_metric_store_core.inc_counter
     ~labels:(("keeper_id", keeper_id) :: extra_labels)
     Keeper_metrics.(to_string metric)
     ()

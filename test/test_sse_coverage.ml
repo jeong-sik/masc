@@ -329,6 +329,23 @@ let test_get_events_after_preserves_oldest_first_order () =
       check (list string) "tail replayed oldest-first" [ "event B"; "event C" ]
         (Sse.get_events_after 803_000))
 
+let test_buffer_event_caps_replay_buffer () =
+  let original_buffer = Atomic.get Sse.event_buffer in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Sse.event_buffer original_buffer)
+    (fun () ->
+      Atomic.set Sse.event_buffer [];
+      let base = 804_000 in
+      for index = 0 to Sse.max_buffer_size + 4 do
+        Sse.buffer_event (base + index) (Printf.sprintf "event-%d" index)
+      done;
+      let buffered = Atomic.get Sse.event_buffer in
+      check int "buffer capped" Sse.max_buffer_size (List.length buffered);
+      match buffered with
+      | (event_id, _, _) :: _ ->
+          check int "newest retained at head" (base + Sse.max_buffer_size + 4) event_id
+      | [] -> fail "buffer should not be empty")
+
 let test_get_events_after_empty () =
   let future_id = Sse.current_id () + 100000 in
   let events = Sse.get_events_after future_id in
@@ -538,6 +555,7 @@ let () =
       test_case "filters" `Quick test_get_events_after_filters;
       test_case "preserves oldest-first order" `Quick
         test_get_events_after_preserves_oldest_first_order;
+      test_case "caps replay buffer" `Quick test_buffer_event_caps_replay_buffer;
       test_case "empty for future" `Quick test_get_events_after_empty;
       test_case "cleanup exact under domain contention" `Quick
         test_cleanup_expired_events_exact_under_domain_contention;

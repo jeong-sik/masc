@@ -274,16 +274,35 @@ let max_buffer_size =
 let buffer_ttl_seconds = Env_config.InternalTimers.sse_buffer_ttl_sec
 let event_buffer : (int * string * float) list Atomic.t = Atomic.make []
 
+let trim_newest_first_to_limit ~limit events =
+  if limit <= 0 then []
+  else
+    let rec scan remaining rest =
+      if remaining = 0 then
+        match rest with
+        | [] -> None
+        | _ :: _ -> Some []
+      else
+        match rest with
+        | [] -> None
+        | item :: tail ->
+            match scan (remaining - 1) tail with
+            | None -> None
+            | Some kept_tail -> Some (item :: kept_tail)
+    in
+    match scan limit events with
+    | None -> events
+    | Some trimmed -> trimmed
+
 (** Add event to buffer, maintaining max size *)
 let buffer_event event_id event_str =
   Lockfree_atomic.update_with_commit event_buffer (fun lst ->
     run_test_hook buffer_commit_test_hook;
     let timestamp = Time_compat.now () in
-    let next = (event_id, event_str, timestamp) :: lst in
     let trimmed =
-      if List.compare_length_with next max_buffer_size > 0 then
-        take max_buffer_size next
-      else next
+      trim_newest_first_to_limit
+        ~limit:max_buffer_size
+        ((event_id, event_str, timestamp) :: lst)
     in
     { next_state = trimmed; result = () })
 

@@ -37,6 +37,29 @@ let keeper_oas_visibility_neutral_guardrails ?guardrails () =
   }
 ;;
 
+let normalize_response_text_for_finalization
+      ~runtime_id
+      ~initial_messages
+      ~(run_result : Runtime_agent.run_result)
+      ~text
+      ~tool_names
+      ()
+  =
+  match Keeper_tool_response.normalize_response_text ~text ~tool_names () with
+  | Ok response_text -> Ok response_text
+  | Error _ ->
+    let last_tool_context =
+      Keeper_turn_driver_try_provider.accept_rejection_context_of_run_result
+        ~initial_messages
+        run_result
+    in
+    Error
+      (Keeper_turn_driver_try_provider.accept_rejected_error
+         ~last_tool_context
+         ~runtime_id
+         ~response:run_result.response)
+;;
+
 module For_testing = struct
   let sse_event_progress_kind = Turn_helpers.sse_event_progress_kind
   let registry_progress_on_event = Turn_helpers.registry_progress_on_event
@@ -44,6 +67,8 @@ module For_testing = struct
     Contract_helpers.progress_keeper_tool_names_for_contract
   let keeper_oas_visibility_neutral_guardrails =
     keeper_oas_visibility_neutral_guardrails
+  let normalize_response_text_for_finalization =
+    normalize_response_text_for_finalization
 end
 
 (** Run a single keeper turn via OAS Agent.run().
@@ -599,12 +624,15 @@ let run_turn
                  let contract_status = completion_contract_status () in
                  acc.receipt_completion_contract_result <- contract_status;
                      (match
-                        Keeper_tool_response.normalize_response_text
+                        normalize_response_text_for_finalization
+                          ~runtime_id:runtime_id_string
+                          ~initial_messages:history_messages
+                          ~run_result:result
                           ~text
                           ~tool_names:actual_keeper_tool_names
                           ()
                       with
-                      | Error e -> Error (Agent_sdk.Error.Internal e)
+                      | Error e -> Error e
                       | Ok response_text ->
                         Keeper_agent_run_finalize_response.finalize
                           ~config ~meta ~generation ~manifest_keeper_turn_id

@@ -292,6 +292,46 @@ let test_reject_reason_describes_thinking_only_response () =
        Masc.Keeper_error_classify.degraded_retry_reason_to_string
        (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
 
+let test_finalization_blank_response_is_typed_accept_rejection () =
+  let result =
+    Masc.Keeper_agent_run.For_testing.normalize_response_text_for_finalization
+      ~runtime_id:"ollama.gemma4-26b-a4b-qat"
+      ~initial_messages:[]
+      ~run_result:(run_result ())
+      ~text:""
+      ~tool_names:[]
+      ()
+  in
+  match result with
+  | Ok text -> Alcotest.failf "blank response should fail, got %S" text
+  | Error err ->
+    (match Keeper_internal_error.classify_masc_internal_error err with
+     | Some
+         (Keeper_internal_error.Accept_rejected
+            { scope; reason_kind; reason; _ }) ->
+       Alcotest.(check string)
+         "scope"
+         "ollama.gemma4-26b-a4b-qat"
+         scope;
+       Alcotest.(check bool)
+         "reason kind is no usable progress"
+         true
+         (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+       Alcotest.(check bool)
+         "reason identifies empty shape"
+         true
+         (contains ~needle:"shape=empty" reason);
+       Alcotest.(check bool)
+         "typed no-progress classification"
+         true
+         (Masc.Keeper_error_classify.is_accept_no_usable_progress_error err)
+     | Some other ->
+       Alcotest.failf "expected Accept_rejected, got %s"
+         (Keeper_internal_error.kind_of_masc_internal_error other)
+     | None ->
+       Alcotest.failf "expected typed keeper error, got %s"
+         (Agent_sdk.Error.to_string err))
+
 let test_runtime_error_mapping_preserves_no_progress_accept_rejection () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
@@ -1585,6 +1625,10 @@ let () =
             test_rejects_as_typed_accept_error;
           Alcotest.test_case "thinking-only rejection is diagnosed" `Quick
             test_reject_reason_describes_thinking_only_response;
+          Alcotest.test_case
+            "blank finalization response is typed no-progress"
+            `Quick
+            test_finalization_blank_response_is_typed_accept_rejection;
           Alcotest.test_case
             "runtime mapping preserves no-progress accept rejection"
             `Quick

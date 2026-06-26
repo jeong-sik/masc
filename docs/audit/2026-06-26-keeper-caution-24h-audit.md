@@ -1,7 +1,7 @@
 # Keeper caution 24h audit - 2026-06-26
 
 status: in_progress
-last_verified: 2026-06-26T15:40:57+09:00
+last_verified: 2026-06-27T07:46:18+09:00
 runtime_window_utc: 2026-06-25T06:31:00Z..2026-06-26T06:31:00Z
 runtime_root: `<RUNTIME_ROOT>`
 repo_head: `origin/main` at worktree creation
@@ -13,6 +13,66 @@ repo_head: `origin/main` at worktree creation
 - [근거] 24h receipt aggregation: parsed `<RUNTIME_ROOT>/keepers/*/execution-receipts/2026-06/{25,26}.jsonl`, checked 2026-06-26T15:38+09:00, confidence High.
 - [근거] Current code overlap: `git log e882945c06d..origin/main -- lib/keeper/keeper_meta_json.ml config/prompts lib/keeper/keeper_prompt_token_integrity.ml`, checked 2026-06-26T15:34+09:00, confidence High.
 - [근거] OCaml/Eio design basis: OCaml 5.4 manual parallelism/memory-model docs and Eio Switch documentation, checked 2026-06-26T15:33+09:00, confidence Medium because exact downstream version behavior still needs CI.
+
+## Refresh - 2026-06-27 07:46 KST
+
+Evidence refresh:
+
+- [근거] Live health: `curl -fsS '<MASC_HTTP_BASE>/health?full=1'`, checked 2026-06-27T07:39+09:00, confidence High. Runtime reported version `0.19.50`, commit `3ae98cf2293`, `paths.effective_base_path=/Users/dancer/me`, `paths.effective_masc_root=/Users/dancer/me/.masc`, `keeper_fleet_safety.status=blocked`, `keeper_identity_drift.status=degraded`, and `keeper_reaction_ledger.status=degraded`.
+- [근거] 24h decision-log error aggregation: parsed `<RUNTIME_ROOT>/keepers/*.decisions.jsonl` with `cutoff=$(date -u -v-24H +%s)`, checked 2026-06-27T07:42+09:00, confidence High.
+- [근거] Current code remediation: focused `scripts/dune-local.sh exec ./test/test_keeper_turn_driver_accept.exe`, checked 2026-06-27T07:45+09:00, confidence High for the touched finalization boundary only. Full build authority remains PR CI.
+
+Current live caution list:
+
+1. P0 fleet safety blocked: no executable keeper fibers
+   - Current health: `keeper_fleet_safety.status=blocked`, `blocker=no_executable_keeper_fibers`, `bootable_keeper_count=0`, `running_keeper_fiber_count=0`.
+   - Direct reasons: five autoboot-enabled keepers are durably paused: `albini`, `idealist`, `mad-improver`, `nick0cave`, `verifier`.
+   - Operator action in health: `resume_or_leave_paused`.
+
+2. P0 repeated no-text completion failures
+   - Count in current 24h decision logs: `nick0cave=66`.
+   - Terminal reason: `internal_error`, next action `inspect_latest_error`.
+   - Error text: `Internal error: keeper turn completed with no textual reply`.
+   - Root implementation gap: the finalization safety net converted blank text/no tool progress into `Agent_sdk.Error.Internal`, losing the existing typed accept-rejection/no-progress path.
+
+3. P0 no-progress-loop pauses
+   - Current paused metadata: `mad-improver` and `sangsu` have `last_blocker.klass=no_progress_loop` with `streak=10 threshold=10; manual pause applied`.
+   - Risk: manual pause is correct as a stopgap, but the system must not turn this into prompt constraint stacking or a fleet-wide stop. The blocker must remain per keeper.
+
+4. P1 identity drift
+   - Current health: `keeper_identity_drift.status=degraded`, terminal reason `configured_keeper_without_runtime_meta`.
+   - Direct item: configured keeper `analyst` has no persisted runtime meta.
+   - Next action from health: `materialize_configured_keeper_or_disable_unused_toml`.
+
+5. P1 reaction ledger pending stimulus
+   - Current health: `keeper_reaction_ledger.status=degraded`, `pending_stimulus_count=1`.
+   - Direct item: keeper `sangsu`, pending `stimulus:21b111835489d00fe0002928f5c49b89`.
+   - Risk: a paused keeper with pending stimulus keeps the fleet in caution unless the pending ledger state is resolved or explicitly quarantined.
+
+6. P1 singleton provider/runtime errors
+   - Current 24h decision-log aggregation:
+     - `verifier`: one `provider_error_timeout:http_operation`, next action `inspect_latest_error`.
+     - `idealist`: one typed `accept_rejected` with `reason_kind=no_usable_progress`, `response_shape=thinking_only`.
+   - These are not the dominant current error volume, but they prove the typed no-progress path already exists and should be reused instead of adding another string classifier.
+
+7. P2 tool invocation shape errors
+   - Current 24h decision-log aggregation: one `executor` and one `idealist` `tool_exec` record where `Execute` arguments did not include exactly one of `executable | pipeline`.
+   - Risk: this is a deterministic tool-shape contract issue, not a reason to weaken shell/path guards.
+
+Hardening slice 2 started:
+
+- Changed `lib/keeper/keeper_agent_run.ml` so blank response finalization reuses `Keeper_turn_driver_try_provider.accept_rejected_error` instead of emitting a generic internal error.
+- Exposed the helper through `Keeper_agent_run.For_testing` in `lib/keeper/keeper_agent_run.mli`.
+- Added `test_finalization_blank_response_is_typed_accept_rejection` in `test/test_keeper_turn_driver_accept.ml`.
+
+Adversarial checks for slice 2:
+
+- No local path hardcoding added.
+- No new environment variable or runtime knob added.
+- No free-form error-string classifier added; the patch reuses the existing typed accept-rejection and OAS response-shape diagnostics.
+- No new global keeper/fleet gate added; the outcome remains per turn and per keeper.
+- No new mutex, lazy value, blocking I/O, or Eio resource lifecycle path added.
+- Failure remains explicit: blank/no-tool output now returns a typed `Accept_rejected` error, so it can be counted by the existing completion-contract auto-pause path.
 
 ## 24h Caution Inventory
 

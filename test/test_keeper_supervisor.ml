@@ -1559,6 +1559,91 @@ let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
       check bool "unresolved watchdog-stopped entry reaped"
         false (Reg.is_registered ~base_path:config.base_path name))
 
+let test_stale_run_sweep_sets_watchdog_stop_signal () =
+  with_restart_launch_noop @@ fun () ->
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  ensure_test_runtime ();
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+      let name = "stale-run-stop-signal" in
+      let base_meta = make_meta name in
+      let meta =
+        {
+          base_meta with
+          runtime =
+            {
+              base_meta.runtime with
+              usage =
+                {
+                  base_meta.runtime.usage with
+                  last_turn_ts = Unix.time () -. 3600.0;
+                };
+            };
+        }
+      in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      let max_restarts =
+        Masc.Runtime_params.get
+          Masc.Governance_registry.keeper_supervisor_max_restarts
+      in
+      Reg.restore_supervisor_state ~base_path:config.base_path name
+        ~restart_count:max_restarts ~last_restart_ts:0.0 ~crash_log:[];
+      check bool "precondition: fiber_stop clear"
+        false (Atomic.get reg.fiber_stop);
+      check bool "precondition: fiber_wakeup clear"
+        false (Atomic.get reg.fiber_wakeup);
+      check bool "precondition: done unresolved"
+        true (Option.is_none (Eio.Promise.peek reg.done_p));
+      let ctx : _ Keeper_types_profile.context =
+        {
+          config;
+          agent_name = "supervisor";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      Sup.sweep_and_recover ctx;
+      check bool "stale sweep requests watchdog stop"
+        true (Atomic.get reg.fiber_stop);
+      check bool "stale sweep wakes keeper"
+        true (Atomic.get reg.fiber_wakeup);
+      check bool "first stale sweep leaves done unresolved"
+        true (Option.is_none (Eio.Promise.peek reg.done_p));
+      (match Reg.get ~base_path:config.base_path name with
+       | Some updated ->
+         (match updated.last_failure_reason with
+          | Some (Reg.Stale_turn_timeout (Reg.Idle_turn { stall_seconds })) ->
+            check bool "stale seconds is at least stale threshold"
+              true (stall_seconds > 1800.0)
+          | _ -> fail "expected idle stale-turn failure reason")
+       | None -> fail "registry entry missing after first stale sweep");
+      Sup.sweep_and_recover ctx;
+      (match Reg.get ~base_path:config.base_path name with
+       | Some updated ->
+         check bool "second sweep marks exhausted stale keeper dead"
+           true (updated.phase = KSM.Dead);
+         (match Eio.Promise.peek updated.done_p with
+         | Some (`Crashed msg) ->
+            check bool "done reason preserves stale timeout"
+              true (String.starts_with ~prefix:"stale_turn_timeout(" msg)
+          | Some `Stopped -> fail "expected crashed watchdog resolution"
+          | None -> fail "expected resolved watchdog crash")
+       | None -> fail "registry entry missing after watchdog crash"))
+
 (* Regression guard: a `Crashed entry whose last_failure_reason is NOT a
    storm must still flow through the existing restart-or-mark-dead branch.
    Verifies the new gate is variant-specific, not a blanket short-circuit. *)
@@ -2542,6 +2627,8 @@ let () =
         test_provider_timeout_loop_pause_skips_restart;
       test_case "unresolved watchdog-stopped budget loop is reaped" `Quick
         test_unresolved_watchdog_stopped_budget_loop_is_reaped;
+      test_case "stale run sweep sets watchdog stop signal" `Quick
+        test_stale_run_sweep_sets_watchdog_stop_signal;
       test_case "non-storm Crashed still routes to restart (regression guard)" `Quick
         test_non_storm_crashed_restarts_normally;
     ];

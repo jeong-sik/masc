@@ -227,6 +227,15 @@ let sweep_and_recover (ctx : _ context) =
     | Some (Keeper_registry.Exception _)
     | None -> false
   in
+  let signal_watchdog_stop_pending
+        (entry : Keeper_registry.registry_entry)
+        (reason : Keeper_registry.failure_reason)
+    =
+    Keeper_registry.set_failure_reason ~base_path entry.name (Some reason);
+    Atomic.set entry.fiber_stop true;
+    Atomic.set entry.fiber_wakeup true;
+    Keeper_keepalive_signal.post_wakeup_signal ~wakeup:entry.fiber_wakeup
+  in
   let force_unresolved_watchdog_crash
         (acc : sweep_acc)
         (entry : Keeper_registry.registry_entry)
@@ -406,7 +415,7 @@ let sweep_and_recover (ctx : _ context) =
                      { since_progress_seconds; _ }) -> since_progress_seconds
               | _ -> now -. entry.meta.runtime.usage.last_turn_ts
             in
-            Keeper_registry.set_failure_reason ~base_path entry.name (Some reason);
+            signal_watchdog_stop_pending entry reason;
             Keeper_execution_receipt.emit_stale_keeper_broadcast
               ctx.config
               ~keeper_name:entry.name

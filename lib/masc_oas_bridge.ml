@@ -3,7 +3,7 @@
     Enforces strict structural timeouts, cancellation safety, and type isolation. *)
 
 (** Safe execution of a generic OAS operation.
-    Applies timeout handling when an Eio clock is available, and converts
+    Applies timeout handling with the initialized Eio clock, and converts
     [Eio.Time.Timeout] into an error result.
     [Eio.Cancel.Cancelled] is always re-raised to preserve structured concurrency.
 
@@ -23,33 +23,33 @@ let run_safe ~caller ~timeout_s fn =
          "Masc_oas_bridge.run_safe: timeout_s must be positive or infinite \
           (got %.6g)"
          timeout_s);
-  let clock_opt =
+  let fail_without_clock ~reason =
+    let detail =
+      Printf.sprintf
+        "masc_oas_bridge: Eio clock unavailable (%s); refusing to run caller=%s \
+         without enforcing timeout_s=%.6g"
+        reason
+        caller
+        timeout_s
+    in
+    Log.Misc.error "%s" detail;
+    Error
+      (Keeper_internal_error.sdk_error_of_masc_internal_error
+         (Keeper_internal_error.Internal_contract_rejected { reason = detail }))
+  in
+  let clock =
     match Masc_eio_env.get_opt () with
-    | Some { clock; _ } -> clock
-    | None -> None
+    | None -> Error (`Missing_env)
+    | Some { clock = None; _ } -> Error (`Missing_clock)
+    | Some { clock = Some clock; _ } -> Ok clock
   in
-  let t0 =
-    match clock_opt with
-    | Some clock -> Eio.Time.now clock
-    | None -> Unix.gettimeofday ()
-  in
-  let elapsed () =
-    match clock_opt with
-    | Some clock -> Eio.Time.now clock -. t0
-    | None -> Unix.gettimeofday () -. t0
-  in
-  let do_timeout fn =
-    match clock_opt with
-    | Some clock -> Eio.Time.with_timeout_exn clock timeout_s fn
-    | None ->
-      (* #18476: defensive — server bootstrap always provides a clock,
-         but if reached without one, the timeout is unenforceable. *)
-      Log.Misc.warn
-        "masc_oas_bridge.run_safe: no Eio clock available, running \
-         without timeout enforcement (caller=%s, budget=%.1fs)"
-        caller timeout_s;
-      fn ()
-  in
+  match clock with
+  | Error `Missing_env -> fail_without_clock ~reason:"env_not_initialized"
+  | Error `Missing_clock -> fail_without_clock ~reason:"clock_not_initialized"
+  | Ok clock ->
+  let t0 = Eio.Time.now clock in
+  let elapsed () = Eio.Time.now clock -. t0 in
+  let do_timeout fn = Eio.Time.with_timeout_exn clock timeout_s fn in
   try
     do_timeout fn
   with

@@ -13,9 +13,8 @@ work. If the bridge runs without an Eio clock, it cannot enforce that budget.
 The previous warning-and-run behavior silently converted configured timeouts
 into unbounded execution.
 
-Do not add an opt-out flag that restores clockless bridge execution. A flag such
-as `MASC_OAS_BRIDGE_REQUIRE_CLOCK=false` would preserve the unsafe behavior this
-contract removes.
+Do not add a default-off opt-out flag that restores clockless bridge execution.
+That would preserve the unsafe behavior this contract removes.
 
 ## Migration
 

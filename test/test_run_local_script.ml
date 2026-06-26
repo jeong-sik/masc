@@ -8,6 +8,11 @@ let source_root () =
 let run_local_script_path () =
   Filename.concat (Filename.concat (source_root ()) "scripts") "run-local.sh"
 
+let build_dashboard_if_needed_script_path () =
+  Filename.concat
+    (Filename.concat (source_root ()) "scripts")
+    "build-dashboard-if-needed.sh"
+
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
@@ -270,6 +275,60 @@ let test_build_dashboard_flag_is_opt_in () =
           code_flag stdout_flag stderr_flag;
       check bool "helper invoked with flag" true (Sys.file_exists marker))
 
+let test_dashboard_build_helper_rebuilds_remote_startup_resource_output () =
+  with_temp_dir "run-local-script" (fun dir ->
+      let repo_root = Filename.concat dir "repo" in
+      let scripts_dir = Filename.concat repo_root "scripts" in
+      let dashboard_dir = Filename.concat repo_root "dashboard" in
+      let output_dir = Filename.concat repo_root "assets/dashboard" in
+      let fake_bin = Filename.concat dir "fake-bin" in
+      let pnpm_capture = Filename.concat dir "pnpm-calls.txt" in
+      mkdir_p scripts_dir;
+      mkdir_p (Filename.concat dashboard_dir "src");
+      mkdir_p (Filename.concat dashboard_dir "node_modules");
+      mkdir_p output_dir;
+      mkdir_p fake_bin;
+      copy_script
+        (build_dashboard_if_needed_script_path ())
+        (Filename.concat scripts_dir "build-dashboard-if-needed.sh");
+      write_file (Filename.concat dashboard_dir "package.json") {|{"scripts":{"build":"vite build"}}|};
+      write_file (Filename.concat dashboard_dir "index.html")
+        {|<!doctype html><html><head></head><body><div id="app"></div></body></html>|};
+      write_file (Filename.concat dashboard_dir "src/main.ts") "export {}\n";
+      write_file (Filename.concat output_dir "index.html")
+        {|<!doctype html><html><head><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR"></head><body></body></html>|};
+      write_file (Filename.concat output_dir ".build-stamp") "fresh\n";
+      write_executable (Filename.concat fake_bin "pnpm")
+        (Printf.sprintf
+           {|
+#!/bin/sh
+set -eu
+printf '%%s\n' "$*" >> %s
+case "$*" in
+  "run build")
+    mkdir -p ../assets/dashboard
+    printf 'fresh generated dashboard\n' > ../assets/dashboard/index.html
+    ;;
+esac
+|}
+           (Filename.quote pnpm_capture));
+      let script = Filename.concat scripts_dir "build-dashboard-if-needed.sh" in
+      let path =
+        fake_bin ^ ":" ^ Option.value ~default:"" (Sys.getenv_opt "PATH")
+      in
+      let code, stdout, stderr =
+        run_process ~cwd:repo_root script
+          ~env:[ ("PATH", path) ]
+          [| script |]
+      in
+      if code <> 0 then
+        failf "dashboard build helper failed (%d)\nstdout:\n%s\nstderr:\n%s"
+          code stdout stderr;
+      check bool "stale generated index forced rebuild" true
+        (contains_substring (read_file pnpm_capture) "run build");
+      check bool "stale reason was explicit" true
+        (contains_substring stderr "remote startup resources"))
+
 let test_existing_target_config_is_not_overwritten () =
   with_temp_dir "run-local-script" (fun dir ->
       let repo_root = setup_fake_repo dir in
@@ -393,6 +452,9 @@ let () =
             test_print_port_is_stable_for_target_dir;
           test_case "build-dashboard flag is opt-in" `Quick
             test_build_dashboard_flag_is_opt_in;
+          test_case "dashboard helper rebuilds stale remote startup resources"
+            `Quick
+            test_dashboard_build_helper_rebuilds_remote_startup_resource_output;
           test_case "bootstrap-keepers flag is opt-in" `Quick
             test_bootstrap_keepers_flag_is_opt_in;
           test_case "existing target config is not overwritten" `Quick

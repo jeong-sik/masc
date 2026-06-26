@@ -102,12 +102,21 @@ let dashboard_query_cache_segment = function
   | None -> "missing"
 ;;
 
+let dashboard_query_cache_value_json = function
+  | Some raw ->
+    let value = String.trim raw in
+    if value = "" then `Null else `String value
+  | None -> `Null
+;;
+
 let dashboard_query_cache_key config prefix fields =
   let suffix =
-    fields
-    |> List.map (fun (key, value) ->
-      Printf.sprintf "%s=%s" key (dashboard_query_cache_segment value))
-    |> String.concat ":"
+    `List
+      (List.map
+         (fun (key, value) ->
+           `List [ `String key; dashboard_query_cache_value_json value ])
+         fields)
+    |> Yojson.Safe.to_string
   in
   dashboard_cache_key config prefix suffix
 ;;

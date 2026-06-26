@@ -492,9 +492,40 @@ let test_dashboard_query_cache_key_partitions_route_params () =
         (not (String.equal session_a actor_b));
       check string "deterministic key shape"
         (Printf.sprintf
-           "session:%s:default:actor=default:session=session-a"
+           "session:%s:default:[[\"actor\",\"default\"],[\"session\",\"session-a\"]]"
            config.base_path)
         session_a)
+
+let test_dashboard_query_cache_key_encodes_delimiter_values () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Workspace_utils.default_config dir in
+      let actor_delimiter =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", Some "default:session=session-a")
+          ; ("session", Some "session-b")
+          ]
+      in
+      let session_delimiter =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", Some "default")
+          ; ("session", Some "session-a:session=session-b")
+          ]
+      in
+      let missing_session =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", Some "default"); ("session", None) ]
+      in
+      let literal_missing_session =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", Some "default"); ("session", Some "missing") ]
+      in
+      check bool "delimiter-bearing values do not collide" true
+        (not (String.equal actor_delimiter session_delimiter));
+      check bool "literal missing does not collide with absent value" true
+        (not (String.equal missing_session literal_missing_session)))
 
 let test_operator_snapshot_default_route_exposes_provenance () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -1452,6 +1483,8 @@ let () =
             test_dashboard_query_cache_segment_normalizes_missing_values;
           test_case "dashboard query cache key partitions route params" `Quick
             test_dashboard_query_cache_key_partitions_route_params;
+          test_case "dashboard query cache key encodes delimiter values" `Quick
+            test_dashboard_query_cache_key_encodes_delimiter_values;
           test_case "operator snapshot default route exposes provenance" `Quick
             test_operator_snapshot_default_route_exposes_provenance;
           test_case "operator digest default route exposes provenance" `Quick

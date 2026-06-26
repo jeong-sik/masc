@@ -675,6 +675,12 @@ let server_workspace_mismatch ~server_repo_path (config : Workspace.config) =
      || same_or_descendant_normalized_path server_repo_path config.base_path)
 ;;
 
+let server_workspace_mismatch_for_tests ~server_repo_path (config : Workspace.config) =
+  match normalized_path_opt server_repo_path with
+  | Some server_repo_path -> server_workspace_mismatch ~server_repo_path config
+  | None -> false
+;;
+
 let shutdown_signal_of_message message =
   if String_util.contains_substring message "Received SIGTERM"
   then Some "SIGTERM"

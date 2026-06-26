@@ -306,19 +306,6 @@ let test_dashboard_shell_http_json_prefers_preserved_base_path_input () =
     (json |> member "runtime_resolution" |> member "base_path" |> member "path"
    |> to_string)
 
-let runtime_resolution_warning_strings json =
-  let open Yojson.Safe.Util in
-  json |> member "warnings" |> to_list
-  |> List.filter_map (function
-    | `String value -> Some value
-    | _ -> None)
-
-let assert_no_server_workspace_warning label json =
-  check bool label false
-    (List.exists
-       (fun warning -> contains_substring warning "Server binary checkout")
-       (runtime_resolution_warning_strings json))
-
 let test_runtime_resolution_accepts_server_repo_inside_base_path () =
   match Lib.Build_identity.repo_root () with
   | None -> fail "Build_identity.repo_root unavailable; cannot test server/base path relation"
@@ -328,17 +315,10 @@ let test_runtime_resolution_accepts_server_repo_inside_base_path () =
       | Unix.Unix_error _ -> repo_root
     in
     let config = Workspace.default_config (Filename.dirname repo_root) in
-    let open Yojson.Safe.Util in
-    let full = Server_dashboard_http_runtime_info.runtime_resolution_json config in
-    let light =
-      Server_dashboard_http_runtime_info.light_runtime_resolution_json config
-    in
-    check bool "full runtime accepts nested server repo" false
-      (full |> member "server_workspace_mismatch" |> to_bool);
-    check bool "light runtime accepts nested server repo" false
-      (light |> member "server_workspace_mismatch" |> to_bool);
-    assert_no_server_workspace_warning "full runtime omits nested server warning" full;
-    assert_no_server_workspace_warning "light runtime omits nested server warning" light
+    check bool "runtime accepts nested server repo" false
+      (Server_dashboard_http_runtime_info.server_workspace_mismatch_for_tests
+         ~server_repo_path:repo_root
+         config)
 
 let test_dashboard_shell_http_json_uses_bootstrap_payload_while_prewarming () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->

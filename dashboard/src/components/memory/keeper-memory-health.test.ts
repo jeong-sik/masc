@@ -34,6 +34,7 @@ function makeEntry(
     events_to_facts_ratio: 2,
     ttl_expired_on_disk: 0,
     near_duplicate: 0,
+    alerts: [],
     ...overrides,
   }
 }
@@ -53,6 +54,19 @@ function makeResponse(
       ttl_expired_on_disk: 0,
       near_duplicate: 0,
       ...totalsOverrides,
+    },
+    alert_summary: {
+      total_alerts: 0,
+      warn_alerts: 0,
+      keepers_with_alerts: 0,
+      ttl_expired_keepers: 0,
+      near_duplicate_keepers: 0,
+      high_event_ratio_keepers: 0,
+      thresholds: {
+        ttl_expired_on_disk: 0,
+        near_duplicate: 0,
+        events_to_facts_ratio: 2,
+      },
     },
   }
 }
@@ -130,13 +144,65 @@ describe('KeeperMemoryHealth', () => {
       // isRowWarning is an OR: ratio>2 OR ttl_expired_on_disk>0.
       mockFetch.mockResolvedValue(
         makeResponse([
-          makeEntry({ keeper_id: 'ttl-expired', events_to_facts_ratio: 2, ttl_expired_on_disk: 4 }),
-        ]),
+          makeEntry({
+            keeper_id: 'ttl-expired',
+            events_to_facts_ratio: 2,
+            ttl_expired_on_disk: 4,
+            alerts: [{
+              code: 'ttl_expired_on_disk',
+              severity: 'warn',
+              message: 'TTL-expired Memory OS fact rows remain on disk',
+              value: 4,
+              threshold: 0,
+            }],
+          }),
+        ], { ttl_expired_on_disk: 4 }),
       )
       const { container } = render(html`<${KeeperMemoryHealth} />`)
       await waitFor(() => expect(screen.getByText('ttl-expired')).not.toBeNull())
 
       expect(container.querySelector('.kmh-row--warn')).not.toBeNull()
+      expect(screen.getByText('TTL')).not.toBeNull()
+    })
+  })
+
+  describe('backend alert summary', () => {
+    it('surfaces total alert count in the summary strip', async () => {
+      mockFetch.mockResolvedValue({
+        ...makeResponse([
+          makeEntry({
+            keeper_id: 'alerted',
+            ttl_expired_on_disk: 2,
+            alerts: [{
+              code: 'ttl_expired_on_disk',
+              severity: 'warn',
+              message: 'TTL-expired Memory OS fact rows remain on disk',
+              value: 2,
+              threshold: 0,
+            }],
+          }),
+        ], { ttl_expired_on_disk: 2 }),
+        alert_summary: {
+          total_alerts: 1,
+          warn_alerts: 1,
+          keepers_with_alerts: 1,
+          ttl_expired_keepers: 1,
+          near_duplicate_keepers: 0,
+          high_event_ratio_keepers: 0,
+          thresholds: {
+            ttl_expired_on_disk: 0,
+            near_duplicate: 0,
+            events_to_facts_ratio: 2,
+          },
+        },
+      })
+      const { container } = render(html`<${KeeperMemoryHealth} />`)
+      await waitFor(() => expect(screen.getByText('alerted')).not.toBeNull())
+
+      const alertStat = Array.from(container.querySelectorAll('.kmh-totals-strip .kmh-stat'))
+        .find((stat) => stat.textContent === '경보1')
+      expect(alertStat).not.toBeUndefined()
+      expect(alertStat!.querySelector('.kmh-stat-value')?.textContent).toBe('1')
     })
   })
 

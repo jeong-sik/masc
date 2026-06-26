@@ -291,6 +291,7 @@ export type {
   MemorySubsystemsDraftSkillCandidate,
   MemorySubsystemsDelegationRequest,
   MemorySubsystemsResponse,
+  KeeperMemoryHealthAlert,
   KeeperMemoryHealthKeeperEntry,
   KeeperMemoryHealthResponse,
   VerificationRequestStatus,

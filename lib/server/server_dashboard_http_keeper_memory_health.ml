@@ -25,6 +25,65 @@ type keeper_health =
   ; near_duplicate : int
   }
 
+type keeper_alert =
+  { code : string
+  ; severity : string
+  ; message : string
+  ; value : float
+  ; threshold : float
+  }
+
+let events_to_facts_ratio_warn_threshold = 2.0
+
+let alert ~code ~message ~value ~threshold =
+  { code; severity = "warn"; message; value; threshold }
+;;
+
+let keeper_alerts h =
+  []
+  |> (fun alerts ->
+    if h.ttl_expired_on_disk > 0
+    then
+      alert
+        ~code:"ttl_expired_on_disk"
+        ~message:"TTL-expired Memory OS fact rows remain on disk; GC dry-run would prune them."
+        ~value:(float_of_int h.ttl_expired_on_disk)
+        ~threshold:0.0
+      :: alerts
+    else alerts)
+  |> (fun alerts ->
+    if h.near_duplicate > 0
+    then
+      alert
+        ~code:"near_duplicate"
+        ~message:"Near-duplicate Memory OS fact rows remain on disk; GC dry-run would deduplicate them."
+        ~value:(float_of_int h.near_duplicate)
+        ~threshold:0.0
+      :: alerts
+    else alerts)
+  |> (fun alerts ->
+    if h.events_to_facts_ratio > events_to_facts_ratio_warn_threshold
+    then
+      alert
+        ~code:"events_to_facts_ratio_high"
+        ~message:"Memory OS event bytes are high relative to fact bytes."
+        ~value:h.events_to_facts_ratio
+        ~threshold:events_to_facts_ratio_warn_threshold
+      :: alerts
+    else alerts)
+  |> List.rev
+;;
+
+let keeper_alert_to_json alert =
+  `Assoc
+    [ "code", `String alert.code
+    ; "severity", `String alert.severity
+    ; "message", `String alert.message
+    ; "value", `Float alert.value
+    ; "threshold", `Float alert.threshold
+    ]
+;;
+
 let count_lines_in_file path =
   (* NDT-OK: file line count is a read-only diagnostic metric, not a control
      value. Streams the file so a large append-only events log is not loaded
@@ -92,6 +151,7 @@ let keeper_health ~keepers_dir ~now keeper_id =
 ;;
 
 let keeper_health_to_json h : Yojson.Safe.t =
+  let alerts = keeper_alerts h in
   `Assoc
     [ "keeper_id", `String h.keeper_id
     ; "facts", `Int h.facts
@@ -101,6 +161,7 @@ let keeper_health_to_json h : Yojson.Safe.t =
     ; "events_to_facts_ratio", `Float h.events_to_facts_ratio
     ; "ttl_expired_on_disk", `Int h.ttl_expired_on_disk
     ; "near_duplicate", `Int h.near_duplicate
+    ; "alerts", `List (List.map keeper_alert_to_json alerts)
     ]
 ;;
 
@@ -127,6 +188,13 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
     |> List.sort (fun a b -> compare b.facts_bytes a.facts_bytes)
   in
   let sum f = List.fold_left (fun acc h -> acc + f h) 0 entries in
+  let all_alerts = List.concat_map keeper_alerts entries in
+  let alert_count_by_code code =
+    List.fold_left
+      (fun acc alert -> if String.equal alert.code code then acc + 1 else acc)
+      0
+      all_alerts
+  in
   `Assoc
     [ "generated_at", `Float now
     ; "cadence_counter_entries", `Int cadence_counter_entries
@@ -138,6 +206,27 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
           ; "events_bytes", `Int (sum (fun h -> h.events_bytes))
           ; "ttl_expired_on_disk", `Int (sum (fun h -> h.ttl_expired_on_disk))
           ; "near_duplicate", `Int (sum (fun h -> h.near_duplicate))
+          ] )
+    ; ( "alert_summary"
+      , `Assoc
+          [ "total_alerts", `Int (List.length all_alerts)
+          ; "warn_alerts", `Int (List.length all_alerts)
+          ; ( "keepers_with_alerts"
+            , `Int
+                (List.fold_left
+                   (fun acc h -> if keeper_alerts h = [] then acc else acc + 1)
+                   0
+                   entries) )
+          ; "ttl_expired_keepers", `Int (alert_count_by_code "ttl_expired_on_disk")
+          ; "near_duplicate_keepers", `Int (alert_count_by_code "near_duplicate")
+          ; ( "high_event_ratio_keepers"
+            , `Int (alert_count_by_code "events_to_facts_ratio_high") )
+          ; ( "thresholds"
+            , `Assoc
+                [ "ttl_expired_on_disk", `Float 0.0
+                ; "near_duplicate", `Float 0.0
+                ; "events_to_facts_ratio", `Float events_to_facts_ratio_warn_threshold
+                ] )
           ] )
     ]
 ;;

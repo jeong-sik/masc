@@ -9,15 +9,16 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import {
   fetchKeeperMemoryHealth,
+  type KeeperMemoryHealthAlert,
   type KeeperMemoryHealthKeeperEntry,
   type KeeperMemoryHealthResponse,
 } from '../../api/dashboard'
 import { DEFAULT_PANEL_REFRESH_MS, formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 
 // Rows whose events-to-facts ratio exceeds this threshold are flagged for
-// operator attention — a high ratio suggests the event log has grown much
-// larger than the fact store, which may indicate GC backpressure.
-const EVENTS_TO_FACTS_RATIO_WARN_THRESHOLD = 2
+// operator attention by the backend. Keep the fallback threshold only for
+// legacy responses that predate typed alerts.
+const LEGACY_EVENTS_TO_FACTS_RATIO_WARN_THRESHOLD = 2
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -25,16 +26,35 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
 }
 
+function entryAlerts(entry: KeeperMemoryHealthKeeperEntry): KeeperMemoryHealthAlert[] {
+  return entry.alerts ?? []
+}
+
 function isRowWarning(entry: KeeperMemoryHealthKeeperEntry): boolean {
+  if (entryAlerts(entry).length > 0) return true
   return (
-    entry.events_to_facts_ratio > EVENTS_TO_FACTS_RATIO_WARN_THRESHOLD
+    entry.events_to_facts_ratio > LEGACY_EVENTS_TO_FACTS_RATIO_WARN_THRESHOLD
     || entry.ttl_expired_on_disk > 0
   )
+}
+
+function alertLabel(code: string): string {
+  switch (code) {
+    case 'ttl_expired_on_disk':
+      return 'TTL'
+    case 'near_duplicate':
+      return '중복'
+    case 'events_to_facts_ratio_high':
+      return '비율'
+    default:
+      return code
+  }
 }
 
 function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
   const warn = isRowWarning(entry)
   const ratioStr = entry.events_to_facts_ratio.toFixed(2)
+  const alerts = entryAlerts(entry)
 
   return html`
     <tr class=${warn ? 'kmh-row--warn' : ''}>
@@ -42,7 +62,8 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
       <td>${entry.facts.toLocaleString()}</td>
       <td>${formatBytes(entry.facts_bytes)}</td>
       <td>
-        ${entry.events_to_facts_ratio > EVENTS_TO_FACTS_RATIO_WARN_THRESHOLD
+        ${alerts.some(alert => alert.code === 'events_to_facts_ratio_high')
+          || entry.events_to_facts_ratio > LEGACY_EVENTS_TO_FACTS_RATIO_WARN_THRESHOLD
           ? html`<span class="kmh-badge kmh-badge--warn">${ratioStr}</span>`
           : html`<span>${ratioStr}</span>`}
       </td>
@@ -52,6 +73,13 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
           : html`<span class="kmh-badge kmh-badge--ok">0</span>`}
       </td>
       <td>${entry.near_duplicate}</td>
+      <td>
+        ${alerts.length > 0
+          ? alerts.map(alert => html`
+            <span class="kmh-badge kmh-badge--warn" title=${alert.message}>${alertLabel(alert.code)}</span>
+          `)
+          : html`<span class="kmh-badge kmh-badge--ok">정상</span>`}
+      </td>
     </tr>
   `
 }
@@ -115,6 +143,12 @@ export function KeeperMemoryHealth() {
   }
 
   const generatedAt = new Date(data.generated_at * 1000).toLocaleTimeString()
+  const derivedAlertCount = data.keepers.reduce((total, entry) => {
+    const alerts = entryAlerts(entry)
+    if (alerts.length > 0) return total + alerts.length
+    return total + (isRowWarning(entry) ? 1 : 0)
+  }, 0)
+  const totalAlerts = data.alert_summary?.total_alerts ?? derivedAlertCount
 
   return html`
     <div class="kmh-panel">
@@ -144,6 +178,12 @@ export function KeeperMemoryHealth() {
             <span class="kmh-stat-value">${data.totals.near_duplicate}</span>
           </div>
           <div class="kmh-stat">
+            <span class="kmh-stat-label">경보</span>
+            <span class=${`kmh-stat-value${totalAlerts > 0 ? ' kmh-stat-value--warn' : ''}`}>
+              ${totalAlerts}
+            </span>
+          </div>
+          <div class="kmh-stat">
             <span class="kmh-stat-label">케이던스 카운터</span>
             <span class="kmh-stat-value">${data.cadence_counter_entries}</span>
           </div>
@@ -170,6 +210,7 @@ export function KeeperMemoryHealth() {
                   <th>events:facts 비율</th>
                   <th>만료(디스크)</th>
                   <th>근접중복</th>
+                  <th>경보</th>
                 </tr>
               </thead>
               <tbody>

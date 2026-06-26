@@ -62,10 +62,28 @@ let float_field name json =
   | _ -> Alcotest.failf "expected float field %S" name
 ;;
 
+let string_field name json =
+  match assoc_field name json with
+  | Some (`String s) -> s
+  | _ -> Alcotest.failf "expected string field %S" name
+;;
+
+let list_field name json =
+  match assoc_field name json with
+  | Some (`List xs) -> xs
+  | _ -> Alcotest.failf "expected list field %S" name
+;;
+
 let totals json =
   match assoc_field "totals" json with
   | Some t -> t
   | None -> Alcotest.fail "expected totals object"
+;;
+
+let alert_summary json =
+  match assoc_field "alert_summary" json with
+  | Some s -> s
+  | None -> Alcotest.fail "expected alert_summary object"
 ;;
 
 let keeper_obj id json =
@@ -155,6 +173,7 @@ let test_reports_per_keeper_metric_values () =
     (float_field "events_to_facts_ratio" k);
   Alcotest.(check int) "nothing expired" 0 (int_field "ttl_expired_on_disk" k);
   Alcotest.(check int) "no duplicates" 0 (int_field "near_duplicate" k);
+  Alcotest.(check int) "no keeper alerts" 0 (List.length (list_field "alerts" k));
   Alcotest.(check int) "totals.facts" 2 (int_field "facts" (totals json));
   Alcotest.(check bool)
     "totals.facts_bytes positive"
@@ -189,6 +208,18 @@ let test_dry_run_gc_reports_expired_and_duplicates () =
   Alcotest.(check int) "all rows counted on disk" 4 (int_field "facts" k);
   Alcotest.(check int) "one TTL-expired row" 1 (int_field "ttl_expired_on_disk" k);
   Alcotest.(check int) "one duplicate row" 1 (int_field "near_duplicate" k);
+  let alerts = list_field "alerts" k in
+  Alcotest.(check int) "two keeper alerts" 2 (List.length alerts);
+  Alcotest.(check (list string))
+    "alert codes"
+    [ "ttl_expired_on_disk"; "near_duplicate" ]
+    (List.map (string_field "code") alerts);
+  let summary = alert_summary json in
+  Alcotest.(check int) "summary total alerts" 2 (int_field "total_alerts" summary);
+  Alcotest.(check int) "summary warn alerts" 2 (int_field "warn_alerts" summary);
+  Alcotest.(check int) "summary keepers with alerts" 1 (int_field "keepers_with_alerts" summary);
+  Alcotest.(check int) "summary ttl keepers" 1 (int_field "ttl_expired_keepers" summary);
+  Alcotest.(check int) "summary duplicate keepers" 1 (int_field "near_duplicate_keepers" summary);
   (* dry_run must NOT rewrite the store: a fresh read still sees all 4 rows. *)
   let reread = Io.read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id:"gc" in
   Alcotest.(check int) "store untouched by dry-run gc" 4 (List.length reread)

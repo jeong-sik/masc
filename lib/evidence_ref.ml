@@ -11,8 +11,15 @@ type t =
   | Trace_ref of trace_kind * string
   | File_path of string
 
+(* Minimum length of a git "short" commit id (git's default abbrev). Hex
+   strings shorter than this are not treated as commit refs. *)
 let min_short_commit_hex_len = 7
+(* Maximum length of a commit hex id. 64 = SHA-256 hex; git SHA-1 is 40.
+   Accept the longer form so SHA-256 repos are covered. *)
 let max_commit_hex_len = 64
+(* Upper bound on a plausible file extension (e.g. final segment of
+   ".tar.gz"). Bounds the plausible-extension check in
+   [has_plausible_extension]. *)
 let max_file_extension_len = 12
 
 let starts_with ~prefix value =
@@ -151,9 +158,39 @@ let has_plausible_extension value =
     && String.for_all is_file_ref_char value
     && String.for_all is_extension_char (String.sub value (idx + 1) ext_len)
 
+let is_absolute_path value =
+  String.length value > 0 && Char.equal value.[0] '/'
+
+let contains_parent_segment value =
+  (* Reject ".." as a path segment (parent-dir traversal). Matched only at
+     a segment boundary so a literal ".." inside a file name (e.g. "v1..0")
+     is not falsely rejected. *)
+  let len = String.length value in
+  let rec scan i =
+    if i + 2 > len then false
+    else if
+      Char.equal value.[i] '.'
+      && (i + 1 < len)
+      && Char.equal value.[i + 1] '.'
+      && (i = 0 || Char.equal value.[i - 1] '/')
+      && (i + 2 = len || Char.equal value.[i + 2] '/')
+    then true
+    else scan (i + 1)
+  in
+  scan 0
+
 let parse_file_path value =
+  (* P0 (#22348 review): a concrete artifact reference must not be an
+     absolute path or contain a parent-dir ("..") segment — both are
+     gate-bypass shapes, not legitimate relative artifact refs. NOTE: this
+     is shape validation only; the deeper "candidate vs validated"
+     separation the review asks for (so even a/b and x.txt require a
+     base-path-resolved validated variant before the gate accepts them) is
+     deferred as a follow-up. *)
   if
-    String.for_all is_file_ref_char value
+    not (is_absolute_path value)
+    && not (contains_parent_segment value)
+    && String.for_all is_file_ref_char value
     && has_payload_char value
     && (contains_path_separator value || has_plausible_extension value)
   then Some (File_path value)
@@ -199,4 +236,9 @@ let to_string = function
   | Trace_ref (kind, payload) -> trace_kind_to_string kind ^ ":" ^ payload
   | File_path value -> value
 
-let is_concrete_string value = Option.is_some (of_string value)
+(* Formerly [is_concrete_string]. Renamed (#22348 review P1): the typed
+   variant only recognizes a *shape* (url / commit / pr / file_path / …)
+   — it does NOT semantically validate that the value is a real, existing,
+   base-path-resolved artifact. Callers must not read "true" as "this is a
+   concrete, trusted evidence reference". *)
+let recognizes_evidence_shape value = Option.is_some (of_string value)

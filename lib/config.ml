@@ -43,7 +43,16 @@ let descriptor_owned_internal_tool_schemas : Masc_domain.tool_schema list =
 
 let raw_all_tool_schemas : Masc_domain.tool_schema list =
   dedupe_schemas
-    (Tools.raw_schemas
+    (* #9912 / #10101: [Tool_shard.all_keeper_tool_schemas] is the SSOT
+       for every keeper-facing shard tool. It is placed first so that,
+       on the unlikely event of a duplicate name with another aggregate
+       source, the keeper shard definition wins and help lookup /
+       dispatch metadata stay coherent. The earlier #9912 patch only
+       registered [Tool_shard.base_tools] (5 always-present tools); #10101
+       observed 11 other shard categories still missing
+       (keeper_task_claim, tool_edit_file, keeper_board_*, ...). *)
+    (Tool_shard.all_keeper_tool_schemas
+     @ Tools.raw_schemas
      @ Tool_schemas_misc.schemas
      @ descriptor_owned_internal_tool_schemas
      (* Board MCP adapter schemas live outside neutral Tool substrate and
@@ -51,20 +60,7 @@ let raw_all_tool_schemas : Masc_domain.tool_schema list =
      @ Board_tool.tools
      @ Keeper_types_profile.schemas
      @ Tool_local_runtime.schemas
-     @ Tool_agent_timeline.schemas
-     @ Tool_shard.schemas
-     (* #9912 / #10101: every keeper-facing shard tool must reach the
-        authoritative registry consumed by
-        [Tool_help_registry.find_entry], or keepers that request
-        help on the tool receive "unknown tool" despite the
-        dispatcher handling it correctly.  #9912 plugged only
-        [Tool_shard.base_tools] (5 always-present tools); #10101
-        observed 11 other shard categories still missing
-        (keeper_task_claim, tool_edit_file, keeper_board_*, ...).
-        [Tool_shard.all_keeper_tool_schemas] is the SSOT that
-        pulls from [all_shards] plus unsharded default schemas, so future
-        tool categories flow through without another patch-local fix. *)
-     @ Tool_shard.all_keeper_tool_schemas)
+     @ Tool_agent_timeline.schemas)
 
 let front_door_tool_schemas : Masc_domain.tool_schema list = raw_all_tool_schemas
 

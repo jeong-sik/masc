@@ -91,7 +91,11 @@ let link_block_json ~url ~title ~description =
     ]
 
 let image_block_json ~url ~caption =
-  let alt_text = Option.value (Option.map redact caption) ~default:"" in
+  let alt_text =
+    match caption with
+    | Some caption -> redact caption
+    | None -> ""
+  in
   `Assoc
     [ ("type", `String "image")
     ; ("image_url", `String url)

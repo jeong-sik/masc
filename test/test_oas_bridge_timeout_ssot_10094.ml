@@ -29,8 +29,8 @@ let test_remaining_defaults () =
   clear_envs ();
   let cases =
     [ Cfg.Anti_rationalization, 180.0
-    ; Cfg.Governance_judge, Cfg.governance_judge_no_timeout
-    ; Cfg.Operator_judge, Cfg.governance_judge_no_timeout
+    ; Cfg.Governance_judge, Cfg.dashboard_judge_default_sec
+    ; Cfg.Operator_judge, Cfg.dashboard_judge_default_sec
     ]
   in
   List.iter
@@ -51,10 +51,10 @@ let test_per_caller_env_override () =
     "anti_rationalization env overrides default"
     45.5
     (Cfg.timeout_sec ~caller:Cfg.Anti_rationalization ());
-  Alcotest.(check bool)
+  Alcotest.(check (float 0.0001))
     "governance_judge unaffected by anti_rationalization env"
-    true
-    (Float.is_infinite (Cfg.timeout_sec ~caller:Cfg.Governance_judge ()));
+    Cfg.dashboard_judge_default_sec
+    (Cfg.timeout_sec ~caller:Cfg.Governance_judge ());
   clear_envs ()
 ;;
 

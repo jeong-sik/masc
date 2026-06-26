@@ -3,10 +3,8 @@
     Each remaining caller is named so:
 
       1. anti-rationalization keeps its compute-heavy default (180s);
-      2. dashboard judge daemons stay advisory and unbounded by default —
-         a per-judge wrapper timeout that fires before the provider's
-         first response arrives propagates fleet-wide idle instead of
-         giving the operator a usable degraded signal;
+      2. dashboard judge daemons have a MASC-owned structural timeout
+         instead of relying on provider-specific inner timeouts;
       3. the operator can override any single caller's budget via
          [MASC_OAS_BRIDGE_TIMEOUT_<CALLER>_SEC];
       4. the operator can set a fallback for unknown / future callers
@@ -28,32 +26,14 @@ type caller =
 (** Hardcoded default seconds for each known caller. *)
 let global_default_sec = 300.0
 
-(** Legacy default for advisory dashboard judge callers. Retained as a
-    named pin so tests that previously asserted on it (45.0) keep a
-    stable reference, but it is no longer the active default for any
-    caller — the {b governance_judge_no_timeout} value below replaces
-    the [Governance_judge | Operator_judge] arms in [known_default_sec]
-    (#20082-style: 2026-06-08 fleet-wide idle root cause was a 45s
-    judge wrapper firing before the OAS provider's first response). *)
-let dashboard_judge_default_sec = 45.0
-
-(** Dashboard judge callers are advisory signal generators running on a
-    background daemon cycle. A wrapper timeout that fires while the
-    provider is still preparing the first response (boot race or lane
-    saturation) propagates fleet-wide idle: the daemon fiber blocks,
-    the next [refresh_once] skips behind it, and operators see a frozen
-    dashboard with no incremental signal. Real protection is the OAS
-    bridge's own per-call timeout (or no-timeout) inside the wrapped
-    computation, plus the typed in-flight invariant in
-    [Dashboard_governance_judge.mark_compute_start]. Therefore both
-    judge callers resolve to [Float.infinity]: the bridge applies no
-    wrapper timeout, the [Eio.Time.with_timeout_exn] call in
-    [Masc_oas_bridge.run_safe] receives an infinite budget, and
-    [Eio 5.x] treats it as no fire.  Per-caller env overrides
-    [MASC_OAS_BRIDGE_TIMEOUT_GOVERNANCE_JUDGE_SEC] /
-    [MASC_OAS_BRIDGE_TIMEOUT_OPERATOR_JUDGE_SEC] still win — operators
-    can re-bind a finite budget if they explicitly want one. *)
-let governance_judge_no_timeout = Float.infinity
+(** Default for advisory dashboard judge callers. This is intentionally
+    finite: those callers use [Masc_oas_bridge.run_with_caller], so the
+    bridge must own a structural wall-clock budget rather than presenting
+    an unbounded call as protected by the timeout contract.  Per-caller
+    env overrides still win, including explicit [Float.infinity] when an
+    operator intentionally wants to disable the wrapper for a local
+    experiment. *)
+let dashboard_judge_default_sec = global_default_sec
 
 let caller_key = function
   | Anti_rationalization -> "anti_rationalization"
@@ -72,13 +52,7 @@ let known_callers () =
 
 let known_default_sec = function
   | Anti_rationalization -> Some 180.0
-  (* #9629 originally bounded both judges to 45s for dashboard responsiveness.
-     #20082 reversed this: the 45s wrapper timeout was firing before the
-     provider's first response (boot race, ollama_cloud lane saturation) and
-     propagating fleet-wide idle.  Real protection lives at the OAS provider
-     boundary, not in a per-judge cycle wrapper, so both callers now resolve
-     to [Float.infinity]. *)
-  | Governance_judge | Operator_judge -> Some governance_judge_no_timeout
+  | Governance_judge | Operator_judge -> Some dashboard_judge_default_sec
   | Unknown _ -> None
 ;;
 
@@ -109,19 +83,17 @@ let trimmed_value_opt name =
   | None -> None
 ;;
 
-(** Accept positive floats including [Float.infinity]. The [is_finite]
-    guard below used to reject [infinity] silently, which would have
-    collapsed the dashboard-judge no-timeout pin back to
-    [global_default_sec] (300s) the moment any env override went
-    through this function.  The OAS bridge treats [infinity] as
-    no-fire, so we let it pass. *)
-let positive_finite_or_default ~default value =
+(** Accept positive floats including [Float.infinity]. Explicit infinite env
+    overrides are allowed for local operator experiments even though checked-in
+    production defaults stay finite.  The OAS bridge treats [infinity] as
+    no-fire, so the helper name intentionally does not claim finiteness. *)
+let positive_or_default ~default value =
   if Float.compare value 0.0 > 0 then value else default
 ;;
 
 let timeout_env_value ~default raw =
   Safe_ops.float_of_string_with_default ~default raw
-  |> positive_finite_or_default ~default
+  |> positive_or_default ~default
 ;;
 
 (** [timeout_sec ~caller ()] resolves the OAS bridge timeout for
@@ -130,13 +102,11 @@ let timeout_env_value ~default raw =
       1. Per-caller env [MASC_OAS_BRIDGE_TIMEOUT_<CALLER>_SEC]
          — wins unconditionally.  Lets the operator tune one
          caller without touching others.  Positive [Float.infinity]
-         passes through so the dashboard-judge no-timeout pin
-         survives env-override parsing.
+         passes through as an explicit no-wrapper operator override.
       2. Per-caller checked-in default ([known_default_sec]).
          Preserves intentional 180s budgets for compute-heavy
-         callers; dashboard judge callers resolve to
-         [governance_judge_no_timeout] ([Float.infinity]) so the
-         bridge never wraps their cycle in a timer.
+         callers; dashboard judge callers resolve to the finite
+         [dashboard_judge_default_sec] budget.
       3. Global env [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC] — only
          consulted for UNKNOWN callers (typo, future caller
          without a default entry).  Treating it as an override

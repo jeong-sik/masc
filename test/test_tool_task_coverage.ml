@@ -406,8 +406,20 @@ let () = test "masc_oas_bridge_fails_closed_without_eio_env" (fun () ->
         called := true;
         Ok "ok")
     with
-    | Error _ ->
-        if !called then failwith "run_safe called fn without an Eio env"
+    | Error error ->
+        if !called then failwith "run_safe called fn without an Eio env";
+        (match Keeper_internal_error.classify_masc_internal_error error with
+         | Some (Keeper_internal_error.Internal_bridge_exception { caller; _ }) ->
+             if caller <> "test_tool_task_coverage" then
+               failwith ("unexpected bridge caller: " ^ caller)
+         | Some other ->
+             failwith
+               ( "unexpected internal error: "
+               ^ Keeper_internal_error.kind_of_masc_internal_error other )
+         | None ->
+             failwith
+               ("expected typed internal bridge error, got: "
+               ^ Agent_sdk.Error.to_string error))
     | Ok other -> failwith ("unexpected success: " ^ other)
 )
 

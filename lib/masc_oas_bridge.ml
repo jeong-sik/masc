@@ -14,7 +14,7 @@
     [~caller] explicitly or use {!run_with_caller}, which accepts a
     typed caller and pulls the configured budget from
     [Env_config_oas_bridge]. *)
-let min_timeout_s = 0.0
+let timeout_overshoot_warn_ratio = 2.0
 
 let run_safe ~caller ~timeout_s fn =
   if Float.classify_float timeout_s = FP_nan || Float.compare timeout_s 0.0 <= 0 then
@@ -65,7 +65,7 @@ let run_safe ~caller ~timeout_s fn =
        ratio so operators can distinguish "timeout fired at 45s" from
        "timeout fired but cleanup took 121s". *)
     let overshoot_ratio = wall /. timeout_s in
-    if overshoot_ratio > 2.0 then
+    if overshoot_ratio > timeout_overshoot_warn_ratio then
       Log.Misc.warn
         "masc_oas_bridge: timeout overshoot — budget=%.1fs wall=%.1fs \
          (ratio=%.1fx, caller=%s). Cancel propagation through runtime \

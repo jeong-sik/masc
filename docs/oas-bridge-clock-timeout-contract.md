@@ -16,6 +16,10 @@ into unbounded execution.
 Do not add a default-off opt-out flag that restores clockless bridge execution.
 That would preserve the unsafe behavior this contract removes.
 
+Callers registered in `Env_config_oas_bridge.known_callers` must have finite
+checked-in defaults. `Float.infinity` is accepted only as an explicit operator
+override, not as the production default for a `run_with_caller` path.
+
 ## Migration
 
 Server boot:

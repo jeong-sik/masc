@@ -124,9 +124,28 @@ let test_cooperative_cancel_is_reraised () =
            in
            Alcotest.fail "expected Cancelled exception")
        with
-       | Eio.Cancel.Cancelled (Failure "simulated parent cancel") -> caught := true
+       | Eio.Cancel.Cancelled (Failure msg) when msg = "simulated parent cancel" -> caught := true
        | exn -> Alcotest.failf "expected Cancelled(Failure), got %s" (Printexc.to_string exn));
       Alcotest.(check bool) "exception was re-raised" true !caught))
+;;
+
+let test_timeout_log_carries_failure_envelope () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun _sw ->
+      let clock = Eio.Stdenv.clock env in
+      match
+        Keeper_llm_bridge.run_with_timeout_and_fallback ~clock ~timeout_s:0.001 (fun () ->
+          Eio.Time.sleep clock 0.02;
+          Ok "late")
+      with
+      | Error (Agent_sdk.Error.Api (Timeout _)) ->
+        assert_latest_failure_envelope
+          ~label:"timeout"
+          ~needle:"OAS execution timed out"
+          ~cause_code:"provider_timeout"
+          ~operator_action:"inspect_provider_stream"
+      | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
+      | Ok value -> Alcotest.failf "unexpected success: %s" value))
 ;;
 
 let test_parent_timeout_cancel_logs_info () =

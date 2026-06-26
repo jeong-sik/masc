@@ -17,10 +17,10 @@ let test_session_find () =
 
 let test_session_touch () =
   let session = SH.Session.create ~transport:SH.Streamable_HTTP in
-  let old_time = Atomic.get session.last_seen in
+  let old_time = Atomic.get session.SH.last_seen in
   Time_compat.sleep 0.01;
   SH.Session.touch session;
-  Alcotest.(check bool) "last_seen updated" true (Atomic.get session.last_seen > old_time)
+  Alcotest.(check bool) "last_seen updated" true (Atomic.get session.SH.last_seen > old_time)
 
 let test_session_cleanup () =
   (* Create a session that will expire immediately *)
@@ -112,15 +112,15 @@ let test_handle_post_handler_dispatch () =
 
 let session_with_stale_seen () =
   let session = SH.Session.create ~transport:SH.Streamable_HTTP in
-  let before = Atomic.get session.last_seen in
+  let before = Atomic.get session.SH.last_seen in
   Time_compat.sleep 0.01;
   (session, before)
 
 let check_session_touched label session before =
-  Alcotest.(check bool) label true (Atomic.get session.last_seen > before)
+  Alcotest.(check bool) label true (Atomic.get session.SH.last_seen > before)
 
 let check_session_not_touched label session before =
-  Alcotest.(check bool) label true (Atomic.get session.last_seen = before)
+  Alcotest.(check bool) label true (Atomic.get session.SH.last_seen = before)
 
 let test_handle_post_session_touch_success () =
   let session, before = session_with_stale_seen () in

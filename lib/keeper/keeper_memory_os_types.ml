@@ -62,6 +62,19 @@ let category_to_string = function
   | Unknown s -> s
 ;;
 
+let all_categories =
+  [ Code_change
+  ; Fact
+  ; Preference
+  ; Blocker
+  ; Goal
+  ; Constraint
+  ; Ephemeral
+  ; Validated_approach
+  ; Lesson
+  ]
+;;
+
 let category_of_string s =
   match String.lowercase_ascii (String.trim s) with
   | "code_change" -> Code_change
@@ -92,6 +105,14 @@ let claim_kind_to_string = function
   | External_state -> "external_state"
   | Durable_knowledge -> "durable_knowledge"
   | Diagnostic -> "diagnostic"
+;;
+
+let all_claim_kinds =
+  [ Self_observation; External_state; Durable_knowledge; Diagnostic ]
+;;
+
+let librarian_claim_kinds =
+  [ Self_observation; External_state; Durable_knowledge ]
 ;;
 
 let claim_kind_of_string s =

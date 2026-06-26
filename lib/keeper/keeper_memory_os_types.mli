@@ -53,6 +53,11 @@ type category =
     [category_of_string] for known variants; [Unknown s] yields [s]). *)
 val category_to_string : category -> string
 
+(** All closed taxonomy categories that can be emitted by the librarian prompt.
+    [Unknown _] is intentionally excluded because it represents parser drift,
+    not an advertised token. *)
+val all_categories : category list
+
 (** Parse a free-text category label (trimmed, case-insensitive on known tokens);
     anything outside the taxonomy becomes [Unknown] carrying the raw label. *)
 val category_of_string : string -> category
@@ -69,6 +74,14 @@ type claim_kind =
 
 (** Canonical lowercase token (round-trips with [claim_kind_of_string]). *)
 val claim_kind_to_string : claim_kind -> string
+
+(** All closed claim-kind tokens. *)
+val all_claim_kinds : claim_kind list
+
+(** Claim-kind tokens the librarian prompt should ask a provider to emit.
+    [Diagnostic] is system-authored and intentionally excluded from the LLM
+    retry contract. *)
+val librarian_claim_kinds : claim_kind list
 
 (** Parse a claim_kind token (trimmed, case-insensitive on known tokens); an
     absent/unrecognized label yields [None], routing to the durable pre-RFC path

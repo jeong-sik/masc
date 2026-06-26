@@ -8,6 +8,38 @@ type input =
   ; messages : Agent_sdk.Types.message list
   }
 
+let wire_field_schema_version = "schema_version"
+let wire_field_episode_summary = "episode_summary"
+let wire_field_claims = "claims"
+let wire_field_open_items = "open_items"
+let wire_field_constraints = "constraints"
+let wire_field_preserved_tool_refs = "preserved_tool_refs"
+let wire_field_claim = "claim"
+let wire_field_category = "category"
+let wire_field_source_turn = "source_turn"
+let wire_field_source_tool_call_id = "source_tool_call_id"
+let wire_field_claim_id = "claim_id"
+let wire_field_claim_kind = "claim_kind"
+
+let wire_episode_fields =
+  [ wire_field_episode_summary
+  ; wire_field_claims
+  ; wire_field_open_items
+  ; wire_field_constraints
+  ; wire_field_preserved_tool_refs
+  ]
+;;
+
+let wire_claim_fields =
+  [ wire_field_claim
+  ; wire_field_category
+  ; wire_field_source_turn
+  ; wire_field_source_tool_call_id
+  ; wire_field_claim_id
+  ; wire_field_claim_kind
+  ]
+;;
+
 let trim_nonempty s =
   let s = String.trim s in
   if String.equal s "" then None else Some s
@@ -158,24 +190,24 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
   match json with
   | `Assoc fields ->
     (match
-       string_field "claim" fields
-       , string_field "category" fields
-       , int_field "source_turn" fields
+       string_field wire_field_claim fields
+       , string_field wire_field_category fields
+       , int_field wire_field_source_turn fields
      with
      | Some claim, Some category_str, Some turn when turn >= 0 ->
-       let tool_call_id = optional_string_field "source_tool_call_id" fields in
+       let tool_call_id = optional_string_field wire_field_source_tool_call_id fields in
       (* RFC-0259 §3.7 (P6): a stable conclusion slug the model emits so a reworded
          re-extraction of the same conclusion reuses the id and UPSERTs the existing
          row (defect E/F). Pass-through only — absent => [None] (conservative
          fallback to [normalize_claim] keying); we never derive/hash an id in code,
          which would be the string-classifier workaround the RFC rejects. *)
-      let claim_id = optional_string_field "claim_id" fields in
+      let claim_id = optional_string_field wire_field_claim_id fields in
       (* RFC-0285 §3.1/§3.2(a): the producer-emitted origin tag. Pass-through only —
          the librarian LLM classifies at the live-context boundary; deriving
          claim_kind in code would be the read-time string-classifier workaround the
          RFC rejects. Absent/unrecognized => [None], routing to the durable path. *)
       let claim_kind =
-        Option.bind (optional_string_field "claim_kind" fields) claim_kind_of_string
+        Option.bind (optional_string_field wire_field_claim_kind fields) claim_kind_of_string
       in
       (* Parse-once at the producer boundary: the LLM's free-text category becomes
          a typed [category] here, so no surface string reaches the store or the
@@ -236,11 +268,11 @@ let episode_of_output_result ?now ~generation (inp : input) (raw : string) :
     (match json with
     | `Assoc fields ->
       (match
-         string_field "episode_summary" fields
-         , List.assoc_opt "claims" fields
-         , string_list_field_or_empty "open_items" fields
-         , string_list_field_or_empty "constraints" fields
-         , string_list_field_or_empty "preserved_tool_refs" fields
+         string_field wire_field_episode_summary fields
+         , List.assoc_opt wire_field_claims fields
+         , string_list_field_or_empty wire_field_open_items fields
+         , string_list_field_or_empty wire_field_constraints fields
+         , string_list_field_or_empty wire_field_preserved_tool_refs fields
        with
        | ( Some episode_summary
          , Some (`List claim_items)

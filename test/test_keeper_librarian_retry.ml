@@ -12,16 +12,16 @@ module R = Masc.Keeper_librarian_runtime
 module Lib = Masc.Keeper_librarian
 module Types = Agent_sdk.Types
 
-let field_episode_summary = "episode_summary"
-let field_claims = "claims"
-let field_claim = "claim"
+let field_episode_summary = Lib.wire_field_episode_summary
+let field_claims = Lib.wire_field_claims
+let field_claim = Lib.wire_field_claim
 let field_confidence = "confidence"
-let field_category = "category"
-let field_source_turn = "source_turn"
-let field_source_tool_call_id = "source_tool_call_id"
-let field_open_items = "open_items"
-let field_constraints = "constraints"
-let field_preserved_tool_refs = "preserved_tool_refs"
+let field_category = Lib.wire_field_category
+let field_source_turn = Lib.wire_field_source_turn
+let field_source_tool_call_id = Lib.wire_field_source_tool_call_id
+let field_open_items = Lib.wire_field_open_items
+let field_constraints = Lib.wire_field_constraints
+let field_preserved_tool_refs = Lib.wire_field_preserved_tool_refs
 
 let claim_json ?confidence ?(claim = "c") ?(source_turn = `Int 0) () =
   let fields =
@@ -422,6 +422,12 @@ let test_invalid_source_turn_string_rejected () =
 let test_retry_nudge_matches_schema () =
   (* The old nudge listed "confidence" as a claim field; the parser dropped
      confidence in RFC-0247, so the nudge must no longer ask for it. *)
+  check (list string) "nudge episode fields match parser fields"
+    Lib.wire_episode_fields
+    R.parse_retry_episode_fields;
+  check (list string) "nudge claim fields match parser fields"
+    Lib.wire_claim_fields
+    R.parse_retry_claim_fields;
   check bool "nudge episode field list includes claims" true
     (List.mem field_claims R.parse_retry_episode_fields);
   check bool "nudge episode field list includes preserved refs" true

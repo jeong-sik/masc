@@ -23,19 +23,19 @@ let cleanup_dir dir =
 
 let rules_path ~base_path =
   Filename.concat
-    (Workspace_utils.masc_dir_from_base_path ~base_path)
+    (Common.masc_dir_from_base_path ~base_path)
     "approval-rules.json"
 ;;
 
 let write_rules ~base_path json =
-  let masc_dir = Workspace_utils.masc_dir_from_base_path ~base_path in
+  let masc_dir = Common.masc_dir_from_base_path ~base_path in
   if not (Sys.file_exists masc_dir) then Unix.mkdir masc_dir 0o755;
   Out_channel.with_open_text (rules_path ~base_path) (fun oc ->
     output_string oc (Yojson.Safe.pretty_to_string json))
 ;;
 
 let write_rules_raw ~base_path content =
-  let masc_dir = Workspace_utils.masc_dir_from_base_path ~base_path in
+  let masc_dir = Common.masc_dir_from_base_path ~base_path in
   if not (Sys.file_exists masc_dir) then Unix.mkdir masc_dir 0o755;
   Out_channel.with_open_text (rules_path ~base_path) (fun oc -> output_string oc content)
 ;;

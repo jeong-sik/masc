@@ -3,9 +3,10 @@
 
     The switch and net handle are needed by OAS provider completions
     which use cohttp-eio for HTTP transport.  They are stored in
-    [Domain.DLS] so each domain can hold its own handles, with a process-wide
-    compatibility fallback for domains that have not been explicitly
-    initialized yet.
+    [Domain.DLS] only; an uninitialized domain must call {!init} itself
+    or fail closed.  Falling back to another domain's [Eio.Switch.t] or
+    [Eio.Net.t] would let a worker domain borrow handles whose lifetime is
+    tied to the originating domain's switch, which is unsafe.
 
     @since 2.130.0 *)
 
@@ -16,21 +17,14 @@ type t = {
 }
 
 let env_key : t option Domain.DLS.key = Domain.DLS.new_key (fun () -> None)
-let process_env : t option Atomic.t = Atomic.make None
 
 let init ~sw ~net ?clock () =
-  let env = { sw; net; clock } in
-  Domain.DLS.set env_key (Some env);
-  Atomic.set process_env (Some env)
+  Domain.DLS.set env_key (Some { sw; net; clock })
 
 let reset_for_test () =
-  Domain.DLS.set env_key None;
-  Atomic.set process_env None
+  Domain.DLS.set env_key None
 
-let get_opt () =
-  match Domain.DLS.get env_key with
-  | Some _ as env -> env
-  | None -> Atomic.get process_env
+let get_opt () = Domain.DLS.get env_key
 
 let get () =
   match get_opt () with

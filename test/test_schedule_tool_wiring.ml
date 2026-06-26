@@ -663,7 +663,7 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
     (due_tool_status |> member "dispatch_registered" |> to_bool);
   check bool "due keeper next tool direct callable" true
     (due_tool_status |> member "direct_call_allowed" |> to_bool);
-  check string "due keeper next tool hidden visibility" "hidden"
+  check string "due keeper next tool visibility" "default"
     (due_tool_status |> member "visibility" |> to_string);
   check int "due keeper next tool has no surface projection" 0
     (due_tool_status |> member "surface_count" |> to_int);

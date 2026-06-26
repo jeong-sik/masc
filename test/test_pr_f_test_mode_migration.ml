@@ -4,7 +4,8 @@ open Alcotest
 
     PR-F migrates the typed [Host_config.test_mode_kind] surface into
     the only call-site that lives in the [masc] main library:
-    [lib/config_dir_resolver.ml:55] [running_under_test_executable].
+    [lib/config_dir_resolver/config_dir_resolver.ml:55]
+    [running_under_test_executable].
 
     The other 4 sites enumerated in PR-12 mli §1.5 live in lower-level
     sub-libraries ([masc_config], [masc_workspace], [fs_compat]) which
@@ -57,19 +58,19 @@ let count_substring ~haystack ~needle =
 ;;
 
 let test_no_test_prefix_literal_in_config_dir_resolver () =
-  let content = read_file "lib/config_dir_resolver.ml" in
+  let content = read_file "lib/config_dir_resolver/config_dir_resolver.ml" in
   let occurrences =
     count_substring ~haystack:content
       ~needle:{|String.starts_with ~prefix:"test_"|}
   in
   (check int)
     "literal `String.starts_with ~prefix:\"test_\"` in \
-     lib/config_dir_resolver.ml must be 0 after PR-F"
+     lib/config_dir_resolver/config_dir_resolver.ml must be 0 after PR-F"
     pinned_test_prefix_literal_count occurrences
 ;;
 
 let test_helper_takes_no_argument () =
-  let content = read_file "lib/config_dir_resolver.ml" in
+  let content = read_file "lib/config_dir_resolver/config_dir_resolver.ml" in
   let old_signature_occurrences =
     count_substring ~haystack:content
       ~needle:"running_under_test_executable executable_name"
@@ -86,14 +87,14 @@ let test_helper_takes_no_argument () =
 ;;
 
 let test_host_config_is_test_mode_called () =
-  let content = read_file "lib/config_dir_resolver.ml" in
+  let content = read_file "lib/config_dir_resolver/config_dir_resolver.ml" in
   let occurrences =
     count_substring ~haystack:content
       ~needle:"Host_config.is_test_mode"
   in
   (check bool)
     "Host_config.is_test_mode must be called from \
-     lib/config_dir_resolver.ml after PR-F"
+     lib/config_dir_resolver/config_dir_resolver.ml after PR-F"
     true (occurrences >= 1)
 ;;
 

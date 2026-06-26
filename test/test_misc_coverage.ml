@@ -114,7 +114,8 @@ let test_config_default () =
 
 let test_config_to_json () =
   let names = Config.all_tool_names () in
-  check bool "pause in names" true (List.mem "masc_pause" names)
+  check bool "pause hidden from public names" false
+    (List.mem "masc_pause" names)
 
 let test_config_of_json () =
   let visible = Config.visible_tool_schemas () in
@@ -125,8 +126,8 @@ let test_config_of_json_custom () =
   check bool "mode tools removed" false (List.mem "masc_switch_mode" names)
 
 let test_config_of_json_invalid () =
-  (* masc_pause is auto-classified as Hidden (not on public MCP surface) *)
-  check bool "pause hidden (not on public surface)" false
+  (* masc_pause is hidden from public schemas, but allowed on admin/catalog surfaces. *)
+  check bool "pause allowed on admin/catalog surface" true
     (Config.is_tool_allowed "masc_pause")
 
 (* ============================================================

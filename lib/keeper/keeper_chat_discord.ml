@@ -54,6 +54,15 @@ let send_message ~token ~channel_id ~content =
 let truncate content =
   Discord_rest_client.truncate_to_limit (Observability_redact.redact_text content)
 
+let redacted_http_url_opt url =
+  let url = Observability_redact.redact_text url in
+  try
+    match Uri.scheme (Uri.of_string url) with
+    | Some "http" | Some "https" -> Some url
+    | _ -> None
+  with
+  | _ -> None
+
 let is_ascii_space = function
   | ' ' | '\n' | '\r' | '\t' -> true
   | _ -> false
@@ -254,12 +263,16 @@ let send_audio_block ~token ~channel_id ~base_url ~audio_token ~message_text
 let rich_embed_of_chat_block = function
   | Keeper_chat_blocks.Image { src; cap } ->
       let caption = Option.map Observability_redact.redact_text cap in
-      Some (Discord_rest_client.image_embed ~url:src ~caption)
+      Option.map
+        (fun url -> Discord_rest_client.image_embed ~url ~caption)
+        (redacted_http_url_opt src)
   | Keeper_chat_blocks.Link { url; title; meta = _ } ->
       let title = Observability_redact.redact_text title in
-      Some
-        (Discord_rest_client.link_embed ~url ~title ~description:None
-           ~image:None)
+      Option.map
+        (fun url ->
+          Discord_rest_client.link_embed ~url ~title ~description:None
+            ~image:None)
+        (redacted_http_url_opt url)
   | Keeper_chat_blocks.Text _
   | Keeper_chat_blocks.Heading _
   | Keeper_chat_blocks.Unordered_list _
@@ -274,7 +287,6 @@ let rich_embed_of_chat_block = function
 
 let rich_embeds_of_text text =
   text
-  |> Observability_redact.redact_text
   |> Keeper_chat_blocks.parse_text_to_blocks
   |> List.filter_map rich_embed_of_chat_block
 

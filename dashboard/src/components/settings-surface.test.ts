@@ -14,6 +14,8 @@ import type { DashboardToolInventoryItem, LogEntry, RuntimeDefaultsResponse } fr
 import { DashboardMain } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
+
+const MOCK_RUNTIME_PATH = '/tmp/.masc/config/runtime.toml'
 import { dashboardLoading } from '../store'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
 import { resetDevTokenBootstrap } from '../api/dev-token'
@@ -421,7 +423,7 @@ describe('SettingsSurface', () => {
       if (path === '/api/v1/runtime/config/raw') {
         return new Response(JSON.stringify({
           ok: true,
-          path: '/tmp/.masc/config/runtime.toml',
+          path: MOCK_RUNTIME_PATH,
           file_name: 'runtime.toml',
           source_text: '[fusion]\nenabled = true\ndefault_preset = "trio"\nmax_concurrent_panels = 2\n\n[fusion.presets.trio]\nmin_answered = 2\n',
           reloaded: false,
@@ -489,7 +491,7 @@ describe('SettingsSurface', () => {
   it('opens the live runtime.toml editor from runtime management', async () => {
     const runtimeConfig = {
       ok: true,
-      path: '/tmp/.masc/config/runtime.toml',
+      path: MOCK_RUNTIME_PATH,
       file_name: 'runtime.toml',
       source_text: '[runtime]\ndefault = "runpod_mtp.qwen"\n',
       reloaded: false,
@@ -529,19 +531,13 @@ describe('SettingsSurface', () => {
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtimes"]') as HTMLElement)
 
-    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('런타임 관리')
-    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('runtime.toml live-backed')
-    expect(container.querySelector('[data-testid="settings-runtime-launch"]')).not.toBeNull()
-    expect(container.querySelector('.set-rt')).toBeNull()
-    expect(container.textContent).not.toContain('Add runtime')
-
-    await fireEvent.click(container.querySelector('[data-testid="settings-open-runtime-editor"]') as HTMLElement)
-
     await waitFor(() => {
-      expect(container.querySelector('.rt-overlay')).not.toBeNull()
+      expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('런타임 관리')
       expect(container.querySelector('[data-testid="runtime-toml-editor"]')).not.toBeNull()
-      expect(container.textContent).toContain('/tmp/.masc/config/runtime.toml')
+      expect(container.querySelector('.rt-overlay')).toBeNull()
+      expect(container.textContent).toContain(MOCK_RUNTIME_PATH)
     })
+
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/runtime/config/raw',
       expect.objectContaining({

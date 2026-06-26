@@ -8,6 +8,7 @@ import {
   setRuntimeTomlModelField,
   setRuntimeTomlProviderCredential,
   setRuntimeTomlProviderField,
+  cascadeDeleteProvider,
 } from './runtime-toml-config'
 
 const sourceText = `[runtime]
@@ -55,6 +56,7 @@ describe('runtime TOML dashboard editing helpers', () => {
       maxContext: 128000,
       toolsSupport: true,
       thinkingSupport: true,
+      jsonSupport: null,
       streaming: true,
     })
     expect(environment.bindings[0]).toMatchObject({
@@ -170,5 +172,31 @@ sangsu = "runpod_mtp.qwen"
     const impact = runtimeTomlImpactSummary(before, after)
 
     expect(impact.runtimeAssignmentsChanged).toBe(false)
+  })
+
+  it('cascades provider deletion to credentials, bindings, and default runtime', () => {
+    const next = cascadeDeleteProvider(sourceText, 'runpod_mtp')
+    const env = parseRuntimeTomlEnvironment(next)
+    
+    expect(env.providers.length).toBe(0)
+    expect(env.bindings.length).toBe(0)
+    expect(next).not.toContain('default = "runpod_mtp.qwen"')
+    expect(next).not.toContain('[providers.runpod_mtp.credentials]')
+  })
+
+  it('can delete max-context field by setting it to null', () => {
+    const next = setRuntimeTomlModelField(sourceText, 'qwen', 'max-context', null)
+    const env = parseRuntimeTomlEnvironment(next)
+    
+    expect(env.models[0]?.maxContext).toBeNull()
+    expect(next).not.toContain('max-context =')
+  })
+
+  it('extracts json-support from model config', () => {
+    const sourceWithJson = `${sourceText}\n[models.structured]\njson-support = true\n`
+    const env = parseRuntimeTomlEnvironment(sourceWithJson)
+    
+    const structuredModel = env.models.find(m => m.id === 'structured')
+    expect(structuredModel?.jsonSupport).toBe(true)
   })
 })

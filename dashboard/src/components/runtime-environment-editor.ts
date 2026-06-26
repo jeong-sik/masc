@@ -7,8 +7,10 @@ import {
   setRuntimeTomlBindingField,
   setRuntimeTomlDefault,
   setRuntimeTomlKey,
+  setRuntimeTomlModelField,
   setRuntimeTomlProviderCredential,
   setRuntimeTomlProviderField,
+  cascadeDeleteProvider,
   type RuntimeTomlBinding,
   type RuntimeTomlCredentialType,
   type RuntimeTomlEnvironment,
@@ -43,8 +45,9 @@ function firstId<T extends { id: string }>(items: T[]): string {
 }
 
 function parsePositiveInt(value: string): number | null {
-  const parsed = Number.parseInt(value, 10)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+  const trimmed = value.trim()
+  const parsed = Number.parseInt(trimmed, 10)
+  return Number.isFinite(parsed) && parsed > 0 && String(parsed) === trimmed ? parsed : null
 }
 
 function runtimeOptions(environment: RuntimeTomlEnvironment): string[] {
@@ -204,6 +207,17 @@ export function RuntimeEnvironmentEditor({
     onChange: (runtimeId: string) => void,
     needsJson: boolean,
   ) {
+    const binding = environment.bindings.find(b => b.id === value)
+    const model = binding ? environment.models.find(m => m.id === binding.modelId) : null
+    const hasJsonCap = model ? (typeof model.jsonSupport === 'boolean' ? model.jsonSupport : null) : false
+    const capWarning = needsJson && hasJsonCap === false && model
+      ? html`<span class="rt-warn">JSON 모드 필요 · ${model.apiName} 미지원</span>`
+      : needsJson && hasJsonCap === null && model
+        ? html`<span class="rt-ok">JSON 모드 필요 · 모델 capability 미확인</span>`
+        : needsJson && !model
+          ? html`<span class="rt-ok">JSON 모드 필요 · 모델 capability 미확인</span>`
+          : null
+
     return html`
       <div class="rt-lane">
         <div class="rt-lane-l">
@@ -220,9 +234,7 @@ export function RuntimeEnvironmentEditor({
           >
             ${runtimeIds.map(id => html`<option value=${id}>${id}</option>`)}
           </select>
-          ${needsJson
-            ? html`<span class="rt-ok" data-stub="no-per-model-json-cap">JSON 모드 필요 · 모델 capability 미수집</span>`
-            : null}
+          ${capWarning}
         </div>
       </div>
     `
@@ -336,6 +348,20 @@ export function RuntimeEnvironmentEditor({
                    had no live source and rendered as if confirmed. Removed until a
                    provider-capability source exists, rather than implying support
                    with no backing (PR #22081 review P1: no stub). */ ''}
+              <div class="rt-field" style=${{ marginTop: '11px', paddingTop: '11px', borderTop: '1px solid var(--border-soft)' }}>
+                <button
+                  type="button"
+                  class="rt-warn"
+                  style=${{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '11px' }}
+                  disabled=${isDisabled}
+                  onClick=${() => {
+                    const msg = `프로바이더 '${provider.id}'를 삭제할까요? 관련 모델 바인딩 및 런타임 할당이 모두 삭제됩니다.`
+                    if (typeof window !== 'undefined' && !window.confirm(msg)) return
+                    onDraftChange(cascadeDeleteProvider(sourceText, provider.id))
+                  }}
+                  data-testid=${`runtime-provider-delete-${provider.id}`}
+                >프로바이더 삭제</button>
+              </div>
             </div>
           `)}
         </div>
@@ -372,6 +398,23 @@ export function RuntimeEnvironmentEditor({
                      (PR #22081 review P1: no stub). effort stays — it states "미수집"
                      honestly rather than faking a value. */ ''}
                 <span class="rt-cap tcf mono" data-stub="no-effort-source">effort: 미수집</span>
+              </div>
+              <div class="rt-field" style=${{ marginTop: '9px' }}>
+                <span class="sub-k">max-ctx</span>
+                <input
+                  class="rt-input-sm mono"
+                  value=${model.maxContext == null ? '' : String(model.maxContext)}
+                  placeholder="—"
+                  disabled=${isDisabled}
+                  aria-label=${`${model.id} max-context`}
+                  onInput=${(event: Event) => {
+                    const raw = (event.currentTarget as HTMLInputElement).value
+                    const parsed = raw.trim() === '' ? null : parsePositiveInt(raw)
+                    if (parsed !== undefined) {
+                      onDraftChange(setRuntimeTomlModelField(sourceText, model.id, 'max-context', parsed))
+                    }
+                  }}
+                />
               </div>
             </div>
           `)}

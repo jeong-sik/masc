@@ -17,16 +17,16 @@ External references checked on 2026-06-26 Asia/Seoul:
 
 Live commands:
 
-- `curl -fsS 'http://127.0.0.1:8935/health?full=1'`
-  - Runtime paths: `effective_base_path=/Users/dancer/me`, `effective_masc_root=/Users/dancer/me/.masc`, `resolution_source=explicit_cli`.
+- `curl -fsS "$MASC_HEALTH_BASE_URL/health?full=1"`
+  - Runtime paths: `effective_base_path=<base-path>`, `effective_masc_root=<base-path>/.masc`, `resolution_source=explicit_cli`.
   - `keeper_fleet_safety.status=ok`, `running_keeper_fiber_count=6`, `failing_keeper_fiber_count=0`.
-- `curl -fsS 'http://127.0.0.1:8935/api/v1/dashboard/keeper-memory-health' | jq '.keepers[] | select(.keeper_id=="sangsu")'`
+- `curl -fsS "$MASC_HEALTH_BASE_URL/api/v1/dashboard/keeper-memory-health" | jq '.keepers[] | select(.keeper_id=="<keeper-id>")'`
   - `facts=163`, `events=178`, `events_to_facts_ratio=4.2430085983804995`, `ttl_expired_on_disk=0`, `near_duplicate=0`.
-- `jq -s '[.[] | select((.claim // "") | startswith("unstructured_note:"))] | length' /Users/dancer/me/.masc/config/keepers/sangsu.facts.jsonl`
+- `jq -s '[.[] | select((.claim // "") | startswith("unstructured_note:"))] | length' <base-path>/.masc/config/keepers/<keeper-id>.facts.jsonl`
   - `11`
-- `jq -s '[.[] | select((.claim // "") | startswith("unstructured_note:")) | select((.valid_until == null) or (.valid_until > now))] | length' /Users/dancer/me/.masc/config/keepers/sangsu.facts.jsonl`
+- `jq -s '[.[] | select((.claim // "") | startswith("unstructured_note:")) | select((.valid_until == null) or (.valid_until > now))] | length' <base-path>/.masc/config/keepers/<keeper-id>.facts.jsonl`
   - `11`
-- `rg -c 'librarian_unstructured_fallback' /Users/dancer/me/.masc/config/keepers/sangsu.events.jsonl`
+- `rg -c 'librarian_unstructured_fallback' <base-path>/.masc/config/keepers/<keeper-id>.events.jsonl`
   - `108`
 
 Key source references:
@@ -73,7 +73,7 @@ Confirmed current behavior:
 - The row is persisted in the keeper fact/event/episode stores, not in a separate temporary cache.
 - The row is eligible for future recall injection while current. It is not used by the same turn that created it because the librarian write happens after the prompt context for that turn has already been built.
 
-This is not silent data loss, and keeping a diagnostic artifact is useful. The problem is that a raw, truncated, invalid provider response is stored in the same semantic fact channel as keeper memory. The live `sangsu` store has 11 current unstructured fallback facts and 108 fallback event markers, so the screenshot is a real current-state symptom.
+This is not silent data loss, and keeping a diagnostic artifact is useful. The problem is that a raw, truncated, invalid provider response is stored in the same semantic fact channel as keeper memory. One live keeper store had 11 current unstructured fallback facts and 108 fallback event markers, so the screenshot is a real current-state symptom.
 
 Production fix direction:
 
@@ -88,8 +88,14 @@ Implementation in this branch:
 - Added `Keeper_memory_os_types.fact_prompt_recallable` as the typed recall-eligibility SSOT.
 - Marked new librarian parse-failure fallback facts as `claim_kind="diagnostic"`.
 - Excluded diagnostic facts and diagnostic-only episodes from prompt recall.
+- Excluded legacy pre-`Diagnostic` fallback facts with the exact historical
+  `unstructured_note: librarian parse fallback` claim prefix from prompt recall,
+  so old stores do not keep injecting raw parse-failure diagnostics.
+- Excluded empty episodes from prompt recall.
 - Kept diagnostics visible in dashboard decoding/rendering via backend-projected `prompt_recallable=false`.
-- Did not add a legacy prefix-based migration for already-written untyped fallback rows. Those rows retain their existing TTL behavior; reclassifying them needs a separate, explicit migration decision.
+- Did not rewrite existing stores. Legacy rows retain their existing TTL and
+  on-disk shape; the compatibility shim only changes prompt-recall eligibility
+  and dashboard `prompt_recallable` projection.
 
 ### P1/P2 - Fleet-wide librarian provider slot does not stop all keepers, but can drop extraction work under load
 
@@ -120,7 +126,7 @@ Production fix direction:
 
 ### P2 - OAS env parsing policy is duplicated and inconsistent
 
-No hardcoded `/Users/dancer/me` path was found in the scanned OAS production source. The current risk is policy drift:
+No hardcoded local absolute path was found in the scanned OAS production source. The current risk is policy drift:
 
 - `Util.int_env_or` silently falls back on invalid input.
 - `Defaults.int_env_or` logs invalid input.
@@ -137,9 +143,9 @@ Production fix direction:
 
 ## Corrected Non-Findings
 
-### No confirmed production hardcoded `/Users/dancer/me` base path in scanned MASC/OAS code
+### No confirmed production hardcoded local base path in scanned MASC/OAS code
 
-The live MASC process is running with an explicit base path, and source resolution requires `MASC_BASE_PATH` or a server resolver path. The broad `/Users/dancer/me` hits in MASC are mainly tests/fixtures or documentation. I did not find a current production `let default_base = "/Users/dancer/me"` pattern in the scanned runtime paths.
+The live MASC process is running with an explicit base path, and source resolution requires `MASC_BASE_PATH` or a server resolver path. Broad local-path hits in MASC are mainly tests/fixtures or documentation. I did not find a current production `let default_base = "<base-path>"` pattern in the scanned runtime paths.
 
 ### Expired Memory OS facts are not recall-injected on current code
 
@@ -147,7 +153,7 @@ The older "GC default off means expired facts accumulate indefinitely into recal
 
 - write/cap paths drop expired rows,
 - recall filters `fact_is_current`,
-- `sangsu` currently reports `ttl_expired_on_disk=0`.
+- The sampled keeper currently reports `ttl_expired_on_disk=0`.
 
 GC is still default-off for quiet-store disk cleanup, but that is not the same as expired rows being active recall facts.
 

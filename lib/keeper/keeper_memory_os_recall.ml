@@ -244,7 +244,7 @@ let facts_recency_ranked ~now facts =
 
 let episode_prompt_recallable (episode : episode) =
   match episode.claims with
-  | [] -> true
+  | [] -> false
   | claims -> List.exists fact_prompt_recallable claims
 ;;
 

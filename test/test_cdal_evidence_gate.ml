@@ -196,6 +196,46 @@ let test_placeholder_required_evidence_reference_rejects () =
         | _ -> fail "payload did not preserve placeholder evidence entry")
      | _ -> fail "payload is not Assoc")
 
+let test_evidence_ref_parser_ssot () =
+  let parses_as label expected = function
+    | Some actual -> check string label expected actual
+    | None -> failf "%s did not parse" label
+  in
+  let rejects label raw =
+    match Evidence_ref.of_string raw with
+    | None -> ()
+    | Some ref_ ->
+      failf "%s should reject, parsed %S" label (Evidence_ref.to_string ref_)
+  in
+  Evidence_ref.of_string "https://example.test/pr/42"
+  |> Option.map (function
+    | Evidence_ref.Url value -> value
+    | other -> Evidence_ref.to_string other)
+  |> parses_as "url ref" "https://example.test/pr/42";
+  Evidence_ref.of_string "PR#42"
+  |> Option.map (function
+    | Evidence_ref.Pr value -> string_of_int value
+    | other -> Evidence_ref.to_string other)
+  |> parses_as "PR ref" "42";
+  Evidence_ref.of_string "trace:run-123"
+  |> Option.map (function
+    | Evidence_ref.Trace_ref (Evidence_ref.Trace, value) -> value
+    | other -> Evidence_ref.to_string other)
+  |> parses_as "trace ref" "run-123";
+  Evidence_ref.of_string "logs/output.json"
+  |> Option.map (function
+    | Evidence_ref.File_path value -> value
+    | other -> Evidence_ref.to_string other)
+  |> parses_as "file path ref" "logs/output.json";
+  List.iter
+    (fun (label, raw) -> rejects label raw)
+    [ "bare http", "http://"
+    ; "bare https", "https://"
+    ; "bare file URI", "file://"
+    ; "bare trace", "trace:"
+    ; "bare path separator", "/"
+    ]
+
 let test_blank_required_evidence_rejects () =
   let contract = make_contract ~required_evidence:[ "  " ] () in
   let task = make_task ~contract:(Some contract) () in
@@ -334,6 +374,7 @@ let () =
             test_placeholder_handoff_reference_rejects
         ; test_case "placeholder required ref → Reject" `Quick
             test_placeholder_required_evidence_reference_rejects
+        ; test_case "evidence ref parser SSOT" `Quick test_evidence_ref_parser_ssot
         ; test_case "blank required_evidence → Reject" `Quick
             test_blank_required_evidence_rejects
         ; test_case "required_evidence unsatisfied → Reject" `Quick

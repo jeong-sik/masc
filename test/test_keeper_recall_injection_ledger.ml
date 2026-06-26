@@ -23,6 +23,7 @@ let () =
       ~injected_episode_keys:[ "trace-1:g0" ]
       ~n_facts_in_store:42
       ~now:1234.5
+      ()
   in
   check "keeper_id" (j |> member "keeper_id" |> to_string = "alpha");
   check "trace_id" (j |> member "trace_id" |> to_string = "trace-1");
@@ -37,6 +38,22 @@ let () =
     "injected_episode_keys preserved"
     (j |> member "injected_episode_keys" |> to_list |> List.map to_string
      = [ "trace-1:g0" ]);
+  check "failure_reason omitted by default" (j |> member "failure_reason" = `Null);
+  let failure_json =
+    Ledger.to_json
+      ~failure_reason:"prompt_render_error"
+      ~keeper_id:"alpha"
+      ~trace_id:"trace-1"
+      ~turn:3
+      ~injected_fact_keys:[]
+      ~injected_episode_keys:[]
+      ~n_facts_in_store:42
+      ~now:1234.5
+      ()
+  in
+  check
+    "failure_reason preserved when present"
+    (failure_json |> member "failure_reason" |> to_string = "prompt_render_error");
   (* Empty key lists serialise to empty JSON arrays, not null. *)
   let empty =
     Ledger.to_json
@@ -47,6 +64,7 @@ let () =
       ~injected_episode_keys:[]
       ~n_facts_in_store:0
       ~now:0.0
+      ()
   in
   check
     "empty fact keys is []"

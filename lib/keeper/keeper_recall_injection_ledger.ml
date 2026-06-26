@@ -6,6 +6,7 @@
 let recall_injections_dir masc_root = Filename.concat masc_root "recall_injections"
 
 let to_json
+      ?failure_reason
       ~keeper_id
       ~trace_id
       ~turn
@@ -13,9 +14,10 @@ let to_json
       ~injected_episode_keys
       ~n_facts_in_store
       ~now
+      ()
   : Yojson.Safe.t
   =
-  `Assoc
+  let fields =
     [ "keeper_id", `String keeper_id
     ; "trace_id", `String trace_id
     ; "turn", `Int turn
@@ -24,9 +26,17 @@ let to_json
     ; "n_facts_in_store", `Int n_facts_in_store
     ; "ts", `Float now
     ]
+  in
+  let fields =
+    match failure_reason with
+    | None -> fields
+    | Some reason -> fields @ [ "failure_reason", `String reason ]
+  in
+  `Assoc fields
 ;;
 
 let append
+      ?failure_reason
       ~masc_root
       ~keeper_id
       ~trace_id
@@ -35,10 +45,12 @@ let append
       ~injected_episode_keys
       ~n_facts_in_store
       ~now
+      ()
   =
   let store = Dated_jsonl.create ~base_dir:(recall_injections_dir masc_root) () in
   let entry =
     to_json
+      ?failure_reason
       ~keeper_id
       ~trace_id
       ~turn
@@ -46,6 +58,7 @@ let append
       ~injected_episode_keys
       ~n_facts_in_store
       ~now
+      ()
   in
   try Dated_jsonl.append store entry with
   | Eio.Cancel.Cancelled _ as e -> raise e

@@ -24,8 +24,12 @@ set -euo pipefail
 
 die() { echo "ERROR: $*" >&2; exit 2; }
 
-command -v gh >/dev/null || die "gh not found"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib/gh-preflight.sh"
+
 command -v jq >/dev/null || die "jq not found"
+gh_preflight_require_cli
+GH_PR_AUDIT_CACHE_TTL_SEC=300
 
 REPO="${1:-}"; PR="${2:-}"; MODE="${3:-}"
 [ -n "$REPO" ] && [ -n "$PR" ] || die "usage: $0 <repo|.> <pr> [--logs[=N]]"
@@ -41,9 +45,24 @@ esac
 if [ "$REPO" = "." ]; then
   REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)" || die "cannot infer repo from cwd"
 fi
+CACHE_PATH="$(gh_preflight_cache_path pr-checks "$REPO" "$PR")"
 
-CHECKS_JSON="$(gh pr checks "$PR" --repo "$REPO" --json name,state,bucket,link 2>/dev/null)" \
-  || die "gh pr checks failed (no checks yet, or bad PR number?)"
+if ! PREFLIGHT_ERROR="$(gh_preflight_check_repo_read "$REPO" 2>&1)"; then
+  if CHECKS_JSON="$(gh_preflight_cache_load_fresh "$CACHE_PATH" "$GH_PR_AUDIT_CACHE_TTL_SEC")"; then
+    echo "WARNING: gh preflight failed; using cached PR checks for $REPO#$PR (ttl=${GH_PR_AUDIT_CACHE_TTL_SEC}s): $PREFLIGHT_ERROR" >&2
+  else
+    die "$PREFLIGHT_ERROR"
+  fi
+else
+  if CHECKS_JSON="$(gh pr checks "$PR" --repo "$REPO" --json name,state,bucket,link 2>&1)"; then
+    gh_preflight_cache_store "$CACHE_PATH" "$CHECKS_JSON"
+  elif CACHED_CHECKS_JSON="$(gh_preflight_cache_load_fresh "$CACHE_PATH" "$GH_PR_AUDIT_CACHE_TTL_SEC")"; then
+    echo "WARNING: gh pr checks failed; using cached PR checks for $REPO#$PR (ttl=${GH_PR_AUDIT_CACHE_TTL_SEC}s): $CHECKS_JSON" >&2
+    CHECKS_JSON="$CACHED_CHECKS_JSON"
+  else
+    die "gh pr checks failed after gh preflight passed; check PR number and whether checks have started: $CHECKS_JSON"
+  fi
+fi
 
 summary() {
   # `group_by` only groups *adjacent* equal keys, so sort by .bucket first —

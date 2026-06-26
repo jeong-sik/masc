@@ -173,6 +173,7 @@ type t =
   | SpawnSlotDenied
   | RegistryUpdateDropped
   | RegistryOrphanThresholdBreached
+  | RegistryInvalidEntry
   | DeadTotal
   | AutoResumedTotal
   | AutoResumeBlockedTotal

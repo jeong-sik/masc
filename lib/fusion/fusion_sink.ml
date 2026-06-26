@@ -201,9 +201,9 @@ let judge_meta (judge : (Fusion_types.judge_synthesis, string) result) : Yojson.
   | Error e -> `Assoc [ ("status", `String "failed"); ("error", `String e) ]
 
 (* 심판 노드의 위상 역할/정체성 → board meta_json 필드 (RFC-0284). [role]은 위상 의미
-   (single/refine/first/meta), [identity]는 [First]면 panelist_id(panel model과 대칭),
-   그 외는 role과 동일. 프론트는 role로 노드 종류를, identity로 1차 심판을 구분해 위상
-   이름 없이 배열 shape만으로 구조를 렌더한다(1=simple, 2=refine, N개 first+meta=JOJ). *)
+   (single/refine/first/meta/stage_meta/final_meta), [identity]는 [First]면 panelist_id(panel
+   model과 대칭), [Stage_meta n]이면 stage-n. 프론트는 role로 노드 종류를, identity로 1차
+   심판·stage를 구분해 위상 이름 없이 배열 shape만으로 구조를 렌더한다. *)
 let judge_role_fields (role : Fusion_types.judge_role) : (string * Yojson.Safe.t) list =
   let kind, identity =
     match role with
@@ -211,6 +211,8 @@ let judge_role_fields (role : Fusion_types.judge_role) : (string * Yojson.Safe.t
     | Fusion_types.Refine_pass -> ("refine", "refine")
     | Fusion_types.First id -> ("first", id)
     | Fusion_types.Meta -> ("meta", "meta")
+    | Fusion_types.Stage_meta n -> ("stage_meta", Printf.sprintf "stage-%d" n)
+    | Fusion_types.Final_meta -> ("final_meta", "final")
   in
   [ ("role", `String kind); ("identity", `String identity) ]
 

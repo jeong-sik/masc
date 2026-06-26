@@ -21,10 +21,16 @@ let test_labels () =
     (Fusion_metrics.topology_label Fusion_types.Simple);
   check string "topology judge_of_judges" "judge_of_judges"
     (Fusion_metrics.topology_label Fusion_types.Judge_of_judges);
+  check string "topology staged_judge_of_judges" "staged_judge_of_judges"
+    (Fusion_metrics.topology_label Fusion_types.Staged_judge_of_judges);
   check string "role single" "single"
     (Fusion_metrics.judge_role_label Fusion_types.Single);
   check string "role first" "first"
     (Fusion_metrics.judge_role_label (Fusion_types.First "p1"));
+  check string "role stage_meta" "stage_meta"
+    (Fusion_metrics.judge_role_label (Fusion_types.Stage_meta 1));
+  check string "role final_meta" "final_meta"
+    (Fusion_metrics.judge_role_label Fusion_types.Final_meta);
   check string "outcome synthesized" "synthesized"
     (Fusion_metrics.judge_outcome_label
        (Fusion_types.Synthesized

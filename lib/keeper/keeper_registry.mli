@@ -72,8 +72,39 @@ val get : base_path:string -> string -> registry_entry option
 (** Return all registered keepers. *)
 val all : ?base_path:string -> unit -> registry_entry list
 
+type registry_entry_validation_error =
+  | Registry_key_malformed of { key : string }
+  | Registry_base_path_mismatch of
+      { expected : string
+      ; actual : string
+      }
+  | Registry_name_mismatch of
+      { expected : string
+      ; actual : string
+      }
+  | Registry_meta_name_mismatch of
+      { expected : string
+      ; actual : string
+      }
+  | Registry_meta_agent_name_empty
+
+val registry_entry_validation_error_to_string :
+  registry_entry_validation_error -> string
+
+val validate_registry_entry :
+  base_path:string ->
+  string ->
+  registry_entry ->
+  (unit, registry_entry_validation_error) result
+
 (** Update the meta for a registered keeper. No-op if not found. *)
 val update_meta : base_path:string -> string -> keeper_meta -> unit
+
+(** Reload a registered keeper's meta from disk and replace the in-memory
+    registry copy. Returns [Ok None] when the keeper is not registered or has
+    no persisted meta. *)
+val reload_meta_from_disk :
+  base_path:string -> string -> (registry_entry option, string) result
 
 (* Runtime-attempt persistence + enrichment moved to
    Keeper_registry_runtime_attempt (record / enrich_fiber_unresolved_outcome). *)

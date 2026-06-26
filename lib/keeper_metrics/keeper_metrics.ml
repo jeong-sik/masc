@@ -182,6 +182,7 @@ type t =
   | SpawnSlotDenied
   | RegistryUpdateDropped
   | RegistryOrphanThresholdBreached
+  | RegistryInvalidEntry
   | DeadTotal
   | AutoResumedTotal
   | AutoResumeBlockedTotal
@@ -430,6 +431,7 @@ let to_string = function
   | RegistryUpdateDropped -> "masc_keeper_registry_update_dropped_total"
   | RegistryOrphanThresholdBreached ->
     "masc_keeper_registry_orphan_threshold_breached_total"
+  | RegistryInvalidEntry -> "masc_keeper_registry_invalid_entry_total"
   | DeadTotal -> "masc_keeper_dead_total"
   | AutoResumedTotal -> "masc_keeper_auto_resumed_total"
   | AutoResumeBlockedTotal -> "masc_keeper_auto_resume_blocked_total"
@@ -540,7 +542,7 @@ let all : t list =
     OasOnIdleEscalated; InvariantViolations; FsmEdgeTransitions; TurnFsmTransitions;
     TurnPhaseDuration; LifecycleTransitions; LifecycleCallbackFailures; CompactionCallbackRecoveries;
     EventBusDrain; SupervisorCleanupFailures; SpawnSlotDenied; RegistryUpdateDropped;
-    RegistryOrphanThresholdBreached; DeadTotal; AutoResumedTotal; AutoResumeBlockedTotal;
+    RegistryOrphanThresholdBreached; RegistryInvalidEntry; DeadTotal; AutoResumedTotal; AutoResumeBlockedTotal;
     SkipIdleWakeResumed; EventQueueOverride; StimulusConsumed; UnsupportedStimulus;
     NearExhaustionTotal; RestartAttempts; RestartOutcomes; ConsecutiveIdle;
     LastProductiveTs; ProviderTimeoutStrike; StaleTerminationTotal; StaleTerminationByClass;

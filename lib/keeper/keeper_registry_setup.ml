@@ -14,6 +14,125 @@ module Orphan_drops = Keeper_registry_orphan_drops
 module Spawn_slots = Keeper_registry_spawn_slots
 module Error_tracking = Keeper_registry_error_tracking
 
+type registry_entry_validation_error =
+  | Registry_key_malformed of { key : string }
+  | Registry_base_path_mismatch of
+      { expected : string
+      ; actual : string
+      }
+  | Registry_name_mismatch of
+      { expected : string
+      ; actual : string
+      }
+  | Registry_meta_name_mismatch of
+      { expected : string
+      ; actual : string
+      }
+  | Registry_meta_agent_name_empty
+
+let registry_entry_validation_error_label = function
+  | Registry_key_malformed _ -> "key_malformed"
+  | Registry_base_path_mismatch _ -> "entry_base_path_mismatch"
+  | Registry_name_mismatch _ -> "entry_name_mismatch"
+  | Registry_meta_name_mismatch _ -> "meta_name_mismatch"
+  | Registry_meta_agent_name_empty -> "meta_agent_name_empty"
+
+let registry_entry_validation_error_to_string = function
+  | Registry_key_malformed { key } ->
+      Printf.sprintf "registry key %S is malformed" key
+  | Registry_base_path_mismatch { expected; actual } ->
+      Printf.sprintf
+        "registry entry base_path mismatch: expected %S, got %S"
+        expected
+        actual
+  | Registry_name_mismatch { expected; actual } ->
+      Printf.sprintf
+        "registry entry name mismatch: expected %S, got %S"
+        expected
+        actual
+  | Registry_meta_name_mismatch { expected; actual } ->
+      Printf.sprintf
+        "registry entry meta.name mismatch: expected %S, got %S"
+        expected
+        actual
+  | Registry_meta_agent_name_empty ->
+      "registry entry meta.agent_name is empty"
+
+let registry_key_parts key =
+  match String.rindex_opt key '\x1f' with
+  | None -> Error (Registry_key_malformed { key })
+  | Some idx ->
+      let key_len = String.length key in
+      let base_path = String.sub key 0 idx in
+      let name = String.sub key (idx + 1) (key_len - idx - 1) in
+      Ok (base_path, name)
+
+let validate_registry_entry ~base_path name (entry : registry_entry) =
+  let expected_name = String.trim name in
+  if not (String.equal entry.base_path base_path)
+  then
+    Error
+      (Registry_base_path_mismatch
+         { expected = base_path; actual = entry.base_path })
+  else if not (String.equal entry.name expected_name)
+  then
+    Error (Registry_name_mismatch { expected = expected_name; actual = entry.name })
+  else if not (String.equal entry.meta.name expected_name)
+  then
+    Error
+      (Registry_meta_name_mismatch
+         { expected = expected_name; actual = entry.meta.name })
+  else if String.equal (String.trim entry.meta.agent_name) ""
+  then Error Registry_meta_agent_name_empty
+  else Ok ()
+
+let validate_registry_meta ~base_path:_ name (meta : keeper_meta) =
+  let expected_name = String.trim name in
+  if not (String.equal meta.name expected_name)
+  then
+    Error
+      (Registry_meta_name_mismatch { expected = expected_name; actual = meta.name })
+  else if String.equal (String.trim meta.agent_name) ""
+  then Error Registry_meta_agent_name_empty
+  else Ok ()
+
+let record_invalid_registry_entry ~operation ~name reason =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string RegistryInvalidEntry)
+    ~labels:
+      [ "operation", operation
+      ; "name", name
+      ; "reason", registry_entry_validation_error_label reason
+      ]
+    ();
+  Log.Keeper.warn
+    "registry: invalid entry operation=%s name=%s reason=%s"
+    operation
+    name
+    (registry_entry_validation_error_to_string reason)
+
+let canonicalize_registry_meta ~operation ~base_path name (meta : keeper_meta) =
+  match validate_registry_meta ~base_path name meta with
+  | Ok () -> meta
+  | Error reason ->
+      let expected_name = String.trim name in
+      let expected_agent_name = Keeper_identity.keeper_agent_name expected_name in
+      let repaired =
+        { meta with
+          name = expected_name
+        ; agent_name =
+            (if String.equal (String.trim meta.agent_name) ""
+             then expected_agent_name
+             else meta.agent_name)
+        }
+      in
+      record_invalid_registry_entry ~operation ~name reason;
+      (match validate_registry_meta ~base_path name repaired with
+       | Ok () -> repaired
+       | Error repair_reason ->
+           record_invalid_registry_entry ~operation ~name repair_reason;
+           meta)
+
 (** CAS loop for clamped decrement.  [Atomic.fetch_and_add _ (-1)] can leave the counter negative if increment/decrement paths interleave, so we retry until we successfully install [max 0 (cur - 1)]. *)
 let decr_running_count_clamped () =
   let rec loop () =
@@ -138,6 +257,7 @@ let register_with_state
       ~(phase : Keeper_state_machine.phase)
       ~(conditions : Keeper_state_machine.conditions)
   =
+  let meta = canonicalize_registry_meta ~operation:"register" ~base_path name meta in
   Log.Keeper.info
     "registry: registering keeper name=%s base_path=%s phase=%s"
     name
@@ -231,6 +351,9 @@ type register_restarting_error = Budget_already_exhausted of { name : string }
 let register_restarting ~base_path name meta
   : (registry_entry, register_restarting_error) result
   =
+  let meta =
+    canonicalize_registry_meta ~operation:"register_restarting" ~base_path name meta
+  in
   let key = registry_key ~base_path name in
   let conditions =
     { Keeper_state_machine.default_conditions with
@@ -339,39 +462,89 @@ let unregister ~base_path name =
 
 let get ~base_path name =
   let result = StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) in
-  (match result with
-   | None -> Log.Keeper.debug "registry: lookup miss name=%s base_path=%s" name base_path
-   | Some _ -> ());
-  result
+  match result with
+  | None ->
+      Log.Keeper.debug "registry: lookup miss name=%s base_path=%s" name base_path;
+      None
+  | Some entry -> (
+      match validate_registry_entry ~base_path name entry with
+      | Ok () -> Some entry
+      | Error reason ->
+          record_invalid_registry_entry ~operation:"get" ~name reason;
+          None)
 ;;
 
 let all ?base_path () =
   StringMap.fold
-    (fun _k v acc ->
-       match base_path with
-       | Some expected when not (String.equal expected v.base_path) -> acc
-       | _ -> v :: acc)
+    (fun key v acc ->
+       match registry_key_parts key with
+       | Error reason ->
+           record_invalid_registry_entry ~operation:"all" ~name:v.name reason;
+           acc
+       | Ok (key_base_path, key_name) ->
+           (match base_path with
+            | Some expected when not (String.equal expected key_base_path) -> acc
+            | Some _ | None -> (
+                match validate_registry_entry ~base_path:key_base_path key_name v with
+                | Ok () -> v :: acc
+                | Error reason ->
+                    record_invalid_registry_entry ~operation:"all" ~name:key_name reason;
+                    acc)))
     (Atomic.get registry)
     []
 ;;
 
 let update_meta ~base_path name meta =
-  update_entry ~base_path name (fun e -> { e with meta })
+  match validate_registry_meta ~base_path name meta with
+  | Error reason ->
+      record_invalid_registry_entry ~operation:"update_meta" ~name reason
+  | Ok () ->
+      update_entry ~base_path name (fun e -> { e with base_path; name; meta })
+;;
+
+let reload_meta_from_disk ~base_path name =
+  let config = Workspace.default_config base_path in
+  match read_meta config name with
+  | Error msg -> Error msg
+  | Ok None -> Ok None
+  | Ok (Some meta) -> (
+      let defaults = load_keeper_profile_defaults_for_base_path ~base_path name in
+      match effective_meta_of_profile_defaults defaults meta with
+      | Error msg -> Error msg
+      | Ok effective_meta -> (
+          match validate_registry_meta ~base_path name effective_meta with
+          | Error reason ->
+              record_invalid_registry_entry ~operation:"reload_meta_from_disk" ~name reason;
+              Error (registry_entry_validation_error_to_string reason)
+          | Ok () ->
+              let changed = ref false in
+              update_entry_if_registered ~base_path name (fun e ->
+                changed := true;
+                { e with base_path; name; meta = effective_meta });
+              if not !changed
+              then Ok None
+              else Ok (get ~base_path name)))
 ;;
 
 (* Runtime-attempt cluster (runtime_attempt_merge / meta_for_runtime_attempt / record_runtime_attempt / runtime_attempt_suffix / last_runtime_attempt / runtime_attempt_freshness_threshold_sec / enrich... *)
 
 let sync_meta_if_registered ~base_path name meta =
-  let key = registry_key ~base_path name in
-  let rec loop () =
-    let current = Atomic.get registry in
-    match StringMap.find_opt key current with
-    | None -> ()
-    | Some entry ->
-      let updated = StringMap.add key { entry with meta } current in
-      if not (Atomic.compare_and_set registry current updated) then loop ()
-  in
-  loop ()
+  match validate_registry_meta ~base_path name meta with
+  | Error reason ->
+      record_invalid_registry_entry ~operation:"sync_meta_if_registered" ~name reason
+  | Ok () ->
+      let key = registry_key ~base_path name in
+      let rec loop () =
+        let current = Atomic.get registry in
+        match StringMap.find_opt key current with
+        | None -> ()
+        | Some entry ->
+            let updated =
+              StringMap.add key { entry with base_path; name; meta } current
+            in
+            if not (Atomic.compare_and_set registry current updated) then loop ()
+      in
+      loop ()
 ;;
 
 let () =

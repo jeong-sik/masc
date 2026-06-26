@@ -2,6 +2,7 @@ open Alcotest
 
 module KEC = Masc.Keeper_context_runtime
 module Keeper_meta_contract = Masc.Keeper_meta_contract
+module Keeper_meta_json = Masc.Keeper_meta_json
 module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
 module Keeper_types_profile = Masc.Keeper_types_profile
 module KT = Keeper_types
@@ -41,6 +42,26 @@ let write_lines path lines =
           output_string oc line;
           output_char oc '\n')
         lines)
+
+let write_json path json =
+  let (_ : string) = KFS.ensure_dir (Filename.dirname path) in
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc (Yojson.Safe.pretty_to_string json))
+
+let write_keeper_toml ~base_dir name lines =
+  let path =
+    Filename.concat
+      (Filename.concat (Filename.concat (Filename.concat base_dir ".masc") "config") "keepers")
+      (name ^ ".toml")
+  in
+  write_lines path lines
+
+let write_keeper_meta_json config (meta : Keeper_meta_contract.keeper_meta) =
+  write_json
+    (Keeper_types_profile.keeper_meta_path config meta.name)
+    (Keeper_meta_json.meta_to_json meta)
 
 let test_runtime_toml =
   {|
@@ -134,6 +155,77 @@ let base_lifecycle ~(meta : Keeper_meta_contract.keeper_meta) : KEC.post_turn_li
     context_max = 0;
     message_count = 0;
   }
+
+let test_registry_rejects_meta_name_mismatch_update () =
+  let base_dir = temp_dir "keeper_lifecycle_registry_meta_mismatch" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      KR.clear ();
+      let config = Masc.Workspace.default_config base_dir in
+      let meta = make_keeper_meta ~name:"keeper-registry-meta-mismatch" () in
+      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      let bad_meta = { meta with name = "wrong-keeper-name" } in
+      KR.update_meta ~base_path:config.base_path meta.name bad_meta;
+      match KR.get ~base_path:config.base_path meta.name with
+      | Some entry ->
+          check string "registry keeps original meta name" meta.name entry.meta.name
+      | None -> fail "expected registered keeper after rejected meta update")
+
+let test_registry_canonicalizes_mismatched_meta_on_register () =
+  let base_dir = temp_dir "keeper_lifecycle_registry_register_repair" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      KR.clear ();
+      let config = Masc.Workspace.default_config base_dir in
+      let registry_name = "keeper-registry-register-repair" in
+      let bad_meta =
+        { (make_keeper_meta ~name:"wrong-register-name" ()) with agent_name = "" }
+      in
+      ignore (KR.register ~base_path:config.base_path registry_name bad_meta);
+      match KR.get ~base_path:config.base_path registry_name with
+      | Some entry ->
+          check string "registry repairs meta name" registry_name entry.meta.name;
+          check string "registry repairs empty agent name"
+            (Masc.Keeper_identity.keeper_agent_name registry_name)
+            entry.meta.agent_name
+      | None -> fail "expected registered keeper after canonical register repair")
+
+let test_registry_reload_meta_from_disk_repairs_stale_meta () =
+  let base_dir = temp_dir "keeper_lifecycle_registry_meta_reload" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      KR.clear ();
+      let config = Masc.Workspace.default_config base_dir in
+      let name = "keeper-registry-meta-reload" in
+      write_keeper_toml
+        ~base_dir
+        name
+        [ "[keeper]"; {|sandbox_profile = "local"|}; {|tool_denylist = ["Write"]|} ];
+      let persisted_meta = make_keeper_meta ~name () in
+      let stale_meta = { persisted_meta with tool_denylist = [ "stale_tool" ] } in
+      ignore (KR.register ~base_path:config.base_path name stale_meta);
+      write_keeper_meta_json config persisted_meta;
+      match KR.reload_meta_from_disk ~base_path:config.base_path name with
+      | Ok (Some entry) ->
+          check (list string) "reload applies base-path TOML denylist" [ "Write" ]
+            entry.meta.tool_denylist
+      | Ok None -> fail "expected reload to update registered keeper"
+      | Error msg -> fail ("reload_meta_from_disk failed: " ^ msg))
 
 let test_dispatch_keeper_phase_event_uses_workspace_base_path () =
   let base_dir = temp_dir "keeper_lifecycle_registry_phase" in
@@ -580,6 +672,12 @@ let () =
             test_dispatch_keeper_phase_event_rejection_increments_metric;
           test_case "keepalive event rejection increments metric" `Quick
             test_keepalive_dispatch_event_rejection_increments_metric;
+          test_case "registry rejects mismatched meta update" `Quick
+            test_registry_rejects_meta_name_mismatch_update;
+          test_case "registry canonicalizes mismatched meta on register" `Quick
+            test_registry_canonicalizes_mismatched_meta_on_register;
+          test_case "registry reload repairs stale meta from disk" `Quick
+            test_registry_reload_meta_from_disk_repairs_stale_meta;
           test_case "heartbeat history fallback counts malformed rows" `Quick
             test_heartbeat_history_fallback_counts_malformed_rows;
           test_case "board wakeup dedup key collapses reposts (RFC-0239 R4)" `Quick

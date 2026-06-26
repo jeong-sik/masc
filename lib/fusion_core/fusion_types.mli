@@ -203,6 +203,8 @@ type judge_role =
   | Refine_pass
   | First of string
   | Meta
+  | Stage_meta of int
+  | Final_meta
 [@@deriving yojson, show, eq]
 
 (** 성공한 심판 노드 — 역할 + 종합 + 노드별 실측 usage. *)
@@ -297,6 +299,11 @@ type fusion_topology =
   | Judge_of_judges
       (** panel → [N개 1차 심판] → meta-judge → sink (RFC-0283). 서로 다른 N개 1차
           심판이 같은 패널을 독립 종합하고, meta가 reconcile. preset.judges >= 2 필요. *)
+  | Staged_judge_of_judges
+      (** panel → [N개 1차 심판] → fixed-size stage meta reducers → final meta reducer
+          → sink. preset.judges count must form at least two exact groups of
+          TOML key [staged_judge_group_size]. Named topology only; it does
+          not relax the nested fusion depth guard. *)
 [@@deriving yojson, show, eq]
 
 (** 안정적 wire 문자열 ([masc_fusion] 도구 인자·로깅용). *)

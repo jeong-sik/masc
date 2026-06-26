@@ -69,6 +69,19 @@ val min_answered_floor : int
 
 val default_min_answered : int
 
+(** Default JOJ first-judge concurrency. Derived from {!max_panel} so judge
+    fan-out has its own bounded capacity instead of borrowing panel throttling. *)
+val default_max_concurrent_judges : int
+
+(** Default staged JOJ group size. A staged judge-of-judges run groups first
+    judges into fixed-size cohorts before a final meta reduction; default 3
+    expresses the common 3x3x3 shape. *)
+val default_staged_judge_group_size : int
+
+(** Smallest useful staged JOJ group size. Size 1 degenerates into a serial
+    pass-through and is rejected. *)
+val min_staged_judge_group_size : int
+
 (** 그룹 모델당 [max_tool_calls] 상한 (0..이 값). 0=무제한. named SSOT. *)
 val max_tool_calls_ceiling : int
 
@@ -115,6 +128,33 @@ val preset_duplicate_judge : preset -> string option
 (** 모든 1차 심판의 system prompt(lens)가 비어있지 않은가. judges=[]면 vacuously [true]
     (simple/refine/conditional은 judges를 안 쓴다). (RFC-0283) *)
 val preset_judge_prompts_present : preset -> bool
+
+(** Staged JOJ preset grouping validation. This is runtime topology validation
+    rather than preset validation because the same preset may be valid for flat
+    JOJ while invalid for staged JOJ. *)
+type staged_judge_group_error =
+  | Staged_group_size_below_min of int
+  | Staged_too_few_judges of
+      { group_size : int
+      ; judges : int
+      }
+  | Staged_ragged_judges of
+      { group_size : int
+      ; judges : int
+      }
+[@@deriving show, eq]
+
+(** Render a staged grouping error at operator/tool boundaries. *)
+val staged_judge_group_error_message : staged_judge_group_error -> string
+
+(** Split JOJ first judges into exact staged groups. Requirements:
+    [group_size >= min_staged_judge_group_size], at least two full groups, and
+    no ragged final group. For example, 9 judges with group size 3 returns
+    three groups of three; 8 judges with group size 3 is rejected. *)
+val staged_judge_groups
+  :  group_size:int
+  -> judge_spec list
+  -> (judge_spec list list, staged_judge_group_error) result
 
 (** 외곽 run_safe 타임아웃 = 그룹 timeout 중 max. 단일 그룹이면 그 그룹 timeout. *)
 val panel_outer_timeout_of : panel_group list -> float
@@ -168,6 +208,8 @@ type t =
   { enabled : bool
   ; default_preset : string
   ; max_concurrent_panels : int
+  ; max_concurrent_judges : int
+  ; staged_judge_group_size : int
   ; presets : Validated_preset.t list
   }
 [@@deriving show, eq]

@@ -569,7 +569,7 @@ let test_memory_writes_report_local_mirror_failure_consistently () =
        | Ok () -> fail "expected local mirror failure"
        | Error msg ->
            check bool "direct writer reports mirror failure" true
-             (Workspace_utils.contains_substring msg "local mirror write failed"));
+             (String_util.contains_substring msg "local mirror write failed"));
       let backlog =
         { Masc_domain.tasks = []
         ; last_updated = Masc_domain.now_iso ()
@@ -580,7 +580,7 @@ let test_memory_writes_report_local_mirror_failure_consistently () =
        | Ok () -> fail "expected backlog mirror failure"
        | Error msg ->
            check bool "backlog writer reports mirror failure" true
-             (Workspace_utils.contains_substring msg "local mirror write failed"));
+             (String_util.contains_substring msg "local mirror write failed"));
       (match Workspace_utils.read_json_result cfg (Workspace.backlog_path cfg) with
        | Ok got ->
            check yojson "write_backlog_result commits primary backend value"

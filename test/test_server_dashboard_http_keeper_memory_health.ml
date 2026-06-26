@@ -3,7 +3,7 @@
 module Types = Masc.Keeper_memory_os_types
 module Io = Masc.Keeper_memory_os_io
 module Metrics = Masc.Otel_metric_store
-module KeeperMetrics = Masc.Keeper_metrics
+module KeeperMetrics = Keeper_metrics
 module Health = Server_dashboard_http_keeper_memory_health
 
 let test_now = 1_700_000_000.0

@@ -15,7 +15,7 @@ module Types = Agent_sdk.Types
 let field_episode_summary = Lib.wire_field_episode_summary
 let field_claims = Lib.wire_field_claims
 let field_claim = Lib.wire_field_claim
-let field_confidence = "confidence"
+let deprecated_field_confidence = "confidence"
 let field_category = Lib.wire_field_category
 let field_source_turn = Lib.wire_field_source_turn
 let field_source_tool_call_id = Lib.wire_field_source_tool_call_id
@@ -33,7 +33,7 @@ let claim_json ?confidence ?(claim = "c") ?(source_turn = `Int 0) () =
   let fields =
     match confidence with
     | None -> fields
-    | Some confidence -> (field_confidence, confidence) :: fields
+    | Some confidence -> (deprecated_field_confidence, confidence) :: fields
   in
   `Assoc fields
 ;;
@@ -433,7 +433,7 @@ let test_retry_nudge_matches_schema () =
   check bool "nudge episode field list includes preserved refs" true
     (List.mem field_preserved_tool_refs R.parse_retry_episode_fields);
   check bool "nudge field list excludes confidence" false
-    (List.mem field_confidence R.parse_retry_claim_fields);
+    (List.mem deprecated_field_confidence R.parse_retry_claim_fields);
   check bool "nudge field list includes source_turn" true
     (List.mem field_source_turn R.parse_retry_claim_fields);
   check bool "nudge field list includes source_tool_call_id" true

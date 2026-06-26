@@ -12,7 +12,6 @@ type input =
   ; messages : Agent_sdk.Types.message list
   }
 
-val wire_field_schema_version : string
 val wire_field_episode_summary : string
 val wire_field_claims : string
 val wire_field_open_items : string

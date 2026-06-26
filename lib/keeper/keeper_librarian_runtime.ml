@@ -301,7 +301,7 @@ let parse_retry_claim_field_shapes =
   ; { name = Keeper_librarian.wire_field_category
     ; shape = union_shape parse_retry_claim_categories
     }
-  ; { name = Keeper_librarian.wire_field_source_turn; shape = "0" }
+  ; { name = Keeper_librarian.wire_field_source_turn; shape = quoted "integer" }
   ; { name = Keeper_librarian.wire_field_source_tool_call_id
     ; shape = quoted "optional-string"
     }

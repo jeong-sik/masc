@@ -54,6 +54,7 @@ type category =
 val category_to_string : category -> string
 
 (** All closed taxonomy categories that can be emitted by the librarian prompt.
+    The order is prompt-significant: durable/common categories come first.
     [Unknown _] is intentionally excluded because it represents parser drift,
     not an advertised token. *)
 val all_categories : category list

@@ -8,7 +8,6 @@ type input =
   ; messages : Agent_sdk.Types.message list
   }
 
-let wire_field_schema_version = "schema_version"
 let wire_field_episode_summary = "episode_summary"
 let wire_field_claims = "claims"
 let wire_field_open_items = "open_items"

@@ -63,8 +63,9 @@ let category_to_string = function
 ;;
 
 let all_categories =
-  [ Code_change
-  ; Fact
+  (* Prompt-significant order: keep durable/common tokens first so retry nudges
+     bias toward normal memory facts before narrower bookkeeping categories. *)
+  [ Fact
   ; Preference
   ; Blocker
   ; Goal
@@ -72,6 +73,7 @@ let all_categories =
   ; Ephemeral
   ; Validated_approach
   ; Lesson
+  ; Code_change
   ]
 ;;
 

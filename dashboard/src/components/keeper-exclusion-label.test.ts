@@ -19,8 +19,8 @@ describe('keeperExclusionLabel', () => {
     expect(keeperExclusionLabel(undefined)).toBeNull()
   })
 
-  it('returns null for unknown reason strings rather than surfacing raw backend tokens', () => {
-    expect(keeperExclusionLabel('something_future')).toBeNull()
+  it('returns a visible generic label for unknown reason strings without surfacing raw backend tokens', () => {
+    expect(keeperExclusionLabel('something_future')).toBe('부팅 제외')
     expect(keeperExclusionLabel('')).toBeNull()
   })
 })

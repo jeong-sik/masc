@@ -287,7 +287,12 @@ let enrich_keeper_with_diagnostic ~(config : Workspace.config) (keeper_json : Yo
      (match Json_util.assoc_string_opt "name" result with
       | Some name ->
         (match Keeper_runtime.autoboot_exclusion_reason config name with
-         | Some reason -> `Assoc (assoc_upsert fields "exclusion_reason" (`String reason))
+         | Some reason ->
+           `Assoc
+             (assoc_upsert
+                fields
+                "exclusion_reason"
+                (Keeper_runtime.autoboot_exclusion_reason_to_yojson reason))
          | None -> result)
       | None -> result)
    | other -> other)

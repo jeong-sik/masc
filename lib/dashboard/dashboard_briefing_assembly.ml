@@ -211,9 +211,8 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                       ("proactive_enabled", member_assoc "proactive_enabled" keeper);
                       ("paused", member_assoc "paused" keeper);
                       ("exclusion_reason",
-                       (match Keeper_runtime.autoboot_exclusion_reason config name with
-                        | Some r -> `String r
-                        | None -> `Null));
+                       Keeper_runtime.autoboot_exclusion_reason_opt_to_yojson
+                         (Keeper_runtime.autoboot_exclusion_reason config name));
                     ]
                     @ keeper_tool_audit_json_fields config registry_lookup keeper
                         (match String_util.trim_to_option (string_field "agent_name" keeper) with

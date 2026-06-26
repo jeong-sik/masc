@@ -74,9 +74,26 @@ val boot_meta_failure_for :
     the current process has observed one.  Cleared when the keeper loads or
     materializes successfully. *)
 
+type autoboot_exclusion_reason =
+  | Paused
+  | Declarative_autoboot_disabled
+  | Autoboot_disabled
+(** Closed reason why a configured keeper is intentionally absent from
+    {!bootable_keeper_names}. *)
+
+val autoboot_exclusion_reason_to_string : autoboot_exclusion_reason -> string
+(** Stable JSON/log label for {!autoboot_exclusion_reason}. *)
+
+val autoboot_exclusion_reason_to_yojson : autoboot_exclusion_reason -> Yojson.Safe.t
+(** Stable JSON representation for {!autoboot_exclusion_reason}. *)
+
+val autoboot_exclusion_reason_opt_to_yojson :
+  autoboot_exclusion_reason option -> Yojson.Safe.t
+(** Stable JSON representation for an optional {!autoboot_exclusion_reason}. *)
+
 type autoboot_exclusion = {
   keeper_name : string;
-  reason : string;
+  reason : autoboot_exclusion_reason;
 }
 (** Why a configured keeper is intentionally absent from
     {!bootable_keeper_names}. *)
@@ -85,10 +102,9 @@ val bootable_keeper_names : Workspace.config -> string list
 (** Names of every keeper whose [keepers/<name>/keeper.toml] exists and
     looks bootable on disk. *)
 
-val autoboot_exclusion_reason : Workspace.config -> string -> string option
-(** Per-keeper autoboot exclusion reason label ([paused] /
-    [declarative_autoboot_disabled] / [autoboot_disabled]), or [None] when the
-    keeper is bootable.  Single-keeper projection of
+val autoboot_exclusion_reason : Workspace.config -> string -> autoboot_exclusion_reason option
+(** Per-keeper autoboot exclusion reason, or [None] when the keeper is bootable.
+    Single-keeper projection of
     {!autoboot_excluded_keeper_reasons}. *)
 
 val autoboot_excluded_keeper_reasons : Workspace.config -> autoboot_exclusion list

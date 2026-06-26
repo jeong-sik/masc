@@ -1095,6 +1095,15 @@ export type KeeperPhase =
   | 'Dead'
   | 'Zombie'
 
+export const KEEPER_AUTOBOOT_EXCLUSION_REASONS = [
+  'declarative_autoboot_disabled',
+  'paused',
+  'autoboot_disabled',
+] as const
+
+export type KeeperAutobootExclusionReason =
+  typeof KEEPER_AUTOBOOT_EXCLUSION_REASONS[number]
+
 export interface Keeper {
   name: string
   keeper_id?: string | null
@@ -1104,10 +1113,10 @@ export interface Keeper {
   phase?: KeeperPhase | null
   runtime_class?: 'keeper'
   paused?: boolean
-  /** Autoboot exclusion reason (declarative_autoboot_disabled / paused /
-   *  autoboot_disabled) — why this keeper is not booting/proactive. null when
-   *  bootable. Surfaced from execution `keepers` and briefing `keeper_briefs`. */
-  exclusion_reason?: string | null
+  /** Autoboot exclusion reason mirrored from `Keeper_runtime`.
+   *  null when bootable. Surfaced from execution `keepers` and briefing
+   *  `keeper_briefs`. */
+  exclusion_reason?: KeeperAutobootExclusionReason | null
   registered?: boolean
   reconcile_status?: string | null
   emoji?: string

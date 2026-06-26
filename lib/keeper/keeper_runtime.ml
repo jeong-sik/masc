@@ -146,24 +146,41 @@ let remember_boot_meta_result ctx name result =
       record_boot_meta_failure ~base_path ~name ~cause ~error:message;
       Error message
 
+type autoboot_exclusion_reason =
+  | Paused
+  | Declarative_autoboot_disabled
+  | Autoboot_disabled
+
+let autoboot_exclusion_reason_to_string = function
+  | Paused -> "paused"
+  | Declarative_autoboot_disabled -> "declarative_autoboot_disabled"
+  | Autoboot_disabled -> "autoboot_disabled"
+
+let autoboot_exclusion_reason_to_yojson reason =
+  `String (autoboot_exclusion_reason_to_string reason)
+
+let autoboot_exclusion_reason_opt_to_yojson = function
+  | Some reason -> autoboot_exclusion_reason_to_yojson reason
+  | None -> `Null
+
 type autoboot_exclusion = {
   keeper_name : string;
-  reason : string;
+  reason : autoboot_exclusion_reason;
 }
 
 let autoboot_exclusion_reason config name =
   match read_meta_file_path (keeper_meta_path config name) with
   | Ok (Some meta) ->
-    if meta.paused then Some "paused"
+    if meta.paused then Some Paused
     else
       (match (profile_defaults_for_config config name).autoboot_enabled with
        | Some true -> None
-       | Some false -> Some "declarative_autoboot_disabled"
+       | Some false -> Some Declarative_autoboot_disabled
        | None ->
-         if meta.autoboot_enabled then None else Some "autoboot_disabled")
+         if meta.autoboot_enabled then None else Some Autoboot_disabled)
   | Ok None ->
     (match (profile_defaults_for_config config name).autoboot_enabled with
-     | Some false -> Some "declarative_autoboot_disabled"
+     | Some false -> Some Declarative_autoboot_disabled
      | Some true | None -> None)
   | Error _ ->
     (* Preserve existing behavior: corrupt/unreadable meta still enters the

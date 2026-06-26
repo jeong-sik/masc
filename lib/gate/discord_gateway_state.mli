@@ -65,6 +65,24 @@ type intent =
 
 val intents_bitmask : intent list -> int
 
+(** {1 Mention resolution metadata} *)
+
+type mention_kind =
+  | User_mention
+  | Role_mention
+  | Channel_mention
+
+(** Structured mention discovered in message content. [mention_name] is
+    [Some] for user mentions when Discord's [mentions] array supplied a
+    display name; role and channel mentions are currently recorded with
+    [None] until a guild cache is wired in. *)
+type resolved_mention =
+  { mention_id : string
+  ; mention_name : string option
+  ; mention_kind : mention_kind
+  ; raw_mention : string
+  }
+
 (** {1 Dispatched events surfaced to caller} *)
 
 (** Re-exported from Discord_gateway_client. Closed sum. *)
@@ -86,6 +104,10 @@ type dispatched_event =
             [author.username]; [None] only when the payload carries
             neither (RFC-0223 P1). *)
       ; content : string
+      ; raw_content : string
+        (** Original content before mention resolution. *)
+      ; resolved_mentions : resolved_mention list
+        (** Structured mentions found in [raw_content]. *)
       ; mention_user_ids : string list
             (* RFC-0232 §3.3: the structured [mentions] member ids are
                kept at decode instead of being reduced to a bot bool;

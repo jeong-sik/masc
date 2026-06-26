@@ -49,9 +49,12 @@ let http_get ~(host : string) ~(port : int) ~(path : string) : (string, string) 
   let url = url_of ~host ~port ~path in
   match
     Masc_http_client.get_sync ?clock:(request_clock ()) ~timeout_sec:default_timeout_sec
-      ~url ~headers:[] ()
+      ~url ~headers:(auth_headers ()) ()
   with
-  | Ok (status, body) -> Ok (raw_response ~status ~body)
+  | Ok (status, body) ->
+      if Masc.Tui_decode.is_success_http_status status then
+        Ok (raw_response ~status ~body)
+      else Error (Printf.sprintf "HTTP error %d: %s" status body)
   | Error e -> Error (report_err "GET failed" e)
 
 (** Send an HTTP POST request with a JSON body and return the raw response. *)
@@ -63,7 +66,10 @@ let http_post ?(headers = []) ~(host : string) ~(port : int) ~(path : string)
       ~timeout_sec:default_timeout_sec ~url ~headers:(json_headers headers) ~body
       ()
   with
-  | Ok (status, body) -> Ok (raw_response ~status ~body)
+  | Ok (status, body) ->
+      if Masc.Tui_decode.is_success_http_status status then
+        Ok (raw_response ~status ~body)
+      else Error (Printf.sprintf "HTTP error %d: %s" status body)
   | Error e -> Error (report_err "POST failed" e)
 
 (** GET a JSON response from a dashboard endpoint. *)

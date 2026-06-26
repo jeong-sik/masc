@@ -389,6 +389,49 @@ let update_goal_phase = Workspace_goals_verification.update_goal_phase
 
 let emit_goal_event = Workspace_goals_verification.emit_goal_event
 
+let goal_verification_request_status_label = function
+  | Goal_verification.Open -> "open"
+  | Goal_verification.Approved -> "approved"
+  | Goal_verification.Rejected -> "rejected"
+  | Goal_verification.Cancelled -> "cancelled"
+;;
+
+let cancel_created_verification_request ctx ~goal_id ~request_id ~reason =
+  match Goal_verification.cancel_request_if_open ctx.config ~request_id with
+  | Ok (Goal_verification.Cancelled_request _) ->
+    emit_goal_event
+      ctx
+      ~goal_id
+      ~event_type:"goal_verification_resolved"
+      ~payload:
+        (`Assoc
+            [ "request_id", `String request_id
+            ; "reason", `String reason
+            ; "status", `String "cancelled"
+            ]);
+    Ok ()
+  | Ok (Goal_verification.Already_resolved_request request) ->
+    let cleanup_msg =
+      Printf.sprintf
+        "goal verification request %s was already %s"
+        request_id
+        (goal_verification_request_status_label request.status)
+    in
+    Log.Misc.warn
+      "goal verification compensation skipped for %s after %s: %s"
+      request_id
+      reason
+      cleanup_msg;
+    Error cleanup_msg
+  | Error cleanup_msg ->
+    Log.Misc.warn
+      "goal verification compensation failed for %s after %s: %s"
+      request_id
+      reason
+      cleanup_msg;
+    Error cleanup_msg
+;;
+
 let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.result =
   match
     ( reject_retired_goal_list_status args
@@ -583,6 +626,22 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                                ()
                            with
                            | Error msg ->
+                             let cleanup_result =
+                               cancel_created_verification_request
+                                 ctx
+                                 ~goal_id
+                                 ~request_id:request.id
+                                 ~reason:"goal_phase_update_failed"
+                             in
+                             let msg =
+                               match cleanup_result with
+                               | Ok () -> msg
+                               | Error cleanup_msg ->
+                                 Printf.sprintf
+                                   "%s; verification cleanup failed: %s"
+                                   msg
+                                   cleanup_msg
+                             in
                              error_result_typed
                                ~tool_name
                                ~start_time
@@ -706,8 +765,8 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                        not a quorum verdict. Seal the open request as cancelled;
                        quorum failure is handled in [handle_goal_verify] as
                        [Rejected] and moves the goal back to [Executing]. *)
-                    (match Goal_verification.cancel_request ctx.config ~request_id with
-                     | Ok _ ->
+                    (match Goal_verification.cancel_request_if_open ctx.config ~request_id with
+                     | Ok (Goal_verification.Cancelled_request _) ->
                        emit_goal_event
                          ctx
                          ~goal_id
@@ -717,6 +776,11 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                                [ "request_id", `String request_id
                                ; "status", `String "cancelled"
                                ])
+                     | Ok (Goal_verification.Already_resolved_request request) ->
+                       Log.Misc.warn
+                         "goal verification cancel_request skipped for %s: already %s"
+                         request_id
+                         (goal_verification_request_status_label request.status)
                      | Error msg ->
                        Log.Misc.warn
                          "goal verification cancel_request failed for %s: %s"
@@ -833,17 +897,28 @@ let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result
             ~code:Conflict
             "goal has no active verification request"
         | Some request_id ->
-          (match
-             Goal_verification.submit_vote
-               ctx.config
-               ~goal_id
-               ~request_id
-               ~principal
-               ~decision
-               ?note
-               ~evidence_refs
-               ()
-           with
+          if
+            goal.phase <> Goal_phase.Awaiting_verification
+            || not
+                 (Option.equal String.equal goal.active_verification_request_id (Some request_id))
+          then
+            error_result_typed
+              ~tool_name
+              ~start_time
+              ~code:Conflict
+              "goal verification request is not active on this goal"
+          else
+            (match
+               Goal_verification.submit_vote
+                 ctx.config
+                 ~goal_id
+                 ~request_id
+                 ~principal
+                 ~decision
+                 ?note
+                 ~evidence_refs
+                 ()
+             with
            | Error msg -> error_result_typed ~tool_name ~start_time ~code:Conflict msg
            | Ok (request, quorum_result) ->
              let goals = Goal_store.list_goals ctx.config () in

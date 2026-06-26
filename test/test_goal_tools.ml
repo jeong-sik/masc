@@ -1041,6 +1041,147 @@ let test_goal_verify_rejects_cross_goal_request_id () =
   check int "no cross-goal vote written" 0 (List.length saved_request.votes)
 ;;
 
+let test_goal_verify_rejects_inactive_request_id () =
+  with_workspace
+  @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Inactive request guard" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let verifier = { Goal_verification.id = "agent-alpha"; display_name = None } in
+  let policy_snapshot : Goal_verification.policy_snapshot =
+    { principals = [ verifier ]; eligible_principals = [ verifier ]; required_verdicts = 1 }
+  in
+  let request =
+    match
+      Goal_verification.create_request
+        config
+        ~goal_id:goal.id
+        ~requested_by:{ id = "planner"; display_name = None }
+        ~policy_snapshot
+    with
+    | Ok request -> request
+    | Error msg -> fail msg
+  in
+  let rejected =
+    Tool_workspace.dispatch
+      (workspace_ctx ~agent_name:"agent-alpha" config)
+      ~name:"masc_goal_verify"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "request_id", `String request.id
+            ; "principal", principal_json ~id:"agent-alpha"
+            ; "decision", `String "approve"
+            ])
+  in
+  let error_json = expect_error rejected in
+  check string "inactive request rejected" "conflict"
+    (get_string_field error_json "error_code");
+  check string "inactive request error" "goal verification request is not active on this goal"
+    (get_string_field error_json "error");
+  let saved_request =
+    match Goal_verification.find_request config ~request_id:request.id with
+    | Some request -> request
+    | None -> fail "verification request missing after inactive vote"
+  in
+  check int "no inactive-request vote written" 0 (List.length saved_request.votes);
+  let saved_goal =
+    match Goal_store.get_goal config ~goal_id:goal.id with
+    | Some goal -> goal
+    | None -> fail "goal missing after inactive vote"
+  in
+  check string "phase unchanged" (Goal_phase.to_string goal.phase)
+    (Goal_phase.to_string saved_goal.phase)
+;;
+
+let test_goal_verify_rejects_non_active_request_id () =
+  with_workspace
+  @@ fun config ->
+  let verifier = { Goal_verification.id = "agent-alpha"; display_name = None } in
+  let verifier_policy =
+    { Goal_verification.inherit_mode = Goal_verification.Extend
+    ; principals = [ verifier ]
+    ; required_verdicts = Some 1
+    }
+  in
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Reject stale request" ~verifier_policy () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Reject stale request task";
+  let transitioned =
+    Tool_workspace.dispatch
+      (workspace_ctx config)
+      ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "action", `String "request_complete"
+            ; "actor", principal_json ~id:"planner"
+            ])
+  in
+  let transitioned_json =
+    match transitioned with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_transition not handled"
+  in
+  let active_request_id =
+    transitioned_json
+    |> Yojson.Safe.Util.member "verification_request"
+    |> fun json -> get_string_field json "id"
+  in
+  let policy_snapshot : Goal_verification.policy_snapshot =
+    { principals = [ verifier ]; eligible_principals = [ verifier ]; required_verdicts = 1 }
+  in
+  let stale_request =
+    match
+      Goal_verification.create_request
+        config
+        ~goal_id:goal.id
+        ~requested_by:{ id = "planner"; display_name = None }
+        ~policy_snapshot
+    with
+    | Ok request -> request
+    | Error msg -> fail msg
+  in
+  let rejected =
+    Tool_workspace.dispatch
+      (workspace_ctx ~agent_name:"agent-alpha" config)
+      ~name:"masc_goal_verify"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "request_id", `String stale_request.id
+            ; "principal", principal_json ~id:"agent-alpha"
+            ; "decision", `String "approve"
+            ])
+  in
+  let error_json = expect_error rejected in
+  check string "non-active request rejected" "conflict"
+    (get_string_field error_json "error_code");
+  check string "non-active request error" "goal verification request is not active on this goal"
+    (get_string_field error_json "error");
+  let saved_goal =
+    match Goal_store.get_goal config ~goal_id:goal.id with
+    | Some goal -> goal
+    | None -> fail "goal missing after stale request vote"
+  in
+  check
+    (option string)
+    "active request unchanged"
+    (Some active_request_id)
+    saved_goal.active_verification_request_id;
+  let saved_stale_request =
+    match Goal_verification.find_request config ~request_id:stale_request.id with
+    | Some request -> request
+    | None -> fail "stale verification request missing after rejected vote"
+  in
+  check int "no stale-request vote written" 0 (List.length saved_stale_request.votes)
+;;
+
 let test_goal_review_removed_from_dispatch () =
   with_workspace
   @@ fun config ->
@@ -1341,6 +1482,14 @@ let () =
             "verify rejects cross-goal request"
             `Quick
             test_goal_verify_rejects_cross_goal_request_id
+        ; test_case
+            "verify rejects inactive request"
+            `Quick
+            test_goal_verify_rejects_inactive_request_id
+        ; test_case
+            "verify rejects non-active request"
+            `Quick
+            test_goal_verify_rejects_non_active_request_id
         ; test_case
             "completion requires linked task"
             `Quick

@@ -154,6 +154,10 @@ type goal_verification_request = {
     for future phase gates.  [resolved_at] is set when
     [status] transitions out of [Open]. *)
 
+type cancel_request_result =
+  | Cancelled_request of goal_verification_request
+  | Already_resolved_request of goal_verification_request
+
 val goal_verification_request_to_yojson :
   goal_verification_request -> Yojson.Safe.t
 val goal_verification_request_of_yojson :
@@ -283,6 +287,14 @@ val cancel_request :
     [resolved_at].  Idempotent on already-non-[Open]
     requests (returns [Ok request] without mutation).
     Errors when [request_id] is unknown. *)
+
+val cancel_request_if_open :
+  Workspace_utils.config ->
+  request_id:string ->
+  (cancel_request_result, string) result
+(** Like {!cancel_request}, but reports whether this call performed the
+    [Open] -> [Cancelled] transition or found an already resolved
+    request. *)
 
 val submit_vote :
   Workspace_utils.config ->

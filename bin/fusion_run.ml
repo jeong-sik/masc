@@ -103,10 +103,11 @@ let first_some (f : 'a -> 'b option) (xs : 'a list) : 'b option =
    This debug CLI does not account for error-path usage (the orchestrator does),
    so the [Error] usage carried by [Fusion_judge.run] is dropped here, keeping
    the existing [(.. , string) result] contract for the print helpers below. *)
-let synthesize ~sw ~net ~(preset : Fusion_policy.preset) ~(prompt : string)
-    ~(panel : Fusion_types.panel_outcome list)
+let synthesize ?clock ~sw ~net ~(preset : Fusion_policy.preset) ~(prompt : string)
+    ~(panel : Fusion_types.panel_outcome list) ()
   : (Fusion_types.judge_synthesis * Fusion_types.usage, string) result =
   Masc.Fusion_judge.run
+    ?clock
     ~sw
     ~net
     ~timeout_s:preset.Fusion_policy.judge_timeout_s
@@ -145,8 +146,8 @@ let print_judge_arm ~(tag : string)
       , u.Fusion_types.input_tokens
       , u.Fusion_types.output_tokens )
 
-let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.preset)
-    ~(prompt : string) ~(config_path : string) : unit =
+let run_harness ?clock ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.preset)
+    ~(prompt : string) ~(config_path : string) () : unit =
   let models_all = Fusion_policy.preset_models preset in
   let n = List.length models_all in
   let max_fibers = max 1 policy.Fusion_policy.max_concurrent_panels in
@@ -170,6 +171,7 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
 
   let run_panel ~max_fibers ~models =
     Masc.Fusion_panel.run
+      ?clock
       ~sw
       ~net
       ~max_fibers
@@ -240,7 +242,7 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
   let self_moa_answer, self_moa_judge_in, self_moa_judge_out =
     match
       print_judge_arm ~tag:"self-moa"
-        (synthesize ~sw ~net ~preset ~prompt ~panel:sc_panel)
+        (synthesize ?clock ~sw ~net ~preset ~prompt ~panel:sc_panel ())
     with
     | Ok values -> values
     | Error msg ->
@@ -259,7 +261,7 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
   let fusion_answer, fusion_judge_in, fusion_judge_out =
     match
       print_judge_arm ~tag:"fusion"
-        (synthesize ~sw ~net ~preset ~prompt ~panel:fusion_panel)
+        (synthesize ?clock ~sw ~net ~preset ~prompt ~panel:fusion_panel ())
     with
     | Ok values -> values
     | Error msg ->
@@ -407,4 +409,4 @@ let () =
        (* RFC-0280: find_preset가 검증된 preset을 돌려준다. 하네스는 raw preset으로
           coerce해 arm을 구성한다(read-only). *)
        let preset = Fusion_policy.Validated_preset.preset vp in
-       run_harness ~sw ~net ~policy ~preset ~prompt ~config_path)
+       run_harness ~clock:(Eio.Stdenv.clock env) ~sw ~net ~policy ~preset ~prompt ~config_path ())

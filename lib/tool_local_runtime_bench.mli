@@ -19,6 +19,7 @@ include module type of struct
 end
 
 val run_bench :
+  ?env:Masc_eio_env.t ->
   ?model_id:string ->
   ?runtime_pool:string ->
   parallelism:int ->

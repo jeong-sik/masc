@@ -123,7 +123,7 @@ let attach_usage
    에러도 usage를 동반한다: 토큰을 태운 뒤 실패(빈 응답/파싱 실패)는 소비분을, 토큰
    소비 전 실패(빌드/실행/빈 결과/provider 에러)는 [zero_usage]를 싣는다. 호출자는
    실패 경로에서도 비용을 회계할 수 있다. *)
-let run_composed ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~web_tools
+let run_composed ?clock ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~web_tools
     ~max_tool_calls ~prompt () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , string * Fusion_types.usage )
@@ -139,8 +139,8 @@ let run_composed ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~web_tool
           (Fusion_oas.panel_failure_detail ~runtime_id:judge_model reason)
       , Fusion_types.zero_usage )
   | Ok agent ->
-    (match
-       Masc_oas_bridge.run_safe ~caller:"fusion_judge" ~timeout_s (fun () ->
+    match
+      Masc_oas_bridge.run_safe ?clock ~caller:"fusion_judge" ~timeout_s (fun () ->
          Ok (Agent_sdk.Async_agent.all ~sw [ (agent, prompt) ]))
      with
      | Error e ->
@@ -164,28 +164,28 @@ let run_composed ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~web_tool
          ( "judge provider error: "
            ^ Fusion_oas.provider_error_detail ~runtime_id:judge_model
                (Agent_sdk.Error.to_string e)
-         , Fusion_types.zero_usage ))
+         , Fusion_types.zero_usage )
 
-let run ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~question ~panel
+let run ?clock ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~question ~panel
     ~web_tools ~max_tool_calls () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , string * Fusion_types.usage )
     result =
-  run_composed ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~web_tools
+  run_composed ?clock ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~web_tools
     ~max_tool_calls ~prompt:(compose_prompt ~question ~panel) ()
 
-let run_refine ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~question
+let run_refine ?clock ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~question
     ~panel ~prior ~web_tools ~max_tool_calls () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , string * Fusion_types.usage )
     result =
-  run_composed ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~web_tools
+  run_composed ?clock ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~web_tools
     ~max_tool_calls ~prompt:(compose_refine_prompt ~question ~panel ~prior) ()
 
-let run_meta ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~question
+let run_meta ?clock ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~question
     ~panel ~priors ~web_tools ~max_tool_calls () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , string * Fusion_types.usage )
     result =
-  run_composed ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~web_tools
+  run_composed ?clock ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~web_tools
     ~max_tool_calls ~prompt:(compose_meta_prompt ~question ~panel ~priors) ()

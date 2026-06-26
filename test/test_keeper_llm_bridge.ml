@@ -68,152 +68,159 @@ let test_missing_env_fails_closed_without_calling_fn () =
 ;;
 
 let test_clockless_env_fails_closed_without_calling_fn () =
-  Eio_main.run (fun env ->
-    Eio.Switch.run (fun sw ->
-      Masc_eio_env.reset_for_test ();
-      Fun.protect ~finally:Masc_eio_env.reset_for_test (fun () ->
-        Masc_eio_env.init ~sw ~net:(Eio.Stdenv.net env) ();
-        let called = ref false in
-        let result =
-          Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s:1.0 (fun () ->
-            called := true;
-            Ok "should-not-run")
-        in
-        assert_no_clock_error ~label:"clockless env" ~called result)))
+  Eio_main.run (fun _env ->
+    Eio.Switch.run (fun _sw ->
+      let called = ref false in
+      let result =
+        Keeper_llm_bridge.run_with_timeout_and_fallback ?clock:None ~timeout_s:1.0 (fun () ->
+          called := true;
+          Ok "should-not-run")
+      in
+      assert_no_clock_error ~label:"clockless env" ~called result))
 ;;
 
 let test_clocked_env_runs_function () =
   Eio_main.run (fun env ->
-    Eio.Switch.run (fun sw ->
-      Masc_eio_env.reset_for_test ();
-      Fun.protect ~finally:Masc_eio_env.reset_for_test (fun () ->
-        Masc_eio_env.init ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env) ();
-        let called = ref false in
-        match
-          Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s:1.0 (fun () ->
-            called := true;
-            Ok "ok")
-        with
-        | Ok "ok" -> Alcotest.(check bool) "function was called" true !called
-        | Ok other -> Alcotest.failf "unexpected success: %s" other
-        | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err))))
+    Eio.Switch.run (fun _sw ->
+      let called = ref false in
+      match
+        Keeper_llm_bridge.run_with_timeout_and_fallback ~clock:(Eio.Stdenv.clock env) ~timeout_s:1.0 (fun () ->
+          called := true;
+          Ok "ok")
+      with
+      | Ok "ok" -> Alcotest.(check bool) "function was called" true !called
+      | Ok other -> Alcotest.failf "unexpected success: %s" other
+      | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)))
 ;;
 
-let test_timeout_log_carries_failure_envelope () =
+let test_timeout_raised_as_api_error_and_metric_bumped () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun _sw ->
+      let clock = Eio.Stdenv.clock env in
+      match
+        Keeper_llm_bridge.run_with_timeout_and_fallback ~clock ~timeout_s:0.001 (fun () ->
+          Eio.Time.sleep clock 0.1;
+          Ok "should-not-reach")
+      with
+      | Ok _ -> Alcotest.fail "expected timeout"
+      | Error (Agent_sdk.Error.Api (Timeout _)) ->
+        Alcotest.(check int) "metric bumped" 1 (count_timeout_metric_bumps ())
+      | Error err -> Alcotest.failf "expected Api.Timeout, got %a" Agent_sdk.Error.pp err))
+;;
+
+let test_cooperative_cancel_is_reraised_and_metric_not_bumped () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
-      Masc_eio_env.reset_for_test ();
-      Fun.protect ~finally:Masc_eio_env.reset_for_test (fun () ->
-        Masc_eio_env.init ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env) ();
-        match
-          Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s:0.001 (fun () ->
-            Eio.Time.sleep (Eio.Stdenv.clock env) 0.02;
-            Ok "late")
-        with
-        | Error (Agent_sdk.Error.Api (Timeout _)) ->
-          assert_latest_failure_envelope
-            ~label:"timeout"
-            ~needle:"OAS execution timed out"
-            ~cause_code:"provider_timeout"
-            ~operator_action:"inspect_provider_stream"
-        | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
-        | Ok value -> Alcotest.failf "unexpected success: %s" value)))
+      let clock = Eio.Stdenv.clock env in
+      Otel_metric_store.reset_for_test ();
+      let caught = ref false in
+      (try
+         Eio.Switch.run (fun inner_sw ->
+           Eio.Fiber.fork ~sw:inner_sw (fun () ->
+             Eio.Time.sleep clock 0.05;
+             Eio.Switch.fail inner_sw (Failure "simulated parent cancel"));
+           let _ =
+             Keeper_llm_bridge.run_with_timeout_and_fallback ~clock ~timeout_s:1.0 (fun () ->
+               Eio.Time.sleep clock 0.5;
+               Ok "should-not-reach")
+           in
+           Alcotest.fail "expected Cancelled exception")
+       with
+       | Eio.Cancel.Cancelled (Failure "simulated parent cancel") -> caught := true
+       | exn -> Alcotest.failf "expected Cancelled(Failure), got %s" (Printexc.to_string exn));
+      Alcotest.(check bool) "exception was re-raised" true !caught;
+      Alcotest.(check int) "metric NOT bumped" 0 (count_timeout_metric_bumps ())))
 ;;
 
 let test_parent_timeout_cancel_logs_info () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
-      Masc_eio_env.reset_for_test ();
-      Fun.protect ~finally:Masc_eio_env.reset_for_test (fun () ->
-        Masc_eio_env.init ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env) ();
-        let cancelled =
-          try
-            ignore
-              (Keeper_llm_bridge.run_with_timeout_and_fallback
-                 ~cancel_classification:Keeper_llm_bridge.Routine_parent_cancel
-                 ~timeout_s:1.0
-                 (fun () -> raise (Eio.Cancel.Cancelled Eio.Time.Timeout)));
-            false
-          with
-          | Eio.Cancel.Cancelled _ -> true
-        in
-        Alcotest.(check bool) "cancel re-raised" true cancelled;
-        match latest_keeper_log_matching "bucket=fast inner=Eio__Time.Timeout" with
-        | None -> Alcotest.fail "missing parent timeout cancel log"
-        | Some entry ->
-          let open Yojson.Safe.Util in
-          Alcotest.(check string)
-            "routine parent timeout cancel is info"
-            "INFO"
-            (Log.level_to_string entry.Log.Ring.level);
-          Alcotest.(check string)
-            "log class"
-            "routine_parent_cancel"
-            (entry.Log.Ring.details |> member "log_class" |> to_string))))
+      let clock = Eio.Stdenv.clock env in
+      let cancelled =
+        try
+          ignore
+            (Keeper_llm_bridge.run_with_timeout_and_fallback
+               ~clock
+               ~cancel_classification:Keeper_llm_bridge.Routine_parent_cancel
+               ~timeout_s:1.0
+               (fun () -> raise (Eio.Cancel.Cancelled Eio.Time.Timeout)));
+          false
+        with
+        | Eio.Cancel.Cancelled _ -> true
+      in
+      Alcotest.(check bool) "cancel re-raised" true cancelled;
+      match latest_keeper_log_matching "bucket=fast inner=Eio__Time.Timeout" with
+      | None -> Alcotest.fail "missing parent timeout cancel log"
+      | Some entry ->
+        let open Yojson.Safe.Util in
+        Alcotest.(check string)
+          "routine parent timeout cancel is info"
+          "INFO"
+          (Log.level_to_string entry.Log.Ring.level);
+        Alcotest.(check string)
+          "log class"
+          "routine_parent_cancel"
+          (entry.Log.Ring.details |> member "log_class" |> to_string)))
 ;;
 
 let test_default_timeout_inner_cancel_logs_info () =
   Eio_main.run (fun env ->
-    Eio.Switch.run (fun sw ->
-      Masc_eio_env.reset_for_test ();
-      Fun.protect ~finally:Masc_eio_env.reset_for_test (fun () ->
-        Masc_eio_env.init ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env) ();
-        let cancelled =
-          try
-            ignore
-              (Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s:1.0
-                 (fun () -> raise (Eio.Cancel.Cancelled Eio.Time.Timeout)));
-            false
-          with
-          | Eio.Cancel.Cancelled _ -> true
-        in
-        Alcotest.(check bool) "cancel re-raised" true cancelled;
-        match latest_keeper_log_matching "bucket=fast inner=Eio__Time.Timeout" with
-        | None -> Alcotest.fail "missing default timeout cancel log"
-        | Some entry ->
-          let open Yojson.Safe.Util in
-          Alcotest.(check string)
-            "default timeout inner cancel is info"
-            "INFO"
-            (Log.level_to_string entry.Log.Ring.level);
-          Alcotest.(check string)
-            "log class"
-            "inner_timeout_cancel"
-            (entry.Log.Ring.details |> member "log_class" |> to_string);
-          Alcotest.(check string)
-            "cancel classification"
-            "inner_timeout_cancel"
-            (entry.Log.Ring.details |> member "cancel_classification" |> to_string))))
+    Eio.Switch.run (fun _sw ->
+      let clock = Eio.Stdenv.clock env in
+      let cancelled =
+        try
+          ignore
+            (Keeper_llm_bridge.run_with_timeout_and_fallback ~clock ~timeout_s:1.0
+               (fun () -> raise (Eio.Cancel.Cancelled Eio.Time.Timeout)));
+          false
+        with
+        | Eio.Cancel.Cancelled _ -> true
+      in
+      Alcotest.(check bool) "cancel re-raised" true cancelled;
+      match latest_keeper_log_matching "bucket=fast inner=Eio__Time.Timeout" with
+      | None -> Alcotest.fail "missing default timeout cancel log"
+      | Some entry ->
+        let open Yojson.Safe.Util in
+        Alcotest.(check string)
+          "default timeout inner cancel is info"
+          "INFO"
+          (Log.level_to_string entry.Log.Ring.level);
+        Alcotest.(check string)
+          "log class"
+          "inner_timeout_cancel"
+          (entry.Log.Ring.details |> member "log_class" |> to_string);
+        Alcotest.(check string)
+          "cancel classification"
+          "inner_timeout_cancel"
+          (entry.Log.Ring.details |> member "cancel_classification" |> to_string)))
 ;;
 
 let test_unknown_cancel_stays_warn () =
   Eio_main.run (fun env ->
-    Eio.Switch.run (fun sw ->
-      Masc_eio_env.reset_for_test ();
-      Fun.protect ~finally:Masc_eio_env.reset_for_test (fun () ->
-        Masc_eio_env.init ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env) ();
-        let cancelled =
-          try
-            ignore
-              (Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s:1.0
-                 (fun () -> raise (Eio.Cancel.Cancelled (Failure "operator-stop-test"))));
-            false
-          with
-          | Eio.Cancel.Cancelled _ -> true
-        in
-        Alcotest.(check bool) "cancel re-raised" true cancelled;
-        match latest_keeper_log_matching "inner=Failure(operator-stop-test)" with
-        | None -> Alcotest.fail "missing unknown cancel log"
-        | Some entry ->
-          let open Yojson.Safe.Util in
-          Alcotest.(check string)
-            "unknown cancel stays warn"
-            "WARN"
-            (Log.level_to_string entry.Log.Ring.level);
-          Alcotest.(check string)
-            "log class"
-            "warn_cancel"
-            (entry.Log.Ring.details |> member "log_class" |> to_string))))
+    Eio.Switch.run (fun _sw ->
+      let clock = Eio.Stdenv.clock env in
+      let cancelled =
+        try
+          ignore
+            (Keeper_llm_bridge.run_with_timeout_and_fallback ~clock ~timeout_s:1.0
+               (fun () -> raise (Eio.Cancel.Cancelled (Failure "operator-stop-test"))));
+          false
+        with
+        | Eio.Cancel.Cancelled _ -> true
+      in
+      Alcotest.(check bool) "cancel re-raised" true cancelled;
+      match latest_keeper_log_matching "inner=Failure(operator-stop-test)" with
+      | None -> Alcotest.fail "missing unknown cancel log"
+      | Some entry ->
+        let open Yojson.Safe.Util in
+        Alcotest.(check string)
+          "unknown cancel stays warn"
+          "WARN"
+          (Log.level_to_string entry.Log.Ring.level);
+        Alcotest.(check string)
+          "log class"
+          "warn_cancel"
+          (entry.Log.Ring.details |> member "log_class" |> to_string)))
 ;;
 
 let test_hitl_headworkspace_exceeds_default_approval_wait () =

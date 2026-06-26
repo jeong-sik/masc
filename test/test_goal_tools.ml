@@ -51,7 +51,7 @@ let parse_json_result (result : Tool_result.result) =
   else Alcotest.fail ((Tool_result.message result))
 ;;
 
-let principal_json ?display_name ~id =
+let principal_json ?display_name id =
   let fields =
     ("id", `String id)
     ::
@@ -415,7 +415,7 @@ let test_goal_transition_verification_to_completion () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "request_complete"
-            ; "actor", principal_json ~id:"planner"
+            ; "actor", principal_json "planner"
             ])
   in
   let transitioned_json =
@@ -449,7 +449,7 @@ let test_goal_transition_verification_to_completion () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "request_id", `String request_id
-            ; "principal", principal_json ~id:"agent-alpha"
+            ; "principal", principal_json "agent-alpha"
             ; "decision", `String "approve"
             ; "note", `String "checked receipt and tests"
             ; ( "evidence_refs"
@@ -537,7 +537,7 @@ let test_goal_transition_rejected_verification_retains_evidence () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "request_complete"
-            ; "actor", principal_json ~id:"planner"
+            ; "actor", principal_json "planner"
             ])
   in
   let transitioned_json =
@@ -558,7 +558,7 @@ let test_goal_transition_rejected_verification_retains_evidence () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "request_id", `String request_id
-            ; "principal", principal_json ~id:"agent-alpha"
+            ; "principal", principal_json "agent-alpha"
             ; "decision", `String "reject"
             ; "note", `String "receipt did not prove completion"
             ; "evidence_refs", `List [ `String "receipt:agent-alpha:turn-7" ]
@@ -637,7 +637,7 @@ let test_goal_transition_manual_reject_blocks_and_cancels_request () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "request_complete"
-            ; "actor", principal_json ~id:"planner"
+            ; "actor", principal_json "planner"
             ])
   in
   let transitioned_json =
@@ -658,7 +658,7 @@ let test_goal_transition_manual_reject_blocks_and_cancels_request () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "reject_completion"
-            ; "actor", principal_json ~id:"planner"
+            ; "actor", principal_json "planner"
             ; "note", `String "operator rejected the completion claim"
             ])
   in
@@ -725,7 +725,7 @@ let test_goal_transition_approval_gate () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "request_complete"
-            ; "actor", principal_json ~id:"planner"
+            ; "actor", principal_json "planner"
             ])
   in
   let transitioned_json =
@@ -746,7 +746,7 @@ let test_goal_transition_approval_gate () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "request_id", `String request_id
-            ; "principal", principal_json ~id:"agent-alpha"
+            ; "principal", principal_json "agent-alpha"
             ; "decision", `String "approve"
             ])
   in
@@ -770,7 +770,7 @@ let test_goal_transition_approval_gate () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "approve_completion"
-            ; "actor", principal_json ~id:"planner"
+            ; "actor", principal_json "planner"
             ])
   in
   let approved_json =
@@ -820,7 +820,7 @@ let test_goal_principal_display_name_canonicalized () =
             [ "goal_id", `String goal.id
             ; "action", `String "request_complete"
             ; ( "actor"
-              , principal_json ~id:"planner" ~display_name:forged_actor_label )
+              , principal_json "planner" ~display_name:forged_actor_label )
             ])
   in
   let transitioned_json =
@@ -857,7 +857,7 @@ let test_goal_principal_display_name_canonicalized () =
             [ "goal_id", `String goal.id
             ; "request_id", `String request_id
             ; ( "principal"
-              , principal_json ~id:"agent-alpha" ~display_name:forged_vote_label )
+              , principal_json "agent-alpha" ~display_name:forged_vote_label )
             ; "decision", `String "approve"
             ])
   in
@@ -934,7 +934,7 @@ let test_goal_verify_rejects_spoofed_principal () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "request_complete"
-            ; "actor", principal_json ~id:"planner"
+            ; "actor", principal_json "planner"
             ])
   in
   let transitioned_json =
@@ -955,7 +955,7 @@ let test_goal_verify_rejects_spoofed_principal () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "request_id", `String request_id
-            ; "principal", principal_json ~id:"agent-alpha"
+            ; "principal", principal_json "agent-alpha"
             ; "decision", `String "approve"
             ])
   in
@@ -1000,7 +1000,7 @@ let test_goal_verify_rejects_cross_goal_request_id () =
           (`Assoc
               [ "goal_id", `String goal.id
               ; "action", `String "request_complete"
-              ; "actor", principal_json ~id:"planner"
+              ; "actor", principal_json "planner"
               ])
     in
     let transitioned_json =
@@ -1021,7 +1021,7 @@ let test_goal_verify_rejects_cross_goal_request_id () =
         (`Assoc
             [ "goal_id", `String goal_two.id
             ; "request_id", `String request_one
-            ; "principal", principal_json ~id:"agent-alpha"
+            ; "principal", principal_json "agent-alpha"
             ; "decision", `String "approve"
             ])
   in
@@ -1064,7 +1064,7 @@ let test_goal_completion_requires_linked_task () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "request_complete"
-            ; "actor", principal_json ~id:"planner"
+            ; "actor", principal_json "planner"
             ])
   in
   let error_json = expect_error completed in
@@ -1103,7 +1103,7 @@ let test_goal_completion_blocks_open_tasks () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "request_complete"
-            ; "actor", principal_json ~id:"planner"
+            ; "actor", principal_json "planner"
             ])
   in
   let error_json = expect_error completed in
@@ -1130,7 +1130,7 @@ let test_goal_completion_override_allows_empty_goal () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "request_complete"
-            ; "actor", principal_json ~id:"planner"
+            ; "actor", principal_json "planner"
             ; "override_note", `String "metric-only manual completion"
             ])
   in
@@ -1164,7 +1164,7 @@ let test_goal_transition_rejects_spoofed_actor () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "pause"
-            ; "actor", principal_json ~id:"agent-alpha"
+            ; "actor", principal_json "agent-alpha"
             ])
   in
   let error_json = expect_error rejected in
@@ -1194,7 +1194,7 @@ let test_operator_actions_require_operator_caller () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "operator_block"
-            ; "actor", principal_json ~id:"agent-alpha"
+            ; "actor", principal_json "agent-alpha"
             ])
   in
   let error_json = expect_error rejected in
@@ -1223,7 +1223,7 @@ let test_operator_actions_accept_authenticated_operator () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "operator_block"
-            ; "actor", principal_json ~id:"planner"
+            ; "actor", principal_json "planner"
             ])
   in
   let blocked_json =
@@ -1262,7 +1262,7 @@ let test_completion_approval_requires_operator_caller () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "approve_completion"
-            ; "actor", principal_json ~id:"agent-alpha"
+            ; "actor", principal_json "agent-alpha"
             ])
   in
   let error_json = expect_error approved in

@@ -54,6 +54,7 @@ val classify_runtime_blocker :
     strings.  Drift breaks tooltip + alerting downstream. *)
 
 val runtime_verify_json :
+  ?env:Masc_eio_env.t ->
   ?runtime_pool:string ->
   ?expected_slots:int ->
   ?expected_ctx:int ->

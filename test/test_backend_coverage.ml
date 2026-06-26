@@ -159,7 +159,13 @@ let with_eio_backend_and_dir f =
   let fs = Eio.Stdenv.fs env in
   let clock = Eio.Stdenv.clock env in
   let tmp_dir = make_test_dir "masc_eio" in
-  let config = { Backend.default_config with base_path = tmp_dir; node_id = "test"; cluster_name = "test" } in
+  let config =
+    { (Backend.default_config ()) with
+      base_path = tmp_dir
+    ; node_id = "test"
+    ; cluster_name = "test"
+    }
+  in
   Fun.protect
     ~finally:(fun () -> try rm_rf tmp_dir with _ -> ())
     (fun () ->

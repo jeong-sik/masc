@@ -28,8 +28,8 @@ val query_tokens : string -> string list
 val ascii_punctuation_tokens : string -> string list
 (** [ascii_punctuation_tokens text] splits on ASCII punctuation and whitespace,
     lowercases ASCII token bytes, and keeps UTF-8 bytes inside tokens. It is the
-    shared tokenizer for legacy contract/reference text that treats punctuation
-    as token boundaries. *)
+    shared tokenizer for anti-rationalization-style contract-token matching,
+    where punctuation is a token boundary. *)
 
 val contains_contiguous_token_sequence
   :  haystack:string list

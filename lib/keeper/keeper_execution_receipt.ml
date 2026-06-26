@@ -576,9 +576,13 @@ let needs_operator_broadcast = function
 ;;
 
 module Broadcast_dedupe = struct
+  (* Tracks only the last successfully emitted key. A->B->A re-emits by
+     design so changed failure identities are not hidden; #22391 owns the
+     durable state-backed idempotence model. *)
   type 'key keeper_slot =
     { mu : Eio.Mutex.t
     ; mutable last_key : 'key option
+    ; mutable pending_keys : 'key list
     }
 
   type 'key t =
@@ -600,7 +604,7 @@ module Broadcast_dedupe = struct
       match Hashtbl.find_opt t.by_keeper keeper_name with
       | Some slot -> slot
       | None ->
-        let slot = { mu = Eio.Mutex.create (); last_key = None } in
+        let slot = { mu = Eio.Mutex.create (); last_key = None; pending_keys = [] } in
         Hashtbl.add t.by_keeper keeper_name slot;
         slot)
   ;;
@@ -611,15 +615,46 @@ module Broadcast_dedupe = struct
     | _ -> false
   ;;
 
+  let key_pending t pending_keys key =
+    List.exists (fun pending_key -> t.equal pending_key key) pending_keys
+  ;;
+
+  let remove_pending_key t key pending_keys =
+    List.filter (fun pending_key -> not (t.equal pending_key key)) pending_keys
+  ;;
+
+  let reserve_emit t slot key =
+    Eio.Mutex.use_rw ~protect:true slot.mu (fun () ->
+      if key_seen t slot.last_key key || key_pending t slot.pending_keys key
+      then false
+      else (
+        slot.pending_keys <- key :: slot.pending_keys;
+        true))
+  ;;
+
+  let commit_emit t slot key =
+    Eio.Mutex.use_rw ~protect:true slot.mu (fun () ->
+      slot.pending_keys <- remove_pending_key t key slot.pending_keys;
+      slot.last_key <- Some key)
+  ;;
+
+  let cancel_emit t slot key =
+    Eio.Mutex.use_rw ~protect:true slot.mu (fun () ->
+      slot.pending_keys <- remove_pending_key t key slot.pending_keys)
+  ;;
+
   let emit_once t ~keeper_name ~key ~emit =
     let slot = slot t ~keeper_name in
-    Eio.Mutex.use_rw ~protect:true slot.mu (fun () ->
-      if key_seen t slot.last_key key
-      then Duplicate
-      else (
-        let event = emit () in
-        slot.last_key <- Some key;
-        Emitted event))
+    if not (reserve_emit t slot key)
+    then Duplicate
+    else (
+      match emit () with
+      | event ->
+        commit_emit t slot key;
+        Emitted event
+      | exception exn ->
+        cancel_emit t slot key;
+        raise exn)
   ;;
 
   let reset t =
@@ -631,6 +666,7 @@ end
 type operator_broadcast_dedupe_key =
   { operator_keeper_name : string
   ; operator_agent_name : string
+  ; operator_trace_id : string
   ; operator_generation : int
   ; operator_turn_count : int option
   ; operator_current_task_id : string option
@@ -651,6 +687,7 @@ let operator_broadcast_turn_key = function
 let operator_broadcast_dedupe_key receipt ~disposition ~reason =
   { operator_keeper_name = receipt.keeper_name
   ; operator_agent_name = receipt.agent_name
+  ; operator_trace_id = receipt.trace_id
   ; operator_generation = receipt.generation
   ; operator_turn_count = receipt.turn_count
   ; operator_current_task_id = receipt.current_task_id
@@ -971,43 +1008,58 @@ let emit_stale_keeper_broadcast
       ~last_turn_ts
       ~failure_reason
   in
-  match
-    Broadcast_dedupe.emit_once
-      stale_broadcast_dedupe
-      ~keeper_name
-      ~key
-      ~emit:(fun () ->
-        Activity_graph.emit
-          config
-          ~actor:{ Activity_graph.kind = "watchdog"; id = keeper_name }
-          ~kind:"keeper.operator_broadcast_required"
-          ~payload
-          ())
+  try
+    match
+      Broadcast_dedupe.emit_once
+        stale_broadcast_dedupe
+        ~keeper_name
+        ~key
+        ~emit:(fun () ->
+          Activity_graph.emit
+            config
+            ~actor:{ Activity_graph.kind = "watchdog"; id = keeper_name }
+            ~kind:"keeper.operator_broadcast_required"
+            ~payload
+            ())
+    with
+    | Broadcast_dedupe.Emitted event ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string ExecutionReceiptFailures)
+        ~labels:[ "keeper", keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Stale_broadcast) ]
+        ();
+      Log.Keeper.warn
+        ~keeper_name
+        "%s: stale_keeper_broadcast emitted last_turn=%.0fs ago runtime=%s seq=%d"
+        keeper_name
+        stale_seconds
+        runtime_id_string
+        event.seq
+    | Broadcast_dedupe.Duplicate ->
+      let reason = "stale_keeper_broadcast_duplicate" in
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string OperatorBroadcastSuppressed)
+        ~labels:[ "keeper", keeper_name; "reason", reason ]
+        ();
+      Log.Keeper.info
+        ~keeper_name
+        "%s: stale_keeper_broadcast suppressed duplicate bucket=%s runtime=%s"
+        keeper_name
+        (stale_turn_bucket stale_seconds)
+        runtime_id_string
   with
-  | Broadcast_dedupe.Emitted event ->
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ExecutionReceiptFailures)
-      ~labels:[ "keeper", keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Stale_broadcast) ]
+      ~labels:[ "keeper", keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Emit_failed) ]
       ();
-    Log.Keeper.warn
+    Log.Keeper.error
       ~keeper_name
-      "%s: stale_keeper_broadcast emitted last_turn=%.0fs ago runtime=%s seq=%d"
-      keeper_name
-      stale_seconds
-      runtime_id_string
-      event.seq
-  | Broadcast_dedupe.Duplicate ->
-    let reason = "stale_keeper_broadcast_duplicate" in
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string OperatorBroadcastSuppressed)
-      ~labels:[ "keeper", keeper_name; "reason", reason ]
-      ();
-    Log.Keeper.info
-      ~keeper_name
-      "%s: stale_keeper_broadcast suppressed duplicate bucket=%s runtime=%s"
+      "%s: stale_keeper_broadcast EMIT FAILED bucket=%s runtime=%s exn=%s"
       keeper_name
       (stale_turn_bucket stale_seconds)
       runtime_id_string
+      (Printexc.to_string exn)
 ;;
 
 let latest_json (config : Workspace.config) keeper_name =
@@ -1028,6 +1080,39 @@ let latest_json_by_keeper (config : Workspace.config) keeper_names =
 module For_testing = struct
   let stale_broadcast_dedupe_key = stale_broadcast_dedupe_key
   let stale_turn_bucket = stale_turn_bucket
+
+  let emit_operator_broadcast_dedupe_for_testing
+        ?turn_count
+        ?current_task_id
+        ~keeper_name
+        ~agent_name
+        ~trace_id
+        ~generation
+        ~disposition
+        ~reason
+        ~terminal_reason_code
+        ~emit
+    =
+    let key =
+      { operator_keeper_name = keeper_name
+      ; operator_agent_name = agent_name
+      ; operator_trace_id = trace_id
+      ; operator_generation = generation
+      ; operator_turn_count = turn_count
+      ; operator_current_task_id = current_task_id
+      ; operator_disposition = disposition
+      ; operator_reason = reason
+      ; operator_terminal_reason_code = terminal_reason_code
+      }
+    in
+    match Broadcast_dedupe.emit_once operator_broadcast_dedupe ~keeper_name ~key ~emit with
+    | Broadcast_dedupe.Emitted () -> true
+    | Broadcast_dedupe.Duplicate -> false
+  ;;
+
+  let reset_operator_broadcast_dedupe () =
+    Broadcast_dedupe.reset operator_broadcast_dedupe
+  ;;
 
   let emit_stale_keeper_broadcast_dedupe_for_testing
         ~keeper_name

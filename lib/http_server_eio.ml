@@ -63,16 +63,12 @@ module Compression = struct
 
   (** Legacy: Standard zstd without dictionary *)
   let compress_zstd ?(level = 3) (data : string) : (string * bool) =
-    if String.length data < 256 then
-      (data, false)
+    if String.length data < 256
+    then data, false
     else
-      try
-        let compressed = Zstd.compress ~level data in
-        if String.length compressed < String.length data then
-          (compressed, true)
-        else
-          (data, false)
-      with Zstd.Error _ -> (data, false)
+      match Compression_codec.compress ~level data with
+      | Compression_codec.Unchanged payload -> payload, false
+      | Compression_codec.Compressed { payload; encoding = _ } -> payload, true
 end
 
 (** Late-response failure classifier (#13059).

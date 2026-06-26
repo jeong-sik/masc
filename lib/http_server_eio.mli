@@ -74,7 +74,9 @@ module Compression : sig
 
   (** [compress_zstd ?level data] is the legacy
       no-dictionary path.  Returns [(payload, did_compress)] —
-      data shorter than 256 bytes is kept as-is. *)
+      data shorter than 256 bytes is kept as-is.  Raw zstd
+      compression is delegated to {!Compression_codec}, which owns
+      compression failure diagnostics. *)
   val compress_zstd : ?level:int -> string -> string * bool
 end
 

@@ -544,9 +544,8 @@ and handle_transition ~tool_name ~start_time ctx args =
       ~tool_name ~start_time reason
   | None ->
   let rec try_transition attempt =
-      let ev = if attempt = 0 then expected_version else None in
       let r = Workspace.transition_task_r ctx.config ~agent_name:ctx.agent_name
-                ~task_id ~action ?expected_version:ev ~notes ~reason
+                ~task_id ~action ?expected_version ~notes ~reason
                 (* RFC-0262: the admin-gated [force] bool (l.164, already
                    verified against initial_admin) maps to Operator authority;
                    a non-admin or no-force caller acts as Assignee. *)
@@ -554,7 +553,11 @@ and handle_transition ~tool_name ~start_time ctx args =
                 ?handoff_context ?prepare_verification_request
                 ?compensate_verification_request
                 ?prepare_verification_verdict () in
-      if is_version_mismatch r && attempt < max_cas_retries then begin
+      if
+        is_version_mismatch r
+        && Option.is_none expected_version
+        && attempt < max_cas_retries
+      then begin
         task_log_info ~task_id "CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms"
           task_id (attempt + 1) max_cas_retries (cas_retry_delay_s *. 1000.0);
         try

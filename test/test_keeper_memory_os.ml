@@ -9,6 +9,7 @@ module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
 module Consolidator = Masc.Keeper_memory_os_consolidator
+module Metrics = Masc.Otel_metric_store
 
 external unsetenv : string -> unit = "masc_test_unsetenv"
 
@@ -90,6 +91,28 @@ let render_if_enabled_for_test ~keeper_id ~now ~masc_root () =
     ~turn:1
     ~masc_root
     ()
+;;
+
+let memory_os_recall_unavailable_metric =
+  Keeper_metrics.(to_string MemoryOsRecallUnavailable)
+;;
+
+let recall_unavailable_metric_value reason =
+  Metrics.metric_value_or_zero memory_os_recall_unavailable_metric ~labels:[ "reason", reason ] ()
+;;
+
+let recent_recall_injection_failure_reason masc_root =
+  let store =
+    Dated_jsonl.create
+      ~base_dir:(Filename.concat masc_root "recall_injections")
+      ()
+  in
+  match Dated_jsonl.read_recent store 1 with
+  | [ json ] ->
+    (match Yojson.Safe.Util.(json |> member "failure_reason") with
+     | `String reason -> Some reason
+     | _ -> None)
+  | _ -> None
 ;;
 
 let has_memory_os_prompt_root path =
@@ -1771,6 +1794,8 @@ let test_render_if_enabled_surfaces_prompt_render_failure () =
         (fun () ->
           let keeper_id = "virtual-memory-keeper" in
           let now = 1_000_000.0 in
+          let reason = "prompt_render_error" in
+          let metric_before = recall_unavailable_metric_value reason in
           Memory_io.append_fact
             ~keeper_id
             { (fact_fixture ~now ()) with Types.claim = "Hidden fact should not leak" };
@@ -1781,7 +1806,7 @@ let test_render_if_enabled_surfaces_prompt_render_failure () =
             Alcotest.(check bool)
               "surfaces unavailable advisory"
               true
-              (contains "Historical memory recall is unavailable" block);
+              (contains "Memory recall unavailable" block);
             Alcotest.(check bool)
               "classifies prompt failure without raw template error"
               true
@@ -1789,8 +1814,16 @@ let test_render_if_enabled_surfaces_prompt_render_failure () =
             Alcotest.(check bool)
               "does not render fact text after prompt failure"
               false
-              (contains "Hidden fact should not leak" block))))
-;;
+              (contains "Hidden fact should not leak" block);
+            Alcotest.(check (float 0.001))
+              "increments recall-unavailable metric"
+              (metric_before +. 1.0)
+              (recall_unavailable_metric_value reason);
+            Alcotest.(check (option string))
+              "ledger records failure reason"
+              (Some reason)
+              (recent_recall_injection_failure_reason keepers_dir))))
+  ;;
 
 let test_render_if_enabled_renders_persisted_memory () =
   with_recall_env "true" (fun () ->

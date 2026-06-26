@@ -50,6 +50,22 @@ let sanitize_atom text =
     | c -> c)
 ;;
 
+type unavailable_reason =
+  | Read_error
+  | Prompt_render_error
+
+let unavailable_reason_to_label = function
+  | Read_error -> "read_error"
+  | Prompt_render_error -> "prompt_render_error"
+;;
+
+let record_unavailable reason =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string MemoryOsRecallUnavailable)
+    ~labels:[ "reason", unavailable_reason_to_label reason ]
+    ()
+;;
+
 let episode_is_current ~now (episode : episode) =
   match episode.valid_until with
   | None -> true
@@ -144,9 +160,9 @@ let render_prompt_template key variables =
   | Error msg -> Error (Printf.sprintf "%s: %s" key msg)
 ;;
 
-let render_unavailable_context ~reason =
-  let reason = sanitize_atom reason in
-  let reason = if String.equal reason "" then "unknown" else reason in
+let render_unavailable_context reason =
+  record_unavailable reason;
+  let reason = unavailable_reason_to_label reason in
   match
     render_prompt_template
       Keeper_prompt_names.memory_os_recall_unavailable
@@ -156,10 +172,7 @@ let render_unavailable_context ~reason =
   | Error msg ->
     Log.Keeper.warn "memory os recall unavailable prompt unavailable: %s" msg;
     Printf.sprintf
-      "--- Memory OS Recall ---\n\
-       Historical memory recall is unavailable for this turn (reason=%s).\n\
-       Continue using current live context only; do not infer missing facts from memory \
-       absence."
+      "--- Memory OS Recall ---\nMemory recall unavailable (reason=%s)."
       reason
 ;;
 
@@ -238,6 +251,7 @@ type render_result =
   ; injected_fact_keys : string list
   ; injected_episode_keys : string list
   ; n_facts_in_store : int
+  ; failure_reason : unavailable_reason option
   }
 
 let with_fact_store_locks keeper_ids f =
@@ -315,9 +329,9 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
       (fun (e : episode) -> Printf.sprintf "%s:g%d" e.trace_id e.generation)
       episodes
   in
-  let block, injected_fact_keys, injected_episode_keys =
+  let block, injected_fact_keys, injected_episode_keys, failure_reason =
     match facts, shared_facts, episodes with
-    | [], [], [] -> "", [], []
+    | [], [], [] -> "", [], [], None
     | _ ->
       let fact_lines =
         List.map (render_fact ~now) facts
@@ -325,12 +339,15 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
       in
       let episode_lines = List.map render_episode episodes in
       (match render_recall_context ~fact_lines ~episode_lines with
-       | Ok context -> context, injected_fact_keys, injected_episode_keys
+       | Ok context -> context, injected_fact_keys, injected_episode_keys, None
        | Error msg ->
          Log.Keeper.warn "memory os recall prompt unavailable keeper=%s: %s" keeper_id msg;
-         render_unavailable_context ~reason:"prompt_render_error", [], [])
+         ( render_unavailable_context Prompt_render_error
+         , []
+         , []
+         , Some Prompt_render_error ))
   in
-  { block; injected_fact_keys; injected_episode_keys; n_facts_in_store }
+  { block; injected_fact_keys; injected_episode_keys; n_facts_in_store; failure_reason }
 ;;
 
 let render_context
@@ -347,7 +364,7 @@ let render_context
       "memory os recall unavailable keeper=%s: %s"
       keeper_id
       (Printexc.to_string exn);
-    render_unavailable_context ~reason:"read_error"
+    render_unavailable_context Read_error
 ;;
 
 let enabled () =
@@ -379,16 +396,18 @@ let render_if_enabled ~keeper_id ~now ~trace_id ~turn ~masc_root () =
           "memory os recall unavailable keeper=%s: %s"
           keeper_id
           (Printexc.to_string exn);
-        { block = render_unavailable_context ~reason:"read_error"
+        { block = render_unavailable_context Read_error
         ; injected_fact_keys = []
         ; injected_episode_keys = []
         ; n_facts_in_store = 0
+        ; failure_reason = Some Read_error
         }
     in
     match String.trim result.block with
     | "" -> None
     | block ->
       Keeper_recall_injection_ledger.append
+        ?failure_reason:(Option.map unavailable_reason_to_label result.failure_reason)
         ~masc_root
         ~keeper_id
         ~trace_id
@@ -396,6 +415,7 @@ let render_if_enabled ~keeper_id ~now ~trace_id ~turn ~masc_root () =
         ~injected_fact_keys:result.injected_fact_keys
         ~injected_episode_keys:result.injected_episode_keys
         ~n_facts_in_store:result.n_facts_in_store
-        ~now;
+        ~now
+        ();
       Some block)
 ;;

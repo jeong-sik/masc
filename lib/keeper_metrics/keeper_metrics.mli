@@ -214,6 +214,7 @@ type t =
   | TurnCleanupFailures
   | MemoryBankLoadHistorySwallowedExceptions
   | MemoryRecallReadErrors
+  | MemoryOsRecallUnavailable
   | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze
   | VisionCandidateAttempts

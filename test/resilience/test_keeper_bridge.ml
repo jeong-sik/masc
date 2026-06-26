@@ -301,10 +301,10 @@ let test_pipeline_writes_attempted_then_outcome_audit_when_executor_supplied
   assert (Option.is_some outcome.audit_envelope_id);
   let recent = Shared_audit.Store.recent store ~n:2 in
   assert (List.length recent = 2);
-  (* Store.recent returns the most recent entries in chronological order:
-     pre-flight RecoveryAttempted, then the outcome. *)
+  (* Most recent is the outcome (HandoffRequested → RecoverySucceeded);
+     older is the pre-flight RecoveryAttempted. *)
   match recent with
-  | [ attempted_env; outcome_env ] ->
+  | [ outcome_env; attempted_env ] ->
       assert (
         attempted_env.Shared_audit.Envelope.category = "RecoveryAttempted");
       assert (
@@ -333,7 +333,7 @@ let test_pipeline_writes_recovery_failed_when_callback_fails () =
   let recent = Shared_audit.Store.recent store ~n:2 in
   assert (List.length recent = 2);
   match recent with
-  | [ attempted_env; outcome_env ] ->
+  | [ outcome_env; attempted_env ] ->
       assert (
         attempted_env.Shared_audit.Envelope.category = "RecoveryAttempted");
       assert (

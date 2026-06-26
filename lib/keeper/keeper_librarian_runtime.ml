@@ -399,9 +399,10 @@ let unstructured_episode ~now ~generation (inp : Keeper_librarian.input) ~reason
       (collapse_for_unstructured_note raw)
   in
   let note =
+    let prefix = Keeper_memory_os_types.librarian_unstructured_fallback_claim_prefix in
     if String.equal raw_excerpt ""
-    then Printf.sprintf "unstructured_note: librarian parse fallback (%s): <empty response>" reason
-    else Printf.sprintf "unstructured_note: librarian parse fallback (%s): %s" reason raw_excerpt
+    then Printf.sprintf "%s (%s): <empty response>" prefix reason
+    else Printf.sprintf "%s (%s): %s" prefix reason raw_excerpt
   in
   let source_turn_range =
     match List.length inp.messages with

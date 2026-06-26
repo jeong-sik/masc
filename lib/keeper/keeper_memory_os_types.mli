@@ -170,9 +170,15 @@ type fact =
     [valid_until] are durable and current. *)
 val fact_is_current : now:float -> fact -> bool
 
+(** Historical claim prefix used for librarian parse-failure fallback facts.
+    Kept as the SSOT for the producer and the legacy recall-eligibility shim. *)
+val librarian_unstructured_fallback_claim_prefix : string
+
 (** Structural prompt-recall eligibility. Callers still apply {!fact_is_current}
     for the time horizon; [Diagnostic] rows stay operator evidence, not prompt
-    context. *)
+    context. Legacy pre-[Diagnostic] librarian fallback rows are also excluded by
+    their exact historical claim prefix so old stores cannot keep injecting raw
+    parse-failure diagnostics. *)
 val fact_prompt_recallable : fact -> bool
 
 (** RFC-0259 §3.6 (P5): partition facts into [(live, expired)] at [now] on the

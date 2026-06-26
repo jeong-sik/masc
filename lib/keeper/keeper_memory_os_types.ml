@@ -224,10 +224,19 @@ let fact_is_current ~now (fact : fact) =
   | Some ts -> ts >= now
 ;;
 
+let librarian_unstructured_fallback_claim_prefix =
+  "unstructured_note: librarian parse fallback"
+;;
+
+let legacy_unstructured_fallback_claim (claim : string) =
+  String.starts_with ~prefix:librarian_unstructured_fallback_claim_prefix claim
+;;
+
 let fact_prompt_recallable (fact : fact) =
   match fact.claim_kind with
   | Some Diagnostic -> false
-  | Some Self_observation | Some External_state | Some Durable_knowledge | None -> true
+  | Some Self_observation | Some External_state | Some Durable_knowledge -> true
+  | None -> not (legacy_unstructured_fallback_claim fact.claim)
 ;;
 
 (* RFC-0259 §3.6 (P5): split a fact list into (live, expired-at-[now]) on the

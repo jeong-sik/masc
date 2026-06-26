@@ -296,6 +296,7 @@ export type KeeperCompactionSnapshotsResponse = {
   readonly producer: string
   readonly limit: number
   readonly count: number
+  readonly read_errors: { scope: string; error: string }[]
   readonly items: KeeperCompactionSnapshot[]
 }
 
@@ -699,6 +700,16 @@ function decodeKeeperCompactionSnapshot(raw: unknown): KeeperCompactionSnapshot 
   }
 }
 
+function decodeReadErrors(raw: unknown): { scope: string; error: string }[] {
+  return asRecordArray(raw)
+    .map((item) => {
+      const scope = asString(item.scope)
+      const error = asString(item.error)
+      return scope && error ? { scope, error } : null
+    })
+    .filter((item): item is { scope: string; error: string } => item !== null)
+}
+
 function decodeKeeperCompactionSnapshotsResponse(raw: unknown): KeeperCompactionSnapshotsResponse | null {
   if (!isRecord(raw)) return null
   const schema = asString(raw.schema)
@@ -713,10 +724,18 @@ function decodeKeeperCompactionSnapshotsResponse(raw: unknown): KeeperCompaction
     producer,
     limit: asNumber(raw.limit, 0) ?? 0,
     count: asNumber(raw.count, 0) ?? 0,
+    read_errors: decodeReadErrors(raw.read_errors),
     items: asRecordArray(raw.items)
       .map(decodeKeeperCompactionSnapshot)
       .filter((item): item is KeeperCompactionSnapshot => item !== null),
   }
+}
+
+function limitQueryString(limit?: number): string {
+  const params = new URLSearchParams()
+  if (limit != null) params.set('limit', String(limit))
+  const query = params.toString()
+  return query ? `?${query}` : ''
 }
 
 export function fetchKeeperTurnRecords(
@@ -724,7 +743,7 @@ export function fetchKeeperTurnRecords(
   limit?: number,
   opts?: AbortableRequestOptions,
 ): Promise<TurnRecordsResponse> {
-  const params = limit != null ? `?limit=${limit}` : ''
+  const params = limitQueryString(limit)
   return get<Record<string, unknown>>(
     `/api/v1/keepers/${encodeURIComponent(name)}/turn-records${params}`,
     { signal: opts?.signal },
@@ -740,7 +759,7 @@ export function fetchKeeperCompactionSnapshots(
   limit?: number,
   opts?: AbortableRequestOptions,
 ): Promise<KeeperCompactionSnapshotsResponse> {
-  const params = limit != null ? `?limit=${limit}` : ''
+  const params = limitQueryString(limit)
   return get<Record<string, unknown>>(
     `/api/v1/keepers/${encodeURIComponent(name)}/compaction-snapshots${params}`,
     { signal: opts?.signal },

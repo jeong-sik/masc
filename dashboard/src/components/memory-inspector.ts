@@ -185,6 +185,7 @@ export function factTtlLabel(fact: MemoryOsFact): string {
 }
 
 const DEFAULT_FACT_ROW_LIMIT = 12
+const LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER = 'librarian_unstructured_fallback'
 type FactVisibilityFilter = 'recallable' | 'diagnostic' | 'all'
 
 export function sortMemoryFactsForReview(facts: readonly MemoryOsFact[]): MemoryOsFact[] {
@@ -452,10 +453,10 @@ function OneKeeperMemoryReal({
   const diagnosticFacts = facts.filter(isDiagnosticEvidenceFact)
   const allEpisodes = [...snapshot.episodes.items].reverse()
   const episodes = allEpisodes
-    .filter(ep => ep.terminal_marker !== 'librarian_unstructured_fallback')
+    .filter(ep => ep.terminal_marker !== LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER)
     .slice(0, 5)
   const fallbackEpisodes = allEpisodes
-    .filter(ep => ep.terminal_marker === 'librarian_unstructured_fallback')
+    .filter(ep => ep.terminal_marker === LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER)
     .slice(0, 5)
   // distinct categories present, in first-seen order, deduped by tag
   const seen = new Set<string>()

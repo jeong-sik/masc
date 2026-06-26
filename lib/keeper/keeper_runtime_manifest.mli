@@ -79,7 +79,10 @@ val source_clock_of_string : string -> source_clock option
 val source_clock_of_event : event_kind -> source_clock
 
 val schema_version : int
+val manifest_file_suffix : string
 val safe_segment : string -> string
+
+val status_is_skipped : t -> bool
 
 val clock_refs :
   ?edge_id:string ->

@@ -12,6 +12,9 @@ let keeper_hot_path_cache_ttl_s = 30.0
 let keeper_composite_cache_ttl_s = 5.0
 let compaction_snapshot_default_limit = 25
 let compaction_snapshot_max_limit = 100
+let compaction_snapshot_manifest_scan_min_files = 8
+let compaction_snapshot_manifest_scan_limit_multiplier = 4
+let compaction_snapshot_manifest_tail_max_lines = 200
 
 (* Maximum number of trajectory/trace entries returned per query. *)
 let trajectory_max_limit = 500
@@ -244,49 +247,149 @@ let compaction_snapshot_take n xs =
   loop n [] xs
 ;;
 
+type compaction_snapshot_read_error =
+  { scope : string
+  ; error : string
+  }
+
+let compaction_snapshot_read_error ~scope ~error = { scope; error }
+
+let compaction_snapshot_read_error_json { scope; error } =
+  `Assoc [ "scope", `String scope; "error", `String error ]
+;;
+
+let compaction_snapshot_read_errors_json errors =
+  `List (List.map compaction_snapshot_read_error_json errors)
+;;
+
+let log_compaction_snapshot_read_errors ~keeper_id errors =
+  List.iter
+    (fun { scope; error } ->
+      Log.Dashboard.warn
+        "compaction_snapshots: keeper=%s scope=%s error=%s"
+        keeper_id scope error)
+    errors
+;;
+
+let compaction_snapshot_unix_error_message err fn arg =
+  Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err)
+;;
+
 let safe_regular_mtime path =
   try
     let st = Unix.stat path in
-    if st.Unix.st_kind = Unix.S_REG then Some st.Unix.st_mtime else None
+    if st.Unix.st_kind = Unix.S_REG
+    then Some st.Unix.st_mtime, []
+    else None, []
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | _ -> None
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> None, []
+  | Unix.Unix_error (err, fn, arg) ->
+    ( None
+    , [ compaction_snapshot_read_error
+          ~scope:("runtime_manifest_file:" ^ path)
+          ~error:(compaction_snapshot_unix_error_message err fn arg)
+      ] )
+  | exn ->
+    ( None
+    , [ compaction_snapshot_read_error
+          ~scope:("runtime_manifest_file:" ^ path)
+          ~error:(Printexc.to_string exn)
+      ] )
 ;;
 
 let runtime_manifest_paths ~config ~keeper_id ~limit =
   let dir = Keeper_runtime_manifest.base_dir config ~keeper_name:keeper_id in
+  let scan_limit =
+    max compaction_snapshot_manifest_scan_min_files
+      (limit * compaction_snapshot_manifest_scan_limit_multiplier)
+  in
   try
     let st = Unix.stat dir in
     if st.Unix.st_kind <> Unix.S_DIR
-    then []
+    then
+      ( []
+      , [ compaction_snapshot_read_error
+            ~scope:("runtime_manifest_dir:" ^ dir)
+            ~error:"path is not a directory"
+        ] )
     else
-      Sys.readdir dir
-      |> Array.to_list
-      |> List.filter (String.ends_with ~suffix:".jsonl")
-      |> List.filter_map (fun file ->
+      let entries, read_errors =
+        Sys.readdir dir
+        |> Array.to_list
+        |> List.filter
+             (String.ends_with
+                ~suffix:Keeper_runtime_manifest.manifest_file_suffix)
+        |> List.fold_left
+             (fun (entries, read_errors) file ->
         let path = Filename.concat dir file in
-        Option.map (fun mtime -> path, mtime) (safe_regular_mtime path))
+        let mtime, errors = safe_regular_mtime path in
+        let entries =
+          match mtime with
+          | Some mtime -> (path, mtime) :: entries
+          | None -> entries
+        in
+        entries, List.rev_append errors read_errors)
+             ([], [])
+      in
+      (entries
       |> List.sort (fun (_, a) (_, b) -> Float.compare b a)
-      |> compaction_snapshot_take (max 8 (limit * 4))
+      |> compaction_snapshot_take scan_limit
       |> List.map fst
+      , List.rev read_errors)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | _ -> []
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> [], []
+  | Unix.Unix_error (err, fn, arg) ->
+    ( []
+    , [ compaction_snapshot_read_error
+          ~scope:("runtime_manifest_dir:" ^ dir)
+          ~error:(compaction_snapshot_unix_error_message err fn arg)
+      ] )
+  | exn ->
+    ( []
+    , [ compaction_snapshot_read_error
+          ~scope:("runtime_manifest_dir:" ^ dir)
+          ~error:(Printexc.to_string exn)
+      ] )
 ;;
 
 let read_runtime_manifest_tail_rows path =
   try
-    Dated_jsonl.load_tail_lines path ~max_lines:200
-    |> List.filter_map (fun line ->
+    Dated_jsonl.load_tail_lines path
+      ~max_lines:compaction_snapshot_manifest_tail_max_lines
+    |> fun lines ->
+    let rec loop line_no rows read_errors = function
+      | [] -> List.rev rows, List.rev read_errors
+      | line :: rest ->
       try
         match Yojson.Safe.from_string line |> Keeper_runtime_manifest.of_json with
-        | Ok row -> Some row
-        | Error _ -> None
+            | Ok row -> loop (line_no + 1) (row :: rows) read_errors rest
+            | Error msg ->
+              loop (line_no + 1) rows
+                (compaction_snapshot_read_error
+                   ~scope:(Printf.sprintf "runtime_manifest_row:%s:%d" path line_no)
+                   ~error:msg
+                 :: read_errors)
+                rest
       with
-      | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
+          | Yojson.Json_error msg | Yojson.Safe.Util.Type_error (msg, _) ->
+            loop (line_no + 1) rows
+              (compaction_snapshot_read_error
+                 ~scope:(Printf.sprintf "runtime_manifest_row:%s:%d" path line_no)
+                 ~error:msg
+               :: read_errors)
+              rest
+    in
+    loop 1 [] [] lines
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | _ -> []
+  | exn ->
+    ( []
+    , [ compaction_snapshot_read_error
+          ~scope:("runtime_manifest_file:" ^ path)
+          ~error:(Printexc.to_string exn)
+      ] )
 ;;
 
 let compaction_snapshot_clock_refs decision =
@@ -399,7 +502,7 @@ let compaction_context_snapshot_json ~keeper_id (row : Keeper_runtime_manifest.t
   let pre_dispatch_compacted =
     Json_util.get_bool row.decision "pre_dispatch_compacted" = Some true
   in
-  if (not pre_dispatch_compacted) && String.equal row.status "skipped"
+  if (not pre_dispatch_compacted) && Keeper_runtime_manifest.status_is_skipped row
   then None
   else
     let before_tokens =
@@ -463,51 +566,69 @@ let keeper_meta_compaction_snapshot_json ~config ~keeper_id =
   | Ok (Some meta) ->
     let rt = meta.runtime.compaction_rt in
     if rt.count <= 0 || rt.last_ts <= 0.0
-    then None
+    then None, []
     else
       let before_tokens = Some rt.last_before_tokens in
       let after_tokens = Some rt.last_after_tokens in
-      Some
-        (compaction_snapshot_item_json
-           ~id:"keeper_meta:last_compaction"
-           ~keeper_id
-           ~ts_iso:(Masc_domain.iso8601_of_unix_seconds rt.last_ts)
-           ~ts_unix:(Some rt.last_ts)
-           ~trace_id:None
-           ~keeper_turn_id:None
-           ~source:"keeper_meta"
-           ~trigger:
-             (Keeper_meta_contract.compaction_runtime_decision_to_string
-                rt.last_decision)
-           ~runtime_id:None
-           ~before_tokens
-           ~after_tokens
-           ~saved_tokens:(compaction_saved_tokens before_tokens after_tokens)
-           ~compaction_id:None
-           ~compaction_source:None
-           ~status:"latest"
-           ~links:(`Assoc []))
-  | Ok None | Error _ -> None
+      ( Some
+          (compaction_snapshot_item_json
+             ~id:"keeper_meta:last_compaction"
+             ~keeper_id
+             ~ts_iso:(Masc_domain.iso8601_of_unix_seconds rt.last_ts)
+             ~ts_unix:(Some rt.last_ts)
+             ~trace_id:None
+             ~keeper_turn_id:None
+             ~source:"keeper_meta"
+             ~trigger:
+               (Keeper_meta_contract.compaction_runtime_decision_to_string
+                  rt.last_decision)
+             ~runtime_id:None
+             ~before_tokens
+             ~after_tokens
+             ~saved_tokens:(compaction_saved_tokens before_tokens after_tokens)
+             ~compaction_id:None
+             ~compaction_source:None
+             ~status:"latest"
+             ~links:(`Assoc []))
+      , [] )
+  | Ok None -> None, []
+  | Error msg ->
+    ( None
+    , [ compaction_snapshot_read_error
+          ~scope:("keeper_meta:" ^ keeper_id)
+          ~error:msg
+      ] )
 ;;
 
 let compaction_snapshots_json ~config ~keeper_id ~limit =
   let limit = limit |> max 1 |> min compaction_snapshot_max_limit in
-  let manifest_items =
+  let manifest_paths, path_read_errors =
     runtime_manifest_paths ~config ~keeper_id ~limit
-    |> List.concat_map read_runtime_manifest_tail_rows
+  in
+  let rows_and_errors = List.map read_runtime_manifest_tail_rows manifest_paths in
+  let manifest_rows = List.concat_map fst rows_and_errors in
+  let manifest_read_errors =
+    path_read_errors @ List.concat_map snd rows_and_errors
+  in
+  let manifest_items =
+    manifest_rows
     |> List.filter_map (compaction_snapshot_of_manifest_row ~keeper_id)
     |> List.sort (fun a b ->
       Float.compare (compaction_snapshot_sort_value b) (compaction_snapshot_sort_value a))
     |> compaction_snapshot_take limit
   in
-  let items =
+  let items, read_errors =
     match manifest_items with
     | [] ->
-      (match keeper_meta_compaction_snapshot_json ~config ~keeper_id with
-       | Some item -> [ item ]
-       | None -> [])
-    | _ -> manifest_items
+      let meta_item, meta_read_errors =
+        keeper_meta_compaction_snapshot_json ~config ~keeper_id
+      in
+      (match meta_item with
+       | Some item -> [ item ], manifest_read_errors @ meta_read_errors
+       | None -> [], manifest_read_errors @ meta_read_errors)
+    | _ -> manifest_items, manifest_read_errors
   in
+  log_compaction_snapshot_read_errors ~keeper_id read_errors;
   `Assoc
     [ "schema", `String "keeper.compaction_snapshots.v1"
     ; "keeper", `String keeper_id
@@ -515,6 +636,8 @@ let compaction_snapshots_json ~config ~keeper_id ~limit =
     ; "producer", `String "keeper_runtime_manifest|keeper_meta_store"
     ; "limit", `Int limit
     ; "count", `Int (List.length items)
+    ; "read_error_count", `Int (List.length read_errors)
+    ; "read_errors", compaction_snapshot_read_errors_json read_errors
     ; "items", `List items
     ]
 ;;
@@ -1074,9 +1197,12 @@ let handle_keeper_get_subroutes state req request reqd =
         |> max 1 |> min compaction_snapshot_max_limit
       in
       let config = Mcp_server.workspace_config state in
+      let json =
+        Domain_pool_ref.submit_io_or_inline (fun () ->
+          compaction_snapshots_json ~config ~keeper_id:name ~limit)
+      in
       Http.Response.json_value ~compress:true ~request:req
-        (compaction_snapshots_json ~config ~keeper_id:name ~limit)
-        reqd
+        json reqd
   else if ends_with "/turn-records" then
     (* RFC-0233 §2.3 PR-4: serve TurnRecords with server-side
        consecutive-pair block diffs so the dashboard stays a renderer

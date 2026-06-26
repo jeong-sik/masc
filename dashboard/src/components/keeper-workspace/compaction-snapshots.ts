@@ -36,7 +36,12 @@ export interface CompactionSnapshot {
 
 type PerKeeperSnapshots = Record<string, CompactionSnapshot[]>
 
+export const COMPACTION_SNAPSHOT_DEFAULT_LIMIT = 25
+export const COMPACTION_SNAPSHOT_MAX_ITEMS = 100
+
 export const compactionSnapshots: Signal<PerKeeperSnapshots> = signal({})
+
+let fallbackIdSeq = 0
 
 function nowHM(): string {
   const d = new Date()
@@ -44,7 +49,10 @@ function nowHM(): string {
 }
 
 function nextId(prefix: string): string {
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
+  const uuid = globalThis.crypto?.randomUUID?.()
+  if (uuid) return `${prefix}_${uuid}`
+  fallbackIdSeq = (fallbackIdSeq + 1) % Number.MAX_SAFE_INTEGER
+  return `${prefix}_${Date.now().toString(36)}_${fallbackIdSeq.toString(36)}`
 }
 
 function finiteNumberOrNull(value: number | null | undefined): number | null {
@@ -73,17 +81,17 @@ function labelFromIso(iso: string): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+function displayRuntimeFromBackendSnapshot(snapshot: BackendCompactionSnapshot): string {
+  return snapshot.runtime_id ?? snapshot.compaction_source ?? snapshot.source
+}
+
 function backendSnapshotToLocal(snapshot: BackendCompactionSnapshot): CompactionSnapshot {
-  const runtime =
-    snapshot.runtime_id
-    ?? snapshot.compaction_source
-    ?? snapshot.source
   return {
     id: snapshot.id,
     at: labelFromIso(snapshot.ts_iso),
     atIso: snapshot.ts_iso,
     trigger: snapshot.trigger,
-    runtime,
+    runtime: displayRuntimeFromBackendSnapshot(snapshot),
     before: { tok: finiteNumberOrNull(snapshot.before_tokens) },
     after: { tok: finiteNumberOrNull(snapshot.after_tokens) },
     savedTokens: finiteNumberOrNull(snapshot.saved_tokens),
@@ -99,12 +107,25 @@ function backendSnapshotToLocal(snapshot: BackendCompactionSnapshot): Compaction
 }
 
 function snapshotSortKey(snapshot: CompactionSnapshot): number {
-  if (snapshot.source !== 'backend') return Number.MAX_SAFE_INTEGER
   if (snapshot.atIso) {
     const parsed = Date.parse(snapshot.atIso)
     if (Number.isFinite(parsed)) return parsed
   }
   return 0
+}
+
+function snapshotSourceRank(snapshot: CompactionSnapshot): number {
+  if (snapshot.source === 'backend') return 2
+  if (snapshot.source === 'sse') return 1
+  return 0
+}
+
+function compareCompactionSnapshots(a: CompactionSnapshot, b: CompactionSnapshot): number {
+  const byTime = snapshotSortKey(b) - snapshotSortKey(a)
+  if (byTime !== 0) return byTime
+  const bySource = snapshotSourceRank(b) - snapshotSourceRank(a)
+  if (bySource !== 0) return bySource
+  return b.id.localeCompare(a.id)
 }
 
 export function hydrateCompactionSnapshots(
@@ -119,8 +140,8 @@ export function hydrateCompactionSnapshots(
     if (!byId.has(snapshot.id)) byId.set(snapshot.id, snapshot)
   }
   const next = [...byId.values()]
-    .sort((a, b) => snapshotSortKey(b) - snapshotSortKey(a))
-    .slice(0, 100)
+    .sort(compareCompactionSnapshots)
+    .slice(0, COMPACTION_SNAPSHOT_MAX_ITEMS)
   compactionSnapshots.value = {
     ...compactionSnapshots.value,
     [keeperName]: next,

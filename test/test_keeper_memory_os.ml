@@ -91,6 +91,14 @@ let with_temp_workspace_config f =
   f (Masc.Workspace.default_config marker)
 ;;
 
+let write_text_file path contents =
+  let (_ : string) = Masc.Keeper_fs.ensure_dir (Filename.dirname path) in
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc contents)
+;;
+
 let render_if_enabled_for_test ~keeper_id ~now ~masc_root () =
   Recall.render_if_enabled
     ~keeper_id
@@ -4390,6 +4398,10 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
       "keeper.compaction_snapshots.v1"
       (json_string_field "compaction_snapshots" top "schema");
     Alcotest.(check int) "count" 1 (json_int_field "compaction_snapshots" top "count");
+    Alcotest.(check int)
+      "read errors"
+      0
+      (List.length (json_item_list "compaction_snapshots" top "read_errors"));
     let item =
       match json_item_list "compaction_snapshots" top "items" with
       | [ item ] -> json_assoc "compaction_snapshots.items[0]" item
@@ -4424,6 +4436,35 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
           false
           (contains forbidden item_json))
       [ "before_prompt"; "after_prompt"; "prompt_text"; "context_text" ])
+;;
+
+let test_compaction_snapshots_json_surfaces_manifest_read_errors () =
+  with_temp_workspace_config (fun config ->
+    let keeper_id = "memory-panel-test" in
+    let path =
+      Runtime_manifest.path_for_trace config
+        ~keeper_name:keeper_id
+        ~trace_id:"trace-corrupt-compaction-dashboard"
+    in
+    write_text_file path "{not-json}\n";
+    let top =
+      Server_dashboard_http_keeper_api.compaction_snapshots_json
+        ~config
+        ~keeper_id
+        ~limit:10
+      |> json_assoc "compaction_snapshots"
+    in
+    Alcotest.(check int) "count" 0 (json_int_field "compaction_snapshots" top "count");
+    let read_errors = json_item_list "compaction_snapshots" top "read_errors" in
+    Alcotest.(check bool)
+      "corrupt manifest row is surfaced"
+      true
+      (List.length read_errors > 0);
+    let error_json = Yojson.Safe.to_string (`List read_errors) in
+    Alcotest.(check bool)
+      "error names runtime manifest row"
+      true
+      (contains "runtime_manifest_row" error_json))
 ;;
 
 let () =
@@ -4533,6 +4574,10 @@ let () =
             "dashboard compaction snapshots read runtime manifest metadata only"
             `Quick
             test_compaction_snapshots_json_reads_runtime_manifest
+        ; Alcotest.test_case
+            "dashboard compaction snapshots surface manifest read errors"
+            `Quick
+            test_compaction_snapshots_json_surfaces_manifest_read_errors
         ] )
     ; ( "policy"
       , [ Alcotest.test_case

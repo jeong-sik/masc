@@ -555,6 +555,7 @@ describe('keeper tool telemetry fetchers', () => {
         producer: 'keeper_runtime_manifest|keeper_meta_store',
         limit: 2,
         count: 2,
+        read_errors: [{ scope: 'runtime_manifest_row:/tmp/bad.jsonl:1', error: 'bad row' }],
         items: [
           {
             id: 'manifest:trace-a:event_bus_correlated:2026-06-26T03:03:00Z',
@@ -602,6 +603,9 @@ describe('keeper tool telemetry fetchers', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/keeper-alpha/compaction-snapshots?limit=2')
     expect(result.items[0]?.before_tokens).toBe(210000)
     expect(result.items[0]?.saved_tokens).toBe(90000)
+    expect(result.read_errors).toEqual([
+      { scope: 'runtime_manifest_row:/tmp/bad.jsonl:1', error: 'bad row' },
+    ])
     expect(result.items[0]?.links.receipt_path).toBeNull()
     expect(result.items[1]?.before_tokens).toBeNull()
     expect(result.items[1]?.runtime_id).toBeNull()

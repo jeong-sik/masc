@@ -115,12 +115,12 @@ let test_maybe_sweep_updates_schedule_once () =
   let store = create_store () in
   store.last_sweep <- 0.0;
   store.last_flush <- 0.0;
-  Masc.Board_core_persist.maybe_sweep store;
+  Masc_board_handlers.Board_core_persist.maybe_sweep store;
   let first_sweep = store.last_sweep in
   let first_flush = store.last_flush in
   Alcotest.(check bool) "sweep timestamp updated" true (first_sweep > 0.0);
   Alcotest.(check bool) "flush timestamp updated" true (first_flush > 0.0);
-  Masc.Board_core_persist.maybe_sweep store;
+  Masc_board_handlers.Board_core_persist.maybe_sweep store;
   Alcotest.(check (float 0.0)) "sweep timestamp unchanged" first_sweep store.last_sweep;
   Alcotest.(check (float 0.0)) "flush timestamp unchanged" first_flush store.last_flush
 

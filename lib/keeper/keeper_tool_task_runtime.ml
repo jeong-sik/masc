@@ -253,6 +253,12 @@ let wip_admission_rejection_json
   `Assoc
     [ "task_id", `String task_id
     ; "reason", `String (Keeper_wip_admission.reject_reason_to_string rejection.reason)
+    ; "axis", `String (Keeper_wip_admission.reject_reason_axis rejection.reason)
+    ; "cap_kind", `String "wip_claim_admission"
+    ; "action", `String "finish_or_release_existing_wip_before_claiming_more"
+    ; ( "scope_note"
+      , `String
+          "This claim cap limits active WIP in the current scope; it is not a request to create a new repo or unrelated work." )
     ; "current", `Int rejection.current
     ; "limit", `Int rejection.limit
     ; "scope_key", `String rejection.scope_key
@@ -264,7 +270,7 @@ let wip_admission_rejection_action = function
   | (task_id, (rejection : Keeper_wip_admission.rejection)) :: _ ->
     Some
       (Printf.sprintf
-         "WIP admission rejected task %s: %s current=%d limit=%d scope=%s. ACTION: finish/release existing WIP in this scope before claiming more."
+         "WIP admission rejected task %s: %s current=%d limit=%d scope=%s. ACTION: finish/release existing WIP in this scope before claiming more; do not create unrelated repos to bypass this claim cap."
          task_id
          (Keeper_wip_admission.reject_reason_to_string rejection.reason)
          rejection.current
@@ -278,7 +284,9 @@ let wip_admission_result_fields rejections =
   | rejections ->
     [ ( "wip_admission"
       , `Assoc
-          [ "rejected_count", `Int (List.length rejections)
+          [ "kind", `String "claim_wip_admission"
+          ; "action", `String "finish_or_release_existing_wip_before_claiming_more"
+          ; "rejected_count", `Int (List.length rejections)
           ; "rejections", `List (List.map wip_admission_rejection_json rejections)
           ] )
     ]

@@ -107,29 +107,44 @@ let handover_to_json (h : handover_record) : Yojson.Safe.t =
 (** JSON to handover *)
 let handover_of_json (json : Yojson.Safe.t) : handover_record option =
   let str key = Json_util.get_string_with_default json ~key ~default:"" in
+  let required_str key =
+    match Json_util.get_string json key with
+    | Some value when not (String.equal (String.trim value) "") -> Some value
+    | _ -> None
+  in
   let str_opt key = Json_util.get_string json key in
   let str_list key = Json_util.get_string_list json key in
   let int_val key = Json_util.get_int json key |> Option.value ~default:0 in
   let float_val key = Json_util.get_float json key |> Option.value ~default:0.0 in
-  try Some {
-    id = str "id";
-    from_agent = str "from_agent";
-    to_agent = str_opt "to_agent";
-    task_id = str "task_id";
-    session_id = str "session_id";
-    current_goal = str "current_goal";
-    progress_summary = str "progress_summary";
-    completed_steps = str_list "completed_steps";
-    pending_steps = str_list "pending_steps";
-    key_decisions = str_list "key_decisions";
-    assumptions = str_list "assumptions";
-    warnings = str_list "warnings";
-    unresolved_errors = str_list "unresolved_errors";
-    modified_files = str_list "modified_files";
-    created_at = float_val "created_at";
-    context_usage_percent = int_val "context_usage_percent";
-    handover_reason = str "handover_reason";
-  }
+  try
+    match
+      ( required_str "id"
+      , required_str "from_agent"
+      , required_str "task_id"
+      , required_str "session_id"
+      , required_str "handover_reason" )
+    with
+    | Some id, Some from_agent, Some task_id, Some session_id, Some handover_reason ->
+      Some {
+        id;
+        from_agent;
+        to_agent = str_opt "to_agent";
+        task_id;
+        session_id;
+        current_goal = str "current_goal";
+        progress_summary = str "progress_summary";
+        completed_steps = str_list "completed_steps";
+        pending_steps = str_list "pending_steps";
+        key_decisions = str_list "key_decisions";
+        assumptions = str_list "assumptions";
+        warnings = str_list "warnings";
+        unresolved_errors = str_list "unresolved_errors";
+        modified_files = str_list "modified_files";
+        created_at = float_val "created_at";
+        context_usage_percent = int_val "context_usage_percent";
+        handover_reason;
+      }
+    | _ -> None
   with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
 
 (** Storage paths *)

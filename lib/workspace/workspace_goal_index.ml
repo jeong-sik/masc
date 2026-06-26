@@ -124,7 +124,22 @@ let read_goal_task_links config =
 
 let write_goal_task_links config links =
   let json = links_to_yojson links in
-  write_json config (goal_task_links_path config) json;
+  let primary_path = goal_task_links_path config in
+  let expected_links = normalize_link_set links in
+  write_json config primary_path json;
+  (match read_json_result config primary_path with
+   | Ok written when links_of_yojson written = expected_links -> ()
+   | Ok _ ->
+     failwith
+       (Printf.sprintf
+          "write_goal_task_links: primary readback mismatch for %s"
+          primary_path)
+   | Error msg ->
+     failwith
+       (Printf.sprintf
+          "write_goal_task_links: primary write/readback failed for %s: %s"
+          primary_path
+          msg));
   write_json config (goal_task_links_recovery_path config) json
 ;;
 

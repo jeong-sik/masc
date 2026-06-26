@@ -271,6 +271,7 @@
   masc_backend
   masc_process
   masc_eio_context
+  masc.http_client
   fmt
   str
   eio_main

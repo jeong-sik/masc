@@ -1,6 +1,7 @@
-(** TUI HTTP client — thin Unix.open_connection wrapper for Dashboard APIs. *)
+(** TUI HTTP client — Dashboard API wrapper over Masc_http_client. *)
 
 let report_err prefix msg = Printf.sprintf "(%s: %s)" prefix msg
+let default_timeout_sec = 10.0
 
 let trim_nonempty value =
   let trimmed = String.trim value in
@@ -28,118 +29,42 @@ let auth_headers () =
       ("Authorization", "Bearer " ^ sanitize_header_value token) :: agent_header
   | None -> agent_header
 
-let render_headers headers =
-  headers
-  |> List.filter_map (fun (name, value) ->
-         let value = sanitize_header_value value in
-         if value = "" then None
-         else Some (Printf.sprintf "%s: %s\r\n" name value))
-  |> String.concat ""
+let json_headers headers =
+  ("Content-Type", "application/json") :: headers
 
-let resolve_addr ~(host : string) ~(port : int) : (Unix.sockaddr, string) result =
-  try
-    match
-      Unix.getaddrinfo host (string_of_int port)
-        [ Unix.AI_SOCKTYPE Unix.SOCK_STREAM ]
-    with
-    | [] -> Error (report_err "connection failed" "host resolved to no addresses")
-    | addrs -> (
-        match
-          List.find_map
-            (fun addr ->
-              match addr.Unix.ai_addr with
-              | Unix.ADDR_INET _ as inet -> Some inet
-              | _ -> None)
-            addrs
-        with
-        | Some addr -> Ok addr
-        | None ->
-            Error
-              (report_err "connection failed"
-                 "host resolved to no TCP/IP addresses"))
-  with
-  | Unix.Unix_error (err, _, _) ->
-      Error (report_err "connection failed" (Unix.error_message err))
-  | exn ->
-      Error (report_err "connection failed" (Printexc.to_string exn))
+let host_for_url host =
+  if String.contains host ':' && not (String.starts_with ~prefix:"[" host) then
+    "[" ^ host ^ "]"
+  else host
+
+let url_of ~(host : string) ~(port : int) ~(path : string) =
+  Printf.sprintf "http://%s:%d%s" (host_for_url host) port path
+
+let raw_response ~status ~body = Printf.sprintf "HTTP/1.1 %d\r\n\r\n%s" status body
+
+let request_clock () = Eio_context.get_clock_opt ()
 
 (** Send an HTTP GET request and return the raw response. *)
 let http_get ~(host : string) ~(port : int) ~(path : string) : (string, string) result =
-  match resolve_addr ~host ~port with
-  | Error e -> Error e
-  | Ok addr -> (
-    try
-    let (ic, oc) = Unix.open_connection addr in
-    Fun.protect
-      ~finally:(fun () ->
-        Unix.shutdown_connection ic;
-        close_in_noerr ic;
-        close_out_noerr oc)
-      (fun () ->
-        let request =
-          Printf.sprintf
-            "GET %s HTTP/1.1\r\n\
-             Host: %s:%d\r\n\
-             Connection: close\r\n\
-             \r\n"
-            path host port
-        in
-        output_string oc request;
-        flush oc;
-        let buf = Buffer.create 4096 in
-        (try while true do
-           let line = input_line ic in
-           Buffer.add_string buf line;
-           Buffer.add_char buf '\n'
-         done with End_of_file -> ());
-        Ok (Buffer.contents buf))
+  let url = url_of ~host ~port ~path in
+  match
+    Masc_http_client.get_sync ?clock:(request_clock ()) ~timeout_sec:default_timeout_sec
+      ~url ~headers:[] ()
   with
-  | Unix.Unix_error (err, _, _) ->
-      Error (report_err "connection failed" (Unix.error_message err))
-  | exn ->
-      Error (report_err "error" (Printexc.to_string exn)))
+  | Ok (status, body) -> Ok (raw_response ~status ~body)
+  | Error e -> Error (report_err "GET failed" e)
 
 (** Send an HTTP POST request with a JSON body and return the raw response. *)
 let http_post ?(headers = []) ~(host : string) ~(port : int) ~(path : string)
     ~(body : string) : (string, string) result =
-  match resolve_addr ~host ~port with
-  | Error e -> Error e
-  | Ok addr -> (
-    try
-    let (ic, oc) = Unix.open_connection addr in
-    Fun.protect
-      ~finally:(fun () ->
-        Unix.shutdown_connection ic;
-        close_in_noerr ic;
-        close_out_noerr oc)
-      (fun () ->
-        let body_len = String.length body in
-        let request =
-          Printf.sprintf
-            "POST %s HTTP/1.1\r\n\
-             Host: %s:%d\r\n\
-             Content-Type: application/json\r\n\
-             Content-Length: %d\r\n\
-             %s\
-             Connection: close\r\n\
-             \r\n\
-             %s"
-            path host port body_len (render_headers headers) body
-        in
-        output_string oc request;
-        flush oc;
-        let buf = Buffer.create 4096 in
-        (try while true do
-           let line = input_line ic in
-           Buffer.add_string buf line;
-           Buffer.add_char buf '\n'
-         done with End_of_file -> ());
-        Ok (Buffer.contents buf))
+  let url = url_of ~host ~port ~path in
+  match
+    Masc_http_client.post_sync ?clock:(request_clock ())
+      ~timeout_sec:default_timeout_sec ~url ~headers:(json_headers headers) ~body
+      ()
   with
-  | Unix.Unix_error (err, _, _) ->
-      Error (report_err "connection failed" (Unix.error_message err))
-  | exn ->
-      Error (report_err "error" (Printexc.to_string exn)))
+  | Ok (status, body) -> Ok (raw_response ~status ~body)
+  | Error e -> Error (report_err "POST failed" e)
 
 (** GET a JSON response from a dashboard endpoint. *)
 let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, string) result =

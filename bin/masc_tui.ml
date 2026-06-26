@@ -515,4 +515,14 @@ let main () =
     done
   with Break -> ()
 
-let () = main ()
+let run_with_eio_context f =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_env env;
+  Eio_context.set_switch sw;
+  Eio_context.set_net (Eio.Stdenv.net env);
+  Eio_context.set_clock (Eio.Stdenv.clock env);
+  Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
+  f ()
+
+let () = run_with_eio_context main

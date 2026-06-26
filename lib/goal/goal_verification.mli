@@ -286,6 +286,7 @@ val cancel_request :
 
 val submit_vote :
   Workspace_utils.config ->
+  goal_id:string ->
   request_id:string ->
   principal:goal_principal ->
   decision:vote_decision ->
@@ -302,6 +303,7 @@ val submit_vote :
 
     Errors on any of:
     - [request_id] unknown,
+    - [request_id] belongs to another goal,
     - request is not [Open],
     - [principal] is the original requester,
     - [principal] is not in

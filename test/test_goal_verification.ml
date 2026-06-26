@@ -70,6 +70,7 @@ let test_invalid_vote_does_not_bump () =
   let before = Goal_verification.read_state config in
   (match
      Goal_verification.submit_vote config ~request_id:request.id
+       ~goal_id:"goal-1"
        ~principal:requested_by ~decision:Goal_verification.Approve ()
    with
    | Error _ -> ()

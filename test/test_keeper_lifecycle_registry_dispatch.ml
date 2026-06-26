@@ -58,7 +58,7 @@ let write_keeper_toml ~base_dir name lines =
   in
   write_lines path lines
 
-let write_keeper_meta_json config meta =
+let write_keeper_meta_json config (meta : Keeper_meta_contract.keeper_meta) =
   write_json
     (Keeper_types_profile.keeper_meta_path config meta.name)
     (Keeper_meta_json.meta_to_json meta)

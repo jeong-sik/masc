@@ -400,13 +400,14 @@ let () = test "masc_oas_bridge_runs_without_eio_env" (fun () ->
     failwith
       "masc_oas_bridge_runs_without_eio_env requires Masc_eio_env.get_opt () = None before calling run_safe"
   | None ->
+    let called = ref false in
     match
       Masc_oas_bridge.run_safe ~caller:"test_tool_task_coverage" ~timeout_s:0.1 (fun () ->
+        called := true;
         Ok "ok")
     with
-    | Ok "ok" -> ()
-    | Ok other -> failwith ("unexpected result: " ^ other)
-    | Error err -> failwith (Agent_sdk.Error.to_string err)
+    | Ok _ -> failwith "expected failure when no Eio clock is available"
+    | Error _ -> Alcotest.(check bool) "fn was not called" false !called
 )
 
 (* Test dispatch transition claim *)

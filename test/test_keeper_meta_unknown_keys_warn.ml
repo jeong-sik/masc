@@ -19,25 +19,10 @@ open Masc
 let counter_total () =
   Otel_metric_store.metric_total Keeper_metrics.(to_string MetaJsonFailures)
 
-let read_file path =
-  let ic = open_in path in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () ->
-       let len = in_channel_length ic in
-       really_input_string ic len)
-
-let contains_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  if needle_len = 0
-  then true
-  else (
-    let rec loop idx =
-      idx + needle_len <= haystack_len
-      && (String.sub haystack idx needle_len = needle || loop (idx + 1))
-    in
-    loop 0)
+let top_level_json_key_present path key =
+  match Yojson.Safe.from_file path with
+  | `Assoc fields -> List.mem_assoc key fields
+  | _ -> Alcotest.fail "keeper meta must remain a JSON object"
 
 let canonical_only_meta_json () =
   (* Build an `Assoc whose every key is in [canonical_keeper_meta_key_names].
@@ -121,7 +106,27 @@ let test_persisted_multimodal_policy_is_canonical_before_warn () =
       Alcotest.(check bool)
         "read path keeps persisted multimodal_policy key"
         true
-        (contains_substring (read_file path) "\"multimodal_policy\""))
+        (top_level_json_key_present path "multimodal_policy"))
+
+let test_config_keys_are_warned_before_parse () =
+  let path = Filename.temp_file "masc-config-key-keeper-meta-" ".json" in
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+      Fs_compat.save_file
+        path
+        {|{"name":"config-key","agent_name":"config-key","trace_id":"trace-config-key","tool_access":[],"goal":"legacy profile goal"}|};
+      let before = counter_total () in
+      (match Keeper_meta_store.read_meta_file_path path with
+       | Ok (Some meta) -> Alcotest.(check string) "keeper name" "config-key" meta.name
+       | Ok None -> Alcotest.fail "expected keeper meta"
+       | Error err -> Alcotest.fail ("read_meta_file_path failed: " ^ err));
+      let after = counter_total () in
+      Alcotest.(check bool)
+        "TOML-owned config keys are warned before parse, not silently dropped"
+        true
+        (after > before))
 
 let fresh_tmpdir () =
   let path = Filename.temp_file "masc-progress-refresh-" ".tmp" in
@@ -175,6 +180,10 @@ let () =
             "persisted multimodal policy is canonical before warning"
             `Quick
             test_persisted_multimodal_policy_is_canonical_before_warn
+        ; Alcotest.test_case
+            "config keys are warned before parse"
+            `Quick
+            test_config_keys_are_warned_before_parse
         ; Alcotest.test_case
             "progress Updated-line refresh failure is observable"
             `Quick

@@ -1,7 +1,8 @@
 (** Keeper meta JSON scrub helpers.
 
-    Kept below the codec/parser facade so persisted runtime JSON can be
-    normalized before [keeper_meta] decoding. *)
+    Kept below the codec/parser facade so persisted runtime JSON cleanup code
+    can share the same TOML-owned field names without introducing a module
+    cycle. *)
 
 
 (* Config/policy fields owned by TOML only.  Never written to JSON; scrubbed
@@ -32,11 +33,11 @@ let config_field_names =
   ; "per_provider_timeout_s"; "always_approve"
     (* NOTE: multimodal_policy is a PERSISTED runtime field: meta_to_json emits
        it (keeper_meta_json.ml) and it is a canonical key. It must NOT be in this
-       config-only scrub list: keeper_meta_store drops these keys on read before
-       meta_of_json, so listing it here deleted "delegate" on every read (parse
-       fell back to Mm_inherit -> gate never delegated -> next write re-emitted
-       "inherit"). The test/test_config_runtime_split invariant (no meta_to_json
-       key may be in config_field_names) guards this. *)
+       config-only scrub list: any call-site that rewrites persisted JSON with
+       this list would delete "delegate", after which parsing falls back to
+       Mm_inherit and the next write re-emits "inherit". The
+       test/test_config_runtime_split invariant (no meta_to_json key may be in
+       config_field_names) guards this. *)
   ; "autoboot_enabled"; "max_context_override"
   ; "telemetry_feedback_enabled"; "telemetry_feedback_window_hours"
   ]

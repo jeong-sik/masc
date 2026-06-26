@@ -1303,7 +1303,7 @@ let test_goal_verify_rejects_inactive_request_id () =
   check string "inactive request rejected" "conflict"
     (get_string_field error_json "error_code");
   check string "inactive request error" "goal verification request is not active on this goal"
-    (get_string_field error_json "error");
+    (get_string_field error_json "message");
   let saved_request =
     match Goal_verification.find_request config ~request_id:request.id with
     | Some request -> request
@@ -1386,7 +1386,7 @@ let test_goal_verify_rejects_non_active_request_id () =
   check string "non-active request rejected" "conflict"
     (get_string_field error_json "error_code");
   check string "non-active request error" "goal verification request is not active on this goal"
-    (get_string_field error_json "error");
+    (get_string_field error_json "message");
   let saved_goal =
     match Goal_store.get_goal config ~goal_id:goal.id with
     | Some goal -> goal

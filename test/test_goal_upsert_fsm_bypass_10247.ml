@@ -37,7 +37,13 @@ let with_workspace f =
        f config)
 ;;
 
-let workspace_ctx config : Tool_workspace.context = { Tool_workspace.config; agent_name = "planner" }
+let workspace_ctx ?(agent_name = "planner") config : Tool_workspace.context =
+  { Tool_workspace.config; agent_name }
+;;
+
+let seed_goal_operator config ~agent_name =
+  Auth_credential_base.write_initial_admin config.base_path agent_name
+;;
 
 let dispatch_upsert ctx args =
   match Tool_workspace.dispatch ctx ~name:"masc_goal_upsert" ~args:(`Assoc args) with
@@ -110,7 +116,7 @@ let dispatch_transition_must_succeed ctx ~goal_id ~action =
         (`Assoc
             [ "goal_id", `String goal_id
             ; "action", `String action
-            ; "actor", principal_json ~id:"planner"
+            ; "actor", principal_json ~id:ctx.agent_name
             ])
   with
   | Some result when (Tool_result.is_success result) -> ()
@@ -195,8 +201,12 @@ let test_no_lifecycle_field_still_round_trips () =
 let test_existing_blocked_cannot_resume_with_executing_phase () =
   with_workspace
   @@ fun config ->
+  seed_goal_operator config ~agent_name:"operator";
   let goal_id = create_goal_id config ~title:"Blocked goal" in
-  dispatch_transition_must_succeed (workspace_ctx config) ~goal_id ~action:"operator_block";
+  dispatch_transition_must_succeed
+    (workspace_ctx ~agent_name:"operator" config)
+    ~goal_id
+    ~action:"operator_block";
   check string "fixture moved to blocked" "blocked" (saved_phase config goal_id);
   let body =
     dispatch_upsert_must_fail

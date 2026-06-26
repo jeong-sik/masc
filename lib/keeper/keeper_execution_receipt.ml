@@ -1092,6 +1092,7 @@ module For_testing = struct
         ~reason
         ~terminal_reason_code
         ~emit
+        ()
     =
     let key =
       { operator_keeper_name = keeper_name

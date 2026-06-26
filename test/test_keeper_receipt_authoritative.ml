@@ -175,6 +175,7 @@ let emit_operator_for_testing
     ~reason:R.Reason_turn_livelock_blocked
     ~terminal_reason_code:"turn_livelock_blocked"
     ~emit
+    ()
 
 let should_emit_operator ?trace_id () =
   emit_operator_for_testing ?trace_id ~emit:(fun () -> ()) ()

@@ -324,6 +324,7 @@ module For_testing : sig
     -> reason:operator_disposition_reason
     -> terminal_reason_code:string
     -> emit:(unit -> unit)
+    -> unit
     -> bool
 
   val reset_operator_broadcast_dedupe : unit -> unit

@@ -188,7 +188,7 @@ sangsu = "runpod_mtp.qwen"
     const next = setRuntimeTomlModelField(sourceText, 'qwen', 'max-context', null)
     const env = parseRuntimeTomlEnvironment(next)
     
-    expect(env.models[0].maxContext).toBeNull()
+    expect(env.models[0]?.maxContext).toBeNull()
     expect(next).not.toContain('max-context =')
   })
 

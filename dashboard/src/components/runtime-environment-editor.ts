@@ -3,7 +3,6 @@ import { Save } from 'lucide-preact'
 import { useMemo, useState } from 'preact/hooks'
 import {
   deleteRuntimeTomlKey,
-  deleteRuntimeTomlSection,
   parseRuntimeTomlEnvironment,
   setRuntimeTomlBindingField,
   setRuntimeTomlDefault,

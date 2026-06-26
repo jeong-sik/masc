@@ -541,7 +541,7 @@ let () =
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Eio.Switch.run @@ fun sw ->
     (* let net = Eio.Stdenv.net env in *)
-    (* Masc_eio_env.init was removed. Thread env if needed. *)
+    
     let config_path = runtime_toml_path ~base_path in
     (match Runtime.init_default_strict ~config_path with
      | Error msg ->

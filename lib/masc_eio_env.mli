@@ -3,6 +3,9 @@
 
     The OAS provider completions use [cohttp-eio] for HTTP
     transport, which needs an Eio switch and net handle.
+    The env is typically created and injected by callers that
+    manage discovery cache (e.g., [Discovery_cache.set_env]).
+    transport, which needs an Eio switch and net handle.
     {!init} is called at server bootstrap and may be called again
     by additional OCaml domains that own their own Eio handles.
     Every consumer that needs to issue an HTTP call later reaches

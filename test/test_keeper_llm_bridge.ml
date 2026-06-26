@@ -52,16 +52,30 @@ let assert_latest_failure_envelope ~label ~needle ~cause_code ~operator_action =
       (envelope |> member "operator_action" |> to_string)
 ;;
 
-let test_missing_env_fails_closed_without_calling_fn () =
+
+let latest_keeper_cancel_log ~inner =
+  Log.Ring.recent
+    ~limit:50
+    ~min_level:(Log.level_to_int Log.Debug)
+    ~module_filter:"Keeper"
+    ()
+  |> List.find_opt (fun entry ->
+       let open Yojson.Safe.Util in
+       try
+         let inner_str = entry.Log.Ring.details |> member "inner_exception" |> to_string in
+         String.equal inner_str inner
+       with _ -> false)
+
+let test_missing_clock_fails_closed_without_calling_fn () =
   let called = ref false in
   let result =
     Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s:1.0 (fun () ->
       called := true;
       Ok "should-not-run")
   in
-  assert_no_clock_error ~label:"missing env" ~called result;
+  assert_no_clock_error ~label:"missing clock" ~called result;
   assert_latest_failure_envelope
-    ~label:"missing env"
+    ~label:"missing clock"
     ~needle:"Eio clock unavailable"
     ~cause_code:"eio_clock_unavailable"
     ~operator_action:"check_masc_eio_env"
@@ -151,7 +165,7 @@ let test_parent_timeout_cancel_logs_info () =
           | Eio.Cancel.Cancelled _ -> true
         in
         Alcotest.(check bool) "cancel re-raised" true cancelled;
-        match latest_keeper_log_matching "bucket=fast inner=Eio__Time.Timeout" with
+        match latest_keeper_cancel_log ~inner:"Eio__Time.Timeout" with
         | None -> Alcotest.fail "missing parent timeout cancel log"
         | Some entry ->
           let open Yojson.Safe.Util in
@@ -181,7 +195,7 @@ let test_default_timeout_inner_cancel_logs_info () =
           | Eio.Cancel.Cancelled _ -> true
         in
         Alcotest.(check bool) "cancel re-raised" true cancelled;
-        match latest_keeper_log_matching "bucket=fast inner=Eio__Time.Timeout" with
+        match latest_keeper_cancel_log ~inner:"Eio__Time.Timeout" with
         | None -> Alcotest.fail "missing default timeout cancel log"
         | Some entry ->
           let open Yojson.Safe.Util in
@@ -215,7 +229,7 @@ let test_unknown_cancel_stays_warn () =
           | Eio.Cancel.Cancelled _ -> true
         in
         Alcotest.(check bool) "cancel re-raised" true cancelled;
-        match latest_keeper_log_matching "inner=Failure(operator-stop-test)" with
+        match latest_keeper_cancel_log ~inner:"Failure(operator-stop-test)" with
         | None -> Alcotest.fail "missing unknown cancel log"
         | Some entry ->
           let open Yojson.Safe.Util in
@@ -274,7 +288,7 @@ let () =
       , [ Alcotest.test_case
             "missing env fails closed"
             `Quick
-            test_missing_env_fails_closed_without_calling_fn
+            test_missing_clock_fails_closed_without_calling_fn
         ; Alcotest.test_case
             "clockless env fails closed"
             `Quick

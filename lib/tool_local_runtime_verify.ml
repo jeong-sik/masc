@@ -88,7 +88,7 @@ let probe_chat_completion_compatible
     ?(timeout_sec = 5)
     (endpoint : Discovery_cache.endpoint_info) =
   match env, endpoint_model_id endpoint with
-  | None, _ -> (None, None)
+  | None, _ -> (Some false, Some "oas bridge missing Eio environment")
   | _, None ->
       Log.Runtime_verify.warn "chat-completions probe skipped caller_surface=runtime_verify endpoint=%s reason=missing_model_id"
         endpoint.url;

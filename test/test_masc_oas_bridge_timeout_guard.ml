@@ -3,7 +3,7 @@ open Masc
 let expected_invalid_timeout timeout_s =
   Invalid_argument
     (Printf.sprintf
-       "Masc_oas_bridge.run_safe: timeout_s must be positive and finite (got %.6g)"
+       "Masc_oas_bridge.run_safe: timeout_s must be positive or infinite (got %.6g)"
        timeout_s)
 ;;
 
@@ -24,9 +24,8 @@ let test_rejects_non_positive_timeout () =
   check_rejects_timeout ~name:"negative timeout rejected" (-0.5)
 ;;
 
-let test_rejects_non_finite_timeout () =
-  check_rejects_timeout ~name:"infinite timeout rejected" Float.infinity;
-  check_rejects_timeout ~name:"nan timeout rejected" Float.nan
+let test_rejects_nan_timeout () =
+    check_rejects_timeout ~name:"nan timeout rejected" Float.nan
 ;;
 
 let test_accepts_positive_timeout_without_eio_env () =
@@ -71,9 +70,7 @@ let test_run_with_caller_rejects_invalid_env_timeouts_at_boundary () =
   check_run_with_caller_uses_fallback_for_invalid_env ~name:"zero env fallback" "0";
   check_run_with_caller_uses_fallback_for_invalid_env ~name:"negative env fallback" "-1";
   check_run_with_caller_uses_fallback_for_invalid_env ~name:"nan env fallback" "nan";
-  check_run_with_caller_uses_fallback_for_invalid_env
-    ~name:"infinite env fallback"
-    "infinity"
+  
 ;;
 
 let () =
@@ -85,9 +82,9 @@ let () =
             `Quick
             test_rejects_non_positive_timeout
         ; Alcotest.test_case
-            "rejects non-finite timeout"
+            "rejects nan timeout"
             `Quick
-            test_rejects_non_finite_timeout
+            test_rejects_nan_timeout
         ; Alcotest.test_case
             "accepts positive timeout without eio env"
             `Quick

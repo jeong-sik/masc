@@ -44,6 +44,15 @@ type consolidation_plan =
 
 let empty_plan = { groups = []; drop_indices = [] }
 
+type output_rejection_reason =
+  | Non_json
+  | Non_object_json
+
+let output_rejection_reason_to_string = function
+  | Non_json -> "non_json"
+  | Non_object_json -> "non_object_json"
+;;
+
 (* The numbered fact list the consolidation prompt sees: one 0-based line per
    fact, "[category] claim". The index is the only handle the LLM gets on an
    existing fact, so [apply_plan] reads back the same order. Pure — no IO. *)
@@ -166,18 +175,35 @@ let plan_of_json (json : Yojson.Safe.t) =
     empty_plan
 ;;
 
-let json_of_output raw =
+let json_of_output_result raw =
   let raw = String.trim raw in
   match Yojson.Safe.from_string raw with
-  | `Assoc _ as json -> Some json
-  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
-  | exception Yojson.Json_error _ -> None
+  | `Assoc _ as json -> Ok json
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    Error Non_object_json
+  | exception Yojson.Json_error _ -> Error Non_json
+;;
+
+let json_of_output raw =
+  match json_of_output_result raw with
+  | Ok json -> Some json
+  | Error _ -> None
+;;
+
+let log_rejected_output ~reason ~raw =
+  Log.Keeper.warn
+    "memory_os_consolidation: rejected provider output reason=%s bytes=%d; \
+     expected exact JSON object"
+    (output_rejection_reason_to_string reason)
+    (String.length raw)
 ;;
 
 let plan_of_string raw =
-  match json_of_output raw with
-  | Some json -> Some (plan_of_json json)
-  | None -> None
+  match json_of_output_result raw with
+  | Ok json -> Some (plan_of_json json)
+  | Error reason ->
+    log_rejected_output ~reason ~raw;
+    None
 ;;
 
 (* ---------- Apply (pure, deterministic) ---------- *)

@@ -440,7 +440,11 @@ let test_parse_degrades_garbled_group () =
 
 let test_parse_non_json_is_none () =
   Alcotest.(check bool) "non-JSON yields None" true (Consolidation.plan_of_string "not json {{{" = None);
-  Alcotest.(check bool) "non-object JSON yields None" true (Consolidation.plan_of_string "[]" = None)
+  Alcotest.(check bool)
+    "JSON string yields None"
+    true
+    (Consolidation.plan_of_string {|"not an object"|} = None);
+  Alcotest.(check bool) "JSON array yields None" true (Consolidation.plan_of_string "[]" = None)
 ;;
 
 let () =

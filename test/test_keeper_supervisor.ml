@@ -18,6 +18,7 @@ module FD = Keeper_fd_pressure
 module KA = Masc.Keeper_keepalive
 module KFP = Keeper_failure_policy
 module KSP = Masc.Keeper_supervisor_self_preservation
+module KSR = Masc.Keeper_supervisor_reconcile_keepalive
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_supervisor_" "" in
@@ -458,6 +459,13 @@ let make_meta name =
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
 
+let noop_load_or_materialize_keeper_meta _ctx _name = Ok None
+
+let sweep_and_recover_no_materialize ctx =
+  Sup.sweep_and_recover
+    ~load_or_materialize_keeper_meta:noop_load_or_materialize_keeper_meta
+    ctx
+
 (* Sweep paths that resolve a keeper's runtime id reach
    [Keeper_meta_contract.runtime_id_of_meta], which falls back to
    [Runtime.get_default_runtime_id ()] for keepers without an explicit
@@ -599,7 +607,7 @@ let test_declarative_boot_materializes_goal_from_instructions () =
       Reg.clear ();
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
-  ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
   let ctx = keeper_runtime_context env sw config in
   Fun.protect
     ~finally:(fun () -> KR.stop_keepalive ~base_path:config.base_path name)
@@ -627,7 +635,7 @@ let test_declarative_boot_records_goal_required_failure () =
       Reg.clear ();
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
-  ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
   let ctx = keeper_runtime_context env sw config in
   (match KR.load_or_materialize_boot_meta ctx name with
    | Ok _ -> fail "expected declarative keeper without any intent to fail"
@@ -642,6 +650,162 @@ let test_declarative_boot_records_goal_required_failure () =
         (KR.boot_meta_failure_cause_label failure.cause);
       check bool "recorded failure keeps raw error" true
         (String_util.contains_substring failure.error "goal is required")
+
+let test_reconcile_materializes_configured_keeper_without_meta () =
+  with_config_dir @@ fun config_dir ->
+  Eio_main.run @@ fun env ->
+  ensure_test_runtime ();
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = Filename.dirname config_dir in
+  let name = "hot-restored" in
+  write_keeper_toml config_dir ~name;
+  Eio.Switch.on_release sw (fun () ->
+      Reg.clear ();
+      KR.reset_test_state base_dir);
+  let config = Masc.Workspace.default_config base_dir in
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+  let ctx = keeper_runtime_context env sw config in
+  let materialized = ref [] in
+  let supervised = ref [] in
+  let publish_lifecycle ~event:_ _name _detail () = () in
+  let supervise_keepalive ~proactive_warmup_sec:_ _ctx
+      (meta : Keeper_meta_contract.keeper_meta) =
+    supervised := meta.name :: !supervised
+  in
+  let load_or_materialize_keeper_meta _ctx requested =
+    materialized := requested :: !materialized;
+    Ok (Some (make_meta requested))
+  in
+  KSR.reconcile_keepalive_keepers
+    ~publish_lifecycle
+    ~supervise_keepalive
+    ~load_or_materialize_keeper_meta
+    ctx;
+  check (list string) "materialized missing meta" [ name ]
+    (List.rev !materialized);
+  check (list string) "supervised materialized keeper" [ name ]
+    (List.rev !supervised)
+
+let test_reconcile_does_not_double_start_materialized_keeper () =
+  with_config_dir @@ fun config_dir ->
+  Eio_main.run @@ fun env ->
+  ensure_test_runtime ();
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = Filename.dirname config_dir in
+  let name = "hot-registered" in
+  write_keeper_toml config_dir ~name;
+  Eio.Switch.on_release sw (fun () ->
+      Reg.clear ();
+      KR.reset_test_state base_dir);
+  let config = Masc.Workspace.default_config base_dir in
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+  let ctx = keeper_runtime_context env sw config in
+  let materialized = ref [] in
+  let supervised = ref [] in
+  let publish_lifecycle ~event:_ _name _detail () = () in
+  let supervise_keepalive ~proactive_warmup_sec:_ _ctx
+      (meta : Keeper_meta_contract.keeper_meta) =
+    supervised := meta.name :: !supervised
+  in
+  let load_or_materialize_keeper_meta _ctx requested =
+    materialized := requested :: !materialized;
+    let meta = make_meta requested in
+    let _entry = Reg.register_offline ~base_path:config.base_path requested meta in
+    Ok (Some meta)
+  in
+  KSR.reconcile_keepalive_keepers
+    ~publish_lifecycle
+    ~supervise_keepalive
+    ~load_or_materialize_keeper_meta
+    ctx;
+  check (list string) "materialized missing meta" [ name ]
+    (List.rev !materialized);
+  check (list string) "already registered keeper not supervised" []
+    (List.rev !supervised);
+  check bool "materialized keeper registered" true
+    (Reg.is_registered ~base_path:config.base_path name)
+
+let test_reconcile_materialize_failure_continues_with_metric () =
+  with_config_dir @@ fun config_dir ->
+  Eio_main.run @@ fun env ->
+  ensure_test_runtime ();
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = Filename.dirname config_dir in
+  let failing = "a-missing-meta" in
+  let healthy = "b-hot-restored" in
+  write_keeper_toml config_dir ~name:failing;
+  write_keeper_toml config_dir ~name:healthy;
+  Eio.Switch.on_release sw (fun () ->
+      Reg.clear ();
+      KR.reset_test_state base_dir);
+  let config = Masc.Workspace.default_config base_dir in
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+  let ctx = keeper_runtime_context env sw config in
+  let supervised = ref [] in
+  let metric = Keeper_metrics.(to_string KeeperMaterializationFailures) in
+  let before = Masc.Otel_metric_store.metric_total metric in
+  let publish_lifecycle ~event:_ _name _detail () = () in
+  let supervise_keepalive ~proactive_warmup_sec:_ _ctx
+      (meta : Keeper_meta_contract.keeper_meta) =
+    supervised := meta.name :: !supervised
+  in
+  let load_or_materialize_keeper_meta _ctx requested =
+    if String.equal requested failing
+    then Error "fixture materialize failure"
+    else Ok (Some (make_meta requested))
+  in
+  KSR.reconcile_keepalive_keepers
+    ~publish_lifecycle
+    ~supervise_keepalive
+    ~load_or_materialize_keeper_meta
+    ctx;
+  check (list string) "later keeper still supervised" [ healthy ]
+    (List.rev !supervised);
+  check (float 0.001) "materialize failure metric increments" (before +. 1.)
+    (Masc.Otel_metric_store.metric_total metric)
+
+let test_reconcile_supervise_exception_continues () =
+  with_config_dir @@ fun config_dir ->
+  Eio_main.run @@ fun env ->
+  ensure_test_runtime ();
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = Filename.dirname config_dir in
+  let failing = "a-supervise-raises" in
+  let healthy = "b-supervised" in
+  write_keeper_toml config_dir ~name:failing;
+  write_keeper_toml config_dir ~name:healthy;
+  Eio.Switch.on_release sw (fun () ->
+      Reg.clear ();
+      KR.reset_test_state base_dir);
+  let config = Masc.Workspace.default_config base_dir in
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+  let ctx = keeper_runtime_context env sw config in
+  let supervised = ref [] in
+  let metric = Keeper_metrics.(to_string ReconcileFailures) in
+  let before = Masc.Otel_metric_store.metric_total metric in
+  let publish_lifecycle ~event:_ _name _detail () = () in
+  let supervise_keepalive ~proactive_warmup_sec:_ _ctx
+      (meta : Keeper_meta_contract.keeper_meta) =
+    if String.equal meta.name failing
+    then raise (Failure "fixture supervise failure")
+    else supervised := meta.name :: !supervised
+  in
+  let load_or_materialize_keeper_meta _ctx requested =
+    Ok (Some (make_meta requested))
+  in
+  KSR.reconcile_keepalive_keepers
+    ~publish_lifecycle
+    ~supervise_keepalive
+    ~load_or_materialize_keeper_meta
+    ctx;
+  check (list string) "later keeper still supervised" [ healthy ]
+    (List.rev !supervised);
+  check (float 0.001) "reconcile failure metric increments" (before +. 1.)
+    (Masc.Otel_metric_store.metric_total metric)
 
 let registered_entries names =
   Reg.clear ();
@@ -711,7 +875,7 @@ let test_fresh_supervision_cohort_keepers_rereads_registry () =
   in
   Reg.unregister ~base_path:bp "alpha";
   Reg.unregister ~base_path:bp "bravo";
-  ignore (Reg.register_offline ~base_path:bp "bravo" (make_meta "bravo"));
+  let _entry = Reg.register_offline ~base_path:bp "bravo" (make_meta "bravo") in
   let fresh = Sup.fresh_supervision_cohort_keepers ~base_path:bp cohort in
   check (list string) "removed entries omitted"
     [ "bravo" ]
@@ -757,7 +921,7 @@ let test_spawn_admission_denial_does_not_register_or_fork () =
     Masc.Keeper_runtime.reset_test_state base_dir;
     cleanup_dir base_dir);
   let config = Masc.Workspace.default_config base_dir in
-  ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
   let name = "spawn-denied-no-fork" in
   let meta = make_meta name in
   (match Keeper_meta_store.write_meta config meta with
@@ -815,7 +979,7 @@ let test_active_supervision_keeper_count_uses_current_entries () =
   check int "initial active count" 2
     (Sup.active_supervision_keeper_count entries);
   Reg.unregister ~base_path:bp "bravo";
-  ignore (Reg.register_offline ~base_path:bp "bravo" (make_meta "bravo"));
+  let _entry = Reg.register_offline ~base_path:bp "bravo" (make_meta "bravo") in
   let fresh_entries = Reg.all ~base_path:bp () in
   check int "fresh active count excludes offline" 1
     (Sup.active_supervision_keeper_count fresh_entries)
@@ -1009,7 +1173,7 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
         }
       in
       let pending_before = AQ.pending_count () in
-      Sup.sweep_and_recover ctx;
+      sweep_and_recover_no_materialize ctx;
       check bool "paused keeper has pending approval" true
         (AQ.has_pending_for_keeper ~keeper_name:meta.name);
       check int "approval count incremented"
@@ -1061,7 +1225,7 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
       write_keeper_toml config_dir ~name;
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
@@ -1093,7 +1257,7 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
           net = Some (Eio.Stdenv.net env);
         }
       in
-      Sup.sweep_and_recover ctx;
+      sweep_and_recover_no_materialize ctx;
       check (float 0.001) "restart attempt metric incremented"
         (attempts_before +. 1.0)
         (Masc.Otel_metric_store.metric_value_or_zero
@@ -1122,7 +1286,7 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
       let meta = make_meta name in
       let reg = Reg.register ~base_path:config.base_path name meta in
       resolve_done_for_test reg (`Crashed "ordinary crash");
@@ -1152,7 +1316,7 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
           net = Some (Eio.Stdenv.net env);
         }
       in
-      Sup.sweep_and_recover ctx;
+      sweep_and_recover_no_materialize ctx;
       check (float 0.001) "restart attempt metric incremented"
         (attempts_before +. 1.0)
         (Masc.Otel_metric_store.metric_value_or_zero
@@ -1184,7 +1348,7 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
       let name = "dead-alert-keeper" in
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
@@ -1217,7 +1381,7 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
           net = Some (Eio.Stdenv.net env);
         }
       in
-      Sup.sweep_and_recover ctx;
+      sweep_and_recover_no_materialize ctx;
       let after =
         Masc.Otel_metric_store.metric_total
           Keeper_metrics.(to_string DeadTotal)
@@ -1245,7 +1409,7 @@ let with_reap_ready_dead_keeper name f =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
@@ -1275,7 +1439,7 @@ let test_sweep_and_recover_fires_tombstone_reaped_hook () =
   KLH.register (fun ~keeper_id event ->
     fired := (keeper_id, event_label event) :: !fired);
   with_reap_ready_dead_keeper name @@ fun ~config ctx ->
-  Sup.sweep_and_recover ctx;
+  sweep_and_recover_no_materialize ctx;
   check (list (pair string string))
     "single Tombstone_reaped event"
     [ (name, "tombstone_reaped") ] (List.rev !fired);
@@ -1293,7 +1457,7 @@ let test_sweep_and_recover_swallows_failing_tombstone_hook () =
   KLH.register (fun ~keeper_id event ->
     later_hook_events := (keeper_id, event_label event) :: !later_hook_events);
   with_reap_ready_dead_keeper name @@ fun ~config ctx ->
-  Sup.sweep_and_recover ctx;
+  sweep_and_recover_no_materialize ctx;
   check int "failing hook invoked exactly once" 1 !failing_hook_calls;
   check (list (pair string string))
     "later hook still observes Tombstone_reaped"
@@ -1327,7 +1491,7 @@ let test_stale_storm_pause_skips_restart () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
       let name = "stale-storm-keeper" in
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
@@ -1360,7 +1524,7 @@ let test_stale_storm_pause_skips_restart () =
           net = Some (Eio.Stdenv.net env);
         }
       in
-      Sup.sweep_and_recover ctx;
+      sweep_and_recover_no_materialize ctx;
       let after_pause =
         Masc.Otel_metric_store.metric_total "masc_keeper_stale_storm_paused_total"
       in
@@ -1401,7 +1565,7 @@ let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
       let name = "legacy-stale-fleet-batch-keeper" in
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
@@ -1431,7 +1595,7 @@ let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
           net = Some (Eio.Stdenv.net env);
         }
       in
-      Sup.sweep_and_recover ctx;
+      sweep_and_recover_no_materialize ctx;
       let after_dead =
         Masc.Otel_metric_store.metric_total
           Keeper_metrics.(to_string DeadTotal)
@@ -1458,7 +1622,7 @@ let test_provider_timeout_loop_pause_skips_restart () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
       let name = "provider-timeout-loop-keeper" in
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
@@ -1488,7 +1652,7 @@ let test_provider_timeout_loop_pause_skips_restart () =
           net = Some (Eio.Stdenv.net env);
         }
       in
-      Sup.sweep_and_recover ctx;
+      sweep_and_recover_no_materialize ctx;
       let after_pause =
         Masc.Otel_metric_store.metric_total
           "masc_keeper_provider_timeout_loop_paused_total"
@@ -1522,7 +1686,7 @@ let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
       let name = "unresolved-watchdog-stopped" in
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
@@ -1544,7 +1708,7 @@ let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
           net = Some (Eio.Stdenv.net env);
         }
       in
-      Sup.sweep_and_recover ctx;
+      sweep_and_recover_no_materialize ctx;
       (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = true after unresolved watchdog stop"
@@ -1573,7 +1737,7 @@ let test_stale_run_sweep_sets_watchdog_stop_signal () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
       let name = "stale-run-stop-signal" in
       let base_meta = make_meta name in
       let meta =
@@ -1616,7 +1780,7 @@ let test_stale_run_sweep_sets_watchdog_stop_signal () =
           net = Some (Eio.Stdenv.net env);
         }
       in
-      Sup.sweep_and_recover ctx;
+      sweep_and_recover_no_materialize ctx;
       check bool "stale sweep requests watchdog stop"
         true (Atomic.get reg.fiber_stop);
       check bool "stale sweep wakes keeper"
@@ -1631,7 +1795,7 @@ let test_stale_run_sweep_sets_watchdog_stop_signal () =
               true (stall_seconds > 1800.0)
           | _ -> fail "expected idle stale-turn failure reason")
        | None -> fail "registry entry missing after first stale sweep");
-      Sup.sweep_and_recover ctx;
+      sweep_and_recover_no_materialize ctx;
       (match Reg.get ~base_path:config.base_path name with
        | Some updated ->
          check bool "second sweep marks exhausted stale keeper dead"
@@ -1659,7 +1823,7 @@ let test_non_storm_crashed_restarts_normally () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
       let name = "non-storm-keeper" in
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
@@ -1692,7 +1856,7 @@ let test_non_storm_crashed_restarts_normally () =
           net = Some (Eio.Stdenv.net env);
         }
       in
-      Sup.sweep_and_recover ctx;
+      sweep_and_recover_no_materialize ctx;
       let after_pause =
         Masc.Otel_metric_store.metric_total "masc_keeper_stale_storm_paused_total"
       in
@@ -1721,7 +1885,7 @@ let test_storm_pause_requires_manual_resume () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
       let name = "storm-manual-resume" in
       let meta = make_meta name in
       (* Ensure no prior auto_resume_after_sec. *)
@@ -1746,7 +1910,7 @@ let test_storm_pause_requires_manual_resume () =
           net = Some (Eio.Stdenv.net env);
         }
       in
-      Sup.sweep_and_recover ctx;
+      sweep_and_recover_no_materialize ctx;
       (* Stale storms are operator-owned pauses: no timer should re-enter
          the same failed runtime/tool loop automatically. *)
       (match Keeper_meta_store.read_meta config name with
@@ -1780,7 +1944,7 @@ let test_oas_auto_resume_after_sec_doubles_on_repause () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
       let name = "backoff-doubles" in
       (* Simulate a keeper that was already auto-paused with 1h delay. *)
       let initial_meta =
@@ -1807,7 +1971,7 @@ let test_oas_auto_resume_after_sec_doubles_on_repause () =
           net = Some (Eio.Stdenv.net env);
         }
       in
-      Sup.sweep_and_recover ctx;
+      sweep_and_recover_no_materialize ctx;
       (* Back-off must double: 3600 -> 7200. *)
       (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
@@ -1836,7 +2000,7 @@ let test_sweep_auto_resumes_after_backoff () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
       let name = "auto-resume-keeper" in
       write_keeper_toml config_dir ~name;
       (* Simulate a keeper paused 2h ago with a 1h (3600s) auto-resume
@@ -1873,7 +2037,7 @@ let test_sweep_auto_resumes_after_backoff () =
           net = Some (Eio.Stdenv.net env);
         }
       in
-      Sup.sweep_and_recover ctx;
+      sweep_and_recover_no_materialize ctx;
       (* meta.paused must be cleared after the back-off timer elapsed. *)
       (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
@@ -1911,7 +2075,7 @@ let test_sweep_auto_resumes_registered_paused_entry () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
       let name = "auto-resume-registered" in
       write_keeper_toml config_dir ~name;
       let two_hours_ago =
@@ -1952,7 +2116,7 @@ let test_sweep_auto_resumes_registered_paused_entry () =
           net = Some (Eio.Stdenv.net env);
         }
       in
-      Sup.sweep_and_recover ctx;
+      sweep_and_recover_no_materialize ctx;
       (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = false after auto-resume" false m.paused
@@ -1981,7 +2145,7 @@ let test_operator_pause_not_auto_resumed () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
       let name = "operator-paused-keeper" in
       write_keeper_toml config_dir ~name;
       (* Paused 2h ago with NO auto_resume_after_sec (operator pause). *)
@@ -2017,7 +2181,7 @@ let test_operator_pause_not_auto_resumed () =
           net = Some (Eio.Stdenv.net env);
         }
       in
-      Sup.sweep_and_recover ctx;
+      sweep_and_recover_no_materialize ctx;
       (* meta.paused must remain true: operator pauses need human action. *)
       (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
@@ -2085,7 +2249,7 @@ let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
       let name = "capacity-paused-without-resume-policy" in
       write_keeper_toml config_dir ~name;
       let two_hours_ago =
@@ -2133,7 +2297,7 @@ let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
           net = Some (Eio.Stdenv.net env);
         }
       in
-      Sup.sweep_and_recover ctx;
+      sweep_and_recover_no_materialize ctx;
       (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused stays true without explicit resume policy"
@@ -2171,7 +2335,7 @@ let test_initial_auto_resume_capped_at_max () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
       let name = "initial-cap-regression" in
       (* meta has no prior auto_resume_after_sec (first auto-pause). *)
       let meta = make_meta name in
@@ -2224,7 +2388,7 @@ let test_persisted_blocker_survives_unregister () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
       let name = "auto-pause-blocker-keeper" in
       let meta = make_meta name in
       let meta =
@@ -2249,7 +2413,7 @@ let test_persisted_blocker_survives_unregister () =
       let ctx : _ Keeper_types_profile.context =
         { config; agent_name = "supervisor"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = Some (Eio.Stdenv.net env) }
       in
-      Sup.sweep_and_recover ctx;
+      sweep_and_recover_no_materialize ctx;
       
       (* Check if blocker is persisted *)
       (match Keeper_meta_store.read_meta config name with
@@ -2529,6 +2693,14 @@ let () =
         test_declarative_boot_materializes_goal_from_instructions;
       test_case "declarative boot records goal-required failure" `Quick
         test_declarative_boot_records_goal_required_failure;
+      test_case "reconcile materializes configured keeper without meta" `Quick
+        test_reconcile_materializes_configured_keeper_without_meta;
+      test_case "reconcile does not double-start materialized keeper" `Quick
+        test_reconcile_does_not_double_start_materialized_keeper;
+      test_case "reconcile materialize failure is isolated and metriced" `Quick
+        test_reconcile_materialize_failure_continues_with_metric;
+      test_case "reconcile supervise exception is isolated" `Quick
+        test_reconcile_supervise_exception_continues;
     ];
     "fiber_health", [
       test_case "unknown for unregistered" `Quick test_fiber_health_unknown;

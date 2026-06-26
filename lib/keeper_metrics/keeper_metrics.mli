@@ -158,6 +158,7 @@ type t =
   | ChatStoreFailures
   | ChatTransportFailures
   | PersonNoteStoreFailures
+  | KeeperMaterializationFailures
   | ObservationQueryFailures
   | OasOnStop
   | OasOnIdleEscalated

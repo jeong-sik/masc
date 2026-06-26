@@ -134,6 +134,104 @@ let test_decision_to_string_skip_idle () =
 
 module KK = Masc.Keeper_keepalive
 
+let rec rm_rf path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path)
+    else Sys.remove path
+
+let with_temp_workspace f =
+  let base_path = Filename.temp_dir "keeper-heartbeat-current-task" "" in
+  let config = Workspace.default_config base_path in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      ignore (Workspace.init config ~agent_name:None : string);
+      f config)
+
+let make_keepalive_meta ~name ~agent_name =
+  let json =
+    `Assoc
+      [
+        ("name", `String name);
+        ("agent_name", `String agent_name);
+        ("trace_id", `String ("trace-" ^ name));
+        ("goal", `String "test");
+        ("sandbox_profile", `String "local");
+        ("network_mode", `String "inherit");
+        ("tool_access", `List []);
+      ]
+  in
+  match Keeper_meta_json_parse.meta_of_json json with
+  | Error err -> fail ("meta_of_json failed: " ^ err)
+  | Ok meta -> meta
+
+let make_in_progress_task ~id ~assignee : Types.task =
+  {
+    id;
+    title = "Heartbeat current task";
+    description = "";
+    task_status =
+      Types.InProgress { assignee; started_at = "2026-06-26T00:00:00Z" };
+    priority = 3;
+    files = [];
+    created_at = "2026-06-26T00:00:00Z";
+    created_by = Some "test";
+    contract = None;
+    handoff_context = None;
+    cycle_count = 0;
+    reclaim_policy = None;
+    do_not_reclaim_reason = None;
+  }
+
+let test_current_task_id_for_agent_reconciles_from_empty_registry_task () =
+  with_temp_workspace (fun config ->
+    let keeper_name = "heartbeat-current-task-owner" in
+    let agent_name = "keeper-heartbeat-current-task-owner-agent" in
+    let task_id = "task-heartbeat-current" in
+    let meta = make_keepalive_meta ~name:keeper_name ~agent_name in
+    (match Keeper_meta_store.write_meta config meta with
+     | Ok () -> ()
+     | Error err -> fail ("write_meta failed: " ^ err));
+    Workspace.write_backlog config
+      {
+        Types.tasks = [ make_in_progress_task ~id:task_id ~assignee:agent_name ];
+        last_updated = "2026-06-26T00:00:01Z";
+        version = 2;
+      };
+    ignore
+      (Keeper_registry.register
+         ~base_path:config.Workspace.base_path
+         keeper_name
+         meta);
+    Fun.protect
+      ~finally:(fun () ->
+        Keeper_registry.unregister ~base_path:config.Workspace.base_path keeper_name)
+      (fun () ->
+        check string "heartbeat task id" task_id
+          (KK.current_task_id_for_agent ~config agent_name);
+        let current_from_registry =
+          match Keeper_registry.get ~base_path:config.Workspace.base_path keeper_name with
+          | Some entry ->
+            Option.map Keeper_id.Task_id.to_string entry.meta.current_task_id
+          | None -> None
+        in
+        check (option string) "registry current task reconciled" (Some task_id)
+          current_from_registry;
+        let current_from_disk =
+          match Keeper_meta_store.read_meta config keeper_name with
+          | Ok (Some persisted) ->
+            Option.map Keeper_id.Task_id.to_string persisted.current_task_id
+          | Ok None -> None
+          | Error err -> fail ("read_meta failed: " ^ err)
+        in
+        check (option string) "persisted current task reconciled" (Some task_id)
+          current_from_disk))
+
 let test_cycle_continues_on_skip_busy () =
   check bool "Skip_busy cycle continues" true
     (KK.smart_heartbeat_cycle_continues HS.Skip_busy)
@@ -413,6 +511,10 @@ let () =
         `Quick test_cycle_continues_on_skip_busy;
       test_case "Emit -> cycle continues" `Quick test_cycle_continues_on_emit;
       test_case "Skip_idle -> cycle pauses" `Quick test_cycle_pauses_on_skip_idle;
+    ];
+    "current_task_reconciliation", [
+      test_case "heartbeat reconciles empty current_task_id from active backlog"
+        `Quick test_current_task_id_for_agent_reconciles_from_empty_registry_task;
     ];
     "visibility_gate", [
       test_case "unobserved idle emit delays dispatch" `Quick

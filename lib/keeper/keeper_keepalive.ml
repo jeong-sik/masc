@@ -350,15 +350,12 @@ let registry_current_task_id agent_name =
 ;;
 
 let current_task_id_for_agent ~config agent_name =
-  match registry_current_task_id agent_name with
-  | None -> ""
-  | Some _ ->
-    if reconcile_current_task_id_for_heartbeat ~config ~agent_name
-    then (
-      match registry_current_task_id agent_name with
-      | Some task_id -> Keeper_id.Task_id.to_string task_id
-      | None -> "")
-    else ""
+  if reconcile_current_task_id_for_heartbeat ~config ~agent_name
+  then (
+    match registry_current_task_id agent_name with
+    | Some task_id -> Keeper_id.Task_id.to_string task_id
+    | None -> "")
+  else ""
 ;;
 
 let start_keeper_grpc_heartbeat

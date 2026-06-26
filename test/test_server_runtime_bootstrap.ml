@@ -1012,6 +1012,23 @@ let make_keeper_meta ?(paused = false) ?(name = "sangsu")
       }
   | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
 
+let make_task ?(title = "Task") ?(description = "") ~id ~status () : Types.task =
+  {
+    id;
+    title;
+    description;
+    task_status = status;
+    priority = 3;
+    files = [];
+    created_at = "2026-06-26T00:00:00Z";
+    created_by = Some "test";
+    contract = None;
+    handoff_context = None;
+    cycle_count = 0;
+    reclaim_policy = None;
+    do_not_reclaim_reason = None;
+  }
+
 let write_keeper_meta_exn config meta =
   match Keeper_meta_store.write_meta config meta with
   | Ok () -> ()
@@ -1344,6 +1361,85 @@ let test_health_json_keeps_timeout_pause_without_policy_manual () =
           (detail |> member "auto_resume_source" |> to_string);
         Alcotest.(check string) "last blocker class" "turn_timeout"
           (detail |> member "last_blocker" |> member "klass" |> to_string)))
+
+let test_health_json_reports_dormant_task_owner_as_advisory () =
+  with_temp_dir "health-active-task-owner-without-fiber" (fun dir ->
+    let config_root = make_config_root dir in
+    Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
+    write_file
+      (Filename.concat (Filename.concat config_root "keepers") "executor.toml")
+      "[keeper]\ngoal = \"goal-executor\"\nautoboot_enabled = false\n";
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = Mcp_server.workspace_config state in
+        let executor =
+          make_keeper_meta ~name:"executor" ~trace_id:"trace-executor" ()
+        in
+        write_keeper_meta_exn config executor;
+        let task =
+          make_task
+            ~id:"task-active-owner"
+            ~title:"Active keeper task"
+            ~status:
+              (Types.InProgress
+                 {
+                   assignee = executor.Keeper_meta_contract.agent_name;
+                   started_at = "2026-06-26T00:00:01Z";
+                 })
+            ()
+        in
+        Workspace.write_backlog config
+          { Types.tasks = [ task ]; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+        let request = Httpun.Request.create `GET "/health" in
+        let json = Server_routes_http_runtime.make_health_json request in
+        let open Yojson.Safe.Util in
+        let fleet_safety = json |> member "keeper_fleet_safety" in
+        Alcotest.(check int) "health keeps autoboot target empty" 0
+          (fleet_safety |> member "target_reaction_capacity_count" |> to_int);
+        Alcotest.(check bool) "health does not report target no-executable" false
+          (fleet_safety |> member "no_executable_keeper_fibers" |> to_bool);
+        Alcotest.(check string) "health keeps dormant task owner advisory"
+          "ok"
+          (fleet_safety |> member "status" |> to_string);
+        Alcotest.(check (option string)) "health keeps blocker empty" None
+          (fleet_safety |> member "blocker" |> to_string_option);
+        Alcotest.(check bool) "health excludes non-target dormant owner" false
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber"
+           |> to_bool);
+        Alcotest.(check int) "health exposes no non-target owner rows" 0
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber_count"
+           |> to_int);
+        Alcotest.(check (list string)) "health exposes no dormant owner names"
+          []
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber_names"
+           |> to_list
+           |> List.map to_string);
+        let dormant_tasks =
+          fleet_safety
+          |> member "active_task_owner_without_executable_fiber_tasks"
+          |> to_list
+        in
+        Alcotest.(check int) "health exposes no dormant owner task row" 0
+          (List.length dormant_tasks);
+        Alcotest.(check string) "health documents advisory semantics"
+          "advisory: reports task owners without executable keeper fibers; does not set \
+           fleet status, blocker, or operator_action_required"
+          (fleet_safety |> member "active_task_owner_fiber_scan_semantics" |> to_string);
+        Alcotest.(check int) "health has no scan errors" 0
+          (fleet_safety |> member "active_task_owner_scan_error_count" |> to_int);
+        Alcotest.(check bool) "health does not ask fleet operator action" false
+          (fleet_safety |> member "operator_action_required" |> to_bool)))
 
 let test_health_json_degrades_when_reaction_capacity_below_target () =
   with_temp_dir "health-reaction-capacity-below-target" (fun dir ->
@@ -3153,6 +3249,10 @@ let () =
           Alcotest.test_case
             "health json keeps timeout pause without policy manual"
             `Quick test_health_json_keeps_timeout_pause_without_policy_manual;
+          Alcotest.test_case
+            "health json reports dormant task owner as advisory"
+            `Quick
+            test_health_json_reports_dormant_task_owner_as_advisory;
           Alcotest.test_case
             "health json degrades when reaction capacity is below target"
             `Quick test_health_json_degrades_when_reaction_capacity_below_target;

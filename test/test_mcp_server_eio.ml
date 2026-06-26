@@ -18,6 +18,17 @@ module Masc_log = Log
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
+let () =
+  (* These process-global registries are installed by module initializers in the
+     production server path.  Force them in this standalone test executable so
+     profile-specific fixtures do not depend on link/load order. *)
+  ignore (Operator_tool.remote_tool_names : string list);
+  ignore (Server_mcp_transport_ws.session_count : unit -> int);
+  (* The transition-done guidance fixture reaches completion review; production
+     wires this runtime hook during startup.  A fixed dummy id lets the test
+     exercise guidance behavior without booting runtime.toml. *)
+  Atomic.set Workspace_hooks.get_default_runtime_id_fn (fun () -> "test-evaluator-runtime")
+
 (* ===== Test Helpers ===== *)
 
 let temp_dir () =
@@ -1151,6 +1162,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
                   `Assoc
                     [
                       ("task_id", `String "task-001");
+                      ("agent_name", `String "codex");
                       ("action", `String "claim");
                     ] );
               ] );
@@ -1198,6 +1210,7 @@ let test_handle_request_tools_call_transition_done_guidance () =
         (`Assoc
           [
             ("task_id", `String "task-001");
+            ("agent_name", `String "codex");
             ("action", `String "claim");
           ])
   in
@@ -1217,6 +1230,7 @@ let test_handle_request_tools_call_transition_done_guidance () =
                   `Assoc
                     [
                       ("task_id", `String "task-001");
+                      ("agent_name", `String "codex");
                       ("action", `String "done");
                       ("notes", `String "Completed task and verified output");
                     ] );
@@ -1227,8 +1241,18 @@ let test_handle_request_tools_call_transition_done_guidance () =
     Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:sid state request
   in
   let steps = workflow_next_step_names response in
-  Alcotest.(check bool) "done guidance includes status" true
-    (List.mem "masc_status" steps);
+  let task =
+    Masc.Workspace.get_tasks_raw (Mcp_server.workspace_config state)
+    |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id "task-001")
+  in
+  (match task with
+   | Some { task_status = Masc_domain.Done _; _ } -> ()
+   | Some { task_status; _ } ->
+       Alcotest.failf "task-001 should be done, got %s"
+         (Masc_domain.task_status_to_string task_status)
+   | None -> Alcotest.fail "task-001 missing");
+  Alcotest.(check (option string)) "done clears current_task" None
+    (Masc.Task.Planning_eio.get_current_task (Mcp_server.workspace_config state));
   Alcotest.(check bool) "done guidance omits plan_set_task" false
     (List.mem "masc_plan_set_task" steps);
   cleanup_dir base_path
@@ -1269,7 +1293,12 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
             `Assoc
               [
                 ("name", `String "masc_transition");
-                ("arguments", `Assoc [ ("task_id", `String "task-001") ]);
+                ( "arguments",
+                  `Assoc
+                    [
+                      ("task_id", `String "task-001");
+                      ("agent_name", `String "codex");
+                    ] );
               ] );
         ])
   in

@@ -322,8 +322,8 @@ let extract_nickname_from_join_result result =
       (* Handle idempotent bind formats:
          - "... <nickname> already in workspace ..."
          - "<nickname> already bound in the namespace ..." *)
-      let already_suffixes =
-        [ " already in workspace"; " already bound in the namespace" ]
+      let already_phrases =
+        [ "already in workspace"; "already bound in the namespace" ]
       in
       let tick_prefix = "\xe2\x9c\x85 " in (* UTF-8 for check mark emoji *)
       (match
@@ -338,17 +338,18 @@ let extract_nickname_from_join_result result =
                   (String.length trimmed - String.length tick_prefix)
               else trimmed
             in
-            if
-              List.exists
-                (fun suffix ->
-                  String.contains without_tick ' '
-                  && String.ends_with ~suffix without_tick)
-                already_suffixes
-            then (
-              match String.split_on_char ' ' without_tick with
-              | nickname :: _ when nickname <> "" -> Some nickname
-              | _ -> None)
-            else None)
+            match String.split_on_char ' ' without_tick with
+            | nickname :: rest when nickname <> "" ->
+                let detail = String.concat " " rest |> String.trim in
+                if
+                  List.exists
+                    (fun phrase ->
+                      String.length detail >= String.length phrase
+                      && String.sub detail 0 (String.length phrase) = phrase)
+                    already_phrases
+                then Some nickname
+                else None
+            | _ -> None)
           lines
       with
       | Some nickname -> nickname
@@ -421,7 +422,10 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
         create_worker_token implementer_a_nickname,
         create_worker_token implementer_b_nickname )
     end else
+      (Masc.Auth.save_auth_config config.base_path
+         { Masc_domain.default_auth_config with enabled = false; require_token = false };
       ("", "", "", "")
+      )
   in
   let log_fd =
     Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644

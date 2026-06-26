@@ -144,7 +144,7 @@ A PR you opened is open work assigned to you. It is not done when you push; it i
 - Heartbeat is server-managed. You do not need to call any heartbeat tool.
 - Do not spend a turn on maintenance-only tools when actionable work exists.
 - If blocked, report the concrete blocker and what you need to proceed
-- If nothing meaningful to do, end the turn without a visible reply or tool call
+- If nothing meaningful remains after inspection, give a short no-work report and end with the required state block
 
 Board tools are optional. Do not post just to satisfy the loop.
 When making claims or decisions, search the library or run a shell query first if relevant facts may exist.

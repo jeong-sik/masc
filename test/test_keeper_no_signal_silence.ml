@@ -1,10 +1,10 @@
-(** No-signal silence invariant for [keeper_cycle_decision].
+(** No-signal scheduler invariant for [keeper_cycle_decision].
 
     PR #21685 removed the [Entropic_oscillation] turn-trigger: a 600s / 5%
     random probe that, per the runtime decision log (96 entropic turns over
     ~19h on the analyst keeper), produced visible action 88.5% of the time —
-    contradicting the prompt policy ([config/prompts/keeper.core_behavior.md:4]:
-    a structured-work-less proactive turn reports [SPEECH_ACT: stay_silent]).
+    contradicting the scheduler policy: a structured-work-less proactive turn
+    should not be opened.
 
     After the removal, a warm keeper (past bootstrap, [min_interval] not yet
     elapsed, no provider cooldown) with NO per-keeper signal (no mention, board
@@ -14,7 +14,8 @@
     It is the structural dual of the thundering-herd backlog test
     ([test_keeper_reactive_wake_backlog_gate]): that file shows global backlog
     drives a run ([backlog=1] -> [should_run=true]); this file shows the
-    absence of all signals drives silence ([backlog=0] -> [should_run=false]).
+    absence of all signals suppresses scheduling ([backlog=0] ->
+    [should_run=false]).
 
     The assertion is sensitive to [should_run]: a [|| true] mutation of the
     intent flag is killed by this test. The removed [Entropic_oscillation]

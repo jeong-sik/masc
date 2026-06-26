@@ -32,6 +32,7 @@ type add_task_error =
   | Backlog_read_failed of string
   | Rejected of string
   | Duplicate of { title : string; existing_id : string }
+  | Goal_link_write_failed of string
   | Unexpected_error of string
 
 type batch_add_tasks_success =
@@ -42,6 +43,7 @@ type batch_add_tasks_success =
 
 type batch_add_tasks_error =
   | Batch_backlog_read_failed of string
+  | Batch_goal_link_write_failed of string
   | Batch_unexpected_error of string
 
 val add_task_error_to_string : add_task_error -> string

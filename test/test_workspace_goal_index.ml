@@ -61,6 +61,12 @@ let check_bool label expected actual =
   Alcotest.(check bool) label expected actual
 ;;
 
+let make_primary_goal_task_links_path_unwritable config =
+  let path = Workspace_goal_index.goal_task_links_path config in
+  if Sys.file_exists path && not (Sys.is_directory path) then Sys.remove path;
+  if not (Sys.file_exists path) then Unix.mkdir path 0o755
+;;
+
 let check_list_len label expected tasks =
   check_int label expected (List.length tasks)
 ;;
@@ -218,6 +224,71 @@ let test_prune_goal_links_preserves_other_goals () =
          links))
 ;;
 
+let test_write_failure_refreshes_recovery_before_primary_error () =
+  with_test_env (fun config ->
+    make_primary_goal_task_links_path_unwritable config;
+    (match
+       Workspace_goal_index.write_goal_task_links_result
+         config
+         [ "goal-a", [ "task-001" ] ]
+     with
+     | Ok () -> Alcotest.fail "expected primary write failure"
+     | Error msg ->
+       check_bool "failure message is populated" true (String.length msg > 0));
+    match Workspace_goal_index.read_goal_task_links_r config with
+    | Error msg -> Alcotest.failf "expected recovery read, got %s" msg
+    | Ok links ->
+      check_bool
+        "recovery has the attempted link"
+        true
+        (List.exists
+           (fun (goal_id, task_ids) ->
+              String.equal goal_id "goal-a" && List.mem "task-001" task_ids)
+           links))
+;;
+
+let test_add_task_goal_link_write_failure_does_not_publish_task () =
+  with_test_env (fun config ->
+    make_primary_goal_task_links_path_unwritable config;
+    (match
+       Workspace.add_task_with_result
+         ~goal_id:"goal-a"
+         config
+         ~title:"blocked linked task"
+         ~priority:1
+         ~description:""
+     with
+     | Error (Workspace.Goal_link_write_failed msg) ->
+       check_bool "failure message is populated" true (String.length msg > 0)
+     | Error err ->
+       Alcotest.failf
+         "expected Goal_link_write_failed, got %s"
+         (Workspace.add_task_error_to_string err)
+     | Ok created -> Alcotest.failf "expected failure, created %s" created.task_id);
+    check_int "task was not published" 0 (List.length (Workspace.get_tasks_safe config)))
+;;
+
+let test_batch_add_task_goal_link_write_failure_does_not_publish_tasks () =
+  with_test_env (fun config ->
+    make_primary_goal_task_links_path_unwritable config;
+    (match
+       Workspace.batch_add_tasks_with_contracts_result
+         config
+         [ "blocked batch a", 1, "", None, Some "goal-a"
+         ; "blocked batch b", 2, "", None, Some "goal-b"
+         ]
+     with
+     | Error (Workspace.Batch_goal_link_write_failed msg) ->
+       check_bool "failure message is populated" true (String.length msg > 0)
+     | Error err ->
+       Alcotest.failf
+         "expected Batch_goal_link_write_failed, got %s"
+         (Workspace.batch_add_tasks_error_to_string err)
+     | Ok created ->
+       Alcotest.failf "expected failure, created %d tasks" created.count);
+    check_int "tasks were not published" 0 (List.length (Workspace.get_tasks_safe config)))
+;;
+
 (* ── test suite ─────────────────────────────────────────────────────── *)
 
 let () =
@@ -244,6 +315,18 @@ let () =
               "prune removes only deleted goal links"
               `Quick
               test_prune_goal_links_preserves_other_goals
+          ; test_case
+              "write failure still refreshes recovery before primary error"
+              `Quick
+              test_write_failure_refreshes_recovery_before_primary_error
+          ; test_case
+              "single create does not publish when goal link write fails"
+              `Quick
+              test_add_task_goal_link_write_failure_does_not_publish_task
+          ; test_case
+              "batch create does not publish when goal link write fails"
+              `Quick
+              test_batch_add_task_goal_link_write_failure_does_not_publish_tasks
           ] )
     ]
 ;;

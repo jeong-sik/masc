@@ -37,8 +37,8 @@ let test_raw_all_tool_schemas_non_empty () =
 let test_all_tool_schemas_non_empty () =
   check bool "public schemas exist" true (List.length Config.all_tool_schemas > 0)
 
-let test_all_tool_names_contains_pause () =
-  check bool "masc_pause registered" true
+let test_all_tool_names_omits_pause () =
+  check bool "masc_pause hidden from public schema names" false
     (List.mem "masc_pause" (Config.all_tool_names ()))
 
 let test_shard_base_tools_registered_for_help () =
@@ -84,7 +84,7 @@ let test_visible_tool_schemas_subset_of_all () =
 
 let test_is_tool_allowed_pause () =
   (* masc_pause is an admin-surface tool with a descriptor. *)
-  check bool "pause allowed on admin/public catalog surface" true
+  check bool "pause allowed on admin/catalog surface" true
     (Config.is_tool_allowed "masc_pause");
   check bool "pause included with include_hidden" true
     (Tool_catalog.is_visible ~include_hidden:true "masc_pause")
@@ -99,8 +99,8 @@ let () =
             test_raw_all_tool_schemas_non_empty;
           test_case "all schemas non-empty" `Quick
             test_all_tool_schemas_non_empty;
-          test_case "all_tool_names contains pause" `Quick
-            test_all_tool_names_contains_pause;
+          test_case "all_tool_names omits pause" `Quick
+            test_all_tool_names_omits_pause;
           test_case "shard base tools registered for help" `Quick
             test_shard_base_tools_registered_for_help;
           test_case "removed mode tools omitted" `Quick

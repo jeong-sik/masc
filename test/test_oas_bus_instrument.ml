@@ -1,14 +1,9 @@
 (** Tests for [Agent_sdk_metrics_bridge].
 
-    Covers:
-    - [subscribe] registers purpose, [unsubscribe] removes it.
-    - [publish] increments depth for subscribers whose filter matches.
-    - [publish] does NOT increment depth for subscribers whose filter
-      rejects the event.
-    - [drain] decrements depth by batch size and never below zero.
-    - Multiple subscribers under the same purpose coexist (both tracked).
-    - [publish] updates the Otel_metric_store publish-total counter and
-      accumulates publish-block-seconds (value > 0 after one publish).
+    Covers the compatibility wrapper around [Agent_sdk.Event_bus].
+    Otel/depth instrumentation was retired; [For_testing] hooks are now
+    no-ops and the wrapper should still forward subscribe/publish/drain
+    semantics to the SDK bus.
 *)
 
 open Alcotest
@@ -30,16 +25,16 @@ let run_eio f =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw -> f ~sw ~env))
 
-let test_subscribe_tracks_purpose () =
+let test_subscribe_for_testing_depth_noop () =
   I.For_testing.reset ();
   run_eio (fun ~sw:_ ~env:_ ->
     let bus = mk_bus () in
     let h = I.subscribe ~purpose:"test_sub_a" bus in
-    check int "depth initialised to 0"
+    check int "depth hook is retired"
       0 (I.For_testing.current_depth ~purpose:"test_sub_a");
     I.unsubscribe bus h;
-    check int "unsubscribe clears tracking"
-      (-1) (I.For_testing.current_depth ~purpose:"test_sub_a"))
+    check int "depth hook remains retired"
+      0 (I.For_testing.current_depth ~purpose:"test_sub_a"))
 
 let test_subscribe_forwards_purpose_to_oas_stats () =
   I.For_testing.reset ();
@@ -53,7 +48,7 @@ let test_subscribe_forwards_purpose_to_oas_stats () =
      | _ -> fail "expected one OAS subscription");
     I.unsubscribe bus h)
 
-let test_publish_increments_matching_depth () =
+let test_publish_forwards_to_matching_subscribers () =
   I.For_testing.reset ();
   run_eio (fun ~sw:_ ~env:_ ->
     let bus = mk_bus () in
@@ -62,15 +57,13 @@ let test_publish_increments_matching_depth () =
       I.subscribe ~purpose:"foo_sub" ~filter:(topic_filter "foo") bus
     in
     I.publish bus (mk_custom_event "foo");
-    check int "accept_all subscriber saw event"
-      1 (I.For_testing.current_depth ~purpose:"all_sub");
-    check int "filtered subscriber saw matching event"
-      1 (I.For_testing.current_depth ~purpose:"foo_sub");
+    check int "accept_all subscriber saw event" 1 (List.length (I.drain h_all));
+    check int "filtered subscriber saw matching event" 1
+      (List.length (I.drain h_foo));
     I.publish bus (mk_custom_event "bar");
-    check int "accept_all subscriber saw bar too"
-      2 (I.For_testing.current_depth ~purpose:"all_sub");
-    check int "filtered subscriber ignored non-matching"
-      1 (I.For_testing.current_depth ~purpose:"foo_sub");
+    check int "accept_all subscriber saw bar too" 1 (List.length (I.drain h_all));
+    check int "filtered subscriber ignored non-matching" 0
+      (List.length (I.drain h_foo));
     I.unsubscribe bus h_all;
     I.unsubscribe bus h_foo)
 
@@ -82,17 +75,12 @@ let test_drain_decrements_depth () =
     for _ = 1 to 3 do
       I.publish bus (mk_custom_event "x")
     done;
-    check int "three publishes tracked"
-      3 (I.For_testing.current_depth ~purpose:"drain_sub");
     let events = I.drain h in
     check int "drain returned all three"
       3 (List.length events);
-    check int "depth went back to zero"
+    check int "depth hook is retired after drain"
       0 (I.For_testing.current_depth ~purpose:"drain_sub");
-    (* Extra drain does not go negative. *)
-    let _ = I.drain h in
-    check int "depth floors at zero"
-      0 (I.For_testing.current_depth ~purpose:"drain_sub");
+    check int "extra drain returns no events" 0 (List.length (I.drain h));
     I.unsubscribe bus h)
 
 let test_multiple_subs_same_purpose_coexist () =
@@ -101,41 +89,22 @@ let test_multiple_subs_same_purpose_coexist () =
     let bus = mk_bus () in
     let a = I.subscribe ~purpose:"shared" bus in
     let b = I.subscribe ~purpose:"shared" bus in
-    (* current_depth returns the first match — behaviour checked, not
-       load-bearing. Important: both subscribers exist and neither
-       crashes on publish. *)
     I.publish bus (mk_custom_event "x");
-    let d = I.For_testing.current_depth ~purpose:"shared" in
-    check bool "some shared sub has depth >= 1" true (d >= 1);
+    check int "first shared subscriber receives event" 1 (List.length (I.drain a));
+    check int "second shared subscriber receives event" 1 (List.length (I.drain b));
     I.unsubscribe bus a;
     I.unsubscribe bus b)
 
-let test_publish_updates_counters () =
+let test_publish_without_subscribers_noop () =
   I.For_testing.reset ();
   run_eio (fun ~sw:_ ~env:_ ->
     let bus = mk_bus () in
-    let before_total =
-      Masc.Otel_metric_store.metric_value_or_zero "masc_oas_bus_publish_total" ()
-    in
-    let before_block =
-      Masc.Otel_metric_store.metric_value_or_zero
-        "masc_oas_bus_publish_block_seconds_total" ()
-    in
     I.publish bus (mk_custom_event "x");
     I.publish bus (mk_custom_event "y");
-    let after_total =
-      Masc.Otel_metric_store.metric_value_or_zero "masc_oas_bus_publish_total" ()
-    in
-    let after_block =
-      Masc.Otel_metric_store.metric_value_or_zero
-        "masc_oas_bus_publish_block_seconds_total" ()
-    in
-    check bool "publish_total incremented by at least 2"
-      true (after_total -. before_total >= 2.0);
-    check bool "publish_block_seconds did not decrease"
-      true (after_block >= before_block))
+    check int "depth hook remains retired without subscribers" 0
+      (I.For_testing.current_depth ~purpose:"missing"))
 
-let test_threshold_transitions_warn_once_until_recovery () =
+let test_threshold_transitions_noop_after_retirement () =
   I.For_testing.reset ();
   run_eio (fun ~sw:_ ~env:_ ->
     let bus = mk_bus () in
@@ -143,23 +112,11 @@ let test_threshold_transitions_warn_once_until_recovery () =
     for _ = 1 to 3 do
       I.publish bus (mk_custom_event "x")
     done;
-    (match I.For_testing.sample_threshold_transitions ~warn_threshold:2 with
-     | [ `Warn ("sampler_sub", 3) ] -> ()
-     | other ->
-       fail
-         (Printf.sprintf "expected single warn transition, got %d"
-            (List.length other)));
-    check int "no duplicate warn without recovery" 0
+    check int "threshold sampler retired" 0
       (List.length
          (I.For_testing.sample_threshold_transitions ~warn_threshold:2));
     ignore (I.drain h);
-    (match I.For_testing.sample_threshold_transitions ~warn_threshold:2 with
-     | [ `Recovered ("sampler_sub", 0) ] -> ()
-     | other ->
-       fail
-         (Printf.sprintf "expected single recovery transition, got %d"
-            (List.length other)));
-    check int "no duplicate recovery after state clears" 0
+    check int "threshold sampler remains retired after drain" 0
       (List.length
          (I.For_testing.sample_threshold_transitions ~warn_threshold:2));
     I.unsubscribe bus h)
@@ -167,19 +124,19 @@ let test_threshold_transitions_warn_once_until_recovery () =
 let () =
   run "oas_bus_instrument" [
     ("backpressure", [
-      test_case "subscribe tracks purpose" `Quick
-        test_subscribe_tracks_purpose;
+      test_case "subscribe depth hook retired" `Quick
+        test_subscribe_for_testing_depth_noop;
       test_case "subscribe forwards purpose to OAS stats" `Quick
         test_subscribe_forwards_purpose_to_oas_stats;
-      test_case "publish increments matching depth" `Quick
-        test_publish_increments_matching_depth;
-      test_case "drain decrements depth" `Quick
+      test_case "publish forwards to matching subscribers" `Quick
+        test_publish_forwards_to_matching_subscribers;
+      test_case "drain returns events" `Quick
         test_drain_decrements_depth;
       test_case "multiple subs same purpose coexist" `Quick
         test_multiple_subs_same_purpose_coexist;
-      test_case "publish updates counters" `Quick
-        test_publish_updates_counters;
-      test_case "threshold transitions warn once until recovery" `Quick
-        test_threshold_transitions_warn_once_until_recovery;
+      test_case "publish without subscribers noop" `Quick
+        test_publish_without_subscribers_noop;
+      test_case "threshold transitions retired" `Quick
+        test_threshold_transitions_noop_after_retirement;
     ])
   ]

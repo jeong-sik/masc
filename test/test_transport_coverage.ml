@@ -522,7 +522,7 @@ let test_rest_parse_request_tasks () =
 
 let test_rest_parse_request_agents () =
   let req = Transport.Rest.parse_request ~http_method:"GET" ~path:"/api/v1/agents" ~query_params:[] ~body:"" in
-  check string "method_name" "masc_agents" req.method_name
+  check string "method_name" "unknown" req.method_name
 
 let test_rest_parse_request_operator_snapshot () =
   let req =
@@ -616,7 +616,6 @@ let test_rest_parse_request_roundtrips_direct_bindings () =
     [
       "masc_status";
       "masc_tasks";
-      "masc_agents";
       "masc_messages";
       "masc_operator_snapshot";
       "masc_operator_digest";
@@ -722,7 +721,6 @@ let test_rest_generate_openapi_document () =
   check_operation_tags "masc_status" [ "tasks" ];
   check_operation_tags "masc_plan_init" [ "planning" ];
   check_operation_tags "masc_broadcast" [ "messaging" ];
-  check_operation_tags "masc_agents" [ "masc" ];
   let sdk_aliases =
     status_entry |> member "x-agent-sdk" |> member "aliases" |> to_list
   in

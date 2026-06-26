@@ -34,9 +34,46 @@ let route_candidate_of_output json =
        | _ -> None))
 ;;
 
-let route_safe_input_string ~max_output_len value =
-  Option.map (Observability_redact.redact_preview ~max_len:max_output_len) value
+let split_command_words command =
+  command
+  |> String.split_on_char ' '
+  |> List.filter (fun word -> not (String.equal word ""))
 ;;
+
+let git_push_option_consumes_value = function
+  | "-o" | "--push-option" | "--repo" -> true
+  | _ -> false
+;;
+
+let redact_git_push_refspecs command =
+  match split_command_words command with
+  | "git" :: "push" :: rest ->
+    let rec loop ~seen_remote ~redacted acc = function
+      | [] -> Some (String.concat " " (List.rev acc))
+      | option :: value :: tail when git_push_option_consumes_value option ->
+        loop ~seen_remote ~redacted (value :: option :: acc) tail
+      | word :: tail when String.starts_with ~prefix:"-" word ->
+        loop ~seen_remote ~redacted (word :: acc) tail
+      | word :: tail when not seen_remote ->
+        loop ~seen_remote:true ~redacted (word :: acc) tail
+      | _word :: tail ->
+        let acc = if redacted then acc else "[REDACTED]" :: acc in
+        loop ~seen_remote ~redacted:true acc tail
+    in
+    loop ~seen_remote:false ~redacted:false [ "push"; "git" ] rest
+  | _ -> None
+;;
+
+let route_safe_command_string ~max_output_len command =
+  let command =
+    match redact_git_push_refspecs command with
+    | Some redacted -> redacted
+    | None -> command
+  in
+  Observability_redact.redact_preview ~max_len:max_output_len command
+;;
+
+let route_safe_path_string _path = "[REDACTED]"
 
 let route_text_for_evidence output_text =
   match Tool_output.decode_from_oas output_text with
@@ -93,7 +130,6 @@ let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_tex
   if descriptor_fields = [] && Option.is_none route_json
   then None
   else (
-    let safe_input_string = route_safe_input_string ~max_output_len in
     let dynamic_fields =
       []
       |> add_json
@@ -104,9 +140,9 @@ let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_tex
       |> add_string "network_mode" (Json_util.assoc_string_opt "network_mode" output_json)
       |> add_string "sandbox_profile" (Json_util.assoc_string_opt "sandbox_profile" output_json)
       |> add_string "via" (Json_util.assoc_string_opt "via" output_json)
-      |> add_string "path" (safe_input_string (Json_util.assoc_string_opt "path" input))
-      |> add_string "cwd" (safe_input_string (Json_util.assoc_string_opt "cwd" input))
-      |> add_string "command" (safe_input_string command)
+      |> add_string "path" (Option.map route_safe_path_string (Json_util.assoc_string_opt "path" input))
+      |> add_string "cwd" (Option.map route_safe_path_string (Json_util.assoc_string_opt "cwd" input))
+      |> add_string "command" (Option.map (route_safe_command_string ~max_output_len) command)
       |> add_string "tool_name" (Some tool_name)
     in
     Some (`Assoc (descriptor_fields @ List.rev dynamic_fields)))

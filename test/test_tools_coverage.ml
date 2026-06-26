@@ -422,8 +422,8 @@ let test_masc_board_post_schema_supports_judgment () =
 
 let test_masc_agents_schema () =
   match find_registered_tool "masc_agents" with
-  | None -> Alcotest.fail "masc_agents not found"
-  | Some _ -> ()
+  | None -> ()
+  | Some _ -> Alcotest.fail "masc_agents should be absent from registered schema inventory"
 
 let test_masc_register_capabilities_removed () =
   match find_registered_tool "masc_register_capabilities" with

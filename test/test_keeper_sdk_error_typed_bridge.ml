@@ -164,19 +164,19 @@ let test_server_parse_rejection_split () =
     ~model_:false
     ~server:false;
   check_parse_split
-    "provider_invalid_request_invalid_json"
+    "provider_invalid_request_invalid_json_is_not_typed_parse_error"
     (SdkE.Provider
        (Llm_provider.Error.InvalidRequest
           { provider = "claude"; reason = "invalid json in tool call arguments" }))
-    ~provider:true
+    ~provider:false
     ~model_:false
-    ~server:true;
+    ~server:false;
   check_parse_split
-    "api_invalid_request_invalid_json"
+    "api_invalid_request_invalid_json_is_not_typed_parse_error"
     (SdkE.Api (Retry.InvalidRequest { message = "invalid json in tool call arguments" }))
     ~provider:false
-    ~model_:true
-    ~server:true;
+    ~model_:false
+    ~server:false;
   check_parse_split
     "api_invalid_request_query_parse_error"
     (SdkE.Api (Retry.InvalidRequest { message = "parse error in query parameters" }))

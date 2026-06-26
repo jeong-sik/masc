@@ -14,7 +14,6 @@ import type { DashboardToolInventoryItem, LogEntry, RuntimeDefaultsResponse } fr
 import { DashboardMain } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
-import { mockKeepers } from '../store.mock'
 
 const MOCK_RUNTIME_PATH = '/tmp/.masc/config/runtime.toml'
 import { dashboardLoading } from '../store'

@@ -18,6 +18,8 @@ import {
   buildOverviewTelemetrySnapshot,
   keeperModelLabel,
   OVERVIEW_TELEMETRY_BAR_COUNT,
+  OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET,
+  OVERVIEW_TELEMETRY_EVENT_SAMPLE_LIMIT,
   type FunnelCounts,
   Overview,
 } from './overview'
@@ -711,6 +713,24 @@ describe('buildOverviewTelemetrySnapshot', () => {
     expect(snapshot.peakPerBucket).toBe(0)
     expect(snapshot.averagePerBucket).toBe(0)
     expect(snapshot.sourceHealth).toBe('unknown')
+  })
+
+  it('keeps the overview event sample tied to the rendered bar budget', () => {
+    expect(OVERVIEW_TELEMETRY_EVENT_SAMPLE_LIMIT)
+      .toBe(OVERVIEW_TELEMETRY_BAR_COUNT * OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET)
+  })
+
+  it('preserves the API truncation signal for sample-derived metrics', () => {
+    const snapshot = buildOverviewTelemetrySnapshot({
+      entries: [entry(1), entry(2)],
+      sources,
+      nowMs,
+      totalMatchingEntries: OVERVIEW_TELEMETRY_EVENT_SAMPLE_LIMIT + 1,
+      truncated: true,
+    })
+
+    expect(snapshot.truncated).toBe(true)
+    expect(snapshot.eventCount).toBe(OVERVIEW_TELEMETRY_EVENT_SAMPLE_LIMIT + 1)
   })
 })
 

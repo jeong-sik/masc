@@ -249,6 +249,12 @@ export const OVERVIEW_TELEMETRY_BAR_COUNT = 28
 export const OVERVIEW_TELEMETRY_BUCKET_MINUTES = 5
 export const OVERVIEW_TELEMETRY_WINDOW_MINUTES =
   OVERVIEW_TELEMETRY_BAR_COUNT * OVERVIEW_TELEMETRY_BUCKET_MINUTES
+// The overview needs a compact activity shape, not the full event log. The
+// source summary provides total/freshness truth; raw events are sampled only to
+// paint the 28-bar sparkline without pulling hundreds of KB on first load.
+export const OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET = 10
+export const OVERVIEW_TELEMETRY_EVENT_SAMPLE_LIMIT =
+  OVERVIEW_TELEMETRY_BAR_COUNT * OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET
 const UNIX_MS_TIMESTAMP_THRESHOLD = 10_000_000_000
 
 export interface OverviewTelemetrySnapshot {
@@ -649,7 +655,11 @@ function loadOverviewTelemetry(nowMs = Date.now()): Promise<void> {
   return overviewTelemetryResource.load(async () => {
     const sinceMs = nowMs - OVERVIEW_TELEMETRY_WINDOW_MINUTES * 60 * 1000
     const [telemetry, summary] = await Promise.all([
-      fetchTelemetry({ source: 'oas_event', since_ms: sinceMs, n: 1000 }),
+      fetchTelemetry({
+        source: 'oas_event',
+        since_ms: sinceMs,
+        n: OVERVIEW_TELEMETRY_EVENT_SAMPLE_LIMIT,
+      }),
       fetchTelemetrySummary(),
     ])
     return buildOverviewTelemetrySnapshot({
@@ -836,6 +846,7 @@ function OverviewTelemetry({
   telemetry: AsyncState<OverviewTelemetrySnapshot>
 }) {
   const snapshot = telemetry.status === 'loaded' ? telemetry.data : null
+  const sampledLabel = snapshot?.truncated ? ' 샘플' : ''
   return html`
     <section class="ov-card ov-telemetry v2-overview-telemetry" data-testid="overview-telemetry">
       <div class="ov-card-h">
@@ -854,8 +865,8 @@ function OverviewTelemetry({
             `)}
           </div>
           <div class="ov-tel-foot">
-            <div class="ov-tel-stat"><span class="k">피크</span><span class="v mono">${snapshot.peakPerBucket}/5m</span></div>
-            <div class="ov-tel-stat"><span class="k">평균</span><span class="v mono">${snapshot.averagePerBucket}/5m</span></div>
+            <div class="ov-tel-stat"><span class="k">피크${sampledLabel}</span><span class="v mono">${snapshot.peakPerBucket}/5m</span></div>
+            <div class="ov-tel-stat"><span class="k">평균${sampledLabel}</span><span class="v mono">${snapshot.averagePerBucket}/5m</span></div>
             <div class="ov-tel-stat"><span class="k">이벤트</span><span class="v mono">${snapshot.eventCount.toLocaleString()}${snapshot.truncated ? '+' : ''}</span></div>
             <div class="ov-tel-stat"><span class="k">최신</span><span class=${`v mono ${telemetryHealthToneClass(snapshot)}`}>${formatTelemetryAge(snapshot.latestAgeSeconds)}</span></div>
             <div class="ov-tel-stat"><span class="k">소스</span><span class="v mono">${snapshot.healthySourceCount}/${snapshot.sourceCount}</span></div>

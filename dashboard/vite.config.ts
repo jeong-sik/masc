@@ -14,6 +14,10 @@ function chunkByPackage(id: string, packageNames: string[]): boolean {
   )
 }
 
+function isBundlerRuntimeHelper(id: string): boolean {
+  return id.includes('vite/preload-helper') || id.includes('commonjsHelpers')
+}
+
 const heavyMermaidDependencyChunks: Array<{ packages: string[]; chunk: string }> = [
   {
     packages: ['cytoscape'],
@@ -96,6 +100,9 @@ export default defineConfig(({ command }) => {
         output: {
           manualChunks(id) {
             const normalizedId = normalizeModuleId(id)
+            if (isBundlerRuntimeHelper(normalizedId)) {
+              return 'vendor'
+            }
             for (const { packages, chunk } of heavyMermaidDependencyChunks) {
               if (chunkByPackage(normalizedId, packages)) return chunk
             }

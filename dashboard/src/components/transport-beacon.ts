@@ -84,7 +84,8 @@ export function computeBeaconView(args: {
     }
   }
   const silentMs = args.now - args.lastEventAt
-  if (args.lastEventAt === 0 || silentMs > SILENT_THRESHOLD_MS) {
+  const hasRouteEvent = args.lastEventAt > 0
+  if (!hasRouteEvent || silentMs > SILENT_THRESHOLD_MS) {
     const pongAgeMs = args.lastPongAt === 0
       ? Number.POSITIVE_INFINITY
       : args.now - args.lastPongAt
@@ -96,6 +97,14 @@ export function computeBeaconView(args: {
         state: 'green',
         label: `Client WS · heartbeat · ${latency}`,
         title: `Client WS mode active. No route events, but heartbeat pong arrived ${Math.floor(pongAgeMs / 1000)}s ago.`,
+      }
+    }
+    if (!hasRouteEvent) {
+      return {
+        state: 'yellow',
+        label: 'Client WS · silent',
+        title:
+          'Client WS mode is ready but has not received route events yet, and no fresh heartbeat pong is available. The workload may be idle or WS fan-out may be stuck.',
       }
     }
     return {

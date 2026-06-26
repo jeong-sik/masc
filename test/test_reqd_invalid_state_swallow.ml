@@ -36,8 +36,13 @@
       direct [respond_with_string] calls in the critical POST/GET/DELETE
       handlers (especially the OAS-executing forked fiber at [Eio.Fiber.fork
       ~sw:(runtime.sw)]).
-   5. [lib/server/server_ws_standalone.ml]: [Ws.Wsd.send_pong] wrapped so the
-      "cannot write to closed writer" race is explicit.
+   5. [lib/server/server_ws_standalone.ml]: the WebSocket write path was
+      guarded against the "cannot write to closed writer" race. After the
+      RFC-0287 ws-direct swap (#22132, 2026-06-23) the write path moved into
+      the ws-direct Endpoint and [Ws.Wsd.send_pong] is no longer called here;
+      the equivalent safety is now enforced by ws-direct Server delegation +
+      missed-pong threshold + write-failure classifier + per-connection flow
+      release (see the W1/W2 anchors below).
 
    This test asserts the presence of these defensive patterns in the source so
    a future refactor that silently removes them fails CI before it can re-arm
@@ -265,23 +270,46 @@ let () =
     |> read_file
   in
 
-  (* Anchor W1: send_pong is still guarded by the write-failure classifier. *)
+  (* RFC-0287 ws-direct update: the ws-direct Endpoint now owns the WebSocket
+     write path, so [Ws.Wsd.send_pong] is no longer called directly from this
+     module. The cycle9 closed-writer safety is preserved equivalently by:
+       - delegating the connection to the ws-direct Server ([Ws_server.handle])
+       - the ws-direct heartbeat/pong protocol ([missed_pong_threshold])
+       - classifying write failures on handler exit ([classify_write_failure])
+       - releasing the per-connection flow on cancel ([Eio.Switch.on_release])
+     These anchors lock the ws-direct equivalents so a future refactor that
+     silently drops any of them fails CI before re-arming the 2026-05-05
+     cycle9 FATAL restart loop. *)
+
+  (* Anchor W1a-i: the connection is delegated to the ws-direct Server, not
+     driven by raw [Ws.Wsd.send_pong] calls from this module. *)
   assert_contains
-    ~label:"W1a: send_pong call still present"
+    ~label:"W1a-i: ws-direct Server.handle delegation"
     ws_src
-    "Ws.Wsd.send_pong session.wsd";
+    "Ws_server.handle";
+
+  (* Anchor W1a-ii: the ws-direct heartbeat/pong protocol is armed (closes
+     sessions that stop responding), the equivalent of the old manual
+     send_pong health-check path. *)
   assert_contains
-    ~label:"W1b: send_pong write failure classifier"
+    ~label:"W1a-ii: ws-direct missed-pong threshold"
+    ws_src
+    "missed_pong_threshold";
+
+  (* Anchor W1b: the write-failure classifier is still present on the
+     handler-error path, so a closed writer is explicit instead of fatal. *)
+  assert_contains
+    ~label:"W1b: write-failure classifier on handler error"
     ws_src
     "classify_write_failure exn";
 
-  (* Anchor W2: writer-closed-during-cancel race comment is present
-     (the wsd-race incident reference travels with the [send_pong]
-     wrapper, so a future refactor that drops the comment is forced
-     to update this anchor). *)
+  (* Anchor W2: the per-connection flow is released via the connection switch
+     on cancel, so a cancel-during-write race closes the flow safely instead
+     of escaping to the server switch — equivalent to the old "writer closed
+     during cancel race" guard. *)
   assert_contains
-    ~label:"W2: writer closed during cancel race comment"
+    ~label:"W2: per-connection flow release on cancel"
     ws_src
-    "writer closed during cancel race";
+    "Eio.Switch.on_release conn_sw";
 
   print_endline "test_reqd_invalid_state_swallow: OK"

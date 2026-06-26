@@ -25,6 +25,9 @@ module Retry = Agent_sdk.Retry
 module Http = Llm_provider.Http_client
 
 let typed_wire t = Code.to_wire t
+let unknown_invalid_request message =
+  Retry.InvalidRequest
+    { message; reason = Retry.Unknown_invalid_request }
 
 let api_cases : (string * SdkE.api_error * string) list =
   [ ( "RateLimited"
@@ -36,7 +39,7 @@ let api_cases : (string * SdkE.api_error * string) list =
     , "api_error_server:502" )
   ; "AuthError", Retry.AuthError { message = "" }, "api_error_auth"
   ; ( "InvalidRequest"
-    , Retry.InvalidRequest { message = "bad" }
+    , unknown_invalid_request "bad"
     , "api_error_invalid_request" )
   ; "NotFound", Retry.NotFound { message = "missing" }, "api_error_not_found"
   ; ( "ContextOverflow"
@@ -137,7 +140,7 @@ let test_server_parse_rejection_split () =
     ~server:false;
   check_parse_split
     "api_invalid_request_json_message_is_not_typed_parse_error"
-    (SdkE.Api (Retry.InvalidRequest { message = "unexpected character in JSON at byte 9" }))
+    (SdkE.Api (unknown_invalid_request "unexpected character in JSON at byte 9"))
     ~provider:false
     ~model_:false
     ~server:false;
@@ -153,13 +156,13 @@ let test_server_parse_rejection_split () =
     ~server:false;
   check_parse_split
     "api_invalid_request_json_parse_message_is_not_typed_parse_error"
-    (SdkE.Api (Retry.InvalidRequest { message = "JSON parse error at byte 9" }))
+    (SdkE.Api (unknown_invalid_request "JSON parse error at byte 9"))
     ~provider:false
     ~model_:false
     ~server:false;
   check_parse_split
     "api_invalid_request_xml_parse_error"
-    (SdkE.Api (Retry.InvalidRequest { message = "XML parse error at line 3" }))
+    (SdkE.Api (unknown_invalid_request "XML parse error at line 3"))
     ~provider:false
     ~model_:false
     ~server:false;
@@ -173,25 +176,25 @@ let test_server_parse_rejection_split () =
     ~server:false;
   check_parse_split
     "api_invalid_request_invalid_json_is_not_typed_parse_error"
-    (SdkE.Api (Retry.InvalidRequest { message = "invalid json in tool call arguments" }))
+    (SdkE.Api (unknown_invalid_request "invalid json in tool call arguments"))
     ~provider:false
     ~model_:false
     ~server:false;
   check_parse_split
     "api_invalid_request_query_parse_error"
-    (SdkE.Api (Retry.InvalidRequest { message = "parse error in query parameters" }))
+    (SdkE.Api (unknown_invalid_request "parse error in query parameters"))
     ~provider:false
     ~model_:false
     ~server:false;
   check_parse_split
     "api_invalid_request_cant_find_tool"
-    (SdkE.Api (Retry.InvalidRequest { message = "Can't find the specified tool" }))
+    (SdkE.Api (unknown_invalid_request "Can't find the specified tool"))
     ~provider:false
     ~model_:false
     ~server:false;
   check_parse_split
     "api_invalid_request_generic"
-    (SdkE.Api (Retry.InvalidRequest { message = "missing required field: model" }))
+    (SdkE.Api (unknown_invalid_request "missing required field: model"))
     ~provider:false
     ~model_:false
     ~server:false

@@ -478,11 +478,14 @@ let extract_with_provider_classified
           last_unparseable_raw := Some raw;
           Unparseable "librarian provider returned empty response")
         else (
-          match Keeper_librarian.episode_of_output ~generation inp raw with
-          | Some episode -> Parsed episode
-          | None ->
+          match Keeper_librarian.episode_of_output_result ~generation inp raw with
+          | Ok episode -> Parsed episode
+          | Error error ->
             last_unparseable_raw := Some raw;
-            Unparseable "librarian provider returned invalid episode JSON")
+            Unparseable
+              (Printf.sprintf
+                 "librarian provider returned invalid episode JSON (%s)"
+                 (Keeper_librarian.parse_error_to_string error)))
     in
     (match
        run_with_parse_retries

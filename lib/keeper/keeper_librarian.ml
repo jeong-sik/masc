@@ -90,11 +90,7 @@ let optional_string_field key fields =
 let int_field key fields =
   match List.assoc_opt key fields with
   | Some (`Int i) -> Some i
-  | Some (`String s) ->
-    (match int_of_string_opt (String.trim s) with
-     | Some i when i >= 0 -> Some i
-     | Some _ | None -> None)
-  | Some (`Assoc _ | `Bool _ | `Float _ | `Intlit _ | `List _ | `Null)
+  | Some (`Assoc _ | `Bool _ | `Float _ | `Intlit _ | `List _ | `Null | `String _)
   | None -> None
 ;;
 
@@ -119,52 +115,39 @@ let string_list_field_or_empty key fields =
   | Some _ -> string_list_field key fields
 ;;
 
+type parse_error =
+  | Empty_output
+  | Invalid_json of string
+  | Json_string_invalid_json of string
+  | Top_level_not_object
+  | Missing_required_fields
+  | Claim_schema_mismatch
+
+let parse_error_to_string = function
+  | Empty_output -> "empty_output"
+  | Invalid_json msg -> "invalid_json: " ^ msg
+  | Json_string_invalid_json msg -> "json_string_invalid_json: " ^ msg
+  | Top_level_not_object -> "top_level_not_object"
+  | Missing_required_fields -> "missing_required_fields"
+  | Claim_schema_mismatch -> "claim_schema_mismatch"
+;;
+
 let json_of_output raw =
   let raw = String.trim raw in
-  let try_parse s =
-    try Some (Yojson.Safe.from_string (String.trim s)) with
-    | Yojson.Json_error _ -> None
-  in
-  let unwrap_string json =
-    match json with
-    | `String inner -> try_parse inner
-    | _ -> None
-  in
-  let whole_markdown_fence_body s =
-    let lines = String.split_on_char '\n' s in
-    let is_blank line = String.equal (String.trim line) "" in
-    let is_fence line = String.starts_with ~prefix:"```" (String.trim line) in
-    let rec drop_blanks = function
-      | line :: rest when is_blank line -> drop_blanks rest
-      | lines -> lines
+  if String.equal raw ""
+  then Error Empty_output
+  else
+    let try_parse ~on_error s =
+      try Ok (Yojson.Safe.from_string (String.trim s)) with
+      | Yojson.Json_error msg -> Error (on_error msg)
     in
-    let rec rev_drop_blanks = function
-      | line :: rest when is_blank line -> rev_drop_blanks rest
-      | lines -> lines
-    in
-    match drop_blanks lines |> List.rev |> rev_drop_blanks |> List.rev with
-    | open_line :: body_rev when is_fence open_line ->
-      (match List.rev body_rev with
-       | close_line :: body_lines_rev when is_fence close_line ->
-         Some (String.concat "\n" (List.rev body_lines_rev) |> String.trim)
-       | [] | _ :: _ -> None)
-    | [] | _ :: _ -> None
-  in
-  let candidates =
-    match whole_markdown_fence_body raw with
-    | None -> [ raw ]
-    | Some fenced -> [ raw; fenced ]
-  in
-  List.find_map
-    (fun candidate ->
-       if String.equal candidate ""
-       then None
-       else
-         Option.bind (try_parse candidate) (fun json ->
-           match unwrap_string json with
-           | Some inner -> Some inner
-           | None -> Some json))
-    candidates
+    match try_parse raw ~on_error:(fun msg -> Invalid_json msg) with
+    | Error _ as error -> error
+    | Ok (`String inner) ->
+      if String.equal (String.trim inner) ""
+      then Error (Json_string_invalid_json "empty JSON string")
+      else try_parse inner ~on_error:(fun msg -> Json_string_invalid_json msg)
+    | Ok json -> Ok json
 ;;
 
 let claim_source ~trace_id turn tool_call_id =
@@ -237,7 +220,9 @@ let source_turn_range claims =
     Some (lo, hi)
 ;;
 
-let episode_of_output ?now ~generation (inp : input) (raw : string) : episode option =
+let episode_of_output_result ?now ~generation (inp : input) (raw : string) :
+  (episode, parse_error) result
+  =
   let now =
     match now with
     | Some now -> now
@@ -246,12 +231,8 @@ let episode_of_output ?now ~generation (inp : input) (raw : string) : episode op
       Unix.gettimeofday ()
   in
   match json_of_output raw with
-  | None ->
-    Log.Keeper.debug
-      "librarian episode parse failed: not valid JSON (raw: %s)"
-      (truncate_for_log 800 raw);
-    None
-  | Some json ->
+  | Error _ as error -> error
+  | Ok json ->
     (match json with
     | `Assoc fields ->
       (match
@@ -282,19 +263,19 @@ let episode_of_output ?now ~generation (inp : input) (raw : string) : episode op
               ; terminal_marker = None
               ; schema_version
               }
-          | None ->
-            Log.Keeper.debug
-              "librarian episode parse failed: claim objects did not match schema (raw: %s)"
-              (truncate_for_log 800 raw);
-            None)
-       | _ ->
-         Log.Keeper.debug
-           "librarian episode parse failed: JSON object missing required fields (raw: %s)"
-           (truncate_for_log 800 raw);
-         None)
+          | None -> Error Claim_schema_mismatch)
+       | _ -> Error Missing_required_fields)
     | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
-      Log.Keeper.debug
-        "librarian episode parse failed: top-level JSON is not an object (raw: %s)"
-        (truncate_for_log 800 raw);
-      None)
+      Error Top_level_not_object)
+;;
+
+let episode_of_output ?now ~generation inp raw : episode option =
+  match episode_of_output_result ?now ~generation inp raw with
+  | Ok episode -> Some episode
+  | Error error ->
+    Log.Keeper.debug
+      "librarian episode parse failed: %s (raw: %s)"
+      (parse_error_to_string error)
+      (truncate_for_log 800 raw);
+    None
 ;;

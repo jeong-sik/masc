@@ -254,9 +254,9 @@ let test_cadence_step_keyed () =
     (R.cadence_step_keyed ~cadence:3 ~current_trace:"t2" ~prior:(Some ("t1", 2)))
 
 (* Strict parsing with bounded compatibility for real-world librarian provider
-   drift. We accept exact JSON, exact fenced JSON, and JSON-string wrapping, but
-   prose-wrapped or embedded JSON must fall into the diagnostic fallback path
-   instead of being accepted as a structured episode. *)
+   drift. We accept exact JSON and exact JSON-string wrapping only. Markdown
+   fences, prose-wrapped JSON, and embedded JSON must fall into the diagnostic
+   fallback path instead of being accepted as a structured episode. *)
 
 let parse_ep raw =
   let inp = { Lib.trace_id = "tolerant-t"; generation = 0; messages = [] } in
@@ -280,17 +280,13 @@ let minimal_episode_json ?(claim = "c") () =
     ]
   |> Yojson.Safe.to_string
 
-let test_parses_markdown_wrapped () =
+let test_rejects_markdown_wrapped () =
   let raw =
     "```json\n\
      {\"episode_summary\":\"s\",\"claims\":[],\"open_items\":[],\"constraints\":[],\"preserved_tool_refs\":[]}\n\
      ```"
   in
-  match parse_ep raw with
-  | Some ep ->
-    check string "episode_summary" "s" ep.episode_summary;
-    check int "claims count" 0 (List.length ep.claims)
-  | None -> Alcotest.fail "markdown-wrapped JSON should parse"
+  check bool "markdown-wrapped JSON rejected" true (Option.is_none (parse_ep raw))
 ;;
 
 let test_rejects_prose_wrapped_json () =
@@ -318,17 +314,20 @@ let test_parses_json_string_wrapping () =
   | None -> Alcotest.fail "JSON-string-wrapped object should parse"
 ;;
 
-let test_parses_string_source_turn () =
+let test_rejects_string_source_turn () =
   let raw =
     {|{"episode_summary":"s","claims":[{"claim":"c","category":"fact","source_turn":"3"}],"open_items":[],"constraints":[],"preserved_tool_refs":[]}|}
   in
-  match parse_ep raw with
-  | Some ep ->
-    check int "claims count" 1 (List.length ep.claims);
-    (match ep.claims with
-     | [ claim ] -> check int "source_turn coerced" 3 claim.source.turn
-     | _ -> Alcotest.fail "expected exactly one claim")
-  | None -> Alcotest.fail "string source_turn should coerce to int"
+  check bool "string source_turn rejected" true (Option.is_none (parse_ep raw))
+;;
+
+let test_parse_result_reports_error () =
+  let inp = { Lib.trace_id = "typed-error-t"; generation = 0; messages = [] } in
+  match Lib.episode_of_output_result ~now:1_000_000.0 ~generation:0 inp "not json" with
+  | Error (Lib.Invalid_json _) -> ()
+  | Error error ->
+    Alcotest.failf "expected Invalid_json, got %s" (Lib.parse_error_to_string error)
+  | Ok _ -> Alcotest.fail "expected typed parse error"
 ;;
 
 let test_rejects_multiple_json_objects () =
@@ -431,10 +430,11 @@ let () =
         ] );
       ( "strict_parsing",
         [
-          test_case "parses markdown-wrapped JSON" `Quick test_parses_markdown_wrapped;
+          test_case "rejects markdown-wrapped JSON" `Quick test_rejects_markdown_wrapped;
           test_case "rejects prose-wrapped JSON" `Quick test_rejects_prose_wrapped_json;
           test_case "parses JSON-string-wrapped object" `Quick test_parses_json_string_wrapping;
-          test_case "coerces string source_turn" `Quick test_parses_string_source_turn;
+          test_case "rejects string source_turn" `Quick test_rejects_string_source_turn;
+          test_case "parse result reports typed error" `Quick test_parse_result_reports_error;
           test_case "rejects multiple JSON objects" `Quick test_rejects_multiple_json_objects;
           test_case "rejects model thinking leak" `Quick test_rejects_model_thinking_leak;
           test_case "rejects malformed JSON" `Quick test_rejects_malformed_json;

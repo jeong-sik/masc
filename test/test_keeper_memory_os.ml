@@ -628,9 +628,7 @@ let test_librarian_accepts_wrapped_json_output () =
   in
   let json = valid_librarian_output () |> Yojson.Safe.to_string in
   let cases =
-    [ "fenced", Printf.sprintf "```json\n%s\n```" json
-    ; "json string", Yojson.Safe.to_string (`String json)
-    ]
+    [ "json string", Yojson.Safe.to_string (`String json) ]
   in
   List.iter
     (fun (name, raw) ->
@@ -641,6 +639,34 @@ let test_librarian_accepts_wrapped_json_output () =
            1
            (List.length episode.Types.claims)
        | None -> Alcotest.failf "expected %s librarian output to parse" name)
+    cases
+;;
+
+let test_librarian_rejects_prose_wrapped_json_output () =
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-prose-wrapped-json"
+    ; generation = 6
+    ; messages = [ text_message "prose wrapped JSON memory" ]
+    }
+  in
+  let json = valid_librarian_output () |> Yojson.Safe.to_string in
+  let cases =
+    [ "prose before", "Here is the JSON:\n" ^ json
+    ; "prose after", json ^ "\nDone."
+    ; "markdown fenced", Printf.sprintf "```json\n%s\n```" json
+    ]
+  in
+  List.iter
+    (fun (name, raw) ->
+       Alcotest.(check bool)
+         (name ^ " rejected")
+         true
+         (Option.is_none
+            (Librarian.episode_of_output
+               ~now:1_000_000.0
+               ~generation:inp.generation
+               inp
+               raw)))
     cases
 ;;
 
@@ -4527,6 +4553,10 @@ let () =
             "librarian accepts wrapped json output"
             `Quick
             test_librarian_accepts_wrapped_json_output
+        ; Alcotest.test_case
+            "librarian rejects prose wrapped json output"
+            `Quick
+            test_librarian_rejects_prose_wrapped_json_output
         ; Alcotest.test_case
             "librarian defaults missing optional lists"
             `Quick

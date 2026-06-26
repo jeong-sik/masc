@@ -11,9 +11,20 @@ open Alcotest
 let pinned_tmp_agent_literal_count = 0
 let pinned_agent_runtime_root_binding_count = 0
 
+let repo_path relative =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> Filename.concat root relative
+  | None -> relative
+;;
+
 let read_file path =
+  let path = if Filename.is_relative path then repo_path path else path in
   match In_channel.with_open_text path In_channel.input_all with
-  | exception _ -> ""
+  | exception exn ->
+      Alcotest.failf
+        "failed to read source path %S: %s"
+        path
+        (Printexc.to_string exn)
   | content -> content
 ;;
 

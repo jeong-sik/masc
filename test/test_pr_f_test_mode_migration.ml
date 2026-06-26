@@ -4,7 +4,8 @@ open Alcotest
 
     PR-F migrates the typed [Host_config.test_mode_kind] surface into
     the only call-site that lives in the [masc] main library:
-    [lib/config_dir_resolver.ml:55] [running_under_test_executable].
+    [lib/config_dir_resolver/config_dir_resolver.ml:55]
+    [running_under_test_executable].
 
     The other 4 sites enumerated in PR-12 mli §1.5 live in lower-level
     sub-libraries ([masc_config], [masc_workspace], [fs_compat]) which
@@ -28,16 +29,24 @@ open Alcotest
 let pinned_test_prefix_literal_count = 0
 let pinned_helper_takes_no_argument = true
 
+let config_dir_resolver_source_path =
+  "lib/config_dir_resolver/config_dir_resolver.ml"
+;;
+
+let repo_path relative =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> Filename.concat root relative
+  | None -> relative
+;;
+
 let read_file path =
-  let path =
-    if Filename.is_relative path then
-      match Sys.getenv_opt "DUNE_SOURCEROOT" with
-      | Some root -> Filename.concat root path
-      | None -> path
-    else path
-  in
+  let path = if Filename.is_relative path then repo_path path else path in
   match In_channel.with_open_text path In_channel.input_all with
-  | exception _ -> ""
+  | exception exn ->
+      Alcotest.failf
+        "failed to read source path %S: %s"
+        path
+        (Printexc.to_string exn)
   | content -> content
 ;;
 
@@ -57,19 +66,19 @@ let count_substring ~haystack ~needle =
 ;;
 
 let test_no_test_prefix_literal_in_config_dir_resolver () =
-  let content = read_file "lib/config_dir_resolver.ml" in
+  let content = read_file config_dir_resolver_source_path in
   let occurrences =
     count_substring ~haystack:content
       ~needle:{|String.starts_with ~prefix:"test_"|}
   in
   (check int)
     "literal `String.starts_with ~prefix:\"test_\"` in \
-     lib/config_dir_resolver.ml must be 0 after PR-F"
+     config_dir_resolver source must be 0 after PR-F"
     pinned_test_prefix_literal_count occurrences
 ;;
 
 let test_helper_takes_no_argument () =
-  let content = read_file "lib/config_dir_resolver.ml" in
+  let content = read_file config_dir_resolver_source_path in
   let old_signature_occurrences =
     count_substring ~haystack:content
       ~needle:"running_under_test_executable executable_name"
@@ -86,14 +95,14 @@ let test_helper_takes_no_argument () =
 ;;
 
 let test_host_config_is_test_mode_called () =
-  let content = read_file "lib/config_dir_resolver.ml" in
+  let content = read_file config_dir_resolver_source_path in
   let occurrences =
     count_substring ~haystack:content
       ~needle:"Host_config.is_test_mode"
   in
   (check bool)
     "Host_config.is_test_mode must be called from \
-     lib/config_dir_resolver.ml after PR-F"
+     config_dir_resolver source after PR-F"
     true (occurrences >= 1)
 ;;
 

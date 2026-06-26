@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => ({
         has_override: true,
         char_count: 14,
         required_file: true,
-        template_variables: [],
+        template_variables: ['keeper'],
       },
       {
         key: 'governance.dry_run',
@@ -140,10 +140,18 @@ describe('PromptRegistryPanel', () => {
     expect(container.textContent).toContain('프롬프트 레지스트리')
     expect(container.textContent).toContain('keeper.world')
     expect(container.textContent).toContain('/tmp/config/prompts/keeper.world.md')
+    expect(container.querySelector('[data-prompt-preset-switcher]')).not.toBeNull()
+    expect(container.querySelector('[data-prompt-destinations]')?.textContent).toContain('System rules')
+    expect(container.querySelector('[data-prompt-destinations]')?.textContent).toContain('system')
+    expect(container.textContent).toContain('{{keeper}}')
     await waitFor(() => {
       expect(container.textContent).toContain('file world')
     })
     expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('override world')
+
+    const allPreset = container.querySelector('[data-prompt-preset-switcher] button') as HTMLButtonElement
+    allPreset?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
 
     const governanceButton = Array.from(container.querySelectorAll('button')).find(button =>
       button.textContent?.includes('governance.dry_run'),

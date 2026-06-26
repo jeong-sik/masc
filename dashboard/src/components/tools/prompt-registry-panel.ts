@@ -16,9 +16,29 @@ import { TextArea, TextInput } from '../common/input'
 import { FilterChips } from '../common/filter-chips'
 import { StatusChip } from '../common/status-chip'
 import { errorToString } from '../../lib/format-string'
-import { KeeperPromptAssemblyPanel } from '../keeper-prompt-assembly-panel'
+import {
+  buildKeeperPromptAssemblyReport,
+  KeeperPromptAssemblyPanel,
+  type KeeperPromptAssemblyReport,
+  type KeeperPromptAssemblyStage,
+} from '../keeper-prompt-assembly-panel'
 
-type PromptSourceFilter = 'all' | PromptSource
+export type PromptSourceFilter = 'all' | PromptSource
+export type PromptPresetId = 'all' | 'attention' | `stage:${string}`
+
+export interface PromptPreset {
+  id: PromptPresetId
+  label: string
+  description: string
+  count: number
+}
+
+export interface PromptDestination {
+  stageTitle: string
+  messageSlot: string
+  role: string
+  summary: string
+}
 
 const SOURCE_CHIP_ORDER: PromptSourceFilter[] = ['all', 'file', 'override', 'default', 'missing']
 
@@ -43,6 +63,80 @@ function sourceBadgeClass(source: PromptSource): string {
   }
 }
 
+function promptPresetRows(report: KeeperPromptAssemblyReport, preset: PromptPresetId): Set<string> | null {
+  if (preset === 'all' || preset === 'attention') return null
+  const stageId = preset.replace(/^stage:/, '')
+  const stage = report.stages.find(item => item.id === stageId)
+  if (!stage) return new Set()
+  return new Set(stage.rows.map(row => row.promptKey).filter(key => !key.startsWith('(')))
+}
+
+function stagePresetLabel(stage: KeeperPromptAssemblyStage): string {
+  if (stage.messageSlot === 'not sent') return stage.title
+  return `${stage.messageSlot}: ${stage.title}`
+}
+
+function presetPromptCount(
+  prompts: DashboardPromptItem[],
+  report: KeeperPromptAssemblyReport,
+  preset: PromptPresetId,
+): number {
+  if (preset === 'all') return prompts.length
+  if (preset === 'attention') {
+    return prompts.filter(prompt => prompt.has_override || prompt.source === 'missing').length
+  }
+  const allowed = promptPresetRows(report, preset)
+  if (!allowed || allowed.size === 0) return 0
+  return prompts.filter(prompt => allowed.has(prompt.key)).length
+}
+
+export function promptPresetOptions(
+  prompts: DashboardPromptItem[],
+  report: KeeperPromptAssemblyReport,
+): PromptPreset[] {
+  const stagePresets = report.stages
+    .filter(stage => stage.rows.some(row => !row.promptKey.startsWith('(')))
+    .map(stage => {
+      const id: PromptPresetId = `stage:${stage.id}`
+      return {
+        id,
+        label: stagePresetLabel(stage),
+        description: stage.summary,
+        count: presetPromptCount(prompts, report, id),
+      }
+    })
+
+  return [
+    {
+      id: 'all',
+      label: '전체',
+      description: 'All registered prompt files and overrides.',
+      count: prompts.length,
+    },
+    ...stagePresets,
+    {
+      id: 'attention',
+      label: '수정/누락',
+      description: 'Saved overrides and missing required prompt files.',
+      count: presetPromptCount(prompts, report, 'attention'),
+    },
+  ]
+}
+
+export function promptDestinationsForKey(
+  report: KeeperPromptAssemblyReport,
+  key: string,
+): PromptDestination[] {
+  return report.stages
+    .filter(stage => stage.rows.some(row => row.promptKey === key))
+    .map(stage => ({
+      stageTitle: stage.title,
+      messageSlot: stage.messageSlot,
+      role: stage.role,
+      summary: stage.summary,
+    }))
+}
+
 function normalizeDraft(prompt: DashboardPromptItem | null): string {
   if (!prompt) return ''
   return prompt.override_value ?? prompt.effective
@@ -50,13 +144,20 @@ function normalizeDraft(prompt: DashboardPromptItem | null): string {
 
 // Pure helper: filter by source + substring search (case-insensitive).
 // Exported for unit testing.
-function filterPrompts(
+export function filterPrompts(
   prompts: DashboardPromptItem[],
   source: PromptSourceFilter,
   query: string,
+  report?: KeeperPromptAssemblyReport,
+  preset: PromptPresetId = 'all',
 ): DashboardPromptItem[] {
   const q = query.trim().toLowerCase()
   return prompts.filter(p => {
+    if (preset === 'attention' && !p.has_override && p.source !== 'missing') return false
+    if (preset !== 'all' && preset !== 'attention') {
+      const allowed = report ? promptPresetRows(report, preset) : new Set<string>()
+      if (!allowed || !allowed.has(p.key)) return false
+    }
     if (source !== 'all' && p.source !== source) return false
     if (!q) return true
     return (
@@ -85,7 +186,7 @@ export function promptSourceCounts(
 const sourceFilter = signal<PromptSourceFilter>('all')
 const searchQuery = signal('')
 
-export function PromptRegistryPanel() {
+export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const [prompts, setPrompts] = useState<DashboardPromptItem[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -93,9 +194,14 @@ export function PromptRegistryPanel() {
   const [status, setStatus] = useState<string | null>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
+  const [preset, setPreset] = useState<PromptPresetId>('stage:base-system')
 
-  const visiblePrompts = filterPrompts(prompts, sourceFilter.value, searchQuery.value)
-  const selectedPrompt = prompts.find(prompt => prompt.key === selectedKey) ?? prompts[0] ?? null
+  const report = buildKeeperPromptAssemblyReport(prompts)
+  const presets = promptPresetOptions(prompts, report)
+  const activePreset = presets.some(item => item.id === preset) ? preset : 'all'
+  const visiblePrompts = filterPrompts(prompts, sourceFilter.value, searchQuery.value, report, activePreset)
+  const selectedPrompt = visiblePrompts.find(prompt => prompt.key === selectedKey) ?? visiblePrompts[0] ?? null
+  const selectedDestinations = selectedPrompt ? promptDestinationsForKey(report, selectedPrompt.key) : []
   const counts = promptSourceCounts(prompts)
 
   async function loadPrompts(preferredKey?: string | null) {
@@ -124,8 +230,7 @@ export function PromptRegistryPanel() {
   }, [])
 
   useEffect(() => {
-    if (!selectedPrompt) return
-    setDraft(current => (current === '' ? normalizeDraft(selectedPrompt) : current))
+    setDraft(normalizeDraft(selectedPrompt))
   }, [selectedPrompt?.key])
 
   async function applyOverride() {
@@ -166,11 +271,59 @@ export function PromptRegistryPanel() {
     }
   }
 
-  return html`
-    <${SectionCard} label="프롬프트 레지스트리" class="section mb-4">
+  const body = html`
       <div class="mb-4 text-xs text-[var(--color-fg-muted)] leading-relaxed">
         <div>기준 원문은 resolved config root의 <code>prompts/*.md</code>입니다. 경로는 설정 경로 상세 패널에서 확인할 수 있습니다.</div>
         <div>이 화면에서는 현재 effective 값 확인과 runtime override 적용/해제만 합니다.</div>
+      </div>
+
+      <div class="mb-4 grid gap-2 md:grid-cols-4" data-prompt-registry-summary>
+        <div class="v2-lab-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+          <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">registered</div>
+          <div class="mt-1 font-mono text-sm text-[var(--color-fg-primary)]">${prompts.length}</div>
+        </div>
+        <div class="v2-lab-card rounded-[var(--r-1)] border border-[var(--warn-border)] bg-[var(--warn-soft)] px-3 py-2">
+          <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">overrides</div>
+          <div class="mt-1 font-mono text-sm text-[var(--color-fg-primary)]">${report.stats.overrideRows}</div>
+        </div>
+        <div class="v2-lab-card rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-soft)] px-3 py-2">
+          <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">missing</div>
+          <div class="mt-1 font-mono text-sm text-[var(--color-fg-primary)]">${report.stats.missingRows}</div>
+        </div>
+        <div class="v2-lab-card min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+          <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">prompt root</div>
+          <div class="mt-1 truncate font-mono text-xs text-[var(--color-fg-primary)]" title=${report.activePromptRoots[0] ?? ''}>
+            ${report.activePromptRoots[0] ?? '—'}
+          </div>
+        </div>
+      </div>
+
+      <div class="mb-4" data-prompt-preset-switcher>
+        <div class="mb-2 flex items-center justify-between gap-2">
+          <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">프리셋</div>
+          <div class="text-2xs text-[var(--color-fg-muted)]">Turn prompt recipe 기준으로 묶어 봅니다.</div>
+        </div>
+        <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          ${presets.map(item => html`
+            <button
+              type="button"
+              class=${`prompt-preset-card rounded-[var(--r-1)] border px-3 py-2 text-left transition-colors ${activePreset === item.id
+                ? 'border-[var(--accent-30)] bg-[var(--accent-10)]'
+                : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:border-[var(--accent-22)] hover:bg-[var(--color-bg-elevated)]'}`}
+              data-active=${activePreset === item.id ? 'true' : 'false'}
+              onClick=${() => {
+                setPreset(item.id)
+                setStatus(null)
+              }}
+            >
+              <div class="mb-1 flex items-center justify-between gap-2">
+                <span class="text-xs font-semibold text-[var(--color-fg-primary)]">${item.label}</span>
+                <${StatusChip} tone=${activePreset === item.id ? 'info' : 'neutral'} uppercase=${false}>${item.count}<//>
+              </div>
+              <div class="prompt-preset-description text-2xs leading-relaxed text-[var(--color-fg-muted)]">${item.description}</div>
+            </button>
+          `)}
+        </div>
       </div>
 
       <${KeeperPromptAssemblyPanel} prompts=${prompts} />
@@ -183,7 +336,7 @@ export function PromptRegistryPanel() {
           <div class="mb-2 flex items-center justify-between gap-2 px-2">
             <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
               등록된 프롬프트
-              ${sourceFilter.value !== 'all' || searchQuery.value
+              ${activePreset !== 'all' || sourceFilter.value !== 'all' || searchQuery.value
                 ? html`<span class="ml-1 normal-case tracking-normal text-[var(--color-fg-muted)]">${visiblePrompts.length} / ${prompts.length}</span>`
                 : null}
             </div>
@@ -259,12 +412,42 @@ export function PromptRegistryPanel() {
               </div>
             </div>
 
+            <div class="v2-lab-card mb-4 rounded-[var(--r-1)] border border-[var(--accent-22)] bg-[var(--accent-8)] px-3 py-2" data-prompt-destinations>
+              <div class="mb-2 flex flex-wrap items-center gap-2">
+                <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">들어가는 위치</div>
+                ${selectedDestinations.length === 0 ? html`<${StatusChip} tone="neutral">not in keeper recipe<//>` : null}
+              </div>
+              ${selectedDestinations.length === 0 ? html`
+                <div class="text-xs leading-relaxed text-[var(--color-fg-muted)]">
+                  이 프롬프트는 registry에는 있지만 keeper turn prompt recipe의 고정 단계에는 포함되지 않습니다.
+                </div>
+              ` : html`
+                <div class="grid gap-2">
+                  ${selectedDestinations.map(destination => html`
+                    <div class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-2">
+                      <div class="mb-1 flex flex-wrap items-center gap-2">
+                        <${StatusChip} tone=${destination.role === 'model_input' ? 'info' : 'neutral'} uppercase=${false}>${destination.messageSlot}<//>
+                        <span class="text-xs font-semibold text-[var(--color-fg-primary)]">${destination.stageTitle}</span>
+                      </div>
+                      <div class="text-2xs leading-relaxed text-[var(--color-fg-muted)]">${destination.summary}</div>
+                    </div>
+                  `)}
+                </div>
+              `}
+            </div>
+
             ${selectedPrompt.template_variables.length > 0 ? html`
               <div class="v2-lab-card mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
                 <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">허용된 플레이스홀더</div>
-                <div class="mt-2 flex flex-wrap gap-2">
+                <div class="mt-1 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
+                  값 치환은 registry render 호출자가 공급하며, 치환된 텍스트는 위 위치로 그대로 들어갑니다.
+                </div>
+                <div class="mt-2 grid gap-2 sm:grid-cols-2">
                   ${selectedPrompt.template_variables.map(variable => html`
-                    <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 font-mono text-2xs text-[var(--color-fg-primary)]">${`{{${variable}}}`}</span>
+                    <div class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
+                      <div class="font-mono text-2xs text-[var(--color-fg-primary)]">${`{{${variable}}}`}</div>
+                      <div class="mt-0.5 text-3xs text-[var(--color-fg-muted)]">${selectedDestinations.length > 0 ? `${selectedDestinations.length} prompt recipe slot(s)` : 'registry render variable'}</div>
+                    </div>
                   `)}
                 </div>
               </div>
@@ -310,6 +493,15 @@ export function PromptRegistryPanel() {
           `}
         </div>
       </div>
+  `
+
+  if (embedded) {
+    return html`<div class="prompt-registry-panel prompt-registry-panel-embedded" data-testid="prompt-registry-panel">${body}</div>`
+  }
+
+  return html`
+    <${SectionCard} label="프롬프트 레지스트리" class="section mb-4">
+      <div data-testid="prompt-registry-panel">${body}</div>
     <//>
   `
 }

@@ -222,7 +222,7 @@ let upsert_keeper_trust_fields fields trust =
 ;;
 
 let enrich_keeper_with_diagnostic ~(config : Workspace.config) (keeper_json : Yojson.Safe.t) =
-  match keeper_json with
+  let result = match keeper_json with
   | `Assoc fields ->
     (* The upstream operator snapshot already carries these for most keeper rows.
        Reuse them before falling back to per-keeper file reads. *)
@@ -277,6 +277,20 @@ let enrich_keeper_with_diagnostic ~(config : Workspace.config) (keeper_json : Yo
            | Ok None | Error _ -> keeper_json)
         | _ -> keeper_json))
   | _ -> keeper_json
+  in
+  (* Surface the autoboot exclusion reason so the roster can show *why* a keeper
+     is not booting/proactive (declarative_autoboot_disabled / paused /
+     autoboot_disabled).  paused/proactive_enabled already ride on the snapshot
+     keeper row; exclusion_reason is the missing visibility piece. *)
+  (match result with
+   | `Assoc fields ->
+     (match Json_util.assoc_string_opt "name" result with
+      | Some name ->
+        (match Keeper_runtime.autoboot_exclusion_reason config name with
+         | Some reason -> `Assoc (assoc_upsert fields "exclusion_reason" (`String reason))
+         | None -> result)
+      | None -> result)
+   | other -> other)
 ;;
 
 let bool_field ?(default = false) key json =

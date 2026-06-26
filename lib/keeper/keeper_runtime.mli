@@ -85,6 +85,12 @@ val bootable_keeper_names : Workspace.config -> string list
 (** Names of every keeper whose [keepers/<name>/keeper.toml] exists and
     looks bootable on disk. *)
 
+val autoboot_exclusion_reason : Workspace.config -> string -> string option
+(** Per-keeper autoboot exclusion reason label ([paused] /
+    [declarative_autoboot_disabled] / [autoboot_disabled]), or [None] when the
+    keeper is bootable.  Single-keeper projection of
+    {!autoboot_excluded_keeper_reasons}. *)
+
 val autoboot_excluded_keeper_reasons : Workspace.config -> autoboot_exclusion list
 (** Configured keepers skipped by autoboot with operator-facing reason labels. *)
 

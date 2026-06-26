@@ -1104,6 +1104,10 @@ export interface Keeper {
   phase?: KeeperPhase | null
   runtime_class?: 'keeper'
   paused?: boolean
+  /** Autoboot exclusion reason (declarative_autoboot_disabled / paused /
+   *  autoboot_disabled) — why this keeper is not booting/proactive. null when
+   *  bootable. Surfaced from execution `keepers` and briefing `keeper_briefs`. */
+  exclusion_reason?: string | null
   registered?: boolean
   reconcile_status?: string | null
   emoji?: string

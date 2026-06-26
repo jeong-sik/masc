@@ -504,6 +504,15 @@ html[data-skin="v2"] .rt-toml code {
   white-space: pre;
 }
 
+/* inline embedded mode — when RuntimeTomlEditor is rendered inside the
+   Settings surface card without the overlay wrapper. Drop the outer
+   box-shadow since the host card provides its own chrome. */
+html[data-skin="v2"] .set-card-b-wide .rt-shell {
+  box-shadow: none;
+  border-radius: var(--radius-md);
+  min-height: 36rem;
+}
+
 /* responsive — runtime.css:137 */
 @media (max-width: 720px) {
   html[data-skin="v2"] .rt-shell { grid-template-columns: 1fr; }

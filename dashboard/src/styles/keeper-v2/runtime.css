@@ -134,6 +134,9 @@
 .set-rt-open { font-family: var(--font-ui); font-size: 13px; padding: 9px 18px; border-radius: var(--radius-sm); border: 1px solid var(--volt-dim); background: var(--volt-wash); color: var(--volt); cursor: pointer; transition: 0.14s; }
 .set-rt-open:hover { background: var(--volt); color: var(--volt-ink); }
 
+/* inline embedded mode — no double box-shadow */
+.set-card-b-wide .rt-shell { box-shadow: none; min-height: 36rem; }
+
 @media (max-width: 720px) {
   .rt-shell { grid-template-columns: 1fr; }
   .rt-nav { flex-direction: row; overflow-x: auto; }

@@ -20,13 +20,9 @@ let realtime_cache_ttl_s = Server_dashboard_http_core_cache.realtime_cache_ttl_s
 let feature_health_cache_ttl_s = Server_dashboard_http_core_cache.feature_health_cache_ttl_s
 
 let dashboard_actor_cache_segment state req =
-  match
-    dashboard_actor_for_request
-      ~base_path:(Mcp_server.workspace_config state).base_path
-      req
-  with
-  | Some actor -> Some actor
-  | None -> Some "default"
+  dashboard_actor_for_request
+    ~base_path:(Mcp_server.workspace_config state).base_path
+    req
 ;;
 
 let dashboard_error_json ?ok message =

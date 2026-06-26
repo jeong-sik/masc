@@ -522,10 +522,20 @@ let test_dashboard_query_cache_key_encodes_delimiter_values () =
         Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
           [ ("actor", Some "default"); ("session", Some "missing") ]
       in
+      let missing_actor =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", None); ("session", Some "session-a") ]
+      in
+      let explicit_default_actor =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", Some "default"); ("session", Some "session-a") ]
+      in
       check bool "delimiter-bearing values do not collide" true
         (not (String.equal actor_delimiter session_delimiter));
       check bool "literal missing does not collide with absent value" true
-        (not (String.equal missing_session literal_missing_session)))
+        (not (String.equal missing_session literal_missing_session));
+      check bool "missing actor does not collide with explicit default actor" true
+        (not (String.equal missing_actor explicit_default_actor)))
 
 let test_operator_snapshot_default_route_exposes_provenance () =
   with_test_env @@ fun ~env ~sw ~config ->

@@ -75,13 +75,21 @@ type dispatch_error =
 
 let rec first_privileged_program = function
   | [] -> None
-  | Masc_exec.Capability.Exec_program (bin, _) :: _
-    when Masc_exec.Exec_program.risk_class bin = `Privileged -> Some bin
-  | Masc_exec.Capability.Pipeline_fold inner :: rest ->
-    (match first_privileged_program inner with
-     | Some _ as found -> found
+  | cap :: rest ->
+    let found =
+      match cap with
+      | Masc_exec.Capability.Exec_program (bin, _)
+        when Masc_exec.Exec_program.risk_class bin = `Privileged -> Some bin
+      | Masc_exec.Capability.Exec_program _ -> None
+      | Masc_exec.Capability.Read_path _ -> None
+      | Masc_exec.Capability.Write_path _ -> None
+      | Masc_exec.Capability.Git _ -> None
+      | Masc_exec.Capability.Env_set _ -> None
+      | Masc_exec.Capability.Pipeline_fold inner -> first_privileged_program inner
+    in
+    (match found with
+     | Some _ -> found
      | None -> first_privileged_program rest)
-  | _ :: rest -> first_privileged_program rest
 ;;
 
 let validate_paths ?keeper_id ?base_path ~workdir ir =
@@ -127,9 +135,11 @@ let dispatch_classified
      single chokepoint every executed command passes through, including the
      [MASC_SHELL_IR_APPROVAL_GATE_ENABLED]=off route.  The catastrophic floor is
      never approvable; the privileged-program floor is fail-closed until a real
-     Shell IR approval resolver is wired.  This prevents autonomous/flag-off
-     paths from treating [sudo]/[chmod]/[rm]/[dd] as executable merely because
-     no HITL channel exists. *)
+     Shell IR approval resolver is wired.  [Exec_program.risk_class] is derived
+     from the closed [Exec_program.known] metadata registry, and unknown
+     binaries are classified as [`Privileged] in [Exec_program.of_string].  The
+     capability scan above enumerates every [Capability.t] arm so new
+     execution-bearing capabilities cannot silently bypass this floor. *)
   match Masc_exec.Approval_policy.catastrophic_floor caps with
   | Some reason ->
     Error (Policy_denied { reason = Masc_exec.Verdict.deny_reason_to_string reason })

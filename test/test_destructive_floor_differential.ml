@@ -117,11 +117,18 @@ let classify e = Risk.classify (Risk.undecided (ir_of e))
    approval resolver exists. *)
 let rec has_privileged_program = function
   | [] -> false
-  | Exec.Capability.Exec_program (bin, _) :: _
-    when Exec.Exec_program.risk_class bin = `Privileged -> true
-  | Exec.Capability.Pipeline_fold inner :: rest ->
-    has_privileged_program inner || has_privileged_program rest
-  | _ :: rest -> has_privileged_program rest
+  | cap :: rest ->
+    let current =
+      match cap with
+      | Exec.Capability.Exec_program (bin, _) ->
+        Exec.Exec_program.risk_class bin = `Privileged
+      | Exec.Capability.Read_path _ -> false
+      | Exec.Capability.Write_path _ -> false
+      | Exec.Capability.Git _ -> false
+      | Exec.Capability.Env_set _ -> false
+      | Exec.Capability.Pipeline_fold inner -> has_privileged_program inner
+    in
+    current || has_privileged_program rest
 ;;
 
 let typed_blocks e =

@@ -116,11 +116,11 @@ let session_with_stale_seen () =
   Time_compat.sleep 0.01;
   (session, before)
 
-let check_session_touched label (session : SH.session) before =
-  Alcotest.(check bool) label true (Atomic.get session.last_seen > before)
+let check_session_touched label session before =
+  Alcotest.(check bool) label true (SH.Session.last_seen session > before)
 
-let check_session_not_touched label (session : SH.session) before =
-  Alcotest.(check bool) label true (Atomic.get session.last_seen = before)
+let check_session_not_touched label session before =
+  Alcotest.(check bool) label true (SH.Session.last_seen session = before)
 
 let test_handle_post_session_touch_success () =
   let session, before = session_with_stale_seen () in

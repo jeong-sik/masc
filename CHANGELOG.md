@@ -18,6 +18,15 @@
   filesystem-only by construction; operator/test environments must remove old
   backend overrides instead of expecting an in-memory backend.
 
+## [0.19.49] - 2026-06-26
+
+### Changed
+- `agent_sdk`: bumped the OAS runtime pin from `v0.207.7` (`b84af27e`) to
+  `v0.207.8` (`ecd509f4`, OAS `main` HEAD) and raised the dependency floor to
+  `>= 0.207.8` in `dune-project` / `masc.opam`. Pin metadata in
+  `scripts/oas-agent-sdk-pin.sh`, locked opam metadata, and the keeper user
+  manual pin block were refreshed by #22359.
+
 ## [0.19.48] - 2026-06-22
 
 ### Changed

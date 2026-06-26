@@ -50,6 +50,7 @@ let min_panel = 1
 let max_panel = 8
 let min_answered_floor = 1
 let default_min_answered = min_answered_floor
+let default_max_concurrent_judges = max_panel
 
 (* 그룹 모델당 max_tool_calls 상한 (0..max). 0=무제한, 그 외 양수는 에이전트
    max_turns에 근사. SSOT 상수 (Magic Number 회피, RFC-0280에서 검증을 한 곳으로 모음). *)
@@ -245,6 +246,7 @@ type t =
   { enabled : bool
   ; default_preset : string
   ; max_concurrent_panels : int
+  ; max_concurrent_judges : int
   ; presets : Validated_preset.t list
   }
 [@@deriving show, eq]

@@ -69,6 +69,10 @@ val min_answered_floor : int
 
 val default_min_answered : int
 
+(** Default JOJ first-judge concurrency. Derived from {!max_panel} so judge
+    fan-out has its own bounded capacity instead of borrowing panel throttling. *)
+val default_max_concurrent_judges : int
+
 (** 그룹 모델당 [max_tool_calls] 상한 (0..이 값). 0=무제한. named SSOT. *)
 val max_tool_calls_ceiling : int
 
@@ -168,6 +172,7 @@ type t =
   { enabled : bool
   ; default_preset : string
   ; max_concurrent_panels : int
+  ; max_concurrent_judges : int
   ; presets : Validated_preset.t list
   }
 [@@deriving show, eq]

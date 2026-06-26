@@ -164,6 +164,32 @@ let test_server_parse_rejection_split () =
     ~model_:false
     ~server:false;
   check_parse_split
+    "provider_invalid_request_invalid_json"
+    (SdkE.Provider
+       (Llm_provider.Error.InvalidRequest
+          { provider = "claude"; reason = "invalid json in tool call arguments" }))
+    ~provider:true
+    ~model_:false
+    ~server:true;
+  check_parse_split
+    "api_invalid_request_invalid_json"
+    (SdkE.Api (Retry.InvalidRequest { message = "invalid json in tool call arguments" }))
+    ~provider:false
+    ~model_:true
+    ~server:true;
+  check_parse_split
+    "api_invalid_request_query_parse_error"
+    (SdkE.Api (Retry.InvalidRequest { message = "parse error in query parameters" }))
+    ~provider:false
+    ~model_:false
+    ~server:false;
+  check_parse_split
+    "api_invalid_request_cant_find_tool"
+    (SdkE.Api (Retry.InvalidRequest { message = "Can't find the specified tool" }))
+    ~provider:false
+    ~model_:false
+    ~server:false;
+  check_parse_split
     "api_invalid_request_generic"
     (SdkE.Api (Retry.InvalidRequest { message = "missing required field: model" }))
     ~provider:false

@@ -36,6 +36,7 @@ let base_policy : Fusion_policy.t =
   { Fusion_policy.enabled = true
   ; default_preset = "trio"
   ; max_concurrent_panels = 2
+  ; max_concurrent_judges = Fusion_policy.default_max_concurrent_judges
   ; presets =
       [ validated
           { Fusion_policy.name = "trio"
@@ -100,6 +101,7 @@ let valid_toml =
 enabled = true
 default_preset = "trio"
 max_concurrent_panels = 2
+max_concurrent_judges = 4
 [fusion.presets.trio]
 web_tools = false
 max_tool_calls_per_panel = 0
@@ -113,6 +115,7 @@ let test_config_valid () =
   match Fusion_config.of_toml (parse valid_toml) with
   | Ok p ->
     Alcotest.(check bool) "enabled" true p.Fusion_policy.enabled;
+    Alcotest.(check int) "judge concurrency" 4 p.Fusion_policy.max_concurrent_judges;
     Alcotest.(check int) "one preset" 1 (List.length p.Fusion_policy.presets);
     (match p.Fusion_policy.presets with
      | [ vp ] ->
@@ -523,6 +526,26 @@ judge_system_prompt = "j"
       (List.mem (Fusion_config.Invalid_max_concurrent_panels 0) es)
   | Ok _ -> Alcotest.fail "expected Error Invalid_max_concurrent_panels"
 
+let test_config_bad_judge_concurrency () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p1"
+max_concurrent_judges = 0
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = "a"
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Invalid_max_concurrent_judges present" true
+      (List.mem (Fusion_config.Invalid_max_concurrent_judges 0) es)
+  | Ok _ -> Alcotest.fail "expected Error Invalid_max_concurrent_judges"
+
 let test_config_invalid_max_tool_calls () =
   let s =
     {|
@@ -576,6 +599,7 @@ let seed_disabled_toml =
 enabled = false
 default_preset = "trio"
 max_concurrent_panels = 2
+max_concurrent_judges = 3
 [fusion.presets.trio]
 web_tools = false
 max_tool_calls_per_panel = 0
@@ -595,6 +619,8 @@ let test_config_disabled_with_preset () =
   match Fusion_config.of_toml (parse seed_disabled_toml) with
   | Ok p ->
     Alcotest.(check bool) "seed disabled" false p.Fusion_policy.enabled;
+    Alcotest.(check int) "seed judge concurrency" 3
+      p.Fusion_policy.max_concurrent_judges;
     Alcotest.(check int) "trio preset present" 1 (List.length p.Fusion_policy.presets);
     (match p.Fusion_policy.presets with
      | [ vp ] ->
@@ -1175,6 +1201,8 @@ let () =
         ; Alcotest.test_case "missing_prompt" `Quick test_config_missing_prompt
         ; Alcotest.test_case "missing_judge_model" `Quick test_config_missing_judge_model
         ; Alcotest.test_case "bad_concurrency" `Quick test_config_bad_concurrency
+        ; Alcotest.test_case "bad_judge_concurrency" `Quick
+            test_config_bad_judge_concurrency
         ; Alcotest.test_case "invalid_max_tool_calls" `Quick
             test_config_invalid_max_tool_calls
         ; Alcotest.test_case "empty_default_preset" `Quick test_config_empty_default_preset

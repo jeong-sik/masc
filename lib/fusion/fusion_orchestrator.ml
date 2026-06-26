@@ -120,7 +120,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
             | judges ->
               let firsts =
                 Eio.Fiber.List.map
-                  ~max_fibers:policy.Fusion_policy.max_concurrent_panels
+                  ~max_fibers:policy.Fusion_policy.max_concurrent_judges
                   (fun (j : Fusion_policy.judge_spec) ->
                     let id = Fusion_policy.panelist_id ~label:j.jlabel ~model:j.jmodel in
                     ( id

@@ -24,6 +24,7 @@ type config_error =
   | Missing_judge_model of string
       (** preset의 judge 모델 id가 비어있음 (필수, 빈 문자열 default 거부) *)
   | Invalid_max_concurrent_panels of int  (** max_concurrent_panels < 1 *)
+  | Invalid_max_concurrent_judges of int  (** max_concurrent_judges < 1 *)
   | Invalid_max_tool_calls of string * int
       (** (preset 이름, 값) — 0..16 범위 위반 *)
   | Missing_default_preset of string
@@ -55,6 +56,7 @@ val disabled : Fusion_policy.t
     - panel/judge system prompt 누락 → [Error [Missing_prompt _]].
     - judge 모델 id 누락 → [Error [Missing_judge_model _]].
     - max_concurrent_panels < 1 → [Error [Invalid_max_concurrent_panels _]].
+    - max_concurrent_judges < 1 → [Error [Invalid_max_concurrent_judges _]].
     - max_tool_calls_per_panel이 0..16 범위 밖 → [Error [Invalid_max_tool_calls _]].
     - min_answered가 1..패널 모델 총합 범위 밖 → [Error [Invalid_min_answered _]].
     - default_preset가 presets에 없음 → [Error [Missing_default_preset _]].

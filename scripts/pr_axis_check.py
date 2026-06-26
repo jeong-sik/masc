@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -40,9 +41,7 @@ class AxisRisk:
         files_str = ", ".join(self.overlap_files[:3])
         if len(self.overlap_files) > 3:
             files_str += f" (+{len(self.overlap_files) - 3} more)"
-        return (
-            f"| #{self.merged_pr} | `{self.risk_type}` | {files_str} | {self.confidence} |"
-        )
+        return f"| #{self.merged_pr} | `{self.risk_type}` | {files_str} | {self.confidence} |"
 
 
 # --- RFC number cross-open-PR collision detection (legacy numbered RFCs) -----
@@ -98,6 +97,67 @@ def _run_gh(args: List[str]) -> Any:
     raise AssertionError("unreachable gh api retry loop")
 
 
+def _require_gh_cli() -> None:
+    if shutil.which("gh") is None:
+        print("GitHub CLI 'gh' is required for PR axis checks.", file=sys.stderr)
+        sys.exit(2)
+
+
+def _combined_output(result: subprocess.CompletedProcess) -> str:
+    combined = "\n".join(
+        part.strip() for part in (result.stdout, result.stderr) if part.strip()
+    )
+    return combined if combined else "<no output>"
+
+
+def _require_gh_auth_identity() -> None:
+    _require_gh_cli()
+    status = subprocess.run(
+        ["gh", "auth", "status", "--hostname", "github.com"],
+        capture_output=True,
+        text=True,
+    )
+    if status.returncode != 0:
+        print(
+            "gh auth is not usable for github.com; refresh credentials before "
+            f"running PR axis checks. Details: {_combined_output(status)}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    user = subprocess.run(
+        ["gh", "api", "user", "--jq", ".login"],
+        capture_output=True,
+        text=True,
+    )
+    if user.returncode != 0:
+        print(
+            "gh credentials did not resolve a GitHub identity; refresh "
+            "token/login before running PR axis checks. Details: "
+            f"{_combined_output(user)}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+
+def _require_gh_repo_read(owner: str, repo: str) -> None:
+    _require_gh_auth_identity()
+    repo_slug = f"{owner}/{repo}"
+    repo_check = subprocess.run(
+        ["gh", "api", f"repos/{repo_slug}", "--jq", ".full_name"],
+        capture_output=True,
+        text=True,
+    )
+    if repo_check.returncode != 0:
+        print(
+            "gh credentials are authenticated but cannot read repo "
+            f"{repo_slug}; check token repository permissions before PR axis "
+            f"checks. Details: {_combined_output(repo_check)}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+
 def _run_gh_graphql(query: str) -> dict:
     """Run gh graphql query and return data."""
     for attempt in range(1, GH_RETRIES + 1):
@@ -139,13 +199,18 @@ def get_repo_slug() -> Tuple[str, str]:
         repo = os.environ.get("GITHUB_REPOSITORY", "")
         if "/" in repo:
             return tuple(repo.split("/", 1))  # type: ignore[return-value]
-        print("Cannot determine repository. Set GITHUB_REPOSITORY or run in a gh repo.", file=sys.stderr)
+        print(
+            "Cannot determine repository. Set GITHUB_REPOSITORY or run in a gh repo.",
+            file=sys.stderr,
+        )
         sys.exit(2)
     data = json.loads(result.stdout)
     return data["owner"]["login"], data["name"]
 
 
-def get_pr_base_info(pr_number: int, owner: str, repo: str) -> Tuple[Optional[str], Optional[str]]:
+def get_pr_base_info(
+    pr_number: int, owner: str, repo: str
+) -> Tuple[Optional[str], Optional[str]]:
     """Get the base SHA and base ref name of an open PR."""
     resp = _run_gh([f"/repos/{owner}/{repo}/pulls/{pr_number}"])
     base = resp.get("base", {})
@@ -161,7 +226,9 @@ def merge_commit_already_in_base(
     # GitHub compare API: compare/{base}...{head}
     # status == "ahead"   -> head is ahead of base (base is ancestor of head)
     # status == "identical" -> same
-    resp = _run_gh([f"/repos/{owner}/{repo}/compare/{merge_commit_sha}...{pr_base_sha}"])
+    resp = _run_gh(
+        [f"/repos/{owner}/{repo}/compare/{merge_commit_sha}...{pr_base_sha}"]
+    )
     status = resp.get("status", "")
     return status in ("ahead", "identical")
 
@@ -279,7 +346,10 @@ def check_pr_axis_stale(
 
     pr_base_sha, pr_base_ref = get_pr_base_info(pr_number, owner, repo)
     if not pr_base_sha:
-        print(f"Warning: could not determine base SHA for PR #{pr_number}", file=sys.stderr)
+        print(
+            f"Warning: could not determine base SHA for PR #{pr_number}",
+            file=sys.stderr,
+        )
 
     recently_merged = get_recently_merged_prs(owner, repo, hours, limit)
     risks: List[AxisRisk] = []
@@ -289,7 +359,9 @@ def check_pr_axis_stale(
         if merged_num == pr_number:
             continue
         merged_title = merged["title"]
-        merged_files = {node["path"] for node in merged.get("files", {}).get("nodes", [])}
+        merged_files = {
+            node["path"] for node in merged.get("files", {}).get("nodes", [])
+        }
 
         overlap = open_files & merged_files
         if not overlap:
@@ -308,7 +380,9 @@ def check_pr_axis_stale(
         # don't pay a per-PR REST round-trip here when scanning many PRs.
         if pr_base_sha:
             merge_commit = (merged.get("mergeCommit") or {}).get("oid")
-            if merge_commit and merge_commit_already_in_base(merge_commit, pr_base_sha, owner, repo):
+            if merge_commit and merge_commit_already_in_base(
+                merge_commit, pr_base_sha, owner, repo
+            ):
                 continue
 
         # Determine risk type and confidence
@@ -337,18 +411,22 @@ def check_pr_axis_stale(
         if len(overlap) > 5 and confidence == "LOW":
             confidence = "MEDIUM"
 
-        risks.append(AxisRisk(
-            risk_type=risk_type,
-            merged_pr=merged_num,
-            merged_title=merged_title,
-            overlap_files=sorted(overlap),
-            confidence=confidence,
-        ))
+        risks.append(
+            AxisRisk(
+                risk_type=risk_type,
+                merged_pr=merged_num,
+                merged_title=merged_title,
+                overlap_files=sorted(overlap),
+                confidence=confidence,
+            )
+        )
 
     return risks
 
 
-def scan_all_open_prs(owner: str, repo: str, hours: int, limit: int) -> Dict[int, List[AxisRisk]]:
+def scan_all_open_prs(
+    owner: str, repo: str, hours: int, limit: int
+) -> Dict[int, List[AxisRisk]]:
     """Scan all open PRs for axis risks."""
     query = f"""
 query {{
@@ -364,7 +442,12 @@ query {{
 }}
 """
     data = _run_gh_graphql(query)
-    open_prs = data.get("data", {}).get("repository", {}).get("pullRequests", {}).get("nodes", [])
+    open_prs = (
+        data.get("data", {})
+        .get("repository", {})
+        .get("pullRequests", {})
+        .get("nodes", [])
+    )
 
     results: Dict[int, List[AxisRisk]] = {}
     for pr in open_prs:
@@ -407,9 +490,7 @@ def detect_rfc_collisions(open_prs: List[Dict[str, Any]]) -> List[RfcCollision]:
     return collisions
 
 
-def get_open_prs_with_added_rfc_files(
-    owner: str, repo: str
-) -> List[Dict[str, Any]]:
+def get_open_prs_with_added_rfc_files(owner: str, repo: str) -> List[Dict[str, Any]]:
     """Fetch open PRs and the RFC files each one ADDS (GraphQL changeType)."""
     query = f"""
 query {{
@@ -476,7 +557,9 @@ def self_test() -> int:
     assert len(collisions) == 1, f"expected 1 collision, got {len(collisions)}"
     assert collisions[0].rfc_number == "0289"
     assert {n for n, _ in collisions[0].prs} == {22144, 22158}
-    print(f"self-test: two open PRs claim RFC-0289 -> {collisions[0].describe()} (PASS)")
+    print(
+        f"self-test: two open PRs claim RFC-0289 -> {collisions[0].describe()} (PASS)"
+    )
 
     multiphase = [
         {
@@ -484,7 +567,9 @@ def self_test() -> int:
             "added_rfc_files": ["docs/rfc/RFC-0300-a.md", "docs/rfc/RFC-0300-b.md"],
         },
     ]
-    assert detect_rfc_collisions(multiphase) == [], "single PR multi-file is not a collision"
+    assert detect_rfc_collisions(multiphase) == [], (
+        "single PR multi-file is not a collision"
+    )
     print("self-test: single PR, one number across files -> no collision (PASS)")
 
     noise = [
@@ -501,9 +586,15 @@ def self_test() -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="PR Axis Cross-Check")
     parser.add_argument("--pr", type=int, help="PR number to check")
-    parser.add_argument("--scan-all-open", action="store_true", help="Scan all open PRs")
-    parser.add_argument("--hours", type=int, default=24, help="Lookback window in hours")
-    parser.add_argument("--limit", type=int, default=20, help="Max recent merged PRs to check")
+    parser.add_argument(
+        "--scan-all-open", action="store_true", help="Scan all open PRs"
+    )
+    parser.add_argument(
+        "--hours", type=int, default=24, help="Lookback window in hours"
+    )
+    parser.add_argument(
+        "--limit", type=int, default=20, help="Max recent merged PRs to check"
+    )
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     parser.add_argument(
         "--check-rfc-collisions",
@@ -520,7 +611,9 @@ def main() -> int:
     if args.self_test:
         return self_test()
 
+    _require_gh_cli()
     owner, repo = get_repo_slug()
+    _require_gh_repo_read(owner, repo)
 
     if args.check_rfc_collisions:
         open_prs = get_open_prs_with_added_rfc_files(owner, repo)
@@ -554,19 +647,32 @@ def main() -> int:
             if w:
                 warnings[pr_num] = w
         if args.json:
-            print(json.dumps({
-                str(pr_num): [
-                    {"type": r.risk_type, "merged_pr": r.merged_pr, "confidence": r.confidence}
-                    for r in risks
-                ]
-                for pr_num, risks in blockers.items()
-            }, indent=2))
+            print(
+                json.dumps(
+                    {
+                        str(pr_num): [
+                            {
+                                "type": r.risk_type,
+                                "merged_pr": r.merged_pr,
+                                "confidence": r.confidence,
+                            }
+                            for r in risks
+                        ]
+                        for pr_num, risks in blockers.items()
+                    },
+                    indent=2,
+                )
+            )
         else:
             if warnings:
                 for pr_num, risks in warnings.items():
-                    print(f"\nPR #{pr_num} LOW-confidence overlaps (informational only):")
+                    print(
+                        f"\nPR #{pr_num} LOW-confidence overlaps (informational only):"
+                    )
                     for r in risks:
-                        print(f"  - {r.risk_type} from #{r.merged_pr} ({r.confidence}): {', '.join(r.overlap_files[:3])}")
+                        print(
+                            f"  - {r.risk_type} from #{r.merged_pr} ({r.confidence}): {', '.join(r.overlap_files[:3])}"
+                        )
             if blockers:
                 print(f"\nFound blocking risks in {len(blockers)} PR(s):\n")
                 for pr_num, risks in blockers.items():
@@ -586,13 +692,24 @@ def main() -> int:
     single_warnings = [r for r in single_risks if not _block(r)]
 
     if args.json:
-        print(json.dumps([
-            {"type": r.risk_type, "merged_pr": r.merged_pr, "confidence": r.confidence}
-            for r in single_blockers
-        ], indent=2))
+        print(
+            json.dumps(
+                [
+                    {
+                        "type": r.risk_type,
+                        "merged_pr": r.merged_pr,
+                        "confidence": r.confidence,
+                    }
+                    for r in single_blockers
+                ],
+                indent=2,
+            )
+        )
     else:
         if single_warnings:
-            print(f"Found {len(single_warnings)} LOW-confidence overlap(s) for PR #{args.pr} (informational only):\n")
+            print(
+                f"Found {len(single_warnings)} LOW-confidence overlap(s) for PR #{args.pr} (informational only):\n"
+            )
             print("| Merged PR | Risk Type | Overlap Files | Confidence |")
             print("|-----------|-----------|---------------|------------|")
             for r in single_warnings:
@@ -606,7 +723,9 @@ def main() -> int:
             for r in single_blockers:
                 print(r.to_markdown())
             print()
-            print("Recommended action: rebase on latest main and run `dune build @check`.")
+            print(
+                "Recommended action: rebase on latest main and run `dune build @check`."
+            )
             return 1
         if not single_warnings:
             print(f"No axis risks found for PR #{args.pr}.")

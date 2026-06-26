@@ -23,8 +23,12 @@ usage() {
   sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'
 }
 
-command -v gh >/dev/null || die "gh not found"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib/gh-preflight.sh"
+
 command -v jq >/dev/null || die "jq not found"
+gh_preflight_require_cli
+GH_PR_AUDIT_CACHE_TTL_SEC=300
 
 REPO="${1:-}"
 [ -n "$REPO" ] || {
@@ -77,8 +81,24 @@ if [ "$REPO" = "." ]; then
 fi
 
 CHECK_FIELDS="number,title,url,isDraft,mergeStateStatus,reviewDecision,statusCheckRollup,updatedAt,headRefName,baseRefName"
-PRS_JSON="$(gh pr list --repo "$REPO" --state open --limit "$LIMIT" --json "$CHECK_FIELDS")" \
-  || die "gh pr list failed"
+CACHE_PATH="$(gh_preflight_cache_path pr-list "$REPO" "open-limit-${LIMIT}")"
+
+if ! PREFLIGHT_ERROR="$(gh_preflight_check_repo_read "$REPO" 2>&1)"; then
+  if PRS_JSON="$(gh_preflight_cache_load_fresh "$CACHE_PATH" "$GH_PR_AUDIT_CACHE_TTL_SEC")"; then
+    echo "WARNING: gh preflight failed; using cached PR list for $REPO (ttl=${GH_PR_AUDIT_CACHE_TTL_SEC}s): $PREFLIGHT_ERROR" >&2
+  else
+    die "$PREFLIGHT_ERROR"
+  fi
+else
+  if PRS_JSON="$(gh pr list --repo "$REPO" --state open --limit "$LIMIT" --json "$CHECK_FIELDS" 2>&1)"; then
+    gh_preflight_cache_store "$CACHE_PATH" "$PRS_JSON"
+  elif CACHED_PRS_JSON="$(gh_preflight_cache_load_fresh "$CACHE_PATH" "$GH_PR_AUDIT_CACHE_TTL_SEC")"; then
+    echo "WARNING: gh pr list failed; using cached PR list for $REPO (ttl=${GH_PR_AUDIT_CACHE_TTL_SEC}s): $PRS_JSON" >&2
+    PRS_JSON="$CACHED_PRS_JSON"
+  else
+    die "gh pr list failed after gh preflight passed: $PRS_JSON"
+  fi
+fi
 
 jq -r \
   --arg repo "$REPO" \

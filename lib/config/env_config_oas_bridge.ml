@@ -115,13 +115,13 @@ let trimmed_value_opt name =
     [global_default_sec] (300s) the moment any env override went
     through this function.  The OAS bridge treats [infinity] as
     no-fire, so we let it pass. *)
-let positive_finite_or_default ~default value =
+let positive_or_default ~default value =
   if Float.compare value 0.0 > 0 then value else default
 ;;
 
 let timeout_env_value ~default raw =
   Safe_ops.float_of_string_with_default ~default raw
-  |> positive_finite_or_default ~default
+  |> positive_or_default ~default
 ;;
 
 (** [timeout_sec ~caller ()] resolves the OAS bridge timeout for

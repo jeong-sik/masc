@@ -313,11 +313,19 @@ let runtime_resolution_warning_strings json =
     | `String value -> Some value
     | _ -> None)
 
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    idx + needle_len <= haystack_len
+    && (String.equal (String.sub haystack idx needle_len) needle || loop (idx + 1))
+  in
+  String.equal needle "" || loop 0
+
 let assert_no_server_workspace_warning label json =
   check bool label false
     (List.exists
-       (fun warning ->
-         Lib.String_util.contains_substring warning "Server binary checkout")
+       (fun warning -> contains_substring warning "Server binary checkout")
        (runtime_resolution_warning_strings json))
 
 let test_runtime_resolution_accepts_server_repo_inside_base_path () =

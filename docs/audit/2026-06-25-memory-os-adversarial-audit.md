@@ -197,14 +197,12 @@ owner.
 
 The env surface is broad but named and centralized enough to audit:
 
-- `MASC_KEEPER_MEMORY_OS_RECALL`: default true. Disable only with an explicit
-  false token (`0`, `false`, `no`, `off`, `disabled`); invalid values warn and
-  preserve the default-on behavior so a typo does not remove model recall
-  context.
-- `MASC_KEEPER_MEMORY_OS_LIBRARIAN`: default true. Disable only with an
-  explicit false token (`0`, `false`, `no`, `off`, `disabled`); invalid values
-  warn and preserve the default-on behavior so a typo does not stop memory
-  extraction.
+- `MASC_KEEPER_MEMORY_OS_RECALL`: default true; invalid values warn and fail
+  closed to false so malformed operator input cannot leave the kill switch
+  accidentally enabled.
+- `MASC_KEEPER_MEMORY_OS_LIBRARIAN`: default true; invalid values warn and fail
+  closed to false so malformed operator input cannot leave the kill switch
+  accidentally enabled.
 - `MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS`: default 3.
 - `MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES`: default 24.
 - `MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC`: default 600.

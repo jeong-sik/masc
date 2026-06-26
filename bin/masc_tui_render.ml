@@ -163,11 +163,15 @@ let render_overview (state : state) =
 
   (* Summary line *)
   let summary_line =
-    match ov with
-    | None ->
+    match (ov, state.overview_error) with
+    | _, Some err ->
+        Printf.sprintf "  %s(data unreliable: %s)%s" Ansi.red
+          (fit_width err (cols - 24))
+          Ansi.reset
+    | None, None ->
         Printf.sprintf "  %s(no overview data — press 'r' to refresh)%s"
           Ansi.dim Ansi.reset
-    | Some o ->
+    | Some o, None ->
         let health_color =
           match o.ov_workspace_health with
           | "healthy" | "ok" -> Ansi.green
@@ -312,7 +316,15 @@ let render_approvals (state : state) =
   box_divider buf cols;
 
   if count = 0 then begin
-    box_line buf cols (Ansi.dim ^ "  (no pending approvals)" ^ Ansi.reset);
+    (match state.overview_error with
+     | Some err ->
+         box_line buf cols
+           (Ansi.red ^ "  (data unreliable: "
+           ^ fit_width err (cols - 24)
+           ^ ")" ^ Ansi.reset)
+     | None ->
+         box_line buf cols
+           (Ansi.dim ^ "  (no pending approvals)" ^ Ansi.reset));
     for _ = 1 to rows - 8 do
       box_empty buf cols
     done
@@ -403,7 +415,14 @@ let render_board_list (state : state) =
   box_divider buf cols;
 
   if count = 0 then begin
-    box_line buf cols (Ansi.dim ^ "  (no board posts)" ^ Ansi.reset);
+    (match state.board_error with
+     | Some err ->
+         box_line buf cols
+           (Ansi.red ^ "  (data unreliable: "
+           ^ fit_width err (cols - 24)
+           ^ ")" ^ Ansi.reset)
+     | None ->
+         box_line buf cols (Ansi.dim ^ "  (no board posts)" ^ Ansi.reset));
     for _ = 1 to rows - 7 do
       box_empty buf cols
     done
@@ -568,7 +587,14 @@ let render_planning_list (state : state) =
 
   (match state.planning with
    | None ->
-       box_line buf cols (Ansi.dim ^ "  (no planning data)" ^ Ansi.reset);
+       (match state.planning_error with
+        | Some err ->
+            box_line buf cols
+              (Ansi.red ^ "  (data unreliable: "
+              ^ fit_width err (cols - 24)
+              ^ ")" ^ Ansi.reset)
+        | None ->
+            box_line buf cols (Ansi.dim ^ "  (no planning data)" ^ Ansi.reset));
        for _ = 1 to rows - 10 do
          box_empty buf cols
        done

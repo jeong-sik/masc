@@ -228,238 +228,376 @@ let add_event (state : state) event_type content =
   let ev = { timestamp; event_type; content } in
   state.events <- ev :: (List.filteri (fun i _ -> i < 10) state.events)
 
-(** Overview JSON decoding helpers *)
-let string_field_default json key default =
-  try Yojson.Safe.Util.to_string (Yojson.Safe.Util.member key json) with _ -> default
+(** HTTP JSON decoding helpers. These intentionally fail closed for the TUI
+    dashboard surfaces: an empty list means the API really returned an empty
+    list, not that a malformed payload was silently dropped. *)
+let ( let* ) = Result.bind
 
-let int_field_default json key default =
-  try Yojson.Safe.Util.to_int (Yojson.Safe.Util.member key json) with _ -> default
+let json_kind = function
+  | `Assoc _ -> "object"
+  | `Bool _ -> "bool"
+  | `Float _ -> "float"
+  | `Int _ | `Intlit _ -> "int"
+  | `List _ -> "array"
+  | `Null -> "null"
+  | `String _ -> "string"
+  | _ -> "json"
+
+let missing_field key =
+  Error (Printf.sprintf "missing required field '%s'" key)
+
+let field_type_error key expected value =
+  Error
+    (Printf.sprintf "field '%s' must be %s (received %s)" key expected
+       (json_kind value))
+
+let required_string_field json key =
+  match Yojson.Safe.Util.member key json with
+  | `String value -> Ok value
+  | `Null -> missing_field key
+  | bad -> field_type_error key "a string" bad
+
+let optional_string_field json key =
+  match Yojson.Safe.Util.member key json with
+  | `String value -> Ok (Some value)
+  | `Null -> Ok None
+  | bad -> field_type_error key "a string or null" bad
+
+let required_int_field json key =
+  match Yojson.Safe.Util.member key json with
+  | `Int value -> Ok value
+  | `Intlit raw -> (
+      match int_of_string_opt raw with
+      | Some value -> Ok value
+      | None -> Error (Printf.sprintf "field '%s' has invalid int %S" key raw))
+  | `Null -> missing_field key
+  | bad -> field_type_error key "an int" bad
+
+let required_int_any_field json keys =
+  let rec loop = function
+    | [] ->
+        Error
+          (Printf.sprintf "missing required field '%s'"
+             (String.concat "' or '" keys))
+    | key :: rest -> (
+        match Yojson.Safe.Util.member key json with
+        | `Null -> loop rest
+        | _ -> required_int_field json key)
+  in
+  loop keys
+
+let int_field_or json key ~default =
+  match Yojson.Safe.Util.member key json with
+  | `Null -> Ok default
+  | _ -> required_int_field json key
+
+let required_display_field json key =
+  match Yojson.Safe.Util.member key json with
+  | `String value -> Ok value
+  | `Int value -> Ok (string_of_int value)
+  | `Intlit value -> Ok value
+  | `Float value -> Ok (Printf.sprintf "%.0f" value)
+  | `Null -> missing_field key
+  | bad -> field_type_error key "a scalar display value" bad
+
+let required_display_any_field json keys =
+  let rec loop = function
+    | [] ->
+        Error
+          (Printf.sprintf "missing required field '%s'"
+             (String.concat "' or '" keys))
+    | key :: rest -> (
+        match Yojson.Safe.Util.member key json with
+        | `Null -> loop rest
+        | _ -> required_display_field json key)
+  in
+  loop keys
+
+let optional_body_field json =
+  match Yojson.Safe.Util.member "body" json with
+  | `String value -> Ok value
+  | `Null -> (
+      match Yojson.Safe.Util.member "content" json with
+      | `String value -> Ok value
+      | `Null -> Ok ""
+      | bad -> field_type_error "content" "a string" bad)
+  | bad -> field_type_error "body" "a string" bad
+
+let required_body_field json =
+  match Yojson.Safe.Util.member "body" json with
+  | `String value -> Ok value
+  | `Null -> required_string_field json "content"
+  | bad -> field_type_error "body" "a string" bad
+
+let required_list_field json key =
+  match Yojson.Safe.Util.member key json with
+  | `List items -> Ok items
+  | `Null -> missing_field key
+  | bad -> field_type_error key "an array" bad
+
+let optional_list_field json key =
+  match Yojson.Safe.Util.member key json with
+  | `List items -> Ok items
+  | `Null -> Ok []
+  | bad -> field_type_error key "an array" bad
+
+let required_object_field json key =
+  match Yojson.Safe.Util.member key json with
+  | `Assoc _ as obj -> Ok obj
+  | `Null -> missing_field key
+  | bad -> field_type_error key "an object" bad
+
+let optional_object_field json key =
+  match Yojson.Safe.Util.member key json with
+  | `Assoc _ as obj -> Ok (Some obj)
+  | `Null -> Ok None
+  | bad -> field_type_error key "an object" bad
+
+let decode_list label decode items =
+  let rec loop idx acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest -> (
+        match decode item with
+        | Ok decoded -> loop (idx + 1) (decoded :: acc) rest
+        | Error err -> Error (Printf.sprintf "%s[%d]: %s" label idx err))
+  in
+  loop 0 [] items
 
 let decode_attention_item json =
-  try
-    Some {
-      ai_kind = string_field_default json "kind" "-";
-      ai_severity = string_field_default json "severity" "info";
-      ai_summary = string_field_default json "summary" "-";
-      ai_target_type = string_field_default json "target_type" "-";
-      ai_target_id =
-        (try Some (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "target_id" json))
-         with _ -> None);
-    }
-  with _ -> None
+  let* ai_kind = required_string_field json "kind" in
+  let* ai_severity = required_string_field json "severity" in
+  let* ai_summary = required_string_field json "summary" in
+  let* ai_target_type = required_string_field json "target_type" in
+  let* ai_target_id = optional_string_field json "target_id" in
+  Ok { ai_kind; ai_severity; ai_summary; ai_target_type; ai_target_id }
 
 let decode_attention_items json_list =
-  List.filter_map decode_attention_item json_list
+  decode_list "attention_items" decode_attention_item json_list
 
 let decode_approval_item json =
-  try
-    let token =
-      try Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "confirm_token" json)
-      with _ ->
-        Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "token" json)
-    in
-    Some {
-      ap_token = token;
-      ap_actor = string_field_default json "actor" "-";
-      ap_action_type = string_field_default json "action_type" "-";
-      ap_target_type = string_field_default json "target_type" "-";
-      ap_target_id =
-        (try Some (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "target_id" json))
-         with _ -> None);
-      ap_delegated_tool = string_field_default json "delegated_tool" "-";
-      ap_summary =
-        let action = string_field_default json "action_type" "-" in
-        let target = string_field_default json "target_type" "-" in
-        let tool = string_field_default json "delegated_tool" "-" in
-        Printf.sprintf "%s on %s (%s)" action target tool;
+  let* ap_token = required_string_field json "confirm_token" in
+  let* ap_actor = required_string_field json "actor" in
+  let* ap_action_type = required_string_field json "action_type" in
+  let* ap_target_type = required_string_field json "target_type" in
+  let* ap_target_id = optional_string_field json "target_id" in
+  let* ap_delegated_tool = required_string_field json "delegated_tool" in
+  let ap_summary =
+    Printf.sprintf "%s on %s (%s)" ap_action_type ap_target_type
+      ap_delegated_tool
+  in
+  Ok
+    {
+      ap_token;
+      ap_actor;
+      ap_action_type;
+      ap_target_type;
+      ap_target_id;
+      ap_delegated_tool;
+      ap_summary;
     }
-  with _ -> None
 
 let decode_approval_items json_list =
-  List.filter_map decode_approval_item json_list
+  decode_list "pending_confirms" decode_approval_item json_list
 
-let decode_board_post json =
-  try
-    let id = Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "id" json) in
-    let author = string_field_default json "author" "-" in
-    let title = string_field_default json "title" "-" in
-    let body =
-      try Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "body" json)
-      with _ ->
-        (try Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "content" json)
-         with _ -> "")
-    in
-    Some {
-      bp_id = id;
-      bp_author = author;
-      bp_title = title;
-      bp_body = body;
-      bp_votes = int_field_default json "votes" 0;
-      bp_comment_count = int_field_default json "comment_count" 0;
-      bp_created_at = string_field_default json "created_at" "-";
+let decode_board_post ?(require_body = false) json =
+  let* bp_id = required_string_field json "id" in
+  let* bp_author = required_string_field json "author" in
+  let* bp_title = required_string_field json "title" in
+  let* bp_body =
+    if require_body then required_body_field json else optional_body_field json
+  in
+  let* bp_votes = required_int_field json "votes" in
+  let* bp_comment_count = required_int_field json "comment_count" in
+  let* bp_created_at =
+    required_display_any_field json [ "created_at_iso"; "created_at" ]
+  in
+  Ok
+    {
+      bp_id;
+      bp_author;
+      bp_title;
+      bp_body;
+      bp_votes;
+      bp_comment_count;
+      bp_created_at;
     }
-  with _ -> None
 
 let decode_board_posts json_list =
-  List.filter_map decode_board_post json_list
+  decode_list "posts" decode_board_post json_list
 
 let decode_board_comment json =
-  try
-    let id = Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "id" json) in
-    let author = string_field_default json "author" "-" in
-    let content = string_field_default json "content" "" in
-    Some {
-      bc_id = id;
-      bc_author = author;
-      bc_content = content;
-      bc_created_at = string_field_default json "created_at" "-";
-    }
-  with _ -> None
+  let* bc_id = required_string_field json "id" in
+  let* bc_author = required_string_field json "author" in
+  let* bc_content = required_string_field json "content" in
+  let* bc_created_at =
+    required_display_any_field json [ "created_at_iso"; "created_at" ]
+  in
+  Ok { bc_id; bc_author; bc_content; bc_created_at }
 
 let decode_board_comments json_list =
-  List.filter_map decode_board_comment json_list
+  decode_list "comments" decode_board_comment json_list
 
 (** Load board post list from /api/v1/board *)
-let load_board_list ~(host : string) ~(port : int) : board_post list =
+let load_board_list ~(host : string) ~(port : int) :
+    (board_post list, string) result =
   match fetch_board ~host ~port with
-  | Error err ->
-      Printf.eprintf "[masc-tui] board load failed: %s\n%!" err;
-      []
+  | Error err -> Error ("board load failed: " ^ err)
   | Ok json ->
-      try decode_board_posts (Yojson.Safe.Util.to_list (Yojson.Safe.Util.member "posts" json))
-      with exn ->
-        Printf.eprintf "[masc-tui] board decode failed: %s\n%!" (Printexc.to_string exn);
-        []
+      let* posts = required_list_field json "posts" in
+      decode_board_posts posts
 
 (** Load board post detail from /api/v1/board/<postId> *)
-let load_board_post ~(host : string) ~(port : int) ~(post_id : string) : (board_post * board_comment list) option =
+let load_board_post ~(host : string) ~(port : int) ~(post_id : string) :
+    (board_post * board_comment list, string) result =
   match fetch_board_post ~host ~port ~post_id with
-  | Error err ->
-      Printf.eprintf "[masc-tui] board post load failed: %s\n%!" err;
-      None
+  | Error err -> Error (Printf.sprintf "board post load failed: %s" err)
   | Ok json ->
-      try
-        let post = decode_board_post (Yojson.Safe.Util.member "post" json) in
-        let comments = decode_board_comments (Yojson.Safe.Util.to_list (Yojson.Safe.Util.member "comments" json)) in
-        match post with
-        | None -> None
-        | Some p -> Some (p, comments)
-      with exn ->
-        Printf.eprintf "[masc-tui] board post decode failed: %s\n%!" (Printexc.to_string exn);
-        None
+      let post_json =
+        match Yojson.Safe.Util.member "post" json with
+        | `Null -> json
+        | value -> value
+      in
+      let* post = decode_board_post ~require_body:true post_json in
+      let* comments_json = optional_list_field json "comments" in
+      let* comments = decode_board_comments comments_json in
+      Ok (post, comments)
 
 (** Load overview snapshot from /api/v1/dashboard/briefing *)
-let load_overview ~(host : string) ~(port : int) : overview_snapshot option =
+let load_overview ~(host : string) ~(port : int) :
+    (overview_snapshot, string) result =
   match fetch_dashboard_briefing ~host ~port with
-  | Error err ->
-      Printf.eprintf "[masc-tui] overview load failed: %s\n%!" err;
-      None
+  | Error err -> Error ("overview load failed: " ^ err)
   | Ok json ->
-      try
-        let summary = Yojson.Safe.Util.member "summary" json in
-        let top_attention =
-          match decode_attention_item (Yojson.Safe.Util.member "top_attention" summary) with
-          | Some x -> Some x
-          | None -> None
+      let* summary = required_object_field json "summary" in
+      let* command_focus = optional_object_field json "command_focus" in
+      let* incidents =
+        let* items = optional_list_field json "incidents" in
+        decode_attention_items items
+      in
+      let* attention_queue =
+        let* items = optional_list_field json "attention_queue" in
+        decode_attention_items items
+      in
+      let* attention_items =
+        let* items = optional_list_field json "attention_items" in
+        decode_attention_items items
+      in
+      let* pending_confirms =
+        match Yojson.Safe.Util.member "operator_targets" json with
+        | `Null -> Ok []
+        | `Assoc _ as operator_targets ->
+            let* items = optional_list_field operator_targets "pending_confirms" in
+            decode_approval_items items
+        | bad -> field_type_error "operator_targets" "an object" bad
+      in
+      let* agent_briefs = optional_list_field json "agent_briefs" in
+      let* top_attention =
+        let fallback =
+          match incidents with
+          | first :: _ -> Some first
+          | [] -> None
         in
-        let incidents =
-          try decode_attention_items (Yojson.Safe.Util.to_list (Yojson.Safe.Util.member "incidents" json))
-          with _ -> []
-        in
-        let attention_queue =
-          try decode_attention_items (Yojson.Safe.Util.to_list (Yojson.Safe.Util.member "attention_queue" json))
-          with _ -> []
-        in
-        let attention_items =
-          try decode_attention_items (Yojson.Safe.Util.to_list (Yojson.Safe.Util.member "attention_items" json))
-          with _ -> []
-        in
-        let pending_confirms =
-          try
-            let operator_targets = Yojson.Safe.Util.member "operator_targets" json in
-            decode_approval_items (Yojson.Safe.Util.to_list (Yojson.Safe.Util.member "pending_confirms" operator_targets))
-          with _ -> []
-        in
-        Some {
-          ov_workspace_health = string_field_default summary "workspace_health" "-";
-          ov_cluster = string_field_default summary "cluster" "-";
-          ov_project = string_field_default summary "project" "-";
-          ov_active_agents = int_field_default summary "active_agents" 0;
-          ov_pending_approvals = int_field_default summary "pending_approvals" 0;
-          ov_incident_count = int_field_default summary "incident_count" 0;
+        match command_focus with
+        | None -> Ok fallback
+        | Some command_focus -> (
+            match Yojson.Safe.Util.member "top_attention" command_focus with
+            | `Null -> Ok fallback
+            | value ->
+                Result.map (fun item -> Some item) (decode_attention_item value))
+      in
+      let* ov_workspace_health =
+        required_string_field summary "workspace_health"
+      in
+      let* ov_cluster = required_string_field summary "cluster" in
+      let* ov_project = required_string_field summary "project" in
+      let* ov_active_agents =
+        int_field_or summary "active_agents" ~default:(List.length agent_briefs)
+      in
+      let* ov_pending_approvals =
+        match command_focus with
+        | Some command_focus ->
+            int_field_or command_focus "pending_approvals"
+              ~default:(List.length pending_confirms)
+        | None ->
+            int_field_or summary "pending_approvals"
+              ~default:(List.length pending_confirms)
+      in
+      let* ov_incident_count =
+        int_field_or summary "incident_count" ~default:(List.length incidents)
+      in
+      let* ov_generated_at = required_string_field json "generated_at" in
+      Ok
+        {
+          ov_workspace_health;
+          ov_cluster;
+          ov_project;
+          ov_active_agents;
+          ov_pending_approvals;
+          ov_incident_count;
           ov_attention_items = incidents @ attention_queue @ attention_items;
           ov_top_attention = top_attention;
           ov_pending_confirms = pending_confirms;
-          ov_generated_at = string_field_default json "generated_at" "-";
+          ov_generated_at;
         }
-      with exn ->
-        Printf.eprintf "[masc-tui] overview decode failed: %s\n%!" (Printexc.to_string exn);
-        None
 
 let decode_planning_goal json =
-  try
-    let id = Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "id" json) in
-    Some {
-      pg_id = id;
-      pg_title = string_field_default json "title" "-";
-      pg_status = string_field_default json "status" "active";
-      pg_phase = string_field_default json "phase" "executing";
-      pg_priority = int_field_default json "priority" 3;
-      pg_due_date =
-        (try Some (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "due_date" json))
-         with _ -> None);
-      pg_parent_goal_id =
-        (try Some (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "parent_goal_id" json))
-         with _ -> None);
-      pg_metric =
-        (try Some (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "metric" json))
-         with _ -> None);
-      pg_target_value =
-        (try Some (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "target_value" json))
-         with _ -> None);
+  let* pg_id = required_string_field json "id" in
+  let* pg_title = required_string_field json "title" in
+  let* pg_status = required_string_field json "status" in
+  let* pg_phase = required_string_field json "phase" in
+  let* pg_priority = required_int_field json "priority" in
+  let* pg_due_date = optional_string_field json "due_date" in
+  let* pg_parent_goal_id = optional_string_field json "parent_goal_id" in
+  let* pg_metric = optional_string_field json "metric" in
+  let* pg_target_value = optional_string_field json "target_value" in
+  Ok
+    {
+      pg_id;
+      pg_title;
+      pg_status;
+      pg_phase;
+      pg_priority;
+      pg_due_date;
+      pg_parent_goal_id;
+      pg_metric;
+      pg_target_value;
     }
-  with _ -> None
 
 let decode_planning_goals json_list =
-  List.filter_map decode_planning_goal json_list
+  decode_list "goals" decode_planning_goal json_list
 
 let decode_planning_rollup json =
-  {
-    pr_active = int_field_default json "active_count" 0;
-    pr_paused = int_field_default json "paused_count" 0;
-    pr_done = int_field_default json "done_count" 0;
-    pr_dropped = int_field_default json "dropped_count" 0;
-  }
+  let* pr_active = required_int_field json "active_count" in
+  let* pr_paused = required_int_field json "paused_count" in
+  let* pr_done = required_int_field json "done_count" in
+  let* pr_dropped = required_int_field json "dropped_count" in
+  Ok { pr_active; pr_paused; pr_done; pr_dropped }
 
 let decode_planning_backlog json =
-  {
-    pb_todo = int_field_default json "todo" 0;
-    pb_claimed = int_field_default json "claimed" 0;
-    pb_running = int_field_default json "running" 0;
-    pb_done = int_field_default json "done" 0;
-    pb_cancelled = int_field_default json "cancelled" 0;
-  }
+  let* pb_todo = required_int_field json "todo" in
+  let* pb_claimed = required_int_field json "claimed" in
+  let* pb_running = required_int_any_field json [ "in_progress"; "running" ] in
+  let* pb_done = required_int_field json "done" in
+  let* pb_cancelled = required_int_field json "cancelled" in
+  Ok { pb_todo; pb_claimed; pb_running; pb_done; pb_cancelled }
 
 (** Load planning snapshot from /api/v1/dashboard/planning *)
-let load_planning ~(host : string) ~(port : int) : planning_snapshot option =
+let load_planning ~(host : string) ~(port : int) :
+    (planning_snapshot, string) result =
   match fetch_dashboard_planning ~host ~port with
-  | Error err ->
-      Printf.eprintf "[masc-tui] planning load failed: %s\n%!" err;
-      None
+  | Error err -> Error ("planning load failed: " ^ err)
   | Ok json ->
-      try
-        let goals =
-          try decode_planning_goals (Yojson.Safe.Util.to_list (Yojson.Safe.Util.member "goals" json))
-          with _ -> []
-        in
-        let rollup = decode_planning_rollup (Yojson.Safe.Util.member "rollup" json) in
-        let backlog = decode_planning_backlog (Yojson.Safe.Util.member "task_backlog" json) in
-        Some {
+      let* goals_json = required_list_field json "goals" in
+      let* goals = decode_planning_goals goals_json in
+      let* rollup_json = required_object_field json "rollup" in
+      let* rollup = decode_planning_rollup rollup_json in
+      let* backlog_json = required_object_field json "task_backlog" in
+      let* backlog = decode_planning_backlog backlog_json in
+      let* generated_at = required_string_field json "generated_at" in
+      Ok
+        {
           pl_goals = goals;
           pl_rollup = rollup;
           pl_backlog = backlog;
-          pl_generated_at = string_field_default json "generated_at" "-";
+          pl_generated_at = generated_at;
         }
-      with exn ->
-        Printf.eprintf "[masc-tui] planning decode failed: %s\n%!" (Printexc.to_string exn);
-        None

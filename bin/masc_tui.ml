@@ -206,6 +206,75 @@ let pending_approval_matches pending approval decision =
       String.equal p.paa_token approval.ap_token && p.paa_decision = decision
   | None -> false
 
+let remember_surface_error state ~surface ~current_error ~set_error err =
+  let changed =
+    match current_error with
+    | Some current -> not (String.equal current err)
+    | None -> true
+  in
+  set_error (Some err);
+  if changed then
+    add_event state "error"
+      (Printf.sprintf "%s data unreliable: %s" surface err)
+
+let apply_overview_load state = function
+  | Ok overview ->
+      state.overview <- Some overview;
+      state.overview_error <- None
+  | Error err ->
+      state.overview <- None;
+      remember_surface_error state ~surface:"overview"
+        ~current_error:state.overview_error
+        ~set_error:(fun value -> state.overview_error <- value)
+        err
+
+let apply_board_list_load state = function
+  | Ok posts ->
+      state.board_posts <- posts;
+      state.board_error <- None;
+      if state.board_cursor >= List.length posts then
+        state.board_cursor <- max 0 (List.length posts - 1)
+  | Error err ->
+      state.board_posts <- [];
+      state.board_comments <- [];
+      state.board_mode <- Board_list;
+      remember_surface_error state ~surface:"board"
+        ~current_error:state.board_error
+        ~set_error:(fun value -> state.board_error <- value)
+        err
+
+let apply_planning_load state = function
+  | Ok planning ->
+      state.planning <- Some planning;
+      state.planning_error <- None;
+      if state.planning_cursor >= List.length planning.pl_goals then
+        state.planning_cursor <- max 0 (List.length planning.pl_goals - 1)
+  | Error err ->
+      state.planning <- None;
+      state.planning_mode <- Planning_list;
+      remember_surface_error state ~surface:"planning"
+        ~current_error:state.planning_error
+        ~set_error:(fun value -> state.planning_error <- value)
+        err
+
+let refresh_http_surfaces state ~host ~port =
+  apply_overview_load state (load_overview ~host ~port);
+  apply_board_list_load state (load_board_list ~host ~port);
+  apply_planning_load state (load_planning ~host ~port)
+
+let apply_board_post_load state ~post_id = function
+  | Ok (post, comments) ->
+      state.board_mode <- Board_read post_id;
+      state.board_error <- None;
+      state.board_comments <- comments;
+      state.board_posts <-
+        post :: List.filter (fun p -> p.bp_id <> post_id) state.board_posts
+  | Error err ->
+      remember_surface_error state ~surface:"board"
+        ~current_error:state.board_error
+        ~set_error:(fun value -> state.board_error <- value)
+        err
+
 let execute_approval_decision state approval decision =
   let host = Env_config_core.masc_host () in
   let port = state.port in
@@ -219,7 +288,7 @@ let execute_approval_decision state approval decision =
       add_event state "system"
         (Printf.sprintf "%s: %s" (approval_decision_done decision)
            approval.ap_summary);
-      state.overview <- load_overview ~host ~port;
+      apply_overview_load state (load_overview ~host ~port);
       state.approval_cursor <- 0
   | Error err ->
       state.pending_approval_action <- None;
@@ -263,9 +332,7 @@ let main () =
   load_from_masc_dir state base_path;
   let host = Env_config_core.masc_host () in
   let port = state.port in
-  state.overview <- load_overview ~host ~port;
-  state.board_posts <- load_board_list ~host ~port;
-  state.planning <- load_planning ~host ~port;
+  refresh_http_surfaces state ~host ~port;
   add_event state "system" "TUI started";
   state.connection_status <- "connected";
 
@@ -305,9 +372,7 @@ let main () =
            load_from_masc_dir state base_path;
            let host = Env_config_core.masc_host () in
            let port = state.port in
-           state.overview <- load_overview ~host ~port;
-           state.board_posts <- load_board_list ~host ~port;
-           state.planning <- load_planning ~host ~port;
+           refresh_http_surfaces state ~host ~port;
            (* Also reload logs / board / planning detail if viewing them *)
            (match state.view with
             | Keepers Keeper_logs ->
@@ -319,13 +384,10 @@ let main () =
                 (match state.board_mode with
                  | Board_read post_id ->
                      (match load_board_post ~host ~port ~post_id with
-                      | Some (post, comments) ->
-                          state.board_mode <- Board_read post_id;
-                          state.board_comments <- comments;
-                          (* Refresh post metadata in list *)
-                          state.board_posts <-
-                            post :: List.filter (fun p -> p.bp_id <> post_id) state.board_posts
-                      | None -> state.board_mode <- Board_list)
+                      | Ok _ as result -> apply_board_post_load state ~post_id result
+                      | Error _ as result ->
+                          apply_board_post_load state ~post_id result;
+                          state.board_mode <- Board_list)
                  | Board_list -> ())
             | Planning ->
                 (match state.planning_mode with
@@ -469,14 +531,14 @@ let main () =
                           let host = Env_config_core.masc_host () in
                           let port = state.port in
                           (match load_board_post ~host ~port ~post_id:p.bp_id with
-                           | Some (post, comments) ->
-                               state.board_mode <- Board_read p.bp_id;
+                           | Ok _ as result ->
                                state.board_scroll <- 0;
-                               state.board_comments <- comments;
-                               (* Refresh post metadata in list *)
-                               state.board_posts <-
-                                 post :: List.filter (fun x -> x.bp_id <> p.bp_id) state.board_posts
-                           | None -> add_event state "error" (Printf.sprintf "Failed to load board post %s" p.bp_id))
+                               apply_board_post_load state ~post_id:p.bp_id result
+                           | Error err as result ->
+                               apply_board_post_load state ~post_id:p.bp_id result;
+                               add_event state "error"
+                                 (Printf.sprintf "Failed to load board post %s: %s"
+                                    p.bp_id err))
                       | None -> ())
                  | Board_read _ -> ())
             | Planning ->
@@ -520,9 +582,7 @@ let main () =
         load_from_masc_dir state base_path;
         let host = Env_config_core.masc_host () in
         let port = state.port in
-        state.overview <- load_overview ~host ~port;
-        state.board_posts <- load_board_list ~host ~port;
-        state.planning <- load_planning ~host ~port;
+        refresh_http_surfaces state ~host ~port;
         (* Also refresh logs / board / planning detail if viewing them *)
         (match state.view with
          | Keepers Keeper_logs ->
@@ -534,11 +594,10 @@ let main () =
              (match state.board_mode with
               | Board_read post_id ->
                   (match load_board_post ~host ~port ~post_id with
-                   | Some (post, comments) ->
-                       state.board_comments <- comments;
-                       state.board_posts <-
-                         post :: List.filter (fun p -> p.bp_id <> post_id) state.board_posts
-                   | None -> state.board_mode <- Board_list)
+                   | Ok _ as result -> apply_board_post_load state ~post_id result
+                   | Error _ as result ->
+                       apply_board_post_load state ~post_id result;
+                       state.board_mode <- Board_list)
               | Board_list -> ())
          | Planning ->
              (match state.planning_mode with

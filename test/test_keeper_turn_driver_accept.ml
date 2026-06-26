@@ -64,6 +64,19 @@ let run_result ?content ?stop_reason ?checkpoint () : Runtime_agent.run_result =
     stop_reason = Runtime_agent.Completed;
   }
 
+let accept_no_progress_retry_kind_string err =
+  let kind =
+    match Masc.Keeper_turn_driver.classify_masc_internal_error err with
+    | Some internal_error ->
+      Masc.Keeper_turn_driver.accept_no_progress_retry_kind internal_error
+    | None -> None
+  in
+  Option.map
+    (function
+      | `Empty_no_progress -> "empty_no_progress"
+      | `Read_only_no_progress -> "read_only_no_progress")
+    kind
+
 let test_keeper_hook_relaxes_strict_tool_choice () =
   let open Agent_sdk.Types in
   let relax = Masc.Keeper_run_tools_hooks.relax_strict_tool_choice_for_keeper in
@@ -514,6 +527,10 @@ let test_historical_mutation_does_not_block_current_read_only_retry () =
      .accept_no_progress_read_only_should_try_next
        err);
   Alcotest.(check (option string))
+    "current read-only no-progress classified by internal-error SSOT"
+    (Some "read_only_no_progress")
+    (accept_no_progress_retry_kind_string err);
+  Alcotest.(check (option string))
     "current read-only no-progress is runtime-recoverable"
     (Some "read_only_no_progress")
     (Option.map
@@ -831,6 +848,10 @@ let test_empty_non_end_turn_response_is_rejected () =
     (Masc.Keeper_turn_driver.For_testing
      .accept_no_progress_read_only_should_try_next
        err);
+  Alcotest.(check (option string))
+    "empty no-progress classified by internal-error SSOT"
+    (Some "empty_no_progress")
+    (accept_no_progress_retry_kind_string err);
   Alcotest.(check (option string))
     "empty no-progress is runtime-recoverable"
     (Some "empty_no_progress")

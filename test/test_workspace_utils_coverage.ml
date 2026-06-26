@@ -12,6 +12,8 @@ open Alcotest
 
 module Workspace_utils = Workspace_utils
 
+let yojson = testable Yojson.Safe.pp Yojson.Safe.equal
+
 let with_env name value f =
   let previous = Sys.getenv_opt name in
   (match value with
@@ -548,6 +550,44 @@ let test_list_dir_prefers_backend_for_memory_keys () =
       check (list string) "memory backend ignores local-only stale files"
         [ "backend.json" ] listed)
 
+let test_memory_writes_report_local_mirror_failure_consistently () =
+  let scratch = Filename.temp_dir "workspace-utils-write-json-memory" "" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf scratch)
+    (fun () ->
+      let cfg = make_test_config ~base_path:scratch ~cluster_name:"default" in
+      write_file (Workspace_utils.masc_root_dir cfg) "not a directory";
+      let direct_path =
+        Filename.concat (Workspace_utils.masc_root_dir cfg) "direct.json"
+      in
+      let direct_json = `Assoc [ ("ok", `Bool true) ] in
+      Workspace_utils.write_json cfg direct_path direct_json;
+      (match Workspace_utils.read_json_result cfg direct_path with
+       | Ok got -> check yojson "write_json commits backend value" direct_json got
+       | Error msg -> failf "read direct backend json failed: %s" msg);
+      (match Workspace_utils.write_json_result cfg direct_path direct_json with
+       | Ok () -> fail "expected local mirror failure"
+       | Error msg ->
+           check bool "direct writer reports mirror failure" true
+             (Workspace_utils.contains_substring msg "local mirror write failed"));
+      let backlog =
+        { Masc_domain.tasks = []
+        ; last_updated = Masc_domain.now_iso ()
+        ; version = 1
+        }
+      in
+      (match Workspace.write_backlog_result cfg backlog with
+       | Ok () -> fail "expected backlog mirror failure"
+       | Error msg ->
+           check bool "backlog writer reports mirror failure" true
+             (Workspace_utils.contains_substring msg "local mirror write failed"));
+      (match Workspace_utils.read_json_result cfg (Workspace.backlog_path cfg) with
+       | Ok got ->
+           check yojson "write_backlog_result commits primary backend value"
+             (Masc_domain.backlog_to_yojson backlog)
+             got
+       | Error msg -> failf "read backlog backend json failed: %s" msg))
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -662,5 +702,7 @@ let () =
       test_case "masc_root_dir nested with cluster" `Quick test_masc_root_dir_with_cluster_nested;
       test_case "list_dir prefers backend for memory keys" `Quick
         test_list_dir_prefers_backend_for_memory_keys;
+      test_case "memory writes report local mirror failures consistently" `Quick
+        test_memory_writes_report_local_mirror_failure_consistently;
     ];
   ]

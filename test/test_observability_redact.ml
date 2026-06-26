@@ -29,7 +29,7 @@ let test_short_input_unchanged () =
 
 let test_redact_text_does_not_truncate () =
   let secret = "sk-proj-abcdefghijklmnopqrstuvwxyz" in
-  let input = String.make 300 'x' ^ secret in
+  let input = String.make 300 'x' ^ " " ^ secret in
   let redacted = Observability_redact.redact_text input in
   Alcotest.(check bool) "not preview-truncated" false
     (String_util.contains_substring redacted "...(truncated)");

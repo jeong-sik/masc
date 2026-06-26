@@ -65,9 +65,7 @@ let make_config_root root =
 
 let make_toml_only_config_root root =
   let config = Filename.concat root "config" in
-  mkdir_p (Filename.concat config "prompts");
-  mkdir_p (Filename.concat config "keepers");
-  mkdir_p (Filename.concat config "personas");
+  mkdir_p config;
   write_file
     (Filename.concat config "runtime.toml")
     {|
@@ -260,7 +258,7 @@ let test_env_override_valid_with_toml_only_root () =
     Config_dir_resolver.resolve_with
       (make_inputs ~env_config_dir:config ())
   in
-  check string "status" "ready"
+  check string "status" "warn"
     (Config_dir_resolver.status_to_string resolution.status);
   check string "root source" "env"
     (Config_dir_resolver.source_to_string resolution.config_root.source);

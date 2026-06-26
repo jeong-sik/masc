@@ -1,10 +1,6 @@
-(** Regression test for the [via] discriminator in tool_search_files host-branch
-    JSON. Before the helper-and-sweep fix in #11080's sibling sweep, the
-    host branches of [ls/cat/rg/find/head/tail/tree/wc] hand-rolled JSON
-    without [via], so dashboards and downstream LLMs could not tell host
-    execution from a docker-sandboxed run. The bug class is the same as
-    the [sandbox_host_root] / [playground_path] leak that #11080 closed
-    in [keeper_status_detail.ml]. *)
+(** Regression test for the [via] discriminator in the tool_search_files
+    host-branch JSON. tool_search_files is now the Grep/rg tool only; directory
+    listing and file reads live under Execute. *)
 
 module Workspace = Masc.Workspace
 module Keeper_tool_command_runtime = Masc.Keeper_tool_command_runtime
@@ -87,25 +83,16 @@ let assert_via_host ~op raw =
       Alcotest.failf
         "op=%s missing [via] discriminator in host-branch JSON; raw=%s" op raw
 
+let assert_error_contains ~needle raw =
+  let error = Yojson.Safe.from_string raw |> Json.member "error" |> Json.to_string in
+  Alcotest.(check bool)
+    ("error contains " ^ needle)
+    true
+    (String_util.contains_substring error needle)
+
 let invoke ~config ~meta args =
   Keeper_tool_command_runtime.handle_tool_search_files ~turn_sandbox_factory:None
     ~exec_cache:None ~config ~meta ~args
-
-let test_ls_host_includes_via () =
-  setup @@ fun ~config ~meta ~playground:_ ~sample:_ ->
-  let raw =
-    invoke ~config ~meta
-      (`Assoc [ ("op", `String "ls"); ("path", `String ".") ])
-  in
-  assert_via_host ~op:"ls" raw
-
-let test_cat_host_includes_via () =
-  setup @@ fun ~config ~meta ~playground:_ ~sample:_ ->
-  let raw =
-    invoke ~config ~meta
-      (`Assoc [ ("op", `String "cat"); ("path", `String "sample.txt") ])
-  in
-  assert_via_host ~op:"cat" raw
 
 let test_rg_host_includes_via () =
   setup @@ fun ~config ~meta ~playground:_ ~sample:_ ->
@@ -120,71 +107,19 @@ let test_rg_host_includes_via () =
   in
   assert_via_host ~op:"rg" raw
 
-let test_find_host_includes_via () =
+let test_missing_pattern_rejects_before_host_dispatch () =
   setup @@ fun ~config ~meta ~playground:_ ~sample:_ ->
-  let raw =
-    invoke ~config ~meta
-      (`Assoc
-        [
-          ("op", `String "find");
-          ("pattern", `String "*.txt");
-          ("path", `String ".");
-        ])
-  in
-  assert_via_host ~op:"find" raw
-
-let test_head_host_includes_via () =
-  setup @@ fun ~config ~meta ~playground:_ ~sample:_ ->
-  let raw =
-    invoke ~config ~meta
-      (`Assoc [ ("op", `String "head"); ("path", `String "sample.txt") ])
-  in
-  assert_via_host ~op:"head" raw
-
-let test_tail_host_includes_via () =
-  setup @@ fun ~config ~meta ~playground:_ ~sample:_ ->
-  let raw =
-    invoke ~config ~meta
-      (`Assoc [ ("op", `String "tail"); ("path", `String "sample.txt") ])
-  in
-  assert_via_host ~op:"tail" raw
-
-let test_tree_host_includes_via () =
-  setup @@ fun ~config ~meta ~playground:_ ~sample:_ ->
-  let raw =
-    invoke ~config ~meta
-      (`Assoc [ ("op", `String "tree"); ("path", `String ".") ])
-  in
-  assert_via_host ~op:"tree" raw
-
-let test_wc_host_includes_via () =
-  setup @@ fun ~config ~meta ~playground:_ ~sample:_ ->
-  let raw =
-    invoke ~config ~meta
-      (`Assoc [ ("op", `String "wc"); ("path", `String "sample.txt") ])
-  in
-  assert_via_host ~op:"wc" raw
+  let raw = invoke ~config ~meta (`Assoc [ ("path", `String ".") ]) in
+  assert_error_contains ~needle:"pattern is required for rg" raw
 
 let () =
   Alcotest.run "Grep via discriminator"
     [
       ( "host-branch",
         [
-          Alcotest.test_case "ls includes via=host" `Quick
-            test_ls_host_includes_via;
-          Alcotest.test_case "cat includes via=host" `Quick
-            test_cat_host_includes_via;
           Alcotest.test_case "rg includes via=host" `Quick
             test_rg_host_includes_via;
-          Alcotest.test_case "find includes via=host" `Quick
-            test_find_host_includes_via;
-          Alcotest.test_case "head includes via=host" `Quick
-            test_head_host_includes_via;
-          Alcotest.test_case "tail includes via=host" `Quick
-            test_tail_host_includes_via;
-          Alcotest.test_case "tree includes via=host" `Quick
-            test_tree_host_includes_via;
-          Alcotest.test_case "wc includes via=host" `Quick
-            test_wc_host_includes_via;
+          Alcotest.test_case "missing pattern rejects before host dispatch" `Quick
+            test_missing_pattern_rejects_before_host_dispatch;
         ] );
     ]

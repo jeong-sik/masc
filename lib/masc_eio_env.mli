@@ -11,7 +11,8 @@
     Internal storage is hidden. The current domain's [Domain.DLS]
     value is the only lookup source. There is no process-wide fallback:
     domains that need OAS HTTP calls must initialise their own Eio
-    handles, including a clock, or fail closed. *)
+    handles, including a clock, or fail closed. See
+    [docs/oas-bridge-clock-timeout-contract.md] for the migration contract. *)
 
 type t = {
   sw : Eio.Switch.t;

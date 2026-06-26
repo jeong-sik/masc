@@ -1,7 +1,12 @@
 (* lib/masc_oas_bridge.mli *)
 
 (** Centralized boundary between MASC subsystems and the OAS Agent SDK.
-    Enforces strict structural timeouts, cancellation safety, and type isolation. *)
+    Enforces strict structural timeouts, cancellation safety, and type isolation.
+
+    Migration and entrypoint requirements are documented in
+    [docs/oas-bridge-clock-timeout-contract.md]. This is intentionally
+    fail-closed: adding a default-off compatibility flag would restore the
+    clockless path that silently ignored configured wall-clock budgets. *)
 
 (** Safe execution of a generic OAS operation with a mandatory Eio clock.
     Catches [Eio.Time.Timeout] and [Eio.Cancel.Cancelled] to perform functional rollback.

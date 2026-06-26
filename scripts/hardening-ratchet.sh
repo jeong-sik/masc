@@ -24,6 +24,11 @@
 #   scripts/hardening-ratchet.sh --measure
 #   scripts/hardening-ratchet.sh --check
 #   scripts/hardening-ratchet.sh --rebaseline
+#
+# Rebaseline policy:
+#   No scheduled rebaseline.  Use --rebaseline only in the PR that intentionally
+#   changes accepted debt, and keep the baseline metadata fields
+#   (owner/rebaselineCadence/exemptionProcess/metricPolicies) intact.
 
 set -euo pipefail
 
@@ -234,6 +239,14 @@ do_rebaseline() {
 import json, subprocess, sys
 path = sys.argv[1]
 data = json.load(sys.stdin)
+try:
+    with open(path) as f:
+        existing = json.load(f)
+except FileNotFoundError:
+    existing = {}
+for key in ("owner", "rebaselineCadence", "exemptionProcess", "metricPolicies"):
+    if key in existing:
+        data[key] = existing[key]
 data["_comment"] = "Production hardening ratchet baseline. Regenerate with scripts/hardening-ratchet.sh --rebaseline."
 data["lastUpdatedCommit"] = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
 with open(path, "w") as f:

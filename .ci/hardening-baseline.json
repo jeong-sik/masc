@@ -49,7 +49,34 @@
       "bin/gen_shell_ir_walkers.ml:1254:| _ -> ()"
     ]
   },
+  "exemptionProcess": "A metric increase must either be removed or explicitly justified in the PR. Do not run --rebaseline only to silence CI; reviewer approval is required for accepted-risk increases.",
   "lastUpdatedCommit": "5bc6966a817cd031053b60d24da54c960760f3ba",
+  "metricPolicies": {
+    "direct_env_reads": {
+      "acceptedRisk": true,
+      "severity": "warning"
+    },
+    "direct_env_reads_outside_env_boundary": {
+      "acceptedRisk": false,
+      "severity": "critical"
+    },
+    "exception_message_classifiers": {
+      "acceptedRisk": true,
+      "severity": "warning"
+    },
+    "local_workspace_path_literals": {
+      "acceptedRisk": false,
+      "severity": "critical"
+    },
+    "stub_markers": {
+      "acceptedRisk": true,
+      "severity": "warning"
+    },
+    "wildcard_silent_defaults": {
+      "acceptedRisk": true,
+      "severity": "warning"
+    }
+  },
   "metrics": {
     "direct_env_reads": 188,
     "direct_env_reads_outside_env_boundary": 160,
@@ -57,5 +84,7 @@
     "local_workspace_path_literals": 0,
     "stub_markers": 4,
     "wildcard_silent_defaults": 1994
-  }
+  },
+  "owner": "MASC CI meta gate owner",
+  "rebaselineCadence": "No scheduled rebaseline. Rebaseline only in the PR that intentionally changes accepted debt, after the reviewer accepts the severity and exemption rationale."
 }

@@ -61,6 +61,12 @@ let principal_matches_authenticated_caller
   String.equal principal.id ctx.agent_name
 ;;
 
+let canonical_principal_for_authenticated_caller (ctx : context)
+  : Goal_verification.goal_principal
+  =
+  { id = ctx.agent_name; display_name = None }
+;;
+
 let caller_is_goal_operator (ctx : context) =
   (Atomic.get Workspace_hooks.is_admin_agent_fn)
     ~base_path:ctx.config.base_path
@@ -72,7 +78,8 @@ let caller_is_goal_operator (ctx : context) =
 ;;
 
 let principal_binding_error ~field ctx _principal =
-  Printf.sprintf "%s id must match authenticated caller (%s)" field ctx.agent_name
+  ignore ctx;
+  Printf.sprintf "%s id must match authenticated caller" field
 ;;
 
 let operator_action_error action =
@@ -499,6 +506,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
         ~code:Conflict
         (operator_action_error action)
     else
+    let actor = canonical_principal_for_authenticated_caller ctx in
     let note = get_string_opt args "note" in
     let override_note = get_string_opt args "override_note" in
     (match Goal_store.get_goal ctx.config ~goal_id with
@@ -805,6 +813,7 @@ let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result
         ~code:Validation_error
         (principal_binding_error ~field:"principal" ctx principal)
     else
+    let principal = canonical_principal_for_authenticated_caller ctx in
     let note = get_string_opt args "note" in
     let evidence_refs = Option.value evidence_refs ~default:[] in
     let request_id = get_string_opt args "request_id" in

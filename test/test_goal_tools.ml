@@ -51,12 +51,28 @@ let parse_json_result (result : Tool_result.result) =
   else Alcotest.fail ((Tool_result.message result))
 ;;
 
-let principal_json ~id = `Assoc [ "id", `String id ]
+let principal_json ?display_name ~id =
+  let fields =
+    ("id", `String id)
+    ::
+    (match display_name with
+     | None -> []
+     | Some display_name -> [ "display_name", `String display_name ])
+  in
+  `Assoc fields
+;;
 
 let get_string_field json field =
   match Yojson.Safe.Util.member field json with
   | `String value -> value
   | _ -> fail (field ^ " missing")
+;;
+
+let get_optional_string_field json field =
+  match Yojson.Safe.Util.member field json with
+  | `String value -> Some value
+  | `Null -> None
+  | _ -> fail (field ^ " must be string or null")
 ;;
 
 let get_string_list_field json field =
@@ -83,6 +99,13 @@ let contains_substring s needle =
     else loop (i + 1)
   in
   loop 0
+;;
+
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
 ;;
 
 let create_done_task config ~goal_id ~title =
@@ -764,6 +787,129 @@ let test_goal_transition_approval_gate () =
      |> fun json -> get_string_field json "phase")
 ;;
 
+let test_goal_principal_display_name_canonicalized () =
+  with_workspace
+  @@ fun config ->
+  let forged_actor_label = "Admin / human reviewer" in
+  let forged_vote_label = "Root approver" in
+  let verifier_policy =
+    { Goal_verification.inherit_mode = Goal_verification.Extend
+    ; principals =
+        [ { id = "agent-alpha"; display_name = Some "agent-alpha" } ]
+    ; required_verdicts = Some 1
+    }
+  in
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal
+        config
+        ~title:"Canonical principal labels"
+        ~verifier_policy
+        ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Canonical principal done task";
+  let transitioned =
+    Tool_workspace.dispatch
+      (workspace_ctx config)
+      ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "action", `String "request_complete"
+            ; ( "actor"
+              , principal_json ~id:"planner" ~display_name:forged_actor_label )
+            ])
+  in
+  let transitioned_json =
+    match transitioned with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_transition not handled"
+  in
+  let request_json = Yojson.Safe.Util.member "verification_request" transitioned_json in
+  let request_id = get_string_field request_json "id" in
+  let requested_by_json = Yojson.Safe.Util.member "requested_by" request_json in
+  check string "requester id remains caller" "planner"
+    (get_string_field requested_by_json "id");
+  check
+    bool
+    "requester display label is canonical"
+    true
+    (Option.is_none (get_optional_string_field requested_by_json "display_name"));
+  let saved_open_request =
+    match Goal_verification.find_request config ~request_id with
+    | Some request -> request
+    | None -> fail "verification request missing after transition"
+  in
+  check
+    bool
+    "persisted requester display label is canonical"
+    true
+    (Option.is_none saved_open_request.requested_by.display_name);
+  let verified =
+    Tool_workspace.dispatch
+      (workspace_ctx ~agent_name:"agent-alpha" config)
+      ~name:"masc_goal_verify"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "request_id", `String request_id
+            ; ( "principal"
+              , principal_json ~id:"agent-alpha" ~display_name:forged_vote_label )
+            ; "decision", `String "approve"
+            ])
+  in
+  let verified_json =
+    match verified with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_verify not handled"
+  in
+  let verified_request = Yojson.Safe.Util.member "verification_request" verified_json in
+  let vote_json =
+    match
+      verified_request |> Yojson.Safe.Util.member "votes" |> Yojson.Safe.Util.to_list
+    with
+    | vote :: _ -> vote
+    | [] -> fail "expected verification vote"
+  in
+  let vote_principal_json = Yojson.Safe.Util.member "principal" vote_json in
+  check string "vote principal id remains caller" "agent-alpha"
+    (get_string_field vote_principal_json "id");
+  check
+    bool
+    "vote principal display label is canonical"
+    true
+    (Option.is_none (get_optional_string_field vote_principal_json "display_name"));
+  let saved_final_request =
+    match Goal_verification.find_request config ~request_id with
+    | Some request -> request
+    | None -> fail "verification request missing after vote"
+  in
+  (match saved_final_request.votes with
+   | [ vote ] ->
+     check
+       bool
+       "persisted vote display label is canonical"
+       true
+       (Option.is_none vote.principal.display_name)
+   | _ -> fail "expected one persisted vote");
+  let event_log =
+    read_file (Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl")
+  in
+  check
+    bool
+    "event log omits forged actor label"
+    false
+    (contains_substring event_log forged_actor_label);
+  check
+    bool
+    "event log omits forged vote label"
+    false
+    (contains_substring event_log forged_vote_label)
+;;
+
 let test_goal_verify_rejects_spoofed_principal () =
   with_workspace
   @@ fun config ->
@@ -1177,6 +1323,10 @@ let () =
             `Quick
             test_goal_transition_manual_reject_blocks_and_cancels_request
         ; test_case "approval gate" `Quick test_goal_transition_approval_gate
+        ; test_case
+            "principal display labels are canonicalized"
+            `Quick
+            test_goal_principal_display_name_canonicalized
         ; test_case
             "verify rejects spoofed principal"
             `Quick

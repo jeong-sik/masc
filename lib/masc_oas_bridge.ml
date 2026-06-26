@@ -26,7 +26,7 @@ let run_safe ~clock ~caller ~timeout_s fn =
   let t0 = Eio.Time.now clock in
   let elapsed () = Eio.Time.now clock -. t0 in
   let do_timeout fn =
-    if Float.is_inf timeout_s then fn ()
+    if Float.classify_float timeout_s = FP_infinite then fn ()
     else Eio.Time.with_timeout_exn clock timeout_s fn
   in
   try

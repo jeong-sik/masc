@@ -913,8 +913,7 @@ let test_execute_git_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc" in
-  ensure_dir repo;
-  git_ok ~cwd:repo [ "init"; "-q" ];
+  setup_ready_repo_with_origin ~config ~repo_name:"masc" ~repo;
   let raw =
     Keeper_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
       ~args:(tool_execute_typed_exec_args ~cwd:repo "git" ~argv:[ "status" ])
@@ -1090,8 +1089,7 @@ let test_execute_git_status_readonly_without_write_tool_access () =
   setup ~tool_access:[] ~sandbox:Keeper_types_profile_sandbox.Local
   @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc" in
-  ensure_dir repo;
-  git_ok ~cwd:repo [ "init"; "-q" ];
+  setup_ready_repo_with_origin ~config ~repo_name:"masc" ~repo;
   let raw =
     Keeper_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None

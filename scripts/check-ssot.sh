@@ -65,11 +65,11 @@ check_rule() {
 # SSOT-R1 — .masc path concat bypasses Workspace_utils.masc_dir helper.
 # Tracked: #8355 (37 files at filing; current ratchet from main).
 # Excluded: the helper impl + backend setters where the literal IS the SSOT.
-check_rule "R1-masc-path" 2 \
+check_rule "R1-masc-path" 0 \
   "Workspace_utils.masc_dir <config>" \
   'Filename\.concat\s+[a-zA-Z_]+\s+"\.masc"' \
   'workspace_utils_paths_backend|workspace_utils_backend_setup|workspace_eio' \
-  lib
+  lib bin
 
 # SSOT-R2 — loopback literal bypasses Masc_network_defaults.masc_http_default_host.
 # Tracked: #8387.

@@ -147,7 +147,7 @@
  (modules masc_completion_trust_audit)
  (public_name masc-completion-trust-audit)
  (package masc)
- (libraries unix yojson masc.completion_trust_audit))
+ (libraries unix yojson masc.completion_trust_audit masc.config_dir_resolver))
 
 ;; RFC-0262 §9 PR-C: live-LLM behavioural eval for completion-trust.
 ;; Drives a real keeper through the masc runtime, so it links the same
@@ -220,7 +220,7 @@
  (modules masc_trace)
  (public_name masc-trace)
  (package masc)
- (libraries yojson))
+ (libraries yojson masc.config_dir_resolver))
 
 ;; TUI Dashboard - Terminal interface for multi-agent workspace
 

@@ -12,10 +12,49 @@
    - Parse failures and missing files are no-ops, not warnings —
      during normal operation the file is *absent* most of the time. *)
 
-let state_file_path () =
-  match Sys.getenv_opt "MASC_HOST_FD_PRESSURE_STATE_FILE" with
-  | Some s when s <> "" -> s
-  | _ -> "/tmp/masc-host-pressure.state"
+let state_file_env = "MASC_HOST_FD_PRESSURE_STATE_FILE"
+let legacy_sysmon_state_file_env = "MASC_SYSMON_PRESSURE_STATE"
+let default_state_file_path = "/tmp/masc-host-pressure.state"
+
+type state_file_source =
+  | Canonical_env
+  | Legacy_sysmon_env
+  | Default
+
+type state_file_resolution =
+  { path : string
+  ; source : state_file_source
+  ; ignored_legacy_path : string option
+  }
+
+let state_file_source_to_string = function
+  | Canonical_env -> state_file_env
+  | Legacy_sysmon_env -> legacy_sysmon_state_file_env
+  | Default -> "default"
+
+let nonempty_env getenv name =
+  match getenv name with
+  | Some value when value <> "" -> Some value
+  | _ -> None
+;;
+
+let resolve_state_file_path ~getenv =
+  match
+    ( nonempty_env getenv state_file_env
+    , nonempty_env getenv legacy_sysmon_state_file_env )
+  with
+  | Some canonical, Some legacy ->
+    { path = canonical
+    ; source = Canonical_env
+    ; ignored_legacy_path =
+        (if String.equal canonical legacy then None else Some legacy)
+    }
+  | Some canonical, None ->
+    { path = canonical; source = Canonical_env; ignored_legacy_path = None }
+  | None, Some legacy ->
+    { path = legacy; source = Legacy_sysmon_env; ignored_legacy_path = None }
+  | None, None ->
+    { path = default_state_file_path; source = Default; ignored_legacy_path = None }
 ;;
 
 let poll_interval_sec () =
@@ -174,11 +213,22 @@ let one_tick path =
 
 let start ~sw ~clock =
   Eio.Fiber.fork ~sw (fun () ->
-    let path = state_file_path () in
+    let resolution = resolve_state_file_path ~getenv:Sys.getenv_opt in
+    let path = resolution.path in
     let interval = poll_interval_sec () in
+    (match resolution.ignored_legacy_path with
+     | None -> ()
+     | Some legacy_path ->
+       Log.Server.warn
+         "host_fd_pressure_poller: ignoring %s=%s because %s=%s is set"
+         legacy_sysmon_state_file_env
+         legacy_path
+         state_file_env
+         path);
     Log.Server.info
-      "host_fd_pressure_poller: started path=%s interval=%.1fs"
+      "host_fd_pressure_poller: started path=%s source=%s interval=%.1fs"
       path
+      (state_file_source_to_string resolution.source)
       interval;
     let rec loop () =
       Eio.Time.sleep clock interval;

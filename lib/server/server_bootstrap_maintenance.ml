@@ -104,8 +104,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~on_error:(log_server_fiber_crash "metrics_flush")
     (fun () -> Metrics_store_eio.start_flush_fiber ~clock);
   Shutdown.register ~name:"metrics_flush" ~priority:30 Metrics_store_eio.flush_pending;
-  (* RFC-0137 PR-2: host FD pressure poller. Watches sysmon's pressure state
-     file at /tmp/masc-host-pressure.state every 1s; bridges WARN/CRIT into
+  (* RFC-0137 PR-2: host FD pressure poller. Watches sysmon's configured
+     pressure state file every 1s; bridges WARN/CRIT into
      [Keeper_fd_pressure.engage_external] so the keeper scheduling gates pause
      before kern.maxfiles exhaustion can panic the kernel. Disable via
      [MASC_HOST_FD_PRESSURE_POLLER_DISABLED=1]. Sunsets when RFC-0097

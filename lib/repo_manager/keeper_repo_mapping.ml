@@ -2,7 +2,13 @@ open Repo_manager_types
 
 let ( let* ) = Result.bind
 
-let logged_mapping_errors : (string, unit) Hashtbl.t = Hashtbl.create 4
+module String_map = Map.Make (String)
+
+(** Fiber/domain-safe set of keepers for whom a mapping load error has already
+    been logged. Using an immutable [Map] under [Atomic] avoids locking an
+    Eio fiber while still deduplicating warnings. *)
+let logged_mapping_errors : unit String_map.t Atomic.t =
+  Atomic.make String_map.empty
 
 let mappings_toml_basename = "keeper_repo_mappings.toml"
 
@@ -59,20 +65,36 @@ let load_all ~base_path =
 
 (** Cache for [load_all] results keyed by [base_path]. Invalidated on every
     write so the in-memory view does not diverge from disk after mapping
-    mutations. *)
-let load_all_cache : (string, (keeper_repo_mapping list, string) result) Hashtbl.t =
-  Hashtbl.create 4
+    mutations. The immutable [Map] + [Atomic] design is fiber-safe without
+    requiring an Eio mutex to be threaded through every caller. *)
+let load_all_cache : (keeper_repo_mapping list, string) result String_map.t Atomic.t =
+  Atomic.make String_map.empty
 ;;
 
-let invalidate_load_all_cache ~base_path = Hashtbl.remove load_all_cache base_path
+let invalidate_load_all_cache ~base_path =
+  let rec loop () =
+    let current = Atomic.get load_all_cache in
+    let next = String_map.remove base_path current in
+    if Atomic.compare_and_set load_all_cache current next then () else loop ()
+  in
+  loop ()
+;;
 
 let load_all_cached ~base_path =
-  match Hashtbl.find_opt load_all_cache base_path with
+  match String_map.find_opt base_path (Atomic.get load_all_cache) with
   | Some result -> result
   | None ->
     let result = load_all ~base_path in
-    Hashtbl.replace load_all_cache base_path result;
-    result
+    let rec insert () =
+      let current = Atomic.get load_all_cache in
+      match String_map.find_opt base_path current with
+      | Some existing -> existing
+      | None ->
+        let next = String_map.add base_path result current in
+        if Atomic.compare_and_set load_all_cache current next then result
+        else insert ()
+    in
+    insert ()
 ;;
 
 type mapping_lookup =
@@ -143,13 +165,19 @@ let filter_repos_by_mapping (mapping : keeper_repo_mapping)
       repos
 
 let log_mapping_load_error_if_new ~keeper_id msg =
-  if not (Hashtbl.mem logged_mapping_errors keeper_id) then begin
-    Hashtbl.add logged_mapping_errors keeper_id ();
-    Log.Misc.warn
-      "[KeeperRepoMapping] mapping load error for keeper %s \
-       — access denied fail-closed (error: %s)"
-      keeper_id msg
-  end
+  let rec mark () =
+    let current = Atomic.get logged_mapping_errors in
+    if String_map.mem keeper_id current then ()
+    else
+      let next = String_map.add keeper_id () current in
+      if Atomic.compare_and_set logged_mapping_errors current next then
+        Log.Misc.warn
+          "[KeeperRepoMapping] mapping load error for keeper %s \
+           — access denied fail-closed (error: %s)"
+          keeper_id msg
+      else mark ()
+  in
+  mark ()
 ;;
 
 let is_allowed ~keeper_id ~repository_id ~base_path =
@@ -202,10 +230,7 @@ let apply_mapping ~keeper_id ~base_path ~repositories =
   match lookup_mapping ~base_path ~keeper_id with
   | Mapping_missing _ -> []
   | Mapping_load_error msg ->
-      Log.Misc.warn
-        "[KeeperRepoMapping] apply_mapping: mapping load error for \
-         keeper %s — returning no repositories fail-closed (error: %s)"
-        keeper_id msg;
+      log_mapping_load_error_if_new ~keeper_id msg;
       []
   | Mapping_found mapping ->
       filter_repos_by_mapping mapping repositories

@@ -39,6 +39,19 @@ let test_approval_rule_json_round_trip () =
     check bool "risk" true (parsed.max_risk = Q.High)
 ;;
 
+let test_approval_rule_rejects_non_object_json () =
+  check
+    (option reject)
+    "list input"
+    None
+    (Q.approval_rule_of_yojson (`List []));
+  check
+    (option reject)
+    "string input"
+    None
+    (Q.approval_rule_of_yojson (`String "not-a-rule"))
+;;
+
 let test_blank_string_json_is_none () =
   check (option string) "blank" None (Q.string_opt_of_json (`String "  "))
 ;;
@@ -50,6 +63,10 @@ let () =
       , [ test_case "risk conversions" `Quick test_risk_level_conversions ] )
     ; ( "json"
       , [ test_case "approval rule round trip" `Quick test_approval_rule_json_round_trip
+        ; test_case
+            "approval rule rejects non-object json"
+            `Quick
+            test_approval_rule_rejects_non_object_json
         ; test_case "blank string is none" `Quick test_blank_string_json_is_none
         ] )
     ]

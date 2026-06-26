@@ -105,11 +105,6 @@ let string_opt_of_json = function
   | _ -> None
 ;;
 
-(* RFC-0145 — narrow the wildcard catch-all to the only exception
-   [Yojson.Safe.Util.member] can raise on non-object inputs.  An
-   unrelated runtime exception (e.g. [Out_of_memory], async failure,
-   unexpected internal contract break) will now propagate to the
-   caller instead of being silently coerced to [None]. *)
 let string_opt_member key json =
   match Json_util.assoc_member_opt key json with
   | Some value -> string_opt_of_json value
@@ -150,7 +145,8 @@ let approval_rule_to_yojson (rule : approval_rule) =
 ;;
 
 let approval_rule_of_yojson json =
-  try
+  match json with
+  | `Assoc _ ->
     let id = (match Json_util.assoc_member_opt "id" json with Some (`String s) -> s | _ -> "") in
     let keeper_name = (match Json_util.assoc_member_opt "keeper_name" json with Some (`String s) -> s | _ -> "") in
     let tool_name = (match Json_util.assoc_member_opt "tool_name" json with Some (`String s) -> s | _ -> "") in
@@ -196,7 +192,5 @@ let approval_rule_of_yojson json =
       ; match_count
       ; source_approval_id
       }
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
   | _ -> None
 ;;

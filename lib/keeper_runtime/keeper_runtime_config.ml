@@ -134,6 +134,26 @@ let value_to_string = function
   | Keeper_toml_loader.Toml_bool b -> Some (if b then "true" else "false")
   | Keeper_toml_loader.Toml_string_array _ -> None
 
+(** Resolve a single TOML key to its boot-override value. Returns
+    [Some (env_name, value)] when the key is present in the doc and the
+    corresponding env var is unset (so the TOML value would apply).
+    Returns [None] when the env var is already set (caller override wins)
+    or the key is absent / unsupported.
+
+    This is the single precedence rule shared by the pure preview
+    ([resolve_overrides]) and the effectful apply path ([apply_one]):
+    env var > TOML > hardcoded default. *)
+let resolve_one
+    ?(env_lookup = Env_config_core.raw_value_opt)
+    (doc : Keeper_toml_loader.toml_doc) (toml_key, env_name) =
+  if env_is_set env_lookup env_name then
+    (* Caller env override — leave alone. *)
+    None
+  else
+    match List.assoc_opt toml_key doc with
+    | None -> None
+    | Some v -> Option.map (fun s -> (env_name, s)) (value_to_string v)
+
 (** Apply one TOML key to the corresponding env var, unless the env var
     is already set (caller override wins). Returns [true] iff a boot
     override was actually recorded.
@@ -144,19 +164,12 @@ let value_to_string = function
 let apply_one
     ?(env_lookup = Env_config_core.raw_value_opt)
     ?(env_set = Config_boot_overrides.set)
-    (doc : Keeper_toml_loader.toml_doc) (toml_key, env_name) =
-  if env_is_set env_lookup env_name then
-    (* Caller env override — leave alone. *)
-    false
-  else
-    match List.assoc_opt toml_key doc with
-    | None -> false
-    | Some v ->
-      match value_to_string v with
-      | None -> false
-      | Some s ->
-        env_set env_name s;
-        true
+    (doc : Keeper_toml_loader.toml_doc) pair =
+  match resolve_one ~env_lookup doc pair with
+  | None -> false
+  | Some (env_name, s) ->
+    env_set env_name s;
+    true
 
 (** Pure version of the load+apply pipeline. Parses TOML and returns
     the number of overrides that would be applied, plus a list of
@@ -164,22 +177,8 @@ let apply_one
 let resolve_overrides
     ?(env_lookup = Env_config_core.raw_value_opt)
     (doc : Keeper_toml_loader.toml_doc) =
-  let count, applied =
-    List.fold_left
-      (fun (count, applied) (toml_key, env_name) ->
-        if env_is_set env_lookup env_name then (count, applied)
-        else
-          match List.assoc_opt toml_key doc with
-          | None -> (count, applied)
-          | Some v ->
-            match value_to_string v with
-            | None -> (count, applied)
-            | Some s ->
-              (count + 1, (env_name, s) :: applied))
-      (0, [])
-      key_to_env
-  in
-  (count, List.rev applied)
+  let applied = List.filter_map (resolve_one ~env_lookup doc) key_to_env in
+  (List.length applied, applied)
 
 (* Shadow registry: stores every TOML value keyed by env name, even when
    the env var is already set.  This lets operator surfaces compare the

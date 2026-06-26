@@ -285,6 +285,30 @@ let refresh_http_surfaces state ~host ~port =
         Result.map (fun _ -> ()) planning;
       ]
 
+let start_http_refresh state ~host ~port ~refresh_inflight =
+  if not !refresh_inflight then begin
+    refresh_inflight := true;
+    state.connection_status <-
+      (match state.connection_status with
+      | "connected" | "degraded" -> "reconnecting"
+      | _ -> "connecting");
+    let run_refresh () =
+      try refresh_http_surfaces state ~host ~port
+      with exn ->
+        state.connection_status <- "disconnected";
+        add_event state "error"
+          (Printf.sprintf "HTTP refresh failed: %s" (Printexc.to_string exn))
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork ~sw (fun () ->
+            run_refresh ();
+            refresh_inflight := false)
+    | None ->
+        run_refresh ();
+        refresh_inflight := false
+  end
+
 let apply_board_post_load state ~post_id = function
   | Ok (post, comments) ->
       state.board_mode <- Board_read post_id;
@@ -297,6 +321,30 @@ let apply_board_post_load state ~post_id = function
         ~current_error:state.board_error
         ~set_error:(fun value -> state.board_error <- value)
         err
+
+let start_board_post_refresh state ~host ~port ~post_id ~refresh_inflight =
+  if not !refresh_inflight then begin
+    refresh_inflight := true;
+    let run_refresh () =
+      try
+        apply_board_post_load state ~post_id
+          (load_board_post ~host ~port ~post_id)
+      with exn ->
+        remember_surface_error state ~surface:"board"
+          ~current_error:state.board_error
+          ~set_error:(fun value -> state.board_error <- value)
+          (Printf.sprintf "board post refresh failed: %s"
+             (Printexc.to_string exn))
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork ~sw (fun () ->
+            run_refresh ();
+            refresh_inflight := false)
+    | None ->
+        run_refresh ();
+        refresh_inflight := false
+  end
 
 let execute_approval_decision state approval decision =
   let host = Env_config_core.masc_host () in
@@ -355,7 +403,9 @@ let main () =
   load_from_masc_dir state base_path;
   let host = Env_config_core.masc_host () in
   let port = state.port in
-  refresh_http_surfaces state ~host ~port;
+  let http_refresh_inflight = ref false in
+  let board_post_refresh_inflight = ref false in
+  start_http_refresh state ~host ~port ~refresh_inflight:http_refresh_inflight;
   add_event state "system" "TUI started";
 
   (* Main loop *)
@@ -394,7 +444,8 @@ let main () =
            load_from_masc_dir state base_path;
            let host = Env_config_core.masc_host () in
            let port = state.port in
-           refresh_http_surfaces state ~host ~port;
+           start_http_refresh state ~host ~port
+             ~refresh_inflight:http_refresh_inflight;
            (* Also reload logs / board / planning detail if viewing them *)
            (match state.view with
             | Keepers Keeper_logs ->
@@ -405,11 +456,8 @@ let main () =
             | Board ->
                 (match state.board_mode with
                  | Board_read post_id ->
-                     (match load_board_post ~host ~port ~post_id with
-                      | Ok _ as result -> apply_board_post_load state ~post_id result
-                      | Error _ as result ->
-                          apply_board_post_load state ~post_id result;
-                          state.board_mode <- Board_list)
+                     start_board_post_refresh state ~host ~port ~post_id
+                       ~refresh_inflight:board_post_refresh_inflight
                  | Board_list -> ())
             | Planning ->
                 (match state.planning_mode with
@@ -552,15 +600,11 @@ let main () =
                       | Some p ->
                           let host = Env_config_core.masc_host () in
                           let port = state.port in
-                          (match load_board_post ~host ~port ~post_id:p.bp_id with
-                           | Ok _ as result ->
-                               state.board_scroll <- 0;
-                               apply_board_post_load state ~post_id:p.bp_id result
-                           | Error err as result ->
-                               apply_board_post_load state ~post_id:p.bp_id result;
-                               add_event state "error"
-                                 (Printf.sprintf "Failed to load board post %s: %s"
-                                    p.bp_id err))
+                          state.board_mode <- Board_read p.bp_id;
+                          state.board_scroll <- 0;
+                          start_board_post_refresh state ~host ~port
+                            ~post_id:p.bp_id
+                            ~refresh_inflight:board_post_refresh_inflight
                       | None -> ())
                  | Board_read _ -> ())
             | Planning ->
@@ -595,7 +639,9 @@ let main () =
                 state.view <- Keepers Keeper_message
             | Keepers Keeper_detail | Overview | Keepers Keeper_list | Keepers Keeper_logs | Keepers Keeper_message
             | Board | Approvals | Planning | Command | Workspace _ | Lab _ | Logs | Monitoring _ -> ())
-       | _ -> ());
+      | _ -> ());
+
+      Eio.Fiber.yield ();
 
       (* Periodic refresh *)
       let now = Unix.gettimeofday () in
@@ -604,7 +650,8 @@ let main () =
         load_from_masc_dir state base_path;
         let host = Env_config_core.masc_host () in
         let port = state.port in
-        refresh_http_surfaces state ~host ~port;
+        start_http_refresh state ~host ~port
+          ~refresh_inflight:http_refresh_inflight;
         (* Also refresh logs / board / planning detail if viewing them *)
         (match state.view with
          | Keepers Keeper_logs ->
@@ -615,11 +662,8 @@ let main () =
          | Board ->
              (match state.board_mode with
               | Board_read post_id ->
-                  (match load_board_post ~host ~port ~post_id with
-                   | Ok _ as result -> apply_board_post_load state ~post_id result
-                   | Error _ as result ->
-                       apply_board_post_load state ~post_id result;
-                       state.board_mode <- Board_list)
+                  start_board_post_refresh state ~host ~port ~post_id
+                    ~refresh_inflight:board_post_refresh_inflight
               | Board_list -> ())
          | Planning ->
              (match state.planning_mode with

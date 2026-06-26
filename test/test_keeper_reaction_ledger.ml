@@ -252,6 +252,92 @@ let test_summary_counts_completion_contract_attention_receipts () =
     (keeper_attention |> member "completion_contract_attention_count" |> to_int)
 ;;
 
+let test_summary_degrades_unknown_completion_contract_result () =
+  with_temp_base @@ fun base_path ->
+  let config = Workspace.default_config base_path in
+  let keeper_name = "contract-unknown-keeper" in
+  let record ~trace_id ~completion_contract_result () =
+    let receipt_json =
+      `Assoc
+        [ "schema", `String "keeper.execution_receipt.v1"
+        ; "trace_id", `String trace_id
+        ; "outcome", `String "receipt_done"
+        ; "terminal_reason_code", `String "completed"
+        ; "operator_disposition", `String "continue"
+        ; "operator_disposition_reason", `String "none"
+        ; "completion_contract_result", `String completion_contract_result
+        ]
+    in
+    Keeper_reaction_ledger.record_execution_receipt_reaction
+      config
+      ~keeper_name
+      ~trace_id
+      ~turn_count:1
+      ~current_task_id:None
+      ~goal_ids:[]
+      ~outcome:"receipt_done"
+      ~terminal_reason_code:"completed"
+      ~receipt_json
+      ()
+  in
+  record ~trace_id:"trace-unknown" ~completion_contract_result:"passive-only" ();
+  record
+    ~trace_id:"trace-satisfied"
+    ~completion_contract_result:"satisfied_execution"
+    ();
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string
+    "unknown contract result degrades summary"
+    "degraded"
+    "status"
+    summary;
+  check bool "unknown contract result requires operator action" true
+    (summary |> member "operator_action_required" |> to_bool);
+  check int "unknown contract result is not attention" 0
+    (summary |> member "completion_contract_attention_count" |> to_int);
+  check int "unknown contract result counted" 1
+    (summary |> member "completion_contract_unknown_result_count" |> to_int);
+  check int "unknown contract result does not use reaction bucket" 0
+    (summary |> member "unknown_reaction_count" |> to_int);
+  let unknown_result_count =
+    summary
+    |> member "completion_contract_unknown_result_counts"
+    |> to_list
+    |> List.hd
+  in
+  check_member_string "unknown contract result label" "passive-only" "result"
+    unknown_result_count;
+  check int "unknown contract result label count" 1
+    (unknown_result_count |> member "count" |> to_int);
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check_member_string "fleet unknown contract result degrades" "degraded" "status"
+    fleet;
+  check bool "fleet unknown contract result requires operator action" true
+    (fleet |> member "operator_action_required" |> to_bool);
+  check int "fleet unknown contract result counted" 1
+    (fleet |> member "completion_contract_unknown_result_count" |> to_int);
+  let keeper_unknown =
+    fleet
+    |> member "completion_contract_unknown_results_by_keeper"
+    |> to_list
+    |> List.hd
+  in
+  check_member_string
+    "fleet unknown contract result keeper"
+    keeper_name
+    "keeper_name"
+    keeper_unknown;
+  check int "fleet keeper unknown contract result count" 1
+    (keeper_unknown |> member "completion_contract_unknown_result_count" |> to_int)
+;;
+
 let test_summary_marks_unreacted_and_reacted_stimuli () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "summary-keeper" in
@@ -545,6 +631,10 @@ let () =
             "summary counts completion-contract attention receipts"
             `Quick
             test_summary_counts_completion_contract_attention_receipts
+        ; test_case
+            "summary degrades unknown completion-contract result"
+            `Quick
+            test_summary_degrades_unknown_completion_contract_result
         ; test_case
             "summary marks unreacted and reacted stimuli"
             `Quick

@@ -440,6 +440,11 @@ let receipt_contract_result_of_string raw =
   | _ -> None
 ;;
 
+let unknown_receipt_contract_result_label raw =
+  let label = raw |> String.trim |> String.lowercase_ascii in
+  if label = "" then "<empty>" else label
+;;
+
 let receipt_contract_result_to_string = function
   | Receipt_contract_unknown -> "unknown"
   | Receipt_contract_not_dispatched -> "not_dispatched"
@@ -530,6 +535,7 @@ let summarize_rows ~keeper_name ~limit rows =
   let supervisor_recovery_requested_count = ref 0 in
   let completion_contract_attention_count = ref 0 in
   let completion_contract_passive_only_count = ref 0 in
+  let completion_contract_unknown_result_count = ref 0 in
   let unsupported_stimulus_count = ref 0 in
   let payload_parse_error_count = ref 0 in
   let unknown_reaction_count = ref 0 in
@@ -537,6 +543,7 @@ let summarize_rows ~keeper_name ~limit rows =
   let latest_stimulus_id = ref None in
   let latest_completion_contract_attention = ref None in
   let completion_contract_result_counts = Hashtbl.create 8 in
+  let completion_contract_unknown_result_counts = Hashtbl.create 8 in
   let stimulus_seen = Hashtbl.create 16 in
   let board_stimulus_tokens = Hashtbl.create 16 in
   let stimulus_order = ref [] in
@@ -635,7 +642,10 @@ let summarize_rows ~keeper_name ~limit rows =
           | Contract_attention { result; label } ->
             note_contract_attention_label ~result ~label
           | Contract_no_attention -> ())
-       | None -> ())
+       | None ->
+         let label = unknown_receipt_contract_result_label result in
+         incr completion_contract_unknown_result_count;
+         increment_count completion_contract_unknown_result_counts label)
     | None -> ()
   in
   let note_stimulus_kind = function
@@ -718,6 +728,7 @@ let summarize_rows ~keeper_name ~limit rows =
     + !unsupported_stimulus_count
     + !payload_parse_error_count
     + !unknown_reaction_count
+    + !completion_contract_unknown_result_count
   in
   let status =
     if row_count = 0 then "empty"
@@ -742,6 +753,10 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "completion_contract_attention_count", `Int !completion_contract_attention_count
     ; "completion_contract_passive_only_count", `Int !completion_contract_passive_only_count
     ; "completion_contract_result_counts", count_table_json completion_contract_result_counts
+    ; ( "completion_contract_unknown_result_count"
+      , `Int !completion_contract_unknown_result_count )
+    ; ( "completion_contract_unknown_result_counts"
+      , count_table_json completion_contract_unknown_result_counts )
     ; ( "latest_completion_contract_attention"
       , Json_util.string_opt_to_json !latest_completion_contract_attention )
     ; "unsupported_stimulus_count", `Int !unsupported_stimulus_count
@@ -780,6 +795,8 @@ let error_summary ~keeper_name ~limit error =
     ; "completion_contract_attention_count", `Int 0
     ; "completion_contract_passive_only_count", `Int 0
     ; "completion_contract_result_counts", `List []
+    ; "completion_contract_unknown_result_count", `Int 0
+    ; "completion_contract_unknown_result_counts", `List []
     ; "latest_completion_contract_attention", `Null
     ; "unsupported_stimulus_count", `Int 0
     ; "payload_parse_error_count", `Int 0
@@ -871,6 +888,26 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
                ]))
       summaries
   in
+  let completion_contract_unknown_results_by_keeper =
+    List.filter_map
+      (fun summary ->
+        let unknown_count = int_field "completion_contract_unknown_result_count" summary in
+        if unknown_count = 0
+        then None
+        else
+          Some
+            (`Assoc
+               [ "keeper_name"
+               , (match string_field "keeper_name" summary with
+                  | Some value -> `String value
+                  | None -> `String "unknown")
+               ; "completion_contract_unknown_result_count", `Int unknown_count
+               ; ( "completion_contract_unknown_result_counts"
+                 , `List
+                     (list_field "completion_contract_unknown_result_counts" summary) )
+               ]))
+      summaries
+  in
   let read_error_count =
     List.fold_left
       (fun acc summary -> acc + summary_read_error_count summary)
@@ -879,6 +916,9 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
   in
   let pending_count = total_int "pending_stimulus_count" in
   let unknown_reaction_count = total_int "unknown_reaction_count" in
+  let completion_contract_unknown_result_count =
+    total_int "completion_contract_unknown_result_count"
+  in
   let unsupported_stimulus_count = total_int "unsupported_stimulus_count" in
   let payload_parse_error_count = total_int "payload_parse_error_count" in
   let row_count = total_int "row_count" in
@@ -887,6 +927,7 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     else if
       pending_count > 0
       || unknown_reaction_count > 0
+      || completion_contract_unknown_result_count > 0
       || unsupported_stimulus_count > 0
       || payload_parse_error_count > 0
     then "degraded"
@@ -903,6 +944,7 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
           (read_error_count > 0
            || pending_count > 0
            || unknown_reaction_count > 0
+           || completion_contract_unknown_result_count > 0
            || unsupported_stimulus_count > 0
            || payload_parse_error_count > 0) )
     ; "keeper_count", `Int (List.length keeper_names)
@@ -922,6 +964,10 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
       , `Int (total_int "completion_contract_passive_only_count") )
     ; ( "completion_contract_attention_by_keeper"
       , `List completion_contract_attention_by_keeper )
+    ; ( "completion_contract_unknown_result_count"
+      , `Int completion_contract_unknown_result_count )
+    ; ( "completion_contract_unknown_results_by_keeper"
+      , `List completion_contract_unknown_results_by_keeper )
     ; "unsupported_stimulus_count", `Int unsupported_stimulus_count
     ; "payload_parse_error_count", `Int payload_parse_error_count
     ; "unknown_reaction_count", `Int unknown_reaction_count

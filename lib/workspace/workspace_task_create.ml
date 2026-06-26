@@ -59,6 +59,7 @@ type add_task_error =
   | Rejected of string
   | Duplicate of { title : string; existing_id : string }
   | Goal_link_write_failed of string
+  | Backlog_write_failed of string
   | Unexpected_error of string
 
 type batch_add_tasks_success =
@@ -70,6 +71,7 @@ type batch_add_tasks_success =
 type batch_add_tasks_error =
   | Batch_backlog_read_failed of string
   | Batch_goal_link_write_failed of string
+  | Batch_backlog_write_failed of string
   | Batch_unexpected_error of string
 
 let add_task_error_to_string = function
@@ -82,6 +84,7 @@ let add_task_error_to_string = function
       existing_id
   | Goal_link_write_failed msg ->
     Printf.sprintf "Error linking task to goal: %s" msg
+  | Backlog_write_failed msg -> Printf.sprintf "Error writing backlog: %s" msg
   | Unexpected_error msg -> Printf.sprintf "Error: %s" msg
 ;;
 
@@ -89,6 +92,7 @@ let batch_add_tasks_error_to_string = function
   | Batch_backlog_read_failed msg -> Printf.sprintf "Error adding batch tasks: %s" msg
   | Batch_goal_link_write_failed msg ->
     Printf.sprintf "Error linking batch tasks to goals: %s" msg
+  | Batch_backlog_write_failed msg -> Printf.sprintf "Error writing batch backlog: %s" msg
   | Batch_unexpected_error msg -> Printf.sprintf "Error adding batch tasks: %s" msg
 ;;
 
@@ -166,36 +170,51 @@ let add_task_with_result
                   ~task_id
             with
             | Error msg -> Error (Goal_link_write_failed msg)
-            | Ok () ->
-              write_backlog config new_backlog;
-              let created_by_json = Json_util.string_opt_to_json created_by in
-              Workspace_task_classify.emit_task_activity
-                config
-                ~agent_name:actor
-                ~task_id
-                ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
-                ~payload:
-                  (`Assoc
-                      [ "task_id", `String task_id
-                      ; "title", `String title
-                      ; "goal_id", Json_util.string_opt_to_json goal_id
-                      ; "priority", `Int priority
-                      ; "created_by", created_by_json
-                      ; ( "strict_contract"
-                        , `Bool
-                            (match contract with
-                             | Some contract -> contract.strict
-                             | None -> false) )
-                      ]);
-              (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
-              let _ =
-                broadcast
-                  config
-                  ~from_agent:actor
-                  ~content:(Printf.sprintf "New quest: %s" title)
-              in
-              let summary = Printf.sprintf "Added %s: %s" task_id title in
-              Ok { task_id; summary; title; priority; description; goal_id }))))
+            | Ok () -> (
+              match write_backlog_result config new_backlog with
+              | Error msg ->
+                  (* Rollback the goal link we just wrote so the registry does
+                     not reference a task that was not durably published. *)
+                  (match goal_id with
+                   | Some goal_id ->
+                       let _ =
+                         Workspace_goal_index.unlink_task_from_goal_result
+                           config
+                           ~goal_id
+                           ~task_id
+                       in
+                       ()
+                   | None -> ());
+                  Error (Backlog_write_failed msg)
+              | Ok () ->
+                  let created_by_json = Json_util.string_opt_to_json created_by in
+                  Workspace_task_classify.emit_task_activity
+                    config
+                    ~agent_name:actor
+                    ~task_id
+                    ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
+                    ~payload:
+                      (`Assoc
+                          [ "task_id", `String task_id
+                          ; "title", `String title
+                          ; "goal_id", Json_util.string_opt_to_json goal_id
+                          ; "priority", `Int priority
+                          ; "created_by", created_by_json
+                          ; ( "strict_contract"
+                            , `Bool
+                                (match contract with
+                                 | Some contract -> contract.strict
+                                 | None -> false) )
+                          ]);
+                  (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
+                  let _ =
+                    broadcast
+                      config
+                      ~from_agent:actor
+                      ~content:(Printf.sprintf "New quest: %s" title)
+                  in
+                  let summary = Printf.sprintf "Added %s: %s" task_id title in
+                  Ok { task_id; summary; title; priority; description; goal_id })))))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Unexpected_error (Printexc.to_string e))
@@ -276,47 +295,65 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
                  added_tasks_with_goal_ids)
           with
           | Error msg -> Error (Batch_goal_link_write_failed msg)
-          | Ok () ->
-            write_backlog config new_backlog;
-            List.iter
-              (fun ((task : Masc_domain.task), goal_id) ->
-                 let created_by_json = Json_util.string_opt_to_json task.created_by in
-                 Workspace_task_classify.emit_task_activity
-                   config
-                   ~agent_name:actor
-                   ~task_id:task.id
-                   ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
-                   ~payload:
-                     (`Assoc
-                         [ "task_id", `String task.id
-                         ; "title", `String task.title
-                         ; "goal_id", Json_util.string_opt_to_json goal_id
-                         ; "priority", `Int task.priority
-                         ; "created_by", created_by_json
-                         ; ( "strict_contract"
-                           , `Bool
-                               (match task.contract with
-                                | Some contract -> contract.strict
-                                | None -> false) )
-                         ]))
-              added_tasks_with_goal_ids;
-            let summary =
-              String.concat
-                ", "
-                (List.map (fun (t : Masc_domain.task) -> t.id) added_tasks)
-            in
-            (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
-            let msg =
-              Printf.sprintf
-                "New batch of %d quests added: %s"
-                (List.length added_tasks)
-                summary
-            in
-            let _ = broadcast config ~from_agent:actor ~content:msg in
-            let count = List.length added_tasks in
-            let task_ids = List.map (fun (task : Masc_domain.task) -> task.id) added_tasks in
-            let summary = Printf.sprintf "Added %d tasks: %s" count summary in
-            Ok { task_ids; summary; count })
+          | Ok () -> (
+            match write_backlog_result config new_backlog with
+            | Error msg ->
+                (* Rollback goal links for the tasks that were just linked so
+                   the registry does not reference unpublished tasks. *)
+                List.iter
+                  (fun ((task : Masc_domain.task), goal_id) ->
+                     match goal_id with
+                     | Some goal_id ->
+                         let _ =
+                           Workspace_goal_index.unlink_task_from_goal_result
+                             config
+                             ~goal_id
+                             ~task_id:task.id
+                         in
+                         ()
+                     | None -> ())
+                  added_tasks_with_goal_ids;
+                Error (Batch_backlog_write_failed msg)
+            | Ok () ->
+                List.iter
+                  (fun ((task : Masc_domain.task), goal_id) ->
+                     let created_by_json = Json_util.string_opt_to_json task.created_by in
+                     Workspace_task_classify.emit_task_activity
+                       config
+                       ~agent_name:actor
+                       ~task_id:task.id
+                       ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
+                       ~payload:
+                         (`Assoc
+                             [ "task_id", `String task.id
+                             ; "title", `String task.title
+                             ; "goal_id", Json_util.string_opt_to_json goal_id
+                             ; "priority", `Int task.priority
+                             ; "created_by", created_by_json
+                             ; ( "strict_contract"
+                               , `Bool
+                                   (match task.contract with
+                                    | Some contract -> contract.strict
+                                    | None -> false) )
+                             ]))
+                  added_tasks_with_goal_ids;
+                let summary =
+                  String.concat
+                    ", "
+                    (List.map (fun (t : Masc_domain.task) -> t.id) added_tasks)
+                in
+                (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
+                let msg =
+                  Printf.sprintf
+                    "New batch of %d quests added: %s"
+                    (List.length added_tasks)
+                    summary
+                in
+                let _ = broadcast config ~from_agent:actor ~content:msg in
+                let count = List.length added_tasks in
+                let task_ids = List.map (fun (task : Masc_domain.task) -> task.id) added_tasks in
+                let summary = Printf.sprintf "Added %d tasks: %s" count summary in
+                Ok { task_ids; summary; count }))
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | e -> Error (Batch_unexpected_error (Printexc.to_string e))))

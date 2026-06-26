@@ -222,6 +222,16 @@ let add_link_to_links links ~goal_id ~task_id =
   if !updated then links else links @ [ goal_id, [ task_id ] ]
 ;;
 
+let remove_link_from_links links ~goal_id ~task_id =
+  List.filter_map
+    (fun (candidate_goal_id, task_ids) ->
+       if String.equal candidate_goal_id goal_id then
+         let filtered = List.filter (fun id -> not (String.equal id task_id)) task_ids in
+         if filtered = [] then None else Some (candidate_goal_id, filtered)
+       else Some (candidate_goal_id, task_ids))
+    links
+;;
+
 let read_goal_task_links_for_mutation config =
   match read_goal_task_links_r config with
   | Ok links -> Ok links
@@ -264,6 +274,19 @@ let link_task_to_goal config ~goal_id ~task_id =
   match link_task_to_goal_result config ~goal_id ~task_id with
   | Ok () -> ()
   | Error msg -> Log.Misc.warn "%s" msg
+;;
+
+let unlink_task_from_goal_result config ~goal_id ~task_id =
+  let goal_id = String.trim goal_id in
+  let task_id = String.trim task_id in
+  if String.equal goal_id "" || String.equal task_id "" then Ok ()
+  else
+    with_file_lock config (goal_task_links_lock_path config) (fun () ->
+      match read_goal_task_links_for_mutation config with
+      | Error _ as error -> error
+      | Ok links ->
+        let links = remove_link_from_links links ~goal_id ~task_id in
+        write_goal_task_links_result config links)
 ;;
 
 let link_goalless_task_to_goal config ~goal_id ~task_id =

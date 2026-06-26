@@ -91,6 +91,13 @@ val link_task_to_goal_result :
   task_id:string ->
   (unit, goal_task_links_write_error) result
 
+(** Remove one task-to-goal link from the persistent registry. *)
+val unlink_task_from_goal_result :
+  Workspace_utils_backend_setup.config ->
+  goal_id:string ->
+  task_id:string ->
+  (unit, goal_task_links_write_error) result
+
 (** Add one task-to-goal link only when [task_id] has no existing goal link.
     The read/check/write sequence runs under the goal-task-links file lock.
     Returns [Error (Already_linked_to_goals existing_goal_ids)] when the task

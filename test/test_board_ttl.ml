@@ -111,18 +111,74 @@ let test_sweeper_skips_permanent () =
   let (removed_posts, _) = sweep store in
   Alcotest.(check int) "sweeper removed 0 permanent posts" 0 removed_posts
 
+let reset_sweep_schedule_for_test store =
+  store.last_sweep <- 0.0;
+  store.last_flush <- 0.0
+
+let maybe_sweep_for_test = Masc_board_handlers.Board_core_persist.maybe_sweep
+
+let flusher_inbox_capacity_for_test =
+  Masc_board_handlers.Board_core_persist.flusher_inbox_capacity
+
+let drain_flusher_inbox store =
+  let rec loop acc =
+    match Eio.Stream.take_nonblocking store.flusher_inbox with
+    | None -> List.rev acc
+    | Some msg -> loop (msg :: acc)
+  in
+  loop []
+
+let check_one_sweep_and_flush label messages =
+  let sweep_count, flush_count =
+    List.fold_left
+      (fun (sweeps, flushes) msg ->
+         match msg with
+         | Sweep -> (sweeps + 1, flushes)
+         | Flush -> (sweeps, flushes + 1))
+      (0, 0)
+      messages
+  in
+  Alcotest.(check int) (label ^ " sweep count") 1 sweep_count;
+  Alcotest.(check int) (label ^ " flush count") 1 flush_count
+
 let test_maybe_sweep_updates_schedule_once () =
   let store = create_store () in
-  store.last_sweep <- 0.0;
-  store.last_flush <- 0.0;
-  Masc_board_handlers.Board_core_persist.maybe_sweep store;
+  reset_sweep_schedule_for_test store;
+  maybe_sweep_for_test store;
   let first_sweep = store.last_sweep in
   let first_flush = store.last_flush in
   Alcotest.(check bool) "sweep timestamp updated" true (first_sweep > 0.0);
   Alcotest.(check bool) "flush timestamp updated" true (first_flush > 0.0);
-  Masc_board_handlers.Board_core_persist.maybe_sweep store;
+  maybe_sweep_for_test store;
   Alcotest.(check (float 0.0)) "sweep timestamp unchanged" first_sweep store.last_sweep;
-  Alcotest.(check (float 0.0)) "flush timestamp unchanged" first_flush store.last_flush
+  Alcotest.(check (float 0.0)) "flush timestamp unchanged" first_flush store.last_flush;
+  check_one_sweep_and_flush "sequential" (drain_flusher_inbox store)
+
+let test_maybe_sweep_concurrent_schedules_once () =
+  let store = create_store () in
+  reset_sweep_schedule_for_test store;
+  let callers = List.init 32 Fun.id in
+  let _ =
+    Eio.Fiber.List.map
+      ~max_fibers:32
+      (fun _ -> maybe_sweep_for_test store)
+      callers
+  in
+  check_one_sweep_and_flush "concurrent" (drain_flusher_inbox store)
+
+let test_maybe_sweep_full_inbox_rolls_back_schedule () =
+  let store = create_store () in
+  reset_sweep_schedule_for_test store;
+  for _ = 1 to flusher_inbox_capacity_for_test do
+    Eio.Stream.add store.flusher_inbox Flush
+  done;
+  maybe_sweep_for_test store;
+  Alcotest.(check (float 0.0)) "sweep timestamp rolled back" 0.0 store.last_sweep;
+  Alcotest.(check (float 0.0)) "flush timestamp rolled back" 0.0 store.last_flush;
+  Alcotest.(check int)
+    "full inbox length unchanged"
+    flusher_inbox_capacity_for_test
+    (Eio.Stream.length store.flusher_inbox)
 
 let test_post_kind_direct_default () =
   let store = create_store () in
@@ -233,6 +289,10 @@ let () =
             (with_eio test_sweeper_skips_permanent);
           Alcotest.test_case "maybe_sweep schedules once" `Quick
             (with_eio test_maybe_sweep_updates_schedule_once);
+          Alcotest.test_case "maybe_sweep concurrent schedules once" `Quick
+            (with_eio test_maybe_sweep_concurrent_schedules_once);
+          Alcotest.test_case "maybe_sweep full inbox rolls back schedule" `Quick
+            (with_eio test_maybe_sweep_full_inbox_rolls_back_schedule);
         ] );
       ( "visibility_ssot",
         [

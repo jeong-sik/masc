@@ -16,6 +16,7 @@ include module type of struct
 end
 
 val flush_interval_sec : float
+val flusher_inbox_capacity : int
 val persist_error_count : unit -> int
 val record_persist_error : where:string -> string -> unit
 

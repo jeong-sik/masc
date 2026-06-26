@@ -1496,7 +1496,7 @@ let test_health_json_ignores_stale_active_task_alias_when_agent_executable () =
             running_names = [ executor.name ];
             recovering_names = [];
             executable_names = [ executor.name ];
-            phase_names = [ (executor.name, "running") ];
+            phase_values = [ (executor.name, Keeper_state_machine.Running) ];
           }
         in
         let fleet_safety =
@@ -1649,7 +1649,7 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
             running_names = [];
             recovering_names = [];
             executable_names = [];
-            phase_names = [];
+            phase_values = [];
           }
         in
         let fleet_safety =

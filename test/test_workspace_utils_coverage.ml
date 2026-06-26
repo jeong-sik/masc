@@ -11,6 +11,7 @@
 open Alcotest
 
 module Workspace_utils = Workspace_utils
+module Workspace = Masc.Workspace
 
 let yojson = testable Yojson.Safe.pp Yojson.Safe.equal
 

@@ -803,6 +803,65 @@ let stale_turn_bucket stale_seconds =
   else "stale_turn_ge_30m"
 ;;
 
+let stale_broadcast_dedupe_mu = Eio.Mutex.create ()
+let stale_broadcast_dedupe_by_keeper : (string, string) Hashtbl.t =
+  Hashtbl.create 16
+;;
+
+let stale_broadcast_dedupe_key
+      ~keeper_name
+      ~agent_name
+      ~runtime_id
+      ~trace_id
+      ~generation
+      ~failure_reason
+      ~stale_seconds
+  =
+  let failure_reason_cohort = stale_broadcast_failure_cohort failure_reason in
+  let terminal_reason_code =
+    Keeper_turn_terminal_code.to_wire (stale_terminal_reason_code_typed failure_reason)
+  in
+  String.concat
+    "\000"
+    [ keeper_name
+    ; agent_name
+    ; runtime_id
+    ; trace_id
+    ; string_of_int generation
+    ; failure_reason_cohort
+    ; terminal_reason_code
+    ; operator_broadcast_key_part (stale_broadcast_kill_class failure_reason)
+    ; stale_turn_bucket stale_seconds
+    ]
+;;
+
+let should_emit_stale_keeper_broadcast
+      ~keeper_name
+      ~agent_name
+      ~runtime_id
+      ~trace_id
+      ~generation
+      ~failure_reason
+      ~stale_seconds
+  =
+  let key =
+    stale_broadcast_dedupe_key
+      ~keeper_name
+      ~agent_name
+      ~runtime_id
+      ~trace_id
+      ~generation
+      ~failure_reason
+      ~stale_seconds
+  in
+  Eio.Mutex.use_rw ~protect:true stale_broadcast_dedupe_mu (fun () ->
+    match Hashtbl.find_opt stale_broadcast_dedupe_by_keeper keeper_name with
+    | Some previous_key when String.equal previous_key key -> false
+    | _ ->
+      Hashtbl.replace stale_broadcast_dedupe_by_keeper keeper_name key;
+      true)
+;;
+
 let stale_broadcast_payload
       ~keeper_name
       ~agent_name
@@ -851,36 +910,58 @@ let emit_stale_keeper_broadcast
       ~last_turn_ts
   =
   let runtime_id_string = runtime_id in
-  let payload =
-    stale_broadcast_payload
+  if
+    should_emit_stale_keeper_broadcast
       ~keeper_name
       ~agent_name
       ~runtime_id
       ~trace_id
       ~generation
-      ~stale_seconds
-      ~last_turn_ts
       ~failure_reason
-  in
-  let event =
-    Activity_graph.emit
-      config
-      ~actor:{ Activity_graph.kind = "watchdog"; id = keeper_name }
-      ~kind:"keeper.operator_broadcast_required"
-      ~payload
-      ()
-  in
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string ExecutionReceiptFailures)
-    ~labels:[ "keeper", keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Stale_broadcast) ]
-    ();
-  Log.Keeper.warn
-    ~keeper_name
-    "%s: stale_keeper_broadcast emitted last_turn=%.0fs ago runtime=%s seq=%d"
-    keeper_name
-    stale_seconds
-    runtime_id_string
-    event.seq
+      ~stale_seconds
+  then (
+    let payload =
+      stale_broadcast_payload
+        ~keeper_name
+        ~agent_name
+        ~runtime_id
+        ~trace_id
+        ~generation
+        ~stale_seconds
+        ~last_turn_ts
+        ~failure_reason
+    in
+    let event =
+      Activity_graph.emit
+        config
+        ~actor:{ Activity_graph.kind = "watchdog"; id = keeper_name }
+        ~kind:"keeper.operator_broadcast_required"
+        ~payload
+        ()
+    in
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ExecutionReceiptFailures)
+      ~labels:[ "keeper", keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Stale_broadcast) ]
+      ();
+    Log.Keeper.warn
+      ~keeper_name
+      "%s: stale_keeper_broadcast emitted last_turn=%.0fs ago runtime=%s seq=%d"
+      keeper_name
+      stale_seconds
+      runtime_id_string
+      event.seq)
+  else (
+    let reason = "stale_keeper_broadcast_duplicate" in
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string OperatorBroadcastSuppressed)
+      ~labels:[ "keeper", keeper_name; "reason", reason ]
+      ();
+    Log.Keeper.info
+      ~keeper_name
+      "%s: stale_keeper_broadcast suppressed duplicate bucket=%s runtime=%s"
+      keeper_name
+      (stale_turn_bucket stale_seconds)
+      runtime_id_string)
 ;;
 
 let latest_json (config : Workspace.config) keeper_name =
@@ -897,3 +978,14 @@ let latest_json_by_keeper (config : Workspace.config) keeper_names =
     | Some json -> Some (keeper_name, json)
     | None -> None)
 ;;
+
+module For_testing = struct
+  let stale_broadcast_dedupe_key = stale_broadcast_dedupe_key
+  let stale_turn_bucket = stale_turn_bucket
+  let should_emit_stale_keeper_broadcast = should_emit_stale_keeper_broadcast
+
+  let reset_stale_broadcast_dedupe () =
+    Eio.Mutex.use_rw ~protect:true stale_broadcast_dedupe_mu (fun () ->
+      Hashtbl.reset stale_broadcast_dedupe_by_keeper)
+  ;;
+end

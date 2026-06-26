@@ -1,6 +1,14 @@
 # Changelog
 
 
+## [0.19.50] - 2026-06-26
+
+### Changed
+- Bump OAS agent_sdk pin to latest main and bump masc version to 0.19.50.
+
+### Deprecated
+- TBD
+
 ## Unreleased
 
 ### Changed

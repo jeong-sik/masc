@@ -157,7 +157,7 @@ type monitoring_section =
 (** Workspace sub-sections *)
 type workspace_section =
   | Work
-  | Planning
+  | Workspace_planning
   | Repositories
   | Verification
 

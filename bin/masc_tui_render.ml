@@ -1248,7 +1248,7 @@ let render (state : state) =
   | Approvals -> render_approvals state
   | Command -> render_placeholder state ~title:"Command"
   | Workspace Work -> render_placeholder state ~title:"Workspace Work"
-  | Workspace Planning -> render_placeholder state ~title:"Workspace Planning"
+  | Workspace Workspace_planning -> render_placeholder state ~title:"Workspace Planning"
   | Workspace Repositories -> render_placeholder state ~title:"Repositories"
   | Workspace Verification -> render_placeholder state ~title:"Verification"
   | Lab Tools -> render_placeholder state ~title:"Tools"

@@ -472,14 +472,6 @@ export function SettingsSurface() {
   const [compactAt, setCompactAt] = useState(85)
   const [autoCompact, setAutoCompact] = useState(true)
 
-
-  const runtimeStats = {
-    ids: runtimeDefaults?.runtimes.length ?? 0,
-    providers: new Set(runtimeDefaults?.runtimes.map(r => r.provider) ?? []).size,
-    models: new Set(runtimeDefaults?.runtimes.map(r => r.model) ?? []).size,
-    default: runtimeDefaults?.default_runtime_id ?? '—',
-  }
-
   useEffect(() => {
     let active = true
     void (async () => {

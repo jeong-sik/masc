@@ -128,35 +128,35 @@ let test_server_parse_rejection_split () =
     ~model_:false
     ~server:true;
   check_parse_split
-    "provider_invalid_request_parse_error"
+    "provider_invalid_request_json_message_is_not_typed_parse_error"
     (SdkE.Provider
        (Llm_provider.Error.InvalidRequest
           { provider = "claude"; reason = "unexpected character in JSON at byte 9" }))
-    ~provider:true
+    ~provider:false
     ~model_:false
-    ~server:true;
+    ~server:false;
   check_parse_split
-    "api_invalid_request_parse_error"
+    "api_invalid_request_json_message_is_not_typed_parse_error"
     (SdkE.Api (Retry.InvalidRequest { message = "unexpected character in JSON at byte 9" }))
     ~provider:false
-    ~model_:true
-    ~server:true;
+    ~model_:false
+    ~server:false;
   check_parse_split
-    "provider_invalid_request_yyjson_parse_error"
+    "provider_invalid_request_yyjson_message_is_not_typed_parse_error"
     (SdkE.Provider
        (Llm_provider.Error.InvalidRequest
           { provider = "ollama"
           ; reason = "yyjson parse error: unexpected token at byte 9"
           }))
-    ~provider:true
+    ~provider:false
     ~model_:false
-    ~server:true;
+    ~server:false;
   check_parse_split
-    "api_invalid_request_json_parse_error"
+    "api_invalid_request_json_parse_message_is_not_typed_parse_error"
     (SdkE.Api (Retry.InvalidRequest { message = "JSON parse error at byte 9" }))
     ~provider:false
-    ~model_:true
-    ~server:true;
+    ~model_:false
+    ~server:false;
   check_parse_split
     "api_invalid_request_xml_parse_error"
     (SdkE.Api (Retry.InvalidRequest { message = "XML parse error at line 3" }))

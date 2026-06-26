@@ -98,37 +98,26 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Orchestration _
   | Agent_sdk.Error.Internal _ -> false
 
-(** Detect server-side request body parse errors (e.g. Ollama yyjson
-    rejecting a request with "Value looks like object, but can't find
-    closing '}' symbol").  The LLM API never processed the request, so
-    committed tool results are not at risk of duplication.
+(** Detect typed server-side request body parse errors.  The LLM API never
+    processed the request, so committed tool results are not at risk of
+    duplication.
 
     These errors may recur with the same payload, so they are NOT
     eligible for same-turn retry.  They ARE eligible for auto-recovery
     when all committed tools are reconcile-safe (idempotent/board-like):
-    the keeper's next heartbeat cycle will build a fresh prompt. *)
-let server_parse_rejection_message_matches message =
-  let lower = String.lowercase_ascii message in
-  (* Compound patterns to avoid false positives on generic messages
-     like "Service closing" or "Can't find the specified tool".
-     Each pattern targets a specific JSON parser error family. *)
-  (string_contains_substring ~needle:"can't find closing" lower
-   || string_contains_substring ~needle:"find end of" lower)
-  || string_contains_substring ~needle:"unexpected character in json" lower
-  || string_contains_substring ~needle:"unterminated" lower
-  || (string_contains_substring ~needle:"parse error" lower
-      && (string_contains_substring ~needle:"json" lower
-          || string_contains_substring ~needle:"yyjson" lower))
+    the keeper's next heartbeat cycle will build a fresh prompt.
+
+    Deliberately do not infer this from [InvalidRequest] message text: provider
+    bodies are free-form and have produced false positives for non-JSON parse
+    errors.  If OAS needs to recover these cases, it must expose a structured
+    parse-error constructor before MASC classifies them here. *)
 
 let is_provider_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Provider (Llm_provider.Error.ParseError _) -> true
   | Agent_sdk.Error.Provider
-      (Llm_provider.Error.InvalidRequest { reason; _ }) ->
-      server_parse_rejection_message_matches reason
-  (* Not a provider-level parse rejection. *)
-  | Agent_sdk.Error.Provider
-      (Llm_provider.Error.NetworkError _ | Llm_provider.Error.Timeout _
+      (Llm_provider.Error.InvalidRequest _ | Llm_provider.Error.NetworkError _
+      | Llm_provider.Error.Timeout _
       | Llm_provider.Error.ServerError _ | Llm_provider.Error.RateLimit _
       | Llm_provider.Error.AuthError _ | Llm_provider.Error.MissingApiKey _
       | Llm_provider.Error.NotFound _ | Llm_provider.Error.CapacityExhausted _
@@ -148,12 +137,10 @@ let is_provider_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
 
 let is_model_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
-  | Agent_sdk.Error.Api (InvalidRequest { message }) ->
-      server_parse_rejection_message_matches message
-  (* Not a model-level parse rejection. *)
-  | Agent_sdk.Error.Api (NetworkError _ | Timeout _ | Overloaded _
-    | ServerError _ | RateLimited _ | AuthError _ | NotFound _
-    | ContextOverflow _) -> false
+  | Agent_sdk.Error.Api (InvalidRequest _ | NetworkError _ | Timeout _
+    | Overloaded _ | ServerError _ | RateLimited _ | AuthError _ | NotFound _
+    | ContextOverflow _) ->
+      false
   | Agent_sdk.Error.Provider _ -> false
   | Agent_sdk.Error.Agent _ -> false
   | Agent_sdk.Error.Mcp _ -> false

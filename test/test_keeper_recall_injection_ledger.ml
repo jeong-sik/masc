@@ -44,13 +44,14 @@ let test_append_retention_prunes_old_day_file () =
     ~n_facts_in_store:1
     ~now:1234.5
     ();
-  check "append retention prunes old recall file" false (Sys.file_exists old_file);
+  check "append retention prunes old recall file" (not (Sys.file_exists old_file));
   let store =
     Dated_jsonl.create
       ~base_dir:(Filename.concat masc_root "recall_injections")
       ()
   in
-  check "current recall row survives append retention" true
+  check
+    "current recall row survives append retention"
     (Dated_jsonl.read_recent store 10 |> List.length > 0)
 
 let test_prune_older_than_removes_old_day_file () =
@@ -59,8 +60,8 @@ let test_prune_older_than_removes_old_day_file () =
   let masc_root = tmpdir "recall-ledger-retention-manual" in
   let old_file = write_old_recall_file masc_root in
   let deleted = Ledger.prune_older_than ~masc_root ~retention_days:30 in
-  check "manual retention reports deletion" true (deleted >= 1);
-  check "manual retention removes old recall file" false (Sys.file_exists old_file)
+  check "manual retention reports deletion" (deleted >= 1);
+  check "manual retention removes old recall file" (not (Sys.file_exists old_file))
 
 let () =
   let j =

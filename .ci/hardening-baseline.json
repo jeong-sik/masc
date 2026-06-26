@@ -49,13 +49,13 @@
       "bin/gen_shell_ir_walkers.ml:1254:| _ -> ()"
     ]
   },
-  "lastUpdatedCommit": "adfc935e518a3d0b299d823bc4c4ed033b28fcbc",
+  "lastUpdatedCommit": "5bc6966a817cd031053b60d24da54c960760f3ba",
   "metrics": {
     "direct_env_reads": 188,
     "direct_env_reads_outside_env_boundary": 160,
     "exception_message_classifiers": 106,
     "local_workspace_path_literals": 0,
     "stub_markers": 4,
-    "wildcard_silent_defaults": 1991
+    "wildcard_silent_defaults": 1994
   }
 }

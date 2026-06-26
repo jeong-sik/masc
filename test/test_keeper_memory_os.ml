@@ -782,6 +782,101 @@ let test_memory_os_env_invalid_values_fail_closed_or_default () =
     check_log_contains lines "using default")
 ;;
 
+let assoc_fields label = function
+  | `Assoc fields -> fields
+  | json -> Alcotest.failf "%s must be object, got %s" label (Yojson.Safe.to_string json)
+;;
+
+let string_field label key json =
+  match List.assoc_opt key (assoc_fields label json) with
+  | Some (`String value) -> value
+  | Some value ->
+    Alcotest.failf
+      "%s.%s must be string, got %s"
+      label
+      key
+      (Yojson.Safe.to_string value)
+  | None -> Alcotest.failf "%s.%s missing" label key
+;;
+
+let storage_config_entries () =
+  let snapshot = Env_config_snapshot.to_json ~cat:"storage" () in
+  match List.assoc_opt "categories" (assoc_fields "snapshot" snapshot) with
+  | Some (`Assoc categories) ->
+    (match List.assoc_opt "storage" categories with
+     | Some (`List entries) -> entries
+     | Some json ->
+       Alcotest.failf "storage category must be list, got %s" (Yojson.Safe.to_string json)
+     | None -> Alcotest.fail "storage category missing")
+  | Some json ->
+    Alcotest.failf "categories must be object, got %s" (Yojson.Safe.to_string json)
+  | None -> Alcotest.fail "categories missing"
+;;
+
+let find_config_env env entries =
+  match
+    List.find_opt
+      (fun entry -> String.equal env (string_field "config entry" "env" entry))
+      entries
+  with
+  | Some entry -> entry
+  | None -> Alcotest.failf "config entry %s missing" env
+;;
+
+let test_memory_os_config_snapshot_surfaces_effective_envs () =
+  let timeout_env = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC" in
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_RECALL" "" (fun () ->
+    with_memory_os_env timeout_env "123.5" (fun () ->
+      let entries = storage_config_entries () in
+      let names = List.map (string_field "config entry" "env") entries in
+      List.iter
+        (fun expected ->
+           Alcotest.(check bool)
+             (expected ^ " surfaced")
+             true
+             (List.mem expected names))
+        [ "MASC_KEEPER_MEMORY_OS_RECALL"
+        ; "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
+        ; "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS"
+        ; "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
+        ; timeout_env
+        ; "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
+        ; "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
+        ; "MASC_KEEPER_MEMORY_OS_GC"
+        ; "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
+        ; "MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID"
+        ];
+      let timeout = find_config_env timeout_env entries in
+      Alcotest.(check string)
+        "timeout snapshot source"
+        "env"
+        (string_field "timeout entry" "source" timeout);
+      Alcotest.(check string)
+        "timeout snapshot value"
+        "123.5"
+        (string_field "timeout entry" "value" timeout);
+      Alcotest.(check string)
+        "timeout snapshot default"
+        "600.0"
+        (string_field "timeout entry" "default" timeout);
+      let recall = find_config_env "MASC_KEEPER_MEMORY_OS_RECALL" entries in
+      Alcotest.(check string)
+        "blank recall env falls back to default source"
+        "default"
+        (string_field "recall entry" "source" recall);
+      Alcotest.(check string)
+        "recall snapshot default"
+        "true"
+        (string_field "recall entry" "default" recall);
+      match List.assoc_opt "value" (assoc_fields "recall entry" recall) with
+      | Some `Null -> ()
+      | Some value ->
+        Alcotest.failf
+          "blank recall env should render null value, got %s"
+          (Yojson.Safe.to_string value)
+      | None -> Alcotest.fail "recall entry value missing"))
+;;
+
 let test_librarian_timeout_override_env () =
   let env = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC" in
   Fun.protect
@@ -4163,6 +4258,10 @@ let () =
             "memory os env invalid values fail closed or default"
             `Quick
             test_memory_os_env_invalid_values_fail_closed_or_default
+        ; Alcotest.test_case
+            "memory os config snapshot surfaces effective envs"
+            `Quick
+            test_memory_os_config_snapshot_surfaces_effective_envs
         ; Alcotest.test_case
             "librarian timeout override env"
             `Quick

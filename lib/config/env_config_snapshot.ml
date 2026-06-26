@@ -586,7 +586,29 @@ let lock_entries =
       "Default lock timeout (seconds, 2 min)";
   ]
 
-let memory_entries = []
+let memory_entries =
+  [
+    entry ~default:"true" "MASC_KEEPER_MEMORY_OS_RECALL"
+      "Memory OS recall prompt injection enabled; invalid values fail closed";
+    entry ~default:"true" "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
+      "Memory OS post-turn librarian extraction enabled; invalid values fail closed";
+    entry ~default:"3" "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS"
+      "Turns between librarian extraction attempts per keeper (floor 1)";
+    entry ~default:"24" "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
+      "Recent-message window for librarian extraction (floor 1)";
+    entry ~default:"600.0" "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC"
+      "Provider timeout for librarian extraction in seconds";
+    entry ~default:"(none)" "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
+      "Optional runtime id override for librarian extraction";
+    entry ~default:"1" "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
+      "Fleet-wide concurrency gate for librarian provider calls; 0 disables";
+    entry ~default:"false" "MASC_KEEPER_MEMORY_OS_GC"
+      "Per-keeper Memory OS GC maintenance fiber kill switch; invalid values fail closed";
+    entry ~default:"false" "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
+      "Per-keeper Memory OS consolidation maintenance fiber kill switch; invalid values fail closed";
+    entry ~default:"(none)" "MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID"
+      "Optional runtime id override for Memory OS consolidation";
+  ]
 
 let message_gc_entries =
   [

@@ -870,12 +870,17 @@ let () = test "handle_transition_rejects_submit_when_verification_disabled"
   assert (not (str_contains message "Valid actions: start, done, submit_for_verification"))
 )
 
-let () = test "handle_transition_expected_version_mismatch_does_not_retry_without_cas"
+let () = test "handle_transition_expected_version_mismatch_preserves_cas_guard"
     (fun () ->
   let ctx = make_test_ctx () in
   let _ =
     Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [ ("title", `String "CAS guarded task") ])
+  in
+  let before_seq =
+    match Log.Ring.recent ~limit:1 () with
+    | entry :: _ -> entry.Log.Ring.seq
+    | [] -> -1
   in
   let result =
     Task.Tool.handle_transition
@@ -890,6 +895,15 @@ let () = test "handle_transition_expected_version_mismatch_does_not_retry_withou
          ])
   in
   assert (not (Tool_result.is_success result));
+  assert (str_contains (Tool_result.message result) "Version mismatch");
+  let retry_entries =
+    Log.Ring.recent ~limit:20 ~module_filter:"Task" ~since_seq:before_seq ()
+    |> List.filter (fun (entry : Log.Ring.entry) ->
+      str_contains entry.message "CAS version mismatch"
+      && str_contains entry.message "retrying")
+  in
+  if retry_entries <> []
+  then failwith "explicit expected_version mismatch must not enter CAS retry loop";
   match Workspace.get_tasks_raw ctx.Task.Tool.config with
   | [ { Masc_domain.task_status = Masc_domain.Todo; _ } ] -> ()
   | [ task ] ->

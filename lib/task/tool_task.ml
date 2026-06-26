@@ -439,11 +439,18 @@ and handle_transition ~tool_name ~start_time ctx args =
   in
   let max_cas_retries = 3 in
   let cas_retry_delay_s = 0.05 in
+  let version_mismatch_prefix = "Version mismatch" in
+  (* TODO(task-cas): replace this string bridge with a typed
+     [Task_error.Version_mismatch] variant.  Today [transition_task_r] emits
+     this prefix only for caller-supplied [expected_version=Some _] guards, so
+     the retry below is intentionally gated to [expected_version=None]; a stale
+     explicit CAS guard must fail instead of becoming a blind retry. *)
   let is_version_mismatch = function
     | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState msg)) ->
-        let prefix = "Version mismatch" in
-        String.length msg >= String.length prefix
-        && String.equal (Stdlib.String.sub msg 0 (String.length prefix)) prefix
+        String.length msg >= String.length version_mismatch_prefix
+        && String.equal
+             (Stdlib.String.sub msg 0 (String.length version_mismatch_prefix))
+             version_mismatch_prefix
     | _ -> false
   in
   let prepare_verification_request =

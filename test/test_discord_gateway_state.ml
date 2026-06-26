@@ -689,6 +689,32 @@ let test_decode_message_create_leaves_unknown_mention_untouched () =
   | Ok _ -> fail "expected unknown mention left as raw snowflake"
   | Error msg -> fail msg
 
+let test_decode_message_create_leaves_malformed_mention_unresolved () =
+  let malformed_id = "333333333333333333" in
+  let raw = "hey <@?" ^ malformed_id ^ ">" in
+  let payload =
+    message_create_payload
+      ~id:"MSG6B"
+      ~channel_id:"CH1"
+      ~author_id:"USER1"
+      ~content:raw
+      ~mention_ids:[]
+      ()
+  in
+  match
+    S.decode_dispatch
+      ~bot_user_id:(Some "BOT")
+      ~event_name:"MESSAGE_CREATE"
+      ~payload
+  with
+  | Ok
+      (S.Message_create
+        { content; raw_content; resolved_mentions = []; _ })
+    when String.equal content raw && String.equal raw_content raw ->
+      ()
+  | Ok _ -> fail "expected malformed mention left unresolved"
+  | Error msg -> fail msg
+
 let test_decode_message_create_preserves_raw_content () =
   let alice_id = "111111111111111111" in
   let payload =
@@ -2196,6 +2222,8 @@ let () =
             test_decode_message_create_resolves_mention_username_fallback
         ; test_case "MESSAGE_CREATE leaves unknown mention untouched" `Quick
             test_decode_message_create_leaves_unknown_mention_untouched
+        ; test_case "MESSAGE_CREATE leaves malformed mention unresolved" `Quick
+            test_decode_message_create_leaves_malformed_mention_unresolved
         ; test_case "MESSAGE_CREATE preserves raw_content" `Quick
             test_decode_message_create_preserves_raw_content
         ; test_case "MESSAGE_CREATE records resolved_mentions metadata" `Quick

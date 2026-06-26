@@ -19,6 +19,26 @@ open Masc
 let counter_total () =
   Otel_metric_store.metric_total Keeper_metrics.(to_string MetaJsonFailures)
 
+let read_file path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+       let len = in_channel_length ic in
+       really_input_string ic len)
+
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0
+  then true
+  else (
+    let rec loop idx =
+      idx + needle_len <= haystack_len
+      && (String.sub haystack idx needle_len = needle || loop (idx + 1))
+    in
+    loop 0)
+
 let canonical_only_meta_json () =
   (* Build an `Assoc whose every key is in [canonical_keeper_meta_key_names].
      Values are placeholders — [warn_unknown_keeper_meta_keys] inspects keys
@@ -74,7 +94,7 @@ let test_counter_ticks_on_genuine_unknown_key () =
     true
     (after > before)
 
-let test_legacy_toml_owned_meta_keys_are_ignored_before_warn () =
+let test_persisted_multimodal_policy_is_canonical_before_warn () =
   let path = Filename.temp_file "masc-legacy-keeper-meta-" ".json" in
   Fun.protect
     ~finally:(fun () ->
@@ -86,22 +106,22 @@ let test_legacy_toml_owned_meta_keys_are_ignored_before_warn () =
       let before = counter_total () in
       (match Keeper_meta_store.read_meta_file_path path with
        | Ok (Some meta) ->
-         Alcotest.(check string) "keeper name" "legacy-mm" meta.name
+         Alcotest.(check string) "keeper name" "legacy-mm" meta.name;
+         Alcotest.(check string)
+           "multimodal policy"
+           "delegate"
+           (Keeper_types_profile.multimodal_policy_to_string meta.multimodal_policy)
        | Ok None -> Alcotest.fail "expected keeper meta"
        | Error err -> Alcotest.fail ("read_meta_file_path failed: " ^ err));
       let after = counter_total () in
       Alcotest.(check (float 0.0001))
-        "legacy TOML-owned keys are scrubbed before unknown-key warning"
+        "persisted multimodal policy is canonical before unknown-key warning"
         before
         after;
-      match Safe_ops.read_json_file_safe path with
-      | Error err -> Alcotest.fail ("failed to reload keeper meta: " ^ err)
-      | Ok (`Assoc fields) ->
-        Alcotest.(check bool)
-          "read path does not rewrite persisted legacy meta"
-          true
-          (List.mem_assoc "multimodal_policy" fields)
-      | Ok _ -> Alcotest.fail "keeper meta must remain a JSON object")
+      Alcotest.(check bool)
+        "read path keeps persisted multimodal_policy key"
+        true
+        (contains_substring (read_file path) "\"multimodal_policy\""))
 
 let fresh_tmpdir () =
   let path = Filename.temp_file "masc-progress-refresh-" ".tmp" in
@@ -152,9 +172,9 @@ let () =
             `Quick
             test_counter_ticks_on_genuine_unknown_key
         ; Alcotest.test_case
-            "legacy TOML-owned keys are ignored before warning"
+            "persisted multimodal policy is canonical before warning"
             `Quick
-            test_legacy_toml_owned_meta_keys_are_ignored_before_warn
+            test_persisted_multimodal_policy_is_canonical_before_warn
         ; Alcotest.test_case
             "progress Updated-line refresh failure is observable"
             `Quick

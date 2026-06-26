@@ -28,11 +28,33 @@ else
 fi
 dashboard_pm_label="${dashboard_pm[*]}"
 
-# Check if rebuild is needed: any source file newer than stamp
+generated_index_has_remote_startup_resources() {
+  local index="$OUTPUT_DIR/index.html"
+  [ -f "$index" ] || return 1
+
+  # The dashboard source index intentionally avoids network-blocking startup
+  # resources. Treat stale generated output that still contains them as invalid
+  # even when the timestamp stamp says "fresh".
+  if grep -Eiq 'https://fonts\.(googleapis|gstatic)\.com' "$index"; then
+    return 0
+  fi
+  if grep -Eiq '<link[^>]+rel=["'\'']stylesheet["'\''][^>]+href=["'\'']https://' "$index"; then
+    return 0
+  fi
+
+  return 1
+}
+
+# Check if rebuild is needed: source mtimes, missing output, or invalid output.
 needs_rebuild() {
   # No stamp or no output → must build
   [ ! -f "$STAMP" ] && return 0
   [ ! -f "$OUTPUT_DIR/index.html" ] && return 0
+
+  if generated_index_has_remote_startup_resources; then
+    echo "[dashboard] Generated index contains remote startup resources; rebuilding." >&2
+    return 0
+  fi
 
   # Any .ts/.tsx/.css/.html source newer than stamp → rebuild
   if find "$DASHBOARD_DIR/src" \
@@ -55,7 +77,7 @@ needs_rebuild() {
 }
 
 if needs_rebuild; then
-  echo "[dashboard] Sources changed, rebuilding SPA..." >&2
+  echo "[dashboard] Build output stale, rebuilding SPA..." >&2
   temp_root="${TMPDIR:-/tmp}"
   temp_root="${temp_root%/}"
   if [ ! -d "$temp_root" ] || [ ! -w "$temp_root" ]; then

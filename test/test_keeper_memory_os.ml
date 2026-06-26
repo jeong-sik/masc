@@ -1121,10 +1121,10 @@ let test_librarian_runtime_requires_clock_for_provider_call () =
          with
          | Ok _ -> Alcotest.fail "expected missing clock to fail closed"
          | Error msg ->
-           Alcotest.(check bool)
+           Alcotest.(check string)
              "explicit missing clock error"
-             true
-             (contains "clock unavailable" msg));
+             Librarian_runtime.librarian_provider_clock_unavailable_error
+             msg);
         Alcotest.(check bool) "provider not called without clock" false !called;
         Alcotest.(check int)
           "no event persisted"

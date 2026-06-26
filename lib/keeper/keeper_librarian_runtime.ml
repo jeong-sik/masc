@@ -366,6 +366,10 @@ let with_timeout ~clock ~timeout_sec f =
   | Eio.Time.Timeout -> None
 ;;
 
+let librarian_provider_clock_unavailable_error =
+  "memory os librarian provider clock unavailable"
+;;
+
 let unstructured_note_max_chars = 900
 
 let collapse_for_unstructured_note raw =
@@ -453,7 +457,7 @@ let extract_with_provider_classified
     (inp : Keeper_librarian.input)
   =
   match clock with
-  | None -> Error "memory os librarian provider clock unavailable"
+  | None -> Error librarian_provider_clock_unavailable_error
   | Some clock -> (
   match messages_for_librarian inp with
   | Error _ as e -> e

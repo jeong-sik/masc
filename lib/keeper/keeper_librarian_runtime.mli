@@ -147,6 +147,11 @@ val with_provider_slot
     capacity 0 disables the gate so [f] always runs ([Some]). Exposed for
     storm-guard regression coverage (#21376). *)
 
+val librarian_provider_clock_unavailable_error : string
+(** Stable error returned before provider I/O when provider-backed librarian
+    extraction is called without a clock. Exposed so callers/tests do not
+    classify the human diagnostic with substring matching. *)
+
 val extract_with_provider
   :  ?complete:complete_fn
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -168,9 +173,11 @@ val extract_with_provider_classified
   -> generation:int
   -> Keeper_librarian.input
   -> (extraction_result, string) result
-(** Provider-backed librarian extraction. A missing [clock] is an explicit
-    [Error] so production calls cannot silently run without timeout
-    enforcement. *)
+(** Provider-backed librarian extraction. [clock] stays optional at the API
+    boundary because [run_best_effort] may be called from contexts that cannot
+    supply an Eio clock; [None] returns
+    {!librarian_provider_clock_unavailable_error} before provider I/O so
+    production calls cannot silently run without timeout enforcement. *)
 
 val extract_and_append_with_provider
   :  ?complete:complete_fn

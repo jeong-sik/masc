@@ -751,6 +751,30 @@ let tag_dispatch_fn
   ref (fun ~config:_ ~agent_name:_ ~tag:_ ~name:_ ~args:_ -> None)
 ;;
 
+let json_string_list values =
+  `List (List.map (fun value -> `String value) values)
+;;
+
+let append_assoc_field key value = function
+  | `Assoc fields -> `Assoc (fields @ [ key, value ])
+  | json -> json
+;;
+
+let descriptor_active_names names descriptor =
+  let descriptor_names =
+    Keeper_tool_descriptor.public_names_of_descriptor descriptor
+    @ Keeper_tool_descriptor.internal_names descriptor
+  in
+  List.filter (fun name -> List.mem name names) descriptor_names
+;;
+
+let descriptor_discovery_json names descriptor =
+  Keeper_tool_descriptor.discovery_json descriptor
+  |> append_assoc_field
+       "active_names"
+       (json_string_list (descriptor_active_names names descriptor))
+;;
+
 let keeper_tools_list_json ~(meta : keeper_meta) =
   let names = Keeper_tool_policy.keeper_allowed_tool_names meta in
   let has_prefix prefix name = String.starts_with ~prefix name in
@@ -784,5 +808,10 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
       map
       []
   in
-  Yojson.Safe.to_string (`Assoc assoc)
+  let descriptor_surface =
+    Keeper_tool_descriptor_resolution.descriptors_for_tool_names names
+    |> List.map (descriptor_discovery_json names)
+  in
+  Yojson.Safe.to_string
+    (`Assoc (assoc @ [ "descriptor_surface", `List descriptor_surface ]))
 ;;

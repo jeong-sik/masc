@@ -160,3 +160,8 @@ val public_input_schema : string -> Yojson.Safe.t option
 val translate_input : public:string -> Yojson.Safe.t -> Yojson.Safe.t
 val receipt_labels_json : t -> Yojson.Safe.t
 val route_evidence_json : t -> Yojson.Safe.t
+
+(** Read-only discovery projection for capability introspection surfaces.
+    Keeps executor, policy, schema-shape, and curated typed examples attached
+    to the descriptor that owns the runtime route. *)
+val discovery_json : t -> Yojson.Safe.t

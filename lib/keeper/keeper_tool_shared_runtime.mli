@@ -198,6 +198,6 @@ val with_registry_meta
   -> string
 
 (** Render the keeper-tools-list JSON envelope: tool names grouped
-    by category (board / voice / workspace / shell / fs / memory
-    / core). *)
+    by category plus descriptor_surface metadata for executor/policy/schema
+    discovery. *)
 val keeper_tools_list_json : meta:Keeper_meta_contract.keeper_meta -> string

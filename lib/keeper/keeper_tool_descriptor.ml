@@ -1800,3 +1800,141 @@ let route_evidence_json d =
      ]
      @ policy_fields)
 ;;
+
+let assoc_member name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+;;
+
+let string_list_json values =
+  `List (List.map (fun value -> `String value) values)
+;;
+
+let string_list_of_json = function
+  | `List values ->
+    List.filter_map
+      (function
+        | `String value -> Some value
+        | _ -> None)
+      values
+  | _ -> []
+;;
+
+let schema_property_names schema =
+  match assoc_member "properties" schema with
+  | Some (`Assoc properties) -> List.map fst properties
+  | _ -> []
+;;
+
+let schema_required_names schema =
+  match assoc_member "required" schema with
+  | Some required -> string_list_of_json required
+  | None -> []
+;;
+
+let schema_one_of_required_names schema =
+  match assoc_member "oneOf" schema with
+  | Some (`List cases) ->
+    List.filter_map
+      (fun case ->
+         match schema_required_names case with
+         | [] -> None
+         | required -> Some (string_list_json required))
+      cases
+  | _ -> []
+;;
+
+let schema_shape_json schema =
+  let one_of_required = schema_one_of_required_names schema in
+  let base =
+    [ "properties", string_list_json (schema_property_names schema)
+    ; "required", string_list_json (schema_required_names schema)
+    ]
+  in
+  let fields =
+    if one_of_required = []
+    then base
+    else ("one_of_required", `List one_of_required) :: base
+  in
+  `Assoc fields
+;;
+
+let execute_example ~label ?cwd ~executable ~argv () =
+  let input =
+    `Assoc
+      ([ "executable", `String executable
+       ; "argv", string_list_json argv
+       ]
+       @
+       match cwd with
+       | Some cwd -> [ "cwd", `String cwd ]
+       | None -> [])
+  in
+  `Assoc [ "label", `String label; "input", input ]
+;;
+
+let discovery_examples d =
+  match d.internal_name with
+  | "tool_execute" ->
+    [ execute_example
+        ~label:"GitHub PR metadata"
+        ~cwd:"repos/masc"
+        ~executable:"gh"
+        ~argv:[ "pr"; "view"; "123"; "--json"; "number,state,headRefOid" ]
+        ()
+    ; execute_example
+        ~label:"Git status"
+        ~cwd:"repos/masc"
+        ~executable:"git"
+        ~argv:[ "status"; "--short" ]
+        ()
+    ; execute_example
+        ~label:"Focused OCaml test target"
+        ~cwd:"repos/masc"
+        ~executable:"scripts/dune-local.sh"
+        ~argv:[ "build"; "test/test_keeper_tool_dispatch_runtime.exe" ]
+        ()
+    ]
+  | _ -> []
+;;
+
+let policy_group_of_effect_domain = function
+  | Some effect_domain -> Tool_catalog.effect_domain_to_string effect_domain
+  | None -> "unspecified"
+;;
+
+let discovery_policy_json policy =
+  `Assoc
+    [ ( "visibility"
+      , `String (Tool_catalog.visibility_to_string policy.visibility) )
+    ; "readonly_hint", Json_util.bool_opt_to_json policy.readonly_hint
+    ; ( "effect_domain"
+      , (match policy.effect_domain with
+         | Some effect_domain ->
+           `String (Tool_catalog.effect_domain_to_string effect_domain)
+         | None -> `Null) )
+    ; "policy_group", `String (policy_group_of_effect_domain policy.effect_domain)
+    ; "approval", `String (approval_to_string policy.approval)
+    ; "retryable", `Bool policy.retryable
+    ; "cwd_scope", Json_util.string_opt_to_json policy.cwd_scope
+    ; "inline_safe", `Bool policy.inline_safe
+    ; "maintenance_only", `Bool policy.maintenance_only
+    ]
+;;
+
+let discovery_json d =
+  `Assoc
+    [ "id", `String d.id
+    ; "public_name", `String d.public_name
+    ; "public_aliases", string_list_json d.public_aliases
+    ; "internal_name", `String d.internal_name
+    ; "description", `String d.description
+    ; "executor", `String (executor_to_string d.executor)
+    ; "backend", `String (backend_to_string d.backend)
+    ; "sandbox", `String (sandbox_to_string d.sandbox)
+    ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
+    ; "policy", discovery_policy_json d.policy
+    ; "schema_shape", schema_shape_json d.input_schema
+    ; "examples", `List (discovery_examples d)
+    ]
+;;

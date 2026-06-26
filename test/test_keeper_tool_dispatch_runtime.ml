@@ -464,7 +464,58 @@ let test_keeper_tools_list_json_uses_typed_groups () =
   check bool "fs tool grouped" true
     (member "fs" "tool_read_file");
   check bool "memory tool grouped" true
-    (member "memory" "keeper_memory_search")
+    (member "memory" "keeper_memory_search");
+  let descriptor_surface =
+    Yojson.Safe.Util.(member "descriptor_surface" json |> to_list)
+  in
+  let string_member field obj =
+    Yojson.Safe.Util.(member field obj |> to_string)
+  in
+  let list_member_contains field expected obj =
+    json_list_contains expected Yojson.Safe.Util.(member field obj)
+  in
+  let find_descriptor internal_name =
+    match
+      List.find_opt
+        (fun descriptor ->
+           String.equal internal_name (string_member "internal_name" descriptor))
+        descriptor_surface
+    with
+    | Some descriptor -> descriptor
+    | None -> fail ("missing descriptor_surface entry for " ^ internal_name)
+  in
+  let execute = find_descriptor "tool_execute" in
+  check string "Execute public alias" "Execute"
+    (string_member "public_name" execute);
+  check string "Execute executor" "shell_ir"
+    (string_member "executor" execute);
+  check bool "Execute active internal name listed" true
+    (list_member_contains "active_names" "tool_execute" execute);
+  check bool "Execute active public name listed" true
+    (list_member_contains "active_names" "Execute" execute);
+  let policy = Yojson.Safe.Util.member "policy" execute in
+  check string "Execute policy group" "playground_write"
+    (string_member "policy_group" policy);
+  let schema_shape = Yojson.Safe.Util.member "schema_shape" execute in
+  check bool "Execute schema properties include executable" true
+    (list_member_contains "properties" "executable" schema_shape);
+  check bool "Execute schema properties include pipeline" true
+    (list_member_contains "properties" "pipeline" schema_shape);
+  let examples = Yojson.Safe.Util.(member "examples" execute |> to_list) in
+  let example_with_executable executable =
+    List.exists
+      (fun example ->
+         String.equal
+           executable
+           Yojson.Safe.Util.(member "input" example |> member "executable" |> to_string))
+      examples
+  in
+  check bool "Execute examples include typed gh argv" true
+    (example_with_executable "gh");
+  check bool "Execute examples include typed git argv" true
+    (example_with_executable "git");
+  check bool "Execute examples include focused test wrapper" true
+    (example_with_executable "scripts/dune-local.sh")
 
 let test_execute_with_outcome_missing_file_is_failure () =
   with_exec_fixture "keeper_tool_dispatch_runtime_missing_file"

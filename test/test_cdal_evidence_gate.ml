@@ -284,6 +284,9 @@ let test_evidence_ref_parser_ssot () =
     ; "absolute path", "/etc/passwd"
     ; "parent-dir traversal", "../../etc/passwd"
     ; "parent-dir mid-segment", "logs/../../etc/passwd"
+    ; "hex PR number", "PR#0x2A"
+    ; "octal PR number", "#0o10"
+    ; "signed PR number", "PR#+42"
     ]
 
 let test_blank_required_evidence_rejects () =

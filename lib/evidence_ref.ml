@@ -34,6 +34,10 @@ let is_hex_char = function
   | '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' -> true
   | _ -> false
 
+let is_decimal_digit = function
+  | '0' .. '9' -> true
+  | _ -> false
+
 let parse_commit value =
   let len = String.length value in
   if
@@ -43,20 +47,26 @@ let parse_commit value =
   then Some (Commit value)
   else None
 
-let parse_positive_int value =
-  match int_of_string_opt value with
-  | Some n when n > 0 -> Some n
-  | Some _ | None -> None
+let parse_positive_decimal value =
+  if String.equal value "" || not (String.for_all is_decimal_digit value)
+  then None
+  else (
+    match int_of_string_opt value with
+    | Some n when n > 0 -> Some n
+    | Some _ | None -> None)
 
 let parse_pr value =
-  let len = String.length value in
-  if
-    len > 3
-    && (starts_with ~prefix:"PR#" value || starts_with ~prefix:"pr#" value)
-  then Option.map (fun n -> Pr n) (parse_positive_int (String.sub value 3 (len - 3)))
-  else if len > 1 && Char.equal value.[0] '#'
-  then Option.map (fun n -> Pr n) (parse_positive_int (String.sub value 1 (len - 1)))
-  else None
+  let parse_prefixed ~prefix value =
+    if starts_with ~prefix value
+    then Option.map (fun n -> Pr n) (parse_positive_decimal (payload_after_prefix ~prefix value))
+    else None
+  in
+  match parse_prefixed ~prefix:"PR#" value with
+  | Some _ as parsed -> parsed
+  | None ->
+    (match parse_prefixed ~prefix:"pr#" value with
+     | Some _ as parsed -> parsed
+     | None -> parse_prefixed ~prefix:"#" value)
 
 let has_payload_char value =
   String.exists

@@ -48,6 +48,7 @@
   mirage-crypto-rng
   mirage-crypto-rng.unix
   base64
+  re
   ; existing
   masc_config
   masc_core

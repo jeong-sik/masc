@@ -11,6 +11,13 @@
 
 ## Unreleased
 
+### Fixed
+- `gate`: Discord inbound messages now resolve `<@snowflake>` / `<@!snowflake>`
+  user mentions to `@DisplayName` using the structured `mentions` array. This
+  makes Discord-originated chat in the dashboard show human-readable names
+  instead of raw ids. The existing platform surface badge already identifies the
+  message as coming from Discord.
+
 ### Changed
 - `dashboard`: Memory OS fact decoding now emits a development-console warning
   when a legacy wire payload still carries `external_ref`. The field remains

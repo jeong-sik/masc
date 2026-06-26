@@ -22,6 +22,18 @@ type intent = Discord_gateway_state.intent =
   | Direct_messages
   | Direct_message_reactions
 
+type mention_kind = Discord_gateway_state.mention_kind =
+  | User_mention
+  | Role_mention
+  | Channel_mention
+
+type resolved_mention = Discord_gateway_state.resolved_mention =
+  { mention_id : string
+  ; mention_name : string option
+  ; mention_kind : mention_kind
+  ; raw_mention : string
+  }
+
 type gateway_event = Discord_gateway_state.dispatched_event =
   | Ready of
       { session_id : string
@@ -35,6 +47,8 @@ type gateway_event = Discord_gateway_state.dispatched_event =
       ; author_id : string
       ; author_name : string option
       ; content : string
+      ; raw_content : string
+      ; resolved_mentions : resolved_mention list
       ; mention_user_ids : string list
       ; mentions_bot : bool
       ; explicit_mentions_bot : bool

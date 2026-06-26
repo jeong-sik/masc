@@ -21,3 +21,10 @@ type t =
 val of_string : string -> t option
 val to_string : t -> string
 val is_concrete_string : string -> bool
+
+val boundary_match : haystack:string -> needle:string -> start:int -> bool
+(** [boundary_match ~haystack ~needle ~start] is true when [needle] appears
+    as a standalone evidence-reference token at [start]. The policy treats
+    path/URL/trace punctuation as extending the token only when more reference
+    characters follow, so ["src/main.ml."] can end a sentence while
+    ["src/main.ml.bak"] remains a longer reference. *)

@@ -305,6 +305,41 @@ let test_required_evidence_embedded_substring_rejects () =
         | _ -> fail "payload did not preserve unsatisfied evidence entry")
      | _ -> fail "payload is not Assoc")
 
+let test_required_evidence_extended_reference_rejects () =
+  let cases =
+    [ "src/main.ml", "completed work in src/main.ml.bak with enough notes"
+    ; "file.tar", "completed work in file.tar.gz with enough notes"
+    ; ( "https://example.test/pr/42"
+      , "completed work in https://example.test/pr/42.extra with enough notes" )
+    ; "trace:run-123", "completed work in trace:run-123:retry with enough notes"
+    ]
+  in
+  List.iter
+    (fun (required, notes) ->
+       let contract = make_contract ~required_evidence:[ required ] () in
+       let task = make_task ~contract:(Some contract) () in
+       match
+         Gate.decide
+           ~task_id:"task-extended-reference"
+           ~task_opt:(Some task)
+           ~notes
+           ~handoff_context:None
+           ()
+       with
+       | Gate.Pass ->
+         failf
+           "longer reference in notes must not satisfy required_evidence %S"
+           required
+       | Gate.Reject { rule_id; payload_json; _ } ->
+         check string "rule_id" Gate.rule_id_evidence_incomplete rule_id;
+         (match payload_json with
+          | `Assoc fields ->
+            (match List.assoc_opt "required_evidence_unsatisfied" fields with
+             | Some (`List [ `String actual ]) -> check string "unsatisfied" required actual
+             | _ -> fail "payload did not preserve unsatisfied evidence entry")
+          | _ -> fail "payload is not Assoc"))
+    cases
+
 let test_required_evidence_path_with_punctuation_passes () =
   let contract = make_contract ~required_evidence:[ "src/main.ml" ] () in
   let task = make_task ~contract:(Some contract) () in
@@ -381,6 +416,8 @@ let () =
             test_required_evidence_unsatisfied_rejects
         ; test_case "embedded required_evidence substring → Reject" `Quick
             test_required_evidence_embedded_substring_rejects
+        ; test_case "extended required_evidence reference → Reject" `Quick
+            test_required_evidence_extended_reference_rejects
         ; test_case "required_evidence path punctuation → Pass" `Quick
             test_required_evidence_path_with_punctuation_passes
         ; test_case "required_evidence word colon → Pass" `Quick

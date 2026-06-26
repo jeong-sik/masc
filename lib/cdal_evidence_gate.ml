@@ -35,29 +35,6 @@ let evidence_ref_is_concrete ref_ =
       | Evidence_ref.File_path _ ) -> true
   | None -> false
 
-let is_reference_token_char = function
-  | '0' .. '9'
-  | 'a' .. 'z'
-  | 'A' .. 'Z'
-  | '/'
-  | '_'
-  | '-'
-  | '~'
-  | '@' -> true
-  | _ -> false
-
-let reference_boundary_match haystack needle start =
-  let needle_len = String.length needle in
-  let before =
-    start = 0 || not (is_reference_token_char haystack.[start - 1])
-  in
-  let after_idx = start + needle_len in
-  let after =
-    after_idx >= String.length haystack
-    || not (is_reference_token_char haystack.[after_idx])
-  in
-  before && after
-
 let notes_mention_required_entry ~notes entry =
   let needle = String.lowercase_ascii entry in
   let haystack = String.lowercase_ascii notes in
@@ -70,7 +47,7 @@ let notes_mention_required_entry ~notes entry =
       if i > limit then false
       else if
         String.sub haystack i needle_len = needle
-        && reference_boundary_match haystack needle i
+        && Evidence_ref.boundary_match ~haystack ~needle ~start:i
       then true
       else loop (i + 1)
     in

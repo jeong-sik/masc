@@ -96,6 +96,43 @@ let is_file_ref_char = function
   | ':' -> true
   | _ -> false
 
+let is_reference_body_char = function
+  | '0' .. '9'
+  | 'a' .. 'z'
+  | 'A' .. 'Z'
+  | '/'
+  | '_'
+  | '-'
+  | '~'
+  | '@' -> true
+  | _ -> false
+
+let is_reference_connector_char = function
+  | '.' | ':' | '?' | '&' | '=' | '%' | '#' | '+' -> true
+  | _ -> false
+
+let reference_char_extends_right haystack idx =
+  if idx >= String.length haystack then false
+  else if is_reference_body_char haystack.[idx] then true
+  else if is_reference_connector_char haystack.[idx]
+  then (
+    let next = idx + 1 in
+    next < String.length haystack && is_reference_body_char haystack.[next])
+  else false
+
+let reference_char_extends_left haystack idx =
+  idx >= 0
+  && idx < String.length haystack
+  &&
+  (is_reference_body_char haystack.[idx]
+   || is_reference_connector_char haystack.[idx])
+
+let boundary_match ~haystack ~needle ~start =
+  let before = start = 0 || not (reference_char_extends_left haystack (start - 1)) in
+  let after_idx = start + String.length needle in
+  let after = not (reference_char_extends_right haystack after_idx) in
+  before && after
+
 let is_extension_char = function
   | '0' .. '9' | 'a' .. 'z' | 'A' .. 'Z' -> true
   | _ -> false

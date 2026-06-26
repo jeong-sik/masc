@@ -127,6 +127,7 @@ module Completion_contract_label = Keeper_completion_contract_result_label
 
 let completion_contract_result_to_label = function
   | Contract_unknown -> Completion_contract_label.Unknown
+  (* TEL-OK: pure label bridge; not a dispatch/action handler. *)
   | Contract_not_dispatched -> Completion_contract_label.Not_dispatched
   | Contract_violated -> Completion_contract_label.Violated
   | Contract_surface_mismatch -> Completion_contract_label.Surface_mismatch
@@ -148,6 +149,7 @@ let completion_contract_result_to_string result =
 
 let completion_contract_result_of_label = function
   | Completion_contract_label.Unknown -> Contract_unknown
+  (* TEL-OK: pure label bridge; not a dispatch/action handler. *)
   | Completion_contract_label.Not_dispatched -> Contract_not_dispatched
   | Completion_contract_label.Violated -> Contract_violated
   | Completion_contract_label.Surface_mismatch -> Contract_surface_mismatch

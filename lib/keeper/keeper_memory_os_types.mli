@@ -65,6 +65,7 @@ type claim_kind =
   | Self_observation
   | External_state
   | Durable_knowledge
+  | Diagnostic
 
 (** Canonical lowercase token (round-trips with [claim_kind_of_string]). *)
 val claim_kind_to_string : claim_kind -> string
@@ -168,6 +169,11 @@ type fact =
 (** Whether a fact's hard-expiry horizon still admits it at [now]. Facts with no
     [valid_until] are durable and current. *)
 val fact_is_current : now:float -> fact -> bool
+
+(** Structural prompt-recall eligibility. Callers still apply {!fact_is_current}
+    for the time horizon; [Diagnostic] rows stay operator evidence, not prompt
+    context. *)
+val fact_prompt_recallable : fact -> bool
 
 (** RFC-0259 §3.6 (P5): partition facts into [(live, expired)] at [now] on the
     [valid_until] boundary ([fact_is_current]). The cap path drops the expired

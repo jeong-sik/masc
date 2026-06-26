@@ -96,6 +96,7 @@ function turnRecordsPayload() {
             valid_until_iso: null,
             last_verified_at: 1_789_500_000,
             current: true,
+            prompt_recallable: true,
             claim_kind: 'durable_knowledge',
             external_ref: { kind: 'pr', id: '22198' },
           },
@@ -110,6 +111,7 @@ function turnRecordsPayload() {
             valid_until_iso: '2026-09-09T...Z',
             last_verified_at: null,
             current: false,
+            prompt_recallable: true,
           },
         ],
       },
@@ -393,6 +395,7 @@ describe('memory view-model helpers', () => {
       valid_until_iso: null,
       last_verified_at: null,
       current: true,
+      prompt_recallable: true,
       claim_kind: null,
       ...over,
     })
@@ -421,6 +424,7 @@ describe('memory view-model helpers', () => {
       valid_until_iso: null,
       last_verified_at: null,
       current,
+      prompt_recallable: true,
       claim_kind: null,
     })
     expect(sortMemoryFactsForReview([
@@ -442,8 +446,12 @@ describe('memory view-model helpers', () => {
       valid_until_iso: null,
       last_verified_at: null,
       current: true,
+      prompt_recallable: true,
       claim_kind: 'durable_knowledge',
     }
     expect(factSelectionReason(fact)).toBe('active recall candidate · 제약 · durable')
+    expect(factSelectionReason({ ...fact, prompt_recallable: false, claim_kind: 'diagnostic' })).toBe(
+      'diagnostic evidence row · 제약 · diagnostic',
+    )
   })
 })

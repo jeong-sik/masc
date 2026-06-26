@@ -85,11 +85,13 @@ type claim_kind =
   | Self_observation (* transient first-person agent state: idle, looping, tool-timeout *)
   | External_state (* about the world/PR/issue; verifiable elsewhere *)
   | Durable_knowledge (* timeless rule / lesson independent of transient state *)
+  | Diagnostic (* system-authored diagnostic artifact; not prompt-recallable knowledge *)
 
 let claim_kind_to_string = function
   | Self_observation -> "self_observation"
   | External_state -> "external_state"
   | Durable_knowledge -> "durable_knowledge"
+  | Diagnostic -> "diagnostic"
 ;;
 
 let claim_kind_of_string s =
@@ -97,6 +99,7 @@ let claim_kind_of_string s =
   | "self_observation" -> Some Self_observation
   | "external_state" -> Some External_state
   | "durable_knowledge" -> Some Durable_knowledge
+  | "diagnostic" -> Some Diagnostic
   | _ -> None
 ;;
 
@@ -173,7 +176,7 @@ let self_observation_ttl_seconds = 3_600.0
 let fact_valid_until ~now ~external_ref:_ ~claim_kind category =
   match claim_kind with
   | Some Self_observation -> Some (now +. self_observation_ttl_seconds)
-  | Some External_state | Some Durable_knowledge | None ->
+  | Some External_state | Some Durable_knowledge | Some Diagnostic | None ->
     category_valid_until ~now category
 ;;
 
@@ -219,6 +222,12 @@ let fact_is_current ~now (fact : fact) =
   match fact.valid_until with
   | None -> true
   | Some ts -> ts >= now
+;;
+
+let fact_prompt_recallable (fact : fact) =
+  match fact.claim_kind with
+  | Some Diagnostic -> false
+  | Some Self_observation | Some External_state | Some Durable_knowledge | None -> true
 ;;
 
 (* RFC-0259 §3.6 (P5): split a fact list into (live, expired-at-[now]) on the

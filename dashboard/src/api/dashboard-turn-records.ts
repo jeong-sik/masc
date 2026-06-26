@@ -136,11 +136,16 @@ export function parseMemoryOsFactCategory(raw: string): MemoryOsFactCategory {
 // RFC-0285 §3.1 claim_kind — closed vocabulary, no Unknown arm on the backend.
 // Mirrors claim_kind_of_string: an unrecognized/absent token yields undefined,
 // the backend's own None degrade to the durable path.
-export type MemoryOsClaimKind = 'self_observation' | 'external_state' | 'durable_knowledge'
+export type MemoryOsClaimKind =
+  | 'self_observation'
+  | 'external_state'
+  | 'durable_knowledge'
+  | 'diagnostic'
 const MEMORY_OS_CLAIM_KINDS: readonly MemoryOsClaimKind[] = [
   'self_observation',
   'external_state',
   'durable_knowledge',
+  'diagnostic',
 ]
 export function parseMemoryOsClaimKind(raw: string): MemoryOsClaimKind | undefined {
   const token = raw.trim().toLowerCase()
@@ -168,6 +173,7 @@ export type MemoryOsFact = {
   readonly valid_until_iso: string | null
   readonly last_verified_at: number | null
   readonly current: boolean
+  readonly prompt_recallable: boolean
   readonly claim_kind: MemoryOsClaimKind | null
 }
 
@@ -382,6 +388,7 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
   const first_seen = asNumber(raw.first_seen)
   const reference_time = asNumber(raw.reference_time)
   const current = asBoolean(raw.current)
+  const prompt_recallable = asBoolean(raw.prompt_recallable)
   // Required keys are exactly the always-present ones in memory_os_fact_json.
   // A row missing any of them is a contract violation — dropped here rather
   // than rendered with a guessed default (no silent fabrication).
@@ -392,6 +399,7 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
     || first_seen == null
     || reference_time == null
     || current == null
+    || prompt_recallable == null
   ) {
     return null
   }
@@ -409,6 +417,7 @@ function decodeMemoryOsFact(raw: unknown): MemoryOsFact | null {
     valid_until_iso: asNullableString(raw.valid_until_iso),
     last_verified_at: asNumber(raw.last_verified_at) ?? null,
     current,
+    prompt_recallable,
     claim_kind: claimKindToken ? (parseMemoryOsClaimKind(claimKindToken) ?? null) : null,
   }
 }

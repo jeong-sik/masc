@@ -412,9 +412,10 @@ let unstructured_episode ~now ~generation (inp : Keeper_librarian.input) ~reason
     { claim = note
     ; category = Keeper_memory_os_types.Ephemeral
     ; external_ref = None
-    ; (* RFC-0285: a parse-retry fallback note is not a librarian-classified claim;
-         leave it untagged ([None]) so it follows the Ephemeral category horizon. *)
-      claim_kind = None
+    ; (* A parse-retry fallback note is system-authored diagnostic evidence, not a
+         librarian-classified memory claim. Tag it at the producer boundary so recall
+         can exclude it without string-matching the raw claim text. *)
+      claim_kind = Some Keeper_memory_os_types.Diagnostic
     ; source = { trace_id = inp.trace_id; turn = 0; tool_call_id = None }
     ; observed_by = []
     ; first_seen = now
@@ -422,7 +423,7 @@ let unstructured_episode ~now ~generation (inp : Keeper_librarian.input) ~reason
         Keeper_memory_os_types.fact_valid_until
           ~now
           ~external_ref:None
-          ~claim_kind:None
+          ~claim_kind:(Some Keeper_memory_os_types.Diagnostic)
           Keeper_memory_os_types.Ephemeral
     ; last_verified_at = Some now
     ; schema_version = Keeper_memory_os_types.schema_version

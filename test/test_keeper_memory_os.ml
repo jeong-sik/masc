@@ -1169,6 +1169,10 @@ let test_librarian_runtime_preserves_unstructured_fallback () =
                 true
                 (fact.Types.category = Types.Ephemeral);
               Alcotest.(check (option string))
+                "fallback is diagnostic"
+                (Some "diagnostic")
+                (Option.map Types.claim_kind_to_string fact.Types.claim_kind);
+              Alcotest.(check (option string))
                 "fallback diagnostic does not author claim_id"
                 None
                 fact.Types.claim_id;
@@ -1207,10 +1211,14 @@ let test_librarian_runtime_preserves_unstructured_fallback () =
             "fact persisted as unstructured note"
             true
             (contains "unstructured_note" fact.Types.claim);
+          Alcotest.(check (option string))
+            "persisted fact is diagnostic"
+            (Some "diagnostic")
+            (Option.map Types.claim_kind_to_string fact.Types.claim_kind);
           Alcotest.(check (float 0.001))
             "persisted fact first_seen uses injected clock"
-          fallback_created_at
-          fact.Types.first_seen
+            fallback_created_at
+            fact.Types.first_seen
         | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts))))
 ;;
 
@@ -1259,6 +1267,10 @@ let test_librarian_unstructured_fallback_uses_exact_text_identity () =
           true
           (List.for_all (fun fact -> Option.is_none fact.Types.claim_id) facts);
         Alcotest.(check bool)
+          "fallback diagnostics are typed diagnostic"
+          true
+          (List.for_all (fun fact -> fact.Types.claim_kind = Some Types.Diagnostic) facts);
+        Alcotest.(check bool)
           "first raw note is preserved"
           true
           (List.exists
@@ -1272,14 +1284,19 @@ let test_librarian_unstructured_fallback_uses_exact_text_identity () =
              facts);
         (match first.Types.claims, second.Types.claims with
          | [ first_fact ], [ second_fact ] ->
-          Alcotest.(check bool)
-            "first result has no claim_id"
-            true
-            (Option.is_none first_fact.Types.claim_id);
-          Alcotest.(check bool)
-            "second result has no claim_id"
-            true
-            (Option.is_none second_fact.Types.claim_id)
+           Alcotest.(check bool)
+             "first result has no claim_id"
+             true
+             (Option.is_none first_fact.Types.claim_id);
+           Alcotest.(check bool)
+             "second result has no claim_id"
+             true
+             (Option.is_none second_fact.Types.claim_id);
+           Alcotest.(check bool)
+             "result fallback facts are diagnostic"
+             true
+             (first_fact.Types.claim_kind = Some Types.Diagnostic
+              && second_fact.Types.claim_kind = Some Types.Diagnostic)
          | first_claims, second_claims ->
            Alcotest.failf
              "expected one fallback fact in each result, got %d/%d"
@@ -1946,6 +1963,44 @@ let test_render_if_enabled_renders_persisted_memory () =
             "block carries the persisted claim"
             true
             (contains "Gated recall should surface saved facts" block))))
+  ;;
+
+let test_render_if_enabled_omits_diagnostic_memory () =
+  with_recall_env "true" (fun () ->
+    with_prompt_registry (fun () ->
+      with_temp_keepers_dir (fun keepers_dir ->
+        let keeper_id = "diagnostic-memory-keeper" in
+        let now = 1_000_000.0 in
+        let fact =
+          { (fact_fixture ~now ()) with
+            Types.claim = "Raw parse-failure fallback should not enter prompt recall"
+          ; Types.category = Types.Ephemeral
+          ; Types.claim_kind = Some Types.Diagnostic
+          ; Types.valid_until = Some (now +. 3600.0)
+          }
+        in
+        let episode =
+          { Types.trace_id = "trace-diagnostic-recall"
+          ; Types.generation = 1
+          ; Types.episode_summary = "diagnostic-only episode should not enter recall"
+          ; Types.claims = [ fact ]
+          ; Types.open_items = []
+          ; Types.constraints = []
+          ; Types.preserved_tool_refs = []
+          ; Types.source_turn_range = Some (1, 2)
+          ; Types.created_at = now
+          ; Types.valid_until = Some (now +. 3600.0)
+          ; Types.terminal_marker = Some "librarian_unstructured_fallback"
+          ; Types.schema_version = Types.schema_version
+          }
+        in
+        Memory_io.append_episode_bundle ~keeper_id episode;
+        match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
+        | None -> ()
+        | Some block ->
+          Alcotest.failf
+            "diagnostic memory leaked into recall block: %s"
+            block)))
 ;;
 
 (* RFC-0239 Q4 window invariant: when the store sits in the
@@ -3319,7 +3374,11 @@ let test_claim_kind_round_trip () =
          (Option.map
             Types.claim_kind_to_string
             (Types.claim_kind_of_string (Types.claim_kind_to_string k))))
-    [ Types.Self_observation; Types.External_state; Types.Durable_knowledge ];
+    [ Types.Self_observation
+    ; Types.External_state
+    ; Types.Durable_knowledge
+    ; Types.Diagnostic
+    ];
   Alcotest.(check bool)
     "unrecognized claim_kind token -> None (durable path)"
     true
@@ -3789,9 +3848,9 @@ let test_dashboard_fact_json_omits_score_keys () =
   let has k = List.mem_assoc k fields in
   List.iter
     (fun k -> Alcotest.(check bool) (Printf.sprintf "present: %s" k) true (has k))
-    [ "claim"; "category"; "source"; "first_seen"; "first_seen_iso"
-    ; "reference_time"; "valid_until"; "last_verified_at"; "current"
-    ; "claim_kind" ];
+	    [ "claim"; "category"; "source"; "first_seen"; "first_seen_iso"
+	    ; "reference_time"; "valid_until"; "last_verified_at"; "current"
+	    ; "prompt_recallable"; "claim_kind" ];
   Alcotest.(check bool) "external_ref not surfaced" false (has "external_ref");
   List.iter
     (fun k -> Alcotest.(check bool) (Printf.sprintf "deleted score key absent: %s" k) false (has k))
@@ -3801,9 +3860,12 @@ let test_dashboard_fact_json_omits_score_keys () =
    | Some (`String s) ->
      Alcotest.(check string) "category is the typed producer string" "validated_approach" s
    | _ -> Alcotest.fail "category must be a string");
-  match List.assoc_opt "current" fields with
-  | Some (`Bool b) -> Alcotest.(check bool) "current when valid_until is in the future" true b
-  | _ -> Alcotest.fail "current must be a bool"
+  (match List.assoc_opt "current" fields with
+   | Some (`Bool b) -> Alcotest.(check bool) "current when valid_until is in the future" true b
+   | _ -> Alcotest.fail "current must be a bool");
+  match List.assoc_opt "prompt_recallable" fields with
+  | Some (`Bool b) -> Alcotest.(check bool) "durable fact is prompt recallable" true b
+  | _ -> Alcotest.fail "prompt_recallable must be a bool"
 ;;
 
 (* Optional [claim_kind] is omitted when [None]; the staleness anchor
@@ -3826,6 +3888,25 @@ let test_dashboard_fact_json_omits_optional_when_none () =
     Alcotest.(check (float 0.001))
       "reference_time falls back to last_verified_at" (now -. 3600.0) t
   | _ -> Alcotest.fail "reference_time must be a float"
+;;
+
+let test_dashboard_fact_json_marks_diagnostic_not_prompt_recallable () =
+  let now = 1_000_000.0 in
+  let fact =
+    { (fact_fixture ~now ()) with
+      Types.category = Types.Ephemeral
+    ; Types.claim_kind = Some Types.Diagnostic
+    ; Types.valid_until = Some (now +. 3600.0)
+    }
+  in
+  let fields =
+    match Server_dashboard_http_keeper_api.memory_os_fact_json ~now fact with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.fail "memory_os_fact_json must be a JSON object"
+  in
+  match List.assoc_opt "prompt_recallable" fields with
+  | Some (`Bool b) -> Alcotest.(check bool) "diagnostic fact is not prompt recallable" false b
+  | _ -> Alcotest.fail "prompt_recallable must be a bool"
 ;;
 
 (* The [items] wiring lives in [memory_os_dashboard_json], not the pure
@@ -4037,6 +4118,10 @@ let () =
             `Quick
             test_dashboard_fact_json_omits_optional_when_none
         ; Alcotest.test_case
+            "dashboard fact json marks diagnostic rows as not prompt recallable"
+            `Quick
+            test_dashboard_fact_json_marks_diagnostic_not_prompt_recallable
+        ; Alcotest.test_case
             "dashboard json wires one facts.items row per persisted fact"
             `Quick
             test_dashboard_json_wires_one_fact_item_per_fact
@@ -4134,6 +4219,10 @@ let () =
             "render_if_enabled renders persisted memory"
             `Quick
             test_render_if_enabled_renders_persisted_memory
+        ; Alcotest.test_case
+            "render_if_enabled omits diagnostic memory"
+            `Quick
+            test_render_if_enabled_omits_diagnostic_memory
         ; Alcotest.test_case
             "recall scans the whole bounded store, not just the tail window"
             `Quick

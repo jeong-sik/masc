@@ -237,8 +237,15 @@ let truth_anchor (fact : fact) = reference_time fact
 let facts_recency_ranked ~now facts =
   facts
   |> List.filter (fact_is_current ~now)
+  |> List.filter fact_prompt_recallable
   |> List.sort (fun a b -> compare (truth_anchor b) (truth_anchor a))
   |> dedup_by_claim
+;;
+
+let episode_prompt_recallable (episode : episode) =
+  match episode.claims with
+  | [] -> true
+  | claims -> List.exists fact_prompt_recallable claims
 ;;
 
 (* RFC-0264 P2: render_context_exn returns the rendered block alongside the
@@ -319,6 +326,7 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
       ~keeper_id
       ~n:(max max_episodes episode_tail_scan)
     |> List.filter (episode_is_current ~now)
+    |> List.filter episode_prompt_recallable
     |> take max_episodes
   in
   let injected_fact_keys =

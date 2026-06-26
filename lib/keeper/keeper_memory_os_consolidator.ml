@@ -51,10 +51,16 @@ type contribution =
 (* RFC-0247 (purge): eligibility is purely structural — a promotable category.
    The prior confidence floor (only claims above 0.5 count as corroboration) was
    a score gate and is gone. *)
-(* RFC-0285 §3.5: a [Self_observation] is transient keeper-local self-state, never
-   cross-keeper knowledge — gate it here (the single promotion SSOT) rather than
-   widening [is_promotable]'s exhaustive category signature. *)
-let eligible fact = is_promotable fact.category && fact.claim_kind <> Some Self_observation
+(* RFC-0285 §3.5: only objective claim kinds cross keepers. [Self_observation] is
+   transient keeper-local state, and [Diagnostic] is system-authored evidence for
+   operators, not shared semantic memory. Keep this exhaustive so a future
+   [claim_kind] cannot promote by accident. *)
+let eligible fact =
+  is_promotable fact.category
+  &&
+  match fact.claim_kind with
+  | Some External_state | Some Durable_knowledge | None -> true
+  | Some Self_observation | Some Diagnostic -> false
 
 (* Pick the representative fact for a claim group by a structural total order:
    earliest first_seen, then lexically smallest claim, then keeper id — so

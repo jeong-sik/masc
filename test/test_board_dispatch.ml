@@ -1260,7 +1260,16 @@ let test_sub_board_delete_clears_orphan_hearth () =
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok post ->
        Alcotest.(check (option string)) "post hearth cleared after sub-board delete"
-         None post.Board.hearth)
+         None post.Board.hearth);
+  Board_dispatch.flush ();
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  (match Board_dispatch.get_post ~post_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok post ->
+       Alcotest.(check (option string)) "cleared hearth survives restart" None
+         post.Board.hearth)
 
 let test_sub_board_post_count_projection () =
   ignore

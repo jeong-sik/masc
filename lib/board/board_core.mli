@@ -93,8 +93,9 @@ val record_comment_timestamp : author:string -> now:float -> unit
     every other reader / writer. *)
 val with_lock : store -> (unit -> 'a) -> 'a
 
-(** [with_persist_lock store f] serializes JSONL writes that must run
-    after the state mutation lock has been released. *)
+(** [with_persist_lock store f] serializes JSONL writes. Callers must not hold
+    [with_lock] while acquiring it; compute any state snapshot under
+    [with_lock], release it, then acquire [with_persist_lock]. *)
 val with_persist_lock : store -> (unit -> 'a) -> 'a
 
 (** Clears [karma_cache] and [sorted_posts_cache].  Called

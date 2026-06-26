@@ -77,7 +77,7 @@ LEGACY_REPO_HELPER_PATTERN='(keeper|github)_pr_[A-Za-z0-9_]*'
 GH_COMMIT_PATTERN='gh_'"commit"
 GITHUB_COMMENT_PATTERN='github_'"comment"
 MICRO_TOOL_PATTERN="\b(${PR_VERB_PATTERN}|${GH_COMMIT_PATTERN}|${GITHUB_COMMENT_PATTERN}|${REPO_PR_PATTERN}|${LEGACY_REPO_HELPER_PATTERN})\b"
-INTERNAL_WEB_TOOL_PATTERN='\b(masc_web_search|masc_web_fetch)\b'
+INTERNAL_WEB_TOOL_PATTERN='(\b(masc_web_search|masc_web_fetch)\b|\bmasc_web_\*)'
 
 current_tmp="$(mktemp -t tool-substrate-adapter-surface.current.XXXXXX)"
 allow_tmp="$(mktemp -t tool-substrate-adapter-surface.allow.XXXXXX)"

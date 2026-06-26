@@ -83,7 +83,7 @@ let load_file_content path =
     when the file is absent, or [Error] when it exists but cannot be read.
     All [Unix.Unix_error] variants are caught so that a stat/read failure is
     never propagated as an exception to enforcement callers. *)
-let read_mapping_file ~base_path =
+let read_mapping_file ~base_path : (file_snapshot option, string) result =
   Eio_guard.run_in_systhread (fun () ->
     let path = mappings_toml_path base_path in
     match Unix.stat path with
@@ -118,7 +118,7 @@ let read_mapping_file ~base_path =
             Ok (Some { stamp; content })))
 ;;
 
-let parse_mapping_content content =
+let parse_mapping_content content : (keeper_repo_mapping list, string) result =
   match Otoml.Parser.from_string_result content with
   | Error msg -> Error msg
   | Ok toml -> (
@@ -141,7 +141,7 @@ let parse_mapping_content content =
           loop [] fields
       | Ok _ -> Error "mapping field must be a table")
 
-let load_all ~base_path =
+let load_all ~base_path : (keeper_repo_mapping list, string) result =
   let* snapshot = read_mapping_file ~base_path in
   match snapshot with
   | None -> Ok []
@@ -195,7 +195,9 @@ let update_load_all_cache ~base_path stamp result =
     then the file is read a second time to confirm the stamp has not changed
     before the result is cached or returned. This closes the TOCTOU window
     where a concurrent edit would serve stale access-control data. *)
-let rec load_all_cached_attempt ~remaining_attempts ~base_path =
+let rec load_all_cached_attempt ~remaining_attempts ~base_path
+  : (keeper_repo_mapping list, string) result
+  =
   match read_mapping_file ~base_path with
   | Error msg -> Error msg
   | Ok None ->

@@ -68,13 +68,16 @@ let canonical_principal_for_authenticated_caller (ctx : context)
 ;;
 
 let caller_is_goal_operator (ctx : context) =
-  (Atomic.get Workspace_hooks.is_admin_agent_fn)
-    ~base_path:ctx.config.base_path
-    ~agent_name:ctx.agent_name
-  ||
-  match Auth.read_initial_admin ctx.config.base_path with
-  | Some admin -> String.equal admin ctx.agent_name
-  | None -> false
+  if not (Auth.is_auth_enabled ctx.config.base_path)
+  then true
+  else
+    (Atomic.get Workspace_hooks.is_admin_agent_fn)
+      ~base_path:ctx.config.base_path
+      ~agent_name:ctx.agent_name
+    ||
+    match Auth.read_initial_admin ctx.config.base_path with
+    | Some admin -> String.equal admin ctx.agent_name
+    | None -> false
 ;;
 
 let principal_binding_error ~field ctx _principal =

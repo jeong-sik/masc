@@ -5,7 +5,7 @@
     Architecture:
     - Stateless by default (no session required for simple request/response)
     - Optional session for: SSE streaming, server-initiated messages
-    - Thread-safe session storage using Mutex
+    - Lock-free session storage using atomic CAS
 *)
 
 type transport = Streamable_HTTP
@@ -28,10 +28,11 @@ type request_handler =
 
 module StringMap = Set_util.StringMap
 
-(** Session storage with mutex protection *)
+(** Session storage using lock-free atomic updates.
+    A single [Atomic.t] holds the immutable session map so reads never block
+    and writers retry via CAS instead of taking a mutex. *)
 module Session = struct
-  let sessions : session StringMap.t ref = ref StringMap.empty
-  let mutex = Eio.Mutex.create ()
+  let sessions : session StringMap.t Atomic.t = Atomic.make StringMap.empty
 
   let generate_id () =
     let hex = Random_id.hex ~bytes:16 in
@@ -43,46 +44,47 @@ module Session = struct
       (String.sub hex 16 4)
       (String.sub hex 20 12)
 
-  let with_lock f =
-    Eio.Mutex.use_rw ~protect:true mutex (fun () -> f ())
-
   let create ~transport =
-    with_lock (fun () ->
-      let session = {
-        id = generate_id ();
-        created_at = Time_compat.now ();
-        last_seen = Atomic.make (Time_compat.now ());
-        transport;
-        subscriptions = [];
-      } in
-      sessions := StringMap.add session.id session !sessions;
-      session)
+    let now = Time_compat.now () in
+    let session = {
+      id = generate_id ();
+      created_at = now;
+      last_seen = Atomic.make now;
+      transport;
+      subscriptions = [];
+    } in
+    Lockfree_atomic.update sessions (StringMap.add session.id session);
+    session
 
   let find id =
-    with_lock (fun () -> StringMap.find_opt id !sessions)
+    StringMap.find_opt id (Atomic.get sessions)
 
   let touch session =
     Atomic.set session.last_seen (Time_compat.now ())
 
   let remove id =
-    with_lock (fun () -> sessions := StringMap.remove id !sessions)
+    Lockfree_atomic.update sessions (StringMap.remove id)
 
   let list_all () =
-    with_lock (fun () ->
-      !sessions
-      |> StringMap.bindings
-      |> List.map (fun (_, v) -> v)
-    )
+    Atomic.get sessions
+    |> StringMap.bindings
+    |> List.map (fun (_, v) -> v)
 
   let cleanup ~ttl_seconds =
     let now = Time_compat.now () in
     let cutoff = now -. ttl_seconds in
-    with_lock (fun () ->
-      let to_remove = StringMap.fold (fun id session acc ->
-        if Atomic.get session.last_seen < cutoff then id :: acc else acc
-      ) !sessions [] in
-      List.iter (fun id -> sessions := StringMap.remove id !sessions) to_remove;
-      List.length to_remove)
+    Lockfree_atomic.update_with_commit sessions (fun map ->
+      let expired = ref [] in
+      let next =
+        StringMap.fold
+          (fun id session acc ->
+             if Atomic.get session.last_seen < cutoff then begin
+               expired := id :: !expired;
+               StringMap.remove id acc
+             end else acc)
+          map map
+      in
+      { next_state = next; result = List.length !expired })
 end
 
 (** JSON-RPC low-level helpers (raw Yojson, pre-parse validation). *)
@@ -114,12 +116,13 @@ let jsonrpc_extract_id = function
 
 let jsonrpc_dispatch_request (handler : request_handler) request =
   try
-    handler request
+    (handler request, false)
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    jsonrpc_error_response
-      ~id:(jsonrpc_extract_id request)
-      ~code:Mcp_error_code.Internal_error
-      ~message:(Log.Server.error "streamable_http dispatch: %s" (Printexc.to_string exn); "Internal error")
+    (jsonrpc_error_response
+       ~id:(jsonrpc_extract_id request)
+       ~code:Mcp_error_code.Internal_error
+       ~message:(Log.Server.error "streamable_http dispatch: %s" (Printexc.to_string exn); "Internal error"),
+     true)
 
 (** Handle POST /mcp - JSON-RPC request processing *)
 let handle_post ?session_id ~body ?request_handler () =
@@ -151,21 +154,23 @@ let handle_post ?session_id ~body ?request_handler () =
         None )
 
   | Ok json ->
-      (* Find or create session if session_id provided *)
+      (* Find session if session_id provided. Do not touch it yet: a malformed
+         or crashing request should not refresh the activity window. *)
       let session = match session_id with
         | Some id -> Session.find id
         | None -> None
       in
-
-      (* Touch session if found *)
-      Option.iter Session.touch session;
 
       (* Streamable HTTP transport no longer accepts JSON-RPC batches. *)
       if jsonrpc_is_batch json then
         (Error_response (400, "JSON-RPC batch requests are not supported"), session)
       else if jsonrpc_is_valid_request json then
         (* Single request - delegate to MCP handler *)
-        let response = jsonrpc_dispatch_request request_handler json in
+        let response, handler_raised = jsonrpc_dispatch_request request_handler json in
+        (* Only refresh last_seen when the handler returned normally. A handler
+           exception produces an internal-error response but must not keep the
+           session alive. *)
+        if not handler_raised then Option.iter Session.touch session;
         (Json_response response, session)
       else
         (Error_response (400, "Invalid JSON-RPC request"), session)

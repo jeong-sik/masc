@@ -825,6 +825,14 @@ let find_config_env env entries =
 
 let test_memory_os_config_snapshot_surfaces_effective_envs () =
   let timeout_env = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC" in
+  let float_default_to_display value =
+    let raw = string_of_float value in
+    let len = String.length raw in
+    if len > 0 && Char.equal raw.[len - 1] '.' then raw ^ "0" else raw
+  in
+  let timeout_default =
+    float_default_to_display Env_config.KeeperMemoryOs.librarian_timeout_sec_default
+  in
   with_memory_os_env "MASC_KEEPER_MEMORY_OS_RECALL" "" (fun () ->
     with_memory_os_env timeout_env "123.5" (fun () ->
       let entries = storage_config_entries () in
@@ -857,7 +865,7 @@ let test_memory_os_config_snapshot_surfaces_effective_envs () =
         (string_field "timeout entry" "value" timeout);
       Alcotest.(check string)
         "timeout snapshot default"
-        "600.0"
+        timeout_default
         (string_field "timeout entry" "default" timeout);
       let recall = find_config_env "MASC_KEEPER_MEMORY_OS_RECALL" entries in
       Alcotest.(check string)
@@ -874,7 +882,22 @@ let test_memory_os_config_snapshot_surfaces_effective_envs () =
         Alcotest.failf
           "blank recall env should render null value, got %s"
           (Yojson.Safe.to_string value)
-      | None -> Alcotest.fail "recall entry value missing"))
+      | None -> Alcotest.fail "recall entry value missing"));
+  with_memory_os_env timeout_env "nan" (fun () ->
+    let entries = storage_config_entries () in
+    let timeout = find_config_env timeout_env entries in
+    Alcotest.(check string)
+      "invalid timeout snapshot source"
+      "env"
+      (string_field "timeout entry" "source" timeout);
+    Alcotest.(check string)
+      "invalid timeout snapshot raw value"
+      "nan"
+      (string_field "timeout entry" "value" timeout);
+    Alcotest.(check string)
+      "invalid timeout snapshot default"
+      timeout_default
+      (string_field "timeout entry" "default" timeout))
 ;;
 
 let test_librarian_timeout_override_env () =

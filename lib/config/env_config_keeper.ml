@@ -190,6 +190,17 @@ module KeeperMemoryOs = struct
   let get_int_logged = Env_config_memory.get_int_logged
   let get_float_positive_logged = Env_config_memory.get_float_positive_logged
 
+  let recall_enabled_default = true
+  let librarian_enabled_default = true
+  let librarian_cadence_turns_default = 3
+  let librarian_max_messages_default = 24
+  let librarian_timeout_sec_default = 600.0
+  let librarian_runtime_id_default = None
+  let librarian_global_slot_default = 1
+  let gc_enabled_default = false
+  let consolidation_enabled_default = false
+  let consolidation_runtime_id_default = None
+
   let get_bool_logged ?(invalid = Env_config_memory.Default) name ~default =
     Env_config_memory.get_bool_logged
       ~invalid
@@ -211,7 +222,7 @@ module KeeperMemoryOs = struct
     get_bool_logged
       ~invalid:Env_config_memory.Fail_closed
       "MASC_KEEPER_MEMORY_OS_RECALL"
-      ~default:true
+      ~default:recall_enabled_default
   ;;
 
   (** Memory OS librarian post-turn extraction kill switch. Default: true;
@@ -223,7 +234,7 @@ module KeeperMemoryOs = struct
     get_bool_logged
       ~invalid:Env_config_memory.Fail_closed
       "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
-      ~default:true
+      ~default:librarian_enabled_default
   ;;
 
   (** Turns between librarian extraction attempts per keeper. Default: 3,
@@ -233,7 +244,9 @@ module KeeperMemoryOs = struct
   let librarian_cadence_turns () =
     max
       1
-      (get_int_logged "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS" ~default:3)
+      (get_int_logged
+         "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS"
+         ~default:librarian_cadence_turns_default)
   ;;
 
   (** Base recent-message window for librarian extraction. Default: 24,
@@ -243,7 +256,9 @@ module KeeperMemoryOs = struct
   let librarian_max_messages () =
     max
       1
-      (get_int_logged "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES" ~default:24)
+      (get_int_logged
+         "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
+         ~default:librarian_max_messages_default)
   ;;
 
   (** Provider timeout for librarian extraction. Default: 600 seconds; invalid,
@@ -253,14 +268,16 @@ module KeeperMemoryOs = struct
   let librarian_timeout_sec () =
     get_float_positive_logged
       "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC"
-      ~default:600.0
+      ~default:librarian_timeout_sec_default
   ;;
 
   (** Optional runtime id override for librarian extraction.
       @category Runtime
       @ops_class operator *)
   let librarian_runtime_id () =
-    get_string ~default:"" "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
+    get_string
+      ~default:(Option.value librarian_runtime_id_default ~default:"")
+      "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
     |> nonempty_string
   ;;
 
@@ -269,7 +286,11 @@ module KeeperMemoryOs = struct
       @category Concurrency
       @ops_class operator *)
   let librarian_global_slot () =
-    max 0 (get_int_logged "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT" ~default:1)
+    max
+      0
+      (get_int_logged
+         "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
+         ~default:librarian_global_slot_default)
   ;;
 
   (** Per-keeper Memory OS GC maintenance fiber kill switch. Default: false;
@@ -280,7 +301,7 @@ module KeeperMemoryOs = struct
     get_bool_logged
       ~invalid:Env_config_memory.Fail_closed
       "MASC_KEEPER_MEMORY_OS_GC"
-      ~default:false
+      ~default:gc_enabled_default
   ;;
 
   (** Per-keeper Memory OS consolidation maintenance fiber kill switch.
@@ -291,14 +312,16 @@ module KeeperMemoryOs = struct
     get_bool_logged
       ~invalid:Env_config_memory.Fail_closed
       "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
-      ~default:false
+      ~default:consolidation_enabled_default
   ;;
 
   (** Optional runtime id override for Memory OS consolidation.
       @category Runtime
       @ops_class operator *)
   let consolidation_runtime_id () =
-    get_string ~default:"" "MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID"
+    get_string
+      ~default:(Option.value consolidation_runtime_id_default ~default:"")
+      "MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID"
     |> nonempty_string
   ;;
 end

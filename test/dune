@@ -2455,7 +2455,11 @@
  (modules test_keeper_visible_path_projection)
  (libraries masc_test_deps))
 
-(executable
+; (test) not (executable): this guards the "no meta_to_json key may live in
+; config_field_names" invariant (config/runtime split). As (executable) it was
+; never run by `dune runtest`, so the multimodal_policy scrub regression shipped
+; uncaught. (test) runs it under @runtest; it exits 1 on a leaked key.
+(test
  (name test_config_runtime_split)
  (modules test_config_runtime_split)
  (libraries masc_test_deps))

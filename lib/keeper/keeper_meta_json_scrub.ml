@@ -30,7 +30,13 @@ let config_field_names =
   ; "tool_heavy_msg_threshold"; "tool_heavy_ratio_floor"
   ; "auto_handoff"; "handoff_threshold"; "handoff_cooldown_sec"
   ; "per_provider_timeout_s"; "always_approve"
-  ; "multimodal_policy"
+    (* NOTE: multimodal_policy is a PERSISTED runtime field: meta_to_json emits
+       it (keeper_meta_json.ml) and it is a canonical key. It must NOT be in this
+       config-only scrub list: keeper_meta_store drops these keys on read before
+       meta_of_json, so listing it here deleted "delegate" on every read (parse
+       fell back to Mm_inherit -> gate never delegated -> next write re-emitted
+       "inherit"). The test/test_config_runtime_split invariant (no meta_to_json
+       key may be in config_field_names) guards this. *)
   ; "autoboot_enabled"; "max_context_override"
   ; "telemetry_feedback_enabled"; "telemetry_feedback_window_hours"
   ]

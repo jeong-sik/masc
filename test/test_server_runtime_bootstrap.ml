@@ -1090,6 +1090,19 @@ let exhaust_keeper_restart_budget config (meta : Keeper_meta_contract.keeper_met
       ("keeper restart-budget exhaustion failed: "
        ^ Keeper_state_machine.transition_error_to_string err)
 
+let mark_keeper_dead_with_registry_cause config
+    (meta : Keeper_meta_contract.keeper_meta) =
+  let base_path = config.Workspace.base_path in
+  Keeper_registry.record_restart ~base_path meta.name;
+  Keeper_registry.record_restart ~base_path meta.name;
+  Keeper_registry.set_failure_reason ~base_path meta.name
+    (Some (Keeper_registry.Fiber_unresolved Keeper_registry.Cancelled_by_parent));
+  Keeper_registry.set_last_error_entry ~base_path ~name:meta.name
+    "synthetic cancelled by parent";
+  Keeper_registry.record_crash ~base_path meta.name 1780000000.0
+    "synthetic crash record";
+  Keeper_registry.mark_dead ~base_path meta.name ~at:1780000001.0
+
 let test_health_json_surfaces_durable_paused_keepers () =
   with_temp_dir "health-durable-paused-keepers" (fun dir ->
       let config_root = make_config_root dir in
@@ -1926,8 +1939,63 @@ let test_health_json_explains_phase_paused_capacity_blocker () =
             [ ("example", "not_registered"); ("phase-paused", "phase_paused") ]
             (fleet_safety |> member "blocked_keeper_reasons" |> to_list
              |> List.map (fun row ->
-                  ( row |> member "keeper" |> to_string
-                  , row |> member "reason" |> to_string ))))))
+	                  ( row |> member "keeper" |> to_string
+	                  , row |> member "reason" |> to_string ))))))
+
+let test_health_json_exposes_dead_keeper_registry_cause () =
+  with_temp_dir "health-phase-dead-registry-cause" (fun dir ->
+    let config_root = make_config_root dir in
+    write_config_root_keeper_toml config_root "phase-dead";
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = (Mcp_server.workspace_config state) in
+        let phase_dead =
+          make_keeper_meta ~name:"phase-dead" ~trace_id:"trace-phase-dead" ()
+        in
+        write_keeper_meta_exn config phase_dead;
+        with_running_keeper_metas config [ phase_dead ] (fun () ->
+          mark_keeper_dead_with_registry_cause config phase_dead;
+          let request = Httpun.Request.create `GET "/health" in
+          let json = Server_routes_http_runtime.make_health_json request in
+          let open Yojson.Safe.Util in
+          let fleet_safety = json |> member "keeper_fleet_safety" in
+          let blocked_detail name =
+            fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            |> List.find (fun row -> row |> member "keeper" |> to_string = name)
+          in
+          let detail = blocked_detail "phase-dead" in
+          Alcotest.(check string) "health explains dead keeper reason" "phase_dead"
+            (detail |> member "reason" |> to_string);
+          Alcotest.(check string) "health exposes dead phase" "dead"
+            (detail |> member "phase" |> to_string);
+          Alcotest.(check string) "health suggests dead keeper recovery"
+            "inspect_dead_keeper_root_cause"
+            (detail |> member "action" |> to_string);
+          Alcotest.(check string) "health surfaces registry failure reason"
+            "fiber_unresolved(cancelled_by_parent)"
+            (detail |> member "last_failure_reason" |> to_string);
+          Alcotest.(check string) "health surfaces registry last error"
+            "synthetic cancelled by parent"
+            (detail |> member "last_error" |> to_string);
+          Alcotest.(check int) "health surfaces registry restart count" 2
+            (detail |> member "restart_count" |> to_int);
+          Alcotest.(check (option (float 0.0001)))
+            "health surfaces registry dead timestamp" (Some 1780000001.0)
+            (detail |> member "dead_since_ts" |> to_float_option);
+          Alcotest.(check (option (float 0.0001)))
+            "health surfaces latest crash timestamp" (Some 1780000000.0)
+            (detail |> member "latest_crash_at" |> to_float_option);
+          Alcotest.(check string) "health surfaces latest crash reason"
+            "synthetic crash record"
+            (detail |> member "latest_crash_reason" |> to_string))))
 
 let test_health_json_explains_terminal_capacity_blocker
     ~dir_name
@@ -3694,6 +3762,9 @@ let () =
           Alcotest.test_case
             "health json explains zombie capacity blocker as terminal"
             `Quick test_health_json_explains_zombie_capacity_blocker_as_terminal;
+          Alcotest.test_case
+            "health json exposes dead keeper registry cause"
+            `Quick test_health_json_exposes_dead_keeper_registry_cause;
           Alcotest.test_case
             "health json distinguishes failing executable keepers"
             `Quick test_health_json_distinguishes_failing_executable_keepers;

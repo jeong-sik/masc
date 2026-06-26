@@ -78,12 +78,22 @@ type keeper_phase_counts = {
   recovering : int;
   executable : int;
 }
+type keeper_phase_detail = {
+  phase : string;
+  last_failure_reason : string option;
+  last_error : string option;
+  restart_count : int;
+  dead_since_ts : float option;
+  latest_crash_at : float option;
+  latest_crash_reason : string option;
+}
 type keeper_phase_snapshot = {
   counts : keeper_phase_counts;
   running_names : string list;
   recovering_names : string list;
   executable_names : string list;
   phase_values : (string * Keeper_state_machine.phase) list;
+  phase_details : (string * keeper_phase_detail) list;
 }
 val keeper_phase_snapshot : ?base_path:string -> unit -> keeper_phase_snapshot
 val keeper_phase_counts : ?base_path:string -> unit -> keeper_phase_counts

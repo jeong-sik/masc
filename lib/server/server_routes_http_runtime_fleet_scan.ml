@@ -405,22 +405,52 @@ type keeper_phase_counts =
 let empty_keeper_phase_counts =
   { running = 0; failing = 0; recovering = 0; executable = 0 }
 
+type keeper_phase_detail =
+  { phase : string
+  ; last_failure_reason : string option
+  ; last_error : string option
+  ; restart_count : int
+  ; dead_since_ts : float option
+  ; latest_crash_at : float option
+  ; latest_crash_reason : string option
+  }
+
 type keeper_phase_snapshot =
   { counts : keeper_phase_counts
   ; running_names : string list
   ; recovering_names : string list
   ; executable_names : string list
   ; phase_values : (string * Keeper_state_machine.phase) list
+  ; phase_details : (string * keeper_phase_detail) list
+  }
+
+let keeper_phase_detail_of_entry (entry : Keeper_registry.registry_entry) =
+  let latest_crash_at, latest_crash_reason =
+    match entry.crash_log with
+    | (ts, reason) :: _ -> (Some ts, Some reason)
+    | [] -> (None, None)
+  in
+  {
+    phase = Keeper_state_machine.phase_to_string entry.phase;
+    last_failure_reason =
+      Option.map Keeper_registry.failure_reason_to_string entry.last_failure_reason;
+    last_error = entry.last_error;
+    restart_count = entry.restart_count;
+    dead_since_ts = entry.dead_since_ts;
+    latest_crash_at;
+    latest_crash_reason;
   }
 
 let keeper_phase_snapshot ?base_path () =
   Keeper_registry.all ?base_path ()
   |> List.fold_left
        (fun acc (entry : Keeper_registry.registry_entry) ->
-          let acc =
+         let acc =
             {
               acc with
               phase_values = (entry.name, entry.phase) :: acc.phase_values;
+              phase_details =
+                (entry.name, keeper_phase_detail_of_entry entry) :: acc.phase_details;
             }
           in
           let counts = acc.counts in
@@ -455,6 +485,7 @@ let keeper_phase_snapshot ?base_path () =
               recovering_names;
               executable_names;
               phase_values = acc.phase_values;
+              phase_details = acc.phase_details;
             }
           | Keeper_state_machine.Failing ->
             {
@@ -482,6 +513,7 @@ let keeper_phase_snapshot ?base_path () =
          recovering_names = [];
          executable_names = [];
          phase_values = [];
+         phase_details = [];
        }
   |> fun snapshot ->
   {
@@ -491,6 +523,8 @@ let keeper_phase_snapshot ?base_path () =
     executable_names = sorted_unique_strings snapshot.executable_names;
     phase_values =
       List.sort (fun (a, _) (b, _) -> String.compare a b) snapshot.phase_values;
+    phase_details =
+      List.sort (fun (a, _) (b, _) -> String.compare a b) snapshot.phase_details;
   }
 
 let keeper_phase_counts ?base_path () = (keeper_phase_snapshot ?base_path ()).counts
@@ -714,6 +748,7 @@ let active_task_owner_fiber_scan_semantics =
 let blocked_keeper_detail_json
     ?base_path
     ?phase
+    ?phase_detail
     ~bootable_set
     ~capacity_set
     ~paused_set
@@ -766,6 +801,27 @@ let blocked_keeper_detail_json
           ("last_bootstrap_recorded_at", `String failure.Keeper_runtime.recorded_at);
         ]
   in
+  let phase_detail_fields =
+    match phase_detail with
+    | None ->
+        [
+          ("last_failure_reason", `Null);
+          ("last_error", `Null);
+          ("restart_count", `Null);
+          ("dead_since_ts", `Null);
+          ("latest_crash_at", `Null);
+          ("latest_crash_reason", `Null);
+        ]
+    | Some detail ->
+        [
+          ("last_failure_reason", Json_util.string_opt_to_json detail.last_failure_reason);
+          ("last_error", Json_util.string_opt_to_json detail.last_error);
+          ("restart_count", `Int detail.restart_count);
+          ("dead_since_ts", Json_util.float_opt_to_json detail.dead_since_ts);
+          ("latest_crash_at", Json_util.float_opt_to_json detail.latest_crash_at);
+          ("latest_crash_reason", Json_util.string_opt_to_json detail.latest_crash_reason);
+        ]
+  in
   `Assoc
     ([
        ("keeper", `String name);
@@ -779,7 +835,8 @@ let blocked_keeper_detail_json
        ("meta_read_error", `Bool has_read_error);
      ]
      @ terminal_phase_field
-     @ last_failure_fields)
+     @ last_failure_fields
+     @ phase_detail_fields)
 
 type active_task_owner_without_executable_fiber = {
   keeper_name : string option;
@@ -1049,6 +1106,12 @@ let keeper_fleet_safety_health_json
     | None -> []
   in
   let phase_value name = List.assoc_opt name phase_values in
+  let phase_details =
+    match phase_snapshot with
+    | Some snapshot -> snapshot.phase_details
+    | None -> []
+  in
+  let phase_detail name = List.assoc_opt name phase_details in
   let minimum_running_fibers =
     if target_count <= 1 then target_count else 2
   in
@@ -1142,6 +1205,7 @@ let keeper_fleet_safety_health_json
              blocked_keeper_detail_json
                ?base_path:runtime_base_path
                ?phase:(phase_value name)
+               ?phase_detail:(phase_detail name)
                ~bootable_set
                ~capacity_set
                ~paused_set

@@ -37,6 +37,7 @@ let base_policy : Fusion_policy.t =
   ; default_preset = "trio"
   ; max_concurrent_panels = 2
   ; max_concurrent_judges = Fusion_policy.default_max_concurrent_judges
+  ; staged_judge_group_size = Fusion_policy.default_staged_judge_group_size
   ; presets =
       [ validated
           { Fusion_policy.name = "trio"
@@ -102,6 +103,7 @@ enabled = true
 default_preset = "trio"
 max_concurrent_panels = 2
 max_concurrent_judges = 4
+staged_judge_group_size = 3
 [fusion.presets.trio]
 web_tools = false
 max_tool_calls_per_panel = 0
@@ -116,6 +118,8 @@ let test_config_valid () =
   | Ok p ->
     Alcotest.(check bool) "enabled" true p.Fusion_policy.enabled;
     Alcotest.(check int) "judge concurrency" 4 p.Fusion_policy.max_concurrent_judges;
+    Alcotest.(check int) "staged judge group size" 3
+      p.Fusion_policy.staged_judge_group_size;
     Alcotest.(check int) "one preset" 1 (List.length p.Fusion_policy.presets);
     (match p.Fusion_policy.presets with
      | [ vp ] ->
@@ -546,6 +550,26 @@ judge_system_prompt = "j"
       (List.mem (Fusion_config.Invalid_max_concurrent_judges 0) es)
   | Ok _ -> Alcotest.fail "expected Error Invalid_max_concurrent_judges"
 
+let test_config_bad_staged_judge_group_size () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p1"
+staged_judge_group_size = 1
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = "a"
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Invalid_staged_judge_group_size present" true
+      (List.mem (Fusion_config.Invalid_staged_judge_group_size 1) es)
+  | Ok _ -> Alcotest.fail "expected Error Invalid_staged_judge_group_size"
+
 let test_config_invalid_max_tool_calls () =
   let s =
     {|
@@ -600,6 +624,7 @@ enabled = false
 default_preset = "trio"
 max_concurrent_panels = 2
 max_concurrent_judges = 3
+staged_judge_group_size = 3
 [fusion.presets.trio]
 web_tools = false
 max_tool_calls_per_panel = 0
@@ -621,6 +646,8 @@ let test_config_disabled_with_preset () =
     Alcotest.(check bool) "seed disabled" false p.Fusion_policy.enabled;
     Alcotest.(check int) "seed judge concurrency" 3
       p.Fusion_policy.max_concurrent_judges;
+    Alcotest.(check int) "seed staged group size" 3
+      p.Fusion_policy.staged_judge_group_size;
     Alcotest.(check int) "trio preset present" 1 (List.length p.Fusion_policy.presets);
     (match p.Fusion_policy.presets with
      | [ vp ] ->
@@ -744,6 +771,42 @@ let test_validated_judge_bad_max_tool_calls () =
   match Fusion_policy.Validated_preset.of_preset (mk_preset ~judges:[ over ] "jmtc") with
   | Error (Fusion_policy.Validated_preset.Bad_max_tool_calls 17) -> ()
   | _ -> Alcotest.fail "expected Bad_max_tool_calls 17 for over-ceiling judge"
+
+let judge_named model = { base_judge with Fusion_policy.jmodel = model }
+
+let test_staged_judge_groups_exact_3x3 () =
+  let judges = List.init 9 (fun i -> judge_named (Printf.sprintf "j%d" (i + 1))) in
+  match Fusion_policy.staged_judge_groups ~group_size:3 judges with
+  | Ok groups ->
+    Alcotest.(check int) "three groups" 3 (List.length groups);
+    Alcotest.(check (list int)) "3x3 group sizes" [ 3; 3; 3 ]
+      (List.map List.length groups);
+    (match groups with
+     | first :: _ ->
+       (match first with
+        | j :: _ -> Alcotest.(check string) "first judge preserved" "j1" j.Fusion_policy.jmodel
+        | [] -> Alcotest.fail "first group should not be empty")
+     | [] -> Alcotest.fail "expected groups")
+  | Error e ->
+    Alcotest.failf "expected 3x3 groups, got %s"
+      (Fusion_policy.show_staged_judge_group_error e)
+
+let test_staged_judge_groups_too_few () =
+  let judges = List.init 5 (fun i -> judge_named (Printf.sprintf "j%d" (i + 1))) in
+  match Fusion_policy.staged_judge_groups ~group_size:3 judges with
+  | Error (Fusion_policy.Staged_too_few_judges { group_size = 3; judges = 5 }) -> ()
+  | _ -> Alcotest.fail "expected Staged_too_few_judges for 5 judges at group size 3"
+
+let test_staged_judge_groups_ragged () =
+  let judges = List.init 8 (fun i -> judge_named (Printf.sprintf "j%d" (i + 1))) in
+  match Fusion_policy.staged_judge_groups ~group_size:3 judges with
+  | Error (Fusion_policy.Staged_ragged_judges { group_size = 3; judges = 8 }) -> ()
+  | _ -> Alcotest.fail "expected Staged_ragged_judges for 8 judges at group size 3"
+
+let test_staged_judge_groups_bad_size () =
+  match Fusion_policy.staged_judge_groups ~group_size:1 [ judge_named "j1"; judge_named "j2" ] with
+  | Error (Fusion_policy.Staged_group_size_below_min 1) -> ()
+  | _ -> Alcotest.fail "expected Staged_group_size_below_min"
 
 (* --- JOJ 1차 심판 TOML 파싱 (RFC-0283). parse_judge_spec + finish_preset의
        [[...judges]] array-of-tables 리더를 end-to-end로 검증한다. 위 of_preset
@@ -968,7 +1031,7 @@ let test_topology_unknown_is_none () =
 let test_topology_strings () =
   Alcotest.(check (list string))
     "all topology wire strings"
-    [ "simple"; "refine"; "conditional"; "judge_of_judges" ]
+    [ "simple"; "refine"; "conditional"; "judge_of_judges"; "staged_judge_of_judges" ]
     all_fusion_topology_strings
 
 (* Conditional 에스컬레이트 정책 — 닫힌 합 전수 값-핀. Insufficient만 escalate. *)
@@ -1203,6 +1266,8 @@ let () =
         ; Alcotest.test_case "bad_concurrency" `Quick test_config_bad_concurrency
         ; Alcotest.test_case "bad_judge_concurrency" `Quick
             test_config_bad_judge_concurrency
+        ; Alcotest.test_case "bad_staged_judge_group_size" `Quick
+            test_config_bad_staged_judge_group_size
         ; Alcotest.test_case "invalid_max_tool_calls" `Quick
             test_config_invalid_max_tool_calls
         ; Alcotest.test_case "empty_default_preset" `Quick test_config_empty_default_preset
@@ -1223,6 +1288,12 @@ let () =
         ; Alcotest.test_case "duplicate_judge" `Quick test_validated_duplicate_judge
         ; Alcotest.test_case "judge_bad_max_tool_calls" `Quick
             test_validated_judge_bad_max_tool_calls
+        ] )
+    ; ( "staged_judge_groups"
+      , [ Alcotest.test_case "exact_3x3" `Quick test_staged_judge_groups_exact_3x3
+        ; Alcotest.test_case "too_few" `Quick test_staged_judge_groups_too_few
+        ; Alcotest.test_case "ragged" `Quick test_staged_judge_groups_ragged
+        ; Alcotest.test_case "bad_size" `Quick test_staged_judge_groups_bad_size
         ] )
     ; ( "judge_args"
       , [ Alcotest.test_case "single_group_identity" `Quick

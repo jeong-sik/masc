@@ -1,4 +1,4 @@
-# RFC-0283 — Fusion: judge-of-judges 위상 (N개 1차 심판 + meta 심판)
+# RFC-0283 — Fusion: judge-of-judges 위상 (flat/staged reducer)
 
 - Status: Draft
 - Author: Vincent (yousleepwhen) + Claude
@@ -59,6 +59,8 @@ type preset =
 
 - `simple`/`refine`/`conditional`: `judges`를 **무시**하고 기존 단일 `judge` 사용 → 동작 불변(byte-identical).
 - `judge_of_judges`: `judges`의 N개로 1차 fan-out, 기존 `judge`를 meta로.
+- `staged_judge_of_judges`: 같은 `judges` 목록을 `[fusion].staged_judge_group_size`
+  단위의 exact group으로 나누고, group별 stage meta 결과를 final meta가 다시 reconcile한다.
 
 판정 정체성은 `panelist_id`와 동형인 `judge_id ~label ~model`로 derive한다(meta 프롬프트에서 어느 1차 심판의 종합인지 attribute).
 
@@ -91,10 +93,24 @@ type preset =
           (* meta usage + 모든 1차 usage 합산 *)))
 ```
 
-- **재귀 없음**: 1차 N개 + meta 1개 = 고정 2-레벨. depth 카운터 불필요(Fusion_depth 게이트가 Nested 재진입을 이미 차단).
+- **재귀 없음**: `judge_of_judges`는 1차 N개 + meta 1개의 고정 2-level이다.
+  `staged_judge_of_judges`는 같은 fusion run 안의 고정 reducer tree(stage meta + final meta)이며
+  nested `masc_fusion`을 호출하지 않는다. Fusion_depth 게이트의 Nested 재진입 차단은 그대로 유지한다.
 - **격리**: 1차 심판 하나가 실패해도 나머지로 meta 진행(panel `Async_agent.all` 격리와 동형). 전원 실패면 첫 에러 전파.
 - **usage**: 성공한 1차 usage 전부 + meta usage를 `add_usage` fold로 합산해 sink에 전달.
 - **graceful degrade**: meta 실패 시 1차 종합 중 하나(예: 첫 성공)로 fallback + warn(refine 위상과 동일 원리). [열린 질문 §5.1]
+
+### 2.3.1 staged JOJ 분기
+
+`staged_judge_of_judges`는 graph DSL이나 recursive fusion이 아니라 named topology arm이다.
+
+- `[fusion].staged_judge_group_size` 기본값은 3, 허용 최소값은 2.
+- judge 수는 group size로 나누어떨어져야 하며, 최소 두 개의 full group을 만들어야 한다.
+  예: 9 judges + group size 3 → `3 + 3 + 3` stage meta → final meta. 8 judges + group
+  size 3은 ragged라 실행 전 에러로 fail-closed.
+- 1차 judge wave와 stage meta wave는 `max_concurrent_judges` cap을 쓴다. Final meta는 1회 호출이다.
+- 각 stage meta 실패는 해당 stage의 첫 성공 1차 종합으로 degrade하고, final meta 실패는 첫 성공
+  stage 종합으로 degrade한다. 모든 stage가 실패하면 canonical judge는 Error다.
 
 ### 2.4 meta-judge 진입점
 
@@ -117,7 +133,8 @@ val run_meta : (* run/run_refine과 동형, ~priors 추가 *) ...
 | 건드림 | 안 건드림 |
 |--------|-----------|
 | preset에 `judges` 추가, Validated_preset 검증 | 기존 `judge`/`judge_system_prompt`/`judge_timeout_s` |
-| fusion_topology에 `Judge_of_judges` | simple/refine/conditional 동작 |
+| `[fusion].staged_judge_group_size` config + staged grouping validation | panel preset grammar |
+| fusion_topology에 `Judge_of_judges`, `Staged_judge_of_judges` | simple/refine/conditional 동작 |
 | Fusion_judge: compose_meta_prompt/run_meta | sink 계약, OAS |
 | orchestrator JOJ 분기 + 1차 병렬 fan-out | panel fan-out |
 
@@ -125,6 +142,8 @@ val run_meta : (* run/run_refine과 동형, ~priors 추가 *) ...
 
 순수 경계(fusion_core 빠른 alcotest):
 - `judge_of_judges` round-trip + wire-string 목록.
+- `staged_judge_of_judges` round-trip + wire-string 목록.
+- staged grouping: 9 judges/group 3 → 3x3, too few/ragged/group_size<2 → fail-closed.
 - `judge_spec` 검증: prompt 누락 → `Judge_panel_prompt_missing`, 정체성 중복 → `Duplicate_judge`, byte-identity(judges=[]면 기존 preset과 동치).
 - `compose_meta_prompt`: N개 prior가 전부 lossless 렌더되고 judge_id로 attribute됨.
 

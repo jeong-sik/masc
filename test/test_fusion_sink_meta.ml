@@ -197,6 +197,22 @@ let test_node_meta_role () =
   check (option string) "role = meta" (Some "meta") (string_field a "role");
   check (option string) "identity = meta" (Some "meta") (string_field a "identity")
 
+let test_node_stage_and_final_roles () =
+  let stage =
+    assoc_of
+      (Masc.Fusion_sink.judge_node_meta
+         (Synthesized { role = Stage_meta 2; synthesis = full_synthesis (); usage = zero_usage }))
+  in
+  check (option string) "stage role" (Some "stage_meta") (string_field stage "role");
+  check (option string) "stage identity" (Some "stage-2") (string_field stage "identity");
+  let final =
+    assoc_of
+      (Masc.Fusion_sink.judge_node_meta
+         (Synthesized { role = Final_meta; synthesis = full_synthesis (); usage = zero_usage }))
+  in
+  check (option string) "final role" (Some "final_meta") (string_field final "role");
+  check (option string) "final identity" (Some "final") (string_field final "identity")
+
 let test_node_single_and_refine_roles () =
   let single =
     assoc_of
@@ -259,6 +275,7 @@ let () =
       , [ test_case "first_carries_panelist_identity" `Quick
             test_node_first_carries_panelist_identity
         ; test_case "meta_role" `Quick test_node_meta_role
+        ; test_case "stage_and_final_roles" `Quick test_node_stage_and_final_roles
         ; test_case "single_and_refine_roles" `Quick test_node_single_and_refine_roles
         ; test_case "failed_keeps_identity" `Quick test_node_failed_keeps_identity
         ] )

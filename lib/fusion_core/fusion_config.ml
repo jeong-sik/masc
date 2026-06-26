@@ -11,6 +11,7 @@ type config_error =
   | Missing_judge_model of string
   | Invalid_max_concurrent_panels of int
   | Invalid_max_concurrent_judges of int
+  | Invalid_staged_judge_group_size of int
   | Invalid_max_tool_calls of string * int
   | Missing_default_preset of string
   | Judge_panel_prompt_missing of string  (** preset 이름; JOJ 1차 심판 prompt 누락 (RFC-0283) *)
@@ -25,6 +26,7 @@ let disabled : Fusion_policy.t =
   ; default_preset = ""
   ; max_concurrent_panels = 1
   ; max_concurrent_judges = Fusion_policy.default_max_concurrent_judges
+  ; staged_judge_group_size = Fusion_policy.default_staged_judge_group_size
   ; presets = []
   }
 
@@ -155,6 +157,10 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
     Otoml.find_or ~default:Fusion_policy.default_max_concurrent_judges toml
       Otoml.get_integer [ "fusion"; "max_concurrent_judges" ]
   in
+  let staged_judge_group_size =
+    Otoml.find_or ~default:Fusion_policy.default_staged_judge_group_size toml
+      Otoml.get_integer [ "fusion"; "staged_judge_group_size" ]
+  in
   let preset_entries =
     match Otoml.find_opt toml Otoml.get_table [ "fusion"; "presets" ] with
     | Some entries -> entries
@@ -174,12 +180,19 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
       Invalid_max_concurrent_panels max_concurrent_panels :: errors
     else errors
   in
-  (* JOJ first-pass judges do not share the panel cap.  A low panel cap is often
+  (* JOJ judge waves do not share the panel cap.  A low panel cap is often
      provider backpressure for panel models; coupling judges to it serializes
      independent judge lenses and lets one slow judge delay the rest. *)
   let errors =
     if enabled && max_concurrent_judges < 1 then
       Invalid_max_concurrent_judges max_concurrent_judges :: errors
+    else errors
+  in
+  (* Staged JOJ uses this as an exact reducer group size.  Values below 2
+     silently degenerate the tree into pass-through, so reject them at load. *)
+  let errors =
+    if enabled && staged_judge_group_size < Fusion_policy.min_staged_judge_group_size
+    then Invalid_staged_judge_group_size staged_judge_group_size :: errors
     else errors
   in
   (* enabled면 default_preset가 비어있지 않고 presets에 존재해야 한다. preset 생략
@@ -203,6 +216,7 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
       ; default_preset
       ; max_concurrent_panels
       ; max_concurrent_judges
+      ; staged_judge_group_size
       ; presets
       }
 

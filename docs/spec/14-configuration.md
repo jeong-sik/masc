@@ -354,14 +354,21 @@ runtime authoring surface에서 모델 binding, preset, 동시성 cap을 함께 
 | `enabled` | bool | `true` | `false`면 `masc_fusion` 게이트가 모델 호출 없이 `Deny` |
 | `default_preset` | string | `"trio"` | 요청이 preset을 지정하지 않을 때 사용하는 `[fusion.presets.*]` 이름 |
 | `max_concurrent_panels` | int >= 1 | `2` | 패널 답변 fan-out 상한 |
-| `max_concurrent_judges` | int >= 1 | `3` | `judge_of_judges`의 1차 심판 fan-out 상한. 패널 backpressure와 독립 |
+| `max_concurrent_judges` | int >= 1 | `3` | `judge_of_judges` 계열 judge wave fan-out 상한. 패널 backpressure와 독립 |
+| `staged_judge_group_size` | int >= 2 | `3` | `staged_judge_of_judges`가 1차 심판을 묶는 고정 reducer group 크기 |
 
-`max_concurrent_judges`는 topology를 늘리는 값이 아니라 독립 1차 심판을 동시에 몇 개까지
-실행할지 정하는 cap이다. 예를 들어 preset에 9개의
-`[[fusion.presets.<name>.judges]]`가 있으면 flat JoJ로 9개 1차 심판을 배치 실행한 뒤
-meta 심판이 한 번 reconcile한다. 반대로 `3x3x3` 같은 hierarchical reducer tree나 여러
-JoJ 결과를 최종 문서에 append하는 workflow는 현재 `[fusion]` topology가 표현하지 않는다.
-그 경우 별도 상위 오케스트레이션과 append 계약을 설계해야 한다.
+`max_concurrent_judges`는 topology를 늘리는 값이 아니라 독립 judge 호출을 동시에 몇 개까지
+실행할지 정하는 cap이다. Topology는 `masc_fusion.topology` 문자열로 선택한다.
+
+- `judge_of_judges`: preset에 9개의 `[[fusion.presets.<name>.judges]]`가 있으면 flat
+  JoJ로 9개 1차 심판을 실행한 뒤 meta 심판이 한 번 reconcile한다.
+- `staged_judge_of_judges`: 같은 9개 1차 심판과 `staged_judge_group_size = 3`이면
+  `3 + 3 + 3` stage meta 결과를 만든 뒤 final meta가 최종 reconcile한다. judge 수가
+  group size로 나누어떨어지지 않거나 두 개 이상의 full group을 만들 수 없으면 실행 전
+  에러로 fail-closed한다.
+
+두 topology 모두 기존 `Fusion_sink.emit` 경로로 canonical judge 결과를 board/chat에 append한다.
+staged topology도 nested `masc_fusion` 호출을 하지 않으므로 depth guard는 그대로 유지된다.
 
 ### 7.2 모델 식별자 형식
 

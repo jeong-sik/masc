@@ -181,13 +181,16 @@ type judge_synthesis =
    존재하다 [Result.map fst]로 소실되던 것을, 패널처럼 배열로 board 증거에 남긴다.
    이것은 *관측 데이터*(무엇이 실행됐나)이지 *실행 추상*(어떻게 조립하나 — purge된
    ChainEngine node-graph DSL)이 아니다: 대시보드는 위상 이름 없이 이 배열의 shape만으로
-   구조를 렌더한다(1=simple, 2=refine, N+meta=judge-of-judges). 콤비네이터/그래프 어휘는
-   도입하지 않는다(RFC-0284 §4: 추상 추출은 5번째 위상이 강제할 때까지 defer). *)
+   구조를 렌더한다(1=simple, 2=refine, N+meta=judge-of-judges,
+   grouped firsts+stage_meta+final_meta=staged judge-of-judges). 콤비네이터/그래프 어휘는
+   도입하지 않는다(RFC-0284 §4). *)
 type judge_role =
   | Single  (** Simple 위상의 단일 심판. *)
   | Refine_pass  (** Refine/Conditional의 2차(재검토) 심판. *)
   | First of string  (** JOJ 1차 심판. panelist_id를 정체성으로 보존(panel model과 대칭). *)
   | Meta  (** JOJ meta(reconcile) 심판. *)
+  | Stage_meta of int  (** staged JOJ의 stage reducer. 정체성은 ["stage-N"]. *)
+  | Final_meta  (** staged JOJ의 최종 reducer. *)
 [@@deriving yojson, show, eq]
 
 type judge_node =
@@ -271,6 +274,11 @@ type fusion_topology =
   | Judge_of_judges
       (** panel → [N개 1차 심판] → meta-judge → sink (RFC-0283). 서로 다른 N개 1차
           심판이 같은 패널을 독립 종합하고, meta가 reconcile. preset.judges >= 2 필요. *)
+  | Staged_judge_of_judges
+      (** panel → [N개 1차 심판] → fixed-size stage meta reducers → final meta reducer
+          → sink. preset.judges count must form at least two exact groups of
+          TOML key [staged_judge_group_size]. This is a named topology,
+          not recursive fusion; [Fusion_depth.Nested] remains denied. *)
 [@@deriving yojson, show, eq]
 
 let fusion_topology_to_string = function
@@ -278,6 +286,7 @@ let fusion_topology_to_string = function
   | Refine -> "refine"
   | Conditional -> "conditional"
   | Judge_of_judges -> "judge_of_judges"
+  | Staged_judge_of_judges -> "staged_judge_of_judges"
 
 (* [to_string]의 역함수, 닫힌 합 밖은 [None]=fail-closed (Unknown→permissive 회피).
    keeper 입력 문자열을 typed 위상으로 parse한 뒤 exhaustive match하게 한다. round-trip은
@@ -287,10 +296,11 @@ let fusion_topology_of_string = function
   | "refine" -> Some Refine
   | "conditional" -> Some Conditional
   | "judge_of_judges" -> Some Judge_of_judges
+  | "staged_judge_of_judges" -> Some Staged_judge_of_judges
   | _ -> None
 
 let all_fusion_topologies : fusion_topology list =
-  [ Simple; Refine; Conditional; Judge_of_judges ]
+  [ Simple; Refine; Conditional; Judge_of_judges; Staged_judge_of_judges ]
 
 let all_fusion_topology_strings : string list =
   List.map fusion_topology_to_string all_fusion_topologies

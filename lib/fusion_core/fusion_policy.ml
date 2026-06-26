@@ -51,6 +51,8 @@ let max_panel = 8
 let min_answered_floor = 1
 let default_min_answered = min_answered_floor
 let default_max_concurrent_judges = max_panel
+let min_staged_judge_group_size = 2
+let default_staged_judge_group_size = 3
 
 (* 그룹 모델당 max_tool_calls 상한 (0..max). 0=무제한, 그 외 양수는 에이전트
    max_turns에 근사. SSOT 상수 (Magic Number 회피, RFC-0280에서 검증을 한 곳으로 모음). *)
@@ -147,6 +149,63 @@ let preset_judge_prompts_present (p : preset) =
   List.for_all
     (fun (j : judge_spec) -> String.length (String.trim j.jsystem_prompt) > 0)
     p.judges
+
+type staged_judge_group_error =
+  | Staged_group_size_below_min of int
+  | Staged_too_few_judges of
+      { group_size : int
+      ; judges : int
+      }
+  | Staged_ragged_judges of
+      { group_size : int
+      ; judges : int
+      }
+[@@deriving show, eq]
+
+let staged_judge_group_error_message = function
+  | Staged_group_size_below_min group_size ->
+    Printf.sprintf "staged_judge_group_size must be >= %d, got %d"
+      min_staged_judge_group_size
+      group_size
+  | Staged_too_few_judges { group_size; judges } ->
+    Printf.sprintf
+      "staged_judge_of_judges requires at least two full groups: group_size=%d \
+       requires >= %d judges, got %d"
+      group_size
+      (group_size * 2)
+      judges
+  | Staged_ragged_judges { group_size; judges } ->
+    Printf.sprintf
+      "staged_judge_of_judges requires judge count divisible by \
+       staged_judge_group_size: group_size=%d, judges=%d"
+      group_size
+      judges
+
+let staged_judge_groups ~group_size judges =
+  let judge_count = List.length judges in
+  if group_size < min_staged_judge_group_size
+  then Error (Staged_group_size_below_min group_size)
+  else if judge_count < group_size * 2
+  then Error (Staged_too_few_judges { group_size; judges = judge_count })
+  else if judge_count mod group_size <> 0
+  then Error (Staged_ragged_judges { group_size; judges = judge_count })
+  else
+    let rec take n acc rest =
+      if n = 0
+      then (List.rev acc, rest)
+      else
+        match rest with
+        | [] -> (List.rev acc, [])
+        | x :: xs -> take (n - 1) (x :: acc) xs
+    in
+    let rec loop acc rest =
+      match rest with
+      | [] -> Ok (List.rev acc)
+      | _ ->
+        let group, rest = take group_size [] rest in
+        loop (group :: acc) rest
+    in
+    loop [] judges
 
 (* 외곽 run_safe 타임아웃 = 그룹 timeout 중 max. 하나의 Async_agent.all은 하나의
    외곽 타임아웃만 가지므로(RFC-0252-A §4.3), 그룹별 정밀 timeout은 build_agent에
@@ -247,6 +306,7 @@ type t =
   ; default_preset : string
   ; max_concurrent_panels : int
   ; max_concurrent_judges : int
+  ; staged_judge_group_size : int
   ; presets : Validated_preset.t list
   }
 [@@deriving show, eq]

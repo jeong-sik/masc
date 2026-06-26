@@ -361,24 +361,25 @@ let message_create_payload
     ~content ~mention_ids ()
     : Yojson.Safe.t =
   let mentions_json =
-    if mentions <> [] then
-      `List
-        (List.map
-           (fun (uid, uname, gname) ->
-             `Assoc
-               ([ ("id", `String uid) ]
-                @ (match uname with
-                  | Some u -> [ ("username", `String u) ]
-                  | None -> [])
-                @ match gname with
-                | Some g -> [ ("global_name", `String g) ]
-                | None -> []))
-           mentions)
-    else
-      `List
-        (List.map
-           (fun uid -> `Assoc [ ("id", `String uid) ])
-           mention_ids)
+    let full_mentions =
+      List.map
+        (fun (uid, uname, gname) ->
+          `Assoc
+            ([ ("id", `String uid) ]
+             @ (match uname with
+               | Some u -> [ ("username", `String u) ]
+               | None -> [])
+             @ match gname with
+             | Some g -> [ ("global_name", `String g) ]
+             | None -> []))
+        mentions
+    in
+    let mentioned_ids =
+      List.map
+        (fun uid -> `Assoc [ ("id", `String uid) ])
+        mention_ids
+    in
+    `List (full_mentions @ mentioned_ids)
   in
   let author_fields =
     ("id", `String author_id)
@@ -608,14 +609,15 @@ let test_decode_message_create_reply_ping_is_not_explicit_mention () =
 (* Discord mention -> display-name resolution. *)
 
 let test_decode_message_create_resolves_mention_global_name () =
+  let alice_id = "111111111111111111" in
   let payload =
     message_create_payload
       ~id:"MSG4"
       ~channel_id:"CH1"
       ~author_id:"USER1"
-      ~content:"hello <@ALICE>"
-      ~mention_ids:[ "ALICE" ]
-      ~mentions:[ ("ALICE", Some "alice_handle", Some "Alice") ]
+      ~content:("hello <@" ^ alice_id ^ ">")
+      ~mention_ids:[]
+      ~mentions:[ (alice_id, Some "alice_handle", Some "Alice") ]
       ()
   in
   match
@@ -636,14 +638,15 @@ let test_decode_message_create_resolves_mention_global_name () =
   | Error msg -> fail msg
 
 let test_decode_message_create_resolves_mention_username_fallback () =
+  let bob_id = "222222222222222222" in
   let payload =
     message_create_payload
       ~id:"MSG5"
       ~channel_id:"CH1"
       ~author_id:"USER1"
-      ~content:"<@!BOB> check this"
-      ~mention_ids:[ "BOB" ]
-      ~mentions:[ ("BOB", Some "bob_user", None) ]
+      ~content:("<@!" ^ bob_id ^ "> check this")
+      ~mention_ids:[]
+      ~mentions:[ (bob_id, Some "bob_user", None) ]
       ()
   in
   match
@@ -664,12 +667,13 @@ let test_decode_message_create_resolves_mention_username_fallback () =
   | Error msg -> fail msg
 
 let test_decode_message_create_leaves_unknown_mention_untouched () =
+  let unknown_id = "333333333333333333" in
   let payload =
     message_create_payload
       ~id:"MSG6"
       ~channel_id:"CH1"
       ~author_id:"USER1"
-      ~content:"hey <@UNKNOWN>"
+      ~content:("hey <@" ^ unknown_id ^ ">")
       ~mention_ids:[]
       ()
   in
@@ -679,8 +683,90 @@ let test_decode_message_create_leaves_unknown_mention_untouched () =
       ~event_name:"MESSAGE_CREATE"
       ~payload
   with
-  | Ok (S.Message_create { content = "hey <@UNKNOWN>"; _ }) -> ()
+  | Ok (S.Message_create { content; _ })
+    when String.equal content ("hey <@" ^ unknown_id ^ ">") ->
+      ()
   | Ok _ -> fail "expected unknown mention left as raw snowflake"
+  | Error msg -> fail msg
+
+let test_decode_message_create_preserves_raw_content () =
+  let alice_id = "111111111111111111" in
+  let payload =
+    message_create_payload
+      ~id:"MSG7"
+      ~channel_id:"CH1"
+      ~author_id:"USER1"
+      ~content:("hello <@" ^ alice_id ^ ">")
+      ~mention_ids:[]
+      ~mentions:[ (alice_id, Some "alice_handle", Some "Alice") ]
+      ()
+  in
+  match
+    S.decode_dispatch
+      ~bot_user_id:(Some "BOT")
+      ~event_name:"MESSAGE_CREATE"
+      ~payload
+  with
+  | Ok
+      (S.Message_create
+        { content = "hello @Alice"
+        ; raw_content
+        ; _
+        }) when String.equal raw_content ("hello <@" ^ alice_id ^ ">") ->
+      ()
+  | Ok _ -> fail "expected raw_content preserved and content resolved"
+  | Error msg -> fail msg
+
+let test_decode_message_create_records_resolved_mentions () =
+  let alice_id = "111111111111111111" in
+  let channel_id = "444444444444444444" in
+  let role_id = "555555555555555555" in
+  let payload =
+    message_create_payload
+      ~id:"MSG8"
+      ~channel_id:"CH1"
+      ~author_id:"USER1"
+      ~content:
+        ("hi <@" ^ alice_id ^ "> in <#" ^ channel_id ^ "> and <@&"
+       ^ role_id ^ ">")
+      ~mention_ids:[]
+      ~mentions:[ (alice_id, Some "alice_handle", Some "Alice") ]
+      ()
+  in
+  match
+    S.decode_dispatch
+      ~bot_user_id:(Some "BOT")
+      ~event_name:"MESSAGE_CREATE"
+      ~payload
+  with
+  | Ok
+      (S.Message_create
+        { resolved_mentions =
+            [ { mention_id
+              ; mention_name = Some "Alice"
+              ; mention_kind = S.User_mention
+              ; _
+              }
+            ; { mention_id = channel_mention_id
+              ; mention_name = None
+              ; mention_kind = S.Channel_mention
+              ; _
+              }
+            ; { mention_id = role_mention_id
+              ; mention_name = None
+              ; mention_kind = S.Role_mention
+              ; _
+              }
+            ]
+        ; _
+        })
+    when String.equal mention_id alice_id
+         && String.equal channel_mention_id channel_id
+         && String.equal role_mention_id role_id ->
+      ()
+  | Ok (S.Message_create { resolved_mentions; _ }) ->
+      failf "unexpected resolved_mentions: %d items" (List.length resolved_mentions)
+  | Ok _ -> fail "expected Message_create"
   | Error msg -> fail msg
 
 let test_decode_reaction_add_unicode () =
@@ -2110,6 +2196,10 @@ let () =
             test_decode_message_create_resolves_mention_username_fallback
         ; test_case "MESSAGE_CREATE leaves unknown mention untouched" `Quick
             test_decode_message_create_leaves_unknown_mention_untouched
+        ; test_case "MESSAGE_CREATE preserves raw_content" `Quick
+            test_decode_message_create_preserves_raw_content
+        ; test_case "MESSAGE_CREATE records resolved_mentions metadata" `Quick
+            test_decode_message_create_records_resolved_mentions
         ; test_case "author_name prefers global_name" `Quick
             test_decode_author_name_prefers_global_name
         ; test_case "author_name falls back to username" `Quick

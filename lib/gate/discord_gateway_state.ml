@@ -69,6 +69,24 @@ let intent_bit = function
 let intents_bitmask intents =
   List.fold_left (fun acc i -> acc lor (intent_bit i)) 0 intents
 
+(* ── Mention resolution metadata ──────────────────────────────── *)
+
+type mention_kind =
+  | User_mention
+  | Role_mention
+  | Channel_mention
+
+(** A single Discord mention found in message content. [mention_name] is
+    populated for user mentions when the structured [mentions] array
+    included a display name; role/channel mentions stay [None] until a
+    guild cache is wired in. *)
+type resolved_mention =
+  { mention_id : string
+  ; mention_name : string option
+  ; mention_kind : mention_kind
+  ; raw_mention : string
+  }
+
 (* ── Dispatched events ─────────────────────────────────────────── *)
 
 type dispatched_event =
@@ -84,6 +102,15 @@ type dispatched_event =
       ; author_id : string
       ; author_name : string option
       ; content : string
+      ; raw_content : string
+            (* Original message content before mention resolution. Kept so
+               downstream consumers can fall back to snowflakes or render
+               their own mention UI without re-parsing. *)
+      ; resolved_mentions : resolved_mention list
+            (* Structured mentions discovered in [raw_content]. Populated
+               for user mentions when names are available; role/channel
+               mentions are recorded with [mention_name = None] so callers
+               can identify their positions without parsing again. *)
       ; mention_user_ids : string list
             (* RFC-0232 §3.3: the structured [mentions] member ids are
                kept at decode instead of being reduced to a bot bool;
@@ -313,50 +340,50 @@ let content_mentions_user ~user_id content =
    nickname-ping).  The structured [mentions] array carries the matching
    user objects, including [global_name] / [username].  Resolve those
    snowflakes to human-readable [@DisplayName] so downstream consumers
-   (keeper prompt, dashboard chat) see names instead of raw ids.  Unknown
-   ids are left untouched. *)
+   (keeper prompt, dashboard chat) see names instead of raw ids.
+
+   The resolver also records every user/role/channel mention it sees as a
+   structured [resolved_mention], so callers can render tooltips, profile
+   links, or fall back to raw ids without re-parsing the original text. *)
 let user_display_name user_json =
   match field_string_opt "global_name" user_json with
   | Some _ as name -> name
   | None -> field_string_opt "username" user_json
 
+let discord_mention_re =
+  Re.Pcre.re {|<(@!?|@&|#)([0-9]+)>|} |> Re.compile
 
-let resolve_mentions_in_content ~mentions content =
-  let len = String.length content in
-  let buf = Buffer.create len in
-  let rec scan i =
-    if i >= len then Buffer.contents buf
-    else if content.[i] <> '<' then (
-      Buffer.add_char buf content.[i];
-      scan (i + 1))
-    else
-      let id_start, ok =
-        if i + 1 < len && content.[i + 1] = '@' then
-          if i + 2 < len && content.[i + 2] = '!' then (i + 3, true)
-          else (i + 2, true)
-        else (-1, false)
+let mention_kind_of_prefix = function
+  | "@" | "@!" -> User_mention
+  | "@&" -> Role_mention
+  | "#" -> Channel_mention
+  | _ -> User_mention
+
+let resolve_mentions ~mentions content =
+  let resolved = ref [] in
+  let content =
+    Re.replace discord_mention_re content ~f:(fun group ->
+      let raw = Re.Group.get group 0 in
+      let prefix = Re.Group.get group 1 in
+      let id = Re.Group.get group 2 in
+      let kind = mention_kind_of_prefix prefix in
+      let name_opt =
+        match kind with
+        | User_mention -> List.assoc_opt id mentions
+        | Role_mention | Channel_mention -> None
       in
-      if not ok then (
-        Buffer.add_char buf content.[i];
-        scan (i + 1))
-      else
-        let end_i =
-          try String.index_from content id_start '>' with
-          | Not_found -> -1
-        in
-        if end_i < 0 then (
-          Buffer.add_char buf content.[i];
-          scan (i + 1))
-        else
-          let id = String.sub content id_start (end_i - id_start) in
-          (match List.assoc_opt id mentions with
-          | Some name ->
-              Buffer.add_char buf '@';
-              Buffer.add_string buf name
-          | None -> Buffer.add_substring buf content i (end_i - i + 1));
-          scan (end_i + 1)
+      resolved :=
+        { mention_id = id
+        ; mention_name = name_opt
+        ; mention_kind = kind
+        ; raw_mention = raw
+        }
+        :: !resolved;
+      match name_opt with
+      | Some name -> "@" ^ name
+      | None -> raw)
   in
-  scan 0
+  (content, List.rev !resolved)
 
 (* ── Frame parse / encode ──────────────────────────────────────── *)
 
@@ -416,7 +443,7 @@ let decode_message_create ~bot_user_id ~payload =
   let channel_id = field_string_opt "channel_id" payload in
   let guild_id = field_string_opt "guild_id" payload in
   let message_id = field_string_opt "id" payload in
-  let content =
+  let raw_content =
     match field_string_opt "content" payload with
     | Some s -> s
     | None -> ""
@@ -433,25 +460,24 @@ let decode_message_create ~bot_user_id ~payload =
   let author_name =
     match author with
     | None -> None
-    | Some a -> (
-        match field_string_opt "global_name" a with
-        | Some _ as name -> name
-        | None -> field_string_opt "username" a)
+    | Some a -> user_display_name a
   in
   let mentions, mention_user_ids =
     match assoc_opt "mentions" payload with
     | Some (`List items) ->
-        let ids = List.filter_map (fun item -> field_string_opt "id" item) items in
-        let pairs =
-          List.filter_map
-            (fun item ->
+        let pairs, ids =
+          List.fold_right
+            (fun item (pairs, ids) ->
               match field_string_opt "id" item with
-              | Some id -> (
-                  match user_display_name item with
-                  | Some name -> Some (id, name)
-                  | None -> None)
-              | None -> None)
-            items
+              | None -> (pairs, ids)
+              | Some id ->
+                  let pairs =
+                    match user_display_name item with
+                    | Some name -> (id, name) :: pairs
+                    | None -> pairs
+                  in
+                  (pairs, id :: ids))
+            items ([], [])
         in
         (pairs, ids)
     | Some _ | None -> ([], [])
@@ -464,9 +490,9 @@ let decode_message_create ~bot_user_id ~payload =
   let explicit_mentions_bot =
     match bot_user_id with
     | None -> false
-    | Some bot_id -> content_mentions_user ~user_id:bot_id content
+    | Some bot_id -> content_mentions_user ~user_id:bot_id raw_content
   in
-  let content = resolve_mentions_in_content ~mentions content in
+  let content, resolved_mentions = resolve_mentions ~mentions raw_content in
   (* An automated author is either a bot user ([author.bot] = true) or a
      webhook ([webhook_id] present on the message). Discord's own guidance
      is for bots to ignore both so they do not loop on each other. *)
@@ -507,6 +533,8 @@ let decode_message_create ~bot_user_id ~payload =
            ; author_id
            ; author_name
            ; content
+           ; raw_content
+           ; resolved_mentions
            ; mention_user_ids
            ; mentions_bot
            ; explicit_mentions_bot

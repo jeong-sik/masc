@@ -249,7 +249,7 @@ let episode_of_output_result ?now ~generation (inp : input) (raw : string) :
          , Some preserved_tool_refs ) ->
          (match traverse (fact_of_json ~trace_id:inp.trace_id ~now) claim_items with
           | Some claims ->
-            Some
+            Ok
               { trace_id = inp.trace_id
               ; generation
               ; episode_summary

@@ -308,7 +308,9 @@ let test_prune_goal_links_preserves_other_goals () =
     Workspace_goal_index.write_goal_task_links
       config
       [ "goal-a", [ "task-001"; "task-002" ]; "goal-b", [ "task-003" ] ];
-    Workspace_goal_index.prune_links_for_goal config ~goal_id:"goal-a";
+    (match Workspace_goal_index.prune_links_for_goal_result config ~goal_id:"goal-a" with
+     | Ok () -> ()
+     | Error msg -> Alcotest.fail msg);
     let links = Workspace_goal_index.read_goal_task_links config in
     check_bool
       "deleted goal links removed"

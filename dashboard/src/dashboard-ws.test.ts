@@ -673,7 +673,7 @@ describe('dashboard websocket route subscriptions', () => {
     expect(mockSockets).toHaveLength(1)
   })
 
-  it('reconnects after a transient 1011 server error close', async () => {
+  it('stops reconnecting after a fatal 1011 server error close', async () => {
     vi.useFakeTimers()
     installWebSocketMocks()
 
@@ -693,8 +693,53 @@ describe('dashboard websocket route subscriptions', () => {
 
     expect(dashboardWsConnected.value).toBe(false)
     expect(dashboardWsReady.value).toBe(false)
-    expect(mockSockets).toHaveLength(2)
-    expect(mockSockets[1]!.readyState).toBe(MockWebSocket.CONNECTING)
+    expect(mockSockets).toHaveLength(1)
+  })
+
+  it('stops reconnecting after a fatal 1002 protocol error close', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    const subscribe = parseRpc(socket, 1)
+    socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: { snapshot: { seq: 1, slices: {} } } })
+    await flushPromises()
+    expect(dashboardWsReady.value).toBe(true)
+
+    socket.close({ code: 1002, reason: 'protocol error', wasClean: false })
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+
+    expect(dashboardWsConnected.value).toBe(false)
+    expect(dashboardWsReady.value).toBe(false)
+    expect(mockSockets).toHaveLength(1)
+  })
+
+  it('stops reconnecting after a fatal 1003 unsupported data close', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    const subscribe = parseRpc(socket, 1)
+    socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: { snapshot: { seq: 1, slices: {} } } })
+    await flushPromises()
+    expect(dashboardWsReady.value).toBe(true)
+
+    socket.close({ code: 1003, reason: 'unsupported data', wasClean: false })
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+
+    expect(dashboardWsConnected.value).toBe(false)
+    expect(dashboardWsReady.value).toBe(false)
+    expect(mockSockets).toHaveLength(1)
   })
 
   it('stops reconnecting after an abnormal close after hello is rejected', async () => {
@@ -784,7 +829,7 @@ describe('dashboard websocket route subscriptions', () => {
     await flushPromises()
     expect(dashboardWsReady.value).toBe(true)
 
-    freshSocket.close({ code: 1011, reason: 'server restart', wasClean: false })
+    freshSocket.close({ code: 1006, reason: 'abnormal', wasClean: false })
     await vi.advanceTimersByTimeAsync(60_000)
     await flushPromises()
 

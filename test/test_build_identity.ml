@@ -187,9 +187,9 @@ let test_commit_ts_git_status_failure_is_observed () =
         None
         result;
       Alcotest.(check bool)
-        "non-zero git status observed"
+        "non-zero git status counted at least once"
         true
-        (after > before)
+        (after >= before +. 1.0)
 
 let () =
   Alcotest.run "build_identity"

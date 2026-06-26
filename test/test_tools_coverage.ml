@@ -420,7 +420,7 @@ let test_masc_board_post_schema_supports_judgment () =
 (* 7. Agent Capability Tool Tests                                *)
 (* ============================================================ *)
 
-let test_masc_agents_schema () =
+let test_masc_agents_removed () =
   match find_registered_tool "masc_agents" with
   | None -> ()
   | Some _ -> Alcotest.fail "masc_agents should be absent from registered schema inventory"
@@ -751,7 +751,7 @@ let () =
         test_retired_front_door_tools_absent_from_schema_inventory;
     ];
     "agent_tools", [
-      Alcotest.test_case "agents" `Quick test_masc_agents_schema;
+      Alcotest.test_case "agents removed" `Quick test_masc_agents_removed;
       Alcotest.test_case "register_capabilities removed" `Quick
         test_masc_register_capabilities_removed;
       (* find_by_capability removed: tool pruned *)

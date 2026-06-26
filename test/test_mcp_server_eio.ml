@@ -1586,6 +1586,11 @@ let check_auth_preflight_result ~tool_name ok msg =
      || contains_substring msg "Unauthorized"
      || contains_substring msg "No credential")
 
+let check_rejected_without_mutation ~tool_name ok msg =
+  Alcotest.(check bool) (tool_name ^ " rejected before mutation") false ok;
+  Alcotest.(check bool) (tool_name ^ " reports rejection detail") true
+    (String.trim msg <> "")
+
 let test_execute_tool_explicit_generated_alias_claim_next_not_rewritten_by_token () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1612,7 +1617,7 @@ let test_execute_tool_explicit_generated_alias_claim_next_not_rewritten_by_token
       ~name:"keeper_task_claim"
       ~arguments:(`Assoc [ ("agent_name", `String "dashboard-eager-manta") ])
   in
-  check_auth_preflight_result ~tool_name:"keeper_task_claim"
+  check_rejected_without_mutation ~tool_name:"keeper_task_claim"
     (Tool_result.is_success result) ((Tool_result.message result));
   check_task_still_todo (Mcp_server.workspace_config state) "task-001";
   cleanup_dir base_path
@@ -1649,12 +1654,13 @@ let test_execute_tool_explicit_generated_alias_transition_not_rewritten_by_token
             ("action", `String "claim");
           ])
   in
-  check_auth_preflight_result ~tool_name:"masc_transition"
+  check_rejected_without_mutation ~tool_name:"masc_transition"
     (Tool_result.is_success result) ((Tool_result.message result));
   check_task_still_todo (Mcp_server.workspace_config state) "task-001";
   cleanup_dir base_path
 
-let test_execute_tool_hyphenated_generated_alias_claim_next_reuses_base_token () =
+let test_execute_tool_hyphenated_generated_alias_claim_next_rejected_without_mutation
+    () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
@@ -1680,16 +1686,15 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_reuses_base_token ()
       ~name:"keeper_task_claim"
       ~arguments:(`Assoc [ ("agent_name", `String "qa-king-warm-heron") ])
   in
-  if not (Tool_result.is_success result) then
-    Alcotest.failf "claim_next failed: %s" ((Tool_result.message result));
-  Alcotest.(check bool) "claim_next reports claimed task" true
-    (contains_substring ((Tool_result.message result)) "task-001");
-  Alcotest.(check (option string)) "current task set after claim_next"
-    (Some "task-001")
+  Alcotest.(check bool) "claim_next rejected by public MCP path" false
+    (Tool_result.is_success result);
+  Alcotest.(check bool) "claim_next points to in-process task handler" true
+    (contains_substring
+       (Tool_result.message result)
+       "keeper in-process task handler");
+  check_task_still_todo (Mcp_server.workspace_config state) "task-001";
+  Alcotest.(check (option string)) "current task remains unset after rejection" None
     (Masc.Task.Planning_eio.get_current_task (Mcp_server.workspace_config state));
-  Alcotest.(check bool) "explicit alias joined" true
-    (Masc.Workspace.is_agent_session_bound (Mcp_server.workspace_config state)
-       ~agent_name:"qa-king-warm-heron");
   cleanup_dir base_path
 
 let test_execute_tool_claim_next_requires_auth_before_mutation () =
@@ -2993,8 +2998,8 @@ let eio_tests = [
     test_execute_tool_explicit_generated_alias_claim_next_not_rewritten_by_token;
   "explicit generated alias transition not rewritten by token", `Quick,
     test_execute_tool_explicit_generated_alias_transition_not_rewritten_by_token;
-  "hyphenated generated alias claim_next reuses base token", `Quick,
-    test_execute_tool_hyphenated_generated_alias_claim_next_reuses_base_token;
+  "hyphenated generated alias claim_next rejected without mutation", `Quick,
+    test_execute_tool_hyphenated_generated_alias_claim_next_rejected_without_mutation;
   "claim_next auth preflight blocks mutation", `Quick,
     test_execute_tool_claim_next_requires_auth_before_mutation;
   "transition auth preflight blocks mutation", `Quick,

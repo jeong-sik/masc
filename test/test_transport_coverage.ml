@@ -651,8 +651,8 @@ let test_rest_generate_openapi_paths () =
   check bool "has status" true
     (try let _ = Str.search_forward (Str.regexp "masc_status") json_str 0 in true
      with Not_found -> false);
-  check bool "has join" true
-    (try let _ = Str.search_forward (Str.regexp "masc_start") json_str 0 in true
+  check bool "has tasks" true
+    (try let _ = Str.search_forward (Str.regexp "masc_tasks") json_str 0 in true
      with Not_found -> false)
 
 let test_rest_generate_openapi_document () =

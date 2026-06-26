@@ -137,15 +137,15 @@ val global_slot_capacity : unit -> int
     gate). *)
 
 val with_provider_slot
-  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  :  clock:float Eio.Time.clock_ty Eio.Resource.t
   -> (unit -> 'a)
   -> 'a option
 (** Run [f] under the fleet-wide librarian provider gate — the #21230
     storm-guard the per-keeper lane keeps as an optional fleet-wide cap. At
     capacity N, the (N+1)-th concurrent entrant returns [None] after
-    [provider_slot_wait_sec] when [clock] is supplied (drop, not block);
-    capacity 0 disables the gate so [f] always runs ([Some]). Exposed for
-    storm-guard regression coverage (#21376). *)
+    [provider_slot_wait_sec] (drop, not block); capacity 0 disables the gate so
+    [f] always runs ([Some]). Exposed for storm-guard regression coverage
+    (#21376). *)
 
 val librarian_provider_clock_unavailable_error : string
 (** Stable error returned before provider I/O when provider-backed librarian

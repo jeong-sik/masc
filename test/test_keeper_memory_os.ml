@@ -1109,6 +1109,11 @@ let test_librarian_runtime_requires_clock_for_provider_call () =
           ; messages = [ text_message "Please remember the timeout boundary." ]
           }
         in
+        let generation_counter =
+          Filename.concat
+            (Memory_io.episodes_dir ~keeper_id)
+            (Printf.sprintf "%s.generation" inp.Librarian.trace_id)
+        in
         (match
            Librarian_runtime.extract_and_append_with_provider_classified
              ~complete
@@ -1126,6 +1131,10 @@ let test_librarian_runtime_requires_clock_for_provider_call () =
              Librarian_runtime.librarian_provider_clock_unavailable_error
              msg);
         Alcotest.(check bool) "provider not called without clock" false !called;
+        Alcotest.(check bool)
+          "generation counter not created without clock"
+          false
+          (Sys.file_exists generation_counter);
         Alcotest.(check int)
           "no event persisted"
           0

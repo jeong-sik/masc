@@ -12,6 +12,10 @@ val reconcile_keepalive_keepers :
      'a Keeper_types_profile.context ->
      Keeper_meta_contract.keeper_meta ->
      unit) ->
+  load_or_materialize_keeper_meta:
+    ('a Keeper_types_profile.context ->
+     string ->
+     (Keeper_meta_contract.keeper_meta option, string) result) ->
   'a Keeper_types_profile.context ->
   unit
 (** Re-launch durable keepalive keepers not dominated by the supervisor sweep. *)

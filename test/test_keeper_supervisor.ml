@@ -18,6 +18,7 @@ module FD = Keeper_fd_pressure
 module KA = Masc.Keeper_keepalive
 module KFP = Keeper_failure_policy
 module KSP = Masc.Keeper_supervisor_self_preservation
+module KSR = Masc.Keeper_supervisor_reconcile_keepalive
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_supervisor_" "" in
@@ -642,6 +643,82 @@ let test_declarative_boot_records_goal_required_failure () =
         (KR.boot_meta_failure_cause_label failure.cause);
       check bool "recorded failure keeps raw error" true
         (String_util.contains_substring failure.error "goal is required")
+
+let test_reconcile_materializes_configured_keeper_without_meta () =
+  with_config_dir @@ fun config_dir ->
+  Eio_main.run @@ fun env ->
+  ensure_test_runtime ();
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = Filename.dirname config_dir in
+  let name = "hot-restored" in
+  write_keeper_toml config_dir ~name;
+  Eio.Switch.on_release sw (fun () ->
+      Reg.clear ();
+      KR.reset_test_state base_dir);
+  let config = Masc.Workspace.default_config base_dir in
+  ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+  let ctx = keeper_runtime_context env sw config in
+  let materialized = ref [] in
+  let supervised = ref [] in
+  let publish_lifecycle ~event:_ _name _detail () = () in
+  let supervise_keepalive ~proactive_warmup_sec:_ _ctx
+      (meta : Keeper_meta_contract.keeper_meta) =
+    supervised := meta.name :: !supervised
+  in
+  let load_or_materialize_keeper_meta _ctx requested =
+    materialized := requested :: !materialized;
+    Ok (Some (make_meta requested))
+  in
+  KSR.reconcile_keepalive_keepers
+    ~publish_lifecycle
+    ~supervise_keepalive
+    ~load_or_materialize_keeper_meta
+    ctx;
+  check (list string) "materialized missing meta" [ name ]
+    (List.rev !materialized);
+  check (list string) "supervised materialized keeper" [ name ]
+    (List.rev !supervised)
+
+let test_reconcile_does_not_double_start_materialized_keeper () =
+  with_config_dir @@ fun config_dir ->
+  Eio_main.run @@ fun env ->
+  ensure_test_runtime ();
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = Filename.dirname config_dir in
+  let name = "hot-registered" in
+  write_keeper_toml config_dir ~name;
+  Eio.Switch.on_release sw (fun () ->
+      Reg.clear ();
+      KR.reset_test_state base_dir);
+  let config = Masc.Workspace.default_config base_dir in
+  ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+  let ctx = keeper_runtime_context env sw config in
+  let materialized = ref [] in
+  let supervised = ref [] in
+  let publish_lifecycle ~event:_ _name _detail () = () in
+  let supervise_keepalive ~proactive_warmup_sec:_ _ctx
+      (meta : Keeper_meta_contract.keeper_meta) =
+    supervised := meta.name :: !supervised
+  in
+  let load_or_materialize_keeper_meta _ctx requested =
+    materialized := requested :: !materialized;
+    let meta = make_meta requested in
+    ignore (Reg.register_offline ~base_path:config.base_path requested meta);
+    Ok (Some meta)
+  in
+  KSR.reconcile_keepalive_keepers
+    ~publish_lifecycle
+    ~supervise_keepalive
+    ~load_or_materialize_keeper_meta
+    ctx;
+  check (list string) "materialized missing meta" [ name ]
+    (List.rev !materialized);
+  check (list string) "already registered keeper not supervised" []
+    (List.rev !supervised);
+  check bool "materialized keeper registered" true
+    (Reg.is_registered ~base_path:config.base_path name)
 
 let registered_entries names =
   Reg.clear ();
@@ -2529,6 +2606,10 @@ let () =
         test_declarative_boot_materializes_goal_from_instructions;
       test_case "declarative boot records goal-required failure" `Quick
         test_declarative_boot_records_goal_required_failure;
+      test_case "reconcile materializes configured keeper without meta" `Quick
+        test_reconcile_materializes_configured_keeper_without_meta;
+      test_case "reconcile does not double-start materialized keeper" `Quick
+        test_reconcile_does_not_double_start_materialized_keeper;
     ];
     "fiber_health", [
       test_case "unknown for unregistered" `Quick test_fiber_health_unknown;

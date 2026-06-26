@@ -24,7 +24,11 @@ val supervise_keepalive :
 
 (** {1 Sweep and Recovery} *)
 
-val sweep_and_recover : 'a context -> unit
+val sweep_and_recover :
+     ?load_or_materialize_keeper_meta:
+       ('a context -> string -> (keeper_meta option, string) result)
+  -> 'a context
+  -> unit
 (** Scan all supervised keepers in [Keeper_registry]. Detect zombies
     (resolved Promise), restart with exponential backoff if within
     budget, mark dead otherwise. Called periodically by the keeper
@@ -144,4 +148,3 @@ val set_global_switch : Eio.Switch.t -> unit
 
 val get_global_switch : unit -> Eio.Switch.t option
 (** Retrieve the global server switch if configured. *)
-

@@ -81,7 +81,7 @@ let test_of_string_goldens () =
     (id_str "keeper_alice-agent");
   check (option string) "keeper- prefix form" (Some "alice")
     (id_str "keeper-alice");
-  check (option string) "case folded before canonicalizing" (Some "alice")
+  check (option string) "case folded before canonicalizing" (Some "dreamer")
     (id_str "Keeper-Dreamer-Agent");
   check (option string) "whitespace trimmed" (Some "alice")
     (id_str "  alice  ");
@@ -177,9 +177,12 @@ let test_case_fold_widening () =
   check bool "mixed-case wrapper is self (legacy matched via raw token)"
     true
     (new_is_self ~name:"alice" ~agent_name:"keeper-alice-agent"
-       "Keeper-Dreamer-Agent");
+       "Keeper-Alice-Agent");
   check bool "uppercase bare name is self" true
-    (new_is_self ~name:"alice" ~agent_name:"keeper-alice-agent" "DREAMER")
+    (new_is_self ~name:"alice" ~agent_name:"keeper-alice-agent" "ALICE");
+  check bool "mixed-case foreign wrapper is not self" false
+    (new_is_self ~name:"alice" ~agent_name:"keeper-alice-agent"
+       "Keeper-Dreamer-Agent")
 
 let test_message_scope_surface () =
   let ids = List.filter_map Kid.of_string [ "alice" ] in

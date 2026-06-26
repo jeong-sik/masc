@@ -19,14 +19,11 @@ let tools_call_body ~tool_name =
     tool_name
 
 let test_registry_membership_known_tools () =
-  (* The hand-curated registry must include the two tools the e2e
-     suite exercises with SSE expectations (test_mcp_post_sse_e2e.ml:
-     [masc_status], [masc_bind]). Removing them flips the contract,
-     so the test pins the membership at the seam. *)
+  (* The hand-curated registry must include the tool the e2e suite exercises
+     with SSE expectations (test_mcp_post_sse_e2e.ml: [masc_status]).
+     Non-listed tools keep the chunked-JSON shape. *)
   check bool "masc_status in registry" true
-    (Streaming.is_streaming_capable "masc_status");
-  check bool "masc_bind in registry" true
-    (Streaming.is_streaming_capable "masc_bind")
+    (Streaming.is_streaming_capable "masc_status")
 
 let test_registry_excludes_other_tools () =
   (* Any tool not explicitly listed should not auto-upgrade. The
@@ -35,6 +32,8 @@ let test_registry_excludes_other_tools () =
      [public_mcp_surface_tools]-wide enablement. *)
   check bool "masc_broadcast excluded" false
     (Streaming.is_streaming_capable "masc_broadcast");
+  check bool "masc_bind excluded" false
+    (Streaming.is_streaming_capable "masc_bind");
   check bool "masc_messages excluded" false
     (Streaming.is_streaming_capable "masc_messages");
   check bool "unknown tool name excluded" false

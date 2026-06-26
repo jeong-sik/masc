@@ -30,13 +30,9 @@ include Dashboard_http_keeper
 
 let dashboard_request_timeout_s = Server_dashboard_http_core_cache.dashboard_request_timeout_s
 let shell_warmed = Server_dashboard_http_core_cache.shell_warmed
-let _shell_warmed = Server_dashboard_http_core_cache._shell_warmed
 let shell_warming = Server_dashboard_http_core_cache.shell_warming
-let _shell_warming = Server_dashboard_http_core_cache._shell_warming
 let last_good_shell = Server_dashboard_http_core_cache.last_good_shell
-let _last_good_shell = Server_dashboard_http_core_cache._last_good_shell
 let last_good_shell_light = Server_dashboard_http_core_cache.last_good_shell_light
-let _last_good_shell_light = Server_dashboard_http_core_cache._last_good_shell_light
 let with_dashboard_timeout = Server_dashboard_http_core_cache.with_dashboard_timeout
 let cache_partition_segment = Server_dashboard_http_core_cache.cache_partition_segment
 let dashboard_cache_key = Server_dashboard_http_core_cache.dashboard_cache_key
@@ -48,13 +44,9 @@ let initialized_json_opt = Server_dashboard_http_core_cache.initialized_json_opt
 
 
 let operator_snapshot_broadcast_ref = Server_dashboard_http_core_operator.operator_snapshot_broadcast_ref
-let _operator_snapshot_broadcast_ref = Server_dashboard_http_core_operator._operator_snapshot_broadcast_ref
 let operator_digest_broadcast_ref = Server_dashboard_http_core_operator.operator_digest_broadcast_ref
-let _operator_digest_broadcast_ref = Server_dashboard_http_core_operator._operator_digest_broadcast_ref
 let operator_snapshot_cache = Server_dashboard_http_core_operator.operator_snapshot_cache
-let _operator_snapshot_cache = Server_dashboard_http_core_operator._operator_snapshot_cache
 let operator_digest_cache = Server_dashboard_http_core_operator.operator_digest_cache
-let _operator_digest_cache = Server_dashboard_http_core_operator._operator_digest_cache
 let operator_refresh_interval_s = Server_dashboard_http_core_operator.operator_refresh_interval_s
 let operator_snapshot_extra = Server_dashboard_http_core_operator.operator_snapshot_extra
 let json_assoc_int_opt = Server_dashboard_http_core_json.json_assoc_int_opt
@@ -103,8 +95,6 @@ let mission_cache =
         ; "internal_signals", `List []
         ])
 ;;
-
-let _mission_cache = mission_cache
 
 let start_mission_refresh_loop ~state ~sw ~clock =
   let workspace_config = (Mcp_server.workspace_config state) in

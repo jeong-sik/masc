@@ -5,8 +5,16 @@ module Request_context = Server_mcp_request_context
 module Headers = Server_mcp_transport_http_headers
 module Negotiation = Mcp_transport_protocol.Http_negotiation
 
+let source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when Sys.file_exists (Filename.concat root "dune-project") -> root
+  | _ -> Sys.getcwd ()
+
+let resolve_path rel =
+  if Filename.is_relative rel then Filename.concat (source_root ()) rel else rel
+
 let source_file rel =
-  let path = Filename.concat (Sys.getcwd ()) rel in
+  let path = resolve_path rel in
   let ic = open_in path in
   Fun.protect
     ~finally:(fun () -> close_in_noerr ic)

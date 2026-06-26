@@ -33,7 +33,7 @@ let test_parser_goldens () =
   check ids "plain mention" [ "alice" ] (parse "hey @alice look");
   check ids "different token" [ "alicex" ] (parse "ping @alicex now");
   check ids "email is one token" [] (parse "send to email@alice.com");
-  check ids "case folded" [ "alice" ] (parse "PING @DREAMER NOW");
+  check ids "case folded" [ "alice" ] (parse "PING @ALICE NOW");
   check ids "trailing punctuation" [ "alice" ] (parse "ok @alice, thanks");
   check ids "no mention" [] (parse "just chatting here");
   check ids "newline separated" [ "alice" ] (parse "line one\n@alice two");

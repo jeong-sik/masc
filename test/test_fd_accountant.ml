@@ -55,6 +55,8 @@ let test_configured_within_bounds () =
     FA.all_kinds
 
 let test_fd_limit_reuses_keeper_pressure_cache () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun _sw ->
   let expected = 4242 in
   Atomic.set
     Keeper_fd_pressure.nofile_soft_limit_cache
@@ -121,6 +123,8 @@ let test_docker_delegation_consistent () =
   check int "docker delegation cap parity" via_accountant via_legacy
 
 let test_snapshot_shape () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun _sw ->
   let s = FA.fd_snapshot () in
   (* per_kind must include all kinds *)
   check int "snapshot covers all kinds" (List.length FA.all_kinds)

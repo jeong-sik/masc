@@ -25,7 +25,9 @@
 
    Concurrency: single serving domain. [add] / file reads may yield; a racing
    rebuild of the same key re-folds the same new bytes into the same result and
-   the later [Hashtbl.replace] wins, costing only repeated work. *)
+   the later [Hashtbl.replace] wins, costing only repeated work. Cache instances
+   are caller-owned; callers that multiplex multiple projections through one
+   cache must namespace [key] by the logical projection, not just by path. *)
 
 type 'a t = (string, int * int * string * 'a) Hashtbl.t
 (* key -> (consumed byte offset at a line boundary, file inode, consumed-boundary
@@ -59,9 +61,7 @@ let read_range path ~start ~upto : string =
           In_channel.seek ic (Int64.of_int start);
           match In_channel.really_input_string ic (upto - start) with
           | Some s -> s
-          | None ->
-              In_channel.seek ic (Int64.of_int start);
-              In_channel.input_all ic
+          | None -> ""
         end)
 
 let fingerprint_bytes = 512

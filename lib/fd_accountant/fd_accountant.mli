@@ -65,7 +65,7 @@ val with_slot : kind:kind -> (unit -> 'a) -> 'a
     cancellation can no longer leave the holding state stuck
     because [holding_state] is a typed variant with only two
     valid transitions, performed under
-    the per-slot state mutex. *)
+    [Eio.Mutex.use_rw ~protect:true]. *)
 
 val acquire_lifetime_slot : kind:kind -> unit -> (unit -> unit)
 (** [acquire_lifetime_slot ~kind ()] acquires a [kind]-typed slot and

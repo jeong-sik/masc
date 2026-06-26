@@ -338,6 +338,47 @@ let test_summary_degrades_unknown_completion_contract_result () =
     (keeper_unknown |> member "completion_contract_unknown_result_count" |> to_int)
 ;;
 
+let test_completion_contract_result_canonical_roundtrip () =
+  let module Receipt = Keeper_execution_receipt_types in
+  let cases =
+    [ Receipt.Contract_unknown, false
+    ; Receipt.Contract_not_dispatched, false
+    ; Receipt.Contract_violated, true
+    ; Receipt.Contract_surface_mismatch, true
+    ; Receipt.Contract_no_capable_provider, true
+    ; Receipt.Contract_claim_only_after_owned_task, true
+    ; Receipt.Contract_needs_execution_progress, true
+    ; Receipt.Contract_passive_only, true
+    ; Receipt.Contract_satisfied_completion, false
+    ; Receipt.Contract_satisfied_execution, false
+    ]
+  in
+  List.iter
+    (fun (result, requires_attention) ->
+       let label = Receipt.completion_contract_result_to_string result in
+       let parsed_label =
+         Receipt.completion_contract_result_of_string label
+         |> Option.map Receipt.completion_contract_result_to_string
+       in
+       check
+         (option string)
+         ("completion-contract parser roundtrip: " ^ label)
+         (Some label)
+         parsed_label;
+       check
+         bool
+         ("completion-contract attention classification: " ^ label)
+         requires_attention
+         (Receipt.completion_contract_result_requires_attention result))
+    cases;
+  check
+    (option string)
+    "completion-contract parser rejects prose drift"
+    None
+    (Receipt.completion_contract_result_of_string "passive-only"
+     |> Option.map Receipt.completion_contract_result_to_string)
+;;
+
 let test_summary_marks_unreacted_and_reacted_stimuli () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "summary-keeper" in
@@ -635,6 +676,10 @@ let () =
             "summary degrades unknown completion-contract result"
             `Quick
             test_summary_degrades_unknown_completion_contract_result
+        ; test_case
+            "completion-contract parser and attention use canonical receipt type"
+            `Quick
+            test_completion_contract_result_canonical_roundtrip
         ; test_case
             "summary marks unreacted and reacted stimuli"
             `Quick

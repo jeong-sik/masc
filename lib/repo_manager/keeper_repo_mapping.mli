@@ -57,12 +57,15 @@ type policy_decision =
   | Policy_decision_missing
   | Policy_decision_not_in_mapping
   | Policy_decision_load_error
+  | Policy_decision_repository_identity_mismatch
+  | Policy_decision_repository_store_error
 
 val record_policy_decision :
   keeper_id:string -> ?repository_id:string -> policy_decision -> unit
 (** Record a keeper-repository mapping policy decision in the operator
     metrics. Callers should increment once per decision so denied-by-missing,
-    denied-not-in-mapping, and load-error paths are observable. *)
+    denied-not-in-mapping, load-error, repository identity mismatch, and
+    repository store load-error paths are observable. *)
 
 val is_allowed :
   keeper_id:string -> repository_id:repository_id -> base_path:string -> bool

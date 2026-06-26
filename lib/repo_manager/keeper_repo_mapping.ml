@@ -234,8 +234,11 @@ let rec load_all_cached_attempt ~remaining_attempts ~base_path
                else Error "mapping file changed while loading"))
 ;;
 
+let load_all_cache_changed_file_retries = 1
+
 let load_all_cached ~base_path =
-  load_all_cached_attempt ~remaining_attempts:1 ~base_path
+  load_all_cached_attempt
+    ~remaining_attempts:load_all_cache_changed_file_retries ~base_path
 ;;
 
 type mapping_lookup =
@@ -327,6 +330,8 @@ type policy_decision =
   | Policy_decision_missing
   | Policy_decision_not_in_mapping
   | Policy_decision_load_error
+  | Policy_decision_repository_identity_mismatch
+  | Policy_decision_repository_store_error
 
 let record_policy_decision ~keeper_id ?repository_id decision =
   let metric, extra_labels =
@@ -340,6 +345,16 @@ let record_policy_decision ~keeper_id ?repository_id decision =
         | Some r -> [("repository_id", r)] )
     | Policy_decision_load_error ->
       (Keeper_metrics.KeeperRepoMappingLoadError, [])
+    | Policy_decision_repository_identity_mismatch ->
+      ( Keeper_metrics.KeeperRepoMappingRepositoryIdentityMismatch
+      , match repository_id with
+        | None -> []
+        | Some r -> [("repository_id", r)] )
+    | Policy_decision_repository_store_error ->
+      ( Keeper_metrics.KeeperRepoMappingRepositoryStoreError
+      , match repository_id with
+        | None -> []
+        | Some r -> [("repository_id", r)] )
   in
   Otel_metric_store_core.inc_counter
     ~labels:(("keeper_id", keeper_id) :: extra_labels)

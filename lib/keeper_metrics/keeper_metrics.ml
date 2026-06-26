@@ -243,6 +243,8 @@ type t =
   | KeeperRepoMappingDeniedMissing      (* counter: keeper repo mapping decision: missing mapping *)
   | KeeperRepoMappingDeniedNotInMapping (* counter: keeper repo mapping decision: repo not in mapping *)
   | KeeperRepoMappingLoadError          (* counter: keeper repo mapping load/parse failure *)
+  | KeeperRepoMappingRepositoryIdentityMismatch (* counter: repo identity mismatch in policy projection *)
+  | KeeperRepoMappingRepositoryStoreError       (* counter: repo catalog load failure in policy projection *)
 
 (** String conversion
 
@@ -503,6 +505,10 @@ let to_string = function
   | KeeperRepoMappingDeniedMissing -> "masc_keeper_repo_mapping_denied_missing_total"
   | KeeperRepoMappingDeniedNotInMapping -> "masc_keeper_repo_mapping_denied_not_in_mapping_total"
   | KeeperRepoMappingLoadError -> "masc_keeper_repo_mapping_load_error_total"
+  | KeeperRepoMappingRepositoryIdentityMismatch ->
+    "masc_keeper_repo_mapping_repository_identity_mismatch_total"
+  | KeeperRepoMappingRepositoryStoreError ->
+    "masc_keeper_repo_mapping_repository_store_error_total"
 ;;
 
 (* Every constructor of [t], in declaration order.  Consumed by
@@ -566,7 +572,8 @@ let all : t list =
     TurnCleanupFailures; MemoryBankLoadHistorySwallowedExceptions; MemoryRecallReadErrors; MemoryOsRecallUnavailable; RuntimeHttpProbeJsonParseFailures;
     VisionAnalyze; VisionCandidateAttempts; VisionIngestEvictions; PromptSegmentBytes; PromptTemplateRenderOutcome; ToolCallParamCompleteness; KeeperTurnInstructionHash;
     KeeperToolCallRetryLoop; AttemptWatchdogFired; ShellIrEffectTotal;
-  KeeperRepoMappingDeniedMissing; KeeperRepoMappingDeniedNotInMapping; KeeperRepoMappingLoadError
+  KeeperRepoMappingDeniedMissing; KeeperRepoMappingDeniedNotInMapping; KeeperRepoMappingLoadError;
+  KeeperRepoMappingRepositoryIdentityMismatch; KeeperRepoMappingRepositoryStoreError
   ]
 ;;
 

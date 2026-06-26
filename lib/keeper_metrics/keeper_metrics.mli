@@ -233,6 +233,8 @@ type t =
   | KeeperRepoMappingDeniedMissing
   | KeeperRepoMappingDeniedNotInMapping
   | KeeperRepoMappingLoadError
+  | KeeperRepoMappingRepositoryIdentityMismatch
+  | KeeperRepoMappingRepositoryStoreError
 
 val to_string : t -> string
 

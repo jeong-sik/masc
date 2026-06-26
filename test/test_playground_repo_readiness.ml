@@ -236,6 +236,53 @@ let test_playground_repos_policy_uses_registered_repository_id () =
   check string "policy repository id" "repo-masc"
     (json_string "policy_repository_id" json)
 
+let test_playground_repos_mark_repository_identity_mismatch_denied () =
+  let base_path = temp_dir "masc-playground-repo-policy" in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "keeper-one" in
+  let repo_path = playground_repo_path ~config ~meta "masc" in
+  mkdir_p (Filename.concat repo_path ".git");
+  save_repositories base_path
+    [ repository_fixture
+        ~id:"masc"
+        ~name:"masc"
+        ~url:"https://github.com/jeong-sik/secret.git"
+        ~local_path:repo_path
+    ];
+  write_mapping base_path meta.name [ "masc" ];
+  let json = playground_repo_entry ~config ~meta ~repo_name:"masc" in
+  check bool "policy denies identity mismatch" false
+    (json_bool "policy_allowed" json);
+  check string "policy status"
+    (Keeper_sandbox_control.playground_policy_status_to_string
+       Policy_repository_identity_mismatch)
+    (json_string "policy_status" json);
+  check string "policy repository id" "masc"
+    (json_string "policy_repository_id" json);
+  check bool "policy error is surfaced" true
+    (String.length (json_string "policy_error" json) > 0)
+
+let test_playground_repos_mark_repository_store_error_denied () =
+  let base_path = temp_dir "masc-playground-repo-policy" in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "keeper-one" in
+  let path = Config_dir_resolver.repositories_toml_path ~base_path in
+  mkdir_p (Filename.dirname path);
+  write_file path "[repository.bad\n";
+  write_mapping base_path meta.name [ "masc" ];
+  create_playground_repo_marker ~config ~meta "masc";
+  let json = playground_repo_entry ~config ~meta ~repo_name:"masc" in
+  check bool "policy denies repository store error" false
+    (json_bool "policy_allowed" json);
+  check string "policy status"
+    (Keeper_sandbox_control.playground_policy_status_to_string
+       Policy_repository_store_error)
+    (json_string "policy_status" json);
+  check string "policy repository id" "masc"
+    (json_string "policy_repository_id" json);
+  check bool "policy error is surfaced" true
+    (String.length (json_string "policy_error" json) > 0)
+
 let test_playground_repos_mark_mapping_load_error_denied () =
   let base_path = temp_dir "masc-playground-repo-policy" in
   let config = Masc.Workspace.default_config base_path in
@@ -605,6 +652,10 @@ let () =
           `Quick test_playground_repos_mark_wildcard_mapping_allowed;
         test_case "filesystem repo policy uses registered repository id"
           `Quick test_playground_repos_policy_uses_registered_repository_id;
+        test_case "repository identity mismatch is marked denied" `Quick
+          test_playground_repos_mark_repository_identity_mismatch_denied;
+        test_case "repository store error is marked denied" `Quick
+          test_playground_repos_mark_repository_store_error_denied;
         test_case "mapping load error is marked denied" `Quick
           test_playground_repos_mark_mapping_load_error_denied;
       ];

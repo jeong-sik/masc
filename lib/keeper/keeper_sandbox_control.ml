@@ -313,12 +313,16 @@ type playground_policy_status =
   | Policy_denied_missing_mapping
   | Policy_denied_not_in_mapping
   | Policy_mapping_load_error
+  | Policy_repository_identity_mismatch
+  | Policy_repository_store_error
 
 let playground_policy_status_to_string = function
   | Policy_allowed -> "allowed"
   | Policy_denied_missing_mapping -> "denied_missing_mapping"
   | Policy_denied_not_in_mapping -> "denied_not_in_mapping"
   | Policy_mapping_load_error -> "mapping_load_error"
+  | Policy_repository_identity_mismatch -> "repository_identity_mismatch"
+  | Policy_repository_store_error -> "repository_store_error"
 
 let playground_policy_reason = function
   | Policy_allowed -> None
@@ -330,6 +334,13 @@ let playground_policy_reason = function
       Some
         "keeper repository mapping could not be loaded; access is denied \
          fail-closed"
+  | Policy_repository_identity_mismatch ->
+      Some
+        "repository identity does not match the playground clone; access is \
+         denied fail-closed"
+  | Policy_repository_store_error ->
+      Some
+        "repository catalog could not be loaded; access is denied fail-closed"
 
 let playground_repo_policy ~(base_path : string) ~(keeper_name : string) =
   match Keeper_repo_mapping.lookup_mapping ~base_path ~keeper_id:keeper_name with
@@ -345,8 +356,10 @@ let playground_repo_policy_repository_id ~base_path ~repo_name ~repo_path =
   | Keeper_repo_mapping.Repository repository_id -> Ok repository_id
   | Keeper_repo_mapping.No_repository -> Ok repo_name
   | Keeper_repo_mapping.Repository_identity_mismatch _ ->
-    Error "repository identity mismatch; access is denied fail-closed"
-  | Keeper_repo_mapping.Repository_store_error msg -> Error msg
+    Error
+      (`Identity_mismatch
+        "repository identity mismatch; access is denied fail-closed")
+  | Keeper_repo_mapping.Repository_store_error msg -> Error (`Store_error msg)
 
 let playground_repo_policy_fields ~base_path ~keeper_id policy ~repo_name
       ~repo_path =
@@ -384,13 +397,19 @@ let playground_repo_policy_fields ~base_path ~keeper_id policy ~repo_name
       field Policy_denied_missing_mapping false ()
   | Keeper_repo_mapping.Mapping_found mapping ->
       (match
-         playground_repo_policy_repository_id ~base_path ~repo_name ~repo_path
+       playground_repo_policy_repository_id ~base_path ~repo_name ~repo_path
        with
-       | Error msg ->
-         Keeper_repo_mapping.record_policy_decision
-           ~keeper_id ~repository_id:repo_name
-           Keeper_repo_mapping.Policy_decision_not_in_mapping;
-         field Policy_denied_not_in_mapping false ~repository_id:repo_name
+       | Error (`Identity_mismatch msg) ->
+         Keeper_repo_mapping.record_policy_decision ~keeper_id
+           ~repository_id:repo_name
+           Keeper_repo_mapping.Policy_decision_repository_identity_mismatch;
+         field Policy_repository_identity_mismatch false
+           ~repository_id:repo_name ~error:msg ()
+       | Error (`Store_error msg) ->
+         Keeper_repo_mapping.record_policy_decision ~keeper_id
+           ~repository_id:repo_name
+           Keeper_repo_mapping.Policy_decision_repository_store_error;
+         field Policy_repository_store_error false ~repository_id:repo_name
            ~error:msg ()
        | Ok repository_id ->
          if

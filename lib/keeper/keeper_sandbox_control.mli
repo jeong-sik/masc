@@ -52,6 +52,8 @@ type playground_policy_status =
   | Policy_denied_missing_mapping
   | Policy_denied_not_in_mapping
   | Policy_mapping_load_error
+  | Policy_repository_identity_mismatch
+  | Policy_repository_store_error
 
 val playground_policy_status_to_string : playground_policy_status -> string
 (** Wire-format label for the playground repo policy status.  Exposed so

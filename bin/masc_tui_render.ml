@@ -21,6 +21,7 @@ let render_dashboard (state : state) =
     Ansi.cyan state.workspace Ansi.reset timestamp
     (match state.connection_status with
      | "connected" -> Ansi.green ^ "[connected]" ^ Ansi.reset
+     | "degraded" -> Ansi.yellow ^ "[degraded]" ^ Ansi.reset
      | "connecting" -> Ansi.yellow ^ "[connecting...]" ^ Ansi.reset
      | "reconnecting" -> Ansi.yellow ^ "[reconnecting...]" ^ Ansi.reset
      | _ -> Ansi.red ^ "[disconnected]" ^ Ansi.reset) in
@@ -151,6 +152,7 @@ let render_overview (state : state) =
     Ansi.cyan state.workspace Ansi.reset timestamp
     (match state.connection_status with
      | "connected" -> Ansi.green ^ "[connected]" ^ Ansi.reset
+     | "degraded" -> Ansi.yellow ^ "[degraded]" ^ Ansi.reset
      | "connecting" -> Ansi.yellow ^ "[connecting...]" ^ Ansi.reset
      | "reconnecting" -> Ansi.yellow ^ "[reconnecting...]" ^ Ansi.reset
      | _ -> Ansi.red ^ "[disconnected]" ^ Ansi.reset) in
@@ -307,6 +309,7 @@ let render_approvals (state : state) =
     count timestamp
     (match state.connection_status with
      | "connected" -> Ansi.green ^ "[connected]" ^ Ansi.reset
+     | "degraded" -> Ansi.yellow ^ "[degraded]" ^ Ansi.reset
      | "connecting" -> Ansi.yellow ^ "[connecting...]" ^ Ansi.reset
      | "reconnecting" -> Ansi.yellow ^ "[reconnecting...]" ^ Ansi.reset
      | _ -> Ansi.red ^ "[disconnected]" ^ Ansi.reset) in
@@ -406,6 +409,7 @@ let render_board_list (state : state) =
     count timestamp
     (match state.connection_status with
      | "connected" -> Ansi.green ^ "[connected]" ^ Ansi.reset
+     | "degraded" -> Ansi.yellow ^ "[degraded]" ^ Ansi.reset
      | "connecting" -> Ansi.yellow ^ "[connecting...]" ^ Ansi.reset
      | "reconnecting" -> Ansi.yellow ^ "[reconnecting...]" ^ Ansi.reset
      | _ -> Ansi.red ^ "[disconnected]" ^ Ansi.reset) in
@@ -574,6 +578,7 @@ let render_planning_list (state : state) =
     timestamp
     (match state.connection_status with
      | "connected" -> Ansi.green ^ "[connected]" ^ Ansi.reset
+     | "degraded" -> Ansi.yellow ^ "[degraded]" ^ Ansi.reset
      | "connecting" -> Ansi.yellow ^ "[connecting...]" ^ Ansi.reset
      | "reconnecting" -> Ansi.yellow ^ "[reconnecting...]" ^ Ansi.reset
      | _ -> Ansi.red ^ "[disconnected]" ^ Ansi.reset) in

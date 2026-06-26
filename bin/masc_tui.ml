@@ -257,10 +257,33 @@ let apply_planning_load state = function
         ~set_error:(fun value -> state.planning_error <- value)
         err
 
+let refresh_status results =
+  let successes =
+    List.fold_left
+      (fun count -> function
+        | Ok () -> count + 1
+        | Error () -> count)
+      0 results
+  in
+  match (successes, List.length results) with
+  | 0, _ -> "disconnected"
+  | n, total when n = total -> "connected"
+  | _ -> "degraded"
+
 let refresh_http_surfaces state ~host ~port =
-  apply_overview_load state (load_overview ~host ~port);
-  apply_board_list_load state (load_board_list ~host ~port);
-  apply_planning_load state (load_planning ~host ~port)
+  let overview = load_overview ~host ~port in
+  let board = load_board_list ~host ~port in
+  let planning = load_planning ~host ~port in
+  apply_overview_load state overview;
+  apply_board_list_load state board;
+  apply_planning_load state planning;
+  state.connection_status <-
+    refresh_status
+      [
+        Result.map (fun _ -> ()) overview;
+        Result.map (fun _ -> ()) board;
+        Result.map (fun _ -> ()) planning;
+      ]
 
 let apply_board_post_load state ~post_id = function
   | Ok (post, comments) ->
@@ -334,7 +357,6 @@ let main () =
   let port = state.port in
   refresh_http_surfaces state ~host ~port;
   add_event state "system" "TUI started";
-  state.connection_status <- "connected";
 
   (* Main loop *)
   let last_check = ref (Unix.gettimeofday ()) in

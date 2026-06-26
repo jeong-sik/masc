@@ -30,6 +30,10 @@ let prompt_path name =
   Filename.concat (find_repo_root (Sys.getcwd ())) ("config/prompts/" ^ name)
 ;;
 
+let keeper_config_path name =
+  Filename.concat (find_repo_root (Sys.getcwd ())) ("config/keepers/" ^ name)
+;;
+
 let contains text needle =
   String_util.contains_substring text needle
 ;;
@@ -64,6 +68,21 @@ let test_no_work_prompts_do_not_request_silent_finish () =
     [ "keeper.core_behavior.md"; "keeper.unified.system.md" ]
 ;;
 
+let test_keeper_toml_does_not_request_silent_finish () =
+  let root = find_repo_root (Sys.getcwd ()) in
+  let keepers_dir = Filename.concat root "config/keepers" in
+  Sys.readdir keepers_dir
+  |> Array.to_list
+  |> List.filter (fun file -> Filename.check_suffix file ".toml")
+  |> List.sort String.compare
+  |> List.iter (fun file ->
+    let prompt = "config/keepers/" ^ file in
+    let text = read_file (keeper_config_path file) in
+    assert_not_contains ~prompt text "SPEECH_ACT: stay_silent";
+    assert_not_contains ~prompt text "DELIVERY_SURFACE: silent";
+    assert_not_contains ~prompt text "stay_silent")
+;;
+
 let () =
   run
     "prompt no silent reply contract"
@@ -72,6 +91,10 @@ let () =
             "no-work prompts require visible no-work report"
             `Quick
             test_no_work_prompts_do_not_request_silent_finish
+        ; test_case
+            "keeper TOML must not request silent no-work finish"
+            `Quick
+            test_keeper_toml_does_not_request_silent_finish
         ] )
     ]
 ;;

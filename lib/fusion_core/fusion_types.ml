@@ -63,6 +63,7 @@ end
 
 type panel_failure =
   | Timeout
+  | Bridge_error of string
   | Provider_error of string
   | Empty_response of string
   | Invalid_max_output_tokens of int

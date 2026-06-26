@@ -25,6 +25,7 @@ let run_cmd base_path =
   let clock, mono_clock, net, _domain_mgr, proc_mgr, fs =
     Server_runtime_bootstrap.init_runtime_context env
   in
+  Masc.Masc_eio_env.init ~sw ~net ~clock ();
   let state, _remaining_work =
     Gc.ramp_up (fun () ->
       Server_runtime_bootstrap.create_server_state ~sw ~base_path ~clock

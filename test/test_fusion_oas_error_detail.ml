@@ -79,6 +79,10 @@ let test_panel_failure_text_no_reattribution () =
     "timeout"
     (Fusion_oas.panel_failure_text Fusion_types.Timeout);
   Alcotest.(check string)
+    "bridge error"
+    "Bridge error: env_not_initialized"
+    (Fusion_oas.panel_failure_text (Fusion_types.Bridge_error "env_not_initialized"));
+  Alcotest.(check string)
     "empty response"
     "empty response (stop_reason=max_tokens)"
     (Fusion_oas.panel_failure_text

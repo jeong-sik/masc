@@ -394,19 +394,21 @@ let () = test "task_history_events_json_returns_empty_for_missing_task" (fun () 
   | `List _ -> failwith "missing task should have no history events"
   | _ -> failwith "task history payload must be a JSON list"
 )
-let () = test "masc_oas_bridge_runs_without_eio_env" (fun () ->
+let () = test "masc_oas_bridge_fails_closed_without_eio_env" (fun () ->
   match Masc_eio_env.get_opt () with
   | Some _ ->
     failwith
-      "masc_oas_bridge_runs_without_eio_env requires Masc_eio_env.get_opt () = None before calling run_safe"
+      "masc_oas_bridge_fails_closed_without_eio_env requires Masc_eio_env.get_opt () = None before calling run_safe"
   | None ->
+    let called = ref false in
     match
       Masc_oas_bridge.run_safe ~caller:"test_tool_task_coverage" ~timeout_s:0.1 (fun () ->
+        called := true;
         Ok "ok")
     with
-    | Ok "ok" -> ()
-    | Ok other -> failwith ("unexpected result: " ^ other)
-    | Error err -> failwith (Agent_sdk.Error.to_string err)
+    | Error _ ->
+        if !called then failwith "run_safe called fn without an Eio env"
+    | Ok other -> failwith ("unexpected success: " ^ other)
 )
 
 (* Test dispatch transition claim *)

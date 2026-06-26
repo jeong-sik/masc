@@ -117,15 +117,12 @@ let () =
     src
     "let wall = elapsed ()";
 
-  (* B5: Time bucket classification exists *)
-  let has_bucket =
-    count_occurrences src "\"fast\"" >= 1
-    && count_occurrences src "\"long_tail\"" >= 1
-  in
-  if not has_bucket then
-    failwith
-      "[B5] expected bucket classification (\"fast\" / \"long_tail\") in \
-       masc_oas_bridge.ml";
+  (* B5: Time bucket classification uses the shared SSOT.  Literal bucket
+     labels are pinned in [test_cancel_wall_bucket.ml]. *)
+  assert_contains
+    ~label:"B5: cancel bucket classifier SSOT"
+    src
+    "Cancel_wall_bucket.of_wall wall";
 
   (* B6: Otel_metric_store counter incremented for cancel *)
   assert_contains

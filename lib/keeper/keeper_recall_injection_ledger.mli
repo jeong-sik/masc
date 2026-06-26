@@ -12,16 +12,18 @@
     - Best-effort: a write failure is logged and never aborts the turn.
     - Bounded: uses the shared [Dated_jsonl] day-split layout
       ([masc_root/recall_injections/YYYY-MM/DD.jsonl]), same per-day mutex
-      registry as the cost / receipt appenders. Startup/periodic JSONL
-      maintenance prunes this store via [MASC_JSONL_RETENTION_DAYS], and
-      callers can trigger immediate retention through [prune_older_than] or
-      [append ~retention_days].
+      registry as the cost / receipt appenders. Append never performs retention
+      on the hot path; startup/periodic JSONL maintenance prunes this store via
+      [MASC_JSONL_RETENTION_DAYS] by calling [prune_older_than].
     - Deterministic: keys are [claim_identity] outputs (the identity SSOT — the
       producer [claim_id] when present, else [normalize_claim]) and [trace_id:gN]
       episode keys, so the same trace renders a byte-identical record.
     - Failure-visible: when recall returns an unavailable advisory, the optional
       [failure_reason] records the bounded reason label instead of making the
       side-effect record look like an empty successful injection. *)
+
+val base_dir : masc_root:string -> string
+(** Directory that stores recall injection JSONL day files. *)
 
 val to_json
   :  ?failure_reason:string
@@ -39,7 +41,6 @@ val to_json
 
 val append
   :  ?failure_reason:string
-  -> ?retention_days:int
   -> masc_root:string
   -> keeper_id:string
   -> trace_id:string
@@ -51,14 +52,14 @@ val append
   -> unit
   -> unit
 (** Append one injection record. Best-effort: never raises except to re-raise
-    [Eio.Cancel.Cancelled]. When [retention_days] is positive, the underlying
-    dated JSONL store performs its opportunistic once-per-process-day prune
-    during append. *)
+    [Eio.Cancel.Cancelled]. Retention is intentionally handled by server
+    maintenance, not by append. *)
 
 val prune_older_than
   :  masc_root:string
   -> retention_days:int
   -> int
-(** Delete recall injection day-files older than [retention_days] days.
-    Thin wrapper over {!Dated_jsonl.prune}; returns the number of files
-    deleted. *)
+(** Best-effort maintenance hook for deleting recall injection day-files older
+    than [retention_days] days. Returns the count reported by
+    {!Dated_jsonl.prune}; logs filesystem errors and returns [0], except
+    [Eio.Cancel.Cancelled] which is re-raised. *)

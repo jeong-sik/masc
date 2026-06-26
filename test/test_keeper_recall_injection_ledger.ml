@@ -1,6 +1,7 @@
-(* RFC-0264 P2: unit tests for the recall-injection ledger record serialiser.
-   Pure, deterministic, no I/O — verifies the JSON shape that recall_outcome_eval
-   (P3) will join against, and that the record round-trips. *)
+(* RFC-0264 P2: unit tests for the recall-injection ledger record serialiser and
+   retention maintenance hook. The serialiser checks are pure; retention checks
+   use a temporary dated JSONL tree to keep append-time pruning out of the hot
+   path. *)
 
 module Ledger = Masc.Keeper_recall_injection_ledger
 open Yojson.Safe.Util
@@ -20,21 +21,30 @@ let tmpdir name =
   path
 
 let write_old_recall_file masc_root =
-  let old_month =
-    Filename.concat (Filename.concat masc_root "recall_injections") "2020-01"
-  in
+  let old_month = Filename.concat (Ledger.base_dir ~masc_root) "2020-01" in
   Fs_compat.mkdir_p old_month;
   let old_file = Filename.concat old_month "15.jsonl" in
-  Fs_compat.append_file old_file "{\"old\":true}\n";
+  let old_row =
+    Ledger.to_json
+      ~keeper_id:"old-keeper"
+      ~trace_id:"old-trace"
+      ~turn:1
+      ~injected_fact_keys:[ "old-fact" ]
+      ~injected_episode_keys:[]
+      ~n_facts_in_store:1
+      ~now:0.0
+      ()
+    |> Yojson.Safe.to_string
+  in
+  Fs_compat.append_file old_file (old_row ^ "\n");
   old_file
 
-let test_append_retention_prunes_old_day_file () =
+let test_append_does_not_prune_old_day_file () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let masc_root = tmpdir "recall-ledger-retention-append" in
+  let masc_root = tmpdir "recall-ledger-append-no-prune" in
   let old_file = write_old_recall_file masc_root in
   Ledger.append
-    ~retention_days:30
     ~masc_root
     ~keeper_id:"alpha"
     ~trace_id:"trace-retention"
@@ -44,14 +54,10 @@ let test_append_retention_prunes_old_day_file () =
     ~n_facts_in_store:1
     ~now:1234.5
     ();
-  check "append retention prunes old recall file" (not (Sys.file_exists old_file));
-  let store =
-    Dated_jsonl.create
-      ~base_dir:(Filename.concat masc_root "recall_injections")
-      ()
-  in
+  check "append does not prune old recall file" (Sys.file_exists old_file);
+  let store = Dated_jsonl.create ~base_dir:(Ledger.base_dir ~masc_root) () in
   check
-    "current recall row survives append retention"
+    "current recall row survives append without retention"
     (Dated_jsonl.read_recent store 10 |> List.length > 0)
 
 let test_prune_older_than_removes_old_day_file () =
@@ -122,7 +128,7 @@ let () =
   (* Deterministic round-trip: serialise then re-parse is structurally equal. *)
   let round_trip = Yojson.Safe.from_string (Yojson.Safe.to_string j) in
   check "round-trip equal" (Yojson.Safe.equal j round_trip);
-  test_append_retention_prunes_old_day_file ();
+  test_append_does_not_prune_old_day_file ();
   test_prune_older_than_removes_old_day_file ();
   if !failed > 0
   then (

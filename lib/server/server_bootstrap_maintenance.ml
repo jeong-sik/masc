@@ -484,6 +484,15 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                then Dated_jsonl.prune (Dated_jsonl.create ~base_dir:dir ()) ~days
                else 0
              in
+             let prune_recall_injections () =
+               let dir = Keeper_recall_injection_ledger.base_dir ~masc_root:masc in
+               if Sys.file_exists dir
+               then
+                 Keeper_recall_injection_ledger.prune_older_than
+                   ~masc_root:masc
+                   ~retention_days:days
+               else 0
+             in
              let total =
                prune_dir (Filename.concat masc "audit")
                + prune_dir (Filename.concat masc "telemetry")
@@ -492,7 +501,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                + prune_dir (Filename.concat masc "messages")
                + prune_dir (Filename.concat masc "events")
                + prune_dir (Filename.concat masc "activity-events")
-               + prune_dir (Filename.concat masc "recall_injections")
+               + prune_recall_injections ()
                + prune_dir (Filename.concat masc "voice_sessions")
                + prune_dir (Filename.concat masc "tool_calls")
                (* transition-audit was absent from this list since its

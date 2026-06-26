@@ -1,9 +1,10 @@
 (* RFC-0264 P2. See the .mli for the contract. Mirrors the cost-ledger
-   append pattern (Keeper_hooks_oas_cost_events): a per-process Dated_jsonl
-   store under masc_root, append wrapped so a write failure degrades to a log
-   line and never propagates into the turn. *)
+   append pattern (Keeper_hooks_oas_cost_events): a Dated_jsonl store under
+   masc_root, append wrapped so a write failure degrades to a log line and never
+   propagates into the turn. Retention is deliberately kept out of append's hot
+   path and handled by server maintenance. *)
 
-let recall_injections_dir masc_root = Filename.concat masc_root "recall_injections"
+let base_dir ~masc_root = Filename.concat masc_root "recall_injections"
 
 let to_json
       ?failure_reason
@@ -35,16 +36,10 @@ let to_json
   `Assoc fields
 ;;
 
-let make_store ?retention_days ~masc_root () =
-  Dated_jsonl.create
-    ~base_dir:(recall_injections_dir masc_root)
-    ?retention_days
-    ()
-;;
+let make_store ~masc_root () = Dated_jsonl.create ~base_dir:(base_dir ~masc_root) ()
 
 let append
       ?failure_reason
-      ?retention_days
       ~masc_root
       ~keeper_id
       ~trace_id
@@ -55,7 +50,7 @@ let append
       ~now
       ()
   =
-  let store = make_store ?retention_days ~masc_root () in
+  let store = make_store ~masc_root () in
   let entry =
     to_json
       ?failure_reason
@@ -78,5 +73,12 @@ let append
 ;;
 
 let prune_older_than ~masc_root ~retention_days =
-  Dated_jsonl.prune (make_store ~masc_root ()) ~days:retention_days
+  try Dated_jsonl.prune (make_store ~masc_root ()) ~days:retention_days with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Log.Keeper.warn
+      "recall_injection_ledger: failed to prune %s: %s"
+      (base_dir ~masc_root)
+      (Printexc.to_string exn);
+    0
 ;;

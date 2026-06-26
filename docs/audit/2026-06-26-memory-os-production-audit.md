@@ -1,11 +1,13 @@
 # Memory OS Production Audit
 
 Date: 2026-06-26 15:19 KST
+Refresh note: PR #22365/current-main status rechecked 2026-06-26 16:09 KST.
 
 Scope:
 - repo: `jeong-sik/masc`
 - audit worktree: `.worktrees/memory-os-audit-20260626`
 - audited source head: `2b30bbc55691a9a9e82b317d47765fd84884093f`
+- refreshed current `origin/main`: `9b79f1a5ce31f4bca2536183074a8da3a1116c4c`
 - live runtime head from `/health?full=1`: `e882945c06d`
 - live base path: `/Users/dancer/me`
 - live MASC root: `/Users/dancer/me/.masc`
@@ -29,9 +31,9 @@ heuristics, no silent failure, no string-match workaround" bar. The deterministi
 storage layer is mostly strong; the weak surface is still the LLM ingestion and
 cleanup loop:
 
-1. Current `main` still treats parse-exhaustion fallback episodes as successful
-   writes for librarian cadence. PR #22365 has the right source fix, but it is
-   still open, draft, and CI-red.
+1. The audited source head still treated parse-exhaustion fallback episodes as
+   successful writes for librarian cadence. Current `origin/main` no longer has
+   this issue after #22365 merged.
 2. `Keeper_librarian.json_of_output` and LLM consolidation still use markdown /
    first-`{...}` substring recovery. That is a heuristic parser in the hottest
    quality boundary.
@@ -47,8 +49,7 @@ Review-response state:
 - #22328 is merged and fixed the prior silent recall-unavailable hole.
 - #22337 is merged and fixed MASC-authored unstructured fallback `claim_id`
   semantics.
-- #22365 is the right fix for the fallback-cadence leak, but it is not landed and
-  Build/Test is red.
+- #22365 is merged and fixed the fallback-cadence leak on current `origin/main`.
 - #22352 remains a separate linked-risk PR; do not merge it as-is because optional
   no-clock bridges can remove timeout enforcement from live Eio callers.
 
@@ -56,6 +57,13 @@ Review-response state:
 
 [근거] Source head: `git rev-parse HEAD`, checked 2026-06-26 15:19 KST,
 confidence High. Result: `2b30bbc55691a9a9e82b317d47765fd84884093f`.
+
+[근거] Current main refresh: `git rev-parse origin/main` and
+`gh pr view 22365 --repo jeong-sik/masc --json state,isDraft,mergedAt,mergeCommit`,
+checked 2026-06-26 16:09 KST, confidence High. Result: current `origin/main`
+`9b79f1a5ce31f4bca2536183074a8da3a1116c4c`; #22365 is `MERGED`,
+`isDraft=false`, `mergedAt=2026-06-26T06:25:35Z`, merge commit
+`b03ac89e3627bcf99660634dcd55437b14a8fbbe`.
 
 [근거] Live runtime truth:
 `curl -fsS 'http://127.0.0.1:8935/health?full=1'`, checked 2026-06-26 15:19
@@ -204,7 +212,7 @@ Read and modify Memory OS in this order:
    "Do not classify current PR state from prose mentioning `PR #123`." This is a
    `lesson`; current code correctly avoids external-ref inference from claim text.
 5. Active external state:
-   "PR #22365 is open and CI-red." This should be `external_state` only if the
+   "PR #22365 is merged and fixed." This should be `external_state` only if the
    producer supplies an explicit current-state tag and future recall marks it stale
    enough to re-verify. Otherwise it can mislead future turns.
 6. Self observation:
@@ -252,26 +260,29 @@ Read and modify Memory OS in this order:
 
 ## Findings
 
-### P0 / P1: Fallback Cadence Leak Still Exists On Main
+### Historical P0 / P1: Fallback Cadence Leak Fixed After Audit Snapshot
 
-Current `main` still returns an unstructured fallback as `Ok episode` after parse
-retries are exhausted (`lib/keeper/keeper_librarian_runtime.ml:481`, `:493`).
-`run_best_effort` resets cadence on every `Some (Ok episode)` at `:634-637`.
+The audited source head returned an unstructured fallback as `Ok episode` after
+parse retries were exhausted (`lib/keeper/keeper_librarian_runtime.ml:481`,
+`:493`). `run_best_effort` reset cadence on every `Some (Ok episode)` at
+`:634-637`.
 
 Real-world impact: if a provider repeatedly returns unparseable JSON, the keeper
 stores an ephemeral fallback note and then waits for the normal cadence interval.
 The next structured extraction is delayed even though no structured memory was
 actually extracted.
 
-Status: PR #22365 implements the correct typed source fix by classifying
-`Structured_episode` vs `Unstructured_fallback`, and only structured extraction
-records cadence success. However #22365 is still open/draft and CI-red, so this
-must remain a current-main finding.
+Status: fixed on current `origin/main` by #22365. The merged code classifies
+`Structured_episode` vs `Unstructured_fallback`, and `should_record_cadence_success`
+returns `false` for `Unstructured_fallback`, so unstructured fallback attempts do
+not reset librarian cadence. Keep this as a historical finding for the audited
+snapshot, not as a current-main P0/P1.
 
-[근거] `gh pr view 22365 --repo jeong-sik/masc --json statusCheckRollup`,
-checked 2026-06-26 15:19 KST, confidence High. Result: `Build and Test` and
-`CI Gate` failed. Failed harness log shows `masc_goal_transition` validation
-error `actor id must match authenticated caller`, not a Memory OS compile error.
+[근거] `git show origin/main:lib/keeper/keeper_librarian_runtime.ml` and
+`gh pr view 22365 --repo jeong-sik/masc --json state,isDraft,mergedAt,mergeCommit`,
+checked 2026-06-26 16:09 KST, confidence High. Result:
+`Unstructured_fallback -> false` in `should_record_cadence_success`; #22365
+merged at `2026-06-26T06:25:35Z`.
 
 ### P1: LLM Output Parsing Still Uses Heuristic Recovery
 
@@ -501,8 +512,8 @@ that recall improves outcomes.
 ## Production Plan
 
 Immediate:
-1. Land #22365 or equivalent after CI is green, so unstructured fallback does not
-   reset librarian cadence.
+1. Keep the #22365 cadence fix covered by regression/CI so unstructured fallback
+   cannot reset librarian cadence again.
 2. Remove first-`{...}` JSON substring recovery from production parser paths.
 3. Add strict typed parse errors and a corpus of malformed provider outputs.
 4. Add GC dry-run command and dashboard alert for expired rows.

@@ -16,8 +16,6 @@ import {
 } from '../../api/dashboard'
 import { DEFAULT_PANEL_REFRESH_MS, formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 
-type AlertThresholds = NonNullable<KeeperMemoryHealthResponse['alert_summary']>['thresholds']
-
 const EVENT_RATIO_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'events_to_facts_ratio'
 
 function formatBytes(bytes: number): string {
@@ -38,33 +36,15 @@ function hasTargetAlert(alerts: KeeperMemoryHealthAlert[], target: KeeperMemoryH
   return alerts.some(alert => alert.target === target)
 }
 
-function isRowWarning(
-  entry: KeeperMemoryHealthKeeperEntry,
-  thresholds: AlertThresholds | undefined,
-): boolean {
-  if (entryAlerts(entry).length > 0) return true
-  const ratioThreshold = thresholds?.events_to_facts_ratio
-  return (
-    (ratioThreshold !== undefined && entry.events_to_facts_ratio > ratioThreshold)
-    || entry.ttl_expired_on_disk > 0
-    || entry.near_duplicate > 0
-    || providerSlotBusy(entry) > 0
-  )
+function isRowWarning(entry: KeeperMemoryHealthKeeperEntry): boolean {
+  return entryAlerts(entry).length > 0
 }
 
-function KeeperRow({
-  entry,
-  thresholds,
-}: {
-  entry: KeeperMemoryHealthKeeperEntry
-  thresholds: AlertThresholds | undefined
-}) {
+function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
   const ratioStr = entry.events_to_facts_ratio.toFixed(2)
   const alerts = entryAlerts(entry)
-  const warn = isRowWarning(entry, thresholds)
-  const ratioThreshold = thresholds?.events_to_facts_ratio
+  const warn = isRowWarning(entry)
   const ratioWarn = hasTargetAlert(alerts, EVENT_RATIO_ALERT_TARGET)
-    || (ratioThreshold !== undefined && entry.events_to_facts_ratio > ratioThreshold)
   const providerSlotBusyCount = providerSlotBusy(entry)
 
   return html`
@@ -163,52 +143,51 @@ export function KeeperMemoryHealth() {
   }, 0)
   const totalAlerts = data.alert_summary?.total_alerts ?? derivedAlertCount
   const totalProviderSlotBusy = data.totals.provider_slot_busy ?? 0
-  const thresholds = data.alert_summary?.thresholds
 
   return html`
     <div class="kmh-panel">
       <div class="kmh-header">
         <div class="kmh-title">키퍼 메모리 상태</div>
         <div class="kmh-totals-strip">
-          <div class="kmh-stat">
+          <div class="kmh-stat" data-stat-key="facts">
             <span class="kmh-stat-label">전체 사실</span>
             <span class="kmh-stat-value">${data.totals.facts.toLocaleString()}</span>
           </div>
-          <div class="kmh-stat">
+          <div class="kmh-stat" data-stat-key="facts-bytes">
             <span class="kmh-stat-label">사실 크기</span>
             <span class="kmh-stat-value">${formatBytes(data.totals.facts_bytes)}</span>
           </div>
-          <div class="kmh-stat">
+          <div class="kmh-stat" data-stat-key="events-bytes">
             <span class="kmh-stat-label">이벤트 크기</span>
             <span class="kmh-stat-value">${formatBytes(data.totals.events_bytes)}</span>
           </div>
-          <div class="kmh-stat">
+          <div class="kmh-stat" data-stat-key="ttl-expired">
             <span class="kmh-stat-label">TTL 만료(디스크)</span>
             <span class=${`kmh-stat-value${data.totals.ttl_expired_on_disk > 0 ? ' kmh-stat-value--warn' : ''}`}>
               ${data.totals.ttl_expired_on_disk}
             </span>
           </div>
-          <div class="kmh-stat">
+          <div class="kmh-stat" data-stat-key="near-duplicate">
             <span class="kmh-stat-label">근접중복</span>
             <span class="kmh-stat-value">${data.totals.near_duplicate}</span>
           </div>
-          <div class="kmh-stat">
+          <div class="kmh-stat" data-stat-key="provider-slot-busy">
             <span class="kmh-stat-label">슬롯 실패</span>
             <span class=${`kmh-stat-value${totalProviderSlotBusy > 0 ? ' kmh-stat-value--warn' : ''}`}>
               ${totalProviderSlotBusy}
             </span>
           </div>
-          <div class="kmh-stat">
+          <div class="kmh-stat" data-stat-key="alerts">
             <span class="kmh-stat-label">경보</span>
             <span class=${`kmh-stat-value${totalAlerts > 0 ? ' kmh-stat-value--warn' : ''}`}>
               ${totalAlerts}
             </span>
           </div>
-          <div class="kmh-stat">
+          <div class="kmh-stat" data-stat-key="cadence-counter">
             <span class="kmh-stat-label">케이던스 카운터</span>
             <span class="kmh-stat-value">${data.cadence_counter_entries}</span>
           </div>
-          <div class="kmh-stat">
+          <div class="kmh-stat" data-stat-key="keeper-count">
             <span class="kmh-stat-label">키퍼 수</span>
             <span class="kmh-stat-value">${data.keepers.length}</span>
           </div>
@@ -236,13 +215,7 @@ export function KeeperMemoryHealth() {
                 </tr>
               </thead>
               <tbody>
-                ${data.keepers.map(entry => html`
-                  <${KeeperRow}
-                    key=${entry.keeper_id}
-                    entry=${entry}
-                    thresholds=${thresholds}
-                  />
-                `)}
+                ${data.keepers.map(entry => html`<${KeeperRow} key=${entry.keeper_id} entry=${entry} />`)}
               </tbody>
             </table>
           </div>

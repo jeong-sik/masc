@@ -13,7 +13,6 @@ import type {
 // Mocking the module lets us drive every render branch without a real HTTP call.
 
 const mockFetch = vi.fn<() => Promise<KeeperMemoryHealthResponse>>()
-const EVENTS_TO_FACTS_RATIO_THRESHOLD = 2
 
 vi.mock('../../api/dashboard', () => ({
   fetchKeeperMemoryHealth: () => mockFetch(),
@@ -32,7 +31,7 @@ function makeEntry(
     facts_bytes: 512,
     events: 20,
     events_bytes: 1024,
-    events_to_facts_ratio: EVENTS_TO_FACTS_RATIO_THRESHOLD,
+    events_to_facts_ratio: 0,
     ttl_expired_on_disk: 0,
     near_duplicate: 0,
     provider_slot_busy: 0,
@@ -44,6 +43,7 @@ function makeEntry(
 function makeResponse(
   keepers: KeeperMemoryHealthKeeperEntry[],
   totalsOverrides: Partial<KeeperMemoryHealthResponse['totals']> = {},
+  alertSummary?: KeeperMemoryHealthResponse['alert_summary'],
 ): KeeperMemoryHealthResponse {
   return {
     generated_at: 1_700_000_000,
@@ -58,27 +58,33 @@ function makeResponse(
       provider_slot_busy: 0,
       ...totalsOverrides,
     },
-    alert_summary: {
-      total_alerts: 0,
-      warn_alerts: 0,
-      keepers_with_alerts: 0,
-      ttl_expired_keepers: 0,
-      near_duplicate_keepers: 0,
-      high_event_ratio_keepers: 0,
-      provider_slot_busy_keepers: 0,
-      thresholds: {
-        ttl_expired_on_disk: 0,
-        near_duplicate: 0,
-        events_to_facts_ratio: EVENTS_TO_FACTS_RATIO_THRESHOLD,
-        provider_slot_busy: 0,
-      },
-    },
+    ...(alertSummary === undefined ? {} : { alert_summary: alertSummary }),
   }
 }
 
-function statValue(container: Element, label: string): string | undefined {
-  const stat = Array.from(container.querySelectorAll('.kmh-totals-strip .kmh-stat'))
-    .find((node) => node.querySelector('.kmh-stat-label')?.textContent === label)
+function makeAlertSummary(
+  overrides: Partial<NonNullable<KeeperMemoryHealthResponse['alert_summary']>> = {},
+): NonNullable<KeeperMemoryHealthResponse['alert_summary']> {
+  return {
+    total_alerts: 0,
+    warn_alerts: 0,
+    keepers_with_alerts: 0,
+    ttl_expired_keepers: 0,
+    near_duplicate_keepers: 0,
+    high_event_ratio_keepers: 0,
+    provider_slot_busy_keepers: 0,
+    thresholds: {
+      ttl_expired_on_disk: 0,
+      near_duplicate: 0,
+      events_to_facts_ratio: 0,
+      provider_slot_busy: 0,
+    },
+    ...overrides,
+  }
+}
+
+function statValue(container: Element, key: string): string | undefined {
+  const stat = container.querySelector(`.kmh-totals-strip .kmh-stat[data-stat-key="${key}"]`)
   return stat?.querySelector('.kmh-stat-value')?.textContent ?? undefined
 }
 
@@ -115,53 +121,60 @@ describe('KeeperMemoryHealth', () => {
     })
   })
 
-  // ── isRowWarning boundary (via row class + ratio badge) ──
-  // Component operator is strict greater-than against the backend threshold:
-  //   ratio === threshold → NOT a warning
-  //   ratio  > threshold → warning
-  describe('isRowWarning ratio boundary', () => {
-    it('does not flag a row when the ratio equals the backend threshold', async () => {
+  describe('backend alert-driven row warnings', () => {
+    it('does not classify a raw high ratio as a warning without a backend alert', async () => {
       mockFetch.mockResolvedValue(
         makeResponse([
           makeEntry({
-            keeper_id: 'at-threshold',
-            events_to_facts_ratio: EVENTS_TO_FACTS_RATIO_THRESHOLD,
+            keeper_id: 'raw-high-ratio',
+            events_to_facts_ratio: 3,
             ttl_expired_on_disk: 0,
           }),
         ]),
       )
       const { container } = render(html`<${KeeperMemoryHealth} />`)
-      await waitFor(() => expect(screen.getByText('at-threshold')).not.toBeNull())
+      await waitFor(() => expect(screen.getByText('raw-high-ratio')).not.toBeNull())
 
       expect(container.querySelector('.kmh-row--warn')).toBeNull()
-      // The ratio cell renders the threshold value inside a plain span, not a warn badge.
       expect(container.querySelector('.kmh-badge--warn')).toBeNull()
-      expect(screen.getByText('2.00')).not.toBeNull()
+      expect(screen.getByText('3.00')).not.toBeNull()
     })
 
-    it('flags a row when the ratio exceeds the threshold', async () => {
+    it('flags a ratio row only when the backend emits a ratio alert target', async () => {
       mockFetch.mockResolvedValue(
         makeResponse([
-          makeEntry({ keeper_id: 'over-threshold', events_to_facts_ratio: 3, ttl_expired_on_disk: 0 }),
+          makeEntry({
+            keeper_id: 'ratio-alert',
+            events_to_facts_ratio: 3,
+            ttl_expired_on_disk: 0,
+            alerts: [{
+              code: 'events_to_facts_ratio_high',
+              severity: 'warn',
+              target: 'events_to_facts_ratio',
+              label: '비율',
+              message: 'Memory OS event bytes are high relative to fact bytes.',
+              value: 3,
+              threshold: 0,
+            }],
+          }),
         ]),
       )
       const { container } = render(html`<${KeeperMemoryHealth} />`)
-      await waitFor(() => expect(screen.getByText('over-threshold')).not.toBeNull())
+      await waitFor(() => expect(screen.getByText('ratio-alert')).not.toBeNull())
 
       expect(container.querySelector('.kmh-row--warn')).not.toBeNull()
-      // The ratio cell is wrapped in a warn badge showing 3.00.
       const warnBadge = container.querySelector('.kmh-badge--warn')
       expect(warnBadge).not.toBeNull()
       expect(warnBadge!.textContent).toBe('3.00')
+      expect(screen.getByText('비율')).not.toBeNull()
     })
 
-    it('flags a row on ttl_expired_on_disk even when the ratio is at the threshold', async () => {
-      // isRowWarning is an OR: ratio above backend threshold OR ttl_expired_on_disk > 0.
+    it('flags a ttl row when the backend emits a ttl alert', async () => {
       mockFetch.mockResolvedValue(
         makeResponse([
           makeEntry({
             keeper_id: 'ttl-expired',
-            events_to_facts_ratio: EVENTS_TO_FACTS_RATIO_THRESHOLD,
+            events_to_facts_ratio: 0,
             ttl_expired_on_disk: 4,
             alerts: [{
               code: 'ttl_expired_on_disk',
@@ -201,26 +214,17 @@ describe('KeeperMemoryHealth', () => {
             }],
           }),
         ], { ttl_expired_on_disk: 2 }),
-        alert_summary: {
+        alert_summary: makeAlertSummary({
           total_alerts: 1,
           warn_alerts: 1,
           keepers_with_alerts: 1,
           ttl_expired_keepers: 1,
-          near_duplicate_keepers: 0,
-          high_event_ratio_keepers: 0,
-          provider_slot_busy_keepers: 0,
-          thresholds: {
-            ttl_expired_on_disk: 0,
-            near_duplicate: 0,
-            events_to_facts_ratio: EVENTS_TO_FACTS_RATIO_THRESHOLD,
-            provider_slot_busy: 0,
-          },
-        },
+        }),
       })
       const { container } = render(html`<${KeeperMemoryHealth} />`)
       await waitFor(() => expect(screen.getByText('alerted')).not.toBeNull())
 
-      expect(statValue(container, '경보')).toBe('1')
+      expect(statValue(container, 'alerts')).toBe('1')
     })
 
     it('surfaces provider slot busy alerts per keeper', async () => {
@@ -240,27 +244,18 @@ describe('KeeperMemoryHealth', () => {
             }],
           }),
         ], { provider_slot_busy: 3 }),
-        alert_summary: {
+        alert_summary: makeAlertSummary({
           total_alerts: 1,
           warn_alerts: 1,
           keepers_with_alerts: 1,
-          ttl_expired_keepers: 0,
-          near_duplicate_keepers: 0,
-          high_event_ratio_keepers: 0,
           provider_slot_busy_keepers: 1,
-          thresholds: {
-            ttl_expired_on_disk: 0,
-            near_duplicate: 0,
-            events_to_facts_ratio: EVENTS_TO_FACTS_RATIO_THRESHOLD,
-            provider_slot_busy: 0,
-          },
-        },
+        }),
       })
       const { container } = render(html`<${KeeperMemoryHealth} />`)
       await waitFor(() => expect(screen.getByText('slot-busy')).not.toBeNull())
 
       expect(screen.getByText('슬롯')).not.toBeNull()
-      expect(statValue(container, '슬롯 실패')).toBe('3')
+      expect(statValue(container, 'provider-slot-busy')).toBe('3')
     })
   })
 

@@ -84,8 +84,18 @@ let alert_target_to_string = function
   | Provider_slot_busy_target -> "provider_slot_busy"
 ;;
 
-let alert ~code ~target ~label ~message ~value ~threshold =
-  { code; severity = Warn; target; label; message; value; threshold }
+(* Alert labels are endpoint-owned wire copy for this backend-defined diagnostic
+   taxonomy. The dashboard renders the label as data from this endpoint instead
+   of maintaining a second code -> label classifier. *)
+let alert_label = function
+  | Ttl_expired_on_disk -> "TTL"
+  | Near_duplicate -> "중복"
+  | Events_to_facts_ratio_high -> "비율"
+  | Provider_slot_busy -> "슬롯"
+;;
+
+let alert ~code ~target ~message ~value ~threshold =
+  { code; severity = Warn; target; label = alert_label code; message; value; threshold }
 ;;
 
 let keeper_alerts h =
@@ -96,7 +106,6 @@ let keeper_alerts h =
       alert
         ~code:Ttl_expired_on_disk
         ~target:Ttl_expired_on_disk_target
-        ~label:"TTL"
         ~message:"TTL-expired Memory OS fact rows remain on disk; GC dry-run would prune them."
         ~value:(float_of_int h.ttl_expired_on_disk)
         ~threshold:ttl_expired_on_disk_threshold
@@ -108,7 +117,6 @@ let keeper_alerts h =
       alert
         ~code:Near_duplicate
         ~target:Near_duplicate_target
-        ~label:"중복"
         ~message:"Near-duplicate Memory OS fact rows remain on disk; GC dry-run would deduplicate them."
         ~value:(float_of_int h.near_duplicate)
         ~threshold:near_duplicate_threshold
@@ -120,7 +128,6 @@ let keeper_alerts h =
       alert
         ~code:Events_to_facts_ratio_high
         ~target:Events_to_facts_ratio_target
-        ~label:"비율"
         ~message:"Memory OS event bytes are high relative to fact bytes."
         ~value:h.events_to_facts_ratio
         ~threshold:events_to_facts_ratio_warn_threshold
@@ -132,7 +139,6 @@ let keeper_alerts h =
       alert
         ~code:Provider_slot_busy
         ~target:Provider_slot_busy_target
-        ~label:"슬롯"
         ~message:
           "Memory OS librarian provider slot was busy; extraction was skipped and remains due."
         ~value:(float_of_int h.provider_slot_busy)

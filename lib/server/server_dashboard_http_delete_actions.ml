@@ -502,7 +502,7 @@ let add_delete_action_routes router =
 
   |> Http.Router.post "/api/v1/dashboard/board/moderation/flag" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state _agent_name req reqd ->
+         (fun _state agent_name req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
@@ -526,10 +526,7 @@ let add_delete_action_routes router =
              | None ->
                   respond_error ~request:req reqd (invalid_request "target_id")
              | Some target_id ->
-                  let reporter =
-                    Safe_ops.json_string_opt "reporter" json
-                    |> Option.value ~default:"operator"
-                  in
+                  let reporter = agent_name in
                    (match Board_moderation.flag ~target_kind ~target_id ~reporter ~reason with
                     | Error msg ->
                        Http.Response.json_value ~status:`Conflict ~request:req
@@ -607,11 +604,7 @@ let add_delete_action_routes router =
                            Board_moderation.flag_reason_of_string
                        in
                        let note = Safe_ops.json_string_opt "note" json in
-                       let actor =
-                         match Safe_ops.json_string_opt "actor" json with
-                         | Some a -> (match String_util.trim_to_option a with Some trimmed -> trimmed | None -> agent_name)
-                         | _ -> agent_name
-                       in
+                       let actor = agent_name in
                        (match Board_moderation.record_action ~target_kind ~target_id
                                 ~actor ~action ?reason ?note () with
                         | Error msg ->

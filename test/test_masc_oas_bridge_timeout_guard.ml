@@ -62,14 +62,24 @@ let check_run_with_caller_uses_fallback_for_invalid_env ~name raw_value =
   let env_name = Env_config_oas_bridge.per_caller_env_var ~caller in
   with_env env_name raw_value (fun () ->
     let called = ref false in
-    match
-      Masc_oas_bridge.run_with_caller ~caller (fun () ->
-        called := true;
-        Ok "ok")
-    with
-    | Ok "ok" -> Alcotest.(check bool) name true !called
-    | Ok other -> failwith ("unexpected result: " ^ other)
-    | Error err -> failwith (Agent_sdk.Error.to_string err))
+    match Masc_eio_env.get_opt () with
+    | None ->
+      (match
+         Masc_oas_bridge.run_with_caller ~caller (fun () ->
+           called := true;
+           Ok "ok")
+       with
+       | Ok _ -> failwith "expected failure when no Eio clock is available"
+       | Error _ -> Alcotest.(check bool) (name ^ " fn was not called") false !called)
+    | Some _ ->
+      (match
+         Masc_oas_bridge.run_with_caller ~caller (fun () ->
+           called := true;
+           Ok "ok")
+       with
+       | Ok "ok" -> Alcotest.(check bool) name true !called
+       | Ok other -> failwith ("unexpected result: " ^ other)
+       | Error err -> failwith (Agent_sdk.Error.to_string err)))
 ;;
 
 let test_run_with_caller_rejects_invalid_env_timeouts_at_boundary () =

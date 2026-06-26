@@ -1,6 +1,6 @@
 opam-version: "2.0"
 name: "masc"
-version: "0.19.46"
+version: "0.19.49"
 synopsis: "Multi-Agent Shared Context MCP Server in OCaml"
 description:
   "MASC Protocol: File-based workspace collaboration for Claude, Gemini, and Codex agents"
@@ -218,7 +218,7 @@ dev-repo: "git+https://github.com/jeong-sik/masc.git"
 pin-depends: [
   [
   "agent_sdk.0.207.8"
-  "git+https://github.com/jeong-sik/oas.git#e571728cf2d43555987e9ca73b4abc4e55be14a6"
+  "git+https://github.com/jeong-sik/oas.git#ecd509f4b13af6d02854789cb6f8f36823df0533"
 ]
   [
     "bisect_ppx.2.8.3"

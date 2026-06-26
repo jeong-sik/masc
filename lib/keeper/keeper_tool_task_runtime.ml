@@ -780,6 +780,18 @@ let handle_keeper_task_tool
                        ; all_goals_excluded
                        }
                  }) )
+      | Workspace.Claim_next_no_unclaimed ->
+        Some
+          ( "typed_outcome"
+          , Keeper_tool_outcome.to_json
+              (Keeper_tool_outcome.No_progress
+                 { reason = Keeper_tool_outcome.No_work_available }) )
+      | Workspace.Claim_next_error e ->
+        Some
+          ( "typed_outcome"
+          , Keeper_tool_outcome.to_json
+              (Keeper_tool_outcome.Error
+                 { reason = Printf.sprintf "keeper_task_claim rejected: %s" e }) )
       | _ -> None
     in
     Yojson.Safe.to_string

@@ -4,6 +4,7 @@ module KAR = Masc.Keeper_agent_run
 module KTN = Keeper_tool_name
 module KTP = Masc.Keeper_tool_progress
 module KUS = Masc.Keeper_unified_metrics_support
+module Outcome = Keeper_tool_outcome
 
 (* RFC-0232: a budget-exhausted (Continuation_checkpoint) turn substitutes a
    synthetic continuation notice for the reply text. That text is display-only;
@@ -177,6 +178,20 @@ let test_material_progress_does_not_special_case_worktree_reuse_text () =
           Branch already checked out: feature/task\n")
 ;;
 
+let test_no_work_outcome_maps_to_empty_queue_sleep () =
+  let turn_effect =
+    KTP.classify_tool_progress_with_outcome
+      "keeper_task_claim"
+      (Some (Outcome.No_progress { reason = Outcome.No_work_available }))
+  in
+  match turn_effect with
+  | KTP.Streak_reset_and_empty_queue_sleep { reason = KTP.No_work_to_report } -> ()
+  | KTP.Streak_increment -> fail "expected empty queue sleep, got streak increment"
+  | KTP.Streak_reset -> fail "expected empty queue sleep, got streak reset"
+  | KTP.Streak_reset_and_empty_queue_sleep { reason = KTP.No_eligible_tasks _ } ->
+    fail "expected no-work reason"
+;;
+
 let () =
   run
     "keeper_unified_claim_progress"
@@ -205,6 +220,10 @@ let () =
             "material progress does not special-case worktree reuse text"
             `Quick
             test_material_progress_does_not_special_case_worktree_reuse_text
+        ; test_case
+            "no-work typed outcome maps to empty queue sleep"
+            `Quick
+            test_no_work_outcome_maps_to_empty_queue_sleep
         ] )
     ; ( "preview_precedence"
       , [ test_case

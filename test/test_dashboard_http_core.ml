@@ -313,15 +313,6 @@ let runtime_resolution_warning_strings json =
     | `String value -> Some value
     | _ -> None)
 
-let contains_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  let rec loop idx =
-    idx + needle_len <= haystack_len
-    && (String.equal (String.sub haystack idx needle_len) needle || loop (idx + 1))
-  in
-  String.equal needle "" || loop 0
-
 let assert_no_server_workspace_warning label json =
   check bool label false
     (List.exists
@@ -338,9 +329,9 @@ let test_runtime_resolution_accepts_server_repo_inside_base_path () =
     in
     let config = Workspace.default_config (Filename.dirname repo_root) in
     let open Yojson.Safe.Util in
-    let full = Lib.Server_dashboard_http_runtime_info.runtime_resolution_json config in
+    let full = Server_dashboard_http_runtime_info.runtime_resolution_json config in
     let light =
-      Lib.Server_dashboard_http_runtime_info.light_runtime_resolution_json config
+      Server_dashboard_http_runtime_info.light_runtime_resolution_json config
     in
     check bool "full runtime accepts nested server repo" false
       (full |> member "server_workspace_mismatch" |> to_bool);

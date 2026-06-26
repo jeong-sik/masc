@@ -800,9 +800,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                   | Error msg ->
                     error_result_typed ~tool_name ~start_time ~code:Internal_error msg
                   | Ok updated_goal ->
-                    if
-                      goal.phase = Goal_phase.Awaiting_approval
-                      && next_phase <> Goal_phase.Awaiting_approval
+                    if goal.phase = Goal_phase.Awaiting_approval
                     then clear_goal_approval_pending_confirm ctx ~goal_id;
                     emit_goal_event
                       ctx

@@ -221,6 +221,7 @@ module Rest = struct
     [
       ("masc_status", [ (GET, "/api/v1/status") ]);
       ("masc_tasks", [ (GET, "/api/v1/tasks") ]);
+      ("masc_agents", [ (GET, "/api/v1/agents") ]);
       ("masc_messages", [ (GET, "/api/v1/messages") ]);
       ("masc_operator_snapshot", [ (GET, "/api/v1/operator") ]);
       ("masc_operator_digest", [ (GET, "/api/v1/operator/digest") ]);

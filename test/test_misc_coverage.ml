@@ -125,8 +125,8 @@ let test_config_of_json_custom () =
   check bool "mode tools removed" false (List.mem "masc_switch_mode" names)
 
 let test_config_of_json_invalid () =
-  (* masc_pause is auto-classified as Hidden (not on public MCP surface) *)
-  check bool "pause hidden (not on public surface)" false
+  (* masc_pause is an admin-surface tool with explicit catalog metadata. *)
+  check bool "pause allowed on catalog surface" true
     (Config.is_tool_allowed "masc_pause")
 
 (* ============================================================

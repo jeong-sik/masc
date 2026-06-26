@@ -153,6 +153,30 @@ let masc_cleanup_zombies_spec : tool_spec =
   }
 ;;
 
+let masc_pause_spec : tool_spec =
+  { name = "masc_pause"
+  ; description = "Pause the default project scope."
+  ; parameters =
+      [ { p_name = "reason"
+        ; p_type = T_string { enum = None; default = Some "Manual pause" }
+        ; p_description = "Reason recorded with the pause state"
+        ; p_required = false
+        }
+      ]
+  ; additional_properties = false
+  ; behavior_contract = []
+  }
+;;
+
+let masc_resume_spec : tool_spec =
+  { name = "masc_resume"
+  ; description = "Resume the default project scope if it is paused."
+  ; parameters = []
+  ; additional_properties = false
+  ; behavior_contract = []
+  }
+;;
+
 (* === PR-2: plan group (8 tools) === *)
 
 let masc_plan_init_spec : tool_spec =
@@ -389,6 +413,8 @@ let phase6_specs : tool_spec list =
   ; masc_gc_spec
   ; masc_tool_stats_spec
   ; masc_cleanup_zombies_spec
+  ; masc_pause_spec
+  ; masc_resume_spec
     (* PR-2: plan group *)
   ; masc_plan_init_spec
   ; masc_plan_update_spec

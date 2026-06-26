@@ -122,10 +122,38 @@ let read_goal_task_links config =
     []
 ;;
 
-let write_goal_task_links config links =
+let write_json_result config path json =
+  match key_of_path config path with
+  | Some key ->
+    let content = json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string in
+    (match backend_set config ~key ~value:content with
+     | Error err ->
+       Error
+         (Printf.sprintf
+            "backend_set failed for %s: %s"
+            key
+            (Backend_types.show_error err))
+     | Ok () ->
+       if should_dual_write_local config then write_json_local path json else Ok ())
+  | None -> write_json_local path json
+;;
+
+let write_goal_task_links_r config links =
   let json = links_to_yojson links in
-  write_json config (goal_task_links_path config) json;
-  write_json config (goal_task_links_recovery_path config) json
+  let primary = write_json_result config (goal_task_links_path config) json in
+  let recovery = write_json_result config (goal_task_links_recovery_path config) json in
+  match primary, recovery with
+  | Ok (), Ok () -> Ok ()
+  | Error primary_msg, Ok () -> Error primary_msg
+  | Ok (), Error recovery_msg -> Error recovery_msg
+  | Error primary_msg, Error recovery_msg ->
+    Error (primary_msg ^ "; recovery write failed: " ^ recovery_msg)
+;;
+
+let write_goal_task_links config links =
+  match write_goal_task_links_r config links with
+  | Ok () -> ()
+  | Error msg -> Log.Misc.warn "write_goal_task_links failed: %s" msg
 ;;
 
 let goal_task_links_lock_path config =
@@ -163,7 +191,9 @@ let prune_links_for_goal config ~goal_id =
     with_file_lock config (goal_task_links_lock_path config) (fun () ->
       let links = read_goal_task_links config in
       let links = List.filter (fun (gid, _) -> not (String.equal gid goal_id)) links in
-      write_goal_task_links config links)
+      match write_goal_task_links_r config links with
+      | Ok () -> ()
+      | Error msg -> failwith msg)
 ;;
 
 let link_task_to_goal config ~goal_id ~task_id =

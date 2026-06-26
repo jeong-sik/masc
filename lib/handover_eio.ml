@@ -106,31 +106,81 @@ let handover_to_json (h : handover_record) : Yojson.Safe.t =
 
 (** JSON to handover *)
 let handover_of_json (json : Yojson.Safe.t) : handover_record option =
-  let str key = Json_util.get_string_with_default json ~key ~default:"" in
-  let str_opt key = Json_util.get_string json key in
-  let str_list key = Json_util.get_string_list json key in
-  let int_val key = Json_util.get_int json key |> Option.value ~default:0 in
-  let float_val key = Json_util.get_float json key |> Option.value ~default:0.0 in
-  try Some {
-    id = str "id";
-    from_agent = str "from_agent";
-    to_agent = str_opt "to_agent";
-    task_id = str "task_id";
-    session_id = str "session_id";
-    current_goal = str "current_goal";
-    progress_summary = str "progress_summary";
-    completed_steps = str_list "completed_steps";
-    pending_steps = str_list "pending_steps";
-    key_decisions = str_list "key_decisions";
-    assumptions = str_list "assumptions";
-    warnings = str_list "warnings";
-    unresolved_errors = str_list "unresolved_errors";
-    modified_files = str_list "modified_files";
-    created_at = float_val "created_at";
-    context_usage_percent = int_val "context_usage_percent";
-    handover_reason = str "handover_reason";
-  }
-  with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
+  let ( let* ) = Option.bind in
+  let field fields key = List.assoc_opt key fields in
+  let string_field fields key =
+    match field fields key with
+    | Some (`String value) -> Some value
+    | _ -> None
+  in
+  let string_opt_field fields key =
+    match field fields key with
+    | Some (`String value) -> Some (Some value)
+    | Some `Null -> Some None
+    | _ -> None
+  in
+  let string_list_field fields key =
+    match field fields key with
+    | Some (`List values) ->
+        let rec loop acc = function
+          | [] -> Some (List.rev acc)
+          | `String value :: rest -> loop (value :: acc) rest
+          | _ -> None
+        in
+        loop [] values
+    | _ -> None
+  in
+  let int_field fields key =
+    match field fields key with
+    | Some (`Int value) -> Some value
+    | _ -> None
+  in
+  let float_field fields key =
+    match field fields key with
+    | Some (`Float value) -> Some value
+    | Some (`Int value) -> Some (float_of_int value)
+    | _ -> None
+  in
+  match json with
+  | `Assoc fields ->
+      let* id = string_field fields "id" in
+      let* from_agent = string_field fields "from_agent" in
+      let* to_agent = string_opt_field fields "to_agent" in
+      let* task_id = string_field fields "task_id" in
+      let* session_id = string_field fields "session_id" in
+      let* current_goal = string_field fields "current_goal" in
+      let* progress_summary = string_field fields "progress_summary" in
+      let* completed_steps = string_list_field fields "completed_steps" in
+      let* pending_steps = string_list_field fields "pending_steps" in
+      let* key_decisions = string_list_field fields "key_decisions" in
+      let* assumptions = string_list_field fields "assumptions" in
+      let* warnings = string_list_field fields "warnings" in
+      let* unresolved_errors = string_list_field fields "unresolved_errors" in
+      let* modified_files = string_list_field fields "modified_files" in
+      let* created_at = float_field fields "created_at" in
+      let* context_usage_percent = int_field fields "context_usage_percent" in
+      let* handover_reason = string_field fields "handover_reason" in
+      Some
+        {
+          id;
+          from_agent;
+          to_agent;
+          task_id;
+          session_id;
+          current_goal;
+          progress_summary;
+          completed_steps;
+          pending_steps;
+          key_decisions;
+          assumptions;
+          warnings;
+          unresolved_errors;
+          modified_files;
+          created_at;
+          context_usage_percent;
+          handover_reason;
+        }
+  | _ -> None
 
 (** Storage paths *)
 let handover_dir_path (config : Workspace_utils.config) =

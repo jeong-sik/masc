@@ -120,6 +120,7 @@ let core_remote_operation_names =
         "masc_operator_digest";
         "masc_operator_action";
         "masc_operator_confirm";
+        "masc_agents";
       ])
 
 let find_property properties key =

@@ -202,10 +202,27 @@ let agent_card_action_of_string raw =
   | "refresh" -> Some Agent_card_refresh
   | _ -> None
 
-(* masc_agents / masc_agent_update handlers removed (2026-06-09): both read/
-   wrote the disk-backed .masc/agents/ registry whose producer
-   (Workspace_eio.register_agent) had zero call sites. Live agent status is
-   served by the `who` resource (Session.get_agent_statuses). *)
+(* masc_agent_update handler removed (2026-06-09): it wrote the disk-backed
+   .masc/agents/ registry whose producer (Workspace_eio.register_agent) had
+   zero call sites. masc_agents remains read-only for compatibility and is
+   backed by live workspace state. *)
+
+let handle_agents ?(tool_name = "masc_agents") ?(start_time = 0.0) ctx _args
+  : Tool_result.result
+  =
+  let agents =
+    try Workspace.get_active_agents ctx.config with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Log.Workspace.warn "masc_agents active-agent lookup failed: %s"
+        (Stdlib.Printexc.to_string exn);
+      []
+  in
+  json_ok ~tool_name ~start_time
+    (`Assoc
+      [ "count", `Int (List.length agents)
+      ; "agents", `List (List.map Masc_domain.agent_to_yojson agents)
+      ])
 
 (** Handle masc_get_metrics *)
 let handle_get_metrics ?(tool_name = "masc_get_metrics") ?(start_time = 0.0) ctx args
@@ -466,6 +483,8 @@ let handle_agent_card ?(tool_name = "masc_agent_card") ?(start_time = 0.0) ctx a
 let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   match name with
+  | "masc_agents" ->
+      Some (handle_agents ~tool_name:name ~start_time:start ctx args)
   | "masc_get_metrics" ->
       Some (handle_get_metrics ~tool_name:name ~start_time:start ctx args)
   | "masc_agent_fitness" ->
@@ -481,7 +500,7 @@ let schemas = Tool_schemas_agent.schemas
 (* ================================================================ *)
 
 let tool_spec_read_only =
-  [ "masc_agent_card" ]
+  [ "masc_agents"; "masc_agent_card" ]
 
 let () =
   List.iter

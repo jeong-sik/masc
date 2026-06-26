@@ -170,22 +170,21 @@ type autoboot_exclusion = {
 
 let autoboot_exclusion_reason config name =
   match read_meta_file_path (keeper_meta_path config name) with
-  | Ok (Some meta) ->
-    if meta.paused then Some Paused
-    else
-      (match (profile_defaults_for_config config name).autoboot_enabled with
-       | Some true -> None
-       | Some false -> Some Declarative_autoboot_disabled
-       | None ->
-         if meta.autoboot_enabled then None else Some Autoboot_disabled)
-  | Ok None ->
-    (match (profile_defaults_for_config config name).autoboot_enabled with
-     | Some false -> Some Declarative_autoboot_disabled
-     | Some true | None -> None)
   | Error _ ->
     (* Preserve existing behavior: corrupt/unreadable meta still enters the
        boot path so load_or_materialize_boot_meta can emit the precise error. *)
     None
+  | Ok meta_opt ->
+    (match meta_opt with
+     | Some meta when meta.paused -> Some Paused
+     | _ ->
+       (match (profile_defaults_for_config config name).autoboot_enabled with
+        | Some false -> Some Declarative_autoboot_disabled
+        | Some true -> None
+        | None ->
+          (match meta_opt with
+           | Some meta -> if meta.autoboot_enabled then None else Some Autoboot_disabled
+           | None -> None)))
 
 let bootable_keeper_names config =
   configured_keeper_names config

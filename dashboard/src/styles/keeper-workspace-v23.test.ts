@@ -1,10 +1,28 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { parse } from 'postcss'
 import { declarationsForSelector } from './css-test-utils'
 
 const cssPath = resolve(__dirname, 'keeper-workspace.css')
 const css = readFileSync(cssPath, 'utf-8')
+
+function baseDeclarationsForSelector(selector: string): Record<string, string> {
+  const declarations: Record<string, string> = {}
+  let found = false
+
+  parse(css).walkRules((rule) => {
+    if (rule.parent?.type === 'atrule') return
+    if (!rule.selectors.includes(selector)) return
+    found = true
+    rule.walkDecls((decl) => {
+      declarations[decl.prop] = decl.value.trim()
+    })
+  })
+
+  if (!found) throw new Error(`Selector not found: ${selector}`)
+  return declarations
+}
 
 describe('keeper-workspace v2.3 fleet surface CSS', () => {
   it('keeps new roster text surfaces from overflowing the row', () => {
@@ -13,10 +31,21 @@ describe('keeper-workspace v2.3 fleet surface CSS', () => {
     expect(gloss['text-overflow']).toBe('ellipsis')
     expect(gloss['white-space']).toBe('nowrap')
 
-    const inlineActionLabel = declarationsForSelector(css, '.kw-kp-inline-action span')
-    expect(inlineActionLabel.overflow).toBe('hidden')
-    expect(inlineActionLabel['text-overflow']).toBe('ellipsis')
-    expect(inlineActionLabel['white-space']).toBe('nowrap')
+    const rightRail = declarationsForSelector(css, '.kw-kp-right')
+    expect(rightRail['padding-right']).toBe('34px')
+    expect(rightRail['align-items']).toBe('flex-end')
+  })
+
+  it('keeps roster rows to one always discoverable command target', () => {
+    const menuButton = baseDeclarationsForSelector('.kw-kp-more')
+
+    expect(menuButton.position).toBe('absolute')
+    expect(menuButton.opacity).toBe('0.72')
+    expect(menuButton.width).toBe('26px')
+    expect(css).not.toContain('.kw-kp-chat')
+    expect(css).not.toContain('.kw-kp-inline-actions')
+    expect(css).not.toContain('.kw-kp-inline-action')
+    expect(css).not.toContain('.kw-fleet-chat')
   })
 
   it('keeps selected runtime details ellipsized inside the rail card', () => {
@@ -37,12 +66,12 @@ describe('keeper-workspace v2.3 fleet surface CSS', () => {
   })
 
   it('visibly guards fleet lifecycle actions while they are in flight', () => {
-    const inlineBusy = declarationsForSelector(css, '.kw-kp-inline-action.busy')
-    expect(inlineBusy['border-color']).toContain('34, 211, 238')
-    expect(inlineBusy.color).toBe('#cffafe')
-
     const railDisabled = declarationsForSelector(css, '.kw-fleet-action:disabled')
     expect(railDisabled.cursor).toBe('wait')
     expect(railDisabled.opacity).toBe('0.68')
+
+    const railBusy = declarationsForSelector(css, '.kw-fleet-action.busy')
+    expect(railBusy['border-color']).toContain('34, 211, 238')
+    expect(railBusy.color).toBe('#cffafe')
   })
 })

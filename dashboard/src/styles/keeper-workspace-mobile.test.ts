@@ -94,6 +94,7 @@ function mediaRuleDeclsIn(source: string, selector: string, maxWidth: string): R
 const mediaRuleDecls = (selector: string, maxWidth: string) => mediaRuleDeclsIn(css, selector, maxWidth)
 const mobileRuleDecls = (selector: string) => mediaRuleDecls(selector, KEEPER_MOBILE_PANE_BREAKPOINT)
 const copilotRuleDecls = (selector: string, maxWidth: string) => mediaRuleDeclsIn(copilotCss, selector, maxWidth)
+const opsClusterBaseRuleDecls = (selector: string) => baseRuleDeclsIn(opsClusterCss, selector)
 const opsClusterRuleDecls = (selector: string, maxWidth: string) => mediaRuleDeclsIn(opsClusterCss, selector, maxWidth)
 const keeperV2CraftMobileRuleDecls = (selector: string) =>
   mediaRuleDeclsIn(keeperV2CraftCss, selector, KEEPER_MOBILE_PANE_BREAKPOINT)
@@ -170,6 +171,11 @@ describe('keeper workspace v2 (26) mobile contract', () => {
   })
 
   it('keeps remounted operational topbar chrome out of mobile and keeper tablet edges', () => {
+    expect(opsClusterBaseRuleDecls('.v2-top-ops > .emergency-stop-control')['white-space']).toBe('nowrap')
+    expect(opsClusterBaseRuleDecls('.v2-top-ops > .emergency-stop-control')['min-height']).toBe('28px')
+    expect(opsClusterBaseRuleDecls('.v2-top-ops > .emergency-stop-control > span')['white-space'])
+      .toBe('nowrap')
+
     expect(opsClusterRuleDecls('.v2-app[data-mobile="1"] .v2-top-ops', SHELL_MOBILE_CHROME_BREAKPOINT).display)
       .toBe('none')
     expect(

@@ -2,7 +2,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
-import { App, shouldShowCopilotFab, shouldSuppressFloatingChrome, shouldUseCompactDashboardChrome } from './app'
+import {
+  App,
+  shouldBootstrapCommandPaletteShortcut,
+  shouldShowCopilotFab,
+  shouldSuppressFloatingChrome,
+  shouldUseCompactDashboardChrome,
+} from './app'
 import { route } from './router'
 import { executionLoaded, keepers, shellCounts, shellRuntimeResolution } from './store'
 import { activeKeeperName } from './keeper-state'
@@ -369,6 +375,41 @@ describe('App v2 header chrome', () => {
     await waitFor(() => {
       expect(container.querySelector('nav.v2-nav')).not.toBeNull()
     })
+  })
+
+  it('keeps the command palette chunk out of the initial dashboard render', () => {
+    renderApp()
+
+    expect(container.querySelector('ninja-keys')).toBeNull()
+  })
+})
+
+describe('shouldBootstrapCommandPaletteShortcut', () => {
+  it('claims the first Cmd/Ctrl+K only until the palette is mounted', () => {
+    expect(shouldBootstrapCommandPaletteShortcut({
+      altKey: false,
+      ctrlKey: true,
+      key: 'k',
+      metaKey: false,
+    }, false)).toBe(true)
+    expect(shouldBootstrapCommandPaletteShortcut({
+      altKey: false,
+      ctrlKey: true,
+      key: 'k',
+      metaKey: false,
+    }, true)).toBe(false)
+    expect(shouldBootstrapCommandPaletteShortcut({
+      altKey: true,
+      ctrlKey: true,
+      key: 'k',
+      metaKey: false,
+    }, false)).toBe(false)
+    expect(shouldBootstrapCommandPaletteShortcut({
+      altKey: false,
+      ctrlKey: true,
+      key: 'j',
+      metaKey: false,
+    }, false)).toBe(false)
   })
 })
 

@@ -219,6 +219,9 @@ let write_goal_task_links_result ?previous_links config links =
            "write_goal_task_links_result: recovery rollback failed after write failure: %s"
            rollback_msg)
   in
+  (* Write the authoritative primary first so a failed write never leaves the
+     recovery copy ahead of the primary. When the caller provides the previous
+     link set, we also roll both files back to that known-good state. *)
   match write_primary () with
   | Error _ as error ->
     rollback ();

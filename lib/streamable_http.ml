@@ -198,10 +198,8 @@ let is_streamable_request (request : Httpun.Request.t) =
   let headers = request.headers in
   let has_mcp_header = Httpun.Headers.get headers "mcp-session-id" <> None in
   let content_type = Httpun.Headers.get headers "content-type" in
-  let is_json = match content_type with
-    | Some ct -> String.lowercase_ascii ct |> fun s ->
-        String.sub s 0 (min 16 (String.length s)) = "application/json"
-    | None -> false
+  let is_json =
+    Mcp_transport_protocol.Http_negotiation.is_json_content_type content_type
   in
   has_mcp_header || is_json
 

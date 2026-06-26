@@ -215,6 +215,45 @@ let test_with_session_header () =
   Alcotest.(check string) "header key" "mcp-session-id" key;
   Alcotest.(check string) "header value" session.id value
 
+let request_with_headers headers =
+  Httpun.Request.create
+    ~headers:(Httpun.Headers.of_list headers)
+    `POST
+    "/mcp"
+
+let check_streamable_request label expected headers =
+  Alcotest.(check bool)
+    label
+    expected
+    (SH.is_streamable_request (request_with_headers headers))
+
+let test_is_streamable_request_json_content_type () =
+  check_streamable_request
+    "json content-type"
+    true
+    [ "content-type", "application/json" ]
+
+let test_is_streamable_request_json_content_type_params () =
+  check_streamable_request
+    "json content-type params"
+    true
+    [ "content-type", "application/json; charset=utf-8" ]
+
+let test_is_streamable_request_rejects_jsonp_content_type () =
+  check_streamable_request
+    "jsonp content-type"
+    false
+    [ "content-type", "application/jsonp" ]
+
+let test_is_streamable_request_rejects_wildcard_content_type () =
+  check_streamable_request "wildcard content-type" false [ "content-type", "*/*" ]
+
+let test_is_streamable_request_accepts_session_header () =
+  check_streamable_request
+    "session header"
+    true
+    [ "mcp-session-id", "session-1"; "content-type", "text/plain" ]
+
 let () =
   (* Initialize RNG for session ID generation *)
   Mirage_crypto_rng_unix.use_default ();
@@ -249,5 +288,17 @@ let () =
     ];
     "Headers", [
       Alcotest.test_case "with_session_header" `Quick test_with_session_header;
+    ];
+    "Request classification", [
+      Alcotest.test_case "json content-type" `Quick
+        test_is_streamable_request_json_content_type;
+      Alcotest.test_case "json content-type params" `Quick
+        test_is_streamable_request_json_content_type_params;
+      Alcotest.test_case "reject jsonp content-type" `Quick
+        test_is_streamable_request_rejects_jsonp_content_type;
+      Alcotest.test_case "reject wildcard content-type" `Quick
+        test_is_streamable_request_rejects_wildcard_content_type;
+      Alcotest.test_case "session header" `Quick
+        test_is_streamable_request_accepts_session_header;
     ];
   ]

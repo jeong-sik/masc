@@ -115,14 +115,12 @@ let jsonrpc_extract_id = function
   | _ -> `Null
 
 let jsonrpc_dispatch_request (handler : request_handler) request =
-  try
-    (handler request, false)
+  try handler request
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    (jsonrpc_error_response
+    jsonrpc_error_response
        ~id:(jsonrpc_extract_id request)
        ~code:Mcp_error_code.Internal_error
-       ~message:(Log.Server.error "streamable_http dispatch: %s" (Printexc.to_string exn); "Internal error"),
-     true)
+       ~message:(Log.Server.error "streamable_http dispatch: %s" (Printexc.to_string exn); "Internal error")
 
 (** Handle POST /mcp - JSON-RPC request processing *)
 let handle_post ?session_id ~body ?request_handler () =
@@ -154,23 +152,22 @@ let handle_post ?session_id ~body ?request_handler () =
         None )
 
   | Ok json ->
-      (* Find session if session_id provided. Do not touch it yet: a malformed
-         or crashing request should not refresh the activity window. *)
+      (* A syntactically valid request body on an existing streamable session
+         proves client activity even if JSON-RPC validation or handler dispatch
+         later returns an error response. Malformed JSON does not reach here and
+         therefore does not refresh the activity window. *)
       let session = match session_id with
         | Some id -> Session.find id
         | None -> None
       in
+      Option.iter Session.touch session;
 
       (* Streamable HTTP transport no longer accepts JSON-RPC batches. *)
       if jsonrpc_is_batch json then
         (Error_response (400, "JSON-RPC batch requests are not supported"), session)
       else if jsonrpc_is_valid_request json then
         (* Single request - delegate to MCP handler *)
-        let response, handler_raised = jsonrpc_dispatch_request request_handler json in
-        (* Only refresh last_seen when the handler returned normally. A handler
-           exception produces an internal-error response but must not keep the
-           session alive. *)
-        if not handler_raised then Option.iter Session.touch session;
+        let response = jsonrpc_dispatch_request request_handler json in
         (Json_response response, session)
       else
         (Error_response (400, "Invalid JSON-RPC request"), session)

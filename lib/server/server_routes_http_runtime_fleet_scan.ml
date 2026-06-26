@@ -733,15 +733,12 @@ let empty_active_task_owner_fiber_scan =
     active_task_owner_scan_errors = [];
   }
 
+let compare_string_pair (left_name, left_detail) (right_name, right_detail) =
+  let cmp = String.compare left_name right_name in
+  if cmp <> 0 then cmp else String.compare left_detail right_detail
+
 let compare_active_task_owner_without_executable_fiber left right =
-  let compare_string_opt left right =
-    match (left, right) with
-    | None, None -> 0
-    | None, Some _ -> -1
-    | Some _, None -> 1
-    | Some left, Some right -> String.compare left right
-  in
-  let cmp = compare_string_opt left.keeper_name right.keeper_name in
+  let cmp = Option.compare String.compare left.keeper_name right.keeper_name in
   if cmp <> 0 then cmp
   else
     let cmp = String.compare left.agent_name right.agent_name in
@@ -762,6 +759,7 @@ let active_task_owner_without_executable_fiber_json row =
   `Assoc
     [
       ("keeper", Json_util.string_opt_to_json row.keeper_name);
+      (* Legacy alias retained for existing fleet-safety consumers. *)
       ("name", Json_util.string_opt_to_json row.keeper_name);
       ("agent_name", `String row.agent_name);
       ("task_id", `String row.task_id);
@@ -770,19 +768,48 @@ let active_task_owner_without_executable_fiber_json row =
       ("action", `String action);
     ]
 
+type keeper_agent_binding_scan = {
+  enabled_agent_bindings : (string * string) list;
+  disabled_agent_names : string list;
+  binding_read_errors : (string * string) list;
+}
+
+let empty_keeper_agent_binding_scan =
+  { enabled_agent_bindings = []; disabled_agent_names = []; binding_read_errors = [] }
+
 let keeper_agent_bindings config =
   Keeper_meta_store.configured_keeper_names config
   |> sorted_unique_strings
   |> List.fold_left
-       (fun (bindings, read_errors) name ->
+       (fun scan name ->
          match Keeper_meta_store.read_meta config name with
          | Ok (Some meta) ->
              if effective_autoboot_enabled config name meta then
-               ((meta.agent_name, meta.name) :: bindings, read_errors)
-             else (bindings, read_errors)
-         | Ok None -> (bindings, read_errors)
-         | Error err -> (bindings, (name, err) :: read_errors))
-       ([], [])
+               {
+                 scan with
+                 enabled_agent_bindings =
+                   (meta.agent_name, meta.name) :: scan.enabled_agent_bindings;
+               }
+             else
+               {
+                 scan with
+                 disabled_agent_names = meta.agent_name :: scan.disabled_agent_names;
+               }
+         | Ok None -> scan
+         | Error err ->
+             {
+               scan with
+               binding_read_errors = (name, err) :: scan.binding_read_errors;
+             })
+       empty_keeper_agent_binding_scan
+  |> fun scan ->
+  {
+    enabled_agent_bindings =
+      List.sort_uniq compare_string_pair scan.enabled_agent_bindings;
+    disabled_agent_names = sorted_unique_strings scan.disabled_agent_names;
+    binding_read_errors =
+      List.sort_uniq compare_string_pair scan.binding_read_errors;
+  }
 
 let keeper_names_for_agent agent_bindings assignee =
   agent_bindings
@@ -792,7 +819,9 @@ let keeper_names_for_agent agent_bindings assignee =
 
 let active_task_owner_fiber_scan config ~executable_names =
   let executable_set = string_set_of_list executable_names in
-  let agent_bindings, meta_read_errors = keeper_agent_bindings config in
+  let binding_scan = keeper_agent_bindings config in
+  let agent_bindings = binding_scan.enabled_agent_bindings in
+  let meta_read_errors = binding_scan.binding_read_errors in
   match Workspace.read_backlog_r config with
   | Error err ->
       {
@@ -815,6 +844,10 @@ let active_task_owner_fiber_scan config ~executable_names =
                  then []
                  else (
                    match keeper_names with
+                   | []
+                     when List.mem assignee binding_scan.disabled_agent_names
+                          || meta_read_errors <> [] ->
+                       []
                    | [] ->
                        [
                          {
@@ -838,13 +871,30 @@ let active_task_owner_fiber_scan config ~executable_names =
       in
       {
         active_task_owner_without_executable_fibers = rows;
-        active_task_owner_scan_errors =
-          List.sort_uniq
-            (fun (left_name, left_err) (right_name, right_err) ->
-              let cmp = String.compare left_name right_name in
-              if cmp <> 0 then cmp else String.compare left_err right_err)
-            meta_read_errors;
+        active_task_owner_scan_errors = meta_read_errors;
       }
+
+let active_task_owner_blocked_name row =
+  match row.keeper_name with
+  | Some keeper_name -> keeper_name
+  | None -> row.agent_name
+
+let active_task_owner_blocked_detail_json row =
+  let reason =
+    match row.keeper_name with
+    | Some _ -> Not_running
+    | None -> No_keeper_binding
+  in
+  `Assoc
+    [
+      ("keeper", Json_util.string_opt_to_json row.keeper_name);
+      ("name", Json_util.string_opt_to_json row.keeper_name);
+      ("agent_name", `String row.agent_name);
+      ("task_id", `String row.task_id);
+      ("task_status", `String row.task_status);
+      ("reason", `String (blocked_keeper_reason_label reason));
+      ("action", `String (blocked_keeper_action reason));
+    ]
 
 let keeper_fleet_safety_health_json
     ?bootable_names:bootable_names_override
@@ -915,6 +965,11 @@ let keeper_fleet_safety_health_json
     |> List.filter_map (fun row -> row.keeper_name)
     |> sorted_unique_strings
   in
+  let active_task_owner_blocked_names =
+    active_task_owner_scan.active_task_owner_without_executable_fibers
+    |> List.map active_task_owner_blocked_name
+    |> sorted_unique_strings
+  in
   let active_task_owner_without_executable_fiber_count =
     List.length active_task_owner_scan.active_task_owner_without_executable_fibers
   in
@@ -940,6 +995,14 @@ let keeper_fleet_safety_health_json
   in
   let reaction_capacity_below_target =
     target_count > 0 && reaction_capacity_shortfall_count > 0
+  in
+  let active_task_owner_is_selected_blocker =
+    active_task_owner_without_executable_fiber
+    && not
+         (no_executable_keeper_fibers
+          || no_running_fibers
+          || low_running_fiber_margin
+          || reaction_capacity_below_target)
   in
   let executable_reaction_capacity_shortfall_count =
     max 0 (target_count - phase_counts.executable)
@@ -981,16 +1044,14 @@ let keeper_fleet_safety_health_json
     if no_executable_keeper_fibers then executable_reaction_capacity_shortfall_count
     else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target
     then reaction_capacity_shortfall_count
-    else if active_task_owner_without_executable_fiber
-    then active_task_owner_without_executable_fiber_count
+    else if active_task_owner_is_selected_blocker then active_task_owner_without_executable_fiber_count
     else 0
   in
   let blocked_keeper_names =
     if no_executable_keeper_fibers then names_not_in executable_names
     else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target
     then names_not_in (running_names @ recovering_names)
-    else if active_task_owner_without_executable_fiber
-    then active_task_owner_without_executable_fiber_names
+    else if active_task_owner_is_selected_blocker then active_task_owner_blocked_names
     else []
   in
   let active_capacity_names =
@@ -1010,17 +1071,21 @@ let keeper_fleet_safety_health_json
     autoboot_scan.read_errors |> List.map fst |> string_set_of_list
   in
   let blocked_keeper_reasons =
-    blocked_keeper_names
-    |> List.map
-         (fun name ->
-           blocked_keeper_detail_json
-             ?base_path:runtime_base_path
-             ?phase:(phase_name name)
-             ~bootable_set
-             ~capacity_set
-             ~paused_set
-             ~read_error_set
-             name)
+    if active_task_owner_is_selected_blocker then
+      active_task_owner_scan.active_task_owner_without_executable_fibers
+      |> List.map active_task_owner_blocked_detail_json
+    else
+      blocked_keeper_names
+      |> List.map
+           (fun name ->
+             blocked_keeper_detail_json
+               ?base_path:runtime_base_path
+               ?phase:(phase_name name)
+               ~bootable_set
+               ~capacity_set
+               ~paused_set
+               ~read_error_set
+               name)
   in
   let blocker =
     if no_executable_keeper_fibers then Some "no_executable_keeper_fibers"

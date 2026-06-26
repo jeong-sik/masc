@@ -287,9 +287,11 @@ val run :
 (** [run ~sw ~net ~clock config request_handler] binds to
     [config.host:config.port] with [Eio.Net.listen
     ~backlog:config.max_connections], then accepts in a loop.
-    Each accepted connection is handled in a forked fiber under
-    its own switch; flow close is registered via
-    [Eio.Switch.on_release].
+    Each accepted connection is handled in a new fiber via
+    [Eio.Net.accept_fork], which closes the flow when the handler
+    returns; the per-connection handler runs under its own switch
+    so internal H2 reader/writer fibers are released with the
+    connection.
 
     Backoff: per-iteration accept errors trigger exponential
     backoff (50 ms initial, 1 s ceiling) via [Eio.Time.sleep

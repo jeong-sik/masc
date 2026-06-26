@@ -281,7 +281,8 @@ let buffer_event event_id event_str =
     let timestamp = Time_compat.now () in
     let next = (event_id, event_str, timestamp) :: lst in
     let trimmed =
-      if List.length next > max_buffer_size then take max_buffer_size next
+      if List.compare_length_with next max_buffer_size > 0 then
+        take max_buffer_size next
       else next
     in
     { next_state = trimmed; result = () })

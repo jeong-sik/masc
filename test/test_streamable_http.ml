@@ -110,6 +110,96 @@ let test_handle_post_handler_dispatch () =
   | _ ->
       Alcotest.fail "expected Json_response"
 
+let session_with_stale_seen () =
+  let session = SH.Session.create ~transport:SH.Streamable_HTTP in
+  let before = Atomic.get session.last_seen in
+  Time_compat.sleep 0.01;
+  (session, before)
+
+let check_session_touched label session before =
+  Alcotest.(check bool) label true (Atomic.get session.last_seen > before)
+
+let check_session_not_touched label session before =
+  Alcotest.(check bool) label true (Atomic.get session.last_seen = before)
+
+let test_handle_post_session_touch_success () =
+  let session, before = session_with_stale_seen () in
+  let handler _ =
+    `Assoc
+      [
+        ("jsonrpc", `String "2.0");
+        ("id", `Int 7);
+        ("result", `Assoc [("ok", `Bool true)]);
+      ]
+  in
+  let response, returned_session =
+    SH.handle_post ~session_id:session.id
+      ~body:{|{"jsonrpc":"2.0","method":"ping","id":7}|}
+      ~request_handler:handler
+      ()
+  in
+  (match response with
+   | SH.Json_response _ -> ()
+   | _ -> Alcotest.fail "expected Json_response");
+  Alcotest.(check bool) "session returned" true (Option.is_some returned_session);
+  check_session_touched "valid dispatch touches session" session before
+
+let test_handle_post_session_touch_handler_exception () =
+  let session, before = session_with_stale_seen () in
+  let handler _ = failwith "boom" in
+  let response, returned_session =
+    SH.handle_post ~session_id:session.id
+      ~body:{|{"jsonrpc":"2.0","method":"explode","id":8}|}
+      ~request_handler:handler
+      ()
+  in
+  (match response with
+   | SH.Json_response json ->
+       (match json with
+        | `Assoc fields ->
+            Alcotest.(check bool) "internal error returned" true
+              (List.mem_assoc "error" fields)
+        | _ -> Alcotest.fail "expected JSON-RPC error object")
+   | _ -> Alcotest.fail "expected Json_response");
+  Alcotest.(check bool) "session returned" true (Option.is_some returned_session);
+  check_session_touched "handler exception still touches session" session before
+
+let test_handle_post_session_touch_batch () =
+  let session, before = session_with_stale_seen () in
+  let response, returned_session =
+    SH.handle_post ~session_id:session.id
+      ~body:{|[{"jsonrpc":"2.0","method":"a","id":1}]|}
+      ()
+  in
+  (match response with
+   | SH.Error_response (400, _) -> ()
+   | _ -> Alcotest.fail "expected batch 400");
+  Alcotest.(check bool) "session returned" true (Option.is_some returned_session);
+  check_session_touched "valid JSON batch touches session" session before
+
+let test_handle_post_session_touch_invalid_request () =
+  let session, before = session_with_stale_seen () in
+  let response, returned_session =
+    SH.handle_post ~session_id:session.id ~body:{|{"jsonrpc":"2.0","id":9}|} ()
+  in
+  (match response with
+   | SH.Error_response (400, _) -> ()
+   | _ -> Alcotest.fail "expected invalid request 400");
+  Alcotest.(check bool) "session returned" true (Option.is_some returned_session);
+  check_session_touched "valid JSON invalid request touches session" session before
+
+let test_handle_post_session_touch_malformed_json () =
+  let session, before = session_with_stale_seen () in
+  let response, returned_session =
+    SH.handle_post ~session_id:session.id ~body:"not valid json" ()
+  in
+  (match response with
+   | SH.Error_response (400, _) -> ()
+   | _ -> Alcotest.fail "expected malformed JSON 400");
+  Alcotest.(check bool) "session not returned before parse" true
+    (Option.is_none returned_session);
+  check_session_not_touched "malformed JSON does not touch session" session before
+
 let test_handle_get () =
   match SH.handle_get () with
   | Ok session ->
@@ -143,6 +233,16 @@ let () =
       Alcotest.test_case "invalid json" `Quick test_handle_post_invalid_json;
       Alcotest.test_case "batch" `Quick test_handle_post_batch;
       Alcotest.test_case "handler dispatch" `Quick test_handle_post_handler_dispatch;
+      Alcotest.test_case "session touch success" `Quick
+        test_handle_post_session_touch_success;
+      Alcotest.test_case "session touch handler exception" `Quick
+        test_handle_post_session_touch_handler_exception;
+      Alcotest.test_case "session touch batch" `Quick
+        test_handle_post_session_touch_batch;
+      Alcotest.test_case "session touch invalid request" `Quick
+        test_handle_post_session_touch_invalid_request;
+      Alcotest.test_case "session touch malformed json" `Quick
+        test_handle_post_session_touch_malformed_json;
     ];
     "Handle GET", [
       Alcotest.test_case "create session" `Quick test_handle_get;

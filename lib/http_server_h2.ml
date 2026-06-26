@@ -307,19 +307,14 @@ let run ~sw ~net ~clock config request_handler =
 
   let rec accept_loop () =
     try
-      (try
-        let flow, client_addr = Eio.Net.accept ~sw socket in
-        disable_nagle flow;
-        reset_backoff ();
-        Eio.Fiber.fork ~sw (fun () ->
+      Eio.Net.accept_fork ~sw socket
+        ~on_error:(fun exn ->
+          if not (is_cancelled exn) then
+            Log.Http.error "[%s] connection handler error: %s"
+              listener_tag (Printexc.to_string exn))
+        (fun flow client_addr ->
           Eio.Switch.run (fun conn_sw ->
-            Eio.Switch.on_release conn_sw (fun () ->
-              try Eio.Flow.close flow with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                Log.Misc.error "[%s] flow close failed: %s"
-                  listener_tag (Printexc.to_string exn)
-            );
+            disable_nagle flow;
             try
               H2_eio.Server.create_connection_handler
                 ~sw:conn_sw
@@ -333,24 +328,16 @@ let run ~sw ~net ~clock config request_handler =
               Log.Http.error "[%s] connection error: %s"
                 listener_tag (Printexc.to_string exn)
           )
-        )
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        if is_cancelled exn then raise exn;
-        let delay = !backoff_s in
-        Log.Http.error "[%s] accept error: %s (backoff %.2fs)"
-          listener_tag (Printexc.to_string exn) delay;
-        Eio.Time.sleep clock delay;
-        bump_backoff ());
+        );
+      reset_backoff ();
       accept_loop ()
     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      if is_cancelled exn then ()
-      else begin
-        let delay = !backoff_s in
-        Log.Http.error "[%s] accept loop error: %s (backoff %.2fs)"
-          listener_tag (Printexc.to_string exn) delay;
-        Eio.Time.sleep clock delay;
-        bump_backoff ();
-        accept_loop ()
-      end
+      if is_cancelled exn then raise exn;
+      let delay = !backoff_s in
+      Log.Http.error "[%s] accept error: %s (backoff %.2fs)"
+        listener_tag (Printexc.to_string exn) delay;
+      Eio.Time.sleep clock delay;
+      bump_backoff ();
+      accept_loop ()
   in
   accept_loop ()

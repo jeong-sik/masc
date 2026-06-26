@@ -130,69 +130,41 @@ let json_of_output raw =
     | `String inner -> try_parse inner
     | _ -> None
   in
-  let strip_markdown_fences s =
+  let whole_markdown_fence_body s =
     let lines = String.split_on_char '\n' s in
+    let is_blank line = String.equal (String.trim line) "" in
     let is_fence line = String.starts_with ~prefix:"```" (String.trim line) in
-    let rec find_open i =
-      if i >= List.length lines
-      then None
-      else if is_fence (List.nth lines i)
-      then Some i
-      else find_open (i + 1)
+    let rec drop_blanks = function
+      | line :: rest when is_blank line -> drop_blanks rest
+      | lines -> lines
     in
-    let rec find_close start i =
-      if i >= List.length lines
-      then None
-      else if i > start && is_fence (List.nth lines i)
-      then Some i
-      else find_close start (i + 1)
+    let rec rev_drop_blanks = function
+      | line :: rest when is_blank line -> rev_drop_blanks rest
+      | lines -> lines
     in
-    match find_open 0 with
-    | None -> s
-    | Some open_idx ->
-      (match find_close open_idx (open_idx + 1) with
-       | None -> s
-       | Some close_idx ->
-         let between =
-           List.filteri (fun idx _ -> idx > open_idx && idx < close_idx) lines
-         in
-         String.concat "\n" between |> String.trim)
+    match drop_blanks lines |> List.rev |> rev_drop_blanks |> List.rev with
+    | open_line :: body_rev when is_fence open_line ->
+      (match List.rev body_rev with
+       | close_line :: body_lines_rev when is_fence close_line ->
+         Some (String.concat "\n" (List.rev body_lines_rev) |> String.trim)
+       | [] | _ :: _ -> None)
+    | [] | _ :: _ -> None
   in
-  let from_parsing =
-    List.find_map
-      (fun candidate ->
-         if String.equal candidate ""
-         then None
-         else
-           Option.bind (try_parse candidate) (fun json ->
-             match unwrap_string json with
-             | Some inner -> Some inner
-             | None -> Some json))
-      [ raw; strip_markdown_fences raw ]
+  let candidates =
+    match whole_markdown_fence_body raw with
+    | None -> [ raw ]
+    | Some fenced -> [ raw; fenced ]
   in
-  match from_parsing with
-  | Some _ as result -> result
-  | None ->
-    (* Fallback: extract the first {...} substring and try to parse it. This
-       recovers from leading/trailing prose that prevented the fenced-path from
-       isolating the JSON object. *)
-    let len = String.length raw in
-    let rec find_from i ch =
-      if i >= len then None else if Char.equal raw.[i] ch then Some i else find_from (i + 1) ch
-    in
-    let rec find_from_right i ch =
-      if i < 0 then None else if Char.equal raw.[i] ch then Some i else find_from_right (i - 1) ch
-    in
-    (match find_from 0 '{', find_from_right (len - 1) '}' with
-     | Some start, Some stop when start < stop ->
-       let candidate = String.sub raw start (stop - start + 1) in
-       (match try_parse candidate with
-        | Some json ->
-          (match unwrap_string json with
+  List.find_map
+    (fun candidate ->
+       if String.equal candidate ""
+       then None
+       else
+         Option.bind (try_parse candidate) (fun json ->
+           match unwrap_string json with
            | Some inner -> Some inner
-           | None -> Some json)
-        | None -> None)
-     | _ -> None)
+           | None -> Some json))
+    candidates
 ;;
 
 let claim_source ~trace_id turn tool_call_id =

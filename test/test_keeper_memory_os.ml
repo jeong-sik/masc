@@ -629,7 +629,7 @@ let test_librarian_accepts_wrapped_json_output () =
   let json = valid_librarian_output () |> Yojson.Safe.to_string in
   let cases =
     [ "fenced", Printf.sprintf "```json\n%s\n```" json
-    ; "prefixed", Printf.sprintf "Here is the extracted JSON:\n%s" json
+    ; "json string", Yojson.Safe.to_string (`String json)
     ]
   in
   List.iter

@@ -253,12 +253,32 @@ let test_cadence_step_keyed () =
     (("t2", 3), true)
     (R.cadence_step_keyed ~cadence:3 ~current_trace:"t2" ~prior:(Some ("t1", 2)))
 
-(* Tolerant parsing for real-world librarian provider drift. *)
+(* Strict parsing with bounded compatibility for real-world librarian provider
+   drift. We accept exact JSON, exact fenced JSON, and JSON-string wrapping, but
+   prose-wrapped or embedded JSON must fall into the diagnostic fallback path
+   instead of being accepted as a structured episode. *)
 
 let parse_ep raw =
   let inp = { Lib.trace_id = "tolerant-t"; generation = 0; messages = [] } in
   Lib.episode_of_output ~now:1_000_000.0 ~generation:inp.generation inp raw
 ;;
+
+let minimal_episode_json ?(claim = "c") () =
+  `Assoc
+    [ "episode_summary", `String "s"
+    ; ( "claims"
+      , `List
+          [ `Assoc
+              [ "claim", `String claim
+              ; "category", `String "fact"
+              ; "source_turn", `Int 0
+              ]
+          ] )
+    ; "open_items", `List []
+    ; "constraints", `List []
+    ; "preserved_tool_refs", `List []
+    ]
+  |> Yojson.Safe.to_string
 
 let test_parses_markdown_wrapped () =
   let raw =
@@ -273,19 +293,18 @@ let test_parses_markdown_wrapped () =
   | None -> Alcotest.fail "markdown-wrapped JSON should parse"
 ;;
 
-let test_parses_prose_wrapped () =
+let test_rejects_prose_wrapped_json () =
+  let raw = "Here is the episode you requested:\n" ^ minimal_episode_json () in
+  check bool "prose before JSON rejected" true (Option.is_none (parse_ep raw));
+  let raw = minimal_episode_json () ^ "\nDone." in
+  check bool "prose after JSON rejected" true (Option.is_none (parse_ep raw));
   let raw =
     "Here is the episode you requested:\n\
-     ```json\n\
-     {\"episode_summary\":\"s\",\"claims\":[],\"open_items\":[],\"constraints\":[],\"preserved_tool_refs\":[]}\n\
-     ```\n\
-     Let me know if you need more."
+     ```json\n"
+    ^ minimal_episode_json ()
+    ^ "\n```\nDone."
   in
-  match parse_ep raw with
-  | Some ep ->
-    check string "episode_summary" "s" ep.episode_summary;
-    check int "claims count" 0 (List.length ep.claims)
-  | None -> Alcotest.fail "prose-wrapped JSON should parse"
+  check bool "prose around fenced JSON rejected" true (Option.is_none (parse_ep raw))
 ;;
 
 let test_parses_json_string_wrapping () =
@@ -310,6 +329,36 @@ let test_parses_string_source_turn () =
      | [ claim ] -> check int "source_turn coerced" 3 claim.source.turn
      | _ -> Alcotest.fail "expected exactly one claim")
   | None -> Alcotest.fail "string source_turn should coerce to int"
+;;
+
+let test_rejects_multiple_json_objects () =
+  let raw = minimal_episode_json () ^ "\n" ^ minimal_episode_json ~claim:"d" () in
+  check bool "multiple JSON objects rejected" true (Option.is_none (parse_ep raw))
+;;
+
+let test_rejects_model_thinking_leak () =
+  let raw =
+    "<thinking>I should output JSON now.</thinking>\n" ^ minimal_episode_json ()
+  in
+  check bool "thinking leak before JSON rejected" true (Option.is_none (parse_ep raw))
+;;
+
+let test_rejects_malformed_json () =
+  let raw =
+    {|{"episode_summary":"s","claims":[{"claim":"c","category":"fact","source_turn":0}],|}
+  in
+  check bool "malformed JSON rejected" true (Option.is_none (parse_ep raw))
+;;
+
+let test_parses_nested_braces_inside_string () =
+  let raw = minimal_episode_json ~claim:"Keep literal { braces } in memory" () in
+  match parse_ep raw with
+  | Some ep ->
+    (match ep.claims with
+     | [ claim ] ->
+       check string "claim with braces parsed" "Keep literal { braces } in memory" claim.claim
+     | claims -> Alcotest.failf "expected one claim, got %d" (List.length claims))
+  | None -> Alcotest.fail "valid JSON with braces in a string should parse"
 ;;
 
 let test_missing_lists_default_to_empty () =
@@ -380,12 +429,17 @@ let () =
             test_cadence_table_bounded_under_trace_rotation;
           test_case "cadence_step_keyed rollover decision" `Quick test_cadence_step_keyed;
         ] );
-      ( "tolerant_parsing",
+      ( "strict_parsing",
         [
           test_case "parses markdown-wrapped JSON" `Quick test_parses_markdown_wrapped;
-          test_case "parses prose-wrapped JSON" `Quick test_parses_prose_wrapped;
+          test_case "rejects prose-wrapped JSON" `Quick test_rejects_prose_wrapped_json;
           test_case "parses JSON-string-wrapped object" `Quick test_parses_json_string_wrapping;
           test_case "coerces string source_turn" `Quick test_parses_string_source_turn;
+          test_case "rejects multiple JSON objects" `Quick test_rejects_multiple_json_objects;
+          test_case "rejects model thinking leak" `Quick test_rejects_model_thinking_leak;
+          test_case "rejects malformed JSON" `Quick test_rejects_malformed_json;
+          test_case "parses nested braces inside string" `Quick
+            test_parses_nested_braces_inside_string;
           test_case "missing lists default to empty" `Quick test_missing_lists_default_to_empty;
           test_case "rejects invalid source_turn string" `Quick test_invalid_source_turn_string_rejected;
           test_case "retry nudge matches schema" `Quick test_retry_nudge_matches_schema;

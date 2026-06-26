@@ -357,13 +357,28 @@ let message_create_payload
     ~id ~channel_id ~author_id ?guild_id ?username ?global_name
     ?message_reference_channel_id ?message_reference_message_id
     ?referenced_message_author_id ?author_bot ?webhook_id
+    ?(mentions = [])
     ~content ~mention_ids ()
     : Yojson.Safe.t =
-  let mentions =
-    `List
-      (List.map
-         (fun uid -> `Assoc [ ("id", `String uid) ])
-         mention_ids)
+  let mentions_json =
+    if mentions <> [] then
+      `List
+        (List.map
+           (fun (uid, uname, gname) ->
+             `Assoc
+               ([ ("id", `String uid) ]
+                @ (match uname with
+                  | Some u -> [ ("username", `String u) ]
+                  | None -> [])
+                @ match gname with
+                | Some g -> [ ("global_name", `String g) ]
+                | None -> []))
+           mentions)
+    else
+      `List
+        (List.map
+           (fun uid -> `Assoc [ ("id", `String uid) ])
+           mention_ids)
   in
   let author_fields =
     ("id", `String author_id)
@@ -382,7 +397,7 @@ let message_create_payload
     ; ("channel_id", `String channel_id)
     ; ("author", `Assoc author_fields)
     ; ("content", `String content)
-    ; ("mentions", mentions)
+    ; ("mentions", mentions_json)
     ]
     @ (match webhook_id with
        | Some w -> [ ("webhook_id", `String w) ]
@@ -588,6 +603,84 @@ let test_decode_message_create_reply_ping_is_not_explicit_mention () =
         }) ->
       ()
   | Ok _ -> fail "expected reply ping metadata without explicit mention"
+  | Error msg -> fail msg
+
+(* Discord mention -> display-name resolution. *)
+
+let test_decode_message_create_resolves_mention_global_name () =
+  let payload =
+    message_create_payload
+      ~id:"MSG4"
+      ~channel_id:"CH1"
+      ~author_id:"USER1"
+      ~content:"hello <@ALICE>"
+      ~mention_ids:[ "ALICE" ]
+      ~mentions:[ ("ALICE", Some "alice_handle", Some "Alice") ]
+      ()
+  in
+  match
+    S.decode_dispatch
+      ~bot_user_id:(Some "BOT")
+      ~event_name:"MESSAGE_CREATE"
+      ~payload
+  with
+  | Ok
+      (S.Message_create
+        { content = "hello @Alice"
+        ; mentions_bot = false
+        ; explicit_mentions_bot = false
+        ; _
+        }) ->
+      ()
+  | Ok _ -> fail "expected resolved mention using global_name"
+  | Error msg -> fail msg
+
+let test_decode_message_create_resolves_mention_username_fallback () =
+  let payload =
+    message_create_payload
+      ~id:"MSG5"
+      ~channel_id:"CH1"
+      ~author_id:"USER1"
+      ~content:"<@!BOB> check this"
+      ~mention_ids:[ "BOB" ]
+      ~mentions:[ ("BOB", Some "bob_user", None) ]
+      ()
+  in
+  match
+    S.decode_dispatch
+      ~bot_user_id:(Some "BOT")
+      ~event_name:"MESSAGE_CREATE"
+      ~payload
+  with
+  | Ok
+      (S.Message_create
+        { content = "@bob_user check this"
+        ; mentions_bot = false
+        ; explicit_mentions_bot = false
+        ; _
+        }) ->
+      ()
+  | Ok _ -> fail "expected resolved mention using username fallback"
+  | Error msg -> fail msg
+
+let test_decode_message_create_leaves_unknown_mention_untouched () =
+  let payload =
+    message_create_payload
+      ~id:"MSG6"
+      ~channel_id:"CH1"
+      ~author_id:"USER1"
+      ~content:"hey <@UNKNOWN>"
+      ~mention_ids:[]
+      ()
+  in
+  match
+    S.decode_dispatch
+      ~bot_user_id:(Some "BOT")
+      ~event_name:"MESSAGE_CREATE"
+      ~payload
+  with
+  | Ok (S.Message_create { content = "hey <@UNKNOWN>"; _ }) -> ()
+  | Ok _ -> fail "expected unknown mention left as raw snowflake"
   | Error msg -> fail msg
 
 let test_decode_reaction_add_unicode () =
@@ -2010,6 +2103,13 @@ let () =
             test_decode_message_create_preserves_guild_id
         ; test_case "MESSAGE_CREATE reply-ping is not explicit mention"
             `Quick test_decode_message_create_reply_ping_is_not_explicit_mention
+        ; test_case "MESSAGE_CREATE resolves mention to global_name" `Quick
+            test_decode_message_create_resolves_mention_global_name
+        ; test_case "MESSAGE_CREATE resolves mention to username fallback"
+            `Quick
+            test_decode_message_create_resolves_mention_username_fallback
+        ; test_case "MESSAGE_CREATE leaves unknown mention untouched" `Quick
+            test_decode_message_create_leaves_unknown_mention_untouched
         ; test_case "author_name prefers global_name" `Quick
             test_decode_author_name_prefers_global_name
         ; test_case "author_name falls back to username" `Quick

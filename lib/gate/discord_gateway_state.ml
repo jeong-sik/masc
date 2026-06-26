@@ -309,6 +309,55 @@ let content_mentions_user ~user_id content =
   && (contains_substring ~needle:("<@" ^ user_id ^ ">") content
       || contains_substring ~needle:("<@!" ^ user_id ^ ">") content)
 
+(* Discord sends user mentions as [<@snowflake>] (or [<@!snowflake>] for
+   nickname-ping).  The structured [mentions] array carries the matching
+   user objects, including [global_name] / [username].  Resolve those
+   snowflakes to human-readable [@DisplayName] so downstream consumers
+   (keeper prompt, dashboard chat) see names instead of raw ids.  Unknown
+   ids are left untouched. *)
+let user_display_name user_json =
+  match field_string_opt "global_name" user_json with
+  | Some _ as name -> name
+  | None -> field_string_opt "username" user_json
+
+
+let resolve_mentions_in_content ~mentions content =
+  let len = String.length content in
+  let buf = Buffer.create len in
+  let rec scan i =
+    if i >= len then Buffer.contents buf
+    else if content.[i] <> '<' then (
+      Buffer.add_char buf content.[i];
+      scan (i + 1))
+    else
+      let id_start, ok =
+        if i + 1 < len && content.[i + 1] = '@' then
+          if i + 2 < len && content.[i + 2] = '!' then (i + 3, true)
+          else (i + 2, true)
+        else (-1, false)
+      in
+      if not ok then (
+        Buffer.add_char buf content.[i];
+        scan (i + 1))
+      else
+        let end_i =
+          try String.index_from content id_start '>' with
+          | Not_found -> -1
+        in
+        if end_i < 0 then (
+          Buffer.add_char buf content.[i];
+          scan (i + 1))
+        else
+          let id = String.sub content id_start (end_i - id_start) in
+          (match List.assoc_opt id mentions with
+          | Some name ->
+              Buffer.add_char buf '@';
+              Buffer.add_string buf name
+          | None -> Buffer.add_substring buf content i (end_i - i + 1));
+          scan (end_i + 1)
+  in
+  scan 0
+
 (* ── Frame parse / encode ──────────────────────────────────────── *)
 
 let parse_frame (json : Yojson.Safe.t) =
@@ -389,11 +438,23 @@ let decode_message_create ~bot_user_id ~payload =
         | Some _ as name -> name
         | None -> field_string_opt "username" a)
   in
-  let mention_user_ids =
+  let mentions, mention_user_ids =
     match assoc_opt "mentions" payload with
     | Some (`List items) ->
-        List.filter_map (fun item -> field_string_opt "id" item) items
-    | Some _ | None -> []
+        let ids = List.filter_map (fun item -> field_string_opt "id" item) items in
+        let pairs =
+          List.filter_map
+            (fun item ->
+              match field_string_opt "id" item with
+              | Some id -> (
+                  match user_display_name item with
+                  | Some name -> Some (id, name)
+                  | None -> None)
+              | None -> None)
+            items
+        in
+        (pairs, ids)
+    | Some _ | None -> ([], [])
   in
   let mentions_bot =
     match bot_user_id with
@@ -405,6 +466,7 @@ let decode_message_create ~bot_user_id ~payload =
     | None -> false
     | Some bot_id -> content_mentions_user ~user_id:bot_id content
   in
+  let content = resolve_mentions_in_content ~mentions content in
   (* An automated author is either a bot user ([author.bot] = true) or a
      webhook ([webhook_id] present on the message). Discord's own guidance
      is for bots to ignore both so they do not loop on each other. *)

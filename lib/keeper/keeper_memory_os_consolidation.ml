@@ -154,15 +154,28 @@ let merge_group_of_json json =
 ;;
 
 (* Parse the LLM's consolidation plan. Unknown/garbled groups inside a valid
-   object are dropped individually (defensive degrade), never aborting the whole
-   plan. The provider output itself must be an exact JSON object; prose,
-   markdown fences, and substring salvage are rejected at [plan_of_string]. *)
+   object are dropped individually (defensive degrade) with bounded warning
+   telemetry, never aborting the whole plan. The provider output itself must be
+   an exact JSON object; prose, markdown fences, and substring salvage are
+   rejected at [plan_of_string]. *)
+let log_dropped_groups ~dropped ~total =
+  if dropped > 0
+  then
+    Log.Keeper.warn
+      "memory_os_consolidation: dropped malformed merge groups dropped=%d total=%d"
+      dropped
+      total
+;;
+
 let plan_of_json (json : Yojson.Safe.t) =
   match json with
   | `Assoc _ ->
     let groups =
       match assoc_field "groups" json with
-      | Some (`List items) -> List.filter_map merge_group_of_json items
+      | Some (`List items) ->
+        let parsed = List.filter_map merge_group_of_json items in
+        log_dropped_groups ~dropped:(List.length items - List.length parsed) ~total:(List.length items);
+        parsed
       | _ -> []
     in
     let drop_indices =

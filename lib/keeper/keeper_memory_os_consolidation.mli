@@ -30,7 +30,8 @@ val empty_plan : consolidation_plan
 val render_numbered_facts : fact list -> string
 
 (** Parse the LLM's consolidation output. Garbled groups degrade individually
-    (dropped, not fatal); a wholly invalid object yields [empty_plan]. *)
+    (dropped with bounded warning telemetry, not fatal); a wholly invalid object
+    yields [empty_plan]. *)
 val plan_of_json : Yojson.Safe.t -> consolidation_plan
 
 (** [plan_of_string raw] is [None] only when [raw] is not an exact JSON object.

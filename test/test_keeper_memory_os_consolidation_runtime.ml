@@ -35,13 +35,31 @@ let fake_response canned =
   }
 ;;
 
+let message_text (message : Atypes.message) =
+  message.content
+  |> List.filter_map (function
+    | Atypes.Text s -> Some s
+    | _ -> None)
+  |> String.concat "\n"
+;;
+
+let contains_substring ~needle text =
+  let needle_len = String.length needle in
+  let text_len = String.length text in
+  let rec loop index =
+    index + needle_len <= text_len
+    && (String.equal (String.sub text index needle_len) needle || loop (index + 1))
+  in
+  String.equal needle "" || loop 0
+;;
+
 let fake_complete canned : Runtime.complete_fn =
   fun ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () -> Ok (fake_response canned)
 ;;
 
 let fake_complete_with_config inspect canned : Runtime.complete_fn =
-  fun ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ () ->
-  inspect config;
+  fun ~sw:_ ~net:_ ?clock:_ ~config ~messages () ->
+  inspect config messages;
   Ok (fake_response canned)
 ;;
 
@@ -276,10 +294,19 @@ let test_consolidate_respects_configured_max_tokens () =
         let plan =
           {|{"groups":[{"member_indices":[0,1],"consolidated_claim":"ab","category":"fact"}],"drop_indices":[]}|}
         in
+        let seen_response_format = ref None in
+        let seen_bare_object_contract = ref false in
         let complete =
           fake_complete_with_config
-            (fun config ->
-               seen_max_tokens := config.Llm_provider.Provider_config.max_tokens)
+            (fun config messages ->
+               seen_max_tokens := config.Llm_provider.Provider_config.max_tokens;
+               seen_response_format := Some config.Llm_provider.Provider_config.response_format;
+               let rendered_prompt = messages |> List.map message_text |> String.concat "\n" in
+               seen_bare_object_contract
+               := contains_substring
+                    ~needle:"Return exactly one JSON object"
+                    rendered_prompt
+                  && contains_substring ~needle:"Do not wrap" rendered_prompt)
             plan
         in
         let outcome =
@@ -298,7 +325,15 @@ let test_consolidate_respects_configured_max_tokens () =
         Alcotest.(check (option int))
           "configured max_tokens cap is preserved"
           (Some 512)
-          !seen_max_tokens))))
+          !seen_max_tokens;
+        Alcotest.(check (option bool))
+          "json mode requested"
+          (Some true)
+          (Option.map (fun format -> format = Atypes.JsonMode) !seen_response_format);
+        Alcotest.(check bool)
+          "prompt carries bare JSON object contract"
+          true
+          !seen_bare_object_contract))))
 ;;
 
 let () =

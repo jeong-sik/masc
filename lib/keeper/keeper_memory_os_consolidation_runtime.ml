@@ -58,6 +58,11 @@ let min_facts_to_consolidate = 4
    512-token summary budget. *)
 let consolidation_max_tokens = 2048
 
+let bare_json_object_contract =
+  "Return exactly one JSON object. Do not wrap the object in markdown fences, \
+   prose, arrays, JSON strings, XML tags, or thinking text."
+;;
+
 type outcome =
   | Skipped_too_few of int
   | Transport_failed of string
@@ -96,7 +101,7 @@ let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
   ; temperature = Some 0.0
   ; tool_choice = None
   ; disable_parallel_tool_use = true
-  ; response_format = Agent_sdk.Types.Off
+  ; response_format = Agent_sdk.Types.JsonMode
   ; output_schema = None
   }
 ;;
@@ -113,7 +118,7 @@ let messages_for_consolidation facts =
     let user = String.trim user in
     if String.equal user ""
     then Error "consolidation prompt rendered empty"
-    else Ok [ user_message user ]
+    else Ok [ user_message (user ^ "\n\n" ^ bare_json_object_contract) ]
 ;;
 
 let rewrite_if_snapshot_current ?clock ~keeper_id ~facts ~survivors ~before ~after () =

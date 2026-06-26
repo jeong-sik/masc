@@ -152,6 +152,8 @@ val kind_of_masc_internal_error : masc_internal_error -> string
 
 val runtime_id_of_masc_internal_error : masc_internal_error -> string
 
+val accept_rejection_has_no_progress_retry_hint : masc_internal_error -> bool
+
 val accept_rejection_has_read_only_no_progress_retry_hint :
   masc_internal_error -> bool
 

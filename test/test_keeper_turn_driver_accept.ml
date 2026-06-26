@@ -820,7 +820,61 @@ let test_empty_non_end_turn_response_is_rejected () =
   Alcotest.(check bool)
     "no-progress accept rejection is typed"
     true
-    (Masc.Keeper_error_classify.is_accept_no_usable_progress_error err)
+    (Masc.Keeper_error_classify.is_accept_no_usable_progress_error err);
+  Alcotest.(check bool)
+    "empty no-progress can try next candidate"
+    true
+    (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next err);
+  Alcotest.(check bool)
+    "empty no-progress is not a read-only retry"
+    false
+    (Masc.Keeper_turn_driver.For_testing
+     .accept_no_progress_read_only_should_try_next
+       err);
+  Alcotest.(check (option string))
+    "empty no-progress is runtime-recoverable"
+    (Some "empty_no_progress")
+    (Option.map
+       Masc.Keeper_error_classify.degraded_retry_reason_to_string
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
+
+let test_empty_after_workspace_mutation_stays_terminal () =
+  let checkpoint =
+    checkpoint_with_messages
+      [
+        message
+          [
+            tool_use
+              ~input:(`Assoc [ "title", `String "t"; "body", `String "b" ])
+              "keeper_board_post";
+          ];
+      ]
+  in
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.empty-after-mutation"
+      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      (run_result ~checkpoint ())
+  in
+  let err, reason_kind, reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "reason kind is no usable progress"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+  Alcotest.(check bool)
+    "reason includes mutating tool context"
+    true
+    (contains ~needle:"last_tool_effect=mutating" reason);
+  Alcotest.(check bool)
+    "empty response after mutation does not try next candidate"
+    false
+    (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next err);
+  Alcotest.(check (option string))
+    "empty response after mutation is not runtime-recoverable"
+    None
+    (Option.map
+       Masc.Keeper_error_classify.degraded_retry_reason_to_string
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
 
 let test_blank_text_non_end_turn_response_is_rejected () =
   let result =
@@ -993,6 +1047,10 @@ let () =
             test_thinking_only_non_end_turn_response_is_rejected;
           Alcotest.test_case "empty non-end-turn response is rejected" `Quick
             test_empty_non_end_turn_response_is_rejected;
+          Alcotest.test_case
+            "empty response after workspace mutation stays terminal"
+            `Quick
+            test_empty_after_workspace_mutation_stays_terminal;
           Alcotest.test_case "blank text non-end-turn response is rejected" `Quick
             test_blank_text_non_end_turn_response_is_rejected;
           Alcotest.test_case "custom predicate rejection stays distinct" `Quick

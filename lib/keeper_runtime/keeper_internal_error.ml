@@ -619,6 +619,19 @@ let accept_rejection_has_read_only_no_progress_retry_hint = function
   | Internal_contract_rejected _ ->
     false
 
+let accept_rejection_has_no_progress_retry_hint = function
+  | Accept_rejected
+      {
+        reason_kind = Some Accept_no_usable_progress;
+        response_shape = Some Accept_response_empty;
+        last_tool_effect = None;
+        any_mutating_tool = None;
+        tool_effects_seen = [];
+        _;
+      } ->
+    true
+  | err -> accept_rejection_has_read_only_no_progress_retry_hint err
+
 let sdk_error_of_masc_internal_error err =
   Agent_sdk.Error.Internal
     (masc_internal_error_prefix ^ Yojson.Safe.to_string (masc_internal_error_to_json err))

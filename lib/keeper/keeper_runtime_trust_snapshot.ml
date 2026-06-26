@@ -68,26 +68,21 @@ let terminal_reason_from_decision json =
 
 let terminal_reason_from_receipt receipt =
   let terminal_reason_code = json_string_opt_member "terminal_reason_code" receipt in
-  let operator_disposition =
-    json_string_opt_member "operator_disposition" receipt
-    |> Option.map String.lowercase_ascii
-  in
   let operator_disposition_reason =
     json_string_opt_member "operator_disposition_reason" receipt
     |> Option.map String.lowercase_ascii
   in
   let completion_contract_result =
-    json_string_opt_member "completion_contract_result" receipt
-    |> Option.map String.lowercase_ascii
+    Option.bind
+      (json_string_opt_member "completion_contract_result" receipt
+       |> Option.map String.lowercase_ascii)
+      (fun s -> Keeper_execution_receipt_types.completion_contract_result_of_string s)
   in
   let receipt_requires_tool_attention =
-    match operator_disposition, operator_disposition_reason, completion_contract_result with
-    | _, Some "tool_route_recoverable_failure", _
-    | _, _, Some "needs_execution_progress"
-    | _, _, Some "surface_mismatch"
-    | _, _, Some "no_capable_provider"
-    | _, _, Some "passive_only"
-    | _, _, Some "violated" ->
+    match operator_disposition_reason, completion_contract_result with
+    | Some "tool_route_recoverable_failure", _ -> true
+    | _, Some (Contract_needs_execution_progress | Contract_surface_mismatch
+               | Contract_no_capable_provider | Contract_passive_only | Contract_violated) ->
         true
     | _ -> false
   in
@@ -108,8 +103,10 @@ let terminal_reason_from_receipt receipt =
 
 let receipt_contract_attention_reason receipt =
   let completion_contract_result =
-    json_string_opt_member "completion_contract_result" receipt
-    |> Option.map (fun value -> String.lowercase_ascii (String.trim value))
+    Option.bind
+      (json_string_opt_member "completion_contract_result" receipt
+       |> Option.map (fun value -> String.lowercase_ascii (String.trim value)))
+      (fun s -> Keeper_execution_receipt_types.completion_contract_result_of_string s)
   in
   let terminal_reason_code =
     json_string_opt_member "terminal_reason_code" receipt
@@ -122,15 +119,14 @@ let receipt_contract_attention_reason receipt =
   in
   match completion_contract_result with
   | Some
-      ( ("violated" | "claim_only_after_owned_task" | "needs_execution_progress"
-        | "passive_only")
-        as reason ) ->
-      Some ("completion_contract_result:" ^ reason)
+      ((Contract_violated | Contract_claim_only_after_owned_task
+       | Contract_needs_execution_progress | Contract_passive_only) as result) ->
+      Some (Keeper_execution_receipt_types.completion_contract_result_to_string result)
   | Some
-      ( ("unknown" | "not_dispatched" | "surface_mismatch" | "no_capable_provider")
-        as reason )
+      ((Contract_unknown | Contract_not_dispatched | Contract_surface_mismatch
+       | Contract_no_capable_provider) as result)
     when turn_budget_exhausted ->
-      Some ("completion_contract_result:" ^ reason)
+      Some (Keeper_execution_receipt_types.completion_contract_result_to_string result)
   | Some _ | None -> None
 
 (* JSON-deserialization boundary: maps a runtime_blocker_class wire
@@ -589,6 +585,12 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
   let completion_contract_result =
     Option.bind latest_receipt (json_string_opt_member "completion_contract_result")
   in
+  let completion_contract_result_typed =
+    Option.bind
+      (Option.map (fun value -> String.lowercase_ascii (String.trim value))
+         completion_contract_result)
+      (fun s -> Keeper_execution_receipt_types.completion_contract_result_of_string s)
+  in
   let runtime_json =
     match latest_receipt with
     | Some receipt -> json_member "runtime" receipt
@@ -615,11 +617,12 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
     | json -> json_string_opt_member "selected_model" json
   in
   let mutation_guard_summary =
-    match completion_contract_result with
-    | Some "violated" -> "mutation_contract_violated"
-    | Some ("satisfied" | "satisfied_execution" | "satisfied_completion") ->
+    match completion_contract_result_typed with
+    | Some Contract_violated -> "mutation_contract_violated"
+    | Some (Contract_satisfied_completion | Contract_satisfied_execution) ->
         "mutation_contract_satisfied"
-    | Some other -> other
+    | Some result ->
+        Keeper_execution_receipt_types.completion_contract_result_to_string result
     | None -> "mutation_contract_not_observed"
   in
   `Assoc

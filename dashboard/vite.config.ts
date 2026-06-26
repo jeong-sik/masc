@@ -14,10 +14,6 @@ function chunkByPackage(id: string, packageNames: string[]): boolean {
   )
 }
 
-function isBundlerRuntimeHelper(id: string): boolean {
-  return id.includes('vite/preload-helper') || id.includes('commonjsHelpers')
-}
-
 const heavyMermaidDependencyChunks: Array<{ packages: string[]; chunk: string }> = [
   {
     packages: ['cytoscape'],
@@ -96,13 +92,25 @@ export default defineConfig(({ command }) => {
       // out-of-band tooling. Cuts the deployment artifact (Docker image
       // copy step) from ~30 MB to ~7.3 MB without losing debug coverage.
       sourcemap: 'hidden',
+      modulePreload: {
+        // MASC dashboard targets the operator's modern browser runtime.
+        polyfill: false,
+        // Keep the HTML entry preload contract tied to our own vendor chunk
+        // name instead of Vite/Rollup private helper module ids. JS dynamic
+        // import dependency lists remain Vite-managed.
+        resolveDependencies(_url, deps, { hostType }) {
+          if (hostType !== 'html') return deps
+          return deps.filter(dep => dep.startsWith('assets/vendor-'))
+        },
+      },
       rollupOptions: {
         output: {
+          // Keep manual chunk assignments explicit so Rollup does not merge
+          // runtime/helper dependencies into feature chunks. This avoids
+          // matching Vite/Rollup private virtual module ids.
+          onlyExplicitManualChunks: true,
           manualChunks(id) {
             const normalizedId = normalizeModuleId(id)
-            if (isBundlerRuntimeHelper(normalizedId)) {
-              return 'vendor'
-            }
             for (const { packages, chunk } of heavyMermaidDependencyChunks) {
               if (chunkByPackage(normalizedId, packages)) return chunk
             }
@@ -115,7 +123,7 @@ export default defineConfig(({ command }) => {
             if (normalizedId.includes('/node_modules/mermaid/dist/mermaid.core.mjs')) {
               return 'mermaid-core'
             }
-            if (chunkByPackage(normalizedId, ['preact', 'htm', '@preact/signals'])) {
+            if (chunkByPackage(normalizedId, ['preact', 'htm', '@preact/signals', '@preact/signals-core'])) {
               return 'vendor'
             }
             if (chunkByPackage(normalizedId, ['solid-js'])) {

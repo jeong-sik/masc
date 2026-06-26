@@ -92,6 +92,12 @@ export const OAS_AGENT_EVENT_BUFFER = envInt('VITE_OAS_AGENT_EVENT_BUFFER', 50)
 export const OAS_KEEPER_SNAPSHOT_MAX = envInt('VITE_OAS_KEEPER_SNAPSHOT_MAX', 20)
 export const OAS_TELEMETRY_REPLAY_LIMIT = envInt('VITE_OAS_TELEMETRY_REPLAY_LIMIT', 500)
 export const OAS_OPENTELEMETRY_UI_URL = envString('VITE_OAS_OPENTELEMETRY_UI_URL', null)
+// Overview telemetry renders a fixed 28-bar sparkline; this bounds raw samples
+// per 5-minute bucket before the summary model takes over for totals/freshness.
+export const OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET = envInt(
+  'VITE_OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET',
+  10,
+)
 
 // --- Text truncation (characters) ---
 export const TRIM_TEXT_DEFAULT = 120

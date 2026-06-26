@@ -3,7 +3,7 @@
 // Redesigned: clean section headers, consistent row styling, proper form controls.
 
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import {
   fetchDashboardGoalsTree,
@@ -37,6 +37,7 @@ import {
 export {
   applyKeeperConfigUpdate,
   configState,
+  keeperConfigSubscriptionCountsForTests,
   loadKeeperConfig,
   peekKeeperConfigLoadStatus,
   peekLoadedKeeperConfig,
@@ -206,7 +207,7 @@ const runtimeSaving = signal(false)
 const denylistDraftText = signal<string | null>(null)
 const denylistSaving = signal(false)
 
-registerKeeperConfigResetHandler(() => {
+function resetKeeperConfigPanelDrafts(): void {
   goalOptionsResource.reset()
   editMode.value = false
   editDraft.value = null
@@ -220,11 +221,33 @@ registerKeeperConfigResetHandler(() => {
   hookFilterQuery.value = ''
   globalArchExpanded.value = false
   kcfTab.value = 'identity'
-})
+}
 
-registerKeeperConfigUpdateHandler((_name, updated) => {
+function syncRuntimeDraftFromConfig(_name: string, updated: KeeperConfig): void {
   runtimeDraft.value = initRuntimeDraftFromConfig(updated)
-})
+}
+
+let panelSubscriptionRefs = 0
+let unregisterPanelReset: (() => void) | null = null
+let unregisterPanelUpdate: (() => void) | null = null
+
+function retainKeeperConfigPanelSubscriptions(): () => void {
+  if (panelSubscriptionRefs === 0) {
+    unregisterPanelReset = registerKeeperConfigResetHandler(resetKeeperConfigPanelDrafts)
+    unregisterPanelUpdate = registerKeeperConfigUpdateHandler(syncRuntimeDraftFromConfig)
+  }
+  panelSubscriptionRefs += 1
+
+  return () => {
+    panelSubscriptionRefs = Math.max(0, panelSubscriptionRefs - 1)
+    if (panelSubscriptionRefs > 0) return
+    resetKeeperConfigPanelDrafts()
+    unregisterPanelReset?.()
+    unregisterPanelUpdate?.()
+    unregisterPanelReset = null
+    unregisterPanelUpdate = null
+  }
+}
 
 export function coerceSandboxProfile(raw: string | undefined): SandboxProfile {
   return raw === 'docker' ? 'docker' : 'local'
@@ -753,6 +776,8 @@ function runtimeSelectionSummary(c: KeeperConfig): string {
 
 export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string; onClose?: () => void }) {
   const state = configState.value
+
+  useEffect(() => retainKeeperConfigPanelSubscriptions(), [])
 
   // Trigger load on first render or name change
   if (configKeeperName.value !== keeperName || state.status === 'idle') {

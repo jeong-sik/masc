@@ -655,18 +655,47 @@ let normalized_path_opt path =
     Some normalized
 ;;
 
+let lexical_normalize_path path =
+  let path = Env_config_core.strip_path_trailing_slashes path in
+  let is_absolute = not (Filename.is_relative path) in
+  let push_segment acc = function
+    | "" | "." -> acc
+    | ".." ->
+      (match acc, is_absolute with
+       | _ :: rest, _ -> rest
+       | [], true -> []
+       | [], false -> [ ".." ])
+    | segment -> segment :: acc
+  in
+  let segments = path |> String.split_on_char '/' |> List.fold_left push_segment [] in
+  match is_absolute, List.rev segments with
+  | true, [] -> "/"
+  | true, segments -> "/" ^ String.concat "/" segments
+  | false, [] -> "."
+  | false, segments -> String.concat "/" segments
+;;
+
+let normalized_path_segments path =
+  let normalized = lexical_normalize_path path in
+  if String.equal normalized "/" || String.equal normalized "."
+  then []
+  else normalized |> String.split_on_char '/' |> List.filter (fun segment -> segment <> "")
+;;
+
+let rec segment_prefix ~prefix path =
+  match prefix, path with
+  | [], _ -> true
+  | _ :: _, [] -> false
+  | p :: ps, x :: xs -> String.equal p x && segment_prefix ~prefix:ps xs
+;;
+
 let same_or_descendant_normalized_path path expected =
-  match normalized_path_opt expected with
-  | None -> false
-  | Some expected ->
-    let path = Env_config_core.strip_path_trailing_slashes path in
-    let expected = Env_config_core.strip_path_trailing_slashes expected in
-    String.equal path expected
-    ||
-    let expected_len = String.length expected in
-    String.length path > expected_len
-    && String.starts_with ~prefix:expected path
-    && (String.equal expected "/" || Char.equal path.[expected_len] '/')
+  match normalized_path_opt path, normalized_path_opt expected with
+  | Some path, Some expected ->
+    segment_prefix
+      ~prefix:(normalized_path_segments expected)
+      (normalized_path_segments path)
+  | _ -> false
 ;;
 
 let server_workspace_mismatch ~server_repo_path (config : Workspace.config) =

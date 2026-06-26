@@ -41,6 +41,9 @@ import {
   type TelemetryEntry,
   type TelemetrySourceSummary,
 } from '../../api/dashboard'
+import {
+  OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET,
+} from '../../config/constants'
 
 // ─── Attention / Keeper v2 helpers ───────────────────────────────────────────
 
@@ -249,13 +252,7 @@ export const OVERVIEW_TELEMETRY_BAR_COUNT = 28
 export const OVERVIEW_TELEMETRY_BUCKET_MINUTES = 5
 export const OVERVIEW_TELEMETRY_WINDOW_MINUTES =
   OVERVIEW_TELEMETRY_BAR_COUNT * OVERVIEW_TELEMETRY_BUCKET_MINUTES
-// The overview needs a compact activity shape, not the full event log. The
-// source summary provides total/freshness truth; raw events are sampled only to
-// paint the 28-bar sparkline without pulling hundreds of KB on first load.
-// Contract: each rendered 5-minute bucket gets at most ten raw events, which
-// keeps the initial telemetry request bounded to 280 entries while preserving
-// a visible burst shape for every bar in the 140-minute window.
-export const OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET = 10
+export { OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET }
 export const OVERVIEW_TELEMETRY_EVENT_SAMPLE_LIMIT =
   OVERVIEW_TELEMETRY_BAR_COUNT * OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET
 const UNIX_MS_TIMESTAMP_THRESHOLD = 10_000_000_000

@@ -28,6 +28,13 @@ export function registerKeeperConfigUpdateHandler(handler: UpdateHandler): () =>
   }
 }
 
+export function keeperConfigSubscriptionCountsForTests(): { reset: number; update: number } {
+  return {
+    reset: resetHandlers.size,
+    update: updateHandlers.size,
+  }
+}
+
 export async function loadKeeperConfig(
   name: string,
   options?: { force?: boolean },

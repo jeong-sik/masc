@@ -36,8 +36,6 @@ describe('dashboard production bundle preloads', () => {
         outDir,
         emptyOutDir: true,
         manifest: true,
-        minify: false,
-        cssMinify: false,
         sourcemap: false,
       },
     })
@@ -49,8 +47,8 @@ describe('dashboard production bundle preloads', () => {
     const entry = manifest['index.html']
 
     expect(entry?.isEntry).toBe(true)
-    expect(entry?.imports ?? []).toHaveLength(1)
-    expect(entry?.imports?.[0]).toMatch(/^_vendor-/)
+    expect((entry?.imports ?? []).filter(id => id.startsWith('_vendor-'))).toHaveLength(1)
+    expect((entry?.imports ?? []).some(id => id.includes('mermaid'))).toBe(false)
 
     const preloads = modulePreloads(html)
     expect(preloads).toHaveLength(1)

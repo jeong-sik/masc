@@ -257,13 +257,6 @@ let is_accept_no_usable_progress_error (err : Agent_sdk.Error.sdk_error) : bool 
   | None ->
     false
 
-let is_thinking_only_read_only_accept_rejection
-    (err : Agent_sdk.Error.sdk_error) : bool =
-  match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some err ->
-    Keeper_turn_driver.accept_rejection_has_read_only_no_progress_retry_hint err
-  | None -> false
-
 (* Classification of why a degraded retry is being attempted.  Closed set
    covering both producer paths: [phase_recovery_retry] (7 narrow reasons)
    and [recoverable_runtime_failure_reason] (broader set including raw
@@ -282,6 +275,7 @@ type degraded_retry_reason =
   | Server_error
   | Auth_error
   | Read_only_no_progress
+  | Empty_no_progress
 
 let degraded_retry_reason_to_string = function
   | Hard_quota -> "hard_quota"
@@ -296,6 +290,22 @@ let degraded_retry_reason_to_string = function
   | Server_error -> "server_error"
   | Auth_error -> "auth_error"
   | Read_only_no_progress -> "read_only_no_progress"
+  | Empty_no_progress -> "empty_no_progress"
+
+let accept_rejection_degraded_retry_reason err =
+  match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some internal_error ->
+    (match Keeper_turn_driver.accept_no_progress_retry_kind internal_error with
+     | Some `Empty_no_progress -> Some Empty_no_progress
+     | Some `Read_only_no_progress -> Some Read_only_no_progress
+     | None -> None)
+  | None -> None
+
+let is_recoverable_no_progress_accept_rejection
+    (err : Agent_sdk.Error.sdk_error) : bool =
+  match accept_rejection_degraded_retry_reason err with
+  | Some (Empty_no_progress | Read_only_no_progress) -> true
+  | Some _ | None -> false
 
 type degraded_retry =
   { next_runtime : string
@@ -370,12 +380,12 @@ let degraded_retry_after_recoverable_error
         (Keeper_turn_driver.Runtime_exhausted
            { reason = Keeper_turn_driver.Candidates_filtered_after_cycles; _ }) ->
         phase_recovery_retry Runtime_candidates_filtered
-    | Some (Keeper_turn_driver.Accept_rejected _)
-      when is_thinking_only_read_only_accept_rejection err ->
-        phase_recovery_retry Read_only_no_progress
+    | Some (Keeper_turn_driver.Accept_rejected _) ->
+        (match accept_rejection_degraded_retry_reason err with
+         | Some reason -> phase_recovery_retry reason
+         | None -> None)
     | Some
         (Keeper_turn_driver.Runtime_exhausted _)
-    | Some (Keeper_turn_driver.Accept_rejected _)
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
     | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
     | Some (Keeper_turn_driver.Ambiguous_post_commit _)
@@ -420,10 +430,8 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
            arm previously returned [None]. Other arms below remain
            non-recoverable to keep the surface conservative. *)
         Some Runtime_exhausted
-    | Some (Keeper_turn_driver.Accept_rejected _)
-      when is_thinking_only_read_only_accept_rejection err ->
-        Some Read_only_no_progress
-    | Some (Keeper_turn_driver.Accept_rejected _)
+    | Some (Keeper_turn_driver.Accept_rejected _) ->
+        accept_rejection_degraded_retry_reason err
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
     | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
     | Some (Keeper_turn_driver.Ambiguous_post_commit _)
@@ -545,7 +553,7 @@ let default_degraded_rotation_candidates
   in
   let default_candidates = [ normalized_base; default_runtime; phase_recovery_runtime ] in
   match fallback_reason with
-  | Some Read_only_no_progress ->
+  | Some (Read_only_no_progress | Empty_no_progress) ->
     let tool_capable =
       Runtime.get_runtimes ()
       |> List.filter (fun (runtime : Runtime.t) -> runtime.model.tools_support)
@@ -632,7 +640,7 @@ let is_completion_contract_violation (_ : Agent_sdk.Error.sdk_error) : bool =
   false
 
 let degraded_reason_allows_candidate_cycle = function
-  | Hard_quota | Rate_limit | Read_only_no_progress -> false
+  | Hard_quota | Rate_limit | Read_only_no_progress | Empty_no_progress -> false
   | Resumable_cli_session
   | Admission_queue_timeout
   | Provider_timeout
@@ -678,6 +686,7 @@ let degraded_rotation_after_recoverable_error
             candidates
         | Hard_quota
         | Read_only_no_progress
+        | Empty_no_progress
         | Resumable_cli_session
         | Admission_queue_timeout
         | Provider_timeout

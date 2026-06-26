@@ -178,6 +178,8 @@ module For_testing : sig
   val media_degrade_manifest_decision :
     runtime_id:string -> (string * int) list -> Yojson.Safe.t
 
+  val accept_no_progress_should_try_next : Agent_sdk.Error.sdk_error -> bool
+
   val accept_no_progress_read_only_should_try_next :
     Agent_sdk.Error.sdk_error -> bool
 end

@@ -1090,6 +1090,24 @@ let exhaust_keeper_restart_budget config (meta : Keeper_meta_contract.keeper_met
       ("keeper restart-budget exhaustion failed: "
        ^ Keeper_state_machine.transition_error_to_string err)
 
+let terminate_keeper_fiber config (meta : Keeper_meta_contract.keeper_meta) =
+  match
+    Keeper_registry.dispatch_event
+      ~base_path:config.Workspace.base_path
+      meta.name
+      (Keeper_state_machine.Fiber_terminated
+         {
+           outcome = "stale_turn_timeout(idle_turn(2268s))";
+           provider_id = None;
+           http_status = None;
+         })
+  with
+  | Ok _ -> ()
+  | Error err ->
+    Alcotest.fail
+      ("keeper fiber termination failed: "
+       ^ Keeper_state_machine.transition_error_to_string err)
+
 let test_health_json_surfaces_durable_paused_keepers () =
   with_temp_dir "health-durable-paused-keepers" (fun dir ->
       let config_root = make_config_root dir in
@@ -2097,6 +2115,13 @@ let test_health_json_explains_nonrecoverable_failing_keeper () =
         write_keeper_meta_exn config failing;
         with_running_keeper_metas config [ failing ] (fun () ->
           mark_keeper_failing config failing;
+          Keeper_registry.set_failure_reason
+            ~base_path:config.Workspace.base_path
+            failing.name
+            (Some
+               (Keeper_registry.Stale_turn_timeout
+                  (Keeper_registry.Idle_turn { stall_seconds = 2268.0 })));
+          terminate_keeper_fiber config failing;
           exhaust_keeper_restart_budget config failing;
           let request = Httpun.Request.create `GET "/health" in
           let json = Server_routes_http_runtime.make_health_json request in
@@ -2109,21 +2134,35 @@ let test_health_json_explains_nonrecoverable_failing_keeper () =
              |> List.map to_string);
           Alcotest.(check (list (pair string string)))
             "health explains nonrecoverable failing keeper"
-            [ ("capacity-failing", "phase_failing"); ("example", "not_registered") ]
+            [ ("capacity-failing", "phase_dead"); ("example", "not_registered") ]
             (fleet_safety |> member "blocked_keeper_reasons" |> to_list
              |> List.map (fun row ->
                   ( row |> member "keeper" |> to_string
                   , row |> member "reason" |> to_string )));
-          let failing_detail =
+          let capacity_row =
             fleet_safety |> member "blocked_keeper_reasons" |> to_list
-            |> List.find (fun row ->
-                 row |> member "keeper" |> to_string = "capacity-failing")
+            |> List.find_opt (fun row ->
+                 String.equal
+                   "capacity-failing"
+                   (row |> member "keeper" |> to_string))
           in
-          Alcotest.(check string) "health reports failing action"
-            "repair_failing_keeper"
-            (failing_detail |> member "action" |> to_string);
-          Alcotest.(check bool) "health marks failing phase non-terminal" false
-            (failing_detail |> member "terminal_phase" |> to_bool))))
+          match capacity_row with
+          | None -> Alcotest.fail "missing capacity-failing blocked row"
+          | Some row ->
+            Alcotest.(check string) "health exposes dead phase" "dead"
+              (row |> member "phase" |> to_string);
+            Alcotest.(check string) "health exposes typed stale failure reason"
+              "stale_turn_timeout(idle_turn(2268s))"
+              (row |> member "last_failure_reason" |> to_string);
+            Alcotest.(check string) "health recommends keeper recovery action"
+              "keeper_recover"
+              (row |> member "operator_action_type" |> to_string);
+            Alcotest.(check string) "health recommends recovery tool"
+              "masc_keeper_recover"
+              (row |> member "operator_tool_name" |> to_string);
+            Alcotest.(check bool) "health marks recovery as confirm-required"
+              true
+              (row |> member "operator_action_confirm_required" |> to_bool))))
 
 let test_health_json_reaction_ledger_cursor_sweep_clears_pending () =
   with_temp_dir "health-reaction-ledger-cursor-sweep" (fun dir ->

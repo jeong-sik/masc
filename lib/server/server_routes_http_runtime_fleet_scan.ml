@@ -707,6 +707,51 @@ let blocked_keeper_action = function
 let blocked_keeper_action_label reason =
   reason |> blocked_keeper_action |> blocked_keeper_operator_action_to_string
 
+let blocked_keeper_operator_action = function
+  | Phase
+      ( Keeper_state_machine.Failing
+      | Keeper_state_machine.Crashed
+      | Keeper_state_machine.Restarting
+      | Keeper_state_machine.Dead ) ->
+      List.find_opt
+        (fun (action : Operator_pending_confirm.available_action) ->
+          String.equal action.action_type "keeper_recover")
+        Operator_pending_confirm.available_actions
+  | Durable_paused_autoboot_enabled
+  | Meta_read_error
+  | Not_bootable
+  | Boot_failure _
+  | Phase
+      ( Keeper_state_machine.Offline
+      | Keeper_state_machine.Running
+      | Keeper_state_machine.Overflowed
+      | Keeper_state_machine.Compacting
+      | Keeper_state_machine.HandingOff
+      | Keeper_state_machine.Draining
+      | Keeper_state_machine.Paused
+      | Keeper_state_machine.Stopped
+      | Keeper_state_machine.Zombie )
+  | Not_registered
+  | Not_running
+  | No_keeper_binding
+  | Unknown ->
+      None
+
+let blocked_keeper_operator_action_fields reason =
+  match blocked_keeper_operator_action reason with
+  | None ->
+      [
+        ("operator_action_type", `Null);
+        ("operator_tool_name", `Null);
+        ("operator_action_confirm_required", `Null);
+      ]
+  | Some action ->
+      [
+        ("operator_action_type", `String action.action_type);
+        ("operator_tool_name", `String action.tool_name);
+        ("operator_action_confirm_required", `Bool action.confirm_required);
+      ]
+
 let active_task_owner_fiber_scan_semantics =
   "reports active task owners without executable keeper fibers; disabled \
    keepers are excluded; matching rows can degrade fleet status"
@@ -727,6 +772,27 @@ let blocked_keeper_detail_json
     match base_path with
     | None -> None
     | Some base_path -> Keeper_runtime.boot_meta_failure_for ~base_path ~name
+  in
+  let registry_entry =
+    match base_path with
+    | None -> None
+    | Some base_path -> Keeper_registry.get ~base_path name
+  in
+  let registry_phase =
+    match registry_entry with
+    | Some (entry : Keeper_registry.registry_entry) -> Some entry.phase
+    | None -> None
+  in
+  let phase =
+    match registry_phase with
+    | Some _ as phase -> phase
+    | None -> phase
+  in
+  let registry_last_failure_reason =
+    match registry_entry with
+    | Some { Keeper_registry.last_failure_reason = Some reason; _ } ->
+        Some (Keeper_registry.failure_reason_to_string reason)
+    | Some { Keeper_registry.last_failure_reason = None; _ } | None -> None
   in
   let reason =
     if is_paused then Durable_paused_autoboot_enabled
@@ -773,12 +839,15 @@ let blocked_keeper_detail_json
        ("reason", `String (blocked_keeper_reason_label reason));
        ("action", `String (blocked_keeper_action_label reason));
        ("phase", Json_util.string_opt_to_json phase_name);
+       ( "last_failure_reason"
+       , Json_util.string_opt_to_json registry_last_failure_reason );
        ("bootable", `Bool is_bootable);
        ("reaction_capacity", `Bool is_capacity);
        ("paused", `Bool is_paused);
        ("meta_read_error", `Bool has_read_error);
      ]
      @ terminal_phase_field
+     @ blocked_keeper_operator_action_fields reason
      @ last_failure_fields)
 
 type active_task_owner_without_executable_fiber = {

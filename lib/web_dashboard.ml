@@ -10,7 +10,8 @@
 
 let assets_root () =
   let is_dir path =
-    Sys.file_exists path && Sys.is_directory path
+    try (Unix.stat path).Unix.st_kind = Unix.S_DIR with
+    | Unix.Unix_error _ -> false
   in
   let exe_dir = Filename.dirname Sys.executable_name in
   let inferred_repo_assets =

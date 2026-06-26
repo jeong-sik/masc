@@ -611,6 +611,7 @@ type blocked_keeper_reason =
   | Phase of string
   | Not_registered
   | Not_running
+  | No_keeper_binding
   | Unknown
 
 let blocked_keeper_reason_label = function
@@ -621,6 +622,7 @@ let blocked_keeper_reason_label = function
   | Phase phase -> "phase_" ^ phase
   | Not_registered -> "not_registered"
   | Not_running -> "not_running"
+  | No_keeper_binding -> "no_keeper_binding"
   | Unknown -> "unknown"
 
 let blocked_keeper_action = function
@@ -642,7 +644,12 @@ let blocked_keeper_action = function
   | Not_registered ->
       "start_or_recover_keeper"
   | Not_running -> "start_or_recover_keeper"
+  | No_keeper_binding -> "create_keeper_or_reassign_task"
   | Unknown -> "inspect_keeper_autoboot_logs"
+
+let active_task_owner_fiber_scan_semantics =
+  "reports active task owners without executable keeper fibers; disabled \
+   keepers are excluded; matching rows can degrade fleet status"
 
 let blocked_keeper_detail_json
     ?base_path
@@ -708,7 +715,7 @@ let blocked_keeper_detail_json
      @ last_failure_fields)
 
 type active_task_owner_without_executable_fiber = {
-  keeper_name : string;
+  keeper_name : string option;
   agent_name : string;
   task_id : string;
   task_status : string;
@@ -727,7 +734,14 @@ let empty_active_task_owner_fiber_scan =
   }
 
 let compare_active_task_owner_without_executable_fiber left right =
-  let cmp = String.compare left.keeper_name right.keeper_name in
+  let compare_string_opt left right =
+    match (left, right) with
+    | None, None -> 0
+    | None, Some _ -> -1
+    | Some _, None -> 1
+    | Some left, Some right -> String.compare left right
+  in
+  let cmp = compare_string_opt left.keeper_name right.keeper_name in
   if cmp <> 0 then cmp
   else
     let cmp = String.compare left.agent_name right.agent_name in
@@ -740,14 +754,20 @@ let active_task_assignment (task : Masc_domain.task) =
          (assignee, Workspace_task_schedule.task_status_label task.task_status))
 
 let active_task_owner_without_executable_fiber_json row =
+  let action =
+    match row.keeper_name with
+    | Some _ -> blocked_keeper_action Not_running
+    | None -> blocked_keeper_action No_keeper_binding
+  in
   `Assoc
     [
-      ("keeper", `String row.keeper_name);
+      ("keeper", Json_util.string_opt_to_json row.keeper_name);
+      ("name", Json_util.string_opt_to_json row.keeper_name);
       ("agent_name", `String row.agent_name);
       ("task_id", `String row.task_id);
       ("task_status", `String row.task_status);
       ("executable", `Bool false);
-      ("action", `String (blocked_keeper_action Not_running));
+      ("action", `String action);
     ]
 
 let keeper_agent_bindings config =
@@ -763,6 +783,12 @@ let keeper_agent_bindings config =
          | Ok None -> (bindings, read_errors)
          | Error err -> (bindings, (name, err) :: read_errors))
        ([], [])
+
+let keeper_names_for_agent agent_bindings assignee =
+  agent_bindings
+  |> List.filter_map (fun (agent_name, keeper_name) ->
+       if String.equal agent_name assignee then Some keeper_name else None)
+  |> sorted_unique_strings
 
 let active_task_owner_fiber_scan config ~executable_names =
   let executable_set = string_set_of_list executable_names in
@@ -781,20 +807,32 @@ let active_task_owner_fiber_scan config ~executable_names =
              match active_task_assignment task with
              | None -> []
              | Some (assignee, task_status) ->
-                 agent_bindings
-                 |> List.filter_map (fun (agent_name, keeper_name) ->
-                      if
-                        String.equal agent_name assignee
-                        && not (String_set.mem keeper_name executable_set)
-                      then
-                        Some
-                          {
-                            keeper_name;
-                            agent_name;
-                            task_id = task.id;
-                            task_status;
-                          }
-                      else None))
+                 let keeper_names = keeper_names_for_agent agent_bindings assignee in
+                 if
+                   List.exists
+                     (fun keeper_name -> String_set.mem keeper_name executable_set)
+                     keeper_names
+                 then []
+                 else (
+                   match keeper_names with
+                   | [] ->
+                       [
+                         {
+                           keeper_name = None;
+                           agent_name = assignee;
+                           task_id = task.id;
+                           task_status;
+                         };
+                       ]
+                   | keeper_names ->
+                       keeper_names
+                       |> List.map (fun keeper_name ->
+                             {
+                               keeper_name = Some keeper_name;
+                               agent_name = assignee;
+                               task_id = task.id;
+                               task_status;
+                            })))
         |> List.concat
         |> List.sort_uniq compare_active_task_owner_without_executable_fiber
       in
@@ -874,11 +912,11 @@ let keeper_fleet_safety_health_json
   in
   let active_task_owner_without_executable_fiber_names =
     active_task_owner_scan.active_task_owner_without_executable_fibers
-    |> List.map (fun row -> row.keeper_name)
+    |> List.filter_map (fun row -> row.keeper_name)
     |> sorted_unique_strings
   in
   let active_task_owner_without_executable_fiber_count =
-    List.length active_task_owner_without_executable_fiber_names
+    List.length active_task_owner_scan.active_task_owner_without_executable_fibers
   in
   let active_task_owner_without_executable_fiber =
     active_task_owner_without_executable_fiber_count > 0
@@ -936,18 +974,23 @@ let keeper_fleet_safety_health_json
     else if no_running_fibers then "degraded"
     else if low_running_fiber_margin then "degraded"
     else if reaction_capacity_below_target then "degraded"
+    else if active_task_owner_without_executable_fiber then "degraded"
     else "ok"
   in
   let blocked_count =
     if no_executable_keeper_fibers then executable_reaction_capacity_shortfall_count
     else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target
     then reaction_capacity_shortfall_count
+    else if active_task_owner_without_executable_fiber
+    then active_task_owner_without_executable_fiber_count
     else 0
   in
   let blocked_keeper_names =
     if no_executable_keeper_fibers then names_not_in executable_names
     else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target
     then names_not_in (running_names @ recovering_names)
+    else if active_task_owner_without_executable_fiber
+    then active_task_owner_without_executable_fiber_names
     else []
   in
   let active_capacity_names =
@@ -984,6 +1027,8 @@ let keeper_fleet_safety_health_json
     else if no_running_fibers then Some "no_healthy_running_keeper_fibers"
     else if low_running_fiber_margin then Some "low_running_fiber_margin"
     else if reaction_capacity_below_target then Some "reaction_capacity_below_target"
+    else if active_task_owner_without_executable_fiber
+    then Some "active_task_owner_without_executable_fiber"
     else if paused_autoboot_count > 0 then Some "durable_paused_autoboot_enabled"
     else None
   in
@@ -1034,9 +1079,7 @@ let keeper_fleet_safety_health_json
              active_task_owner_without_executable_fiber_json
              active_task_owner_scan.active_task_owner_without_executable_fibers) )
     ; ( "active_task_owner_fiber_scan_semantics"
-      , `String
-          "advisory: reports task owners without executable keeper fibers; does \
-           not set fleet status, blocker, or operator_action_required" )
+      , `String active_task_owner_fiber_scan_semantics )
     ; ( "active_task_owner_scan_error_count"
       , `Int (List.length active_task_owner_scan.active_task_owner_scan_errors) )
     ; ( "active_task_owner_scan_errors"
@@ -1064,5 +1107,6 @@ let keeper_fleet_safety_health_json
           (no_executable_keeper_fibers
            || no_running_fibers
            || low_running_fiber_margin
-           || reaction_capacity_below_target) )
+           || reaction_capacity_below_target
+           || active_task_owner_without_executable_fiber) )
     ]

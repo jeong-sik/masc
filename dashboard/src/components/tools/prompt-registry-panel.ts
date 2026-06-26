@@ -20,6 +20,7 @@ import {
   buildKeeperPromptAssemblyReport,
   KeeperPromptAssemblyPanel,
   type KeeperPromptAssemblyReport,
+  type KeeperPromptAssemblyRow,
   type KeeperPromptAssemblyStage,
 } from '../keeper-prompt-assembly-panel'
 
@@ -63,12 +64,23 @@ function sourceBadgeClass(source: PromptSource): string {
   }
 }
 
-function promptPresetRows(report: KeeperPromptAssemblyReport, preset: PromptPresetId): Set<string> | null {
+const STAGE_PRESET_PREFIX = 'stage:'
+
+function stagePresetId(preset: PromptPresetId): string | null {
   if (preset === 'all' || preset === 'attention') return null
-  const stageId = preset.replace(/^stage:/, '')
+  return preset.slice(STAGE_PRESET_PREFIX.length)
+}
+
+function promptAssemblyRows(stage: KeeperPromptAssemblyStage): KeeperPromptAssemblyRow[] {
+  return stage.rows.filter(row => row.source !== 'computed')
+}
+
+function promptPresetRows(report: KeeperPromptAssemblyReport, preset: PromptPresetId): Set<string> | null {
+  const stageId = stagePresetId(preset)
+  if (!stageId) return null
   const stage = report.stages.find(item => item.id === stageId)
   if (!stage) return new Set()
-  return new Set(stage.rows.map(row => row.promptKey).filter(key => !key.startsWith('(')))
+  return new Set(promptAssemblyRows(stage).map(row => row.promptKey))
 }
 
 function stagePresetLabel(stage: KeeperPromptAssemblyStage): string {
@@ -95,9 +107,9 @@ export function promptPresetOptions(
   report: KeeperPromptAssemblyReport,
 ): PromptPreset[] {
   const stagePresets = report.stages
-    .filter(stage => stage.rows.some(row => !row.promptKey.startsWith('(')))
+    .filter(stage => promptAssemblyRows(stage).length > 0)
     .map(stage => {
-      const id: PromptPresetId = `stage:${stage.id}`
+      const id: PromptPresetId = `${STAGE_PRESET_PREFIX}${stage.id}`
       return {
         id,
         label: stagePresetLabel(stage),
@@ -152,12 +164,13 @@ export function filterPrompts(
   preset: PromptPresetId = 'all',
 ): DashboardPromptItem[] {
   const q = query.trim().toLowerCase()
+  const allowedPromptKeys =
+    preset !== 'all' && preset !== 'attention'
+      ? report ? promptPresetRows(report, preset) : new Set<string>()
+      : null
   return prompts.filter(p => {
     if (preset === 'attention' && !p.has_override && p.source !== 'missing') return false
-    if (preset !== 'all' && preset !== 'attention') {
-      const allowed = report ? promptPresetRows(report, preset) : new Set<string>()
-      if (!allowed || !allowed.has(p.key)) return false
-    }
+    if (allowedPromptKeys && !allowedPromptKeys.has(p.key)) return false
     if (source !== 'all' && p.source !== source) return false
     if (!q) return true
     return (
@@ -194,15 +207,17 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
   const [status, setStatus] = useState<string | null>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
-  const [preset, setPreset] = useState<PromptPresetId>('stage:base-system')
+  const [preset, setPreset] = useState<PromptPresetId>('all')
 
   const report = buildKeeperPromptAssemblyReport(prompts)
   const presets = promptPresetOptions(prompts, report)
   const activePreset = presets.some(item => item.id === preset) ? preset : 'all'
   const visiblePrompts = filterPrompts(prompts, sourceFilter.value, searchQuery.value, report, activePreset)
-  const selectedPrompt = visiblePrompts.find(prompt => prompt.key === selectedKey) ?? visiblePrompts[0] ?? null
+  const selectedPrompt =
+    (selectedKey ? prompts.find(prompt => prompt.key === selectedKey) : null) ?? visiblePrompts[0] ?? null
   const selectedDestinations = selectedPrompt ? promptDestinationsForKey(report, selectedPrompt.key) : []
   const counts = promptSourceCounts(prompts)
+  const draftDirty = selectedPrompt ? draft !== normalizeDraft(selectedPrompt) : draft.length > 0
 
   async function loadPrompts(preferredKey?: string | null) {
     setLoading(true)
@@ -230,8 +245,24 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
   }, [])
 
   useEffect(() => {
-    setDraft(normalizeDraft(selectedPrompt))
+    if (!selectedPrompt) setDraft('')
   }, [selectedPrompt?.key])
+
+  function confirmDiscardDraft(nextPrompt: DashboardPromptItem): boolean {
+    if (!selectedPrompt || nextPrompt.key === selectedPrompt.key || !draftDirty) return true
+    return (
+      typeof window === 'undefined' ||
+      typeof window.confirm !== 'function' ||
+      window.confirm('저장하지 않은 override 초안을 버리고 다른 프롬프트를 열까요?')
+    )
+  }
+
+  function selectPrompt(prompt: DashboardPromptItem) {
+    if (!confirmDiscardDraft(prompt)) return
+    setSelectedKey(prompt.key)
+    setDraft(normalizeDraft(prompt))
+    setStatus(null)
+  }
 
   async function applyOverride() {
     if (!selectedPrompt) return
@@ -375,9 +406,7 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
                   ? 'border-[var(--accent-30)] bg-[var(--accent-10)]'
                   : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:bg-[var(--color-bg-elevated)]'}"
                 onClick=${() => {
-                  setSelectedKey(prompt.key)
-                  setDraft(normalizeDraft(prompt))
-                  setStatus(null)
+                  selectPrompt(prompt)
                 }}
               >
                 <div class="mb-1 flex items-start justify-between gap-2">

@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
-import { waitFor } from '@testing-library/preact'
+import { fireEvent, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 void vi
@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
         effective: 'override world',
         file_value: 'file world',
         override_value: 'override world',
-        file_path: '/tmp/config/prompts/keeper.world.md',
+        file_path: 'fixture/config/prompts/keeper.world.md',
         file_exists: true,
         source: 'override' as const,
         has_override: true,
@@ -34,7 +34,7 @@ const mocks = vi.hoisted(() => ({
         effective: 'dry run prompt',
         file_value: 'dry run prompt',
         override_value: null,
-        file_path: '/tmp/config/prompts/governance.dry_run.md',
+        file_path: 'fixture/config/prompts/governance.dry_run.md',
         file_exists: true,
         source: 'file' as const,
         has_override: false,
@@ -139,7 +139,7 @@ describe('PromptRegistryPanel', () => {
     expect(container.querySelector('.v2-lab-row')).not.toBeNull()
     expect(container.textContent).toContain('프롬프트 레지스트리')
     expect(container.textContent).toContain('keeper.world')
-    expect(container.textContent).toContain('/tmp/config/prompts/keeper.world.md')
+    expect(container.textContent).toContain('fixture/config/prompts/keeper.world.md')
     expect(container.querySelector('[data-prompt-preset-switcher]')).not.toBeNull()
     expect(container.querySelector('[data-prompt-destinations]')?.textContent).toContain('System rules')
     expect(container.querySelector('[data-prompt-destinations]')?.textContent).toContain('system')
@@ -160,5 +160,45 @@ describe('PromptRegistryPanel', () => {
     await flush()
 
     expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('dry run prompt')
+  })
+
+  it('keeps dirty draft text across filters and confirms before discarding on row selection', async () => {
+    render(html`<${PromptRegistryPanel} />`, container)
+    await flush()
+    await flush()
+
+    const textarea = () => container.querySelector('textarea') as HTMLTextAreaElement
+    const searchInput = () =>
+      container.querySelector('input[aria-label="프롬프트 검색"]') as HTMLInputElement
+    const governanceButton = () =>
+      Array.from(container.querySelectorAll('button')).find(button =>
+        button.textContent?.includes('governance.dry_run'),
+      ) as HTMLButtonElement | undefined
+
+    await fireEvent.input(textarea(), { target: { value: 'edited unsaved draft' } })
+    await fireEvent.input(searchInput(), { target: { value: 'governance' } })
+    await flush()
+
+    expect(textarea().value).toBe('edited unsaved draft')
+
+    const originalConfirm = window.confirm
+    const confirmSpy = vi.fn(() => false)
+    window.confirm = confirmSpy
+    try {
+      await fireEvent.click(governanceButton()!)
+      await flush()
+
+      expect(confirmSpy).toHaveBeenCalledTimes(1)
+      expect(textarea().value).toBe('edited unsaved draft')
+
+      confirmSpy.mockReturnValue(true)
+      await fireEvent.click(governanceButton()!)
+      await flush()
+
+      expect(textarea().value).toBe('dry run prompt')
+    } finally {
+      window.confirm = originalConfirm
+      await fireEvent.input(searchInput(), { target: { value: '' } })
+    }
   })
 })

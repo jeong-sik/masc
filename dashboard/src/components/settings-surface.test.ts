@@ -15,7 +15,7 @@ import { DashboardMain } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
 
-const MOCK_RUNTIME_PATH = '/tmp/.masc/config/runtime.toml'
+const MOCK_RUNTIME_PATH = 'fixture/config/runtime.toml'
 import { dashboardLoading } from '../store'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
 import { resetDevTokenBootstrap } from '../api/dev-token'
@@ -39,7 +39,7 @@ const promptApiMock = vi.hoisted(() => ({
         effective: 'Hello {{keeper}} in {{namespace}}',
         file_value: 'Hello {{keeper}} in {{namespace}}',
         override_value: null,
-        file_path: '/tmp/.masc/config/prompts/keeper.world.md',
+        file_path: 'fixture/config/prompts/keeper.world.md',
         file_exists: true,
         source: 'file' as const,
         has_override: false,

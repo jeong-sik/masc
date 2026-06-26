@@ -49,6 +49,16 @@ module For_testing : sig
       turn is no longer exempt from the no-progress streak. *)
   val claim_bound_work
     : (string * Keeper_tool_outcome.t option) list -> bool
+
+  (** task-5: a passive-only no-work exemption. A turn that only called tools
+      classified as [Passive_status] by [Keeper_tool_progress.classify_tool_progress]
+      and observed no actionable work at turn start is legitimately idle and must
+      not accrue the no-progress streak. *)
+  val legitimate_no_work_passive_only
+    :  observation:Keeper_world_observation.world_observation
+    -> tool_names:string list
+    -> had_owned_active_task:bool
+    -> bool
 end
 
 val handle

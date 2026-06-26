@@ -193,7 +193,7 @@ let claim_bound_work (calls : (string * Keeper_tool_outcome.t option) list) =
     calls
 ;;
 
-let apply_loop_detectors ~config ~observation updated_meta result =
+let apply_loop_detectors ~config ~observation ~meta updated_meta result =
   (* RFC-0239 §3 R3 / RFC-0276 §3.2: feed the loop detector a semantic
      no-progress verdict derived from observed turn facts, not the LLM
      self-declared header. A turn makes progress if it produced durable
@@ -232,10 +232,31 @@ let apply_loop_detectors ~config ~observation updated_meta result =
     | (Peer_only | User_facing | Internal_prose) as delivery ->
       delivery_requires_evidence delivery
   in
+  let had_owned_active_task_at_turn_start =
+    Option.is_some meta.Keeper_meta_contract.current_task_id
+  in
+  let completion_contract =
+    Keeper_agent_run.completion_contract_result_for_progress_evidence
+      ~had_owned_active_task_at_turn_start
+      ~actual_keeper_tool_names:(Keeper_agent_result.tool_names result)
+  in
+  let actionable_signal =
+    Keeper_contract_classifier.classify_actionable_signal
+      (Keeper_contract_classifier.of_keeper_world_observation observation)
+  in
+  (* task-5: the exemption applies to any tool classified as [Passive_status]
+     by [Keeper_tool_progress.classify_tool_progress], including peer-surface
+     tools when the turn observed no work and owned no active task. *)
+  let legitimate_no_work_passive_only =
+    (not had_owned_active_task_at_turn_start)
+    && completion_contract = Keeper_execution_receipt.Contract_passive_only
+    && actionable_signal = Keeper_contract_classifier.No_actionable_signal
+  in
   let made_progress =
     Keeper_no_progress_loop_detector.turn_made_progress
       ~strong_evidence
       ~surface_requires_evidence
+    || legitimate_no_work_passive_only
   in
   let threshold_override =
     no_work_budget_threshold_override
@@ -285,6 +306,21 @@ module For_testing = struct
   let delivery_requires_evidence = delivery_requires_evidence
   let has_substantive_tool_calls_with_outcome = has_substantive_tool_calls_with_outcome
   let claim_bound_work = claim_bound_work
+
+  let legitimate_no_work_passive_only ~observation ~tool_names ~had_owned_active_task =
+    let completion_contract =
+      Keeper_agent_run.completion_contract_result_for_progress_evidence
+        ~had_owned_active_task_at_turn_start:had_owned_active_task
+        ~actual_keeper_tool_names:tool_names
+    in
+    let actionable_signal =
+      Keeper_contract_classifier.classify_actionable_signal
+        (Keeper_contract_classifier.of_keeper_world_observation observation)
+    in
+    (not had_owned_active_task)
+    && completion_contract = Keeper_execution_receipt.Contract_passive_only
+    && actionable_signal = Keeper_contract_classifier.No_actionable_signal
+  ;;
 end
 
 let append_metrics_snapshot
@@ -639,7 +675,7 @@ let handle
       result
   in
   let updated_meta =
-    apply_loop_detectors ~config ~observation updated_meta result
+    apply_loop_detectors ~config ~observation ~meta updated_meta result
   in
   append_metrics_snapshot
     ~config

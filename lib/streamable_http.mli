@@ -32,6 +32,9 @@ module Session : sig
   (** Update last_seen timestamp *)
   val touch : session -> unit
 
+  (** Read last_seen timestamp *)
+  val last_seen : session -> float
+
   (** Remove session *)
   val remove : string -> unit
 

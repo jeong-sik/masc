@@ -28,23 +28,31 @@ let starts_with ~prefix value =
   let prefix_len = String.length prefix in
   String.length value >= prefix_len && String.sub value 0 prefix_len = prefix
 
+let payload_after_prefix ~prefix value =
+  let prefix_len = String.length prefix in
+  String.sub value prefix_len (String.length value - prefix_len)
+
 let is_hex_char = function
   | '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' -> true
   | _ -> false
 
+let min_short_commit_hex_len = 7
+let max_commit_hex_len = 64
+let max_file_extension_len = 12
+
 let is_commit_ref value =
   let len = String.length value in
-  len >= 7 && len <= 40 && String.for_all is_hex_char value
+  len >= min_short_commit_hex_len
+  && len <= max_commit_hex_len
+  && String.for_all is_hex_char value
 
-let contains_path_separator value =
-  String.contains value '/' || String.contains value '\\'
+let contains_path_separator value = String.contains value '/'
 
 let is_file_ref_char = function
   | '0' .. '9'
   | 'a' .. 'z'
   | 'A' .. 'Z'
   | '/'
-  | '\\'
   | '.'
   | '_'
   | '-'
@@ -65,12 +73,24 @@ let has_plausible_extension value =
     let ext_len = len - idx - 1 in
     idx > 0
     && ext_len >= 1
-    && ext_len <= 12
+    && ext_len <= max_file_extension_len
     && String.for_all is_file_ref_char value
     && String.for_all is_extension_char (String.sub value (idx + 1) ext_len)
 
+let has_file_payload_char value =
+  String.exists
+    (function
+      | '/' | '.' -> false
+      | _ -> true)
+    value
+
+let has_concrete_prefix_payload ~prefix value =
+  let payload = payload_after_prefix ~prefix value |> String.trim in
+  (not (String.equal payload "")) && has_file_payload_char payload
+
 let looks_like_file_path value =
   String.for_all is_file_ref_char value
+  && has_file_payload_char value
   && (contains_path_separator value || has_plausible_extension value)
 
 let is_pr_ref value =
@@ -91,20 +111,37 @@ let is_pr_ref value =
            (String.sub value 1 (len - 1)))
 
 let is_trace_ref value =
-  starts_with ~prefix:"trace:" value
-  || starts_with ~prefix:"turn:" value
-  || starts_with ~prefix:"receipt:" value
+  (starts_with ~prefix:"trace:" value
+   && has_concrete_prefix_payload ~prefix:"trace:" value)
+  || (starts_with ~prefix:"turn:" value
+      && has_concrete_prefix_payload ~prefix:"turn:" value)
+  || (starts_with ~prefix:"receipt:" value
+      && has_concrete_prefix_payload ~prefix:"receipt:" value)
+
+let is_url_ref value =
+  (starts_with ~prefix:"http://" value
+   && has_concrete_prefix_payload ~prefix:"http://" value)
+  || (starts_with ~prefix:"https://" value
+      && has_concrete_prefix_payload ~prefix:"https://" value)
+
+let is_file_uri_ref value =
+  starts_with ~prefix:"file://" value
+  && has_concrete_prefix_payload ~prefix:"file://" value
 
 let evidence_ref_is_concrete ref_ =
   let value = String.trim ref_ in
   if String.equal value "" then false
+  else if starts_with ~prefix:"http://" value || starts_with ~prefix:"https://" value
+  then is_url_ref value
+  else if starts_with ~prefix:"file://" value then is_file_uri_ref value
+  else if
+    starts_with ~prefix:"trace:" value
+    || starts_with ~prefix:"turn:" value
+    || starts_with ~prefix:"receipt:" value
+  then is_trace_ref value
   else
-    starts_with ~prefix:"http://" value
-    || starts_with ~prefix:"https://" value
-    || starts_with ~prefix:"file://" value
-    || is_pr_ref value
+    is_pr_ref value
     || is_commit_ref value
-    || is_trace_ref value
     || looks_like_file_path value
 
 let is_reference_token_char = function
@@ -112,7 +149,6 @@ let is_reference_token_char = function
   | 'a' .. 'z'
   | 'A' .. 'Z'
   | '/'
-  | '\\'
   | '_'
   | '-'
   | '~'

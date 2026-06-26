@@ -156,6 +156,46 @@ let test_plain_handoff_reference_rejects () =
          check string "rule_id" Gate.rule_id_evidence_incomplete rule_id)
     [ "see retro"; "see retro." ]
 
+let test_placeholder_handoff_reference_rejects () =
+  let task = make_task ~contract:(Some (make_contract ())) () in
+  List.iter
+    (fun ref_ ->
+       match
+         Gate.decide
+           ~task_id:"task-placeholder-handoff"
+           ~task_opt:(Some task)
+           ~notes:""
+           ~handoff_context:(Some (handoff_with_refs [ ref_ ]))
+           ()
+       with
+       | Gate.Pass ->
+         failf "placeholder handoff ref %S must not count as evidence" ref_
+       | Gate.Reject { rule_id; _ } ->
+         check string "rule_id" Gate.rule_id_evidence_incomplete rule_id)
+    [ "http://"; "https://"; "file://"; "trace:"; "turn:"; "receipt:"; "/"; "//"; "./" ]
+
+let test_placeholder_required_evidence_reference_rejects () =
+  let contract = make_contract ~required_evidence:[ "trace:" ] () in
+  let task = make_task ~contract:(Some contract) () in
+  match
+    Gate.decide
+      ~task_id:"task-placeholder-required-ref"
+      ~task_opt:(Some task)
+      ~notes:"substantive completion notes are present here"
+      ~handoff_context:(Some (handoff_with_refs [ "trace:" ]))
+      ()
+  with
+  | Gate.Pass ->
+    fail "placeholder required_evidence reference must remain unsatisfied"
+  | Gate.Reject { rule_id; payload_json; _ } ->
+    check string "rule_id" Gate.rule_id_evidence_incomplete rule_id;
+    (match payload_json with
+     | `Assoc fields ->
+       (match List.assoc_opt "required_evidence_unsatisfied" fields with
+        | Some (`List [ `String "trace:" ]) -> ()
+        | _ -> fail "payload did not preserve placeholder evidence entry")
+     | _ -> fail "payload is not Assoc")
+
 let test_blank_required_evidence_rejects () =
   let contract = make_contract ~required_evidence:[ "  " ] () in
   let task = make_task ~contract:(Some contract) () in
@@ -290,6 +330,10 @@ let () =
         ; test_case "handoff reference → Pass" `Quick test_handoff_reference_passes
         ; test_case "plain handoff text → Reject" `Quick
             test_plain_handoff_reference_rejects
+        ; test_case "placeholder handoff ref → Reject" `Quick
+            test_placeholder_handoff_reference_rejects
+        ; test_case "placeholder required ref → Reject" `Quick
+            test_placeholder_required_evidence_reference_rejects
         ; test_case "blank required_evidence → Reject" `Quick
             test_blank_required_evidence_rejects
         ; test_case "required_evidence unsatisfied → Reject" `Quick

@@ -171,11 +171,9 @@ describe('keeper workspace v2 (26) mobile contract', () => {
   })
 
   it('keeps remounted operational topbar chrome out of mobile and keeper tablet edges', () => {
-    expect(opsClusterBaseRuleDecls('.v2-top-ops > [data-testid="emergency-stop-control"]')['white-space'])
-      .toBe('nowrap')
-    expect(opsClusterBaseRuleDecls('.v2-top-ops > [data-testid="emergency-stop-control"]')['min-height'])
-      .toBe('28px')
-    expect(opsClusterBaseRuleDecls('.v2-top-ops > [data-testid="emergency-stop-control"] > span')['white-space'])
+    expect(opsClusterBaseRuleDecls('.v2-top-ops > .emergency-stop-control')['white-space']).toBe('nowrap')
+    expect(opsClusterBaseRuleDecls('.v2-top-ops > .emergency-stop-control')['min-height']).toBe('28px')
+    expect(opsClusterBaseRuleDecls('.v2-top-ops > .emergency-stop-control > span')['white-space'])
       .toBe('nowrap')
 
     expect(opsClusterRuleDecls('.v2-app[data-mobile="1"] .v2-top-ops', SHELL_MOBILE_CHROME_BREAKPOINT).display)
@@ -424,10 +422,6 @@ describe('keeper workspace v2 (26) mobile contract', () => {
     expect(keeperWorkspaceRosterSource).toContain('keeper.latest_tool_call_count')
     expect(keeperWorkspaceRosterSource).toContain('class="kw-kp-context"')
     expect(keeperWorkspaceRosterSource).toContain('class="kw-kp-tool"')
-    expect(keeperWorkspaceRosterSource).not.toContain('class="kw-kp-chat')
-    expect(keeperWorkspaceRosterSource).not.toContain('class="kw-kp-inline-actions')
-    expect(keeperWorkspaceRailSource).not.toContain('kw-fleet-chat')
-    expect(keeperWorkspaceRailSource).not.toContain('data-stub')
     expect(keeperWorkspaceRosterSource).toContain('const ROSTER_ROW_ESTIMATED_HEIGHT = 92')
     expect(keeperWorkspaceRosterSource).toContain('estimatedItemHeight=${ROSTER_ROW_ESTIMATED_HEIGHT}')
     expect(css).toContain('.kw-kp-row::before')

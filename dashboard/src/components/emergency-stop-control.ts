@@ -35,7 +35,7 @@ export function EmergencyStopControl() {
 
   if (state === 'paused') {
     return html`
-      <div class="v2-shell-panel flex items-center gap-1.5" data-testid="emergency-stop-control">
+      <div class="emergency-stop-control v2-shell-panel flex items-center gap-1.5" data-testid="emergency-stop-control">
         <${CountBadge} tone="warn">Paused<//>
         ${access.allowed ? html`
           <${ActionButton} variant="ghost" size="sm" disabled=${loading}
@@ -49,7 +49,7 @@ export function EmergencyStopControl() {
 
   if (state === 'running' && access.allowed) {
     return html`
-      <${ActionButton} variant="danger" size="sm" disabled=${loading}
+      <${ActionButton} variant="danger" size="sm" class="emergency-stop-control" disabled=${loading}
         testId="emergency-stop-control"
         onClick=${async () => {
           const confirmed = await requestConfirm({

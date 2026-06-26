@@ -263,9 +263,6 @@ function RosterRow({
   const activityText = rosterActivityText(activity)
   const recentTool = keeperRecentTool(keeper)
   const phaseLabel = keeperPhaseLabel(keeper)
-  const contextLabel = contextPct === null ? '' : ` · context ${contextPct}%`
-  const attentionLabel = att > 0 ? ` · 주의 ${att}` : ''
-  const rowLabel = `${keeper.name} 선택 · ${phaseLabel}${contextLabel}${attentionLabel}`
   const select = () => onSelect(keeper.name)
   return html`
     <div
@@ -275,7 +272,6 @@ function RosterRow({
       data-tone=${tone}
       style=${style}
       aria-current=${active ? 'true' : 'false'}
-      aria-label=${rowLabel}
       onClick=${select}
       onContextMenu=${(event: MouseEvent) => onMenu(keeper, event)}
       onKeyDown=${(event: KeyboardEvent) => {

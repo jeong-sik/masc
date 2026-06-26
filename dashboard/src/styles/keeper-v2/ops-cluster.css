@@ -53,7 +53,7 @@
   white-space: nowrap;
 }
 
-.v2-top-ops > [data-testid="emergency-stop-control"] {
+.v2-top-ops > .emergency-stop-control {
   display: inline-flex;
   flex: none;
   align-items: center;
@@ -64,7 +64,7 @@
   white-space: nowrap;
 }
 
-.v2-top-ops > [data-testid="emergency-stop-control"] > span {
+.v2-top-ops > .emergency-stop-control > span {
   flex-wrap: nowrap;
   white-space: nowrap;
 }

@@ -1996,9 +1996,15 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 
 .ctx-meter-head {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   align-items: baseline;
+  gap: 8px;
   min-width: 0;
+}
+
+.ctx-meter-label {
+  color: var(--text-mid);
+  font-size: 12px;
 }
 
 .ctx-meter-pct {

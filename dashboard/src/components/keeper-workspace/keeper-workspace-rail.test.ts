@@ -116,7 +116,7 @@ describe('KeeperWorkspaceRail', () => {
     const meter = container.querySelector('.meter') as HTMLElement | null
 
     expect(container.textContent).toContain('컨텍스트')
-    expect(container.textContent).not.toContain('윈도우 사용량')
+    expect(container.textContent).toContain('윈도우 사용량')
     expect(container.textContent).toContain('62%')
     expect(container.textContent).toContain('124.0k')
     expect(meter).not.toBeNull()

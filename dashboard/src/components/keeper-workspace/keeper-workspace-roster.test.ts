@@ -78,12 +78,13 @@ describe('KeeperWorkspaceRoster', () => {
     expect(active?.textContent).toContain('masc-improver')
   })
 
-  it('exposes selectable rows with a descriptive accessible label', () => {
+  it('uses visible row content for the selectable row name', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
     const active = host.querySelector('.kw-kp-row[aria-current="true"]') as HTMLElement
 
-    expect(active?.getAttribute('aria-label')).toContain('masc-improver 선택')
-    expect(active?.getAttribute('aria-label')).toContain('실행 중')
+    expect(active?.getAttribute('aria-label')).toBeNull()
+    expect(active?.textContent).toContain('masc-improver')
+    expect(active?.textContent).toContain('실행 중')
   })
 
   it('keeps row actions behind one explicit command menu target', () => {

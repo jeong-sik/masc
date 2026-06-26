@@ -72,6 +72,7 @@ describe('EmergencyStopControl', () => {
 
     expect(container.textContent).toContain('Emergency Stop')
     expect(container.querySelector('[data-testid="emergency-stop-control"]')).toBeTruthy()
+    expect(container.querySelector('.emergency-stop-control')).toBeTruthy()
   })
 
   it('pauses the namespace after the confirmation is accepted', async () => {
@@ -115,6 +116,7 @@ describe('EmergencyStopControl', () => {
 
     expect(container.textContent).toContain('Paused')
     expect(container.textContent).toContain('Resume')
+    expect(container.querySelector('.emergency-stop-control')).toBeTruthy()
   })
 
   it('resumes the namespace when Resume is clicked', async () => {

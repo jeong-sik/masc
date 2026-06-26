@@ -423,7 +423,8 @@ function ContextSection({
   }
 
   const usageHeader = html`
-    <div class="ctx-meter-head" aria-label=${`윈도우 사용률 ${pct ?? 0}%`}>
+    <div class="ctx-meter-head">
+      <span class="ctx-meter-label">윈도우 사용량</span>
       <span class=${`ctx-meter-pct mono${hot ? ' hot' : ''}`}>${pct ?? 0}%</span>
     </div>
   `

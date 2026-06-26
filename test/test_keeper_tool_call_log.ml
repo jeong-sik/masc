@@ -544,6 +544,33 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
         (Safe_ops.json_string_opt "command" evidence)
     | _ -> Alcotest.fail "expected exactly one entry")
 
+let test_route_evidence_redacts_wrapped_git_push () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"executor"
+      ~tool_name:"tool_execute"
+      ~input:
+        (`Assoc
+           [
+             ( "cmd",
+               `String
+                 "env FOO=bar git -C repos/private-worktree push origin feature/private-proof"
+             );
+           ])
+      ~output_text:
+        {|{"ok":true,"via":"docker","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}
+      ~success:true
+      ~duration_ms:42.0
+      ();
+    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
+    match entries with
+    | [ entry ] ->
+      let evidence = Yojson.Safe.Util.member "route_evidence" entry in
+      Alcotest.(check (option string)) "wrapped command redacted"
+        (Some "env FOO=bar git -C [REDACTED] push origin [REDACTED]")
+        (Safe_ops.json_string_opt "command" evidence)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
 let test_route_evidence_records_descriptor_for_filesystem_calls () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
@@ -1168,6 +1195,8 @@ let () =
             test_route_evidence_stored_for_git_push
         ; eio_test "route evidence reads blob-backed git push preview"
             test_route_evidence_stored_for_blob_backed_git_push
+        ; eio_test "route evidence redacts wrapped git push"
+            test_route_evidence_redacts_wrapped_git_push
         ; eio_test "route evidence records descriptor for filesystem calls"
             test_route_evidence_records_descriptor_for_filesystem_calls
         ; eio_test "route evidence records internal descriptor"

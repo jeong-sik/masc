@@ -45,23 +45,66 @@ let git_push_option_consumes_value = function
   | _ -> false
 ;;
 
+let git_global_option_consumes_path = function
+  | "-C" | "--git-dir" | "--work-tree" | "--exec-path" -> true
+  | _ -> false
+;;
+
+let redact_inline_git_path_option word =
+  let prefixes =
+    [ "--git-dir="; "--work-tree="; "--exec-path=" ]
+  in
+  match
+    List.find_opt
+      (fun prefix -> String.starts_with ~prefix word)
+      prefixes
+  with
+  | Some prefix -> prefix ^ "[REDACTED]"
+  | None -> word
+;;
+
+let redact_git_global_path_options words =
+  let rec loop acc = function
+    | [] -> List.rev acc
+    | option :: _value :: tail when git_global_option_consumes_path option ->
+      loop ("[REDACTED]" :: option :: acc) tail
+    | word :: tail ->
+      loop (redact_inline_git_path_option word :: acc) tail
+  in
+  loop [] words
+;;
+
 let redact_git_push_refspecs command =
-  match split_command_words command with
-  | "git" :: "push" :: rest ->
-    let rec loop ~seen_remote ~redacted acc = function
+  let rec redact_push_args ~seen_remote ~redacted acc = function
       | [] -> Some (String.concat " " (List.rev acc))
       | option :: value :: tail when git_push_option_consumes_value option ->
-        loop ~seen_remote ~redacted (value :: option :: acc) tail
+        redact_push_args ~seen_remote ~redacted (value :: option :: acc) tail
       | word :: tail when String.starts_with ~prefix:"-" word ->
-        loop ~seen_remote ~redacted (word :: acc) tail
+        redact_push_args ~seen_remote ~redacted (word :: acc) tail
       | word :: tail when not seen_remote ->
-        loop ~seen_remote:true ~redacted (word :: acc) tail
+        redact_push_args ~seen_remote:true ~redacted (word :: acc) tail
       | _word :: tail ->
         let acc = if redacted then acc else "[REDACTED]" :: acc in
-        loop ~seen_remote ~redacted:true acc tail
-    in
-    loop ~seen_remote:false ~redacted:false [ "push"; "git" ] rest
-  | _ -> None
+        redact_push_args ~seen_remote ~redacted:true acc tail
+  in
+  let rec find_git prefix = function
+    | [] -> None
+    | "git" :: rest ->
+      let rest = redact_git_global_path_options rest in
+      let rec find_push git_prefix = function
+        | [] -> None
+        | "push" :: push_rest ->
+          redact_push_args
+            ~seen_remote:false
+            ~redacted:false
+            ("push" :: (git_prefix @ ("git" :: prefix)))
+            push_rest
+        | word :: tail -> find_push (word :: git_prefix) tail
+      in
+      find_push [] rest
+    | word :: tail -> find_git (word :: prefix) tail
+  in
+  find_git [] (split_command_words command)
 ;;
 
 let route_safe_command_string ~max_output_len command =

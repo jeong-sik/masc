@@ -3,8 +3,9 @@
 
 import { html } from 'htm/preact'
 import { useComputed, useSignal } from '@preact/signals'
+import { useEffect } from 'preact/hooks'
 import { oasHealthSummary, oasAgentEvents, oasKeeperSnapshots } from '../store'
-import { loadMoreOasEvents } from '../oas-runtime-store'
+import { ensureOasRuntimeReplay, loadMoreOasEvents } from '../oas-runtime-store'
 import { SectionCard } from './common/card'
 import { StatTile } from './common/stat-tile'
 import { EmptyState } from './common/feedback-state'
@@ -107,6 +108,17 @@ export function OasHealthChip() {
     return tick == null || Date.now() - tick > STALE_MS
   })
   const isLoadingMore = useSignal(false)
+
+  useEffect(() => {
+    let disposed = false
+    void ensureOasRuntimeReplay().catch(err => {
+      if (disposed) return
+      console.warn('[OAS] runtime replay failed', err instanceof Error ? err.message : err)
+    })
+    return () => {
+      disposed = true
+    }
+  }, [])
 
   async function handleLoadMore() {
     if (isLoadingMore.value) return

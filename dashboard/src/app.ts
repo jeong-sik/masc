@@ -16,10 +16,6 @@ import { lazy, Suspense } from 'preact/compat'
 import { signal } from '@preact/signals'
 import { persistentSignal } from './lib/persistent-signal'
 import { route, initRouter } from './router'
-import {
-  pauseQueuedOasRuntimeIngress,
-  resumeQueuedOasRuntimeIngress,
-} from './sse'
 import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './namespace-truth-store'
 import { cancelPendingSSERefreshes, registerGovernanceRefresh, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { refreshShell } from './store'
@@ -179,23 +175,8 @@ export function App() {
           .catch(err => {
             console.warn('[app] dashboard config fetch failed', err instanceof Error ? err.message : err)
           })
-      })
 
-    // Replay durable OAS state before opening the live SSE tail.
-    pauseQueuedOasRuntimeIngress()
-    void import('./oas-runtime-store')
-      .then(({ replayOasRuntimeTelemetry }) => replayOasRuntimeTelemetry())
-      .catch(err => {
-        console.warn('[app] OAS runtime replay failed', err instanceof Error ? err.message : err)
-      })
-      .finally(() => {
-        if (cancelled) return
-        void ensureLoopbackAuth()
-          .finally(() => {
-            if (cancelled) return
-            void connectDashboardWS(route.value)
-            resumeQueuedOasRuntimeIngress()
-          })
+        void connectDashboardWS(route.value)
       })
 
     registerMissionRefresh(() => {

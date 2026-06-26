@@ -200,17 +200,18 @@ let test_stale_watchdog_broadcast_dedupe () =
 let test_stale_watchdog_emit_regression () =
   Eio_main.run @@ fun _env ->
   R.For_testing.reset_stale_broadcast_dedupe ();
+  let exception Emit_failed in
   let attempts = ref 0 in
   (try
      ignore
        (emit_stale_for_testing
           ~emit:(fun () ->
             incr attempts;
-            failwith "emit failed")
+            raise Emit_failed)
           ());
      failwith "expected stale broadcast emit failure"
    with
-   | Failure "emit failed" -> ());
+   | Emit_failed -> ());
   check_bool "failed emit was attempted" true (!attempts = 1);
   check_bool
     "same key retries after failed emit"

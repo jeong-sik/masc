@@ -92,6 +92,14 @@ describe('KeeperWorkspaceRail', () => {
     expect(state?.getAttribute('title')).toBe('offline')
   })
 
+  it('keeps the selected runtime card informational without a duplicate chat CTA', () => {
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
+
+    expect(container.querySelector('.kw-fleet-aside')).not.toBeNull()
+    expect(container.querySelector('.kw-fleet-chat')).toBeNull()
+    expect(container.textContent).not.toContain('대화 콘솔 열기')
+  })
+
   it('shows the model line as missing when no model was reported', () => {
     const k = mkKeeper({ runtime_canonical: 'runpod_gemma' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
@@ -105,11 +113,16 @@ describe('KeeperWorkspaceRail', () => {
 
   it('renders the context-window occupancy percent', () => {
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
-    // v2 renames the "컨텍스트 점유" header to "컨텍스트" with a "윈도우 사용량" usage label.
+    const meter = container.querySelector('.meter') as HTMLElement | null
+
     expect(container.textContent).toContain('컨텍스트')
-    expect(container.textContent).toContain('윈도우 사용량')
+    expect(container.textContent).not.toContain('윈도우 사용량')
     expect(container.textContent).toContain('62%')
     expect(container.textContent).toContain('124.0k')
+    expect(meter).not.toBeNull()
+    expect(meter?.getAttribute('role')).toBe('meter')
+    expect(meter?.getAttribute('aria-label')).toBe('컨텍스트 윈도우 사용률')
+    expect(meter?.getAttribute('aria-valuenow')).toBe('62')
   })
 
   it('lists only the keeper-owned tasks', () => {

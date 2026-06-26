@@ -12,8 +12,6 @@ import type { VNode } from 'preact'
 import { shellAuthSummary, tasks } from '../../store'
 import type { Keeper, Task } from '../../types'
 import { navigate } from '../../router'
-import { selectKeeper } from '../../keeper-runtime'
-import { keeperMobilePane } from '../keeper-detail-state'
 import { keeperActivityDisplay } from '../../lib/keeper-runtime-display'
 import { keeperActionVisibility } from '../../lib/keeper-predicates'
 import {
@@ -179,11 +177,6 @@ function FleetSelectedSection({ keeper }: { keeper: Keeper }): VNode {
   const lifecycle = keeper.phase || keeper.lifecycle_phase || keeper.status
   const actions = fleetLifecycleActions(keeper).filter(action => action !== 'shutdown').slice(0, 3)
   const [pendingAction, setPendingAction] = useState<KeeperActionKey | null>(null)
-  const openChat = () => {
-    selectKeeper(keeper.name)
-    keeperMobilePane.value = 'chat'
-    navigate('monitoring', { section: 'agents', keeper: keeper.name })
-  }
 
   return html`
     <div class="kw-fleet-aside" data-tone=${tone}>
@@ -196,7 +189,6 @@ function FleetSelectedSection({ keeper }: { keeper: Keeper }): VNode {
         </div>
         <span class="kw-fleet-aside-state" title=${keeper.status}>${phase}</span>
       </div>
-      <button type="button" class="kw-fleet-chat" onClick=${openChat}>대화 콘솔 열기</button>
       <div class="kw-fleet-phase" title=${activity.source !== 'none' ? activity.label : phase}>
         <b>${phase}</b>
         <span>${activity.source !== 'none' ? activity.label : '최근 활동 미수신'}</span>
@@ -278,10 +270,10 @@ function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
                 </span>
               </div>
             `
-          : html`<div class="rtc-na" data-stub="runtime-capabilities">capabilities — n/a</div>`}
+          : html`<div class="rtc-na" data-missing="runtime-capabilities">능력 정보 미수신</div>`}
         <div class="rtc-effort">
           <span class="rtc-effort-k">effort</span>
-          <span class="rtc-eff-na" data-stub="runtime-effort">조정 불가 · 미수집</span>
+          <span class="rtc-eff-na" data-missing="runtime-effort">조정 정보 미수신</span>
         </div>
       </div>
     </div>
@@ -431,9 +423,8 @@ function ContextSection({
   }
 
   const usageHeader = html`
-    <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-      <span style=${{ fontSize: '12px', color: 'var(--text-mid)' }}>윈도우 사용량</span>
-      <span class="mono" style=${{ fontSize: '14px', color: hot ? 'var(--status-bad)' : 'var(--volt-strong)' }}>${pct ?? 0}%</span>
+    <div class="ctx-meter-head" aria-label=${`윈도우 사용률 ${pct ?? 0}%`}>
+      <span class=${`ctx-meter-pct mono${hot ? ' hot' : ''}`}>${pct ?? 0}%</span>
     </div>
   `
 
@@ -445,13 +436,20 @@ function ContextSection({
           ? html`
               ${usageHeader}
               <div class="meter-wrap">
-                <div class=${`meter${hot ? ' hot' : ''}`}><span style=${{ width: `${pct ?? 0}%` }}></span></div>
+                <div
+                  class=${`meter${hot ? ' hot' : ''}`}
+                  role="meter"
+                  aria-label="컨텍스트 윈도우 사용률"
+                  aria-valuenow=${pct ?? 0}
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                ><span style=${{ width: `${pct ?? 0}%` }}></span></div>
                 <span class=${`meter-mark${hot ? ' hot' : ''}`} style=${{ left: `${compactAt}%` }}>
                   <i class="meter-mark-lbl">compact ${compactAt}%</i>
                 </span>
               </div>
             `
-          : html`<div class="ctx-empty" data-stub="context-window"><strong>윈도우 사용률 미수신</strong><span>런타임이 전체 윈도우 총량을 아직 보내지 않았습니다.</span></div>`}
+          : html`<div class="ctx-empty" data-missing="context-window"><strong>윈도우 사용률 미수신</strong><span>런타임이 전체 윈도우 총량을 아직 보내지 않았습니다.</span></div>`}
         <div class="ctx-tok">
           <span class="mono">${tokens ?? '—'}</span>
           <span class="ctx-tok-sep">/</span>

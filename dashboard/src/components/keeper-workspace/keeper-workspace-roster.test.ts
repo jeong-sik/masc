@@ -78,6 +78,22 @@ describe('KeeperWorkspaceRoster', () => {
     expect(active?.textContent).toContain('masc-improver')
   })
 
+  it('exposes selectable rows with a descriptive accessible label', () => {
+    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
+    const active = host.querySelector('.kw-kp-row[aria-current="true"]') as HTMLElement
+
+    expect(active?.getAttribute('aria-label')).toContain('masc-improver 선택')
+    expect(active?.getAttribute('aria-label')).toContain('실행 중')
+  })
+
+  it('keeps row actions behind one explicit command menu target', () => {
+    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
+
+    expect(host.querySelector('.kw-kp-chat')).toBeNull()
+    expect(host.querySelector('.kw-kp-inline-actions')).toBeNull()
+    expect(host.querySelectorAll('.kw-kp-more').length).toBe(host.querySelectorAll('.kw-kp-row').length)
+  })
+
   it('shows filter chip counts (all / running / attention)', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
     const chips = Array.from(host.querySelectorAll('.kw-rfilter')).map(c => c.textContent)

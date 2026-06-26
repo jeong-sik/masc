@@ -94,6 +94,7 @@ function mediaRuleDeclsIn(source: string, selector: string, maxWidth: string): R
 const mediaRuleDecls = (selector: string, maxWidth: string) => mediaRuleDeclsIn(css, selector, maxWidth)
 const mobileRuleDecls = (selector: string) => mediaRuleDecls(selector, KEEPER_MOBILE_PANE_BREAKPOINT)
 const copilotRuleDecls = (selector: string, maxWidth: string) => mediaRuleDeclsIn(copilotCss, selector, maxWidth)
+const opsClusterBaseRuleDecls = (selector: string) => baseRuleDeclsIn(opsClusterCss, selector)
 const opsClusterRuleDecls = (selector: string, maxWidth: string) => mediaRuleDeclsIn(opsClusterCss, selector, maxWidth)
 const keeperV2CraftMobileRuleDecls = (selector: string) =>
   mediaRuleDeclsIn(keeperV2CraftCss, selector, KEEPER_MOBILE_PANE_BREAKPOINT)
@@ -170,6 +171,13 @@ describe('keeper workspace v2 (26) mobile contract', () => {
   })
 
   it('keeps remounted operational topbar chrome out of mobile and keeper tablet edges', () => {
+    expect(opsClusterBaseRuleDecls('.v2-top-ops > [data-testid="emergency-stop-control"]')['white-space'])
+      .toBe('nowrap')
+    expect(opsClusterBaseRuleDecls('.v2-top-ops > [data-testid="emergency-stop-control"]')['min-height'])
+      .toBe('28px')
+    expect(opsClusterBaseRuleDecls('.v2-top-ops > [data-testid="emergency-stop-control"] > span')['white-space'])
+      .toBe('nowrap')
+
     expect(opsClusterRuleDecls('.v2-app[data-mobile="1"] .v2-top-ops', SHELL_MOBILE_CHROME_BREAKPOINT).display)
       .toBe('none')
     expect(
@@ -416,6 +424,10 @@ describe('keeper workspace v2 (26) mobile contract', () => {
     expect(keeperWorkspaceRosterSource).toContain('keeper.latest_tool_call_count')
     expect(keeperWorkspaceRosterSource).toContain('class="kw-kp-context"')
     expect(keeperWorkspaceRosterSource).toContain('class="kw-kp-tool"')
+    expect(keeperWorkspaceRosterSource).not.toContain('class="kw-kp-chat')
+    expect(keeperWorkspaceRosterSource).not.toContain('class="kw-kp-inline-actions')
+    expect(keeperWorkspaceRailSource).not.toContain('kw-fleet-chat')
+    expect(keeperWorkspaceRailSource).not.toContain('data-stub')
     expect(keeperWorkspaceRosterSource).toContain('const ROSTER_ROW_ESTIMATED_HEIGHT = 92')
     expect(keeperWorkspaceRosterSource).toContain('estimatedItemHeight=${ROSTER_ROW_ESTIMATED_HEIGHT}')
     expect(css).toContain('.kw-kp-row::before')

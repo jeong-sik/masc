@@ -262,8 +262,10 @@ function RosterRow({
   const activity = keeperActivityDisplay(keeper, undefined, { includeCreated: false })
   const activityText = rosterActivityText(activity)
   const recentTool = keeperRecentTool(keeper)
-  const inlineActions = lifecycleActions(keeper).filter(action => action !== 'shutdown').slice(0, 2)
-  const [pendingAction, setPendingAction] = useState<KeeperActionKey | null>(null)
+  const phaseLabel = keeperPhaseLabel(keeper)
+  const contextLabel = contextPct === null ? '' : ` · context ${contextPct}%`
+  const attentionLabel = att > 0 ? ` · 주의 ${att}` : ''
+  const rowLabel = `${keeper.name} 선택 · ${phaseLabel}${contextLabel}${attentionLabel}`
   const select = () => onSelect(keeper.name)
   return html`
     <div
@@ -273,6 +275,7 @@ function RosterRow({
       data-tone=${tone}
       style=${style}
       aria-current=${active ? 'true' : 'false'}
+      aria-label=${rowLabel}
       onClick=${select}
       onContextMenu=${(event: MouseEvent) => onMenu(keeper, event)}
       onKeyDown=${(event: KeyboardEvent) => {
@@ -285,7 +288,7 @@ function RosterRow({
       <div class="kw-kp-meta">
         <div class="kw-kp-name">${keeper.koreanName ?? keeper.name}</div>
         <div class="kw-kp-sub">
-          <span class="kw-kp-state"><${StatusDot} tone=${tone} pulse=${bucket === 'running'} />${keeperPhaseLabel(keeper)}</span>
+          <span class="kw-kp-state"><${StatusDot} tone=${tone} pulse=${bucket === 'running'} />${phaseLabel}</span>
           ${handle ? html`<span aria-hidden="true">·</span><span class="kw-kp-handle kp-handle" title=${handleTitle}>${handle}</span>` : null}
         </div>
         ${contextPct !== null
@@ -315,53 +318,9 @@ function RosterRow({
       </div>
       <button
         type="button"
-        class="kw-kp-chat v2-monitoring-action"
-        aria-label=${`${keeper.name} 대화 열기`}
-        title="대화 열기"
-        onClick=${(event: MouseEvent) => {
-          event.preventDefault()
-          event.stopPropagation()
-          select()
-        }}
-      >
-        <${MessageSquare} size=${14} aria-hidden="true" />
-      </button>
-      ${inlineActions.length > 0
-        ? html`
-            <div class="kw-kp-inline-actions">
-              ${inlineActions.map(action => {
-                const copy = LIFECYCLE_COPY[action]
-                const Icon = copy.icon
-                return html`
-                  <button
-                    key=${action}
-                    type="button"
-                    class=${`kw-kp-inline-action v2-monitoring-action${pendingAction === action ? ' busy' : ''}`}
-                    title=${copy.title}
-                    aria-label=${`${keeper.name} ${copy.label}`}
-                    aria-busy=${pendingAction === action ? 'true' : 'false'}
-                    disabled=${pendingAction !== null}
-                    onClick=${(event: MouseEvent) => {
-                      event.preventDefault()
-                      event.stopPropagation()
-                      if (pendingAction !== null) return
-                      setPendingAction(action)
-                      void runRosterKeeperAction(keeper.name, action).finally(() => setPendingAction(null))
-                    }}
-                  >
-                    <${Icon} size=${13} aria-hidden="true" />
-                    <span>${pendingAction === action ? '실행중' : copy.label}</span>
-                  </button>
-                `
-              })}
-            </div>
-          `
-        : null}
-      <button
-        type="button"
         class="kw-kp-more v2-monitoring-action"
-        aria-label=${`${keeper.name} 명령`}
-        title="keeper 명령"
+        aria-label=${`${keeper.name} 명령 메뉴`}
+        title="keeper 명령 메뉴"
         onClick=${(event: MouseEvent) => onMenu(keeper, event)}
         data-testid=${`kw-roster-menu-${keeper.name}`}
       >

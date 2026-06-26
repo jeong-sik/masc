@@ -182,6 +182,21 @@ let make_fake_eio_exe repo_root =
   let exe_path = Filename.concat repo_root "_build/default/bin/main_eio.exe" in
   write_fake_eio_exe exe_path ~marker:"local"
 
+let write_failing_dashboard_build_helper repo_root marker =
+  let scripts_dir = Filename.concat repo_root "scripts" in
+  mkdir_p scripts_dir;
+  write_executable
+    (Filename.concat scripts_dir "build-dashboard-if-needed.sh")
+    (Printf.sprintf
+       {|
+#!/bin/sh
+set -eu
+echo ran > %s
+echo dashboard build failed >&2
+exit 17
+|}
+       (quote marker))
+
 let write_fake_dune_stale_then_success ~path ~state_file ~clean_marker =
   write_executable path
     (Printf.sprintf
@@ -1031,6 +1046,57 @@ exit 0
       check bool "stderr explains stdio dashboard skip" true
         (contains_substring stderr "Skipping SPA build in stdio mode."))
 
+let test_http_dashboard_build_failure_is_non_blocking_by_default () =
+  with_temp_dir "start-masc-script-dashboard-nonblocking" (fun dir ->
+      let script = Filename.concat dir "start-masc.sh" in
+      let dashboard_marker = Filename.concat dir "dashboard-build-ran.txt" in
+      let capture = Filename.concat dir "captured-http.txt" in
+      copy_script (script_path ()) script;
+      ignore (make_config_root dir);
+      make_fake_eio_exe dir;
+      write_failing_dashboard_build_helper dir dashboard_marker;
+      let code, stdout, stderr =
+        run_script ~cwd:dir script
+          ~env:[ ("FAKE_CAPTURE_FILE", capture); ("MASC_BASE_PATH", dir) ]
+          [ "--http"; "--port"; "9956"; "--base-path"; dir ]
+      in
+      if code <> 0 then
+        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
+          stderr;
+      let captured = read_file capture in
+      check bool "HTTP server starts despite dashboard helper failure" true
+        (contains_substring captured "FAKE_EXE_MARKER=local");
+      check bool "dashboard build is non-blocking by default" true
+        (contains_substring stderr "Background SPA build started"))
+
+let test_http_dashboard_build_blocking_mode_fails_closed () =
+  with_temp_dir "start-masc-script-dashboard-blocking" (fun dir ->
+      let script = Filename.concat dir "start-masc.sh" in
+      let dashboard_marker = Filename.concat dir "dashboard-build-ran.txt" in
+      let capture = Filename.concat dir "captured-http.txt" in
+      copy_script (script_path ()) script;
+      ignore (make_config_root dir);
+      make_fake_eio_exe dir;
+      write_failing_dashboard_build_helper dir dashboard_marker;
+      let code, _stdout, stderr =
+        run_script ~cwd:dir script
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture);
+              ("MASC_BASE_PATH", dir);
+              ("MASC_DASHBOARD_BUILD_BLOCKING", "1");
+            ]
+          [ "--http"; "--port"; "9957"; "--base-path"; dir ]
+      in
+      check bool "blocking dashboard build failure stops startup" true
+        (code <> 0);
+      check bool "HTTP server is not launched after blocking build failure" false
+        (Sys.file_exists capture);
+      check bool "blocking dashboard build is explicit in stderr" true
+        (contains_substring stderr "Building SPA before server start");
+      check bool "helper failure is surfaced in blocking mode" true
+        (contains_substring stderr "dashboard build failed"))
+
 let test_http_preflight_waits_for_port_to_clear_before_build () =
   with_temp_dir "start-masc-script-port-wait" (fun dir ->
       let script = Filename.concat dir "start-masc.sh" in
@@ -1179,6 +1245,13 @@ let () =
             test_stale_executable_requires_build_lock;
           test_case "stdio skips dashboard build and HTTP preflight" `Quick
             test_stdio_skips_dashboard_build_and_http_preflight;
+          test_case
+            "dashboard build failure is non-blocking by default in HTTP mode"
+            `Quick
+            test_http_dashboard_build_failure_is_non_blocking_by_default;
+          test_case
+            "dashboard build failure stops startup in explicit blocking mode"
+            `Quick test_http_dashboard_build_blocking_mode_fails_closed;
           test_case "HTTP preflight waits for transient port conflict" `Quick
             test_http_preflight_waits_for_port_to_clear_before_build;
           test_case "zshenv absolute base path is preserved" `Quick

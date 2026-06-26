@@ -264,7 +264,7 @@ build_dashboard_spa() {
         return 0
     fi
 
-    if is_truthy "${MASC_DASHBOARD_BUILD_BLOCKING:-1}"; then
+    if is_truthy "${MASC_DASHBOARD_BUILD_BLOCKING:-0}"; then
         echo "[dashboard] Building SPA before server start..." >&2
         "$build_script"
         return 0

@@ -306,6 +306,41 @@ let test_dashboard_shell_http_json_prefers_preserved_base_path_input () =
     (json |> member "runtime_resolution" |> member "base_path" |> member "path"
    |> to_string)
 
+let runtime_resolution_warning_strings json =
+  let open Yojson.Safe.Util in
+  json |> member "warnings" |> to_list
+  |> List.filter_map (function
+    | `String value -> Some value
+    | _ -> None)
+
+let assert_no_server_workspace_warning label json =
+  check bool label false
+    (List.exists
+       (fun warning ->
+         Lib.String_util.contains_substring warning "Server binary checkout")
+       (runtime_resolution_warning_strings json))
+
+let test_runtime_resolution_accepts_server_repo_inside_base_path () =
+  match Lib.Build_identity.repo_root () with
+  | None -> fail "Build_identity.repo_root unavailable; cannot test server/base path relation"
+  | Some repo_root ->
+    let repo_root =
+      try Unix.realpath repo_root with
+      | Unix.Unix_error _ -> repo_root
+    in
+    let config = Workspace.default_config (Filename.dirname repo_root) in
+    let open Yojson.Safe.Util in
+    let full = Lib.Server_dashboard_http_runtime_info.runtime_resolution_json config in
+    let light =
+      Lib.Server_dashboard_http_runtime_info.light_runtime_resolution_json config
+    in
+    check bool "full runtime accepts nested server repo" false
+      (full |> member "server_workspace_mismatch" |> to_bool);
+    check bool "light runtime accepts nested server repo" false
+      (light |> member "server_workspace_mismatch" |> to_bool);
+    assert_no_server_workspace_warning "full runtime omits nested server warning" full;
+    assert_no_server_workspace_warning "light runtime omits nested server warning" light
+
 let test_dashboard_shell_http_json_uses_bootstrap_payload_while_prewarming () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let original_warmed = Atomic.get Server_dashboard_http.shell_warmed in
@@ -1479,6 +1514,8 @@ let () =
             test_dashboard_shell_http_json_includes_paths;
           test_case "shell runtime base_path prefers preserved input" `Quick
             test_dashboard_shell_http_json_prefers_preserved_base_path_input;
+          test_case "runtime resolution accepts server repo under base path" `Quick
+            test_runtime_resolution_accepts_server_repo_inside_base_path;
           test_case "shell bootstrap payload while prewarming" `Quick
             test_dashboard_shell_http_json_uses_bootstrap_payload_while_prewarming;
           test_case "shell reuses last good payload while prewarming" `Quick

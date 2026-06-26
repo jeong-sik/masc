@@ -655,10 +655,24 @@ let normalized_path_opt path =
     Some normalized
 ;;
 
-let same_normalized_path path expected =
+let same_or_descendant_normalized_path path expected =
   match normalized_path_opt expected with
-  | Some expected -> String.equal path expected
   | None -> false
+  | Some expected ->
+    let path = Env_config_core.strip_path_trailing_slashes path in
+    let expected = Env_config_core.strip_path_trailing_slashes expected in
+    String.equal path expected
+    ||
+    let expected_len = String.length expected in
+    String.length path > expected_len
+    && String.starts_with ~prefix:expected path
+    && (String.equal expected "/" || Char.equal path.[expected_len] '/')
+;;
+
+let server_workspace_mismatch ~server_repo_path (config : Workspace.config) =
+  not
+    (same_or_descendant_normalized_path server_repo_path config.workspace_path
+     || same_or_descendant_normalized_path server_repo_path config.base_path)
 ;;
 
 let shutdown_signal_of_message message =
@@ -1616,9 +1630,7 @@ let runtime_resolution_json (config : Workspace.config) =
   let server_workspace_mismatch =
     match Option.bind server_repo_path normalized_path_opt with
     | None -> false
-    | Some server_repo_path ->
-      (not (same_normalized_path server_repo_path config.workspace_path))
-      && not (same_normalized_path server_repo_path config.base_path)
+    | Some server_repo_path -> server_workspace_mismatch ~server_repo_path config
   in
   let diagnostics, signal_count, repair_count, agent_issue_count =
     runtime_diagnostics_json ()
@@ -1843,11 +1855,8 @@ let light_runtime_resolution_json (config : Workspace.config) =
   in
   let server_repo_path = Build_identity.repo_root () in
   let server_workspace_mismatch =
-    match server_repo_path with
-    | Some path ->
-      not
-        (same_normalized_path path config.workspace_path
-         || same_normalized_path path config.base_path)
+    match Option.bind server_repo_path normalized_path_opt with
+    | Some server_repo_path -> server_workspace_mismatch ~server_repo_path config
     | None -> false
   in
   let fleet_fields =

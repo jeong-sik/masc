@@ -234,6 +234,9 @@ let test_evidence_ref_parser_ssot () =
     ; "bare file URI", "file://"
     ; "bare trace", "trace:"
     ; "bare path separator", "/"
+    ; "absolute path", "/etc/passwd"
+    ; "parent-dir traversal", "../../etc/passwd"
+    ; "parent-dir mid-segment", "logs/../../etc/passwd"
     ]
 
 let test_blank_required_evidence_rejects () =

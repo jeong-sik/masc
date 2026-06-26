@@ -20,7 +20,14 @@ type t =
 
 val of_string : string -> t option
 val to_string : t -> string
-val is_concrete_string : string -> bool
+val recognizes_evidence_shape : string -> bool
+(** [recognizes_evidence_shape value] is true when [value] matches a known
+    evidence-reference SHAPE (url / file_uri / pr / commit / trace_ref /
+    file_path). It is a SHAPE HEURISTIC ONLY — it does NOT semantically
+    validate that the value is a real, existing, base-path-resolved
+    artifact. Callers must not read [true] as "this is concrete, trusted
+    evidence"; resolve and validate against the artifact store / base path
+    before gating on it. (Renamed from [is_concrete_string], #22348 review.) *)
 
 val boundary_match : haystack:string -> needle:string -> start:int -> bool
 (** [boundary_match ~haystack ~needle ~start] is true when [needle] appears

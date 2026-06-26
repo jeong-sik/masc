@@ -708,7 +708,7 @@ let blocked_keeper_detail_json
      @ last_failure_fields)
 
 type active_task_owner_without_executable_fiber = {
-  keeper_name : string;
+  keeper_name : string option;
   agent_name : string;
   task_id : string;
   task_status : string;
@@ -727,7 +727,14 @@ let empty_active_task_owner_fiber_scan =
   }
 
 let compare_active_task_owner_without_executable_fiber left right =
-  let cmp = String.compare left.keeper_name right.keeper_name in
+  let compare_string_opt left right =
+    match (left, right) with
+    | None, None -> 0
+    | None, Some _ -> -1
+    | Some _, None -> 1
+    | Some left, Some right -> String.compare left right
+  in
+  let cmp = compare_string_opt left.keeper_name right.keeper_name in
   if cmp <> 0 then cmp
   else
     let cmp = String.compare left.agent_name right.agent_name in
@@ -747,15 +754,20 @@ let active_task_assignment (task : Masc_domain.task) =
   | Masc_domain.Cancelled _ -> None
 
 let active_task_owner_without_executable_fiber_json row =
+  let action =
+    match row.keeper_name with
+    | Some _ -> "start_or_recover_keeper_or_reassign_task"
+    | None -> "create_keeper_or_reassign_task"
+  in
   `Assoc
     [
-      ("keeper", `String row.keeper_name);
-      ("name", `String row.keeper_name);
+      ("keeper", Json_util.string_opt_to_json row.keeper_name);
+      ("name", Json_util.string_opt_to_json row.keeper_name);
       ("agent_name", `String row.agent_name);
       ("task_id", `String row.task_id);
       ("task_status", `String row.task_status);
       ("executable", `Bool false);
-      ("action", `String "start_or_recover_keeper_or_reassign_task");
+      ("action", `String action);
     ]
 
 let keeper_agent_bindings config =
@@ -795,21 +807,32 @@ let active_task_owner_fiber_scan config ~executable_names =
                    keeper_names_for_agent agent_bindings assignee
                  in
                  if
-                   keeper_names = []
-                   || List.exists
-                        (fun keeper_name ->
-                          String_set.mem keeper_name executable_set)
-                        keeper_names
+                   List.exists
+                     (fun keeper_name ->
+                       String_set.mem keeper_name executable_set)
+                     keeper_names
                  then []
                  else
-                   keeper_names
-                   |> List.map (fun keeper_name ->
-                        {
-                          keeper_name;
-                          agent_name = assignee;
-                          task_id = task.id;
-                          task_status;
-                        }))
+                   (match keeper_names with
+                    | [] ->
+                        [
+                          {
+                            keeper_name = None;
+                            agent_name = assignee;
+                            task_id = task.id;
+                            task_status;
+                          };
+                        ]
+                    | keeper_names ->
+                        keeper_names
+                        |> List.map (fun keeper_name ->
+                             {
+                               keeper_name = Some keeper_name;
+                               agent_name = assignee;
+                               task_id = task.id;
+                               task_status;
+                             }))
+                   )
         |> List.concat
         |> List.sort_uniq compare_active_task_owner_without_executable_fiber
       in
@@ -889,11 +912,11 @@ let keeper_fleet_safety_health_json
   in
   let active_task_owner_without_executable_fiber_names =
     active_task_owner_scan.active_task_owner_without_executable_fibers
-    |> List.map (fun row -> row.keeper_name)
+    |> List.filter_map (fun row -> row.keeper_name)
     |> sorted_unique_strings
   in
   let active_task_owner_without_executable_fiber_count =
-    List.length active_task_owner_without_executable_fiber_names
+    List.length active_task_owner_scan.active_task_owner_without_executable_fibers
   in
   let active_task_owner_without_executable_fiber =
     active_task_owner_without_executable_fiber_count > 0

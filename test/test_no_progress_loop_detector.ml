@@ -11,6 +11,7 @@
 module D = Masc.Keeper_no_progress_loop_detector
 module Metrics = Masc.Otel_metric_store
 module Success = Masc.Keeper_unified_turn_success.For_testing
+module Support = Masc.Keeper_unified_metrics_support
 module WO = Masc.Keeper_world_observation
 module Cap = Masc.Keeper_tool_capability_axis
 
@@ -255,21 +256,31 @@ let test_no_progress_board_post_accrues_streak () =
 let delivery_label = function
   | Success.Peer_only -> "peer_only"
   | Success.User_facing -> "user_facing"
-  | Success.Autonomous_prose -> "autonomous_prose"
+  | Success.Internal_prose -> "internal_prose"
   | Success.Task_claim -> "task_claim"
 
-(* [classify] is the reactive cycle (external prompt present): a prose-only reply
-   classifies as [User_facing] (exempt), matching the pre-RFC-0294 mapping. The
-   autonomous (self-cadence, no external prompt) cycle is [classify_auto], which
-   routes a prose-only reply to [Autonomous_prose] (requires evidence). The
-   tool-precedence cases (peer/claim dominate text) are autonomy-independent. *)
-let classify ~tools ~has_visible_text =
+(* [classify_delivered] is the reactive cycle whose reply is externally delivered
+   to the prompting surface: a prose-only reply classifies as [User_facing]
+   (exempt). [classify_internal] is the unified keeper-cycle path, where visible
+   text is an internal decision/metrics artifact; prose-only output is
+   [Internal_prose] and requires evidence even when a stale scope message made
+   the observation channel reactive. The autonomous self-cadence path is
+   [classify_auto]. Tool-precedence cases (peer/claim dominate text) are
+   delivery-independent. *)
+let classify_delivered ~tools ~has_visible_text =
   delivery_label
-    (Success.classify_delivery ~is_autonomous:false ~tools ~has_visible_text)
+    (Success.classify_delivery ~is_autonomous:false
+       ~reply_delivery:Success.Externally_delivered ~tools ~has_visible_text)
+
+let classify_internal ~is_autonomous ~tools ~has_visible_text =
+  delivery_label
+    (Success.classify_delivery ~is_autonomous
+       ~reply_delivery:Success.Internal_only ~tools ~has_visible_text)
 
 let classify_auto ~tools ~has_visible_text =
   delivery_label
-    (Success.classify_delivery ~is_autonomous:true ~tools ~has_visible_text)
+    (Success.classify_delivery ~is_autonomous:true
+       ~reply_delivery:Success.Internal_only ~tools ~has_visible_text)
 
 let test_classify_delivery_mapping () =
   let claim_tool = List.hd Cap.claim_task_tool_names in
@@ -306,12 +317,12 @@ let test_classify_delivery_mapping () =
     (fun t ->
       Alcotest.(check string)
         (Printf.sprintf "peer tool %s -> peer_only" t) "peer_only"
-        (classify ~tools:[ t ] ~has_visible_text:false);
+        (classify_delivered ~tools:[ t ] ~has_visible_text:false);
       Alcotest.(check string)
         (Printf.sprintf "peer tool %s + text -> peer_only (tools dominate text)"
            t)
         "peer_only"
-        (classify ~tools:[ t ] ~has_visible_text:true))
+        (classify_delivered ~tools:[ t ] ~has_visible_text:true))
     expected_peer_tools;
   (* Multi-signal precedence (RFC-0276 §3.2 total derivation): a turn carrying
      both a peer tool and a claim tool, plus text, is Peer_only — peer-posting
@@ -319,23 +330,31 @@ let test_classify_delivery_mapping () =
      inferred_tool_surface if/else-if order so the anti-thrash invariant cannot
      flip to exempt on a multi-signal turn. *)
   Alcotest.(check string) "peer + claim + text -> peer_only" "peer_only"
-    (classify ~tools:[ "keeper_board_post"; claim_tool ] ~has_visible_text:true);
+    (classify_delivered ~tools:[ "keeper_board_post"; claim_tool ]
+       ~has_visible_text:true);
   (* Claim tool is exempt (claiming is progress, RFC-0239); claim dominates
      text. *)
   Alcotest.(check string) "claim tool -> task_claim" "task_claim"
-    (classify ~tools:[ claim_tool ] ~has_visible_text:false);
+    (classify_delivered ~tools:[ claim_tool ] ~has_visible_text:false);
   Alcotest.(check string) "claim + text -> task_claim (claim dominates text)"
     "task_claim"
-    (classify ~tools:[ claim_tool ] ~has_visible_text:true);
-  (* No peer/claim tool + visible text, REACTIVE cycle -> user-facing reply
-     (exempt): replying to an external prompt is the work. *)
-  Alcotest.(check string) "no tool + text (reactive) -> user_facing" "user_facing"
-    (classify ~tools:[] ~has_visible_text:true);
+    (classify_delivered ~tools:[ claim_tool ] ~has_visible_text:true);
+  (* No peer/claim tool + visible text, externally-delivered REACTIVE cycle ->
+     user-facing reply (exempt): replying to an external prompt is the work only
+     when the reply is sent back to that surface. *)
+  Alcotest.(check string)
+    "no tool + text (delivered reactive) -> user_facing" "user_facing"
+    (classify_delivered ~tools:[] ~has_visible_text:true);
+  (* Same reactive observation facts on the unified keeper-cycle path are
+     internal prose, not user-facing: the text is written to internal
+     decision/metrics artifacts and does not clear the prompting lane. *)
+  Alcotest.(check string)
+    "no tool + text (internal reactive) -> internal_prose" "internal_prose"
+    (classify_internal ~is_autonomous:false ~tools:[] ~has_visible_text:true);
   (* RFC-0294 R2a: same surface facts on an AUTONOMOUS cycle (no external prompt)
-     -> autonomous_prose (requires evidence). The autonomy bit is the only
-     difference, so it is the sole discriminator of the split. *)
-  Alcotest.(check string) "no tool + text (autonomous) -> autonomous_prose"
-    "autonomous_prose"
+     -> internal_prose (requires evidence). *)
+  Alcotest.(check string) "no tool + text (autonomous) -> internal_prose"
+    "internal_prose"
     (classify_auto ~tools:[] ~has_visible_text:true);
   (* Tool precedence is autonomy-independent: a peer/claim tool still dominates
      text even on an autonomous cycle (the split only affects prose-only turns). *)
@@ -345,21 +364,21 @@ let test_classify_delivery_mapping () =
      evidence). This is the parse-don't-validate replacement for the old
      DELIVERY_SURFACE: silent header self-declaration. *)
   Alcotest.(check string) "no tool + no text (silent) -> peer_only" "peer_only"
-    (classify ~tools:[] ~has_visible_text:false);
+    (classify_delivered ~tools:[] ~has_visible_text:false);
   (* A non-peer, non-claim tool with no visible text is still routed by surface
      only (Peer_only); strong_evidence (substantive tool calls) is the separate
      channel that lets such a turn count as progress. *)
   let exec_tool = List.hd Cap.shell_command_input_tool_names in
   Alcotest.(check string) "exec-only no text -> peer_only" "peer_only"
-    (classify ~tools:[ exec_tool ] ~has_visible_text:false)
+    (classify_delivered ~tools:[ exec_tool ] ~has_visible_text:false)
 
 let test_delivery_requires_evidence_mapping () =
   Alcotest.(check bool) "peer_only requires evidence" true
     (Success.delivery_requires_evidence Success.Peer_only);
   Alcotest.(check bool) "user_facing exempt" false
     (Success.delivery_requires_evidence Success.User_facing);
-  Alcotest.(check bool) "autonomous_prose requires evidence" true
-    (Success.delivery_requires_evidence Success.Autonomous_prose);
+  Alcotest.(check bool) "internal_prose requires evidence" true
+    (Success.delivery_requires_evidence Success.Internal_prose);
   Alcotest.(check bool) "task_claim exempt" false
     (Success.delivery_requires_evidence Success.Task_claim)
 
@@ -371,8 +390,8 @@ let test_silent_turns_accrue_streak () =
   for _ = 1 to 4 do
     let surface_requires_evidence =
       Success.delivery_requires_evidence
-        (Success.classify_delivery ~is_autonomous:false ~tools:[]
-           ~has_visible_text:false)
+        (Success.classify_delivery ~is_autonomous:false
+           ~reply_delivery:Success.Internal_only ~tools:[] ~has_visible_text:false)
     in
     record_turn ~keeper_name:k
       ~made_progress:
@@ -387,14 +406,14 @@ let test_silent_turns_accrue_streak () =
    residual blind spot after R1g: R1g stops failed_task from *driving* the wake,
    but a keeper that still wakes (e.g. real cooldown elapse) and only says
    "nothing to do" previously reset the streak via the [User_facing] exemption.
-   With the [Autonomous_prose] split it now requires evidence. *)
+   With the [Internal_prose] split it now requires evidence. *)
 let test_autonomous_textonly_noop_accrues_streak () =
-  let k = "r2a_autonomous_prose_thrash" in
+  let k = "r2a_internal_prose_thrash" in
   for _ = 1 to 4 do
     let surface_requires_evidence =
       Success.delivery_requires_evidence
-        (Success.classify_delivery ~is_autonomous:true ~tools:[]
-           ~has_visible_text:true)
+        (Success.classify_delivery ~is_autonomous:true
+           ~reply_delivery:Success.Internal_only ~tools:[] ~has_visible_text:true)
     in
     record_turn ~keeper_name:k
       ~made_progress:
@@ -404,8 +423,8 @@ let test_autonomous_textonly_noop_accrues_streak () =
   Alcotest.(check int) "autonomous prose-only no-evidence turns accrue streak" 4
     (D.current_streak ~keeper_name:k)
 
-(* RFC-0294 R2a false-positive guard: a REACTIVE turn (external prompt present)
-   that replies to an operator/peer with prose and no tool is legitimate work and
+(* RFC-0294 R2a false-positive guard: an externally-delivered REACTIVE turn that
+   replies to an operator/peer with prose and no tool is legitimate work and
    stays exempt — it must NOT accrue the streak. Distinguishes the split from a
    blanket "no-tool prose is no-progress" cap. *)
 let test_operator_mention_textonly_reply_exempt () =
@@ -413,7 +432,8 @@ let test_operator_mention_textonly_reply_exempt () =
   for _ = 1 to 4 do
     let surface_requires_evidence =
       Success.delivery_requires_evidence
-        (Success.classify_delivery ~is_autonomous:false ~tools:[]
+        (Success.classify_delivery ~is_autonomous:false
+           ~reply_delivery:Success.Externally_delivered ~tools:[]
            ~has_visible_text:true)
     in
     record_turn ~keeper_name:k
@@ -422,6 +442,39 @@ let test_operator_mention_textonly_reply_exempt () =
     |> ignore_outcome
   done;
   Alcotest.(check int) "reactive prose reply does not accrue streak" 0
+    (D.current_streak ~keeper_name:k)
+
+(* Regression for the idealist passive-only loop observed on 2026-06-26: an
+   owner-authored scope message stayed pending, but the unified keeper cycle's
+   text response was only an internal decision/metrics artifact, not an
+   assistant row appended to keeper_chat. The observation channel is reactive,
+   yet the reply is not externally delivered, so prose-only output must require
+   evidence and accrue the no-progress streak. *)
+let test_scope_message_internal_textonly_accrues_streak () =
+  let k = "r3_scope_message_internal_prose_thrash" in
+  let observation =
+    { scheduled_observation with
+      pending_scope_messages = [ ("owner", "did you actually use tools?") ]
+    }
+  in
+  let is_autonomous =
+    Support.is_scheduled_autonomous_cycle_of_observation observation
+  in
+  Alcotest.(check bool)
+    "scope-message observation remains reactive" false is_autonomous;
+  for _ = 1 to 4 do
+    let surface_requires_evidence =
+      Success.delivery_requires_evidence
+        (Success.classify_delivery ~is_autonomous
+           ~reply_delivery:Success.Internal_only ~tools:[] ~has_visible_text:true)
+    in
+    record_turn ~keeper_name:k
+      ~made_progress:
+        (D.turn_made_progress ~strong_evidence:false ~surface_requires_evidence)
+    |> ignore_outcome
+  done;
+  Alcotest.(check int)
+    "internal scope-message prose without evidence accrues streak" 4
     (D.current_streak ~keeper_name:k)
 
 (* RFC-0239 / audit D1·D3: the no-progress detector reads the typed outcome
@@ -548,6 +601,9 @@ let () =
           Alcotest.test_case
             "R2a reactive prose reply stays exempt (false-positive guard)"
             `Quick (with_eio test_operator_mention_textonly_reply_exempt);
+          Alcotest.test_case
+            "R3 scope-message internal prose accrues streak"
+            `Quick (with_eio test_scope_message_internal_textonly_accrues_streak);
           Alcotest.test_case "claim exemption is outcome-aware (D3)"
             `Quick test_claim_outcome_aware_exemption;
           Alcotest.test_case "strong evidence drops typed-failure completions (D1)"

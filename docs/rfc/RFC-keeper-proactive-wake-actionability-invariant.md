@@ -54,7 +54,7 @@ keeper는 메타-자각 상태("I need to stop repeating", "Acknowledged. I was 
 ### 왜 안전망이 안 잡았나
 - 무에러 text 턴은 `terminal_reason: success`(`keeper_unified_metrics_decision.ml:105`)로 종료 → 실패 카운터/에스컬레이션 미발동.
 - `is_noop_cycle = not has_text && ...`(`keeper_unified_metrics_support.ml:285`)은 cooldown multiplier 전용이며, text 턴마다 `consecutive_noop_count`를 0으로 리셋.
-- 무진행 loop detector(`keeper_no_progress_loop_detector.ml`)는 streak 10에 latch하지만 — `classify_delivery`(`keeper_unified_turn_success.ml:110-118`)가 `tools=[] && has_visible_text=true → User_facing → delivery_requires_evidence=false → made_progress=true → streak 리셋`. 자율 no-op text 턴이 매번 진행으로 오분류돼 **영영 latch하지 못한다**.
+- 무진행 loop detector(`keeper_no_progress_loop_detector.ml`)는 streak 10에 latch하지만 — R2a/R3 이전 `classify_delivery`(`keeper_unified_turn_success.ml`)는 `tools=[] && has_visible_text=true → User_facing → delivery_requires_evidence=false → made_progress=true → streak 리셋`이었다. 자율/내부 no-op text 턴이 매번 진행으로 오분류돼 **영영 latch하지 못했다**. 최신 구조는 `reply_delivery`를 닫힌 sum으로 분리해 내부 keeper-cycle prose를 `Internal_prose`로 분류한다.
 - RFC-0246 wake-tombstone은 외부 wake 진입점(`keeper_registry.ml` `wakeup`/`board_wakeup_allowed`)만 게이트하고 **self-cadence `should_run` 경로는 게이트하지 않는다**(검증: `keeper_world_observation.ml`/`keeper_heartbeat_loop_scheduling.ml`에 tombstone 참조 0건).
 
 ## 3. Design
@@ -101,9 +101,9 @@ let verification_drives o = o.pending_verification_count > 0 && affordance_can_m
 
 candidate의 "is_noop_cycle has_text blind spot 수정" 전제는 **반증됨**: (i) `is_noop_cycle`은 cooldown 전용이라 고치면 livelock을 늦출 뿐(금지 cap); (ii) loop detector의 `turn_made_progress`(`keeper_no_progress_loop_detector.ml:57`)는 has_text를 입력으로 받지 않아 이미 올바르다.
 
-진짜 잔존 blind spot은 `classify_delivery`의 `User_facing` 면제다. **구조적 수정**: 닫힌 `turn_delivery` sum을 확장해 *자율(self-cadence, 외부 프롬프트 없는)* 무도구 prose 턴을 evidence-불요 면제에서 분리(예: `Autonomous_prose` variant). `delivery_requires_evidence`는 exhaustive match(no catch-all)라 새 variant가 분류를 컴파일 강제.
+진짜 잔존 blind spot은 `classify_delivery`의 `User_facing` 면제다. **구조적 수정**: 닫힌 `turn_delivery` sum과 `reply_delivery` sum을 함께 사용해 *외부 표면에 실제로 전달된 reactive reply*만 evidence-불요 면제로 남긴다. unified keeper-cycle이 생성한 decision/metrics text는 pending scope message가 있어도 외부 lane을 clear하지 못하므로 `Internal_prose`로 분류하고 evidence를 요구한다. `delivery_requires_evidence`는 exhaustive match(no catch-all)라 새 variant가 분류를 컴파일 강제한다.
 
-**False-positive 가드**: operator-mention에 대한 정당한 no-tool text 응답(`Reply_to_external`)은 면제 유지. 분기는 *외부 프롬프트 부재*에 게이팅.
+**False-positive 가드**: operator-mention에 대한 정당한 no-tool text 응답(`Externally_delivered`)은 면제 유지. 분기는 *프롬프트 존재*가 아니라 *reply delivery route*에 게이팅한다.
 
 ### R2b (defense-in-depth, MANDATORY gap) — wire wake-tombstone into self-cadence should_run
 
@@ -180,7 +180,7 @@ RFC-0246 tombstone은 외부 wake 두 경로(`keeper_registry.ml:364 Heartbeat`,
 |---|---|
 | `affordance_can_mutate` exhaustive match가 `tools_for_affordance`와 drift할 위험 → T2가 pin | High |
 | 845 미포함 시 heartbeat-loop:520 2차 livelock 잔존 | High |
-| R2a `wake_origin`을 `classify_delivery`까지 전달하는 plumbing 비용 | Medium |
+| R2a/R3 `reply_delivery` route가 새 direct-turn 소비자와 drift할 위험 | Medium |
 | orphan surfacer gauge vs Dashboard_attention 선택 | Medium |
 | `turn_delivery` 분할이 다른 소비자에 미치는 영향(exhaustive match가 안전망) | Medium |
 | latch latency ~17분(threshold 고정) — R1g primary라 수용 | High |

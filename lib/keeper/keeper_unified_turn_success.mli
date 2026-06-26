@@ -19,14 +19,19 @@ module For_testing : sig
       self-declared delivery header as the no-progress detector input). *)
   type turn_delivery =
     | Peer_only
-    | User_facing  (** reactive visible reply (external prompt present); exempt *)
-    | Autonomous_prose
-        (** RFC-0294 R2a: self-cadence prose-only turn (no external prompt);
-            requires evidence *)
+    | User_facing  (** externally delivered reactive visible reply; exempt *)
+    | Internal_prose
+        (** Visible prose not externally delivered to the prompting surface;
+            requires evidence. *)
     | Task_claim
+
+  type reply_delivery =
+    | Internal_only
+    | Externally_delivered
 
   val classify_delivery
     :  is_autonomous:bool
+    -> reply_delivery:reply_delivery
     -> tools:string list
     -> has_visible_text:bool
     -> turn_delivery

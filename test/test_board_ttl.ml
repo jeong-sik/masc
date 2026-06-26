@@ -111,6 +111,19 @@ let test_sweeper_skips_permanent () =
   let (removed_posts, _) = sweep store in
   Alcotest.(check int) "sweeper removed 0 permanent posts" 0 removed_posts
 
+let test_maybe_sweep_updates_schedule_once () =
+  let store = create_store () in
+  store.last_sweep <- 0.0;
+  store.last_flush <- 0.0;
+  Masc.Board_core_persist.maybe_sweep store;
+  let first_sweep = store.last_sweep in
+  let first_flush = store.last_flush in
+  Alcotest.(check bool) "sweep timestamp updated" true (first_sweep > 0.0);
+  Alcotest.(check bool) "flush timestamp updated" true (first_flush > 0.0);
+  Masc.Board_core_persist.maybe_sweep store;
+  Alcotest.(check (float 0.0)) "sweep timestamp unchanged" first_sweep store.last_sweep;
+  Alcotest.(check (float 0.0)) "flush timestamp unchanged" first_flush store.last_flush
+
 let test_post_kind_direct_default () =
   let store = create_store () in
   match
@@ -218,6 +231,8 @@ let () =
             (with_eio test_expiring_post);
           Alcotest.test_case "sweeper skips permanent" `Quick
             (with_eio test_sweeper_skips_permanent);
+          Alcotest.test_case "maybe_sweep schedules once" `Quick
+            (with_eio test_maybe_sweep_updates_schedule_once);
         ] );
       ( "visibility_ssot",
         [

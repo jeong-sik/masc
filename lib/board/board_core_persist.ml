@@ -232,18 +232,23 @@ let sweep store =
 (** Auto-sweep if needed, delegates to flusher actor inbox *)
 let maybe_sweep store =
   let now = Time_compat.now () in
-  if
-    Stdlib.Float.compare
-      (now -. store.last_sweep)
-      (Stdlib.Float.of_int Limits.sweeper_interval_sec)
-    > 0
-  then (
-    store.last_sweep <- now;
-    Eio.Stream.add store.flusher_inbox Sweep);
-  if Stdlib.Float.compare (now -. store.last_flush) flush_interval_sec > 0
-  then (
-    store.last_flush <- now;
-    Eio.Stream.add store.flusher_inbox Flush)
+  let enqueue_sweep, enqueue_flush =
+    with_lock store (fun () ->
+      let enqueue_sweep =
+        Stdlib.Float.compare
+          (now -. store.last_sweep)
+          (Stdlib.Float.of_int Limits.sweeper_interval_sec)
+        > 0
+      in
+      let enqueue_flush =
+        Stdlib.Float.compare (now -. store.last_flush) flush_interval_sec > 0
+      in
+      if enqueue_sweep then store.last_sweep <- now;
+      if enqueue_flush then store.last_flush <- now;
+      enqueue_sweep, enqueue_flush)
+  in
+  if enqueue_sweep then Eio.Stream.add store.flusher_inbox Sweep;
+  if enqueue_flush then Eio.Stream.add store.flusher_inbox Flush
 ;;
 
 (** {1 Persistence Paths} *)

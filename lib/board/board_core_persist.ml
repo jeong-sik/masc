@@ -114,7 +114,9 @@ let mark_dirty_comment store comment_id =
 
 let with_lock store f = Eio.Mutex.use_rw ~protect:true store.mutex (fun () -> f ())
 
-(** Serialize JSONL writes without holding the state mutex. *)
+(** Serialize JSONL writes. Callers must never hold the state mutex while
+    acquiring [persist_mutex]; compute snapshots under [with_lock], release it,
+    then call [with_persist_lock]. *)
 let with_persist_lock store f =
   let started = Time_compat.now () in
   Eio.Mutex.use_rw ~protect:true store.persist_mutex (fun () ->

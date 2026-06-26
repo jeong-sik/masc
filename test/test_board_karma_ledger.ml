@@ -269,6 +269,94 @@ let file_contains path needle =
         in
         loop ())
 
+let find_substring_from text needle start =
+  let needle_len = String.length needle in
+  let text_len = String.length text in
+  let rec loop i =
+    if needle_len = 0 then Some i
+    else if i + needle_len > text_len then None
+    else if String.sub text i needle_len = needle then Some i
+    else loop (i + 1)
+  in
+  loop start
+
+let source_slice ~rel ~start_marker ~end_marker =
+  let text = Masc_test_deps.read_file (Masc_test_deps.source_path rel) in
+  match find_substring_from text start_marker 0 with
+  | None -> Alcotest.failf "missing start marker %S in %s" start_marker rel
+  | Some start ->
+    (match find_substring_from text end_marker start with
+     | None -> Alcotest.failf "missing end marker %S in %s" end_marker rel
+     | Some stop -> String.sub text start (stop - start))
+
+let call_extent text ~call_marker ~from =
+  match find_substring_from text call_marker from with
+  | None -> None
+  | Some call_start ->
+    (match find_substring_from text "(" call_start with
+     | None -> None
+     | Some open_pos ->
+       let len = String.length text in
+       let rec scan i depth =
+         if i >= len
+         then len
+         else (
+           match text.[i] with
+           | '(' -> scan (i + 1) (depth + 1)
+           | ')' ->
+             let depth = depth - 1 in
+             if depth = 0 then i + 1 else scan (i + 1) depth
+           | _ -> scan (i + 1) depth)
+       in
+       Some (call_start, scan open_pos 0))
+
+let has_nested_call text ~outer ~inner =
+  let rec loop from =
+    match call_extent text ~call_marker:outer ~from with
+    | None -> false
+    | Some (start, stop) ->
+      let call_text = String.sub text start (stop - start) in
+      (match find_substring_from call_text inner (String.length outer) with
+       | Some _ -> true
+       | None -> loop (start + 1))
+  in
+  loop 0
+
+let assert_no_nested_call label text ~outer ~inner =
+  Alcotest.(check bool) label false (has_nested_call text ~outer ~inner)
+
+let test_delete_lock_order_source_pin () =
+  let delete_sub_board =
+    source_slice ~rel:"lib/board/board_core.ml"
+      ~start_marker:"let delete_sub_board"
+      ~end_marker:"(** {1 Voting"
+  in
+  let delete_post =
+    source_slice ~rel:"lib/board/board_votes.ml"
+      ~start_marker:"let delete_post"
+      ~end_marker:"(** {1 Global Store}"
+  in
+  let flush_dirty =
+    source_slice ~rel:"lib/board/board_votes.ml"
+      ~start_marker:"let flush_dirty"
+      ~end_marker:"(** {1 Karma"
+  in
+  let check label body =
+    assert_no_nested_call
+      (label ^ ": no persist lock inside state lock")
+      body
+      ~outer:"with_lock store"
+      ~inner:"with_persist_lock store";
+    assert_no_nested_call
+      (label ^ ": no state lock inside persist lock")
+      body
+      ~outer:"with_persist_lock store"
+      ~inner:"with_lock store"
+  in
+  check "delete_sub_board" delete_sub_board;
+  check "delete_post" delete_post;
+  check "flush_dirty" flush_dirty
+
 let test_delete_post_rewrites_persisted_snapshots () =
   let post = create_post_exn ~author:"alice" ~content:"delete me" in
   let pid = Board.Post_id.to_string post.id in
@@ -282,9 +370,16 @@ let test_delete_post_rewrites_persisted_snapshots () =
   in
   let cid = Board.Comment_id.to_string comment.id in
   vote_exn ~voter:"carol" ~post_id:pid ~direction:Board.Up;
+  vote_comment_exn ~voter:"erin" ~comment_id:cid ~direction:Board.Up;
   (match
      Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
        ~target_id:pid ~user_id:"dave" ~emoji:"👍"
+   with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  (match
+     Board_dispatch.toggle_reaction ~target_type:Board.Reaction_comment
+       ~target_id:cid ~user_id:"frank" ~emoji:"👍"
    with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
@@ -300,7 +395,32 @@ let test_delete_post_rewrites_persisted_snapshots () =
   check_absent "posts snapshot removes deleted post" (Board.persist_path ()) pid;
   check_absent "comments snapshot removes deleted comment" (Board.comments_path ()) cid;
   check_absent "vote snapshot removes deleted post vote" (Board_votes.vote_log_path ()) pid;
-  check_absent "reaction snapshot removes deleted post reaction" (Board.reactions_path ()) pid
+  check_absent
+    "vote snapshot removes deleted comment vote"
+    (Board_votes.vote_log_path ())
+    cid;
+  check_absent "reaction snapshot removes deleted post reaction" (Board.reactions_path ()) pid;
+  check_absent
+    "reaction snapshot removes deleted comment reaction"
+    (Board.reactions_path ())
+    cid;
+  let store =
+    match Board_dispatch.backend () with
+    | Board_dispatch.Jsonl store -> store
+  in
+  Alcotest.(check bool) "dirty posts cleared after delete" false store.dirty_posts;
+  Alcotest.(check bool)
+    "dirty comments cleared after delete"
+    false
+    store.dirty_comments;
+  Alcotest.(check int)
+    "dirty post ids cleared after delete"
+    0
+    (Hashtbl.length store.dirty_post_ids);
+  Alcotest.(check int)
+    "dirty comment ids cleared after delete"
+    0
+    (Hashtbl.length store.dirty_comment_ids)
 
 (** {1 JSON serialisation} *)
 
@@ -446,6 +566,8 @@ let () =
         (with_eio test_replay_invariant);
       Alcotest.test_case "delete post rewrites persisted snapshots" `Quick
         (with_eio test_delete_post_rewrites_persisted_snapshots);
+      Alcotest.test_case "delete paths never nest state and persist locks" `Quick
+        test_delete_lock_order_source_pin;
     ];
     "serialisation", [
       Alcotest.test_case "json fields" `Quick

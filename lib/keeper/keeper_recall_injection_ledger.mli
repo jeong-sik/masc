@@ -60,6 +60,8 @@ val prune_older_than
   -> retention_days:int
   -> int
 (** Best-effort maintenance hook for deleting recall injection day-files older
-    than [retention_days] days. Returns the count reported by
-    {!Dated_jsonl.prune}; logs filesystem errors and returns [0], except
-    [Eio.Cancel.Cancelled] which is re-raised. *)
+    than [retention_days] days. Returns the prune count reported by
+    {!Dated_jsonl.prune}; this is the store-level maintenance count, not a
+    filesystem guarantee that every matched unlink succeeded. Logs filesystem
+    errors with a bounded label and returns [0], except [Eio.Cancel.Cancelled]
+    which is re-raised. *)

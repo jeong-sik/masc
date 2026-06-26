@@ -485,13 +485,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                else 0
              in
              let prune_recall_injections () =
-               let dir = Keeper_recall_injection_ledger.base_dir ~masc_root:masc in
-               if Sys.file_exists dir
-               then
-                 Keeper_recall_injection_ledger.prune_older_than
-                   ~masc_root:masc
-                   ~retention_days:days
-               else 0
+               Keeper_recall_injection_ledger.prune_older_than
+                 ~masc_root:masc
+                 ~retention_days:days
              in
              let total =
                prune_dir (Filename.concat masc "audit")
@@ -512,7 +508,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
              if total > 0
              then
                Log.Server.info
-                 "periodic JSONL prune: deleted %d day-files (retention=%dd)"
+                 "periodic JSONL prune: pruned %d day-files (retention=%dd)"
                  total
                  days
            with

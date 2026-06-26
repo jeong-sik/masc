@@ -14,16 +14,38 @@ let check name cond =
     incr failed;
     Printf.printf "[FAIL] %s\n%!" name)
 
-let tmpdir name =
+let rec rm_rf path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path)
+    else Sys.remove path
+
+let with_temp_masc_root name f =
   let path = Filename.temp_file name "" in
   Sys.remove path;
   Unix.mkdir path 0o700;
-  path
+  Fun.protect ~finally:(fun () -> rm_rf path) (fun () -> f path)
 
-let write_old_recall_file masc_root =
-  let old_month = Filename.concat (Ledger.base_dir ~masc_root) "2020-01" in
-  Fs_compat.mkdir_p old_month;
-  let old_file = Filename.concat old_month "15.jsonl" in
+let old_recall_file_path ~masc_root ~retention_days =
+  let old_ts =
+    Unix.gettimeofday ()
+    -. (float_of_int (retention_days + 5) *. Masc_time_constants.day)
+  in
+  let old_tm = Unix.gmtime old_ts in
+  let old_month =
+    Printf.sprintf "%04d-%02d" (old_tm.Unix.tm_year + 1900) (old_tm.Unix.tm_mon + 1)
+  in
+  let old_day = Printf.sprintf "%02d.jsonl" old_tm.Unix.tm_mday in
+  let old_month_dir = Filename.concat (Ledger.base_dir ~masc_root) old_month in
+  Fs_compat.mkdir_p old_month_dir;
+  Filename.concat old_month_dir old_day
+
+let write_old_recall_file ~masc_root ~retention_days =
+  let old_file = old_recall_file_path ~masc_root ~retention_days in
   let old_row =
     Ledger.to_json
       ~keeper_id:"old-keeper"
@@ -40,10 +62,12 @@ let write_old_recall_file masc_root =
   old_file
 
 let test_append_does_not_prune_old_day_file () =
-  Eio_main.run @@ fun env ->
+  with_temp_masc_root "recall-ledger-append-no-prune" @@ fun masc_root ->
+  Eio_main.run
+  @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let masc_root = tmpdir "recall-ledger-append-no-prune" in
-  let old_file = write_old_recall_file masc_root in
+  let retention_days = 30 in
+  let old_file = write_old_recall_file ~masc_root ~retention_days in
   Ledger.append
     ~masc_root
     ~keeper_id:"alpha"
@@ -61,12 +85,14 @@ let test_append_does_not_prune_old_day_file () =
     (Dated_jsonl.read_recent store 10 |> List.length > 0)
 
 let test_prune_older_than_removes_old_day_file () =
-  Eio_main.run @@ fun env ->
+  with_temp_masc_root "recall-ledger-retention-manual" @@ fun masc_root ->
+  Eio_main.run
+  @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let masc_root = tmpdir "recall-ledger-retention-manual" in
-  let old_file = write_old_recall_file masc_root in
-  let deleted = Ledger.prune_older_than ~masc_root ~retention_days:30 in
-  check "manual retention reports deletion" (deleted >= 1);
+  let retention_days = 30 in
+  let old_file = write_old_recall_file ~masc_root ~retention_days in
+  let deleted = Ledger.prune_older_than ~masc_root ~retention_days in
+  check "manual retention reports prune count" (deleted >= 1);
   check "manual retention removes old recall file" (not (Sys.file_exists old_file))
 
 let () =

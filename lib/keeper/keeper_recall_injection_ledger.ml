@@ -38,6 +38,12 @@ let to_json
 
 let make_store ~masc_root () = Dated_jsonl.create ~base_dir:(base_dir ~masc_root) ()
 
+let prune_failure_label = function
+  | Sys_error _ -> "sys_error"
+  | Unix.Unix_error _ -> "unix_error"
+  | _ -> "unexpected_exception"
+;;
+
 let append
       ?failure_reason
       ~masc_root
@@ -77,8 +83,8 @@ let prune_older_than ~masc_root ~retention_days =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Log.Keeper.warn
-      "recall_injection_ledger: failed to prune %s: %s"
+      "recall_injection_ledger: failed to prune %s: label=%s"
       (base_dir ~masc_root)
-      (Printexc.to_string exn);
+      (prune_failure_label exn);
     0
 ;;

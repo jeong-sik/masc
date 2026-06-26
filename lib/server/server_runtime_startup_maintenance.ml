@@ -16,12 +16,9 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
        else 0
      in
      let prune_recall_injections () =
-       let dir = Keeper_recall_injection_ledger.base_dir ~masc_root:masc in
-       if Sys.file_exists dir then
-         Keeper_recall_injection_ledger.prune_older_than
-           ~masc_root:masc
-           ~retention_days:days
-       else 0
+       Keeper_recall_injection_ledger.prune_older_than
+         ~masc_root:masc
+         ~retention_days:days
      in
      let tool_metrics_dir =
        Filename.concat (Mcp_server.workspace_config state).base_path "data/tool-metrics"
@@ -46,7 +43,7 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
             ) 0 (Sys.readdir keepers))
      in
      if total > 0 then
-         Log.Misc.info "startup prune: deleted %d old JSONL day-files (retention=%dd)"
+         Log.Misc.info "startup prune: pruned %d old JSONL day-files (retention=%dd)"
          total days
    with
    | Eio.Cancel.Cancelled _ as e -> raise e

@@ -21,6 +21,7 @@ type set_task_goal_error =
       { task_id : string
       ; existing_goal_ids : string list
       }
+  | Link_write_failed of string
 
 let set_task_goal_error_to_string = function
   | Unknown_task task_id -> Printf.sprintf "unknown task '%s'" task_id
@@ -31,6 +32,7 @@ let set_task_goal_error_to_string = function
        scope (RFC-0267 Phase 2 only links goalless tasks)"
       task_id
       (String.concat ", " existing_goal_ids)
+  | Link_write_failed msg -> Printf.sprintf "failed to persist task goal link: %s" msg
 ;;
 
 let set_task_goal config ~task_id ~goal_id : (unit, set_task_goal_error) result =
@@ -50,6 +52,8 @@ let set_task_goal config ~task_id ~goal_id : (unit, set_task_goal_error) result 
          the task is still goalless. *)
       (match Workspace_goal_index.link_goalless_task_to_goal config ~goal_id ~task_id with
        | Ok () -> Ok ()
-       | Error existing_goal_ids ->
-         Error (Already_assigned { task_id; existing_goal_ids })))
+       | Error (Workspace_goal_index.Already_linked_to_goals existing_goal_ids) ->
+         Error (Already_assigned { task_id; existing_goal_ids })
+       | Error (Workspace_goal_index.Link_write_failed msg) ->
+         Error (Link_write_failed msg)))
 ;;

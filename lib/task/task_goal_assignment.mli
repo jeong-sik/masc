@@ -17,6 +17,7 @@ type set_task_goal_error =
       { task_id : string
       ; existing_goal_ids : string list
       }
+  | Link_write_failed of string
 
 val set_task_goal_error_to_string : set_task_goal_error -> string
 
@@ -33,6 +34,8 @@ val set_task_goal :
     - [Error (Already_assigned _)] — the task already carries one or more
       goal links; reassignment/unlink is out of scope (RFC-0267 §4, which
       keeps Phase 2 strictly additive for goalless tasks).
+    - [Error (Link_write_failed _)] — the task and goal are valid, but the
+      registry update could not be durably written and verified.
     - [Ok ()] — the link was written after confirming under the registry file
       lock that the task still has no goal link.
 

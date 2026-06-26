@@ -319,6 +319,42 @@ let write_json config path json =
       |> Result.iter_error (fun msg ->
            Log.Misc.warn "write_json: local write failed for %s: %s" path msg)
 
+let write_json_result config path json =
+  match key_of_path config path with
+  | Some key ->
+      let content = json_to_pretty_utf8 json in
+      (match backend_set config ~key ~value:content with
+       | Error e ->
+           let msg =
+             Printf.sprintf
+               "write_json backend_set failed for %s: %s"
+               key
+               (Backend_types.show_error e)
+           in
+           Log.Misc.warn "%s" msg;
+           Error msg
+       | Ok () ->
+           if should_dual_write_local config then
+             match write_json_local path json with
+             | Ok () -> Ok ()
+             | Error msg ->
+                 let full =
+                   Printf.sprintf
+                     "write_json: local mirror write failed for %s: %s"
+                     path
+                     msg
+                 in
+                 Log.Misc.warn "%s" full;
+                 Error full
+           else Ok ())
+  | None -> (
+      match write_json_local path json with
+      | Ok () -> Ok ()
+      | Error msg ->
+          let full = Printf.sprintf "write_json: local write failed for %s: %s" path msg in
+          Log.Misc.warn "%s" full;
+          Error full)
+
 let write_text_local path content =
   mkdir_p (Filename.dirname path);
   let tmp_path = path ^ ".tmp" in

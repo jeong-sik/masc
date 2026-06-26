@@ -479,7 +479,7 @@ let test_route_evidence_stored_for_git_push () =
         (Some "tool_execute")
         (Safe_ops.json_string_opt "canonical_name" evidence);
       Alcotest.(check (option string)) "command captured"
-        (Some "git push -u origin [REDACTED]")
+        (Some "[REDACTED]")
         (Safe_ops.json_string_opt "command" evidence);
       Alcotest.(check (option string)) "cwd captured"
         (Some "[REDACTED]")
@@ -540,9 +540,82 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
         (Some "success")
         (Safe_ops.json_string_opt "label" status);
       Alcotest.(check (option string)) "command captured"
-        (Some "git push -u origin [REDACTED]")
+        (Some "[REDACTED]")
         (Safe_ops.json_string_opt "command" evidence)
     | _ -> Alcotest.fail "expected exactly one entry")
+
+let test_route_evidence_redacts_wrapped_git_push () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"executor"
+      ~tool_name:"tool_execute"
+      ~input:
+        (`Assoc
+           [
+             ( "cmd",
+               `String
+                 "env FOO=bar git -C repos/private-worktree push origin feature/private-proof"
+             );
+           ])
+      ~output_text:
+        {|{"ok":true,"via":"docker","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}
+      ~success:true
+      ~duration_ms:42.0
+      ();
+    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
+    match entries with
+    | [ entry ] ->
+      let evidence = Yojson.Safe.Util.member "route_evidence" entry in
+      Alcotest.(check (option string)) "wrapped command redacted"
+        (Some "[REDACTED]")
+        (Safe_ops.json_string_opt "command" evidence)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+let test_route_evidence_command_redaction_fails_closed () =
+  let commands =
+    [
+      "git push --repo /Users/dancer/private origin feature/private-proof";
+      "git push --repo=/Users/dancer/private origin feature/private-proof";
+      "git -c safe.directory=/Users/dancer/private push origin feature/private-proof";
+      "env FOO=bar git push origin 'feature/private proof'";
+    ]
+  in
+  List.iter
+    (fun command ->
+       with_tmp_log (fun () ->
+         Keeper_tool_call_log.log_call
+           ~keeper_name:"executor"
+           ~tool_name:"tool_execute"
+           ~input:(`Assoc [ ("cmd", `String command) ])
+           ~output_text:
+             {|{"ok":true,"via":"docker","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}
+           ~success:true
+           ~duration_ms:42.0
+           ();
+         match Keeper_tool_call_log.read_recent ~n:1 () with
+         | [ entry ] ->
+           let evidence = Yojson.Safe.Util.member "route_evidence" entry in
+           Alcotest.(check (option string))
+             "command is fail-closed"
+             (Some "[REDACTED]")
+             (Safe_ops.json_string_opt "command" evidence);
+           let evidence_text = Yojson.Safe.to_string evidence in
+           Alcotest.(check bool)
+             "absolute path is absent"
+             false
+             (String_util.contains_substring evidence_text "/Users/dancer");
+           Alcotest.(check bool)
+             "private branch marker is absent"
+             false
+             (String_util.contains_substring evidence_text "private-proof")
+           ;
+           Alcotest.(check bool)
+             "quoted private branch marker is absent"
+             false
+             (String_util.contains_substring evidence_text "private proof")
+         | _ -> Alcotest.fail "expected exactly one entry"))
+    commands
+;;
 
 let test_route_evidence_records_descriptor_for_filesystem_calls () =
   with_tmp_log (fun () ->
@@ -1168,6 +1241,10 @@ let () =
             test_route_evidence_stored_for_git_push
         ; eio_test "route evidence reads blob-backed git push preview"
             test_route_evidence_stored_for_blob_backed_git_push
+        ; eio_test "route evidence redacts wrapped git push"
+            test_route_evidence_redacts_wrapped_git_push
+        ; eio_test "route evidence command redaction fails closed"
+            test_route_evidence_command_redaction_fails_closed
         ; eio_test "route evidence records descriptor for filesystem calls"
             test_route_evidence_records_descriptor_for_filesystem_calls
         ; eio_test "route evidence records internal descriptor"

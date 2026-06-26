@@ -5,6 +5,8 @@
 open Masc_domain
 open Workspace_utils
 
+let backlog_path = Workspace_utils.backlog_path
+
 let backlog_recovery_path config =
   backlog_path config ^ ".last-good"
 
@@ -115,3 +117,29 @@ let write_backlog ?after_commit config backlog =
   (match after_commit with
    | Some f -> f ()
    | None -> ())
+
+(** Result-returning variant that verifies both primary and recovery writes by
+    readback.  Only clears the cache and runs [after_commit] after the primary
+    readback succeeds. *)
+let write_backlog_result ?after_commit config backlog =
+  let json = backlog_to_yojson backlog in
+  let primary_path = backlog_path config in
+  let recovery_path = backlog_recovery_path config in
+  match write_json_result config primary_path json with
+  | Error msg -> Error msg
+  | Ok () -> (
+      match write_json_result config recovery_path json with
+      | Error msg -> Error msg
+      | Ok () -> (
+          match read_json_result config primary_path with
+          | Error msg -> Error (Printf.sprintf "backlog primary readback failed: %s" msg)
+          | Ok read_json -> (
+              match decode_backlog ~path:primary_path read_json with
+              | Error msg -> Error (Printf.sprintf "backlog primary decode failed: %s" msg)
+              | Ok _read_backlog ->
+                  clear_backlog_cache_for primary_path;
+                  clear_backlog_cache_for recovery_path;
+                  (match after_commit with
+                   | Some f -> f ()
+                   | None -> ());
+                  Ok ())))

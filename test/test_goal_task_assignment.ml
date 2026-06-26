@@ -54,6 +54,12 @@ let make_unassigned_task config ~title =
   | [] -> fail "task was not created"
 ;;
 
+let make_primary_goal_task_links_path_unwritable config =
+  let path = Workspace_goal_index.goal_task_links_path config in
+  if Sys.file_exists path && not (Sys.is_directory path) then Sys.remove path;
+  if not (Sys.file_exists path) then Unix.mkdir path 0o755
+;;
+
 let err_to_string = Goal_assignment.set_task_goal_error_to_string
 
 let test_unknown_task () =
@@ -114,6 +120,18 @@ let test_rejects_reassignment () =
     | Error other -> failf "expected Already_assigned, got %s" (err_to_string other))
 ;;
 
+let test_assignment_reports_goal_link_write_failure () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    let task_id = make_unassigned_task config ~title:"t" in
+    make_primary_goal_task_links_path_unwritable config;
+    match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
+    | Error (Goal_assignment.Link_write_failed msg) ->
+      check bool "failure message is populated" true (String.length msg > 0)
+    | Ok () -> fail "expected Link_write_failed, got Ok"
+    | Error other -> failf "expected Link_write_failed, got %s" (err_to_string other))
+;;
+
 let () =
   run
     "goal_task_assignment"
@@ -122,6 +140,10 @@ let () =
         ; test_case "unknown goal is rejected" `Quick test_unknown_goal
         ; test_case "goalless task links to goal" `Quick test_links_goalless_task
         ; test_case "reassignment is rejected" `Quick test_rejects_reassignment
+        ; test_case
+            "link write failure is reported"
+            `Quick
+            test_assignment_reports_goal_link_write_failure
         ] )
     ]
 ;;

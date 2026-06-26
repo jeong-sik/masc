@@ -11,6 +11,20 @@
 open Masc_domain
 open Workspace_utils
 
+type goal_task_links_write_error = string
+
+type link_goalless_task_to_goal_error =
+  | Already_linked_to_goals of string list
+  | Link_write_failed of goal_task_links_write_error
+
+let goal_task_links_write_error_to_string msg = msg
+
+let link_goalless_task_to_goal_error_to_string = function
+  | Already_linked_to_goals existing_goal_ids ->
+    Printf.sprintf "task already linked to goal(s): %s" (String.concat ", " existing_goal_ids)
+  | Link_write_failed msg -> msg
+;;
+
 let goal_task_links_path config =
   Filename.concat (tasks_dir config) "goal_task_links.json"
 ;;
@@ -122,10 +136,105 @@ let read_goal_task_links config =
     []
 ;;
 
-let write_goal_task_links config links =
+let verify_goal_task_links_write config ~path ~json ~expected_links ~label =
+  try
+    write_json config path json;
+    match read_json_result config path with
+    | Ok written when links_of_yojson written = expected_links -> Ok ()
+    | Ok _ ->
+      Error
+        (Printf.sprintf
+           "write_goal_task_links: %s readback mismatch for %s"
+           label
+           path)
+    | Error msg ->
+      Error
+        (Printf.sprintf
+           "write_goal_task_links: %s write/readback failed for %s: %s"
+           label
+           path
+           msg)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Error
+      (Printf.sprintf
+         "write_goal_task_links: %s write failed for %s: %s"
+         label
+         path
+         (Printexc.to_string exn))
+;;
+
+let write_goal_task_links_result ?previous_links config links =
   let json = links_to_yojson links in
-  write_json config (goal_task_links_path config) json;
-  write_json config (goal_task_links_recovery_path config) json
+  let primary_path = goal_task_links_path config in
+  let recovery_path = goal_task_links_recovery_path config in
+  let expected_links = normalize_link_set links in
+  let write_primary () =
+    verify_goal_task_links_write
+      config
+      ~path:primary_path
+      ~json
+      ~expected_links
+      ~label:"primary"
+  in
+  let write_recovery () =
+    verify_goal_task_links_write
+      config
+      ~path:recovery_path
+      ~json
+      ~expected_links
+      ~label:"recovery"
+  in
+  let rollback () =
+    match previous_links with
+    | None -> ()
+    | Some previous_links ->
+      let previous_json = links_to_yojson previous_links in
+      let previous_expected = normalize_link_set previous_links in
+      (match
+         verify_goal_task_links_write
+           config
+           ~path:primary_path
+           ~json:previous_json
+           ~expected_links:previous_expected
+           ~label:"primary-rollback"
+       with
+       | Ok () -> ()
+       | Error rollback_msg ->
+         Log.Misc.warn
+           "write_goal_task_links_result: primary rollback failed after write failure: %s"
+           rollback_msg);
+      (match
+         verify_goal_task_links_write
+           config
+           ~path:recovery_path
+           ~json:previous_json
+           ~expected_links:previous_expected
+           ~label:"recovery-rollback"
+       with
+       | Ok () -> ()
+       | Error rollback_msg ->
+         Log.Misc.warn
+           "write_goal_task_links_result: recovery rollback failed after write failure: %s"
+           rollback_msg)
+  in
+  match write_primary () with
+  | Error _ as error ->
+    rollback ();
+    error
+  | Ok () ->
+    (match write_recovery () with
+     | Ok () -> Ok ()
+     | Error _ as error ->
+       rollback ();
+       error)
+;;
+
+let write_goal_task_links config links =
+  match write_goal_task_links_result config links with
+  | Ok () -> ()
+  | Error msg -> Log.Misc.warn "%s" msg
 ;;
 
 let goal_task_links_lock_path config =
@@ -156,26 +265,92 @@ let add_link_to_links links ~goal_id ~task_id =
   if !updated then links else links @ [ goal_id, [ task_id ] ]
 ;;
 
-let prune_links_for_goal config ~goal_id =
+let remove_link_from_links links ~goal_id ~task_id =
+  List.filter_map
+    (fun (candidate_goal_id, task_ids) ->
+       if String.equal candidate_goal_id goal_id then
+         let filtered = List.filter (fun id -> not (String.equal id task_id)) task_ids in
+         if filtered = [] then None else Some (candidate_goal_id, filtered)
+       else Some (candidate_goal_id, task_ids))
+    links
+;;
+
+let read_goal_task_links_for_mutation config =
+  match read_goal_task_links_r config with
+  | Ok links -> Ok links
+  | Error msg ->
+    Error (Printf.sprintf "goal_task_links read failed before mutation: %s" msg)
+;;
+
+let prune_links_for_goal_result config ~goal_id =
   let goal_id = String.trim goal_id in
-  if String.equal goal_id "" then ()
+  if String.equal goal_id "" then Ok ()
   else
     with_file_lock config (goal_task_links_lock_path config) (fun () ->
-      let links = read_goal_task_links config in
-      let links = List.filter (fun (gid, _) -> not (String.equal gid goal_id)) links in
-      write_goal_task_links config links)
+      match read_goal_task_links_for_mutation config with
+      | Error _ as error -> error
+      | Ok links ->
+        let new_links = List.filter (fun (gid, _) -> not (String.equal gid goal_id)) links in
+        write_goal_task_links_result config ~previous_links:links new_links)
+;;
+
+let prune_links_for_goal config ~goal_id =
+  match prune_links_for_goal_result config ~goal_id with
+  | Ok () -> ()
+  | Error msg -> Log.Misc.warn "%s" msg
+;;
+
+let link_task_to_goal_result config ~goal_id ~task_id =
+  let goal_id = String.trim goal_id in
+  let task_id = String.trim task_id in
+  if String.equal goal_id "" || String.equal task_id "" then Ok ()
+  else
+    with_file_lock config (goal_task_links_lock_path config) (fun () ->
+      match read_goal_task_links_for_mutation config with
+      | Error _ as error -> error
+      | Ok links ->
+        let new_links = add_link_to_links links ~goal_id ~task_id in
+        write_goal_task_links_result config ~previous_links:links new_links)
 ;;
 
 let link_task_to_goal config ~goal_id ~task_id =
+  match link_task_to_goal_result config ~goal_id ~task_id with
+  | Ok () -> ()
+  | Error msg -> Log.Misc.warn "%s" msg
+;;
+
+let before_unlink_task_from_goal_for_testing = Atomic.make None
+
+let unlink_task_from_goal_result_impl config ~goal_id ~task_id =
   let goal_id = String.trim goal_id in
   let task_id = String.trim task_id in
-  if String.equal goal_id "" || String.equal task_id "" then ()
+  if String.equal goal_id "" || String.equal task_id "" then Ok ()
   else
     with_file_lock config (goal_task_links_lock_path config) (fun () ->
-      let links = read_goal_task_links config in
-      let links = add_link_to_links links ~goal_id ~task_id in
-      write_goal_task_links config links)
+      match read_goal_task_links_for_mutation config with
+      | Error _ as error -> error
+      | Ok links ->
+        let new_links = remove_link_from_links links ~goal_id ~task_id in
+        write_goal_task_links_result config ~previous_links:links new_links)
 ;;
+
+let unlink_task_from_goal_result config ~goal_id ~task_id =
+  (match Atomic.get before_unlink_task_from_goal_for_testing with
+   | None -> ()
+   | Some before_unlink -> before_unlink config ~goal_id ~task_id);
+  unlink_task_from_goal_result_impl config ~goal_id ~task_id
+;;
+
+module For_testing = struct
+  let with_before_unlink_task_from_goal before_unlink f =
+    let previous = Atomic.get before_unlink_task_from_goal_for_testing in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set before_unlink_task_from_goal_for_testing previous)
+      (fun () ->
+         Atomic.set before_unlink_task_from_goal_for_testing (Some before_unlink);
+         f ())
+  ;;
+end
 
 let link_goalless_task_to_goal config ~goal_id ~task_id =
   let goal_id = String.trim goal_id in
@@ -183,21 +358,55 @@ let link_goalless_task_to_goal config ~goal_id ~task_id =
   if String.equal goal_id "" || String.equal task_id "" then Ok ()
   else
     with_file_lock config (goal_task_links_lock_path config) (fun () ->
-      let links = read_goal_task_links config in
-      match goal_ids_for_task links ~task_id with
-      | [] ->
-        write_goal_task_links config (add_link_to_links links ~goal_id ~task_id);
-        Ok ()
-      | existing_goal_ids -> Error existing_goal_ids)
+      match read_goal_task_links_for_mutation config with
+      | Error msg -> Error (Link_write_failed msg)
+      | Ok links ->
+        (match goal_ids_for_task links ~task_id with
+         | [] ->
+           (match
+              write_goal_task_links_result
+                config
+                ~previous_links:links
+                (add_link_to_links links ~goal_id ~task_id)
+            with
+            | Ok () -> Ok ()
+            | Error msg -> Error (Link_write_failed msg))
+         | existing_goal_ids -> Error (Already_linked_to_goals existing_goal_ids)))
+;;
+
+let link_tasks_to_goals_result config links =
+  let trimmed_links =
+    List.filter_map
+      (fun (task_id, goal_id_opt) ->
+         let task_id = String.trim task_id in
+         match goal_id_opt with
+         | None -> None
+         | Some goal_id ->
+           let goal_id = String.trim goal_id in
+           if String.equal goal_id "" || String.equal task_id ""
+           then None
+           else Some (task_id, goal_id))
+      links
+  in
+  if trimmed_links = [] then Ok ()
+  else
+    with_file_lock config (goal_task_links_lock_path config) (fun () ->
+      match read_goal_task_links_for_mutation config with
+      | Error _ as error -> error
+      | Ok existing_links ->
+        let updated_links =
+          List.fold_left
+            (fun acc (task_id, goal_id) -> add_link_to_links acc ~goal_id ~task_id)
+            existing_links
+            trimmed_links
+        in
+        write_goal_task_links_result config ~previous_links:existing_links updated_links)
 ;;
 
 let link_tasks_to_goals config links =
-  List.iter
-    (fun (task_id, goal_id_opt) ->
-       match goal_id_opt with
-       | None -> ()
-       | Some goal_id -> link_task_to_goal config ~goal_id ~task_id)
-    links
+  match link_tasks_to_goals_result config links with
+  | Ok () -> ()
+  | Error msg -> Log.Misc.warn "%s" msg
 ;;
 
 (** Build a reverse index from goal_id to its linked tasks.

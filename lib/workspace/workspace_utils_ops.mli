@@ -87,6 +87,9 @@ val should_dual_write_local : config -> bool
 (** Backend-routed JSON write; respects [should_dual_write_local]. *)
 val write_json : config -> string -> Yojson.Safe.t -> unit
 
+(** Result-returning variant that reports backend and local mirror failures. *)
+val write_json_result : config -> string -> Yojson.Safe.t -> (unit, string) result
+
 val write_text_local : string -> string -> (unit, string) result
 val write_text : config -> string -> string -> unit
 val delete_path : config -> string -> unit

@@ -338,6 +338,7 @@ let test_calibration_stats_cross_model_mix () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
   Cal.set_store_for_testing ~base_dir:dir;
+  Fun.protect ~finally:Cal.reset_store_for_testing @@ fun () ->
   (* Four verdicts:
      - same runtime (generator = evaluator)     → NOT cross-model
      - distinct runtime (generator ≠ evaluator) → cross-model
@@ -347,8 +348,7 @@ let test_calibration_stats_cross_model_mix () =
   let same_runtime =
     make_result ~runtime:"verifier" ~gen_runtime:"verifier" () in
   let cross_a =
-    make_result ~runtime:"verifier"
-      ~gen_runtime:(Masc.Keeper_config.default_runtime_id ()) () in
+    make_result ~runtime:"verifier" ~gen_runtime:"generator-default" () in
   let cross_b =
     make_result ~runtime:"cross_verifier" ~gen_runtime:"local_only" () in
   let no_generator = make_result ~runtime:"verifier" () in
@@ -369,8 +369,7 @@ let test_calibration_stats_cross_model_mix () =
     Yojson.Safe.Util.(stats |> member "cross_model_rate" |> to_number) in
   check int "verdicts_with_generator_runtime = 3 (one was Null)" 3 with_gen;
   check int "cross_model_match_count = 2 (two distinct)" 2 cross_match;
-  check (float 1e-3) "cross_model_rate ≈ 0.667" (2.0 /. 3.0) cross_rate;
-  Cal.reset_store_for_testing ()
+  check (float 1e-3) "cross_model_rate approx 0.667" (2.0 /. 3.0) cross_rate
 
 (* ================================================================ *)
 (* OAS Harness.verdict conversion tests (#3165)                      *)

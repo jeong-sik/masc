@@ -61,6 +61,111 @@ let check_bool label expected actual =
   Alcotest.(check bool) label expected actual
 ;;
 
+let string_contains ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  if needle_len = 0 then true
+  else
+    let rec loop idx =
+      idx + needle_len <= haystack_len
+      && (String.equal (String.sub haystack idx needle_len) needle || loop (idx + 1))
+    in
+    loop 0
+;;
+
+let with_activity_counter f =
+  let previous = Atomic.get Workspace_hooks.activity_emit_fn in
+  let count = ref 0 in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Workspace_hooks.activity_emit_fn previous)
+    (fun () ->
+       Atomic.set
+         Workspace_hooks.activity_emit_fn
+         (fun _config ~actor:_ ?subject:_ ~kind:_ ~payload:_ ~tags:_ () ->
+            incr count);
+       f (fun () -> !count))
+;;
+
+let with_mutation_counter f =
+  let previous = Atomic.get Workspace_hooks.on_task_mutation_fn in
+  let count = ref 0 in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Workspace_hooks.on_task_mutation_fn previous)
+    (fun () ->
+       Atomic.set Workspace_hooks.on_task_mutation_fn (fun () -> incr count);
+       f (fun () -> !count))
+;;
+
+let check_no_create_side_effects config activity_count mutation_count =
+  check_int "no task activity emitted" 0 (activity_count ());
+  check_int "no task mutation hook fired" 0 (mutation_count ());
+  check_int
+    "no broadcast messages emitted"
+    0
+    (List.length (Workspace.get_messages_raw config ~since_seq:0 ~limit:10))
+;;
+
+let make_path_unwritable path =
+  if Sys.file_exists path && not (Sys.is_directory path) then Sys.remove path;
+  if not (Sys.file_exists path) then Unix.mkdir path 0o755
+;;
+
+let make_primary_goal_task_links_path_unwritable config =
+  make_path_unwritable (Workspace_goal_index.goal_task_links_path config)
+;;
+
+let make_goal_task_links_recovery_path_unwritable config =
+  make_path_unwritable (Workspace_goal_index.goal_task_links_path config ^ ".last-good")
+;;
+
+let make_backlog_path_unwritable config =
+  make_path_unwritable (Workspace_backlog.backlog_path config)
+;;
+
+let goal_link_exists_in_file path ~goal_id ~task_id =
+  if (not (Sys.file_exists path)) || Sys.is_directory path then false
+  else
+    match Yojson.Safe.from_file path with
+    | `Assoc fields ->
+      (match List.assoc_opt "links" fields with
+       | Some (`List links) ->
+         List.exists
+           (function
+             | `Assoc link_fields ->
+               (match List.assoc_opt "goal_id" link_fields with
+                | Some (`String candidate_goal_id) ->
+                  String.equal candidate_goal_id goal_id
+                  &&
+                  (match List.assoc_opt "task_ids" link_fields with
+                   | Some (`List task_ids) ->
+                     List.exists
+                       (function
+                         | `String candidate_task_id ->
+                           String.equal candidate_task_id task_id
+                         | _ -> false)
+                       task_ids
+                   | _ -> false)
+                | _ -> false)
+             | _ -> false)
+           links
+       | _ -> false)
+    | _ -> false
+;;
+
+let goal_link_exists_in_primary_or_recovery config ~goal_id ~task_id =
+  let primary_path = Workspace_goal_index.goal_task_links_path config in
+  let recovery_path = primary_path ^ ".last-good" in
+  goal_link_exists_in_file primary_path ~goal_id ~task_id
+  || goal_link_exists_in_file recovery_path ~goal_id ~task_id
+;;
+
+let check_no_goal_link_files config ~goal_id ~task_id =
+  check_bool
+    (Printf.sprintf "no primary/recovery link for %s/%s" goal_id task_id)
+    false
+    (goal_link_exists_in_primary_or_recovery config ~goal_id ~task_id)
+;;
+
 let check_list_len label expected tasks =
   check_int label expected (List.length tasks)
 ;;
@@ -218,6 +323,187 @@ let test_prune_goal_links_preserves_other_goals () =
          links))
 ;;
 
+let test_write_failure_does_not_refresh_recovery_before_primary_commit () =
+  with_test_env (fun config ->
+    make_primary_goal_task_links_path_unwritable config;
+    (match
+       Workspace_goal_index.write_goal_task_links_result
+         config
+         [ "goal-a", [ "task-001" ] ]
+     with
+     | Ok () -> Alcotest.fail "expected primary write failure"
+     | Error msg ->
+       check_bool "failure message is populated" true (String.length msg > 0));
+    check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001")
+;;
+
+let test_add_task_goal_link_write_failure_does_not_publish_task () =
+  with_test_env (fun config ->
+    with_activity_counter (fun activity_count ->
+      with_mutation_counter (fun mutation_count ->
+        make_primary_goal_task_links_path_unwritable config;
+        (match
+           Workspace.add_task_with_result
+             ~goal_id:"goal-a"
+             config
+             ~title:"blocked linked task"
+             ~priority:1
+             ~description:""
+         with
+         | Error (Workspace.Goal_link_write_failed msg) ->
+           check_bool "failure message is populated" true (String.length msg > 0)
+         | Error err ->
+           Alcotest.failf
+             "expected Goal_link_write_failed, got %s"
+             (Workspace.add_task_error_to_string err)
+         | Ok created -> Alcotest.failf "expected failure, created %s" created.task_id);
+        check_int "task was not published" 0 (List.length (Workspace.get_tasks_safe config));
+        check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
+        check_no_create_side_effects config activity_count mutation_count)))
+;;
+
+let test_batch_add_task_goal_link_write_failure_does_not_publish_tasks () =
+  with_test_env (fun config ->
+    with_activity_counter (fun activity_count ->
+      with_mutation_counter (fun mutation_count ->
+        make_primary_goal_task_links_path_unwritable config;
+        (match
+           Workspace.batch_add_tasks_with_contracts_result
+             config
+             [ "blocked batch a", 1, "", None, Some "goal-a"
+             ; "blocked batch b", 2, "", None, Some "goal-b"
+             ]
+         with
+         | Error (Workspace.Batch_goal_link_write_failed msg) ->
+           check_bool "failure message is populated" true (String.length msg > 0)
+         | Error err ->
+           Alcotest.failf
+             "expected Batch_goal_link_write_failed, got %s"
+             (Workspace.batch_add_tasks_error_to_string err)
+         | Ok created ->
+           Alcotest.failf "expected failure, created %d tasks" created.count);
+        check_int "tasks were not published" 0 (List.length (Workspace.get_tasks_safe config));
+        check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
+        check_no_goal_link_files config ~goal_id:"goal-b" ~task_id:"task-002";
+        check_no_create_side_effects config activity_count mutation_count)))
+;;
+
+let test_add_task_backlog_write_failure_rolls_back_goal_link () =
+  with_test_env (fun config ->
+    with_activity_counter (fun activity_count ->
+      with_mutation_counter (fun mutation_count ->
+        make_backlog_path_unwritable config;
+        (match
+           Workspace.add_task_with_result
+             ~goal_id:"goal-a"
+             config
+             ~title:"blocked backlog task"
+             ~priority:1
+             ~description:""
+         with
+         | Error (Workspace.Backlog_write_failed msg) ->
+           check_bool "failure message is populated" true (String.length msg > 0)
+         | Error err ->
+           Alcotest.failf
+             "expected Backlog_write_failed, got %s"
+             (Workspace.add_task_error_to_string err)
+         | Ok created -> Alcotest.failf "expected failure, created %s" created.task_id);
+        check_int "task was not published" 0 (List.length (Workspace.get_tasks_safe config));
+        check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
+        check_no_create_side_effects config activity_count mutation_count)))
+;;
+
+let test_batch_add_task_backlog_write_failure_rolls_back_goal_links () =
+  with_test_env (fun config ->
+    with_activity_counter (fun activity_count ->
+      with_mutation_counter (fun mutation_count ->
+        make_backlog_path_unwritable config;
+        (match
+           Workspace.batch_add_tasks_with_contracts_result
+             config
+             [ "blocked batch a", 1, "", None, Some "goal-a"
+             ; "blocked batch b", 2, "", None, Some "goal-b"
+             ]
+         with
+         | Error (Workspace.Batch_backlog_write_failed msg) ->
+           check_bool "failure message is populated" true (String.length msg > 0)
+         | Error err ->
+           Alcotest.failf
+             "expected Batch_backlog_write_failed, got %s"
+             (Workspace.batch_add_tasks_error_to_string err)
+         | Ok created ->
+           Alcotest.failf "expected failure, created %d tasks" created.count);
+        check_int "tasks were not published" 0 (List.length (Workspace.get_tasks_safe config));
+        check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
+        check_no_goal_link_files config ~goal_id:"goal-b" ~task_id:"task-002";
+        check_no_create_side_effects config activity_count mutation_count)))
+;;
+
+let test_add_task_backlog_write_failure_surfaces_rollback_failure () =
+  with_test_env (fun config ->
+    with_activity_counter (fun activity_count ->
+      with_mutation_counter (fun mutation_count ->
+        make_backlog_path_unwritable config;
+        Workspace_goal_index.For_testing.with_before_unlink_task_from_goal
+          (fun hook_config ~goal_id:_ ~task_id:_ ->
+             make_goal_task_links_recovery_path_unwritable hook_config)
+          (fun () ->
+             match
+               Workspace.add_task_with_result
+                 ~goal_id:"goal-a"
+                 config
+                 ~title:"rollback failure task"
+                 ~priority:1
+                 ~description:""
+             with
+             | Error (Workspace.Backlog_write_failed msg) ->
+               check_bool
+                 "rollback failure is surfaced"
+                 true
+                 (string_contains ~needle:"goal link rollback failed" msg)
+             | Error err ->
+               Alcotest.failf
+                 "expected Backlog_write_failed, got %s"
+                 (Workspace.add_task_error_to_string err)
+             | Ok created -> Alcotest.failf "expected failure, created %s" created.task_id);
+        check_int "task was not published" 0 (List.length (Workspace.get_tasks_safe config));
+        check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
+        check_no_create_side_effects config activity_count mutation_count)))
+;;
+
+let test_batch_add_task_backlog_write_failure_surfaces_rollback_failure () =
+  with_test_env (fun config ->
+    with_activity_counter (fun activity_count ->
+      with_mutation_counter (fun mutation_count ->
+        make_backlog_path_unwritable config;
+        Workspace_goal_index.For_testing.with_before_unlink_task_from_goal
+          (fun hook_config ~goal_id:_ ~task_id:_ ->
+             make_goal_task_links_recovery_path_unwritable hook_config)
+          (fun () ->
+             match
+               Workspace.batch_add_tasks_with_contracts_result
+                 config
+                 [ "rollback failure batch a", 1, "", None, Some "goal-a"
+                 ; "rollback failure batch b", 2, "", None, Some "goal-b"
+                 ]
+             with
+             | Error (Workspace.Batch_backlog_write_failed msg) ->
+               check_bool
+                 "rollback failure is surfaced"
+                 true
+                 (string_contains ~needle:"goal link rollback failed" msg)
+             | Error err ->
+               Alcotest.failf
+                 "expected Batch_backlog_write_failed, got %s"
+                 (Workspace.batch_add_tasks_error_to_string err)
+             | Ok created ->
+               Alcotest.failf "expected failure, created %d tasks" created.count);
+        check_int "tasks were not published" 0 (List.length (Workspace.get_tasks_safe config));
+        check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
+        check_no_goal_link_files config ~goal_id:"goal-b" ~task_id:"task-002";
+        check_no_create_side_effects config activity_count mutation_count)))
+;;
+
 (* ── test suite ─────────────────────────────────────────────────────── *)
 
 let () =
@@ -244,6 +530,34 @@ let () =
               "prune removes only deleted goal links"
               `Quick
               test_prune_goal_links_preserves_other_goals
+          ; test_case
+              "write failure does not refresh recovery before primary commit"
+              `Quick
+              test_write_failure_does_not_refresh_recovery_before_primary_commit
+          ; test_case
+              "single create does not publish when goal link write fails"
+              `Quick
+              test_add_task_goal_link_write_failure_does_not_publish_task
+          ; test_case
+              "batch create does not publish when goal link write fails"
+              `Quick
+              test_batch_add_task_goal_link_write_failure_does_not_publish_tasks
+          ; test_case
+              "single create rolls back goal link when backlog write fails"
+              `Quick
+              test_add_task_backlog_write_failure_rolls_back_goal_link
+          ; test_case
+              "batch create rolls back goal links when backlog write fails"
+              `Quick
+              test_batch_add_task_backlog_write_failure_rolls_back_goal_links
+          ; test_case
+              "single create surfaces rollback failure when backlog write fails"
+              `Quick
+              test_add_task_backlog_write_failure_surfaces_rollback_failure
+          ; test_case
+              "batch create surfaces rollback failure when backlog write fails"
+              `Quick
+              test_batch_add_task_backlog_write_failure_surfaces_rollback_failure
           ] )
     ]
 ;;

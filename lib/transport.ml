@@ -298,9 +298,21 @@ module Rest = struct
         ("security", openapi_bearer_security) :: base
 
   let find_schema name =
-    List.find_opt
-      (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
-      Config.raw_all_tool_schemas
+    match
+      List.find_opt
+        (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
+        Config.raw_all_tool_schemas
+    with
+    | Some schema -> Some schema
+    | None ->
+      Sdk_tool_contract.sdk_bindings
+      |> List.find_opt (fun (binding : Sdk_tool_contract.sdk_tool_binding) ->
+             String.equal binding.canonical_operation name)
+      |> Option.map (fun (binding : Sdk_tool_contract.sdk_tool_binding) ->
+             { Masc_domain.name
+             ; description = binding.description
+             ; input_schema = binding.input_schema
+             })
 
   let help_entry name =
     match Tool_help_registry.find_entry Config.raw_all_tool_schemas name with

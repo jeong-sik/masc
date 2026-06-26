@@ -140,7 +140,7 @@ let run_composed ?clock ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~w
       , Fusion_types.zero_usage )
   | Ok agent ->
     match
-      Masc_oas_bridge.run_safe ?clock ~caller:"fusion_judge" ~timeout_s (fun () ->
+      Masc_oas_bridge.run_safe ~clock ~caller:"fusion_judge" ~timeout_s (fun () ->
          Ok (Agent_sdk.Async_agent.all ~sw [ (agent, prompt) ]))
      with
      | Error e ->
@@ -166,7 +166,7 @@ let run_composed ?clock ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~w
                (Agent_sdk.Error.to_string e)
          , Fusion_types.zero_usage )
 
-let run ?clock ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~question ~panel
+let run ~clock ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~question ~panel
     ~web_tools ~max_tool_calls () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , string * Fusion_types.usage )

@@ -10,7 +10,9 @@ let expected_invalid_timeout timeout_s =
 let check_rejects_timeout ~name timeout_s =
   let called = ref false in
   let run () =
-    Masc_oas_bridge.run_safe ~caller:"test_timeout_guard" ~timeout_s (fun () ->
+    Eio_mock.Backend.run @@ fun env ->
+    let clock = Eio.Stdenv.clock env in
+    Masc_oas_bridge.run_safe ~clock ~caller:"test_timeout_guard" ~timeout_s (fun () ->
       called := true;
       Ok "should-not-run")
     |> ignore

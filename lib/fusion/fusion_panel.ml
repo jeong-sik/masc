@@ -71,7 +71,7 @@ let run ?clock ~sw ~net ~max_fibers ~outer_timeout_s ~groups ~prompt ()
         raw model을 쓰기 위함 (RFC-0278). *)
   let answered =
     match
-      Masc_oas_bridge.run_safe ?clock ~caller:"fusion_panel" ~timeout_s:outer_timeout_s (fun () ->
+      Masc_oas_bridge.run_safe ~clock ~caller:"fusion_panel" ~timeout_s:outer_timeout_s (fun () ->
         Ok
           (Agent_sdk.Async_agent.all ~sw ~max_fibers
              (List.map (fun (agent, _panelist, _model) -> (agent, prompt)) built)))

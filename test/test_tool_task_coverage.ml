@@ -396,7 +396,9 @@ let () = test "task_history_events_json_returns_empty_for_missing_task" (fun () 
 )
 let () = test "masc_oas_bridge_runs_without_eio_env" (fun () ->
   match
-    Masc_oas_bridge.run_safe ~caller:"test_tool_task_coverage" ~timeout_s:0.1 (fun () ->
+    Eio_mock.Backend.run @@ fun env ->
+    let clock = Eio.Stdenv.clock env in
+    Masc_oas_bridge.run_safe ~clock ~caller:"test_tool_task_coverage" ~timeout_s:0.1 (fun () ->
       Ok "ok")
   with
   | Ok "ok" -> ()

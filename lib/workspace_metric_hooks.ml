@@ -478,7 +478,9 @@ let install () =
           (Printf.sprintf "Invalid verdict format: %s" msg)
     in
     match
+      let clock = match (Masc_eio_env.get ()).clock with Some c -> c | None -> failwith "missing clock" in
       Masc_oas_bridge.run_with_caller
+        ~clock
         ~caller:Env_config_oas_bridge.Anti_rationalization
         (fun () ->
            Keeper_turn_driver_wrappers.run_named_with_masc_tools

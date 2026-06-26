@@ -690,7 +690,9 @@ let compute_judgments
        #9629: caller uses run_with_caller so this judge resolves its
        budget through Env_config_oas_bridge
        and surfaces in the per-caller Otel_metric_store counter. *)
+    let clock = match (Masc_eio_env.get ()).clock with Some c -> c | None -> failwith "missing clock" in
     Masc_oas_bridge.run_with_caller
+      ~clock
       ~caller:Env_config_oas_bridge.Governance_judge (fun () ->
       let factual_json = build_facts () in
       let prompt = prompt_for_facts factual_json in

@@ -24,7 +24,7 @@ val compose_prompt : question:string -> panel:Fusion_types.panel_outcome list ->
     토큰 소비 전 실패(빌드/실행/provider 에러)는 [Fusion_types.zero_usage]를 싣는다. 이로써
     호출자(refine degrade 경로)가 파싱 실패한 심판의 비용을 0으로 버리지 않는다. *)
 val run
-  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  :  clock:float Eio.Time.clock_ty Eio.Resource.t
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> timeout_s:float
@@ -55,7 +55,7 @@ val compose_refine_prompt
     1차 usage와 [Fusion_types.add_usage]로 합산). 실패는 [run]과 동일하게 [Error (msg,
     usage)] — 파싱 실패 시 소비 토큰을 동반하므로 degrade 경로가 비용을 버리지 않는다. *)
 val run_refine
-  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  :  clock:float Eio.Time.clock_ty Eio.Resource.t
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> timeout_s:float
@@ -96,7 +96,7 @@ val compose_meta_prompt
     1차 심판 usage들과 [Fusion_types.add_usage]로 합산). 실패는 [run]/[run_refine]와 동일하게
     [Error (msg, usage)] — meta 심판이 태운 토큰을 degrade 경로가 버리지 않는다. *)
 val run_meta
-  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  :  clock:float Eio.Time.clock_ty Eio.Resource.t
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> timeout_s:float

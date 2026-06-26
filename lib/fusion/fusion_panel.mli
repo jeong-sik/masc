@@ -22,7 +22,7 @@
     - 빌드 실패·실행 실패·빈 응답은 [Failed]로 격리되어 다른 패널을 죽이지 않는다.
     - 반환 순서: 빌드 실패분 먼저, 그 다음 실행 결과(그룹순 × 그룹내 모델순). *)
 val run
-  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  :  clock:float Eio.Time.clock_ty Eio.Resource.t
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> max_fibers:int

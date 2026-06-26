@@ -340,11 +340,25 @@ let test_buffer_event_caps_replay_buffer () =
         Sse.buffer_event (base + index) (Printf.sprintf "event-%d" index)
       done;
       let buffered = Atomic.get Sse.event_buffer in
+      let expected_newest_first_indexes =
+        List.init Sse.max_buffer_size (fun offset ->
+          Sse.max_buffer_size + 4 - offset)
+      in
+      let expected_newest_first_events =
+        List.map
+          (fun index -> Printf.sprintf "event-%d" index)
+          expected_newest_first_indexes
+      in
       check int "buffer capped" Sse.max_buffer_size (List.length buffered);
-      match buffered with
-      | (event_id, _, _) :: _ ->
-          check int "newest retained at head" (base + Sse.max_buffer_size + 4) event_id
-      | [] -> fail "buffer should not be empty")
+      check (list int) "retained ids newest-first"
+        (List.map (fun index -> base + index) expected_newest_first_indexes)
+        (List.map (fun (event_id, _, _) -> event_id) buffered);
+      check (list string) "retained event contents newest-first"
+        expected_newest_first_events
+        (List.map (fun (_, event, _) -> event) buffered);
+      check (list string) "replay retained events oldest-first"
+        (List.rev expected_newest_first_events)
+        (Sse.get_events_after (base - 1)))
 
 let test_get_events_after_empty () =
   let future_id = Sse.current_id () + 100000 in

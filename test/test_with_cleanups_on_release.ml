@@ -94,7 +94,7 @@ let test_with_cleanups_on_release_preserves_list_order () =
    with
    | Failure _ -> ()) ;
   check string "cleanups run in supplied order"
-    "third-second-first"
+    "first-second-third"
     (String.concat "-" (List.rev !order))
 
 (** Cancelled semantics: when the switch unwinds with Cancelled,
@@ -104,28 +104,31 @@ let test_with_cleanups_on_release_preserves_list_order () =
     inside the cleanup list.  So this test asserts both cleanups
     ran and the fiber observed Cancelled, not the cleanups. *)
 let test_with_cleanups_on_release_runs_all_on_cancel () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun outer_sw ->
+  let exception Trigger_release in
   let step_a_ran = ref false in
   let step_b_ran = ref false in
   let helper_observed_cancel = ref false in
-  let clock = Eio.Stdenv.clock env in
-  Eio.Fiber.fork ~sw:outer_sw (fun () ->
-      try
-        Eio.Switch.run (fun inner_sw ->
-            SBH.with_cleanups_on_release ~sw:inner_sw
-              [ (fun () -> step_a_ran := true);
-                (fun () -> step_b_ran := true) ];
-            (* Suspend; the outer [Eio.Switch.fail] below cancels
-               this fiber mid-sleep, then the inner switch unwinds
-               and the on_release callback runs. *)
-            Eio.Time.sleep clock 60.0)
-      with
-      | Eio.Cancel.Cancelled _ -> helper_observed_cancel := true
-      | _ -> ()) ;
-  Eio.Time.sleep clock 0.3 ;
-  Eio.Switch.fail outer_sw (Failure "trigger release") ;
-  Eio.Time.sleep clock 0.3 ;
+  (try
+     Eio_main.run @@ fun env ->
+     Eio.Switch.run @@ fun outer_sw ->
+     let clock = Eio.Stdenv.clock env in
+     Eio.Fiber.fork ~sw:outer_sw (fun () ->
+         try
+           Eio.Switch.run (fun inner_sw ->
+               SBH.with_cleanups_on_release ~sw:inner_sw
+                 [ (fun () -> step_a_ran := true);
+                   (fun () -> step_b_ran := true) ];
+               (* Suspend; the outer [Eio.Switch.fail] below cancels
+                  this fiber mid-sleep, then the inner switch unwinds
+                  and the on_release callback runs. *)
+               Eio.Time.sleep clock 60.0)
+         with
+         | Eio.Cancel.Cancelled _ -> helper_observed_cancel := true
+         | _ -> ()) ;
+     Eio.Time.sleep clock 0.3 ;
+     Eio.Switch.fail outer_sw Trigger_release
+   with
+   | Trigger_release -> ()) ;
   check bool "fiber observed Eio.Cancel.Cancelled" true
     !helper_observed_cancel ;
   check bool "step A ran on switch unwind" true !step_a_ran ;

@@ -28,7 +28,7 @@ let rec walk_ml_files dir acc =
 ;;
 
 let test_no_underscore_prefix_bindings () =
-  let files = walk_ml_files "lib" [] in
+  let files = walk_ml_files (Ast_grep.resolve_path "lib") [] in
   let offenders =
     List.filter_map
       (fun f ->
@@ -52,7 +52,7 @@ let test_no_underscore_prefix_bindings () =
 ;;
 
 let test_renamed_bindings_present () =
-  let files = walk_ml_files "lib" [] in
+  let files = walk_ml_files (Ast_grep.resolve_path "lib") [] in
   let total =
     List.fold_left
       (fun acc f ->

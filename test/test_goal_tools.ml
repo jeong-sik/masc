@@ -57,6 +57,10 @@ let principal_json_with_display_name ~id ~display_name =
   `Assoc [ "id", `String id; "display_name", `String display_name ]
 ;;
 
+let seed_goal_operator (config : Workspace.config) ~agent_name =
+  Auth_credential_base.write_initial_admin config.base_path agent_name
+;;
+
 let get_string_field json field =
   match Yojson.Safe.Util.member field json with
   | `String value -> value
@@ -645,15 +649,16 @@ let test_goal_transition_manual_reject_blocks_and_cancels_request () =
     |> Yojson.Safe.Util.member "verification_request"
     |> fun json -> get_string_field json "id"
   in
+  seed_goal_operator config ~agent_name:"operator";
   let rejected =
     Tool_workspace.dispatch
-      (workspace_ctx config)
+      (workspace_ctx ~agent_name:"operator" config)
       ~name:"masc_goal_transition"
       ~args:
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "reject_completion"
-            ; "actor", principal_json ~id:"planner"
+            ; "actor", principal_json ~id:"operator"
             ; "note", `String "operator rejected the completion claim"
             ])
   in
@@ -757,15 +762,16 @@ let test_goal_transition_approval_gate () =
     (verified_json
      |> Yojson.Safe.Util.member "goal"
      |> fun json -> get_string_field json "phase");
+  seed_goal_operator config ~agent_name:"operator";
   let approved =
     Tool_workspace.dispatch
-      (workspace_ctx config)
+      (workspace_ctx ~agent_name:"operator" config)
       ~name:"masc_goal_transition"
       ~args:
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "approve_completion"
-            ; "actor", principal_json ~id:"planner"
+            ; "actor", principal_json ~id:"operator"
             ])
   in
   let approved_json =
@@ -1209,6 +1215,7 @@ let test_operator_actions_require_operator_caller () =
 let test_operator_actions_accept_authenticated_operator () =
   with_workspace
   @@ fun config ->
+  seed_goal_operator config ~agent_name:"operator";
   let goal, _kind =
     match Goal_store.upsert_goal config ~title:"Operator can block" () with
     | Ok payload -> payload
@@ -1216,13 +1223,13 @@ let test_operator_actions_accept_authenticated_operator () =
   in
   let blocked =
     Tool_workspace.dispatch
-      (workspace_ctx config)
+      (workspace_ctx ~agent_name:"operator" config)
       ~name:"masc_goal_transition"
       ~args:
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "operator_block"
-            ; "actor", principal_json ~id:"planner"
+            ; "actor", principal_json ~id:"operator"
             ])
   in
   let blocked_json =

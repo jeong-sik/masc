@@ -316,11 +316,15 @@ let test_local_keeper_rg_invalid_type_surfaces_stderr () =
              (String.lowercase_ascii detail)
              "unrecognized file type"))
 
-let test_docker_keeper_blocks_find_outside () =
+let test_docker_keeper_blocks_second_rg_outside () =
   setup ~keeper_name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside_dir = Filename.concat base "outside_playground" in
   ensure_dir outside_dir;
+  ignore
+    (Fs_compat.save_file_atomic
+       (Filename.concat outside_dir "leak.txt")
+       "secret-token");
   let factory = Keeper_sandbox_factory.create ~config ~meta () in
   Fun.protect
     ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
@@ -332,12 +336,12 @@ let test_docker_keeper_blocks_find_outside () =
       ~args:
         (`Assoc
           [
-            ("op", `String "find");
-            ("pattern", `String "*.txt");
+            ("op", `String "rg");
+            ("pattern", `String "secret");
             ("path", `String outside_dir);
           ])
   in
-  Alcotest.(check bool) "find outside playground blocked" true
+  Alcotest.(check bool) "second rg outside playground blocked" true
     (blocked_by_sandbox_boundary raw)
 
 let test_docker_keeper_allows_inside_playground () =
@@ -521,8 +525,8 @@ let () =
           Alcotest.test_case
             "local keeper rg invalid type surfaces stderr to keeper"
             `Quick test_local_keeper_rg_invalid_type_surfaces_stderr;
-          Alcotest.test_case "docker keeper blocks find outside" `Quick
-            test_docker_keeper_blocks_find_outside;
+          Alcotest.test_case "docker keeper blocks second rg outside" `Quick
+            test_docker_keeper_blocks_second_rg_outside;
           Alcotest.test_case "docker keeper allows inside playground"
             `Quick test_docker_keeper_allows_inside_playground;
           Alcotest.test_case "docker relative repos path resolves inside playground"

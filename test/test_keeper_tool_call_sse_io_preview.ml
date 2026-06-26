@@ -21,9 +21,9 @@ let test_tool_io_preview_fields_are_redacted () =
       ~input:
         (`Assoc
            [ "cmd", `String "echo ok"
-           ; "api_key", `String "abcdefghijklmnopqrstuvwxyz123456"
+           ; "api_key", `String "sk-proj-abcdefghijklmnopqrstuvwxyz123456"
            ])
-      ~output:"result token abcdefghijklmnopqrstuvwxyz123456"
+      ~output:"result token sk-proj-abcdefghijklmnopqrstuvwxyz123456"
       ()
   in
   let json = `Assoc fields in

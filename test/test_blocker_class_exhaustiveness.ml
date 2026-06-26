@@ -193,7 +193,7 @@ let test_all_agent_variants_classified_intentionally () =
 (** Pin the Agent sub-variant count so additions are visible in diffs.
     When the SDK adds a new [Agent] sub-variant, bump this number and add it
     to [all_sdk_agent_variants]. *)
-let expected_agent_variant_count = 12
+let expected_agent_variant_count = 9
 
 let test_agent_variant_count_pin () =
   let count = List.length all_sdk_agent_variants in

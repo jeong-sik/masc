@@ -13,6 +13,11 @@ module FA = Fd_accountant
 module DST = Masc.Docker_spawn_throttle
 module DP = Domain_pool
 
+let install_pressure_hooks () =
+  FA.set_pressure_hooks
+    ~active:Keeper_fd_pressure.active
+    ~nofile_soft_limit:Keeper_fd_pressure.process_nofile_soft_limit
+
 let bg_spawn_error_to_string = function
   | Bg_task.Spawn_failed msg -> "Spawn_failed: " ^ msg
   | Bg_task.Too_many_tasks { keeper; limit } ->
@@ -50,6 +55,8 @@ let test_configured_within_bounds () =
     FA.all_kinds
 
 let test_fd_limit_reuses_keeper_pressure_cache () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun _sw ->
   let expected = 4242 in
   Atomic.set
     Keeper_fd_pressure.nofile_soft_limit_cache
@@ -116,6 +123,8 @@ let test_docker_delegation_consistent () =
   check int "docker delegation cap parity" via_accountant via_legacy
 
 let test_snapshot_shape () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun _sw ->
   let s = FA.fd_snapshot () in
   (* per_kind must include all kinds *)
   check int "snapshot covers all kinds" (List.length FA.all_kinds)
@@ -498,6 +507,7 @@ let test_bg_task_cancelled_lifetime_acquire_releases_pending_slot () =
            | Error _ -> false)))
 
 let () =
+  install_pressure_hooks ();
   Alcotest.run "Fd_accountant"
     [
       ( "kind discrimination",

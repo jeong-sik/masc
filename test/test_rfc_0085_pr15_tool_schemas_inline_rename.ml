@@ -11,42 +11,50 @@ open Alcotest
     This retroactive test pins the rename so any future reintroduction
     of [_inline_*] or [_codegen_*] prefix on these names fails CI. *)
 
-let renamed_identifiers =
+let retired_identifiers =
   [ ( "lib/tool_schemas/tool_schemas_inline.ml"
     , "_inline_workspace_codegen_names"
-    , "inline_workspace_codegen_names" )
+    )
   ; ( "lib/tool_schemas/tool_schemas_inline.ml"
     , "_inline_workspace_from_codegen"
-    , "inline_workspace_from_codegen" )
+    )
   ; ( "lib/tool_schemas/tool_schemas_inline_infra.ml"
     , "_codegen_inline_infra_names"
-    , "codegen_inline_infra_names" )
+    )
   ; ( "lib/tool_schemas/tool_schemas_inline_infra.ml"
     , "_inline_infra_from_codegen"
-    , "inline_infra_from_codegen" )
+    )
+  ]
+;;
+
+let active_identifiers =
+  [ "lib/tool_schemas/tool_schemas_inline.ml", "inline_workspace_codegen_names"
+  ; "lib/tool_schemas/tool_schemas_inline.ml", "inline_workspace_from_codegen"
+  ; "lib/tool_schemas/tool_schemas_inline_infra.ml", "mcp_session_action_enum_strings"
+  ; "lib/tool_schemas/tool_schemas_inline_infra.ml", "schemas"
   ]
 ;;
 
 let test_old_underscore_names_gone () =
   List.iter
-    (fun (path, old_name, _new_name) ->
+    (fun (path, old_name) ->
       let n = Ast_grep.count_value_bindings ~module_path:path ~name:old_name in
       let msg =
         Printf.sprintf "old underscore name %s should be removed in %s" old_name path
       in
       check int msg 0 n)
-    renamed_identifiers
+    retired_identifiers
 ;;
 
 let test_new_names_present () =
   List.iter
-    (fun (path, _old_name, new_name) ->
+    (fun (path, new_name) ->
       let n = Ast_grep.count_value_bindings ~module_path:path ~name:new_name in
       let msg =
-        Printf.sprintf "renamed binding %s must exist in %s" new_name path
+        Printf.sprintf "active binding %s must exist in %s" new_name path
       in
       if n < 1 then failf "%s — count=%d" msg n)
-    renamed_identifiers
+    active_identifiers
 ;;
 
 let test_list_mem_caller_preserved () =

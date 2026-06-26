@@ -33,7 +33,7 @@ let rec find_source_root_from dir hops rel =
     if String.equal parent dir then None else find_source_root_from parent (hops + 1) rel
 
 let source_root () =
-  let anchor = "config/prompts/keeper.tool_hints.toml" in
+  let anchor = "dune-project" in
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
   | Some root when String.trim root <> "" && Sys.file_exists (Filename.concat root anchor) ->
     root
@@ -1590,39 +1590,42 @@ let test_keeper_tool_hint_contracts_match_required_fields () =
     "keeper_board_post schema does not require hearth"
     false
     (List.mem "hearth" (schema_required_fields keeper_board_post_schema));
-  let hints = read_source_file "config/prompts/keeper.tool_hints.toml" in
+  let claim_guidance =
+    read_source_file "config/prompts/keeper.turn_intent.claim_guidance_a.md"
+  in
+  let capabilities = read_source_file "config/prompts/keeper.capabilities.md" in
   assert_contains
     "keeper_task_claim hint names optional task_id"
-    hints
-    "task_id:";
+    claim_guidance
+    "`keeper_task_claim { \"task_id\": \"task-123\" }`";
   assert_contains
     "keeper_task_done hint names task_id"
-    hints
-    "`keeper_task_done` { task_id:";
+    capabilities
+    "keeper_task_done task_id=...";
   assert_contains
     "keeper_task_done hint names result"
-    hints
-    "result:";
+    capabilities
+    "result=...";
   assert_contains
     "keeper_task_done hint names evidence"
-    hints
-    "completion evidence";
+    capabilities
+    "include the PR URL or artifact reference in `result`";
   assert_not_contains
     "keeper_task_done hint does not regress to notes-only"
-    hints
+    capabilities
     "`keeper_task_done` { notes: \"evidence\" }";
   assert_contains
     "board get hint uses current tool name"
-    hints
-    "name = \"keeper_board_post_get\"";
+    capabilities
+    "keeper_board_post_get";
   assert_contains
     "board get hint names post_id"
-    hints
-    "post_id:";
+    capabilities
+    "post_id";
   assert_not_contains
     "board get hint avoids retired name"
-    hints
-    "name = \"keeper_board_get\""
+    capabilities
+    "keeper_board_get"
 
 let test_orchestrator_prompt_pins_start_transition () =
   let prompt = read_source_file "config/prompts/system.orchestrator.md" in
@@ -1646,9 +1649,9 @@ let test_task_lifecycle_guidance_is_externalized () =
     workflow
     "masc_transition(start)";
   assert_contains
-    "external workflow keeps worktree guidance"
+    "external workflow keeps branch-work guidance"
     workflow
-    "work in a repo-local worktree";
+    "work in your repo clone on a task branch";
   let schema_source = read_source_file "lib/task/tool_task_schemas.ml" in
   let profile_source =
     read_source_file "lib/mcp_server_eio_tool_profile.ml"

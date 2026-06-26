@@ -100,11 +100,11 @@ let _state_for_kind : (kind * slot_state) list =
 
 let state_of kind = List.assoc kind _state_for_kind
 
-(* Typed-state transitions under the per-slot mutex.  The mutex
-   scope is one record update; it does not span the caller's
-   `f ()` so contention is bounded.  [Eio.Mutex.use_rw ~protect:true]
-   is cancel-safe (caller's `Eio.Cancel.Cancelled` will release the
-   mutex on unwind). *)
+(* Typed-state transitions under the per-slot mutex.  The mutex scope is one
+   record update; it does not span the caller's [f ()] so contention is
+   bounded.  [Eio.Mutex.use_rw ~protect:true] is the runtime contract here:
+   this accountant is installed in Eio server paths, and cancellation while
+   entering/leaving the state machine must not strand the lock. *)
 (* Internal per-slot state-record form.  Not exported -- callers
    go through the kind-level entry points below. *)
 let mark_acquire_slot state =
@@ -278,10 +278,7 @@ let () =
    [max 0 (Atomic.get …)] clamp is gone because the typed
    invariant does not admit underflow. *)
 let in_flight kind =
-  let { holding_state ; _ } = state_of kind in
-  match holding_state with
-  | Idle -> 0
-  | In_flight _ -> 1
+  read_holding_slot (state_of kind)
 
 (* Best-effort FD-open count using /dev/fd (macOS) or /proc/self/fd
    (Linux). Returns -1 on other platforms. *)

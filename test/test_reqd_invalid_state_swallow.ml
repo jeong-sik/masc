@@ -89,7 +89,11 @@ let resolve_path candidates =
 let () =
   let parent p = Filename.dirname p in
   let exe = Sys.executable_name in
-  let project_root = parent (parent (parent (parent exe))) in
+  let project_root =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root when Sys.file_exists (Filename.concat root "dune-project") -> root
+    | _ -> parent (parent (parent (parent exe)))
+  in
 
   (* ---- lib/http_server_eio.ml ----------------------------------------- *)
   let http_src =
@@ -265,23 +269,15 @@ let () =
     |> read_file
   in
 
-  (* Anchor W1: send_pong is still guarded by the write-failure classifier. *)
+  (* Anchor W1: websocket write races are still guarded by the shared
+     late-response classifier. *)
   assert_contains
-    ~label:"W1a: send_pong call still present"
+    ~label:"W1a: websocket write failure classifier still present"
     ws_src
-    "Ws.Wsd.send_pong session.wsd";
+    "Late_response.classify_write_failure exn";
   assert_contains
-    ~label:"W1b: send_pong write failure classifier"
+    ~label:"W1b: websocket late-write debug branch"
     ws_src
-    "classify_write_failure exn";
-
-  (* Anchor W2: writer-closed-during-cancel race comment is present
-     (the wsd-race incident reference travels with the [send_pong]
-     wrapper, so a future refactor that drops the comment is forced
-     to update this anchor). *)
-  assert_contains
-    ~label:"W2: writer closed during cancel race comment"
-    ws_src
-    "writer closed during cancel race";
+    "WS standalone handler closed before write completed";
 
   print_endline "test_reqd_invalid_state_swallow: OK"

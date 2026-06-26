@@ -25,12 +25,15 @@
 
    Concurrency: single serving domain. [add] / file reads may yield; a racing
    rebuild of the same key re-folds the same new bytes into the same result and
-   the later [Hashtbl.replace] wins, costing only repeated work. *)
+   the later [Hashtbl.replace] wins, costing only repeated work. Cache instances
+   are caller-owned; callers that multiplex multiple projections through one
+   cache must namespace [key] by the logical projection, not just by path. *)
 
-type 'a t = (string, int * int * 'a) Hashtbl.t
-(* key -> (consumed byte offset at a line boundary, file inode, accumulator).
-   The inode guards rotation/recreation: a same-path file with a new inode
-   resets the key even when its size exceeds the consumed offset. *)
+type 'a t = (string, int * int * string * 'a) Hashtbl.t
+(* key -> (consumed byte offset at a line boundary, file inode, consumed-boundary
+   fingerprint, accumulator).  The inode catches normal rotation/recreation.
+   The fingerprint catches inode reuse after delete+create: appends preserve the
+   bytes immediately before [consumed], while a recreated file usually does not. *)
 
 let create () : 'a t = Hashtbl.create 16
 
@@ -58,10 +61,20 @@ let read_range path ~start ~upto : string =
           In_channel.seek ic (Int64.of_int start);
           match In_channel.really_input_string ic (upto - start) with
           | Some s -> s
-          | None ->
-              In_channel.seek ic (Int64.of_int start);
-              In_channel.input_all ic
+          | None -> ""
         end)
+
+let fingerprint_bytes = 512
+
+let boundary_fingerprint path ~offset =
+  let start = max 0 (offset - fingerprint_bytes) in
+  read_range path ~start ~upto:offset
+;;
+
+let boundary_matches path ~offset ~fingerprint =
+  try String.equal (boundary_fingerprint path ~offset) fingerprint with
+  | Sys_error _ -> false
+;;
 
 let last_newline (s : string) : int option =
   let rec loop i = if i < 0 then None else if s.[i] = '\n' then Some i else loop (i - 1) in
@@ -81,7 +94,7 @@ let read (t : 'a t) ~(key : string) ~(path : string) ~(empty : 'a)
   match Fs_compat.file_size path with
   | None ->
       (* Missing file: keep whatever was last projected, else empty. *)
-      (match Hashtbl.find_opt t key with Some (_, _, acc) -> acc | None -> empty)
+      (match Hashtbl.find_opt t key with Some (_, _, _, acc) -> acc | None -> empty)
   | Some size ->
       let inode = file_inode path in
       (* Resolve the starting offset and whether it is already line-aligned.
@@ -91,14 +104,18 @@ let read (t : 'a t) ~(key : string) ~(path : string) ~(empty : 'a)
          reseed from the tail. *)
       let consumed, base_acc, aligned =
         match Hashtbl.find_opt t key with
-        | Some (c, ino, acc) when ino = inode && ino >= 0 && c <= size ->
+        | Some (c, ino, fingerprint, acc)
+          when ino = inode
+               && ino >= 0
+               && c <= size
+               && boundary_matches path ~offset:c ~fingerprint ->
             (c, acc, true)
         | _ ->
             let s = max 0 (size - initial_tail_bytes) in
             (s, empty, s = 0)
       in
       if consumed >= size then (
-        Hashtbl.replace t key (size, inode, base_acc);
+        Hashtbl.replace t key (size, inode, boundary_fingerprint path ~offset:size, base_acc);
         base_acc)
       else
         let buf = read_range path ~start:consumed ~upto:size in
@@ -115,13 +132,15 @@ let read (t : 'a t) ~(key : string) ~(path : string) ~(empty : 'a)
         (match last_newline buf with
         | None ->
             (* No complete line yet; hold the offset and wait for the writer. *)
-            Hashtbl.replace t key (consumed, inode, base_acc);
+            Hashtbl.replace t key
+              (consumed, inode, boundary_fingerprint path ~offset:consumed, base_acc);
             base_acc
         | Some p ->
             let complete = String.sub buf 0 (p + 1) in
             let new_consumed = consumed + p + 1 in
             let acc = List.fold_left add base_acc (lines_of complete) in
-            Hashtbl.replace t key (new_consumed, inode, acc);
+            Hashtbl.replace t key
+              (new_consumed, inode, boundary_fingerprint path ~offset:new_consumed, acc);
             acc)
 
 let recent_lines (t : string list t) ~(key : string) ~(path : string)
@@ -140,4 +159,4 @@ let recent_lines (t : string list t) ~(key : string) ~(path : string)
   List.rev newest_first
 
 let peek (t : 'a t) ~(key : string) : 'a option =
-  match Hashtbl.find_opt t key with Some (_, _, acc) -> Some acc | None -> None
+  match Hashtbl.find_opt t key with Some (_, _, _, acc) -> Some acc | None -> None

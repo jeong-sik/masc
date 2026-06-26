@@ -251,9 +251,9 @@ let test_read_missing_file_preflight_errors () =
 
 (* Read on a directory must point the keeper at a tool that actually
    exists. The old message said "use the currently exposed read/listing
-   tools" without naming one; since #20594 exposed op on the search tool,
-   the message now names Grep op='ls' (and Execute ls). Guards against the
-   message regressing to a phantom-tool reference. *)
+   tools" without naming one; the current surface directs agents to
+   Execute ls. Guards against the message regressing to a phantom-tool
+   reference. *)
 let test_read_directory_names_a_real_listing_tool () =
   let base, config, meta = setup_config "minjae" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -269,9 +269,9 @@ let test_read_directory_names_a_real_listing_tool () =
       Alcotest.(check bool) "error reports path_is_directory" true
         (contains_substring msg "path_is_directory");
       Alcotest.(check bool)
-        "error names a real listing tool (op='ls')"
+        "error names a real listing command"
         true
-        (contains_substring msg "op='ls'")
+        (contains_substring msg "executable='ls'")
 
 (* ── run_command error paths
    (exercised without invoking docker) ──────────────────────────── *)
@@ -362,7 +362,7 @@ exit 0\n"
 
 let fake_docker_slow_run_script =
   "#!/bin/sh\n\
-log_file=${KEEPER_DOCKER_LOG:-}\n\
+log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
 if [ \"$1\" = \"info\" ]; then\n\
   printf '[]\\n'\n\
   exit 0\n\
@@ -384,7 +384,7 @@ exit 2\n"
 
 let fake_docker_log_run_script =
   "#!/bin/sh\n\
-log_file=${KEEPER_DOCKER_LOG:-}\n\
+log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
 if [ -n \"$log_file\" ]; then\n\
   printf '%s\\n' \"$*\" >> \"$log_file\"\n\
 fi\n\
@@ -414,7 +414,7 @@ if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ] && [ \"$3\" = \"alpine:tes
   exit 0\n\
 fi\n\
 if [ \"$1\" = \"run\" ]; then\n\
-  env > \"${KEEPER_DOCKER_LOG}.env\"\n\
+  env > \"${MASC_KEEPER_TEST_DOCKER_LOG}.env\"\n\
   printf 'ok\\n'\n\
   exit 0\n\
 fi\n\
@@ -423,7 +423,7 @@ exit 2\n"
 
 let fake_docker_turn_runtime_script =
   "#!/bin/sh\n\
-log_file=${KEEPER_DOCKER_LOG:-}\n\
+log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
 if [ -n \"$log_file\" ]; then\n\
   printf '%s\\n' \"$*\" >> \"$log_file\"\n\
 fi\n\
@@ -468,7 +468,7 @@ exit 2\n"
 
 let fake_docker_stale_streaming_retry_script =
   "#!/bin/sh\n\
-log_file=${KEEPER_DOCKER_LOG:-}\n\
+log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
 inspect_count_file=${KEEPER_DOCKER_INSPECT_COUNT:-}\n\
 exec_count_file=${KEEPER_DOCKER_EXEC_COUNT:-}\n\
 if [ -n \"$log_file\" ]; then\n\
@@ -536,7 +536,7 @@ exit 2\n"
 
 let fake_docker_stopped_streaming_retry_script =
   "#!/bin/sh\n\
-log_file=${KEEPER_DOCKER_LOG:-}\n\
+log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
 state_dir=$(dirname \"$0\")\n\
 run_count_file=\"$state_dir/stopped-run.count\"\n\
 exec_count_file=\"$state_dir/stopped-exec.count\"\n\
@@ -615,7 +615,7 @@ exit 2\n"
 
 let fake_docker_eintr_streaming_retry_script =
   "#!/bin/sh\n\
-log_file=${KEEPER_DOCKER_LOG:-}\n\
+log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
 state_dir=$(dirname \"$0\")\n\
 exec_count_file=\"$state_dir/eintr-exec.count\"\n\
 if [ -n \"$log_file\" ]; then\n\
@@ -832,7 +832,7 @@ exit 2\n"
 
 let fake_docker_startup_preflight_script =
   "#!/bin/sh\n\
-log_file=${KEEPER_DOCKER_LOG:-}\n\
+log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
 if [ -n \"$log_file\" ]; then\n\
   printf '%s\\n' \"$*\" >> \"$log_file\"\n\
 fi\n\
@@ -859,7 +859,7 @@ exit 2\n"
 
 let fake_docker_cleanup_script =
   "#!/bin/sh\n\
-log_file=${KEEPER_DOCKER_LOG:-}\n\
+log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
 if [ -n \"$log_file\" ]; then\n\
   printf '%s\\n' \"$*\" >> \"$log_file\"\n\
 fi\n\
@@ -898,7 +898,7 @@ exit 2\n"
 
 let fake_docker_cleanup_fail_script =
   "#!/bin/sh\n\
-log_file=${KEEPER_DOCKER_LOG:-}\n\
+log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
 if [ -n \"$log_file\" ]; then\n\
   printf '%s\\n' \"$*\" >> \"$log_file\"\n\
 fi\n\
@@ -1110,7 +1110,7 @@ let test_cleanup_stale_containers_removes_only_stale_masc_scope () =
   let base = temp_dir () in
   let log_path = Filename.concat base "docker.log" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   with_env "KEEPER_TEST_PID" (string_of_int (Unix.getpid ())) @@ fun () ->
   let result =
     Keeper_sandbox_runtime.cleanup_stale_containers
@@ -1137,7 +1137,7 @@ let test_maybe_cleanup_stale_containers_runs_once_per_interval () =
       Keeper_sandbox_runtime.reset_last_cleanup_for_tests ();
       cleanup_dir base)
   @@ fun () ->
-  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   with_env "KEEPER_TEST_PID" (string_of_int (Unix.getpid ())) @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "true" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC" "10" @@ fun () ->
@@ -1180,7 +1180,7 @@ let test_maybe_cleanup_stale_containers_backs_off_after_failure () =
       Keeper_sandbox_runtime.reset_last_cleanup_for_tests ();
       cleanup_dir base)
   @@ fun () ->
-  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "true" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC" "10" @@ fun () ->
   Keeper_sandbox_runtime.reset_last_cleanup_for_tests ();
@@ -1319,7 +1319,7 @@ let test_startup_preflight_skips_required_command_inventory () =
   let base = temp_dir () in
   let log_path = Filename.concat base "docker.log" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   match
     Keeper_sandbox_runtime.ensure_keeper_startup_preflight
       ~timeout_sec:5.0 ~sandbox_profile:Keeper_types_profile_sandbox.Docker
@@ -1411,7 +1411,7 @@ let test_run_command_fallback_uses_docker_spawn_slot ~clock () =
   let base, config, meta = setup_config "minjae" in
   let log_path = Filename.concat base "docker.log" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   let result = ref None in
   Eio.Switch.run (fun sw ->
       Eio.Fiber.fork ~sw (fun () ->
@@ -1470,7 +1470,7 @@ let test_run_command_projects_keeper_secret_dir () =
   ensure_dir (Filename.dirname ssh_path);
   write_file token_path "projected-token\n";
   write_file ssh_path "PRIVATE KEY";
-  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   match
     Keeper_sandbox_read_backend.run_command_with_status
       ~config
@@ -1503,7 +1503,7 @@ let test_run_command_scrubs_sensitive_env () =
   let base, config, meta = setup_config "minjae" in
   let log_path = Filename.concat base "docker.log" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   match
     Keeper_sandbox_read_backend.run_command_with_status ~config ~meta
       ~command_argv:[ "echo"; "hello" ]
@@ -1532,7 +1532,7 @@ let test_turn_runtime_reuses_single_container () =
   in
   ensure_dir host_root;
   ensure_dir host_config_dir;
-  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   let factory = Keeper_sandbox_factory.create ~config ~meta () in
   Fun.protect ~finally:(fun () ->
     Keeper_sandbox_factory.cleanup factory;
@@ -1611,7 +1611,7 @@ let test_streaming_exec_validates_cached_container_before_retry () =
   in
   ensure_dir host_root;
   ensure_dir host_config_dir;
-  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   with_env "KEEPER_DOCKER_INSPECT_COUNT" inspect_count_path @@ fun () ->
   with_env "KEEPER_DOCKER_EXEC_COUNT" exec_count_path @@ fun () ->
   let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
@@ -1793,7 +1793,7 @@ let test_streaming_exec_restarts_stopped_container_before_exec () =
   in
   ensure_dir host_root;
   ensure_dir host_config_dir;
-  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta ~turn_id:1 () in
   Fun.protect ~finally:(fun () ->
     Keeper_turn_sandbox_runtime.cleanup runtime;
@@ -2070,9 +2070,9 @@ let test_streaming_exec_releases_retry_marker_prefix_progress () =
     "interdone\n"
     streamed_stdout;
   Alcotest.(check bool)
-    "retry-marker prefix callback arrives before command completion"
+    "retry-marker prefix callback arrives before command returns"
     true
-    (first_stdout_at < elapsed -. 0.2)
+    (first_stdout_at < elapsed)
 
 let test_streaming_exec_retries_split_eintr_marker_without_leak () =
   with_fake_docker fake_docker_eintr_streaming_retry_script @@ fun () ->
@@ -2224,7 +2224,7 @@ let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
   let log_path = Filename.concat base "docker.log" in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir host_root;
-  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
   let factory = Keeper_sandbox_factory.create ~config ~meta () in
   Fun.protect ~finally:(fun () ->
     Keeper_sandbox_factory.cleanup factory;

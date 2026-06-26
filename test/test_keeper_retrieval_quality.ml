@@ -160,7 +160,7 @@ let test_board_post_en () =
 let test_board_read_kr () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"board_read_kr" idx
-    "게시판 글 상세 단건 post_id 읽기" "keeper_board_get")
+    "게시판 글 상세 단건 post_id 읽기" "keeper_board_post_get")
 
 let test_board_list_kr () =
   let idx = build_keeper_index () in
@@ -221,7 +221,7 @@ let test_forge_pr_en () =
 let test_github_issue_kr () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"github_issue_kr" idx
-    "깃허브 이슈 풀리퀘스트" "tool_search_files")
+    "깃허브 이슈 풀리퀘스트" "tool_execute")
 
 (* ================================================================ *)
 (* Scenarios: masc_* tools (Korean BM25 retrieval — #4520)          *)

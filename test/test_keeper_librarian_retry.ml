@@ -158,6 +158,12 @@ let test_cadence_record_success_resets () =
   check bool "after success the next turn is not due" false
     (R.cadence_due ~keeper_id:kid ~trace_id:tid)
 
+let test_cadence_success_policy () =
+  check bool "structured extraction resets cadence" true
+    (R.should_record_cadence_success R.Structured_episode);
+  check bool "unstructured fallback stays due" false
+    (R.should_record_cadence_success R.Unstructured_fallback)
+
 (* [cadence_due] drives the real per-(keeper, trace) counter table (the gate
    [run_best_effort] uses). A fresh pair is due immediately, and failures are
    left due until [cadence_record_success] is called. Asserted as
@@ -365,6 +371,7 @@ let () =
           test_case "cadence 1 always due" `Quick test_cadence_one_always_due;
           test_case "step transitions" `Quick test_cadence_step_transitions;
           test_case "record success resets" `Quick test_cadence_record_success_resets;
+          test_case "success policy excludes fallback" `Quick test_cadence_success_policy;
           test_case "cadence_due fires once per period" `Quick test_cadence_due_periodic;
           test_case "cadence_due is per-keeper" `Quick test_cadence_due_independent_keepers;
           test_case "cadence_due resets on trace rollover" `Quick

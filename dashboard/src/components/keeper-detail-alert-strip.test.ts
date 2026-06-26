@@ -80,6 +80,19 @@ describe('KeeperRuntimeAlertStrip', () => {
     expect(text).not.toContain(reason)
   })
 
+  it('labels completion-contract composite trust reasons', () => {
+    const { container } = render(h(KeeperRuntimeAlertStrip, {
+      keeper: keeper({
+        needs_attention: true,
+        attention_reason: 'completion_contract_result:passive_only',
+      }),
+    }))
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('수동 응답만 있음')
+    expect(text).not.toContain('completion_contract_result:passive_only')
+  })
+
   // First-class status_bridge reasons keep their OWN labels — they are no
   // longer folded into runtime_blocked, so the operator sees the specific
   // failure the backend distinguished.

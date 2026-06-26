@@ -21,8 +21,9 @@
 // (`stale_turn_timeout` was emitted for a release with no label).
 //
 // The richer trust-snapshot attention vocabulary (keeper_runtime_trust_snapshot)
-// is a separate SSOT tracked as a follow-up RFC; see canonicalAttentionReason
-// for the interim coarse bucket.
+// has its own typed sub-vocabularies below, starting with the
+// completion_contract_result:* composite reasons emitted by
+// receipt_contract_attention_reason.
 
 // One-time warn per (kind, token) so dev consoles surface backend tokens that
 // have no Korean label, without spamming on every render.
@@ -74,18 +75,12 @@ const ATTENTION_REASON_LABELS: Record<AttentionReason, string> = {
 // vocabulary on the trust path (fsm_invariant, runtime_exhausted,
 // sandbox_violation, completion_contract_violation, the composite
 // `completion_contract_result:<reason>`, …) than the keeper_status_bridge
-// needs_attention set this union mirrors. Modeling that vocabulary with typed
-// arms — including the composite — is its own SSOT and is tracked as a
-// follow-up RFC, not inlined here (doing it token-by-token would be the
-// partial-migration anti-pattern).
-//
-// Until then these known trust runtime-failure tokens fold to the coarse
-// `runtime_blocked` bucket so the detail strip shows a label instead of a raw
-// English token. This fold is deliberately scoped to that enumerated trust set
-// — the first-class status_bridge reasons (runtime_attempts_exhausted,
-// fiber_unresolved, stale_turn_timeout) are NOT folded and keep their own
-// labels. Unknown/composite trust tokens still fall through to
-// warnUnknownAttentionToken rather than being silently bucketed.
+// needs_attention set this union mirrors. The known non-composite trust
+// runtime-failure tokens fold to the coarse `runtime_blocked` bucket so the
+// detail strip shows a label instead of a raw token. This fold is deliberately
+// scoped to that enumerated trust set — the first-class status_bridge reasons
+// (runtime_attempts_exhausted, fiber_unresolved, stale_turn_timeout) are NOT
+// folded and keep their own labels.
 const TRUST_RUNTIME_FAILURE_ALIASES: ReadonlySet<string> = new Set([
   'completion_contract_violation',
   'completion_contract_unsatisfied',
@@ -95,6 +90,49 @@ const TRUST_RUNTIME_FAILURE_ALIASES: ReadonlySet<string> = new Set([
   'sandbox_violation',
   'critical_block',
 ])
+
+// Mirrors the completion_contract_result arms that
+// keeper_runtime_trust_snapshot.ml can promote into an attention_reason via
+// `completion_contract_result:<reason>`. The satisfied_* receipt results are
+// intentionally absent because they are not attention reasons.
+export const ATTENTION_COMPLETION_CONTRACT_RESULTS = [
+  'violated',
+  'claim_only_after_owned_task',
+  'needs_execution_progress',
+  'passive_only',
+  'unknown',
+  'not_dispatched',
+  'surface_mismatch',
+  'no_capable_provider',
+] as const
+export type AttentionCompletionContractResult = typeof ATTENTION_COMPLETION_CONTRACT_RESULTS[number]
+export type CompletionContractAttentionReason =
+  `completion_contract_result:${AttentionCompletionContractResult}`
+
+const COMPLETION_CONTRACT_ATTENTION_REASON_LABELS: Record<AttentionCompletionContractResult, string> = {
+  violated: '완료 계약 위반',
+  claim_only_after_owned_task: '작업 소유 없는 claim',
+  needs_execution_progress: '실행 진행 증거 부족',
+  passive_only: '수동 응답만 있음',
+  unknown: '완료 계약 결과 불명',
+  not_dispatched: '도구 미실행',
+  surface_mismatch: '실행 표면 불일치',
+  no_capable_provider: '사용 가능한 provider 없음',
+}
+
+export function isAttentionCompletionContractResult(
+  s: string,
+): s is AttentionCompletionContractResult {
+  return (ATTENTION_COMPLETION_CONTRACT_RESULTS as readonly string[]).includes(s)
+}
+
+export function completionContractAttentionReasonLabel(reason: string): string | null {
+  const prefix = 'completion_contract_result:'
+  if (!reason.startsWith(prefix)) return null
+  const result = reason.slice(prefix.length)
+  if (!isAttentionCompletionContractResult(result)) return null
+  return COMPLETION_CONTRACT_ATTENTION_REASON_LABELS[result]
+}
 
 export function canonicalAttentionReason(reason: string | null): string | null {
   if (reason !== null && TRUST_RUNTIME_FAILURE_ALIASES.has(reason)) return 'runtime_blocked'
@@ -110,6 +148,8 @@ export function attentionReasonLabel(reason: string | null, paused: boolean): st
   if (!canonicalReason) return null
   if (canonicalReason === 'paused' && paused) return null
   if (isAttentionReason(canonicalReason)) return ATTENTION_REASON_LABELS[canonicalReason]
+  const completionContractLabel = completionContractAttentionReasonLabel(canonicalReason)
+  if (completionContractLabel) return completionContractLabel
   warnUnknownAttentionToken('attention_reason', canonicalReason)
   return canonicalReason
 }

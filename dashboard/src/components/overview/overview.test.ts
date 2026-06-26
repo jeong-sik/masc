@@ -565,15 +565,12 @@ describe('deriveKeeperAttentionReason', () => {
     expect(reason.act).toBe('최근 오류 확인')
   })
 
-  it('keeps unknown composite reason codes raw rather than dropping them', () => {
-    // completion_contract_result:* is a colon-composite the union does not
-    // cover (backend reason leakage tracked separately); it must surface raw,
-    // not silently vanish.
+  it('humanizes known completion-contract composite reason codes', () => {
     const reason = deriveKeeperAttentionReason(makeKeeper({
       name: 'composite',
       attention_reason: 'completion_contract_result:passive_only',
     }))
-    expect(reason.text).toBe('completion_contract_result:passive_only')
+    expect(reason.text).toBe('수동 응답만 있음')
   })
 })
 

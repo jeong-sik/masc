@@ -1,6 +1,6 @@
 (** RFC-0109 — Bounded subprocess discipline.
 
-    Run a single subprocess with a hard wall-clock bound and capture
+    Run a single subprocess with a hard monotonic-time bound and capture
     stdout/stderr. The implementation relies on a single Eio invariant
     quoted from
     https://ocaml.org/p/eio/latest/doc/Eio/Process/index.html:
@@ -18,18 +18,33 @@
     which is why scope termination is the only reliable termination
     primitive available. *)
 
+(** Diagnostic payload returned when a subprocess exceeds its bound. *)
+type timeout =
+  { argv : string list
+        (** Exact argv passed to {!run_argv_with_timeout}. *)
+  ; timeout_s : float
+        (** Requested timeout budget in seconds. *)
+  ; elapsed_s : float
+        (** Elapsed monotonic time in seconds. *)
+  ; stdout : string
+        (** Partial stdout captured before the timeout won the race. *)
+  ; stderr : string
+        (** Partial stderr captured before the timeout won the race. *)
+  }
+
 (** Outcome of {!run_argv_with_timeout}. *)
 type outcome =
   | Done of Unix.process_status * string * string
       (** Process finished within the timeout. Fields are
           [(status, stdout, stderr)]. *)
-  | Timeout of float
-      (** Timeout fiber won the race. Carries elapsed wall-clock
-          seconds. The subprocess has been SIGKILLed by Eio at the
-          point this constructor is observed. *)
+  | Timeout of timeout
+      (** Timeout fiber won the race. Carries the requested argv, timeout
+          budget, monotonic elapsed time, and partial captured output. The
+          subprocess has been SIGKILLed by Eio at the point this constructor is
+          observed. *)
 
 val run_argv_with_timeout :
-  clock:_ Eio.Time.clock ->
+  mono_clock:_ Eio.Time.Mono.t ->
   process_mgr:_ Eio.Process.mgr ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->
   ?env:string array ->
@@ -37,9 +52,9 @@ val run_argv_with_timeout :
   timeout_s:float ->
   string list ->
   outcome
-(** [run_argv_with_timeout ~clock ~process_mgr ~cwd ?env ?stdin_string
+(** [run_argv_with_timeout ~mono_clock ~process_mgr ~cwd ?env ?stdin_string
     ~timeout_s argv] spawns [argv] under a fresh internal switch and
-    races the call against [Eio.Time.sleep clock timeout_s].
+    races the call against [Eio.Time.Mono.sleep mono_clock timeout_s].
 
     Returns {!Done} with the captured stdout/stderr if the process
     finishes first, or {!Timeout} otherwise.

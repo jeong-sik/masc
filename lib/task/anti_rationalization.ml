@@ -595,16 +595,62 @@ let default_evaluator_runtime () =
 (* Contract verification (#3071)                                     *)
 (* ================================================================ *)
 
+(** Tokenize legacy contract text for local Gate 2.5 matching.
+    ASCII punctuation separates tokens; UTF-8 bytes remain token
+    characters so non-English contract items still compare literally
+    across ASCII whitespace/punctuation. *)
+let contract_tokens text =
+  let buf = Buffer.create 16 in
+  let out = ref [] in
+  let is_token_char = function
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> true
+    | c -> Char.code c >= 128
+  in
+  let flush () =
+    if Buffer.length buf > 0
+    then (
+      out := Buffer.contents buf :: !out;
+      Buffer.clear buf)
+  in
+  String.iter
+    (fun c ->
+       if is_token_char c
+       then Buffer.add_char buf (Char.lowercase_ascii c)
+       else flush ())
+    text;
+  flush ();
+  List.rev !out
+;;
+
+let contains_token_sequence ~haystack ~needle =
+  let rec starts_with needle haystack =
+    match needle, haystack with
+    | [], _ -> true
+    | n :: ns, h :: hs when String.equal n h -> starts_with ns hs
+    | _ -> false
+  in
+  match needle with
+  | [] -> false
+  | _ ->
+    let rec loop = function
+      | [] -> false
+      | _ :: rest as tokens -> starts_with needle tokens || loop rest
+    in
+    loop haystack
+;;
+
 (** Check completion notes against a pre-declared contract.
-    Returns unmet contract items. A contract item is "met" if the
-    notes contain a case-insensitive substring match.
+    Returns unmet contract items. A contract item is "met" if its
+    normalized token sequence appears in the notes with token boundaries.
 
     This is deliberately simple — the contract is a lightweight
     pre-declaration, not a formal specification language. *)
 let check_contract ~(notes : string) ~(contract : string list) : string list =
-  let lower_notes = String.lowercase_ascii notes in
+  let notes_tokens = contract_tokens notes in
   List.filter
-    (fun item -> not (String_util.contains_substring_ci lower_notes item))
+    (fun item ->
+       let item_tokens = contract_tokens item in
+       not (contains_token_sequence ~haystack:notes_tokens ~needle:item_tokens))
     contract
 ;;
 
@@ -709,8 +755,7 @@ let review
       (* Gate 2.5: legacy local contract check. When the verification FSM is
      enabled, contract judgment is deferred to the Gate 3 LLM prompt instead
      of routing normal completion through a verifier agent. When FSM is
-     disabled, the historical substring check remains as a minimal local
-     safety net. *)
+     disabled, a token-boundary check remains as a minimal local safety net. *)
       let contract_rejection =
         if Env_config_runtime.Verification.fsm_enabled ()
         then None

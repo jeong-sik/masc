@@ -126,6 +126,30 @@ let test_build_prompt_includes_verification_contract () =
     true
     (contains "Reject if the notes do not provide concrete evidence")
 
+let test_check_contract_rejects_embedded_substrings () =
+  let unmet =
+    AR.check_contract
+      ~notes:
+        "The parser is errorless; the contest coverage marker exists in the \
+         fixture."
+      ~contract:[ "error"; "test coverage" ]
+  in
+  Alcotest.(check (list string))
+    "embedded substrings do not satisfy contract items"
+    [ "error"; "test coverage" ]
+    unmet
+
+let test_check_contract_matches_token_sequence_through_punctuation () =
+  let unmet =
+    AR.check_contract
+      ~notes:"Tests: passed. Coverage-report attached to the completion notes."
+      ~contract:[ "tests passed"; "coverage report" ]
+  in
+  Alcotest.(check (list string))
+    "punctuation-separated token sequences satisfy contract items"
+    []
+    unmet
+
 (* Counter label vocabulary contract — pin each decision string
    so dashboards keyed on these labels do not silently break.
    These three strings are the only valid values; adding a new
@@ -188,6 +212,13 @@ let () =
             `Quick test_build_prompt_no_advisory_section_without_input;
           Alcotest.test_case "verification contract included"
             `Quick test_build_prompt_includes_verification_contract;
+        ] );
+      ( "contract_check",
+        [
+          Alcotest.test_case "embedded substrings remain unmet"
+            `Quick test_check_contract_rejects_embedded_substrings;
+          Alcotest.test_case "punctuation token sequence is accepted"
+            `Quick test_check_contract_matches_token_sequence_through_punctuation;
         ] );
       ( "counter_labels",
         [

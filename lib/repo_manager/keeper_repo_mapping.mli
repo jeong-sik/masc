@@ -12,8 +12,9 @@ val mappings_toml_path : string -> string
     library. *)
 
 val load_all : base_path:string -> (keeper_repo_mapping list, string) result
-(** [load_all ~base_path] loads all keeper-repository mappings from
-    [.masc/config/keeper_repo_mappings.toml]. *)
+(** [load_all ~base_path] loads all keeper-repository mappings from the path
+    returned by {!mappings_toml_path}. A malformed top-level [[mapping]]
+    section returns an [Error]. *)
 
 type mapping_lookup =
   | Mapping_found of keeper_repo_mapping
@@ -51,6 +52,17 @@ val log_mapping_load_error_if_new : keeper_id:string -> string -> unit
 (** Log a mapping load error once per keeper so operators notice file
     corruption/misconfiguration even on display-only paths that do not call
     {!is_allowed}. *)
+
+type policy_decision =
+  | Policy_decision_missing
+  | Policy_decision_not_in_mapping
+  | Policy_decision_load_error
+
+val record_policy_decision :
+  keeper_id:string -> ?repository_id:string -> policy_decision -> unit
+(** Record a keeper-repository mapping policy decision in the operator
+    metrics. Callers should increment once per decision so denied-by-missing,
+    denied-not-in-mapping, and load-error paths are observable. *)
 
 val is_allowed :
   keeper_id:string -> repository_id:repository_id -> base_path:string -> bool

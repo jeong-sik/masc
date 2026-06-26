@@ -338,7 +338,7 @@ let playground_repo_policy ~(base_path : string) ~(keeper_name : string) =
     r
   | r -> r
 
-let playground_repo_policy_fields policy ~repo_name =
+let playground_repo_policy_fields ~keeper_id policy ~repo_name =
   let field status allowed ?error () =
     let status_text = playground_policy_status_to_string status in
     let reason_fields =
@@ -359,26 +359,34 @@ let playground_repo_policy_fields policy ~repo_name =
   in
   match policy with
   | Keeper_repo_mapping.Mapping_load_error msg ->
+      Keeper_repo_mapping.record_policy_decision
+        ~keeper_id Keeper_repo_mapping.Policy_decision_load_error;
       field Policy_mapping_load_error false ~error:msg ()
   | Keeper_repo_mapping.Mapping_missing _ ->
+      Keeper_repo_mapping.record_policy_decision
+        ~keeper_id Keeper_repo_mapping.Policy_decision_missing;
       field Policy_denied_missing_mapping false ()
   | Keeper_repo_mapping.Mapping_found mapping ->
       if Keeper_repo_mapping.mapping_allows_repository mapping ~repository_id:repo_name
       then field Policy_allowed true ()
-      else field Policy_denied_not_in_mapping false ()
+      else (
+        Keeper_repo_mapping.record_policy_decision
+          ~keeper_id ~repository_id:repo_name Keeper_repo_mapping.Policy_decision_not_in_mapping;
+        field Policy_denied_not_in_mapping false ())
 
-let with_playground_repo_policy_fields policy ~repo_name = function
+let with_playground_repo_policy_fields ~keeper_id policy ~repo_name = function
   | `Assoc fields ->
-      playground_repo_policy_fields policy ~repo_name
+      playground_repo_policy_fields ~keeper_id policy ~repo_name
       |> List.fold_left
            (fun fields (key, value) -> upsert_assoc key value fields)
            fields
       |> fun fields -> `Assoc fields
   | json ->
-      invalid_arg
-        (Printf.sprintf
-           "playground repo entry must be a JSON object before policy fields: %s"
-           (Yojson.Safe.to_string json))
+      Log.Misc.warn
+        "[KeeperSandboxControl] playground repo entry for %s is not a JSON object; \
+         preserving original value (%s)"
+        repo_name (Yojson.Safe.to_string json);
+      json
 
 let git_metadata_timeout_sec = 2.0
 let max_live_git_enrichment_repos = 20
@@ -511,10 +519,10 @@ let playground_repos_json ~(config : Workspace.config) ~(meta : keeper_meta) =
             (incr live_enriched_count;
             enrich_playground_repo_from_git ~source:"git" ~repo_name:name
               ~repo_path repo
-            |> with_playground_repo_policy_fields policy ~repo_name:name)
+            |> with_playground_repo_policy_fields ~keeper_id:meta.name policy ~repo_name:name)
           else
             playground_repo_entry_json ~source:"cache" ~repo_name:name repo
-            |> with_playground_repo_policy_fields policy ~repo_name:name
+            |> with_playground_repo_policy_fields ~keeper_id:meta.name policy ~repo_name:name
       | None -> repo)
   in
   let cached_names = List.filter_map repo_name_of_json cached in
@@ -524,7 +532,7 @@ let playground_repos_json ~(config : Workspace.config) ~(meta : keeper_meta) =
     |> List.map (fun name ->
       playground_repo_entry_json ~source:"filesystem" ~repo_name:name
         (`Assoc [])
-      |> with_playground_repo_policy_fields policy ~repo_name:name)
+      |> with_playground_repo_policy_fields ~keeper_id:meta.name policy ~repo_name:name)
   in
   `List (cached @ fs_entries)
 

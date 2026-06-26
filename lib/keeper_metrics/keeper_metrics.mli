@@ -230,6 +230,9 @@ type t =
   | KeeperToolCallRetryLoop
   | AttemptWatchdogFired
   | ShellIrEffectTotal
+  | KeeperRepoMappingDeniedMissing
+  | KeeperRepoMappingDeniedNotInMapping
+  | KeeperRepoMappingLoadError
 
 val to_string : t -> string
 

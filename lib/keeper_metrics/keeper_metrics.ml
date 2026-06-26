@@ -240,6 +240,9 @@ type t =
   | KeeperToolCallRetryLoop     (* counter: consecutive identical tool calls with errors *)
   | AttemptWatchdogFired        (* counter: 1800s safety-cap watchdog killed a stuck attempt *)
   | ShellIrEffectTotal          (* counter: fine-grained Shell IR effect decomposition *)
+  | KeeperRepoMappingDeniedMissing      (* counter: keeper repo mapping decision: missing mapping *)
+  | KeeperRepoMappingDeniedNotInMapping (* counter: keeper repo mapping decision: repo not in mapping *)
+  | KeeperRepoMappingLoadError          (* counter: keeper repo mapping load/parse failure *)
 
 (** String conversion
 
@@ -497,6 +500,9 @@ let to_string = function
   | KeeperToolCallRetryLoop -> "masc_keeper_tool_call_retry_loop_total"
   | AttemptWatchdogFired -> "masc_keeper_attempt_watchdog_fired_total"
   | ShellIrEffectTotal -> "masc_keeper_shell_ir_effect_total"
+  | KeeperRepoMappingDeniedMissing -> "masc_keeper_repo_mapping_denied_missing_total"
+  | KeeperRepoMappingDeniedNotInMapping -> "masc_keeper_repo_mapping_denied_not_in_mapping_total"
+  | KeeperRepoMappingLoadError -> "masc_keeper_repo_mapping_load_error_total"
 ;;
 
 (* Every constructor of [t], in declaration order.  Consumed by
@@ -559,7 +565,8 @@ let all : t list =
     UsageAnomalyReason; ConfigEnvParseFailures; PostTurnWireinFailures; RecurringFailures;
     TurnCleanupFailures; MemoryBankLoadHistorySwallowedExceptions; MemoryRecallReadErrors; MemoryOsRecallUnavailable; RuntimeHttpProbeJsonParseFailures;
     VisionAnalyze; VisionCandidateAttempts; VisionIngestEvictions; PromptSegmentBytes; PromptTemplateRenderOutcome; ToolCallParamCompleteness; KeeperTurnInstructionHash;
-    KeeperToolCallRetryLoop; AttemptWatchdogFired; ShellIrEffectTotal
+    KeeperToolCallRetryLoop; AttemptWatchdogFired; ShellIrEffectTotal;
+  KeeperRepoMappingDeniedMissing; KeeperRepoMappingDeniedNotInMapping; KeeperRepoMappingLoadError
   ]
 ;;
 

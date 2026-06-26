@@ -4,6 +4,21 @@ let ( let* ) = Result.bind
 
 module String_map = Map.Make (String)
 
+(** Keep per-path/keeper auxiliary maps bounded. These maps are operational
+    caches, not correctness state: on overflow we drop the old contents and
+    keep the new entry so long-lived processes cannot grow without bound. *)
+let max_load_all_cache_entries = 256
+let max_logged_mapping_error_entries = 1024
+
+let bounded_add key value map ~max_entries =
+  let map =
+    if String_map.mem key map || String_map.cardinal map < max_entries
+    then map
+    else String_map.empty
+  in
+  String_map.add key value map
+;;
+
 (** Fiber/domain-safe set of keepers for whom a mapping load error has already
     been logged. Using an immutable [Map] under [Atomic] avoids locking an
     Eio fiber while still deduplicating warnings. *)
@@ -33,66 +48,120 @@ let toml_of_mapping mapping =
   in
   Otoml.TomlTable fields
 
-let load_all ~base_path =
-  let path = mappings_toml_path base_path in
-  if not (Sys.file_exists path) then Ok []
-  else
-    match Otoml.Parser.from_file_result path with
-    | Error msg -> Error msg
-    | Ok toml -> (
-        match Otoml.find_result toml Fun.id ["mapping"] with
-        | Error _ -> Ok []
-        | Ok (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->
-            let rec loop acc = function
-              | [] -> Ok (List.rev acc)
-              | (keeper_id, value) :: rest ->
-                  if is_toml_table value then
-                    let mapping_toml =
-                      Otoml.TomlTable [("mapping", Otoml.TomlTable [(keeper_id, value)])]
-                    in
-                    (match mapping_of_toml mapping_toml keeper_id with
-                    | Ok mapping -> loop (mapping :: acc) rest
-                    | Error msg -> Error msg)
-                  else
-                    Error (Printf.sprintf "mapping.%s must be a table" keeper_id)
-            in
-            loop [] fields
-        | Ok (Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
-             | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
-             | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
-             | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _) ->
-            Ok [])
-
-(** Cache for [load_all] results keyed by [base_path]. Each entry carries the
-    mapping file stamp so out-of-process TOML edits invalidate the cache before
-    access-control decisions reuse it. Writes through this module still remove
-    the entry explicitly. The immutable [Map] + [Atomic] design is fiber-safe
-    without requiring an Eio mutex to be threaded through every caller. *)
+(** A [mapping_file_stamp] identifies one concrete version of the mapping file.
+    It carries inode and a content digest in addition to mtime/size so that
+    replacement edits that happen to preserve size and mtime still invalidate
+    the cache. *)
 type mapping_file_stamp =
   { mtime : float
   ; size : int
+  ; inode : int64
+  ; content_digest : string
   }
 
+(** [file_snapshot] pairs the bytes read from disk with the metadata that was
+    observed at read time. *)
+type file_snapshot =
+  { stamp : mapping_file_stamp
+  ; content : string
+  }
+
+let log_mapping_file_warning path msg =
+  Log.Misc.warn
+    "[KeeperRepoMapping] mapping file %s unreadable — access denied fail-closed (%s)"
+    path msg
+;;
+
+let load_file_content path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+;;
+
+(** [read_mapping_file ~base_path] returns the current file snapshot, [None]
+    when the file is absent, or [Error] when it exists but cannot be read.
+    All [Unix.Unix_error] variants are caught so that a stat/read failure is
+    never propagated as an exception to enforcement callers. *)
+let read_mapping_file ~base_path =
+  Eio_guard.run_in_systhread (fun () ->
+    let path = mappings_toml_path base_path in
+    match Unix.stat path with
+    | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> Ok None
+    | exception Unix.Unix_error (e, _, _) ->
+        let msg = Unix.error_message e in
+        log_mapping_file_warning path msg;
+        Error msg
+    | exception Sys_error msg ->
+        log_mapping_file_warning path msg;
+        Error msg
+    | stat -> (
+        match load_file_content path with
+        | exception Sys_error msg when not (Sys.file_exists path) ->
+            (* The file disappeared between stat and read; treat as absent. *)
+            Ok None
+        | exception Sys_error msg ->
+            log_mapping_file_warning path msg;
+            Error msg
+        | exception End_of_file ->
+            let msg = "unexpected end of mapping file" in
+            log_mapping_file_warning path msg;
+            Error msg
+        | content ->
+            let stamp =
+              { mtime = stat.Unix.st_mtime
+              ; size = stat.Unix.st_size
+              ; inode = Int64.of_int stat.Unix.st_ino
+              ; content_digest = Digest.string content
+              }
+            in
+            Ok (Some { stamp; content })))
+;;
+
+let parse_mapping_content content =
+  match Otoml.Parser.from_string_result content with
+  | Error msg -> Error msg
+  | Ok toml -> (
+      match Otoml.find_result toml Fun.id ["mapping"] with
+      | Error _ -> Ok []
+      | Ok (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->
+          let rec loop acc = function
+            | [] -> Ok (List.rev acc)
+            | (keeper_id, value) :: rest ->
+                if is_toml_table value then
+                  let mapping_toml =
+                    Otoml.TomlTable [("mapping", Otoml.TomlTable [(keeper_id, value)])]
+                  in
+                  (match mapping_of_toml mapping_toml keeper_id with
+                   | Ok mapping -> loop (mapping :: acc) rest
+                   | Error msg -> Error msg)
+                else
+                  Error (Printf.sprintf "mapping.%s must be a table" keeper_id)
+          in
+          loop [] fields
+      | Ok _ -> Error "mapping field must be a table")
+
+let load_all ~base_path =
+  let* snapshot = read_mapping_file ~base_path in
+  match snapshot with
+  | None -> Ok []
+  | Some { content; _ } -> parse_mapping_content content
+
+(** Cache for [load_all] results keyed by [base_path]. Each entry carries the
+    mapping file stamp so out-of-process TOML edits invalidate the cache before
+    access-control decisions reuse it. Writes through this module remove the
+    entry explicitly. The immutable [Map] + [Atomic] design is fiber-safe
+    without requiring an Eio mutex to be threaded through every caller. *)
 type load_all_cache_entry =
   { stamp : mapping_file_stamp option
   ; result : (keeper_repo_mapping list, string) result
   }
 
-let mapping_file_stamp ~base_path =
-  let path = mappings_toml_path base_path in
-  match Unix.stat path with
-  | stat -> Some { mtime = stat.Unix.st_mtime; size = stat.Unix.st_size }
-  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> None
-  | exception Sys_error _ -> None
-;;
-
-let same_stamp left right =
-  match left, right with
-  | None, None -> true
-  | ( Some { mtime = left_mtime; size = left_size }
-    , Some { mtime = right_mtime; size = right_size } ) ->
-    Float.equal left_mtime right_mtime && Int.equal left_size right_size
-  | _ -> false
+let stamp_equal left right =
+  Float.equal left.mtime right.mtime
+  && Int.equal left.size right.size
+  && Int64.equal left.inode right.inode
+  && String.equal left.content_digest right.content_digest
 ;;
 
 let load_all_cache : load_all_cache_entry String_map.t Atomic.t =
@@ -108,37 +177,56 @@ let invalidate_load_all_cache ~base_path =
   loop ()
 ;;
 
+let update_load_all_cache ~base_path stamp result =
+  let entry = { stamp; result } in
+  let rec loop () =
+    let current = Atomic.get load_all_cache in
+    let next =
+      bounded_add base_path entry current ~max_entries:max_load_all_cache_entries
+    in
+    if Atomic.compare_and_set load_all_cache current next then ()
+    else loop ()
+  in
+  loop ()
+;;
+
+(** [load_all_cached_attempt ~base_path] returns the parsed mapping list, using
+    a per-[base_path] stamp-keyed cache. The file is read once; it is parsed;
+    then the file is read a second time to confirm the stamp has not changed
+    before the result is cached or returned. This closes the TOCTOU window
+    where a concurrent edit would serve stale access-control data. *)
+let rec load_all_cached_attempt ~remaining_attempts ~base_path =
+  match read_mapping_file ~base_path with
+  | Error msg -> Error msg
+  | Ok None ->
+      invalidate_load_all_cache ~base_path;
+      Ok []
+  | Ok Some snapshot -> (
+      match String_map.find_opt base_path (Atomic.get load_all_cache) with
+      | Some { stamp = Some cached_stamp; result }
+        when stamp_equal cached_stamp snapshot.stamp ->
+          result
+      | _ ->
+          let result = parse_mapping_content snapshot.content in
+          (* Only cache the result if the on-disk version is still the one we
+             parsed. A mismatch means the file changed mid-read; we return the
+             result but leave the cache empty so the next call reads fresh. *)
+          (match read_mapping_file ~base_path with
+           | Error msg -> Error msg
+           | Ok (Some post) when stamp_equal post.stamp snapshot.stamp ->
+               update_load_all_cache ~base_path (Some snapshot.stamp) result;
+               result
+           | Ok _ ->
+               invalidate_load_all_cache ~base_path;
+               if remaining_attempts > 0
+               then
+                 load_all_cached_attempt ~remaining_attempts:(remaining_attempts - 1)
+                   ~base_path
+               else Error "mapping file changed while loading"))
+;;
+
 let load_all_cached ~base_path =
-  let current_stamp = mapping_file_stamp ~base_path in
-  match String_map.find_opt base_path (Atomic.get load_all_cache) with
-  | Some { stamp; result } when same_stamp stamp current_stamp -> result
-  | None ->
-    let result = load_all ~base_path in
-    let entry = { stamp = mapping_file_stamp ~base_path; result } in
-    let rec insert () =
-      let current = Atomic.get load_all_cache in
-      match String_map.find_opt base_path current with
-      | Some { stamp; result } when same_stamp stamp entry.stamp -> result
-      | None ->
-        let next = String_map.add base_path entry current in
-        if Atomic.compare_and_set load_all_cache current next then entry.result
-        else insert ()
-      | Some _ ->
-        let next = String_map.add base_path entry current in
-        if Atomic.compare_and_set load_all_cache current next then entry.result
-        else insert ()
-    in
-    insert ()
-  | Some _ ->
-    let result = load_all ~base_path in
-    let entry = { stamp = mapping_file_stamp ~base_path; result } in
-    let rec replace () =
-      let current = Atomic.get load_all_cache in
-      let next = String_map.add base_path entry current in
-      if Atomic.compare_and_set load_all_cache current next then entry.result
-      else replace ()
-    in
-    replace ()
+  load_all_cached_attempt ~remaining_attempts:1 ~base_path
 ;;
 
 type mapping_lookup =
@@ -213,7 +301,9 @@ let log_mapping_load_error_if_new ~keeper_id msg =
     let current = Atomic.get logged_mapping_errors in
     if String_map.mem keeper_id current then ()
     else
-      let next = String_map.add keeper_id () current in
+      let next =
+        bounded_add keeper_id () current ~max_entries:max_logged_mapping_error_entries
+      in
       if Atomic.compare_and_set logged_mapping_errors current next then
         Log.Misc.warn
           "[KeeperRepoMapping] mapping load error for keeper %s \
@@ -224,14 +314,44 @@ let log_mapping_load_error_if_new ~keeper_id msg =
   mark ()
 ;;
 
+type policy_decision =
+  | Policy_decision_missing
+  | Policy_decision_not_in_mapping
+  | Policy_decision_load_error
+
+let record_policy_decision ~keeper_id ?repository_id decision =
+  let metric, extra_labels =
+    match decision with
+    | Policy_decision_missing ->
+      (Keeper_metrics.KeeperRepoMappingDeniedMissing, [])
+    | Policy_decision_not_in_mapping ->
+      ( Keeper_metrics.KeeperRepoMappingDeniedNotInMapping
+      , match repository_id with
+        | None -> []
+        | Some r -> [("repository_id", r)] )
+    | Policy_decision_load_error ->
+      (Keeper_metrics.KeeperRepoMappingLoadError, [])
+  in
+  Otel_metric_store.inc_counter
+    ~labels:(("keeper_id", keeper_id) :: extra_labels)
+    Keeper_metrics.(to_string metric)
+    ()
+;;
+
 let is_allowed ~keeper_id ~repository_id ~base_path =
   match lookup_mapping ~base_path ~keeper_id with
-  | Mapping_missing _ -> false
+  | Mapping_missing _ ->
+      record_policy_decision ~keeper_id Policy_decision_missing;
+      false
   | Mapping_load_error msg ->
       log_mapping_load_error_if_new ~keeper_id msg;
+      record_policy_decision ~keeper_id Policy_decision_load_error;
       false
   | Mapping_found mapping ->
-      mapping_allows_repository mapping ~repository_id
+      if mapping_allows_repository mapping ~repository_id then true
+      else (
+        record_policy_decision ~keeper_id ~repository_id Policy_decision_not_in_mapping;
+        false)
 
 let validate_access ~keeper_id ~repository_id ~base_path =
   if is_allowed ~keeper_id ~repository_id ~base_path then Ok ()
@@ -251,30 +371,41 @@ let save_all ~base_path mappings =
   let dir = Filename.dirname path in
   Fs_compat.mkdir_p dir;
   let content = Otoml.Printer.to_string toml in
-  try
-    let oc = open_out path in
-    Fun.protect
-      ~finally:(fun () -> close_out_noerr oc)
-      (fun () -> output_string oc content);
-    invalidate_load_all_cache ~base_path;
-    Ok ()
-  with Sys_error msg -> Error msg
+  match Fs_compat.save_file_atomic path content with
+  | Ok () ->
+      invalidate_load_all_cache ~base_path;
+      Ok ()
+  | Error msg -> Error msg
 
 let save_mapping ~base_path mapping =
-  let* mappings = load_all_cached ~base_path in
-  let filtered =
-    List.filter
-      (fun (m : keeper_repo_mapping) ->
-        not (String.equal m.keeper_id mapping.keeper_id))
-      mappings
-  in
-  save_all ~base_path (mapping :: filtered)
+  let path = mappings_toml_path base_path in
+  try
+    Fs_compat.mkdir_p (Filename.dirname path);
+    File_lock_eio.with_lock path (fun () ->
+      let* mappings = load_all ~base_path in
+      let filtered =
+        List.filter
+          (fun (m : keeper_repo_mapping) ->
+            not (String.equal m.keeper_id mapping.keeper_id))
+          mappings
+      in
+      save_all ~base_path (mapping :: filtered))
+  with
+  | File_lock_eio.Flock_timeout { path; attempts; _ } ->
+      Error
+        (Printf.sprintf
+           "timed out acquiring keeper repo mapping lock %s after %d attempts"
+           path attempts)
+  | Sys_error msg -> Error msg
 
 let apply_mapping ~keeper_id ~base_path ~repositories =
   match lookup_mapping ~base_path ~keeper_id with
-  | Mapping_missing _ -> []
+  | Mapping_missing _ ->
+      record_policy_decision ~keeper_id Policy_decision_missing;
+      []
   | Mapping_load_error msg ->
       log_mapping_load_error_if_new ~keeper_id msg;
+      record_policy_decision ~keeper_id Policy_decision_load_error;
       []
   | Mapping_found mapping ->
       filter_repos_by_mapping mapping repositories

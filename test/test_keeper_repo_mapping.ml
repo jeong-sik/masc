@@ -76,16 +76,14 @@ let write_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
+let write_mapping_raw base_path content =
+  write_file (Keeper_repo_mapping.mappings_toml_path base_path) content
+
 let write_mapping base_path keeper_id repo_ids =
-  let path = Filename.concat base_path ".masc/config/keeper_repo_mappings.toml" in
-  let entries =
-    String.concat ", " (List.map (fun s -> "\"" ^ s ^ "\"") repo_ids)
-  in
-  let content =
-    Printf.sprintf "[mapping.%s]\nrepositories = [%s]\n" keeper_id entries
-  in
-  let oc = open_out path in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc content)
+  let mapping = { keeper_id; repository_ids = repo_ids } in
+  match Keeper_repo_mapping.save_mapping ~base_path mapping with
+  | Ok () -> ()
+  | Error e -> Alcotest.fail ("write_mapping failed: " ^ e)
 
 let write_repositories base_path repos =
   let path = Filename.concat base_path ".masc/config/repositories.toml" in
@@ -187,12 +185,22 @@ let test_is_allowed_no_mapping () =
 
 let test_is_allowed_mapping_parse_error () =
   with_temp_base_path (fun base_path ->
-      write_file
-        (Filename.concat base_path ".masc/config/keeper_repo_mappings.toml")
+      write_mapping_raw base_path
         "[mapping.keeper-1]\nrepositories = 42\n";
       Alcotest.(check bool)
         "mapping parse error denies access" false
         (Keeper_repo_mapping.is_allowed ~keeper_id:"keeper-1" ~repository_id:"repo-a" ~base_path))
+
+let test_load_all_rejects_non_table_mapping () =
+  with_temp_base_path (fun base_path ->
+      write_mapping_raw base_path "mapping = 42\n";
+      match Keeper_repo_mapping.load_all ~base_path with
+      | Ok _ -> Alcotest.fail "expected malformed top-level mapping to fail"
+      | Error msg ->
+          Alcotest.(check bool)
+            "mentions mapping table"
+            true
+            (contains_substring msg "mapping field must be a table"))
 
 let test_is_allowed_reloads_after_external_revocation () =
   with_temp_base_path (fun base_path ->
@@ -201,7 +209,8 @@ let test_is_allowed_reloads_after_external_revocation () =
         "initial repo allowed"
         true
         (Keeper_repo_mapping.is_allowed ~keeper_id:"keeper-1" ~repository_id:"repo-a" ~base_path);
-      write_mapping base_path "keeper-1" [ "repo-revoked-target" ];
+      write_mapping_raw base_path
+        "[mapping.keeper-1]\nrepositories = [\"repo-revoked-target\"]\n";
       Alcotest.(check bool)
         "externally revoked repo denied"
         false
@@ -930,8 +939,7 @@ let test_apply_mapping_no_mapping () =
 
 let test_apply_mapping_parse_error () =
   with_temp_base_path (fun base_path ->
-      write_file
-        (Filename.concat base_path ".masc/config/keeper_repo_mappings.toml")
+      write_mapping_raw base_path
         "[mapping.keeper-1]\nrepositories = 42\n";
       let repos = [ sample_repo "repo-a"; sample_repo "repo-b" ] in
       let filtered =
@@ -985,6 +993,11 @@ let () =
             test_is_allowed_mapping_parse_error;
           Alcotest.test_case "external revocation reloads cache" `Quick
             test_is_allowed_reloads_after_external_revocation;
+        ] );
+      ( "load_all",
+        [
+          Alcotest.test_case "malformed top-level mapping fails" `Quick
+            test_load_all_rejects_non_table_mapping;
         ] );
       ( "validate_access",
         [

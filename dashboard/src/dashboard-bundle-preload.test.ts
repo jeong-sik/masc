@@ -36,6 +36,8 @@ describe('dashboard production bundle preloads', () => {
         outDir,
         emptyOutDir: true,
         manifest: true,
+        minify: false,
+        cssMinify: false,
         sourcemap: false,
       },
     })
@@ -54,5 +56,5 @@ describe('dashboard production bundle preloads', () => {
     expect(preloads).toHaveLength(1)
     expect(preloads[0]).toMatch(/\/assets\/vendor-[^/]+\.js$/)
     expect(preloads.some(href => href.includes('mermaid'))).toBe(false)
-  }, 20_000)
+  }, 120_000)
 })

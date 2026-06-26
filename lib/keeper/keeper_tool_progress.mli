@@ -39,8 +39,9 @@ val effect_of_progress_class : tool_progress_class -> turn_effect
 
 (** Route a tool call through typed-outcome classification.
 
-    When [outcome] is [Some (No_progress (No_eligible_tasks ...))], the result
-    is [Streak_reset_and_empty_queue_sleep]. Other outcomes fall back to
+    [No_progress (No_eligible_tasks ...)] and [No_progress No_work_available]
+    both mean the keeper has no claimable work right now, so they produce
+    [Streak_reset_and_empty_queue_sleep]. Other outcomes fall back to
     [effect_of_progress_class (classify_tool_progress name)]. *)
 val classify_tool_progress_with_outcome
   : string -> Keeper_tool_outcome.t option -> turn_effect

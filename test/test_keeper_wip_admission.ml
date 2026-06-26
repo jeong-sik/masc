@@ -224,6 +224,39 @@ let test_keeper_task_claim_wip_cap_reports_claim_admission () =
          (Astring.String.is_infix ~affix:"do not create unrelated repos"
             (json |> U.member "result" |> U.to_string)))
 
+let test_keeper_task_claim_no_unclaimed_emits_no_work_outcome () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let payload =
+         Task_runtime.handle_keeper_task_tool ~config
+           ~meta:
+             (match
+                Masc_test_deps.meta_of_json_fixture
+                  (`Assoc
+                    [ "name", `String "keeper-empty-queue"
+                    ; "agent_name", `String "keeper-empty-queue-agent"
+                    ; "trace_id", `String "trace-empty-queue"
+                    ; "active_goal_ids", `List []
+                    ])
+              with
+              | Ok meta -> meta
+              | Error err -> fail ("meta_of_json_fixture failed: " ^ err))
+           ~name:"keeper_task_claim" ~args:(`Assoc [])
+       in
+       let json = Yojson.Safe.from_string payload in
+       check string "result"
+         "No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
+         (json |> U.member "result" |> U.to_string);
+       let typed = json |> U.member "typed_outcome" in
+       check string "typed kind" "No_progress"
+         (typed |> U.member "kind" |> U.to_string);
+       check string "reason kind" "No_work_available"
+         (typed |> U.member "reason" |> U.member "kind" |> U.to_string))
+
 let test_active_items_only_include_claimed_or_in_progress () =
   let tasks =
     [ task
@@ -310,6 +343,8 @@ let () =
             test_scope_of_task_uses_repo_goal_and_title_category
         ; test_case "keeper_task_claim reports WIP claim admission cap" `Quick
             test_keeper_task_claim_wip_cap_reports_claim_admission
+        ; test_case "keeper_task_claim no-unclaimed emits no-work outcome" `Quick
+            test_keeper_task_claim_no_unclaimed_emits_no_work_outcome
         ; test_case "active items include active WIP only" `Quick
             test_active_items_only_include_claimed_or_in_progress
         ; test_case "goalless task exempt from goal cap" `Quick

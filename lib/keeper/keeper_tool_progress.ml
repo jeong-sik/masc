@@ -137,7 +137,9 @@ let classify_tool_progress_with_outcome name outcome =
          { reason = No_eligible_tasks { scope_excluded_count; all_goals_excluded } }) ->
     Streak_reset_and_empty_queue_sleep
       { reason = No_eligible_tasks { scope_excluded_count; all_goals_excluded } }
-  | Some (Keeper_tool_outcome.No_progress { reason = Resource_conflict _ | No_work_available })
+  | Some (Keeper_tool_outcome.No_progress { reason = No_work_available }) ->
+    Streak_reset_and_empty_queue_sleep { reason = No_work_to_report }
+  | Some (Keeper_tool_outcome.No_progress { reason = Resource_conflict _ })
   | Some (Keeper_tool_outcome.Progress | Keeper_tool_outcome.Error _)
   | None -> effect_of_progress_class (classify_tool_progress name)
 ;;

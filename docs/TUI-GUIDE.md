@@ -24,7 +24,7 @@ MASC_BASE_PATH="/path/to/base" ./_build/default/bin/masc_tui.exe
 masc-tui
 ```
 
-If the server is using a different base path, pass `--base <path>` or export
+If the server is using a different base path, pass `--base-path <path>` or export
 `MASC_BASE_PATH` before launching the TUI. The fallback order is
 `MASC_BASE_PATH` -> `cwd`.
 

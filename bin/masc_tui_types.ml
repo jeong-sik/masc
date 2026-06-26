@@ -78,6 +78,15 @@ type approval_item = {
   ap_summary: string;
 }
 
+type approval_decision =
+  | Confirm
+  | Deny
+
+type pending_approval_action = {
+  paa_token: string;
+  paa_decision: approval_decision;
+}
+
 (** Overview snapshot from /api/v1/dashboard/briefing *)
 type overview_snapshot = {
   ov_workspace_health: string;
@@ -192,6 +201,7 @@ type state = {
   mutable live_message_count: int;
   mutable overview: overview_snapshot option;
   mutable approval_cursor: int;
+  mutable pending_approval_action: pending_approval_action option;
   mutable board_posts: board_post list;
   mutable board_comments: board_comment list;
   mutable board_cursor: int;
@@ -228,6 +238,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   live_message_count = 0;
   overview = None;
   approval_cursor = 0;
+  pending_approval_action = None;
   board_posts = [];
   board_comments = [];
   board_cursor = 0;

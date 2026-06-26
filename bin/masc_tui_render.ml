@@ -353,8 +353,20 @@ let render_approvals (state : state) =
   let detail_line =
     if state.approval_cursor < count then
       let a = List.nth approvals state.approval_cursor in
-      Printf.sprintf "  %s%s%s"
-        Ansi.dim (fit_width a.ap_summary (cols - 6)) Ansi.reset
+      match state.pending_approval_action with
+      | Some { paa_token; paa_decision }
+        when String.equal paa_token a.ap_token ->
+          let key =
+            match paa_decision with
+            | Confirm -> "y"
+            | Deny -> "n"
+          in
+          Printf.sprintf "  %sPress %s again: %s%s" Ansi.yellow key
+            (fit_width a.ap_summary (cols - 22))
+            Ansi.reset
+      | _ ->
+          Printf.sprintf "  %s%s%s"
+            Ansi.dim (fit_width a.ap_summary (cols - 6)) Ansi.reset
     else
       ""
   in
@@ -1156,12 +1168,33 @@ let render_keeper_message (state : state) =
     flush stdout
   end
 
+let render_placeholder (state : state) ~(title : string) =
+  let (rows, cols) = get_terminal_size () in
+  let buf = Buffer.create 1024 in
+  Buffer.add_string buf Ansi.clear;
+  Buffer.add_string buf Ansi.hide_cursor;
+  box_top buf cols;
+  box_line buf cols (Printf.sprintf " MASC %s  [%s]" title state.connection_status);
+  box_divider buf cols;
+  box_line buf cols (Ansi.dim ^ "  (not implemented)" ^ Ansi.reset);
+  for _ = 1 to max 0 (rows - 7) do
+    box_empty buf cols
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (Printf.sprintf "%s  Tab:next  r:refresh  q:quit%s\n" Ansi.dim Ansi.reset);
+  print_string (Buffer.contents buf);
+  flush stdout
+
 (** Dispatch render based on current surface *)
 let render (state : state) =
   match state.view with
   | Overview -> render_overview state
   | Monitoring Agents -> render_dashboard state
-  | Monitoring _section -> render_overview state
+  | Monitoring Fleet_health -> render_placeholder state ~title:"Fleet Health"
+  | Monitoring Runtime -> render_placeholder state ~title:"Runtime"
+  | Monitoring Observatory -> render_placeholder state ~title:"Observatory"
+  | Monitoring Transport_health -> render_placeholder state ~title:"Transport Health"
   | Keepers Keeper_list -> render_keeper_list state
   | Keepers Keeper_detail -> render_keeper_detail state
   | Keepers Keeper_logs -> render_keeper_logs state
@@ -1182,7 +1215,12 @@ let render (state : state) =
            | Some goal -> render_planning_detail state goal
            | None -> render_planning_list state)
   | Approvals -> render_approvals state
-  | Command -> render_dashboard state
-  | Workspace _section -> render_dashboard state
-  | Lab _section -> render_dashboard state
-  | Logs -> render_dashboard state
+  | Command -> render_placeholder state ~title:"Command"
+  | Workspace Work -> render_placeholder state ~title:"Workspace Work"
+  | Workspace Planning -> render_placeholder state ~title:"Workspace Planning"
+  | Workspace Repositories -> render_placeholder state ~title:"Repositories"
+  | Workspace Verification -> render_placeholder state ~title:"Verification"
+  | Lab Tools -> render_placeholder state ~title:"Tools"
+  | Lab Harness -> render_placeholder state ~title:"Harness"
+  | Lab Keeper_memory_health -> render_placeholder state ~title:"Keeper Memory"
+  | Logs -> render_placeholder state ~title:"Logs"

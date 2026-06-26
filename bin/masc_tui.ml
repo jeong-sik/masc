@@ -83,9 +83,12 @@ let parse_args () =
     ("--port", Arg.Set_int port, Printf.sprintf "MASC server port (default: %d)" (Env_config_core.masc_http_port_int ()));
     ("--workspace", Arg.Set_string workspace, "Workspace name (default: from base path)");
     ("--refresh", Arg.Set_float refresh, "Refresh interval in seconds (default: 2)");
-    ( "--base",
+    ( "--base-path",
       Arg.Set_string base_path,
       "Workspace/base path; .masc lives below it (default: MASC_BASE_PATH or cwd)" );
+    ( "--base",
+      Arg.Set_string base_path,
+      "Alias for --base-path" );
   ] in
 
   Arg.parse specs (fun _ -> ()) "masc-tui [OPTIONS]";
@@ -181,6 +184,60 @@ let handle_message_key (state : state) (base_path : string) (key : string) : boo
       true  (* Consume but ignore other control chars *)
   | _ -> true
 
+let approval_decision_wire = function
+  | Confirm -> "confirm"
+  | Deny -> "deny"
+
+let approval_decision_key = function
+  | Confirm -> "y"
+  | Deny -> "n"
+
+let approval_decision_done = function
+  | Confirm -> "Confirmed"
+  | Deny -> "Denied"
+
+let approval_decision_failed = function
+  | Confirm -> "Confirm failed"
+  | Deny -> "Deny failed"
+
+let pending_approval_matches pending approval decision =
+  match pending with
+  | Some p ->
+      String.equal p.paa_token approval.ap_token && p.paa_decision = decision
+  | None -> false
+
+let execute_approval_decision state approval decision =
+  let host = Env_config_core.masc_host () in
+  let port = state.port in
+  let decision_wire = approval_decision_wire decision in
+  match
+    Masc_tui_http.post_operator_confirm ~host ~port ~token:approval.ap_token
+      ~decision:decision_wire
+  with
+  | Ok _ ->
+      state.pending_approval_action <- None;
+      add_event state "system"
+        (Printf.sprintf "%s: %s" (approval_decision_done decision)
+           approval.ap_summary);
+      state.overview <- load_overview ~host ~port;
+      state.approval_cursor <- 0
+  | Error err ->
+      state.pending_approval_action <- None;
+      add_event state "error"
+        (Printf.sprintf "%s: %s" (approval_decision_failed decision) err)
+
+let handle_approval_decision state approval decision =
+  if pending_approval_matches state.pending_approval_action approval decision then
+    execute_approval_decision state approval decision
+  else begin
+    state.pending_approval_action <-
+      Some { paa_token = approval.ap_token; paa_decision = decision };
+    add_event state "system"
+      (Printf.sprintf "Press %s again: %s"
+         (approval_decision_key decision)
+         approval.ap_summary)
+  end
+
 (** Main loop *)
 let main () =
   let (base_path, workspace, port, refresh) = parse_args () in
@@ -230,16 +287,7 @@ let main () =
                  | None -> ()
                  | Some o ->
                      (match List.nth_opt o.ov_pending_confirms state.approval_cursor with
-                      | Some a ->
-                          let host = Env_config_core.masc_host () in
-                          let port = state.port in
-                          (match Masc_tui_http.post_operator_confirm ~host ~port ~token:a.ap_token ~decision:"confirm" with
-                           | Ok _ ->
-                               add_event state "system" (Printf.sprintf "Confirmed: %s" a.ap_summary);
-                               state.overview <- load_overview ~host ~port;
-                               state.approval_cursor <- 0
-                           | Error err ->
-                               add_event state "error" (Printf.sprintf "Confirm failed: %s" err))
+                      | Some a -> handle_approval_decision state a Confirm
                       | None -> ()))
             | _ -> ())
        | Some "n" | Some "N" ->
@@ -249,19 +297,11 @@ let main () =
                  | None -> ()
                  | Some o ->
                      (match List.nth_opt o.ov_pending_confirms state.approval_cursor with
-                      | Some a ->
-                          let host = Env_config_core.masc_host () in
-                          let port = state.port in
-                          (match Masc_tui_http.post_operator_confirm ~host ~port ~token:a.ap_token ~decision:"deny" with
-                           | Ok _ ->
-                               add_event state "system" (Printf.sprintf "Denied: %s" a.ap_summary);
-                               state.overview <- load_overview ~host ~port;
-                               state.approval_cursor <- 0
-                           | Error err ->
-                               add_event state "error" (Printf.sprintf "Deny failed: %s" err))
+                      | Some a -> handle_approval_decision state a Deny
                       | None -> ()))
             | _ -> ())
        | Some "r" | Some "R" ->
+           state.pending_approval_action <- None;
            load_from_masc_dir state base_path;
            let host = Env_config_core.masc_host () in
            let port = state.port in
@@ -354,8 +394,10 @@ let main () =
                 state.log_scroll <- state.log_scroll + 1
             | Approvals ->
                 let count = match state.overview with None -> 0 | Some o -> List.length o.ov_pending_confirms in
-                if state.approval_cursor < count - 1 then
+                if state.approval_cursor < count - 1 then begin
+                  state.pending_approval_action <- None;
                   state.approval_cursor <- state.approval_cursor + 1
+                end
             | Board ->
                 (match state.board_mode with
                  | Board_list ->
@@ -388,8 +430,10 @@ let main () =
                 if state.log_scroll > 0 then
                   state.log_scroll <- state.log_scroll - 1
             | Approvals ->
-                if state.approval_cursor > 0 then
+                if state.approval_cursor > 0 then begin
+                  state.pending_approval_action <- None;
                   state.approval_cursor <- state.approval_cursor - 1
+                end
             | Board ->
                 (match state.board_mode with
                  | Board_list ->
@@ -472,6 +516,7 @@ let main () =
       (* Periodic refresh *)
       let now = Unix.gettimeofday () in
       if now -. !last_check >= refresh then begin
+        state.pending_approval_action <- None;
         load_from_masc_dir state base_path;
         let host = Env_config_core.masc_host () in
         let port = state.port in

@@ -1863,6 +1863,60 @@ let test_health_json_explains_phase_paused_capacity_blocker () =
                   ( row |> member "keeper" |> to_string
                   , row |> member "reason" |> to_string ))))))
 
+let test_health_json_explains_dead_capacity_blocker_as_terminal () =
+  with_temp_dir "health-dead-capacity-blocker" (fun dir ->
+    let config_root = make_config_root dir in
+    write_config_root_keeper_toml config_root "dead-capacity";
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = Mcp_server.workspace_config state in
+        let dead =
+          make_keeper_meta ~name:"dead-capacity" ~trace_id:"trace-dead-capacity" ()
+        in
+        write_keeper_meta_exn config dead;
+        with_running_keeper_metas config [ dead ] (fun () ->
+          Keeper_registry.mark_dead
+            ~base_path:config.Workspace.base_path
+            dead.name
+            ~at:0.0;
+          let request = Httpun.Request.create `GET "/health" in
+          let json = Server_routes_http_runtime.make_health_json request in
+          let open Yojson.Safe.Util in
+          let fleet_safety = json |> member "keeper_fleet_safety" in
+          Alcotest.(check (list string))
+            "health includes dead keeper in blocked targets"
+            [ "dead-capacity"; "example" ]
+            (fleet_safety |> member "blocked_keeper_names" |> to_list
+             |> List.map to_string);
+          Alcotest.(check (list (pair string string)))
+            "health explains dead blocked keeper"
+            [ ("dead-capacity", "phase_dead"); ("example", "not_registered") ]
+            (fleet_safety |> member "blocked_keeper_reasons" |> to_list
+             |> List.map (fun row ->
+                  ( row |> member "keeper" |> to_string
+                  , row |> member "reason" |> to_string )));
+          let dead_detail =
+            fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            |> List.find (fun row ->
+                 row |> member "keeper" |> to_string = "dead-capacity")
+          in
+          Alcotest.(check string) "health reports typed dead phase" "dead"
+            (dead_detail |> member "phase" |> to_string);
+          Alcotest.(check bool) "health marks dead phase terminal" true
+            (dead_detail |> member "terminal_phase" |> to_bool);
+          Alcotest.(check string)
+            "health does not suggest normal start recovery for dead keepers"
+            "inspect_dead_keeper_root_cause"
+            (dead_detail |> member "action" |> to_string))))
+
 let test_health_json_distinguishes_failing_executable_keepers () =
   with_temp_dir "health-failing-executable-keepers" (fun dir ->
     let config_root = make_config_root dir in
@@ -3517,6 +3571,9 @@ let () =
           Alcotest.test_case
             "health json explains phase-paused capacity blocker"
             `Quick test_health_json_explains_phase_paused_capacity_blocker;
+          Alcotest.test_case
+            "health json explains dead capacity blocker as terminal"
+            `Quick test_health_json_explains_dead_capacity_blocker_as_terminal;
           Alcotest.test_case
             "health json distinguishes failing executable keepers"
             `Quick test_health_json_distinguishes_failing_executable_keepers;

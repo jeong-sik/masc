@@ -92,10 +92,9 @@ let terminal_reason_from_receipt receipt =
     match operator_disposition_reason with
     | Some "tool_route_recoverable_failure" -> true
     | _ ->
-        Option.value_map
-          completion_contract_result
-          ~default:false
-          ~f:Completion_contract_result.requires_attention
+        (match completion_contract_result with
+         | Some result -> Completion_contract_result.requires_attention result
+         | None -> false)
   in
   match terminal_reason_code with
   | Some code when receipt_requires_tool_attention

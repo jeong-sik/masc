@@ -310,6 +310,8 @@ val append : Workspace.config -> t -> unit
 val latest_json : Workspace.config -> string -> Yojson.Safe.t option
 val latest_json_by_keeper : Workspace.config -> string list -> (string * Yojson.Safe.t) list
 
+type stale_broadcast_dedupe_key
+
 module For_testing : sig
   val stale_broadcast_dedupe_key
     :  keeper_name:string
@@ -319,7 +321,7 @@ module For_testing : sig
     -> generation:int
     -> failure_reason:Keeper_registry.failure_reason option
     -> stale_seconds:float
-    -> string
+    -> stale_broadcast_dedupe_key
 
   val stale_turn_bucket : float -> string
 
@@ -331,6 +333,17 @@ module For_testing : sig
     -> generation:int
     -> failure_reason:Keeper_registry.failure_reason option
     -> stale_seconds:float
+    -> bool
+
+  val emit_stale_keeper_broadcast_dedupe_for_testing
+    :  keeper_name:string
+    -> agent_name:string
+    -> runtime_id:string
+    -> trace_id:string
+    -> generation:int
+    -> failure_reason:Keeper_registry.failure_reason option
+    -> stale_seconds:float
+    -> emit:(unit -> unit)
     -> bool
 
   val reset_stale_broadcast_dedupe : unit -> unit

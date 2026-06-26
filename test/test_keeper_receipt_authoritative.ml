@@ -131,6 +131,25 @@ let should_emit_stale ?(keeper_name = "keeper-a") ?(trace_id = "trace-a") ?(gene
     ~failure_reason
     ~stale_seconds
 
+let emit_stale_for_testing
+      ?(keeper_name = "keeper-a")
+      ?(trace_id = "trace-a")
+      ?(generation = 1)
+      ?(stale_seconds = 120.0)
+      ?(failure_reason = stale_idle_failure 120.0)
+      ~emit
+      ()
+  =
+  R.For_testing.emit_stale_keeper_broadcast_dedupe_for_testing
+    ~keeper_name
+    ~agent_name:"keeper-a-agent"
+    ~runtime_id:"runtime-a"
+    ~trace_id
+    ~generation
+    ~failure_reason
+    ~stale_seconds
+    ~emit
+
 let test_stale_watchdog_broadcast_dedupe () =
   Eio_main.run @@ fun _env ->
   R.For_testing.reset_stale_broadcast_dedupe ();
@@ -176,36 +195,37 @@ let test_stale_watchdog_broadcast_dedupe () =
       ~failure_reason:(stale_idle_failure 650.0)
       ~stale_seconds:650.0
   in
-  check_bool "dedupe key includes stale bucket" false (String.equal key_1 key_2)
+  check_bool "dedupe key includes stale bucket" false (key_1 = key_2)
 
 let test_stale_watchdog_emit_regression () =
   Eio_main.run @@ fun _env ->
   R.For_testing.reset_stale_broadcast_dedupe ();
-  let config = Masc.Workspace.default_config "/tmp/invalid_dir_for_test" in
-  (* Override Activity_graph.emit behavior by causing an exception if possible?
-     Actually we can just assume `Workspace.default_config` with an invalid dir
-     will cause `Activity_graph.emit` to raise `Sys_error` or something when writing.
-     Wait, `Activity_graph.emit` in `masc` might just log an error or raise.
-     Let's force an exception by mocking or just relying on the missing dir. *)
-  let raised =
-    try
-      R.emit_stale_keeper_broadcast
-        config
-        ~keeper_name:"k1"
-        ~agent_name:"a1"
-        ~runtime_id:"r1"
-        ~trace_id:"t1"
-        ~generation:1
-        ~failure_reason:None
-        ~stale_seconds:120.0
-        ~last_turn_ts:0.0;
-      false
-    with _ -> true
-  in
-  if not raised then
-    Printf.printf "Warning: Activity_graph.emit did not raise. But checking if we can still emit.\n";
-  (* Clear and try again. It should be allowed to emit. *)
-  check_bool "next call is still allowed to emit" true (should_emit_stale ~keeper_name:"k1" ())
+  let attempts = ref 0 in
+  (try
+     ignore
+       (emit_stale_for_testing
+          ~emit:(fun () ->
+            incr attempts;
+            failwith "emit failed")
+          ());
+     failwith "expected stale broadcast emit failure"
+   with
+   | Failure "emit failed" -> ());
+  check_bool "failed emit was attempted" true (!attempts = 1);
+  check_bool
+    "same key retries after failed emit"
+    true
+    (emit_stale_for_testing
+       ~emit:(fun () ->
+         incr attempts)
+       ());
+  check_bool "successful retry was attempted" true (!attempts = 2);
+  check_bool
+    "same key suppresses after successful emit"
+    false
+    (emit_stale_for_testing
+       ~emit:(fun () -> failwith "duplicate should not call emit")
+       ())
 
 let () =
   test_ok_done ();

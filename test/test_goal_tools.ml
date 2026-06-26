@@ -1041,6 +1041,61 @@ let test_goal_verify_rejects_cross_goal_request_id () =
   check int "no cross-goal vote written" 0 (List.length saved_request.votes)
 ;;
 
+let test_goal_verify_rejects_inactive_request_id () =
+  with_workspace
+  @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Inactive request guard" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let verifier = { Goal_verification.id = "agent-alpha"; display_name = None } in
+  let policy_snapshot : Goal_verification.policy_snapshot =
+    { principals = [ verifier ]; eligible_principals = [ verifier ]; required_verdicts = 1 }
+  in
+  let request =
+    match
+      Goal_verification.create_request
+        config
+        ~goal_id:goal.id
+        ~requested_by:{ id = "planner"; display_name = None }
+        ~policy_snapshot
+    with
+    | Ok request -> request
+    | Error msg -> fail msg
+  in
+  let rejected =
+    Tool_workspace.dispatch
+      (workspace_ctx ~agent_name:"agent-alpha" config)
+      ~name:"masc_goal_verify"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "request_id", `String request.id
+            ; "principal", principal_json ~id:"agent-alpha"
+            ; "decision", `String "approve"
+            ])
+  in
+  let error_json = expect_error rejected in
+  check string "inactive request rejected" "conflict"
+    (get_string_field error_json "error_code");
+  check string "inactive request error" "goal verification request is not active on this goal"
+    (get_string_field error_json "error");
+  let saved_request =
+    match Goal_verification.find_request config ~request_id:request.id with
+    | Some request -> request
+    | None -> fail "verification request missing after inactive vote"
+  in
+  check int "no inactive-request vote written" 0 (List.length saved_request.votes);
+  let saved_goal =
+    match Goal_store.get_goal config ~goal_id:goal.id with
+    | Some goal -> goal
+    | None -> fail "goal missing after inactive vote"
+  in
+  check string "phase unchanged" (Goal_phase.to_string goal.phase)
+    (Goal_phase.to_string saved_goal.phase)
+;;
+
 let test_goal_review_removed_from_dispatch () =
   with_workspace
   @@ fun config ->
@@ -1341,6 +1396,10 @@ let () =
             "verify rejects cross-goal request"
             `Quick
             test_goal_verify_rejects_cross_goal_request_id
+        ; test_case
+            "verify rejects inactive request"
+            `Quick
+            test_goal_verify_rejects_inactive_request_id
         ; test_case
             "completion requires linked task"
             `Quick

@@ -389,6 +389,27 @@ let update_goal_phase = Workspace_goals_verification.update_goal_phase
 
 let emit_goal_event = Workspace_goals_verification.emit_goal_event
 
+let cancel_created_verification_request ctx ~goal_id ~request_id ~reason =
+  match Goal_verification.cancel_request ctx.config ~request_id with
+  | Ok _ ->
+    emit_goal_event
+      ctx
+      ~goal_id
+      ~event_type:"goal_verification_cancelled"
+      ~payload:
+        (`Assoc
+            [ "request_id", `String request_id
+            ; "reason", `String reason
+            ; "status", `String "cancelled"
+            ])
+  | Error cleanup_msg ->
+    Log.Misc.warn
+      "goal verification compensation failed for %s after %s: %s"
+      request_id
+      reason
+      cleanup_msg
+;;
+
 let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.result =
   match
     ( reject_retired_goal_list_status args
@@ -583,6 +604,11 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                                ()
                            with
                            | Error msg ->
+                             cancel_created_verification_request
+                               ctx
+                               ~goal_id
+                               ~request_id:request.id
+                               ~reason:"goal_phase_update_failed";
                              error_result_typed
                                ~tool_name
                                ~start_time
@@ -833,17 +859,28 @@ let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result
             ~code:Conflict
             "goal has no active verification request"
         | Some request_id ->
-          (match
-             Goal_verification.submit_vote
-               ctx.config
-               ~goal_id
-               ~request_id
-               ~principal
-               ~decision
-               ?note
-               ~evidence_refs
-               ()
-           with
+          if
+            goal.phase <> Goal_phase.Awaiting_verification
+            || not
+                 (Option.equal String.equal goal.active_verification_request_id (Some request_id))
+          then
+            error_result_typed
+              ~tool_name
+              ~start_time
+              ~code:Conflict
+              "goal verification request is not active on this goal"
+          else
+            (match
+               Goal_verification.submit_vote
+                 ctx.config
+                 ~goal_id
+                 ~request_id
+                 ~principal
+                 ~decision
+                 ?note
+                 ~evidence_refs
+                 ()
+             with
            | Error msg -> error_result_typed ~tool_name ~start_time ~code:Conflict msg
            | Ok (request, quorum_result) ->
              let goals = Goal_store.list_goals ctx.config () in

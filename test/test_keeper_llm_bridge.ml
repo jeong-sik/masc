@@ -100,6 +100,19 @@ let test_clocked_env_runs_function () =
         | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err))))
 ;;
 
+let test_env_process_fallback_visible_from_uninitialized_domain () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      Masc_eio_env.reset_for_test ();
+      Fun.protect ~finally:Masc_eio_env.reset_for_test (fun () ->
+        Masc_eio_env.init ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env) ();
+        let worker = Domain.spawn (fun () -> Option.is_some (Masc_eio_env.get_opt ())) in
+        Alcotest.(check bool)
+          "process fallback is visible from another domain"
+          true
+          (Domain.join worker))))
+;;
+
 let test_timeout_log_carries_failure_envelope () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
@@ -268,6 +281,10 @@ let () =
             `Quick
             test_clockless_env_fails_closed_without_calling_fn
         ; Alcotest.test_case "clocked env runs" `Quick test_clocked_env_runs_function
+        ; Alcotest.test_case
+            "process fallback is visible cross-domain"
+            `Quick
+            test_env_process_fallback_visible_from_uninitialized_domain
         ; Alcotest.test_case
             "timeout log carries failure envelope"
             `Quick

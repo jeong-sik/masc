@@ -16,7 +16,7 @@ type config = {
 let default_config = {
   port = Env_config_core.masc_http_port_int ();
   host = Env_config_core.masc_host ();
-  max_connections = 128;
+  max_connections = Env_config_core.get_int ~default:512 "MASC_HTTP_MAX_CONNECTIONS";
 }
 
 (** HTTP/2 request handler type - receives H2.Reqd.t directly *)

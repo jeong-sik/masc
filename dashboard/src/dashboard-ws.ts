@@ -33,6 +33,11 @@ type PendingRpc = {
   reject: (err: Error) => void
   timeout: ReturnType<typeof setTimeout>
 }
+type ParseWorkerJob = {
+  data: string
+  generation: number
+  timeout: ReturnType<typeof setTimeout>
+}
 type DashboardRouteState = Pick<RouteState, 'tab' | 'params'>
 
 interface DashboardWsDiscovery {
@@ -55,6 +60,7 @@ interface DashboardWsDiscoveryResult {
 }
 
 const DASHBOARD_WS_DISCOVERY_CACHE_KEY = 'masc.dashboard.ws.discovery.v1'
+const DASHBOARD_WS_PARSE_TIMEOUT_MS = 5_000
 
 let socket: WebSocket | null = null
 let rpcId = 0
@@ -71,9 +77,9 @@ let helloFailed = false
 const pending = new Map<number, PendingRpc>()
 
 // WebSocket close codes that indicate a persistent failure and should stop
-// reconnection attempts (1008 policy violation). 1011 (server error) is left
-// to the normal reconnect backoff because it is often transient.
-const FATAL_CLOSE_CODES = new Set([1008])
+// reconnection attempts: 1002 protocol error, 1003 unsupported data, 1008
+// policy violation, and 1011 internal server error per RFC 6455.
+const FATAL_CLOSE_CODES = new Set([1002, 1003, 1008, 1011])
 
 function sessionStorageOrNull(): Storage | null {
   if (typeof sessionStorage === 'undefined') return null
@@ -299,6 +305,73 @@ export function flushPendingInbound(): void {
   flushPending()
 }
 
+// Phase 2 (PR-4.5): Offload JSON/SSE parsing to a Web Worker so the
+// main thread never blocks on large payloads.
+let parseWorker: Worker | null = null
+let workerJobId = 0
+const workerJobs = new Map<number, ParseWorkerJob>()
+
+function deliverParsedPayloads(payloads: unknown[]): void {
+  for (const payload of payloads) {
+    pendingInbound.push(payload)
+  }
+  scheduleFlush()
+}
+
+function fallbackParseWorkerJob(id: number): void {
+  const job = workerJobs.get(id)
+  if (!job) return
+  workerJobs.delete(id)
+  clearTimeout(job.timeout)
+  if (job.generation !== connectGeneration || !socket) return
+  pendingInbound.push(job.data)
+  scheduleFlush()
+}
+
+function fallbackAllParseWorkerJobs(): void {
+  for (const id of Array.from(workerJobs.keys())) {
+    fallbackParseWorkerJob(id)
+  }
+  parseWorker?.terminate()
+  parseWorker = null
+}
+
+function cancelParseWorkerJobs(): void {
+  for (const job of workerJobs.values()) {
+    clearTimeout(job.timeout)
+  }
+  workerJobs.clear()
+  parseWorker?.terminate()
+  parseWorker = null
+}
+
+function initParseWorker(): Worker | null {
+  if (parseWorker) return parseWorker
+  if (typeof Worker === 'undefined') return null
+  try {
+    parseWorker = new Worker(
+      new URL('./workers/dashboard-ws.worker.ts', import.meta.url),
+    )
+    parseWorker.onmessage = (event) => {
+      const { id, payloads } = event.data as {
+        id: number
+        payloads: unknown[]
+      }
+      const job = workerJobs.get(id)
+      if (!job) return
+      workerJobs.delete(id)
+      clearTimeout(job.timeout)
+      if (job.generation !== connectGeneration || !socket) return
+      deliverParsedPayloads(Array.isArray(payloads) ? payloads : [])
+    }
+    parseWorker.onerror = fallbackAllParseWorkerJobs
+    parseWorker.onmessageerror = fallbackAllParseWorkerJobs
+    return parseWorker
+  } catch {
+    return null
+  }
+}
+
 function rememberRouteState(routeState: DashboardRouteState): DashboardRouteState {
   desiredRouteState = {
     tab: routeState.tab,
@@ -447,6 +520,7 @@ function closeSocket(): void {
     socket = null
   }
   clearPendingInbound()
+  cancelParseWorkerJobs()
   rejectPendingRpcs(new Error('dashboard websocket closed'))
 }
 
@@ -520,6 +594,10 @@ function sendNotification(method: string, params: JsonObject): void {
     // surface to the console so operators can see the drop pattern in
     // DevTools when investigating "server keeps re-sending stale deltas."
     console.warn('[dashboard-ws] sendNotification failed', { method, err })
+    // A thrown send on a socket whose readyState claimed OPEN signals a
+    // half-open connection. Treat it like any other transport failure and
+    // reconnect rather than letting subsequent deltas stack up un-acked.
+    reconnectAfterCurrentSocketFailure(currentSocket, err)
   }
 }
 
@@ -651,10 +729,24 @@ function processInboundMessage(data: string): void {
 
 function handleMessage(data: unknown): void {
   if (typeof data !== 'string') return
-  // Inbound frames are parsed inline on the main thread. The PR-4.5 worker
-  // parse-offload path was retired when its source module
-  // (workers/dashboard-ws.worker.ts) was removed in dead-store sweep #18352;
-  // the worker had been failing to load and falling back here ever since.
+  const worker = initParseWorker()
+  if (worker) {
+    const id = ++workerJobId
+    workerJobs.set(id, {
+      data,
+      generation: connectGeneration,
+      timeout: setTimeout(() => {
+        fallbackParseWorkerJob(id)
+      }, DASHBOARD_WS_PARSE_TIMEOUT_MS),
+    })
+    try {
+      worker.postMessage({ id, data })
+    } catch {
+      fallbackParseWorkerJob(id)
+      parseWorker = null
+    }
+    return
+  }
   pendingInbound.push(data)
   scheduleFlush()
 }
@@ -847,6 +939,7 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     }
     lastSubscribeKey = ''
     socket = null
+    cancelParseWorkerJobs()
     rejectPendingRpcs(closeError)
     if (fatal) {
       shouldReconnect = false

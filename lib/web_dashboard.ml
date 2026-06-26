@@ -52,10 +52,10 @@ let html () =
 
 let etag () =
   try
-    let st = Unix.stat (index_path ()) in
-    let hash = Digest.string (string_of_float st.Unix.st_mtime) |> Digest.to_hex in
+    let hash = Digest.file (index_path ()) |> Digest.to_hex in
     String.sub hash 0 12
-  with Unix.Unix_error _ -> "none"
+  with
+  | Unix.Unix_error _ | Sys_error _ -> "none"
 
 let is_safe_asset_relative_path rel =
   String.length rel > 0

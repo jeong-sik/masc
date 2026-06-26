@@ -412,7 +412,10 @@ let unstructured_episode ~now ~generation (inp : Keeper_librarian.input) ~reason
           Keeper_memory_os_types.Ephemeral
     ; last_verified_at = Some now
     ; schema_version = Keeper_memory_os_types.schema_version
-    ; claim_id = None
+    ; (* MASC authors this diagnostic fallback, not the LLM librarian. Do not
+         overload the librarian [claim_id] producer-identity field; diagnostic
+         fallback rows degrade to exact-text identity via [claim_id = None]. *)
+      claim_id = None
     }
   in
   { Keeper_memory_os_types.trace_id = inp.trace_id

@@ -57,6 +57,19 @@ module For_testing = struct
   let clear_snapshot_cache = Snapshot_cache.clear
 end
 
+module Completion_contract_result = Keeper_completion_contract_result_label
+
+let normalized_completion_contract_result_label raw =
+  raw |> String.trim |> String.lowercase_ascii
+;;
+
+let completion_contract_result_from_receipt receipt =
+  receipt
+  |> json_string_opt_member "completion_contract_result"
+  |> Option.map normalized_completion_contract_result_label
+  |> Option.bind Completion_contract_result.of_string
+;;
+
 let terminal_reason_from_decision json =
   match json_member "terminal_reason" json with
   | `Assoc _ as terminal_reason -> Keeper_turn_terminal.of_json terminal_reason
@@ -72,19 +85,15 @@ let terminal_reason_from_receipt receipt =
     json_string_opt_member "operator_disposition_reason" receipt
     |> Option.map String.lowercase_ascii
   in
-  let completion_contract_result =
-    Option.bind
-      (json_string_opt_member "completion_contract_result" receipt
-       |> Option.map String.lowercase_ascii)
-      (fun s -> Keeper_execution_receipt_types.completion_contract_result_of_string s)
-  in
+  let completion_contract_result = completion_contract_result_from_receipt receipt in
   let receipt_requires_tool_attention =
-    match operator_disposition_reason, completion_contract_result with
-    | Some "tool_route_recoverable_failure", _ -> true
-    | _, Some (Contract_needs_execution_progress | Contract_surface_mismatch
-               | Contract_no_capable_provider | Contract_passive_only | Contract_violated) ->
-        true
-    | _ -> false
+    match operator_disposition_reason with
+    | Some "tool_route_recoverable_failure" -> true
+    | _ ->
+        Option.value_map
+          completion_contract_result
+          ~default:false
+          ~f:Completion_contract_result.requires_attention
   in
   match terminal_reason_code with
   | Some code when receipt_requires_tool_attention
@@ -102,12 +111,7 @@ let terminal_reason_from_receipt receipt =
   | None -> None
 
 let receipt_contract_attention_reason receipt =
-  let completion_contract_result =
-    Option.bind
-      (json_string_opt_member "completion_contract_result" receipt
-       |> Option.map (fun value -> String.lowercase_ascii (String.trim value)))
-      (fun s -> Keeper_execution_receipt_types.completion_contract_result_of_string s)
-  in
+  let completion_contract_result = completion_contract_result_from_receipt receipt in
   let terminal_reason_code =
     json_string_opt_member "terminal_reason_code" receipt
     |> Option.map (fun value -> String.lowercase_ascii (String.trim value))
@@ -117,16 +121,23 @@ let receipt_contract_attention_reason receipt =
     | Some code -> String.starts_with ~prefix:"turn_budget_exhausted" code
     | None -> false
   in
+  let attention_reason result =
+    "completion_contract_result:" ^ Completion_contract_result.to_string result
+  in
   match completion_contract_result with
   | Some
-      ((Contract_violated | Contract_claim_only_after_owned_task
-       | Contract_needs_execution_progress | Contract_passive_only) as result) ->
-      Some (Keeper_execution_receipt_types.completion_contract_result_to_string result)
+      ( Completion_contract_result.Violated
+      | Completion_contract_result.Claim_only_after_owned_task
+      | Completion_contract_result.Needs_execution_progress
+      | Completion_contract_result.Passive_only as result ) ->
+      Some (attention_reason result)
   | Some
-      ((Contract_unknown | Contract_not_dispatched | Contract_surface_mismatch
-       | Contract_no_capable_provider) as result)
+      ( Completion_contract_result.Unknown
+      | Completion_contract_result.Not_dispatched
+      | Completion_contract_result.Surface_mismatch
+      | Completion_contract_result.No_capable_provider as result )
     when turn_budget_exhausted ->
-      Some (Keeper_execution_receipt_types.completion_contract_result_to_string result)
+      Some (attention_reason result)
   | Some _ | None -> None
 
 (* JSON-deserialization boundary: maps a runtime_blocker_class wire
@@ -596,11 +607,10 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
     | Some value when value <> "" -> Some value
     | Some _ | None -> None
   in
-  let completion_contract_result_typed =
+  let typed_completion_contract_result =
     Option.bind
-      (Option.map (fun value -> String.lowercase_ascii (String.trim value))
-         completion_contract_result)
-      (fun s -> Keeper_execution_receipt_types.completion_contract_result_of_string s)
+      (Option.map normalized_completion_contract_result_label completion_contract_result)
+      Completion_contract_result.of_string
   in
   let runtime_json =
     match latest_receipt with
@@ -628,16 +638,21 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
     | json -> json_string_opt_member "selected_model" json
   in
   let mutation_guard_summary =
-    match completion_contract_result_typed with
-    | Some Contract_violated -> "mutation_contract_violated"
-    | Some (Contract_satisfied_completion | Contract_satisfied_execution) ->
+    match typed_completion_contract_result with
+    | Some Completion_contract_result.Violated -> "mutation_contract_violated"
+    | Some
+        ( Completion_contract_result.Satisfied_execution
+        | Completion_contract_result.Satisfied_completion ) ->
         "mutation_contract_satisfied"
-    | Some result ->
-        Keeper_execution_receipt_types.completion_contract_result_to_string result
-    | None -> (
-        match completion_contract_result_raw with
-        | Some raw -> "unknown_completion_contract_result:" ^ raw
-        | None -> "mutation_contract_not_observed")
+    | Some result -> Completion_contract_result.to_string result
+    | None ->
+        (match completion_contract_result_raw with
+         | Some raw
+           when String.equal (normalized_completion_contract_result_label raw) "satisfied"
+           ->
+             "mutation_contract_satisfied"
+         | Some raw -> "unknown_completion_contract_result:" ^ raw
+         | None -> "mutation_contract_not_observed")
   in
   `Assoc
     [

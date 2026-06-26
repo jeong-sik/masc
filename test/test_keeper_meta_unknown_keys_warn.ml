@@ -82,14 +82,7 @@ let test_legacy_toml_owned_meta_keys_are_ignored_before_warn () =
     (fun () ->
       Fs_compat.save_file
         path
-        (Yojson.Safe.to_string
-           (`Assoc
-             [ "name", `String "legacy-mm"
-             ; "agent_name", `String "legacy-mm"
-             ; "trace_id", `String "trace-legacy-mm"
-             ; "tool_access", `List []
-             ; "multimodal_policy", `String "Delegate"
-             ]));
+        {|{"name":"legacy-mm","agent_name":"legacy-mm","trace_id":"trace-legacy-mm","tool_access":[],"multimodal_policy":"Delegate"}|};
       let before = counter_total () in
       (match Keeper_meta_store.read_meta_file_path path with
        | Ok (Some meta) ->

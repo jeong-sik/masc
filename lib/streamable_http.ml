@@ -62,6 +62,9 @@ module Session = struct
   let touch session =
     Atomic.set session.last_seen (Time_compat.now ())
 
+  let last_seen session =
+    Atomic.get session.last_seen
+
   let remove id =
     Lockfree_atomic.update sessions (StringMap.remove id)
 

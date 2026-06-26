@@ -90,7 +90,7 @@ describe('ds-theme-tokens.css', () => {
 
   it('contains only the small local display @font-face on the hot path', () => {
     // The 9.9MB local Noto Sans KR TTF is intentionally not declared here;
-    // index.html loads subsetted WOFF2 via the single Google Fonts request.
+    // body text falls through to system/Pretendard/Noto fallback stacks.
     expect(css).toContain("src: url('/dashboard/assets/fonts/Cinzel-Regular.ttf') format('truetype')")
     expect(css).not.toContain('NotoSansKR-Regular.ttf')
   })

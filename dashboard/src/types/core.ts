@@ -4,6 +4,7 @@
 
 export interface RefreshOptions {
   force?: boolean
+  immediate?: boolean
   light?: boolean
 }
 

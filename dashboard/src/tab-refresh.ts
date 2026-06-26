@@ -147,7 +147,17 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
   missionSnapshot: () => { void refreshMissionSnapshot() },
   // Execution already has a fetch scheduler; route refreshes should enqueue
   // through that budgeted path instead of bypassing it.
-  execution: () => { void refreshExecution() },
+  execution: routeState => {
+    // Overview first paint already has the shell snapshot; the execution
+    // snapshot fills the visible attention/fleet rows. Do not pay the generic
+    // 300ms debounce on the first screen, but also do not force backend cache
+    // recomputation.
+    if (routeState.tab === 'overview') {
+      void refreshExecution({ immediate: true })
+    } else {
+      void refreshExecution()
+    }
+  },
   observatory: () => { void refreshObservatoryPanel() },
   board: () => { void refreshBoard() },
   fusionBoard: () => { void refreshFusionBoard() },

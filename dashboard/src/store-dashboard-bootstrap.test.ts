@@ -110,6 +110,64 @@ describe('refreshDashboard bootstrap', () => {
     expect(goalTreeState.goalTreeData.value?.summary.total_goals).toBe(0)
   })
 
+  it('does not fetch the full goal tree during startup when bootstrap omits goals', async () => {
+    apiMocks.fetchDashboardBootstrap.mockResolvedValue({
+      served_at: '2026-06-26T00:00:00Z',
+      milestone: 1,
+      shell: {
+        generated_at: '2026-06-26T00:00:00Z',
+        status: { project: 'default' },
+        counts: { agents: 0, tasks: 0, keepers: 0, total_runtimes: 0 },
+        configured_keepers: 0,
+        providers: {},
+        meta_cognition: null,
+        auth: null,
+        config_resolution: null,
+        runtime_resolution: null,
+      },
+      execution: {
+        generated_at: '2026-06-26T00:00:00Z',
+        status: { project: 'default' },
+        agents: [],
+        tasks: [],
+        messages: [],
+        keepers: [],
+        execution_queue: [],
+        worker_support_briefs: [],
+        continuity_briefs: [],
+      },
+      planning: {
+        generated_at: '2026-06-26T00:00:01Z',
+        goals: [],
+        rollup: {},
+        workspace_fsm: null,
+      },
+      namespace_truth: {
+        generated_at: '2026-06-26T00:00:02Z',
+        root: {
+          status: { project: 'default', version: '2.200.0' },
+          counts: { agents: 0, tasks: 0, keepers: 0 },
+          configured_keepers: 0,
+          provenance: 'bootstrap',
+        },
+      },
+      goal_loop_status: {
+        generated_at: '2026-06-26T00:00:03Z',
+        status: 'idle',
+      },
+    })
+
+    const store = await import('./store')
+    const goalTreeState = await import('./goal-tree-state')
+
+    await store.refreshDashboard({ force: true })
+
+    expect(apiMocks.fetchDashboardBootstrap).toHaveBeenCalledTimes(1)
+    expect(apiMocks.fetchDashboardGoalsTree).not.toHaveBeenCalled()
+    expect(goalTreeState.goalTreeData.value).toBeNull()
+    expect(store.lastGoalsRefreshAt.value).toBe('2026-06-26T00:00:01Z')
+  })
+
   it('hydrates the Goal Store tree when refreshing goals', async () => {
     apiMocks.fetchDashboardPlanning.mockResolvedValue({
       generated_at: '2026-06-25T00:00:00Z',

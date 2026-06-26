@@ -17,6 +17,31 @@ let with_env key value f =
   in
   Fun.protect ~finally:cleanup f
 
+let temp_dir prefix =
+  let dir = Filename.temp_file prefix "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then (
+        Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+        Unix.rmdir path)
+      else
+        Unix.unlink path
+  in
+  try rm dir with _ -> ()
+
+let with_temp_audit_store prefix f =
+  let dir = temp_dir prefix in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let store = Shared_audit.Store.create ~base_dir:dir in
+      f store)
+
 let test_enabled_when_set_to_one () =
   with_env "MASC_RESILIENCE" (Some "1") @@ fun () ->
   assert (KB.masc_resilience_enabled ())
@@ -225,27 +250,7 @@ let test_pipeline_upserts_into_working_context () =
 (* ─── audit envelope wiring ───────────────────────────────────── *)
 
 let test_pipeline_writes_audit_when_store_supplied () =
-  let tmp_dir =
-    let base = Filename.get_temp_dir_name () in
-    let dir = Filename.concat base "test_keeper_bridge_audit" in
-    (* Best-effort cleanup; ignore failures. *)
-    (try
-       if Sys.file_exists dir then begin
-         (* Walk + remove — tests may rerun. *)
-         let rec rm path =
-           if Sys.is_directory path then begin
-             Array.iter (fun e -> rm (Filename.concat path e))
-               (Sys.readdir path);
-             Unix.rmdir path
-           end
-           else Sys.remove path
-         in
-         rm dir
-       end
-     with _ -> ());
-    dir
-  in
-  let store = Shared_audit.Store.create ~base_dir:tmp_dir in
+  with_temp_audit_store "test_keeper_bridge_audit_" @@ fun store ->
   let outcome =
     KB.apply_post_turn_resilience witness ~audit_store:store ~now:6.0
       ~working_context:None
@@ -282,11 +287,7 @@ let test_pipeline_writes_audit_when_store_supplied () =
      category enum instead of parsing payloads. *)
 let test_pipeline_writes_attempted_then_outcome_audit_when_executor_supplied
     () =
-  let tmp_dir =
-    Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "test_keeper_bridge_attempted_audit_%d" (Unix.getpid ()))
-  in
-  let store = Shared_audit.Store.create ~base_dir:tmp_dir in
+  with_temp_audit_store "test_keeper_bridge_attempted_audit_" @@ fun store ->
   let executor =
     make_executor
       ~request_handoff:(fun ~message:_ ~preserve_state:_ -> Ok ())
@@ -300,10 +301,9 @@ let test_pipeline_writes_attempted_then_outcome_audit_when_executor_supplied
   assert (Option.is_some outcome.audit_envelope_id);
   let recent = Shared_audit.Store.recent store ~n:2 in
   assert (List.length recent = 2);
-  (* Most recent is the outcome (HandoffRequested → RecoverySucceeded);
-     older is the pre-flight RecoveryAttempted. *)
+  (* recent returns chronological order: pre-flight attempt, then outcome. *)
   match recent with
-  | [ outcome_env; attempted_env ] ->
+  | [ attempted_env; outcome_env ] ->
       assert (
         attempted_env.Shared_audit.Envelope.category = "RecoveryAttempted");
       assert (
@@ -317,11 +317,7 @@ let test_pipeline_writes_attempted_then_outcome_audit_when_executor_supplied
    ([Strategy_execution_failed]) emits [RecoveryFailed], not
    [RecoveryAttempted]. *)
 let test_pipeline_writes_recovery_failed_when_callback_fails () =
-  let tmp_dir =
-    Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "test_keeper_bridge_recovery_failed_%d" (Unix.getpid ()))
-  in
-  let store = Shared_audit.Store.create ~base_dir:tmp_dir in
+  with_temp_audit_store "test_keeper_bridge_recovery_failed_" @@ fun store ->
   let executor =
     make_executor
       ~request_handoff:(fun ~message:_ ~preserve_state:_ ->
@@ -336,7 +332,7 @@ let test_pipeline_writes_recovery_failed_when_callback_fails () =
   let recent = Shared_audit.Store.recent store ~n:2 in
   assert (List.length recent = 2);
   match recent with
-  | [ outcome_env; attempted_env ] ->
+  | [ attempted_env; outcome_env ] ->
       assert (
         attempted_env.Shared_audit.Envelope.category = "RecoveryAttempted");
       assert (

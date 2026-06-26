@@ -84,7 +84,6 @@ let public_mcp_surface_tools =
     "masc_agent_card"
   ; (* Utility *)
     "masc_tool_help"
-  ; "masc_dashboard"
   ; "masc_check"
   ; (* Board extended *)
     "masc_board_comment_vote"

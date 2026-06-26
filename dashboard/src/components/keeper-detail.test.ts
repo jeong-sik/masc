@@ -36,6 +36,15 @@ vi.mock('../api/keeper', async () => {
   }
 })
 
+vi.mock('./keeper-config-state', async () => {
+  const actual = await vi.importActual<typeof import('./keeper-config-state')>('./keeper-config-state')
+  return {
+    ...actual,
+    loadKeeperConfig: mocks.loadKeeperConfig,
+    resetKeeperConfig: mocks.resetKeeperConfig,
+  }
+})
+
 vi.mock('./keeper-config-panel', async () => {
   const actual = await vi.importActual<typeof import('./keeper-config-panel')>('./keeper-config-panel')
   return {

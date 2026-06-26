@@ -46,6 +46,14 @@ let request_snapshot ~requested_by =
     required_verdicts = 2;
   }
 
+let single_approver_snapshot ~requested_by =
+  let reviewer = operator "reviewer-1" in
+  {
+    Goal_verification.principals = [ requested_by; reviewer ];
+    eligible_principals = [ reviewer ];
+    required_verdicts = 1;
+  }
+
 let test_cancel_missing_request_does_not_bump () =
   with_workspace @@ fun config ->
   let before = Goal_verification.read_state config in
@@ -85,6 +93,46 @@ let test_invalid_vote_does_not_bump () =
   in
   check int "no votes written" 0 (List.length saved.votes)
 
+let test_cancel_if_open_reports_already_resolved () =
+  with_workspace @@ fun config ->
+  let requested_by = operator "planner" in
+  let reviewer = operator "reviewer-1" in
+  let request =
+    match
+      Goal_verification.create_request config ~goal_id:"goal-1" ~requested_by
+        ~policy_snapshot:(single_approver_snapshot ~requested_by)
+    with
+    | Ok request -> request
+    | Error msg -> fail msg
+  in
+  let approved_request =
+    match
+      Goal_verification.submit_vote config ~request_id:request.id ~goal_id:"goal-1"
+        ~principal:reviewer ~decision:Goal_verification.Approve ()
+    with
+    | Ok (request, _) -> request
+    | Error msg -> fail msg
+  in
+  check bool "fixture approved" true
+    (approved_request.status = Goal_verification.Approved);
+  let before = Goal_verification.read_state config in
+  (match Goal_verification.cancel_request_if_open config ~request_id:request.id with
+   | Ok (Goal_verification.Already_resolved_request resolved) ->
+       check bool "already resolved status preserved" true
+         (resolved.status = Goal_verification.Approved)
+   | Ok (Goal_verification.Cancelled_request _) ->
+       fail "approved request must not report a fresh cancellation"
+   | Error msg -> fail msg);
+  let after = Goal_verification.read_state config in
+  check int "version unchanged on already resolved cancel" before.version after.version;
+  let saved =
+    match Goal_verification.find_request config ~request_id:request.id with
+    | Some request -> request
+    | None -> fail "request missing after already resolved cancel"
+  in
+  check bool "saved status still approved" true
+    (saved.status = Goal_verification.Approved)
+
 let () =
   run "Goal_verification"
     [
@@ -94,5 +142,7 @@ let () =
             test_cancel_missing_request_does_not_bump;
           test_case "invalid vote: no bump" `Quick
             test_invalid_vote_does_not_bump;
+          test_case "cancel if open reports already resolved" `Quick
+            test_cancel_if_open_reports_already_resolved;
         ] );
     ]

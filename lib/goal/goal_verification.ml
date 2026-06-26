@@ -274,6 +274,10 @@ type goal_verification_request = {
   resolved_at : string option;
 }
 
+type cancel_request_result =
+  | Cancelled_request of goal_verification_request
+  | Already_resolved_request of goal_verification_request
+
 let goal_verification_request_to_yojson (request : goal_verification_request) =
   `Assoc
     [
@@ -639,13 +643,13 @@ let evaluate_quorum request =
   else
     Pending
 
-let cancel_request config ~(request_id : string) =
+let cancel_request_if_open config ~(request_id : string) =
   let lock_path = requests_path config in
   Workspace_utils.with_file_lock config lock_path (fun () ->
       let state = read_state config in
       match List.find_opt (fun request -> String.equal request.id request_id) state.requests with
       | None -> Error "goal verification request not found"
-      | Some request when request.status <> Open -> Ok request
+      | Some request when request.status <> Open -> Ok (Already_resolved_request request)
       | Some request ->
           let resolved_at = Masc_domain.now_iso () in
           let updated_request =
@@ -663,7 +667,12 @@ let cancel_request config ~(request_id : string) =
           in
           write_state config
             { version = state.version + 1; updated_at = resolved_at; requests };
-          Ok updated_request)
+          Ok (Cancelled_request updated_request))
+
+let cancel_request config ~(request_id : string) =
+  match cancel_request_if_open config ~request_id with
+  | Ok (Cancelled_request request | Already_resolved_request request) -> Ok request
+  | Error msg -> Error msg
 
 let submit_vote config ~(goal_id : string) ~(request_id : string) ~(principal : goal_principal)
     ~(decision : vote_decision) ?note ?(evidence_refs = []) () =

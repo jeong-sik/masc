@@ -389,9 +389,16 @@ let update_goal_phase = Workspace_goals_verification.update_goal_phase
 
 let emit_goal_event = Workspace_goals_verification.emit_goal_event
 
+let goal_verification_request_status_label = function
+  | Goal_verification.Open -> "open"
+  | Goal_verification.Approved -> "approved"
+  | Goal_verification.Rejected -> "rejected"
+  | Goal_verification.Cancelled -> "cancelled"
+;;
+
 let cancel_created_verification_request ctx ~goal_id ~request_id ~reason =
-  match Goal_verification.cancel_request ctx.config ~request_id with
-  | Ok _ ->
+  match Goal_verification.cancel_request_if_open ctx.config ~request_id with
+  | Ok (Goal_verification.Cancelled_request _) ->
     emit_goal_event
       ctx
       ~goal_id
@@ -403,6 +410,19 @@ let cancel_created_verification_request ctx ~goal_id ~request_id ~reason =
             ; "status", `String "cancelled"
             ]);
     Ok ()
+  | Ok (Goal_verification.Already_resolved_request request) ->
+    let cleanup_msg =
+      Printf.sprintf
+        "goal verification request %s was already %s"
+        request_id
+        (goal_verification_request_status_label request.status)
+    in
+    Log.Misc.warn
+      "goal verification compensation skipped for %s after %s: %s"
+      request_id
+      reason
+      cleanup_msg;
+    Error cleanup_msg
   | Error cleanup_msg ->
     Log.Misc.warn
       "goal verification compensation failed for %s after %s: %s"
@@ -745,8 +765,8 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                        not a quorum verdict. Seal the open request as cancelled;
                        quorum failure is handled in [handle_goal_verify] as
                        [Rejected] and moves the goal back to [Executing]. *)
-                    (match Goal_verification.cancel_request ctx.config ~request_id with
-                     | Ok _ ->
+                    (match Goal_verification.cancel_request_if_open ctx.config ~request_id with
+                     | Ok (Goal_verification.Cancelled_request _) ->
                        emit_goal_event
                          ctx
                          ~goal_id
@@ -756,6 +776,11 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                                [ "request_id", `String request_id
                                ; "status", `String "cancelled"
                                ])
+                     | Ok (Goal_verification.Already_resolved_request request) ->
+                       Log.Misc.warn
+                         "goal verification cancel_request skipped for %s: already %s"
+                         request_id
+                         (goal_verification_request_status_label request.status)
                      | Error msg ->
                        Log.Misc.warn
                          "goal verification cancel_request failed for %s: %s"

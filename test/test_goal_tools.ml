@@ -864,6 +864,153 @@ let test_goal_transition_approval_gate () =
     (List.length (Operator_pending_confirm.read_pending_confirms config))
 ;;
 
+let with_goal_awaiting_completion_approval ~title f =
+  with_operator_pending_confirm_hooks
+  @@ fun () ->
+  with_workspace
+  @@ fun config ->
+  let verifier_policy =
+    { Goal_verification.inherit_mode = Goal_verification.Extend
+    ; principals =
+        [ { id = "agent-alpha"; display_name = Some "agent-alpha" } ]
+    ; required_verdicts = Some 1
+    }
+  in
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal
+        config
+        ~title
+        ~verifier_policy
+        ~require_completion_approval:true
+        ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  seed_goal_operator config ~agent_name:"operator";
+  create_done_task config ~goal_id:goal.id ~title:(title ^ " done task");
+  let transitioned =
+    Tool_workspace.dispatch
+      (workspace_ctx config)
+      ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "action", `String "request_complete"
+            ; "actor", principal_json ~id:"planner"
+            ])
+  in
+  let transitioned_json =
+    match transitioned with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_transition not handled"
+  in
+  let request_id =
+    transitioned_json
+    |> Yojson.Safe.Util.member "verification_request"
+    |> fun json -> get_string_field json "id"
+  in
+  let verified =
+    Tool_workspace.dispatch
+      (workspace_ctx ~agent_name:"agent-alpha" config)
+      ~name:"masc_goal_verify"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "request_id", `String request_id
+            ; "principal", principal_json ~id:"agent-alpha"
+            ; "decision", `String "approve"
+            ])
+  in
+  let verified_json =
+    match verified with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_verify not handled"
+  in
+  check
+    string
+    "fixture phase moved to awaiting_approval"
+    "awaiting_approval"
+    (verified_json
+     |> Yojson.Safe.Util.member "goal"
+     |> fun json -> get_string_field json "phase");
+  check
+    int
+    "fixture approval request persisted"
+    1
+    (List.length (Operator_pending_confirm.read_pending_confirms config));
+  f config goal
+;;
+
+let test_goal_approval_reject_clears_pending_confirm () =
+  with_goal_awaiting_completion_approval
+    ~title:"Reject approval cleanup"
+    (fun config goal ->
+       let rejected =
+         Tool_workspace.dispatch
+           (workspace_ctx ~agent_name:"operator" config)
+           ~name:"masc_goal_transition"
+           ~args:
+             (`Assoc
+                 [ "goal_id", `String goal.id
+                 ; "action", `String "reject_completion"
+                 ; "actor", principal_json ~id:"operator"
+                 ])
+       in
+       let rejected_json =
+         match rejected with
+         | Some result -> parse_json_result result
+         | None -> fail "masc_goal_transition not handled"
+       in
+       check
+         string
+         "reject_completion moves to blocked"
+         "blocked"
+         (rejected_json
+          |> Yojson.Safe.Util.member "goal"
+          |> fun json -> get_string_field json "phase");
+       check
+         int
+         "reject_completion clears approval request"
+         0
+         (List.length (Operator_pending_confirm.read_pending_confirms config)))
+;;
+
+let test_goal_approval_drop_clears_pending_confirm () =
+  with_goal_awaiting_completion_approval
+    ~title:"Drop approval cleanup"
+    (fun config goal ->
+       let dropped =
+         Tool_workspace.dispatch
+           (workspace_ctx ~agent_name:"operator" config)
+           ~name:"masc_goal_transition"
+           ~args:
+             (`Assoc
+                 [ "goal_id", `String goal.id
+                 ; "action", `String "drop"
+                 ; "actor", principal_json ~id:"operator"
+                 ])
+       in
+       let dropped_json =
+         match dropped with
+         | Some result -> parse_json_result result
+         | None -> fail "masc_goal_transition not handled"
+       in
+       check
+         string
+         "drop moves to dropped"
+         "dropped"
+         (dropped_json
+          |> Yojson.Safe.Util.member "goal"
+          |> fun json -> get_string_field json "phase");
+       check
+         int
+         "drop clears approval request"
+         0
+         (List.length (Operator_pending_confirm.read_pending_confirms config)))
+;;
+
 let test_goal_principal_display_name_canonicalized () =
   with_workspace
   @@ fun config ->
@@ -1612,6 +1759,14 @@ let () =
             `Quick
             test_goal_transition_manual_reject_blocks_and_cancels_request
         ; test_case "approval gate" `Quick test_goal_transition_approval_gate
+        ; test_case
+            "approval reject clears pending confirm"
+            `Quick
+            test_goal_approval_reject_clears_pending_confirm
+        ; test_case
+            "approval drop clears pending confirm"
+            `Quick
+            test_goal_approval_drop_clears_pending_confirm
         ; test_case
             "principal display labels are canonicalized"
             `Quick

@@ -611,16 +611,6 @@ module Broadcast_dedupe = struct
     | _ -> false
   ;;
 
-  let record_if_new t ~keeper_name ~key =
-    let slot = slot t ~keeper_name in
-    Eio.Mutex.use_rw ~protect:true slot.mu (fun () ->
-      if key_seen t slot.last_key key
-      then false
-      else (
-        slot.last_key <- Some key;
-        true))
-  ;;
-
   let emit_once t ~keeper_name ~key ~emit =
     let slot = slot t ~keeper_name in
     Eio.Mutex.use_rw ~protect:true slot.mu (fun () ->
@@ -668,17 +658,6 @@ let operator_broadcast_dedupe_key receipt ~disposition ~reason =
   ; operator_reason = reason
   ; operator_terminal_reason_code = receipt.terminal_reason_code
   }
-;;
-
-let should_emit_operator_broadcast receipt ~disposition ~reason =
-  match reason with
-  | Reason_turn_livelock_blocked ->
-    let key = operator_broadcast_dedupe_key receipt ~disposition ~reason in
-    Broadcast_dedupe.record_if_new
-      operator_broadcast_dedupe
-      ~keeper_name:receipt.keeper_name
-      ~key
-  | _ -> true
 ;;
 
 let operator_broadcast_payload (receipt : t) ~disposition ~reason =
@@ -923,28 +902,6 @@ let stale_broadcast_dedupe_key
   }
 ;;
 
-let should_emit_stale_keeper_broadcast
-      ~keeper_name
-      ~agent_name
-      ~runtime_id
-      ~trace_id
-      ~generation
-      ~failure_reason
-      ~stale_seconds
-  =
-  let key =
-    stale_broadcast_dedupe_key
-      ~keeper_name
-      ~agent_name
-      ~runtime_id
-      ~trace_id
-      ~generation
-      ~failure_reason
-      ~stale_seconds
-  in
-  Broadcast_dedupe.record_if_new stale_broadcast_dedupe ~keeper_name ~key
-;;
-
 let stale_broadcast_payload
       ~keeper_name
       ~agent_name
@@ -1071,7 +1028,6 @@ let latest_json_by_keeper (config : Workspace.config) keeper_names =
 module For_testing = struct
   let stale_broadcast_dedupe_key = stale_broadcast_dedupe_key
   let stale_turn_bucket = stale_turn_bucket
-  let should_emit_stale_keeper_broadcast = should_emit_stale_keeper_broadcast
 
   let emit_stale_keeper_broadcast_dedupe_for_testing
         ~keeper_name

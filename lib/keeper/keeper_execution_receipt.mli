@@ -325,16 +325,6 @@ module For_testing : sig
 
   val stale_turn_bucket : float -> string
 
-  val should_emit_stale_keeper_broadcast
-    :  keeper_name:string
-    -> agent_name:string
-    -> runtime_id:string
-    -> trace_id:string
-    -> generation:int
-    -> failure_reason:Keeper_registry.failure_reason option
-    -> stale_seconds:float
-    -> bool
-
   val emit_stale_keeper_broadcast_dedupe_for_testing
     :  keeper_name:string
     -> agent_name:string

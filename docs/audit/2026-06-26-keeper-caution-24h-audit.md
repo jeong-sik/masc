@@ -3,14 +3,14 @@
 status: in_progress
 last_verified: 2026-06-26T15:40:57+09:00
 runtime_window_utc: 2026-06-25T06:31:00Z..2026-06-26T06:31:00Z
-runtime_root: `/Users/dancer/me/.masc`
+runtime_root: `<RUNTIME_ROOT>`
 repo_head: `origin/main` at worktree creation
 
 ## Evidence
 
-- [근거] Live health: `curl -fsS 'http://127.0.0.1:8935/health?full=1'`, checked 2026-06-26T15:31+09:00, confidence High. Runtime reported version `0.19.48`, commit `e882945c06d`, effective base path `/Users/dancer/me`, effective root `/Users/dancer/me/.masc`, `keeper_identity_drift.status=degraded`, `logs.recent_warnings=17`.
-- [근거] 24h log aggregation: parsed `/Users/dancer/me/.masc/logs/system_log_2026-06-25.jsonl` and `system_log_2026-06-26.jsonl` with cutoff `2026-06-25T06:31:00Z`, checked 2026-06-26T15:37+09:00, confidence High.
-- [근거] 24h receipt aggregation: parsed `/Users/dancer/me/.masc/keepers/*/execution-receipts/2026-06/{25,26}.jsonl`, checked 2026-06-26T15:38+09:00, confidence High.
+- [근거] Live health: `curl -fsS '<MASC_HTTP_BASE>/health?full=1'`, checked 2026-06-26T15:31+09:00, confidence High. Runtime reported version `0.19.48`, commit `e882945c06d`, effective base path `<MASC_BASE_PATH>`, effective root `<RUNTIME_ROOT>`, `keeper_identity_drift.status=degraded`, `logs.recent_warnings=17`.
+- [근거] 24h log aggregation: parsed `<RUNTIME_ROOT>/logs/system_log_2026-06-25.jsonl` and `system_log_2026-06-26.jsonl` with cutoff `2026-06-25T06:31:00Z`, checked 2026-06-26T15:37+09:00, confidence High.
+- [근거] 24h receipt aggregation: parsed `<RUNTIME_ROOT>/keepers/*/execution-receipts/2026-06/{25,26}.jsonl`, checked 2026-06-26T15:38+09:00, confidence High.
 - [근거] Current code overlap: `git log e882945c06d..origin/main -- lib/keeper/keeper_meta_json.ml config/prompts lib/keeper/keeper_prompt_token_integrity.ml`, checked 2026-06-26T15:34+09:00, confidence High.
 - [근거] OCaml/Eio design basis: OCaml 5.4 manual parallelism/memory-model docs and Eio Switch documentation, checked 2026-06-26T15:33+09:00, confidence Medium because exact downstream version behavior still needs CI.
 
@@ -20,8 +20,11 @@ repo_head: `origin/main` at worktree creation
    - Count: 4445 total.
    - Top keepers: `taskmaster=732`, `executor=690`, `sangsu=465`, `idealist=428`, `issue_king=426`, `garnet=387`, `ramarama=365`, `albini=256`, `mad-improver=242`, `nick0cave=198`, `verifier=189`, `rondo=67`.
    - Evidence example: `garnet: stale_keeper_broadcast emitted last_turn=<N>s ago runtime=ollama_cloud.deepseek-v4-pro`.
-   - Root cause: `emit_stale_keeper_broadcast` emitted every watchdog sweep with no per-keeper/failure/bucket dedupe.
-   - Started fix: `lib/keeper/keeper_execution_receipt.ml` now suppresses duplicate stale broadcasts in the same keeper/runtime/trace/generation/failure/stale-bucket while still emitting at bucket transitions or new failure identity.
+   - Immediate repeated-emission mechanism: `emit_stale_keeper_broadcast` emitted every watchdog sweep with no durable state saying the same stale identity was already broadcast.
+   - WORKAROUND: production-blocking alert flood mitigation while state-backed broadcast idempotence is designed.
+   - Follow-up: issue #22391 tracks the root state-machine fix for durable broadcasted-state linkage across stale watchdog and receipt-side repeats.
+   - Removal target: replace this in-memory stale-watchdog mitigation when #22391 lands.
+   - Started mitigation: `lib/keeper/keeper_execution_receipt.ml` now suppresses duplicate stale broadcasts in the same keeper/runtime/trace/generation/failure/stale-bucket while still emitting at bucket transitions or new failure identity.
 
 2. P0 recovery stimulus loop: `no-progress-loop:*`
    - Count: 3148 consumed events.
@@ -99,7 +102,7 @@ Why this is not constraint hell:
 
 ## Adversarial Checks
 
-- Hardcoded local path: no new `/Users/dancer/me` literals were introduced in changed source/test files.
+- Hardcoded local path: committed evidence uses `<MASC_BASE_PATH>` and `<RUNTIME_ROOT>` placeholders instead of host/user-specific paths.
 - Environment variables: no new `Sys.getenv*` or runtime env knob was introduced.
 - Reimplementation: reused existing `OperatorBroadcastSuppressed`, `stale_turn_bucket`, `stale_broadcast_failure_cohort`, and `Keeper_turn_terminal_code` helpers.
 - Fleet isolation: dedupe state is keyed per keeper; suppressing one keeper's duplicate stale alert does not block other keepers or new failure identities.

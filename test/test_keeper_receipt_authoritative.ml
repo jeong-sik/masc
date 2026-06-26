@@ -119,18 +119,6 @@ let stale_mid_turn_failure since_progress_seconds =
           ; last_progress_kind = Some "runtime_state"
           }))
 
-let should_emit_stale ?(keeper_name = "keeper-a") ?(trace_id = "trace-a") ?(generation = 1) ?(stale_seconds = 120.0)
-      ?(failure_reason = stale_idle_failure 120.0) ()
-  =
-  R.For_testing.should_emit_stale_keeper_broadcast
-    ~keeper_name
-    ~agent_name:"keeper-a-agent"
-    ~runtime_id:"runtime-a"
-    ~trace_id
-    ~generation
-    ~failure_reason
-    ~stale_seconds
-
 let emit_stale_for_testing
       ?(keeper_name = "keeper-a")
       ?(trace_id = "trace-a")
@@ -149,6 +137,23 @@ let emit_stale_for_testing
     ~failure_reason
     ~stale_seconds
     ~emit
+
+let should_emit_stale
+      ?(keeper_name = "keeper-a")
+      ?(trace_id = "trace-a")
+      ?(generation = 1)
+      ?(stale_seconds = 120.0)
+      ?(failure_reason = stale_idle_failure 120.0)
+      ()
+  =
+  emit_stale_for_testing
+    ~keeper_name
+    ~trace_id
+    ~generation
+    ~stale_seconds
+    ~failure_reason
+    ~emit:(fun () -> ())
+    ()
 
 let test_stale_watchdog_broadcast_dedupe () =
   Eio_main.run @@ fun _env ->

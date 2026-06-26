@@ -7,7 +7,7 @@
     \[<masc_dir>/handovers/<id>.json\] and discovered via
     {!list_handovers} / {!get_pending_handovers}.
 
-    Internal: \[handover_rng\] (Random.State.t),
+    Internal: handover id counter,
     \[trigger_reason_to_string\] (helper consumed by
     {!create_handover}), \[ensure_dir\], \[handover_dir_path\] /
     \[handover_file_path\] (path helpers).  Future "configurable
@@ -49,10 +49,10 @@ type trigger_reason =
 (** {1 Construction} *)
 
 val generate_id : unit -> string
-(** [generate_id ()] returns ["handover-<timestamp_ms>-<5-digit-random>"].
-    Uses a fiber-safe internal {!Random.State.t}; collisions in the
-    same millisecond require both [Random.int 100000] outputs to
-    collide. *)
+(** [generate_id ()] returns ["handover-<timestamp_ms>-<sequence>"].
+    The sequence is process-local and monotonic, so IDs generated in
+    the same millisecond remain distinct without relying on shared
+    random state. *)
 
 val create_handover :
   from_agent:string ->

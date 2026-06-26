@@ -5,8 +5,7 @@
     structured state for the next agent to inherit.
 *)
 
-(* Fiber-safe random state for handover ID generation *)
-let handover_rng = Random.State.make_self_init ()
+let handover_id_counter = Atomic.make 0
 
 (** Handover record - the capsule passed to next agent *)
 type handover_record = {
@@ -57,8 +56,8 @@ let trigger_reason_to_string = function
 (** Generate unique handover ID *)
 let generate_id () =
   let timestamp = Time_compat.now () in
-  let random = Random.State.int handover_rng 100000 in
-  Printf.sprintf "handover-%d-%05d" (int_of_float (timestamp *. 1000.)) random
+  let sequence = Atomic.fetch_and_add handover_id_counter 1 in
+  Printf.sprintf "handover-%d-%06d" (int_of_float (timestamp *. 1000.)) sequence
 
 (** Create empty handover record *)
 let create_handover ~from_agent ~task_id ~session_id ~reason : handover_record =

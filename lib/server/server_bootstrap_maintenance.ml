@@ -492,6 +492,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                + prune_dir (Filename.concat masc "messages")
                + prune_dir (Filename.concat masc "events")
                + prune_dir (Filename.concat masc "activity-events")
+               + prune_dir (Filename.concat masc "recall_injections")
                + prune_dir (Filename.concat masc "voice_sessions")
                + prune_dir (Filename.concat masc "tool_calls")
                (* transition-audit was absent from this list since its

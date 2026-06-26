@@ -26,6 +26,7 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
        + prune_dir (Filename.concat masc "messages")
        + prune_dir (Filename.concat masc "events")
        + prune_dir (Filename.concat masc "activity-events")
+       + prune_dir (Filename.concat masc "recall_injections")
        + prune_dir (Filename.concat masc "voice_sessions")
        + (let keepers = Filename.concat masc "keepers" in
           if not (Sys.file_exists keepers) then 0

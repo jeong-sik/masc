@@ -13,6 +13,55 @@ let check name cond =
     incr failed;
     Printf.printf "[FAIL] %s\n%!" name)
 
+let tmpdir name =
+  let path = Filename.temp_file name "" in
+  Sys.remove path;
+  Unix.mkdir path 0o700;
+  path
+
+let write_old_recall_file masc_root =
+  let old_month =
+    Filename.concat (Filename.concat masc_root "recall_injections") "2020-01"
+  in
+  Fs_compat.mkdir_p old_month;
+  let old_file = Filename.concat old_month "15.jsonl" in
+  Fs_compat.append_file old_file "{\"old\":true}\n";
+  old_file
+
+let test_append_retention_prunes_old_day_file () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let masc_root = tmpdir "recall-ledger-retention-append" in
+  let old_file = write_old_recall_file masc_root in
+  Ledger.append
+    ~retention_days:30
+    ~masc_root
+    ~keeper_id:"alpha"
+    ~trace_id:"trace-retention"
+    ~turn:1
+    ~injected_fact_keys:[ "fact" ]
+    ~injected_episode_keys:[]
+    ~n_facts_in_store:1
+    ~now:1234.5
+    ();
+  check "append retention prunes old recall file" false (Sys.file_exists old_file);
+  let store =
+    Dated_jsonl.create
+      ~base_dir:(Filename.concat masc_root "recall_injections")
+      ()
+  in
+  check "current recall row survives append retention" true
+    (Dated_jsonl.read_recent store 10 |> List.length > 0)
+
+let test_prune_older_than_removes_old_day_file () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let masc_root = tmpdir "recall-ledger-retention-manual" in
+  let old_file = write_old_recall_file masc_root in
+  let deleted = Ledger.prune_older_than ~masc_root ~retention_days:30 in
+  check "manual retention reports deletion" true (deleted >= 1);
+  check "manual retention removes old recall file" false (Sys.file_exists old_file)
+
 let () =
   let j =
     Ledger.to_json
@@ -72,6 +121,8 @@ let () =
   (* Deterministic round-trip: serialise then re-parse is structurally equal. *)
   let round_trip = Yojson.Safe.from_string (Yojson.Safe.to_string j) in
   check "round-trip equal" (Yojson.Safe.equal j round_trip);
+  test_append_retention_prunes_old_day_file ();
+  test_prune_older_than_removes_old_day_file ();
   if !failed > 0
   then (
     Printf.printf "\n%d check(s) failed\n%!" !failed;

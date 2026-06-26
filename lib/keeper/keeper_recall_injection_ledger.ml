@@ -35,8 +35,16 @@ let to_json
   `Assoc fields
 ;;
 
+let make_store ?retention_days ~masc_root () =
+  Dated_jsonl.create
+    ~base_dir:(recall_injections_dir masc_root)
+    ?retention_days
+    ()
+;;
+
 let append
       ?failure_reason
+      ?retention_days
       ~masc_root
       ~keeper_id
       ~trace_id
@@ -47,7 +55,7 @@ let append
       ~now
       ()
   =
-  let store = Dated_jsonl.create ~base_dir:(recall_injections_dir masc_root) () in
+  let store = make_store ?retention_days ~masc_root () in
   let entry =
     to_json
       ?failure_reason
@@ -67,4 +75,8 @@ let append
       "recall_injection_ledger: failed to write %s: %s"
       (Dated_jsonl.base_dir store)
       (Printexc.to_string exn)
+;;
+
+let prune_older_than ~masc_root ~retention_days =
+  Dated_jsonl.prune (make_store ~masc_root ()) ~days:retention_days
 ;;

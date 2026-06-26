@@ -1098,9 +1098,13 @@ let mark_keeper_dead_with_registry_cause config
   Keeper_registry.set_failure_reason ~base_path meta.name
     (Some (Keeper_registry.Fiber_unresolved Keeper_registry.Cancelled_by_parent));
   Keeper_registry.set_last_error_entry ~base_path ~name:meta.name
-    "synthetic cancelled by parent";
+    (Printf.sprintf
+       "synthetic cancelled by parent sk-testsecret at %s/private/state.json"
+       base_path);
   Keeper_registry.record_crash ~base_path meta.name 1780000000.0
-    "synthetic crash record";
+    (Printf.sprintf
+       "synthetic crash record github_pat_secret at %s/crash.log"
+       base_path);
   Keeper_registry.mark_dead ~base_path meta.name ~at:1780000001.0
 
 let test_health_json_surfaces_durable_paused_keepers () =
@@ -1525,6 +1529,19 @@ let test_health_json_ignores_stale_active_task_alias_when_agent_executable () =
             recovering_names = [];
             executable_names = [ executor.name ];
             phase_values = [ (executor.name, Keeper_state_machine.Running) ];
+            phase_details =
+              [
+                ( executor.name
+                , {
+                    phase = "running";
+                    last_failure_reason = None;
+                    last_error = None;
+                    restart_count = 0;
+                    dead_since_ts = None;
+                    latest_crash_at = None;
+                    latest_crash_reason = None;
+                  } );
+              ];
           }
         in
         let fleet_safety =
@@ -1678,6 +1695,7 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
             recovering_names = [];
             executable_names = [];
             phase_values = [];
+            phase_details = [];
           }
         in
         let fleet_safety =
@@ -1982,9 +2000,17 @@ let test_health_json_exposes_dead_keeper_registry_cause () =
           Alcotest.(check string) "health surfaces registry failure reason"
             "fiber_unresolved(cancelled_by_parent)"
             (detail |> member "last_failure_reason" |> to_string);
-          Alcotest.(check string) "health surfaces registry last error"
-            "synthetic cancelled by parent"
-            (detail |> member "last_error" |> to_string);
+          let last_error = detail |> member "last_error" |> to_string in
+          Alcotest.(check bool) "health preserves last error class" true
+            (contains_substring last_error "synthetic cancelled by parent");
+          Alcotest.(check bool) "health redacts last error token" false
+            (contains_substring last_error "sk-testsecret");
+          Alcotest.(check bool) "health redacts last error base path" false
+            (contains_substring last_error config.Workspace.base_path);
+          Alcotest.(check bool) "health marks redacted last error" true
+            (contains_substring last_error "[REDACTED]");
+          Alcotest.(check bool) "health marks redacted last error path" true
+            (contains_substring last_error "[REDACTED_PATH]");
           Alcotest.(check int) "health surfaces registry restart count" 2
             (detail |> member "restart_count" |> to_int);
           Alcotest.(check (option (float 0.0001)))
@@ -1993,9 +2019,19 @@ let test_health_json_exposes_dead_keeper_registry_cause () =
           Alcotest.(check (option (float 0.0001)))
             "health surfaces latest crash timestamp" (Some 1780000000.0)
             (detail |> member "latest_crash_at" |> to_float_option);
-          Alcotest.(check string) "health surfaces latest crash reason"
-            "synthetic crash record"
-            (detail |> member "latest_crash_reason" |> to_string))))
+          let latest_crash_reason =
+            detail |> member "latest_crash_reason" |> to_string
+          in
+          Alcotest.(check bool) "health preserves crash reason class" true
+            (contains_substring latest_crash_reason "synthetic crash record");
+          Alcotest.(check bool) "health redacts crash reason token" false
+            (contains_substring latest_crash_reason "github_pat_secret");
+          Alcotest.(check bool) "health redacts crash reason base path" false
+            (contains_substring latest_crash_reason config.Workspace.base_path);
+          Alcotest.(check bool) "health marks redacted crash reason" true
+            (contains_substring latest_crash_reason "[REDACTED]");
+          Alcotest.(check bool) "health marks redacted crash reason path" true
+            (contains_substring latest_crash_reason "[REDACTED_PATH]"))))
 
 let test_health_json_explains_terminal_capacity_blocker
     ~dir_name

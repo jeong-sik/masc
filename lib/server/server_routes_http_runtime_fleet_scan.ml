@@ -745,6 +745,28 @@ let active_task_owner_fiber_scan_semantics =
   "reports active task owners without executable keeper fibers; disabled \
    keepers are excluded; matching rows can degrade fleet status"
 
+let public_health_diagnostic_preview ?base_path ~keeper_name text =
+  let text =
+    match base_path with
+    | None -> text
+    | Some base_path ->
+        let base_path = String.trim base_path in
+        if base_path = "" then text
+        else
+          String_util.replace_substring
+            ~needle:base_path
+            ~by:"[REDACTED_PATH]"
+            text
+  in
+  let text =
+    match base_path with
+    | None -> Observability_redact.redact_text text
+    | Some base_path ->
+        let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+        Keeper_secret_redaction.redact_text redaction text
+  in
+  Observability_redact.redact_preview ~max_len:240 text
+
 let blocked_keeper_detail_json
     ?base_path
     ?phase
@@ -813,13 +835,18 @@ let blocked_keeper_detail_json
           ("latest_crash_reason", `Null);
         ]
     | Some detail ->
+        let diagnostic_preview =
+          public_health_diagnostic_preview ?base_path ~keeper_name:name
+        in
         [
           ("last_failure_reason", Json_util.string_opt_to_json detail.last_failure_reason);
-          ("last_error", Json_util.string_opt_to_json detail.last_error);
+          ("last_error", Json_util.string_opt_to_json (Option.map diagnostic_preview detail.last_error));
           ("restart_count", `Int detail.restart_count);
           ("dead_since_ts", Json_util.float_opt_to_json detail.dead_since_ts);
           ("latest_crash_at", Json_util.float_opt_to_json detail.latest_crash_at);
-          ("latest_crash_reason", Json_util.string_opt_to_json detail.latest_crash_reason);
+          ( "latest_crash_reason"
+          , Json_util.string_opt_to_json
+              (Option.map diagnostic_preview detail.latest_crash_reason) );
         ]
   in
   `Assoc

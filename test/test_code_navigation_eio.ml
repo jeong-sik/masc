@@ -84,6 +84,29 @@ let extract_tool_output response =
 
 let prepare_code_surface ~clock:_ ~sw:_ _state = ()
 
+let cleanup_dir dir =
+  if Sys.file_exists dir then Fs_compat.remove_tree dir
+
+let with_code_fixture f =
+  let dir =
+    Filename.concat (Filename.get_temp_dir_name ())
+      ("masc-code-nav-" ^ string_of_int (Random.bits ()))
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+       let lib_dir = Filename.concat dir "lib" in
+       Fs_compat.mkdir_p lib_dir;
+       Fs_compat.save_file
+         (Filename.concat lib_dir "config.ml")
+         {|
+(* fixture mentions ripgrep so tool_search_files has a deterministic hit. *)
+let config_value = "ripgrep"
+
+let helper x = x + 1
+|};
+       f dir)
+
 (* ===== E2E Test: tool_search_files ===== *)
 
 let test_code_search_basic () =
@@ -93,8 +116,7 @@ let test_code_search_basic () =
   Eio.Switch.run @@ fun sw ->
   with_eio_context env sw @@ fun () ->
 
-  (* Use current repo as base_path for real code search *)
-  let base_path = Sys.getcwd () in
+  with_code_fixture @@ fun base_path ->
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
   prepare_code_surface ~clock ~sw state;
 
@@ -173,7 +195,7 @@ let test_code_symbols_basic () =
   Eio.Switch.run @@ fun sw ->
   with_eio_context env sw @@ fun () ->
 
-  let base_path = Sys.getcwd () in
+  with_code_fixture @@ fun base_path ->
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
   prepare_code_surface ~clock ~sw state;
 
@@ -226,7 +248,7 @@ let test_code_read_basic () =
   Eio.Switch.run @@ fun sw ->
   with_eio_context env sw @@ fun () ->
 
-  let base_path = Sys.getcwd () in
+  with_code_fixture @@ fun base_path ->
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
   prepare_code_surface ~clock ~sw state;
 
@@ -292,7 +314,7 @@ let test_code_read_offset_limit () =
   Eio.Switch.run @@ fun sw ->
   with_eio_context env sw @@ fun () ->
 
-  let base_path = Sys.getcwd () in
+  with_code_fixture @@ fun base_path ->
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
   prepare_code_surface ~clock ~sw state;
 

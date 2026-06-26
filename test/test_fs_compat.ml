@@ -13,6 +13,13 @@ let with_tmp_dir (f : string -> unit) : unit =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree tmp) (fun () -> f tmp)
 ;;
 
+let rec mkdir_p_unix path =
+  if path = "" || path = Filename.dirname path then ()
+  else (
+    mkdir_p_unix (Filename.dirname path);
+    if not (Sys.file_exists path) then Unix.mkdir path 0o755)
+;;
+
 let test_mkdir_p_creates_nested_dirs () =
   Fs_compat.clear_fs ();
   with_tmp_dir
@@ -44,6 +51,7 @@ let test_remove_tree_does_not_shell_inject () =
   @@ fun base ->
   let marker = Filename.concat base "pwned" in
   let dangerous = Filename.concat base ("dir;touch " ^ marker) in
+  mkdir_p_unix (Filename.dirname dangerous);
   Unix.mkdir dangerous 0o755;
   Fs_compat.remove_tree dangerous;
   check bool "target removed" false (Sys.file_exists dangerous);

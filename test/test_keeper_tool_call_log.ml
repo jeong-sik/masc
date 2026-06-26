@@ -449,10 +449,15 @@ let test_route_evidence_stored_for_git_push () =
       ~input:
         (`Assoc
            [
-             ( "cmd",
-               `String
-                 "git push -u origin keeper/executor-direct-clone-pr-proof-20260506-1039"
-             );
+             ("executable", `String "git");
+             ( "argv",
+               `List
+                 [
+                   `String "push";
+                   `String "-u";
+                   `String "origin";
+                   `String "keeper/executor-direct-clone-pr-proof-20260506-1039";
+                 ] );
              ( "cwd",
                `String "repos/masc-keeper-direct-proof-20260506-1039" );
            ])
@@ -517,7 +522,15 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
       ~input:
         (`Assoc
            [
-             ("cmd", `String "git push -u origin keeper/large-route-proof");
+             ("executable", `String "git");
+             ( "argv",
+               `List
+                 [
+                   `String "push";
+                   `String "-u";
+                   `String "origin";
+                   `String "keeper/large-route-proof";
+                 ] );
              ("cwd", `String "repos/masc-keeper-direct-proof");
            ])
       ~output_text:marker

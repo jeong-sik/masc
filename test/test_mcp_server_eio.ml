@@ -1278,7 +1278,8 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
   in
   let response_text = Yojson.Safe.to_string response in
   Alcotest.(check bool) "missing action rejected" true
-    (contains_substring response_text "action is required");
+    (contains_substring response_text "action"
+     && contains_substring response_text "MISSING");
   cleanup_dir base_path
 
 let test_handle_request_tools_call_operator_profile_rejects_non_operator () =
@@ -1487,7 +1488,7 @@ let test_execute_tool_explicit_agent_name_not_overridden () =
 
   cleanup_dir base_path
 
-let test_execute_tool_explicit_alias_reuses_joined_nickname () =
+let test_execute_tool_domain_agent_name_does_not_reuse_joined_nickname () =
   let base_path = temp_dir () in
   let config = Masc.Workspace.default_config base_path in
   let _ = Masc.Workspace.init config ~agent_name:None in
@@ -1508,8 +1509,10 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check string)
-    "explicit alias resolves to bound nickname"
-    joined_nickname resolved.agent_name;
+    "tool-domain agent_name does not resolve caller nickname"
+    "agent-explicit" resolved.agent_name;
+  Alcotest.(check bool) "joined nickname differs from generated caller" true
+    (not (String.equal joined_nickname resolved.agent_name));
 
   cleanup_dir base_path
 
@@ -1914,6 +1917,7 @@ let test_handle_request_tools_call_board_post_structured_content () =
     ("params", `Assoc [
       ("name", `String "masc_board_post");
       ("arguments", `Assoc [
+        ("_agent_name", `String "tester");
         ("content", `String "hello board");
         ("author", `String "tester");
       ]);
@@ -2041,6 +2045,7 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
           Alcotest.(check int) "tool count" 1 entry.count;
           Alcotest.(check int) "tool successes" 1 entry.successes;
           Alcotest.(check int) "tool failures" 0 entry.failures;
+          Masc.Keeper_registry_tool_usage_persistence.flush ~base_path keeper_name;
           let persisted =
             Yojson.Safe.from_file
               (Filename.concat base_path ".masc/keepers/tool_usage/sangsu.json")
@@ -2068,13 +2073,21 @@ let test_handle_request_tools_call_blocks_keeper_internal_tool () =
     ]);
   ]) in
   let response = Mcp_eio.handle_request ~clock ~sw state request in
-  Alcotest.(check int) "error code" (-32601) (error_code_exn response);
-  let msg = error_message_exn response in
-  Alcotest.(check bool) "mentions keeper-internal" true
-    (try
-       ignore (Str.search_forward (Str.regexp_case_fold "keeper-internal") msg 0);
-       true
-     with Not_found -> false);
+  let result = result_fields_exn response in
+  Alcotest.(check bool) "unknown keeper internal tool isError" true
+    (match List.assoc_opt "isError" result with
+     | Some (`Bool value) -> value
+     | _ -> Alcotest.fail "missing isError");
+  let msg =
+    match List.assoc_opt "content" result with
+    | Some (`List (`Assoc fields :: _)) -> (
+        match List.assoc_opt "text" fields with
+        | Some (`String text) -> text
+        | _ -> Alcotest.fail "missing content text")
+    | _ -> Alcotest.fail "missing content"
+  in
+  Alcotest.(check bool) "mentions unknown keeper internal tool" true
+    (contains_substring msg "Unknown tool: keeper_time_now");
   cleanup_dir base_path
 
 let tool_names_from_list_response response =
@@ -2130,7 +2143,7 @@ let test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal
       Alcotest.(check bool) "system internal still hidden" false
         (List.mem "masc_session" names))
 
-let test_handle_request_tools_call_internal_keeper_runtime_allows_keeper_internal_tool
+let test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execute
     () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2164,7 +2177,8 @@ let test_handle_request_tools_call_internal_keeper_runtime_allows_keeper_interna
             `Assoc
               [
                 ("_agent_name", `String keeper_agent_name);
-                ("cmd", `String "pwd");
+                ("executable", `String "pwd");
+                ("argv", `List []);
               ] );
         ]);
       ]) in
@@ -2173,13 +2187,22 @@ let test_handle_request_tools_call_internal_keeper_runtime_allows_keeper_interna
           ~internal_keeper_runtime:true state request
       in
       let result = result_fields_exn response in
-      Alcotest.(check bool) "tool_execute is not an MCP error" false
+      Alcotest.(check bool) "tool_execute is an MCP tool-result error" true
         (match List.assoc_opt "isError" result with
          | Some (`Bool value) -> value
          | _ -> Alcotest.fail "missing isError");
-      let structured = structured_content_exn response in
-      Alcotest.(check bool) "tool_execute ok" true
-        Yojson.Safe.Util.(structured |> member "ok" |> to_bool))
+      let msg =
+        match List.assoc_opt "content" result with
+        | Some (`List (`Assoc fields :: _)) -> (
+            match List.assoc_opt "text" fields with
+            | Some (`String text) -> text
+            | _ -> Alcotest.fail "missing content text")
+        | _ -> Alcotest.fail "missing content"
+      in
+      Alcotest.(check bool) "mentions retired tool_execute" true
+        (contains_substring msg "Unknown tool: tool_execute");
+      Alcotest.(check bool) "mentions registry inconsistency" true
+        (contains_substring msg "registry inconsistency"))
 
 let test_internal_keeper_runtime_cleanup_preserves_primary_exception () =
   let module T = Masc.Mcp_server_eio_execute.For_testing in
@@ -2979,8 +3002,8 @@ let eio_tests = [
     test_handle_request_tools_call_blocks_keeper_internal_tool;
   "handle tools/list internal keeper runtime hides keeper internal tools", `Quick,
     test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal_tools;
-  "handle tools/call internal keeper runtime allows keeper tool", `Quick,
-    test_handle_request_tools_call_internal_keeper_runtime_allows_keeper_internal_tool;
+  "handle tools/call internal keeper runtime rejects retired execute", `Quick,
+    test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execute;
   "internal keeper runtime cleanup preserves primary exception", `Quick,
     test_internal_keeper_runtime_cleanup_preserves_primary_exception;
   "handle invalid json", `Quick, test_handle_request_invalid_json;
@@ -2989,7 +3012,8 @@ let eio_tests = [
   (* Governance status tool test removed *)
   (* execution_session_step direct call test removed — team session cleanup *)
   "explicit agent_name not overridden", `Quick, test_execute_tool_explicit_agent_name_not_overridden;
-  "explicit alias reuses bound nickname", `Quick, test_execute_tool_explicit_alias_reuses_joined_nickname;
+  "tool-domain agent_name does not reuse bound nickname", `Quick,
+    test_execute_tool_domain_agent_name_does_not_reuse_joined_nickname;
   "generated agent_name uses token identity", `Quick,
     test_execute_tool_generated_agent_name_uses_token_identity;
   "internal _agent_name is caller identity", `Quick,

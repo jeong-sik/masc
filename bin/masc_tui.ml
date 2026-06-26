@@ -11,45 +11,24 @@ let send_keeper_message (state : state) (keeper_name : string) (message : string
   try
     let host = Env_config_core.masc_host () in
     let port = state.port in
-    let addr = Unix.ADDR_INET (Unix.inet_addr_of_string host, port) in
-    let (ic, oc) = Unix.open_connection addr in
-    Fun.protect
-      ~finally:(fun () ->
-        Unix.shutdown_connection ic;
-        close_in_noerr ic;
-        close_out_noerr oc)
-      (fun () ->
-        (* Build JSON body *)
-        let body = Printf.sprintf {|{"name":"%s","message":"%s","models":[]}|}
-          (String.escaped keeper_name)
-          (String.escaped message) in
-        let body_len = String.length body in
-
-        (* Send HTTP request *)
-        let request = Printf.sprintf
-          "POST /api/v1/keepers/chat/stream HTTP/1.1\r\n\
-           Host: %s:%d\r\n\
-           Content-Type: application/json\r\n\
-           Content-Length: %d\r\n\
-           Connection: close\r\n\
-           \r\n\
-           %s"
-          host port body_len body in
-        output_string oc request;
-        flush oc;
-
-        (* Read response *)
-        let buf = Buffer.create 4096 in
-        (try while true do
-           let line = input_line ic in
-           Buffer.add_string buf line;
-           Buffer.add_char buf '\n'
-         done with End_of_file -> ());
-
-        let response = Buffer.contents buf in
-        (match Tui_decode.parse_keeper_chat_response response with
-         | Ok reply -> reply
-         | Error err -> "(response parsing failed: " ^ err ^ ")"))
+    let body =
+      Yojson.Safe.to_string
+        (`Assoc
+          [
+            ("name", `String keeper_name);
+            ("message", `String message);
+            ("models", `List []);
+          ])
+    in
+    match
+      Masc_tui_http.post_raw_json ~host ~port
+        ~path:"/api/v1/keepers/chat/stream" ~body
+    with
+    | Ok response -> (
+        match Tui_decode.parse_keeper_chat_response response with
+        | Ok reply -> reply
+        | Error err -> "(response parsing failed: " ^ err ^ ")")
+    | Error err -> err
   with
   | Unix.Unix_error (err, _, _) ->
     Printf.sprintf "(connection failed: %s -- is MASC server running on port %d?)"

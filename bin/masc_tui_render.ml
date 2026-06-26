@@ -508,13 +508,10 @@ let render_board_read (state : state) (post : board_post) =
   flush stdout
 
 (** Compute display depth of a goal based on parent chain. *)
-let rec goal_depth (goals : planning_goal list) (goal : planning_goal) =
-  match goal.pg_parent_goal_id with
-  | None -> 0
-  | Some parent_id ->
-      match List.find_opt (fun g -> g.pg_id = parent_id) goals with
-      | Some parent -> 1 + goal_depth goals parent
-      | None -> 0
+let goal_depth (goals : planning_goal list) (goal : planning_goal) =
+  bounded_parent_depth ~id_of:(fun g -> g.pg_id)
+    ~parent_id_of:(fun g -> g.pg_parent_goal_id)
+    goals goal
 
 (** Sort goals so parents appear before children. *)
 let sort_goals_for_tree (goals : planning_goal list) : planning_goal list =

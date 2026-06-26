@@ -58,8 +58,25 @@ type log_entry = {
   le_guardrail_stop : bool option;
 }
 
+type http_response = {
+  status_code : int;
+  body : string;
+}
+
 val decode_agent : Yojson.Safe.t -> (agent, string) result
 val decode_task : Yojson.Safe.t -> (task, string) result
 val decode_keeper : filename:string -> Yojson.Safe.t -> (keeper, string) result
 val parse_log_entry : string -> (log_entry, string) result
+val parse_http_response : string -> (http_response, string) result
+val is_success_http_status : int -> bool
+val http_status_error : http_response -> string
+val decode_json_http_response :
+  allow_empty:bool -> string -> (Yojson.Safe.t, string) result
+val bounded_parent_depth :
+  ?max_depth:int ->
+  id_of:('a -> string) ->
+  parent_id_of:('a -> string option) ->
+  'a list ->
+  'a ->
+  int
 val parse_keeper_chat_response : string -> (string, string) result

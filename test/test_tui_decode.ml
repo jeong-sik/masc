@@ -210,6 +210,41 @@ let test_parse_keeper_chat_response_json_error () =
   | Ok _ -> Alcotest.fail "expected parse failure"
   | Error err -> Alcotest.(check string) "error message" "boom" err
 
+let test_decode_json_http_response_rejects_error_status () =
+  let response =
+    "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n\
+     {\"error\":\"bad confirm\"}"
+  in
+  match Tui_decode.decode_json_http_response ~allow_empty:true response with
+  | Ok _ -> Alcotest.fail "expected HTTP 400 to fail"
+  | Error err ->
+      Alcotest.(check string)
+        "http error" "HTTP 400: {\"error\":\"bad confirm\"}" err
+
+let test_decode_json_http_response_allows_empty_success_post () =
+  let response = "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n" in
+  match Tui_decode.decode_json_http_response ~allow_empty:true response with
+  | Ok (`Assoc []) -> ()
+  | Ok json ->
+      Alcotest.failf "expected empty object, got %s" (Yojson.Safe.to_string json)
+  | Error err -> Alcotest.fail err
+
+type parent_node = {
+  node_id : string;
+  parent_id : string option;
+}
+
+let test_bounded_parent_depth_stops_on_cycle () =
+  let a = { node_id = "a"; parent_id = Some "b" } in
+  let b = { node_id = "b"; parent_id = Some "a" } in
+  let depth =
+    Tui_decode.bounded_parent_depth
+      ~id_of:(fun n -> n.node_id)
+      ~parent_id_of:(fun n -> n.parent_id)
+      [ a; b ] a
+  in
+  Alcotest.(check int) "cycle stops at first repeated parent" 1 depth
+
 let () =
   Alcotest.run "tui_decode" [
     ( "decode_agent",
@@ -254,5 +289,17 @@ let () =
           test_parse_keeper_chat_response_sse_delta;
         Alcotest.test_case "json error" `Quick
           test_parse_keeper_chat_response_json_error;
+      ] );
+    ( "http_response",
+      [
+        Alcotest.test_case "rejects error status" `Quick
+          test_decode_json_http_response_rejects_error_status;
+        Alcotest.test_case "allows empty success post" `Quick
+          test_decode_json_http_response_allows_empty_success_post;
+      ] );
+    ( "bounded_parent_depth",
+      [
+        Alcotest.test_case "stops on cycle" `Quick
+          test_bounded_parent_depth_stops_on_cycle;
       ] );
   ]

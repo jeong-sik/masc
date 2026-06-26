@@ -460,6 +460,83 @@ let test_operator_snapshot_default_route_hydrates_first_success () =
        (contains_substring source
           "then cached_surface_json operator_snapshot_cache"))
 
+let test_dashboard_query_cache_segment_normalizes_missing_values () =
+  check string "missing none" "missing"
+    (Server_dashboard_http_core_cache.dashboard_query_cache_segment None);
+  check string "missing blank" "missing"
+    (Server_dashboard_http_core_cache.dashboard_query_cache_segment (Some "  "));
+  check string "trimmed value" "keeper-a"
+    (Server_dashboard_http_core_cache.dashboard_query_cache_segment (Some " keeper-a "))
+
+let test_dashboard_query_cache_key_partitions_route_params () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Workspace_utils.default_config dir in
+      let session_a =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", Some "default"); ("session", Some "session-a") ]
+      in
+      let session_b =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", Some "default"); ("session", Some "session-b") ]
+      in
+      let actor_b =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", Some "keeper-b"); ("session", Some "session-a") ]
+      in
+      check bool "session_id partitions route cache" true
+        (not (String.equal session_a session_b));
+      check bool "actor partitions route cache" true
+        (not (String.equal session_a actor_b));
+      check string "deterministic key shape"
+        (Printf.sprintf
+           "session:%s:default:[[\"actor\",\"default\"],[\"session\",\"session-a\"]]"
+           config.base_path)
+        session_a)
+
+let test_dashboard_query_cache_key_encodes_delimiter_values () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Workspace_utils.default_config dir in
+      let actor_delimiter =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", Some "default:session=session-a")
+          ; ("session", Some "session-b")
+          ]
+      in
+      let session_delimiter =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", Some "default")
+          ; ("session", Some "session-a:session=session-b")
+          ]
+      in
+      let missing_session =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", Some "default"); ("session", None) ]
+      in
+      let literal_missing_session =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", Some "default"); ("session", Some "missing") ]
+      in
+      let missing_actor =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", None); ("session", Some "session-a") ]
+      in
+      let explicit_default_actor =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key config "session"
+          [ ("actor", Some "default"); ("session", Some "session-a") ]
+      in
+      check bool "delimiter-bearing values do not collide" true
+        (not (String.equal actor_delimiter session_delimiter));
+      check bool "literal missing does not collide with absent value" true
+        (not (String.equal missing_session literal_missing_session));
+      check bool "missing actor does not collide with explicit default actor" true
+        (not (String.equal missing_actor explicit_default_actor)))
+
 let test_operator_snapshot_default_route_exposes_provenance () =
   with_test_env @@ fun ~env ~sw ~config ->
   let state =
@@ -1412,6 +1489,12 @@ let () =
             test_dashboard_shell_http_json_prefers_light_last_good_while_prewarming;
           test_case "operator snapshot hydrates on first default request" `Quick
             test_operator_snapshot_default_route_hydrates_first_success;
+          test_case "dashboard query cache segment normalizes missing values" `Quick
+            test_dashboard_query_cache_segment_normalizes_missing_values;
+          test_case "dashboard query cache key partitions route params" `Quick
+            test_dashboard_query_cache_key_partitions_route_params;
+          test_case "dashboard query cache key encodes delimiter values" `Quick
+            test_dashboard_query_cache_key_encodes_delimiter_values;
           test_case "operator snapshot default route exposes provenance" `Quick
             test_operator_snapshot_default_route_exposes_provenance;
           test_case "operator digest default route exposes provenance" `Quick

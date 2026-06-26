@@ -95,6 +95,32 @@ let dashboard_cache_key (config : Workspace.config) prefix suffix =
     suffix
 ;;
 
+let dashboard_query_cache_segment = function
+  | Some raw ->
+    let value = String.trim raw in
+    if value = "" then "missing" else value
+  | None -> "missing"
+;;
+
+let dashboard_query_cache_value_json = function
+  | Some raw ->
+    let value = String.trim raw in
+    if value = "" then `Null else `String value
+  | None -> `Null
+;;
+
+let dashboard_query_cache_key config prefix fields =
+  let suffix =
+    `List
+      (List.map
+         (fun (key, value) ->
+           `List [ `String key; dashboard_query_cache_value_json value ])
+         fields)
+    |> Yojson.Safe.to_string
+  in
+  dashboard_cache_key config prefix suffix
+;;
+
 let dashboard_briefing_timeout_s = Env_config_runtime.Dashboard.briefing_timeout_sec
 
 let attach_projection_diagnostics json diagnostics =

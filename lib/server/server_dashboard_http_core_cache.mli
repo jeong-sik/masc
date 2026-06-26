@@ -24,6 +24,9 @@ val with_dashboard_timeout :
 
 val cache_partition_segment : Workspace.config -> string
 val dashboard_cache_key : Workspace.config -> string -> string -> string
+val dashboard_query_cache_segment : string option -> string
+val dashboard_query_cache_key :
+  Workspace.config -> string -> (string * string option) list -> string
 val dashboard_briefing_timeout_s : float
 
 val attach_projection_diagnostics :

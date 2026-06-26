@@ -29,6 +29,7 @@ describe('OasHealthChip', () => {
   afterEach(() => {
     cleanup()
     resetRuntimeState()
+    vi.restoreAllMocks()
   })
 
   it('renders OAS runtime evidence refs in the health summary', () => {
@@ -97,6 +98,18 @@ describe('OasHealthChip', () => {
         n: 500,
         signal: undefined,
       })
+    })
+  })
+
+  it('surfaces durable replay failures in the chip', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    fetchTelemetryMock.mockRejectedValue(new Error('journal unavailable'))
+
+    const { container } = render(html`<${OasHealthChip} />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('OAS 리플레이를 불러오지 못했습니다')
+      expect(container.textContent).toContain('journal unavailable')
     })
   })
 })

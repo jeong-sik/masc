@@ -85,12 +85,13 @@ export const KEEPER_STREAM_IDLE_POLL_MS = 5_000
 // want deeper replay (e.g. OAS telemetry) can raise the ceiling at build
 // time without editing this file:
 //   VITE_OAS_TELEMETRY_REPLAY_LIMIT=2000 pnpm --filter masc-dashboard build
-import { envInt } from './env'
+import { envInt, envString } from './env'
 
 export const MAX_JOURNAL_ENTRIES = envInt('VITE_MAX_JOURNAL_ENTRIES', 200)
 export const OAS_AGENT_EVENT_BUFFER = envInt('VITE_OAS_AGENT_EVENT_BUFFER', 50)
 export const OAS_KEEPER_SNAPSHOT_MAX = envInt('VITE_OAS_KEEPER_SNAPSHOT_MAX', 20)
 export const OAS_TELEMETRY_REPLAY_LIMIT = envInt('VITE_OAS_TELEMETRY_REPLAY_LIMIT', 500)
+export const OAS_OPENTELEMETRY_UI_URL = envString('VITE_OAS_OPENTELEMETRY_UI_URL', null)
 
 // --- Text truncation (characters) ---
 export const TRIM_TEXT_DEFAULT = 120

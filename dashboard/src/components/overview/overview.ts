@@ -252,6 +252,9 @@ export const OVERVIEW_TELEMETRY_WINDOW_MINUTES =
 // The overview needs a compact activity shape, not the full event log. The
 // source summary provides total/freshness truth; raw events are sampled only to
 // paint the 28-bar sparkline without pulling hundreds of KB on first load.
+// Contract: each rendered 5-minute bucket gets at most ten raw events, which
+// keeps the initial telemetry request bounded to 280 entries while preserving
+// a visible burst shape for every bar in the 140-minute window.
 export const OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET = 10
 export const OVERVIEW_TELEMETRY_EVENT_SAMPLE_LIMIT =
   OVERVIEW_TELEMETRY_BAR_COUNT * OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET

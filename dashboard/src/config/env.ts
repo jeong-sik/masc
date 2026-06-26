@@ -26,3 +26,10 @@ export function envBool(key: string, fallback: boolean): boolean {
   const raw = (import.meta.env as Record<string, unknown>)[key]
   return parseEnvBool(typeof raw === 'string' ? raw : raw == null ? undefined : String(raw), fallback)
 }
+
+export function envString(key: string, fallback: string | null): string | null {
+  const raw = (import.meta.env as Record<string, unknown>)[key]
+  if (raw == null) return fallback
+  const value = String(raw).trim()
+  return value === '' ? fallback : value
+}

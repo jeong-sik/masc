@@ -1,12 +1,12 @@
 // MASC Dashboard — Entry point
 // Mounts the root <App /> component into the DOM
 
-// Foundation styles (load first)
+// Foundation and global styles
 // Keeper-v2 design-system tokens are loaded earliest so the v2 vocabulary is
 // available to the dashboard token ladder; global.css owns the legacy/global
-// CSS bundle and imports its foundation/feature dependencies exactly once.
+// CSS bundle, and tokens.css follows it so dashboard-specific root variables
+// keep override priority over generated/legacy foundations.
 import './styles/ds-theme-tokens.css'
-import './styles/tokens.css'
 import './styles/primitives.css'
 import './styles/layout.css'
 import './styles/layers.css'
@@ -28,6 +28,7 @@ import './styles/styleseed-base.css'
 
 // Global utilities and layout
 import './styles/global.css'
+import './styles/tokens.css'
 // chat-blocks-v2.css / surfaces-v2.css / cockpit-v2.css load via the *-v2.css
 // glob below (see ordering note there) — no per-surface import line here.
 

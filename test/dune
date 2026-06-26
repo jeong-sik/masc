@@ -101,6 +101,7 @@
   test_keeper_memory_os_consolidation
   test_keeper_memory_os_consolidation_runtime
   test_server_bootstrap_maintenance_memory_os
+  test_server_dashboard_http_legacy_keeper_inventory
   eval_memory_os_value
   test_keeper_reconcile_state
   test_attempt_state
@@ -418,6 +419,7 @@
   test_keeper_memory_os_consolidation
   test_keeper_memory_os_consolidation_runtime
   test_server_bootstrap_maintenance_memory_os
+  test_server_dashboard_http_legacy_keeper_inventory
   eval_memory_os_value
   test_keeper_reconcile_state
   test_attempt_state

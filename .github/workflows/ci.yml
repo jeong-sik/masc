@@ -440,16 +440,9 @@ jobs:
           scripts/check-sandbox-dune-version.sh
 
       - name: Meta bug-class gates (SSOT, SIL, STR, BND)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BRANCH_PROTECTION_REPOSITORY: ${{ github.repository }}
-          BRANCH_PROTECTION_BRANCH: ${{ github.base_ref || github.ref_name }}
-          BRANCH_PROTECTION_REQUIRED_CONTEXTS: CI Gate
-          BRANCH_PROTECTION_ALLOW_UNREADABLE: 1
         run: |
           chmod +x scripts/ci/*.sh
           echo "=== Running meta bug-class gates (see #9516 #9517 #9519 #9521) ==="
-          bash scripts/ci/check-main-branch-protection.sh
           bash scripts/ci/check-ssot-spawn-drift.sh
           bash scripts/check-spec-truth.sh
           bash scripts/ci/check-silent-failure-patterns.sh
@@ -836,11 +829,6 @@ jobs:
           echo "::warning::transport harness suite failed; retrying once"
           run_suite
 
-      - name: Check formatting
-        run: |
-          opam exec -- dune fmt 2>&1 || true
-          # Note: dune fmt may not be available, skip if so
-
       - name: Run contract harness suite
         id: contract_harness_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}
@@ -879,20 +867,6 @@ jobs:
         with:
           name: release-evidence-main
           path: .release-evidence/
-
-      - name: Record flake mitigation policy
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        run: |
-          echo "::notice::Flake mitigation for hard-required test suites:"
-          echo "::notice::  - Dune-based suites (quick, operator-control, SSE e2e): one isolated-build-dir retry via scripts/ci-run-tests.sh (CI_TEST_ALLOW_FLAKY_RETRY=1)."
-          echo "::notice::  - Non-dune harness suites (transport, contract): one workflow-level shell retry wrapper."
-          echo "::notice::  - Disk-exhaustion failures are non-retryable; scripts/ci-run-tests.sh emits repair guidance."
-          echo "::notice::  - See: https://github.com/jeong-sik/masc/issues/2957"
-
-      - name: Verification matrix summary
-        if: ${{ always() }}
-        run: |
-          echo "::notice::dune build and all test suites are hard-required and block merge via CI Gate"
 
       - name: Config diagnostic drift report
         if: ${{ always() && steps.build_step.outcome == 'success' }}

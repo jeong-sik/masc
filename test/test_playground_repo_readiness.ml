@@ -75,9 +75,33 @@ let write_mapping base_path keeper_id repo_ids =
   | Ok () -> ()
   | Error msg -> fail ("write_mapping failed: " ^ msg)
 
-let create_playground_repo_marker ~config ~meta repo_name =
+let save_repositories base_path repositories =
+  match Repo_store.save_all ~base_path repositories with
+  | Ok () -> ()
+  | Error msg -> fail ("save_repositories failed: " ^ msg)
+
+let repository_fixture ~id ~name ~url ~local_path : Repo_manager_types.repository =
+  { id
+  ; name
+  ; url
+  ; local_path
+  ; aliases = []
+  ; default_branch = "main"
+  ; keepers = []
+  ; status = Repo_manager_types.Active
+  ; auto_sync = false
+  ; sync_interval = 0
+  ; created_at = 0L
+  ; updated_at = 0L
+  }
+
+let playground_repo_path ~config ~(meta : Keeper_meta_contract.keeper_meta)
+      repo_name =
   let playground = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
-  let repo_path = Filename.concat playground (Filename.concat "repos" repo_name) in
+  Filename.concat playground (Filename.concat "repos" repo_name)
+
+let create_playground_repo_marker ~config ~meta repo_name =
+  let repo_path = playground_repo_path ~config ~meta repo_name in
   mkdir_p (Filename.concat repo_path ".git")
 
 let playground_repo_entry ~config ~meta ~repo_name =
@@ -188,6 +212,29 @@ let test_playground_repos_mark_wildcard_mapping_allowed () =
   check string "policy status"
     (Keeper_sandbox_control.playground_policy_status_to_string Policy_allowed)
     (json_string "policy_status" json)
+
+let test_playground_repos_policy_uses_registered_repository_id () =
+  let base_path = temp_dir "masc-playground-repo-policy" in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "keeper-one" in
+  let repo_path = playground_repo_path ~config ~meta "masc" in
+  mkdir_p (Filename.concat repo_path ".git");
+  save_repositories base_path
+    [ repository_fixture
+        ~id:"repo-masc"
+        ~name:"masc"
+        ~url:"https://github.com/jeong-sik/masc.git"
+        ~local_path:repo_path
+    ];
+  write_mapping base_path meta.name [ "repo-masc" ];
+  let json = playground_repo_entry ~config ~meta ~repo_name:"masc" in
+  check bool "policy allows registered repository id" true
+    (json_bool "policy_allowed" json);
+  check string "policy status"
+    (Keeper_sandbox_control.playground_policy_status_to_string Policy_allowed)
+    (json_string "policy_status" json);
+  check string "policy repository id" "repo-masc"
+    (json_string "policy_repository_id" json)
 
 let test_playground_repos_mark_mapping_load_error_denied () =
   let base_path = temp_dir "masc-playground-repo-policy" in
@@ -556,6 +603,8 @@ let () =
           test_playground_repos_mark_repo_not_in_mapping_denied;
         test_case "filesystem repo under wildcard mapping is marked allowed"
           `Quick test_playground_repos_mark_wildcard_mapping_allowed;
+        test_case "filesystem repo policy uses registered repository id"
+          `Quick test_playground_repos_policy_uses_registered_repository_id;
         test_case "mapping load error is marked denied" `Quick
           test_playground_repos_mark_mapping_load_error_denied;
       ];

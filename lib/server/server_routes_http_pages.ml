@@ -219,19 +219,15 @@ let dashboard_asset_root () =
 let dashboard_index_path () =
   Filename.concat (dashboard_asset_root ()) "index.html"
 
+let dashboard_etag_of_body body =
+  let hash = Digest.string body |> Digest.to_hex in
+  String.sub hash 0 12
+
 let dashboard_etag () =
-  try
-    let st = Unix.stat (dashboard_index_path ()) in
-    let hash =
-      Digest.string (string_of_float st.Unix.st_mtime) |> Digest.to_hex
-    in
-    String.sub hash 0 12
-  with
-  | Unix.Unix_error (err, _, _) ->
-      Log.Pages.warn "dashboard_etag stat failed: %s" (Unix.error_message err);
-      "none"
-  | exn ->
-      Log.Pages.warn "dashboard_etag unexpected: %s" (Printexc.to_string exn);
+  match read_file (dashboard_index_path ()) with
+  | Ok body -> dashboard_etag_of_body body
+  | Error msg ->
+      Log.Pages.warn "dashboard_etag read failed: %s" msg;
       "none"
 
 let dashboard_index_cache_control = "no-store, max-age=0, must-revalidate"
@@ -240,7 +236,7 @@ let serve_dashboard_index request reqd =
   match read_file (dashboard_index_path ()) with
   | Ok body ->
       Http.Response.html_cached
-        ~etag:(dashboard_etag ())
+        ~etag:(dashboard_etag_of_body body)
         ~request body reqd
   | Error _ ->
       Http.Response.html

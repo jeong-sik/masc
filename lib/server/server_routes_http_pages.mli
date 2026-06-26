@@ -114,11 +114,14 @@ val dashboard_index_path : unit -> string
 (** Resolved path to the legacy dashboard's
     [index.html]. *)
 
+val dashboard_etag_of_body : string -> string
+(** Content-derived ETag digest for dashboard [index.html]
+    response bytes (first 12 hex chars). *)
+
 val dashboard_etag : unit -> string
-(** ETag derived from the dashboard index file's mtime
-    digest (first 12 hex chars).  Stable across
-    process restarts as long as the asset bundle is
-    untouched. *)
+(** Content-derived ETag for the dashboard index file
+    (first 12 hex chars).  Returns ["none"] and logs
+    when the file cannot be read. *)
 
 val dashboard_index_cache_control : string
 (** Cache-control header value for the dashboard index

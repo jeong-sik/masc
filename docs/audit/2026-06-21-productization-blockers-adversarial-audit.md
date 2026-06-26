@@ -57,26 +57,29 @@ No runtime `let default_base = "/Users/dancer/me"` style default was found in `b
 
 ## Findings
 
-### 1. Shell IR path-jail kill-switch can remove a product safety boundary
+### 1. Shell IR path-jail kill-switch could remove a product safety boundary
 
-**Severity**: P0 when `MASC_SHELL_IR_PATH_JAIL_ENABLED=false`; P1 until the kill-switch has a sunset and policy boundary.
+**Severity**: Historical P0 when `MASC_SHELL_IR_PATH_JAIL_ENABLED=false`; resolved once the P5 sunset removes the kill-switch and makes the path jail unconditional.
 
-**Evidence**:
+**Pre-sunset evidence**:
 
-- `lib/keeper_tooling/keeper_tool_execute_shell_ir.ml:76-84` skips `Exec_policy.validate_shell_ir_paths` entirely when `Env_config_runtime.Shell_ir_path_jail.enabled ()` is false.
-- `lib/config/env_config_runtime.ml:957-968` documents that disabling the flag removes "the only positional write-escape guard on the Host profile".
-- `lib/keeper/keeper_tool_execute_runtime.ml:571-583` logs and counts `path_jail_disabled`, but still proceeds.
+- `lib/keeper_tooling/keeper_tool_execute_shell_ir.ml:76-84` skipped `Exec_policy.validate_shell_ir_paths` entirely when `Env_config_runtime.Shell_ir_path_jail.enabled ()` was false.
+- `lib/config/env_config_runtime.ml:957-968` documented that disabling the flag removed "the only positional write-escape guard on the Host profile".
+- `lib/keeper/keeper_tool_execute_runtime.ml:571-583` logged and counted `path_jail_disabled`, but still proceeded.
 - `lib/exec_policy/exec_policy.ml:631-742` contains the actual path/cwd/redirect validation that gets bypassed.
 
 **Impact**:
 
-For a multi-agent system, this is not just a debug knob. A single process-level env value can move Host-profile Execute from path-validated to path-unvalidated. If a keeper can issue Shell IR on Host while the flag is off, product safety depends on operational discipline instead of an enforceable boundary.
+For a multi-agent system, this was not just a debug knob. A single process-level env value could move Host-profile Execute from path-validated to path-unvalidated. If a keeper could issue Shell IR on Host while the flag was off, product safety depended on operational discipline instead of an enforceable boundary.
 
 **Fix direction**:
 
-- Remove the public steady-state kill-switch, or make it an emergency-only startup valve that requires an explicit local operator approval file/token and emits a fatal startup warning.
-- Add a CI/product gate proving Host-profile Execute cannot run with path-jail disabled outside test binaries.
-- Keep `path_jail_disabled` telemetry, but do not treat telemetry as a control.
+- Resolved by removing the public steady-state kill-switch and making Shell IR
+  path validation unconditional in product runtime.
+- Add or keep CI/product gates proving the retired env knob cannot re-enter the
+  runtime tunables catalog or feature-flag registry.
+- Treat old `path_jail_disabled` telemetry references as historical evidence
+  only; telemetry is not a substitute for an enforced control.
 
 ### 2. Env/config control plane is too wide, and the guard has false negatives
 

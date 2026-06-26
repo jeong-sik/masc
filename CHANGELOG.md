@@ -25,6 +25,10 @@
   context for the model, not a machine-readable external-state status tag.
 
 ### Removed
+- `runtime`: removed the temporary `MASC_SHELL_IR_PATH_JAIL_ENABLED`
+  kill-switch. Shell IR execution now always applies the workspace path jail;
+  operators should remove the old env override and handle false positives with
+  policy/data fixes or rollback instead of disabling path validation.
 - `dashboard`: documented the Memory OS `external_ref` dashboard API removal.
   Legacy payloads are ignored rather than re-rendered as status tags; producers
   must use future structured origin fields instead of relying on the retired

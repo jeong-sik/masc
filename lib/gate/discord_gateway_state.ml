@@ -381,9 +381,9 @@ let resolve_mentions ~mentions content =
             ; raw_mention = raw
             }
             :: !resolved;
-          (match name_opt with
+          match name_opt with
           | Some name -> "@" ^ name
-          | None -> raw))
+          | None -> raw)
   in
   (content, List.rev !resolved)
 

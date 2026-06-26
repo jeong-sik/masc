@@ -366,6 +366,8 @@ let execute_approval_decision state approval decision =
       add_event state "error"
         (Printf.sprintf "%s: %s" (approval_decision_failed decision) err)
 
+(* TEL-OK: TUI-local confirmation gate emits user-visible events here; the
+   operator confirmation endpoint owns durable approval telemetry. *)
 let handle_approval_decision state approval decision =
   if pending_approval_matches state.pending_approval_action approval decision then
     execute_approval_decision state approval decision

@@ -58,7 +58,7 @@ let http_get ~(host : string) ~(port : int) ~(path : string) : (string, string) 
   | Error e -> Error (report_err "GET failed" e)
 
 (** Send an HTTP POST request with a JSON body and return the raw response. *)
-let http_post ?(headers = []) ~(host : string) ~(port : int) ~(path : string)
+let http_post ~headers ~(host : string) ~(port : int) ~(path : string)
     ~(body : string) : (string, string) result =
   let url = url_of ~host ~port ~path in
   match

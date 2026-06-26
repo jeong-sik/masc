@@ -169,14 +169,10 @@ let operator_pending_confirm_upsert_fn
     (fun _config _entry ->
       Error "operator pending-confirm callback is not connected")
 
-let operator_pending_confirms_remove_by_target_fn
-  : (Workspace_utils_backend_setup.config ->
-     target_type:string ->
-     target_id:string option ->
-     int)
-      Atomic.t
+let operator_pending_confirm_remove_fn
+  : (Workspace_utils_backend_setup.config -> string -> unit) Atomic.t
   =
-  Atomic.make (fun _config ~target_type:_ ~target_id:_ -> 0)
+  Atomic.make (fun _config _token -> ())
 
 
 (** Auto-subscribe agent to messages on session binding — wraps Subscriptions.SubscriptionStore. *)

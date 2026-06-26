@@ -45,11 +45,22 @@ let workspace_ctx ?(agent_name = "planner") config : Tool_workspace.context =
   { Tool_workspace.config; agent_name }
 ;;
 
+let operator_ctx env sw config agent_name : _ Operator_control.context =
+  { config
+  ; agent_name
+  ; sw
+  ; clock = Eio.Stdenv.clock env
+  ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+  ; net = Some (Eio.Stdenv.net env)
+  ; mcp_session_id = None
+  }
+;;
+
 let with_operator_pending_confirm_hooks f =
   let previous_trace = Atomic.get Workspace_hooks.operator_pending_confirm_trace_id_fn in
   let previous_upsert = Atomic.get Workspace_hooks.operator_pending_confirm_upsert_fn in
   let previous_remove =
-    Atomic.get Workspace_hooks.operator_pending_confirms_remove_by_target_fn
+    Atomic.get Workspace_hooks.operator_pending_confirm_remove_fn
   in
   Atomic.set
     Workspace_hooks.operator_pending_confirm_trace_id_fn
@@ -72,14 +83,14 @@ let with_operator_pending_confirm_hooks f =
          };
        Ok ());
   Atomic.set
-    Workspace_hooks.operator_pending_confirms_remove_by_target_fn
-    Operator_pending_confirm.remove_pending_confirms_by_target;
+    Workspace_hooks.operator_pending_confirm_remove_fn
+    Operator_pending_confirm.remove_pending_confirm;
   Fun.protect
     ~finally:(fun () ->
       Atomic.set Workspace_hooks.operator_pending_confirm_trace_id_fn previous_trace;
       Atomic.set Workspace_hooks.operator_pending_confirm_upsert_fn previous_upsert;
       Atomic.set
-        Workspace_hooks.operator_pending_confirms_remove_by_target_fn
+        Workspace_hooks.operator_pending_confirm_remove_fn
         previous_remove)
     f
 ;;
@@ -811,11 +822,12 @@ let test_goal_transition_approval_gate () =
     | [ entry ] -> entry
     | _ -> fail "expected one persisted goal approval request"
   in
-  check string "approval action type" "goal_completion_decision"
+  check string "approval action type" Operator_action_constants.goal_completion_decision
     pending_confirm.action_type;
-  check string "approval target type" "goal" pending_confirm.target_type;
+  check string "approval target type" Operator_action_constants.goal_target_type
+    pending_confirm.target_type;
   check (option string) "approval target id" (Some goal.id) pending_confirm.target_id;
-  check string "approval delegated tool" "masc_goal_transition"
+  check string "approval delegated tool" Operator_action_constants.goal_transition_tool
     pending_confirm.delegated_tool;
   check string "approval actor" "operator" pending_confirm.actor;
   check string "approval request id in payload" request_id
@@ -1493,21 +1505,68 @@ let test_completion_approval_requires_operator_caller () =
 
 let test_goal_approval_operator_action_registered () =
   check bool "allowed action" true
-    (Operator_approval.is_allowed "goal_completion_decision");
+    (Operator_approval.is_allowed Operator_action_constants.goal_completion_decision);
   check bool "confirm required" true
-    (Operator_approval.confirm_required "goal_completion_decision");
+    (Operator_approval.confirm_required Operator_action_constants.goal_completion_decision);
   let action =
     List.find_opt
       (fun (action : Operator_pending_confirm.available_action) ->
-         String.equal action.action_type "goal_completion_decision")
+         String.equal
+           action.action_type
+           Operator_action_constants.goal_completion_decision)
       Operator_pending_confirm.available_actions
   in
   match action with
-  | None -> fail "goal_completion_decision missing from available actions"
+  | None ->
+    fail
+      (Operator_action_constants.goal_completion_decision
+       ^ " missing from available actions")
   | Some action ->
-    check string "tool" "masc_goal_transition" action.tool_name;
-    check string "target type" "goal" action.target_type;
+    check string "tool" Operator_action_constants.goal_transition_tool action.tool_name;
+    check string "target type" Operator_action_constants.goal_target_type action.target_type;
     check bool "registry confirm required" true action.confirm_required
+;;
+
+let test_operator_goal_decision_requires_explicit_decision () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run
+  @@ fun sw ->
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+       let config = Workspace.default_config dir in
+       ignore (Workspace.init config ~agent_name:(Some "operator"));
+       let ctx = operator_ctx env sw config "operator" in
+       let assert_rejected ~token payload =
+         Operator_pending_confirm.upsert_pending_confirm
+           config
+           { token
+           ; trace_id = "goal_missing_decision"
+           ; actor = "operator"
+           ; action_type = Operator_action_constants.goal_completion_decision
+           ; target_type = Operator_action_constants.goal_target_type
+           ; target_id = Some "goal-1"
+           ; payload
+           ; delegated_tool = Operator_action_constants.goal_transition_tool
+           ; created_at = Masc_domain.now_iso ()
+           ; expires_at = None
+           };
+         match
+           Operator_control.confirm_json
+             ctx
+             (`Assoc
+                 [ "actor", `String "operator"; "confirm_token", `String token ])
+         with
+         | Ok _ -> fail "goal decision without explicit decision should reject"
+         | Error msg -> check string "decision rejection" "payload.decision is required" msg
+       in
+       assert_rejected ~token:"missing-decision" (`Assoc []);
+       assert_rejected
+         ~token:"blank-decision"
+         (`Assoc [ "decision", `String "  " ]))
 ;;
 
 let () =
@@ -1605,6 +1664,10 @@ let () =
             "approval operator action registered"
             `Quick
             test_goal_approval_operator_action_registered
+        ; test_case
+            "operator goal decision requires explicit decision"
+            `Quick
+            test_operator_goal_decision_requires_explicit_decision
         ] )
     ]
 ;;

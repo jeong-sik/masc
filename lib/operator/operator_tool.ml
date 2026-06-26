@@ -417,8 +417,8 @@ let () =
          };
        Ok ());
   Atomic.set
-    Workspace_hooks.operator_pending_confirms_remove_by_target_fn
-    Operator_pending_confirm.remove_pending_confirms_by_target;
+    Workspace_hooks.operator_pending_confirm_remove_fn
+    Operator_pending_confirm.remove_pending_confirm;
   Keeper_turn_lifecycle.register_remove_pending_confirms_by_target
     Operator_pending_confirm.remove_pending_confirms_by_target
 ;;

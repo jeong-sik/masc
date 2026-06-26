@@ -88,7 +88,9 @@ let operator_action_error action =
     (Goal_phase.action_to_string action)
 ;;
 
-let goal_approval_pending_confirm_token goal_id = "goal-approval:" ^ goal_id
+let goal_approval_pending_confirm_token goal_id =
+  Operator_action_constants.goal_approval_token_prefix ^ goal_id
+;;
 
 let goal_approval_operator_actor (ctx : context) =
   match Auth.read_initial_admin ctx.config.base_path with
@@ -102,7 +104,7 @@ let goal_approval_pending_confirm_payload ~goal ~opened_by ?request_id () =
     [ "goal_id", `String goal.Goal_store.id
     ; "goal_title", `String goal.title
     ; "phase", Goal_phase.to_yojson goal.phase
-    ; "decision", `String "approve"
+    ; "decision", `String Operator_action_constants.goal_decision_approve
     ; "request_id", Json_util.string_opt_to_json request_id
     ; "opened_by", Goal_verification.goal_principal_to_yojson opened_by
     ]
@@ -121,11 +123,11 @@ let persist_goal_approval_pending_confirm ctx ~goal ~opened_by ?request_id () =
     { token = goal_approval_pending_confirm_token goal.Goal_store.id
     ; trace_id = (Atomic.get Workspace_hooks.operator_pending_confirm_trace_id_fn) "goal"
     ; actor = goal_approval_operator_actor ctx
-    ; action_type = "goal_completion_decision"
-    ; target_type = "goal"
+    ; action_type = Operator_action_constants.goal_completion_decision
+    ; target_type = Operator_action_constants.goal_target_type
     ; target_id = Some goal.Goal_store.id
     ; payload = goal_approval_pending_confirm_payload ~goal ~opened_by ?request_id ()
-    ; delegated_tool = "masc_goal_transition"
+    ; delegated_tool = Operator_action_constants.goal_transition_tool
     ; created_at = Masc_domain.now_iso ()
     ; expires_at = None
     }
@@ -134,11 +136,9 @@ let persist_goal_approval_pending_confirm ctx ~goal ~opened_by ?request_id () =
 ;;
 
 let clear_goal_approval_pending_confirm ctx ~goal_id =
-  ignore
-    ((Atomic.get Workspace_hooks.operator_pending_confirms_remove_by_target_fn)
-       ctx.config
-       ~target_type:"goal"
-       ~target_id:(Some goal_id))
+  (Atomic.get Workspace_hooks.operator_pending_confirm_remove_fn)
+    ctx.config
+    (goal_approval_pending_confirm_token goal_id)
 ;;
 
 let goal_status_strings = [ "active"; "paused"; "done"; "dropped" ]

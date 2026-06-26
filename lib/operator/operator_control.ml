@@ -141,44 +141,55 @@ let execute_workspace_action (ctx : 'a context) (request : action_request) =
    "team session actions removed: ..." error instead of the cleaner
    "unsupported action_type" path. *)
 
-let goal_decision_payload decision payload =
-  let fields =
-    match payload with
-    | `Assoc fields -> List.remove_assoc "decision" fields
-    | _ -> []
-  in
-  `Assoc (("decision", `String decision) :: fields)
+type goal_completion_decision =
+  | Goal_completion_approve
+  | Goal_completion_reject
 
-let execute_goal_action (_ctx : 'a context) (request : action_request) =
+let parse_goal_completion_decision payload =
+  match payload with
+  | `Assoc _ ->
+    (match get_string_opt payload "decision" with
+     | None -> Error "payload.decision is required"
+     | Some raw ->
+       (match String.trim raw |> String.lowercase_ascii with
+        | "approve" | "confirm" -> Ok Goal_completion_approve
+        | "reject" | "deny" -> Ok Goal_completion_reject
+        | "" -> Error "payload.decision is required"
+        | other -> Error (Printf.sprintf "unsupported goal decision: %s" other)))
+  | _ -> Error "goal decision payload must be an object"
+;;
+
+let goal_completion_transition_action = function
+  | Goal_completion_approve -> "approve_completion"
+  | Goal_completion_reject -> "reject_completion"
+;;
+
+let goal_decision_payload decision payload =
+  match payload with
+  | `Assoc fields ->
+    Ok (`Assoc (("decision", `String decision) :: List.remove_assoc "decision" fields))
+  | _ -> Error "goal decision payload must be an object"
+;;
+
+let execute_goal_action (ctx : 'a context) (request : action_request) =
   match request.action_type with
-  | "goal_completion_decision" ->
-    let* () = validate_target_type "goal" request in
+  | action when String.equal action Operator_action_constants.goal_completion_decision ->
+    let* () = validate_target_type Operator_action_constants.goal_target_type request in
     let* goal_id = require_target_id request in
-    let decision =
-      get_string request.payload "decision" "approve"
-      |> String.trim
-      |> String.lowercase_ascii
-    in
-    let* action =
-      match decision with
-      | "" | "approve" | "confirm" -> Ok "approve_completion"
-      | "reject" | "deny" -> Ok "reject_completion"
-      | other -> Error (Printf.sprintf "unsupported goal decision: %s" other)
-    in
+    let* decision = parse_goal_completion_decision request.payload in
+    let action = goal_completion_transition_action decision in
     let note_fields =
       match get_string_opt request.payload "note" with
       | Some note when String.trim note <> "" -> [ "note", `String note ]
       | _ -> []
     in
     let goal_ctx : Workspace_types.context =
-      { config = _ctx.config; agent_name = request.actor }
+      { config = ctx.config; agent_name = request.actor }
     in
     let result =
       Workspace_goals.handle_goal_transition
-        ~tool_name:"masc_goal_transition"
-        (* NDT-OK: remote operator confirmation executes at the wall-clock boundary;
-           replay uses the emitted Tool_result timestamp rather than this call site. *)
-        ~start_time:(Unix.gettimeofday ())
+        ~tool_name:Operator_action_constants.goal_transition_tool
+        ~start_time:(Eio.Time.now ctx.clock)
         goal_ctx
         (`Assoc
             ([ "goal_id", `String goal_id
@@ -337,7 +348,8 @@ let execute_action (ctx : 'a context) (request : action_request) :
   | "broadcast" | "namespace_pause" | "namespace_resume" | "social_sweep"
   | "task_inject" ->
       execute_workspace_action ctx request
-  | "goal_completion_decision" -> execute_goal_action ctx request
+  | action when String.equal action Operator_action_constants.goal_completion_decision ->
+    execute_goal_action ctx request
   | "keeper_probe" | "keeper_recover" | "keeper_message" ->
       execute_keeper_action ctx request
   | "" -> Error "action_type is required"
@@ -506,20 +518,27 @@ let confirm_json ?actor_hint (ctx : _ context) args :
       | Some entry ->
           if String.equal decision "deny" then (
             let goal_denial_result =
-              if String.equal entry.action_type "goal_completion_decision" then
-                let request =
-                  {
-                    actor = entry.actor;
-                    action_type = entry.action_type;
-                    target_type = entry.target_type;
-                    target_id = entry.target_id;
-                    payload = goal_decision_payload "reject" entry.payload;
-                  }
+              if
+                String.equal
+                  entry.action_type
+                  Operator_action_constants.goal_completion_decision
+              then
+                let* payload =
+                  goal_decision_payload
+                    Operator_action_constants.goal_decision_reject
+                    entry.payload
                 in
-                execute_action ctx request |> Result.map Option.some
+                execute_action
+                  ctx
+                  { actor = entry.actor
+                  ; action_type = entry.action_type
+                  ; target_type = entry.target_type
+                  ; target_id = entry.target_id
+                  ; payload
+                  }
+                |> Result.map Option.some
               else Ok None
             in
-            let* goal_denial_result = goal_denial_result in
             remove_pending_confirm ctx.config confirm_token;
             append_action_log ctx.config
               {
@@ -532,7 +551,8 @@ let confirm_json ?actor_hint (ctx : _ context) args :
                 target_id = entry.target_id;
                 delegated_tool = entry.delegated_tool;
                 confirmation_state = Denied;
-                result_status = ActionOk;
+                result_status =
+                  (match goal_denial_result with Ok _ -> ActionOk | Error _ -> ActionError);
                 latency_ms = 0;
                 created_at = Masc_domain.now_iso ();
               };
@@ -540,16 +560,21 @@ let confirm_json ?actor_hint (ctx : _ context) args :
               ~agent_id:actor ~trace_id:entry.trace_id
               ~decision:Audit_log.Governance_deny ~action_type:entry.action_type
               ~confirmation_state:(confirmation_state_to_string Denied) ();
+            let* goal_denial_result = goal_denial_result in
+            let result_fields =
+              [ "trace_id", `String entry.trace_id
+              ; "decision", `String "deny"
+              ; "tool_name", `String entry.delegated_tool
+              ; "executed_action", pending_confirm_to_yojson entry
+              ]
+            in
+            let result_fields =
+              match goal_denial_result with
+              | Some result -> ("result", result) :: result_fields
+              | None -> ("result_status", `String "not_applicable") :: result_fields
+            in
             Ok
-              (Tool_args.ok_assoc
-                 [
-                   ("trace_id", `String entry.trace_id);
-                   ("decision", `String "deny");
-                   ("tool_name", `String entry.delegated_tool);
-                   (* DET-OK: absent non-goal denial output is encoded as explicit JSON null. *)
-                   ("result", Option.value goal_denial_result ~default:`Null);
-                   ("executed_action", pending_confirm_to_yojson entry);
-                 ]))
+              (Tool_args.ok_assoc result_fields))
           else
             let started_at = Unix.gettimeofday () in
             let request =

@@ -1760,15 +1760,20 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
           make_keeper_meta ~name:"capacity-running-b"
             ~trace_id:"trace-capacity-running-b" ()
         in
-        List.iter (write_keeper_meta_exn config) [ paused; running_a; running_b ];
-        with_running_keeper_metas config [ running_a; running_b ] (fun () ->
+        let runtime_only =
+          make_keeper_meta ~name:"runtime-only" ~trace_id:"trace-runtime-only" ()
+        in
+        List.iter
+          (write_keeper_meta_exn config)
+          [ paused; running_a; running_b; runtime_only ];
+        with_running_keeper_metas config [ running_a; running_b; runtime_only ] (fun () ->
           let request = Httpun.Request.create `GET "/health" in
           let json = Server_routes_http_runtime.make_health_json request in
           let open Yojson.Safe.Util in
           let fleet_safety = json |> member "keeper_fleet_safety" in
-          Alcotest.(check int) "health exposes running reaction capacity" 2
+          Alcotest.(check int) "health exposes running reaction capacity" 3
             (fleet_safety |> member "effective_reaction_capacity_count" |> to_int);
-          Alcotest.(check int) "health exposes executable reaction capacity" 2
+          Alcotest.(check int) "health exposes executable reaction capacity" 3
             (fleet_safety |> member "executable_reaction_capacity_count" |> to_int);
           Alcotest.(check int) "health exposes failing keeper count" 0
             (fleet_safety |> member "failing_keeper_fiber_count" |> to_int);
@@ -1780,13 +1785,13 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
             (fleet_safety |> member "low_running_fiber_margin" |> to_bool);
           Alcotest.(check bool) "health marks capacity below target" true
             (fleet_safety |> member "reaction_capacity_below_target" |> to_bool);
-          Alcotest.(check int) "health exposes capacity shortfall" 2
+          Alcotest.(check int) "health exposes capacity shortfall" 1
             (fleet_safety |> member "reaction_capacity_shortfall_count" |> to_int);
-          Alcotest.(check int) "health exposes executable capacity shortfall" 2
+          Alcotest.(check int) "health exposes executable capacity shortfall" 1
             (fleet_safety
              |> member "executable_reaction_capacity_shortfall_count"
              |> to_int);
-          Alcotest.(check int) "health exposes blocked shortfall" 2
+          Alcotest.(check int) "health exposes blocked keeper count" 2
             (fleet_safety |> member "blocked_count" |> to_int);
           Alcotest.(check (list string)) "health exposes blocked keeper names"
             [ "capacity-paused"; "example" ]

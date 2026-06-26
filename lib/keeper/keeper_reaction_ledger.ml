@@ -368,6 +368,12 @@ let int_field name json =
   | _ -> 0
 ;;
 
+let list_field name json =
+  match assoc_field name json with
+  | Some (`List values) -> values
+  | _ -> []
+;;
+
 let bool_field name json =
   match assoc_field name json with
   | Some (`Bool value) -> value
@@ -386,6 +392,15 @@ let nested_float_field outer inner json =
   | None -> None
 ;;
 
+let reaction_receipt_field name row =
+  match assoc_field "reaction" row with
+  | Some reaction ->
+    (match assoc_field "receipt" reaction with
+     | Some receipt -> string_field name receipt
+     | None -> None)
+  | None -> None
+;;
+
 let summary_schema = "keeper.reaction_ledger.summary.v1"
 let fleet_summary_schema = "keeper.reaction_ledger.fleet_summary.v1"
 
@@ -396,6 +411,87 @@ let cap_list limit values =
     | value :: rest -> loop (remaining - 1) (value :: acc) rest
   in
   loop limit [] values
+;;
+
+type receipt_contract_result =
+  | Receipt_contract_unknown
+  | Receipt_contract_not_dispatched
+  | Receipt_contract_violated
+  | Receipt_contract_surface_mismatch
+  | Receipt_contract_no_capable_provider
+  | Receipt_contract_claim_only_after_owned_task
+  | Receipt_contract_needs_execution_progress
+  | Receipt_contract_passive_only
+  | Receipt_contract_satisfied_completion
+  | Receipt_contract_satisfied_execution
+
+let receipt_contract_result_of_string raw =
+  match raw |> String.trim |> String.lowercase_ascii with
+  | "unknown" -> Some Receipt_contract_unknown
+  | "not_dispatched" -> Some Receipt_contract_not_dispatched
+  | "violated" -> Some Receipt_contract_violated
+  | "surface_mismatch" -> Some Receipt_contract_surface_mismatch
+  | "no_capable_provider" -> Some Receipt_contract_no_capable_provider
+  | "claim_only_after_owned_task" -> Some Receipt_contract_claim_only_after_owned_task
+  | "needs_execution_progress" -> Some Receipt_contract_needs_execution_progress
+  | "passive_only" -> Some Receipt_contract_passive_only
+  | "satisfied_completion" -> Some Receipt_contract_satisfied_completion
+  | "satisfied_execution" -> Some Receipt_contract_satisfied_execution
+  | _ -> None
+;;
+
+let receipt_contract_result_to_string = function
+  | Receipt_contract_unknown -> "unknown"
+  | Receipt_contract_not_dispatched -> "not_dispatched"
+  | Receipt_contract_violated -> "violated"
+  | Receipt_contract_surface_mismatch -> "surface_mismatch"
+  | Receipt_contract_no_capable_provider -> "no_capable_provider"
+  | Receipt_contract_claim_only_after_owned_task -> "claim_only_after_owned_task"
+  | Receipt_contract_needs_execution_progress -> "needs_execution_progress"
+  | Receipt_contract_passive_only -> "passive_only"
+  | Receipt_contract_satisfied_completion -> "satisfied_completion"
+  | Receipt_contract_satisfied_execution -> "satisfied_execution"
+;;
+
+type contract_result_attention =
+  | Contract_attention of
+      { result : receipt_contract_result
+      ; label : string
+      }
+  | Contract_no_attention
+
+let contract_result_attention_of_typed = function
+  | Receipt_contract_violated
+  | Receipt_contract_surface_mismatch
+  | Receipt_contract_no_capable_provider
+  | Receipt_contract_claim_only_after_owned_task
+  | Receipt_contract_needs_execution_progress
+  | Receipt_contract_passive_only as result ->
+    Contract_attention { result; label = receipt_contract_result_to_string result }
+  | Receipt_contract_unknown
+  | Receipt_contract_not_dispatched
+  | Receipt_contract_satisfied_completion
+  | Receipt_contract_satisfied_execution ->
+    Contract_no_attention
+;;
+
+let increment_count tbl key =
+  let current =
+    match Hashtbl.find_opt tbl key with
+    | Some value -> value
+    | None -> 0
+  in
+  Hashtbl.replace tbl key (current + 1)
+;;
+
+let count_table_json tbl =
+  Hashtbl.fold (fun name count acc -> (name, count) :: acc) tbl []
+  |> List.sort (fun (left_name, left_count) (right_name, right_count) ->
+    let count_cmp = Int.compare right_count left_count in
+    if count_cmp <> 0 then count_cmp else String.compare left_name right_name)
+  |> List.map (fun (name, count) ->
+    `Assoc [ "result", `String name; "count", `Int count ])
+  |> fun values -> `List values
 ;;
 
 let compare_board_cursor_token (ts_a, post_id_a) (ts_b, post_id_b) =
@@ -432,11 +528,15 @@ let summarize_rows ~keeper_name ~limit rows =
   let terminal_reason_count = ref 0 in
   let operator_escalation_count = ref 0 in
   let supervisor_recovery_requested_count = ref 0 in
+  let completion_contract_attention_count = ref 0 in
+  let completion_contract_passive_only_count = ref 0 in
   let unsupported_stimulus_count = ref 0 in
   let payload_parse_error_count = ref 0 in
   let unknown_reaction_count = ref 0 in
   let latest_recorded_at = ref None in
   let latest_stimulus_id = ref None in
+  let latest_completion_contract_attention = ref None in
+  let completion_contract_result_counts = Hashtbl.create 8 in
   let stimulus_seen = Hashtbl.create 16 in
   let board_stimulus_tokens = Hashtbl.create 16 in
   let stimulus_order = ref [] in
@@ -508,6 +608,36 @@ let summarize_rows ~keeper_name ~limit rows =
        | Supervisor_recovery_requested -> incr supervisor_recovery_requested_count
        | Unknown_reaction _ -> incr unknown_reaction_count)
   in
+  let note_contract_attention_label ~result ~label =
+    incr completion_contract_attention_count;
+    (match result with
+     | Receipt_contract_passive_only ->
+       incr completion_contract_passive_only_count
+     | Receipt_contract_violated
+     | Receipt_contract_surface_mismatch
+     | Receipt_contract_no_capable_provider
+     | Receipt_contract_claim_only_after_owned_task
+     | Receipt_contract_needs_execution_progress
+     | Receipt_contract_unknown
+     | Receipt_contract_not_dispatched
+     | Receipt_contract_satisfied_completion
+     | Receipt_contract_satisfied_execution ->
+       ());
+    increment_count completion_contract_result_counts label;
+    latest_completion_contract_attention := Some label
+  in
+  let note_completion_contract_attention row =
+    match reaction_receipt_field "completion_contract_result" row with
+    | Some result ->
+      (match receipt_contract_result_of_string result with
+       | Some typed ->
+         (match contract_result_attention_of_typed typed with
+          | Contract_attention { result; label } ->
+            note_contract_attention_label ~result ~label
+          | Contract_no_attention -> ())
+       | None -> ())
+    | None -> ()
+  in
   let note_stimulus_kind = function
     | None -> incr unsupported_stimulus_count
     | Some raw ->
@@ -545,6 +675,7 @@ let summarize_rows ~keeper_name ~limit rows =
       | Some "reaction", Some id ->
         incr reaction_count;
         note_reaction_kind (nested_string_field "reaction" "kind" row);
+        note_completion_contract_attention row;
         mark_reacted id
       | Some "cursor_ack", Some id ->
         incr reaction_count;
@@ -559,7 +690,8 @@ let summarize_rows ~keeper_name ~limit rows =
          | None -> ())
       | Some "reaction", None ->
         incr reaction_count;
-        note_reaction_kind (nested_string_field "reaction" "kind" row)
+        note_reaction_kind (nested_string_field "reaction" "kind" row);
+        note_completion_contract_attention row
       | Some "cursor_ack", None ->
         incr reaction_count;
         incr cursor_ack_count;
@@ -607,6 +739,11 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "terminal_reason_count", `Int !terminal_reason_count
     ; "operator_escalation_count", `Int !operator_escalation_count
     ; "supervisor_recovery_requested_count", `Int !supervisor_recovery_requested_count
+    ; "completion_contract_attention_count", `Int !completion_contract_attention_count
+    ; "completion_contract_passive_only_count", `Int !completion_contract_passive_only_count
+    ; "completion_contract_result_counts", count_table_json completion_contract_result_counts
+    ; ( "latest_completion_contract_attention"
+      , Json_util.string_opt_to_json !latest_completion_contract_attention )
     ; "unsupported_stimulus_count", `Int !unsupported_stimulus_count
     ; "payload_parse_error_count", `Int !payload_parse_error_count
     ; "unknown_reaction_count", `Int !unknown_reaction_count
@@ -640,6 +777,10 @@ let error_summary ~keeper_name ~limit error =
     ; "terminal_reason_count", `Int 0
     ; "operator_escalation_count", `Int 0
     ; "supervisor_recovery_requested_count", `Int 0
+    ; "completion_contract_attention_count", `Int 0
+    ; "completion_contract_passive_only_count", `Int 0
+    ; "completion_contract_result_counts", `List []
+    ; "latest_completion_contract_attention", `Null
     ; "unsupported_stimulus_count", `Int 0
     ; "payload_parse_error_count", `Int 0
     ; "unknown_reaction_count", `Int 0
@@ -705,6 +846,31 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
                ]))
       summaries
   in
+  let completion_contract_attention_by_keeper =
+    List.filter_map
+      (fun summary ->
+        let attention_count = int_field "completion_contract_attention_count" summary in
+        if attention_count = 0
+        then None
+        else
+          Some
+            (`Assoc
+               [ "keeper_name"
+               , (match string_field "keeper_name" summary with
+                  | Some value -> `String value
+                  | None -> `String "unknown")
+               ; "completion_contract_attention_count", `Int attention_count
+               ; ( "completion_contract_passive_only_count"
+                 , `Int (int_field "completion_contract_passive_only_count" summary) )
+               ; ( "latest_completion_contract_attention"
+                 , match assoc_field "latest_completion_contract_attention" summary with
+                   | Some value -> value
+                   | None -> `Null )
+               ; ( "completion_contract_result_counts"
+                 , `List (list_field "completion_contract_result_counts" summary) )
+               ]))
+      summaries
+  in
   let read_error_count =
     List.fold_left
       (fun acc summary -> acc + summary_read_error_count summary)
@@ -751,6 +917,11 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; "terminal_reason_count", `Int (total_int "terminal_reason_count")
     ; "operator_escalation_count", `Int (total_int "operator_escalation_count")
     ; "supervisor_recovery_requested_count", `Int (total_int "supervisor_recovery_requested_count")
+    ; "completion_contract_attention_count", `Int (total_int "completion_contract_attention_count")
+    ; ( "completion_contract_passive_only_count"
+      , `Int (total_int "completion_contract_passive_only_count") )
+    ; ( "completion_contract_attention_by_keeper"
+      , `List completion_contract_attention_by_keeper )
     ; "unsupported_stimulus_count", `Int unsupported_stimulus_count
     ; "payload_parse_error_count", `Int payload_parse_error_count
     ; "unknown_reaction_count", `Int unknown_reaction_count

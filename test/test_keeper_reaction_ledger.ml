@@ -165,6 +165,93 @@ let test_execution_receipt_links_to_reaction_ledger () =
     (reaction |> member "receipt")
 ;;
 
+let test_summary_counts_completion_contract_attention_receipts () =
+  with_temp_base @@ fun base_path ->
+  let config = Workspace.default_config base_path in
+  let keeper_name = "contract-attention-keeper" in
+  let record ?(terminal_reason_code = "completed") ?current_task_id
+        ~trace_id ~completion_contract_result () =
+    let receipt_json =
+      `Assoc
+        [ "schema", `String "keeper.execution_receipt.v1"
+        ; "trace_id", `String trace_id
+        ; "outcome", `String "receipt_done"
+        ; "terminal_reason_code", `String terminal_reason_code
+        ; "operator_disposition", `String "pause_human"
+        ; "operator_disposition_reason", `String "completion_contract_unsatisfied"
+        ; "completion_contract_result", `String completion_contract_result
+        ]
+    in
+    Keeper_reaction_ledger.record_execution_receipt_reaction
+      config
+      ~keeper_name
+      ~trace_id
+      ~turn_count:1
+      ~current_task_id
+      ~goal_ids:[]
+      ~outcome:"receipt_done"
+      ~terminal_reason_code
+      ~receipt_json
+      ()
+  in
+  record
+    ~trace_id:"trace-passive-1"
+    ~current_task_id:"task-passive-1"
+    ~completion_contract_result:"passive_only"
+    ();
+  record
+    ~trace_id:"trace-passive-2"
+    ~current_task_id:"task-passive-2"
+    ~completion_contract_result:"passive_only"
+    ();
+  record
+    ~trace_id:"trace-satisfied"
+    ~current_task_id:"task-satisfied"
+    ~completion_contract_result:"satisfied_execution"
+    ();
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "contract summary remains mechanically ok" "ok" "status" summary;
+  check int "completion contract attention count" 2
+    (summary |> member "completion_contract_attention_count" |> to_int);
+  check int "passive-only count" 2
+    (summary |> member "completion_contract_passive_only_count" |> to_int);
+  check string "latest contract attention" "passive_only"
+    (summary |> member "latest_completion_contract_attention" |> to_string);
+  let result_count =
+    summary
+    |> member "completion_contract_result_counts"
+    |> to_list
+    |> List.hd
+  in
+  check_member_string "contract result label" "passive_only" "result" result_count;
+  check int "contract result count" 2 (result_count |> member "count" |> to_int);
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check int "fleet contract attention count" 2
+    (fleet |> member "completion_contract_attention_count" |> to_int);
+  check int "fleet passive-only count" 2
+    (fleet |> member "completion_contract_passive_only_count" |> to_int);
+  let keeper_attention =
+    fleet
+    |> member "completion_contract_attention_by_keeper"
+    |> to_list
+    |> List.hd
+  in
+  check_member_string
+    "fleet contract attention keeper"
+    keeper_name
+    "keeper_name"
+    keeper_attention;
+  check int "fleet keeper contract attention count" 2
+    (keeper_attention |> member "completion_contract_attention_count" |> to_int)
+;;
+
 let test_summary_marks_unreacted_and_reacted_stimuli () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "summary-keeper" in
@@ -454,6 +541,10 @@ let () =
             "execution receipt links to reaction ledger"
             `Quick
             test_execution_receipt_links_to_reaction_ledger
+        ; test_case
+            "summary counts completion-contract attention receipts"
+            `Quick
+            test_summary_counts_completion_contract_attention_receipts
         ; test_case
             "summary marks unreacted and reacted stimuli"
             `Quick

@@ -104,6 +104,39 @@ let test_accepts_json_case_insensitive () =
     (Http_negotiation.accepts_json (Some "Application/Json"))
 
 (* ============================================================
+   is_json_content_type Tests
+   ============================================================ *)
+
+let test_json_content_type_none () =
+  check bool "None" false (Http_negotiation.is_json_content_type None)
+
+let test_json_content_type_exact () =
+  check bool "exact" true
+    (Http_negotiation.is_json_content_type (Some "application/json"))
+
+let test_json_content_type_with_params () =
+  check bool "params" true
+    (Http_negotiation.is_json_content_type
+       (Some "application/json; charset=utf-8"))
+
+let test_json_content_type_case_insensitive () =
+  check bool "mixed-case" true
+    (Http_negotiation.is_json_content_type (Some "Application/Json"))
+
+let test_json_content_type_rejects_jsonp () =
+  check bool "jsonp" false
+    (Http_negotiation.is_json_content_type (Some "application/jsonp"))
+
+let test_json_content_type_rejects_wildcard () =
+  check bool "wildcard" false
+    (Http_negotiation.is_json_content_type (Some "*/*"))
+
+let test_json_content_type_rejects_accept_list () =
+  check bool "list" false
+    (Http_negotiation.is_json_content_type
+       (Some "application/json, text/event-stream"))
+
+(* ============================================================
    accepts_sse_header Tests
    ============================================================ *)
 
@@ -239,6 +272,16 @@ let () =
       test_case "wildcard */*" `Quick test_accepts_json_wildcard;
       test_case "in list" `Quick test_accepts_json_in_list;
       test_case "case-insensitive" `Quick test_accepts_json_case_insensitive;
+    ];
+    "is_json_content_type", [
+      test_case "none" `Quick test_json_content_type_none;
+      test_case "exact" `Quick test_json_content_type_exact;
+      test_case "with params" `Quick test_json_content_type_with_params;
+      test_case "case-insensitive" `Quick test_json_content_type_case_insensitive;
+      test_case "rejects jsonp" `Quick test_json_content_type_rejects_jsonp;
+      test_case "rejects wildcard" `Quick test_json_content_type_rejects_wildcard;
+      test_case "rejects accept list" `Quick
+        test_json_content_type_rejects_accept_list;
     ];
     "accepts_sse_header", [
       test_case "none" `Quick test_accepts_sse_none;

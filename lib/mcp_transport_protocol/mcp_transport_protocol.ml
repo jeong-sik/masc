@@ -149,6 +149,15 @@ module Http_negotiation = struct
             (type_ = "application" && subtype = "json")
             || (type_ = "*" && subtype = "*"))
 
+  let is_json_content_type = function
+    | None -> false
+    | Some h ->
+        (match Mcp_protocol.Http_negotiation.parse_accept_header h with
+         | [ mt ] ->
+             String.equal (String.lowercase_ascii mt.type_) "application"
+             && String.equal (String.lowercase_ascii mt.subtype) "json"
+         | [] | _ :: _ :: _ -> false)
+
   let accepts_streamable_mcp = function
     | None -> false
     | Some h ->

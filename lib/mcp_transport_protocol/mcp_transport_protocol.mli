@@ -99,6 +99,11 @@ module Http_negotiation : sig
   val accepts_json : string option -> bool
   (** [true] iff the header advertises [application/json] or [*\/*]. *)
 
+  val is_json_content_type : string option -> bool
+  (** [true] iff the Content-Type value is exactly [application/json],
+      allowing media-type parameters such as [charset]. Wildcards and
+      comma-separated Accept-style lists are rejected. *)
+
   val accepts_streamable_mcp : string option -> bool
   (** [true] iff the header advertises both JSON and SSE
       (the Streamable HTTP transport requirement). *)

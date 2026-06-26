@@ -1,0 +1,61 @@
+{
+  "_comment": "Production hardening ratchet baseline. Regenerate with scripts/hardening-ratchet.sh --rebaseline.",
+  "examples": {
+    "direct_env_reads": [
+      "bin/keeper_feature_proof_report.ml:29:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
+      "bin/main_eio.ml:605:match Sys.getenv_opt \"MASC_BASE_PATH_RESOLUTION_SOURCE\" with",
+      "bin/main_eio.ml:609:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
+      "bin/main_eio.ml:959:match Sys.getenv_opt \"OCAMLRUNPARAM\" with",
+      "bin/masc_compaction_audit.ml:53:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
+      "bin/masc_compaction_audit.ml:58:match Sys.getenv_opt \"MASC_COMPACTION_AUDIT_RETENTION_DAYS\" with",
+      "bin/masc_completion_trust_audit.ml:40:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
+      "bin/masc_cost.ml:21:match Sys.getenv_opt \"MASC_BASE_PATH\" with"
+    ],
+    "direct_env_reads_outside_env_boundary": [
+      "bin/keeper_feature_proof_report.ml:29:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
+      "bin/main_eio.ml:605:match Sys.getenv_opt \"MASC_BASE_PATH_RESOLUTION_SOURCE\" with",
+      "bin/main_eio.ml:609:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
+      "bin/main_eio.ml:959:match Sys.getenv_opt \"OCAMLRUNPARAM\" with",
+      "bin/masc_compaction_audit.ml:53:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
+      "bin/masc_compaction_audit.ml:58:match Sys.getenv_opt \"MASC_COMPACTION_AUDIT_RETENTION_DAYS\" with",
+      "bin/masc_completion_trust_audit.ml:40:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
+      "bin/masc_cost.ml:21:match Sys.getenv_opt \"MASC_BASE_PATH\" with"
+    ],
+    "exception_message_classifiers": [
+      "bin/fusion_run.ml:50:| Fusion_types.Timeout -> \"timeout\"",
+      "lib/board/board_core_status_rollup.ml:107:; \"timeout\"",
+      "lib/core/system_error_class.ml:20:[ \"too many open files\"",
+      "lib/core/system_error_class.ml:45:let connection_refused_needles = [ \"connection refused\"; \"econnrefused\" ]",
+      "lib/core/system_error_class.ml:47:let timeout_needles = [ \"etimedout\"; \"timed out\"; \"operation timed out\" ]",
+      "lib/core/system_error_class.ml:82:| Timeout -> \"timeout\"",
+      "lib/core/system_error_class.ml:90:| Timeout -> \"timeout\"",
+      "lib/dashboard/dashboard_briefing_agents.ml:116:if not (String.equal (String.lowercase_ascii (String.trim message.from_agent)) lowered) then"
+    ],
+    "local_workspace_path_literals": [],
+    "stub_markers": [
+      "lib/cdal/adversarial_eval.ml:240:(\"assert false\", \"runtime assertion instead of type safety\");",
+      "lib/tool_types/tool_args.ml:72:| Not_implemented       (** Feature exists in schema but not in runtime *)",
+      "lib/tool_types/tool_args.ml:84:| Not_implemented -> \"not_implemented\"",
+      "lib/tool_types/tool_args.mli:59:| Not_implemented       (** Feature exists in schema but not in runtime. *)"
+    ],
+    "wildcard_silent_defaults": [
+      "bin/env_knob_catalog.ml:314:| _ -> ())",
+      "bin/gen_shell_ir_walkers.ml:214:| _ -> None|}",
+      "bin/gen_shell_ir_walkers.ml:427:| _ -> None)",
+      "bin/gen_shell_ir_walkers.ml:437:| _ -> None)",
+      "bin/gen_shell_ir_walkers.ml:513:| _ -> ()",
+      "bin/gen_shell_ir_walkers.ml:941:| _ -> ()",
+      "bin/gen_shell_ir_walkers.ml:1058:| _ -> ()",
+      "bin/gen_shell_ir_walkers.ml:1254:| _ -> ()"
+    ]
+  },
+  "lastUpdatedCommit": "adfc935e518a3d0b299d823bc4c4ed033b28fcbc",
+  "metrics": {
+    "direct_env_reads": 188,
+    "direct_env_reads_outside_env_boundary": 160,
+    "exception_message_classifiers": 106,
+    "local_workspace_path_literals": 0,
+    "stub_markers": 4,
+    "wildcard_silent_defaults": 1991
+  }
+}

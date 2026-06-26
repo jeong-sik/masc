@@ -453,6 +453,7 @@ jobs:
           bash scripts/ci/check-telemetry-coverage.sh
           bash scripts/ci/check-determinism-contract.sh
           bash scripts/audit-hardcoding-truth.sh --fail-on-confirmed
+          bash scripts/hardening-ratchet.sh --check
           bash scripts/ci/check-credential-audits.sh
           bash scripts/ci/check-persona-profile-placeholders.sh
           bash scripts/ci/check-accept-fd-lifecycle.sh

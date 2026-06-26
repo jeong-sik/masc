@@ -13,6 +13,7 @@ import type {
 // Mocking the module lets us drive every render branch without a real HTTP call.
 
 const mockFetch = vi.fn<() => Promise<KeeperMemoryHealthResponse>>()
+const EVENTS_TO_FACTS_RATIO_THRESHOLD = 2
 
 vi.mock('../../api/dashboard', () => ({
   fetchKeeperMemoryHealth: () => mockFetch(),
@@ -31,7 +32,7 @@ function makeEntry(
     facts_bytes: 512,
     events: 20,
     events_bytes: 1024,
-    events_to_facts_ratio: 2,
+    events_to_facts_ratio: EVENTS_TO_FACTS_RATIO_THRESHOLD,
     ttl_expired_on_disk: 0,
     near_duplicate: 0,
     provider_slot_busy: 0,
@@ -68,11 +69,17 @@ function makeResponse(
       thresholds: {
         ttl_expired_on_disk: 0,
         near_duplicate: 0,
-        events_to_facts_ratio: 2,
+        events_to_facts_ratio: EVENTS_TO_FACTS_RATIO_THRESHOLD,
         provider_slot_busy: 0,
       },
     },
   }
+}
+
+function statValue(container: Element, label: string): string | undefined {
+  const stat = Array.from(container.querySelectorAll('.kmh-totals-strip .kmh-stat'))
+    .find((node) => node.querySelector('.kmh-stat-label')?.textContent === label)
+  return stat?.querySelector('.kmh-stat-value')?.textContent ?? undefined
 }
 
 describe('KeeperMemoryHealth', () => {
@@ -109,21 +116,25 @@ describe('KeeperMemoryHealth', () => {
   })
 
   // ── isRowWarning boundary (via row class + ratio badge) ──
-  // Component operator is strict greater-than against threshold 2:
-  //   ratio === 2 → NOT a warning
-  //   ratio  > 2 → warning
-  describe('isRowWarning ratio boundary (threshold is > 2)', () => {
-    it('does not flag a row when the ratio equals the threshold (2)', async () => {
+  // Component operator is strict greater-than against the backend threshold:
+  //   ratio === threshold → NOT a warning
+  //   ratio  > threshold → warning
+  describe('isRowWarning ratio boundary', () => {
+    it('does not flag a row when the ratio equals the backend threshold', async () => {
       mockFetch.mockResolvedValue(
         makeResponse([
-          makeEntry({ keeper_id: 'at-threshold', events_to_facts_ratio: 2, ttl_expired_on_disk: 0 }),
+          makeEntry({
+            keeper_id: 'at-threshold',
+            events_to_facts_ratio: EVENTS_TO_FACTS_RATIO_THRESHOLD,
+            ttl_expired_on_disk: 0,
+          }),
         ]),
       )
       const { container } = render(html`<${KeeperMemoryHealth} />`)
       await waitFor(() => expect(screen.getByText('at-threshold')).not.toBeNull())
 
       expect(container.querySelector('.kmh-row--warn')).toBeNull()
-      // The ratio cell renders 2.00 inside a plain span, not a warn badge.
+      // The ratio cell renders the threshold value inside a plain span, not a warn badge.
       expect(container.querySelector('.kmh-badge--warn')).toBeNull()
       expect(screen.getByText('2.00')).not.toBeNull()
     })
@@ -145,16 +156,18 @@ describe('KeeperMemoryHealth', () => {
     })
 
     it('flags a row on ttl_expired_on_disk even when the ratio is at the threshold', async () => {
-      // isRowWarning is an OR: ratio>2 OR ttl_expired_on_disk>0.
+      // isRowWarning is an OR: ratio above backend threshold OR ttl_expired_on_disk > 0.
       mockFetch.mockResolvedValue(
         makeResponse([
           makeEntry({
             keeper_id: 'ttl-expired',
-            events_to_facts_ratio: 2,
+            events_to_facts_ratio: EVENTS_TO_FACTS_RATIO_THRESHOLD,
             ttl_expired_on_disk: 4,
             alerts: [{
               code: 'ttl_expired_on_disk',
               severity: 'warn',
+              target: 'ttl_expired_on_disk',
+              label: 'TTL',
               message: 'TTL-expired Memory OS fact rows remain on disk',
               value: 4,
               threshold: 0,
@@ -180,6 +193,8 @@ describe('KeeperMemoryHealth', () => {
             alerts: [{
               code: 'ttl_expired_on_disk',
               severity: 'warn',
+              target: 'ttl_expired_on_disk',
+              label: 'TTL',
               message: 'TTL-expired Memory OS fact rows remain on disk',
               value: 2,
               threshold: 0,
@@ -197,7 +212,7 @@ describe('KeeperMemoryHealth', () => {
           thresholds: {
             ttl_expired_on_disk: 0,
             near_duplicate: 0,
-            events_to_facts_ratio: 2,
+            events_to_facts_ratio: EVENTS_TO_FACTS_RATIO_THRESHOLD,
             provider_slot_busy: 0,
           },
         },
@@ -205,10 +220,7 @@ describe('KeeperMemoryHealth', () => {
       const { container } = render(html`<${KeeperMemoryHealth} />`)
       await waitFor(() => expect(screen.getByText('alerted')).not.toBeNull())
 
-      const alertStat = Array.from(container.querySelectorAll('.kmh-totals-strip .kmh-stat'))
-        .find((stat) => stat.textContent === '경보1')
-      expect(alertStat).not.toBeUndefined()
-      expect(alertStat!.querySelector('.kmh-stat-value')?.textContent).toBe('1')
+      expect(statValue(container, '경보')).toBe('1')
     })
 
     it('surfaces provider slot busy alerts per keeper', async () => {
@@ -220,6 +232,8 @@ describe('KeeperMemoryHealth', () => {
             alerts: [{
               code: 'provider_slot_busy',
               severity: 'warn',
+              target: 'provider_slot_busy',
+              label: '슬롯',
               message: 'Memory OS librarian provider slot was busy',
               value: 3,
               threshold: 0,
@@ -237,7 +251,7 @@ describe('KeeperMemoryHealth', () => {
           thresholds: {
             ttl_expired_on_disk: 0,
             near_duplicate: 0,
-            events_to_facts_ratio: 2,
+            events_to_facts_ratio: EVENTS_TO_FACTS_RATIO_THRESHOLD,
             provider_slot_busy: 0,
           },
         },
@@ -246,10 +260,7 @@ describe('KeeperMemoryHealth', () => {
       await waitFor(() => expect(screen.getByText('slot-busy')).not.toBeNull())
 
       expect(screen.getByText('슬롯')).not.toBeNull()
-      const slotStat = Array.from(container.querySelectorAll('.kmh-totals-strip .kmh-stat'))
-        .find((stat) => stat.textContent === '슬롯 실패3')
-      expect(slotStat).not.toBeUndefined()
-      expect(slotStat!.querySelector('.kmh-stat-value')?.textContent).toBe('3')
+      expect(statValue(container, '슬롯 실패')).toBe('3')
     })
   })
 

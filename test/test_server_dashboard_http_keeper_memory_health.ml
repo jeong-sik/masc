@@ -217,6 +217,14 @@ let test_dry_run_gc_reports_expired_and_duplicates () =
     "alert codes"
     [ "ttl_expired_on_disk"; "near_duplicate" ]
     (List.map (string_field "code") alerts);
+  Alcotest.(check (list string))
+    "alert targets"
+    [ "ttl_expired_on_disk"; "near_duplicate" ]
+    (List.map (string_field "target") alerts);
+  Alcotest.(check (list string))
+    "alert labels"
+    [ "TTL"; "중복" ]
+    (List.map (string_field "label") alerts);
   let summary = alert_summary json in
   Alcotest.(check int) "summary total alerts" 2 (int_field "total_alerts" summary);
   Alcotest.(check int) "summary warn alerts" 2 (int_field "warn_alerts" summary);
@@ -256,6 +264,14 @@ let test_reports_provider_slot_busy_metric_as_alert () =
     "provider slot alert code"
     [ "provider_slot_busy" ]
     (List.map (string_field "code") alerts);
+  Alcotest.(check (list string))
+    "provider slot alert target"
+    [ "provider_slot_busy" ]
+    (List.map (string_field "target") alerts);
+  Alcotest.(check (list string))
+    "provider slot alert label"
+    [ "슬롯" ]
+    (List.map (string_field "label") alerts);
   let summary = alert_summary json in
   Alcotest.(check int) "summary provider slot keepers" 1 (int_field "provider_slot_busy_keepers" summary);
   Alcotest.(check int) "summary total alerts" 1 (int_field "total_alerts" summary)

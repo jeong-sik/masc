@@ -10,15 +10,15 @@ import { useEffect, useState } from 'preact/hooks'
 import {
   fetchKeeperMemoryHealth,
   type KeeperMemoryHealthAlert,
+  type KeeperMemoryHealthAlertTarget,
   type KeeperMemoryHealthKeeperEntry,
   type KeeperMemoryHealthResponse,
 } from '../../api/dashboard'
 import { DEFAULT_PANEL_REFRESH_MS, formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 
-// Rows whose events-to-facts ratio exceeds this threshold are flagged for
-// operator attention by the backend. Keep the fallback threshold only for
-// legacy responses that predate typed alerts.
-const LEGACY_EVENTS_TO_FACTS_RATIO_WARN_THRESHOLD = 2
+type AlertThresholds = NonNullable<KeeperMemoryHealthResponse['alert_summary']>['thresholds']
+
+const EVENT_RATIO_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'events_to_facts_ratio'
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -34,33 +34,37 @@ function providerSlotBusy(entry: KeeperMemoryHealthKeeperEntry): number {
   return entry.provider_slot_busy ?? 0
 }
 
-function isRowWarning(entry: KeeperMemoryHealthKeeperEntry): boolean {
+function hasTargetAlert(alerts: KeeperMemoryHealthAlert[], target: KeeperMemoryHealthAlertTarget): boolean {
+  return alerts.some(alert => alert.target === target)
+}
+
+function isRowWarning(
+  entry: KeeperMemoryHealthKeeperEntry,
+  thresholds: AlertThresholds | undefined,
+): boolean {
   if (entryAlerts(entry).length > 0) return true
+  const ratioThreshold = thresholds?.events_to_facts_ratio
   return (
-    entry.events_to_facts_ratio > LEGACY_EVENTS_TO_FACTS_RATIO_WARN_THRESHOLD
+    (ratioThreshold !== undefined && entry.events_to_facts_ratio > ratioThreshold)
     || entry.ttl_expired_on_disk > 0
+    || entry.near_duplicate > 0
+    || providerSlotBusy(entry) > 0
   )
 }
 
-function alertLabel(code: string): string {
-  switch (code) {
-    case 'ttl_expired_on_disk':
-      return 'TTL'
-    case 'near_duplicate':
-      return '중복'
-    case 'events_to_facts_ratio_high':
-      return '비율'
-    case 'provider_slot_busy':
-      return '슬롯'
-    default:
-      return code
-  }
-}
-
-function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
-  const warn = isRowWarning(entry)
+function KeeperRow({
+  entry,
+  thresholds,
+}: {
+  entry: KeeperMemoryHealthKeeperEntry
+  thresholds: AlertThresholds | undefined
+}) {
   const ratioStr = entry.events_to_facts_ratio.toFixed(2)
   const alerts = entryAlerts(entry)
+  const warn = isRowWarning(entry, thresholds)
+  const ratioThreshold = thresholds?.events_to_facts_ratio
+  const ratioWarn = hasTargetAlert(alerts, EVENT_RATIO_ALERT_TARGET)
+    || (ratioThreshold !== undefined && entry.events_to_facts_ratio > ratioThreshold)
   const providerSlotBusyCount = providerSlotBusy(entry)
 
   return html`
@@ -69,8 +73,7 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
       <td>${entry.facts.toLocaleString()}</td>
       <td>${formatBytes(entry.facts_bytes)}</td>
       <td>
-        ${alerts.some(alert => alert.code === 'events_to_facts_ratio_high')
-          || entry.events_to_facts_ratio > LEGACY_EVENTS_TO_FACTS_RATIO_WARN_THRESHOLD
+        ${ratioWarn
           ? html`<span class="kmh-badge kmh-badge--warn">${ratioStr}</span>`
           : html`<span>${ratioStr}</span>`}
       </td>
@@ -88,7 +91,7 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
       <td>
         ${alerts.length > 0
           ? alerts.map(alert => html`
-            <span class="kmh-badge kmh-badge--warn" title=${alert.message}>${alertLabel(alert.code)}</span>
+            <span class="kmh-badge kmh-badge--warn" title=${alert.message}>${alert.label}</span>
           `)
           : html`<span class="kmh-badge kmh-badge--ok">정상</span>`}
       </td>
@@ -156,12 +159,11 @@ export function KeeperMemoryHealth() {
 
   const generatedAt = new Date(data.generated_at * 1000).toLocaleTimeString()
   const derivedAlertCount = data.keepers.reduce((total, entry) => {
-    const alerts = entryAlerts(entry)
-    if (alerts.length > 0) return total + alerts.length
-    return total + (isRowWarning(entry) ? 1 : 0)
+    return total + entryAlerts(entry).length
   }, 0)
   const totalAlerts = data.alert_summary?.total_alerts ?? derivedAlertCount
   const totalProviderSlotBusy = data.totals.provider_slot_busy ?? 0
+  const thresholds = data.alert_summary?.thresholds
 
   return html`
     <div class="kmh-panel">
@@ -234,7 +236,13 @@ export function KeeperMemoryHealth() {
                 </tr>
               </thead>
               <tbody>
-                ${data.keepers.map(entry => html`<${KeeperRow} key=${entry.keeper_id} entry=${entry} />`)}
+                ${data.keepers.map(entry => html`
+                  <${KeeperRow}
+                    key=${entry.keeper_id}
+                    entry=${entry}
+                    thresholds=${thresholds}
+                  />
+                `)}
               </tbody>
             </table>
           </div>

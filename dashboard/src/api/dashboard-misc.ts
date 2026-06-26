@@ -196,14 +196,25 @@ export function fetchMemorySubsystems(
 
 // --- Keeper Memory Health ---
 
+export type KeeperMemoryHealthAlertCode =
+  | 'ttl_expired_on_disk'
+  | 'near_duplicate'
+  | 'events_to_facts_ratio_high'
+  | 'provider_slot_busy'
+
+export type KeeperMemoryHealthAlertSeverity = 'warn'
+
+export type KeeperMemoryHealthAlertTarget =
+  | 'ttl_expired_on_disk'
+  | 'near_duplicate'
+  | 'events_to_facts_ratio'
+  | 'provider_slot_busy'
+
 export interface KeeperMemoryHealthAlert {
-  code:
-    | 'ttl_expired_on_disk'
-    | 'near_duplicate'
-    | 'events_to_facts_ratio_high'
-    | 'provider_slot_busy'
-    | string
-  severity: 'warn' | string
+  code: KeeperMemoryHealthAlertCode
+  severity: KeeperMemoryHealthAlertSeverity
+  target: KeeperMemoryHealthAlertTarget
+  label: string
   message: string
   value: number
   threshold: number

@@ -28,21 +28,64 @@ type keeper_health =
   ; provider_slot_busy : int
   }
 
+type alert_code =
+  | Ttl_expired_on_disk
+  | Near_duplicate
+  | Events_to_facts_ratio_high
+  | Provider_slot_busy
+
+type alert_severity = Warn
+
+type alert_target =
+  | Ttl_expired_on_disk_target
+  | Near_duplicate_target
+  | Events_to_facts_ratio_target
+  | Provider_slot_busy_target
+
 type keeper_alert =
-  { code : string
-  ; severity : string
+  { code : alert_code
+  ; severity : alert_severity
+  ; target : alert_target
+  ; label : string
   ; message : string
   ; value : float
   ; threshold : float
   }
 
+let ttl_expired_on_disk_threshold = 0.0
+let near_duplicate_threshold = 0.0
+
+(* Diagnostic threshold only: rows above this line are highlighted for
+   compaction attention, but no control-flow or pruning decision depends on it.
+   The backend owns the value and publishes it through [alert_summary.thresholds]
+   so the dashboard does not duplicate the literal. *)
 let events_to_facts_ratio_warn_threshold = 2.0
+
+let provider_slot_busy_threshold = 0.0
 
 let provider_slot_busy_metric = Keeper_metrics.(to_string MemoryLaneProviderSlotBusy)
 let provider_slot_busy_site = "memory_os_librarian_provider_slot"
 
-let alert ~code ~message ~value ~threshold =
-  { code; severity = "warn"; message; value; threshold }
+let alert_code_to_string = function
+  | Ttl_expired_on_disk -> "ttl_expired_on_disk"
+  | Near_duplicate -> "near_duplicate"
+  | Events_to_facts_ratio_high -> "events_to_facts_ratio_high"
+  | Provider_slot_busy -> "provider_slot_busy"
+;;
+
+let alert_severity_to_string = function
+  | Warn -> "warn"
+;;
+
+let alert_target_to_string = function
+  | Ttl_expired_on_disk_target -> "ttl_expired_on_disk"
+  | Near_duplicate_target -> "near_duplicate"
+  | Events_to_facts_ratio_target -> "events_to_facts_ratio"
+  | Provider_slot_busy_target -> "provider_slot_busy"
+;;
+
+let alert ~code ~target ~label ~message ~value ~threshold =
+  { code; severity = Warn; target; label; message; value; threshold }
 ;;
 
 let keeper_alerts h =
@@ -51,27 +94,33 @@ let keeper_alerts h =
     if h.ttl_expired_on_disk > 0
     then
       alert
-        ~code:"ttl_expired_on_disk"
+        ~code:Ttl_expired_on_disk
+        ~target:Ttl_expired_on_disk_target
+        ~label:"TTL"
         ~message:"TTL-expired Memory OS fact rows remain on disk; GC dry-run would prune them."
         ~value:(float_of_int h.ttl_expired_on_disk)
-        ~threshold:0.0
+        ~threshold:ttl_expired_on_disk_threshold
       :: alerts
     else alerts)
   |> (fun alerts ->
     if h.near_duplicate > 0
     then
       alert
-        ~code:"near_duplicate"
+        ~code:Near_duplicate
+        ~target:Near_duplicate_target
+        ~label:"중복"
         ~message:"Near-duplicate Memory OS fact rows remain on disk; GC dry-run would deduplicate them."
         ~value:(float_of_int h.near_duplicate)
-        ~threshold:0.0
+        ~threshold:near_duplicate_threshold
       :: alerts
     else alerts)
   |> (fun alerts ->
     if h.events_to_facts_ratio > events_to_facts_ratio_warn_threshold
     then
       alert
-        ~code:"events_to_facts_ratio_high"
+        ~code:Events_to_facts_ratio_high
+        ~target:Events_to_facts_ratio_target
+        ~label:"비율"
         ~message:"Memory OS event bytes are high relative to fact bytes."
         ~value:h.events_to_facts_ratio
         ~threshold:events_to_facts_ratio_warn_threshold
@@ -81,11 +130,13 @@ let keeper_alerts h =
     if h.provider_slot_busy > 0
     then
       alert
-        ~code:"provider_slot_busy"
+        ~code:Provider_slot_busy
+        ~target:Provider_slot_busy_target
+        ~label:"슬롯"
         ~message:
           "Memory OS librarian provider slot was busy; extraction was skipped and remains due."
         ~value:(float_of_int h.provider_slot_busy)
-        ~threshold:0.0
+        ~threshold:provider_slot_busy_threshold
       :: alerts
     else alerts)
   |> List.rev
@@ -93,8 +144,10 @@ let keeper_alerts h =
 
 let keeper_alert_to_json alert =
   `Assoc
-    [ "code", `String alert.code
-    ; "severity", `String alert.severity
+    [ "code", `String (alert_code_to_string alert.code)
+    ; "severity", `String (alert_severity_to_string alert.severity)
+    ; "target", `String (alert_target_to_string alert.target)
+    ; "label", `String alert.label
     ; "message", `String alert.message
     ; "value", `Float alert.value
     ; "threshold", `Float alert.threshold
@@ -176,8 +229,7 @@ let keeper_health ~keepers_dir ~now keeper_id =
   }
 ;;
 
-let keeper_health_to_json h : Yojson.Safe.t =
-  let alerts = keeper_alerts h in
+let keeper_health_entry_to_json (h, alerts) : Yojson.Safe.t =
   `Assoc
     [ "keeper_id", `String h.keeper_id
     ; "facts", `Int h.facts
@@ -211,21 +263,22 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
           keeper_id
           (Printexc.to_string exn);
         None)
+    |> List.map (fun h -> h, keeper_alerts h)
     (* Largest stores first so the worst offenders surface at the top. *)
-    |> List.sort (fun a b -> compare b.facts_bytes a.facts_bytes)
+    |> List.sort (fun (a, _) (b, _) -> compare b.facts_bytes a.facts_bytes)
   in
-  let sum f = List.fold_left (fun acc h -> acc + f h) 0 entries in
-  let all_alerts = List.concat_map keeper_alerts entries in
+  let sum f = List.fold_left (fun acc (h, _) -> acc + f h) 0 entries in
+  let all_alerts = List.concat_map snd entries in
   let alert_count_by_code code =
     List.fold_left
-      (fun acc alert -> if String.equal alert.code code then acc + 1 else acc)
+      (fun acc alert -> if alert.code = code then acc + 1 else acc)
       0
       all_alerts
   in
   `Assoc
     [ "generated_at", `Float now
     ; "cadence_counter_entries", `Int cadence_counter_entries
-    ; "keepers", `List (List.map keeper_health_to_json entries)
+    ; "keepers", `List (List.map keeper_health_entry_to_json entries)
     ; ( "totals"
       , `Assoc
           [ "facts", `Int (sum (fun h -> h.facts))
@@ -242,20 +295,20 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
           ; ( "keepers_with_alerts"
             , `Int
                 (List.fold_left
-                   (fun acc h -> if keeper_alerts h = [] then acc else acc + 1)
+                   (fun acc (_, alerts) -> if alerts = [] then acc else acc + 1)
                    0
                    entries) )
-          ; "ttl_expired_keepers", `Int (alert_count_by_code "ttl_expired_on_disk")
-          ; "near_duplicate_keepers", `Int (alert_count_by_code "near_duplicate")
+          ; "ttl_expired_keepers", `Int (alert_count_by_code Ttl_expired_on_disk)
+          ; "near_duplicate_keepers", `Int (alert_count_by_code Near_duplicate)
           ; ( "high_event_ratio_keepers"
-            , `Int (alert_count_by_code "events_to_facts_ratio_high") )
-          ; "provider_slot_busy_keepers", `Int (alert_count_by_code "provider_slot_busy")
+            , `Int (alert_count_by_code Events_to_facts_ratio_high) )
+          ; "provider_slot_busy_keepers", `Int (alert_count_by_code Provider_slot_busy)
           ; ( "thresholds"
             , `Assoc
-                [ "ttl_expired_on_disk", `Float 0.0
-                ; "near_duplicate", `Float 0.0
+                [ "ttl_expired_on_disk", `Float ttl_expired_on_disk_threshold
+                ; "near_duplicate", `Float near_duplicate_threshold
                 ; "events_to_facts_ratio", `Float events_to_facts_ratio_warn_threshold
-                ; "provider_slot_busy", `Float 0.0
+                ; "provider_slot_busy", `Float provider_slot_busy_threshold
                 ] )
           ] )
     ]

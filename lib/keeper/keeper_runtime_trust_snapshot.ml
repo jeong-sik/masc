@@ -64,10 +64,12 @@ let normalized_completion_contract_result_label raw =
 ;;
 
 let completion_contract_result_from_receipt receipt =
-  receipt
-  |> json_string_opt_member "completion_contract_result"
-  |> Option.map normalized_completion_contract_result_label
-  |> Option.bind Completion_contract_result.of_string
+  match json_string_opt_member "completion_contract_result" receipt with
+  | Some raw ->
+      raw
+      |> normalized_completion_contract_result_label
+      |> Completion_contract_result.of_string
+  | None -> None
 ;;
 
 let terminal_reason_from_decision json =

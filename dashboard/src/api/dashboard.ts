@@ -254,11 +254,15 @@ export type {
   KeeperUserModelItem,
   KeeperUserModelSnapshot,
   TurnRecordsResponse,
+  KeeperCompactionSnapshotLinks,
+  KeeperCompactionSnapshot,
+  KeeperCompactionSnapshotsResponse,
   TurnTranscriptLine,
   TurnTranscript,
 } from './dashboard-turn-records'
 export {
   fetchKeeperTurnRecords,
+  fetchKeeperCompactionSnapshots,
   fetchKeeperTurnTranscript,
   parseMemoryOsFactCategory,
   parseMemoryOsClaimKind,

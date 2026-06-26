@@ -10,6 +10,8 @@ let freshness_slo_s = Server_dashboard_http_core_cache.freshness_slo_s
 
 let keeper_hot_path_cache_ttl_s = 30.0
 let keeper_composite_cache_ttl_s = 5.0
+let compaction_snapshot_default_limit = 25
+let compaction_snapshot_max_limit = 100
 
 (* Maximum number of trajectory/trace entries returned per query. *)
 let trajectory_max_limit = 500
@@ -230,6 +232,290 @@ let memory_os_dashboard_json ~keeper_id =
                truncated tail is visible, not silent. *)
           ; "items", `List (List.map (memory_os_fact_json ~now) facts)
           ] )
+    ]
+;;
+
+let compaction_snapshot_take n xs =
+  let rec loop remaining acc = function
+    | [] -> List.rev acc
+    | _ when remaining <= 0 -> List.rev acc
+    | x :: rest -> loop (remaining - 1) (x :: acc) rest
+  in
+  loop n [] xs
+;;
+
+let safe_regular_mtime path =
+  try
+    let st = Unix.stat path in
+    if st.Unix.st_kind = Unix.S_REG then Some st.Unix.st_mtime else None
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | _ -> None
+;;
+
+let runtime_manifest_paths ~config ~keeper_id ~limit =
+  let dir = Keeper_runtime_manifest.base_dir config ~keeper_name:keeper_id in
+  try
+    let st = Unix.stat dir in
+    if st.Unix.st_kind <> Unix.S_DIR
+    then []
+    else
+      Sys.readdir dir
+      |> Array.to_list
+      |> List.filter (String.ends_with ~suffix:".jsonl")
+      |> List.filter_map (fun file ->
+        let path = Filename.concat dir file in
+        Option.map (fun mtime -> path, mtime) (safe_regular_mtime path))
+      |> List.sort (fun (_, a) (_, b) -> Float.compare b a)
+      |> compaction_snapshot_take (max 8 (limit * 4))
+      |> List.map fst
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | _ -> []
+;;
+
+let read_runtime_manifest_tail_rows path =
+  try
+    Dated_jsonl.load_tail_lines path ~max_lines:200
+    |> List.filter_map (fun line ->
+      try
+        match Yojson.Safe.from_string line |> Keeper_runtime_manifest.of_json with
+        | Ok row -> Some row
+        | Error _ -> None
+      with
+      | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | _ -> []
+;;
+
+let compaction_snapshot_clock_refs decision =
+  match Json_util.assoc_member_opt "clock_refs" decision with
+  | Some (`Assoc _ as clock_refs) -> Some clock_refs
+  | _ -> None
+;;
+
+let compaction_snapshot_clock_string decision key =
+  match compaction_snapshot_clock_refs decision with
+  | Some clock_refs -> Json_util.assoc_string_opt key clock_refs
+  | None -> None
+;;
+
+let compaction_snapshot_links_json (links : Keeper_runtime_manifest.links) =
+  `Assoc
+    [ "receipt_path", Json_util.string_opt_to_json links.receipt_path
+    ; "checkpoint_path", Json_util.string_opt_to_json links.checkpoint_path
+    ; "tool_call_log_path", Json_util.string_opt_to_json links.tool_call_log_path
+    ]
+;;
+
+let compaction_snapshot_item_json
+      ~id
+      ~keeper_id
+      ~ts_iso
+      ~ts_unix
+      ~trace_id
+      ~keeper_turn_id
+      ~source
+      ~trigger
+      ~runtime_id
+      ~before_tokens
+      ~after_tokens
+      ~saved_tokens
+      ~compaction_id
+      ~compaction_source
+      ~status
+      ~links
+  =
+  `Assoc
+    [ "id", `String id
+    ; "keeper", `String keeper_id
+    ; "ts_iso", `String ts_iso
+    ; "ts_unix", Json_util.float_opt_to_json ts_unix
+    ; "trace_id", Json_util.string_opt_to_json trace_id
+    ; "keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id
+    ; "source", `String source
+    ; "trigger", `String trigger
+    ; "runtime_id", Json_util.string_opt_to_json runtime_id
+    ; "before_tokens", Json_util.int_opt_to_json before_tokens
+    ; "after_tokens", Json_util.int_opt_to_json after_tokens
+    ; "saved_tokens", Json_util.int_opt_to_json saved_tokens
+    ; "compaction_id", Json_util.string_opt_to_json compaction_id
+    ; "compaction_source", Json_util.string_opt_to_json compaction_source
+    ; "status", `String status
+    ; "links", links
+    ]
+;;
+
+let compaction_saved_tokens before_tokens after_tokens =
+  match before_tokens, after_tokens with
+  | Some before_tokens, Some after_tokens -> Some (max 0 (before_tokens - after_tokens))
+  | _ -> None
+;;
+
+let compaction_event_bus_snapshot_json ~keeper_id (row : Keeper_runtime_manifest.t) =
+  match Json_util.assoc_member_opt "last_compaction" row.decision with
+  | Some (`Assoc _ as compaction) ->
+    let before_tokens = Json_util.get_int compaction "before_tokens" in
+    let after_tokens = Json_util.get_int compaction "after_tokens" in
+    let saved_tokens =
+      match Json_util.get_int compaction "tokens_freed" with
+      | Some tokens -> Some tokens
+      | None -> compaction_saved_tokens before_tokens after_tokens
+    in
+    let trigger =
+      Json_util.get_string compaction "phase_hint"
+      (* DET-OK: manifest projection fallback only; a missing phase hint maps to
+         a stable UI label and does not drive keeper policy. *)
+      |> Option.value ~default:"event_bus_context_compacted"
+    in
+    Some
+      (compaction_snapshot_item_json
+         ~id:
+           (Printf.sprintf "manifest:%s:%s:%s" row.trace_id
+              (Keeper_runtime_manifest.event_kind_to_string row.event)
+              row.ts)
+         ~keeper_id
+         ~ts_iso:row.ts
+         ~ts_unix:(Masc_domain.parse_iso8601_opt row.ts)
+         ~trace_id:(Some row.trace_id)
+         ~keeper_turn_id:row.keeper_turn_id
+         ~source:"runtime_manifest"
+         ~trigger
+         ~runtime_id:row.runtime_id
+         ~before_tokens
+         ~after_tokens
+         ~saved_tokens
+         ~compaction_id:(compaction_snapshot_clock_string row.decision "compaction_id")
+         ~compaction_source:(compaction_snapshot_clock_string row.decision "compaction_source")
+         ~status:row.status
+         ~links:(compaction_snapshot_links_json row.links))
+  | _ -> None
+;;
+
+let compaction_context_snapshot_json ~keeper_id (row : Keeper_runtime_manifest.t) =
+  (* TEL-OK: read-only dashboard projection; compaction telemetry is emitted by
+     the keeper runtime/event bridge that produced the manifest row. *)
+  let pre_dispatch_compacted =
+    Json_util.get_bool row.decision "pre_dispatch_compacted" = Some true
+  in
+  if (not pre_dispatch_compacted) && String.equal row.status "skipped"
+  then None
+  else
+    let before_tokens =
+      match Json_util.get_int row.decision "before_tokens" with
+      | Some tokens -> Some tokens
+      | None -> Json_util.get_int row.decision "pre_dispatch_compaction_before_tokens"
+    in
+    let after_tokens =
+      match Json_util.get_int row.decision "after_tokens" with
+      | Some tokens -> Some tokens
+      | None -> Json_util.get_int row.decision "pre_dispatch_compaction_after_tokens"
+    in
+    let compaction_source =
+      compaction_snapshot_clock_string row.decision "compaction_source"
+    in
+    Some
+      (compaction_snapshot_item_json
+         ~id:
+           (Printf.sprintf "manifest:%s:%s:%s" row.trace_id
+              (Keeper_runtime_manifest.event_kind_to_string row.event)
+              row.ts)
+         ~keeper_id
+         ~ts_iso:row.ts
+         ~ts_unix:(Masc_domain.parse_iso8601_opt row.ts)
+         ~trace_id:(Some row.trace_id)
+         ~keeper_turn_id:row.keeper_turn_id
+         ~source:"runtime_manifest"
+         (* DET-OK: manifest projection fallback only; a missing source maps to
+            a stable UI label and does not drive keeper policy. *)
+         ~trigger:(Option.value ~default:"pre_dispatch_hygiene" compaction_source)
+         ~runtime_id:row.runtime_id
+         ~before_tokens
+         ~after_tokens
+         ~saved_tokens:(compaction_saved_tokens before_tokens after_tokens)
+         ~compaction_id:(compaction_snapshot_clock_string row.decision "compaction_id")
+         ~compaction_source
+         ~status:row.status
+         ~links:(compaction_snapshot_links_json row.links))
+;;
+
+let compaction_snapshot_of_manifest_row ~keeper_id (row : Keeper_runtime_manifest.t) =
+  match row.event with
+  | Keeper_runtime_manifest.Event_bus_correlated ->
+    compaction_event_bus_snapshot_json ~keeper_id row
+  | Keeper_runtime_manifest.Context_compacted ->
+    compaction_context_snapshot_json ~keeper_id row
+  | _ -> None
+;;
+
+let compaction_snapshot_sort_value = function
+  | `Assoc fields ->
+    (match List.assoc_opt "ts_unix" fields with
+     | Some (`Float ts) -> ts
+     | Some (`Int ts) -> float_of_int ts
+     | _ -> 0.0)
+  | _ -> 0.0
+;;
+
+let keeper_meta_compaction_snapshot_json ~config ~keeper_id =
+  match Keeper_meta_store.read_meta config keeper_id with
+  | Ok (Some meta) ->
+    let rt = meta.runtime.compaction_rt in
+    if rt.count <= 0 || rt.last_ts <= 0.0
+    then None
+    else
+      let before_tokens = Some rt.last_before_tokens in
+      let after_tokens = Some rt.last_after_tokens in
+      Some
+        (compaction_snapshot_item_json
+           ~id:"keeper_meta:last_compaction"
+           ~keeper_id
+           ~ts_iso:(Masc_domain.iso8601_of_unix_seconds rt.last_ts)
+           ~ts_unix:(Some rt.last_ts)
+           ~trace_id:None
+           ~keeper_turn_id:None
+           ~source:"keeper_meta"
+           ~trigger:
+             (Keeper_meta_contract.compaction_runtime_decision_to_string
+                rt.last_decision)
+           ~runtime_id:None
+           ~before_tokens
+           ~after_tokens
+           ~saved_tokens:(compaction_saved_tokens before_tokens after_tokens)
+           ~compaction_id:None
+           ~compaction_source:None
+           ~status:"latest"
+           ~links:(`Assoc []))
+  | Ok None | Error _ -> None
+;;
+
+let compaction_snapshots_json ~config ~keeper_id ~limit =
+  let limit = limit |> max 1 |> min compaction_snapshot_max_limit in
+  let manifest_items =
+    runtime_manifest_paths ~config ~keeper_id ~limit
+    |> List.concat_map read_runtime_manifest_tail_rows
+    |> List.filter_map (compaction_snapshot_of_manifest_row ~keeper_id)
+    |> List.sort (fun a b ->
+      Float.compare (compaction_snapshot_sort_value b) (compaction_snapshot_sort_value a))
+    |> compaction_snapshot_take limit
+  in
+  let items =
+    match manifest_items with
+    | [] ->
+      (match keeper_meta_compaction_snapshot_json ~config ~keeper_id with
+       | Some item -> [ item ]
+       | None -> [])
+    | _ -> manifest_items
+  in
+  `Assoc
+    [ "schema", `String "keeper.compaction_snapshots.v1"
+    ; "keeper", `String keeper_id
+    ; "source", `String "runtime_manifest|keeper_meta"
+    ; "producer", `String "keeper_runtime_manifest|keeper_meta_store"
+    ; "limit", `Int limit
+    ; "count", `Int (List.length items)
+    ; "items", `List items
     ]
 ;;
 
@@ -773,6 +1059,24 @@ let handle_keeper_get_subroutes state req request reqd =
        | Error (`Io msg) ->
          Http.Response.json_value ~status:`Internal_server_error
            (`Assoc [ ("error", `String msg) ]) reqd)
+  else if ends_with "/compaction-snapshots" then
+    let name = extract_name "/compaction-snapshots" in
+    if String.length name = 0 then
+      respond_error reqd "keeper name is required"
+    else if not (Keeper_config.validate_name name) then
+      Http.Response.json_value ~status:`Bad_request
+        (`Assoc
+           [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])
+        reqd
+    else
+      let limit =
+        Server_utils.int_query_param req "limit" ~default:compaction_snapshot_default_limit
+        |> max 1 |> min compaction_snapshot_max_limit
+      in
+      let config = Mcp_server.workspace_config state in
+      Http.Response.json_value ~compress:true ~request:req
+        (compaction_snapshots_json ~config ~keeper_id:name ~limit)
+        reqd
   else if ends_with "/turn-records" then
     (* RFC-0233 §2.3 PR-4: serve TurnRecords with server-side
        consecutive-pair block diffs so the dashboard stays a renderer

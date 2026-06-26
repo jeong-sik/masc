@@ -20,6 +20,7 @@ import {
   fetchDashboardTools,
   fetchKeeperToolCalls,
   fetchKeeperToolStats,
+  fetchKeeperCompactionSnapshots,
   fetchKeeperTurnRecords,
   parseMemoryOsFactCategory,
   parseMemoryOsClaimKind,
@@ -543,6 +544,68 @@ describe('keeper tool telemetry fetchers', () => {
     expect(result.entries[0]?.record.finish_reason).toBe('completed')
     expect(result.entries[1]?.record.model).toBeUndefined()
     expect(result.entries[1]?.record.finish_reason).toBeUndefined()
+  })
+
+  it('decodes durable compaction snapshots with nullable token fields', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({
+        schema: 'keeper.compaction_snapshots.v1',
+        keeper: 'keeper-alpha',
+        source: 'runtime_manifest|keeper_meta',
+        producer: 'keeper_runtime_manifest|keeper_meta_store',
+        limit: 2,
+        count: 2,
+        items: [
+          {
+            id: 'manifest:trace-a:event_bus_correlated:2026-06-26T03:03:00Z',
+            keeper: 'keeper-alpha',
+            ts_iso: '2026-06-26T03:03:00Z',
+            ts_unix: 1_782_444_580,
+            trace_id: 'trace-a',
+            keeper_turn_id: 12,
+            source: 'runtime_manifest',
+            trigger: 'proactive(85%)',
+            runtime_id: 'oas-seoul-1',
+            before_tokens: 210000,
+            after_tokens: 120000,
+            saved_tokens: 90000,
+            compaction_id: 'cmp-42',
+            compaction_source: 'event_bus',
+            status: 'observed',
+            links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
+          },
+          {
+            id: 'manifest:trace-b:context_compacted:2026-06-26T04:03:00Z',
+            keeper: 'keeper-alpha',
+            ts_iso: '2026-06-26T04:03:00Z',
+            ts_unix: null,
+            trace_id: 'trace-b',
+            keeper_turn_id: null,
+            source: 'runtime_manifest',
+            trigger: 'pre_dispatch_hygiene',
+            runtime_id: null,
+            before_tokens: null,
+            after_tokens: null,
+            saved_tokens: null,
+            compaction_id: null,
+            compaction_source: 'pre_dispatch_hygiene',
+            status: 'compacted',
+            links: {},
+          },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperCompactionSnapshots('keeper-alpha', 2)
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/keeper-alpha/compaction-snapshots?limit=2')
+    expect(result.items[0]?.before_tokens).toBe(210000)
+    expect(result.items[0]?.saved_tokens).toBe(90000)
+    expect(result.items[0]?.links.receipt_path).toBeNull()
+    expect(result.items[1]?.before_tokens).toBeNull()
+    expect(result.items[1]?.runtime_id).toBeNull()
+    expect(result.items[1]?.links.checkpoint_path).toBeNull()
   })
 })
 

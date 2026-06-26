@@ -1,15 +1,16 @@
-// MASC v2 — lightweight client-side log of keeper context compactions.
+// MASC v2 — compaction snapshot log for keeper context compactions.
 //
-// The backend exposes compaction results as discrete events (SSE
-// `keeper_compaction` / `oas:context_compacted` and the manual
-// `masc_keeper_compact` MCP response). It does not yet expose per-event
-// kept/summarized/dropped lists or full before/after message/trace counts, so
-// this store records what we *do* see and surfaces the rest as honest gaps.
+// SSE/manual events are optimistic live updates. The durable backend endpoint
+// (`/api/v1/keepers/:name/compaction-snapshots`) hydrates historical runtime
+// manifest / keeper-meta events after opening the inspector. It still does not
+// expose raw prompt text or kept/summarized/dropped message lists, so the drawer
+// renders those as explicit data gaps.
 
 import { signal, type Signal } from '@preact/signals'
+import type { KeeperCompactionSnapshot as BackendCompactionSnapshot } from '../../api/dashboard'
 
 export interface CompactionSnapshotNumbers {
-  readonly tok: number
+  readonly tok: number | null
   readonly msgs?: number | null
   readonly traces?: number | null
 }
@@ -17,14 +18,20 @@ export interface CompactionSnapshotNumbers {
 export interface CompactionSnapshot {
   readonly id: string
   readonly at: string
+  readonly atIso?: string | null
   readonly trigger: string
   readonly runtime: string
   readonly before: CompactionSnapshotNumbers
   readonly after: CompactionSnapshotNumbers
+  readonly savedTokens?: number | null
+  readonly traceId?: string | null
+  readonly keeperTurnId?: number | null
+  readonly status?: string | null
+  readonly detailSource?: string | null
   readonly kept: readonly string[]
   readonly summarized: readonly string[]
   readonly dropped: readonly string[]
-  readonly source: 'manual' | 'sse'
+  readonly source: 'manual' | 'sse' | 'backend'
 }
 
 type PerKeeperSnapshots = Record<string, CompactionSnapshot[]>
@@ -38,6 +45,10 @@ function nowHM(): string {
 
 function nextId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
+}
+
+function finiteNumberOrNull(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
 export function pushCompactionSnapshot(
@@ -55,14 +66,75 @@ export function pushCompactionSnapshot(
   }
 }
 
+function labelFromIso(iso: string): string {
+  const ts = Date.parse(iso)
+  if (!Number.isFinite(ts)) return iso
+  const d = new Date(ts)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+function backendSnapshotToLocal(snapshot: BackendCompactionSnapshot): CompactionSnapshot {
+  const runtime =
+    snapshot.runtime_id
+    ?? snapshot.compaction_source
+    ?? snapshot.source
+  return {
+    id: snapshot.id,
+    at: labelFromIso(snapshot.ts_iso),
+    atIso: snapshot.ts_iso,
+    trigger: snapshot.trigger,
+    runtime,
+    before: { tok: finiteNumberOrNull(snapshot.before_tokens) },
+    after: { tok: finiteNumberOrNull(snapshot.after_tokens) },
+    savedTokens: finiteNumberOrNull(snapshot.saved_tokens),
+    traceId: snapshot.trace_id,
+    keeperTurnId: snapshot.keeper_turn_id,
+    status: snapshot.status,
+    detailSource: snapshot.source,
+    kept: [],
+    summarized: [],
+    dropped: [],
+    source: 'backend',
+  }
+}
+
+function snapshotSortKey(snapshot: CompactionSnapshot): number {
+  if (snapshot.source !== 'backend') return Number.MAX_SAFE_INTEGER
+  if (snapshot.atIso) {
+    const parsed = Date.parse(snapshot.atIso)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return 0
+}
+
+export function hydrateCompactionSnapshots(
+  keeperName: string,
+  snapshots: readonly BackendCompactionSnapshot[],
+): void {
+  const existing = compactionSnapshots.value[keeperName] ?? []
+  const optimistic = existing.filter(snapshot => snapshot.source !== 'backend')
+  const byId = new Map<string, CompactionSnapshot>()
+  for (const snapshot of snapshots.map(backendSnapshotToLocal)) byId.set(snapshot.id, snapshot)
+  for (const snapshot of optimistic) {
+    if (!byId.has(snapshot.id)) byId.set(snapshot.id, snapshot)
+  }
+  const next = [...byId.values()]
+    .sort((a, b) => snapshotSortKey(b) - snapshotSortKey(a))
+    .slice(0, 100)
+  compactionSnapshots.value = {
+    ...compactionSnapshots.value,
+    [keeperName]: next,
+  }
+}
+
 export function recordManualCompaction(
   keeperName: string,
   beforeTokens: number | null | undefined,
   afterTokens: number | null | undefined,
   runtime: string,
 ): void {
-  const before = typeof beforeTokens === 'number' && Number.isFinite(beforeTokens) ? beforeTokens : 0
-  const after = typeof afterTokens === 'number' && Number.isFinite(afterTokens) ? afterTokens : 0
+  const before = finiteNumberOrNull(beforeTokens)
+  const after = finiteNumberOrNull(afterTokens)
   pushCompactionSnapshot(keeperName, {
     trigger: '수동 — operator 요청 (지금 컴팩트)',
     runtime: runtime || '—',
@@ -82,8 +154,8 @@ export function recordSseCompaction(
   trigger: string,
   runtime: string,
 ): void {
-  const before = typeof beforeTokens === 'number' && Number.isFinite(beforeTokens) ? beforeTokens : 0
-  const after = typeof afterTokens === 'number' && Number.isFinite(afterTokens) ? afterTokens : 0
+  const before = finiteNumberOrNull(beforeTokens)
+  const after = finiteNumberOrNull(afterTokens)
   pushCompactionSnapshot(keeperName, {
     trigger: trigger || '자동 — SSE context_compacted',
     runtime: runtime || '—',

@@ -8,6 +8,7 @@ import { requestConfirm } from '../common/confirm-dialog'
 import { KeeperWorkspaceRail } from './keeper-workspace-rail'
 import type { Keeper, Task } from '../../types'
 import { resetRuntimeCatalog } from '../../lib/runtime-catalog-resource'
+import { compactionSnapshots } from './compaction-snapshots'
 
 // The recent-tool-calls section now lazy-loads via fetchKeeperToolCalls (rather
 // than rendering keeper.recent_tool_names). Stub it so these rail tests never hit
@@ -23,6 +24,34 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
       entries: [],
     }),
     fetchRuntimeProviders: vi.fn().mockResolvedValue({ providers: [] }),
+    fetchKeeperCompactionSnapshots: vi.fn().mockResolvedValue({
+      schema: 'keeper.compaction_snapshots.v1',
+      keeper: 'masc-improver',
+      source: 'runtime_manifest|keeper_meta',
+      producer: 'keeper_runtime_manifest|keeper_meta_store',
+      limit: 25,
+      count: 1,
+      items: [
+        {
+          id: 'manifest:trace-cmp:event_bus_correlated:2026-06-26T03:03:00Z',
+          keeper: 'masc-improver',
+          ts_iso: '2026-06-26T03:03:00Z',
+          ts_unix: 1_782_444_580,
+          trace_id: 'trace-cmp',
+          keeper_turn_id: 12,
+          source: 'runtime_manifest',
+          trigger: 'proactive(85%)',
+          runtime_id: 'oas-seoul-1',
+          before_tokens: 210000,
+          after_tokens: 120000,
+          saved_tokens: 90000,
+          compaction_id: 'cmp-42',
+          compaction_source: 'event_bus',
+          status: 'observed',
+          links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
+        },
+      ],
+    }),
   }
 })
 
@@ -56,6 +85,7 @@ afterEach(() => {
   cleanup()
   tasks.value = []
   shellAuthSummary.value = null
+  compactionSnapshots.value = {}
   vi.clearAllMocks()
   resetRuntimeCatalog()
 })
@@ -268,7 +298,7 @@ describe('KeeperWorkspaceRail', () => {
     expect(callMcpTool).not.toHaveBeenCalled()
   })
 
-  it('opens the compaction inspector overlay from the context rail', () => {
+  it('opens the compaction inspector overlay from the context rail and hydrates durable snapshots', async () => {
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
     const btn = Array.from(container.querySelectorAll('.cmp-open')).find(
       el => el.textContent?.includes('before/after'),
@@ -277,6 +307,10 @@ describe('KeeperWorkspaceRail', () => {
     fireEvent.click(btn as HTMLElement)
     expect(container.querySelector('.turn-overlay')).toBeTruthy()
     expect(container.textContent).toContain('컴팩션 스냅샷')
+    await waitFor(() => expect(container.textContent).toContain('210.0k'))
+    expect(container.textContent).toContain('proactive(85%)')
+    expect(container.textContent).toContain('runtime_manifest · observed')
+    expect(container.textContent).toContain('trace-cmp#12')
   })
 
   it('opens the memory inspector overlay from the context rail', () => {

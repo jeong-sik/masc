@@ -10,6 +10,7 @@ module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
 module Consolidator = Masc.Keeper_memory_os_consolidator
 module Metrics = Masc.Otel_metric_store
+module Runtime_manifest = Masc.Keeper_runtime_manifest
 
 external unsetenv : string -> unit = "masc_test_unsetenv"
 
@@ -81,6 +82,13 @@ let with_temp_keepers_dir f =
   let marker = Filename.temp_file "keeper-memory-os-" ".tmp" in
   Sys.remove marker;
   Memory_io.For_testing.with_keepers_dir marker (fun () -> f marker)
+;;
+
+let with_temp_workspace_config f =
+  let marker = Filename.temp_file "keeper-memory-os-workspace-" ".tmp" in
+  Sys.remove marker;
+  Unix.mkdir marker 0o700;
+  f (Masc.Workspace.default_config marker)
 ;;
 
 let render_if_enabled_for_test ~keeper_id ~now ~masc_root () =
@@ -4286,6 +4294,138 @@ let test_dashboard_json_selection_policy_contract () =
       (List.mem_assoc "episode_tail_limit" policy))
 ;;
 
+let json_assoc label = function
+  | `Assoc fields -> fields
+  | other ->
+    Alcotest.failf "%s must be an object (received %s)" label
+      (Yojson.Safe.to_string other)
+;;
+
+let json_object_field label fields key =
+  match List.assoc_opt key fields with
+  | Some (`Assoc nested) -> nested
+  | Some other ->
+    Alcotest.failf "%s.%s must be an object (received %s)" label key
+      (Yojson.Safe.to_string other)
+  | None -> Alcotest.failf "%s.%s missing" label key
+;;
+
+let json_string_field label fields key =
+  match List.assoc_opt key fields with
+  | Some (`String value) -> value
+  | Some other ->
+    Alcotest.failf "%s.%s must be a string (received %s)" label key
+      (Yojson.Safe.to_string other)
+  | None -> Alcotest.failf "%s.%s missing" label key
+;;
+
+let json_int_field label fields key =
+  match List.assoc_opt key fields with
+  | Some (`Int value) -> value
+  | Some other ->
+    Alcotest.failf "%s.%s must be an int (received %s)" label key
+      (Yojson.Safe.to_string other)
+  | None -> Alcotest.failf "%s.%s missing" label key
+;;
+
+let json_item_list label fields key =
+  match List.assoc_opt key fields with
+  | Some (`List items) -> items
+  | Some other ->
+    Alcotest.failf "%s.%s must be a list (received %s)" label key
+      (Yojson.Safe.to_string other)
+  | None -> Alcotest.failf "%s.%s missing" label key
+;;
+
+let test_compaction_snapshots_json_reads_runtime_manifest () =
+  with_temp_workspace_config (fun config ->
+    let keeper_id = "memory-panel-test" in
+    let trace_id = "trace-compaction-dashboard" in
+    let clock_refs =
+      Runtime_manifest.clock_refs
+        ~compaction_id:"cmp-42"
+        ~compaction_source:"event_bus"
+        ()
+    in
+    let decision =
+      Runtime_manifest.with_clock_refs
+        ~clock_refs
+        (Runtime_manifest.with_payload_role
+           ~payload_role:Runtime_manifest.Operator_evidence
+           (`Assoc
+              [ "last_compaction"
+                , `Assoc
+                    [ "before_tokens", `Int 210_000
+                    ; "after_tokens", `Int 120_000
+                    ; "tokens_freed", `Int 90_000
+                    ; "phase_hint", `String "proactive(85%)"
+                    ]
+              ; "context_compacted_count", `Int 1
+              ]))
+    in
+    let row =
+      Runtime_manifest.make
+        ~ts:"2026-06-26T03:03:00Z"
+        ~keeper_name:keeper_id
+        ~trace_id
+        ~keeper_turn_id:12
+        ~event:Runtime_manifest.Event_bus_correlated
+        ~runtime_id:"oas-seoul-1"
+        ~status:"observed"
+        ~decision
+        ()
+    in
+    (match Runtime_manifest.append config row with
+     | Ok () -> ()
+     | Error msg -> Alcotest.failf "runtime manifest append failed: %s" msg);
+    let top =
+      Server_dashboard_http_keeper_api.compaction_snapshots_json
+        ~config
+        ~keeper_id
+        ~limit:10
+      |> json_assoc "compaction_snapshots"
+    in
+    Alcotest.(check string)
+      "schema"
+      "keeper.compaction_snapshots.v1"
+      (json_string_field "compaction_snapshots" top "schema");
+    Alcotest.(check int) "count" 1 (json_int_field "compaction_snapshots" top "count");
+    let item =
+      match json_item_list "compaction_snapshots" top "items" with
+      | [ item ] -> json_assoc "compaction_snapshots.items[0]" item
+      | items -> Alcotest.failf "expected one compaction item, got %d" (List.length items)
+    in
+    Alcotest.(check string)
+      "source"
+      "runtime_manifest"
+      (json_string_field "item" item "source");
+    Alcotest.(check string)
+      "trigger"
+      "proactive(85%)"
+      (json_string_field "item" item "trigger");
+    Alcotest.(check string)
+      "runtime"
+      "oas-seoul-1"
+      (json_string_field "item" item "runtime_id");
+    Alcotest.(check int) "before" 210_000 (json_int_field "item" item "before_tokens");
+    Alcotest.(check int) "after" 120_000 (json_int_field "item" item "after_tokens");
+    Alcotest.(check int) "saved" 90_000 (json_int_field "item" item "saved_tokens");
+    Alcotest.(check string)
+      "compaction id"
+      "cmp-42"
+      (json_string_field "item" item "compaction_id");
+    let links = json_object_field "item" item "links" in
+    Alcotest.(check int) "links object exists" 3 (List.length links);
+    let item_json = Yojson.Safe.to_string (`Assoc item) in
+    List.iter
+      (fun forbidden ->
+        Alcotest.(check bool)
+          ("does not expose " ^ forbidden)
+          false
+          (contains forbidden item_json))
+      [ "before_prompt"; "after_prompt"; "prompt_text"; "context_text" ])
+;;
+
 let () =
   maybe_run_lock_holder_child ();
   Alcotest.run
@@ -4389,6 +4529,10 @@ let () =
             "dashboard json selection_policy pins recall lineage"
             `Quick
             test_dashboard_json_selection_policy_contract
+        ; Alcotest.test_case
+            "dashboard compaction snapshots read runtime manifest metadata only"
+            `Quick
+            test_compaction_snapshots_json_reads_runtime_manifest
         ] )
     ; ( "policy"
       , [ Alcotest.test_case

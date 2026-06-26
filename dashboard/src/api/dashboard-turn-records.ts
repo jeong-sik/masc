@@ -264,6 +264,41 @@ export type TurnRecordsResponse = TelemetryFreshnessMetadata & {
   entries: TurnRecordRow[]
 }
 
+export type KeeperCompactionSnapshotLinks = {
+  readonly receipt_path: string | null
+  readonly checkpoint_path: string | null
+  readonly tool_call_log_path: string | null
+}
+
+export type KeeperCompactionSnapshot = {
+  readonly id: string
+  readonly keeper: string
+  readonly ts_iso: string
+  readonly ts_unix: number | null
+  readonly trace_id: string | null
+  readonly keeper_turn_id: number | null
+  readonly source: string
+  readonly trigger: string
+  readonly runtime_id: string | null
+  readonly before_tokens: number | null
+  readonly after_tokens: number | null
+  readonly saved_tokens: number | null
+  readonly compaction_id: string | null
+  readonly compaction_source: string | null
+  readonly status: string
+  readonly links: KeeperCompactionSnapshotLinks
+}
+
+export type KeeperCompactionSnapshotsResponse = {
+  readonly schema: string
+  readonly keeper: string
+  readonly source: string
+  readonly producer: string
+  readonly limit: number
+  readonly count: number
+  readonly items: KeeperCompactionSnapshot[]
+}
+
 function decodeTurnBlock(raw: unknown): TurnBlock | null {
   if (!isRecord(raw)) return null
   const block = asString(raw.block)
@@ -620,6 +655,70 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
   }
 }
 
+function decodeKeeperCompactionSnapshotLinks(raw: unknown): KeeperCompactionSnapshotLinks {
+  if (!isRecord(raw)) {
+    return { receipt_path: null, checkpoint_path: null, tool_call_log_path: null }
+  }
+  return {
+    receipt_path: asNullableString(raw.receipt_path),
+    checkpoint_path: asNullableString(raw.checkpoint_path),
+    tool_call_log_path: asNullableString(raw.tool_call_log_path),
+  }
+}
+
+function nullableNumber(raw: unknown): number | null {
+  return asNumber(raw) ?? null
+}
+
+function decodeKeeperCompactionSnapshot(raw: unknown): KeeperCompactionSnapshot | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id)
+  const keeper = asString(raw.keeper)
+  const ts_iso = asString(raw.ts_iso)
+  const source = asString(raw.source)
+  const trigger = asString(raw.trigger)
+  const status = asString(raw.status)
+  if (!id || !keeper || !ts_iso || !source || !trigger || !status) return null
+  return {
+    id,
+    keeper,
+    ts_iso,
+    ts_unix: nullableNumber(raw.ts_unix),
+    trace_id: asNullableString(raw.trace_id),
+    keeper_turn_id: nullableNumber(raw.keeper_turn_id),
+    source,
+    trigger,
+    runtime_id: asNullableString(raw.runtime_id),
+    before_tokens: nullableNumber(raw.before_tokens),
+    after_tokens: nullableNumber(raw.after_tokens),
+    saved_tokens: nullableNumber(raw.saved_tokens),
+    compaction_id: asNullableString(raw.compaction_id),
+    compaction_source: asNullableString(raw.compaction_source),
+    status,
+    links: decodeKeeperCompactionSnapshotLinks(raw.links),
+  }
+}
+
+function decodeKeeperCompactionSnapshotsResponse(raw: unknown): KeeperCompactionSnapshotsResponse | null {
+  if (!isRecord(raw)) return null
+  const schema = asString(raw.schema)
+  const keeper = asString(raw.keeper)
+  const source = asString(raw.source)
+  const producer = asString(raw.producer)
+  if (!schema || !keeper || !source || !producer) return null
+  return {
+    schema,
+    keeper,
+    source,
+    producer,
+    limit: asNumber(raw.limit, 0) ?? 0,
+    count: asNumber(raw.count, 0) ?? 0,
+    items: asRecordArray(raw.items)
+      .map(decodeKeeperCompactionSnapshot)
+      .filter((item): item is KeeperCompactionSnapshot => item !== null),
+  }
+}
+
 export function fetchKeeperTurnRecords(
   name: string,
   limit?: number,
@@ -632,6 +731,22 @@ export function fetchKeeperTurnRecords(
   ).then((raw) => {
     const decoded = decodeTurnRecordsResponse(raw)
     if (!decoded) throw new Error('유효하지 않은 keeper turn record payload')
+    return decoded
+  })
+}
+
+export function fetchKeeperCompactionSnapshots(
+  name: string,
+  limit?: number,
+  opts?: AbortableRequestOptions,
+): Promise<KeeperCompactionSnapshotsResponse> {
+  const params = limit != null ? `?limit=${limit}` : ''
+  return get<Record<string, unknown>>(
+    `/api/v1/keepers/${encodeURIComponent(name)}/compaction-snapshots${params}`,
+    { signal: opts?.signal },
+  ).then((raw) => {
+    const decoded = decodeKeeperCompactionSnapshotsResponse(raw)
+    if (!decoded) throw new Error('유효하지 않은 keeper compaction snapshot payload')
     return decoded
   })
 }

@@ -185,13 +185,24 @@ export function factTtlLabel(fact: MemoryOsFact): string {
 }
 
 const DEFAULT_FACT_ROW_LIMIT = 12
-type FactVisibilityFilter = 'current' | 'all'
+type FactVisibilityFilter = 'recallable' | 'diagnostic' | 'all'
 
 export function sortMemoryFactsForReview(facts: readonly MemoryOsFact[]): MemoryOsFact[] {
   return [...facts].sort((a, b) => {
+    const aRecallable = a.current && a.prompt_recallable
+    const bRecallable = b.current && b.prompt_recallable
+    if (aRecallable !== bRecallable) return aRecallable ? -1 : 1
     if (a.current !== b.current) return a.current ? -1 : 1
     return b.reference_time - a.reference_time
   })
+}
+
+function isPromptRecallableFact(fact: MemoryOsFact): boolean {
+  return fact.current && fact.prompt_recallable
+}
+
+function isDiagnosticEvidenceFact(fact: MemoryOsFact): boolean {
+  return !isPromptRecallableFact(fact)
 }
 
 function formatFactInstant(ts: number, iso: string | null): string {
@@ -280,6 +291,8 @@ function MemoryTrustStrip({
 }) {
   const policy = snapshot.selection_policy
   const memoryBlock = latestMemoryRecallBlock(latestPromptRow)
+  const recallableFacts = snapshot.facts.items.filter(isPromptRecallableFact).length
+  const diagnosticFacts = snapshot.facts.items.filter(isDiagnosticEvidenceFact).length
   const promptTurn = latestPromptRow
     ? `${latestPromptRow.record.trace_id}#${latestPromptRow.record.absolute_turn}`
     : 'none'
@@ -290,8 +303,8 @@ function MemoryTrustStrip({
     <div class="mem-trust">
       <div class="mem-trust-card">
         <span class="mem-trust-k">store</span>
-        <span class="mem-trust-v mono">${snapshot.facts.current}/${snapshot.facts.shown} current</span>
-        <span class="mem-trust-sub mono">${snapshot.source}</span>
+        <span class="mem-trust-v mono">${recallableFacts}/${snapshot.facts.shown} recallable</span>
+        <span class="mem-trust-sub mono">${diagnosticFacts} diagnostic/evidence · ${snapshot.source}</span>
       </div>
       <div class="mem-trust-card">
         <span class="mem-trust-k">scope</span>
@@ -431,11 +444,19 @@ function OneKeeperMemoryReal({
   rows: readonly TurnRecordRow[]
 }) {
   const kindFilter = useSignal<string>('all')
-  const visibilityFilter = useSignal<FactVisibilityFilter>('current')
+  const visibilityFilter = useSignal<FactVisibilityFilter>('recallable')
   const factRowLimit = useSignal(DEFAULT_FACT_ROW_LIMIT)
   const latestPromptRow = latestEntryWithBlocks(rows)
   const facts = sortMemoryFactsForReview(snapshot.facts.items)
-  const episodes = [...snapshot.episodes.items].reverse().slice(0, 5)
+  const recallableFacts = facts.filter(isPromptRecallableFact)
+  const diagnosticFacts = facts.filter(isDiagnosticEvidenceFact)
+  const allEpisodes = [...snapshot.episodes.items].reverse()
+  const episodes = allEpisodes
+    .filter(ep => ep.terminal_marker !== 'librarian_unstructured_fallback')
+    .slice(0, 5)
+  const fallbackEpisodes = allEpisodes
+    .filter(ep => ep.terminal_marker === 'librarian_unstructured_fallback')
+    .slice(0, 5)
   // distinct categories present, in first-seen order, deduped by tag
   const seen = new Set<string>()
   const cats: MemoryOsFactCategory[] = []
@@ -448,11 +469,16 @@ function OneKeeperMemoryReal({
   }
   const filter = kindFilter.value
   const visibilityRows =
-    visibilityFilter.value === 'current' ? facts.filter(f => f.current) : facts
+    visibilityFilter.value === 'recallable'
+      ? recallableFacts
+      : visibilityFilter.value === 'diagnostic'
+        ? diagnosticFacts
+        : facts
   const storeRows =
     filter === 'all' ? visibilityRows : visibilityRows.filter(f => factTag(f) === filter)
   const visibleStoreRows = storeRows.slice(0, factRowLimit.value)
   const hiddenStoreRows = Math.max(0, storeRows.length - visibleStoreRows.length)
+  const showFallbackEpisodes = visibilityFilter.value !== 'recallable'
 
   return html`
     <${Fragment}>
@@ -482,16 +508,20 @@ function OneKeeperMemoryReal({
       <div class="turn-sec">
         <div class="mem-sec-head">
           <h4>장기 메모리 스토어 · memory-os</h4>
-          <span class="mem-n mono">${snapshot.facts.current}/${snapshot.facts.shown}</span>
+          <span class="mem-n mono">${recallableFacts.length}/${snapshot.facts.shown}</span>
         </div>
         ${facts.length
           ? html`
             <${Fragment}>
               <div class="mem-filters">
                 <button
-                  class=${`mem-filter ${visibilityFilter.value === 'current' ? 'on' : ''}`}
-                  onClick=${() => { visibilityFilter.value = 'current'; factRowLimit.value = DEFAULT_FACT_ROW_LIMIT }}
-                >활성 ${snapshot.facts.current}</button>
+                  class=${`mem-filter ${visibilityFilter.value === 'recallable' ? 'on' : ''}`}
+                  onClick=${() => { visibilityFilter.value = 'recallable'; factRowLimit.value = DEFAULT_FACT_ROW_LIMIT }}
+                >회상 ${recallableFacts.length}</button>
+                <button
+                  class=${`mem-filter ${visibilityFilter.value === 'diagnostic' ? 'on' : ''}`}
+                  onClick=${() => { visibilityFilter.value = 'diagnostic'; factRowLimit.value = DEFAULT_FACT_ROW_LIMIT }}
+                >진단/증거 ${diagnosticFacts.length}</button>
                 <button
                   class=${`mem-filter ${visibilityFilter.value === 'all' ? 'on' : ''}`}
                   onClick=${() => { visibilityFilter.value = 'all'; factRowLimit.value = DEFAULT_FACT_ROW_LIMIT }}
@@ -531,6 +561,18 @@ function OneKeeperMemoryReal({
             </>`
           : html`<div class="mem-empty">압축(episode) 이력 없음.</div>`}
       </div>
+
+      ${showFallbackEpisodes && fallbackEpisodes.length
+        ? html`
+          <div class="turn-sec">
+            <h4>진단 fallback · librarian</h4>
+            <div class="mem-store">
+              ${fallbackEpisodes.map(ep => html`<${EpisodeRow} key=${ep.trace_id + ep.generation} episode=${ep} />`)}
+            </div>
+            <${DisclosureNote} text="unstructured fallback은 recall 후보가 아니라 librarian 진단 증거로 분리 표시." />
+          </div>
+        `
+        : null}
     </>`
 }
 

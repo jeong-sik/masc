@@ -976,6 +976,7 @@
   test_keeper_wip_admission
   test_eval_gate_evasion
   test_prompt_registry_defaults
+  test_prompt_no_silent_reply_contract
   test_keeper_prompt_external
   test_keeper_recurring
   test_evidence_claim_schema
@@ -1163,6 +1164,7 @@
   test_keeper_wip_admission
   test_eval_gate_evasion
   test_prompt_registry_defaults
+  test_prompt_no_silent_reply_contract
   test_keeper_prompt_external
   test_keeper_recurring
   test_evidence_claim_schema

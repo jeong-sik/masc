@@ -280,9 +280,9 @@ let refresh_http_surfaces state ~host ~port =
   state.connection_status <-
     refresh_status
       [
-        Result.map (fun _ -> ()) overview;
-        Result.map (fun _ -> ()) board;
-        Result.map (fun _ -> ()) planning;
+        Result.map (fun _ -> ()) overview |> Result.map_error (fun _ -> ());
+        Result.map (fun _ -> ()) board |> Result.map_error (fun _ -> ());
+        Result.map (fun _ -> ()) planning |> Result.map_error (fun _ -> ());
       ]
 
 let start_http_refresh state ~host ~port ~refresh_inflight =

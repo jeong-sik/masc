@@ -1079,6 +1079,8 @@ export async function refreshExecution(opts?: RefreshOptions): Promise<void> {
   if (opts?.force) {
     nextExecutionForce = true
     executionScheduler.requestNow()
+  } else if (opts?.immediate) {
+    executionScheduler.requestNow()
   } else {
     executionScheduler.request()
   }

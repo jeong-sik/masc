@@ -233,6 +233,15 @@ describe('refreshPlanForRoute', () => {
     expect(refreshShell).toHaveBeenCalledWith({ light: true })
   })
 
+  it('requests overview execution immediately without forcing a backend recompute', () => {
+    refreshForRoute({
+      tab: 'overview',
+      params: {},
+    })
+
+    expect(refreshExecution).toHaveBeenCalledWith({ immediate: true })
+  })
+
   it('uses the scheduler-backed execution refresh path on monitoring navigation', () => {
     refreshForRoute({
       tab: 'monitoring',

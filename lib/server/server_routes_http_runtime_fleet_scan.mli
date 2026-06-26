@@ -104,6 +104,7 @@ val keeper_fleet_safety_health_json :
   ?phase_snapshot:keeper_phase_snapshot ->
   ?base_path:string ->
   ?reaction_capacity_names:string list ->
+  ?keeper_bootstrap_enabled:bool ->
   phase_counts:keeper_phase_counts ->
   paused_keepers_json:Yojson.Safe.t ->
   unit ->

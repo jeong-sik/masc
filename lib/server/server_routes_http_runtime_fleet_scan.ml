@@ -641,6 +641,7 @@ type blocked_keeper_reason =
   | Not_bootable
   | Boot_failure of Keeper_runtime.boot_meta_failure_cause
   | Phase of Keeper_state_machine.phase
+  | Bootstrap_disabled
   | Not_registered
   | Not_running
   | No_keeper_binding
@@ -652,6 +653,7 @@ let blocked_keeper_reason_label = function
   | Not_bootable -> "not_bootable"
   | Boot_failure cause -> Keeper_runtime.boot_meta_failure_cause_label cause
   | Phase phase -> "phase_" ^ Keeper_state_machine.phase_to_string phase
+  | Bootstrap_disabled -> "keeper_bootstrap_disabled"
   | Not_registered -> "not_registered"
   | Not_running -> "not_running"
   | No_keeper_binding -> "no_keeper_binding"
@@ -666,6 +668,7 @@ type blocked_keeper_operator_action =
   | Add_sandbox_profile_to_keeper_toml
   | Add_goal_or_goal_horizon_to_keeper_toml
   | Inspect_keeper_autoboot_logs
+  | Enable_keeper_bootstrap_or_start_manually
   | Inspect_dead_keeper_root_cause
   | Repair_terminal_keeper_failure
   | Restart_or_disable_stopped_keeper
@@ -691,6 +694,8 @@ let blocked_keeper_operator_action_to_string = function
   | Add_goal_or_goal_horizon_to_keeper_toml ->
       "add_goal_or_goal_horizon_to_keeper_toml"
   | Inspect_keeper_autoboot_logs -> "inspect_keeper_autoboot_logs"
+  | Enable_keeper_bootstrap_or_start_manually ->
+      "enable_keeper_bootstrap_or_start_manually"
   | Inspect_dead_keeper_root_cause -> "inspect_dead_keeper_root_cause"
   | Repair_terminal_keeper_failure -> "repair_terminal_keeper_failure"
   | Restart_or_disable_stopped_keeper -> "restart_or_disable_stopped_keeper"
@@ -720,6 +725,7 @@ let blocked_keeper_action = function
       Add_goal_or_goal_horizon_to_keeper_toml
   | Boot_failure Keeper_runtime.Materialization_failed ->
       Inspect_keeper_autoboot_logs
+  | Bootstrap_disabled -> Enable_keeper_bootstrap_or_start_manually
   | Phase Keeper_state_machine.Dead -> Inspect_dead_keeper_root_cause
   | Phase Keeper_state_machine.Zombie -> Repair_terminal_keeper_failure
   | Phase Keeper_state_machine.Stopped -> Restart_or_disable_stopped_keeper
@@ -771,6 +777,7 @@ let blocked_keeper_detail_json
     ?base_path
     ?phase
     ?phase_detail
+    ~keeper_bootstrap_enabled
     ~bootable_set
     ~capacity_set
     ~paused_set
@@ -796,7 +803,9 @@ let blocked_keeper_detail_json
           else if not is_capacity then
             (match phase with
              | Some phase -> Phase phase
-             | None -> Not_registered)
+             | None ->
+               if keeper_bootstrap_enabled then Not_registered
+               else Bootstrap_disabled)
           else Unknown
   in
   let phase_name = Option.map Keeper_state_machine.phase_to_string phase in
@@ -804,6 +813,11 @@ let blocked_keeper_detail_json
     match phase with
     | Some phase -> [ ("terminal_phase", `Bool (Keeper_state_machine.is_terminal phase)) ]
     | None -> []
+  in
+  let keeper_bootstrap_blocker =
+    match reason with
+    | Bootstrap_disabled -> Some "keeper_bootstrap_disabled"
+    | _ -> None
   in
   let last_failure_fields =
     match last_failure with
@@ -860,6 +874,9 @@ let blocked_keeper_detail_json
        ("reaction_capacity", `Bool is_capacity);
        ("paused", `Bool is_paused);
        ("meta_read_error", `Bool has_read_error);
+       ("keeper_bootstrap_enabled", `Bool keeper_bootstrap_enabled);
+       ( "keeper_bootstrap_blocker"
+       , Json_util.string_opt_to_json keeper_bootstrap_blocker );
      ]
      @ terminal_phase_field
      @ last_failure_fields
@@ -1053,6 +1070,7 @@ let keeper_fleet_safety_health_json
     ?phase_snapshot
     ?base_path
     ?reaction_capacity_names
+    ?keeper_bootstrap_enabled:keeper_bootstrap_enabled_override
     ~phase_counts
     ~paused_keepers_json
     () =
@@ -1076,6 +1094,11 @@ let keeper_fleet_safety_health_json
   in
   let bootable_count = List.length bootable_names in
   let target_count = List.length autoboot_scan.autoboot_names in
+  let keeper_bootstrap_enabled =
+    match keeper_bootstrap_enabled_override with
+    | Some value -> value
+    | None -> Env_config.KeeperBootstrap.enabled
+  in
   let runtime_base_path =
     match base_path with
     | Some _ as value -> value
@@ -1153,13 +1176,21 @@ let keeper_fleet_safety_health_json
   let reaction_capacity_below_target =
     target_count > 0 && reaction_capacity_shortfall_count > 0
   in
+  let keeper_bootstrap_blocked =
+    (not keeper_bootstrap_enabled)
+    && (no_executable_keeper_fibers
+       || no_running_fibers
+       || low_running_fiber_margin
+       || reaction_capacity_below_target)
+  in
   let active_task_owner_is_selected_blocker =
     active_task_owner_without_executable_fiber
     && not
          (no_executable_keeper_fibers
           || no_running_fibers
           || low_running_fiber_margin
-          || reaction_capacity_below_target)
+          || reaction_capacity_below_target
+          || keeper_bootstrap_blocked)
   in
   let executable_reaction_capacity_shortfall_count =
     max 0 (target_count - phase_counts.executable)
@@ -1233,6 +1264,7 @@ let keeper_fleet_safety_health_json
                ?base_path:runtime_base_path
                ?phase:(phase_value name)
                ?phase_detail:(phase_detail name)
+               ~keeper_bootstrap_enabled
                ~bootable_set
                ~capacity_set
                ~paused_set
@@ -1240,7 +1272,8 @@ let keeper_fleet_safety_health_json
                name)
   in
   let blocker =
-    if no_executable_keeper_fibers then Some "no_executable_keeper_fibers"
+    if keeper_bootstrap_blocked then Some "keeper_bootstrap_disabled"
+    else if no_executable_keeper_fibers then Some "no_executable_keeper_fibers"
     else if no_running_fibers then Some "no_healthy_running_keeper_fibers"
     else if low_running_fiber_margin then Some "low_running_fiber_margin"
     else if reaction_capacity_below_target then Some "reaction_capacity_below_target"
@@ -1252,6 +1285,9 @@ let keeper_fleet_safety_health_json
   `Assoc
     [ "status", `String status
     ; ("blocker", Json_util.string_opt_to_json blocker)
+    ; "keeper_bootstrap_enabled", `Bool keeper_bootstrap_enabled
+    ; ( "keeper_bootstrap_blocker"
+      , if keeper_bootstrap_blocked then `String "keeper_bootstrap_disabled" else `Null )
     ; "bootable_keeper_count", `Int bootable_count
     ; ( "bootable_keeper_names"
       , `List (List.map (fun name -> `String name) bootable_names) )
@@ -1330,5 +1366,6 @@ let keeper_fleet_safety_health_json
            || no_running_fibers
            || low_running_fiber_margin
            || reaction_capacity_below_target
+           || keeper_bootstrap_blocked
            || active_task_owner_without_executable_fiber) )
     ]

@@ -1814,6 +1814,10 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
           Alcotest.(check string) "health suggests unregistered action"
             "start_or_recover_keeper"
             (blocked_detail "example" |> member "action" |> to_string);
+          Alcotest.(check bool) "health reports bootstrap enabled" true
+            (fleet_safety |> member "keeper_bootstrap_enabled" |> to_bool);
+          Alcotest.(check bool) "health has no bootstrap blocker" true
+            (fleet_safety |> member "keeper_bootstrap_blocker" = `Null);
           Alcotest.(check string) "health marks fleet degraded" "degraded"
             (fleet_safety |> member "status" |> to_string);
           Alcotest.(check string) "health marks target-capacity blocker"
@@ -1873,6 +1877,76 @@ let test_health_json_blocked_count_matches_blocked_names_with_non_target_capacit
               (fleet_safety |> member "blocked_count" |> to_int);
             Alcotest.(check int) "blocked_keepers alias matches names" 2
               (fleet_safety |> member "blocked_keepers" |> to_int))))
+
+let test_health_json_exposes_disabled_keeper_bootstrap_blocker () =
+  with_temp_dir "health-keeper-bootstrap-disabled" (fun dir ->
+    let config_root = make_config_root dir in
+    write_config_root_keeper_toml config_root "boot-disabled";
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = (Mcp_server.workspace_config state) in
+        let phase_counts :
+            Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
+          { running = 0; failing = 0; recovering = 0; executable = 0 }
+        in
+        let phase_snapshot :
+            Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot =
+          {
+            counts = phase_counts;
+            running_names = [];
+            recovering_names = [];
+            executable_names = [];
+            phase_values = [];
+            phase_details = [];
+          }
+        in
+        let paused_keepers_json =
+          Server_routes_http_runtime_fleet_scan.durable_paused_keeper_scan config
+          |> Server_routes_http_runtime_fleet_scan
+             .paused_keepers_health_json_of_scan
+               ~running_names:[]
+        in
+        let fleet_safety =
+          Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+            ~keeper_bootstrap_enabled:false
+            ~phase_snapshot
+            ~phase_counts
+            ~paused_keepers_json
+            ()
+        in
+        let open Yojson.Safe.Util in
+        Alcotest.(check string) "health selects disabled bootstrap blocker"
+          "keeper_bootstrap_disabled"
+          (fleet_safety |> member "blocker" |> to_string);
+        Alcotest.(check bool) "health reports bootstrap disabled" false
+          (fleet_safety |> member "keeper_bootstrap_enabled" |> to_bool);
+        Alcotest.(check string) "health exposes bootstrap blocker"
+          "keeper_bootstrap_disabled"
+          (fleet_safety |> member "keeper_bootstrap_blocker" |> to_string);
+        let blocked_detail name =
+          fleet_safety |> member "blocked_keeper_reasons" |> to_list
+          |> List.find (fun row -> row |> member "keeper" |> to_string = name)
+        in
+        let detail = blocked_detail "boot-disabled" in
+        Alcotest.(check string) "health explains disabled bootstrap row"
+          "keeper_bootstrap_disabled"
+          (detail |> member "reason" |> to_string);
+        Alcotest.(check string) "health suggests bootstrap recovery"
+          "enable_keeper_bootstrap_or_start_manually"
+          (detail |> member "action" |> to_string);
+        Alcotest.(check bool) "row reports bootstrap disabled" false
+          (detail |> member "keeper_bootstrap_enabled" |> to_bool);
+        Alcotest.(check string) "row exposes bootstrap blocker"
+          "keeper_bootstrap_disabled"
+          (detail |> member "keeper_bootstrap_blocker" |> to_string)))
 
 let test_health_json_ignores_persisted_only_keeper_for_capacity_target () =
   with_temp_dir "health-persisted-only-keeper-target" (fun dir ->
@@ -3782,6 +3856,10 @@ let () =
             "health json blocked count matches named target blockers"
             `Quick
             test_health_json_blocked_count_matches_blocked_names_with_non_target_capacity;
+          Alcotest.test_case
+            "health json exposes disabled keeper bootstrap blocker"
+            `Quick
+            test_health_json_exposes_disabled_keeper_bootstrap_blocker;
           Alcotest.test_case
             "health json ignores persisted-only keeper for capacity target"
             `Quick

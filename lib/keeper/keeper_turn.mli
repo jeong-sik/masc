@@ -42,6 +42,11 @@ module For_testing : sig
   val surface_context_to_instructions : Yojson.Safe.t -> string option
   (** Format a dashboard co-view context object ({ label, route, scene, fields })
       into turn instructions when no explicit [turn_instructions] is supplied. *)
+
+  val direct_empty_no_progress_retry_reason :
+    Agent_sdk.Error.sdk_error -> Keeper_error_classify.degraded_retry_reason option
+  (** Return [Some Empty_no_progress] only for direct-message accept rejections
+      that are safe to rotate before surfacing an error. *)
 end
 
 (** Format a dashboard co-view context object ({ label, route, scene, fields })

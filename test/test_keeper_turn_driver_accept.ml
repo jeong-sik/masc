@@ -77,6 +77,11 @@ let accept_no_progress_retry_kind_string err =
       | `Read_only_no_progress -> "read_only_no_progress")
     kind
 
+let direct_empty_no_progress_retry_reason_string err =
+  Option.map
+    Masc.Keeper_error_classify.degraded_retry_reason_to_string
+    (Masc.Keeper_turn.For_testing.direct_empty_no_progress_retry_reason err)
+
 let test_keeper_hook_relaxes_strict_tool_choice () =
   let open Agent_sdk.Types in
   let relax = Masc.Keeper_run_tools_hooks.relax_strict_tool_choice_for_keeper in
@@ -674,6 +679,10 @@ let test_read_only_retry_uses_typed_context_not_reason_tokens () =
     (Option.map
        Masc.Keeper_error_classify.degraded_retry_reason_to_string
        (Masc.Keeper_error_classify.recoverable_runtime_failure_reason typed_err));
+  Alcotest.(check (option string))
+    "direct keeper_msg does not rotate read-only no-progress"
+    None
+    (direct_empty_no_progress_retry_reason_string typed_err);
   let string_only_err =
     accept_rejected_sdk_error
       ~response_shape:None
@@ -879,7 +888,11 @@ let test_empty_non_end_turn_response_is_rejected () =
      Alcotest.failf
        "expected completion_contract_violation blocker, got %s"
        (Masc.Keeper_meta_contract.blocker_class_to_string other)
-   | None -> Alcotest.fail "expected accept rejection blocker class")
+   | None -> Alcotest.fail "expected accept rejection blocker class");
+  Alcotest.(check (option string))
+    "direct keeper_msg rotates empty no-progress"
+    (Some "empty_no_progress")
+    (direct_empty_no_progress_retry_reason_string err)
 
 let test_empty_after_workspace_mutation_stays_terminal () =
   let checkpoint =
@@ -917,7 +930,11 @@ let test_empty_after_workspace_mutation_stays_terminal () =
     None
     (Option.map
        Masc.Keeper_error_classify.degraded_retry_reason_to_string
-       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err));
+  Alcotest.(check (option string))
+    "direct keeper_msg does not rotate after mutation"
+    None
+    (direct_empty_no_progress_retry_reason_string err)
 
 let test_blank_text_non_end_turn_response_is_rejected () =
   let result =

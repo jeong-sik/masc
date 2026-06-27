@@ -81,7 +81,11 @@ module String_map = Map.Make (String)
 
 let merge_category_counts left right =
   let add counts (category, count) =
-    let current = Option.value (String_map.find_opt category counts) ~default:0 in
+    let current =
+      match String_map.find_opt category counts with
+      | Some current -> current
+      | None -> 0
+    in
     String_map.add category (current + count) counts
   in
   List.fold_left add String_map.empty (left @ right) |> String_map.bindings

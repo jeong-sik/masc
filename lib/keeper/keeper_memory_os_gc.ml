@@ -31,7 +31,11 @@ let ttl_expired ~now (fact : fact) =
 ;;
 
 let bump_count key counts =
-  let current = Option.value (String_map.find_opt key counts) ~default:0 in
+  let current =
+    match String_map.find_opt key counts with
+    | Some count -> count
+    | None -> 0
+  in
   String_map.add key (current + 1) counts
 ;;
 

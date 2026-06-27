@@ -244,14 +244,31 @@ let judge_tool_budget_of (groups : panel_group list) =
   if List.exists (fun (g : panel_group) -> g.max_tool_calls = 0) groups then 0
   else List.fold_left (fun acc (g : panel_group) -> max acc g.max_tool_calls) 0 groups
 
+(* 적응형 타임아웃 임계값들. [adaptive_extension_threshold]는 adaptive 확장을 끄는
+   factor 값(config default 1.0; 검증이 >= 1.0을 강제). 1.0은 IEEE754에서 정확히
+   표현되지만, 의도를 명시하고 drift를 막기 named 상수로 둔다 — callers 도 float
+   equality 비교 대신 [adaptive_timeout_enabled]를 쓴다 (CLAUDE.md §Magic Number +
+   P2#6 float-equality-as-toggle 회피). [min_effective_timeout_s]는 확장 후 effective
+   타임아웃이 이보다 작으면 즉시 실패(None)하는 하한이다. *)
+let adaptive_extension_threshold = 1.0
+
+let min_effective_timeout_s = 0.001
+
+(* [adaptive_timeout_enabled preset] — preset의 factor가 확장 임계값을 넘는가. float
+   equality 대신 typed bool 토글로, callers(orchestrator)가 adaptive 재시도 분기를
+   판정한다. *)
+let adaptive_timeout_enabled (p : preset) =
+  p.adaptive_timeout_factor > adaptive_extension_threshold
+
 (* 적응형 타임아웃: 1차 심판/재시도 호출에 사용할 effective timeout을 계산한다.
-   - factor = 1.0 (또는 아직 타임아웃 안 됨): base_s를 wave 예산에 맞춰 반환.
-   - already_timed_out && factor > 1.0: base_s *. factor를 max_s로 상한, 남은 예산으로
-     하한해 확장된 타임아웃을 반환.
-   예산/상한이 너무 작아 0.001초 미만이면 None (즉시 실패). *)
+   - factor <= [adaptive_extension_threshold] (또는 아직 타임아웃 안 됨): base_s를 wave
+     예산에 맞춰 반환.
+   - already_timed_out && factor > [adaptive_extension_threshold]: base_s *. factor를
+     max_s로 상한, 남은 예산으로 하한해 확장된 타임아웃을 반환.
+   예산/상한이 너무 작아 [min_effective_timeout_s] 미만이면 None (즉시 실패). *)
 let adjust_judge_timeout ~base_s ~max_s ~factor ~wave_budget_s ~elapsed_s
     ~already_timed_out : float option =
-  if factor = 1.0 || not already_timed_out
+  if factor <= adaptive_extension_threshold || not already_timed_out
   then if elapsed_s +. base_s <= wave_budget_s then Some base_s else None
   else
     let extended = base_s *. factor in
@@ -262,7 +279,7 @@ let adjust_judge_timeout ~base_s ~max_s ~factor ~wave_budget_s ~elapsed_s
     in
     let remaining = wave_budget_s -. elapsed_s in
     let effective = Float.min proposed remaining in
-    if effective < 0.001 then None else Some effective
+    if effective < min_effective_timeout_s then None else Some effective
 
 (* RFC-0280: 검증된 preset을 타입으로 증명한다 (Parse, don't validate).
    [Validated_preset.t = private preset]이라 외부는 필드를 읽되([preset]/coercion)

@@ -1226,10 +1226,9 @@ let test_judge_outcome_roundtrip () =
         { role = Refine_pass; synthesis = synth (Answer "r"); usage = zero_usage }
     ; Judge_failed
         { failed_role = Meta
-        ; error = "boom"
+        ; failure = Provider_error "boom"
         ; usage = { input_tokens = 9; output_tokens = 10 }
         ; elapsed_s = 0.0
-        ; timed_out = false
         }
     ]
   in
@@ -1479,19 +1478,18 @@ let test_judge_error_node_timed_out () =
   let timeout_node =
     Fusion_types.Judge_failed
       { Fusion_types.failed_role = First "j"
-      ; error = "Execution timed out after 5.0s"
+      ; failure = Fusion_types.Timeout
       ; usage = Fusion_types.zero_usage
       ; elapsed_s = 5.0
-      ; timed_out = true
       }
   in
   let budget_node =
     Fusion_types.Judge_failed
       { Fusion_types.failed_role = First "j"
-      ; error = "judge j skipped: would exceed wave budget"
+      ; failure =
+          Fusion_types.Budget_exceeded "judge j skipped: would exceed wave budget"
       ; usage = Fusion_types.zero_usage
       ; elapsed_s = 3.0
-      ; timed_out = false
       }
   in
   match
@@ -1501,9 +1499,11 @@ let test_judge_error_node_timed_out () =
         (Fusion_types.judge_outcome_to_yojson budget_node) )
   with
   | Ok (Judge_failed n1), Ok (Judge_failed n2) ->
-    Alcotest.(check bool) "timeout node roundtrips timed_out" true n1.timed_out;
+    Alcotest.(check bool) "timeout node roundtrips timed_out" true
+      (Fusion_types.judge_failure_is_timeout n1.failure);
     Alcotest.(check (float 0.001)) "timeout node roundtrips elapsed_s" 5.0 n1.elapsed_s;
-    Alcotest.(check bool) "budget node roundtrips timed_out" false n2.timed_out;
+    Alcotest.(check bool) "budget node roundtrips timed_out" false
+      (Fusion_types.judge_failure_is_timeout n2.failure);
     Alcotest.(check (float 0.001)) "budget node roundtrips elapsed_s" 3.0 n2.elapsed_s
   | _ -> Alcotest.fail "expected Judge_failed roundtrip"
 

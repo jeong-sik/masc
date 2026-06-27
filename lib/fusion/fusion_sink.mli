@@ -25,7 +25,7 @@ val panel_meta : Fusion_types.panel_outcome -> Yojson.Safe.t
     decision variant에 따른 최상위 [recommend] | [missing]. [Error] → {status="failed"; error}.
     구조화 필드 키(text/models/topic/addressed_by/...)는 {!Fusion_judge_parse}의
     LLM-facing JSON 스키마와 대칭이며, 프론트가 markdown 재파싱 없이 5섹션을 렌더한다. *)
-val judge_meta : (Fusion_types.judge_synthesis, string) result -> Yojson.Safe.t
+val judge_meta : (Fusion_types.judge_synthesis, Fusion_types.judge_failure) result -> Yojson.Safe.t
 
 (** [judge_node_meta o] — 심판 실행 노드 한 건을 board meta_json [judges] 배열 원소로
     직렬화 (RFC-0284). [Synthesized] → role/identity + judge_synthesis 5섹션 + 노드별
@@ -54,7 +54,7 @@ val emit
   -> run_id:string
   -> question:string
   -> panel:Fusion_types.panel_outcome list
-  -> judge:(Fusion_types.judge_synthesis, string) result
+  -> judge:(Fusion_types.judge_synthesis, Fusion_types.judge_failure) result
   -> judges:Fusion_types.judge_outcome list
   -> judge_usage:Fusion_types.usage
   -> (unit, string) result

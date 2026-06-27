@@ -154,10 +154,9 @@ let test_sink_failed_node_includes_timeout_fields () =
   let node =
     Fusion_types.Judge_failed
       { Fusion_types.failed_role = First "j"
-      ; error = "Execution timed out after 5.0s"
+      ; failure = Fusion_types.Timeout
       ; usage = sample_usage
       ; elapsed_s = 5.0
-      ; timed_out = true
       }
   in
   let json = Fusion_sink.judge_node_meta node in

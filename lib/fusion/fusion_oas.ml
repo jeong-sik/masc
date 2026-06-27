@@ -103,14 +103,16 @@ let provider_error_detail ~runtime_id detail =
     then detail
     else Printf.sprintf "%s: %s" runtime_id detail
 
-let panel_failure_code = function
+let panel_failure_code (failure : Fusion_types.panel_failure) : string =
+  match failure with
   | Fusion_types.Timeout -> "timeout"
   | Fusion_types.Bridge_error _ -> "bridge_error"
   | Fusion_types.Provider_error _ -> "provider_error"
   | Fusion_types.Empty_response _ -> "empty_response"
   | Fusion_types.Invalid_max_output_tokens _ -> "invalid_max_output_tokens"
 
-let panel_failure_detail ~runtime_id = function
+let panel_failure_detail ~runtime_id (failure : Fusion_types.panel_failure) : string =
+  match failure with
   | Fusion_types.Timeout -> "timeout"
   | Fusion_types.Bridge_error detail -> Printf.sprintf "Bridge error: %s" detail
   | Fusion_types.Provider_error detail -> provider_error_detail ~runtime_id detail
@@ -124,7 +126,8 @@ let panel_failure_detail ~runtime_id = function
    panelist(정체성, 예 "skeptic (claude)")가 "Provider '...'" 슬롯에 새거나 중복
    prefix가 붙는다 (RFC-0278). panelist는 panel_answer.model/failed_model에만 두고
    provider attribution은 detail 안에 이미 박혀 있는 raw model을 쓴다. *)
-let panel_failure_text = function
+let panel_failure_text (failure : Fusion_types.panel_failure) : string =
+  match failure with
   | Fusion_types.Timeout -> "timeout"
   | Fusion_types.Bridge_error detail -> Printf.sprintf "Bridge error: %s" detail
   | Fusion_types.Provider_error detail -> detail

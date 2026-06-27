@@ -39,10 +39,9 @@ let test_labels () =
     (Fusion_metrics.judge_outcome_label
        (Fusion_types.Judge_failed
           { Fusion_types.failed_role = Meta
-          ; error = "boom"
+          ; failure = Fusion_types.Provider_error "boom"
           ; usage = sample_usage
           ; elapsed_s = 0.0
-          ; timed_out = false
           }))
 
 let test_record_judge_execution_emits () =

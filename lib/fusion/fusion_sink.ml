@@ -192,13 +192,19 @@ let judge_synthesis_fields (j : Fusion_types.judge_synthesis) :
   | Fusion_types.Answer _ -> base
 
 (* 심판 종합을 board meta_json [judge] 원소로 (canonical 단일 키 — RFC-0284 이전 호환). *)
-let judge_meta (judge : (Fusion_types.judge_synthesis, string) result) : Yojson.Safe.t =
+let judge_meta (judge : (Fusion_types.judge_synthesis, Fusion_types.judge_failure) result)
+    : Yojson.Safe.t =
   (* status는 형제 panel_meta와 같은 동사형(판이 무엇을 했는가): 종합 산출은
      "synthesized", 실패는 "failed". tool-result ok-봉투("ok")가 아니라 board
      증거의 judge 서술 필드다 (no-inline-ok-envelope 가드 대상과 별개 개념). *)
   match judge with
   | Ok j -> `Assoc (judge_synthesis_fields j)
-  | Error e -> `Assoc [ ("status", `String "failed"); ("error", `String e) ]
+  | Error f ->
+    `Assoc
+      [ ("status", `String "failed")
+      ; ("error", `String (Fusion_types.judge_failure_text f))
+      ; ("failure_code", `String (Fusion_types.judge_failure_tag f))
+      ]
 
 (* 심판 노드의 위상 역할/정체성 → board meta_json 필드 (RFC-0284). [role]은 위상 의미
    (single/refine/first/meta/stage_meta/final_meta), [identity]는 [First]면 panelist_id(panel
@@ -229,11 +235,17 @@ let judge_node_meta (o : Fusion_types.judge_outcome) : Yojson.Safe.t =
        @ [ ("input_tokens", `Int usage.Fusion_types.input_tokens)
          ; ("output_tokens", `Int usage.Fusion_types.output_tokens)
          ])
-  | Fusion_types.Judge_failed { failed_role; error; usage; elapsed_s; timed_out } ->
+  | Fusion_types.Judge_failed { failed_role; failure; usage; elapsed_s } ->
+    (* [failure]가 single source of truth. 하위 호환을 위해 사람-가독 [error] 문자열과
+       파생 [timed_out]을 synthetic key로 복원하고, 정확 분류용 [failure_code]를 additive
+       로 추가한다(dashboard는 [error]만 읽고 [timed_out]/[elapsed_s]는 무시하므로 기존
+       소비가 깨지지 않는다). *)
+    let timed_out = Fusion_types.judge_failure_is_timeout failure in
     `Assoc
       (judge_role_fields failed_role
        @ [ ("status", `String "failed")
-         ; ("error", `String error)
+         ; ("error", `String (Fusion_types.judge_failure_text failure))
+         ; ("failure_code", `String (Fusion_types.judge_failure_tag failure))
          ; ("input_tokens", `Int usage.Fusion_types.input_tokens)
          ; ("output_tokens", `Int usage.Fusion_types.output_tokens)
          ; ("elapsed_s", `Float elapsed_s)
@@ -412,7 +424,7 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage 
          let ok, resolved_answer =
            match judge with
            | Ok j -> true, j.Fusion_types.resolved_answer
-           | Error e -> false, Printf.sprintf "judge failed: %s" e
+           | Error e -> false, Printf.sprintf "judge failed: %s" (Fusion_types.judge_failure_text e)
          in
          (* RFC-0266 §7: registry를 Completed로 갱신(가시성). wake와 무관하게 run
             상태를 반영해야 하므로 wake 직전 무조건 호출. *)

@@ -216,6 +216,45 @@ type judge_role =
   | Final_meta
 [@@deriving yojson, show, eq]
 
+(** 심판(judge) 한 명이 실패하는 방식. {!panel_failure}와 동형인 닫힌 합이되, 심판
+    도메인에만 존재하는 사유([Empty_result]/[Build_error]/[Parse_error]/[Budget_exceeded])
+    를 추가로 담는다. [panel_failure]를 literal하게 공유하지 않는 이유: 판(panel) 전용인
+    [Invalid_max_output_tokens]가 심판에서 dead variant가 되고, wave-budget SKIP을
+    [Provider_error "...skipped..."] 문자열에 숨기면 orchestrator의 fallback 분류가
+    substring match로 잔존하기 때문이다(CLAUDE.md §string-classifier 안티패턴).
+
+    근원에서 typed로 propagate한다: [Fusion_judge.run] 계열이 {!Agent_sdk.Error}의
+    [Timeout] variant를 match에서 잡아 [Timeout]으로, provider/transport 에러를
+    [Provider_error]로 반환한다. 호출자는 [string]을 역분류하지 않고 exhaustive match로
+    분류한다. *)
+type judge_failure =
+  | Timeout  (** 구조적 타임아웃 — Agent_sdk.Error.Api (Retry.Timeout _)에서 propagate *)
+  | Provider_error of string  (** provider/transport 에러, to_string 보존 *)
+  | Empty_response of string  (** 모델이 빈 응답 *)
+  | Empty_result  (** Async_agent.all 이 빈 결과를 반환 *)
+  | Build_error of string  (** Fusion_oas.build_agent 실패 *)
+  | Parse_error of string  (** Fusion_judge_parse.of_string 파싱 실패 *)
+  | Budget_exceeded of string  (** wave budget 초과로 심판 실행 전 SKIP *)
+  | Internal_error of string  (** all_fail_error fallback / 미분류 *)
+[@@deriving to_yojson, show, eq]
+
+val judge_failure_of_yojson : Yojson.Safe.t -> (judge_failure, string) result
+
+(** [Timeout] 변형인가. {!judge_error_node}의 [timed_out] 파생처럼, 분류는 variant 자체로
+    충분하므로 별도 bool 필드를 두지 않는다. *)
+val judge_failure_is_timeout : judge_failure -> bool
+
+(** [Timeout] 또는 [Budget_exceeded] 인가. orchestrator의 fallback-judge 트리거 조건:
+    1차 심판 전원이 타임아웃/예산-skip이면 fallback을 시도한다. exhaustive match로
+    string classifier([is_timeout_or_budget_error])를 대체한다. *)
+val judge_failure_is_timeout_or_budget : judge_failure -> bool
+
+(** sink/로그용 사람-가독 문자열. {!Fusion_oas.panel_failure_text}와 대칭. *)
+val judge_failure_text : judge_failure -> string
+
+(** 대시보드 failure_code 키용 정규화 태그(timeout/provider_error/...). *)
+val judge_failure_tag : judge_failure -> string
+
 (** 성공한 심판 노드 — 역할 + 종합 + 노드별 실측 usage. *)
 type judge_node =
   { role : judge_role
@@ -224,16 +263,15 @@ type judge_node =
   }
 [@@deriving yojson, show, eq]
 
-(** 격리된 심판 실패 노드. *)
+(** 격리된 심판 실패 노드. [failure]가 single source of truth: [timed_out]은
+    [judge_failure_is_timeout failure]로 파생 가능해 별도 필드에서 제거했다. *)
 type judge_error_node =
   { failed_role : judge_role
-  ; error : string
+  ; failure : judge_failure
   ; usage : usage
-      (** 실패필도 태운 토큰 — 관측 record가 비용을 버리지 않는다(RFC-0284, 적대 리뷰 #22112 E). *)
+      (** 실패해도 태운 토큰 — 관측 record가 비용을 버리지 않는다(RFC-0284, 적대 리뷰 #22112 E). *)
   ; elapsed_s : float
       (** Wave start부터 실패까지 경과한 시간(초). 타임아웃/예산 원인 분석용. *)
-  ; timed_out : bool
-      (** 구조적 타임아웃("Execution timed out after")으로 분류되는 실패인가. *)
   }
 [@@deriving yojson, show, eq]
 

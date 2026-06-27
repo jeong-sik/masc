@@ -186,10 +186,16 @@ val judge_web_tools_of : req_web_tools:bool -> panel_group list -> bool
     단일 그룹이면 그 그룹 [max_tool_calls] (오늘과 byte-identical). *)
 val judge_tool_budget_of : panel_group list -> int
 
+(** [adaptive_timeout_enabled preset] — preset의 [adaptive_timeout_factor]가 확장
+    임계값(1.0)을 넘는가. callers(orchestrator)가 float equality 비교 없이 typed bool로
+    adaptive 재시도 분기를 판정한다. *)
+val adaptive_timeout_enabled : preset -> bool
+
 (** 적응형 타임아웃: 1차 심판/재시도 호출에 사용할 effective timeout을 계산한다.
-    [factor = 1.0]이면 [base_s]를 wave 예산에 맞춰 반환하고, [already_timed_out]이고
-    [factor > 1.0]이면 [base_s *. factor]를 [max_s]로 상한·남은 예산으로 하한해
-    확장한다. 결과가 0.001초 미만이면 [None]. *)
+    [factor <= adaptive_extension_threshold](= 1.0)이면 [base_s]를 wave 예산에 맞춰
+    반환하고, [already_timed_out]이고 [factor > adaptive_extension_threshold]이면
+    [base_s *. factor]를 [max_s]로 상한·남은 예산으로 하한해 확장한다. 결과가
+    [min_effective_timeout_s](0.001s) 미만이면 [None]. *)
 val adjust_judge_timeout
   :  base_s:float
   -> max_s:float option

@@ -36,7 +36,7 @@ let mapping_of_toml toml keeper_id =
   let* repository_ids =
     Otoml.Helpers.find_strings_result toml (path "repositories")
   in
-  Ok { keeper_id; repository_ids }
+  Ok (make_keeper_repo_mapping ~keeper_id ~repository_ids)
 
 let toml_of_mapping mapping =
   let fields =
@@ -269,17 +269,12 @@ let allowed_repositories ~keeper_id ~base_path =
   let* mapping = find_mapping ~base_path ~keeper_id in
   Ok mapping.repository_ids
 
-let is_wildcard s = s = "*"
-
-type repository_scope =
+type repository_scope = Repo_manager_types.repository_scope =
   | All_repositories
   | Selected_repositories of repository_id list
 
 let repository_scope_of_mapping (mapping : keeper_repo_mapping) =
-  if List.exists is_wildcard mapping.repository_ids then
-    All_repositories
-  else
-    Selected_repositories mapping.repository_ids
+  mapping.repository_scope
 
 let mapping_allows_repository (mapping : keeper_repo_mapping) ~repository_id =
   match repository_scope_of_mapping mapping with
@@ -287,13 +282,9 @@ let mapping_allows_repository (mapping : keeper_repo_mapping) ~repository_id =
   | Selected_repositories repository_ids ->
       List.exists (String.equal repository_id) repository_ids
 
-(* Filter [repos] down to those whose id appears in [mapping.repository_ids],
-   with ["*"] as a wildcard that bypasses filtering entirely.
-   The Hashtbl materialisation is skipped when a wildcard short-circuits
-   the check, so the wildcard case avoids building the membership set
-   (the [is_wildcard] predicate itself is a fully-saturated function so
-   no closure is allocated per call, unlike [(String.equal "*")] which
-   would partially apply). *)
+(* Filter [repos] down to those whose id appears in the parsed mapping scope.
+   The Hashtbl materialisation is skipped when the TOML/JSON boundary parsed a
+   wildcard scope, so the wildcard case avoids building the membership set. *)
 let filter_repos_by_mapping (mapping : keeper_repo_mapping)
     (repos : repository list) : repository list =
   match repository_scope_of_mapping mapping with
@@ -402,6 +393,10 @@ let save_all ~base_path mappings =
   | Error msg -> Error msg
 
 let save_mapping ~base_path mapping =
+  let mapping =
+    make_keeper_repo_mapping ~keeper_id:mapping.keeper_id
+      ~repository_ids:mapping.repository_ids
+  in
   let path = mappings_toml_path base_path in
   try
     Fs_compat.mkdir_p (Filename.dirname path);

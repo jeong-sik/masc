@@ -80,7 +80,10 @@ let write_mapping_raw base_path content =
   write_file (Keeper_repo_mapping.mappings_toml_path base_path) content
 
 let write_mapping base_path keeper_id repo_ids =
-  let mapping = { keeper_id; repository_ids = repo_ids } in
+  let mapping =
+    Repo_manager_types.make_keeper_repo_mapping ~keeper_id
+      ~repository_ids:repo_ids
+  in
   match Keeper_repo_mapping.save_mapping ~base_path mapping with
   | Ok () -> ()
   | Error e -> Alcotest.fail ("write_mapping failed: " ^ e)
@@ -201,6 +204,24 @@ let test_load_all_rejects_non_table_mapping () =
             "mentions mapping table"
             true
             (contains_substring msg "mapping field must be a table"))
+
+let test_load_all_parses_wildcard_scope () =
+  with_temp_base_path (fun base_path ->
+      write_mapping_raw base_path
+        "[mapping.keeper-wild]\nrepositories = [\"*\"]\n";
+      match Keeper_repo_mapping.load_all ~base_path with
+      | Error msg -> Alcotest.fail ("load_all failed: " ^ msg)
+      | Ok [ mapping ] -> (
+          match Keeper_repo_mapping.repository_scope_of_mapping mapping with
+          | All_repositories -> ()
+          | Selected_repositories ids ->
+              Alcotest.fail
+                (Printf.sprintf
+                   "expected wildcard scope, got selected repositories: %s"
+                   (String.concat "," ids)))
+      | Ok mappings ->
+          Alcotest.fail
+            (Printf.sprintf "expected one mapping, got %d" (List.length mappings)))
 
 let test_is_allowed_reloads_after_external_revocation () =
   with_temp_base_path (fun base_path ->
@@ -967,10 +988,8 @@ let test_allowed_repositories_no_mapping () =
 let test_save_mapping_creates_config_dir () =
   with_empty_temp_base_path (fun base_path ->
       let mapping =
-        {
-          keeper_id = "keeper-new";
-          repository_ids = [ "repo-a"; "repo-b" ];
-        }
+        Repo_manager_types.make_keeper_repo_mapping ~keeper_id:"keeper-new"
+          ~repository_ids:[ "repo-a"; "repo-b" ]
       in
       match Keeper_repo_mapping.save_mapping ~base_path mapping with
       | Error e -> Alcotest.fail ("save_mapping failed: " ^ e)
@@ -998,6 +1017,8 @@ let () =
         [
           Alcotest.test_case "malformed top-level mapping fails" `Quick
             test_load_all_rejects_non_table_mapping;
+          Alcotest.test_case "wildcard scope parsed at load boundary" `Quick
+            test_load_all_parses_wildcard_scope;
         ] );
       ( "validate_access",
         [

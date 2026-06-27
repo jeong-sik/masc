@@ -30,13 +30,13 @@ val mapping_allows_repository :
 (** [mapping_allows_repository mapping ~repository_id] applies the
     repository-id matching rules, including wildcard mappings. *)
 
-type repository_scope =
+type repository_scope = Repo_manager_types.repository_scope =
   | All_repositories
   | Selected_repositories of repository_id list
 
 val repository_scope_of_mapping : keeper_repo_mapping -> repository_scope
-(** [repository_scope_of_mapping mapping] parses raw TOML repository IDs into
-    the closed repository-scope representation used for policy decisions. *)
+(** [repository_scope_of_mapping mapping] returns the parsed repository scope
+    produced at the TOML/JSON boundary. *)
 
 val find_mapping :
   base_path:string -> keeper_id:string -> (keeper_repo_mapping, string) result

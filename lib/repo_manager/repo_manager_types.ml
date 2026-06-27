@@ -24,11 +24,30 @@ type repository = {
 }
 [@@deriving yojson, show, eq]
 
+type repository_scope =
+  | All_repositories
+  | Selected_repositories of repository_id list
+[@@deriving yojson, show, eq]
+
 type keeper_repo_mapping = {
   keeper_id : string;
   repository_ids : string list;
+  repository_scope : repository_scope [@default Selected_repositories []];
 }
 [@@deriving yojson, show, eq]
+
+let repository_scope_of_ids repository_ids =
+  if List.exists (String.equal "*") repository_ids then
+    All_repositories
+  else
+    Selected_repositories repository_ids
+
+let make_keeper_repo_mapping ~keeper_id ~repository_ids =
+  {
+    keeper_id;
+    repository_ids;
+    repository_scope = repository_scope_of_ids repository_ids;
+  }
 
 (* [Otoml.t] is a 3rd-party closed variant with 12 value constructors;
    the on-disk config loaders in this library only ever distinguish

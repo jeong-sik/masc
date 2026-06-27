@@ -21,7 +21,11 @@ let extract_keeper_id path =
       | _ -> Error "expected path /api/v1/keeper-repos/:id")
 
 let mapping_json (m : Repo_manager_types.keeper_repo_mapping) : Yojson.Safe.t =
-  let allow_all = List.exists (String.equal "*") m.repository_ids in
+  let allow_all =
+    match m.repository_scope with
+    | Repo_manager_types.All_repositories -> true
+    | Repo_manager_types.Selected_repositories _ -> false
+  in
   `Assoc
     [
       ("keeper_id", `String m.keeper_id);
@@ -53,7 +57,10 @@ let mapping_of_json keeper_id (json : Yojson.Safe.t) :
         | None -> list_field fields "repos"
       in
       match repository_ids with
-      | Ok repository_ids -> Ok { Repo_manager_types.keeper_id; repository_ids }
+      | Ok repository_ids ->
+          Ok
+            (Repo_manager_types.make_keeper_repo_mapping ~keeper_id
+               ~repository_ids)
       | Error msg -> Error msg)
   | _ -> Error "expected JSON object body"
 

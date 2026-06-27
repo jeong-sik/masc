@@ -70,7 +70,10 @@ let write_mapping_raw base_path contents =
   write_file path contents
 
 let write_mapping base_path keeper_id repo_ids =
-  let mapping = { Repo_manager_types.keeper_id; repository_ids = repo_ids } in
+  let mapping =
+    Repo_manager_types.make_keeper_repo_mapping ~keeper_id
+      ~repository_ids:repo_ids
+  in
   match Keeper_repo_mapping.save_mapping ~base_path mapping with
   | Ok () -> ()
   | Error msg -> fail ("write_mapping failed: " ^ msg)

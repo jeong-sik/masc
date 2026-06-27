@@ -318,6 +318,7 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.querySelector('.turn-overlay')).toBeTruthy()
     expect(container.textContent).toContain('컴팩션 스냅샷')
     await waitFor(() => expect(container.textContent).toContain('210.0k'))
+    expect(container.querySelector('[data-testid="compaction-scan-diagnostics"]')).toBeNull()
     expect(container.textContent).toContain('proactive(85%)')
     expect(container.textContent).toContain('runtime_manifest · observed')
     expect(container.textContent).toContain('trace-cmp#12')

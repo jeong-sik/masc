@@ -139,7 +139,7 @@ key = ""
 let test_runtime_toml_threads_provider_connect_timeout () =
   let content =
     runtime_toml_with_credentials
-      ~provider_extra:"connect-timeout-s = 123.5"
+      ~provider_extra:(Runtime_schema.connect_timeout_s_key ^ " = 123.5")
       inline_credentials
   in
   match Runtime_toml.parse_string content with
@@ -170,7 +170,7 @@ let test_runtime_toml_threads_provider_connect_timeout () =
 let test_runtime_toml_rejects_non_positive_provider_connect_timeout () =
   let content =
     runtime_toml_with_credentials
-      ~provider_extra:"connect-timeout-s = 0.0"
+      ~provider_extra:(Runtime_schema.connect_timeout_s_key ^ " = 0.0")
       inline_credentials
   in
   match Runtime_toml.parse_string content with
@@ -184,7 +184,7 @@ let test_runtime_toml_rejects_non_positive_provider_connect_timeout () =
 let test_runtime_toml_rejects_wrong_typed_provider_connect_timeout () =
   let content =
     runtime_toml_with_credentials
-      ~provider_extra:"connect-timeout-s = 600"
+      ~provider_extra:(Runtime_schema.connect_timeout_s_key ^ " = 600")
       inline_credentials
   in
   match Runtime_toml.parse_string content with
@@ -193,7 +193,7 @@ let test_runtime_toml_rejects_wrong_typed_provider_connect_timeout () =
     check_parse_error_contains
       errors
       "providers.runpod_mtp.connect-timeout-s"
-      "connect-timeout-s must be a float"
+      (Runtime_schema.connect_timeout_s_key ^ " must be a float")
 
 let test_runtime_toml_rejects_missing_env_credential_key () =
   let content =

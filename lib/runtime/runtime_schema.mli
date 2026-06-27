@@ -40,6 +40,8 @@ type capabilities =
   }
 [@@deriving show, eq]
 
+val connect_timeout_s_key : string
+
 type provider =
   { id : string
   ; display_name : string
@@ -54,13 +56,9 @@ type provider =
     (** Per-provider override for the OAS connect + initial-response-headers
       wall-clock timeout (seconds). [None] keeps the OAS kind-based default
       (see [Llm_provider.Provider_config.default_connect_timeout_s]). Declared
-      on the provider (not the model) because it is a transport property of
-      the endpoint: a cloud OpenAI-compatible endpoint whose upstream behaves
-      like a queued model (Ollama Cloud serving reasoning models whose TTFB
-      exceeds the 60s OpenAI_compat default) requests a larger connect budget
-      without changing wire-format kind. oas#2163, RFC-OAS-026 I2 — MASC
-      declares the budget; OAS owns enforcement and phase=Http_operation
-      attribution. *)
+      on the provider, not the model, because it is a transport property.
+      oas#2163, RFC-OAS-026 I2: MASC declares the budget; OAS owns enforcement
+      and phase=Http_operation attribution. *)
   }
 [@@deriving show, eq]
 

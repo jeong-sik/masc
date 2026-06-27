@@ -182,4 +182,7 @@ module For_testing : sig
 
   val accept_no_progress_read_only_should_try_next :
     Agent_sdk.Error.sdk_error -> bool
+
+  val accept_rejected_result_should_try_next :
+    is_last:bool -> Agent_sdk.Error.sdk_error -> bool
 end

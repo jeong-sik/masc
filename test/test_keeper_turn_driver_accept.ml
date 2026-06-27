@@ -630,6 +630,12 @@ let test_historical_mutation_does_not_block_current_read_only_retry () =
     (Masc.Keeper_turn_driver.For_testing
      .accept_no_progress_read_only_should_try_next
        err);
+  Alcotest.(check bool)
+    "non-last read-only accept rejection advances provider candidate"
+    true
+    (Masc.Keeper_turn_driver.For_testing.accept_rejected_result_should_try_next
+       ~is_last:false
+       err);
   Alcotest.(check (option string))
     "current read-only no-progress classified by internal-error SSOT"
     (Some "read_only_no_progress")
@@ -696,6 +702,12 @@ let test_thinking_only_after_read_only_webfetch_can_try_next_candidate () =
     true
     (Masc.Keeper_turn_driver.For_testing
      .accept_no_progress_read_only_should_try_next
+       err);
+  Alcotest.(check bool)
+    "non-last read-only WebFetch accept rejection advances provider candidate"
+    true
+    (Masc.Keeper_turn_driver.For_testing.accept_rejected_result_should_try_next
+       ~is_last:false
        err);
   Alcotest.(check (option string))
     "thinking-only after read-only tool is runtime-recoverable"
@@ -1594,6 +1606,18 @@ let test_empty_non_end_turn_response_is_rejected () =
     true
     (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next err);
   Alcotest.(check bool)
+    "non-last empty accept rejection advances provider candidate"
+    true
+    (Masc.Keeper_turn_driver.For_testing.accept_rejected_result_should_try_next
+       ~is_last:false
+       err);
+  Alcotest.(check bool)
+    "last empty accept rejection stays terminal"
+    false
+    (Masc.Keeper_turn_driver.For_testing.accept_rejected_result_should_try_next
+       ~is_last:true
+       err);
+  Alcotest.(check bool)
     "empty no-progress is not a read-only retry"
     false
     (Masc.Keeper_turn_driver.For_testing
@@ -1667,6 +1691,12 @@ let test_empty_after_workspace_mutation_stays_terminal () =
     "empty response after mutation does not try next candidate"
     false
     (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next err);
+  Alcotest.(check bool)
+    "mutating accept rejection does not advance provider candidate"
+    false
+    (Masc.Keeper_turn_driver.For_testing.accept_rejected_result_should_try_next
+       ~is_last:false
+       err);
   Alcotest.(check (option string))
     "empty response after mutation is not runtime-recoverable"
     None

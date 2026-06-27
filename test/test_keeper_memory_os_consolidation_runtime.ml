@@ -36,14 +36,6 @@ let fake_response canned =
   }
 ;;
 
-let message_text (message : Atypes.message) =
-  message.content
-  |> List.filter_map (function
-    | Atypes.Text s -> Some s
-    | _ -> None)
-  |> String.concat "\n"
-;;
-
 let fake_complete canned : Runtime.complete_fn =
   fun ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () -> Ok (fake_response canned)
 ;;
@@ -76,7 +68,8 @@ let with_prompts f =
   let root =
     match Sys.getenv_opt "DUNE_SOURCEROOT" with
     | Some r -> r
-    | None -> "."
+    | None ->
+      Alcotest.fail "DUNE_SOURCEROOT is required to locate config/prompts in tests"
   in
   Fun.protect ~finally:Prompt_registry.clear (fun () ->
     Prompt_registry.clear ();
@@ -301,7 +294,12 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
                seen_max_tokens := config.Llm_provider.Provider_config.max_tokens;
                seen_response_format := Some config.Llm_provider.Provider_config.response_format;
                let rendered_prompt =
-                 messages |> List.map message_text |> String.concat "\n" |> String.trim
+                 messages
+                 |> List.filter_map (function
+                   | Atypes.Text s -> Some s
+                   | _ -> None)
+                 |> String.concat "\n"
+                 |> String.trim
                in
                seen_prompt_matches_template := String.equal expected_prompt rendered_prompt)
             plan

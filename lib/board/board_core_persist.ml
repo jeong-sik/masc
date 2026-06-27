@@ -11,7 +11,7 @@ include Board_core_classify
 include Board_core_payload
 
 let flush_interval_sec = Env_config.Board.flush_interval_sec
-let flusher_inbox_capacity = 1000
+let flusher_inbox_capacity = Env_config.Board.flusher_inbox_capacity
 
 (** Monotonic count of sweep/flush schedule messages skipped because the
     bounded flusher inbox had no room for the whole batch. *)
@@ -19,9 +19,10 @@ let flusher_schedule_dropped = Atomic.make 0
 let flusher_schedule_dropped_count () = Atomic.get flusher_schedule_dropped
 
 let record_flusher_schedule_drop scheduled_count =
-  for _ = 1 to scheduled_count do
-    Atomic.incr flusher_schedule_dropped
-  done
+  (* Single atomic add instead of N increments, so a concurrent reader cannot
+     observe a partial count. [scheduled_count] is a [List.length], so it is
+     non-negative. *)
+  Atomic.fetch_and_add flusher_schedule_dropped scheduled_count |> ignore
 ;;
 
 (** Monotonic counter of persist failures (disk full, permission errors, etc.). *)

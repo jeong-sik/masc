@@ -1,4 +1,4 @@
-(** Tool_task_contract_gate — task-contract predicates and CDAL gate
+(** Tool_task_contract_gate — task-contract predicates and verification gate
     evaluation for task tools.
 
     Contract predicates ([task_has_persisted_contract] etc.) are pure
@@ -65,7 +65,7 @@ let completion_state_error ~(task_id : string) ~(agent_name : string)
 
 (* Verification is owned solely by [Cdal_evidence_gate], applied upstream in
    [Tool_task.handle_transition]. This per-action layer formerly ran a second
-   gate against the CDAL verdict ledger; that ledger no longer exists, so this
+   gate against the contract-verdict ledger; that ledger no longer exists, so this
    layer never rejects. Kept as a typed seam so the transition control flow is
    unchanged. *)
 let persisted_contract_rejection ~(agent_name : string)

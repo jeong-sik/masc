@@ -334,7 +334,7 @@ module Cdal = struct
   let enabled () =
     Feature_flag_registry.get_bool "MASC_CDAL_ENABLED"
 
-  (** Block task completion when CDAL verdict is Violated/Inconclusive. Default: false. *)
+  (** Block task completion when contract verdict is Violated/Inconclusive. Default: false. *)
   let gate_enabled () =
     Feature_flag_registry.get_bool "MASC_CDAL_GATE_ENABLED"
 

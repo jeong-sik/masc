@@ -425,10 +425,10 @@ function cdalHealthChip(cdal: DashboardCdalHealth | null | undefined): Dashboard
   const tone: DashboardHealthChipTone =
     requiresAction || stale > 0 || currentMissing > 0 ? 'bad' : terminal > 0 || incomplete > 0 ? 'warn' : 'ok'
   const label = stale > 0 || terminal > 0 || incomplete > 0
-    ? `CDAL proof incomplete ${incomplete}`
+    ? `Contract proof incomplete ${incomplete}`
     : currentMissing > 0
-      ? `CDAL task scope ${currentMissing}`
-      : `CDAL ${writerStatus}`
+      ? `Contract task scope ${currentMissing}`
+      : `Contract verification ${writerStatus}`
   return {
     key: 'cdal-runtime-health',
     label,

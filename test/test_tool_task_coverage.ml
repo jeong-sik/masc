@@ -1117,7 +1117,7 @@ let () = test "handle_transition_done_prefers_ownership_error_over_cdal_gate" (f
   in
   assert (not (Tool_result.is_success result));
   assert (str_contains (Tool_result.message result) "currently owned by other-agent");
-  assert (not (str_contains (Tool_result.message result) "CDAL verdict"))
+  assert (not (str_contains (Tool_result.message result) "contract verdict"))
 )
 
 let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun () ->
@@ -1705,7 +1705,7 @@ let () = test "transition_claim_sets_planning_current_task" (fun () ->
    have been removed: their intent was the exact behaviour Phase E
    removes.  Phase E semantics is now pinned by
    [test/test_task_state_verification_phase_e.ml] (5 cases) and by
-   the typed CDAL verdict consultation in
+   the typed contract verdict consultation in
    [test/test_cdal_evidence_gate.ml] (10 cases).  See issue #18830
    Cluster A.1 for the triage record. *)
 
@@ -1778,7 +1778,7 @@ let () = test "transition_pr_url_top_level_is_retired" (fun () ->
    exists; this test's [str_contains "requires verification evidence"]
    assertion was the third lock-in of the retired behaviour and has
    been removed.  The remaining intent — contracted-task submit
-   rejection when no CDAL verdict and no substantive evidence — is
+   rejection when no contract verdict and no substantive evidence — is
    covered by [test/test_cdal_evidence_gate.ml]'s missing-verdict
    arm. See issue #18830 Cluster A.1. *)
 

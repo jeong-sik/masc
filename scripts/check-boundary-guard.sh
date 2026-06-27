@@ -115,7 +115,7 @@ check_forbidden_outside "V10-provider-filter-ownership" \
   "lib/keeper/keeper_config_text.ml" \
   "lib/keeper/keeper_config_text.mli"
 
-# V11: proof-store layout knowledge must stay inside the CDAL proof-store owner
+# V11: proof-store layout knowledge must stay inside the contract proof-store owner
 # and proof reader adapter.
 check_forbidden_outside "V11-proof-store-layout" \
   'Filename\.concat .*"proofs"' \

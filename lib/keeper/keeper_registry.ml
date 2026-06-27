@@ -708,11 +708,21 @@ let rec dispatch_event_with_audit
                to_phase_str
                event_str);
           (* Record transition in audit ring buffer for dashboard API *)
+          let audit_events_fired =
+            (* DET-OK: absent audit batch metadata falls back to the current FSM
+               event; this adds no entropy, clock read, or unordered input. *)
+            Option.value events_fired ~default:[ event ]
+          in
+          let audit_selected_event =
+            (* DET-OK: single-event dispatch uses the same current FSM event as
+               the selected audit event when no caller override is present. *)
+            Option.value selected_event ~default:event
+          in
           Keeper_transition_audit.record_transition
             ~keeper_name:name
             { snapshot
-            ; events_fired = Option.value events_fired ~default:[ event ]
-            ; selected_event = Option.value selected_event ~default:event
+            ; events_fired = audit_events_fired
+            ; selected_event = audit_selected_event
             ; prev_phase = tr.prev_phase
             ; new_phase = tr.new_phase
             ; transition_outcome = "applied"

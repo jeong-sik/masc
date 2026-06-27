@@ -167,6 +167,15 @@ let record_error errors ~root ~operation path exn =
     error.message
 ;;
 
+let record_scan_error errors ~operation ~path ~message =
+  errors := { path; operation; message } :: !errors;
+  Log.Dashboard.warn
+    "legacy keeper inventory %s failed for %s: %s"
+    operation
+    path
+    message
+;;
+
 let lstat_result errors ~root path =
   try Ok (Unix.lstat path) with
   | Unix.Unix_error _ as exn ->
@@ -195,28 +204,33 @@ let scan_entries ~legacy_dir ~current_keepers_dir ~max_depth ~max_entries =
       | Ok st ->
         incr visited;
         let kind = stat_kind st in
-        let parts =
-          path_components_under_root ~root:legacy_dir path
-          |> Option.value ~default:[ path ]
-        in
-        let rel = path_of_components parts in
-        let classification, reason = classify ~current_keepers_dir ~parts ~kind in
-        entries
-        := { path = rel
-           ; depth
-           ; kind
-           ; bytes = st.Unix.st_size
-           ; classification
-           ; reason
-           }
-           :: !entries;
-        if String.equal kind "dir" && depth < max_depth
-        then (
-          match sorted_readdir_result errors ~root:legacy_dir path with
-          | Error () -> ()
-          | Ok names ->
-            names
-            |> List.iter (fun name -> visit ~depth:(depth + 1) (Filename.concat path name))))
+        (match path_components_under_root ~root:legacy_dir path with
+         | None ->
+           record_scan_error
+             errors
+             ~operation:"relative_path"
+             ~path:"<outside-legacy-root>"
+             ~message:"visited path is not under legacy keeper root"
+         | Some parts ->
+           let rel = path_of_components parts in
+           let classification, reason = classify ~current_keepers_dir ~parts ~kind in
+           entries
+           := { path = rel
+              ; depth
+              ; kind
+              ; bytes = st.Unix.st_size
+              ; classification
+              ; reason
+              }
+              :: !entries;
+           if String.equal kind "dir" && depth < max_depth
+           then (
+             match sorted_readdir_result errors ~root:legacy_dir path with
+             | Error () -> ()
+             | Ok names ->
+               names
+               |> List.iter (fun name ->
+                 visit ~depth:(depth + 1) (Filename.concat path name)))))
   in
   let exists =
     match

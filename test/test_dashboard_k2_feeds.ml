@@ -18,6 +18,42 @@ module Json = Yojson.Safe.Util
 
 let test_counter = ref 0
 
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out oc)
+    (fun () -> output_string oc content)
+;;
+
+let runtime_toml =
+  {|[runtime]
+default = "test.local"
+
+[providers.test]
+display-name = "Test"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.local]
+api-name = "local"
+max-context = 4096
+tools-support = true
+streaming = true
+
+[test.local]
+is-default = true
+max-concurrent = 1
+|}
+;;
+
+let init_runtime_default () =
+  let path = Filename.temp_file "dashboard-k2-runtime" ".toml" in
+  write_file path runtime_toml;
+  match Runtime.init_default ~config_path:path with
+  | Ok () -> ()
+  | Error err -> fail ("Runtime.init_default failed: " ^ err)
+;;
+
 let tmpdir prefix =
   incr test_counter;
   let dir =
@@ -39,6 +75,7 @@ let with_config f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_runtime_default ();
   let base_dir = tmpdir "dashboard_k2_feeds" in
   let config = Workspace.default_config base_dir in
   f config
@@ -262,6 +299,9 @@ let memory_row ~ts text =
   `Assoc
     [ "schema_version", `Int 2
     ; "kind", `String "goal"
+    ; "horizon", `String "mid_term"
+    ; "source", `String "test_fixture"
+    ; "trace_id", `String "trace-k2-memory"
     ; "text", `String text
     ; "priority", `Int 10
     ; "ts_unix", `Float ts
@@ -296,6 +336,9 @@ let test_memory_log_kind_mapping () =
     (`Assoc
         [ "schema_version", `Int 2
         ; "kind", `String "progress"
+        ; "horizon", `String "short_term"
+        ; "source", `String "test_fixture"
+        ; "trace_id", `String "trace-k2-progress"
         ; "text", `String "p1"
         ; "priority", `Int 10
         ; "ts_unix", `Float 3_000.0
@@ -306,17 +349,23 @@ let test_memory_log_kind_mapping () =
     (`Assoc
         [ "schema_version", `Int 2
         ; "kind", `String "goal"
+        ; "horizon", `String "mid_term"
+        ; "source", `String "test_fixture"
+        ; "trace_id", `String "trace-k2-goal"
         ; "text", `String "g1"
         ; "priority", `Int 10
         ; "ts_unix", `Float 3_001.0
         ]);
-  (* belief -> fact *)
+  (* constraints -> fact *)
   append_jsonl
     path
     (`Assoc
         [ "schema_version", `Int 2
-        ; "kind", `String "belief"
-        ; "text", `String "b1"
+        ; "kind", `String "constraints"
+        ; "horizon", `String "mid_term"
+        ; "source", `String "test_fixture"
+        ; "trace_id", `String "trace-k2-constraints"
+        ; "text", `String "c1"
         ; "priority", `Int 10
         ; "ts_unix", `Float 3_002.0
         ]);

@@ -132,6 +132,15 @@ let direct_empty_no_progress_retry_decision ?time_spent_in_turn_s err =
     ~remaining_turn_budget_s:60.0
     err
 
+type direct_retry_observed_attempt =
+  { observed_runtime_id : string
+  ; observed_max_context : int
+  ; observed_is_retry : bool
+  ; observed_degraded_retry_runtime : string option
+  ; observed_fallback_reason : string option
+  ; observed_rotation_attempt_count : int
+  }
+
 let test_keeper_hook_relaxes_strict_tool_choice () =
   let open Agent_sdk.Types in
   let relax = Masc.Keeper_run_tools_hooks.relax_strict_tool_choice_for_keeper in
@@ -808,9 +817,199 @@ let test_direct_empty_no_progress_retry_uses_shared_budget_decision () =
       true
       (match direct_empty_no_progress_retry_decision read_only_err with
        | Masc.Keeper_turn_runtime_budget.No_degraded_retry -> true
-       | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed _
-       | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted _ ->
-         false))
+	       | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed _
+	       | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted _ ->
+	         false))
+
+let cascade_decision_to_string
+    (decision : Masc.Keeper_unified_turn_cascade_resolution.cascade_decision_kind) =
+  match decision with
+  | Degraded_retry_allowed -> "degraded_retry_allowed"
+  | Degraded_retry_slot_phase_exhausted -> "degraded_retry_slot_phase_exhausted"
+  | No_degraded_retry -> "no_degraded_retry"
+  | Transient_network_retry -> "transient_network_retry"
+
+let test_direct_empty_no_progress_retry_loop_runs_fallback_attempt () =
+  with_direct_retry_runtime (fun () ->
+    let empty_err =
+      accept_rejected_sdk_error
+        ~response_shape:(Some Keeper_internal_error.Accept_response_empty)
+        ~last_tool_effect:None
+        ~reason:"shape=empty"
+        ()
+    in
+    let expected_retry_runtime =
+      match direct_empty_no_progress_retry_decision empty_err with
+      | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed retry ->
+        retry.next_runtime
+      | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted _ ->
+        Alcotest.fail
+          "fresh direct empty retry should not exhaust slot phase before loop"
+      | Masc.Keeper_turn_runtime_budget.No_degraded_retry ->
+        Alcotest.fail "fresh direct empty retry should select a fallback runtime"
+    in
+    let retry_context_resolution
+        : Masc.Keeper_context_runtime.max_context_resolution =
+      { requested_override = None
+      ; primary_budget = 4096
+      ; runtime_budget = 4096
+      ; turn_budget = 4096
+      ; effective_budget = 4096
+      }
+    in
+    let attempts = ref [] in
+    let published = ref [] in
+    let selected = ref [] in
+    let rotated = ref [] in
+    let validated = ref [] in
+    let setup_failures = ref [] in
+    let yielded = ref 0 in
+    let result =
+      Masc.Keeper_turn.For_testing.run_direct_empty_no_progress_retry_loop
+        ~keeper_name:"keeper-test"
+        ~base_runtime:"test_provider.test_model"
+        ~initial_runtime:"runtime.direct-empty"
+        ~initial_max_context:1024
+        ~estimated_input_tokens:1
+        ~timeout_sec:60.0
+        ~remaining_turn_budget_s:(fun () -> 60.0)
+        ~current_turn_phase_elapsed_ms:(function
+          | None -> 7, None
+          | Some _ -> 7, Some 0)
+        ~now_s:(fun () -> 10.0)
+        ~max_context_resolution_for_retry_runtime:(fun runtime_id ->
+          Alcotest.(check string)
+            "retry context resolved for fallback"
+            expected_retry_runtime
+            runtime_id;
+          retry_context_resolution)
+        ~validate_retry_runtime:(fun runtime_id ->
+          validated := runtime_id :: !validated;
+          Ok ())
+        ~publish_cascade_resolution:
+          (fun ~runtime_id ~decision ~reason ~next_runtime ~attempt _err ->
+             published :=
+               ( runtime_id
+               , cascade_decision_to_string decision
+               , reason
+               , next_runtime
+               , attempt )
+               :: !published)
+        ~emit_runtime_selected:(fun ~runtime_id ~fallback_reason ->
+          selected := (runtime_id, fallback_reason) :: !selected)
+        ~emit_runtime_rotation:(fun ~from_runtime ~to_runtime ~reason ->
+          rotated := (from_runtime, to_runtime, reason) :: !rotated)
+        ~record_retry_setup_failure:(fun ~from_runtime ~retry:_ ~rotation_attempt:_
+                                      ~fail_open_err:_ ->
+          setup_failures := from_runtime :: !setup_failures)
+        ~before_retry:(fun () -> yielded := !yielded + 1)
+        ~run_once:
+          (fun ~runtime_id ~max_context ~is_retry ~degraded_retry_runtime
+               ~fallback_reason ~runtime_rotation_attempts ->
+             attempts :=
+               { observed_runtime_id = runtime_id
+               ; observed_max_context = max_context
+               ; observed_is_retry = is_retry
+               ; observed_degraded_retry_runtime = degraded_retry_runtime
+               ; observed_fallback_reason =
+                   Option.map
+                     Masc.Keeper_error_classify.degraded_retry_reason_to_string
+                     fallback_reason
+               ; observed_rotation_attempt_count =
+                   List.length runtime_rotation_attempts
+               }
+               :: !attempts;
+             if is_retry then Ok ("ok:" ^ runtime_id) else Error empty_err)
+        ()
+    in
+    (match result with
+     | Error err ->
+       Alcotest.failf
+         "retry loop should succeed on fallback runtime: %s"
+         (Agent_sdk.Error.to_string err)
+     | Ok (value, final_max_context) ->
+       Alcotest.(check string)
+         "retry result comes from fallback runtime"
+         ("ok:" ^ expected_retry_runtime)
+         value;
+       Alcotest.(check int)
+         "final max context comes from fallback runtime"
+         4096
+         final_max_context);
+    (match List.rev !attempts with
+     | [ first; second ] ->
+       Alcotest.(check string)
+         "first attempt uses initial runtime"
+         "runtime.direct-empty"
+         first.observed_runtime_id;
+       Alcotest.(check int)
+         "first attempt uses initial max context"
+         1024
+         first.observed_max_context;
+       Alcotest.(check bool) "first attempt is not retry" false
+         first.observed_is_retry;
+       Alcotest.(check (option string))
+         "first attempt has no degraded runtime"
+         None
+         first.observed_degraded_retry_runtime;
+       Alcotest.(check string)
+         "second attempt uses fallback runtime"
+         expected_retry_runtime
+         second.observed_runtime_id;
+       Alcotest.(check int)
+         "second attempt uses fallback max context"
+         4096
+         second.observed_max_context;
+       Alcotest.(check bool) "second attempt is retry" true
+         second.observed_is_retry;
+       Alcotest.(check (option string))
+         "second attempt carries degraded retry runtime"
+         (Some expected_retry_runtime)
+         second.observed_degraded_retry_runtime;
+       Alcotest.(check (option string))
+         "second attempt carries fallback reason"
+         (Some "empty_no_progress")
+         second.observed_fallback_reason;
+       Alcotest.(check int)
+         "second attempt receives scheduled rotation attempt"
+         1
+         second.observed_rotation_attempt_count
+     | attempts ->
+       Alcotest.failf "expected exactly two attempts, got %d"
+         (List.length attempts));
+    Alcotest.(check (list string))
+      "fallback runtime was validated"
+      [ expected_retry_runtime ]
+      (List.rev !validated);
+    Alcotest.(check (list (pair string string)))
+      "runtime selected metric emitted"
+      [ expected_retry_runtime, "empty_no_progress" ]
+      (List.rev !selected);
+    Alcotest.(check (list (triple string string string)))
+      "runtime rotation metric emitted"
+      [ "runtime.direct-empty", expected_retry_runtime, "empty_no_progress" ]
+      (List.rev !rotated);
+    Alcotest.(check int) "cooperative retry yield runs once" 1 !yielded;
+    Alcotest.(check (list string)) "no setup failure recorded" [] !setup_failures;
+    (match List.rev !published with
+     | [ (runtime_id, decision, reason, next_runtime, attempt) ] ->
+       Alcotest.(check string)
+         "cascade published from initial runtime"
+         "runtime.direct-empty"
+         runtime_id;
+       Alcotest.(check string)
+         "cascade records allowed retry"
+         "degraded_retry_allowed"
+         decision;
+       Alcotest.(check string) "cascade reason" "empty_no_progress" reason;
+       Alcotest.(check (option string))
+         "cascade next runtime"
+         (Some expected_retry_runtime)
+         next_runtime;
+       Alcotest.(check int) "cascade attempt" 1 attempt
+     | published ->
+       Alcotest.failf "expected one cascade event, got %d"
+         (List.length published)))
 
 let test_thinking_with_text_is_accepted () =
   let result =
@@ -1204,12 +1403,16 @@ let () =
             "read-only retry uses typed context, not reason tokens"
             `Quick
             test_read_only_retry_uses_typed_context_not_reason_tokens;
-          Alcotest.test_case
-            "direct empty no-progress retry uses shared budget decision"
-            `Quick
-            test_direct_empty_no_progress_retry_uses_shared_budget_decision;
-          Alcotest.test_case "thinking plus text is accepted" `Quick
-            test_thinking_with_text_is_accepted;
+	          Alcotest.test_case
+	            "direct empty no-progress retry uses shared budget decision"
+	            `Quick
+	            test_direct_empty_no_progress_retry_uses_shared_budget_decision;
+	          Alcotest.test_case
+	            "direct empty no-progress retry runs fallback attempt"
+	            `Quick
+	            test_direct_empty_no_progress_retry_loop_runs_fallback_attempt;
+	          Alcotest.test_case "thinking plus text is accepted" `Quick
+	            test_thinking_with_text_is_accepted;
           Alcotest.test_case "thinking plus tool use is accepted" `Quick
             test_thinking_with_tool_use_is_accepted;
           Alcotest.test_case "accept delegates to OAS response shape" `Quick

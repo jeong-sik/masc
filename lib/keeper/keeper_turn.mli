@@ -55,10 +55,58 @@ module For_testing : sig
     estimated_input_tokens:int ->
     ?time_spent_in_turn_s:float ->
     remaining_turn_budget_s:float ->
-    Agent_sdk.Error.sdk_error ->
-    Keeper_turn_runtime_budget.degraded_retry_budget_decision
-  (** Shared-budget retry decision for direct-message empty no-progress accept
-      rejections. Non-empty/read-only accept rejections remain terminal here. *)
+	    Agent_sdk.Error.sdk_error ->
+	    Keeper_turn_runtime_budget.degraded_retry_budget_decision
+	  (** Shared-budget retry decision for direct-message empty no-progress accept
+	      rejections. Non-empty/read-only accept rejections remain terminal here. *)
+
+  val run_direct_empty_no_progress_retry_loop :
+    keeper_name:string ->
+    base_runtime:string ->
+    initial_runtime:string ->
+    initial_max_context:int ->
+    estimated_input_tokens:int ->
+    timeout_sec:float ->
+    remaining_turn_budget_s:(unit -> float) ->
+    current_turn_phase_elapsed_ms:(float option -> int * int option) ->
+    now_s:(unit -> float) ->
+    max_context_resolution_for_retry_runtime:
+      (string -> Keeper_context_runtime.max_context_resolution) ->
+    validate_retry_runtime:
+      (string -> (unit, Agent_sdk.Error.sdk_error) result) ->
+    publish_cascade_resolution:
+      (runtime_id:string ->
+       decision:Keeper_unified_turn_cascade_resolution.cascade_decision_kind ->
+       reason:string ->
+       next_runtime:string option ->
+       attempt:int ->
+       Agent_sdk.Error.sdk_error ->
+       unit) ->
+    emit_runtime_selected:
+      (runtime_id:string -> fallback_reason:string -> unit) ->
+    emit_runtime_rotation:
+      (from_runtime:string -> to_runtime:string -> reason:string -> unit) ->
+    record_retry_setup_failure:
+      (from_runtime:string ->
+       retry:Keeper_error_classify.degraded_retry ->
+       rotation_attempt:Keeper_execution_receipt.runtime_rotation_attempt ->
+       fail_open_err:Agent_sdk.Error.sdk_error ->
+       unit) ->
+    before_retry:(unit -> unit) ->
+    run_once:
+      (runtime_id:string ->
+       max_context:int ->
+       is_retry:bool ->
+       degraded_retry_runtime:string option ->
+       fallback_reason:Keeper_error_classify.degraded_retry_reason option ->
+       runtime_rotation_attempts:
+         Keeper_execution_receipt.runtime_rotation_attempt list ->
+       ('a, Agent_sdk.Error.sdk_error) result) ->
+    unit ->
+    ('a * int, Agent_sdk.Error.sdk_error) result
+  (** Execute the direct-message empty-response retry loop with injected side
+      effects. Exposed only to verify that fallback selection reaches the next
+      keeper run attempt. *)
 end
 
 (** Format a dashboard co-view context object ({ label, route, scene, fields })

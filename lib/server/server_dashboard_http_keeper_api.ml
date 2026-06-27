@@ -402,11 +402,33 @@ let read_runtime_manifest_tail_rows ~base_dir path =
     Dated_jsonl.load_tail_lines path
       ~max_lines:compaction_snapshot_manifest_tail_max_lines
     |> fun lines ->
+    let compaction_snapshot_manifest_event_name = function
+      | `Assoc fields -> (
+          match List.assoc_opt "event" fields with
+          | Some (`String event) -> Some event
+          | _ -> None)
+      | _ -> None
+    in
+    let compaction_snapshot_manifest_event_is_relevant event =
+      String.equal
+        event
+        (Keeper_runtime_manifest.event_kind_to_string
+           Keeper_runtime_manifest.Event_bus_correlated)
+      || String.equal
+           event
+           (Keeper_runtime_manifest.event_kind_to_string
+              Keeper_runtime_manifest.Context_compacted)
+    in
     let rec loop line_no rows read_errors = function
       | [] -> List.rev rows, List.rev read_errors
       | line :: rest ->
       try
-        match Yojson.Safe.from_string line |> Keeper_runtime_manifest.of_json with
+        let json = Yojson.Safe.from_string line in
+        match compaction_snapshot_manifest_event_name json with
+        | Some event when not (compaction_snapshot_manifest_event_is_relevant event) ->
+          loop (line_no + 1) rows read_errors rest
+        | _ -> (
+        match Keeper_runtime_manifest.of_json json with
             | Ok row -> loop (line_no + 1) (row :: rows) read_errors rest
             | Error msg ->
               loop (line_no + 1) rows
@@ -414,7 +436,7 @@ let read_runtime_manifest_tail_rows ~base_dir path =
                    ~scope:(runtime_manifest_row_scope ~base_dir path line_no)
                    ~error:msg
                  :: read_errors)
-                rest
+                rest)
       with
           | Yojson.Json_error msg | Yojson.Safe.Util.Type_error (msg, _) ->
             loop (line_no + 1) rows

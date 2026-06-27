@@ -110,6 +110,88 @@ let empty_sweep_acc =
   }
 ;;
 
+let release_dead_keeper_owned_tasks (ctx : _ context) (entry : Keeper_registry.registry_entry) =
+  let base_path = ctx.config.base_path in
+  let meta =
+    match read_meta ctx.config entry.name with
+    | Ok (Some meta) -> meta
+    | Ok None ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string ReconcileFailures)
+        ~labels:[ "keeper", entry.name; "phase", "dead_task_release_meta_missing" ]
+        ();
+      Log.Keeper.warn
+        "%s: dead-task release using registry meta because persisted meta is missing"
+        entry.name;
+      entry.meta
+    | Error err ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string ReconcileFailures)
+        ~labels:[ "keeper", entry.name; "phase", "dead_task_release_meta_read" ]
+        ();
+      Log.Keeper.warn
+        "%s: dead-task release using registry meta because persisted meta read failed: %s"
+        entry.name
+        err;
+      entry.meta
+  in
+  let owned_tasks =
+    Keeper_current_task_reconcile.owned_active_tasks_for_meta ~config:ctx.config ~meta
+  in
+  List.iter
+    (fun (owned : Keeper_current_task_reconcile.owned_active_task) ->
+      let task_id = Keeper_id.Task_id.to_string owned.task_id in
+      match
+        Workspace.force_release_task_r
+          ctx.config
+          ~agent_name:"keeper-supervisor"
+          ~task_id
+          ()
+      with
+      | Ok msg ->
+        Log.Keeper.warn
+          "%s: released active task %s from dead owner %s after restart budget \
+           exhaustion: %s"
+          entry.name
+          task_id
+          meta.agent_name
+          msg
+      | Error err ->
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string ReconcileFailures)
+          ~labels:[ "keeper", entry.name; "phase", "dead_task_release" ]
+          ();
+        Log.Keeper.error
+          "%s: failed to release active task %s from dead owner %s: %s"
+          entry.name
+          task_id
+          meta.agent_name
+          (Masc_domain.masc_error_to_string err))
+    owned_tasks;
+  match meta.current_task_id with
+  | None -> ()
+  | Some _ ->
+    let cleared_meta =
+      { meta with current_task_id = None; updated_at = now_iso () }
+    in
+    (match
+       write_meta_with_merge
+         ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+         ctx.config
+         cleared_meta
+     with
+     | Ok () -> Keeper_registry.update_meta ~base_path entry.name cleared_meta
+     | Error err ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string WriteMetaFailures)
+         ~labels:[ "keeper", entry.name; "phase", "dead_clear_current_task" ]
+         ();
+       Log.Keeper.warn
+         "%s: failed to clear current_task_id after dead-task release: %s"
+         entry.name
+         err)
+;;
+
 let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
   let now = Time_compat.now () in
   let max_restarts =
@@ -461,21 +543,11 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
          entry.name
          Keeper_state_machine.Restart_budget_exhausted;
        Keeper_registry.mark_dead ~base_path entry.name ~at:now;
-       (* Task release: Dead keepers cannot make progress on claimed tasks.
-       Without this release, current_task_id stays claimed forever —
-       the task is invisible to peers while this keeper is permanently
-       stopped.  Mirrors handle_crash_auto_pause (line 1163). *)
-       (match entry.meta.current_task_id with
-        | Some _ ->
-          (match read_meta ctx.config entry.name with
-           | Ok (Some meta) ->
-             ignore
-               (write_meta_with_merge
-                  ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-                  ctx.config
-                  { meta with current_task_id = None })
-           | _ -> ())
-        | None -> ());
+       (* Dead keepers cannot make progress on owned tasks.  Release from the
+          backlog's typed ownership state, not from a possibly stale meta
+          pointer, so an exhausted keeper cannot strand an InProgress task and
+          a stale current_task_id cannot release someone else's work. *)
+       release_dead_keeper_owned_tasks ctx entry;
        let detail =
          Printf.sprintf "restart budget exhausted (%d), last: %s" max_restarts msg
        in

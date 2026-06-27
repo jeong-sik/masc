@@ -613,13 +613,21 @@ module Broadcast_dedupe = struct
 
   let emit_once t ~keeper_name ~key ~emit =
     let slot = slot t ~keeper_name in
-    Eio.Mutex.use_rw ~protect:true slot.mu (fun () ->
-      if key_seen t slot.last_key key
-      then Duplicate
-      else (
-        let event = emit () in
-        slot.last_key <- Some key;
-        Emitted event))
+    match
+      Eio.Mutex.use_rw ~protect:true slot.mu (fun () ->
+          try
+            Ok
+              (if key_seen t slot.last_key key
+               then Duplicate
+               else (
+                 let event = emit () in
+                 slot.last_key <- Some key;
+                 Emitted event))
+          with
+          | exn -> Error (exn, Printexc.get_raw_backtrace ()))
+    with
+    | Ok value -> value
+    | Error (exn, bt) -> Printexc.raise_with_backtrace exn bt
   ;;
 
   let reset t =

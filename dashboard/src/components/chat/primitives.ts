@@ -503,7 +503,12 @@ let markedPromise: Promise<MarkedApi> | null = null
 
 function loadMarked(): Promise<MarkedApi> {
   if (!markedPromise) {
-    markedPromise = import('marked').then((module) => module.marked)
+    markedPromise = import('marked')
+      .then((module) => module.marked)
+      .catch((err) => {
+        markedPromise = null
+        throw err
+      })
   }
   return markedPromise
 }
@@ -527,7 +532,8 @@ function AsyncMarkdownDiv({
         const marked = await loadMarked()
         const next = purifyHtml(marked.parse(text) as string, sanitizeConfig)
         if (active) setRendered(next)
-      } catch {
+      } catch (err) {
+        console.warn('[chat] markdown render failed', err instanceof Error ? err.message : err)
         if (active) setRendered(null)
       }
     })()
@@ -535,7 +541,7 @@ function AsyncMarkdownDiv({
   }, [text, sanitizeConfig])
 
   return rendered === null
-    ? html`<div class=${className}>${text}</div>`
+    ? html`<div class=${className} dangerouslySetInnerHTML=${renderPlainLinkedHtml(text)} />`
     : html`<div class=${className} dangerouslySetInnerHTML=${{ __html: rendered }} />`
 }
 
@@ -1901,9 +1907,15 @@ function hasRichBlockMarkdownCue(text: string): boolean {
   return (
     /^ {0,3}(```|~~~)/m.test(text)
     || /^ {0,3}#{1,6}\s+\S/m.test(text)
-    || /^ {0,3}>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION|DANGER|WARN|ERROR)\]/im.test(text)
+    || /^ {0,3}>/m.test(text)
+    || /^ {0,3}(?:[-*+]\s+|\d+[.)]\s+)/m.test(text)
+    || /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/m.test(text)
     || (/^\s*\|.+\|\s*$/m.test(text) && /^\s*\|?\s*:?-{3,}:?\s*\|/m.test(text))
-    || /!\[[^\]]*]\([^)]+\)/.test(text)
+    || /!?\[[^\]]+]\([^)]+\)/.test(text)
+    || /`[^`\n]+`/.test(text)
+    || /(?:\*\*|__)\S[\s\S]*?\S(?:\*\*|__)/.test(text)
+    || /(^|[\s(])(?:\*|_)\S[^\n]*?\S(?:\*|_)(?=$|[\s).,!?;:])/.test(text)
+    || /^https?:\/\/\S+$/im.test(text)
     || /^<svg\b[\s\S]*<\/svg>$/i.test(trimmed)
   )
 }
@@ -1967,14 +1979,17 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const [parsedBlocks, setParsedBlocks] = useState<ChatBlock[] | null>(null)
   useEffect(() => {
     let active = true
-    setParsedBlocks(null)
-    if (!shouldParseRichBlocks) return () => { active = false }
+    if (!shouldParseRichBlocks) {
+      setParsedBlocks(null)
+      return () => { active = false }
+    }
     void (async () => {
       try {
         const { parseMarkdownToBlocks } = await import('./markdown-blocks')
         const next = parseMarkdownToBlocks(entry.text ?? '')
         if (active) setParsedBlocks(next)
-      } catch {
+      } catch (err) {
+        console.warn('[chat] rich markdown parse failed', err instanceof Error ? err.message : err)
         if (active) setParsedBlocks(null)
       }
     })()

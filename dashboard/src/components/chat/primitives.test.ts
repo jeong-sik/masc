@@ -2551,6 +2551,22 @@ describe('ChatMessageBubble — rich markdown rendering of assistant prose', () 
     expect(code?.textContent).toContain('const x = 1')
   })
 
+  it('routes inline markdown and lists through the rich parser', async () => {
+    renderEntries([
+      entry({
+        id: 'a-inline',
+        role: 'assistant',
+        source: 'direct_assistant',
+        text: 'Summary with **bold** and `code`.\n\n- first\n- second',
+      }),
+    ])
+
+    await waitFor(() => expect(container.querySelector('[data-chat-blocks] strong')?.textContent).toBe('bold'))
+    expect(container.querySelector('[data-chat-blocks] code')?.textContent).toBe('code')
+    const items = Array.from(container.querySelectorAll('[data-chat-blocks] li')).map((node) => node.textContent)
+    expect(items).toEqual(['first', 'second'])
+  })
+
   it('re-parses richly even when the backend supplied a degraded p-only block', async () => {
     // The backend persists a line-based parse (escaped <p>); the render path
     // must still recover the structured code block from the message text.

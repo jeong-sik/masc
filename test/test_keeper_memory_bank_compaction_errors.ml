@@ -76,6 +76,28 @@ let test_schema_mismatch_surfaces_typed_error () =
     result.Policy.error
 ;;
 
+let test_malformed_json_is_not_schema_mismatch () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "malformed-json" in
+  let path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
+  let content =
+    String.concat
+      "\n"
+      [ progress_row ~trace_id:"t1" ~text:"valid row"; {|{"schema_version":|} ]
+    ^ "\n"
+  in
+  write_file path content;
+  let result = Bank.compact_memory_bank_if_needed config meta in
+  Alcotest.(check bool) "compaction was attempted" true result.Policy.performed;
+  Alcotest.(check int) "invalid row dropped" 1 result.Policy.invalid_dropped;
+  Alcotest.(check (option (Alcotest.testable (Fmt.of_to_string Policy.compaction_error_to_string) ( = ))))
+    "malformed json is not schema mismatch"
+    None
+    result.Policy.error
+;;
+
 let test_write_failure_surfaces_typed_error () =
   with_temp_dir
   @@ fun base_path ->
@@ -119,6 +141,10 @@ let () =
             "write failure surfaces typed error"
             `Quick
             test_write_failure_surfaces_typed_error
+        ; Alcotest.test_case
+            "malformed json is not schema mismatch"
+            `Quick
+            test_malformed_json_is_not_schema_mismatch
         ] )
     ]
 ;;

@@ -318,9 +318,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       in
       loop ());
   (* P0-1: per-keeper Memory OS reconcile. Runs after GC at the same coarse
-     cadence. Degrades gracefully when [Keeper_memory_os_reconcile] is only a
+     cadence. The pass is opt-in while [Keeper_memory_os_reconcile] is only a
      stub; each keeper is wrapped in try/with so one failure does not cancel
-     siblings. Gated by [MASC_KEEPER_MEMORY_OS_RECONCILE] (default true). *)
+     siblings. Gated by [MASC_KEEPER_MEMORY_OS_RECONCILE] (default false). *)
   if Env_config.KeeperMemoryOs.reconcile_enabled () then
     fork_logged_fiber
       ~sw

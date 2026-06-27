@@ -169,6 +169,7 @@ let has_schema_mismatch content =
     then false
     else (
       match Yojson.Safe.from_string line with
+      | exception Yojson.Json_error _ -> false
       | `Assoc fields ->
         (match Safe_ops.json_int_opt "schema_version" (`Assoc fields) with
          | Some v when v <> current -> true

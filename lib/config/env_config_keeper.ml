@@ -198,7 +198,7 @@ module KeeperMemoryOs = struct
   let librarian_runtime_id_default = None
   let librarian_global_slot_default = 1
   let gc_enabled_default = true
-  let reconcile_enabled_default = true
+  let reconcile_enabled_default = false
   let consolidation_enabled_default = false
   let consolidation_runtime_id_default = None
 
@@ -311,7 +311,8 @@ module KeeperMemoryOs = struct
       ~default:gc_enabled_default
   ;;
 
-  (** Per-keeper Memory OS reconcile maintenance fiber kill switch. Default: true;
+  (** Per-keeper Memory OS reconcile maintenance fiber kill switch.
+      Default: false while [Keeper_memory_os_reconcile] is a placeholder;
       invalid values fail closed to false.
       @category Policies
       @ops_class operator *)

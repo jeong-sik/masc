@@ -4836,10 +4836,10 @@ let test_self_observation_excluded_from_user_model () =
       (List.hd model.Keeper_user_model.preferences).Keeper_user_model.claim)
 ;;
 
-let test_gc_and_reconcile_default_on () =
+let test_gc_default_on_and_reconcile_default_off () =
   (* Defaults are module-load constants; env overrides are tested separately. *)
   Alcotest.(check bool) "gc default is true" true Env_config.KeeperMemoryOs.gc_enabled_default;
-  Alcotest.(check bool) "reconcile default is true" true Env_config.KeeperMemoryOs.reconcile_enabled_default
+  Alcotest.(check bool) "reconcile default is false" false Env_config.KeeperMemoryOs.reconcile_enabled_default
 ;;
 
 let () =
@@ -4958,9 +4958,9 @@ let () =
             `Quick
             test_compaction_snapshots_json_surfaces_manifest_read_errors
         ; Alcotest.test_case
-            "gc and reconcile defaults are on (P0-1)"
+            "gc default is on and reconcile default is opt-in (P0-1)"
             `Quick
-            test_gc_and_reconcile_default_on
+            test_gc_default_on_and_reconcile_default_off
         ] )
     ; ( "policy"
       , [ Alcotest.test_case

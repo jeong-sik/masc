@@ -465,6 +465,22 @@ function formatCloseEventError(event: CloseEvent): string {
   return `dashboard websocket closed (${parts.join(', ')})`
 }
 
+function websocketReadyStateName(state: number): string {
+  if (typeof WebSocket !== 'undefined') {
+    switch (state) {
+      case WebSocket.CONNECTING:
+        return 'CONNECTING'
+      case WebSocket.OPEN:
+        return 'OPEN'
+      case WebSocket.CLOSING:
+        return 'CLOSING'
+      case WebSocket.CLOSED:
+        return 'CLOSED'
+    }
+  }
+  return `UNKNOWN(${state})`
+}
+
 // WebSocket reconnect uses an explicit 500ms base (half of the SSE
 // RECONNECT_BASE_MS) so transient socket churn recovers faster. Derive the
 // exp clamp from the configured cap so a future operator bump of
@@ -584,8 +600,17 @@ function sendRpc(method: string, params: JsonObject, timeoutMs = DASHBOARD_WS_RP
 }
 
 function sendNotification(method: string, params: JsonObject): void {
-  if (!socket || socket.readyState !== WebSocket.OPEN) return
   const currentSocket = socket
+  if (!currentSocket) return
+  if (currentSocket.readyState !== WebSocket.OPEN) {
+    reconnectAfterCurrentSocketFailure(
+      currentSocket,
+      new Error(
+        `dashboard websocket notification send skipped while socket state=${websocketReadyStateName(currentSocket.readyState)}: ${method}`,
+      ),
+    )
+    return
+  }
   try {
     currentSocket.send(JSON.stringify({ jsonrpc: '2.0', method, params }))
   } catch (err) {

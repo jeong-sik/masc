@@ -4638,6 +4638,59 @@ let json_item_list label fields key =
   | None -> Alcotest.failf "%s.%s missing" label key
 ;;
 
+let compaction_snapshot_event_class_to_string = function
+  | Runtime_manifest.Compaction_snapshot_relevant -> "relevant"
+  | Runtime_manifest.Compaction_snapshot_known_unrelated -> "known_unrelated"
+  | Runtime_manifest.Compaction_snapshot_unknown -> "unknown"
+;;
+
+let check_compaction_snapshot_event_class label expected actual =
+  Alcotest.(check string)
+    label
+    (compaction_snapshot_event_class_to_string expected)
+    (compaction_snapshot_event_class_to_string actual)
+;;
+
+let expected_compaction_snapshot_event_class = function
+  | Runtime_manifest.Event_bus_correlated
+  | Runtime_manifest.Context_compacted ->
+    Runtime_manifest.Compaction_snapshot_relevant
+  | Runtime_manifest.Turn_started
+  | Runtime_manifest.Phase_gate_decided
+  | Runtime_manifest.Runtime_routed
+  | Runtime_manifest.Pre_dispatch_blocked
+  | Runtime_manifest.Provider_lane_resolved
+  | Runtime_manifest.Provider_attempt_started
+  | Runtime_manifest.Provider_attempt_finished
+  | Runtime_manifest.Context_injected
+  | Runtime_manifest.State_snapshot_sidecar_saved
+  | Runtime_manifest.Working_state_sidecar_saved
+  | Runtime_manifest.Checkpoint_loaded
+  | Runtime_manifest.Checkpoint_saved
+  | Runtime_manifest.Receipt_appended
+  | Runtime_manifest.Turn_finished ->
+    Runtime_manifest.Compaction_snapshot_known_unrelated
+;;
+
+let test_compaction_snapshot_event_classifier_covers_typed_events () =
+  List.iter
+    (fun event ->
+       let event_name = Runtime_manifest.event_kind_to_string event in
+       check_compaction_snapshot_event_class
+         event_name
+         (expected_compaction_snapshot_event_class event)
+         (Runtime_manifest.classify_compaction_snapshot_event event_name))
+    Runtime_manifest.all_event_kinds;
+  check_compaction_snapshot_event_class
+    "legacy memory_injected"
+    Runtime_manifest.Compaction_snapshot_known_unrelated
+    (Runtime_manifest.classify_compaction_snapshot_event "memory_injected");
+  check_compaction_snapshot_event_class
+    "unknown typed-like future event"
+    Runtime_manifest.Compaction_snapshot_unknown
+    (Runtime_manifest.classify_compaction_snapshot_event "context_compacted_v2")
+;;
+
 let test_compaction_snapshots_json_reads_runtime_manifest () =
   with_temp_workspace_config (fun config ->
     let keeper_id = "memory-panel-test" in
@@ -5064,6 +5117,10 @@ let () =
             "dashboard json selection_policy pins recall lineage"
             `Quick
             test_dashboard_json_selection_policy_contract
+        ; Alcotest.test_case
+            "dashboard compaction snapshot classifier covers typed events"
+            `Quick
+            test_compaction_snapshot_event_classifier_covers_typed_events
         ; Alcotest.test_case
             "dashboard compaction snapshots read runtime manifest metadata only"
             `Quick

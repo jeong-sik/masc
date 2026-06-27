@@ -298,10 +298,15 @@ let host_fd_pressure_state_file_path () =
      | None -> default_host_fd_pressure_state_file_path)
 ;;
 
+(** Operator policy toggle for disabling host fd pressure polling.
+    @category Policies
+    @ops_class operator *)
 let host_fd_pressure_poller_disabled () =
   get_bool ~default:false host_fd_pressure_poller_disabled_env_key
-;;
 
+(** Operator timeout/interval knob for host fd pressure polling cadence.
+    @category Timeouts
+    @ops_class operator *)
 let host_fd_pressure_poll_interval_sec () =
   get_float ~default:1.0 host_fd_pressure_poll_interval_sec_env_key
   |> Float.max 0.5

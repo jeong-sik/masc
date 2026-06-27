@@ -155,25 +155,30 @@ function normalizeStage(stage: PipelineStage | string | null | undefined): strin
   return stage ? String(stage) : 'offline'
 }
 
-// Transient FSM phases — KeeperPhase SSOT (PascalCase, `types/core.ts:1083`)
-// plus their PipelineStage equivalents (`types/core.ts:945`).
+// Transient FSM phases — derived from the closed-sum SSOTs
+// (KeeperPhase: `types/core.ts:1083`, PipelineStage: `types/core.ts:945`).
 // These signal a *transition* (compacting/handoff/draining/restarting) rather
 // than steady-state, so they route to the dedicated `transient` band instead
 // of `active` (which would silently re-merge them with healthy keepers mid-
 // transition) or `attention` (which is reserved for failure/stall signals).
-const TRANSIENT_KEEPER_PHASES: readonly KeeperPhase[] = [
+//
+// `satisfies readonly KeeperPhase[]` ties each literal to the closed sum: any
+// drift (typo or new transient variant) becomes a compile-time error instead
+// of a silent runtime mismatch. `as const` keeps the literal types so the
+// `ReadonlySet<string>` derivation stays branch-free.
+const TRANSIENT_KEEPER_PHASES = [
   'Compacting',
   'HandingOff',
   'Draining',
   'Restarting',
-]
+] as const satisfies readonly KeeperPhase[]
 
-const TRANSIENT_PIPELINE_STAGES: readonly PipelineStage[] = [
+const TRANSIENT_PIPELINE_STAGES = [
   'compacting',
   'handoff',
   'draining',
   'restarting',
-]
+] as const satisfies readonly PipelineStage[]
 
 const TRANSIENT_PHASE_KEYS: ReadonlySet<string> = new Set<string>([
   ...TRANSIENT_KEEPER_PHASES,

@@ -8,7 +8,7 @@ revision_note: "§5.2 mapping source corrected in revision 2 (2026-06-27). The t
 author: jeong-sik (vincent)
 supersedes: []
 superseded_by: null
-related: ["0294", "0288", "fleet.jsx prototype (~/Downloads/v2 4/project/keeper-v2/fleet.jsx)"]
+related: ["0294", "0288"]
 implementation_prs: []
 ---
 
@@ -31,9 +31,9 @@ which already uses `kw-fleet-aside[data-tone]` directly without going through
 
 ## 1. Problem — Fleet CSS paints 5 tones, TS only emits 4; "busy" is a dead branch
 
-The keeper-v2 Fleet design (`fleet.jsx` prototype, ground truth in
-`~/Downloads/v2 4/project/keeper-v2/notes/grounding.md`) defines a 5-value
-tone vocabulary for the row-left tone-rail and the per-row phase chip:
+The keeper-v2 Fleet design (`fleet.jsx` prototype HTML/JSX, vendored SSOT in
+`dashboard/design-system/prototype-v2/notes/css-map.md` line 35) defines a
+5-value tone vocabulary for the row-left tone-rail and the per-row phase chip:
 
 ```
 ok | warn | bad | busy | idle
@@ -59,7 +59,9 @@ The TS path that fills `data-tone` is narrower. Two layers constrain it:
    is one of four values; the CSS `[data-tone="busy"]` selectors are dead branches.
 
 The prototype's intent is recoverable from `phaseTone(k.phase)` at
-`fleet.jsx:30` — it maps every FSM phase onto the 5-tone vocabulary
+`fleet.jsx:30` (designer-side HTML/JSX, not vendored into this repo; see
+`dashboard/design-system/prototype-v2/notes/css-map.md:35` for the vendored
+SSOT path) — it maps every FSM phase onto the 5-tone vocabulary
 (`PHASE_TONE[phase] || 'idle'`, where `PHASE_TONE` includes transient
 phases like `Compacting | Draining | HandingOff | Restarting` → `'busy'`).
 Because the dashboard runs `phase → RuntimeBand → FleetTone` instead of
@@ -110,7 +112,8 @@ The prototype maps all four transient phases onto `busy` and reserves
 "keeper is in transition" with "keeper is failing" loses the operator's
 ability to scan "what is currently moving" down a single column edge,
 which is the design's stated goal
-(`fleet.jsx:1-3`: *"tone-rail per row, real varied phase chips"*).
+(`fleet.jsx:1-3`, designer-side HTML/JSX, not vendored; vendored SSOT is
+`dashboard/design-system/prototype-v2/notes/css-map.md:35`): *"tone-rail per row, real varied phase chips"*).
 
 Without `busy`, transient-phase keepers paint the same edge color as
 steady-state `active` or `attention`, and the dashboard's group divider

@@ -356,6 +356,7 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 1,
       pausedKeepers: 1,
+      transientKeepers: 0,
       offlineKeepers: 0,
       keeperRows: 2,
       totalRuntimes: 2,
@@ -388,6 +389,7 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 0,
       pausedKeepers: 1,
+      transientKeepers: 0,
       offlineKeepers: 0,
       keeperRows: 1,
       totalRuntimes: 1,
@@ -418,6 +420,7 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 1,
       pausedKeepers: 0,
+      transientKeepers: 0,
       offlineKeepers: 0,
       keeperRows: 1,
       totalRuntimes: 1,
@@ -449,6 +452,7 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 1,
       pausedKeepers: 0,
+      transientKeepers: 0,
       offlineKeepers: 0,
       keeperRows: 1,
       totalRuntimes: 1,
@@ -476,6 +480,7 @@ describe('countRuntimeKinds', () => {
       agents: 1,
       keepers: 1,
       pausedKeepers: 0,
+      transientKeepers: 0,
       offlineKeepers: 0,
       keeperRows: 1,
       totalRuntimes: 2,
@@ -513,6 +518,7 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 2,
       pausedKeepers: 6,
+      transientKeepers: 0,
       offlineKeepers: 9,
       keeperRows: 17,
       totalRuntimes: 17,
@@ -566,9 +572,41 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 1,
       pausedKeepers: 1,
+      transientKeepers: 2,
       offlineKeepers: 1,
       keeperRows: 5,
       totalRuntimes: 5,
+    })
+  })
+
+  it('uses composite snapshots when counting transient keeper rows', () => {
+    const composite = makeCompositeSnapshot({
+      keeper: 'compact',
+      correlation_id: 'keeper:compact:1',
+      phase: 'compacting',
+    })
+    const result = countRuntimeKinds(
+      [],
+      [
+        {
+          name: 'compact',
+          status: 'active',
+          phase: 'Running',
+          pipeline_stage: 'idle',
+          keepalive_running: true,
+        } as Keeper,
+      ],
+      new Map([['compact', composite]]),
+    )
+
+    expect(result).toEqual({
+      agents: 0,
+      keepers: 0,
+      pausedKeepers: 0,
+      transientKeepers: 1,
+      offlineKeepers: 0,
+      keeperRows: 1,
+      totalRuntimes: 1,
     })
   })
 })

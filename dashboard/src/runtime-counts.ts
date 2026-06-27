@@ -14,6 +14,11 @@ export interface LiveRuntimeView {
   agents: number
   keepers: number
   pausedKeepers: number
+  // Transient keeper count — RFC-0295. Always present (even when the
+  // underlying source can't enumerate it) so downstream consumers can
+  // reconcile `keepers + pausedKeepers + transientKeepers + offlineKeepers`
+  // against `keeperRows` without guessing.
+  transientKeepers: number
   offlineKeepers: number
   keeperRows: number
   tasks: number
@@ -265,10 +270,14 @@ export function resolveRuntimeCounts({
   const livePausedKeepers = runtimeHealthAvailable
     ? runtimeHealthCounts.pausedKeepers
     : normalizeCount(pausedKeepersCount)
-  const liveTransientKeepers = runtimeHealthAvailable ? 0 : normalizeCount(transientKeepersCount)
+  // Runtime-health fleet_safety is authoritative for running/paused fibers,
+  // but it does not enumerate RFC-0295 transient detail rows. Preserve the
+  // row-derived transient count so the live view remains reconcilable without
+  // synthesizing offline rows from stale execution snapshots.
+  const liveTransientKeepers = normalizeCount(transientKeepersCount)
   const liveOfflineKeepers = runtimeHealthAvailable ? 0 : normalizeCount(offlineKeepersCount)
   const liveKeeperRows = runtimeHealthAvailable
-    ? liveKeepers + livePausedKeepers
+    ? liveKeepers + livePausedKeepers + liveTransientKeepers
     : Math.max(
         normalizeCount(keeperRowsCount),
         liveKeepers + livePausedKeepers + liveTransientKeepers + liveOfflineKeepers,
@@ -278,6 +287,7 @@ export function resolveRuntimeCounts({
     agents: liveAgents,
     keepers: liveKeepers,
     pausedKeepers: livePausedKeepers,
+    transientKeepers: liveTransientKeepers,
     offlineKeepers: runtimeHealthAvailable
       ? 0
       : Math.max(0, liveKeeperRows - liveKeepers - livePausedKeepers - liveTransientKeepers),

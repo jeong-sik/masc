@@ -705,10 +705,21 @@ function compositeSnapshotForKeeper(
 export function countRuntimeKinds(
   agentList: Agent[],
   keeperList: Keeper[],
+  // RFC-0295: pass the fleet-wide composite snapshot map so the breakdown
+  // agrees with the per-row band computation (`liveRuntimeCounts`,
+  // `bandByAgent`). Without this, countRuntimeKinds and the chip/footer math
+  // would disagree on transient/attention whenever composite gates shift
+  // the band — a silent operator-visible count inconsistency.
+  compositeByKeeperKey?: ReadonlyMap<string, KeeperCompositeSnapshot> | null,
 ): {
   agents: number
   keepers: number
   pausedKeepers: number
+  // RFC-0295: transient band rows (Compacting/HandingOff/Draining/Restarting)
+  // are now part of the breakdown. Exposed so consumers can reconcile
+  // `keepers + pausedKeepers + transientKeepers + offlineKeepers` against
+  // `keeperRows` without guessing where the missing rows went.
+  transientKeepers: number
   offlineKeepers: number
   keeperRows: number
   totalRuntimes: number
@@ -726,7 +737,8 @@ export function countRuntimeKinds(
   let transientKeepers = 0
   for (const row of allKeepers) {
     const keeper = findKeeperRuntimeForAgent(row, keeperLookup)
-    const band = keeper ? runtimeBandMetaForAgent(row, keeper).key : null
+    const composite = compositeSnapshotForKeeper(keeper, compositeByKeeperKey ?? null)
+    const band = keeper ? runtimeBandMetaForAgent(row, keeper, composite).key : null
     if (band === 'transient') {
       transientKeepers += 1
     } else if (keeper && isKeeperPaused(keeper)) {
@@ -742,6 +754,7 @@ export function countRuntimeKinds(
     agents: agentCount,
     keepers: runningKeepers,
     pausedKeepers,
+    transientKeepers,
     offlineKeepers: Math.max(0, keeperRows - runningKeepers - pausedKeepers - transientKeepers),
     keeperRows,
     totalRuntimes: rosterAgents.length,

@@ -15,6 +15,8 @@ open Keeper_execution
 
 include Keeper_supervisor_launch
 
+let supervisor_agent_name = "keeper-supervisor"
+
 (** RFC-0250: pure stale-run assessment for the no-turn-produced case.
 
     Returns [Some (Stale_turn_timeout (Idle_turn { stall_seconds }))] — giving
@@ -144,7 +146,7 @@ let release_dead_keeper_owned_tasks (ctx : _ context) (entry : Keeper_registry.r
       match
         Workspace.force_release_task_r
           ctx.config
-          ~agent_name:"keeper-supervisor"
+          ~agent_name:supervisor_agent_name
           ~task_id
           ()
       with

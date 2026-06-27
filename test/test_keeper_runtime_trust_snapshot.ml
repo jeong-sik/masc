@@ -394,6 +394,43 @@ let test_completion_blocker_supersedes_passive_only_receipt () =
              |> to_string)))
 ;;
 
+let test_unknown_completion_contract_result_is_explicit () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "runtime-trust-unknown-contract-label" in
+       let meta = make_meta keeper_name in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       Dated_jsonl.append
+         receipt_store
+         (`Assoc
+             [ "ended_at", `String "2026-06-01T00:00:00Z"
+             ; "operator_disposition", `String "pass"
+             ; "operator_disposition_reason", `String "healthy"
+             ; "terminal_reason_code", `String "completed"
+             ; "completion_contract_result", `String "passive-only"
+             ]);
+       let snapshot = K.snapshot_json ~config ~meta in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "raw result remains visible"
+         "passive-only"
+         (snapshot |> member "execution" |> member "completion_contract_result" |> to_string);
+       Alcotest.(check string)
+         "unknown result uses explicit sentinel"
+         "unknown_completion_contract_result:passive-only"
+         (snapshot |> member "execution" |> member "mutation_guard_summary" |> to_string))
+;;
+
 let test_model_observability_uses_runtime_trust_selected_model () =
   let runtime_trust =
     `Assoc
@@ -503,6 +540,10 @@ let () =
             "completion-contract labels use typed parser"
             `Quick
             test_completion_contract_result_uses_typed_label_parser
+        ; Alcotest.test_case
+            "unknown completion-contract label uses explicit sentinel"
+            `Quick
+            test_unknown_completion_contract_result_is_explicit
         ; Alcotest.test_case
             "status model observability reuses runtime-trust execution selected model"
             `Quick

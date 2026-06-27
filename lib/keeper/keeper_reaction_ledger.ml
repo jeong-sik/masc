@@ -416,8 +416,7 @@ let cap_list limit values =
 ;;
 
 let unknown_receipt_contract_result_label raw =
-  let label = raw |> String.trim |> String.lowercase_ascii in
-  if label = "" then "<empty>" else label
+  if raw = "" then "<empty>" else raw
 ;;
 
 type contract_result_attention =

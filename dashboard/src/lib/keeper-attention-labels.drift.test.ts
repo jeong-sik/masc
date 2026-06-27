@@ -20,7 +20,12 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
-import { isAttentionReason, isNextHumanAction } from './keeper-attention-labels'
+import {
+  ATTENTION_COMPLETION_CONTRACT_RESULTS,
+  isAttentionCompletionContractResult,
+  isAttentionReason,
+  isNextHumanAction,
+} from './keeper-attention-labels'
 
 const here = dirname(fileURLToPath(import.meta.url))
 // dashboard/src/lib → repo root is three levels up.
@@ -96,6 +101,20 @@ const EXECUTION_RECEIPT_PASS_ONLY_REASONS: ReadonlySet<string> = new Set([
   'phase_skipped',
 ])
 
+function completionContractAttentionLabels(): string[] {
+  const src = read('lib/keeper/keeper_completion_contract_result_label.ml')
+  const start = src.indexOf('type t =')
+  expect(start, 'completion contract label type present').toBeGreaterThan(-1)
+  const body = src.slice(start, src.indexOf('let to_string', start))
+  return [...body.matchAll(/\|\s+([A-Z][A-Za-z_]*)/g)]
+    .map((m) => m[1])
+    .filter((arm): arm is string => arm !== undefined)
+    .map((arm) =>
+      arm.replace(/[A-Z]/g, (c, offset) => `${offset === 0 ? '' : '_'}${c.toLowerCase()}`),
+    )
+    .filter((label) => label !== 'satisfied_completion' && label !== 'satisfied_execution')
+}
+
 describe('keeper attention vocabulary drift guard', () => {
   it('extracts a non-empty backend vocabulary (guard self-check)', () => {
     // If extraction silently returns nothing, the coverage assertions below
@@ -146,5 +165,16 @@ describe('keeper attention vocabulary drift guard', () => {
       missing,
       `execution receipt attention_reason codes with no union arm: ${missing.join(', ')}`,
     ).toEqual([])
+  })
+
+  it('completion_contract_result attention labels mirror the OCaml typed label SSOT', () => {
+    const backend = [...new Set(completionContractAttentionLabels())].sort()
+    const frontend = [...ATTENTION_COMPLETION_CONTRACT_RESULTS].sort()
+    const missing = backend.filter((label) => !isAttentionCompletionContractResult(label))
+    expect(
+      missing,
+      `completion_contract_result labels emitted by backend with no union arm: ${missing.join(', ')}`,
+    ).toEqual([])
+    expect(frontend).toEqual(backend)
   })
 })

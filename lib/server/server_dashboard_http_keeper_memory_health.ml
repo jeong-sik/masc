@@ -302,7 +302,10 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
     ; ( "alert_summary"
       , `Assoc
           [ "total_alerts", `Int (List.length all_alerts)
-          ; "warn_alerts", `Int (List.length all_alerts)
+          ; ( "warn_alerts"
+            , `Int
+                (List.length
+                   (List.filter (fun alert -> alert.severity = Warn) all_alerts)) )
           ; ( "keepers_with_alerts"
             , `Int
                 (List.fold_left

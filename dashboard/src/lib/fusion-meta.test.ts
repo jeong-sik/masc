@@ -38,6 +38,18 @@ describe('normalizeFusionPanelReason', () => {
     expect(normalizeFusionPanelReason('gpt-5', '( Fusion_types.Empty_response )')).toBe(
       'empty response',
     )
+    expect(
+      normalizeFusionPanelReason(
+        'gpt-5',
+        'Fusion_types.Empty_response "empty response (stop_reason=max_tokens)"',
+      ),
+    ).toBe('empty response (stop_reason=max_tokens)')
+  })
+
+  it('normalizes Invalid_max_output_tokens without provider attribution', () => {
+    expect(
+      normalizeFusionPanelReason('gpt-5', '( Fusion_types.Invalid_max_output_tokens 0 )'),
+    ).toBe('invalid max_output_tokens 0')
   })
 
   it('passes through plain reasons', () => {

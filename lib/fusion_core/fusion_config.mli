@@ -29,6 +29,8 @@ type config_error =
       (** staged_judge_group_size < Fusion_policy.min_staged_judge_group_size *)
   | Invalid_max_tool_calls of string * int
       (** (preset 이름, 값) — 0..16 범위 위반 *)
+  | Invalid_max_output_tokens of string * int
+      (** (preset 이름, 값) — max_output_tokens override는 양수여야 함 *)
   | Missing_default_preset of string
       (** enabled인데 default_preset가 비었거나 presets에 없음. 빈 문자엏도 거부 —
           preset 생략 호출이 default_preset로 폭빽하는데 ""는 항상 Preset_unknown로
@@ -61,6 +63,7 @@ val disabled : Fusion_policy.t
     - max_concurrent_judges < 1 → [Error [Invalid_max_concurrent_judges _]].
     - staged_judge_group_size < 2 → [Error [Invalid_staged_judge_group_size _]].
     - max_tool_calls_per_panel이 0..16 범위 밖 → [Error [Invalid_max_tool_calls _]].
+    - max_output_tokens override가 0 이하 → [Error [Invalid_max_output_tokens _]].
     - min_answered가 1..패널 모델 총합 범위 밖 → [Error [Invalid_min_answered _]].
     - default_preset가 presets에 없음 → [Error [Missing_default_preset _]].
     - 필드 타입 불일치 → [Error [Toml_type_error _]].

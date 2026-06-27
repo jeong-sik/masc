@@ -22,8 +22,10 @@ function normalizeProviderAttribution(model: string, reason: string): string {
 }
 
 /**
- * Unwrap OCaml `Fusion_types.Provider_error / Timeout / Empty_response`
- * literals and re-attribute `Provider 'unknown'` failures to the real model id.
+ * Normalize panel failure reasons. Current `fusion_sink.ml` emits structured
+ * `reason_code`/`reason_detail`; the OCaml constructor parsing below is a
+ * legacy fallback for older board/meta payloads and direct show-derived
+ * fixtures.
  */
 export function normalizeFusionPanelReason(model: string, reason: string | undefined): string | undefined {
   if (!reason) return undefined
@@ -33,7 +35,16 @@ export function normalizeFusionPanelReason(model: string, reason: string | undef
     return normalizeProviderAttribution(model, decodeOcamlStringLiteral(providerMatch[1] ?? '').trim())
   }
   if (/^\(?\s*Fusion_types\.Timeout\s*\)?$/.test(trimmed)) return 'timeout'
-  if (/^\(?\s*Fusion_types\.Empty_response\s*\)?$/.test(trimmed)) return 'empty response'
+  const emptyMatch = trimmed.match(/^\(?\s*Fusion_types\.Empty_response(?:\s+"([\s\S]*)")?\s*\)?$/)
+  if (emptyMatch) {
+    return decodeOcamlStringLiteral(emptyMatch[1] ?? '').trim() || 'empty response'
+  }
+  const invalidMaxOutputTokensMatch = trimmed.match(
+    /^\(?\s*Fusion_types\.Invalid_max_output_tokens\s+(-?\d+)\s*\)?$/,
+  )
+  if (invalidMaxOutputTokensMatch) {
+    return `invalid max_output_tokens ${invalidMaxOutputTokensMatch[1]}`
+  }
   return normalizeProviderAttribution(model, trimmed)
 }
 

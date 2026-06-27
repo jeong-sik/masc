@@ -11,6 +11,8 @@
     [tools]를 주면 패널/심판이 tool call을 할 수 있다.
     [max_tool_calls] > 0이면 에이전트의 [max_turns]를 해당 횟수+1로 제한해
     OpenRouter Fusion의 per-panel tool budget을 근사한다.
+    [max_tokens]는 지정된 패널/심판 호출의 출력 토큰 예산이다. 생략하면
+    Runtime_agent 기본값을 보존한다.
     [timeout_s]는 OAS transport idle/body budget에만 매핑한다. Fusion의 구조적
     wall-clock budget은 호출자가 [Masc_oas_bridge.run_safe]로 소유하며, OAS
     [max_execution_time_s]에는 매핑하지 않는다.
@@ -25,6 +27,7 @@ val build_agent
   -> ?tools:Agent_sdk.Tool.t list
   -> ?max_tool_calls:int
   -> ?timeout_s:float
+  -> ?max_tokens:int
   -> ?name:string
   -> string
   -> (Agent_sdk.Agent.t, Fusion_types.panel_failure) result
@@ -37,6 +40,8 @@ module For_testing : sig
     :  ?timeout_s:float
     -> Runtime_agent.config
     -> Runtime_agent.config
+
+  val empty_response_detail : Agent_sdk.Types.api_response -> string
 end
 
 (** Attach Fusion's runtime id to an OAS provider error string.
@@ -55,6 +60,10 @@ val panel_failure_detail : runtime_id:string -> Fusion_types.panel_failure -> st
     detail 그대로(실패 시점에 raw model로 정규화됨), Timeout/Empty는 사람용 문자열.
     panelist 정체성을 [Provider '...'] 슬롯에 다시 입히지 않는다 (RFC-0278). *)
 val panel_failure_text : Fusion_types.panel_failure -> string
+
+(** Empty text response diagnostics. This records stop_reason, token usage, and
+    content block counts only; it never exposes reasoning/thinking content. *)
+val empty_response_detail : Agent_sdk.Types.api_response -> string
 
 (** [masc_web_search] / [masc_web_fetch]를 [Agent_sdk.Tool.t]로 변환한 목록.
     [Keeper_tool_descriptor]에서 descriptor를 찾지 못하면 빈 목록을 반환한다. *)

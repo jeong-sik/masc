@@ -67,8 +67,14 @@ end
 type panel_failure =
   | Timeout  (** 구조적 타임아웃 (Masc_oas_bridge) *)
   | Provider_error of string  (** provider/transport 에러, 메시지 보존 *)
-  | Empty_response  (** 모델이 빈 응답 (keeper_librarian 빈응답 전례) *)
-[@@deriving yojson, show, eq]
+  | Empty_response of string
+      (** 모델이 빈 응답. detail에는 stop_reason/usage/content shape만 보존하고,
+          reasoning/thinking 본문은 노출하지 않는다. *)
+  | Invalid_max_output_tokens of int
+      (** Runtime defense-in-depth: output token override must be positive. *)
+[@@deriving to_yojson, show, eq]
+
+val panel_failure_of_yojson : Yojson.Safe.t -> (panel_failure, string) result
 
 (** 성공한 패널 한 명의 답. (variant inline record는 ppx_deriving_yojson 비호환이라
     named record로 분리한다.) *)

@@ -14,6 +14,7 @@ type panel_group =
   ; system_prompt : string  (** 그룹 패널 모델 system prompt (config 필수) *)
   ; web_tools : bool  (** 그룹에 web_search/web_fetch 주입 여부 *)
   ; max_tool_calls : int  (** 그룹 모델당 최대 tool 호출 수 (0=무제한) *)
+  ; max_output_tokens : int option  (** 그룹 모델당 출력 토큰 예산 override *)
   ; timeout_s : float  (** 그룹 패널 호출 구조적 타임아웃 (초) *)
   }
 [@@deriving show, eq]
@@ -27,6 +28,7 @@ type judge_spec =
   ; jsystem_prompt : string  (** 이 1차 심판의 lens (config 필수) *)
   ; jweb_tools : bool  (** web_search/web_fetch 주입 여부 *)
   ; jmax_tool_calls : int  (** 최대 tool 호출 수 (0=무제한) *)
+  ; jmax_output_tokens : int option  (** 출력 토큰 예산 override *)
   ; jtimeout_s : float  (** 호출 구조적 타임아웃 (초) *)
   }
 [@@deriving show, eq]
@@ -38,6 +40,7 @@ type preset =
       (** simple/refine/conditional 심판이자 JOJ의 meta-judge(reducer). (RFC-0283) *)
   ; judge_system_prompt : string
   ; judge_timeout_s : float
+  ; judge_max_output_tokens : int option
   ; judges : judge_spec list
       (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
@@ -57,6 +60,10 @@ let default_staged_judge_group_size = 3
 (* 그룹 모델당 max_tool_calls 상한 (0..max). 0=무제한, 그 외 양수는 에이전트
    max_turns에 근사. SSOT 상수 (Magic Number 회피, RFC-0280에서 검증을 한 곳으로 모음). *)
 let max_tool_calls_ceiling = 16
+
+let valid_max_output_tokens = function
+  | None -> true
+  | Some n -> n > 0
 
 (* 패널/심판 호출 구조적 타임아웃 기본값 (preset이 명시 안 할 때). 운영 노브 —
    행동 휴리스틱이 아니므로 named SSOT 상수로 둔다 (Magic Number 회피). *)
@@ -243,6 +250,8 @@ module Validated_preset = struct
     | Duplicate_panelist of string  (** 두 패널이 같은 정체성(panelist_id) *)
     | Bad_max_tool_calls of int
         (** 그룹 또는 JOJ 1차 심판 max_tool_calls가 0..max_tool_calls_ceiling 밖 *)
+    | Bad_max_output_tokens of int
+        (** 그룹/심판 출력 토큰 예산 override가 양수가 아님 *)
     | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0283) *)
     | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성(judge_id) (RFC-0283) *)
     | Min_answered_below_min of int
@@ -251,8 +260,9 @@ module Validated_preset = struct
         (** [min_answered]가 패널 모델 총합을 초과. *)
 
   (* 검증 순서는 config 로드 시점과 동일(byte-identical config_error): size → 패널 prompt →
-     judge model → 패널 정체성 중복 → 패널 max_tool_calls 범위 → (RFC-0283) 1차 심판 prompt
-     → 1차 심판 정체성 중복 → 1차 심판 max_tool_calls 범위 → min_answered.
+     judge model → 패널 정체성 중복 → 패널 max_tool_calls 범위 → 패널 max_output_tokens
+     범위 → (RFC-0283) 1차 심판 prompt → 1차 심판 정체성 중복 → 1차 심판
+     max_tool_calls 범위 → 심판 max_output_tokens 범위 → min_answered.
      judges=[]면 1차 심판 관련 셋은 통과(simple/refine/conditional preset은 기존과 동일
      결과 = byte-identity). *)
   let of_preset (p : preset) : (t, invalid) result =
@@ -271,26 +281,45 @@ module Validated_preset = struct
          with
          | Some g -> Error (Bad_max_tool_calls g.max_tool_calls)
          | None ->
-           if not (preset_judge_prompts_present p) then Error Judge_panel_prompt_missing
-           else (
-             match preset_duplicate_judge p with
-             | Some id -> Error (Duplicate_judge id)
-             | None ->
-               (match
-                  List.find_opt
-                    (fun (j : judge_spec) ->
-                      j.jmax_tool_calls < 0
-                      || j.jmax_tool_calls > max_tool_calls_ceiling)
-                    p.judges
-                with
-                | Some j -> Error (Bad_max_tool_calls j.jmax_tool_calls)
+           (match
+              List.find_map
+                (fun (g : panel_group) ->
+                  match g.max_output_tokens with
+                  | Some n when not (valid_max_output_tokens (Some n)) -> Some n
+                  | _ -> None)
+                p.panels
+            with
+            | Some n -> Error (Bad_max_output_tokens n)
+            | None ->
+              if not (preset_judge_prompts_present p) then Error Judge_panel_prompt_missing
+              else (
+                match preset_duplicate_judge p with
+                | Some id -> Error (Duplicate_judge id)
                 | None ->
-                  let total = List.length (preset_models p) in
-                  if p.min_answered < min_answered_floor
-                  then Error (Min_answered_below_min p.min_answered)
-                  else if p.min_answered > total
-                  then Error (Min_answered_above_max p.min_answered)
-                  else Ok p)))
+                  (match
+                     List.find_opt
+                       (fun (j : judge_spec) ->
+                         j.jmax_tool_calls < 0
+                         || j.jmax_tool_calls > max_tool_calls_ceiling)
+                       p.judges
+                   with
+                   | Some j -> Error (Bad_max_tool_calls j.jmax_tool_calls)
+                   | None ->
+                     (match
+                        p.judge_max_output_tokens
+                        :: List.map
+                             (fun (j : judge_spec) -> j.jmax_output_tokens)
+                             p.judges
+                        |> List.find_opt (fun v -> not (valid_max_output_tokens v))
+                      with
+                      | Some (Some n) -> Error (Bad_max_output_tokens n)
+                      | Some None | None ->
+                        let total = List.length (preset_models p) in
+                        if p.min_answered < min_answered_floor
+                        then Error (Min_answered_below_min p.min_answered)
+                        else if p.min_answered > total
+                        then Error (Min_answered_above_max p.min_answered)
+                        else Ok p)))))
 
   let preset (t : t) : preset = t
 

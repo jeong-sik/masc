@@ -18,6 +18,8 @@ type panel_group =
       (** 그룹 패널 모델 system prompt — config에서 필수(코드 default 없음). *)
   ; web_tools : bool  (** 그룹에 web_search/web_fetch 주입 여부. *)
   ; max_tool_calls : int  (** 그룹 모델당 최대 tool 호출 수 (0=무제한). *)
+  ; max_output_tokens : int option
+      (** 그룹 모델당 출력 토큰 예산 override. [None]이면 Runtime_agent 기본값. *)
   ; timeout_s : float  (** 그룹 패널 호출 구조적 타임아웃 (초). *)
   }
 [@@deriving show, eq]
@@ -31,6 +33,8 @@ type judge_spec =
   ; jsystem_prompt : string  (** 이 1차 심판의 lens — config에서 필수(코드 default 없음). *)
   ; jweb_tools : bool  (** web_search/web_fetch 주입 여부. *)
   ; jmax_tool_calls : int  (** 최대 tool 호출 수 (0=무제한). *)
+  ; jmax_output_tokens : int option
+      (** 출력 토큰 예산 override. [None]이면 Runtime_agent 기본값. *)
   ; jtimeout_s : float  (** 호출 구조적 타임아웃 (초). *)
   }
 [@@deriving show, eq]
@@ -47,6 +51,8 @@ type preset =
   ; judge_system_prompt : string
       (** 심판 모델 system prompt — config에서 필수(코드 default 없음). *)
   ; judge_timeout_s : float  (** 심판 호출 구조적 타임아웃 (초). *)
+  ; judge_max_output_tokens : int option
+      (** 단일/refine/meta 심판 출력 토큰 예산 override. [None]이면 기본값. *)
   ; judges : judge_spec list
       (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
@@ -84,6 +90,9 @@ val min_staged_judge_group_size : int
 
 (** 그룹 모델당 [max_tool_calls] 상한 (0..이 값). 0=무제한. named SSOT. *)
 val max_tool_calls_ceiling : int
+
+(** Optional max-output-token overrides must be positive when present. *)
+val valid_max_output_tokens : int option -> bool
 
 (** 패널/심판 타임아웃 기본값 (config 미지정 시). 운영 노브 — named SSOT. *)
 val default_timeout_s : float
@@ -182,6 +191,8 @@ module Validated_preset : sig
     | Duplicate_panelist of string  (** 두 패널이 같은 정체성({!panelist_id}) *)
     | Bad_max_tool_calls of int
         (** 그룹 또는 JOJ 1차 심판 max_tool_calls가 0..[max_tool_calls_ceiling] 밖 *)
+    | Bad_max_output_tokens of int
+        (** 그룹/심판 max_output_tokens override가 양수가 아님 *)
     | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0283) *)
     | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성 (RFC-0283) *)
     | Min_answered_below_min of int
@@ -189,8 +200,9 @@ module Validated_preset : sig
     | Min_answered_above_max of int
         (** [min_answered]가 패널 모델 총합을 초과. *)
 
-  (** 검증 순서: size → prompt → judge → 정체성 중복 → max_tool_calls → 1차 심판
-      prompt/정체성/max_tool_calls → min_answered. 통과 시 [Ok vp], 첫 위반에서
+  (** 검증 순서: size → prompt → judge → 정체성 중복 → max_tool_calls →
+      max_output_tokens → 1차 심판 prompt/정체성/max_tool_calls/max_output_tokens
+      → min_answered. 통과 시 [Ok vp], 첫 위반에서
       [Error invalid]. config 로드의 검증 순서와 동일. *)
   val of_preset : preset -> (t, invalid) result
 

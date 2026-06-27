@@ -108,7 +108,7 @@ let run_one ~keepers_dir ~run_gc_for_keepers_dir ~explicit ~keeper_id ~now =
   then fact_store_missing_error ~keepers_dir ~keeper_id
   else (
     try
-      let report =
+      let (report : Keeper_memory_os_gc.gc_report) =
         run_gc_for_keepers_dir
           ~keepers_dir
           ~dry_run:true

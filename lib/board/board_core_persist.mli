@@ -16,6 +16,14 @@ include module type of struct
 end
 
 val flush_interval_sec : float
+val flusher_inbox_capacity : int
+(** Capacity of {!store.flusher_inbox}. The scheduler reserves room for a whole
+    sweep/flush batch before enqueueing. *)
+
+val flusher_schedule_dropped_count : unit -> int
+(** Count of sweep/flush schedule messages skipped because the flusher inbox was
+    full. *)
+
 val persist_error_count : unit -> int
 val record_persist_error : where:string -> string -> unit
 
@@ -32,6 +40,11 @@ val with_lock : store -> (unit -> 'a) -> 'a
 val with_persist_lock : store -> (unit -> 'a) -> 'a
 val sweep : store -> int * int
 val maybe_sweep : store -> unit
+val reset_sweep_schedule_for_test : store -> unit
+(** Reset sweep/flush schedule timestamps. Test-only. *)
+
+val sweep_schedule_timestamps_for_test : store -> float * float
+(** Snapshot sweep/flush schedule timestamps under the store mutex. Test-only. *)
 
 val board_base_path : unit -> string
 val board_masc_dir : unit -> string

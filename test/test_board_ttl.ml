@@ -111,6 +111,93 @@ let test_sweeper_skips_permanent () =
   let (removed_posts, _) = sweep store in
   Alcotest.(check int) "sweeper removed 0 permanent posts" 0 removed_posts
 
+let schedule_reset_timestamp_for_test = 0.0
+
+let reset_sweep_schedule_for_test =
+  Masc_board_handlers.Board_core_persist.reset_sweep_schedule_for_test
+
+let sweep_schedule_timestamps_for_test =
+  Masc_board_handlers.Board_core_persist.sweep_schedule_timestamps_for_test
+
+let maybe_sweep_for_test = Masc_board_handlers.Board_core_persist.maybe_sweep
+
+let flusher_inbox_capacity_for_test =
+  Masc_board_handlers.Board_core_persist.flusher_inbox_capacity
+
+let flusher_schedule_dropped_count_for_test =
+  Masc_board_handlers.Board_core_persist.flusher_schedule_dropped_count
+
+let drain_flusher_inbox store =
+  let rec loop acc =
+    match Eio.Stream.take_nonblocking store.flusher_inbox with
+    | None -> List.rev acc
+    | Some msg -> loop (msg :: acc)
+  in
+  loop []
+
+let check_one_sweep_and_flush label messages =
+  let sweep_count, flush_count =
+    List.fold_left
+      (fun (sweeps, flushes) msg ->
+         match msg with
+         | Sweep -> (sweeps + 1, flushes)
+         | Flush -> (sweeps, flushes + 1))
+      (0, 0)
+      messages
+  in
+  Alcotest.(check int) (label ^ " sweep count") 1 sweep_count;
+  Alcotest.(check int) (label ^ " flush count") 1 flush_count
+
+let test_maybe_sweep_updates_schedule_once () =
+  let store = create_store () in
+  reset_sweep_schedule_for_test store;
+  maybe_sweep_for_test store;
+  let first_sweep, first_flush = sweep_schedule_timestamps_for_test store in
+  Alcotest.(check bool) "sweep timestamp updated" true (first_sweep > 0.0);
+  Alcotest.(check bool) "flush timestamp updated" true (first_flush > 0.0);
+  maybe_sweep_for_test store;
+  let second_sweep, second_flush = sweep_schedule_timestamps_for_test store in
+  Alcotest.(check (float 0.0)) "sweep timestamp unchanged" first_sweep second_sweep;
+  Alcotest.(check (float 0.0)) "flush timestamp unchanged" first_flush second_flush;
+  check_one_sweep_and_flush "sequential" (drain_flusher_inbox store)
+
+let test_maybe_sweep_concurrent_schedules_once () =
+  let store = create_store () in
+  reset_sweep_schedule_for_test store;
+  let callers = List.init 32 Fun.id in
+  let _ =
+    Eio.Fiber.List.map
+      ~max_fibers:32
+      (fun _ -> maybe_sweep_for_test store)
+      callers
+  in
+  check_one_sweep_and_flush "concurrent" (drain_flusher_inbox store)
+
+let test_maybe_sweep_full_inbox_rolls_back_schedule () =
+  let store = create_store () in
+  reset_sweep_schedule_for_test store;
+  for _ = 1 to flusher_inbox_capacity_for_test do
+    Eio.Stream.add store.flusher_inbox Flush
+  done;
+  let dropped_before = flusher_schedule_dropped_count_for_test () in
+  maybe_sweep_for_test store;
+  let dropped_after = flusher_schedule_dropped_count_for_test () in
+  let sweep_ts, flush_ts = sweep_schedule_timestamps_for_test store in
+  Alcotest.(check int) "full inbox dropped scheduled messages" 2
+    (dropped_after - dropped_before);
+  Alcotest.(check (float 0.0))
+    "sweep timestamp rolled back"
+    schedule_reset_timestamp_for_test
+    sweep_ts;
+  Alcotest.(check (float 0.0))
+    "flush timestamp rolled back"
+    schedule_reset_timestamp_for_test
+    flush_ts;
+  Alcotest.(check int)
+    "full inbox length unchanged"
+    flusher_inbox_capacity_for_test
+    (Eio.Stream.length store.flusher_inbox)
+
 let test_post_kind_direct_default () =
   let store = create_store () in
   match
@@ -218,6 +305,12 @@ let () =
             (with_eio test_expiring_post);
           Alcotest.test_case "sweeper skips permanent" `Quick
             (with_eio test_sweeper_skips_permanent);
+          Alcotest.test_case "maybe_sweep schedules once" `Quick
+            (with_eio test_maybe_sweep_updates_schedule_once);
+          Alcotest.test_case "maybe_sweep concurrent schedules once" `Quick
+            (with_eio test_maybe_sweep_concurrent_schedules_once);
+          Alcotest.test_case "maybe_sweep full inbox rolls back schedule" `Quick
+            (with_eio test_maybe_sweep_full_inbox_rolls_back_schedule);
         ] );
       ( "visibility_ssot",
         [

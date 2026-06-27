@@ -67,7 +67,7 @@ val flush_interval_sec : float
 (** Builds a fresh empty store with default Hashtbl capacities
     (1024 posts / 4096 comments / 2048 vote-log entries),
     fresh [Eio.Mutex], cold caches, and an [Eio.Stream]
-    [flusher_inbox] capped at 1000 messages. *)
+    [flusher_inbox] capped by the persistence-layer flusher inbox capacity. *)
 val create_store : unit -> store
 
 (** Reset the per-author comment rate-limit tracker.  Test-only. *)

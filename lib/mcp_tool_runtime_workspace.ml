@@ -88,7 +88,11 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
         else if String.length path = 1 && Char.equal path.[0] '~' then
           (match Sys.getenv_opt "HOME" with Some h -> h | None -> Filename.get_temp_dir_name ())
         else if Filename.is_relative path then
-          Filename.concat (Sys.getcwd ()) path
+          let anchor =
+            if Workspace.is_initialized config then config.base_path
+            else Config_dir_resolver.base_path_or_cwd ()
+          in
+          Filename.concat anchor path
         else
           path
       in

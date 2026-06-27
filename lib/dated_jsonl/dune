@@ -9,4 +9,12 @@
  ; not split across (flags)/(ocamlc_flags)/(ocamlopt_flags).
  (flags
   (:standard -w -32 -w +4))
- (libraries fs_compat jsonl_writer masc.config otel_metric_store eio unix yojson))
+ (libraries
+  fs_compat
+  jsonl_writer
+  masc.config
+  masc.config_dir_resolver
+  otel_metric_store
+  eio
+  unix
+  yojson))

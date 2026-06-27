@@ -83,7 +83,7 @@ let fallback_voice_config_path () =
   let root =
     match (Host_config.from_env ()).base_path with
     | Some bp -> bp
-    | None -> Sys.getcwd ()
+    | None -> Config_dir_resolver.base_path_or_cwd ()
   in
   voice_config_file_in root
 

@@ -28,7 +28,7 @@ let assets_root () =
       [
         Some inferred_repo_assets;
         Some (Filename.concat exe_dir "assets");
-        Some (Filename.concat (Sys.getcwd ()) "assets");
+        Some (Filename.concat (Config_dir_resolver.current_working_dir ()) "assets");
       ]
       []
   in
@@ -40,7 +40,7 @@ let assets_root () =
       | None ->
           (match candidates with
            | path :: _ -> path
-           | [] -> Filename.concat (Sys.getcwd ()) "assets")
+           | [] -> Filename.concat (Config_dir_resolver.current_working_dir ()) "assets")
 
 let index_path () =
   Filename.concat (Filename.concat (assets_root ()) "dashboard") "index.html"

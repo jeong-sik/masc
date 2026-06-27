@@ -38,7 +38,7 @@ let strip_trailing_slashes path =
 let mutex_key base_dir =
   let path =
     if Filename.is_relative base_dir then
-      Filename.concat (Sys.getcwd ()) base_dir
+      Filename.concat (Config_dir_resolver.current_working_dir ()) base_dir
     else
       base_dir
   in

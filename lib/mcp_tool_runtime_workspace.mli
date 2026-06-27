@@ -29,7 +29,9 @@ val handle_start :
 
     [~/...] and bare [~] expand against [HOME]
     (defaults to [/tmp] when unset).  Relative paths resolve
-    against [Sys.getcwd ()].  Absolute paths are used verbatim.
+    against the initialized workspace base path, or
+    [Config_dir_resolver.base_path_or_cwd ()] when none is set.
+    Absolute paths are used verbatim.
 
     {2 Three-step pipeline}
 

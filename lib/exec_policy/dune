@@ -12,6 +12,7 @@
   masc_core
   masc.host_config
   masc.repo_manager
+  masc.config_dir_resolver
   unix
   yojson
   eio

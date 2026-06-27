@@ -65,6 +65,9 @@
   ; reversed (host_config no longer depends on masc_workspace; audit
   ; 2026-05-15 confirmed the masc_workspace dep was unused).
   masc.host_config
+  ; #22444 — normalize_base_path now routes relative inputs through
+  ; Config_dir_resolver.base_path_or_cwd ().
+  masc.config_dir_resolver
   time_compat
   fs_compat
   yojson

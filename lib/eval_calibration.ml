@@ -158,7 +158,9 @@ let lexical_normalize_abs abs =
 let lexical_abs ?cwd raw =
   let abs =
     if Filename.is_relative raw then
-      Filename.concat (match cwd with Some d -> d | None -> Sys.getcwd ()) raw
+      Filename.concat
+        (match cwd with Some d -> d | None -> Config_dir_resolver.current_working_dir ())
+        raw
     else
       raw
   in

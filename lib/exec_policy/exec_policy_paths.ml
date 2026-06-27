@@ -3,7 +3,7 @@
 let normalize_path ?base_dir path =
   let abs =
     if Filename.is_relative path then
-      Filename.concat (Option.value ~default:(Sys.getcwd ()) base_dir) path
+      Filename.concat (Option.value ~default:(Config_dir_resolver.current_working_dir ()) base_dir) path
     else
       path
   in

@@ -197,30 +197,34 @@ let record_skip_reasons ~base_path name ~reasons =
   if reasons <> []
   then (
     let now = Time_compat.now () in
-    update_entry ~base_path name (fun e ->
-      { e with last_skip_observation = Some (now, reasons) }))
+    ignore
+      (update_entry ~base_path name (fun e ->
+         { e with last_skip_observation = Some (now, reasons) })))
 ;;
 
 let touch_last_turn_ts ~base_path name =
   let now = Time_compat.now () in
-  update_entry ~base_path name (fun e ->
-    let runtime = e.meta.runtime in
-    let usage = runtime.usage in
-    { e with
-      meta =
-        { e.meta with
-          runtime = { runtime with usage = { usage with last_turn_ts = now } }
-        }
-    })
+  ignore
+    (update_entry ~base_path name (fun e ->
+       let runtime = e.meta.runtime in
+       let usage = runtime.usage in
+       { e with
+         meta =
+           { e.meta with
+             runtime = { runtime with usage = { usage with last_turn_ts = now } }
+           }
+       }))
 ;;
 
 let increment_turn_failures ~base_path name =
-  update_entry ~base_path name (fun e ->
-    { e with turn_consecutive_failures = e.turn_consecutive_failures + 1 })
+  ignore
+    (update_entry ~base_path name (fun e ->
+       { e with turn_consecutive_failures = e.turn_consecutive_failures + 1 }))
 ;;
 
 let reset_turn_failures ~base_path name =
-  update_entry ~base_path name (fun e -> { e with turn_consecutive_failures = 0 })
+  ignore
+    (update_entry ~base_path name (fun e -> { e with turn_consecutive_failures = 0 }))
 ;;
 
 let get_turn_failures ~base_path name =
@@ -313,7 +317,8 @@ let started_at ~base_path name =
 ;;
 
 let set_started_at_for_test ~base_path name started_at =
-  update_entry ~base_path name (fun entry -> { entry with started_at })
+  (* fire-and-forget: test fixture helper mirrors other registry mutators. *)
+  ignore (update_entry ~base_path name (fun entry -> { entry with started_at }))
 ;;
 
 type spawn_slot_denial_reason = Spawn_slots.denial_reason =
@@ -462,13 +467,15 @@ let board_wakeup_allowed ~base_path name ~dedup_key ~debounce_sec =
        (match StringMap.find_opt dedup_key entry.board_wakeups with
         | Some last_ts when now_ts -. last_ts < debounce_sec -> false
         | _ ->
-          update_entry ~base_path name (fun e ->
-            { e with board_wakeups = StringMap.add dedup_key now_ts e.board_wakeups });
+          ignore
+            (update_entry ~base_path name (fun e ->
+               { e with board_wakeups = StringMap.add dedup_key now_ts e.board_wakeups }));
           true))
 ;;
 
 let clear_board_wakeups ~base_path name =
-  update_entry ~base_path name (fun e -> { e with board_wakeups = StringMap.empty })
+  (* fire-and-forget: clearing debounce state is best-effort for missing keepers. *)
+  ignore (update_entry ~base_path name (fun e -> { e with board_wakeups = StringMap.empty }))
 ;;
 
 let cleanup_tracking ~base_path name =
@@ -500,11 +507,12 @@ let get_board_cursor_ts ~base_path name =
 ;;
 
 let set_board_cursor_ts ~base_path name ts =
-  update_entry ~base_path name (fun e ->
-    let board_cursor_post_id =
-      if Float.compare ts e.board_cursor_ts = 0 then e.board_cursor_post_id else None
-    in
-    { e with board_cursor_ts = ts; board_cursor_post_id })
+  ignore
+    (update_entry ~base_path name (fun e ->
+       let board_cursor_post_id =
+         if Float.compare ts e.board_cursor_ts = 0 then e.board_cursor_post_id else None
+       in
+       { e with board_cursor_ts = ts; board_cursor_post_id }))
 ;;
 
 let get_board_cursor ~base_path name =
@@ -514,8 +522,9 @@ let get_board_cursor ~base_path name =
 ;;
 
 let set_board_cursor ~base_path name ts post_id =
-  update_entry ~base_path name (fun e ->
-    { e with board_cursor_ts = ts; board_cursor_post_id = post_id })
+  ignore
+    (update_entry ~base_path name (fun e ->
+       { e with board_cursor_ts = ts; board_cursor_post_id = post_id }))
 ;;
 
 (* -- Tool usage tracking ------------------------------------------- *)
@@ -524,20 +533,21 @@ let set_board_cursor ~base_path name ts post_id =
    keeper-turn OAS callbacks and runtime MCP server callbacks can both
    record usage for the same keeper without clobbering each other. *)
 let record_tool_use ~base_path name ~tool_name ~success =
-  update_entry ~base_path name (fun entry ->
-    let e =
-      match StringMap.find_opt tool_name entry.tool_usage with
-      | Some e -> e
-      | None -> { count = 0; successes = 0; failures = 0; last_used_at = 0.0 }
-    in
-    let updated =
-      { count = e.count + 1
-      ; successes = (if success then e.successes + 1 else e.successes)
-      ; failures = (if success then e.failures else e.failures + 1)
-      ; last_used_at = Time_compat.now ()
-      }
-    in
-    { entry with tool_usage = StringMap.add tool_name updated entry.tool_usage })
+  ignore
+    (update_entry ~base_path name (fun entry ->
+       let e =
+         match StringMap.find_opt tool_name entry.tool_usage with
+         | Some e -> e
+         | None -> { count = 0; successes = 0; failures = 0; last_used_at = 0.0 }
+       in
+       let updated =
+         { count = e.count + 1
+         ; successes = (if success then e.successes + 1 else e.successes)
+         ; failures = (if success then e.failures else e.failures + 1)
+         ; last_used_at = Time_compat.now ()
+         }
+       in
+       { entry with tool_usage = StringMap.add tool_name updated entry.tool_usage }))
 ;;
 
 let tool_usage_of ~base_path name =
@@ -557,8 +567,9 @@ let tool_usage_of ~base_path name =
    [set_tool_usage_entry]. *)
 
 let set_tool_usage_entry ~base_path ~name ~tool_name (e : tool_call_entry) =
-  update_entry ~base_path name (fun ent ->
-    { ent with tool_usage = StringMap.add tool_name e ent.tool_usage })
+  ignore
+    (update_entry ~base_path name (fun ent ->
+       { ent with tool_usage = StringMap.add tool_name e ent.tool_usage }))
 ;;
 
 (* ── RFC-0002 Event Dispatch ───────────────────────────── *)

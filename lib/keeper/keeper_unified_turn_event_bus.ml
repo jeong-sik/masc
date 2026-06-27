@@ -30,6 +30,7 @@ type drain_cancel_state =
 type t =
   { keeper_name : string
   ; turn_id : int
+  ; event_bus : Agent_sdk.Event_bus.t option
   ; event_bus_sub : Agent_sdk_metrics_bridge.handle option
   ; drain_cancel : drain_cancel_state Atomic.t
   ; state : event_bus_state Atomic.t
@@ -37,8 +38,9 @@ type t =
   }
 
 let create ?(on_pending_count_change = fun _ -> ()) ~keeper_name ~turn_id () =
+  let event_bus = Keeper_event_bus.get () in
   let event_bus_sub =
-    match Keeper_event_bus.get () with
+    match event_bus with
     | Some bus ->
       Some
         (Agent_sdk_metrics_bridge.subscribe
@@ -49,6 +51,7 @@ let create ?(on_pending_count_change = fun _ -> ()) ~keeper_name ~turn_id () =
   in
   { keeper_name
   ; turn_id
+  ; event_bus
   ; event_bus_sub
   ; drain_cancel = Atomic.make Inactive
   ; state =
@@ -132,9 +135,9 @@ let emit_fsm_transition ~keeper_name ~turn_id ~pending_count transition =
 
 let drain ?(site = "unspecified") t =
   let events =
-    match t.event_bus_sub, Keeper_event_bus.get () with
-    | Some sub, Some _bus -> Agent_sdk_metrics_bridge.drain sub
-    | _ -> []
+    match t.event_bus_sub with
+    | Some sub -> Agent_sdk_metrics_bridge.drain sub
+    | None -> []
   in
   let outcome = if events = [] then "empty" else "drained" in
   Otel_metric_store.inc_counter
@@ -265,7 +268,7 @@ let unsubscribe t =
          t.keeper_name
          msg));
   ignore (drain ~site:"unsubscribe_final" t);
-  match t.event_bus_sub, Keeper_event_bus.get () with
+  match t.event_bus_sub, t.event_bus with
   | Some sub, Some bus -> Agent_sdk_metrics_bridge.unsubscribe bus sub
   | _ -> ()
 ;;

@@ -531,6 +531,13 @@ let test_no_progress_recovery_reaction_clears_pending () =
   check_member_string "pending recovery summary status" "degraded" "status" pending_summary;
   check int "recovery stimulus pending" 1
     (pending_summary |> member "pending_stimulus_count" |> to_int);
+  check int "pending recovery stimulus kind counted" 1
+    (pending_summary |> member "pending_no_progress_recovery_count" |> to_int);
+  check int "pending recovery stimulus id surfaced" 1
+    (pending_summary
+     |> member "pending_no_progress_recovery_ids"
+     |> to_list
+     |> List.length);
   Keeper_reaction_ledger.record_event_queue_reaction
     ~base_path
     ~keeper_name
@@ -544,8 +551,72 @@ let test_no_progress_recovery_reaction_clears_pending () =
     (reacted_summary |> member "operator_action_required" |> to_bool);
   check int "recovery stimulus cleared" 0
     (reacted_summary |> member "pending_stimulus_count" |> to_int);
+  check int "pending recovery stimulus kind cleared" 0
+    (reacted_summary |> member "pending_no_progress_recovery_count" |> to_int);
   check int "turn-start reaction counted" 1
     (reacted_summary |> member "turn_started_count" |> to_int)
+;;
+
+let test_summary_links_passive_only_attention_to_pending_recovery () =
+  with_temp_base @@ fun base_path ->
+  let config = Workspace.default_config base_path in
+  let keeper_name = "passive-recovery-keeper" in
+  let receipt_json =
+    `Assoc
+      [ "schema", `String "keeper.execution_receipt.v1"
+      ; "trace_id", `String "trace-passive"
+      ; "outcome", `String "receipt_done"
+      ; "terminal_reason_code", `String "completed"
+      ; "operator_disposition", `String "pause_human"
+      ; "operator_disposition_reason", `String "completion_contract_unsatisfied"
+      ; "completion_contract_result", `String "passive_only"
+      ]
+  in
+  Keeper_reaction_ledger.record_execution_receipt_reaction
+    config
+    ~keeper_name
+    ~trace_id:"trace-passive"
+    ~turn_count:1
+    ~current_task_id:(Some "task-passive")
+    ~goal_ids:[]
+    ~outcome:"receipt_done"
+    ~terminal_reason_code:"completed"
+    ~receipt_json
+    ();
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    (no_progress_recovery_stimulus ~keeper_name ());
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check int "passive-only attention counted" 1
+    (summary |> member "completion_contract_passive_only_count" |> to_int);
+  check int "pending no-progress recovery counted" 1
+    (summary |> member "pending_no_progress_recovery_count" |> to_int);
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check int "fleet passive-only attention counted" 1
+    (fleet |> member "completion_contract_passive_only_count" |> to_int);
+  check int "fleet pending no-progress recovery counted" 1
+    (fleet |> member "pending_no_progress_recovery_count" |> to_int);
+  let recovery_keeper =
+    fleet
+    |> member "pending_no_progress_recovery_by_keeper"
+    |> to_list
+    |> List.hd
+  in
+  check_member_string
+    "fleet pending recovery keeper"
+    keeper_name
+    "keeper_name"
+    recovery_keeper;
+  check int "fleet keeper pending recovery count" 1
+    (recovery_keeper |> member "pending_no_progress_recovery_count" |> to_int)
 ;;
 
 let test_unknown_reaction_degrades_summary () =
@@ -700,6 +771,10 @@ let () =
             "no-progress recovery reaction clears pending"
             `Quick
             test_no_progress_recovery_reaction_clears_pending
+        ; test_case
+            "summary links passive-only attention to pending recovery"
+            `Quick
+            test_summary_links_passive_only_attention_to_pending_recovery
         ; test_case
             "unknown reaction degrades summary"
             `Quick

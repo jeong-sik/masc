@@ -498,6 +498,7 @@ let summarize_rows ~keeper_name ~limit rows =
   let completion_contract_result_counts = Hashtbl.create 8 in
   let completion_contract_unknown_result_counts = Hashtbl.create 8 in
   let stimulus_seen = Hashtbl.create 16 in
+  let stimulus_kind_by_id = Hashtbl.create 16 in
   let board_stimulus_tokens = Hashtbl.create 16 in
   let stimulus_order = ref [] in
   let latest_board_cursor = ref None in
@@ -631,8 +632,12 @@ let summarize_rows ~keeper_name ~limit rows =
       match string_field "record_kind" row, stimulus_id with
       | Some "stimulus", Some id ->
         incr stimulus_count;
-        note_stimulus_kind (nested_string_field "stimulus" "kind" row);
+        let stimulus_kind = nested_string_field "stimulus" "kind" row in
+        note_stimulus_kind stimulus_kind;
         note_payload_parse_error row;
+        (match stimulus_kind with
+         | Some kind -> Hashtbl.replace stimulus_kind_by_id id kind
+         | None -> ());
         remember_stimulus id;
         remember_board_stimulus row id
       | Some "reaction", Some id ->
@@ -676,6 +681,22 @@ let summarize_rows ~keeper_name ~limit rows =
       | Some true | None -> false)
   in
   let pending_stimulus_count = List.length pending_stimulus_ids in
+  let pending_no_progress_recovery_ids =
+    List.filter
+      (fun id ->
+        match
+          Hashtbl.find_opt stimulus_kind_by_id id
+          |> Option.bind stimulus_kind_of_string
+        with
+        | Some No_progress_recovery -> true
+        | Some (Board_signal | Bootstrap | Fusion_completed | Bg_completed)
+        | None ->
+          false)
+      pending_stimulus_ids
+  in
+  let pending_no_progress_recovery_count =
+    List.length pending_no_progress_recovery_ids
+  in
   let degraded_signal_count =
     pending_stimulus_count
     + !unsupported_stimulus_count
@@ -718,11 +739,17 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "cursor_swept_stimulus_count", `Int !cursor_swept_stimulus_count
     ; "legacy_cursor_swept_stimulus_count", `Int !legacy_cursor_swept_stimulus_count
     ; "pending_stimulus_count", `Int pending_stimulus_count
+    ; "pending_no_progress_recovery_count", `Int pending_no_progress_recovery_count
     ; ( "pending_stimulus_ids"
       , `List
           (List.map
              (fun value -> `String value)
              (cap_list 8 pending_stimulus_ids)) )
+    ; ( "pending_no_progress_recovery_ids"
+      , `List
+          (List.map
+             (fun value -> `String value)
+             (cap_list 8 pending_no_progress_recovery_ids)) )
     ; "latest_recorded_at_unix", Json_util.float_opt_to_json !latest_recorded_at
     ; "latest_stimulus_id", Json_util.string_opt_to_json !latest_stimulus_id
     ; "read_error", `Null
@@ -757,7 +784,9 @@ let error_summary ~keeper_name ~limit error =
     ; "cursor_swept_stimulus_count", `Int 0
     ; "legacy_cursor_swept_stimulus_count", `Int 0
     ; "pending_stimulus_count", `Int 0
+    ; "pending_no_progress_recovery_count", `Int 0
     ; "pending_stimulus_ids", `List []
+    ; "pending_no_progress_recovery_ids", `List []
     ; "latest_recorded_at_unix", `Null
     ; "latest_stimulus_id", `Null
     ; "read_error", `String error
@@ -861,6 +890,27 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
                ]))
       summaries
   in
+  let pending_no_progress_recovery_by_keeper =
+    List.filter_map
+      (fun summary ->
+        let pending_count = int_field "pending_no_progress_recovery_count" summary in
+        if pending_count = 0
+        then None
+        else
+          Some
+            (`Assoc
+               [ "keeper_name"
+               , (match string_field "keeper_name" summary with
+                  | Some value -> `String value
+                  | None -> `String "unknown")
+               ; "pending_no_progress_recovery_count", `Int pending_count
+               ; ( "pending_no_progress_recovery_ids"
+                 , match assoc_field "pending_no_progress_recovery_ids" summary with
+                   | Some value -> value
+                   | None -> `List [] )
+               ]))
+      summaries
+  in
   let read_error_count =
     List.fold_left
       (fun acc summary -> acc + summary_read_error_count summary)
@@ -868,6 +918,9 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
       summaries
   in
   let pending_count = total_int "pending_stimulus_count" in
+  let pending_no_progress_recovery_count =
+    total_int "pending_no_progress_recovery_count"
+  in
   let unknown_reaction_count = total_int "unknown_reaction_count" in
   let completion_contract_unknown_result_count =
     total_int "completion_contract_unknown_result_count"
@@ -928,7 +981,10 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; ( "legacy_cursor_swept_stimulus_count"
       , `Int (total_int "legacy_cursor_swept_stimulus_count") )
     ; "pending_stimulus_count", `Int pending_count
+    ; "pending_no_progress_recovery_count", `Int pending_no_progress_recovery_count
     ; "pending_by_keeper", `List pending_by_keeper
+    ; ( "pending_no_progress_recovery_by_keeper"
+      , `List pending_no_progress_recovery_by_keeper )
     ; "read_error_count", `Int read_error_count
     ; "keepers", `List summaries
     ]

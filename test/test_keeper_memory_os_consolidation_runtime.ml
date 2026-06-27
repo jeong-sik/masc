@@ -289,7 +289,7 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
         let expected_prompt =
           match
             Prompt_registry.render_prompt_template
-              Masc.Keeper_prompt_names.librarian_memory_consolidation
+              Keeper_prompt_names.librarian_memory_consolidation
               [ "numbered_facts", Consolidation.render_numbered_facts facts ]
           with
           | Ok text -> String.trim text

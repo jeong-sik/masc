@@ -167,6 +167,17 @@ let compaction_source_of_string_opt (s : string) : compaction_source option =
   | "memory_bank" -> Some Memory_bank
   | _ -> None
 
+type compaction_error =
+  | Read_error
+  | Write_error of string
+  | Schema_mismatch
+
+let compaction_error_to_string = function
+  | Read_error -> "read_error"
+  | Write_error msg -> "write_error: " ^ msg
+  | Schema_mismatch -> "schema_mismatch"
+;;
+
 type memory_bank_compaction = {
   performed: bool;
   source: compaction_source option;
@@ -177,6 +188,7 @@ type memory_bank_compaction = {
   dedup_dropped: int;
   invalid_dropped: int;
   dropped_by_kind: (string * int) list;
+  error: compaction_error option;
 }
 
 let no_memory_bank_compaction = {
@@ -189,6 +201,7 @@ let no_memory_bank_compaction = {
   dedup_dropped = 0;
   invalid_dropped = 0;
   dropped_by_kind = [];
+  error = None;
 }
 
 let keeper_memory_schema_version = 2

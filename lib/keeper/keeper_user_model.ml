@@ -73,6 +73,10 @@ let rank_facts ~now facts =
   facts
   |> List.filter (fact_is_current ~now)
   |> List.filter fact_is_user_model
+  |> List.filter (fun (fact : fact) ->
+    match fact.claim_kind with
+    | Some Keeper_memory_os_types.Self_observation -> false
+    | _ -> true)
   |> List.sort (fun (a : fact) (b : fact) ->
     compare (reference_time b) (reference_time a))
   |> dedup_facts_by_claim

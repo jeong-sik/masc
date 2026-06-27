@@ -30,6 +30,11 @@ val enabled : unit -> bool
     Read side of Memory OS; the write side (librarian) is gated
     separately by [MASC_KEEPER_MEMORY_OS_LIBRARIAN]. *)
 
+val facts_recency_ranked
+  :  now:float -> Keeper_memory_os_types.fact list -> Keeper_memory_os_types.fact list
+(** Filter and order facts for prompt recall: current, recallable, not
+    self-observation, most-recent truth-anchor first. Exposed for tests. *)
+
 val render_if_enabled
   :  keeper_id:string
   -> now:float

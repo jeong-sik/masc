@@ -37,18 +37,37 @@ val procedures_path : ?base_path:string -> agent_name:string -> unit -> string
 
 (** {1 File I/O} *)
 
+(** A strict load error carries the file path, the 1-based line number
+    of the offending JSONL row, and the parser message. *)
+type load_error = {
+  path : string;
+  line_number : int;
+  message : string;
+}
+
+type load_result = (procedure list, load_error list) result
+(** Result of a strict load: the parsed procedures or the list of
+    errors encountered, each with line-level provenance. *)
+
 (** Load all persisted procedures for [agent_name]. Malformed JSONL
     lines are silently skipped (via [of_json]). Returns [[]] if the
     file does not exist. *)
 val load_procedures : ?base_path:string -> agent_name:string -> unit -> procedure list
 
+(** Load all persisted procedures for [agent_name] strictly. Every
+    JSONL line must parse and match the procedure schema. Returns
+    [Error errors] on the first row that fails, with path, line
+    number, and message. Returns [Ok []] when the file is missing. *)
+val load_procedures_strict : ?base_path:string -> agent_name:string -> unit -> load_result
+
 (** Append [p] to the agent's procedures file. Creates the directory
     if it does not exist. *)
 val save_procedure : ?base_path:string -> agent_name:string -> procedure -> unit
 
-(** Rewrite the full procedures file atomically. On write error,
-    logs via [Log.Config.warn] and returns [()]. *)
-val rewrite_procedures : ?base_path:string -> agent_name:string -> procedure list -> unit
+(** Rewrite the full procedures file atomically. Returns [Error msg]
+    when the atomic write fails so callers can decide whether to
+    surface or log. *)
+val rewrite_procedures : ?base_path:string -> agent_name:string -> procedure list -> (unit, string) result
 
 (** {1 Crystallisation} *)
 

@@ -11,6 +11,7 @@ module Recall = Masc.Keeper_memory_os_recall
 module Consolidator = Masc.Keeper_memory_os_consolidator
 module Metrics = Masc.Otel_metric_store
 module Runtime_manifest = Masc.Keeper_runtime_manifest
+module Keeper_user_model = Masc.Keeper_user_model
 
 external unsetenv : string -> unit = "masc_test_unsetenv"
 
@@ -3610,12 +3611,17 @@ let test_librarian_provider_slot_gate_caps_at_capacity () =
       Eio.Fiber.fork ~sw (fun () ->
         first
         := Some
-             (Librarian_runtime.with_provider_slot ~clock (fun () ->
-                Eio.Promise.resolve resolve_entered ();
-                Eio.Promise.await release;
-                "ran")));
+             (Librarian_runtime.with_provider_slot
+                ~keeper_id:"keeper-a"
+                ~clock
+                (fun () ->
+                   Eio.Promise.resolve resolve_entered ();
+                   Eio.Promise.await release;
+                   "ran")));
       Eio.Promise.await entered;
-      let second = Librarian_runtime.with_provider_slot ~clock (fun () -> "ran") in
+      let second =
+        Librarian_runtime.with_provider_slot ~keeper_id:"keeper-a" ~clock (fun () -> "ran")
+      in
       Eio.Promise.resolve resolve_release ();
       wait_for_ref ~clock "first slot holder" first;
       Alcotest.(check (option string))
@@ -3639,18 +3645,57 @@ let test_librarian_provider_slot_gate_disabled_at_zero () =
       Eio.Fiber.fork ~sw (fun () ->
         first
         := Some
-             (Librarian_runtime.with_provider_slot ~clock (fun () ->
-                Eio.Promise.resolve resolve_entered ();
-                Eio.Promise.await release;
-                "ran")));
+             (Librarian_runtime.with_provider_slot
+                ~keeper_id:"keeper-a"
+                ~clock
+                (fun () ->
+                   Eio.Promise.resolve resolve_entered ();
+                   Eio.Promise.await release;
+                   "ran")));
       Eio.Promise.await entered;
-      let second = Librarian_runtime.with_provider_slot ~clock (fun () -> "ran") in
+      let second =
+        Librarian_runtime.with_provider_slot ~keeper_id:"keeper-a" ~clock (fun () -> "ran")
+      in
       Eio.Promise.resolve resolve_release ();
       wait_for_ref ~clock "first slot holder" first;
       Alcotest.(check (option string))
         "gate disabled: concurrent entrant also ran"
         (Some "ran")
         second;
+      Alcotest.(check (option (option string)))
+        "slot holder ran"
+        (Some (Some "ran"))
+        !first))
+;;
+
+let test_librarian_provider_slot_gate_is_per_keeper () =
+  with_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT" "1" (fun () ->
+    with_eio (fun ~sw ~net:_ ~clock ->
+      (* Capacity 1 is per keeper: a slot held by keeper-a must not block
+         keeper-b. This is the P0-4 isolation contract. *)
+      let entered, resolve_entered = Eio.Promise.create () in
+      let release, resolve_release = Eio.Promise.create () in
+      let first = ref None in
+      Eio.Fiber.fork ~sw (fun () ->
+        first
+        := Some
+             (Librarian_runtime.with_provider_slot
+                ~keeper_id:"keeper-a"
+                ~clock
+                (fun () ->
+                   Eio.Promise.resolve resolve_entered ();
+                   Eio.Promise.await release;
+                   "ran")));
+      Eio.Promise.await entered;
+      let other_keeper =
+        Librarian_runtime.with_provider_slot ~keeper_id:"keeper-b" ~clock (fun () -> "ran")
+      in
+      Eio.Promise.resolve resolve_release ();
+      wait_for_ref ~clock "first slot holder" first;
+      Alcotest.(check (option string))
+        "different keeper runs despite capacity 1 held"
+        (Some "ran")
+        other_keeper;
       Alcotest.(check (option (option string)))
         "slot holder ran"
         (Some (Some "ran"))
@@ -4735,6 +4780,68 @@ let test_compaction_snapshots_json_surfaces_manifest_read_errors () =
       (json_int_field "compaction_snapshots" top "read_error_count"))
 ;;
 
+let test_self_observation_excluded_from_recall () =
+  let now = 1_000_000.0 in
+  let self_obs =
+    { (fact_fixture ~now ()) with
+      Types.claim = "I am looping this turn"
+    ; Types.category = Types.Fact
+    ; Types.claim_kind = Some Types.Self_observation
+    ; Types.first_seen = now
+    ; Types.last_verified_at = Some now
+    }
+  in
+  let durable =
+    { (fact_fixture ~now ()) with
+      Types.claim = "The build uses dune 3.x"
+    ; Types.category = Types.Fact
+    ; Types.claim_kind = Some Types.External_state
+    ; Types.first_seen = now -. 1.0
+    ; Types.last_verified_at = Some (now -. 1.0)
+    }
+  in
+  let ranked = Recall.facts_recency_ranked ~now [ self_obs; durable ] in
+  Alcotest.(check int) "self-observation excluded from recall ranking" 1 (List.length ranked);
+  Alcotest.(check string) "only durable fact remains" "The build uses dune 3.x" (List.hd ranked).Types.claim
+;;
+
+let test_self_observation_excluded_from_user_model () =
+  let now = 1_000_000.0 in
+  with_temp_keepers_dir (fun _marker ->
+    let keeper_id = "keeper-self-obs" in
+    let self_pref =
+      { (fact_fixture ~now ()) with
+        Types.claim = "I prefer short turns"
+      ; Types.category = Types.Preference
+      ; Types.claim_kind = Some Types.Self_observation
+      ; Types.first_seen = now
+      ; Types.last_verified_at = Some now
+      }
+    in
+    let real_pref =
+      { (fact_fixture ~now ()) with
+        Types.claim = "User prefers concise responses"
+      ; Types.category = Types.Preference
+      ; Types.claim_kind = None
+      ; Types.first_seen = now -. 1.0
+      ; Types.last_verified_at = Some (now -. 1.0)
+      }
+    in
+    List.iter (Memory_io.append_fact ~keeper_id) [ self_pref; real_pref ];
+    let model = Keeper_user_model.build ~keeper_id ~now () in
+    Alcotest.(check int) "one preference remains" 1 (List.length model.Keeper_user_model.preferences);
+    Alcotest.(check string)
+      "real preference remains, self-observation excluded"
+      "User prefers concise responses"
+      (List.hd model.Keeper_user_model.preferences).Keeper_user_model.claim)
+;;
+
+let test_gc_default_on_and_reconcile_default_off () =
+  (* Defaults are module-load constants; env overrides are tested separately. *)
+  Alcotest.(check bool) "gc default is true" true Env_config.KeeperMemoryOs.gc_enabled_default;
+  Alcotest.(check bool) "reconcile default is false" false Env_config.KeeperMemoryOs.reconcile_enabled_default
+;;
+
 let () =
   maybe_run_lock_holder_child ();
   Alcotest.run
@@ -4850,6 +4957,10 @@ let () =
             "dashboard compaction snapshots surface manifest read errors"
             `Quick
             test_compaction_snapshots_json_surfaces_manifest_read_errors
+        ; Alcotest.test_case
+            "gc default is on and reconcile default is opt-in (P0-1)"
+            `Quick
+            test_gc_default_on_and_reconcile_default_off
         ] )
     ; ( "policy"
       , [ Alcotest.test_case
@@ -5122,6 +5233,10 @@ let () =
             "provider slot gate disabled at capacity 0"
             `Quick
             test_librarian_provider_slot_gate_disabled_at_zero
+        ; Alcotest.test_case
+            "provider slot gate isolates keepers (P0-4)"
+            `Quick
+            test_librarian_provider_slot_gate_is_per_keeper
         ] )
     ; ( "rfc-0259 volatile"
       , [ Alcotest.test_case
@@ -5140,6 +5255,14 @@ let () =
             "self-observation never promoted; durable is (RFC-0285 §3.5)"
             `Quick
             test_self_observation_not_promoted
+        ; Alcotest.test_case
+            "self-observation excluded from recall context (P0-2)"
+            `Quick
+            test_self_observation_excluded_from_recall
+        ; Alcotest.test_case
+            "self-observation excluded from user model (P0-2)"
+            `Quick
+            test_self_observation_excluded_from_user_model
         ; Alcotest.test_case
             "fact_of_json does not infer external_ref from legacy prose"
             `Quick

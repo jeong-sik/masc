@@ -197,7 +197,8 @@ module KeeperMemoryOs = struct
   let librarian_timeout_sec_default = 600.0
   let librarian_runtime_id_default = None
   let librarian_global_slot_default = 1
-  let gc_enabled_default = false
+  let gc_enabled_default = true
+  let reconcile_enabled_default = false
   let consolidation_enabled_default = false
   let consolidation_runtime_id_default = None
 
@@ -298,8 +299,9 @@ module KeeperMemoryOs = struct
          ~default:librarian_global_slot_default)
   ;;
 
-  (** Per-keeper Memory OS GC maintenance fiber kill switch. Default: false;
-      invalid values fail closed to false.
+  (** Per-keeper Memory OS GC maintenance fiber kill switch. Default: true;
+      invalid values fail closed to false. Env var acts as a kill switch to
+      disable GC if a live dry-run shows it would prune the wrong rows.
       @category Storage
       @ops_class operator *)
   let gc_enabled () =
@@ -307,6 +309,18 @@ module KeeperMemoryOs = struct
       ~invalid:Env_config_memory.Fail_closed
       "MASC_KEEPER_MEMORY_OS_GC"
       ~default:gc_enabled_default
+  ;;
+
+  (** Per-keeper Memory OS reconcile maintenance fiber kill switch.
+      Default: false while [Keeper_memory_os_reconcile] is a placeholder;
+      invalid values fail closed to false.
+      @category Policies
+      @ops_class operator *)
+  let reconcile_enabled () =
+    get_bool_logged
+      ~invalid:Env_config_memory.Fail_closed
+      "MASC_KEEPER_MEMORY_OS_RECONCILE"
+      ~default:reconcile_enabled_default
   ;;
 
   (** Per-keeper Memory OS consolidation maintenance fiber kill switch.

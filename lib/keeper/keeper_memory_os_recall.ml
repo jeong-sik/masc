@@ -226,7 +226,13 @@ let dedup_by_claim facts =
    ([staleness_marker]) all read the same timestamp by construction. *)
 let truth_anchor (fact : fact) = reference_time fact
 
-(* Filter to current, order by structural recency (the truth anchor), and dedup.
+(* Filter to current, order by structural recency (the truth anchor), dedup, and
+   exclude first-person self-observations. Self-observations ("I am idle",
+   "I am looping") are transient agent-state notes, not verifiable external state
+   or durable knowledge, so they must not leak into the recall context shown to
+   the model. RFC-0285 §3.1 classifies them at the producer boundary; this is the
+   read-side enforcement.
+
    RFC-0247 replaced the composite [score_fact] order with this single typed
    timestamp: recall ordering is structural, never a learned number. The prior
    pipeline also ran spreading-activation reranking ([activate]) and lexical
@@ -238,6 +244,10 @@ let facts_recency_ranked ~now facts =
   facts
   |> List.filter (fact_is_current ~now)
   |> List.filter fact_prompt_recallable
+  |> List.filter (fun (fact : fact) ->
+    match fact.claim_kind with
+    | Some Keeper_memory_os_types.Self_observation -> false
+    | _ -> true)
   |> List.sort (fun a b -> compare (truth_anchor b) (truth_anchor a))
   |> dedup_by_claim
 ;;

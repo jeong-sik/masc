@@ -78,6 +78,12 @@ type keeper_memory_summary =
 }
 (** @see [Keeper_memory_policy.keeper_memory_summary] *)
 
+type compaction_error = Keeper_memory_policy.compaction_error =
+  | Read_error
+  | Write_error of string
+  | Schema_mismatch
+(** @see [Keeper_memory_policy.compaction_error] *)
+
 type memory_bank_compaction =
   Keeper_memory_policy.memory_bank_compaction = {
   performed : bool;
@@ -89,6 +95,7 @@ type memory_bank_compaction =
   dedup_dropped : int;
   invalid_dropped : int;
   dropped_by_kind : (string * int) list;
+  error : compaction_error option;
 }
 (** @see [Keeper_memory_policy.memory_bank_compaction] *)
 

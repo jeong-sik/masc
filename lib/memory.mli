@@ -39,6 +39,12 @@ type compaction_source =
   | MASC_policy
   | Memory_bank
 
+type compaction_error =
+  Keeper_memory_policy.compaction_error =
+    Read_error
+  | Write_error of string
+  | Schema_mismatch
+
 type compaction =
   Keeper_memory_policy.memory_bank_compaction = {
   performed : bool;
@@ -50,6 +56,7 @@ type compaction =
   dedup_dropped : int;
   invalid_dropped : int;
   dropped_by_kind : (string * int) list;
+  error : compaction_error option;
 }
 
 type read_error = Keeper_memory_recall_exn_class.t

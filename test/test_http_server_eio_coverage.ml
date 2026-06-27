@@ -116,12 +116,12 @@ let test_compress_zstd_level () =
 ;;
 
 let test_compress_zstd_dictionary_result_returns_original () =
-  let original = String.make Masc.Compression_codec.legacy_min_size 'd' in
+  let original = String.make Compression_codec.legacy_min_size 'd' in
   let dictionary_payload = "dictionary-compressed-bytes" in
   let result, compressed =
     Compression.compress_zstd_result ~original
-      (Masc.Compression_codec.Compressed
-         { payload = dictionary_payload; encoding = Masc.Compression_codec.Dictionary })
+      (Compression_codec.Compressed
+         { payload = dictionary_payload; encoding = Compression_codec.Dictionary })
   in
   check bool "dictionary not advertised as zstd" false compressed;
   check string "dictionary payload not leaked" original result

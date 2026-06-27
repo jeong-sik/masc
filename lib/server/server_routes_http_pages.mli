@@ -114,9 +114,13 @@ val dashboard_index_path : unit -> string
 (** Resolved path to the legacy dashboard's
     [index.html]. *)
 
+val dashboard_etag_hex_chars : int
+(** Number of hex digest characters included in the
+    dashboard index ETag. *)
+
 val dashboard_etag_of_body : string -> string
 (** Content-derived ETag digest for dashboard [index.html]
-    response bytes (first 12 hex chars). *)
+    response bytes, truncated to [dashboard_etag_hex_chars]. *)
 
 val dashboard_index_cache_control : string
 (** Cache-control header value for the dashboard index

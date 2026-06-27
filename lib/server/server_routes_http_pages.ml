@@ -223,7 +223,7 @@ let dashboard_etag_hex_chars = 12
 
 let dashboard_etag_of_body body =
   let hash = Digest.string body |> Digest.to_hex in
-  String.sub hash 0 dashboard_etag_hex_chars
+  String.sub hash 0 (min dashboard_etag_hex_chars (String.length hash))
 
 let dashboard_index_cache_control = "no-store, max-age=0, must-revalidate"
 

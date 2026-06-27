@@ -434,7 +434,7 @@ let to_json (receipt : t) =
       ()
   in
   `Assoc
-    [ "schema", `String "keeper.execution_receipt.v1"
+    [ "schema", `String Keeper_types_support.execution_receipt_schema
     ; "recorded_at", `String receipt.ended_at
     ; "keeper_name", `String receipt.keeper_name
     ; "agent_name", `String receipt.agent_name

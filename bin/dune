@@ -116,6 +116,15 @@
   agent_sdk
   agent_sdk.llm_provider))
 
+;; RFC-0264 P3 local substrate: recall ledger ⨝ execution receipts, no network.
+
+(executable
+ (name masc_recall_outcome_eval)
+ (modules masc_recall_outcome_eval)
+ (public_name masc-recall-outcome-eval)
+ (package masc)
+ (libraries masc masc.config masc_core unix yojson))
+
 (executable
  (name public_tool_manifest)
  (modules public_tool_manifest)

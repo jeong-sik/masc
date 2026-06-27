@@ -316,11 +316,11 @@ let test_completion_contract_result_uses_typed_label_parser () =
          "completion_contract_result:passive_only"
          (snapshot |> member "disposition_reason" |> to_string);
        Alcotest.(check string)
-         "completion contract terminal reason is inferred"
+         "completion contract terminal disposition is inferred"
          "completion_contract_unsatisfied"
          (snapshot
           |> member "latest_terminal_reason"
-          |> member "terminal_reason_code"
+          |> member "disposition"
           |> to_string);
        Alcotest.(check string)
          "mutation guard summary uses typed label"

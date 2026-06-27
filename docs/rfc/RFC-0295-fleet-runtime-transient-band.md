@@ -4,6 +4,7 @@ title: "Fleet RuntimeBand 5th value — transient (busy tone dead-branch recover
 status: Draft
 created: 2026-06-27
 updated: 2026-06-27
+revision_note: "§5.2 mapping source corrected in revision 2 (2026-06-27). The transient phases live on `opState.phase` (KeeperPhase SSOT), not `opState.kind` (closed sum of offline/paused/stuck/running). agentBand retains 4-tone routing because AgentStatus carries no FSM-phase information."
 author: jeong-sik (vincent)
 supersedes: []
 superseded_by: null
@@ -116,27 +117,33 @@ steady-state `active` or `attention`, and the dashboard's group divider
 (`fl-group.attn` for attention-first sort) becomes ambiguous during a
 burst of compactions.
 
-## 4. Caller census — 28 sites touch `RuntimeBand`, 18 have exhaustive switches
+## 4. Caller census — RuntimeBand has 4 exhaustive switch sites (revision 2)
 
-`rg -n 'RuntimeBand|\b(active|attention|paused|offline)\b' dashboard/src --type ts`
-returns **28 files**. Of those, **18 sites have exhaustive switch/case
-statements** that must add a `'transient'` arm. The exhaustive set:
+`rg -n 'RuntimeBand' dashboard/src --type ts` returns **9 lines**, all
+in two files (`monitoring-runtime.ts`, `agent-roster.ts`). Of those,
+**4 sites have exhaustive switch statements on `RuntimeBand`** that
+must add a `'transient'` arm:
 
 | site | current arms needed | action |
 |---|---|---|
-| `api/board.ts:94` `switch (band)` | 4 | add `'transient' → transientBandApi()` |
-| `components/governance.ts:60` `case 'offline'` | 1 | add `case 'transient'` |
-| `components/ide/ide-persistence-panel.ts:71/79/105` | 3 | add `case 'transient'` |
-| `components/overview/overview.ts:446/452/457/476/478/479` | 6 | add `case 'transient'` (label: `'전이'` per prototype's `FL_TONE_LABEL`) |
-| `components/keeper-exclusion-label.ts:31` | 1 | add `case 'transient'` |
-| `components/approvals/approvals-surface.ts:47` `switch (band)` | 4 | add `case 'transient'` |
-| `components/goals/goal-helpers.ts:148/161/191` | 3 | add `case 'transient'` |
-| `components/goals/goal-tree.ts:251/266` | 2 | add `case 'transient'` |
+| `components/agent-roster.ts:83-89` `rosterBandActionHint(band, isKeeper)` | 4 | add `case 'transient' → '전이'` |
+| `lib/monitoring-runtime.ts:158-175` `keeperBand(projection)` | 4 | add transient branch per §5.2 |
+| `lib/monitoring-runtime.ts:230-258` `agentBand(status)` | 4 | unchanged — see §5.2 |
+| `lib/monitoring-runtime.ts:264-267` `runtimeBandForAgent(...)` | 4 | unchanged (routes to `keeperBand`) |
 
-The remaining 10 sites are type references (`Record<RuntimeBand, …>`,
-function returns, property reads). They widen automatically when the
-sum type extends; no manual edit required as long as they do not
-exhaustively switch.
+The remaining 5 sites are type references
+(`Record<RuntimeBand, ...>`, function returns, property reads). They
+widen automatically when the sum type extends; no manual edit is
+required for them, though `agent-roster.ts:97 ROSTER_BAND_TONE` must be
+rewritten because its *value* union narrows from
+`'ok' | 'warn' | 'bad' | 'idle'` (4) to include `'busy'` (5).
+
+A first-pass audit (revision 1) listed 18 sites based on substring
+matching of the 4-value literals; that census was incorrect — those
+matches were on unrelated closed sums (`KeeperAttention`,
+`PausedCause`, `RepoState`, etc.), not on `RuntimeBand`. The exhaustive
+enforcement of `RuntimeBand` only fires where the parameter or local
+variable is typed `RuntimeBand`.
 
 ## 5. Design — `transient` as a first-class band
 
@@ -155,22 +162,39 @@ export type RuntimeBand = 'active' | 'attention' | 'paused' | 'offline' | 'trans
 
 ### 5.2 The mapping
 
-`keeperBand` (line 158) routes to `transient` when
-`projection.op_state.kind ∈ { Compacting | Draining | HandingOff | Restarting }`.
-These four `op_state.kind` values already exist in
-`lib/keeper/keeper_runtime_projection.ml`; the dashboard already imports
-them in `monitoring-runtime.ts`. The mapping is:
+`keeperBand` (line 158) routes to `transient` when the keeper's FSM phase
+is a *transient* phase. The phase data lives on `projection.opState.phase`
+(preferred, typed `KeeperPhase` SSOT — `types/core.ts:1083`) or, when
+the composite is unavailable, `keeper.pipeline_stage` (lowercase wire
+format, `types/core.ts:945`). The `STAGE_PHASE_EQUIVALENTS` table at
+`monitoring-runtime.ts:101-110` is the cross-format SSOT.
 
 | condition | band |
 |---|---|
-| `op_state.kind === 'paused'` | `paused` |
-| `op_state.kind === 'offline'` | `offline` |
-| `op_state.kind ∈ {Compacting, Draining, HandingOff, Restarting}` | **`transient`** (new) |
-| `attention_reasons.length > 0` | `attention` |
+| `opState.kind === 'paused'` | `paused` |
+| `opState.kind === 'offline'` | `offline` |
+| `opState.kind === 'stuck'` | `attention` (existing — unchanged) |
+| `opState.phase ∈ {Compacting, HandingOff, Draining, Restarting}` *(or pipeline_stage equivalents `compacting`/`handoff`/`draining`/`restarting`)* | **`transient`** (new) |
+| `attention_signals.length > 0` | `attention` |
 | else | `active` |
 
-`agentBand` (line 230) gains a parallel branch for the agent-status
-counterpart (`status ∈ {'compacting','draining','handing_off','restarting'}`).
+The mapping is **phase-first**, not kind-first. `opState.kind` lives on
+a closed sum (`offline`/`paused`/`stuck`/`running` —
+`keeper-operational-state.ts:106-113`) that carries no transient-phase
+information; transient phases are encoded on `opState.phase` (the
+orthogonal axis), not on `opState.kind`. The current code reads
+`opState.kind` only and lets the `'stuck'` arm absorb the visual signal,
+which is why the prototype's busy rail is unreachable from the dashboard
+path.
+
+`agentBand` (line 230) does NOT gain a transient arm. `AgentStatus`
+(`agent-status.ts:16-22`) is a closed sum of presence states
+(`active | busy | listening | idle | inactive | offline`) that carries
+no FSM-phase information; the agent-status `'busy'` token is an
+operational cue (currently driving work), not a transient FSM phase.
+Agents without a linked keeper therefore keep their existing 4-tone
+routing. Operators see the transient rail only on rows where a keeper
+is linked and the keeper FSM is mid-transition.
 
 ### 5.3 The tone
 
@@ -196,11 +220,21 @@ become live.
 
 ## 6. Verification
 
-- `rg -n "case 'active'|case 'attention'|case 'paused'|case 'offline'" dashboard/src --type ts | wc -l` increases by 18 (one new arm per exhaustive site).
-- `dashboard/src/components/agent-roster.test.ts:729-731` already asserts `data-tone` is in `valid`. Extend `valid` from 4 → 5.
-- `dashboard/src/components/fleet-health-panel.test.ts` — update band fixtures.
-- New test `monitoring-runtime.test.ts` asserting `keeperBand` returns `'transient'` for each of the four transient `op_state.kind` values.
-- Visual: at runtime, trigger Compacting on a keeper and confirm `data-tone="busy"` appears on the row's left rail and the chip.
+- `rg -n 'RuntimeBand' dashboard/src --type ts` returns 9 lines; the
+  sum-type extension to 5 values forces a compile-time error on the
+  4 exhaustive switch sites (§4) until each adds a `'transient'` arm.
+- `dashboard/src/components/agent-roster.test.ts:729-731` asserts
+  `data-tone` is in `valid`. Extend `valid` from 4 → 5 with `'busy'`.
+- New tests in `dashboard/src/lib/monitoring-runtime.test.ts`
+  asserting `runtimeBandMeta('transient')` returns the new band meta
+  AND `summarizeKeeperMonitoring(...)` returns `band.key === 'transient'`
+  for each of the four transient phases (`Compacting`/`HandingOff`/
+  `Draining`/`Restarting`) — driven via `composite.phase` (lowercase
+  wire format, see `KeeperCompositePhaseSchema`).
+- `dashboard/src/components/fleet-health-panel.test.ts` — update any
+  band fixtures that enumerate the 4-value band.
+- Visual: at runtime, trigger Compacting on a keeper and confirm
+  `data-tone="busy"` appears on the row's left rail and the chip.
 
 ## 7. Migration / rollback
 

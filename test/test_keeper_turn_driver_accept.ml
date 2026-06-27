@@ -977,6 +977,186 @@ let test_prepare_degraded_retry_reports_setup_failure () =
      | rows ->
        Alcotest.failf "expected one cascade event, got %d" (List.length rows))
 
+let test_plan_degraded_retry_step_covers_direct_outcomes () =
+  with_direct_retry_runtime (fun () ->
+    let empty_err =
+      accept_rejected_sdk_error
+        ~response_shape:(Some Keeper_internal_error.Accept_response_empty)
+        ~last_tool_effect:None
+        ~reason:"shape=empty"
+        ()
+    in
+    let expected_retry_runtime =
+      match direct_empty_no_progress_retry_decision empty_err with
+      | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed retry ->
+        retry.next_runtime
+      | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted _ ->
+        Alcotest.fail
+          "fresh direct empty retry should not exhaust slot phase before planning"
+      | Masc.Keeper_turn_runtime_budget.No_degraded_retry ->
+        Alcotest.fail "fresh direct empty retry should select a fallback runtime"
+    in
+    let plan
+        ?time_spent_in_turn_s
+        ?(allow_retry = fun _ -> true)
+        ?(setup_runtime = fun runtime_id -> Ok ("prepared:" ^ runtime_id))
+        err =
+      let published, selected, rotated, publish_cascade_resolution,
+          emit_runtime_selected, emit_runtime_rotation =
+        prepare_retry_observers ()
+      in
+      ( Masc.Keeper_turn_runtime_budget.plan_degraded_retry_step
+          ~base_runtime:"test_provider.test_model"
+          ~current_runtime_id:"runtime.direct-empty"
+          ~attempted_runtimes:[ "runtime.direct-empty" ]
+          ~estimated_input_tokens:1
+          ~time_spent_in_turn_s
+          ~remaining_turn_budget_s:60.0
+          ~attempt:1
+          ~err
+          ~allow_retry
+          ~publish_cascade_resolution
+          ~emit_runtime_selected
+          ~emit_runtime_rotation
+          ~setup_runtime
+      , published
+      , selected
+      , rotated )
+    in
+    let step, published, selected, rotated =
+      plan ~allow_retry:(fun _ -> false) empty_err
+    in
+    (match step with
+     | Masc.Keeper_turn_runtime_budget.Degraded_retry_step_not_allowed -> ()
+     | _ -> Alcotest.fail "retry policy denial should not plan a retry");
+    Alcotest.(check (list (pair string string)))
+      "policy denial emits no selected metric"
+      []
+      (List.rev !selected);
+    Alcotest.(check (list (triple string string string)))
+      "policy denial emits no rotation metric"
+      []
+      (List.rev !rotated);
+    Alcotest.(check int)
+      "policy denial emits no cascade event"
+      0
+      (List.length !published);
+    let step, published, selected, rotated = plan empty_err in
+    (match step with
+     | Masc.Keeper_turn_runtime_budget.Degraded_retry_step_prepared
+         { retry; reason; next } ->
+       Alcotest.(check string)
+         "prepared runtime"
+         expected_retry_runtime
+         retry.next_runtime;
+       Alcotest.(check string) "prepared reason" "empty_no_progress" reason;
+       Alcotest.(check string)
+         "prepared payload"
+         ("prepared:" ^ expected_retry_runtime)
+         next
+     | _ -> Alcotest.fail "allowed empty retry should prepare fallback runtime");
+    Alcotest.(check (list (pair string string)))
+      "prepared emits selected metric"
+      [ expected_retry_runtime, "empty_no_progress" ]
+      (List.rev !selected);
+    Alcotest.(check (list (triple string string string)))
+      "prepared emits rotation metric"
+      [ "runtime.direct-empty", expected_retry_runtime, "empty_no_progress" ]
+      (List.rev !rotated);
+    (match List.rev !published with
+     | [ (runtime_id, decision, reason, next_runtime, attempt) ] ->
+       Alcotest.(check string)
+         "prepared cascade runtime"
+         "runtime.direct-empty"
+         runtime_id;
+       Alcotest.(check string)
+         "prepared cascade decision"
+         "degraded_retry_allowed"
+         decision;
+       Alcotest.(check string) "prepared cascade reason" "empty_no_progress" reason;
+       Alcotest.(check (option string))
+         "prepared cascade target"
+         (Some expected_retry_runtime)
+         next_runtime;
+       Alcotest.(check int) "prepared cascade attempt" 1 attempt
+     | rows ->
+       Alcotest.failf "expected one prepared cascade event, got %d"
+         (List.length rows));
+    let setup_err = Agent_sdk.Error.Internal "plan setup failed" in
+    let step, published, selected, rotated =
+      plan ~setup_runtime:(fun _ -> Error setup_err) empty_err
+    in
+    (match step with
+     | Masc.Keeper_turn_runtime_budget.Degraded_retry_step_setup_failed
+         { retry; reason; fail_open_err } ->
+       Alcotest.(check string)
+         "setup failure retry runtime"
+         expected_retry_runtime
+         retry.next_runtime;
+       Alcotest.(check string) "setup failure reason" "empty_no_progress" reason;
+       Alcotest.(check string)
+         "setup failure error"
+         (Agent_sdk.Error.to_string setup_err)
+         (Agent_sdk.Error.to_string fail_open_err)
+     | _ -> Alcotest.fail "setup error should produce setup-failed step");
+    Alcotest.(check (list (pair string string)))
+      "setup failure emits no selected metric"
+      []
+      (List.rev !selected);
+    Alcotest.(check (list (triple string string string)))
+      "setup failure emits no rotation metric"
+      []
+      (List.rev !rotated);
+    Alcotest.(check int)
+      "setup failure still publishes allowed cascade"
+      1
+      (List.length !published);
+    let exhausted_after =
+      Masc.Keeper_turn_runtime_budget.degraded_retry_slot_phase_budget_sec +. 1.0
+    in
+    let step, published, selected, rotated =
+      plan ~time_spent_in_turn_s:exhausted_after empty_err
+    in
+    (match step with
+     | Masc.Keeper_turn_runtime_budget.Degraded_retry_step_slot_phase_exhausted
+         { retry; reason } ->
+       Alcotest.(check string)
+         "slot exhausted runtime"
+         expected_retry_runtime
+         retry.next_runtime;
+       Alcotest.(check string) "slot exhausted reason" "empty_no_progress" reason
+     | _ -> Alcotest.fail "expired slot phase should produce exhausted step");
+    Alcotest.(check (list (pair string string)))
+      "slot exhaustion emits no selected metric"
+      []
+      (List.rev !selected);
+    Alcotest.(check (list (triple string string string)))
+      "slot exhaustion emits no rotation metric"
+      []
+      (List.rev !rotated);
+    (match List.rev !published with
+     | [ (runtime_id, decision, reason, next_runtime, attempt) ] ->
+       Alcotest.(check string)
+         "slot exhausted cascade runtime"
+         "runtime.direct-empty"
+         runtime_id;
+       Alcotest.(check string)
+         "slot exhausted cascade decision"
+         "degraded_retry_slot_phase_exhausted"
+         decision;
+       Alcotest.(check string)
+         "slot exhausted cascade reason"
+         "empty_no_progress"
+         reason;
+       Alcotest.(check (option string))
+         "slot exhausted cascade target"
+         (Some expected_retry_runtime)
+         next_runtime;
+       Alcotest.(check int) "slot exhausted cascade attempt" 1 attempt
+     | rows ->
+       Alcotest.failf "expected one slot-exhausted cascade event, got %d"
+         (List.length rows)))
+
 let test_direct_empty_no_progress_retry_loop_runs_fallback_attempt () =
   with_direct_retry_runtime (fun () ->
     let empty_err =
@@ -1631,6 +1811,10 @@ let () =
             "degraded retry reports setup failure"
             `Quick
             test_prepare_degraded_retry_reports_setup_failure;
+          Alcotest.test_case
+            "degraded retry planner covers direct outcomes"
+            `Quick
+            test_plan_degraded_retry_step_covers_direct_outcomes;
 	          Alcotest.test_case
 	            "direct empty no-progress retry runs fallback attempt"
 	            `Quick

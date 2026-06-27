@@ -327,6 +327,22 @@ let append_recall_record
   |> Dated_jsonl.append store
 ;;
 
+let append_malformed_recall_record ~(config : Workspace_utils.config) =
+  let masc_root = Workspace_utils.masc_dir config in
+  let store =
+    Dated_jsonl.create
+      ~base_dir:(Recall_ledger.base_dir ~masc_root)
+      ()
+  in
+  Dated_jsonl.append
+    store
+    (`Assoc
+      [ "keeper_id", `String "keeper-bad"
+      ; "injected_fact_keys", `List [ `Int 1 ]
+      ; "injected_episode_keys", `List []
+      ])
+;;
+
 let legacy_unstructured_fallback_fact_key () =
   Types.claim_identity
     (fact (Types.librarian_unstructured_fallback_claim_prefix ^ " (provider): raw"))
@@ -384,6 +400,8 @@ let test_http_json_surfaces_memory_quality_summary () =
          Json.(quality |> member "empty_recall_records" |> to_int);
        check int "failure records" 1
          Json.(quality |> member "failure_records" |> to_int);
+       check int "decode error records" 0
+         Json.(quality |> member "decode_error_records" |> to_int);
        check bool "outcome not joined in dashboard summary" false
          Json.(quality |> member "outcome_joined" |> to_bool);
        let fact_injections = Json.(quality |> member "fact_injections") in
@@ -411,6 +429,57 @@ let test_http_json_surfaces_memory_quality_summary () =
          Json.(reason |> member "key" |> to_string);
        check int "failure reason count" 1
          Json.(reason |> member "count" |> to_int))
+;;
+
+let test_http_json_surfaces_memory_quality_decode_errors () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+       let config = Workspace_utils.default_config dir in
+       append_recall_record
+         ~failure_reason:"free-form provider detail that must not become a label"
+         ~config
+         ~keeper_id:"keeper-a"
+         ~trace_id:"trace-1"
+         ~turn:1
+         ~injected_fact_keys:[ "id:stable" ]
+         ~injected_episode_keys:[]
+         ~n_facts_in_store:1
+         ();
+       append_malformed_recall_record ~config;
+       let json =
+         Memory_subsystems.dashboard_memory_subsystems_http_json
+           ~config
+           ~include_memory_entries:false
+           (request
+              "/dashboard/memory-subsystems?limit=100&memory_quality_limit=10&memory_quality_top_key_limit=1")
+       in
+       let quality = Json.(json |> member "memory_quality") in
+       check int "sample limit from query" 10
+         Json.(quality |> member "sample_limit" |> to_int);
+       check int "one decoded record" 1
+         Json.(quality |> member "sampled_records" |> to_int);
+       check int "one decode error record" 1
+         Json.(quality |> member "decode_error_records" |> to_int);
+       let reasons = Json.(quality |> member "failure_reasons" |> to_list) in
+       check int "one bounded failure reason" 1 (List.length reasons);
+       let reason = List.hd reasons in
+       check
+         string
+         "unknown reason is grouped"
+         Recall_ledger.failure_reason_unknown_label
+         Json.(reason |> member "key" |> to_string);
+       check int "unknown reason count" 1
+         Json.(reason |> member "count" |> to_int);
+       let top_echoed =
+         Json.(
+           quality
+           |> member "fact_injections"
+           |> member "top_echoed_fact_keys"
+           |> to_list)
+       in
+       check int "top key limit applies" 0 (List.length top_echoed))
 ;;
 
 let test_http_json_hebbian_derives_from_shared_facts () =
@@ -534,6 +603,10 @@ let () =
             "surfaces memory quality summary"
             `Quick
             test_http_json_surfaces_memory_quality_summary
+        ; test_case
+            "surfaces memory quality decode errors"
+            `Quick
+            test_http_json_surfaces_memory_quality_decode_errors
         ; test_case
             "hebbian empty without shared facts"
             `Quick

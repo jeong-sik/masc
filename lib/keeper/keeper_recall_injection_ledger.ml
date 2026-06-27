@@ -14,6 +14,9 @@ let field_injected_episode_keys = "injected_episode_keys"
 let field_n_facts_in_store = "n_facts_in_store"
 let field_ts = "ts"
 let field_failure_reason = "failure_reason"
+let failure_reason_read_error = "read_error"
+let failure_reason_prompt_render_error = "prompt_render_error"
+let failure_reason_unknown_label = "unknown_failure_reason"
 
 type record =
   { keeper_id : string
@@ -22,35 +25,67 @@ type record =
   ; failure_reason : string option
   }
 
-let json_string_field fields key =
+type decode_error =
+  [ `Expected_object
+  | `Missing_field of string
+  | `Invalid_field of string
+  ]
+
+let json_required_string_field fields key =
   match List.assoc_opt key fields with
-  | Some (`String value) -> Some value
-  | _ -> None
+  | Some (`String value) -> Ok value
+  | Some _ -> Error (`Invalid_field key)
+  | None -> Error (`Missing_field key)
 ;;
 
-let json_string_list_field fields key =
+let json_required_string_list_field fields key =
   match List.assoc_opt key fields with
   | Some (`List items) ->
-    List.filter_map
-      (function
-        | `String value -> Some value
-        | _ -> None)
-      items
-  | _ -> []
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | `String value :: rest -> loop (value :: acc) rest
+      | _ :: _ -> Error (`Invalid_field key)
+    in
+    loop [] items
+  | Some _ -> Error (`Invalid_field key)
+  | None -> Error (`Missing_field key)
 ;;
 
-let record_of_json = function
+let json_optional_string_field fields key =
+  match List.assoc_opt key fields with
+  | Some (`String value) -> Ok (Some value)
+  | Some _ -> Error (`Invalid_field key)
+  | None -> Ok None
+;;
+
+let record_of_json_result = function
   | `Assoc fields ->
-    (match json_string_field fields field_keeper_id with
-     | None -> None
-     | Some keeper_id ->
-       Some
-         { keeper_id
-         ; injected_fact_keys = json_string_list_field fields field_injected_fact_keys
-         ; injected_episode_keys = json_string_list_field fields field_injected_episode_keys
-         ; failure_reason = json_string_field fields field_failure_reason
-         })
-  | _ -> None
+    (match
+       ( json_required_string_field fields field_keeper_id
+       , json_required_string_list_field fields field_injected_fact_keys
+       , json_required_string_list_field fields field_injected_episode_keys
+       , json_optional_string_field fields field_failure_reason )
+     with
+     | Ok keeper_id, Ok injected_fact_keys, Ok injected_episode_keys, Ok failure_reason ->
+       Ok { keeper_id; injected_fact_keys; injected_episode_keys; failure_reason }
+     | Error err, _, _, _
+     | _, Error err, _, _
+     | _, _, Error err, _
+     | _, _, _, Error err -> Error err)
+  | _ -> Error `Expected_object
+;;
+
+let record_of_json json =
+  match record_of_json_result json with
+  | Ok record -> Some record
+  | Error _ -> None
+;;
+
+let bounded_failure_reason_label = function
+  | reason
+    when String.equal reason failure_reason_read_error
+         || String.equal reason failure_reason_prompt_render_error -> reason
+  | _ -> failure_reason_unknown_label
 ;;
 
 let to_json
@@ -107,7 +142,10 @@ let prune_failure_label = function
   | _ -> `Unexpected_exception
 ;;
 
-let error_label_of_exn exn = exn |> prune_failure_label |> string_of_prune_error
+let error_label_of_exn exn =
+  exn
+  |> Keeper_memory_recall_exn_class.classify
+  |> Keeper_memory_recall_exn_class.to_label
 ;;
 
 let append

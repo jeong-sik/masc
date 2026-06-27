@@ -3,6 +3,7 @@ open Repo_manager_types
 let ( let* ) = Result.bind
 
 module String_map = Map.Make (String)
+module String_set = Set.Make (String)
 
 (** Keep per-path/keeper auxiliary maps bounded. These maps are operational
     caches, not correctness state: on overflow we drop the old contents and
@@ -283,20 +284,20 @@ let mapping_allows_repository (mapping : keeper_repo_mapping) ~repository_id =
       List.exists (String.equal repository_id) repository_ids
 
 (* Filter [repos] down to those whose id appears in the parsed mapping scope.
-   The Hashtbl materialisation is skipped when the TOML/JSON boundary parsed a
-   wildcard scope, so the wildcard case avoids building the membership set. *)
+   Wildcard scope bypasses filtering, and selected scopes use an immutable set
+   so display/policy paths do not allocate mutable membership tables. *)
 let filter_repos_by_mapping (mapping : keeper_repo_mapping)
     (repos : repository list) : repository list =
   match repository_scope_of_mapping mapping with
   | All_repositories -> repos
   | Selected_repositories repository_ids ->
     let mapping_id_set =
-      let tbl = Hashtbl.create (List.length repository_ids) in
-      List.iter (fun id -> Hashtbl.replace tbl id ()) repository_ids;
-      tbl
+      List.fold_left
+        (fun set id -> String_set.add id set)
+        String_set.empty repository_ids
     in
     List.filter
-      (fun (r : repository) -> Hashtbl.mem mapping_id_set r.id)
+      (fun (r : repository) -> String_set.mem r.id mapping_id_set)
       repos
 
 let log_mapping_load_error_if_new ~keeper_id msg =

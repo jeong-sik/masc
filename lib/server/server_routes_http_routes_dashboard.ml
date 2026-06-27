@@ -718,9 +718,13 @@ let add_routes ~sw ~clock router =
            |> Server_utils.clamp ~min_v:1 ~max_v:50_000
          in
          let cache_key =
+           let base_hash =
+             Digestif.SHA256.(digest_string base_path |> to_hex)
+             |> fun hex -> String.sub hex 0 16
+           in
            Printf.sprintf
              "legacy_keeper_inventory:%s:%d:%d"
-             base_path
+             base_hash
              max_depth
              max_entries
          in

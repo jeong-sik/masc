@@ -83,6 +83,14 @@ let events_path_for_keepers_dir ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ ".events.jsonl")
 ;;
 
+let current_path_for_legacy_memory_filename ~keepers_dir ~keeper_id ~filename =
+  if String.equal filename "facts.jsonl"
+  then Some (facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
+  else if String.equal filename "events.jsonl"
+  then Some (events_path_for_keepers_dir ~keepers_dir ~keeper_id)
+  else None
+;;
+
 let events_path ~keeper_id =
   events_path_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
 ;;

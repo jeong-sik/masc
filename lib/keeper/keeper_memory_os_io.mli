@@ -21,6 +21,11 @@ val list_fact_store_keeper_ids_for_base_path : base_path:string -> string list
 
 val events_path : keeper_id:string -> string
 val events_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
+val current_path_for_legacy_memory_filename :
+  keepers_dir:string -> keeper_id:string -> filename:string -> string option
+(** Map a legacy per-keeper Memory OS filename under [.masc/keepers/<keeper>/]
+    to the current store path under [keepers_dir], when the filename is a
+    supported legacy memory artifact. *)
 val episodes_dir : keeper_id:string -> string
 val tool_results_dir : keeper_id:string -> string
 val tool_result_path : keeper_id:string -> tool_call_id:string -> string

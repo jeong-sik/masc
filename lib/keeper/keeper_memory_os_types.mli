@@ -174,6 +174,10 @@ val fact_is_current : now:float -> fact -> bool
     Kept as the SSOT for the producer and the legacy recall-eligibility shim. *)
 val librarian_unstructured_fallback_claim_prefix : string
 
+(** Terminal marker used on episodes that preserve unstructured librarian output
+    after strict JSON parsing fails. *)
+val librarian_unstructured_fallback_terminal_marker : string
+
 (** Structural prompt-recall eligibility. Callers still apply {!fact_is_current}
     for the time horizon; [Diagnostic] rows stay operator evidence, not prompt
     context. Legacy pre-[Diagnostic] librarian fallback rows are also excluded by

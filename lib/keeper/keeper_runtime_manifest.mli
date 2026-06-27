@@ -69,6 +69,10 @@ type logical_ordering = {
   logical_seq : int option;
 }
 
+type status =
+  | Skipped
+  | Other of string
+
 (** {1 Own-module vals} *)
 
 val payload_role_to_string : payload_role -> string
@@ -79,7 +83,12 @@ val source_clock_of_string : string -> source_clock option
 val source_clock_of_event : event_kind -> source_clock
 
 val schema_version : int
+val manifest_file_suffix : string
 val safe_segment : string -> string
+
+val status_of_string : string -> status
+val status_to_string : status -> string
+val status_is_skipped : t -> bool
 
 val clock_refs :
   ?edge_id:string ->

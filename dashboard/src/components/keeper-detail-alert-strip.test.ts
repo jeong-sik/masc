@@ -84,13 +84,13 @@ describe('KeeperRuntimeAlertStrip', () => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
       keeper: keeper({
         needs_attention: true,
-        attention_reason: 'completion_contract_result:passive_only',
+        attention_reason: 'passive_only',
       }),
     }))
 
     const text = container.textContent ?? ''
     expect(text).toContain('수동 응답만 있음')
-    expect(text).not.toContain('completion_contract_result:passive_only')
+    expect(text).not.toContain('passive_only')
   })
 
   // First-class status_bridge reasons keep their OWN labels — they are no

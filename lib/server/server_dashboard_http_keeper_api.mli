@@ -195,3 +195,11 @@ val memory_os_dashboard_json : keeper_id:string -> Yojson.Safe.t
     from the keeper's on-disk stores. Exported so the test suite can assert the
     facts [items] are wired (one row per persisted fact); [memory_os_fact_json],
     being a pure per-fact projection, cannot guard that wiring on its own. *)
+
+val compaction_snapshots_json :
+  config:Workspace.config -> keeper_id:string -> limit:int -> Yojson.Safe.t
+(** Durable compaction snapshot payload for
+    [GET /api/v1/keepers/:name/compaction-snapshots]. Reads runtime manifests
+    first, then keeper meta as a latest-only fallback, and emits only event
+    metadata/token counts/provenance — never raw prompt or compacted context
+    text. Exported for JSON contract tests. *)

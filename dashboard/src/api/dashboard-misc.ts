@@ -196,6 +196,30 @@ export function fetchMemorySubsystems(
 
 // --- Keeper Memory Health ---
 
+export type KeeperMemoryHealthAlertCode =
+  | 'ttl_expired_on_disk'
+  | 'near_duplicate'
+  | 'events_to_facts_ratio_high'
+  | 'provider_slot_busy'
+
+export type KeeperMemoryHealthAlertSeverity = 'warn'
+
+export type KeeperMemoryHealthAlertTarget =
+  | 'ttl_expired_on_disk'
+  | 'near_duplicate'
+  | 'events_to_facts_ratio'
+  | 'provider_slot_busy'
+
+export interface KeeperMemoryHealthAlert {
+  code: KeeperMemoryHealthAlertCode
+  severity: KeeperMemoryHealthAlertSeverity
+  target: KeeperMemoryHealthAlertTarget
+  label: string
+  message: string
+  value: number
+  threshold: number
+}
+
 export interface KeeperMemoryHealthKeeperEntry {
   keeper_id: string
   facts: number
@@ -205,6 +229,8 @@ export interface KeeperMemoryHealthKeeperEntry {
   events_to_facts_ratio: number
   ttl_expired_on_disk: number
   near_duplicate: number
+  provider_slot_busy: number
+  alerts: KeeperMemoryHealthAlert[]
 }
 
 export interface KeeperMemoryHealthResponse {
@@ -217,6 +243,22 @@ export interface KeeperMemoryHealthResponse {
     events_bytes: number
     ttl_expired_on_disk: number
     near_duplicate: number
+    provider_slot_busy: number
+  }
+  alert_summary: {
+    total_alerts: number
+    warn_alerts: number
+    keepers_with_alerts: number
+    ttl_expired_keepers: number
+    near_duplicate_keepers: number
+    high_event_ratio_keepers: number
+    provider_slot_busy_keepers: number
+    thresholds: {
+      ttl_expired_on_disk: number
+      near_duplicate: number
+      events_to_facts_ratio: number
+      provider_slot_busy: number
+    }
   }
 }
 

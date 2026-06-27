@@ -30,11 +30,15 @@ val empty_plan : consolidation_plan
 val render_numbered_facts : fact list -> string
 
 (** Parse the LLM's consolidation output. Garbled groups degrade individually
-    (dropped, not fatal); a wholly invalid object yields [empty_plan]. *)
+    (dropped with warning counts, not fatal); a wholly invalid object yields
+    [empty_plan]. *)
 val plan_of_json : Yojson.Safe.t -> consolidation_plan
 
-(** [plan_of_string raw] is [None] only when [raw] is not parseable JSON at all;
-    a parseable-but-empty/garbled plan returns [Some empty_plan]-equivalent. *)
+(** [plan_of_string raw] is [None] only when [raw] is not an exact JSON object.
+    Rejections emit a warning with a bounded reason label and byte count so
+    model-provider contract regressions are observable without logging raw
+    provider text. A parseable-but-empty/garbled object returns [Some
+    empty_plan]-equivalent. *)
 val plan_of_string : string -> consolidation_plan option
 
 (** Apply a plan to a keeper's facts, returning the new fact list. Each group of

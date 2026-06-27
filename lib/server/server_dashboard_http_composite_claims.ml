@@ -223,6 +223,14 @@ let lower_string_opt =
   Option.map (fun value -> String.lowercase_ascii (String.trim value))
 ;;
 
+let completion_contract_result_of_execution execution =
+  match json_string "completion_contract_result" execution with
+  | Some raw ->
+    Keeper_execution_receipt_types.completion_contract_result_of_string
+      (String.lowercase_ascii (String.trim raw))
+  | None -> None
+;;
+
 let string_opt_is_any value candidates =
   match lower_string_opt value with
   | Some value -> List.mem value candidates
@@ -315,10 +323,10 @@ let composite_execution_contract_blocker_reason execution =
   if not recoverable_disposition
   then None
   else
-    match lower_string_opt (json_string "completion_contract_result" execution) with
-    | Some ("surface_mismatch" as reason) | Some ("no_capable_provider" as reason) ->
-      Some ("completion_contract_result:" ^ reason)
-    | _ -> None
+    match completion_contract_result_of_execution execution with
+    | Some ((Contract_surface_mismatch | Contract_no_capable_provider) as result) ->
+      Some (Keeper_execution_receipt_types.completion_contract_result_to_string result)
+    | Some _ | None -> None
 ;;
 
 let composite_execution_contract_blocked execution =
@@ -337,24 +345,23 @@ let composite_execution_config_drift execution =
 let keeper_activation_readiness_json = Server_dashboard_fleet_readiness.keeper_activation_readiness_json
 
 let composite_execution_completion_unsatisfied_reason execution =
-  match lower_string_opt (json_string "completion_contract_result" execution) with
+  match completion_contract_result_of_execution execution with
   | Some
-      ( ("violated" | "claim_only_after_owned_task" | "needs_execution_progress"
-        | "passive_only")
-        as reason ) -> Some ("completion_contract_result:" ^ reason)
-  | Some _
-  | None -> None
+      ((Contract_violated | Contract_claim_only_after_owned_task
+       | Contract_needs_execution_progress | Contract_passive_only) as result) ->
+    Some (Keeper_execution_receipt_types.completion_contract_result_to_string result)
+  | Some _ | None -> None
 ;;
 
 let composite_execution_budget_unsatisfied_reason execution =
-  match lower_string_opt (json_string "completion_contract_result" execution) with
+  match completion_contract_result_of_execution execution with
   | Some
-      ( ("unknown" | "not_dispatched" | "violated" | "surface_mismatch"
-        | "no_capable_provider" | "claim_only_after_owned_task" | "needs_execution_progress"
-        | "passive_only")
-        as reason ) -> Some ("completion_contract_result:" ^ reason)
-  | Some _
-  | None -> None
+      ((Contract_unknown | Contract_not_dispatched | Contract_violated
+       | Contract_surface_mismatch | Contract_no_capable_provider
+       | Contract_claim_only_after_owned_task | Contract_needs_execution_progress
+       | Contract_passive_only) as result) ->
+    Some (Keeper_execution_receipt_types.completion_contract_result_to_string result)
+  | Some _ | None -> None
 ;;
 
 let composite_execution_turn_budget_exhausted execution =

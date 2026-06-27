@@ -136,6 +136,20 @@ let completion_contract_result_to_string = function
   | Contract_satisfied_execution -> "satisfied_execution"
 ;;
 
+let completion_contract_result_of_string = function
+  | "unknown" -> Some Contract_unknown
+  | "not_dispatched" -> Some Contract_not_dispatched
+  | "violated" -> Some Contract_violated
+  | "surface_mismatch" -> Some Contract_surface_mismatch
+  | "no_capable_provider" -> Some Contract_no_capable_provider
+  | "claim_only_after_owned_task" -> Some Contract_claim_only_after_owned_task
+  | "needs_execution_progress" -> Some Contract_needs_execution_progress
+  | "passive_only" -> Some Contract_passive_only
+  | "satisfied_completion" -> Some Contract_satisfied_completion
+  | "satisfied_execution" -> Some Contract_satisfied_execution
+  | _ -> None
+;;
+
 (* Lift the typed [Keeper_contract_classifier.contract_status] into the
    receipt-level [completion_contract_result].  Bridges the six classifier
    outcomes; the four boundary states are emitted only by producer sites

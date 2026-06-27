@@ -162,7 +162,9 @@ let profile_of_string = function
 
 let sessions_file_path () =
   let base = default_base_path () in
-  Filename.concat (Filename.concat base ".masc") "mcp_transport_sessions.json"
+  Filename.concat
+    (Config_dir_resolver.masc_root ~base_path:base)
+    "mcp_transport_sessions.json"
 
 (** Serialize current session state to JSON and write to disk atomically.
     Uses write-then-rename to avoid partial writes on crash. *)

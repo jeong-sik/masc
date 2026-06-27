@@ -43,6 +43,7 @@ type completion_contract_result =
   | Contract_satisfied_completion
   | Contract_satisfied_execution
 val completion_contract_result_to_string : completion_contract_result -> string
+val completion_contract_result_of_string : string -> completion_contract_result option
 val completion_contract_result_of_contract_status :
   Keeper_contract_classifier.contract_status -> completion_contract_result
 val encode_tool_list : string list -> string

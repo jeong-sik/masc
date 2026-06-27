@@ -228,6 +228,10 @@ let librarian_unstructured_fallback_claim_prefix =
   "unstructured_note: librarian parse fallback"
 ;;
 
+let librarian_unstructured_fallback_terminal_marker =
+  "librarian_unstructured_fallback"
+;;
+
 let legacy_unstructured_fallback_claim (claim : string) =
   String.starts_with ~prefix:librarian_unstructured_fallback_claim_prefix claim
 ;;

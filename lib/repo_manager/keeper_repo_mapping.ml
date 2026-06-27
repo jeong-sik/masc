@@ -201,7 +201,7 @@ type playground_path =
 
 let playground_path_of_path ~base_path ~path =
   let playground_root =
-    Filename.concat (Filename.concat base_path ".masc") "playground"
+    Filename.concat (Config_dir_resolver.masc_root ~base_path) "playground"
   in
   match relative_under ~root:playground_root path with
   | None -> None

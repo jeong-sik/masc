@@ -56,7 +56,12 @@ val surface_context_to_instructions : Yojson.Safe.t -> string option
 val handle_keeper_msg :
   ?on_text_delta:(string -> unit) ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
+  ?event_bus:Agent_sdk.Event_bus.t ->
   _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
+(** [event_bus] is captured at the handler boundary and reused by the admitted
+    turn body. Callers that omit it keep the legacy process/domain fallback, but
+    async wrappers should pass an explicit value captured before submitting the
+    background turn. *)
 
 (** Stop a running keeper agent. *)
 val handle_keeper_down : _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result

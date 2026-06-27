@@ -83,6 +83,17 @@ end
 (** {1 Keeper Memory OS} *)
 
 module KeeperMemoryOs : sig
+  val recall_enabled_default : bool
+  val librarian_enabled_default : bool
+  val librarian_cadence_turns_default : int
+  val librarian_max_messages_default : int
+  val librarian_timeout_sec_default : float
+  val librarian_runtime_id_default : string option
+  val librarian_global_slot_default : int
+  val gc_enabled_default : bool
+  val consolidation_enabled_default : bool
+  val consolidation_runtime_id_default : string option
+
   val recall_enabled : unit -> bool
   val librarian_enabled : unit -> bool
   val librarian_cadence_turns : unit -> int
@@ -93,6 +104,16 @@ module KeeperMemoryOs : sig
   val gc_enabled : unit -> bool
   val consolidation_enabled : unit -> bool
   val consolidation_runtime_id : unit -> string option
+end
+
+(** {1 Keeper dashboard compaction snapshots} *)
+
+module KeeperCompactionSnapshots : sig
+  val default_limit : int
+  val max_limit : int
+  val manifest_scan_min_files : int
+  val manifest_scan_limit_multiplier : int
+  val manifest_tail_max_lines : int
 end
 
 (** {1 Keeper vision tool} *)

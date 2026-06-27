@@ -62,6 +62,11 @@ val cadence_counter_entries : unit -> int
     leak-regression signal for the keeper-keyed cadence table and a memory-health
     metric for the dashboard. Read-only. *)
 
+val memory_os_librarian_provider_slot_site : string
+(** OTel [site] label used when the fleet-wide librarian provider slot is busy.
+    The producer and dashboard health reader share this value so label drift
+    cannot silently hide provider-slot-busy alerts. *)
+
 val max_messages : unit -> int
 (** Base per-turn cap on checkpoint messages sent to the librarian prompt. The
     effective prompt window is this value scaled by [cadence_turns] so skipped
@@ -137,15 +142,20 @@ val global_slot_capacity : unit -> int
     gate). *)
 
 val with_provider_slot
-  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  :  clock:float Eio.Time.clock_ty Eio.Resource.t
   -> (unit -> 'a)
   -> 'a option
 (** Run [f] under the fleet-wide librarian provider gate — the #21230
     storm-guard the per-keeper lane keeps as an optional fleet-wide cap. At
     capacity N, the (N+1)-th concurrent entrant returns [None] after
-    [provider_slot_wait_sec] when [clock] is supplied (drop, not block);
-    capacity 0 disables the gate so [f] always runs ([Some]). Exposed for
-    storm-guard regression coverage (#21376). *)
+    [provider_slot_wait_sec] (drop, not block); capacity 0 disables the gate so
+    [f] always runs ([Some]). Exposed for storm-guard regression coverage
+    (#21376). *)
+
+val librarian_provider_clock_unavailable_error : string
+(** Stable error returned before provider I/O when provider-backed librarian
+    extraction is called without a clock. Exposed so callers/tests do not
+    classify the human diagnostic with substring matching. *)
 
 val extract_with_provider
   :  ?complete:complete_fn
@@ -168,6 +178,11 @@ val extract_with_provider_classified
   -> generation:int
   -> Keeper_librarian.input
   -> (extraction_result, string) result
+(** Provider-backed librarian extraction. [clock] stays optional at the API
+    boundary because [run_best_effort] may be called from contexts that cannot
+    supply an Eio clock; [None] returns
+    {!librarian_provider_clock_unavailable_error} before provider I/O so
+    production calls cannot silently run without timeout enforcement. *)
 
 val extract_and_append_with_provider
   :  ?complete:complete_fn

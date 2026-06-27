@@ -38,7 +38,8 @@ let error msg =
 
 let default_events_dir () =
   match Sys.getenv_opt "MASC_BASE_PATH" with
-  | Some p when String.trim p <> "" -> Some (Filename.concat (Filename.concat p ".masc") "events")
+  | Some p when String.trim p <> "" ->
+    Some (Filename.concat (Config_dir_resolver.masc_root ~base_path:p) "events")
   | Some _ | None -> None
 ;;
 

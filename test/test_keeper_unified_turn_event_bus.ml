@@ -5,6 +5,8 @@
 open Alcotest
 
 module EB = Masc.Keeper_unified_turn_event_bus
+module Kmsg = Masc.Keeper_msg_async
+module Ops = Masc.Keeper_tool_surface_ops
 
 let dummy_event payload =
   { Agent_sdk.Event_bus.meta =
@@ -164,6 +166,67 @@ let test_keeper_event_bus_is_intentionally_process_wide () =
     (Domain.join worker)
 ;;
 
+let temp_dir prefix =
+  let path = Filename.temp_file prefix "" in
+  Sys.remove path;
+  Unix.mkdir path 0o700;
+  path
+;;
+
+let wait_for_done ~clock ~base_path request_id =
+  let rec loop remaining =
+    match Kmsg.poll ~base_path request_id with
+    | Kmsg.Found { Kmsg.status = Kmsg.Done { ok = true; _ }; _ } ->
+      ()
+    | Kmsg.Found { Kmsg.status = Kmsg.Done { ok = false; body }; _ } ->
+      Alcotest.failf "keeper_msg request failed: %s" body
+    | _ when remaining <= 0 ->
+      Alcotest.failf "keeper_msg request %s did not complete" request_id
+    | _ ->
+      Eio.Time.sleep clock 0.01;
+      loop (remaining - 1)
+  in
+  loop 100
+;;
+
+let test_keeper_msg_async_submit_uses_captured_event_bus () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir "keeper-msg-event-bus-" in
+  let captured_bus = Agent_sdk.Event_bus.create () in
+  let later_bus = Agent_sdk.Event_bus.create () in
+  let observed_bus = ref None in
+  Keeper_event_bus.set captured_bus;
+  Fun.protect
+    ~finally:(fun () ->
+      Kmsg.For_testing.clear ();
+      Keeper_event_bus.set captured_bus)
+    (fun () ->
+       let request_id =
+         Ops.For_testing.submit_keeper_msg_with_captured_event_bus
+           ~clock:env#clock
+           ~sw
+           ~base_path
+           ~keeper_name:"event-bus-test"
+           ~f:(fun ?event_bus () ->
+             Keeper_event_bus.set later_bus;
+             observed_bus := event_bus;
+             Tool_result.ok ~tool_name:"keeper-event-bus-test" ~start_time:0.0 "{}")
+           ()
+       in
+       wait_for_done ~clock:env#clock ~base_path request_id;
+       check
+         (option pass)
+         "worker received boundary-captured bus"
+         (Some captured_bus)
+         !observed_bus;
+       check
+         (option pass)
+         "worker changed fallback bus after capture"
+         (Some later_bus)
+         (Keeper_event_bus.get ()))
+;;
+
 let test_take_drain_cancel_clears_active_without_spin () =
   let open EB.For_testing in
   let t = EB.create ~keeper_name:"k" ~turn_id:1 () in
@@ -239,6 +302,8 @@ let () =
             test_state_pending_count_integrity_under_concurrent_updates
         ; test_case "event bus is intentionally process-wide" `Quick
             test_keeper_event_bus_is_intentionally_process_wide
+        ; test_case "keeper msg async submit uses captured event bus" `Quick
+            test_keeper_msg_async_submit_uses_captured_event_bus
         ] )
     ; ( "background-drain"
       , [ test_case "continues after first poll" `Quick

@@ -96,13 +96,17 @@ let with_mutation_counter f =
        f (fun () -> !count))
 ;;
 
-let check_no_create_side_effects config activity_count mutation_count =
+let message_count config =
+  List.length (Workspace.get_messages_raw config ~since_seq:0 ~limit:100)
+;;
+
+let check_no_create_side_effects config activity_count mutation_count ~baseline_messages =
   check_int "no task activity emitted" 0 (activity_count ());
   check_int "no task mutation hook fired" 0 (mutation_count ());
   check_int
-    "no broadcast messages emitted"
-    0
-    (List.length (Workspace.get_messages_raw config ~since_seq:0 ~limit:10))
+    "no create broadcast messages emitted"
+    baseline_messages
+    (message_count config)
 ;;
 
 let make_path_unwritable path =
@@ -343,6 +347,7 @@ let test_add_task_goal_link_write_failure_does_not_publish_task () =
   with_test_env (fun config ->
     with_activity_counter (fun activity_count ->
       with_mutation_counter (fun mutation_count ->
+        let baseline_messages = message_count config in
         make_primary_goal_task_links_path_unwritable config;
         (match
            Workspace.add_task_with_result
@@ -358,16 +363,21 @@ let test_add_task_goal_link_write_failure_does_not_publish_task () =
            Alcotest.failf
              "expected Goal_link_write_failed, got %s"
              (Workspace.add_task_error_to_string err)
-         | Ok created -> Alcotest.failf "expected failure, created %s" created.task_id);
+        | Ok created -> Alcotest.failf "expected failure, created %s" created.task_id);
         check_int "task was not published" 0 (List.length (Workspace.get_tasks_safe config));
         check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
-        check_no_create_side_effects config activity_count mutation_count)))
+        check_no_create_side_effects
+          config
+          activity_count
+          mutation_count
+          ~baseline_messages)))
 ;;
 
 let test_batch_add_task_goal_link_write_failure_does_not_publish_tasks () =
   with_test_env (fun config ->
     with_activity_counter (fun activity_count ->
       with_mutation_counter (fun mutation_count ->
+        let baseline_messages = message_count config in
         make_primary_goal_task_links_path_unwritable config;
         (match
            Workspace.batch_add_tasks_with_contracts_result
@@ -387,13 +397,18 @@ let test_batch_add_task_goal_link_write_failure_does_not_publish_tasks () =
         check_int "tasks were not published" 0 (List.length (Workspace.get_tasks_safe config));
         check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
         check_no_goal_link_files config ~goal_id:"goal-b" ~task_id:"task-002";
-        check_no_create_side_effects config activity_count mutation_count)))
+        check_no_create_side_effects
+          config
+          activity_count
+          mutation_count
+          ~baseline_messages)))
 ;;
 
 let test_add_task_backlog_write_failure_rolls_back_goal_link () =
   with_test_env (fun config ->
     with_activity_counter (fun activity_count ->
       with_mutation_counter (fun mutation_count ->
+        let baseline_messages = message_count config in
         make_backlog_path_unwritable config;
         (match
            Workspace.add_task_with_result
@@ -409,16 +424,21 @@ let test_add_task_backlog_write_failure_rolls_back_goal_link () =
            Alcotest.failf
              "expected Backlog_write_failed, got %s"
              (Workspace.add_task_error_to_string err)
-         | Ok created -> Alcotest.failf "expected failure, created %s" created.task_id);
+        | Ok created -> Alcotest.failf "expected failure, created %s" created.task_id);
         check_int "task was not published" 0 (List.length (Workspace.get_tasks_safe config));
         check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
-        check_no_create_side_effects config activity_count mutation_count)))
+        check_no_create_side_effects
+          config
+          activity_count
+          mutation_count
+          ~baseline_messages)))
 ;;
 
 let test_batch_add_task_backlog_write_failure_rolls_back_goal_links () =
   with_test_env (fun config ->
     with_activity_counter (fun activity_count ->
       with_mutation_counter (fun mutation_count ->
+        let baseline_messages = message_count config in
         make_backlog_path_unwritable config;
         (match
            Workspace.batch_add_tasks_with_contracts_result
@@ -438,13 +458,18 @@ let test_batch_add_task_backlog_write_failure_rolls_back_goal_links () =
         check_int "tasks were not published" 0 (List.length (Workspace.get_tasks_safe config));
         check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
         check_no_goal_link_files config ~goal_id:"goal-b" ~task_id:"task-002";
-        check_no_create_side_effects config activity_count mutation_count)))
+        check_no_create_side_effects
+          config
+          activity_count
+          mutation_count
+          ~baseline_messages)))
 ;;
 
 let test_add_task_backlog_write_failure_surfaces_rollback_failure () =
   with_test_env (fun config ->
     with_activity_counter (fun activity_count ->
       with_mutation_counter (fun mutation_count ->
+        let baseline_messages = message_count config in
         make_backlog_path_unwritable config;
         Workspace_goal_index.For_testing.with_before_unlink_task_from_goal
           (fun hook_config ~goal_id:_ ~task_id:_ ->
@@ -466,17 +491,23 @@ let test_add_task_backlog_write_failure_surfaces_rollback_failure () =
              | Error err ->
                Alcotest.failf
                  "expected Backlog_write_failed, got %s"
-                 (Workspace.add_task_error_to_string err)
+                (Workspace.add_task_error_to_string err)
              | Ok created -> Alcotest.failf "expected failure, created %s" created.task_id);
         check_int "task was not published" 0 (List.length (Workspace.get_tasks_safe config));
-        check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
-        check_no_create_side_effects config activity_count mutation_count)))
+        (* Rollback failure is surfaced above; unlike the successful rollback
+           cases, these paths cannot promise that goal_task_links was cleaned. *)
+        check_no_create_side_effects
+          config
+          activity_count
+          mutation_count
+          ~baseline_messages)))
 ;;
 
 let test_batch_add_task_backlog_write_failure_surfaces_rollback_failure () =
   with_test_env (fun config ->
     with_activity_counter (fun activity_count ->
       with_mutation_counter (fun mutation_count ->
+        let baseline_messages = message_count config in
         make_backlog_path_unwritable config;
         Workspace_goal_index.For_testing.with_before_unlink_task_from_goal
           (fun hook_config ~goal_id:_ ~task_id:_ ->
@@ -501,9 +532,13 @@ let test_batch_add_task_backlog_write_failure_surfaces_rollback_failure () =
              | Ok created ->
                Alcotest.failf "expected failure, created %d tasks" created.count);
         check_int "tasks were not published" 0 (List.length (Workspace.get_tasks_safe config));
-        check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
-        check_no_goal_link_files config ~goal_id:"goal-b" ~task_id:"task-002";
-        check_no_create_side_effects config activity_count mutation_count)))
+        (* Rollback failure is surfaced above; unlike the successful rollback
+           cases, these paths cannot promise that goal_task_links was cleaned. *)
+        check_no_create_side_effects
+          config
+          activity_count
+          mutation_count
+          ~baseline_messages)))
 ;;
 
 (* ── test suite ─────────────────────────────────────────────────────── *)

@@ -140,7 +140,7 @@ let test_classifies_host_local_bottlenecks () =
     "ungated"
     (classify ~is_read_only:true "future_fs_reader");
   check string "status stays ungated" "ungated" (classify ~is_read_only:true "masc_status");
-  check string "agent catalog metadata stays ungated" "ungated" (classify "masc_agents")
+  check string "agent catalog metadata uses actor-bound gate" "generic_write" (classify "masc_agents")
 ;;
 
 let test_gate_rejects_when_lane_is_saturated () =

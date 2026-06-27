@@ -80,7 +80,7 @@ let test_find_registry_meta_mismatch () =
        let meta = make_meta "real-name" in
        let before_invalid =
          invalid_entry_counter_value ~operation:"register" ~name:"alias-name"
-           ~reason:"meta_name_mismatch"
+           ~reason:"name_mismatch"
        in
        (* Register under a different name than meta.name. The registry repairs
           this at insert time, so the lookup layer should not see live drift. *)
@@ -96,7 +96,7 @@ let test_find_registry_meta_mismatch () =
        check (float 0.0001) "registry invalid-entry counter +1"
          (before_invalid +. 1.0)
          (invalid_entry_counter_value ~operation:"register" ~name:"alias-name"
-            ~reason:"meta_name_mismatch");
+            ~reason:"name_mismatch");
        check (float 0.0001) "name_mismatch counter unchanged"
          before
          (counter_value ~source_layer:"test_layer" ~field:"name_mismatch"))

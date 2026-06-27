@@ -366,7 +366,7 @@ let playground_repo_policy_repository_id ~base_path ~repo_catalog ~repo_name
         "repository identity mismatch; access is denied fail-closed")
   | Keeper_repo_mapping.Repository_store_error msg -> Error (`Store_error msg))
 
-let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id policy
+let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
       ~repo_name ~repo_path =
   let field status allowed ?repository_id ?error () =
     let status_text = playground_policy_status_to_string status in
@@ -393,12 +393,8 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id policy
   in
   match policy with
   | Keeper_repo_mapping.Mapping_load_error msg ->
-      Keeper_repo_mapping.record_policy_decision
-        ~keeper_id Keeper_repo_mapping.Policy_decision_load_error;
       field Policy_mapping_load_error false ~error:msg ()
   | Keeper_repo_mapping.Mapping_missing _ ->
-      Keeper_repo_mapping.record_policy_decision
-        ~keeper_id Keeper_repo_mapping.Policy_decision_missing;
       field Policy_denied_missing_mapping false ()
   | Keeper_repo_mapping.Mapping_found mapping ->
       (match
@@ -406,26 +402,16 @@ let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id policy
          ~repo_path
        with
        | Error (`Identity_mismatch msg) ->
-         Keeper_repo_mapping.record_policy_decision ~keeper_id
-           ~repository_id:repo_name
-           Keeper_repo_mapping.Policy_decision_repository_identity_mismatch;
          field Policy_repository_identity_mismatch false
            ~repository_id:repo_name ~error:msg ()
        | Error (`Store_error msg) ->
-         Keeper_repo_mapping.record_policy_decision ~keeper_id
-           ~repository_id:repo_name
-           Keeper_repo_mapping.Policy_decision_repository_store_error;
          field Policy_repository_store_error false ~repository_id:repo_name
            ~error:msg ()
        | Ok repository_id ->
          if
            Keeper_repo_mapping.mapping_allows_repository mapping ~repository_id
          then field Policy_allowed true ~repository_id ()
-         else (
-           Keeper_repo_mapping.record_policy_decision
-             ~keeper_id ~repository_id
-             Keeper_repo_mapping.Policy_decision_not_in_mapping;
-           field Policy_denied_not_in_mapping false ~repository_id ()))
+         else field Policy_denied_not_in_mapping false ~repository_id ())
 
 let with_playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id policy
       ~repo_name ~repo_path = function

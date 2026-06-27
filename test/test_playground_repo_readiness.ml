@@ -64,6 +64,20 @@ let json_string key json =
 let json_string_opt key json =
   Yojson.Safe.Util.(json |> member key |> to_string_option)
 
+let repo_mapping_decision_metric_total () =
+  let metric_total metric =
+    Otel_metric_store.metric_total Keeper_metrics.(to_string metric)
+  in
+  List.fold_left
+    (fun total metric -> total +. metric_total metric)
+    0.0
+    [ Keeper_metrics.KeeperRepoMappingDeniedMissing;
+      Keeper_metrics.KeeperRepoMappingDeniedNotInMapping;
+      Keeper_metrics.KeeperRepoMappingLoadError;
+      Keeper_metrics.KeeperRepoMappingRepositoryIdentityMismatch;
+      Keeper_metrics.KeeperRepoMappingRepositoryStoreError;
+    ]
+
 let write_mapping_raw base_path contents =
   let path = Keeper_repo_mapping.mappings_toml_path base_path in
   mkdir_p (Filename.dirname path);
@@ -302,6 +316,19 @@ let test_playground_repos_mark_mapping_load_error_denied () =
     (json_string "policy_status" json);
   check bool "policy error is surfaced" true
     (String.length (json_string "policy_error" json) > 0)
+
+let test_playground_repos_projection_does_not_record_policy_metrics () =
+  let base_path = temp_dir "masc-playground-repo-policy" in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "keeper-one" in
+  create_playground_repo_marker ~config ~meta "masc";
+  let before = repo_mapping_decision_metric_total () in
+  let json = playground_repo_entry ~config ~meta ~repo_name:"masc" in
+  check bool "policy projection still denies missing mapping" false
+    (json_bool "policy_allowed" json);
+  check (float 0.0) "policy projection does not record decision metrics"
+    before
+    (repo_mapping_decision_metric_total ())
 
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
@@ -661,6 +688,8 @@ let () =
           test_playground_repos_mark_repository_store_error_denied;
         test_case "mapping load error is marked denied" `Quick
           test_playground_repos_mark_mapping_load_error_denied;
+        test_case "policy projection does not record decision metrics" `Quick
+          test_playground_repos_projection_does_not_record_policy_metrics;
       ];
       "status_hints",
       [

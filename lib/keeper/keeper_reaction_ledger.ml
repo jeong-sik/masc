@@ -684,10 +684,7 @@ let summarize_rows ~keeper_name ~limit rows =
   let pending_no_progress_recovery_ids =
     List.filter
       (fun id ->
-        match
-          Hashtbl.find_opt stimulus_kind_by_id id
-          |> Option.bind stimulus_kind_of_string
-        with
+        match Option.bind (Hashtbl.find_opt stimulus_kind_by_id id) stimulus_kind_of_string with
         | Some No_progress_recovery -> true
         | Some (Board_signal | Bootstrap | Fusion_completed | Bg_completed)
         | None ->

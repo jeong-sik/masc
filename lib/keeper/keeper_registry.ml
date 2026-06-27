@@ -734,73 +734,46 @@ let rec dispatch_event_with_audit
           ~event
           ~now
     in
-    Dashboard_attribution.record
-      (Keeper_state_machine.attribution_of_transition ~event result);
+    let record_transition_attribution tr =
+      Dashboard_attribution.record
+        (Keeper_state_machine.attribution_of_transition ~event (Ok tr))
+    in
+    let registry_write_error ~from_phase ~to_phase err =
+      Keeper_state_machine.Invalid_transition
+        { from_phase
+        ; to_phase
+        ; reason =
+            Printf.sprintf
+              "registry write validation failed for event=%s: %s"
+              (Keeper_state_machine.event_to_string event)
+              (registry_entry_validation_error_to_string err)
+        }
+    in
+    let reject_dispatch e =
+      Dashboard_attribution.record
+        (Keeper_state_machine.attribution_of_transition ~event (Error e));
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string LifecycleDispatchRejections)
+        ~labels:[ "event", Keeper_state_machine.event_to_string event ]
+        ();
+      let event_str = Keeper_state_machine.event_to_string event in
+      let error_str = Keeper_state_machine.transition_error_to_string e in
+      Log.Keeper.emit
+        Log.Warn
+        ~category:Log.Fsm
+        ~details:
+          (`Assoc
+            [ "event", `String event_str
+            ; "error", `String error_str
+            ])
+        (Printf.sprintf "registry: dispatch_event rejected name=%s error=%s" name error_str);
+      Error e
+    in
     (match result with
      | Ok tr when tr.new_phase <> tr.prev_phase ->
        let from_phase_str = Keeper_state_machine.phase_to_string tr.prev_phase in
        let to_phase_str = Keeper_state_machine.phase_to_string tr.new_phase in
        let event_str = Keeper_state_machine.event_to_string event in
-       Log.Keeper.emit
-         Log.Info
-         ~category:Log.Fsm
-         ~details:
-           (`Assoc
-             [ "from_phase", `String from_phase_str
-             ; "to_phase", `String to_phase_str
-             ; "event", `String event_str
-             ])
-         (Printf.sprintf
-            "registry: phase transition name=%s old=%s new=%s event=%s"
-            name
-            from_phase_str
-            to_phase_str
-            event_str);
-       (* Record transition in audit ring buffer for dashboard API *)
-       Keeper_transition_audit.record_transition
-         ~keeper_name:name
-         { snapshot
-         ; events_fired = Option.value events_fired ~default:[ event ]
-         ; selected_event = Option.value selected_event ~default:event
-         ; prev_phase = tr.prev_phase
-         ; new_phase = tr.new_phase
-         ; transition_outcome = "applied"
-         ; wall_clock_at_decision = now
-         };
-       Keeper_lifecycle_hooks.run
-         ~base_dir:base_path
-         ~meta:entry.meta
-         ~keeper_id:name
-         (Keeper_lifecycle_hooks.Phase_transition
-            { from_phase = tr.prev_phase; to_phase = tr.new_phase });
-       (* Broadcast phase transition to SSE subscribers *)
-       (try
-          Sse.broadcast
-            (`Assoc
-                [ "type", `String "keeper_phase_changed"
-                ; "name", `String name
-                ; ( "prev_phase"
-                  , `String (Keeper_state_machine.phase_to_string tr.prev_phase) )
-                ; "new_phase", `String (Keeper_state_machine.phase_to_string tr.new_phase)
-                ; "event", `String (Keeper_state_machine.event_to_string event)
-                ; "ts_unix", `Float now
-                ])
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn -> record_phase_broadcast_failure ~name exn);
-       (* Update running count based on phase transition *)
-       (match tr.prev_phase, tr.new_phase with
-        | Running, phase when phase <> Running -> decr_running_count_clamped ()
-        | phase, Running when phase <> Running -> Atomic.incr running_count_atomic
-        | _ -> ());
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string LifecycleTransitions)
-         ~labels:
-           [ "keeper", name
-           ; "from_phase", Keeper_state_machine.phase_to_string tr.prev_phase
-           ; "to_phase", Keeper_state_machine.phase_to_string tr.new_phase
-           ]
-         ();
        (* Update dead_since_ts: always set to now on Dead transition *)
        let dead_since_ts =
          match tr.new_phase with
@@ -808,18 +781,6 @@ let rec dispatch_event_with_audit
          | _ -> None
        in
        let new_seq = entry.transition_seq + 1 in
-       (* TLA+ trace emission (MASC_TLA_TRACE=1) *)
-       if Keeper_trace_emit.enabled ()
-       then
-         Keeper_trace_emit.emit_transition
-           ~keeper_name:name
-           ~base_path
-           ~seq:new_seq
-           ~event
-           ~prev_phase:tr.prev_phase
-           ~new_phase:tr.new_phase
-           ~conditions_after:tr.updated_conditions
-           ~restart_count:entry.restart_count;
        (match
           put_entry
             ~base_path
@@ -835,16 +796,88 @@ let rec dispatch_event_with_audit
             }
         with
         | Error err ->
-          Error
-            (Keeper_state_machine.Invalid_transition
-               { from_phase = tr.prev_phase
-               ; to_phase = tr.new_phase
-               ; reason =
-                   Printf.sprintf
-                     "registry validation failed while applying transition: %s"
-                     (registry_entry_validation_error_to_string err)
-               })
+          reject_dispatch
+            (registry_write_error
+               ~from_phase:tr.prev_phase
+               ~to_phase:tr.new_phase
+               err)
         | Ok () ->
+          record_transition_attribution tr;
+          Log.Keeper.emit
+            Log.Info
+            ~category:Log.Fsm
+            ~details:
+              (`Assoc
+                [ "from_phase", `String from_phase_str
+                ; "to_phase", `String to_phase_str
+                ; "event", `String event_str
+                ])
+            (Printf.sprintf
+               "registry: phase transition name=%s old=%s new=%s event=%s"
+               name
+               from_phase_str
+               to_phase_str
+               event_str);
+          (* Record transition in audit ring buffer for dashboard API. *)
+          (* DET-OK: absent audit selection falls back to this dispatch event. *)
+          let audit_events_fired = Option.value events_fired ~default:[ event ] in
+          let audit_selected_event = Option.value selected_event ~default:event in
+          Keeper_transition_audit.record_transition
+            ~keeper_name:name
+            { snapshot
+            ; events_fired = audit_events_fired
+            ; selected_event = audit_selected_event
+            ; prev_phase = tr.prev_phase
+            ; new_phase = tr.new_phase
+            ; transition_outcome = "applied"
+            ; wall_clock_at_decision = now
+            };
+          Keeper_lifecycle_hooks.run
+            ~base_dir:base_path
+            ~meta:entry.meta
+            ~keeper_id:name
+            (Keeper_lifecycle_hooks.Phase_transition
+               { from_phase = tr.prev_phase; to_phase = tr.new_phase });
+          (* Broadcast phase transition to SSE subscribers *)
+          (try
+             Sse.broadcast
+               (`Assoc
+                   [ "type", `String "keeper_phase_changed"
+                   ; "name", `String name
+                   ; ( "prev_phase"
+                     , `String (Keeper_state_machine.phase_to_string tr.prev_phase) )
+                   ; "new_phase", `String (Keeper_state_machine.phase_to_string tr.new_phase)
+                   ; "event", `String (Keeper_state_machine.event_to_string event)
+                   ; "ts_unix", `Float now
+                   ])
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn -> record_phase_broadcast_failure ~name exn);
+          (* Update running count based on phase transition *)
+          (match tr.prev_phase, tr.new_phase with
+           | Running, phase when phase <> Running -> decr_running_count_clamped ()
+           | phase, Running when phase <> Running -> Atomic.incr running_count_atomic
+           | _ -> ());
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string LifecycleTransitions)
+            ~labels:
+              [ "keeper", name
+              ; "from_phase", Keeper_state_machine.phase_to_string tr.prev_phase
+              ; "to_phase", Keeper_state_machine.phase_to_string tr.new_phase
+              ]
+            ();
+          (* TLA+ trace emission (MASC_TLA_TRACE=1) *)
+          if Keeper_trace_emit.enabled ()
+          then
+            Keeper_trace_emit.emit_transition
+              ~keeper_name:name
+              ~base_path
+              ~seq:new_seq
+              ~event
+              ~prev_phase:tr.prev_phase
+              ~new_phase:tr.new_phase
+              ~conditions_after:tr.updated_conditions
+              ~restart_count:entry.restart_count;
           List.iter
             (execute_entry_action_observability ~name ~phase:tr.new_phase ~ts_unix:now)
             tr.entry_actions;
@@ -914,17 +947,6 @@ let rec dispatch_event_with_audit
      | Ok tr ->
        (* No phase change — still update conditions *)
        let new_seq = entry.transition_seq + 1 in
-       if Keeper_trace_emit.enabled ()
-       then
-         Keeper_trace_emit.emit_transition
-           ~keeper_name:name
-           ~base_path
-           ~seq:new_seq
-           ~event
-           ~prev_phase:tr.prev_phase
-           ~new_phase:tr.new_phase
-           ~conditions_after:tr.updated_conditions
-           ~restart_count:entry.restart_count;
        (match
           put_entry
             ~base_path
@@ -938,35 +960,27 @@ let rec dispatch_event_with_audit
             }
         with
         | Error err ->
-          Error
-            (Keeper_state_machine.Invalid_transition
-               { from_phase = tr.prev_phase
-               ; to_phase = tr.new_phase
-               ; reason =
-                   Printf.sprintf
-                     "registry validation failed while refreshing transition conditions: %s"
-                     (registry_entry_validation_error_to_string err)
-               })
+          reject_dispatch
+            (registry_write_error
+               ~from_phase:tr.prev_phase
+               ~to_phase:tr.new_phase
+               err)
         | Ok () ->
+          record_transition_attribution tr;
+          if Keeper_trace_emit.enabled ()
+          then
+            Keeper_trace_emit.emit_transition
+              ~keeper_name:name
+              ~base_path
+              ~seq:new_seq
+              ~event
+              ~prev_phase:tr.prev_phase
+              ~new_phase:tr.new_phase
+              ~conditions_after:tr.updated_conditions
+              ~restart_count:entry.restart_count;
           broadcast_composite_changed ~name ~ts_unix:now;
           Ok tr)
-     | Error e ->
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string LifecycleDispatchRejections)
-         ~labels:[ "event", Keeper_state_machine.event_to_string event ]
-         ();
-       let event_str = Keeper_state_machine.event_to_string event in
-       let error_str = Keeper_state_machine.transition_error_to_string e in
-       Log.Keeper.emit
-         Log.Warn
-         ~category:Log.Fsm
-         ~details:
-           (`Assoc
-             [ "event", `String event_str
-             ; "error", `String error_str
-             ])
-         (Printf.sprintf "registry: dispatch_event rejected name=%s error=%s" name error_str);
-       Error e)
+     | Error e -> reject_dispatch e)
 ;;
 
 let dispatch_event ~base_path ?(origin = Generic_dispatch) name event =

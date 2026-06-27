@@ -27,6 +27,15 @@ cross_verifier = "deepseek.deepseek-v4-pro"
 display-name = "Ollama Cloud"
 protocol = "openai-compatible-http"
 endpoint = "https://ollama.com/v1"
+# OAS connect + initial-response-headers wall-clock budget (oas#2163).
+# Ollama Cloud serving reasoning models (kimi-k2.6, minimax-m3) can hold the
+# first response header past the 60s OpenAI_compat default (cold-start /
+# admission queueing / long reasoning prefill), surfacing in the Fusion panel
+# as `phase=http_operation: HTTP operation exceeded wall-clock timeout` — which
+# degraded a panel to 1/3 models (only deepseek-v4-pro cleared 60s). 600s
+# intentionally mirrors OAS `Provider_config.default_connect_timeout_s Ollama`;
+# omit to keep the OAS OpenAI-compatible default.
+connect-timeout-s = 600.0
 
 [providers.ollama_cloud.credentials]
 type = "env"

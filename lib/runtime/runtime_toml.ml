@@ -289,17 +289,40 @@ let parse_provider (id : string) (tbl : Otoml.t)
          | None -> None
          | Some h_tbl -> Some (parse_headers h_tbl (path ^ ".headers"))
        in
-       Ok
-         { Runtime_schema.id
-         ; display_name
-         ; protocol
-         ; api_format
-         ; transport
-         ; is_non_interactive
-         ; credentials
-         ; capabilities
-         ; headers
-         })
+       (* Optional per-provider connect/headers timeout override (oas#2163).
+          Absent (most providers) leaves the OAS kind-based default in force. *)
+       let connect_timeout_result =
+         match
+           typed_find "a float" path tbl "connect-timeout-s" Otoml.get_float
+         with
+         | Error errs -> Error errs
+         | Ok None -> Ok None
+         | Ok (Some timeout_s)
+           when timeout_s > 0.0 && Float.is_finite timeout_s ->
+           Ok (Some timeout_s)
+         | Ok (Some timeout_s) ->
+           Error
+             (error
+                (path ^ ".connect-timeout-s")
+                (Printf.sprintf
+                   "connect-timeout-s must be a positive finite float; got %g"
+                   timeout_s))
+       in
+       (match connect_timeout_result with
+        | Error errs -> Error errs
+        | Ok connect_timeout_s ->
+          Ok
+            { Runtime_schema.id
+            ; display_name
+            ; protocol
+            ; api_format
+            ; transport
+            ; is_non_interactive
+            ; credentials
+            ; capabilities
+            ; headers
+            ; connect_timeout_s
+            }))
 ;;
 
 let parse_providers (toml : Otoml.t)

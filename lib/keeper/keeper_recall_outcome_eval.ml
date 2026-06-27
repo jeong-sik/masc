@@ -2,11 +2,13 @@
     receipt outcomes. *)
 
 module String_map = Map.Make (String)
+module String_set = Set.Make (String)
 
 type recall_record =
   { keeper_id : string
   ; trace_id : string
   ; turn : int
+  ; injected_fact_keys : string list
   ; injected_fact_key_count : int
   ; injected_episode_key_count : int
   ; failure_reason : string option
@@ -34,10 +36,25 @@ type trace_row =
   { trace_id : string
   ; keeper_id : string option
   ; recall_records : int
+  ; fact_keys : string list
   ; injected_fact_keys : int
   ; recall_failure_records : int
   ; receipt : receipt_record option
   ; outcome_bucket : outcome_bucket
+  }
+
+type fact_key_summary =
+  { fact_key : string
+  ; injected_count : int
+  ; recall_records : int
+  ; recall_failure_records : int
+  ; trace_count : int
+  ; outcome_ok : int
+  ; outcome_skipped : int
+  ; outcome_error : int
+  ; outcome_cancelled : int
+  ; outcome_unknown : int
+  ; outcome_missing_receipt : int
   }
 
 type t =
@@ -55,6 +72,7 @@ type t =
   ; outcome_error : int
   ; outcome_cancelled : int
   ; outcome_unknown : int
+  ; fact_key_summaries : fact_key_summary list
   ; traces : trace_row list
   }
 
@@ -116,7 +134,7 @@ let assoc_string_list fields key =
   match List.assoc_opt key fields with
   | Some (`List items) ->
     List.filter_map (function
-      | `String s -> Some s
+      | `String s when String.trim s <> "" -> Some s
       | _ -> None)
       items
   | _ -> []
@@ -132,12 +150,13 @@ let parse_recall_json = function
   | `Assoc fields ->
     (match assoc_string fields "keeper_id", assoc_string fields "trace_id" with
      | Some keeper_id, Some trace_id ->
+       let injected_fact_keys = assoc_string_list fields "injected_fact_keys" in
        Some
          { keeper_id
          ; trace_id
          ; turn = Option.value (assoc_int fields "turn") ~default:0
-         ; injected_fact_key_count =
-             List.length (assoc_string_list fields "injected_fact_keys")
+         ; injected_fact_keys
+         ; injected_fact_key_count = List.length injected_fact_keys
          ; injected_episode_key_count =
              List.length (assoc_string_list fields "injected_episode_keys")
          ; failure_reason = assoc_string fields "failure_reason"
@@ -179,9 +198,9 @@ let newer_receipt candidate existing =
   | None, None -> String.compare candidate.keeper_name existing.keeper_name < 0
 ;;
 
-let receipt_map receipts =
+let receipt_map (receipts : receipt_record list) : receipt_record String_map.t =
   List.fold_left
-    (fun acc receipt ->
+    (fun (acc : receipt_record String_map.t) (receipt : receipt_record) ->
        match String_map.find_opt receipt.trace_id acc with
        | None -> String_map.add receipt.trace_id receipt acc
        | Some existing when newer_receipt receipt existing ->
@@ -220,13 +239,29 @@ let outcome_bucket_to_string = function
   | Outcome_missing_receipt -> "missing_receipt"
 ;;
 
-let trace_row_of_group receipts trace_id records =
+let unique_sorted xs =
+  xs
+  |> List.fold_left
+       (fun acc x -> if String.trim x = "" then acc else String_set.add x acc)
+       String_set.empty
+  |> String_set.elements
+;;
+
+let trace_row_of_group
+      (receipts : receipt_record String_map.t)
+      trace_id
+      (records : recall_record list)
+  =
   let records = List.rev records in
   let receipt = String_map.find_opt trace_id receipts in
   let outcome_bucket = outcome_bucket_of_receipt receipt in
+  let fact_keys =
+    records |> List.concat_map (fun r -> r.injected_fact_keys) |> unique_sorted
+  in
   { trace_id
   ; keeper_id = (match records with r :: _ -> Some r.keeper_id | [] -> None)
   ; recall_records = List.length records
+  ; fact_keys
   ; injected_fact_keys =
       List.fold_left (fun acc r -> acc + r.injected_fact_key_count) 0 records
   ; recall_failure_records =
@@ -237,6 +272,102 @@ let trace_row_of_group receipts trace_id records =
   ; receipt
   ; outcome_bucket
   }
+;;
+
+let empty_fact_key_summary fact_key =
+  { fact_key
+  ; injected_count = 0
+  ; recall_records = 0
+  ; recall_failure_records = 0
+  ; trace_count = 0
+  ; outcome_ok = 0
+  ; outcome_skipped = 0
+  ; outcome_error = 0
+  ; outcome_cancelled = 0
+  ; outcome_unknown = 0
+  ; outcome_missing_receipt = 0
+  }
+;;
+
+let update_fact_key_summary fact_key f acc =
+  let current =
+    Option.value
+      (String_map.find_opt fact_key acc)
+      ~default:(empty_fact_key_summary fact_key)
+  in
+  String_map.add fact_key (f current) acc
+;;
+
+let key_counts keys =
+  List.fold_left
+    (fun acc key ->
+       let current = Option.value (String_map.find_opt key acc) ~default:0 in
+       String_map.add key (current + 1) acc)
+    String_map.empty
+    keys
+;;
+
+let add_record_to_fact_summaries acc record =
+  let counts = key_counts record.injected_fact_keys in
+  String_map.fold
+    (fun fact_key count acc ->
+       update_fact_key_summary
+         fact_key
+         (fun row ->
+            { row with
+              injected_count = row.injected_count + count
+            ; recall_records = row.recall_records + 1
+            ; recall_failure_records =
+                row.recall_failure_records
+                + if Option.is_some record.failure_reason then 1 else 0
+            })
+         acc)
+    counts
+    acc
+;;
+
+let add_outcome_to_fact_summary bucket row =
+  match bucket with
+  | Outcome_ok -> { row with outcome_ok = row.outcome_ok + 1 }
+  | Outcome_skipped -> { row with outcome_skipped = row.outcome_skipped + 1 }
+  | Outcome_error -> { row with outcome_error = row.outcome_error + 1 }
+  | Outcome_cancelled -> { row with outcome_cancelled = row.outcome_cancelled + 1 }
+  | Outcome_unknown -> { row with outcome_unknown = row.outcome_unknown + 1 }
+  | Outcome_missing_receipt ->
+    { row with outcome_missing_receipt = row.outcome_missing_receipt + 1 }
+;;
+
+let add_trace_to_fact_summaries acc row =
+  List.fold_left
+    (fun acc fact_key ->
+       update_fact_key_summary
+         fact_key
+         (fun summary ->
+            summary
+            |> add_outcome_to_fact_summary row.outcome_bucket
+            |> fun summary -> { summary with trace_count = summary.trace_count + 1 })
+         acc)
+    acc
+    row.fact_keys
+;;
+
+let compare_fact_key_summary a b =
+  let by_trace = compare b.trace_count a.trace_count in
+  if by_trace <> 0
+  then by_trace
+  else (
+    let by_injected = compare b.injected_count a.injected_count in
+    if by_injected <> 0 then by_injected else String.compare a.fact_key b.fact_key)
+;;
+
+let fact_key_summaries recall_records traces =
+  let from_records =
+    List.fold_left add_record_to_fact_summaries String_map.empty recall_records
+  in
+  List.fold_left add_trace_to_fact_summaries from_records traces
+  |> String_map.bindings
+  |> List.map snd
+  |> List.sort compare_fact_key_summary
 ;;
 
 let evaluate ~masc_root =
@@ -258,6 +389,7 @@ let evaluate ~masc_root =
       0
       traces
   in
+  let fact_key_summaries = fact_key_summaries recall_records traces in
   { masc_root
   ; recall_dir
   ; receipts_dir
@@ -278,6 +410,7 @@ let evaluate ~masc_root =
   ; outcome_error = count_bucket Outcome_error
   ; outcome_cancelled = count_bucket Outcome_cancelled
   ; outcome_unknown = count_bucket Outcome_unknown
+  ; fact_key_summaries
   ; traces
   }
 ;;
@@ -303,6 +436,7 @@ let trace_row_to_json row =
     [ "trace_id", `String row.trace_id
     ; "keeper_id", string_opt_to_json row.keeper_id
     ; "recall_records", `Int row.recall_records
+    ; "fact_keys", `List (List.map (fun key -> `String key) row.fact_keys)
     ; "injected_fact_keys", `Int row.injected_fact_keys
     ; "recall_failure_records", `Int row.recall_failure_records
     ; "outcome_bucket", `String (outcome_bucket_to_string row.outcome_bucket)
@@ -310,6 +444,25 @@ let trace_row_to_json row =
       , match row.receipt with
         | Some receipt -> receipt_to_json receipt
         | None -> `Null )
+    ]
+;;
+
+let fact_key_summary_to_json row =
+  `Assoc
+    [ "fact_key", `String row.fact_key
+    ; "injected_count", `Int row.injected_count
+    ; "recall_records", `Int row.recall_records
+    ; "recall_failure_records", `Int row.recall_failure_records
+    ; "trace_count", `Int row.trace_count
+    ; ( "outcomes"
+      , `Assoc
+          [ "ok", `Int row.outcome_ok
+          ; "skipped", `Int row.outcome_skipped
+          ; "error", `Int row.outcome_error
+          ; "cancelled", `Int row.outcome_cancelled
+          ; "unknown", `Int row.outcome_unknown
+          ; "missing_receipt", `Int row.outcome_missing_receipt
+          ] )
     ]
 ;;
 
@@ -322,7 +475,7 @@ let take n xs =
   loop n [] xs
 ;;
 
-let to_json ?(trace_limit = 50) report =
+let to_json ?(trace_limit = 50) ?(fact_key_limit = 50) report =
   `Assoc
     [ "masc_root", `String report.masc_root
     ; "recall_dir", `String report.recall_dir
@@ -341,6 +494,17 @@ let to_json ?(trace_limit = 50) report =
           ; "cancelled", `Int report.outcome_cancelled
           ; "unknown", `Int report.outcome_unknown
           ; "missing_receipt", `Int report.traces_without_receipt
+          ] )
+    ; ( "fact_key_summary_index"
+      , `Assoc
+          [ "indexed_by", `List [ `String "fact_key"; `String "trace_outcome" ]
+          ; "total_fact_keys", `Int (List.length report.fact_key_summaries)
+          ; "fact_key_limit", `Int fact_key_limit
+          ; ( "rows"
+            , `List
+                (List.map
+                   fact_key_summary_to_json
+                   (take fact_key_limit report.fact_key_summaries)) )
           ] )
     ; "trace_limit", `Int trace_limit
     ; "traces", `List (List.map trace_row_to_json (take trace_limit report.traces))
@@ -369,12 +533,33 @@ let render_trace row =
     terminal
 ;;
 
-let render_text ?(trace_limit = 50) report =
+let render_fact_key_summary row =
+  Printf.sprintf
+    "%s\ttraces=%d\tinjections=%d\tfailures=%d\tok=%d\tskipped=%d\terror=%d\tcancelled=%d\tunknown=%d\tmissing=%d\n"
+    row.fact_key
+    row.trace_count
+    row.injected_count
+    row.recall_failure_records
+    row.outcome_ok
+    row.outcome_skipped
+    row.outcome_error
+    row.outcome_cancelled
+    row.outcome_unknown
+    row.outcome_missing_receipt
+;;
+
+let render_text ?(trace_limit = 50) ?(fact_key_limit = 50) report =
   let traces = take trace_limit report.traces in
   let trace_lines =
     match traces with
     | [] -> "no recall traces found\n"
     | rows -> rows |> List.map render_trace |> String.concat ""
+  in
+  let fact_key_rows = take fact_key_limit report.fact_key_summaries in
+  let fact_key_lines =
+    match fact_key_rows with
+    | [] -> "no injected fact keys found\n"
+    | rows -> rows |> List.map render_fact_key_summary |> String.concat ""
   in
   Printf.sprintf
     "Memory OS recall outcome eval (local receipts only)\n\
@@ -383,6 +568,8 @@ let render_text ?(trace_limit = 50) report =
      joined: with_receipt=%d without_receipt=%d\n\
      injected_fact_keys=%d recall_failure_records=%d\n\
      outcomes: ok=%d skipped=%d error=%d cancelled=%d unknown=%d missing_receipt=%d\n\
+     fact_key_summary_index: total_fact_keys=%d fact_key_limit=%d\n\
+     %s\
      trace_limit=%d\n\
      %s"
     report.masc_root
@@ -398,6 +585,34 @@ let render_text ?(trace_limit = 50) report =
     report.outcome_cancelled
     report.outcome_unknown
     report.traces_without_receipt
+    (List.length report.fact_key_summaries)
+    fact_key_limit
+    fact_key_lines
     trace_limit
     trace_lines
+;;
+
+let rec mkdir_p path =
+  if path = "" || path = Filename.current_dir_name
+  then ()
+  else if Sys.file_exists path
+  then ()
+  else (
+    let parent = Filename.dirname path in
+    if not (String.equal parent path) then mkdir_p parent;
+    Unix.mkdir path 0o755)
+;;
+
+let write_summary_index ~path report =
+  mkdir_p (Filename.dirname path);
+  let oc = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+       List.iter
+         (fun row ->
+            output_string oc (Yojson.Safe.to_string (fact_key_summary_to_json row));
+            output_char oc '\n')
+         report.fact_key_summaries;
+       close_out oc)
 ;;

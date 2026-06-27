@@ -9,6 +9,7 @@ type recall_record =
   { keeper_id : string
   ; trace_id : string
   ; turn : int
+  ; injected_fact_keys : string list
   ; injected_fact_key_count : int
   ; injected_episode_key_count : int
   ; failure_reason : string option
@@ -36,10 +37,25 @@ type trace_row =
   { trace_id : string
   ; keeper_id : string option
   ; recall_records : int
+  ; fact_keys : string list
   ; injected_fact_keys : int
   ; recall_failure_records : int
   ; receipt : receipt_record option
   ; outcome_bucket : outcome_bucket
+  }
+
+type fact_key_summary =
+  { fact_key : string
+  ; injected_count : int
+  ; recall_records : int
+  ; recall_failure_records : int
+  ; trace_count : int
+  ; outcome_ok : int
+  ; outcome_skipped : int
+  ; outcome_error : int
+  ; outcome_cancelled : int
+  ; outcome_unknown : int
+  ; outcome_missing_receipt : int
   }
 
 type t =
@@ -57,6 +73,7 @@ type t =
   ; outcome_error : int
   ; outcome_cancelled : int
   ; outcome_unknown : int
+  ; fact_key_summaries : fact_key_summary list
   ; traces : trace_row list
   }
 
@@ -66,5 +83,9 @@ val evaluate : masc_root:string -> t
     Malformed JSONL rows are skipped rather than failing the whole report. *)
 
 val outcome_bucket_to_string : outcome_bucket -> string
-val to_json : ?trace_limit:int -> t -> Yojson.Safe.t
-val render_text : ?trace_limit:int -> t -> string
+val to_json : ?trace_limit:int -> ?fact_key_limit:int -> t -> Yojson.Safe.t
+val render_text : ?trace_limit:int -> ?fact_key_limit:int -> t -> string
+val write_summary_index : path:string -> t -> unit
+(** Write the complete fact-key outcome summary as compact JSONL rows.
+    The file is replaced by this local CLI helper; the live runtime does not
+    call it. *)

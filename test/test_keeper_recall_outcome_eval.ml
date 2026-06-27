@@ -53,12 +53,23 @@ let test_joins_recall_to_receipts () =
     Alcotest.(check int) "fact keys" 3 report.injected_fact_keys;
     Alcotest.(check int) "recall failures" 1 report.recall_failure_records;
     Alcotest.(check int) "ok outcomes" 1 report.outcome_ok;
+    (match
+       List.find_opt
+         (fun row -> String.equal row.Eval.fact_key "a")
+         report.fact_key_summaries
+     with
+     | Some row ->
+       Alcotest.(check int) "fact a trace count" 1 row.trace_count;
+       Alcotest.(check int) "fact a injections" 2 row.injected_count;
+       Alcotest.(check int) "fact a ok outcomes" 1 row.outcome_ok
+     | None -> Alcotest.fail "missing fact key summary a");
     match List.find_opt (fun row -> String.equal row.Eval.trace_id "trace-1") report.traces with
     | Some row ->
       Alcotest.(check string)
         "bucket"
         "ok"
         (Eval.outcome_bucket_to_string row.outcome_bucket);
+      Alcotest.(check (list string)) "trace fact keys" [ "a"; "b" ] row.fact_keys;
       Alcotest.(check int) "trace recall count" 2 row.recall_records
     | None -> Alcotest.fail "missing trace-1")
 ;;
@@ -70,7 +81,9 @@ let test_json_respects_trace_limit () =
       [ {|{"keeper_id":"alpha","trace_id":"trace-1","turn":1,"injected_fact_keys":[],"injected_episode_keys":[],"n_facts_in_store":0}|}
       ; {|{"keeper_id":"alpha","trace_id":"trace-2","turn":1,"injected_fact_keys":[],"injected_episode_keys":[],"n_facts_in_store":0}|}
       ];
-    let json = Eval.evaluate ~masc_root |> Eval.to_json ~trace_limit:1 in
+    let json =
+      Eval.evaluate ~masc_root |> Eval.to_json ~trace_limit:1 ~fact_key_limit:0
+    in
     match json with
     | `Assoc fields ->
       (match List.assoc_opt "traces" fields with
@@ -79,12 +92,63 @@ let test_json_respects_trace_limit () =
     | _ -> Alcotest.fail "expected JSON object")
 ;;
 
+let test_writes_fact_key_summary_index () =
+  with_temp_masc_root (fun masc_root ->
+    write_lines
+      (Filename.concat masc_root "recall_injections/2026-06/27.jsonl")
+      [ {|{"keeper_id":"alpha","trace_id":"trace-ok","turn":1,"injected_fact_keys":["shared:a"],"injected_episode_keys":[]}|}
+      ; {|{"keeper_id":"beta","trace_id":"trace-err","turn":1,"injected_fact_keys":["shared:a"],"injected_episode_keys":[]}|}
+      ];
+    write_lines
+      (Filename.concat
+         masc_root
+         "keepers/alpha/execution-receipts/2026-06/27.jsonl")
+      [ {|{"keeper_name":"alpha","trace_id":"trace-ok","outcome":"receipt_done","terminal_reason_code":"completed","ended_at":"2026-06-27T00:00:00Z"}|}
+      ; {|{"keeper_name":"beta","trace_id":"trace-err","outcome":"receipt_failed","terminal_reason_code":"error","ended_at":"2026-06-27T00:00:01Z"}|}
+      ];
+    let report = Eval.evaluate ~masc_root in
+    let path = Filename.concat masc_root "summary-index/facts.jsonl" in
+    Eval.write_summary_index ~path report;
+    match read_lines path with
+    | [ line ] ->
+      (match Yojson.Safe.from_string line with
+       | `Assoc fields ->
+         Alcotest.(check string)
+           "fact key"
+           "shared:a"
+           (match List.assoc_opt "fact_key" fields with
+            | Some (`String value) -> value
+            | _ -> Alcotest.fail "missing fact_key");
+         (match List.assoc_opt "outcomes" fields with
+          | Some (`Assoc outcome_fields) ->
+            Alcotest.(check int)
+              "ok"
+              1
+              (match List.assoc_opt "ok" outcome_fields with
+               | Some (`Int value) -> value
+               | _ -> Alcotest.fail "missing ok");
+            Alcotest.(check int)
+              "error"
+              1
+              (match List.assoc_opt "error" outcome_fields with
+               | Some (`Int value) -> value
+               | _ -> Alcotest.fail "missing error")
+          | _ -> Alcotest.fail "missing outcomes")
+       | _ -> Alcotest.fail "expected JSON object")
+    | lines ->
+      Alcotest.failf "expected one summary-index row, got %d" (List.length lines))
+;;
+
 let () =
   Alcotest.run
     "keeper_recall_outcome_eval"
     [ ( "eval"
       , [ Alcotest.test_case "joins recall to receipts" `Quick test_joins_recall_to_receipts
         ; Alcotest.test_case "json respects trace limit" `Quick test_json_respects_trace_limit
+        ; Alcotest.test_case
+            "writes fact-key summary index"
+            `Quick
+            test_writes_fact_key_summary_index
         ] )
     ]
 ;;

@@ -72,6 +72,13 @@ module Compression : sig
       identifies the content-encoding header value to set. *)
   val compress : ?level:int -> string -> string * string option
 
+  (** [compress_zstd_result ~original result] adapts a {!Compression_codec}
+      result to the legacy zstd-only response contract. Dictionary-compressed
+      payloads are rejected back to [original] because this path can only
+      advertise [Content-Encoding: zstd]. *)
+  val compress_zstd_result :
+    original:string -> Compression_codec.compress_result -> string * bool
+
   (** [compress_zstd ?level data] is the legacy
       no-dictionary path.  Returns [(payload, did_compress)] —
       data shorter than 256 bytes is kept as-is.  Raw zstd

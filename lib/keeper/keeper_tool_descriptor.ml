@@ -1849,6 +1849,8 @@ let common_policy_json_fields ~readonly_key policy =
   ]
 ;;
 
+(* Route evidence consumers must read fields by key; object field order is not a
+   compatibility contract. *)
 let route_evidence_json d =
   let policy = d.policy in
   `Assoc
@@ -1867,112 +1869,10 @@ let route_evidence_json d =
      @ effect_domain_fields policy.effect_domain)
 ;;
 
-let schema_property_names schema =
-  match Json_util.assoc_member_opt "properties" schema with
-  | None -> [], []
-  | Some (`Assoc properties) -> List.map fst properties, []
-  | Some other ->
-    ( []
-    , [ Printf.sprintf
-          "properties: expected object, got %s"
-          (Json_util.kind_name other)
-      ] )
-;;
-
-let schema_required_names schema =
-  match Json_util.assoc_member_opt "required" schema with
-  | None -> [], []
-  | Some (`List values) ->
-    List.fold_right
-      (fun value (names, errors) ->
-         match value with
-         | `String name when not (String.equal name "") -> name :: names, errors
-         | other ->
-           ( names
-           , Printf.sprintf
-               "required: expected non-empty string, got %s"
-               (Json_util.kind_name other)
-             :: errors ))
-      values
-      ([], [])
-  | Some other ->
-    ( []
-    , [ Printf.sprintf
-          "required: expected string array, got %s"
-          (Json_util.kind_name other)
-      ] )
-
-let schema_one_of_required_names schema =
-  match Json_util.assoc_member_opt "oneOf" schema with
-  | None -> [], []
-  | Some (`List cases) ->
-    let mapped_cases =
-      List.mapi
-        (fun index case ->
-           match case with
-           | `Assoc _ ->
-             let required, errors = schema_required_names case in
-             ( (if required = [] then None else Some (Json_util.json_string_list required))
-             , List.map (Printf.sprintf "oneOf[%d].%s" index) errors )
-           | other ->
-             ( None
-             , [ Printf.sprintf
-                   "oneOf[%d]: expected object, got %s"
-                   index
-                   (Json_util.kind_name other)
-               ] ))
-        cases
-    in
-    let required, errors =
-      List.fold_right
-        (fun (required, errors) (required_acc, error_acc) ->
-           ( match required with
-             | Some required -> required :: required_acc
-             | None -> required_acc )
-           , errors @ error_acc)
-        mapped_cases
-        ([], [])
-    in
-    required, errors
-  | Some other ->
-    ( []
-    , [ Printf.sprintf
-          "oneOf: expected object array, got %s"
-          (Json_util.kind_name other)
-      ] )
-;;
-
-let schema_shape_json schema =
-  let properties, property_errors = schema_property_names schema in
-  let required, required_errors = schema_required_names schema in
-  let one_of_required, one_of_errors = schema_one_of_required_names schema in
-  let errors = property_errors @ required_errors @ one_of_errors in
-  let base =
-    [ "properties", Json_util.json_string_list properties
-    ; "required", Json_util.json_string_list required
-    ]
-  in
-  let fields =
-    if one_of_required = []
-    then base
-    else ("one_of_required", `List one_of_required) :: base
-  in
-  let fields =
-    if errors = []
-    then fields
-    else ("schema_errors", Json_util.json_string_list errors) :: fields
-  in
-  `Assoc fields
-;;
-
 let discovery_policy_json policy =
   `Assoc
     (common_policy_json_fields ~readonly_key:"readonly_hint" policy
-     @ [ "effect_domain", effect_domain_json policy.effect_domain
-       ; ( "policy_group"
-      , Json_util.string_opt_to_json
-          (Option.map Tool_catalog.effect_domain_to_string policy.effect_domain) )
-       ])
+     @ [ "effect_domain", effect_domain_json policy.effect_domain ])
 ;;
 
 let discovery_json d =
@@ -1992,7 +1892,7 @@ let discovery_json d =
      ; "sandbox", `String (sandbox_to_string d.sandbox)
      ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
      ; "policy", discovery_policy_json d.policy
-     ; "schema_shape", schema_shape_json d.input_schema
+     ; "schema_shape", Tool_input_validation.schema_shape_json d.input_schema
      ]
      @ examples_field)
 ;;

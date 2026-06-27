@@ -166,5 +166,7 @@ val route_evidence_json : t -> Yojson.Safe.t
 
 (** Read-only discovery projection for capability introspection surfaces.
     Keeps executor, policy, schema-shape, and curated typed examples attached
-    to the descriptor that owns the runtime route. *)
+    to the descriptor that owns the runtime route. The policy [effect_domain] is
+    [null] when a descriptor has no static effect domain; no fallback sentinel
+    string is emitted. *)
 val discovery_json : t -> Yojson.Safe.t

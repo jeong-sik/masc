@@ -766,10 +766,13 @@ let descriptor_discovery_json active_name_set descriptor =
     `Assoc
       (fields
        @ [ ( "active_names"
-           , Json_util.json_string_list
-               (descriptor_active_names active_name_set descriptor) )
-         ])
-  | _ -> invalid_arg "Keeper_tool_descriptor.discovery_json must return an object"
+         , Json_util.json_string_list
+             (descriptor_active_names active_name_set descriptor) )
+       ])
+  | _ ->
+    (* [discovery_json] is specified as an object projection; this branch is an
+       internal invariant breach, not user input. *)
+    assert false
 ;;
 
 let keeper_tools_list_json ~(meta : keeper_meta) =

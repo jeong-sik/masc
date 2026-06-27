@@ -15,7 +15,6 @@
     [~caller] explicitly or use {!run_with_caller}, which accepts a
     typed caller and pulls the configured budget from
     [Env_config_oas_bridge]. *)
-let min_timeout_s = 0.0
 
 let run_safe ~caller ~timeout_s fn =
   if Float.classify_float timeout_s = FP_nan || Float.compare timeout_s 0.0 <= 0
@@ -158,4 +157,7 @@ let run_unbounded ~caller fn =
     surfaces must not reappear as hidden timeout configuration. *)
 let run_with_caller ~caller fn =
   let timeout_s = Env_config_oas_bridge.timeout_sec ~caller () in
-  run_safe ~caller:(Env_config_oas_bridge.caller_key caller) ~timeout_s fn
+  let caller = Env_config_oas_bridge.caller_key caller in
+  match Float.classify_float timeout_s with
+  | FP_infinite -> run_unbounded ~caller fn
+  | _ -> run_safe ~caller ~timeout_s fn

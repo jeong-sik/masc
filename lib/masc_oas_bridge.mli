@@ -37,8 +37,9 @@ val run_unbounded
 
     Inherits the [Invalid_argument] contract from [run_safe].
     [Env_config_oas_bridge.timeout_sec] clamps non-positive and [nan]
-    env overrides to the default and accepts ["infinity"] as no-fire,
-    so [run_safe]'s validation is satisfied under normal use. *)
+    env overrides to the default and accepts ["infinity"] as no-fire.
+    Infinite budgets dispatch through {!run_unbounded}; finite budgets
+    dispatch through {!run_safe}. *)
 val run_with_caller
   :  caller:Env_config_oas_bridge.caller
   -> (unit -> ('a, Agent_sdk.Error.sdk_error) result)

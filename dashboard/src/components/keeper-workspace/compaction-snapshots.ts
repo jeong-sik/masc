@@ -43,8 +43,7 @@ export const compactionSnapshots: Signal<PerKeeperSnapshots> = signal({})
 
 let fallbackIdSeq = 0
 
-function nowHM(): string {
-  const d = new Date()
+function hmLabel(d: Date): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
@@ -63,10 +62,12 @@ export function pushCompactionSnapshot(
   keeperName: string,
   snapshot: Omit<CompactionSnapshot, 'id' | 'at'>,
 ): void {
+  const now = new Date()
   const next: CompactionSnapshot = {
     ...snapshot,
     id: nextId(snapshot.source === 'manual' ? 'cmp-m' : 'cmp-s'),
-    at: nowHM(),
+    at: hmLabel(now),
+    atIso: snapshot.atIso ?? now.toISOString(),
   }
   compactionSnapshots.value = {
     ...compactionSnapshots.value,
@@ -81,17 +82,13 @@ function labelFromIso(iso: string): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-function displayRuntimeFromBackendSnapshot(snapshot: BackendCompactionSnapshot): string {
-  return snapshot.runtime_id ?? snapshot.compaction_source ?? snapshot.source
-}
-
 function backendSnapshotToLocal(snapshot: BackendCompactionSnapshot): CompactionSnapshot {
   return {
     id: snapshot.id,
     at: labelFromIso(snapshot.ts_iso),
     atIso: snapshot.ts_iso,
     trigger: snapshot.trigger,
-    runtime: displayRuntimeFromBackendSnapshot(snapshot),
+    runtime: snapshot.display_runtime,
     before: { tok: finiteNumberOrNull(snapshot.before_tokens) },
     after: { tok: finiteNumberOrNull(snapshot.after_tokens) },
     savedTokens: finiteNumberOrNull(snapshot.saved_tokens),

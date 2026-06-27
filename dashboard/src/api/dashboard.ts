@@ -261,6 +261,7 @@ export type {
   TurnTranscript,
 } from './dashboard-turn-records'
 export {
+  MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER,
   fetchKeeperTurnRecords,
   fetchKeeperCompactionSnapshots,
   fetchKeeperTurnTranscript,

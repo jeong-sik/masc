@@ -10,11 +10,27 @@ let freshness_slo_s = Server_dashboard_http_core_cache.freshness_slo_s
 
 let keeper_hot_path_cache_ttl_s = 30.0
 let keeper_composite_cache_ttl_s = 5.0
-let compaction_snapshot_default_limit = 25
-let compaction_snapshot_max_limit = 100
-let compaction_snapshot_manifest_scan_min_files = 8
-let compaction_snapshot_manifest_scan_limit_multiplier = 4
-let compaction_snapshot_manifest_tail_max_lines = 200
+
+(* Bounded dashboard hydration defaults for the operator compaction inspector.
+   These cap best-effort filesystem scans; [scan_truncated] in the response makes
+   the bound observable when there are more manifest files/rows than scanned. *)
+let compaction_snapshot_default_limit =
+  Env_config.KeeperCompactionSnapshots.default_limit
+;;
+
+let compaction_snapshot_max_limit = Env_config.KeeperCompactionSnapshots.max_limit
+
+let compaction_snapshot_manifest_scan_min_files =
+  Env_config.KeeperCompactionSnapshots.manifest_scan_min_files
+;;
+
+let compaction_snapshot_manifest_scan_limit_multiplier =
+  Env_config.KeeperCompactionSnapshots.manifest_scan_limit_multiplier
+;;
+
+let compaction_snapshot_manifest_tail_max_lines =
+  Env_config.KeeperCompactionSnapshots.manifest_tail_max_lines
+;;
 
 (* Maximum number of trajectory/trace entries returned per query. *)
 let trajectory_max_limit = 500
@@ -275,7 +291,31 @@ let compaction_snapshot_unix_error_message err fn arg =
   Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err)
 ;;
 
-let safe_regular_mtime path =
+let compaction_snapshot_scope_path ~base_dir path =
+  let base_prefix =
+    if String.ends_with ~suffix:Filename.dir_sep base_dir
+    then base_dir
+    else base_dir ^ Filename.dir_sep
+  in
+  if String.equal path base_dir
+  then "."
+  else if String.starts_with ~prefix:base_prefix path
+  then
+    String.sub path (String.length base_prefix) (String.length path - String.length base_prefix)
+  else Filename.basename path
+;;
+
+let runtime_manifest_file_scope ~base_dir path =
+  "runtime_manifest_file:" ^ compaction_snapshot_scope_path ~base_dir path
+;;
+
+let runtime_manifest_row_scope ~base_dir path line_no =
+  Printf.sprintf "runtime_manifest_row:%s:%d"
+    (compaction_snapshot_scope_path ~base_dir path)
+    line_no
+;;
+
+let safe_regular_mtime ~base_dir path =
   try
     let st = Unix.stat path in
     if st.Unix.st_kind = Unix.S_REG
@@ -287,13 +327,13 @@ let safe_regular_mtime path =
   | Unix.Unix_error (err, fn, arg) ->
     ( None
     , [ compaction_snapshot_read_error
-          ~scope:("runtime_manifest_file:" ^ path)
+          ~scope:(runtime_manifest_file_scope ~base_dir path)
           ~error:(compaction_snapshot_unix_error_message err fn arg)
       ] )
   | exn ->
     ( None
     , [ compaction_snapshot_read_error
-          ~scope:("runtime_manifest_file:" ^ path)
+          ~scope:(runtime_manifest_file_scope ~base_dir path)
           ~error:(Printexc.to_string exn)
       ] )
 ;;
@@ -310,9 +350,10 @@ let runtime_manifest_paths ~config ~keeper_id ~limit =
     then
       ( []
       , [ compaction_snapshot_read_error
-            ~scope:("runtime_manifest_dir:" ^ dir)
+            ~scope:("runtime_manifest_dir:" ^ keeper_id)
             ~error:"path is not a directory"
-        ] )
+        ]
+      , false )
     else
       let entries, read_errors =
         Sys.readdir dir
@@ -323,7 +364,7 @@ let runtime_manifest_paths ~config ~keeper_id ~limit =
         |> List.fold_left
              (fun (entries, read_errors) file ->
         let path = Filename.concat dir file in
-        let mtime, errors = safe_regular_mtime path in
+        let mtime, errors = safe_regular_mtime ~base_dir:dir path in
         let entries =
           match mtime with
           | Some mtime -> (path, mtime) :: entries
@@ -332,29 +373,31 @@ let runtime_manifest_paths ~config ~keeper_id ~limit =
         entries, List.rev_append errors read_errors)
              ([], [])
       in
-      (entries
-      |> List.sort (fun (_, a) (_, b) -> Float.compare b a)
-      |> compaction_snapshot_take scan_limit
-      |> List.map fst
-      , List.rev read_errors)
+      let sorted_entries = List.sort (fun (_, a) (_, b) -> Float.compare b a) entries in
+      let scan_truncated = List.length sorted_entries > scan_limit in
+      ( sorted_entries |> compaction_snapshot_take scan_limit |> List.map fst
+      , List.rev read_errors
+      , scan_truncated )
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Unix.Unix_error (Unix.ENOENT, _, _) -> [], []
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> [], [], false
   | Unix.Unix_error (err, fn, arg) ->
     ( []
     , [ compaction_snapshot_read_error
-          ~scope:("runtime_manifest_dir:" ^ dir)
+          ~scope:("runtime_manifest_dir:" ^ keeper_id)
           ~error:(compaction_snapshot_unix_error_message err fn arg)
-      ] )
+      ]
+    , false )
   | exn ->
     ( []
     , [ compaction_snapshot_read_error
-          ~scope:("runtime_manifest_dir:" ^ dir)
+          ~scope:("runtime_manifest_dir:" ^ keeper_id)
           ~error:(Printexc.to_string exn)
-      ] )
+      ]
+    , false )
 ;;
 
-let read_runtime_manifest_tail_rows path =
+let read_runtime_manifest_tail_rows ~base_dir path =
   try
     Dated_jsonl.load_tail_lines path
       ~max_lines:compaction_snapshot_manifest_tail_max_lines
@@ -368,7 +411,7 @@ let read_runtime_manifest_tail_rows path =
             | Error msg ->
               loop (line_no + 1) rows
                 (compaction_snapshot_read_error
-                   ~scope:(Printf.sprintf "runtime_manifest_row:%s:%d" path line_no)
+                   ~scope:(runtime_manifest_row_scope ~base_dir path line_no)
                    ~error:msg
                  :: read_errors)
                 rest
@@ -376,20 +419,22 @@ let read_runtime_manifest_tail_rows path =
           | Yojson.Json_error msg | Yojson.Safe.Util.Type_error (msg, _) ->
             loop (line_no + 1) rows
               (compaction_snapshot_read_error
-                 ~scope:(Printf.sprintf "runtime_manifest_row:%s:%d" path line_no)
+                 ~scope:(runtime_manifest_row_scope ~base_dir path line_no)
                  ~error:msg
                :: read_errors)
               rest
     in
-    loop 1 [] [] lines
+    let rows, read_errors = loop 1 [] [] lines in
+    rows, read_errors, List.length lines >= compaction_snapshot_manifest_tail_max_lines
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     ( []
     , [ compaction_snapshot_read_error
-          ~scope:("runtime_manifest_file:" ^ path)
+          ~scope:(runtime_manifest_file_scope ~base_dir path)
           ~error:(Printexc.to_string exn)
-      ] )
+      ]
+    , false )
 ;;
 
 let compaction_snapshot_clock_refs decision =
@@ -410,6 +455,15 @@ let compaction_snapshot_links_json (links : Keeper_runtime_manifest.links) =
     ; "checkpoint_path", Json_util.string_opt_to_json links.checkpoint_path
     ; "tool_call_log_path", Json_util.string_opt_to_json links.tool_call_log_path
     ]
+;;
+
+let compaction_snapshot_display_runtime ~source ~runtime_id ~compaction_source =
+  match runtime_id with
+  | Some value when String.trim value <> "" -> value
+  | Some _ | None ->
+    (match compaction_source with
+     | Some value when String.trim value <> "" -> value
+     | Some _ | None -> source)
 ;;
 
 let compaction_snapshot_item_json
@@ -440,6 +494,9 @@ let compaction_snapshot_item_json
     ; "source", `String source
     ; "trigger", `String trigger
     ; "runtime_id", Json_util.string_opt_to_json runtime_id
+    ; ( "display_runtime"
+      , `String (compaction_snapshot_display_runtime ~source ~runtime_id ~compaction_source)
+      )
     ; "before_tokens", Json_util.int_opt_to_json before_tokens
     ; "after_tokens", Json_util.int_opt_to_json after_tokens
     ; "saved_tokens", Json_util.int_opt_to_json saved_tokens
@@ -552,13 +609,8 @@ let compaction_snapshot_of_manifest_row ~keeper_id (row : Keeper_runtime_manifes
   | _ -> None
 ;;
 
-let compaction_snapshot_sort_value = function
-  | `Assoc fields ->
-    (match List.assoc_opt "ts_unix" fields with
-     | Some (`Float ts) -> ts
-     | Some (`Int ts) -> float_of_int ts
-     | _ -> 0.0)
-  | _ -> 0.0
+let compaction_snapshot_manifest_sort_value (row : Keeper_runtime_manifest.t) =
+  Option.value ~default:0.0 (Masc_domain.parse_iso8601_opt row.ts)
 ;;
 
 let keeper_meta_compaction_snapshot_json ~config ~keeper_id =
@@ -602,19 +654,31 @@ let keeper_meta_compaction_snapshot_json ~config ~keeper_id =
 
 let compaction_snapshots_json ~config ~keeper_id ~limit =
   let limit = limit |> max 1 |> min compaction_snapshot_max_limit in
-  let manifest_paths, path_read_errors =
+  let manifest_base_dir =
+    Keeper_runtime_manifest.base_dir config ~keeper_name:keeper_id
+  in
+  let manifest_paths, path_read_errors, path_scan_truncated =
     runtime_manifest_paths ~config ~keeper_id ~limit
   in
-  let rows_and_errors = List.map read_runtime_manifest_tail_rows manifest_paths in
-  let manifest_rows = List.concat_map fst rows_and_errors in
-  let manifest_read_errors =
-    path_read_errors @ List.concat_map snd rows_and_errors
+  let rows_and_errors =
+    List.map (read_runtime_manifest_tail_rows ~base_dir:manifest_base_dir) manifest_paths
   in
+  let manifest_rows = List.map (fun (rows, _, _) -> rows) rows_and_errors |> List.concat in
+  let manifest_read_errors =
+    path_read_errors
+    @ (List.map (fun (_, read_errors, _) -> read_errors) rows_and_errors |> List.concat)
+  in
+  let tail_scan_truncated =
+    List.exists (fun (_, _, scan_truncated) -> scan_truncated) rows_and_errors
+  in
+  let scan_truncated = path_scan_truncated || tail_scan_truncated in
   let manifest_items =
     manifest_rows
-    |> List.filter_map (compaction_snapshot_of_manifest_row ~keeper_id)
     |> List.sort (fun a b ->
-      Float.compare (compaction_snapshot_sort_value b) (compaction_snapshot_sort_value a))
+      Float.compare
+        (compaction_snapshot_manifest_sort_value b)
+        (compaction_snapshot_manifest_sort_value a))
+    |> List.filter_map (compaction_snapshot_of_manifest_row ~keeper_id)
     |> compaction_snapshot_take limit
   in
   let items, read_errors =
@@ -638,6 +702,7 @@ let compaction_snapshots_json ~config ~keeper_id ~limit =
     ; "count", `Int (List.length items)
     ; "read_error_count", `Int (List.length read_errors)
     ; "read_errors", compaction_snapshot_read_errors_json read_errors
+    ; "scan_truncated", `Bool scan_truncated
     ; "items", `List items
     ]
 ;;

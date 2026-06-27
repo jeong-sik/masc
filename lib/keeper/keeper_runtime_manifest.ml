@@ -66,8 +66,19 @@ module StringSet = Set_util.StringSet
 let schema_version = 1
 let manifest_file_suffix = ".jsonl"
 
+type status =
+  | Skipped
+  | Other of string
+
+let status_of_string = function
+  | "skipped" -> Skipped
+  | value -> Other value
+;;
+
 let status_is_skipped manifest =
-  String.equal manifest.status "skipped"
+  match status_of_string manifest.status with
+  | Skipped -> true
+  | Other _ -> false
 ;;
 
 let safe_segment value =

@@ -331,6 +331,57 @@ module KeeperMemoryOs = struct
   ;;
 end
 
+(** {1 Keeper dashboard compaction snapshots}
+
+    Read-side bounds for the dashboard compaction snapshot inspector. These
+    limits only cap filesystem hydration work and response size; they do not
+    alter keeper compaction policy or reducer semantics.
+
+    @category Runtime @ops_class operator *)
+module KeeperCompactionSnapshots = struct
+  (** Default item limit for [GET /keepers/:name/compaction-snapshots].
+      Default: 25. @category Runtime @ops_class operator *)
+  let default_limit =
+    max 1 (get_int_nonneg ~default:25 "MASC_KEEPER_COMPACTION_SNAPSHOT_DEFAULT_LIMIT")
+  ;;
+
+  (** Maximum accepted item limit for the compaction snapshot endpoint.
+      Default: 100. @category Runtime @ops_class operator *)
+  let max_limit =
+    max 1 (get_int_nonneg ~default:100 "MASC_KEEPER_COMPACTION_SNAPSHOT_MAX_LIMIT")
+  ;;
+
+  (** Minimum manifest files scanned before applying [limit * multiplier].
+      Default: 8. @category Runtime @ops_class operator *)
+  let manifest_scan_min_files =
+    max
+      1
+      (get_int_nonneg
+         ~default:8
+         "MASC_KEEPER_COMPACTION_SNAPSHOT_MANIFEST_SCAN_MIN_FILES")
+  ;;
+
+  (** Multiplier from requested item limit to manifest files scanned.
+      Default: 4. @category Runtime @ops_class operator *)
+  let manifest_scan_limit_multiplier =
+    max
+      1
+      (get_int_nonneg
+         ~default:4
+         "MASC_KEEPER_COMPACTION_SNAPSHOT_MANIFEST_SCAN_LIMIT_MULTIPLIER")
+  ;;
+
+  (** Tail line count read from each selected manifest file. Default: 200.
+      @category Runtime @ops_class operator *)
+  let manifest_tail_max_lines =
+    max
+      1
+      (get_int_nonneg
+         ~default:200
+         "MASC_KEEPER_COMPACTION_SNAPSHOT_MANIFEST_TAIL_MAX_LINES")
+  ;;
+end
+
 (** {1 Keeper Vision Tool Configuration} *)
 
 module KeeperVision = struct

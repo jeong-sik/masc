@@ -23,6 +23,7 @@ import { useSignal } from '@preact/signals'
 import { formatDateTimeKo, formatTimeAgo, formatTimeUntil } from '../lib/format-time'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import {
+  MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER,
   fetchKeeperTurnRecords,
   type TurnRecordsResponse,
   type MemoryOsTurnRecordSnapshot,
@@ -185,7 +186,6 @@ export function factTtlLabel(fact: MemoryOsFact): string {
 }
 
 const DEFAULT_FACT_ROW_LIMIT = 12
-const LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER = 'librarian_unstructured_fallback'
 type FactVisibilityFilter = 'recallable' | 'diagnostic' | 'all'
 
 export function sortMemoryFactsForReview(facts: readonly MemoryOsFact[]): MemoryOsFact[] {
@@ -203,7 +203,7 @@ function isPromptRecallableFact(fact: MemoryOsFact): boolean {
 }
 
 function isDiagnosticEvidenceFact(fact: MemoryOsFact): boolean {
-  return !isPromptRecallableFact(fact)
+  return fact.current && !fact.prompt_recallable
 }
 
 function formatFactInstant(ts: number, iso: string | null): string {
@@ -453,10 +453,10 @@ function OneKeeperMemoryReal({
   const diagnosticFacts = facts.filter(isDiagnosticEvidenceFact)
   const allEpisodes = [...snapshot.episodes.items].reverse()
   const episodes = allEpisodes
-    .filter(ep => ep.terminal_marker !== LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER)
+    .filter(ep => ep.terminal_marker !== MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER)
     .slice(0, 5)
   const fallbackEpisodes = allEpisodes
-    .filter(ep => ep.terminal_marker === LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER)
+    .filter(ep => ep.terminal_marker === MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER)
     .slice(0, 5)
   // distinct categories present, in first-seen order, deduped by tag
   const seen = new Set<string>()

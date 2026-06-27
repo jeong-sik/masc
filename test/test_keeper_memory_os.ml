@@ -1342,7 +1342,7 @@ let test_librarian_runtime_preserves_unstructured_fallback () =
              episode.Types.episode_summary;
            Alcotest.(check (option string))
              "fallback marker"
-             (Some "librarian_unstructured_fallback")
+             (Some Types.librarian_unstructured_fallback_terminal_marker)
              episode.Types.terminal_marker;
            (match episode.Types.claims with
             | [ fact ] ->
@@ -1384,7 +1384,7 @@ let test_librarian_runtime_preserves_unstructured_fallback () =
          | [ episode ] ->
            Alcotest.(check (option string))
              "event persisted with fallback marker"
-             (Some "librarian_unstructured_fallback")
+             (Some Types.librarian_unstructured_fallback_terminal_marker)
              episode.Types.terminal_marker;
            Alcotest.(check (float 0.001))
              "event persisted with injected-clock timestamp"
@@ -2186,7 +2186,7 @@ let test_render_if_enabled_omits_diagnostic_memory () =
           ; Types.source_turn_range = Some (1, 2)
           ; Types.created_at = now
           ; Types.valid_until = Some (now +. 3600.0)
-          ; Types.terminal_marker = Some "librarian_unstructured_fallback"
+          ; Types.terminal_marker = Some Types.librarian_unstructured_fallback_terminal_marker
           ; Types.schema_version = Types.schema_version
           }
         in
@@ -4336,6 +4336,15 @@ let json_int_field label fields key =
   | None -> Alcotest.failf "%s.%s missing" label key
 ;;
 
+let json_bool_field label fields key =
+  match List.assoc_opt key fields with
+  | Some (`Bool value) -> value
+  | Some other ->
+    Alcotest.failf "%s.%s must be a bool (received %s)" label key
+      (Yojson.Safe.to_string other)
+  | None -> Alcotest.failf "%s.%s missing" label key
+;;
+
 let json_item_list label fields key =
   match List.assoc_opt key fields with
   | Some (`List items) -> items
@@ -4402,6 +4411,14 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
       "read errors"
       0
       (List.length (json_item_list "compaction_snapshots" top "read_errors"));
+    Alcotest.(check int)
+      "read error count"
+      0
+      (json_int_field "compaction_snapshots" top "read_error_count");
+    Alcotest.(check bool)
+      "scan truncated"
+      false
+      (json_bool_field "compaction_snapshots" top "scan_truncated");
     let item =
       match json_item_list "compaction_snapshots" top "items" with
       | [ item ] -> json_assoc "compaction_snapshots.items[0]" item
@@ -4419,6 +4436,10 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
       "runtime"
       "oas-seoul-1"
       (json_string_field "item" item "runtime_id");
+    Alcotest.(check string)
+      "display runtime"
+      "oas-seoul-1"
+      (json_string_field "item" item "display_runtime");
     Alcotest.(check int) "before" 210_000 (json_int_field "item" item "before_tokens");
     Alcotest.(check int) "after" 120_000 (json_int_field "item" item "after_tokens");
     Alcotest.(check int) "saved" 90_000 (json_int_field "item" item "saved_tokens");
@@ -4464,7 +4485,15 @@ let test_compaction_snapshots_json_surfaces_manifest_read_errors () =
     Alcotest.(check bool)
       "error names runtime manifest row"
       true
-      (contains "runtime_manifest_row" error_json))
+      (contains "runtime_manifest_row" error_json);
+    Alcotest.(check bool)
+      "error scope does not expose absolute manifest path"
+      false
+      (contains path error_json);
+    Alcotest.(check int)
+      "read error count"
+      (List.length read_errors)
+      (json_int_field "compaction_snapshots" top "read_error_count"))
 ;;
 
 let () =

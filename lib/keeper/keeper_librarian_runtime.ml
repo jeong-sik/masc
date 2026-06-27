@@ -439,7 +439,8 @@ let unstructured_episode ~now ~generation (inp : Keeper_librarian.input) ~reason
       Keeper_memory_os_types.category_valid_until
         ~now
         Keeper_memory_os_types.Ephemeral
-  ; terminal_marker = Some "librarian_unstructured_fallback"
+  ; terminal_marker =
+      Some Keeper_memory_os_types.librarian_unstructured_fallback_terminal_marker
   ; schema_version = Keeper_memory_os_types.schema_version
   }
 

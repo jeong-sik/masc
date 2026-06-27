@@ -555,7 +555,9 @@ describe('keeper tool telemetry fetchers', () => {
         producer: 'keeper_runtime_manifest|keeper_meta_store',
         limit: 2,
         count: 2,
+        read_error_count: 1,
         read_errors: [{ scope: 'runtime_manifest_row:/tmp/bad.jsonl:1', error: 'bad row' }],
+        scan_truncated: false,
         items: [
           {
             id: 'manifest:trace-a:event_bus_correlated:2026-06-26T03:03:00Z',
@@ -567,6 +569,7 @@ describe('keeper tool telemetry fetchers', () => {
             source: 'runtime_manifest',
             trigger: 'proactive(85%)',
             runtime_id: 'oas-seoul-1',
+            display_runtime: 'oas-seoul-1',
             before_tokens: 210000,
             after_tokens: 120000,
             saved_tokens: 90000,
@@ -585,6 +588,7 @@ describe('keeper tool telemetry fetchers', () => {
             source: 'runtime_manifest',
             trigger: 'pre_dispatch_hygiene',
             runtime_id: null,
+            display_runtime: 'pre_dispatch_hygiene',
             before_tokens: null,
             after_tokens: null,
             saved_tokens: null,
@@ -603,9 +607,12 @@ describe('keeper tool telemetry fetchers', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/keeper-alpha/compaction-snapshots?limit=2')
     expect(result.items[0]?.before_tokens).toBe(210000)
     expect(result.items[0]?.saved_tokens).toBe(90000)
+    expect(result.items[0]?.display_runtime).toBe('oas-seoul-1')
+    expect(result.read_error_count).toBe(1)
     expect(result.read_errors).toEqual([
       { scope: 'runtime_manifest_row:/tmp/bad.jsonl:1', error: 'bad row' },
     ])
+    expect(result.scan_truncated).toBe(false)
     expect(result.items[0]?.links.receipt_path).toBeNull()
     expect(result.items[1]?.before_tokens).toBeNull()
     expect(result.items[1]?.runtime_id).toBeNull()

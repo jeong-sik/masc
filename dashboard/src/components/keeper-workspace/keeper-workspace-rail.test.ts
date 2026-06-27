@@ -8,7 +8,11 @@ import { requestConfirm } from '../common/confirm-dialog'
 import { KeeperWorkspaceRail } from './keeper-workspace-rail'
 import type { Keeper, Task } from '../../types'
 import { resetRuntimeCatalog } from '../../lib/runtime-catalog-resource'
-import { compactionSnapshots } from './compaction-snapshots'
+import {
+  compactionSnapshots,
+  hydrateCompactionSnapshots,
+  recordManualCompaction,
+} from './compaction-snapshots'
 
 // The recent-tool-calls section now lazy-loads via fetchKeeperToolCalls (rather
 // than rendering keeper.recent_tool_names). Stub it so these rail tests never hit
@@ -31,6 +35,9 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
       producer: 'keeper_runtime_manifest|keeper_meta_store',
       limit: 25,
       count: 1,
+      read_error_count: 0,
+      read_errors: [],
+      scan_truncated: false,
       items: [
         {
           id: 'manifest:trace-cmp:event_bus_correlated:2026-06-26T03:03:00Z',
@@ -42,6 +49,7 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
           source: 'runtime_manifest',
           trigger: 'proactive(85%)',
           runtime_id: 'oas-seoul-1',
+          display_runtime: 'oas-seoul-1',
           before_tokens: 210000,
           after_tokens: 120000,
           saved_tokens: 90000,
@@ -87,6 +95,7 @@ afterEach(() => {
   shellAuthSummary.value = null
   compactionSnapshots.value = {}
   vi.clearAllMocks()
+  vi.useRealTimers()
   resetRuntimeCatalog()
 })
 
@@ -311,6 +320,39 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('proactive(85%)')
     expect(container.textContent).toContain('runtime_manifest · observed')
     expect(container.textContent).toContain('trace-cmp#12')
+  })
+
+  it('keeps newly recorded optimistic compactions above older durable snapshots', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-27T10:00:00Z'))
+
+    recordManualCompaction('masc-improver', 1000, 800, 'runtime-a')
+    hydrateCompactionSnapshots('masc-improver', [
+      {
+        id: 'manifest:old:event_bus_correlated:2026-06-26T03:03:00Z',
+        keeper: 'masc-improver',
+        ts_iso: '2026-06-26T03:03:00Z',
+        ts_unix: 1_782_444_580,
+        trace_id: 'old',
+        keeper_turn_id: 1,
+        source: 'runtime_manifest',
+        trigger: 'proactive(85%)',
+        runtime_id: 'runtime-old',
+        display_runtime: 'runtime-old',
+        before_tokens: 210000,
+        after_tokens: 120000,
+        saved_tokens: 90000,
+        compaction_id: 'cmp-old',
+        compaction_source: 'event_bus',
+        status: 'observed',
+        links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
+      },
+    ])
+
+    const snapshots = compactionSnapshots.value['masc-improver'] ?? []
+    expect(snapshots[0]?.source).toBe('manual')
+    expect(snapshots[0]?.atIso).toBe('2026-06-27T10:00:00.000Z')
+    expect(snapshots[1]?.source).toBe('backend')
   })
 
   it('opens the memory inspector overlay from the context rail', () => {

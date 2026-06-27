@@ -6,6 +6,9 @@ import { get, type AbortableRequestOptions } from './core'
 import { isRecord, asBoolean, asNumber, asNullableString, asString, asStringArray, asRecordArray } from '../components/common/normalize'
 import { decodeTelemetryFreshnessMetadata, type TelemetryFreshnessMetadata } from './dashboard-shared'
 
+// Mirror of Keeper_memory_os_types.librarian_unstructured_fallback_terminal_marker.
+export const MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER = 'librarian_unstructured_fallback'
+
 // Accepts either a string array or a single string; mirrors the keeper-config
 // normalizeStringList (duplicated here to keep this domain self-contained).
 function normalizeStringList(value: unknown): string[] {
@@ -280,6 +283,7 @@ export type KeeperCompactionSnapshot = {
   readonly source: string
   readonly trigger: string
   readonly runtime_id: string | null
+  readonly display_runtime: string
   readonly before_tokens: number | null
   readonly after_tokens: number | null
   readonly saved_tokens: number | null
@@ -296,7 +300,9 @@ export type KeeperCompactionSnapshotsResponse = {
   readonly producer: string
   readonly limit: number
   readonly count: number
+  readonly read_error_count: number
   readonly read_errors: { scope: string; error: string }[]
+  readonly scan_truncated: boolean
   readonly items: KeeperCompactionSnapshot[]
 }
 
@@ -680,6 +686,8 @@ function decodeKeeperCompactionSnapshot(raw: unknown): KeeperCompactionSnapshot 
   const trigger = asString(raw.trigger)
   const status = asString(raw.status)
   if (!id || !keeper || !ts_iso || !source || !trigger || !status) return null
+  const runtimeId = asNullableString(raw.runtime_id)
+  const compactionSource = asNullableString(raw.compaction_source)
   return {
     id,
     keeper,
@@ -689,12 +697,13 @@ function decodeKeeperCompactionSnapshot(raw: unknown): KeeperCompactionSnapshot 
     keeper_turn_id: nullableNumber(raw.keeper_turn_id),
     source,
     trigger,
-    runtime_id: asNullableString(raw.runtime_id),
+    runtime_id: runtimeId,
+    display_runtime: asString(raw.display_runtime) || runtimeId || compactionSource || source,
     before_tokens: nullableNumber(raw.before_tokens),
     after_tokens: nullableNumber(raw.after_tokens),
     saved_tokens: nullableNumber(raw.saved_tokens),
     compaction_id: asNullableString(raw.compaction_id),
-    compaction_source: asNullableString(raw.compaction_source),
+    compaction_source: compactionSource,
     status,
     links: decodeKeeperCompactionSnapshotLinks(raw.links),
   }
@@ -724,7 +733,9 @@ function decodeKeeperCompactionSnapshotsResponse(raw: unknown): KeeperCompaction
     producer,
     limit: asNumber(raw.limit, 0) ?? 0,
     count: asNumber(raw.count, 0) ?? 0,
+    read_error_count: asNumber(raw.read_error_count, 0) ?? 0,
     read_errors: decodeReadErrors(raw.read_errors),
+    scan_truncated: asBoolean(raw.scan_truncated) ?? false,
     items: asRecordArray(raw.items)
       .map(decodeKeeperCompactionSnapshot)
       .filter((item): item is KeeperCompactionSnapshot => item !== null),

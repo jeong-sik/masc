@@ -16,7 +16,11 @@ import {
   sortMemoryFactsForReview,
   type MemoryKeeper,
 } from './memory-inspector'
-import type { MemoryOsFact, TurnRecordRow } from '../api/dashboard'
+import {
+  MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER,
+  type MemoryOsFact,
+  type TurnRecordRow,
+} from '../api/dashboard'
 
 afterEach(() => {
   cleanup()
@@ -85,7 +89,7 @@ function turnRecordsPayload() {
             valid_until: null,
             valid_until_iso: null,
             current: true,
-            terminal_marker: 'librarian_unstructured_fallback',
+            terminal_marker: MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER,
             claim_count: 1,
             summary: 'unstructured_note: librarian parse fallback (empty response)',
           },
@@ -252,12 +256,13 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(container.textContent).not.toContain('diagnostic row: operator pin backend source absent')
     expect(container.textContent).not.toContain('librarian parse fallback')
 
-    const diagnosticBtn = [...container.querySelectorAll('.mem-filter')].find(b => b.textContent === '진단/증거 2')
+    const diagnosticBtn = [...container.querySelectorAll('.mem-filter')].find(b => b.textContent === '진단/증거 1')
     expect(diagnosticBtn).toBeTruthy()
     fireEvent.click(diagnosticBtn!)
 
     expect(container.textContent).toContain('diagnostic row: operator pin backend source absent')
     expect(container.textContent).toContain('diagnostic evidence row')
+    expect(container.textContent).not.toContain('amplitude 캐시는 만료됨')
     expect(container.textContent).toContain('진단 fallback · librarian')
     expect(container.textContent).toContain('librarian parse fallback')
   })

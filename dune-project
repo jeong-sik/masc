@@ -55,9 +55,9 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Provider_config.make ?connect_timeout_s override landed in OAS commit
-  ;; 37f2084 and is now carried by the published agent_sdk 0.207.9 release.
-  (agent_sdk (>= 0.207.9))
+  ;; Pinned OAS main carries post-v0.207.10 provider fixes until the next
+  ;; published agent_sdk release carries them.
+  (agent_sdk (>= 0.207.10))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

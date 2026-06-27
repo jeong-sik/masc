@@ -197,11 +197,13 @@ let update_entry_if_registered ~base_path name f =
   let rec loop () =
     let current = Atomic.get registry in
     match StringMap.find_opt key current with
-    | None -> ()
+    | None -> false
     | Some entry ->
       let updated = StringMap.add key (f entry) current in
       if Atomic.compare_and_set registry current updated
-      then Orphan_drops.clear ~base_path name
+      then (
+        Orphan_drops.clear ~base_path name;
+        true)
       else loop ()
   in
   loop ()
@@ -513,13 +515,11 @@ let reload_meta_from_disk ~base_path name =
               record_invalid_registry_entry ~operation:"reload_meta_from_disk" ~name reason;
               Error (registry_entry_validation_error_to_string reason)
           | Ok () ->
-              let changed = ref false in
-              update_entry_if_registered ~base_path name (fun e ->
-                changed := true;
-                { e with base_path; name; meta = effective_meta });
-              if not !changed
-              then Ok None
-              else Ok (get ~base_path name)))
+              let updated =
+                update_entry_if_registered ~base_path name (fun e ->
+                  { e with base_path; name; meta = effective_meta })
+              in
+              if updated then Ok (get ~base_path name) else Ok None))
 ;;
 
 (* Runtime-attempt cluster (runtime_attempt_merge / meta_for_runtime_attempt / record_runtime_attempt / runtime_attempt_suffix / last_runtime_attempt / runtime_attempt_freshness_threshold_sec / enrich... *)

@@ -178,6 +178,10 @@ val read_recent_audit :
   unit ->
   Yojson.Safe.t list
 
+(** Read recent resolved audit entries (default last 20). *)
+val list_recent_resolved_json :
+  base_path:string -> ?n:int -> unit -> Yojson.Safe.t list
+
 module For_testing : sig
   val reset_audit_store : unit -> unit
   val first_cmd_token : string -> string option

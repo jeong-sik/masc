@@ -671,6 +671,7 @@ export interface DashboardGovernanceResponse {
   judgments?: GovernanceJudgment[]
   pending_actions?: PendingConfirmation[]
   approval_queue?: KeeperApprovalQueueItem[]
+  recent_resolved?: KeeperApprovalQueueItem[]
   approval_rules?: KeeperApprovalRule[]
   hitl?: {
     enabled: boolean

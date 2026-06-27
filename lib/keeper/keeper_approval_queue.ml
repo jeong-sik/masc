@@ -254,6 +254,25 @@ let read_recent_audit ~base_path ?keeper_name ?(n = 20) () : Yojson.Safe.t list 
         [])
 ;;
 
+let list_recent_resolved_json ~base_path ?(n = 20) () : Yojson.Safe.t list =
+  if n <= 0
+  then []
+  else (
+    match get_audit_store ~base_path () with
+    | None -> []
+    | Some store ->
+      try
+        read_recent_audit_raw store (audit_scan_window n)
+        |> List.filter (fun json ->
+             String.equal "resolved" (Safe_ops.json_string ~default:"" "event" json))
+        |> List.filteri (fun idx _ -> idx < n)
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Keeper_fd_pressure.note_exception ~site:"approval_audit.list_recent_resolved" exn;
+        [])
+;;
+
 let generate_id () = make_generated_id "appr"
 
 let normalized_input_hash (input : Yojson.Safe.t) =

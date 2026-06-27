@@ -111,6 +111,31 @@ function approvalRuleSummary(item: KeeperApprovalQueueItem): string | null {
     : null
 }
 
+function resolvedDecisionLabel(decision: string | null | undefined): string {
+  if (decision === 'approve') return '승인'
+  if (decision === 'reject') return '거부'
+  return decision || '처리됨'
+}
+
+function ResolvedApprovalItem({ item }: { item: KeeperApprovalQueueItem }) {
+  const decision = resolvedDecisionLabel(item.decision)
+  return html`
+    <li
+      class="ap-history-item"
+      data-testid="approval-history-item"
+      data-approval-id=${item.id}
+    >
+      <span class=${`ap-history-decision ${item.decision ?? ''}`}>${decision}</span>
+      <span class="ap-history-tool mono">${item.tool_name}</span>
+      <span class="ap-history-keeper">${item.keeper_name}</span>
+      <span class="ap-history-id mono">${item.id}</span>
+      ${item.requested_at
+        ? html`<span class="ap-history-at">${new Date(item.requested_at).toLocaleString('ko-KR')}</span>`
+        : null}
+    </li>
+  `
+}
+
 function approvalDetailRows(item: KeeperApprovalQueueItem): Array<{ label: string; value: string }> {
   return [
     { label: '키퍼', value: item.keeper_name },
@@ -280,6 +305,7 @@ export function ApprovalsSurface() {
   }, [])
 
   const items = governanceData.value?.approval_queue ?? []
+  const resolvedItems = governanceData.value?.recent_resolved ?? []
   const error = governanceError.value
   // First load only: governanceResource is stale-while-revalidate, so a refetch
   // keeps the previous data — governanceData is null ONLY before the first load
@@ -369,6 +395,18 @@ export function ApprovalsSurface() {
                 <h3>열린 승인이 없습니다</h3>
                 <div class="ap-clear-sub">HITL 큐가 비어 있습니다 — keeper들이 결재 대기 없이 진행 중입니다.</div>
               </div>
+            `
+          : null}
+        ${resolvedItems.length > 0
+          ? html`
+              <section class="ap-history" data-testid="approvals-history">
+                <h2 class="ap-history-title">최근 처리 (${resolvedItems.length})</h2>
+                <ul class="ap-history-list">
+                  ${resolvedItems.map(item => html`
+                    <${ResolvedApprovalItem} key=${item.id} item=${item} />
+                  `)}
+                </ul>
+              </section>
             `
           : null}
       `}

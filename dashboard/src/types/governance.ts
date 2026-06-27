@@ -233,6 +233,7 @@ export interface KeeperApprovalQueueItem {
   selected_model?: string | null
   disposition?: string | null
   disposition_reason?: string | null
+  decision?: string | null
   rule_match?: {
     rule_id?: string | null
     matched_by?: string | null

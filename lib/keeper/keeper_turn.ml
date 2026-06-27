@@ -84,6 +84,52 @@ let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
     ~total_cost_usd:updated_meta.runtime.usage.total_cost_usd;
   updated_meta
 
+let has_no_progress_loop_blocker (meta : keeper_meta) =
+  match meta.runtime.last_blocker with
+  | Some { klass = No_progress_loop; _ } -> true
+  | _ -> false
+
+let clear_direct_success_no_progress_pause
+      ~(config : Workspace.config)
+      ~(pre_turn_meta : keeper_meta)
+      (meta : keeper_meta)
+  : keeper_meta
+  =
+  if not (pre_turn_meta.paused && has_no_progress_loop_blocker pre_turn_meta)
+  then meta
+  else (
+    let cleared_meta =
+      Keeper_unified_turn_no_progress.clear_for_operator_resume
+        ~base_path:config.base_path
+        meta
+    in
+    let resumed_meta =
+      { cleared_meta with
+        paused = false
+      ; auto_resume_after_sec = None
+      ; updated_at = now_iso ()
+      }
+    in
+    Keeper_registry.update_meta
+      ~base_path:config.base_path
+      resumed_meta.name
+      resumed_meta;
+    Keeper_registry.reset_turn_failures
+      ~base_path:config.base_path
+      resumed_meta.name;
+    Keeper_turn_livelock.reset_keeper_livelock
+      ~base_path:config.base_path
+      ~keeper:resumed_meta.name;
+    Keeper_livelock_state.reset_for_keeper ~keeper:resumed_meta.name;
+    Keeper_registry.dispatch_event_unit
+      ~base_path:config.base_path
+      resumed_meta.name
+      Keeper_state_machine.Operator_resume;
+    Log.Keeper.info
+      "%s: direct keeper_msg success cleared no_progress pause/blocker"
+      resumed_meta.name;
+    resumed_meta)
+
 let direct_turn_observation ~(config : Workspace.config) (meta : keeper_meta) :
     Keeper_world_observation.world_observation =
   Keeper_world_observation.observe_direct_keeper_msg
@@ -198,6 +244,14 @@ let surface_context_to_instructions (ctx : Yojson.Safe.t) : string option =
 module For_testing = struct
   let direct_owner_conversation_context = direct_owner_conversation_context
   let surface_context_to_instructions = surface_context_to_instructions
+  let clear_direct_success_no_progress_pause =
+    clear_direct_success_no_progress_pause
+  let direct_empty_no_progress_retry_reason =
+    direct_empty_no_progress_retry_reason
+  let direct_empty_no_progress_retry_decision =
+    next_direct_empty_no_progress_retry_decision
+  let run_direct_empty_no_progress_retry_loop =
+    run_direct_empty_no_progress_retry_loop
 end
 
 let resolve_turn_runtime_id (meta : keeper_meta) =
@@ -1030,8 +1084,14 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
                 ~config:ctx.config
                 ~keeper_name:meta.name
                 lifecycle;
+              let lifecycle_updated_meta =
+                clear_direct_success_no_progress_pause
+                  ~config:ctx.config
+                  ~pre_turn_meta:meta
+                  lifecycle.updated_meta
+              in
               let updated_meta =
-                update_direct_turn_meta lifecycle.updated_meta ~latency_ms result
+                update_direct_turn_meta lifecycle_updated_meta ~latency_ms result
               in
               (* #9733: keeper_msg turn-completion is the same race shape
                  as the unified-turn failure path — heartbeat updates

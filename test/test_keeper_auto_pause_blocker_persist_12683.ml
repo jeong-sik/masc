@@ -305,6 +305,78 @@ let test_wakeup_directive_persists_no_progress_meta_clear () =
           | Some _ -> fail "expected wakeup to clear no_progress failure reason")
        | None -> fail "expected registered keeper")
 
+let test_direct_success_clears_no_progress_pause () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir "masc-no-progress-direct-success-" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_no_progress_loop_detector.reset_all_for_test ();
+      Masc.Keeper_registry.clear ();
+      cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "no-progress-direct-success" in
+       let blocker =
+         Keeper_meta_contract.blocker_info_of_class
+           ~detail:"latched"
+           Keeper_meta_contract.No_progress_loop
+       in
+       let meta =
+         { (make_meta keeper_name
+            |> Keeper_meta_contract.map_runtime (fun rt ->
+              { rt with last_blocker = Some blocker }))
+           with
+           paused = true
+         }
+       in
+       Masc.Keeper_registry.clear ();
+       ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta);
+       ignore
+         (Masc.Keeper_no_progress_loop_detector.record_turn
+            ~threshold_override:1
+            ~keeper_name
+            ~made_progress:false
+            ());
+       Masc.Keeper_registry.set_failure_reason
+         ~base_path:config.base_path
+         keeper_name
+         (Some
+            (Masc.Keeper_registry.Provider_runtime_error
+               { code = Masc.Keeper_unified_turn_no_progress.failure_reason_code
+               ; detail = "latched"
+               ; provider_id = None
+               ; http_status = None
+               ; runtime_id = None
+               ; reason = None
+               }));
+       let recovered_meta =
+         Masc.Keeper_turn.For_testing.clear_direct_success_no_progress_pause
+           ~config
+           ~pre_turn_meta:meta
+           meta
+       in
+       check bool "direct success resumes no-progress pause" false recovered_meta.paused;
+       check bool
+         "detector reset by direct success"
+         false
+         (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
+       (match recovered_meta.runtime.last_blocker with
+        | None -> ()
+        | Some _ -> fail "expected direct success to clear no_progress meta blocker");
+       match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
+       | Some entry ->
+         check bool
+           "registry meta resumed"
+           false
+           entry.Masc.Keeper_registry.meta.paused;
+         (match entry.Masc.Keeper_registry.last_failure_reason with
+          | None -> ()
+          | Some _ -> fail "expected direct success to clear no_progress failure reason")
+       | None -> fail "expected registered keeper")
+
 let test_idle_detected_repeated_failure_pauses_keeper () =
   Eio_main.run
   @@ fun env ->
@@ -417,6 +489,8 @@ let () =
             test_operator_resume_clears_no_progress_loop_latch;
           test_case "wakeup directive persists no-progress meta clear" `Quick
             test_wakeup_directive_persists_no_progress_meta_clear;
+          test_case "direct success clears no-progress pause" `Quick
+            test_direct_success_clears_no_progress_pause;
         ] );
       ( "idle-detected loop",
         [

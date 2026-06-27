@@ -353,12 +353,12 @@ let load_overview ~(host : string) ~(port : int) :
         decode_attention_items items
       in
       let* pending_confirms =
-        match Yojson.Safe.Util.member "operator_targets" json with
-        | `Null -> Ok []
-        | `Assoc _ as operator_targets ->
+        let* operator_targets = optional_object_field json "operator_targets" in
+        match operator_targets with
+        | None -> Ok []
+        | Some operator_targets ->
             let* items = optional_list_field operator_targets "pending_confirms" in
             decode_approval_items items
-        | bad -> field_type_error "operator_targets" "an object" bad
       in
       let* agent_briefs = optional_list_field json "agent_briefs" in
       let* top_attention =

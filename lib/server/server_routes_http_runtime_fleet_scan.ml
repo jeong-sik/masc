@@ -485,8 +485,6 @@ let keeper_phase_snapshot ?base_path () =
               running_names = entry.name :: acc.running_names;
               recovering_names;
               executable_names;
-              phase_values = acc.phase_values;
-              phase_details = acc.phase_details;
             }
           | Keeper_state_machine.Failing ->
             {
@@ -794,7 +792,8 @@ let blocked_keeper_detail_json
   let is_bootable = String_set.mem name bootable_set in
   let is_capacity = String_set.mem name capacity_set in
   let has_read_error = String_set.mem name read_error_set in
-  let phase = Option.map (fun detail -> detail.phase) phase_detail in
+  let phase_name = Option.map (fun detail -> detail.phase) phase_detail in
+  let phase = Option.bind phase_name Keeper_state_machine.phase_of_string in
   let last_failure =
     match base_path with
     | None -> None
@@ -816,7 +815,6 @@ let blocked_keeper_detail_json
                else Bootstrap_disabled)
           else Unknown
   in
-  let phase_name = Option.map Keeper_state_machine.phase_to_string phase in
   let terminal_phase_field =
     match phase with
     | Some phase -> [ ("terminal_phase", `Bool (Keeper_state_machine.is_terminal phase)) ]

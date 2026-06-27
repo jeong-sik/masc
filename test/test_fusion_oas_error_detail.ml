@@ -145,6 +145,36 @@ let test_panel_failure_yojson_accepts_legacy_empty_response () =
   | Error err -> Alcotest.fail err
 ;;
 
+let test_panel_failure_yojson_round_trips_current_shapes () =
+  let check_round_trip label failure =
+    let json = Fusion_types.panel_failure_to_yojson failure in
+    match Fusion_types.panel_failure_of_yojson json with
+    | Ok actual ->
+      Alcotest.(check string)
+        label
+        (Fusion_types.show_panel_failure failure)
+        (Fusion_types.show_panel_failure actual)
+    | Error err -> Alcotest.failf "%s failed to decode: %s" label err
+  in
+  check_round_trip "timeout" Fusion_types.Timeout;
+  check_round_trip "provider error"
+    (Fusion_types.Provider_error "Provider 'runtime': quota");
+  check_round_trip "empty response"
+    (Fusion_types.Empty_response "empty response (stop_reason=max_tokens)");
+  check_round_trip "invalid max output tokens"
+    (Fusion_types.Invalid_max_output_tokens 0);
+  Alcotest.(check bool)
+    "detail empty response serializes as tagged payload, not legacy string"
+    true
+    (Yojson.Safe.equal
+       (`List
+         [ `String "Empty_response"
+         ; `String "empty response (stop_reason=max_tokens)"
+         ])
+       (Fusion_types.panel_failure_to_yojson
+          (Fusion_types.Empty_response "empty response (stop_reason=max_tokens)")))
+;;
+
 let test_timeout_budget_does_not_set_total_execution_ceiling () =
   let config =
     Fusion_oas.For_testing.apply_timeout_budget
@@ -201,6 +231,10 @@ let () =
             "panel failure yojson accepts legacy empty response"
             `Quick
             test_panel_failure_yojson_accepts_legacy_empty_response
+        ; Alcotest.test_case
+            "panel failure yojson round-trips current shapes"
+            `Quick
+            test_panel_failure_yojson_round_trips_current_shapes
         ; Alcotest.test_case
             "timeout budget does not arm OAS total execution ceiling"
             `Quick

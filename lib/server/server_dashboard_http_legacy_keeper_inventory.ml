@@ -76,7 +76,7 @@ let path_of_components = function
 let relative_path ~root path =
   match path_components_under_root ~root path with
   | Some parts -> path_of_components parts
-  | None -> path
+  | None -> "<external>"
 ;;
 
 let is_runtime_store_dir name =
@@ -339,31 +339,12 @@ let class_totals entries =
     class_to_string cls, `Assoc [ "count", `Int count; "bytes", `Int bytes ])
 ;;
 
-let cleanup_candidate_classes = [ Orphaned; Backup ]
-
-let is_cleanup_candidate entry =
-  List.exists
-    (fun candidate_class -> entry.classification = candidate_class)
-    cleanup_candidate_classes
-;;
-
-let cleanup_plan_json entries =
-  let candidates = List.filter is_cleanup_candidate entries in
-  let candidate_bytes =
-    List.fold_left (fun total entry -> total + entry.bytes) 0 candidates
-  in
+let cleanup_plan_json () =
   `Assoc
     [ "delete_allowed", `Bool false
     ; "requires_operator_approval", `Bool true
-    ; "candidate_policy", `String "disabled_until_owner_verified"
-    ; ( "candidate_classes"
-      , `List
-          (List.map
-             (fun candidate_class -> `String (class_to_string candidate_class))
-             cleanup_candidate_classes) )
-    ; "candidate_count", `Int (List.length candidates)
-    ; "candidate_bytes", `Int candidate_bytes
-    ; "candidates", `List (List.map entry_to_json candidates)
+    ; "candidate_policy", `String "not_available_until_owner_verified"
+    ; "candidate_source", `String "inventory_only"
     ]
 ;;
 
@@ -389,6 +370,6 @@ let legacy_keeper_inventory_http_json ~base_path ?(max_depth = default_max_depth
     ; "scan_errors", `List (List.map scan_error_to_json result.errors)
     ; "class_totals", `Assoc (class_totals result.entries)
     ; "entries", `List (List.map entry_to_json result.entries)
-    ; "dry_run_cleanup_plan", cleanup_plan_json result.entries
+    ; "dry_run_cleanup_plan", cleanup_plan_json ()
     ]
 ;;

@@ -83,12 +83,28 @@ let events_path_for_keepers_dir ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ ".events.jsonl")
 ;;
 
+type legacy_memory_file =
+  | Legacy_facts
+  | Legacy_events
+
+let supported_legacy_memory_files = [ Legacy_facts; Legacy_events ]
+
+let legacy_memory_filename = function
+  | Legacy_facts -> "facts.jsonl"
+  | Legacy_events -> "events.jsonl"
+;;
+
+let legacy_memory_file_of_filename filename =
+  List.find_opt
+    (fun legacy_file -> String.equal filename (legacy_memory_filename legacy_file))
+    supported_legacy_memory_files
+;;
+
 let current_path_for_legacy_memory_filename ~keepers_dir ~keeper_id ~filename =
-  if String.equal filename "facts.jsonl"
-  then Some (facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
-  else if String.equal filename "events.jsonl"
-  then Some (events_path_for_keepers_dir ~keepers_dir ~keeper_id)
-  else None
+  match legacy_memory_file_of_filename filename with
+  | Some Legacy_facts -> Some (facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
+  | Some Legacy_events -> Some (events_path_for_keepers_dir ~keepers_dir ~keeper_id)
+  | None -> None
 ;;
 
 let events_path ~keeper_id =

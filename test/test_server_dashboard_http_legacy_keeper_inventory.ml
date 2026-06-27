@@ -147,23 +147,12 @@ let test_classifies_legacy_paths_and_dry_run_candidates () =
     (bool_field "requires_operator_approval" plan);
   Alcotest.(check string)
     "candidate policy"
-    "disabled_until_owner_verified"
+    "not_available_until_owner_verified"
     (string_field "candidate_policy" plan);
-  let candidate_classes = list_field "candidate_classes" plan in
-  Alcotest.(check int)
-    "cleanup candidate classes"
-    2
-    (List.length candidate_classes);
-  Alcotest.(check bool)
-    "orphaned cleanup class exposed"
-    true
-    (List.mem (`String "orphaned") candidate_classes);
-  Alcotest.(check bool)
-    "backup cleanup class exposed"
-    true
-    (List.mem (`String "backup") candidate_classes);
-  Alcotest.(check int) "cleanup candidates" 0 (int_field "candidate_count" plan);
-  Alcotest.(check int) "cleanup candidate list" 0 (List.length (list_field "candidates" plan))
+  Alcotest.(check string)
+    "candidate source"
+    "inventory_only"
+    (string_field "candidate_source" plan)
 ;;
 
 let test_scan_cap_marks_truncation () =

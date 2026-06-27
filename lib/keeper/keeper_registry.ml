@@ -340,6 +340,8 @@ let spawn_slots_available () =
 ;;
 
 module For_testing = struct
+  let unsafe_put_entry = unsafe_put_entry
+
   let spawn_slots_decision ?fd_admitted () =
     spawn_slots_decision_internal ?fd_admitted ()
   ;;

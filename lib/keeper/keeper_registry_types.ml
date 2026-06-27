@@ -146,6 +146,15 @@ type done_resolve_result =
       ; previous : done_resolution
       }
 
+type registry_entry_health =
+  | Healthy
+  | Meta_validation_failed of { reason : string }
+  | Required_field_missing of { field : string }
+  | Base_path_mismatch of { expected : string; actual : string }
+  | Name_mismatch of { expected : string; actual : string }
+
+type registry_entry_validation_error = registry_entry_health
+
 let resolve_done entry ~source (value : done_resolution) =
   match Eio.Promise.peek entry.done_p with
   | Some previous -> Done_already_resolved { source; previous }

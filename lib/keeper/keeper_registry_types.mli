@@ -549,6 +549,21 @@ type done_resolve_result =
       previous : done_resolution;
     }
 
+(** Structured health verdict for a registry entry.  Used both as the public
+    [health_of_entry] / [get_with_health] result and as the validation-error
+    type returned by [validate_registry_entry] and the CAS write helpers. *)
+type registry_entry_health =
+  | Healthy
+  | Meta_validation_failed of { reason : string }
+  | Required_field_missing of { field : string }
+  | Base_path_mismatch of { expected : string; actual : string }
+  | Name_mismatch of { expected : string; actual : string }
+
+(** Alias kept so the CAS write helpers can return
+    [(unit, registry_entry_validation_error) result] without duplicating the
+    health variant. *)
+type registry_entry_validation_error = registry_entry_health
+
 (** Resolve a keeper run completion promise at most once.
 
     [source] identifies the lifecycle branch attempting the resolve. The

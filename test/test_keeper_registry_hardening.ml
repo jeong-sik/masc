@@ -1,0 +1,180 @@
+(** P0 keeper registry hardening tests.
+
+    Verify typed validation errors on put/update, health-aware get, and the
+    tool-dispatch fallback path that uses the original meta when the registry
+    entry is corrupted. *)
+
+open Alcotest
+
+module KR = Masc.Keeper_registry
+module KET = Masc.Keeper_tool_dispatch_runtime
+
+let base_path = "/tmp/test_keeper_registry_hardening"
+
+let make_meta ?(tool_access = []) name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [
+          ("name", `String name);
+          ("agent_name", `String ("agent-" ^ name));
+          ("trace_id", `String ("trace-" ^ name));
+          ("goal", `String "test keeper");
+          ("allowed_paths", `List [ `String "*" ]);
+          ("tool_access", Json_util.json_string_list tool_access);
+          ("autoboot_enabled", `Bool false);
+        ])
+  with
+  | Ok m -> m
+  | Error e -> failwith ("make_meta failed: " ^ e)
+;;
+
+let register name =
+  let meta = make_meta name in
+  KR.register ~base_path meta.name meta
+;;
+
+let health_to_string = KR.registry_entry_validation_error_to_string
+
+let test_put_entry_rejects_meta_name_mismatch () =
+  KR.clear ();
+  let entry = register "alice" in
+  let corrupted = { entry with meta = { entry.meta with name = "bob" } } in
+  match KR.put_entry ~base_path "alice" corrupted with
+  | Ok () -> fail "put_entry accepted a meta.name mismatch"
+  | Error (KR.Name_mismatch { expected; actual }) ->
+    check string "expected name" "alice" expected;
+    check string "actual name" "bob" actual
+  | Error other -> fail ("unexpected validation error: " ^ health_to_string other)
+;;
+
+let test_update_entry_rejects_corrupted_result () =
+  KR.clear ();
+  let entry = register "alice" in
+  let original_base_path = entry.base_path in
+  (match
+     KR.update_entry ~base_path "alice" (fun e -> { e with base_path = "wrong" })
+   with
+   | Ok () -> fail "update_entry accepted a corrupted closure result"
+   | Error (KR.Base_path_mismatch _) -> ()
+   | Error other -> fail ("unexpected validation error: " ^ health_to_string other));
+  match KR.get ~base_path "alice" with
+  | None -> fail "original entry disappeared after rejected update"
+  | Some e -> check string "original base_path preserved" original_base_path e.base_path
+;;
+
+let test_get_filters_corrupted_entry () =
+  KR.clear ();
+  let entry = register "alice" in
+  let corrupted =
+    { entry with
+      meta =
+        { entry.meta with
+          runtime = { entry.meta.runtime with trace_id = "" }
+        }
+    }
+  in
+  KR.For_testing.unsafe_put_entry ~base_path "alice" corrupted;
+  (match KR.get ~base_path "alice" with
+   | None -> ()
+   | Some _ -> fail "get returned a corrupted entry");
+  match KR.get_with_health ~base_path "alice" with
+  | None -> fail "get_with_health returned None for an existing (corrupted) entry"
+  | Some (e, KR.Required_field_missing { field }) ->
+    check string "missing field" "trace_id" field;
+    check string "entry base_path" base_path e.base_path
+  | Some (_, other) -> fail ("unexpected health: " ^ health_to_string other)
+;;
+
+let temp_dir prefix =
+  let dir = Filename.temp_file prefix "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+;;
+
+let cleanup_dir path =
+  let rec rm target =
+    if Sys.file_exists target
+    then
+      if Sys.is_directory target
+      then (
+        Sys.readdir target |> Array.iter (fun name -> rm (Filename.concat target name));
+        Unix.rmdir target)
+      else Unix.unlink target
+  in
+  try rm path with _ -> ()
+;;
+
+let contains_substring text needle =
+  let text_len = String.length text in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    idx + needle_len <= text_len
+    && (String.sub text idx needle_len = needle || loop (idx + 1))
+  in
+  needle_len = 0 || loop 0
+;;
+
+let test_tool_dispatch_fallback_uses_original_meta () =
+  let dir = temp_dir "registry_fallback" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       let config = Masc.Workspace.default_config dir in
+       let meta = make_meta "fallback-keeper" in
+       let ctx_work = Masc.Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000 in
+       ignore (KR.register ~base_path:config.base_path meta.name meta);
+       Fun.protect
+         ~finally:(fun () -> KR.unregister ~base_path:config.base_path meta.name)
+         (fun () ->
+            (match KR.get_with_health ~base_path:config.base_path meta.name with
+             | None -> fail "registered entry not found"
+             | Some (entry, _) ->
+               let corrupted_meta =
+                 { entry.meta with
+                   name = "wrong-name"
+                 ; tool_denylist = [ "Read" ]
+                 }
+               in
+               let corrupted = { entry with meta = corrupted_meta } in
+               KR.For_testing.unsafe_put_entry ~base_path:config.base_path meta.name corrupted);
+            let result =
+              KET.execute_keeper_tool_call_with_outcome
+                ~config
+                ~meta
+                ~ctx_work
+                ~exec_cache:None
+                ~name:"Read"
+                ~input:(`Assoc [ ("file_path", `String "config/tool_policy.toml") ])
+                ()
+            in
+            check
+              bool
+              "fallback used original meta (Read not denied by corrupted registry entry)"
+              false
+              (contains_substring result.raw_output "\"error\":\"tool_not_allowed\"")))
+;;
+
+let () =
+  run
+    "keeper_registry_hardening"
+    [ ( "put_entry"
+      , [ test_case "rejects meta name mismatch" `Quick test_put_entry_rejects_meta_name_mismatch ]
+      )
+    ; ( "update_entry"
+      , [ test_case
+            "rejects corrupted closure result and preserves original"
+            `Quick
+            test_update_entry_rejects_corrupted_result
+        ] )
+    ; ( "get_with_health"
+      , [ test_case "get filters corrupted entry" `Quick test_get_filters_corrupted_entry ] )
+    ; ( "tool_dispatch_fallback"
+      , [ test_case "uses original meta on corrupted registry entry" `Quick
+            test_tool_dispatch_fallback_uses_original_meta
+        ] )
+    ]
+;;

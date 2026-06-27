@@ -16,8 +16,8 @@
 # Removal: an entry SHOULD be removed when the spawn site itself is removed,
 # never when a "we'll wrap it later" excuse appears.
 
-# lib/bounded_proc/bounded_proc.ml:35  — the canonical helper itself.
-lib/bounded_proc/bounded_proc.ml:35
+# lib/bounded_proc/bounded_proc.ml:37  — the canonical helper itself.
+lib/bounded_proc/bounded_proc.ml:37
 
 # lib/process/process_eio.ml:483, 521, 570 — `spawn_and_drain_{stdout,both}`
 # and `spawn_and_drain_both_streaming`.

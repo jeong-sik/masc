@@ -369,6 +369,9 @@ let resolve_for_base_path ~base_path =
 let keepers_dir_for_base_path ~base_path =
   (resolve_for_base_path ~base_path).keepers.path
 
+let keeper_runtime_store_of_dirname =
+  Common.keeper_runtime_store_of_dirname
+
 let personas_dir_opt () =
   let resolution = resolve () in
   match resolution.config_root.source with

@@ -54,6 +54,20 @@ val keepers_runtime_dir_of_base : base_path:string -> string
     (default cluster). Low-level SSOT that avoids the Workspace dependency cycle
     the cluster-aware [Workspace.keepers_runtime_dir] would impose. *)
 
+type keeper_runtime_store =
+  | Keeper_tool_usage
+  | Keeper_runtime_manifests
+  | Keeper_metrics
+  | Keeper_execution_receipts
+  | Keeper_turn_records
+  | Keeper_reaction_ledger
+  | Keeper_trajectories
+(** Canonical child-store names under {!keepers_runtime_dirname}. *)
+
+val keeper_runtime_store_dirname : keeper_runtime_store -> string
+val keeper_runtime_store_of_dirname : string -> keeper_runtime_store option
+val keeper_runtime_store_dirnames : string list
+
 val auth_dir_from_base_path : base_path:string -> string
 (** [<base_path>/.masc/auth]. SSOT path so {!Auth} and
     {!Keeper_identity} can both compute it without depending on each

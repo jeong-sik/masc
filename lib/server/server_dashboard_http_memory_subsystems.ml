@@ -207,6 +207,209 @@ let compute_hebbian ~base_path ~now () =
     `Assoc [ "synapses", `List []; "last_consolidation", `Float 0.0 ]
 ;;
 
+let memory_quality_recent_limit = 500
+let memory_quality_top_key_limit = 10
+
+type recall_quality_record =
+  { injected_fact_keys : string list
+  ; injected_episode_keys : string list
+  ; failure_reason : string option
+  }
+
+let json_string_field fields key =
+  match List.assoc_opt key fields with
+  | Some (`String value) -> Some value
+  | _ -> None
+;;
+
+let json_string_list_field fields key =
+  match List.assoc_opt key fields with
+  | Some (`List items) ->
+    List.filter_map (function
+      | `String value -> Some value
+      | _ -> None)
+      items
+  | _ -> []
+;;
+
+let recall_quality_record_of_json = function
+  | `Assoc fields ->
+    (match json_string_field fields "keeper_id" with
+     | None -> None
+     | Some _keeper_id ->
+       Some
+         { injected_fact_keys = json_string_list_field fields "injected_fact_keys"
+         ; injected_episode_keys = json_string_list_field fields "injected_episode_keys"
+         ; failure_reason = json_string_field fields "failure_reason"
+         })
+  | _ -> None
+;;
+
+let memory_quality_error_label = function
+  | Sys_error _ -> "sys_error"
+  | Unix.Unix_error _ -> "unix_error"
+  | Yojson.Json_error _ -> "json_error"
+  | _ -> "unexpected_exception"
+;;
+
+let load_recall_quality_records ~(config : Workspace_utils.config) =
+  try
+    let masc_root = Workspace_utils.masc_dir config in
+    let store =
+      Dated_jsonl.create
+        ~base_dir:(Keeper_recall_injection_ledger.base_dir ~masc_root)
+        ()
+    in
+    Ok
+      (Dated_jsonl.read_recent store memory_quality_recent_limit
+       |> List.filter_map recall_quality_record_of_json)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (memory_quality_error_label exn)
+;;
+
+let increment_count tbl key =
+  let next =
+    match Hashtbl.find_opt tbl key with
+    | Some count -> count + 1
+    | None -> 1
+  in
+  Hashtbl.replace tbl key next
+;;
+
+let sorted_counts tbl =
+  Hashtbl.fold (fun key count acc -> (key, count) :: acc) tbl []
+  |> List.sort (fun (key_a, count_a) (key_b, count_b) ->
+    let count_order = compare count_b count_a in
+    if count_order <> 0 then count_order else String.compare key_a key_b)
+;;
+
+let count_rows_by ?(limit = max_int) pairs =
+  pairs
+  |> List.filteri (fun i _ -> i < limit)
+  |> List.map (fun (key, count) ->
+    `Assoc [ "key", `String key; "count", `Int count ])
+;;
+
+let legacy_unstructured_fallback_key_prefix =
+  "claim:"
+  ^ Keeper_memory_os_types.normalize_claim
+      Keeper_memory_os_types.librarian_unstructured_fallback_claim_prefix
+;;
+
+(* Dashboard-only compatibility metric for legacy pre-[Diagnostic] fallback
+   rows. Prompt recall and retention decisions use typed fact fields upstream;
+   this counts old injected fact keys after they have already reached the
+   read-only recall ledger. *)
+let is_legacy_unstructured_fallback_key key =
+  String.starts_with ~prefix:legacy_unstructured_fallback_key_prefix key
+;;
+
+let recall_quality_json records =
+  let fact_counts = Hashtbl.create 256 in
+  let failure_counts = Hashtbl.create 16 in
+  let total_fact_injections = ref 0 in
+  let diagnostic_fallback_key_injections = ref 0 in
+  List.iter
+    (fun record ->
+       Option.iter (increment_count failure_counts) record.failure_reason;
+       List.iter
+         (fun key ->
+            incr total_fact_injections;
+            if is_legacy_unstructured_fallback_key key
+            then incr diagnostic_fallback_key_injections;
+            increment_count fact_counts key)
+         record.injected_fact_keys)
+    records;
+  let fact_count_rows = sorted_counts fact_counts in
+  let echoed_fact_keys =
+    List.fold_left
+      (fun acc (_key, count) -> if count > 1 then acc + 1 else acc)
+      0
+      fact_count_rows
+  in
+  let max_fact_echo_count =
+    match fact_count_rows with
+    | (_key, count) :: _ -> count
+    | [] -> 0
+  in
+  let records_with_recall =
+    List.fold_left
+      (fun acc record ->
+         if record.injected_fact_keys <> [] || record.injected_episode_keys <> []
+         then acc + 1
+         else acc)
+      0
+      records
+  in
+  let failure_records =
+    List.fold_left
+      (fun acc record -> if Option.is_some record.failure_reason then acc + 1 else acc)
+      0
+      records
+  in
+  `Assoc
+    [ "schema", `String "masc.memory_quality.recall_ledger.v1"
+    ; "source", `String "recall_injections"
+    ; "sample_limit", `Int memory_quality_recent_limit
+    ; "sampled_records", `Int (List.length records)
+    ; "records_with_recall", `Int records_with_recall
+    ; "empty_recall_records", `Int (List.length records - records_with_recall)
+    ; "failure_records", `Int failure_records
+    ; "failure_reasons", `List (count_rows_by (sorted_counts failure_counts))
+    ; ( "fact_injections"
+      , `Assoc
+          [ "total", `Int !total_fact_injections
+          ; "unique_fact_keys", `Int (List.length fact_count_rows)
+          ; "echoed_fact_keys", `Int echoed_fact_keys
+          ; "max_fact_echo_count", `Int max_fact_echo_count
+          ; ( "diagnostic_fallback_key_injections"
+            , `Int !diagnostic_fallback_key_injections )
+          ; ( "top_echoed_fact_keys"
+            , `List
+                (count_rows_by
+                   ~limit:memory_quality_top_key_limit
+                   (List.filter (fun (_key, count) -> count > 1) fact_count_rows))
+            )
+          ] )
+    ; "outcome_joined", `Bool false
+    ; "useful_recalls", `Null
+    ; "stale_recalls", `Null
+    ; "loop_reductions", `Null
+    ; "error", `Null
+    ]
+;;
+
+let memory_quality_dashboard_json ~(config : Workspace_utils.config) =
+  match load_recall_quality_records ~config with
+  | Ok records -> recall_quality_json records
+  | Error label ->
+    `Assoc
+      [ "schema", `String "masc.memory_quality.recall_ledger.v1"
+      ; "source", `String "recall_injections"
+      ; "sample_limit", `Int memory_quality_recent_limit
+      ; "sampled_records", `Int 0
+      ; "records_with_recall", `Int 0
+      ; "empty_recall_records", `Int 0
+      ; "failure_records", `Int 0
+      ; "failure_reasons", `List []
+      ; ( "fact_injections"
+        , `Assoc
+            [ "total", `Int 0
+            ; "unique_fact_keys", `Int 0
+            ; "echoed_fact_keys", `Int 0
+            ; "max_fact_echo_count", `Int 0
+            ; "diagnostic_fallback_key_injections", `Int 0
+            ; "top_echoed_fact_keys", `List []
+            ] )
+      ; "outcome_joined", `Bool false
+      ; "useful_recalls", `Null
+      ; "stale_recalls", `Null
+      ; "loop_reductions", `Null
+      ; "error", `String label
+      ]
+;;
+
 let dashboard_memory_subsystems_http_json
       ~(config : Workspace_utils.config)
       ?include_memory_entries
@@ -455,6 +658,7 @@ let dashboard_memory_subsystems_http_json
   `Assoc
     [ "generated_at", `String (Masc_domain.now_iso ())
     ; "hebbian", hebbian
+    ; "memory_quality", memory_quality_dashboard_json ~config
     ; ( "episodes"
       , `Assoc
           [ "total", `Int total

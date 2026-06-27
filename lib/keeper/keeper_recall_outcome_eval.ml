@@ -103,40 +103,87 @@ let merge_load_stats a b =
 
 let jsonl_suffix = ".jsonl"
 
-let is_dir path = try Sys.is_directory path with Sys_error _ -> false
+type directory_status =
+  | Directory
+  | Not_directory
+  | Missing
+  | Directory_access_error of string
+
+let directory_status path =
+  try
+    match (Unix.lstat path).Unix.st_kind with
+    | Unix.S_DIR -> Directory
+    | _ -> Not_directory
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _)
+  | Unix.Unix_error (Unix.ENOTDIR, _, _) -> Missing
+  | Unix.Unix_error (err, _, _) -> Directory_access_error (Unix.error_message err)
+;;
+
+let load_stats_error ~operation path message =
+  { empty_load_stats with
+    read_error_count = 1
+  ; errors = [ Printf.sprintf "%s: %s failed: %s" path operation message ]
+  }
+;;
+
+let sorted_readdir path =
+  try Ok (Sys.readdir path |> Array.to_list |> List.sort String.compare) with
+  | Sys_error msg -> Error msg
+;;
 
 let rec find_jsonl dir =
-  if Sys.file_exists dir && is_dir dir
-  then
-    Sys.readdir dir
-    |> Array.to_list
-    |> List.sort String.compare
-    |> List.concat_map (fun name ->
-      let path = Filename.concat dir name in
-      if is_dir path
-      then find_jsonl path
-      else if Filename.check_suffix path jsonl_suffix
-      then [ path ]
-      else [])
-  else []
+  match directory_status dir with
+  | Missing | Not_directory -> [], empty_load_stats
+  | Directory_access_error message -> [], load_stats_error ~operation:"lstat" dir message
+  | Directory ->
+    (match sorted_readdir dir with
+     | Error message -> [], load_stats_error ~operation:"readdir" dir message
+     | Ok names ->
+       List.fold_left
+         (fun (files, stats) name ->
+            let path = Filename.concat dir name in
+            match directory_status path with
+            | Directory ->
+              let child_files, child_stats = find_jsonl path in
+              files @ child_files, merge_load_stats stats child_stats
+            | Not_directory ->
+              if Filename.check_suffix path jsonl_suffix
+              then files @ [ path ], stats
+              else files, stats
+            | Missing -> files, stats
+            | Directory_access_error message ->
+              files, merge_load_stats stats (load_stats_error ~operation:"lstat" path message))
+         ([], empty_load_stats)
+         names)
 ;;
 
 let find_receipt_jsonl keepers_dir =
-  if Sys.file_exists keepers_dir && is_dir keepers_dir
-  then
-    Sys.readdir keepers_dir
-    |> Array.to_list
-    |> List.sort String.compare
-    |> List.concat_map (fun keeper_name ->
-      let keeper_dir = Filename.concat keepers_dir keeper_name in
-      if is_dir keeper_dir
-      then
-        find_jsonl
-          (Filename.concat
-             keeper_dir
-             Keeper_types_support.execution_receipts_dirname)
-      else [])
-  else []
+  match directory_status keepers_dir with
+  | Missing | Not_directory -> [], empty_load_stats
+  | Directory_access_error message ->
+    [], load_stats_error ~operation:"lstat" keepers_dir message
+  | Directory ->
+    (match sorted_readdir keepers_dir with
+     | Error message -> [], load_stats_error ~operation:"readdir" keepers_dir message
+     | Ok names ->
+       List.fold_left
+         (fun (files, stats) keeper_name ->
+            let keeper_dir = Filename.concat keepers_dir keeper_name in
+            match directory_status keeper_dir with
+            | Directory ->
+              let receipt_files, receipt_stats =
+                find_jsonl
+                  (Filename.concat
+                     keeper_dir
+                     Keeper_types_support.execution_receipts_dirname)
+              in
+              files @ receipt_files, merge_load_stats stats receipt_stats
+            | Not_directory | Missing -> files, stats
+            | Directory_access_error message ->
+              files, merge_load_stats stats (load_stats_error ~operation:"lstat" keeper_dir message))
+         ([], empty_load_stats)
+         names)
 ;;
 
 let read_lines path =
@@ -280,7 +327,11 @@ let load_records_from_files files parse =
   List.rev records, stats
 ;;
 
-let load_records dir parse = load_records_from_files (find_jsonl dir) parse
+let load_records dir parse =
+  let files, scan_stats = find_jsonl dir in
+  let records, load_stats = load_records_from_files files parse in
+  records, merge_load_stats scan_stats load_stats
+;;
 
 let newer_receipt candidate existing =
   match candidate.ended_at_unix, existing.ended_at_unix with
@@ -360,6 +411,17 @@ let trace_row_of_group
       if by_turn <> 0 then by_turn else String.compare a.keeper_id b.keeper_id
   in
   let records = List.sort compare_record records in
+  let latest_record =
+    match records with
+    | [] -> None
+    | first :: rest ->
+      Some
+        (List.fold_left
+           (fun latest record ->
+              if compare_record latest record <= 0 then record else latest)
+           first
+           rest)
+  in
   let receipt = String_map.find_opt trace_id receipts in
   let outcome_bucket = outcome_bucket_of_receipt receipt in
   let fact_keys =
@@ -369,9 +431,9 @@ let trace_row_of_group
   in
   { trace_id
   ; keeper_id =
-      (match List.rev records with
-       | r :: _ -> Some r.keeper_id
-       | [] -> None)
+      (match latest_record with
+       | Some record -> Some record.keeper_id
+       | None -> None)
   ; recall_records = List.length records
   ; fact_keys
   ; injected_fact_keys =
@@ -491,7 +553,9 @@ let evaluate ~masc_root =
   let receipts_dir = Filename.concat masc_root Common.keepers_runtime_dirname in
   let recall_records, recall_stats = load_records recall_dir parse_recall_json in
   let receipts, receipt_stats =
-    load_records_from_files (find_receipt_jsonl receipts_dir) parse_receipt_json
+    let files, scan_stats = find_receipt_jsonl receipts_dir in
+    let records, load_stats = load_records_from_files files parse_receipt_json in
+    records, merge_load_stats scan_stats load_stats
   in
   let receipts_by_trace = receipt_map receipts in
   let traces =
@@ -653,8 +717,8 @@ let render_trace row =
   in
   let terminal =
     match row.receipt with
-    | Some receipt when receipt.terminal_reason_code <> "" -> receipt.terminal_reason_code
-    | Some _ | None -> "-"
+    | Some receipt -> receipt.terminal_reason_code
+    | None -> "-"
   in
   Printf.sprintf
     "%s\t%s\trecall=%d\tfacts=%d\tfailures=%d\ttask=%s\tterminal=%s\n"

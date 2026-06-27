@@ -86,8 +86,9 @@ type t =
 val evaluate : masc_root:string -> t
 (** Read [masc_root/recall_injections/**/*.jsonl] and
     [masc_root/keepers/*/execution-receipts/**/*.jsonl], joining on [trace_id].
-    Malformed/unreadable/invalid rows are excluded from aggregation and surfaced
-    through the load-diagnostic counters and [load_errors]. *)
+    Directory scan failures plus malformed/unreadable/invalid rows are excluded
+    from aggregation and surfaced through the load-diagnostic counters and
+    [load_errors]. *)
 
 val outcome_bucket_to_string : outcome_bucket -> string
 val to_json : ?trace_limit:int -> ?fact_key_limit:int -> t -> Yojson.Safe.t

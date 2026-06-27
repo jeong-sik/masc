@@ -3,6 +3,11 @@
 (** Coarse categorisation of [Agent_sdk.Error.sdk_error] (for dashboards). *)
 val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
 
+(** Typed receipt error-kind counterpart of {!sdk_error_kind}. *)
+val sdk_error_kind_for_receipt
+  :  Agent_sdk.Error.sdk_error
+  -> Keeper_execution_receipt.error_kind
+
 (** User-facing SDK error message for keeper chat/tool surfaces.
     Keeps low-level SDK prefixes out of persisted keeper replies while
     telemetry and terminal reason codes continue to use structured errors. *)

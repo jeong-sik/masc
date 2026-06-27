@@ -97,7 +97,7 @@ let finalize
     match turn_result with
     | Ok _ -> None, None
     | Error err ->
-      ( Some (Keeper_execution_receipt.error_kind_of_string (Keeper_agent_error.sdk_error_kind err))
+      ( Some (Keeper_agent_error.sdk_error_kind_for_receipt err)
       , Some (Agent_sdk.Error.to_string err) )
   in
   let completion_contract_result

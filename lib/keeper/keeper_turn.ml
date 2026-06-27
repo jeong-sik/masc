@@ -233,12 +233,12 @@ let next_direct_empty_no_progress_retry_decision
      with
      | Keeper_turn_runtime_budget.Degraded_retry_allowed retry
        when retry_reason_is_empty_no_progress retry ->
-	       Keeper_turn_runtime_budget.Degraded_retry_allowed retry
-	     | Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted retry
-	       when retry_reason_is_empty_no_progress retry ->
-	       Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted retry
-	     | _ -> Keeper_turn_runtime_budget.No_degraded_retry)
-	  | Some _ -> Keeper_turn_runtime_budget.No_degraded_retry
+       Keeper_turn_runtime_budget.Degraded_retry_allowed retry
+     | Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted retry
+       when retry_reason_is_empty_no_progress retry ->
+       Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted retry
+     | _ -> Keeper_turn_runtime_budget.No_degraded_retry)
+  | _ -> Keeper_turn_runtime_budget.No_degraded_retry
 
 let run_direct_empty_no_progress_retry_loop
       ~keeper_name
@@ -349,28 +349,19 @@ let run_direct_empty_no_progress_retry_loop
            (timeout_sec -. remaining_turn_budget_s ());
          error
        | Keeper_turn_runtime_budget.Degraded_retry_allowed retry ->
-         let retry =
-           if String.trim retry.next_runtime = "" then
-             { retry with next_runtime = runtime_id }
-           else retry
-         in
-         let reason =
-           Keeper_error_classify.degraded_retry_reason_to_string
-             retry.fallback_reason
-         in
-         publish_cascade_resolution
-           ~runtime_id
-           ~decision:Keeper_unified_turn_cascade_resolution.Degraded_retry_allowed
-           ~reason
-           ~next_runtime:(Some retry.next_runtime)
-           ~attempt
-           err;
-         emit_runtime_selected ~runtime_id:retry.next_runtime
-           ~fallback_reason:reason;
-         emit_runtime_rotation ~from_runtime:runtime_id
-           ~to_runtime:retry.next_runtime ~reason;
-         (match validate_retry_runtime retry.next_runtime with
-          | Error fail_open_err ->
+         (match
+            Keeper_turn_runtime_budget.prepare_degraded_retry_allowed
+              ~current_runtime_id:runtime_id
+              ~attempt
+              ~err
+              ~retry
+              ~publish_cascade_resolution
+              ~emit_runtime_selected
+              ~emit_runtime_rotation
+              ~setup_runtime:validate_retry_runtime
+          with
+          | Keeper_turn_runtime_budget.Degraded_retry_setup_failed
+              { retry; fail_open_err; _ } ->
             let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
               current_turn_phase_elapsed_ms retry_phase_started_at
             in
@@ -390,7 +381,8 @@ let run_direct_empty_no_progress_retry_loop
               ~rotation_attempt
               ~fail_open_err;
             Error fail_open_err
-          | Ok () ->
+          | Keeper_turn_runtime_budget.Degraded_retry_prepared
+              { retry; reason; next = () } ->
             let retry_phase_started_at =
               match retry_phase_started_at with
               | Some _ -> retry_phase_started_at
@@ -1026,8 +1018,17 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
             in
             (* RFC-0225 §3.3: per-run carrier for the chat lane. *)
 	            let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
+	            let direct_prompt_for_estimate =
+	              build_turn_prompt ~base_system_prompt:"" ~messages:[]
+	            in
+	            let direct_prompt_metrics =
+	              Keeper_agent_run.build_prompt_metrics
+	                ~system_prompt:direct_prompt_for_estimate.system_prompt
+	                ~dynamic_context:direct_prompt_for_estimate.dynamic_context
+	                ~user_message:message
+	            in
 	            let direct_prompt_estimated_input_tokens =
-	              max 1 (Agent_sdk.Context_reducer.estimate_char_tokens message)
+	              max 1 direct_prompt_metrics.estimated_total_tokens
 	            in
 	            let run_result, latency_ms =
 	              Keeper_context_runtime.timed (fun () ->
@@ -1171,10 +1172,9 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
 		                                     (Agent_sdk.Error.to_string
 		                                        fail_open_err))
 		                                ~error_kind:
-		                                  (Keeper_execution_receipt
-		                                   .error_kind_of_string
-		                                     (Keeper_agent_error.sdk_error_kind
-		                                        fail_open_err))
+		                                  (Keeper_agent_error
+		                                   .sdk_error_kind_for_receipt
+		                                     fail_open_err)
 		                                ~error_message:
 		                                  (Agent_sdk.Error.to_string fail_open_err)
 		                                ~degraded_retry_runtime:retry.next_runtime

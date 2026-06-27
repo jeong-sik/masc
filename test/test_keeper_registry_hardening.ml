@@ -71,7 +71,7 @@ let test_get_filters_corrupted_entry () =
     { entry with
       meta =
         { entry.meta with
-          runtime = { entry.meta.runtime with trace_id = invalid_trace_id }
+          runtime = { entry.meta.runtime with generation = -1 }
         }
     }
   in
@@ -82,7 +82,7 @@ let test_get_filters_corrupted_entry () =
   match KR.get_with_health ~base_path "alice" with
   | None -> fail "get_with_health returned None for an existing (corrupted) entry"
   | Some (e, KR.Required_field_missing { field }) ->
-    check string "missing field" "trace_id" field;
+    check string "missing field" "generation" field;
     check string "entry base_path" base_path e.base_path
   | Some (_, other) -> fail ("unexpected health: " ^ health_to_string other)
 ;;

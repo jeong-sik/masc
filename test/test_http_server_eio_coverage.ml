@@ -66,8 +66,7 @@ let test_compress_zstd_small_data () =
 ;;
 
 let test_compress_zstd_threshold () =
-  (* Data exactly at 256 bytes threshold *)
-  let data = String.make 256 'a' in
+  let data = String.make Compression_codec.legacy_min_size 'a' in
   let _, compressed = Compression.compress_zstd data in
   (* Repetitive data compresses well *)
   check bool "threshold data compressed" true compressed
@@ -99,8 +98,7 @@ let test_compress_zstd_empty () =
 ;;
 
 let test_compress_zstd_below_threshold () =
-  (* Data just below threshold (255 bytes) *)
-  let data = String.make 255 'b' in
+  let data = String.make (Compression_codec.legacy_min_size - 1) 'b' in
   let result, compressed = Compression.compress_zstd data in
   check bool "below threshold not compressed" false compressed;
   check string "unchanged" data result
@@ -116,12 +114,13 @@ let test_compress_zstd_level () =
 ;;
 
 let test_compress_zstd_dictionary_result_returns_original () =
-  let original = String.make Masc.Compression_codec.legacy_min_size 'd' in
+  let original = String.make Compression_codec.legacy_min_size 'd' in
   let dictionary_payload = "dictionary-compressed-bytes" in
   let result, compressed =
-    Compression.compress_zstd_result ~original
-      (Masc.Compression_codec.Compressed
-         { payload = dictionary_payload; encoding = Masc.Compression_codec.Dictionary })
+    Compression_codec.legacy_standard_result
+      ~original
+      (Compression_codec.Compressed
+         { payload = dictionary_payload; encoding = Compression_codec.Dictionary })
   in
   check bool "dictionary not advertised as zstd" false compressed;
   check string "dictionary payload not leaked" original result

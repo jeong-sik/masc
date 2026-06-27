@@ -68,19 +68,12 @@ module Compression = struct
       payload was unchanged, because compression failed and returned
       [Unchanged], or because a dictionary-compressed result cannot be served
       through this legacy standard-zstd path. *)
-  let compress_zstd_result ~original = function
-    | Compression_codec.Unchanged payload -> payload, false
-    | Compression_codec.Compressed { payload; encoding = Standard } ->
-      payload, true
-    | Compression_codec.Compressed { encoding = Dictionary; _ } ->
-      original, false
-
   let compress_zstd ?(level = 3) (data : string) : string * bool =
     if String.length data < Compression_codec.legacy_min_size
     then data, false
     else
       Compression_codec.compress ~level data
-      |> compress_zstd_result ~original:data
+      |> Compression_codec.legacy_standard_result ~original:data
 end
 
 (** Late-response failure classifier (#13059).

@@ -311,6 +311,36 @@ let test_operator_broadcast_emit_regression () =
        ~emit:(fun () -> failwith "operator duplicate should not call emit")
        ())
 
+let test_operator_broadcast_cancel_regression () =
+  Eio_main.run @@ fun _env ->
+  R.For_testing.reset_operator_broadcast_dedupe ();
+  let attempts = ref 0 in
+  (try
+     ignore
+       (emit_operator_for_testing
+          ~emit:(fun () ->
+            incr attempts;
+            raise (Eio.Cancel.Cancelled (Failure "synthetic cancel")))
+          ());
+     failwith "expected operator broadcast cancellation"
+   with
+   | Eio.Cancel.Cancelled _ -> ());
+  check_bool "cancelled operator emit was attempted" true (!attempts = 1);
+  check_bool
+    "same operator key retries after cancelled emit"
+    true
+    (emit_operator_for_testing
+       ~emit:(fun () ->
+         incr attempts)
+       ());
+  check_bool "successful operator retry after cancel was attempted" true (!attempts = 2);
+  check_bool
+    "same operator key suppresses after cancel retry succeeds"
+    false
+    (emit_operator_for_testing
+       ~emit:(fun () -> failwith "operator duplicate should not call emit")
+       ())
+
 let () =
   test_ok_done ();
   test_skipped_done ();
@@ -327,4 +357,5 @@ let () =
   test_stale_watchdog_emit_regression ();
   test_operator_broadcast_dedupe ();
   test_operator_broadcast_emit_regression ();
+  test_operator_broadcast_cancel_regression ();
   print_endline "test_keeper_receipt_authoritative: OK"

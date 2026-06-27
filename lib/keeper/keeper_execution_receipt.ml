@@ -578,7 +578,12 @@ let needs_operator_broadcast = function
 module Broadcast_dedupe = struct
   (* Tracks only the last successfully emitted key. A->B->A re-emits by
      design so changed failure identities are not hidden; #22391 owns the
-     durable state-backed idempotence model. *)
+     durable state-backed idempotence model.
+
+     [pending_keys] stays as a list because current call sites are low-volume
+     watchdog/operator broadcast paths with one in-flight emit per distinct
+     keeper key. Keep membership/removal protected and revisit the structure if
+     this helper is reused for high-cardinality streams. *)
   type 'key keeper_slot =
     { mu : Eio.Mutex.t
     ; mutable last_key : 'key option
@@ -595,8 +600,13 @@ module Broadcast_dedupe = struct
     | Emitted of 'event
     | Duplicate
 
+  let initial_keeper_capacity = 16
+
   let create ~equal () =
-    { registry_mu = Eio.Mutex.create (); by_keeper = Hashtbl.create 16; equal }
+    { registry_mu = Eio.Mutex.create ()
+    ; by_keeper = Hashtbl.create initial_keeper_capacity
+    ; equal
+    }
   ;;
 
   let slot t ~keeper_name =
@@ -624,23 +634,26 @@ module Broadcast_dedupe = struct
   ;;
 
   let reserve_emit t slot key =
-    Eio.Mutex.use_rw ~protect:true slot.mu (fun () ->
-      if key_seen t slot.last_key key || key_pending t slot.pending_keys key
-      then false
-      else (
-        slot.pending_keys <- key :: slot.pending_keys;
-        true))
+    Eio.Cancel.protect (fun () ->
+      Eio.Mutex.use_rw ~protect:true slot.mu (fun () ->
+        if key_seen t slot.last_key key || key_pending t slot.pending_keys key
+        then false
+        else (
+          slot.pending_keys <- key :: slot.pending_keys;
+          true)))
   ;;
 
   let commit_emit t slot key =
-    Eio.Mutex.use_rw ~protect:true slot.mu (fun () ->
-      slot.pending_keys <- remove_pending_key t key slot.pending_keys;
-      slot.last_key <- Some key)
+    Eio.Cancel.protect (fun () ->
+      Eio.Mutex.use_rw ~protect:true slot.mu (fun () ->
+        slot.pending_keys <- remove_pending_key t key slot.pending_keys;
+        slot.last_key <- Some key))
   ;;
 
   let cancel_emit t slot key =
-    Eio.Mutex.use_rw ~protect:true slot.mu (fun () ->
-      slot.pending_keys <- remove_pending_key t key slot.pending_keys)
+    Eio.Cancel.protect (fun () ->
+      Eio.Mutex.use_rw ~protect:true slot.mu (fun () ->
+        slot.pending_keys <- remove_pending_key t key slot.pending_keys))
   ;;
 
   let emit_once t ~keeper_name ~key ~emit =
@@ -658,6 +671,8 @@ module Broadcast_dedupe = struct
   ;;
 
   let reset t =
+    (* Testing seam only: callers must quiesce in-flight [emit_once] fibers
+       before resetting, otherwise a detached slot may still commit/cancel. *)
     Eio.Mutex.use_rw ~protect:true t.registry_mu (fun () ->
       Hashtbl.reset t.by_keeper)
   ;;
@@ -675,26 +690,61 @@ type operator_broadcast_dedupe_key =
   ; operator_terminal_reason_code : string
   }
 
-let operator_broadcast_dedupe =
-  Broadcast_dedupe.create ~equal:( = ) ()
-;;
-
 let operator_broadcast_turn_key = function
   | Some value -> string_of_int value
   | None -> "-"
 ;;
 
-let operator_broadcast_dedupe_key receipt ~disposition ~reason =
-  { operator_keeper_name = receipt.keeper_name
-  ; operator_agent_name = receipt.agent_name
-  ; operator_trace_id = receipt.trace_id
-  ; operator_generation = receipt.generation
-  ; operator_turn_count = receipt.turn_count
-  ; operator_current_task_id = receipt.current_task_id
+let operator_broadcast_dedupe_key_of_fields
+      ~keeper_name
+      ~agent_name
+      ~trace_id
+      ~generation
+      ~turn_count
+      ~current_task_id
+      ~disposition
+      ~reason
+      ~terminal_reason_code
+  =
+  { operator_keeper_name = keeper_name
+  ; operator_agent_name = agent_name
+  ; operator_trace_id = trace_id
+  ; operator_generation = generation
+  ; operator_turn_count = turn_count
+  ; operator_current_task_id = current_task_id
   ; operator_disposition = disposition
   ; operator_reason = reason
-  ; operator_terminal_reason_code = receipt.terminal_reason_code
+  ; operator_terminal_reason_code = terminal_reason_code
   }
+;;
+
+let operator_broadcast_dedupe_key receipt ~disposition ~reason =
+  operator_broadcast_dedupe_key_of_fields
+    ~keeper_name:receipt.keeper_name
+    ~agent_name:receipt.agent_name
+    ~trace_id:receipt.trace_id
+    ~generation:receipt.generation
+    ~turn_count:receipt.turn_count
+    ~current_task_id:receipt.current_task_id
+    ~disposition
+    ~reason
+    ~terminal_reason_code:receipt.terminal_reason_code
+;;
+
+let equal_operator_broadcast_dedupe_key a b =
+  String.equal a.operator_keeper_name b.operator_keeper_name
+  && String.equal a.operator_agent_name b.operator_agent_name
+  && String.equal a.operator_trace_id b.operator_trace_id
+  && Int.equal a.operator_generation b.operator_generation
+  && Option.equal Int.equal a.operator_turn_count b.operator_turn_count
+  && Option.equal String.equal a.operator_current_task_id b.operator_current_task_id
+  && a.operator_disposition = b.operator_disposition
+  && a.operator_reason = b.operator_reason
+  && String.equal a.operator_terminal_reason_code b.operator_terminal_reason_code
+;;
+
+let operator_broadcast_dedupe =
+  Broadcast_dedupe.create ~equal:equal_operator_broadcast_dedupe_key ()
 ;;
 
 let operator_broadcast_payload (receipt : t) ~disposition ~reason =
@@ -910,10 +960,6 @@ type stale_broadcast_dedupe_key =
   ; stale_turn_bucket_key : string
   }
 
-let stale_broadcast_dedupe =
-  Broadcast_dedupe.create ~equal:( = ) ()
-;;
-
 let stale_broadcast_dedupe_key
       ~keeper_name
       ~agent_name
@@ -937,6 +983,22 @@ let stale_broadcast_dedupe_key
   ; stale_kill_class = stale_broadcast_kill_class failure_reason
   ; stale_turn_bucket_key = stale_turn_bucket stale_seconds
   }
+;;
+
+let equal_stale_broadcast_dedupe_key a b =
+  String.equal a.stale_keeper_name b.stale_keeper_name
+  && String.equal a.stale_agent_name b.stale_agent_name
+  && String.equal a.stale_runtime_id b.stale_runtime_id
+  && String.equal a.stale_trace_id b.stale_trace_id
+  && Int.equal a.stale_generation b.stale_generation
+  && String.equal a.stale_failure_reason_cohort b.stale_failure_reason_cohort
+  && String.equal a.stale_terminal_reason_code b.stale_terminal_reason_code
+  && Option.equal String.equal a.stale_kill_class b.stale_kill_class
+  && String.equal a.stale_turn_bucket_key b.stale_turn_bucket_key
+;;
+
+let stale_broadcast_dedupe =
+  Broadcast_dedupe.create ~equal:equal_stale_broadcast_dedupe_key ()
 ;;
 
 let stale_broadcast_payload
@@ -1008,51 +1070,57 @@ let emit_stale_keeper_broadcast
       ~last_turn_ts
       ~failure_reason
   in
-  try
-    match
-      Broadcast_dedupe.emit_once
-        stale_broadcast_dedupe
-        ~keeper_name
-        ~key
-        ~emit:(fun () ->
-          Activity_graph.emit
-            config
-            ~actor:{ Activity_graph.kind = "watchdog"; id = keeper_name }
-            ~kind:"keeper.operator_broadcast_required"
-            ~payload
-            ())
+  let emit_result =
+    try
+      Ok
+        (Broadcast_dedupe.emit_once
+           stale_broadcast_dedupe
+           ~keeper_name
+           ~key
+           ~emit:(fun () ->
+             Activity_graph.emit
+               config
+               ~actor:{ Activity_graph.kind = "watchdog"; id = keeper_name }
+               ~kind:"keeper.operator_broadcast_required"
+               ~payload
+               ()))
     with
-    | Broadcast_dedupe.Emitted event ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string ExecutionReceiptFailures)
-        ~labels:[ "keeper", keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Stale_broadcast) ]
-        ();
-      Log.Keeper.warn
-        ~keeper_name
-        "%s: stale_keeper_broadcast emitted last_turn=%.0fs ago runtime=%s seq=%d"
-        keeper_name
-        stale_seconds
-        runtime_id_string
-        event.seq
-    | Broadcast_dedupe.Duplicate ->
-      let reason = "stale_keeper_broadcast_duplicate" in
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string OperatorBroadcastSuppressed)
-        ~labels:[ "keeper", keeper_name; "reason", reason ]
-        ();
-      Log.Keeper.info
-        ~keeper_name
-        "%s: stale_keeper_broadcast suppressed duplicate bucket=%s runtime=%s"
-        keeper_name
-        (stale_turn_bucket stale_seconds)
-        runtime_id_string
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn -> Error exn
+  in
+  match emit_result with
+  | Ok (Broadcast_dedupe.Emitted event) ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ExecutionReceiptFailures)
+      ~labels:[ "keeper", keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Stale_broadcast) ]
+      ();
+    Log.Keeper.warn
+      ~keeper_name
+      "%s: stale_keeper_broadcast emitted last_turn=%.0fs ago runtime=%s seq=%d"
+      keeper_name
+      stale_seconds
+      runtime_id_string
+      event.seq
+  | Ok Broadcast_dedupe.Duplicate ->
+    let reason = "stale_keeper_broadcast_duplicate" in
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string OperatorBroadcastSuppressed)
+      ~labels:[ "keeper", keeper_name; "reason", reason ]
+      ();
+    Log.Keeper.info
+      ~keeper_name
+      "%s: stale_keeper_broadcast suppressed duplicate bucket=%s runtime=%s"
+      keeper_name
+      (stale_turn_bucket stale_seconds)
+      runtime_id_string
+  | Error exn ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ExecutionReceiptFailures)
       ~labels:[ "keeper", keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Emit_failed) ]
       ();
+    (* Activity_graph.emit currently raises exceptions rather than returning a
+       typed error; Cancelled is re-raised above, and this string is operator
+       evidence for the graph emit boundary only. *)
     Log.Keeper.error
       ~keeper_name
       "%s: stale_keeper_broadcast EMIT FAILED bucket=%s runtime=%s exn=%s"
@@ -1095,16 +1163,16 @@ module For_testing = struct
         ()
     =
     let key =
-      { operator_keeper_name = keeper_name
-      ; operator_agent_name = agent_name
-      ; operator_trace_id = trace_id
-      ; operator_generation = generation
-      ; operator_turn_count = turn_count
-      ; operator_current_task_id = current_task_id
-      ; operator_disposition = disposition
-      ; operator_reason = reason
-      ; operator_terminal_reason_code = terminal_reason_code
-      }
+      operator_broadcast_dedupe_key_of_fields
+        ~keeper_name
+        ~agent_name
+        ~trace_id
+        ~generation
+        ~turn_count
+        ~current_task_id
+        ~disposition
+        ~reason
+        ~terminal_reason_code
     in
     match Broadcast_dedupe.emit_once operator_broadcast_dedupe ~keeper_name ~key ~emit with
     | Broadcast_dedupe.Emitted () -> true

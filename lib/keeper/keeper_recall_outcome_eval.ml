@@ -401,8 +401,8 @@ let trace_row_of_group
   =
   let compare_record (a : recall_record) (b : recall_record) =
     match a.ts, b.ts with
-    | Some a, Some b ->
-      let by_ts = Float.compare a b in
+    | Some a_ts, Some b_ts ->
+      let by_ts = Float.compare a_ts b_ts in
       if by_ts <> 0 then by_ts else compare a.turn b.turn
     | Some _, None -> 1
     | None, Some _ -> -1

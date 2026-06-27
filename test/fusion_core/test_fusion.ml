@@ -598,10 +598,10 @@ max_tool_calls_per_panel = 17
   match Fusion_config.of_toml (parse s) with
   | Error es ->
     Alcotest.(check bool) "Invalid_max_tool_calls present" true
-	      (List.exists
-	         (function Fusion_config.Invalid_max_tool_calls _ -> true | _ -> false)
-	         es)
-	  | Ok _ -> Alcotest.fail "expected Error Invalid_max_tool_calls"
+      (List.exists
+         (function Fusion_config.Invalid_max_tool_calls _ -> true | _ -> false)
+         es)
+  | Ok _ -> Alcotest.fail "expected Error Invalid_max_tool_calls"
 
 let test_config_invalid_max_output_tokens () =
   let s =
@@ -1319,13 +1319,13 @@ let () =
         ; Alcotest.test_case "bad_concurrency" `Quick test_config_bad_concurrency
         ; Alcotest.test_case "bad_judge_concurrency" `Quick
             test_config_bad_judge_concurrency
-	        ; Alcotest.test_case "bad_staged_judge_group_size" `Quick
-	            test_config_bad_staged_judge_group_size
-	        ; Alcotest.test_case "invalid_max_tool_calls" `Quick
-	            test_config_invalid_max_tool_calls
-	        ; Alcotest.test_case "invalid_max_output_tokens" `Quick
-	            test_config_invalid_max_output_tokens
-	        ; Alcotest.test_case "empty_default_preset" `Quick test_config_empty_default_preset
+        ; Alcotest.test_case "bad_staged_judge_group_size" `Quick
+            test_config_bad_staged_judge_group_size
+        ; Alcotest.test_case "invalid_max_tool_calls" `Quick
+            test_config_invalid_max_tool_calls
+        ; Alcotest.test_case "invalid_max_output_tokens" `Quick
+            test_config_invalid_max_output_tokens
+        ; Alcotest.test_case "empty_default_preset" `Quick test_config_empty_default_preset
         ; Alcotest.test_case "disabled_with_preset" `Quick test_config_disabled_with_preset
         ; Alcotest.test_case "judges_parse" `Quick test_config_judges_parse
         ; Alcotest.test_case "no_judges" `Quick test_config_no_judges
@@ -1333,21 +1333,21 @@ let () =
     ; ( "validated_preset"
       , [ Alcotest.test_case "ok" `Quick test_validated_ok
         ; Alcotest.test_case "bad_size" `Quick test_validated_bad_size
-	        ; Alcotest.test_case "missing_prompt" `Quick test_validated_missing_prompt
-	        ; Alcotest.test_case "missing_judge" `Quick test_validated_missing_judge
-	        ; Alcotest.test_case "duplicate_panelist" `Quick test_validated_duplicate_panelist
-	        ; Alcotest.test_case "bad_max_tool_calls" `Quick test_validated_bad_max_tool_calls
-	        ; Alcotest.test_case "bad_max_output_tokens" `Quick
-	            test_validated_bad_max_output_tokens
+        ; Alcotest.test_case "missing_prompt" `Quick test_validated_missing_prompt
+        ; Alcotest.test_case "missing_judge" `Quick test_validated_missing_judge
+        ; Alcotest.test_case "duplicate_panelist" `Quick test_validated_duplicate_panelist
+        ; Alcotest.test_case "bad_max_tool_calls" `Quick test_validated_bad_max_tool_calls
+        ; Alcotest.test_case "bad_max_output_tokens" `Quick
+            test_validated_bad_max_output_tokens
         ; Alcotest.test_case "judges_empty_ok" `Quick test_validated_judges_empty_ok
         ; Alcotest.test_case "judges_ok" `Quick test_validated_judges_ok
         ; Alcotest.test_case "judge_prompt_missing" `Quick test_validated_judge_prompt_missing
-	        ; Alcotest.test_case "duplicate_judge" `Quick test_validated_duplicate_judge
-	        ; Alcotest.test_case "judge_bad_max_tool_calls" `Quick
-	            test_validated_judge_bad_max_tool_calls
-	        ; Alcotest.test_case "judge_bad_max_output_tokens" `Quick
-	            test_validated_judge_bad_max_output_tokens
-	        ] )
+        ; Alcotest.test_case "duplicate_judge" `Quick test_validated_duplicate_judge
+        ; Alcotest.test_case "judge_bad_max_tool_calls" `Quick
+            test_validated_judge_bad_max_tool_calls
+        ; Alcotest.test_case "judge_bad_max_output_tokens" `Quick
+            test_validated_judge_bad_max_output_tokens
+        ] )
     ; ( "staged_judge_groups"
       , [ Alcotest.test_case "exact_3x3" `Quick test_staged_judge_groups_exact_3x3
         ; Alcotest.test_case "too_few" `Quick test_staged_judge_groups_too_few

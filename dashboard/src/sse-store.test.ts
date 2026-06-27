@@ -184,7 +184,7 @@ describe('setupSSEReaction reconnect hydration', () => {
   it('refreshes the governance approval queue on reconnect (nav-rail badge recovery)', async () => {
     const { sseStore, sse } = await loadSseStore()
     const cleanup = sseStore.setupSSEReaction()
-    const refreshGovernance = vi.fn<() => void>()
+    const refreshGovernance = vi.fn<(opts?: { force?: boolean }) => void>()
     sseStore.registerGovernanceRefresh(refreshGovernance)
 
     sse.connected.value = true
@@ -202,7 +202,7 @@ describe('setupSSEReaction reconnect hydration', () => {
 
   it('routes an approval:pending SSE event to the governance refresh (HITL badge contract)', async () => {
     const { sseStore } = await loadSseStore()
-    const refreshGovernance = vi.fn<() => void>()
+    const refreshGovernance = vi.fn<(opts?: { force?: boolean }) => void>()
     sseStore.registerGovernanceRefresh(refreshGovernance)
 
     // Pins the FRONTEND routing contract: an `approval:pending` event must
@@ -214,7 +214,7 @@ describe('setupSSEReaction reconnect hydration', () => {
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
 
-    expect(refreshGovernance).toHaveBeenCalled()
+    expect(refreshGovernance).toHaveBeenCalledWith({ force: true })
   })
 
   it('hydrates the canonical project_snapshot SSE event without an HTTP fetch', async () => {

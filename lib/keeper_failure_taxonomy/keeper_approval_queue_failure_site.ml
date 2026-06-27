@@ -7,6 +7,7 @@ type t =
   | Approval_expired
   | Expire_callback
   | Audit_read_recent
+  | Audit_list_recent_resolved
 
 let to_label = function
   | Upsert_rule_save -> "upsert_rule_save"
@@ -17,4 +18,5 @@ let to_label = function
   | Approval_expired -> "approval_expired"
   | Expire_callback -> "expire_callback"
   | Audit_read_recent -> "audit_read_recent"
+  | Audit_list_recent_resolved -> "audit_list_recent_resolved"
 ;;

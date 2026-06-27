@@ -128,7 +128,8 @@ let test_approval_queue_failure_metric_labels_site () =
       cleanup_dir audit_dir;
       let oc = open_out_bin audit_dir in
       close_out oc;
-      AQ.audit_approval_event ~base_path ~event_type:"pending"
+  AQ.audit_approval_event ~base_path
+    ~event_type:AQ.approval_audit_pending_event
         ~id:"audit-failure-path-test" ~keeper_name ~tool_name:"tool_search_files"
         ~risk_level:AQ.Medium ();
       let after =
@@ -1338,12 +1339,13 @@ let test_callback_always_approve_respects_forbidden () =
 let test_read_recent_audit_filters_after_wide_scan () =
   with_temp_masc_base @@ fun base_path ->
   let keeper_name = "audit-target-keeper" in
-  AQ.audit_approval_event ~base_path ~event_type:"resolved" ~id:"target-audit"
-    ~keeper_name ~tool_name:"tool_search_files" ~risk_level:AQ.Medium
+  AQ.audit_approval_event ~base_path
+    ~event_type:AQ.approval_audit_resolved_event ~id:"target-audit" ~keeper_name
+    ~tool_name:"tool_search_files" ~risk_level:AQ.Medium
     ~selected_model:"openai:gpt-5.4"
     ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ();
   for i = 1 to 32 do
-    AQ.audit_approval_event ~base_path ~event_type:"resolved"
+    AQ.audit_approval_event ~base_path ~event_type:AQ.approval_audit_resolved_event
       ~id:(Printf.sprintf "other-audit-%02d" i)
       ~keeper_name:(Printf.sprintf "busy-keeper-%02d" i)
       ~tool_name:"tool_search_files" ~risk_level:AQ.Medium
@@ -1359,6 +1361,53 @@ let test_read_recent_audit_filters_after_wide_scan () =
   | items ->
       Alcotest.fail
         (Printf.sprintf "expected one target audit, got %d" (List.length items))
+
+let test_list_recent_resolved_json_projects_resolved_history () =
+  with_temp_masc_base @@ fun base_path ->
+  let keeper_name = "resolved-history-target" in
+  AQ.audit_approval_event ~base_path
+    ~event_type:AQ.approval_audit_resolved_event ~id:"older-resolved"
+    ~keeper_name ~tool_name:"tool_search_files" ~risk_level:AQ.Medium
+    ~decision:(AQ.Approval_resolved (Agent_sdk.Hooks.Reject "operator denied")) ();
+  for i = 1 to 64 do
+    AQ.audit_approval_event ~base_path
+      ~event_type:AQ.approval_audit_pending_event
+      ~id:(Printf.sprintf "pending-noise-%02d" i)
+      ~keeper_name:(Printf.sprintf "busy-keeper-%02d" i)
+      ~tool_name:"tool_search_files" ~risk_level:AQ.Low ()
+  done;
+  AQ.audit_approval_event ~base_path
+    ~event_type:AQ.approval_audit_resolved_event ~id:"newer-resolved"
+    ~keeper_name ~tool_name:"tool_search_files" ~risk_level:AQ.Medium
+    ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ();
+  match AQ.list_recent_resolved_json ~base_path ~n:2 () with
+  | [ newest; older ] ->
+    let open Yojson.Safe.Util in
+    Alcotest.(check string) "newest first" "newer-resolved"
+      (newest |> member "id" |> to_string);
+    Alcotest.(check string) "older second" "older-resolved"
+      (older |> member "id" |> to_string);
+    Alcotest.(check string) "keeper name" keeper_name
+      (older |> member "keeper_name" |> to_string);
+    Alcotest.(check string) "tool name" "tool_search_files"
+      (older |> member "tool_name" |> to_string);
+    Alcotest.(check string) "risk level" "medium"
+      (older |> member "risk_level" |> to_string);
+    Alcotest.(check string) "decision" "reject:operator denied"
+      (older |> member "decision" |> to_string);
+    Alcotest.(check string) "decision kind" "reject"
+      (older |> member "decision_kind" |> to_string);
+    Alcotest.(check string) "decision reason" "operator denied"
+      (older |> member "decision_reason" |> to_string);
+    Alcotest.(check bool) "resolved_at float present" true
+      (older |> member "resolved_at" |> to_float > 0.0);
+    Alcotest.(check bool) "resolved_at_iso present" true
+      (contains_substring (older |> member "resolved_at_iso" |> to_string) "T");
+    Alcotest.(check bool) "pending timestamp omitted" false
+      (has_assoc_key "requested_at" older)
+  | items ->
+    Alcotest.fail
+      (Printf.sprintf "expected two resolved audits, got %d" (List.length items))
 
 let test_runtime_trust_approval_read_model_filters_after_wide_scan () =
   with_test_config @@ fun config ->
@@ -1377,12 +1426,13 @@ let test_runtime_trust_approval_read_model_filters_after_wide_scan () =
           ])
       in
       AQ.audit_approval_event ~base_path:config.base_path
-        ~event_type:"resolved" ~id:"runtime-trust-target-audit"
+        ~event_type:AQ.approval_audit_resolved_event
+        ~id:"runtime-trust-target-audit"
         ~keeper_name ~tool_name:"tool_search_files" ~risk_level:AQ.Medium
         ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ();
       for i = 1 to 64 do
         AQ.audit_approval_event ~base_path:config.base_path
-          ~event_type:"resolved"
+          ~event_type:AQ.approval_audit_resolved_event
           ~id:(Printf.sprintf "runtime-trust-other-audit-%02d" i)
           ~keeper_name:(Printf.sprintf "busy-runtime-keeper-%02d" i)
           ~tool_name:"tool_search_files" ~risk_level:AQ.Medium
@@ -1466,6 +1516,9 @@ let () =
         test_submit_pending_audit_uses_workspace_base_path;
       Alcotest.test_case "read_recent_audit scans before keeper filter" `Quick
         test_read_recent_audit_filters_after_wide_scan;
+      Alcotest.test_case
+        "list_recent_resolved_json projects resolved history" `Quick
+        test_list_recent_resolved_json_projects_resolved_history;
       Alcotest.test_case
         "runtime trust approval read model scans before keeper filter" `Quick
         test_runtime_trust_approval_read_model_filters_after_wide_scan;

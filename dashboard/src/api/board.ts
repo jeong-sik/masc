@@ -150,6 +150,7 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
     selected_model: null,
     disposition: asNullableString(raw.disposition),
     disposition_reason: asNullableString(raw.disposition_reason),
+    decision: asNullableString(raw.decision),
     rule_match: ruleMatch,
     input: raw.input,
     input_preview: asNullableString(raw.input_preview),

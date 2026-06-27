@@ -169,6 +169,15 @@ val audit_approval_event :
 val audit_rule_event :
   base_path:string -> event_type:string -> approval_rule -> unit
 
+val approval_audit_pending_event : string
+(** Event tag persisted when an approval is pending. *)
+
+val approval_audit_resolved_event : string
+(** Event tag persisted when an approval is resolved. *)
+
+val recent_resolved_history_limit : int
+(** Default dashboard history length for resolved HITL approvals. *)
+
 (** Read recent audit entries (default last 20), optionally filtered
     by keeper. *)
 val read_recent_audit :
@@ -177,6 +186,10 @@ val read_recent_audit :
   ?n:int ->
   unit ->
   Yojson.Safe.t list
+
+(** Read recent resolved audit entries (default last 20). *)
+val list_recent_resolved_json :
+  base_path:string -> ?n:int -> unit -> Yojson.Safe.t list
 
 module For_testing : sig
   val reset_audit_store : unit -> unit

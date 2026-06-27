@@ -14,14 +14,19 @@
 import { html } from 'htm/preact'
 import { Fragment } from 'preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import type { KeeperApprovalQueueItem } from '../../types'
+import type { KeeperApprovalQueueItem, KeeperResolvedApprovalItem } from '../../types'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../../config/constants'
 import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
+import { formatDateTimeKo } from '../../lib/format-time'
 import {
   keeperApprovalRiskLabel,
   keeperApprovalRiskVisualBand,
   type KeeperApprovalRiskVisualBand,
 } from '../../lib/governance-risk-level'
+import {
+  keeperResolvedApprovalDecisionClass,
+  keeperResolvedApprovalDecisionLabel,
+} from '../../lib/keeper-approval-decision'
 import { navigate } from '../../router'
 import { AgentAvatar } from '../overview/agent-avatar'
 import { LoadingState } from '../common/feedback-state'
@@ -109,6 +114,25 @@ function approvalRuleSummary(item: KeeperApprovalQueueItem): string | null {
         item.rule_match.matched_by ? `matched by ${item.rule_match.matched_by}` : null,
       ])
     : null
+}
+
+function ResolvedApprovalItem({ item }: { item: KeeperResolvedApprovalItem }) {
+  const decision = keeperResolvedApprovalDecisionLabel(item.decision)
+  return html`
+    <li
+      class="ap-history-item"
+      data-testid="approval-history-item"
+      data-approval-id=${item.id}
+    >
+      <span class=${`ap-history-decision ${keeperResolvedApprovalDecisionClass(item.decision)}`}>${decision}</span>
+      <span class="ap-history-tool mono">${item.tool_name}</span>
+      <span class="ap-history-keeper">${item.keeper_name}</span>
+      <span class="ap-history-id mono">${item.id}</span>
+      ${item.resolved_at
+        ? html`<span class="ap-history-at">${formatDateTimeKo(item.resolved_at)}</span>`
+        : null}
+    </li>
+  `
 }
 
 function approvalDetailRows(item: KeeperApprovalQueueItem): Array<{ label: string; value: string }> {
@@ -280,6 +304,7 @@ export function ApprovalsSurface() {
   }, [])
 
   const items = governanceData.value?.approval_queue ?? []
+  const resolvedItems = governanceData.value?.recent_resolved ?? []
   const error = governanceError.value
   // First load only: governanceResource is stale-while-revalidate, so a refetch
   // keeps the previous data — governanceData is null ONLY before the first load
@@ -369,6 +394,18 @@ export function ApprovalsSurface() {
                 <h3>열린 승인이 없습니다</h3>
                 <div class="ap-clear-sub">HITL 큐가 비어 있습니다 — keeper들이 결재 대기 없이 진행 중입니다.</div>
               </div>
+            `
+          : null}
+        ${resolvedItems.length > 0
+          ? html`
+              <section class="ap-history" data-testid="approvals-history">
+                <h2 class="ap-history-title">최근 처리 (${resolvedItems.length})</h2>
+                <ul class="ap-history-list">
+                  ${resolvedItems.map(item => html`
+                    <${ResolvedApprovalItem} key=${item.id} item=${item} />
+                  `)}
+                </ul>
+              </section>
             `
           : null}
       `}

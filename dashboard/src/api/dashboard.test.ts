@@ -1317,6 +1317,79 @@ describe('fetchDashboardMemory', () => {
 })
 
 describe('fetchDashboardGovernance', () => {
+  it('requests a forced governance snapshot when asked', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ approval_queue: [], recent_resolved: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchDashboardGovernance({ force: true })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/governance?force=1')
+  })
+
+  it('normalizes resolved approval history separately from pending queue items', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        approval_queue: [],
+        recent_resolved: [
+          {
+            id: 'appr-done',
+            keeper_name: 'keeper-a',
+            tool_name: 'fs_write',
+            risk_level: 'medium',
+            decision: 'reject:operator denied',
+            decision_kind: 'reject',
+            decision_reason: 'operator denied',
+            resolved_at_iso: '2026-06-27T01:02:03Z',
+          },
+          {
+            id: 'appr-legacy',
+            keeper_name: 'keeper-a',
+            tool_name: 'shell_exec',
+            risk_level: 'high',
+            decision: 'reject:legacy reason',
+            resolved_at_iso: '2026-06-27T01:03:03Z',
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardGovernance()
+
+    expect(result.recent_resolved).toEqual([
+      expect.objectContaining({
+        id: 'appr-done',
+        keeper_name: 'keeper-a',
+        tool_name: 'fs_write',
+        risk_level: 'medium',
+        decision: 'reject',
+        decision_raw: 'reject:operator denied',
+        decision_reason: 'operator denied',
+        resolved_at: '2026-06-27T01:02:03Z',
+      }),
+      expect.objectContaining({
+        id: 'appr-legacy',
+        keeper_name: 'keeper-a',
+        tool_name: 'shell_exec',
+        risk_level: 'high',
+        decision: 'unknown',
+        decision_raw: 'reject:legacy reason',
+        decision_reason: null,
+        resolved_at: '2026-06-27T01:03:03Z',
+      }),
+    ])
+    expect(result.recent_resolved?.[0]).not.toHaveProperty('requested_at')
+  })
+
   it('does not retry structured computation timeouts', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

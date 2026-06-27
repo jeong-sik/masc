@@ -192,9 +192,9 @@ export function App() {
     // governance resource must refresh globally. Keep boot on the read-only
     // refresh module instead of governance-actions: first paint should not load
     // toast/action write handlers just to count pending approvals.
-    const refreshGovernanceLazy = () => {
+    const refreshGovernanceLazy = (opts?: { force?: boolean }) => {
       void import('./components/governance-refresh')
-        .then(({ refreshGovernance }) => refreshGovernance())
+        .then(({ refreshGovernance }) => refreshGovernance(opts))
         .catch(err => {
           console.warn('[app] governance refresh unavailable', err instanceof Error ? err.message : err)
         })

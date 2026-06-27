@@ -368,6 +368,7 @@ let test_keeper_oas_bundle_materializes_masc_fusion_tool () =
       let meta = Cases.make_meta ~name:"keeper-fusion-schema" () in
       let ctx_snapshot =
         Masc.Keeper_context_runtime.create
+          ~eio:false
           ~system_prompt:"keeper fusion schema regression"
           ~max_tokens:4000
       in

@@ -162,7 +162,8 @@ let prepare_run_context
     match ctx_opt with
     | Some c -> c
     | None ->
-      Keeper_context_runtime.create ~system_prompt:base_system_prompt ~max_tokens:max_context
+      Keeper_context_runtime.create ~eio:true ~system_prompt:base_system_prompt
+        ~max_tokens:max_context
   in
   let ctx_work =
     Keeper_context_runtime.set_system_prompt base_ctx ~system_prompt:base_system_prompt

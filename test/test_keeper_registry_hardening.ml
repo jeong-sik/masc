@@ -126,7 +126,10 @@ let test_tool_dispatch_fallback_uses_original_meta () =
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Masc.Workspace.default_config dir in
        let meta = make_meta "fallback-keeper" in
-       let ctx_work = Masc.Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000 in
+       let ctx_work =
+         Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
+           ~max_tokens:4000
+       in
        ignore (KR.register ~base_path:config.base_path meta.name meta);
        Fun.protect
          ~finally:(fun () -> KR.unregister ~base_path:config.base_path meta.name)

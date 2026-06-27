@@ -149,8 +149,8 @@ let context_ratio (ctx : working_context) : float =
   if max_tokens = 0 then 0.0
   else float_of_int (token_count ctx) /. float_of_int max_tokens
 
-let create ~system_prompt ~max_tokens =
-  let context = Agent_sdk.Context.create ~eio:true () in
+let create ~eio ~system_prompt ~max_tokens =
+  let context = Agent_sdk.Context.create ~eio () in
   let checkpoint =
     empty_runtime_checkpoint ~system_prompt ~messages:[] ~max_tokens ~context
   in
@@ -509,7 +509,7 @@ let serialize_context (ctx : working_context) : string =
   ] in
   Yojson.Safe.to_string json
 
-let deserialize_context (s : string) ~max_tokens : working_context =
+let deserialize_context ~eio (s : string) ~max_tokens : working_context =
   let json = Yojson.Safe.from_string s in
   let system_prompt = (match Json_util.assoc_member_opt "system_prompt" json with Some (`String s) -> s | _ -> "") in
   let messages =
@@ -517,7 +517,7 @@ let deserialize_context (s : string) ~max_tokens : working_context =
     |> repair_broken_tool_call_pairs
   in
   let _legacy_token_count = Json_util.get_int json "token_count" in
-  let context = Agent_sdk.Context.create ~eio:true () in
+  let context = Agent_sdk.Context.create ~eio () in
   let checkpoint =
     empty_runtime_checkpoint ~system_prompt ~messages ~max_tokens ~context
   in

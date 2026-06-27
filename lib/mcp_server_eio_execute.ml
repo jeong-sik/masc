@@ -453,6 +453,7 @@ let execute_tool_eio
                  | Ok meta ->
                    let ctx_work =
                      Keeper_context_runtime.create
+                       ~eio:true
                        ~system_prompt:""
                        ~max_tokens:(Keeper_config.keeper_unified_max_tokens ())
                    in

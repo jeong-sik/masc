@@ -162,7 +162,8 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   in
   let config = Masc.Workspace.default_config base_path in
   let ctx =
-    Masc.Keeper_context_runtime.create ~system_prompt:"keeper tool matrix"
+    Masc.Keeper_context_runtime.create ~eio:false
+      ~system_prompt:"keeper tool matrix"
       ~max_tokens:4000
     |> fun ctx ->
     Masc.Keeper_context_runtime.append ctx

@@ -44,6 +44,15 @@ type consolidation_plan =
 
 let empty_plan = { groups = []; drop_indices = [] }
 
+type output_rejection_reason =
+  | Non_json
+  | Non_object_json
+
+let output_rejection_reason_to_string = function
+  | Non_json -> "non_json"
+  | Non_object_json -> "non_object_json"
+;;
+
 (* The numbered fact list the consolidation prompt sees: one 0-based line per
    fact, "[category] claim". The index is the only handle the LLM gets on an
    existing fact, so [apply_plan] reads back the same order. Pure — no IO. *)
@@ -144,15 +153,29 @@ let merge_group_of_json json =
   | _ -> None
 ;;
 
-(* Parse the LLM's consolidation output. Unknown/garbled groups are dropped
-   individually (defensive degrade), never aborting the whole plan. A plan that
-   fails to parse at all yields [empty_plan] = a no-op consolidation. *)
+(* Parse the LLM's consolidation plan. Unknown/garbled groups inside a valid
+   object are dropped individually (defensive degrade) and emit a warning with
+   dropped/total counts, never aborting the whole plan. The provider output
+   itself must be an exact JSON object; prose, markdown fences, and substring
+   salvage are rejected at [plan_of_string]. *)
+let log_dropped_groups ~dropped ~total =
+  if dropped > 0
+  then
+    Log.Keeper.warn
+      "memory_os_consolidation: dropped malformed merge groups dropped=%d total=%d"
+      dropped
+      total
+;;
+
 let plan_of_json (json : Yojson.Safe.t) =
   match json with
   | `Assoc _ ->
     let groups =
       match assoc_field "groups" json with
-      | Some (`List items) -> List.filter_map merge_group_of_json items
+      | Some (`List items) ->
+        let parsed = List.filter_map merge_group_of_json items in
+        log_dropped_groups ~dropped:(List.length items - List.length parsed) ~total:(List.length items);
+        parsed
       | _ -> []
     in
     let drop_indices =
@@ -165,51 +188,29 @@ let plan_of_json (json : Yojson.Safe.t) =
     empty_plan
 ;;
 
-let json_of_output raw =
+let json_of_output_result raw =
   let raw = String.trim raw in
-  let raw =
-    if String.starts_with ~prefix:"```" raw
-    then (
-      match String.split_on_char '\n' raw with
-      | first :: rest when String.starts_with ~prefix:"```" first ->
-        rest
-        |> List.rev
-        |> (function
-          | last :: rest when String.starts_with ~prefix:"```" (String.trim last) ->
-            List.rev rest
-          | lines -> List.rev lines)
-        |> String.concat "\n"
-        |> String.trim
-      | _ -> raw)
-    else raw
-  in
   match Yojson.Safe.from_string raw with
-  | json -> Some json
-  | exception Yojson.Json_error _ ->
-    let len = String.length raw in
-    let rec find_from i ch =
-      if i >= len then None else if Char.equal raw.[i] ch then Some i else find_from (i + 1) ch
-    in
-    let rec find_from_right i ch =
-      if i < 0
-      then None
-      else if Char.equal raw.[i] ch
-      then Some i
-      else find_from_right (i - 1) ch
-    in
-    (match find_from 0 '{', find_from_right (len - 1) '}' with
-     | Some start, Some stop when start < stop ->
-       let candidate = String.sub raw start (stop - start + 1) in
-       (match Yojson.Safe.from_string candidate with
-        | json -> Some json
-        | exception Yojson.Json_error _ -> None)
-     | _ -> None)
+  | `Assoc _ as json -> Ok json
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    Error Non_object_json
+  | exception Yojson.Json_error _ -> Error Non_json
+;;
+
+let log_rejected_output ~reason ~raw =
+  Log.Keeper.warn
+    "memory_os_consolidation: rejected provider output reason=%s bytes=%d; \
+     expected exact JSON object"
+    (output_rejection_reason_to_string reason)
+    (String.length raw)
 ;;
 
 let plan_of_string raw =
-  match json_of_output raw with
-  | Some json -> Some (plan_of_json json)
-  | None -> None
+  match json_of_output_result raw with
+  | Ok json -> Some (plan_of_json json)
+  | Error reason ->
+    log_rejected_output ~reason ~raw;
+    None
 ;;
 
 (* ---------- Apply (pure, deterministic) ---------- *)

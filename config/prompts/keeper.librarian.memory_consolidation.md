@@ -17,6 +17,8 @@ Facts (index: [category] claim):
 {{numbered_facts}}
 
 Output schema (JSON only, no markdown):
+Return exactly one JSON object. Do not wrap the object in markdown fences, prose, arrays, JSON strings, XML tags, or thinking text.
+
 {
   "groups": [
     { "member_indices": [0, 3], "consolidated_claim": "One sentence merging those facts.", "category": "fact" }

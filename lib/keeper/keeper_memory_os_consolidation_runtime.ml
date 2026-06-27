@@ -96,7 +96,7 @@ let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
   ; temperature = Some 0.0
   ; tool_choice = None
   ; disable_parallel_tool_use = true
-  ; response_format = Agent_sdk.Types.Off
+  ; response_format = Agent_sdk.Types.JsonMode
   ; output_schema = None
   }
 ;;

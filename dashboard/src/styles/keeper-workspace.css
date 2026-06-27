@@ -1688,6 +1688,20 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 }
 
 .kw-chat .chat-block-suggestions {
+  /* Prototype messages.jsx:135-147: vertical stack — label above, chip row below.
+     The label is a readability cue (inline block would read like message body). */
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 4px;
+}
+.kw-chat .chat-block-suggestions-label {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.kw-chat .chat-block-suggestions-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;

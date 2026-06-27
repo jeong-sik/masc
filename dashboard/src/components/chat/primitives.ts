@@ -919,19 +919,27 @@ function ChatChartBlock({ title, series, labels, xLabel, yMax }: ChatChartBlock)
 }
 
 function ChatSuggestionsBlock({ items }: ChatSuggestionsBlock) {
+  // Mirrors prototype messages.jsx:135-147 (.suggest container with the
+  // "추천 후속 질문" label above a chip row). The label is a readability cue:
+  // the block is inline in the message bubble, so without an explicit heading
+  // readers mistake the chips for message content. The row uses the existing
+  // .chat-block-suggestion-chip styling unchanged.
   return html`
     <div class="chat-block-suggestions" data-chat-block="suggestions">
-      ${items.map((it, i) => html`
-        <button
-          key=${i}
-          type="button"
-          class="chat-block-suggestion-chip"
-          data-action=${it.action ?? ''}
-        >
-          <span class="chat-block-suggestion-pre">${it.icon ?? '▸'}</span>
-          <span class="chat-block-suggestion-label">${it.label}</span>
-        </button>
-      `)}
+      <span class="chat-block-suggestions-label">추천 후속 질문</span>
+      <div class="chat-block-suggestions-row">
+        ${items.map((it, i) => html`
+          <button
+            key=${i}
+            type="button"
+            class="chat-block-suggestion-chip"
+            data-action=${it.action ?? ''}
+          >
+            <span class="chat-block-suggestion-pre">${it.icon ?? '▸'}</span>
+            <span class="chat-block-suggestion-label">${it.label}</span>
+          </button>
+        `)}
+      </div>
     </div>
   `
 }

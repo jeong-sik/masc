@@ -77,7 +77,11 @@ describe('Keeper chat rich blocks', () => {
 
     const suggestions = container.querySelector('[data-chat-block="suggestions"]')
     expect(suggestions).not.toBeNull()
-    const buttons = [...(suggestions?.querySelectorAll('button') ?? [])]
+    // Mirrors prototype messages.jsx:139 — "추천 후속 질문" label precedes the chip row.
+    expect(suggestions?.querySelector('.chat-block-suggestions-label')?.textContent).toBe('추천 후속 질문')
+    const row = suggestions?.querySelector('.chat-block-suggestions-row')
+    expect(row).not.toBeNull()
+    const buttons = [...(row?.querySelectorAll('button') ?? [])]
     expect(buttons).toHaveLength(3)
     expect(buttons.map((b) => b.textContent?.trim())).toEqual([
       '▸PR #7763 열기',

@@ -1,7 +1,5 @@
 include Workspace_core
 
-let () = Workspace_metric_hooks.install ()
-
 let fsm_drift_metric = "masc_task_fsm_drift_total"
 let fsm_drift_per_agent_metric = "masc_task_fsm_drift_per_agent_total"
 let process_timeout_metric = Otel_metric_store.metric_process_timeout

@@ -80,7 +80,7 @@ let accept_no_progress_retry_kind_string err =
 let direct_empty_no_progress_retry_reason_string err =
   Option.map
     Masc.Keeper_error_classify.degraded_retry_reason_to_string
-    (Masc.Keeper_turn.For_testing.direct_empty_no_progress_retry_reason err)
+    (Masc.Keeper_turn_runtime_budget.direct_empty_no_progress_retry_reason err)
 
 let write_file path content =
   let oc = open_out path in
@@ -123,7 +123,7 @@ let with_direct_retry_runtime f =
        | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e)
 
 let direct_empty_no_progress_retry_decision ?time_spent_in_turn_s err =
-  Masc.Keeper_turn.For_testing.direct_empty_no_progress_retry_decision
+  Masc.Keeper_turn_runtime_budget.direct_empty_no_progress_retry_decision
     ~base_runtime:"test_provider.test_model"
     ~effective_runtime:"runtime.direct-empty"
     ~attempted_runtimes:[ "runtime.direct-empty" ]
@@ -1021,7 +1021,7 @@ let test_direct_empty_no_progress_retry_loop_runs_fallback_attempt () =
       }
     in
     let result =
-      Masc.Keeper_turn.For_testing.run_direct_empty_no_progress_retry_loop
+      Masc.Keeper_turn_runtime_budget.run_direct_empty_no_progress_retry_loop
         ~keeper_name:"keeper-test"
         ~base_runtime:"test_provider.test_model"
         ~initial_runtime:"runtime.direct-empty"
@@ -1166,7 +1166,7 @@ let test_direct_retry_loop_publishes_non_retry_terminal_cascade () =
   let published = ref [] in
   let run_count = ref 0 in
   let result =
-    Masc.Keeper_turn.For_testing.run_direct_empty_no_progress_retry_loop
+    Masc.Keeper_turn_runtime_budget.run_direct_empty_no_progress_retry_loop
       ~keeper_name:"keeper-test"
       ~base_runtime:"runtime.initial"
       ~initial_runtime:"runtime.initial"

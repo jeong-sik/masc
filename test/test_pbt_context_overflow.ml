@@ -600,7 +600,7 @@ let test_checkpoint_sanitize_preserves_pair_repair_stats () =
     ; user_text_and_tool_result "result wrapper kept text" "orphan" "late"
     ]
   in
-  let ctx = KC.create ~system_prompt:"system" ~max_tokens:4096 in
+  let ctx = KC.create ~eio:false ~system_prompt:"system" ~max_tokens:4096 in
   let ctx = KC.append_many ctx messages in
   let checkpoint = KC.checkpoint_of_context ctx in
   let sanitized, stats = KC.sanitize_oas_checkpoint checkpoint in
@@ -650,7 +650,7 @@ let test_checkpoint_save_repair_drops_unpaired_tool_blocks () =
     1
     stats.dropped_tool_results;
   let save_ctx =
-    KC.create ~system_prompt:"system" ~max_tokens:4096
+    KC.create ~eio:false ~system_prompt:"system" ~max_tokens:4096
     |> fun ctx -> KC.append_many ctx repaired_messages
   in
   let checkpoint = KC.checkpoint_of_context save_ctx in

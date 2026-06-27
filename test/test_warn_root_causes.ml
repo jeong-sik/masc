@@ -158,7 +158,8 @@ let test_web_alias_bundle_visible_without_injected_masc_schema () =
       let config = Workspace.default_config dir in
       let meta = make_meta ~name:"test-web-alias-no-injected-schema" () in
       let ctx_snapshot =
-        Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000
+        Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
+          ~max_tokens:4000
       in
       let bundle =
         Keeper_tools_oas_bundle.make_tool_bundle ~config ~meta ~ctx_snapshot ()
@@ -189,7 +190,8 @@ let test_fusion_default_descriptor_is_bundle_visible () =
       let config = Workspace.default_config dir in
       let meta = make_meta ~name:"test-fusion-default-descriptor" () in
       let ctx_snapshot =
-        Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000
+        Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
+          ~max_tokens:4000
       in
       let bundle =
         Keeper_tools_oas_bundle.make_tool_bundle ~config ~meta ~ctx_snapshot ()

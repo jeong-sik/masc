@@ -301,7 +301,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~active_goals
             ()
       in
-      let ctx0 = Keeper_context_runtime.create ~system_prompt ~max_tokens:primary_max_context in
+      let ctx0 =
+        Keeper_context_runtime.create ~eio:true ~system_prompt
+          ~max_tokens:primary_max_context
+      in
       (* next_generation keys the per-(keeper, trace) counter by the trace_id
          string; episodes live under that same string dir (ensure_dir/of
          session_id above), so pass the raw [trace_id] string, not the typed

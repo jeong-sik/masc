@@ -31,7 +31,7 @@ val oas_context_of_context : working_context -> Agent_sdk.Context.t
 val with_max_tokens : working_context -> int -> working_context
 val system_prompt_of_context : working_context -> string
 val messages_of_context : working_context -> Agent_sdk.Types.message list
-val create : system_prompt:string -> max_tokens:int -> working_context
+val create : eio:bool -> system_prompt:string -> max_tokens:int -> working_context
 val set_system_prompt : working_context -> system_prompt:string -> working_context
 val append : working_context -> Agent_sdk.Types.message -> working_context
 val append_many : working_context -> Agent_sdk.Types.message list -> working_context
@@ -47,7 +47,7 @@ val role_of_string_opt : string -> Agent_sdk.Types.role option
 val message_to_json : Agent_sdk.Types.message -> Yojson.Safe.t
 val message_of_json : Yojson.Safe.t -> Agent_sdk.Types.message
 val serialize_context : working_context -> string
-val deserialize_context : string -> max_tokens:int -> working_context
+val deserialize_context : eio:bool -> string -> max_tokens:int -> working_context
 val context_to_json : working_context -> Yojson.Safe.t
 val create_session : session_id:string -> base_dir:string -> session_context
 val persist_message : ?source:string -> session_context -> Agent_sdk.Types.message -> unit

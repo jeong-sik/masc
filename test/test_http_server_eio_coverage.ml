@@ -7,6 +7,7 @@
 
 open Alcotest
 module Http_server_eio = Masc.Http_server_eio
+module Compression_codec = Compression_codec
 
 (* ============================================================
    config Type Tests

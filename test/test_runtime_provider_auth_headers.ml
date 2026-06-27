@@ -941,7 +941,7 @@ let test_runtime_agent_context_uses_configured_turn_budget () =
     ; response_format = Agent_sdk.Types.default_config.response_format
     ; thinking_budget = None
     ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create ~eio:true ()
+    ; context = Agent_sdk.Context.create ~eio:false ()
     ; mcp_sessions = []
     ; working_context = None
     }

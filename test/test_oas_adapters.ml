@@ -10,8 +10,6 @@ open Masc
 let ctx_messages = Keeper_context_runtime.messages_of_context
 let ctx_system_prompt = Keeper_context_runtime.system_prompt_of_context
 
-let with_eio f = Eio_main.run @@ fun _env -> f ()
-
 (* ================================================================ *)
 (* Helper: create MASC messages with all 4 roles                    *)
 (* ================================================================ *)
@@ -112,8 +110,10 @@ let compact_ctx (ctx : Keeper_context_runtime.working_context) strategies =
 (* ================================================================ *)
 
 let test_compact_prune_tool_outputs () =
-  with_eio @@ fun () ->
-  let ctx = Keeper_context_runtime.create ~system_prompt:"test system" ~max_tokens:4000 in
+  let ctx =
+    Keeper_context_runtime.create ~eio:false ~system_prompt:"test system"
+      ~max_tokens:4000
+  in
   let ctx = List.fold_left Keeper_context_runtime.append ctx (make_test_messages ()) in
   let compacted = compact_ctx ctx [Context_compact_oas.PruneToolOutputs] in
   (* PruneToolOutputs on short tool output should not drop messages *)
@@ -127,8 +127,10 @@ let test_compact_prune_tool_outputs () =
     (List.length (ctx_messages compacted))
 
 let test_compact_merge_contiguous () =
-  with_eio @@ fun () ->
-  let ctx = Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000 in
+  let ctx =
+    Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
+      ~max_tokens:4000
+  in
   let msgs = [
     Agent_sdk.Types.user_msg "part 1";
     Agent_sdk.Types.user_msg "part 2";
@@ -141,9 +143,11 @@ let test_compact_merge_contiguous () =
     true (List.length (ctx_messages compacted) <= List.length msgs)
 
 let test_compact_summarize_old () =
-  with_eio @@ fun () ->
   (* Create enough messages to trigger keep-first-and-last behavior *)
-  let ctx = Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:8000 in
+  let ctx =
+    Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
+      ~max_tokens:8000
+  in
   let msgs = List.init 12 (fun i ->
     if i mod 2 = 0 then
       Agent_sdk.Types.user_msg (Printf.sprintf "user message %d with content" i)
@@ -159,8 +163,10 @@ let test_compact_summarize_old () =
     true (Keeper_context_runtime.token_count compacted > 0)
 
 let test_compact_small_list_unchanged () =
-  with_eio @@ fun () ->
-  let ctx = Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000 in
+  let ctx =
+    Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
+      ~max_tokens:4000
+  in
   let msgs = [
     Agent_sdk.Types.user_msg "hello";
     Agent_sdk.Types.assistant_msg "world";

@@ -2164,6 +2164,71 @@ let test_health_json_explains_nonrecoverable_failing_keeper () =
               true
               (row |> member "operator_action_confirm_required" |> to_bool))))
 
+let test_health_json_uses_crash_log_when_restore_clears_failure_reason () =
+  with_temp_dir "health-restored-crash-log-keeper" (fun dir ->
+    let config_root = make_config_root dir in
+    write_config_root_keeper_toml config_root "restored-crash-log";
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = Mcp_server.workspace_config state in
+        let restored =
+          make_keeper_meta ~name:"restored-crash-log"
+            ~trace_id:"trace-restored-crash-log" ()
+        in
+        write_keeper_meta_exn config restored;
+        with_running_keeper_metas config [ restored ] (fun () ->
+          let base_path = config.Workspace.base_path in
+          let stale_reason = "stale_turn_timeout(idle_turn(2268s))" in
+          mark_keeper_failing config restored;
+          Keeper_registry.set_failure_reason
+            ~base_path
+            restored.name
+            (Some
+               (Keeper_registry.Stale_turn_timeout
+                  (Keeper_registry.Idle_turn { stall_seconds = 2268.0 })));
+          terminate_keeper_fiber config restored;
+          Keeper_registry.record_crash ~base_path restored.name 1234.0 stale_reason;
+          exhaust_keeper_restart_budget config restored;
+          Keeper_registry.restore_supervisor_state
+            ~base_path
+            restored.name
+            ~restart_count:10
+            ~last_restart_ts:1234.0
+            ~crash_log:(Keeper_registry.crash_log_of ~base_path restored.name);
+          (match Keeper_registry.get ~base_path restored.name with
+           | Some entry ->
+             Alcotest.(check bool) "restore cleared typed failure reason" true
+               (Option.is_none entry.Keeper_registry.last_failure_reason)
+           | None -> Alcotest.fail "missing restored keeper registry entry");
+          let request = Httpun.Request.create `GET "/health" in
+          let json = Server_routes_http_runtime.make_health_json request in
+          let open Yojson.Safe.Util in
+          let fleet_safety = json |> member "keeper_fleet_safety" in
+          let restored_row =
+            fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            |> List.find_opt (fun row ->
+                 String.equal
+                   "restored-crash-log"
+                   (row |> member "keeper" |> to_string))
+          in
+          match restored_row with
+          | None -> Alcotest.fail "missing restored-crash-log blocked row"
+          | Some row ->
+            Alcotest.(check string) "health exposes dead phase after restore" "dead"
+              (row |> member "phase" |> to_string);
+            Alcotest.(check string)
+              "health falls back to restored crash-log failure reason"
+              stale_reason
+              (row |> member "last_failure_reason" |> to_string))))
+
 let test_health_json_reaction_ledger_cursor_sweep_clears_pending () =
   with_temp_dir "health-reaction-ledger-cursor-sweep" (fun dir ->
     with_env "MASC_BASE_PATH" (Some dir) (fun () ->
@@ -3739,6 +3804,10 @@ let () =
           Alcotest.test_case
             "health json explains nonrecoverable failing keeper"
             `Quick test_health_json_explains_nonrecoverable_failing_keeper;
+          Alcotest.test_case
+            "health json restores crash-log failure reason"
+            `Quick
+            test_health_json_uses_crash_log_when_restore_clears_failure_reason;
           Alcotest.test_case
             "health json reaction ledger cursor sweep clears pending"
             `Quick test_health_json_reaction_ledger_cursor_sweep_clears_pending;

@@ -752,6 +752,39 @@ let blocked_keeper_operator_action_fields reason =
         ("operator_action_confirm_required", `Bool action.confirm_required);
       ]
 
+let latest_crash_log_reason crash_log =
+  let latest =
+    List.fold_left
+      (fun acc (ts, reason) ->
+        let reason = String.trim reason in
+        if String.equal reason "" then acc
+        else
+          match acc with
+          | None -> Some (ts, reason)
+          | Some (latest_ts, _) when ts > latest_ts -> Some (ts, reason)
+          | Some _ -> acc)
+      None
+      crash_log
+  in
+  Option.map snd latest
+
+let phase_supports_crash_log_failure_reason = function
+  | Keeper_state_machine.Failing
+  | Keeper_state_machine.Crashed
+  | Keeper_state_machine.Dead ->
+      true
+  | Keeper_state_machine.Offline
+  | Keeper_state_machine.Running
+  | Keeper_state_machine.Overflowed
+  | Keeper_state_machine.Compacting
+  | Keeper_state_machine.HandingOff
+  | Keeper_state_machine.Draining
+  | Keeper_state_machine.Paused
+  | Keeper_state_machine.Stopped
+  | Keeper_state_machine.Restarting
+  | Keeper_state_machine.Zombie ->
+      false
+
 let active_task_owner_fiber_scan_semantics =
   "reports active task owners without executable keeper fibers; disabled \
    keepers are excluded; matching rows can degrade fleet status"
@@ -792,6 +825,11 @@ let blocked_keeper_detail_json
     match registry_entry with
     | Some { Keeper_registry.last_failure_reason = Some reason; _ } ->
         Some (Keeper_registry.failure_reason_to_string reason)
+    | Some { Keeper_registry.last_failure_reason = None; crash_log; _ }
+      when Option.value
+             ~default:false
+             (Option.map phase_supports_crash_log_failure_reason phase) ->
+        latest_crash_log_reason crash_log
     | Some { Keeper_registry.last_failure_reason = None; _ } | None -> None
   in
   let reason =

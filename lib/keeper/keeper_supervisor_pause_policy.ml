@@ -52,7 +52,7 @@ let auto_pause_handoff_context ~meta ~reason_tag =
     reclaim_policy = Some Masc_domain.Allow_reclaim;
     evidence_refs = [];
     updated_at = Some (now_iso ());
-    updated_by = Some Keeper_supervisor_actor.supervisor_agent_name;
+    updated_by = Some supervisor_agent_name;
   }
 ;;
 
@@ -67,7 +67,7 @@ let release_owned_active_tasks_after_pause ~config ~meta ~reason_tag =
       match
         Workspace.force_release_task_r
           config
-          ~agent_name:Keeper_supervisor_actor.supervisor_agent_name
+          ~agent_name:supervisor_agent_name
           ~task_id
           ~handoff_context
           ()

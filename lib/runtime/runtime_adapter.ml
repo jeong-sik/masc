@@ -293,6 +293,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
             ?max_tokens
             ?keep_alive
             ?num_ctx
+            ?connect_timeout_s:provider.connect_timeout_s
             ())
      | None -> None)
   | Cli _ ->
@@ -310,6 +311,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
             ?max_tokens
             ?keep_alive
             ?num_ctx
+            ?connect_timeout_s:provider.connect_timeout_s
             ())
      | None -> None)
 ;;

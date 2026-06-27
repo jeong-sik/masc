@@ -231,6 +231,7 @@ module Board : sig
   val backend_of_string : string -> backend
   val backend_to_string : backend -> string
   val flush_interval_sec : float
+  val flusher_inbox_capacity : int
   val backend_opt : unit -> backend option
 end
 

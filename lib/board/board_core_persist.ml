@@ -11,6 +11,19 @@ include Board_core_classify
 include Board_core_payload
 
 let flush_interval_sec = Env_config.Board.flush_interval_sec
+let flusher_inbox_capacity = Env_config.Board.flusher_inbox_capacity
+
+(** Monotonic count of sweep/flush schedule messages skipped because the
+    bounded flusher inbox had no room for the whole batch. *)
+let flusher_schedule_dropped = Atomic.make 0
+let flusher_schedule_dropped_count () = Atomic.get flusher_schedule_dropped
+
+let record_flusher_schedule_drop scheduled_count =
+  (* Single atomic add instead of N increments, so a concurrent reader cannot
+     observe a partial count. [scheduled_count] is a [List.length], so it is
+     non-negative. *)
+  Atomic.fetch_and_add flusher_schedule_dropped scheduled_count |> ignore
+;;
 
 (** Monotonic counter of persist failures (disk full, permission errors, etc.). *)
 let persist_errors = Atomic.make 0
@@ -36,7 +49,7 @@ let create_store () =
   ; dirty_post_ids = Hashtbl.create 256
   ; dirty_comment_ids = Hashtbl.create 512
   ; last_flush = Time_compat.now ()
-  ; flusher_inbox = Eio.Stream.create 1000
+  ; flusher_inbox = Eio.Stream.create flusher_inbox_capacity
   ; sub_boards = Hashtbl.create 64
   ; sub_boards_by_slug = Hashtbl.create 64
   ; posts_by_turn_ref = Hashtbl.create 256
@@ -230,20 +243,91 @@ let sweep store =
 ;;
 
 (** Auto-sweep if needed, delegates to flusher actor inbox *)
+type scheduled_flusher_msg =
+  { msg : flusher_msg
+  ; previous_ts : float
+  ; reserved_ts : float
+  }
+
+let rollback_scheduled_msg store scheduled =
+  with_lock store (fun () ->
+    match scheduled.msg with
+    | Sweep ->
+      if Stdlib.Float.equal store.last_sweep scheduled.reserved_ts
+      then store.last_sweep <- scheduled.previous_ts
+    | Flush ->
+      if Stdlib.Float.equal store.last_flush scheduled.reserved_ts
+      then store.last_flush <- scheduled.previous_ts)
+;;
+
+let enqueue_scheduled_msg store scheduled =
+  try Eio.Stream.add store.flusher_inbox scheduled.msg
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    let bt = Printexc.get_raw_backtrace () in
+    rollback_scheduled_msg store scheduled;
+    Printexc.raise_with_backtrace exn bt
+;;
+
+let enqueue_scheduled_msgs store scheduled =
+  let scheduled_count = List.length scheduled in
+  let inbox_len = Eio.Stream.length store.flusher_inbox in
+  if scheduled_count = 0
+  then ()
+  else if scheduled_count > flusher_inbox_capacity - inbox_len
+  then (
+    record_flusher_schedule_drop scheduled_count;
+    List.iter (rollback_scheduled_msg store) scheduled;
+    Log.BoardLog.warn
+      "board flusher inbox full; skipped scheduling sweep/flush messages \
+       (queued=%d, requested=%d, capacity=%d)"
+      inbox_len scheduled_count flusher_inbox_capacity)
+  else (
+    (* [maybe_sweep] is the only producer of these messages and reserves
+       timestamps under [store.mutex] before this check. Once there is room for
+       the whole batch, these adds should not block on capacity. *)
+    List.iter (enqueue_scheduled_msg store) scheduled)
+;;
+
 let maybe_sweep store =
-  let now = Time_compat.now () in
-  if
-    Stdlib.Float.compare
-      (now -. store.last_sweep)
-      (Stdlib.Float.of_int Limits.sweeper_interval_sec)
-    > 0
-  then (
-    store.last_sweep <- now;
-    Eio.Stream.add store.flusher_inbox Sweep);
-  if Stdlib.Float.compare (now -. store.last_flush) flush_interval_sec > 0
-  then (
-    store.last_flush <- now;
-    Eio.Stream.add store.flusher_inbox Flush)
+  let scheduled =
+    with_lock store (fun () ->
+      let now = Time_compat.now () in
+      let scheduled = [] in
+      let scheduled =
+        if
+          Stdlib.Float.compare
+            (now -. store.last_sweep)
+            (Stdlib.Float.of_int Limits.sweeper_interval_sec)
+          > 0
+        then (
+          let previous_ts = store.last_sweep in
+          store.last_sweep <- now;
+          { msg = Sweep; previous_ts; reserved_ts = now } :: scheduled)
+        else scheduled
+      in
+      let scheduled =
+        if Stdlib.Float.compare (now -. store.last_flush) flush_interval_sec > 0
+        then (
+          let previous_ts = store.last_flush in
+          store.last_flush <- now;
+          { msg = Flush; previous_ts; reserved_ts = now } :: scheduled)
+        else scheduled
+      in
+      List.rev scheduled)
+  in
+  enqueue_scheduled_msgs store scheduled
+;;
+
+let reset_sweep_schedule_for_test store =
+  with_lock store (fun () ->
+    store.last_sweep <- 0.0;
+    store.last_flush <- 0.0)
+;;
+
+let sweep_schedule_timestamps_for_test store =
+  with_lock store (fun () -> store.last_sweep, store.last_flush)
 ;;
 
 (** {1 Persistence Paths} *)

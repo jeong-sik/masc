@@ -433,6 +433,9 @@ let test_repo_runtime_toml_loads () =
     check bool "at least one runtime" true (List.length runtimes > 0);
     check string "default runtime" "ollama_cloud.deepseek-v4-flash"
       default.Runtime.id;
+    check (option (float 0.0)) "Ollama Cloud connect timeout override"
+      (Some 600.0)
+      default.provider_config.connect_timeout_s;
     check int "one local Gemma canary pin in seed" 1 (List.length assignments);
     check (option string) "nick0cave Gemma canary pin"
       (Some "ollama.gemma4-26b-a4b-qat")
@@ -495,6 +498,17 @@ let test_repo_runtime_toml_loads () =
           check bool "GLM Coding Plan extended thinking" true
             caps.supports_extended_thinking
         | None -> fail "expected GLM Coding Plan capabilities"));
+    (match
+       List.find_opt
+         (fun (runtime : Runtime.t) ->
+            String.equal runtime.id "deepseek.deepseek-v4-pro")
+         runtimes
+     with
+     | None -> fail "expected DeepSeek Pro runtime in seed"
+     | Some runtime ->
+       check (option (float 0.0)) "DeepSeek keeps OAS connect timeout default"
+         None
+         runtime.provider_config.connect_timeout_s);
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->

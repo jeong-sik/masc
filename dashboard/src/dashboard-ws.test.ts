@@ -1227,6 +1227,33 @@ describe('dashboard websocket route subscriptions', () => {
     expect(mockSockets[1]!.readyState).toBe(MockWebSocket.CONNECTING)
   })
 
+  it('reconnects when a delta ack notification sees a non-open socket', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+
+    const socket = await connectReadyDashboard()
+    expect(dashboardWsReady.value).toBe(true)
+    const sentBeforeDelta = socket.sent.length
+    socket.readyState = MockWebSocket.CLOSING
+
+    socket.receive({
+      jsonrpc: '2.0',
+      method: 'dashboard/delta',
+      params: { seq: 45, slice: 'execution', payload: { agents: [] } },
+    })
+
+    expect(socket.sent).toHaveLength(sentBeforeDelta)
+    expect(dashboardWsConnected.value).toBe(false)
+    expect(dashboardWsReady.value).toBe(false)
+    expect(dashboardWsLastError.value).toContain('state=CLOSING')
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await flushPromises()
+
+    expect(mockSockets).toHaveLength(2)
+    expect(mockSockets[1]!.readyState).toBe(MockWebSocket.CONNECTING)
+  })
+
   it('ignores stale subscribe snapshots that arrive after a newer route subscription', async () => {
     installWebSocketMocks()
 

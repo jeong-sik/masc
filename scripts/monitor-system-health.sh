@@ -40,7 +40,7 @@ ALERT_COOLDOWN="${MASC_SYSMON_ALERT_COOLDOWN:-300}"
 # Pressure flag file. masc server (future) is expected to poll this
 # and engage Keeper_fd_pressure when level=CRIT. We always rewrite it
 # atomically so a reader sees a consistent snapshot.
-PRESSURE_STATE_FILE="${MASC_HOST_FD_PRESSURE_STATE_FILE:-/tmp/masc-host-pressure.state}"
+PRESSURE_STATE_FILE="${MASC_HOST_FD_PRESSURE_STATE_FILE:-${MASC_SYSMON_PRESSURE_STATE:-/tmp/masc-host-pressure.state}}"
 PRESSURE_EVENTS_FILE="${MASC_SYSMON_PRESSURE_EVENTS:-/tmp/masc-host-pressure.events.jsonl}"
 
 usage() {

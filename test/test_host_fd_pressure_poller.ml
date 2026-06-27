@@ -5,7 +5,7 @@ module Poller = Host_fd_pressure_poller
 external unsetenv : string -> unit = "masc_test_unsetenv"
 
 let canonical_env = Env_config_core.host_fd_pressure_state_file_env_key
-let legacy_env = "MASC_SYSMON_PRESSURE_STATE"
+let legacy_env = Env_config_core.legacy_host_fd_pressure_state_file_env_key
 let default_path = Env_config_core.default_host_fd_pressure_state_file_path
 
 let restore_env name = function
@@ -46,7 +46,23 @@ let test_canonical_env_wins () =
 
 let test_legacy_env_is_ignored () =
   with_env [ canonical_env, None; legacy_env, Some "/tmp/sysmon-pressure.json" ] (fun () ->
-    check_resolution "legacy ignored" default_path Poller.Default)
+    check_resolution "legacy" "/tmp/sysmon-pressure.json" Poller.Legacy_env)
+
+let test_conflicting_envs_are_detected () =
+  with_env
+    [ canonical_env, Some "/var/run/masc/fd-pressure.json"
+    ; legacy_env, Some "/tmp/sysmon-pressure.json"
+    ]
+    (fun () ->
+      check_resolution
+        "canonical conflict"
+        "/var/run/masc/fd-pressure.json"
+        Poller.Canonical_env;
+      check
+        (option (pair string string))
+        "conflict"
+        (Some ("/var/run/masc/fd-pressure.json", "/tmp/sysmon-pressure.json"))
+        (Poller.state_file_env_conflict ()))
 
 let test_empty_env_is_absent () =
   with_env [ canonical_env, Some ""; legacy_env, Some "" ] (fun () ->
@@ -58,7 +74,11 @@ let () =
     [ ( "state path"
       , [ test_case "default path" `Quick test_default_path
         ; test_case "canonical env wins" `Quick test_canonical_env_wins
-        ; test_case "legacy env is ignored" `Quick test_legacy_env_is_ignored
+        ; test_case "legacy env falls back" `Quick test_legacy_env_is_ignored
+        ; test_case
+            "conflicting envs are detected"
+            `Quick
+            test_conflicting_envs_are_detected
         ; test_case "empty env is absent" `Quick test_empty_env_is_absent
         ] )
     ]

@@ -32,7 +32,7 @@ stimulus".
 
 ## §1 Motivation (verified against live runtime, 2026-06-27)
 
-The loop was observed end-to-end in `~/me/.masc/logs/main_eio-main-20260626-2307.log`
+The loop was observed end-to-end in `<base-path>/.masc/logs/main_eio-main-20260626-2307.log`
 on a fleet where 9 of 14 keepers were `paused` and would not stay up after a manual
 `/boot` ("Play → immediately stops"). Five load-bearing facts:
 
@@ -44,7 +44,7 @@ on a fleet where 9 of 14 keepers were `paused` and would not stay up after a man
 
 2. **A consumed-and-acknowledged stimulus re-appears on the next snapshot
    (verified directly against the persist files).** The pending snapshot
-   `~/me/.masc/keepers/<name>/event-queue.json` holds the bootstrap stimulus in
+   `<base-path>/.masc/keepers/<name>/event-queue.json` holds the bootstrap stimulus in
    quantity — albini 70, verifier 48, nick0cave 46, idealist 38, issue_king 10,
    rondo 8 occurrences — while the sibling `event-queue-inflight.json` is 63 bytes
    (empty) for the same keepers. The ack path (`ack_inflight`,

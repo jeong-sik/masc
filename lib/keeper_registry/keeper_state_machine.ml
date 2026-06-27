@@ -7,6 +7,27 @@
    [Keeper_state_machine_types] (godfile decomp). *)
 include Keeper_state_machine_types
 
+(** [is_terminal phase] is true iff [phase] cannot accept new turns.
+
+    Stopped, Dead, and Zombie are terminal: in [can_transition] every
+    outgoing edge from these sources is denied. Centralized here so the
+    FSM, health surfaces, and the mermaid renderer share one source of
+    truth instead of re-matching the terminal triple at each consumer.
+    Exhaustive (no [_] wildcard) so adding a phase variant surfaces a
+    compile-time warning here. *)
+let is_terminal = function
+  | Stopped | Dead | Zombie -> true
+  | Offline
+  | Running
+  | Failing
+  | Overflowed
+  | Compacting
+  | HandingOff
+  | Draining
+  | Paused
+  | Crashed
+  | Restarting -> false
+
 
 (* ── derive_phase ──────────────────────────────────────── *)
 

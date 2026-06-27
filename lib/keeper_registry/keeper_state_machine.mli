@@ -52,6 +52,12 @@ val phase_to_string : phase -> string
 val phase_of_string : string -> phase option
 val all_phases : phase list
 
+(** [is_terminal phase] is true for Stopped/Dead/Zombie — phases with no
+    outgoing transition (see {!can_transition}). Shared by health surfaces
+    and the mermaid renderer so the terminal triple is defined once in the
+    FSM instead of re-matched at each consumer. *)
+val is_terminal : phase -> bool
+
 (** {1 Observable Conditions (Kubernetes Pattern)} *)
 
 (** Observable boolean conditions computed from keeper state.

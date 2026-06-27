@@ -37,6 +37,12 @@ export function normalizeFusionPanelReason(model: string, reason: string | undef
   if (emptyMatch) {
     return decodeOcamlStringLiteral(emptyMatch[1] ?? '').trim() || 'empty response'
   }
+  const invalidMaxOutputTokensMatch = trimmed.match(
+    /^\(?\s*Fusion_types\.Invalid_max_output_tokens\s+(-?\d+)\s*\)?$/,
+  )
+  if (invalidMaxOutputTokensMatch) {
+    return `invalid max_output_tokens ${invalidMaxOutputTokensMatch[1]}`
+  }
   return normalizeProviderAttribution(model, trimmed)
 }
 

@@ -114,7 +114,7 @@ let test_empty_response_detail_summarizes_shape () =
     (String_util.string_contains_substring ~needle:"secret chain" detail)
 ;;
 
-let test_empty_response_detail_escapes_unknown_stop_reason () =
+let test_empty_response_detail_uses_canonical_unknown_stop_reason () =
   let response : Agent_sdk.Types.api_response =
     { id = "r"
     ; model = "m"
@@ -125,9 +125,8 @@ let test_empty_response_detail_escapes_unknown_stop_reason () =
     }
   in
   let detail = Fusion_oas.For_testing.empty_response_detail response in
-  Alcotest.(check bool) "unknown stop reason escaped" true
-    (String_util.string_contains_substring ~needle:"stop_reason=unknown:line\\nquote\\\""
-       detail);
+  Alcotest.(check bool) "unknown stop reason uses canonical label" true
+    (String_util.string_contains_substring ~needle:"stop_reason=unknown" detail);
   Alcotest.(check bool) "raw newline not embedded" false
     (String_util.string_contains_substring ~needle:"line\nquote" detail)
 ;;
@@ -191,9 +190,9 @@ let () =
             `Quick
             test_empty_response_detail_summarizes_shape
         ; Alcotest.test_case
-            "empty response detail escapes unknown stop reason"
+            "empty response detail uses canonical unknown stop reason"
             `Quick
-            test_empty_response_detail_escapes_unknown_stop_reason
+            test_empty_response_detail_uses_canonical_unknown_stop_reason
         ; Alcotest.test_case
             "panel failure yojson accepts legacy empty response"
             `Quick

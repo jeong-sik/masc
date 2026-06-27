@@ -9,50 +9,48 @@ let answer_text (resp : Agent_sdk.Types.api_response) : string =
   |> List.filter_map (function Agent_sdk.Types.Text s -> Some s | _ -> None)
   |> String.concat "\n"
 
-let stop_reason_label : Agent_sdk.Types.stop_reason -> string = function
-  | EndTurn -> "end_turn"
-  | StopToolUse -> "tool_use"
-  | MaxTokens -> "max_tokens"
-  | StopSequence -> "stop_sequence"
-  | Refusal -> "refusal"
-  | PauseTurn -> "pause_turn"
-  | Compaction -> "compaction"
-  | ContextWindowExceeded -> "context_window_exceeded"
-  | Unknown s ->
-    let s = String.trim s in
-    if String.equal s "" then "unknown"
-    else
-      let escaped = String.escaped s in
-      let max_len = 80 in
-      let safe =
-        if String.length escaped <= max_len then escaped
-        else String.sub escaped 0 max_len ^ "..."
-      in
-      "unknown:" ^ safe
+let stop_reason_label = Keeper_hooks_oas_types.stop_reason_to_label
+
+type empty_response_content_counts =
+  { text_blocks : int
+  ; text_chars : int
+  ; tool_use_count : int
+  ; tool_result_count : int
+  ; image_count : int
+  ; document_count : int
+  ; audio_count : int
+  }
+
+let zero_empty_response_content_counts =
+  { text_blocks = 0
+  ; text_chars = 0
+  ; tool_use_count = 0
+  ; tool_result_count = 0
+  ; image_count = 0
+  ; document_count = 0
+  ; audio_count = 0
+  }
+
+let empty_response_content_counts content =
+  List.fold_left
+    (fun acc -> function
+      | Agent_sdk.Types.Text s ->
+        { acc with
+          text_blocks = acc.text_blocks + 1
+        ; text_chars = acc.text_chars + String.length s
+        }
+      | Thinking _ | RedactedThinking _ -> acc
+      | ToolUse _ -> { acc with tool_use_count = acc.tool_use_count + 1 }
+      | ToolResult _ ->
+        { acc with tool_result_count = acc.tool_result_count + 1 }
+      | Image _ -> { acc with image_count = acc.image_count + 1 }
+      | Document _ -> { acc with document_count = acc.document_count + 1 }
+      | Audio _ -> { acc with audio_count = acc.audio_count + 1 })
+    zero_empty_response_content_counts content
 
 let empty_response_detail (resp : Agent_sdk.Types.api_response) : string =
-  let text_blocks = ref 0 in
-  let text_chars = ref 0 in
-  let thinking_blocks = ref 0 in
-  let redacted_thinking_blocks = ref 0 in
-  let tool_use_count = ref 0 in
-  let tool_result_count = ref 0 in
-  let image_count = ref 0 in
-  let document_count = ref 0 in
-  let audio_count = ref 0 in
-  List.iter
-    (function
-      | Agent_sdk.Types.Text s ->
-        incr text_blocks;
-        text_chars := !text_chars + String.length s
-      | Thinking _ -> incr thinking_blocks
-      | RedactedThinking _ -> incr redacted_thinking_blocks
-      | ToolUse _ -> incr tool_use_count
-      | ToolResult _ -> incr tool_result_count
-      | Image _ -> incr image_count
-      | Document _ -> incr document_count
-      | Audio _ -> incr audio_count)
-    resp.content;
+  let counts = empty_response_content_counts resp.content in
+  let thinking = Keeper_hooks_oas_types.summarize_thinking_blocks resp.content in
   let input_tokens, output_tokens =
     match resp.usage with
     | Some u -> string_of_int u.input_tokens, string_of_int u.output_tokens
@@ -60,20 +58,23 @@ let empty_response_detail (resp : Agent_sdk.Types.api_response) : string =
   in
   Printf.sprintf
     "empty response (stop_reason=%s content_blocks=%d text_blocks=%d \
-     text_chars=%d thinking_blocks=%d redacted_thinking_blocks=%d \
-     tool_use_count=%d tool_result_count=%d image_count=%d document_count=%d \
-     audio_count=%d input_tokens=%s output_tokens=%s)"
+     text_chars=%d thinking_kind=%s thinking_blocks=%d thinking_chars=%d \
+     redacted_thinking_blocks=%d tool_use_count=%d tool_result_count=%d \
+     image_count=%d document_count=%d audio_count=%d input_tokens=%s \
+     output_tokens=%s)"
     (stop_reason_label resp.stop_reason)
     (List.length resp.content)
-    !text_blocks
-    !text_chars
-    !thinking_blocks
-    !redacted_thinking_blocks
-    !tool_use_count
-    !tool_result_count
-    !image_count
-    !document_count
-    !audio_count
+    counts.text_blocks
+    counts.text_chars
+    thinking.Keeper_hooks_oas_types.thinking_kind
+    thinking.Keeper_hooks_oas_types.thinking_blocks
+    thinking.Keeper_hooks_oas_types.thinking_chars
+    thinking.Keeper_hooks_oas_types.redacted_thinking_blocks
+    counts.tool_use_count
+    counts.tool_result_count
+    counts.image_count
+    counts.document_count
+    counts.audio_count
     input_tokens
     output_tokens
 

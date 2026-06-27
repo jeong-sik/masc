@@ -18,12 +18,13 @@ export function keeperBucket(keeper: Keeper): KeeperBucket {
   return 'running'
 }
 
-export type DotTone = 'ok' | 'warn' | 'bad' | 'idle'
+export type DotTone = 'ok' | 'warn' | 'bad' | 'info' | 'idle'
 
 const DOT_CLASS: Record<DotTone, string> = {
   ok: 'kw-dot ok',
   warn: 'kw-dot warn',
   bad: 'kw-dot bad',
+  info: 'kw-dot info',
   idle: 'kw-dot',
 }
 
@@ -92,8 +93,13 @@ export function keeperPhaseLabel(keeper: Keeper): string {
 
 /** Error phases that must not render as a healthy green dot. */
 const ERROR_STATUS_TOKENS = new Set(['failing', 'overflowed', 'crashed', 'dead', 'zombie'])
-/** Transient / attention phases that warrant a warn (amber) dot. */
-const WARN_STATUS_TOKENS = new Set(['paused', 'compacting', 'handoff', 'draining', 'restarting'])
+/** Operator-initiated pause — warn (amber). Distinct from transient below so the
+ *  Fleet surfaces can show "stopped by operator" apart from "working through a
+ *  phase", matching the prototype fleet.jsx 5-tone vocabulary. */
+const WARN_STATUS_TOKENS = new Set(['paused'])
+/** Transient phases — info (blue). The keeper is moving through Compacting /
+ *  HandingOff / Draining / Restarting, which is working state, not paused. */
+const INFO_STATUS_TOKENS = new Set(['compacting', 'handoff', 'draining', 'restarting'])
 
 /** Canonical lower-cased phase token, preferring the FSM lifecycle_phase and
  *  falling back to the legacy phase field. Used whenever logic (rather than
@@ -120,6 +126,7 @@ export function isTerminalPhase(keeper: Keeper): boolean {
 export function keeperStatusTone(keeper: Keeper): DotTone {
   const token = keeperDisplayStatus(keeper)
   if (ERROR_STATUS_TOKENS.has(token)) return 'bad'
+  if (INFO_STATUS_TOKENS.has(token)) return 'info'
   if (WARN_STATUS_TOKENS.has(token)) return 'warn'
   if (token === 'running') return 'ok'
   return 'idle'
@@ -139,11 +146,14 @@ export function keeperFleetTone(keeper: Keeper): DotTone {
 }
 
 /** The state-pill modifier class for the chat header, derived from the health
- *  tone so error phases get the `bad` pill rather than collapsing to `off`. */
-export function statePillTone(tone: DotTone): 'run' | 'warn' | 'bad' | 'off' {
+ *  tone so error phases get the `bad` pill rather than collapsing to `off`.
+ *  Transient (info) phases get the dedicated `info` pill so the header shows
+ *  "compacting" as working-through, not stopped. */
+export function statePillTone(tone: DotTone): 'run' | 'warn' | 'bad' | 'info' | 'off' {
   if (tone === 'ok') return 'run'
   if (tone === 'warn') return 'warn'
   if (tone === 'bad') return 'bad'
+  if (tone === 'info') return 'info'
   return 'off'
 }
 

@@ -46,10 +46,18 @@ describe('keeperStatusTone', () => {
     expect(keeperStatusTone(mk({ lifecycle_phase: 'Dead' }))).toBe('bad')
     expect(keeperStatusTone(mk({ lifecycle_phase: 'Zombie' }))).toBe('bad')
   })
-  it('maps transient / attention phases to warn', () => {
+  it('maps transient phases to info (working-through, not paused)', () => {
+    // Prototype fleet.jsx vocabulary distinguishes paused(warn) from
+    // transient(info). Compacting / HandingOff / Draining / Restarting are
+    // mid-phase movement, not operator-initiated pause — they render blue.
+    expect(keeperStatusTone(mk({ lifecycle_phase: 'Compacting' }))).toBe('info')
+    expect(keeperStatusTone(mk({ lifecycle_phase: 'HandingOff' }))).toBe('info')
+    expect(keeperStatusTone(mk({ lifecycle_phase: 'Draining' }))).toBe('info')
+    expect(keeperStatusTone(mk({ lifecycle_phase: 'Restarting' }))).toBe('info')
+  })
+  it('maps operator-initiated pause to warn (amber, distinct from transient blue)', () => {
     expect(keeperStatusTone(mk({ status: 'running', paused: true }))).toBe('warn')
-    expect(keeperStatusTone(mk({ lifecycle_phase: 'Compacting' }))).toBe('warn')
-    expect(keeperStatusTone(mk({ lifecycle_phase: 'HandingOff' }))).toBe('warn')
+    expect(keeperStatusTone(mk({ lifecycle_phase: 'Paused', paused: true }))).toBe('warn')
   })
   it('maps stopped / unbooted to idle', () => {
     expect(keeperStatusTone(mk({ status: 'stopped' }))).toBe('idle')
@@ -62,6 +70,7 @@ describe('statePillTone', () => {
     expect(statePillTone('ok')).toBe('run')
     expect(statePillTone('warn')).toBe('warn')
     expect(statePillTone('bad')).toBe('bad')
+    expect(statePillTone('info')).toBe('info')
     expect(statePillTone('idle')).toBe('off')
   })
 })

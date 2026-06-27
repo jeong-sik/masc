@@ -72,6 +72,12 @@ let risk_level_to_string = function
   | Critical -> "critical"
 ;;
 
+let allowed_risk_levels = [ Low; Medium; High; Critical ]
+
+let allowed_risk_level_values = List.map risk_level_to_string allowed_risk_levels
+
+let allowed_risk_level_values_label = String.concat "/" allowed_risk_level_values
+
 let risk_level_to_int = function
   | Low -> 1
   | Medium -> 2
@@ -175,7 +181,12 @@ let approval_rule_of_yojson_with_error json =
     let* max_risk =
       match risk_level_of_string max_risk_raw with
       | Some level -> Ok level
-      | None -> Error (Printf.sprintf "max_risk %S is not low/medium/high/critical" max_risk_raw)
+      | None ->
+        Error
+          (Printf.sprintf
+             "max_risk %S is not %s"
+             max_risk_raw
+             allowed_risk_level_values_label)
     in
     let* created_at =
       match Json_util.get_float json "created_at" with

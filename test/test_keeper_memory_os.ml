@@ -3771,6 +3771,43 @@ let test_fact_of_json_does_not_infer_external_ref_from_legacy_prose () =
       f.Types.valid_until
 ;;
 
+let test_fact_of_json_migrates_legacy_external_state_category () =
+  let first_seen = 1_000_000.0 in
+  let legacy =
+    `Assoc
+      [ "claim", `String "PR #21363 is OPEN, MERGEABLE, and BLOCKED"
+      ; "category", `String "external_state"
+      ; "source", `Assoc [ "trace_id", `String "t"; "turn", `Int 1 ]
+      ; "first_seen", `Float first_seen
+      ; "schema_version", `String "rfc0231-v2"
+      ]
+  in
+  match Types.fact_of_json legacy with
+  | None -> Alcotest.fail "legacy external_state row failed to decode"
+  | Some f ->
+    Alcotest.(check string)
+      "legacy external_state category migrates to fact"
+      "fact"
+      (Types.category_to_string f.Types.category);
+    Alcotest.(check (option string))
+      "legacy external_state category becomes claim_kind"
+      (Some "external_state")
+      (Option.map Types.claim_kind_to_string f.Types.claim_kind);
+    Alcotest.(check bool)
+      "migration does not reintroduce external_ref inference"
+      true
+      (Option.is_none f.Types.external_ref);
+    let json = Yojson.Safe.to_string (Types.fact_to_json f) in
+    Alcotest.(check bool)
+      "rewritten row no longer persists external_state as category"
+      false
+      (contains {|"category":"external_state"|} json);
+    Alcotest.(check bool)
+      "rewritten row persists external_state as claim_kind"
+      true
+      (contains {|"claim_kind":"external_state"|} json)
+;;
+
 let test_fact_to_json_drops_external_ref_surface () =
   let now = 1_000_000.0 in
   let f = fact_fixture ~now () in
@@ -4930,6 +4967,10 @@ let () =
             "fact_of_json does not infer external_ref from legacy prose"
             `Quick
             test_fact_of_json_does_not_infer_external_ref_from_legacy_prose
+        ; Alcotest.test_case
+            "fact_of_json migrates legacy external_state category"
+            `Quick
+            test_fact_of_json_migrates_legacy_external_state_category
         ; Alcotest.test_case
             "fact_to_json drops external_ref surface"
             `Quick

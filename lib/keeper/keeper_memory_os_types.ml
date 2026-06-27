@@ -175,6 +175,15 @@ let claim_kind_of_string s =
   | _ -> None
 ;;
 
+let legacy_external_state_category = "external_state"
+
+let category_and_claim_kind_of_persisted_row ~category_str ~claim_kind =
+  match String.lowercase_ascii (String.trim category_str) with
+  | s when String.equal s legacy_external_state_category ->
+    Fact, Some (Option.value claim_kind ~default:External_state)
+  | _ -> category_of_string category_str, claim_kind
+;;
+
 (* Exhaustive promotability: only objective, durable claim kinds cross keepers.
    Extends the prior [Fact; Constraint] whitelist with the two outcome-derived
    kinds [Validated_approach] and [Lesson] — a validated approach and a hard-won
@@ -593,11 +602,17 @@ let fact_of_json (json : Yojson.Safe.t) =
           let claim_kind =
             Option.bind (json_string_field wire_field_claim_kind fields) claim_kind_of_string
           in
+          let category, claim_kind =
+            category_and_claim_kind_of_persisted_row ~category_str ~claim_kind
+          in
           Some
             { claim
             ; (* Parse-once at the read boundary; legacy free-string categories
-                 on disk map to their arm or [Unknown] (graceful-degrade). *)
-              category = category_of_string category_str
+                 on disk map to their arm or [Unknown] (graceful-degrade). The
+                 legacy [external_state] category is an exact structured token,
+                 so decode it into the modern [Fact] + [claim_kind=External_state]
+                 shape rather than inferring from claim prose. *)
+              category
             ; external_ref
             ; claim_kind
             ; source

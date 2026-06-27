@@ -301,7 +301,10 @@ let count_running ?base_path () =
 ;;
 
 let record_crash ~base_path name ts msg =
-  Error_tracking.record_crash ~base_path name ts msg ~update_entry
+  let update_entry_unit ~base_path name f =
+    ignore (update_entry ~base_path name f)
+  in
+  Error_tracking.record_crash ~base_path name ts msg ~update_entry:update_entry_unit
 ;;
 
 let set_grpc_close ~base_path name close_fn =

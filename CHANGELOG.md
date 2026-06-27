@@ -29,6 +29,11 @@
   kill-switch. Shell IR execution now always applies the workspace path jail;
   operators should remove the old env override and handle false positives with
   policy/data fixes or rollback instead of disabling path validation.
+  Runtime startup now warns and emits
+  `masc_keeper_shell_ir_effect_total{kind="retired_path_jail_env_ignored"}`
+  when the retired env var is still present. The former
+  `path_jail_disabled` label is retired because the path jail can no longer be
+  disabled at runtime.
 - `dashboard`: documented the Memory OS `external_ref` dashboard API removal.
   Legacy payloads are ignored rather than re-rendered as status tags; producers
   must use future structured origin fields instead of relying on the retired

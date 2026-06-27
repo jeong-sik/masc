@@ -602,6 +602,9 @@ let handle_tool_execute_typed
                   meta.name
                   (Printexc.to_string exn))
           in
+          Retired_env_warnings.report_shell_ir_path_jail_if_set
+            ~source:"execute"
+            ();
           let dispatch_result =
             if Env_config_runtime.Shell_ir_approval_gate.enabled ()
             then (

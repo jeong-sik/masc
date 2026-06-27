@@ -220,6 +220,19 @@ let test_path_probe_does_not_list_parent_outside_cwd () =
        | Some entries -> check (list string) "outside parent entries hidden" [] entries
        | None -> fail "path probe should include parent_entries")
 
+let test_retired_path_jail_env_detection () =
+  let configured value =
+    Retired_env_warnings.For_testing.shell_ir_path_jail_env_configured
+      ~getenv:(fun name ->
+        if String.equal name "MASC_SHELL_IR_PATH_JAIL_ENABLED"
+        then value
+        else None)
+      ()
+  in
+  check bool "absent retired path jail env" false (configured None);
+  check bool "blank retired path jail env" false (configured (Some "  "));
+  check bool "non-empty retired path jail env" true (configured (Some "false"))
+
 (* Source-level pin: assert that no [("cwd", `String <ident>)]
    literal remains in keeper_sandbox_docker.ml. The four sites
    from #11080's sibling leak class must be wired through
@@ -286,5 +299,11 @@ let () =
         ; test_case
             "absolute missing path outside cwd does not list parent"
             `Quick test_path_probe_does_not_list_parent_outside_cwd
+        ] )
+    ; ( "retired-env"
+      , [
+          test_case
+            "path jail retired env detection ignores blanks"
+            `Quick test_retired_path_jail_env_detection
         ] )
     ]

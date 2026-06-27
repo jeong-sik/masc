@@ -1,4 +1,4 @@
-import type { Agent, Keeper, PipelineStage } from '../types'
+import type { Agent, Keeper, KeeperPhase, PipelineStage } from '../types'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { parseAgentStatus } from './agent-status'
 import { UNKNOWN_STATUS_LABEL } from './format-string'
@@ -7,7 +7,7 @@ import {
   type KeeperRuntimeProjection,
 } from './keeper-runtime-projection'
 
-export type RuntimeBand = 'active' | 'attention' | 'paused' | 'offline'
+export type RuntimeBand = 'active' | 'attention' | 'paused' | 'offline' | 'transient'
 
 interface RuntimeBandMeta {
   key: RuntimeBand
@@ -96,6 +96,8 @@ const DEFAULT_PHASE_BY_BAND: Partial<Record<RuntimeBand, string>> = {
   active: 'Running',
   paused: 'Paused',
   offline: 'Offline',
+  // No transient default: the band intentionally preserves the concrete
+  // Compacting / HandingOff / Draining / Restarting phase as evidence.
 }
 
 const STAGE_PHASE_EQUIVALENTS: Record<string, string> = {
@@ -130,6 +132,11 @@ const BAND_META: Record<RuntimeBand, RuntimeBandMeta> = {
     label: '오프라인',
     description: '프로세스나 하트비트를 확인하지 못해 기동이 필요한 상태입니다.',
   },
+  transient: {
+    key: 'transient',
+    label: '전이',
+    description: '컨텍스트 압축, 승계, 종료, 재시작 등 단계 전이 중이라 결과 확인 전 입니다.',
+  },
 }
 
 function phaseMeta(key: string | null | undefined): PhaseMeta {
@@ -146,6 +153,43 @@ function stageMeta(key: string | null | undefined): StageMeta {
 
 function normalizeStage(stage: PipelineStage | string | null | undefined): string {
   return stage ? String(stage) : 'offline'
+}
+
+// Transient FSM phases — accepted here only after upstream normalization to
+// the closed-sum SSOTs (KeeperPhase: `types/core.ts:1083`, PipelineStage:
+// `types/core.ts:945`). Raw composite wire spellings such as `handing_off`
+// are normalized before this helper sees them.
+// These signal a *transition* (compacting/handoff/draining/restarting) rather
+// than steady-state, so they route to the dedicated `transient` band instead
+// of `active` (which would silently re-merge them with healthy keepers mid-
+// transition) or `attention` (which is reserved for failure/stall signals).
+//
+// `satisfies readonly KeeperPhase[]` ties each literal to the closed sum: any
+// drift (typo or new transient variant) becomes a compile-time error instead
+// of a silent runtime mismatch. `as const` keeps the literal types so the
+// `ReadonlySet<string>` derivation stays branch-free.
+const TRANSIENT_KEEPER_PHASES = [
+  'Compacting',
+  'HandingOff',
+  'Draining',
+  'Restarting',
+] as const satisfies readonly KeeperPhase[]
+
+const TRANSIENT_PIPELINE_STAGES = [
+  'compacting',
+  'handoff',
+  'draining',
+  'restarting',
+] as const satisfies readonly PipelineStage[]
+
+const TRANSIENT_PHASE_KEYS: ReadonlySet<string> = new Set<string>([
+  ...TRANSIENT_KEEPER_PHASES,
+  ...TRANSIENT_PIPELINE_STAGES,
+])
+
+export function isTransientPhase(phase: string | null | undefined): boolean {
+  if (phase == null) return false
+  return TRANSIENT_PHASE_KEYS.has(phase)
 }
 
 export function keeperPhaseForDisplay(
@@ -166,8 +210,16 @@ function keeperBand(projection: KeeperRuntimeProjection): RuntimeBand {
   // were strict subsets of `projection.opState.kind === 'paused'` and
   // `projection.opState.kind === 'offline'`; routing through the runtime
   // projection keeps monitoring aligned with detail live-truth.
+  //
+  // RFC-0295 §5.2 (pixel-perfect Fleet tone rail): transient FSM phases
+  // (Compacting / HandingOff / Draining / Restarting) get their own band so
+  // the prototype's busy rail becomes live instead of collapsing into
+  // `active`. Routed *before* attention so a mid-compaction blocker check
+  // doesn't repaint the row as red — the operator's first scan question is
+  // "what is currently moving", not "what is currently failing".
   if (projection.opState.kind === 'paused') return 'paused'
   if (projection.opState.kind === 'offline') return 'offline'
+  if (isTransientPhase(projection.opState.phase)) return 'transient'
   if (projection.signals.some(signal => signal.contributesToAttention)) {
     return 'attention'
   }

@@ -14,6 +14,11 @@ export interface LiveRuntimeView {
   agents: number
   keepers: number
   pausedKeepers: number
+  // Transient keeper count — RFC-0295. Always present (even when the
+  // underlying source can't enumerate it) so downstream consumers can
+  // reconcile `keepers + pausedKeepers + transientKeepers + offlineKeepers`
+  // against `keeperRows` without guessing.
+  transientKeepers: number
   offlineKeepers: number
   keeperRows: number
   tasks: number
@@ -36,6 +41,7 @@ export interface RuntimeCounts {
 export interface KeeperCountBreakdownInput {
   liveKeepers: number
   pausedKeepers?: number
+  transientKeepers?: number
   offlineKeepers?: number
   configuredKeepers: number
 }
@@ -47,6 +53,7 @@ interface ResolveRuntimeCountsOptions {
   agentsCount: number
   keepersCount: number
   pausedKeepersCount?: number
+  transientKeepersCount?: number
   offlineKeepersCount?: number
   keeperRowsCount?: number
   tasksCount?: number
@@ -240,6 +247,7 @@ export function resolveRuntimeCounts({
   agentsCount,
   keepersCount,
   pausedKeepersCount = 0,
+  transientKeepersCount = 0,
   offlineKeepersCount,
   keeperRowsCount,
   tasksCount = 0,
@@ -262,21 +270,27 @@ export function resolveRuntimeCounts({
   const livePausedKeepers = runtimeHealthAvailable
     ? runtimeHealthCounts.pausedKeepers
     : normalizeCount(pausedKeepersCount)
+  // Runtime-health fleet_safety is authoritative for running/paused fibers,
+  // but it does not enumerate RFC-0295 transient detail rows. Preserve the
+  // row-derived transient count so the live view remains reconcilable without
+  // synthesizing offline rows from stale execution snapshots.
+  const liveTransientKeepers = normalizeCount(transientKeepersCount)
   const liveOfflineKeepers = runtimeHealthAvailable ? 0 : normalizeCount(offlineKeepersCount)
   const liveKeeperRows = runtimeHealthAvailable
-    ? liveKeepers + livePausedKeepers
+    ? liveKeepers + livePausedKeepers + liveTransientKeepers
     : Math.max(
         normalizeCount(keeperRowsCount),
-        liveKeepers + livePausedKeepers + liveOfflineKeepers,
+        liveKeepers + livePausedKeepers + liveTransientKeepers + liveOfflineKeepers,
       )
   const liveTasks = normalizeCount(tasksCount)
   const live: LiveRuntimeView = {
     agents: liveAgents,
     keepers: liveKeepers,
     pausedKeepers: livePausedKeepers,
+    transientKeepers: liveTransientKeepers,
     offlineKeepers: runtimeHealthAvailable
       ? 0
-      : Math.max(0, liveKeeperRows - liveKeepers - livePausedKeepers),
+      : Math.max(0, liveKeeperRows - liveKeepers - livePausedKeepers - liveTransientKeepers),
     keeperRows: liveKeeperRows,
     tasks: liveTasks,
     totalRuntimes: liveAgents + liveKeepers,
@@ -343,10 +357,12 @@ export function formatActiveOverConfigured(
   if (kind === 'keeper') {
     const running = counts.live.keepers
     const paused = counts.live.pausedKeepers
+    const transient = counts.live.transientKeepers
     const offline = counts.live.offlineKeepers
     const configured = counts.configured.keepers
     const parts = [`런타임 가동 ${running}`]
     if (paused > 0) parts.push(`일시정지 ${paused}`)
+    if (transient > 0) parts.push(`전이 ${transient}`)
     if (offline > 0) parts.push(`오프라인 ${offline}`)
     parts.push(`설정 ${configured}`)
     return parts.join(' / ')
@@ -373,13 +389,16 @@ export function expectedRuntimeDetailRows(counts: Pick<RuntimeCounts, 'live' | '
 export function formatKeeperCountBreakdown({
   liveKeepers,
   pausedKeepers = 0,
+  transientKeepers = 0,
   offlineKeepers = 0,
   configuredKeepers,
 }: KeeperCountBreakdownInput): string {
   const parts = [`키퍼 런타임 가동 ${normalizeCount(liveKeepers)}`]
   const paused = normalizeCount(pausedKeepers)
+  const transient = normalizeCount(transientKeepers)
   const offline = normalizeCount(offlineKeepers)
   if (paused > 0) parts.push(`일시정지 ${paused}`)
+  if (transient > 0) parts.push(`전이 ${transient}`)
   if (offline > 0) parts.push(`오프라인 ${offline}`)
   parts.push(`설정 ${normalizeCount(configuredKeepers)}`)
   return parts.join(' / ')
@@ -391,6 +410,7 @@ export function formatKeeperRosterCount(counts: Pick<RuntimeCounts, 'live' | 'co
     formatKeeperCountBreakdown({
       liveKeepers: counts.live.keepers,
       pausedKeepers: counts.live.pausedKeepers,
+      transientKeepers: counts.live.transientKeepers,
       offlineKeepers: counts.live.offlineKeepers,
       configuredKeepers: counts.configured.keepers,
     }).replace(/^키퍼 /, ''),
@@ -398,11 +418,13 @@ export function formatKeeperRosterCount(counts: Pick<RuntimeCounts, 'live' | 'co
 }
 
 export function formatRuntimeRosterCount(counts: Pick<RuntimeCounts, 'live' | 'configured'>): string {
-  return [
+  const parts = [
     `상세 ${runtimeDetailRows(counts)}`,
     `런타임 가동 ${counts.live.totalRuntimes}`,
-    `키퍼 설정 ${counts.configured.keepers}`,
-  ].join(' / ')
+  ]
+  if (counts.live.transientKeepers > 0) parts.push(`전이 ${counts.live.transientKeepers}`)
+  parts.push(`키퍼 설정 ${counts.configured.keepers}`)
+  return parts.join(' / ')
 }
 
 export function formatCommandTargetSection(kind: CommandTargetKind, count: number): string {

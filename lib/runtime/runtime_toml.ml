@@ -37,6 +37,26 @@ let typed_find (kind : string) (path : string) (tbl : Otoml.t) (key : string) ge
          (Printf.sprintf "%s must be %s; got %s" key kind msg))
 ;;
 
+let positive_finite_float_opt_field
+      ~(path : string)
+      ~(key : string)
+      (value_result : (float option, parse_error list) result)
+  : (float option, parse_error list) result
+  =
+  match value_result with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some value) when value > 0.0 && Float.is_finite value -> Ok (Some value)
+  | Ok (Some value) ->
+    Error
+      (error
+         (path ^ "." ^ key)
+         (Printf.sprintf
+            "%s must be a positive finite float; got %g"
+            key
+            value))
+;;
+
 let required_non_empty_string
       ?(trim_result = false)
       (tbl : Otoml.t)
@@ -289,17 +309,28 @@ let parse_provider (id : string) (tbl : Otoml.t)
          | None -> None
          | Some h_tbl -> Some (parse_headers h_tbl (path ^ ".headers"))
        in
-       Ok
-         { Runtime_schema.id
-         ; display_name
-         ; protocol
-         ; api_format
-         ; transport
-         ; is_non_interactive
-         ; credentials
-         ; capabilities
-         ; headers
-         })
+       (* Optional per-provider connect/headers timeout override (oas#2163).
+          Absent (most providers) leaves the OAS kind-based default in force. *)
+       let connect_timeout_key = Runtime_schema.connect_timeout_s_key in
+       let connect_timeout_result =
+         typed_find "a float" path tbl connect_timeout_key Otoml.get_float
+         |> positive_finite_float_opt_field ~path ~key:connect_timeout_key
+       in
+       (match connect_timeout_result with
+        | Error errs -> Error errs
+        | Ok connect_timeout_s ->
+          Ok
+            { Runtime_schema.id
+            ; display_name
+            ; protocol
+            ; api_format
+            ; transport
+            ; is_non_interactive
+            ; credentials
+            ; capabilities
+            ; headers
+            ; connect_timeout_s
+            }))
 ;;
 
 let parse_providers (toml : Otoml.t)

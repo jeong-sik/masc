@@ -55,6 +55,8 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
+  ;; Effective floor for Provider_config.make ?connect_timeout_s is the pinned
+  ;; OAS commit 37f2084 until the next published agent_sdk release carries it.
   (agent_sdk (>= 0.207.8))
   (uri (>= 4.4))
   (tls (>= 2.0))

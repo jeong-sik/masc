@@ -38,6 +38,7 @@ let runpod_provider =
   ; credentials = Some (Inline "rp-test-token")
   ; capabilities = None
   ; headers = None
+  ; connect_timeout_s = None
   }
 
 let qwen_model =
@@ -64,7 +65,7 @@ let runpod_binding =
   ; num_ctx = None
   }
 
-let runtime_toml_with_credentials credentials =
+let runtime_toml_with_credentials ?(provider_extra = "") credentials =
   Printf.sprintf
     {|
 [runtime]
@@ -77,6 +78,8 @@ endpoint = "https://example-runpod.proxy.runpod.net/v1"
 
 %s
 
+%s
+
 [models.qwen]
 api-name = "qwen"
 max-context = 160000
@@ -86,6 +89,7 @@ tools-support = true
 is-default = true
 max-concurrent = 4
 |}
+    provider_extra
     credentials
 
 let check_parse_error errors expected_path expected_message =
@@ -97,6 +101,23 @@ let check_parse_error errors expected_path expected_message =
       errors
   in
   check bool "expected parse error" true matches
+
+let check_parse_error_contains errors expected_path expected_message_fragment =
+  let matches =
+    List.exists
+      (fun (err : Runtime_toml.parse_error) ->
+         String.equal err.path expected_path
+         && String_util.contains_substring err.message expected_message_fragment)
+      errors
+  in
+  check bool "expected parse error" true matches
+
+let inline_credentials =
+  {|
+[providers.runpod_mtp.credentials]
+type = "inline"
+value = "rp-test-token"
+|}
 
 let test_runtime_toml_rejects_blank_env_credential_key () =
   let content =
@@ -114,6 +135,65 @@ key = ""
       errors
       "providers.runpod_mtp.credentials.key"
       "credential type 'env' requires non-empty 'key'"
+
+let test_runtime_toml_threads_provider_connect_timeout () =
+  let content =
+    runtime_toml_with_credentials
+      ~provider_extra:(Runtime_schema.connect_timeout_s_key ^ " = 123.5")
+      inline_credentials
+  in
+  match Runtime_toml.parse_string content with
+  | Error errors ->
+    failf
+      "expected runtime TOML connect-timeout-s to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.providers, cfg.bindings with
+     | [ provider ], [ binding ] ->
+       check (option (float 0.0)) "provider connect timeout" (Some 123.5)
+         provider.Runtime_schema.connect_timeout_s;
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Error msg -> failf "unexpected adapter error: %s" msg
+        | Ok provider_cfg ->
+          check (option (float 0.0)) "provider config connect timeout"
+            (Some 123.5) provider_cfg.connect_timeout_s)
+     | providers, bindings ->
+       failf "expected one provider/binding, got %d/%d"
+         (List.length providers)
+         (List.length bindings))
+
+let test_runtime_toml_rejects_non_positive_provider_connect_timeout () =
+  let content =
+    runtime_toml_with_credentials
+      ~provider_extra:(Runtime_schema.connect_timeout_s_key ^ " = 0.0")
+      inline_credentials
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> fail "expected runtime TOML connect-timeout-s parse error"
+  | Error errors ->
+    check_parse_error_contains
+      errors
+      "providers.runpod_mtp.connect-timeout-s"
+      "positive finite float"
+
+let test_runtime_toml_rejects_wrong_typed_provider_connect_timeout () =
+  let content =
+    runtime_toml_with_credentials
+      ~provider_extra:(Runtime_schema.connect_timeout_s_key ^ " = 600")
+      inline_credentials
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> fail "expected runtime TOML connect-timeout-s type error"
+  | Error errors ->
+    check_parse_error_contains
+      errors
+      "providers.runpod_mtp.connect-timeout-s"
+      (Runtime_schema.connect_timeout_s_key ^ " must be a float")
 
 let test_runtime_toml_rejects_missing_env_credential_key () =
   let content =
@@ -1006,6 +1086,18 @@ let () =
             "runtime TOML trims env credential key"
             `Quick
             test_runtime_toml_trims_env_credential_key
+        ; test_case
+            "runtime TOML threads provider connect timeout"
+            `Quick
+            test_runtime_toml_threads_provider_connect_timeout
+        ; test_case
+            "runtime TOML rejects non-positive provider connect timeout"
+            `Quick
+            test_runtime_toml_rejects_non_positive_provider_connect_timeout
+        ; test_case
+            "runtime TOML rejects wrong-typed provider connect timeout"
+            `Quick
+            test_runtime_toml_rejects_wrong_typed_provider_connect_timeout
         ; test_case
             "runtime TOML rejects legacy protocol aliases"
             `Quick

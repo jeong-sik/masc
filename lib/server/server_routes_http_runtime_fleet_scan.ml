@@ -789,9 +789,29 @@ let active_task_owner_fiber_scan_semantics =
   "reports active task owners without executable keeper fibers; disabled \
    keepers are excluded; matching rows can degrade fleet status"
 
+let paused_keeper_last_blocker_json paused_keepers_json name =
+  match paused_keepers_json with
+  | `Assoc fields -> (
+    match List.assoc_opt "details" fields with
+    | Some (`List details) ->
+      details
+      |> List.find_map (function
+        | `Assoc detail_fields
+          when (match List.assoc_opt "name" detail_fields with
+                | Some (`String detail_name) -> String.equal detail_name name
+                | _ -> false) ->
+            (match List.assoc_opt "last_blocker" detail_fields with
+             | Some last_blocker -> Some last_blocker
+             | None -> Some `Null)
+        | _ -> None)
+      |> Option.value ~default:`Null
+    | Some _ | None -> `Null)
+  | _ -> `Null
+
 let blocked_keeper_detail_json
     ?base_path
     ?phase
+    ?(last_blocker = `Null)
     ~bootable_set
     ~capacity_set
     ~paused_set
@@ -879,6 +899,7 @@ let blocked_keeper_detail_json
        ("phase", Json_util.string_opt_to_json phase_name);
        ( "last_failure_reason"
        , Json_util.string_opt_to_json registry_last_failure_reason );
+       ("last_blocker", last_blocker);
        ("bootable", `Bool is_bootable);
        ("reaction_capacity", `Bool is_capacity);
        ("paused", `Bool is_paused);
@@ -1249,6 +1270,7 @@ let keeper_fleet_safety_health_json
              blocked_keeper_detail_json
                ?base_path:runtime_base_path
                ?phase:(phase_value name)
+               ~last_blocker:(paused_keeper_last_blocker_json paused_keepers_json name)
                ~bootable_set
                ~capacity_set
                ~paused_set

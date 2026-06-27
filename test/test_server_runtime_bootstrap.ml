@@ -1739,6 +1739,20 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
           make_keeper_meta ~name:"capacity-paused" ~trace_id:"trace-capacity-paused"
             ~paused:true ()
         in
+        let paused =
+          {
+            paused with
+            runtime =
+              {
+                paused.runtime with
+                last_blocker =
+                  Some
+                    (Keeper_meta_contract.blocker_info_of_class
+                       ~detail:"no_progress loop detected"
+                       Keeper_meta_contract.No_progress_loop);
+              };
+          }
+        in
         let running_a =
           make_keeper_meta ~name:"capacity-running-a"
             ~trace_id:"trace-capacity-running-a" ()
@@ -1798,6 +1812,18 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
           Alcotest.(check string) "health suggests paused action"
             "resume_or_leave_paused"
             (blocked_detail "capacity-paused" |> member "action" |> to_string);
+          Alcotest.(check string) "health preserves paused blocker class"
+            "no_progress_loop"
+            (blocked_detail "capacity-paused"
+             |> member "last_blocker"
+             |> member "klass"
+             |> to_string);
+          Alcotest.(check string) "health preserves paused blocker detail"
+            "no_progress loop detected"
+            (blocked_detail "capacity-paused"
+             |> member "last_blocker"
+             |> member "detail"
+             |> to_string);
           Alcotest.(check string) "health suggests unregistered action"
             "start_or_recover_keeper"
             (blocked_detail "example" |> member "action" |> to_string);

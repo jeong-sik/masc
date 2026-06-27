@@ -143,8 +143,10 @@ let category_of_string s =
 (* RFC-0285 §3.1: producer-emitted origin tag, orthogonal to [category] (a [Lesson]
    can be a self-observation). A closed sum classified ONCE at the librarian write
    boundary — not a read-time string match (the project's workaround signature #2).
-   An absent/unrecognized tag yields [None] in [claim_kind_of_string], which routes
-   to the durable pre-RFC path (safe), never to wrong-volatile. *)
+   An absent/unrecognized tag yields [None] in [claim_kind_of_string]. For normal
+   categories that routes to the durable pre-RFC path (safe), never to
+   wrong-volatile; legacy category migrations may reject invalid structured tags
+   instead of guessing. *)
 type claim_kind =
   | Self_observation (* transient first-person agent state: idle, looping, tool-timeout *)
   | External_state (* about the world/PR/issue; verifiable elsewhere *)
@@ -175,6 +177,41 @@ let claim_kind_of_string s =
   | _ -> None
 ;;
 
+type persisted_claim_kind =
+  | Persisted_claim_kind_absent
+  | Persisted_claim_kind_valid of claim_kind
+  | Persisted_claim_kind_invalid
+
+let persisted_claim_kind_of_json fields =
+  match List.assoc_opt wire_field_claim_kind fields with
+  | None -> Persisted_claim_kind_absent
+  | Some (`String raw) ->
+    (match claim_kind_of_string raw with
+     | Some claim_kind -> Persisted_claim_kind_valid claim_kind
+     | None -> Persisted_claim_kind_invalid)
+  | Some _ -> Persisted_claim_kind_invalid
+;;
+
+let legacy_external_state_category = claim_kind_to_string External_state
+
+let category_and_claim_kind_of_persisted_row ~category_str ~claim_kind =
+  match category_str with
+  | s when String.equal s legacy_external_state_category ->
+    (match claim_kind with
+     | Persisted_claim_kind_absent
+     | Persisted_claim_kind_valid External_state
+     | Persisted_claim_kind_valid Self_observation
+     | Persisted_claim_kind_valid Durable_knowledge
+     | Persisted_claim_kind_valid Diagnostic -> Some (Fact, Some External_state)
+     | Persisted_claim_kind_invalid -> None)
+  | _ ->
+    let claim_kind =
+      match claim_kind with
+      | Persisted_claim_kind_absent | Persisted_claim_kind_invalid -> None
+      | Persisted_claim_kind_valid claim_kind -> Some claim_kind
+    in
+    Some (category_of_string category_str, claim_kind)
+;;
 (* Exhaustive promotability: only objective, durable claim kinds cross keepers.
    Extends the prior [Fact; Constraint] whitelist with the two outcome-derived
    kinds [Validated_approach] and [Lesson] — a validated approach and a hard-won
@@ -586,32 +623,32 @@ let fact_of_json (json : Yojson.Safe.t) =
           let claim_id =
             Option.bind (json_string_field wire_field_claim_id fields) normalize_claim_id
           in
-          (* RFC-0285 §3.1: absent on legacy rows -> [None] (durable path). Closed sum,
-             so an unrecognized string also yields [None] (graceful-degrade). The
-             write-side [valid_until] is preserved as-is above; legacy self-observation
-             rows are not retrofitted a horizon (RFC §5 non-goal). *)
-          let claim_kind =
-            Option.bind (json_string_field wire_field_claim_kind fields) claim_kind_of_string
-          in
-          Some
-            { claim
-            ; (* Parse-once at the read boundary; legacy free-string categories
-                 on disk map to their arm or [Unknown] (graceful-degrade). *)
-              category = category_of_string category_str
-            ; external_ref
-            ; claim_kind
-            ; source
-            ; observed_by
-            ; first_seen
-            ; valid_until
-            ; last_verified_at
-            ; schema_version =
-                (* DET-OK: default to current schema for forward compatibility. *)
-                Option.value
-                  (json_string_field wire_field_schema_version fields)
-                  ~default:schema_version
-            ; claim_id
-            }
+          let claim_kind = persisted_claim_kind_of_json fields in
+          (match category_and_claim_kind_of_persisted_row ~category_str ~claim_kind with
+           | None -> None
+           | Some (category, claim_kind) ->
+             Some
+               { claim
+               ; (* Parse-once at the read boundary; legacy free-string categories
+                    on disk map to their arm or [Unknown] (graceful-degrade). The
+                    legacy [external_state] category is an exact structured token,
+                    so decode it into the modern [Fact] + [claim_kind=External_state]
+                    shape rather than inferring from claim prose. *)
+                 category
+               ; external_ref
+               ; claim_kind
+               ; source
+               ; observed_by
+               ; first_seen
+               ; valid_until
+               ; last_verified_at
+               ; schema_version =
+                   (* DET-OK: default to current schema for forward compatibility. *)
+                   Option.value
+                     (json_string_field wire_field_schema_version fields)
+                     ~default:schema_version
+               ; claim_id
+               })
         | None -> None)
      | (Some _, Some _, None)
      | (Some _, None, _)

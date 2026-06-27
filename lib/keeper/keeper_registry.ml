@@ -739,11 +739,21 @@ let rec dispatch_event_with_audit
                to_phase_str
                event_str);
           (* Record transition in audit ring buffer for dashboard API *)
+          let audit_events_fired =
+            match events_fired with
+            | Some events -> events
+            | None -> [ event ]
+          in
+          let audit_selected_event =
+            match selected_event with
+            | Some selected -> selected
+            | None -> event
+          in
           Keeper_transition_audit.record_transition
             ~keeper_name:name
             { snapshot
-            ; events_fired = Option.value events_fired ~default:[ event ]
-            ; selected_event = Option.value selected_event ~default:event
+            ; events_fired = audit_events_fired
+            ; selected_event = audit_selected_event
             ; prev_phase = tr.prev_phase
             ; new_phase = tr.new_phase
             ; transition_outcome = "applied"

@@ -752,6 +752,13 @@ let active_task_owner_fiber_scan_semantics =
   "reports active task owners without executable keeper fibers; disabled \
    keepers are excluded; matching rows can degrade fleet status"
 
+(* Maximum length of the diagnostic string surfaced on public [/health]
+   fields via [public_health_diagnostic_preview]. Operational limit (UX
+   contract for operator-facing snippets), not a security bound — full
+   redaction happens upstream through [Keeper_secret_redaction] and
+   [Observability_redact.redact_text]; this only truncates the tail. *)
+let max_public_diagnostic_preview_len = 240
+
 let public_health_diagnostic_preview ?base_path ~keeper_name text =
   let text =
     match base_path with
@@ -772,7 +779,7 @@ let public_health_diagnostic_preview ?base_path ~keeper_name text =
         let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
         Keeper_secret_redaction.redact_text redaction text
   in
-  Observability_redact.redact_preview ~max_len:240 text
+  Observability_redact.redact_preview ~max_len:max_public_diagnostic_preview_len text
 
 let blocked_keeper_detail_json
     ?base_path
@@ -1238,6 +1245,11 @@ let keeper_fleet_safety_health_json
     else if active_task_owner_is_selected_blocker then active_task_owner_blocked_names
     else []
   in
+  (* Counts unique blocked keeper NAMES, not capacity shortfall. This
+     intentionally differs from pre-#22388 behavior, which reported
+     [executable_reaction_capacity_shortfall_count]; see the PR summary.
+     Consumers should read this as "number of named blockers" rather than
+     missing capacity slots. *)
   let blocked_count = List.length blocked_keeper_names in
   let active_capacity_names =
     if no_executable_keeper_fibers then executable_names

@@ -12,6 +12,45 @@ val schema_version : string
     collides; the consolidator filters it out of its source keeper list. *)
 val shared_store_id : string
 
+(** Canonical JSON wire field names for Memory OS persistence and librarian
+    ingestion. The schema module owns these strings so parser, retry prompt,
+    persistence codec, and tests share one source. *)
+val wire_field_trace_id : string
+val wire_field_turn : string
+val wire_field_tool_call_id : string
+val wire_field_claim : string
+val wire_field_category : string
+val wire_field_source : string
+val wire_field_first_seen : string
+val wire_field_valid_until : string
+val wire_field_last_verified_at : string
+val wire_field_observed_by : string
+val wire_field_claim_id : string
+val wire_field_claim_kind : string
+val wire_field_schema_version : string
+val wire_field_generation : string
+val wire_field_episode_summary : string
+val wire_field_claims : string
+val wire_field_open_items : string
+val wire_field_constraints : string
+val wire_field_preserved_tool_refs : string
+val wire_field_source_turn : string
+val wire_field_source_tool_call_id : string
+val wire_field_source_turn_range : string
+val wire_field_lo : string
+val wire_field_hi : string
+val wire_field_created_at : string
+val wire_field_terminal_marker : string
+
+(** Episode-object fields accepted from the librarian and rendered in retry
+    prompts. [wire_field_schema_version] is accepted separately for compatibility
+    but is not requested from the provider. *)
+val wire_librarian_episode_fields : string list
+
+(** Claim-object fields accepted from the librarian and rendered in retry
+    prompts. *)
+val wire_librarian_claim_fields : string list
+
 (** Source attribution for a single extracted fact. *)
 type provenance_event =
   { trace_id : string
@@ -90,10 +129,10 @@ val librarian_claim_kinds : claim_kind list
 val claim_kind_of_string : string -> claim_kind option
 
 (** Whether a category may be promoted into the shared semantic tier. Exhaustive
-    over {!category}; only [Fact] and [Constraint] promote (preserving the prior
-    ["fact";"constraint"] whitelist), so a new or typo'd category cannot silently
-    join the promotable set — a future durable kind must be classified here at
-    compile time. *)
+    over {!category}; [Fact], [Constraint], [Validated_approach], and [Lesson]
+    promote. Everything else stays keeper-local, so a new or typo'd category
+    cannot silently join the shared tier — a future durable kind must be
+    classified here at compile time. *)
 val is_promotable : category -> bool
 
 (** Historical RFC-0259 external-ref kind. Kept as a closed sum for source

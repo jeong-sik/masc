@@ -8,37 +8,20 @@ type input =
   ; messages : Agent_sdk.Types.message list
   }
 
-let wire_field_episode_summary = "episode_summary"
-let wire_field_claims = "claims"
-let wire_field_open_items = "open_items"
-let wire_field_constraints = "constraints"
-let wire_field_preserved_tool_refs = "preserved_tool_refs"
-let wire_field_claim = "claim"
-let wire_field_category = "category"
-let wire_field_source_turn = "source_turn"
-let wire_field_source_tool_call_id = "source_tool_call_id"
-let wire_field_claim_id = "claim_id"
-let wire_field_claim_kind = "claim_kind"
-let wire_field_schema_version = "schema_version"
-
-let wire_episode_fields =
-  [ wire_field_episode_summary
-  ; wire_field_claims
-  ; wire_field_open_items
-  ; wire_field_constraints
-  ; wire_field_preserved_tool_refs
-  ]
-;;
-
-let wire_claim_fields =
-  [ wire_field_claim
-  ; wire_field_category
-  ; wire_field_source_turn
-  ; wire_field_source_tool_call_id
-  ; wire_field_claim_id
-  ; wire_field_claim_kind
-  ]
-;;
+let wire_field_episode_summary = Keeper_memory_os_types.wire_field_episode_summary
+let wire_field_claims = Keeper_memory_os_types.wire_field_claims
+let wire_field_open_items = Keeper_memory_os_types.wire_field_open_items
+let wire_field_constraints = Keeper_memory_os_types.wire_field_constraints
+let wire_field_preserved_tool_refs = Keeper_memory_os_types.wire_field_preserved_tool_refs
+let wire_field_claim = Keeper_memory_os_types.wire_field_claim
+let wire_field_category = Keeper_memory_os_types.wire_field_category
+let wire_field_source_turn = Keeper_memory_os_types.wire_field_source_turn
+let wire_field_source_tool_call_id = Keeper_memory_os_types.wire_field_source_tool_call_id
+let wire_field_claim_id = Keeper_memory_os_types.wire_field_claim_id
+let wire_field_claim_kind = Keeper_memory_os_types.wire_field_claim_kind
+let wire_field_schema_version = Keeper_memory_os_types.wire_field_schema_version
+let wire_episode_fields = Keeper_memory_os_types.wire_librarian_episode_fields
+let wire_claim_fields = Keeper_memory_os_types.wire_librarian_claim_fields
 
 let accepted_episode_fields = wire_field_schema_version :: wire_episode_fields
 

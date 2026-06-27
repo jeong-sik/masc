@@ -296,16 +296,21 @@ let quoted value = Printf.sprintf "\"%s\"" value
 let union_shape values = values |> String.concat "|" |> quoted
 let render_retry_field field = Printf.sprintf "\"%s\": %s" field.name field.shape
 
+let retry_shape_string = quoted "string"
+let retry_shape_integer = quoted "integer"
+let retry_shape_optional_string = quoted "optional-string"
+let retry_shape_string_list = Printf.sprintf "[%s]" retry_shape_string
+
 let parse_retry_claim_field_shapes =
-  [ { name = Keeper_librarian.wire_field_claim; shape = quoted "string" }
+  [ { name = Keeper_librarian.wire_field_claim; shape = retry_shape_string }
   ; { name = Keeper_librarian.wire_field_category
     ; shape = union_shape parse_retry_claim_categories
     }
-  ; { name = Keeper_librarian.wire_field_source_turn; shape = quoted "integer" }
+  ; { name = Keeper_librarian.wire_field_source_turn; shape = retry_shape_integer }
   ; { name = Keeper_librarian.wire_field_source_tool_call_id
-    ; shape = quoted "optional-string"
+    ; shape = retry_shape_optional_string
     }
-  ; { name = Keeper_librarian.wire_field_claim_id; shape = quoted "optional-string" }
+  ; { name = Keeper_librarian.wire_field_claim_id; shape = retry_shape_optional_string }
   ; { name = Keeper_librarian.wire_field_claim_kind
     ; shape = union_shape parse_retry_claim_kinds
     }
@@ -324,13 +329,15 @@ let parse_retry_claim_shape =
 ;;
 
 let parse_retry_episode_field_shapes =
-  [ { name = Keeper_librarian.wire_field_episode_summary; shape = quoted "string" }
+  [ { name = Keeper_librarian.wire_field_episode_summary; shape = retry_shape_string }
   ; { name = Keeper_librarian.wire_field_claims
     ; shape = Printf.sprintf "[%s]" parse_retry_claim_shape
     }
-  ; { name = Keeper_librarian.wire_field_open_items; shape = "[\"string\"]" }
-  ; { name = Keeper_librarian.wire_field_constraints; shape = "[\"string\"]" }
-  ; { name = Keeper_librarian.wire_field_preserved_tool_refs; shape = "[\"string\"]" }
+  ; { name = Keeper_librarian.wire_field_open_items; shape = retry_shape_string_list }
+  ; { name = Keeper_librarian.wire_field_constraints; shape = retry_shape_string_list }
+  ; { name = Keeper_librarian.wire_field_preserved_tool_refs
+    ; shape = retry_shape_string_list
+    }
   ]
 ;;
 

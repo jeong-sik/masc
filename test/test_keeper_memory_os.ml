@@ -691,13 +691,14 @@ let test_librarian_defaults_missing_optional_lists () =
   in
   let raw =
     `Assoc
-      [ "episode_summary", `String "Minimal valid librarian output"
-      ; ( "claims"
+      [ Librarian.wire_field_episode_summary, `String "Minimal valid librarian output"
+      ; ( Librarian.wire_field_claims
         , `List
             [ `Assoc
-                [ "claim", `String "Minimal output still records a fact."
-                ; "category", `String "fact"
-                ; "source_turn", `Int 0
+                [ Librarian.wire_field_claim
+                , `String "Minimal output still records a fact."
+                ; Librarian.wire_field_category, `String "fact"
+                ; Librarian.wire_field_source_turn, `Int 0
                 ]
             ] )
       ]

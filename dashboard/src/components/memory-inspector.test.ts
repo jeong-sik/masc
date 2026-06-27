@@ -16,7 +16,11 @@ import {
   sortMemoryFactsForReview,
   type MemoryKeeper,
 } from './memory-inspector'
-import type { MemoryOsFact, TurnRecordRow } from '../api/dashboard'
+import {
+  MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER,
+  type MemoryOsFact,
+  type TurnRecordRow,
+} from '../api/dashboard'
 
 afterEach(() => {
   cleanup()
@@ -60,10 +64,10 @@ function turnRecordsPayload() {
       read_errors: [{ scope: 'facts', error: 'one malformed row skipped' }],
       episodes: {
         tail_limit: 12,
-        shown: 1,
-        current: 1,
+        shown: 2,
+        current: 2,
         expired: 0,
-        terminal_markers: 1,
+        terminal_markers: 2,
         items: [
           {
             trace_id: 'trace-ep1',
@@ -77,12 +81,24 @@ function turnRecordsPayload() {
             claim_count: 4,
             summary: '리텐션 코호트 정의를 정리하고 amplitude 쿼리를 표로 캐시함.',
           },
+          {
+            trace_id: 'trace-fallback',
+            generation: 4,
+            created_at: 1_789_950_000,
+            created_at_iso: '2026-09-20T...Z',
+            valid_until: null,
+            valid_until_iso: null,
+            current: true,
+            terminal_marker: MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER,
+            claim_count: 1,
+            summary: 'unstructured_note: librarian parse fallback (empty response)',
+          },
         ],
       },
       facts: {
         tail_limit: 384,
-        shown: 2,
-        current: 1,
+        shown: 3,
+        current: 2,
         expired: 1,
         items: [
           {
@@ -99,6 +115,20 @@ function turnRecordsPayload() {
             prompt_recallable: true,
             claim_kind: 'durable_knowledge',
             external_ref: { kind: 'pr', id: '22198' },
+          },
+          {
+            claim: 'diagnostic row: operator pin backend source absent',
+            category: 'fact',
+            source: { trace_id: 'trace-diagnostic', turn: 6, tool_call_id: null },
+            first_seen: 1_789_700_000,
+            first_seen_iso: '2026-09-10T...Z',
+            reference_time: 1_789_700_000,
+            valid_until: null,
+            valid_until_iso: null,
+            last_verified_at: null,
+            current: true,
+            prompt_recallable: false,
+            claim_kind: 'diagnostic',
           },
           {
             claim: 'amplitude 캐시는 만료됨',
@@ -190,12 +220,16 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     stubFetch()
     const { container } = renderInspector()
     await waitFor(() => expect(container.querySelectorAll('.mem-store-row').length).toBeGreaterThan(0))
-    // Default view is active/current only so expired rows do not dominate the drawer.
+    // Default view is prompt-recallable current rows only, so diagnostics and
+    // expired evidence do not dominate the drawer.
     expect(container.textContent).toContain('retention D0 = 가입일, 첫 세션 기준')
     expect(container.textContent).toContain('제약') // constraint chip label
     expect(container.textContent).toContain('저장')
     expect(container.textContent).toContain('검증')
     expect(container.textContent).toContain('active recall candidate')
+    expect(container.textContent).toContain('1/3 recallable')
+    expect(container.textContent).not.toContain('diagnostic row: operator pin backend source absent')
+    expect(container.textContent).not.toContain('librarian parse fallback')
     expect(container.textContent).not.toContain('amplitude 캐시는 만료됨')
   })
 
@@ -203,7 +237,7 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     stubFetch()
     const { container } = renderInspector()
     await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
-    const allBtn = [...container.querySelectorAll('.mem-filter')].find(b => b.textContent === '전체 2')
+    const allBtn = [...container.querySelectorAll('.mem-filter')].find(b => b.textContent === '전체 3')
     expect(allBtn).toBeTruthy()
     fireEvent.click(allBtn!)
     // out-of-vocabulary category surfaces its raw label, not a fabricated kind.
@@ -213,6 +247,24 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(container.textContent).not.toContain('pr 22198')
     // NO salience meter — the deleted score model must not reappear.
     expect(container.querySelector('.mem-sal')).toBeFalsy()
+  })
+
+  it('keeps diagnostic facts and librarian fallback episodes out of the default recall view', async () => {
+    stubFetch()
+    const { container } = renderInspector()
+    await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
+    expect(container.textContent).not.toContain('diagnostic row: operator pin backend source absent')
+    expect(container.textContent).not.toContain('librarian parse fallback')
+
+    const diagnosticBtn = [...container.querySelectorAll('.mem-filter')].find(b => b.textContent === '진단/증거 1')
+    expect(diagnosticBtn).toBeTruthy()
+    fireEvent.click(diagnosticBtn!)
+
+    expect(container.textContent).toContain('diagnostic row: operator pin backend source absent')
+    expect(container.textContent).toContain('diagnostic evidence row')
+    expect(container.textContent).not.toContain('amplitude 캐시는 만료됨')
+    expect(container.textContent).toContain('진단 fallback · librarian')
+    expect(container.textContent).toContain('librarian parse fallback')
   })
 
   it('surfaces selection policy and prompt digest lineage without claiming raw full-prompt storage', async () => {

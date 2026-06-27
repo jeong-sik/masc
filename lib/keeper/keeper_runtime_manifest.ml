@@ -64,6 +64,28 @@ type logical_ordering = {
 module StringSet = Set_util.StringSet
 
 let schema_version = 1
+let manifest_file_suffix = ".jsonl"
+
+type status =
+  | Skipped
+  | Other of string
+
+let skipped_status = "skipped"
+
+let status_of_string value =
+  if String.equal value skipped_status then Skipped else Other value
+;;
+
+let status_to_string = function
+  | Skipped -> skipped_status
+  | Other value -> value
+;;
+
+let status_is_skipped manifest =
+  match status_of_string manifest.status with
+  | Skipped -> true
+  | Other _ -> false
+;;
 
 let safe_segment value =
   let buf = Buffer.create (String.length value) in
@@ -626,7 +648,7 @@ let base_dir config ~keeper_name =
 
 let path_for_trace config ~keeper_name ~trace_id =
   Filename.concat (base_dir config ~keeper_name)
-    (safe_segment trace_id ^ ".jsonl")
+    (safe_segment trace_id ^ manifest_file_suffix)
 
 include Keeper_runtime_manifest_housekeeping
 
@@ -651,7 +673,8 @@ let append config manifest =
   let base_dir = base_dir config ~keeper_name:manifest.keeper_name in
   match
     append_to_path
-      (Filename.concat base_dir (safe_segment manifest.trace_id ^ ".jsonl"))
+      (Filename.concat base_dir
+         (safe_segment manifest.trace_id ^ manifest_file_suffix))
       manifest
   with
   | Ok () ->

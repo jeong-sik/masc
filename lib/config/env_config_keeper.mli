@@ -106,6 +106,16 @@ module KeeperMemoryOs : sig
   val consolidation_runtime_id : unit -> string option
 end
 
+(** {1 Keeper dashboard compaction snapshots} *)
+
+module KeeperCompactionSnapshots : sig
+  val default_limit : int
+  val max_limit : int
+  val manifest_scan_min_files : int
+  val manifest_scan_limit_multiplier : int
+  val manifest_tail_max_lines : int
+end
+
 (** {1 Keeper vision tool} *)
 
 module KeeperVision : sig

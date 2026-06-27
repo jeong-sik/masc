@@ -1,17 +1,27 @@
 // MASC v2 — Compaction snapshot overlay (from context rail).
 //
-// Ported from rails.jsx CompactionInspector. Uses the client-side
-// compactionSnapshots store; only token counts are guaranteed from live data.
-// Message/trace counts and kept/summarized/dropped details are not yet streamed
-// by the backend, so those sections render an explicit data-gap note.
+// Ported from rails.jsx CompactionInspector. Hydrates durable snapshots from
+// the backend and keeps optimistic SSE/manual entries from the local store.
+// Message/trace counts and kept/summarized/dropped details are not exposed, so
+// those sections render an explicit data-gap note.
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import type { Keeper } from '../../types'
-import { keeperCompactionSnapshots, type CompactionSnapshot } from './compaction-snapshots'
+import { fetchKeeperCompactionSnapshots } from '../../api/dashboard'
+import {
+  hydrateCompactionSnapshots,
+  keeperCompactionSnapshots,
+  type CompactionSnapshot,
+} from './compaction-snapshots'
 
-function fmtTok(n: number): string {
+function isFiniteNumber(n: number | null | undefined): n is number {
+  return typeof n === 'number' && Number.isFinite(n)
+}
+
+function fmtTok(n: number | null | undefined): string {
+  if (!isFiniteNumber(n)) return '미수신'
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
 }
 
@@ -60,7 +70,7 @@ function cmpFullCtx(ev: CompactionSnapshot, side: 'before' | 'after'): string {
     `- trace 수: ${ev.before.traces != null && ev.after.traces != null ? String(side === 'before' ? ev.before.traces : ev.after.traces) : '미수신'}`,
     `- 반대쪽: ${fmtTok(otherTok)}`,
     '',
-    '전체 프롬프트 텍스트는 아직 백엔드에서 스트리밍되지 않습니다.',
+    '전체 프롬프트 텍스트는 이 API에서 노출하지 않습니다.',
   ]
   return lines.join('\n')
 }
@@ -79,6 +89,10 @@ export function CompactionInspectorOverlay({
   const events = keeperCompactionSnapshots(keeper.name)
   const [idx, setIdx] = useState(0)
   const [side, setSide] = useState<'before' | 'after'>('after')
+  const [loadState, setLoadState] = useState<{ loading: boolean; error: string | null }>({
+    loading: true,
+    error: null,
+  })
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -91,6 +105,30 @@ export function CompactionInspectorOverlay({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  useEffect(() => {
+    const controller = new AbortController()
+    let active = true
+    setLoadState({ loading: true, error: null })
+    void fetchKeeperCompactionSnapshots(keeper.name, undefined, { signal: controller.signal })
+      .then((payload) => {
+        if (!active) return
+        hydrateCompactionSnapshots(keeper.name, payload.items)
+        setLoadState({ loading: false, error: null })
+      })
+      .catch((err: unknown) => {
+        if (!active) return
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        setLoadState({
+          loading: false,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      })
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [keeper.name])
+
   if (events.length === 0) {
     return html`
       <div class="turn-overlay" onClick=${onClose}>
@@ -101,10 +139,16 @@ export function CompactionInspectorOverlay({
             <button type="button" class="turn-close" onClick=${onClose} title="닫기 (Esc)">${'✕'}</button>
           </div>
           <div class="turn-body">
-            <div class="cmp-empty">
-              아직 이 keeper에서 실행된 컴팩션이 없습니다.<br />
-              컨텍스트가 임계치를 넘으면 자동으로 기록되며, ‘지금 컴팩트’를 눌러 수동 결과를 남길 수 있습니다.
-            </div>
+            ${loadState.loading
+              ? html`<div class="cmp-empty">컴팩션 스냅샷 불러오는 중…</div>`
+              : loadState.error
+                ? html`<div class="mem-read-error" role="alert">${'⚠'} 컴팩션 스냅샷 불러오기 실패 — ${loadState.error}</div>`
+                : html`
+                  <div class="cmp-empty">
+                    아직 이 keeper에서 durable compaction snapshot이 없습니다.<br />
+                    컨텍스트가 임계치를 넘거나 ‘지금 컴팩트’를 실행하면 새 결과가 기록됩니다.
+                  </div>
+                `}
           </div>
         </div>
       </div>
@@ -113,7 +157,10 @@ export function CompactionInspectorOverlay({
 
   const safeIdx = Math.max(0, Math.min(idx, events.length - 1))
   const ev = events[safeIdx]!
-  const reduction = Math.round((1 - ev.after.tok / Math.max(1, ev.before.tok)) * 100)
+  const hasTokenPair = isFiniteNumber(ev.before.tok) && isFiniteNumber(ev.after.tok)
+  const reduction = hasTokenPair && ev.before.tok > 0
+    ? Math.round((1 - ev.after.tok / ev.before.tok) * 100)
+    : null
 
   return html`
     <div class="turn-overlay" onClick=${onClose}>
@@ -137,8 +184,17 @@ export function CompactionInspectorOverlay({
           `)}
         </div>
         <div class="turn-body">
+          ${loadState.loading
+            ? html`<div class="mem-empty mem-disclosure">durable snapshot 새로고침 중…</div>`
+            : loadState.error
+              ? html`<div class="mem-read-error" role="alert">${'⚠'} durable snapshot 새로고침 실패 — ${loadState.error}</div>`
+              : null}
           <div class="cmp-trigger"><span class="sub-k">트리거</span>${ev.trigger}</div>
           <div class="cmp-trigger"><span class="sub-k">수행 런타임</span><span class="mono">${ev.runtime}</span></div>
+          <div class="cmp-trigger"><span class="sub-k">소스</span><span class="mono">${ev.detailSource ?? ev.source}${ev.status ? ` · ${ev.status}` : ''}</span></div>
+          ${ev.traceId
+            ? html`<div class="cmp-trigger"><span class="sub-k">trace</span><span class="mono">${ev.traceId}${ev.keeperTurnId != null ? `#${ev.keeperTurnId}` : ''}</span></div>`
+            : null}
 
           <div class="turn-sec">
             <h4>Before → After</h4>
@@ -146,9 +202,11 @@ export function CompactionInspectorOverlay({
               <span class="mono">${fmtTok(ev.before.tok)}</span>
               <span class="cmp-arrow">${'→'}</span>
               <span class="mono" style=${{ color: 'var(--status-ok)' }}>${fmtTok(ev.after.tok)}</span>
-              <span class="cmp-reduce">${'−'}${reduction}%</span>
+              ${reduction != null ? html`<span class="cmp-reduce">${'−'}${reduction}%</span>` : null}
             </div>
-            <${CmpStat} label="토큰" a=${ev.before.tok} b=${ev.after.tok} unit="k" max=${Math.max(ev.before.tok, 1)} />
+            ${hasTokenPair
+              ? html`<${CmpStat} label="토큰" a=${ev.before.tok} b=${ev.after.tok} unit="k" max=${Math.max(ev.before.tok, 1)} />`
+              : html`<${DataGapNote}>이 snapshot에는 before/after token count가 없습니다.</${DataGapNote}>`}
             ${ev.before.msgs != null && ev.after.msgs != null
               ? html`<${CmpStat} label="메시지" a=${ev.before.msgs} b=${ev.after.msgs} max=${Math.max(ev.before.msgs, 1)} />`
               : null}
@@ -160,7 +218,7 @@ export function CompactionInspectorOverlay({
           <div class="turn-sec">
             <h4>유지 · 요약 · 폐기</h4>
             ${ev.kept.length === 0 && ev.summarized.length === 0 && ev.dropped.length === 0
-              ? html`<${DataGapNote}>백엔드에서 아직 상세 분류(kept / summarized / dropped)를 병렬하지 않습니다.</${DataGapNote}>`
+              ? html`<${DataGapNote}>백엔드 API는 상세 분류(kept / summarized / dropped)와 raw prompt text를 노출하지 않습니다.</${DataGapNote}>`
               : html`
                 <div class="cmp-diff">
                   <div class="cmp-col kept">

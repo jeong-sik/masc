@@ -254,11 +254,16 @@ export type {
   KeeperUserModelItem,
   KeeperUserModelSnapshot,
   TurnRecordsResponse,
+  KeeperCompactionSnapshotLinks,
+  KeeperCompactionSnapshot,
+  KeeperCompactionSnapshotsResponse,
   TurnTranscriptLine,
   TurnTranscript,
 } from './dashboard-turn-records'
 export {
+  MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER,
   fetchKeeperTurnRecords,
+  fetchKeeperCompactionSnapshots,
   fetchKeeperTurnTranscript,
   parseMemoryOsFactCategory,
   parseMemoryOsClaimKind,

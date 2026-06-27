@@ -15,7 +15,7 @@ import { DashboardMain } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
 
-const MOCK_RUNTIME_PATH = '/tmp/.masc/config/runtime.toml'
+const MOCK_RUNTIME_PATH = 'fixture/config/runtime.toml'
 import { dashboardLoading } from '../store'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
 import { resetDevTokenBootstrap } from '../api/dev-token'
@@ -26,6 +26,32 @@ const apiMock = vi.hoisted(() => ({
   fetchRuntimeDefaults: vi.fn(),
 }))
 
+const promptApiMock = vi.hoisted(() => ({
+  clearPromptOverride: vi.fn(async () => ({ ok: true, message: 'override cleared' })),
+  fetchDashboardPrompts: vi.fn(async () => ({
+    prompts: [
+      {
+        key: 'keeper.world',
+        category: 'keeper',
+        description: 'Shared world prompt',
+        current: 'Hello {{keeper}} in {{namespace}}',
+        default: 'Hello {{keeper}} in {{namespace}}',
+        effective: 'Hello {{keeper}} in {{namespace}}',
+        file_value: 'Hello {{keeper}} in {{namespace}}',
+        override_value: null,
+        file_path: 'fixture/config/prompts/keeper.world.md',
+        file_exists: true,
+        source: 'file' as const,
+        has_override: false,
+        char_count: 35,
+        required_file: true,
+        template_variables: ['keeper', 'namespace'],
+      },
+    ],
+  })),
+  savePromptOverride: vi.fn(async () => ({ ok: true, message: 'override set' })),
+}))
+
 vi.mock('../api/dashboard.js', async () => {
   const actual = await vi.importActual<typeof import('../api/dashboard')>('../api/dashboard')
   return {
@@ -33,6 +59,16 @@ vi.mock('../api/dashboard.js', async () => {
     fetchLogs: apiMock.fetchLogs,
     fetchDashboardTools: apiMock.fetchDashboardTools,
     fetchRuntimeDefaults: apiMock.fetchRuntimeDefaults,
+  }
+})
+
+vi.mock('../api', async () => {
+  const actual = await vi.importActual<typeof import('../api')>('../api')
+  return {
+    ...actual,
+    clearPromptOverride: promptApiMock.clearPromptOverride,
+    fetchDashboardPrompts: promptApiMock.fetchDashboardPrompts,
+    savePromptOverride: promptApiMock.savePromptOverride,
   }
 })
 
@@ -127,6 +163,9 @@ describe('SettingsSurface', () => {
     apiMock.fetchLogs.mockReset()
     apiMock.fetchDashboardTools.mockReset()
     apiMock.fetchRuntimeDefaults.mockReset()
+    promptApiMock.clearPromptOverride.mockClear()
+    promptApiMock.fetchDashboardPrompts.mockClear()
+    promptApiMock.savePromptOverride.mockClear()
     stubEmptyApi()
     window.location.hash = '#settings'
     route.value = { tab: 'settings', params: {}, postId: null }
@@ -330,6 +369,26 @@ describe('SettingsSurface', () => {
       expect(container.querySelector('[data-testid="routing-assignments-empty"]')).not.toBeNull()
     })
     expect(container.querySelectorAll('[data-testid="routing-assignment"]').length).toBe(0)
+  })
+
+  it('renders prompt settings from the live prompt registry instead of prototype placeholders', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    const promptsNav = container.querySelector('[data-testid="settings-nav-prompts"]') as HTMLElement
+    await fireEvent.click(promptsNav)
+
+    await waitFor(() => {
+      expect(promptApiMock.fetchDashboardPrompts).toHaveBeenCalledTimes(1)
+      expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('prompt registry live-backed')
+    })
+
+    expect(container.querySelector('.set-card-b')?.getAttribute('data-preview-locked')).toBe('false')
+    expect(container.querySelector('[data-testid="prompt-registry-panel"]')).not.toBeNull()
+    expect(container.querySelector('[data-prompt-preset-switcher]')).not.toBeNull()
+    expect(container.querySelector('[data-prompt-destinations]')?.textContent).toContain('System rules')
+    expect(container.textContent).toContain('{{keeper}}')
+    expect(container.textContent).not.toContain('System (base) — what a keeper is')
+    expect(container.textContent).not.toContain('World prompt — shared world·rules')
   })
 
   it('log filter chips filter live rows from the ring', async () => {

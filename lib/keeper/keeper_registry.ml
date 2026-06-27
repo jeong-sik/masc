@@ -438,7 +438,7 @@ let restore_supervisor_state ~base_path name ~restart_count ~last_restart_ts ~cr
     ~restart_count
     ~last_restart_ts
     ~crash_log
-    ~update_entry
+    ~update_entry:update_entry_unit
 ;;
 
 (* [dedup_key] is the key under which a board wakeup is deduped. RFC-0239 R4
@@ -485,14 +485,16 @@ let cleanup_tracking ~base_path name =
   let key = registry_key ~base_path name in
   match StringMap.find_opt key (Atomic.get registry) with
   | Some entry ->
-    put_entry
-      key
-      { entry with
-        board_wakeups = StringMap.empty
-      ; tool_usage = StringMap.empty
-      ; board_cursor_ts = 0.0
-      ; board_cursor_post_id = None
-      }
+    ignore
+      (put_entry
+         ~base_path
+         name
+         { entry with
+           board_wakeups = StringMap.empty
+         ; tool_usage = StringMap.empty
+         ; board_cursor_ts = 0.0
+         ; board_cursor_post_id = None
+         })
   | None -> ()
 ;;
 
@@ -738,17 +740,19 @@ let rec dispatch_event_with_audit
            ~new_phase:tr.new_phase
            ~conditions_after:tr.updated_conditions
            ~restart_count:entry.restart_count;
-       put_entry
-         key
-         { entry with
-           phase = tr.new_phase
-         ; conditions = tr.updated_conditions
-         ; dead_since_ts
-         ; transition_seq = new_seq
-         ; last_auto_rules
-         ; pending_turn_measurement
-         ; compaction_stage
-         };
+       ignore
+         (put_entry
+            ~base_path
+            name
+            { entry with
+              phase = tr.new_phase
+            ; conditions = tr.updated_conditions
+            ; dead_since_ts
+            ; transition_seq = new_seq
+            ; last_auto_rules
+            ; pending_turn_measurement
+            ; compaction_stage
+            });
        List.iter
          (execute_entry_action_observability ~name ~phase:tr.new_phase ~ts_unix:now)
          tr.entry_actions;
@@ -829,15 +833,17 @@ let rec dispatch_event_with_audit
            ~new_phase:tr.new_phase
            ~conditions_after:tr.updated_conditions
            ~restart_count:entry.restart_count;
-       put_entry
-         key
-         { entry with
-           conditions = tr.updated_conditions
-         ; transition_seq = new_seq
-         ; last_auto_rules
-         ; pending_turn_measurement
-         ; compaction_stage
-         };
+       ignore
+         (put_entry
+            ~base_path
+            name
+            { entry with
+              conditions = tr.updated_conditions
+            ; transition_seq = new_seq
+            ; last_auto_rules
+            ; pending_turn_measurement
+            ; compaction_stage
+            });
        broadcast_composite_changed ~name ~ts_unix:now;
        Ok tr
      | Error e ->

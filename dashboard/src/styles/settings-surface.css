@@ -900,6 +900,25 @@
   background: var(--volt-wash);
 }
 
+.prompt-registry-panel .prompt-preset-card {
+  min-height: 76px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+}
+
+.prompt-registry-panel .prompt-preset-card[data-active="true"] {
+  box-shadow:
+    inset 3px 0 0 var(--accent),
+    inset 0 1px 0 rgb(255 255 255 / 0.04);
+}
+
+.prompt-registry-panel .prompt-preset-description {
+  display: -webkit-box;
+  min-height: 2.5em;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 /* Discord trigger radios — keeper-v2 styles/surfaces.css:580-587 (.set-trigger*) */
 .set-trigger {
   display: flex;

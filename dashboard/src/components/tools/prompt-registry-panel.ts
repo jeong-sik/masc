@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { Markdown } from "../common/markdown"
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import {
   clearPromptOverride,
   fetchDashboardPrompts,
@@ -16,9 +16,30 @@ import { TextArea, TextInput } from '../common/input'
 import { FilterChips } from '../common/filter-chips'
 import { StatusChip } from '../common/status-chip'
 import { errorToString } from '../../lib/format-string'
-import { KeeperPromptAssemblyPanel } from '../keeper-prompt-assembly-panel'
+import {
+  buildKeeperPromptAssemblyReport,
+  KeeperPromptAssemblyPanel,
+  type KeeperPromptAssemblyReport,
+  type KeeperPromptAssemblyRow,
+  type KeeperPromptAssemblyStage,
+} from '../keeper-prompt-assembly-panel'
 
-type PromptSourceFilter = 'all' | PromptSource
+export type PromptSourceFilter = 'all' | PromptSource
+export type PromptPresetId = 'all' | 'attention' | `stage:${string}`
+
+export interface PromptPreset {
+  id: PromptPresetId
+  label: string
+  description: string
+  count: number
+}
+
+export interface PromptDestination {
+  stageTitle: string
+  messageSlot: string
+  role: KeeperPromptAssemblyStage['role']
+  summary: string
+}
 
 const SOURCE_CHIP_ORDER: PromptSourceFilter[] = ['all', 'file', 'override', 'default', 'missing']
 
@@ -43,20 +64,125 @@ function sourceBadgeClass(source: PromptSource): string {
   }
 }
 
+const STAGE_PRESET_PREFIX = 'stage:'
+const COMPUTED_PROMPT_SOURCE: KeeperPromptAssemblyRow['source'] = 'computed'
+const NOT_SENT_MESSAGE_SLOT = 'not sent'
+const MODEL_INPUT_STAGE_ROLE: KeeperPromptAssemblyStage['role'] = 'model_input'
+
+function stagePresetId(preset: PromptPresetId): string | null {
+  if (preset === 'all' || preset === 'attention') return null
+  return preset.slice(STAGE_PRESET_PREFIX.length)
+}
+
+function promptAssemblyRows(stage: KeeperPromptAssemblyStage): KeeperPromptAssemblyRow[] {
+  return stage.rows.filter(row => row.source !== COMPUTED_PROMPT_SOURCE)
+}
+
+function promptPresetRows(report: KeeperPromptAssemblyReport, preset: PromptPresetId): Set<string> | null {
+  const stageId = stagePresetId(preset)
+  if (!stageId) return null
+  const stage = report.stages.find(item => item.id === stageId)
+  if (!stage) return new Set()
+  return new Set(promptAssemblyRows(stage).map(row => row.promptKey))
+}
+
+function stagePresetLabel(stage: KeeperPromptAssemblyStage): string {
+  if (stage.messageSlot === NOT_SENT_MESSAGE_SLOT) return stage.title
+  return `${stage.messageSlot}: ${stage.title}`
+}
+
+function isModelInputDestination(destination: PromptDestination): boolean {
+  return destination.role === MODEL_INPUT_STAGE_ROLE
+}
+
+function presetPromptCount(
+  prompts: DashboardPromptItem[],
+  report: KeeperPromptAssemblyReport,
+  preset: PromptPresetId,
+): number {
+  if (preset === 'all') return prompts.length
+  if (preset === 'attention') {
+    return prompts.filter(prompt => prompt.has_override || prompt.source === 'missing').length
+  }
+  const allowed = promptPresetRows(report, preset)
+  if (!allowed || allowed.size === 0) return 0
+  return prompts.filter(prompt => allowed.has(prompt.key)).length
+}
+
+export function promptPresetOptions(
+  prompts: DashboardPromptItem[],
+  report: KeeperPromptAssemblyReport,
+): PromptPreset[] {
+  const stagePresets = report.stages
+    .filter(stage => promptAssemblyRows(stage).length > 0)
+    .map(stage => {
+      const id: PromptPresetId = `${STAGE_PRESET_PREFIX}${stage.id}`
+      const stagePromptKeys = new Set(promptAssemblyRows(stage).map(row => row.promptKey))
+      return {
+        id,
+        label: stagePresetLabel(stage),
+        description: stage.summary,
+        count: prompts.filter(prompt => stagePromptKeys.has(prompt.key)).length,
+      }
+    })
+
+  return [
+    {
+      id: 'all',
+      label: '전체',
+      description: '등록된 모든 프롬프트 파일과 오버라이드.',
+      count: prompts.length,
+    },
+    ...stagePresets,
+    {
+      id: 'attention',
+      label: '수정/누락',
+      description: '저장된 오버라이드와 누락된 필수 프롬프트 파일.',
+      count: presetPromptCount(prompts, report, 'attention'),
+    },
+  ]
+}
+
+export function promptDestinationsForKey(
+  report: KeeperPromptAssemblyReport,
+  key: string,
+): PromptDestination[] {
+  return report.stages
+    .filter(stage => stage.rows.some(row => row.promptKey === key))
+    .map(stage => ({
+      stageTitle: stage.title,
+      messageSlot: stage.messageSlot,
+      role: stage.role,
+      summary: stage.summary,
+    }))
+}
+
 function normalizeDraft(prompt: DashboardPromptItem | null): string {
   if (!prompt) return ''
   return prompt.override_value ?? prompt.effective
 }
 
+function draftKeyForPrompt(prompt: DashboardPromptItem | null): string | null {
+  return prompt?.key ?? null
+}
+
 // Pure helper: filter by source + substring search (case-insensitive).
 // Exported for unit testing.
-function filterPrompts(
+export function filterPrompts(
   prompts: DashboardPromptItem[],
   source: PromptSourceFilter,
   query: string,
+  report: KeeperPromptAssemblyReport,
+  preset: PromptPresetId = 'all',
 ): DashboardPromptItem[] {
   const q = query.trim().toLowerCase()
+  const allowedPromptKeys =
+    preset !== 'all' && preset !== 'attention'
+      ? promptPresetRows(report, preset)
+      : null
   return prompts.filter(p => {
+    if (preset === 'attention' && !p.has_override && p.source !== 'missing') return false
+    if (allowedPromptKeys && !allowedPromptKeys.has(p.key)) return false
     if (source !== 'all' && p.source !== source) return false
     if (!q) return true
     return (
@@ -85,7 +211,7 @@ export function promptSourceCounts(
 const sourceFilter = signal<PromptSourceFilter>('all')
 const searchQuery = signal('')
 
-export function PromptRegistryPanel() {
+export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const [prompts, setPrompts] = useState<DashboardPromptItem[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -93,10 +219,27 @@ export function PromptRegistryPanel() {
   const [status, setStatus] = useState<string | null>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
+  const [draftPromptKey, setDraftPromptKey] = useState<string | null>(null)
+  const [preset, setPreset] = useState<PromptPresetId>('all')
 
-  const visiblePrompts = filterPrompts(prompts, sourceFilter.value, searchQuery.value)
-  const selectedPrompt = prompts.find(prompt => prompt.key === selectedKey) ?? prompts[0] ?? null
+  const report = useMemo(() => buildKeeperPromptAssemblyReport(prompts), [prompts])
+  const presets = promptPresetOptions(prompts, report)
+  const activePreset = presets.some(item => item.id === preset) ? preset : 'all'
+  const visiblePrompts = filterPrompts(prompts, sourceFilter.value, searchQuery.value, report, activePreset)
+  const selectedPrompt =
+    (selectedKey ? prompts.find(prompt => prompt.key === selectedKey) : null) ?? visiblePrompts[0] ?? null
+  const selectedDestinations = selectedPrompt ? promptDestinationsForKey(report, selectedPrompt.key) : []
   const counts = promptSourceCounts(prompts)
+  const draftDirty = selectedPrompt
+    ? draftPromptKey === selectedPrompt.key
+      ? draft !== normalizeDraft(selectedPrompt)
+      : draft.length > 0
+    : draft.length > 0
+
+  function setDraftForPrompt(prompt: DashboardPromptItem | null) {
+    setDraft(normalizeDraft(prompt))
+    setDraftPromptKey(draftKeyForPrompt(prompt))
+  }
 
   async function loadPrompts(preferredKey?: string | null) {
     setLoading(true)
@@ -111,8 +254,9 @@ export function PromptRegistryPanel() {
           : nextPrompts[0]?.key ?? null
       setSelectedKey(nextSelectedKey)
       const nextPrompt = nextPrompts.find(prompt => prompt.key === nextSelectedKey) ?? nextPrompts[0] ?? null
-      setDraft(normalizeDraft(nextPrompt))
+      setDraftForPrompt(nextPrompt)
     } catch (err) {
+      setStatus(null)
       setError(errorToString(err))
     } finally {
       setLoading(false)
@@ -124,12 +268,33 @@ export function PromptRegistryPanel() {
   }, [])
 
   useEffect(() => {
-    if (!selectedPrompt) return
-    setDraft(current => (current === '' ? normalizeDraft(selectedPrompt) : current))
-  }, [selectedPrompt?.key])
+    const nextDraftPromptKey = draftKeyForPrompt(selectedPrompt)
+    if (draftPromptKey === nextDraftPromptKey) return
+    setDraft(normalizeDraft(selectedPrompt))
+    setDraftPromptKey(nextDraftPromptKey)
+  }, [selectedPrompt, draftPromptKey])
+
+  function confirmDiscardDraft(nextPrompt: DashboardPromptItem): boolean {
+    if (!selectedPrompt || nextPrompt.key === selectedPrompt.key || !draftDirty) return true
+    if (typeof window === 'undefined' || typeof window.confirm !== 'function') return false
+    return window.confirm('저장하지 않은 override 초안을 버리고 다른 프롬프트를 열까요?')
+  }
+
+  function selectPrompt(prompt: DashboardPromptItem) {
+    if (!confirmDiscardDraft(prompt)) return
+    setSelectedKey(prompt.key)
+    setDraftForPrompt(prompt)
+    setStatus(null)
+  }
 
   async function applyOverride() {
     if (!selectedPrompt) return
+    if (draftPromptKey !== selectedPrompt.key) {
+      setError('선택된 프롬프트가 바뀌어 초안을 다시 동기화했습니다. 내용을 확인한 뒤 다시 저장하세요.')
+      setStatus(null)
+      setDraftForPrompt(selectedPrompt)
+      return
+    }
     setSaving(true)
     setError(null)
     setStatus(null)
@@ -149,6 +314,7 @@ export function PromptRegistryPanel() {
 
   async function clearOverride() {
     if (!selectedPrompt) return
+    if (draftPromptKey !== selectedPrompt.key) setDraftForPrompt(selectedPrompt)
     setSaving(true)
     setError(null)
     setStatus(null)
@@ -166,11 +332,59 @@ export function PromptRegistryPanel() {
     }
   }
 
-  return html`
-    <${SectionCard} label="프롬프트 레지스트리" class="section mb-4">
+  const body = html`
       <div class="mb-4 text-xs text-[var(--color-fg-muted)] leading-relaxed">
         <div>기준 원문은 resolved config root의 <code>prompts/*.md</code>입니다. 경로는 설정 경로 상세 패널에서 확인할 수 있습니다.</div>
         <div>이 화면에서는 현재 effective 값 확인과 runtime override 적용/해제만 합니다.</div>
+      </div>
+
+      <div class="mb-4 grid gap-2 md:grid-cols-4" data-prompt-registry-summary>
+        <div class="v2-lab-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+          <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">registered</div>
+          <div class="mt-1 font-mono text-sm text-[var(--color-fg-primary)]">${prompts.length}</div>
+        </div>
+        <div class="v2-lab-card rounded-[var(--r-1)] border border-[var(--warn-border)] bg-[var(--warn-soft)] px-3 py-2">
+          <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">overrides</div>
+          <div class="mt-1 font-mono text-sm text-[var(--color-fg-primary)]">${report.stats.overrideRows}</div>
+        </div>
+        <div class="v2-lab-card rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-soft)] px-3 py-2">
+          <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">missing</div>
+          <div class="mt-1 font-mono text-sm text-[var(--color-fg-primary)]">${report.stats.missingRows}</div>
+        </div>
+        <div class="v2-lab-card min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+          <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">prompt root</div>
+          <div class="mt-1 truncate font-mono text-xs text-[var(--color-fg-primary)]" title=${report.activePromptRoots[0] ?? ''}>
+            ${report.activePromptRoots[0] ?? '—'}
+          </div>
+        </div>
+      </div>
+
+      <div class="mb-4" data-prompt-preset-switcher>
+        <div class="mb-2 flex items-center justify-between gap-2">
+          <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">프리셋</div>
+          <div class="text-2xs text-[var(--color-fg-muted)]">Turn prompt recipe 기준으로 묶어 봅니다.</div>
+        </div>
+        <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          ${presets.map(item => html`
+            <button
+              type="button"
+              class=${`prompt-preset-card rounded-[var(--r-1)] border px-3 py-2 text-left transition-colors ${activePreset === item.id
+                ? 'border-[var(--accent-30)] bg-[var(--accent-10)]'
+                : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:border-[var(--accent-22)] hover:bg-[var(--color-bg-elevated)]'}`}
+              data-active=${activePreset === item.id ? 'true' : 'false'}
+              onClick=${() => {
+                setPreset(item.id)
+                setStatus(null)
+              }}
+            >
+              <div class="mb-1 flex items-center justify-between gap-2">
+                <span class="text-xs font-semibold text-[var(--color-fg-primary)]">${item.label}</span>
+                <${StatusChip} tone=${activePreset === item.id ? 'info' : 'neutral'} uppercase=${false}>${item.count}<//>
+              </div>
+              <div class="prompt-preset-description text-2xs leading-relaxed text-[var(--color-fg-muted)]">${item.description}</div>
+            </button>
+          `)}
+        </div>
       </div>
 
       <${KeeperPromptAssemblyPanel} prompts=${prompts} />
@@ -183,7 +397,7 @@ export function PromptRegistryPanel() {
           <div class="mb-2 flex items-center justify-between gap-2 px-2">
             <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
               등록된 프롬프트
-              ${sourceFilter.value !== 'all' || searchQuery.value
+              ${activePreset !== 'all' || sourceFilter.value !== 'all' || searchQuery.value
                 ? html`<span class="ml-1 normal-case tracking-normal text-[var(--color-fg-muted)]">${visiblePrompts.length} / ${prompts.length}</span>`
                 : null}
             </div>
@@ -222,9 +436,7 @@ export function PromptRegistryPanel() {
                   ? 'border-[var(--accent-30)] bg-[var(--accent-10)]'
                   : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:bg-[var(--color-bg-elevated)]'}"
                 onClick=${() => {
-                  setSelectedKey(prompt.key)
-                  setDraft(normalizeDraft(prompt))
-                  setStatus(null)
+                  selectPrompt(prompt)
                 }}
               >
                 <div class="mb-1 flex items-start justify-between gap-2">
@@ -259,12 +471,42 @@ export function PromptRegistryPanel() {
               </div>
             </div>
 
+            <div class="v2-lab-card mb-4 rounded-[var(--r-1)] border border-[var(--accent-22)] bg-[var(--accent-8)] px-3 py-2" data-prompt-destinations>
+              <div class="mb-2 flex flex-wrap items-center gap-2">
+                <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">들어가는 위치</div>
+                ${selectedDestinations.length === 0 ? html`<${StatusChip} tone="neutral">not in keeper recipe<//>` : null}
+              </div>
+              ${selectedDestinations.length === 0 ? html`
+                <div class="text-xs leading-relaxed text-[var(--color-fg-muted)]">
+                  이 프롬프트는 registry에는 있지만 keeper turn prompt recipe의 고정 단계에는 포함되지 않습니다.
+                </div>
+              ` : html`
+                <div class="grid gap-2">
+                  ${selectedDestinations.map(destination => html`
+                    <div class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-2">
+                      <div class="mb-1 flex flex-wrap items-center gap-2">
+                        <${StatusChip} tone=${isModelInputDestination(destination) ? 'info' : 'neutral'} uppercase=${false}>${destination.messageSlot}<//>
+                        <span class="text-xs font-semibold text-[var(--color-fg-primary)]">${destination.stageTitle}</span>
+                      </div>
+                      <div class="text-2xs leading-relaxed text-[var(--color-fg-muted)]">${destination.summary}</div>
+                    </div>
+                  `)}
+                </div>
+              `}
+            </div>
+
             ${selectedPrompt.template_variables.length > 0 ? html`
               <div class="v2-lab-card mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
                 <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">허용된 플레이스홀더</div>
-                <div class="mt-2 flex flex-wrap gap-2">
+                <div class="mt-1 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
+                  값 치환은 registry render 호출자가 공급하며, 치환된 텍스트는 위 위치로 그대로 들어갑니다.
+                </div>
+                <div class="mt-2 grid gap-2 sm:grid-cols-2">
                   ${selectedPrompt.template_variables.map(variable => html`
-                    <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 font-mono text-2xs text-[var(--color-fg-primary)]">${`{{${variable}}}`}</span>
+                    <div class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
+                      <div class="font-mono text-2xs text-[var(--color-fg-primary)]">${`{{${variable}}}`}</div>
+                      <div class="mt-0.5 text-3xs text-[var(--color-fg-muted)]">${selectedDestinations.length > 0 ? `${selectedDestinations.length} prompt recipe slot(s)` : 'registry render variable'}</div>
+                    </div>
                   `)}
                 </div>
               </div>
@@ -297,7 +539,7 @@ export function PromptRegistryPanel() {
                 오버라이드 제거
               <//>
               <${ActionButton} variant="ghost" size="md" disabled=${saving || loading} onClick=${() => {
-                setDraft(normalizeDraft(selectedPrompt))
+                setDraftForPrompt(selectedPrompt)
                 setStatus(null)
               }}>
                 초안 초기화
@@ -310,6 +552,15 @@ export function PromptRegistryPanel() {
           `}
         </div>
       </div>
+  `
+
+  if (embedded) {
+    return html`<div class="prompt-registry-panel prompt-registry-panel-embedded" data-testid="prompt-registry-panel">${body}</div>`
+  }
+
+  return html`
+    <${SectionCard} label="프롬프트 레지스트리" class="section mb-4">
+      <div data-testid="prompt-registry-panel">${body}</div>
     <//>
   `
 }

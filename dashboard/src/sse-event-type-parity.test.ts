@@ -57,16 +57,31 @@ const FE_ONLY_OR_EXTERNAL: Record<string, string> = {
 function parseFeRoutedEventTypes(source: string): Set<string> {
   // The exact-match routing forms in sse-store.ts:
   //   event.type === 'X'
+  //   event.type === SSE_SOME_EVENT
   //   routedType === 'X'
   //   normalizeMascEventType(event.type) === 'X'
+  const exportedConstants = parseExportedStringConstants(
+    readFileSync(resolve(process.cwd(), 'src/schemas/sse.ts'), 'utf8'),
+  )
   const re =
-    /(?:event\.type|routedType|normalizeMascEventType\(event\.type\)) === '([a-zA-Z0-9_:/]+)'/g
+    /(?:event\.type|routedType|normalizeMascEventType\(event\.type\)) === (?:'([a-zA-Z0-9_:/]+)'|([A-Z][A-Z0-9_]*))/g
   const found = new Set<string>()
   for (const m of source.matchAll(re)) {
-    const eventType = m[1]
+    const eventType = m[1] ?? exportedConstants.get(m[2] ?? '')
     if (eventType) found.add(eventType)
   }
   return found
+}
+
+function parseExportedStringConstants(source: string): Map<string, string> {
+  const constants = new Map<string, string>()
+  const re = /export const ([A-Z][A-Z0-9_]*) = '([a-zA-Z0-9_:/]+)'/g
+  for (const m of source.matchAll(re)) {
+    const name = m[1]
+    const value = m[2]
+    if (name && value) constants.set(name, value)
+  }
+  return constants
 }
 
 const sseStoreSource = readFileSync(resolve(process.cwd(), 'src/sse-store.ts'), 'utf8')

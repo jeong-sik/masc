@@ -15,6 +15,7 @@ import type { DashboardToolInventoryItem, LogEntry, RuntimeDefaultsResponse } fr
 import { envBool } from '../config/env'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { FusionSettingsPanel } from './fusion-settings-panel'
+import { PromptRegistryPanel } from './tools/prompt-registry-panel'
 import { ThemeSwitch } from './theme-switch'
 import type { ComponentChildren } from 'preact'
 
@@ -311,6 +312,18 @@ function RolePill({ children }: { children: ComponentChildren }) {
   return html`<span class="set-rolepill">${children}</span>`
 }
 
+function settingsSectionState(
+  section: SectionId,
+  fusionSettingsWritable: boolean,
+): { live: boolean; label: string } {
+  if (section === 'runtimes') return { live: true, label: 'runtime.toml live-backed' }
+  if (section === 'prompts') return { live: true, label: 'prompt registry live-backed' }
+  if (section === 'fusion' && fusionSettingsWritable) {
+    return { live: true, label: 'runtime.toml live-backed' }
+  }
+  return { live: false, label: 'preview only' }
+}
+
 function LogFilter({
   filter,
   active,
@@ -552,10 +565,6 @@ export function SettingsSurface() {
   const [searchIndex, setSearchIndex] = useState(true)
   const [ideRepo, setIdeRepo] = useState('masc/masc-mcp')
 
-  // prompts
-  const [sysPrompt, setSysPrompt] = useState('')
-  const [worldPrompt, setWorldPrompt] = useState('')
-
   // logs
   const [traceKeep, setTraceKeep] = useState('30일')
   const [logLevel, setLogLevel] = useState('info')
@@ -578,7 +587,7 @@ export function SettingsSurface() {
   const [clock24, setClock24] = useState(true)
 
   const cur = SET_SECTIONS.find(s => s[0] === sec) ?? SET_SECTIONS[0]!
-  const isLiveBackedSection = sec === 'runtimes' || (sec === 'fusion' && fusionSettingsWritable)
+  const sectionState = settingsSectionState(sec, fusionSettingsWritable)
 
   // Resolved runtime options (de-duplicated, derived from the live registry).
   const runtimeEntries = runtimeDefaults?.runtimes ?? []
@@ -628,16 +637,16 @@ export function SettingsSurface() {
           <header class="set-content-h">
             <h1 data-testid="settings-section-title">${cur[2]}</h1>
             <span
-              class=${`set-section-state ${isLiveBackedSection ? 'live' : 'preview'}`}
+              class=${`set-section-state ${sectionState.live ? 'live' : 'preview'}`}
               data-testid="settings-section-state"
             >
-              ${isLiveBackedSection ? 'runtime.toml live-backed' : 'preview only'}
+              ${sectionState.label}
             </span>
           </header>
 
           <div
-            class=${`set-card-b mx-6 my-6 ${sec === 'runtimes' ? 'set-card-b-wide' : 'ss-card'}`}
-            data-preview-locked=${isLiveBackedSection ? 'false' : 'true'}
+            class=${`set-card-b mx-6 my-6 ${sec === 'runtimes' || sec === 'prompts' ? 'set-card-b-wide' : 'ss-card'}`}
+            data-preview-locked=${sectionState.live ? 'false' : 'true'}
           >
             ${sec === 'account' && html`
               <${SetRow} label="Operator" hint="Currently logged-in operator">
@@ -749,29 +758,7 @@ export function SettingsSurface() {
             `}
 
             ${sec === 'prompts' && html`
-              <div class="set-hint" style=${{ marginBottom: '12px' }}>
-                Shared prompt base inherited by every keeper. Keeper-specific persona·instructions layer on top.
-                <span class="mono">{'{{keeper}}'} · {'{{namespace}}'} · {'{{runtime}}'} · {'{{model}}'}</span> are substituted per keeper.
-              </div>
-              <div class="set-sub-h">① System (base) — what a keeper is</div>
-              <textarea
-                class="set-input mono"
-                readOnly
-                style=${{ width: '100%', minHeight: '150px', resize: 'vertical', lineHeight: '1.6', padding: '10px 12px', whiteSpace: 'pre' }}
-                value=${sysPrompt}
-                onInput=${(e: Event) => setSysPrompt((e.target as HTMLTextAreaElement).value)}
-              />
-              <div class="set-sub-h" style=${{ marginTop: '14px' }}>② World prompt — shared world·rules</div>
-              <textarea
-                class="set-input mono"
-                readOnly
-                style=${{ width: '100%', minHeight: '150px', resize: 'vertical', lineHeight: '1.6', padding: '10px 12px', whiteSpace: 'pre' }}
-                value=${worldPrompt}
-                onInput=${(e: Event) => setWorldPrompt((e.target as HTMLTextAreaElement).value)}
-              />
-              <div class="set-mcp-detail mono" style=${{ marginTop: '12px' }}>
-                Effective prompt = ① System + ② World + ③ persona + ④ instructions · inspect composition in the turn inspector.
-              </div>
+              <${PromptRegistryPanel} embedded=${true} />
             `}
 
             ${sec === 'fusion' && html`

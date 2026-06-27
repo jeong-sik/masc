@@ -15,6 +15,8 @@ module Ctx = Agent_sdk.Context
 
 (* ── Helpers ─────────────────────────────────────── *)
 
+let create_ctx () = Ctx.create ~eio:false ()
+
 let ctx_has_key ctx k =
   match Ctx.get ctx k with Some _ -> true | None -> false
 
@@ -27,8 +29,8 @@ let ctx_get_string ctx k =
 
 let test_basic_isolation () =
   (* Two keepers, each with their own context *)
-  let ctx_alice = Ctx.create () in
-  let ctx_bob = Ctx.create () in
+  let ctx_alice = create_ctx () in
+  let ctx_bob = create_ctx () in
   (* Each writes keeper-specific state *)
   Ctx.set ctx_alice "keeper" (`String "alice");
   Ctx.set ctx_alice "turn" (`Int 1);
@@ -45,8 +47,8 @@ let test_basic_isolation () =
 (* ── Test: Checkpoint Roundtrip Isolation ─────────── *)
 
 let test_checkpoint_roundtrip_isolation () =
-  let ctx_a = Ctx.create () in
-  let ctx_b = Ctx.create () in
+  let ctx_a = create_ctx () in
+  let ctx_b = create_ctx () in
   Ctx.set ctx_a "state" (`String "working");
   Ctx.set ctx_b "state" (`String "idle");
   (* Simulate checkpoint: serialize both *)
@@ -67,7 +69,7 @@ let test_checkpoint_roundtrip_isolation () =
 
 let test_copy_resume_isolation () =
   (* Simulates Agent.resume path: Context.copy checkpoint.context *)
-  let checkpoint_ctx = Ctx.create () in
+  let checkpoint_ctx = create_ctx () in
   Ctx.set checkpoint_ctx "trace_id" (`String "abc-123");
   Ctx.set checkpoint_ctx "turn_count" (`Int 3);
   (* Two keepers resume from the same checkpoint *)
@@ -89,7 +91,7 @@ let test_copy_resume_isolation () =
 (* ── Test: Scope Isolation Between Keepers ───────── *)
 
 let test_scope_isolation_cross_keeper () =
-  let parent = Ctx.create () in
+  let parent = create_ctx () in
   Ctx.set parent "shared_config" (`String "base");
   (* Keeper A creates a scope for sub-agent delegation *)
   let scope_a = Ctx.create_scope
@@ -121,8 +123,8 @@ let test_scope_isolation_cross_keeper () =
 
 let test_scoped_key_collision () =
   (* Both keepers use the same key name but in different contexts *)
-  let ctx_a = Ctx.create () in
-  let ctx_b = Ctx.create () in
+  let ctx_a = create_ctx () in
+  let ctx_b = create_ctx () in
   Ctx.set_scoped ctx_a Ctx.Session "trace_id" (`String "trace-AAA");
   Ctx.set_scoped ctx_b Ctx.Session "trace_id" (`String "trace-BBB");
   Ctx.set_scoped ctx_a Ctx.User "name" (`String "Alice");
@@ -140,7 +142,7 @@ let test_scoped_key_collision () =
 (* ── Test: Concurrent Scope Merge Order ──────────── *)
 
 let test_merge_order_independence () =
-  let parent = Ctx.create () in
+  let parent = create_ctx () in
   Ctx.set parent "base" (`Int 0);
   let scope1 = Ctx.create_scope
     ~parent ~propagate_down:["base"] ~propagate_up:["r1"] in
@@ -158,8 +160,8 @@ let test_merge_order_independence () =
 (* ── Test: Diff Between Keeper Contexts ──────────── *)
 
 let test_diff_cross_keeper () =
-  let ctx_a = Ctx.create () in
-  let ctx_b = Ctx.create () in
+  let ctx_a = create_ctx () in
+  let ctx_b = create_ctx () in
   Ctx.set ctx_a "shared" (`String "v1");
   Ctx.set ctx_a "a_only" (`Int 1);
   Ctx.set ctx_b "shared" (`String "v2");

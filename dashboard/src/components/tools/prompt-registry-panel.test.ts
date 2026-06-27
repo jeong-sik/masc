@@ -1,55 +1,20 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
-import { waitFor } from '@testing-library/preact'
+import { fireEvent, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 void vi
 
 const mocks = vi.hoisted(() => ({
-  fetchDashboardPrompts: vi.fn(async () => ({
-    prompts: [
-      {
-        key: 'keeper.world',
-        category: 'keeper',
-        description: 'world block',
-        current: 'override world',
-        default: 'file world',
-        effective: 'override world',
-        file_value: 'file world',
-        override_value: 'override world',
-        file_path: '/tmp/config/prompts/keeper.world.md',
-        file_exists: true,
-        source: 'override' as const,
-        has_override: true,
-        char_count: 14,
-        required_file: true,
-        template_variables: [],
-      },
-      {
-        key: 'governance.dry_run',
-        category: 'governance',
-        description: 'dry run block',
-        current: 'dry run prompt',
-        default: 'dry run prompt',
-        effective: 'dry run prompt',
-        file_value: 'dry run prompt',
-        override_value: null,
-        file_path: '/tmp/config/prompts/governance.dry_run.md',
-        file_exists: true,
-        source: 'file' as const,
-        has_override: false,
-        char_count: 14,
-        required_file: true,
-        template_variables: [],
-      },
-    ],
-  })),
+  clearPromptOverride: vi.fn(async () => ({ ok: true, message: 'override cleared' })),
+  fetchDashboardPrompts: vi.fn(),
+  savePromptOverride: vi.fn(async () => ({ ok: true, message: 'override set' })),
 }))
 
 vi.mock('../../api', () => ({
-  clearPromptOverride: vi.fn(async () => ({ ok: true, message: 'override cleared' })),
+  clearPromptOverride: mocks.clearPromptOverride,
   fetchDashboardPrompts: mocks.fetchDashboardPrompts,
-  savePromptOverride: vi.fn(async () => ({ ok: true, message: 'override set' })),
+  savePromptOverride: mocks.savePromptOverride,
 }))
 
 import type { DashboardPromptItem } from '../../api'
@@ -89,6 +54,41 @@ const HELPER_FIXTURES: DashboardPromptItem[] = [
   }),
 ]
 
+function defaultPromptItems(): DashboardPromptItem[] {
+  return [
+    makePrompt({
+      key: 'keeper.world',
+      category: 'keeper',
+      description: 'world block',
+      current: 'override world',
+      default: 'file world',
+      effective: 'override world',
+      file_value: 'file world',
+      override_value: 'override world',
+      file_path: 'fixture/config/prompts/keeper.world.md',
+      source: 'override',
+      has_override: true,
+      char_count: 14,
+      template_variables: ['keeper'],
+    }),
+    makePrompt({
+      key: 'governance.dry_run',
+      category: 'governance',
+      description: 'dry run block',
+      current: 'dry run prompt',
+      default: 'dry run prompt',
+      effective: 'dry run prompt',
+      file_value: 'dry run prompt',
+      override_value: null,
+      file_path: 'fixture/config/prompts/governance.dry_run.md',
+      source: 'file',
+      has_override: false,
+      char_count: 14,
+      template_variables: [],
+    }),
+  ]
+}
+
 describe('promptSourceCounts', () => {
   it('counts each source and total', () => {
     expect(promptSourceCounts(HELPER_FIXTURES)).toEqual({
@@ -121,7 +121,10 @@ describe('PromptRegistryPanel', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
-    mocks.fetchDashboardPrompts.mockClear()
+    mocks.clearPromptOverride.mockClear()
+    mocks.fetchDashboardPrompts.mockReset()
+    mocks.fetchDashboardPrompts.mockResolvedValue({ prompts: defaultPromptItems() })
+    mocks.savePromptOverride.mockClear()
   })
 
   afterEach(() => {
@@ -139,11 +142,19 @@ describe('PromptRegistryPanel', () => {
     expect(container.querySelector('.v2-lab-row')).not.toBeNull()
     expect(container.textContent).toContain('프롬프트 레지스트리')
     expect(container.textContent).toContain('keeper.world')
-    expect(container.textContent).toContain('/tmp/config/prompts/keeper.world.md')
+    expect(container.textContent).toContain('fixture/config/prompts/keeper.world.md')
+    expect(container.querySelector('[data-prompt-preset-switcher]')).not.toBeNull()
+    expect(container.querySelector('[data-prompt-destinations]')?.textContent).toContain('System rules')
+    expect(container.querySelector('[data-prompt-destinations]')?.textContent).toContain('system')
+    expect(container.textContent).toContain('{{keeper}}')
     await waitFor(() => {
       expect(container.textContent).toContain('file world')
     })
     expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('override world')
+
+    const allPreset = container.querySelector('[data-prompt-preset-switcher] button') as HTMLButtonElement
+    allPreset?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
 
     const governanceButton = Array.from(container.querySelectorAll('button')).find(button =>
       button.textContent?.includes('governance.dry_run'),
@@ -152,5 +163,77 @@ describe('PromptRegistryPanel', () => {
     await flush()
 
     expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('dry run prompt')
+  })
+
+  it('keeps dirty draft text across filters and confirms before discarding on row selection', async () => {
+    render(html`<${PromptRegistryPanel} />`, container)
+    await flush()
+    await flush()
+
+    const textarea = () => container.querySelector('textarea') as HTMLTextAreaElement
+    const searchInput = () =>
+      container.querySelector('input[aria-label="프롬프트 검색"]') as HTMLInputElement
+    const governanceButton = () =>
+      Array.from(container.querySelectorAll('button')).find(button =>
+        button.textContent?.includes('governance.dry_run'),
+      ) as HTMLButtonElement | undefined
+
+    await fireEvent.input(textarea(), { target: { value: 'edited unsaved draft' } })
+    await fireEvent.input(searchInput(), { target: { value: 'governance' } })
+    await flush()
+
+    expect(textarea().value).toBe('edited unsaved draft')
+
+    const originalConfirm = window.confirm
+    const confirmSpy = vi.fn(() => false)
+    window.confirm = confirmSpy
+    try {
+      await fireEvent.click(governanceButton()!)
+      await flush()
+
+      expect(confirmSpy).toHaveBeenCalledTimes(1)
+      expect(textarea().value).toBe('edited unsaved draft')
+
+      confirmSpy.mockReturnValue(true)
+      await fireEvent.click(governanceButton()!)
+      await flush()
+
+      expect(textarea().value).toBe('dry run prompt')
+    } finally {
+      window.confirm = originalConfirm
+      await fireEvent.input(searchInput(), { target: { value: '' } })
+    }
+  })
+
+  it('rebinds the draft when reload removes the selected prompt before saving', async () => {
+    const remainingPrompt = defaultPromptItems()[1]
+    mocks.fetchDashboardPrompts
+      .mockResolvedValueOnce({ prompts: defaultPromptItems() })
+      .mockResolvedValueOnce({ prompts: [remainingPrompt] })
+
+    render(html`<${PromptRegistryPanel} />`, container)
+    await flush()
+    await flush()
+
+    const textarea = () => container.querySelector('textarea') as HTMLTextAreaElement
+    await fireEvent.input(textarea(), { target: { value: 'stale keeper draft' } })
+
+    const refreshButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('새로고침'),
+    ) as HTMLButtonElement
+    await fireEvent.click(refreshButton)
+
+    await waitFor(() => {
+      expect(textarea().value).toBe('dry run prompt')
+    })
+
+    const applyButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('오버라이드 적용'),
+    ) as HTMLButtonElement
+    await fireEvent.click(applyButton)
+
+    await waitFor(() => {
+      expect(mocks.savePromptOverride).toHaveBeenCalledWith('governance.dry_run', 'dry run prompt')
+    })
   })
 })

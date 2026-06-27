@@ -13,14 +13,21 @@ const { invalidateDashboardCache, refreshDashboard } = vi.hoisted(() => ({
   refreshDashboard: vi.fn(async () => undefined),
 }))
 
-vi.mock('../keeper-runtime', async () => {
+vi.mock('../keeper-actions', () => ({
+  cancelActiveKeeperThreadMessage: vi.fn(async () => true),
+  hydrateKeeperStatus: vi.fn(async () => null),
+  hydrateKeeperChatHistory: vi.fn(async () => undefined),
+  loadFullKeeperHistory: vi.fn(async () => null),
+  probeKeeperRuntime: vi.fn(),
+  recoverKeeperRuntime: vi.fn(),
+  resumePendingKeeperChatRequests: vi.fn(async () => undefined),
+  sendKeeperThreadMessage: vi.fn(async () => null),
+  isKeeperThreadMessageSendInFlight: vi.fn(() => false),
+}))
+
+vi.mock('../keeper-state', async () => {
   const { signal } = await import('@preact/signals')
   return {
-    abortKeeperThreadMessage: vi.fn(),
-    cancelActiveKeeperThreadMessage: vi.fn(async () => true),
-    hydrateKeeperStatus: vi.fn(async () => null),
-    hydrateKeeperChatHistory: vi.fn(async () => undefined),
-    loadFullKeeperHistory: vi.fn(async () => null),
     keeperActionErrors: signal({}),
     keeperHydrating: signal({}),
     keeperProbing: signal({}),
@@ -30,11 +37,14 @@ vi.mock('../keeper-runtime', async () => {
     keeperStreamStartedAt: signal({}),
     keeperStreamLastEventAt: signal({}),
     keeperThreads: signal({}),
-    probeKeeperRuntime: vi.fn(),
-    recoverKeeperRuntime: vi.fn(),
-    resumePendingKeeperChatRequests: vi.fn(async () => undefined),
-    sendKeeperThreadMessage: vi.fn(async () => null),
-    isKeeperThreadMessageSendInFlight: vi.fn(() => false),
+    isDefaultVisibleConversationEntry: vi.fn((entry: { role?: string; source?: string }) =>
+      entry.role === 'tool'
+        || ((entry.role === 'user' || entry.role === 'assistant')
+          && entry.source !== 'world_state_prompt'
+          && entry.source !== 'internal_assistant'
+          && entry.source !== 'tool_result'
+          && entry.source !== 'system'),
+    ),
   }
 })
 
@@ -56,14 +66,14 @@ vi.mock('./common/toast', () => ({
   showToast: vi.fn(),
 }))
 
-import { keeperActionErrors, keeperHydrating, keeperSending, keeperStreamStartedAt, keeperThreads } from '../keeper-runtime'
-import { keeperStatusDetails } from '../keeper-runtime'
+import { keeperActionErrors, keeperHydrating, keeperSending, keeperStreamStartedAt, keeperThreads } from '../keeper-state'
+import { keeperStatusDetails } from '../keeper-state'
 import {
   cancelActiveKeeperThreadMessage,
   hydrateKeeperStatus,
   isKeeperThreadMessageSendInFlight,
   sendKeeperThreadMessage,
-} from '../keeper-runtime'
+} from '../keeper-actions'
 import { _resetChatStoreForTests, enqueueInput, getQueuedMessages, getQueueLength } from '../keeper-chat-store'
 import { shellAuthSummary } from '../store'
 import type { KeeperConversationEntry } from '../types'

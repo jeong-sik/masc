@@ -140,8 +140,8 @@ vi.mock('./keeper-shared', () => ({
   KeeperRuntimeActions: () => null,
 }))
 
-vi.mock('../keeper-runtime', async () => {
-  const actual = await vi.importActual<typeof import('../keeper-runtime')>('../keeper-runtime')
+vi.mock('../keeper-actions', async () => {
+  const actual = await vi.importActual<typeof import('../keeper-actions')>('../keeper-actions')
   return {
     ...actual,
     selectKeeper: mocks.selectKeeper,

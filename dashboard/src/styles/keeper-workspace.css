@@ -1688,31 +1688,31 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 }
 
 .kw-chat .chat-block-suggestions {
-  /* Prototype messages.jsx:135-147: vertical stack — label above, chip row below.
+  /* Keeper-v2 prototype suggestion block: label above, chip row below.
      The label is a readability cue (inline block would read like message body). */
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  margin-top: 4px;
+  gap: var(--sp-1h);
+  margin-top: var(--sp-1);
 }
 .kw-chat .chat-block-suggestions-label {
-  font-size: 10px;
-  letter-spacing: 0.16em;
+  font-size: var(--fs-10);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
   color: var(--text-dim);
 }
 .kw-chat .chat-block-suggestions-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 .kw-chat .chat-block-suggestion-chip {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 7px 13px;
+  gap: var(--sp-1h);
+  padding: var(--sp-1h) var(--sp-3);
   border: 1px solid var(--border-main);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--bg-panel);
   color: var(--text-primary);
   font-size: var(--fs-13);
@@ -1723,11 +1723,11 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   border-color: var(--color-accent-fg);
   color: var(--accent-brass-bright);
 }
-.kw-chat .chat-block-suggestion-pre {
+.kw-chat .chat-block-suggestion-chip .suggestion-chip-pre {
   color: var(--accent-brass-bright);
   font-size: var(--fs-11);
 }
-.kw-chat .chat-block-suggestion-label {
+.kw-chat .chat-block-suggestion-chip {
   line-height: 1.3;
 }
 

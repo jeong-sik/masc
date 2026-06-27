@@ -69,6 +69,8 @@ const TRACE_TOOL_STATUS_UI: Record<TraceToolStatus, { className: 'ok' | 'bad' | 
   err: { className: 'bad', title: '실패' },
 }
 
+export const CHAT_SUGGESTIONS_LABEL = '추천 후속 질문'
+
 function traceToolStatusUi(status: ChatTraceToolStep['status']): { className: 'ok' | 'bad' | 'pending'; title: string } {
   return TRACE_TOOL_STATUS_UI[status ?? 'pending']
 }
@@ -919,25 +921,20 @@ function ChatChartBlock({ title, series, labels, xLabel, yMax }: ChatChartBlock)
 }
 
 function ChatSuggestionsBlock({ items }: ChatSuggestionsBlock) {
-  // Mirrors prototype messages.jsx:135-147 (.suggest container with the
-  // "추천 후속 질문" label above a chip row). The label is a readability cue:
-  // the block is inline in the message bubble, so without an explicit heading
-  // readers mistake the chips for message content. The row uses the existing
-  // .chat-block-suggestion-chip styling unchanged.
+  const labelId = useId()
+  // Mirrors the keeper-v2 prototype suggestion block: label above a chip row.
+  // The label is a readability cue for inline message-bubble content.
   return html`
     <div class="chat-block-suggestions" data-chat-block="suggestions">
-      <span class="chat-block-suggestions-label">추천 후속 질문</span>
-      <div class="chat-block-suggestions-row">
+      <span class="chat-block-suggestions-label" id=${labelId}>${CHAT_SUGGESTIONS_LABEL}</span>
+      <div class="chat-block-suggestions-row" role="group" aria-labelledby=${labelId}>
         ${items.map((it, i) => html`
-          <button
+          <${ChatSuggestionChip}
             key=${i}
-            type="button"
+            pre=${it.icon ?? '\u25b8'}
             class="chat-block-suggestion-chip"
             data-action=${it.action ?? ''}
-          >
-            <span class="chat-block-suggestion-pre">${it.icon ?? '▸'}</span>
-            <span class="chat-block-suggestion-label">${it.label}</span>
-          </button>
+          >${it.label}<//>
         `)}
       </div>
     </div>

@@ -268,7 +268,10 @@ describe('KeeperWorkspaceRail', () => {
 
   it('runs overflow compaction without force through the existing MCP tool', async () => {
     shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, phase: 'Overflowed' })} />`)
+    // Use lifecycle_phase (the canonical wire field per Keeper type —
+    // `phaseTokenFromKeeper` reads `keeperDisplayStatus(keeper)` which
+    // routes through `lifecycle_phase`, not the deprecated `phase` alias).
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Overflowed' })} />`)
     fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
     await waitFor(() => {
@@ -282,7 +285,7 @@ describe('KeeperWorkspaceRail', () => {
 
   it('confirms before forcing compaction on running keepers', async () => {
     shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, phase: 'Running' })} />`)
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Running' })} />`)
     fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
     await waitFor(() => {
@@ -300,7 +303,7 @@ describe('KeeperWorkspaceRail', () => {
   it('does not compact running keepers when force confirmation is cancelled', async () => {
     vi.mocked(requestConfirm).mockResolvedValueOnce(false)
     shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, phase: 'Running' })} />`)
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Running' })} />`)
     fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
     await waitFor(() => expect(requestConfirm).toHaveBeenCalled())

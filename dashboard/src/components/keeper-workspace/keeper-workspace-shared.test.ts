@@ -8,6 +8,7 @@ import {
   keeperModelLabel,
   keeperRuntimeLabel,
   keeperPhaseLabel,
+  phaseTokenFromKeeper,
   WorkspaceSigil,
 } from './keeper-workspace-shared'
 import { html } from 'htm/preact'
@@ -46,14 +47,24 @@ describe('keeperStatusTone', () => {
     expect(keeperStatusTone(mk({ lifecycle_phase: 'Dead' }))).toBe('bad')
     expect(keeperStatusTone(mk({ lifecycle_phase: 'Zombie' }))).toBe('bad')
   })
-  it('maps transient phases to info (working-through, not paused)', () => {
-    // Prototype fleet.jsx vocabulary distinguishes paused(warn) from
-    // transient(info). Compacting / HandingOff / Draining / Restarting are
-    // mid-phase movement, not operator-initiated pause — they render blue.
-    expect(keeperStatusTone(mk({ lifecycle_phase: 'Compacting' }))).toBe('info')
-    expect(keeperStatusTone(mk({ lifecycle_phase: 'HandingOff' }))).toBe('info')
-    expect(keeperStatusTone(mk({ lifecycle_phase: 'Draining' }))).toBe('info')
-    expect(keeperStatusTone(mk({ lifecycle_phase: 'Restarting' }))).toBe('info')
+  it('maps transient phases to busy (working-through, not paused)', () => {
+    // Fleet SSOT PHASE_TONE (lib/fleet-tone.ts) classifies the transient
+    // FSM phases (Compacting / HandingOff / Restarting) as `busy` — the
+    // blue rail, not the amber pause pill. They are operator-initiated
+    // movement, not a stopped runtime.
+    expect(keeperStatusTone(mk({ lifecycle_phase: 'Compacting' }))).toBe('busy')
+    expect(keeperStatusTone(mk({ lifecycle_phase: 'HandingOff' }))).toBe('busy')
+    expect(keeperStatusTone(mk({ lifecycle_phase: 'Restarting' }))).toBe('busy')
+  })
+  it('maps operator-initiated Draining to warn (not busy)', () => {
+    // The prototype PHASE_TONE table treats Draining as `warn` (operator
+    // intent via the `stop` action's danger:true via-phase), distinct
+    // from the auto-movement busy phase. This is the P2 gap the
+    // adversarial reviewer flagged: TRANSIENT_KEEPER_PHASES in
+    // monitoring-runtime.ts includes Draining as a transient band, but
+    // the workspace tone must follow the prototype's `warn` classification
+    // so the rail does not paint an operator-initiated stop as "moving".
+    expect(keeperStatusTone(mk({ lifecycle_phase: 'Draining' }))).toBe('warn')
   })
   it('maps operator-initiated pause to warn (amber, distinct from transient blue)', () => {
     expect(keeperStatusTone(mk({ status: 'running', paused: true }))).toBe('warn')
@@ -63,6 +74,9 @@ describe('keeperStatusTone', () => {
     expect(keeperStatusTone(mk({ status: 'stopped' }))).toBe('idle')
     expect(keeperStatusTone(mk({ lifecycle_phase: 'Offline' }))).toBe('idle')
   })
+  it('collapses unknown tokens to idle (closed-sum fallback)', () => {
+    expect(keeperStatusTone(mk({ status: 'bootstrapping' }))).toBe('idle')
+  })
 })
 
 describe('statePillTone', () => {
@@ -70,7 +84,7 @@ describe('statePillTone', () => {
     expect(statePillTone('ok')).toBe('run')
     expect(statePillTone('warn')).toBe('warn')
     expect(statePillTone('bad')).toBe('bad')
-    expect(statePillTone('info')).toBe('info')
+    expect(statePillTone('busy')).toBe('busy')
     expect(statePillTone('idle')).toBe('off')
   })
 })
@@ -98,10 +112,14 @@ describe('keeperPhaseLabel', () => {
     expect(keeperPhaseLabel(mk({ lifecycle_phase: 'Compacting' }))).toBe('압축 중')
     expect(keeperPhaseLabel(mk({ lifecycle_phase: 'Failing' }))).toBe('오류 발생')
     expect(keeperPhaseLabel(mk({ lifecycle_phase: 'HandingOff' }))).toBe('인계 중')
+    expect(keeperPhaseLabel(mk({ lifecycle_phase: 'Zombie' }))).toBe('응답 없음')
   })
-  it('falls back to the status token when no friendly label exists', () => {
-    // keeperDisplayStatus returns the raw status string for unmapped tokens.
-    expect(keeperPhaseLabel(mk({ status: 'bootstrapping' }))).toBe('bootstrapping')
+  it('collapses unknown tokens to the 알 수 없음 fallback (no raw wire string leak)', () => {
+    // Closed-sum SSOT: phaseTokenFromKeeper returns 'unknown' for unmapped
+    // wire tokens, and PHASE_LABEL_KO['unknown'] is the canonical
+    // '알 수 없음' label. The old behavior leaked raw status strings
+    // like 'bootstrapping' into the UI — that's a wire-format leak.
+    expect(keeperPhaseLabel(mk({ status: 'bootstrapping' }))).toBe('알 수 없음')
   })
 })
 
@@ -131,5 +149,18 @@ describe('keeperFleetTone', () => {
   it('falls back to the canonical status tone when no fleet attention is present', () => {
     expect(keeperFleetTone(mk({ status: 'running', lifecycle_phase: 'Running' }))).toBe('ok')
     expect(keeperFleetTone(mk({ status: 'running', lifecycle_phase: 'Paused', paused: true }))).toBe('warn')
+    expect(keeperFleetTone(mk({ status: 'running', lifecycle_phase: 'Compacting' }))).toBe('busy')
+  })
+})
+
+describe('phaseTokenFromKeeper', () => {
+  it('lowercases PascalCase lifecycle_phase to the closed token space', () => {
+    expect(phaseTokenFromKeeper(mk({ lifecycle_phase: 'Compacting' }))).toBe('compacting')
+    expect(phaseTokenFromKeeper(mk({ lifecycle_phase: 'HandingOff' }))).toBe('handoff')
+    expect(phaseTokenFromKeeper(mk({ lifecycle_phase: 'Draining' }))).toBe('draining')
+    expect(phaseTokenFromKeeper(mk({ lifecycle_phase: 'Zombie' }))).toBe('zombie')
+  })
+  it('returns unknown for tokens outside the closed sum', () => {
+    expect(phaseTokenFromKeeper(mk({ status: 'bootstrapping' }))).toBe('unknown')
   })
 })

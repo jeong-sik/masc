@@ -2695,4 +2695,53 @@ describe('ChatComposer v2 prototype surface', () => {
 
     expect(run).toHaveBeenCalledTimes(1)
   })
+
+  it('shows the keeper identifier in the slash menu header when draftPersistKey is set', () => {
+    // Mirrors prototype composer.jsx:204: <div className="slashmenu-h">{keeper.id} · 명령</div>.
+    // The live composer header was a generic "keeper · 명령" string, hiding which
+    // keeper's commands the operator is picking from. Reading draftPersistKey
+    // (already passed by every caller) is the lowest-friction way to surface
+    // the operator-visible identifier without adding a new prop.
+    render(
+      html`<${ChatComposer}
+        draft="/res"
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        draftPersistKey="ocaml-multicore/eio"
+        commands=${[
+          { id: 'restart', group: 'lifecycle', label: 'Restart keeper', run: () => {} },
+        ]}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+    const header = container.querySelector('.slashmenu-h')
+    expect(header?.textContent).toBe('ocaml-multicore/eio · 명령')
+  })
+
+  it('switches the textarea placeholder to the drop cue while files are dragged over', () => {
+    // Mirrors prototype composer.jsx:223: placeholder switches to '여기에 놓아 첨부…'
+    // during drag so the operator gets a single, unambiguous instruction instead
+    // of seeing both the drop visual on the box and the static placeholder.
+    render(
+      html`<${ChatComposer}
+        draft=""
+        placeholder="ocaml-multicore/eio 에게 메시지…  (/ 명령 · ⌘+Enter 전송)"
+        disabled=${false}
+        streaming=${false}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+    const textarea = container.querySelector('.composer-box textarea') as HTMLTextAreaElement
+    expect(textarea.placeholder).toBe('ocaml-multicore/eio 에게 메시지…  (/ 명령 · ⌘+Enter 전송)')
+
+    const composer = container.querySelector('.composer') as HTMLDivElement
+    fireEvent.dragOver(composer)
+    const textareaAfterDrag = container.querySelector('.composer-box textarea') as HTMLTextAreaElement
+    expect(textareaAfterDrag.placeholder).toBe('여기에 놓아 첨부…')
+  })
 })

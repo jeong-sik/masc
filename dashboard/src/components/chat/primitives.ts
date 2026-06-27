@@ -3381,7 +3381,7 @@ export function ChatComposer({
           ${slashOpen
             ? html`
                 <div class="slashmenu" role="listbox" aria-label="keeper slash commands">
-                  <div class="slashmenu-h">keeper · 명령</div>
+                  <div class="slashmenu-h">${draftPersistStoreKey || 'keeper'} · 명령</div>
                   ${slashMatches.map((command, index) => html`
                     <button
                       key=${`${command.group}:${command.id}`}
@@ -3441,7 +3441,7 @@ export function ChatComposer({
                 <textarea
                   ref=${textareaRef}
                   class="composer-textarea"
-                  placeholder=${placeholder}
+                  placeholder=${drag ? '여기에 놓아 첨부…' : placeholder}
                   aria-label="메시지 입력"
                   value=${draft}
                   onInput=${grow}

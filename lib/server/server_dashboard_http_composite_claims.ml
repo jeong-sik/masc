@@ -226,11 +226,7 @@ let lower_string_opt =
 
 let completion_contract_result_of_execution execution =
   match json_string "completion_contract_result" execution with
-  | Some raw ->
-    raw
-    |> String.trim
-    |> String.lowercase_ascii
-    |> Completion_contract_result.of_string
+  | Some raw -> Completion_contract_result.of_string raw
   | None -> None
 ;;
 

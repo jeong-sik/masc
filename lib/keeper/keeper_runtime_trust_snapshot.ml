@@ -59,16 +59,9 @@ end
 
 module Completion_contract_result = Keeper_completion_contract_result_label
 
-let normalized_completion_contract_result_label raw =
-  raw |> String.trim |> String.lowercase_ascii
-;;
-
 let completion_contract_result_from_receipt receipt =
   match json_string_opt_member "completion_contract_result" receipt with
-  | Some raw ->
-      raw
-      |> normalized_completion_contract_result_label
-      |> Completion_contract_result.of_string
+  | Some raw -> Completion_contract_result.of_string raw
   | None -> None
 ;;
 
@@ -604,14 +597,12 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
     Option.bind latest_receipt (json_string_opt_member "completion_contract_result")
   in
   let completion_contract_result_raw =
-    match Option.map String.trim completion_contract_result with
+    match completion_contract_result with
     | Some value when value <> "" -> Some value
     | Some _ | None -> None
   in
   let typed_completion_contract_result =
-    Option.bind
-      (Option.map normalized_completion_contract_result_label completion_contract_result)
-      Completion_contract_result.of_string
+    Option.bind completion_contract_result Completion_contract_result.of_string
   in
   let runtime_json =
     match latest_receipt with
@@ -648,10 +639,6 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
     | Some result -> Completion_contract_result.to_string result
     | None ->
         (match completion_contract_result_raw with
-         | Some raw
-           when String.equal (normalized_completion_contract_result_label raw) "satisfied"
-           ->
-             "mutation_contract_satisfied"
          | Some raw -> "unknown_completion_contract_result:" ^ raw
          | None -> "mutation_contract_not_observed")
   in

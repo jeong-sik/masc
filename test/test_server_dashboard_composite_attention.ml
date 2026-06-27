@@ -97,6 +97,17 @@ let test_contract_blocker_marks_attention () =
     attention.cra_reason
 ;;
 
+let test_drifted_contract_label_is_not_normalized () =
+  let execution = execution " Surface_Mismatch " in
+  let attention =
+    Server_dashboard_http_composite.composite_runtime_attention ~snapshot ~execution
+  in
+  check bool "blocked" false attention.cra_blocked;
+  check bool "needs_attention" false attention.cra_needs_attention;
+  check string "state" "ok" attention.cra_state;
+  check (option string) "reason" None attention.cra_reason
+;;
+
 let test_contract_blocker_recommends_route_actions () =
   let execution = execution "no_capable_provider" in
   let attention =
@@ -195,6 +206,8 @@ let () =
     "server_dashboard_composite_attention"
     [ ( "tool-route contract blockers"
       , [ test_case "marks runtime attention" `Quick test_contract_blocker_marks_attention
+        ; test_case "does not normalize drifted contract labels" `Quick
+            test_drifted_contract_label_is_not_normalized
         ; test_case "emits route actions" `Quick
             test_contract_blocker_recommends_route_actions
         ] )

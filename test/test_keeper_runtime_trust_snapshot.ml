@@ -280,7 +280,7 @@ let test_unknown_completion_contract_result_stays_visible () =
          |> to_string))
 ;;
 
-let test_completion_contract_result_uses_typed_label_parser () =
+let test_completion_contract_result_rejects_drifted_label_before_parser () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -308,23 +308,46 @@ let test_completion_contract_result_uses_typed_label_parser () =
        let snapshot = K.snapshot_json ~config ~meta in
        let open Yojson.Safe.Util in
        Alcotest.(check string)
-         "display disposition"
-         "Blocked"
-         (snapshot |> member "disposition" |> to_string);
-       Alcotest.(check string)
-         "normalizes completion contract label"
-         "completion_contract_result:passive_only"
-         (snapshot |> member "disposition_reason" |> to_string);
-       Alcotest.(check string)
-         "completion contract terminal disposition is inferred"
-         "completion_contract_unsatisfied"
-         (snapshot
-          |> member "latest_terminal_reason"
-          |> member "disposition"
+         "raw drifted result remains visible"
+         " Passive_Only "
+         (snapshot |> member "execution" |> member "completion_contract_result"
           |> to_string);
        Alcotest.(check string)
-         "mutation guard summary uses typed label"
-         "passive_only"
+         "does not normalize drifted label before the exact parser"
+         "unknown_completion_contract_result: Passive_Only "
+         (snapshot |> member "execution" |> member "mutation_guard_summary" |> to_string))
+;;
+
+let test_legacy_satisfied_completion_contract_result_is_unknown () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "runtime-trust-legacy-satisfied-contract-label" in
+       let meta = make_meta keeper_name in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       Dated_jsonl.append
+         receipt_store
+         (`Assoc
+             [ "ended_at", `String "2026-06-01T00:00:00Z"
+             ; "operator_disposition", `String "pass"
+             ; "operator_disposition_reason", `String "healthy"
+             ; "terminal_reason_code", `String "completed"
+             ; "completion_contract_result", `String "satisfied"
+             ]);
+       let snapshot = K.snapshot_json ~config ~meta in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "legacy non-canonical label stays unknown"
+         "unknown_completion_contract_result:satisfied"
          (snapshot |> member "execution" |> member "mutation_guard_summary" |> to_string))
 ;;
 
@@ -537,9 +560,13 @@ let () =
             `Quick
             test_completion_blocker_supersedes_passive_only_receipt
         ; Alcotest.test_case
-            "completion-contract labels use typed parser"
+            "completion-contract labels reject drift before typed parser"
             `Quick
-            test_completion_contract_result_uses_typed_label_parser
+            test_completion_contract_result_rejects_drifted_label_before_parser
+        ; Alcotest.test_case
+            "legacy satisfied completion-contract label is unknown"
+            `Quick
+            test_legacy_satisfied_completion_contract_result_is_unknown
         ; Alcotest.test_case
             "unknown completion-contract label uses explicit sentinel"
             `Quick

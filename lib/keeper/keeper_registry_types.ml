@@ -169,6 +169,16 @@ let registry_key ~base_path name =
   base_path ^ "\x1f" ^ name
 ;;
 
+let registry_key_parts key =
+  match String.rindex_opt key '\x1f' with
+  | None -> Error (Printf.sprintf "malformed registry key: %S" key)
+  | Some idx ->
+    let key_len = String.length key in
+    let base_path = String.sub key 0 idx in
+    let name = String.sub key (idx + 1) (key_len - idx - 1) in
+    Ok (base_path, name)
+;;
+
 let completed_turn_outcome_of_observation (obs : turn_observation)
   : Keeper_transition_audit.completed_turn_outcome
   =

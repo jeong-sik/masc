@@ -59,13 +59,9 @@ let registry_entry_validation_error_to_string = function
       "registry entry meta.agent_name is empty"
 
 let registry_key_parts key =
-  match String.rindex_opt key '\x1f' with
-  | None -> Error (Registry_key_malformed { key })
-  | Some idx ->
-      let key_len = String.length key in
-      let base_path = String.sub key 0 idx in
-      let name = String.sub key (idx + 1) (key_len - idx - 1) in
-      Ok (base_path, name)
+  match Keeper_registry_types.registry_key_parts key with
+  | Ok parts -> Ok parts
+  | Error _ -> Error (Registry_key_malformed { key })
 
 let validate_registry_entry ~base_path name (entry : registry_entry) =
   let expected_name = String.trim name in

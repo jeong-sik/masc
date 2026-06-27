@@ -73,7 +73,10 @@ val get : base_path:string -> string -> registry_entry option
 val all : ?base_path:string -> unit -> registry_entry list
 
 type registry_entry_validation_error =
-  | Registry_key_malformed of { key : string }
+  | Registry_key_malformed of
+      { key : string
+      ; reason : string
+      }
   | Registry_base_path_mismatch of
       { expected : string
       ; actual : string

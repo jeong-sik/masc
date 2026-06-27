@@ -72,6 +72,15 @@ gh_preflight_cache_root() {
   fi
 }
 
+gh_preflight_cache_ttl_sec() {
+  local default_ttl="${1:-3600}"
+  local ttl="${MASC_GH_PR_AUDIT_CACHE_TTL_SEC:-$default_ttl}"
+  if [[ ! "$ttl" =~ ^[0-9]+$ ]]; then
+    gh_preflight_die "MASC_GH_PR_AUDIT_CACHE_TTL_SEC must be a non-negative integer, got: $ttl"
+  fi
+  printf '%s\n' "$ttl"
+}
+
 gh_preflight_cache_segment() {
   printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9._=-' '_'
 }

@@ -29,7 +29,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 command -v jq >/dev/null || die "jq not found"
 gh_preflight_require_cli
-GH_PR_AUDIT_CACHE_TTL_SEC="${MASC_GH_PR_AUDIT_CACHE_TTL_SEC:-300}"
+GH_PR_AUDIT_CACHE_TTL_SEC="$(gh_preflight_cache_ttl_sec 300)"
 
 REPO="${1:-}"; PR="${2:-}"; MODE="${3:-}"
 [ -n "$REPO" ] && [ -n "$PR" ] || die "usage: $0 <repo|.> <pr> [--logs[=N]]"

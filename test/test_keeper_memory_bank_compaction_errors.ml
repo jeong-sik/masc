@@ -12,7 +12,7 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
 ;;
 
 let write_file path content =
-  Masc.Keeper_fs.ensure_dir (Filename.dirname path);
+  let (_ : string) = Masc.Keeper_fs.ensure_dir (Filename.dirname path) in
   match Fs_compat.save_file_atomic path content with
   | Ok () -> ()
   | Error msg -> Alcotest.fail msg
@@ -70,7 +70,7 @@ let test_schema_mismatch_surfaces_typed_error () =
   write_file path content;
   let result = Bank.compact_memory_bank_if_needed config meta in
   Alcotest.(check bool) "compaction was attempted" true result.Policy.performed;
-  Alcotest.(check (option (Alcotest.testable Policy.compaction_error_to_string ( = ))))
+  Alcotest.(check (option (Alcotest.testable (Fmt.of_to_string Policy.compaction_error_to_string) ( = ))))
     "schema mismatch surfaced"
     (Some Policy.Schema_mismatch)
     result.Policy.error
